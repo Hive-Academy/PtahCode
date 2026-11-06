@@ -1,6 +1,6 @@
 # Batches - TASK_2026_886_cae4
 
-Total tasks: 44 | Batches: 19 | Complete: 5/19
+Total tasks: 44 | Batches: 19 | Complete: 8/19
 
 Source: `implementation-plan.md` Revision 2 (Gate 2 APPROVED by the user, `decisions.md` row 14),
 `task-description.md` Revision 3, `implementation-plan-review.md` (codex APPROVED round 1, one Minor
@@ -83,6 +83,11 @@ Edge cases:
 | D10 | Accept Batch 3 deviation: `ITaskEndStore` adds `markStepRunning(runId, step, subject): number` (persists `running`, increments `attempts`) and `getRun(runId)` | omit, change the interface later; add now | Plan Component 5 lines 366-367 ("running state is persisted before its side effect", "`attempts` counts both"); the closed outcome union has `running` only for `index/census-requested`, so `upsertStep` cannot express it; `upsertStep` leaves `attempts` unchanged; D3 forbids silent later interface changes | yes |
 | D11 | Accept Batch 3 deviation: `journalObservation(obs, policy)` and `createRunForOrphans(policy)` take a `TaskEndRunPolicy` (`hookEnabled`, `settleWindowMs`, `queueCap`); the store reads no settings | store injects the settings reader; caller passes the policy | Plan Component 3 Dependencies (line 232) list no settings reader; Component 4 line 283 puts "Hook disabled" on the detector; keeps the store pure SQL like `sqlite-review.repository.ts`. Consequence: the detector (Batch 13) and the startup reconcile build the policy from the Batch 4 settings snapshot (already clamped) | yes |
 | D12 | Accept Batch 3 deviation: `upsertStep<K extends TaskEndStepKind>(runId, step: K, subject, outcome: Extract<TaskEndStepOutcome, { readonly step: K }>)` | plain `outcome: TaskEndStepOutcome` (plan line 224); generic | Every member of `TaskEndStepOutcome` carries a literal `step` (`task-end-hook.types.ts:181-294`), so the Extract never collapses to `never`; it narrows the plan's signature without changing what can be stored. A caller holding a widened `TaskEndStepKind` gets the plain union, so Batch 12's store must still reject `outcome.step !== step` at runtime | yes |
+| D13 | Accept Batch 5 `DisposalInputRecord` shape changes B5-1..B5-9: `kind` discriminants on every union; explicit `error` members on `links`, `worktreeEntry` (`listed`/`not-listed`/`error`), `pathResolution`, `archiveDestination` (`absent`/`exists`/`error`, replacing `archiveDestinationExists`); `mainRealPath`/`agentDirRealPath` nullable; added `worktreePath`; a missing directory skips P7; a non-empty `probeErrors` blocks `precondition-unverifiable` after P2-P11 pass; a bare entry is `is-main-worktree`; P9 `not-queried` is unverifiable | plan shapes verbatim; tagged with error members | Plan Component 6.3 line 510 ("A probe error or unavailability gives `precondition-unverifiable`") cannot be expressed by `GitWorktreeInfo \| null` or a boolean `archiveDestinationExists`; command-table row 3 runs only when the directory exists; P10 needs the lexical path. Fields still cover AC 6.6. Binding on Batch 6: the collector fills `dispose/disposal-input.ts` exactly as typed | yes |
+| D14 | Accept Batch 7: the memory gates reach `CloseCurateStep.run()` as a `CloseCurateGates` argument the worker builds from the Batch 4 snapshot; a retry is an explicit `retry()` (attempt 2), not derived from `attempts` | inject the settings reader; argument | Batch 7 depended only on Batches 1 and 3; plan 6.1 records the gates on the placeholder before expansion; a crash raises `attempts` without being a retry. Binding on Batch 14 (worker) | yes |
+| D15 | Accept Batch 7: `isSessionLive` returning `unavailable` records `failed/curator-failed` (warn log) and curates nothing; the curation workspace root is `run.mainRoot ?? run.seenRoot` | curate anyway; hand off; fail | Batch 3 contract: `unavailable` is never a pass, and curating could race the session-end trigger; plan 6.1 names no root, and memory belongs to the repository root that outlives a disposed worktree | yes |
+| D16 | Accept Batch 7: a close-curate or harvest row left `running` after a crash is re-run as pending | check `running` in the step | Those outcome unions have no `running` member. Binding on Batch 12 (store presents such a row as pending) and Batch 14 (worker re-runs it) | yes |
+| D17 | Batch 4 commit message corrected with `git commit --amend` (message only, same tree) seconds after creation, before any push: a missing blank line had merged the body into the subject | leave a commitlint-failing subject; amend the unpushed commit | `npx commitlint --from HEAD~1` passes after the fix; tree unchanged (5 files, 916 insertions) | n/a |
 | D8 | Commit scope `task-end-hook` is added to `.commitlintrc.json` in Batch 2; Batch 1 commits under `shared,persistence-sqlite`; Electron batches use `electron` | — | `.commitlintrc.json` has `shared`, `persistence-sqlite`, `task-specs`, `session-organization`, `vscode-lm-tools`, `skill-synthesis`, `memory-curator`, `vscode-core`, `electron` (all verified present); no `task-end-hook` | yes |
 
 ## Rules every executor must follow (repeat verbatim in each executor prompt)
@@ -180,7 +185,7 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 
 - Team-leader acceptance (2026-11-06): scaffold matches review-core; `nx show project` lists lint, test, typecheck (plus build, not run); root edits are additive only. `npm run verify -- -p @ptah-extension/task-end-hook` passes, as part of the combined five-project run. Degradation audit exit 0 (TOTAL 220).
 
-## Batch 3: Ports, tokens and the store interface — COMPLETE (commit recorded in Batch 3 acceptance)
+## Batch 3: Ports, tokens and the store interface — COMPLETE (commit 4e3964b6e)
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -215,7 +220,7 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 
 - Team-leader acceptance (2026-11-06): 10 files on disk, all declaration-only, under `libs/backend/task-end-hook/src` (7 ports, `di/tokens.ts`, `persistence/task-end-store.interface.ts`, `index.ts` barrel). `RUN_READER` is `Symbol.for('PtahTaskEndRunReader')`, matching vscode-lm-tools (R6). The library imports only types from `@ptah-extension/shared`, with no session-organization or agent-sdk import (R1/D2). No ports mutate (R12). `npm run verify -- -p @ptah-extension/task-end-hook` exit 0; degradation audit exit 0 (TOTAL 220, unchanged); no TODO/FIXME/PLACEHOLDER markers. The four deviations from the task wording were accepted as D9-D12; the executor's other choices (report B3-4 to B3-7) are consistent with the plan. Batches 4-8 and 12-18 consume these signatures unchanged; any change goes back to the team-leader.
 
-## Batch 4: ReadOnlyGit guard and settings — PENDING
+## Batch 4: ReadOnlyGit guard and settings — COMPLETE (commit f4f5f3d11)
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -226,14 +231,14 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 - Tasks: 2 | Depends on: Batch 3
 - Phase: 1 | Phase review: (after Batch 10)
 
-### Task 4.1: `ReadOnlyGit` and its spec, plus the `assertSafeRef` export — PENDING
+### Task 4.1: `ReadOnlyGit` and its spec, plus the `assertSafeRef` export — COMPLETE
 
 - Files: CREATE `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/task-end-hook/src/lib/ports/read-only-git.ts` and `read-only-git.spec.ts`; MODIFY `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/vscode-core/src/index.ts` (export `assertSafeRef` and `GitInvalidRefError` from `./services/git/git-ref-guard`)
 - Plan reference: Component 8; command table rows 1-6 (`## Disposal policy as implemented in this task`, lines 774-803)
 - Quality requirements: argument vectors checked before spawn; any other vector throws `ReadOnlyGitViolation`; spec: every allowed vector passes; `worktree remove`, `prune`, `fetch`, `branch -d`, `clean`, `stash`, any `-c` option rejected; `<branch>` passes `assertSafeRef`.
 - Validation notes: R4, R12. Row 7 (`gh`) runs inside `GitInfoService`, not through `ReadOnlyGit`.
 
-### Task 4.2: Settings snapshot — PENDING
+### Task 4.2: Settings snapshot — COMPLETE
 
 - Files (CREATE): `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/task-end-hook/src/lib/config/task-end-hook-config.ts` and `task-end-hook-config.spec.ts`
 - Plan reference: Component 9 (keys, defaults, clamps)
@@ -246,7 +251,9 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 - `npm run verify -- -t lint,typecheck -p @ptah-extension/cli-engine,ptah-electron`
 - Degradation audit passes.
 
-## Batch 5: Pure disposal decision and porcelain parser — PENDING
+- Team-leader acceptance (2026-11-06): 5 files on disk (`ports/read-only-git.ts` + spec, `config/task-end-hook-config.ts` + spec, one additive export block in `vscode-core/src/index.ts`). The allow-list is plan command-table rows 1-6, matched by exact position; `-c`, `fetch`, `worktree remove/prune`, `branch -d`, `clean`, `stash` rejected before spawn (R4, R12, C3). Settings: Component 9 keys, defaults and clamps; memory keys read only; no `file-settings-manager.ts` edit (R13). Fresh combined `npm run verify -- -p @ptah-extension/task-end-hook,@ptah-extension/vscode-core` exit 0 (run after all three executors stopped); `-t lint,typecheck -p @ptah-extension/cli-engine,ptah-electron` exit 0; degradation audit exit 0 (TOTAL 220). Executor choices (exact-position match, full-hex SHA in row 6, absolute `cwd`, `READ_ONLY_GIT_VECTORS` builders, injectable `TaskEndHookSettingsReader`) are consistent with the plan. Batch 15 owns exporting these from the library barrel (D4).
+
+## Batch 5: Pure disposal decision and porcelain parser — COMPLETE (commit a167f0d39)
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -257,19 +264,19 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 - Tasks: 3 | Depends on: Batches 1, 3
 - Phase: 1 | Phase review: (after Batch 10)
 
-### Task 5.1: `DisposalInputRecord` type — PENDING
+### Task 5.1: `DisposalInputRecord` type — COMPLETE
 
 - File (CREATE): `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/task-end-hook/src/lib/dispose/disposal-input.ts`
 - Plan reference: Component 6.3 "DisposalInputRecord" (fields follow AC 6.6 exactly)
 
-### Task 5.2: `decideDisposal` and its table spec — PENDING
+### Task 5.2: `decideDisposal` and its table spec — COMPLETE
 
 - Depends on: Task 5.1
 - Files (CREATE): `.../src/lib/dispose/decide-disposal.ts` and `decide-disposal.spec.ts` (under `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/task-end-hook`)
 - Plan reference: Component 6.3 "decideDisposal(record)" and its verification seam
 - Quality requirements: pure, no I/O; P2-P11 in table order, first failure wins; mode derivation (`confirm` → `confirm-unavailable`, `auto` → `auto-unavailable`); all-pass → `skipped/eligible-report-only`; table-driven spec over every P-row and code, byte-cap and file-count-cap pairs, determinism, AC 4.2 a/b, AC 4.10 a/b/c, finding 20 (`cancelled`, unparseable), finding 21.
 
-### Task 5.3: `git status -z` porcelain parser and fixtures — PENDING
+### Task 5.3: `git status -z` porcelain parser and fixtures — COMPLETE
 
 - Files (CREATE): `.../src/lib/dispose/git-porcelain.parser.ts` and `git-porcelain.parser.spec.ts`
 - Validation notes: verify the ignored-directory assumption on a scratch repository created under `$(mktemp -d)` (read-only probe of that scratch repo only; never the worktree) and pin the observed output as a fixture; report the observed output.
@@ -277,6 +284,8 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 ### Batch 5 verification
 
 - `npm run verify -- -p @ptah-extension/task-end-hook`; degradation audit passes.
+
+- Team-leader acceptance (2026-11-06): 5 files under `src/lib/dispose/`; `decide-disposal.ts` does no I/O (imports `node:path` only); type-only imports from shared. Spec: 50 table rows plus a coverage check over `TASK_END_DISPOSE_BLOCK_REASONS`, both cap pairs, AC 4.2 a/b, AC 4.10 a/b/c, findings 20 and 21, determinism. The ignored-directory assumption (plan Assumptions line 94) was verified on a `mktemp -d` scratch repo and pinned as `SCRATCH_REPO_FIXTURE`: an ignored directory is one `!! dir/` entry, not expanded; also pinned: the rename origin field and an untracked nested repo as `?? nested/`. Record-shape deviations B5-1..B5-9 accepted as D13. Same fresh combined verify as Batch 4, exit 0; degradation audit exit 0 (TOTAL 220).
 
 ## Batch 6: Disposal input collector and dispose-evaluate step — PENDING
 
@@ -305,7 +314,7 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 
 - `npm run verify -- -p @ptah-extension/task-end-hook`; degradation audit passes.
 
-## Batch 7: Close-curate and harvest steps — PENDING
+## Batch 7: Close-curate and harvest steps — COMPLETE (commit recorded in Batch 7 acceptance)
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -316,14 +325,14 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 - Tasks: 2 | Depends on: Batches 1, 3
 - Phase: 1 | Phase review: (after Batch 10)
 
-### Task 7.1: `CloseCurateStep` with the total mapping — PENDING
+### Task 7.1: `CloseCurateStep` with the total mapping — COMPLETE
 
 - Files (CREATE): `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/task-end-hook/src/lib/steps/close-curate.step.ts` and `close-curate.step.spec.ts`
 - Plan reference: Component 6.1 (mapping table)
 - Quality requirements: `mapCurationResult` is a `const` table with `satisfies` and a `never` default; roots = `run.mainRoot` (when not null) + seen root, de-duplicated; live session → `deferred/session-active/handedOffTo: session-end-trigger`; disabled gates on the placeholder; the step never marks observations; spec: one row per mapping line for attempt 1 and 2, a throwing and a rejecting port both → `failed/curator-failed` with no error text in the record.
 - Validation notes: the AC 2.2 real-trigger handoff spec is Batch 19, not here.
 
-### Task 7.2: `HarvestStep` — PENDING
+### Task 7.2: `HarvestStep` — COMPLETE
 
 - Files (CREATE): `.../src/lib/steps/harvest.step.ts` and `harvest.step.spec.ts`
 - Plan reference: Component 6.2
@@ -332,6 +341,8 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 ### Batch 7 verification
 
 - `npm run verify -- -p @ptah-extension/task-end-hook`; degradation audit passes.
+
+- Team-leader acceptance (2026-11-06): 4 files under `src/lib/steps/`. `mapCurationResult` is an exhaustive switch with a `never` default over three `satisfies`-checked tables, total over all 11 `TaskEndCuratorReason` codes; mapping matches plan 6.1 for attempts 1 and 2. `markStepRunning` precedes each port call; `upsertStep` gets the literal step; `expandStep` replaces the placeholder; a port throw or rejection records `failed/curator-failed` or `failed/harvest-failed` with the error text in a debug line only (specs assert no secret text in the stored JSON). Harvest never records `not-completed`. The earlier Batch 4/5 red runs were Batch 7 mid-edit (`fromStatus: 'review'`, fixed to `in_review`). Same fresh combined verify as Batch 4, exit 0; degradation audit exit 0 (TOTAL 220). Executor decisions accepted as D14-D16.
 
 ## Batch 8: Index request step and census coordinator — PENDING
 
