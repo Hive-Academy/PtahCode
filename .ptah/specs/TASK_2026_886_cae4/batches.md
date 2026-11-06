@@ -1,6 +1,6 @@
 # Batches - TASK_2026_886_cae4
 
-Total tasks: 44 | Batches: 19 | Complete: 4/19
+Total tasks: 44 | Batches: 19 | Complete: 5/19
 
 Source: `implementation-plan.md` Revision 2 (Gate 2 APPROVED by the user, `decisions.md` row 14),
 `task-description.md` Revision 3, `implementation-plan-review.md` (codex APPROVED round 1, one Minor
@@ -79,6 +79,10 @@ Edge cases:
 | D5 | Scaffold copies (Batch 2), the seven declaration-only port files (Batch 3) and the mechanical version-pin edits (Batch 11) each count as one artifact against the 6-file batch cap | split into more batches; group | Each group is boilerplate with one verification and one rollback boundary; splitting leaves batches that cannot verify alone (a scaffold without `src`) | yes |
 | D6 | Index gate 0 records the user-approved `skipped/main-root-unresolved` and `skipped/main-root-not-open` (plan Clarification 3 accepted, `decisions.md` row 14) | approved codes; `pipeline-disabled` fallback | `decisions.md` row 14 | n/a (user decision) |
 | D7 | Executors are in-process backend-developer subagents for implementation and senior-tester for Batch 19; phase code-logic reviews go to codex (different family) | CLI lanes; subagents | Executor facts 2026-11-06 (grok, antigravity, Ollama exhausted; kimi rate-limited to 21:43 UTC; codex at 93% weekly and reserved for review, cannot run Nx/git) | yes, when lanes recover |
+| D9 | Accept Batch 3 deviation: `SessionLinkPort.worktreePathForSession(sessionId, roots)` takes the roots to search, in order | `(sessionId)` as Task 3.1 worded it; with roots | `getOrganization(root, sessionId)` is keyed by root (plan Codebase evidence line 61, `session-organization.store.ts:599-623`); plan Assumptions line 95 requires querying both the main root and the seen root; `linkedSessions` already takes roots | yes |
+| D10 | Accept Batch 3 deviation: `ITaskEndStore` adds `markStepRunning(runId, step, subject): number` (persists `running`, increments `attempts`) and `getRun(runId)` | omit, change the interface later; add now | Plan Component 5 lines 366-367 ("running state is persisted before its side effect", "`attempts` counts both"); the closed outcome union has `running` only for `index/census-requested`, so `upsertStep` cannot express it; `upsertStep` leaves `attempts` unchanged; D3 forbids silent later interface changes | yes |
+| D11 | Accept Batch 3 deviation: `journalObservation(obs, policy)` and `createRunForOrphans(policy)` take a `TaskEndRunPolicy` (`hookEnabled`, `settleWindowMs`, `queueCap`); the store reads no settings | store injects the settings reader; caller passes the policy | Plan Component 3 Dependencies (line 232) list no settings reader; Component 4 line 283 puts "Hook disabled" on the detector; keeps the store pure SQL like `sqlite-review.repository.ts`. Consequence: the detector (Batch 13) and the startup reconcile build the policy from the Batch 4 settings snapshot (already clamped) | yes |
+| D12 | Accept Batch 3 deviation: `upsertStep<K extends TaskEndStepKind>(runId, step: K, subject, outcome: Extract<TaskEndStepOutcome, { readonly step: K }>)` | plain `outcome: TaskEndStepOutcome` (plan line 224); generic | Every member of `TaskEndStepOutcome` carries a literal `step` (`task-end-hook.types.ts:181-294`), so the Extract never collapses to `never`; it narrows the plan's signature without changing what can be stored. A caller holding a widened `TaskEndStepKind` gets the plain union, so Batch 12's store must still reject `outcome.step !== step` at runtime | yes |
 | D8 | Commit scope `task-end-hook` is added to `.commitlintrc.json` in Batch 2; Batch 1 commits under `shared,persistence-sqlite`; Electron batches use `electron` | — | `.commitlintrc.json` has `shared`, `persistence-sqlite`, `task-specs`, `session-organization`, `vscode-lm-tools`, `skill-synthesis`, `memory-curator`, `vscode-core`, `electron` (all verified present); no `task-end-hook` | yes |
 
 ## Rules every executor must follow (repeat verbatim in each executor prompt)
@@ -176,7 +180,7 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 
 - Team-leader acceptance (2026-11-06): scaffold matches review-core; `nx show project` lists lint, test, typecheck (plus build, not run); root edits are additive only. `npm run verify -- -p @ptah-extension/task-end-hook` passes, as part of the combined five-project run. Degradation audit exit 0 (TOTAL 220).
 
-## Batch 3: Ports, tokens and the store interface — IN_PROGRESS
+## Batch 3: Ports, tokens and the store interface — COMPLETE (commit recorded in Batch 3 acceptance)
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -187,19 +191,19 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 - Tasks: 3 | Depends on: Batch 2
 - Phase: 1 | Phase review: (after Batch 10)
 
-### Task 3.1: Seven port interfaces — IN_PROGRESS
+### Task 3.1: Seven port interfaces — COMPLETE
 
 - Files (CREATE): `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/task-end-hook/src/lib/ports/{curation,harvest,census,session-link,activity,pr-status,git-read-runner}.port.ts`
 - Plan reference: Component 8; contracts in 6.1 (CurationPort), 6.2 (HarvestPort), 6.4 (CensusPort), 6.3 (PrStatusPort, ActivityPort), 10 (bindings)
 - Validation notes: D2/R1 — `SessionLinkPort` has `linkedSessions(taskId, roots)`, `worktreePathForSession(sessionId)` (organization row `worktreePath`), and `taskIdsInWorktreeName(worktreePath: string | null, branch: string | null): string[]`. `ActivityPort`: `isSessionLive`, `liveSessionRoots`, `trackedLaneDirs`, `registeredWorkspaceRoots`, `foregroundActive(backoffMs)`; an `unavailable` result shape where the plan says a probe can be unavailable. `CurationPort` returns the shared `TaskEndCurationResult`. `PrStatusPort` returns a closed `open | none | gh-unavailable | error` result. Interfaces only, no implementation.
 
-### Task 3.2: DI tokens — IN_PROGRESS
+### Task 3.2: DI tokens — COMPLETE
 
 - File (CREATE): `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/task-end-hook/src/lib/di/tokens.ts`
 - Pattern to follow: `libs/backend/session-organization/src/lib/di/tokens.ts:5` (`Symbol.for`)
 - Validation notes: R6 — `TASK_END_TOKENS.RUN_READER = Symbol.for('PtahTaskEndRunReader')` exactly. One token per port, plus store, detector, worker, steps, reader, settings reader.
 
-### Task 3.3: `ITaskEndStore` interface and barrel exports — IN_PROGRESS
+### Task 3.3: `ITaskEndStore` interface and barrel exports — COMPLETE
 
 - Files: CREATE `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/task-end-hook/src/lib/persistence/task-end-store.interface.ts`; MODIFY `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/task-end-hook/src/index.ts` (export ports, tokens, the interface)
 - Plan reference: Component 3 Responsibilities (every public method), plus the census lookups 6.4 needs (pending census per main root, last hook completion, list deferred census steps for a root)
@@ -208,6 +212,8 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 ### Batch 3 verification
 
 - `npm run verify -- -p @ptah-extension/task-end-hook`; degradation audit passes.
+
+- Team-leader acceptance (2026-11-06): 10 files on disk, all declaration-only, under `libs/backend/task-end-hook/src` (7 ports, `di/tokens.ts`, `persistence/task-end-store.interface.ts`, `index.ts` barrel). `RUN_READER` is `Symbol.for('PtahTaskEndRunReader')`, matching vscode-lm-tools (R6). The library imports only types from `@ptah-extension/shared`, with no session-organization or agent-sdk import (R1/D2). No ports mutate (R12). `npm run verify -- -p @ptah-extension/task-end-hook` exit 0; degradation audit exit 0 (TOTAL 220, unchanged); no TODO/FIXME/PLACEHOLDER markers. The four deviations from the task wording were accepted as D9-D12; the executor's other choices (report B3-4 to B3-7) are consistent with the plan. Batches 4-8 and 12-18 consume these signatures unchanged; any change goes back to the team-leader.
 
 ## Batch 4: ReadOnlyGit guard and settings — PENDING
 
@@ -393,7 +399,7 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 
 - Team-leader acceptance (2026-11-06): `trackWrite` counts after validation and decrements in `finally` after the awaited notify (R10); 13 settle tests. Re-run with the worktree `node_modules` symlink present: `npm run verify -- -p @ptah-extension/task-specs,@ptah-extension/session-organization` (in the combined run) exit 0, with session-organization tests run fresh and passing (the 6 earlier load failures were the missing `node_modules`, not the change). The second verify line is run split, because a trailing Jest flag reaches lint/typecheck: `npm run verify -- -t test -p @ptah-extension/rpc-handlers -- --testPathPatterns=tasks-rpc` exit 0, `npm run verify -- -t lint,typecheck -p @ptah-extension/rpc-handlers,ptah-electron` exit 0. The vscode-lm-tools and cli-engine lint/typecheck are in the combined run, exit 0.
 
-## Batch 10: `ptah_task_get` endHook read block (vscode-lm-tools) — COMPLETE (commit recorded in Batch 10 acceptance)
+## Batch 10: `ptah_task_get` endHook read block (vscode-lm-tools) — COMPLETE (commit 932e28fcf)
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -402,7 +408,7 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 - Review family: implementer claude; phase reviewer codex
 - Rationale: depends only on the shared `TaskEndRunRecord` and a local structural type, so it does not wait for the library reader (Batch 15)
 - Tasks: 2 | Depends on: Batch 1
-- Phase: 1 (last batch of Phase 1) | Phase review: code-logic + style, due after this batch commits
+- Phase: 1 (highest-numbered batch of Phase 1) | Phase review: code-logic + style, due once every Phase 1 batch (1-10) is committed; Batches 3-8 remain, so not yet due at 932e28fcf
 
 ### Task 10.1: Optional `endHook` on `TaskGetResult` — COMPLETE
 
