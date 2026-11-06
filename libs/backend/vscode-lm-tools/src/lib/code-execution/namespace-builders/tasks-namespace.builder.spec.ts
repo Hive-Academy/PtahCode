@@ -20,7 +20,10 @@ import {
 } from '../mcp-core/tool-result-budget';
 import { buildHelpMethod } from './system-namespace.builders';
 import {
+  TASK_END_PENDING_STEP_MESSAGE,
+  TASK_END_STEP_KINDS,
   TASK_ESTIMATES,
+  type TaskEndRunRecord,
   type TaskSpecDetail,
   type TaskSpecSummary,
 } from '@ptah-extension/shared';
@@ -30,6 +33,7 @@ import {
   TaskGetArgsSchema,
   TaskUpdateArgsSchema,
   buildTasksNamespace,
+  type TaskEndRunReaderLike,
   type TaskSpecIndexLike,
   type TaskSpecWriterLike,
   type TasksNamespace,
@@ -63,7 +67,10 @@ interface Harness {
   index: { ensureStarted: jest.Mock; list: jest.Mock; getDetail: jest.Mock };
 }
 
-function build(tasks: readonly TaskSpecSummary[] = []): Harness {
+function build(
+  tasks: readonly TaskSpecSummary[] = [],
+  endHookReader?: TaskEndRunReaderLike,
+): Harness {
   const writer = {
     create: jest.fn().mockResolvedValue({
       success: true,
@@ -91,6 +98,7 @@ function build(tasks: readonly TaskSpecSummary[] = []): Harness {
       getWriter: () => writer as unknown as TaskSpecWriterLike,
       getIndex: () => index as unknown as TaskSpecIndexLike,
       getWorkspaceRoot: () => ROOT,
+      ...(endHookReader ? { getEndHookReader: () => endHookReader } : {}),
     }),
   };
 }
@@ -416,6 +424,111 @@ describe('ptah_task_get — derived relations', () => {
     expect(result.derived.childRollup).toBeUndefined();
     expect(result.derived.blocks).toEqual([]);
     expect(result.derived.unmetDependencies).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ptah_task_get — the optional task-end hook block (TASK_2026_886)
+// ---------------------------------------------------------------------------
+
+/** A run read immediately after creation: settling, four pending steps. */
+function freshRun(taskId: string): TaskEndRunRecord {
+  return {
+    runId: 'run-1',
+    repoId: 'repo-1',
+    taskId,
+    episode: 1,
+    source: 'write',
+    fromStatus: 'in_progress',
+    toStatus: 'done',
+    seenRoot: ROOT,
+    mainRoot: ROOT,
+    createdAt: 1_000,
+    settleUntil: 31_000,
+    startedAt: null,
+    endedAt: null,
+    updatedAt: 1_000,
+    state: 'settling',
+    reason: null,
+    steps: TASK_END_STEP_KINDS.map((step) => ({
+      step,
+      subject: '',
+      outcome: { state: 'pending' as const },
+      message: TASK_END_PENDING_STEP_MESSAGE,
+      updatedAt: 1_000,
+      attempts: 0,
+    })),
+  } as TaskEndRunRecord;
+}
+
+describe('ptah_task_get — endHook block', () => {
+  function withTask(reader?: TaskEndRunReaderLike): Harness {
+    const lone = summary({ id: 'TASK_2026_400' });
+    const harness = build([lone], reader);
+    harness.index.getDetail.mockResolvedValue({
+      ...lone,
+      body: '',
+    } as unknown as TaskSpecDetail);
+    return harness;
+  }
+
+  it('carries the latest run when a reader is present', async () => {
+    const run = freshRun('TASK_2026_400');
+    const latestForTask = jest.fn().mockReturnValue(run);
+    const harness = withTask({ latestForTask });
+
+    const result = await harness.tasks.get({ taskId: 'TASK_2026_400' });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error);
+    expect(latestForTask).toHaveBeenCalledWith(ROOT, 'TASK_2026_400');
+    expect(result.endHook).toEqual(run);
+  });
+
+  it('carries endHook: null when the reader has no run for the task', async () => {
+    const harness = withTask({ latestForTask: () => null });
+
+    const result = await harness.tasks.get({ taskId: 'TASK_2026_400' });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error);
+    expect('endHook' in result).toBe(true);
+    expect(result.endHook).toBeNull();
+  });
+
+  it('omits the field when the host has no reader', async () => {
+    const harness = withTask();
+
+    const result = await harness.tasks.get({ taskId: 'TASK_2026_400' });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error);
+    expect('endHook' in result).toBe(false);
+  });
+
+  it('omits the field and still succeeds when the reader throws', async () => {
+    const harness = withTask({
+      latestForTask: () => {
+        throw new Error('database is locked');
+      },
+    });
+
+    const result = await harness.tasks.get({ taskId: 'TASK_2026_400' });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error);
+    expect('endHook' in result).toBe(false);
+    expect(result.task.id).toBe('TASK_2026_400');
+  });
+
+  it('never consults the reader for a task that does not exist', async () => {
+    const latestForTask = jest.fn().mockReturnValue(null);
+    const harness = build([], { latestForTask });
+
+    const result = await harness.tasks.get({ taskId: 'TASK_2026_404' });
+
+    expect(result).toMatchObject({ ok: false, code: 'TASK_NOT_FOUND' });
+    expect(latestForTask).not.toHaveBeenCalled();
   });
 });
 

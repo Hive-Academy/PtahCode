@@ -1,6 +1,6 @@
 # Batches - TASK_2026_886_cae4
 
-Total tasks: 44 | Batches: 19 | Complete: 0/19
+Total tasks: 44 | Batches: 19 | Complete: 4/19
 
 Source: `implementation-plan.md` Revision 2 (Gate 2 APPROVED by the user, `decisions.md` row 14),
 `task-description.md` Revision 3, `implementation-plan-review.md` (codex APPROVED round 1, one Minor
@@ -96,7 +96,7 @@ Edge cases:
 
 Phase review: code-logic (codex, different family) on the combined diff after Batch 10 commits, plus code-style (new public API: shared types, new library ports, task-specs settle signal).
 
-## Batch 1: Closed outcome types and migration 0072 Part A — IN_PROGRESS
+## Batch 1: Closed outcome types and migration 0072 Part A — COMPLETE (commit 4b0efa0b4)
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -107,7 +107,7 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 - Tasks: 4 | Depends on: none
 - Phase: 1 | Phase review: code-logic + style (after Batch 10)
 
-### Task 1.1: Shared task-end-hook vocabulary — IMPLEMENTED
+### Task 1.1: Shared task-end-hook vocabulary — COMPLETE
 
 - File: `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/shared/src/lib/types/task-end-hook.types.ts` (CREATE); `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/shared/src/index.ts` (MODIFY, one `export *` beside `:47`)
 - Plan reference: implementation-plan.md Component 1 (lines 110-172)
@@ -116,14 +116,14 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 - Validation notes: R11 — write the count explicitly: eight retryable curator codes (`provider-cooling-down`, `provider-unreachable`, `concurrency-slot-timeout`, `curator-queue-wait-timeout`, `network-backoff`, `no-output`, `caller-aborted`, `host-shutdown`) plus the trigger gate `hourly-limit` give nine `deferred/<code>` and nine `failed/<code>` members (`failed/hourly-limit` included; `hourly-limit` is not a `TaskEndCuratorReason`). D6: include `skipped/main-root-unresolved` and `skipped/main-root-not-open` as index members. No C1-dependent pair (`removed`, `archive-failed`, …) and no `awaiting-confirmation`.
 - Implementation details: pure types and `const` tables; no imports beyond `task-spec.types`.
 
-### Task 1.2: Type and table spec — IMPLEMENTED
+### Task 1.2: Type and table spec — COMPLETE
 
 - Depends on: Task 1.1
 - File: `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/shared/src/lib/types/task-end-hook.types.spec.ts` (CREATE)
 - Plan reference: Component 1 "Verification seam"
 - Quality requirements: every `@ts-expect-error` case in the plan, plus `deferred/hourly-limit` and `failed/hourly-limit` accepted and `deferred/provider-unsupported`, `deferred/curator-error`, `failed/queue-timeout` rejected; table has no duplicates; `isTerminalStep` truth table; every reason code has a non-empty sentence.
 
-### Task 1.3: Migration 0072 SQL — IMPLEMENTED
+### Task 1.3: Migration 0072 SQL — COMPLETE
 
 - File: `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/persistence-sqlite/src/lib/migrations/0072_task_end_hook.ts` (CREATE)
 - Plan reference: Component 2 (lines 174-208)
@@ -131,7 +131,7 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 - Quality requirements: the five tables, CHECKs, UNIQUE `(repo_id, task_id, episode)`, indexes as listed; `main_root` nullable; no message column on `task_end_steps`.
 - Validation notes: do NOT edit `migrations/index.ts` or any max-version pin (Part B, #957 files).
 
-### Task 1.4: Registry-independent migration spec (Part A) — IMPLEMENTED
+### Task 1.4: Registry-independent migration spec (Part A) — COMPLETE
 
 - Depends on: Task 1.3
 - File: `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/persistence-sqlite/src/lib/migrations/0072_task_end_hook.spec.ts` (CREATE)
@@ -143,8 +143,9 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 - `npm run verify -- -p @ptah-extension/shared,@ptah-extension/persistence-sqlite`
 - Dependent hosts: `npm run verify -- -t lint,typecheck -p ptah-electron,ptah-extension-webview,@ptah-extension/cli-engine,@ptah-extension/platform-cli,@ptah-extension/vscode-lm-tools,@ptah-extension/task-specs`
 - Degradation audit passes. No peer-879 file in the diff.
+- Team-leader acceptance (2026-11-06): scoped verify re-run, all cache hits; shared lint/typecheck/test and persistence-sqlite typecheck/test pass. The only failures are pre-existing and outside this batch: (a) persistence-sqlite lint, 10 `no-restricted-syntax` errors in `0057_drop_skill_pipeline{,.spec}.ts` and `0058_provider_accounts.spec.ts`, unchanged vs origin/main, with no 0072 file in the lint log; (b) ptah-extension-webview lint, 26 `@nx/enforce-module-boundaries` errors from `libs/frontend/canvas/src/lib/orchestra-canvas.component.ts:486` (f887e4242). HEAD fe414de03 equals origin/main, and no frontend or webview path differs from it. Accepted as base debt; not a Batch 1 regression.
 
-## Batch 2: task-end-hook library scaffold and registrations — PENDING
+## Batch 2: task-end-hook library scaffold and registrations — COMPLETE (commit 3e7188e02)
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -155,14 +156,14 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 - Tasks: 2 | Depends on: Batch 1
 - Phase: 1 | Phase review: (after Batch 10)
 
-### Task 2.1: Library scaffold — PENDING
+### Task 2.1: Library scaffold — COMPLETE
 
 - Files (CREATE): `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/task-end-hook/{project.json,package.json,tsconfig.json,tsconfig.lib.json,tsconfig.spec.json,jest.config.ts,src/index.ts}`
 - Plan reference: Component 8 Files (scaffold bullet)
 - Pattern to follow: `libs/backend/review-core/` on disk (project.json with tags `scope:extension`, `type:feature`, `typecheck` via `tsc --noEmit`, `test.options.passWithNoTests`, explicit `lint` target; `package.json` as review-core's)
 - Validation notes: R3 — no per-lib `eslint.config.mjs` (review-core has none). `src/index.ts` starts minimal (`export {};` is acceptable until Batch 3).
 
-### Task 2.2: Root registrations — PENDING
+### Task 2.2: Root registrations — COMPLETE
 
 - Files (MODIFY): `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/tsconfig.base.json` (path alias `@ptah-extension/task-end-hook`, sorted like its neighbours); `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/nx.json` (add `libs/backend/task-end-hook/**/*` to BOTH the `@nx/eslint/plugin` `lint` include and the `@nx/jest/plugin` `test` include, beside `review-core` at `:204` and `:290`); `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/.commitlintrc.json` (scope `task-end-hook` beside `review-core` at `:114`)
 - Validation notes: R2. Additive lines only.
@@ -173,7 +174,9 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 - `npm run verify -- -p @ptah-extension/task-end-hook` (header must name the project for each target).
 - Degradation audit passes.
 
-## Batch 3: Ports, tokens and the store interface — PENDING
+- Team-leader acceptance (2026-11-06): scaffold matches review-core; `nx show project` lists lint, test, typecheck (plus build, not run); root edits are additive only. `npm run verify -- -p @ptah-extension/task-end-hook` passes, as part of the combined five-project run. Degradation audit exit 0 (TOTAL 220).
+
+## Batch 3: Ports, tokens and the store interface — IN_PROGRESS
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -184,19 +187,19 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 - Tasks: 3 | Depends on: Batch 2
 - Phase: 1 | Phase review: (after Batch 10)
 
-### Task 3.1: Seven port interfaces — PENDING
+### Task 3.1: Seven port interfaces — IN_PROGRESS
 
 - Files (CREATE): `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/task-end-hook/src/lib/ports/{curation,harvest,census,session-link,activity,pr-status,git-read-runner}.port.ts`
 - Plan reference: Component 8; contracts in 6.1 (CurationPort), 6.2 (HarvestPort), 6.4 (CensusPort), 6.3 (PrStatusPort, ActivityPort), 10 (bindings)
 - Validation notes: D2/R1 — `SessionLinkPort` has `linkedSessions(taskId, roots)`, `worktreePathForSession(sessionId)` (organization row `worktreePath`), and `taskIdsInWorktreeName(worktreePath: string | null, branch: string | null): string[]`. `ActivityPort`: `isSessionLive`, `liveSessionRoots`, `trackedLaneDirs`, `registeredWorkspaceRoots`, `foregroundActive(backoffMs)`; an `unavailable` result shape where the plan says a probe can be unavailable. `CurationPort` returns the shared `TaskEndCurationResult`. `PrStatusPort` returns a closed `open | none | gh-unavailable | error` result. Interfaces only, no implementation.
 
-### Task 3.2: DI tokens — PENDING
+### Task 3.2: DI tokens — IN_PROGRESS
 
 - File (CREATE): `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/task-end-hook/src/lib/di/tokens.ts`
 - Pattern to follow: `libs/backend/session-organization/src/lib/di/tokens.ts:5` (`Symbol.for`)
 - Validation notes: R6 — `TASK_END_TOKENS.RUN_READER = Symbol.for('PtahTaskEndRunReader')` exactly. One token per port, plus store, detector, worker, steps, reader, settings reader.
 
-### Task 3.3: `ITaskEndStore` interface and barrel exports — PENDING
+### Task 3.3: `ITaskEndStore` interface and barrel exports — IN_PROGRESS
 
 - Files: CREATE `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/task-end-hook/src/lib/persistence/task-end-store.interface.ts`; MODIFY `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/task-end-hook/src/index.ts` (export ports, tokens, the interface)
 - Plan reference: Component 3 Responsibilities (every public method), plus the census lookups 6.4 needs (pending census per main root, last hook completion, list deferred census steps for a root)
@@ -352,7 +355,7 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 
 - `npm run verify -- -p @ptah-extension/task-end-hook`; degradation audit passes.
 
-## Batch 9: task-specs write-settle signal and session-organization export — PENDING
+## Batch 9: task-specs write-settle signal and session-organization export — COMPLETE (commit 82cb873bb)
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -363,20 +366,20 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 - Tasks: 3 | Depends on: none (may run beside Batches 2-8)
 - Phase: 1 | Phase review: (after Batch 10)
 
-### Task 9.1: `hasWriteInFlight` / `onDidSettleWrites` on `TaskWriterService` — PENDING
+### Task 9.1: `hasWriteInFlight` / `onDidSettleWrites` on `TaskWriterService` — COMPLETE
 
 - Files (MODIFY): `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/task-specs/src/lib/task-writer.service.ts`; `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/task-specs/src/index.ts` (export `TaskWritesSettledEvent`)
 - Plan reference: Component 4a (lines 335-353)
 - Pattern to follow: `task-index.service.ts:26`, `:145-147` (`createEvent`); key normalisation as `applyFolderChange` (`task-index.service.ts:307`)
 - Validation notes: R10 — increment after early-return validation, decrement in `finally` after the awaited `notify()`; fire synchronously at 0; listener errors caught and logged at warn; no constructor parameter; return values, error codes and call order unchanged.
 
-### Task 9.2: Settle spec — PENDING
+### Task 9.2: Settle spec — COMPLETE
 
 - Depends on: Task 9.1
 - File (CREATE): `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/task-specs/src/lib/task-writer.settle.spec.ts`
 - Quality requirements: count rises/falls around `updateMetadata`, `create`, `adoptFolder`; one fire after overlapping writes, none between; throwing notifier still settles; throwing listener does not change the result; two roots independent; `deferNotify: true` writes settle.
 
-### Task 9.3: Export `taskIdsInWorktreeName` — PENDING
+### Task 9.3: Export `taskIdsInWorktreeName` — COMPLETE
 
 - File (MODIFY): `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/session-organization/src/index.ts` (one export from `./lib/auto-link/task-link-rules`)
 - Plan reference: Component 7c; consumed by the Electron `SessionLinkPort` adapter (Task 17.1), D2
@@ -388,7 +391,9 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 - `npm run verify -- -t lint,typecheck -p @ptah-extension/vscode-lm-tools,@ptah-extension/cli-engine,ptah-electron`
 - Degradation audit passes.
 
-## Batch 10: `ptah_task_get` endHook read block (vscode-lm-tools) — PENDING
+- Team-leader acceptance (2026-11-06): `trackWrite` counts after validation and decrements in `finally` after the awaited notify (R10); 13 settle tests. Re-run with the worktree `node_modules` symlink present: `npm run verify -- -p @ptah-extension/task-specs,@ptah-extension/session-organization` (in the combined run) exit 0, with session-organization tests run fresh and passing (the 6 earlier load failures were the missing `node_modules`, not the change). The second verify line is run split, because a trailing Jest flag reaches lint/typecheck: `npm run verify -- -t test -p @ptah-extension/rpc-handlers -- --testPathPatterns=tasks-rpc` exit 0, `npm run verify -- -t lint,typecheck -p @ptah-extension/rpc-handlers,ptah-electron` exit 0. The vscode-lm-tools and cli-engine lint/typecheck are in the combined run, exit 0.
+
+## Batch 10: `ptah_task_get` endHook read block (vscode-lm-tools) — COMPLETE (commit recorded in Batch 10 acceptance)
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -399,14 +404,14 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 - Tasks: 2 | Depends on: Batch 1
 - Phase: 1 (last batch of Phase 1) | Phase review: code-logic + style, due after this batch commits
 
-### Task 10.1: Optional `endHook` on `TaskGetResult` — PENDING
+### Task 10.1: Optional `endHook` on `TaskGetResult` — COMPLETE
 
 - Files (MODIFY): `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/vscode-lm-tools/src/lib/code-execution/namespace-builders/tasks-namespace.builder.ts` and `tasks-namespace.builder.spec.ts`
 - Plan reference: Component 11 (builder bullets)
 - Pattern to follow: `TaskSpecIndexLike` local structural type in the same builder
 - Quality requirements: `getEndHookReader?: () => TaskEndRunReaderLike | undefined`; field present with a reader, absent without one, absent when the reader throws; `get` never fails because of the reader.
 
-### Task 10.2: Optional reader injection — PENDING
+### Task 10.2: Optional reader injection — COMPLETE
 
 - Depends on: Task 10.1
 - File (MODIFY): `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/vscode-lm-tools/src/lib/code-execution/ptah-api-builder.service.ts`
@@ -417,6 +422,8 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 - `npm run verify -- -p @ptah-extension/vscode-lm-tools,@ptah-extension/cli-engine`
 - `npm run verify -- -t lint,typecheck -p ptah-electron`
 - Degradation audit passes.
+
+- Team-leader acceptance (2026-11-06): token `Symbol.for('PtahTaskEndRunReader')` is declared in `ptah-api-builder.service.ts` and matches implementation-plan.md:753 and Task 3.2 (R6), so Batch 3 must define `TASK_END_TOKENS.RUN_READER` with exactly this string for the Batch 15/17 host wiring. Reader method `latestForTask(workspaceRoot, taskId)` matches plan Component 11 (:747). No `@ptah-extension/task-end-hook` import. The Prettier reflow of the `getMessageCoordinator` ternary (~:696) is whitespace-only, so behaviour is unchanged; accepted. `npm run verify -- -p @ptah-extension/vscode-lm-tools,@ptah-extension/cli-engine` exit 0, and `-t lint,typecheck -p ptah-electron` exit 0. The git-ignored `node_modules` symlink is environment only and not committed.
 
 ## Phase 2 — Persistence and runtime (BLOCKED-ON-957): Batches 11-15
 

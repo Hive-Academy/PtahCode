@@ -108,6 +108,9 @@ import {
   resolveEffectivePluginPaths,
   type EffectivePluginPolicySource,
 } from './namespace-builders/harness-namespace.builder';
+// Imported from the builder file, not the barrel: only this injection site
+// names the reader shape.
+import type { TaskEndRunReaderLike } from './namespace-builders/tasks-namespace.builder';
 import type {
   CallerWorktreeRecord,
   WorktreeChangeCallback,
@@ -249,6 +252,16 @@ const CODE_SYMBOL_READER_TOKEN = Symbol.for('PtahCodeSymbolReader');
  * @warning Keep Symbol.for() string value in sync with the canonical definition
  */
 const MEMORY_WRITER_TOKEN = Symbol.for('PlatformMemoryWriter');
+
+/**
+ * Duplicated from TASK_END_TOKENS.RUN_READER (TASK_2026_886) so that
+ * vscode-lm-tools never imports `@ptah-extension/task-end-hook`. Only the
+ * Electron host registers it; elsewhere `ptah_task_get` carries no `endHook`.
+ * Must match: libs/backend/task-end-hook/src/lib/di/tokens.ts
+ *
+ * @warning Keep Symbol.for() string value in sync with the canonical definition
+ */
+const TASK_END_RUN_READER_TOKEN = Symbol.for('PtahTaskEndRunReader');
 
 /**
  * DI token for IDE capabilities (VS Code-specific).
@@ -528,6 +541,14 @@ export class PtahAPIBuilder {
 
     @inject(CLI_AGENT_RUNTIME_TOKENS.LANE_LIMIT_LOOKUP, { isOptional: true })
     private readonly laneLimitLookup?: LaneLimitLookupService,
+
+    /**
+     * Task-end run reader (TASK_2026_886). Optional and last for the same
+     * reason as `surfaceStateService`; absent means `ptah_task_get` omits
+     * its `endHook` block.
+     */
+    @inject(TASK_END_RUN_READER_TOKEN, { isOptional: true })
+    private readonly taskEndRunReader?: TaskEndRunReaderLike,
   ) {
     diagnosticsCacheInvalidator.start();
     this.logger.info('PtahAPIBuilder initialized with 22 namespaces');
@@ -672,9 +693,15 @@ export class PtahAPIBuilder {
       ),
       agent: (builtAgent = this.buildNamespaceSafe('agent', () =>
         buildAgentNamespace({
-          getMessageCoordinator: () => this.container?.isRegistered(CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_COORDINATOR, true)
-            ? this.container.resolve<AgentMessageCoordinator>(CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_COORDINATOR)
-            : undefined,
+          getMessageCoordinator: () =>
+            this.container?.isRegistered(
+              CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_COORDINATOR,
+              true,
+            )
+              ? this.container.resolve<AgentMessageCoordinator>(
+                  CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_COORDINATOR,
+                )
+              : undefined,
           agentProcessManager: this.agentProcessManager,
           cliDetectionService: this.cliDetectionService,
           getWorkspaceRoot: () => this.getWorkspaceRoot(),
@@ -847,6 +874,7 @@ export class PtahAPIBuilder {
           getWriter: () => this.taskWriter,
           getIndex: () => this.taskIndex,
           getWorkspaceRoot: () => this.getWorkspaceRoot(),
+          getEndHookReader: () => this.taskEndRunReader,
         }),
       ),
       sessionOrganization: this.buildNamespaceSafe('sessionOrganization', () =>
