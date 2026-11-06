@@ -1,6 +1,6 @@
 # Batches - TASK_2026_886_cae4
 
-Total tasks: 44 | Batches: 19 | Complete: 8/19
+Total tasks: 44 | Batches: 19 | Complete: 10/19
 
 Source: `implementation-plan.md` Revision 2 (Gate 2 APPROVED by the user, `decisions.md` row 14),
 `task-description.md` Revision 3, `implementation-plan-review.md` (codex APPROVED round 1, one Minor
@@ -89,6 +89,16 @@ Edge cases:
 | D16 | Accept Batch 7: a close-curate or harvest row left `running` after a crash is re-run as pending | check `running` in the step | Those outcome unions have no `running` member. Binding on Batch 12 (store presents such a row as pending) and Batch 14 (worker re-runs it) | yes |
 | D17 | Batch 4 commit message corrected with `git commit --amend` (message only, same tree) seconds after creation, before any push: a missing blank line had merged the body into the subject | leave a commitlint-failing subject; amend the unpushed commit | `npx commitlint --from HEAD~1` passes after the fix; tree unchanged (5 files, 916 insertions) | n/a |
 | D8 | Commit scope `task-end-hook` is added to `.commitlintrc.json` in Batch 2; Batch 1 commits under `shared,persistence-sqlite`; Electron batches use `electron` | — | `.commitlintrc.json` has `shared`, `persistence-sqlite`, `task-specs`, `session-organization`, `vscode-lm-tools`, `skill-synthesis`, `memory-curator`, `vscode-core`, `electron` (all verified present); no `task-end-hook` | yes |
+| D18 | Accept Batch 6: `DisposeEvaluateStep` injects `TASK_END_TOKENS.SETTINGS_READER` (fresh snapshot per run) instead of a settings argument | argument (as D14); inject | D14's reason (Batch 7 did not depend on Batch 4) does not apply: Batch 6 depends on Batch 4 and the token and reader exist (`di/tokens.ts`, `config/task-end-hook-config.ts`). Binding on Batch 15: register the reader token | yes |
+| D19 | Accept Batch 6: `DisposalInputCollector` is a plain class the step builds from its injected ports; no DI token | new token (edits Batch 3 `tokens.ts`); plain class | Same shape as `ReadOnlyGit` over `GitReadRunner`; keeps D4 file ownership | yes |
+| D20 | Accept Batch 6: P3 "other non-terminal task" scans `.ptah/specs/*` in the main and seen roots (cap 10 000 folders per root, beyond that `error`); an unparseable carrier counts as non-terminal; a named id without a spec folder does not | ignore; name-only; full scan | task-description P3; `taskIdsInWorktreeName` doc ("the caller still checks that the task folder exists"); unknown means skip | yes |
+| D21 | Accept Batch 6: the `gh` dry run neutralises P9-P11 and `probeErrors`, so `gh` is asked exactly when P2-P8 pass; P7 fields stay `error` when the directory is missing; archive slug `<basename>-<sha256(realPath)[0..12]>` (only `lstat`ed); `## Worktree` line = first non-blank line under the heading, quotes/backticks/trailing punctuation stripped | as listed in batch-6-report.md Decisions | Plan Component 6.3 (gh only after P2-P8), `disposal-input.ts` (P7 not consulted for a missing dir), task-description P7 (folder name plus short hash), real context.md files put a blank line after the heading | yes |
+| D22 | Accept Batch 8: other deferred index steps of a root are coalesced when the owner run actually requests its census (decision 6), not when the cooldown timer fires | coalesce at timer fire (plan line 572 literal); at request | `joined: hook-run` must name a run that holds a census; if the owner is deferred again (foreground), the others stay deferred and re-enter. At most one census per window still holds (AC 5.3 spec). Narrows the plan's wording without changing its guarantee | yes |
+| D23 | Accept Batch 8: `deferred/foreground-active` returns `resumeAt = now + max(bootScanIdleBackoffMs, 60 s)` | no resume time; raw back-off | Plan line 359 schedules the worker timer from idle back-off resume times; a back-off of 0 with a turn in flight would spin. 60 s floor is a guard, not a new setting | yes |
+| D24 | Accept Batch 8: `registeredWorkspaceRoots()` `unavailable` gives `skipped/main-root-not-open` plus a warn; census probe throws give `failed/census-failed` in the step, store errors propagate; `requestedAt` is read back from `store.pendingCensus`; the coordinator exposes `onDidSettleCensus` and `settled()`; the fake store is duplicated in the two specs | as listed in batch-8-report.md Decisions | Batch 3 contract (unavailable never passes); `HarvestStep` split (Batch 7) and plan line 384; store owns `requested_at`; plan lines 377, 819 (wake and shutdown budget); `tsconfig.lib.json` excludes only `*.spec.ts` | yes |
+| D25 | Binding notes from Batch 8. Batch 12 (store): `pendingCensus`, `listDeferredCensusSteps` and `listOpenRuns` include runs whose only non-terminal step is the index step; `upsertStep(running/census-requested)` sets `requested_at`. Batch 14 (worker): call `CensusCoordinator.reconcileAfterRestart()` before the first claim; schedule re-entry from `resumeAt`; wake on `onDidSettleCensus`; at shutdown `dispose()` then await `settled()` within the budget | — | batch-8-report.md "Notes for later batches" | yes |
+| D26 | `tools/di-lint/check-injects.ts` (pre-push hook) fails for every `TASK_END_TOKENS.*` inject in Batches 6, 7 and 8 (19 errors: census-coordinator, close-curate, dispose-evaluate, harvest, index-request) because `registerTaskEndHook` is Batch 15 (D4). The branch cannot pass the pre-push hook until Batch 15 lands (BLOCKED-ON-957). No workaround (no stub registration, no di-lint exclusion) | stub register file; di-lint exclusion; wait for Batch 15 | Team-leader run 2026-11-06: di-lint exit 1, 19 `injects TASK_END_TOKENS.* but no register*.ts registers it`; D4 owns `src/index.ts`/registration in Batch 15 | yes |
+| D27 | Incident (Batch 8): a `prettier --write steps/*.spec.ts` glob reformatted the committed Batch 7 specs `close-curate.step.spec.ts` and `harvest.step.spec.ts`; the executor restored both from `HEAD` | — | Orchestrator and team-leader confirmed `git diff HEAD` empty on both before the Batch 8 commit; neither file is in the Batch 6 or 8 commit | n/a |
 
 ## Rules every executor must follow (repeat verbatim in each executor prompt)
 
@@ -287,7 +297,7 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 
 - Team-leader acceptance (2026-11-06): 5 files under `src/lib/dispose/`; `decide-disposal.ts` does no I/O (imports `node:path` only); type-only imports from shared. Spec: 50 table rows plus a coverage check over `TASK_END_DISPOSE_BLOCK_REASONS`, both cap pairs, AC 4.2 a/b, AC 4.10 a/b/c, findings 20 and 21, determinism. The ignored-directory assumption (plan Assumptions line 94) was verified on a `mktemp -d` scratch repo and pinned as `SCRATCH_REPO_FIXTURE`: an ignored directory is one `!! dir/` entry, not expanded; also pinned: the rename origin field and an untracked nested repo as `?? nested/`. Record-shape deviations B5-1..B5-9 accepted as D13. Same fresh combined verify as Batch 4, exit 0; degradation audit exit 0 (TOTAL 220).
 
-## Batch 6: Disposal input collector and dispose-evaluate step — PENDING
+## Batch 6: Disposal input collector and dispose-evaluate step — COMPLETE (commit 80af87d8a)
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -298,13 +308,13 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 - Tasks: 2 | Depends on: Batches 4, 5
 - Phase: 1 | Phase review: (after Batch 10)
 
-### Task 6.1: `DisposalInputCollector` — PENDING
+### Task 6.1: `DisposalInputCollector` — COMPLETE
 
 - File (CREATE): `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/task-end-hook/src/lib/dispose/disposal-input.collector.ts`
 - Plan reference: Component 6.3 candidate discovery, collector rules, merge and PR mapping
 - Validation notes: R1/D2 — source (b) uses `SessionLinkPort.taskIdsInWorktreeName`; no import of `@ptah-extension/session-organization`. Main-worktree probes run with `cwd = run.mainRoot`; `null` → no probe. `gh` queried only when P2-P8 pass in a dry evaluation. Ignored-file walk: `lstat`, no symlink follow, stops at caps + 1. Git ceiling `WORKTREE_GIT_TIMEOUT_MS`. Cap `maxWorktreesPerRun`.
 
-### Task 6.2: `DisposeEvaluateStep` and its spec — PENDING
+### Task 6.2: `DisposeEvaluateStep` and its spec — COMPLETE
 
 - Depends on: Task 6.1
 - Files (CREATE): `.../src/lib/steps/dispose-evaluate.step.ts` and `dispose-evaluate.step.spec.ts`
@@ -314,7 +324,9 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 
 - `npm run verify -- -p @ptah-extension/task-end-hook`; degradation audit passes.
 
-## Batch 7: Close-curate and harvest steps — COMPLETE (commit recorded in Batch 7 acceptance)
+- Team-leader acceptance (2026-11-06): 3 files (`dispose/disposal-input.collector.ts`, `steps/dispose-evaluate.step.ts`, spec with 18 tests). Every git call goes through `ReadOnlyGit` with `READ_ONLY_GIT_VECTORS` rows and `WORKTREE_GIT_TIMEOUT_MS`; main probes at `cwd = run.mainRoot`; fs limited to `realpath`, `lstat`, `readdir`, `readFile` of carriers; no write, rename, rm, mkdir or `git fetch` in either source file. The one audit annotation (`realpathOrNull`, `catch-return-sentinel`) is truthful: both callers push a probe-error code or fall back to the lexical key. Fresh combined verify (Batches 6 + 8 in tree) with `--skip-nx-cache`: lint and typecheck 2/2, test 1/1, 9 suites / 440 tests passed, exit 0; degradation audit exit 0 (TOTAL 220, task-end-hook not listed). Batch 8's earlier audit failure at `disposal-input.collector.ts:678` was Batch 6 mid-edit, since annotated. di-lint red as D26. Executor decisions accepted as D18-D21.
+
+## Batch 7: Close-curate and harvest steps — COMPLETE (commit a410dcbf1)
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -344,7 +356,7 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 
 - Team-leader acceptance (2026-11-06): 4 files under `src/lib/steps/`. `mapCurationResult` is an exhaustive switch with a `never` default over three `satisfies`-checked tables, total over all 11 `TaskEndCuratorReason` codes; mapping matches plan 6.1 for attempts 1 and 2. `markStepRunning` precedes each port call; `upsertStep` gets the literal step; `expandStep` replaces the placeholder; a port throw or rejection records `failed/curator-failed` or `failed/harvest-failed` with the error text in a debug line only (specs assert no secret text in the stored JSON). Harvest never records `not-completed`. The earlier Batch 4/5 red runs were Batch 7 mid-edit (`fromStatus: 'review'`, fixed to `in_review`). Same fresh combined verify as Batch 4, exit 0; degradation audit exit 0 (TOTAL 220). Executor decisions accepted as D14-D16.
 
-## Batch 8: Index request step and census coordinator — PENDING
+## Batch 8: Index request step and census coordinator — COMPLETE (commit recorded in Batch 8 acceptance)
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -355,13 +367,13 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 - Tasks: 2 | Depends on: Batches 1, 3, 4
 - Phase: 1 | Phase review: (after Batch 10)
 
-### Task 8.1: `CensusCoordinator` — PENDING
+### Task 8.1: `CensusCoordinator` — COMPLETE
 
 - Files (CREATE): `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/task-end-hook/src/lib/steps/census-coordinator.ts` and `census-coordinator.spec.ts`
 - Plan reference: Component 6.4 (completion, cooldown end, restart)
 - Quality requirements: at most one census per main root per cooldown window; restart turns `running/census-requested` into `failed/census-interrupted`; coalesced steps untouched (AC 5.2, 5.7).
 
-### Task 8.2: `IndexRequestStep` — PENDING
+### Task 8.2: `IndexRequestStep` — COMPLETE
 
 - Depends on: Task 8.1
 - Files (CREATE): `.../src/lib/steps/index-request.step.ts` and `index-request.step.spec.ts`
@@ -371,6 +383,8 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 ### Batch 8 verification
 
 - `npm run verify -- -p @ptah-extension/task-end-hook`; degradation audit passes.
+
+- Team-leader acceptance (2026-11-06): 4 files under `src/lib/steps/` (coordinator and step with specs; 39 tests across the two). Decision order 0-6 matches plan Component 6.4: null root → `skipped/main-root-unresolved`, real-path workspace gate → `skipped/main-root-not-open`, pipeline-disabled, hook owner → `coalesced/hook-run`, external → `coalesced/external`, cooldown, foreground, then `markStepRunning` + `upsertStep(running/census-requested)` and `CensusCoordinator.start` without awaiting the census (slot released, AC 5.8). Completion writes only while the row still holds `running/census-requested`; restart reconcile turns it into `failed/census-interrupted` and leaves coalesced steps untouched (AC 5.2, 5.7). No timers. Same fresh combined verify as Batch 6, exit 0; audit exit 0. Batch 7 spec reformat incident recorded as D27 (restored, `git diff HEAD` empty). di-lint red as D26. Executor decisions accepted as D22-D25. Phase-review note: when `start()` returns false (coordinator disposed) the step records `census-interrupted` after `coalesceDeferredInto` already joined other deferred steps to it; reviewer to judge (shutdown-only path).
 
 ## Batch 9: task-specs write-settle signal and session-organization export — COMPLETE (commit 82cb873bb)
 
