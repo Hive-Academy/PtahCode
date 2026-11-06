@@ -3,6 +3,8 @@ import * as path from 'path';
 import {
   PLATFORM_TOKENS,
   FileType,
+  createEvent,
+  type IEvent,
   type IFileSystemProvider,
 } from '@ptah-extension/platform-core';
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
@@ -112,6 +114,16 @@ export type AdoptFolderResult =
     };
 
 /**
+ * Payload of {@link TaskWriterService.onDidSettleWrites}: every carrier write
+ * that was in flight for `workspaceRoot` has finished, index notification
+ * included. `workspaceRoot` is normalised with `normalizeWorkspaceRoot`, the
+ * same key `TaskIndexService` uses for its change events.
+ */
+export interface TaskWritesSettledEvent {
+  workspaceRoot: string;
+}
+
+/**
  * Bound on the allocate → claim retry loop (risk R6).
  *
  * Each attempt re-scans the folders on disk, so a lost race converges: the
@@ -158,10 +170,7 @@ export type UpdateStatusResult =
          * status has no undo. The caller should re-read and retry.
          */
         code:
-          | 'TASK_NOT_FOUND'
-          | 'TASK_EXCLUDED'
-          | 'WRITE_FAILED'
-          | 'TASK_CONFLICT';
+          'TASK_NOT_FOUND' | 'TASK_EXCLUDED' | 'WRITE_FAILED' | 'TASK_CONFLICT';
         message: string;
       };
     };
@@ -233,6 +242,15 @@ export type UpdateMetadataResult =
  */
 @injectable()
 export class TaskWriterService {
+  /**
+   * In-flight writer calls per normalised workspace root. An entry exists only
+   * while its count is above zero, so the map never outgrows the set of roots
+   * being written right now.
+   */
+  private readonly writesInFlight = new Map<string, number>();
+  private readonly _onDidSettleWrites: IEvent<TaskWritesSettledEvent>;
+  private readonly fireSettled: (e: TaskWritesSettledEvent) => void;
+
   constructor(
     @inject(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER)
     private readonly fs: IFileSystemProvider,
@@ -242,7 +260,64 @@ export class TaskWriterService {
     private readonly indexNotifier: ITaskIndexNotifier,
     @inject(TASK_FOLDER_VISIBILITY_TOKEN)
     private readonly visibility: ITaskFolderVisibility,
-  ) {}
+  ) {
+    const [event, fire] = createEvent<TaskWritesSettledEvent>();
+    this.fireSettled = fire;
+    // Each listener is wrapped where it subscribes, so one that throws is
+    // logged and skipped: it cannot stop the listeners after it, and it cannot
+    // turn a finished write into a rejected one (the settle fires from the
+    // writer's own `finally`).
+    this._onDidSettleWrites = (listener) =>
+      event((settled) => {
+        try {
+          listener(settled);
+        } catch (error: unknown) {
+          this.logger.warn('[task-specs] write-settle listener failed', {
+            workspaceRoot: settled.workspaceRoot,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      });
+  }
+
+  /**
+   * Fires once a root's in-flight writes (`create`, `adoptFolder`,
+   * `updateMetadata` and so `updateStatus`) have all finished, after their
+   * index notification. Fired synchronously when the count returns to zero;
+   * overlapping writes on one root produce one fire, after the last of them.
+   */
+  get onDidSettleWrites(): IEvent<TaskWritesSettledEvent> {
+    return this._onDidSettleWrites;
+  }
+
+  /** True while any writer call for `workspaceRoot` has not finished yet. */
+  hasWriteInFlight(workspaceRoot: string): boolean {
+    return this.writesInFlight.has(normalizeWorkspaceRoot(workspaceRoot));
+  }
+
+  /**
+   * Count `write` as in flight for `root` (already normalised) until it
+   * settles, success or failure. The decrement sits in `finally`, so a write
+   * or a notifier that throws can never leave the root marked busy. The
+   * result and any rejection pass through unchanged.
+   */
+  private async trackWrite<T>(
+    root: string,
+    write: () => Promise<T>,
+  ): Promise<T> {
+    this.writesInFlight.set(root, (this.writesInFlight.get(root) ?? 0) + 1);
+    try {
+      return await write();
+    } finally {
+      const remaining = (this.writesInFlight.get(root) ?? 1) - 1;
+      if (remaining > 0) {
+        this.writesInFlight.set(root, remaining);
+      } else {
+        this.writesInFlight.delete(root);
+        this.fireSettled({ workspaceRoot: root });
+      }
+    }
+  }
 
   async create(
     workspaceRoot: string,
@@ -256,6 +331,14 @@ export class TaskWriterService {
     }
 
     const root = normalizeWorkspaceRoot(workspaceRoot);
+    return this.trackWrite(root, () => this.claimAndCreate(root, input));
+  }
+
+  /** `create` past argument validation; `root` is already normalised. */
+  private async claimAndCreate(
+    root: string,
+    input: CreateTaskInput,
+  ): Promise<CreateTaskResult> {
     const specsDir = path.join(root, '.ptah', 'specs');
 
     try {
@@ -394,6 +477,17 @@ export class TaskWriterService {
     }
 
     const root = normalizeWorkspaceRoot(workspaceRoot);
+    return this.trackWrite(root, () =>
+      this.adoptValidated(root, folderName, input),
+    );
+  }
+
+  /** `adoptFolder` past argument validation; `root` is already normalised. */
+  private async adoptValidated(
+    root: string,
+    folderName: string,
+    input: AdoptFolderInput,
+  ): Promise<AdoptFolderResult> {
     const folderPath = path.join(root, '.ptah', 'specs', folderName);
     const carrier = path.join(folderPath, CARRIER_FILE);
 
@@ -633,13 +727,16 @@ export class TaskWriterService {
       };
     }
 
-    return this.applyFrontmatterPatch(
-      normalizeWorkspaceRoot(workspaceRoot),
-      taskId,
-      patch,
-      remove,
-      opts?.deferNotify === true,
-      opts?.expectLabels,
+    const root = normalizeWorkspaceRoot(workspaceRoot);
+    return this.trackWrite(root, () =>
+      this.applyFrontmatterPatch(
+        root,
+        taskId,
+        patch,
+        remove,
+        opts?.deferNotify === true,
+        opts?.expectLabels,
+      ),
     );
   }
 
