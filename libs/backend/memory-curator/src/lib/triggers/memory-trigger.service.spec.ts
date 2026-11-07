@@ -3277,3 +3277,258 @@ describe('MemoryTriggerService — failure events carry fixed sentences (TASK_20
     );
   });
 });
+
+describe('MemoryTriggerService — curateSessionForTaskEnd (task-end hook)', () => {
+  const STATS = {
+    outcome: 'ran',
+    extracted: 4,
+    merged: 1,
+    created: 2,
+    skipped: 0,
+  } as const;
+
+  beforeEach(() => {
+    jest.useFakeTimers({ now: FAKE_CLOCK_EPOCH });
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  function harness(config: Partial<Record<string, unknown>> = {}) {
+    const queue = makeObservationQueue();
+    const rateLimiter = new CuratorRateLimitService(makeLogger());
+    const built = buildService({
+      observationQueue: queue,
+      rateLimiter,
+      workspace: makeWorkspace({
+        'memory.enabled': true,
+        'memory.triggers.sessionEnd.enabled': true,
+        'memory.triggers.maxCuratesPerHour': 100,
+        ...config,
+      }),
+    });
+    const curate = built.curator.curate as jest.Mock;
+    const inFlight = (): boolean =>
+      (
+        built.service as unknown as { inFlightCurates: Set<string> }
+      ).inFlightCurates.has('s1');
+    const enqueueRow = (): void => {
+      queue.store.enqueue({
+        sessionId: 's1',
+        workspaceRoot: '/ws',
+        kind: 'assistant-turn',
+        assistantMessage: 'did work',
+      });
+    };
+    return { ...built, queue, rateLimiter, curate, inFlight, enqueueRow };
+  }
+
+  it.each([
+    [{ 'memory.enabled': false }, 'memory-disabled'],
+    [{ 'memory.triggers.sessionEnd.enabled': false }, 'session-end-disabled'],
+    [{ 'memory.triggers.maxCuratesPerHour': 1 }, 'hourly-limit'],
+  ] as const)('gate %o gives gated/%s without a pass', async (config, gate) => {
+    const h = harness(config);
+    if (gate === 'hourly-limit') h.rateLimiter.tryAcquire('memory.curate', 1);
+
+    await expect(
+      h.service.curateSessionForTaskEnd('s1', '/ws'),
+    ).resolves.toEqual({ kind: 'gated', gate });
+    expect(h.curate).not.toHaveBeenCalled();
+    expect(h.inFlight()).toBe(false);
+  });
+
+  it('gives gated/in-flight while a pass for the session is running', async () => {
+    const h = harness();
+    let release: (value: unknown) => void = () => undefined;
+    h.curate.mockReturnValueOnce(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+    const first = h.service.curateSessionForTaskEnd('s1', '/ws');
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    expect(h.inFlight()).toBe(true);
+
+    await expect(
+      h.service.curateSessionForTaskEnd('s1', '/ws'),
+    ).resolves.toEqual({ kind: 'gated', gate: 'in-flight' });
+
+    release(STATS);
+    await expect(first).resolves.toMatchObject({ kind: 'ran' });
+    expect(h.inFlight()).toBe(false);
+  });
+
+  it('holds on the network back-off before the hourly slot: stalled, transcript not read', async () => {
+    const h = harness();
+    (h.curator.networkDeferralMs as jest.Mock).mockReturnValue(30_000);
+    const acquire = jest.spyOn(h.rateLimiter, 'tryAcquire');
+
+    await expect(
+      h.service.curateSessionForTaskEnd('s1', '/ws'),
+    ).resolves.toEqual({
+      kind: 'stalled',
+      reason: 'network-backoff',
+      transcript: 'not-read',
+    });
+    expect(acquire).not.toHaveBeenCalled();
+    expect(h.transcriptReader.read).not.toHaveBeenCalled();
+    expect(h.curate).not.toHaveBeenCalled();
+  });
+
+  it('ran: returns the counts and marks the drained rows processed', async () => {
+    const h = harness();
+    h.enqueueRow();
+    h.curate.mockResolvedValueOnce(STATS);
+
+    await expect(
+      h.service.curateSessionForTaskEnd('s1', '/ws'),
+    ).resolves.toEqual({
+      kind: 'ran',
+      counts: { extracted: 4, merged: 1, created: 2 },
+      transcript: 'read',
+    });
+    expect(h.queue.markProcessed).toHaveBeenCalledWith([1]);
+    expect(h.inFlight()).toBe(false);
+  });
+
+  it.each([
+    ['provider-cooling-down', undefined, false],
+    ['concurrency-slot-timeout', 'concurrency-slot-timeout', false],
+    ['network-backoff', 'network-backoff', true],
+    ['provider-unsupported', undefined, true],
+  ] as const)(
+    'stalled/%s keeps the rows (refund: %s / %s)',
+    async (reason, deferral, refunded) => {
+      const h = harness();
+      h.enqueueRow();
+      const refund = jest.spyOn(h.rateLimiter, 'refund');
+      h.curate.mockResolvedValueOnce({
+        ...STATS,
+        outcome: 'stalled',
+        reason,
+        ...(deferral ? { deferral } : {}),
+      });
+
+      await expect(
+        h.service.curateSessionForTaskEnd('s1', '/ws'),
+      ).resolves.toEqual({ kind: 'stalled', reason, transcript: 'read' });
+      expect(h.queue.markProcessed).not.toHaveBeenCalled();
+      expect(refund).toHaveBeenCalledTimes(refunded ? 1 : 0);
+      expect(h.inFlight()).toBe(false);
+    },
+  );
+
+  it('a stalled pass without a reason gives reason null', async () => {
+    const h = harness();
+    h.curate.mockResolvedValueOnce({ ...STATS, outcome: 'stalled' });
+
+    await expect(
+      h.service.curateSessionForTaskEnd('s1', '/ws'),
+    ).resolves.toEqual({ kind: 'stalled', reason: null, transcript: 'read' });
+  });
+
+  it.each(['curator-error', 'auth-required'] as const)(
+    'failed/%s keeps the observations within the retry cap; the next failure marks them uncurated',
+    async (reason) => {
+      const h = harness();
+      h.enqueueRow();
+      h.curate.mockResolvedValue({ ...STATS, outcome: 'failed', reason });
+
+      for (let i = 0; i < MAX_FAILED_PASS_RETRIES; i++) {
+        await expect(
+          h.service.curateSessionForTaskEnd('s1', '/ws'),
+        ).resolves.toEqual({
+          kind: 'failed',
+          reason,
+          observations: 'kept',
+          transcript: 'read',
+        });
+      }
+      expect(h.queue.markProcessed).not.toHaveBeenCalled();
+
+      await expect(
+        h.service.curateSessionForTaskEnd('s1', '/ws'),
+      ).resolves.toEqual({
+        kind: 'failed',
+        reason,
+        observations: 'marked-uncurated',
+        transcript: 'read',
+      });
+      expect(h.queue.markProcessed).toHaveBeenCalledWith([1]);
+      expect(h.inFlight()).toBe(false);
+    },
+  );
+
+  it('a transcript read failure still runs the pass and reports read-failed', async () => {
+    const h = harness();
+    (h.transcriptReader.read as jest.Mock).mockRejectedValueOnce(
+      new Error('ENOENT'),
+    );
+    h.curate.mockResolvedValueOnce(STATS);
+
+    await expect(
+      h.service.curateSessionForTaskEnd('s1', '/ws'),
+    ).resolves.toEqual({
+      kind: 'ran',
+      counts: { extracted: 4, merged: 1, created: 2 },
+      transcript: 'read-failed',
+    });
+    expect(h.curate).toHaveBeenCalledTimes(1);
+  });
+
+  it('a curate exception gives threw/pass with no error text in the result', async () => {
+    const h = harness();
+    h.curate.mockRejectedValueOnce(new Error('sk-test-123'));
+
+    const result = await h.service.curateSessionForTaskEnd('s1', '/ws');
+
+    expect(result).toEqual({ kind: 'threw', stage: 'pass' });
+    expect(JSON.stringify(result)).not.toContain('sk-test-123');
+    expect(h.inFlight()).toBe(false);
+  });
+
+  it('a gate that throws gives threw/unexpected and the promise resolves', async () => {
+    const h = harness();
+    jest.spyOn(h.rateLimiter, 'tryAcquire').mockImplementation(() => {
+      throw new Error('sk-test-456');
+    });
+
+    const result = await h.service.curateSessionForTaskEnd('s1', '/ws');
+
+    expect(result).toEqual({ kind: 'threw', stage: 'unexpected' });
+    expect(JSON.stringify(result)).not.toContain('sk-test-456');
+    expect(h.logger.warn).toHaveBeenCalledWith(
+      '[memory-curator] task-end curate failed unexpectedly',
+      expect.objectContaining({ sessionId: 's1' }),
+    );
+    expect(h.inFlight()).toBe(false);
+  });
+
+  it('a pass that rejects before its own try releases the in-flight claim', async () => {
+    const workspace = makeWorkspace({
+      'memory.enabled': true,
+      'memory.triggers.sessionEnd.enabled': true,
+    });
+    const h = harness();
+    const real = h.workspace.getConfiguration as jest.Mock;
+    real.mockImplementation((section: string, key: string, def: unknown) => {
+      if (key === 'memory.triggers.maxObservationsPerCurate') {
+        throw new Error('settings store gone');
+      }
+      return (
+        workspace.getConfiguration as unknown as (
+          s: string,
+          k: string,
+          d: unknown,
+        ) => unknown
+      )(section, key, def);
+    });
+
+    await expect(
+      h.service.curateSessionForTaskEnd('s1', '/ws'),
+    ).resolves.toEqual({ kind: 'threw', stage: 'unexpected' });
+    expect(h.inFlight()).toBe(false);
+    expect(h.curate).not.toHaveBeenCalled();
+  });
+});

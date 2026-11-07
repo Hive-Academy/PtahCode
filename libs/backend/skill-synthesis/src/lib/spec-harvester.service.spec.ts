@@ -902,3 +902,153 @@ describe('SpecHarvesterService — carrier-less folder warning', () => {
     expect(logger.warn).not.toHaveBeenCalled();
   });
 });
+
+describe('SpecHarvesterService.harvestTask (task-end hook)', () => {
+  let root: string;
+  let specsRoot: string;
+  let store: { reconcileTaskEvents: jest.Mock };
+  let logger: ReturnType<typeof makeLogger>;
+  let svc: SpecHarvesterService;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'spec-harvest-task-'));
+    specsRoot = join(root, '.ptah', 'specs');
+    await mkdir(specsRoot, { recursive: true });
+    store = { reconcileTaskEvents: jest.fn().mockReturnValue(1) };
+    logger = makeLogger();
+    svc = new SpecHarvesterService(logger as never, { getWorkspaceRoot: () => root } as never, store as never);
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  async function writeTaskSpec(taskId: string, status: 'done' | 'cancelled' | 'in_progress' = 'done'): Promise<string> {
+    const dir = join(specsRoot, taskId);
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'task.md'), taskMd(taskId, status), 'utf8');
+    await writeFile(join(dir, 'code-logic-review.md'), 'Verdict: APPROVED', 'utf8');
+    return dir;
+  }
+
+  it('harvests only the named task: other finished specs keep no marker and get no reconcile call', async () => {
+    const target = await writeTaskSpec('TASK_2026_301');
+    const other = await writeTaskSpec('TASK_2026_302');
+
+    const result = await svc.harvestTask(root, 'TASK_2026_301');
+
+    expect(result).toEqual({ outcome: 'harvested', reconciled: 1 });
+    expect(await fileExists(join(target, HARVEST_MARKER_FILE))).toBe(true);
+    expect(await fileExists(join(other, HARVEST_MARKER_FILE))).toBe(false);
+    expect(store.reconcileTaskEvents).toHaveBeenCalledTimes(1);
+    expect(store.reconcileTaskEvents).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 'TASK_2026_301', workspaceRoot: normalizeWorkspaceRoot(root), succeeded: true,
+    }));
+    // The other spec is still harvested by a later full run.
+    expect(await svc.harvest()).toMatchObject({ harvested: 1 });
+    expect(await fileExists(join(other, HARVEST_MARKER_FILE))).toBe(true);
+  });
+
+  it('reports already-harvested when the current marker matches, still reconciling open events', async () => {
+    await writeTaskSpec('TASK_2026_303');
+    expect(await svc.harvestTask(root, 'TASK_2026_303')).toEqual({ outcome: 'harvested', reconciled: 1 });
+    store.reconcileTaskEvents.mockReturnValue(0);
+
+    expect(await svc.harvestTask(root, 'TASK_2026_303')).toEqual({ outcome: 'already-harvested', reconciled: 0 });
+    expect(store.reconcileTaskEvents).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports no-carrier for a missing folder, a folder without task.md, and a missing specs root', async () => {
+    await mkdir(join(specsRoot, 'TASK_2026_305'), { recursive: true });
+
+    expect(await svc.harvestTask(root, 'TASK_2026_304')).toEqual({ outcome: 'no-carrier', reconciled: 0 });
+    expect(await svc.harvestTask(root, 'TASK_2026_305')).toEqual({ outcome: 'no-carrier', reconciled: 0 });
+    const bare = await mkdtemp(join(tmpdir(), 'spec-harvest-task-bare-'));
+    try {
+      expect(await svc.harvestTask(bare, 'TASK_2026_304')).toEqual({ outcome: 'no-carrier', reconciled: 0 });
+    } finally {
+      await rm(bare, { recursive: true, force: true });
+    }
+    expect(store.reconcileTaskEvents).not.toHaveBeenCalled();
+  });
+
+  it('reports not-completed for an open task and writes nothing', async () => {
+    const dir = await writeTaskSpec('TASK_2026_306', 'in_progress');
+
+    expect(await svc.harvestTask(root, 'TASK_2026_306')).toEqual({ outcome: 'not-completed', reconciled: 0 });
+    expect(store.reconcileTaskEvents).not.toHaveBeenCalled();
+    expect(await fileExists(join(dir, HARVEST_MARKER_FILE))).toBe(false);
+  });
+
+  it('refuses a task id that is not one path segment, and a relative workspace root', async () => {
+    await writeTaskSpec('TASK_2026_307');
+
+    for (const taskId of ['', '.', '..', '../TASK_2026_307', 'TASK_2026_307/x', 'TASK\\2026']) {
+      expect(await svc.harvestTask(root, taskId)).toEqual({ outcome: 'harvest-failed', reconciled: 0 });
+    }
+    expect(await svc.harvestTask('relative/root', 'TASK_2026_307')).toEqual({ outcome: 'harvest-failed', reconciled: 0 });
+    expect(store.reconcileTaskEvents).not.toHaveBeenCalled();
+  });
+
+  it('reports harvest-failed when the grades cannot be written, and writes no marker', async () => {
+    const grades = {
+      findAttributions: jest.fn(() => { throw new Error('db closed'); }),
+      upsert: jest.fn(), removeAbsent: jest.fn(), hasGradeForTask: jest.fn(),
+    };
+    svc = new SpecHarvesterService(logger as never, { getWorkspaceRoot: () => root } as never, store as never, grades as never);
+    const dir = await writeTaskSpec('TASK_2026_308');
+
+    expect(await svc.harvestTask(root, 'TASK_2026_308')).toEqual({ outcome: 'harvest-failed', reconciled: 1 });
+    expect(await fileExists(join(dir, HARVEST_MARKER_FILE))).toBe(false);
+  });
+
+  const writable = typeof process.getuid !== 'function' || process.getuid() !== 0;
+  (writable && process.platform !== 'win32' ? it : it.skip)(
+    'reports harvest-failed when the marker is not written, while harvest() keeps counting it as harvested',
+    async () => {
+      const { chmod } = await import('node:fs/promises');
+      const dir = await writeTaskSpec('TASK_2026_309');
+      await chmod(dir, 0o555);
+      try {
+        expect(await svc.harvestTask(root, 'TASK_2026_309')).toEqual({ outcome: 'harvest-failed', reconciled: 1 });
+        expect(await svc.harvest()).toMatchObject({ harvested: 1 });
+        expect(await fileExists(join(dir, HARVEST_MARKER_FILE))).toBe(false);
+      } finally {
+        await chmod(dir, 0o755);
+      }
+    },
+  );
+
+  maybe('harvesting from the worktree root and then the main root reconciles no event twice', async () => {
+    const mainRoot = await mkdtemp(join(tmpdir(), 'spec-harvest-task-main-'));
+    const worktreeRoot = await mkdtemp(join(tmpdir(), 'spec-harvest-task-wt-'));
+    const db = createEventsDb();
+    try {
+      const realStore = makeRealStore(db);
+      const realSvc = new SpecHarvesterService(makeLogger() as never, { getWorkspaceRoot: () => mainRoot } as never, realStore as never);
+      recordRun(realStore, 'backend-developer', 1, 'TASK_2026_310', worktreeRoot);
+      recordRun(realStore, 'frontend-developer', 2, 'TASK_2026_310', mainRoot);
+      await writeReviewedSpec(join(worktreeRoot, '.ptah', 'specs'), 'TASK_2026_310', 'APPROVED');
+
+      expect(await realSvc.harvestTask(worktreeRoot, 'TASK_2026_310')).toEqual({ outcome: 'harvested', reconciled: 1 });
+      const afterWorktree = eventRows(db);
+      expect(afterWorktree[0].reconciled_at).not.toBeNull();
+      expect(afterWorktree[1].reconciled_at).toBeNull();
+
+      // The spec folder reached the main root with the merge.
+      await writeReviewedSpec(join(mainRoot, '.ptah', 'specs'), 'TASK_2026_310', 'APPROVED');
+      expect(await realSvc.harvestTask(mainRoot, 'TASK_2026_310')).toEqual({ outcome: 'harvested', reconciled: 1 });
+      const afterMain = eventRows(db);
+      expect(afterMain[0]).toEqual(afterWorktree[0]);
+      expect(afterMain[1].reconciled_at).not.toBeNull();
+
+      expect(await realSvc.harvestTask(worktreeRoot, 'TASK_2026_310')).toEqual({ outcome: 'already-harvested', reconciled: 0 });
+      expect(await realSvc.harvestTask(mainRoot, 'TASK_2026_310')).toEqual({ outcome: 'already-harvested', reconciled: 0 });
+      expect(eventRows(db)).toEqual(afterMain);
+    } finally {
+      db.close();
+      await rm(mainRoot, { recursive: true, force: true });
+      await rm(worktreeRoot, { recursive: true, force: true });
+    }
+  });
+});

@@ -61,7 +61,10 @@ export {
   salienceRankOrderBy,
 } from './lib/salience-ranking';
 export type { SalienceRankRow } from './lib/salience-ranking';
-export { MemoryTriggerService } from './lib/triggers/memory-trigger.service';
+export {
+  MemoryTriggerService,
+  type TaskEndCurateOutcome,
+} from './lib/triggers/memory-trigger.service';
 export {
   DEFAULT_CUE_LIST,
   MEMORY_TRIGGER_DEFAULTS,
