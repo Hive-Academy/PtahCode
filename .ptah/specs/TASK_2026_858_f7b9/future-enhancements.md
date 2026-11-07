@@ -84,6 +84,11 @@ the mobile PWA, P3 = later.
 | Escape closes the Add machine pane even while the theme popover is open; a global Escape handler should yield to an open popover. | visual-review.md finding 6 |
 | A wrong pairing code takes about 7–10 s to fail; consider an earlier client-side or worker-side rejection signal. | visual-review.md finding 7 |
 | The parent maps several worker errors to "The machine is unreachable." (`machines-rpc.handlers.ts:36-62`); the tabId defect was found only from the worker journal. Log the worker error code on the parent and consider a more specific user message for worker-side validation failures. | visual-review.md finding 1 |
+| Readiness reports "Provider ready" while the Claude CLI login on the worker is expired, so a session starts and fails on its first turn. Add an authentication check to readiness, or label the check "CLI installed". | visual-review.md third pass finding A |
+| A failed turn (for example a 401 from the provider) renders as plain assistant text, with no error styling, retry hint or pointer to log in again on the worker. | visual-review.md third pass finding C |
+| The session title differs between the live view (first prompt) and the replay or list ("Session <date>"). Use one title source. | visual-review.md third pass finding D |
+| In the light theme, the user's message in a remote session has no bubble; in dark it has one. | visual-review.md third pass finding E |
+| The driver chip in the session list shows the worker's machine name and a process ID. Show a friendly label instead. | visual-review.md third pass finding F |
 
 ## Worker main database fix (added 2026-11-07)
 
