@@ -85,12 +85,17 @@ describe('resolveAutoCompactControl', () => {
 describe('resolveAutoCompactControl — A1 precedence (env → setting → default → runtime)', () => {
   const DEFAULTS = { claude: 200_000, proxied: 300_000 } as const;
 
-  it('ships with every class default null', () => {
-    expect(A1_DEFAULT_WINDOW).toEqual({ claude: null, proxied: null });
+  it('ships with a first-party Claude window', () => {
+    expect(A1_DEFAULT_WINDOW).toEqual({ claude: 200_000, proxied: null });
+    expect(resolveAutoCompactControl({ enabled: true, windowTokens: null, modelClass: 'claude' })).toEqual({
+      autoCompactWindow: 200_000,
+      effectiveWindow: 200_000,
+      source: 'default',
+    });
   });
 
-  it.each(['claude', 'proxied'] as const)(
-    'null defaults change nothing for the %s class (no behaviour change)',
+  it.each(['proxied'] as const)(
+    'null defaults change nothing for the %s class',
     (modelClass) => {
       expect(
         resolveAutoCompactControl({
@@ -150,7 +155,7 @@ describe('resolveAutoCompactControl — A1 precedence (env → setting → defau
     });
   });
 
-  it('env with no setting and no default → source env, no keys', () => {
+  it('env outranks the default while the default key remains present', () => {
     expect(
       resolveAutoCompactControl({
         enabled: true,
@@ -158,7 +163,7 @@ describe('resolveAutoCompactControl — A1 precedence (env → setting → defau
         modelClass: 'claude',
         envWindow: 400_000,
       }),
-    ).toEqual({ effectiveWindow: 400_000, source: 'env' });
+    ).toEqual({ autoCompactWindow: 200_000, effectiveWindow: 400_000, source: 'env' });
   });
 
   it('setting wins over the class default', () => {

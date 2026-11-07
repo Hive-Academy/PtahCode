@@ -20,6 +20,10 @@ import {
 import { PtahFileSettingsManager } from './file-settings-manager';
 
 describe('isFileBasedSettingKey', () => {
+  it('routes compaction.threshold from Electron settings.json', () => {
+    expect(isFileBasedSettingKey('compaction.threshold')).toBe(true);
+    expect(FILE_BASED_SETTINGS_KEYS.has('compaction.threshold')).toBe(true);
+  });
   it('routes the Codex sandbox choice to file settings with the networked default', () => {
     expect(isFileBasedSettingKey('agentOrchestration.codexSandboxMode')).toBe(true);
     expect(FILE_BASED_SETTINGS_DEFAULTS['agentOrchestration.codexSandboxMode']).toBe('danger-full-access');
@@ -323,8 +327,8 @@ describe('isFileBasedSettingKey', () => {
       },
     );
 
-    it('keeps compaction.threshold out of the file-based set', () => {
-      expect(FILE_BASED_SETTINGS_KEYS.has('compaction.threshold')).toBe(false);
+    it('routes compaction.threshold through the file-based set', () => {
+      expect(FILE_BASED_SETTINGS_KEYS.has('compaction.threshold')).toBe(true);
     });
   });
 
