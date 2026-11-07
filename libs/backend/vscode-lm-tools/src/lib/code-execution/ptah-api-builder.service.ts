@@ -172,6 +172,8 @@ import {
  * @warning Keep Symbol.for() string value in sync with the canonical definition
  */
 const SDK_SESSION_LIFECYCLE_MANAGER = Symbol.for('SdkSessionLifecycleManager');
+/** Canonical token is SDK_TOKENS.CODEX_CHAT_ADAPTER; kept local to avoid a cycle. */
+const CODEX_CHAT_ADAPTER = Symbol.for('CodexChatAdapter');
 
 /**
  * Duplicated from AGENT_GENERATION_TOKENS.ENHANCED_PROMPTS_SERVICE to avoid taking
@@ -277,7 +279,7 @@ interface SdkSessionLifecycleManagerLike {
   getActiveSessionIds(): string[];
   getActiveSessionWorkspace(): string | undefined;
   getSessionWorkspace(idOrTabId: string): string | undefined;
-  find(id: string): { realSessionId: string | null } | undefined;
+  find(id: string): { realSessionId: string | null; permissionLevel?: 'ask' | 'plan' | 'auto-edit' | 'yolo' } | undefined;
 }
 
 interface EnhancedPromptsServiceLike {
@@ -549,6 +551,11 @@ export class PtahAPIBuilder {
      */
     @inject(TASK_END_RUN_READER_TOKEN, { isOptional: true })
     private readonly taskEndRunReader?: TaskEndRunReaderLike,
+
+    @inject(CODEX_CHAT_ADAPTER, { isOptional: true })
+    private readonly codexChatPermissionReader?: {
+      getPermissionLevel(sessionId: string): 'ask' | 'auto-edit' | 'yolo' | 'plan' | undefined;
+    },
   ) {
     diagnosticsCacheInvalidator.start();
     this.logger.info('PtahAPIBuilder initialized with 22 namespaces');
@@ -714,6 +721,9 @@ export class PtahAPIBuilder {
               return tabIdOrSessionId;
             }
           },
+          getParentLevel: (tabIdOrSessionId: string) =>
+            this.sdkSessionLifecycleManager?.find(tabIdOrSessionId)?.permissionLevel
+              ?? this.codexChatPermissionReader?.getPermissionLevel(tabIdOrSessionId),
           getProjectGuidance: async () => {
             if (!this.enhancedPromptsService) return undefined;
             try {

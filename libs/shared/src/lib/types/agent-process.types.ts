@@ -185,6 +185,8 @@ export interface EffectiveLanePolicy {
   readonly permission?: LanePermissionMode;
   readonly network?: LaneNetworkMode;
   readonly nativeDescription?: string;
+  readonly permissionSource?: 'spawn' | 'saved' | 'built-in' | 'parent-plan';
+  readonly networkSource?: 'spawn' | 'saved' | 'built-in' | 'parent-plan';
 }
 
 export interface LaneSpawnPolicyRefusal {
@@ -388,8 +390,12 @@ export interface SpawnAgentRequest {
   readonly effort?: string;
   /** Resume a previous CLI session by its CLI-native session ID */
   readonly resumeSessionId?: string;
+  /** Original effective policy snapshot supplied by an internal lane resumer. */
+  readonly resumePolicy?: EffectiveLanePolicy;
   /** Parent Ptah Claude SDK session ID. Injected by MCP server, NOT set by callers. */
   readonly parentSessionId?: string;
+  /** Parent chat level captured by the MCP entry, never supplied by a lane caller. */
+  readonly parentLevel?: LanePermissionMode;
   /** Project-specific guidance (enhanced prompts). Injected by MCP server, NOT set by callers. */
   readonly projectGuidance?: string;
   /** Absolute paths to enabled plugin directories.

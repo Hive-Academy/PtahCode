@@ -564,9 +564,12 @@ export class AgentProcessManager {
       resumeDecision: gated?.resumeDecision,
       originalTask: gated?.originalTask,
       runSdk: adapter.runSdk.bind(adapter),
-      request: gated
-        ? { ...request, resumeSessionId: gated.resumeSessionId }
-        : request,
+      request: {
+        ...request,
+        ...(gated ? { resumeSessionId: gated.resumeSessionId } : {}),
+        permission: effectivePolicy.requested?.permission,
+        network: effectivePolicy.requested?.network,
+      },
       task: gated?.task ?? request.task,
       workingDirectory,
       cli,

@@ -111,6 +111,7 @@ export const FILE_BASED_SETTINGS_KEYS = new Set<string>([
   'agentOrchestration.codexToolOutputTokenLimit',
   'agentOrchestration.codexWebSearch',
   'agentOrchestration.codexSandboxMode',
+  'agentOrchestration.cliLaneDefaults',
   'agentOrchestration.copilotModel',
   'agentOrchestration.copilotReasoningEffort',
   'agentOrchestration.copilotAutoApprove',
@@ -345,6 +346,7 @@ export const FILE_BASED_SETTINGS_DEFAULTS: Record<string, unknown> = {
   'agentOrchestration.codexReasoningEffort': '',
   'agentOrchestration.codexAutoApprove': true,
   'agentOrchestration.codexSandboxMode': DEFAULT_CODEX_SANDBOX_MODE,
+  'agentOrchestration.cliLaneDefaults': {},
   // Codex lane budgets and codexWebSearch: see ADVANCED_SETTINGS_DEFAULTS.
   'agentOrchestration.copilotModel': '',
   'agentOrchestration.copilotReasoningEffort': '',

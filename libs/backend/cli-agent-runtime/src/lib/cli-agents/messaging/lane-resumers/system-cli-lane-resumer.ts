@@ -38,6 +38,7 @@ export class SystemCliLaneResumer implements LaneResumer {
         resumedFromAgentId: info.agentId,
         permission: info.effectivePolicy?.permission,
         network: info.effectivePolicy?.network,
+        resumePolicy: info.effectivePolicy,
       });
     } catch (error: unknown) {
       if (

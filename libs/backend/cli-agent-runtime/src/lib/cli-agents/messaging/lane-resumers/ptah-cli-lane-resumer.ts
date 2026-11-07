@@ -26,6 +26,7 @@ export interface PtahCliResumeParams {
   /** The lane's saved policy; a resume keeps the permission and network it ran under. */
   readonly permission?: LanePermissionMode;
   readonly network?: LaneNetworkMode;
+  readonly effectivePolicy?: import('@ptah-extension/shared').EffectiveLanePolicy;
 }
 
 export type PtahCliLaneResumerManager = Pick<
@@ -68,6 +69,7 @@ export class PtahCliLaneResumer implements LaneResumer {
         previousAgentId: info.agentId,
         permission: info.effectivePolicy?.permission,
         network: info.effectivePolicy?.network,
+        effectivePolicy: info.effectivePolicy,
       },
       info.workingDirectory,
     );
@@ -95,6 +97,7 @@ export class PtahCliLaneResumer implements LaneResumer {
           agentId,
           ...(params.permission ? { permission: params.permission } : {}),
           ...(params.network ? { network: params.network } : {}),
+          ...(params.effectivePolicy ? { resumePolicy: params.effectivePolicy } : {}),
         },
       );
       if ('status' in spawnResult) {

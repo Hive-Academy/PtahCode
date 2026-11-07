@@ -43,6 +43,7 @@ describe('SystemCliLaneResumer', () => {
       resumedFromAgentId: AGENT_ID,
       permission: 'plan',
       network: 'deny',
+      resumePolicy: { permission: 'plan', network: 'deny' },
     });
   });
 
