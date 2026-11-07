@@ -55,9 +55,10 @@ export {
   isPreCompactHook,
   isPostCompactHook,
 } from './compaction-hook-handler';
-export type { SubagentBudgetMonitor } from './compaction/subagent-budget-monitor';
+export type { SubagentBudgetMonitor, AgentBudgetState } from './compaction/subagent-budget-monitor';
 export {
   adviseSubagentResume,
+  buildBudgetResumeRefusal,
   type SubagentResumeAdvice,
   type SubagentResumeAdviceInput,
 } from './compaction/subagent-resume-advice';

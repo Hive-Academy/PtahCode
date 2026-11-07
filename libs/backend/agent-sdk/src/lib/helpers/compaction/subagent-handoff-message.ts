@@ -16,6 +16,7 @@ export type StopReason = 'handoff' | 'safety';
  * `task_started`) and the SDK task it ran as.
  */
 export interface HandoffSubject {
+  readonly agentId?: string;
   readonly agentType: string;
   readonly teammateName?: string;
   /** The SDK task id the stop used. */
@@ -31,6 +32,13 @@ export interface HandoffUsage {
   readonly weightedUsed: number;
   readonly handoffTokens: number;
   readonly stopWeightedTokens: number;
+}
+
+export interface HandoffProgress {
+  readonly lastAssistantText?: string;
+  readonly filePaths: readonly string[];
+  readonly toolCalls: readonly { readonly name: string; readonly targetPath?: string; readonly outcome: 'started' | 'completed' | 'failed' }[];
+  readonly transcriptPath?: string;
 }
 
 /**
@@ -57,6 +65,7 @@ export function nearBudgetWarning(
 export function stopNotice(
   subject: HandoffSubject,
   usage: HandoffUsage,
+  recordPath?: string,
 ): string {
   const name = subject.teammateName
     ? `\`${subject.agentType}\` ('${subject.teammateName}')`
@@ -66,7 +75,10 @@ export function stopNotice(
       ? `context reached the handoff size (${usage.contextTokens} of ${usage.handoffTokens} tokens)`
       : `weighted tokens reached the safety limit (${Math.round(usage.weightedUsed)} of ${usage.stopWeightedTokens} tokens)`;
   return (
-    `Ptah stopped ${name}: ${why}. The user did not stop it. ` +
+    `Ptah's budget monitor stopped ${name} at its budget: ${why}. ` +
+    `Usage: ${usage.contextTokens} context tokens of ${usage.handoffTokens}; ` +
+    `${Math.round(usage.weightedUsed)} weighted tokens of ${usage.stopWeightedTokens}. ` +
+    `Reason: ${usage.reason}. Record: ${recordPath ?? 'unknown'}. The user did not stop it. ` +
     `It cannot be resumed; start a fresh agent with a handoff. ` +
     `Its partial output is in the transcript.`
   );
@@ -87,6 +99,7 @@ export function handoffMessage(
   taskText: string | undefined,
   files: HandoffFileState,
   recordPath?: string,
+  progress?: HandoffProgress,
 ): string {
   const name = subject.teammateName
     ? `\`${subject.agentType}\` ('${subject.teammateName}')`
@@ -101,12 +114,19 @@ export function handoffMessage(
       `The user did not stop it; a task notification that reports it as ` +
       `stopped by the user refers to this automatic stop. It cannot be resumed.`,
   ];
+  lines.push(`Budget stop reason: ${usage.reason}; SDK agent: ${subject.agentId ?? 'unknown'}; SDK task: ${subject.taskId}.`);
+  lines.push(`Usage: ${usage.contextTokens} context tokens of ${usage.handoffTokens}; ${Math.round(usage.weightedUsed)} weighted tokens of ${usage.stopWeightedTokens}.`);
   if (recordPath) {
     lines.push(recordLine(recordPath));
   }
   if (taskText) {
     lines.push(`Its task was: ${taskText}`);
   }
+  lines.push('Observed progress (from the monitor):');
+  lines.push(`Last assistant text: ${progress?.lastAssistantText ?? 'unknown'}`);
+  lines.push(`Files targeted: ${progress?.filePaths.length ? progress.filePaths.join(', ') : 'unknown'}`);
+  lines.push(`Recent tools: ${progress?.toolCalls.length ? progress.toolCalls.map((call) => `${call.name}${call.targetPath ? ` (${call.targetPath})` : ''}: ${call.outcome}`).join('; ') : 'unknown'}`);
+  lines.push(`Subagent transcript: ${progress?.transcriptPath ?? 'unknown'}`);
   const taskSource =
     paths && taskSaved
       ? `its full original task prompt, saved at ${paths.task}`

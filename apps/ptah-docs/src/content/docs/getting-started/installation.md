@@ -5,10 +5,6 @@ description: Install the PtahCode desktop app on Windows, macOS, or Linux.
 
 PtahCode is a desktop app for Windows, macOS, and Linux. Windows builds come from the Microsoft Store. macOS and Linux builds come from GitHub releases.
 
-<video controls preload="metadata" playsinline style="width:100%;border-radius:0.5rem;border:1px solid var(--sl-color-gray-5);margin:1rem 0;">
-  <source src="/assets/videos/install.mp4" type="video/mp4" />
-</video>
-
 ## Supported platforms
 
 | Platform | Build                         | Where to get it                                                                  |
