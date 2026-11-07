@@ -83,8 +83,10 @@ describe('phase-2 plugin-config reader — harness-root config home (A27, D14)',
       path.join(os.tmpdir(), 'ptah-config-home-plugins-'),
     );
     created.push(repo, pluginsBasePath);
-    // `.git` makes `repo` the harness root of everything below it.
+    // Both markers keep this fixture rooted here even if the developer's
+    // temp directory has a parent `.ptah` workspace marker.
     fs.mkdirSync(path.join(repo, '.git'));
+    fs.mkdirSync(path.join(repo, '.ptah'));
     const subFolder = path.join(repo, 'packages', 'app');
     fs.mkdirSync(subFolder, { recursive: true });
 

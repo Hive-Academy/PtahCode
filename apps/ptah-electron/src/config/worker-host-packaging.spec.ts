@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
@@ -72,7 +73,17 @@ it('ships the executable launcher and systemd template outside app.asar', () => 
     to: 'bin',
     filter: ['ptah-worker', 'ptah-worker.service'],
   });
-  expect(statSync(launcherPath).mode & 0o111).not.toBe(0);
+  // Windows does not preserve POSIX executable bits in stat(), but Git's
+  // tracked mode is the bit that Linux packaging receives on checkout.
+  const trackedMode = execFileSync(
+    'git',
+    ['ls-files', '--stage', '--', 'apps/ptah-electron/worker-host/ptah-worker'],
+    { cwd: root, encoding: 'utf8' },
+  );
+  expect(trackedMode).toMatch(/^100755 [0-9a-f]{40} 0\t/);
+  if (process.platform !== 'win32') {
+    expect(statSync(launcherPath).mode & 0o111).not.toBe(0);
+  }
   expect(launcher).toContain('#!/bin/sh');
   expect(launcher).toContain('readlink "$script"');
   // app.asar is a file; a shell test of a path inside it is always false.
