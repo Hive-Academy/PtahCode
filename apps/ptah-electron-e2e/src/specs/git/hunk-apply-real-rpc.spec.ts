@@ -347,19 +347,9 @@ test.describe('C# AST reaches the packaged app (TASK_2026_270)', () => {
         `(last state: "${lastState}", error: ${lastError ?? 'none'})`,
     ).toBe('indexed');
 
-    // Why the search is a poll and not a one-shot: boot fires a governed
-    // background census of this workspace (WorkspaceIndexLifecycleService in
-    // boot-thoth-runtime), and CodeSymbolIndexer.indexWorkspace JOINS an
-    // active census instead of starting a fresh one. Under CI load that boot
-    // census can still be in flight when `indexing:start` above arrives, so
-    // the call joins it and settles with the boot census's file list — which
-    // was discovered before Invoice.cs existed, so no C# symbols were written
-    // even though the state row now says "indexed". The workspace watcher's
-    // debounced per-file reindex of the just-written Invoice.cs (the watcher
-    // is subscribed in the same boot lifecycle, before this test runs) lands
-    // the symbols moments later, and memory:searchSymbols reads the SQLite
-    // store directly — so poll until the symbols are actually visible rather
-    // than trusting the first lookup after "indexed" to see a settled store.
+    // A forced start can join a boot census whose file list predates Invoice.cs.
+    // The handler starts one fresh census after that join settles. Poll the
+    // SQLite search until the follow-up has written the new file's symbols.
     const searchDeadline = Date.now() + SEARCH_POLL_TIMEOUT_MS;
     let items: Array<{ symbolName: string; kind: string; filePath: string }> =
       [];

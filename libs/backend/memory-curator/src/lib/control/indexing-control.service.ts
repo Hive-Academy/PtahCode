@@ -104,7 +104,10 @@ export interface IndexingRunDeps {
       signal?: AbortSignal;
       onProgress?: (progress: IndexingRunProgress) => void;
     },
-  ) => Promise<IndexingRunStats | void>;
+  ) => Promise<IndexingRunStats | void> & {
+    /** Set synchronously when this call joins an active symbols census. */
+    readonly joinedActiveCensus?: boolean;
+  };
   /** Runs memory curation pass (optional; curator lifecycle is managed separately). */
   runMemory?: (workspaceRoot: string) => Promise<void>;
 }

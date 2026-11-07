@@ -1333,8 +1333,11 @@ describe('CodeSymbolIndexer', () => {
       const { service, discovery } = setup(fakeTsFiles(1), held.governor);
 
       const first = service.indexWorkspace(ROOT);
+      expect(first.joinedActiveCensus).toBe(false);
       await settle();
       const joined = service.indexWorkspace(ROOT);
+      expect(joined.joinedActiveCensus).toBe(true);
+      expect(first.joinedActiveCensus).toBe(false);
       expect(discovery.indexWorkspaceStream).toHaveBeenCalledTimes(1);
 
       held.releaseAll();
@@ -1343,6 +1346,7 @@ describe('CodeSymbolIndexer', () => {
       expect(service.isIndexing(ROOT)).toBe(false);
 
       const again = service.indexWorkspace(ROOT);
+      expect(again.joinedActiveCensus).toBe(false);
       await settle();
       expect(discovery.indexWorkspaceStream).toHaveBeenCalledTimes(2);
       expect(service.isIndexing(ROOT)).toBe(true);
