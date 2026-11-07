@@ -2,6 +2,16 @@
 
 Research only, against main `406c27f28`. Local probes ran once each in `captures/<cli>/` with a trivial prompt. Captures retain only numeric usage fields and event names; all other payload strings and stderr were discarded before writing. A failed or usage-free probe does **not** establish zero consumption. Cursor and Pi were not installed; Ollama Cloud GLM and Kimi Code were at plan limit, so those were not run. The captures are evidence of the observed invocation, not substitutes for adapter tests.
 
+## Live evidence status
+
+| Adapter | Usage proven from real output? |
+| --- | --- |
+| Claude CLI | **Yes**: the local capture has per-response and terminal usage plus cost. |
+| Codex, Grok, Antigravity, OpenCode, Copilot | **No, still unconfirmed live**: the probe failed or emitted no usage event. Field paths below come from adapter code and vendor docs only. |
+| Cursor, Pi, ptah-cli providers (GLM, Kimi Code) | **No, not run**: not installed or at plan limit. Field paths come from code and docs only. |
+
+Each unconfirmed adapter needs a successful live capture after the merge. Batch C must not treat its usage as proven before that capture exists.
+
 ## Required normalization contract
 
 Every completed model turn must yield **full input tokens** (including cached input) and output tokens, a model ID, a stable turn ID, and an evidence source. An adapter that cannot produce either total has a telemetry defect: stop the lane with `telemetry-unavailable`, retain its handoff and forbid budgeted resume until accounting is repaired. Do not count a failed probe's absent usage as zero. Optional cache read/write, last request context, and USD cost are discriminated `reported`/`unavailable` fields with a source or reason. Deduplicate per-turn and cumulative terminal snapshots. If a source reports uncached input (Claude/Grok), add its reported cache buckets to normalize full input; if cache buckets are absent, do not assert that uncached input is full input.
