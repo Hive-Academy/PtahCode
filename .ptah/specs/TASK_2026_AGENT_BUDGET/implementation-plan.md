@@ -115,6 +115,8 @@ Unit-test policy boundaries, four rate classes, raw-token floor for offline/free
 
 Then run Ptah Dev on Electron using a cheap Haiku SDK subagent and cheap Codex lane with low limits: observe one warning, written progress/handoff, Ptah-attributed stop, completion reason `budget`, true CLI Session ID, and refusal to resume the exhausted session. Confirm the **reported** model before choosing pricing: the local `claude --model haiku` probe reported Sonnet 5.5 (`captures/claude/capture.json`). Repeat with absent cost/catalog and context to confirm raw-token floor, explicit cost/context unavailable and one log; repeat with missing required turn totals to confirm `telemetry-unavailable` stop. Keep platform-cli smoke coverage for settings and lane stop.
 
+**Live-run isolation gate (from the stop-path round 2 incident):** run every live test, including the per-adapter captures, only on a build whose branch contains PR #978 (`git merge-base --is-ancestor <#978 merge sha> HEAD`). A branch without #978 made the Dev build read and write the production `~/.ptah/settings.json`. Record `sha256sum ~/.ptah/settings.json` before and after each run. A changed hash invalidates the run: restore the file and repeat the run on a correct build.
+
 ## 7. Decisions
 
 | Decision | Evidence / reason | Reversible? |
