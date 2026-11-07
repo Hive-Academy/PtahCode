@@ -28,6 +28,7 @@ import {
   REVIEW_LANE_TOKENS,
 } from '@ptah-extension/review-core';
 import { REVIEW_GITHUB_TOKENS } from '@ptah-extension/review-github';
+import { TASK_END_TOKENS } from '@ptah-extension/task-end-hook';
 import { CODEX_SIGN_IN_QUIT_HANDLE } from './codex-login-composition';
 
 export const EXPECTED_RESOLVABLE = [
@@ -81,6 +82,18 @@ export const EXPECTED_RESOLVABLE_TOKENS = [
   ['CODEX_SIGN_IN_QUIT_HANDLE', CODEX_SIGN_IN_QUIT_HANDLE],
   ['SDK_CODEX_LOGIN', AUTH_PROVIDERS_TOKENS.SDK_CODEX_LOGIN],
   ['SDK_CODEX_READINESS', AUTH_PROVIDERS_TOKENS.SDK_CODEX_READINESS],
+] as const;
+
+/**
+ * Task-end hook services (TASK_2026_886, R6), bound by
+ * `registerTaskEndHookComposition` in phase 2 when SQLite is registered. The
+ * run reader is the slot `PtahAPIBuilder` takes optionally; resolving it
+ * builds the detector with every host port (D39).
+ */
+export const EXPECTED_TASK_END_TOKENS = [
+  ['TASK_END_STORE', TASK_END_TOKENS.STORE],
+  ['TASK_END_WORKER', TASK_END_TOKENS.WORKER],
+  ['TASK_END_RUN_READER', TASK_END_TOKENS.RUN_READER],
 ] as const;
 
 /** Runtime-owned message services, available after phase 2 registration. */

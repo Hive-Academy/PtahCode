@@ -677,7 +677,7 @@ Phase review: code-logic (codex) on the combined diff after Batch 19 commits, pl
 - Degradation audit passes.
 - Team-leader acceptance (2026-11-07): Task 16.0 overlap check by the executor: the extraction matched the merged #957 files. Six files changed, all in the batch list: `spec-harvester.service.ts` (`harvest()` loop body moved verbatim into private `harvestCompletedSpec()`, exits mapped so `harvest()` still counts `harvested` and `marker-failed` as harvested and skips the other exits as before; `specsRootState()` extracted from `scanSpecs` with the same containment and audit comments; `writeMarker` returns `boolean`; new public `harvestTask`), its spec (+150, additions only), `skill-synthesis/src/index.ts` (`type TaskHarvestResult`), `memory-trigger.service.ts` (`'task-end'` `CurateSource`; `invokeCurate` keeps `Promise<void>` and wraps `runCuratePass`, whose exits leave rows, episode, failure counter and refund unchanged; new public `curateSessionForTaskEnd`), its spec (+255, additions only) and `memory-curator/src/index.ts` (`type TaskEndCurateOutcome`). No peer TASK_2026_879_9809 file touched. Team-leader run `npm run verify -- -p @ptah-extension/task-end-hook,@ptah-extension/skill-synthesis,@ptah-extension/memory-curator`: lint and typecheck pass (warnings only; `memory-trigger.service.ts` max-lines was already 1,565 lines on `main`, now 1,795); skill-synthesis 35 suites, 630 passed, 1 skipped; memory-curator 1061/1062, the one failure a 5 s timeout in the untouched `retention/memory-retention.integration.spec.ts` at load average about 16; verify exit 1. Re-run `npm run verify -- -t test -p @ptah-extension/memory-curator -- --testPathPatterns=memory-retention.integration`: exit 0. `-t lint,typecheck -p @ptah-extension/cli-engine,ptah-electron` exit 0. Degradation audit exit 0, TOTAL 216. Executor decisions 1-7 accepted as D31; Phase 3 review notes in D32.
 
-## Batch 17: Electron composition (ports bound, library registered) — PENDING
+## Batch 17: Electron composition (ports bound, library registered) — COMPLETE (commit recorded in the next batches.md commit)
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -688,13 +688,13 @@ Phase review: code-logic (codex) on the combined diff after Batch 19 commits, pl
 - Tasks: 2 | Depends on: Batches 9, 15, 16
 - Phase: 3 | Phase review: (after Batch 19)
 
-### Task 17.1: `registerTaskEndHookComposition` and spec — PENDING
+### Task 17.1: `registerTaskEndHookComposition` and spec — COMPLETE
 
 - Files (CREATE): `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/apps/ptah-electron/src/di/task-end-hook-composition.ts` and `task-end-hook-composition.spec.ts`
 - Plan reference: Component 10 adapters
 - Validation notes: `CURATOR_REASON_TO_TASK_END … satisfies Record<CuratorRunReason, TaskEndCuratorReason>` plus `Exclude` never check; `SessionLinkPort.taskIdsInWorktreeName` bound to the session-organization export (D2); lazy resolution inside each adapter call; unregistered engine → port rejection → `failed/curator-failed`.
 
-### Task 17.2: Registration call, smoke tokens, build path — PENDING
+### Task 17.2: Registration call, smoke tokens, build path — COMPLETE
 
 - Files (MODIFY): `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/apps/ptah-electron/src/di/phase-2-libraries.ts` (after `registerTaskSpecsServices`/`startTaskSpecsIndex`, only when SQLite registered); `.../src/di/expected-resolvable.ts` (store, worker, RUN_READER tokens — R6); `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/apps/ptah-electron/tsconfig.build.json` (path for `@ptah-extension/task-end-hook` beside review-core `:110` — R2)
 
@@ -706,6 +706,7 @@ Phase review: code-logic (codex) on the combined diff after Batch 19 commits, pl
 - First push of the branch follows this batch's commit (D38)
 - `npm run verify -- -t lint,typecheck -p ptah-extension-webview`
 - Degradation audit passes.
+- Acceptance (2026-11-07): `task-end-hook-composition.ts` (501 lines) binds the seven host ports with direct `container.register` calls, then `registerTaskEndHook`; engines resolved inside each adapter call (unregistered engine -> `TaskEndEngineUnavailableError` -> `failed/curator-failed`); `CURATOR_REASON_TO_TASK_END` `as const satisfies Record<CuratorRunReason, TaskEndCuratorReason>` plus the exported `Exclude` never check; `taskIdsInWorktreeName` delegates to session-organization (D2); git runner passes the vector to `execGit` with no `env`, so `LC_ALL=C` holds (needed by the Phase 2 L2 fix); `gh` only via `GitInfoService.readPrStatus`; no delete/move/archive (C1), no fetch (C3). `phase-2-libraries.ts` calls it after `startTaskSpecsIndex` only when `SQLITE_CONNECTION` is registered. `expected-resolvable.ts` `EXPECTED_TASK_END_TOKENS`; `container.smoke.spec.ts` one added test (orchestrator-approved scope addition) resolves `PTAH_API_BUILDER` and the three tokens after phase 2 + composition + phase 3 (D39); `tsconfig.build.json` path. Accepted deviations: `(container, logger)` signature; `connectTaskEndHook` left to Batch 18. Runs: `-p @ptah-extension/task-end-hook,ptah-electron` exit 0; the two specs 77 tests pass; `-t lint,typecheck -p ptah-extension-webview` typecheck pass, lint the 26 pre-existing module-boundary errors (unchanged); di-lint exit 0 (2124 inject sites, 964 tokens); degradation audit TOTAL 216. Executor note for later: `assertReadOnlyGitVector` is not exported from the barrel.
 
 ## Batch 18: Electron activation and shutdown — PENDING
 

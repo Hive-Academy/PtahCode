@@ -14,6 +14,7 @@ import type { DependencyContainer } from 'tsyringe';
 import { resolve } from 'node:path';
 import { resolveReviewRootsForPath } from '../services/review/resolve-review-roots-for-path';
 import { registerElectronCodexReadinessAndLogin } from './codex-login-composition';
+import { registerTaskEndHookComposition } from './task-end-hook-composition';
 
 import {
   TOKENS,
@@ -517,6 +518,14 @@ export function registerPhase2Libraries(
   // restores its workspace AFTER DI, so the helper also re-attempts on
   // `onDidChangeWorkspaceFolders`. Non-blocking and failure-swallowing.
   startTaskSpecsIndex(container, logger);
+  // Task-end hook (TASK_2026_886): binds the seven host ports, then the
+  // library. Only with the SQLite block's connection: the run store and its
+  // journal live there. Bound before phase 3 registers the API builder, whose
+  // optional run-reader slot builds the detector with these ports (D39).
+  // Starting the hook is an activation step, not a registration.
+  if (container.isRegistered(PERSISTENCE_TOKENS.SQLITE_CONNECTION, true)) {
+    registerTaskEndHookComposition(container, logger);
+  }
   // Session organization (TASK_2026_580). Binds nothing when the SQLite block
   // above was skipped, and `start` only subscribes, never aborting activation.
   // Runs after `registerSdkServices` (the callback registries it subscribes
