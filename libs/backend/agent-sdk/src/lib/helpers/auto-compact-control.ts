@@ -60,13 +60,11 @@ export type AutoCompactModelClass = 'claude' | 'proxied';
 export type AutoCompactWindowSource = 'setting' | 'env' | 'default' | 'runtime';
 
 /**
- * Ptah's default window per model class. Both stay `null` (no default, so no
- * behaviour change) until experiment E2 passes for a class; only then is that
- * class set (200,000 — the runtime's own unrecognised-model default).
+ * First-party Claude defaults to 200,000; proxied models defer to the runtime.
  */
 export const A1_DEFAULT_WINDOW: Readonly<
   Record<AutoCompactModelClass, number | null>
-> = Object.freeze({ claude: null, proxied: null });
+> = Object.freeze({ claude: 200_000, proxied: null });
 
 /**
  * The flag-tier keys Ptah may contribute. A key is PRESENT only when Ptah has
@@ -160,8 +158,7 @@ export function parseAutoCompactWindowEnv(
  * direct caller from sending a value the runtime would drop.
  *
  * `classDefaults` is {@link A1_DEFAULT_WINDOW} for every production caller;
- * the parameter exists so the `default` branch is specced while the shipped
- * table is still all `null`.
+  * the parameter also lets specs exercise each class independently.
  */
 export function resolveAutoCompactControl(
   input: AutoCompactControlInput,

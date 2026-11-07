@@ -1,5 +1,5 @@
 /**
- * PtahFileSettingsManager — File-based settings storage for ~/.ptah/settings.json.
+ * PtahFileSettingsManager — File-based settings storage for the resolved Ptah settings directory.
  *
  * Manages settings that cannot live in VS Code's package.json contributes.configuration
  * because the marketplace scanner flags trademarked terms ("copilot", "codex", "claude", "gpt")
@@ -21,6 +21,7 @@ import type { FSWatcher } from 'fs';
 import * as fsPromises from 'fs/promises';
 import * as path from 'path';
 import { homedir } from 'os';
+import { randomUUID } from 'crypto';
 import { SettingsPersistError } from './file-settings-errors';
 import {
   FILE_BASED_OBJECT_SETTINGS_KEYS,
@@ -62,6 +63,62 @@ let persistTempSequence = 0;
 /** Whether the active cross-process watcher is on the file or the directory. */
 type CrossProcessWatchMode = 'file' | 'directory' | null;
 
+let warnedRelativeSettingsDir = false;
+
+export function resolvePtahSettingsDir(dirPathOverride?: string): string {
+  if (dirPathOverride !== undefined) return dirPathOverride;
+  const fromEnv = process.env['PTAH_SETTINGS_DIR'];
+  if (fromEnv?.trim()) {
+    if (path.isAbsolute(fromEnv)) return fromEnv;
+    if (!warnedRelativeSettingsDir) {
+      warnedRelativeSettingsDir = true;
+      process.emitWarning('PTAH_SETTINGS_DIR must be absolute; using ~/.ptah');
+    }
+  }
+  return path.join(homedir(), '.ptah');
+}
+
+/** Seed an isolated settings file once, leaving other Ptah data in place. */
+export function seedPtahSettingsFile(sourceDir: string, targetDir: string): void {
+  const source = path.join(sourceDir, 'settings.json');
+  const target = path.join(targetDir, 'settings.json');
+  if (!fs.existsSync(source) || fs.existsSync(target)) return;
+  const parsed: unknown = JSON.parse(fs.readFileSync(source, 'utf8'));
+  if (!isJsonObject(parsed)) throw new Error('Ptah settings seed must be a JSON object');
+  // A development launch must not start a second bot poller or cron scheduler.
+  const gateway = isJsonObject(parsed['gateway']) ? parsed['gateway'] : {};
+  const cron = isJsonObject(parsed['cron']) ? parsed['cron'] : {};
+  parsed['gateway'] = { ...gateway, enabled: false };
+  parsed['cron'] = { ...cron, enabled: false };
+  if ('gateway.enabled' in parsed) parsed['gateway.enabled'] = false;
+  if ('cron.enabled' in parsed) parsed['cron.enabled'] = false;
+  fs.mkdirSync(targetDir, { recursive: true });
+  const temp = path.join(targetDir, `settings.json.seed-${process.pid}-${randomUUID()}.tmp`);
+  try {
+    fs.writeFileSync(temp, JSON.stringify(parsed, null, 2), { flag: 'wx' });
+    // A hard link publishes atomically without replacing another dev's file.
+    try {
+      fs.linkSync(temp, target);
+    } catch (error: unknown) {
+      const code = fsErrorCode(error);
+      if (code === 'EPERM' || code === 'EXDEV' || code === 'ENOTSUP') {
+        process.emitWarning(error instanceof Error ? error : new Error(String(error)));
+        fs.copyFileSync(temp, target, fs.constants.COPYFILE_EXCL);
+      } else {
+        throw error;
+      }
+    }
+  } catch (error: unknown) {
+    if (fsErrorCode(error) !== 'EEXIST') throw error;
+  } finally {
+    if (fs.existsSync(temp)) fs.unlinkSync(temp);
+  }
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export class PtahFileSettingsManager {
   /** In-memory cache using flat dot-notation keys */
   private settings: Record<string, unknown> = {};
@@ -98,7 +155,7 @@ export class PtahFileSettingsManager {
   private fileRenameReestablishPending = false;
 
   constructor(defaults: FileSettingsDefaults, dirPathOverride?: string) {
-    this.dirPath = dirPathOverride ?? path.join(homedir(), '.ptah');
+    this.dirPath = resolvePtahSettingsDir(dirPathOverride);
     this.filePath = path.join(this.dirPath, 'settings.json');
     this.defaults = defaults;
     this.loadSync();
