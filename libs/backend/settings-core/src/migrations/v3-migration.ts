@@ -44,6 +44,7 @@ const GATEWAY_SECRET_KEYS = [
 export async function runV3Migration(
   ptahDir: string,
   masterKeyProvider: IMasterKeyProvider,
+  secretsDir: string = ptahDir,
 ): Promise<void> {
   const settingsPath = path.join(ptahDir, 'settings.json');
   let raw: string;
@@ -74,7 +75,7 @@ export async function runV3Migration(
     return;
   }
   const masterKey = await masterKeyProvider.getMasterKey();
-  const secretsStore = new SecretsFileStore(ptahDir);
+  const secretsStore = new SecretsFileStore(secretsDir);
 
   for (const { key, value } of toMigrate) {
     await secretsStore.write(key, value, masterKey);

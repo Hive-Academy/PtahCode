@@ -9,7 +9,7 @@ sidebar:
 
 The Execution Tree shows what happened during a turn. Each assistant message renders as a tree of nodes in the transcript.
 
-![Execution Tree for a complex turn](/screenshots/chat-execution-tree.png)
+![Execution Tree for a complex turn](/screenshots/chat-execution-tree.webp)
 
 ## Node types
 

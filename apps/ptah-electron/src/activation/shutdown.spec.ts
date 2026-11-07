@@ -26,6 +26,7 @@ import {
   CHAT_SESSION_DISPOSE_BUDGET_MS,
   CODEX_SIGN_IN_STOP_BUDGET_MS,
   RUN_CHECK_KILL_BUDGET_MS,
+  TASK_END_HOOK_STOP_BUDGET_MS,
   CODEX_DISPOSE_BUDGET_MS,
   handleWillQuit,
   requiresDeferredDisposal,
@@ -234,6 +235,47 @@ describe('will-quit — the run-check kill', () => {
     finish();
     await flushMicrotasks();
     expect(order).toEqual(['review abort', 'review wait', 'sqliteConnection', 'diagnostics']);
+  });
+
+  it('disposes and awaits the task-end hook before SQLite close', async () => {
+    const order: string[] = [];
+    let finish!: () => void;
+    const refs = minimalRefs(order);
+    refs.taskEndHook = {
+      dispose: () => { order.push('task-end dispose'); },
+      awaitStopped: () => new Promise<void>((resolve) => { finish = resolve; order.push('task-end wait'); }),
+    };
+    expect(requiresDeferredDisposal(refs)).toBe(true);
+    expect(handleWillQuit(quitDeps(refs))).toBe(false);
+    await flushMicrotasks();
+    expect(order).toEqual(['task-end dispose', 'task-end wait']);
+    finish();
+    await flushMicrotasks();
+    expect(order).toEqual(['task-end dispose', 'task-end wait', 'sqliteConnection', 'diagnostics']);
+  });
+
+  it('stops waiting for the task-end hook at its budget', async () => {
+    const order: string[] = [];
+    const refs = minimalRefs(order);
+    refs.taskEndHook = {
+      dispose: () => { order.push('task-end dispose'); },
+      awaitStopped: () => new Promise<void>(() => { order.push('task-end wait'); }),
+    };
+    expect(handleWillQuit(quitDeps(refs))).toBe(false);
+    await jest.advanceTimersByTimeAsync(TASK_END_HOOK_STOP_BUDGET_MS - 1);
+    expect(order).toEqual(['task-end dispose', 'task-end wait']);
+    await jest.advanceTimersByTimeAsync(1);
+    await flushMicrotasks();
+    expect(order).toEqual(['task-end dispose', 'task-end wait', 'sqliteConnection', 'diagnostics']);
+  });
+
+  it('treats a null task-end hook as nothing to wait for', () => {
+    const order: string[] = [];
+    const refs = minimalRefs(order);
+    expect(refs.taskEndHook).toBeNull();
+    expect(requiresDeferredDisposal(refs)).toBe(false);
+    expect(handleWillQuit(quitDeps(refs))).toBe(true);
+    expect(order).toEqual(['sqliteConnection', 'diagnostics']);
   });
 });
 

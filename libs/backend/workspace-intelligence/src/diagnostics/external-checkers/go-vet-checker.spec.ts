@@ -404,6 +404,15 @@ describe('GoVetChecker — fixed invocation and environment', () => {
     const env = buildGoVetEnv({ GOFLAGS: '-vettool=x' }, ['/b'], 'linux');
     expect(env).toEqual({ PATH: '/b', ...GO_VET_FIXED_ENV });
   });
+
+  it('derives LocalAppData from USERPROFILE when a Windows host omits it', () => {
+    const env = buildGoVetEnv(
+      { USERPROFILE: 'C:\\Users\\u' },
+      ['C:\\Go\\bin'],
+      'win32',
+    );
+    expect(env['LOCALAPPDATA']).toBe('C:\\Users\\u\\AppData\\Local');
+  });
 });
 
 describe('GoVetChecker — package validation', () => {

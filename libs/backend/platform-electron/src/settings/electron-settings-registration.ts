@@ -52,7 +52,7 @@ import type { IUserInteraction } from '@ptah-extension/platform-core';
  * 3. FileSettingsStore (raw backend adapter — global settings + encryption)
  * 4. ReactiveSettingsStore (wraps backend with in-process event emission)
  * 5. Per-namespace repositories (AuthSettings, ReasoningSettings, …)
- * 6. MigrationRunner (v1 + v2 + v3, pointed at ~/.ptah/)
+ * 6. MigrationRunner (v1-v4, pointed at the resolved settings directory)
  *
  * @param container - tsyringe DI container (must already have WORKSPACE_PROVIDER registered)
  */
@@ -138,15 +138,17 @@ export function registerElectronSettings(container: DependencyContainer): void {
   container.register(SETTINGS_TOKENS.CUSTOM_PROVIDER_STORE, {
     useValue: new CustomProviderStore(reactiveStore),
   });
-  const boundV3 = (dir: string) => runV3Migration(dir, masterKeyProvider);
+  const boundV3 = (dir: string) => runV3Migration(dir, masterKeyProvider, ptahDir);
   const boundV4 = (dir: string) => runV4Migration(dir, appPrefix);
+  const settingsDir = path.dirname(workspaceProvider.fileSettings.getFilePath());
+  const markerPrefix = process.env['NODE_ENV'] === 'development' ? 'dev-v' : 'v';
   container.register(SETTINGS_TOKENS.MIGRATION_RUNNER, {
-    useValue: new MigrationRunner(ptahDir, [
+    useValue: new MigrationRunner(settingsDir, [
       runV1Migration,
       runV2Migration,
       boundV3,
       boundV4,
-    ]),
+    ], settingsDir, markerPrefix),
   });
 }
 

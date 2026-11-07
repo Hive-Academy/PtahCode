@@ -1526,6 +1526,8 @@ export class SessionRpcHandlers {
         logger: this.logger,
       });
       manager.restoreAgents(refs, folder, sessionId);
+      // A recovered checkpoint must be stored before the webview pages it.
+      await manager.awaitRecoveredOutput(refs.map((ref) => String(ref.agentId)));
       // Each restored card learns when a host restart cut its output.
       return withRestoredOutputLoss(refs, (id) => manager.findAgentInfo(id));
     } catch (error: unknown) {

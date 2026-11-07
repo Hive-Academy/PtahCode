@@ -757,8 +757,8 @@ export class SessionControl {
    * Lower ONE session's auto-compact window (`window`) and report what
    * actually happened. This is the session budget's `tighten` action.
    *
-   * It never assumes the runtime honours `autoCompactWindow` (experiment E2 is
-   * unproven, which is why `A1_DEFAULT_WINDOW` stays `null`). Lowering is:
+    * It reads the effective runtime threshold back before deciding whether
+    * lowering is needed. Lowering is:
    *
    * 1. skip with `env-override` when `CLAUDE_CODE_AUTO_COMPACT_WINDOW` is set
    *    (the runtime ranks it above every setting);

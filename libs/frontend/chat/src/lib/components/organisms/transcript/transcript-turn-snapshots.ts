@@ -37,7 +37,7 @@ export interface TurnSnapshotSources {
   readonly streamingBoundary: number;
   /** The session's change sets, oldest first (`ChangeSetStore.changeSetsFor`). */
   readonly changeSets: readonly TurnChangeSet[];
-  /** The card placement the transcript renders (`anchorChangeSets`). */
+  /** The change-set placement used by the turn summary (`anchorChangeSets`). */
   readonly anchors: ChangeSetAnchors;
   /** `ChangeSetStore.settledThrough`: sets are final up to this backend time. */
   readonly settledThrough: number;

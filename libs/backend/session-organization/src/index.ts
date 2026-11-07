@@ -37,6 +37,8 @@ export type {
   AutoLinkTaskIndexEvents,
 } from './lib/session-auto-link.service';
 export { SessionAutoLinkStore } from './lib/session-auto-link.store';
+// R4 worktree-name evidence, reused by the task-end hook's link step (TASK_2026_886).
+export { taskIdsInWorktreeName } from './lib/auto-link/task-link-rules';
 export type { SessionOrganizationSideTables } from './lib/session-organization-side-tables';
 export { SessionTodoProgressService } from './lib/session-todo-progress.service';
 export type {

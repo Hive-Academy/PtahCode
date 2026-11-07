@@ -5,12 +5,12 @@ import type { ElectronApplication, Locator, Page } from '@playwright/test';
 /**
  * Shooter — writes documentation screenshots straight into the docs site.
  *
- * `apps/ptah-docs/SCREENSHOTS.md` is the shot list and the spec: PNG, 1600px
- * wide for full-window shots, dark theme, no OS chrome, nothing real redacted
- * (these runs use mocked RPC, so no real key ever reaches a frame).
+ * `apps/ptah-docs/SCREENSHOTS.md` is the shot list and the spec: WebP, 1600px
+ * wide for full-window shots, dark theme, no OS chrome. Inspect each output
+ * for private data before publishing; these runs use the real Electron app.
  *
- * Every capture lands in `apps/ptah-docs/public/screenshots/<name>.png`, which
- * is exactly the path `/screenshots/<name>.png` the markdown references, so a
+ * Every capture lands in `apps/ptah-docs/public/screenshots/<name>.webp`, which
+ * is exactly the path `/screenshots/<name>.webp` the markdown references, so a
  * capture run is what makes `check-screenshot-refs.mjs` pass.
  */
 
@@ -120,8 +120,15 @@ export async function shoot(
     ? await target.screenshot({ scale: 'css' })
     : await page.screenshot({ scale: 'css' });
 
-  const file = path.join(SHOT_DIR, `${name}.png`);
-  fs.writeFileSync(file, buffer);
-  console.log(`[docs-shot] ${name}.png (${buffer.length} bytes) -> ${file}`);
+  const file = path.join(SHOT_DIR, `${name}.webp`);
+  let sharp: typeof import('sharp');
+  try {
+    sharp = (await import('sharp')).default;
+  } catch (error: unknown) {
+    throw new Error('Screenshot capture requires the sharp package', { cause: error });
+  }
+  const webp = await sharp(buffer).webp({ quality: 90, effort: 6 }).toBuffer();
+  fs.writeFileSync(file, webp);
+  console.log(`[docs-shot] ${name}.webp (${webp.length} bytes) -> ${file}`);
   return file;
 }

@@ -544,6 +544,32 @@ describe('bootThothRuntime', () => {
     await expect(runDeps.runSymbols('/ws')).rejects.toBe(realFailure);
   });
 
+  it('passes the joined census marker through the RPC runSymbols bridge', async () => {
+    const setRunDeps = jest.fn();
+    const joined = Object.assign(Promise.resolve(undefined), {
+      joinedActiveCensus: true,
+    });
+    const symbolIndexer = {
+      indexWorkspace: jest.fn().mockImplementation(
+        (_root: string, opts?: { userInitiated?: boolean }) =>
+          opts?.userInitiated ? joined : Promise.resolve(undefined),
+      ),
+    };
+    const container = makeContainer([
+      [PERSISTENCE_TOKENS.SQLITE_CONNECTION, makeSqlite()],
+      [CODE_SYMBOL_INDEXER, symbolIndexer],
+      [IndexingRpcHandlers, { setRunDeps }],
+      [TOKENS.WEBVIEW_MANAGER, makeWebviewManager()],
+    ]);
+
+    await bootThothRuntime(container, { workspaceRoot: '/ws' });
+    const runDeps = setRunDeps.mock.calls[0][0] as IndexingRunDeps;
+    const result = runDeps.runSymbols('/ws');
+    expect(result).toBe(joined);
+    expect(result.joinedActiveCensus).toBe(true);
+    await result;
+  });
+
   it('routes the lifecycle full run through trackBackgroundRun and passes reindexFile through', async () => {
     const progress = { filesScanned: 1, totalFiles: 2 };
     const symbolIndexer = {

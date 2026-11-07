@@ -16,6 +16,7 @@
  */
 import { injectable, inject } from 'tsyringe';
 import { TOKENS } from '@ptah-extension/vscode-core';
+import { normalizeWorkspaceRoot } from '@ptah-extension/platform-core';
 import type { Logger, RpcHandler } from '@ptah-extension/vscode-core';
 import {
   MEMORY_TOKENS,
@@ -67,6 +68,18 @@ function toStatusWire(status: IndexingStatus): IndexingStatusWire {
   };
 }
 
+interface PendingForcedStart {
+  readonly pipeline: IndexingStartParams['pipeline'];
+  phase: 'setup' | 'joined' | 'fresh';
+}
+
+function coversPipeline(
+  pending: IndexingStartParams['pipeline'],
+  requested: IndexingStartParams['pipeline'],
+): boolean {
+  return pending === undefined || pending === requested;
+}
+
 @injectable()
 export class IndexingRpcHandlers {
   static readonly METHODS = [
@@ -85,6 +98,8 @@ export class IndexingRpcHandlers {
    * resolved. If null, start/resume return `accepted: false`.
    */
   private runDeps: IndexingRunDeps | null = null;
+  /** Coalesce only while the forced run has not begun its fresh census. */
+  private readonly forcedFollowUps = new Map<string, PendingForcedStart>();
 
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
@@ -160,8 +175,16 @@ export class IndexingRpcHandlers {
             state: 'never-indexed',
           };
         }
-        // A second manual run is refused; a start during a background-only
-        // run is accepted and joins that census.
+        // Covered forced starts share work only before fresh discovery begins.
+        // Later or uncovered requests receive the existing running refusal.
+        const rootKey = normalizeWorkspaceRoot(params.workspaceRoot);
+        const pending = this.forcedFollowUps.get(rootKey);
+        if (params.force && pending) {
+          return pending.phase !== 'fresh' &&
+            coversPipeline(pending.pipeline, params.pipeline)
+            ? { accepted: true, state: 'indexing' }
+            : { accepted: false, reason: 'already-running', state: 'indexing' };
+        }
         if (this.indexingControl.isRunning()) {
           return {
             accepted: false,
@@ -170,15 +193,62 @@ export class IndexingRpcHandlers {
           };
         }
         try {
-          void this.indexingControl
-            .start(params.pipeline, params.workspaceRoot, this.runDeps, {
+          const deps = this.runDeps;
+          const pendingStart: PendingForcedStart | null = params.force
+            ? { pipeline: params.pipeline, phase: 'setup' }
+            : null;
+          if (pendingStart) this.forcedFollowUps.set(rootKey, pendingStart);
+          const runDeps: IndexingRunDeps = pendingStart && params.pipeline !== 'memory'
+            ? {
+                ...deps,
+                runSymbols: async (root, options) => {
+                  const first = deps.runSymbols(root, options);
+                  const joined = first.joinedActiveCensus === true;
+                  pendingStart.phase = joined ? 'joined' : 'fresh';
+                  let stats: Awaited<typeof first> | undefined;
+                  try {
+                    stats = await first;
+                  } catch (error: unknown) {
+                    if (
+                      !joined ||
+                      options?.signal?.aborted ||
+                      (error instanceof Error && error.name === 'AbortError')
+                    ) throw error;
+                    // A failed boot census must not consume an explicit force.
+                    this.logger.warn(
+                      '[indexing] joined boot census failed; starting fresh census',
+                      error instanceof Error ? error : new Error(String(error)),
+                    );
+                  }
+                  if (!joined || options?.signal?.aborted) return stats;
+                  pendingStart.phase = 'fresh';
+                  return deps.runSymbols(root, options);
+                },
+              }
+            : deps;
+          if (pendingStart && params.pipeline === 'memory') {
+            pendingStart.phase = 'fresh';
+          }
+          const run = this.indexingControl.start(
+            params.pipeline,
+            params.workspaceRoot,
+            runDeps,
+            {
               force: params.force,
-            })
-            .catch((err: unknown) => {
-              this.logger.warn('[indexing] start failed (non-fatal):', {
-                error: err instanceof Error ? err.message : String(err),
-              });
+            },
+          );
+          const complete = run.finally(() => {
+            if (pendingStart) {
+              if (this.forcedFollowUps.get(rootKey) === pendingStart) {
+                this.forcedFollowUps.delete(rootKey);
+              }
+            }
+          });
+          void complete.catch((err: unknown) => {
+            this.logger.warn('[indexing] start failed (non-fatal):', {
+              error: err instanceof Error ? err.message : String(err),
             });
+          });
           const status = await this.indexingControl.getStatus(
             params.workspaceRoot,
           );

@@ -12,6 +12,6 @@ Ptah has many color themes, light and dark. They include **Ptah Glass**, **Ptah 
 
 The theme panel also has settings for **Primary accent**, **Backdrop**, and **Animation**.
 
-![Theme toggle](/screenshots/theme-toggle.png)
+![Theme toggle](/screenshots/theme-toggle.webp)
 
 Ptah keeps your choice and uses it in every workspace.

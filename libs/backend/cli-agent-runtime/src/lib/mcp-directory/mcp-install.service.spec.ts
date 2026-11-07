@@ -83,6 +83,10 @@ describe('McpInstallService', () => {
 
   beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-install-service-'));
+    // Establish this workspace's marker before the first intent is recorded.
+    // A parent temp directory may also contain .ptah, which would otherwise
+    // change the canonical root after the store creates tmp/.ptah on write.
+    fs.mkdirSync(path.join(tmp, '.ptah'));
     intents = new McpIntentStore(path.join(tmp, '.ptah', 'mcp-installed.json'));
     reconcileCalls = 0;
   });

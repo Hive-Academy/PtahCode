@@ -28,6 +28,7 @@ import {
   PtahFileSettingsManager,
   FILE_BASED_SETTINGS_DEFAULTS,
   isFileBasedSettingKey,
+  migrateLegacyCompactionThreshold,
 } from '@ptah-extension/platform-core';
 
 export class CliWorkspaceProvider
@@ -47,6 +48,16 @@ export class CliWorkspaceProvider
   private readonly configFilePath: string;
 
   constructor(globalStoragePath: string, workspacePath?: string) {
+    for (const fileName of ['config.json', 'global-state.json']) {
+      try {
+        migrateLegacyCompactionThreshold(
+          path.join(globalStoragePath, fileName),
+          globalStoragePath,
+        );
+      } catch (error: unknown) {
+        process.emitWarning(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
     this.fileSettings = new PtahFileSettingsManager(
       FILE_BASED_SETTINGS_DEFAULTS,
       globalStoragePath,

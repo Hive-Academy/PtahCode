@@ -41,7 +41,8 @@ export const REVIEW_COMMANDS = {
 } as const;
 
 /**
- * Opens what a change-set card asks for, in the host's own review surface
+ * Opens what a change-set surface asks for (the turn summary chip, the
+ * Display panel, the inspector git section), in the host's own review surface
  * (TASK_2026_576, Component 20).
  *
  * - VS Code: `command:execute` with the `ptah.review.*` commands, which open
