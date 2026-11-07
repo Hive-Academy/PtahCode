@@ -53,6 +53,7 @@ import {
   type MockLogger,
 } from '@ptah-extension/shared/testing';
 
+import type { SubagentBudgetMonitor } from '@ptah-extension/agent-sdk';
 import type { SubagentMessageDispatcher } from '@ptah-extension/agent-sdk';
 import type {
   SessionHistoryReaderService,
@@ -157,6 +158,7 @@ interface Harness {
   historyReader: { readSubagentEvents: jest.Mock };
   metadataStore: { dismissResumableSubagents: jest.Mock; get: jest.Mock };
   nativeHistory: { readForResume: jest.Mock };
+  budgetMonitor: SubagentBudgetMonitor;
 }
 
 function makeHarness(bindNativeHistory = true): Harness {
@@ -180,6 +182,8 @@ function makeHarness(bindNativeHistory = true): Harness {
     get: jest.fn().mockResolvedValue(null),
   };
   const nativeHistory = { readForResume: jest.fn() };
+  const budgetMonitor = Object.create(null) as SubagentBudgetMonitor;
+  budgetMonitor.getAgentBudgetState = jest.fn().mockReturnValue(undefined);
 
   const handlers = new SubagentRpcHandlers(
     logger as unknown as Logger,
@@ -194,6 +198,7 @@ function makeHarness(bindNativeHistory = true): Harness {
     > as SessionHistoryReaderService,
     metadataStore as unknown as SessionMetadataStore,
     bindNativeHistory ? nativeHistory : undefined,
+    budgetMonitor,
   );
 
   return {
@@ -203,6 +208,7 @@ function makeHarness(bindNativeHistory = true): Harness {
     registry,
     sentry,
     dispatcher,
+    budgetMonitor,
     workspace,
     historyReader,
     metadataStore,
@@ -1153,6 +1159,66 @@ describe('SubagentRpcHandlers', () => {
   // -------------------------------------------------------------------------
 
   describe('subagent:send-message', () => {
+    it.each([
+      [849, false],
+      [850, true],
+      [1000, true],
+    ])('gates %i tokens at the warning threshold (refuse=%s)', async (tokens, refuse) => {
+      const h = makeHarness();
+      jest.spyOn(h.budgetMonitor, 'getAgentBudgetState').mockReturnValue({
+        contextTokens: tokens, handoffTokens: 1000, warningRatio: 0.85,
+        stopped: false, stopState: 'none', recordPath: 'D:/ws/handoff.md',
+      });
+      h.handlers.register();
+      const sending = call(h, 'subagent:send-message', {
+        sessionId: 'sess-abc', parentToolUseId: 'toolu_xyz', text: 'resume',
+      });
+      if (refuse) {
+        await expect(sending).rejects.toThrow(/Start a new agent with a short brief from the handoff record/);
+        expect(h.dispatcher.sendToSubagent).not.toHaveBeenCalled();
+      } else {
+        await expect(sending).resolves.toEqual({ ok: true });
+      }
+      expect(h.budgetMonitor.getAgentBudgetState).toHaveBeenCalledWith('toolu_xyz', 'sess-abc');
+    });
+
+    it.each([null, undefined])('allows unknown usage %s', async (tokens) => {
+      const h = makeHarness();
+      jest.spyOn(h.budgetMonitor, 'getAgentBudgetState').mockReturnValue(tokens === null
+        ? { contextTokens: null, handoffTokens: 1000, warningRatio: 0.85, stopped: false, stopState: 'none' }
+        : undefined);
+      h.handlers.register();
+      await expect(call(h, 'subagent:send-message', {
+        sessionId: 'sess-abc', parentToolUseId: 'toolu_xyz', text: 'resume',
+      })).resolves.toEqual({ ok: true });
+    });
+
+    it('refuses a stopped agent even when usage is missing', async () => {
+      const h = makeHarness();
+      jest.spyOn(h.budgetMonitor, 'getAgentBudgetState').mockReturnValue({
+        contextTokens: null, handoffTokens: 1000, warningRatio: 0.85,
+        stopped: true, stopState: 'stopped', stopReason: 'handoff', recordPath: 'D:/ws/handoff.md',
+      });
+      h.handlers.register();
+      await expect(call(h, 'subagent:send-message', {
+        sessionId: 'sess-abc', parentToolUseId: 'toolu_xyz', text: 'resume',
+      })).rejects.toThrow(/Ptah's budget monitor stopped this agent.*handoff record: D:\/ws\/handoff.md/);
+      expect(h.dispatcher.sendToSubagent).not.toHaveBeenCalled();
+    });
+
+    it('refuses a pending safety stop at low context', async () => {
+      const h = makeHarness();
+      jest.spyOn(h.budgetMonitor, 'getAgentBudgetState').mockReturnValue({
+        contextTokens: 0, handoffTokens: 1000, warningRatio: 0.85,
+        stopped: true, stopState: 'pending',
+      });
+      h.handlers.register();
+      await expect(call(h, 'subagent:send-message', {
+        sessionId: 'sess-abc', parentToolUseId: 'toolu_xyz', text: 'steer',
+      })).rejects.toThrow(/stopped this agent/);
+      expect(h.dispatcher.sendToSubagent).not.toHaveBeenCalled();
+    });
+
     it('delegates to dispatcher.sendToSubagent and returns { ok: true }', async () => {
       const h = makeHarness();
       h.handlers.register();

@@ -51,6 +51,7 @@ import {
 import type { RpcMethodName } from '@ptah-extension/shared';
 import {
   SDK_TOKENS,
+  buildBudgetResumeRefusal,
   SubagentHistoryValidationError,
   retainSubagentEventsTail,
 } from '@ptah-extension/agent-sdk';
@@ -58,6 +59,7 @@ import type {
   SubagentMessageDispatcher,
   SessionHistoryReaderService,
   SessionMetadataStore,
+  SubagentBudgetMonitor,
 } from '@ptah-extension/agent-sdk';
 import {
   assembleHistoryPage,
@@ -134,6 +136,8 @@ export class SubagentRpcHandlers {
     private readonly sessionMetadataStore: SessionMetadataStore,
     @inject(CHAT_TOKENS.HISTORY_READ, { isOptional: true })
     private readonly nativeHistory?: Pick<ChatHistoryReadService, 'readForResume'>,
+    @inject(SDK_TOKENS.SDK_SUBAGENT_BUDGET_MONITOR, { isOptional: true })
+    private readonly budgetMonitor?: SubagentBudgetMonitor,
   ) {}
 
   private async nativeEvents(sessionId: SessionId): Promise<readonly FlatStreamEventUnion[]> {
@@ -421,6 +425,15 @@ export class SubagentRpcHandlers {
         parentToolUseId,
         textLength: text.length,
       });
+
+      const state = this.budgetMonitor?.getAgentBudgetState(parentToolUseId, sessionId);
+      const refusal = state && buildBudgetResumeRefusal(state);
+      if (refusal) {
+        throw new RpcUserError(
+          refusal,
+          'INVALID_PARAMS',
+        );
+      }
 
       await this.dispatcher.sendToSubagent(sessionId, parentToolUseId, text);
       return { ok: true };

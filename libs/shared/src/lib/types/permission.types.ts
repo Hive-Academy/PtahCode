@@ -107,6 +107,9 @@ export interface PermissionResponse {
  * This breaks the circular dependency between vscode-core and agent-sdk.
  */
 export interface ISdkPermissionHandler {
+  /** Optional diagnostics for SDK hosts that track budget stops. */
+  recordBudgetStop?(sessionId: string): void;
+  getPendingPermissionCount?(sessionId?: string): number;
   /**
    * Handle permission response from webview
    * @param requestId - The permission request ID

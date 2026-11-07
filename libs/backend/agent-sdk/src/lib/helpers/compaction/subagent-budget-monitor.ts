@@ -97,6 +97,9 @@ import type {
   SubagentRegistryService,
 } from '@ptah-extension/vscode-core';
 import type { SubagentPromptCacheTtl } from '@ptah-extension/shared';
+import * as path from 'node:path';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
 import type { SubagentBudgetStopCallbackRegistry } from '../subagent-budget-stop-callback-registry';
 import type { CompactionConfigProvider } from '../compaction-config-provider';
 import type { SubagentMessageDispatcher } from '../subagent-message-dispatcher';
@@ -111,6 +114,7 @@ import {
   stopNotice,
   type HandoffSubject,
   type HandoffUsage,
+  type HandoffProgress,
   type StopReason,
 } from './subagent-handoff-message';
 import {
@@ -168,6 +172,19 @@ export interface SubagentBudgetSnapshot {
   readonly budgetReached: boolean;
 }
 
+/** Read-only stop identity for the parent and direct SendMessage gate. */
+export interface AgentBudgetState {
+  readonly contextTokens: number | null;
+  readonly handoffTokens: number;
+  readonly warningRatio: number;
+  /** A live agent may receive steering messages even near the limit. */
+  readonly running?: boolean;
+  readonly stopState: 'none' | 'pending' | 'stopped';
+  readonly stopped: boolean;
+  readonly stopReason?: StopReason;
+  readonly recordPath?: string;
+}
+
 const INPUT_WEIGHT = 1;
 const CACHE_READ_WEIGHT = 0.1;
 const OUTPUT_WEIGHT = 5;
@@ -190,6 +207,10 @@ const TASK_PROMPT_EXCERPT_CHARS = 300;
 
 type JsonObject = Record<string, unknown>;
 
+function stoppedIdentityKey(sessionId: string, identity: string): string {
+  return JSON.stringify([sessionId, identity]);
+}
+
 function asObject(value: unknown): JsonObject | undefined {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? (value as JsonObject)
@@ -200,6 +221,46 @@ function tokenCount(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
     ? value
     : undefined;
+}
+
+/** Keep a useful excerpt while removing common credential forms from persisted prose. */
+export function redactBudgetSecrets(value: string): string {
+  return value
+    .replace(/-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z ]+ )?PRIVATE KEY-----/g, '[redacted private key]')
+    .replace(/(Authorization["']?\s*:\s*["']?\s*(?:Bearer|Basic)\s+)[^\s"'`]+/gi, '$1[redacted]')
+    .replace(/(\b(?:Bearer|Basic)\s+)[^\s"'`]+/gi, '$1[redacted]')
+    .replace(/(:\/\/[^\s:/@]+:)[^\s@]+(@)/g, '$1[redacted]$2')
+    .replace(/(["'](?:api[_-]?key|password|secret|token|[A-Z0-9_]*(?:_KEY|_SECRET|_TOKEN))["']\s*:\s*["'])[^"']+(["'])/gi, '$1[redacted]$2')
+    .replace(/(?<![A-Za-z0-9])([A-Za-z0-9_.-]*(?:secret|token|password|passwd|key|credential)(?:[_.-][A-Za-z0-9]+)*)\s*[:=]\s*("[^"]*"|'[^']*'|[^\s,;]+)/gi, '$1=[redacted]')
+    .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, '[redacted]')
+    .replace(/\b(?:sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9_]{12,}|github_pat_[A-Za-z0-9_]{12,}|xox[bp]-[A-Za-z0-9-]{12,})\b/g, '[redacted]');
+}
+
+function safeProgressText(value: string): string {
+  return redactBudgetSecrets(value).slice(-2000);
+}
+
+/** Accept only an existing agent JSONL under the expected SDK session directory. */
+export function resolveSubagentTranscriptPath(
+  homeDir: string, workspace: string, sessionId: string, agentId: string,
+  supplied?: string,
+): string | undefined {
+  if (!/^[A-Za-z0-9_-]+$/.test(sessionId) || !/^[A-Za-z0-9_-]+$/.test(agentId)) return undefined;
+  const slug = path.resolve(workspace).replace(/[^A-Za-z0-9]/g, '-');
+  const expected = path.join(homeDir, '.claude', 'projects', slug, sessionId, 'subagents');
+  const candidate = supplied ?? path.join(expected, `agent-${agentId}.jsonl`);
+  if (path.basename(candidate) !== `agent-${agentId}.jsonl`) return undefined;
+  try {
+    const allowedRoot = fs.realpathSync(path.join(homeDir, '.claude', 'projects'));
+    const realDirectory = supplied ? fs.realpathSync(path.dirname(candidate)) : fs.realpathSync(expected);
+    const realFile = fs.realpathSync(candidate);
+    return (realDirectory.startsWith(`${allowedRoot}${path.sep}`) &&
+      path.dirname(realFile) === realDirectory && fs.statSync(realFile).isFile())
+      ? realFile : undefined;
+  } catch {
+    // degradation-audit: optional-capability - an unavailable transcript is represented as unknown.
+    return undefined;
+  }
 }
 
 /**
@@ -288,8 +349,10 @@ interface SubagentState {
   lastWeighted: number;
   /** Set when the stop succeeded or its attempts ran out: no further stop. */
   stopFired: boolean;
+  progressCaptureErrorLogged?: boolean;
   /** A `stopSubagent` call is running; an overlapping message starts no other. */
   stopInFlight: boolean;
+  stopState: 'none' | 'pending' | 'stopped';
   /** `stopSubagent` calls that rejected. */
   stopFailures: number;
   /** API message id of the request whose stop or record write last failed; its other blocks do not retry. */
@@ -307,6 +370,18 @@ interface SubagentState {
   pendingNotice?: { readonly sessionId: string; readonly handoff: Handoff };
   /** SDK agent id the near-budget warning was posted for; set at most once. */
   warnedAgentId?: string;
+  /** One warning per running invocation; reset when a new task starts. */
+  warnedTaskId?: string;
+  stopReason?: StopReason;
+  stoppedTaskId?: string;
+  stoppedAgentId?: string;
+  stoppedTeammateName?: string;
+  stoppedUsage?: HandoffUsage;
+  stoppedRecordPath?: string;
+  lastAssistantText?: string;
+  readonly filePaths: string[];
+  readonly toolCalls: Array<{ name: string; targetPath?: string; outcome: 'started' | 'completed' | 'failed'; id?: string }>;
+  transcriptPath?: string;
   /** Handoff paths the warning named; the stop names the same ones. */
   handoffPaths?: SubagentHandoffPaths;
 }
@@ -389,6 +464,9 @@ export interface SubagentBudgetDispatcherPort
  */
 export class SubagentBudgetMonitor {
   private readonly sessions = new Map<string, SessionState>();
+  /** Bounded stop identities survive registry removal and session release. */
+  private readonly stoppedByIdentity = new Map<string, AgentBudgetState>();
+  private readonly hookTranscriptByAgent = new Map<string, string>();
   /** Old id → new id, one entry per PostCompact rekey; cleared on release. */
   private readonly aliases = new Map<string, string>();
   private readonly delivery: SubagentHandoffDelivery;
@@ -429,6 +507,11 @@ export class SubagentBudgetMonitor {
     cacheTtl: SubagentPromptCacheTtl = SDK_DEFAULT_TTL,
   ): Promise<void> {
     const msg = asObject(message);
+    if (msg?.['type'] === 'user' && typeof msg['parent_tool_use_id'] === 'string') {
+      const state = this.sessions.get(this.currentSessionId(sessionId))?.subagents.get(msg['parent_tool_use_id']);
+      if (state) this.captureToolResults(state, msg);
+      return;
+    }
     if (
       msg?.['type'] === 'user' &&
       typeof msg['parent_tool_use_id'] !== 'string'
@@ -458,6 +541,18 @@ export class SubagentBudgetMonitor {
     }
 
     const state = this.subagentState(session, toolCallId);
+    try {
+      this.captureProgress(state, msg, toolCallId);
+    } catch (error: unknown) {
+      if (!state.progressCaptureErrorLogged) {
+        state.progressCaptureErrorLogged = true;
+        this.logger.error('[SubagentBudgetMonitor] Progress capture failed', {
+          error: error instanceof Error ? error : new Error(String(error)),
+          sessionId,
+          toolCallId,
+        });
+      }
+    }
     this.count(state, msg, usage, cacheTtl);
     if (state.stopFired || state.stopInFlight) {
       return;
@@ -473,6 +568,9 @@ export class SubagentBudgetMonitor {
 
     const { enabled, subagentHandoffTokens, subagentStopWeightedTokens } =
       this.config.getConfig();
+    if (enabled) {
+      this.warnNearBudget(session, toolCallId, state, subagentHandoffTokens);
+    }
     const reason: StopReason | undefined =
       state.contextTokens >= subagentHandoffTokens && !state.recordGaveUp
         ? 'handoff'
@@ -480,9 +578,6 @@ export class SubagentBudgetMonitor {
           ? 'safety'
           : undefined;
     if (!reason) {
-      if (enabled) {
-        this.warnNearBudget(session, toolCallId, state, subagentHandoffTokens);
-      }
       return;
     }
     if (!enabled) {
@@ -520,16 +615,22 @@ export class SubagentBudgetMonitor {
     ) {
       return;
     }
-    const agentId = this.registry.get(toolCallId)?.agentId;
+    const { record } = this.resolveRegistryRecord(session, toolCallId);
+    const agentId = record?.agentId;
     const paths = this.handoffFiles.paths(session.sessionId, toolCallId);
     if (!agentId || !paths) {
+      this.logger.debug('[SubagentBudgetMonitor] Near-budget warning deferred', {
+        sessionId: session.sessionId, toolCallId,
+        missingAgentId: !agentId, missingPaths: !paths,
+      });
       return;
     }
     state.warnedAgentId = agentId;
+    state.warnedTaskId = session.startedTasks.get(toolCallId)?.taskId ?? record?.taskId;
     state.handoffPaths = paths;
     this.dispatcher.postSubagentNotice(
       agentId,
-      nearBudgetWarning(state.contextTokens, handoffTokens, paths.notes),
+      redactBudgetSecrets(nearBudgetWarning(state.contextTokens, handoffTokens, paths.notes)),
     );
     this.logger.info('[SubagentBudgetMonitor] Near-budget warning queued', {
       sessionId: session.sessionId,
@@ -555,6 +656,12 @@ export class SubagentBudgetMonitor {
       return;
     }
     const session = this.sessionState(sessionId);
+    const state = session.subagents.get(toolUseId);
+    if (state?.warnedAgentId && state.warnedTaskId !== taskId) {
+      this.dispatcher.withdrawSubagentNotice(state.warnedAgentId ?? '');
+      state.warnedAgentId = undefined;
+      state.warnedTaskId = undefined;
+    }
     session.startedTasks.set(toolUseId, {
       taskId,
       subagentType: subagentType || undefined,
@@ -579,6 +686,54 @@ export class SubagentBudgetMonitor {
         state.weightedUsed >=
         this.config.getConfig().subagentStopWeightedTokens,
     };
+  }
+
+  /** Look up by SDK agent id or spawning tool call id. */
+  getAgentBudgetState(agentId: string, sessionId: string): AgentBudgetState | undefined {
+    if (!this.config.getConfig().enabled) return undefined;
+    const currentId = this.currentSessionId(sessionId);
+    let idleMatch: AgentBudgetState | undefined;
+    const session = this.sessions.get(currentId);
+    if (session) {
+      for (const [toolCallId, state] of session.subagents) {
+        const { record } = this.resolveRegistryRecord(session, toolCallId);
+        if (toolCallId !== agentId && state.stoppedAgentId !== agentId && state.stoppedTeammateName !== agentId && record?.agentId !== agentId && record?.teammateName !== agentId && !(state.stopState === 'none' && session.tasks.get(toolCallId)?.name === agentId)) continue;
+        const match: AgentBudgetState = {
+          contextTokens: state.lastMessageId === undefined ? null : state.contextTokens,
+          handoffTokens: this.config.getConfig().subagentHandoffTokens,
+          warningRatio: NEAR_BUDGET_RATIO,
+          running: record?.status === 'running' && state.stopState === 'none',
+          stopState: state.stopState,
+          stopped: state.stopState !== 'none',
+          ...(state.stopReason ? { stopReason: state.stopReason } : {}),
+          ...(state.stoppedRecordPath ? { recordPath: state.stoppedRecordPath } : {}),
+        };
+        idleMatch = match;
+      }
+    }
+    return idleMatch ?? this.stoppedByIdentity.get(stoppedIdentityKey(currentId, agentId));
+  }
+
+  recordTranscriptPath(sessionId: string, agentId: string, supplied: string): void {
+    const workspace = this.records.workspaceOf(sessionId);
+    if (!workspace) return;
+    const validated = resolveSubagentTranscriptPath(os.homedir(), workspace, sessionId, agentId, supplied);
+    if (!validated) return;
+    this.hookTranscriptByAgent.set(agentId, validated);
+    while (this.hookTranscriptByAgent.size > 256) {
+      const oldest = this.hookTranscriptByAgent.keys().next().value;
+      if (oldest === undefined) break;
+      this.hookTranscriptByAgent.delete(oldest);
+    }
+    for (const session of this.sessions.values()) {
+      if (session.sessionId !== this.currentSessionId(sessionId)) continue;
+      for (const [toolCallId, state] of session.subagents)
+        if (
+          this.resolveRegistryRecord(session, toolCallId).record?.agentId === agentId ||
+          state.stoppedAgentId === agentId
+        )
+          state.transcriptPath = validated;
+    }
   }
 
   /**
@@ -625,6 +780,18 @@ export class SubagentBudgetMonitor {
         }
       }
       existing.mergedInto = session;
+    }
+    for (const [toolCallId, state] of session.subagents) {
+      if (state.stopState !== 'stopped') continue;
+      for (const identity of [toolCallId, state.stoppedAgentId, state.stoppedTeammateName]) {
+        if (!identity) continue;
+        const oldKey = stoppedIdentityKey(fromSessionId, identity);
+        const stopped = this.stoppedByIdentity.get(oldKey);
+        if (stopped) {
+          this.stoppedByIdentity.delete(oldKey);
+          this.stoppedByIdentity.set(stoppedIdentityKey(toSessionId, identity), stopped);
+        }
+      }
     }
     session.sessionId = toSessionId;
     this.sessions.set(toSessionId, session);
@@ -762,15 +929,50 @@ export class SubagentBudgetMonitor {
         lastWeighted: 0,
         stopFired: false,
         stopInFlight: false,
+        stopState: 'none',
         stopFailures: 0,
         recordFailures: 0,
         recordGaveUp: false,
         stopped: false,
         stopDeferredLogged: false,
+        filePaths: [],
+        toolCalls: [],
       };
       session.subagents.set(toolCallId, state);
     }
     return state;
+  }
+
+  private captureProgress(state: SubagentState, msg: JsonObject, toolCallId: string): void {
+    const message = asObject(msg['message']);
+    const content = message?.['content'];
+    if (Array.isArray(content)) {
+      for (const raw of content) {
+        const block = asObject(raw);
+        if (block?.['type'] === 'text' && typeof block['text'] === 'string') {
+          state.lastAssistantText = safeProgressText(block['text']);
+        }
+        if (block?.['type'] !== 'tool_use' || typeof block['name'] !== 'string') continue;
+        const name = block['name'];
+        const input = asObject(block['input']);
+        const rawPath = input?.['file_path'] ?? input?.['path'] ?? input?.['notebook_path'];
+        const targetPath = typeof rawPath === 'string' && rawPath.length <= 500 && !/[\r\n]/.test(rawPath) ? rawPath : undefined;
+        if (targetPath && ['Write', 'Edit', 'NotebookEdit', 'MultiEdit'].includes(name) && !state.filePaths.includes(targetPath) && state.filePaths.length < 50) state.filePaths.push(targetPath);
+        state.toolCalls.push({ name: name.slice(0, 80), targetPath, outcome: 'started', id: typeof block['id'] === 'string' ? block['id'] : undefined });
+        if (state.toolCalls.length > 10) state.toolCalls.shift();
+      }
+    }
+  }
+
+  private captureToolResults(state: SubagentState, msg: JsonObject): void {
+    const content = asObject(msg['message'])?.['content'];
+    if (!Array.isArray(content)) return;
+    for (const raw of content) {
+      const block = asObject(raw);
+      if (block?.['type'] !== 'tool_result' || typeof block['tool_use_id'] !== 'string') continue;
+      const call = [...state.toolCalls].reverse().find((entry) => entry.id === block['tool_use_id']);
+      if (call) call.outcome = block['is_error'] === true ? 'failed' : 'completed';
+    }
   }
 
   /** Remember the task of every subagent this assistant message spawns. */
@@ -796,6 +998,12 @@ export class SubagentBudgetMonitor {
       const input = asObject(block['input']);
       const prompt = input?.['prompt'];
       const teammate = input?.['name'];
+      if (typeof teammate === 'string' && teammate.trim()) {
+        this.stoppedByIdentity.delete(stoppedIdentityKey(session.sessionId, teammate.trim()));
+        for (const old of session.subagents.values()) {
+          if (old.stoppedTeammateName === teammate.trim()) old.stoppedTeammateName = undefined;
+        }
+      }
       session.tasks.set(id, {
         text: readSubagentTaskText(input),
         prompt:
@@ -887,6 +1095,18 @@ export class SubagentBudgetMonitor {
    * request), `stopSubagent`, publishing the record to the index, delivery,
    * and the task-folder stub. A stop retry reuses the prepared handoff.
    */
+  private resolveRegistryRecord(session: SessionState, toolCallId: string) {
+    const directRecord = this.registry.get(toolCallId);
+    if (directRecord) return { record: directRecord, registryToolCallId: toolCallId };
+    const taskId = session.startedTasks.get(toolCallId)?.taskId;
+    const hookToolCallId = taskId ? this.registry.getToolCallIdByAgentId(taskId) : null;
+    const hookRecord = hookToolCallId ? this.registry.get(hookToolCallId) : null;
+    const record = hookRecord?.parentSessionId === session.sessionId
+      && hookRecord.status === 'running' && hookRecord.agentId === taskId
+      ? hookRecord : null;
+    return { record, registryToolCallId: record?.toolCallId };
+  }
+
   private async stop(
     session: SessionState,
     toolCallId: string,
@@ -897,8 +1117,9 @@ export class SubagentBudgetMonitor {
       readonly stopWeightedTokens: number;
     },
   ): Promise<void> {
-    const registryRecord = this.registry.get(toolCallId);
     const started = session.startedTasks.get(toolCallId);
+    const { record: registryRecord, registryToolCallId } =
+      this.resolveRegistryRecord(session, toolCallId);
     const taskId = started?.taskId ?? registryRecord?.taskId;
     if (!taskId) {
       // Neither task_started nor the registry has the task id yet; the next
@@ -927,6 +1148,7 @@ export class SubagentBudgetMonitor {
           reason,
           limits,
           {
+            agentId: registryRecord?.agentId,
             agentType:
               registryRecord?.agentType ?? started?.subagentType ?? 'subagent',
             teammateName: registryRecord?.teammateName,
@@ -955,6 +1177,17 @@ export class SubagentBudgetMonitor {
       return;
     }
     preparedState.prepared = prepared;
+    preparedState.stopReason = reason;
+    preparedState.stoppedTaskId = taskId;
+    preparedState.stoppedAgentId = registryRecord?.agentId;
+    preparedState.stoppedTeammateName = registryRecord?.teammateName ?? live.tasks.get(toolCallId)?.name;
+    preparedState.stoppedRecordPath = prepared.record?.path;
+    preparedState.stoppedUsage = {
+      reason, contextTokens: preparedState.contextTokens,
+      weightedUsed: preparedState.weightedUsed,
+      handoffTokens: limits.handoffTokens,
+      stopWeightedTokens: limits.stopWeightedTokens,
+    };
     if (prepared.record) {
       this.records.markInvoked(toolCallId);
     }
@@ -963,14 +1196,9 @@ export class SubagentBudgetMonitor {
     this.stopNotices.record(
       live.sessionId,
       taskId,
-      stopNotice(prepared.handoff.subject, {
-        reason,
-        contextTokens: preparedState.contextTokens,
-        weightedUsed: preparedState.weightedUsed,
-        handoffTokens: limits.handoffTokens,
-        stopWeightedTokens: limits.stopWeightedTokens,
-      }),
+      redactBudgetSecrets(stopNotice(prepared.handoff.subject, preparedState.stoppedUsage, prepared.record?.path)),
     );
+    preparedState.stopState = 'pending';
     try {
       await this.dispatcher.stopSubagent(live.sessionId, taskId);
     } catch (error: unknown) {
@@ -979,6 +1207,7 @@ export class SubagentBudgetMonitor {
       };
     } finally {
       state.stopInFlight = false;
+      if (stopFailure) preparedState.stopState = 'none';
     }
     // The stop may have ended the subagent even when it rejected: from here
     // on the record is kept and named on main-thread prompts.
@@ -1012,6 +1241,22 @@ export class SubagentBudgetMonitor {
     }
     liveState.stopFired = true;
     liveState.stopped = true;
+    liveState.stopState = 'stopped';
+    const stoppedState = this.getAgentBudgetState(toolCallId, sessionId);
+    if (stoppedState) {
+      const identities = [toolCallId, liveState.stoppedAgentId, liveState.stoppedTeammateName];
+      for (const identity of identities) {
+        if (!identity) continue;
+        const key = stoppedIdentityKey(sessionId, identity);
+        this.stoppedByIdentity.delete(key);
+        this.stoppedByIdentity.set(key, { ...stoppedState, running: false, stopped: true, stopState: 'stopped' });
+      }
+      while (this.stoppedByIdentity.size > 256) {
+        const oldest = this.stoppedByIdentity.keys().next().value;
+        if (oldest === undefined) break;
+        this.stoppedByIdentity.delete(oldest);
+      }
+    }
     // The signal means Ptah stopped this subagent. A safety stop whose record
     // was not saved still publishes; only a missing agent id cannot.
     if (registryRecord?.agentId) {
@@ -1028,7 +1273,7 @@ export class SubagentBudgetMonitor {
     }
     // A completed record is dropped from the registry, so it is never offered for resume.
     if (registryRecord) {
-      this.registry.update(toolCallId, {
+      this.registry.update(registryToolCallId ?? toolCallId, {
         status: 'completed',
         completedAt: Date.now(),
       });
@@ -1105,7 +1350,18 @@ export class SubagentBudgetMonitor {
       handoffTokens: limits.handoffTokens,
       stopWeightedTokens: limits.stopWeightedTokens,
     };
-    const recordText = handoffMessage(subject, usage, task?.text, files);
+    if (who.agentId && !state.transcriptPath) {
+      const workspace = this.records.workspaceOf(live.sessionId);
+      if (workspace) state.transcriptPath = this.hookTranscriptByAgent.get(who.agentId)
+        ?? resolveSubagentTranscriptPath(os.homedir(), workspace, live.sessionId, who.agentId);
+    }
+    const progress: HandoffProgress = {
+      lastAssistantText: state.lastAssistantText,
+      filePaths: [...state.filePaths],
+      toolCalls: state.toolCalls.map(({ name, targetPath, outcome }) => ({ name, targetPath, outcome })),
+      transcriptPath: state.transcriptPath,
+    };
+    const recordText = redactBudgetSecrets(handoffMessage(subject, usage, task?.text, files, undefined, progress));
     const write = await this.records.writeOnce(
       live.sessionId,
       toolCallId,
@@ -1119,7 +1375,7 @@ export class SubagentBudgetMonitor {
           name: write.name,
         },
         handoff: {
-          text: handoffMessage(subject, usage, task?.text, files, write.path),
+          text: redactBudgetSecrets(handoffMessage(subject, usage, task?.text, files, write.path, progress)),
           subject,
           recordPath: write.path,
         },
