@@ -397,8 +397,18 @@ export function buildGoVetEnv(
 ): Record<string, string> {
   const inherited =
     platform === 'win32' ? [...INHERITED_ENV, 'LOCALAPPDATA'] : INHERITED_ENV;
+  const locations = pickInheritedEnv(parentEnv, inherited, platform);
+  // Go requires LocalAppData or GOCACHE on Windows. Some hosts provide only
+  // USERPROFILE; derive the conventional cache location for those hosts.
+  if (platform === 'win32' && !locations['LOCALAPPDATA'] && locations['USERPROFILE']) {
+    locations['LOCALAPPDATA'] = path.win32.join(
+      locations['USERPROFILE'],
+      'AppData',
+      'Local',
+    );
+  }
   return {
-    ...pickInheritedEnv(parentEnv, inherited, platform),
+    ...locations,
     PATH: pathDirs.join(platform === 'win32' ? ';' : ':'),
     ...GO_VET_FIXED_ENV,
   };

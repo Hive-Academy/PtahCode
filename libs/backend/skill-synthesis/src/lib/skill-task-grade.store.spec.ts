@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import { join, sep } from 'node:path';
+import { normalizeWorkspaceRoot } from '@ptah-extension/platform-core';
 import { MIGRATIONS } from '@ptah-extension/persistence-sqlite';
 import { resolveOpener, type TestDatabase } from './queue/queue-db.test-support';
 import { groupGradeAttributions, SkillTaskGradeStore, type SkillTaskGrade } from './skill-task-grade.store';
@@ -151,7 +152,7 @@ maybe('SkillTaskGradeStore', () => {
       expect(store.upsert({ ...grade, workspaceRoot: null })).toBe(true);
       expect(store.upsert({ ...grade, workspaceRoot: root, verdict: 'fail', gradedAt: 2 })).toBe(true);
       expect(db.prepare('SELECT workspace_root, verdict, graded_at FROM skill_task_grades').all())
-        .toEqual([{ workspace_root: root, verdict: 'fail', graded_at: 2 }]);
+        .toEqual([{ workspace_root: normalizeWorkspaceRoot(root), verdict: 'fail', graded_at: 2 }]);
     } finally { db.close(); }
   });
 

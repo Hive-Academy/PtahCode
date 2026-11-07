@@ -1659,6 +1659,7 @@ describe('PluginRpcHandlers — harness root, config home and local items (TASK_
     beforeEach(() => {
       tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ptah-b12-'));
       fs.mkdirSync(path.join(tmpRoot, '.git'));
+      fs.mkdirSync(path.join(tmpRoot, '.ptah'));
       subFolder = path.join(tmpRoot, 'packages', 'app');
       fs.mkdirSync(subFolder, { recursive: true });
     });

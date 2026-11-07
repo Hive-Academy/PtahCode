@@ -241,6 +241,7 @@ describe('run manifest decisions (target, output root, guards)', () => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'ptah-checkpoint-'));
     // A root marker, so the harness root of every folder below is `root`.
     fs.mkdirSync(path.join(root, '.git'));
+    fs.mkdirSync(path.join(root, '.ptah'));
     opened = path.join(root, 'packages', 'app');
     sibling = path.join(root, 'packages', 'other');
     fs.mkdirSync(opened, { recursive: true });

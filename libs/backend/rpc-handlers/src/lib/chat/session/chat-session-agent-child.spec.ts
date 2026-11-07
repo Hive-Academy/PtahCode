@@ -107,9 +107,9 @@ for (const part of [
   'my-repo/other',
 ])
   mkdirSync(join(TEST_ROOT, part), { recursive: true });
-const ROOT = `${TEST_ROOT}/my-repo`;
-const WORKTREE = `${TEST_ROOT}/my-repo/.ptah/worktrees/child-1`;
-const APP_PATH = `${TEST_ROOT}/ptah-app`;
+const ROOT = join(TEST_ROOT, 'my-repo');
+const WORKTREE = join(ROOT, '.ptah', 'worktrees', 'child-1');
+const APP_PATH = join(TEST_ROOT, 'ptah-app');
 const CHILD_TAB = '0f1e2d3c-4b5a-4968-8776-655443322110';
 
 interface Harness {
@@ -261,7 +261,7 @@ function makeHarness(
 }
 
 const HANDOFF_TAB = '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d';
-const HANDOFF_CWD = `${TEST_ROOT}/my-repo/packages/parser`;
+const HANDOFF_CWD = join(ROOT, 'packages', 'parser');
 const HANDOFF_PROMPT = 'SECRET-CONTINUATION continue the parser work';
 
 function handoffParams(
@@ -400,7 +400,7 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
   describe('startAgentChildSession', () => {
     it('deduplicates an ancestor by physical identity', async () => {
       const alias = join(ROOT, 'parent-alias');
-      symlinkSync(join(ROOT, 'parent'), alias, 'dir');
+      symlinkSync(join(ROOT, 'parent'), alias, process.platform === 'win32' ? 'junction' : 'dir');
       const h = makeHarness({
         metadata: {
           workspaceId: ROOT,
@@ -448,7 +448,7 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
       expect(result.success).toBe(true);
       expect(startConfig(h)['pluginConfigAncestorRoots']).toEqual([
         ROOT,
-        `${TEST_ROOT}/my-repo/parent`,
+        join(ROOT, 'parent'),
       ]);
     });
 

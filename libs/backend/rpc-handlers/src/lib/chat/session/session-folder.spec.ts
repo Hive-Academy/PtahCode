@@ -85,23 +85,26 @@ describe('resolveSessionFolder', () => {
   });
   it('rejects symlink escape from a registered folder', async () => {
     const link = join(project, 'escape');
-    await symlink(outside, link, 'dir');
+    await symlink(outside, link, process.platform === 'win32' ? 'junction' : 'dir');
     await expect(
       resolve({ workspaceId: project, workingDirectory: link }),
     ).rejects.toMatchObject({ errorCode: 'SESSION_FOLDER_UNAVAILABLE' });
   });
   it('resolves physical aliases for identity checks', async () => {
     const alias = join(project, 'alias');
-    await symlink(child, alias, 'dir');
+    await symlink(child, alias, process.platform === 'win32' ? 'junction' : 'dir');
     await expect(
       validateSessionPolicyRoot(alias, provider(), platformInfo()),
     ).resolves.toBe(child);
   });
   it('accepts a readable Windows directory mode without Unix execute bits', async () => {
-    const stat = jest.spyOn(fs, 'stat').mockResolvedValueOnce({
+    const realStat = fs.stat;
+    const windowsStat = {
       isDirectory: () => true,
       mode: 0o40666,
-    } as never);
+    } as never;
+    const stat = jest.spyOn(fs, 'stat').mockImplementation((target, options) =>
+      String(target) === child ? Promise.resolve(windowsStat) : realStat(target, options));
     try {
       await expect(
         validateSessionPolicyRoot(child, provider(), platformInfo()),
@@ -119,18 +122,29 @@ describe('resolveSessionFolder', () => {
     ).rejects.toMatchObject({ errorCode: 'SESSION_FOLDER_UNAVAILABLE' });
   });
   it('rejects a physically unreadable directory despite an authorized parent', async () => {
-    await chmod(child, 0o000);
+    // Windows chmod does not deny reads; inject the access error the policy handles.
+    const fsModule = jest.requireActual<typeof import('node:fs/promises')>('node:fs/promises');
+    const realAccess = fsModule.access;
+    const access = process.platform === 'win32'
+      ? jest.spyOn(fsModule, 'access').mockImplementation((target, mode) =>
+          // Only the saved child is unreadable; parent and unrelated checks use the OS.
+          String(target) === child
+            ? Promise.reject(Object.assign(new Error('access denied'), { code: 'EACCES' }))
+            : realAccess(target, mode))
+      : null;
+    if (!access) await chmod(child, 0o000);
     try {
       await expect(
         resolve({ workspaceId: project, workingDirectory: child }),
       ).rejects.toMatchObject({ errorCode: 'SESSION_FOLDER_UNAVAILABLE' });
     } finally {
-      await chmod(child, 0o700);
+      access?.mockRestore();
+      if (!access) await chmod(child, 0o700);
     }
   });
   it('rejects a dangling symlink filesystem error', async () => {
     const broken = join(project, 'broken');
-    await symlink(join(base, 'missing'), broken, 'dir');
+    await symlink(join(base, 'missing'), broken, process.platform === 'win32' ? 'junction' : 'dir');
     await expect(
       resolve({ workspaceId: project, workingDirectory: broken }),
     ).rejects.toMatchObject({ errorCode: 'SESSION_FOLDER_UNAVAILABLE' });

@@ -10,7 +10,10 @@ import 'reflect-metadata';
 import { container } from 'tsyringe';
 import { TOKENS } from '@ptah-extension/vscode-core';
 import { MEMORY_TOKENS } from '@ptah-extension/memory-curator';
-import type { IndexingStatus } from '@ptah-extension/memory-curator';
+import type {
+  IndexingRunDeps,
+  IndexingStatus,
+} from '@ptah-extension/memory-curator';
 import type { RpcMethodName } from '@ptah-extension/shared';
 import { IndexingRpcHandlers } from './indexing-rpc.handlers';
 
@@ -37,6 +40,12 @@ function makeStatus(overrides: Partial<IndexingStatus> = {}): IndexingStatus {
     embedder: { ready: true },
     ...overrides,
   };
+}
+
+function censusPromise<T>(result: Promise<T>, joined: boolean): Promise<T> & {
+  joinedActiveCensus: boolean;
+} {
+  return Object.assign(result, { joinedActiveCensus: joined });
 }
 
 // ---- Mock factories ----------------------------------------------------------
@@ -323,9 +332,15 @@ describe('IndexingRpcHandlers', () => {
 
     it('accepts a start during a background-only run (it joins the census)', async () => {
       const { rpcHandler, indexingControl, handlers } = buildHandlers();
+      const runSymbols = jest.fn().mockResolvedValue(undefined);
       handlers.setRunDeps({
-        runSymbols: jest.fn().mockResolvedValue(undefined),
+        runSymbols,
       });
+      indexingControl.start.mockImplementationOnce(
+        async (_pipeline: unknown, root: string, deps: IndexingRunDeps) => {
+          await deps.runSymbols(root);
+        },
+      );
       indexingControl.isRunning.mockReturnValue(false);
       indexingControl.getStatus.mockResolvedValueOnce(
         makeStatus({
@@ -340,6 +355,248 @@ describe('IndexingRpcHandlers', () => {
 
       expect(result).toEqual({ accepted: true, state: 'indexing' });
       expect(indexingControl.start).toHaveBeenCalledTimes(1);
+      expect(runSymbols).toHaveBeenCalledTimes(1);
+    });
+
+    it('runs one forced follow-up after a background join, coalescing further forced starts', async () => {
+      const { rpcHandler, indexingControl, handlers } = buildHandlers();
+      let finishJoined!: () => void;
+      const joined = new Promise<void>((resolve) => {
+        finishJoined = resolve;
+      });
+      const bootStats = {
+        filesScanned: 1,
+        symbolsIndexed: 1,
+        errors: 0,
+        durationMs: 1,
+      };
+      const freshStats = { ...bootStats, filesScanned: 2, symbolsIndexed: 2 };
+      const runSymbols = jest
+        .fn()
+        .mockImplementationOnce(() =>
+          censusPromise(joined.then(() => bootStats), true),
+        )
+        .mockResolvedValue(freshStats);
+      let completedStats:
+        | Awaited<ReturnType<IndexingRunDeps['runSymbols']>>
+        | undefined;
+      indexingControl.start.mockImplementationOnce(
+        async (_pipeline: unknown, root: string, deps: IndexingRunDeps) => {
+          completedStats = await deps.runSymbols(root);
+        },
+      );
+      indexingControl.getStatus.mockResolvedValue(
+        makeStatus({
+          state: 'indexing',
+          running: { origin: 'background', startedAt: 1, force: false },
+        }),
+      );
+      handlers.setRunDeps({
+        runSymbols,
+      });
+
+      await Promise.all([
+        rpcHandler.call('indexing:start', {
+          workspaceRoot: '/workspace',
+          force: true,
+        }),
+        rpcHandler.call('indexing:start', {
+          workspaceRoot: '/workspace/',
+          force: true,
+        }),
+      ]);
+      indexingControl.isRunning.mockReturnValue(true);
+      await rpcHandler.call('indexing:start', {
+        workspaceRoot: '/workspace/',
+        force: true,
+      });
+      await rpcHandler.call('indexing:start', {
+        workspaceRoot: '/workspace',
+        force: true,
+      });
+      expect(indexingControl.start).toHaveBeenCalledTimes(1);
+      expect(runSymbols).toHaveBeenCalledTimes(1);
+
+      finishJoined();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(indexingControl.start).toHaveBeenCalledTimes(1);
+      expect(runSymbols).toHaveBeenCalledTimes(2);
+      expect(completedStats).toEqual(freshStats);
+      indexingControl.isRunning.mockReturnValue(false);
+      await rpcHandler.call('indexing:start', {
+        workspaceRoot: '/workspace',
+        force: true,
+      });
+      expect(indexingControl.start).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not schedule a follow-up when the forced joiner aborts', async () => {
+      const { rpcHandler, indexingControl, handlers } = buildHandlers();
+      const controller = new AbortController();
+      indexingControl.getStatus.mockResolvedValue(
+        makeStatus({
+          running: { origin: 'background', startedAt: 1, force: false },
+        }),
+      );
+      indexingControl.start.mockImplementationOnce(
+        async (_pipeline: unknown, root: string, deps: IndexingRunDeps) => {
+          await deps.runSymbols(root, { signal: controller.signal });
+        },
+      );
+      const runSymbols = jest.fn().mockImplementationOnce(() => {
+        controller.abort();
+        return censusPromise(
+          Promise.reject(new DOMException('Aborted', 'AbortError')),
+          true,
+        );
+      });
+      handlers.setRunDeps({ runSymbols });
+
+      await rpcHandler.call('indexing:start', {
+        workspaceRoot: '/workspace',
+        force: true,
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(indexingControl.start).toHaveBeenCalledTimes(1);
+      expect(runSymbols).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not start fresh when the joined boot census rejects with AbortError', async () => {
+      const { rpcHandler, indexingControl, handlers } = buildHandlers();
+      const abortError = new Error('boot shutdown');
+      abortError.name = 'AbortError';
+      const runSymbols = jest.fn().mockImplementationOnce(() =>
+        censusPromise(Promise.reject(abortError), true),
+      );
+      handlers.setRunDeps({ runSymbols });
+      indexingControl.start.mockImplementationOnce(
+        async (_pipeline: unknown, root: string, deps: IndexingRunDeps) => {
+          await deps.runSymbols(root);
+        },
+      );
+
+      await rpcHandler.call('indexing:start', {
+        workspaceRoot: '/workspace',
+        force: true,
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(runSymbols).toHaveBeenCalledTimes(1);
+    });
+
+    it('detects boot joining after the forced start begins', async () => {
+      const { rpcHandler, indexingControl, handlers } = buildHandlers();
+      let continueSetup!: () => void;
+      const setup = new Promise<void>((resolve) => {
+        continueSetup = resolve;
+      });
+      const runSymbols = jest
+        .fn()
+        .mockImplementationOnce(() =>
+          censusPromise(Promise.resolve(undefined), true),
+        )
+        .mockResolvedValue(undefined);
+      handlers.setRunDeps({ runSymbols });
+      indexingControl.start.mockImplementationOnce(
+        async (_pipeline: unknown, root: string, deps: IndexingRunDeps) => {
+          await setup;
+          await deps.runSymbols(root);
+        },
+      );
+      indexingControl.getStatus.mockResolvedValue(makeStatus());
+
+      await rpcHandler.call('indexing:start', {
+        workspaceRoot: '/workspace',
+        force: true,
+      });
+      continueSetup();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(runSymbols).toHaveBeenCalledTimes(2);
+    });
+
+    it('runs fresh after a rejected boot join and clears pending after rejection', async () => {
+      const { rpcHandler, indexingControl, handlers, logger } = buildHandlers();
+      const bootFailure = new Error('boot failed');
+      const runSymbols = jest
+        .fn()
+        .mockImplementationOnce(() =>
+          censusPromise(Promise.reject(bootFailure), true),
+        )
+        .mockResolvedValueOnce(undefined)
+        .mockImplementationOnce(() =>
+          censusPromise(Promise.reject(new Error('fresh failed')), false),
+        )
+        .mockResolvedValue(undefined);
+      handlers.setRunDeps({ runSymbols });
+      indexingControl.start.mockImplementation(
+        async (_pipeline: unknown, root: string, deps: IndexingRunDeps) => {
+          await deps.runSymbols(root);
+        },
+      );
+
+      await rpcHandler.call('indexing:start', {
+        workspaceRoot: '/workspace',
+        force: true,
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(runSymbols).toHaveBeenCalledTimes(2);
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[indexing] joined boot census failed; starting fresh census',
+        bootFailure,
+      );
+      await rpcHandler.call('indexing:start', {
+        workspaceRoot: '/workspace',
+        force: true,
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(runSymbols).toHaveBeenCalledTimes(3);
+      await rpcHandler.call('indexing:start', {
+        workspaceRoot: '/workspace',
+        force: true,
+      });
+      expect(runSymbols).toHaveBeenCalledTimes(4);
+    });
+
+    it('refuses pipeline mismatch and starts arriving during fresh discovery', async () => {
+      const { rpcHandler, indexingControl, handlers } = buildHandlers();
+      let finishBoot!: () => void;
+      const boot = new Promise<void>((resolve) => {
+        finishBoot = resolve;
+      });
+      let finishFresh!: () => void;
+      const fresh = new Promise<void>((resolve) => {
+        finishFresh = resolve;
+      });
+      const runSymbols = jest
+        .fn()
+        .mockImplementationOnce(() => censusPromise(boot, true))
+        .mockImplementationOnce(() => censusPromise(fresh, false));
+      handlers.setRunDeps({ runSymbols });
+      indexingControl.start.mockImplementationOnce(
+        async (_pipeline: unknown, root: string, deps: IndexingRunDeps) => {
+          await deps.runSymbols(root);
+        },
+      );
+      await rpcHandler.call('indexing:start', {
+        workspaceRoot: '/workspace',
+        pipeline: 'symbols',
+        force: true,
+      });
+      const mismatch = await rpcHandler.call('indexing:start', {
+        workspaceRoot: '/workspace',
+        pipeline: 'memory',
+        force: true,
+      });
+      expect(mismatch).toMatchObject({ accepted: false, reason: 'already-running' });
+      finishBoot();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const late = await rpcHandler.call('indexing:start', {
+        workspaceRoot: '/workspace',
+        pipeline: 'symbols',
+        force: true,
+      });
+      expect(late).toMatchObject({ accepted: false, reason: 'already-running' });
+      expect(runSymbols).toHaveBeenCalledTimes(2);
+      finishFresh();
     });
 
     it('refuses with setup-failed when the status read throws', async () => {
