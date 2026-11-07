@@ -38,7 +38,7 @@ function inboundSender(receipt: AgentDeliveryReceipt | undefined, parentFamily: 
 
 interface ReceiptMatch {
   readonly receipt: AgentDeliveryReceipt;
-  /** Another unmatched receipt with the same preview and time came from a different sender. */
+  /** The receipt's group (same preview and time, not id-matched) holds more than one sender. */
   readonly ambiguous: boolean;
 }
 
@@ -47,8 +47,9 @@ const senderKey = (receipt: AgentDeliveryReceipt) => `${receipt.sender ?? 'paren
 /**
  * Joins user-role transcript messages to receipts. An id match wins; otherwise the preview is matched
  * in time order and each receipt is consumed once, so equal previews from two peers keep their own
- * senders. When tied candidates (same preview and creation time) came from different senders, the
- * match is flagged ambiguous so no peer is named.
+ * senders. When the receipts left after id matching hold a group with the same preview and creation
+ * time but different senders, every preview match drawn from that group is flagged ambiguous so no
+ * peer is named.
  */
 function matchReceipts(
   messages: readonly ExecutionChatMessage[],
@@ -68,16 +69,22 @@ function matchReceipts(
       unresolved.push(message);
     }
   }
-  const byTime = [...receipts].filter(receipt => receipt.preview).sort((a, b) => a.createdAt - b.createdAt);
+  const byTime = receipts.filter(receipt => receipt.preview && !used.has(receipt.id)).sort((a, b) => a.createdAt - b.createdAt);
+  // Groups are fixed before any preview match consumes a receipt: once one tied receipt is taken,
+  // the rest of its group still cannot say which message it belongs to.
+  const groupKey = (receipt: AgentDeliveryReceipt) => `${receipt.createdAt}\u0000${normalize(receipt.preview ?? '')}`;
+  const sendersByGroup = new Map<string, Set<string>>();
+  for (const receipt of byTime) {
+    const senders = sendersByGroup.get(groupKey(receipt)) ?? new Set<string>();
+    senders.add(senderKey(receipt));
+    sendersByGroup.set(groupKey(receipt), senders);
+  }
   for (const message of [...unresolved].sort((a, b) => a.timestamp - b.timestamp)) {
     const text = normalize(message.rawContent ?? '');
-    const candidates = byTime.filter(item => !used.has(item.id) && text.startsWith(normalize(item.preview ?? '')));
-    const receipt = candidates[0];
+    const receipt = byTime.find(item => !used.has(item.id) && text.startsWith(normalize(item.preview ?? '')));
     if (!receipt) continue;
     used.add(receipt.id);
-    const ambiguous = candidates.some(item => item !== receipt && item.createdAt === receipt.createdAt &&
-      normalize(item.preview ?? '') === normalize(receipt.preview ?? '') && senderKey(item) !== senderKey(receipt));
-    matches.set(message.id, { receipt, ambiguous });
+    matches.set(message.id, { receipt, ambiguous: (sendersByGroup.get(groupKey(receipt))?.size ?? 0) > 1 });
   }
   return matches;
 }

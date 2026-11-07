@@ -123,6 +123,30 @@ describe('laneThreadEntries', () => {
         expect(message?.senderAgentId).toBeUndefined();
         expect(entries.filter(entry => entry.id.startsWith('receipt:'))).toHaveLength(1);
       });
+
+      it.each([
+        ['A then B', true],
+        ['B then A', false],
+      ])('names no peer for either of two messages drawn from a tied group (%s)', (_order, aFirst) => {
+        const tied = { ...fromOther, createdAt: fromLane.createdAt };
+        const receipts = aFirst ? [fromLane, tied] : [tied, fromLane];
+        const entries = laneThreadEntries(messages, receipts, 'Claude', 'Docs', 'Codex', [], undefined, names);
+        expect(entries).toHaveLength(2);
+        for (const entry of entries) {
+          expect(entry).toMatchObject({ sender: 'From another lane', senderKind: 'peer-lane' });
+          expect(entry.senderAgentId).toBeUndefined();
+        }
+      });
+
+      it('keeps an id match authoritative and names the peer of the receipt left over', () => {
+        const tied = { ...fromOther, createdAt: fromLane.createdAt };
+        const byId = [messages[0], { ...messages[1], id: 'lane:user:peer-2' }];
+        const entries = laneThreadEntries(byId, [fromLane, tied], 'Claude', 'Docs', 'Codex', [], undefined, names);
+        expect(entries.map(entry => [entry.id, entry.sender])).toEqual([
+          ['lane:user:peer-2', 'From lane Docs'],
+          ['stream-2', 'From lane Schema'],
+        ]);
+      });
     });
 
     it('keeps user, parent and own-lane entries on their own kinds', () => {
