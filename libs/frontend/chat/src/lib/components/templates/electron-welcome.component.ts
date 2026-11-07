@@ -337,8 +337,7 @@ export class ElectronWelcomeComponent {
     try {
       await this.machines.loadMachines();
     } catch (error: unknown) {
-      // A transport failure leaves the label count-free; the button still
-      // opens the view, which reports the error and offers Try again.
+      // degradation-audit: reported — a transport failure is logged and leaves the label count-free; the view reports the error and offers Try again.
       this.logger.warn(
         LOG_CONTEXT,
         'Machine list could not be loaded',
