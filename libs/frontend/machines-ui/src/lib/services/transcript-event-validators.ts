@@ -16,8 +16,17 @@ import {
  *
  * Every required field of a variant is checked for its primitive type, its
  * literal union or its nested shape. An optional field may be absent; when
- * present it must have its declared type. Fields typed `unknown` (a tool's
- * `output`) are not checked.
+ * present it must have its declared type.
+ *
+ * The checks run on the copy `displayBlockValue` made, which has no
+ * `undefined`-valued keys, and read own properties only. So "present" means
+ * an own key with a value other than `undefined`.
+ *
+ * A required field typed `unknown` (a tool's `output`) passes with any value
+ * and also when absent: `unknown` admits `undefined`, and JSON drops an
+ * `undefined`-valued key on the way from the worker, so absence is the
+ * `undefined` the type allows. Producers send `output: block.content`, which
+ * can be undefined.
  */
 
 type EventType = FlatStreamEventUnion['eventType'];
@@ -37,6 +46,8 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 const isString: Predicate = (value) => typeof value === 'string';
 const isNumber: Predicate = (value) => typeof value === 'number';
 const isBoolean: Predicate = (value) => typeof value === 'boolean';
+/** A required field of type `unknown`: every value, `undefined` included. */
+const isAnyValue: Predicate = () => true;
 
 /**
  * A check for the members of a string literal union. Taking the members as
@@ -63,8 +74,13 @@ function arrayOf(check: Predicate): Predicate {
   return (value) => Array.isArray(value) && value.every(check);
 }
 
+/** The own property `key` of `raw`; never a value inherited from a prototype. */
+function ownField(raw: Raw, key: string): unknown {
+  return Object.prototype.hasOwnProperty.call(raw, key) ? raw[key] : undefined;
+}
+
 function hasFields(raw: Raw, checks: FieldChecks): boolean {
-  return Object.keys(checks).every((key) => checks[key](raw[key]));
+  return Object.keys(checks).every((key) => checks[key](ownField(raw, key)));
 }
 
 function shape(checks: FieldChecks): Predicate {
@@ -186,6 +202,7 @@ const EVENT_FIELD_CHECKS: { readonly [K in EventType]: FieldChecks } = {
   tool_delta: { toolCallId: isString, delta: isString },
   tool_result: {
     toolCallId: isString,
+    output: isAnyValue,
     isError: isBoolean,
     isPermissionRequest: optionalBoolean,
   },

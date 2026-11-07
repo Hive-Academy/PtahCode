@@ -160,4 +160,84 @@ describe('RemoteSessionPaneComponent', () => {
       true,
     );
   });
+
+  it('an answer that settles after a session switch leaves the new session alone', async () => {
+    const { fixture, store } = setup(view({ pendingPermissions: [REQUEST] }));
+    let settleA!: (outcome: MachinesOutcome) => void;
+    store.respondPermission.mockReturnValueOnce(
+      new Promise<MachinesOutcome>((resolve) => (settleA = resolve)),
+    );
+    (q(fixture, 'approval-allow') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect((q(fixture, 'approval-allow') as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+
+    // Session B shows a request with the same id, and answers it while A's
+    // answer is still in flight.
+    fixture.componentRef.setInput('sessionId', 's2');
+    fixture.detectChanges();
+    expect((q(fixture, 'approval-allow') as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+    let settleB!: (outcome: MachinesOutcome) => void;
+    store.respondPermission.mockReturnValueOnce(
+      new Promise<MachinesOutcome>((resolve) => (settleB = resolve)),
+    );
+    (q(fixture, 'approval-deny') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(store.respondPermission).toHaveBeenLastCalledWith(
+      'm1',
+      's2',
+      'p1',
+      'deny',
+    );
+
+    settleA({ ok: false, error: { message: 'Session A failed' } });
+    await flush();
+    fixture.detectChanges();
+    expect(q(fixture, 'approval-error')).toBeNull();
+    expect((q(fixture, 'approval-allow') as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+
+    settleB({ ok: true, value: undefined });
+    await flush();
+    fixture.detectChanges();
+    expect(q(fixture, 'approval-error')).toBeNull();
+    expect((q(fixture, 'approval-allow') as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
+
+  it('an answer from a session left and re-entered is not applied', async () => {
+    const { fixture, store } = setup(view({ pendingPermissions: [REQUEST] }));
+    let settle!: (outcome: MachinesOutcome) => void;
+    store.respondPermission.mockReturnValueOnce(
+      new Promise<MachinesOutcome>((resolve) => (settle = resolve)),
+    );
+    (q(fixture, 'approval-allow') as HTMLButtonElement).click();
+    fixture.componentRef.setInput('sessionId', 's2');
+    fixture.detectChanges();
+    fixture.componentRef.setInput('sessionId', 's1');
+    fixture.detectChanges();
+    settle({ ok: false, error: { message: 'Late' } });
+    await flush();
+    fixture.detectChanges();
+    expect(q(fixture, 'approval-error')).toBeNull();
+  });
+
+  it('a rejected answer shows on its block and frees it', async () => {
+    const { fixture, store } = setup(view({ pendingPermissions: [REQUEST] }));
+    store.respondPermission.mockRejectedValueOnce(new Error('channel closed'));
+    (q(fixture, 'approval-allow') as HTMLButtonElement).click();
+    await flush();
+    fixture.detectChanges();
+    expect(text(fixture, 'approval-error')).toContain(
+      'The answer could not be sent: channel closed',
+    );
+    expect((q(fixture, 'approval-allow') as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
 });

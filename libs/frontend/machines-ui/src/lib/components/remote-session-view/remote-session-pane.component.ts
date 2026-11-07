@@ -13,6 +13,7 @@ import {
   type MachinesError,
   type RemoteSessionView,
 } from '../../services/machines-store';
+import { displayText } from '../../utils/display-text';
 import { refusalSentence } from '../../utils/remote-session-copy';
 import type { RemoteTranscriptItem } from '../../utils/remote-transcript';
 import {
@@ -36,8 +37,9 @@ interface ApprovalEntry {
  * snapshot, and one approval block per pending or timed-out request.
  *
  * It answers requests through {@link MachinesStore.respondPermission}. An
- * answer in flight disables its block; a failed answer shows on its block.
- * Both start empty for each session. Links in the transcript are passed up
+ * answer in flight disables its block; a failed or rejected answer shows on
+ * its block. Both start empty for each session, and an answer that settles
+ * after the session changed is not applied. Links in the transcript are passed up
  * as `linkActivated`; the page decides what a link does.
  */
 @Component({
@@ -132,6 +134,18 @@ export class RemoteSessionPaneComponent {
     },
   );
 
+  /**
+   * A new object each time the session changes (A to B and back to A gives a
+   * third object). An answer remembers the token it started under and
+   * settles only while it is still current, so an outcome that arrives after
+   * a switch never touches the next session's state, even for a request id
+   * that session reuses.
+   */
+  private readonly sessionToken = computed(() => {
+    this.sessionKey();
+    return {};
+  });
+
   /** Requests with an answer in flight; empty for each session. */
   protected readonly answering = linkedSignal<
     readonly [string, string],
@@ -200,12 +214,14 @@ export class RemoteSessionPaneComponent {
     decision: RemoteApprovalDecision,
   ): Promise<void> {
     if (this.answering().has(request.id)) return;
+    const token = this.sessionToken();
     this.answering.update((set) => new Set(set).add(request.id));
     this.answerErrors.update((map) => {
       const next = new Map(map);
       next.delete(request.id);
       return next;
     });
+    let error: MachinesError | null;
     try {
       const outcome = await this.store.respondPermission(
         this.machineId(),
@@ -213,19 +229,34 @@ export class RemoteSessionPaneComponent {
         request.id,
         decision,
       );
-      if (!outcome.ok) {
-        const error: MachinesError =
-          'error' in outcome
-            ? outcome.error
-            : { message: refusalSentence(outcome.refused, this.machineName()) };
-        this.answerErrors.update((map) => new Map(map).set(request.id, error));
-      }
-    } finally {
-      this.answering.update((set) => {
-        const next = new Set(set);
-        next.delete(request.id);
-        return next;
-      });
+      error = outcome.ok
+        ? null
+        : 'error' in outcome
+          ? outcome.error
+          : { message: refusalSentence(outcome.refused, this.machineName()) };
+    } catch (rejection: unknown) {
+      // The store reports failures as outcomes; a rejection is unexpected,
+      // so it is shown on the request's block instead of being dropped.
+      error = { message: answerFailureSentence(rejection) };
+    }
+    if (token !== this.sessionToken()) return;
+    this.answering.update((set) => {
+      const next = new Set(set);
+      next.delete(request.id);
+      return next;
+    });
+    if (error !== null) {
+      const failure = error;
+      this.answerErrors.update((map) => new Map(map).set(request.id, failure));
     }
   }
+}
+
+/** The line shown for an answer whose request rejected instead of resolving. */
+function answerFailureSentence(rejection: unknown): string {
+  const detail =
+    rejection instanceof Error ? displayText(rejection.message, 200) : '';
+  return detail === ''
+    ? 'The answer could not be sent.'
+    : `The answer could not be sent: ${detail}`;
 }

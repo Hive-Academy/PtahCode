@@ -184,57 +184,87 @@ const VALID_WITH_OPTIONALS: readonly FlatStreamEventUnion[] = [
   },
 ];
 
-/** `[eventType, field, wrong value]`: each required field, mistyped. */
-const REQUIRED_FIELDS: readonly (readonly [EventType, string, unknown])[] = [
-  ['message_start', 'role', 'system'],
-  ['text_delta', 'delta', 1],
-  ['text_delta', 'blockIndex', '0'],
-  ['thinking_start', 'blockIndex', '0'],
-  ['thinking_delta', 'delta', null],
-  ['thinking_delta', 'blockIndex', '0'],
-  ['tool_start', 'toolCallId', 1],
-  ['tool_start', 'toolName', 1],
-  ['tool_start', 'isTaskTool', 'false'],
-  ['tool_delta', 'toolCallId', 1],
-  ['tool_delta', 'delta', {}],
-  ['tool_result', 'toolCallId', 1],
-  ['tool_result', 'isError', 0],
-  ['agent_start', 'toolCallId', 1],
-  ['agent_start', 'agentType', 1],
-  ['message_delta', 'tokenUsage', 'lots'],
-  ['signature_delta', 'blockIndex', '0'],
-  ['signature_delta', 'signature', 1],
-  ['compaction_start', 'trigger', 'scheduled'],
-  ['compaction_start', 'preTokens', '100'],
-  ['compaction_complete', 'trigger', 'scheduled'],
-  ['background_agent_started', 'toolCallId', 1],
-  ['background_agent_started', 'agentType', 1],
-  ['background_agent_completed', 'toolCallId', 1],
-  ['background_agent_completed', 'agentId', 1],
-  ['background_agent_stopped', 'toolCallId', 1],
-  ['background_agent_stopped', 'agentId', 1],
-  ['background_tasks_snapshot', 'sessionId', 1],
-  ['background_tasks_snapshot', 'tasks', {}],
-  ['agent_progress', 'parentToolUseId', 1],
-  ['agent_progress', 'taskId', 1],
-  ['agent_progress', 'description', 1],
-  ['agent_progress', 'totalTokens', '10'],
-  ['agent_progress', 'toolUses', '1'],
-  ['agent_progress', 'durationMs', '5'],
-  ['agent_status', 'parentToolUseId', 1],
-  ['agent_status', 'taskId', 1],
-  ['agent_status', 'status', 'exploded'],
-  ['agent_completed', 'parentToolUseId', 1],
-  ['agent_completed', 'taskId', 1],
-  ['agent_completed', 'status', 'running'],
-  ['agent_completed', 'summary', 1],
-  ['agent_completed', 'outputFile', 1],
-  ['turn_state', 'phase', 'asleep'],
-  ['turn_state', 'revision', '3'],
-  ['turn_state', 'backgroundTasks', {}],
-  ['turn_state', 'sessionCrons', {}],
-  ['turn_state', 'terminalReason', 'nope'],
-];
+/** The keys of `T` that are not optional. */
+type RequiredKeys<T> = {
+  [K in keyof T]-?: object extends Pick<T, K> ? never : K;
+}[keyof T];
+
+/** The required fields a variant adds to the base the caller checks. */
+type VariantRequiredKeys<K extends EventType> = Exclude<
+  RequiredKeys<EventOf<K>>,
+  'id' | 'messageId' | 'timestamp' | 'eventType'
+>;
+
+/**
+ * Marks a required field typed `unknown`: no value has the wrong type, and
+ * absence is the `undefined` the type admits (JSON drops it in transit).
+ */
+const ANY_VALUE_IS_VALID = Symbol('any value is valid');
+
+/**
+ * A wrongly typed value for every required field of every variant. The mapped
+ * type makes the compiler reject a table that misses a required field or
+ * names one that is not required, so it cannot drift from the union.
+ */
+const WRONG_VALUES: {
+  readonly [K in EventType]: {
+    readonly [F in VariantRequiredKeys<K>]: unknown;
+  };
+} = {
+  message_start: { role: 'system' },
+  text_delta: { delta: 1, blockIndex: '0' },
+  thinking_start: { blockIndex: '0' },
+  thinking_delta: { delta: null, blockIndex: '0' },
+  tool_start: { toolCallId: 1, toolName: 1, isTaskTool: 'false' },
+  tool_delta: { toolCallId: 1, delta: {} },
+  tool_result: { toolCallId: 1, output: ANY_VALUE_IS_VALID, isError: 0 },
+  agent_start: { toolCallId: 1, agentType: 1 },
+  message_complete: {},
+  message_delta: { tokenUsage: 'lots' },
+  signature_delta: { blockIndex: '0', signature: 1 },
+  compaction_start: { trigger: 'scheduled', preTokens: '100' },
+  compaction_complete: { trigger: 'scheduled' },
+  background_agent_started: { toolCallId: 1, agentType: 1 },
+  background_agent_completed: { toolCallId: 1, agentId: 1 },
+  background_agent_stopped: { toolCallId: 1, agentId: 1 },
+  background_tasks_snapshot: { sessionId: 1, tasks: {} },
+  agent_progress: {
+    parentToolUseId: 1,
+    taskId: 1,
+    description: 1,
+    totalTokens: '10',
+    toolUses: '1',
+    durationMs: '5',
+  },
+  agent_status: { parentToolUseId: 1, taskId: 1, status: 'exploded' },
+  agent_completed: {
+    parentToolUseId: 1,
+    taskId: 1,
+    status: 'running',
+    summary: 1,
+    outputFile: 1,
+  },
+  turn_state: {
+    phase: 'asleep',
+    revision: '3',
+    backgroundTasks: {},
+    sessionCrons: {},
+    terminalReason: 'nope',
+  },
+};
+
+/** `[eventType, field, wrong value]` for every required field. */
+const REQUIRED_FIELDS: readonly (readonly [EventType, string, unknown])[] = (
+  Object.keys(WRONG_VALUES) as EventType[]
+).flatMap((eventType) =>
+  Object.entries(WRONG_VALUES[eventType]).map(
+    ([field, wrong]) => [eventType, field, wrong] as const,
+  ),
+);
+
+const MISTYPED_FIELDS = REQUIRED_FIELDS.filter(
+  ([, , wrong]) => wrong !== ANY_VALUE_IS_VALID,
+);
 
 function withField(
   eventType: EventType,
@@ -265,11 +295,20 @@ describe('parseFlatStreamEvent field checks', () => {
     },
   );
 
-  it.each(REQUIRED_FIELDS)('rejects %s without %s', (eventType, field) => {
+  it.each(MISTYPED_FIELDS)('rejects %s without %s', (eventType, field) => {
     expect(parseFlatStreamEvent(withoutField(eventType, field))).toBeNull();
   });
 
-  it.each(REQUIRED_FIELDS)(
+  it('covers the required fields of every variant', () => {
+    expect(REQUIRED_FIELDS).toContainEqual([
+      'tool_result',
+      'output',
+      ANY_VALUE_IS_VALID,
+    ]);
+    expect(REQUIRED_FIELDS.length).toBeGreaterThan(48);
+  });
+
+  it.each(MISTYPED_FIELDS)(
     'rejects %s with a mistyped %s (%p)',
     (eventType, field, wrong) => {
       expect(
@@ -388,5 +427,92 @@ describe('parseFlatStreamEvent field checks', () => {
       ...VALID.tool_result,
       output: { text: 'ab' },
     });
+  });
+
+  it.each([null, false, 0, '', [], {}])(
+    'accepts a tool_result whose output is %p',
+    (output) => {
+      const event = { ...VALID.tool_result, output };
+      expect(parseFlatStreamEvent(event)).toEqual(event);
+    },
+  );
+
+  it('accepts a tool_result with no output or an undefined output', () => {
+    // `output: unknown` admits undefined, and JSON drops an undefined-valued
+    // key in transit, so a producer's `output: block.content` can arrive
+    // without the key. Rejecting it would hide that tool's result.
+    const missing = withoutField('tool_result', 'output');
+    expect(parseFlatStreamEvent(missing)).toEqual(missing);
+    expect(
+      parseFlatStreamEvent({ ...VALID.tool_result, output: undefined }),
+    ).toEqual(missing);
+  });
+
+  it('does not read a required field from the prototype', () => {
+    const inherited = Object.create({ isError: false }) as Record<
+      string,
+      unknown
+    >;
+    Object.assign(inherited, withoutField('tool_result', 'isError'));
+    expect(parseFlatStreamEvent(inherited)).toBeNull();
+  });
+
+  describe('keys that differ only by an unsafe character', () => {
+    const RLO = '\u202E';
+    const ZWSP = '\u200B';
+    const LRI = '\u2066';
+    const RLM = '\u200F';
+
+    it('cannot replace a validated eventType', () => {
+      expect(
+        parseFlatStreamEvent({
+          ...VALID.text_delta,
+          [`eventType${RLO}`]: 'evil',
+        }),
+      ).toBeNull();
+    });
+
+    it('cannot replace a validated id with a value of the wrong type', () => {
+      expect(
+        parseFlatStreamEvent({ ...VALID.text_delta, [`id${ZWSP}`]: 7 }),
+      ).toBeNull();
+    });
+
+    it('returns the value that was checked when the collision is well typed', () => {
+      expect(
+        parseFlatStreamEvent({ ...VALID.text_delta, [`${LRI}id`]: 'e2' }),
+      ).toEqual({ ...VALID.text_delta, id: 'e2' });
+    });
+
+    it('cannot replace a validated nested field', () => {
+      expect(
+        parseFlatStreamEvent({
+          ...VALID.message_delta,
+          tokenUsage: { input: 1, output: 2, [`input${RLM}`]: 'many' },
+        }),
+      ).toBeNull();
+    });
+  });
+
+  it('checks the depth-bounded copy, so a too-deep value is null when checked', () => {
+    let deep: unknown = 'bottom';
+    for (let i = 0; i < 80; i++) deep = { next: deep };
+    const parsed = parseFlatStreamEvent({ ...VALID.tool_result, output: deep });
+    expect(parsed).not.toBeNull();
+    let node: unknown =
+      parsed?.eventType === 'tool_result' ? parsed.output : null;
+    let depth = 0;
+    while (typeof node === 'object' && node !== null) {
+      node = (node as Record<string, unknown>)['next'];
+      depth++;
+    }
+    expect(node).toBeNull();
+    expect(depth).toBeLessThan(80);
+    expect(
+      parseFlatStreamEvent({
+        ...VALID.background_tasks_snapshot,
+        tasks: [deep],
+      }),
+    ).toBeNull();
   });
 });

@@ -118,32 +118,39 @@ export function toTranscriptEvents(
  * every event a remote transcript shows, from a baseline, a `chat:chunk` or
  * a snapshot, passes through here.
  *
- * Narrows an untrusted value to a flat stream event: an object with string
+ * First makes a copy in which every string, object keys included, has had
+ * control, bidi and zero-width characters removed by
+ * {@link displayBlockValue} (nothing is cut; `undefined`-valued keys are
+ * dropped, nesting beyond its depth bound becomes `null`). Then narrows that
+ * copy, and only that copy, to a flat stream event: an object with string
  * `id` and `messageId`, a numeric `timestamp`, an `eventType` of the
  * {@link FlatStreamEventUnion} (unknown types are rejected), and every field
- * that variant declares, with its type, literal union or nested shape
- * (see `transcript-event-validators.ts`). Unknown extra keys are kept.
- * Returns a copy in which every string (text, thinking, tool input and
- * output, names, keys) has had control, bidi and zero-width characters
- * removed by {@link displayBlockValue}; nothing is cut. Returns `null` for a
- * value that does not parse.
+ * that variant declares, with its type, literal union or nested shape (see
+ * `transcript-event-validators.ts`). Unknown extra keys are kept.
+ *
+ * Validating the sanitized copy is what makes the result trustworthy: two
+ * raw keys that differ only by an unsafe character (`id` and `id` plus a
+ * bidi mark) become one key, and the value that survives is the value that
+ * was checked. Returns `null` for a value that does not parse.
  */
 export function parseFlatStreamEvent(
   value: unknown,
 ): FlatStreamEventUnion | null {
   if (!isRecord(value)) return null;
-  const eventType = value['eventType'];
+  const event = displayBlockValue(value);
+  if (!isRecord(event)) return null;
+  const eventType = event['eventType'];
   if (
-    typeof value['id'] !== 'string' ||
+    typeof event['id'] !== 'string' ||
     typeof eventType !== 'string' ||
     !isFlatEventType(eventType) ||
-    typeof value['messageId'] !== 'string' ||
-    typeof value['timestamp'] !== 'number' ||
-    !hasEventFields(eventType, value)
+    typeof event['messageId'] !== 'string' ||
+    typeof event['timestamp'] !== 'number' ||
+    !hasEventFields(eventType, event)
   ) {
     return null;
   }
-  return displayBlockValue(value) as FlatStreamEventUnion;
+  return event as unknown as FlatStreamEventUnion;
 }
 
 /** {@link parseFlatStreamEvent} over a list; events that do not parse are left out. */
