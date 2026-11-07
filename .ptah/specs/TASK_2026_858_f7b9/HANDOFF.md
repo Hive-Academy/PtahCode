@@ -8,12 +8,12 @@ the setup checklist.
 
 Control Ptah on LAN machines from an Electron "parent" desktop. Workers expose WS `/rpc` on
 loopback 41873, reached through `ssh -W`. Libs: worker-protocol, worker-runtime, remote-machines,
-machines-ui, worker-host. All user decisions: `decisions.md` rows 12–33. Do not ask again about
+machines-ui, worker-host. All user decisions: `decisions.md` rows 12–34. Do not ask again about
 anything recorded there.
 
 ## State
 
-- Branch `feat/remote-workers-phase-f`, draft **PR #982** against main. Phase F (Machines view)
+- Branch `feat/remote-workers-phase-f`, draft **PR #982** (https://github.com/Hive-Academy/PtahCode/pull/982) against main; setup issue #988 for abdallah-pc. Phase F (Machines view)
   is implemented, verified (scoped) and reviewed for 2 rounds + 1 bounded correction.
 - CI on `c336bcc03`: every job passed except the degradation audit (`libs/frontend/chat` 12 vs
   baseline 11). Fixed in `bf73d834d` (`degradation-audit: reported` marker in
@@ -58,12 +58,40 @@ anything recorded there.
 - `design-spec.md`, `prototype/` (Gate 1.7 approved, decisions 7 and 17).
 - `libs/backend/worker-host/docs/worker.md` — worker operator guide.
 
-## Next steps
+## Background work
 
-1. If on abdallah-pc: do the setup checklist in the GitHub issue (SSH key + aliases, transport
-   check, Ptah from the branch with the user's approval, pair the workers, smoke test).
-2. Ask the user once: another fix round for open item 1 (and 2)? Electron visual review approval?
-   Review-workflow scope for horus/anubis?
-3. Watch PR #982 CI and CodeRabbit; fix task defects with new commits; keep it a draft until
-   item 1 is resolved or accepted. No merge.
-4. amun-PC as a worker (steps in the issue).
+None. No lanes, subagents or child sessions running. CI on PR #982 head `56388f54e` was partly
+done at handoff (pass=10, skipping=4, pending=6, no failure; `checks` audit job passed).
+Note: `jq` is NOT installed on amun-PC — use `gh ... --jq` in watch scripts (two earlier
+monitors silently failed because of this).
+
+## Next steps (user decision 34: fix round, then Electron review, continue normally)
+
+amun-PC stays the parent for now; the abdallah-pc move (issue #988) comes later.
+
+1. Check PR #982 CI: `gh pr checks 982 --json name,bucket --jq '.[]|"\(.bucket) \(.name)"'`.
+   Fix any task failure with a new commit.
+2. **Fix round (authorized beyond the cap, decision 34)** in the worktree
+   `/home/amun/ptah-extension/.claude-worktrees/remote-workers-phase-f`:
+   a. Open item 1: per-variant required-field validation in `parseFlatStreamEvent`
+      (`libs/frontend/machines-ui/src/lib/services/transcript-events.ts`) for every admitted type
+      (read `libs/shared/src/lib/types/execution/stream.ts` for each event's required fields,
+      incl. nested shapes like `tokenUsage`); malformed-event specs per variant.
+   b. Open item 2 (S3): extract the transcript/approval pane from
+      `remote-session-view.component.ts` into a focused component with typed `input()`/`output()`.
+   Use a frontend-developer subagent (Claude) so the codex reviewers stay a different family.
+   Verify: `npm run verify -- -p @ptah-extension/machines-ui` (TMPDIR=/home/amun/.cache/ptah-phase-e-tmp;
+   foreground or background with timeout ≥ 3600000 — tests take > 10 min). Run
+   `npx ts-node --transpile-only tools/degradation-audit/check-degradation.ts` (CI audit).
+   Grep new files for literal bidi chars. Commit (scope `machines-ui`).
+3. Independent codex review of the fix (one lane, role code-logic-reviewer or code-style-reviewer,
+   deliverable `phase-f-fix-round-3-review.md`, read-only, scoped verify only).
+4. **Electron visual review (authorized, decision 34):** Machines view in dark + light vs
+   `.ptah/specs/TASK_2026_858_f7b9/prototype/` (states listed in `prototype/README.md`). Run the
+   Electron build/dev under the verify lock: `node scripts/verify.mjs --exec --task <name> -- <cmd>`.
+   Use the visual-reviewer agent; deliverable `visual-review.md`; show screenshots to the user.
+   Real worker data is available (horus, anubis, chappie, gatsby are ready and pairable:
+   `ssh <alias> /opt/Ptah/resources/bin/ptah-worker pair --json`).
+5. Push in the background; update the PR body test plan; when all items pass, mark PR #982
+   ready (`gh pr ready 982`). Watch CI + CodeRabbit. No merge.
+6. Later (user's call): abdallah-pc parent setup per issue #988; amun-PC as a worker.
