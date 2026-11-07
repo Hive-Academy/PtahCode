@@ -1,6 +1,6 @@
 # Batches - TASK_2026_886_cae4
 
-Total tasks: 44 | Batches: 19 | Complete: 10/19
+Total tasks: 44 | Batches: 19 | Complete: 11/19
 
 Source: `implementation-plan.md` Revision 2 (Gate 2 APPROVED by the user, `decisions.md` row 14),
 `task-description.md` Revision 3, `implementation-plan-review.md` (codex APPROVED round 1, one Minor
@@ -12,9 +12,10 @@ Base: fast-forwarded by the team-leader from e9ca7046c to `origin/main` fe414de0
 against e9ca7046c; executors re-read the cited lines, which may have shifted (notably
 `ptah-api-builder.service.ts`, changed by #955 on main).
 
-Schedulable now: Batches 1-10 (Phase 1). Batches 11-19 are BLOCKED-ON-957: do not schedule them
-until PR #957 (`fix/memory-skills-dead-actions`) has merged to `main` and this branch is rebased
-onto that `main` (user decision, `decisions.md` row 14).
+Schedulable now: Batch 12 and Batch 16 (file-disjoint, may run in parallel). Batches 1-11 COMPLETE.
+BLOCKED-ON-957 is lifted (D28): #957 merged and `main` was merged into this branch (fe0f9dfb9)
+instead of rebased, by user decision 2026-11-07. Remaining order: 13 and 14 after 12; 15 after
+13 and 14; 17 after 15 and 16; 18 after 17; 19 after 15 and 16.
 
 ## Plan validation
 
@@ -99,6 +100,7 @@ Edge cases:
 | D25 | Binding notes from Batch 8. Batch 12 (store): `pendingCensus`, `listDeferredCensusSteps` and `listOpenRuns` include runs whose only non-terminal step is the index step; `upsertStep(running/census-requested)` sets `requested_at`. Batch 14 (worker): call `CensusCoordinator.reconcileAfterRestart()` before the first claim; schedule re-entry from `resumeAt`; wake on `onDidSettleCensus`; at shutdown `dispose()` then await `settled()` within the budget | — | batch-8-report.md "Notes for later batches" | yes |
 | D26 | `tools/di-lint/check-injects.ts` (pre-push hook) fails for every `TASK_END_TOKENS.*` inject in Batches 6, 7 and 8 (19 errors: census-coordinator, close-curate, dispose-evaluate, harvest, index-request) because `registerTaskEndHook` is Batch 15 (D4). The branch cannot pass the pre-push hook until Batch 15 lands (BLOCKED-ON-957). No workaround (no stub registration, no di-lint exclusion) | stub register file; di-lint exclusion; wait for Batch 15 | Team-leader run 2026-11-06: di-lint exit 1, 19 `injects TASK_END_TOKENS.* but no register*.ts registers it`; D4 owns `src/index.ts`/registration in Batch 15 | yes |
 | D27 | Incident (Batch 8): a `prettier --write steps/*.spec.ts` glob reformatted the committed Batch 7 specs `close-curate.step.spec.ts` and `harvest.step.spec.ts`; the executor restored both from `HEAD` | — | Orchestrator and team-leader confirmed `git diff HEAD` empty on both before the Batch 8 commit; neither file is in the Batch 6 or 8 commit | n/a |
+| D28 | BLOCKED-ON-957 is lifted for Batches 11-19. The user merged `main` into the branch (merge commit fe0f9dfb9, clean, #957 content present) instead of rebasing (user decision, 2026-11-07). Every "rebased onto `main`" dependency (Batches 11 and 16) is satisfied by that merge. Afterwards came the Phase 1 fix commit 94ea88f9c (before the merge) and the contract fix afb4fb11f `fix(task-end-hook): use spec contract names for task files`. That fix replaced `'task.md'`/`'context.md'` literals in `dispose/disposal-input.collector.ts` and `dispose/task-spec.reader.ts` with `CARRIER_FILE`, `CONTEXT_FILE` and `SPEC_ROOT_SEGMENTS` from `@ptah-extension/shared`, which the task-specs `contract.guard.spec.ts` requires; verify task-end-hook 467 tests and task-specs 555 tests exit 0 | rebase; merge | User chose the merge; `git merge-base --is-ancestor` confirms the #957 merge d3b9a5994 is an ancestor of HEAD (fe0f9dfb9 second parent be25eb1d1); `main` has since advanced to bce361218 with no `persistence-sqlite/migrations` change | yes (later rebase or merge) |
 
 ## Rules every executor must follow (repeat verbatim in each executor prompt)
 
@@ -120,6 +122,7 @@ Phase 1 review — COMPLETE (2026-11-07). Implementer family claude; reviewer fa
 - Round 0 (codex): REVISE — L1 (Serious: joined index steps stranded as `succeeded/coalesced` when start refuses), L2 (Moderate: `comparablePath` lexical fallback on any realpath error), L3 (Moderate: vanished ignored entry silently skipped), S1 (Serious style: `disposal-input.collector.ts` 1,046 lines). Reviews: `code-logic-review.md`, `code-style-review.md`.
 - Fix round 1: `phase-1-fix-report.md` — start before coalesce (L1); `comparablePath` fails closed to `main-root-not-open` (L2); every vanish during the ignored walk maps to `error` -> `blocked/precondition-unverifiable` (L3); collector split into `task-spec.reader.ts`, `ignored-files.walker.ts`, `candidate-path.resolver.ts`, `fs-probe.ts` (S1, collector 810 lines).
 - Round 1 re-review (codex, scoped to the fixes): logic APPROVED 8/10, style APPROVED 8/10, no new defects. File: `phase-1-round-1-review.md`; `## Round 1` sections appended to both review files.
+- Fix-round commit: 94ea88f9c `fix(task-end-hook): phase 1 review fixes - census order, probes`. Follow-up contract fix after the main merge: afb4fb11f (D28).
 - Revise rounds used: 1 of max 2. Scoped verify `npm run verify -- -p task-end-hook` (lint, typecheck, test) exit 0 on the fix tree, 2026-11-07T13:48Z.
 
 ## Batch 1: Closed outcome types and migration 0072 Part A — COMPLETE (commit 4b0efa0b4)
@@ -463,11 +466,11 @@ Phase 1 review — COMPLETE (2026-11-07). Implementer family claude; reviewer fa
 
 - Team-leader acceptance (2026-11-06): token `Symbol.for('PtahTaskEndRunReader')` is declared in `ptah-api-builder.service.ts` and matches implementation-plan.md:753 and Task 3.2 (R6), so Batch 3 must define `TASK_END_TOKENS.RUN_READER` with exactly this string for the Batch 15/17 host wiring. Reader method `latestForTask(workspaceRoot, taskId)` matches plan Component 11 (:747). No `@ptah-extension/task-end-hook` import. The Prettier reflow of the `getMessageCoordinator` ternary (~:696) is whitespace-only, so behaviour is unchanged; accepted. `npm run verify -- -p @ptah-extension/vscode-lm-tools,@ptah-extension/cli-engine` exit 0, and `-t lint,typecheck -p ptah-electron` exit 0. The git-ignored `node_modules` symlink is environment only and not committed.
 
-## Phase 2 — Persistence and runtime (BLOCKED-ON-957): Batches 11-15
+## Phase 2 — Persistence and runtime (unblocked, D28): Batches 11-15
 
 Phase review: code-logic (codex) on the combined diff after Batch 15 commits, plus code-style (store, detector, worker and reader are new public API of the library).
 
-## Batch 11: Migration 0072 Part B (registry and version pins) — PENDING — BLOCKED-ON-957
+## Batch 11: Migration 0072 Part B (registry and version pins) — COMPLETE (commit recorded in the next batches.md commit)
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -475,15 +478,15 @@ Phase review: code-logic (codex) on the combined diff after Batch 15 commits, pl
 - Subagent reason: D7
 - Review family: implementer claude; phase reviewer codex
 - Rationale: edits #957 files; one commit by plan (Component 2 Part B); D5 counts the pin lines as one artifact
-- Tasks: 2 | Depends on: Batch 1; PR #957 merged and this branch rebased onto that `main`
+- Tasks: 2 | Depends on: Batch 1; PR #957 merged and this branch rebased onto that `main` (satisfied by the merge fe0f9dfb9, D28)
 - Phase: 2 | Phase review: (after Batch 15)
 
-### Task 11.1: Read-only pre-condition check — PENDING
+### Task 11.1: Read-only pre-condition check — COMPLETE
 
 - Plan reference: Component 2 "Pre-condition for Part B"
 - Implementation details: `git show main:libs/backend/persistence-sqlite/src/lib/migrations/index.ts` ends with 70 (`0070_indexing_last_run`) and 71 (`0071_skill_inv_events_task_unreconciled`) and nothing at 72 (team-leader runs it; executors run no git). Otherwise take `max + 1` and rename both 0072 files.
 
-### Task 11.2: Registry line, pins, spec switch — PENDING
+### Task 11.2: Registry line, pins, spec switch — COMPLETE
 
 - Files (MODIFY): `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/persistence-sqlite/src/lib/migrations/index.ts`; every spec listed by `grep -l "Math.max(...MIGRATIONS" libs/backend/persistence-sqlite/src/lib` at that time (pin 71 → 72, including #957's 0070/0071 specs if they pin it); `0072_task_end_hook.spec.ts` (switch to `MIGRATIONS`, assert 70, 71, 72 in order with those names)
 - Validation notes: R9.
@@ -493,8 +496,9 @@ Phase review: code-logic (codex) on the combined diff after Batch 15 commits, pl
 - `npm run verify -- -p @ptah-extension/persistence-sqlite` (contiguity `migration-runner.spec.ts`, final version `sqlite-connection.service.spec.ts`, every pin 72)
 - `npm run verify -- -p @ptah-extension/cli-engine,ptah-electron`
 - Degradation audit passes.
+- Team-leader acceptance (2026-11-07): Task 11.1 pre-condition run by the team-leader. Local `main` (bce361218) `migrations/index.ts` ends at 70 and 71 with nothing at 72; `git diff HEAD...main` touches no file under `migrations/` after the merge fe0f9dfb9, so R9 is clear and 0072 keeps its number. Task 11.2: `index.ts` has one new import and the `{ version: 72, name: '0072_task_end_hook', sql: sql0072TaskEndHook }` entry. 25 specs move their final-version pin from 71 to 72 (0028, 0030, 0038-0047, 0051-0056, 0059-0061, 0063, 0064, 0070, 0071). `git diff -U0` shows only pin lines, comments and the 0072 spec changes; no other number changed. No final `71` pin remains (`grep -rnE "\b71\b"` matches only the 0071 registry entry). `0072_task_end_hook.spec.ts` asserts 70, 71, 72 in order with their names and `MIGRATIONS[start + 2].sql === sql`. Team-leader re-run of `npm run verify -- -p @ptah-extension/persistence-sqlite`: typecheck pass; tests 73 suites, 723 passed, 2 skipped; lint exit 1 with exactly the 10 pre-existing `no-restricted-syntax` errors, all in `0057_drop_skill_pipeline.ts`, `0057_drop_skill_pipeline.spec.ts` and `0058_provider_accounts.spec.ts`. Those three files are byte-identical to `main` and outside this diff, and Batch 1 accepted the same failure. The executor ran `-t lint,typecheck -p @ptah-extension/cli-engine,ptah-electron`, exit 0. The team-leader also ran `-t test -p ptah-electron -- --testPathPatterns=wizard-seed` (exit 0, 8 tasks succeeded); that spec iterates MIGRATIONS and pins no version. Degradation audit exit 0, TOTAL 216 (was 220; no new site). Executor decisions accepted. (a) The duplicate `db.exec(sql)` was removed from the 0072 spec `beforeEach`: with 0072 registered, the loop over MIGRATIONS already applies it, and a second exec would re-run the CREATE statements. (b) The 0071 test title "as the latest migration" became "before 0072", because the old title is now false. (c) A pin-history comment line was added in 0044 and 0046, matching the existing comment convention there.
 
-## Batch 12: `SqliteTaskEndStore` — PENDING — BLOCKED-ON-957
+## Batch 12: `SqliteTaskEndStore` — PENDING
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -527,7 +531,7 @@ Phase review: code-logic (codex) on the combined diff after Batch 15 commits, pl
 
 - `npm run verify -- -p @ptah-extension/task-end-hook`; degradation audit passes.
 
-## Batch 13: Transition detector and main-root resolver — PENDING — BLOCKED-ON-957
+## Batch 13: Transition detector and main-root resolver — PENDING
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -558,7 +562,7 @@ Phase review: code-logic (codex) on the combined diff after Batch 15 commits, pl
 
 - `npm run verify -- -p @ptah-extension/task-end-hook`; degradation audit passes.
 
-## Batch 14: Run worker and carrier reader — PENDING — BLOCKED-ON-957
+## Batch 14: Run worker and carrier reader — PENDING
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -584,7 +588,7 @@ Phase review: code-logic (codex) on the combined diff after Batch 15 commits, pl
 
 - `npm run verify -- -p @ptah-extension/task-end-hook`; degradation audit passes.
 
-## Batch 15: Run reader, library registration and public barrel — PENDING — BLOCKED-ON-957
+## Batch 15: Run reader, library registration and public barrel — PENDING
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -610,11 +614,11 @@ Phase review: code-logic (codex) on the combined diff after Batch 15 commits, pl
 
 - `npm run verify -- -p @ptah-extension/task-end-hook`; degradation audit passes.
 
-## Phase 3 — Engine entry points, Electron wiring, integration (BLOCKED-ON-957): Batches 16-19
+## Phase 3 — Engine entry points, Electron wiring, integration (unblocked, D28): Batches 16-19
 
 Phase review: code-logic (codex) on the combined diff after Batch 19 commits, plus code-style (new public engine methods). No visual review: no rendered UI changes (D6 of the plan).
 
-## Batch 16: Engine entry points `harvestTask` and `curateSessionForTaskEnd` — PENDING — BLOCKED-ON-957
+## Batch 16: Engine entry points `harvestTask` and `curateSessionForTaskEnd` — PENDING
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -647,7 +651,7 @@ Phase review: code-logic (codex) on the combined diff after Batch 19 commits, pl
 - `npm run verify -- -t lint,typecheck -p @ptah-extension/cli-engine,ptah-electron`
 - Degradation audit passes.
 
-## Batch 17: Electron composition (ports bound, library registered) — PENDING — BLOCKED-ON-957
+## Batch 17: Electron composition (ports bound, library registered) — PENDING
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -674,7 +678,7 @@ Phase review: code-logic (codex) on the combined diff after Batch 19 commits, pl
 - `npm run verify -- -t lint,typecheck -p ptah-extension-webview`
 - Degradation audit passes.
 
-## Batch 18: Electron activation and shutdown — PENDING — BLOCKED-ON-957
+## Batch 18: Electron activation and shutdown — PENDING
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -701,7 +705,7 @@ Phase review: code-logic (codex) on the combined diff after Batch 19 commits, pl
 - `npm run verify -- -t lint,typecheck -p ptah-extension-webview`
 - Degradation audit passes.
 
-## Batch 19: End-to-end integration spec — PENDING — BLOCKED-ON-957
+## Batch 19: End-to-end integration spec — PENDING
 
 - Recommended executor: senior-tester subagent
 - Execution mode: sequential

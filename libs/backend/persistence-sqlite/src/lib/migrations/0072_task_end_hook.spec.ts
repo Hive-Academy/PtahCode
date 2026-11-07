@@ -1,9 +1,9 @@
 /**
- * Migration 0072 — task-end hook tables (TASK_2026_886), Part A.
+ * Migration 0072 — task-end hook tables (TASK_2026_886).
  *
- * Registry-independent: the database is migrated through every entry of
- * MIGRATIONS as it stands, then the exported 0072 SQL is executed directly.
- * This spec never asserts a bundled max version; registering 0072 is Part B.
+ * Part B registered 0072 after #957's 0070 and 0071, so the database is
+ * migrated through every entry of MIGRATIONS, 0072 included, and the
+ * registry order and the registered SQL are asserted here.
  * Fails instead of skipping when neither SQLite binding loads.
  */
 import { sql } from './0072_task_end_hook';
@@ -73,19 +73,32 @@ const TABLES = [
   'task_end_transitions',
 ];
 
-describe('migration 0072_task_end_hook (Part A, registry-independent)', () => {
+describe('migration 0072_task_end_hook', () => {
+  it('registers 0070, 0071 and 0072 in order with the exported sql', () => {
+    const start = MIGRATIONS.findIndex((migration) => migration.version === 70);
+    expect(
+      MIGRATIONS.slice(start, start + 3).map(({ version, name }) => ({ version, name })),
+    ).toEqual([
+      { version: 70, name: '0070_indexing_last_run' },
+      { version: 71, name: '0071_skill_inv_events_task_unreconciled' },
+      { version: 72, name: '0072_task_end_hook' },
+    ]);
+    expect(MIGRATIONS[start + 2]?.sql).toBe(sql);
+    expect(sql).not.toContain('${');
+  });
+
   const opener = resolveOpener();
   let db: DatabaseShape;
 
   beforeEach(() => {
     if (!opener) throw new Error('No SQLite binding loaded');
     db = opener();
-    // Base SQL of every registered migration, as the 0054 spec applies it;
-    // vec0-only bodies need the sqlite-vec extension and are not relevant here.
+    // Base SQL of every registered migration (0072 included), as the 0054
+    // spec applies it; vec0-only bodies need the sqlite-vec extension and are
+    // not relevant here.
     for (const migration of MIGRATIONS) {
       if (migration.sql) db.exec(migration.sql);
     }
-    db.exec(sql);
   });
 
   afterEach(() => db.close());
