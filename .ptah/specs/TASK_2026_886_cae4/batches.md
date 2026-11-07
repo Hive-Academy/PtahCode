@@ -1,6 +1,6 @@
 # Batches - TASK_2026_886_cae4
 
-Total tasks: 44 | Batches: 19 | Complete: 11/19
+Total tasks: 44 | Batches: 19 | Complete: 14/19
 
 Source: `implementation-plan.md` Revision 2 (Gate 2 APPROVED by the user, `decisions.md` row 14),
 `task-description.md` Revision 3, `implementation-plan-review.md` (codex APPROVED round 1, one Minor
@@ -12,7 +12,8 @@ Base: fast-forwarded by the team-leader from e9ca7046c to `origin/main` fe414de0
 against e9ca7046c; executors re-read the cited lines, which may have shifted (notably
 `ptah-api-builder.service.ts`, changed by #955 on main).
 
-Schedulable now: Batch 12 and Batch 16 (file-disjoint, may run in parallel). Batches 1-11 COMPLETE.
+Schedulable now: Batch 14 (Batch 13 committed; Batch 14 verified, committed next). Batches 1-13
+and 16 COMPLETE.
 BLOCKED-ON-957 is lifted (D28): #957 merged and `main` was merged into this branch (fe0f9dfb9)
 instead of rebased, by user decision 2026-11-07. Remaining order: 13 and 14 after 12; 15 after
 13 and 14; 17 after 15 and 16; 18 after 17; 19 after 15 and 16.
@@ -105,6 +106,8 @@ Edge cases:
 | D30 | Binding on Batch 15: register `SqliteTaskEndStore` with a `useFactory` that calls `new SqliteTaskEndStore(c.resolve(PERSISTENCE_TOKENS.SQLITE_CONNECTION), c.resolve(TOKENS.LOGGER))`, never `registerSingleton(token, SqliteTaskEndStore)` | class registration; factory | Team-leader check 2026-11-07: tsyringe resolves every `design:paramtypes` entry, and the third, un-injected `options` parameter (type `Object`) fails with `Cannot inject the dependency at position #2` | yes |
 | D31 | Accept Batch 16 decisions: (1) `harvestTask` returns `harvest-failed` for a task id that is not one path segment or a relative workspace root; (2) specs root outside the workspace gives `harvest-failed`, a missing root `no-carrier`; (3) unwritten grades, grades on hold and an unwritten marker give `harvest-failed`; (4) `gated/hourly-limit` emits the existing `rate-limited` diagnostics event with source `task-end`; (5) the task-end pass does not set `lastCurateAt` or emit a trigger event; (6) the outer `finally` releases the in-flight claim only when `runCuratePass` rejected before its own `try`; (7) `TaskEndCurateCounts` stays internal | reject any; accept | Plan Components 7a and 7b; Batch 16 validation notes (promise never rejects, `inFlightCurates` cleared on every path, no raw error text) | yes |
 | D32 | Phase 3 review notes (no change now): (a) `memory-trigger.service.ts` was over max-lines before this task and grows by about 230 plan-required lines; do not split it in this task; (b) `failedPasses` entries are freed only by a later `ran` or past the retry cap, bounded by session count; (c) `main` (575391d48 and its parents e164e6d11, 5992903a8, cdb605115) changed `spec-harvester.service.ts` (+34/-6), its spec and `memory-curator/src/index.ts` after the merge base be25eb1d1, so the next merge of `main` must re-apply the `harvestCompletedSpec` extraction by hand | split now; record | Executor report; `git diff --stat be25eb1d1 main` on those files | yes |
+| D33 | Accept Batch 13 decisions: (1) the detector fires `onDidChangeRuns({createdRunIds, cancelledRunIds})` instead of calling the worker (D24 event pattern), so Batch 15 wires `detector.onDidChangeRuns(() => worker.wake())`; (2) every constructor parameter is injected, no options parameter (avoids the D30 failure); the detector builds `ReadOnlyGit` and both resolvers itself (D19); (3) new `TRIGGER_GIT_TIMEOUT_MS = 30_000`; (4) a settle with nothing pending arms no timer; (5) the write gate is re-checked after the git probes; (6) a repository not yet baselined at flush time records a baseline and journals nothing (AC 1.6); (7) `rememberMainRoot` only with a non-null root; (8) mixed sources rank write > reindex > watcher; (9) a store failure on one carrier is logged with `logger.error`, the others still commit, nothing throws into an emitter; (10) a root whose `ensureStarted` failed is left unmarked for retry; (11) "not a git repo" is exit 128 with empty stdout, so a dubious-ownership exit is also classed `nogit` and only a later re-baseline corrects it | reject any; accept | Plan Component 4; D19, D24, D30; Batch 13 validation notes | yes |
+| D34 | Phase 2 review notes (for the code-logic reviewer after Batch 15, no change now): (a) Jest once printed "worker process has failed to exit gracefully" in a full task-end-hook run; the trigger specs alone with `--detectOpenHandles` report no open handle (team-leader run 2026-11-07), so the source is unconfirmed; (b) an abort during curation makes `CloseCurateStep` (Batch 7) record `failed/curator-failed` instead of leaving the entry pending for resume; (c) D33(11): a `safe.directory` (dubious ownership) exit 128 with empty stdout is classed `nogit` | — | Batch 13 and 14 executor observations | n/a |
 
 ## Rules every executor must follow (repeat verbatim in each executor prompt)
 
@@ -536,7 +539,7 @@ Phase review: code-logic (codex) on the combined diff after Batch 15 commits, pl
 - `npm run verify -- -p @ptah-extension/task-end-hook`; degradation audit passes.
 - Team-leader acceptance (2026-11-07): four files under `src/lib/persistence/`: `task-end-rows.ts` (zod row schemas, strict outcome schema), `sqlite-task-end.store.ts` (`implements ITaskEndStore`; the Batch 3 interface file is unchanged against HEAD; `@inject(PERSISTENCE_TOKENS.SQLITE_CONNECTION)`, `@inject(TOKENS.LOGGER)`; parameterised statements, the only interpolations are fixed column lists and the closed `repo_id`/`seen_root` choice; one `db.transaction` per observation; run creation inserts the four placeholder steps in the same transaction), `task-end-row.mapper.ts` (coordinator-approved extra file for max-lines; plain class built with `new`, no token, as D19) and `sqlite-task-end.store.spec.ts` (25 tests, in-memory DB migrated through `MIGRATIONS`). `src/index.ts` untouched (D4); the store is registered in Batch 15 (see D30). No TODO, stub or `eslint-disable`. Team-leader run `npm run verify -- -p @ptah-extension/task-end-hook,@ptah-extension/skill-synthesis,@ptah-extension/memory-curator`: lint and typecheck pass for all three (task-end-hook lint 0 warnings); task-end-hook 13 suites, 492 tests passed. Degradation audit exit 0, TOTAL 216. Executor decisions 1-10 accepted as D29.
 
-## Batch 13: Transition detector and main-root resolver — PENDING
+## Batch 13: Transition detector and main-root resolver — COMPLETE (commit recorded in the next batches.md commit)
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -547,16 +550,16 @@ Phase review: code-logic (codex) on the combined diff after Batch 15 commits, pl
 - Tasks: 3 | Depends on: Batches 4, 9, 12
 - Phase: 2 | Phase review: (after Batch 15)
 
-### Task 13.1: Repository identity — PENDING
+### Task 13.1: Repository identity — COMPLETE
 
 - File (CREATE): `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/task-end-hook/src/lib/trigger/repository-identity.ts`
 
-### Task 13.2: `MainRootResolver` and spec — PENDING
+### Task 13.2: `MainRootResolver` and spec — COMPLETE
 
 - Files (CREATE): `.../src/lib/trigger/main-root-resolver.ts` and `main-root-resolver.spec.ts`
 - Plan reference: Component 4 "Main worktree root" and its spec list
 
-### Task 13.3: `TaskEndTransitionDetector` and spec — PENDING
+### Task 13.3: `TaskEndTransitionDetector` and spec — COMPLETE
 
 - Depends on: Tasks 13.1, 13.2
 - Files (CREATE): `.../src/lib/trigger/task-end-transition-detector.ts` and `task-end-transition-detector.spec.ts`
@@ -566,6 +569,7 @@ Phase review: code-logic (codex) on the combined diff after Batch 15 commits, pl
 ### Batch 13 verification
 
 - `npm run verify -- -p @ptah-extension/task-end-hook`; degradation audit passes.
+- Team-leader acceptance (2026-11-07): five files under `src/lib/trigger/`, all in the batch list: `repository-identity.ts` (`RepositoryIdentityResolver`, plain class, real common dir or `nogit:<realpath>`, only `ok` cached, `TRIGGER_GIT_TIMEOUT_MS`), `main-root-resolver.ts` (first `worktree list --porcelain -z` entry, bare/prunable/absolute/realpath/identity/listed checks, closed `MainRootCheck` codes logged at warn without paths, only resolved roots cached) and its spec (18 tests), `task-end-transition-detector.ts` (listener O(1) with no I/O; commit armed only from `onDidSettleWrites` or with no write in flight, as an `unref`'d 250 ms timer; write gate re-checked after the git probes; serial chain that never rejects; startup baseline or `startup-reconcile` journaling, then orphan runs; `onDidChangeRuns` event) and its spec (21 tests, real SQLite store, real `TaskWriterService` over a mock fs). The `degradation-audit: reported` marker on the `ensureStarted` catch is justified: the catch logs at warn, skips the root and removes it from `reconciledRoots`, so the next startup or folder change retries. Nothing deletes, moves or archives (C1). `src/index.ts`, DI registration and peer TASK_2026_879_9809 files untouched. Team-leader run `npm run verify -- -p @ptah-extension/task-end-hook` (Batches 13 and 14 together): lint and typecheck pass, 16 suites, 567 tests passed, exit 0. `-t test ... --testPathPatterns=trigger/ --detectOpenHandles --skip-nx-cache`: 2 suites, 39 tests, exit 0, no open handle reported. Degradation audit exit 0, TOTAL 216. di-lint exit 1 with 29 errors, the 3 new ones on the detector's `TASK_END_TOKENS` injects (expected, D26, until Batch 15). Executor decisions 1-11 accepted as D33.
 
 ## Batch 14: Run worker and carrier reader — PENDING
 
@@ -603,6 +607,7 @@ Phase review: code-logic (codex) on the combined diff after Batch 15 commits, pl
 - Rationale: closes the library surface the Electron host consumes
 - Tasks: 2 | Depends on: Batches 13, 14
 - Phase: 2 (last batch of Phase 2) | Phase review: code-logic + style, due after this batch commits
+- Binding inputs: (1) `registerTaskEndHook` (or the activation code it exposes) wires `detector.onDidChangeRuns(() => worker.wake())` and keeps the subscription for disposal (D33(1)); (2) `SqliteTaskEndStore` is registered with `useFactory` (D30); the detector and worker have no options parameter and may use class registration (D33(2))
 
 ### Task 15.1: `TaskEndRunReader` and spec — PENDING
 
@@ -623,7 +628,7 @@ Phase review: code-logic (codex) on the combined diff after Batch 15 commits, pl
 
 Phase review: code-logic (codex) on the combined diff after Batch 19 commits, plus code-style (new public engine methods). No visual review: no rendered UI changes (D6 of the plan).
 
-## Batch 16: Engine entry points `harvestTask` and `curateSessionForTaskEnd` — COMPLETE (commit recorded in the next batches.md commit)
+## Batch 16: Engine entry points `harvestTask` and `curateSessionForTaskEnd` — COMPLETE (commit 058d04e3b)
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
