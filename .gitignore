@@ -234,3 +234,5 @@ tmp-scratch-*
 
 # tools/perf probe output (traces can be hundreds of MB)
 tools/perf/out/
+
+.ptah/tmp/

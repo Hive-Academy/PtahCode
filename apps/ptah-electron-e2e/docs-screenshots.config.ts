@@ -7,9 +7,10 @@ import { defineConfig } from '@playwright/test';
  * `apps/ptah-docs/public/screenshots/`, so they must never run as part of the
  * ordinary `e2e` target. Run them with `nx run ptah-docs:screenshots`.
  *
- * They reuse the e2e fixtures (mocked RPC, throwaway profile) rather than a
- * real authenticated profile, because a docs screenshot must be reproducible
- * on any machine without live LLM calls.
+ * They use real local handlers and an isolated database. Most shots open a
+ * throwaway sample repository with synthetic profile state; saved-session
+ * shots copy existing state from the development profile. Capture never
+ * starts a live AI run.
  */
 const isCI = !!process.env['CI'];
 
@@ -24,7 +25,8 @@ export default defineConfig({
   expect: {
     timeout: 30_000,
   },
-  globalSetup: './src/support/build-precheck.ts',
+  globalSetup: './src/docs-screenshots/_harness/docs-global-setup.ts',
+  globalTeardown: './src/docs-screenshots/_harness/docs-global-teardown.ts',
   reporter: [['list']],
   outputDir: '../../dist/apps/ptah-electron-e2e/docs-screenshots-results',
   use: {
