@@ -7,8 +7,6 @@ description: The built-in agent templates in PtahCode, their roles, and when to 
 
 PtahCode has 14 built-in agent templates for planning, implementation, review, research, design, and visual QA. The [setup wizard](/setup/setup-wizard/) selects the templates that apply to your project and writes them to `<workspace-root>/.claude/agents/`.
 
-![Built-in agents catalog](/screenshots/agents-catalog.webp)
-
 ## The catalog
 
 | Agent                        | Role                                                           | Reach for it when…                                               |

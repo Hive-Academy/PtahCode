@@ -77,6 +77,40 @@ export interface DocsProfileOptions {
 /** Default shots copy no profile files; saved-session shots opt into one workspace. */
 const PROFILE_COPY_ALLOWLIST: readonly string[] = [];
 
+/** Copy only the two development databases and their live SQLite sidecars. */
+function copyDevelopmentDatabases(stateDir: string): { main: string; sessions: string } {
+  const sourceDir = path.join(originalHome, '.ptah', 'state');
+  const copyFamily = (file: 'ptah-dev.sqlite' | 'sessions-dev.sqlite'): string => {
+    const source = path.join(sourceDir, file);
+    if (!fs.existsSync(source)) throw new Error(`[docs-shot] required development database is missing: ${file}`);
+    const members = ['', '-wal', '-shm'].filter((suffix) => fs.existsSync(source + suffix));
+    const snapshot = members.map((suffix) => {
+      const member = source + suffix;
+      const stat = fs.lstatSync(member);
+      if (!stat.isFile()) throw new Error(`[docs-shot] development database member is not a regular file: ${file}${suffix}`);
+      return { suffix, size: stat.size, mtimeMs: stat.mtimeMs };
+    });
+    for (const { suffix, size } of snapshot) {
+      const destination = path.join(stateDir, file + suffix);
+      fs.copyFileSync(source + suffix, destination);
+      if (fs.statSync(destination).size !== size) throw new Error(`[docs-shot] incomplete development database copy: ${file}${suffix}`);
+    }
+    for (const { suffix, size, mtimeMs } of snapshot) {
+      const member = source + suffix;
+      if (!fs.existsSync(member)) throw new Error(`[docs-shot] development database changed during copy: ${file}${suffix}`);
+      const stat = fs.lstatSync(member);
+      if (!stat.isFile() || stat.size !== size || stat.mtimeMs !== mtimeMs) {
+        throw new Error(`[docs-shot] development database changed during copy: ${file}${suffix}`);
+      }
+    }
+    if (['-wal', '-shm'].some((suffix) => fs.existsSync(source + suffix) !== members.includes(suffix))) {
+      throw new Error(`[docs-shot] development database sidecars changed during copy: ${file}`);
+    }
+    return path.join(stateDir, file);
+  };
+  return { main: copyFamily('ptah-dev.sqlite'), sessions: copyFamily('sessions-dev.sqlite') };
+}
+
 export function prepareDocsProfile(options: DocsProfileOptions = {}): DocsProfile {
   const configured = process.env['PTAH_DOCS_CAPTURE_DIR']?.trim();
   if (configured && !path.isAbsolute(configured)) throw new Error('[docs-shot] PTAH_DOCS_CAPTURE_DIR must be absolute');
@@ -96,6 +130,13 @@ export function prepareDocsProfile(options: DocsProfileOptions = {}): DocsProfil
   fs.mkdirSync(homePtah);
   const env: Record<string, string> = { APPDATA: dir, LOCALAPPDATA: dir, PTAH_DB_PATH: path.join(runDir, 'state', 'ptah.sqlite') };
   for (const key of HOME_ENV_KEYS) env[key] = home;
+  if (options.devSessionWorkspace) {
+    const copies = copyDevelopmentDatabases(path.join(runDir, 'state'));
+    env['PTAH_DB_PATH'] = copies.main;
+    env['PTAH_SESSIONS_DB_PATH'] = copies.sessions;
+  }
+  // D14 disables live prompts. Saved transcript readers use os.homedir(), so
+  // CLAUDE_CONFIG_DIR cannot make them replay from the original home.
   // Adding a source file here requires an explicit privacy review.
   for (const file of PROFILE_COPY_ALLOWLIST) {
     fs.copyFileSync(path.join(realProfileDir(), file), path.join(dir, file));
