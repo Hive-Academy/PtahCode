@@ -253,8 +253,6 @@ export function createRemoteSessions(deps: RemoteSessionDeps): RemoteSessions {
     onExpired: (requestId) => permissionSessions.delete(requestId),
   });
   const tabsBySession = new Map<string, string>();
-  /** Permission requests that carry only the tab of a start not yet resolved. */
-  const heldPermissions = new Map<string, PermissionRequest[]>();
   /** peer id → session id → unsubscribe. */
   const subscriptions = new Map<string, Map<string, () => void>>();
 
@@ -417,8 +415,9 @@ export function createRemoteSessions(deps: RemoteSessionDeps): RemoteSessions {
           return { sessionId: turn.sessionId, turnId: turn.turnId };
         } finally {
           // A timed-out start can still resolve: its held requests are bound
-          // on the late `session:id-resolved` (see tap).
-          if (!driver.awaitingSession(tabId)) heldPermissions.delete(tabId);
+          // on the late `session:id-resolved` (see tap). Otherwise nothing
+          // can answer them, so they are denied now.
+          if (!driver.awaitingSession(tabId)) pending.denyHeld(tabId);
         }
       },
     ),
@@ -494,11 +493,20 @@ export function createRemoteSessions(deps: RemoteSessionDeps): RemoteSessions {
           pending.add(record, sessionId);
           permissionSessions.set(record.id, sessionId);
         } else if (tabId && driver.awaitingSession(tabId)) {
-          // Bound to its session when `session:id-resolved` arrives.
-          const held = heldPermissions.get(tabId) ?? [];
-          if (held.length < HELD_PERMISSIONS_LIMIT) held.push(record);
-          else deps.log('[ptah-worker] held permission request dropped');
-          heldPermissions.set(tabId, held);
+          // Bound to its session when `session:id-resolved` arrives; its
+          // 60 s deadline runs from now on (decision 27).
+          if (pending.heldCount(tabId) < HELD_PERMISSIONS_LIMIT)
+            pending.hold(record, tabId);
+          else {
+            // Over the hold limit: deny now, so the SDK never waits on a
+            // request that no deadline covers (decision 27).
+            deps.log('[ptah-worker] held permission request denied: limit');
+            deps.permissions.handleResponse(record.id, {
+              id: record.id,
+              decision: 'deny',
+              reason: 'Too many remote permission requests are pending',
+            });
+          }
         }
       } else if (type === 'permission:auto-resolved') {
         const requestId = text(record, 'id');
@@ -511,11 +519,8 @@ export function createRemoteSessions(deps: RemoteSessionDeps): RemoteSessions {
         const sessionId = text(record, 'realSessionId');
         if (tabId && sessionId) {
           driver.tabResolved(tabId, sessionId);
-          for (const request of heldPermissions.get(tabId) ?? []) {
-            pending.add(request, sessionId);
-            permissionSessions.set(request.id, sessionId);
-          }
-          heldPermissions.delete(tabId);
+          for (const requestId of pending.bindTab(tabId, sessionId))
+            permissionSessions.set(requestId, sessionId);
         }
       }
       capture.capture(type, payload);

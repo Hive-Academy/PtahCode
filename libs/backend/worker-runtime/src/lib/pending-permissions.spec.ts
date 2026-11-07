@@ -141,6 +141,65 @@ describe('remote permission expiry', () => {
     expect(jest.getTimerCount()).toBe(1);
   });
 
+  const heldRequest = (id: string) =>
+    ({ id, tabId: 'tab-1', timestamp: 0, timeoutAt: 0 }) as PermissionRequest;
+
+  it('denies a held request 60 s after capture when its session never resolves', () => {
+    const f = fixture();
+    f.index.hold(heldRequest('h1'), 'tab-1');
+    expect(f.index.heldCount('tab-1')).toBe(1);
+    jest.advanceTimersByTime(REMOTE_PERMISSION_TIMEOUT_MS - 1);
+    expect(f.handleResponse).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(1);
+    expect(f.handleResponse).toHaveBeenCalledWith('h1', {
+      id: 'h1',
+      decision: 'deny',
+      reason: 'No answer from the controller within 60 s',
+    });
+    // No session: nothing to route and no log to write.
+    expect(f.onExpired).not.toHaveBeenCalled();
+    expect(f.writer.enqueue).not.toHaveBeenCalled();
+    expect(f.index.heldCount('tab-1')).toBe(0);
+  });
+
+  it('binds a held request to its session without restarting the clock', async () => {
+    const f = fixture();
+    f.index.hold(heldRequest('h1'), 'tab-1');
+    jest.advanceTimersByTime(40_000);
+    expect(f.index.bindTab('tab-1', 's1')).toEqual(['h1']);
+    expect(f.index.heldCount('tab-1')).toBe(0);
+    jest.advanceTimersByTime(REMOTE_PERMISSION_TIMEOUT_MS - 40_000 - 1);
+    expect(f.handleResponse).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(1);
+    expect(f.handleResponse).toHaveBeenCalledTimes(1);
+    expect(f.onExpired).toHaveBeenCalledWith('h1', 's1');
+    expect(f.writer.enqueue).toHaveBeenCalledWith(
+      'worker:permission.answered',
+      { requestId: 'h1', decision: 'deny', by: 'Worker timeout' },
+    );
+  });
+
+  it('a bound held request can be answered; auto-resolve, denyHeld and dispose stop held timers', async () => {
+    const f = fixture();
+    f.index.hold(heldRequest('h1'), 'tab-1');
+    f.index.bindTab('tab-1', 's1');
+    await f.index.answer('s1', { id: 'h1', decision: 'allow' }, 'C', f.writer);
+    f.index.hold(heldRequest('h2'), 'tab-2');
+    f.index.remove('h2');
+    f.index.hold(heldRequest('h3'), 'tab-3');
+    f.index.denyHeld('tab-3');
+    expect(f.handleResponse).toHaveBeenLastCalledWith('h3', {
+      id: 'h3',
+      decision: 'deny',
+      reason: 'No answer from the controller within 60 s',
+    });
+    f.index.hold(heldRequest('h4'), 'tab-4');
+    f.index.dispose();
+    jest.advanceTimersByTime(REMOTE_PERMISSION_TIMEOUT_MS);
+    expect(f.handleResponse).toHaveBeenCalledTimes(2);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
   it('computes the forwarded deadline', () => {
     expect(remotePermissionDeadline({ timestamp: 5, timeoutAt: 0 })).toBe(
       5 + REMOTE_PERMISSION_TIMEOUT_MS,

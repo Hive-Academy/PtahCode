@@ -105,7 +105,10 @@ export interface PendingPermissionOptions {
 }
 
 interface Pending {
-  sessionId: string;
+  /** Unset while the request is held for a start whose session is unknown. */
+  sessionId?: string;
+  /** Tab of the start a held request waits on. */
+  tabId?: string;
   request: PermissionRequest;
   timer: ReturnType<typeof setTimeout>;
 }
@@ -125,11 +128,53 @@ export class PendingPermissionIndex {
     const sessionId = request.sessionId ?? sessionFromTab;
     if (!sessionId) return;
     this.take(request.id);
-    const delay = Math.max(0, remotePermissionDeadline(request) - Date.now());
-    const timer = setTimeout(() => this.expire(request.id), delay);
-    // A pending prompt must not keep the worker process alive on its own.
-    timer.unref?.();
-    this.pending.set(request.id, { sessionId, request, timer });
+    this.pending.set(request.id, {
+      sessionId,
+      request,
+      timer: this.startTimer(request),
+    });
+  }
+
+  /**
+   * Holds a request raised by a start whose session ID is not resolved yet.
+   * Its deadline runs from now on; `bindTab` attaches it to the session
+   * without restarting the clock.
+   */
+  hold(request: PermissionRequest, tabId: string): void {
+    this.take(request.id);
+    this.pending.set(request.id, {
+      tabId,
+      request,
+      timer: this.startTimer(request),
+    });
+  }
+
+  /** Number of requests held for `tabId`. */
+  heldCount(tabId: string): number {
+    let count = 0;
+    for (const entry of this.pending.values())
+      if (!entry.sessionId && entry.tabId === tabId) count++;
+    return count;
+  }
+
+  /** Binds the requests held for `tabId` to its session; returns their IDs. */
+  bindTab(tabId: string, sessionId: string): string[] {
+    const bound: string[] = [];
+    for (const [id, entry] of this.pending)
+      if (!entry.sessionId && entry.tabId === tabId) {
+        entry.sessionId = sessionId;
+        bound.push(id);
+      }
+    return bound;
+  }
+
+  /**
+   * Denies now the requests held for `tabId`: its start ended without a
+   * session, so no controller can answer them.
+   */
+  denyHeld(tabId: string): void {
+    for (const [id, entry] of [...this.pending])
+      if (!entry.sessionId && entry.tabId === tabId) this.expire(id);
   }
 
   remove(requestId: string): void {
@@ -164,6 +209,16 @@ export class PendingPermissionIndex {
     });
   }
 
+  private startTimer(
+    request: PermissionRequest,
+  ): ReturnType<typeof setTimeout> {
+    const delay = Math.max(0, remotePermissionDeadline(request) - Date.now());
+    const timer = setTimeout(() => this.expire(request.id), delay);
+    // A pending prompt must not keep the worker process alive on its own.
+    timer.unref?.();
+    return timer;
+  }
+
   /** Removes a request and stops its timer; returns what was pending. */
   private take(requestId: string): Pending | undefined {
     const entry = this.pending.get(requestId);
@@ -181,6 +236,8 @@ export class PendingPermissionIndex {
       decision: 'deny',
       reason: REMOTE_PERMISSION_TIMEOUT_REASON,
     });
+    // A held request has no session: no routing and no log to write to.
+    if (!entry.sessionId) return;
     this.options.onExpired?.(requestId, entry.sessionId);
     const writer = this.options.findWriter?.(entry.sessionId);
     // degradation-audit: reported - an append failure degrades the writer,

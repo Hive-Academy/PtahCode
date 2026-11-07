@@ -313,6 +313,76 @@ describe('remote permission expiry (decision 27)', () => {
     );
   });
 
+  it('denies a held request at 60 s when its start never emits session:id-resolved', async () => {
+    const fake = setup((message, tap) => {
+      if (message.method === 'chat:start')
+        tap('permission:request', {
+          id: 'req-held',
+          toolName: 'Bash',
+          toolInput: {},
+          tabId: String(param(message, 'tabId')),
+          timestamp: Date.now(),
+          timeoutAt: 0,
+        });
+      return undefined;
+    });
+    const started = fake.sessions.handle(
+      'session.start',
+      { workspaceId: 'ws_1', prompt: 'run' },
+      grant,
+      peer,
+    );
+    const outcome = expect(started).rejects.toMatchObject({
+      code: 'INTERNAL',
+    });
+    await jest.advanceTimersByTimeAsync(
+      runtime.REMOTE_PERMISSION_TIMEOUT_MS - 1,
+    );
+    await outcome;
+    expect(fake.permissions.handleResponse).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(1);
+    expect(fake.permissions.handleResponse).toHaveBeenCalledWith('req-held', {
+      id: 'req-held',
+      decision: 'deny',
+      reason: 'No answer from the controller within 60 s',
+    });
+    expect(fake.permissions.handleResponse).toHaveBeenCalledTimes(1);
+  });
+
+  it('denies a held request at once when the hold limit is full', async () => {
+    const fake = setup((message, tap) => {
+      if (message.method === 'chat:start')
+        for (let index = 0; index <= 100; index++)
+          tap('permission:request', {
+            id: `req-${index}`,
+            toolName: 'Bash',
+            toolInput: {},
+            tabId: String(param(message, 'tabId')),
+            timestamp: Date.now(),
+            timeoutAt: 0,
+          });
+      return undefined;
+    });
+    const started = fake.sessions.handle(
+      'session.start',
+      { workspaceId: 'ws_1', prompt: 'run' },
+      grant,
+      peer,
+    );
+    const outcome = expect(started).rejects.toMatchObject({
+      code: 'INTERNAL',
+    });
+    await jest.advanceTimersByTimeAsync(0);
+    expect(fake.permissions.handleResponse).toHaveBeenCalledTimes(1);
+    expect(fake.permissions.handleResponse).toHaveBeenCalledWith('req-100', {
+      id: 'req-100',
+      decision: 'deny',
+      reason: 'Too many remote permission requests are pending',
+    });
+    await jest.advanceTimersByTimeAsync(runtime.REMOTE_PERMISSION_TIMEOUT_MS);
+    await outcome;
+  });
+
   it('stops expiry timers when the worker drains', async () => {
     const fake = setup(() => undefined);
     fake.tap('permission:request', request());

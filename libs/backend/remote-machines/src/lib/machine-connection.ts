@@ -21,6 +21,10 @@ import type {
 import { createSshStdioTransport } from './ssh-stdio-transport';
 
 const BACKOFF = [1000, 2000, 5000, 10000, 30000] as const;
+type SessionCursor = { epoch?: string; seq: number };
+type AttachCall = (
+  params: WorkerMethodParams<'session.attach'>,
+) => Promise<WorkerMethodResult<'session.attach'>>;
 type Timer = ReturnType<typeof setTimeout>;
 export interface MachineConnectionOptions {
   machineId: string;
@@ -67,10 +71,9 @@ export class MachineConnection {
     grant: WorkerMethodResult<'pair.exchange'>['grant'];
     workerMachineId: string;
   }>;
-  private readonly sessions = new Map<
-    string,
-    { epoch?: string; seq: number }
-  >();
+  private readonly sessions = new Map<string, SessionCursor>();
+  /** Cursors written by delivered events, as opposed to by an attach. */
+  private readonly observed = new WeakSet<SessionCursor>();
   state: MachineConnectionState;
   nextRetryAt?: number;
   lastSeenAt?: number;
@@ -219,11 +222,11 @@ export class MachineConnection {
     const previous = this.sessions.get(frame.sessionId);
     if (previous && previous.epoch === frame.epoch && frame.seq <= previous.seq)
       return;
-    if (previous)
-      this.sessions.set(frame.sessionId, {
-        epoch: frame.epoch,
-        seq: frame.seq,
-      });
+    if (previous) {
+      const cursor = { epoch: frame.epoch, seq: frame.seq };
+      this.observed.add(cursor);
+      this.sessions.set(frame.sessionId, cursor);
+    }
     this.options.onEvent?.({
       machineId: this.machineId,
       sessionId: frame.sessionId,
@@ -298,11 +301,11 @@ export class MachineConnection {
       let reattachFailed = false;
       for (const [sessionId, cursor] of this.sessions) {
         try {
-          await client.call('session.attach', {
+          await this.attachLog(
+            (params) => client.call('session.attach', params),
             sessionId,
-            afterSeq: cursor.seq,
-            ...(cursor.epoch ? { epoch: cursor.epoch } : {}),
-          });
+            cursor,
+          );
         } catch {
           // degradation-audit: reported - the worker refused this session (ended or no
           // longer granted); the connected push carries 'session-reattach-failed'.
@@ -459,31 +462,74 @@ export class MachineConnection {
   }
   async attach(sessionId: string, afterSeq = 0) {
     const previous = this.sessions.get(sessionId);
-    this.sessions.set(sessionId, {
-      epoch: previous?.epoch,
-      seq: afterSeq,
-    });
+    const attempt = { epoch: previous?.epoch, seq: afterSeq };
+    this.sessions.set(sessionId, attempt);
     try {
-      const result = await this.call('session.attach', { sessionId, afterSeq });
-      const current = this.sessions.get(sessionId);
-      if (result.mode === 'log')
-        this.sessions.set(sessionId, {
-          epoch: result.epoch,
-          seq: Math.max(afterSeq, current?.seq ?? 0),
-        });
-      return result;
+      return await this.attachLog(
+        (params) => this.call('session.attach', params),
+        sessionId,
+        attempt,
+      );
     } catch (error) {
       // A failed re-attach keeps the cursor the app already tracked, so the
-      // next reconnect re-attaches from it. A first attach that fails leaves
-      // nothing tracked.
-      if (previous) this.sessions.set(sessionId, previous);
-      else this.sessions.delete(sessionId);
+      // next reconnect re-attaches from it, unless events delivered while the
+      // attach was in flight advanced it: that newer cursor stays. A first
+      // attach that fails leaves nothing tracked.
+      const current = this.sessions.get(sessionId);
+      if (!previous) this.sessions.delete(sessionId);
+      else if (!current || !this.observed.has(current))
+        this.sessions.set(sessionId, previous);
       if (previous && this.state === 'connected') {
         this.reason = 'session-reattach-failed';
         this.emit();
       }
       throw error;
     }
+  }
+  /**
+   * Attaches from `cursor` and moves the tracked cursor to the result. The
+   * epoch rides along, so a worker whose log was recreated answers from the
+   * new log's start (W7). A cursor past the head of the log the worker
+   * answered from belongs to a log it no longer has: attach again from the
+   * start of the current epoch.
+   */
+  private async attachLog(
+    call: AttachCall,
+    sessionId: string,
+    cursor: SessionCursor,
+  ): Promise<WorkerMethodResult<'session.attach'>> {
+    const result = await call({
+      sessionId,
+      afterSeq: cursor.seq,
+      ...(cursor.epoch ? { epoch: cursor.epoch } : {}),
+    });
+    if (result.mode !== 'log') return result;
+    if (result.fromSeq > result.headSeq) {
+      const restart = await call({
+        sessionId,
+        afterSeq: 0,
+        epoch: result.epoch,
+      });
+      // The replay follows the result, so the cursor starts at its origin
+      // even if frames of the first attach arrived meanwhile.
+      if (restart.mode === 'log')
+        this.sessions.set(sessionId, {
+          epoch: restart.epoch,
+          seq: restart.fromSeq,
+        });
+      return restart;
+    }
+    // Frames of the same epoch seen during the call keep their cursor; a new
+    // epoch starts at the replay origin, below any old epoch's sequence.
+    const current = this.sessions.get(sessionId);
+    this.sessions.set(sessionId, {
+      epoch: result.epoch,
+      seq:
+        current?.epoch === result.epoch
+          ? Math.max(result.fromSeq, current.seq)
+          : result.fromSeq,
+    });
+    return result;
   }
   detach(sessionId: string): Promise<unknown> {
     this.sessions.delete(sessionId);

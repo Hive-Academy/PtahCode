@@ -435,3 +435,123 @@ it('does not open a new connection while a pairing exchange is in flight', async
   expect(h.clients[0].close).toHaveBeenCalledTimes(1);
   h.connection.dispose();
 });
+
+function frameIn(epoch: string, seq: number): EventFrame {
+  return { ...frame(seq), epoch };
+}
+
+it('delivers a new epoch from its start on reconnect when the old sequence is past the new head', async () => {
+  const delivered = jest.fn();
+  const h = harness(
+    { onEvent: delivered },
+    async (method, params, index, cb) => {
+      if (method === 'hello') return hello;
+      if (method === 'auth') return auth;
+      if (index === 0)
+        return { mode: 'log', epoch: 'e', fromSeq: 0, headSeq: 0 };
+      // The worker recreated the log: another epoch answers from its start.
+      expect(params).toEqual({ sessionId: 's', afterSeq: 100, epoch: 'e' });
+      queueMicrotask(() => {
+        for (const seq of [1, 2, 3]) cb.onEvent(frameIn('e2', seq));
+      });
+      return { mode: 'log', epoch: 'e2', fromSeq: 0, headSeq: 3 };
+    },
+  );
+  await h.connection.connect();
+  await h.connection.attach('s');
+  h.callbacks[0].onEvent(frame(100));
+  h.callbacks[0].onClose(1006);
+  await h.connection.retry();
+  await Promise.resolve();
+  expect(
+    delivered.mock.calls.map(([event]) => [event.epoch, event.seq]),
+  ).toEqual([
+    ['e', 100],
+    ['e2', 1],
+    ['e2', 2],
+    ['e2', 3],
+  ]);
+  h.callbacks[1].onClose(1006);
+  await h.connection.retry();
+  expect(
+    h.calls.filter((call) => call.method === 'session.attach').at(-1)?.params,
+  ).toEqual({ sessionId: 's', afterSeq: 3, epoch: 'e2' });
+  h.connection.dispose();
+});
+
+it('moves an explicit re-attach to the new epoch origin instead of the old cursor', async () => {
+  const delivered = jest.fn();
+  let attaches = 0;
+  const h = harness(
+    { onEvent: delivered },
+    async (method, params, _index, cb) => {
+      if (method === 'hello') return hello;
+      if (method === 'auth') return auth;
+      if (attaches++ === 0)
+        return { mode: 'log', epoch: 'e', fromSeq: 0, headSeq: 0 };
+      expect(params).toEqual({ sessionId: 's', afterSeq: 50, epoch: 'e' });
+      queueMicrotask(() => cb.onEvent(frameIn('e2', 1)));
+      return { mode: 'log', epoch: 'e2', fromSeq: 0, headSeq: 1 };
+    },
+  );
+  await h.connection.connect();
+  await h.connection.attach('s');
+  h.callbacks[0].onEvent(frame(50));
+  await h.connection.attach('s', 50);
+  await Promise.resolve();
+  expect(delivered.mock.calls.at(-1)?.[0]).toMatchObject({
+    epoch: 'e2',
+    seq: 1,
+  });
+  h.connection.dispose();
+});
+
+it('re-attaches from the start when the cursor is past the head of an untracked epoch', async () => {
+  const h = harness({}, async (method, params) => {
+    if (method === 'hello') return hello;
+    if (method === 'auth') return auth;
+    const { afterSeq } = params as { afterSeq: number };
+    return afterSeq === 0
+      ? { mode: 'log', epoch: 'e2', fromSeq: 0, headSeq: 3 }
+      : { mode: 'log', epoch: 'e2', fromSeq: afterSeq, headSeq: 3 };
+  });
+  await h.connection.connect();
+  await expect(h.connection.attach('s', 100)).resolves.toMatchObject({
+    epoch: 'e2',
+    fromSeq: 0,
+  });
+  expect(
+    h.calls
+      .filter((call) => call.method === 'session.attach')
+      .map((call) => call.params),
+  ).toEqual([
+    { sessionId: 's', afterSeq: 100 },
+    { sessionId: 's', afterSeq: 0, epoch: 'e2' },
+  ]);
+  h.connection.dispose();
+});
+
+it('keeps a cursor advanced by events while a failed explicit re-attach was in flight', async () => {
+  let refuse = false;
+  const h = harness({}, async (method, _params, _index, cb) => {
+    if (method === 'hello') return hello;
+    if (method === 'auth') return auth;
+    if (refuse) {
+      cb.onEvent(frame(9));
+      throw new WorkerClientError('INTERNAL');
+    }
+    return attachResult;
+  });
+  await h.connection.connect();
+  await h.connection.attach('s');
+  h.callbacks[0].onEvent(frame(4));
+  refuse = true;
+  await expect(h.connection.attach('s', 2)).rejects.toThrow();
+  refuse = false;
+  h.callbacks[0].onClose(1006);
+  await h.connection.retry();
+  expect(
+    h.calls.filter((call) => call.method === 'session.attach').at(-1)?.params,
+  ).toEqual({ sessionId: 's', afterSeq: 9, epoch: 'e' });
+  h.connection.dispose();
+});
