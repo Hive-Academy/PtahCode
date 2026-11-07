@@ -181,3 +181,72 @@ export function withRestoredOutputLoss(
       : { ...ref, outputLostAfter: info.outputLostAfter };
   });
 }
+
+/** Receives the queued persist of one recovered lane's output (`agent:output-recovered`). */
+export type RecoveredOutputTracker = (settled: Promise<void>) => void;
+
+/** How long a restore waits for recovered output to persist before it returns anyway. */
+export const RECOVERED_OUTPUT_WAIT_MS = 3_000;
+
+/**
+ * A recovered write that has not settled yet. It holds exactly one reaction
+ * on the write (attached by {@link trackRecoveredWrite}); waiters are plain
+ * callbacks that each waiter removes on timeout, so a stuck write never
+ * gathers reactions or closures per session load.
+ */
+export interface TrackedRecoveredWrite {
+  readonly waiters: Set<() => void>;
+}
+
+/**
+ * Track `write` with its one reaction. When it settles (resolved or
+ * rejected: its writer logs its own failure), `onSettled` runs first, then
+ * every current waiter is released.
+ */
+export function trackRecoveredWrite(
+  write: Promise<void>,
+  onSettled: () => void,
+): TrackedRecoveredWrite {
+  const tracked: TrackedRecoveredWrite = { waiters: new Set() };
+  const settle = (): void => {
+    onSettled();
+    const waiters = [...tracked.waiters];
+    tracked.waiters.clear();
+    for (const release of waiters) release();
+  };
+  write.then(settle, settle);
+  return tracked;
+}
+
+/**
+ * Settles `true` once every tracked write settled, `false` when `timeoutMs`
+ * passed first. On either outcome this waiter's callbacks are removed from
+ * every write, so a timed-out wait leaves nothing behind.
+ */
+export function waitForRecoveredWrites(
+  writes: readonly TrackedRecoveredWrite[],
+  timeoutMs: number,
+): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const registered = new Map<TrackedRecoveredWrite, () => void>();
+    let done = false;
+    const finish = (landed: boolean): void => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      for (const [write, release] of registered) write.waiters.delete(release);
+      resolve(landed);
+    };
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    // One callback per distinct write: a repeated agent id must not add a
+    // second callback that the cleanup below could not remove.
+    for (const write of new Set(writes)) {
+      const release = (): void => {
+        registered.delete(write);
+        if (registered.size === 0) finish(true);
+      };
+      registered.set(write, release);
+      write.waiters.add(release);
+    }
+  });
+}

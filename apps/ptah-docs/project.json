@@ -35,6 +35,17 @@
         "command": "npx playwright test --config=docs-screenshots.config.ts"
       }
     },
+    "videos": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        { "target": "build-dev", "projects": ["ptah-electron"] },
+        { "target": "copy-renderer-dev", "projects": ["ptah-electron"] }
+      ],
+      "options": {
+        "cwd": "apps/ptah-electron-e2e",
+        "command": "npx playwright test --config=docs-videos.config.ts"
+      }
+    },
     "dev": {
       "executor": "nx:run-commands",
       "continuous": true,

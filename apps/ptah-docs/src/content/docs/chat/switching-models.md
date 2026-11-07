@@ -9,7 +9,7 @@ sidebar:
 
 The model selector in the composer changes the model of the session. The next message uses the new model. The transcript stays.
 
-![Model selector in the chat header](/screenshots/chat-model-selector.png)
+![Model selector in the chat header](/screenshots/chat-model-selector.webp)
 
 ## What to expect when you switch
 

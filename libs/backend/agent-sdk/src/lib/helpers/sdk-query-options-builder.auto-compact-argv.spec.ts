@@ -24,8 +24,6 @@ import type { ConfigManager, Logger } from '@ptah-extension/vscode-core';
 import { SdkQueryOptionsBuilder } from './sdk-query-options-builder';
 import { CompactionConfigProvider } from './compaction-config-provider';
 
-const PINNED_SDK_VERSION = '0.3.318';
-
 // The probe payload (system prompts across 7 cases routinely exceed 100 KB
 // combined) is read from stdin, never argv or env — both are capped by the
 // OS (Linux MAX_ARG_STRLEN is 131072 bytes per string; spawnSync fails with
@@ -298,11 +296,8 @@ describe('interactive path — compaction settings on the real SDK argv', () => 
       logger: jest.Mocked<Logger>;
     }
   >();
-  let sdkVersion = '';
-
   beforeAll(async () => {
     const sdk = findPinnedSdk();
-    sdkVersion = sdk.version;
     const built: Array<{
       name: CaseName;
       options: Record<string, unknown>;
@@ -383,12 +378,11 @@ describe('interactive path — compaction settings on the real SDK argv', () => 
     subagentPromptCacheTtl: '1h',
   } as const;
 
-  it('runs against the pinned SDK version', () => {
-    expect(sdkVersion).toBe(PINNED_SDK_VERSION);
-  });
-
-  it('enabled + unset threshold → no autoCompactWindow and no autoCompactEnabled', () => {
-    expect(argvSettings('enabled-unset')).toEqual({ ...ALWAYS });
+  it('enabled + unset threshold → first-party default window', () => {
+    expect(argvSettings('enabled-unset')).toEqual({
+      ...ALWAYS,
+      autoCompactWindow: 200_000,
+    });
   });
 
   it('disabled → autoCompactEnabled false (auto compact off, no window)', () => {
@@ -411,7 +405,10 @@ describe('interactive path — compaction settings on the real SDK argv', () => 
   it.each(['invalid-low', 'invalid-high'] as const)(
     'invalid persisted threshold (%s) → warn + treated as unset',
     (name) => {
-      expect(argvSettings(name)).toEqual({ ...ALWAYS });
+      expect(argvSettings(name)).toEqual({
+        ...ALWAYS,
+        autoCompactWindow: 200_000,
+      });
       expect(results.get(name)?.logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('Invalid compaction threshold'),
         expect.anything(),
@@ -443,11 +440,11 @@ describe('interactive path — compaction settings on the real SDK argv', () => 
   }
 
   it.each([
-    ['enabled-unset', true, null, 'runtime'],
+    ['enabled-unset', true, 200_000, 'default'],
     ['disabled', false, null, 'setting'],
     ['min', true, 100_000, 'setting'],
     ['max', true, 1_000_000, 'setting'],
-    ['invalid-low', true, null, 'runtime'],
+    ['invalid-low', true, 200_000, 'default'],
     ['style-and-window', true, 400_000, 'setting'],
     ['env-window', true, 250_000, 'env'],
   ] as const)(

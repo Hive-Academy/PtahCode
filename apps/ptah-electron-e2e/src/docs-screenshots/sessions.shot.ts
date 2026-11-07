@@ -1,82 +1,11 @@
 import { test, expect } from './_harness/docs-fixtures';
-import { shoot, freezeMotion } from './_harness/shooter';
-import { openPreviousSessions } from '../support/perf-session-fixture';
-import { visibleNewSessionTrigger } from '../support/new-session-trigger';
+import { shoot } from './_harness/shooter';
 
 /**
- * Session-surface shots (TASK_2026_260).
- *
- * The session list, its search/date filter and the canvas tile strip all read
- * from the profile copy's real session metadata, so these frames show the real
- * modal rather than a mocked one.
+ * Dashboard session analytics uses the isolated sample repository.
+ * Session rail/history/tabs require saved state and are not recaptured here.
  */
 test.describe('docs screenshots — sessions', () => {
-  test('sessions rail, history filters and the canvas tile strip', async ({
-    ui,
-    page,
-  }) => {
-    test.setTimeout(300_000);
-    await ui.goto('canvas');
-
-    await openPreviousSessions(page);
-    const dialog = page.getByRole('dialog', { name: 'Previous sessions' });
-    const search = dialog.getByPlaceholder('Search sessions...');
-    await expect(search).toBeVisible();
-
-    // Crop to the dialog panel so the search, filters and rows are included.
-    const sessionsPanel = page.locator(
-      '[data-testid="previous-sessions-modal"] [role="dialog"]',
-    );
-    await shoot(page, 'sessions-overview', { crop: sessionsPanel });
-
-    // Show the date-range controls in the same panel.
-    const dateFilter = sessionsPanel.locator(
-      '[title="Toggle date filter"], [aria-label="Toggle date filter"]',
-    );
-    if (
-      await dateFilter
-        .first()
-        .isVisible()
-        .catch(() => false)
-    ) {
-      await dateFilter.first().click();
-      await page.waitForTimeout(600);
-    }
-    await shoot(page, 'sessions-history', { crop: sessionsPanel });
-    await page.keyboard.press('Escape');
-    await expect(dialog).toBeHidden();
-
-    // Two tiles side by side: the canvas is where multiple sessions are open at
-    // once, so it is what "managing sessions" documents. The tile buttons sit
-    // on animated surfaces, so freeze motion first — Playwright's stability
-    // check otherwise waits out the whole timeout on a never-still element.
-    await freezeMotion(page);
-    for (let i = 0; i < 2; i++) {
-      // The empty-board hero first (it loads in a deferred chunk); after a
-      // tile exists, the Rail footer New session button.
-      const add = await visibleNewSessionTrigger(page).catch(() => null);
-      if (add === null) break;
-      await add.click({ force: true });
-      const create = page.getByRole('button', { name: 'Create', exact: true });
-      if (
-        await create
-          .first()
-          .isVisible()
-          .catch(() => false)
-      ) {
-        await create.first().click({ force: true });
-      }
-      await page.waitForTimeout(2_500);
-    }
-    const tiles = page.locator(
-      '[data-testid="canvas-grid"] [data-testid="canvas-tile"]',
-    );
-    console.log(`[docs-shot] canvas tiles: ${await tiles.count()}`);
-    await expect(page.locator('[data-testid="canvas-grid"]')).toBeVisible();
-    await page.waitForTimeout(1_500);
-    await shoot(page, 'sessions-tabs');
-  });
-
   test('session analytics dashboard', async ({ ui, page }) => {
     test.setTimeout(300_000);
     await ui.goto('dashboard');
@@ -110,6 +39,10 @@ test.describe('docs screenshots — sessions', () => {
       }
       await page.waitForTimeout(2_500);
     }
-    await shoot(page, 'sessions-analytics');
+    const usage = page.locator('ptah-usage-dashboard');
+    await expect(usage.locator('[data-testid="usage-content"], [data-testid="usage-error"]')).toBeVisible({ timeout: 60_000 });
+    await expect(page.locator('[aria-label="Loading account usage"]')).toHaveCount(0, { timeout: 60_000 });
+    // Keep account identities above this panel out of the published image.
+    await shoot(page, 'sessions-analytics', { crop: usage });
   });
 });

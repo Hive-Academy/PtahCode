@@ -135,6 +135,14 @@ export const CODEX_SIGN_IN_STOP_BUDGET_MS = 2000;
 export const SEARCH_WORKER_EXIT_BUDGET_MS = 2000;
 
 /**
+ * How long the chain waits for the task-end hook's running flush, step and
+ * hook censuses to settle after their abort, before `SQLite close`. The same
+ * 5 s as the review worker's lease release: both are report-only background
+ * work whose unfinished entries are resumed by the next start.
+ */
+export const TASK_END_HOOK_STOP_BUDGET_MS = 5_000;
+
+/**
  * How long the chain may wait for the main-chat SDK sessions to end before it
  * moves on to the agent reap and `SQLite close`.
  *
@@ -264,6 +272,7 @@ function disposeBeforePersistence(deps: DisposalDeps): {
   nonFatal('UpdateManager dispose', () => refs.updateManager?.dispose());
   nonFatal('MachinesService dispose', () => refs.remoteMachines?.dispose());
   nonFatal('Review worker dispose', () => refs.reviewWorker?.dispose());
+  nonFatal('Task-end hook dispose', () => refs.taskEndHook?.dispose());
   // LIFO puts it here: it is captured at the very END of the heavy boot, right
   // after the cron start that arms its boot dispatch, so it is disposed early.
   // It belongs in THIS half — a check that completes writes its verdict through
@@ -394,6 +403,19 @@ async function disposeAfterPersistence(deps: DisposalDeps): Promise<void> {
       () => reviewWorker.awaitStopped(),
       5_000,
       'the lease will expire and reconcile on next start.',
+    );
+  }
+
+  // Before `SQLite close`: a step that settles after its abort, or a hook
+  // census recording its result, writes through that connection. Disposed
+  // above; an entry left unfinished is resumed by the next start.
+  const taskEndHook = refs.taskEndHook;
+  if (taskEndHook !== null) {
+    await withBudget(
+      'Task-end hook stop',
+      () => taskEndHook.awaitStopped(),
+      TASK_END_HOOK_STOP_BUDGET_MS,
+      'unfinished task-end steps resume on next start.',
     );
   }
 
@@ -594,6 +616,7 @@ export function requiresDeferredDisposal(refs: BootRefs): boolean {
     refs.messagingGateway !== null ||
     refs.agentProcessManager !== null ||
     refs.reviewWorker !== null ||
+    refs.taskEndHook !== null ||
     refs.searchWorker !== null ||
     refs.chatSessions !== null ||
     runningCheckPids().length > 0

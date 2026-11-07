@@ -15,7 +15,7 @@ Select **File → Open Folder...** and select the project root.
 
 Click **Add Folder** in the workspace sidebar and select the project root. The sidebar lists all open workspaces. Click **Remove workspace** to remove a workspace from the list. This does not delete the folder.
 
-![Recent workspaces list](/screenshots/recent-workspaces.png)
+![Recent workspaces list](/screenshots/recent-workspaces.webp)
 
 ## From the command line
 

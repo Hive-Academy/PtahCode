@@ -39,7 +39,10 @@ import {
   MemoryCuratorService,
   type CuratorRunStats,
 } from '../memory-curator.service';
-import { curatorRunMessage } from '../curator-llm/curator-activity-log';
+import {
+  curatorRunMessage,
+  type CuratorRunReason,
+} from '../curator-llm/curator-activity-log';
 import {
   ObservationQueueStore,
   type ObservationDraftRow,
@@ -82,7 +85,75 @@ type CurateSource =
   | 'commit-detect'
   | 'session-end'
   | 'boot'
-  | 'user-cue';
+  | 'user-cue'
+  | 'task-end';
+
+/** Whether the pass read the session transcript; a failed read curates without it. */
+type CurateTranscriptRead = 'read' | 'read-failed';
+
+/**
+ * How one curation pass ended: one member per exit of {@link
+ * MemoryTriggerService.runCuratePass}. `threw` is the drain, compose or
+ * `curate` exception the pass already logs; it carries no error text.
+ */
+type CuratePassExit =
+  | {
+      readonly exit: 'ran';
+      readonly counts: TaskEndCurateCounts;
+      readonly transcript: CurateTranscriptRead;
+    }
+  | {
+      readonly exit: 'stalled';
+      readonly reason: CuratorRunReason | null;
+      readonly transcript: CurateTranscriptRead;
+    }
+  | {
+      readonly exit: 'failed';
+      readonly reason: CuratorRunReason | null;
+      readonly observations: 'kept' | 'marked-uncurated';
+      readonly transcript: CurateTranscriptRead;
+    }
+  | { readonly exit: 'threw' };
+
+interface TaskEndCurateCounts {
+  readonly extracted: number;
+  readonly merged: number;
+  readonly created: number;
+}
+
+/**
+ * The closed result of {@link MemoryTriggerService.curateSessionForTaskEnd}.
+ *
+ * Same shape as the task-end hook's shared `TaskEndCurationResult`, with the
+ * engine's own `CuratorRunReason`; the host adapter converts the reason. Codes
+ * and counts only: no error text, path or provider output.
+ */
+export type TaskEndCurateOutcome =
+  | {
+      readonly kind: 'ran';
+      readonly counts: TaskEndCurateCounts;
+      readonly transcript: CurateTranscriptRead;
+    }
+  | {
+      readonly kind: 'gated';
+      readonly gate:
+        | 'memory-disabled'
+        | 'session-end-disabled'
+        | 'in-flight'
+        | 'hourly-limit';
+    }
+  | {
+      readonly kind: 'stalled';
+      readonly reason: CuratorRunReason | null;
+      readonly transcript: CurateTranscriptRead | 'not-read';
+    }
+  | {
+      readonly kind: 'failed';
+      readonly reason: CuratorRunReason | null;
+      readonly observations: 'kept' | 'marked-uncurated';
+      readonly transcript: CurateTranscriptRead;
+    }
+  | { readonly kind: 'threw'; readonly stage: 'pass' | 'unexpected' };
 
 type CurateEventKind =
   | 'idle-trigger'
@@ -558,6 +629,112 @@ export class MemoryTriggerService {
     this.curator.forgetSession(sessionId);
   }
 
+  /**
+   * Curate one ended session for the task-end hook, through the same pass as
+   * every trigger: the session's observation queue plus its transcript.
+   *
+   * Gates, in order, return without starting a pass: memory off, the
+   * session-end trigger off, a pass already in flight for the session, the
+   * network back-off (checked before the hourly slot, so none is spent), then
+   * the hourly limit. Recency coalescing and the empty-episode gate do not
+   * apply: this pass does not read the episode buffer, and it does not touch
+   * episodes or session teardown (`flushSessionEnd` owns those).
+   *
+   * The promise never rejects. An unexpected exception returns
+   * `threw/unexpected`; its message goes to the log only.
+   */
+  async curateSessionForTaskEnd(
+    sessionId: string,
+    workspaceRoot: string,
+  ): Promise<TaskEndCurateOutcome> {
+    let claimed = false;
+    try {
+      if (!this.readMemoryEnabled()) {
+        return { kind: 'gated', gate: 'memory-disabled' };
+      }
+      if (!this.readSessionEndEnabled()) {
+        return { kind: 'gated', gate: 'session-end-disabled' };
+      }
+      if (this.inFlightCurates.has(sessionId)) {
+        return { kind: 'gated', gate: 'in-flight' };
+      }
+      if (this.heldByNetworkBackoff(sessionId, 'task-end')) {
+        return {
+          kind: 'stalled',
+          reason: 'network-backoff',
+          transcript: 'not-read',
+        };
+      }
+      const decision = this.rateLimiter.tryAcquire(
+        RATE_LIMIT_KEY,
+        this.readMaxCuratesPerHour(),
+      );
+      if (!decision.allowed) {
+        this.curator.pushEvent({
+          kind: 'rate-limited',
+          timestamp: Date.now(),
+          sessionId,
+          stats: {
+            source: 'task-end',
+            limit: decision.limit,
+            resetAt: decision.resetAt,
+            usedThisWindow: decision.usedThisWindow,
+          },
+        });
+        return { kind: 'gated', gate: 'hourly-limit' };
+      }
+      this.inFlightCurates.add(sessionId);
+      claimed = true;
+      const passExit = await this.runCuratePass(
+        sessionId,
+        workspaceRoot,
+        'task-end',
+      );
+      // The pass resolved, so its own `finally` already released the claim;
+      // releasing again could drop a claim a newer pass took meanwhile.
+      claimed = false;
+      switch (passExit.exit) {
+        case 'ran':
+          return {
+            kind: 'ran',
+            counts: passExit.counts,
+            transcript: passExit.transcript,
+          };
+        case 'stalled':
+          return {
+            kind: 'stalled',
+            reason: passExit.reason,
+            transcript: passExit.transcript,
+          };
+        case 'failed':
+          return {
+            kind: 'failed',
+            reason: passExit.reason,
+            observations: passExit.observations,
+            transcript: passExit.transcript,
+          };
+        case 'threw':
+          return { kind: 'threw', stage: 'pass' };
+        default: {
+          const unreachable: never = passExit;
+          return unreachable;
+        }
+      }
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn; the closed `threw`
+      // result tells the hook, which records a failed step without the text.
+      this.logger.warn('[memory-curator] task-end curate failed unexpectedly', {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { kind: 'threw', stage: 'unexpected' };
+    } finally {
+      // A pass that rejected before its own `try` (the settings read) never
+      // released the claim; release it so the session is not left in flight.
+      if (claimed) this.inFlightCurates.delete(sessionId);
+    }
+  }
+
   private onUserPromptSubmit(payload: UserPromptSubmitPayload): void {
     if (!this.readMemoryEnabled()) return;
     if (blankToUndefined(payload.sessionId) !== undefined) {
@@ -974,8 +1151,33 @@ export class MemoryTriggerService {
     episodeSnap?: EpisodeSummaryInput,
     detachedEpisode?: EpisodeBuffer | null,
   ): Promise<void> {
+    await this.runCuratePass(
+      sessionId,
+      workspaceRoot,
+      source,
+      salienceBoost,
+      episodeSnap,
+      detachedEpisode,
+    );
+  }
+
+  /**
+   * The body of {@link invokeCurate}, reporting how it ended. Every exit of
+   * the original body maps to exactly one {@link CuratePassExit}; the state
+   * each exit advances (rows, episode, failure counter, hourly refund) is
+   * unchanged.
+   */
+  private async runCuratePass(
+    sessionId: string,
+    workspaceRoot: string,
+    source: CurateSource,
+    salienceBoost?: number,
+    episodeSnap?: EpisodeSummaryInput,
+    detachedEpisode?: EpisodeBuffer | null,
+  ): Promise<CuratePassExit> {
     const limit = this.readMaxObservationsPerCurate();
     let jsonlText: string;
+    let transcriptRead: CurateTranscriptRead = 'read';
     try {
       jsonlText = await this.transcriptReader.read(sessionId, workspaceRoot, {
         tailBytes: TRANSCRIPT_TAIL_BYTES,
@@ -988,6 +1190,7 @@ export class MemoryTriggerService {
         error: message,
       });
       jsonlText = '';
+      transcriptRead = 'read-failed';
     }
     try {
       const drainedRows = this.observationQueue.drainForSession(
@@ -1010,7 +1213,11 @@ export class MemoryTriggerService {
           '[memory-curator] curation pass stalled; observations kept for the next pass',
           { sessionId, source, observations: drainedRows.length },
         );
-        return;
+        return {
+          exit: 'stalled',
+          reason: stats.reason ?? null,
+          transcript: transcriptRead,
+        };
       }
       if (stats.outcome === 'failed') {
         const failures = (this.failedPasses.get(sessionId) ?? 0) + 1;
@@ -1029,7 +1236,12 @@ export class MemoryTriggerService {
               maxRetries: MAX_FAILED_PASS_RETRIES,
             },
           );
-          return;
+          return {
+            exit: 'failed',
+            reason: stats.reason ?? null,
+            observations: 'kept',
+            transcript: transcriptRead,
+          };
         }
         this.logger.warn(
           '[memory-curator] curation pass failed after every retry; observations marked processed uncurated',
@@ -1044,6 +1256,23 @@ export class MemoryTriggerService {
       this.failedPasses.delete(sessionId);
       const ids = drainedRows.map((r) => r.id);
       if (ids.length > 0) this.observationQueue.markProcessed(ids);
+      if (stats.outcome === 'failed') {
+        return {
+          exit: 'failed',
+          reason: stats.reason ?? null,
+          observations: 'marked-uncurated',
+          transcript: transcriptRead,
+        };
+      }
+      return {
+        exit: 'ran',
+        counts: {
+          extracted: stats.extracted,
+          merged: stats.merged,
+          created: stats.created,
+        },
+        transcript: transcriptRead,
+      };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       // Fixed sentence on the event; the raw message, which can carry
@@ -1059,6 +1288,7 @@ export class MemoryTriggerService {
         sessionId,
         error: message,
       });
+      return { exit: 'threw' };
     } finally {
       this.inFlightCurates.delete(sessionId);
     }

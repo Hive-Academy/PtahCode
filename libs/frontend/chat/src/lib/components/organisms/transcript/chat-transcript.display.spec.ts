@@ -390,7 +390,7 @@ describe('ChatTranscriptComponent display wiring (TASK_2026_623 Task 24.1)', () 
   });
 
   describe('turn summary chip (R6.5, R6.9, R6.10)', () => {
-    it('Electron: replaces the change-set card and tests row with the chip at the turn end', async () => {
+    it('Electron: renders the chip at the turn end, with no tests row', async () => {
       // The ROOT loader: the real dynamic import of the turn-recap entry.
       configure({
         tabs: signal([tab(TAB, SUMMARY_MESSAGES)]),
@@ -406,7 +406,6 @@ describe('ChatTranscriptComponent display wiring (TASK_2026_623 Task 24.1)', () 
         'u2',
         'a2',
       ]);
-      expect(query(fixture, 'chat-change-set')).toBeNull();
       expect(query(fixture, 'chat-turn-tests')).toBeNull();
       const chip = query(fixture, 'turn-summary-chip');
       const text = chip?.textContent ?? '';
@@ -433,37 +432,32 @@ describe('ChatTranscriptComponent display wiring (TASK_2026_623 Task 24.1)', () 
       expect(review).toHaveBeenCalledWith(TURN_1_CHANGE_SET);
       expect(openFile).toHaveBeenCalledWith(TURN_1_CHANGE_SET, TURN_1_CHANGE_SET.files[0].path);
     });
-    it('VS Code: keeps the card, with no chip, no tests row and no sync (R1.14)', async () => {
-      const loader = jest.fn(() => Promise.resolve(RECAP));
-      const display =
-        '```ptah-ui display stats\ntitle Stats\nstats\n  Files | 2\n```\n';
+    it('shows a failed chip review action and clears the error on retry', async () => {
       configure({
-        tabs: signal([
-          tab(TAB, [
-            ...SUMMARY_MESSAGES,
-            makeTranscriptMessage('u3', 'user', 300),
-            assistant('a3', 310, [textNode('a3-text', display)]),
-          ]),
-        ]),
+        tabs: signal([tab(TAB, SUMMARY_MESSAGES)]),
         changeSets: signal([TURN_1_CHANGE_SET]),
-        isElectron: false,
-        loader,
       });
-      const dock = TestBed.inject(DisplayDockState);
-      const setLiveTurn = jest.spyOn(dock, 'setLiveTurn');
+      const actions = TestBed.inject(ChangeSetActionsService);
+      const review = jest.spyOn(actions, 'review')
+        .mockRejectedValueOnce(new Error('Review is unavailable right now.'))
+        .mockResolvedValueOnce(undefined);
       const fixture = mount(TAB);
       await settle(fixture);
+      query(fixture, 'turn-summary-chip-toggle')?.click();
+      fixture.detectChanges();
+      query(fixture, 'turn-summary-review-all')?.click();
+      await settle(fixture);
 
-      expect(query(fixture, 'chat-change-set')).not.toBeNull();
-      expect(query(fixture, 'chat-turn-summary')).toBeNull();
-      expect(query(fixture, 'chat-turn-tests')).toBeNull();
-      expect(
-        fixture.nativeElement.querySelector('ptah-display-surface-sync'),
-      ).toBeNull();
-      expect(loader).not.toHaveBeenCalled();
-      expect(setLiveTurn).not.toHaveBeenCalled();
+      const alert = query(fixture, 'chat-change-set-error');
+      expect(alert?.getAttribute('role')).toBe('alert');
+      expect(alert?.textContent).toContain('Review is unavailable right now.');
+      expect(alert?.querySelector('lucide-angular')?.getAttribute('aria-hidden')).toBe('true');
+
+      query(fixture, 'turn-summary-review-all')?.click();
+      await settle(fixture);
+      expect(review).toHaveBeenCalledTimes(2);
+      expect(query(fixture, 'chat-change-set-error')).toBeNull();
     });
-
     it('mounts no chip for a turn without files or tests and never loads the entry (R6.4)', async () => {
       const loader = jest.fn(() => Promise.resolve(RECAP));
       configure({
@@ -481,7 +475,6 @@ describe('ChatTranscriptComponent display wiring (TASK_2026_623 Task 24.1)', () 
       await settle(fixture);
 
       expect(query(fixture, 'chat-turn-summary')).toBeNull();
-      expect(query(fixture, 'chat-change-set')).toBeNull();
       expect(loader).not.toHaveBeenCalled();
     });
 
@@ -505,20 +498,6 @@ describe('ChatTranscriptComponent display wiring (TASK_2026_623 Task 24.1)', () 
       });
     });
 
-    it('keeps the change-set card without a dock', async () => {
-      configure({
-        tabs: signal([tab(TAB, SUMMARY_MESSAGES)]),
-        changeSets: signal([TURN_1_CHANGE_SET]),
-        loader: () => Promise.resolve(RECAP),
-        withDock: false,
-      });
-      const fixture = mount(TAB);
-      await settle(fixture);
-
-      expect(query(fixture, 'chat-turn-summary')).toBeNull();
-      expect(query(fixture, 'chat-change-set')).not.toBeNull();
-      expect(query(fixture, 'turn-summary-chip-open')).toBeNull();
-    });
   });
 
   describe('lazy turn-recap load (decisions #101, #104)', () => {

@@ -30,6 +30,22 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 
+/** Windows needs privilege for file symlinks; emulate its nonregular Dirent. */
+function mockFileLinkEntry(dir: string, name: string): jest.SpyInstance {
+  const fsModule: typeof fs = jest.requireActual('fs/promises');
+  const realReaddir = fsModule.readdir;
+  return jest.spyOn(fsModule, 'readdir').mockImplementation((async (target: string, options: { withFileTypes: true }) => {
+    const entries = await realReaddir(target, options);
+    if (target !== dir) return entries;
+    return entries.map((entry) => path.join(String(target), entry.name) === path.join(dir, name)
+      ? new Proxy(entry, { get(value, key, receiver) {
+          if (key === 'isFile' || key === 'isDirectory') return () => false;
+          return Reflect.get(value, key, receiver);
+        } })
+      : entry);
+  }) as typeof fsModule.readdir);
+}
+
 const stageSkillsInstallMock = jest.fn();
 
 jest.mock('../utils/skills-sh-cli', () => {
@@ -776,33 +792,41 @@ describe('verifyOwnedRoot — ownership is proven only by v2 metadata and every 
   });
 
   it('is unproven when a symlink sits under the root', async () => {
-    await fs.symlink(
-      path.join(workspaceRootDir(), 'skills', 'a', 'SKILL.md'),
-      path.join(workspaceRootDir(), 'skills', 'a', 'link.md'),
-    );
-    await expect(verifyOwnedRoot(workspaceRootDir())).resolves.toEqual({
-      status: 'unproven',
-      reason: 'not-regular-file',
-      path: 'skills/a/link.md',
-    });
+    const dir = path.join(workspaceRootDir(), 'skills', 'a');
+    const link = path.join(dir, 'link.md');
+    let nonRegular: jest.SpyInstance | undefined;
+    if (process.platform === 'win32') {
+      await fs.writeFile(link, 'same bytes');
+      nonRegular = mockFileLinkEntry(dir, 'link.md');
+    } else await fs.symlink(path.join(dir, 'SKILL.md'), link);
+    try {
+      await expect(verifyOwnedRoot(workspaceRootDir())).resolves.toEqual({
+        status: 'unproven', reason: 'not-regular-file', path: 'skills/a/link.md',
+      });
+    } finally { nonRegular?.mockRestore(); }
   });
 
   it('is unproven when a listed file was replaced by a symlink with identical content', async () => {
     const target = path.join(workspaceRootDir(), 'skills', 'a', 'SKILL.md');
     const outside = path.join(homeDir, 'outside.md');
     await fs.copyFile(target, outside);
-    await fs.rm(target);
-    await fs.symlink(outside, target);
-    await expect(verifyOwnedRoot(workspaceRootDir())).resolves.toEqual({
-      status: 'unproven',
-      reason: 'not-regular-file',
-      path: 'skills/a/SKILL.md',
-    });
+    let nonRegular: jest.SpyInstance | undefined;
+    if (process.platform === 'win32') {
+      nonRegular = mockFileLinkEntry(path.dirname(target), 'SKILL.md');
+    } else {
+      await fs.rm(target);
+      await fs.symlink(outside, target);
+    }
+    try {
+      await expect(verifyOwnedRoot(workspaceRootDir())).resolves.toEqual({
+        status: 'unproven', reason: 'not-regular-file', path: 'skills/a/SKILL.md',
+      });
+    } finally { nonRegular?.mockRestore(); }
   });
 
   it('is unproven when the root itself is a symlink to an owned root', async () => {
     const linked = path.join(homeDir, 'linked-root');
-    await fs.symlink(workspaceRootDir(), linked);
+    await fs.symlink(workspaceRootDir(), linked, process.platform === 'win32' ? 'junction' : 'dir');
     await expect(verifyOwnedRoot(linked)).resolves.toEqual({
       status: 'unproven',
       reason: 'root-not-directory',

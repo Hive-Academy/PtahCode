@@ -9,7 +9,7 @@ sidebar:
 
 Autopilot sets the approval mode of the session. When Autopilot is off, the mode is **Manual** and the agent asks for approval before each action. When Autopilot is on, the agent approves actions automatically at the permission level that you select.
 
-![Autopilot toggle in the chat header](/screenshots/chat-autopilot-toggle.png)
+![Autopilot toggle in the chat header](/screenshots/chat-autopilot-toggle.webp)
 
 ## Turn on Autopilot
 

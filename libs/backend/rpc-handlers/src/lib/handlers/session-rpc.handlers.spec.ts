@@ -406,7 +406,11 @@ function makeHarness(
     workspaceFolders?: string[];
     organization?: FakeOrganization;
     taskIndex?: FakeTaskIndex;
-    agentProcessManager?: { restoreAgents: jest.Mock };
+    agentProcessManager?: {
+      restoreAgents: jest.Mock;
+      awaitRecoveredOutput?: jest.Mock;
+      findAgentInfo?: jest.Mock;
+    };
     transcriptLines?: string[];
     webviewManager?: { broadcastMessage: jest.Mock };
   } = {},
@@ -2728,6 +2732,48 @@ describe('SessionRpcHandlers', () => {
 
         expect(result.cliSessions).toEqual(refs);
         expect(restoreAgents).not.toHaveBeenCalled();
+      });
+
+      it('returns the cards only after the recovered output write settled', async () => {
+        let land = (): void => undefined;
+        let markWaiting = (): void => undefined;
+        const waiting = new Promise<void>((resolve) => { markWaiting = resolve; });
+        const awaitRecoveredOutput = jest.fn(
+          () => new Promise<void>((resolve) => { land = resolve; markWaiting(); }),
+        );
+        const restoreAgents = jest.fn().mockReturnValue(1);
+        const h = makeHarness({
+          workspaceFolders: [WORKSPACE, OTHER_PROJECT],
+          agentProcessManager: {
+            restoreAgents,
+            awaitRecoveredOutput,
+            findAgentInfo: jest.fn().mockReturnValue(undefined),
+          },
+        });
+        h.workspace.getWorkspaceRoot.mockReturnValue(WORKSPACE);
+        h.metadataStore.get.mockResolvedValue(
+          makeMetadata({ sessionId: VALID_SESSION_ID, workspaceId: OTHER_PROJECT }) as never,
+        );
+        h.metadataStore.getCliSessionsForRestore.mockResolvedValue(refs);
+        h.fileSystem.exists.mockResolvedValue(true);
+        h.handlers.register();
+
+        let answered = false;
+        const pending = call<{ cliSessions: CliSessionReference[] }>(
+          h,
+          'session:cli-sessions',
+          { sessionId: VALID_SESSION_ID },
+        ).then((result) => {
+          answered = true;
+          return result;
+        });
+        // The handler is now parked on the recovered-output wait.
+        await waiting;
+        expect(awaitRecoveredOutput).toHaveBeenCalledWith(['agent-1']);
+        expect(answered).toBe(false);
+        land();
+        const result = await pending;
+        expect(result.cliSessions).toEqual(refs);
       });
     });
 

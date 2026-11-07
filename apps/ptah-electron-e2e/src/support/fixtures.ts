@@ -5,6 +5,7 @@ import {
 } from '@playwright/test';
 import type { EditorDetectTargetsResult } from '@ptah-extension/shared';
 import { launchPtah } from './electron-launcher';
+import { attachAppLogsOnFailure } from './attach-app-logs';
 import { RpcBridge } from './rpc-bridge';
 import { UiDriver } from './ui-driver';
 import { captureRendererConsoleErrors } from './renderer-console-errors';
@@ -57,11 +58,12 @@ export const test = base.extend<PtahFixtures>({
   },
 
   // eslint-disable-next-line no-empty-pattern
-  electronApp: async ({}, use) => {
+  electronApp: async ({}, use, testInfo) => {
     const app = await launchPtah();
     try {
       await use(app);
     } finally {
+      await attachAppLogsOnFailure(app, testInfo);
       await app.close().catch(() => {});
     }
   },

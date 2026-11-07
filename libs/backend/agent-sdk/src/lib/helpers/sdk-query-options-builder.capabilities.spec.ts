@@ -267,6 +267,7 @@ describe('SdkQueryOptionsBuilder — capability policy (TASK_2026_560, C5)', () 
       // `subagentPromptCacheTtl` is the N1 `auto` default (TASK_2026_597),
       // not a capability key.
       expect(built.settings).toEqual({
+        autoCompactWindow: 200_000,
         autoMemoryEnabled: false,
         autoDreamEnabled: false,
         crossSessionInbound: 'accept',

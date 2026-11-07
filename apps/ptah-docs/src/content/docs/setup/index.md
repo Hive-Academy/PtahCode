@@ -5,7 +5,7 @@ description: Analyze a project, start a new project, or build an AI team from th
 
 The **Setup** tab sets up Ptah for your project. Its home page has the heading **Set up Ptah for your work** and three paths.
 
-![Setup overview](/screenshots/setup-hub.png)
+![Setup overview](/screenshots/setup-hub.webp)
 
 ## Open Setup
 

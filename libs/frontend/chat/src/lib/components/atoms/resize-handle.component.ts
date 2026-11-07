@@ -18,7 +18,7 @@
  *   - Sets body cursor during drag for seamless feel
  */
 
-import { Component, ChangeDetectionStrategy, inject } from '@angular/core';
+import { Component, ChangeDetectionStrategy, inject, input } from '@angular/core';
 import { CdkDrag, CdkDragMove } from '@angular/cdk/drag-drop';
 import { PanelResizeService } from '../../services/panel-resize.service';
 import { RESIZE_HANDLE_STYLES } from '@ptah-extension/chat-ui';
@@ -45,6 +45,7 @@ import { RESIZE_HANDLE_STYLES } from '@ptah-extension/chat-ui';
 })
 export class ResizeHandleComponent {
   private readonly resizeService = inject(PanelResizeService);
+  readonly container = input<HTMLElement | null>(null);
 
   onDragStarted(): void {
     this.resizeService.setDragging(true);
@@ -54,8 +55,23 @@ export class ResizeHandleComponent {
 
   onDragMoved(event: CdkDragMove): void {
     event.source.element.nativeElement.style.transform = 'none';
-    const newWidth = window.innerWidth - event.pointerPosition.x;
-    this.resizeService.setCustomWidth(newWidth);
+    const container = this.container();
+    if (!container) {
+      this.resizeService.setCustomWidth(
+        window.innerWidth - event.pointerPosition.x,
+      );
+      return;
+    }
+    // The panel ends at the container's content edge, and CSS percentages
+    // resolve against the content box, so measure both without padding.
+    const style = getComputedStyle(container);
+    const paddingLeft = Number.parseFloat(style.paddingLeft) || 0;
+    const paddingRight = Number.parseFloat(style.paddingRight) || 0;
+    const contentRight = container.getBoundingClientRect().right - paddingRight;
+    this.resizeService.setCustomWidth(
+      contentRight - event.pointerPosition.x,
+      container.clientWidth - paddingLeft - paddingRight,
+    );
   }
 
   onDragEnded(): void {

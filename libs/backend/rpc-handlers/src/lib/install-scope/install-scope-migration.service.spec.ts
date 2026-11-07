@@ -57,6 +57,23 @@ import { SKILLS_SH_METADATA_FILE } from '../skills-sh/skills-sh-source-root';
 
 const sha256 = (text: string): string =>
   createHash('sha256').update(text, 'utf8').digest('hex');
+const posixPath = (value: string): string => value.replace(/\\/g, '/');
+
+/** Windows needs privilege for file symlinks; emulate the Dirent branch they produce. */
+function mockFileLinkEntry(dir: string, name: string): jest.SpyInstance {
+  const fsModule: typeof fs = jest.requireActual('fs/promises');
+  const realReaddir = fsModule.readdir;
+  return jest.spyOn(fsModule, 'readdir').mockImplementation((async (target: string, options: { withFileTypes: true }) => {
+    const entries = await realReaddir(target, options);
+    if (target !== dir) return entries;
+    return entries.map((entry) => path.join(String(target), entry.name) === path.join(dir, name)
+      ? new Proxy(entry, { get(value, key, receiver) {
+          if (key === 'isFile' || key === 'isDirectory') return () => false;
+          return Reflect.get(value, key, receiver);
+        } })
+      : entry);
+  }) as typeof fsModule.readdir);
+}
 
 let tempBase: string;
 let pluginsDir: string;
@@ -506,7 +523,9 @@ describe('InstallScopeMigrationService — global deletes with proof', () => {
       setup: async (dir) => {
         const outside = path.join(tempBase, 'outside.md');
         await fs.writeFile(outside, 'outside');
-        await fs.symlink(outside, path.join(dir, 'skills', 'a', 'link.md'));
+        const link = path.join(dir, 'skills', 'a', 'link.md');
+        if (process.platform === 'win32') await fs.writeFile(link, 'outside');
+        else await fs.symlink(outside, link);
       },
     },
   ];
@@ -523,7 +542,12 @@ describe('InstallScopeMigrationService — global deletes with proof', () => {
       );
       await setup(dir);
 
-      const result = await makeService().run();
+      const nonRegular = reason === 'not-regular-file' && process.platform === 'win32'
+        ? mockFileLinkEntry(path.join(dir, 'skills', 'a'), 'link.md')
+        : undefined;
+      let result: InstallScopeMigrationRunResult;
+      try { result = await makeService().run(); }
+      finally { nonRegular?.mockRestore(); }
 
       expect(await exists(path.join(dir, SKILLS_SH_METADATA_FILE))).toBe(true);
       const item = (await readLedger()).items[
@@ -554,6 +578,7 @@ describe('InstallScopeMigrationService — global deletes with proof', () => {
     await fs.symlink(
       path.join(tempBase, 'elsewhere'),
       rootDir('ptah-skillssh-linked-root'),
+      process.platform === 'win32' ? 'junction' : 'dir',
     );
 
     await makeService().run();
@@ -976,13 +1001,23 @@ describe('InstallScopeMigrationService — roots the user took back (decision #8
     });
     await writeV1Root('ptah-skillssh-legacy');
     // No search permission: lstat of the metadata file fails with EACCES.
-    await fs.chmod(locked, 0o000);
+    const fsModule: typeof fs = jest.requireActual('fs/promises');
+    const realLstat = fsModule.lstat;
+    // Windows chmod does not deny metadata reads; inject the same OS error.
+    const deniedRead = process.platform === 'win32'
+      ? jest.spyOn(fsModule, 'lstat').mockImplementation((target, options) =>
+          String(target) === path.join(locked, SKILLS_SH_METADATA_FILE)
+            ? Promise.reject(Object.assign(new Error('access denied'), { code: 'EACCES' }))
+            : realLstat(target, options))
+      : null;
+    if (!deniedRead) await fs.chmod(locked, 0o000);
 
     let result: InstallScopeMigrationRunResult | undefined;
     try {
       result = await makeService().run();
     } finally {
-      await fs.chmod(locked, 0o755);
+      deniedRead?.mockRestore();
+      if (!deniedRead) await fs.chmod(locked, 0o755);
     }
 
     expect(result?.status).toBe('completed');
@@ -1039,7 +1074,7 @@ describe('InstallScopeMigrationService — workspace pass and ledger', () => {
     const ledgerAtW2 = seenAtW2 as InstallScopeLedger | null;
     expect(ledgerAtW2?.workspaces[w1].passedAt).toEqual(expect.any(String));
     expect(Object.keys(ledgerAtW2?.items['mcp:S'].removedPaths ?? {})).toEqual([
-      `${w1}/.mcp.json#S`,
+      `${posixPath(w1)}/.mcp.json#S`,
     ]);
   });
 
@@ -1074,7 +1109,7 @@ describe('InstallScopeMigrationService — workspace pass and ledger', () => {
     expect(ledger.completedAt).toBeUndefined();
     expect(ledger.workspaces[w2].passedAt).toBeUndefined();
     expect(ledger.items['mcp:S'].failedPaths).toEqual({
-      [`${w2}/.mcp.json#S`]: 'EBUSY',
+      [`${posixPath(w2)}/.mcp.json#S`]: 'EBUSY',
     });
     expect(ledger.items['mcp:S'].outcome).toBeUndefined();
     expect(await service.readNotice()).toBeNull();
@@ -1090,8 +1125,8 @@ describe('InstallScopeMigrationService — workspace pass and ledger', () => {
     expect(ledger.items['mcp:S'].failedPaths).toEqual({});
     expect(Object.keys(ledger.items['mcp:S'].removedPaths).sort()).toEqual(
       [
-        `${w1}/.mcp.json#S`,
-        `${w2}/.mcp.json#S`,
+        `${posixPath(w1)}/.mcp.json#S`,
+        `${posixPath(w2)}/.mcp.json#S`,
         '~/.codex/config.toml#S',
       ].sort(),
     );
@@ -1424,13 +1459,24 @@ describe('InstallScopeMigrationService — retries and idempotence', () => {
     // A read-only ledger directory: the read finds no ledger, the write fails.
     const migrations = path.join(fakeHome, '.ptah', 'migrations');
     await fs.mkdir(migrations, { recursive: true });
-    await fs.chmod(migrations, 0o555);
+    const syncModule: typeof fsSync = jest.requireActual('fs');
+    const realMkdir = syncModule.mkdirSync;
+    // Windows chmod does not prevent the atomic writer from entering this directory.
+    const deniedWrite = process.platform === 'win32'
+      ? jest.spyOn(syncModule, 'mkdirSync').mockImplementation((target, options) => {
+          if (String(target) === migrations)
+            throw Object.assign(new Error('access denied'), { code: 'EACCES' });
+          return realMkdir(target, options);
+        })
+      : null;
+    if (!deniedWrite) await fs.chmod(migrations, 0o555);
 
     let result: InstallScopeMigrationRunResult | undefined;
     try {
       result = await makeService().run();
     } finally {
-      await fs.chmod(migrations, 0o755);
+      deniedWrite?.mockRestore();
+      if (!deniedWrite) await fs.chmod(migrations, 0o755);
     }
 
     expect(result?.status).toBe('failed');
@@ -1503,7 +1549,7 @@ describe('InstallScopeMigrationService — notice', () => {
       counts: { retired: 1, removed: 0, kept: 1, onDisk: 1 },
       keptPaths: [
         {
-          path: `${w1}/.claude/skills/a`,
+          path: `${posixPath(w1)}/.claude/skills/a`,
           reason: 'git-tracked',
           itemId: 'skills-sh:ptah-skillssh-acme-tools',
         },

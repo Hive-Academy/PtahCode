@@ -45,6 +45,7 @@ function harnessConfig(): HarnessConfig {
 }
 
 describe('HarnessConfigStore', () => {
+  const originalSettingsDir = process.env['PTAH_SETTINGS_DIR'];
   let root: string;
   let logger: ReturnType<typeof createMockLogger>;
   let service: HarnessConfigStore;
@@ -62,6 +63,11 @@ describe('HarnessConfigStore', () => {
   });
 
   afterEach(async () => {
+    if (originalSettingsDir === undefined) {
+      delete process.env['PTAH_SETTINGS_DIR'];
+    } else {
+      process.env['PTAH_SETTINGS_DIR'] = originalSettingsDir;
+    }
     await fs.rm(root, { recursive: true, force: true });
   });
 
@@ -114,6 +120,29 @@ describe('HarnessConfigStore', () => {
   });
 
   describe('updatePtahSettings', () => {
+    it('writes to the resolved development settings file only', async () => {
+      const productionDir = path.join(root, '.ptah');
+      const developmentDir = path.join(root, '.ptah-dev');
+      await fs.mkdir(productionDir);
+      await fs.writeFile(
+        path.join(productionDir, 'settings.json'),
+        '{"production":true}',
+      );
+      process.env['PTAH_SETTINGS_DIR'] = developmentDir;
+
+      expect(service.settingsPath).toBe(
+        path.join(developmentDir, 'settings.json'),
+      );
+      await service.updatePtahSettings(harnessConfig());
+
+      await expect(
+        fs.readFile(path.join(productionDir, 'settings.json'), 'utf-8'),
+      ).resolves.toBe('{"production":true}');
+      await expect(fs.readFile(service.settingsPath, 'utf-8')).resolves.toContain(
+        'harness.lastApplied',
+      );
+    });
+
     it('creates missing settings.json with the harness keys', async () => {
       await expect(
         service.updatePtahSettings(harnessConfig()),

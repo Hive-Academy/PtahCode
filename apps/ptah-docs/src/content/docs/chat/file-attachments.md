@@ -9,7 +9,7 @@ sidebar:
 
 The composer has one suggestions dropdown. The character that you type selects what it shows.
 
-![Unified @ suggestions dropdown](/screenshots/chat-at-suggestions.png)
+![Unified @ suggestions dropdown](/screenshots/chat-at-suggestions.webp)
 
 ## Attach files and folders
 

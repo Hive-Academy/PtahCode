@@ -39,6 +39,7 @@ export {
   type UpdateMetadataResult,
   type AdoptFolderInput,
   type AdoptFolderResult,
+  type TaskWritesSettledEvent,
 } from './lib/task-writer.service';
 export { TaskSweepService } from './lib/task-sweep.service';
 export {

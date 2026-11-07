@@ -143,10 +143,21 @@ describe('FileViewRpcHandlers — file:viewContent', () => {
       await fs.writeFile(outside, 'outside');
       const checked = await resolvedFile('race-target.txt');
       resolveForView.mockImplementationOnce(async () => {
-        await fs.rm(inside);
-        await fs.symlink(outside, inside, 'file');
+        if (process.platform !== 'win32') {
+          await fs.rm(inside);
+          await fs.symlink(outside, inside, 'file');
+        }
         return checked;
       });
+      // Windows cannot create file symlinks without privilege; return the same
+      // escaped realpath observed by the opened-file verification branch.
+      const realRealpath = fsModule.realpath;
+      const realpath = process.platform === 'win32'
+        ? jest.spyOn(fsModule, 'realpath').mockImplementation((target, options) =>
+            String(target) === inside
+              ? Promise.resolve(outside)
+              : realRealpath(target, options))
+        : null;
       const methods = new Map<string, RpcMethod>();
       new FileViewRpcHandlers(
         { warn } as never,
@@ -160,6 +171,7 @@ describe('FileViewRpcHandlers — file:viewContent', () => {
           success: false, reason: 'outside-roots', externalOpenAllowed: false,
         });
       } finally {
+        realpath?.mockRestore();
         await fs.rm(inside, { force: true });
       }
     },

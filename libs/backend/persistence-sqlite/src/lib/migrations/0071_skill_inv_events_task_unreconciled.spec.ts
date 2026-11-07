@@ -10,14 +10,14 @@ interface DatabaseShape {
 }
 
 describe('migration 0071_skill_inv_events_task_unreconciled', () => {
-  it('registers after 0070 as the latest migration', () => {
+  it('registers after 0070 and before 0072', () => {
     const previous = MIGRATIONS.findIndex((migration) => migration.version === 70);
     expect(MIGRATIONS[previous + 1]).toEqual({
       version: 71,
       name: '0071_skill_inv_events_task_unreconciled',
       sql,
     });
-    expect(MIGRATIONS[MIGRATIONS.length - 1]?.version).toBe(71);
+    expect(MIGRATIONS[MIGRATIONS.length - 1]?.version).toBe(72);
     expect(sql).not.toContain('${');
   });
 

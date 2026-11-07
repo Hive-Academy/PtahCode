@@ -112,8 +112,12 @@ import {
   applyOutputCheckpoint,
   checkpointFreshness,
   laneLastActivityAt,
+  RECOVERED_OUTPUT_WAIT_MS,
   restoreLaneIdentity,
   restoreLaneLifecycle,
+  trackRecoveredWrite,
+  waitForRecoveredWrites,
+  type TrackedRecoveredWrite,
   stampWorkspaceKey,
 } from './lane-restore';
 import { findBlockedLaneModel } from './lane-spawn-policy';
@@ -365,6 +369,8 @@ export class AgentProcessManager {
   private spawning = 0;
   /** Promise-based mutex to serialize spawn operations and prevent TOCTOU race in concurrent limit check */
   private spawnMutex: Promise<void> = Promise.resolve();
+  /** Pending recovered-output persists of restored lanes, keyed by agent id. */
+  private readonly recoveredOutputWrites = new Map<string, TrackedRecoveredWrite>();
 
   /** EventEmitter for agent lifecycle events (spawned, output, exited) */
   readonly events = new EventEmitter();
@@ -1824,7 +1830,10 @@ export class AgentProcessManager {
       // Same TTL as a completed agent. Without it, a long-lived Electron
       // process accumulates one record per restored agent per session switch.
       this.scheduleCleanup(agentId);
-      if (output.recovered) this.events.emit('agent:output-recovered', { ...info });
+      if (output.recovered) {
+        this.events.emit('agent:output-recovered', { ...info }, (settled: Promise<void>) =>
+          this.trackRecoveredOutputWrite(agentId, settled));
+      }
       restored++;
     }
 
@@ -1841,6 +1850,46 @@ export class AgentProcessManager {
     }
 
     return restored;
+  }
+
+  /**
+   * Wait, at most `timeoutMs`, for the recovered-output persists of these
+   * agents (queued by `restoreAgents` through `agent:output-recovered`), so a
+   * restore path does not hand the webview refs whose first output page still
+   * reads the pre-checkpoint store. No recovered write pending: no wait. A
+   * timeout is logged and the restore goes on; the write keeps its retries and
+   * the checkpoint stays on disk until the write lands.
+   */
+  async awaitRecoveredOutput(
+    agentIds: readonly string[],
+    timeoutMs: number = RECOVERED_OUTPUT_WAIT_MS,
+  ): Promise<void> {
+    const writes = agentIds.flatMap((id) => {
+      const tracked = this.recoveredOutputWrites.get(id);
+      return tracked ? [tracked] : [];
+    });
+    if (writes.length === 0) return;
+    if (await waitForRecoveredWrites(writes, timeoutMs)) return;
+    this.logger.warn(
+      '[AgentProcessManager] Recovered lane output not persisted in time; restore continues',
+      { pending: writes.length, timeoutMs },
+    );
+  }
+
+  /**
+   * Track a recovered write with exactly one reaction on it. The entry stays
+   * until the write settles, so every later restore still waits (bounded) on
+   * a stuck write, and is dropped the moment it settles. A newer restore of
+   * the same agent replaces the entry; the old write then cannot drop it.
+   * Queue order and retries are untouched.
+   */
+  private trackRecoveredOutputWrite(agentId: string, write: Promise<void>): void {
+    const tracked = trackRecoveredWrite(write, () => {
+      if (this.recoveredOutputWrites.get(agentId) === tracked) {
+        this.recoveredOutputWrites.delete(agentId);
+      }
+    });
+    this.recoveredOutputWrites.set(agentId, tracked);
   }
 
   /**

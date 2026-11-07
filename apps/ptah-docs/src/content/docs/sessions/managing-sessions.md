@@ -7,7 +7,7 @@ description: Create, rename, organize, and delete sessions in PtahCode.
 
 A session is the unit of work in PtahCode. Use one session for each task.
 
-![Session tabs](/screenshots/sessions-tabs.png)
+![Session tabs](/screenshots/sessions-tabs.webp)
 
 ## Create a session
 

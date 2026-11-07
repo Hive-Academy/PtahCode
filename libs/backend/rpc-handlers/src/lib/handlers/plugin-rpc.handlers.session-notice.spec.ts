@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { join, resolve } from 'node:path';
 jest.mock('@ptah-extension/workspace-intelligence', () => ({
   ProjectType: {},
   Framework: {},
@@ -39,8 +40,8 @@ import { PluginRpcHandlers } from './plugin-rpc.handlers';
 import { EXTERNAL_PLUGIN_MCP_TOKEN } from './external-plugin-mcp.service';
 
 const SESSION_ID = '11111111-1111-4111-8111-111111111111';
-const ROOT = '/tmp/ptah-plugin-notice-project';
-const FOLDER = `${ROOT}/child`;
+const ROOT = resolve('/tmp/ptah-plugin-notice-project');
+const FOLDER = join(ROOT, 'child');
 const CONFIG = {
   enabledPluginIds: [],
   disabledPluginIds: [],
