@@ -33,7 +33,7 @@ import {
  * the state (changes, branch review, spot editor, commit hook log and failure,
  * history, stashes, worktrees, a real merge conflict); mocked RPC only for the
  * states a real repo cannot reach (PR panel ok, history unavailable, diff load
- * failure, the chat change-set card).
+ * failure, the chat turn summary chip).
  *
  * Pierre reads the theme at mount, so each theme gets its own launch and the
  * theme is set BEFORE the git panel first opens.
@@ -949,7 +949,7 @@ for (const theme of ['dark', 'light'] as const) {
     );
 
     mockedTest(
-      `chat change-set card ${theme}`,
+      `chat turn summary chip ${theme}`,
       async ({ mainWindow, ui, electronApp }) => {
         const cap = new Capture(theme, 'card', electronApp, ui.page);
         await cap.resize(WIDE);

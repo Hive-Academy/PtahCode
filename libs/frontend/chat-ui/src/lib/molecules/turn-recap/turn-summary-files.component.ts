@@ -8,7 +8,7 @@
 } from '@angular/core';
 import { LucideAngularModule, TriangleAlert } from 'lucide-angular';
 import { FileStatusBadgeComponent } from '@ptah-extension/ui';
-import { ROW_PAGE_SIZE } from '../change-set/change-set-card.component';
+import { ROW_PAGE_SIZE } from './turn-summary-files.utils';
 import type {
   TurnSummaryFileRow,
   TurnSummaryFilesCard,
@@ -28,7 +28,7 @@ function splitPath(path: string): {
 /**
  * TurnSummaryFilesComponent - the expanded Files card of the panel's turn
  * summary (TASK_2026_623, component 5; R6.1, R6.3, R6.8; parity-inventory
- * section 2, the change-set card's capabilities).
+ * section 2, the former change-set card's capabilities, removed in TASK_2026_891).
  *
  * One row per active file: the status badge (accessible name, `U` when
  * conflicted), the path (directory muted, file name bold, full path in
