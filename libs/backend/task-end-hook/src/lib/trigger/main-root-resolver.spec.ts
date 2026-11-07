@@ -350,6 +350,17 @@ describe('RepositoryIdentityResolver', () => {
     expect(linked).toEqual(main);
   });
 
+  it('answers cachedRepoId from the cache only, without running git', async () => {
+    const h = setup();
+    expect(h.identities.cachedRepoId(MAIN)).toBeNull();
+    expect(h.git.calls).toHaveLength(0);
+
+    await h.identities.resolve(MAIN);
+    expect(h.identities.cachedRepoId(MAIN)).toBe(COMMON);
+    expect(h.identities.cachedRepoId(WT_A)).toBeNull();
+    expect(h.git.calls).toHaveLength(1);
+  });
+
   it('does not cache a failure: the next call re-runs git', async () => {
     const h = setup();
     h.git.answer(READ_ONLY_GIT_VECTORS.commonDir(), WT_B, new Error('timeout'));

@@ -793,6 +793,9 @@ describe('TaskEndTransitionDetector', () => {
     it('announces created and cancelled runs to subscribers', async () => {
       const root = gitRepo(h);
       const detector = await start(root, { [TASK_1]: 'in_progress' });
+      // cachedRepoId: the resolved root hits the cache, an unseen root does not.
+      expect(detector.cachedRepoId(root)).toBe(path.join(root, '.git'));
+      expect(detector.cachedRepoId(makeMainCheckout())).toBeNull();
       const events: TaskEndRunsChanged[] = [];
       detector.onDidChangeRuns((event) => events.push(event));
 

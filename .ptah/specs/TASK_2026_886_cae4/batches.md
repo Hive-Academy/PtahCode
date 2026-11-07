@@ -1,6 +1,6 @@
 # Batches - TASK_2026_886_cae4
 
-Total tasks: 44 | Batches: 19 | Complete: 15/19
+Total tasks: 44 | Batches: 19 | Complete: 16/19
 
 Source: `implementation-plan.md` Revision 2 (Gate 2 APPROVED by the user, `decisions.md` row 14),
 `task-description.md` Revision 3, `implementation-plan-review.md` (codex APPROVED round 1, one Minor
@@ -12,8 +12,9 @@ Base: fast-forwarded by the team-leader from e9ca7046c to `origin/main` fe414de0
 against e9ca7046c; executors re-read the cited lines, which may have shifted (notably
 `ptah-api-builder.service.ts`, changed by #955 on main).
 
-Schedulable now: Batch 15 (last of Phase 2; its code-logic + style review follows its commit).
-Batches 1-14 and 16 COMPLETE.
+Schedulable now: Phase 2 review (code-logic + style, DUE on the combined Phase 2 diff), and
+Batch 17 (its dependencies 9, 15 and 16 are COMPLETE). Batches 1-16 COMPLETE. First push after
+Batch 17 (D38).
 BLOCKED-ON-957 is lifted (D28): #957 merged and `main` was merged into this branch (fe0f9dfb9)
 instead of rebased, by user decision 2026-11-07. Remaining order: 13 and 14 after 12; 15 after
 13 and 14; 17 after 15 and 16; 18 after 17; 19 after 15 and 16.
@@ -110,6 +111,9 @@ Edge cases:
 | D34 | Phase 2 review notes (for the code-logic reviewer after Batch 15, no change now): (a) Jest once printed "worker process has failed to exit gracefully" in a full task-end-hook run; the trigger specs alone with `--detectOpenHandles` report no open handle (team-leader run 2026-11-07), so the source is unconfirmed; (b) an abort during curation makes `CloseCurateStep` (Batch 7) record `failed/curator-failed` instead of leaving the entry pending for resume; (c) D33(11): a `safe.directory` (dubious ownership) exit 128 with empty stdout is classed `nogit` | — | Batch 13 and 14 executor observations | n/a |
 | D35 | Accept Batch 14 decisions: (1) `CarrierReader` is a plain class the worker creates, no token (D19); (2) a step throw records the step fallback on the affected entries with debug-only error text and the tick continues; a throw while recording the fallback is a store failure: `logger.error`, the tick stops, 60 s back-off that `wake()` does not shorten; an index entry in `running/census-requested` is never overwritten; (3) the close-curate retry runs once the index entry is no longer pending (a deferral counts); (4) index resume times live in memory only (restart means due now, D25), a deferral without a resume time gives now + 60 s; (5) slot release in FIFO order, run state re-read after every await; (6) `awaitStopped()` waits for the tick and `coordinator.settled()`, `dispose()` also disposes the coordinator (D25); (7) the worker duplicates the 3-entry dispose mode table with `satisfies` (resolved by D36); (8) the worker does not read `settings.enabled` (the detector owns `hook-disabled`, D11); (9) reader cases tested through `store.getRun()` until `TaskEndRunReader` (Batch 15); (10) `CarrierReader` cases live in the worker spec, two case pairs merged to stay under 700 lines | reject any; accept | Plan Component 5; D11, D19, D25; Batch 14 validation notes | yes |
 | D36 | Remove the duplicated dispose mode table in Batch 15: export `modeFields` from `steps/dispose-evaluate.step.ts` and use it in the worker's dispose fallback, deleting `DISPOSE_MODE_REASONS` (`task-end-run-worker.ts:79-85`). The export is a module export, not a barrel export | keep the copy; export now in Batch 14; export in Batch 15 | Replace-not-accumulate rule; two tables that must agree with `TaskEndDisposeModeFields` drift independently; `satisfies` checks keys, not that both copies map the same values; Batch 15 already edits the library surface | yes |
+| D37 | Accept Batch 15 decisions: (1) coordinator-approved Q1(A): `RepositoryIdentityResolver.cachedRepoId(root)` and `TaskEndTransitionDetector.cachedRepoId(root)` are read-only (no git call, no cache write), so `TaskEndRunReader.latestForTask` stays synchronous, looks up `{repoId}` from the detector's cache and falls back to `{seenRoot}`; (2) coordinator-approved Q2(A): the 12 residual di-lint errors are host-bound ports bound by Batch 17, no stub registration or exclusion; (3) the wake subscription lives in `connectTaskEndHook(container): TaskEndHookHandle`, not inside registration (review-core pattern); the handle disposes once and `awaitStopped` waits `detector.whenIdle()` then `worker.awaitStopped()`; (4) `di/register.spec.ts` added (4 tests) although not in the batch list; (5) the reader normalises with `normalizeWorkspaceRoot` like the detector; (6) a run with a missing step kind is logged at warn and omitted (`null`); store errors propagate and the `ptah_task_get` builder catch omits `endHook` | reject any; accept | Plan Components 10, 11; D30, D33(1), D35(9), D36; team-leader review 2026-11-07 | yes |
+| D38 | The first push moves from after Batch 15 to after Batch 17: the pre-push di-lint gate (D26) stays red until the Electron composition binds the seven host ports | push after 15 with a red gate; bypass hooks; push after 17 | Team-leader di-lint run 2026-11-07 after Batch 15: exit 1, exactly the 12 host-port errors listed under Batch 17 verification | yes |
+| D39 | Batch 17 note: `PtahAPIBuilder` injects `Symbol.for('PtahTaskEndRunReader')` with `isOptional: true` in its constructor (`ptah-api-builder.service.ts:550`), so once the token is registered, building the API builder constructs the reader and the detector singleton with all their dependencies. Batch 17 binds every host port before anything resolves `PtahAPIBuilder`, or the builder construction throws | — | `ptah-api-builder.service.ts:264,550,877`; `read/task-end-run.reader.ts` injects `TASK_END_TOKENS.DETECTOR` | n/a |
 
 ## Rules every executor must follow (repeat verbatim in each executor prompt)
 
@@ -479,6 +483,8 @@ Phase 1 review — COMPLETE (2026-11-07). Implementer family claude; reviewer fa
 
 Phase review: code-logic (codex) on the combined diff after Batch 15 commits, plus code-style (store, detector, worker and reader are new public API of the library).
 
+Phase 2 implementation COMPLETE (Batches 11-15). Phase 2 review: DUE — combined diff `afb4fb11f..<Batch 15 commit>` restricted to Phase 2 files (Batch 16 is Phase 3 and excluded).
+
 ## Batch 11: Migration 0072 Part B (registry and version pins) — COMPLETE (commit e26a42260)
 
 - Recommended executor: backend-developer subagent
@@ -573,7 +579,7 @@ Phase review: code-logic (codex) on the combined diff after Batch 15 commits, pl
 - `npm run verify -- -p @ptah-extension/task-end-hook`; degradation audit passes.
 - Team-leader acceptance (2026-11-07): five files under `src/lib/trigger/`, all in the batch list: `repository-identity.ts` (`RepositoryIdentityResolver`, plain class, real common dir or `nogit:<realpath>`, only `ok` cached, `TRIGGER_GIT_TIMEOUT_MS`), `main-root-resolver.ts` (first `worktree list --porcelain -z` entry, bare/prunable/absolute/realpath/identity/listed checks, closed `MainRootCheck` codes logged at warn without paths, only resolved roots cached) and its spec (18 tests), `task-end-transition-detector.ts` (listener O(1) with no I/O; commit armed only from `onDidSettleWrites` or with no write in flight, as an `unref`'d 250 ms timer; write gate re-checked after the git probes; serial chain that never rejects; startup baseline or `startup-reconcile` journaling, then orphan runs; `onDidChangeRuns` event) and its spec (21 tests, real SQLite store, real `TaskWriterService` over a mock fs). The `degradation-audit: reported` marker on the `ensureStarted` catch is justified: the catch logs at warn, skips the root and removes it from `reconciledRoots`, so the next startup or folder change retries. Nothing deletes, moves or archives (C1). `src/index.ts`, DI registration and peer TASK_2026_879_9809 files untouched. Team-leader run `npm run verify -- -p @ptah-extension/task-end-hook` (Batches 13 and 14 together): lint and typecheck pass, 16 suites, 567 tests passed, exit 0. `-t test ... --testPathPatterns=trigger/ --detectOpenHandles --skip-nx-cache`: 2 suites, 39 tests, exit 0, no open handle reported. Degradation audit exit 0, TOTAL 216. di-lint exit 1 with 29 errors, the 3 new ones on the detector's `TASK_END_TOKENS` injects (expected, D26, until Batch 15). Executor decisions 1-11 accepted as D33.
 
-## Batch 14: Run worker and carrier reader — COMPLETE (commit recorded in the next batches.md commit)
+## Batch 14: Run worker and carrier reader — COMPLETE (commit a6f440bdd)
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -600,7 +606,7 @@ Phase review: code-logic (codex) on the combined diff after Batch 15 commits, pl
 - `npm run verify -- -p @ptah-extension/task-end-hook`; degradation audit passes.
 - Team-leader acceptance (2026-11-07): three files under `src/lib/worker/`, all in the batch list: `carrier-reader.ts` (plain class; task id validated as one path segment before the join; `readCarrierFile` bounded read, no symlink follow; absent/unparseable give `unreadable`), `task-end-run-worker.ts` (`start`/`wake`/`dispose`/`awaitStopped`; one `unref`'d timer; `reconcileAfterRestart()` before the first claim; wake on `onDidSettleCensus`; run state re-read with `store.getRun()` after every await so a detector cancellation is never overwritten; step-throw fallbacks; dispose fallback is `blocked/precondition-unverifiable` with `effectiveMode: 'off'`, C1) and its spec (36 tests, real store, fake timers). No fs write, delete, move or archive call (C1). The worker has no options parameter (all eight parameters injected), so class registration works in Batch 15. `src/index.ts`, DI registration and peer TASK_2026_879_9809 files untouched. Verification shared with Batch 13 (team-leader run): 16 suites, 567 tests, exit 0; audit exit 0, TOTAL 216; di-lint adds 7 expected errors on the worker's `TASK_END_TOKENS` injects (D26). Executor decisions 1-10 accepted as D35, with (7) carried into Batch 15 as D36.
 
-## Batch 15: Run reader, library registration and public barrel — PENDING
+## Batch 15: Run reader, library registration and public barrel — COMPLETE (commit recorded in the next batches.md commit)
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -612,12 +618,12 @@ Phase review: code-logic (codex) on the combined diff after Batch 15 commits, pl
 - Phase: 2 (last batch of Phase 2) | Phase review: code-logic + style, due after this batch commits
 - Binding inputs: (1) `registerTaskEndHook` (or the activation code it exposes) wires `detector.onDidChangeRuns(() => worker.wake())` and keeps the subscription for disposal (D33(1)); (2) `SqliteTaskEndStore` is registered with `useFactory` (D30); the detector and worker have no options parameter and may use class registration (D33(2)); (3) D36: export `modeFields` from `steps/dispose-evaluate.step.ts`, import it in `worker/task-end-run-worker.ts` for the dispose fallback and delete the worker's `DISPOSE_MODE_REASONS` copy (both files join this batch's list; 5 files total); `TaskEndRunReader` covers the reader cases the worker spec checks with `store.getRun()` (D35(9))
 
-### Task 15.1: `TaskEndRunReader` and spec — PENDING
+### Task 15.1: `TaskEndRunReader` and spec — COMPLETE
 
 - Files (CREATE): `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/task-end-hook/src/lib/read/task-end-run.reader.ts` and `task-end-run.reader.spec.ts`
 - Plan reference: Component 11 (reader bullets; read right after creation gives four `pending` steps; malformed row set logged and omitted)
 
-### Task 15.2: `registerTaskEndHook` and barrel — PENDING
+### Task 15.2: `registerTaskEndHook` and barrel — COMPLETE
 
 - Depends on: Task 15.1
 - Files: CREATE `.../src/lib/di/register.ts`; MODIFY `.../src/index.ts` (D4)
@@ -626,6 +632,7 @@ Phase review: code-logic (codex) on the combined diff after Batch 15 commits, pl
 ### Batch 15 verification
 
 - `npm run verify -- -p @ptah-extension/task-end-hook`; degradation audit passes.
+- Team-leader acceptance (2026-11-07): `read/task-end-run.reader.ts` (synchronous `latestForTask`, matches `TaskEndRunReaderLike`; `{repoId}` from `detector.cachedRepoId(root)`, else `{seenRoot}`; missing step kind gives warn + `null`; store errors propagate to the builder catch, which omits `endHook` — fails closed) and its spec (8 tests); `di/register.ts` (`registerTaskEndHook` registers the 11 library tokens and no host port; `STORE` via `useFactory: instanceCachingFactory(...)` calling `new SqliteTaskEndStore(SQLITE_CONNECTION, LOGGER)` (D30); `connectTaskEndHook` subscribes `detector.onDidChangeRuns(() => worker.wake())` and disposes the subscription, detector and worker once (D33(1))) and `di/register.spec.ts` (4 tests); `src/index.ts` exports the two functions, the handle type and type-only detector/worker/reader; D36 done: `modeFields` exported from `steps/dispose-evaluate.step.ts` (module export, not in the barrel), worker `DISPOSE_MODE_REASONS` deleted, fallback spreads `modeFields(...)` with `effectiveMode: 'off'` (C1). Approved deviation: read-only `cachedRepoId` in `trigger/repository-identity.ts` and the detector, with spec cases. No Electron app file or peer TASK_2026_879_9809 file touched. Team-leader runs: `-p @ptah-extension/task-end-hook` exit 0 (lint, typecheck, 18 suites, 580 tests); `-t lint,typecheck -p @ptah-extension/vscode-lm-tools,ptah-electron` exit 0; degradation audit exit 0, TOTAL 216; di-lint exit 1 with exactly the 12 host-port errors (D37(2), D38). Executor decisions accepted as D37.
 
 ## Phase 3 — Engine entry points, Electron wiring, integration (unblocked, D28): Batches 16-19
 
@@ -689,6 +696,9 @@ Phase review: code-logic (codex) on the combined diff after Batch 19 commits, pl
 ### Batch 17 verification
 
 - `npm run verify -- -p ptah-electron` (composition, `container.smoke.spec.ts`)
+- di-lint (`node_modules/.bin/nx run di-lint:lint`) exits 0: each of these 12 residual errors after Batch 15 must be cleared by a host binding, with no stub or exclusion (D37(2), D38): `steps/census-coordinator.ts:105` CENSUS_PORT; `steps/close-curate.step.ts:257` CURATION_PORT, `:259` SESSION_LINK_PORT, `:261` ACTIVITY_PORT; `steps/dispose-evaluate.step.ts:92` SESSION_LINK_PORT, `:94` ACTIVITY_PORT, `:95` PR_STATUS_PORT, `:96` GIT_READ_RUNNER; `steps/harvest.step.ts:79` HARVEST_PORT; `steps/index-request.step.ts:88` CENSUS_PORT, `:89` ACTIVITY_PORT; `trigger/task-end-transition-detector.ts:177` GIT_READ_RUNNER (all under `libs/backend/task-end-hook/src/lib/`)
+- Host ports are bound before anything resolves `PtahAPIBuilder` (D39); the smoke spec resolves the API builder with the task-end tokens registered
+- First push of the branch follows this batch's commit (D38)
 - `npm run verify -- -t lint,typecheck -p ptah-extension-webview`
 - Degradation audit passes.
 

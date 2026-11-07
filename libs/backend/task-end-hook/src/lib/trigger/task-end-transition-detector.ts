@@ -230,6 +230,15 @@ export class TaskEndTransitionDetector {
   }
 
   /**
+   * The repository id the detector has cached for `root`, or `null` when it
+   * has not resolved that root yet. Synchronous and side-effect free: no git
+   * call, no cache write (`TaskEndRunReader`, plan Component 11).
+   */
+  cachedRepoId(root: string): string | null {
+    return this.identities.cachedRepoId(root);
+  }
+
+  /**
    * Resolves once every queued flush and reconcile has finished. Pending
    * entries whose timer has not fired are not waited for.
    */

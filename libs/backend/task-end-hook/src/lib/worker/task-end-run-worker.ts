@@ -2,8 +2,6 @@ import { inject, injectable } from 'tsyringe';
 import type { IDisposable } from '@ptah-extension/platform-core';
 import {
   isTerminalStep,
-  type TaskEndDisposeModeReason,
-  type TaskEndDisposeRequestedMode,
   type TaskEndRunRecord,
   type TaskEndRunStatus,
   type TaskEndStepKind,
@@ -21,7 +19,10 @@ import {
   type CloseCurateGates,
   type CloseCurateStep,
 } from '../steps/close-curate.step';
-import type { DisposeEvaluateStep } from '../steps/dispose-evaluate.step';
+import {
+  modeFields,
+  type DisposeEvaluateStep,
+} from '../steps/dispose-evaluate.step';
 import type { HarvestStep } from '../steps/harvest.step';
 import type { IndexRequestStep } from '../steps/index-request.step';
 import { CarrierReader } from './carrier-reader';
@@ -74,15 +75,6 @@ const STEPS_TERMINAL: TaskEndRunStatus = {
   state: 'completed',
   reason: 'steps-terminal',
 };
-
-/** P1 as `DisposeEvaluateStep` records it: `auto`/`confirm` resolve to off. */
-const DISPOSE_MODE_REASONS = {
-  off: 'none',
-  auto: 'auto-unavailable',
-  confirm: 'confirm-unavailable',
-} as const satisfies Readonly<
-  Record<TaskEndDisposeRequestedMode, TaskEndDisposeModeReason>
->;
 
 type EntrySelector = (entry: TaskEndStepRecord) => boolean;
 
@@ -529,18 +521,13 @@ export class TaskEndRunWorker {
         return { step: kind, state: 'failed', reason: 'curator-failed' };
       case 'harvest':
         return { step: kind, state: 'failed', reason: 'harvest-failed' };
-      case 'dispose': {
-        const requestedMode = this.settings.read().disposalMode;
+      case 'dispose':
         return {
           step: kind,
           state: 'blocked',
           reason: 'precondition-unverifiable',
-          requestedMode,
-          effectiveMode: 'off',
-          modeReason: DISPOSE_MODE_REASONS[requestedMode],
-          activityScope: 'in-process',
+          ...modeFields(this.settings.read().disposalMode),
         };
-      }
       case 'index':
         return { step: kind, state: 'failed', reason: 'census-failed' };
     }

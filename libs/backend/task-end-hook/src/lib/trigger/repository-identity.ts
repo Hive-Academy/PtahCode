@@ -111,6 +111,15 @@ export class RepositoryIdentityResolver {
     return result;
   }
 
+  /**
+   * The cached repository id of `root`, or `null` when no successful probe
+   * has cached one yet. Never runs git and never changes the cache (the
+   * synchronous read path, plan Component 11).
+   */
+  cachedRepoId(root: string): string | null {
+    return this.cache.get(path.resolve(root))?.repoId ?? null;
+  }
+
   private async probe(
     root: string,
     signal: AbortSignal | undefined,

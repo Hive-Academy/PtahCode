@@ -57,7 +57,11 @@ const MODE_REASONS = {
   Record<TaskEndDisposeRequestedMode, TaskEndDisposeModeReason>
 >;
 
-function modeFields(
+/**
+ * P1 mode fields for a dispose outcome: the effective mode is always `off`
+ * (C1). Also used by the run worker for its dispose fallback (D36).
+ */
+export function modeFields(
   requestedMode: TaskEndDisposeRequestedMode,
 ): TaskEndDisposeModeFields {
   return {

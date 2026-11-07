@@ -42,3 +42,13 @@ export type {
   TaskEndRunLookup,
   TaskEndRunPolicy,
 } from './lib/persistence/task-end-store.interface';
+
+// Registration and runtime (host composition roots)
+export {
+  registerTaskEndHook,
+  connectTaskEndHook,
+  type TaskEndHookHandle,
+} from './lib/di/register';
+export type { TaskEndTransitionDetector } from './lib/trigger/task-end-transition-detector';
+export type { TaskEndRunWorker } from './lib/worker/task-end-run-worker';
+export type { TaskEndRunReader } from './lib/read/task-end-run.reader';
