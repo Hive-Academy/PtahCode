@@ -111,6 +111,9 @@ interface MachineRow {
                 type="button"
                 class="flex w-full flex-col gap-0.5 rounded-md px-3 py-2 text-left hover:bg-base-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
                 [class.bg-base-300]="row.machineId === selectedId()"
+                [class.ring-1]="row.machineId === selectedId()"
+                [class.ring-inset]="row.machineId === selectedId()"
+                [class.ring-base-content/25]="row.machineId === selectedId()"
                 [attr.aria-current]="
                   row.machineId === selectedId() ? 'true' : null
                 "
