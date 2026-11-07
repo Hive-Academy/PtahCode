@@ -189,71 +189,62 @@ export type RecoveredOutputTracker = (settled: Promise<void>) => void;
 export const RECOVERED_OUTPUT_WAIT_MS = 3_000;
 
 /**
- * How long one shared observer of a recovered write lives. A write still
- * pending after this stays tracked; its expired observer is re-armed by the
- * next restore that waits on it, so a stuck write holds at most one live
- * observer per window, never one per session load. The write itself keeps
- * its place in the lane queue.
+ * A recovered write that has not settled yet. It holds exactly one reaction
+ * on the write (attached by {@link trackRecoveredWrite}); waiters are plain
+ * callbacks that each waiter removes on timeout, so a stuck write never
+ * gathers reactions or closures per session load.
  */
-export const RECOVERED_OUTPUT_MAX_AGE_MS = 120_000;
-
-/** How a shared observer ended: the write settled, or its max age passed first. */
-export type WriteObservation = 'settled' | 'expired';
-
-/** A recovered write and its current shared observer. */
 export interface TrackedRecoveredWrite {
-  readonly write: Promise<void>;
-  observer: Promise<WriteObservation>;
-  /** Set once `observer` resolved `expired`; the next waiter re-arms it. */
-  expired: boolean;
+  readonly waiters: Set<() => void>;
 }
 
 /**
- * The one shared observer of a tracked write. Resolves (never rejects)
- * `settled` when the write settles, or `expired` after `maxAgeMs` with
- * `onExpired` called first. Every waiter races this promise, so the reactions
- * it holds end by `maxAgeMs` at the latest instead of living as long as a
- * stuck write. A rejected write is `settled` too: its writer logs its own
- * failure. `expired` never means the write landed.
+ * Track `write` with its one reaction. When it settles (resolved or
+ * rejected: its writer logs its own failure), `onSettled` runs first, then
+ * every current waiter is released.
  */
-export function observeTrackedWrite(
+export function trackRecoveredWrite(
   write: Promise<void>,
-  maxAgeMs: number,
-  onExpired: () => void,
-): Promise<WriteObservation> {
-  return new Promise<WriteObservation>((resolve) => {
-    const timer = setTimeout(() => {
-      onExpired();
-      resolve('expired');
-    }, maxAgeMs);
-    if (typeof (timer as { unref?: () => void }).unref === 'function') {
-      (timer as { unref: () => void }).unref();
-    }
-    const settle = (): void => {
-      clearTimeout(timer);
-      resolve('settled');
-    };
-    write.then(settle, settle);
-  });
+  onSettled: () => void,
+): TrackedRecoveredWrite {
+  const tracked: TrackedRecoveredWrite = { waiters: new Set() };
+  const settle = (): void => {
+    onSettled();
+    const waiters = [...tracked.waiters];
+    tracked.waiters.clear();
+    for (const release of waiters) release();
+  };
+  write.then(settle, settle);
+  return tracked;
 }
 
 /**
- * Settles `true` once every observer resolved `settled`, `false` when
- * `timeoutMs` passed first or any observer `expired` (an expiry is never a
- * landed write). Takes {@link observeTrackedWrite} observers, which never
- * reject and resolve by their max age, so a timed-out waiter's reactions are
- * released then.
+ * Settles `true` once every tracked write settled, `false` when `timeoutMs`
+ * passed first. On either outcome this waiter's callbacks are removed from
+ * every write, so a timed-out wait leaves nothing behind.
  */
-export function settleWithin(
-  observers: readonly Promise<WriteObservation>[],
+export function waitForRecoveredWrites(
+  writes: readonly TrackedRecoveredWrite[],
   timeoutMs: number,
 ): Promise<boolean> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timedOut = new Promise<boolean>((resolve) => {
-    timer = setTimeout(() => resolve(false), timeoutMs);
+  return new Promise<boolean>((resolve) => {
+    const registered = new Map<TrackedRecoveredWrite, () => void>();
+    let done = false;
+    const finish = (landed: boolean): void => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      for (const [write, release] of registered) write.waiters.delete(release);
+      resolve(landed);
+    };
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    for (const write of writes) {
+      const release = (): void => {
+        registered.delete(write);
+        if (registered.size === 0) finish(true);
+      };
+      registered.set(write, release);
+      write.waiters.add(release);
+    }
   });
-  const settled = Promise.all(observers).then((results) =>
-    results.every((result) => result === 'settled'),
-  );
-  return Promise.race([settled, timedOut]).finally(() => clearTimeout(timer));
 }

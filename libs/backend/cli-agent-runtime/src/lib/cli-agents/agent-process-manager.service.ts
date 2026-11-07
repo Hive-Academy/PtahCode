@@ -112,14 +112,12 @@ import {
   applyOutputCheckpoint,
   checkpointFreshness,
   laneLastActivityAt,
-  observeTrackedWrite,
-  RECOVERED_OUTPUT_MAX_AGE_MS,
   RECOVERED_OUTPUT_WAIT_MS,
   restoreLaneIdentity,
   restoreLaneLifecycle,
-  settleWithin,
+  trackRecoveredWrite,
+  waitForRecoveredWrites,
   type TrackedRecoveredWrite,
-  type WriteObservation,
   stampWorkspaceKey,
 } from './lane-restore';
 import { findBlockedLaneModel } from './lane-spawn-policy';
@@ -371,7 +369,7 @@ export class AgentProcessManager {
   private spawning = 0;
   /** Promise-based mutex to serialize spawn operations and prevent TOCTOU race in concurrent limit check */
   private spawnMutex: Promise<void> = Promise.resolve();
-  /** Shared observers of restored lanes' recovered-output persists, keyed by agent id. */
+  /** Pending recovered-output persists of restored lanes, keyed by agent id. */
   private readonly recoveredOutputWrites = new Map<string, TrackedRecoveredWrite>();
 
   /** EventEmitter for agent lifecycle events (spawned, output, exited) */
@@ -1867,11 +1865,11 @@ export class AgentProcessManager {
     timeoutMs: number = RECOVERED_OUTPUT_WAIT_MS,
   ): Promise<void> {
     const writes = agentIds.flatMap((id) => {
-      const observer = this.recoveredOutputObserver(id);
-      return observer ? [observer] : [];
+      const tracked = this.recoveredOutputWrites.get(id);
+      return tracked ? [tracked] : [];
     });
     if (writes.length === 0) return;
-    if (await settleWithin(writes, timeoutMs)) return;
+    if (await waitForRecoveredWrites(writes, timeoutMs)) return;
     this.logger.warn(
       '[AgentProcessManager] Recovered lane output not persisted in time; restore continues',
       { pending: writes.length, timeoutMs },
@@ -1879,47 +1877,19 @@ export class AgentProcessManager {
   }
 
   /**
-   * Track a recovered write with ONE shared observer; waiters race it, never
-   * the write. The entry stays until the write settles, so a later restore
-   * still waits on a stuck write. Queue order and retries are untouched.
+   * Track a recovered write with exactly one reaction on it. The entry stays
+   * until the write settles, so every later restore still waits (bounded) on
+   * a stuck write, and is dropped the moment it settles. A newer restore of
+   * the same agent replaces the entry; the old write then cannot drop it.
+   * Queue order and retries are untouched.
    */
   private trackRecoveredOutputWrite(agentId: string, write: Promise<void>): void {
-    const tracked: TrackedRecoveredWrite = { write, observer: Promise.resolve('expired'), expired: false };
-    tracked.observer = this.armRecoveredObserver(agentId, tracked);
-    this.recoveredOutputWrites.set(agentId, tracked);
-  }
-
-  /** The live shared observer for an agent's pending recovered write, re-armed when expired. */
-  private recoveredOutputObserver(agentId: string): Promise<WriteObservation> | undefined {
-    const tracked = this.recoveredOutputWrites.get(agentId);
-    if (!tracked) return undefined;
-    if (tracked.expired) {
-      tracked.expired = false;
-      tracked.observer = this.armRecoveredObserver(agentId, tracked);
-    }
-    return tracked.observer;
-  }
-
-  /**
-   * One observer lives at most {@link RECOVERED_OUTPUT_MAX_AGE_MS}. Settled:
-   * the entry is dropped. Expired: the entry stays, marked for re-arming, so a
-   * stuck write holds one live observer per window instead of one per load.
-   */
-  private armRecoveredObserver(
-    agentId: string,
-    tracked: TrackedRecoveredWrite,
-  ): Promise<WriteObservation> {
-    const observer = observeTrackedWrite(tracked.write, RECOVERED_OUTPUT_MAX_AGE_MS, () =>
-      this.logger.warn(
-        '[AgentProcessManager] Recovered lane output write still pending after max age',
-        { agentId, maxAgeMs: RECOVERED_OUTPUT_MAX_AGE_MS },
-      ));
-    void observer.then((result) => {
-      if (this.recoveredOutputWrites.get(agentId) !== tracked) return;
-      if (result === 'settled') this.recoveredOutputWrites.delete(agentId);
-      else if (tracked.observer === observer) tracked.expired = true;
+    const tracked = trackRecoveredWrite(write, () => {
+      if (this.recoveredOutputWrites.get(agentId) === tracked) {
+        this.recoveredOutputWrites.delete(agentId);
+      }
     });
-    return observer;
+    this.recoveredOutputWrites.set(agentId, tracked);
   }
 
   /**
