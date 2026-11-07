@@ -12,7 +12,7 @@ Base: fast-forwarded by the team-leader from e9ca7046c to `origin/main` fe414de0
 against e9ca7046c; executors re-read the cited lines, which may have shifted (notably
 `ptah-api-builder.service.ts`, changed by #955 on main).
 
-Schedulable now: Phase 2 review (code-logic + style, DUE on the combined Phase 2 diff), and
+Phase 2 review COMPLETE (APPROVED in round 1). Schedulable now:
 Batch 17 (its dependencies 9, 15 and 16 are COMPLETE). Batches 1-16 COMPLETE. First push after
 Batch 17 (D38).
 BLOCKED-ON-957 is lifted (D28): #957 merged and `main` was merged into this branch (fe0f9dfb9)
@@ -483,7 +483,12 @@ Phase 1 review — COMPLETE (2026-11-07). Implementer family claude; reviewer fa
 
 Phase review: code-logic (codex) on the combined diff after Batch 15 commits, plus code-style (store, detector, worker and reader are new public API of the library).
 
-Phase 2 implementation COMPLETE (Batches 11-15). Phase 2 review: DUE — combined diff `afb4fb11f..<Batch 15 commit>` restricted to Phase 2 files (Batch 16 is Phase 3 and excluded).
+Phase 2 implementation COMPLETE (Batches 11-15). Phase 2 review — COMPLETE (2026-11-07). Implementer family claude; reviewer family codex. Diff `afb4fb11f..5b3047ffe` restricted to Phase 2 files (Batch 16 excluded).
+
+- Round 0 (codex): logic REVISE 5/10 — L1 (Serious: shutdown abort during curation recorded terminal `failed/curator-failed`), L2 (Serious: every exit 128 with empty stdout cached as `nogit:`, dubious ownership included); style APPROVED 8/10 — S1 (Minor, register.ts comment count), S2 (Minor, store 793 lines; deferred). File: `phase-2-review.md`.
+- Fix round 1: `phase-2-fix-report.md` — abort leaves the curation entry resumable (L1); `nogit` only for C-locale "fatal: not a git repository", other exit 128 uncached errors (L2; host runner must keep `LC_ALL=C`); S1 disputed (comment gives no count).
+- Round 1 re-review (codex, fresh lane): logic APPROVED 8/10, style APPROVED 8/10 (S1 dispute accepted), no new defects. File: `phase-2-round-1-review.md`.
+- Revise rounds used: 1 of max 2. Verify `-p @ptah-extension/task-end-hook` exit 0 (18 suites, 589 tests); degradation audit TOTAL 216.
 
 ## Batch 11: Migration 0072 Part B (registry and version pins) — COMPLETE (commit e26a42260)
 
@@ -606,7 +611,7 @@ Phase 2 implementation COMPLETE (Batches 11-15). Phase 2 review: DUE — combine
 - `npm run verify -- -p @ptah-extension/task-end-hook`; degradation audit passes.
 - Team-leader acceptance (2026-11-07): three files under `src/lib/worker/`, all in the batch list: `carrier-reader.ts` (plain class; task id validated as one path segment before the join; `readCarrierFile` bounded read, no symlink follow; absent/unparseable give `unreadable`), `task-end-run-worker.ts` (`start`/`wake`/`dispose`/`awaitStopped`; one `unref`'d timer; `reconcileAfterRestart()` before the first claim; wake on `onDidSettleCensus`; run state re-read with `store.getRun()` after every await so a detector cancellation is never overwritten; step-throw fallbacks; dispose fallback is `blocked/precondition-unverifiable` with `effectiveMode: 'off'`, C1) and its spec (36 tests, real store, fake timers). No fs write, delete, move or archive call (C1). The worker has no options parameter (all eight parameters injected), so class registration works in Batch 15. `src/index.ts`, DI registration and peer TASK_2026_879_9809 files untouched. Verification shared with Batch 13 (team-leader run): 16 suites, 567 tests, exit 0; audit exit 0, TOTAL 216; di-lint adds 7 expected errors on the worker's `TASK_END_TOKENS` injects (D26). Executor decisions 1-10 accepted as D35, with (7) carried into Batch 15 as D36.
 
-## Batch 15: Run reader, library registration and public barrel — COMPLETE (commit recorded in the next batches.md commit)
+## Batch 15: Run reader, library registration and public barrel — COMPLETE (commit 5b3047ffe)
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential

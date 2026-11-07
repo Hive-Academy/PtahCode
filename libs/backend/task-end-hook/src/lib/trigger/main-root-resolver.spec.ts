@@ -341,6 +341,66 @@ describe('RepositoryIdentityResolver', () => {
     });
   });
 
+  it('treats a dubious-ownership exit 128 as unresolved, uncached, and recovers later', async () => {
+    const h = setup();
+    h.realpaths.set('/owned', '/owned');
+    h.git.answer(READ_ONLY_GIT_VECTORS.commonDir(), '/owned', {
+      stdout: '',
+      stderr:
+        "fatal: detected dubious ownership in repository at '/owned'\n" +
+        'To add an exception for this directory, call:\n\n' +
+        "\tgit config --global --add safe.directory /owned\n",
+      exitCode: 128,
+    });
+
+    await expect(h.identities.resolve('/owned')).resolves.toEqual({
+      kind: 'error',
+      error: 'common-dir-unexpected-exit',
+    });
+    expect(h.identities.cachedRepoId('/owned')).toBeNull();
+
+    // Ownership repaired: the next call re-runs git and resolves the real
+    // repository, never a cached `nogit:` id.
+    h.git.answer(READ_ONLY_GIT_VECTORS.commonDir(), '/owned', ok(`${COMMON}\n`));
+    await expect(h.identities.resolve('/owned')).resolves.toEqual({
+      kind: 'ok',
+      identity: GIT_IDENTITY,
+    });
+    expect(h.identities.cachedRepoId('/owned')).toBe(COMMON);
+    expect(h.git.calls.filter((c) => c.cwd === '/owned')).toHaveLength(2);
+  });
+
+  it('treats an exit 128 with empty stderr as unresolved, not nogit', async () => {
+    const h = setup();
+    h.realpaths.set('/silent', '/silent');
+    h.git.answer(READ_ONLY_GIT_VECTORS.commonDir(), '/silent', {
+      stdout: '',
+      stderr: '',
+      exitCode: 128,
+    });
+
+    await expect(h.identities.resolve('/silent')).resolves.toEqual({
+      kind: 'error',
+      error: 'common-dir-unexpected-exit',
+    });
+    expect(h.identities.cachedRepoId('/silent')).toBeNull();
+  });
+
+  it('caches a not-a-repository nogit identity: the next call runs no git', async () => {
+    const h = setup();
+    h.realpaths.set('/plain', '/real/plain');
+    h.git.answer(READ_ONLY_GIT_VECTORS.commonDir(), '/plain', {
+      stdout: '',
+      stderr: 'fatal: not a git repository (or any of the parent directories): .git\n',
+      exitCode: 128,
+    });
+
+    await h.identities.resolve('/plain');
+    await h.identities.resolve('/plain');
+    expect(h.identities.cachedRepoId('/plain')).toBe('nogit:/real/plain');
+    expect(h.git.calls.filter((c) => c.cwd === '/plain')).toHaveLength(1);
+  });
+
   it('resolves a relative common dir against the root and gives the same id for every worktree', async () => {
     const h = setup();
     const main = await h.identities.resolve(MAIN);

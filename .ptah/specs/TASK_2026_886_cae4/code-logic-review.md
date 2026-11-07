@@ -52,3 +52,22 @@ Score: 8/10
 - L3: RESOLVED — a vanished entry maps to `error` (`dispose/ignored-files.walker.ts:66-88`),
   outcome `blocked/precondition-unverifiable` (`dispose-evaluate.step.spec.ts:763-778`).
 - New defects: none.
+
+## Phase 2 — Round 0 (codex, 2026-11-07)
+
+Implementer family claude; reviewer family codex. Range afb4fb11f..5b3047ffe (Batches 11-15).
+Verdict: REVISE, 5/10. Full text: `phase-2-review.md` `## Logic`.
+
+- L1 (Serious) `steps/close-curate.step.ts:407` — shutdown abort during curation records terminal
+  `failed/curator-failed`; must stay resumable (also after a port resolves despite abort, :428).
+- L2 (Serious) `trigger/repository-identity.ts:147` — every exit 128 with empty stdout is cached as
+  `nogit:` (dubious ownership included); classify only "not a git repository", do not cache others.
+
+Revise round 1 of 2 started.
+
+## Phase 2 — Round 1 (codex, 2026-11-07)
+
+Fix round 1: `phase-2-fix-report.md` (diff /var/tmp/b886/phase2-fix1.diff). Re-review:
+`phase-2-round-1-review.md`. Verdict: APPROVED, 8/10. L1 resolved (`close-curate.step.ts:412`,
+:427-443), L2 resolved (`repository-identity.ts:159`, :177-179). No new defects.
+Revise rounds used: 1 of 2. Verify `-p @ptah-extension/task-end-hook` exit 0, 18 suites, 589 tests.

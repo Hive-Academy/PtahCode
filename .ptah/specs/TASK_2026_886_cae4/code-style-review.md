@@ -32,3 +32,17 @@ Score: 8/10
   `candidate-path.resolver.ts`, `ignored-files.walker.ts`, `task-spec.reader.ts` and
   `fs-probe.ts` have focused implementations and specs.
 - New defects: none.
+
+## Phase 2 — Round 0 (codex, 2026-11-07)
+
+Implementer family claude; reviewer family codex. Range afb4fb11f..5b3047ffe (Batches 11-15).
+Verdict: APPROVED, 8/10. Full text: `phase-2-review.md` `## Style`.
+
+- S1 (Minor) `di/register.ts:20` — comment says 11 library tokens; 10 are registered.
+- S2 (Minor) `persistence/sqlite-task-end.store.ts:118` — store is 793 lines; split if it grows.
+  Not fixed now (no growth in this task).
+
+## Phase 2 — Round 1 (codex, 2026-11-07)
+
+Verdict: APPROVED, 8/10. S1 accepted as a misread of the original review (`register.ts:20` gives
+no count; 10 registrations at :40-74). S2 deferred. File: `phase-2-round-1-review.md`.

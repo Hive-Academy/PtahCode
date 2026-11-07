@@ -163,6 +163,8 @@ const HEAD = '0123456789abcdef0123456789abcdef01234567';
 class FakeGit implements GitReadRunner {
   private readonly worktreesOf = new Map<string, string[]>();
   readonly calls: { args: readonly string[]; cwd: string }[] = [];
+  /** Roots whose git refuses with the safe.directory (dubious ownership) fatal. */
+  readonly dubious = new Set<string>();
 
   addRepo(main: string, ...linked: string[]): void {
     this.worktreesOf.set(main, [main, ...linked]);
@@ -170,6 +172,10 @@ class FakeGit implements GitReadRunner {
 
   async run(args: readonly string[], cwd: string): Promise<GitReadResult> {
     this.calls.push({ args, cwd });
+    if (this.dubious.has(cwd)) {
+      const stderr = `fatal: detected dubious ownership in repository at '${cwd}'\n`;
+      return { stdout: '', stderr, exitCode: 128 };
+    }
     for (const [main, worktrees] of this.worktreesOf) {
       if (!worktrees.includes(cwd)) continue;
       if (args.join(' ') === READ_ONLY_GIT_VECTORS.commonDir().join(' ')) {
@@ -771,6 +777,35 @@ describe('TaskEndTransitionDetector', () => {
       expect(
         h.db.prepare('SELECT main_root FROM task_end_repo_state').all(),
       ).toEqual([{ main_root: main }]);
+    });
+
+    it('a dubious-ownership root is not baselined as nogit and is retried once repaired', async () => {
+      const root = gitRepo(h);
+      h.git.dubious.add(root);
+      const detector = await start(root, { [TASK_1]: 'in_progress' });
+
+      expect(h.count('task_end_repo_state')).toBe(0);
+      expect(h.logger.warn).toHaveBeenCalledWith(
+        '[task-end-hook] repository identity unresolved',
+        { error: 'common-dir-unexpected-exit' },
+      );
+
+      // Ownership repaired: the next reconcile resolves the real repository
+      // and baselines it; the later terminal transition creates its run.
+      h.git.dubious.delete(root);
+      await detector.reconcileStartup();
+      const repoIds = h.db
+        .prepare('SELECT repo_id FROM task_end_repo_state')
+        .all() as { repo_id: string }[];
+      expect(repoIds).toHaveLength(1);
+      expect(repoIds[0]?.repo_id.startsWith('nogit:')).toBe(false);
+
+      h.index.set(root, TASK_1, 'done');
+      h.index.fire(root, [TASK_1], 'watcher');
+      await commit(detector);
+      expect(runsOf(h, TASK_1)).toEqual([
+        { main_root: root, source: 'watcher' },
+      ]);
     });
 
     it('skips a root whose identity cannot be resolved, without throwing', async () => {

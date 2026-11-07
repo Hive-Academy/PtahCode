@@ -539,6 +539,81 @@ describe('CloseCurateStep.run', () => {
     expect(h.store.outcomeOf('s2')).toEqual({ state: 'pending' });
   });
 
+  describe('shutdown abort while the curator call is in flight (L1)', () => {
+    it('a rejection after the abort records nothing terminal; the entry reads back pending', async () => {
+      const controller = new AbortController();
+      const h = harness({
+        sessions: ['s1', 's2'],
+        curate: async () => {
+          controller.abort();
+          throw new Error('aborted');
+        },
+      });
+      const recorded = await h.step.run(makeRun(), OPEN, controller.signal);
+
+      expect(recorded).toEqual([]);
+      expect(h.store.calls).not.toContain('upsert:close-curate:s1');
+      expect(h.store.outcomeOf('s1')).toEqual({ state: 'running' });
+      expect(h.store.getRun('run-1')?.steps.find((e) => e.subject === 's1')?.outcome).toEqual({
+        state: 'pending',
+      });
+      expect(h.curate).toHaveBeenCalledTimes(1);
+      expect(h.logger.debug).toHaveBeenCalledWith(
+        '[task-end-hook] close-curate interrupted by shutdown',
+        { runId: 'run-1', sessionId: 's1' },
+      );
+    });
+
+    it('a result resolved after the abort is not recorded', async () => {
+      const controller = new AbortController();
+      const h = harness({
+        curate: async () => {
+          controller.abort();
+          return RAN;
+        },
+      });
+      const recorded = await h.step.run(makeRun(), OPEN, controller.signal);
+
+      expect(recorded).toEqual([]);
+      expect(h.store.calls).not.toContain('upsert:close-curate:s1');
+      expect(h.store.outcomeOf('s1')).toEqual({ state: 'running' });
+    });
+
+    it('the next start resumes curation for the interrupted session', async () => {
+      const controller = new AbortController();
+      let calls = 0;
+      const h = harness({
+        curate: async () => {
+          if (calls++ === 0) {
+            controller.abort();
+            throw new Error('aborted');
+          }
+          return RAN;
+        },
+      });
+      await h.step.run(makeRun(), OPEN, controller.signal);
+      const restarted = h.store.getRun('run-1');
+      if (restarted === null) throw new Error('run missing');
+
+      const recorded = await h.step.run(restarted, OPEN, signal());
+      expect(h.curate).toHaveBeenCalledTimes(2);
+      expect(recorded).toEqual([
+        { subject: 's1', outcome: expect.objectContaining({ state: 'succeeded' }) },
+      ]);
+      expect(h.store.entries.find((e) => e.subject === 's1')?.attempts).toBe(2);
+    });
+
+    it('a rejection without an abort still records curator-failed', async () => {
+      const h = harness({
+        curate: async () => {
+          throw new Error('engine fault');
+        },
+      });
+      await h.step.run(makeRun(), OPEN, signal());
+      expect(h.store.outcomeOf('s1')).toEqual(CURATOR_FAILED);
+    });
+  });
+
   it('never marks observations: the store sees only the step outcome', async () => {
     const h = harness({
       curate: async () => ({
@@ -590,6 +665,24 @@ describe('CloseCurateStep.retry', () => {
     if (run === null) throw new Error('run missing');
     await h.step.retry(run, 's1', signal());
     expect(h.store.outcomeOf('s1')).toMatchObject({ state: 'succeeded', reason: 'curated' });
+  });
+
+  it('an abort during the retry returns null and leaves the entry resumable', async () => {
+    const controller = new AbortController();
+    let calls = 0;
+    const h = harness({
+      curate: async () => {
+        if (calls++ === 0) return { kind: 'gated', gate: 'hourly-limit' };
+        controller.abort();
+        throw new Error('aborted');
+      },
+    });
+    await h.step.run(makeRun(), OPEN, signal());
+    const run = h.store.getRun('run-1');
+    if (run === null) throw new Error('run missing');
+
+    expect(await h.step.retry(run, 's1', controller.signal)).toBeNull();
+    expect(h.store.outcomeOf('s1')).toEqual({ state: 'running' });
   });
 
   it('leaves an entry that is not waiting for a retry untouched', async () => {

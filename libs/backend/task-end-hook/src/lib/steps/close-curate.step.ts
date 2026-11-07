@@ -22,7 +22,10 @@ import type { SessionLinkPort } from '../ports/session-link.port';
  *
  * The step records codes and counts only. A thrown or rejected port call is
  * recorded as `failed/curator-failed`; its text goes to a debug log line and
- * never into a stored row. The step never marks observations: that stays the
+ * never into a stored row. A port call that settles (either way) after the
+ * worker's signal aborted records nothing: the entry stays `running` with no
+ * reason, which the store reads back as pending, so the next worker start
+ * resumes that session's curation (plan Component 5, durable resume). The step never marks observations: that stays the
  * curation engine's rule, and `observations` only reports what it did.
  */
 
@@ -330,9 +333,14 @@ export class CloseCurateStep {
       if (entry.step !== STEP || entry.subject === '') continue;
       if (entry.outcome.state !== 'pending') continue;
       if (signal.aborted) break;
-      recorded.push(
-        await this.curateSession(current, entry.subject, 1, signal),
+      const outcome = await this.curateSession(
+        current,
+        entry.subject,
+        1,
+        signal,
       );
+      if (outcome === null) break;
+      recorded.push(outcome);
     }
     return recorded;
   }
@@ -340,7 +348,8 @@ export class CloseCurateStep {
   /**
    * The worker's single retry of one `deferred/<code>` entry (attempt 2).
    * An entry that is not waiting for its retry is left untouched and `null`
-   * is returned.
+   * is returned; so is an entry whose curation the abort interrupted (left
+   * resumable, see {@link curateSession}).
    */
   async retry(
     run: TaskEndRunRecord,
@@ -370,12 +379,16 @@ export class CloseCurateStep {
     return null;
   }
 
+  /**
+   * Curates one session. Returns `null`, recording nothing, when `signal`
+   * aborts before the port call or while it is in flight.
+   */
   private async curateSession(
     run: TaskEndRunRecord,
     sessionId: string,
     attempt: CloseCurateAttempt,
     signal: AbortSignal,
-  ): Promise<CloseCurateRecorded> {
+  ): Promise<CloseCurateRecorded | null> {
     const live = this.activity.isSessionLive(sessionId);
     if (live.kind === 'unavailable') {
       // Liveness cannot be proved either way: curating could race the
@@ -396,6 +409,7 @@ export class CloseCurateStep {
       });
     }
 
+    if (signal.aborted) return null;
     this.store.markStepRunning(run.runId, STEP, sessionId);
     let result: TaskEndCurationResult;
     try {
@@ -405,14 +419,27 @@ export class CloseCurateStep {
         signal,
       );
     } catch (error: unknown) {
-      // An adapter fault or an unregistered engine is recorded as
-      // failed/curator-failed; the error text stays in a debug line.
+      // degradation-audit: reported - an abort (shutdown) leaves the entry
+      // running/no-reason, read back as pending, so the next worker start
+      // re-curates it (debug-logged, never a pass). Any other adapter fault
+      // or an unregistered engine is recorded as failed/curator-failed; the
+      // error text stays in a debug line.
+      if (signal.aborted) {
+        this.interrupted(run.runId, sessionId);
+        return null;
+      }
       this.logger.debug('[task-end-hook] close-curate port failed', {
         runId: run.runId,
         sessionId,
         error: errorText(error),
       });
       return this.record(run.runId, sessionId, CURATOR_FAILED);
+    }
+    if (signal.aborted) {
+      // The port finished despite the abort; its result is not trusted as
+      // final (an engine may report a partial pass), so the entry is resumed.
+      this.interrupted(run.runId, sessionId);
+      return null;
     }
 
     if (
@@ -426,6 +453,13 @@ export class CloseCurateStep {
       });
     }
     return this.record(run.runId, sessionId, mapCurationResult(result, attempt));
+  }
+
+  private interrupted(runId: string, sessionId: string): void {
+    this.logger.debug('[task-end-hook] close-curate interrupted by shutdown', {
+      runId,
+      sessionId,
+    });
   }
 
   private record(

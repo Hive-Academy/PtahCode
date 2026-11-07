@@ -9,10 +9,14 @@
  * checkout after a merge journal under one key (AC 1.3), while two
  * repositories with the same task id never collide (AC 1.5).
  *
- * A root that is not a git repository (exit 128 with no stdout) gets
- * `nogit:<realpath(root)>`. Any other failure is an `error` result: the
- * caller skips the root for this flush and a later flush retries, because
- * only `ok` results are cached.
+ * A root that is not a git repository (exit 128, no stdout, and git's own
+ * "not a git repository" fatal on stderr) gets `nogit:<realpath(root)>`.
+ * Any other failure, including another exit-128 fatal such as "detected
+ * dubious ownership", is an `error` result: the caller skips the root for
+ * this flush and a later flush retries, because only `ok` results are cached.
+ * The stderr match relies on the host runner pinning the C locale
+ * (`execGit` forces `LC_ALL=C`); a localized message classifies as an error,
+ * which fails closed (retry, no false `nogit` baseline).
  */
 import * as path from 'node:path';
 import type { ReadOnlyGit } from '../ports/read-only-git';
@@ -34,6 +38,8 @@ export const TRIGGER_GIT_TIMEOUT_MS = 30_000;
 const COMMON_DIR_MAX_BYTES = 64 * 1024;
 /** Exit code git uses for "not a git repository" (and other fatal errors). */
 const GIT_FATAL_EXIT = 128;
+/** git's C-locale fatal text for a directory outside every repository. */
+const NOT_A_REPOSITORY = /^fatal: not a git repository\b/im;
 
 export type RepositoryIdentity =
   /** Inside a git repository: `repoId` is the real common dir. */
@@ -49,7 +55,10 @@ export type RepositoryIdentity =
 export type RepositoryIdentityError =
   /** The runner rejected (timeout, abort, output limit, spawn failure). */
   | 'common-dir-git-failed'
-  /** A non-zero exit other than "not a repository". */
+  /**
+   * A non-zero exit other than "not a repository", including an exit-128
+   * fatal with any other stderr (e.g. dubious ownership).
+   */
   | 'common-dir-unexpected-exit'
   /** Exit 0 with no path on stdout. */
   | 'common-dir-empty'
@@ -125,6 +134,7 @@ export class RepositoryIdentityResolver {
     signal: AbortSignal | undefined,
   ): Promise<RepositoryIdentityResult> {
     let stdout: string;
+    let stderr: string;
     let exitCode: number;
     try {
       const result = await this.git.run(
@@ -137,6 +147,7 @@ export class RepositoryIdentityResolver {
         },
       );
       stdout = result.stdout;
+      stderr = result.stderr;
       exitCode = result.exitCode;
     } catch {
       // The closed code is logged by the detector, which skips the root for
@@ -145,7 +156,11 @@ export class RepositoryIdentityResolver {
     }
 
     const reported = firstLine(stdout);
-    if (exitCode === GIT_FATAL_EXIT && reported.trim() === '') {
+    if (
+      exitCode === GIT_FATAL_EXIT &&
+      reported.trim() === '' &&
+      NOT_A_REPOSITORY.test(stderr)
+    ) {
       const rootRealPath = await realpathOrNull(this.realpath, root);
       if (rootRealPath === null) {
         return { kind: 'error', error: 'root-realpath-failed' };
