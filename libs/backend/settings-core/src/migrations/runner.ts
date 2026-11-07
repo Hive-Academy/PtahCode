@@ -21,18 +21,23 @@ export class MigrationRunner implements ISettingsMigrator {
   private readonly ptahDir: string;
   private readonly migrations: readonly MigrationFn[];
 
-  constructor(ptahDir: string, migrations: readonly MigrationFn[]) {
+  constructor(
+    ptahDir: string,
+    migrations: readonly MigrationFn[],
+    private readonly markerDir: string = ptahDir,
+    private readonly markerPrefix = 'v',
+  ) {
     this.ptahDir = ptahDir;
     this.migrations = migrations;
   }
 
   async runMigrations(): Promise<void> {
-    const migrationsDir = path.join(this.ptahDir, 'migrations');
+    const migrationsDir = path.join(this.markerDir, 'migrations');
     fs.mkdirSync(migrationsDir, { recursive: true });
 
     for (let i = 0; i < this.migrations.length; i++) {
       const version = i + 1;
-      const sentinel = path.join(migrationsDir, `v${version}.applied`);
+      const sentinel = path.join(migrationsDir, `${this.markerPrefix}${version}.applied`);
 
       if (fs.existsSync(sentinel)) {
         continue; // Already applied — skip.

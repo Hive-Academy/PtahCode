@@ -126,7 +126,7 @@ describe('SessionBudgetBannerComponent', () => {
     const banner = byTestId(host, 'session-budget-banner');
     expect(banner).not.toBeNull();
     expect(banner?.getAttribute('role')).toBe('status');
-    expect(banner?.classList).toContain('border-warning');
+    expect(banner?.classList).toContain('border-warning/30');
     expect(byTestId(host, 'session-budget-title')?.textContent?.trim()).toBe(
       'Session used 41.2M of 50.0M tokens',
     );
@@ -134,8 +134,11 @@ describe('SessionBudgetBannerComponent', () => {
       'Ask the agent to finish its running work, write a handoff document and give you a prompt for a new session.',
     );
     expect(
-      byTestId<HTMLProgressElement>(host, 'session-budget-meter')?.value,
-    ).toBe(82.4);
+      byTestId(host, 'session-budget-meter')?.getAttribute('aria-valuenow'),
+    ).toBe('82.4');
+    expect(
+      byTestId<HTMLElement>(host, 'session-budget-meter')?.style.width,
+    ).toBe('82.4%');
     const wrapUp = byTestId<HTMLButtonElement>(host, 'session-budget-wrap-up');
     expect(wrapUp?.textContent?.trim()).toBe('Wrap up & hand off');
     expect(wrapUp?.disabled).toBe(false);
@@ -143,6 +146,38 @@ describe('SessionBudgetBannerComponent', () => {
       'Dismiss',
     );
     expect(host.querySelectorAll('button')).toHaveLength(2);
+  });
+
+  it('keeps the advice reachable: tooltip, description and a meter with a range', () => {
+    const host = render(BASE, { wrapUpSent: true });
+    const banner = byTestId(host, 'session-budget-banner');
+    const body = byTestId(host, 'session-budget-body');
+    const bodyId = body?.id ?? '';
+    expect(bodyId).not.toBe('');
+    expect(banner?.getAttribute('aria-live')).toBe('polite');
+    expect(banner?.getAttribute('title')).toBe(body?.textContent?.trim());
+    expect(banner?.getAttribute('aria-describedby')).toBe(bodyId);
+    // The disabled wrap-up keeps the link, and Dismiss stays focusable with it.
+    expect(
+      byTestId(host, 'session-budget-wrap-up')?.getAttribute(
+        'aria-describedby',
+      ),
+    ).toBe(bodyId);
+    const dismiss = byTestId<HTMLButtonElement>(host, 'session-budget-dismiss');
+    expect(dismiss?.disabled).toBe(false);
+    expect(dismiss?.getAttribute('aria-describedby')).toBe(bodyId);
+    const meter = byTestId(host, 'session-budget-meter');
+    expect(meter?.getAttribute('role')).toBe('meter');
+    expect(meter?.getAttribute('aria-valuemin')).toBe('0');
+    expect(meter?.getAttribute('aria-valuemax')).toBe('100');
+  });
+
+  it('lets the actions wrap under the text in a narrow pane', () => {
+    const host = render(BASE, { autoHandoffQueued: true });
+    const actions = byTestId(host, 'session-budget-wrap-up')?.parentElement;
+    expect(actions?.classList).toContain('flex-shrink-0');
+    expect(actions?.parentElement?.classList).toContain('flex-wrap');
+    expect(host.querySelectorAll('button')).toHaveLength(3);
   });
 
   it('emits wrapUp on the primary button', () => {
@@ -191,10 +226,13 @@ describe('SessionBudgetBannerComponent', () => {
     const banner = byTestId(host, 'session-budget-banner');
     expect(banner).not.toBeNull();
     expect(banner?.getAttribute('role')).toBe('alert');
-    expect(banner?.classList).toContain('border-error');
+    expect(banner?.classList).toContain('border-error/40');
     expect(
-      byTestId<HTMLProgressElement>(host, 'session-budget-meter')?.value,
-    ).toBe(100);
+      byTestId(host, 'session-budget-meter')?.getAttribute('aria-valuenow'),
+    ).toBe('100');
+    expect(
+      byTestId<HTMLElement>(host, 'session-budget-meter')?.style.width,
+    ).toBe('100%');
   });
 
   it('stays hidden at the limit once the limit stage was dismissed', () => {

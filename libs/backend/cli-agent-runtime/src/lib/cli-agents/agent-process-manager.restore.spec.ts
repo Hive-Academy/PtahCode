@@ -876,6 +876,145 @@ describe('AgentProcessManager.restoreAgents', () => {
       expect(recovered[0]).toMatchObject({ outputLostAfter: checkpointAt, stopReason: 'host-restart' });
     });
 
+    describe('awaitRecoveredOutput', () => {
+      function deferred(): { promise: Promise<void>; resolve: () => void } {
+        let resolve: () => void = () => undefined;
+        const promise = new Promise<void>((r) => { resolve = r; });
+        return { promise, resolve };
+      }
+      function restoredWithWrite(write: Promise<void>): AgentProcessManager {
+        const manager = makeManager({ providerRoot: ROOT_A, outputJournal: journalWith(checkpoint) });
+        manager.events.on(
+          'agent:output-recovered',
+          (_info: AgentProcessInfo, track: (settled: Promise<void>) => void) => track(write),
+        );
+        manager.restoreAgents([interrupted()], ROOT_A, 'parent-1');
+        return manager;
+      }
+
+      it('waits until the recovered reference write settles', async () => {
+        const write = deferred();
+        const manager = restoredWithWrite(write.promise);
+        let done = false;
+        const waiting = manager.awaitRecoveredOutput([RESTORED_ID]).then(() => { done = true; });
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(done).toBe(false);
+        write.resolve();
+        await waiting;
+        expect(done).toBe(true);
+        expect(manager['logger'].warn).not.toHaveBeenCalled();
+      });
+
+      it('continues after the bound and logs when the write is slow', async () => {
+        jest.useFakeTimers();
+        try {
+          const manager = restoredWithWrite(new Promise<void>(() => undefined));
+          const waiting = manager.awaitRecoveredOutput([RESTORED_ID], 3_000);
+          await jest.advanceTimersByTimeAsync(3_000);
+          await waiting;
+          expect(manager['logger'].warn).toHaveBeenCalledWith(
+            expect.stringContaining('not persisted in time'),
+            { pending: 1, timeoutMs: 3_000 },
+          );
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+
+      it('leaves no waiter on a stuck write after each timed-out load, and drops it once it lands', async () => {
+        jest.useFakeTimers();
+        try {
+          const landing = { resolve: (): void => undefined };
+          const write = new Promise<void>((resolve) => { landing.resolve = resolve; });
+          const manager = restoredWithWrite(write);
+          const writes = manager['recoveredOutputWrites'];
+          const tracked = writes.get(RESTORED_ID);
+          const timersBefore = jest.getTimerCount();
+          for (let load = 0; load < 3; load++) {
+            let done = false;
+            const waiting = manager.awaitRecoveredOutput([RESTORED_ID], 3_000).then(() => { done = true; });
+            expect(tracked?.waiters.size).toBe(1);
+            await jest.advanceTimersByTimeAsync(2_999);
+            expect(done).toBe(false);
+            await jest.advanceTimersByTimeAsync(1);
+            await waiting;
+            // The timed-out waiter removed itself; the same entry stays tracked.
+            expect(tracked?.waiters.size).toBe(0);
+            expect(writes.get(RESTORED_ID)).toBe(tracked);
+          }
+          expect(manager['logger'].warn).toHaveBeenCalledTimes(3);
+          expect(jest.getTimerCount()).toBe(timersBefore);
+
+          // Only a landed write drops the entry, and it does so at once.
+          landing.resolve();
+          await jest.advanceTimersByTimeAsync(0);
+          expect(writes.has(RESTORED_ID)).toBe(false);
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+
+      it('registers one waiter for a repeated agent id and removes it on timeout', async () => {
+        jest.useFakeTimers();
+        try {
+          const manager = restoredWithWrite(new Promise<void>(() => undefined));
+          const tracked = manager['recoveredOutputWrites'].get(RESTORED_ID);
+          const waiting = manager.awaitRecoveredOutput([RESTORED_ID, RESTORED_ID], 3_000);
+          expect(tracked?.waiters.size).toBe(1);
+          await jest.advanceTimersByTimeAsync(3_000);
+          await waiting;
+          expect(tracked?.waiters.size).toBe(0);
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+
+      it('releases every concurrent waiter when the write lands', async () => {
+        jest.useFakeTimers();
+        try {
+          const landing = { resolve: (): void => undefined };
+          const write = new Promise<void>((resolve) => { landing.resolve = resolve; });
+          const manager = restoredWithWrite(write);
+          const timersBefore = jest.getTimerCount();
+          const first = manager.awaitRecoveredOutput([RESTORED_ID], 3_000);
+          const second = manager.awaitRecoveredOutput([RESTORED_ID], 3_000);
+          landing.resolve();
+          await jest.advanceTimersByTimeAsync(0);
+          await Promise.all([first, second]);
+          expect(manager['logger'].warn).not.toHaveBeenCalled();
+          expect(jest.getTimerCount()).toBe(timersBefore);
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+
+      it('continues without a timeout warning when the write failed', async () => {
+        const manager = restoredWithWrite(Promise.reject(new Error('store down')));
+        await manager.awaitRecoveredOutput([RESTORED_ID]);
+        expect(manager['logger'].warn).not.toHaveBeenCalled();
+      });
+
+      it('does not wait when nothing was recovered', async () => {
+        jest.useFakeTimers();
+        try {
+          const manager = makeManager({ providerRoot: ROOT_A });
+          manager.restoreAgents([interrupted()], ROOT_A, 'parent-1');
+          const timersBefore = jest.getTimerCount();
+          let done = false;
+          const waiting = manager.awaitRecoveredOutput([RESTORED_ID]).then(() => { done = true; });
+          // No bound timer was armed: nothing recovered means nothing to wait on.
+          expect(jest.getTimerCount()).toBe(timersBefore);
+          await Promise.resolve();
+          await Promise.resolve();
+          expect(done).toBe(true);
+          await waiting;
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+    });
+
     it('does not recover again once the reference carries the checkpoint time', () => {
       const manager = makeManager({ providerRoot: ROOT_A, outputJournal: journalWith(checkpoint) });
       const recovered = jest.fn();

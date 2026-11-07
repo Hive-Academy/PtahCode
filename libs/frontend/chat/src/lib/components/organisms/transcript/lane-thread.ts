@@ -36,6 +36,59 @@ function inboundSender(receipt: AgentDeliveryReceipt | undefined, parentFamily: 
   return { sender: parentFamily ? `Parent agent · ${parentFamily}` : 'Parent agent', senderKind: 'parent' };
 }
 
+interface ReceiptMatch {
+  readonly receipt: AgentDeliveryReceipt;
+  /** The receipt's group (same preview and time, not id-matched) holds more than one sender. */
+  readonly ambiguous: boolean;
+}
+
+const senderKey = (receipt: AgentDeliveryReceipt) => `${receipt.sender ?? 'parent'}:${receipt.senderAgentId ?? ''}`;
+
+/**
+ * Joins user-role transcript messages to receipts. An id match wins; otherwise the preview is matched
+ * in time order and each receipt is consumed once, so equal previews from two peers keep their own
+ * senders. When the receipts left after id matching hold a group with the same preview and creation
+ * time but different senders, every preview match drawn from that group is flagged ambiguous so no
+ * peer is named.
+ */
+function matchReceipts(
+  messages: readonly ExecutionChatMessage[],
+  receipts: readonly AgentDeliveryReceipt[],
+): Map<string, ReceiptMatch> {
+  const byId = new Map(receipts.map(receipt => [receipt.id, receipt]));
+  const normalize = (text: string) => text.replace(/\s+/g, ' ').trim();
+  const matches = new Map<string, ReceiptMatch>();
+  const used = new Set<string>();
+  const unresolved: ExecutionChatMessage[] = [];
+  for (const message of messages) {
+    const receipt = byId.get(message.id) ?? byId.get(message.id.split(':').at(-1) ?? '');
+    if (receipt && !used.has(receipt.id)) {
+      used.add(receipt.id);
+      matches.set(message.id, { receipt, ambiguous: false });
+    } else {
+      unresolved.push(message);
+    }
+  }
+  const byTime = receipts.filter(receipt => receipt.preview && !used.has(receipt.id)).sort((a, b) => a.createdAt - b.createdAt);
+  // Groups are fixed before any preview match consumes a receipt: once one tied receipt is taken,
+  // the rest of its group still cannot say which message it belongs to.
+  const groupKey = (receipt: AgentDeliveryReceipt) => `${receipt.createdAt}\u0000${normalize(receipt.preview ?? '')}`;
+  const sendersByGroup = new Map<string, Set<string>>();
+  for (const receipt of byTime) {
+    const senders = sendersByGroup.get(groupKey(receipt)) ?? new Set<string>();
+    senders.add(senderKey(receipt));
+    sendersByGroup.set(groupKey(receipt), senders);
+  }
+  for (const message of [...unresolved].sort((a, b) => a.timestamp - b.timestamp)) {
+    const text = normalize(message.rawContent ?? '');
+    const receipt = byTime.find(item => !used.has(item.id) && text.startsWith(normalize(item.preview ?? '')));
+    if (!receipt) continue;
+    used.add(receipt.id);
+    matches.set(message.id, { receipt, ambiguous: (sendersByGroup.get(groupKey(receipt))?.size ?? 0) > 1 });
+  }
+  return matches;
+}
+
 /** Receipt ids are independent of transcript ids; match user text before adding preview rows. */
 export function laneThreadEntries(
   messages: readonly ExecutionChatMessage[],
@@ -47,17 +100,19 @@ export function laneThreadEntries(
   completion?: { readonly status: string; readonly timestamp: number },
   laneNameOf: LaneNameResolver = () => undefined,
 ): LaneThreadEntry[] {
-  const byId = new Map(receipts.map(receipt => [receipt.id, receipt]));
   // "kimi · kimi" reads as a stutter: name the CLI once when the label is the CLI.
   const laneSender = laneLabel && laneLabel.trim().toLowerCase() !== cli.trim().toLowerCase() ? `${laneLabel} · ${cli}` : cli;
   const self: EntrySender = { sender: laneSender, senderKind: 'this-lane' };
-  const normalize = (text: string) => text.replace(/\s+/g, ' ').trim();
-  const matched = new Set<string>();
-  const entries: LaneThreadEntry[] = messages.filter(message => message.role === 'user' && message.rawContent && message.timestamp > 0).map(message => {
-    const receipt = byId.get(message.id) ?? byId.get(message.id.split(':').at(-1) ?? '') ??
-      receipts.find(item => item.preview && !matched.has(item.id) && normalize(message.rawContent ?? '').startsWith(normalize(item.preview)));
-    if (receipt) matched.add(receipt.id);
-    return { id: message.id, ...inboundSender(receipt, parentFamily, laneNameOf), kind: 'message' as const,
+  const inbound = messages.filter(message => message.role === 'user' && message.rawContent && message.timestamp > 0);
+  const matches = matchReceipts(inbound, receipts);
+  const matched = new Set([...matches.values()].map(match => match.receipt.id));
+  const entries: LaneThreadEntry[] = inbound.map(message => {
+    const match = matches.get(message.id);
+    const receipt = match?.receipt;
+    const sender = match?.ambiguous && receipt?.sender === 'lane'
+      ? { sender: 'From another lane', senderKind: 'peer-lane' as const }
+      : inboundSender(receipt, parentFamily, laneNameOf);
+    return { id: message.id, ...sender, kind: 'message' as const,
       timestamp: message.timestamp, body: message.rawContent ?? '', receipt };
   });
   for (const receipt of receipts) {

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { buildCertifiedClaudeEnv, certifiedEnvDigest, CLAUDE_CERTIFIED_ENV_KEYS } from '@ptah-extension/agent-sdk';
 import type { IProcessSpawner, ProcessSpawnRequest, SpawnedProcessHandle } from '@ptah-extension/platform-core';
-import { ClaudeLoginConsole, quotePosix, quotePowerShell, quoteWindowsArgument } from './claude-login-console';
+import { CLAUDE_POSIX_LOGIN_DESKTOP_KEYS, ClaudeLoginConsole, quotePosix, quotePowerShell, quoteWindowsArgument } from './claude-login-console';
 import { ClaudeRouteCertifier, type ClaudeAuthContext, type ClaudeCliProbe, type ClaudeRouteCertifierFs } from './claude-route-certifier';
 import { resolveProviderAccountRoute, type CanonicalProviderAccountRoute } from './provider-account-route';
 
@@ -452,6 +452,19 @@ describe('ClaudeLoginConsole.fallbackScript', () => {
     expect(script).toContain('${no_proxy+"no_proxy=$no_proxy,127.0.0.1,localhost"}');
     expect(script).toContain('NO_PROXY="${NO_PROXY:+$NO_PROXY,}127.0.0.1,localhost"');
     expect(script).not.toContain('PROGRAMFILES(X86)');
+  });
+
+  it('posix keeps the desktop-session names by reference so the browser can open', () => {
+    const { script } = posix.fallbackScript(context());
+    for (const name of CLAUDE_POSIX_LOGIN_DESKTOP_KEYS) {
+      expect(script).toContain(`\${${name}+"${name}=$${name}"}`);
+      expect(script).not.toContain(`\${${name.toLowerCase()}+`);
+    }
+  });
+
+  it('PowerShell keeps no desktop-session names: the win32 console opens the browser itself', () => {
+    const { script } = powershell.fallbackScript(context());
+    for (const name of CLAUDE_POSIX_LOGIN_DESKTOP_KEYS) expect(script).not.toContain(`'${name}'`);
   });
 
   it('PowerShell keeps exactly the allowlist names as literals', () => {

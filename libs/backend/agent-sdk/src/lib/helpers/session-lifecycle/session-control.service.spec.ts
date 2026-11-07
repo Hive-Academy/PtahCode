@@ -523,7 +523,7 @@ describe('SessionControl.applyAutoCompactConfig — live compaction.threshold ch
     expect(second).toHaveBeenCalledWith({ autoCompactWindow: 300_000 });
   });
 
-  it('an unset threshold clears the flag-layer window (null) while class defaults are null', async () => {
+  it('an unset threshold uses the first-party Claude default', async () => {
     const h = makeHarness();
     const apply = jest.fn().mockResolvedValue(undefined);
     attachQuery(h, 'tab_a', undefined, apply);
@@ -538,7 +538,7 @@ describe('SessionControl.applyAutoCompactConfig — live compaction.threshold ch
       subagentStopWeightedTokens: 3_000_000,
     });
 
-    expect(apply).toHaveBeenCalledWith({ autoCompactWindow: null });
+    expect(apply).toHaveBeenCalledWith({ autoCompactWindow: 200_000 });
   });
 
   it('sends nothing while auto compaction is disabled', async () => {
@@ -776,7 +776,7 @@ describe('SessionControl.applySessionAutoCompactWindow — E2-gated tighten (TAS
     );
   });
 
-  it('a read-back miss with no configured window sends null back (the runtime decides)', async () => {
+  it('a read-back miss restores the first-party Claude default', async () => {
     const h = makeHarness(() => configOf());
     const q = attachQuery(h, { honours: false });
 
@@ -784,7 +784,7 @@ describe('SessionControl.applySessionAutoCompactWindow — E2-gated tighten (TAS
 
     expect(q.applyFlagSettings.mock.calls.map((c) => c[0])).toEqual([
       { autoCompactWindow: TARGET },
-      { autoCompactWindow: null },
+      { autoCompactWindow: 200_000 },
     ]);
     expect(q.rec.autoCompactOverride).toBeNull();
   });
@@ -958,8 +958,8 @@ describe('SessionControl.applySessionAutoCompactWindow — E2-gated tighten (TAS
     ).resolves.toEqual({ target: TARGET, applied: false, reason: 'failed' });
   });
 
-  it('leaves the A1 class defaults null (E2 has not passed)', () => {
-    expect(A1_DEFAULT_WINDOW).toEqual({ claude: null, proxied: null });
+  it('uses the shipped first-party Claude default', () => {
+    expect(A1_DEFAULT_WINDOW).toEqual({ claude: 200_000, proxied: null });
   });
 });
 

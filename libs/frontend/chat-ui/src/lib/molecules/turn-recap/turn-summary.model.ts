@@ -8,7 +8,7 @@ import {
   type TurnTestRun,
   type TurnTestSummary,
 } from '@ptah-extension/shared';
-import { formatFileCounts } from '../change-set/change-set-card.component';
+import { formatFileCounts } from './turn-summary-files.utils';
 
 /**
  * Host-built turn summary model (TASK_2026_623, component 6; R6.1-R6.4, R6.6,
@@ -41,11 +41,11 @@ export type TurnSummaryFileState = 'changed' | 'conflicted' | 'reconciled';
 export interface TurnSummaryFileRow {
   readonly file: TurnChangeSetFile;
   readonly state: TurnSummaryFileState;
-  /** `+N −N`, `binary`, or `?`: the change-set card's own formatter. */
+  /** `+N −N`, `binary`, or `?`: the shared file-count formatter. */
   readonly counts: string;
 }
 
-/** Files card: the change-set card's capabilities (parity section 2). */
+/** Files card: the former change-set card's capabilities (removed in TASK_2026_891). */
 export interface TurnSummaryFilesCard {
   readonly kind: 'files';
   /** `$diff.files`: the file count, or `unavailable` when counts are unavailable. */

@@ -45,12 +45,9 @@ import {
   ExecutionChatMessage,
 } from '@ptah-extension/shared';
 import type { ExecutionNode, TurnChangeSet } from '@ptah-extension/shared';
-// Its own declaration from its own entry point: the compiler defers an import
-// only when every symbol of the declaration is used inside `@defer` alone,
-// and esbuild splits it out only when no eager code imports that file.
-import { ChangeSetCardComponent } from '@ptah-extension/chat-ui/change-set-card';
-// Same lazy-entry contract as the change-set card above (see
-// `libs/frontend/chat-ui/src/turn-recap.ts`); the model builder is loaded
+// Keep the chip in its own entry point: Angular defers a component only when
+// all uses are inside @defer, and esbuild splits files with no eager import.
+// The model builder is loaded
 // through `TRANSCRIPT_TURN_RECAP_LOADER`, never imported as a value here.
 import { TurnSummaryChipComponent, type TurnSummaryModel } from '@ptah-extension/chat-ui/turn-recap';
 // Same contract (see `libs/frontend/chat-ui/src/display-panel.ts`).
@@ -62,7 +59,6 @@ import {
 } from '@ptah-extension/chat-ui';
 import {
   ChangeSetStore,
-  type ChangeSetMarks,
 } from '../../../services/change-set/change-set.store';
 import { ChangeSetActionsService } from '../../../services/change-set/change-set-actions.service';
 import {
@@ -255,8 +251,6 @@ function findAgentNode(
     TranscriptOlderHistorySentinelDirective,
     TranscriptPrependAnchorDirective,
     TranscriptMotionDirective,
-    // Used only inside `@defer`, so the compiler loads it lazily.
-    ChangeSetCardComponent,
     // Used only inside `@defer`, so the compiler loads it lazily.
     TurnSummaryChipComponent,
     // Used only inside `@defer`, so the compiler loads it lazily.
@@ -652,9 +646,8 @@ export class ChatTranscriptComponent {
   private _frozenAnchors: ChangeSetAnchors = NO_CHANGE_SET_ANCHORS;
 
   /**
-   * Change-set cards per message: each turn's card renders after the turn's
-   * last assistant message (see `anchorChangeSets`). Gated like `vm`, so a
-   * hidden transcript keeps its last placement and does no join work.
+   * Change-set anchors for turn snapshots and the Electron summary chip.
+   * Gated like `vm`, so a hidden transcript keeps its last placement.
    */
   protected readonly changeSetAnchors = computed<ChangeSetAnchors>(() => {
     const view = this.vm();
@@ -881,8 +874,6 @@ export class ChatTranscriptComponent {
     view: this.vm,
   });
 
-  protected readonly ChangeSetErrorIcon = AlertTriangle;
-
   private readonly document = inject(DOCUMENT);
 
   /** Tool call id of the sub-agent opened in place; null shows the transcript. */
@@ -1090,21 +1081,14 @@ export class ChatTranscriptComponent {
     return null;
   }
 
-  /** The last failed action per card (by turn), shown inline under it. */
-  private readonly changeSetErrors = signal<ReadonlyMap<string, string>>(
+  /** The last failed chip action per turn, shown inline under the chip. */
+  protected readonly changeSetErrors = signal<ReadonlyMap<string, string>>(
     new Map(),
   );
+  protected readonly ChangeSetErrorIcon = AlertTriangle;
 
   protected changeSetKey(changeSet: TurnChangeSet): string {
     return `${changeSet.turnStartedAt}:${changeSet.turnEndedAt}`;
-  }
-
-  protected changeSetMarks(changeSet: TurnChangeSet): ChangeSetMarks {
-    return this.changeSetStore.marksFor(changeSet);
-  }
-
-  protected changeSetError(changeSet: TurnChangeSet): string | null {
-    return this.changeSetErrors().get(this.changeSetKey(changeSet)) ?? null;
   }
 
   protected onTurnSummaryReview(summary: TurnSummaryModel): void {
@@ -1124,12 +1108,6 @@ export class ChatTranscriptComponent {
   protected onChangeSetOpenFile(changeSet: TurnChangeSet, path: string): void {
     void this.runChangeSetAction(changeSet, () =>
       this.changeSetActions.openFile(changeSet, path),
-    );
-  }
-
-  protected onChangeSetOpenScm(changeSet: TurnChangeSet): void {
-    void this.runChangeSetAction(changeSet, () =>
-      this.changeSetActions.openScm(),
     );
   }
 

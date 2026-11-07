@@ -138,7 +138,10 @@ describe('CLAUDE_POLICY_COVERAGE', () => {
     ['2.1.312', true],
     ['2.1.999', true],
     ['2.1.309', false],
-    ['2.2.0', false],
+    ['2.2.0', true],
+    ['2.10.0', true],
+    ['2.0.999', false],
+    ['3.0.0', false],
     ['3.1.310', false],
     ['1.1.310', false],
     ['2.1', false],
@@ -242,7 +245,7 @@ describe('scanClaudeAuthPolicy', () => {
       const { fs, calls } = fakeFs();
       const registry = fakeRegistry();
       const result = await scanClaudeAuthPolicy(
-        request({ knownVersion: '2.2.0', fs, queryRegistry: registry.queryRegistry }),
+        request({ knownVersion: '3.0.0', fs, queryRegistry: registry.queryRegistry }),
       );
       expect(result).toEqual(REFUSED);
       expect(calls).toEqual([]);

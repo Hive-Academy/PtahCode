@@ -3,7 +3,7 @@
  *
  * Filesystem + configuration persistence for the harness wizard:
  *   - Writes CLAUDE.md to the workspace .claude/ directory (with backup).
- *   - Merges agent config into `~/.ptah/settings.json`.
+ *   - Merges agent config into the active Ptah settings file.
  *   - Normalises partial configs coming from the conversational builder.
  *   - Persists/loads harness presets in `~/.ptah/harnesses/*.json`.
  *
@@ -17,6 +17,7 @@ import { inject, injectable } from 'tsyringe';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import type { HarnessConfig, HarnessPreset } from '@ptah-extension/shared';
 import { normalizeHarnessSkillSelection } from '@ptah-extension/shared/schemas';
+import { resolvePtahSettingsDir } from '@ptah-extension/platform-core';
 import { HARNESS_TOKENS } from '../tokens';
 import { HarnessPromptBuilderService } from './harness-prompt-builder.service';
 import { BUILTIN_HARNESS_PRESETS } from './builtin-presets';
@@ -42,9 +43,9 @@ export class HarnessConfigStore {
     private readonly promptBuilder: HarnessPromptBuilderService,
   ) {}
 
-  /** Absolute path to `~/.ptah/settings.json` (used by callers for reporting). */
+  /** Absolute path to the active settings.json (used by callers for reporting). */
   get settingsPath(): string {
-    return path.join(getPtahHome(), 'settings.json');
+    return path.join(resolvePtahSettingsDir(), 'settings.json');
   }
 
   /**
@@ -93,13 +94,13 @@ export class HarnessConfigStore {
   }
 
   /**
-   * Update ~/.ptah/settings.json with agent configuration from the harness config.
+   * Update the active settings.json with agent configuration from the harness config.
    *
    * Merges agent overrides into the existing settings file,
    * preserving any unrelated settings.
    */
   async updatePtahSettings(config: HarnessConfig): Promise<void> {
-    const settingsPath = path.join(getPtahHome(), 'settings.json');
+    const settingsPath = this.settingsPath;
 
     let existingSettings: Record<string, unknown> = {};
 
