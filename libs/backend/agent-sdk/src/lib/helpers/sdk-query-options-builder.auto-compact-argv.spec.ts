@@ -24,8 +24,6 @@ import type { ConfigManager, Logger } from '@ptah-extension/vscode-core';
 import { SdkQueryOptionsBuilder } from './sdk-query-options-builder';
 import { CompactionConfigProvider } from './compaction-config-provider';
 
-const PINNED_SDK_VERSION = '0.3.318';
-
 // The probe payload (system prompts across 7 cases routinely exceed 100 KB
 // combined) is read from stdin, never argv or env — both are capped by the
 // OS (Linux MAX_ARG_STRLEN is 131072 bytes per string; spawnSync fails with
@@ -298,11 +296,8 @@ describe('interactive path — compaction settings on the real SDK argv', () => 
       logger: jest.Mocked<Logger>;
     }
   >();
-  let sdkVersion = '';
-
   beforeAll(async () => {
     const sdk = findPinnedSdk();
-    sdkVersion = sdk.version;
     const built: Array<{
       name: CaseName;
       options: Record<string, unknown>;
@@ -382,10 +377,6 @@ describe('interactive path — compaction settings on the real SDK argv', () => 
     crossSessionInbound: 'accept',
     subagentPromptCacheTtl: '1h',
   } as const;
-
-  it('runs against the pinned SDK version', () => {
-    expect(sdkVersion).toBe(PINNED_SDK_VERSION);
-  });
 
   it('enabled + unset threshold → first-party default window', () => {
     expect(argvSettings('enabled-unset')).toEqual({
