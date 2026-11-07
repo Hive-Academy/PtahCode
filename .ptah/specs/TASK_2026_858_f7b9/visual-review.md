@@ -1,5 +1,48 @@
 # Phase F visual review (Electron)
 
+## Third pass (head f31e1b9e7, dist rebuilt at ffbc0b745)
+
+**Verdict: PASS WITH NOTES, approval and watch-only still NOT REVIEWED.** The account refusal is fixed: a session now starts on horus, its transcript renders and replays after a renderer reload. Claude on horus then answers "Failed to authenticate. API Error: 401 OAuth access token is invalid." The worker's Claude login is expired, so no real stream and no tool approval can happen. I did not touch credentials.
+
+### Second-pass findings re-checked
+
+- Finding 1 (wrong message "The machine is unreachable"): **fixed for this cause.** The start is accepted and no error shows (`08-stream-start-dark.png`). The generic mapping in `mapMachineError` still exists for other causes, not re-tested.
+- Finding 2 (readiness missed the refusal): **fixed.** Readiness shows 9 checks, including "Main database - The main database is open" and a local driver lock check (`04b-readiness-9-dark.png`, `04b-readiness-9-light.png`). It still reports "Provider ready - Claude CLI is available" while the Claude login is invalid (new finding A).
+- Findings 3 and 4 (plain error text, 28px shift): not re-tested (the form error no longer appears on this path).
+
+### Third-pass states
+
+| State | Dark | Light | Prototype | Result |
+|---|---|---|---|---|
+| Readiness, 9 checks | 04b-readiness-9-dark | 04b-readiness-9-light | proto-04-readiness-* | Matches. |
+| 6 Stream (turn in progress) | 08-stream-start-dark | not captured (turn ended in under 2 s) | proto-06-stream-* | Header shows "Caught up" and Stop, input placeholder "(a turn is in progress)". Layout matches the prototype. |
+| 6 After (turn ended with 401) | 08-stream-after-dark | 08-stream-after-light | proto-06-stream-* | Renders. Stop becomes disabled. See findings B, C, E. |
+| Session list with a session | 10-list-with-session-dark | not captured | proto-05-list-* | Shows status, title, driver chip, provider, Open. |
+| 8 Replay (reload renderer, Open) | 11-replay-opening-dark, 11-replay-dark | 11-replay-light | proto-08-replay-* | Transcript replays identically. Title differs from the live view (finding D). |
+| Keyboard focus in the session view | 09-focus-back-dark, 09-focus-message-dark, 09-focus-send-dark | the same with `-light` | none | Pass: a visible ring on each stop. Stop is disabled and skipped. |
+| 7 Approval | not reachable | not reachable | proto-07-approval-* | The login is invalid, so no tool call can run. Nothing was written to /tmp or the workspace. |
+| 5b Reconnecting | not reachable | not reachable | proto-05b-* | Needs a dropped worker link; I did not disturb the workers. Back to horus and Open again worked. |
+| 9 Watch-only | not reachable | not reachable | proto-09-owner-* | Needs a second client holding the driver lock. |
+| 10 No local folder | not reachable | not reachable | proto-10-nofolders-* | Needs a profile without a workspace folder; the Ptah Dev profile was not changed. |
+
+### New findings
+
+- **A. Serious (readiness gap): readiness says "Provider ready" while the Claude login on the worker is expired,** so a session starts and fails on its first turn. Add an authentication check to readiness, or label the check "CLI installed".
+- **B. Serious (state): the session stays "Running" in the list after its only turn failed, and Stop is disabled,** so a user cannot stop or clear it from the app (`10-list-with-session-dark.png`, `08-stream-after-dark.png`). It is idle on horus and I could not stop it from the UI. Expected: a failed or idle status, and an enabled Stop or a Remove.
+- **C. Moderate: the failure is plain assistant text** ("Failed to authenticate...") with no error styling, retry hint or pointer to re-login on the worker.
+- **D. Moderate: the title differs between the live view ("Reply with the word ok.") and the replay or list ("Session 11/7/2026").** Use one title source.
+- **E. Moderate: in light, the user's message has no bubble** (`08-stream-after-light.png`); in dark it has a filled bubble (`08-stream-after-dark.png`). It reads as unstyled in light.
+- **F. Minor: the driver chip in the list shows the worker's machine name and a process id.** `10-list-with-session-dark.png` therefore contains them; keep it out of any published copy.
+
+### Third-pass checks
+
+- axe-core (wcag2a, wcag2aa, wcag21aa, wcag22aa) on `ptah-machines-view` in the stream state, dark and light: 0 violations. `color-contrast` incomplete for 20 nodes (glass), checked by hand.
+- Manual contrast, stream state: lowest enabled text is 6.63:1 in light (Connected) and 8.03:1 in dark. The disabled Stop button measures 2.44:1 light and 3.53:1 dark, exempt as a disabled control. The gold gradient buttons defeat a simple measurement; the dark label on gold is legible by eye.
+- Approval-state axe, contrast and focus on the approval buttons: not run (state not reachable).
+- Sessions started: 1 (one short prompt). It remains idle in the list (finding B). The Electron instance was closed.
+
+---
+
 ## Second pass (head 11262af8a)
 
 **Verdict: PASS WITH NOTES, session half still NOT REVIEWED.** The two first-pass visual fixes are confirmed. The tabId blocker is fixed (the worker no longer rejects the start), but starting a session on horus is now refused by a different, worker-side cause, so the stream, approval, replay, watch-only and no-folder states were again not reachable.
