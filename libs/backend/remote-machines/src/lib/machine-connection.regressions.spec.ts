@@ -555,3 +555,42 @@ it('keeps a cursor advanced by events while a failed explicit re-attach was in f
   ).toEqual({ sessionId: 's', afterSeq: 9, epoch: 'e' });
   h.connection.dispose();
 });
+
+it('keeps tracking a session whose failed first attach delivered events', async () => {
+  let refuse = true;
+  const h = harness({}, async (method, _params, _index, cb) => {
+    if (method === 'hello') return hello;
+    if (method === 'auth') return auth;
+    if (refuse) {
+      cb.onEvent(frame(3));
+      throw new WorkerClientError('INTERNAL');
+    }
+    return attachResult;
+  });
+  await h.connection.connect();
+  await expect(h.connection.attach('s')).rejects.toThrow();
+  refuse = false;
+  h.callbacks[0].onClose(1006);
+  await h.connection.retry();
+  expect(
+    h.calls.filter((call) => call.method === 'session.attach').at(-1)?.params,
+  ).toEqual({ sessionId: 's', afterSeq: 3, epoch: 'e' });
+  h.connection.dispose();
+});
+
+it('tracks nothing after a failed first attach that delivered no events', async () => {
+  const h = harness({}, async (method) => {
+    if (method === 'hello') return hello;
+    if (method === 'auth') return auth;
+    throw new WorkerClientError('INTERNAL');
+  });
+  await h.connection.connect();
+  await expect(h.connection.attach('s')).rejects.toThrow();
+  const before = h.calls.length;
+  h.callbacks[0].onClose(1006);
+  await h.connection.retry();
+  expect(
+    h.calls.slice(before).filter((call) => call.method === 'session.attach'),
+  ).toEqual([]);
+  h.connection.dispose();
+});

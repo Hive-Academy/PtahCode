@@ -474,11 +474,14 @@ export class MachineConnection {
       // A failed re-attach keeps the cursor the app already tracked, so the
       // next reconnect re-attaches from it, unless events delivered while the
       // attach was in flight advanced it: that newer cursor stays. A first
-      // attach that fails leaves nothing tracked.
+      // attach that fails leaves nothing tracked, again unless events
+      // advanced it: those events were delivered, so the session is live.
       const current = this.sessions.get(sessionId);
-      if (!previous) this.sessions.delete(sessionId);
-      else if (!current || !this.observed.has(current))
-        this.sessions.set(sessionId, previous);
+      const advanced = current !== undefined && this.observed.has(current);
+      if (!advanced) {
+        if (previous) this.sessions.set(sessionId, previous);
+        else this.sessions.delete(sessionId);
+      }
       if (previous && this.state === 'connected') {
         this.reason = 'session-reattach-failed';
         this.emit();
