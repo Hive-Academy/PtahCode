@@ -478,10 +478,60 @@ describe('parseFlatStreamEvent field checks', () => {
       ).toBeNull();
     });
 
-    it('returns the value that was checked when the collision is well typed', () => {
+    it('rejects a collision even when both values are well typed', () => {
       expect(
         parseFlatStreamEvent({ ...VALID.text_delta, [`${LRI}id`]: 'e2' }),
-      ).toEqual({ ...VALID.text_delta, id: 'e2' });
+      ).toBeNull();
+    });
+
+    it('rejects an unknown raw eventType hidden behind a valid colliding one', () => {
+      expect(
+        parseFlatStreamEvent({
+          ...VALID.text_delta,
+          eventType: 'unknown',
+          [`eventType${RLO}`]: 'text_delta',
+        }),
+      ).toBeNull();
+    });
+
+    it('rejects a mistyped raw id hidden behind a valid colliding one', () => {
+      expect(
+        parseFlatStreamEvent({
+          ...VALID.text_delta,
+          id: 7,
+          [`id${RLO}`]: 'e1',
+        }),
+      ).toBeNull();
+    });
+
+    it('rejects a well-typed collision in a nested object', () => {
+      expect(
+        parseFlatStreamEvent({
+          ...VALID.message_delta,
+          tokenUsage: { input: '1', [`input${ZWSP}`]: 1, output: 2 },
+        }),
+      ).toBeNull();
+    });
+
+    it('rejects a collision inside an array element', () => {
+      expect(
+        parseFlatStreamEvent({
+          ...VALID.background_tasks_snapshot,
+          tasks: [
+            {
+              ...VALID.background_tasks_snapshot.tasks[0],
+              status: 'done',
+              [`status${RLM}`]: 'running',
+            },
+          ],
+        }),
+      ).toBeNull();
+    });
+
+    it('ignores a colliding key whose value is undefined', () => {
+      expect(
+        parseFlatStreamEvent({ ...VALID.text_delta, [`id${ZWSP}`]: undefined }),
+      ).toEqual(VALID.text_delta);
     });
 
     it('cannot replace a validated nested field', () => {

@@ -13,7 +13,6 @@ import {
   type MachinesError,
   type RemoteSessionView,
 } from '../../services/machines-store';
-import { displayText } from '../../utils/display-text';
 import { refusalSentence } from '../../utils/remote-session-copy';
 import type { RemoteTranscriptItem } from '../../utils/remote-transcript';
 import {
@@ -25,6 +24,10 @@ import {
   RemoteTranscriptComponent,
   type RemoteLinkActivation,
 } from './remote-transcript.component';
+
+/** The line shown for an answer whose request rejected instead of resolving. */
+const ANSWER_REJECTED_SENTENCE =
+  'The answer could not be sent. Check the connection to the machine and try again.';
 
 interface ApprovalEntry {
   readonly request: PermissionRequest;
@@ -234,10 +237,12 @@ export class RemoteSessionPaneComponent {
         : 'error' in outcome
           ? outcome.error
           : { message: refusalSentence(outcome.refused, this.machineName()) };
-    } catch (rejection: unknown) {
+    } catch {
       // The store reports failures as outcomes; a rejection is unexpected,
-      // so it is shown on the request's block instead of being dropped.
-      error = { message: answerFailureSentence(rejection) };
+      // so it is shown on the request's block instead of being dropped. Its
+      // raw message may carry transport or provider detail and stays out of
+      // the UI.
+      error = { message: ANSWER_REJECTED_SENTENCE };
     }
     if (token !== this.sessionToken()) return;
     this.answering.update((set) => {
@@ -250,13 +255,4 @@ export class RemoteSessionPaneComponent {
       this.answerErrors.update((map) => new Map(map).set(request.id, failure));
     }
   }
-}
-
-/** The line shown for an answer whose request rejected instead of resolving. */
-function answerFailureSentence(rejection: unknown): string {
-  const detail =
-    rejection instanceof Error ? displayText(rejection.message, 200) : '';
-  return detail === ''
-    ? 'The answer could not be sent.'
-    : `The answer could not be sent: ${detail}`;
 }

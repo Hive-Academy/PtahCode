@@ -103,6 +103,32 @@ export function displayBlockValue(value: unknown, depth = 0): unknown {
   return result;
 }
 
+/**
+ * True when two keys of one object anywhere in `value` (nested objects and
+ * array elements included) are the same key after {@link displayBlockText},
+ * so {@link displayBlockValue} would keep one value and silently drop the
+ * other. Keys whose value is `undefined` are skipped, as that function skips
+ * them; nesting beyond {@link MAX_VALUE_DEPTH} is not inspected, as it
+ * becomes `null` there.
+ */
+export function hasCollidingKeys(value: unknown, depth = 0): boolean {
+  if (typeof value !== 'object' || value === null || depth >= MAX_VALUE_DEPTH) {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => hasCollidingKeys(item, depth + 1));
+  }
+  const seen = new Set<string>();
+  for (const [key, item] of Object.entries(value)) {
+    if (item === undefined) continue;
+    const clean = displayBlockText(key);
+    if (seen.has(clean)) return true;
+    seen.add(clean);
+    if (hasCollidingKeys(item, depth + 1)) return true;
+  }
+  return false;
+}
+
 /** Template form of {@link displayText}: `{{ name | displayText }}`. */
 @Pipe({ name: 'displayText', standalone: true })
 export class DisplayTextPipe implements PipeTransform {

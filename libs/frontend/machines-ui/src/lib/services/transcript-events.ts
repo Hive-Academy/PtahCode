@@ -1,5 +1,5 @@
 import type { FlatStreamEventUnion } from '@ptah-extension/shared';
-import { displayBlockValue } from '../utils/display-text';
+import { displayBlockValue, hasCollidingKeys } from '../utils/display-text';
 import {
   hasEventFields,
   isFlatEventType,
@@ -128,15 +128,16 @@ export function toTranscriptEvents(
  * that variant declares, with its type, literal union or nested shape (see
  * `transcript-event-validators.ts`). Unknown extra keys are kept.
  *
- * Validating the sanitized copy is what makes the result trustworthy: two
- * raw keys that differ only by an unsafe character (`id` and `id` plus a
- * bidi mark) become one key, and the value that survives is the value that
- * was checked. Returns `null` for a value that does not parse.
+ * An event in which two keys of one object differ only by unsafe characters
+ * (`id` and `id` plus a bidi mark), at any depth, is rejected before that:
+ * cleaning would merge them and drop one value unseen. Validating the
+ * cleaned copy then means the value returned is the value that was checked.
+ * Returns `null` for a value that does not parse.
  */
 export function parseFlatStreamEvent(
   value: unknown,
 ): FlatStreamEventUnion | null {
-  if (!isRecord(value)) return null;
+  if (!isRecord(value) || hasCollidingKeys(value)) return null;
   const event = displayBlockValue(value);
   if (!isRecord(event)) return null;
   const eventType = event['eventType'];

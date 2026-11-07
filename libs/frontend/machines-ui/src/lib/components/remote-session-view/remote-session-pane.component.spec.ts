@@ -227,15 +227,22 @@ describe('RemoteSessionPaneComponent', () => {
     expect(q(fixture, 'approval-error')).toBeNull();
   });
 
-  it('a rejected answer shows on its block and frees it', async () => {
+  it('a rejected answer shows a fixed line on its block and frees it', async () => {
     const { fixture, store } = setup(view({ pendingPermissions: [REQUEST] }));
-    store.respondPermission.mockRejectedValueOnce(new Error('channel closed'));
+    store.respondPermission.mockRejectedValueOnce(
+      new Error(
+        '401 from provider, key sk-test-SECRET, /home/horus/.ptah/auth',
+      ),
+    );
     (q(fixture, 'approval-allow') as HTMLButtonElement).click();
     await flush();
     fixture.detectChanges();
     expect(text(fixture, 'approval-error')).toContain(
-      'The answer could not be sent: channel closed',
+      'The answer could not be sent. Check the connection to the machine and try again.',
     );
+    const block = q(fixture, 'approval-block')?.textContent ?? '';
+    expect(block).not.toContain('sk-test-SECRET');
+    expect(block).not.toContain('/home/horus');
     expect((q(fixture, 'approval-allow') as HTMLButtonElement).disabled).toBe(
       false,
     );
