@@ -118,6 +118,8 @@ import {
   restoreLaneIdentity,
   restoreLaneLifecycle,
   settleWithin,
+  type TrackedRecoveredWrite,
+  type WriteObservation,
   stampWorkspaceKey,
 } from './lane-restore';
 import { findBlockedLaneModel } from './lane-spawn-policy';
@@ -370,7 +372,7 @@ export class AgentProcessManager {
   /** Promise-based mutex to serialize spawn operations and prevent TOCTOU race in concurrent limit check */
   private spawnMutex: Promise<void> = Promise.resolve();
   /** Shared observers of restored lanes' recovered-output persists, keyed by agent id. */
-  private readonly recoveredOutputWrites = new Map<string, Promise<void>>();
+  private readonly recoveredOutputWrites = new Map<string, TrackedRecoveredWrite>();
 
   /** EventEmitter for agent lifecycle events (spawned, output, exited) */
   readonly events = new EventEmitter();
@@ -1865,8 +1867,8 @@ export class AgentProcessManager {
     timeoutMs: number = RECOVERED_OUTPUT_WAIT_MS,
   ): Promise<void> {
     const writes = agentIds.flatMap((id) => {
-      const write = this.recoveredOutputWrites.get(id);
-      return write ? [write] : [];
+      const observer = this.recoveredOutputObserver(id);
+      return observer ? [observer] : [];
     });
     if (writes.length === 0) return;
     if (await settleWithin(writes, timeoutMs)) return;
@@ -1877,23 +1879,47 @@ export class AgentProcessManager {
   }
 
   /**
-   * Store ONE shared observer per write; waiters race it, never the write. It
-   * ends when the write settles or after {@link RECOVERED_OUTPUT_MAX_AGE_MS},
-   * which also drops the entry, so a stuck write costs no reactions per later
-   * session load. Queue order and retries of the write are untouched.
+   * Track a recovered write with ONE shared observer; waiters race it, never
+   * the write. The entry stays until the write settles, so a later restore
+   * still waits on a stuck write. Queue order and retries are untouched.
    */
-  private trackRecoveredOutputWrite(agentId: string, settled: Promise<void>): void {
-    const observer = observeTrackedWrite(settled, RECOVERED_OUTPUT_MAX_AGE_MS, () =>
+  private trackRecoveredOutputWrite(agentId: string, write: Promise<void>): void {
+    const tracked: TrackedRecoveredWrite = { write, observer: Promise.resolve('expired'), expired: false };
+    tracked.observer = this.armRecoveredObserver(agentId, tracked);
+    this.recoveredOutputWrites.set(agentId, tracked);
+  }
+
+  /** The live shared observer for an agent's pending recovered write, re-armed when expired. */
+  private recoveredOutputObserver(agentId: string): Promise<WriteObservation> | undefined {
+    const tracked = this.recoveredOutputWrites.get(agentId);
+    if (!tracked) return undefined;
+    if (tracked.expired) {
+      tracked.expired = false;
+      tracked.observer = this.armRecoveredObserver(agentId, tracked);
+    }
+    return tracked.observer;
+  }
+
+  /**
+   * One observer lives at most {@link RECOVERED_OUTPUT_MAX_AGE_MS}. Settled:
+   * the entry is dropped. Expired: the entry stays, marked for re-arming, so a
+   * stuck write holds one live observer per window instead of one per load.
+   */
+  private armRecoveredObserver(
+    agentId: string,
+    tracked: TrackedRecoveredWrite,
+  ): Promise<WriteObservation> {
+    const observer = observeTrackedWrite(tracked.write, RECOVERED_OUTPUT_MAX_AGE_MS, () =>
       this.logger.warn(
-        '[AgentProcessManager] Recovered lane output write still pending; no longer waited on',
+        '[AgentProcessManager] Recovered lane output write still pending after max age',
         { agentId, maxAgeMs: RECOVERED_OUTPUT_MAX_AGE_MS },
       ));
-    this.recoveredOutputWrites.set(agentId, observer);
-    void observer.then(() => {
-      if (this.recoveredOutputWrites.get(agentId) === observer) {
-        this.recoveredOutputWrites.delete(agentId);
-      }
+    void observer.then((result) => {
+      if (this.recoveredOutputWrites.get(agentId) !== tracked) return;
+      if (result === 'settled') this.recoveredOutputWrites.delete(agentId);
+      else if (tracked.observer === observer) tracked.expired = true;
     });
+    return observer;
   }
 
   /**

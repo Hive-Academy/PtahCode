@@ -923,34 +923,65 @@ describe('AgentProcessManager.restoreAgents', () => {
         }
       });
 
-      it('shares one observer for a never-settling write across loads and drops it at max age', async () => {
+      it('shares one observer per window for a stuck write and keeps it tracked until it lands', async () => {
         jest.useFakeTimers();
         try {
-          const manager = restoredWithWrite(new Promise<void>(() => undefined));
+          const landing = { resolve: (): void => undefined };
+          const write = new Promise<void>((resolve) => { landing.resolve = resolve; });
+          const manager = restoredWithWrite(write);
           const writes = manager['recoveredOutputWrites'];
-          const observer = writes.get(RESTORED_ID);
+          const observer = writes.get(RESTORED_ID)?.observer;
           for (let load = 0; load < 3; load++) {
             const waiting = manager.awaitRecoveredOutput([RESTORED_ID], 3_000);
             await jest.advanceTimersByTimeAsync(3_000);
             await waiting;
             // Every load raced the same stored observer; none replaced it.
-            expect(writes.get(RESTORED_ID)).toBe(observer);
+            expect(writes.get(RESTORED_ID)?.observer).toBe(observer);
           }
           expect(manager['logger'].warn).toHaveBeenCalledTimes(3);
 
+          // Past max age the observer expires, but the stuck write stays tracked.
           await jest.advanceTimersByTimeAsync(RECOVERED_OUTPUT_MAX_AGE_MS);
-          expect(writes.has(RESTORED_ID)).toBe(false);
+          expect(writes.has(RESTORED_ID)).toBe(true);
           expect(manager['logger'].warn).toHaveBeenLastCalledWith(
-            expect.stringContaining('no longer waited on'),
+            expect.stringContaining('still pending after max age'),
             { agentId: RESTORED_ID, maxAgeMs: RECOVERED_OUTPUT_MAX_AGE_MS },
           );
 
-          // A later load does not wait on the expired write at all.
-          const timersBefore = jest.getTimerCount();
-          const later = manager.awaitRecoveredOutput([RESTORED_ID], 3_000);
-          expect(jest.getTimerCount()).toBe(timersBefore);
+          // A later load re-arms one observer and still waits the full bound.
+          let done = false;
+          const later = manager.awaitRecoveredOutput([RESTORED_ID], 3_000).then(() => { done = true; });
+          expect(writes.get(RESTORED_ID)?.observer).not.toBe(observer);
+          await jest.advanceTimersByTimeAsync(2_999);
+          expect(done).toBe(false);
+          await jest.advanceTimersByTimeAsync(1);
           await later;
-          expect(manager['logger'].warn).toHaveBeenCalledTimes(4);
+          expect(manager['logger'].warn).toHaveBeenLastCalledWith(
+            expect.stringContaining('not persisted in time'),
+            { pending: 1, timeoutMs: 3_000 },
+          );
+
+          // Only a landed write drops the entry.
+          landing.resolve();
+          await jest.advanceTimersByTimeAsync(0);
+          expect(writes.has(RESTORED_ID)).toBe(false);
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+
+      it('reports a timeout, not success, when the observer expires during a wait', async () => {
+        jest.useFakeTimers();
+        try {
+          const manager = restoredWithWrite(new Promise<void>(() => undefined));
+          await jest.advanceTimersByTimeAsync(RECOVERED_OUTPUT_MAX_AGE_MS - 1_000);
+          const waiting = manager.awaitRecoveredOutput([RESTORED_ID], 3_000);
+          await jest.advanceTimersByTimeAsync(1_000);
+          await waiting;
+          expect(manager['logger'].warn).toHaveBeenLastCalledWith(
+            expect.stringContaining('not persisted in time'),
+            { pending: 1, timeoutMs: 3_000 },
+          );
         } finally {
           jest.useRealTimers();
         }
