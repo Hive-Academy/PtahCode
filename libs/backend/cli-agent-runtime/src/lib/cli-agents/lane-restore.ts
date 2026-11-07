@@ -238,7 +238,9 @@ export function waitForRecoveredWrites(
       resolve(landed);
     };
     const timer = setTimeout(() => finish(false), timeoutMs);
-    for (const write of writes) {
+    // One callback per distinct write: a repeated agent id must not add a
+    // second callback that the cleanup below could not remove.
+    for (const write of new Set(writes)) {
       const release = (): void => {
         registered.delete(write);
         if (registered.size === 0) finish(true);

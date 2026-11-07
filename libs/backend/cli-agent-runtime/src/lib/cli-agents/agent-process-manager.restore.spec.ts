@@ -955,6 +955,21 @@ describe('AgentProcessManager.restoreAgents', () => {
         }
       });
 
+      it('registers one waiter for a repeated agent id and removes it on timeout', async () => {
+        jest.useFakeTimers();
+        try {
+          const manager = restoredWithWrite(new Promise<void>(() => undefined));
+          const tracked = manager['recoveredOutputWrites'].get(RESTORED_ID);
+          const waiting = manager.awaitRecoveredOutput([RESTORED_ID, RESTORED_ID], 3_000);
+          expect(tracked?.waiters.size).toBe(1);
+          await jest.advanceTimersByTimeAsync(3_000);
+          await waiting;
+          expect(tracked?.waiters.size).toBe(0);
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+
       it('releases every concurrent waiter when the write lands', async () => {
         jest.useFakeTimers();
         try {
