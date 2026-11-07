@@ -401,7 +401,7 @@ export function createRemoteSessions(deps: RemoteSessionDeps): RemoteSessions {
         const workspace = workspaceById(workspaceId);
         if (!workspace) throw new RemoteMethodError('NOT_FOUND_OR_FORBIDDEN');
         deps.workspaces.addFolder(workspace.path);
-        const tabId = `worker-${randomUUID()}`;
+        const tabId = randomUUID();
         try {
           const turn = await driver.start(
             { tabId, prompt, workspacePath: workspace.path, name },
@@ -430,7 +430,7 @@ export function createRemoteSessions(deps: RemoteSessionDeps): RemoteSessions {
         if (!workspace) throw new RemoteMethodError('NOT_FOUND_OR_FORBIDDEN');
         deps.workspaces.addFolder(workspace.path);
         await deps.logs.openSession(sessionId);
-        const tabId = tabsBySession.get(sessionId) ?? `worker-${randomUUID()}`;
+        const tabId = tabsBySession.get(sessionId) ?? randomUUID();
         tabsBySession.set(sessionId, tabId);
         const turn = await driver.continue(sessionId, tabId, prompt);
         return { turnId: turn.turnId };

@@ -221,6 +221,30 @@ it('keeps the lock of a start that never reported its session at shutdown and lo
   );
 });
 
+it('starts each session on a tab whose id is a plain UUID v4', async () => {
+  // chat:start and permission requests validate tabId as a UUID v4; a
+  // prefixed id made every remote session.start fail on a real worker.
+  const UUID_V4 =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  let tabId = '';
+  const fake = setup((message, tap) => {
+    if (message.method !== 'chat:start') return undefined;
+    tabId = String(param(message, 'tabId'));
+    fake.held.set('s1', 'nonce-s1');
+    tap('session:id-resolved', { tabId, realSessionId: 's1' });
+    return undefined;
+  });
+  await expect(
+    fake.sessions.handle(
+      'session.start',
+      { workspaceId: 'ws_1', prompt: 'go' },
+      grant,
+      peer,
+    ),
+  ).resolves.toMatchObject({ sessionId: 's1' });
+  expect(tabId).toMatch(UUID_V4);
+});
+
 it('frees the slot and the lock of a start that never reported its session on its tab-only terminal event, once', async () => {
   const tabs: string[] = [];
   const fake = setup(
