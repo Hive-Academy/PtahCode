@@ -189,6 +189,7 @@ export { SessionUnavailableError } from './lib/helpers/session-lifecycle/session
 export type { LegacySessionControlPorts } from './lib/wiring/legacy-session-controls-composition';
 export type { AuthOperationContext } from './lib/auth-env.port';
 export { SDK_TOKENS } from './lib/di/tokens';
+export type { SdkCliAgentOwnerLookup } from './lib/di/tokens';
 // Electron codex-runtime-composition.spec.ts constructs this adapter; hosts must override only nullable port tokens.
 export {
   /** @internal Electron composition specs only. */

@@ -71,7 +71,7 @@ export class PendingPermissionIndex {
     sessionId: string,
     response: PermissionResponse,
     by: string,
-    writer: SessionLogWriter,
+    writer: Pick<SessionLogWriter, 'enqueue'>,
   ): Promise<void> {
     if (response.decision !== 'allow' && response.decision !== 'deny')
       throw new PermissionAnswerError();
@@ -79,7 +79,8 @@ export class PendingPermissionIndex {
     if (!entry || entry.sessionId !== sessionId)
       throw new PermissionAnswerError();
     this.pending.delete(response.id);
-    this.handler.handleResponse(response.id, response);
+    if (!this.handler.handleResponse(response.id, response))
+      throw new PermissionAnswerError();
     await writer.enqueue('worker:permission.answered', {
       requestId: response.id,
       decision: response.decision,

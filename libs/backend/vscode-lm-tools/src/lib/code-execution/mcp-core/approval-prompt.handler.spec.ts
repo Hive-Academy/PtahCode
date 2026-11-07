@@ -37,6 +37,7 @@ function createWebviewManager(): jest.Mocked<WebviewManager> {
 interface FakePermissionService {
   createRequest: jest.Mock;
   setPendingResolver: jest.Mock;
+  resolveRequest: jest.Mock;
   resolver?: (response: PermissionResponse) => void;
 }
 
@@ -57,6 +58,10 @@ function createPermissionService(): FakePermissionService &
         svc.resolver = resolve;
       },
     ),
+    resolveRequest: jest.fn((response: PermissionResponse) => {
+      svc.resolver?.(response);
+      return true;
+    }),
   };
   return svc as unknown as FakePermissionService & PermissionPromptService;
 }
@@ -66,6 +71,11 @@ function createRequest(id: string | number = 1): MCPRequest {
     jsonrpc: '2.0',
     id,
     method: 'tools/call',
+    _callerSessionId: '22222222-2222-4222-8222-222222222222',
+    _callerBinding: {
+      kind: 'session', sessionId: '22222222-2222-4222-8222-222222222222',
+      capability: 'privileged',
+    },
   };
 }
 
@@ -81,6 +91,86 @@ function createParams(
 }
 
 describe('handleApprovalPrompt', () => {
+  it('denies an ownerless request before publishing a card', async () => {
+    const service = createPermissionService();
+    const webview = createWebviewManager();
+    const request = createRequest();
+    delete request._callerSessionId;
+    const response = await handleApprovalPrompt(request, createParams(), {
+      permissionPromptService: service, webviewManager: webview,
+      logger: createLogger(),
+    });
+    expect(webview.sendMessage).not.toHaveBeenCalled();
+    expect(service.createRequest).not.toHaveBeenCalled();
+    expect(JSON.parse((response.result as { content: Array<{ text: string }> }).content[0].text))
+      .toMatchObject({ behavior: 'deny' });
+  });
+  const SESSION = '22222222-2222-4222-8222-222222222222';
+  it.each([
+    ['a CLI lane agent binding', { _callerAgentId: 'lane-1', _callerBinding: { kind: 'agent', agentId: 'lane-1', capability: 'privileged' } }, 'agent'],
+    ['an external workspace client', { _callerWorkspaceRoot: '/repo', _callerBinding: { kind: 'workspace', workspaceRoot: '/repo', capability: 'privileged' } }, 'workspace'],
+    ['an external home client', { _callerBinding: { kind: 'home', capability: 'privileged' } }, 'home'],
+    ['an internal query', { _callerBinding: { kind: 'internal-query', workspaceRoot: '/repo', capability: 'privileged' } }, 'internal-query'],
+    ['an in-process or stdio caller', {}, 'none'],
+    ['an agent binding that reuses a session URL', { _callerSessionId: SESSION, _callerBinding: { kind: 'agent', agentId: 'lane-1', sessionId: SESSION, capability: 'privileged' } }, 'agent'],
+    ['a non-UUID session binding', { _callerSessionId: 'gw-chat-1', _callerBinding: { kind: 'session', sessionId: 'gw-chat-1', capability: 'privileged' } }, 'session'],
+  ] as const)('intentionally denies %s without a card', async (_label, caller, bindingKind) => {
+    const service = createPermissionService();
+    const webview = createWebviewManager();
+    const logger = createLogger();
+    const request: MCPRequest = { jsonrpc: '2.0', id: 1, method: 'tools/call', ...caller } as MCPRequest;
+    const response = await handleApprovalPrompt(request, createParams(), {
+      permissionPromptService: service, webviewManager: webview, logger,
+    });
+    expect(webview.sendMessage).not.toHaveBeenCalled();
+    expect(service.createRequest).not.toHaveBeenCalled();
+    expect(JSON.parse((response.result as { content: Array<{ text: string }> }).content[0].text))
+      .toEqual({ behavior: 'deny', message: 'Permission request has no verified session owner' });
+    expect(logger.info).toHaveBeenCalledWith(
+      'approval_prompt denied: no verified session owner',
+      { tool: 'Bash', bindingKind },
+    );
+  });
+  it('publishes a card owned by the verified session for a session producer', async () => {
+    const service = createPermissionService();
+    const webview = createWebviewManager();
+    const pending = handleApprovalPrompt(createRequest(), createParams(), {
+      permissionPromptService: service, webviewManager: webview, logger: createLogger(),
+    });
+    await Promise.resolve();
+    expect(service.createRequest).toHaveBeenCalledWith(expect.objectContaining({ tool_name: 'Bash' }), SESSION);
+    expect(webview.sendMessage).toHaveBeenCalledWith('ptah.main', MESSAGE_TYPES.PERMISSION_REQUEST, expect.objectContaining({ id: 'req-123' }));
+    service.resolver?.({ id: 'req-123', decision: 'allow' });
+    await pending;
+  });
+  it('denies a session URL that does not match the token owner', async () => {
+    const service = createPermissionService();
+    const webview = createWebviewManager();
+    const request = createRequest();
+    request._callerSessionId = '33333333-3333-4333-8333-333333333333';
+    const response = await handleApprovalPrompt(request, createParams(), {
+      permissionPromptService: service, webviewManager: webview,
+      logger: createLogger(),
+    });
+    expect(webview.sendMessage).not.toHaveBeenCalled();
+    expect(service.createRequest).not.toHaveBeenCalled();
+    expect(JSON.parse((response.result as { content: Array<{ text: string }> }).content[0].text))
+      .toMatchObject({ behavior: 'deny' });
+  });
+  it('denies when the permission window cannot receive the request', async () => {
+    const service = createPermissionService();
+    const webview = createWebviewManager();
+    webview.sendMessage.mockResolvedValue(false);
+    const result = await handleApprovalPrompt(createRequest(), createParams(), {
+      permissionPromptService: service, webviewManager: webview,
+      logger: createLogger(),
+    });
+    expect(service.resolveRequest).toHaveBeenCalledWith({
+      id: 'req-123', decision: 'deny', reason: 'Permission window unavailable',
+    });
+    expect(JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text))
+      .toMatchObject({ behavior: 'deny' });
+  });
   it('resolves the in-app approval before formatting a response', async () => {
     const service = createPermissionService();
     const pending = handleApprovalPrompt(createRequest(), createParams(), {

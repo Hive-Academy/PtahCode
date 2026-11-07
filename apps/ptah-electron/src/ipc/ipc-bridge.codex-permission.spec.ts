@@ -20,6 +20,7 @@ import { TOKENS } from '@ptah-extension/vscode-core';
 import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
 import { MESSAGE_TYPES } from '@ptah-extension/shared';
 import { IpcBridge } from './ipc-bridge';
+import type { PermissionPromptService } from '@ptah-extension/vscode-lm-tools';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -31,6 +32,7 @@ describe('IpcBridge Codex permission ownership', () => {
 
   function setup(
     codexPorts?: Pick<CodexChatHostPorts, 'handlePermissionResponse'> | null,
+    mcpService?: Pick<PermissionPromptService, 'resolveRequest'>,
   ) {
     const child = container.createChildContainer();
     const handleResponse = jest.fn();
@@ -46,6 +48,7 @@ describe('IpcBridge Codex permission ownership', () => {
       });
     }
     child.registerInstance(Symbol.for('SdkPermissionHandler'), { handleResponse });
+    if (mcpService) child.registerInstance(TOKENS.PERMISSION_PROMPT_SERVICE, mcpService);
     bridge = new IpcBridge(
       child,
       () => ({ webContents: { id: 1, send: jest.fn() } }),
@@ -114,16 +117,43 @@ describe('IpcBridge Codex permission ownership', () => {
     expect(h.handleResponse).toHaveBeenCalledWith(response.id, response);
   });
 
-  it('refuses unknown decisions before either handler', async () => {
+  it('routes an MCP answer to its pending service before the SDK handler', async () => {
+    const resolveRequest = jest.fn(() => true);
+    const h = setup({ handlePermissionResponse: () => false }, { resolveRequest });
+    const response = { id: 'mcp-request', decision: 'allow' };
+    await h.send(response);
+    expect(resolveRequest).toHaveBeenCalledWith(response);
+    expect(h.handleResponse).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['an unknown decision', { id: 'request', decision: 'accept' }, 'decision'],
+    ['an empty id', { id: '', decision: 'allow' }, 'id'],
+    ['a non-string id', { id: 7, decision: 'allow' }, 'id'],
+    ['a non-string reason', { id: 'request', decision: 'deny', reason: 42 }, 'reason'],
+    ['an array modifiedInput', { id: 'request', decision: 'allow', modifiedInput: ['rm'] }, 'modifiedInput'],
+    ['a non-object payload', 'allow', '(root)'],
+  ])('parses the renderer payload and refuses %s before every resolver', async (_label, payload, issue) => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     const handlePermissionResponse = jest.fn(() => true);
-    const h = setup({ handlePermissionResponse });
-    await h.send({ id: 'request', decision: 'accept' });
+    const resolveRequest = jest.fn(() => true);
+    const h = setup({ handlePermissionResponse }, { resolveRequest });
+    await h.send(payload);
     expect(warn).toHaveBeenCalledWith(
-      '[IpcBridge] SDK permission response has invalid decision',
+      '[IpcBridge] SDK permission response failed validation',
+      { issues: [issue] },
     );
     expect(handlePermissionResponse).not.toHaveBeenCalled();
+    expect(resolveRequest).not.toHaveBeenCalled();
     expect(h.handleResponse).not.toHaveBeenCalled();
+  });
+
+  it('strips unknown renderer fields before a resolver sees the answer', async () => {
+    const resolveRequest = jest.fn((_response: unknown) => true);
+    const h = setup(null, { resolveRequest });
+    await h.send({ id: 'mcp-request', decision: 'allow', injected: { owner: 'other' } });
+    expect(resolveRequest).toHaveBeenCalledTimes(1);
+    expect(Object.keys(resolveRequest.mock.calls[0][0] as object).sort()).toEqual(['decision', 'id']);
   });
 
   it('logs the real Error when Codex routing fails', async () => {

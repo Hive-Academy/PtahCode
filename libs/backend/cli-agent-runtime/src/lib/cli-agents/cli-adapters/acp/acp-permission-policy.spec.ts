@@ -197,7 +197,7 @@ const PERMISSION_CASES: PermissionCase[] = [
     },
   },
   {
-    name: 'selects the only allow_always option and notes the persistent grant',
+    name: 'cancels when only a persistent grant is offered',
     request: permissionRequest(
       [
         {
@@ -209,10 +209,9 @@ const PERMISSION_CASES: PermissionCase[] = [
       titledToolCall('Edit config.json'),
     ),
     expected: {
-      selectedOptionId: 'always-allow',
-      cancelled: false,
-      refused: false,
-      info: 'Edit config.json: the only allow option offered was a persistent grant',
+      cancelled: true,
+      refused: true,
+      info: 'Refused permission for Edit config.json: no offered option could be selected',
       toolTitle: 'Edit config.json',
     },
   },

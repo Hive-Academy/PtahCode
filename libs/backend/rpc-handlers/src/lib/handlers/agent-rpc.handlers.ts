@@ -83,6 +83,7 @@ import type {
   ICapabilityResolver,
   AgentListCliModelsResult,
   AgentPermissionDecision,
+  AgentPermissionRequest,
   AgentContinueErrorCode,
   AgentResumeOutcome,
   CliDetectionResult,
@@ -384,6 +385,7 @@ export class AgentRpcHandlers {
     'agent:detectClis',
     'agent:listCliModels',
     'agent:permissionResponse',
+    'agent:pendingPermissions',
     'agent:e2eSeedPermission',
     'agent:stop',
     'agent:continue',
@@ -447,6 +449,7 @@ export class AgentRpcHandlers {
     this.registerDetectClis();
     this.registerListCliModels();
     this.registerPermissionResponse();
+    this.registerPendingPermissions();
     this.registerE2eSeedPermission();
     this.registerAgentStop();
     this.registerAgentContinue();
@@ -472,6 +475,7 @@ export class AgentRpcHandlers {
         'agent:detectClis',
         'agent:listCliModels',
         'agent:permissionResponse',
+        'agent:pendingPermissions',
         'agent:e2eSeedPermission',
         'agent:stop',
         'agent:continue',
@@ -1412,16 +1416,19 @@ export class AgentRpcHandlers {
             decision: params.decision,
             reason: params.reason,
           };
-          permissionHandler.handleResponse(params.requestId, response);
-          handled = true;
+          handled = permissionHandler.handleResponse(
+            params.requestId,
+            response,
+          );
         }
         const copilotAdapter = this.cliDetection.getAdapter('copilot');
         if (copilotAdapter && 'permissionBridge' in copilotAdapter) {
           const bridge = (
             copilotAdapter as { permissionBridge: CopilotPermissionBridge }
           ).permissionBridge;
+          const copilotPending = bridge.hasPendingRequest(params.requestId);
           bridge.resolvePermission(params.requestId, params);
-          handled = true;
+          handled = copilotPending || handled;
         }
 
         if (handled) {
@@ -1430,7 +1437,7 @@ export class AgentRpcHandlers {
 
         return {
           success: false,
-          error: 'No permission handler available (neither SDK nor Copilot)',
+          error: 'No pending permission request matched this response',
         };
       } catch (error) {
         const errorMessage =
@@ -1442,6 +1449,23 @@ export class AgentRpcHandlers {
         return { success: false, error: errorMessage };
       }
     });
+  }
+
+  private registerPendingPermissions(): void {
+    this.rpcHandler.registerMethod<void, AgentPermissionRequest[]>(
+      'agent:pendingPermissions',
+      async () => {
+        const sdkPending = this.runtimeContainer.isRegistered(SDK_TOKENS.SDK_PERMISSION_HANDLER)
+          ? this.runtimeContainer.resolve<ISdkPermissionHandler>(SDK_TOKENS.SDK_PERMISSION_HANDLER)
+              .getPendingCliAgentPermissions()
+          : [];
+        const adapter = this.cliDetection.getAdapter('copilot');
+        const copilotPending = adapter && 'permissionBridge' in adapter
+          ? (adapter as { permissionBridge: CopilotPermissionBridge }).permissionBridge.pendingPermissions()
+          : [];
+        return [...sdkPending, ...copilotPending];
+      },
+    );
   }
 
   /**

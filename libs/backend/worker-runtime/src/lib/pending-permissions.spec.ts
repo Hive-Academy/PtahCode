@@ -32,7 +32,7 @@ it('refuses a persisted autopilot level that skips manual approval', () => {
 });
 
 it('first answer wins synchronously; auto-approve is refused', async () => {
-  const handleResponse = jest.fn();
+  const handleResponse = jest.fn().mockReturnValue(true);
   const handler = { handleResponse } as unknown as ISdkPermissionHandler;
   const index = new PendingPermissionIndex(handler);
   const writer = {
@@ -61,4 +61,20 @@ it('first answer wins synchronously; auto-approve is refused', async () => {
     ),
   ).rejects.toBeInstanceOf(PermissionAnswerError);
   expect(handleResponse).toHaveBeenCalledTimes(1);
+});
+
+it('rejects a worker answer after the SDK permission has expired', async () => {
+  const handler: ISdkPermissionHandler = {
+    getPendingCliAgentPermissions: () => [],
+    handleResponse: jest.fn().mockReturnValue(false),
+    handleQuestionResponse: jest.fn(),
+    getPermissionLevel: () => 'ask',
+    cleanupPendingPermissions: jest.fn(),
+  };
+  const index = new PendingPermissionIndex(handler);
+  const writer = { enqueue: jest.fn().mockResolvedValue({}) };
+  index.add({ id: 'expired', sessionId: 's1' } as PermissionRequest);
+  await expect(index.answer('s1', { id: 'expired', decision: 'allow' }, 'Client', writer))
+    .rejects.toBeInstanceOf(PermissionAnswerError);
+  expect(writer.enqueue).not.toHaveBeenCalled();
 });

@@ -30,6 +30,12 @@ export interface AgentPermissionRequest {
   /** Agent that is requesting permission (branded AgentId as string) */
   readonly agentId: string;
 
+  /** Parent captured from the live lane at dispatch. Older SDK lane payloads may omit it. */
+  readonly parentSessionId?: string;
+
+  /** Lane process start timestamp; distinguishes a resumed lane from a stale card. */
+  readonly laneGeneration?: string;
+
   /** Permission kind from SDK: "shell", "write", "mcp", "read", "url" */
   readonly kind: string;
 

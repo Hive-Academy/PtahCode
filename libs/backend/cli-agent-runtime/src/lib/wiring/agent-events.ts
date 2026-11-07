@@ -250,7 +250,7 @@ export function wireAgentEventListeners(
     );
 
     if (options.copilotPermission === true) {
-      wireCopilotPermissionForwarding(container, webviewManager, logger, tag);
+      wireCopilotPermissionForwarding(container, agentProcessManager, webviewManager, logger, tag);
     }
 
     logger.info(`${tag} Agent event listeners wired`);
@@ -521,6 +521,7 @@ function resolveOutputJournal(
 
 function wireCopilotPermissionForwarding(
   container: DependencyContainer,
+  agentProcessManager: AgentProcessManager,
   webviewManager: WebviewManagerLike,
   logger: Logger,
   tag: string,
@@ -562,16 +563,37 @@ function wireCopilotPermissionForwarding(
         'permission-request',
         (request: AgentPermissionRequest) => {
           generations.set(request.requestId, request.timestamp);
+          const owner = agentProcessManager.findAgentInfo(request.agentId);
+          if (!owner?.parentSessionId || !owner.startedAt || owner.status !== 'running') {
+            bridge.resolvePermission(request.requestId, {
+              requestId: request.requestId,
+              decision: 'deny',
+              reason: 'Permission lane owner unavailable',
+            });
+            return;
+          }
+          const routed = bridge.setRequestRoute(request.requestId, owner.parentSessionId, owner.startedAt);
+          if (!routed) return;
           webviewManager
             .broadcastMessage(
               MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_REQUEST,
-              request,
+              routed,
             )
+            .then(() => {
+              // The routed lane card shows the same wall-clock deadline that
+              // markDelivered enforces, including after renderer loss.
+              bridge.markDelivered(request.requestId);
+            })
             .catch((error) => {
               logger.error(
                 `${tag} Failed to send agent permission request to webview`,
                 error instanceof Error ? error : new Error(String(error)),
               );
+              bridge.resolvePermission(request.requestId, {
+                requestId: request.requestId,
+                decision: 'deny',
+                reason: 'Permission renderer unavailable',
+              });
             });
         },
       );

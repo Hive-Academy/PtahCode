@@ -86,6 +86,7 @@ import {
 import {
   registerSdkServices,
   SDK_TOKENS,
+  type SdkCliAgentOwnerLookup,
   wireAgentAdapterAliases,
   HARNESS_PREFLIGHT_TOKEN,
   type PluginLoaderService,
@@ -108,6 +109,7 @@ import { registerAuthProvidersServices } from '@ptah-extension/auth-providers';
 import { registerUsageAnalytics } from '@ptah-extension/usage-analytics';
 import {
   registerCliAgentRuntimeServices,
+  AgentProcessManager,
   createContainerHarnessCliDetector,
 } from '@ptah-extension/cli-agent-runtime';
 import { registerCliCodexLaneFactory } from './codex-lane-runtime-composition';
@@ -781,6 +783,14 @@ export class CliDIContainer {
     wireLaneOutcomes(container, logger);
     registerCliCodexLaneFactory(container, logger);
     registerCliAgentRuntimeServices(container, logger);
+    let permissionOwnerManager: AgentProcessManager | undefined;
+    const permissionOwnerLookup: SdkCliAgentOwnerLookup = {
+      findAgentInfo: (agentId) => permissionOwnerManager?.findAgentInfo(agentId),
+    };
+    container.registerInstance(SDK_TOKENS.SDK_CLI_AGENT_OWNER_LOOKUP, permissionOwnerLookup);
+    container.afterResolution(TOKENS.AGENT_PROCESS_MANAGER, (_token, resolved) => {
+      if (resolved instanceof AgentProcessManager) permissionOwnerManager = resolved;
+    });
 
     wireAgentAdapterAliases(container);
 

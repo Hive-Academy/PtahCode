@@ -1,6 +1,7 @@
 import * as path from 'node:path';
 import { v4 as uuidv4, validate as isUuid } from 'uuid';
 import { injectable, inject } from 'tsyringe';
+import type { SdkCliAgentOwnerLookup } from './di/tokens';
 import {
   Logger,
   TOKENS,
@@ -146,6 +147,7 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
   private _permissionLevel: PermissionLevel = 'ask';
 
   private pendingRequests = new Map<string, PendingRequest>();
+  private readonly pendingCliAgentPermissions = new Map<string, AgentPermissionRequest>();
   private readonly attentionGenerations = new Map<string, { kind: 'permission' | 'lane-permission'; timestamp: number }>();
   private readonly ruleStore: PermissionRuleStore;
   private readonly lifecycleListeners =
@@ -153,7 +155,7 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
 
   private pendingRequestContext = new Map<
     string,
-    { toolName: string; toolInput: Record<string, unknown> }
+    { toolName: string; toolInput: Record<string, unknown>; sessionId?: SessionId; tabId?: TabId }
   >();
 
   private emitterInitialized = false;
@@ -180,6 +182,10 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     private readonly unattendedPolicies?: UnattendedSessionPolicyRegistry,
     @inject(SDK_TOKENS.HOST_ATTENTION_COORDINATOR, { isOptional: true })
     private readonly hostAttention?: Pick<HostAttentionCoordinator, 'resolve'>,
+    // Hosts without a process-manager composition (including absent VS Code
+    // host composition in this checkout) omit this port; lane prompts deny.
+    @inject(SDK_TOKENS.SDK_CLI_AGENT_OWNER_LOOKUP, { isOptional: true })
+    private readonly agentOwnerLookup?: SdkCliAgentOwnerLookup,
   ) {
     this.ruleStore = new PermissionRuleStore(this.logger);
 
@@ -212,6 +218,12 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
 
   getPermissionLevel(): PermissionLevel {
     return this._permissionLevel;
+  }
+
+  getPendingCliAgentPermissions(): AgentPermissionRequest[] {
+    return [...this.pendingCliAgentPermissions.values()].filter(
+      (request) => this.pendingRequests.has(request.requestId),
+    );
   }
 
   /**
@@ -342,6 +354,22 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     payload: PermissionRequest,
     agentId: string,
   ): void {
+    const owner = this.agentOwnerLookup?.findAgentInfo(agentId);
+    if (!owner?.parentSessionId || !owner.startedAt || !Number.isFinite(Date.parse(owner.startedAt)) || owner.status !== 'running') {
+      queueMicrotask(() => {
+        const pending = this.pendingRequests.get(payload.id);
+        if (!pending) return;
+        this.pendingRequests.delete(payload.id);
+        this.pendingRequestContext.delete(payload.id);
+        pending.resolve({
+          id: payload.id,
+          decision: 'deny',
+          reason: 'Permission lane owner unavailable',
+          systemAbort: true,
+        });
+      });
+      return;
+    }
     let toolArgs: string;
     try {
       toolArgs = JSON.stringify(payload.toolInput);
@@ -352,6 +380,8 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     const agentPermissionRequest: AgentPermissionRequest = {
       requestId: payload.id,
       agentId,
+      parentSessionId: owner.parentSessionId,
+      laneGeneration: owner.startedAt,
       kind: 'tool',
       toolName: payload.toolName,
       toolArgs,
@@ -359,6 +389,7 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       timestamp: payload.timestamp,
       timeoutAt: payload.timeoutAt,
     };
+    this.pendingCliAgentPermissions.set(payload.id, agentPermissionRequest);
 
     this.webviewManager
       .sendMessage(
@@ -640,7 +671,7 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
         }
       }
 
-      const storedRule = this.ruleStore.getRule(toolName);
+      const storedRule = this.ruleStore.getRule(toolName, resolveSessionId());
       if (storedRule && storedRule.action === 'allow') {
         this.logger.info(
           `[SdkPermissionHandler] Auto-approved via "Always Allow" rule: ${toolName}`,
@@ -866,8 +897,8 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
    *   `SessionId.safeParse`/`TabId.safeParse` (non-UUID routing ids become
    *   `undefined`), so in practice this is "either is present". The explicit
    *   UUID check is defense-in-depth and keeps the classification correct
-   *   regardless of caller. The surface provably exists, so the wait is
-   *   unbounded and a user can take as long as they like.
+   *   regardless of caller. An owned chat prompt keeps the existing unbounded
+   *   wait while its renderer remains available; host teardown settles it.
    * - `'cli-agent'` — a resolved CLI agent id. `sendPermissionRequest` routes
    *   those to the agent monitor panel by `agentId`, and the answer comes back
    *   via `agent:permissionResponse` → `handleResponse(requestId)`, which is
@@ -885,14 +916,14 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     tabId?: TabId,
     cliAgentId?: string,
   ): { readonly routable: boolean; readonly denyWindowMs?: number } {
+    if (cliAgentId !== undefined && cliAgentId.length > 0) {
+      return { routable: true, denyWindowMs: CLI_AGENT_PERMISSION_TIMEOUT_MS };
+    }
     if (
       (sessionId !== undefined && isUuid(sessionId as string)) ||
       (tabId !== undefined && isUuid(tabId as string))
     ) {
-      return { routable: true, denyWindowMs: undefined };
-    }
-    if (cliAgentId !== undefined && cliAgentId.length > 0) {
-      return { routable: true, denyWindowMs: CLI_AGENT_PERMISSION_TIMEOUT_MS };
+      return { routable: true };
     }
     return { routable: false, denyWindowMs: UNROUTABLE_PERMISSION_TIMEOUT_MS };
   }
@@ -921,14 +952,25 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     const sanitizedInput = sanitizeToolInput(input);
 
     // Route and deny window come from one classification — see
-    // `classifyPermissionRoute`. Only a webview surface earns an unbounded wait
-    // (`timeoutAt = 0`); every other route is bounded so the SDK stream can
-    // complete instead of stalling on a tool call forever.
+    // `classifyPermissionRoute`. Lane and unowned routes have finite deadlines;
+    // an owned chat prompt retains the existing wait until answer or teardown.
     //
     // Resolved ONCE here, not again inside sendPermissionRequest: the resolver
     // is read live, and a routability verdict that disagrees with the delivery
     // route is the whole defect this replaces.
-    const cliAgentId = cliAgentResolver?.();
+    // The SDK may call canUseTool before the manager attaches the lane record.
+    // Keep that request off chat surfaces until the lane has a stable id.
+    let cliAgentId = cliAgentResolver?.();
+    if (cliAgentResolver && !cliAgentId) {
+      const attachDeadline = Date.now() + 10_000;
+      while (!cliAgentId && Date.now() < attachDeadline && !signal?.aborted) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 25));
+        cliAgentId = cliAgentResolver();
+      }
+      if (!cliAgentId) {
+        return { behavior: 'deny', message: 'Lane identity was not attached before the permission deadline', interrupt: true };
+      }
+    }
     const route = this.classifyPermissionRoute(sessionId, tabId, cliAgentId);
     const isRoutable = route.routable;
     const isUnattended = unattendedDenyWindowMs !== undefined;
@@ -974,10 +1016,11 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       description,
       timeoutAt,
       sessionId,
+      canAlwaysAllow: Boolean(sessionId),
       tabId,
     };
 
-    this.pendingRequestContext.set(requestId, { toolName, toolInput: input });
+    this.pendingRequestContext.set(requestId, { toolName, toolInput: input, sessionId, tabId });
 
     this.logger.info(
       `[SdkPermissionHandler] Sending permission request to webview`,
@@ -1013,6 +1056,7 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       );
     } finally {
       this.unattendedRequestIds.delete(requestId);
+      this.pendingCliAgentPermissions.delete(requestId);
     }
 
     this.logger.info(`[SdkPermissionHandler] Permission response received`, {
@@ -1121,23 +1165,39 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     };
   }
 
-  handleResponse(requestId: string, response: PermissionResponse): void {
+  handleResponse(requestId: string, response: PermissionResponse): boolean {
     const pending = this.pendingRequests.get(requestId);
     if (!pending) {
       this.logger.warn(
         `[SdkPermissionHandler] Received response for unknown request: ${requestId}`,
       );
-      return;
+      return false;
     }
 
     const requestContext = this.pendingRequestContext.get(requestId);
 
+    // "Always in session" needs a session to scope its rule. Without one the
+    // answer is an explicit one-time Allow: no rule, no sibling resolution, and
+    // the resolved decision says `allow` so no caller reports a rule.
+    const oneTimeOnly =
+      response.decision === 'always_allow' && !requestContext?.sessionId;
+    if (oneTimeOnly) {
+      this.logger.warn(
+        `[SdkPermissionHandler] "Always Allow" for a sessionless request applies once; no rule created`,
+        { requestId, toolName: requestContext?.toolName },
+      );
+    }
+    const effective: PermissionResponse = oneTimeOnly
+      ? { ...response, decision: 'allow' }
+      : response;
+
     const neverAutoApproveTools = ['ExitPlanMode', 'AskUserQuestion'];
     if (
-      response.decision === 'always_allow' &&
-      requestContext &&
+      effective.decision === 'always_allow' &&
+      requestContext?.sessionId &&
       !neverAutoApproveTools.includes(requestContext.toolName)
     ) {
+      const sessionId = requestContext.sessionId;
       const rule: PermissionRule = {
         id: uuidv4(),
         pattern: requestContext.toolName,
@@ -1147,7 +1207,7 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
         description: `Auto-created from "Always Allow" for ${requestContext.toolName}`,
       };
 
-      this.ruleStore.setRule(requestContext.toolName, rule);
+      this.ruleStore.setRule(requestContext.toolName, sessionId, rule);
 
       this.logger.info(
         `[SdkPermissionHandler] Created "Always Allow" rule for tool: ${requestContext.toolName}`,
@@ -1163,6 +1223,7 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       ] of this.pendingRequestContext.entries()) {
         if (pendingId === requestId) continue;
         if (pendingCtx.toolName !== toolName) continue;
+        if (pendingCtx.sessionId !== sessionId) continue;
         // Unattended sessions never consult "Always Allow" rules.
         if (this.unattendedRequestIds.has(pendingId)) continue;
 
@@ -1198,15 +1259,16 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     this.pendingRequestContext.delete(requestId);
 
     this.pendingRequests.delete(requestId);
-    pending.resolve(response);
+    pending.resolve(effective);
 
     const isApproved =
-      response.decision === 'allow' || response.decision === 'always_allow';
+      effective.decision === 'allow' || effective.decision === 'always_allow';
     this.logger.debug(
       `[SdkPermissionHandler] Handled response for request ${requestId}: ${
         isApproved ? 'approved' : 'denied'
-      } (decision: ${response.decision})`,
+      } (decision: ${effective.decision})`,
     );
+    return true;
   }
 
   handleQuestionResponse(response: AskUserQuestionResponse): void {

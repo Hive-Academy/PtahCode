@@ -9,12 +9,18 @@
  * Both are routed through the same internal mechanism:
  * - Store pending requests as Map<requestId, Promise resolver>
  * - Emit 'permission-request' event for RPC forwarding to webview
- * - Block indefinitely until user responds or cleanup resolves
+ * - Deny when no renderer is listening or delivery is not confirmed in time
+ *
+ * Deadline policy: a request has a finite delivery deadline until the
+ * forwarder routes it to a verified lane owner (`setRequestRoute`) and
+ * confirms the renderer accepted it (`markDelivered`). A delivered, owned
+ * card shows a ten-minute wall-clock countdown and leaves the queue at
+ * expiry. This also settles a request if the renderer disappears after
+ * delivery. Agent stop/exit settles through `cleanup()`; failed delivery
+ * settles through the forwarder or the short delivery deadline.
  *
  * Auto-approves read-only tools and 'read' permission kinds to reduce friction.
  *
- * now block indefinitely until the user responds or cleanup resolves them
- * (matching Claude Code CLI behavior).
  */
 import { EventEmitter } from 'eventemitter3';
 import { v4 as uuidv4 } from 'uuid';
@@ -94,8 +100,16 @@ export const PERMISSION_PRESETS = {
 };
 
 interface PendingRequest {
+  request: AgentPermissionRequest;
   readonly resolve: (decision: AgentPermissionDecision) => void;
+  /** Delivery or visible owner deadline, cleared on settlement. */
+  deliveryTimer?: ReturnType<typeof setTimeout>;
 }
+
+/** Time allowed to route and deliver a request before it is denied. */
+export const COPILOT_PERMISSION_DELIVERY_TIMEOUT_MS = 60_000;
+/** A delivered lane card displays this wall-clock deadline. */
+export const COPILOT_PERMISSION_OWNED_TIMEOUT_MS = 10 * 60_000;
 
 export class CopilotPermissionBridge {
   /** Event emitter for RPC forwarding. Emits 'permission-request' events. */
@@ -217,7 +231,7 @@ export class CopilotPermissionBridge {
   /**
    * Internal permission request mechanism shared by both hook handlers.
    * Creates a Promise, stores the resolver, emits an event, and waits
-   * indefinitely for resolution (no timeout).
+   * until response, cleanup, or the delivery deadline (see class docs).
    */
   private async requestPermissionInternal(params: {
     agentId: string;
@@ -236,17 +250,33 @@ export class CopilotPermissionBridge {
       toolArgs: params.toolArgs,
       description: params.description,
       timestamp: now,
-      timeoutAt: 0,
+      timeoutAt: now + COPILOT_PERMISSION_DELIVERY_TIMEOUT_MS,
     };
 
     return new Promise<AgentPermissionDecision>((resolve) => {
-      this.pending.set(requestId, {
+      const entry: PendingRequest = {
+        request,
         resolve: (decision: AgentPermissionDecision) => {
+          clearTimeout(entry.deliveryTimer);
           this.pending.delete(requestId);
           resolve(decision);
         },
-      });
-      this.events.emit('permission-request', request);
+      };
+      entry.deliveryTimer = setTimeout(() => {
+        this.resolvePermission(requestId, {
+          requestId,
+          decision: 'deny',
+          reason: 'Permission request was not delivered in time',
+        });
+      }, COPILOT_PERMISSION_DELIVERY_TIMEOUT_MS);
+      this.pending.set(requestId, entry);
+      if (!this.events.emit('permission-request', request)) {
+        this.resolvePermission(requestId, {
+          requestId,
+          decision: 'deny',
+          reason: 'No permission renderer available',
+        });
+      }
     });
   }
 
@@ -265,6 +295,47 @@ export class CopilotPermissionBridge {
     if (entry) {
       entry.resolve(decision);
     }
+  }
+
+  hasPendingRequest(requestId: string): boolean {
+    return this.pending.has(requestId);
+  }
+
+  /**
+   * Bind a pending request to its verified lane owner. Its visible deadline
+   * remains on the card after delivery, while the short delivery timer stays
+   * armed until {@link markDelivered} confirms the renderer received it.
+   */
+  setRequestRoute(requestId: string, parentSessionId: string, laneGeneration: string): AgentPermissionRequest | undefined {
+    const entry = this.pending.get(requestId);
+    if (!entry) return undefined;
+    entry.request = { ...entry.request, parentSessionId, laneGeneration, timeoutAt: Date.now() + COPILOT_PERMISSION_OWNED_TIMEOUT_MS };
+    return entry.request;
+  }
+
+  /**
+   * Confirm that the renderer accepted a routed request. Replaces the short
+   * delivery deadline with the visible card deadline.
+   */
+  markDelivered(requestId: string): boolean {
+    const entry = this.pending.get(requestId);
+    if (!entry?.request.parentSessionId || !entry.request.laneGeneration) return false;
+    clearTimeout(entry.deliveryTimer);
+    entry.deliveryTimer = setTimeout(() => {
+      this.resolvePermission(requestId, {
+        requestId,
+        decision: 'deny',
+        reason: 'Permission request expired',
+      });
+    }, Math.max(0, entry.request.timeoutAt - Date.now()));
+    return true;
+  }
+
+  pendingPermissions(): AgentPermissionRequest[] {
+    return [...this.pending.values()]
+      .map(({ request }) => request)
+      .filter((request) => request.parentSessionId && request.laneGeneration)
+      .map((request) => ({ ...request }));
   }
 
   /**

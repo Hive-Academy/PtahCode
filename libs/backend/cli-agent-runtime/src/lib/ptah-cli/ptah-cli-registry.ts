@@ -840,7 +840,9 @@ export class PtahCliRegistry {
         message: `Unknown provider "${agentConfig.providerId}" for Ptah CLI agent "${id}"`,
       };
     }
-    const agentIdHolder: { value?: string } = {};
+    // A supplied lane id is authoritative before the SDK query can request permission.
+    // Generated ids attach through setAgentId; the SDK handler waits for that attachment.
+    const agentIdHolder: { value?: string } = { value: options?.agentId };
     const { authEnv, stopProxy } = await this.buildProxyAuthEnv(
       agentConfig,
       provider,
