@@ -23,15 +23,21 @@ import { CLI_AGENT_RUNTIME_TOKENS } from '../di/tokens';
 import { CopilotPermissionBridge } from '../cli-agents/cli-adapters/copilot-permission-bridge';
 import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
 import type {
-  AgentId,
   AgentDeliveryReceipt,
   AgentProcessInfo,
   CliSessionReference,
 } from '@ptah-extension/shared';
-import { MESSAGE_TYPES } from '@ptah-extension/shared';
+import { AgentId, MESSAGE_TYPES } from '@ptah-extension/shared';
 import type { DependencyContainer } from 'tsyringe';
 import type { ParentDeliveryEnvelope } from '../cli-agents/parent-delivery/parent-envelope-store.service';
+import { ParentEnvelopeStoreService } from '../cli-agents/parent-delivery/parent-envelope-store.service';
 import {
+  ParentCompletionOutboxEntrySchema,
+  type ParentCompletionOutboxEntry,
+} from '../cli-agents/parent-delivery/parent-envelope.schema';
+import { manifestFixture } from '../cli-agents/testing/manifest.fixture';
+import {
+  createLaneTerminalCheckpoint,
   persistCliSessionReference,
   wireAgentEventListeners,
 } from './agent-events';
@@ -79,9 +85,9 @@ function buildInfo(overrides: Partial<AgentProcessInfo>): AgentProcessInfo {
 }
 
 function buildContainer(
-  entries: Array<[symbol, unknown]>,
+  entries: Array<[symbol | typeof ParentEnvelopeStoreService, unknown]>,
 ): DependencyContainer {
-  const registry = new Map<symbol, unknown>(entries);
+  const registry = new Map<symbol | typeof ParentEnvelopeStoreService, unknown>(entries);
   return {
     isRegistered: (token: symbol) => registry.has(token),
     resolve: (token: symbol) => registry.get(token),
@@ -90,6 +96,122 @@ function buildContainer(
     },
   } as unknown as DependencyContainer;
 }
+
+describe('createLaneTerminalCheckpoint', () => {
+  const entry: ParentCompletionOutboxEntry = {
+    dedupeKey: 'completion:agent-42:1',
+    agentId: AgentId.from('aaaaaaaa-bbbb-4ccc-8ddd-000000000401'),
+    parentSessionId: PARENT_SESSION,
+    completedAt: '2026-11-07T00:01:00.000Z',
+    body: 'Done',
+    verdict: 'delivered',
+    originName: 'worker',
+    createdAt: 1,
+  };
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('returns durable only after the exact outbox entry is persisted', async () => {
+    let finishWrite: (() => void) | undefined;
+    const putCompletionOutbox = jest.fn(
+      () => new Promise<void>((resolve) => { finishWrite = resolve; }),
+    );
+    const addCliSession = jest.fn();
+    const container = buildContainer([
+      [ParentEnvelopeStoreService, { putCompletionOutbox }],
+      [SDK_TOKENS.SDK_SESSION_METADATA_STORE, { addCliSession }],
+    ]);
+    const checkpoint = createLaneTerminalCheckpoint(
+      container,
+      createMockLogger() as unknown as Logger,
+    );
+    let settled = false;
+    const result = checkpoint.checkpoint(entry).finally(() => { settled = true; });
+
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(putCompletionOutbox).toHaveBeenCalledWith(entry);
+    finishWrite?.();
+    await expect(result).resolves.toBe('durable');
+    expect(addCliSession).not.toHaveBeenCalled();
+  });
+
+  it('returns failed after the bounded retries', async () => {
+    jest.useFakeTimers();
+    const putCompletionOutbox = jest.fn(async () => {
+      throw new Error('storage unavailable');
+    });
+    const container = buildContainer([
+      [ParentEnvelopeStoreService, { putCompletionOutbox }],
+    ]);
+    const checkpoint = createLaneTerminalCheckpoint(
+      container,
+      createMockLogger() as unknown as Logger,
+    );
+
+    const result = checkpoint.checkpoint(entry);
+    await jest.advanceTimersByTimeAsync(9_000);
+    await expect(result).resolves.toBe('failed');
+    expect(putCompletionOutbox).toHaveBeenCalledTimes(4);
+  });
+
+  it('does not retry a ZodError thrown when validating the completion outbox entry', async () => {
+    jest.useFakeTimers();
+    const putCompletionOutbox = jest.fn(async (candidate: unknown) => {
+      ParentCompletionOutboxEntrySchema.parse(candidate);
+    });
+    const container = buildContainer([
+      [ParentEnvelopeStoreService, { putCompletionOutbox }],
+    ]);
+    const checkpoint = createLaneTerminalCheckpoint(
+      container,
+      createMockLogger() as unknown as Logger,
+    );
+
+    const invalidEntry = { ...entry, completedAt: 'not-a-date' };
+    await expect(checkpoint.checkpoint(invalidEntry)).resolves.toBe('failed');
+    expect(putCompletionOutbox).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns failed at the fifteen second deadline', async () => {
+    jest.useFakeTimers();
+    const putCompletionOutbox = jest.fn(() => new Promise<void>(() => undefined));
+    const container = buildContainer([
+      [ParentEnvelopeStoreService, { putCompletionOutbox }],
+    ]);
+    const checkpoint = createLaneTerminalCheckpoint(
+      container,
+      createMockLogger() as unknown as Logger,
+    );
+
+    const result = checkpoint.checkpoint(entry);
+    await jest.advanceTimersByTimeAsync(15_000);
+    await expect(result).resolves.toBe('failed');
+    expect(putCompletionOutbox).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns not-applicable without a parent or parent store', async () => {
+    const withoutStore = createLaneTerminalCheckpoint(
+      buildContainer([]),
+      createMockLogger() as unknown as Logger,
+    );
+    const putCompletionOutbox = jest.fn(async () => undefined);
+    const withoutParent = createLaneTerminalCheckpoint(
+      buildContainer([
+        [ParentEnvelopeStoreService, { putCompletionOutbox }],
+      ]),
+      createMockLogger() as unknown as Logger,
+    );
+
+    await expect(withoutStore.checkpoint(entry)).resolves.toBe('not-applicable');
+    await expect(
+      withoutParent.checkpoint({ ...entry, parentSessionId: '' }),
+    ).resolves.toBe('not-applicable');
+    expect(putCompletionOutbox).not.toHaveBeenCalled();
+  });
+});
 
 describe('agent delivery push sinks', () => {
   it('broadcasts receipt and parent-delivery changes on the monitor channel', async () => {
@@ -102,15 +224,16 @@ describe('agent delivery push sinks', () => {
       logger: Object.assign(Object.create(null) as Logger, createMockLogger()),
       platform: 'electron',
     });
+    expect(container.isRegistered(CLI_AGENT_RUNTIME_TOKENS.LANE_TERMINAL_CHECKPOINT)).toBe(true);
     const receipt: AgentDeliveryReceipt = {
-      id: 'message-1', agentId: 'agent-1' as AgentId, state: 'accepted',
+      id: 'message-1', agentId: 'aaaaaaaa-bbbb-4ccc-8ddd-000000000001' as AgentId, state: 'accepted',
       mode: 'queue-next-turn', delivery: 'queue', createdAt: 1, updatedAt: 1,
     };
     const envelope: ParentDeliveryEnvelope = {
       id: 'lane-delivery:completion-1', parentSessionId: PARENT_SESSION,
-      agentId: 'agent-1', kind: 'completion', dedupeKey: 'completion-1',
-      body: 'Done', createdAt: 1, state: 'delivered', attempts: 1,
-      verdict: 'no-deliverable', stopReason: 'auth',
+      agentId: 'aaaaaaaa-bbbb-4ccc-8ddd-000000000001', kind: 'completion', dedupeKey: 'completion-1',
+      body: 'Done', createdAt: 1, updatedAt: 2, state: 'delivered', attempts: 1,
+      bodyBytes: 4, verdict: 'no-deliverable', stopReason: 'auth',
     };
     container.resolve<{ changed(receipt: AgentDeliveryReceipt): void }>(
       CLI_AGENT_RUNTIME_TOKENS.AGENT_DELIVERY_RECEIPT_EVENT_SINK,
@@ -123,15 +246,18 @@ describe('agent delivery push sinks', () => {
     );
     expect(broadcastMessage).toHaveBeenCalledWith(
       MESSAGE_TYPES.AGENT_MONITOR_PARENT_DELIVERY,
-      expect.objectContaining({ agentId: 'agent-1', kind: 'completion', state: 'delivered',
+      expect.objectContaining({ agentId: 'aaaaaaaa-bbbb-4ccc-8ddd-000000000001', kind: 'completion', state: 'delivered',
         deliveryId: envelope.id, verdict: 'no-deliverable', stopReason: 'auth' }),
     );
     container.resolve<{ emit(envelope: ParentDeliveryEnvelope): void }>(
       CLI_AGENT_RUNTIME_TOKENS.PARENT_DELIVERY_EVENT_SINK,
-    ).emit({ ...envelope, state: 'expired', lastError: 'delivery-expired' });
+    ).emit({ ...envelope, state: 'blocked-retryable', attempts: 2, lastError: 'busy',
+      nextRetryAt: 30_000, waitingReason: undefined });
     expect(broadcastMessage).toHaveBeenCalledWith(
       MESSAGE_TYPES.AGENT_MONITOR_PARENT_DELIVERY,
-      expect.objectContaining({ deliveryId: envelope.id, state: 'expired' }),
+      expect.objectContaining({ deliveryId: envelope.id, state: 'blocked-retryable',
+        parentSessionId: PARENT_SESSION, createdAt: 1, updatedAt: 2, attempts: 2,
+        lastError: 'busy', nextRetryAt: 30_000 }),
     );
   });
 });
@@ -214,6 +340,39 @@ describe('persistCliSessionReference — missing parent session', () => {
     expect(addCliSession).toHaveBeenCalledWith(
       PARENT_SESSION,
       expect.objectContaining({ cliSessionId: 'cli-sess-1' }),
+    );
+  });
+
+  it('persists the manifest and workspace identity', () => {
+    const logger = createMockLogger();
+    const addCliSession = jest.fn().mockResolvedValue(undefined);
+    const container = buildContainer([
+      [
+        SDK_TOKENS.SDK_SESSION_METADATA_STORE,
+        {
+          addCliSession,
+          markChildSession: jest.fn().mockResolvedValue(undefined),
+        },
+      ],
+    ]);
+    const potentialCapabilities = manifestFixture();
+
+    persistCliSessionReference(
+      container,
+      logger as unknown as Logger,
+      '[test]',
+      buildInfo({
+        parentSessionId: PARENT_SESSION,
+        cliSessionId: 'cli-sess-1',
+        workspaceKey: '/workspace/root',
+        potentialCapabilities,
+      }),
+      undefined,
+    );
+
+    expect(addCliSession).toHaveBeenCalledWith(
+      PARENT_SESSION,
+      expect.objectContaining({ workspaceKey: '/workspace/root', potentialCapabilities }),
     );
   });
 });
@@ -315,6 +474,40 @@ describe('persistCliSessionReference — completion time', () => {
 
     persist(info, addCliSession);
     expect(addCliSession.mock.calls[0][1]).not.toHaveProperty('completedAt');
+  });
+
+  it('persists a positive finite stopResetAt on usage-limit stops and omits non-positive values', () => {
+    const addCliSession = jest.fn().mockResolvedValue(undefined);
+    persist(
+      buildInfo({
+        parentSessionId: PARENT_SESSION,
+        cliSessionId: 'cli-sess-1',
+        status: 'stopped',
+        stopReason: 'usage-limit',
+        stopResetAt: 1_762_000_000_000,
+      }),
+      addCliSession,
+    );
+    expect(addCliSession).toHaveBeenCalledWith(
+      PARENT_SESSION,
+      expect.objectContaining({
+        stopReason: 'usage-limit',
+        stopResetAt: 1_762_000_000_000,
+      }),
+    );
+
+    addCliSession.mockClear();
+    persist(
+      buildInfo({
+        parentSessionId: PARENT_SESSION,
+        cliSessionId: 'cli-sess-1',
+        status: 'stopped',
+        stopReason: 'usage-limit',
+        stopResetAt: 0,
+      }),
+      addCliSession,
+    );
+    expect(addCliSession.mock.calls[0][1]).not.toHaveProperty('stopResetAt');
   });
 });
 
@@ -827,6 +1020,258 @@ describe('quota owner persistence (TASK_2026_596 G3)', () => {
       PARENT_SESSION,
       expect.objectContaining({ quotaOwner: owner }),
     );
+  });
+});
+
+/**
+ * Records each `addCliSession` attempt and lets a test await an exact attempt
+ * count instead of guessing how many microtask turns the lane queue needs.
+ */
+function createWriteLog(
+  fails: (ref: CliSessionReference, attempt: number) => boolean = () => false,
+) {
+  const durable: CliSessionReference[] = [];
+  const waiters = new Set<{ count: number; resolve: () => void }>();
+  let attempts = 0;
+  const addCliSession = jest.fn(
+    (_parent: string, ref: CliSessionReference): Promise<void> => {
+      attempts += 1;
+      const failed = fails(ref, attempts);
+      if (!failed) durable.push(ref);
+      for (const waiter of [...waiters]) {
+        if (attempts >= waiter.count) {
+          waiters.delete(waiter);
+          waiter.resolve();
+        }
+      }
+      return failed
+        ? Promise.reject(new Error('transient checkpoint failure'))
+        : Promise.resolve();
+    },
+  );
+  const attemptsReached = (count: number): Promise<void> =>
+    attempts >= count
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => waiters.add({ count, resolve }));
+  return { addCliSession, durable, attemptsReached };
+}
+
+/** Every remaining queue stage is a microtask, so one macrotask drains it. */
+const drainMicrotasks = (): Promise<void> =>
+  new Promise<void>((resolve) => setImmediate(resolve));
+
+function wireCheckpointLane(
+  addCliSession: ReturnType<typeof createWriteLog>['addCliSession'],
+  currentInfo: () => AgentProcessInfo,
+): EventEmitter {
+  const events = new EventEmitter();
+  const container = buildContainer([
+    [
+      TOKENS.AGENT_PROCESS_MANAGER,
+      {
+        events,
+        findAgentInfo: currentInfo,
+        readOutputForPersistence: jest.fn().mockReturnValue(undefined),
+      },
+    ],
+    [
+      TOKENS.WEBVIEW_MANAGER,
+      { broadcastMessage: jest.fn().mockResolvedValue(undefined) },
+    ],
+    [
+      SDK_TOKENS.SDK_SESSION_METADATA_STORE,
+      { addCliSession, markChildSession: jest.fn() },
+    ],
+  ]);
+  wireAgentEventListeners(container, {
+    logger: createMockLogger() as unknown as Logger,
+    platform: 'electron',
+    options: { persistCliSession: true },
+  });
+  return events;
+}
+
+describe('wireAgentEventListeners — running activity checkpoints', () => {
+  it('persists throttled activity without output and resets on exit', async () => {
+    const { addCliSession, durable, attemptsReached } = createWriteLog();
+    let current = buildInfo({
+      cli: 'codex',
+      status: 'running',
+      parentSessionId: PARENT_SESSION,
+      cliSessionId: 'cli-sess-1',
+      lastActivityAt: '2026-10-17T12:00:00.000Z',
+    });
+    const events = wireCheckpointLane(addCliSession, () => current);
+
+    events.emit('agent:output', { agentId: current.agentId });
+    current = {
+      ...current,
+      lastActivityAt: '2026-10-17T12:00:01.000Z',
+    };
+    events.emit('agent:output', { agentId: current.agentId });
+    await attemptsReached(1);
+    await drainMicrotasks();
+
+    expect(addCliSession).toHaveBeenCalledTimes(1);
+    expect(durable[0]).toMatchObject({
+      lastActivityAt: '2026-10-17T12:00:00.000Z',
+      status: 'running',
+    });
+    expect(durable[0]).not.toHaveProperty('stdout');
+
+    current = {
+      ...current,
+      lastActivityAt: '2026-10-17T12:00:30.000Z',
+    };
+    events.emit('agent:output', { agentId: current.agentId });
+    await attemptsReached(2);
+
+    expect(durable[1]).toMatchObject({
+      lastActivityAt: '2026-10-17T12:00:30.000Z',
+      status: 'running',
+    });
+
+    current = {
+      ...current,
+      status: 'completed',
+      completedAt: '2026-10-17T12:00:31.000Z',
+    };
+    events.emit('agent:exited', current);
+    await attemptsReached(3);
+    events.emit('agent:output', { agentId: current.agentId });
+    await drainMicrotasks();
+
+    expect(addCliSession).toHaveBeenCalledTimes(3);
+    expect(durable.map((ref) => ref.status)).toEqual([
+      'running',
+      'running',
+      'completed',
+    ]);
+    expect(durable.at(-1)).toMatchObject({
+      status: 'completed',
+      completedAt: '2026-10-17T12:00:31.000Z',
+    });
+  });
+
+  it('serializes a failed checkpoint retry before the terminal write', async () => {
+    jest.useFakeTimers();
+    try {
+      const { addCliSession, durable, attemptsReached } = createWriteLog(
+        (ref, attempt) => ref.status === 'running' && attempt === 1,
+      );
+      let current = buildInfo({
+        cli: 'codex',
+        status: 'running',
+        parentSessionId: PARENT_SESSION,
+        cliSessionId: 'cli-sess-1',
+        lastActivityAt: '2026-10-17T12:00:00.000Z',
+      });
+      const events = wireCheckpointLane(addCliSession, () => current);
+
+      events.emit('agent:output', { agentId: current.agentId });
+      await attemptsReached(1);
+
+      current = {
+        ...current,
+        status: 'completed',
+        completedAt: '2026-10-17T12:00:01.000Z',
+      };
+      events.emit('agent:exited', current);
+      // The exit write waits behind the checkpoint's retry backoff.
+      await jest.advanceTimersByTimeAsync(0);
+      expect(addCliSession).toHaveBeenCalledTimes(1);
+
+      // retryWithBackoff waits initialDelay * [0.8, 1.2); 1 200 ms covers it.
+      await jest.advanceTimersByTimeAsync(1_200);
+      await attemptsReached(3);
+      // Any further retry would need another backoff timer.
+      await jest.advanceTimersByTimeAsync(10_000);
+
+      expect(addCliSession).toHaveBeenCalledTimes(3);
+      expect(addCliSession.mock.calls.map(([, ref]) => ref.status)).toEqual([
+        'running',
+        'running',
+        'completed',
+      ]);
+      expect(durable.map((ref) => ref.status)).toEqual([
+        'running',
+        'completed',
+      ]);
+      expect(durable.at(-1)).toMatchObject({
+        status: 'completed',
+        completedAt: '2026-10-17T12:00:01.000Z',
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('releases the throttle when a checkpoint is skipped for a missing parent', async () => {
+    const { addCliSession, durable, attemptsReached } = createWriteLog();
+    let current = buildInfo({
+      cli: 'codex',
+      status: 'running',
+      parentSessionId: undefined,
+      cliSessionId: 'cli-sess-1',
+      lastActivityAt: '2026-10-17T12:00:00.000Z',
+    });
+    const events = wireCheckpointLane(addCliSession, () => current);
+
+    events.emit('agent:output', { agentId: current.agentId });
+    await drainMicrotasks();
+    expect(addCliSession).not.toHaveBeenCalled();
+
+    // The parent resolves one second later, inside the throttle window.
+    current = {
+      ...current,
+      parentSessionId: PARENT_SESSION,
+      lastActivityAt: '2026-10-17T12:00:01.000Z',
+    };
+    events.emit('agent:output', { agentId: current.agentId });
+    await attemptsReached(1);
+
+    expect(durable[0]).toMatchObject({
+      status: 'running',
+      lastActivityAt: '2026-10-17T12:00:01.000Z',
+    });
+  });
+
+  it('lets later output retry a checkpoint that failed after its retries', async () => {
+    jest.useFakeTimers();
+    try {
+      const firstActivity = '2026-10-17T12:00:00.000Z';
+      const { addCliSession, durable, attemptsReached } = createWriteLog(
+        (ref) => ref.lastActivityAt === firstActivity,
+      );
+      let current = buildInfo({
+        cli: 'codex',
+        status: 'running',
+        parentSessionId: PARENT_SESSION,
+        cliSessionId: 'cli-sess-1',
+        lastActivityAt: firstActivity,
+      });
+      const events = wireCheckpointLane(addCliSession, () => current);
+
+      events.emit('agent:output', { agentId: current.agentId });
+      // One attempt plus three retries, every backoff elapsed.
+      await jest.advanceTimersByTimeAsync(20_000);
+      await attemptsReached(4);
+      expect(addCliSession).toHaveBeenCalledTimes(4);
+      expect(durable).toEqual([]);
+
+      // One second later: inside the throttle window of the failed stamp.
+      current = { ...current, lastActivityAt: '2026-10-17T12:00:01.000Z' };
+      events.emit('agent:output', { agentId: current.agentId });
+      await attemptsReached(5);
+
+      expect(durable).toHaveLength(1);
+      expect(durable[0]).toMatchObject({
+        status: 'running',
+        lastActivityAt: '2026-10-17T12:00:01.000Z',
+      });
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
 

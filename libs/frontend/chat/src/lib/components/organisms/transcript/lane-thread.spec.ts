@@ -1,4 +1,4 @@
-import { createExecutionChatMessage, type AgentDeliveryReceipt } from '@ptah-extension/shared';
+import { AgentId, createExecutionChatMessage, type AgentDeliveryReceipt } from '@ptah-extension/shared';
 import { laneThreadEntries } from './lane-thread';
 
 describe('laneThreadEntries', () => {
@@ -9,7 +9,7 @@ describe('laneThreadEntries', () => {
       [{ agentId: 'lane', kind: 'completion', state: 'pending' }], { status: 'failed', timestamp: 20 });
     expect(entries.map(entry => entry.body || entry.verdict)).toEqual(['Check the files', 'Failed']);
     expect(entries[0].sender).toBe('Parent agent · Claude');
-    expect(entries[1]).toMatchObject({ verdict: 'Failed', parentSignal: 'Waiting for parent' });
+    expect(entries[1]).toMatchObject({ verdict: 'Failed', parentDelivery: { kind: 'completion', state: 'pending' } });
   });
   it('orders text messages and only attributes a receipt on exact id', () => {
     const messages = [
@@ -59,15 +59,43 @@ describe('laneThreadEntries', () => {
     expect(entries[0].body).toBe('');
   });
 
-  it('shows no parent signal when no parent-delivery push exists', () => {
+  it('shows no parent delivery when no parent-delivery push exists', () => {
     const entries = laneThreadEntries([], [], 'Claude', 'Docs', 'Codex', [],
       { status: 'completed', timestamp: 20 });
-    expect(entries[0].parentSignal).toBeUndefined();
+    expect(entries[0].parentDelivery).toBeUndefined();
   });
 
   it('names the CLI once when the lane label equals the CLI', () => {
     const entries = laneThreadEntries([], [], 'Claude', 'opencode', 'opencode', [],
       { status: 'completed', timestamp: 20 });
     expect(entries[0].sender).toBe('opencode');
+  });
+
+  it('emits an ack thread entry only for read, acted, or rejected receipts that have ackAt', () => {
+    const base: AgentDeliveryReceipt = {
+      id: 'r1',
+      agentId: AgentId.from('11111111-1111-4111-8111-111111111111'),
+      sender: 'user',
+      state: 'settled',
+      mode: 'queue-next-turn',
+      delivery: 'queue',
+      createdAt: 10,
+      updatedAt: 50,
+    };
+    expect(laneThreadEntries([], [{ ...base, ackState: 'pending', ackAt: 30 }], 'Claude', 'Docs', 'Codex')).toEqual([]);
+    expect(laneThreadEntries([], [{ ...base, ackState: 'unavailable', ackAt: 30 }], 'Claude', 'Docs', 'Codex')).toEqual([]);
+    expect(laneThreadEntries([], [{ ...base, ackState: 'read' }], 'Claude', 'Docs', 'Codex')).toEqual([]);
+
+    const acted = laneThreadEntries([], [{ ...base, ackState: 'acted', ackAt: 42 }], 'Claude', 'Docs', 'Codex');
+    expect(acted).toEqual([
+      {
+        id: 'ack:r1',
+        sender: 'Docs · Codex',
+        kind: 'ack',
+        timestamp: 42,
+        body: 'Lane reports acted',
+        ackState: 'acted',
+      },
+    ]);
   });
 });
