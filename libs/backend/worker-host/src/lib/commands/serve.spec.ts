@@ -158,6 +158,11 @@ it.each(['SIGTERM', 'SIGINT'] as const)(
           hostProfile: expect.objectContaining({ host: 'worker' }),
         }),
       );
+      // The worker opens the main database: the session account gate reads
+      // it, so a closed connection refuses every fresh remote session.
+      expect(container.isRegistered).toHaveBeenCalledWith(
+        Symbol.for('PtahSqliteConnection'),
+      );
       const response = new Promise<void>((resolve) =>
         socket?.once('message', () => resolve()),
       );

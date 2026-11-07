@@ -122,7 +122,10 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     {},
     {
       mode: 'full',
-      thoth: 'off',
+      // 'oneshot' opens and migrates the main SQLite database (no memory,
+      // cron or gateway). The account gate of chat:start reads it; with
+      // 'off' every fresh remote session is refused as unavailable-storage.
+      thoth: 'oneshot',
       hostProfile: runtime.createWorkerRpcHostProfile(),
       pushAdapter,
       ...(options.bootstrap ? { bootstrap: options.bootstrap } : {}),
