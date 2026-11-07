@@ -1,0 +1,356 @@
+import { signal } from '@angular/core';
+import { TestBed, type ComponentFixture } from '@angular/core/testing';
+import {
+  MachinesStore,
+  type MachinesError,
+  type MachinesOutcome,
+  type RemoteMachine,
+} from '../../services/machines-store';
+import {
+  MachinesViewComponent,
+  machineBanners,
+} from './machines-view.component';
+
+const HORUS: RemoteMachine = {
+  machineId: 'm1',
+  alias: 'horus',
+  displayName: 'Horus',
+  state: 'connected',
+  versions: {
+    local: { ptahVersion: '0.1.70', protocol: { min: 3, max: 3 } },
+    remote: { ptahVersion: '0.1.70', protocol: { min: 3, max: 3 } },
+  },
+};
+const ANUBIS: RemoteMachine = {
+  machineId: 'm2',
+  alias: 'anubis',
+  displayName: 'Anubis',
+  state: 'reconnecting',
+  lastSeenAt: 1_000_000,
+  nextRetryAt: 1_017_000,
+};
+
+const ok = <T>(value: T): MachinesOutcome<T> => ({ ok: true, value });
+
+/** Microtask flush: works with real and fake timers alike. */
+async function flush(): Promise<void> {
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+}
+
+async function setup(machines: readonly RemoteMachine[] = [HORUS]) {
+  TestBed.resetTestingModule();
+  const list = signal<readonly RemoteMachine[]>(machines);
+  const store = {
+    machines: list,
+    loading: signal(false),
+    error: signal<MachinesError | null>(null),
+    loadMachines: jest.fn().mockResolvedValue(undefined),
+    retry: jest.fn().mockResolvedValue(ok(HORUS)),
+    remove: jest.fn().mockImplementation(async (id: string) => {
+      list.update((all) => all.filter((m) => m.machineId !== id));
+      return ok(undefined);
+    }),
+    readiness: jest.fn().mockResolvedValue(
+      ok({
+        machineId: 'm1',
+        remote: { ready: true, checks: [] },
+        local: { ready: true, checks: [] },
+      }),
+    ),
+    sshAliases: jest.fn().mockResolvedValue(ok(['horus'])),
+    add: jest.fn(),
+    pair: jest.fn().mockResolvedValue(ok(HORUS)),
+    pairViaSsh: jest.fn(),
+  };
+  TestBed.configureTestingModule({
+    imports: [MachinesViewComponent],
+    providers: [{ provide: MachinesStore, useValue: store }],
+  });
+  const fixture = TestBed.createComponent(MachinesViewComponent);
+  document.body.appendChild(fixture.nativeElement);
+  fixture.detectChanges();
+  await flush();
+  fixture.detectChanges();
+  return { fixture, store, list };
+}
+
+const host = (fixture: ComponentFixture<MachinesViewComponent>) =>
+  fixture.nativeElement as HTMLElement;
+const q = <T extends HTMLElement = HTMLElement>(
+  fixture: ComponentFixture<MachinesViewComponent>,
+  id: string,
+) => host(fixture).querySelector<T>(`[data-testid="${id}"]`);
+const banners = (fixture: ComponentFixture<MachinesViewComponent>) =>
+  Array.from(
+    host(fixture).querySelectorAll<HTMLElement>(
+      '[data-testid="machine-banner"]',
+    ),
+  );
+
+async function click(
+  fixture: ComponentFixture<MachinesViewComponent>,
+  id: string,
+): Promise<void> {
+  q(fixture, id)?.click();
+  fixture.detectChanges();
+  await flush();
+  fixture.detectChanges();
+}
+
+afterEach(() => {
+  jest.useRealTimers();
+  document.body.innerHTML = '';
+});
+
+describe('MachinesViewComponent', () => {
+  it('loads machines on init', async () => {
+    const { store } = await setup();
+    expect(store.loadMachines).toHaveBeenCalledTimes(1);
+  });
+
+  it('empty (4.1): one primary Add machine in the pane, a ghost one in the list, and what is checked', async () => {
+    const { fixture } = await setup([]);
+    const empty = q(fixture, 'machines-empty');
+    expect(empty?.textContent).toContain('Control Ptah on your other machines');
+    expect(empty?.textContent).toContain('nothing is opened on your network');
+    expect(q(fixture, 'machines-empty-add')?.classList).toContain(
+      'btn-primary',
+    );
+    expect(q(fixture, 'machine-list-add')?.classList).toContain('btn-ghost');
+    expect(
+      host(fixture).querySelectorAll('[data-testid="machines-checked"] li'),
+    ).toHaveLength(7);
+
+    await click(fixture, 'machines-empty-add');
+    expect(q(fixture, 'add-machine-form')).not.toBeNull();
+  });
+
+  it('selects the first machine and shows its header', async () => {
+    const { fixture } = await setup([HORUS, ANUBIS]);
+    const detail = q(fixture, 'machine-detail');
+    expect(detail?.querySelector('h2')?.textContent).toContain('Horus');
+    expect(detail?.textContent).toContain('Connected');
+    expect(
+      q(fixture, 'machine-detail-meta')?.textContent?.replace(/\s+/g, ' '),
+    ).toContain('via SSH alias horus · ptah 0.1.70 · protocol 3');
+    expect(banners(fixture)).toHaveLength(0);
+  });
+
+  it('selecting a row shows that machine', async () => {
+    const { fixture } = await setup([HORUS, ANUBIS]);
+    host(fixture)
+      .querySelectorAll<HTMLButtonElement>('[data-testid="machine-row"]')[1]
+      .click();
+    fixture.detectChanges();
+    expect(
+      q(fixture, 'machine-detail')?.querySelector('h2')?.textContent,
+    ).toContain('Anubis');
+  });
+
+  it('reconnecting: status banner says sessions are unknown, not failed, and counts down', async () => {
+    jest.useFakeTimers({ now: 1_012_000 });
+    const { fixture, store } = await setup([ANUBIS]);
+    const [banner] = banners(fixture);
+    expect(banner.getAttribute('role')).toBe('status');
+    expect(banner.textContent).toContain('Lost contact 12 s ago.');
+    expect(banner.textContent).toContain('shown as unknown, not failed');
+    expect(banner.textContent).toContain('Next attempt in 5 s.');
+
+    jest.advanceTimersByTime(2000);
+    fixture.detectChanges();
+    expect(banners(fixture)[0].textContent).toContain('Lost contact 14 s ago.');
+    expect(banners(fixture)[0].textContent).toContain('Next attempt in 3 s.');
+
+    await click(fixture, 'machine-retry');
+    expect(store.retry).toHaveBeenCalledWith('m2');
+  });
+
+  it('runs no clock while the selected machine is connected, and stops it on destroy', async () => {
+    const started = jest.spyOn(globalThis, 'setInterval');
+    const stopped = jest.spyOn(globalThis, 'clearInterval');
+    const { fixture, list } = await setup([ANUBIS]);
+    const clockStarts = () =>
+      started.mock.calls.filter(([, ms]) => ms === 1000).length;
+    expect(clockStarts()).toBe(1);
+
+    const stopsBefore = stopped.mock.calls.length;
+    list.set([{ ...ANUBIS, state: 'connected' }]);
+    fixture.detectChanges();
+    await flush();
+    expect(stopped.mock.calls.length).toBeGreaterThan(stopsBefore);
+
+    list.set([ANUBIS]);
+    fixture.detectChanges();
+    expect(clockStarts()).toBe(2);
+    const stopsAtDestroy = stopped.mock.calls.length;
+    fixture.destroy();
+    expect(stopped.mock.calls.length).toBeGreaterThan(stopsAtDestroy);
+    started.mockRestore();
+    stopped.mockRestore();
+  });
+
+  it('version mismatch: alert names both versions', async () => {
+    const { fixture } = await setup([
+      {
+        ...HORUS,
+        displayName: 'Chappie',
+        state: 'version-mismatch',
+        versions: {
+          local: { ptahVersion: '0.1.70', protocol: { min: 3, max: 3 } },
+          remote: { ptahVersion: '0.1.60', protocol: { min: 2, max: 2 } },
+        },
+      },
+    ]);
+    const [banner] = banners(fixture);
+    expect(banner.getAttribute('role')).toBe('alert');
+    expect(banner.textContent).toContain('Version mismatch');
+    expect(banner.textContent).toContain('Ptah 0.1.70');
+    expect(banner.textContent).toContain(
+      'Chappie runs Ptah 0.1.60, protocol 2',
+    );
+    expect(banner.textContent).toContain('Not connected.');
+  });
+
+  it('version mismatch without a remote version uses the no-worker-mode copy', async () => {
+    const { fixture } = await setup([
+      { ...HORUS, state: 'version-mismatch', versions: undefined },
+    ]);
+    expect(banners(fixture)[0].textContent).toContain(
+      'This Ptah build on Horus has no worker mode. Update the Ptah desktop app there.',
+    );
+  });
+
+  it.each([
+    [
+      'worker-identity-changed',
+      'A different worker answers on this alias — re-pair this machine.',
+    ],
+    ['re-pair-required', 'Pairing expired — re-pair this machine.'],
+  ] as const)(
+    'reason %s: fixed copy and a Re-pair that opens the pair flow',
+    async (reason, copy) => {
+      const { fixture, store } = await setup([
+        { ...HORUS, state: 'unpaired', reason },
+      ]);
+      const all = banners(fixture);
+      expect(all).toHaveLength(1);
+      expect(all[0].textContent).toContain(copy);
+      expect(q(fixture, 'machine-repair')?.textContent?.trim()).toBe('Re-pair');
+
+      await click(fixture, 'machine-repair');
+      const alias = q<HTMLInputElement>(fixture, 'add-machine-alias');
+      expect(alias?.readOnly).toBe(true);
+      expect(alias?.value).toBe('horus');
+
+      host(fixture)
+        .querySelectorAll<HTMLInputElement>(
+          '[data-testid="add-machine-code-cell"]',
+        )
+        .forEach((cell, i) => {
+          cell.value = 'K7QM4X2P'[i];
+          cell.dispatchEvent(new Event('input'));
+        });
+      q(fixture, 'add-machine-form')?.dispatchEvent(
+        new Event('submit', { cancelable: true }),
+      );
+      await flush();
+      fixture.detectChanges();
+      await flush();
+      fixture.detectChanges();
+      expect(store.add).not.toHaveBeenCalled();
+      expect(store.pair).toHaveBeenCalledWith('m1', 'K7QM4X2P');
+      // Pairing success goes straight to the readiness check (4.2).
+      expect(
+        host(fixture).querySelector('ptah-readiness-panel'),
+      ).not.toBeNull();
+    },
+  );
+
+  it('reason session-reattach-failed: fixed copy and Retry now', async () => {
+    const { fixture, store } = await setup([
+      { ...HORUS, reason: 'session-reattach-failed' },
+    ]);
+    const [banner] = banners(fixture);
+    expect(banner.getAttribute('role')).toBe('status');
+    expect(banner.textContent).toContain(
+      'A session could not re-attach — retry.',
+    );
+    await click(fixture, 'machine-retry');
+    expect(store.retry).toHaveBeenCalledWith('m1');
+  });
+
+  it('unpaired without a reason offers Pair', async () => {
+    const { fixture } = await setup([{ ...HORUS, state: 'unpaired' }]);
+    expect(banners(fixture)[0].textContent).toContain('Not paired');
+    expect(q(fixture, 'machine-repair')?.textContent?.trim()).toBe('Pair');
+  });
+
+  it('remove: confirms with the token and tunnel text, focuses Cancel, then removes', async () => {
+    const { fixture, store } = await setup([HORUS]);
+    await click(fixture, 'machine-remove');
+    const dialog = q(fixture, 'machine-remove-confirm');
+    expect(dialog?.getAttribute('role')).toBe('alertdialog');
+    expect(dialog?.textContent).toContain(
+      'Deletes the stored token and stops the tunnel.',
+    );
+    expect(document.activeElement).toBe(
+      q(fixture, 'machine-remove-confirm-no'),
+    );
+
+    await click(fixture, 'machine-remove-confirm-yes');
+    expect(store.remove).toHaveBeenCalledWith('m1');
+    expect(q(fixture, 'machines-empty')).not.toBeNull();
+  });
+
+  it('remove failure shows a sanitised alert and keeps the machine', async () => {
+    const { fixture, store } = await setup([HORUS]);
+    store.remove.mockResolvedValue({
+      ok: false,
+      error: { message: 'worker\u202E gone', code: 'MACHINE_UNREACHABLE' },
+    });
+    await click(fixture, 'machine-remove');
+    await click(fixture, 'machine-remove-confirm-yes');
+    const alert = q(fixture, 'machine-action-error');
+    expect(alert?.getAttribute('role')).toBe('alert');
+    expect(alert?.textContent).toContain('worker gone.');
+    expect(q(fixture, 'machine-detail')).not.toBeNull();
+  });
+
+  it('opens the readiness check and goes back', async () => {
+    const { fixture, store } = await setup([HORUS]);
+    await click(fixture, 'machine-readiness');
+    expect(store.readiness).toHaveBeenCalledWith('m1');
+    expect(host(fixture).querySelector('ptah-readiness-panel')).not.toBeNull();
+    await click(fixture, 'machines-back');
+    expect(q(fixture, 'machine-detail')).not.toBeNull();
+  });
+
+  it('add machine from the list opens the form; cancel closes it', async () => {
+    const { fixture } = await setup([HORUS]);
+    await click(fixture, 'machine-list-add');
+    expect(q(fixture, 'add-machine-form')).not.toBeNull();
+    await click(fixture, 'add-machine-cancel');
+    expect(q(fixture, 'machine-detail')).not.toBeNull();
+  });
+});
+
+describe('machineBanners', () => {
+  it('a machine going offline never says its sessions failed', () => {
+    const [banner] = machineBanners({ ...ANUBIS, state: 'offline' }, 1_012_000);
+    expect(banner.label).toBe('Offline');
+    expect(banner.text).toContain('they are shown as unknown, not failed');
+  });
+
+  it('sanitises the machine name', () => {
+    const [banner] = machineBanners(
+      { ...ANUBIS, displayName: 'An\u202Eubis' },
+      1_012_000,
+    );
+    expect(banner.text).toContain('Sessions on Anubis keep running');
+  });
+
+  it('omits "Next attempt" once the retry time has passed', () => {
+    const [banner] = machineBanners(ANUBIS, 1_020_000);
+    expect(banner.text).not.toContain('Next attempt');
+  });
+});

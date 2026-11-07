@@ -32,3 +32,18 @@ export {
   toTranscriptEvents,
   type TranscriptEvents,
 } from './lib/services/transcript-events';
+export {
+  MachinesViewComponent,
+  machineBanners,
+  type MachinesPaneMode,
+} from './lib/components/machines-view/machines-view.component';
+export { MachineListComponent } from './lib/components/machine-list/machine-list.component';
+export { MachineStatusComponent } from './lib/components/machine-status/machine-status.component';
+export { AddMachinePaneComponent } from './lib/components/add-machine-pane/add-machine-pane.component';
+export { ReadinessPanelComponent } from './lib/components/readiness-panel/readiness-panel.component';
+export { CopyCommandComponent } from './lib/components/copy-command/copy-command.component';
+export {
+  DISPLAY_TEXT_MAX_LENGTH,
+  DisplayTextPipe,
+  displayText,
+} from './lib/utils/display-text';

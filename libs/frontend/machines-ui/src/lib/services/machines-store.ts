@@ -11,6 +11,7 @@ import type {
   MachineStateReason,
   MachineSummary,
   MachinesEventPayload,
+  MachinesReadinessResult,
   MachinesSessionAttachResult,
   MachinesStatePayload,
   RemoteMachineSessionSummary,
@@ -257,6 +258,22 @@ export class MachinesStore {
 
   public retry(machineId: string): Promise<MachinesOutcome<RemoteMachine>> {
     return this.machineCall(this.api.retry(machineId));
+  }
+
+  /** `Host` aliases from `~/.ssh/config`, for the add form's suggestions. */
+  public async sshAliases(): Promise<MachinesOutcome<readonly string[]>> {
+    const result = await this.api.sshAliases();
+    if (!result.isSuccess()) return { ok: false, error: toError(result) };
+    return { ok: true, value: result.data.aliases };
+  }
+
+  /** One readiness run; nothing is cached, "Check again" runs it anew. */
+  public async readiness(
+    machineId: string,
+  ): Promise<MachinesOutcome<MachinesReadinessResult>> {
+    const result = await this.api.readiness(machineId);
+    if (!result.isSuccess()) return { ok: false, error: toError(result) };
+    return { ok: true, value: result.data };
   }
 
   public async remove(machineId: string): Promise<MachinesOutcome> {
