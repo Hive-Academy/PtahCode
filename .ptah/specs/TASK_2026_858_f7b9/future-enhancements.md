@@ -72,3 +72,15 @@ the mobile PWA, P3 = later.
 | Worker readiness shows only check names in the journal ("Worker is not ready: provider"); log each failing check's detail (e.g. the auth-route blockers). | Worker readiness |
 | Codex-only workers cannot serve: the worker host refuses `thirdParty`/openai-codex ("native Codex runtime"). | Anubis |
 | Remote transcript links keep their real `href`; only click/auxclick are stopped (`remote-transcript.component.ts`). Not reachable in Electron (its context menu has no open-link item, `main-window.ts:74-98`; `will-navigate`/window-open go through `openExternalSafely`). Defence in depth: render remote links with an inert `href` and the target in a data attribute, incl. tool content; check drag-to-window too. | Phase F logic review r2, defect 2 (disputed) |
+
+## Phase F Electron visual review (added 2026-11-07)
+
+| Item | Source |
+| --- | --- |
+| "Remove machine" and "New session" use a different button style than the prototype; align them with the design-spec action styles. | visual-review.md finding 3 |
+| The navbar Machines tab has no machine count badge (prototype shows one). | visual-review.md finding 3 |
+| Pairing code cells do not show the error border after a rejected code. | visual-review.md finding 4 |
+| The pairing failure copy has no "(N attempts left)" count; the worker would have to report the remaining attempts. | visual-review.md finding 5 |
+| Escape closes the Add machine pane even while the theme popover is open; a global Escape handler should yield to an open popover. | visual-review.md finding 6 |
+| A wrong pairing code takes about 7–10 s to fail; consider an earlier client-side or worker-side rejection signal. | visual-review.md finding 7 |
+| The parent maps several worker errors to "The machine is unreachable." (`machines-rpc.handlers.ts:36-62`); the tabId defect was found only from the worker journal. Log the worker error code on the parent and consider a more specific user message for worker-side validation failures. | visual-review.md finding 1 |
