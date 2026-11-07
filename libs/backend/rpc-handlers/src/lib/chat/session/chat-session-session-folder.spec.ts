@@ -73,6 +73,7 @@ function makeHarness(
     folders?: string[];
     metadata?: Record<string, unknown> | null;
     ptahCli?: boolean;
+    awaitRecoveredOutput?: jest.Mock;
   } = {},
 ) {
   const noop = jest.fn();
@@ -154,6 +155,9 @@ function makeHarness(
         : { error: '__NOT_PTAH_CLI__' },
     );
   const restoreAgents = jest.fn();
+  const awaitRecoveredOutput =
+    opts.awaitRecoveredOutput ?? jest.fn().mockResolvedValue(undefined);
+  const findAgentInfo = jest.fn().mockReturnValue(undefined);
   const captureException = jest.fn();
 
   const service = new ChatSessionService(
@@ -209,7 +213,7 @@ function makeHarness(
     new SessionMcpStatusRegistry(),
     { register: jest.fn().mockReturnValue(() => undefined) } as never,
     { register: jest.fn().mockReturnValue(() => undefined) } as never,
-    { restoreAgents } as never,
+    { restoreAgents, awaitRecoveredOutput, findAgentInfo } as never,
     undefined,
     undefined,
     undefined,
@@ -229,6 +233,7 @@ function makeHarness(
     routeFollowUpSlashCommand,
     injectInterruptedAgentsContext,
     restoreAgents,
+    awaitRecoveredOutput,
     captureException,
     registerResumedSession,
     registryMocks,
@@ -488,6 +493,34 @@ describe("ChatSessionService — the session's own folder (MP-3)", () => {
         PROJECT_B,
         SESSION_ID,
       );
+      expect(h.awaitRecoveredOutput).toHaveBeenCalledWith(['agent-1']);
+    });
+
+    it('resolves only after the recovered output write settled', async () => {
+      let land = (): void => undefined;
+      let markWaiting = (): void => undefined;
+      const waiting = new Promise<void>((resolve) => { markWaiting = resolve; });
+      const awaitRecoveredOutput = jest.fn(
+        () => new Promise<void>((resolve) => { land = resolve; markWaiting(); }),
+      );
+      const h = makeHarness({ awaitRecoveredOutput });
+
+      let answered = false;
+      const pending = h.service
+        .resumeSession({ sessionId: SESSION_ID, tabId: TAB_ID, workspacePath: PROJECT_A })
+        .then((result) => {
+          answered = true;
+          return result;
+        });
+      // The handler is now parked on the recovered-output wait.
+      await waiting;
+      expect(awaitRecoveredOutput).toHaveBeenCalledTimes(1);
+      expect(answered).toBe(false);
+      land();
+      await expect(pending).resolves.toMatchObject({
+        success: true,
+        cliSessions: [{ agentId: 'agent-1' }],
+      });
     });
 
     it('files a resumed Ptah CLI session under its own project', async () => {

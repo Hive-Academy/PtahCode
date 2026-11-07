@@ -40,6 +40,7 @@ import { registerAgentDeliveryPushSinks } from './agent-delivery-push-sinks-regi
 
 export { registerAgentDeliveryPushSinks };
 import type { AgentProcessManager } from '../cli-agents/agent-process-manager.service';
+import type { RecoveredOutputTracker } from '../cli-agents/lane-restore';
 import { laneAccountFields, snapshotLaneAccountReference } from '../cli-agents/lane-resume-gate';
 import type { CopilotPermissionBridge } from '../cli-agents/cli-adapters/copilot-permission-bridge';
 import { ParentEnvelopeStoreService } from '../cli-agents/parent-delivery/parent-envelope-store.service';
@@ -57,11 +58,16 @@ const lanePersistQueues = new WeakMap<
   Map<string, Promise<void>>
 >();
 
+/**
+ * Runs `operation` after the lane's previous persist settles (resolved or
+ * rejected), so writes of one lane never overlap or reorder. Returns the
+ * queued write; the queue entry is dropped once the newest write settles.
+ */
 function enqueueLanePersist(
   container: DependencyContainer,
   info: AgentProcessInfo,
   operation: () => Promise<void>,
-): void {
+): Promise<void> {
   let queues = lanePersistQueues.get(container);
   if (!queues) {
     queues = new Map<string, Promise<void>>();
@@ -76,6 +82,7 @@ function enqueueLanePersist(
   void next.finally(() => {
     if (queues.get(key) === next) queues.delete(key);
   });
+  return next;
 }
 
 /** Minimal shape of the webview manager used by the wiring. */
@@ -296,6 +303,11 @@ function wireHandoffChainBroadcast(
   });
 }
 
+/**
+ * Forwards agent lifecycle events to the webview and, when
+ * `persistCliSession` is set, persists each lane's session reference:
+ * activity checkpoints, exits and recovered output after a host restart.
+ */
 function wireAgentMonitorListeners(
   agentProcessManager: AgentProcessManager,
   webviewManager: WebviewManagerLike,
@@ -410,12 +422,19 @@ function wireAgentMonitorListeners(
 
   // A restored host-restart lane's checkpoint is newer than its persisted
   // output: persist it as the lane's output, with `outputLostAfter`. The
-  // checkpoint itself stays for the fresh handoff until it expires.
-  agentProcessManager.events.on('agent:output-recovered', (info: AgentProcessInfo) => {
-    if (persistCliSession) {
-      persistCliSessionReference(container, logger, tag, info, getSdkSessionId);
-    }
-  });
+  // checkpoint itself stays for the fresh handoff until it expires. `track`
+  // hands the queued write back to the manager, so a restore path can wait
+  // for it before the webview pages that output.
+  agentProcessManager.events.on(
+    'agent:output-recovered',
+    (info: AgentProcessInfo, track?: RecoveredOutputTracker) => {
+      if (!persistCliSession) return;
+      // Persist first: `track?.(persist(...))` would skip the write when
+      // nothing tracks it, as an optional call skips its arguments.
+      const settled = persistCliSessionReference(container, logger, tag, info, getSdkSessionId);
+      track?.(settled);
+    },
+  );
 
   // A run's quota owner became known after spawn (TASK_2026_596). Persisted at
   // once so a host that dies before the run exits still restores the owner.
@@ -574,6 +593,10 @@ function wireCopilotPermissionForwarding(
  * `addCliSession` accepted the reference; a write skipped as stale (a newer
  * run or turn of the lane) runs neither callback.
  *
+ * The returned promise settles (never rejects) once this write left the
+ * lane's queue — written, skipped or failed — so a restore path can wait for
+ * it; it is already settled when nothing was queued.
+ *
  * Exported so `sdk-callbacks.ts` can re-persist exited agents once their
  * parent session IDs resolve from tab ID to real SDK UUID.
  */
@@ -585,14 +608,14 @@ export function persistCliSessionReference(
   getSdkSessionId: ((ptahCliId: string) => string | undefined) | undefined,
   onFailed?: () => void,
   onPersisted?: () => void,
-): void {
+): Promise<void> {
   const { parentSessionId } = info;
   if (!parentSessionId) {
     // Nothing was persisted: a caller's checkpoint stamp must not stay set.
     onFailed?.();
     // Named parentless lanes have an awaited durable registry/reference
     // checkpoint. This optional parent-card projection is not that receipt.
-    if (laneAccountFields(info).accountBindingId !== undefined) return;
+    if (laneAccountFields(info).accountBindingId !== undefined) return Promise.resolve();
     // The reference has nowhere to go — `addCliSession` is keyed by the parent
     // session. This used to be a silent `return`, so an agent spawned without
     // a parent simply never appeared under any session and nothing said why.
@@ -607,7 +630,7 @@ export function persistCliSessionReference(
         cliSessionId: info.cliSessionId ?? null,
       },
     );
-    return;
+    return Promise.resolve();
   }
   const effectiveCliSessionId = info.cliSessionId || info.agentId;
 
@@ -617,7 +640,7 @@ export function persistCliSessionReference(
         `${tag} SessionMetadataStore not registered — CLI session persist skipped`,
       );
       onFailed?.();
-      return;
+      return Promise.resolve();
     }
     const metadataStore = container.resolve<SdkSessionMetadataStoreLike>(
       SDK_TOKENS.SDK_SESSION_METADATA_STORE,
@@ -829,7 +852,7 @@ export function persistCliSessionReference(
           }
         });
 
-    enqueueLanePersist(container, info, persist);
+    const settled = enqueueLanePersist(container, info, persist);
 
     // Proactively flag the ptah-cli agent's own SDK session as a hidden child
     // so it never surfaces as a top-level entry in the session sidebar. The
@@ -851,12 +874,14 @@ export function persistCliSessionReference(
           );
         });
     }
+    return settled;
   } catch (error) {
     onFailed?.();
     logger.warn(
       `${tag} Could not persist CLI session reference`,
       error instanceof Error ? error : new Error(String(error)),
     );
+    return Promise.resolve();
   }
 }
 
