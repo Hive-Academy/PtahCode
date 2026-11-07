@@ -6,8 +6,7 @@
  * compiler turns into a dynamic `import()` of this path, so the fence pipeline,
  * zod, the validator and `declarative-dashboard` stay in a lazy chunk. The
  * main `@ptah-extension/chat-ui` barrel is statically imported by eager code;
- * same pattern as `@ptah-extension/chat-ui/turn-recap` and
- * `@ptah-extension/chat-ui/change-set-card`.
+ * same pattern as `@ptah-extension/chat-ui/turn-recap`.
  *
  * `PtahUiLiveWindow` is NOT here: the eager transcript provides it, so it is
  * exported from the main barrel.

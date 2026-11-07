@@ -16,7 +16,7 @@
  *
  * Ids the table does not know (custom providers, aggregators) fall back to
  * the muted text tier, which holds 3:1 on every base layer in both anubis
- * themes — the same neutral accent `change-set-card` uses.
+ * themes — the same neutral accent the turn summary files card uses.
  */
 export const PROVIDER_ACCENTS: Readonly<Record<string, string>> = {
   anthropic: '#d97757',

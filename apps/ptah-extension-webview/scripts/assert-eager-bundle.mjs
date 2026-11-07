@@ -26,8 +26,7 @@ const require = createRequire(import.meta.url);
 
 const FORBIDDEN_MARKERS = [
   'ptah-git-',
-  // The card's own template text: the `ptah-change-set-card` tag itself stays
-  // in the eager transcript that names it in a `@defer` block.
+  // The expanded turn summary files card stays in a lazy chunk.
   'No longer changes HEAD',
   // CodeMirror's own editor class: the spot editor must stay in a lazy chunk.
   'cm-editor',

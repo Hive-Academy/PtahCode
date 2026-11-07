@@ -132,7 +132,7 @@ export class GitChangeSetNumstatReader {
       return result;
     } catch (error: unknown) {
       // degradation-audit: reported - logged here; the paths not yet counted
-      // keep null counts, which the change-set card shows as unavailable.
+      // keep null counts, which the turn summary chip shows as unavailable.
       this.warn(
         workspacePath,
         error instanceof Error ? error.message : String(error),

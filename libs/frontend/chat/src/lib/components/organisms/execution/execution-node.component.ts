@@ -29,7 +29,7 @@ import {
 } from '@ptah-extension/chat-ui';
 // Used only inside `@defer`, so the compiler loads the `ptah-ui` entry (the
 // fence pipeline, zod and the declarative renderer) as a lazy chunk. Same
-// contract as `@ptah-extension/chat-ui/change-set-card` in the transcript.
+// contract as `@ptah-extension/chat-ui/turn-recap` in the transcript.
 import { PtahUiMessageTextComponent } from '@ptah-extension/chat-ui/ptah-ui';
 import { PTAH_UI_HOST_SOURCES } from '@ptah-extension/chat-ui';
 import { DisplayDockState } from '../../../services/display-dock/display-dock.state';
