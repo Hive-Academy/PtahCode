@@ -143,6 +143,20 @@ describe('SDK SendMessage budget gate', () => {
     expect((await handler.createCallback(session)('SendMessage', input, { signal: new AbortController().signal, toolUseID: 'send-6', requestId: 'send-6' }))?.behavior).toBe('allow');
     expect(monitor.getAgentBudgetState).not.toHaveBeenCalled();
   });
+
+  it('shares the budget refusal with the PreToolUse route and logs its denial', () => {
+    if (!session) throw new Error('Expected a valid fixture session');
+    const monitor = { getAgentBudgetState: jest.fn(() => ({
+      contextTokens: null, stopped: true, stopState: 'stopped' as const,
+      handoffTokens: 1000, warningRatio: 0.85,
+    })) };
+    const { handler, logger } = makeHandler(undefined, monitor);
+    expect(handler.budgetSendMessageRefusal('stopped-agent', session)).toContain('Start a new agent');
+    handler.logBudgetSendMessageHookDenial(session, undefined, 'send-hook');
+    expect(logger.debug).toHaveBeenCalledWith('[SdkPermissionHandler] Permission decision',
+      expect.objectContaining({ sessionId: session, toolUseID: 'send-hook',
+        toolName: 'SendMessage', route: 'deny', decisionSource: 'subagent-budget', interrupt: false }));
+  });
 });
 
 describe('SdkPermissionHandler published prompt lifecycle', () => {

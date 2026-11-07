@@ -429,6 +429,26 @@ describe('SubagentBudgetMonitor', () => {
     expect(h.dispatcher.postSubagentNotice).toHaveBeenCalledTimes(2);
   });
 
+  it('warns and finds budget state through the hook UUID for a streamed Task', async () => {
+    const h = makeHarness(null, { workspace: RECORD_WORKSPACE });
+    const hookRecord: SubagentRecord = {
+      toolCallId: 'hook-uuid', agentType: 'Explore', agentId: 'task-agent',
+      status: 'running', startedAt: 0, parentSessionId: SESSION,
+    };
+    h.registry.get.mockImplementation((id: string) => id === 'hook-uuid' ? hookRecord : null);
+    h.registry.getToolCallIdByAgentId.mockReturnValue('hook-uuid');
+    h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-agent');
+    await h.monitor.observe(SESSION, assistant({ input: 130_000 }, { id: 'near-budget' }));
+    expect(h.dispatcher.postSubagentNotice).toHaveBeenCalledWith('task-agent', expect.any(String));
+    expect(h.monitor.getAgentBudgetState('task-agent', SESSION)).toEqual(
+      expect.objectContaining({ running: true, stopped: false }),
+    );
+    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'stop' }));
+    expect(h.monitor.getAgentBudgetState('task-agent', SESSION)).toEqual(
+      expect.objectContaining({ stopped: true }),
+    );
+  });
+
   it('warns once at 86 percent and re-arms for a new task invocation', async () => {
     const h = makeHarness({}, { workspace: RECORD_WORKSPACE });
     await h.monitor.observe(SESSION, assistant({ input: 100 }, { id: 'm1' }));
@@ -1095,7 +1115,10 @@ describe('SubagentBudgetMonitor', () => {
     expect(h.recordStore.withdraw).not.toHaveBeenCalled();
     expect(h.index.publish).toHaveBeenCalledTimes(1);
     expect(h.logger.warn).not.toHaveBeenCalled();
-    expect(h.logger.debug).not.toHaveBeenCalled();
+    expect(h.logger.debug).toHaveBeenCalledWith(
+      '[SubagentBudgetMonitor] Near-budget warning deferred',
+      expect.objectContaining({ missingPaths: true }),
+    );
   });
 
   it('the handoff restates the task from the spawning Agent tool_use', async () => {

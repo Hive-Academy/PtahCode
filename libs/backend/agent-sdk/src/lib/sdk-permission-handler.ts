@@ -145,6 +145,22 @@ export type PermissionPromptLifecycleListener = (
 
 @injectable()
 export class SdkPermissionHandler implements ISdkPermissionHandler {
+  /** Called by PreToolUse as well as canUseTool: SDK auto-allow can skip the latter. */
+  budgetSendMessageRefusal(targetName: string, sessionId: string): string | undefined {
+    const target = this.subagentRegistry.getToolCallIdByName(targetName) ?? targetName;
+    const state = this.budgetMonitor?.getAgentBudgetState(target, sessionId)
+      ?? this.budgetMonitor?.getAgentBudgetState(targetName, sessionId);
+    return (state ? buildBudgetResumeRefusal(state) : undefined) ?? undefined;
+  }
+
+  logBudgetSendMessageHookDenial(sessionId: string, tabId: TabId | undefined, toolUseID: string): void {
+    this.logger.debug('[SdkPermissionHandler] Permission decision', {
+      sessionId, tabId, toolUseID, toolName: 'SendMessage', route: 'deny',
+      decisionSource: 'subagent-budget', interrupt: false,
+      recentSubagentBudgetStop:
+        Date.now() - (this.recentBudgetStops.get(sessionId) ?? 0) < 60_000,
+    });
+  }
   private _permissionLevel: PermissionLevel = 'ask';
 
   private pendingRequests = new Map<string, PendingRequest>();
@@ -516,13 +532,10 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       },
     ): Promise<PermissionResult> => {
       if (toolName === 'SendMessage' && typeof input['to'] === 'string') {
-        const target = this.subagentRegistry.getToolCallIdByName(input['to']) ?? input['to'];
         const budgetSessionId = resolveSessionId();
-        const state = budgetSessionId
-          ? this.budgetMonitor?.getAgentBudgetState(target, budgetSessionId as string)
-            ?? this.budgetMonitor?.getAgentBudgetState(input['to'], budgetSessionId as string)
+        const refusal = budgetSessionId
+          ? this.budgetSendMessageRefusal(input['to'], budgetSessionId as string)
           : undefined;
-        const refusal = state && buildBudgetResumeRefusal(state);
         if (refusal) return { behavior: 'deny', message: refusal, interrupt: false };
       }
       this.logger.info(

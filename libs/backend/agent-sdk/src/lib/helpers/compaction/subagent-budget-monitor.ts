@@ -615,13 +615,18 @@ export class SubagentBudgetMonitor {
     ) {
       return;
     }
-    const agentId = this.registry.get(toolCallId)?.agentId;
+    const { record } = this.resolveRegistryRecord(session, toolCallId);
+    const agentId = record?.agentId;
     const paths = this.handoffFiles.paths(session.sessionId, toolCallId);
     if (!agentId || !paths) {
+      this.logger.debug('[SubagentBudgetMonitor] Near-budget warning deferred', {
+        sessionId: session.sessionId, toolCallId,
+        missingAgentId: !agentId, missingPaths: !paths,
+      });
       return;
     }
     state.warnedAgentId = agentId;
-    state.warnedTaskId = session.startedTasks.get(toolCallId)?.taskId ?? this.registry.get(toolCallId)?.taskId;
+    state.warnedTaskId = session.startedTasks.get(toolCallId)?.taskId ?? record?.taskId;
     state.handoffPaths = paths;
     this.dispatcher.postSubagentNotice(
       agentId,
@@ -691,7 +696,7 @@ export class SubagentBudgetMonitor {
     const session = this.sessions.get(currentId);
     if (session) {
       for (const [toolCallId, state] of session.subagents) {
-        const record = this.registry.get(toolCallId);
+        const { record } = this.resolveRegistryRecord(session, toolCallId);
         if (toolCallId !== agentId && state.stoppedAgentId !== agentId && state.stoppedTeammateName !== agentId && record?.agentId !== agentId && record?.teammateName !== agentId && !(state.stopState === 'none' && session.tasks.get(toolCallId)?.name === agentId)) continue;
         const match: AgentBudgetState = {
           contextTokens: state.lastMessageId === undefined ? null : state.contextTokens,
@@ -723,7 +728,10 @@ export class SubagentBudgetMonitor {
     for (const session of this.sessions.values()) {
       if (session.sessionId !== this.currentSessionId(sessionId)) continue;
       for (const [toolCallId, state] of session.subagents)
-        if (this.registry.get(toolCallId)?.agentId === agentId || state.stoppedAgentId === agentId)
+        if (
+          this.resolveRegistryRecord(session, toolCallId).record?.agentId === agentId ||
+          state.stoppedAgentId === agentId
+        )
           state.transcriptPath = validated;
     }
   }
@@ -1087,6 +1095,18 @@ export class SubagentBudgetMonitor {
    * request), `stopSubagent`, publishing the record to the index, delivery,
    * and the task-folder stub. A stop retry reuses the prepared handoff.
    */
+  private resolveRegistryRecord(session: SessionState, toolCallId: string) {
+    const directRecord = this.registry.get(toolCallId);
+    if (directRecord) return { record: directRecord, registryToolCallId: toolCallId };
+    const taskId = session.startedTasks.get(toolCallId)?.taskId;
+    const hookToolCallId = taskId ? this.registry.getToolCallIdByAgentId(taskId) : null;
+    const hookRecord = hookToolCallId ? this.registry.get(hookToolCallId) : null;
+    const record = hookRecord?.parentSessionId === session.sessionId
+      && hookRecord.status === 'running' && hookRecord.agentId === taskId
+      ? hookRecord : null;
+    return { record, registryToolCallId: record?.toolCallId };
+  }
+
   private async stop(
     session: SessionState,
     toolCallId: string,
@@ -1098,19 +1118,8 @@ export class SubagentBudgetMonitor {
     },
   ): Promise<void> {
     const started = session.startedTasks.get(toolCallId);
-    // The SDK's SubagentStart hook can supply a hook UUID instead of the
-    // streamed Task tool_use_id. Its agent_id is the streamed task_id.
-    const directRecord = this.registry.get(toolCallId);
-    const hookToolCallId = !directRecord && started?.taskId
-      ? this.registry.getToolCallIdByAgentId(started.taskId)
-      : undefined;
-    const hookRecord = hookToolCallId ? this.registry.get(hookToolCallId) : null;
-    const matchedHookRecord = hookRecord?.parentSessionId === session.sessionId
-      && hookRecord.status === 'running'
-      && hookRecord.agentId === started?.taskId
-      ? hookRecord : null;
-    const registryRecord = directRecord ?? matchedHookRecord;
-    const registryToolCallId = directRecord ? toolCallId : matchedHookRecord?.toolCallId;
+    const { record: registryRecord, registryToolCallId } =
+      this.resolveRegistryRecord(session, toolCallId);
     const taskId = started?.taskId ?? registryRecord?.taskId;
     if (!taskId) {
       // Neither task_started nor the registry has the task id yet; the next
