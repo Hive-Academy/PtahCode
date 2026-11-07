@@ -88,6 +88,43 @@ describe('laneThreadEntries', () => {
       expect(entries[0]).toMatchObject({ sender: 'From lane Schema', senderKind: 'peer-lane', receipt: fromLane });
     });
 
+    describe('equal previews from two peers', () => {
+      const other = AgentId.from('33333333-3333-4333-8333-333333333333');
+      const names = (id: string) => (id === sender ? 'Schema' : id === other ? 'Docs' : undefined);
+      const fromOther: AgentDeliveryReceipt = { ...fromLane, id: 'peer-2', senderAgentId: other, createdAt: 8, updatedAt: 9 };
+      const messages = [
+        createExecutionChatMessage({ id: 'stream-2', role: 'user', timestamp: 10, rawContent: 'Schema is ready' }),
+        createExecutionChatMessage({ id: 'stream-1', role: 'user', timestamp: 7, rawContent: 'Schema is ready' }),
+      ];
+
+      it('gives each message its own peer in time order, whatever the receipt order', () => {
+        const entries = laneThreadEntries(messages, [fromOther, fromLane], 'Claude', 'Docs', 'Codex', [], undefined, names);
+        expect(entries).toHaveLength(2);
+        expect(entries.map(entry => [entry.id, entry.sender, entry.senderAgentId])).toEqual([
+          ['stream-1', 'From lane Schema', sender],
+          ['stream-2', 'From lane Docs', other],
+        ]);
+      });
+
+      it('prefers an id match and leaves the remaining receipt to the other message', () => {
+        const byId = [messages[0], { ...messages[1], id: 'lane:user:peer-2' }];
+        const entries = laneThreadEntries(byId, [fromLane, fromOther], 'Claude', 'Docs', 'Codex', [], undefined, names);
+        expect(entries.map(entry => [entry.id, entry.senderAgentId])).toEqual([
+          ['lane:user:peer-2', other],
+          ['stream-2', sender],
+        ]);
+      });
+
+      it('names no peer when two candidates cannot be told apart', () => {
+        const tied = { ...fromOther, createdAt: fromLane.createdAt };
+        const entries = laneThreadEntries([messages[1]], [fromLane, tied], 'Claude', 'Docs', 'Codex', [], undefined, names);
+        const message = entries.find(entry => entry.id === 'stream-1');
+        expect(message).toMatchObject({ sender: 'From another lane', senderKind: 'peer-lane' });
+        expect(message?.senderAgentId).toBeUndefined();
+        expect(entries.filter(entry => entry.id.startsWith('receipt:'))).toHaveLength(1);
+      });
+    });
+
     it('keeps user, parent and own-lane entries on their own kinds', () => {
       const entries = laneThreadEntries([], [{ ...fromLane, id: 'u', sender: 'user' }, { ...fromLane, id: 'p', sender: 'parent' }],
         'Claude', 'Docs', 'Codex', [], { status: 'completed', timestamp: 20 });
