@@ -45,6 +45,8 @@ export interface AccountRenameRequest {
 
 /** Design capability map "Pending completion instruction": the state word of a pending sign-in. */
 const PENDING_WORD = 'Waiting for Claude window';
+/** The state word of a pending sign-in that opened no window (the host sent a terminal script instead). */
+const PENDING_TERMINAL_WORD = 'Waiting for sign-in: use terminal';
 
 /** Dot ink per state; status is always dot + word. */
 const STATE_DOT: Readonly<Record<ProviderAccountState, string>> = {
@@ -300,7 +302,9 @@ export class AccountDetailViewComponent {
   protected readonly attention = computed(() => ATTENTION_STATES.has(this.account().state));
   protected readonly stateDot = computed(() => STATE_DOT[this.account().state]);
   protected readonly stateWord = computed(() =>
-    this.pending() ? PENDING_WORD : STATE_LABEL[this.account().state],
+    this.pending()
+      ? this.fallbackShown() ? PENDING_TERMINAL_WORD : PENDING_WORD
+      : STATE_LABEL[this.account().state],
   );
   protected readonly resumeUnavailable = computed(
     () => this.account().activeRunCount > 0 && this.account().state !== 'signed-in',

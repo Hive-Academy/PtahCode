@@ -6,6 +6,18 @@ import type { ClaudeAuthContext } from './claude-route-certifier';
 
 const LOGIN_ARGS = ['auth', 'login', '--claudeai'] as const;
 const LOCAL_NO_PROXY = '127.0.0.1,localhost';
+/**
+ * Desktop-session names the posix login keeps on top of the certified
+ * allowlist. Without a display and the session bus, `claude auth login` does
+ * not try to open a browser and only prints the sign-in URL. They are kept for
+ * this login only (the user's own terminal), never for a certified launch.
+ */
+export const CLAUDE_POSIX_LOGIN_DESKTOP_KEYS = Object.freeze([
+  'DISPLAY',
+  'WAYLAND_DISPLAY',
+  'XAUTHORITY',
+  'DBUS_SESSION_BUS_ADDRESS',
+] as const);
 /** A posix name that `${NAME+...}` can reference. `PROGRAMFILES(X86)` is not one. */
 const SHELL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** PowerShell treats these as single quotes too, so each is doubled inside a literal. */
@@ -121,6 +133,9 @@ function posixScript(context: ClaudeAuthContext): string {
     for (const name of new Set([upper, upper.toLowerCase()])) {
       inherited.push(`\${${name}+"${name}=$${name}"}`);
     }
+  }
+  for (const name of CLAUDE_POSIX_LOGIN_DESKTOP_KEYS) {
+    inherited.push(`\${${name}+"${name}=$${name}"}`);
   }
   const dir = quotePosix(context.canonicalDir);
   const invocation = [context.executable.command, ...context.executable.prefixArgs].map(quotePosix).join(' ');
