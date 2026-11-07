@@ -26,13 +26,9 @@ A stepper at the top of the page shows where you are.
 
 Ptah scans the workspace and detects the stack. It shows the progress of each phase. You can leave the page: the analysis keeps running. Earlier results appear under **Saved analyses**.
 
-![Analysis step](/screenshots/agents-wizard-step1.webp)
-
 ### 2. Choose agents
 
 Ptah recommends agents for the detected stack. Turn agents on or off.
-
-![Choose agents step](/screenshots/agents-wizard-step3.webp)
 
 ### 3. Generate agents
 
