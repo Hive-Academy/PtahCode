@@ -1,5 +1,8 @@
-import { signal } from '@angular/core';
+import { computed, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
+import { SURFACE_ACTIVE } from '@ptah-extension/core';
+import { provideMarkdownRendering } from '@ptah-extension/markdown';
+import { initialSessionEventState } from '../../services/session-event-reducer';
 import {
   MachinesStore,
   type MachinesError,
@@ -37,7 +40,10 @@ async function flush(): Promise<void> {
   for (let i = 0; i < 10; i++) await Promise.resolve();
 }
 
-async function setup(machines: readonly RemoteMachine[] = [HORUS]) {
+async function setup(
+  machines: readonly RemoteMachine[] = [HORUS],
+  extra: Record<string, unknown> = {},
+) {
   TestBed.resetTestingModule();
   const list = signal<readonly RemoteMachine[]>(machines);
   const store = {
@@ -61,10 +67,20 @@ async function setup(machines: readonly RemoteMachine[] = [HORUS]) {
     add: jest.fn(),
     pair: jest.fn().mockResolvedValue(ok(HORUS)),
     pairViaSsh: jest.fn(),
+    // The detail's session list (Batch 25).
+    workspaces: () => signal([]),
+    sessionsByWorkspace: () => signal([]),
+    loadWorkspaces: jest.fn().mockResolvedValue(ok(undefined)),
+    loadSessions: jest.fn().mockResolvedValue(ok(undefined)),
+    ...extra,
   };
   TestBed.configureTestingModule({
     imports: [MachinesViewComponent],
-    providers: [{ provide: MachinesStore, useValue: store }],
+    providers: [
+      { provide: MachinesStore, useValue: store },
+      { provide: SURFACE_ACTIVE, useValue: signal(true) },
+      provideMarkdownRendering({ extensions: 'basic' }),
+    ],
   });
   const fixture = TestBed.createComponent(MachinesViewComponent);
   document.body.appendChild(fixture.nativeElement);
@@ -331,6 +347,59 @@ describe('MachinesViewComponent', () => {
     expect(q(fixture, 'add-machine-form')).not.toBeNull();
     await click(fixture, 'add-machine-cancel');
     expect(q(fixture, 'machine-detail')).not.toBeNull();
+  });
+});
+
+describe('MachinesViewComponent remote sessions', () => {
+  it('opens a listed session in the pane and goes back to the machine', async () => {
+    const workspace = { workspaceId: 'w1', name: 'notes', path: '~/work/notes' };
+    const session = {
+      sessionId: 's1',
+      title: 'Summarise sprint log',
+      state: 'idle' as const,
+      updatedAt: 1,
+      provider: 'claude',
+      logged: true,
+    };
+    const openSession = jest.fn().mockResolvedValue(ok(undefined));
+    const closeSession = jest.fn().mockResolvedValue(ok(undefined));
+    const { fixture } = await setup([HORUS], {
+      workspaces: () => signal([workspace]),
+      sessionsByWorkspace: () => signal([{ workspace, sessions: [session] }]),
+      machine: () => computed(() => HORUS),
+      sessionView: () =>
+        signal({
+          ...initialSessionEventState('s1'),
+          mode: 'log',
+          machineId: 'm1',
+          machineState: 'connected',
+          stale: false,
+          watchOnly: false,
+          lockUnavailable: false,
+          catchingUp: false,
+          error: null,
+        }),
+      openSession,
+      closeSession,
+    });
+    const element = fixture.nativeElement as HTMLElement;
+    element
+      .querySelector<HTMLButtonElement>('[data-testid="remote-session-open"]')
+      ?.click();
+    fixture.detectChanges();
+    await flush();
+    fixture.detectChanges();
+    expect(openSession).toHaveBeenCalledWith('m1', 's1');
+    expect(
+      element.querySelector('[data-testid="remote-session-title"]')?.textContent?.trim(),
+    ).toBe('Summarise sprint log');
+
+    element
+      .querySelector<HTMLButtonElement>('[data-testid="machines-session-back"]')
+      ?.click();
+    fixture.detectChanges();
+    expect(closeSession).toHaveBeenCalledWith('m1', 's1');
+    expect(element.querySelector('[data-testid="remote-session-list"]')).not.toBeNull();
   });
 });
 

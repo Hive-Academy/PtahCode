@@ -45,6 +45,27 @@ export function displayText(
   return points.slice(0, limit).join('').trimEnd() + ELLIPSIS;
 }
 
+/**
+ * The block form of {@link displayText} for worker-supplied text that must be
+ * shown whole, such as the arguments of a tool request (design 4.7, D8):
+ * the same control, bidi and zero-width characters are removed, but nothing
+ * is cut, spacing is kept, and line breaks stay (`\r\n` and `\r` become
+ * `\n`; tabs stay). Other separating controls become a space. Bind the result
+ * by interpolation inside a `pre`, never `[innerHTML]`.
+ */
+export function displayBlockText(value: string | null | undefined): string {
+  if (value === null || value === undefined) return '';
+  return value
+    .replace(/\r\n?/g, '\n')
+    .replace(UNSAFE_CHARACTERS, (char) =>
+      char === '\n' || char === '\t'
+        ? char
+        : SEPARATING_CONTROL.test(char)
+          ? ' '
+          : '',
+    );
+}
+
 /** Template form of {@link displayText}: `{{ name | displayText }}`. */
 @Pipe({ name: 'displayText', standalone: true })
 export class DisplayTextPipe implements PipeTransform {

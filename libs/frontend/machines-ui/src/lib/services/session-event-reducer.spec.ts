@@ -1,4 +1,5 @@
 import type { MachinesEventPayload } from '@ptah-extension/shared';
+import { REMOTE_PERMISSION_TIMEOUT_BY } from '../utils/remote-session-copy';
 import {
   MAX_HELD_EVENTS,
   initialSessionEventState,
@@ -229,5 +230,38 @@ describe('reduceSessionEvent', () => {
     expect(midTurn.pendingPermissions.map((request) => request.id)).toEqual([
       'p1',
     ]);
+  });
+  it('keeps a request the worker denied on timeout until the next turn', () => {
+    const log = referenceLog();
+    const request = sessionEvent(7, 'permission:request', {
+      id: 'p1',
+      toolName: 'Bash',
+      toolInput: { command: 'ls' },
+    });
+    const timedOut = run(attachedLog(), [
+      ...events(log.slice(0, 6)),
+      ...events([
+        request,
+        sessionEvent(8, 'worker:permission.answered', {
+          requestId: 'p1',
+          decision: 'deny',
+          by: REMOTE_PERMISSION_TIMEOUT_BY,
+        }),
+      ]),
+    ]).state;
+    expect(timedOut.pendingPermissions).toEqual([]);
+    expect(timedOut.timedOutPermissions.map((r) => r.id)).toEqual(['p1']);
+
+    const nextTurn = run(timedOut, [
+      ...events([sessionEvent(9, 'worker:turn.begin', { turnId: 't2' })]),
+    ]).state;
+    expect(nextTurn.timedOutPermissions).toEqual([]);
+  });
+
+  it('an answer by someone else is not a timeout', () => {
+    const answered = run(attachedLog(), events(referenceLog().slice(0, 8)))
+      .state;
+    expect(answered.pendingPermissions).toEqual([]);
+    expect(answered.timedOutPermissions).toEqual([]);
   });
 });

@@ -10,6 +10,7 @@ import {
   toTranscriptEvents,
   type TranscriptEvents,
 } from './transcript-events';
+import { REMOTE_PERMISSION_TIMEOUT_BY } from '../utils/remote-session-copy';
 
 /**
  * Renderer-side reducer for one remote session's `machines:event` stream.
@@ -41,6 +42,9 @@ import {
 
 /** Events held past a gap. Beyond this they are dropped; the replay resends them. */
 export const MAX_HELD_EVENTS = 1_000;
+
+/** Timed-out requests kept for their notice; older ones are dropped. */
+export const MAX_TIMED_OUT_PERMISSIONS = 20;
 
 /**
  * - `attaching` — an attach is outstanding; events are held for it.
@@ -74,6 +78,13 @@ export interface SessionEventState {
   readonly turnId: string | null;
   /** Permission requests the log shows unanswered, in arrival order. */
   readonly pendingPermissions: readonly PermissionRequest[];
+  /**
+   * Requests of the current turn the worker denied because nobody answered
+   * within its deadline (a `worker:permission.answered` with
+   * `by: 'Worker timeout'`, decision 27), kept so the view can say so. A new
+   * turn, a baseline or a new log clears them.
+   */
+  readonly timedOutPermissions: readonly PermissionRequest[];
   /** Holder label of a snapshot another process drives (`drivenBy`). */
   readonly drivenBy: string | null;
   readonly recovery: RemoteSessionRecovery;
@@ -116,6 +127,7 @@ export function initialSessionEventState(sessionId: string): SessionEventState {
     events: EMPTY_TRANSCRIPT_EVENTS,
     turnId: null,
     pendingPermissions: [],
+    timedOutPermissions: [],
     drivenBy: null,
     recovery: 'none',
   };
@@ -178,6 +190,7 @@ function restartLog(
     events: EMPTY_TRANSCRIPT_EVENTS,
     turnId: null,
     pendingPermissions: [],
+    timedOutPermissions: [],
     drivenBy: null,
   };
 }
@@ -197,6 +210,7 @@ function attachSucceeded(
       events: toTranscriptEvents(result.events),
       turnId: null,
       pendingPermissions: [],
+      timedOutPermissions: [],
       drivenBy: result.drivenBy ?? null,
       recovery: 'none',
     };
@@ -314,11 +328,14 @@ function applyEvent(
           parsed.filter((parsedEvent) => parsedEvent !== null),
         ),
         pendingPermissions: [],
+        timedOutPermissions: [],
       };
     }
     case 'worker:turn.begin': {
       const turnId = payload?.['turnId'];
-      return typeof turnId === 'string' ? { ...advanced, turnId } : advanced;
+      return typeof turnId === 'string'
+        ? { ...advanced, turnId, timedOutPermissions: [] }
+        : advanced;
     }
     case 'worker:turn.end':
     case 'worker:turn.interrupted':
@@ -326,11 +343,25 @@ function applyEvent(
     case 'worker:permission.answered': {
       const requestId = payload?.['requestId'];
       if (typeof requestId !== 'string') return advanced;
+      const answered = advanced.pendingPermissions.find(
+        (request) => request.id === requestId,
+      );
+      const timedOut =
+        answered !== undefined &&
+        payload?.['by'] === REMOTE_PERMISSION_TIMEOUT_BY;
       return {
         ...advanced,
         pendingPermissions: advanced.pendingPermissions.filter(
           (request) => request.id !== requestId,
         ),
+        ...(timedOut
+          ? {
+              timedOutPermissions: [
+                ...advanced.timedOutPermissions,
+                answered,
+              ].slice(-MAX_TIMED_OUT_PERMISSIONS),
+            }
+          : {}),
       };
     }
     case 'permission:request': {

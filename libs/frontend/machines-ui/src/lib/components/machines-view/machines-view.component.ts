@@ -32,9 +32,19 @@ import { AddMachinePaneComponent } from '../add-machine-pane/add-machine-pane.co
 import { MachineListComponent } from '../machine-list/machine-list.component';
 import { MachineStatusComponent } from '../machine-status/machine-status.component';
 import { ReadinessPanelComponent } from '../readiness-panel/readiness-panel.component';
+import {
+  RemoteSessionListComponent,
+  type RemoteSessionOpenRequest,
+} from '../remote-session-list/remote-session-list.component';
+import { RemoteSessionViewComponent } from '../remote-session-view/remote-session-view.component';
 
 /** What the right pane shows. */
-export type MachinesPaneMode = 'detail' | 'add' | 'repair' | 'readiness';
+export type MachinesPaneMode =
+  | 'detail'
+  | 'add'
+  | 'repair'
+  | 'readiness'
+  | 'session';
 
 interface MachineBanner {
   readonly role: 'alert' | 'status';
@@ -67,7 +77,8 @@ const CHECKED_ITEMS: readonly string[] = [
  * selected machine is offline or reconnecting, for "Lost contact" and "Next
  * attempt"; it stops otherwise and on destroy.
  *
- * Remote sessions of the selected machine are Batch 25 (C10c).
+ * The detail lists the machine's remote sessions; "Open" shows one session
+ * in the pane, with a way back to the machine.
  */
 @Component({
   selector: 'ptah-machines-view',
@@ -79,6 +90,8 @@ const CHECKED_ITEMS: readonly string[] = [
     MachineStatusComponent,
     AddMachinePaneComponent,
     ReadinessPanelComponent,
+    RemoteSessionListComponent,
+    RemoteSessionViewComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'flex h-full min-h-0 min-w-0 flex-1 bg-base-100' },
@@ -138,6 +151,35 @@ const CHECKED_ITEMS: readonly string[] = [
                 </button>
               </div>
               <ptah-readiness-panel [machine]="machine" />
+            }
+          }
+          @case ('session') {
+            @if (selected(); as machine) {
+              @if (openSession(); as session) {
+                <div class="flex h-full min-h-0 flex-col">
+                  <div class="px-5 pt-3">
+                    <button
+                      type="button"
+                      class="btn btn-ghost btn-xs gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                      data-testid="machines-session-back"
+                      (click)="closeSession()"
+                    >
+                      <lucide-angular
+                        [img]="ArrowLeftIcon"
+                        class="h-3.5 w-3.5"
+                        aria-hidden="true"
+                      />
+                      Back to {{ machineName(machine) }}
+                    </button>
+                  </div>
+                  <ptah-remote-session-view
+                    [machineId]="machine.machineId"
+                    [sessionId]="session.sessionId"
+                    [title]="session.title"
+                    [workspacePath]="session.workspacePath"
+                  />
+                </div>
+              }
             }
           }
           @default {
@@ -285,6 +327,11 @@ const CHECKED_ITEMS: readonly string[] = [
                     }
                   </div>
                 }
+
+                <ptah-remote-session-list
+                  [machine]="machine"
+                  (opened)="showSession($event)"
+                />
               </div>
             } @else if (!store.loading() && store.machines().length === 0) {
               <div
@@ -347,6 +394,9 @@ export class MachinesViewComponent implements OnInit {
     readonly text: string;
   } | null>(null);
   protected readonly now = signal(Date.now());
+  protected readonly openSession = signal<RemoteSessionOpenRequest | null>(
+    null,
+  );
 
   protected readonly checkedItems = CHECKED_ITEMS;
   protected readonly PlusIcon = Plus;
@@ -397,6 +447,17 @@ export class MachinesViewComponent implements OnInit {
       this.actionError.set(null);
     }
     this.selectedId.set(machineId);
+    this.openSession.set(null);
+    this.paneMode.set('detail');
+  }
+
+  protected showSession(session: RemoteSessionOpenRequest): void {
+    this.openSession.set(session);
+    this.paneMode.set('session');
+  }
+
+  protected closeSession(): void {
+    this.openSession.set(null);
     this.paneMode.set('detail');
   }
 

@@ -17,6 +17,7 @@ export {
 } from './lib/services/machines-store';
 export {
   MAX_HELD_EVENTS,
+  MAX_TIMED_OUT_PERMISSIONS,
   initialSessionEventState,
   isCaughtUp,
   reduceSessionEvent,
@@ -43,7 +44,32 @@ export { AddMachinePaneComponent } from './lib/components/add-machine-pane/add-m
 export { ReadinessPanelComponent } from './lib/components/readiness-panel/readiness-panel.component';
 export { CopyCommandComponent } from './lib/components/copy-command/copy-command.component';
 export {
+  RemoteSessionListComponent,
+  type RemoteSessionOpenRequest,
+} from './lib/components/remote-session-list/remote-session-list.component';
+export {
+  RemoteApprovalBlockComponent,
+  type RemoteApprovalDecision,
+  type RemoteApprovalMode,
+} from './lib/components/remote-approval-block/remote-approval-block.component';
+export { ReconnectBannerComponent } from './lib/components/reconnect-banner/reconnect-banner.component';
+export { SessionSyncChipComponent } from './lib/components/reconnect-banner/session-sync-chip.component';
+export {
+  SESSION_SYNC_LABELS,
+  replaySummary,
+  sessionSyncState,
+  type ReplaySummary,
+  type SessionSyncState,
+} from './lib/components/reconnect-banner/session-sync';
+export { RemoteSessionViewComponent } from './lib/components/remote-session-view/remote-session-view.component';
+export {
   DISPLAY_TEXT_MAX_LENGTH,
   DisplayTextPipe,
+  displayBlockText,
   displayText,
 } from './lib/utils/display-text';
+export {
+  PERMISSION_TIMED_OUT_COPY,
+  REMOTE_PERMISSION_TIMEOUT_BY,
+  REMOTE_PERMISSION_TIMEOUT_SEC,
+} from './lib/utils/remote-session-copy';
