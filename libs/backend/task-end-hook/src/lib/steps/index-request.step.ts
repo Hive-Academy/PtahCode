@@ -49,21 +49,32 @@ const CENSUS_FAILED: TaskEndIndexOutcome = {
 };
 
 /**
- * Real path of `p` for comparison; the lexical resolution when it cannot be
- * resolved (a missing directory still compares by its spelling). Case is
- * folded on win32 only.
+ * Real path of `p` for comparison. Only a confirmed missing path (`ENOENT` or
+ * `ENOTDIR`) falls back to its lexical resolution, so a missing root still
+ * compares by its spelling. Any other `realpath` failure (permission, I/O)
+ * returns `null`: the real path is not established and gate 0 fails closed.
+ * Case is folded on win32 only.
  */
-async function comparablePath(p: string): Promise<string> {
+async function comparablePath(p: string): Promise<string | null> {
   let resolved: string;
   try {
     resolved = await fs.realpath(p);
-  } catch {
-    // realpath fails for a missing path or a permission error; the lexical
-    // form is the documented fallback, so a missing root still compares.
+  } catch (error: unknown) {
+    // degradation-audit: reported - a non-missing failure returns `null`,
+    // which fails gate 0 closed (the caller warns); never a real path.
+    if (!isMissingPathError(error)) return null;
     resolved = path.resolve(p);
   }
   const slashed = resolved.replace(/\\/g, '/').replace(/\/+$/, '');
   return process.platform === 'win32' ? slashed.toLowerCase() : slashed;
+}
+
+function isMissingPathError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) {
+    return false;
+  }
+  const code = (error as { readonly code: unknown }).code;
+  return code === 'ENOENT' || code === 'ENOTDIR';
 }
 
 function errorText(error: unknown): string {
@@ -237,17 +248,19 @@ export class IndexRequestStep {
         ? persisted.requestedAt
         : Date.now();
 
-    // Cooldown end (AC 5.3): the other waiting steps of this root join it.
-    this.coordinator.coalesceDeferredInto(mainRoot, runId);
-
     if (!this.coordinator.start(runId, mainRoot, requestedAt)) {
       // The coordinator is shut down: nothing will report this census, so
       // `run` records it interrupted now instead of leaving it to a restart.
+      // The other waiting steps stay deferred: no census exists to join.
       return {
         outcome: { step: STEP, state: 'failed', reason: 'census-interrupted' },
         resumeAt: null,
       };
     }
+
+    // Cooldown end (AC 5.3, D22): only once the census has actually started
+    // do the other waiting steps of this root join it.
+    this.coordinator.coalesceDeferredInto(mainRoot, runId);
     return { outcome: requested, resumeAt: null };
   }
 
@@ -267,6 +280,12 @@ export class IndexRequestStep {
       return false;
     }
     const target = await comparablePath(mainRoot);
+    if (target === null) {
+      this.logger.warn('[task-end-hook] index main root path unverifiable', {
+        runId,
+      });
+      return false;
+    }
     for (const root of roots.value) {
       if ((await comparablePath(root)) === target) return true;
     }

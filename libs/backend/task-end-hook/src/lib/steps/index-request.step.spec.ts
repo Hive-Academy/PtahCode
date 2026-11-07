@@ -397,6 +397,42 @@ describe('IndexRequestStep gate 0 (D6)', () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+  it('fails closed when realpath fails for a reason other than a missing path', async () => {
+    const realpath = fs.promises.realpath;
+    jest
+      .spyOn(fs.promises, 'realpath')
+      .mockImplementation(async (p: fs.PathLike) => {
+        if (String(p) === ROOT) {
+          throw Object.assign(new Error('permission denied'), {
+            code: 'EACCES',
+          });
+        }
+        return realpath(p);
+      });
+    const h = harness();
+    h.store.add('run-a');
+    const result = await h.step.run(h.record('run-a'));
+
+    expect(result.outcome).toEqual({
+      step: 'index',
+      state: 'skipped',
+      reason: 'main-root-not-open',
+    });
+    expect(h.census.requests).toHaveLength(0);
+    expect(h.logger.warn).toHaveBeenCalledWith(
+      '[task-end-hook] index main root path unverifiable',
+      { runId: 'run-a' },
+    );
+  });
+
+  it('compares a confirmed missing root (ENOENT) by its lexical spelling', async () => {
+    const h = harness();
+    h.store.add('run-a');
+    const result = await h.step.run(h.record('run-a'));
+
+    expect(fs.existsSync(ROOT)).toBe(false);
+    expect(result.outcome).toMatchObject({ reason: 'census-requested' });
+  });
 });
 
 describe('IndexRequestStep decision order 1-6', () => {
@@ -695,5 +731,58 @@ describe('IndexRequestStep cooldown window (AC 5.3)', () => {
       reason: 'coalesced',
       joined: { source: 'hook-run', runId: 'run-a' },
     });
+  });
+
+  it('shutdown before the cooldown-end request leaves both waiting runs deferred', async () => {
+    const h = harness();
+    h.census.indexedAt = clock;
+    clock += 1000;
+    for (const runId of ['run-a', 'run-b', 'run-c']) {
+      h.store.add(runId);
+      expect((await h.step.run(h.record(runId))).outcome).toMatchObject({
+        reason: 'census-cooldown',
+      });
+    }
+
+    // Shutdown disposes the coordinator as the cooldown ends.
+    clock = (h.census.indexedAt ?? 0) + COOLDOWN_MS;
+    h.coordinator.dispose();
+    const owner = await h.step.run(h.record('run-a'));
+
+    expect(owner.outcome).toMatchObject({
+      state: 'failed',
+      reason: 'census-interrupted',
+    });
+    expect(h.census.requests).toHaveLength(0);
+    for (const runId of ['run-b', 'run-c']) {
+      expect(h.store.index(runId)).toEqual({
+        step: 'index',
+        state: 'deferred',
+        reason: 'census-cooldown',
+      });
+    }
+    // The waiting runs can still re-enter: a fresh coordinator after the
+    // restart starts one census for them.
+    const restarted = new CensusCoordinator(
+      h.store as unknown as ITaskEndStore,
+      h.census,
+      h.logger,
+    );
+    const step = new IndexRequestStep(
+      h.store as unknown as ITaskEndStore,
+      h.census,
+      h.activity,
+      restarted,
+      { read: () => settingsWith(COOLDOWN_MS) },
+      h.logger,
+    );
+    expect((await step.run(h.record('run-b'))).outcome).toMatchObject({
+      reason: 'census-requested',
+    });
+    expect(h.store.index('run-c')).toMatchObject({
+      reason: 'coalesced',
+      joined: { source: 'hook-run', runId: 'run-b' },
+    });
+    expect(h.census.requests).toHaveLength(1);
   });
 });

@@ -27,7 +27,6 @@ import {
   type TaskStatus,
 } from '@ptah-extension/shared';
 import { TASK_ID_PATTERN } from '@ptah-extension/shared/schemas';
-import { parseTaskFile } from '@ptah-extension/task-specs';
 import {
   WORKTREE_GIT_TIMEOUT_MS,
   type Logger,
@@ -46,20 +45,24 @@ import {
   type DisposalArchiveDestination,
   type DisposalCarrier,
   type DisposalHarvestOutcome,
-  type DisposalIgnoredFile,
   type DisposalIgnoredFiles,
   type DisposalInputRecord,
   type DisposalLinks,
   type DisposalMerge,
   type DisposalOpenPr,
-  type DisposalPathResolution,
   type DisposalPorcelain,
   type DisposalWorktreeEntry,
 } from './disposal-input';
+import { resolveCandidatePath } from './candidate-path.resolver';
+import { isMissing, realpathOrNull } from './fs-probe';
+import { parseGitStatusPorcelainZ } from './git-porcelain.parser';
+import { walkIgnored } from './ignored-files.walker';
 import {
-  parseGitStatusPorcelainZ,
-  type GitIgnoredEntry,
-} from './git-porcelain.parser';
+  readCarrier,
+  readCarrierFile,
+  readContextWorktreeLine,
+  readdirOrEmpty,
+} from './task-spec.reader';
 
 /** Codes recorded in `probeErrors`; never free text (AC 6.6). */
 export const DISPOSAL_PROBE_ERRORS = {
@@ -166,8 +169,6 @@ type OtherTaskIndex =
 
 type OriginMainState = 'present' | 'absent' | 'error' | 'not-probed';
 
-/** Bounded reads: carriers and context files are small text files. */
-const MAX_SPEC_FILE_BYTES = 1024 * 1024;
 /** Spec folders scanned per root for other tasks' claims. */
 const MAX_SPEC_FOLDERS = 10_000;
 /** `git worktree list` output ceiling. */
@@ -361,7 +362,10 @@ export class DisposalInputCollector {
           trackedChanges: status.trackedChanges,
           untrackedNonIgnored: status.untrackedNonIgnored,
         };
-        ignoredFiles = await walkIgnored(realPath, status.ignored, settings);
+        ignoredFiles = await walkIgnored(realPath, status.ignored, {
+          maxFiles: settings.archiveMaxFiles,
+          maxBytes: settings.archiveMaxBytes,
+        });
         if (ignoredFiles.kind === 'error')
           probeErrors.push(DISPOSAL_PROBE_ERRORS.ignoredWalk);
       } else {
@@ -764,21 +768,6 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function isMissing(error: unknown): boolean {
-  const code = (error as NodeJS.ErrnoException | null)?.code;
-  return code === 'ENOENT' || code === 'ENOTDIR';
-}
-
-async function realpathOrNull(target: string): Promise<string | null> {
-  try {
-    return await fs.realpath(target);
-  } catch {
-    // degradation-audit: reported - callers record `null` as a probe-error
-    // code (or fall back to the lexical path key), never as a pass.
-    return null;
-  }
-}
-
 /** De-duplication keys: the real path, else the resolved lexical path. */
 class PathKeyCache {
   private readonly cache = new Map<string, string>();
@@ -817,230 +806,5 @@ class CandidateSet {
       key,
       sources: value.sources,
     }));
-  }
-}
-
-/** Reads a small regular file without following a symlink at its path. */
-async function readSmallFile(
-  file: string,
-): Promise<string | 'absent' | 'unreadable'> {
-  try {
-    const info = await fs.lstat(file);
-    if (!info.isFile() || info.size > MAX_SPEC_FILE_BYTES) return 'unreadable';
-    return await fs.readFile(file, 'utf8');
-  } catch (error: unknown) {
-    return isMissing(error) ? 'absent' : 'unreadable';
-  }
-}
-
-async function readCarrierFile(
-  file: string,
-  taskId: string,
-): Promise<TaskStatus | 'absent' | 'unparseable'> {
-  const raw = await readSmallFile(file);
-  if (raw === 'absent') return 'absent';
-  if (raw === 'unreadable') return 'unparseable';
-  const parsed = parseTaskFile(taskId, raw);
-  return parsed.kind === 'task' ? parsed.task.status : 'unparseable';
-}
-
-/** P2: this task's carrier in the root it was seen in. */
-async function readCarrier(
-  seenRoot: string,
-  taskId: string,
-): Promise<DisposalCarrier> {
-  const status = await readCarrierFile(
-    path.join(seenRoot, '.ptah', 'specs', taskId, 'task.md'),
-    taskId,
-  );
-  return status === 'absent' || status === 'unparseable'
-    ? { kind: 'unparseable' }
-    : { kind: 'ok', status };
-}
-
-type ContextLine =
-  | { readonly kind: 'ok'; readonly path: string | null }
-  | { readonly kind: 'error' };
-
-/**
- * P3 (c): the first absolute path token on the first non-blank line after a
- * `## Worktree` heading. Backticks and trailing punctuation around the token
- * are stripped; nothing else is normalised (the path must match exactly).
- */
-async function readContextWorktreeLine(
-  root: string,
-  taskId: string,
-): Promise<ContextLine> {
-  const raw = await readSmallFile(
-    path.join(root, '.ptah', 'specs', taskId, 'context.md'),
-  );
-  if (raw === 'absent') return { kind: 'ok', path: null };
-  if (raw === 'unreadable') return { kind: 'error' };
-  return { kind: 'ok', path: worktreeLinePath(raw) };
-}
-
-export function worktreeLinePath(markdown: string): string | null {
-  const lines = markdown.split(/\r?\n/);
-  const heading = lines.findIndex((line) => /^##\s+Worktree\s*$/.test(line));
-  if (heading === -1) return null;
-  for (let i = heading + 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (line.length === 0) continue;
-    if (line.startsWith('#')) return null;
-    for (const raw of line.split(/\s+/)) {
-      const token = raw.replace(/^[`'"(]+/, '').replace(/[`'"),.;:]+$/, '');
-      if (isAbsoluteToken(token)) return token;
-    }
-    return null;
-  }
-  return null;
-}
-
-function isAbsoluteToken(token: string): boolean {
-  return path.isAbsolute(token) && token.length > 1;
-}
-
-async function readdirOrEmpty(dir: string): Promise<string[]> {
-  try {
-    return await fs.readdir(dir);
-  } catch (error: unknown) {
-    if (isMissing(error)) return [];
-    throw error;
-  }
-}
-
-type ResolvedCandidate = {
-  readonly dirExists: boolean;
-  readonly resolution: DisposalPathResolution;
-};
-
-/**
- * P5 inputs: the real path when the candidate exists, otherwise the real
- * path of the nearest existing parent plus the raw lexical segments below it
- * (AC 4.10). Segments are not normalised, so `..` reaches the decision.
- */
-async function resolveCandidatePath(
-  worktreePath: string,
-): Promise<ResolvedCandidate> {
-  if (!path.isAbsolute(worktreePath))
-    return { dirExists: false, resolution: { kind: 'error' } };
-  try {
-    const realPath = await fs.realpath(worktreePath);
-    const info = await fs.lstat(realPath);
-    return {
-      dirExists: info.isDirectory(),
-      resolution: { kind: 'resolved', realPath },
-    };
-  } catch (error: unknown) {
-    if (!isMissing(error))
-      return { dirExists: false, resolution: { kind: 'error' } };
-  }
-
-  const root = path.parse(worktreePath).root;
-  const rest = worktreePath.slice(root.length);
-  const trimmed = rest.endsWith(path.sep) ? rest.slice(0, -1) : rest;
-  const segments = trimmed.length === 0 ? [] : trimmed.split(path.sep);
-  for (let i = segments.length - 1; i >= 0; i--) {
-    const prefix = root + segments.slice(0, i).join(path.sep);
-    try {
-      const parentRealPath = await fs.realpath(prefix);
-      return {
-        dirExists: false,
-        resolution: {
-          kind: 'missing',
-          nearestParentRealPath: parentRealPath,
-          remainingSegments: segments.slice(i),
-        },
-      };
-    } catch (error: unknown) {
-      if (!isMissing(error))
-        return { dirExists: false, resolution: { kind: 'error' } };
-    }
-  }
-  return { dirExists: false, resolution: { kind: 'error' } };
-}
-
-/** Matches the decision's top-level allow-list rule. */
-function isAllowListed(relPath: string): boolean {
-  return DISPOSAL_ARCHIVE_ALLOW_LIST.some((entry) => {
-    const dir = entry.endsWith('/') ? entry : `${entry}/`;
-    return relPath === dir.slice(0, -1) || relPath.startsWith(dir);
-  });
-}
-
-/**
- * P7 ignored files with sizes. Descends only into ignored directories that
- * are not allow-listed, counts with `lstat` (a symlink counts as itself and
- * is never followed), and stops at `archiveMaxFiles + 1` files or
- * `archiveMaxBytes + 1` bytes: the result is then `truncated`. Directories
- * visited are bounded by the same file cap plus one; beyond it the walk is
- * an `error` (a directory tree that large is not provably small).
- */
-async function walkIgnored(
-  worktreeRoot: string,
-  ignored: readonly GitIgnoredEntry[],
-  settings: DisposalCollectorSettings,
-): Promise<DisposalIgnoredFiles> {
-  const files: DisposalIgnoredFile[] = [];
-  const fileCap = settings.archiveMaxFiles + 1;
-  const byteCap = settings.archiveMaxBytes + 1;
-  let bytes = 0;
-  let directories = 0;
-
-  const count = (relPath: string, size: number): boolean => {
-    files.push({ relPath, bytes: size });
-    bytes += size;
-    return files.length >= fileCap || bytes >= byteCap;
-  };
-
-  const stack: string[] = [];
-  try {
-    for (const item of ignored) {
-      if (isAllowListed(item.relPath)) continue;
-      if (item.isDirectory) {
-        stack.push(item.relPath);
-        continue;
-      }
-      const info = await lstatOrNull(path.join(worktreeRoot, item.relPath));
-      if (info !== null && count(item.relPath, info.size))
-        return { kind: 'truncated' };
-    }
-    while (stack.length > 0) {
-      const relDir = stack.pop() as string;
-      directories += 1;
-      if (directories > fileCap) return { kind: 'error' };
-      let names: string[];
-      try {
-        names = await fs.readdir(path.join(worktreeRoot, relDir));
-      } catch (error: unknown) {
-        if (isMissing(error)) continue;
-        throw error;
-      }
-      for (const name of names.sort()) {
-        const relPath = `${relDir}/${name}`;
-        const info = await lstatOrNull(path.join(worktreeRoot, relPath));
-        if (info === null) continue;
-        if (info.isDirectory()) {
-          stack.push(relPath);
-        } else if (count(relPath, info.size)) {
-          return { kind: 'truncated' };
-        }
-      }
-    }
-  } catch {
-    // An entry could not be read (permissions, I/O): the archive size is
-    // unknown, which P7 records as precondition-unverifiable.
-    return { kind: 'error' };
-  }
-  return { kind: 'ok', files };
-}
-
-/** `lstat`, or `null` when the entry vanished during the walk. */
-async function lstatOrNull(target: string) {
-  try {
-    return await fs.lstat(target);
-  } catch (error: unknown) {
-    if (isMissing(error)) return null;
-    throw error;
   }
 }

@@ -760,6 +760,24 @@ describe('DisposeEvaluateStep', () => {
     expectReadOnly(tooMany);
   });
 
+  it('records precondition-unverifiable when an ignored entry vanished after git status (L3)', async () => {
+    const a = makeWorktree(`a-${TASK}`);
+    const h = harness({
+      script: {
+        worktrees: [{ path: a, branch: `feat/${TASK}` }],
+        // Neither entry exists any more when the archive census runs.
+        status: { [a]: '!! gone.log\0!! gone-dir/\0' },
+      },
+    });
+
+    await h.step.run(makeRun(), signal());
+
+    expect(
+      reasonOf(h.store.dispose()[0].outcome as TaskEndDisposeOutcome),
+    ).toBe('blocked/precondition-unverifiable');
+    expectReadOnly(h);
+  });
+
   it('skips P7 for a listed worktree whose directory is missing', async () => {
     const gone = path.join(agentDir, `gone-${TASK}`);
     const h = harness({

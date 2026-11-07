@@ -115,6 +115,13 @@ Edge cases:
 
 Phase review: code-logic (codex, different family) on the combined diff after Batch 10 commits, plus code-style (new public API: shared types, new library ports, task-specs settle signal).
 
+Phase 1 review — COMPLETE (2026-11-07). Implementer family claude; reviewer family codex.
+
+- Round 0 (codex): REVISE — L1 (Serious: joined index steps stranded as `succeeded/coalesced` when start refuses), L2 (Moderate: `comparablePath` lexical fallback on any realpath error), L3 (Moderate: vanished ignored entry silently skipped), S1 (Serious style: `disposal-input.collector.ts` 1,046 lines). Reviews: `code-logic-review.md`, `code-style-review.md`.
+- Fix round 1: `phase-1-fix-report.md` — start before coalesce (L1); `comparablePath` fails closed to `main-root-not-open` (L2); every vanish during the ignored walk maps to `error` -> `blocked/precondition-unverifiable` (L3); collector split into `task-spec.reader.ts`, `ignored-files.walker.ts`, `candidate-path.resolver.ts`, `fs-probe.ts` (S1, collector 810 lines).
+- Round 1 re-review (codex, scoped to the fixes): logic APPROVED 8/10, style APPROVED 8/10, no new defects. File: `phase-1-round-1-review.md`; `## Round 1` sections appended to both review files.
+- Revise rounds used: 1 of max 2. Scoped verify `npm run verify -- -p task-end-hook` (lint, typecheck, test) exit 0 on the fix tree, 2026-11-07T13:48Z.
+
 ## Batch 1: Closed outcome types and migration 0072 Part A — COMPLETE (commit 4b0efa0b4)
 
 - Recommended executor: backend-developer subagent
@@ -356,7 +363,7 @@ Phase review: code-logic (codex, different family) on the combined diff after Ba
 
 - Team-leader acceptance (2026-11-06): 4 files under `src/lib/steps/`. `mapCurationResult` is an exhaustive switch with a `never` default over three `satisfies`-checked tables, total over all 11 `TaskEndCuratorReason` codes; mapping matches plan 6.1 for attempts 1 and 2. `markStepRunning` precedes each port call; `upsertStep` gets the literal step; `expandStep` replaces the placeholder; a port throw or rejection records `failed/curator-failed` or `failed/harvest-failed` with the error text in a debug line only (specs assert no secret text in the stored JSON). Harvest never records `not-completed`. The earlier Batch 4/5 red runs were Batch 7 mid-edit (`fromStatus: 'review'`, fixed to `in_review`). Same fresh combined verify as Batch 4, exit 0; degradation audit exit 0 (TOTAL 220). Executor decisions accepted as D14-D16.
 
-## Batch 8: Index request step and census coordinator — COMPLETE (commit recorded in Batch 8 acceptance)
+## Batch 8: Index request step and census coordinator — COMPLETE (commit 300e39e29)
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
