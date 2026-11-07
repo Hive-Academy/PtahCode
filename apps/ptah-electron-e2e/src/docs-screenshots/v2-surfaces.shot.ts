@@ -1,24 +1,36 @@
-import { test, expect } from '../support/fixtures';
+import { test, expect } from './_harness/docs-fixtures';
 import { shoot, sizeForCapture } from './_harness/shooter';
 import { visibleNewSessionTrigger } from '../support/new-session-trigger';
 
 /** Ptah v2 README frames. All renderer RPC calls use the e2e fake listener. */
 test.describe('docs screenshots — v2 Electron surfaces', () => {
-  test.beforeEach(async ({ electronApp, mainWindow }) => {
-    await sizeForCapture(electronApp, mainWindow);
+  test.beforeEach(async ({ app, page, ui }) => {
+    await ui.installFakeRpcListener();
+    await ui.mockRpc({
+      'workspace:getInfo': { folders: ['C:\\ptah-e2e-ws'], activeFolder: 'C:\\ptah-e2e-ws' },
+      'workspace:switch': { success: true },
+      'auth:getAuthStatus': { authMethod: 'apiKey', hasApiKey: true, availableProviders: [], anthropicProviderId: null },
+      'config:get': {},
+      'editor:detectTargets': { success: true, targets: [] },
+      'cron:list': { jobs: [] },
+      'gateway:listBindings': { bindings: [] },
+      'memory:list': { memories: [], total: 0 },
+    });
+    await ui.prepare();
+    await sizeForCapture(app, page);
   });
 
   // Skipped: the mocked RPC fixture has no data for this surface yet, so the
   // capture shows an empty or error state. Re-enable once its seed exists.
-  test.skip('Voice stage', async ({ ui, mainWindow }) => {
+  test.skip('Voice stage', async ({ ui, page }) => {
     await ui.goto('canvas');
     await ui.pushEvent({ type: 'switchView', payload: { view: 'command-center' } });
-    await expect(mainWindow.locator('ptah-command-center-page')).toBeVisible();
-    await expect(mainWindow.getByRole('main')).toBeVisible();
-    await shoot(mainWindow, 'v2-voice-stage');
+    await expect(page.locator('ptah-command-center-page')).toBeVisible();
+    await expect(page.getByRole('main')).toBeVisible();
+    await shoot(page, 'v2-voice-stage');
   });
 
-  test('Thoth Memory curator', async ({ ui, mainWindow }) => {
+  test('Thoth Memory curator', async ({ ui, page }) => {
     const now = Date.now();
     const entry = (id: string, tier: 'core' | 'recall' | 'archival', subject: string, content: string) => ({
       id, sessionId: null, workspaceRoot: 'C:\\ptah-e2e-ws', tier,
@@ -37,36 +49,36 @@ test.describe('docs screenshots — v2 Electron surfaces', () => {
       'indexing:getStatus': { state: 'ready', lastIndexedAt: now, pipelineEnabled: true },
     });
     await ui.openTab('memory');
-    await expect(mainWindow.getByTestId('memory-entry-row')).toHaveCount(3);
-    await shoot(mainWindow, 'v2-thoth-memory');
+    await expect(page.getByTestId('memory-entry-row')).toHaveCount(3);
+    await shoot(page, 'v2-thoth-memory');
   });
 
   // Skipped: the mocked RPC fixture has no data for this surface yet, so the
   // capture shows an empty or error state. Re-enable once its seed exists.
-  test.skip('Canvas session rail', async ({ ui, mainWindow }) => {
+  test.skip('Canvas session rail', async ({ ui, page }) => {
     await ui.goto('canvas');
     for (let index = 0; index < 3; index++) {
-      await (await visibleNewSessionTrigger(mainWindow)).click();
-      await mainWindow.getByRole('button', { name: 'Create', exact: true }).click();
+      await (await visibleNewSessionTrigger(page)).click();
+      await page.getByRole('button', { name: 'Create', exact: true }).click();
     }
-    await expect(mainWindow.locator('ptah-canvas-rail')).toBeVisible();
-    await expect(mainWindow.locator('[data-testid="canvas-tile"]')).toHaveCount(3);
-    await shoot(mainWindow, 'v2-session-rail');
+    await expect(page.locator('ptah-canvas-rail')).toBeVisible();
+    await expect(page.locator('[data-testid="canvas-tile"]')).toHaveCount(3);
+    await shoot(page, 'v2-session-rail');
   });
 
   // Skipped: the mocked RPC fixture has no data for this surface yet, so the
   // capture shows an empty or error state. Re-enable once its seed exists.
-  test.skip('Apps surface', async ({ ui, mainWindow }) => {
+  test.skip('Apps surface', async ({ ui, page }) => {
     await ui.goto('canvas');
     await ui.pushEvent({ type: 'switchView', payload: { view: 'apps' } });
-    await expect(mainWindow.locator('ptah-apps-page')).toBeVisible();
-    await expect(mainWindow.locator('ptah-apps-surface-panel')).toContainText('Revenue');
-    await shoot(mainWindow, 'v2-apps');
+    await expect(page.locator('ptah-apps-page')).toBeVisible();
+    await expect(page.locator('ptah-apps-surface-panel')).toContainText('Revenue');
+    await shoot(page, 'v2-apps');
   });
 
   // Skipped: the mocked RPC fixture has no data for this surface yet, so the
   // capture shows an empty or error state. Re-enable once its seed exists.
-  test.skip('Attention bell', async ({ ui, mainWindow }) => {
+  test.skip('Attention bell', async ({ ui, page }) => {
     await ui.pushEvent({
       type: 'permission:request',
       payload: {
@@ -83,22 +95,22 @@ test.describe('docs screenshots — v2 Electron surfaces', () => {
         surfaceMode: false,
       },
     });
-    await mainWindow.getByTestId('notification-center-bell').click();
-    const panel = mainWindow.getByTestId('notification-center-panel');
+    await page.getByTestId('notification-center-bell').click();
+    const panel = page.getByTestId('notification-center-panel');
     await expect(panel).toBeVisible();
     await expect(panel).toContainText('Permission');
-    await shoot(mainWindow, 'v2-attention-bell');
+    await shoot(page, 'v2-attention-bell');
   });
 
   // Skipped: the mocked RPC fixture has no data for this surface yet, so the
   // capture shows an empty or error state. Re-enable once its seed exists.
-  test.skip('Display panel', async ({ ui, mainWindow }) => {
+  test.skip('Display panel', async ({ ui, page }) => {
     await ui.goto('canvas');
-    await (await visibleNewSessionTrigger(mainWindow)).click();
-    await mainWindow.getByRole('button', { name: 'Create', exact: true }).click();
-    await expect(mainWindow.getByTestId('display-sheet')).toBeVisible();
-    await mainWindow.getByTestId('display-sheet-tab').click();
-    await expect(mainWindow.getByTestId('display-sheet-region')).toContainText('Revenue');
-    await shoot(mainWindow, 'v2-display-panel');
+    await (await visibleNewSessionTrigger(page)).click();
+    await page.getByRole('button', { name: 'Create', exact: true }).click();
+    await expect(page.getByTestId('display-sheet')).toBeVisible();
+    await page.getByTestId('display-sheet-tab').click();
+    await expect(page.getByTestId('display-sheet-region')).toContainText('Revenue');
+    await shoot(page, 'v2-display-panel');
   });
 });

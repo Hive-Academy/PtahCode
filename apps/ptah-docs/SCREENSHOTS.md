@@ -1,49 +1,25 @@
 # Screenshots
 
-PNG files live in `apps/ptah-docs/public/screenshots/` and are served at `/screenshots/<name>.png`.
-Reference them from pages in `apps/ptah-docs/src/content/docs/`.
+WebP files live in `apps/ptah-docs/public/screenshots/` and are served at `/screenshots/<name>.webp`. Reference them from pages in `apps/ptah-docs/src/content/docs/`.
 
-**Specs** (the capture harness, `apps/ptah-electron-e2e/src/docs-screenshots/_harness/shooter.ts`, follows these)
+## Capture
 
-- Format: PNG (lossless), fall back to WebP if size matters
-- Width: 1600px for full-window shots, 800px for panel crops (retina-ready)
-- Theme: dark theme, matching the docs site's dark-first look
+Run the `ptah-docs:screenshots` and `ptah-docs:videos` targets under `node scripts/verify.mjs --exec --task docs-capture -- npx nx run <target>`. They run Playwright against the real Electron app. Screenshot captures use 1600px full windows or focused panel crops and write WebP at quality 90, effort 6. Video captures write MP4 files to `public/assets/videos/`.
+
+Each fixture creates one run directory under `<repo root>/.ptah/tmp/docs-capture/`; an absolute `PTAH_DOCS_CAPTURE_DIR` changes the base directory. The temporary Electron profile, database, `HOME`, `USERPROFILE`, `APPDATA`, and `LOCALAPPDATA` all live there. The app uses the isolated home. Both fixtures check that the real `~/.ptah/settings.json` hash is unchanged after Electron closes. The fixture removes the run directory after closing; Windows file locks may retain it with a stderr notice. Set `PTAH_DOCS_KEEP_CAPTURE=1` to retain it for debugging.
+
+The default source is `%APPDATA%\Ptah Dev`; `PTAH_DOCS_SOURCE_PROFILE` selects another source profile, except the real `~/.ptah` and paths inside it, which are refused. The profile copy allowlist is empty, so ordinary captures copy no files from the source. Saved-session shots run only when `PTAH_DOCS_SESSION_WORKSPACE` explicitly names an existing workspace; otherwise they skip and ordinary shots use the throwaway sample repository. This mode copies only that workspace's `workspace-storage/<base64url-absolute-path>/` folder into the temporary Electron profile and temporary home `.ptah`. It opens the named real workspace, and the app can write into it. Captures may also write synthetic `global-state.json` workspace folders into the temporary profile.
+
+Every screenshot and video must be inspected for private data before commit.
+
+## Not produced by the harness
+
+- `sessions-overview.webp` (used by `sessions/index.mdx`)
+- `sessions-tabs.webp` (used by `sessions/managing-sessions.md`)
+- `sessions-history.webp` (used by `sessions/session-history.md`)
+
+These three images need saved session state. No current shot regenerates them; they are maintained manually until a saved-session capture is available.
 
 ## Check references
 
-```bash
-nx run ptah-docs:check-screenshots   # every /screenshots/... reference resolves
-```
-
-It runs `apps/ptah-docs/scripts/check-screenshot-refs.mjs`, and `nx build ptah-docs` runs the same
-script before `astro build`. The build alone does not catch a missing `/screenshots/...` file.
-
-## Capture workflow
-
-```bash
-nx run ptah-docs:screenshots         # drives the real app, writes public/screenshots/
-```
-
-`screenshots` runs Playwright against the built Electron app
-(`apps/ptah-electron-e2e/docs-screenshots.config.ts`, shot files in
-`apps/ptah-electron-e2e/src/docs-screenshots/*.shot.ts`) and writes PNGs straight into
-`public/screenshots/`. It is NOT part of `nx run ptah-electron-e2e:e2e`: a capture pass writes
-files, so it only runs when asked. Screenshots not covered by a shot file are captured by hand.
-
-How the run is set up (`apps/ptah-electron-e2e/src/docs-screenshots/_harness/`):
-
-- **Real backend, no RPC mocks.** The e2e fixtures replace the whole `rpc` IPC listener, which
-  paints an empty state on every surface. These fixtures only launch and navigate.
-- **A copy of the real profile.** Session metadata lives in the Electron `userData` dir, so a fresh
-  profile has no sessions and no settings. The harness copies the state-bearing part of `~/.ptah`
-  (override with `PTAH_DOCS_SOURCE_PROFILE`) into a temp dir. It does not copy the secret
-  envelopes, and it drops the cached license, so no key, name or email reaches an asset.
-- **A real project for read-only surfaces** (`PTAH_DOCS_WORKSPACE`), **a throwaway sample repo for
-  git surfaces.** The app rewrites `.codex/agents/*.toml` in any workspace it opens, and Source
-  Control row actions stage files for real, so git shots never point at a developer's repository.
-
-Adding a shot: put it in the matching `*.shot.ts`, call `shoot(page, '<filename-without-extension>')`,
-and crop to the subject with `{ crop: locator }`. Re-run the target and look at the PNG before
-committing it.
-
-Do not reference a screenshot for a surface the app does not have. Remove the reference instead.
+Run `node apps/ptah-docs/scripts/check-screenshot-refs.mjs`. It fails if a docs page references a missing screenshot. `ptah-docs:check-screenshots` runs the same check.

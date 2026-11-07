@@ -26,6 +26,8 @@ export interface LaunchOptions {
    * opt out and wait only for Electron's first (preparing) window.
    */
   waitForRenderer?: boolean;
+  /** Playwright video recording for manual documentation capture. */
+  recordVideo?: { dir: string; size: { width: number; height: number } };
 }
 
 const DEFAULT_LAUNCH_TIMEOUT_MS = 30_000;
@@ -111,7 +113,7 @@ export async function launchPtah(
     // Inherited PTAH_DB_PATH is dropped, not merged: a stale value from the
     // shell would silently re-point every spec. A caller that wants a specific
     // database passes it through `opts.env` below.
-    PTAH_DB_PATH: isolatedDbPath(),
+    PTAH_DB_PATH: opts.env?.['PTAH_DB_PATH'] ?? isolatedDbPath(),
     ...(opts.env ?? {}),
   };
   // Publish the effective database back to the Playwright process so a spec
@@ -136,6 +138,7 @@ export async function launchPtah(
     ],
     env: env as Record<string, string>,
     timeout: opts.timeout ?? DEFAULT_LAUNCH_TIMEOUT_MS,
+    ...(opts.recordVideo ? { recordVideo: opts.recordVideo } : {}),
   });
   if (ownsUserDataDir) {
     app.process().on('exit', () => {
