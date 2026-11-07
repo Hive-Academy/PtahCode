@@ -74,11 +74,19 @@ describe('CommandOverlayComponent', () => {
     const { fixture, labels } = setup();
     fixture.componentRef.setInput('visibleLabelIds', ['a', 'b']);
     fixture.detectChanges();
-    expect(labels[1].style.visibility).toBe('visible');
+    expect(labels[1].style.visibility).toBe('');
     fixture.componentRef.setInput('visibleLabelIds', ['a']);
     fixture.detectChanges();
-    expect(labels[0].style.visibility).toBe('visible');
+    expect(labels[0].style.visibility).toBe('');
     expect(labels[1].style.visibility).toBe('hidden');
+  });
+
+  it('clips unpositioned plates below the measured scene header', () => {
+    const { fixture, labels } = setup();
+    fixture.componentRef.setInput('reservedTop', 144);
+    fixture.detectChanges();
+    expect(labels[0].parentElement?.style.clipPath).toBe('inset(144px 0 0)');
+    expect(labels[0].style.transform).toBe('');
   });
 
   it('shows a semantic context ring on the root plate only when verified', () => {

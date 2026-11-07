@@ -1,9 +1,15 @@
 .command-plate {
+  visibility: hidden;
   gap: 2px;
   max-width: 196px;
   padding-block: 5px;
   text-align: center;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+}
+
+/* Scene labels start at 0,0. Reveal them only after the renderer places them. */
+.command-plate[style*='translate3d'] {
+  visibility: visible;
 }
 
 /* Glass on: the plate attribute supplies a local text scrim; drop the flat drop shadow. */
