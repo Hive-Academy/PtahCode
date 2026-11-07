@@ -105,6 +105,10 @@ export type {
   GitCommitOptions,
 } from './services/git-info.service';
 export type { StagedPatchRead } from './services/git/git-staged-patch.reader';
+export {
+  assertSafeRef,
+  GitInvalidRefError,
+} from './services/git/git-ref-guard';
 export type { GitConflictStagesResult } from './services/git/git-operation-actions';
 export {
   execGit,

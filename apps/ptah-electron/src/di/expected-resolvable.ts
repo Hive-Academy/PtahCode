@@ -29,6 +29,7 @@ import {
   REVIEW_LANE_TOKENS,
 } from '@ptah-extension/review-core';
 import { REVIEW_GITHUB_TOKENS } from '@ptah-extension/review-github';
+import { TASK_END_TOKENS } from '@ptah-extension/task-end-hook';
 import { PERSISTENCE_TOKENS } from '@ptah-extension/persistence-sqlite';
 import { CODEX_SIGN_IN_QUIT_HANDLE } from './codex-login-composition';
 
@@ -100,6 +101,18 @@ export const EXPECTED_RESOLVABLE_TOKENS = [
   ['WAL_CHECKPOINT_SCHEDULER', PERSISTENCE_TOKENS.WAL_CHECKPOINT_SCHEDULER],
   // `db:reset` pauses the checkpoint worker through this port (review-11).
   ['SQLITE_EXCLUSIVE_ACCESS', PERSISTENCE_TOKENS.SQLITE_EXCLUSIVE_ACCESS],
+] as const;
+
+/**
+ * Task-end hook services (TASK_2026_886, R6), bound by
+ * `registerTaskEndHookComposition` in phase 2 when SQLite is registered. The
+ * run reader is the slot `PtahAPIBuilder` takes optionally; resolving it
+ * builds the detector with every host port (D39).
+ */
+export const EXPECTED_TASK_END_TOKENS = [
+  ['TASK_END_STORE', TASK_END_TOKENS.STORE],
+  ['TASK_END_WORKER', TASK_END_TOKENS.WORKER],
+  ['TASK_END_RUN_READER', TASK_END_TOKENS.RUN_READER],
 ] as const;
 
 /** Runtime-owned message services, available after phase 2 registration. */

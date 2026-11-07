@@ -142,6 +142,7 @@ export {
   type SpecStatus,
   type SpecSummary,
   type HarvestResult,
+  type TaskHarvestResult,
   type ClearStaleResult,
 } from './lib/spec-harvester.service';
 export {
