@@ -39,9 +39,17 @@ function setup(
   overrides: Partial<RemoteSessionDeps> = {},
 ) {
   const held = new Map<string, string>();
+  /** Purpose and state of a held entry; a drive lock that is held by default. */
+  const heldAs = new Map<string, { purpose: string; state: string }>();
   const lock = {
     held: jest.fn(() =>
-      [...held].map(([sessionId, nonce]) => ({ sessionId, nonce })),
+      [...held].map(([sessionId, nonce]) => ({
+        sessionId,
+        nonce,
+        purpose: 'drive',
+        state: 'held',
+        ...heldAs.get(sessionId),
+      })),
     ),
     release: jest.fn(async (sessionId: string) => {
       held.delete(sessionId);
@@ -108,6 +116,7 @@ function setup(
   return {
     sessions,
     held,
+    heldAs,
     lock,
     permissions,
     requestRelease,
@@ -435,5 +444,149 @@ describe('remote permission expiry (decision 27)', () => {
     await fake.sessions.drain();
     jest.advanceTimersByTime(runtime.REMOTE_PERMISSION_TIMEOUT_MS);
     expect(fake.permissions.handleResponse).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Starts s1, whose engine record keeps this process's drive lock, and lets
+ * its only turn fail (401). `status` answers the engine's `session:status`.
+ */
+async function failedTurnSession(status: () => unknown) {
+  const fake = setup((message, tap) => {
+    if (message.method === 'chat:start') {
+      fake.held.set('s1', 'nonce-s1');
+      tap('session:id-resolved', {
+        tabId: param(message, 'tabId'),
+        realSessionId: 's1',
+      });
+    }
+    if (message.method === 'session:status') return status();
+    return undefined;
+  });
+  // The kernel lock answers with this process's engine record as the holder.
+  fake.lock.holder.mockImplementation(async () =>
+    fake.held.has('s1')
+      ? ({ kind: 'cli', label: 'Ptah (host, PID 1)' } as never)
+      : null,
+  );
+  await fake.sessions.handle(
+    'session.start',
+    { workspaceId: 'ws_1', prompt: 'hi' },
+    grant,
+    peer,
+  );
+  const list = async () =>
+    (
+      (await fake.sessions.handle(
+        'sessions.list',
+        { workspaceId: 'ws_1' },
+        grant,
+        peer,
+      )) as Array<{ state: string; driver?: { label: string } }>
+    )[0];
+  expect(await list()).toMatchObject({ state: 'running' });
+  fake.tap('session:turnFailed', {
+    sessionId: 's1',
+    error: 'authentication_failed',
+  });
+  await settle();
+  expect(fake.held.has('s1')).toBe(true);
+  return { fake, list };
+}
+const engineStatus = (
+  phase?: string,
+  isStreaming = false,
+  pending: { backgroundTasks?: unknown[]; sessionCrons?: unknown[] } = {},
+) =>
+  ok({
+    isActive: true,
+    isStreaming,
+    ...(phase
+      ? {
+          turnState: {
+            phase,
+            revision: 1,
+            backgroundTasks: [],
+            sessionCrons: [],
+            ...pending,
+          },
+        }
+      : {}),
+  });
+
+it.each(['failed', 'idle'])(
+  'lists a session as idle after its turn ended while the engine record of this process keeps its lock (phase %s)',
+  async (phase) => {
+    const { list } = await failedTurnSession(() => engineStatus(phase));
+    const summary = await list();
+    expect(summary.state).toBe('idle');
+    expect(summary.driver).toBeUndefined();
+  },
+);
+
+it.each([
+  [
+    'the engine generates a turn admitted by another path',
+    () => engineStatus('generating', true),
+  ],
+  [
+    'the engine reports background work',
+    () => engineStatus('awaiting-background'),
+  ],
+  [
+    'a failed turn still owns background tasks',
+    () =>
+      engineStatus('failed', false, {
+        backgroundTasks: [{ taskId: 'bg-1', status: 'running' }],
+      }),
+  ],
+  [
+    'a failed turn still has session crons',
+    () =>
+      engineStatus('failed', false, {
+        sessionCrons: [{ id: 'cron-1' }],
+      }),
+  ],
+  ['the engine has no turn state', () => engineStatus()],
+  ['session:status is refused', () => ({ success: false, error: 'refused' })],
+])(
+  'keeps listing an attributable session as running when %s',
+  async (_case, status) => {
+    const { list } = await failedTurnSession(status);
+    expect(await list()).toMatchObject({
+      state: 'running',
+      driver: { label: 'Ptah (host, PID 1)' },
+    });
+  },
+);
+
+it.each([
+  [{ purpose: 'refresh', state: 'held' }],
+  [{ purpose: 'drive', state: 'releasing' }],
+])(
+  'keeps listing an attributable session as running while its lock is held as %o',
+  async (entry) => {
+    const { fake, list } = await failedTurnSession(() =>
+      engineStatus('failed'),
+    );
+    fake.heldAs.set('s1', entry);
+    expect(await list()).toMatchObject({ state: 'running' });
+  },
+);
+
+it('still lists a session held by another process as running', async () => {
+  const fake = setup(() => undefined);
+  fake.lock.holder.mockImplementation(
+    async () => ({ kind: 'desktop', label: 'Desktop' }) as never,
+  );
+  const [summary] = (await fake.sessions.handle(
+    'sessions.list',
+    { workspaceId: 'ws_1' },
+    grant,
+    peer,
+  )) as Array<{ state: string; driver?: { label: string } }>;
+  expect(summary).toMatchObject({
+    state: 'running',
+    driver: { label: 'Desktop' },
   });
 });

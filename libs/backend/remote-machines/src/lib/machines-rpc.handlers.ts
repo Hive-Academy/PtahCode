@@ -21,6 +21,8 @@ const USER_TEXT = {
   SESSION_DRIVEN_ELSEWHERE: 'This session is driven elsewhere.',
   SESSION_DRIVER_LOCK_UNAVAILABLE: 'The session driver lock is unavailable.',
   MACHINE_UNREACHABLE: 'The machine is unreachable.',
+  MACHINE_TRANSCRIPT_UNAVAILABLE:
+    'The session transcript could not be read on the machine. Open the session again, or check the Ptah log on the machine.',
 } as const;
 type MachineCode = keyof typeof USER_TEXT;
 function userError(code: MachineCode): RpcUserError {
@@ -47,7 +49,9 @@ export function mapMachineError(error: unknown): Error {
               ? 'SESSION_DRIVEN_ELSEWHERE'
               : error.code === 'DRIVER_LOCK_UNAVAILABLE'
                 ? 'SESSION_DRIVER_LOCK_UNAVAILABLE'
-                : 'MACHINE_UNREACHABLE';
+                : error.code === 'TRANSCRIPT_UNAVAILABLE'
+                  ? 'MACHINE_TRANSCRIPT_UNAVAILABLE'
+                  : 'MACHINE_UNREACHABLE';
     return userError(code);
   }
   // Keep provider messages out of the RPC response and redact credential-like values in logs.

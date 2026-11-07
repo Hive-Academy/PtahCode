@@ -9,7 +9,11 @@ import type { RpcMethodParams, RpcMethodResult } from '@ptah-extension/shared';
 import { redactText } from './redact';
 
 type LocalMethod =
-  'session:list' | 'chat:start' | 'chat:continue' | 'chat:abort';
+  | 'session:list'
+  | 'session:status'
+  | 'chat:start'
+  | 'chat:continue'
+  | 'chat:abort';
 export interface RpcHandlerPort {
   handleMessage(message: {
     method: string;
@@ -76,6 +80,24 @@ export const IN_PROCESS_SPECS = {
         ),
         total: z.number(),
         hasMore: z.boolean(),
+      })
+      .passthrough(),
+  },
+  // The engine's own turn state: the authoritative "is a turn running" signal
+  // for a session whose record this process keeps between turns.
+  'session:status': {
+    result: z
+      .object({
+        isActive: z.boolean(),
+        isStreaming: z.boolean(),
+        turnState: z
+          .object({
+            phase: z.string(),
+            backgroundTasks: z.array(z.unknown()).optional(),
+            sessionCrons: z.array(z.unknown()).optional(),
+          })
+          .passthrough()
+          .optional(),
       })
       .passthrough(),
   },

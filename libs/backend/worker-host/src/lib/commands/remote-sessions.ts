@@ -325,6 +325,47 @@ export function createRemoteSessions(deps: RemoteSessionDeps): RemoteSessions {
     });
   };
 
+  /**
+   * True when this process's lock on the session is only the engine's idle
+   * record: the engine keeps its record, and so its drive lock, after a turn
+   * ends (success or failure). It needs all of:
+   * - a session this worker started or continued, with no turn of this
+   *   driver that may still run;
+   * - a held drive lock of this process (not a refresh, not releasing);
+   * - the engine's own turn state (`session:status`) saying the turn ended
+   *   (`idle` or `failed`) with no background tasks and no session crons. This covers a turn admitted by any other
+   *   in-process path, which `driver.running` cannot see.
+   * Any doubt (status refused, no turn state, generating, background work)
+   * answers false, so the lock is listed as a running driver.
+   */
+  const idleEngineSession = async (sessionId: string): Promise<boolean> => {
+    if (!attributable(sessionId) || driver.running(sessionId)) return false;
+    const drive = deps.lock
+      .held()
+      .some(
+        (held) =>
+          held.sessionId === sessionId &&
+          held.purpose === 'drive' &&
+          held.state === 'held',
+      );
+    if (!drive) return false;
+    const status = await rpc.call(
+      'session:status',
+      { sessionId },
+      runtime.IN_PROCESS_SPECS['session:status'] as unknown as RpcSpec<
+        RpcMethodResult<'session:status'>
+      >,
+    );
+    if (!status.ok || status.value.isStreaming) return false;
+    const turn = status.value.turnState;
+    // A failed turn keeps the background tasks and crons it reported
+    // (`settleTurn` picks `failed` first): those still count as running.
+    return (
+      (turn?.phase === 'idle' || turn?.phase === 'failed') &&
+      turn.backgroundTasks?.length === 0 &&
+      turn.sessionCrons?.length === 0
+    );
+  };
   const holderOf = async (sessionId: string) => {
     try {
       return await deps.lock.holder(sessionId);
@@ -358,7 +399,11 @@ export function createRemoteSessions(deps: RemoteSessionDeps): RemoteSessions {
         sessions.map(async (session): Promise<RemoteSessionSummary> => {
           sessionIndex.remember(session.id, workspaceId);
           const driving = driver.driving(session.id);
-          const holder = driving ? null : await holderOf(session.id);
+          // The engine's idle record keeps this process's lock between
+          // turns; that lock is not a running driver.
+          const idleHere = !driving && (await idleEngineSession(session.id));
+          const holder =
+            driving || idleHere ? null : await holderOf(session.id);
           const driverInfo = driving
             ? { kind: owner.kind, label: owner.label }
             : holder

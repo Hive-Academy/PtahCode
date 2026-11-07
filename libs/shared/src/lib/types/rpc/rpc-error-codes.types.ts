@@ -74,4 +74,6 @@ export type RpcUserErrorCode =
    */
   | 'MACHINE_NOT_FOUND_OR_FORBIDDEN'
   /** The worker refused the pairing code (wrong, expired or window closed). */
-  | 'MACHINE_PAIRING_REJECTED';
+  | 'MACHINE_PAIRING_REJECTED'
+  /** The worker could not read the session's transcript (attach refresh). */
+  | 'MACHINE_TRANSCRIPT_UNAVAILABLE';
