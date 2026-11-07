@@ -19,6 +19,10 @@ import type {
   MessageStartEvent,
 } from '@ptah-extension/shared';
 import type { TranscriptEvents } from '../services/transcript-events';
+import { remoteMarkdown } from './remote-markdown';
+
+/** File paths whose tool content the shared renderers show as markdown. */
+const MARKDOWN_PATH = /\.(md|mdx|markdown)$/i;
 
 /** One top-level message of a remote transcript, as the view renders it. */
 export interface RemoteTranscriptItem {
@@ -36,6 +40,11 @@ export interface RemoteTranscriptItem {
  *
  * The events are already normalised (one event per slot, `transcript-events`),
  * so each text, thinking and tool-input slot is its whole accumulated value.
+ *
+ * Every string the shared renderers show as markdown passes through
+ * {@link remoteMarkdown} (S6): text and thinking blocks, and the output and
+ * written content of a tool call on a markdown file. Other tool content is
+ * shown in a code block, which is already text.
  */
 export function buildRemoteTranscript(
   events: TranscriptEvents,
@@ -49,7 +58,7 @@ export function buildRemoteTranscript(
     if (start === undefined || start.parentToolUseId) continue;
     const node = buildMessageNode(deps, messageId, state);
     if (node === null) continue;
-    items.push({ id: messageId, role: start.role, node });
+    items.push({ id: messageId, role: start.role, node: inertTools(node) });
   }
   return items;
 }
@@ -78,13 +87,13 @@ function accumulate(state: StreamingState, event: FlatStreamEventUnion): void {
     case 'text_delta':
       state.textAccumulators.set(
         `${event.messageId}-block-${event.blockIndex}`,
-        event.delta,
+        remoteMarkdown(event.delta),
       );
       break;
     case 'thinking_delta':
       state.textAccumulators.set(
         `${event.messageId}-thinking-${event.blockIndex}`,
-        event.delta,
+        remoteMarkdown(event.delta),
       );
       break;
     case 'tool_delta':
@@ -93,6 +102,33 @@ function accumulate(state: StreamingState, event: FlatStreamEventUnion): void {
     default:
       break;
   }
+}
+
+/** A copy of `node` whose markdown-file tool content is inert (see above). */
+function inertTools(node: ExecutionNode): ExecutionNode {
+  const children = node.children.map(inertTools);
+  const path = node.toolInput?.['file_path'];
+  if (
+    node.type !== 'tool' ||
+    typeof path !== 'string' ||
+    !MARKDOWN_PATH.test(path)
+  ) {
+    return { ...node, children };
+  }
+  const input = node.toolInput ?? {};
+  const content = input['content'];
+  return {
+    ...node,
+    children,
+    toolInput:
+      typeof content === 'string'
+        ? { ...input, content: remoteMarkdown(content) }
+        : input,
+    toolOutput:
+      typeof node.toolOutput === 'string'
+        ? remoteMarkdown(node.toolOutput)
+        : node.toolOutput,
+  };
 }
 
 /** The callback bag the builders recurse through, as `ExecutionTreeBuilderService` wires it. */

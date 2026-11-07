@@ -19,19 +19,21 @@ import { LucideAngularModule, Lock, RefreshCw, Square } from 'lucide-angular';
 import {
   MachinesStore,
   type MachinesError,
-  type MachinesOutcome,
-  type MachinesRefusal,
   type RemoteSessionView,
 } from '../../services/machines-store';
 import { EMPTY_TRANSCRIPT_EVENTS } from '../../services/transcript-events';
 import { displayText } from '../../utils/display-text';
 import {
   drivenElsewhereBanner,
+  errorSentence,
   lockFreedBanner,
   lockUnavailableBanner,
+  outcomeSentence,
+  refusalSentence,
   type WatchOnlyBanner,
 } from '../../utils/remote-session-copy';
 import { buildRemoteTranscript } from '../../utils/remote-transcript';
+import { RemoteComposerComponent } from '../remote-composer/remote-composer.component';
 import { ReconnectBannerComponent } from '../reconnect-banner/reconnect-banner.component';
 import { SessionSyncChipComponent } from '../reconnect-banner/session-sync-chip.component';
 import {
@@ -44,7 +46,10 @@ import {
   type RemoteApprovalDecision,
   type RemoteApprovalMode,
 } from '../remote-approval-block/remote-approval-block.component';
-import { RemoteTranscriptComponent } from './remote-transcript.component';
+import {
+  RemoteTranscriptComponent,
+  type RemoteLinkActivation,
+} from './remote-transcript.component';
 
 const REASON_ID = 'ptah-remote-session-reason';
 
@@ -67,7 +72,12 @@ interface ApprovalEntry {
  *
  * File links in tool calls point at the remote machine, so this view
  * provides its own {@link FILE_LINK_OPENER}: it never opens a remote path on
- * this machine and says where the file is instead.
+ * this machine and says where the file is instead. Links in remote markdown
+ * are inert ({@link RemoteTranscriptComponent}); the notice shows a URL's
+ * real target instead of opening it.
+ *
+ * The composer is {@link RemoteComposerComponent}; a failed Stop shares its
+ * error line through `actionError`.
  */
 @Component({
   selector: 'ptah-remote-session-view',
@@ -76,6 +86,7 @@ interface ApprovalEntry {
     LucideAngularModule,
     RemoteTranscriptComponent,
     RemoteApprovalBlockComponent,
+    RemoteComposerComponent,
     ReconnectBannerComponent,
     SessionSyncChipComponent,
   ],
@@ -232,7 +243,7 @@ interface ApprovalEntry {
         </p>
       }
 
-      @if (fileNotice(); as notice) {
+      @if (linkNotice(); as notice) {
         <p class="text-xs text-base-content-muted" role="status" data-testid="remote-file-notice">
           {{ notice }}
         </p>
@@ -263,6 +274,7 @@ interface ApprovalEntry {
             [items]="transcript()"
             [machineName]="machineName()"
             [streaming]="turnInFlight()"
+            (linkActivated)="onLink($event)"
           />
         }
 
@@ -291,47 +303,14 @@ interface ApprovalEntry {
       </section>
     </div>
 
-    <form
-      class="flex flex-col gap-2 border-t border-surface-border px-5 py-3"
-      aria-label="Message"
-      data-testid="remote-composer"
-      (submit)="onSubmit($event)"
-    >
-      <div class="flex items-end gap-2">
-        <textarea
-          class="textarea textarea-bordered textarea-sm min-h-[2.5rem] flex-1 rounded-md text-sm text-base-content placeholder:text-base-content-muted disabled:cursor-not-allowed"
-          rows="2"
-          name="prompt"
-          aria-label="Message"
-          data-testid="remote-composer-input"
-          [value]="draft()"
-          [placeholder]="placeholder()"
-          [disabled]="composerDisabled()"
-          [attr.aria-describedby]="composerReason() ? composerReasonId : null"
-          (input)="onDraftInput($event)"
-          (keydown.enter)="onEnter($event)"
-        ></textarea>
-        <button
-          type="submit"
-          class="btn btn-primary btn-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content disabled:cursor-not-allowed disabled:border-dashed disabled:border-surface-border disabled:bg-transparent disabled:text-base-content-muted"
-          data-testid="remote-send"
-          [disabled]="!canSend()"
-          [attr.aria-describedby]="composerReason() ? composerReasonId : null"
-        >
-          Send
-        </button>
-      </div>
-      @if (composerReason(); as reason) {
-        <p [id]="composerReasonId" class="text-xs text-base-content-muted" data-testid="remote-composer-reason">
-          {{ reason }}
-        </p>
-      }
-      @if (sendError(); as text) {
-        <p class="text-sm text-base-content" role="alert" data-testid="remote-send-error">
-          {{ text }}
-        </p>
-      }
-    </form>
+    <ptah-remote-composer
+      [machineId]="machineId()"
+      [sessionId]="sessionId()"
+      [view]="view()"
+      [machineName]="machineName()"
+      [connected]="connected()"
+      [(error)]="actionError"
+    />
   `,
 })
 export class RemoteSessionViewComponent implements IFileLinkOpener {
@@ -346,16 +325,14 @@ export class RemoteSessionViewComponent implements IFileLinkOpener {
   public readonly workspacePath = input('');
 
   protected readonly reasonId = REASON_ID;
-  protected readonly composerReasonId = `${REASON_ID}-composer`;
   protected readonly LockIcon = Lock;
   protected readonly RefreshIcon = RefreshCw;
   protected readonly StopIcon = Square;
 
-  protected readonly draft = signal('');
-  protected readonly sending = signal(false);
-  protected readonly sendError = signal<string | null>(null);
+  /** The last send or stop failure, shown by the composer. */
+  protected readonly actionError = signal<string | null>(null);
   protected readonly announcement = signal('');
-  protected readonly fileNotice = signal<string | null>(null);
+  protected readonly linkNotice = signal<string | null>(null);
   protected readonly freed = signal<WatchOnlyBanner | null>(null);
   protected readonly answering = signal<ReadonlySet<string>>(new Set());
   protected readonly answerErrors = signal<ReadonlyMap<string, MachinesError>>(
@@ -479,53 +456,6 @@ export class RemoteSessionViewComponent implements IFileLinkOpener {
     this.connected() ? null : `${this.machineName()} is not connected.`,
   );
 
-  protected readonly composerDisabled = computed(
-    () => this.view()?.watchOnly ?? false,
-  );
-
-  protected readonly placeholder = computed(() => {
-    const view = this.view();
-    const machine = this.machineName();
-    if (view?.lockUnavailable) return 'Sending is unavailable';
-    if (view?.watchOnly) {
-      return view.drivenBy
-        ? `Sending is unavailable: driven from ${machine}`
-        : 'Sending is unavailable';
-    }
-    if (this.turnInFlight()) {
-      return `Message Claude on ${machine} (a turn is in progress)`;
-    }
-    return `Message Claude on ${machine}`;
-  });
-
-  protected readonly composerReason = computed(() => {
-    const view = this.view();
-    const machine = this.machineName();
-    if (view?.lockUnavailable) {
-      return 'This app could not check who has this session. Sending is unavailable.';
-    }
-    if (view?.watchOnly) {
-      return view.drivenBy
-        ? `Someone at ${machine} is driving this session. Sending is unavailable until they are done.`
-        : `This session has no live log on ${machine}; this is its last saved state. Sending is unavailable.`;
-    }
-    if (!this.connected()) return `${machine} is not connected.`;
-    return null;
-  });
-
-  protected readonly canSend = computed(() => {
-    const view = this.view();
-    return (
-      view !== null &&
-      view.mode === 'log' &&
-      !view.watchOnly &&
-      this.connected() &&
-      !this.turnInFlight() &&
-      !this.sending() &&
-      this.draft().trim() !== ''
-    );
-  });
-
   protected readonly canStop = computed(() => {
     const view = this.view();
     return (
@@ -607,10 +537,21 @@ export class RemoteSessionViewComponent implements IFileLinkOpener {
 
   /** {@link IFileLinkOpener}: a remote path is never opened on this machine. */
   public open(request: FileLinkOpenRequest): Promise<void> {
-    this.fileNotice.set(
+    this.linkNotice.set(
       `${displayText(request.path, 200)} is on ${this.machineName()}. Open it there.`,
     );
     return Promise.resolve();
+  }
+
+  /** A link in remote content: never followed; the notice names its real target. */
+  protected onLink(link: RemoteLinkActivation): void {
+    if (link.kind === 'file') {
+      void this.open({ path: link.target });
+      return;
+    }
+    this.linkNotice.set(
+      `Links from ${this.machineName()} do not open here. This one points to ${displayText(link.target, 200)}.`,
+    );
   }
 
   protected onWindowFocus(): void {
@@ -627,46 +568,6 @@ export class RemoteSessionViewComponent implements IFileLinkOpener {
     this.replayFrom.set(null);
   }
 
-  protected onDraftInput(event: Event): void {
-    const target = event.target;
-    if (target instanceof HTMLTextAreaElement) this.draft.set(target.value);
-  }
-
-  protected onEnter(event: Event): void {
-    if (event instanceof KeyboardEvent && (event.shiftKey || event.isComposing)) {
-      return;
-    }
-    event.preventDefault();
-    void this.send();
-  }
-
-  protected onSubmit(event: Event): void {
-    event.preventDefault();
-    void this.send();
-  }
-
-  protected async send(): Promise<void> {
-    if (!this.canSend()) return;
-    const prompt = this.draft().trim();
-    this.sending.set(true);
-    this.sendError.set(null);
-    try {
-      const outcome = await this.store.sendPrompt(
-        this.machineId(),
-        this.sessionId(),
-        prompt,
-      );
-      if (outcome.ok) {
-        this.draft.set('');
-        return;
-      }
-      // The draft stays; nothing is queued or retried (4.9 9d).
-      this.sendError.set(outcomeSentence(outcome, this.machineName()));
-    } finally {
-      this.sending.set(false);
-    }
-  }
-
   protected async stop(): Promise<void> {
     if (!this.canStop()) return;
     const outcome = await this.store.stopSession(
@@ -674,7 +575,7 @@ export class RemoteSessionViewComponent implements IFileLinkOpener {
       this.sessionId(),
     );
     if (!outcome.ok) {
-      this.sendError.set(outcomeSentence(outcome, this.machineName()));
+      this.actionError.set(outcomeSentence(outcome, this.machineName()));
     }
   }
 
@@ -717,9 +618,8 @@ export class RemoteSessionViewComponent implements IFileLinkOpener {
   }
 
   private resetForSession(): void {
-    this.draft.set('');
-    this.sendError.set(null);
-    this.fileNotice.set(null);
+    this.actionError.set(null);
+    this.linkNotice.set(null);
     this.freed.set(null);
     this.replayFrom.set(null);
     this.answering.set(new Set());
@@ -734,28 +634,4 @@ export class RemoteSessionViewComponent implements IFileLinkOpener {
 
 function clockTime(epochMs: number): string {
   return new Date(epochMs).toLocaleTimeString([], { hour12: false });
-}
-
-function errorSentence(error: MachinesError): string {
-  const text = displayText(error.message, 200);
-  if (text === '') return 'The request failed.';
-  return /[.!?]$/.test(text) ? text : `${text}.`;
-}
-
-function refusalSentence(refusal: MachinesRefusal, machine: string): string {
-  switch (refusal) {
-    case 'watch-only':
-      return 'This session is watch-only here.';
-    case 'not-connected':
-      return `${machine} is not connected.`;
-    case 'not-open':
-      return 'This session is not open.';
-  }
-}
-
-function outcomeSentence(outcome: MachinesOutcome, machine: string): string {
-  if (outcome.ok) return '';
-  return 'error' in outcome
-    ? errorSentence(outcome.error)
-    : refusalSentence(outcome.refused, machine);
 }

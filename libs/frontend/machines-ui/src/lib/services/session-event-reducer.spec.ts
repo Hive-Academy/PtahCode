@@ -15,6 +15,7 @@ import {
   baseline,
   chunk,
   messageStart,
+  permissionPayload,
   referenceLog,
   sessionEvent,
   textDelta,
@@ -233,11 +234,7 @@ describe('reduceSessionEvent', () => {
   });
   it('keeps a request the worker denied on timeout until the next turn', () => {
     const log = referenceLog();
-    const request = sessionEvent(7, 'permission:request', {
-      id: 'p1',
-      toolName: 'Bash',
-      toolInput: { command: 'ls' },
-    });
+    const request = sessionEvent(7, 'permission:request', permissionPayload());
     const timedOut = run(attachedLog(), [
       ...events(log.slice(0, 6)),
       ...events([
@@ -263,5 +260,129 @@ describe('reduceSessionEvent', () => {
       .state;
     expect(answered.pendingPermissions).toEqual([]);
     expect(answered.timedOutPermissions).toEqual([]);
+  });
+});
+
+describe('reduceSessionEvent: permission request boundary', () => {
+  const requestAt = (payload: Record<string, unknown>) =>
+    run(attachedLog(), [
+      ...events([sessionEvent(1, 'permission:request', payload)]),
+    ]).state.pendingPermissions;
+
+  it('builds the full request and drops fields it does not know', () => {
+    expect(
+      requestAt(permissionPayload({ toolUseId: 'tu1', extra: 'ignored' })),
+    ).toEqual([
+      {
+        id: 'p1',
+        toolName: 'Bash',
+        toolInput: { command: 'ls' },
+        timestamp: 1_700_000_000_000,
+        description: 'Run ls',
+        timeoutAt: 1_700_000_060_000,
+        toolUseId: 'tu1',
+      },
+    ]);
+  });
+
+  it.each([
+    ['timestamp missing', { timestamp: undefined }],
+    ['timestamp not a number', { timestamp: '1700000000000' }],
+    ['timeoutAt missing', { timeoutAt: undefined }],
+    ['timeoutAt not finite', { timeoutAt: Number.POSITIVE_INFINITY }],
+    ['timeoutAt negative', { timeoutAt: -1 }],
+    ['description missing', { description: undefined }],
+    ['id empty', { id: '' }],
+    ['toolInput an array', { toolInput: ['ls'] }],
+  ])('rejects a malformed request: %s', (_label, overrides) => {
+    expect(requestAt(permissionPayload(overrides))).toEqual([]);
+  });
+
+  it('strips control and bidi characters from shown fields, not from the id', () => {
+    const [request] = requestAt(
+      permissionPayload({
+        id: 'p\u200B1',
+        toolName: 'Ba\u202Esh',
+        description: 'Run\u0007 ls',
+        toolInput: { 'com\u2066mand': 'rm\u202E -rf /\u0000' },
+      }),
+    );
+    expect(request.id).toBe('p\u200B1');
+    expect(request.toolName).toBe('Bash');
+    expect(request.description).toBe('Run ls');
+    expect(request.toolInput).toEqual({ command: 'rm -rf /' });
+  });
+});
+
+describe('reduceSessionEvent: transcript display boundary (S6)', () => {
+  // eslint-disable-next-line no-control-regex -- the spec asserts these are gone.
+  const UNSAFE = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/;
+
+  it('removes bidi overrides from streamed text and keeps line breaks', () => {
+    const { state } = run(attachedLog(), [
+      ...events([
+        chunk(1, messageStart('s', 'msg-9', 'stream')),
+        chunk(2, textDelta('t', 'msg-9', 'invoice\u202Etxt.exe\nnext\u2067', 'stream')),
+      ]),
+    ]);
+    const text = state.events[1];
+    expect(text.eventType === 'text_delta' && text.delta).toBe(
+      'invoicetxt.exe\nnext',
+    );
+  });
+
+  it('keeps raw HTML as text for the sanitising renderer, without hidden characters', () => {
+    const { state } = run(attachedLog(), [
+      ...events([
+        chunk(
+          1,
+          textDelta('t', 'msg-9', '<img src=x onerror=alert(1)>\u200B', 'stream'),
+        ),
+      ]),
+    ]);
+    const text = state.events[0];
+    expect(text.eventType === 'text_delta' && text.delta).toBe(
+      '<img src=x onerror=alert(1)>',
+    );
+  });
+
+  it('cleans every string of a tool result, nested output included', () => {
+    const { state } = run(attachedLog(), [
+      ...events([
+        chunk(1, {
+          id: 'r',
+          eventType: 'tool_result',
+          timestamp: 1,
+          messageId: 'msg-9',
+          toolCallId: 'tc\u00001',
+          output: { stdout: 'ok\u001B[31m red\u0007', lines: ['a\u202Eb'] },
+          isError: false,
+          source: 'stream',
+        }),
+      ]),
+    ]);
+    const result = state.events[0];
+    expect(JSON.stringify(result)).not.toMatch(UNSAFE);
+    expect(result.eventType === 'tool_result' && result.output).toEqual({
+      stdout: 'ok[31m red',
+      lines: ['ab'],
+    });
+  });
+
+  it('applies the same boundary to a baseline and a snapshot', () => {
+    const hostile = textDelta('h', 'msg-9', 'a\u202Eb', 'history');
+    const fromBaseline = run(attachedLog(), [
+      ...events([baseline(1, [hostile])]),
+    ]).state.events;
+    const fromSnapshot = reduceSessionEvent(
+      initialSessionEventState(SESSION_ID),
+      {
+        kind: 'attach-succeeded',
+        result: { mode: 'snapshot', events: [hostile], live: false },
+      },
+    ).state.events;
+    for (const list of [fromBaseline, fromSnapshot]) {
+      expect(list[0].eventType === 'text_delta' && list[0].delta).toBe('ab');
+    }
   });
 });

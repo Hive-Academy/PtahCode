@@ -139,10 +139,40 @@ describe('RemoteApprovalBlockComponent', () => {
     expect(activeIntervals.size).toBe(0);
   });
 
-  it('one countdown timer per block, cleared on destroy', () => {
+  it('one countdown timer, cleared on destroy', () => {
     const fixture = setup();
     expect(activeIntervals.size).toBe(1);
     fixture.destroy();
+    expect(activeIntervals.size).toBe(0);
+  });
+
+  it('S2: many pending blocks share one timer, released by the last', () => {
+    const first = setup({ request: request({ id: 'p0' }) });
+    const others = [1, 2, 3, 4].map((n) => {
+      const fixture = TestBed.createComponent(RemoteApprovalBlockComponent);
+      fixture.componentRef.setInput(
+        'request',
+        request({ id: `p${n}`, timeoutAt: NOW + 10_000 * n }),
+      );
+      fixture.componentRef.setInput('machineName', 'Horus');
+      fixture.detectChanges();
+      return fixture;
+    });
+    expect(activeIntervals.size).toBe(1);
+
+    jest.advanceTimersByTime(5_000);
+    for (const fixture of [first, ...others]) fixture.detectChanges();
+    expect(q(others[0], 'approval-deadline')?.textContent?.trim()).toBe(
+      'Denied automatically in 5 s',
+    );
+    expect(q(others[3], 'approval-deadline')?.textContent?.trim()).toBe(
+      'Denied automatically in 35 s',
+    );
+    expect(activeIntervals.size).toBe(1);
+
+    for (const fixture of others) fixture.destroy();
+    expect(activeIntervals.size).toBe(1);
+    first.destroy();
     expect(activeIntervals.size).toBe(0);
   });
 

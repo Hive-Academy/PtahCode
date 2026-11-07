@@ -13,6 +13,7 @@ import {
 } from '@angular/core';
 import type { PermissionRequest } from '@ptah-extension/shared';
 import { Check, Copy, LucideAngularModule } from 'lucide-angular';
+import { CountdownClock } from '../../services/countdown-clock';
 import type { MachinesError } from '../../services/machines-store';
 import { displayBlockText, displayText } from '../../utils/display-text';
 import {
@@ -30,7 +31,6 @@ export type RemoteApprovalMode = 'answerable' | 'watch-only' | 'cached';
 
 export type RemoteApprovalDecision = 'allow' | 'deny';
 
-const COUNTDOWN_TICK_MS = 1000;
 const COPIED_FEEDBACK_MS = 2000;
 
 let nextBlockId = 0;
@@ -42,8 +42,9 @@ let nextBlockId = 0;
  * scrolling `pre`.
  *
  * The worker denies an unanswered request at its deadline (`timeoutAt`,
- * decision 27). While answerable, one timer per block counts down to it; it
- * stops at expiry and on destroy. After expiry, or once the worker's timeout
+ * decision 27). While answerable, the block counts down to it on the shared
+ * {@link CountdownClock} (one interval for all blocks); it lets go of the
+ * clock at expiry and on destroy. After expiry, or once the worker's timeout
  * record arrived (`timedOut`), the buttons are disabled and the block says
  * the worker denied it.
  */
@@ -212,9 +213,9 @@ export class RemoteApprovalBlockComponent {
   protected readonly CopyIcon = Copy;
   protected readonly CheckIcon = Check;
 
-  protected readonly now = signal(Date.now());
+  private readonly clock = inject(CountdownClock);
+  protected readonly now = this.clock.now;
   protected readonly copied = signal(false);
-  private countdown: ReturnType<typeof setInterval> | undefined;
   private copiedTimer: ReturnType<typeof setTimeout> | undefined;
 
   /** The worker's deadline, or `null` when the request has none (`timeoutAt: 0`). */
@@ -306,21 +307,21 @@ export class RemoteApprovalBlockComponent {
     );
   });
 
+  /** The countdown runs: answerable, with a deadline, and not yet past it. */
+  private readonly counting = computed(
+    () =>
+      this.mode() === 'answerable' &&
+      !this.timedOut() &&
+      this.deadline() !== null &&
+      !this.expired(),
+  );
+
   public constructor() {
-    effect(() => {
-      const running =
-        this.mode() === 'answerable' &&
-        !this.timedOut() &&
-        this.deadline() !== null;
-      untracked(() => {
-        this.now.set(Date.now());
-        this.setCountdown(running && !this.expired());
-      });
+    effect((onCleanup) => {
+      if (!this.counting()) return;
+      onCleanup(untracked(() => this.clock.acquire()));
     });
-    inject(DestroyRef).onDestroy(() => {
-      this.setCountdown(false);
-      clearTimeout(this.copiedTimer);
-    });
+    inject(DestroyRef).onDestroy(() => clearTimeout(this.copiedTimer));
   }
 
   protected copyArgs(): void {
@@ -331,18 +332,5 @@ export class RemoteApprovalBlockComponent {
       () => this.copied.set(false),
       COPIED_FEEDBACK_MS,
     );
-  }
-
-  private setCountdown(running: boolean): void {
-    if (!running) {
-      clearInterval(this.countdown);
-      this.countdown = undefined;
-      return;
-    }
-    if (this.countdown !== undefined) return;
-    this.countdown = setInterval(() => {
-      this.now.set(Date.now());
-      if (this.expired()) this.setCountdown(false);
-    }, COUNTDOWN_TICK_MS);
   }
 }

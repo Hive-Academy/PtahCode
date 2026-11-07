@@ -89,7 +89,10 @@ describe('buildRemoteTranscript (plan A7 fallback)', () => {
   });
 
   it('A5: history plus the live copy of a message renders like one copy', () => {
-    const once = buildRemoteTranscript(toTranscriptEvents(HISTORY_MESSAGE), stats);
+    const once = buildRemoteTranscript(
+      toTranscriptEvents(HISTORY_MESSAGE),
+      stats,
+    );
     const twice = buildRemoteTranscript(
       toTranscriptEvents([...HISTORY_MESSAGE, ...LIVE_MESSAGE]),
       stats,
@@ -97,6 +100,42 @@ describe('buildRemoteTranscript (plan A7 fallback)', () => {
     const shape = (items: typeof once) =>
       items.map((i) => i.node.children.map((c) => c.content));
     expect(shape(twice)).toEqual(shape(once));
+  });
+
+  it('S6: text from the worker reaches the renderer with raw HTML made inert', () => {
+    const [item] = buildRemoteTranscript(
+      toTranscriptEvents(
+        TOOL_TURN.map((event) =>
+          event.id === 'a-text'
+            ? { ...event, delta: 'see <img src=x> `<kept>`' }
+            : event,
+        ),
+      ),
+      stats,
+    );
+    expect(item.node.children[0].content).toBe('see &lt;img src=x> `<kept>`');
+  });
+
+  it('S6: a tool result for a markdown file is made inert; other output is kept', () => {
+    const turn = (path: string) =>
+      TOOL_TURN.map((event) => {
+        if (event.id === 'a-tool-input')
+          return { ...event, delta: JSON.stringify({ file_path: path }) };
+        if (event.id === 'a-tool-result')
+          return { ...event, output: '![p](https://evil.example/p.png) <b>' };
+        return event;
+      });
+    const tool = (path: string) =>
+      buildRemoteTranscript(
+        toTranscriptEvents(turn(path)),
+        stats,
+      )[0].node.children.find((child) => child.type === 'tool');
+    expect(tool('/r/NOTES.md')?.toolOutput).toBe(
+      '!\\[p](https://evil.example/p.png) &lt;b>',
+    );
+    expect(tool('/r/page.html')?.toolOutput).toBe(
+      '![p](https://evil.example/p.png) <b>',
+    );
   });
 
   it('an empty list gives no items', () => {

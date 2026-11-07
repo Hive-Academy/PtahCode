@@ -1,5 +1,11 @@
 import type { RemoteMachineSessionState } from '@ptah-extension/shared';
 import { WORKER_REMOTE_COMMAND } from '@ptah-extension/worker-protocol';
+import type {
+  MachinesError,
+  MachinesOutcome,
+  MachinesRefusal,
+} from '../services/machines-store';
+import { displayText } from './display-text';
 
 /**
  * Copy of the remote session screens (design 4.6-4.9) and the worker facts it
@@ -189,4 +195,37 @@ export function lockFreedBanner(holder: string | null): WatchOnlyBanner {
     code: null,
     announcement: `${who} finished. You can send messages again.`,
   };
+}
+
+/** A failed request as one sentence; `error.message` is worker-supplied. */
+export function errorSentence(error: MachinesError): string {
+  const text = displayText(error.message, 200);
+  if (text === '') return 'The request failed.';
+  return /[.!?]$/.test(text) ? text : `${text}.`;
+}
+
+/** Why the store refused an action before sending it. */
+export function refusalSentence(
+  refusal: MachinesRefusal,
+  machine: string,
+): string {
+  switch (refusal) {
+    case 'watch-only':
+      return 'This session is watch-only here.';
+    case 'not-connected':
+      return `${machine} is not connected.`;
+    case 'not-open':
+      return 'This session is not open.';
+  }
+}
+
+/** The sentence for a failed outcome; `''` for a successful one. */
+export function outcomeSentence(
+  outcome: MachinesOutcome,
+  machine: string,
+): string {
+  if (outcome.ok) return '';
+  return 'error' in outcome
+    ? errorSentence(outcome.error)
+    : refusalSentence(outcome.refused, machine);
 }

@@ -7,9 +7,11 @@ import {
   EMPTY_TRANSCRIPT_EVENTS,
   appendTranscriptEvent,
   parseFlatStreamEvent,
+  parseFlatStreamEvents,
   toTranscriptEvents,
   type TranscriptEvents,
 } from './transcript-events';
+import { displayBlockText, displayBlockValue } from '../utils/display-text';
 import { REMOTE_PERMISSION_TIMEOUT_BY } from '../utils/remote-session-copy';
 
 /**
@@ -207,7 +209,8 @@ function attachSucceeded(
       last: 0,
       target: 0,
       held: [],
-      events: toTranscriptEvents(result.events),
+      // The snapshot is worker-supplied too: same boundary as a baseline.
+      events: toTranscriptEvents(parseFlatStreamEvents(result.events)),
       turnId: null,
       pendingPermissions: [],
       timedOutPermissions: [],
@@ -397,16 +400,56 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+/**
+ * The ingestion boundary for a worker's `permission:request` payload: every
+ * required {@link PermissionRequest} field is checked and the request is
+ * built field by field, so nothing unchecked reaches the view. Display
+ * strings pass through {@link displayBlockText} / {@link displayBlockValue};
+ * identifiers stay as sent because answers quote them back to the worker.
+ * A malformed request is dropped (`null`).
+ */
 function parsePermissionRequest(
   payload: Record<string, unknown> | null,
 ): PermissionRequest | null {
   if (payload === null) return null;
+  const id = payload['id'];
+  const toolName = payload['toolName'];
+  const toolInput = asRecord(payload['toolInput']);
+  const timestamp = payload['timestamp'];
+  const description = payload['description'];
+  const timeoutAt = payload['timeoutAt'];
   if (
-    typeof payload['id'] !== 'string' ||
-    typeof payload['toolName'] !== 'string' ||
-    asRecord(payload['toolInput']) === null
+    typeof id !== 'string' ||
+    id === '' ||
+    typeof toolName !== 'string' ||
+    toolInput === null ||
+    !isFiniteNumber(timestamp) ||
+    typeof description !== 'string' ||
+    !isFiniteNumber(timeoutAt) ||
+    timeoutAt < 0
   ) {
     return null;
   }
-  return payload as unknown as PermissionRequest;
+  const toolUseId = optionalString(payload['toolUseId']);
+  const agentToolCallId = optionalString(payload['agentToolCallId']);
+  const sessionId = optionalString(payload['sessionId']);
+  return {
+    id,
+    toolName: displayBlockText(toolName),
+    toolInput: displayBlockValue(toolInput) as Readonly<Record<string, unknown>>,
+    timestamp,
+    description: displayBlockText(description),
+    timeoutAt,
+    ...(toolUseId === undefined ? {} : { toolUseId }),
+    ...(agentToolCallId === undefined ? {} : { agentToolCallId }),
+    ...(sessionId === undefined ? {} : { sessionId }),
+  };
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
 }

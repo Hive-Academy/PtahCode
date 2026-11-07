@@ -78,6 +78,6 @@ describe('transcript events', () => {
       }),
     ).toBeNull();
     const ok = textDelta('x', 'm', 'a', 'stream');
-    expect(parseFlatStreamEvent(ok)).toBe(ok);
+    expect(parseFlatStreamEvent(ok)).toEqual(ok);
   });
 });

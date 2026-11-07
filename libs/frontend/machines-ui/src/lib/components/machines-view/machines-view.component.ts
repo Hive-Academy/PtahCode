@@ -13,21 +13,18 @@ import {
   type ElementRef,
   type OnInit,
 } from '@angular/core';
-import { ArrowLeft, LucideAngularModule, Plus } from 'lucide-angular';
+import { ArrowLeft, LucideAngularModule } from 'lucide-angular';
 import {
   MachinesStore,
-  type MachinesError,
   type MachinesOutcome,
   type RemoteMachine,
 } from '../../services/machines-store';
 import { DisplayTextPipe, displayText } from '../../utils/display-text';
 import {
-  MACHINE_REASON_COPY,
-  durationText,
-  noWorkerModeCopy,
-  reasonNeedsRepair,
-  versionMismatchCopy,
-} from '../../utils/machine-copy';
+  machineBanners,
+  type MachineBanner,
+} from '../../utils/machine-banners';
+import { errorSentence } from '../../utils/remote-session-copy';
 import { AddMachinePaneComponent } from '../add-machine-pane/add-machine-pane.component';
 import { MachineListComponent } from '../machine-list/machine-list.component';
 import { MachineStatusComponent } from '../machine-status/machine-status.component';
@@ -37,6 +34,7 @@ import {
   type RemoteSessionOpenRequest,
 } from '../remote-session-list/remote-session-list.component';
 import { RemoteSessionViewComponent } from '../remote-session-view/remote-session-view.component';
+import { MachinesIntroComponent } from './machines-intro.component';
 
 /** What the right pane shows. */
 export type MachinesPaneMode =
@@ -46,26 +44,9 @@ export type MachinesPaneMode =
   | 'readiness'
   | 'session';
 
-interface MachineBanner {
-  readonly role: 'alert' | 'status';
-  readonly tone: 'err' | 'need';
-  readonly label: string;
-  readonly text: string;
-  readonly action: 'repair' | 'retry' | null;
-}
 
 const CLOCK_TICK_MS = 1000;
 
-/** The worker's Phase 1 checks, named for the empty state's "What is checked?". */
-const CHECKED_ITEMS: readonly string[] = [
-  'Operating system',
-  'Node 22 or newer, and the session database loads',
-  'Ptah and protocol versions are compatible',
-  'The worker service listens on loopback only',
-  'At least one workspace folder is registered and readable',
-  'At least one provider is signed in',
-  'The session driver lock works and none is stranded',
-];
 
 /**
  * The Machines surface (design 3, 4.1-4.5): the machine list on the left and,
@@ -92,6 +73,7 @@ const CHECKED_ITEMS: readonly string[] = [
     ReadinessPanelComponent,
     RemoteSessionListComponent,
     RemoteSessionViewComponent,
+    MachinesIntroComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'flex h-full min-h-0 min-w-0 flex-1 bg-base-100' },
@@ -334,46 +316,7 @@ const CHECKED_ITEMS: readonly string[] = [
                 />
               </div>
             } @else if (!store.loading() && store.machines().length === 0) {
-              <div
-                class="mx-auto flex max-w-[52ch] flex-col items-center gap-3 p-8 text-center"
-                data-testid="machines-empty"
-              >
-                <h2 class="text-base font-semibold text-base-content">
-                  Control Ptah on your other machines
-                </h2>
-                <p class="text-sm text-base-content-muted">
-                  Ptah reaches each machine through your own SSH login, so
-                  nothing is opened on your network.
-                </p>
-                <button
-                  type="button"
-                  class="btn btn-primary btn-sm gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                  data-testid="machines-empty-add"
-                  (click)="openAdd()"
-                >
-                  <lucide-angular
-                    [img]="PlusIcon"
-                    class="h-4 w-4"
-                    aria-hidden="true"
-                  />
-                  Add machine
-                </button>
-                <details class="text-left text-xs text-base-content-muted">
-                  <summary
-                    class="cursor-pointer text-center underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                  >
-                    What is checked?
-                  </summary>
-                  <ol
-                    class="mt-2 list-decimal pl-5"
-                    data-testid="machines-checked"
-                  >
-                    @for (item of checkedItems; track item) {
-                      <li>{{ item }}</li>
-                    }
-                  </ol>
-                </details>
-              </div>
+              <ptah-machines-intro (add)="openAdd()" />
             }
           }
         }
@@ -398,8 +341,6 @@ export class MachinesViewComponent implements OnInit {
     null,
   );
 
-  protected readonly checkedItems = CHECKED_ITEMS;
-  protected readonly PlusIcon = Plus;
   protected readonly ArrowLeftIcon = ArrowLeft;
 
   private readonly removeCancel =
@@ -532,78 +473,4 @@ export class MachinesViewComponent implements OnInit {
     if (this.clock !== undefined) return;
     this.clock = setInterval(() => this.now.set(Date.now()), CLOCK_TICK_MS);
   }
-}
-
-function errorSentence(error: MachinesError): string {
-  const text = displayText(error.message, 200);
-  if (text === '') return 'The request failed.';
-  return /[.!?]$/.test(text) ? text : `${text}.`;
-}
-
-/** The 4.3/4.5 banners for one machine, most actionable first. */
-export function machineBanners(
-  machine: RemoteMachine,
-  now: number,
-): readonly MachineBanner[] {
-  const name = displayText(machine.displayName) || displayText(machine.alias);
-  const banners: MachineBanner[] = [];
-
-  if (machine.reason !== undefined) {
-    const repair = reasonNeedsRepair(machine.reason);
-    banners.push({
-      role: repair ? 'alert' : 'status',
-      tone: repair ? 'err' : 'need',
-      label: repair ? 'Re-pair needed' : 'Session not re-attached',
-      text: MACHINE_REASON_COPY[machine.reason],
-      action: repair ? 'repair' : 'retry',
-    });
-  }
-
-  switch (machine.state) {
-    case 'unpaired':
-      if (!reasonNeedsRepair(machine.reason)) {
-        banners.push({
-          role: 'status',
-          tone: 'need',
-          label: 'Not paired',
-          text: `${name} has no pairing token on this machine. Pair it to connect.`,
-          action: 'repair',
-        });
-      }
-      break;
-    case 'offline':
-    case 'reconnecting': {
-      const lost =
-        machine.lastSeenAt !== undefined
-          ? `Lost contact ${durationText(machine.lastSeenAt, now)} ago.`
-          : `No contact with ${name}.`;
-      const next =
-        machine.nextRetryAt !== undefined && machine.nextRetryAt > now
-          ? ` Next attempt in ${durationText(now, machine.nextRetryAt)}.`
-          : '';
-      banners.push({
-        role: 'status',
-        tone: 'need',
-        label: machine.state === 'offline' ? 'Offline' : 'Reconnecting',
-        text: `${lost} Sessions on ${name} keep running; they are shown as unknown, not failed.${next}`,
-        action: 'retry',
-      });
-      break;
-    }
-    case 'version-mismatch':
-      banners.push({
-        role: 'alert',
-        tone: 'err',
-        label: 'Version mismatch',
-        text:
-          versionMismatchCopy(name, machine.versions, (v) =>
-            displayText(v, 24),
-          ) ?? noWorkerModeCopy(name),
-        action: 'retry',
-      });
-      break;
-    case 'connected':
-      break;
-  }
-  return banners;
 }

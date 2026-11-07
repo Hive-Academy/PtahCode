@@ -1,4 +1,5 @@
 import type { FlatStreamEventUnion } from '@ptah-extension/shared';
+import { displayBlockValue } from '../utils/display-text';
 
 /**
  * The flat events a remote session's transcript is built from, in display
@@ -108,15 +109,23 @@ export function toTranscriptEvents(
 }
 
 /**
- * Narrow an untrusted value to a flat stream event: an object with string
+ * The one ingestion boundary for worker-supplied transcript events (S6):
+ * every event a remote transcript shows, from a baseline, a `chat:chunk` or
+ * a snapshot, passes through here.
+ *
+ * Narrows an untrusted value to a flat stream event: an object with string
  * `id`, `eventType` and `messageId`, a numeric `timestamp`, and the slot
  * fields its type needs. The rest of its shape belongs to the backend that
- * produced it and is passed through.
+ * produced it and is kept. Returns a copy in which every string (text,
+ * thinking, tool input and output, names, keys) has had control, bidi and
+ * zero-width characters removed by {@link displayBlockValue}; nothing is cut.
  */
 export function parseFlatStreamEvent(
   value: unknown,
 ): FlatStreamEventUnion | null {
-  if (typeof value !== 'object' || value === null) return null;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return null;
+  }
   const raw = value as Record<string, unknown>;
   if (
     typeof raw['id'] !== 'string' ||
@@ -146,5 +155,17 @@ export function parseFlatStreamEvent(
     default:
       break;
   }
-  return value as FlatStreamEventUnion;
+  return displayBlockValue(value) as FlatStreamEventUnion;
+}
+
+/** {@link parseFlatStreamEvent} over a list; events that do not parse are left out. */
+export function parseFlatStreamEvents(
+  values: readonly unknown[],
+): FlatStreamEventUnion[] {
+  const parsed: FlatStreamEventUnion[] = [];
+  for (const value of values) {
+    const event = parseFlatStreamEvent(value);
+    if (event !== null) parsed.push(event);
+  }
+  return parsed;
 }

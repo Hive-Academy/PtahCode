@@ -2,6 +2,7 @@ import {
   DISPLAY_TEXT_MAX_LENGTH,
   DisplayTextPipe,
   displayBlockText,
+  displayBlockValue,
   displayText,
 } from './display-text';
 
@@ -83,5 +84,35 @@ describe('displayBlockText', () => {
     expect(displayBlockText('  one\r\n\ttwo   three\rfour\fx')).toBe(
       '  one\n\ttwo   three\nfour x',
     );
+  });
+});
+
+describe('displayBlockValue', () => {
+  it('cleans every string, keys included, and keeps other JSON values', () => {
+    expect(
+      displayBlockValue({
+        'na\u202Eme': ['a\u200Bb', 1, true, null],
+        nested: { text: 'line one\r\nline\u0007 two' },
+      }),
+    ).toEqual({
+      name: ['ab', 1, true, null],
+      nested: { text: 'line one\nline two' },
+    });
+  });
+
+  it('keeps a __proto__ key as a plain key', () => {
+    const value = displayBlockValue(
+      JSON.parse('{"__proto__": {"polluted": true}}'),
+    ) as Record<string, unknown>;
+    expect(Object.getPrototypeOf(value)).toBe(Object.prototype);
+    expect(Object.keys(value)).toEqual(['__proto__']);
+    expect(({} as Record<string, unknown>)['polluted']).toBeUndefined();
+  });
+
+  it('replaces non-JSON values and over-deep nesting with null', () => {
+    expect(displayBlockValue({ f: () => 1, u: undefined })).toEqual({ f: null });
+    let deep: unknown = 'leaf';
+    for (let i = 0; i < 100; i++) deep = [deep];
+    expect(JSON.stringify(displayBlockValue(deep))).toContain('null');
   });
 });

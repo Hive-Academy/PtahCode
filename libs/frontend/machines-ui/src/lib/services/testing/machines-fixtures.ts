@@ -99,6 +99,21 @@ export function baseline(
   );
 }
 
+/** A complete `permission:request` payload, as the worker logs it. */
+export function permissionPayload(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: 'p1',
+    toolName: 'Bash',
+    toolInput: { command: 'ls' },
+    timestamp: 1_700_000_000_000,
+    description: 'Run ls',
+    timeoutAt: 1_700_000_060_000,
+    ...overrides,
+  };
+}
+
 /** History copy of message `h1`: what a baseline carries for it. */
 export const HISTORY_MESSAGE: readonly FlatStreamEventUnion[] = [
   messageStart('h-start', 'msg-1', 'history'),
@@ -129,12 +144,7 @@ export function referenceLog(epoch = 'e1'): readonly MachinesEventPayload[] {
     chunk(4, LIVE_MESSAGE[1], epoch),
     chunk(5, LIVE_MESSAGE[2], epoch),
     chunk(6, LIVE_MESSAGE[4], epoch),
-    sessionEvent(
-      7,
-      'permission:request',
-      { id: 'p1', toolName: 'Bash', toolInput: { command: 'ls' } },
-      epoch,
-    ),
+    sessionEvent(7, 'permission:request', permissionPayload(), epoch),
     sessionEvent(
       8,
       'worker:permission.answered',

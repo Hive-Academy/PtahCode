@@ -9,10 +9,7 @@ import {
   type MachinesOutcome,
   type RemoteMachine,
 } from '../../services/machines-store';
-import {
-  MachinesViewComponent,
-  machineBanners,
-} from './machines-view.component';
+import { MachinesViewComponent } from './machines-view.component';
 
 const HORUS: RemoteMachine = {
   machineId: 'm1',
@@ -400,26 +397,5 @@ describe('MachinesViewComponent remote sessions', () => {
     fixture.detectChanges();
     expect(closeSession).toHaveBeenCalledWith('m1', 's1');
     expect(element.querySelector('[data-testid="remote-session-list"]')).not.toBeNull();
-  });
-});
-
-describe('machineBanners', () => {
-  it('a machine going offline never says its sessions failed', () => {
-    const [banner] = machineBanners({ ...ANUBIS, state: 'offline' }, 1_012_000);
-    expect(banner.label).toBe('Offline');
-    expect(banner.text).toContain('they are shown as unknown, not failed');
-  });
-
-  it('sanitises the machine name', () => {
-    const [banner] = machineBanners(
-      { ...ANUBIS, displayName: 'An\u202Eubis' },
-      1_012_000,
-    );
-    expect(banner.text).toContain('Sessions on Anubis keep running');
-  });
-
-  it('omits "Next attempt" once the retry time has passed', () => {
-    const [banner] = machineBanners(ANUBIS, 1_020_000);
-    expect(banner.text).not.toContain('Next attempt');
   });
 });

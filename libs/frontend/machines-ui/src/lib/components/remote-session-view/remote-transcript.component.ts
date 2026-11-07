@@ -3,6 +3,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   input,
+  output,
   signal,
 } from '@angular/core';
 import {
@@ -15,13 +16,32 @@ import { MarkdownBlockComponent } from '@ptah-extension/markdown';
 import type { RemoteTranscriptItem } from '../../utils/remote-transcript';
 
 /**
+ * A link in remote content was activated. It was not followed: `target` is
+ * its real destination as written (a file path on the remote machine, or a
+ * URL), for the view to show.
+ */
+export interface RemoteLinkActivation {
+  readonly kind: 'file' | 'url';
+  readonly target: string;
+}
+
+/** Where the markdown renderer keeps a file link's destination (`href` is `#`). */
+const FILE_HREF_ATTR = 'data-ptah-file-href';
+
+/**
  * A remote session's messages, drawn with the local transcript's
  * presentational pieces (design 4.6, 3.3): markdown text, the thinking block
  * and the tool call header, input and output from `@ptah-extension/chat-ui`.
  * The assistant author label names the machine ("Claude on Horus").
  *
  * Text goes through `ptah-markdown-block` (the one sanitising renderer);
- * nothing here binds HTML.
+ * nothing here binds HTML. The strings were already cleaned of control, bidi
+ * and zero-width characters where they entered (`parseFlatStreamEvent`).
+ *
+ * Links in remote content are inert (S6): a link's text is the worker's, so
+ * it may name another destination than the one it opens. A click on any
+ * link here is stopped before the app could open it (on this machine or in
+ * a browser) and reported through `linkActivated` with its real target.
  */
 @Component({
   selector: 'ptah-remote-transcript',
@@ -35,6 +55,10 @@ import type { RemoteTranscriptItem } from '../../utils/remote-transcript';
     ToolOutputDisplayComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: {
+    '(click)': 'onLinkActivation($event)',
+    '(auxclick)': 'onLinkActivation($event)',
+  },
   template: `
     <ol class="flex flex-col gap-4" data-testid="remote-transcript">
       @for (item of items(); track item.id; let last = $last) {
@@ -146,8 +170,27 @@ export class RemoteTranscriptComponent {
   /** A turn is in flight: the last streaming message shows a caret. */
   public readonly streaming = input(false);
 
+  /** A link was activated and not followed. */
+  public readonly linkActivated = output<RemoteLinkActivation>();
+
   /** Expanded tool calls; collapsed by default like the local transcript. */
   protected readonly expanded = signal<ReadonlySet<string>>(new Set());
+
+  protected onLinkActivation(event: MouseEvent): void {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const anchor = target.closest('a');
+    if (anchor === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const file = anchor.getAttribute(FILE_HREF_ATTR);
+    const href = anchor.getAttribute('href') ?? '';
+    if (file !== null) {
+      this.linkActivated.emit({ kind: 'file', target: file });
+    } else if (href !== '' && href !== '#') {
+      this.linkActivated.emit({ kind: 'url', target: href });
+    }
+  }
 
   protected toggle(id: string): void {
     this.expanded.update((set) => {

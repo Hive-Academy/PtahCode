@@ -13,7 +13,10 @@ import {
   type RemoteMachine,
   type RemoteSessionView,
 } from '../../services/machines-store';
-import { initialSessionEventState } from '../../services/session-event-reducer';
+import {
+  initialSessionEventState,
+  reduceSessionEvent,
+} from '../../services/session-event-reducer';
 import {
   HISTORY_MESSAGE,
   sessionEvent,
@@ -184,22 +187,6 @@ describe('RemoteSessionViewComponent', () => {
     fixture.detectChanges();
     expect(store.sendPrompt).toHaveBeenCalledWith('m1', 's1', 'Next step');
     expect(input(fixture).value).toBe('');
-  });
-
-  it('a refused send keeps the draft and says why', async () => {
-    const { fixture, store } = await setup();
-    store.sendPrompt.mockResolvedValueOnce({
-      ok: false,
-      error: { message: 'This session is driven elsewhere.', code: 'SESSION_DRIVEN_ELSEWHERE' },
-    });
-    await type(fixture, 'Keep me');
-    send(fixture).click();
-    await flush();
-    fixture.detectChanges();
-    expect(input(fixture).value).toBe('Keep me');
-    expect(text(fixture, 'remote-send-error')).toBe(
-      'This session is driven elsewhere.',
-    );
   });
 
   it('4.9 (9): a driven snapshot is the last saved state and watch-only', async () => {
@@ -389,5 +376,64 @@ describe('RemoteSessionViewComponent', () => {
     expect(text(fixture, 'remote-file-notice')).toBe(
       '/home/horus/src/app.ts is on Horus. Open it there.',
     );
+  });
+
+  it('S6: a markdown link in remote text is inert and shows its real target', async () => {
+    const deceptive: FlatStreamEventUnion = {
+      id: 'link-text',
+      eventType: 'text_delta',
+      timestamp: 1,
+      messageId: 'msg-0',
+      delta: 'See [https://ptah.dev/docs](https://evil.example/steal)',
+      blockIndex: 0,
+      source: 'history',
+    };
+    const { fixture } = await setup(
+      view({ events: [USER_MESSAGE[0], deceptive, ...HISTORY_MESSAGE] }),
+    );
+    const anchor = (fixture.nativeElement as HTMLElement).querySelector<HTMLAnchorElement>(
+      'ptah-remote-transcript a',
+    );
+    expect(anchor).not.toBeNull();
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+    anchor?.dispatchEvent(event);
+    fixture.detectChanges();
+    expect(event.defaultPrevented).toBe(true);
+    expect(text(fixture, 'remote-file-notice')).toBe(
+      'Links from Horus do not open here. This one points to https://evil.example/steal.',
+    );
+  });
+
+  it('S6: raw HTML and bidi characters in remote text never reach the DOM as such', async () => {
+    const hostile: FlatStreamEventUnion = {
+      id: 'html-text',
+      eventType: 'text_delta',
+      timestamp: 1,
+      messageId: 'msg-0',
+      delta: 'ok <img src=x onerror="alert(1)"><script>alert(2)</script> evil\u202Etxt.exe',
+      blockIndex: 0,
+      source: 'history',
+    };
+    const { fixture, set } = await setup(view({ events: [] }));
+    // Through the reducer's boundary, as a snapshot would arrive.
+    const events = reduceSessionEvent(initialSessionEventState('s1'), {
+      kind: 'attach-succeeded',
+      result: { mode: 'snapshot', events: [USER_MESSAGE[0], hostile], live: false },
+    }).state.events;
+    await set(view({ events }));
+    const region = q(fixture, 'remote-transcript-region') as HTMLElement;
+    expect(region.querySelector('img, script')).toBeNull();
+    expect(region.textContent).not.toContain('\u202E');
+    expect(region.textContent).toContain('eviltxt.exe');
+  });
+
+  it('a failed Stop shows on the composer error line', async () => {
+    const { fixture, store, set } = await setup();
+    await set(view({ turnId: 't1' }));
+    store.stopSession.mockResolvedValueOnce({ ok: false, refused: 'not-open' });
+    (q(fixture, 'remote-stop') as HTMLButtonElement).click();
+    await flush();
+    fixture.detectChanges();
+    expect(text(fixture, 'remote-send-error')).toBe('This session is not open.');
   });
 });

@@ -66,6 +66,43 @@ export function displayBlockText(value: string | null | undefined): string {
     );
 }
 
+/** Nesting beyond this is not display data; it is replaced by `null`. */
+const MAX_VALUE_DEPTH = 64;
+
+/**
+ * The structured form of {@link displayBlockText} for a worker-supplied JSON
+ * value (a transcript event, tool arguments or output): every string in it,
+ * object keys included, passes through {@link displayBlockText}; numbers,
+ * booleans and `null` stay. Anything that is not plain JSON data, or nests
+ * deeper than {@link MAX_VALUE_DEPTH}, becomes `null`. Returns a copy.
+ */
+export function displayBlockValue(value: unknown, depth = 0): unknown {
+  if (typeof value === 'string') return displayBlockText(value);
+  if (
+    value === null ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value;
+  }
+  if (typeof value !== 'object' || depth >= MAX_VALUE_DEPTH) return null;
+  if (Array.isArray(value)) {
+    return value.map((item) => displayBlockValue(item, depth + 1));
+  }
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (item === undefined) continue;
+    // defineProperty, not assignment: a `__proto__` key stays a plain key.
+    Object.defineProperty(result, displayBlockText(key), {
+      value: displayBlockValue(item, depth + 1),
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+  return result;
+}
+
 /** Template form of {@link displayText}: `{{ name | displayText }}`. */
 @Pipe({ name: 'displayText', standalone: true })
 export class DisplayTextPipe implements PipeTransform {

@@ -35,9 +35,12 @@ export {
 } from './lib/services/transcript-events';
 export {
   MachinesViewComponent,
-  machineBanners,
   type MachinesPaneMode,
 } from './lib/components/machines-view/machines-view.component';
+export {
+  machineBanners,
+  type MachineBanner,
+} from './lib/utils/machine-banners';
 export { MachineListComponent } from './lib/components/machine-list/machine-list.component';
 export { MachineStatusComponent } from './lib/components/machine-status/machine-status.component';
 export { AddMachinePaneComponent } from './lib/components/add-machine-pane/add-machine-pane.component';
