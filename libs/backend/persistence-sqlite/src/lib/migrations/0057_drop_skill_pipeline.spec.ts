@@ -30,6 +30,22 @@ describe('migration 0057_drop_skill_pipeline', () => {
     expect(MIGRATIONS[MIGRATIONS.indexOf(migration57) - 1]?.version).toBe(56);
   });
 
+  it('keeps the exact SQL text that already ran on user databases', () => {
+    const ids =
+      "'@ptah/skills-drain-frequent', '@ptah/skills-drain-nightly', " +
+      "'@ptah/skills-drain-weekly', '@ptah/skills-backlog-cleanup'";
+    expect(sql).toBe([
+      'DELETE FROM job_runs WHERE job_id IN (' + ids + ');',
+      'DELETE FROM scheduled_jobs WHERE id IN (' + ids + ');',
+      'DROP TABLE skill_invocations;',
+      'DROP TABLE skill_candidates;',
+      'DROP TABLE skill_suggestions;',
+      'DROP TABLE skill_synthesis_queue;',
+      'DROP TABLE skill_synthesis_budget;',
+      'DROP TABLE skill_synthesis_workspace_cursor;',
+    ].join('\n'));
+  });
+
   it('leaves version 56 and every table intact when archive verification fails', async () => {
     const db = at56();
     db.tables.add('skill_candidates_vec');
