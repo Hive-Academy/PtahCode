@@ -95,6 +95,11 @@ At each adapter boundary, parse the vendor payload with Zod, normalize uncached 
 
 Wire through `libs/backend/agent-sdk/src/lib/di/registration.ts` and `libs/backend/cli-agent-runtime/src/lib/di/registration.ts` if a new injectable is needed; inspect post-merge names before writing. Electron's phased composition and CLI engine must resolve the same policy and pricing adapter. Update `container.smoke.spec.ts` and `expected-resolvable.ts` for new DI bindings; update `rpc-surface.spec.ts` and `surface-composition.spec.ts` only if RPC methods change. A shared message schema change alone should leave RPC surface names unchanged. Confirm module direction before imports; `libs/shared` cannot import either feature lib (`libs/shared/project.json:6`; `libs/backend/agent-sdk/project.json:6`; `libs/backend/cli-agent-runtime/project.json:6`).
 
+**SDK constraints proven by #989 live rounds 4-5 (head `0718b55a2`):**
+1. **Gate in PreToolUse, not only in `canUseTool`.** The SDK can auto-allow `SendMessage` before `canUseTool` runs. The refusal of a stopped or exhausted agent worked only through the `SendMessage` PreToolUse gate (`route=deny`, `decisionSource=subagent-budget`). Batches B and F must enforce resume refusal in PreToolUse. `canUseTool` is only a second check.
+2. **Join subagent identity by agent id = task id in the same parent session.** The `SubagentStart` hook UUID is different from the streamed Task tool id. Do not use the hook UUID as the budget key. The `BudgetAccountingPort` key is `(parentSessionId, agentId)`, where `agentId` is the task id.
+Recheck both points against the merged #989 code before B starts.
+
 ## 5. File-disjoint implementation batches
 
 Start only after PR #978 and `fix/subagent-budget-stop-path` merge into main. Agree the telemetry contract first, then assign disjoint files. Recommendation: settings/Angular executor A; policy/SDK executor B; adapter specialist C; lane-runtime executor D; composition owner E.
