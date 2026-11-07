@@ -14,11 +14,9 @@ import {
   type FileLinkOpenRequest,
   type IFileLinkOpener,
 } from '@ptah-extension/core';
-import type { PermissionRequest } from '@ptah-extension/shared';
 import { LucideAngularModule, Lock, RefreshCw, Square } from 'lucide-angular';
 import {
   MachinesStore,
-  type MachinesError,
   type RemoteSessionView,
 } from '../../services/machines-store';
 import { EMPTY_TRANSCRIPT_EVENTS } from '../../services/transcript-events';
@@ -29,7 +27,6 @@ import {
   lockFreedBanner,
   lockUnavailableBanner,
   outcomeSentence,
-  refusalSentence,
   type WatchOnlyBanner,
 } from '../../utils/remote-session-copy';
 import { buildRemoteTranscript } from '../../utils/remote-transcript';
@@ -41,22 +38,10 @@ import {
   sessionSyncState,
   type ReplaySummary,
 } from '../reconnect-banner/session-sync';
-import {
-  RemoteApprovalBlockComponent,
-  type RemoteApprovalDecision,
-  type RemoteApprovalMode,
-} from '../remote-approval-block/remote-approval-block.component';
-import {
-  RemoteTranscriptComponent,
-  type RemoteLinkActivation,
-} from './remote-transcript.component';
+import { RemoteSessionPaneComponent } from './remote-session-pane.component';
+import type { RemoteLinkActivation } from './remote-transcript.component';
 
 const REASON_ID = 'ptah-remote-session-reason';
-
-interface ApprovalEntry {
-  readonly request: PermissionRequest;
-  readonly timedOut: boolean;
-}
 
 /**
  * One opened remote session (design 4.6-4.9): header, banners, the
@@ -76,16 +61,17 @@ interface ApprovalEntry {
  * are inert ({@link RemoteTranscriptComponent}); the notice shows a URL's
  * real target instead of opening it.
  *
- * The composer is {@link RemoteComposerComponent}; a failed Stop shares its
- * error line through `actionError`.
+ * The transcript and approval blocks are {@link RemoteSessionPaneComponent};
+ * this view builds the transcript (its labels count it) and handles the
+ * links the pane passes up. The composer is {@link RemoteComposerComponent};
+ * a failed Stop shares its error line through `actionError`.
  */
 @Component({
   selector: 'ptah-remote-session-view',
   standalone: true,
   imports: [
     LucideAngularModule,
-    RemoteTranscriptComponent,
-    RemoteApprovalBlockComponent,
+    RemoteSessionPaneComponent,
     RemoteComposerComponent,
     ReconnectBannerComponent,
     SessionSyncChipComponent,
@@ -99,7 +85,12 @@ interface ApprovalEntry {
     '(window:focus)': 'onWindowFocus()',
   },
   template: `
-    <div class="sr-only" role="status" aria-live="polite" data-testid="remote-live">
+    <div
+      class="sr-only"
+      role="status"
+      aria-live="polite"
+      data-testid="remote-live"
+    >
       {{ announcement() }}
     </div>
 
@@ -113,7 +104,10 @@ interface ApprovalEntry {
         >
           {{ title() || 'Remote session' }}
         </h2>
-        <p class="truncate text-xs text-base-content-muted" data-testid="remote-session-meta">
+        <p
+          class="truncate text-xs text-base-content-muted"
+          data-testid="remote-session-meta"
+        >
           on {{ machineName() }}
           @if (workspacePath()) {
             · <span class="font-mono">{{ workspacePath() }}</span>
@@ -132,11 +126,17 @@ interface ApprovalEntry {
             class="badge badge-outline badge-sm max-w-[18rem] gap-1 truncate text-base-content"
             data-testid="remote-owner-chip"
           >
-            <lucide-angular [img]="LockIcon" class="h-3 w-3 shrink-0" aria-hidden="true" />
+            <lucide-angular
+              [img]="LockIcon"
+              class="h-3 w-3 shrink-0"
+              aria-hidden="true"
+            />
             Driver: {{ holder() }}
           </span>
         } @else if (freed()) {
-          <span class="badge badge-outline badge-sm text-base-content" data-testid="remote-owner-chip"
+          <span
+            class="badge badge-outline badge-sm text-base-content"
+            data-testid="remote-owner-chip"
             >Idle</span
           >
         }
@@ -151,7 +151,11 @@ interface ApprovalEntry {
             [disabled]="!connected()"
             (click)="refresh()"
           >
-            <lucide-angular [img]="RefreshIcon" class="h-3.5 w-3.5" aria-hidden="true" />
+            <lucide-angular
+              [img]="RefreshIcon"
+              class="h-3.5 w-3.5"
+              aria-hidden="true"
+            />
             Refresh
           </button>
         }
@@ -163,7 +167,11 @@ interface ApprovalEntry {
           [attr.aria-describedby]="view()?.watchOnly ? reasonId : null"
           (click)="stop()"
         >
-          <lucide-angular [img]="StopIcon" class="h-3.5 w-3.5" aria-hidden="true" />
+          <lucide-angular
+            [img]="StopIcon"
+            class="h-3.5 w-3.5"
+            aria-hidden="true"
+          />
           Stop
         </button>
       </div>
@@ -211,9 +219,11 @@ interface ApprovalEntry {
             >
           }
           @if (b.code; as code) {
-            <span class="font-mono text-xs text-base-content-muted" data-testid="remote-watch-code">{{
-              code
-            }}</span>
+            <span
+              class="font-mono text-xs text-base-content-muted"
+              data-testid="remote-watch-code"
+              >{{ code }}</span
+            >
           }
         </div>
       }
@@ -224,13 +234,16 @@ interface ApprovalEntry {
           role="status"
           data-testid="remote-stale"
         >
-          {{ machineName() }} is not connected. This is the last known state; the
-          session keeps running there.
+          {{ machineName() }} is not connected. This is the last known state;
+          the session keeps running there.
         </p>
       }
 
       @if (replay(); as summary) {
-        <ptah-reconnect-banner [summary]="summary" (dismissed)="dismissReplay()" />
+        <ptah-reconnect-banner
+          [summary]="summary"
+          (dismissed)="dismissReplay()"
+        />
       }
 
       @if (errorText(); as text) {
@@ -244,63 +257,36 @@ interface ApprovalEntry {
       }
 
       @if (linkNotice(); as notice) {
-        <p class="text-xs text-base-content-muted" role="status" data-testid="remote-file-notice">
+        <p
+          class="text-xs text-base-content-muted"
+          role="status"
+          data-testid="remote-file-notice"
+        >
           {{ notice }}
         </p>
       }
 
       @if (snapshotLabel(); as label) {
-        <p class="text-xs text-base-content-muted" data-testid="remote-snapshot-label">
+        <p
+          class="text-xs text-base-content-muted"
+          data-testid="remote-snapshot-label"
+        >
           {{ label }}
         </p>
       }
 
-      <section
-        class="flex flex-col gap-4 rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-        tabindex="0"
-        aria-label="Transcript"
-        data-testid="remote-transcript-region"
-      >
-        @if (view() === null || (view()?.mode === 'attaching' && transcript().length === 0)) {
-          <p class="text-sm text-base-content-muted" role="status" data-testid="remote-opening">
-            Opening session…
-          </p>
-        } @else if (transcript().length === 0) {
-          <p class="text-sm text-base-content-muted" data-testid="remote-empty">
-            {{ emptyText() }}
-          </p>
-        } @else {
-          <ptah-remote-transcript
-            [items]="transcript()"
-            [machineName]="machineName()"
-            [streaming]="turnInFlight()"
-            (linkActivated)="onLink($event)"
-          />
-        }
-
-        @if (savedUpTo(); as saved) {
-          <p
-            class="border-t border-dashed border-surface-border pt-2 text-xs text-base-content-muted"
-            data-testid="remote-saved-divider"
-          >
-            {{ saved }}
-          </p>
-        }
-
-        @for (entry of approvals(); track entry.request.id) {
-          <ptah-remote-approval-block
-            [request]="entry.request"
-            [machineName]="machineName()"
-            [sessionTitle]="title()"
-            [mode]="approvalMode()"
-            [timedOut]="entry.timedOut"
-            [busy]="answering().has(entry.request.id)"
-            [unavailableReason]="answerUnavailable()"
-            [error]="answerErrors().get(entry.request.id) ?? null"
-            (answered)="answer(entry.request, $event)"
-          />
-        }
-      </section>
+      <ptah-remote-session-pane
+        [machineId]="machineId()"
+        [sessionId]="sessionId()"
+        [view]="view()"
+        [transcript]="transcript()"
+        [machineName]="machineName()"
+        [sessionTitle]="title()"
+        [connected]="connected()"
+        [streaming]="turnInFlight()"
+        [savedAt]="savedAt()"
+        (linkActivated)="onLink($event)"
+      />
     </div>
 
     <ptah-remote-composer
@@ -334,10 +320,6 @@ export class RemoteSessionViewComponent implements IFileLinkOpener {
   protected readonly announcement = signal('');
   protected readonly linkNotice = signal<string | null>(null);
   protected readonly freed = signal<WatchOnlyBanner | null>(null);
-  protected readonly answering = signal<ReadonlySet<string>>(new Set());
-  protected readonly answerErrors = signal<ReadonlyMap<string, MachinesError>>(
-    new Map(),
-  );
   private readonly replayFrom = signal<number | null>(null);
 
   protected readonly view = computed<RemoteSessionView | null>(() =>
@@ -373,7 +355,7 @@ export class RemoteSessionViewComponent implements IFileLinkOpener {
   );
 
   /** Local time of the newest saved event, for 4.9 labels. */
-  private readonly savedAt = computed(() => {
+  protected readonly savedAt = computed(() => {
     let newest = 0;
     for (const event of this.events()) {
       if (Number.isFinite(event.timestamp) && event.timestamp > newest) {
@@ -405,29 +387,12 @@ export class RemoteSessionViewComponent implements IFileLinkOpener {
     if (view === null || this.transcript().length === 0) return null;
     if (view.lockUnavailable) {
       const at = this.savedAt();
-      return at ? `Cached from ${at}, may be out of date` : 'Cached, may be out of date';
+      return at
+        ? `Cached from ${at}, may be out of date`
+        : 'Cached, may be out of date';
     }
     if (view.mode === 'snapshot') return 'Showing the last saved state';
     return null;
-  });
-
-  protected readonly savedUpTo = computed(() => {
-    const view = this.view();
-    if (view?.mode !== 'snapshot' || this.transcript().length === 0) return null;
-    const at = this.savedAt();
-    return at
-      ? `Saved up to ${at}. Newer activity is not shown.`
-      : 'Newer activity is not shown.';
-  });
-
-  protected readonly emptyText = computed(() => {
-    const view = this.view();
-    if (view?.lockUnavailable) {
-      return 'No saved history is available because the session could not be checked.';
-    }
-    if (view?.mode === 'snapshot') return 'Nothing was saved in this session yet.';
-    if (view?.mode === 'detached') return 'The session could not be opened.';
-    return 'No messages yet.';
   });
 
   protected readonly errorText = computed(() => {
@@ -436,25 +401,6 @@ export class RemoteSessionViewComponent implements IFileLinkOpener {
     if (error === null || this.view()?.lockUnavailable) return null;
     return errorSentence(error);
   });
-
-  protected readonly approvalMode = computed<RemoteApprovalMode>(() => {
-    const view = this.view();
-    if (view?.lockUnavailable) return 'cached';
-    return view?.watchOnly ? 'watch-only' : 'answerable';
-  });
-
-  protected readonly approvals = computed<readonly ApprovalEntry[]>(() => {
-    const view = this.view();
-    if (view === null) return [];
-    return [
-      ...view.pendingPermissions.map((request) => ({ request, timedOut: false })),
-      ...view.timedOutPermissions.map((request) => ({ request, timedOut: true })),
-    ];
-  });
-
-  protected readonly answerUnavailable = computed(() =>
-    this.connected() ? null : `${this.machineName()} is not connected.`,
-  );
 
   protected readonly canStop = computed(() => {
     const view = this.view();
@@ -579,40 +525,6 @@ export class RemoteSessionViewComponent implements IFileLinkOpener {
     }
   }
 
-  protected async answer(
-    request: PermissionRequest,
-    decision: RemoteApprovalDecision,
-  ): Promise<void> {
-    if (this.answering().has(request.id)) return;
-    this.answering.update((set) => new Set(set).add(request.id));
-    this.answerErrors.update((map) => {
-      const next = new Map(map);
-      next.delete(request.id);
-      return next;
-    });
-    try {
-      const outcome = await this.store.respondPermission(
-        this.machineId(),
-        this.sessionId(),
-        request.id,
-        decision,
-      );
-      if (!outcome.ok) {
-        const error: MachinesError =
-          'error' in outcome
-            ? outcome.error
-            : { message: refusalSentence(outcome.refused, this.machineName()) };
-        this.answerErrors.update((map) => new Map(map).set(request.id, error));
-      }
-    } finally {
-      this.answering.update((set) => {
-        const next = new Set(set);
-        next.delete(request.id);
-        return next;
-      });
-    }
-  }
-
   private announce(text: string): void {
     this.announcement.set(text);
   }
@@ -622,8 +534,6 @@ export class RemoteSessionViewComponent implements IFileLinkOpener {
     this.linkNotice.set(null);
     this.freed.set(null);
     this.replayFrom.set(null);
-    this.answering.set(new Set());
-    this.answerErrors.set(new Map());
     this.announcedTurn = null;
     this.lastBannerAnnouncement = '';
     this.wasWatchOnly = false;
