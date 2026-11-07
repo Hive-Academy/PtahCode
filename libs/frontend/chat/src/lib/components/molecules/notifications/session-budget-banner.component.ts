@@ -5,6 +5,7 @@ import {
   input,
   output,
 } from '@angular/core';
+import { Gauge, LucideAngularModule } from 'lucide-angular';
 import type {
   SessionBudgetStage,
   SessionBudgetState,
@@ -23,6 +24,14 @@ interface BudgetMeter {
 const BODY =
   'Ask the agent to finish its running work, write a handoff document and give you a prompt for a new session.';
 
+const PLATE = 'relative block overflow-hidden px-4 border-t text-xs';
+const FILL =
+  'pointer-events-none absolute inset-y-0 left-0 transition-[width] duration-500';
+const ICON = 'w-3.5 h-3.5 flex-shrink-0';
+
+/** Per-instance suffix for the advice text id (one banner per chat view). */
+let nextBannerId = 0;
+
 const FOCUS =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
 
@@ -33,88 +42,100 @@ const FOCUS =
  * user dismissed that stage. A dismissed `handoff` comes back at `limit`. "Wrap up & hand off" asks the
  * parent to send the wrap-up message; the agent does the rest. While an automatic hand-off is queued the
  * notice stays up (even if dismissed) with "Auto hand-off queued" and a Cancel button.
+ *
+ * Layout: one compact row in the same glass plate and button style as the queued follow-ups. The
+ * usage meter is the row's background fill. The advice text is the banner tooltip and the
+ * accessible description of the banner and its actions. In a narrow pane the actions wrap.
  */
 @Component({
   selector: 'ptah-session-budget-banner',
   standalone: true,
+  imports: [LucideAngularModule],
   template: `
     @if (stage(); as current) {
-      <div
-        class="surface-2 mx-2 my-1 rounded-lg border text-xs"
-        [class.border-warning]="current === 'handoff'"
-        [class.border-error]="current === 'limit'"
+      <!-- One compact row in the same plate as the queued follow-ups: the
+           meter is the row's background fill, the advice is the tooltip.
+           In a narrow pane the actions wrap under the text. -->
+      <section
+        [class]="tone().plate"
+        data-glass-surface="plate"
         [attr.role]="current === 'limit' ? 'alert' : 'status'"
         [attr.aria-live]="current === 'limit' ? 'assertive' : 'polite'"
+        [attr.aria-describedby]="bodyId"
+        [title]="body"
         data-testid="session-budget-banner"
       >
-        <div class="px-2.5 pt-2">
+        @if (meter(); as meter) {
           <div
-            class="font-semibold leading-5"
-            data-testid="session-budget-title"
+            [class]="tone().fill"
+            [style.width.%]="meter.value"
+            role="meter"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            [attr.aria-valuenow]="meter.value"
+            [attr.aria-label]="meter.label"
+            data-testid="session-budget-meter"
+          ></div>
+        }
+        <div class="relative flex flex-wrap items-center gap-x-2 gap-y-1 py-2">
+          <lucide-angular
+            [img]="GaugeIcon"
+            [class]="tone().icon"
+            aria-hidden="true"
+          />
+          <p class="min-w-32 flex-1 truncate text-base-content">
+            <span data-testid="session-budget-title">{{ title() }}</span>
+            @if (percentLabel(); as percent) {
+              <span class="text-base-content-muted"> · {{ percent }}</span>
+            }
+            @if (autoHandoffQueued()) {
+              <span
+                class="text-base-content-muted"
+                data-testid="session-budget-auto-queued"
+                >&nbsp;· Auto hand-off queued, runs after this turn</span
+              >
+            }
+          </p>
+          <span
+            class="sr-only"
+            [id]="bodyId"
+            data-testid="session-budget-body"
+            >{{ body }}</span
           >
-            {{ title() }}
-          </div>
-          @if (meter(); as meter) {
-            <progress
-              class="progress mt-1.5 h-1.5 w-full"
-              [class.progress-warning]="current === 'handoff'"
-              [class.progress-error]="current === 'limit'"
-              [value]="meter.value"
-              max="100"
-              [attr.aria-label]="meter.label"
-              data-testid="session-budget-meter"
-            ></progress>
-          }
-        </div>
-
-        <p
-          class="mt-1.5 px-2.5 leading-relaxed text-base-content-muted"
-          data-testid="session-budget-body"
-        >
-          {{ body }}
-        </p>
-
-        @if (autoHandoffQueued()) {
-          <div
-            class="mt-1.5 flex flex-wrap items-center gap-2 px-2.5"
-            data-testid="session-budget-auto-queued"
-          >
-            <span class="font-semibold">Auto hand-off queued</span>
-            <span class="text-base-content-muted">
-              It runs after the current turn.
-            </span>
+          <div class="ml-auto flex flex-shrink-0 items-center gap-1">
+            @if (autoHandoffQueued()) {
+              <button
+                type="button"
+                class="btn btn-ghost btn-xs {{ focus }}"
+                aria-label="Cancel the automatic hand-off"
+                (click)="cancelAutoHandoff.emit()"
+                data-testid="session-budget-auto-cancel"
+              >
+                Cancel
+              </button>
+            }
             <button
               type="button"
-              class="btn btn-xs btn-outline {{ focus }}"
-              aria-label="Cancel the automatic hand-off"
-              (click)="cancelAutoHandoff.emit()"
-              data-testid="session-budget-auto-cancel"
+              class="btn btn-ghost btn-xs {{ focus }}"
+              [attr.aria-describedby]="bodyId"
+              [disabled]="wrapUpSent()"
+              (click)="wrapUp.emit()"
+              data-testid="session-budget-wrap-up"
             >
-              Cancel
+              {{ wrapUpSent() ? 'Wrap-up requested' : 'Wrap up & hand off' }}
+            </button>
+            <button
+              type="button"
+              class="btn btn-ghost btn-xs {{ focus }}"
+              [attr.aria-describedby]="bodyId"
+              (click)="dismiss.emit()"
+              data-testid="session-budget-dismiss"
+            >
+              Dismiss
             </button>
           </div>
-        }
-
-        <div class="flex flex-wrap items-center gap-1 px-2.5 pb-2 pt-1.5">
-          <button
-            type="button"
-            class="btn btn-xs btn-primary {{ focus }}"
-            [disabled]="wrapUpSent()"
-            (click)="wrapUp.emit()"
-            data-testid="session-budget-wrap-up"
-          >
-            {{ wrapUpSent() ? 'Wrap-up requested' : 'Wrap up & hand off' }}
-          </button>
-          <button
-            type="button"
-            class="btn btn-xs btn-ghost {{ focus }}"
-            (click)="dismiss.emit()"
-            data-testid="session-budget-dismiss"
-          >
-            Dismiss
-          </button>
         </div>
-      </div>
+      </section>
     }
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -144,6 +165,27 @@ export class SessionBudgetBannerComponent {
 
   protected readonly body = BODY;
   protected readonly focus = FOCUS;
+  protected readonly GaugeIcon = Gauge;
+  /** Id of the screen-reader advice text that the banner and its actions point to. */
+  protected readonly bodyId = `session-budget-body-${nextBannerId++}`;
+
+  /** Tone classes per stage: a faint plate, a stronger meter fill, the icon. */
+  protected readonly tone = computed(() => {
+    const limit = this.stage() === 'limit';
+    return {
+      plate: `${PLATE} ${limit ? 'border-error/40 bg-error/5' : 'border-warning/30 bg-warning/5'}`,
+      fill: `${FILL} ${limit ? 'bg-error/15' : 'bg-warning/15'}`,
+      icon: `${ICON} ${limit ? 'text-error' : 'text-warning'}`,
+    };
+  });
+
+  /** "82%" next to the title, or `null` with no figure. */
+  protected readonly percentLabel = computed(() => {
+    const percent = this.budget()?.percent;
+    return percent === null || percent === undefined
+      ? null
+      : formatPercent(percent);
+  });
 
   /** The stage to show, or `null` for none. */
   protected readonly stage = computed<BannerStage | null>(() => {
