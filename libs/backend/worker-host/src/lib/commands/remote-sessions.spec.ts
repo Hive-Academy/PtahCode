@@ -245,6 +245,28 @@ it('starts each session on a tab whose id is a plain UUID v4', async () => {
   expect(tabId).toMatch(UUID_V4);
 });
 
+it('continues a session this worker has no tab for on a plain UUID v4 tab', async () => {
+  // After a worker restart tabsBySession is empty: continue makes a new tab.
+  const UUID_V4 =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  let tabId = '';
+  const fake = setup((message) => {
+    if (message.method !== 'chat:continue') return undefined;
+    tabId = String(param(message, 'tabId'));
+    fake.held.set('s1', 'nonce-s1');
+    return undefined;
+  });
+  await expect(
+    fake.sessions.handle(
+      'session.continue',
+      { sessionId: 's1', prompt: 'more' },
+      grant,
+      peer,
+    ),
+  ).resolves.toMatchObject({ turnId: expect.any(String) });
+  expect(tabId).toMatch(UUID_V4);
+});
+
 it('frees the slot and the lock of a start that never reported its session on its tab-only terminal event, once', async () => {
   const tabs: string[] = [];
   const fake = setup(

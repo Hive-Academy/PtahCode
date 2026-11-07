@@ -113,7 +113,7 @@ interface MachineRow {
                 [class.bg-base-300]="row.machineId === selectedId()"
                 [class.ring-1]="row.machineId === selectedId()"
                 [class.ring-inset]="row.machineId === selectedId()"
-                [class.ring-base-content/25]="row.machineId === selectedId()"
+                [class.ring-base-content/60]="row.machineId === selectedId()"
                 [attr.aria-current]="
                   row.machineId === selectedId() ? 'true' : null
                 "
