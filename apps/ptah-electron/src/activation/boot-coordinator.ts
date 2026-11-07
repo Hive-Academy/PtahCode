@@ -125,6 +125,14 @@ export interface BootRefs extends ThothRuntimeRefs {
     awaitStopped: () => Promise<void>;
   } | null;
   /**
+   * Task-end hook detector and run worker (TASK_2026_886). Started once by
+   * the heavy boot after the review worker; null without SQLite.
+   */
+  taskEndHook: {
+    dispose: () => void;
+    awaitStopped: () => Promise<void>;
+  } | null;
+  /**
    * Ptah CLI registry, resolved eagerly while the container is healthy so
    * `will-quit` disposes a captured instance instead of forcing a first-time
    * lazy build of its dependency graph mid-teardown.
@@ -242,6 +250,7 @@ export function createEmptyBootRefs(): BootRefs {
     updateManager: null,
     remoteMachines: null,
     reviewWorker: null,
+    taskEndHook: null,
     cliRegistry: null,
     agentProcessManager: null,
     laneOutcomesDisposer: null,
