@@ -15,6 +15,7 @@ import {
 } from '@ptah-extension/core';
 import { PROVIDER_MODELS_LOADER } from '@ptah-extension/ui';
 import type {
+  CliAdapterManifest,
   CliDetectionResult,
   PtahCliSummary,
 } from '@ptah-extension/shared';
@@ -44,6 +45,19 @@ const idle: ProvidersSettingsCommit = {
   message: null,
 };
 const CONTEXT = { scopeKey: 'workspace', activePath: '/ws' };
+const laneSupported = { state: 'supported' as const };
+const laneManifest: CliAdapterManifest = {
+  messaging: { steer: laneSupported, interrupt: laneSupported, continuation: laneSupported, resume: laneSupported },
+  roleChannel: 'task-prompt',
+  permissionModes: {
+    plan: { ...laneSupported, networkModes: ['deny'] },
+    'auto-edit': { ...laneSupported, networkModes: ['deny', 'allow'] },
+    yolo: { ...laneSupported, networkModes: ['allow'] },
+  },
+  networkModes: { deny: laneSupported, allow: laneSupported },
+  mcp: laneSupported,
+  limitReader: { state: 'no-reliable-source' },
+};
 
 const detected = (
   cli: CliDetectionResult['cli'],
@@ -242,6 +256,14 @@ describe('CliOrchestrationMatrixComponent', () => {
     input.checked = checked;
     input.dispatchEvent(new Event('change'));
   }
+  function showSavedCodexDefault() {
+    state.orchestration.set(ready({ ...ORCHESTRATION,
+      cliLaneDefaults: { codex: { permission: 'plan', network: 'deny' } },
+      detectedClis: ORCHESTRATION.detectedClis.map(cli =>
+        cli.cli === 'codex' ? { ...cli, manifest: laneManifest } : cli),
+    }));
+    fixture.detectChanges();
+  }
   /** Decision 1: the Uninstalled group starts collapsed; most cases look inside it. */
   function expandUninstalled() {
     q<HTMLButtonElement>(
@@ -338,6 +360,7 @@ describe('CliOrchestrationMatrixComponent', () => {
         'Model',
         'Effort',
         'Permissions & Safety',
+        'Lane defaults',
         'Actions',
       ]);
       expect(q('#cli-matrix-heading')?.textContent).toContain(
@@ -869,6 +892,56 @@ describe('CliOrchestrationMatrixComponent', () => {
   });
 
   describe('writes (every write is state.saveSettings through the feedback service)', () => {
+    it('saves a lane default and Undo restores the previous row', async () => {
+      showSavedCodexDefault();
+      const select = row('codex')?.querySelector('select') as HTMLSelectElement;
+      select.value = 'auto-edit';
+      select.dispatchEvent(new Event('change'));
+      expect(select.value).toBe('plan');
+      await flush();
+      expect(state.saveSettings).toHaveBeenCalledWith(
+        { orchestration: { cliLaneDefaults: { codex: { permission: 'auto-edit', network: 'deny' } } } }, CONTEXT,
+      );
+      await feedback.undo();
+      expect(state.saveSettings).toHaveBeenLastCalledWith(
+        { orchestration: { cliLaneDefaults: { codex: { permission: 'plan', network: 'deny' } } } }, CONTEXT,
+      );
+    });
+
+    it('resets a saved default with a null row and Undo restores it', async () => {
+      showSavedCodexDefault();
+      const reset = Array.from(row('codex')?.querySelectorAll('button') ?? [])
+        .find(button => button.textContent?.includes('Reset to default'));
+      reset?.click();
+      fixture.detectChanges();
+      expect(state.saveSettings).not.toHaveBeenCalled();
+      const confirm = Array.from(row('codex')?.querySelectorAll('button') ?? [])
+        .find(button => button.textContent?.trim() === 'Confirm');
+      confirm?.click();
+      await flush();
+      expect(state.saveSettings).toHaveBeenCalledWith(
+        { orchestration: { cliLaneDefaults: { codex: null } } }, CONTEXT,
+      );
+      await feedback.undo();
+      expect(state.saveSettings).toHaveBeenLastCalledWith(
+        { orchestration: { cliLaneDefaults: { codex: { permission: 'plan', network: 'deny' } } } }, CONTEXT,
+      );
+    });
+
+    it('keeps the prior selection when a write is rejected', async () => {
+      showSavedCodexDefault();
+      state.saveSettings.mockImplementationOnce(async () => {
+        state.commit.set({ ...idle, status: 'failed', unsaved: ['agentOrchestration.cliLaneDefaults.codex'], message: 'Unsupported choice.' });
+        return true;
+      });
+      const select = row('codex')?.querySelector('select') as HTMLSelectElement;
+      select.value = 'auto-edit';
+      select.dispatchEvent(new Event('change'));
+      await flush();
+      expect(select.value).toBe('plan');
+      expect(feedback.toast()?.tone).toBe('alert');
+      expect(feedback.toast()?.message).toContain('Unsupported choice.');
+    });
     it('switches a system CLI off through disabledClis, with Undo', async () => {
       check('codex', false);
       await flush();
@@ -1404,7 +1477,7 @@ describe('CliOrchestrationMatrixComponent', () => {
       expect(
         row('codex')?.querySelector('[data-testid^="cli-matrix-test-"]'),
       ).toBeNull();
-      expect(row('codex')?.querySelectorAll('td')[7]?.textContent?.trim()).toBe(
+      expect(row('codex')?.querySelectorAll('td')[8]?.textContent?.trim()).toBe(
         '',
       );
     });

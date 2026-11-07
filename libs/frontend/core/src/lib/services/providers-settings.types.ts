@@ -78,6 +78,7 @@ export type ProvidersOrchestrationField =
   | 'claudeReasoningEffort';
 /** Orchestration policy the CLI matrix writes. Array fields are read back order-sensitively. */
 export type ProvidersOrchestrationPolicyField =
+  | 'cliLaneDefaults'
   | 'disabledClis'
   | 'preferredAgentOrder'
   | 'maxConcurrentAgents'
