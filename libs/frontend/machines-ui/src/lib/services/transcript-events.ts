@@ -108,14 +108,53 @@ export function toTranscriptEvents(
   return result;
 }
 
+/** Every `eventType` of {@link FlatStreamEventUnion}; the compiler checks the list. */
+const FLAT_EVENT_TYPE_LIST = [
+  'message_start',
+  'text_delta',
+  'thinking_start',
+  'thinking_delta',
+  'tool_start',
+  'tool_delta',
+  'tool_result',
+  'agent_start',
+  'message_complete',
+  'message_delta',
+  'signature_delta',
+  'compaction_start',
+  'compaction_complete',
+  'background_agent_started',
+  'background_agent_completed',
+  'background_agent_stopped',
+  'background_tasks_snapshot',
+  'agent_progress',
+  'agent_status',
+  'agent_completed',
+  'turn_state',
+] as const satisfies readonly FlatStreamEventUnion['eventType'][];
+
+type MissingEventType = Exclude<
+  FlatStreamEventUnion['eventType'],
+  (typeof FLAT_EVENT_TYPE_LIST)[number]
+>;
+/** Fails to compile when the union gains a type the list does not name. */
+const FLAT_EVENT_TYPES_COMPLETE: [MissingEventType] extends [never]
+  ? true
+  : MissingEventType = true;
+void FLAT_EVENT_TYPES_COMPLETE;
+
+const FLAT_EVENT_TYPES: ReadonlySet<string> = new Set(FLAT_EVENT_TYPE_LIST);
+
 /**
  * The one ingestion boundary for worker-supplied transcript events (S6):
  * every event a remote transcript shows, from a baseline, a `chat:chunk` or
  * a snapshot, passes through here.
  *
  * Narrows an untrusted value to a flat stream event: an object with string
- * `id`, `eventType` and `messageId`, a numeric `timestamp`, and the slot
- * fields its type needs. The rest of its shape belongs to the backend that
+ * `id` and `messageId`, a numeric `timestamp`, an `eventType` of the
+ * {@link FlatStreamEventUnion} (unknown types are rejected), and the required
+ * fields the remote tree builders read for that type (role, tool name and
+ * flags, slot keys). The rest of its shape belongs to the backend that
  * produced it and is kept. Returns a copy in which every string (text,
  * thinking, tool input and output, names, keys) has had control, bidi and
  * zero-width characters removed by {@link displayBlockValue}; nothing is cut.
@@ -127,15 +166,20 @@ export function parseFlatStreamEvent(
     return null;
   }
   const raw = value as Record<string, unknown>;
+  const eventType = raw['eventType'];
   if (
     typeof raw['id'] !== 'string' ||
-    typeof raw['eventType'] !== 'string' ||
+    typeof eventType !== 'string' ||
+    !FLAT_EVENT_TYPES.has(eventType) ||
     typeof raw['messageId'] !== 'string' ||
     typeof raw['timestamp'] !== 'number'
   ) {
     return null;
   }
-  switch (raw['eventType']) {
+  switch (eventType) {
+    case 'message_start':
+      if (raw['role'] !== 'user' && raw['role'] !== 'assistant') return null;
+      break;
     case 'text_delta':
     case 'thinking_delta':
       if (typeof raw['delta'] !== 'string') return null;
@@ -149,8 +193,17 @@ export function parseFlatStreamEvent(
       if (typeof raw['toolCallId'] !== 'string') return null;
       break;
     case 'tool_start':
+      if (typeof raw['toolCallId'] !== 'string') return null;
+      if (typeof raw['toolName'] !== 'string') return null;
+      if (typeof raw['isTaskTool'] !== 'boolean') return null;
+      break;
     case 'tool_result':
       if (typeof raw['toolCallId'] !== 'string') return null;
+      if (typeof raw['isError'] !== 'boolean') return null;
+      break;
+    case 'agent_start':
+      if (typeof raw['toolCallId'] !== 'string') return null;
+      if (typeof raw['agentType'] !== 'string') return null;
       break;
     default:
       break;

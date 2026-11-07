@@ -80,4 +80,48 @@ describe('transcript events', () => {
     const ok = textDelta('x', 'm', 'a', 'stream');
     expect(parseFlatStreamEvent(ok)).toEqual(ok);
   });
+
+  it('rejects unknown event types and events without their required fields', () => {
+    const base = { id: 'x', messageId: 'm', timestamp: 1 };
+    expect(parseFlatStreamEvent({ ...base, eventType: 'evil' })).toBeNull();
+    expect(
+      parseFlatStreamEvent({
+        ...base,
+        eventType: 'message_start',
+        role: 'root',
+      }),
+    ).toBeNull();
+    expect(
+      parseFlatStreamEvent({
+        ...base,
+        eventType: 'tool_start',
+        toolCallId: 'c',
+        toolName: 'Bash',
+      }),
+    ).toBeNull();
+    expect(
+      parseFlatStreamEvent({
+        ...base,
+        eventType: 'tool_result',
+        toolCallId: 'c',
+      }),
+    ).toBeNull();
+    expect(
+      parseFlatStreamEvent({
+        ...base,
+        eventType: 'agent_start',
+        toolCallId: 'c',
+      }),
+    ).toBeNull();
+    const start = { ...base, eventType: 'message_start', role: 'assistant' };
+    expect(parseFlatStreamEvent(start)).toEqual(start);
+    const tool = {
+      ...base,
+      eventType: 'tool_start',
+      toolCallId: 'c',
+      toolName: 'Bash',
+      isTaskTool: false,
+    };
+    expect(parseFlatStreamEvent(tool)).toEqual(tool);
+  });
 });
