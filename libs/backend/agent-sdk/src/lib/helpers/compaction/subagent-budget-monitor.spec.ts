@@ -1561,6 +1561,11 @@ describe('SubagentBudgetMonitor', () => {
       expect(text).toContain("Ptah's subagent budget monitor stopped");
       expect(text).toContain('The user did not stop it');
       expect(text).toContain('handoff limit 150000 tokens');
+      expect(text).toContain(
+        `If a Read or Glob right after this handoff fails with "The user doesn't want to take this action right now" ` +
+          `and you saw no permission prompt the user declined, retry that call once; ` +
+          `if it fails the same way, stop and report to the user.`,
+      );
     });
 
     it('foreground subagent: posts the handoff to the notice queue once; its drained tool result delivers nothing more', async () => {
