@@ -99,6 +99,19 @@ const CHIP_STATES = [
       .rail-scroll-collapsed::-webkit-scrollbar {
         display: none;
       }
+      :host ::ng-deep [data-rail-card].rail-card-carried {
+        position: relative;
+      }
+      :host ::ng-deep [data-rail-card].rail-card-carried::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        /* The host has no radius; match the card frame's rounded-lg. */
+        border-radius: 0.5rem;
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+        pointer-events: none;
+        opacity: 0;
+      }
     `,
   ],
   template: `
@@ -531,8 +544,7 @@ export class CanvasRailComponent {
   private readonly animateGroupChanges = effect(() => {
     this.railLayout();
     const collapsed = this.collapsed();
-    const canAnimate = this.flipReady && this.previousCollapsed === collapsed &&
-      !this.document.defaultView?.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const canAnimate = this.flipReady && this.previousCollapsed === collapsed;
     if (this.previousCollapsed !== collapsed) this.flip?.cancel();
     this.previousCollapsed = collapsed;
     const container = this.host.nativeElement.querySelector<HTMLElement>('[data-rail-scroll]');
