@@ -128,10 +128,10 @@ describe('ElectronHostAttentionNotifications', () => {
     adapter.present(notice);
     adapter.present(next);
     expect(native).toHaveBeenCalledTimes(2);
-    expect(native).toHaveBeenLastCalledWith({ title: 'Ptah', body: '2 requests need you — Session title' });
+    expect(native).toHaveBeenLastCalledWith({ title: 'PtahCode', body: '2 requests need you — Session title' });
     adapter.resolve(notice.key, 1);
     expect(native).toHaveBeenCalledTimes(3);
-    expect(native).toHaveBeenLastCalledWith({ title: 'Ptah', body: 'Permission needed — Session title' });
+    expect(native).toHaveBeenLastCalledWith({ title: 'PtahCode', body: 'Permission needed — Session title' });
     expect(close).toHaveBeenCalledTimes(2);
     clicks[2]();
     expect(reveal).toHaveBeenCalledTimes(1);
