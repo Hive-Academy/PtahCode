@@ -1,0 +1,17 @@
+{
+  "cli": "copilot",
+  "argv": [
+    "-p",
+    "Reply with the word OK.",
+    "--output-format",
+    "json",
+    "--mode",
+    "plan",
+    "--available-tools"
+  ],
+  "exitCode": 0,
+  "jsonLines": 16,
+  "usageEvents": [],
+  "stderrPresent": false,
+  "note": "Only numeric usage fields retained; all string payloads and stderr discarded."
+}

@@ -1,0 +1,17 @@
+{
+  "cli": "codex",
+  "argv": [
+    "exec",
+    "--json",
+    "--sandbox",
+    "read-only",
+    "-m",
+    "gpt-5.1-codex-mini",
+    "Reply with the word OK."
+  ],
+  "exitCode": 1,
+  "jsonLines": 5,
+  "usageEvents": [],
+  "stderrPresent": true,
+  "note": "Only numeric usage fields retained; all string payloads and stderr discarded."
+}
