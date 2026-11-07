@@ -60,3 +60,11 @@ the mobile PWA, P3 = later.
 | Map `MachineRegistryWriteError` (registry over the size or count cap) in `mapMachineError`. Today it falls back to `MACHINE_UNREACHABLE` with a log entry. | PR 962 CodeRabbit re-review, Moderate 1 |
 | `pairViaSsh` holds the service mutation queue for the ssh command (up to 15 s), so `add`/`remove`/`list` wait behind it. Use a per-machine queue. | PR 962 CodeRabbit re-review, Moderate 2 |
 | `pair()` returns the offline summary for any error while the state is offline, not only for a `WorkerClientError`. Narrow the check. | PR 962 CodeRabbit re-review, Moderate 3 |
+
+## Fleet setup findings (added 2026-11-07)
+
+| Item | Source |
+| --- | --- |
+| P1: `rebuild-native.js` source-builds better-sqlite3 on the build host and copies it over `prebuilds/linux-x64.node`, so the deb needs the build host's glibc (2.38 from amun-PC 2.39). Ubuntu 22.04 / Mint 21 (glibc 2.35) workers fail with "Worker requires working better-sqlite3". Build the Linux addon in an older-glibc container, or declare `libc6 (>= 2.38)` in the deb Depends. | Gatsby install, decisions row 30 |
+| `ptah-worker status` says "worker service is not running" while the unit is active but blocked on readiness; name the readiness gate instead. | Horus install |
+| O1 copy carries the desktop `autopilot` setting; the worker refuses `yolo`/`auto-edit` at start. Document it in worker.md or offer a worker-only override. | Horus install |
