@@ -58,6 +58,11 @@ const lanePersistQueues = new WeakMap<
   Map<string, Promise<void>>
 >();
 
+/**
+ * Runs `operation` after the lane's previous persist settles (resolved or
+ * rejected), so writes of one lane never overlap or reorder. Returns the
+ * queued write; the queue entry is dropped once the newest write settles.
+ */
 function enqueueLanePersist(
   container: DependencyContainer,
   info: AgentProcessInfo,
@@ -298,6 +303,11 @@ function wireHandoffChainBroadcast(
   });
 }
 
+/**
+ * Forwards agent lifecycle events to the webview and, when
+ * `persistCliSession` is set, persists each lane's session reference:
+ * activity checkpoints, exits and recovered output after a host restart.
+ */
 function wireAgentMonitorListeners(
   agentProcessManager: AgentProcessManager,
   webviewManager: WebviewManagerLike,
