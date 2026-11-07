@@ -85,7 +85,10 @@ export function validateCliLaneDefaultsPatch(
   legacyMode: CodexSandboxMode | undefined,
   capabilities: (cli: CliType) => Pick<CliAdapterManifest, 'permissionModes' | 'networkModes'> | undefined,
 ): CliLaneDefaults {
-  const current = readCliLaneDefaults(workspace);
+  const codexTouched = legacyMode !== undefined || (patch !== undefined && Object.prototype.hasOwnProperty.call(patch, 'codex'));
+  const current = codexTouched
+    ? readCliLaneDefaults(workspace)
+    : CLI_LANE_DEFAULTS_SCHEMA.parse(readRaw(workspace, defaultsKey) ?? {});
   const base = legacyMode === undefined ? current : { ...current, codex: codexChoice(legacyMode) };
   const merged = patch === undefined ? base : mergeDefaults(base, patch);
   for (const [name, choice] of Object.entries(merged)) {
@@ -108,20 +111,23 @@ export async function saveCliLaneDefaults(
   const previousDefaults = readRaw(workspace, defaultsKey);
   const previousLegacy = readRaw(workspace, legacyKey);
   const merged = validateCliLaneDefaultsPatch(workspace, patch, legacyMode, capabilities);
-  const nextLegacy = merged.codex ? codexMode(merged.codex) : undefined;
+  const codexTouched = legacyMode !== undefined || (patch !== undefined && Object.prototype.hasOwnProperty.call(patch, 'codex'));
+  const nextLegacy = codexTouched ? (merged.codex ? codexMode(merged.codex) : undefined) : previousLegacy;
+  const writes: ReadonlyArray<readonly [string, unknown]> = codexTouched
+    ? [[defaultsKey, merged], [legacyKey, nextLegacy]]
+    : [[defaultsKey, merged]];
   try {
-    await workspace.setConfiguration(section, defaultsKey, merged);
-    await workspace.setConfiguration(section, legacyKey, nextLegacy);
+    for (const [key, value] of writes) await workspace.setConfiguration(section, key, value);
   } catch (error: unknown) {
     const recoveryErrors: unknown[] = [];
-    for (const [key, previous] of [[defaultsKey, previousDefaults], [legacyKey, previousLegacy]] as const) {
+    for (const [key, previous] of writes.map(([key]) => [key, key === defaultsKey ? previousDefaults : previousLegacy] as const)) {
       try {
         await workspace.setConfiguration(section, key, previous);
       } catch (rollbackError: unknown) {
         recoveryErrors.push(rollbackError);
       }
     }
-    for (const [key, previous] of [[defaultsKey, previousDefaults], [legacyKey, previousLegacy]] as const) {
+    for (const [key, previous] of writes.map(([key]) => [key, key === defaultsKey ? previousDefaults : previousLegacy] as const)) {
       try {
         if (!isDeepStrictEqual(readRaw(workspace, key), previous)) {
           recoveryErrors.push(new Error(`CLI defaults recovery verification failed for ${key}`));

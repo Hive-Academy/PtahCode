@@ -176,6 +176,19 @@ function makeHarness(
 }
 
 describe('agent:setConfig reasoning-effort boundary', () => {
+  it('does not persist a derived Codex row on an unrelated CLI patch', async () => {
+    const h = makeHarness();
+    h.settings.set('ptah.agentOrchestration.codexSandboxMode', 'read-only');
+    expect(await h.setConfig({ cliLaneDefaults: { copilot: { permission: 'yolo' } } }))
+      .toMatchObject({ success: true });
+    expect(h.settings.get('ptah.agentOrchestration.cliLaneDefaults')).toEqual({
+      copilot: { permission: 'yolo' },
+    });
+    expect(h.settings.get('ptah.agentOrchestration.codexSandboxMode')).toBe('read-only');
+    expect(h.workspace.setConfiguration).not.toHaveBeenCalledWith(
+      'ptah', 'agentOrchestration.codexSandboxMode', expect.anything(),
+    );
+  });
   it('projects the legacy Codex choice into the canonical map', async () => {
     const h = makeHarness();
     expect((await h.getConfig()).cliLaneDefaults.codex).toBeUndefined();

@@ -8,6 +8,7 @@ import type {
 import type { SessionMetadataStore } from '@ptah-extension/agent-sdk';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { AgentProcessManager } from '../../agent-process-manager.service';
+import type { ParentLaneLevel } from '../parent-lane-level';
 import { LaneAccountResumeError } from '../../lane-resume-gate';
 import type { PtahCliRegistry } from '../../../ptah-cli/ptah-cli-registry';
 import {
@@ -44,6 +45,7 @@ export class PtahCliLaneResumer implements LaneResumer {
     >,
     private readonly sessionMetadata: Pick<SessionMetadataStore, 'createChild'>,
     private readonly logger: Pick<Logger, 'warn'>,
+    private readonly parentLevel?: ParentLaneLevel,
   ) {}
 
   resume(info: AgentProcessInfo, task: string): Promise<LaneResumeResult> {
@@ -94,6 +96,8 @@ export class PtahCliLaneResumer implements LaneResumer {
           workingDirectory: workspaceRoot,
           resumeSessionId: prepared.resumeSessionId,
           parentSessionId,
+          ...(this.parentLevel && parentSessionId
+            ? { parentLevel: this.parentLevel(parentSessionId) } : {}),
           agentId,
           ...(params.permission ? { permission: params.permission } : {}),
           ...(params.network ? { network: params.network } : {}),

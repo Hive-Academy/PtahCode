@@ -699,8 +699,10 @@ export class OpencodeCliAdapter implements CliAdapter {
       baseArgs.push('--model', options.model);
     }
     const standalone = await this.supportsStandalone(binary);
-    if (policy.requested.permission && !standalone) {
-      throw new Error('OpenCode lane policy requires opencode run --standalone');
+    const legacyAutoFallback = policy.requested.permission === 'yolo'
+      && options.permissionSource === 'built-in' && !standalone;
+    if (policy.requested.permission && !standalone && !legacyAutoFallback) {
+      throw new Error(`OpenCode ${options.permissionSource ?? 'explicit'} ${policy.requested.permission} lane policy requires opencode run --standalone`);
     }
     if (standalone) {
       baseArgs.push('--standalone');
@@ -790,6 +792,9 @@ export class OpencodeCliAdapter implements CliAdapter {
     const done = startTurn(taskPrompt, options.resumeSessionId);
 
     return {
+      ...(legacyAutoFallback ? { effectivePolicy: {
+        nativeDescription: 'legacy opencode run --auto (standalone unavailable)',
+      } } : {}),
       abort: abortController,
       done,
       onOutput: output.subscribe,

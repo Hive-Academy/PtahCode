@@ -643,6 +643,34 @@ describe('OpencodeCliAdapter', () => {
       expect(await runArgs()).not.toContain('--standalone');
     });
 
+    it('uses legacy --auto for a built-in yolo default on older binaries', async () => {
+      mockHelpProbe.mockImplementation(() => helpProbeChild('  --print-logs  Print logs\n'));
+      const handle = await adapter.runSdk({ ...baseOptions, permission: 'yolo', network: 'allow', permissionSource: 'built-in' });
+      collect(handle);
+      currentChild?.emitClose(0);
+      await handle.done;
+      expect(mockSpawnCli.mock.calls[0][1]).toContain('--auto');
+      expect(handle.effectivePolicy?.permission).toBeUndefined();
+    });
+
+    it('uses legacy --auto when the built-in policy help probe fails', async () => {
+      mockHelpProbe.mockImplementationOnce(() => helpProbeChild(V2_RUN_HELP, 1));
+      const handle = await adapter.runSdk({ ...baseOptions, permission: 'yolo', network: 'allow', permissionSource: 'built-in' });
+      collect(handle);
+      currentChild?.emitClose(0);
+      await handle.done;
+      expect(mockSpawnCli.mock.calls[0][1]).toContain('--auto');
+      expect(handle.effectivePolicy?.nativeDescription).toContain('legacy');
+    });
+
+    it('refuses saved yolo and plan without standalone', async () => {
+      mockHelpProbe.mockImplementation(() => helpProbeChild('  --print-logs  Print logs\n'));
+      await expect(adapter.runSdk({ ...baseOptions, permission: 'yolo', network: 'allow', permissionSource: 'saved' }))
+        .rejects.toThrow('saved yolo lane policy requires');
+      await expect(adapter.runSdk({ ...baseOptions, permission: 'plan', network: 'allow', permissionSource: 'parent-plan' }))
+        .rejects.toThrow('parent-plan plan lane policy requires');
+    });
+
     it('omits --standalone and says so when the help probe exits non-zero', async () => {
       mockHelpProbe.mockImplementationOnce(() =>
         helpProbeChild(V2_RUN_HELP, 1),

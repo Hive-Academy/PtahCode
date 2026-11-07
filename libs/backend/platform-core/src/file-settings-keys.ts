@@ -317,6 +317,7 @@ export const ENHANCE_TIMEOUT_DEFAULT_MS = 120_000;
  * unset. Each key here must also be in `FILE_BASED_SETTINGS_KEYS`.
  */
 export const FILE_BASED_OBJECT_SETTINGS_KEYS: ReadonlySet<string> = new Set([
+  'agentOrchestration.cliLaneDefaults',
   // `DecisionModelSelection` (TASK_2026_646_136a), e.g. `{ kind, model }`.
   'agentOrchestration.decisionModel',
 ]);

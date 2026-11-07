@@ -23,6 +23,7 @@
 
 import * as os from 'os';
 import * as path from 'path';
+import { parentLanePermission } from './parent-lane-permission';
 import { injectable, inject, type DependencyContainer } from 'tsyringe';
 import type { AgentMessageCoordinator } from '@ptah-extension/cli-agent-runtime';
 import { TOKENS, Logger, FileSystemManager } from '@ptah-extension/vscode-core';
@@ -721,9 +722,10 @@ export class PtahAPIBuilder {
               return tabIdOrSessionId;
             }
           },
-          getParentLevel: (tabIdOrSessionId: string) =>
-            this.sdkSessionLifecycleManager?.find(tabIdOrSessionId)?.permissionLevel
-              ?? this.codexChatPermissionReader?.getPermissionLevel(tabIdOrSessionId),
+          getParentLevel: (tabIdOrSessionId: string) => parentLanePermission(
+            tabIdOrSessionId, this.sdkSessionLifecycleManager,
+            this.codexChatPermissionReader,
+          ),
           getProjectGuidance: async () => {
             if (!this.enhancedPromptsService) return undefined;
             try {
