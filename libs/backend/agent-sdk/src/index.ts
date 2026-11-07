@@ -356,7 +356,9 @@ export type {
 export { parseQuotaOwnerRef } from './lib/helpers/plan-limits/quota-owner-ref.schema';
 export {
   adviseSubagentResume,
+  buildBudgetResumeRefusal,
   type SubagentBudgetMonitor,
+  type AgentBudgetState,
   type SubagentResumeAdvice,
   type SubagentResumeAdviceInput,
 } from './lib/helpers';

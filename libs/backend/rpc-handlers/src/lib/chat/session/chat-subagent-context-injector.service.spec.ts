@@ -18,7 +18,8 @@ import { SubagentRegistryService } from '@ptah-extension/vscode-core';
 import type { IWorkspaceProvider } from '@ptah-extension/platform-core';
 import type { SessionId, SubagentRecord } from '@ptah-extension/shared';
 
-import type { SessionMetadataStore } from '@ptah-extension/agent-sdk';
+import type { SessionMetadataStore, CompactionConfigProvider } from '@ptah-extension/agent-sdk';
+import type { SubagentBudgetMonitor } from '@ptah-extension/agent-sdk';
 import { ChatSubagentContextInjectorService } from './chat-subagent-context-injector.service';
 import type { ChatPtahCliService } from '../ptah-cli/chat-ptah-cli.service';
 
@@ -45,6 +46,21 @@ describe('ChatSubagentContextInjectorService', () => {
   let logger: jest.Mocked<Logger>;
   let injector: ChatSubagentContextInjectorService;
   let savedTtlEnv: string | undefined;
+
+  function withBudgetState(state: ReturnType<SubagentBudgetMonitor['getAgentBudgetState']>, by: string): jest.Mock {
+    const monitor = Object.create(null) as SubagentBudgetMonitor;
+    const lookup = jest.fn((id: string) => id === by ? state : undefined);
+    monitor.getAgentBudgetState = lookup;
+    monitor.getSnapshot = jest.fn().mockReturnValue(undefined);
+    const config = { getConfig: jest.fn().mockReturnValue({ enabled: true, subagentHandoffTokens: 1000 }) };
+    injector = new ChatSubagentContextInjectorService(
+      logger, registry, ptahCli as unknown as ChatPtahCliService,
+      workspace as unknown as IWorkspaceProvider,
+      metadataStore as unknown as SessionMetadataStore,
+      monitor, config as unknown as CompactionConfigProvider,
+    );
+    return lookup;
+  }
 
   beforeEach(() => {
     savedTtlEnv = process.env[TTL_ENV];
@@ -89,6 +105,34 @@ describe('ChatSubagentContextInjectorService', () => {
       interruptedAt: Date.now(),
     });
   }
+
+  it.each(['agent-1', 'tc-1'])('uses stopped budget state found by %s after rekey or restart', async (by) => {
+    registerInterrupted('tc-1', 'agent-1');
+    const lookup = withBudgetState({
+      contextTokens: 1001, handoffTokens: 1000, warningRatio: 0.85,
+      stopped: true, stopState: 'stopped', stopReason: 'handoff', recordPath: 'D:/ws/handoff.md',
+    }, by);
+    const result = await injector.injectInterruptedAgentsContext('continue', SESSION, WORKSPACE);
+    expect(result.prompt).toContain('Ptah\'s budget monitor stopped this agent (not the user');
+    expect(result.prompt).toContain('start a new agent from the handoff record D:/ws/handoff.md');
+    expect(result.prompt).not.toContain('resume (cache warm, context within budget)');
+    expect(lookup).toHaveBeenCalledWith(by, 'sess-1');
+  });
+
+  it('labels unknown usage without claiming budget room', async () => {
+    registerInterrupted('tc-1', 'agent-1');
+    withBudgetState(undefined, 'agent-1');
+    const result = await injector.injectInterruptedAgentsContext('continue', SESSION, WORKSPACE);
+    expect(result.prompt).toContain('context usage unknown');
+    expect(result.prompt).not.toContain('context within budget');
+  });
+
+  it('allows warm advice for a measured agent below the warning threshold', async () => {
+    registerInterrupted('tc-1', 'agent-1');
+    withBudgetState({ contextTokens: 849, handoffTokens: 1000, warningRatio: 0.85, stopped: false, stopState: 'none' }, 'agent-1');
+    const result = await injector.injectInterruptedAgentsContext('continue', SESSION, WORKSPACE);
+    expect(result.prompt).toContain('advice: resume (cache warm, context within budget)');
+  });
 
   it('returns the prompt unchanged when no resumable agents exist', async () => {
     const result = await injector.injectInterruptedAgentsContext(
@@ -542,6 +586,7 @@ describe('ChatSubagentContextInjectorService', () => {
             budgetReached: boolean;
           }
         | undefined,
+      enabled = true,
     ): ChatSubagentContextInjectorService {
       return new ChatSubagentContextInjectorService(
         makeLogger(),
@@ -549,9 +594,10 @@ describe('ChatSubagentContextInjectorService', () => {
         ptahCli as unknown as ChatPtahCliService,
         workspace as unknown as IWorkspaceProvider,
         metadataStore as unknown as SessionMetadataStore,
-        { getSnapshot: jest.fn().mockReturnValue(snapshot) } as never,
+        { getSnapshot: jest.fn().mockReturnValue(snapshot), getAgentBudgetState: jest.fn().mockReturnValue(undefined) } as never,
         {
           getConfig: jest.fn().mockReturnValue({
+            enabled,
             subagentHandoffTokens: HANDOFF,
           }),
         } as never,
@@ -591,6 +637,14 @@ describe('ChatSubagentContextInjectorService', () => {
       expect(prompt).toContain('1. Your FIRST action should be to resume');
     });
 
+    it('does not apply budget usage advice when compaction is disabled', async () => {
+      registerInterrupted('tc-1', 'abc1234');
+      const { prompt } = await withMonitor(snap({ contextTokens: HANDOFF }), false)
+        .injectInterruptedAgentsContext('msg', SESSION, WORKSPACE);
+      expect(prompt).toContain('advice: resume (cache warm, context usage unknown)');
+      expect(prompt).not.toContain('context at or above 85%');
+    });
+
     it('B-m3: no "advice: fresh" instruction when no agent is advised fresh', async () => {
       registerInterrupted('tc-1', 'abc1234');
       const { prompt } = await withMonitor(
@@ -615,7 +669,7 @@ describe('ChatSubagentContextInjectorService', () => {
       const { prompt } = await withMonitor(
         snap({ contextTokens: HANDOFF }),
       ).injectInterruptedAgentsContext('msg', SESSION, WORKSPACE);
-      expect(prompt).toContain('advice: fresh (context at handoff size)');
+      expect(prompt).toContain('advice: fresh (context at or above 85% of handoff limit');
       expect(prompt).not.toContain('Your FIRST action');
       expect(prompt).toContain('Where an agent is marked "advice: fresh"');
     });

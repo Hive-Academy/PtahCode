@@ -100,6 +100,7 @@ describe('SubagentHookHandler — SubagentStopCallbackRegistry fan-out', () => {
     });
     const stopRegistry = new SubagentStopCallbackRegistry(logger);
     const captured: SubagentStopPayload[] = [];
+    const budgetMonitor = { recordTranscriptPath: jest.fn() };
     stopRegistry.register((payload) => {
       captured.push(payload);
     });
@@ -108,6 +109,7 @@ describe('SubagentHookHandler — SubagentStopCallbackRegistry fan-out', () => {
       registry,
       stopRegistry,
       new SessionStatsOwnerService(),
+      budgetMonitor,
     );
     const fn = getStopCallback(handler, '/workspace', 'parent-sess-1');
 
@@ -125,6 +127,9 @@ describe('SubagentHookHandler — SubagentStopCallbackRegistry fan-out', () => {
     });
 
     expect(result).toEqual({ continue: true });
+    expect(budgetMonitor.recordTranscriptPath).toHaveBeenCalledWith(
+      'parent-sess-1', 'agent-xyz', `/tmp/transcripts/${VALID_UUID}.jsonl`,
+    );
     expect(captured).toHaveLength(1);
     expect(captured[0]).toEqual(
       expect.objectContaining({
@@ -380,8 +385,7 @@ describe('SubagentHookHandler — SubagentStopCallbackRegistry fan-out', () => {
       ([msg, ctx]) =>
         typeof msg === 'string' &&
         msg.includes('could not derive subagentSessionId') &&
-        (ctx as { transcriptPath?: string } | undefined)?.transcriptPath ===
-          badPath,
+        (ctx as { agentId?: string } | undefined)?.agentId === 'agent-xyz',
     );
     expect(warnedAboutDerive).toBe(true);
   });

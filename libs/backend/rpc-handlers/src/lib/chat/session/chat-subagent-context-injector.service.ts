@@ -202,7 +202,7 @@ export class ChatSubagentContextInjectorService {
       return {
         record: s,
         cache,
-        advice: this.adviseResume(sessionId, s.toolCallId, cache.cacheState),
+        advice: this.adviseResume(sessionId, s.toolCallId, s.agentId, cache.cacheState),
       };
     });
     const hasFreshAdvice = agents.some((a) => a.advice?.advice === 'fresh');
@@ -378,22 +378,37 @@ ${instructions.map((line, i) => `${i + 1}. ${line}`).join('\n')}
   private adviseResume(
     sessionId: SessionId,
     toolCallId: string,
+    agentId: string,
     cacheState: SubagentCacheInfo['cacheState'],
   ): { advice: SubagentResumeAdvice; reason: string } | undefined {
-    if (!this.budgetMonitor || !this.compactionConfig) {
-      return undefined;
+    if (!this.compactionConfig) return undefined;
+    const budgetEnabled = this.compactionConfig.getConfig().enabled;
+    const state = budgetEnabled
+      ? this.budgetMonitor?.getAgentBudgetState(agentId, sessionId as string)
+        ?? this.budgetMonitor?.getAgentBudgetState(toolCallId, sessionId as string)
+      : undefined;
+    if (state?.stopped) {
+      return {
+        advice: 'fresh',
+        reason: `Ptah's budget monitor stopped this agent (not the user; reason: ${state.stopReason ?? 'unknown'}; context: ${state.contextTokens ?? 'unknown'} tokens; handoff limit: ${state.handoffTokens} tokens); start a new agent from ${state.recordPath ? `the handoff record ${state.recordPath}` : 'the available context'}`,
+      };
     }
-    const snapshot = this.budgetMonitor.getSnapshot(sessionId, toolCallId);
+    const snapshot = budgetEnabled
+      ? this.budgetMonitor?.getSnapshot(sessionId, toolCallId)
+      : undefined;
     const input: SubagentResumeAdviceInput = {
-      stopped: snapshot?.stopped ?? false,
+      stopped: state?.stopped ?? snapshot?.stopped ?? false,
       cacheState,
-      contextTokens: snapshot?.contextTokens,
-      handoffTokens: this.compactionConfig.getConfig().subagentHandoffTokens,
+      contextTokens: state?.contextTokens ?? snapshot?.contextTokens,
+      handoffTokens: state?.handoffTokens ?? this.compactionConfig.getConfig().subagentHandoffTokens,
+      warningRatio: state?.warningRatio,
       budgetReached: snapshot?.budgetReached ?? false,
     };
     const advice = adviseSubagentResume(input);
     if (advice === 'resume') {
-      return { advice, reason: 'cache warm, context within budget' };
+      return { advice, reason: input.contextTokens === undefined
+        ? 'cache warm, context usage unknown'
+        : 'cache warm, context within budget' };
     }
     // Same precedence as adviseSubagentResume.
     const reason = input.stopped
@@ -402,7 +417,7 @@ ${instructions.map((line, i) => `${i + 1}. ${line}`).join('\n')}
         ? 'budget reached'
         : input.cacheState === 'cold'
           ? 'cold'
-          : 'context at handoff size';
+          : `context at or above 85% of handoff limit (${input.contextTokens ?? 'unknown'} / ${input.handoffTokens} tokens)`;
     return { advice, reason };
   }
 

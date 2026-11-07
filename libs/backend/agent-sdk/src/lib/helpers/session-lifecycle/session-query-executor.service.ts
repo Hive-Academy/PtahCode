@@ -194,7 +194,7 @@ export type CompactionCoordinatorSink = Pick<
 /** The subagent budget monitor surface the executor drives (TASK_2026_597 28b). */
 export type SubagentBudgetSink = Pick<
   SubagentBudgetMonitor,
-  'observe' | 'recordTaskStarted' | 'release' | 'currentSessionId'
+  'observe' | 'recordTaskStarted' | 'release' | 'currentSessionId' | 'getAgentBudgetState'
 >;
 
 /** True when a message's content carries at least one block of `blockType`. */
@@ -226,6 +226,7 @@ class CompactionSessionTap {
   private query: Query | null = null;
   private turn = 0;
   private readonly subagentIds = new Set<string>();
+  private readonly signalledStops = new Set<string>();
   private released = false;
   /** Unset until the options build resolves it; the monitor default applies. */
   private subagentCacheTtl: SubagentPromptCacheTtl | undefined;
@@ -247,6 +248,7 @@ class CompactionSessionTap {
     private readonly subagentMonitor: SubagentBudgetSink | null = null,
     private readonly idle: IdleCompactionSignals | null = null,
     private readonly nativeAnthropic = false,
+    private readonly onBudgetStop?: (toolCallId: string) => void,
   ) {}
 
   attachQuery(query: Query): void {
@@ -355,7 +357,13 @@ class CompactionSessionTap {
     // The executor runs observe() now; a synchronous throw becomes a rejection.
     new Promise<void>((resolve) =>
       resolve(monitor.observe(id, message, cacheTtl)),
-    ).catch((error: unknown) =>
+    ).then(() => {
+      const toolCallId = 'parent_tool_use_id' in message ? message.parent_tool_use_id : undefined;
+      if (typeof toolCallId === 'string' && monitor.getAgentBudgetState(toolCallId, id)?.stopState === 'stopped' && !this.signalledStops.has(toolCallId)) {
+        this.signalledStops.add(toolCallId);
+        this.onBudgetStop?.(toolCallId);
+      }
+    }).catch((error: unknown) =>
       this.warn('Subagent budget monitor failed', 'subagent-budget', error),
     );
   }
@@ -432,6 +440,7 @@ class CompactionSessionTap {
     }
     this.trackedIds.clear();
     this.subagentIds.clear();
+    this.signalledStops.clear();
     try {
       this.logger.debug('[SessionQueryExecutor] Releasing idle query ownership', {
         reason,
@@ -1632,6 +1641,16 @@ export class SessionQueryExecutor {
       this.subagentBudgetMonitor,
       this.idle,
       rec.capacityRoute?.kind === 'native',
+      (toolCallId) => {
+        this.permissionHandler.recordBudgetStop?.(sessionId as string);
+        const pendingPermissionRequests =
+          this.permissionHandler.getPendingPermissionCount?.(sessionId as string) ?? null;
+        this.logger.info('[SessionQueryExecutor] Subagent budget stop parent turn', {
+          sessionId, tabId: rec.tabId, toolCallId,
+          abortSignalAborted: abortController.signal.aborted,
+          pendingPermissionRequests,
+        });
+      },
     );
     abortController.signal.addEventListener(
       'abort',

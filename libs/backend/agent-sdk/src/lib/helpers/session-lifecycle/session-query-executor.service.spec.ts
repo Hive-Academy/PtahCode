@@ -155,6 +155,7 @@ interface Harness {
   buildSpy: jest.Mock;
   getPermissionLevelSpy: jest.Mock;
   cleanupSpy: jest.Mock;
+  recordBudgetStopSpy: jest.Mock;
   sdkQuery: Query;
 }
 
@@ -184,9 +185,12 @@ function makeHarness(
     .fn()
     .mockReturnValue(globalPermissionLevel);
   const cleanupSpy = jest.fn();
+  const recordBudgetStopSpy = jest.fn();
   const permissionHandler = {
     getPermissionLevel: getPermissionLevelSpy,
     cleanupPendingPermissions: cleanupSpy,
+    recordBudgetStop: recordBudgetStopSpy,
+    getPendingPermissionCount: () => 2,
   } as unknown as ISdkPermissionHandler;
 
   const queryFn = jest.fn();
@@ -254,6 +258,7 @@ function makeHarness(
     buildSpy,
     getPermissionLevelSpy,
     cleanupSpy,
+    recordBudgetStopSpy,
     sdkQuery,
   };
 }
@@ -1711,6 +1716,48 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
     expect(observe).toHaveBeenCalledTimes(1);
     // The build reported no TTL, so the monitor's own default applies.
     expect(observe).toHaveBeenCalledWith(REAL, sub, undefined);
+    run.abortController.abort();
+  });
+
+  it('correlates one budget stop with the parent turn despite later messages', async () => {
+    const { monitor } = makeMonitor();
+    Object.assign(monitor, { getAgentBudgetState: () => ({ stopped: true, stopState: 'stopped' }) });
+    const logger = makeLogger();
+    const { executor, recordBudgetStopSpy } = makeHarness('ask', {} as AuthEnv, {
+      subagentMonitor: monitor, logger,
+    });
+    const run = await executor.executeQuery(makeConfig('tab-stop-once'));
+    feed(run, init());
+    feed(run, subAssistant());
+    feed(run, subAssistant());
+    await flush();
+    expect(recordBudgetStopSpy).toHaveBeenCalledTimes(1);
+    expect(logger.info).toHaveBeenCalledWith(
+      '[SessionQueryExecutor] Subagent budget stop parent turn',
+      expect.objectContaining({ sessionId: 'tab-stop-once', tabId: 'tab-stop-once', toolCallId: 'toolu_1', abortSignalAborted: false, pendingPermissionRequests: 2 }),
+    );
+    run.abortController.abort();
+  });
+
+  it('does not latch a pending stop; a later completed stop signals once', async () => {
+    const { monitor } = makeMonitor();
+    let stopState: 'pending' | 'none' | 'stopped' = 'pending';
+    Object.assign(monitor, { getAgentBudgetState: () => ({ stopState }) });
+    const { executor, recordBudgetStopSpy } = makeHarness('ask', {} as AuthEnv, { subagentMonitor: monitor });
+    const run = await executor.executeQuery(makeConfig('tab-pending-stop'));
+    feed(run, init());
+    feed(run, subAssistant());
+    await flush();
+    expect(recordBudgetStopSpy).not.toHaveBeenCalled();
+    stopState = 'none';
+    feed(run, subAssistant());
+    await flush();
+    expect(recordBudgetStopSpy).not.toHaveBeenCalled();
+    stopState = 'stopped';
+    feed(run, subAssistant());
+    feed(run, subAssistant());
+    await flush();
+    expect(recordBudgetStopSpy).toHaveBeenCalledTimes(1);
     run.abortController.abort();
   });
 
