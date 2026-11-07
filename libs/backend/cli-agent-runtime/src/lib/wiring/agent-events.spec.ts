@@ -1673,4 +1673,31 @@ describe('wireAgentEventListeners — running-output journal (P3-K)', () => {
     );
     expect(journal.remove).not.toHaveBeenCalled();
   });
+
+  it('hands the queued recovered write to the tracker, settled only once it landed', async () => {
+    const info = buildInfo({
+      cli: 'codex',
+      status: 'stopped',
+      stopReason: 'host-restart',
+      parentSessionId: PARENT_SESSION,
+      cliSessionId: 'cli-1',
+      outputLostAfter: '2026-11-07T00:00:45.000Z',
+    });
+    let land = (): void => undefined;
+    const addCliSession = jest.fn(
+      () => new Promise<void>((resolve) => { land = resolve; }),
+    );
+    const { events } = wireJournalLane(() => info, addCliSession);
+    const tracked: Promise<void>[] = [];
+    events.emit('agent:output-recovered', info, (settled: Promise<void>) => tracked.push(settled));
+    expect(tracked).toHaveLength(1);
+    let settled = false;
+    void tracked[0].then(() => { settled = true; });
+    await drainMicrotasks();
+    expect(addCliSession).toHaveBeenCalledTimes(1);
+    expect(settled).toBe(false);
+    land();
+    await drainMicrotasks();
+    expect(settled).toBe(true);
+  });
 });

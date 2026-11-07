@@ -112,8 +112,10 @@ import {
   applyOutputCheckpoint,
   checkpointFreshness,
   laneLastActivityAt,
+  RECOVERED_OUTPUT_WAIT_MS,
   restoreLaneIdentity,
   restoreLaneLifecycle,
+  settleWithin,
   stampWorkspaceKey,
 } from './lane-restore';
 import { findBlockedLaneModel } from './lane-spawn-policy';
@@ -365,6 +367,8 @@ export class AgentProcessManager {
   private spawning = 0;
   /** Promise-based mutex to serialize spawn operations and prevent TOCTOU race in concurrent limit check */
   private spawnMutex: Promise<void> = Promise.resolve();
+  /** Queued persists of restored lanes' recovered output, keyed by agent id. */
+  private readonly recoveredOutputWrites = new Map<string, Promise<void>>();
 
   /** EventEmitter for agent lifecycle events (spawned, output, exited) */
   readonly events = new EventEmitter();
@@ -1824,7 +1828,10 @@ export class AgentProcessManager {
       // Same TTL as a completed agent. Without it, a long-lived Electron
       // process accumulates one record per restored agent per session switch.
       this.scheduleCleanup(agentId);
-      if (output.recovered) this.events.emit('agent:output-recovered', { ...info });
+      if (output.recovered) {
+        this.events.emit('agent:output-recovered', { ...info }, (settled: Promise<void>) =>
+          this.trackRecoveredOutputWrite(agentId, settled));
+      }
       restored++;
     }
 
@@ -1841,6 +1848,41 @@ export class AgentProcessManager {
     }
 
     return restored;
+  }
+
+  /**
+   * Wait, at most `timeoutMs`, for the recovered-output persists of these
+   * agents (queued by `restoreAgents` through `agent:output-recovered`), so a
+   * restore path does not hand the webview refs whose first output page still
+   * reads the pre-checkpoint store. No recovered write pending: no wait. A
+   * timeout is logged and the restore goes on; the write keeps its retries and
+   * the checkpoint stays on disk until the write lands.
+   */
+  async awaitRecoveredOutput(
+    agentIds: readonly string[],
+    timeoutMs: number = RECOVERED_OUTPUT_WAIT_MS,
+  ): Promise<void> {
+    const writes = agentIds.flatMap((id) => {
+      const write = this.recoveredOutputWrites.get(id);
+      return write ? [write] : [];
+    });
+    if (writes.length === 0) return;
+    if (await settleWithin(writes, timeoutMs)) return;
+    this.logger.warn(
+      '[AgentProcessManager] Recovered lane output not persisted in time; restore continues',
+      { pending: writes.length, timeoutMs },
+    );
+  }
+
+  private trackRecoveredOutputWrite(agentId: string, settled: Promise<void>): void {
+    this.recoveredOutputWrites.set(agentId, settled);
+    const release = (): void => {
+      if (this.recoveredOutputWrites.get(agentId) === settled) {
+        this.recoveredOutputWrites.delete(agentId);
+      }
+    };
+    // Both arms only release the entry: the writer logs its own failure.
+    settled.then(release, release);
   }
 
   /**

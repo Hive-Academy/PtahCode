@@ -181,3 +181,25 @@ export function withRestoredOutputLoss(
       : { ...ref, outputLostAfter: info.outputLostAfter };
   });
 }
+
+/** Receives the queued persist of one recovered lane's output (`agent:output-recovered`). */
+export type RecoveredOutputTracker = (settled: Promise<void>) => void;
+
+/** How long a restore waits for recovered output to persist before it returns anyway. */
+export const RECOVERED_OUTPUT_WAIT_MS = 3_000;
+
+/**
+ * Settles `true` once every write settled, `false` when `timeoutMs` passed
+ * first. A rejected write counts as settled: its writer logs its own failure.
+ */
+export function settleWithin(
+  writes: readonly Promise<void>[],
+  timeoutMs: number,
+): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), timeoutMs);
+  });
+  const settled = Promise.allSettled(writes).then(() => true);
+  return Promise.race([settled, timedOut]).finally(() => clearTimeout(timer));
+}
