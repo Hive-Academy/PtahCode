@@ -71,3 +71,22 @@ Fix round 1: `phase-2-fix-report.md` (diff /var/tmp/b886/phase2-fix1.diff). Re-r
 `phase-2-round-1-review.md`. Verdict: APPROVED, 8/10. L1 resolved (`close-curate.step.ts:412`,
 :427-443), L2 resolved (`repository-identity.ts:159`, :177-179). No new defects.
 Revise rounds used: 1 of 2. Verify `-p @ptah-extension/task-end-hook` exit 0, 18 suites, 589 tests.
+
+## Phase 3 — Round 0 (codex, 2026-11-07)
+
+Implementer family claude; reviewer family codex. Commits 058d04e3b, 4eaf75ca2, f06747567,
+b17853e71 (Batches 16-19). Verdict: REVISE, 6/10. Full text: `phase-3-review.md` `## Logic`.
+
+- L1 (Serious) `task-end-hook.integration.spec.ts:508-511` — teardown `splice(0)` empties boots
+  before the loop; `awaitStopped()` never runs before the DB closes.
+- L2 (Moderate) `task-end-hook.integration.spec.ts:526-530` — fs spies installed after `endTask`,
+  so detection is outside the zero-mutating-fs window.
+
+Production code: no defect (C1, C3, D39, lazy engines, shutdown budget checked OK).
+Revise round 1 of 2 started.
+
+## Phase 3 — Round 1 (codex, 2026-11-07)
+
+Fix round 1: `phase-3-fix-report.md` (diff /var/tmp/b886/phase3-fix1.diff). Re-review:
+`phase-3-round-1-review.md`. Verdict: APPROVED, 8/10. L1 and L2 resolved; no new defects.
+Revise rounds used: 1 of 2. Verify `-p @ptah-extension/task-end-hook` exit 0 (19 suites, 598 tests).

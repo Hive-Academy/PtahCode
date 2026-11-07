@@ -46,3 +46,12 @@ Verdict: APPROVED, 8/10. Full text: `phase-2-review.md` `## Style`.
 
 Verdict: APPROVED, 8/10. S1 accepted as a misread of the original review (`register.ts:20` gives
 no count; 10 registrations at :40-74). S2 deferred. File: `phase-2-round-1-review.md`.
+
+## Phase 3 — Round 0 (codex, 2026-11-07)
+
+Verdict: APPROVED, 8/10. No new style defect. memory-trigger.service.ts size accepted (D32).
+File: `phase-3-review.md` `## Style`.
+
+## Phase 3 — Round 1 (codex, 2026-11-07)
+
+Verdict: APPROVED, 8/10. File: `phase-3-round-1-review.md`.

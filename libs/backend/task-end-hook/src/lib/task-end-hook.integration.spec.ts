@@ -434,8 +434,14 @@ async function baseline(h: Harness, boot: Boot): Promise<void> {
 }
 
 /** The carrier ends: written on disk, seen by the index, committed after the debounce. */
-async function endTask(h: Harness, boot: Boot): Promise<void> {
+async function endTask(
+  h: Harness,
+  boot: Boot,
+  afterFixtures: () => void = () => undefined,
+): Promise<void> {
+  // Fixtures first; `afterFixtures` lets a spec start observing before detection.
   writeCarrier(h.root, TASK, 'done');
+  afterFixtures();
   h.index.set(h.root, TASK, 'done');
   h.index.fire(h.root, [TASK]);
   await jest.advanceTimersByTimeAsync(OBSERVE_DEBOUNCE_MS);
@@ -505,12 +511,19 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  for (const h of harnesses.splice(0)) {
-    for (const boot of h.boots.splice(0)) boot.handle.dispose();
-    for (const boot of h.boots) await boot.handle.awaitStopped();
-    h.db.close();
+  try {
+    for (const h of harnesses.splice(0)) {
+      const boots = h.boots.splice(0);
+      try {
+        for (const boot of boots) boot.handle.dispose();
+        for (const boot of boots) await boot.handle.awaitStopped();
+      } finally {
+        h.db.close();
+      }
+    }
+  } finally {
+    jest.useRealTimers();
   }
-  jest.useRealTimers();
 });
 
 describe('task-end hook (integration)', () => {
@@ -523,18 +536,22 @@ describe('task-end hook (integration)', () => {
     boot.worker.start();
     await baseline(h, boot);
 
-    await endTask(h, boot);
-    const [runId] = runIds(h, TASK);
-    expect(runIds(h, TASK)).toHaveLength(1);
-
-    const spies = spyMutatingFs();
+    // The spies watch detection, debounce, settle and every step.
+    let spies: jest.SpyInstance[] = [];
+    let runId = '';
     try {
+      await endTask(h, boot, () => {
+        spies = spyMutatingFs();
+      });
+      [runId] = runIds(h, TASK);
+      expect(runIds(h, TASK)).toHaveLength(1);
       await flush(h, SETTLE_MS);
       await until(() => runOf(h, runId).state === 'completed');
 
       const mutating = spies
-        .map((spy) => [spy.getMockName(), spy.mock.calls.length] as const)
-        .filter(([, calls]) => calls > 0);
+        .map((spy, i) => [i, spy.mock.calls.length] as const)
+        .filter(([, calls]) => calls > 0)
+        .map(([i]) => (MUTATING_ASYNC as readonly string[])[i] ?? `sync#${i}`);
       expect(mutating).toEqual([]);
     } finally {
       for (const spy of spies) spy.mockRestore();

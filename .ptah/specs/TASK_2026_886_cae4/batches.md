@@ -708,7 +708,7 @@ Phase review: code-logic (codex) on the combined diff after Batch 19 commits, pl
 - Degradation audit passes.
 - Acceptance (2026-11-07): `task-end-hook-composition.ts` (501 lines) binds the seven host ports with direct `container.register` calls, then `registerTaskEndHook`; engines resolved inside each adapter call (unregistered engine -> `TaskEndEngineUnavailableError` -> `failed/curator-failed`); `CURATOR_REASON_TO_TASK_END` `as const satisfies Record<CuratorRunReason, TaskEndCuratorReason>` plus the exported `Exclude` never check; `taskIdsInWorktreeName` delegates to session-organization (D2); git runner passes the vector to `execGit` with no `env`, so `LC_ALL=C` holds (needed by the Phase 2 L2 fix); `gh` only via `GitInfoService.readPrStatus`; no delete/move/archive (C1), no fetch (C3). `phase-2-libraries.ts` calls it after `startTaskSpecsIndex` only when `SQLITE_CONNECTION` is registered. `expected-resolvable.ts` `EXPECTED_TASK_END_TOKENS`; `container.smoke.spec.ts` one added test (orchestrator-approved scope addition) resolves `PTAH_API_BUILDER` and the three tokens after phase 2 + composition + phase 3 (D39); `tsconfig.build.json` path. Accepted deviations: `(container, logger)` signature; `connectTaskEndHook` left to Batch 18. Runs: `-p @ptah-extension/task-end-hook,ptah-electron` exit 0; the two specs 77 tests pass; `-t lint,typecheck -p ptah-extension-webview` typecheck pass, lint the 26 pre-existing module-boundary errors (unchanged); di-lint exit 0 (2124 inject sites, 964 tokens); degradation audit TOTAL 216. Executor note for later: `assertReadOnlyGitVector` is not exported from the barrel.
 
-## Batch 18: Electron activation and shutdown — COMPLETE (commit recorded in the next batches.md commit)
+## Batch 18: Electron activation and shutdown — COMPLETE (commit f06747567)
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -736,7 +736,7 @@ Phase review: code-logic (codex) on the combined diff after Batch 19 commits, pl
 - Degradation audit passes.
 - Acceptance (2026-11-07): `activation/task-end-hook.activation.ts` `startTaskEndHook(container, signal, logger)` — null when aborted or the DETECTOR/WORKER tokens are unregistered; order `connectTaskEndHook` -> `reconcileStartup` -> `worker.start` -> `subscribe`; any throw disposes and returns null with a fixed error text (no secrets/paths logged); abort during reconcile disposes; idempotent dispose. Started once per process (`taskEndHookClaimed`), after the review worker in `boot-heavy-services.ts`; `boot-coordinator.ts` ref `taskEndHook` (structural `{ dispose, awaitStopped }`, accepted deviation); `shutdown.ts` disposes beside the review worker and awaits `awaitStopped()` within `TASK_END_HOOK_STOP_BUDGET_MS = 5_000` before SQLite close; `shutdown.spec.ts` +3 tests (additions only). package.json unchanged (validate-deps checks external packages; tsyringe, ulid, zod present). Runs: `-p ptah-electron` exit 0 (106 suites, 1772 passed, 8 skipped); webview typecheck pass, lint the 26 pre-existing errors; di-lint exit 0; audit TOTAL 216. Note (pre-existing, not touched): `refs.reviewWorker` is reassigned per root without dispose.
 
-## Batch 19: End-to-end integration spec — COMPLETE (commit recorded in the next batches.md commit)
+## Batch 19: End-to-end integration spec — COMPLETE (commit b17853e71)
 
 - Recommended executor: senior-tester subagent
 - Execution mode: sequential
@@ -759,6 +759,14 @@ Phase review: code-logic (codex) on the combined diff after Batch 19 commits, pl
 - Final host sweep: `npm run verify -- -t lint,typecheck -p @ptah-extension/cli-engine,@ptah-extension/platform-cli,ptah-extension-webview`
 - Degradation audit passes; no peer-879 file in the full task diff; pre-push di-lint and `validate-deps` gates pass at push.
 - Acceptance (2026-11-07): `task-end-hook.integration.spec.ts`, 9 cases, real SQLite store (all migrations), real detector, worker, steps and `connectTaskEndHook`; host ports doubled. Full run (AC 6.1, R12, C1, C3): `completed/steps-terminal`, dispose `skipped/eligible-report-only` with `effectiveMode: 'off'`, zero calls on 13 mutating `fs.promises` and 11 sync `fs` spies, every git vector passes `assertReadOnlyGitVector` (merge-base, rev-parse, status, worktree list; no fetch). AC 1.12a/1.9, AC 1.12b, AC 6.2 (kill at boundaries 0-3, no step redone), AC 2.2 (real `MemoryTriggerService`, stub curator; deferred/session-active, one curate via session-end trigger). Module-boundary lint accepts the spec-only memory-curator import. Runs: `-p @ptah-extension/task-end-hook` exit 0 (19 suites, 598 tests); host sweep cli-engine, platform-cli pass, webview lint the 26 pre-existing errors; audit TOTAL 216.
+
+## Phase 3 review — COMPLETE (2026-11-07)
+
+Implementer family claude; reviewer family codex. Commits 058d04e3b, 4eaf75ca2, f06747567, b17853e71.
+
+- Round 0: logic REVISE 6/10 — L1 (Serious: integration spec teardown never awaited `awaitStopped()` before closing the DB), L2 (Moderate: fs spies installed after detection); style APPROVED 8/10. Production code: no defect. File: `phase-3-review.md`.
+- Fix round 1 (`phase-3-fix-report.md`): boots kept in a local array, disposed and awaited, DB close and real timers in `finally` (L1); spies installed through an `afterFixtures` callback before the index event and kept through completion — zero mutating fs calls (L2).
+- Round 1 re-review: logic APPROVED 8/10, style APPROVED 8/10. File: `phase-3-round-1-review.md`. Revise rounds used: 1 of 2.
 
 ## QA after Batch 19 (not a batch)
 
