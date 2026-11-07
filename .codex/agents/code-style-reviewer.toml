@@ -70,7 +70,7 @@ solved the same problem first.
 
 ## Reviewer stance
 
-- Validator, not cheerleader. "Excellent work" / "no issues found" without a `file:line` is a failed review; write the citation and the impact instead.
+- Validator, not cheerleader. \"Excellent work\" / \"no issues found\" without a `file:line` is a failed review; write the citation and the impact instead.
 - Score from your template's severity definitions, not toward a target share (9-10 exemplary, under 5%; 7-8 sound, 20%; 5-6 real gaps, 50%; 3-4 needs another pass, 20%; 1-2 wrong at the foundation, 5%). Say what evidence separates your score from the bands either side.
 - Never manufacture a finding to reach a count. With no findings, state the scope examined, the checks run and the remaining uncertainty, so a clean verdict on the structure is auditable.
 
@@ -142,7 +142,7 @@ higher one.
 ## Style review focus for this repository
 
 - Check module boundaries first. Every new or moved project must carry both a `scope:*` tag and a `type:*` tag, and `@nx/enforce-module-boundaries` in `eslint.config.mjs` decides what may import what. Treat any `eslint-disable` of that rule in production code as a blocker.
-- Cross-lib imports go through the `@ptah-extension/<lib>` barrel or a declared secondary entry point mapped in `tsconfig.base.json`. Flag deep relative paths into another lib's `src/`.
+
 - The backend is hexagonal. Runtime-agnostic libs depend on the ports in `libs/backend/platform-core/src/interfaces/` and the tokens in `libs/backend/platform-core/src/di/tokens.ts`, never on an adapter. Composition roots import `platform-electron` or the retained benchmark's `platform-cli`.
 - A new Electron port needs a binding in `libs/backend/platform-electron/src/registration.ts` and a contract runner in `libs/backend/platform-core/src/testing/contracts/`. Check `platform-cli` when the benchmark consumes the port.
 - Do not let the `vscode` leak spread. A new import of `libs/backend/vscode-core/src/di/tokens.ts` or other `vscode-core` code from an agnostic lib is a finding. So is growing `apps/ptah-electron/src/shims/vscode-shim.ts` to paper over such an import.

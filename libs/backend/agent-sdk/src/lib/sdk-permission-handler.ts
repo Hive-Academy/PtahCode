@@ -53,6 +53,8 @@ import type {
   UnattendedSessionPolicyRegistry,
 } from './permission/unattended-session-policy.registry';
 import { SDK_TOKENS } from './di/tokens';
+import type { SubagentBudgetMonitor } from './helpers/compaction/subagent-budget-monitor';
+import { buildBudgetResumeRefusal } from './helpers/compaction/subagent-resume-advice';
 import type { HostAttentionCoordinator } from './permission/host-attention-coordinator';
 import {
   buildSystemAbortPermissionMessage,
@@ -144,10 +146,27 @@ export type PermissionPromptLifecycleListener = (
 
 @injectable()
 export class SdkPermissionHandler implements ISdkPermissionHandler {
+  /** Called by PreToolUse as well as canUseTool: SDK auto-allow can skip the latter. */
+  budgetSendMessageRefusal(targetName: string, sessionId: string): string | undefined {
+    const target = this.subagentRegistry.getToolCallIdByName(targetName) ?? targetName;
+    const state = this.budgetMonitor?.getAgentBudgetState(target, sessionId)
+      ?? this.budgetMonitor?.getAgentBudgetState(targetName, sessionId);
+    return (state ? buildBudgetResumeRefusal(state) : undefined) ?? undefined;
+  }
+
+  logBudgetSendMessageHookDenial(sessionId: string, tabId: TabId | undefined, toolUseID: string): void {
+    this.logger.debug('[SdkPermissionHandler] Permission decision', {
+      sessionId, tabId, toolUseID, toolName: 'SendMessage', route: 'deny',
+      decisionSource: 'subagent-budget', interrupt: false,
+      recentSubagentBudgetStop:
+        Date.now() - (this.recentBudgetStops.get(sessionId) ?? 0) < 60_000,
+    });
+  }
   private _permissionLevel: PermissionLevel = 'ask';
 
   private pendingRequests = new Map<string, PendingRequest>();
   private readonly pendingCliAgentPermissions = new Map<string, AgentPermissionRequest>();
+  private readonly recentBudgetStops = new Map<string, number>();
   private readonly attentionGenerations = new Map<string, { kind: 'permission' | 'lane-permission'; timestamp: number }>();
   private readonly ruleStore: PermissionRuleStore;
   private readonly lifecycleListeners =
@@ -155,7 +174,7 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
 
   private pendingRequestContext = new Map<
     string,
-    { toolName: string; toolInput: Record<string, unknown>; sessionId?: SessionId; tabId?: TabId }
+    { toolName: string; toolInput: Record<string, unknown>; sessionId?: SessionId; tabId?: TabId; toolUseID?: string }
   >();
 
   private emitterInitialized = false;
@@ -186,6 +205,8 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     // host composition in this checkout) omit this port; lane prompts deny.
     @inject(SDK_TOKENS.SDK_CLI_AGENT_OWNER_LOOKUP, { isOptional: true })
     private readonly agentOwnerLookup?: SdkCliAgentOwnerLookup,
+    @inject(SDK_TOKENS.SDK_SUBAGENT_BUDGET_MONITOR, { isOptional: true })
+    private readonly budgetMonitor?: Pick<SubagentBudgetMonitor, 'getAgentBudgetState'>,
   ) {
     this.ruleStore = new PermissionRuleStore(this.logger);
 
@@ -224,6 +245,19 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     return [...this.pendingCliAgentPermissions.values()].filter(
       (request) => this.pendingRequests.has(request.requestId),
     );
+  }
+
+  getPendingPermissionCount(sessionId?: string): number {
+    return [...this.pendingRequests.values()].filter(
+      (request) => request.sessionId === sessionId || request.tabId === sessionId,
+    ).length;
+  }
+
+  recordBudgetStop(sessionId: string): void {
+    const now = Date.now();
+    for (const [id, stoppedAt] of this.recentBudgetStops)
+      if (now - stoppedAt >= 60_000) this.recentBudgetStops.delete(id);
+    this.recentBudgetStops.set(sessionId, now);
   }
 
   /**
@@ -473,6 +507,7 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
      */
     sessionIdResolver?: () => string | undefined,
   ): CanUseTool {
+    let prompted = false;
     const resolveSessionId = (): SessionId | undefined => {
       const live = sessionIdResolver?.();
       return (live ? SessionId.safeParse(live) : null) ?? sessionId;
@@ -481,8 +516,9 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       toolName: string,
       input: Record<string, unknown>,
       options: { toolUseID: string; agentID?: string; signal: AbortSignal },
-    ): Promise<PermissionResult> =>
-      this.requestUserPermission(
+    ): Promise<PermissionResult> => {
+      prompted = true;
+      return this.requestUserPermission(
         toolName,
         input,
         options.toolUseID,
@@ -493,13 +529,15 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
         tabId,
         routingHint,
       );
+    };
     const requestBoundedPermission = (
       toolName: string,
       input: Record<string, unknown>,
       options: { toolUseID: string; agentID?: string; signal: AbortSignal },
       denyWindowMs: number,
-    ): Promise<PermissionResult> =>
-      this.requestUserPermission(
+    ): Promise<PermissionResult> => {
+      prompted = true;
+      return this.requestUserPermission(
         toolName,
         input,
         options.toolUseID,
@@ -511,7 +549,8 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
         routingHint,
         denyWindowMs,
       );
-    return async (
+    };
+    const decide = async (
       toolName: string,
       input: Record<string, unknown>,
       options: {
@@ -523,6 +562,13 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
         agentID?: string;
       },
     ): Promise<PermissionResult> => {
+      if (toolName === 'SendMessage' && typeof input['to'] === 'string') {
+        const budgetSessionId = resolveSessionId();
+        const refusal = budgetSessionId
+          ? this.budgetSendMessageRefusal(input['to'], budgetSessionId as string)
+          : undefined;
+        if (refusal) return { behavior: 'deny', message: refusal, interrupt: false };
+      }
       this.logger.info(
         `[SdkPermissionHandler] canUseTool invoked: ${toolName}`,
         {
@@ -718,6 +764,22 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
         `[SdkPermissionHandler] Unknown tool encountered, requesting user permission: ${toolName}`,
       );
       return await requestUserPermission(toolName, input, options);
+    };
+    return async (toolName, input, options) => {
+      prompted = false;
+      const result = await decide(toolName, input, options);
+      const session = resolveSessionId();
+      this.logger.debug('[SdkPermissionHandler] Permission decision', {
+        sessionId: session, tabId, toolUseID: options.toolUseID, toolName,
+        route: result.behavior === 'deny' ? 'deny' :
+          prompted ? 'prompt' : 'auto-allow',
+        decisionSource: toolName === 'SendMessage' && result.behavior === 'deny'
+          ? 'subagent-budget' : 'permission-policy',
+        interrupt: result.behavior === 'deny' ? result.interrupt ?? false : false,
+        recentSubagentBudgetStop: session !== undefined &&
+          Date.now() - (this.recentBudgetStops.get(session as string) ?? 0) < 60_000,
+      });
+      return result;
     };
   }
 
@@ -1020,7 +1082,7 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       tabId,
     };
 
-    this.pendingRequestContext.set(requestId, { toolName, toolInput: input, sessionId, tabId });
+    this.pendingRequestContext.set(requestId, { toolName, toolInput: input, sessionId, tabId, toolUseID: toolUseId });
 
     this.logger.info(
       `[SdkPermissionHandler] Sending permission request to webview`,
@@ -1060,7 +1122,12 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     }
 
     this.logger.info(`[SdkPermissionHandler] Permission response received`, {
-      requestId,
+      requestId, sessionId, tabId, toolUseID: toolUseId, toolName,
+      route: response?.decision === 'allow' || response?.decision === 'always_allow' ? 'prompt' : 'deny',
+      decisionSource: response?.systemAbort ? 'system-abort' : response?.timedOut ? 'timeout' : 'user-response',
+      interrupt: !response || (response.decision === 'deny' && !response.systemAbort),
+      recentSubagentBudgetStop: sessionId !== undefined &&
+        Date.now() - (this.recentBudgetStops.get(sessionId as string) ?? 0) < 60_000,
       totalLatency: Date.now() - startTime,
       decision: response?.decision ?? 'aborted',
     });
@@ -1263,11 +1330,14 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
 
     const isApproved =
       effective.decision === 'allow' || effective.decision === 'always_allow';
-    this.logger.debug(
-      `[SdkPermissionHandler] Handled response for request ${requestId}: ${
-        isApproved ? 'approved' : 'denied'
-      } (decision: ${effective.decision})`,
-    );
+    this.logger.debug('[SdkPermissionHandler] Permission response handled', {
+      requestId, sessionId: pending.sessionId, tabId: pending.tabId,
+      toolUseID: requestContext?.toolUseID, toolName: requestContext?.toolName,
+      route: isApproved ? 'prompt' : 'deny', decisionSource: 'user-response',
+      interrupt: effective.decision === 'deny',
+      recentSubagentBudgetStop: pending.sessionId !== undefined &&
+        Date.now() - (this.recentBudgetStops.get(pending.sessionId as string) ?? 0) < 60_000,
+    });
     return true;
   }
 

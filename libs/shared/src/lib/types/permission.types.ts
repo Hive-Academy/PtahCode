@@ -113,6 +113,9 @@ export interface PermissionResponse {
 export interface ISdkPermissionHandler {
   /** Live CLI lane prompts for replay after a lane resumes or the renderer reconnects. */
   getPendingCliAgentPermissions(): AgentPermissionRequest[];
+  /** Optional diagnostics for SDK hosts that track budget stops. */
+  recordBudgetStop?(sessionId: string): void;
+  getPendingPermissionCount?(sessionId?: string): number;
   /**
    * Handle permission response from webview
    * @param requestId - The permission request ID

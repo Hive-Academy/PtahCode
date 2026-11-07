@@ -41,6 +41,8 @@ import {
   SubagentBudgetMonitor,
   readSubagentRequestUsage,
   readSubagentTaskText,
+  redactBudgetSecrets,
+  resolveSubagentTranscriptPath,
   requestContextTokens,
   weightedRequestTokens,
   type SubagentBudgetDispatcherPort,
@@ -216,7 +218,7 @@ function makeHarness(
     ),
   };
   const registry = {
-    get: jest.fn(() =>
+    get: jest.fn((_toolCallId: string) =>
       record === null
         ? null
         : ({
@@ -229,6 +231,7 @@ function makeHarness(
             ...record,
           } as SubagentRecord),
     ),
+    getToolCallIdByAgentId: jest.fn((_agentId: string) => undefined as string | undefined),
     update: jest.fn(),
   };
   const budgetStops = new SubagentBudgetStopCallbackRegistry(
@@ -300,7 +303,208 @@ function spawn(input: Record<string, unknown>, name = 'Agent'): unknown {
   };
 }
 
+/**
+ * Builds a fake credential fixture from parts at runtime so secret scanners
+ * (GitGuardian) do not flag the spec source. None of these values are real.
+ */
+const fake = (...parts: string[]): string => parts.join('');
+
 describe('SubagentBudgetMonitor', () => {
+  it.each([
+    fake('Authorization: Bear', 'er ', 'eyJhbGci', 'OiJIUzI1NiJ9', '.very-secret'),
+    fake('Authorization: Bas', 'ic ', 'dXNlcjpw', 'YXNz'),
+    '"apiKey": "very-secret"',
+    'AWS_SECRET_ACCESS_KEY=very-secret',
+    'SERVICE_TOKEN_VALUE=very-secret',
+    'MY_PRIVATE_KEY=very-secret',
+    fake('AK', 'IA', '1234567890ABCDEF'),
+    fake('AS', 'IA', '1234567890ABCDEF'),
+    fake('sk', '-', '1234567890abcdef'),
+    fake('gh', 'p_', '1234567890abcdef'),
+    fake('github', '_pat_', '1234567890abcdef'),
+    fake('xo', 'xb-', '1234567890abcdef'),
+    fake('client', '_secret', '=', 'abc123'),
+    fake('access', '_token', '=', 'abc123'),
+    fake('db', '_password', '=', 'abc123'),
+    fake('api', '_key', ': ', 'abc123'),
+    fake('"Authorization": "Bear', 'er ', 'abc123"'),
+    fake('Authorization: Bas', 'ic ', 'abc123'),
+    fake('Bear', 'er ', 'abc123.jwt'),
+    fake('pass', 'word', ' = "two words"'),
+    fake('postgres://', 'user:', 'pass', '@host'),
+    fake('-----BEGIN PRIV', 'ATE KEY-----\nvery-secret\n-----END PRIV', 'ATE KEY-----'),
+  ])('redacts credential pattern in persisted text: %s', (secret) => {
+    expect(redactBudgetSecrets(secret)).not.toContain(secret.includes('very-secret') ? 'very-secret' : secret);
+  });
+
+  it.each(['the token count is 31079', 'update the key handler', 'password reset flow'])('preserves normal sentence: %s', (sentence) => {
+    expect(redactBudgetSecrets(sentence)).toBe(sentence);
+  });
+
+  it('accepts only an existing transcript in the expected session directory', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ptah-transcript-home-'));
+    const workspace = path.join(home, 'workspace');
+    const session = 'session-1';
+    const agent = 'agent-1';
+    const slug = path.resolve(workspace).replace(/[^A-Za-z0-9]/g, '-');
+    const directory = path.join(home, '.claude', 'projects', slug, session, 'subagents');
+    const file = path.join(directory, `agent-${agent}.jsonl`);
+    const outside = path.join(home, `agent-${agent}.jsonl`);
+    const hookDirectory = path.join(home, '.claude', 'projects', 'different-claude-slug', session, 'subagents');
+    const hookFile = path.join(hookDirectory, `agent-${agent}.jsonl`);
+    try {
+      fs.mkdirSync(directory, { recursive: true });
+      fs.writeFileSync(file, '{}\n');
+      fs.writeFileSync(outside, '{}\n');
+      fs.mkdirSync(hookDirectory, { recursive: true });
+      fs.writeFileSync(hookFile, '{}\n');
+      expect(resolveSubagentTranscriptPath(home, workspace, session, agent)).toBe(fs.realpathSync(file));
+      expect(resolveSubagentTranscriptPath(home, workspace, session, agent, file)).toBe(fs.realpathSync(file));
+      expect(resolveSubagentTranscriptPath(home, workspace, session, agent, hookFile)).toBe(fs.realpathSync(hookFile));
+      expect(resolveSubagentTranscriptPath(home, workspace, session, agent, outside)).toBeUndefined();
+      fs.unlinkSync(file);
+      expect(resolveSubagentTranscriptPath(home, workspace, session, agent)).toBeUndefined();
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('retains stopped identities by SDK id, spawning call, and teammate name after registry removal', async () => {
+    const h = makeHarness({ teammateName: 'reviewer' });
+    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'stop-name' }));
+    h.registry.get.mockReturnValue(null);
+    for (const target of ['a1', TOOL_CALL, 'reviewer'])
+      expect(h.monitor.getAgentBudgetState(target, SESSION)).toEqual(expect.objectContaining({ stopped: true }));
+    h.monitor.release(SESSION);
+    expect(h.monitor.getAgentBudgetState('reviewer', SESSION)?.stopped).toBe(true);
+  });
+
+  it('clears a stopped name when a new same-name agent spawns without usage', async () => {
+    const h = makeHarness({ teammateName: 'reviewer' });
+    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'old-stop' }));
+    h.registry.get.mockReturnValue(null);
+    await h.monitor.observe(SESSION, {
+      type: 'assistant', parent_tool_use_id: null,
+      message: { content: [{ type: 'tool_use', id: 'new-call', name: 'Agent', input: { name: 'reviewer', description: 'new review' } }] },
+    });
+    expect(h.monitor.getAgentBudgetState('reviewer', SESSION)?.stopped).not.toBe(true);
+    expect(h.monitor.getAgentBudgetState('new-call', SESSION)).toBeUndefined();
+    expect(h.monitor.getAgentBudgetState(TOOL_CALL, SESSION)?.stopState).toBe('stopped');
+  });
+
+  it('keeps identical teammate names independent across sessions', async () => {
+    const h = makeHarness({ teammateName: 'reviewer' });
+    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'first-stop' }));
+    h.registry.get.mockReturnValue(null);
+    expect(h.monitor.getAgentBudgetState('reviewer', SESSION)?.stopState).toBe('stopped');
+    expect(h.monitor.getAgentBudgetState('reviewer', 'session-2')).toBeUndefined();
+    await h.monitor.observe('session-2', assistant({ input: 100 }, { id: 'second-low' }));
+    expect(h.monitor.getAgentBudgetState('reviewer', 'session-2')).toBeUndefined();
+  });
+
+  it('does not expose a budget refusal when compaction is disabled', async () => {
+    const h = makeHarness({}, { enabled: false });
+    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'disabled' }));
+    expect(h.monitor.getAgentBudgetState('a1', SESSION)).toBeUndefined();
+  });
+
+  it('shows a pending stop immediately and clears it after a rejected attempt', async () => {
+    const h = makeHarness({ teammateName: 'reviewer' });
+    let rejectStop: (error: Error) => void = () => undefined;
+    h.dispatcher.stopSubagent.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectStop = reject; }));
+    const observing = h.monitor.observe(SESSION, assistant({ output: 600_000 }, { id: 'pending' }));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(h.monitor.getAgentBudgetState('reviewer', SESSION)?.stopState).toBe('pending');
+    rejectStop(new Error('busy'));
+    await observing;
+    expect(h.monitor.getAgentBudgetState('reviewer', SESSION)).toEqual(expect.objectContaining({ stopped: false, stopState: 'none', running: true }));
+  });
+
+  it('re-arms a warning whose first task id was unknown', async () => {
+    const h = makeHarness({ taskId: undefined }, { workspace: RECORD_WORKSPACE });
+    await h.monitor.observe(SESSION, assistant({ input: 130_000 }, { id: 'warn-unknown' }));
+    expect(h.dispatcher.postSubagentNotice).toHaveBeenCalledTimes(1);
+    h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-later');
+    await h.monitor.observe(SESSION, assistant({ input: 130_000 }, { id: 'warn-again' }));
+    expect(h.dispatcher.postSubagentNotice).toHaveBeenCalledTimes(2);
+  });
+
+  it('warns and finds budget state through the hook UUID for a streamed Task', async () => {
+    const h = makeHarness(null, { workspace: RECORD_WORKSPACE });
+    const hookRecord: SubagentRecord = {
+      toolCallId: 'hook-uuid', agentType: 'Explore', agentId: 'task-agent',
+      status: 'running', startedAt: 0, parentSessionId: SESSION,
+    };
+    h.registry.get.mockImplementation((id: string) => id === 'hook-uuid' ? hookRecord : null);
+    h.registry.getToolCallIdByAgentId.mockReturnValue('hook-uuid');
+    h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-agent');
+    await h.monitor.observe(SESSION, assistant({ input: 130_000 }, { id: 'near-budget' }));
+    expect(h.dispatcher.postSubagentNotice).toHaveBeenCalledWith('task-agent', expect.any(String));
+    expect(h.monitor.getAgentBudgetState('task-agent', SESSION)).toEqual(
+      expect.objectContaining({ running: true, stopped: false }),
+    );
+    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'stop' }));
+    expect(h.monitor.getAgentBudgetState('task-agent', SESSION)).toEqual(
+      expect.objectContaining({ stopped: true }),
+    );
+  });
+
+  it('warns once at 86 percent and re-arms for a new task invocation', async () => {
+    const h = makeHarness({}, { workspace: RECORD_WORKSPACE });
+    await h.monitor.observe(SESSION, assistant({ input: 100 }, { id: 'm1' }));
+    await h.monitor.observe(SESSION, assistant({ input: 129_000 }, { id: 'm2' }));
+    await h.monitor.observe(SESSION, assistant({ input: 130_000 }, { id: 'm3' }));
+    expect(h.dispatcher.postSubagentNotice).toHaveBeenCalledTimes(1);
+    h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-2');
+    await h.monitor.observe(SESSION, assistant({ input: 130_000 }, { id: 'm4' }));
+    expect(h.dispatcher.postSubagentNotice).toHaveBeenCalledTimes(2);
+  });
+
+  it('carries progress and attribution through a jump beyond the stop threshold', async () => {
+    const h = makeHarness({}, { workspace: RECORD_WORKSPACE });
+    await h.monitor.observe(SESSION, assistant({ input: 100 }, { id: 'm1' }));
+    const jump = assistant({ input: 186_000 }, { id: 'm2' }) as { message: { content: unknown[] } };
+    jump.message.content = [
+      { type: 'text', text: 'Changed the parser token=SECRET_VALUE' },
+      { type: 'tool_use', id: 'edit-1', name: 'Edit', input: { file_path: 'src/parser.ts', new_string: 'SECRET_VALUE' } },
+    ];
+    await h.monitor.observe(SESSION, jump);
+    expect(h.dispatcher.postSubagentNotice).toHaveBeenCalledTimes(1);
+    expect(h.recordStore.writeOnce.mock.calls[0][2]).toContain('Changed the parser');
+    expect(h.recordStore.writeOnce.mock.calls[0][2]).toContain('src/parser.ts');
+    expect(h.recordStore.writeOnce.mock.calls[0][2]).not.toContain('SECRET_VALUE');
+    expect(h.stopNotices.noticeFor('task-1')).toContain('The user did not stop it');
+    expect(h.monitor.getAgentBudgetState('a1', SESSION)).toEqual(expect.objectContaining({ stopped: true, stopReason: 'handoff', contextTokens: 186_000 }));
+    expect(h.monitor.getAgentBudgetState(TOOL_CALL, SESSION)?.recordPath).toBeDefined();
+  });
+  it('tracks tool result outcomes and keeps only the last ten tool calls', async () => {
+    const h = makeHarness();
+    const progress = assistant({ input: 100 }, { id: 'progress' }) as { message: { content: unknown[] } };
+    progress.message.content = Array.from({ length: 12 }, (_, index) => ({
+      type: 'tool_use', id: `call-${index}`, name: 'Read', input: { file_path: `file-${index}.txt` },
+    }));
+    await h.monitor.observe(SESSION, progress);
+    await h.monitor.observe(SESSION, {
+      type: 'user', parent_tool_use_id: TOOL_CALL,
+      message: { content: [{ type: 'tool_result', tool_use_id: 'call-11', is_error: true }] },
+    });
+    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'stop-tools' }));
+    const record = h.recordStore.writeOnce.mock.calls[0][2];
+    expect(record).toContain('file-11.txt');
+    expect(record).toContain('failed');
+    expect(record).not.toContain('file-0.txt');
+    expect(record).not.toContain('file-1.txt');
+  });
+  it('redacts a long private key before applying the progress text cap', async () => {
+    const h = makeHarness();
+    const progress = assistant({ input: 160_000 }, { id: 'stop-pem' }) as { message: { content: unknown[] } };
+    const secret = 'Q'.repeat(3000);
+    progress.message.content = [{ type: 'text', text: `-----BEGIN PRIVATE KEY-----\n${secret}\n-----END PRIVATE KEY-----` }];
+    await h.monitor.observe(SESSION, progress);
+    const record = h.recordStore.writeOnce.mock.calls[0][2];
+    expect(record).not.toContain(secret.slice(0, 100));
+    expect(record).toContain('[redacted private key]');
+  });
   it('publishes one id-only signal for an invoked stop with a record', async () => {
     const h = makeHarness({}, { workspace: RECORD_WORKSPACE });
     const observed: SubagentBudgetStopPayload[] = [];
@@ -322,6 +526,81 @@ describe('SubagentBudgetMonitor', () => {
       timestamp: expect.any(Number),
     });
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
+  });
+
+  it('joins a hook UUID to the streamed Task by agent id before publishing the stop', async () => {
+    const h = makeHarness(null, { workspace: RECORD_WORKSPACE });
+    const hookRecord: SubagentRecord = {
+      toolCallId: 'hook-uuid', agentType: 'Explore', agentId: 'task-agent',
+      status: 'running', startedAt: 0, parentSessionId: SESSION,
+    };
+    h.registry.get.mockImplementation((id: string) => id === 'hook-uuid' ? hookRecord : null);
+    h.registry.getToolCallIdByAgentId.mockReturnValue('hook-uuid');
+    const observed = jest.fn();
+    h.budgetStops.register(observed);
+    h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-agent');
+
+    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'stop' }));
+
+    expect(h.registry.getToolCallIdByAgentId).toHaveBeenCalledWith('task-agent');
+    expect(observed).toHaveBeenCalledWith(expect.objectContaining({ agentId: 'task-agent' }));
+    expect(h.registry.update).toHaveBeenCalledWith('hook-uuid', expect.objectContaining({ status: 'completed' }));
+  });
+
+  it('prefers the direct tool ID over an agent ID join', async () => {
+    const h = makeHarness({ agentId: 'direct', taskId: 'task-agent' });
+    h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-agent');
+    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'stop' }));
+    expect(h.registry.getToolCallIdByAgentId).not.toHaveBeenCalled();
+    expect(h.registry.update).toHaveBeenCalledWith(TOOL_CALL, expect.objectContaining({ status: 'completed' }));
+  });
+
+  it.each([
+    ['another session', { parentSessionId: 'other-session', status: 'running' }],
+    ['completed', { parentSessionId: SESSION, status: 'completed' }],
+    ['interrupted', { parentSessionId: SESSION, status: 'interrupted' }],
+  ] as const)('does not attribute a stale agent ID join from %s', async (_label, fields) => {
+    const h = makeHarness(null);
+    h.registry.get.mockImplementation((id: string) => id === 'hook-uuid' ? {
+      toolCallId: 'hook-uuid', agentType: 'Explore', agentId: 'task-agent',
+      startedAt: 0, ...fields,
+    } : null);
+    h.registry.getToolCallIdByAgentId.mockReturnValue('hook-uuid');
+    const observed = jest.fn();
+    h.budgetStops.register(observed);
+    h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-agent');
+    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'stop' }));
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledWith(SESSION, 'task-agent');
+    expect(observed).not.toHaveBeenCalled();
+    expect(h.registry.update).not.toHaveBeenCalled();
+  });
+
+  it('does not signal or complete when the registry has no matching agent', async () => {
+    const h = makeHarness(null);
+    const observed = jest.fn();
+    h.budgetStops.register(observed);
+    h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-agent');
+    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'stop' }));
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledWith(SESSION, 'task-agent');
+    expect(observed).not.toHaveBeenCalled();
+    expect(h.registry.update).not.toHaveBeenCalled();
+  });
+
+  it('stops only the over-budget member of two running subagents', async () => {
+    const h = makeHarness(null);
+    const records = new Map<string, SubagentRecord>([
+      [TOOL_CALL, { toolCallId: TOOL_CALL, agentType: 'Explore', agentId: 'first', status: 'running', startedAt: 0, parentSessionId: SESSION }],
+      ['toolu_second', { toolCallId: 'toolu_second', agentType: 'Explore', agentId: 'second', status: 'running', startedAt: 0, parentSessionId: SESSION }],
+    ]);
+    h.registry.get.mockImplementation((id: string) => records.get(id) ?? null);
+    h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'first');
+    h.monitor.recordTaskStarted(SESSION, 'toolu_second', 'second');
+    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'stop' }));
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledWith(SESSION, 'first');
+    expect(h.registry.update).toHaveBeenCalledTimes(1);
+    expect(h.registry.update).toHaveBeenCalledWith(TOOL_CALL, expect.objectContaining({ status: 'completed' }));
+    expect(h.monitor.getSnapshot(SESSION, 'toolu_second')?.stopped).not.toBe(true);
   });
 
   it('does not publish a stop for a failed attempt', async () => {
@@ -515,7 +794,7 @@ describe('SubagentBudgetMonitor', () => {
       );
       await started;
       const notice = h.stopNotices.noticeFor('task-1');
-      expect(notice).toContain("Ptah stopped `Explore` ('scout')");
+      expect(notice).toContain("Ptah's budget monitor stopped `Explore` ('scout')");
       expect(notice).toContain(reason);
       expect(notice).toContain(amount);
       expect(notice).not.toContain('stopped by user');
@@ -836,7 +1115,10 @@ describe('SubagentBudgetMonitor', () => {
     expect(h.recordStore.withdraw).not.toHaveBeenCalled();
     expect(h.index.publish).toHaveBeenCalledTimes(1);
     expect(h.logger.warn).not.toHaveBeenCalled();
-    expect(h.logger.debug).not.toHaveBeenCalled();
+    expect(h.logger.debug).toHaveBeenCalledWith(
+      '[SubagentBudgetMonitor] Near-budget warning deferred',
+      expect.objectContaining({ missingPaths: true }),
+    );
   });
 
   it('the handoff restates the task from the spawning Agent tool_use', async () => {
@@ -1965,6 +2247,19 @@ describe('SubagentBudgetMonitor handoff records', () => {
     expect(h.streamed[0]).not.toContain('This handoff is saved at');
   });
 
+  it('counts and stops when progress capture throws', async () => {
+    const h = makeHarness();
+    const capture = jest.fn(() => { throw new Error('capture failed'); });
+    Object.defineProperty(h.monitor, 'captureProgress', { value: capture });
+    await h.monitor.observe(SESSION, assistant({ output: 600_000 }, { id: 'capture-1' }));
+    expect(h.monitor.getSnapshot(SESSION, TOOL_CALL)?.weightedUsed).toBeGreaterThanOrEqual(STOP_WEIGHTED);
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
+    expect(h.logger.error).toHaveBeenCalledWith(
+      '[SubagentBudgetMonitor] Progress capture failed',
+      expect.objectContaining({ error: expect.any(Error) }),
+    );
+  });
+
   it('a safety stop whose record write fails still stops and hands off in memory (B2)', async () => {
     const h = makeHarness();
     h.recordStore.writeOnce.mockResolvedValueOnce(failed('ENOSPC'));
@@ -2001,6 +2296,7 @@ describe('SubagentBudgetMonitor handoff records', () => {
     );
     const first = h.monitor.observe(SESSION, over('m1'));
     await writing;
+    expect(h.monitor.getAgentBudgetState(TOOL_CALL, SESSION)?.stopState).toBe('none');
     h.monitor.release(SESSION);
     finish({
       ok: true,

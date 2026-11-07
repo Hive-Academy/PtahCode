@@ -90,6 +90,7 @@ import {
 import type { McpServerBackoffService } from './mcp-server-backoff.service';
 import {
   CanUseTool,
+  HookCallback,
   HookEvent,
   HookCallbackMatcher,
   McpHttpServerConfig,
@@ -98,6 +99,7 @@ import {
   type Options,
   type Settings,
 } from '../types/sdk-types/claude-sdk.types';
+import { z } from 'zod';
 import type { SDKUserMessage } from './session-lifecycle-manager';
 import {
   getAnthropicProvider,
@@ -1308,6 +1310,42 @@ export class SdkQueryOptionsBuilder {
       activityHold,
       this.ptahUiHintEnabled(sessionConfig),
     );
+    // The SDK may auto-allow SendMessage before canUseTool. PreToolUse still
+    // runs for auto-allowed tools and can deny a stopped or near-limit target.
+    const budgetMessageGate: HookCallback = async (hookInput) => {
+      if (hookInput.hook_event_name !== 'PreToolUse' || hookInput.tool_name !== 'SendMessage') {
+        return {};
+      }
+      try {
+        const toolInput = z.object({ to: z.string() }).safeParse(hookInput.tool_input);
+        if (!toolInput.success) return {};
+        const budgetSession = sessionIdResolver?.() ?? sessionId;
+        if (!budgetSession) return {};
+        const refusal = this.permissionHandler.budgetSendMessageRefusal(
+          toolInput.data.to, budgetSession,
+        );
+        if (!refusal) return {};
+        this.permissionHandler.logBudgetSendMessageHookDenial(
+          budgetSession, routingTabId ?? undefined, hookInput.tool_use_id,
+        );
+        return { hookSpecificOutput: {
+          hookEventName: 'PreToolUse', permissionDecision: 'deny',
+          permissionDecisionReason: refusal,
+        } };
+      } catch (error: unknown) {
+        // degradation-audit: reported - logged at warn; the budget gate fails
+        // open so a defect in it never blocks every SendMessage.
+        this.logger.warn('[SdkQueryOptionsBuilder] SendMessage budget gate failed; allowing the call', {
+          toolUseId: hookInput.tool_use_id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return {};
+      }
+    };
+    hooks.PreToolUse = [
+      { matcher: 'SendMessage', hooks: [budgetMessageGate] },
+      ...(hooks.PreToolUse ?? []),
+    ];
     const compactionConfig = this.compactionConfigProvider.getConfig();
     // The class follows the same first-party test as the 1M beta and the
     // model pre-flight. With `A1_DEFAULT_WINDOW` all `null` it changes no

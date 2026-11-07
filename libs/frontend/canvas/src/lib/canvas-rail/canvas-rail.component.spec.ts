@@ -14,6 +14,7 @@ import {
   SPLIT_NEEDS_TWO_SESSIONS_REASON,
 } from './canvas-rail-card.component';
 import { CanvasRailComponent } from './canvas-rail.component';
+import { CanvasRailFlip } from './canvas-rail-flip';
 
 @Component({
   // Match the real component's native list-item host.
@@ -48,6 +49,25 @@ class CardStub {
 const tile = (tabId: string, order: number): CanvasTile => ({ tabId, order, width: DEFAULT_TILE_WIDTH, rowBreakBefore: false });
 
 describe('CanvasRailComponent', () => {
+  it('passes an eligible layout update to play under reduced motion', async () => {
+    const originalRects = Element.prototype.getClientRects;
+    const originalMatchMedia = window.matchMedia;
+    const play = jest.spyOn(CanvasRailFlip.prototype, 'play').mockImplementation(() => undefined);
+    Element.prototype.getClientRects = () => Object.assign({} as DOMRectList, { length: 1 });
+    Object.defineProperty(window, 'matchMedia', { value: () => ({ matches: true }), configurable: true });
+    try {
+      const fixture = mount([tile('a', 0), tile('b', 1)]);
+      await fixture.whenStable();
+      fixture.componentRef.setInput('tiles', [tile('b', 0), tile('a', 1)]);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      expect(play).toHaveBeenCalled();
+    } finally {
+      Element.prototype.getClientRects = originalRects;
+      Object.defineProperty(window, 'matchMedia', { value: originalMatchMedia, configurable: true });
+      play.mockRestore();
+    }
+  });
   const dispatchOutcome = jest.fn().mockResolvedValue({ kind: 'completed' });
   beforeEach(() => {
     dispatchOutcome.mockReset().mockResolvedValue({ kind: 'completed' });

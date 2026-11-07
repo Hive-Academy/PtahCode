@@ -38,7 +38,7 @@ interface AskUserQuestionPayload {
   tabId?: string;
 }
 
-function makeHandler(hostAttention?: { resolve(key: string, generation: number): void }, agentProcessManager?: { findAgentInfo(agentId: string): { parentSessionId?: string; startedAt?: string; status?: string } | undefined } | null): {
+function makeHandler(hostAttention?: { resolve(key: string, generation: number): void }, agentProcessManager?: { findAgentInfo(agentId: string): { parentSessionId?: string; startedAt?: string; status?: string } | undefined } | null, budgetMonitor?: ConstructorParameters<typeof SdkPermissionHandler>[6], targetToolCallId?: string): {
   handler: SdkPermissionHandler;
   logger: MockLogger;
   sent: SentMessage[];
@@ -64,6 +64,7 @@ function makeHandler(hostAttention?: { resolve(key: string, generation: number):
 
   const subagentRegistry = {
     getToolCallIdByAgentId: jest.fn().mockReturnValue(null),
+    getToolCallIdByName: jest.fn().mockReturnValue(targetToolCallId ?? null),
     get: jest.fn().mockReturnValue(undefined),
   };
 
@@ -84,10 +85,86 @@ function makeHandler(hostAttention?: { resolve(key: string, generation: number):
         status: 'running',
       }),
     }),
+    budgetMonitor,
   );
 
   return { handler, logger, sent };
 }
+
+describe('SDK SendMessage budget gate', () => {
+  const session = asSessionId('11111111-2222-4333-8444-555555555555');
+  it.each([
+    [849, false, 'allow'],
+    [850, false, 'deny'],
+    [1000, true, 'deny'],
+  ] as const)('routes %s tokens (stopped=%s) as %s', async (contextTokens, stopped, behavior) => {
+    const monitor = { getAgentBudgetState: jest.fn(() => ({ contextTokens, stopped, stopState: stopped ? 'stopped' as const : 'none' as const, handoffTokens: 1000, warningRatio: 0.85 })) };
+    const { handler, logger } = makeHandler(undefined, undefined, monitor);
+    handler.setPermissionLevel('yolo');
+    const result = await handler.createCallback(session)('SendMessage', { to: 'agent-1', message: 'private payload' }, { signal: new AbortController().signal, toolUseID: 'send-1', requestId: 'send-1' });
+    expect(result?.behavior).toBe(behavior);
+    if (behavior === 'deny') expect(result).toEqual(expect.objectContaining({ interrupt: false }));
+    expect(monitor.getAgentBudgetState).toHaveBeenCalledWith('agent-1', session);
+    expect(logger.debug).toHaveBeenCalledWith('[SdkPermissionHandler] Permission decision', expect.objectContaining({ sessionId: session, toolUseID: 'send-1', toolName: 'SendMessage', route: behavior === 'deny' ? 'deny' : 'auto-allow', interrupt: false }));
+    expect(JSON.stringify(logger.debug.mock.calls.filter(([name]) => name === '[SdkPermissionHandler] Permission decision'))).not.toContain('private payload');
+  });
+
+  it('allows an unknown target', async () => {
+    const { handler } = makeHandler(undefined, undefined, { getAgentBudgetState: () => undefined });
+    handler.setPermissionLevel('yolo');
+    expect((await handler.createCallback(session)('SendMessage', { to: 'missing' }, { signal: new AbortController().signal, toolUseID: 'send-2', requestId: 'send-2' }))?.behavior).toBe('allow');
+  });
+
+  it('resolves a teammate name to its spawning tool call before checking the budget', async () => {
+    const monitor = { getAgentBudgetState: jest.fn(() => ({ contextTokens: 850, stopped: false, stopState: 'none' as const, handoffTokens: 1000, warningRatio: 0.85 })) };
+    const { handler } = makeHandler(undefined, undefined, monitor, 'tool-call-1');
+    const result = await handler.createCallback(session)('SendMessage', { to: 'reviewer' }, { signal: new AbortController().signal, toolUseID: 'send-3', requestId: 'send-3' });
+    expect(result).toEqual(expect.objectContaining({ behavior: 'deny', interrupt: false }));
+    expect(monitor.getAgentBudgetState).toHaveBeenCalledWith('tool-call-1', session);
+  });
+
+  it('denies a stopped teammate by name after the registry has discarded it', async () => {
+    const monitor = { getAgentBudgetState: jest.fn(() => ({ contextTokens: null, stopped: true, stopState: 'stopped' as const, handoffTokens: 1000, warningRatio: 0.85 })) };
+    const { handler } = makeHandler(undefined, undefined, monitor);
+    const result = await handler.createCallback(session)('SendMessage', { to: 'reviewer' }, { signal: new AbortController().signal, toolUseID: 'send-4', requestId: 'send-4' });
+    expect(result).toEqual(expect.objectContaining({ behavior: 'deny', interrupt: false }));
+    expect(monitor.getAgentBudgetState).toHaveBeenCalledWith('reviewer', session);
+  });
+
+  it('denies during the pending safety-stop window even with low context', async () => {
+    const { handler } = makeHandler(undefined, undefined, { getAgentBudgetState: () => ({ contextTokens: 0, stopped: true, stopState: 'pending', handoffTokens: 1000, warningRatio: 0.85 }) });
+    const result = await handler.createCallback(session)('SendMessage', { to: 'reviewer' }, { signal: new AbortController().signal, toolUseID: 'pending-send', requestId: 'pending-send' });
+    expect(result).toEqual(expect.objectContaining({ behavior: 'deny', interrupt: false }));
+  });
+
+  it('allows steering a running agent at the warning threshold', async () => {
+    const { handler } = makeHandler(undefined, undefined, { getAgentBudgetState: () => ({ contextTokens: 850, stopped: false, stopState: 'none', running: true, handoffTokens: 1000, warningRatio: 0.85 }) });
+    handler.setPermissionLevel('yolo');
+    expect((await handler.createCallback(session)('SendMessage', { to: 'reviewer' }, { signal: new AbortController().signal, toolUseID: 'send-5', requestId: 'send-5' }))?.behavior).toBe('allow');
+  });
+
+  it.each([{}, { to: 42 }])('keeps the existing policy when to is missing or not a string', async (input) => {
+    const monitor = { getAgentBudgetState: jest.fn() };
+    const { handler } = makeHandler(undefined, undefined, monitor);
+    handler.setPermissionLevel('yolo');
+    expect((await handler.createCallback(session)('SendMessage', input, { signal: new AbortController().signal, toolUseID: 'send-6', requestId: 'send-6' }))?.behavior).toBe('allow');
+    expect(monitor.getAgentBudgetState).not.toHaveBeenCalled();
+  });
+
+  it('shares the budget refusal with the PreToolUse route and logs its denial', () => {
+    if (!session) throw new Error('Expected a valid fixture session');
+    const monitor = { getAgentBudgetState: jest.fn(() => ({
+      contextTokens: null, stopped: true, stopState: 'stopped' as const,
+      handoffTokens: 1000, warningRatio: 0.85,
+    })) };
+    const { handler, logger } = makeHandler(undefined, undefined, monitor);
+    expect(handler.budgetSendMessageRefusal('stopped-agent', session)).toContain('Start a new agent');
+    handler.logBudgetSendMessageHookDenial(session, undefined, 'send-hook');
+    expect(logger.debug).toHaveBeenCalledWith('[SdkPermissionHandler] Permission decision',
+      expect.objectContaining({ sessionId: session, toolUseID: 'send-hook',
+        toolName: 'SendMessage', route: 'deny', decisionSource: 'subagent-budget', interrupt: false }));
+  });
+});
 
 describe('SdkPermissionHandler published prompt lifecycle', () => {
   const event: PermissionPromptLifecycleEvent = {
