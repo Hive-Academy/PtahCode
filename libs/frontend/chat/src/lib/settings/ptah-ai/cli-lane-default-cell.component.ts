@@ -12,15 +12,15 @@ const FULL_ACCESS_WARNING = 'Full access lets Codex read and change files outsid
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="flex min-w-36 flex-col gap-1 text-xs text-base-content">
+    <div class="flex w-[4.75rem] min-w-0 max-w-full flex-col gap-1 text-xs text-base-content [overflow-wrap:anywhere]">
       @if (cli() === 'ptah-cli') { <span>Shared by all Ptah CLI providers</span> }
       @if (cli() === 'codex') { <span>This is the same setting as Codex sandbox in Orchestration.</span> }
       <span>{{ saved() ? 'Saved default' : 'Auto (default) · built-in' }}</span>
-      @if (saved()) { <button type="button" class="btn btn-ghost btn-xs self-start" [disabled]="disabled() || pending() !== null" (click)="requestReset()">Reset to default ({{ resetDescription() }})</button> }
+      @if (saved()) { <button type="button" class="btn btn-ghost btn-xs h-auto min-h-6 max-w-full whitespace-normal px-1 py-0.5" [disabled]="disabled() || pending() !== null" (click)="requestReset()">Reset to default ({{ resetDescription() }})</button> }
       @if (unsupportedCombination(); as reason) { <span role="status">Unsupported combination: {{ reason }}</span> }
       @if (permissions().length) {
         <label class="flex flex-col gap-0.5">Permission
-          <select class="select select-bordered select-xs text-base-content" [attr.aria-label]="name() + ' permission default'"
+          <select class="select select-bordered select-xs w-full min-w-0 max-w-full text-base-content" [attr.aria-label]="name() + ' permission default'" [title]="effectivePermission()"
             [value]="effectivePermission()" [disabled]="disabled() || pending() !== null" (change)="choosePermission($event)">
             @for (mode of permissions(); track mode) { <option [value]="mode">{{ mode }}</option> }
           </select>
@@ -28,7 +28,7 @@ const FULL_ACCESS_WARNING = 'Full access lets Codex read and change files outsid
       } @else { <span tabindex="0" [title]="reason()">Permission: Unavailable — {{ reason() }}</span> }
       @if (networks().length) {
         <label class="flex flex-col gap-0.5">Network
-          <select class="select select-bordered select-xs text-base-content" [attr.aria-label]="name() + ' network default'"
+          <select class="select select-bordered select-xs w-full min-w-0 max-w-full text-base-content" [attr.aria-label]="name() + ' network default'" [title]="effectiveNetwork()"
             [value]="effectiveNetwork()" [disabled]="disabled() || pending() !== null" (change)="chooseNetwork($event)">
             @for (mode of networks(); track mode) { <option [value]="mode">{{ mode }}</option> }
           </select>
