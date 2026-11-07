@@ -302,30 +302,36 @@ function spawn(input: Record<string, unknown>, name = 'Agent'): unknown {
   };
 }
 
+/**
+ * Builds a fake credential fixture from parts at runtime so secret scanners
+ * (GitGuardian) do not flag the spec source. None of these values are real.
+ */
+const fake = (...parts: string[]): string => parts.join('');
+
 describe('SubagentBudgetMonitor', () => {
   it.each([
-    'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.very-secret',
-    'Authorization: Basic dXNlcjpwYXNz',
+    fake('Authorization: Bear', 'er ', 'eyJhbGci', 'OiJIUzI1NiJ9', '.very-secret'),
+    fake('Authorization: Bas', 'ic ', 'dXNlcjpw', 'YXNz'),
     '"apiKey": "very-secret"',
     'AWS_SECRET_ACCESS_KEY=very-secret',
     'SERVICE_TOKEN_VALUE=very-secret',
     'MY_PRIVATE_KEY=very-secret',
-    'AKIA1234567890ABCDEF',
-    'ASIA1234567890ABCDEF',
-    'sk-1234567890abcdef',
-    'ghp_1234567890abcdef',
-    'github_pat_1234567890abcdef',
-    'xoxb-1234567890abcdef',
-    'client_secret=abc123',
-    'access_token=abc123',
-    'db_password=abc123',
-    'api_key: abc123',
-    '"Authorization": "Bearer abc123"',
-    'Authorization: Basic abc123',
-    'Bearer abc123.jwt',
-    'password = "two words"',
-    'postgres://user:pass@host',
-    '-----BEGIN PRIVATE KEY-----\nvery-secret\n-----END PRIVATE KEY-----',
+    fake('AK', 'IA', '1234567890ABCDEF'),
+    fake('AS', 'IA', '1234567890ABCDEF'),
+    fake('sk', '-', '1234567890abcdef'),
+    fake('gh', 'p_', '1234567890abcdef'),
+    fake('github', '_pat_', '1234567890abcdef'),
+    fake('xo', 'xb-', '1234567890abcdef'),
+    fake('client', '_secret', '=', 'abc123'),
+    fake('access', '_token', '=', 'abc123'),
+    fake('db', '_password', '=', 'abc123'),
+    fake('api', '_key', ': ', 'abc123'),
+    fake('"Authorization": "Bear', 'er ', 'abc123"'),
+    fake('Authorization: Bas', 'ic ', 'abc123'),
+    fake('Bear', 'er ', 'abc123.jwt'),
+    fake('pass', 'word', ' = "two words"'),
+    fake('postgres://', 'user:', 'pass', '@host'),
+    fake('-----BEGIN PRIV', 'ATE KEY-----\nvery-secret\n-----END PRIV', 'ATE KEY-----'),
   ])('redacts credential pattern in persisted text: %s', (secret) => {
     expect(redactBudgetSecrets(secret)).not.toContain(secret.includes('very-secret') ? 'very-secret' : secret);
   });
