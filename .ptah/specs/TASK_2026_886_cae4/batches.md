@@ -101,6 +101,8 @@ Edge cases:
 | D26 | `tools/di-lint/check-injects.ts` (pre-push hook) fails for every `TASK_END_TOKENS.*` inject in Batches 6, 7 and 8 (19 errors: census-coordinator, close-curate, dispose-evaluate, harvest, index-request) because `registerTaskEndHook` is Batch 15 (D4). The branch cannot pass the pre-push hook until Batch 15 lands (BLOCKED-ON-957). No workaround (no stub registration, no di-lint exclusion) | stub register file; di-lint exclusion; wait for Batch 15 | Team-leader run 2026-11-06: di-lint exit 1, 19 `injects TASK_END_TOKENS.* but no register*.ts registers it`; D4 owns `src/index.ts`/registration in Batch 15 | yes |
 | D27 | Incident (Batch 8): a `prettier --write steps/*.spec.ts` glob reformatted the committed Batch 7 specs `close-curate.step.spec.ts` and `harvest.step.spec.ts`; the executor restored both from `HEAD` | — | Orchestrator and team-leader confirmed `git diff HEAD` empty on both before the Batch 8 commit; neither file is in the Batch 6 or 8 commit | n/a |
 | D28 | BLOCKED-ON-957 is lifted for Batches 11-19. The user merged `main` into the branch (merge commit fe0f9dfb9, clean, #957 content present) instead of rebasing (user decision, 2026-11-07). Every "rebased onto `main`" dependency (Batches 11 and 16) is satisfied by that merge. Afterwards came the Phase 1 fix commit 94ea88f9c (before the merge) and the contract fix afb4fb11f `fix(task-end-hook): use spec contract names for task files`. That fix replaced `'task.md'`/`'context.md'` literals in `dispose/disposal-input.collector.ts` and `dispose/task-spec.reader.ts` with `CARRIER_FILE`, `CONTEXT_FILE` and `SPEC_ROOT_SEGMENTS` from `@ptah-extension/shared`, which the task-specs `contract.guard.spec.ts` requires; verify task-end-hook 467 tests and task-specs 555 tests exit 0 | rebase; merge | User chose the merge; `git merge-base --is-ancestor` confirms the #957 merge d3b9a5994 is an ancestor of HEAD (fe0f9dfb9 second parent be25eb1d1); `main` has since advanced to bce361218 with no `persistence-sqlite/migrations` change | yes (later rebase or merge) |
+| D29 | Accept Batch 12 store decisions: (1) `faultAfterTransitionInsert` constructor option with 3 fire points; (2) injectable `now` clock option; (3) `upsertStep` only updates, throws on a missing (run, step, subject) and checks `outcome.step === step` at runtime (D12); (4) `markStepRunning` clears `reason` and `extra_json`; (5) `expandStep` de-duplicates, deletes the placeholder in any state, inserts with ON CONFLICT DO NOTHING, an empty subject throws; (6) `done → cancelled` is terminal to terminal, so it classifies as duplicate (journal `last_status` updated, no episode or transition; dispose still re-reads the carrier, D13/Task 5.2); (7) orphan reconciliation skips transitions that already have a run, hook off gives `hook-disabled`, a reverted task gives a `cancelled/status-reverted` run, `main_root` comes from `task_end_repo_state`; (8) `recordBaseline` once per repository, `rememberMainRoot` only updates; (9) `pendingCensus` does not filter by run state, `listDeferredCensusSteps`/`listOpenRuns` include runs whose only unfinished step is index (D25); (10) a malformed row is logged with `logger.error` and a real `Error` and skipped | reject any; accept | Plan Component 3 lines 210-240; AC 1.1 (trigger is non-terminal to terminal); D12, D16, D25 | yes |
+| D30 | Binding on Batch 15: register `SqliteTaskEndStore` with a `useFactory` that calls `new SqliteTaskEndStore(c.resolve(PERSISTENCE_TOKENS.SQLITE_CONNECTION), c.resolve(TOKENS.LOGGER))`, never `registerSingleton(token, SqliteTaskEndStore)` | class registration; factory | Team-leader check 2026-11-07: tsyringe resolves every `design:paramtypes` entry, and the third, un-injected `options` parameter (type `Object`) fails with `Cannot inject the dependency at position #2` | yes |
 
 ## Rules every executor must follow (repeat verbatim in each executor prompt)
 
@@ -470,7 +472,7 @@ Phase 1 review — COMPLETE (2026-11-07). Implementer family claude; reviewer fa
 
 Phase review: code-logic (codex) on the combined diff after Batch 15 commits, plus code-style (store, detector, worker and reader are new public API of the library).
 
-## Batch 11: Migration 0072 Part B (registry and version pins) — COMPLETE (commit recorded in the next batches.md commit)
+## Batch 11: Migration 0072 Part B (registry and version pins) — COMPLETE (commit e26a42260)
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -498,7 +500,7 @@ Phase review: code-logic (codex) on the combined diff after Batch 15 commits, pl
 - Degradation audit passes.
 - Team-leader acceptance (2026-11-07): Task 11.1 pre-condition run by the team-leader. Local `main` (bce361218) `migrations/index.ts` ends at 70 and 71 with nothing at 72; `git diff HEAD...main` touches no file under `migrations/` after the merge fe0f9dfb9, so R9 is clear and 0072 keeps its number. Task 11.2: `index.ts` has one new import and the `{ version: 72, name: '0072_task_end_hook', sql: sql0072TaskEndHook }` entry. 25 specs move their final-version pin from 71 to 72 (0028, 0030, 0038-0047, 0051-0056, 0059-0061, 0063, 0064, 0070, 0071). `git diff -U0` shows only pin lines, comments and the 0072 spec changes; no other number changed. No final `71` pin remains (`grep -rnE "\b71\b"` matches only the 0071 registry entry). `0072_task_end_hook.spec.ts` asserts 70, 71, 72 in order with their names and `MIGRATIONS[start + 2].sql === sql`. Team-leader re-run of `npm run verify -- -p @ptah-extension/persistence-sqlite`: typecheck pass; tests 73 suites, 723 passed, 2 skipped; lint exit 1 with exactly the 10 pre-existing `no-restricted-syntax` errors, all in `0057_drop_skill_pipeline.ts`, `0057_drop_skill_pipeline.spec.ts` and `0058_provider_accounts.spec.ts`. Those three files are byte-identical to `main` and outside this diff, and Batch 1 accepted the same failure. The executor ran `-t lint,typecheck -p @ptah-extension/cli-engine,ptah-electron`, exit 0. The team-leader also ran `-t test -p ptah-electron -- --testPathPatterns=wizard-seed` (exit 0, 8 tasks succeeded); that spec iterates MIGRATIONS and pins no version. Degradation audit exit 0, TOTAL 216 (was 220; no new site). Executor decisions accepted. (a) The duplicate `db.exec(sql)` was removed from the 0072 spec `beforeEach`: with 0072 registered, the loop over MIGRATIONS already applies it, and a second exec would re-run the CREATE statements. (b) The 0071 test title "as the latest migration" became "before 0072", because the old title is now false. (c) A pin-history comment line was added in 0044 and 0046, matching the existing comment convention there.
 
-## Batch 12: `SqliteTaskEndStore` — PENDING
+## Batch 12: `SqliteTaskEndStore` — COMPLETE (commit recorded in the next batches.md commit)
 
 - Recommended executor: backend-developer subagent
 - Execution mode: sequential
@@ -509,19 +511,19 @@ Phase review: code-logic (codex) on the combined diff after Batch 15 commits, pl
 - Tasks: 3 | Depends on: Batches 3, 11
 - Phase: 2 | Phase review: (after Batch 15)
 
-### Task 12.1: Zod row schemas — PENDING
+### Task 12.1: Zod row schemas — COMPLETE
 
 - File (CREATE): `/home/amun/ptah-extension/.claude-worktrees/task-end-hook/libs/backend/task-end-hook/src/lib/persistence/task-end-rows.ts`
 - Pattern to follow: `libs/backend/review-core/src/lib/persistence/sqlite-review.repository.ts:10-17`
 
-### Task 12.2: Store — PENDING
+### Task 12.2: Store — COMPLETE
 
 - Depends on: Task 12.1
 - File (CREATE): `.../src/lib/persistence/sqlite-task-end.store.ts`
 - Plan reference: Component 3
 - Validation notes: R5 — `implements ITaskEndStore` (Batch 3) unchanged; four pending placeholder rows in the run-creation transaction; `faultAfterTransitionInsert` via constructor options; parameterised statements; one transaction per observation.
 
-### Task 12.3: Store spec — PENDING
+### Task 12.3: Store spec — COMPLETE
 
 - Depends on: Task 12.2
 - File (CREATE): `.../src/lib/persistence/sqlite-task-end.store.spec.ts`
@@ -530,6 +532,7 @@ Phase review: code-logic (codex) on the combined diff after Batch 15 commits, pl
 ### Batch 12 verification
 
 - `npm run verify -- -p @ptah-extension/task-end-hook`; degradation audit passes.
+- Team-leader acceptance (2026-11-07): four files under `src/lib/persistence/`: `task-end-rows.ts` (zod row schemas, strict outcome schema), `sqlite-task-end.store.ts` (`implements ITaskEndStore`; the Batch 3 interface file is unchanged against HEAD; `@inject(PERSISTENCE_TOKENS.SQLITE_CONNECTION)`, `@inject(TOKENS.LOGGER)`; parameterised statements, the only interpolations are fixed column lists and the closed `repo_id`/`seen_root` choice; one `db.transaction` per observation; run creation inserts the four placeholder steps in the same transaction), `task-end-row.mapper.ts` (coordinator-approved extra file for max-lines; plain class built with `new`, no token, as D19) and `sqlite-task-end.store.spec.ts` (25 tests, in-memory DB migrated through `MIGRATIONS`). `src/index.ts` untouched (D4); the store is registered in Batch 15 (see D30). No TODO, stub or `eslint-disable`. Team-leader run `npm run verify -- -p @ptah-extension/task-end-hook,@ptah-extension/skill-synthesis,@ptah-extension/memory-curator`: lint and typecheck pass for all three (task-end-hook lint 0 warnings); task-end-hook 13 suites, 492 tests passed. Degradation audit exit 0, TOTAL 216. Executor decisions 1-10 accepted as D29.
 
 ## Batch 13: Transition detector and main-root resolver — PENDING
 
