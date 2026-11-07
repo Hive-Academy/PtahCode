@@ -146,6 +146,10 @@ export const FILE_BASED_SETTINGS_KEYS = new Set<string>([
   'compaction.subagentHandoffTokens',
   'compaction.rotationSuggestTokens',
   'compaction.subagentStopWeightedTokens',
+  'agentBudget.warnRatio',
+  'agentBudget.stopWeightedTokens',
+  'agentBudget.handoffContextTokens',
+  'agentBudget.maxDurationMin',
   // Idle compaction settings (TASK_2026_692).
   'compaction.idleCompactionEnabled',
   'compaction.idleCompactionMinTokens',
@@ -373,6 +377,9 @@ export const FILE_BASED_SETTINGS_DEFAULTS: Record<string, unknown> = {
   // Missing or non-boolean reads stay "on" in the routing reader (R1).
   'agentOrchestration.laneRotation': true,
   // Compaction budgets: see ADVANCED_SETTINGS_DEFAULTS.
+  // Preserve old reader defaults until every host has run agentBudgetV1.
+  'compaction.subagentHandoffTokens': 150_000,
+  'compaction.subagentStopWeightedTokens': 3_000_000,
   'agentOrchestration.disabledClis': [],
   'agentOrchestration.disabledMcpNamespaces': [],
   'mcp.externalCallerAccess': 'read-only',

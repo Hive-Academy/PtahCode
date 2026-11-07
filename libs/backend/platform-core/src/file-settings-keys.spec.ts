@@ -907,9 +907,11 @@ describe('isFileBasedSettingKey', () => {
      */
     const advancedDefaults: Record<string, unknown> = {
       'compaction.toolOutputBudgetTokens': 2500,
-      'compaction.subagentHandoffTokens': 150000,
       'compaction.rotationSuggestTokens': 300000,
-      'compaction.subagentStopWeightedTokens': 3000000,
+      'agentBudget.warnRatio': 0.85,
+      'agentBudget.stopWeightedTokens': 3000000,
+      'agentBudget.handoffContextTokens': 150000,
+      'agentBudget.maxDurationMin': 90,
       'compaction.idleCompactionEnabled': true,
       'compaction.idleCompactionMinTokens': 200000,
       'agentOrchestration.codexAutoCompactTokens': 120000,

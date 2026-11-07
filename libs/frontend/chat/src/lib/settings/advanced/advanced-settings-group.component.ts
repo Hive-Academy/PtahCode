@@ -94,6 +94,11 @@ function formatValue(
           <p class="mt-0.5 text-xs text-base-content-muted">
             {{ group.description }}
           </p>
+          @if (group.id === 'context-budgets') {
+            <p class="mt-1 text-xs text-base-content-muted">
+              Agent limits apply even when compaction is off.
+            </p>
+          }
         </div>
 
         @switch (load()) {
