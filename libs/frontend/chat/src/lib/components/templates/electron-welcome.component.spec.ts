@@ -1,6 +1,7 @@
 import { computed, signal, type WritableSignal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import {
+  AppStateManager,
   ElectronLayoutService,
   LoggingService,
   VSCodeService,
@@ -21,6 +22,7 @@ import {
 } from '../../services/vitals/vitals-load';
 import { WelcomeVitalsStore } from '../../services/vitals/welcome-vitals.store';
 import { localDayKey } from '../../services/vitals/usage-vitals.model';
+import { MachinesStore } from '@ptah-extension/machines-ui/services';
 import { ElectronWelcomeComponent } from './electron-welcome.component';
 
 const NOW = new Date('2026-10-26T12:00:00.000Z');
@@ -81,6 +83,12 @@ describe('ElectronWelcomeComponent', () => {
   };
   let recentsLoad: jest.Mock;
   let warn: jest.Mock;
+  let machines: {
+    connectedCount: WritableSignal<number>;
+    error: WritableSignal<{ message: string } | null>;
+    loadMachines: jest.Mock;
+  };
+  let setCurrentView: jest.Mock;
 
   function host(): HTMLElement {
     return fixture.nativeElement as HTMLElement;
@@ -100,7 +108,9 @@ describe('ElectronWelcomeComponent', () => {
 
   function recentButtons(): HTMLButtonElement[] {
     return Array.from(
-      host().querySelectorAll<HTMLButtonElement>('ptah-recent-workspace-list button'),
+      host().querySelectorAll<HTMLButtonElement>(
+        'ptah-recent-workspace-list button',
+      ),
     );
   }
 
@@ -131,6 +141,12 @@ describe('ElectronWelcomeComponent', () => {
     };
     recentsLoad = jest.fn(async () => undefined);
     warn = jest.fn();
+    machines = {
+      connectedCount: signal(2),
+      error: signal<{ message: string } | null>(null),
+      loadMachines: jest.fn(async () => undefined),
+    };
+    setCurrentView = jest.fn();
 
     await TestBed.configureTestingModule({
       imports: [ElectronWelcomeComponent],
@@ -138,6 +154,8 @@ describe('ElectronWelcomeComponent', () => {
         { provide: ElectronLayoutService, useValue: layout },
         { provide: RecentWorkspacesStore, useValue: { load: recentsLoad } },
         { provide: LoggingService, useValue: { warn } },
+        { provide: MachinesStore, useValue: machines },
+        { provide: AppStateManager, useValue: { setCurrentView } },
         {
           provide: VSCodeService,
           useValue: { getPtahIconUri: () => 'ptah-icon.png' },
@@ -199,21 +217,37 @@ describe('ElectronWelcomeComponent', () => {
 
   it('advances the recent age label and local grid day on a coarse tick', () => {
     fixture.destroy();
-    const beforeMidnight = new Date(NOW.getFullYear(), NOW.getMonth(), NOW.getDate(), 23, 59, 45);
+    const beforeMidnight = new Date(
+      NOW.getFullYear(),
+      NOW.getMonth(),
+      NOW.getDate(),
+      23,
+      59,
+      45,
+    );
     jest.setSystemTime(beforeMidnight);
     vitals.isFirstRun.set(true);
-    vitals.recents.set(vitalsReady([{ ...RECENTS[0], lastOpenedAt: beforeMidnight.getTime() - 45_000 }]));
+    vitals.recents.set(
+      vitalsReady([
+        { ...RECENTS[0], lastOpenedAt: beforeMidnight.getTime() - 45_000 },
+      ]),
+    );
     fixture = TestBed.createComponent(ElectronWelcomeComponent);
     fixture.detectChanges();
 
-    const todayCell = () => host().querySelector('.ptah-activity-grid__today')?.getAttribute('data-date');
+    const todayCell = () =>
+      host()
+        .querySelector('.ptah-activity-grid__today')
+        ?.getAttribute('data-date');
     expect(recentButtons()[0].textContent).toContain('now');
     expect(todayCell()).toBe(localDayKey(beforeMidnight));
 
     jest.advanceTimersByTime(30_000);
     fixture.detectChanges();
     expect(recentButtons()[0].textContent).toContain('1m');
-    expect(todayCell()).toBe(localDayKey(new Date(beforeMidnight.getTime() + 30_000)));
+    expect(todayCell()).toBe(
+      localDayKey(new Date(beforeMidnight.getTime() + 30_000)),
+    );
   });
 
   it('shows four vitals cells for a returning user', () => {
@@ -369,5 +403,74 @@ describe('ElectronWelcomeComponent', () => {
     expect(
       host().querySelector('[data-testid="welcome-open-failed"]'),
     ).toBeNull();
+  });
+
+  describe('Machines button (TASK_2026_858)', () => {
+    function machinesButton(): HTMLButtonElement | null {
+      return host().querySelector<HTMLButtonElement>(
+        '[data-testid="welcome-open-machines"]',
+      );
+    }
+
+    it('loads the machine list once and shows the connected count', async () => {
+      await settle();
+      expect(machines.loadMachines).toHaveBeenCalledTimes(1);
+      expect(machinesButton()?.textContent?.trim()).toBe(
+        'Machines (2 connected)',
+      );
+    });
+
+    it('sits next to Open Folder as a secondary button', () => {
+      const openFolder = host().querySelector(
+        '[data-testid="welcome-open-folder"]',
+      );
+      expect(machinesButton()?.parentElement).toBe(openFolder?.parentElement);
+      expect(machinesButton()?.classList).toContain('btn-ghost');
+      expect(machinesButton()?.type).toBe('button');
+    });
+
+    it('claims no count before the list is known', () => {
+      expect(machinesButton()?.textContent?.trim()).toBe('Machines');
+    });
+
+    it('claims no count when the list cannot be read', async () => {
+      machines.loadMachines.mockImplementation(async () => {
+        machines.error.set({ message: 'unavailable' });
+      });
+      fixture.destroy();
+      fixture = TestBed.createComponent(ElectronWelcomeComponent);
+      fixture.detectChanges();
+      await settle();
+      expect(machinesButton()?.textContent?.trim()).toBe('Machines');
+    });
+
+    it('logs and claims no count when the load rejects', async () => {
+      machines.loadMachines.mockRejectedValue(new Error('bridge down'));
+      fixture.destroy();
+      fixture = TestBed.createComponent(ElectronWelcomeComponent);
+      fixture.detectChanges();
+      await settle();
+      expect(machinesButton()?.textContent?.trim()).toBe('Machines');
+      expect(warn).toHaveBeenCalledWith(
+        'ElectronWelcome',
+        'Machine list could not be loaded',
+        'bridge down',
+      );
+    });
+
+    it('follows the store count live', async () => {
+      await settle();
+      machines.connectedCount.set(0);
+      fixture.detectChanges();
+      expect(machinesButton()?.textContent?.trim()).toBe(
+        'Machines (0 connected)',
+      );
+    });
+
+    it('opens the Machines surface without a folder', () => {
+      machinesButton()?.click();
+      expect(setCurrentView).toHaveBeenCalledWith('machines');
+      expect(layout.addFolder).not.toHaveBeenCalled();
+    });
   });
 });

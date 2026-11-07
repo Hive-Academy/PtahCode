@@ -220,7 +220,7 @@ describe('ElectronShellComponent configuration gate', () => {
     ).toBe('Settings route');
   });
 
-  it('shows the workspace app shell and Chat, Voice, Apps, Tasks, Reviews, Analytics, Setup tabs in order', () => {
+  it('shows the workspace app shell and Chat, Voice, Apps, Tasks, Machines, Reviews, Analytics, Setup tabs in order', () => {
     layoutStub.hasWorkspaceFolders.set(true);
     fixture.detectChanges();
     expect(shell().querySelector('ptah-app-shell')).not.toBeNull();
@@ -230,7 +230,16 @@ describe('ElectronShellComponent configuration gate', () => {
         '[role="tablist"].electron-tabs button[role="tab"]',
       ),
     );
-    const names = ['Chat', 'Voice', 'Apps', 'Tasks', 'Reviews', 'Analytics', 'Setup'];
+    const names = [
+      'Chat',
+      'Voice',
+      'Apps',
+      'Tasks',
+      'Machines',
+      'Reviews',
+      'Analytics',
+      'Setup',
+    ];
     expect(tabs.map((tab) => tab.title)).toEqual(names);
     expect(tabs.map((tab) => tab.textContent?.trim())).toEqual(names);
     expect(tabs.map((tab) => tab.getAttribute('aria-selected'))).toEqual([
@@ -241,8 +250,9 @@ describe('ElectronShellComponent configuration gate', () => {
       'false',
       'false',
       'false',
+      'false',
     ]);
-    expect(shell().querySelectorAll('[role="tab"]')).toHaveLength(7);
+    expect(shell().querySelectorAll('[role="tab"]')).toHaveLength(8);
   });
 
   it('opens onboarding from Setup and marks the tab active once the surface settles', () => {
@@ -268,7 +278,12 @@ describe('ElectronShellComponent configuration gate', () => {
     expect(
       shell().querySelector('[data-test="config-menu-trigger"]'),
     ).toBeNull();
-    expect(shell().querySelector('[role="tablist"]')).toBeNull();
+    // Without a folder the tab strip holds Machines alone (D12).
+    expect(
+      Array.from(shell().querySelectorAll('[role="tablist"] [role="tab"]')).map(
+        (tab) => tab.getAttribute('title'),
+      ),
+    ).toEqual(['Machines']);
     showSettings();
     const actions = thoth.closest('.no-drag');
     expect(actions?.contains(backButton())).toBe(true);

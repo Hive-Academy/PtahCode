@@ -35,6 +35,7 @@ describe('webview surface ids', () => {
       'apps',
       'command-center',
       'review-runs',
+      'machines',
     ]);
     expect(new Set(SURFACE_ROUTE_IDS).size).toBe(SURFACE_ROUTE_IDS.length);
   });

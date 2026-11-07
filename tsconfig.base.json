@@ -125,6 +125,9 @@
       "@ptah-extension/machines-ui": [
         "./libs/frontend/machines-ui/src/index.ts"
       ],
+      "@ptah-extension/machines-ui/services": [
+        "./libs/frontend/machines-ui/src/services.ts"
+      ],
       "@ptah-extension/tasks-ui/services": [
         "./libs/frontend/tasks-ui/src/services.ts"
       ],

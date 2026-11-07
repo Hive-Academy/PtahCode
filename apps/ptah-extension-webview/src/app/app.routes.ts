@@ -72,6 +72,9 @@ import { reviewOnlySurface } from './review-only-surface.guard';
  *   refuses the match on VS Code before the chunk is requested, and the `**`
  *   fallback lands on `chat`. Nothing eager may import
  *   `@ptah-extension/mcp-apps-page`; this dynamic import is its only entry.
+ * - `machines` — `loadComponent`, Electron-only, same guard and fallback as
+ *   `apps`. Eager code imports only `@ptah-extension/machines-ui/services`
+ *   (the feed and the store); the view loads through this dynamic import.
  *
  */
 export const appRoutes: Routes = [
@@ -182,6 +185,20 @@ export const appRoutes: Routes = [
     loadComponent: () =>
       import('@ptah-extension/review-runs-ui').then(
         (m) => m.ReviewRunsPageComponent,
+      ),
+  },
+  {
+    // Electron-only (TASK_2026_858): remote machines are an Electron
+    // main-process service. The guard refuses every other host before the
+    // lazy chunk is requested, and `**` below lands on chat.
+    path: 'machines',
+    canMatch: [electronOnlySurface],
+    providers: [
+      { provide: SURFACE_ACTIVE, useFactory: surfaceActiveFor('machines') },
+    ],
+    loadComponent: () =>
+      import('@ptah-extension/machines-ui').then(
+        (m) => m.MachinesViewComponent,
       ),
   },
   // An unaddressable URL is the chat surface, not an error page: the host can

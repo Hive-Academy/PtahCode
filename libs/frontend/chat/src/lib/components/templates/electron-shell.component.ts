@@ -5,6 +5,8 @@
  * Shows a loading state until the first workspace sync settles, then the
  * welcome page or a configuration surface before a workspace opens.
  * With a workspace, the main app uses the 3-panel layout.
+ * Machines (remote workers, TASK_2026_858) needs no local folder: its tab
+ * stays in the navbar without one, and the welcome yields to it.
  *
  * 3-panel layout:
  *   - Global navbar: Logo, tabs (incl. Setup), Thoth/Marketplace/Settings
@@ -21,6 +23,7 @@ import {
   ChangeDetectionStrategy,
   inject,
   signal,
+  computed,
   effect,
   untracked,
   Type,
@@ -42,6 +45,7 @@ import {
   Wrench,
   Mic,
   RotateCw,
+  Server,
 } from 'lucide-angular';
 import {
   ElectronLayoutService,
@@ -50,6 +54,9 @@ import {
   SurfaceRouterService,
   NOTIFICATION_FOCUS_ROUTER,
 } from '@ptah-extension/core';
+// Component-free entry: the Machines view loads through the route table's
+// `loadComponent`; the shell reads only the store for the tab badge.
+import { MachinesStore } from '@ptah-extension/machines-ui/services';
 import { AppShellComponent } from './app-shell.component';
 // Used only inside `@defer` in the template: the compiler turns this
 // declaration into a dynamic import (lazy chunk). Keep it a declaration of
@@ -230,108 +237,141 @@ import { ClosedTabSessionEnderService } from '../../services/closed-tab-session-
         <!-- Spacer (left) -->
         <div class="flex-1"></div>
 
-        <!-- Navbar tabs (DaisyUI tabs-lifted, fixed navigation) -->
-        @if (layout.hasWorkspaceFolders()) {
+        <!-- Navbar tabs (DaisyUI tabs-lifted, fixed navigation).
+             Without a local folder the strip shrinks to Machines alone
+             (design-spec D12): remote machines need no local folder. -->
+        @if (layout.hasWorkspaceFolders() || layout.workspaceResolved()) {
           <div
             #electronTabs
             role="tablist"
             class="tabs tabs-lifted electron-tabs no-drag min-w-0 overflow-x-auto"
           >
+            @if (layout.hasWorkspaceFolders()) {
+              <button
+                role="tab"
+                class="tab gap-1.5 no-drag whitespace-nowrap"
+                [class.tab-active]="appState.currentView() === 'chat'"
+                [attr.aria-selected]="appState.currentView() === 'chat'"
+                title="Chat"
+                aria-label="Chat"
+                (click)="onCanvasTab()"
+              >
+                <lucide-angular [img]="LayoutGridIcon" class="w-3.5 h-3.5" />
+                <span class="tab-label whitespace-nowrap">Chat</span>
+              </button>
+              <button
+                role="tab"
+                class="tab gap-1.5 no-drag whitespace-nowrap"
+                [class.tab-active]="appState.currentView() === 'command-center'"
+                [attr.aria-selected]="
+                  appState.currentView() === 'command-center'
+                "
+                title="Voice"
+                aria-label="Voice"
+                (click)="openCommandCenter()"
+              >
+                <lucide-angular [img]="MicIcon" class="w-3.5 h-3.5" />
+                <span class="tab-label whitespace-nowrap">Voice</span>
+              </button>
+              <button
+                role="tab"
+                class="tab gap-1.5 no-drag whitespace-nowrap"
+                [class.tab-active]="appState.currentView() === 'apps'"
+                [attr.aria-selected]="appState.currentView() === 'apps'"
+                title="Apps"
+                aria-label="Apps"
+                (click)="openApps()"
+              >
+                <lucide-angular [img]="AppWindowIcon" class="w-3.5 h-3.5" />
+                <span class="tab-label whitespace-nowrap">Apps</span>
+              </button>
+              <button
+                role="tab"
+                class="tab gap-1.5 no-drag whitespace-nowrap"
+                [class.tab-active]="appState.currentView() === 'tasks'"
+                [attr.aria-selected]="appState.currentView() === 'tasks'"
+                title="Tasks"
+                aria-label="Tasks"
+                (click)="openTasks()"
+              >
+                <lucide-angular [img]="ClipboardListIcon" class="w-3.5 h-3.5" />
+                <span class="tab-label whitespace-nowrap">Tasks</span>
+              </button>
+            }
             <button
               role="tab"
               class="tab gap-1.5 no-drag whitespace-nowrap"
-              [class.tab-active]="appState.currentView() === 'chat'"
-              [attr.aria-selected]="appState.currentView() === 'chat'"
-              title="Chat"
-              aria-label="Chat"
-              (click)="onCanvasTab()"
+              data-testid="machines-tab"
+              [class.tab-active]="appState.currentView() === 'machines'"
+              [attr.aria-selected]="appState.currentView() === 'machines'"
+              title="Machines"
+              [attr.aria-label]="machinesTabLabel()"
+              (click)="openMachines()"
             >
-              <lucide-angular [img]="LayoutGridIcon" class="w-3.5 h-3.5" />
-              <span class="tab-label whitespace-nowrap">Chat</span>
+              <lucide-angular [img]="ServerIcon" class="w-3.5 h-3.5" />
+              <span class="tab-label whitespace-nowrap">Machines</span>
+              <!-- A hint, not a button (D11); the tab's label says it. -->
+              @if (pendingApprovals() > 0) {
+                <span
+                  class="badge badge-warning badge-xs"
+                  data-testid="machines-tab-approvals"
+                  aria-hidden="true"
+                  >{{ pendingApprovals() }}</span
+                >
+              }
             </button>
-            <button
-              role="tab"
-              class="tab gap-1.5 no-drag whitespace-nowrap"
-              [class.tab-active]="appState.currentView() === 'command-center'"
-              [attr.aria-selected]="appState.currentView() === 'command-center'"
-              title="Voice"
-              aria-label="Voice"
-              (click)="openCommandCenter()"
-            >
-              <lucide-angular [img]="MicIcon" class="w-3.5 h-3.5" />
-              <span class="tab-label whitespace-nowrap">Voice</span>
-            </button>
-            <button
-              role="tab"
-              class="tab gap-1.5 no-drag whitespace-nowrap"
-              [class.tab-active]="appState.currentView() === 'apps'"
-              [attr.aria-selected]="appState.currentView() === 'apps'"
-              title="Apps"
-              aria-label="Apps"
-              (click)="openApps()"
-            >
-              <lucide-angular [img]="AppWindowIcon" class="w-3.5 h-3.5" />
-              <span class="tab-label whitespace-nowrap">Apps</span>
-            </button>
-            <button
-              role="tab"
-              class="tab gap-1.5 no-drag whitespace-nowrap"
-              [class.tab-active]="appState.currentView() === 'tasks'"
-              [attr.aria-selected]="appState.currentView() === 'tasks'"
-              title="Tasks"
-              aria-label="Tasks"
-              (click)="openTasks()"
-            >
-              <lucide-angular [img]="ClipboardListIcon" class="w-3.5 h-3.5" />
-              <span class="tab-label whitespace-nowrap">Tasks</span>
-            </button>
-            <button
-              role="tab"
-              class="tab gap-1.5 no-drag whitespace-nowrap"
-              [class.tab-active]="appState.currentView() === 'review-runs'"
-              [attr.aria-selected]="appState.currentView() === 'review-runs'"
-              title="Reviews"
-              aria-label="Reviews"
-              (click)="openReviews()"
-            >
-              <lucide-angular [img]="GitPullRequestIcon" class="w-3.5 h-3.5" />
-              <span class="tab-label whitespace-nowrap">Reviews</span>
-            </button>
-            <button
-              role="tab"
-              class="tab gap-1.5 no-drag whitespace-nowrap"
-              [class.tab-active]="appState.currentView() === 'analytics'"
-              [attr.aria-selected]="appState.currentView() === 'analytics'"
-              title="Analytics"
-              aria-label="Analytics"
-              (click)="openDashboard()"
-            >
-              <lucide-angular [img]="BarChart3Icon" class="w-3.5 h-3.5" />
-              <span class="tab-label whitespace-nowrap">Analytics</span>
-            </button>
-            <!-- Keep the former config-menu hook for the Setup entry. -->
-            <button
-              role="tab"
-              class="tab gap-1.5 no-drag whitespace-nowrap"
-              data-test="config-menu-item-setup-hub"
-              [class.tab-active]="
-                appState.openConfigurationSurface() === 'onboarding'
-              "
-              [attr.aria-selected]="
-                appState.openConfigurationSurface() === 'onboarding'
-              "
-              [attr.aria-current]="
-                appState.openConfigurationSurface() === 'onboarding'
-                  ? 'true'
-                  : null
-              "
-              title="Setup"
-              aria-label="Setup"
-              (click)="openSetupHub()"
-            >
-              <lucide-angular [img]="WrenchIcon" class="w-3.5 h-3.5" />
-              <span class="tab-label whitespace-nowrap">Setup</span>
-            </button>
+            @if (layout.hasWorkspaceFolders()) {
+              <button
+                role="tab"
+                class="tab gap-1.5 no-drag whitespace-nowrap"
+                [class.tab-active]="appState.currentView() === 'review-runs'"
+                [attr.aria-selected]="appState.currentView() === 'review-runs'"
+                title="Reviews"
+                aria-label="Reviews"
+                (click)="openReviews()"
+              >
+                <lucide-angular
+                  [img]="GitPullRequestIcon"
+                  class="w-3.5 h-3.5"
+                />
+                <span class="tab-label whitespace-nowrap">Reviews</span>
+              </button>
+              <button
+                role="tab"
+                class="tab gap-1.5 no-drag whitespace-nowrap"
+                [class.tab-active]="appState.currentView() === 'analytics'"
+                [attr.aria-selected]="appState.currentView() === 'analytics'"
+                title="Analytics"
+                aria-label="Analytics"
+                (click)="openDashboard()"
+              >
+                <lucide-angular [img]="BarChart3Icon" class="w-3.5 h-3.5" />
+                <span class="tab-label whitespace-nowrap">Analytics</span>
+              </button>
+              <!-- Keep the former config-menu hook for the Setup entry. -->
+              <button
+                role="tab"
+                class="tab gap-1.5 no-drag whitespace-nowrap"
+                data-test="config-menu-item-setup-hub"
+                [class.tab-active]="
+                  appState.openConfigurationSurface() === 'onboarding'
+                "
+                [attr.aria-selected]="
+                  appState.openConfigurationSurface() === 'onboarding'
+                "
+                [attr.aria-current]="
+                  appState.openConfigurationSurface() === 'onboarding'
+                    ? 'true'
+                    : null
+                "
+                title="Setup"
+                aria-label="Setup"
+                (click)="openSetupHub()"
+              >
+                <lucide-angular [img]="WrenchIcon" class="w-3.5 h-3.5" />
+                <span class="tab-label whitespace-nowrap">Setup</span>
+              </button>
+            }
           </div>
         }
 
@@ -358,7 +398,8 @@ import { ClosedTabSessionEnderService } from '../../services/closed-tab-session-
           >
             @if (
               !layout.hasWorkspaceFolders() &&
-              appState.openConfigurationSurface() !== null
+              (appState.openConfigurationSurface() !== null ||
+                appState.currentView() === 'machines')
             ) {
               <button
                 type="button"
@@ -398,7 +439,8 @@ import { ClosedTabSessionEnderService } from '../../services/closed-tab-session-
         />
       } @else if (
         !layout.hasWorkspaceFolders() &&
-        appState.openConfigurationSurface() === null
+        appState.openConfigurationSurface() === null &&
+        appState.currentView() !== 'machines'
       ) {
         <!-- Deferred so the welcome, its vitals stores and the
              @ptah-extension/chat-ui/vitals molecules load as a lazy chunk,
@@ -445,6 +487,7 @@ import { ClosedTabSessionEnderService } from '../../services/closed-tab-session-
           </div>
         }
       } @else if (!layout.hasWorkspaceFolders()) {
+        <!-- A configuration surface or Machines (D12) without a folder. -->
         <div class="flex-1 min-h-0 overflow-hidden" data-shell-surface>
           <router-outlet />
         </div>
@@ -662,6 +705,16 @@ export class ElectronShellComponent {
   readonly WrenchIcon = Wrench;
   readonly MicIcon = Mic;
   readonly RotateCwIcon = RotateCw;
+  readonly ServerIcon = Server;
+
+  private readonly machines = inject(MachinesStore);
+  /** Pending remote tool approvals across opened remote sessions (D11). */
+  protected readonly pendingApprovals = this.machines.pendingApprovalCount;
+  protected readonly machinesTabLabel = computed(() => {
+    const pending = this.pendingApprovals();
+    if (pending === 0) return 'Machines';
+    return `Machines, ${pending} ${pending === 1 ? 'approval' : 'approvals'} waiting`;
+  });
 
   private readonly document = inject(DOCUMENT);
 
@@ -688,6 +741,9 @@ export class ElectronShellComponent {
     this.appState.setCurrentView('review-runs');
   }
 
+  openMachines(): void {
+    this.appState.setCurrentView('machines');
+  }
   openApps(): void {
     this.appState.setCurrentView('apps');
   }
