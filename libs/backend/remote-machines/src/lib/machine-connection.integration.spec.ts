@@ -71,7 +71,7 @@ it('connects over a real Duplex, round-trips a call, then schedules retry on ser
   });
   await expect(wrong.connect()).rejects.toThrow();
   expect(wrong.state).toBe('unpaired');
-  expect(wrong.reason).toContain('different worker answers on host');
+  expect(wrong.reason).toBe('worker-identity-changed');
   wrong.dispose();
   await server.close();
   server = undefined;

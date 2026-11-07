@@ -3,6 +3,7 @@ import type { MessagePayloadMap } from '../messages/payload-map';
 import type { RpcUserErrorCode } from './rpc-error-codes.types';
 import {
   MACHINE_CONNECTION_STATES,
+  MACHINE_STATE_REASONS,
   MACHINE_PROMPT_MAX_LENGTH,
   MACHINE_SSH_ALIAS_PATTERN,
   MACHINES_RPC_METHOD_NAMES,
@@ -16,6 +17,7 @@ import {
   MachinesSessionStartParamsSchema,
   type MachinesEventPayload,
   type MachinesRpcRegistryInSync,
+  type MachineStateReason,
   type MachinesStatePayload,
 } from './rpc-machines.types';
 
@@ -162,6 +164,29 @@ describe('machines:* renderer contract', () => {
     } satisfies MachinesStatePayload;
     expect(event.seq).toBe(1);
     expect(MACHINE_CONNECTION_STATES).toContain(state.state);
+  });
+
+  it('carries only a closed, optional state reason', () => {
+    const withReason: MachinesStatePayload = {
+      machineId: 'm1',
+      state: 'unpaired',
+      reason: 'worker-identity-changed',
+    };
+    const withoutReason: MachinesStatePayload = {
+      machineId: 'm1',
+      state: 'offline',
+    };
+    const reasons: readonly MachineStateReason[] = MACHINE_STATE_REASONS;
+    expect(reasons).toEqual([
+      'worker-identity-changed',
+      're-pair-required',
+      'session-reattach-failed',
+    ]);
+    expect(MACHINE_STATE_REASONS).toContain(withReason.reason);
+    expect(withoutReason.reason).toBeUndefined();
+    // @ts-expect-error free-form worker text is not a MachineStateReason
+    const freeForm: MachineStateReason = 'A different worker answers on host';
+    expect(MACHINE_STATE_REASONS).not.toContain(freeForm);
   });
 
   it('adds the remote-machine error codes', () => {

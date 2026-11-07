@@ -105,7 +105,16 @@ function setup(
   };
   const sessions = createRemoteSessions(deps);
   tap = (type, payload) => sessions.tap(type, payload);
-  return { sessions, held, lock, permissions, requestRelease, log, tap };
+  return {
+    sessions,
+    held,
+    lock,
+    permissions,
+    requestRelease,
+    log,
+    tap,
+    writer,
+  };
 }
 type Tap = (type: string, payload: unknown) => void;
 const settle = () => new Promise((resolve) => setImmediate(resolve));
@@ -250,4 +259,65 @@ it('frees the slot and the lock of a start that never reported its session on it
   expect(fake.requestRelease).toHaveBeenCalledTimes(1);
   expect(fake.held.has('s-new')).toBe(false);
   await expect(start()).resolves.toMatchObject({ sessionId: 's-2' });
+});
+
+describe('remote permission expiry (decision 27)', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+  const request = () => ({
+    id: 'req-60',
+    toolName: 'Bash',
+    toolInput: {},
+    description: 'run',
+    sessionId: 's1',
+    timestamp: Date.now(),
+    timeoutAt: 0,
+  });
+
+  it('denies an unanswered request after 60 s, logs it and refuses a late answer', async () => {
+    const fake = setup(() => undefined);
+    fake.tap('permission:request', request());
+    jest.advanceTimersByTime(runtime.REMOTE_PERMISSION_TIMEOUT_MS - 1);
+    expect(fake.permissions.handleResponse).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(1);
+    expect(fake.permissions.handleResponse).toHaveBeenCalledWith('req-60', {
+      id: 'req-60',
+      decision: 'deny',
+      reason: 'No answer from the controller within 60 s',
+    });
+    expect(fake.writer.enqueue).toHaveBeenCalledWith(
+      'worker:permission.answered',
+      { requestId: 'req-60', decision: 'deny', by: 'Worker timeout' },
+    );
+    await expect(
+      fake.sessions.handle(
+        'permission.respond',
+        { sessionId: 's1', requestId: 'req-60', decision: 'allow' },
+        grant,
+        peer,
+      ),
+    ).rejects.toMatchObject({ code: 'ALREADY_ANSWERED' });
+    expect(fake.permissions.handleResponse).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs the forwarded request with the worker deadline as timeoutAt', () => {
+    const fake = setup(() => undefined);
+    const raised = request();
+    fake.tap('permission:request', raised);
+    expect(fake.writer.enqueue).toHaveBeenCalledWith(
+      'permission:request',
+      expect.objectContaining({
+        id: 'req-60',
+        timeoutAt: raised.timestamp + runtime.REMOTE_PERMISSION_TIMEOUT_MS,
+      }),
+    );
+  });
+
+  it('stops expiry timers when the worker drains', async () => {
+    const fake = setup(() => undefined);
+    fake.tap('permission:request', request());
+    await fake.sessions.drain();
+    jest.advanceTimersByTime(runtime.REMOTE_PERMISSION_TIMEOUT_MS);
+    expect(fake.permissions.handleResponse).not.toHaveBeenCalled();
+  });
 });

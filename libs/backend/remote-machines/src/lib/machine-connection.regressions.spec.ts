@@ -116,6 +116,113 @@ it('L1 drops a failed reattach and keeps the connection without another retry', 
   h.connection.dispose();
 });
 
+it('pushes session-reattach-failed when an auto re-attach is refused, then clears it', async () => {
+  const states: unknown[] = [];
+  const h = harness(
+    { onState: (state) => states.push(state) },
+    async (method, _params, index) => {
+      if (method === 'session.attach' && index === 1)
+        throw new WorkerClientError('NOT_FOUND_OR_FORBIDDEN');
+      return method === 'hello'
+        ? hello
+        : method === 'auth'
+          ? auth
+          : attachResult;
+    },
+  );
+  await h.connection.connect();
+  await h.connection.attach('s');
+  h.callbacks[0].onClose(1006);
+  expect(h.connection.reason).toBeUndefined();
+  await h.connection.retry();
+  expect(states.at(-1)).toMatchObject({
+    state: 'connected',
+    reason: 'session-reattach-failed',
+  });
+  h.callbacks[1].onClose(1006);
+  expect(states.at(-1)).toMatchObject({ state: 'offline' });
+  expect(states.at(-1)).not.toHaveProperty('reason');
+  h.connection.dispose();
+});
+
+it('keeps the tracked cursor when an explicit re-attach fails, so reconnect re-attaches', async () => {
+  const states: unknown[] = [];
+  let refuse = false;
+  const h = harness(
+    { onState: (state) => states.push(state) },
+    async (method) => {
+      if (method === 'session.attach' && refuse)
+        throw new WorkerClientError('INTERNAL');
+      return method === 'hello'
+        ? hello
+        : method === 'auth'
+          ? auth
+          : attachResult;
+    },
+  );
+  await h.connection.connect();
+  await h.connection.attach('s');
+  h.callbacks[0].onEvent(frame(4));
+  refuse = true;
+  await expect(h.connection.attach('s', 2)).rejects.toThrow();
+  expect(states.at(-1)).toMatchObject({
+    state: 'connected',
+    reason: 'session-reattach-failed',
+  });
+  refuse = false;
+  h.callbacks[0].onClose(1006);
+  await h.connection.retry();
+  const attaches = h.calls.filter((call) => call.method === 'session.attach');
+  expect(attaches.at(-1)?.params).toEqual({
+    sessionId: 's',
+    afterSeq: 4,
+    epoch: 'e',
+  });
+  expect(h.connection.state).toBe('connected');
+  expect(h.connection.reason).toBeUndefined();
+  h.connection.dispose();
+});
+
+it('forgets a first attach that fails and pushes no reason', async () => {
+  const states: unknown[] = [];
+  const h = harness(
+    { onState: (state) => states.push(state) },
+    async (method) => {
+      if (method === 'session.attach')
+        throw new WorkerClientError('NOT_FOUND_OR_FORBIDDEN');
+      return method === 'hello' ? hello : auth;
+    },
+  );
+  await h.connection.connect();
+  const pushed = states.length;
+  await expect(h.connection.attach('s')).rejects.toThrow();
+  expect(states).toHaveLength(pushed);
+  h.callbacks[0].onClose(1006);
+  await h.connection.retry();
+  expect(
+    h.calls.filter((call) => call.method === 'session.attach'),
+  ).toHaveLength(1);
+  h.connection.dispose();
+});
+
+it('pushes worker-identity-changed when another worker answers on the alias', async () => {
+  const states: unknown[] = [];
+  const h = harness(
+    { onState: (state) => states.push(state) },
+    async (method) =>
+      method === 'hello'
+        ? { ...hello, worker: { ...hello.worker, machineId: 'other' } }
+        : auth,
+  );
+  await expect(h.connection.connect()).rejects.toThrow();
+  expect(states.at(-1)).toMatchObject({
+    state: 'unpaired',
+    reason: 'worker-identity-changed',
+  });
+  expect(h.calls.map((call) => call.method)).toEqual(['hello']);
+  h.connection.dispose();
+});
+
 it('L2 advances backoff once when failed open closes its own client', async () => {
   const h = harness({}, async () => {
     throw new Error('offline');
@@ -223,6 +330,7 @@ it.each([4401, 4410])(
     h.callbacks[0].onClose(code);
     await Promise.resolve();
     expect(h.connection.state).toBe('unpaired');
+    expect(h.connection.reason).toBe('re-pair-required');
     expect(deleteToken).toHaveBeenCalledTimes(1);
     await h.connection.retry();
     expect(h.clients).toHaveLength(1);

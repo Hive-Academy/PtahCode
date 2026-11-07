@@ -244,9 +244,14 @@ export function createRemoteSessions(deps: RemoteSessionDeps): RemoteSessions {
     (await listSessions(workspaceId)).map((session) => session.id),
   );
   const authorizer = new runtime.WorkerAuthorizer(deps.machineId, sessionIndex);
-  const pending = new runtime.PendingPermissionIndex(deps.permissions);
   /** requestId → sessionId, so `permission:auto-resolved` reaches its log. */
   const permissionSessions = new Map<string, string>();
+  // An unanswered remote request is denied after 60 s (decision 27); the
+  // expiry writes the same answered record a controller's reply would.
+  const pending = new runtime.PendingPermissionIndex(deps.permissions, {
+    findWriter: (sessionId) => deps.logs.findWriter(sessionId),
+    onExpired: (requestId) => permissionSessions.delete(requestId),
+  });
   const tabsBySession = new Map<string, string>();
   /** Permission requests that carry only the tab of a start not yet resolved. */
   const heldPermissions = new Map<string, PermissionRequest[]>();
@@ -543,6 +548,9 @@ export function createRemoteSessions(deps: RemoteSessionDeps): RemoteSessions {
     },
 
     async drain() {
+      // The listener is closed, so no answer can arrive: stop every expiry
+      // timer before the logs close.
+      pending.dispose();
       const { unresolvedTabs, failedAborts } = await driver.drain();
       if (unresolvedTabs.length > 0)
         deps.log(

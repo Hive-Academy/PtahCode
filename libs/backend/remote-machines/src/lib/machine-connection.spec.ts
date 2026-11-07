@@ -206,7 +206,7 @@ it('does not send a token without a stored worker identity', async () => {
   });
   await connection.connect();
   expect(connection.state).toBe('unpaired');
-  expect(connection.reason).toMatch(/re-pair this machine/i);
+  expect(connection.reason).toBe('re-pair-required');
   expect(createClient).not.toHaveBeenCalled();
   expect(setTimer).not.toHaveBeenCalled();
 });

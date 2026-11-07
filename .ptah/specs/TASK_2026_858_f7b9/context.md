@@ -51,3 +51,9 @@ rebased on `origin/main` `12a482782` on 2026-11-01. `node_modules` is a symlink 
 - Q6 raise `apps/ptah-cli/package.json` `engines.node` to `>=22`. B1-B5 approved as written.
 - Gate 2 passes only on the user's `APPROVED` after the fixes are verified.
 - O1-O6 fleet operations: still unanswered.
+
+## Lane limits (Phase F, 2026-11-07)
+
+- antigravity (family antigravity): usage limit, RESOURCE_EXHAUSTED 429 "Individual quota reached", reset in 157h29m (~2026-11-13 23:20 UTC). Skip until then. Batch 23 moved to grok.
+- grok (family grok): 402 "Grok Build usage balance exhausted"; list row Weekly 100%, reset 2026-11-12 20:04 UTC. Batch 22.5 lane failed before any edit.
+- Fallback (Subagent reason: every eligible CLI lane at limit; codex 99% weekly kept for review): Batch 22.5 -> backend-developer subagent, Batch 23 -> frontend-developer subagent (Claude family). Review: codex lane if room, else independent Claude subagent with weaker-evidence label.
