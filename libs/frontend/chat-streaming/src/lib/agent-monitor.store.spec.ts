@@ -19,6 +19,7 @@ import {
 import { TabManagerService } from '@ptah-extension/chat-state';
 import {
   ClaudeRpcService,
+  LoggingService,
   ProviderAccountsStateService,
   VSCodeService,
 } from '@ptah-extension/core';
@@ -1278,9 +1279,12 @@ describe('AgentMonitorStore', () => {
       spawnAgent('agent-2', 'session-b');
 
       // Add permission to agent in session-b
+      const owner = store.agents().find((agent) => agent.agentId === 'agent-2')!;
       store.onPermissionRequest({
         requestId: 'perm-1',
         agentId: 'agent-2',
+        parentSessionId: 'session-b',
+        laneGeneration: new Date(owner.startedAt).toISOString(),
         kind: 'write',
         toolName: 'edit',
         toolArgs: '{}',
@@ -1294,6 +1298,110 @@ describe('AgentMonitorStore', () => {
 
       mockActiveTab.set({ claudeSessionId: 'session-b' });
       expect(store.activeTabPendingPermissions().length).toBe(1);
+    });
+
+    it('ignores expired and duplicate lane permission replay', () => {
+      spawnAgent('agent-1', 'session-a');
+      const owner = store.agents().find((agent) => agent.agentId === 'agent-1')!;
+      const request = {
+        requestId: 'perm-replay', agentId: 'agent-1', kind: 'write',
+        parentSessionId: 'session-a', laneGeneration: new Date(owner.startedAt).toISOString(),
+        toolName: 'edit', toolArgs: '{}', description: 'Edit file',
+        timestamp: Date.now(), timeoutAt: Date.now() + 60_000,
+      };
+      store.onPermissionRequest(request);
+      store.onPermissionRequest(request);
+      expect(store.pendingPermissions()[0].permissionQueue).toHaveLength(1);
+      store.onPermissionRequest({ ...request, requestId: 'expired', timeoutAt: Date.now() - 1 });
+      expect(store.pendingPermissions()[0].permissionQueue).toHaveLength(1);
+    });
+
+    it('counts down and removes a delivered permission at its deadline', () => {
+      jest.useFakeTimers();
+      try {
+        spawnAgent('agent-1', 'session-a');
+        const owner = store.agents().find(agent => agent.agentId === 'agent-1')!;
+        const timeoutAt = Date.now() + 10_000;
+        store.onPermissionRequest({
+          requestId: 'timed', agentId: 'agent-1', kind: 'write',
+          parentSessionId: 'session-a', laneGeneration: new Date(owner.startedAt).toISOString(),
+          toolName: 'edit', toolArgs: '{}', description: 'Edit file',
+          timestamp: Date.now(), timeoutAt,
+        });
+        expect(store.permissionSecondsRemaining(timeoutAt)).toBe(10);
+        jest.advanceTimersByTime(10_000);
+        expect(store.pendingPermissions()).toHaveLength(0);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('accepts a prompt only for its recorded parent and lane generation', () => {
+      spawnAgent('agent-1', 'session-a');
+      const agent = store.agents().find((entry) => entry.agentId === 'agent-1')!;
+      const request = {
+        requestId: 'owned', agentId: 'agent-1', kind: 'write',
+        toolName: 'edit', toolArgs: '{}', description: 'Edit file',
+        timestamp: Date.now(), timeoutAt: Date.now() + 60_000,
+        parentSessionId: 'session-a', laneGeneration: new Date(agent.startedAt).toISOString(),
+      };
+      store.onPermissionRequest({ ...request, parentSessionId: 'session-b' });
+      store.onPermissionRequest({ ...request, laneGeneration: new Date(agent.startedAt - 1).toISOString() });
+      expect(store.pendingPermissions()).toHaveLength(0);
+      store.onPermissionRequest(request);
+      expect(store.pendingPermissions()[0].permissionQueue).toHaveLength(1);
+      store.reparentAgents(['agent-1'], 'session-b');
+      expect(store.pendingPermissions()).toHaveLength(0);
+    });
+
+    it('rehydrates a pending routed prompt when its lane is spawned again', async () => {
+      const request = {
+        requestId: 'replay-after-resume', agentId: 'agent-1', kind: 'write',
+        toolName: 'edit', toolArgs: '{}', description: 'Edit file',
+        timestamp: Date.now(), timeoutAt: Date.now() + 60_000,
+        parentSessionId: 'session-a', laneGeneration: new Date().toISOString(),
+      };
+      rpcMock.call.mockResolvedValueOnce(rpcSuccess([request]));
+      store.onAgentSpawned({
+        agentId: 'agent-1' as AgentId, cli: 'copilot', task: 'Resume',
+        workingDirectory: '/workspace/root', startedAt: request.laneGeneration,
+        status: 'running', parentSessionId: 'session-a',
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(rpcMock.call).toHaveBeenCalledWith('agent:pendingPermissions', undefined);
+      expect(store.pendingPermissions()[0].permissionQueue).toMatchObject([{ requestId: request.requestId }]);
+    });
+
+    it('logs a failed pending-permission replay', async () => {
+      const warn = jest.spyOn(TestBed.inject(LoggingService), 'warn');
+      rpcMock.call.mockRejectedValueOnce(new Error('transport unavailable'));
+      spawnAgent('agent-replay-error', 'session-a');
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(warn).toHaveBeenCalledWith(
+        'AgentMonitorStore', 'Permission replay failed', expect.any(Error),
+      );
+    });
+
+    it('ignores any lane prompt without owner metadata', () => {
+      spawnAgent('sdk-no-owner', 'session-a');
+      store.onAgentSpawned({
+        agentId: 'copilot-no-owner' as AgentId, cli: 'copilot', task: 'Run',
+        workingDirectory: '/workspace/root', startedAt: '2026-11-07T10:00:00.000Z',
+        status: 'running', parentSessionId: 'session-a',
+      });
+      store.onPermissionRequest({
+        requestId: 'unowned', agentId: 'copilot-no-owner', kind: 'write',
+        toolName: 'edit', toolArgs: '{}', description: 'Edit file',
+        timestamp: Date.now(), timeoutAt: Date.now() + 60_000,
+      });
+      store.onPermissionRequest({
+        requestId: 'sdk-unowned', agentId: 'sdk-no-owner', kind: 'tool',
+        toolName: 'Bash', toolArgs: '{}', description: 'Run command',
+        timestamp: Date.now(), timeoutAt: Date.now() + 60_000,
+      });
+      expect(store.pendingPermissions()).toHaveLength(0);
     });
   });
 

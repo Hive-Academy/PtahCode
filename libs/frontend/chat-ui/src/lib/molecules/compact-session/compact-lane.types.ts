@@ -36,6 +36,7 @@ export interface CompactPermissionCallout {
   readonly kind: 'permission';
   readonly source: 'session' | 'cli';
   readonly requestId: string;
+  readonly canAlwaysAllow?: boolean;
   /** CLI agent id; set when `source` is `cli`. */
   readonly agentId?: string;
   /** Tab that answers the request (the deciding tab for the answer). */

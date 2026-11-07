@@ -299,7 +299,7 @@ describe('MessageDispatchService', () => {
 
     it('when streaming, auto-denies active permissions with deny_with_message', async () => {
       activeTabStatus.set('streaming');
-      permissionRequests.set([{ id: 'perm-1' }]);
+      permissionRequests.set([{ id: 'perm-1', sessionId: 'sess-1' }]);
       await service.sendOrQueueMessage('hello');
       expect(handlePermissionResponseMock).toHaveBeenCalledWith({
         id: 'perm-1',
@@ -346,7 +346,7 @@ describe('MessageDispatchService', () => {
       });
     });
 
-    it('when streaming the active tab, an unrouted (globally shown) prompt is still denied', async () => {
+    it('does not answer an unrouted prompt when streaming an unrelated active tab', async () => {
       activeTabStatus.set('streaming');
       permissionRequests.set([
         { id: 'unrouted' },
@@ -356,7 +356,7 @@ describe('MessageDispatchService', () => {
       const denied = handlePermissionResponseMock.mock.calls.map(
         (c) => (c[0] as { id: string }).id,
       );
-      expect(denied).toEqual(['unrouted']);
+      expect(denied).toEqual([]);
     });
 
     it('when not streaming, dispatches via MessageSender.send', async () => {

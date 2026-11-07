@@ -186,14 +186,21 @@ export class PermissionHandlerService {
 
   /**
    * Check if a request should be visible in the UI.
-   * Always returns true — permissions/questions must always be shown regardless
-   * of which tab is active. Each request carries its own sessionId for response
-   * routing, so the backend handles delivery to the correct session.
-   * Hiding permissions behind tab matching caused them to be silently dropped
-   * when the backend's sessionId (tabId) didn't match the tab's claudeSessionId.
+   * A prompt is answerable only on its verified target tab. Before the real
+   * SDK session ID is known, the tab ID itself is the routing session ID.
    */
-  private isRequestForActiveSession(_req: { sessionId?: string }): boolean {
-    return true;
+  private isRequestForActiveSession(req: { id: string; sessionId?: string; tabId?: string }): boolean {
+    this._routingTargetRevision();
+    const activeId = this.tabManager.activeTabId();
+    if (!activeId) return false;
+    const targets = this._promptTargetTabs.get(req.id) ?? this._questionTargetTabs.get(req.id);
+    if (targets?.length) return targets.includes(activeId);
+    const tab = this.tabManager.findTabByIdAcrossWorkspaces(activeId)?.tab;
+    if (!tab) return false;
+    if (req.tabId === activeId) {
+      return !req.sessionId || req.sessionId === activeId || req.sessionId === tab.claudeSessionId;
+    }
+    return req.sessionId !== undefined && req.sessionId === tab.claudeSessionId;
   }
 
   /**
@@ -297,7 +304,7 @@ export class PermissionHandlerService {
       const targets = this._promptTargetTabs.get(req.id)?.filter((id) =>
         liveTabIds.has(id),
       );
-      if (targets?.length && !targets.includes(activeTabId ?? '')) return false;
+      if (!targets?.length || !targets.includes(activeTabId ?? '')) return false;
       if (!req.toolUseId) return true;
       return !toolIdsInTree.has(req.toolUseId);
     });

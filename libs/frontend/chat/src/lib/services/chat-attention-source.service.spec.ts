@@ -47,11 +47,14 @@ describe('ChatAttentionSourceService', () => {
       { provide: AgentMonitorStore, useValue: { pendingPermissions: lanes } },
       { provide: TabManagerService, useValue: {
         tabs, get activeWorkspacePath() { return activeWorkspacePath(); }, activeWorkspacePath$: activeWorkspacePath,
-        activeTabId: signal('tab-1'), visibleTabIds: signal(new Set<string>()), findTabByIdAcrossWorkspaces: (id: string) =>
-          ownerAvailable && id === 'tab-1' ? { tab: tabs()[0], workspacePath: ownerWorkspacePath } : null,
-        findTabBySessionIdAcrossWorkspaces: (id: string) =>
-          ownerAvailable && id === 'session-1' && (ownerWorkspacePath !== null || tabs().some(tab => tab.claudeSessionId === id))
-            ? { tab: tabs()[0], workspacePath: ownerWorkspacePath } : null,
+        activeTabId: signal('tab-1'), visibleTabIds: signal(new Set<string>()), findTabByIdAcrossWorkspaces: (id: string) => {
+          const tab = tabs().find(candidate => candidate.id === id);
+          return ownerAvailable && tab ? { tab, workspacePath: ownerWorkspacePath } : null;
+        },
+        findTabBySessionIdAcrossWorkspaces: (id: string) => {
+          const tab = tabs().find(candidate => candidate.claudeSessionId === id);
+          return ownerAvailable && tab ? { tab, workspacePath: ownerWorkspacePath } : null;
+        },
       } },
       { provide: CommandCenterVoiceSessionService, useValue: { isActive: voice } },
       { provide: NotificationService, useValue: { upsert, resolve, setSnackbarSuppressed, dismissPresentation } },
@@ -100,30 +103,25 @@ describe('ChatAttentionSourceService', () => {
     expect(upsert.mock.lastCall?.[0].generation).toBeGreaterThan(first.generation);
   });
 
-  it('keeps a queued permission answerable after its target tab closes', () => {
-    TestBed.inject(ChatAttentionSourceService);
+  it('withdraws a permission when its owner tab closes', () => {
+    const source = TestBed.inject(ChatAttentionSourceService);
     permissions.set([{ id: 'closed-tab', toolName: 'Bash', toolInput: { command: 'echo approved' }, timestamp: 1,
       timeoutAt: 0, description: 'Run approved command', tabId: 'tab-1', sessionId: 'session-1' }]);
     TestBed.tick();
+    const live = upsert.mock.lastCall?.[0];
+    if (!live) throw new Error('Missing initial attention item');
     ownerAvailable = false;
     tabs.set([]);
     TestBed.tick();
-    const item = upsert.mock.lastCall?.[0];
-    expect(item?.tabId).toBeUndefined();
-    expect(item?.workspacePath).toBe('/ws/one');
-    expect(item?.permissionPreview).toContain('Input: echo approved');
-    expect(item?.permissionPreview).toContain('Description: Run approved command');
-    expect(item?.actions.map(action => action.id)).toEqual(['allow', 'always_allow', 'deny', 'deny_with_message', 'open']);
-    expect(item?.actions.find(action => action.id === 'allow')?.disabledReason).toBeUndefined();
-    expect(item?.actions.find(action => action.id === 'deny')?.disabledReason).toBeUndefined();
-    expect(item?.actions.find(action => action.id === 'open')?.disabledReason).toBe('Session unavailable');
+    expect(source.getLive(live.key, live.generation)).toBeUndefined();
+    expect(resolve).toHaveBeenCalledWith(live.key, live.generation, 'chat');
     permissions.set([{ id: 'unknown-tool', toolName: '', toolInput: {}, timestamp: 1,
       timeoutAt: 0, description: '', tabId: 'tab-1' }]);
     TestBed.tick();
-    expect(upsert.mock.lastCall?.[0].actions.find(action => action.id === 'allow')?.disabledReason).toBeUndefined();
+    expect(source.getLive('permission:unknown-tool', live.generation)).toBeUndefined();
   });
 
-  it('offers Claude actions for a request the shared parser produces', () => {
+  it('does not offer actions for an ownerless request the shared parser produces', () => {
     TestBed.inject(ChatAttentionSourceService);
     const request = parsePermissionRequest({
       id: '550e8400-e29b-41d4-a716-446655440000',
@@ -138,13 +136,7 @@ describe('ChatAttentionSourceService', () => {
     expect(request).not.toHaveProperty('allowedDecisions');
     permissions.set([request]);
     TestBed.tick();
-    expect(upsert.mock.lastCall?.[0].actions.map(action => [action.id, action.label])).toEqual([
-      ['allow', 'Allow'],
-      ['always_allow', 'Always allow'],
-      ['deny', 'Deny'],
-      ['deny_with_message', 'Deny with message'],
-      ['open', 'Show in canvas'],
-    ]);
+    expect(upsert).not.toHaveBeenCalled();
   });
 
   it('keeps session unavailable ahead of unknown tool for a tabless lane', () => {
@@ -248,14 +240,14 @@ describe('ChatAttentionSourceService', () => {
     expect(upsert.mock.lastCall?.[0]).toMatchObject({ workspacePath: '/ws/background', workspaceName: 'background' });
   });
 
-  it('keeps an unmatched request workspace unknown even when another workspace is active', () => {
+  it('does not publish an unmatched request in another active workspace', () => {
     ownerAvailable = false;
     activeWorkspacePath.set('/ws/active');
     TestBed.inject(ChatAttentionSourceService);
     permissions.set([{ id: 'active', toolName: 'Read', toolInput: {}, timestamp: 1,
       timeoutAt: 0, description: '', sessionId: 'missing' }]);
     TestBed.tick();
-    expect(upsert.mock.lastCall?.[0]).toMatchObject({ workspacePath: '', workspaceName: 'Unknown workspace' });
+    expect(upsert).not.toHaveBeenCalled();
   });
 
   it('uses the renderer workspace root when the partition has no active workspace', () => {
@@ -384,16 +376,13 @@ describe('ChatAttentionSourceService', () => {
     });
   });
 
-  it('keeps an unmatched request countable with Open disabled', () => {
+  it('keeps a request without a verified owner out of actionable attention', () => {
     activeWorkspacePath.set(null);
     TestBed.inject(ChatAttentionSourceService);
     permissions.set([{ id: 'orphan', toolName: '', toolInput: {}, timestamp: 1,
       timeoutAt: 0, description: '', sessionId: 'missing' }]);
     TestBed.tick();
-    const item = upsert.mock.lastCall?.[0];
-    expect(item?.workspacePath).toBe('');
-    expect(item?.actions.find(action => action.id === 'open')?.disabledReason).toBe('Session unavailable');
-    expect(item?.actions.find(action => action.id === 'open')?.label).toBe('Show in canvas');
+    expect(upsert).not.toHaveBeenCalled();
   });
 
   it('enables Open for a tab-less request owned by a surface', () => {
@@ -407,22 +396,19 @@ describe('ChatAttentionSourceService', () => {
     });
   });
 
-  it('keeps an ownerless request in the real model without a reactive write loop', () => {
+  it('keeps an ownerless request out of the actionable model', () => {
     TestBed.overrideProvider(NotificationService, { useClass: NotificationService });
     const model = TestBed.inject(NotificationService);
     TestBed.inject(ChatAttentionSourceService);
     permissions.set([{ id: 'ownerless', toolName: 'Write', toolInput: {}, timestamp: 1,
       timeoutAt: 0, description: '', tabId: 'missing-tab', sessionId: 'missing-session' }]);
     TestBed.tick();
-    expect(model.badgeCount()).toBe(1);
-    expect(model.needsYou()[0].actions.find(action => action.id === 'open')?.disabledReason).toBeTruthy();
-    const original = model.needsYou()[0];
+    expect(model.badgeCount()).toBe(0);
     const upsertSpy = jest.spyOn(model, 'upsert');
     tabs.set([...tabs()]);
     TestBed.tick();
     expect(upsertSpy).not.toHaveBeenCalled();
-    expect(model.needsYou()[0]).toBe(original);
-    expect(model.badgeCount()).toBe(1);
+    expect(model.badgeCount()).toBe(0);
     permissions.set([]);
     TestBed.tick();
     expect(model.badgeCount()).toBe(0);
@@ -444,19 +430,21 @@ describe('ChatAttentionSourceService', () => {
   });
 
   it('leaves a request that arrives in the background to the native notification, not a snackbar', () => {
+    tabs.set([...tabs(), { id: 'tab-2', claudeSessionId: 'session-2', title: 'Background work',
+      titleOrigin: 'user', providerId: 'claude-cli' }]);
     const focused = jest.spyOn(document, 'hasFocus').mockReturnValue(false);
     TestBed.overrideProvider(NotificationService, { useClass: NotificationService });
     const model = TestBed.inject(NotificationService);
     TestBed.inject(ChatAttentionSourceService);
     permissions.set([{ id: 'away', toolName: 'Read', toolInput: {}, timestamp: 1,
-      timeoutAt: 0, description: '', tabId: 'missing-tab', sessionId: 'missing-session' }]);
+      timeoutAt: 0, description: '', tabId: 'tab-2', sessionId: 'session-2' }]);
     TestBed.tick();
     focused.mockReturnValue(true);
     window.dispatchEvent(new Event('focus'));
     expect(model.badgeCount()).toBe(1);
     expect(model.snackbars()).toHaveLength(0);
     permissions.set([...permissions(), { id: 'present', toolName: 'Read', toolInput: {}, timestamp: 2,
-      timeoutAt: 0, description: '', tabId: 'missing-tab', sessionId: 'missing-session' }]);
+      timeoutAt: 0, description: '', tabId: 'tab-2', sessionId: 'session-2' }]);
     TestBed.tick();
     expect(model.snackbars().map(item => item.key)).toEqual(['permission:present']);
     focused.mockRestore();

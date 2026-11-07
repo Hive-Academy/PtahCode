@@ -474,6 +474,7 @@ describe('PermissionHandlerService', () => {
 
   describe('permission lookup', () => {
     it('getPermissionByToolId returns the matching request', () => {
+      tabSignals.tabs.set([{ id: 'tab-1', claudeSessionId: 'sess-1' }]);
       const req = makePermissionRequest({ toolUseId: 'tool-XYZ' });
       service.handlePermissionRequest(req);
       expect(service.getPermissionByToolId('tool-XYZ')).toBe(req);
@@ -490,6 +491,7 @@ describe('PermissionHandlerService', () => {
     });
 
     it('getPermissionForTool returns the matching request', () => {
+      tabSignals.tabs.set([{ id: 'tab-1', claudeSessionId: 'sess-1' }]);
       const req = makePermissionRequest({ toolUseId: 'tool-abc' });
       service.handlePermissionRequest(req);
       expect(service.getPermissionForTool('tool-abc')).toBe(req);
@@ -504,6 +506,7 @@ describe('PermissionHandlerService', () => {
     it('flags permissions with no toolUseId as unmatched', () => {
       const req = makePermissionRequest({ toolUseId: undefined as never });
       service.handlePermissionRequest(req);
+      service.attachPromptTargets(req.id, ['tab-1']);
       expect(service.unmatchedPermissions()).toEqual([req]);
     });
 
@@ -521,6 +524,7 @@ describe('PermissionHandlerService', () => {
     it('flags a permission as unmatched when its toolUseId is nowhere in the tree', () => {
       const req = makePermissionRequest({ toolUseId: 'tool-orphan' });
       service.handlePermissionRequest(req);
+      service.attachPromptTargets(req.id, ['tab-1']);
       tabSignals.activeTabStreamingState.set(emptyStreamingState());
       expect(service.unmatchedPermissions()).toEqual([req]);
     });
@@ -547,7 +551,21 @@ describe('PermissionHandlerService', () => {
 
       tabSignals.tabs.set([{ id: 'tab-1' }]);
       expect(service.permissionRequests()).toContainEqual(req);
-      expect(service.unmatchedPermissions()).toContainEqual(req);
+      expect(service.unmatchedPermissions()).toEqual([]);
+    });
+
+    it('keeps an ownerless prompt off an unrelated active tab', () => {
+      const req = makePermissionRequest({ sessionId: undefined, tabId: undefined, toolUseId: undefined });
+      service.handlePermissionRequest(req);
+      expect(service.unmatchedPermissions()).toEqual([]);
+      expect(service.getPermissionByToolId('tool-1')).toBeUndefined();
+    });
+
+    it('does not show a stale tab binding after its session changes', () => {
+      tabSignals.tabs.set([{ id: 'tab-1', claudeSessionId: 'session-current' }]);
+      const req = makePermissionRequest({ tabId: 'tab-1', sessionId: 'session-old' });
+      service.handlePermissionRequest(req);
+      expect(service.getPermissionByToolId('tool-1')).toBeUndefined();
     });
 
     it('keeps genuine surface-only prompts out of the fallback', () => {
@@ -584,6 +602,7 @@ describe('PermissionHandlerService', () => {
     });
 
     it('getQuestionForTool returns the matching request', () => {
+      tabSignals.tabs.set([{ id: 'tab-1', claudeSessionId: 'sess-1' }]);
       const q = makeQuestionRequest({ toolUseId: 'q-tool' });
       service.handleQuestionRequest(q);
       expect(service.getQuestionForTool('q-tool')).toBe(q);
