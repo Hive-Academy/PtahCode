@@ -13,7 +13,7 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
-import { ArtifactStore, DisplayDockState, DisplayWindowSync } from '@ptah-extension/chat';
+import { ArtifactStore, DisplayDockState, DisplayWindowSync, PanelResizeService, ResizeHandleComponent } from '@ptah-extension/chat';
 import { VSCodeService } from '@ptah-extension/core';
 import {
   sessionContextCue,
@@ -83,18 +83,21 @@ const CAPTION_RESERVE_PX = 72;
     CommandLivePanelComponent,
     CommandRailDisplayComponent,
     SessionStatsSummaryComponent,
+    ResizeHandleComponent,
   ],
   providers: [
     CommandCenterStore,
     CommandCenterSessionCoordinator,
     CommandCenterProjectionSource,
     CommandCenterPageController,
+    PanelResizeService,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './command-center-page.component.html',
   styleUrl: './command-center-page.component.css',
 })
 export class CommandCenterPageComponent {
+  public readonly panelResize = inject(PanelResizeService);
   private readonly displayFocusVersion = signal(0);
 
   activateDisplaySource(): void {
