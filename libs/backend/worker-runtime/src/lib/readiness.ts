@@ -18,6 +18,12 @@ export interface ReadinessPorts {
   /** Host adapts resolveEffectiveAuthRoute. */
   authRoute: () => Promise<{ ready: boolean; detail: string }>;
   driverLock: () => Promise<{ available: boolean; stranded: boolean }>;
+  /**
+   * Host reads the main SQLite connection. The session account gate reads
+   * it, so a closed database refuses every session start. Omitted by hosts
+   * that have no main database.
+   */
+  mainDatabase?: () => { open: boolean; detail: string };
   desktopVersionWarning?: () => string | undefined;
   exists?: (path: string) => Promise<boolean>;
 }
@@ -143,6 +149,23 @@ export async function checkWorkerReadiness(
       ? undefined
       : 'Repair the driver lock before starting the worker.',
   );
+  if (ports.mainDatabase) {
+    let database: { open: boolean; detail: string };
+    try {
+      database = ports.mainDatabase();
+    } catch {
+      database = { open: false, detail: 'The main database check failed.' };
+    }
+    add(
+      'database',
+      'Main database',
+      database.open ? 'pass' : 'fail',
+      database.detail,
+      database.open
+        ? undefined
+        : 'Read the ptah-worker log for the database error, free disk space or fix the permissions of ~/.ptah/state, then restart ptah-worker.',
+    );
+  }
   const warning = ports.desktopVersionWarning?.();
   if (warning) add('desktop-version', 'Desktop app version', 'warn', warning);
   return { ready: checks.every((check) => check.status !== 'fail'), checks };

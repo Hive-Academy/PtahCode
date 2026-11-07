@@ -3,7 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WebSocket } from 'ws';
 import type { CliBootstrapResult } from '@ptah-extension/cli-engine';
-import { bundleVersion, serveCommand } from './serve';
+import { bundleVersion, mainDatabaseState, serveCommand } from './serve';
+
+const SQLITE_CONNECTION = Symbol.for('PtahSqliteConnection');
 
 // Warm the engine module graph once, so the 60 s case timeouts measure the
 // case and not the cold import (88.8 s on a CI shard). Same order as serve.ts:
@@ -32,6 +34,22 @@ it('reads the package version adjacent to the worker bundle', async () => {
     process.argv[1] = previous;
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+it('reports the main database state without a path', () => {
+  const container = (unavailable: { reason: string } | null, registered = true) => ({
+    isRegistered: () => registered,
+    resolve: <T,>() => ({ unavailable }) as T,
+  });
+  expect(mainDatabaseState(container(null))).toEqual({
+    open: true,
+    detail: 'The main database is open.',
+  });
+  expect(mainDatabaseState(container({ reason: 'migration_failed' }))).toEqual({
+    open: false,
+    detail: 'The main database is unavailable (migration_failed).',
+  });
+  expect(mainDatabaseState(container(null, false)).open).toBe(false);
 });
 
 const checks = {
@@ -101,10 +119,24 @@ it.each(['SIGTERM', 'SIGINT'] as const)(
       held: jest.fn(() => []),
       addFolder: jest.fn(),
     };
+    // The main database: opened before the listener, closed after it stops.
+    const order: string[] = [];
+    const connection = {
+      openAndMigrate: jest.fn(async () => {
+        order.push('open');
+      }),
+      close: jest.fn(() => {
+        order.push('close');
+      }),
+      vecLoadDiagnostic: { ok: true },
+      unavailable: null,
+    };
     const container = {
       clearInstances: jest.fn(),
-      resolve: jest.fn(() => sdk),
-      isRegistered: jest.fn(() => false),
+      resolve: jest.fn((token: unknown) =>
+        token === SQLITE_CONNECTION ? connection : sdk,
+      ),
+      isRegistered: jest.fn((token: unknown) => token === SQLITE_CONNECTION),
     };
     const bootstrap = jest.fn(
       (options: { pushAdapter?: unknown }) =>
@@ -158,11 +190,9 @@ it.each(['SIGTERM', 'SIGINT'] as const)(
           hostProfile: expect.objectContaining({ host: 'worker' }),
         }),
       );
-      // The worker opens the main database: the session account gate reads
-      // it, so a closed connection refuses every fresh remote session.
-      expect(container.isRegistered).toHaveBeenCalledWith(
-        Symbol.for('PtahSqliteConnection'),
-      );
+      // The worker opens the main database before it listens: the session
+      // account gate reads it, so a closed one refuses every fresh session.
+      expect(order).toEqual(['open']);
       const response = new Promise<void>((resolve) =>
         socket?.once('message', () => resolve()),
       );
@@ -181,6 +211,7 @@ it.each(['SIGTERM', 'SIGINT'] as const)(
       await response;
       process.emit(signal);
       await serving;
+      expect(order).toEqual(['open', 'close']);
     } finally {
       shutdown.abort();
       socket?.terminate();

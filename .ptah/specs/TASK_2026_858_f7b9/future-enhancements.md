@@ -84,3 +84,10 @@ the mobile PWA, P3 = later.
 | Escape closes the Add machine pane even while the theme popover is open; a global Escape handler should yield to an open popover. | visual-review.md finding 6 |
 | A wrong pairing code takes about 7–10 s to fail; consider an earlier client-side or worker-side rejection signal. | visual-review.md finding 7 |
 | The parent maps several worker errors to "The machine is unreachable." (`machines-rpc.handlers.ts:36-62`); the tabId defect was found only from the worker journal. Log the worker error code on the parent and consider a more specific user message for worker-side validation failures. | visual-review.md finding 1 |
+
+## Worker main database fix (added 2026-11-07)
+
+| Item | Source |
+| --- | --- |
+| The worker's in-process RPC (`in-process-rpc.ts` `chatSpec.nested`) drops `accountRefusal`, so an account refusal reaches the parent as `INTERNAL` and then as "The machine is unreachable." Carry the refusal code to a dedicated worker error code and map `INTERNAL` to a "the worker could not start the session" message on the parent. | session-start root cause, visual-review.md second pass |
+| The worker opens the default profile database (`~/.ptah/state/ptah.sqlite` when `NODE_ENV` is unset). A desktop app on the same machine and profile shares that file; WAL and a 5 s busy timeout allow normal concurrent use, but concurrent migrations can wait or return busy. Document this for operators, and test desktop + worker on one machine if that becomes a supported deployment. | worker-db-fix-review.md finding 3 |

@@ -35,6 +35,32 @@ describe('checkWorkerReadiness', () => {
       'applies to Claude and native Codex sessions; this worker drives Claude sessions only',
     );
   });
+  it('adds a main database check that fails readiness when it is closed', async () => {
+    const open = await checkWorkerReadiness({
+      ...ports(),
+      mainDatabase: () => ({ open: true, detail: 'The main database is open.' }),
+    });
+    expect(open.ready).toBe(true);
+    expect(open.checks[7]).toMatchObject({ id: 'database', status: 'pass' });
+    const closed = await checkWorkerReadiness({
+      ...ports(),
+      mainDatabase: () => ({
+        open: false,
+        detail: 'The main database is unavailable (migration_failed).',
+      }),
+    });
+    expect(closed.ready).toBe(false);
+    expect(closed.checks[7]).toMatchObject({ id: 'database', status: 'fail' });
+    expect(closed.checks[7].fix).toMatch(/restart ptah-worker/);
+    const thrown = await checkWorkerReadiness({
+      ...ports(),
+      mainDatabase: () => {
+        throw new Error('/secret/path');
+      },
+    });
+    expect(thrown.ready).toBe(false);
+    expect(JSON.stringify(thrown)).not.toContain('/secret/path');
+  });
   it('refuses a missing SQLite load and directs an update of the desktop package', async () => {
     const input = {
       ...ports(),
