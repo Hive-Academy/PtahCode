@@ -7,7 +7,7 @@ description: Run installed CLIs and Ptah CLI providers as parallel lanes.
 
 CLI agents are external command-line assistants that PtahCode runs as lanes. The main agent gives them self-contained tasks that run in parallel.
 
-![CLI agents panel](/screenshots/agents-cli-panel.png)
+![CLI agents panel](/screenshots/agents-cli-panel.webp)
 
 ## Supported CLIs
 

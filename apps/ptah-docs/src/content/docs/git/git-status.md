@@ -7,7 +7,7 @@ description: Live branch, upstream, stash, and changed-file status in the Git do
 
 PtahCode watches your `.git/` directory for changes using native filesystem events. When git updates a ref, `HEAD`, or the index, the Git dock shows the change.
 
-![Git status in the Git dock header](/screenshots/git-dock-header.png)
+![Git status in the Git dock header](/screenshots/git-dock-header.webp)
 
 ## What's displayed
 

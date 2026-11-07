@@ -7,7 +7,7 @@ description: Review, stage, and reject file changes in the review view.
 
 The **Changes** tab of the review view shows the diff of each changed file.
 
-![Side-by-side diff view](/screenshots/diff-side-by-side.png)
+![Side-by-side diff view](/screenshots/diff-side-by-side.webp)
 
 ## Diff layout
 

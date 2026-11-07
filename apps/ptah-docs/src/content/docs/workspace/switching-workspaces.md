@@ -11,7 +11,7 @@ You can keep several workspaces open. One workspace is active at a time.
 
 Click a workspace in the workspace sidebar to make it active.
 
-![Workspace quick switcher](/screenshots/workspace-switcher.png)
+![Workspace quick switcher](/screenshots/workspace-switcher.webp)
 
 When you switch:
 

@@ -9,7 +9,7 @@ sidebar:
 
 The chat view is where you talk to the agent. It streams responses, shows each tool call and sub-agent inline, and keeps the session cost and token counts in view.
 
-![Chat overview](/screenshots/chat-overview.png)
+![Chat overview](/screenshots/chat-overview.webp)
 
 ## What the chat gives you
 

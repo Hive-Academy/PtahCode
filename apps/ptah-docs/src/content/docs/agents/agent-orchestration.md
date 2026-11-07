@@ -11,7 +11,7 @@ The `orchestration` skill in `ptah-core` coordinates development work: classify 
   <source src="/assets/videos/cli-agent-orchestration.mp4" type="video/mp4" />
 </video>
 
-![Orchestration hierarchy](/screenshots/agents-orchestration.png)
+![Orchestration hierarchy](/screenshots/agents-orchestration.webp)
 
 ## Who does what
 
