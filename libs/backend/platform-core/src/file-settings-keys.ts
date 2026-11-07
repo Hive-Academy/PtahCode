@@ -140,8 +140,8 @@ export const FILE_BASED_SETTINGS_KEYS = new Set<string>([
   // Lane rotation inside the closeness band. Default true keeps today's
   // cyclic pick. A flip joins ROUTING_KEYS so a cached routing notice refreshes.
   'agentOrchestration.laneRotation',
-  // Compaction budgets (TASK_2026_597 Wave D). `compaction.threshold` is NOT
-  // here: it is still VS Code-contributed and moves with its migration.
+  // Compaction threshold and budgets are file-based for Electron.
+  'compaction.threshold',
   'compaction.toolOutputBudgetTokens',
   'compaction.subagentHandoffTokens',
   'compaction.rotationSuggestTokens',

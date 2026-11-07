@@ -1,10 +1,14 @@
 :host { display: flex; flex-direction: column; min-height: 0; container-type: inline-size; }
-.layout { display: grid; flex: 1 1 auto; min-height: 0; grid-template-columns: minmax(0, 1fr) 296px; grid-template-rows: minmax(600px, 1fr) auto; grid-template-areas: 'stage rail' 'dock rail'; column-gap: 12px; row-gap: 10px; padding: 16px; min-width: 0; }
+.layout { display: grid; flex: 1 1 auto; min-height: 0; grid-template-columns: minmax(0, 1fr) min(var(--rail-width, 360px), 75%); grid-template-rows: minmax(600px, 1fr) auto; grid-template-areas: 'stage rail' 'dock rail'; column-gap: 12px; row-gap: 10px; padding: 16px; min-width: 0; transition: grid-template-columns 200ms ease; }
+.layout.rail-dragging { transition: none; }
+@container (min-width: 1280px) { .layout { grid-template-columns: minmax(0, 1fr) min(var(--rail-width, 440px), 75%); } }
+@container (min-width: 1536px) { .layout { grid-template-columns: minmax(0, 1fr) min(var(--rail-width, 540px), 75%); } }
 .stage-column { grid-area: stage; min-width: 0; min-height: 0; }
 .stage { position: relative; display: block; width: 100%; height: 100%; min-height: 600px; border-radius: 16px; isolation: isolate; }
 .dock { grid-area: dock; align-self: start; }
 .rail { grid-area: rail; position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
-/* The rail is never narrower than RAIL_MIN_CONTENT_WIDTH (240px): its grid column is 296px, then 240px at <=1000px; below 720px it stacks at full width, and the Electron window's 800px minWidth keeps that above 240px. So no "Widen the window" fallback is rendered. */
+.rail-resize-handle { position: absolute; z-index: 2; inset: 0 auto 0 0; display: flex; align-items: stretch; }
+/* Below 720px the rail stacks at full width; wider layouts use the chat panel defaults. */
 /* A tall pending-input card scrolls inside the head so the rail body keeps room for its tabs. */
 .rail-head { flex: 0 1 auto; min-height: 0; max-height: 60%; overflow-y: auto; overscroll-behavior: contain; }
 .rail-body { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; padding: 0 8px 8px; }
@@ -17,7 +21,7 @@
 .work-list-region > ptah-command-work-list { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
 .work-list-region:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
 @keyframes rail-panel-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) { .rail-panel { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .rail-panel { animation: none; } .layout { transition: none; } }
 .stats-band { position: absolute; z-index: 10; inset: 0 0 auto; box-sizing: border-box; height: 144px; display: flex; flex-direction: column; justify-content: center; gap: 14px; padding: 16px 24px; background: var(--color-base-200); border-bottom: 1px solid var(--color-base-300); }
 /* Glass on: the bar attribute supplies the fill, so the flat colour steps aside. */
 :host-context([data-glass='on']) .stats-band { background: transparent; }
@@ -25,6 +29,6 @@
 .stage-stats { min-width: 0; }
 .pending-cue { display: none; }
 @container (min-width: 1100px) { .stats-band { height: 72px; flex-direction: row; align-items: center; justify-content: space-between; } .stage-caption { flex: 0 0 auto; } .stage-stats { flex: 1 1 auto; max-width: 620px; } }
-@container (max-width: 1000px) { .layout { grid-template-columns: minmax(0, 1fr) 240px; grid-template-rows: minmax(570px, 1fr) auto; } .stage { min-height: 570px; } }
-@container (max-width: 720px) { .layout { display: flex; flex: none; flex-direction: column; } .stage-column, .dock, .rail { flex: none; width: 100%; } .stage { min-height: 500px; } .rail { overflow: visible; } .rail-body, .rail-panel { flex: none; } .rail-panel { max-height: 32rem; } .rail-panel.live-panel { height: 28rem; } .work-list-region { display: block; flex: none; max-height: 24rem; } .work-list-region > ptah-command-work-list { display: block; min-height: auto; } .pending-cue { display: block; } }
+@container (max-width: 1000px) { .layout { grid-template-columns: minmax(0, 1fr) min(var(--rail-width, 300px), 75%); grid-template-rows: minmax(570px, 1fr) auto; } .stage { min-height: 570px; } }
+@container (max-width: 720px) { .layout { display: flex; flex: none; flex-direction: column; } .rail-resize-handle { display: none; } .stage-column, .dock, .rail { flex: none; width: 100%; } .stage { min-height: 500px; } .rail { overflow: visible; } .rail-body, .rail-panel { flex: none; } .rail-panel { max-height: 32rem; } .rail-panel.live-panel { height: 28rem; } .work-list-region { display: block; flex: none; max-height: 24rem; } .work-list-region > ptah-command-work-list { display: block; min-height: auto; } .pending-cue { display: block; } }
 @container (max-width: 480px) { .layout { grid-template-rows: minmax(500px, 1fr) auto; } .stage { min-height: 500px; } .stats-band { height: 154px; } }

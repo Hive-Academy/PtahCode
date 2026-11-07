@@ -112,7 +112,7 @@ Apps is a title-bar tab. The agent updates a surface through `ptah_surface_updat
 The bell splits “Needs you” from “Recent notices.” A row names the session, provider, and workspace. Sound can be muted.
 
 - **Transcript cards.** A `ptah-ui` block can render a live card bound to agents and limits. Malformed atoms fail closed. The same renderer family draws Apps surfaces.
-- **Turn trailers.** A turn that changes files can end with added, modified, deleted, renamed, or conflicted paths, plus a chip for files, tests, tokens, cost, and duration. A turn that changes nothing has no change-set card.
+- **Turn trailers.** A turn that changes files can end with added, modified, deleted, renamed, or conflicted paths, plus a chip for files, tests, tokens, cost, and duration. A turn that changes nothing has no files card in the turn summary.
 - **Git review dock.** Tabs for Changes, Commit, Task, and History. The spot editor is CodeMirror. A foreign worktree’s Changes tab is read-only. The skill-enhancement preview is a separate Monaco diff.
 - **Questions.** Stepped question cards in the transcript. The bell can answer one.
 - **[Session details](https://docs.ptah.live/canvas/session-inspector/).** Expand the inspector beside the focused session to see its requests, stats, agents, plan limits, task, git changes, and linked sessions.

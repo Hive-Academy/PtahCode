@@ -525,6 +525,7 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
       autoDreamEnabled: false,
       crossSessionInbound: 'accept',
       subagentPromptCacheTtl: '1h',
+      autoCompactWindow: 200_000,
     });
   });
 
@@ -835,15 +836,13 @@ describe('SdkQueryOptionsBuilder.build — auto-compact control', () => {
     expect(PTAH_DISABLE_SDK_AUTO_MEMORY).toEqual(snapshot);
   });
 
-  it('first-party with defaults sends neither auto-compact key — the shared constant serialized, plus the inbound value', async () => {
+  it('first-party with defaults sends the 200000 auto-compact window', async () => {
     const snapshot = { ...PTAH_DISABLE_SDK_AUTO_MEMORY };
     const opts = await buildOptions(
       'https://api.anthropic.com',
       'claude-sonnet-4-5',
     );
-    // No auto-compact key at all: absence is the only correct "no opinion"
-    // value, and serializing the tier must not invent one.
-    expect(parsedSettings(opts)).toEqual({ ...ALWAYS });
+    expect(parsedSettings(opts)).toEqual({ ...ALWAYS, autoCompactWindow: 200_000 });
     expect(PTAH_DISABLE_SDK_AUTO_MEMORY).toEqual(snapshot);
   });
 });

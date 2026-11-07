@@ -2,6 +2,7 @@ import 'reflect-metadata';
 
 import { app, BrowserWindow, crashReporter, powerMonitor, session } from 'electron';
 import * as path from 'path';
+import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import { readFile } from 'node:fs/promises';
 import { readMotionPreference } from './config/motion-preference';
@@ -23,6 +24,8 @@ import {
 import {
   PLATFORM_TOKENS,
   StateStorageRecoveryRequiredError,
+  migrateLegacyCompactionThreshold,
+  resolvePtahSettingsDir,
   type IArtifactStore,
 } from '@ptah-extension/platform-core';
 import type { ElectronWorkspaceProvider } from '@ptah-extension/platform-electron';
@@ -30,6 +33,7 @@ import { flushSessionMetadataStores } from '@ptah-extension/agent-sdk';
 import type { DependencyContainer } from 'tsyringe';
 import { bootstrapElectron } from './activation/bootstrap';
 import { registerStartupConfigIpc } from './activation/startup-config-ipc';
+import { prepareDevelopmentSettings } from './activation/dev-settings';
 import { registerRecoveryModeIpc } from './activation/recovery-mode-ipc';
 import { BootCoordinator } from './activation/boot-coordinator';
 import { createBootReadinessBroadcaster } from './activation/boot-readiness-broadcaster';
@@ -65,12 +69,31 @@ const isDev = process.env['NODE_ENV'] === 'development';
 app.setName(isDev ? 'Ptah Dev' : 'Ptah');
 if (isDev) {
   app.setPath('userData', path.join(app.getPath('appData'), 'Ptah Dev'));
+  process.env['PTAH_SETTINGS_DIR'] = path.join(homedir(), '.ptah-dev');
 }
 const motionPreference = readMotionPreference(app.getPath('userData'));
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
+  if (isDev) {
+    prepareDevelopmentSettings(path.join(homedir(), '.ptah'), resolvePtahSettingsDir(), (error) => {
+      console.error('[Ptah Electron] Dev settings seed failed; using default dev settings', error);
+    });
+  }
+  const activeSettingsDir = resolvePtahSettingsDir();
+  const legacyConfigPaths = isDev
+    ? [path.join(app.getPath('userData'), 'config.json'),
+        path.join(app.getPath('appData'), 'Ptah', 'config.json')]
+    : [path.join(app.getPath('userData'), 'config.json')];
+  for (const configPath of legacyConfigPaths) {
+    try {
+      migrateLegacyCompactionThreshold(configPath, activeSettingsDir);
+    } catch (error: unknown) {
+      console.error('[Ptah Electron] Legacy compaction threshold migration failed',
+        error instanceof Error ? error : new Error(String(error)));
+    }
+  }
   /**
    * ONE reference for every long-lived boot handle (TASK_2026_331 B1.T6).
    *
@@ -409,7 +432,7 @@ if (!gotLock) {
       trayRef.current = PtahTrayService.create({
         workspace: workspaceProvider,
         // The file-settings watcher fires for in-process writes AND for
-        // external edits of ~/.ptah/settings.json (its cross-process fs.watch
+        // external edits of the resolved settings.json (its cross-process fs.watch
         // diff), so the tray stays current on every OS.
         watchSetting: (key, onChange) =>
           workspaceProvider.fileSettings.watch(key, onChange),

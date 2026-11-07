@@ -82,7 +82,7 @@
           Question waiting · Show question
         </button>
       }
-      <div class="layout deck">
+      <div #deck class="layout deck" [style.--rail-width]="panelResize.customWidth() === null ? null : panelResize.customWidth() + 'px'" [class.rail-dragging]="panelResize.dragging()">
         <div class="stage-column relative flex min-h-0 min-w-0 flex-col">
           @if (!page.canvasUnavailable()) {
             <main
@@ -104,6 +104,7 @@
               />
               <ptah-command-overlay
                 #overlay
+                [reservedTop]="statsBandHeight()"
                 [now]="page.now()"
                 [projection]="page.projection()"
                 [visibleLabelIds]="visibleLabelIds()"
@@ -183,6 +184,7 @@
           [attr.data-glass-surface]="isElectron ? null : 'chrome'"
           aria-label="Command Center rail"
         >
+          <ptah-resize-handle class="rail-resize-handle" [container]="deck" />
           <div class="rail-head flex flex-col gap-2 p-2">
             @if (page.recordWriteFailure()) {
               <p role="status" class="rounded-lg border border-warning p-2 text-xs">

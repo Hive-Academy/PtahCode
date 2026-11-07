@@ -10,8 +10,7 @@
  * `@ptah-extension/chat-ui` barrel is statically imported by eager code, so a
  * deferred import from there would land them in the eager closure; from this
  * file, which nothing eager imports statically, esbuild emits them as a lazy
- * chunk (TASK_2026_610, same pattern as `@ptah-extension/chat-ui/change-set-card`
- * from TASK_2026_576 Batch 31).
+ * chunk (TASK_2026_610).
  *
  * Nothing here imports the surface renderer (D14). Do not re-export these from
  * `index.ts`.
