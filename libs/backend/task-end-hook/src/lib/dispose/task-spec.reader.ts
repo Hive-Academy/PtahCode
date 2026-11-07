@@ -6,7 +6,12 @@
  */
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import type { TaskStatus } from '@ptah-extension/shared';
+import {
+  CARRIER_FILE,
+  CONTEXT_FILE,
+  SPEC_ROOT_SEGMENTS,
+  type TaskStatus,
+} from '@ptah-extension/shared';
 import { parseTaskFile } from '@ptah-extension/task-specs';
 import type { DisposalCarrier } from './disposal-input';
 import { isMissing } from './fs-probe';
@@ -44,7 +49,7 @@ export async function readCarrier(
   taskId: string,
 ): Promise<DisposalCarrier> {
   const status = await readCarrierFile(
-    path.join(seenRoot, '.ptah', 'specs', taskId, 'task.md'),
+    path.join(seenRoot, ...SPEC_ROOT_SEGMENTS, taskId, CARRIER_FILE),
     taskId,
   );
   return status === 'absent' || status === 'unparseable'
@@ -67,7 +72,7 @@ export async function readContextWorktreeLine(
   taskId: string,
 ): Promise<ContextLine> {
   const raw = await readSmallFile(
-    path.join(root, '.ptah', 'specs', taskId, 'context.md'),
+    path.join(root, ...SPEC_ROOT_SEGMENTS, taskId, CONTEXT_FILE),
   );
   if (raw === 'absent') return { kind: 'ok', path: null };
   if (raw === 'unreadable') return { kind: 'error' };

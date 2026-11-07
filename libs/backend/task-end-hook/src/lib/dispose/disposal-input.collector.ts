@@ -20,6 +20,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   AGENT_WORKTREE_DIR,
+  CARRIER_FILE,
+  SPEC_ROOT_SEGMENTS,
   parseWorktreeList,
   type GitWorktreeInfo,
   type TaskEndDisposeRequestedMode,
@@ -453,13 +455,13 @@ export class DisposalInputCollector {
     const claims = new Map<string, Set<string>>();
     try {
       for (const root of roots) {
-        const specsDir = path.join(root, '.ptah', 'specs');
+        const specsDir = path.join(root, ...SPEC_ROOT_SEGMENTS);
         const folders = await readdirOrEmpty(specsDir);
         if (folders.length > MAX_SPEC_FOLDERS) return { kind: 'error' };
         for (const folder of folders) {
           if (folder === run.taskId || !TASK_ID_PATTERN.test(folder)) continue;
           const carrier = await readCarrierFile(
-            path.join(specsDir, folder, 'task.md'),
+            path.join(specsDir, folder, CARRIER_FILE),
             folder,
           );
           if (carrier === 'absent') continue;
