@@ -1,6 +1,15 @@
 import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
-import { AuthStateService, ProvidersSettingsStateService, defaultMainConnectionTarget } from '@ptah-extension/core';
+import {
+  AuthStateService,
+  ClaudeRpcService,
+  CodexSignInService,
+  ProvidersConnectionSetupService,
+  ProvidersSettingsStateService,
+  RpcResult,
+  WorkspaceScopeService,
+  defaultMainConnectionTarget,
+} from '@ptah-extension/core';
 import { ProviderReadinessStore } from './provider-readiness.store';
 import { ConnectionChoiceStore } from './connection-choice.store';
 
@@ -72,8 +81,6 @@ describe('ConnectionChoiceStore', () => {
 /** The popover calls this same public activation service; keep its real payload builder in the test. */
 describe('stage 1 and main-agent popover RPC payload parity (AC 3.11 renderer)', () => {
   it.each(['claude-cli', 'openai-codex'] as const)('sends the same auth:saveSettings params for %s', async (provider) => {
-    const { ClaudeRpcService, RpcResult, WorkspaceScopeService, ProvidersConnectionSetupService, CodexSignInService } =
-      await import('@ptah-extension/core');
     const recorder = jest.fn<Promise<InstanceType<typeof RpcResult>>, [string, unknown, unknown?]>(
       async (method) => {
         if (method !== 'auth:saveSettings') throw new Error(`Unexpected RPC: ${method}`);

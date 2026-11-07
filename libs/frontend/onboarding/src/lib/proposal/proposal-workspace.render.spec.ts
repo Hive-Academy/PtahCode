@@ -1,7 +1,7 @@
 import { Component, ElementRef, NO_ERRORS_SCHEMA, inject, input, output, signal, viewChild } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
-import { ComposerAttachmentsService, FilePickerService } from '@ptah-extension/chat';
+import { FilePickerService } from '@ptah-extension/chat';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import { ClaudeRpcService } from '@ptah-extension/core';
 import { BehaviorSubject } from 'rxjs';
