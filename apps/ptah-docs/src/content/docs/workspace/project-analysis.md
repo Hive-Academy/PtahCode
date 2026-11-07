@@ -7,10 +7,6 @@ description: The multi-phase project analysis that the setup wizard runs and sto
 
 The [setup wizard](/setup/setup-wizard/) runs a multi-phase analysis of your project. The result is a set of Markdown files that agents can read without a new scan.
 
-<video controls preload="metadata" playsinline style="width:100%;border-radius:0.5rem;border:1px solid var(--sl-color-gray-5);margin:1rem 0;">
-  <source src="/assets/videos/setup-wizard-analysis.mp4" type="video/mp4" />
-</video>
-
 ## Phases
 
 | Phase | Output file                      |
