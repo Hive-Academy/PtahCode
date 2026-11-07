@@ -218,7 +218,7 @@ function makeHarness(
     ),
   };
   const registry = {
-    get: jest.fn(() =>
+    get: jest.fn((_toolCallId: string) =>
       record === null
         ? null
         : ({
@@ -231,6 +231,7 @@ function makeHarness(
             ...record,
           } as SubagentRecord),
     ),
+    getToolCallIdByAgentId: jest.fn((_agentId: string) => undefined as string | undefined),
     update: jest.fn(),
   };
   const budgetStops = new SubagentBudgetStopCallbackRegistry(
@@ -505,6 +506,81 @@ describe('SubagentBudgetMonitor', () => {
       timestamp: expect.any(Number),
     });
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
+  });
+
+  it('joins a hook UUID to the streamed Task by agent id before publishing the stop', async () => {
+    const h = makeHarness(null, { workspace: RECORD_WORKSPACE });
+    const hookRecord: SubagentRecord = {
+      toolCallId: 'hook-uuid', agentType: 'Explore', agentId: 'task-agent',
+      status: 'running', startedAt: 0, parentSessionId: SESSION,
+    };
+    h.registry.get.mockImplementation((id: string) => id === 'hook-uuid' ? hookRecord : null);
+    h.registry.getToolCallIdByAgentId.mockReturnValue('hook-uuid');
+    const observed = jest.fn();
+    h.budgetStops.register(observed);
+    h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-agent');
+
+    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'stop' }));
+
+    expect(h.registry.getToolCallIdByAgentId).toHaveBeenCalledWith('task-agent');
+    expect(observed).toHaveBeenCalledWith(expect.objectContaining({ agentId: 'task-agent' }));
+    expect(h.registry.update).toHaveBeenCalledWith('hook-uuid', expect.objectContaining({ status: 'completed' }));
+  });
+
+  it('prefers the direct tool ID over an agent ID join', async () => {
+    const h = makeHarness({ agentId: 'direct', taskId: 'task-agent' });
+    h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-agent');
+    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'stop' }));
+    expect(h.registry.getToolCallIdByAgentId).not.toHaveBeenCalled();
+    expect(h.registry.update).toHaveBeenCalledWith(TOOL_CALL, expect.objectContaining({ status: 'completed' }));
+  });
+
+  it.each([
+    ['another session', { parentSessionId: 'other-session', status: 'running' }],
+    ['completed', { parentSessionId: SESSION, status: 'completed' }],
+    ['interrupted', { parentSessionId: SESSION, status: 'interrupted' }],
+  ] as const)('does not attribute a stale agent ID join from %s', async (_label, fields) => {
+    const h = makeHarness(null);
+    h.registry.get.mockImplementation((id: string) => id === 'hook-uuid' ? {
+      toolCallId: 'hook-uuid', agentType: 'Explore', agentId: 'task-agent',
+      startedAt: 0, ...fields,
+    } : null);
+    h.registry.getToolCallIdByAgentId.mockReturnValue('hook-uuid');
+    const observed = jest.fn();
+    h.budgetStops.register(observed);
+    h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-agent');
+    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'stop' }));
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledWith(SESSION, 'task-agent');
+    expect(observed).not.toHaveBeenCalled();
+    expect(h.registry.update).not.toHaveBeenCalled();
+  });
+
+  it('does not signal or complete when the registry has no matching agent', async () => {
+    const h = makeHarness(null);
+    const observed = jest.fn();
+    h.budgetStops.register(observed);
+    h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-agent');
+    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'stop' }));
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledWith(SESSION, 'task-agent');
+    expect(observed).not.toHaveBeenCalled();
+    expect(h.registry.update).not.toHaveBeenCalled();
+  });
+
+  it('stops only the over-budget member of two running subagents', async () => {
+    const h = makeHarness(null);
+    const records = new Map<string, SubagentRecord>([
+      [TOOL_CALL, { toolCallId: TOOL_CALL, agentType: 'Explore', agentId: 'first', status: 'running', startedAt: 0, parentSessionId: SESSION }],
+      ['toolu_second', { toolCallId: 'toolu_second', agentType: 'Explore', agentId: 'second', status: 'running', startedAt: 0, parentSessionId: SESSION }],
+    ]);
+    h.registry.get.mockImplementation((id: string) => records.get(id) ?? null);
+    h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'first');
+    h.monitor.recordTaskStarted(SESSION, 'toolu_second', 'second');
+    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'stop' }));
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledWith(SESSION, 'first');
+    expect(h.registry.update).toHaveBeenCalledTimes(1);
+    expect(h.registry.update).toHaveBeenCalledWith(TOOL_CALL, expect.objectContaining({ status: 'completed' }));
+    expect(h.monitor.getSnapshot(SESSION, 'toolu_second')?.stopped).not.toBe(true);
   });
 
   it('does not publish a stop for a failed attempt', async () => {

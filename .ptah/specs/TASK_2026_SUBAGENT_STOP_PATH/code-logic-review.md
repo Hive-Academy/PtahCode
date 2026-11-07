@@ -190,3 +190,36 @@ No blocking or major defects found. R5 is accepted as-is.
 ### Score and verdict
 
 Score 8.5/10. Verdict: APPROVED. N1 and N2 are optional follow-ups.
+
+## Review (fix round 3)
+
+Scope: uncommitted diff, 4 files. Score 6/10. Verdict: REVISE (one major, minors; no blocking).
+
+### Findings
+
+- MAJOR - subagent-budget-monitor.ts:1101-1111 (+ registry `subagent-registry.service.ts:851`). The join calls `getToolCallIdByAgentId(started.taskId)`, which is global (not scoped to `session.sessionId`/parentSessionId) and falls back to the first record of ANY status (running preferred, else first match incl. completed/interrupted) when no running one exists. Scenarios: (1) a resumed agent keeps its agentId, so an old interrupted/completed record under a different key can be matched and then marked `completed`, or its workspace/taskId read; (2) the same short-hex id in another session (low probability but unguarded). Fix: after the lookup, require `record.parentSessionId === session.sessionId` (when the field exists) and `status === 'running'`; otherwise treat as no match and keep the defer path.
+- MINOR - :1101-1111. Direct tool-ID lookup does take precedence (`this.registry.get(toolCallId) ? toolCallId : hook...`), so no regression for the normal case. The agent-ID join is reached only when `started.taskId` exists, so a name-based reuse cannot match. Good. But a direct-key record that exists with a different agentId is never cross-checked.
+- MINOR - :1262-1267. Completing under the matched key is correct and avoids double completion for the observed case (streamed key has no record, so `registryRecord` is the hook one and exactly one update fires). Residual: the SubagentStop hook later calls update on the same hook key; `update` is idempotent for status, so no stale entry. If the matched record is an `interrupted` one during teardown, update is ignored (registry 315-327), which is acceptable.
+- MINOR - session-query-executor.service.ts:289-303. Log is diagnostic only: no control-flow change, logs id + a 3-value enum, never output text. Not bounded in count (one line per error result for the rest of the run after any stop; `signalledStops` clears only at :459) and `toolUseId` is an unbounded SDK string. `content` in array-of-blocks form yields '' so cause is always `other`, which weakens the exact diagnosis wanted (denied vs interrupted). Handle text blocks, or log a one-time cap.
+- TESTS: monitor spec (:511) would fail without the fix (registry.get returns null for the streamed id; agentId would be absent and the update would be keyed on the streamed id). It does not pin precedence, session scoping, stale/completed records, or the no-match defer path. Executor spec pins the `denied` classification only; interrupted/other and the no-stop-no-log guard are unpinned.
+
+### Defect A: fixed or not?
+Only the missing agent-id / identity half. The live evidence (handoff turn pushed 12.818Z, SDK interrupt sentinel 12.819Z, parent replied "stopped by user, no Ptah message present") is an ordering race between the stop-driven interrupt and the parent turn. Nothing in this diff changes ordering, delivery or consumption of the parent turn. fix-round-3.md concedes this. Do not claim Defect A fixed.
+
+### Live re-test must prove
+1. Stop signal carries the real agentId (no "missing agent id" warning) and the record is completed under the hook key, not left running.
+2. The parent's FIRST reply after the stop attributes it to Ptah's budget stop and names the handoff record path, with the interrupt sentinel not preceding the parent turn (log timestamps order: turn consumed before/independent of the interrupt).
+3. The new `Tool result error after subagent budget stop` line appears for the Read denial with cause (denied/interrupted/other); if cause is `other` due to block-array content, extend the classifier.
+4. Two concurrent subagents in one session: only the over-budget one is stopped and completed.
+
+## Re-review (fix round 3)
+
+Score 8/10. Verdict: APPROVED (one minor live-test caveat). Read-only; tests not run by me (coordinator's scoped run reported green).
+
+1. Join restriction - OK. subagent-budget-monitor.ts:1103-1113: join is attempted only when the direct lookup is empty (precedence kept), and the matched record must have `parentSessionId === session.sessionId`, `status === 'running'` and `agentId === started.taskId`; otherwise `registryRecord` is null and the existing deferred/no-signal path runs. `registry.update` uses the matched record's own `toolCallId` (:1267), so no stale or double completion.
+2. Tests - OK. Spec now covers join success, direct precedence, other session, completed, interrupted (parameterised), no match, and two concurrent agents with only the over-budget one stopped and completed. These would fail against the round-3 first version (no session/status guard). Not pinned: a direct record whose agentId differs from the task id (accepted; pre-existing behaviour).
+3. Log - OK. session-query-executor.service.ts:289-307: string and text-block-array content are classified, non-text parts ignored, `tool_use_id` capped at 128, only id and a 3-value cause are logged, and control flow is unchanged. Residual: still one line per error result while any stop is signalled (low volume).
+
+New finding (MINOR): the guard compares the hook record's `parentSessionId` with the monitor's `session.sessionId` (possibly a re-bound/real id). The hook handler resolves its parent id from the SDK `input.session_id` or a captured tab id (subagent-hook-handler.ts:93-104), so the two id spaces can differ before a rebind. If they do, the join fails closed and the missing agent-id warning returns, which is safe but would hide the fix. The live re-test must show the agent id is published (no "missing agent id" warning) in the real tab-to-SDK-session case, not only in unit tests.
+
+Defect A (parent-turn ordering vs interrupt sentinel) is still unaddressed by code; the live re-test items from the previous review stand.

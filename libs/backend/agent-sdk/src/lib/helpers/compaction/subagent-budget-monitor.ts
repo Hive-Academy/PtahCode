@@ -1097,8 +1097,20 @@ export class SubagentBudgetMonitor {
       readonly stopWeightedTokens: number;
     },
   ): Promise<void> {
-    const registryRecord = this.registry.get(toolCallId);
     const started = session.startedTasks.get(toolCallId);
+    // The SDK's SubagentStart hook can supply a hook UUID instead of the
+    // streamed Task tool_use_id. Its agent_id is the streamed task_id.
+    const directRecord = this.registry.get(toolCallId);
+    const hookToolCallId = !directRecord && started?.taskId
+      ? this.registry.getToolCallIdByAgentId(started.taskId)
+      : undefined;
+    const hookRecord = hookToolCallId ? this.registry.get(hookToolCallId) : null;
+    const matchedHookRecord = hookRecord?.parentSessionId === session.sessionId
+      && hookRecord.status === 'running'
+      && hookRecord.agentId === started?.taskId
+      ? hookRecord : null;
+    const registryRecord = directRecord ?? matchedHookRecord;
+    const registryToolCallId = directRecord ? toolCallId : matchedHookRecord?.toolCallId;
     const taskId = started?.taskId ?? registryRecord?.taskId;
     if (!taskId) {
       // Neither task_started nor the registry has the task id yet; the next
@@ -1252,7 +1264,7 @@ export class SubagentBudgetMonitor {
     }
     // A completed record is dropped from the registry, so it is never offered for resume.
     if (registryRecord) {
-      this.registry.update(toolCallId, {
+      this.registry.update(registryToolCallId ?? toolCallId, {
         status: 'completed',
         completedAt: Date.now(),
       });

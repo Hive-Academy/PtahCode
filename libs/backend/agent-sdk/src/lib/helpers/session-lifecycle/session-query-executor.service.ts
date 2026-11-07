@@ -286,6 +286,26 @@ class CompactionSessionTap {
     if (id && id !== this.sessionId) this.bind(id);
     const sessionId = this.sessionId;
     if (sessionId === null) return;
+    if (this.signalledStops.size > 0 && message.type === 'user') {
+      const content = message.message.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.type !== 'tool_result' || !block.is_error) continue;
+          const output = typeof block.content === 'string'
+            ? block.content
+            : Array.isArray(block.content)
+              ? block.content.filter((part) => part.type === 'text').map((part) => part.text).join(' ')
+              : '';
+          this.logger.info('[SessionQueryExecutor] Tool result error after subagent budget stop', {
+            sessionId,
+            toolUseId: block.tool_use_id.slice(0, 128),
+            cause: /interrupt|stopped by user/i.test(output)
+              ? 'interrupted'
+              : /denied|permission/i.test(output) ? 'denied' : 'other',
+          });
+        }
+      }
+    }
     if (
       this.requestTracker.observe(message, Date.now()) === 'request-started'
     ) {
