@@ -112,6 +112,8 @@ import {
   applyOutputCheckpoint,
   checkpointFreshness,
   laneLastActivityAt,
+  observeTrackedWrite,
+  RECOVERED_OUTPUT_MAX_AGE_MS,
   RECOVERED_OUTPUT_WAIT_MS,
   restoreLaneIdentity,
   restoreLaneLifecycle,
@@ -367,7 +369,7 @@ export class AgentProcessManager {
   private spawning = 0;
   /** Promise-based mutex to serialize spawn operations and prevent TOCTOU race in concurrent limit check */
   private spawnMutex: Promise<void> = Promise.resolve();
-  /** Queued persists of restored lanes' recovered output, keyed by agent id. */
+  /** Shared observers of restored lanes' recovered-output persists, keyed by agent id. */
   private readonly recoveredOutputWrites = new Map<string, Promise<void>>();
 
   /** EventEmitter for agent lifecycle events (spawned, output, exited) */
@@ -1874,15 +1876,24 @@ export class AgentProcessManager {
     );
   }
 
+  /**
+   * Store ONE shared observer per write; waiters race it, never the write. It
+   * ends when the write settles or after {@link RECOVERED_OUTPUT_MAX_AGE_MS},
+   * which also drops the entry, so a stuck write costs no reactions per later
+   * session load. Queue order and retries of the write are untouched.
+   */
   private trackRecoveredOutputWrite(agentId: string, settled: Promise<void>): void {
-    this.recoveredOutputWrites.set(agentId, settled);
-    const release = (): void => {
-      if (this.recoveredOutputWrites.get(agentId) === settled) {
+    const observer = observeTrackedWrite(settled, RECOVERED_OUTPUT_MAX_AGE_MS, () =>
+      this.logger.warn(
+        '[AgentProcessManager] Recovered lane output write still pending; no longer waited on',
+        { agentId, maxAgeMs: RECOVERED_OUTPUT_MAX_AGE_MS },
+      ));
+    this.recoveredOutputWrites.set(agentId, observer);
+    void observer.then(() => {
+      if (this.recoveredOutputWrites.get(agentId) === observer) {
         this.recoveredOutputWrites.delete(agentId);
       }
-    };
-    // Both arms only release the entry: the writer logs its own failure.
-    settled.then(release, release);
+    });
   }
 
   /**

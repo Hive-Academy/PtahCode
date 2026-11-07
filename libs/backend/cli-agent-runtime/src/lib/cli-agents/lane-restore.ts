@@ -189,17 +189,54 @@ export type RecoveredOutputTracker = (settled: Promise<void>) => void;
 export const RECOVERED_OUTPUT_WAIT_MS = 3_000;
 
 /**
- * Settles `true` once every write settled, `false` when `timeoutMs` passed
- * first. A rejected write counts as settled: its writer logs its own failure.
+ * How long a recovered write stays waitable. A write that never settles is
+ * dropped from tracking after this, so waiters stop attaching to it; the
+ * write itself keeps its place in the lane queue.
+ */
+export const RECOVERED_OUTPUT_MAX_AGE_MS = 120_000;
+
+/**
+ * The one shared observer of a tracked write. Resolves (never rejects) when
+ * the write settles, or after `maxAgeMs` with `onExpired` called first. Every
+ * waiter races this promise, so the reactions it holds end by `maxAgeMs` at
+ * the latest instead of living as long as a stuck write. A rejected write
+ * resolves it too: its writer logs its own failure.
+ */
+export function observeTrackedWrite(
+  write: Promise<void>,
+  maxAgeMs: number,
+  onExpired: () => void,
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      onExpired();
+      resolve();
+    }, maxAgeMs);
+    if (typeof (timer as { unref?: () => void }).unref === 'function') {
+      (timer as { unref: () => void }).unref();
+    }
+    const settle = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    write.then(settle, settle);
+  });
+}
+
+/**
+ * Settles `true` once every observer resolved, `false` when `timeoutMs`
+ * passed first. Takes {@link observeTrackedWrite} observers, which never
+ * reject and resolve by their max age, so a timed-out waiter's reactions are
+ * released then.
  */
 export function settleWithin(
-  writes: readonly Promise<void>[],
+  observers: readonly Promise<void>[],
   timeoutMs: number,
 ): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timedOut = new Promise<boolean>((resolve) => {
     timer = setTimeout(() => resolve(false), timeoutMs);
   });
-  const settled = Promise.allSettled(writes).then(() => true);
+  const settled = Promise.all(observers).then(() => true);
   return Promise.race([settled, timedOut]).finally(() => clearTimeout(timer));
 }

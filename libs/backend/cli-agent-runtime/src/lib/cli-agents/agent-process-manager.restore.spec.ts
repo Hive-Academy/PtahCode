@@ -41,6 +41,7 @@ import {
 } from './lane-resume-gate';
 import type { Logger } from '@ptah-extension/vscode-core';
 import { LaneCompletionNotifier } from './lane-completion-notifier.service';
+import { RECOVERED_OUTPUT_MAX_AGE_MS } from './lane-restore';
 import { FakeStateStorage } from './parent-delivery/__fixtures__/fake-state-storage';
 import { ParentEnvelopeStoreService } from './parent-delivery/parent-envelope-store.service';
 import { ParentDeliveryDrainerService } from './parent-delivery/parent-delivery-drainer.service';
@@ -917,6 +918,39 @@ describe('AgentProcessManager.restoreAgents', () => {
             expect.stringContaining('not persisted in time'),
             { pending: 1, timeoutMs: 3_000 },
           );
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+
+      it('shares one observer for a never-settling write across loads and drops it at max age', async () => {
+        jest.useFakeTimers();
+        try {
+          const manager = restoredWithWrite(new Promise<void>(() => undefined));
+          const writes = manager['recoveredOutputWrites'];
+          const observer = writes.get(RESTORED_ID);
+          for (let load = 0; load < 3; load++) {
+            const waiting = manager.awaitRecoveredOutput([RESTORED_ID], 3_000);
+            await jest.advanceTimersByTimeAsync(3_000);
+            await waiting;
+            // Every load raced the same stored observer; none replaced it.
+            expect(writes.get(RESTORED_ID)).toBe(observer);
+          }
+          expect(manager['logger'].warn).toHaveBeenCalledTimes(3);
+
+          await jest.advanceTimersByTimeAsync(RECOVERED_OUTPUT_MAX_AGE_MS);
+          expect(writes.has(RESTORED_ID)).toBe(false);
+          expect(manager['logger'].warn).toHaveBeenLastCalledWith(
+            expect.stringContaining('no longer waited on'),
+            { agentId: RESTORED_ID, maxAgeMs: RECOVERED_OUTPUT_MAX_AGE_MS },
+          );
+
+          // A later load does not wait on the expired write at all.
+          const timersBefore = jest.getTimerCount();
+          const later = manager.awaitRecoveredOutput([RESTORED_ID], 3_000);
+          expect(jest.getTimerCount()).toBe(timersBefore);
+          await later;
+          expect(manager['logger'].warn).toHaveBeenCalledTimes(4);
         } finally {
           jest.useRealTimers();
         }
