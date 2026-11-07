@@ -1,5 +1,48 @@
 # Phase F visual review (Electron)
 
+## Second pass (head 11262af8a)
+
+**Verdict: PASS WITH NOTES, session half still NOT REVIEWED.** The two first-pass visual fixes are confirmed. The tabId blocker is fixed (the worker no longer rejects the start), but starting a session on horus is now refused by a different, worker-side cause, so the stream, approval, replay, watch-only and no-folder states were again not reachable.
+
+### First-pass findings re-checked
+
+- Finding 1 (session start fails): **partly fixed, still blocked.** The worker log on horus (read-only) showed the old `tabId must be a UUID v4` rejection at 21:30/21:31 and none after the new deb was installed, so the tabId fix works. The new attempt (one start, "Reply with the word ok.") fails in about 16 ms with `MACHINE_UNREACHABLE`. The worker log for that attempt reads "The session account could not be verified. The conversation was preserved." That text is the provider-account admission refusal (`mainSessionAccountFailure` in `chat-slash-command-router.service.ts:72-80`): horus has no admitted provider account for the session. Fixing it means giving the worker a Claude account, which I did not do (no credentials were copied or changed). anubis still runs the old deb and was not used.
+- Finding 2 (selected row invisible in light): **fixed.** `05f-selected-light.png` shows horus with a clear 1px inset outline; the computed inset shadow is the base-content colour at 60% (dark navy on a near-white panel, well above 3:1). `05f-selected-dark.png` shows the same outline in light grey on the dark panel. `aria-current="true"` is still set.
+
+### New findings (second pass)
+
+1. **Serious (functional and copy): the start failure message is wrong.** The user sees "The machine is unreachable." while the header says Connected and readiness passed (`06-start-refused-dark.png`, `06-start-refused-light.png`). The real cause is an account refusal on the worker. `mapMachineError` (`machines-rpc.handlers.ts:30-62`) maps any unmapped `WorkerClientError` to `MACHINE_UNREACHABLE`. Suggested fix: add a distinct code and text for an account refusal, for example "horus has no Claude account set up for sessions".
+2. **Serious (readiness gap): the readiness check reports "Sessions can start" while a session start is refused for lack of a provider account.** Add an account-admission check to the readiness list on the worker.
+3. **Moderate: the start error is plain body text.** `<p role="alert">` uses `text-sm text-base-content`, with no error colour or icon, so it reads like a label. The prototype uses the error treatment on failures. The text itself contrasts well (dark text on the light panel, light text on the dark panel). Fix: use `text-state-err` with an icon.
+4. **Minor: after a failed start the form keeps its content and Start stays enabled.** That is the right behaviour, and the layout moves by 28px when the alert appears (the buttons shift down). A reserved line would stop the shift.
+
+### Second-pass state rows
+
+| State | Dark | Light | Prototype | Result |
+|---|---|---|---|---|
+| Selected machine row | 05f-selected-dark | 05f-selected-light | proto-05-list-* | Matches. Fix confirmed. |
+| Start refused (account) | 06-start-refused-dark | 06-start-refused-light | none | Renders cleanly; wrong message (new finding 1). |
+| Focus on Start | 07-focus-start-dark | 07-focus-start-light | none | Pass. |
+| Focus on Cancel | 07-focus-cancel-dark | 07-focus-cancel-light | none | Pass: 2px ring in the base-content colour, visible in both themes. |
+| 5b Reconnecting | not reachable | not reachable | proto-05b-* | Not covered: it needs a dropped connection and I did not disturb the workers. |
+| 6 Stream | not reachable | not reachable | proto-06-stream-* | Blocked by new finding 1 (no account on horus). |
+| 7 Approval | not reachable | not reachable | proto-07-approval-* | Blocked, same cause. Nothing was written under the workspace. |
+| 8 Replay | not reachable | not reachable | proto-08-replay-* | No session exists to replay. |
+| 9 Watch-only | not reachable | not reachable | proto-09-owner-* | Needs a second client holding the driver lock on a live session. |
+| 10 No local folder | not reachable | not reachable | proto-10-nofolders-* | Needs a profile without a workspace folder; the Ptah Dev profile has folders and was not changed. |
+
+The prototype captures for these states already exist in `visual-review/` (`proto-05b` to `proto-10`), so no new `proto-*` files were needed. Sessions started: 2 attempts in total (one per theme), both refused, so nothing is running on horus. The Electron instance was closed.
+
+### Second-pass checks
+
+- axe-core (wcag2a, wcag2aa, wcag21aa, wcag22aa) on `ptah-machines-view` with the start form and error open, dark and light: 0 violations. `color-contrast` was reported as incomplete for 28 nodes (translucent glass), so contrast was checked by hand where stated above. axe was not run on stream or approval states because they were not reachable.
+- Keyboard: Tab from the message box goes to Start, then Cancel, with a visible ring on each (`07-focus-*`). The approval buttons could not be checked.
+- The Escape and renderer-reload replay checks were not run, since no session exists.
+
+---
+
+## First pass (head 73dca4808)
+
 ## Verdict
 
 **PASS WITH NOTES** for the states that could be reached. One functional blocker stopped the review of the whole session half of the view: starting a session on a paired, ready machine fails with "The machine is unreachable." (Finding 1). Stream, approval, replay and watch-only states were not captured from the app (see Not covered). The reachable states match the prototype in layout and tokens, with the deviations below.
@@ -8,7 +51,7 @@
 
 - Launched: `NODE_ENV=development node_modules/.bin/electron dist/apps/ptah-electron/main.mjs --remote-debugging-port=9333`, driven with `playwright-core` over CDP. The existing dist build was used and no rebuild was done.
 - Profile: the existing `Ptah Dev` profile (`~/.config/Ptah Dev`). It had no machines. Nothing was reset.
-- Head: 73dca4808 on `feat/remote-workers-phase-f`.
+- Head: 73dca4808 on `feat/remote-workers-phase-f` (first pass). Second pass head: 11262af8a. The dist build (main.mjs 21:53:56) is newer than the last code commit (0604520e8, 21:50:42) and contains the tabId fix.
 - Viewport: Electron window size cannot be set over CDP, so the renderer viewport was emulated at 1280x760 (same as the prototype captures). Narrow captures at 700x760.
 - Themes: switched through the app's own theme popover (`ptah-glass`, `ptah-glass-light`).
 - Real data: `horus` and `anubis` were paired through the app's Add machine flow, using "Pair automatically via SSH". A deliberately wrong code (8 x `Z`) exercised the pairing failure. No tokens, codes or addresses are recorded here. Both machines are still paired in the Ptah Dev profile. The Electron instance started for this review was closed.
