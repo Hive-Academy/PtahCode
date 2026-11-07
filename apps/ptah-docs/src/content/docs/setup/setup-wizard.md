@@ -5,10 +5,6 @@ description: Let Ptah read your workspace, recommend agents, write them, and pre
 
 **Analyze current project** is the Setup path for a project that already has code. Ptah reads your workspace, recommends agents, writes them to `.claude/agents/`, and prepares project guidance.
 
-<video controls preload="metadata" playsinline style="width:100%;border-radius:0.5rem;border:1px solid var(--sl-color-gray-5);margin:1rem 0;">
-  <source src="/assets/videos/setup-wizard-agent-generation.mp4" type="video/mp4" />
-</video>
-
 ![Setup analysis overview](/screenshots/agents-setup-wizard.webp)
 
 ## When to run it
