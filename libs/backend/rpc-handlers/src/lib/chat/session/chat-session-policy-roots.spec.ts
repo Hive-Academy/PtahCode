@@ -69,8 +69,8 @@ const TEST_ROOT = mkdtempSync(join(tmpdir(), 'ptah-session-policy-'));
 afterAll(() => rmSync(TEST_ROOT, { recursive: true, force: true }));
 for (const part of ['a', 'b', 'b/child', 'b/.claude/worktrees/task'])
   mkdirSync(join(TEST_ROOT, part), { recursive: true });
-const PROJECT_A = `${TEST_ROOT}/a`;
-const PROJECT_B = `${TEST_ROOT}/b`;
+const PROJECT_A = join(TEST_ROOT, 'a');
+const PROJECT_B = join(TEST_ROOT, 'b');
 const SESSION_ID = '11111111-1111-4111-8111-111111111111' as SessionId;
 const TAB_ID = '22222222-2222-4222-8222-222222222222';
 
@@ -245,7 +245,7 @@ describe('readSessionPolicyRoots', () => {
   };
 
   it('returns physical folder and validated stored ancestors', async () => {
-    const folder = `${PROJECT_B}/child`;
+    const folder = join(PROJECT_B, 'child');
     const h = makeHarness({
       metadata: {
         workspaceId: PROJECT_B,
@@ -268,7 +268,7 @@ describe('readSessionPolicyRoots', () => {
       const linkedFolder = join(root, 'app-link');
       mkdirSync(physicalFolder, { recursive: true });
       mkdirSync(join(worktree, '.git'));
-      symlinkSync(physicalFolder, linkedFolder, 'dir');
+      symlinkSync(physicalFolder, linkedFolder, process.platform === 'win32' ? 'junction' : 'dir');
 
       const h = makeHarness({
         folders: [root],
@@ -289,7 +289,7 @@ describe('readSessionPolicyRoots', () => {
   });
 
   it('restores the immediate root for legacy distinct cwd', async () => {
-    const folder = `${PROJECT_B}/child`;
+    const folder = join(PROJECT_B, 'child');
     const h = makeHarness({
       metadata: { workspaceId: PROJECT_B, workingDirectory: folder },
     });

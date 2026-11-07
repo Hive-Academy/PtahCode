@@ -3253,6 +3253,7 @@ describe('SkillsSynthesisRpcHandlers — Library provenance and scope (B13)', ()
     beforeEach(() => {
       repo = fs.mkdtempSync(join(tmpdir(), 'b13-scope-'));
       fs.mkdirSync(join(repo, '.git'));
+      fs.mkdirSync(join(repo, '.ptah'));
       subFolder = join(repo, 'packages', 'app');
       fs.mkdirSync(subFolder, { recursive: true });
     });
