@@ -13,7 +13,7 @@ Ptah needs at least one AI provider. You do not need a Ptah account. Every local
 4. Do the step that the provider needs: paste an API key, or click the sign-in button.
 5. Test the connection.
 
-![Providers settings panel](/screenshots/providers-settings.png)
+![Providers settings panel](/screenshots/providers-settings.webp)
 
 The **Main agent** section at the top of the Providers tab shows which provider and model drive the main chat agent.
 

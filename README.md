@@ -38,9 +38,9 @@ The download is the Electron app. With a workspace open, the title bar holds the
 
 - **Session rail.** One board per workspace. Up to 20 session tiles. Nine may run at once. Density is comfortable or dense. Sort is recent or manual.
 - **Voice.** An Electron stage that listens, speaks, and can barge in. It stays on “Voice unavailable” until both speech-to-text and text-to-speech are configured. Local engines need model assets. ElevenLabs needs a key.
-- **Apps.** The agent publishes a form, chart, or table from a closed component catalog, beside a private transcript. A failed surface says it could not be shown.
-- **Attention bell.** Questions, permissions, failures, and warnings across sessions and workspaces. Permission rows can be allowed or denied without opening that session.
-- **Display panel.** A sandboxed HTML artifact opens beside the transcript and can detach into its own window. Links use an allowlist.
+- **[Apps](https://docs.ptah.live/mcp-and-skills/apps/).** The agent publishes a form, chart, or table from a closed component catalog, beside a private transcript. A failed surface says it could not be shown.
+- **[Attention bell](https://docs.ptah.live/workspace/notifications-and-tray/).** Questions, permissions, failures, and warnings across sessions and workspaces. Permission rows can be allowed or denied without opening that session.
+- **[Display panel](https://docs.ptah.live/chat/display-panel/).** A sandboxed HTML artifact opens beside the transcript and can detach into its own window. Links use an allowlist.
 - **Two main-chat runtimes.** Claude’s agent runtime, or Codex through the app-server protocol. Background work can run on installed CLIs.
 - **Plan windows.** Where Claude, Codex, Kimi, Antigravity, OpenCode, Grok, or Ollama Cloud reports a usage window, a lane at its limit can be refused. A provider with no window does not get a fake meter.
 
@@ -50,7 +50,7 @@ The download is the Electron app. With a workspace open, the title bar holds the
 
 PtahCode indexes the repository, keeps decisions after the chat ends, and runs specialized agents against that map. The Electron app for Windows, macOS, and Linux hosts the product. Its Angular webview renders the interface. Provider CLI lanes run delegated work.
 
-![Chat with the built-in tool catalog](https://raw.githubusercontent.com/Hive-Academy/PtahCode/main/apps/ptah-docs/public/screenshots/chat-overview.png)
+![Chat with the built-in tool catalog](https://raw.githubusercontent.com/Hive-Academy/PtahCode/main/apps/ptah-docs/public/screenshots/chat-overview.webp)
 
 ---
 
@@ -77,7 +77,7 @@ flowchart LR
   F --> C
 ```
 
-![Execution tree with sub-agent delegation, tokens, and cost](https://raw.githubusercontent.com/Hive-Academy/PtahCode/main/apps/ptah-docs/public/screenshots/chat-execution-tree.png)
+![Execution tree with sub-agent delegation, tokens, and cost](https://raw.githubusercontent.com/Hive-Academy/PtahCode/main/apps/ptah-docs/public/screenshots/chat-execution-tree.webp)
 
 - **CLI lanes.** Supervised processes include `claude`, `codex`, `copilot`, `cursor`, `antigravity`, `opencode`, `grok`, and `pi`, plus API providers such as Kimi, GLM, MiniMax, Qwen, DeepSeek, OpenRouter, and Ollama. Adapter manifests show potential messaging support in list rows; a live lane resolves what its current handle can actually do. Send queues during a running turn. Send now steers when supported, or offers interrupt and resume with explicit consent to lose partial work. Each accepted message has a receipt that tracks delivery through settlement.
 - **Child chats.** A parent can open up to three child sessions. Each child gets its own git worktree and branch and its own tab. That cap is separate from the rail’s nine running sessions.
@@ -115,19 +115,21 @@ The bell splits “Needs you” from “Recent notices.” A row names the sessi
 - **Turn trailers.** A turn that changes files can end with added, modified, deleted, renamed, or conflicted paths, plus a chip for files, tests, tokens, cost, and duration. A turn that changes nothing has no files card in the turn summary.
 - **Git review dock.** Tabs for Changes, Commit, Task, and History. The spot editor is CodeMirror. A foreign worktree’s Changes tab is read-only. The skill-enhancement preview is a separate Monaco diff.
 - **Questions.** Stepped question cards in the transcript. The bell can answer one.
+- **[Session details](https://docs.ptah.live/canvas/session-inspector/).** Expand the inspector beside the focused session to see its requests, stats, agents, plan limits, task, git changes, and linked sessions.
 - **Setup hub.** Workspace analysis, an AI team builder, and new-project scaffolding (an Nx workspace, a roadmap, and an agent team).
 
-![Setup Hub: workspace analysis, AI team builder, new project](https://raw.githubusercontent.com/Hive-Academy/PtahCode/main/apps/ptah-docs/public/screenshots/setup-hub.png)
+![Setup Hub: workspace analysis, AI team builder, new project](https://raw.githubusercontent.com/Hive-Academy/PtahCode/main/apps/ptah-docs/public/screenshots/setup-hub.webp)
 
 ---
 
 ## Memory and skills
 
-![Thoth memory](https://raw.githubusercontent.com/Hive-Academy/PtahCode/main/apps/ptah-docs/public/screenshots/v2-thoth-memory.png)
+![Thoth memory](https://raw.githubusercontent.com/Hive-Academy/PtahCode/main/apps/ptah-docs/public/screenshots/v2-thoth-memory.webp)
 
 Project memory stays on the machine. Search fuses BM25 and vectors with reciprocal rank fusion, and falls back to BM25 if vector search fails. Semantic recall degrades when `sqlite-vec` is unavailable. The Memory tab is the curator. The first index can report coverage as unknown.
 
-- **Named corpora.** Build a corpus from memory, prime an agent session with it, query it, and rebuild membership. This needs a workspace and an agent session.
+- **[Named corpora](https://docs.ptah.live/memory/timeline-and-corpus/).** Build a corpus from memory, prime an agent session with it, query it, and rebuild membership. This needs a workspace and an agent session.
+- **[Memory timeline](https://docs.ptah.live/memory/timeline-and-corpus/).** Filter memories in time order, and anchor the timeline on one memory to see its nearest neighbors.
 - **Compaction curation.** Notes that have not been processed are kept when a session compacts.
 - **Skills.** The Skills tab can propose a unified diff for an existing `SKILL.md`. A judge scores before and after. The file is written only when you Apply. Enhance stays disabled under a use threshold or during a cooldown. Nothing is promoted on its own.
 
@@ -153,11 +155,13 @@ Read more: [Automation](https://docs.ptah.live/automation/)
 
 ## Your repo, and the trust around it
 
+- **[Review runs](https://docs.ptah.live/reviews/).** The Reviews tab lists pull request review attempts, opens run details, and lets you rerun a review.
 - **Symbol search.** Plain-language queries return ranked, cited hits. The result can include a freshness and coverage receipt. Coverage can be unknown while the first index runs.
 - **Dependency graph.** Dependents and dependencies, limited by how far import resolution got.
 - **Declaration summaries.** Eligible files can be summarized from declarations. An ineligible file returns full content with a reason.
 - **Output budgets.** Large tool output can be shrunk by format. The full text stays retrievable. A spool failure is reported.
 - **`execute_code`.** One JavaScript script can call local `ptah.*` tools inside the Node `vm`, with a timeout and cancellation. That VM is not a security boundary.
+- **[External MCP callers](https://docs.ptah.live/mcp-and-skills/external-callers/).** Other local tools that call the built-in MCP server are read-only by default. Full access lets them call privileged tools, including `execute_code`, but not across workspaces.
 - **Browser.** An agent can navigate, click, type, read, capture the network, screenshot, and record, inside URL and root restrictions.
 - **Tasks.** A six-column board over `.ptah/specs/`: backlog, in progress, in review, blocked, done, cancelled. A folder without `task.md` is not a card. A live session can link to a task id and a worktree. Task ids are allocated across local worktrees and `origin/main`.
 - **Plugins.** An install can be project or global. External installs take explicit consent bound to the resolved version and file hashes. A hashed consent token gates a GitHub plugin install.
@@ -176,7 +180,7 @@ Harness write targets verified in this tree: Claude, `codex`, `copilot`, `cursor
 
 ## Providers
 
-![Provider and orchestration settings](https://raw.githubusercontent.com/Hive-Academy/PtahCode/main/apps/ptah-docs/public/screenshots/agents-orchestration.png)
+![Provider and orchestration settings](https://raw.githubusercontent.com/Hive-Academy/PtahCode/main/apps/ptah-docs/public/screenshots/agents-orchestration.webp)
 
 Bring the vendors you already use:
 

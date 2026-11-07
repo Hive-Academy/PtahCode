@@ -7,7 +7,7 @@ description: Create and edit your own agents in PtahCode.
 
 A custom agent records how your team works. You can change a generated agent or create a new specialist.
 
-![Custom agent editor](/screenshots/agents-custom-editor.png)
+![Custom agent editor](/screenshots/agents-custom-editor.webp)
 
 ## Where custom agents live
 

@@ -5,7 +5,7 @@ description: Find and install hosted MCP servers from Smithery.
 
 [Smithery](https://smithery.ai) is a registry of hosted MCP servers. In the Marketplace, you can search Smithery, fill in the configuration of a server, and install it.
 
-![Smithery in the Marketplace](/screenshots/marketplace-smithery.png)
+![Smithery in the Marketplace](/screenshots/marketplace-smithery.webp)
 
 ## Connect Smithery
 

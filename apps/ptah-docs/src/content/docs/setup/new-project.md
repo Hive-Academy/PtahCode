@@ -5,7 +5,7 @@ description: Start a new project from an empty folder with a phased roadmap and 
 
 **New project** is the Setup path for an empty folder. You answer short questions about what you want to build. Then the agent plans the project, writes a phased roadmap, scaffolds the foundation, and proposes an AI team for it.
 
-![New project](/screenshots/setup-new-project.png)
+![New project](/screenshots/setup-new-project.webp)
 
 ## Start a new project
 

@@ -7,7 +7,7 @@ description: Write or generate a commit message and commit staged files.
 
 The **Commit** tab of the review view commits the staged files.
 
-![Commit composer](/screenshots/commit-composer.png)
+![Commit composer](/screenshots/commit-composer.webp)
 
 ## Make a commit
 

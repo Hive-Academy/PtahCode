@@ -5,7 +5,7 @@ description: Describe the AI team you want, tune the proposed configuration with
 
 The **AI team builder** is the Setup path where you describe the team that you want. The agent proposes a configuration, and you tune it in a conversation. Use [Analyze current project](/setup/setup-wizard/) instead if you want Ptah to recommend agents from a scan.
 
-![AI team builder](/screenshots/setup-ai-team-builder.png)
+![AI team builder](/screenshots/setup-ai-team-builder.webp)
 
 ## Start the builder
 
