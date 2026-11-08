@@ -21,6 +21,7 @@
  * `done` and every continuation `done` resolve with 0 or 1 and never reject;
  * failures become one `error` segment.
  */
+import { randomUUID } from 'node:crypto';
 import type {
   InitializeResponse,
   McpServer,
@@ -30,6 +31,8 @@ import type { IProcessSpawner } from '@ptah-extension/platform-core';
 import type { Logger } from '@ptah-extension/vscode-core';
 import { MCP_ATTACHMENT_TIMEOUT_MS } from '../../mcp-attachment-probe.port';
 import type { CliOutputSegment } from '@ptah-extension/shared';
+import { completedTurnTelemetry, turnIdentity } from '@ptah-extension/shared';
+import { z } from 'zod';
 import type {
   CliCommandOptions,
   ContinuationOutcome,
@@ -82,6 +85,8 @@ const HANDSHAKE_PHASE_LABEL: Readonly<Record<AcpHandshakePhase, string>> = {
  * the prompt (or exit) before the tree-kill.
  */
 export const ACP_CANCEL_GRACE_MS = 1_500;
+/** Bound for agents that return a prompt response without usage metadata or a usage_update. */
+export const ACP_USAGE_DRAIN_MS = 2_000;
 
 const ACP_PROTOCOL_VERSION = 1;
 
@@ -93,6 +98,23 @@ const MAX_REPORTED_EXTENSION_METHODS = 32;
 
 /** Title used when a refused permission request carried none. */
 const FALLBACK_REFUSED_TITLE = 'a tool call';
+
+/** ACP prompt response extension; reject malformed counters without failing the turn. */
+const acpPromptUsageSchema = z.object({
+  model: z.string().optional(),
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  cacheReadTokens: z.number().int().nonnegative().optional(),
+  cacheWriteTokens: z.number().int().nonnegative().optional(),
+  contextTokens: z.number().int().nonnegative().optional(),
+  costUsd: z.number().finite().nonnegative().optional(),
+}).passthrough();
+
+const acpUsageUpdateSchema = z.object({
+  sessionUpdate: z.literal('usage_update'),
+  used: z.number().int().nonnegative(),
+  _meta: z.object({ usage: acpPromptUsageSchema.optional() }).passthrough().nullish(),
+}).passthrough();
 
 export interface AcpSessionHandleConfig {
   readonly profile: AcpVendorProfile;
@@ -237,6 +259,10 @@ export function createAcpSessionHandle(
   let onMcpTimeout: (() => void) | undefined;
   let processExit: AcpProcessExit | undefined;
   let promptInFlight = false;
+  let promptSequence = 0;
+  const budgetRunId = options.agentId ?? randomUUID();
+  let latestUpdateUsage: z.infer<typeof acpPromptUsageSchema> | undefined;
+  let resolveUsageUpdate: (() => void) | undefined;
   /** Title of the first request the policy refused during the current prompt. */
   let refusedThisTurn: string | undefined;
   /** Settles when the current prompt has its answer; never rejects. */
@@ -355,6 +381,16 @@ export function createAcpSessionHandle(
     sessionUpdate: async (notification) => {
       if (!isOwnSession(notification.sessionId)) return;
       if (isReplayedUpdate(notification)) return;
+      if (promptInFlight) {
+        const update = acpUsageUpdateSchema.safeParse(notification.update);
+        if (update.success && update.data._meta?.usage) {
+          latestUpdateUsage = {
+            ...update.data._meta.usage,
+            contextTokens: update.data._meta.usage.contextTokens ?? update.data.used,
+          };
+          resolveUsageUpdate?.();
+        }
+      }
       const mapped = mapper.map(notification.update);
       if (mapped.output) output.emit(mapped.output);
       for (const item of mapped.segments) segment.emit(item);
@@ -740,6 +776,8 @@ export function createAcpSessionHandle(
       return 1;
     }
     promptInFlight = true;
+    latestUpdateUsage = undefined;
+    const turnId = `${id}:${budgetRunId}:${++promptSequence}`;
     refusedThisTurn = undefined;
     try {
       const response: unknown = await call('session/prompt', () =>
@@ -755,6 +793,39 @@ export function createAcpSessionHandle(
         refusedPermissionTitle: refusedThisTurn,
         displayName: name,
       });
+      if (mapped.exitCode === 0) {
+        const meta = isRecord(response) ? response['_meta'] : undefined;
+        const rawUsage = isRecord(meta) ? meta['usage'] : undefined;
+        const promptUsage = acpPromptUsageSchema.safeParse(rawUsage);
+        if (!promptUsage.success && !latestUpdateUsage) {
+          // ACP agents can send usage_update after the prompt response. Wait
+          // for that notification, with a safety bound for agents omitting it.
+          let usageDrainTimer: NodeJS.Timeout | undefined;
+          const onAbort = (): void => { resolveUsageUpdate?.(); };
+          try {
+            await new Promise<void>((resolve) => {
+              usageDrainTimer = setTimeout(resolve, ACP_USAGE_DRAIN_MS);
+              usageDrainTimer.unref();
+              resolveUsageUpdate = resolve;
+              abort.signal.addEventListener('abort', onAbort, { once: true });
+              if (latestUpdateUsage || abort.signal.aborted) resolve();
+            });
+          } finally {
+            clearTimeout(usageDrainTimer);
+            abort.signal.removeEventListener('abort', onAbort);
+            resolveUsageUpdate = undefined;
+          }
+        }
+        const usage = promptUsage.success ? promptUsage.data : latestUpdateUsage;
+        segment.emit({
+          type: 'info', content: usage ? `${name} turn usage.` : `${name} turn telemetry unavailable.`,
+          ...(usage ? { usage: { ...usage, model: usage.model ?? `${name}/unknown` } } : {}),
+          turnTelemetry: completedTurnTelemetry({
+            ...turnIdentity({ provider: name, turnId, modelId: usage?.model, source: 'sdk' }),
+            usage,
+          }),
+        });
+      }
       if (mapped.segment?.type === 'error') {
         emitError(mapped.segment.content);
       } else if (mapped.segment) {
@@ -765,6 +836,8 @@ export function createAcpSessionHandle(
       return await reportFailure(error);
     } finally {
       promptInFlight = false;
+      resolveUsageUpdate = undefined;
+      latestUpdateUsage = undefined;
       refusedThisTurn = undefined;
     }
   };

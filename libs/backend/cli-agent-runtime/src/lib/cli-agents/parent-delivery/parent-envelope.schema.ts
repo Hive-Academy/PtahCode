@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AgentId } from '@ptah-extension/shared';
+import { AgentId, LANE_STOP_REASONS } from '@ptah-extension/shared';
 
 export const PARENT_ENVELOPE_INDEX_KEY = 'ptah:parent-envelopes:v1';
 export const PARENT_ENVELOPE_BODY_PREFIX = 'ptah:parent-envelope-body:v1:';
@@ -21,9 +21,7 @@ export const ParentEnvelopeRecordSchema = z.object({
   kind: z.enum(['report', 'completion']),
   dedupeKey: z.string().regex(/^\S{1,470}$/),
   verdict: z.enum(['delivered', 'no-deliverable', 'unverified', 'failed']).optional(),
-  stopReason: z.enum([
-    'repeat-call', 'usage-limit', 'auth', 'session-mismatch', 'host-restart',
-  ]).optional(),
+  stopReason: z.enum(LANE_STOP_REASONS).optional(),
   originName: z.string().min(1).max(200).optional(),
   createdAt: timestamp,
   updatedAt: timestamp,
@@ -55,9 +53,7 @@ export const ParentEnvelopeBodySchema = z.object({
   kind: z.enum(['report', 'completion']),
   dedupeKey: z.string().regex(/^\S{1,470}$/),
   verdict: z.enum(['delivered', 'no-deliverable', 'unverified', 'failed']).optional(),
-  stopReason: z.enum([
-    'repeat-call', 'usage-limit', 'auth', 'session-mismatch', 'host-restart',
-  ]).optional(),
+  stopReason: z.enum(LANE_STOP_REASONS).optional(),
   originName: z.string().min(1).max(200).optional(),
   createdAt: timestamp,
 }).strict();
@@ -96,9 +92,7 @@ export const ParentCompletionOutboxEntrySchema = z.object({
   completedAt: z.string().datetime(),
   body: z.string().max(MAX_BODY_CHARS),
   verdict: z.enum(['delivered', 'no-deliverable', 'unverified', 'failed']),
-  stopReason: z.enum([
-    'repeat-call', 'usage-limit', 'auth', 'session-mismatch', 'host-restart',
-  ]).optional(),
+  stopReason: z.enum(LANE_STOP_REASONS).optional(),
   originName: z.string().min(1).max(200),
   createdAt: timestamp,
 }).strict();

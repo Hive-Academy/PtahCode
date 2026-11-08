@@ -12,6 +12,7 @@
 import { injectable, inject } from 'tsyringe';
 import { FILE_BASED_SETTINGS_DEFAULTS } from '@ptah-extension/platform-core';
 import { Logger, ConfigManager, TOKENS } from '@ptah-extension/vscode-core';
+import { agentBudgetSettingsSchema, parseAgentBudgetSetting, DEFAULT_AGENT_BUDGET_SETTINGS, type AgentBudgetSettings } from '@ptah-extension/shared';
 import {
   isValidAutoCompactWindow,
   parseAutoCompactWindowEnv,
@@ -47,9 +48,7 @@ function budgetDefault(key: string): number {
 
 const BUDGET_KEYS = [
   'compaction.toolOutputBudgetTokens',
-  'compaction.subagentHandoffTokens',
   'compaction.rotationSuggestTokens',
-  'compaction.subagentStopWeightedTokens',
 ] as const;
 
 /**
@@ -71,11 +70,11 @@ export interface CompactionConfig {
   readonly envWindow: number | null;
   /** Per-tool-output cap in tokens (`compaction.toolOutputBudgetTokens`). */
   readonly toolOutputBudgetTokens: number;
-  /** Subagent handoff size in tokens (`compaction.subagentHandoffTokens`). */
+  /** Subagent handoff size in tokens (`agentBudget.handoffContextTokens`). */
   readonly subagentHandoffTokens: number;
   /** Session size at which rotation is suggested (`compaction.rotationSuggestTokens`). */
   readonly rotationSuggestTokens: number;
-  /** Weighted-token total at which a subagent is stopped (`compaction.subagentStopWeightedTokens`). */
+  /** Weighted-token total at which a subagent is stopped (`agentBudget.stopWeightedTokens`). */
   readonly subagentStopWeightedTokens: number;
 }
 
@@ -89,6 +88,19 @@ export interface CompactionConfig {
 export class CompactionConfigProvider {
   /** Invalid budget values already warned about (`key:type:value`). */
   private readonly warnedBudgets = new Set<string>();
+
+  /** Agent limits are independent of the SDK compaction switch. */
+  getAgentBudgetSettings(): AgentBudgetSettings {
+    const values: Record<keyof AgentBudgetSettings, number> = { ...DEFAULT_AGENT_BUDGET_SETTINGS };
+    for (const key of Object.keys(values) as Array<keyof AgentBudgetSettings>) {
+      const raw = this.config.get<unknown>(`agentBudget.${key}`);
+      if (raw === undefined || raw === null) continue;
+      const parsed = parseAgentBudgetSetting(key, raw);
+      if (parsed !== undefined) values[key] = parsed;
+      else this.warnOnce(`agentBudget.${key}:${String(raw)}`, '[CompactionConfigProvider] Invalid agent budget setting; using default', { key, providedType: typeof raw });
+    }
+    return agentBudgetSettingsSchema.parse(values);
+  }
 
   /** Budget defaults, resolved once at construction (key to platform-core default). */
   private readonly budgetDefaults: ReadonlyMap<string, number>;
@@ -171,6 +183,7 @@ export class CompactionConfigProvider {
     }
 
     const envWindow = this.readEnvWindow();
+    const agentBudget = this.getAgentBudgetSettings();
 
     const compactionConfig: CompactionConfig = {
       enabled,
@@ -179,15 +192,11 @@ export class CompactionConfigProvider {
       toolOutputBudgetTokens: this.readBudget(
         'compaction.toolOutputBudgetTokens',
       ),
-      subagentHandoffTokens: this.readBudget(
-        'compaction.subagentHandoffTokens',
-      ),
+      subagentHandoffTokens: agentBudget.handoffContextTokens,
       rotationSuggestTokens: this.readBudget(
         'compaction.rotationSuggestTokens',
       ),
-      subagentStopWeightedTokens: this.readBudget(
-        'compaction.subagentStopWeightedTokens',
-      ),
+      subagentStopWeightedTokens: agentBudget.stopWeightedTokens,
     };
 
     this.logger.debug(

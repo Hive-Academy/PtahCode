@@ -653,7 +653,7 @@ describe('PtahCliStreamLoop plan-limit signals and usage', () => {
 
     const line = 'Completed: 1200 input, 80 output, $0.0123, 1.5s, 2 turns';
     expect(emitOutput).toHaveBeenCalledWith(`\n[${line}]\n`);
-    expect(emitSegment).toHaveBeenCalledWith({
+    expect(emitSegment).toHaveBeenCalledWith(expect.objectContaining({
       type: 'info',
       content: line,
       usage: {
@@ -664,7 +664,7 @@ describe('PtahCliStreamLoop plan-limit signals and usage', () => {
         cacheWriteTokens: 300,
         costUsd: 0.0123,
       },
-    });
+    }));
   });
 
   it('emits modelUsage deltas so the token totals match the cumulative cost scope', async () => {
@@ -699,7 +699,7 @@ describe('PtahCliStreamLoop plan-limit signals and usage', () => {
           outputTokens: 80,
           cacheReadTokens: 150,
           cacheWriteTokens: 50,
-          costUsd: 0.02,
+          costUsd: 0.0077,
         }),
       }),
     );
@@ -760,7 +760,7 @@ describe('PtahCliStreamLoop plan-limit signals and usage', () => {
     expect(emitSegment.mock.calls[0][0].usage.model).toBe('claude-haiku-4-5');
   });
 
-  it('falls back to the init model and leaves unreported values out', async () => {
+  it('does not treat the init model as the billed model', async () => {
     const { loop, emitSegment } = makeSignalLoop();
 
     await loop.run(
@@ -775,11 +775,9 @@ describe('PtahCliStreamLoop plan-limit signals and usage', () => {
       ]),
     );
 
-    expect(emitSegment).toHaveBeenCalledWith({
-      type: 'info',
-      content: 'Completed: 1 turns',
-      usage: { model: 'glm-5.2' },
-    });
+    const records = emitSegment.mock.calls.map(([segment]) => segment.turnTelemetry).filter(Boolean);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ status: 'unavailable', reason: 'no-usage-event' });
   });
 
   it('emits the info line without usage when the result reported none', async () => {
@@ -787,10 +785,9 @@ describe('PtahCliStreamLoop plan-limit signals and usage', () => {
 
     await loop.run(singleMessage(successResult));
 
-    expect(emitSegment).toHaveBeenCalledWith({
-      type: 'info',
-      content: 'Completed: 1 turns',
-    });
+    expect(emitSegment).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'info', content: 'Completed: 1 turns',
+    }));
   });
 
   it('forwards a rate_limit_event as window evidence', async () => {
@@ -953,6 +950,55 @@ describe('PtahCliStreamLoop plan-limit signals and usage', () => {
     expect(exitCode).toBe(0);
     expect(onTurnComplete).toHaveBeenCalledWith(0);
     expect(logger.debug).toHaveBeenCalledTimes(2);
+  });
+
+  it('emits a separate normalized turn record without changing the UI usage segment', async () => {
+    const { loop, emitSegment } = makeSignalLoop();
+    await loop.run(singleMessage(usageResult));
+    const records = emitSegment.mock.calls.map(([segment]) => segment.turnTelemetry).filter(Boolean);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ status: 'reported', usage: { modelId: 'claude-sonnet-4-6', inputTokens: 2400, outputTokens: 80, providerCostUsd: { value: 0.0123 } } });
+  });
+
+  it('reports mixed-model totals without naming one billed model', async () => {
+    const { loop, emitSegment } = makeSignalLoop();
+    const mixed = { ...usageResult, modelUsage: {
+      'claude-sonnet-4-6': { inputTokens: 1200, outputTokens: 80, cacheReadInputTokens: 900, cacheCreationInputTokens: 300 },
+      'claude-haiku-4-5': { inputTokens: 10, outputTokens: 2, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    } } as unknown as SDKMessage;
+    await loop.run(singleMessage(mixed));
+    const records = emitSegment.mock.calls.map(([segment]) => segment.turnTelemetry).filter(Boolean);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ status: 'reported', usage: {
+      modelId: 'mixed-model', inputTokens: 2410, outputTokens: 82,
+      providerCostUsd: { status: 'reported', value: 0.0123 },
+      models: [
+        { modelId: 'claude-sonnet-4-6', inputTokens: 2400, outputTokens: 80 },
+        { modelId: 'claude-haiku-4-5', inputTokens: 10, outputTokens: 2 },
+      ],
+    } });
+  });
+
+  it('uses only the new model delta and cost on a cumulative repeat', async () => {
+    const { loop, emitSegment } = makeSignalLoop();
+    const repeat = { ...usageResult, total_cost_usd: 0.02, modelUsage: {
+      'claude-sonnet-4-6': { inputTokens: 1200, outputTokens: 80, cacheReadInputTokens: 900, cacheCreationInputTokens: 300 },
+      'claude-haiku-4-5': { inputTokens: 10, outputTokens: 2, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    } } as unknown as SDKMessage;
+    await loop.run(manyMessages([usageResult, repeat]));
+    const records = emitSegment.mock.calls.map(([segment]) => segment.turnTelemetry).filter(Boolean);
+    expect(records).toHaveLength(2);
+    expect(records[1]).toMatchObject({ status: 'reported', usage: { modelId: 'claude-haiku-4-5' } });
+    if (records[1]?.status === 'reported' && records[1].usage.providerCostUsd.status === 'reported')
+      expect(records[1].usage.providerCostUsd.value).toBeCloseTo(0.0077);
+  });
+
+  it('emits one unavailable record when the completed turn has no usage', async () => {
+    const { loop, emitSegment } = makeSignalLoop();
+    await loop.run(singleMessage(successResult));
+    const records = emitSegment.mock.calls.map(([segment]) => segment.turnTelemetry).filter(Boolean);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ status: 'unavailable' });
   });
 });
 

@@ -2,6 +2,7 @@ import type {
   LaneCompletionSignal,
   LaneDeliverableCheck,
 } from '@ptah-extension/shared';
+import { isAgentBudgetStopReason } from '@ptah-extension/shared';
 
 function escape(value: string): string {
   return value
@@ -29,6 +30,8 @@ function deliverableLine(check: LaneDeliverableCheck): string {
 /** Who stopped the lane and why, for a lane the host stopped. */
 function hostStopLine(signal: LaneCompletionSignal): string | undefined {
   if (!signal.stopReason) return undefined;
+  if (isAgentBudgetStop(signal))
+    return `Stopped by Ptah (agent budget), not by the user: ${signal.stopReason}; limit: ${signal.budgetLimit ?? 'configured limit'}.${signal.stopReason === 'budget' ? ' Budget warning: finish current work, report progress, and prepare a short handoff before a fresh lane.' : ''}`;
   const calls =
     signal.toolCalls !== undefined ? ` (${signal.toolCalls} tool calls)` : '';
   const why =
@@ -38,7 +41,13 @@ function hostStopLine(signal: LaneCompletionSignal): string | undefined {
   return `Stopped by Ptah: ${why}${calls}. The caller did not stop it.`;
 }
 
+function isAgentBudgetStop(signal: LaneCompletionSignal): boolean {
+  return isAgentBudgetStopReason(signal.stopReason);
+}
+
 function nextAction(signal: LaneCompletionSignal): string {
+  if (isAgentBudgetStop(signal))
+    return 'Next: resume is refused for this CLI session. Read the progress pointer and deliverables, then start a fresh lane with the remaining work.';
   switch (signal.verdict) {
     case 'delivered':
       if (signal.stopReason) {
@@ -92,9 +101,11 @@ export function buildLaneCompletionEnvelope(
     `Reports sent by this lane before it ended: ${signal.reportsDelivered}.`,
   );
   if (signal.cliSessionId)
-    lines.push(
-      `CLI Session ID: ${signal.cliSessionId} — pass it as resume_session_id to continue this lane instead of respawning it.`,
-    );
+    lines.push(isAgentBudgetStop(signal)
+      ? `CLI Session ID: ${signal.cliSessionId} — resume is refused after this budget stop.`
+      : `CLI Session ID: ${signal.cliSessionId} — pass it as resume_session_id to continue this lane instead of respawning it.`);
+  if (isAgentBudgetStop(signal))
+    lines.push(`Progress pointer: ${(signal.progressPointer ?? `CLI Session ID ${signal.cliSessionId ?? 'unavailable'}; inspect lane ${signal.agentId} output`).slice(0, 240)}`);
   lines.push(nextAction(signal));
   return `<agent-lane-completed ${attrs}>\n${lines.join('\n')}\n</agent-lane-completed>`;
 }

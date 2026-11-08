@@ -652,6 +652,7 @@ describe('CopilotSdkAdapter', () => {
           },
         }) + '\n',
       );
+      currentChild?.stdout.write(JSON.stringify({ type: 'result', id: 'native-turn-1', sessionId: 'session-1' }) + '\n');
       currentChild?.emitClose(0);
       await handle.done;
 
@@ -670,6 +671,81 @@ describe('CopilotSdkAdapter', () => {
           durationMs: 3500,
         },
       });
+      expect(segments).toContainEqual(expect.objectContaining({
+        turnTelemetry: expect.objectContaining({
+          status: 'reported', usage: expect.objectContaining({ turnId: 'native-turn-1', inputTokens: 1000, outputTokens: 500, modelId: 'claude-sonnet-4.5' }),
+        }),
+      }));
+    });
+
+    it('aggregates every model call in one turn', async () => {
+      const handle = await adapter.runSdk(defaultOptions);
+      const segments: CliOutputSegment[] = [];
+      handle.onSegment?.((item) => segments.push(item));
+      for (const data of [
+        { model: 'model-a', inputTokens: 100, outputTokens: 20, cost: 0.01 },
+        { model: 'model-b', inputTokens: 50, outputTokens: 10, cost: 0.02 },
+      ]) currentChild?.stdout.write(JSON.stringify({ type: 'assistant.usage', data }) + '\n');
+      currentChild?.emitClose(0);
+      await handle.done;
+      expect(segments.find((item) => item.turnTelemetry)?.turnTelemetry).toMatchObject({
+        status: 'reported', usage: { inputTokens: 150, outputTokens: 30,
+          modelId: 'copilot/multi-model', providerCostUsd: { status: 'reported', value: 0.03 },
+          models: [{ modelId: 'model-a', inputTokens: 100 }, { modelId: 'model-b', inputTokens: 50 }] },
+      });
+    });
+
+    it('keeps usage reported when assistant text starts with the telemetry diagnostic prefix', async () => {
+      const handle = await adapter.runSdk(defaultOptions);
+      const segments: CliOutputSegment[] = [];
+      handle.onSegment?.((item) => segments.push(item));
+      const text = 'Copilot turn telemetry unavailable: quoted by the assistant';
+      currentChild?.stdout.write(JSON.stringify({ type: 'assistant.message', data: { content: text } }) + '\n');
+      currentChild?.stdout.write(JSON.stringify({ type: 'assistant.usage', data: {
+        model: 'model-a', inputTokens: 100, outputTokens: 20,
+      } }) + '\n');
+      currentChild?.emitClose(0);
+      await handle.done;
+
+      expect(segments).toContainEqual({ type: 'text', content: text });
+      expect(segments.find((item) => item.turnTelemetry)?.turnTelemetry).toMatchObject({
+        status: 'reported', usage: { inputTokens: 100, outputTokens: 20, modelId: 'model-a' },
+      });
+    });
+
+    it('marks usage unavailable for missing totals and keeps the diagnostic segment', async () => {
+      const handle = await adapter.runSdk(defaultOptions);
+      const segments: CliOutputSegment[] = [];
+      handle.onSegment?.((item) => segments.push(item));
+      currentChild?.stdout.write(JSON.stringify({ type: 'assistant.usage', data: {
+        model: 'model-a', inputTokens: 100, outputTokens: 20,
+      } }) + '\n');
+      // Exercise the final buffered-line path as well as a preceding valid usage event.
+      currentChild?.stdout.write(JSON.stringify({ type: 'assistant.usage', data: {
+        model: 'model-a', inputTokens: 50,
+      } }));
+      currentChild?.emitClose(0);
+      await handle.done;
+
+      expect(segments).toContainEqual({
+        type: 'info',
+        content: 'Copilot turn telemetry unavailable: complete input/output totals missing.',
+      });
+      expect(segments.find((item) => item.turnTelemetry)?.turnTelemetry).toMatchObject({
+        status: 'unavailable',
+      });
+    });
+
+    it('fails closed when a successful turn has no usage event', async () => {
+      const handle = await adapter.runSdk(defaultOptions);
+      const segments: CliOutputSegment[] = [];
+      handle.onSegment?.((item) => segments.push(item));
+      currentChild?.emitClose(0);
+      await handle.done;
+      expect(segments).toContainEqual(expect.objectContaining({
+        turnTelemetry: expect.objectContaining({ status: 'unavailable', reason: 'no-usage-event' }),
+      }));
+      expect(segments.some((item) => item.type === 'error')).toBe(false);
     });
 
     it('captures sessionId from result event', async () => {

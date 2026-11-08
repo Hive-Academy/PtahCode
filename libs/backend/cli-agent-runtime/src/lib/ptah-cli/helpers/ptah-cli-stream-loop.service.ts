@@ -7,11 +7,13 @@
  *
  */
 
+import { randomUUID } from 'node:crypto';
 import type {
+  AgentTurnTelemetry,
   CliOutputSegment,
   FlatStreamEventUnion,
 } from '@ptah-extension/shared';
-import { SessionId } from '@ptah-extension/shared';
+import { SessionId, completedTurnTelemetry, turnIdentity } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
   SdkMessageTransformer,
@@ -234,6 +236,9 @@ export interface PtahCliStreamLoopConfig {
   readonly planBilledSuccess?: boolean;
 }
 
+/** Aggregate display ID; pricing uses the billed models in `usage.models`. */
+const MULTI_MODEL_ID = 'mixed-model';
+
 /**
  * PtahCliStreamLoop - Consumes the SDK async iterable and dispatches
  * structured segments, raw text, and FlatStreamEventUnion events.
@@ -262,13 +267,15 @@ export class PtahCliStreamLoop {
   private readonly emittedMessageIds = new Set<string>();
   /** Track toolCallIds already emitted via stream_event to avoid duplicate tool_start from assistant */
   private readonly emittedToolCallIds = new Set<string>();
-  /** Model the system init reported; the usage segment's fallback model. */
-  private sessionModel: string | undefined;
+  private turnModelDeltas: Array<{ modelId: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }> = [];
   /**
    * Previous cumulative SDK modelUsage snapshot per model, used to emit one
    * delta per result and to name the model that incurred that delta.
    */
   private readonly previousModelUsage = new Map<string, ModelUsageTotals>();
+  private readonly budgetRunId = randomUUID();
+  /** Previous cumulative result cost, used to recover a turn delta on resume. */
+  private previousResultCostUsd = 0;
   /**
    * Per-turn plan-limit state (Decision 4 S1/S2), reset on every `result`.
    * Scopes and model for plan-limit signals come only from this turn's
@@ -470,7 +477,6 @@ export class PtahCliStreamLoop {
             if (msg.session_id) {
               this.effectiveSessionId = SessionId.from(msg.session_id);
             }
-            if (msg.model) this.sessionModel = msg.model;
             const model = msg.model ?? 'unknown';
             emitOutput(`[PtahCli] Session started (model: ${model})\n`);
             emitSegment({
@@ -645,12 +651,30 @@ export class PtahCliStreamLoop {
               emitOutput(`\n[${usageStr}]\n`);
               // The same line, with the turn's usage attached for the agent
               // card's token and cost tiles (Decision 8).
-              const usage = this.turnUsage(msg);
+              const rawUsage = this.turnUsage(msg);
+              const turnCostUsd = msg.total_cost_usd === undefined ? undefined
+                : Math.max(0, msg.total_cost_usd - this.previousResultCostUsd);
+              if (msg.total_cost_usd !== undefined) this.previousResultCostUsd = msg.total_cost_usd;
+              const usage = rawUsage && { ...rawUsage,
+                ...(turnCostUsd !== undefined && { costUsd: turnCostUsd }) };
+              const turnTelemetry: AgentTurnTelemetry = completedTurnTelemetry({
+                    ...turnIdentity({ provider: 'ptah-cli', sessionId: msg.session_id ?? this.effectiveSessionId,
+                      runId: this.budgetRunId, sequence: this.turnIndex,
+                      modelId: usage?.model ?? (usage?.inputTokens !== undefined ? MULTI_MODEL_ID : undefined),
+                      source: 'sdk' }),
+                    usage: usage ? { ...usage, costUsd: turnCostUsd,
+                      ...(this.turnModelDeltas.length > 1 && { models: this.turnModelDeltas }) } : undefined,
+                    uncachedInput: true,
+                  });
+              const attachTelemetry = usage?.inputTokens !== undefined && usage?.outputTokens !== undefined;
               emitSegment({
                 type: 'info',
                 content: usageStr,
                 ...(usage && { usage }),
+                ...(attachTelemetry && { turnTelemetry }),
               });
+              if (!attachTelemetry)
+                emitSegment({ type: 'info', content: 'Ptah CLI turn telemetry.', turnTelemetry });
               if (!msg.is_error) this.reportTurnSuccess();
               else if (isApiRateLimitResult(msg)) {
                 // The turn still exits 0, so the process manager reads this
@@ -796,7 +820,8 @@ export class PtahCliStreamLoop {
    * main-loop usage fallback.
    */
   private turnUsage(msg: SDKResultSuccess): CliOutputSegment['usage'] {
-    const model = this.turnModel ?? this.sessionModel;
+    this.turnModelDeltas = [];
+    const model = this.turnModel;
     const modelUsageEntries = Object.entries(msg.modelUsage ?? {});
     if (modelUsageEntries.length > 0) {
       let turn: ModelUsageTotals = {
@@ -825,6 +850,8 @@ export class PtahCliStreamLoop {
         };
         if (Object.values(modelDelta).some((value) => value > 0)) {
           modelsWithDelta.push(modelId);
+          this.turnModelDeltas.push({ modelId, ...modelDelta,
+            inputTokens: modelDelta.inputTokens + modelDelta.cacheReadTokens + modelDelta.cacheWriteTokens });
         }
         turn = {
           inputTokens: turn.inputTokens + modelDelta.inputTokens,
@@ -833,6 +860,7 @@ export class PtahCliStreamLoop {
           cacheWriteTokens: turn.cacheWriteTokens + modelDelta.cacheWriteTokens,
         };
       }
+      if (modelsWithDelta.length === 0) return undefined;
       return {
         // Name a model only when exactly one model incurred this turn's delta.
         ...(modelsWithDelta.length === 1 && { model: modelsWithDelta[0] }),
@@ -840,9 +868,6 @@ export class PtahCliStreamLoop {
         outputTokens: turn.outputTokens,
         cacheReadTokens: turn.cacheReadTokens,
         cacheWriteTokens: turn.cacheWriteTokens,
-        ...(msg.total_cost_usd !== undefined && {
-          costUsd: msg.total_cost_usd,
-        }),
       };
     }
     const usage: NonNullable<CliOutputSegment['usage']> = {
@@ -853,10 +878,7 @@ export class PtahCliStreamLoop {
         cacheReadTokens: msg.usage.cache_read_input_tokens,
         cacheWriteTokens: msg.usage.cache_creation_input_tokens,
       }),
-      ...(msg.total_cost_usd !== undefined && {
-        costUsd: msg.total_cost_usd,
-      }),
     };
-    return Object.keys(usage).length > 0 ? usage : undefined;
+    return msg.usage ? usage : undefined;
   }
 }

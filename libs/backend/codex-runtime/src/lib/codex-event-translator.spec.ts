@@ -363,12 +363,12 @@ describe('CodexEventTranslator', () => {
     const clocked = new CodexEventTranslator('context', 4, () => 1_234);
     const first = clocked.translate({
       method: 'thread/tokenUsage/updated',
-      params: { ...ids, model: 'codex-model', tokenUsage: { last: counts, total: counts } },
+      params: { ...ids, parentThreadId: 'parent', model: 'codex-model', tokenUsage: { last: counts, total: counts } },
     });
     const firstEvidence: CodexUsageEvidence | undefined = first[0]?.type === 'usage'
       ? first[0].evidence : undefined;
     expect(firstEvidence).toMatchObject({
-      threadId: 'thread', turnId: 'turn', modelId: 'codex-model',
+      threadId: 'thread', turnId: 'turn', parentThreadId: 'parent', modelId: 'codex-model',
       total: { uncachedInputTokens: 7, outputTokens: 3, cacheReadTokens: 0,
         cacheCreationTokens: 0, reasoningOutputTokens: 1, totalTokens: 10 },
       last: { totalTokens: 10 }, terminalState: 'none', resetOrStale: false,
@@ -884,6 +884,8 @@ describe('CodexEventTranslator', () => {
     expect(translator.translate(itemFrame(wait))).toMatchObject([{ type: 'toolStarted', toolId: 'wait-1' }]);
     expect(translator.translate(itemFrame({ ...wait, status: 'completed' }, true)))
       .toMatchObject([{ type: 'toolCompleted', toolId: 'wait-1', status: 'completed' }]);
+    expect(translator.translate(itemFrame({ ...spawn, receiverThreadIds: [], agentsStates: { child: { status: 'running' } } })))
+      .toMatchObject([{ type: 'toolStarted', agentThreadIds: ['child'] }]);
   });
 
   it('passes MCP failure result content with the error text and drops _meta', () => {

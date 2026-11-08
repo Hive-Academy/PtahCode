@@ -357,6 +357,25 @@ describe('LaneResumeGate', () => {
   });
 });
 
+describe('LaneResumeGate budget refusal', () => {
+  const budgetSettings = { warnRatio: 0.8, stopWeightedTokens: 1_000, handoffContextTokens: 1_000, maxDurationMin: 10 };
+  it('starts fresh after an internal budget stop', async () => {
+    const result = await gateWith().gate.evaluate({ cli: 'claude', cliSessionId: 's', stopReason: 'budget', budgetSettings });
+    expect(result.decision).toBe('fresh');
+    expect(result.reason).toContain('cannot resume');
+  });
+  it('starts fresh at the warning threshold', async () => {
+    const result = await gateWith().gate.evaluate({ cli: 'claude', cliSessionId: 's', budgetSettings,
+      budget: { weightedTokens: 800, rawTokens: 800, turnIds: [], startedAtMs: NOW - 1_000 } });
+    expect(result.decision).toBe('fresh');
+  });
+  it('refuses a token-empty lane after its lifetime expires', async () => {
+    const result = await gateWith().gate.evaluate({ cli: 'claude', cliSessionId: 's', budgetSettings,
+      budget: { weightedTokens: 0, rawTokens: 0, turnIds: [], startedAtMs: NOW - 11 * 60_000 } });
+    expect(result).toMatchObject({ decision: 'fresh', reason: 'lane lifetime budget expired' });
+  });
+});
+
 describe('collectHandoffCarryOver', () => {
   it('uses the checkpoint text and leads with its earlier changed files', () => {
     const checkpoint = {

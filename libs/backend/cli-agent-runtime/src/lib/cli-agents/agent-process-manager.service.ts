@@ -31,6 +31,7 @@ import {
   AgentOutput,
   CliType,
   normalizeWorkspaceRoot,
+  isAgentBudgetStopReason,
 } from '@ptah-extension/shared';
 import type {
   AgentMessageOutcome,
@@ -107,6 +108,10 @@ import {
   resolveLaneAccountResume,
 } from './lane-resume-gate';
 import { LaneBudgetGuard } from './lane-budget-guard';
+import { AgentBudgetCoordinator } from './agent-budget-coordinator';
+import { createLaneBudget } from './lane-budget-deadline';
+import { deliverLaneBudgetWarning, LaneBudgetTelemetry } from './lane-budget-telemetry';
+import { bindLaneSessionId } from './lane-session-binding';
 import type { AgentOutputJournal } from './agent-output-journal.service';
 import {
   applyOutputCheckpoint,
@@ -119,6 +124,8 @@ import {
   waitForRecoveredWrites,
   type TrackedRecoveredWrite,
   stampWorkspaceKey,
+  laneRecordsForSession,
+  previousResumeRecord,
 } from './lane-restore';
 import { findBlockedLaneModel } from './lane-spawn-policy';
 import { CLI_AGENT_RUNTIME_TOKENS } from '../di/tokens';
@@ -137,9 +144,7 @@ import {
 import { matchesAuthFailure } from './limits/lane-auth-classifier';
 import { matchesApiRateLimit } from './limits/lane-rate-limit-classifier';
 import { laneRouteFingerprint } from './limits/lane-limit-lookup.service';
-
 const DEFAULT_AGENT_READ_TAIL_LINES = 200;
-
 /** How much of a failed lane's output tail the limit classifier reads. */
 const LIMIT_CLASSIFIER_TAIL_CHARS = 16 * 1024;
 /** Error segments the classifier reads, newest first, and each one's cap. */
@@ -150,7 +155,6 @@ const STRUCTURED_EXIT_ZERO_LIMIT_ERROR =
   /^(?:API rate limit \(HTTP 429\)|API Error: Request rejected \((?:402|429)\)|(?:HTTP(?:\s+status)?|status(?:\s+code)?)\s*[:=]?\s*(?:402|429)\b[^\n]*(?:usage|quota|rate limit|RESOURCE_EXHAUSTED|balance exhausted|Too Many Requests))/im;
 const STRUCTURED_EXIT_ZERO_AUTH_ERROR =
   /^(?:API Error: Request rejected \(401\)|(?:HTTP(?:\s+status)?|status(?:\s+code)?)\s*[:=]?\s*401\b|Authentication (?:failed|required)\b|Invalid API key\b|Not logged in\b)/im;
-
 /**
  * How a completed system CLI lane was billed (Decision 4, S3). Only `plan`
  * clears unknown-reset exhaustion. Codex can bill credits after a limit and
@@ -162,7 +166,6 @@ const LANE_SUCCESS_BILLING: Partial<Record<CliType, PlanLimitBilling>> = {
   codex: 'unknown',
   opencode: 'unknown',
 };
-
 /** The ledger writes a lane makes. */
 type LanePlanLimitLedger = Pick<
   PlanLimitLedgerService,
@@ -183,7 +186,6 @@ export {
  * possible. Stripping these chars corrupts legitimate prompts containing
  * code characters ($, (), {}, backticks, etc.).
  */
-
 export type AgentContinueErrorCode =
   | 'not_found'
   | 'invalid_params'
@@ -275,6 +277,7 @@ export type AgentWaitMode = 'any' | 'all';
 
 /** Longest {@link AgentProcessManager.waitForAgents} wait: 15 minutes (TASK_2026_597, D13). */
 export const MAX_AGENT_WAIT_MS = 900_000;
+
 const MAX_RESOLVED_PARENT_SESSIONS = 256;
 
 /**
@@ -338,7 +341,6 @@ export class LaneModelBlockedError extends Error {
     this.name = 'LaneModelBlockedError';
   }
 }
-
 @injectable()
 export class AgentProcessManager {
   private readonly agents = new Map<string, TrackedAgent>();
@@ -365,13 +367,14 @@ export class AgentProcessManager {
    */
   private readonly laneGuards = new Map<string, LaneBudgetGuard>();
   private readonly completionClaims = new Set<string>();
+  private readonly budgetTelemetry: LaneBudgetTelemetry;
+  private readonly budgetSettingsSubscription?: { dispose(): void };
   /** Counter for in-flight spawn operations (not yet in agents map) */
   private spawning = 0;
   /** Promise-based mutex to serialize spawn operations and prevent TOCTOU race in concurrent limit check */
   private spawnMutex: Promise<void> = Promise.resolve();
   /** Pending recovered-output persists of restored lanes, keyed by agent id. */
   private readonly recoveredOutputWrites = new Map<string, TrackedRecoveredWrite>();
-
   /** EventEmitter for agent lifecycle events (spawned, output, exited) */
   readonly events = new EventEmitter();
 
@@ -448,12 +451,27 @@ export class AgentProcessManager {
     @inject(CLI_AGENT_RUNTIME_TOKENS.AGENT_OUTPUT_JOURNAL, { isOptional: true })
     private readonly outputJournal?: AgentOutputJournal,
   ) {
-    this.logger.info('[AgentProcessManager] Initialized');
+    this.budgetTelemetry = new LaneBudgetTelemetry(this.logger,
+      async (agentId) => {
+        return deliverLaneBudgetWarning(agentId, this.agents.get(agentId)?.sdkHandle,
+          (id, message, delivery) => this.sendToAgent(id, message, delivery));
+      },
+      (agentId, reason) => { void this.stopLaneForGuard(agentId, reason, 0, 0); });
+    this.budgetSettingsSubscription = this.spawnEnvironment.onAgentBudgetSettingsChanged?.(() => {
+      const settings = this.spawnEnvironment.resolveAgentBudgetSettings();
+      for (const [agentId, tracked] of this.agents) {
+        if (tracked.info.status !== 'running' || !tracked.budget) continue;
+        const decision = tracked.budget.updateSettings(settings);
+        tracked.info = { ...tracked.info, agentBudget: tracked.budget.record() };
+        if (decision.stopReason) clearTimeout(tracked.budgetTimer);
+        else this.budgetTelemetry.armDeadline(agentId, tracked, () => this.agents.get(agentId) === tracked);
+        this.budgetTelemetry.dispatch(agentId, tracked, decision);
+      }
+    });
   }
 
   /**
    * Spawn a new CLI agent process.
-   *
    * Only the cap check and the slot reservation are serialized
    * ({@link reserveSpawnSlot}). CLI detection, working-directory validation,
    * the harness preflight and the SDK launch all run OUTSIDE the mutex, so a
@@ -698,7 +716,7 @@ export class AgentProcessManager {
     resumeSessionId: string,
     cli: CliType,
   ): Promise<GatedResume> {
-    const lane = this.laneRecordsForSession(resumeSessionId);
+    const lane = laneRecordsForSession(this.agents.values(), resumeSessionId);
     const latest = lane[lane.length - 1];
     const lastActivityAt = latest
       ? laneLastActivityAt(latest.info)
@@ -715,6 +733,13 @@ export class AgentProcessManager {
     const gate = await this.resumeGate.evaluate({
       cli,
       cliSessionId: resumeSessionId,
+      ...(latest?.info.agentBudget || isAgentBudgetStopReason(latest?.info.stopReason)
+        ? {
+            ...(latest.info.agentBudget ? { budget: latest.info.agentBudget } : {}),
+            ...(latest.info.stopReason ? { stopReason: latest.info.stopReason } : {}),
+            budgetSettings: this.spawnEnvironment.resolveAgentBudgetSettings(),
+          }
+        : {}),
       accountReference: latest ? laneAccountFields(latest.info) : undefined,
       accountBindings: this.cliDetection.getAdapter(cli)?.accountBindings,
       ...(Number.isFinite(lastActivityAt) ? { lastActivityAt } : {}),
@@ -838,32 +863,6 @@ export class AgentProcessManager {
     throw new LaneModelBlockedError(model ?? blockedModel);
   }
 
-  /**
-   * Every record this host holds for one CLI session, oldest first. A resumed
-   * lane keeps its session id, so a lane resumed twice has three records; the
-   * first holds the original task and the last the latest activity.
-   */
-  private laneRecordsForSession(cliSessionId: string): TrackedAgent[] {
-    return Array.from(this.agents.values())
-      .filter((tracked) => tracked.info.cliSessionId === cliSessionId)
-      .sort((a, b) => a.info.startedAt.localeCompare(b.info.startedAt));
-  }
-
-  /** Most recently started record for this provider's CLI conversation. */
-  private previousResumeRecord(
-    cli: CliType,
-    cliSessionId: string | undefined,
-  ): AgentProcessInfo | undefined {
-    if (!cliSessionId) return undefined;
-    let latest: AgentProcessInfo | undefined;
-    for (const tracked of this.agents.values()) {
-      const info = tracked.info;
-      if (info.cli !== cli || info.cliSessionId !== cliSessionId) continue;
-      if (!latest || info.startedAt >= latest.startedAt) latest = info;
-    }
-    return latest;
-  }
-
   private resumedOwner(
     requested: string | undefined,
     previous: AgentProcessInfo | undefined,
@@ -926,7 +925,7 @@ export class AgentProcessManager {
     } = options;
     const agentId = AgentId.create();
     const startedAt = new Date().toISOString();
-    const previous = this.previousResumeRecord(cli, request.resumeSessionId);
+    const previous = previousResumeRecord(this.agents.values(), cli, request.resumeSessionId);
     const laneModel = this.spawnEnvironment.resolveModel(
       cli,
       request.model,
@@ -1196,7 +1195,7 @@ export class AgentProcessManager {
 
       const agentId = meta.agentId ?? AgentId.create();
       const startedAt = new Date().toISOString();
-      const previous = this.previousResumeRecord(
+      const previous = previousResumeRecord(this.agents.values(),
         meta.cli,
         meta.resumeSessionId,
       );
@@ -1365,7 +1364,14 @@ export class AgentProcessManager {
       turnSegmentStart: 0,
     };
 
+    const previousBudget = info.cliSessionId
+      ? previousResumeRecord(this.agents.values(), info.cli, info.cliSessionId)?.agentBudget
+      : undefined;
+    const budget = createLaneBudget(this.spawnEnvironment.resolveAgentBudgetSettings(), info.startedAt, previousBudget);
+    tracked.budget = budget;
+    tracked.info = { ...tracked.info, agentBudget: budget.record() };
     this.agents.set(agentId, tracked);
+    this.budgetTelemetry.armDeadline(agentId, tracked, () => this.agents.get(agentId) === tracked);
     const turn = Symbol('lane-turn');
     this.turns.set(tracked, turn);
     sdkHandle.setAgentId?.(agentId);
@@ -1374,25 +1380,11 @@ export class AgentProcessManager {
       this.flushDelta(agentId);
     };
     const updateCliSessionId = (sessionId: string | undefined): void => {
-      if (!sessionId || sessionId === tracked.info.cliSessionId) return;
-      const previous = tracked.info.cliSessionId;
-      // Only a Codex lane abandons its first thread (bundled fallback before
-      // any turn). For other CLIs a different resolved id is not a
-      // replacement: the pre-set resume id must keep its own reference.
-      const replaced =
-        previous && tracked.info.cli === 'codex'
-          ? [
-              ...new Set([
-                ...(tracked.info.replacesCliSessionIds ?? []),
-                previous,
-              ]),
-            ]
-          : tracked.info.replacesCliSessionIds;
-      tracked.info = {
-        ...tracked.info,
-        cliSessionId: sessionId,
-        ...(replaced ? { replacesCliSessionIds: replaced } : {}),
-      };
+      const decision = bindLaneSessionId(tracked, sessionId, this.agents.values());
+      if (decision) {
+        this.budgetTelemetry.armDeadline(agentId, tracked, () => this.agents.get(agentId) === tracked);
+        this.budgetTelemetry.dispatch(agentId, tracked, decision);
+      }
     };
     sdkHandle.onOutput((data: string) => {
       const current = this.agents.get(agentId);
@@ -1479,8 +1471,12 @@ export class AgentProcessManager {
       );
       sdkHandle.onSegment((segment: CliOutputSegment) => {
         if (this.agents.get(agentId) !== tracked) return;
+        if (captureSessionId) updateCliSessionId(captureSessionId());
         if (sdkHandle.outcomeUsageIsTurnTotal && segment.usage) {
           tracked.outcomeUsage = segment.usage;
+        }
+        if (segment.turnTelemetry) {
+          this.budgetTelemetry.accept(agentId, tracked, segment.turnTelemetry);
         }
         this.outputBuffer.appendSegment(
           agentId,
@@ -1490,10 +1486,6 @@ export class AgentProcessManager {
         );
         this.recordRequestContext(tracked, segment);
         this.applyLaneGuard(agentId, segment);
-        if (captureSessionId) {
-          const sessionId = captureSessionId();
-          updateCliSessionId(sessionId);
-        }
       });
     }
     if (sdkHandle.onStreamEvent) {
@@ -1619,7 +1611,9 @@ export class AgentProcessManager {
     const tracked = this.agents.get(agentId);
     if (!tracked || tracked.info.status !== 'running') return;
 
-    this.logger.warn('[AgentProcessManager] Lane guard tripped; stopping', {
+    this.logger.warn(isAgentBudgetStopReason(stopReason)
+      ? '[AgentProcessManager] Agent budget tripped; stopping'
+      : '[AgentProcessManager] Lane repeat guard tripped; stopping', {
       agentId,
       stopReason,
       repeats,
@@ -1791,6 +1785,7 @@ export class AgentProcessManager {
         startedAt: ref.startedAt,
         ...(ref.turnSeq !== undefined ? { turnSeq: ref.turnSeq } : {}),
         ...(ref.cliSessionId ? { cliSessionId: ref.cliSessionId } : {}),
+        ...(ref.agentBudget ? { agentBudget: ref.agentBudget } : {}),
         // The owner the run recorded (Gate 2 G3). `getCliSessionsForRestore`
         // already dropped a malformed or legacy value, so a run without one
         // stays "Unknown owner" and is never given the current owner.
@@ -2421,11 +2416,8 @@ export class AgentProcessManager {
    * Deliver one message to a spawned agent by the best mechanism it supports,
    * and report which mechanism actually fired.
    *
-   * This replaces the old `steer()`, which could only ever answer "steering is
-   * not supported" for five of the six CLIs. Mode selection and the pending
-   * queue live in {@link AgentMessageRouter}; this method owns the three record
-   * states no mechanism can serve, because they are states of the MAP, not of
-   * the agent's messaging surface.
+   * Mode selection and the pending queue live in {@link AgentMessageRouter}; this method owns the three record
+   * states no mechanism can serve, because they belong to the agent record.
    *
    * A completed-but-alive continuation-capable agent is deliberately NOT one of
    * them: the honest answer there is "this message starts a new turn", which is
@@ -2598,6 +2590,10 @@ export class AgentProcessManager {
       );
     }
 
+    if (tracked.budget?.expired() || isAgentBudgetStopReason(tracked.info.stopReason)) {
+      throw new AgentContinueError('released', 'Lane budget exhausted; start a fresh lane.');
+    }
+
     const turn = Symbol('lane-turn');
     this.turns.set(tracked, turn);
 
@@ -2639,6 +2635,7 @@ export class AgentProcessManager {
     tracked.guardToolCalls = undefined;
     tracked.repeatedCalls = undefined;
     tracked.queuedMessagesDropped = undefined;
+    if (tracked.budget) this.budgetTelemetry.armDeadline(agentId, tracked, () => this.agents.get(agentId) === tracked);
     this.armInactivityWatchdog(agentId, tracked);
 
     this.events.emit('agent:spawned', tracked.info);
@@ -2733,6 +2730,8 @@ export class AgentProcessManager {
       return tracked.info;
     }
 
+    clearTimeout(tracked.budgetTimer);
+
     this.flushDelta(agentId);
     // Stamped BEFORE the kill, not after. The kill makes the handle settle,
     // which runs `handleExit` — and that path reads `status === 'running'` and
@@ -2796,6 +2795,7 @@ export class AgentProcessManager {
    * tree-kill and the host stops waiting on it.
    */
   async disposeAll(): Promise<void> {
+    this.budgetSettingsSubscription?.dispose();
     const entries = Array.from(this.agents.entries());
     this.logger.info('[AgentProcessManager] Disposing all agents...', {
       agents: entries.length,
@@ -2820,6 +2820,7 @@ export class AgentProcessManager {
         clearTimeout(tracked.exitEmitHandle);
       }
       clearTimeout(tracked.timeoutHandle);
+      clearTimeout(tracked.budgetTimer);
       this.clearIdleRelease(tracked);
       this.outputBuffer.discard(agentId);
     }
@@ -2997,6 +2998,7 @@ export class AgentProcessManager {
   private async handleTimeout(agentId: string): Promise<void> {
     const tracked = this.agents.get(agentId);
     if (!tracked || tracked.info.status !== 'running') return;
+    clearTimeout(tracked.budgetTimer);
 
     this.logger.warn(
       '[AgentProcessManager] Agent produced no output for the whole inactivity window — treating it as hung',
@@ -3192,6 +3194,7 @@ export class AgentProcessManager {
     if (!tracked) return;
     if (tracked.hasExited) return;
     tracked.hasExited = true;
+    clearTimeout(tracked.budgetTimer);
     if (tracked.sdkHandle?.supportsContinuation?.() !== true) {
       void this.instructionFiles?.remove(agentId).catch((error: unknown) => {
         this.logger.warn(

@@ -154,7 +154,8 @@ export function recordLaneUsageOutcome(
       revision: info.turnSeq ?? 0,
       models: [
         {
-          modelId: usage.model ?? info.model ?? null,
+          // The requested alias is not evidence of the model that incurred cost.
+          modelId: usage.model ?? null,
           inputTokens,
           outputTokens,
           cacheReadTokens,

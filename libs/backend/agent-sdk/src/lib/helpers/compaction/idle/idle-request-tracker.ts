@@ -14,10 +14,27 @@ import {
 } from './idle-compaction.types';
 
 export function classifyCacheTtl(
-  usage: SubagentRequestUsage | undefined,
+  split: CacheWriteTtlSplit | undefined,
 ): CacheTtlClass {
-  const split = usage?.cacheWriteByTtl;
   return split && split['1h'] > 0 && split['5m'] === 0 ? '1h' : 'not-1h';
+}
+
+type CacheWriteTtlSplit = Readonly<{ '1h': number; '5m': number }>;
+
+function readCacheWriteTtlSplit(frame: unknown): CacheWriteTtlSplit | undefined {
+  if (typeof frame !== 'object' || frame === null) return undefined;
+  const message = Reflect.get(frame, 'message') as unknown;
+  if (typeof message !== 'object' || message === null) return undefined;
+  const usage = Reflect.get(message, 'usage') as unknown;
+  if (typeof usage !== 'object' || usage === null) return undefined;
+  const split = Reflect.get(usage, 'cache_creation') as unknown;
+  if (typeof split !== 'object' || split === null) return undefined;
+  const hour = Reflect.get(split, 'ephemeral_1h_input_tokens') as unknown;
+  const minutes = Reflect.get(split, 'ephemeral_5m_input_tokens') as unknown;
+  const valid = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isFinite(value) && value >= 0;
+  if (!valid(hour) && !valid(minutes)) return undefined;
+  return { '1h': valid(hour) ? hour : 0, '5m': valid(minutes) ? minutes : 0 };
 }
 
 /** Tracks only top-level frames; the tap filters subagent frames before calling observe. */
@@ -27,9 +44,11 @@ export class MainRequestTracker {
   private requestKey: string | null = null;
   private anchorAt = 0;
   private usage: SubagentRequestUsage | undefined;
+  private ttlSplit: CacheWriteTtlSplit | undefined;
   private cacheRequestKey: string | null = null;
   private cacheAnchorAt: number | null = null;
   private cacheUsage: SubagentRequestUsage | undefined;
+  private cacheTtlSplit: CacheWriteTtlSplit | undefined;
 
   constructor(startAt: number) {
     this.turnStartAt = startAt;
@@ -66,9 +85,11 @@ export class MainRequestTracker {
           this.lastNonRequestFrameAt - IDLE_ANCHOR_SKEW_MS,
         );
         this.usage = undefined;
+        this.ttlSplit = undefined;
       }
       if (frame.type === 'assistant') {
         this.usage = readSubagentRequestUsage(frame);
+        this.ttlSplit = readCacheWriteTtlSplit(frame);
       }
       const model = frame.type === 'assistant' ? frame.message?.model :
         isStreamEvent(frame) && frame.event && isMessageStart(frame.event)
@@ -83,9 +104,11 @@ export class MainRequestTracker {
           ? Math.max(this.anchorAt, at - IDLE_ANCHOR_SKEW_MS)
           : this.anchorAt;
         this.cacheUsage = undefined;
+        this.cacheTtlSplit = undefined;
       }
       if (frame.type === 'assistant') {
         this.cacheUsage = this.usage;
+        this.cacheTtlSplit = this.ttlSplit;
       }
       return started ? 'request-started' : null;
     } catch {
@@ -103,23 +126,25 @@ export class MainRequestTracker {
         : {
             requestKey: this.requestKey,
             anchorAt: this.anchorAt,
-            ttl: classifyCacheTtl(this.usage),
+            ttl: classifyCacheTtl(this.ttlSplit),
             cacheAnchorAt: this.cacheAnchorAt,
             cacheReadTokens: this.cacheUsage?.cacheReadTokens ?? 0,
             cacheWriteTokens: this.cacheUsage?.cacheWriteTokens ?? 0,
-            cacheWriteTtl: this.cacheUsage?.cacheWriteByTtl
-              ? this.cacheUsage.cacheWriteByTtl['5m'] > 0
+            cacheWriteTtl: this.cacheTtlSplit
+              ? this.cacheTtlSplit['5m'] > 0
                 ? '5m'
-                : this.cacheUsage.cacheWriteByTtl['1h'] > 0
+                : this.cacheTtlSplit['1h'] > 0
                   ? '1h'
                   : null
               : null,
           };
     this.requestKey = null;
     this.usage = undefined;
+    this.ttlSplit = undefined;
     this.cacheRequestKey = null;
     this.cacheAnchorAt = null;
     this.cacheUsage = undefined;
+    this.cacheTtlSplit = undefined;
     if (Number.isFinite(at)) {
       this.turnStartAt = at;
       this.lastNonRequestFrameAt = at;

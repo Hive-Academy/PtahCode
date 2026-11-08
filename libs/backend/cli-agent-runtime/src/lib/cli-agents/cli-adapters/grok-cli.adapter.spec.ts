@@ -438,7 +438,7 @@ describe('GrokCliAdapter', () => {
           sessionUpdate: 'agent_message_chunk',
           content: { type: 'text', text: 'Hello from Grok' },
         });
-        return { result: { stopReason: 'end_turn' } };
+        return { result: { stopReason: 'end_turn', _meta: { usage: { inputTokens: 44, outputTokens: 7, cacheReadTokens: 5, model: 'grok-4.7' } } } };
       });
 
       const handle = await adapter.runSdk({
@@ -489,6 +489,9 @@ describe('GrokCliAdapter', () => {
       expect(handle.supportsContinuation?.()).toBe(true);
       expect(output.join('')).toContain('Hello from Grok');
       expect(segments.filter((s) => s.type === 'error')).toEqual([]);
+      expect(segments.find((s) => s.turnTelemetry)?.turnTelemetry).toMatchObject({
+        status: 'reported', usage: { modelId: 'grok-4.7', inputTokens: 44, outputTokens: 7, cacheReadTokens: { status: 'reported', value: 5 } },
+      });
       expect(
         segments.filter((s) => s.type === 'info' && s.content.includes('x.ai')),
       ).toEqual([]);

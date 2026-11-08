@@ -64,6 +64,17 @@ describe('subagent budget hooks', () => {
     expect(monitor.finishWarnedAgent).toHaveBeenCalledWith(parentSession, agent);
   });
 
+  it('uses the rekeyed parent session and Agent tool id for an interrupted handoff', async () => {
+    const liveHooks = createSubagentBudgetHooks(logger, monitor, 'parent-before-rekey');
+    monitor.takeInterruptedHandoff.mockReturnValueOnce('Ptah handoff for task-9');
+    const callback = liveHooks.PostToolUseFailure?.[0]?.hooks[0];
+    if (!callback) throw new Error('budget hook missing');
+    await callback({ hook_event_name: 'PostToolUseFailure', session_id: 'parent-after-rekey',
+      tool_name: 'Agent', tool_use_id: 'toolu_task_9', is_interrupt: true,
+    } as HookInput, 'toolu_task_9', { signal: new AbortController().signal });
+    expect(monitor.takeInterruptedHandoff).toHaveBeenCalledWith('parent-after-rekey', 'toolu_task_9');
+  });
+
   it('logs a rejected notes check and denies a gated agent without rejecting the hook', async () => {
     monitor.hasNotesGate.mockReturnValueOnce(true);
     monitor.checkNotesTool.mockRejectedValueOnce(new Error('gate failed'));

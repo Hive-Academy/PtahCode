@@ -19,6 +19,12 @@ import {
 import { CodexPermissionRuleStore } from './codex-permission-rule-store';
 import { CodexProtocolError, codexNotificationSchemas } from './codex-protocol-validator';
 import { RuntimeContext, type CodexRuntimeOptions } from './codex-context';
+import {
+  observeCodexChildBudgets,
+  errorClass,
+  type CodexChildBudgetObserver,
+  type CodexChildBudgetPort,
+} from './codex-child-budget-observer';
 import type { CodexExecutableSelection, CodexSelection } from './select-codex-executable';
 import type { IProcessSpawner } from './codex-runtime-ports';
 import type {
@@ -77,6 +83,8 @@ export interface CodexRuntimeUsageNotifications {
 
 type RuntimeOptions = CodexRuntimeOptions & {
   readonly usage?: CodexRuntimeUsageNotifications | null;
+  /** When set, each opened context gets exactly one child-budget observer. */
+  readonly childBudget?: CodexChildBudgetPort | null;
 };
 
 const limitsUpdatedEnvelope = z.object({
@@ -123,7 +131,7 @@ class RateLimitsObserver {
       this.options.usage?.onContextClosed?.(this.profile.contextId);
     } catch (error: unknown) {
       this.options.logger.error('Codex usage context cleanup failed', {
-        errorClass: error instanceof Error ? error.constructor.name : typeof error,
+        errorClass: errorClass(error),
       });
     }
   }
@@ -181,6 +189,10 @@ class RateLimitsObserver {
 export class CodexRuntime implements RuntimePort, CodexHistoryReader {
   private readonly contexts = new Map<string, RuntimeContext>();
   private readonly observers = new Map<string, RateLimitsObserver>();
+  private readonly childBudgets = new Map<
+    string,
+    { readonly context: CodexContext; readonly observer: CodexChildBudgetObserver }
+  >();
   private readonly generations = new Map<string, number>();
   private readonly rules = new CodexPermissionRuleStore();
   private readonly historyReads = new Map<AbortController, Promise<void>>();
@@ -327,6 +339,7 @@ export class CodexRuntime implements RuntimePort, CodexHistoryReader {
           this.contexts.delete(profile.contextId);
         observer?.dispose();
         this.observers.delete(profile.contextId);
+        this.stopChildBudget(profile.contextId, context);
       },
     );
     this.contexts.set(profile.contextId, context);
@@ -338,13 +351,14 @@ export class CodexRuntime implements RuntimePort, CodexHistoryReader {
       } catch (error: unknown) {
         if (error instanceof CodexUnsupportedMethodError) throw error;
         this.options.logger.warn('Codex model catalog is unavailable', {
-          errorClass: error instanceof Error ? error.constructor.name : typeof error,
+          errorClass: errorClass(error),
         });
       }
       this.options.usage?.onContextOpened?.(profile.contextId);
       observer?.activate();
       this.contextSelections.set(context, executable === openedSelection.selected
         ? openedSelection : { selected: executable });
+      this.attachChildBudget(profile.contextId, context);
       return context;
     } catch (error) {
       await context.close();
@@ -448,7 +462,37 @@ export class CodexRuntime implements RuntimePort, CodexHistoryReader {
     );
     for (const observer of this.observers.values()) observer.dispose();
     this.observers.clear();
+    for (const contextId of [...this.childBudgets.keys()])
+      this.stopChildBudget(contextId);
     this.rules.dispose();
+  }
+
+  /** The observer subscribes to the returned context; callers get the context unchanged. */
+  private attachChildBudget(contextId: string, context: CodexContext): void {
+    const port = this.options.childBudget;
+    if (!port) return;
+    this.stopChildBudget(contextId);
+    try {
+      this.childBudgets.set(contextId, {
+        context,
+        observer: observeCodexChildBudgets(context, port, this.options.logger, () =>
+          this.options.clock.now(),
+        ),
+      });
+    } catch (error: unknown) {
+      // degradation-audit: reported - child budgets are advisory; an invalid host setting must not refuse the open
+      this.options.logger.warn('[Codex budget] Child budget observer unavailable', {
+        errorClass: errorClass(error),
+      });
+    }
+  }
+
+  /** With `owner`, stop only the observer of that context, never a later reopen. */
+  private stopChildBudget(contextId: string, owner?: CodexContext): void {
+    const entry = this.childBudgets.get(contextId);
+    if (!entry || (owner && entry.context !== owner)) return;
+    entry.observer.dispose();
+    this.childBudgets.delete(contextId);
   }
 }
 

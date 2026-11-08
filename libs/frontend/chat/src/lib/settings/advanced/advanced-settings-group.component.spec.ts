@@ -400,10 +400,15 @@ describe('AdvancedSettingsGroupComponent', () => {
         input.parentElement?.querySelector('[aria-hidden="true"]')?.textContent?.trim(),
       ).toBe('tokens');
       expect(
-        field('compaction.subagentHandoffTokens').getAttribute(
+        field('agentBudget.handoffContextTokens').getAttribute(
           'inputmode',
         ),
       ).toBe('numeric');
+      for (const key of ['agentBudget.warnRatio', 'agentBudget.stopWeightedTokens', 'agentBudget.handoffContextTokens', 'agentBudget.maxDurationMin']) {
+        expect(byTestId(`advanced-setting-${key}`)).not.toBeNull();
+      }
+      expect(byTestId('advanced-setting-compaction.subagentHandoffTokens')).toBeNull();
+      expect(byTestId('advanced-setting-compaction.subagentStopWeightedTokens')).toBeNull();
       await enter('compaction.toolOutputBudgetTokens', '3000');
       expect(writes()).toEqual([
         { key: 'compaction.toolOutputBudgetTokens', value: 3000 },

@@ -29,18 +29,11 @@ const assistant = (
 });
 
 describe('classifyCacheTtl', () => {
-  const base = {
-    inputTokens: 1,
-    outputTokens: 1,
-    cacheReadTokens: 0,
-    cacheWriteTokens: 0,
-  };
   it.each([
     [undefined, 'not-1h'],
-    [{ ...base, cacheWriteByTtl: { '1h': 5, '5m': 0 } }, '1h'],
-    [{ ...base, cacheWriteByTtl: { '1h': 5, '5m': 1 } }, 'not-1h'],
-    [{ ...base, cacheWriteByTtl: { '1h': 0, '5m': 0 } }, 'not-1h'],
-    [base, 'not-1h'],
+    [{ '1h': 5, '5m': 0 }, '1h'],
+    [{ '1h': 5, '5m': 1 }, 'not-1h'],
+    [{ '1h': 0, '5m': 0 }, 'not-1h'],
   ] as const)('classifies %p as %s', (usage, expected) => {
     expect(classifyCacheTtl(usage)).toBe(expected);
   });

@@ -13,6 +13,7 @@ describe('SubagentNotesGate', () => {
     expect(gate.check('agent-1', 'Write', { file_path: '../outside.md' }, 101).reason).toContain(notes);
     expect(gate.check('agent-1', 'Write', { file_path: `${notes}.other` }, 102).reason).toContain(notes);
     expect(gate.check('agent-1', 'Write', { file_path: notes }, 103).reason).toBeUndefined();
+    expect(gate.check('agent-1', 'Edit', { file_path: notes }, 104).reason).toBeUndefined();
     expect(gate.check('agent-1', 'Read', { file_path: notes }, 104).reason).toContain('End your turn now');
   });
 

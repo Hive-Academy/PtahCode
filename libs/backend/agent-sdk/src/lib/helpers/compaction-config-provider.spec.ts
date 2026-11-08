@@ -42,6 +42,13 @@ afterEach(() => {
 });
 
 describe('CompactionConfigProvider.getConfig', () => {
+  it('keeps defaults for null and out-of-range budget values', () => {
+    const { provider, warn } = makeProvider({ 'agentBudget.maxDurationMin': 1_000_000,
+      'agentBudget.warnRatio': null, 'agentBudget.stopWeightedTokens': 2_000 });
+    expect(provider.getAgentBudgetSettings()).toMatchObject({ maxDurationMin: 90,
+      warnRatio: 0.85, stopWeightedTokens: 2_000 });
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
   it('uses the injected development idle minimum', () => {
     expect(makeProvider({}, 1_000).provider.getIdleCompactionConfig().minTokens).toBe(1_000);
   });
@@ -245,14 +252,19 @@ describe('CompactionConfigProvider.getIdleCompactionConfig', () => {
 describe('CompactionConfigProvider.getConfig — budget keys', () => {
   const BUDGETS = [
     ['compaction.toolOutputBudgetTokens', 'toolOutputBudgetTokens', 2500],
-    ['compaction.subagentHandoffTokens', 'subagentHandoffTokens', 150_000],
     ['compaction.rotationSuggestTokens', 'rotationSuggestTokens', 300_000],
-    [
-      'compaction.subagentStopWeightedTokens',
-      'subagentStopWeightedTokens',
-      3_000_000,
-    ],
   ] as const;
+
+  it('uses agent budget settings for handoff and stop, independent of legacy values', () => {
+    const { provider } = makeProvider({
+      'agentBudget.handoffContextTokens': 80_000,
+      'agentBudget.stopWeightedTokens': 1_000_000,
+      'compaction.subagentHandoffTokens': 200_000,
+      'compaction.subagentStopWeightedTokens': 5_000_000,
+    });
+    expect(provider.getConfig().subagentHandoffTokens).toBe(80_000);
+    expect(provider.getConfig().subagentStopWeightedTokens).toBe(1_000_000);
+  });
 
   it.each(BUDGETS)('%s: a valid value is read', (key, field) => {
     const { provider, warn } = makeProvider({ [key]: 4321 });

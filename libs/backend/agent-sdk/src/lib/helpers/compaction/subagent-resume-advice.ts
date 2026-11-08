@@ -9,12 +9,17 @@ import type { AgentBudgetState } from './subagent-budget-monitor';
 
 /** A refusal for a known stopped or near-limit agent; null permits forwarding. */
 export function buildBudgetResumeRefusal(state: AgentBudgetState): string | null {
-  if (!state.stopped && (state.running || state.contextTokens === null ||
+  if (!state.stopped && !state.warned && (state.running || state.contextTokens === null ||
       state.contextTokens < state.warningRatio * state.handoffTokens)) return null;
   const guidance = state.recordPath
     ? `Start a new agent with a short brief from the handoff record.`
     : `Start a new agent with a short brief from the available context.`;
-  return `Ptah's budget monitor ${state.stopped ? 'stopped this agent' : 'refuses this resume at the 85% budget warning'} (current: ${state.contextTokens ?? 'unknown'} tokens; limit: ${state.handoffTokens} tokens${state.recordPath ? `; handoff record: ${state.recordPath}` : ''}). ${guidance}`;
+  const contextWarning = state.contextTokens !== null &&
+    state.contextTokens >= state.warningRatio * state.handoffTokens;
+  const contextDetail = contextWarning
+    ? ` (current: ${state.contextTokens} context tokens; handoff limit: ${state.handoffTokens} tokens)`
+    : '';
+  return `Ptah's budget monitor ${state.stopped ? 'stopped this agent' : `refuses this resume at the ${Math.round(state.warningRatio * 100)}% budget warning`}${contextDetail}${state.recordPath ? ` (handoff record: ${state.recordPath})` : ''}. ${guidance}`;
 }
 
 export interface SubagentResumeAdviceInput {

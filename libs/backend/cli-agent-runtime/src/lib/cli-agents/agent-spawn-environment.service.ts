@@ -26,6 +26,7 @@ import { CliDetectionService } from './cli-detection.service';
 import type { CliLaneBudgets } from './cli-adapters/cli-adapter.interface';
 import type { CliAdapter } from './cli-adapters/cli-adapter.interface';
 import type { CliAdapterManifest, SpawnAgentRequest } from '@ptah-extension/shared';
+import { parseAgentBudgetSetting, DEFAULT_AGENT_BUDGET_SETTINGS, type AgentBudgetSettings } from '@ptah-extension/shared';
 import { translateLaneSpawnPolicy } from './lane-spawn-policy';
 import { resolveCliLanePolicy } from './cli-lane-policy-resolver';
 import { CODEX_DEFAULT_LANE_BUDGETS } from './cli-adapters/codex/codex-lane-budgets';
@@ -261,6 +262,38 @@ export class AgentSpawnEnvironment {
       });
     }
     return { repeatAt: repeatOk ? repeat : d.repeatAt };
+  }
+
+  /** Call `listener` when any `ptah.agentBudget.*` setting changes. */
+  onAgentBudgetSettingsChanged(listener: () => void): { dispose(): void } {
+    return this.workspace.onDidChangeConfiguration?.((event) => {
+      if (event.affectsConfiguration('ptah.agentBudget')) listener();
+    }) ?? { dispose() { /* Test hosts without a configuration event. */ } };
+  }
+
+  /** Read the live budget settings through the same workspace configuration surface. */
+  resolveAgentBudgetSettings(): AgentBudgetSettings {
+    const defaults = DEFAULT_AGENT_BUDGET_SETTINGS;
+    const values = {
+      warnRatio: this.workspace.getConfiguration('ptah', 'agentBudget.warnRatio', defaults.warnRatio),
+      stopWeightedTokens: this.workspace.getConfiguration('ptah', 'agentBudget.stopWeightedTokens', defaults.stopWeightedTokens),
+      handoffContextTokens: this.workspace.getConfiguration('ptah', 'agentBudget.handoffContextTokens', defaults.handoffContextTokens),
+      maxDurationMin: this.workspace.getConfiguration('ptah', 'agentBudget.maxDurationMin', defaults.maxDurationMin),
+    };
+    const resolved = { ...defaults };
+    for (const key of Object.keys(defaults) as Array<keyof AgentBudgetSettings>) {
+      const parsed = parseAgentBudgetSetting(key, values[key]);
+      if (parsed !== undefined) {
+        resolved[key] = parsed;
+      } else {
+        const signature = `agentBudget.${key}\u0000${typeof values[key]}:${String(values[key])}`;
+        if (!this.warnedLaneGuard.has(signature)) {
+          this.warnedLaneGuard.add(signature);
+          this.logger.warn(`[AgentSpawnEnvironment] Invalid agent budget setting ${key}; using default`);
+        }
+      }
+    }
+    return resolved;
   }
 
   /** Warn once per distinct key and rejected values, not on every spawn. */

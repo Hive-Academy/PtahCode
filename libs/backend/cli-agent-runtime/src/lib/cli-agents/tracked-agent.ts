@@ -6,8 +6,12 @@ import type {
 } from '@ptah-extension/shared';
 import type { SdkHandle } from './cli-adapters/cli-adapter.interface';
 import type { PendingAgentMessage } from './agent-message-router.service';
+import type { AgentBudgetCoordinator } from './agent-budget-coordinator';
 
 export interface TrackedAgent {
+  budget?: AgentBudgetCoordinator;
+  budgetTimer?: NodeJS.Timeout;
+  budgetCostWarned?: boolean;
   info: AgentProcessInfo;
   /** Child process for CLI-based agents, null for SDK-based agents */
   process: ChildProcess | null;

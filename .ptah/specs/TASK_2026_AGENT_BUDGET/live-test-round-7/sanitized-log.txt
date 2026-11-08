@@ -1,0 +1,42 @@
+Ptah Dev Electron host log, 2026-11-08. Original one-based line numbers; only selected event names, IDs, and counters are retained. No settings values, prompts, tokens, or raw handoff text are copied.
+
+C1 Task a5b2830df27841ef4
+75283,75314,75321,75326,75332,75336,75343,75351,75357: accepted Haiku turns; weighted totals 30567,69212,108479,148049,188208,229003,270531,312756,355357.
+75358: near-budget warning queued; context 42581.
+75360: next accepted turn; weighted 398652.
+75367: accepted turn; weighted 444846 against stop 400000.
+75368: one handoff record saved for C1 Task.
+75371: safety stop.
+75372: pushParentMessage started, length 4749.
+75388: parent text_delta streamed after the push.
+75399: parent message acceptance unconfirmed after timeout; no retry.
+75405,75408,75412: three SendMessage calls denied by subagent-budget.
+UI first reply: Ptah budget named; completion notice wording "stopped by user" quoted. Child notes: no post-notice update. Fresh Task ac0f3c9c9fc12c6b2 read handoff and finished normally.
+
+C2 Task ac905fd983277cdac
+75781: accepted Haiku turn; weighted 30835.
+75786: accepted turn; weighted 69288 against stop 65000.
+75787: near-budget warning queued in the stop turn.
+75789: one handoff record saved for C2 Task.
+75792: safety stop.
+75793: pushParentMessage started, length 3425.
+75813: parent message acceptance unconfirmed after timeout; no retry.
+75867: parent text_delta streamed after the push.
+UI first reply: Ptah budget named; SDK interruption wording "Request interrupted by user" quoted. First handoff contained a merged inferred progress snapshot; child's notes Write started but did not complete. Three SendMessage probes were refused. Fresh reader Task a856bdf1a114b5f0b also stopped at 70099 (75841-75847) and got its own single record and push.
+
+A Codex CLI lane e382bd53-4d7a-45d2-8beb-a4f2fc95635d
+76237: turn 1 accepted; weighted 91823.
+76302: turn 2 accepted; weighted 194505.
+76303: router mode unsupported before stop.
+76304: telemetry recorded warning delivery via queue-next-turn.
+76330: warning injected into Codex next turn; rollout JSONL lines 86-87 contain the warning text.
+76358: turn 3 accepted; weighted 267496 against stop 250000.
+76415,76522: resume gate chose fresh; reason budget-stopped CLI session cannot resume.
+No post-stop "Codex lane is closed" log found. Original CLI Session ID 01a1ba96-5704-7790-82b8-404bcd888b9a; last accepted turn 01a1ba97-217c-7fb3-88fd-e60dce637939.
+
+B native Codex-provider child
+77107: linked parent thread 01a1ba54-5b69-7e21-84d7-e2a3534b9442 to child 01a1ba9a-70a5-72c2-98fd-5f2d01ee3269.
+77140: one child budget decision, coverage telemetry-unavailable, reason model-id-unavailable, no real counters.
+77143: child relinked. UI reported two completed child turns; no second decision was found by end of run.
+
+Search of this run's host lines found no "onMessage wait timed out", "Budget warning failed", or "Codex lane is closed" entries. Two parent-message acceptance timeouts occurred (C1 75399, C2 75813); these are distinct info events.

@@ -59,6 +59,7 @@ import type { SDKBackgroundTasksChangedMessage, SDKMessage } from '../types/sdk-
 
 import {
   StreamTransformer,
+  STREAM_MONITOR_WAIT_MS,
   ResultModelUsage,
   type StreamTransformConfig,
 } from './stream-transformer';
@@ -3681,6 +3682,82 @@ describe('StreamTransformer — onMessage / onStreamEnd (TASK_2026_614 D.11)', (
     expect(watchdog.stop.mock.invocationCallOrder[0]).toBeLessThan(
       onStreamEnd.mock.invocationCallOrder[0],
     );
+  });
+
+  it('waits for a child stop callback before consuming the next SDK message', async () => {
+    const { transformer, logger } = makeHarness();
+    const messages: SDKMessage[] = [
+      compactingStatus(),
+      compactBoundary(),
+    ];
+    let release: () => void = () => undefined;
+    const hold = new Promise<void>((resolve) => { release = resolve; });
+    const onMessage = jest.fn((message: SDKMessage) => message === messages[0] ? hold : undefined);
+    const pending = drain(transformer.transform({
+      sdkQuery: asAsyncIterable(messages),
+      sessionId: 'sess-1' as SessionId,
+      initialModel: MODEL,
+      onMessage,
+    }));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    release();
+    await pending;
+    expect(onMessage).toHaveBeenCalledTimes(2);
+    expect(logger.warn.mock.calls.some(([message]) => String(message).includes('wait timed out'))).toBe(false);
+  });
+
+  it('continues after a hung monitor wait and logs the Agent tool id once', async () => {
+    jest.useFakeTimers();
+    try {
+      const { transformer, logger } = makeHarness();
+      const first = { ...compactingStatus(), parent_tool_use_id: 'toolu_task_1' } as SDKMessage;
+      const onMessage = jest.fn((message: SDKMessage) =>
+        message === first ? new Promise<void>(() => undefined) : undefined);
+      const pending = drain(transformer.transform({
+        sdkQuery: asAsyncIterable([first, compactBoundary()]),
+        sessionId: 'sess-1' as SessionId,
+        initialModel: MODEL,
+        onMessage,
+      }));
+      await jest.advanceTimersByTimeAsync(STREAM_MONITOR_WAIT_MS - 1);
+      expect(onMessage).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1);
+      await pending;
+      expect(onMessage).toHaveBeenCalledTimes(2);
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[StreamTransformer] onMessage wait timed out; the stream continues',
+        { sessionId: 'sess-1', messageType: first.type, toolUseId: 'toolu_task_1', waitedMs: STREAM_MONITOR_WAIT_MS },
+      );
+      expect(logger.warn.mock.calls.filter(([message]) => String(message).includes('wait timed out'))).toHaveLength(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('logs a rejection after timeout without interrupting the stream', async () => {
+    jest.useFakeTimers();
+    try {
+      const { transformer, logger } = makeHarness();
+      let rejectMonitor: (error: Error) => void = () => undefined;
+      const work = new Promise<void>((_resolve, reject) => { rejectMonitor = reject; });
+      const pending = drain(transformer.transform({
+        sdkQuery: asAsyncIterable([compactingStatus()]),
+        sessionId: 'sess-1' as SessionId,
+        initialModel: MODEL,
+        onMessage: () => work,
+      }));
+      await jest.advanceTimersByTimeAsync(STREAM_MONITOR_WAIT_MS);
+      await pending;
+      rejectMonitor(new TypeError('late monitor failure'));
+      await Promise.resolve();
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[StreamTransformer] onMessage callback failed; the stream continues',
+        expect.objectContaining({ error: 'TypeError' }),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('fires onStreamEnd once when the stream throws, and the error is unchanged', async () => {

@@ -17,6 +17,7 @@ import * as loader from './acp-sdk-loader';
 import {
   ACP_CANCEL_GRACE_MS,
   ACP_HANDSHAKE_TIMEOUTS_MS,
+  ACP_USAGE_DRAIN_MS,
   createAcpSessionHandle,
 } from './acp-session-handle';
 import {
@@ -136,7 +137,7 @@ function start(
     errors: () =>
       segments.filter((s) => s.type === 'error').map((s) => s.content),
     infos: () =>
-      segments.filter((s) => s.type === 'info').map((s) => s.content),
+      segments.filter((s) => s.type === 'info' && !s.turnTelemetry).map((s) => s.content),
     resolvedIds,
     spawn: () => spawn,
     logger,
@@ -175,6 +176,100 @@ afterEach(async () => {
 });
 
 describe('createAcpSessionHandle — first turn', () => {
+  it('separates turn IDs across runs that resume the same ACP session', async () => {
+    const script = (agent: FakeAcpAgent): void => {
+      agent.handle('session/prompt', () => ({ result: {
+        stopReason: 'end_turn', _meta: { usage: { inputTokens: 1, outputTokens: 1 } },
+      } }));
+    };
+    const first = start({ options: { agentId: 'run-a' }, script });
+    const resumed = start({ options: { agentId: 'run-b' }, script });
+    await expect(first.handle.done).resolves.toBe(0);
+    await expect(resumed.handle.done).resolves.toBe(0);
+    expect(first.segments.find((item) => item.turnTelemetry)?.turnTelemetry)
+      .toMatchObject({ status: 'reported', usage: { turnId: 'sess-1:run-a:1' } });
+    expect(resumed.segments.find((item) => item.turnTelemetry)?.turnTelemetry)
+      .toMatchObject({ status: 'reported', usage: { turnId: 'sess-1:run-b:1' } });
+  });
+
+  it('reports prompt _meta.usage and preserves the UI usage segment', async () => {
+    const h = start({
+      options: { model: 'grok-test' },
+      script: (agent) => agent.handle('session/prompt', () => ({
+        result: { stopReason: 'end_turn', _meta: { usage: {
+          inputTokens: 12, outputTokens: 4, cacheReadTokens: 2, costUsd: 0.03,
+          model: 'grok-billed',
+        } } },
+      })),
+    });
+    await expect(h.handle.done).resolves.toBe(0);
+    const telemetry = h.segments.filter((segment) => segment.turnTelemetry);
+    expect(telemetry).toHaveLength(1);
+    expect(telemetry[0].turnTelemetry).toMatchObject({ status: 'reported', usage: {
+      modelId: 'grok-billed', inputTokens: 12, outputTokens: 4,
+    } });
+    expect(telemetry[0].usage).toMatchObject({ inputTokens: 12, outputTokens: 4 });
+  });
+
+  it('reconciles usage_update metadata when the prompt response omits usage', async () => {
+    const h = start({
+      options: { model: 'requested-alias' },
+      script: (agent) => agent.handle('session/prompt', async (params, active) => {
+        await active.sessionUpdate(String(params['sessionId']), {
+          sessionUpdate: 'usage_update', used: 25, size: 1000,
+          _meta: { usage: { inputTokens: 12, outputTokens: 4, model: 'billed-model' } },
+        });
+        return { result: { stopReason: 'end_turn' } };
+      }),
+    });
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(h.segments.filter((item) => item.turnTelemetry)).toEqual([
+      expect.objectContaining({ turnTelemetry: expect.objectContaining({
+        status: 'reported', usage: expect.objectContaining({
+          inputTokens: 12, outputTokens: 4,
+          requestContextTokens: expect.objectContaining({ status: 'reported', value: 25 }),
+          modelId: 'billed-model',
+        }),
+      }) }),
+    ]);
+  });
+
+  it('reconciles usage_update after the prompt response', async () => {
+    const h = start({
+      script: (agent) => agent.handle('session/prompt', (params, active) => {
+        setTimeout(() => {
+          void active.sessionUpdate(String(params['sessionId']), {
+            sessionUpdate: 'usage_update', used: 25, size: 1000,
+            _meta: { usage: { inputTokens: 12, outputTokens: 4, model: 'billed-model' } },
+          });
+        }, 150);
+        return { result: { stopReason: 'end_turn' } };
+      }),
+    });
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(h.segments.find((item) => item.turnTelemetry)?.turnTelemetry?.status).toBe('reported');
+  });
+
+  it('emits one unavailable record per completed turn without usable prompt usage', async () => {
+    const h = start({ options: { model: 'grok-test' } });
+    await expect(h.handle.done).resolves.toBe(0);
+    h.agent.handle('session/prompt', () => ({
+      result: { stopReason: 'end_turn', _meta: { usage: { inputTokens: -1, outputTokens: 2 } } },
+    }));
+    const next = await h.handle.continue?.('Follow up');
+    await expect(next?.done).resolves.toBe(0);
+    const telemetry = h.segments.filter((segment) => segment.turnTelemetry);
+    expect(telemetry).toHaveLength(2);
+    expect(telemetry.map((segment) => segment.turnTelemetry)).toEqual([
+      expect.objectContaining({ status: 'unavailable', reason: 'no-usage-event' }),
+      expect.objectContaining({ status: 'unavailable', reason: 'no-usage-event' }),
+    ]);
+    const unavailable = telemetry.flatMap((segment) =>
+      segment.turnTelemetry?.status === 'unavailable' ? [segment.turnTelemetry] : [],
+    );
+    expect(unavailable[0].turnId).not.toBe(unavailable[1].turnId);
+  });
+
   it('waits for the Ptah MCP attachment before the first prompt', async () => {
     let attach: (value: McpAttachment) => void = () => {
       throw new Error('attachment waiter was not installed');
@@ -450,7 +545,7 @@ describe('createAcpSessionHandle — stop reasons', () => {
     await expect(h.handle.done).resolves.toBe(code);
 
     const notable = h.segments.filter(
-      (s) => s.type === 'error' || s.type === 'info',
+      (s) => (s.type === 'error' || s.type === 'info') && !s.turnTelemetry,
     );
     expect(notable).toEqual(expected ? [expected] : []);
   });
@@ -1058,7 +1153,9 @@ describe('createAcpSessionHandle — handshake timeout', () => {
       doNotFake: ['nextTick', 'queueMicrotask', 'setImmediate'],
     });
     const h = start();
-
+    await h.agent.next(byMethod('session/prompt'));
+    await settle();
+    await jest.advanceTimersByTimeAsync(ACP_USAGE_DRAIN_MS);
     await expect(h.handle.done).resolves.toBe(0);
     expect(jest.getTimerCount()).toBe(0);
   });

@@ -1,0 +1,30 @@
+Ptah Dev Electron host log, 2026-11-08. Original one-based line numbers. Only selected IDs, counters, event names and delivery modes are retained; no prompts, settings values, tokens, raw handoff, or notes are copied.
+
+B native Codex-provider child
+79020: parent 01a1bab7-fb87-7eb2-b2f9-093e94a0121b linked child 01a1bab8-342f-7b81-839c-cdc13ca18cf8.
+79050: decision 1: coverage price-weighting-degraded; context/input/output 22747/45123/226; model codex/unknown.
+79051: one child-model-unavailable notice; raw tokens charged without cost.
+79060: same child relinked; no decision on relink.
+79071: decision 2: coverage price-weighting-degraded; context/input/output 23004/22836/168; model codex/unknown.
+79083: same child relinked; no decision on relink.
+79096: decision 3: coverage price-weighting-degraded; context/input/output 23113/23081/32; model codex/unknown.
+UI: parent reported three completed child turns. Context advisory was not reached (maximum observed context 23113 of 40000). A second child was not run.
+
+A Codex CLI lane 26455550-70af-483b-a6bb-6462a3f8e2e6, gpt-6-luna
+79983: accepted turn 1; weighted total 61386.
+80060: accepted turn 2; weighted total 135357.
+80126: accepted turn 3; weighted total 197884.
+80127: router logged mode unsupported before the stop. This fails the strict A condition.
+80128: warning delivery reported mode queue-next-turn.
+80150: warning injected into next Codex turn.
+80182: accepted turn 4; weighted total 265352/250000; lane stopped.
+79935-80212: original CLI session reference 01a1babb-1197-7de1-86fb-389b38468fae persisted repeatedly as progress pointer.
+80268: resume gate selected fresh; reason: budget-stopped CLI session cannot resume. A new lane was opened and then stopped by the parent without substantive work.
+
+C Haiku SDK subagent Task ae80bd105e93429a3
+82071: turn accepted at weighted 31055. This turn used the old 250000 Dev setting before the corrected agentBudget key was edited.
+82085: turn accepted at weighted 69913/65000 after the Dev-only correction; safety stop followed.
+82087: one handoff record saved for this Task.
+82091: pushParentMessage started, length 3198.
+82092: parent turn received subagent budget stop after the push.
+Targeted handoff check: literal SDK user-interruption string absent; Ptah budget-monitor paraphrase present. UI first reply named Ptah budget and 69913/65000, but independently quoted the SDK interruption string from the Agent result. No raw handoff text is copied here.

@@ -7,6 +7,26 @@ import {
 } from '@ptah-extension/shared';
 import type { AgentSpawnEnvironment } from './agent-spawn-environment.service';
 import type { AgentOutputCheckpoint } from './agent-output-journal.service';
+import type { CliType } from '@ptah-extension/shared';
+import type { TrackedAgent } from './tracked-agent';
+
+export function laneRecordsForSession(agents: Iterable<TrackedAgent>, cliSessionId: string): TrackedAgent[] {
+  return Array.from(agents)
+    .filter((tracked) => tracked.info.cliSessionId === cliSessionId)
+    .sort((a, b) => a.info.startedAt.localeCompare(b.info.startedAt));
+}
+
+/** Find the newest record for this CLI and native session, if one exists. */
+export function previousResumeRecord(agents: Iterable<TrackedAgent>, cli: CliType, cliSessionId: string | undefined): AgentProcessInfo | undefined {
+  if (!cliSessionId) return undefined;
+  let latest: AgentProcessInfo | undefined;
+  for (const tracked of agents) {
+    const info = tracked.info;
+    if (info.cli !== cli || info.cliSessionId !== cliSessionId) continue;
+    if (!latest || info.startedAt >= latest.startedAt) latest = info;
+  }
+  return latest;
+}
 
 const persistedActivitySchema = z.iso.datetime({ offset: true });
 const RESTORE_CLOCK_SKEW_MS = 60_000;

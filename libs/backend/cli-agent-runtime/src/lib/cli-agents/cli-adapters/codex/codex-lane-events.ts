@@ -4,7 +4,7 @@ import {
   type CodexReportedUsage,
   type CodexRuntimeEvent,
 } from '@ptah-extension/codex-runtime';
-import type { CliOutputSegment } from '@ptah-extension/shared';
+import { completedTurnTelemetry, turnIdentity, type CliOutputSegment } from '@ptah-extension/shared';
 
 export type CodexLaneTurnIdentity = Pick<
   CodexRuntimeEvent,
@@ -14,6 +14,7 @@ export interface CodexLaneEventOutput {
   readonly segments: readonly CliOutputSegment[];
   /** Settle the lane immediately on this result; process exit is not required. */
   readonly terminal?: 'completed' | 'interrupted' | 'failed';
+  readonly awaitingUsage?: boolean;
 }
 
 /** One mapper per turn. The owner discards it on terminal or abort. */
@@ -28,13 +29,33 @@ export class CodexLaneEvents {
     { readonly raw: string; readonly presented: string }
   >();
   private usage?: CodexReportedUsage;
+  private usageModelId?: string;
+  private pendingTerminal = false;
   private errorEmitted = false;
 
   constructor(private readonly identity: CodexLaneTurnIdentity) {}
 
+  finishPendingUsage(): CliOutputSegment | undefined {
+    if (!this.pendingTerminal) return undefined;
+    this.pendingTerminal = false;
+    this.terminal = true;
+    return this.unavailableTelemetry();
+  }
+
+  private unavailableTelemetry(usage?: CodexReportedUsage, modelId?: string): CliOutputSegment {
+    return {
+      type: 'info', content: 'Codex turn telemetry unavailable.',
+      turnTelemetry: completedTurnTelemetry({
+        ...turnIdentity({ provider: 'codex', turnId: this.identity.turnId,
+          modelId: modelId ?? this.usageModelId, source: 'stream' }),
+        ...(usage ? { usage: laneUsage(usage) } : {}),
+      }),
+    };
+  }
+
   map(event: CodexRuntimeEvent): CodexLaneEventOutput {
     if (
-      this.terminal ||
+      (this.terminal && !this.pendingTerminal) ||
       event.sequence <= this.sequence ||
       event.contextId !== this.identity.contextId ||
       event.processGeneration !== this.identity.processGeneration ||
@@ -44,6 +65,24 @@ export class CodexLaneEvents {
       return { segments: [] };
     }
     this.sequence = event.sequence;
+    if (this.pendingTerminal) {
+      if (event.type !== 'usage') return { segments: [] };
+      this.pendingTerminal = false;
+      this.terminal = true;
+      if (event.usage.inputTokens === undefined || event.usage.outputTokens === undefined ||
+        !Number.isSafeInteger(event.usage.inputTokens) || !Number.isSafeInteger(event.usage.outputTokens) ||
+        event.usage.inputTokens < 0 || event.usage.outputTokens < 0)
+        return { segments: [this.unavailableTelemetry(event.usage, event.evidence?.modelId)], terminal: 'completed' };
+      return { segments: [{
+        type: 'info', content: 'Codex turn usage.',
+        usage: laneUsage(event.usage),
+        turnTelemetry: completedTurnTelemetry({
+          ...turnIdentity({ provider: 'codex', turnId: this.identity.turnId,
+            modelId: event.evidence?.modelId ?? this.usageModelId, source: 'stream' }),
+          usage: laneUsage(event.usage),
+        }),
+      }], terminal: 'completed' };
+    }
     switch (event.type) {
       case 'textDelta':
         return this.content(
@@ -178,24 +217,39 @@ export class CodexLaneEvents {
         // Core reports turn snapshots. CLI totals add segments, so emit only once,
         // on terminal, instead of counting every snapshot (and terminal) again.
         this.usage = event.usage;
+        this.usageModelId = event.evidence?.modelId ?? this.usageModelId;
         return { segments: [] };
       case 'error':
         return { segments: this.error() };
       case 'terminal': {
         this.terminal = true;
         const usage = event.usage ?? this.usage;
+        if (event.status === 'completed' &&
+          (usage === undefined || usage.inputTokens === undefined || usage.outputTokens === undefined ||
+            !Number.isSafeInteger(usage.inputTokens) || !Number.isSafeInteger(usage.outputTokens) ||
+            usage.inputTokens < 0 || usage.outputTokens < 0)) {
+          this.pendingTerminal = true;
+          return { segments: [], awaitingUsage: true };
+        }
+        const telemetry = completedTurnTelemetry({
+          ...turnIdentity({ provider: 'codex', turnId: this.identity.turnId,
+            modelId: event.evidence?.modelId ?? this.usageModelId, source: 'stream' }),
+          usage: usage ? laneUsage(usage) : undefined,
+        });
         const segments: CliOutputSegment[] =
           event.error || event.status === 'failed' ? this.error() : [];
-        if (usage !== undefined)
+        if (usage !== undefined && Number.isSafeInteger(usage.inputTokens) && Number.isSafeInteger(usage.outputTokens) && usage.inputTokens !== undefined && usage.outputTokens !== undefined && usage.inputTokens >= 0 && usage.outputTokens >= 0)
           segments.push({
             type: 'info',
             content: 'Codex turn usage.',
             usage: laneUsage(usage),
+            turnTelemetry: telemetry,
           });
         this.text.clear();
         this.reasoning.clear();
         this.tools.clear();
         this.usage = undefined;
+        this.usageModelId = undefined;
         return { segments, terminal: event.status };
       }
     }

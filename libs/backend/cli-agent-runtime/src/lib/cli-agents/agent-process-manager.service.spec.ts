@@ -2284,6 +2284,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
     });
 
     it('arms no watchdog at all when the caller passes timeout: 0', async () => {
+      setupVscodeConfig({ 'agentBudget.maxDurationMin': 600 });
       const result = await manager.spawn({
         task: 'Unbounded task',
         cli: 'codex',
@@ -2304,6 +2305,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
     // The old ceiling clamped a larger request back down to one hour and said
     // nothing, so a caller asking for four hours got one.
     it('honours a window larger than the default instead of clamping it', async () => {
+      setupVscodeConfig({ 'agentBudget.maxDurationMin': 600 });
       const result = await manager.spawn({
         task: 'Very long task',
         cli: 'codex',
@@ -2319,6 +2321,53 @@ describe('AgentProcessManager - SDK Execution Path', () => {
         'status',
         'running',
       );
+    });
+  });
+
+  describe('agent budget lifetime', () => {
+    it('rehydrates counters and the original clock when a native ID arrives after tracking', async () => {
+      const firstStarted = Date.now() - 10 * 60_000;
+      manager.restoreAgents([{
+        cliSessionId: 'late-native', cli: 'codex',
+        agentId: 'prior-budget-lane' as CliSessionReference['agentId'],
+        task: 'Prior turn', startedAt: new Date(firstStarted).toISOString(),
+        status: 'completed',
+        agentBudget: {
+          weightedTokens: 900, rawTokens: 700,
+          turnIds: ['late-native:1'], turnCount: 1,
+          startedAtMs: firstStarted, stopWeightedTokens: 1000, maxDurationMin: 90,
+        },
+      }], '/workspace/root');
+      let resolved: ((id: string) => void) | undefined;
+      Object.assign(sdkControls.handle, {
+        onSessionResolved: (callback: (id: string) => void) => { resolved = callback; },
+      });
+      const spawned = await manager.spawn({
+        task: 'Next turn', cli: 'codex', workingDirectory: '/workspace/root', timeout: 0,
+      });
+      expect((manager.getStatus(spawned.agentId) as AgentProcessInfo).agentBudget?.rawTokens).toBe(0);
+      resolved?.('late-native');
+      const budget = (manager.getStatus(spawned.agentId) as AgentProcessInfo).agentBudget;
+      expect(budget).toMatchObject({
+        rawTokens: 700, weightedTokens: 900,
+        startedAtMs: firstStarted, turnCount: 1,
+      });
+    });
+    it('stops at 90 minutes even when the inactivity watchdog is disabled', async () => {
+      setupVscodeConfig({ 'agentBudget.maxDurationMin': 90 });
+      const result = await manager.spawn({
+        task: 'Long running task', cli: 'codex',
+        workingDirectory: '/workspace/root', timeout: 0,
+      });
+
+      jest.advanceTimersByTime(90 * 60_000 - 1);
+      expect(manager.getStatus(result.agentId)).toHaveProperty('status', 'running');
+      jest.advanceTimersByTime(1);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(manager.getStatus(result.agentId)).toEqual(expect.objectContaining({
+        stopReason: 'duration', status: 'stopped',
+      }));
     });
   });
 
@@ -3840,6 +3889,18 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       ).rejects.toMatchObject({ code: 'busy' });
 
       continuableControls.resolve(0);
+    });
+
+    it('refuses a completed turn once its budget stop is recorded', async () => {
+      const agentId = await spawnContinuable();
+      await completeTurn1();
+      const tracked = (Reflect.get(manager, 'agents') as Map<string, { info: AgentProcessInfo }>).get(agentId);
+      expect(tracked?.info).toHaveProperty('status', 'completed');
+      Object.assign(tracked?.info ?? {}, { stopReason: 'budget' });
+
+      await expect(manager.continueConversation(agentId, 'another turn'))
+        .rejects.toMatchObject({ code: 'released' });
+      expect(continuableControls.continueCallCount()).toBe(0);
     });
 
     it('emits agent:spawned with supportsContinuation in the info payload', async () => {

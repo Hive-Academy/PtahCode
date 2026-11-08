@@ -27,6 +27,7 @@ import {
   createNodeCodexExecutableProbes,
   CodexRuntime,
   buildCodexExecutionProfile,
+  ownCodexContext,
   registerCodexRuntime,
   type ApprovalSink,
   type CodexContext,
@@ -79,29 +80,6 @@ function paths(home: string, cwd: string): CodexExecutionProfileInput['paths'] {
     platform: process.platform === 'win32' ? 'win32' : 'posix',
     baseDirectory: cwd,
     entries: { [home]: pathEntry(home), [cwd]: pathEntry(cwd) },
-  };
-}
-
-function ownedContext(
-  context: CodexContext,
-  dispose: () => Promise<void>,
-): CodexContext {
-  let closing: Promise<void> | undefined;
-  return {
-    get identity() {
-      return context.identity;
-    },
-    get turnPermissionLevel() {
-      return context.turnPermissionLevel;
-    },
-    listModels: () => context.listModels(),
-    events: (signal) => context.events(signal),
-    startTurn: (input) => context.startTurn(input),
-    steer: (input) => context.steer(input),
-    interrupt: (turnId) => context.interrupt(turnId),
-    updateNextTurn: (patch) => context.updateNextTurn(patch),
-    compact: () => context.compact(),
-    close: () => (closing ??= dispose()),
   };
 }
 
@@ -342,6 +320,7 @@ export function registerCliCodexLaneFactory(
         }
       })());
     try {
+      const workspace = container.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER);
       const ports: CodexRuntimeRegistrationPorts = {
         selectionSnapshot: boundSnapshot,
         store: getStore(),
@@ -367,6 +346,9 @@ export function registerCliCodexLaneFactory(
           return {};
         },
         usage: null,
+        childBudget: {
+          readSetting: (key, fallback) => workspace.getConfiguration('ptah', key, fallback),
+        },
       };
       registerCodexRuntime(scope, ports);
       registered = true;
@@ -374,7 +356,7 @@ export function registerCliCodexLaneFactory(
         scope,
         input.platform,
       ).open(profile, resume, secrets);
-      return ownedContext(context, dispose);
+      return ownCodexContext(context, dispose);
     } catch (error) {
       try {
         await dispose();

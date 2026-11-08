@@ -495,6 +495,24 @@ describe('LaneCompletionNotifier.signal', () => {
       expect(h.envelope()).toContain('NOT written by this run');
     });
 
+    it('uses the first nonempty current deliverable as a budget progress pointer', async () => {
+      const h = createHarness({ files: { '/tf/empty.md': 0, '/tf/progress.md': 12 } });
+      const result = await h.notifier.signal(createInfo({
+        stopReason: 'budget', deliverables: ['/tf/empty.md', '/tf/progress.md'],
+      }));
+      expect(result.signal?.progressPointer).toBe(p('/tf/progress.md'));
+    });
+
+    it('does not point to a stale deliverable after a budget stop', async () => {
+      const h = createHarness({
+        files: { '/tf/old.md': 12 }, mtime: Date.parse(STARTED_AT) - 1,
+      });
+      const result = await h.notifier.signal(createInfo({
+        stopReason: 'budget', deliverables: ['/tf/old.md'],
+      }));
+      expect(result.signal?.progressPointer).toContain('last completed turn');
+    });
+
     it('treats an unreadable deliverable as missing rather than throwing', async () => {
       const h = createHarness({
         files: { '/tf/report.md': 12 },

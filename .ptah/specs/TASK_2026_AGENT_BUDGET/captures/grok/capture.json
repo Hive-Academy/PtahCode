@@ -1,0 +1,17 @@
+{
+  "cli": "grok",
+  "argv": [
+    "--single",
+    "Reply with the word OK.",
+    "--output-format",
+    "streaming-json",
+    "--permission-mode",
+    "plan",
+    "--no-subagents"
+  ],
+  "exitCode": 1,
+  "jsonLines": 3,
+  "usageEvents": [],
+  "stderrPresent": true,
+  "note": "Only numeric usage fields retained; all string payloads and stderr discarded."
+}

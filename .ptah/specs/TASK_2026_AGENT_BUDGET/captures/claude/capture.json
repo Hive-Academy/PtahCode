@@ -1,0 +1,64 @@
+{
+  "cli": "claude",
+  "argv": [
+    "-p",
+    "Reply with the word OK.",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "plan",
+    "--model",
+    "haiku"
+  ],
+  "exitCode": 0,
+  "jsonLines": 4,
+  "usageEvents": [
+    {
+      "event": "assistant",
+      "numericFields": {
+        "message.usage.input_tokens": 2,
+        "message.usage.cache_creation_input_tokens": 34270,
+        "message.usage.cache_read_input_tokens": 16825,
+        "message.usage.cache_creation.ephemeral_5m_input_tokens": 0,
+        "message.usage.cache_creation.ephemeral_1h_input_tokens": 34270,
+        "message.usage.output_tokens": 4
+      }
+    },
+    {
+      "event": "result",
+      "numericFields": {
+        "total_cost_usd": 0.1388065,
+        "usage.input_tokens": 2,
+        "usage.cache_creation_input_tokens": 34270,
+        "usage.cache_read_input_tokens": 16825,
+        "usage.output_tokens": 4,
+        "usage.output_tokens_details.thinking_tokens": 0,
+        "usage.cache_creation.ephemeral_1h_input_tokens": 34270,
+        "usage.cache_creation.ephemeral_5m_input_tokens": 0,
+        "modelUsage.claude-sonnet-5-5.inputTokens": 2,
+        "modelUsage.claude-sonnet-5-5.outputTokens": 4,
+        "modelUsage.claude-sonnet-5-5.cacheReadInputTokens": 16825,
+        "modelUsage.claude-sonnet-5-5.cacheCreationInputTokens": 34270,
+        "modelUsage.claude-sonnet-5-5.costUSD": 0.1388065,
+        "modelUsage.claude-sonnet-5-5.contextWindow": 1000000,
+        "modelUsage.claude-sonnet-5-5.maxOutputTokens": 128000,
+        "modelUsage.claude-sonnet-5-5.thinkingTokens": 0,
+        "modelUsage.claude-sonnet-5-5.cacheCreationEphemeral5mInputTokens": 0,
+        "modelUsage.claude-sonnet-5-5.cacheCreationEphemeral1hInputTokens": 34270,
+        "model_usage_since_last_result.claude-sonnet-5-5.inputTokens": 2,
+        "model_usage_since_last_result.claude-sonnet-5-5.outputTokens": 4,
+        "model_usage_since_last_result.claude-sonnet-5-5.cacheReadInputTokens": 16825,
+        "model_usage_since_last_result.claude-sonnet-5-5.cacheCreationInputTokens": 34270,
+        "model_usage_since_last_result.claude-sonnet-5-5.costUSD": 0.1388065,
+        "model_usage_since_last_result.claude-sonnet-5-5.contextWindow": 1000000,
+        "model_usage_since_last_result.claude-sonnet-5-5.maxOutputTokens": 128000,
+        "model_usage_since_last_result.claude-sonnet-5-5.thinkingTokens": 0,
+        "model_usage_since_last_result.claude-sonnet-5-5.cacheCreationEphemeral5mInputTokens": 0,
+        "model_usage_since_last_result.claude-sonnet-5-5.cacheCreationEphemeral1hInputTokens": 34270
+      }
+    }
+  ],
+  "stderrPresent": false,
+  "note": "Only numeric usage fields retained; all string payloads and stderr discarded."
+}

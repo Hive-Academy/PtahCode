@@ -93,6 +93,7 @@ import { laneMcpAuthUrl } from './lane-mcp-credentials';
 import { ptahMcpServerUrl } from './ptah-mcp-url';
 import { classifyCliStderr } from './cli-stderr-severity';
 import { z } from 'zod';
+import { completedTurnTelemetry, turnIdentity } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
   formatAgyDiagnostics,
@@ -176,6 +177,7 @@ const AgyResultSchema = z
     error: z.unknown().optional(),
     duration_seconds: z.number().optional(),
     num_turns: z.number().optional(),
+    model: z.string().optional(),
     usage: AgyUsageSchema.optional(),
   })
   .passthrough();
@@ -814,20 +816,90 @@ export class AntigravityCliAdapter implements CliAdapter {
       let processClosed = false;
       let stdinClosed = false;
       let currentTurn = createTurnDeferred();
+      let turnSequence = 1;
+      let currentTurnId = '';
+      let observedModelId: string | undefined;
+      const seenResultIds = new Set<string>();
       const firstTurn = currentTurn;
       const errorSteps: AgyStepUpdate[] = [];
       const agyErrors: string[] = [];
       let failedResult = false;
       let failedEvent: z.infer<typeof AgyResultEventSchema> | undefined;
+      let previousResultUsage: AgyResult['usage'];
+      let stepUsage: AgyResult['usage'];
+      const seenUsageSteps = new Set<number>();
+      let sawResult = false;
+      const validTokens = (value: number | undefined): value is number =>
+        value !== undefined && Number.isSafeInteger(value) && value >= 0;
+      const complete = (usage: AgyResult['usage']): boolean =>
+        !!usage && validTokens(usage.input_tokens) && validTokens(usage.output_tokens);
+      const emitTelemetry = (usage?: AgyResult['usage']): void => {
+        segment.emit({
+          type: 'info', content: 'Antigravity turn telemetry',
+          turnTelemetry: completedTurnTelemetry({
+            ...turnIdentity({ provider: 'antigravity', turnId: currentTurnId,
+              sessionId: capturedSessionId ?? options.agentId ?? `agy:${child.pid ?? 'unknown'}`,
+              runId: options.agentId, sequence: turnSequence, modelId: observedModelId, source: 'stream' }),
+            usage: usage ? {
+              inputTokens: usage.input_tokens,
+              outputTokens: usage.output_tokens,
+              cacheReadTokens: usage.cache_read_tokens,
+            } : undefined,
+          }),
+        });
+      };
       const onStep = (step: AgyStepUpdate): void => {
+        if (step.step_type === 'agent_response' && step.state === 'DONE' && complete(step.usage)
+          && (step.step_index === undefined || !seenUsageSteps.has(step.step_index))) {
+          if (step.step_index !== undefined) seenUsageSteps.add(step.step_index);
+          stepUsage = stepUsage ? {
+            input_tokens: (stepUsage.input_tokens ?? 0) + (step.usage?.input_tokens ?? 0),
+            output_tokens: (stepUsage.output_tokens ?? 0) + (step.usage?.output_tokens ?? 0),
+            cache_read_tokens: validTokens(stepUsage.cache_read_tokens) && validTokens(step.usage?.cache_read_tokens)
+              ? stepUsage.cache_read_tokens + step.usage!.cache_read_tokens! : undefined,
+          } : step.usage;
+        }
         if (step.state === 'ERROR' || step['status'] === 'ERROR') {
           errorSteps.push(step);
           if (errorSteps.length > 5) errorSteps.shift();
         }
       };
       const onResult = (event: z.infer<typeof AgyResultEventSchema>): void => {
+        const nativeTurnId = event.result.conversation_id && event.result.num_turns !== undefined
+          ? `${event.result.conversation_id}:${event.result.num_turns}` : undefined;
+        currentTurnId = nativeTurnId ?? `${event.result.conversation_id}:${turnSequence}`;
+        if (seenResultIds.has(currentTurnId) && (!failedResult || event.result.status !== 'SUCCESS')) return;
+        seenResultIds.add(currentTurnId);
+        observedModelId = event.result.model ?? observedModelId;
+        sawResult = true;
         failedResult = event.result.status !== 'SUCCESS';
         failedEvent = failedResult ? event : undefined;
+        if (!failedResult) {
+          const cumulative = event.result.usage;
+          let delta: AgyResult['usage'];
+          if (complete(cumulative)) {
+            if (!previousResultUsage) delta = cumulative;
+            else if (complete(previousResultUsage) &&
+              cumulative!.input_tokens! >= previousResultUsage.input_tokens! &&
+              cumulative!.output_tokens! >= previousResultUsage.output_tokens!) {
+              delta = {
+                input_tokens: cumulative!.input_tokens! - previousResultUsage.input_tokens!,
+                output_tokens: cumulative!.output_tokens! - previousResultUsage.output_tokens!,
+                cache_read_tokens: validTokens(cumulative?.cache_read_tokens) && validTokens(previousResultUsage.cache_read_tokens)
+                  && cumulative.cache_read_tokens >= previousResultUsage.cache_read_tokens
+                  ? cumulative.cache_read_tokens - previousResultUsage.cache_read_tokens : undefined,
+              };
+            }
+            previousResultUsage = cumulative;
+          }
+          const usage = complete(delta) && (!complete(stepUsage) ||
+            (delta!.input_tokens! >= stepUsage!.input_tokens! && delta!.output_tokens! >= stepUsage!.output_tokens!))
+            ? { ...delta, cache_read_tokens: validTokens(delta?.cache_read_tokens) ? delta!.cache_read_tokens : stepUsage?.cache_read_tokens }
+            : stepUsage;
+          emitTelemetry(usage);
+        }
+        stepUsage = undefined;
+        seenUsageSteps.clear();
       };
 
       const emitAdapterError = (error: Error): void => {
@@ -931,6 +1003,7 @@ export class AntigravityCliAdapter implements CliAdapter {
             onResult,
             useStreamInput
               ? (exitCode) => {
+                  if (exitCode !== 0) sawResult = true;
                   const settledTurn = currentTurn;
                   // A result may share a stdout batch with later lines. Let
                   // queued data callbacks emit them before exposing turn end.
@@ -1002,12 +1075,16 @@ export class AntigravityCliAdapter implements CliAdapter {
               onStep,
               onResult,
               useStreamInput
-                ? (turnCode) => currentTurn.resolve(turnCode)
+                ? (turnCode) => {
+                    if (turnCode !== 0) sawResult = true;
+                    currentTurn.resolve(turnCode);
+                  }
                 : undefined,
             );
             lineBuf = '';
           }
           const exitCode = code ?? (signal ? 1 : 0);
+          if (!sawResult && exitCode === 0 && !abortController.signal.aborted) emitTelemetry(stepUsage);
           const trailingStderr = stderrLineBuf.trim();
           emitStderrLine(trailingStderr);
           if (trailingStderr.startsWith('AGY_ERROR')) {
@@ -1142,8 +1219,14 @@ export class AntigravityCliAdapter implements CliAdapter {
                 const previousTurn = currentTurn;
                 const nextTurn = createTurnDeferred();
                 currentTurn = nextTurn;
+                turnSequence++;
+                currentTurnId = '';
+                observedModelId = undefined;
                 failedResult = false;
                 failedEvent = undefined;
+                sawResult = false;
+                stepUsage = undefined;
+                seenUsageSteps.clear();
                 errorSteps.length = 0;
                 agyErrors.length = 0;
                 try {
@@ -1359,7 +1442,7 @@ export class AntigravityCliAdapter implements CliAdapter {
       step.usage
     ) {
       const usageStr = formatUsage(step.usage);
-      if (usageStr) {
+      if (usageStr && Number.isSafeInteger(step.usage.input_tokens) && Number.isSafeInteger(step.usage.output_tokens) && step.usage.input_tokens !== undefined && step.usage.output_tokens !== undefined && step.usage.input_tokens >= 0 && step.usage.output_tokens >= 0) {
         emitOutput(`\n[${usageStr}]\n`);
         emitSegment({
           type: 'info',
@@ -1367,9 +1450,12 @@ export class AntigravityCliAdapter implements CliAdapter {
           usage: {
             inputTokens: step.usage.input_tokens,
             outputTokens: step.usage.output_tokens,
+            cacheReadTokens: step.usage.cache_read_tokens,
             totalTokens: step.usage.total_tokens,
           },
         });
+      } else {
+        emitSegment({ type: 'info', content: 'Antigravity turn telemetry unavailable: complete input/output totals missing.' });
       }
     }
   }

@@ -245,6 +245,8 @@ interface CodexEventIdentity {
   readonly sequence: number;
   /** Native child activity is nested under its spawning tool. */
   readonly parentToolUseId?: string;
+  /** Parent inferred from the context's child-thread admission or confirmed by a spawn item. */
+  readonly parentThreadId?: string;
 }
 export type CodexRuntimeEvent = CodexEventIdentity &
   (

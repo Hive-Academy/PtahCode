@@ -152,6 +152,7 @@ function agentInput(item: Extract<Item, { type: 'collabAgentToolCall' }>): Codex
   const prompt = item.prompt?.trim();
   return {
     subagent_type: 'codex',
+    ...(item.model ? { model: item.model } : {}),
     description: prompt ? boundText(prompt.split(/\r?\n/, 1)[0] ?? prompt) : 'Codex sub-agent',
     ...(prompt ? { prompt: boundText(prompt) } : {}),
   };
@@ -688,8 +689,9 @@ export class CodexEventTranslator {
                 type: 'toolCompleted',
                 toolId: item.id,
                 status: toolStatus(item.status),
-                output: { receiverThreadIds: item.receiverThreadIds },
-                ...(item.tool === 'spawnAgent' ? { agentThreadIds: item.receiverThreadIds } : {}),
+                output: { receiverThreadIds: item.receiverThreadIds,
+                  ...(item.model ? { model: item.model } : {}) },
+                ...(item.tool === 'spawnAgent' ? { agentThreadIds: [...new Set([...item.receiverThreadIds, ...Object.keys(item.agentsStates)])] } : {}),
               },
             ]
           : [
@@ -700,7 +702,7 @@ export class CodexEventTranslator {
                 input: item.tool === 'spawnAgent'
                   ? agentInput(item)
                   : { receiverThreadIds: item.receiverThreadIds },
-                ...(item.tool === 'spawnAgent' ? { agentThreadIds: item.receiverThreadIds } : {}),
+                ...(item.tool === 'spawnAgent' ? { agentThreadIds: [...new Set([...item.receiverThreadIds, ...Object.keys(item.agentsStates)])] } : {}),
               },
             ];
       case 'webSearch':

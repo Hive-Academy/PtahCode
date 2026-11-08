@@ -67,6 +67,9 @@ import {
 import { codexLaneModels } from './codex-app-server-lane-models';
 import { CodexLaneWriteDacPreflight } from './codex-lane-write-dac-preflight';
 
+/** Safety bound for app-server builds that omit a trailing usage notification. */
+export const CODEX_LANE_USAGE_DRAIN_MS = 2_000;
+
 export class CodexLaneResumeIdentityError extends Error {
   constructor() {
     super('Codex lane resume requires a matching full thread identity.');
@@ -428,9 +431,11 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       }
       return closing;
     };
+    let usageDrainTimer: ReturnType<typeof setTimeout> | undefined;
     const close = (): Promise<boolean> => {
       if (closePromise) return closePromise;
       closed = true;
+      clearTimeout(usageDrainTimer);
       abort.abort();
       eventAbort.abort();
       active?.resolve(1);
@@ -674,7 +679,23 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       }
       const mapped = active.mapper.map(event);
       for (const segment of mapped.segments) emit(segment);
+      if (mapped.awaitingUsage) {
+        const turn = active;
+        clearTimeout(usageDrainTimer);
+        // The app server has no separate per-turn usage-flush event. Give its
+        // trailing notification a bounded transport drain before failing closed.
+        usageDrainTimer = setTimeout(() => {
+          if (active !== turn) return;
+          const telemetry = turn.mapper.finishPendingUsage();
+          if (telemetry) emit(telemetry);
+          active = undefined;
+          turn.resolve(0);
+        }, CODEX_LANE_USAGE_DRAIN_MS);
+        usageDrainTimer.unref();
+        return;
+      }
       if (mapped.terminal) {
+        clearTimeout(usageDrainTimer);
         const turn = active;
         active = undefined;
         turn.resolve(mapped.terminal === 'completed' ? 0 : 1);
@@ -706,11 +727,18 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       }
     };
     void pump(opened, eventAbort.signal);
+    const nextTurnWarnings: string[] = [];
     const runTurn = (text: string, onStarted?: () => void): Promise<number> => {
       if (closed) return Promise.reject(new Error('Codex lane is closed'));
       if (active || starting)
         return Promise.reject(new Error('Codex lane turn is already active'));
       starting = true;
+      if (nextTurnWarnings.length > 0) {
+        this.logger.debug('[CodexAppServerLaneAdapter] Budget warning injected', {
+          warningId: 'agent-budget-warning',
+        });
+        text = `${nextTurnWarnings.splice(0).join('\n\n')}\n\n${text}`;
+      }
       return new Promise<number>((resolve, reject) => {
         const start = async (): Promise<void> => {
           try {
@@ -821,12 +849,16 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
         const expectedTurnId = active?.receipt.turnId;
         if (closed || !expectedTurnId || !context || starting)
           throw new Error('Codex active turn unavailable');
-        const receipt = await context.steer({ text: message });
+        const receipt = await context.steer({ text: message }, expectedTurnId);
         if (
           receipt.turnId !== expectedTurnId ||
           active?.receipt.turnId !== expectedTurnId
         )
           throw new Error('Codex active turn changed');
+      },
+      queueForNextTurn: (message: string): void => {
+        if (closed) throw new Error('Codex lane is closed');
+        if (nextTurnWarnings.length < 1) nextTurnWarnings.push(message);
       },
       continue: (message: string): Promise<ContinuationOutcome> => {
         if (closed) return Promise.reject(new Error('Codex lane is closed'));

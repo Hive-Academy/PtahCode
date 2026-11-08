@@ -5,6 +5,7 @@ import {
   CodexSelectionSnapshot,
 } from '@ptah-extension/codex-runtime';
 import { CHAT_TOKENS } from '@ptah-extension/rpc-handlers';
+import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
 import { SessionId } from '@ptah-extension/shared';
 import {
   createElectronCodexDriverGate,
@@ -60,6 +61,9 @@ describe('Electron Codex runtime composition', () => {
         }).capabilities.nativeCodex,
       ).toBe(true);
       const parent = container.createChildContainer();
+      parent.register(PLATFORM_TOKENS.WORKSPACE_PROVIDER, {
+        useValue: { getConfiguration: jest.fn((_section: string, _key: string, fallback: unknown) => fallback) },
+      });
       const selected = snapshot('0.166.0');
       const scope = createElectronCodexScopeFactory({
         parent,
@@ -115,6 +119,9 @@ describe('Electron Codex runtime composition', () => {
       const selection = await selected.selectForOpen();
       expect(selection.selected.source).toBe(source);
       const parent = container.createChildContainer();
+      parent.register(PLATFORM_TOKENS.WORKSPACE_PROVIDER, {
+        useValue: { getConfiguration: jest.fn((_section: string, _key: string, fallback: unknown) => fallback) },
+      });
       const ports = {
         selectionSnapshot: selected,
         spawner: {

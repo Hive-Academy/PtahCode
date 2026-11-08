@@ -275,7 +275,7 @@ export interface StreamTransformConfig {
    * compaction tap reads `result`, `status: 'compacting'` and
    * `compact_boundary` here. A throw is logged and the stream continues.
    */
-  onMessage?: (message: SDKMessage) => void;
+  onMessage?: (message: SDKMessage) => void | Promise<void>;
   /**
    * Fired once when this stream tears down: normal end, error or abort. The
    * query run releases what its compaction tap tracked here (TASK_2026_614
@@ -396,6 +396,68 @@ function runGuardedCallback(
     }
   } catch (callbackError: unknown) {
     logCallbackFailure(callbackError);
+  }
+}
+
+/** Longer than the 10 s parent streamInput acceptance window. */
+export const STREAM_MONITOR_WAIT_MS = 15_000;
+
+function monitoredToolUseId(message: SDKMessage): string | null {
+  if ('parent_tool_use_id' in message && typeof message.parent_tool_use_id === 'string') {
+    return message.parent_tool_use_id;
+  }
+  if (!isAssistantMessage(message) || !Array.isArray(message.message.content)) return null;
+  for (const block of message.message.content) {
+    if (block.type === 'tool_use' && (block.name === 'Agent' || block.name === 'Task')) {
+      return block.id;
+    }
+  }
+  return null;
+}
+
+export async function waitForMonitorMessage(
+  logger: Logger,
+  sessionId: SessionId,
+  message: SDKMessage,
+  onMessage: (message: SDKMessage) => void | Promise<void>,
+): Promise<void> {
+  const context = { sessionId, messageType: message.type, toolUseId: monitoredToolUseId(message) };
+  const logFailure = (error: unknown): void => {
+    logger.warn('[StreamTransformer] onMessage callback failed; the stream continues', {
+      ...context,
+      error: error instanceof Error ? error.name : typeof error,
+    });
+  };
+  let work: Promise<void>;
+  try {
+    work = Promise.resolve(onMessage(message));
+  } catch (error: unknown) {
+    // degradation-audit: reported - observer errors are logged; the parent stream must continue.
+    logFailure(error);
+    return;
+  }
+  // Keep the rejection handler attached even after the stream stops waiting.
+  const guardedWork = work.catch((error: unknown) => {
+    // degradation-audit: reported - late observer failures are logged even after timeout.
+    logFailure(error);
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      guardedWork,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(() => {
+          logger.warn('[StreamTransformer] onMessage wait timed out; the stream continues', {
+            ...context,
+            waitedMs: STREAM_MONITOR_WAIT_MS,
+          });
+          resolve();
+        }, STREAM_MONITOR_WAIT_MS);
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -623,12 +685,9 @@ export class StreamTransformer {
             activityWatchdog?.observe(sdkMessage);
             // An observer must never break the stream it observes.
             if (onMessage) {
-              runGuardedCallback(
-                logger,
-                '[StreamTransformer] onMessage callback failed; the stream continues',
-                { sessionId, messageType: sdkMessage.type },
-                () => onMessage(sdkMessage),
-              );
+              // Usually the handoff precedes the next parent message. A stuck
+              // monitor cannot hold the stream indefinitely; its work survives.
+              await waitForMonitorMessage(logger, sessionId, sdkMessage, onMessage);
             }
             sdkMessageCount++;
 

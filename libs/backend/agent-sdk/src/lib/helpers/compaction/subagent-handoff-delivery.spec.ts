@@ -137,7 +137,7 @@ describe('SubagentHandoffDelivery', () => {
     );
   });
 
-  it('send: a timed-out push counts as delivered: not retried or queued', async () => {
+  it('send: a timed-out push has unconfirmed acceptance and is not retried or queued', async () => {
     const h = makeHarness();
     h.port.pushParentMessage.mockRejectedValueOnce(
       new RpcUserError('not read in 10s', 'SEND_TIMEOUT'),
@@ -149,7 +149,11 @@ describe('SubagentHandoffDelivery', () => {
 
     expect(h.port.pushParentMessage).toHaveBeenCalledTimes(1);
     expect(h.port.postMainThreadNotice).not.toHaveBeenCalled();
-    expect(h.logger.warn).toHaveBeenCalledTimes(1);
+    expect(h.logger.warn).not.toHaveBeenCalled();
+    expect(h.logger.info).toHaveBeenCalledWith(
+      expect.stringContaining('acceptance unconfirmed after timeout'),
+      { sessionId: SESSION, toolCallId: TOOL_CALL, attempt: 1 },
+    );
   });
 
   it('send: a session released between attempts gets no further push or notice', async () => {

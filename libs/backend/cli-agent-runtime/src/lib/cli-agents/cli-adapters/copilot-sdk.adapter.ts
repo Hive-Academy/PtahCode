@@ -37,6 +37,7 @@
  * - session.error             -> error
  * - result                    -> info (final stats); resolves done promise
  */
+import { completedTurnTelemetry, turnIdentity } from '@ptah-extension/shared';
 import type {
   CliAdapterManifest,
   CliDetectionResult,
@@ -317,6 +318,7 @@ export class CopilotSdkAdapter implements CliAdapter {
     const resolvedBinaryPath = binaryPath;
     const spawnDescriptor = await resolveDirectSpawn(resolvedBinaryPath);
     let capturedSessionId: string | undefined;
+    let turnSequence = 0;
     let activeChild: ReturnType<typeof spawnCli> | undefined;
 
     const isStackFrame = (line: string): boolean =>
@@ -356,6 +358,7 @@ export class CopilotSdkAdapter implements CliAdapter {
       prompt: string,
       resumeSessionId?: string,
     ): Promise<number> => {
+      const turnNumber = ++turnSequence;
       const args: string[] = [
         '-p',
         prompt,
@@ -418,6 +421,13 @@ export class CopilotSdkAdapter implements CliAdapter {
       let receivedDeltas = false;
       let receivedReasoningDeltas = false;
       const toolCallIdToName = new Map<string, string>();
+      const turnUsages: NonNullable<CliOutputSegment['usage']>[] = [];
+      let incompleteUsage = false;
+      let nativeTurnId: string | undefined;
+      const emitTurnSegment = (item: CliOutputSegment): void => {
+        if (item.usage) turnUsages.push(item.usage);
+        segment.emit(item);
+      };
       let lineBuf = '';
       let stderrBuf = '';
 
@@ -432,7 +442,7 @@ export class CopilotSdkAdapter implements CliAdapter {
           const sessionId = this.handleJsonLine(
             trimmed,
             output.emit,
-            segment.emit,
+            emitTurnSegment,
             {
               getReceivedDeltas: () => receivedDeltas,
               setReceivedDeltas: () => {
@@ -443,6 +453,8 @@ export class CopilotSdkAdapter implements CliAdapter {
                 receivedReasoningDeltas = true;
               },
               toolCallIdToName,
+              onResultId: (id) => { nativeTurnId = id; },
+              onUsageUnavailable: () => { incompleteUsage = true; },
             },
           );
           if (sessionId) {
@@ -472,7 +484,7 @@ export class CopilotSdkAdapter implements CliAdapter {
             const sessionId = this.handleJsonLine(
               lineBuf.trim(),
               output.emit,
-              segment.emit,
+              emitTurnSegment,
               {
                 getReceivedDeltas: () => receivedDeltas,
                 setReceivedDeltas: () => {
@@ -483,6 +495,8 @@ export class CopilotSdkAdapter implements CliAdapter {
                   receivedReasoningDeltas = true;
                 },
                 toolCallIdToName,
+                onResultId: (id) => { nativeTurnId = id; },
+                onUsageUnavailable: () => { incompleteUsage = true; },
               },
             );
             if (sessionId) {
@@ -493,7 +507,41 @@ export class CopilotSdkAdapter implements CliAdapter {
           // Turn ended — invalidate the abort/getPid target so a stale, dead PID
           // can't be returned. continue()'s runTurn re-points activeChild.
           activeChild = undefined;
-          resolve(code ?? (signal ? 1 : 0));
+          const exitCode = code ?? (signal ? 1 : 0);
+          if (exitCode === 0 && !abortController.signal.aborted) {
+            const valid = (value: number | undefined): value is number =>
+              value !== undefined && Number.isSafeInteger(value) && value >= 0;
+            const complete = !incompleteUsage && turnUsages.length > 0 &&
+              turnUsages.every((usage) => valid(usage.inputTokens) && valid(usage.outputTokens));
+            const inputTokens = turnUsages.reduce((sum, usage) => sum + (usage.inputTokens ?? 0), 0);
+            const outputTokens = turnUsages.reduce((sum, usage) => sum + (usage.outputTokens ?? 0), 0);
+            const models = new Map<string, { modelId: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }>();
+            for (const usage of turnUsages) {
+              const modelId = usage.model || 'copilot/unknown';
+              const total = models.get(modelId) ?? { modelId, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+              total.inputTokens += usage.inputTokens ?? 0;
+              total.outputTokens += usage.outputTokens ?? 0;
+              models.set(modelId, total);
+            }
+            const costsComplete = turnUsages.every((usage) =>
+              usage.costUsd !== undefined && Number.isFinite(usage.costUsd) && usage.costUsd >= 0);
+            const usage = complete && valid(inputTokens) && valid(outputTokens) ? {
+              inputTokens, outputTokens,
+              ...(costsComplete ? { costUsd: turnUsages.reduce((sum, item) => sum + (item.costUsd ?? 0), 0) } : {}),
+              ...(models.size > 1 ? { models: [...models.values()] } : {}),
+            } : undefined;
+            segment.emit({
+              type: 'info', content: 'Copilot turn telemetry',
+              turnTelemetry: completedTurnTelemetry({
+                ...turnIdentity({ provider: 'copilot', turnId: nativeTurnId,
+                  sessionId: capturedSessionId ?? resumeSessionId ?? `copilot:${child.pid ?? options.agentId ?? 'unknown'}`,
+                   runId: options.agentId, sequence: turnNumber,
+                   modelId: models.size === 1 ? [...models.keys()][0] : 'copilot/multi-model', source: 'stream' }),
+                usage,
+              }),
+            });
+          }
+          resolve(exitCode);
         });
 
         child.on('error', (err) => {
@@ -543,6 +591,8 @@ export class CopilotSdkAdapter implements CliAdapter {
       getReceivedReasoningDeltas: () => boolean;
       setReceivedReasoningDeltas: () => void;
       toolCallIdToName: Map<string, string>;
+      onResultId?: (id: string) => void;
+      onUsageUnavailable?: () => void;
     },
   ): string | undefined {
     let event: CopilotCliEvent;
@@ -743,10 +793,15 @@ export class CopilotSdkAdapter implements CliAdapter {
         if (duration !== undefined)
           parts.push(`${(duration / 1000).toFixed(1)}s`);
         if (
-          parts.length > 0 ||
-          inputTokens !== undefined ||
-          outputTokens !== undefined
+          inputTokens === undefined || outputTokens === undefined ||
+          !Number.isSafeInteger(inputTokens) || inputTokens < 0 ||
+          !Number.isSafeInteger(outputTokens) || outputTokens < 0
         ) {
+          state.onUsageUnavailable?.();
+          emitSegment({ type: 'info', content: 'Copilot turn telemetry unavailable: complete input/output totals missing.' });
+          return undefined;
+        }
+        if (parts.length > 0 || inputTokens === 0 || outputTokens === 0) {
           const usageStr = `Usage: ${parts.join(', ')}`;
           emitOutput(`\n[${usageStr}]\n`);
           emitSegment({
@@ -787,6 +842,7 @@ export class CopilotSdkAdapter implements CliAdapter {
       }
 
       case 'result': {
+        if (typeof event.id === 'string' && event.id.trim()) state.onResultId?.(event.id.trim());
         const sessionId =
           typeof event.sessionId === 'string' && event.sessionId.trim()
             ? event.sessionId.trim()

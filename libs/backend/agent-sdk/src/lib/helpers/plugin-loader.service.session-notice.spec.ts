@@ -217,7 +217,13 @@ describe('PluginLoaderService.getSessionPluginNotice', () => {
   it('recognizes a symlinked alias of the project root in the lineage', () => {
     const h = setup();
     const alias = path.join(h.base, 'project-alias');
-    fs.symlinkSync(h.project, alias, 'dir');
+    try {
+      fs.symlinkSync(h.project, alias, 'dir');
+    } catch (error: unknown) {
+      // Windows without symlink privilege cannot exercise this filesystem case.
+      if (process.platform === 'win32' && typeof error === 'object' && error !== null && 'code' in error && error.code === 'EPERM') return;
+      throw error;
+    }
     h.setConfig(h.child, config({ enabledPluginIds: ['pluginA'] }));
     expect(h.service.getSessionPluginNotice(h.child, [alias], h.project)).toEqual({
       sessionRoot: h.child,

@@ -378,6 +378,7 @@ export {
 export type { TerminalLaunch } from './utils/terminal-launch';
 export { PtahFileSettingsManager, resolvePtahSettingsDir, seedPtahSettingsFile } from './file-settings-manager';
 export { migrateLegacyCompactionThreshold } from './legacy-threshold-migration';
+export { migrateAgentBudgetSettings } from './agent-budget-settings-migration';
 export type { FileSettingsDefaults } from './file-settings-manager';
 export { SettingsPersistError } from './file-settings-errors';
 export {

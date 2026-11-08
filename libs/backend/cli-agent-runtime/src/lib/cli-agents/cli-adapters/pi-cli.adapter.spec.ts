@@ -186,6 +186,35 @@ describe('PiCliAdapter (RPC mode)', () => {
     adapter = new PiCliAdapter();
   });
 
+  it('emits one summed turn telemetry record at settle without counting turn_end twice', async () => {
+    const handle = await adapter.runSdk({ task: 'Count', workingDirectory: '/proj', model: 'provider/model' });
+    const { segments } = collect(handle);
+    const write = (value: unknown) => currentChild?.stdout.write(`${JSON.stringify(value)}\n`);
+    write({ type: 'message_end', message: { role: 'assistant', model: 'provider/model', usage: { input: 10, output: 2, cacheRead: 3, cacheWrite: 1, cost: { total: 0.1 } } } });
+    write({ type: 'message_end', message: { role: 'assistant', model: 'provider/model', usage: { input: 5, output: 4, cacheRead: 0, cacheWrite: 0, cost: { total: 0.2 } } } });
+    write({ type: 'turn_end', message: { role: 'assistant', model: 'provider/model', usage: { input: 5, output: 4 } } });
+    expect(segments.filter((segment) => segment.turnTelemetry)).toHaveLength(0);
+    write({ type: 'agent_settled' });
+    await handle.done;
+    const telemetry = segments.filter((segment) => segment.turnTelemetry);
+    expect(telemetry).toHaveLength(1);
+    expect(telemetry[0].turnTelemetry).toMatchObject({ status: 'reported', usage: { inputTokens: 15, outputTokens: 6, modelId: 'provider/model' } });
+    expect(telemetry[0].usage).toMatchObject({ inputTokens: 15, outputTokens: 6 });
+  });
+
+  it('uses turn_end as fallback and marks a turn with no usage event unavailable', async () => {
+    const handle = await adapter.runSdk({ task: 'Count', workingDirectory: '/proj', model: 'provider/model' });
+    const { segments } = collect(handle);
+    currentChild?.stdout.write(`${JSON.stringify({ type: 'turn_end', message: { role: 'assistant', model: 'provider/model', usage: { input: 7, output: 3 } } })}\n`);
+    currentChild?.stdout.write('{"type":"agent_settled"}\n');
+    await handle.done;
+    expect(segments.filter((segment) => segment.turnTelemetry)[0].turnTelemetry).toMatchObject({ status: 'reported', usage: { inputTokens: 7, outputTokens: 3 } });
+    const next = await handle.continue?.('Again');
+    spawnedChildren[1].stdout.write('{"type":"agent_settled"}\n');
+    await next?.done;
+    expect(segments.filter((segment) => segment.turnTelemetry).map((segment) => segment.turnTelemetry?.status)).toEqual(['reported', 'unavailable']);
+  });
+
   describe('detect()', () => {
     it('reports installed and a steer messagingMode when the binary is found', async () => {
       mockResolveCliPath.mockResolvedValue('/usr/local/bin/pi');
@@ -545,7 +574,7 @@ describe('PiCliAdapter (RPC mode)', () => {
 
       expect(handle.getSessionId?.()).toBe('uuid-123');
       // Session header produces no segment.
-      expect(segments).toHaveLength(0);
+      expect(segments.filter((segment) => !segment.turnTelemetry)).toHaveLength(0);
     });
 
     it('captures the session id from a get_state response', async () => {
@@ -726,7 +755,7 @@ describe('PiCliAdapter (RPC mode)', () => {
       );
       await handle.done;
 
-      expect(segments).toHaveLength(0);
+      expect(segments.filter((segment) => !segment.turnTelemetry)).toHaveLength(0);
     });
 
     it('emits an error segment for stderr and a non-zero exit', async () => {

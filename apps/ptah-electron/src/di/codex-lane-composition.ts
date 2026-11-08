@@ -23,6 +23,7 @@ import {
   CODEX_RUNTIME_TOKENS,
   CodexRuntime,
   buildCodexExecutionProfile,
+  ownCodexContext,
   type ApprovalSink,
   type CodexContext,
   type CodexExecutionProfile,
@@ -87,29 +88,6 @@ function paths(home: string, cwd: string): CodexExecutionProfileInput['paths'] {
   };
 }
 
-function ownedContext(
-  context: CodexContext,
-  dispose: () => Promise<void>,
-): CodexContext {
-  let closing: Promise<void> | undefined;
-  return {
-    get identity() {
-      return context.identity;
-    },
-    get turnPermissionLevel() {
-      return context.turnPermissionLevel;
-    },
-    listModels: () => context.listModels(),
-    events: (signal) => context.events(signal),
-    startTurn: (input) => context.startTurn(input),
-    steer: (input) => context.steer(input),
-    interrupt: (turnId) => context.interrupt(turnId),
-    updateNextTurn: (patch) => context.updateNextTurn(patch),
-    compact: () => context.compact(),
-    close: () => (closing ??= dispose()),
-  };
-}
-
 /** Register a lazy factory. Creating or selecting the adapter performs no I/O. */
 export function registerElectronCodexLaneFactory(
   container: DependencyContainer,
@@ -134,6 +112,11 @@ export function registerElectronCodexLaneFactory(
     container.resolve<CodexSelectionSnapshotPort>(
       CODEX_RUNTIME_TOKENS.SelectionSnapshot,
     );
+  // Phase 2 registers this factory before the workspace port exists. Cache its
+  // instance on the first lane composition; read values from it on each use.
+  let resolvedWorkspace: IWorkspaceProvider | undefined;
+  const getWorkspace = (): IWorkspaceProvider =>
+    (resolvedWorkspace ??= container.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER));
   const home = async (): Promise<string> => {
     if (input.env['CODEX_HOME'] === '') throw new Error('Codex home is empty');
     return canonical(
@@ -168,7 +151,7 @@ export function registerElectronCodexLaneFactory(
       return {
         lane: {
           codexSandboxMode: codexLaneSandboxMode(
-            container.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER),
+            getWorkspace(),
           ),
           permissionLevel: 'ask',
           identity: {
@@ -221,7 +204,7 @@ export function registerElectronCodexLaneFactory(
       const profile = buildCodexExecutionProfile({
         session: {
           codexSandboxMode: codexLaneSandboxMode(
-            container.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER),
+            getWorkspace(),
           ),
           contextId: randomUUID(),
           consumer: 'lane',
@@ -336,7 +319,7 @@ export function registerElectronCodexLaneFactory(
         scope.container,
         input,
       ).open(profile, resume, secrets);
-      return ownedContext(context, scope.dispose);
+      return ownCodexContext(context, scope.dispose);
     } catch (error) {
       await scope.dispose();
       throw error;

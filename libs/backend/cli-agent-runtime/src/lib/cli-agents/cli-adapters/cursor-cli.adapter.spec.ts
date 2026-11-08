@@ -19,6 +19,7 @@ interface FakeRunControls {
     id: string;
     agentId: string;
     stream: () => AsyncGenerator<unknown, void>;
+    wait: jest.Mock;
     cancel: jest.Mock;
   };
 }
@@ -68,7 +69,7 @@ function createFakeRun(agentId: string): FakeRunControls {
       wake();
     },
     cancel,
-    run: { id: 'run-1', agentId, stream, cancel },
+    run: { id: 'run-1', agentId, stream, cancel, wait: jest.fn(async () => ({ id: 'run-1', status: 'completed' })) },
   };
 }
 
@@ -256,6 +257,81 @@ describe('CursorCliAdapter', () => {
       task: 'Refactor module',
       workingDirectory: '/proj',
     };
+
+    it('emits one completed-turn telemetry record from the SDK usage event', async () => {
+      const handle = await adapter.runSdk(defaultOptions);
+      const segments: Array<import('@ptah-extension/shared').CliOutputSegment> = [];
+      handle.onSegment?.((value) => segments.push(value));
+      await Promise.resolve();
+      await Promise.resolve();
+      currentRun?.push({ type: 'usage', agent_id: 'agent-abc', run_id: 'run-1', usage: { inputTokens: 12, outputTokens: 3, cacheReadTokens: 2, cacheWriteTokens: 1, totalTokens: 15 } });
+      currentRun?.end();
+      await handle.done;
+      expect(segments.filter((segment) => segment.turnTelemetry)).toHaveLength(1);
+      expect(segments.find((segment) => segment.turnTelemetry)?.turnTelemetry).toMatchObject({ status: 'reported', usage: { turnId: 'run-1', modelId: 'cursor/unknown', inputTokens: 12, outputTokens: 3 } });
+    });
+
+    it('uses only the final usage snapshot when the SDK repeats it', async () => {
+      const handle = await adapter.runSdk(defaultOptions);
+      const segments: Array<import('@ptah-extension/shared').CliOutputSegment> = [];
+      handle.onSegment?.((value) => segments.push(value));
+      await Promise.resolve();
+      await Promise.resolve();
+      currentRun?.push({ type: 'usage', agent_id: 'agent-abc', run_id: 'run-1', usage: { inputTokens: 5, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 6 } });
+      currentRun?.push({ type: 'usage', agent_id: 'agent-abc', run_id: 'run-1', usage: { inputTokens: 12, outputTokens: 3, cacheReadTokens: 2, cacheWriteTokens: 1, totalTokens: 15 } });
+      currentRun?.end();
+      await handle.done;
+      const records = segments.filter((segment) => segment.turnTelemetry);
+      expect(records).toHaveLength(1);
+      expect(records[0]?.turnTelemetry).toMatchObject({ status: 'reported', usage: { inputTokens: 12, outputTokens: 3 } });
+    });
+
+    it('records unavailable telemetry when a successful stream has no usage', async () => {
+      const handle = await adapter.runSdk(defaultOptions);
+      const segments: Array<import('@ptah-extension/shared').CliOutputSegment> = [];
+      handle.onSegment?.((value) => segments.push(value));
+      await Promise.resolve();
+      await Promise.resolve();
+      currentRun?.end();
+      await handle.done;
+      expect(segments.filter((segment) => segment.turnTelemetry)).toHaveLength(1);
+      expect(segments.find((segment) => segment.turnTelemetry)?.turnTelemetry).toMatchObject({
+        status: 'unavailable', reason: 'no-usage-event',
+      });
+    });
+
+    it('reconciles usage from the final run result when the stream omits it', async () => {
+      const handle = await adapter.runSdk(defaultOptions);
+      const segments: Array<import('@ptah-extension/shared').CliOutputSegment> = [];
+      handle.onSegment?.((value) => segments.push(value));
+      await Promise.resolve();
+      await Promise.resolve();
+      currentRun?.run.wait.mockResolvedValue({
+        id: 'run-1', status: 'completed', model: { id: 'billed-model' },
+        usage: { inputTokens: 9, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 11 },
+      });
+      currentRun?.end();
+      await handle.done;
+      expect(segments.filter((segment) => segment.turnTelemetry)).toHaveLength(1);
+      expect(segments.find((segment) => segment.turnTelemetry)?.turnTelemetry).toMatchObject({
+        status: 'reported', usage: { turnId: 'run-1', modelId: 'billed-model', inputTokens: 9, outputTokens: 2 },
+      });
+    });
+    it('keeps streamed usage when wait rejects after stream completion', async () => {
+      const handle = await adapter.runSdk(defaultOptions);
+      const segments: Array<import('@ptah-extension/shared').CliOutputSegment> = [];
+      handle.onSegment?.((value) => segments.push(value));
+      await Promise.resolve();
+      await Promise.resolve();
+      currentRun?.run.wait.mockRejectedValue(new Error('late SDK failure'));
+      currentRun?.push({ type: 'usage', agent_id: 'agent-abc', run_id: 'run-1',
+        usage: { inputTokens: 12, outputTokens: 3, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 15 } });
+      currentRun?.end();
+      expect(await handle.done).toBe(0);
+      expect(segments.find((segment) => segment.turnTelemetry)?.turnTelemetry).toMatchObject({
+        status: 'reported', usage: { inputTokens: 12, outputTokens: 3 },
+      });
+    });
 
     it('binds yolo to agent mode with the local sandbox disabled', async () => {
       const handle = await adapter.runSdk({ ...defaultOptions, permission: 'yolo', network: 'allow' });

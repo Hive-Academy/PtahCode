@@ -69,6 +69,8 @@ import type {
   CliDetectionResult,
   CliOutputSegment,
 } from '@ptah-extension/shared';
+import { completedTurnTelemetry, turnIdentity } from '@ptah-extension/shared';
+import { z } from 'zod';
 import type {
   CliAdapterManifest,
   CliAdapter,
@@ -145,9 +147,27 @@ interface PiEvent {
   readonly isError?: boolean;
   /** `agent_end` only: a retry follows when true — do NOT settle on it. */
   readonly willRetry?: boolean;
-  /** `error` event only: the failure message. */
-  readonly message?: string;
+  /** Error text or the assistant message on a completion event. */
+  readonly message?: unknown;
 }
+
+const piMessageUsageSchema = z.object({
+  role: z.literal('assistant'),
+  model: z.string().optional(),
+  usage: z.object({
+    input: z.number().int().nonnegative(),
+    output: z.number().int().nonnegative(),
+    cacheRead: z.number().int().nonnegative().optional(),
+    cacheWrite: z.number().int().nonnegative().optional(),
+    cost: z.object({ total: z.number().finite().nonnegative() }).passthrough().optional(),
+  }).passthrough(),
+}).passthrough();
+
+type PiMessageUsage = z.infer<typeof piMessageUsageSchema>;
+const piCompletionUsageSchema = z.object({
+  type: z.enum(['message_end', 'turn_end']),
+  message: piMessageUsageSchema,
+}).passthrough();
 
 /** Cap on the un-newlined stdout buffer before we discard it (runaway line). */
 const LINE_BUF_CAP = 1024 * 1024;
@@ -336,6 +356,7 @@ export class PiCliAdapter implements CliAdapter {
    */
   async runSdk(options: CliCommandOptions): Promise<SdkHandle> {
     validateLaneSpawnPolicy(this.name, this.capabilities(), options);
+    let spawnedChildrenSequence = 0;
     // options.mcpPort is intentionally ignored — Pi has no MCP support.
     // options.autoApprove is a no-op — Pi has no tool-approval gate to skip;
     // tool execution is always auto-approved by Pi itself, so `false` cannot be
@@ -458,6 +479,10 @@ export class PiCliAdapter implements CliAdapter {
 
       let lineBuf = '';
       let stderrBuf = '';
+      let turnModel = options.model;
+      const messageUsage: PiMessageUsage[] = [];
+      const endUsage: PiMessageUsage[] = [];
+      const turnSequence = spawnedChildrenSequence++;
 
       return new Promise<number>((resolve) => {
         let settled = false;
@@ -487,6 +512,12 @@ export class PiCliAdapter implements CliAdapter {
             lineBuf = '';
           }
           for (const line of lines) {
+            const completion = this.readCompletionUsage(line);
+            if (completion) {
+              if (completion.type === 'message_end') messageUsage.push(completion.usage);
+              else endUsage.push(completion.usage);
+              turnModel = completion.usage.model || turnModel;
+            }
             const isSettled = this.handleLine(line, output.emit, segment.emit, {
               onSessionId: (id) => {
                 if (id && !capturedSessionId) capturedSessionId = id;
@@ -496,6 +527,25 @@ export class PiCliAdapter implements CliAdapter {
               },
             });
             if (isSettled) {
+              const records = messageUsage.length ? messageUsage : endUsage;
+              const usage = records.length ? {
+                inputTokens: records.reduce((total, record) => total + record.usage.input, 0),
+                outputTokens: records.reduce((total, record) => total + record.usage.output, 0),
+                cacheReadTokens: records.every((record) => record.usage.cacheRead !== undefined)
+                  ? records.reduce((total, record) => total + (record.usage.cacheRead ?? 0), 0) : undefined,
+                cacheWriteTokens: records.every((record) => record.usage.cacheWrite !== undefined)
+                  ? records.reduce((total, record) => total + (record.usage.cacheWrite ?? 0), 0) : undefined,
+                costUsd: records.every((record) => record.usage.cost?.total !== undefined)
+                  ? records.reduce((total, record) => total + (record.usage.cost?.total ?? 0), 0) : undefined,
+              } : undefined;
+              segment.emit({
+                type: 'info',
+                content: usage ? 'Pi turn usage.' : 'Pi turn telemetry unavailable.',
+                ...(usage ? { usage: { model: turnModel, ...usage } } : {}),
+                turnTelemetry: completedTurnTelemetry({ ...turnIdentity({ provider: 'pi',
+                  sessionId: resumeSessionId ?? capturedSessionId, runId: options.agentId, sequence: turnSequence,
+                  modelId: turnModel, source: 'sdk' }), usage }),
+              });
               finish(0);
             }
           }
@@ -680,7 +730,7 @@ export class PiCliAdapter implements CliAdapter {
         return false;
       }
       case 'error': {
-        const message = event.message ?? 'Unknown Pi error';
+        const message = typeof event.message === 'string' ? event.message : 'Unknown Pi error';
         emitOutput(`\n[Pi CLI Error] ${message}\n`);
         emitSegment({ type: 'error', content: message });
         return false;
@@ -689,6 +739,19 @@ export class PiCliAdapter implements CliAdapter {
         // agent_start/turn_start/turn_end/queue_update/etc. are structural.
         return false;
     }
+  }
+
+  private readCompletionUsage(line: string): { type: 'message_end' | 'turn_end'; usage: PiMessageUsage } | undefined {
+    let event: unknown;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      // degradation-audit: optional-capability - a non-JSON text line is not a
+      // completion event; the normal output handler processes it.
+      return undefined;
+    }
+    const parsed = piCompletionUsageSchema.safeParse(event);
+    return parsed.success ? { type: parsed.data.type, usage: parsed.data.message } : undefined;
   }
 
   /**

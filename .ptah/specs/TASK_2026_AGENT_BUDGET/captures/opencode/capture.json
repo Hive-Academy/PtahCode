@@ -1,0 +1,14 @@
+{
+  "cli": "opencode",
+  "argv": [
+    "run",
+    "--format",
+    "json",
+    "Reply with the word OK."
+  ],
+  "exitCode": 0,
+  "jsonLines": 2,
+  "usageEvents": [],
+  "stderrPresent": false,
+  "note": "Only numeric usage fields retained; all string payloads and stderr discarded."
+}

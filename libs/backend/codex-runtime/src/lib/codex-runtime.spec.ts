@@ -453,6 +453,35 @@ describe('CodexRuntime', () => {
     expect(children[1].frames.map((frame) => frame['method'])).not.toContain('thread/resume');
   });
 
+  it('attaches the child-budget observer without replacing the opened context', async () => {
+    const markUnsupported = jest.fn();
+    const readSetting = jest.fn((_key: string, fallback: number) => fallback);
+    runtime = new CodexRuntime({
+      ...options,
+      selectionSnapshot: { ...options.selectionSnapshot, markUnsupported },
+      childBudget: { readSetting },
+    });
+    const context = await runtime.open(profile);
+    expect(readSetting).toHaveBeenCalledTimes(4);
+    runtime.markUnsupported(context, 'turn/start');
+    expect(markUnsupported).toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'installed' }),
+      'turn/start',
+    );
+    await context.close();
+  });
+
+  it('opens the context when the child-budget settings cannot be read', async () => {
+    runtime = new CodexRuntime({
+      ...options,
+      childBudget: { readSetting: () => { throw new Error('no workspace'); } },
+    });
+    await expect(runtime.open(profile)).resolves.toBeDefined();
+    expect(options.logger.warn).toHaveBeenCalledWith(
+      '[Codex budget] Child budget observer unavailable', { errorClass: 'Error' },
+    );
+  });
+
   it('records an unsupported installed turn for the context selection', async () => {
     const markUnsupported = jest.fn();
     options = { ...options, selectionSnapshot: {

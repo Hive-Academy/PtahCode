@@ -39,7 +39,7 @@ import {
   PLATFORM_TOKENS,
   type IFileSystemProvider,
 } from '@ptah-extension/platform-core';
-import { SessionId } from '@ptah-extension/shared';
+import { SessionId, isAgentBudgetStopReason } from '@ptah-extension/shared';
 import {
   resolveTaskKind,
   type LaneOutcomeRecorder,
@@ -854,6 +854,17 @@ export class LaneCompletionNotifier {
         : {}),
       ...(info.cliSessionId ? { cliSessionId: info.cliSessionId } : {}),
       ...(info.stopReason ? { stopReason: info.stopReason } : {}),
+      ...(isAgentBudgetStopReason(info.stopReason)
+        ? {
+            progressPointer: deliverables.find((item) => item.exists && (item.bytes ?? 0) > 0 && item.writtenAfterSpawn !== false)?.path
+              ?? `last completed turn ${info.agentBudget?.turnIds.at(-1) ?? 'unavailable'} in CLI Session ID ${info.cliSessionId ?? 'unavailable'}`,
+            budgetLimit: info.stopReason === 'budget'
+              ? `${info.agentBudget?.stopWeightedTokens ?? 'configured'} weighted tokens`
+              : info.stopReason === 'duration'
+                ? `${info.agentBudget?.maxDurationMin ?? 'configured'} minutes`
+                : 'completed-turn telemetry required',
+          }
+        : {}),
       ...(context.toolCalls !== undefined
         ? { toolCalls: context.toolCalls }
         : {}),

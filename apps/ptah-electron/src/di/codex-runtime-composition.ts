@@ -237,11 +237,16 @@ export function createElectronCodexScopeFactory(
     }
     const container = input.parent.createChildContainer();
     try {
+      const workspace = input.parent.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER);
       registerCodexRuntime(container, {
         ...input.ports,
         usage: input.ports.usage
           ? { ...input.ports.usage, ...input.usageNotifications }
           : null,
+        // Chat and lane scopes both register here, so each context is observed once.
+        childBudget: {
+          readSetting: (key, fallback) => workspace.getConfiguration('ptah', key, fallback),
+        },
         sink,
       });
       // Lifecycle ownership is the only allowed use of the raw token. Resolving

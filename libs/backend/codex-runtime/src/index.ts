@@ -53,6 +53,7 @@ export type {
 } from './lib/codex-home-auth-reader';
 export { CODEX_RUNTIME_TOKENS } from './lib/di/tokens';
 export { CodexRuntime } from './lib/codex-runtime';
+export { ownCodexContext } from './lib/owned-codex-context';
 export { CodexContextStateError } from './lib/codex-context-state-error';
 export type { CodexRuntimeOptions } from './lib/codex-context';
 export {
@@ -111,5 +112,10 @@ export {
   CODEX_INITIALIZE_TIMEOUT_MS,
 } from './lib/codex-app-server-process';
 export { CodexPreTurnConfigRejectedError } from './lib/codex-runtime';
+export {
+  type CodexChildBudgetObserver,
+  type CodexChildBudgetPort,
+  type CodexChildBudgetSettingKey,
+} from './lib/codex-child-budget-observer';
 
 export { presentCodexApproval, presentCodexTool, presentCodexToolResult, CODEX_DENIED_TOOL_RESULT_TEXT, type CodexCompletedTool } from './lib/codex-tool-presentation';

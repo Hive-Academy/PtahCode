@@ -21,10 +21,14 @@ import type {
   CliType,
   LaneRequestContext,
   LaneRequestContextSource,
+  AgentBudgetSettings,
+  LaneStopReason,
+  AgentBudgetRecord,
 } from '@ptah-extension/shared';
+import { AgentBudgetPolicy, initialAgentBudgetSnapshot } from '@ptah-extension/shared';
 import type { IOutputChannel } from '@ptah-extension/platform-core';
 import { classifyProviderAccountBinding } from '@ptah-extension/shared/schemas';
-import { PROVIDER_ACCOUNT_RESULT_CODES } from '@ptah-extension/shared';
+import { PROVIDER_ACCOUNT_RESULT_CODES, isAgentBudgetStopReason } from '@ptah-extension/shared';
 import type {
   LaneAccountBindingPort,
   LaneAccountReference,
@@ -60,6 +64,9 @@ export const HANDOFF_FINAL_TEXT_MAX_CHARS = 2_000;
 const LOG_PREFIX = '[LaneResumeGate]';
 
 export interface LaneResumeGateInput {
+  readonly budget?: AgentBudgetRecord;
+  readonly budgetSettings?: AgentBudgetSettings;
+  readonly stopReason?: LaneStopReason;
   readonly cli: CliType | 'claude';
   readonly accountReference?: {
     readonly accountBinding?: unknown;
@@ -108,6 +115,22 @@ export class LaneResumeGate {
   ) {}
 
   async evaluate(input: LaneResumeGateInput): Promise<LaneResumeDecision> {
+    const budgetStop = isAgentBudgetStopReason(input.stopReason);
+    const total = Math.max(input.budget?.weightedTokens ?? 0, input.budget?.rawTokens ?? 0);
+    const nearLimit = input.budgetSettings !== undefined && new AgentBudgetPolicy(input.budgetSettings).assess({
+      ...initialAgentBudgetSnapshot,
+      rawTokens: input.budget?.rawTokens ?? 0,
+      weightedTokens: input.budget?.weightedTokens ?? 0,
+    }, input.budget ? Math.max(0, this.now() - input.budget.startedAtMs) : 0).warning;
+    const expired = input.budget !== undefined && input.budgetSettings !== undefined &&
+      this.now() - input.budget.startedAtMs >= input.budgetSettings.maxDurationMin * 60_000;
+    if (budgetStop || nearLimit || expired) {
+      const reason = budgetStop
+        ? `budget stop: CLI session cannot resume after ${input.stopReason} stop`
+        : expired ? 'lane lifetime budget expired' :
+          `near-limit (warning reached): CLI session has reached its budget warning threshold (${Math.round(total)} tokens)`;
+      return { decision: 'fresh', reason, contextTokens: null, source: 'estimate', idleMs: null };
+    }
     // Identity is checked before the cost gate can read context or make a
     // handoff. A fresh-context decision must retain this same account.
     const accountReference = await resolveLaneAccountResume(input);

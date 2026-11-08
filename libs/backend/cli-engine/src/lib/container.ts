@@ -43,6 +43,7 @@ import {
   PLATFORM_TOKENS,
   isFileBasedSettingKey,
   ContentDownloadService,
+  migrateAgentBudgetSettings,
 } from '@ptah-extension/platform-core';
 import type {
   IFileDialog,
@@ -427,6 +428,16 @@ export class CliDIContainer {
     const appPath = options.appPath ?? __dirname;
     const workspacePath = options.workspacePath ?? process.cwd();
     const logsPath = options.logsPath ?? path.join(userDataPath, 'logs');
+    // File settings can materialize defaults during platform registration.
+    const budgetMigrationWarnings: string[] = [];
+    let budgetMigrationError: Error | undefined;
+    try {
+      migrateAgentBudgetSettings(userDataPath, {
+        warn: (message) => budgetMigrationWarnings.push(message),
+      });
+    } catch (error: unknown) {
+      budgetMigrationError = error instanceof Error ? error : new Error(String(error));
+    }
 
     const platformOptions: CliPlatformOptions = {
       appPath,
@@ -483,6 +494,8 @@ export class CliDIContainer {
     const loggerAdapter = new CliLoggerAdapter(outputManager);
     const logger = loggerAdapter as unknown as Logger;
     container.register(TOKENS.LOGGER, { useValue: logger });
+    for (const message of budgetMigrationWarnings) logger.warn(message);
+    if (budgetMigrationError) logger.error('[CLI DI] Agent budget settings migration failed', budgetMigrationError);
 
     logger.info('[CLI DI] Starting service registration...');
     registerVsCodeCorePlatformAgnostic(container, logger, {

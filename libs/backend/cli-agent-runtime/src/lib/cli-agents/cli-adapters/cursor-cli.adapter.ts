@@ -18,6 +18,7 @@ import type {
   CliDetectionResult,
   CliOutputSegment,
 } from '@ptah-extension/shared';
+import { completedTurnTelemetry, turnIdentity } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type {
   CliAdapterManifest,
@@ -106,12 +107,15 @@ type CursorSdkMessage =
       message?: string;
     }
   | { type: 'request'; request_id: string }
-  | { type: 'task'; status?: string; text?: string };
+  | { type: 'task'; status?: string; text?: string }
+  | { type: 'usage'; agent_id: string; run_id: string; usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; totalTokens: number } };
 
 interface CursorRun {
   readonly id: string;
   readonly agentId: string;
   stream(): AsyncGenerator<CursorSdkMessage, void>;
+  wait(): Promise<{ usage?: Extract<CursorSdkMessage, { type: 'usage' }>['usage']; model?: CursorModelSelection }>;
+  readonly usage?: Extract<CursorSdkMessage, { type: 'usage' }>['usage'];
   cancel(): Promise<void>;
 }
 
@@ -453,10 +457,18 @@ export class CursorCliAdapter implements CliAdapter {
 
         const textTracker = { last: '' };
         const seenToolCalls = new Set<string>();
+        let reportedModel = 'cursor/unknown';
+        let latestUsage: Extract<CursorSdkMessage, { type: 'usage' }> | undefined;
 
         for await (const message of run.stream()) {
           if (abortController.signal.aborted) {
             return 1;
+          }
+          if (message.type === 'system' && message.model?.id)
+            reportedModel = message.model.id;
+          if (message.type === 'usage') {
+            latestUsage = message;
+            continue;
           }
           this.handleMessage(
             message,
@@ -465,6 +477,25 @@ export class CursorCliAdapter implements CliAdapter {
             textTracker,
             seenToolCalls,
           );
+        }
+
+        if (!abortController.signal.aborted) {
+          let settled: Awaited<ReturnType<typeof run.wait>> | undefined;
+          try {
+            settled = await run.wait();
+          } catch {
+            // degradation-audit: optional-capability - the completed stream already has usage;
+            // a failed SDK wait cannot invalidate a completed turn.
+            this.logger?.warn('[CursorCliAdapter] run.wait failed after stream completion');
+          }
+          const usage = latestUsage?.usage ?? settled?.usage ?? run.usage;
+          reportedModel = settled?.model?.id ?? reportedModel;
+          emitStreamSegment({
+            type: 'info', content: usage ? 'Cursor turn usage.' : 'Cursor turn telemetry unavailable.',
+            ...(usage ? { usage: { model: reportedModel, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheReadTokens: usage.cacheReadTokens, cacheWriteTokens: usage.cacheWriteTokens, totalTokens: usage.totalTokens } } : {}),
+            turnTelemetry: completedTurnTelemetry({ ...turnIdentity({ provider: 'cursor',
+              turnId: latestUsage?.run_id ?? run.id, modelId: reportedModel, source: 'sdk' }), usage }),
+          });
         }
 
         return abortController.signal.aborted ? 1 : 0;

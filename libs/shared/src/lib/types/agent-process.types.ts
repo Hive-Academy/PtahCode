@@ -4,6 +4,7 @@
  * Branded AgentId, status enum, process tracking types.
  */
 import { v4 as uuidv4 } from 'uuid';
+import type { AgentTurnTelemetry } from './agent-turn-usage.types';
 import type { FlatStreamEventUnion } from './execution';
 import type { QuotaOwnerRef } from './plan-limit.types';
 import type {
@@ -292,6 +293,8 @@ export interface AgentProcessInfo {
    * Unset for ordinary completion and caller stops.
    */
   stopReason?: LaneStopReason;
+  /** Durable completed-turn counters used by the CLI budget resume gate. */
+  readonly agentBudget?: AgentBudgetRecord;
   /** Known provider reset time, in Unix milliseconds, for a usage-limit exit. */
   stopResetAt?: number;
   /**
@@ -309,6 +312,7 @@ export interface AgentProcessInfo {
   readonly routingSource?: Exclude<OutcomeRoutingSource, 'not-routed'>;
 }
 
+const AGENT_BUDGET_STOP_REASONS = ['budget', 'telemetry-unavailable', 'duration'] as const;
 /**
  * Why the host ended a lane (TASK_2026_597, R9.4):
  * `repeat-call` — the lane guard saw one identical tool call repeated up to
@@ -319,12 +323,25 @@ export interface AgentProcessInfo {
  * (or the durable normalization of the session metadata) stamps it so a
  * resume can continue the CLI session.
  */
-export type LaneStopReason =
-  | 'repeat-call'
-  | 'usage-limit'
-  | 'auth'
-  | 'session-mismatch'
-  | 'host-restart';
+export const LANE_STOP_REASONS = [
+  'repeat-call', 'usage-limit', 'auth', 'session-mismatch', 'host-restart',
+  ...AGENT_BUDGET_STOP_REASONS,
+] as const;
+export type LaneStopReason = (typeof LANE_STOP_REASONS)[number];
+export interface AgentBudgetRecord {
+  readonly weightedTokens: number;
+  readonly rawTokens: number;
+  readonly largestTurnTokens?: number;
+  readonly turnIds: readonly string[];
+  readonly turnCount?: number;
+  readonly startedAtMs: number;
+  readonly stopWeightedTokens?: number;
+  readonly maxDurationMin?: number;
+}
+/** True for a budget-owned stop, including unavailable turn telemetry. */
+export function isAgentBudgetStopReason(reason: LaneStopReason | undefined): boolean {
+  return reason !== undefined && AGENT_BUDGET_STOP_REASONS.some((value) => value === reason);
+}
 
 /**
  * What the resume gate did with a `resumeSessionId` spawn (TASK_2026_597):
@@ -550,6 +567,7 @@ export type CliOutputSegmentType =
 export interface CliOutputSegment {
   readonly type: CliOutputSegmentType;
   readonly content: string;
+  readonly turnTelemetry?: AgentTurnTelemetry;
   readonly usage?: {
     readonly model?: string;
     readonly inputTokens?: number;
@@ -628,6 +646,7 @@ export interface CliSessionReference {
   readonly status: AgentStatus;
   /** Why the host stopped this lane, when known. Persisted with an interrupted restore. */
   readonly stopReason?: LaneStopReason;
+  readonly agentBudget?: AgentBudgetRecord;
   /** Epoch milliseconds when a usage-limit stop resets, when known. */
   readonly stopResetAt?: number;
   /**
@@ -740,6 +759,9 @@ export interface LaneCompletionSignal {
   readonly cliSessionId?: string;
   /** Why the host stopped the lane. Absent when it ended on its own or the caller stopped it. */
   readonly stopReason?: LaneStopReason;
+  /** Short read hint for work interrupted by an agent budget stop. */
+  readonly progressPointer?: string;
+  readonly budgetLimit?: string;
   /** Tool calls the lane made in its last task, when the host counted them. */
   readonly toolCalls?: number;
   /** Caller messages a host stop discarded from the lane's queue. Absent when none were. */

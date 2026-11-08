@@ -60,6 +60,7 @@
  */
 import { existsSync } from 'fs';
 import path from 'path';
+import { completedTurnTelemetry, turnIdentity } from '@ptah-extension/shared';
 import { z } from 'zod';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type {
@@ -130,6 +131,8 @@ interface OpencodeToolState {
 /** Nested `part` object present on most opencode JSONL events. */
 interface OpencodePart {
   readonly id?: string;
+  readonly modelID?: string;
+  readonly providerID?: string;
   readonly type?: string;
   readonly text?: string;
   readonly tool?: string;
@@ -156,6 +159,8 @@ interface OpencodePart {
 interface OpencodeEvent {
   readonly type?: string;
   readonly sessionID?: string;
+  readonly modelID?: string;
+  readonly providerID?: string;
   readonly timestamp?: number;
   readonly part?: OpencodePart;
   readonly message?: string;
@@ -177,10 +182,16 @@ interface OpencodeTurnState {
   stoppedAfterLastError: boolean;
   /** Error-classified stderr received after that final `step_finish`. */
   stderrErrorAfterStop?: string;
+  readonly stepUsages: Array<{ part: OpencodePart; modelId?: string }>;
+  turnId?: string;
+  observedModelId?: string;
 }
 
 /** Everything one `opencode run` spawn needs; see `runTurn`. */
 interface OpencodeTurnLaunch {
+  readonly turnNumber: number;
+  readonly runId?: string;
+  readonly requestedModelId?: string;
   readonly command: string;
   readonly args: string[];
   readonly workingDirectory: string;
@@ -743,6 +754,7 @@ export class OpencodeCliAdapter implements CliAdapter {
     // off-Windows / for a resolved `.exe`.
     const spawnDescriptor = await resolveDirectSpawn(binary);
 
+    let turnSequence = 0;
     const startTurn = (
       prompt: string,
       sessionId: string | undefined,
@@ -759,6 +771,9 @@ export class OpencodeCliAdapter implements CliAdapter {
       args.push(prompt);
       assertCommandLineWithinLimit(spawnDescriptor.command, args);
       return this.runTurn({
+        turnNumber: ++turnSequence,
+        runId: options.agentId,
+        requestedModelId: options.model,
         command: spawnDescriptor.command,
         args,
         workingDirectory: options.workingDirectory,
@@ -863,7 +878,9 @@ export class OpencodeCliAdapter implements CliAdapter {
 
     const state: OpencodeTurnState = {
       textTracker: new Map<string, string>(),
+      stepUsages: [],
       stoppedAfterLastError: false,
+      observedModelId: launch.requestedModelId,
     };
     let boundSessionId = launch.expectedSessionId;
     let firstSessionEvent = true;
@@ -939,7 +956,34 @@ export class OpencodeCliAdapter implements CliAdapter {
           lineBuf = '';
         }
         const exitCode = code ?? (exitSignal ? 1 : 0);
-        resolve(sessionMismatch ? 1 : this.settleExitCode(exitCode, state, signal.aborted, launch));
+        const settled = sessionMismatch ? 1 : this.settleExitCode(exitCode, state, signal.aborted, launch);
+        if (settled === 0 && !signal.aborted) {
+          const steps = state.stepUsages;
+          const complete = steps.length > 0 && steps.every(({ part }) =>
+            Number.isSafeInteger(part.tokens?.input) &&
+            Number.isSafeInteger(part.tokens?.output) &&
+            (part.tokens?.input ?? -1) >= 0 && (part.tokens?.output ?? -1) >= 0);
+          const usage = complete ? {
+            inputTokens: steps.reduce((sum, { part }) => sum + (part.tokens?.input ?? 0), 0),
+            outputTokens: steps.reduce((sum, { part }) => sum + (part.tokens?.output ?? 0), 0),
+            ...(steps.every(({ part }) => part.cost !== undefined && Number.isFinite(part.cost) && part.cost >= 0)
+              ? { costUsd: steps.reduce((sum, { part }) => sum + (part.cost ?? 0), 0) } : {}),
+            models: steps.map(({ part, modelId }) => ({
+              modelId: modelId ?? 'opencode/unknown', inputTokens: part.tokens?.input ?? 0,
+              outputTokens: part.tokens?.output ?? 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+            })),
+          } : undefined;
+          emitSegment({
+            type: 'info', content: 'OpenCode turn telemetry',
+            turnTelemetry: completedTurnTelemetry({
+              ...turnIdentity({ provider: 'opencode', turnId: state.turnId,
+                sessionId: boundSessionId ?? launch.expectedSessionId ?? `opencode:${child.pid ?? 'unknown'}`,
+                runId: launch.runId, sequence: launch.turnNumber, modelId: state.observedModelId, source: 'stream' }),
+              usage,
+            }),
+          });
+        }
+        resolve(settled);
       });
 
       child.on('error', (err) => {
@@ -1028,6 +1072,9 @@ export class OpencodeCliAdapter implements CliAdapter {
     }
 
     if (!acceptSession(event)) return;
+    const modelId = event.modelID ?? event.part?.modelID;
+    const providerId = event.providerID ?? event.part?.providerID;
+    if (modelId && providerId) turn.observedModelId = `${providerId}/${modelId}`;
 
     switch (event.type) {
       case 'step_start':
@@ -1040,8 +1087,10 @@ export class OpencodeCliAdapter implements CliAdapter {
         this.handleToolUse(event, emitOutput, emitSegment);
         break;
       case 'step_finish':
+        if (event.part) turn.stepUsages.push({ part: event.part, modelId: turn.observedModelId });
         if (event.part?.reason === 'stop') {
           turn.stoppedAfterLastError = true;
+          turn.turnId = event.part.id;
         }
         this.handleStepFinish(event, emitOutput, emitSegment);
         break;
@@ -1157,10 +1206,14 @@ export class OpencodeCliAdapter implements CliAdapter {
     if (part?.reason !== 'stop') return;
 
     const tokens = part.tokens;
-    if (!tokens) return;
-    const usageStr = `Usage: ${tokens.input ?? 0} input, ${
-      tokens.output ?? 0
-    } output tokens`;
+    if (
+      !tokens ||
+      !Number.isSafeInteger(tokens.input) || tokens.input === undefined || tokens.input < 0 ||
+      !Number.isSafeInteger(tokens.output) || tokens.output === undefined || tokens.output < 0
+    ) {
+      return;
+    }
+    const usageStr = `Usage: ${tokens.input} input, ${tokens.output} output tokens`;
     emitOutput(`\n[${usageStr}]\n`);
     emitSegment({
       type: 'info',

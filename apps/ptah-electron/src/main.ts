@@ -25,6 +25,7 @@ import {
   PLATFORM_TOKENS,
   StateStorageRecoveryRequiredError,
   migrateLegacyCompactionThreshold,
+  migrateAgentBudgetSettings,
   resolvePtahSettingsDir,
   type IArtifactStore,
 } from '@ptah-extension/platform-core';
@@ -93,6 +94,15 @@ if (!gotLock) {
       console.error('[Ptah Electron] Legacy compaction threshold migration failed',
         error instanceof Error ? error : new Error(String(error)));
     }
+  }
+  const agentBudgetMigrationWarnings: string[] = [];
+  try {
+    migrateAgentBudgetSettings(activeSettingsDir, {
+      warn: (message) => agentBudgetMigrationWarnings.push(message),
+    });
+  } catch (error: unknown) {
+    console.error('[Ptah Electron] Agent budget settings migration failed',
+      error instanceof Error ? error : new Error(String(error)));
   }
   /**
    * ONE reference for every long-lived boot handle (TASK_2026_331 B1.T6).
@@ -280,6 +290,7 @@ if (!gotLock) {
       bootStep('bootstrapElectron done');
       bootContainer = boot.container;
       motionLogger = boot.container.resolve<Logger>(TOKENS.LOGGER);
+      for (const warning of agentBudgetMigrationWarnings) motionLogger.warn(warning);
       for (const error of pendingMotionErrors) reportMotionError(error);
       pendingMotionErrors.length = 0;
       workspaceStorageReady = true;

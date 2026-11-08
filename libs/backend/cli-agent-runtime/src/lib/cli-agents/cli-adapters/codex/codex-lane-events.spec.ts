@@ -22,6 +22,20 @@ function mapper() {
 }
 
 describe('CodexLaneEvents', () => {
+  it('accepts usage more than 100 ms after a completed terminal', async () => {
+    const map = mapper();
+    expect(map({ type: 'terminal', status: 'completed' }).awaitingUsage).toBe(true);
+    await new Promise<void>((resolve) => setTimeout(resolve, 150));
+    const result = map({ type: 'usage', usage: { inputTokens: 4, outputTokens: 2 } });
+    expect(result.terminal).toBe('completed');
+    expect(result.segments[0]?.turnTelemetry?.status).toBe('reported');
+  });
+
+  it('reports missing usage when the bounded drain ends', () => {
+    const events = new CodexLaneEvents(identity);
+    events.map({ ...identity, sequence: 1, type: 'terminal', status: 'completed' });
+    expect(events.finishPendingUsage()?.turnTelemetry?.status).toBe('unavailable');
+  });
   it('renders async questions as ordinary text for lane users', () => {
     const map = mapper();
     expect(map({ type: 'userInputAsync', itemId: 'question', text: 'Choose one',
@@ -199,7 +213,7 @@ describe('CodexLaneEvents', () => {
       }).segments,
     ).toEqual([]);
     expect(map({ type: 'terminal', status: 'completed' }).segments).toEqual([
-      {
+      expect.objectContaining({
         type: 'info',
         content: 'Codex turn usage.',
         usage: {
@@ -208,7 +222,7 @@ describe('CodexLaneEvents', () => {
           outputTokens: 2,
           totalTokens: 12,
         },
-      },
+      }),
     ]);
   });
 
@@ -233,7 +247,47 @@ describe('CodexLaneEvents', () => {
     });
   });
 
-  it('prefers terminal usage and preserves missing counters and reported zero cost', () => {
+  it('reports one completed turn with its model and full input total', () => {
+    const map = mapper();
+    const counters = { uncachedInputTokens: 6, outputTokens: 3, cacheReadTokens: 4, cacheCreationTokens: 2, reasoningOutputTokens: 0, totalTokens: 15 };
+    map({
+      type: 'usage',
+      usage: { inputTokens: 12, cachedInputTokens: 4, cacheWriteInputTokens: 2, outputTokens: 3 },
+      evidence: {
+        threadId: 'thread', turnId: 'turn', modelId: 'gpt-5', total: counters, last: counters,
+        timestamp: 0, terminalState: 'none', resetOrStale: false, accepted: true,
+        epoch: 0, cacheSemanticsAmbiguous: false, lastExceedsTotal: false, diagnostics: [],
+      },
+    });
+    const completed = map({ type: 'terminal', status: 'completed' });
+    expect(completed.segments).toHaveLength(1);
+    expect(completed.segments[0]?.turnTelemetry).toMatchObject({
+      status: 'reported', usage: { turnId: 'turn', modelId: 'gpt-5', inputTokens: 12, outputTokens: 3 },
+    });
+  });
+
+  it('waits for trailing usage after a successful terminal', () => {
+    const map = mapper();
+    const completed = map({ type: 'terminal', status: 'completed' });
+    expect(completed).toEqual({ segments: [], awaitingUsage: true });
+    const trailing = map({ type: 'usage', usage: { inputTokens: 12, outputTokens: 3 } });
+    expect(trailing.terminal).toBe('completed');
+    expect(trailing.segments[0]?.turnTelemetry).toMatchObject({
+      status: 'reported', usage: { turnId: 'turn', inputTokens: 12, outputTokens: 3 },
+    });
+  });
+
+  it('flushes one unavailable record when trailing usage never arrives', () => {
+    const events = new CodexLaneEvents(identity);
+    events.map({ ...identity, sequence: 1, type: 'terminal', status: 'completed' });
+    expect(events.finishPendingUsage()?.turnTelemetry).toMatchObject({
+      status: 'unavailable', turnId: 'turn', reason: 'no-usage-event',
+    });
+    expect(events.finishPendingUsage()).toBeUndefined();
+    expect(events.map({ ...identity, sequence: 2, type: 'usage', usage: { inputTokens: 1, outputTokens: 1 } }).segments).toEqual([]);
+  });
+
+  it('waits for complete usage after an incomplete terminal snapshot', () => {
     const map = mapper();
     map({ type: 'usage', usage: { inputTokens: 10 } });
     expect(
@@ -241,8 +295,11 @@ describe('CodexLaneEvents', () => {
         type: 'terminal',
         status: 'completed',
         usage: { outputTokens: 0, costUsd: 0, reasoningOutputTokens: 4 },
-      }).segments[0]?.usage,
-    ).toEqual({ outputTokens: 0, costUsd: 0 });
+      }).awaitingUsage,
+    ).toBe(true);
+    expect(map({ type: 'usage', usage: { inputTokens: 10, outputTokens: 4 } }).segments[0]?.turnTelemetry).toMatchObject({
+      status: 'reported', usage: { inputTokens: 10, outputTokens: 4 },
+    });
   });
 
   it.each(['completed', 'failed', 'interrupted'] as const)(
@@ -250,7 +307,7 @@ describe('CodexLaneEvents', () => {
     (status) => {
       const map = mapper();
       const result = map({ type: 'terminal', status });
-      expect(result.terminal).toBe(status);
+      expect(result.terminal).toBe(status === 'completed' ? undefined : status);
       expect(
         result.segments.every((segment) => segment.usage === undefined),
       ).toBe(true);
@@ -303,7 +360,7 @@ describe('CodexLaneEvents', () => {
         type: 'terminal',
         status: 'completed',
       }).terminal,
-    ).toBe('completed');
+    ).toBeUndefined();
   });
 
   it('rejects replayed sequences', () => {
