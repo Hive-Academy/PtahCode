@@ -104,3 +104,16 @@ the mobile PWA, P3 = later.
 | Session ownership after a turn: the worker engine keeps its SDK record, and so the session's drive lock, while the session idles between turns (`session-driver-lock-coordinator.ts` releases only on record removal). `sessions.list` now shows such a session as Idle, but another process (the desktop app on the worker machine, or another client's local engine) still cannot drive it until the worker ends the record or restarts. Decide whether an idle worker session is transferable; if so, add an explicit handoff (end the idle record on request, or release it after an idle timeout) and a cross-process continuation test. Remote clients of the same worker can already continue it. Stop stays disabled for an idle session because no turn runs. | stuck-session-fix-review.md finding 3 |
 | Test fidelity: the fake drive lock in `serve-sessions.spec.ts` resolves every acquire at once and has no pending-acquire model, so it cannot exercise the kernel's shared pending promise. `transcript.spec.ts` covers the foreign pending case; give the serve fake the same model when that spec grows. | stuck-session-fix-rereview-3.md finding 2 |
 | Attach refresh bound: the 20 s deadline covers the wait for a previous refresh and the history read, but not the in-process lock acquire and release, the baseline enqueue, or the snapshot read for a session another process drives. Consider one end-to-end attach deadline if a slow kernel lock or log write is ever observed. | stuck-session-fix-rereview-4.md follow-up 2 |
+
+## Fourth visual pass (added 2026-11-08, decision 40)
+
+| Item | Source |
+| --- | --- |
+| After a remote Deny, "[Request interrupted by user for tool use]" renders as a user bubble. Render it as a muted system line. | visual-review.md fourth pass finding I |
+| "No messages yet." shows for 1–2 s after Start and the user's prompt is not echoed until the worker answers. Echo the prompt at once. | visual-review.md fourth pass finding J |
+| The approval block differs from the prototype: Deny is a plain text button (prototype: outlined), and the prototype text "Stays pending" is out of date (the 60 s auto-deny is decision 27). Update the prototype and align the Deny style. | visual-review.md fourth pass finding L |
+| Allow once is the primary action and comes first in the focus order. Consider Deny first or equal weight for a remote approval. | visual-review.md fourth pass finding M |
+| A denied tool reads "Failed": the shared `chat-ui` tool status vocabulary has no "Denied" state. Add one if the distinction matters. | frontend-developer report, finding H fix |
+| The Tailwind base reset removes `ol` numerals app-wide (`styles.css` `.prose ol` styles only `::marker`). The Machines transcript restores them locally; local chat markdown probably has the same defect. Fix `.prose ol` once in `apps/ptah-extension-webview/src/styles.css`. | frontend-developer report, finding G fix |
+| The local main transcript uses the same `buildToolNode`, which sets `complete` for an error result; local error tools may also read "Completed". | frontend-developer report, finding H fix |
+| Sessions created before the title fix keep their stored "Session <date>" name; `session:list` has no first-prompt field. | backend-developer report, finding D fix |
