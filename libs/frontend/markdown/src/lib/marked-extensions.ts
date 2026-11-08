@@ -85,10 +85,10 @@ function createCalloutExtension(): MarkedExtension {
 
         const typeLower = calloutType.toLowerCase();
 
-        return `<div class="callout callout-${typeLower}">
+        return `<div class="callout callout-${typeLower}" dir="auto">
   <div class="callout-header">
     <span class="callout-dot"></span>
-    <span class="callout-title">${meta.title}</span>
+    <span class="callout-title" dir="ltr">${meta.title}</span>
   </div>
   <div class="callout-body">${body}</div>
 </div>\n`;
@@ -291,7 +291,7 @@ function createEnhancedHeadingsExtension(): MarkedExtension {
         }
 
         if (depth === 3) {
-          return `<h3 class="prose-heading-bordered">${text}</h3>\n`;
+          return `<h3 class="prose-heading-bordered" dir="auto">${text}</h3>\n`;
         }
         return false;
       },

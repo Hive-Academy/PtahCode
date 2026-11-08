@@ -169,6 +169,8 @@ describe('callout extension', () => {
     ).call(makeParserCtx(), tok);
     expect(typeof out).toBe('string');
     expect(out as string).toContain('callout-tip');
+    expect(out as string).toContain('class="callout callout-tip" dir="auto"');
+    expect(out as string).toContain('class="callout-title" dir="ltr"');
     expect(out as string).toContain('Tip');
   });
 });
@@ -379,6 +381,7 @@ describe('enhanced headings extension', () => {
     } as Tokens.Heading);
     expect(out as string).toContain('<h3');
     expect(out as string).toContain('prose-heading-bordered');
+    expect(out as string).toContain('class="prose-heading-bordered" dir="auto"');
   });
 
   it('returns false for H4-H6 (defer to default renderer)', () => {

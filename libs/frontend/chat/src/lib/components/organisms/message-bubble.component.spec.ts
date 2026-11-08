@@ -682,6 +682,26 @@ describe('MessageBubbleComponent — branch/rewind action buttons', () => {
 });
 
 describe('chat markdown bidi styles', () => {
+  it('uses logical edges for callouts, bordered headings, and list cards', () => {
+    const css = readFileSync(join(__dirname, 'message-bubble-prose.component.css'), 'utf8');
+    const rules = [
+      '.callout', '.callout-note', '.callout-tip', '.callout-warning',
+      '.callout-important', '.callout-caution', '.prose-heading-bordered',
+      '.prose-list-card ul', '.prose-list-card li', '.prose-list-card ul > li::before',
+    ];
+    for (const selector of rules) {
+      const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const rule = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))?.[1];
+      expect(rule).toBeDefined();
+      expect(rule).not.toMatch(/(?:padding|border|margin)-(?:left|right)\s*:|(?:^|[;\n])\s*(?:left|right)\s*:/);
+    }
+    expect(css).toMatch(/\.callout \{[^}]*border-inline-start:/);
+    expect(css).toMatch(/\.prose-heading-bordered \{[^}]*padding-inline-start:[^}]*border-inline-start:/);
+    expect(css).toMatch(/\.prose-list-card ol,[^{]*\{[^}]*padding-inline-start:/);
+    expect(css).toMatch(/\.prose-list-card ul > li::before \{[^}]*inset-inline-start:/);
+    expect(css).toMatch(/\.prose-list-card:has\(> :dir\(rtl\)\) \{\s*direction: rtl;/);
+  });
+
   it('treats plain-text code notes as prose and isolates code controls', () => {
     const css = readFileSync(join(__dirname, 'message-bubble.component.css'), 'utf8');
     const html = readFileSync(join(__dirname, 'message-bubble.component.html'), 'utf8');
