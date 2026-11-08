@@ -136,6 +136,7 @@ interface Harness {
     reserveAgentId: jest.Mock;
     prepareSdkHandleSpawn: jest.Mock;
     continueConversation: jest.Mock;
+    findAgentInfo: jest.Mock;
   };
   /** Stored `ptah` settings, keyed by the full key (`agentOrchestration.x`). */
   settings: Map<string, unknown>;
@@ -147,6 +148,7 @@ interface Harness {
 
 interface HarnessOptions {
   readonly sdkPending?: AgentPermissionRequest[];
+  readonly laneOwner?: { agentId: string; parentSessionId?: string; startedAt: string; status: 'running' | 'completed' };
   readonly detectedClis?: CliDetectionResult[];
   /** Registers a fake account service whose lookup is this mock. */
   readonly accountLookup?: jest.Mock;
@@ -221,6 +223,7 @@ function makeHarness(options: HarnessOptions = {}): Harness {
       }),
     ),
     continueConversation: jest.fn().mockResolvedValue(undefined),
+    findAgentInfo: jest.fn((agentId: string) => options.laneOwner?.agentId === agentId ? options.laneOwner : undefined),
   };
   const metadataStore = { createChild: jest.fn().mockResolvedValue(undefined) };
   const resumeService = {
@@ -368,13 +371,39 @@ describe('AgentRpcHandlers — Codex detection', () => {
   });
 
   it('replays a pending SDK lane prompt through the shared snapshot RPC', async () => {
+    const generation = '2026-11-07T10:00:00.000Z';
     const request: AgentPermissionRequest = {
       requestId: 'sdk-pending', agentId: 'lane-1', parentSessionId: 'parent-1',
-      laneGeneration: '2026-11-07T10:00:00.000Z', kind: 'tool', toolName: 'Bash',
+      laneGeneration: generation, kind: 'tool', toolName: 'Bash',
       toolArgs: '{}', description: 'Run command', timestamp: 1, timeoutAt: 1000,
     };
-    const h = makeHarness({ sdkPending: [request] });
+    const h = makeHarness({ sdkPending: [request], laneOwner: {
+      agentId: 'lane-1', parentSessionId: 'parent-1', startedAt: generation,
+      status: 'running',
+    } });
     expect(await call(h, 'agent:pendingPermissions', undefined)).toEqual([request]);
+  });
+
+  it('replays a pending request under the current kept lane owner only', async () => {
+    const generation = '2026-11-07T10:00:00.000Z';
+    const request: AgentPermissionRequest = {
+      requestId: 'kept', agentId: 'lane-1', parentSessionId: 'old-parent',
+      laneGeneration: generation, kind: 'tool', toolName: 'Bash',
+      toolArgs: '{}', description: 'Run command', timestamp: 1, timeoutAt: 1000,
+    };
+    const h = makeHarness({ sdkPending: [request], laneOwner: {
+      agentId: 'lane-1', parentSessionId: 'successor', startedAt: generation,
+      status: 'running',
+    } });
+    expect(await call(h, 'agent:pendingPermissions', undefined)).toEqual([
+      { ...request, parentSessionId: 'successor' },
+    ]);
+    expect(request.parentSessionId).toBe('old-parent');
+    h.processManager.findAgentInfo.mockReturnValue({
+      agentId: 'lane-1', parentSessionId: 'successor',
+      startedAt: '2026-11-07T10:00:01.000Z', status: 'running',
+    });
+    expect(await call(h, 'agent:pendingPermissions', undefined)).toEqual([]);
   });
 
   it('forwards the selected executable provenance and version', async () => {

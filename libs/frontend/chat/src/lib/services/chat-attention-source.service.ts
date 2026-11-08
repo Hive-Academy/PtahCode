@@ -196,7 +196,9 @@ export class ChatAttentionSourceService {
     const actions: AttentionItem['actions'][number][] = kind === 'question'
       ? [{ id: 'answer', label: 'Answer', ...(!open && { disabledReason: 'Session unavailable' }) }]
       : [{ id: 'allow', label: 'Allow', ...(kind !== 'permission' && (!tabId || !canAllow) && { disabledReason: !tabId ? 'Session unavailable' : 'Unknown tool' }) },
-          ...(kind === 'permission' ? [{ id: 'always_allow', label: 'Always allow in session' }] : []),
+          ...(kind === 'permission' && target.kind === 'permission' &&
+            target.request.sessionId && target.request.canAlwaysAllow !== false
+            ? [{ id: 'always_allow', label: 'Always allow in session' }] : []),
           { id: 'deny', label: 'Deny', ...(kind !== 'permission' && !tabId && { disabledReason: 'Session unavailable' }) }];
     if (kind === 'permission') actions.push({ id: 'deny_with_message', label: 'Deny with message' });
     actions.push({ id: 'open', label: surfaceOwned || surfaceMode ? 'Open' : 'Show in canvas',

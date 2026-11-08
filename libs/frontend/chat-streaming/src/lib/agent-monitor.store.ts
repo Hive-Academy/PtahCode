@@ -2418,10 +2418,11 @@ export class AgentMonitorStore implements OnDestroy {
       const next = list.map((a) => {
         if (ids.has(a.agentId) && a.parentSessionId !== target) {
           changed = true;
-          const updated = { ...a, parentSessionId: target };
-          return { ...updated, permissionQueue: updated.permissionQueue.filter(
-            (request) => this.permissionBelongsToAgent(request, updated),
-          ) };
+          // Keep the live requests already validated for this exact lane, but
+          // bind their actions to the successor rather than the old session.
+          return { ...a, parentSessionId: target, permissionQueue: a.permissionQueue
+            .filter((request) => this.permissionBelongsToAgent(request, a))
+            .map((request) => ({ ...request, parentSessionId: target })) };
         }
         return a;
       });
@@ -2442,6 +2443,13 @@ export class AgentMonitorStore implements OnDestroy {
       }
       return changed ? next : map;
     });
+    // A request emitted just before adoption can arrive after this event with
+    // its old owner stamp. Replay asks the backend for the current lane owner.
+    for (const agent of this._agents()) {
+      if (ids.has(agent.agentId) && agent.parentSessionId === target) {
+        void this.rehydratePendingPermissions(agent.agentId);
+      }
+    }
   }
 
   clearCompleted(): void {

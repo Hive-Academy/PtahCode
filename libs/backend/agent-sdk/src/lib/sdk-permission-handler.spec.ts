@@ -203,6 +203,28 @@ describe('SdkPermissionHandler published prompt lifecycle', () => {
 });
 
 describe('SdkPermissionHandler host attention resolution', () => {
+  it('waits briefly for a seeded lane record before routing its prompt', async () => {
+    jest.useFakeTimers();
+    try {
+      const findAgentInfo = jest.fn()
+        .mockReturnValueOnce(undefined)
+        .mockReturnValue({ parentSessionId: 'parent-session', startedAt: '2026-11-07T10:00:00.000Z', status: 'running' });
+      const { handler, sent } = makeHandler(undefined, { findAgentInfo });
+      const pending = handler.createCallback(asSessionId('11111111-2222-4333-8444-555555555555'), () => 'agent-seeded')(
+        'Bash', { command: 'ls' }, { signal: new AbortController().signal, toolUseID: 'lane-seeded', requestId: 'lane-seeded' },
+      );
+      await jest.advanceTimersByTimeAsync(25);
+      const request = sent.find((message) => message.type === MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_REQUEST)?.payload;
+      expect(request).toMatchObject({ agentId: 'agent-seeded', parentSessionId: 'parent-session' });
+      expect(findAgentInfo).toHaveBeenCalledTimes(2);
+      const requestId = request?.['requestId'];
+      if (typeof requestId !== 'string') throw new Error('Missing routed request ID');
+      handler.handleResponse(requestId, { id: requestId, decision: 'allow' });
+      await expect(pending).resolves.toMatchObject({ behavior: 'allow' });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
   it('captures the live lane owner and generation in the dispatched prompt', async () => {
     const { handler, sent } = makeHandler(undefined, {
       findAgentInfo: () => ({ parentSessionId: 'parent-session', startedAt: '2026-11-07T10:00:00.000Z', status: 'running' }),
@@ -285,6 +307,55 @@ function asTabId(s: string): TabIdParam {
 }
 
 describe('permission ownership regression', () => {
+  it('keeps a tool-wide rule in one chat as its SDK session ID rotates', async () => {
+    const { handler, sent } = makeHandler();
+    const tabA = 'aaaaaaaa-1111-4111-8111-111111111111';
+    const tabB = 'bbbbbbbb-2222-4222-8222-222222222222';
+    let realSessionId: string | undefined;
+    const callbackA = handler.createCallback(
+      asSessionId(tabA), undefined, asTabId(tabA), undefined, tabA,
+      () => realSessionId,
+    );
+    const options = (id: string) => ({
+      signal: new AbortController().signal, toolUseID: id, requestId: id,
+    });
+    const prompts = () => sent.filter((message) => message.type === MESSAGE_TYPES.PERMISSION_REQUEST);
+
+    try {
+      const first = callbackA('Bash', { command: 'printf first > first.txt' }, options('first'));
+      await flushMicrotasks();
+      expect(prompts()).toHaveLength(1);
+      const firstId = String(prompts()[0].payload['id']);
+      expect(handler.handleResponse(firstId, { id: firstId, decision: 'always_allow' })).toBe(true);
+      await expect(first).resolves.toMatchObject({ behavior: 'allow' });
+
+      realSessionId = 'cccccccc-3333-4333-8333-333333333333';
+      const afterResolution = callbackA('Bash', { command: 'printf second > second.txt' }, options('second'));
+      await flushMicrotasks();
+      expect(prompts()).toHaveLength(1);
+      await expect(afterResolution).resolves.toMatchObject({ behavior: 'allow' });
+
+      realSessionId = 'dddddddd-4444-4444-8444-444444444444';
+      const afterRotation = callbackA('Bash', { command: 'printf third > third.txt' }, options('third'));
+      await flushMicrotasks();
+      expect(prompts()).toHaveLength(1);
+      await expect(afterRotation).resolves.toMatchObject({ behavior: 'allow' });
+
+      const callbackB = handler.createCallback(
+        asSessionId(tabB), undefined, asTabId(tabB), undefined, tabB,
+        () => 'eeeeeeee-5555-4555-8555-555555555555',
+      );
+      const otherChat = callbackB('Bash', { command: 'printf other > other.txt' }, options('other'));
+      await flushMicrotasks();
+      expect(prompts()).toHaveLength(2);
+      const otherId = String(prompts()[1].payload['id']);
+      expect(handler.handleResponse(otherId, { id: otherId, decision: 'deny' })).toBe(true);
+      await expect(otherChat).resolves.toMatchObject({ behavior: 'deny' });
+    } finally {
+      handler.cleanupPendingPermissions();
+    }
+  });
+
   it('consumes only a live response and keeps Always Allow in its session', async () => {
     const { handler, sent } = makeHandler();
     try {

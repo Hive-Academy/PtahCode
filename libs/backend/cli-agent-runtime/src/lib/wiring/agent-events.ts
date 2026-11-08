@@ -88,6 +88,7 @@ function enqueueLanePersist(
 /** Minimal shape of the webview manager used by the wiring. */
 interface WebviewManagerLike {
   broadcastMessage(type: string, payload: unknown): Promise<void>;
+  sendMessage(viewType: string, type: string, payload: unknown): Promise<boolean>;
 }
 
 /** Minimal shape of the subagent registry used by `wireSdkCallbacks`. */
@@ -575,14 +576,21 @@ function wireCopilotPermissionForwarding(
           const routed = bridge.setRequestRoute(request.requestId, owner.parentSessionId, owner.startedAt);
           if (!routed) return;
           webviewManager
-            .broadcastMessage(
+            .sendMessage(
+              'ptah.main',
               MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_REQUEST,
               routed,
             )
-            .then(() => {
-              // The routed lane card shows the same wall-clock deadline that
-              // markDelivered enforces, including after renderer loss.
-              bridge.markDelivered(request.requestId);
+            .then((delivered) => {
+              if (delivered) {
+                bridge.markDelivered(request.requestId);
+                return;
+              }
+              bridge.resolvePermission(request.requestId, {
+                requestId: request.requestId,
+                decision: 'deny',
+                reason: 'Permission renderer unavailable',
+              });
             })
             .catch((error) => {
               logger.error(

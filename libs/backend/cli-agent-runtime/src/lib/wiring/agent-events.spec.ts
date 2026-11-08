@@ -48,13 +48,32 @@ import {
 const PARENT_SESSION = '11111111-2222-4333-8444-555555555555';
 
 describe('Copilot lane host attention resolution', () => {
+  it('denies when no renderer accepts the routed request', async () => {
+    const bridge = new CopilotPermissionBridge();
+    bridge.setAutoApprove(false);
+    const sendMessage = jest.fn().mockResolvedValue(false);
+    wireAgentEventListeners(buildContainer([
+      [TOKENS.AGENT_PROCESS_MANAGER, { events: new EventEmitter(), findAgentInfo: () => ({ parentSessionId: PARENT_SESSION, startedAt: new Date(0).toISOString(), status: 'running' }) }],
+      [TOKENS.WEBVIEW_MANAGER, { sendMessage }],
+      [TOKENS.CLI_DETECTION_SERVICE, { getAdapter: () => ({ permissionBridge: bridge }) }],
+    ]), {
+      logger: Object.assign(Object.create(null) as Logger, createMockLogger()),
+      platform: 'electron',
+      options: { copilotPermission: true },
+    });
+    await expect(bridge.requestToolPermission({ agentId: 'agent-1', toolName: 'Write', toolArgs: {} }))
+      .resolves.toMatchObject({ permissionDecision: 'deny' });
+    expect(sendMessage).toHaveBeenCalledWith('ptah.main', MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_REQUEST, expect.any(Object));
+    expect(bridge.pendingCount).toBe(0);
+  });
+
   it('denies a request when broadcasting to the renderer fails', async () => {
     const bridge = new CopilotPermissionBridge();
     bridge.setAutoApprove(false);
-    const broadcastMessage = jest.fn().mockRejectedValue(new Error('window unavailable'));
+    const sendMessage = jest.fn().mockRejectedValue(new Error('window unavailable'));
     wireAgentEventListeners(buildContainer([
       [TOKENS.AGENT_PROCESS_MANAGER, { events: new EventEmitter(), findAgentInfo: () => ({ parentSessionId: PARENT_SESSION, startedAt: new Date(0).toISOString(), status: 'running' }) }],
-      [TOKENS.WEBVIEW_MANAGER, { broadcastMessage }],
+      [TOKENS.WEBVIEW_MANAGER, { sendMessage }],
       [TOKENS.CLI_DETECTION_SERVICE, { getAdapter: () => ({ permissionBridge: bridge }) }],
     ]), {
       logger: Object.assign(Object.create(null) as Logger, createMockLogger()),
@@ -71,10 +90,10 @@ describe('Copilot lane host attention resolution', () => {
     try {
       const bridge = new CopilotPermissionBridge();
       bridge.setAutoApprove(false);
-      const broadcastMessage = jest.fn().mockResolvedValue(undefined);
+      const sendMessage = jest.fn().mockResolvedValue(true);
       wireAgentEventListeners(buildContainer([
         [TOKENS.AGENT_PROCESS_MANAGER, { events: new EventEmitter(), findAgentInfo: () => ({ parentSessionId: PARENT_SESSION, startedAt: new Date(0).toISOString(), status: 'running' }) }],
-        [TOKENS.WEBVIEW_MANAGER, { broadcastMessage }],
+        [TOKENS.WEBVIEW_MANAGER, { sendMessage }],
         [TOKENS.CLI_DETECTION_SERVICE, { getAdapter: () => ({ permissionBridge: bridge }) }],
       ]), {
         logger: Object.assign(Object.create(null) as Logger, createMockLogger()),
@@ -85,7 +104,7 @@ describe('Copilot lane host attention resolution', () => {
       const pending = bridge.requestToolPermission({ agentId: 'agent-1', toolName: 'Write', toolArgs: {} });
       await Promise.resolve();
       await Promise.resolve();
-      const request = broadcastMessage.mock.calls[0]?.[1] as { requestId: string; timeoutAt: number; parentSessionId: string };
+      const request = sendMessage.mock.calls[0]?.[2] as { requestId: string; timeoutAt: number; parentSessionId: string };
       expect(request).toMatchObject({ timeoutAt, parentSessionId: PARENT_SESSION });
       jest.advanceTimersByTime(COPILOT_PERMISSION_OWNED_TIMEOUT_MS - 1);
       expect(bridge.hasPendingRequest(request.requestId)).toBe(true);
@@ -100,10 +119,10 @@ describe('Copilot lane host attention resolution', () => {
     const bridge = new CopilotPermissionBridge();
     bridge.setAutoApprove(false);
     const hostAttention = { resolve: jest.fn() };
-    const broadcastMessage = jest.fn().mockResolvedValue(undefined);
+    const sendMessage = jest.fn().mockResolvedValue(true);
     wireAgentEventListeners(buildContainer([
       [TOKENS.AGENT_PROCESS_MANAGER, { events: new EventEmitter(), findAgentInfo: () => ({ parentSessionId: PARENT_SESSION, startedAt: new Date(0).toISOString(), status: 'running' }) }],
-      [TOKENS.WEBVIEW_MANAGER, { broadcastMessage }],
+      [TOKENS.WEBVIEW_MANAGER, { sendMessage }],
       [TOKENS.CLI_DETECTION_SERVICE, { getAdapter: () => ({ permissionBridge: bridge }) }],
       [SDK_TOKENS.HOST_ATTENTION_COORDINATOR, hostAttention],
     ]), {
@@ -113,7 +132,7 @@ describe('Copilot lane host attention resolution', () => {
     });
     const pending = bridge.requestToolPermission({ agentId: 'agent-1', toolName: 'Write', toolArgs: {} });
     await Promise.resolve();
-    const request = broadcastMessage.mock.calls[0]?.[1] as { requestId: string; timestamp: number };
+    const request = sendMessage.mock.calls[0]?.[2] as { requestId: string; timestamp: number };
     expect(request).toBeDefined();
     if (settlement === 'response') bridge.resolvePermission(request.requestId, { requestId: request.requestId, decision: 'allow' });
     else bridge.cleanup();

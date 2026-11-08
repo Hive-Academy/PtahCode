@@ -171,10 +171,12 @@ export function createCodexChatApprovalPresentation(
         entry.promptTimer = ports.setTimer(() => {
           const current = takePrompt(id);
           if (!current) return;
-          const reason = buildSystemAbortPermissionMessage(
-            presented.toolName,
-            `Permission request timed out after ${timeoutMs}ms with no answer from the UI — denying to prevent a permanent hang.`,
-          );
+          const reason = current.unroutable
+            ? buildSystemAbortPermissionMessage(
+                presented.toolName,
+                `Permission request timed out after ${timeoutMs}ms with no answer from the UI — denying to prevent a permanent hang.`,
+              )
+            : `Permission request timed out after ${timeoutMs}ms without an answer from the UI. This was a timeout, not a user denial.`;
           declineApproval(current, reason);
           publishResolved(id, current, 'timed-out');
         }, timeoutMs);

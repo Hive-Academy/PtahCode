@@ -384,11 +384,20 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     this.hostAttention?.resolve(attentionRequestKey(attention.kind, requestId), attention.timestamp);
   }
 
-  private sendCliAgentPermissionRequest(
+  private async sendCliAgentPermissionRequest(
     payload: PermissionRequest,
     agentId: string,
-  ): void {
-    const owner = this.agentOwnerLookup?.findAgentInfo(agentId);
+  ): Promise<void> {
+    let owner = this.agentOwnerLookup?.findAgentInfo(agentId);
+    const ownerDeadline = Date.now() + 500;
+    let waitedForOwner = false;
+    while (!owner && this.agentOwnerLookup && Date.now() < ownerDeadline) {
+      waitedForOwner = true;
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+      if (!this.pendingRequests.has(payload.id)) return;
+      owner = this.agentOwnerLookup.findAgentInfo(agentId);
+    }
+    if (waitedForOwner && !this.pendingRequests.has(payload.id)) return;
     if (!owner?.parentSessionId || !owner.startedAt || !Number.isFinite(Date.parse(owner.startedAt)) || owner.status !== 'running') {
       queueMicrotask(() => {
         const pending = this.pendingRequests.get(payload.id);
@@ -471,6 +480,11 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
           });
         }
       });
+  }
+
+  /** A chat tab remains stable when the SDK assigns a new session ID per query. */
+  private permissionRuleScope(sessionId?: SessionId, tabId?: TabId): string | undefined {
+    return sessionId ? (tabId ?? sessionId) : undefined;
   }
 
   createCallback(
@@ -717,7 +731,10 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
         }
       }
 
-      const storedRule = this.ruleStore.getRule(toolName, resolveSessionId());
+      const storedRule = this.ruleStore.getRule(
+        toolName,
+        this.permissionRuleScope(resolveSessionId(), tabId),
+      );
       if (storedRule && storedRule.action === 'allow') {
         this.logger.info(
           `[SdkPermissionHandler] Auto-approved via "Always Allow" rule: ${toolName}`,
@@ -1246,8 +1263,8 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     // "Always in session" needs a session to scope its rule. Without one the
     // answer is an explicit one-time Allow: no rule, no sibling resolution, and
     // the resolved decision says `allow` so no caller reports a rule.
-    const oneTimeOnly =
-      response.decision === 'always_allow' && !requestContext?.sessionId;
+    const ruleScope = this.permissionRuleScope(requestContext?.sessionId, requestContext?.tabId);
+    const oneTimeOnly = response.decision === 'always_allow' && !ruleScope;
     if (oneTimeOnly) {
       this.logger.warn(
         `[SdkPermissionHandler] "Always Allow" for a sessionless request applies once; no rule created`,
@@ -1261,10 +1278,10 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     const neverAutoApproveTools = ['ExitPlanMode', 'AskUserQuestion'];
     if (
       effective.decision === 'always_allow' &&
-      requestContext?.sessionId &&
+      requestContext &&
+      ruleScope &&
       !neverAutoApproveTools.includes(requestContext.toolName)
     ) {
-      const sessionId = requestContext.sessionId;
       const rule: PermissionRule = {
         id: uuidv4(),
         pattern: requestContext.toolName,
@@ -1274,7 +1291,7 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
         description: `Auto-created from "Always Allow" for ${requestContext.toolName}`,
       };
 
-      this.ruleStore.setRule(requestContext.toolName, sessionId, rule);
+      this.ruleStore.setRule(requestContext.toolName, ruleScope, rule);
 
       this.logger.info(
         `[SdkPermissionHandler] Created "Always Allow" rule for tool: ${requestContext.toolName}`,
@@ -1290,7 +1307,7 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       ] of this.pendingRequestContext.entries()) {
         if (pendingId === requestId) continue;
         if (pendingCtx.toolName !== toolName) continue;
-        if (pendingCtx.sessionId !== sessionId) continue;
+        if (this.permissionRuleScope(pendingCtx.sessionId, pendingCtx.tabId) !== ruleScope) continue;
         // Unattended sessions never consult "Always Allow" rules.
         if (this.unattendedRequestIds.has(pendingId)) continue;
 

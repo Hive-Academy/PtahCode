@@ -1351,6 +1351,13 @@ describe('AgentMonitorStore', () => {
       store.onPermissionRequest(request);
       expect(store.pendingPermissions()[0].permissionQueue).toHaveLength(1);
       store.reparentAgents(['agent-1'], 'session-b');
+      expect(store.pendingPermissions()[0].permissionQueue).toEqual([{ ...request, parentSessionId: 'session-b' }]);
+      expect(store.agentsForSession('session-b')[0].permissionQueue).toEqual([{ ...request, parentSessionId: 'session-b' }]);
+      expect(store.agentsForSession('session-a')).toHaveLength(0);
+      expect(store.permissionBelongsToAgent(store.pendingPermissions()[0].permissionQueue[0], store.pendingPermissions()[0])).toBe(true);
+      store.onPermissionRequest({ ...request, requestId: 'stale-owner' });
+      expect(store.pendingPermissions()[0].permissionQueue).toEqual([{ ...request, parentSessionId: 'session-b' }]);
+      store.clearPermission('agent-1', request.requestId);
       expect(store.pendingPermissions()).toHaveLength(0);
     });
 

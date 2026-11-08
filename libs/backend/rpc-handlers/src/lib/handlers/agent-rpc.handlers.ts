@@ -1463,7 +1463,12 @@ export class AgentRpcHandlers {
         const copilotPending = adapter && 'permissionBridge' in adapter
           ? (adapter as { permissionBridge: CopilotPermissionBridge }).permissionBridge.pendingPermissions()
           : [];
-        return [...sdkPending, ...copilotPending];
+        return [...sdkPending, ...copilotPending].flatMap((request) => {
+          const lane = this.agentProcessManager.findAgentInfo(request.agentId);
+          if (!lane || lane.status !== 'running' || !lane.parentSessionId ||
+            Date.parse(request.laneGeneration ?? '') !== Date.parse(lane.startedAt)) return [];
+          return [{ ...request, parentSessionId: lane.parentSessionId }];
+        });
       },
     );
   }

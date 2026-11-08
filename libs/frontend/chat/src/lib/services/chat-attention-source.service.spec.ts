@@ -103,6 +103,21 @@ describe('ChatAttentionSourceService', () => {
     expect(upsert.mock.lastCall?.[0].generation).toBeGreaterThan(first.generation);
   });
 
+  it('offers always allow only when the permission has a session and permits it', () => {
+    TestBed.inject(ChatAttentionSourceService);
+    const request: PermissionRequest = {
+      id: 'always-allow-policy', toolName: 'Write', toolInput: {}, timestamp: 1,
+      timeoutAt: 0, description: '', tabId: 'tab-1', sessionId: 'session-1',
+      canAlwaysAllow: false,
+    };
+    permissions.set([request]); TestBed.tick();
+    expect(upsert.mock.lastCall?.[0].actions.some(action => action.id === 'always_allow')).toBe(false);
+    permissions.set([{ ...request, canAlwaysAllow: true }]); TestBed.tick();
+    expect(upsert.mock.lastCall?.[0].actions.some(action => action.id === 'always_allow')).toBe(true);
+    permissions.set([{ ...request, sessionId: undefined }]); TestBed.tick();
+    expect(upsert.mock.lastCall?.[0].actions.some(action => action.id === 'always_allow')).toBe(false);
+  });
+
   it('withdraws a permission when its owner tab closes', () => {
     const source = TestBed.inject(ChatAttentionSourceService);
     permissions.set([{ id: 'closed-tab', toolName: 'Bash', toolInput: { command: 'echo approved' }, timestamp: 1,

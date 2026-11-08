@@ -109,7 +109,10 @@ describe('Codex chat approval presentation', () => {
     jest.advanceTimersByTime(2_000);
     expect(h.respond).toHaveBeenCalledWith(
       { sessionId, threadId: sessionId, requestId: '5' },
-      expect.objectContaining({ response: expect.objectContaining({ decision: 'decline' }) }),
+      expect.objectContaining({ response: expect.objectContaining({
+        decision: 'decline',
+        reason: 'Permission request timed out after 2000ms without an answer from the UI. This was a timeout, not a user denial.',
+      }) }),
     );
     expect(h.ports.handlePermissionResponse({ id: wireId, decision: 'allow' })).toBe(false);
   });
