@@ -49,12 +49,14 @@ export function nearBudgetWarning(
   contextTokens: number,
   handoffTokens: number,
   notesPath: string,
+  taskId?: string,
 ): string {
   return (
     `Ptah budget notice: your context is at ${contextTokens} tokens, close to ` +
     `the ${handoffTokens}-token limit at which Ptah's subagent budget monitor ` +
-    `ends this subagent. Before your next step, write your progress notes to ` +
-    `${notesPath} (create its directory if needed; overwrite the file): current ` +
+    `ends this subagent. Task id: ${taskId ?? 'unknown'}. Before your next step, ` +
+    `write or UPDATE your progress notes at ${notesPath} (create its directory ` +
+    `if needed; overwrite a stub): current ` +
     `state, findings, decisions and their reasons, files touched, and the exact ` +
     `next steps. Then end your turn with a final message that starts ` +
     `"PTAH BUDGET HANDOFF:" and summarizes progress and next steps. ` +

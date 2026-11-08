@@ -91,6 +91,22 @@ describe('SubagentHandoffFiles', () => {
     expect(fs.readFileSync(paths.notes, 'utf8')).not.toContain('second');
   });
 
+  it('merges inferred progress into a pre-warning stub while preserving agent prose', async () => {
+    const files = new SubagentHandoffFiles({ warn: jest.fn() }, () => workspace);
+    const paths = files.paths('sess-1', 'toolu_1');
+    if (!paths) throw new Error('expected paths');
+    fs.mkdirSync(dir(), { recursive: true });
+    fs.writeFileSync(paths.notes, '# Progress\nTask id: unknown\n');
+    expect(await files.notesExist(paths)).toBe(false);
+    expect(await files.ensureFallbackNotes(paths, 'host-generated, inferred: next steps', (text) => text)).toBe(true);
+    expect(fs.readFileSync(paths.notes, 'utf8')).toContain('# Progress\nTask id: unknown\n\nhost-generated, inferred: next steps');
+    expect(await files.notesExist(paths)).toBe(true);
+    fs.writeFileSync(paths.notes, '# Progress\nAgent found the root cause.');
+    expect(await files.notesExist(paths)).toBe(true);
+    expect(await files.ensureFallbackNotes(paths, 'replacement', (text) => text)).toBe(true);
+    expect(fs.readFileSync(paths.notes, 'utf8')).not.toContain('replacement');
+  });
+
   it('reports a failed save as false with one warning, never throwing', async () => {
     const logger = makeLogger();
     // A file where the handoff directory should be makes mkdir fail.

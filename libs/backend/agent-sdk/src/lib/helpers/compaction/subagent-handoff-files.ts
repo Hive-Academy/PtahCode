@@ -43,6 +43,12 @@ export interface SubagentHandoffPaths {
 export const HANDOFF_FILES_TIMEOUT_MS = 5_000;
 const MAX_NOTES_BYTES = 1024 * 1024;
 
+function isNotesStub(content: string): boolean {
+  const lines = content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return lines.length === 0 || (lines.length <= 2 &&
+    lines.every((line) => line.startsWith('#') || /^task id:\s*(unknown)?$/i.test(line)));
+}
+
 /** Where the handoff files of a stopped subagent stand. */
 export interface HandoffFileState {
   /** Absent when the session has no known workspace. */
@@ -105,7 +111,9 @@ export class SubagentHandoffFiles {
   /** Whether the subagent wrote its progress notes. */
   async notesExist(paths: SubagentHandoffPaths): Promise<boolean> {
     try {
-      return (await fs.stat(paths.notes)).isFile();
+      const stat = await fs.lstat(paths.notes);
+      if (!stat.isFile() || stat.size > MAX_NOTES_BYTES) return false;
+      return !isNotesStub(await fs.readFile(paths.notes, 'utf8'));
     } catch (error: unknown) {
       // degradation-audit: optional-capability - missing notes are expected; unreadable notes are logged.
       const code = (error as { code?: unknown } | null)?.code;
@@ -119,7 +127,7 @@ export class SubagentHandoffFiles {
     }
   }
 
-  /** Persist inferred progress only when the agent did not write notes. */
+  /** Persist inferred progress when the agent left no substantive notes. */
   async ensureFallbackNotes(
     paths: SubagentHandoffPaths,
     content: string,
@@ -127,13 +135,22 @@ export class SubagentHandoffFiles {
   ): Promise<boolean> {
     try {
       await fs.mkdir(path.dirname(paths.notes), { recursive: true });
-      await fs.writeFile(paths.notes, redact(content).slice(0, 16_000), {
-        encoding: 'utf8', flag: 'wx', mode: 0o600,
-      });
+      const inferred = redact(content).slice(0, 16_000);
+      try {
+        await fs.writeFile(paths.notes, inferred, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+      } catch (error: unknown) {
+        if ((error as { code?: unknown } | null)?.code !== 'EEXIST') throw error;
+        const before = await fs.lstat(paths.notes);
+        if (!before.isFile() || before.size > MAX_NOTES_BYTES) return false;
+        const original = await fs.readFile(paths.notes, 'utf8');
+        if (!isNotesStub(original)) return true;
+        const after = await fs.lstat(paths.notes);
+        if (!after.isFile() || after.ino !== before.ino || after.mtimeMs !== before.mtimeMs || after.size !== before.size) return false;
+        await fs.writeFile(paths.notes, `${original.trimEnd()}\n\n${inferred}`, { encoding: 'utf8', flag: 'w' });
+      }
       return true;
     } catch (error: unknown) {
-      // degradation-audit: reported - an existing notes file wins; other write failures are logged.
-      if ((error as { code?: unknown } | null)?.code === 'EEXIST') return true;
+      // degradation-audit: reported - failed notes writes are logged; the record still carries the snapshot.
       this.logger.warn('[SubagentHandoffFiles] Could not save inferred notes', {
         errorType: error instanceof Error ? error.name : typeof error,
       });

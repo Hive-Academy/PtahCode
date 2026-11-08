@@ -150,7 +150,7 @@ export class SubagentHandoffDelivery {
           error.errorCode === 'SEND_TIMEOUT'
         ) {
           this.logger.warn(
-            '[SubagentBudgetMonitor] Handoff not read by the parent in time; its write stays queued, not resent',
+            '[SubagentBudgetMonitor] Parent message acknowledgment timed out; the write stays queued and is not resent',
             { sessionId: liveId, toolCallId, attempt },
           );
           return { settled: true };

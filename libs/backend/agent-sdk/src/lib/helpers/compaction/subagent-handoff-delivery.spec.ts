@@ -150,6 +150,10 @@ describe('SubagentHandoffDelivery', () => {
     expect(h.port.pushParentMessage).toHaveBeenCalledTimes(1);
     expect(h.port.postMainThreadNotice).not.toHaveBeenCalled();
     expect(h.logger.warn).toHaveBeenCalledTimes(1);
+    expect(h.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('acknowledgment timed out'),
+      expect.anything(),
+    );
   });
 
   it('send: a session released between attempts gets no further push or notice', async () => {

@@ -2221,7 +2221,8 @@ describe('SubagentBudgetMonitor', () => {
       expect(h.dispatcher.postSubagentNotice).toHaveBeenCalledTimes(1);
       expect(h.registry.get).toHaveBeenCalledWith(TOOL_CALL);
       const warning = h.subagentNotices.take('agent-7');
-      expect(warning).toContain(`write your progress notes to ${notesPath()}`);
+      expect(warning).toContain(`write or UPDATE your progress notes at ${notesPath()}`);
+      expect(warning).toContain('Task id: task-1');
       expect(warning).toContain('150000-token limit');
       expect(h.subagentNotices.take('agent-7')).toBeUndefined();
       expect(h.subagentNotices.take('a1')).toBeUndefined();
@@ -2288,7 +2289,7 @@ describe('SubagentBudgetMonitor', () => {
       expect(h.dispatcher.pushParentMessage).not.toHaveBeenCalled();
       expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
       expect(h.recordStore.markInvoked).toHaveBeenCalledWith(TOOL_CALL);
-      expect(h.index.publish).not.toHaveBeenCalled();
+      expect(h.index.publish).toHaveBeenCalledTimes(1);
     });
 
     it('keeps the notes gate when the safety stop has no task id, then retries after the id arrives', async () => {

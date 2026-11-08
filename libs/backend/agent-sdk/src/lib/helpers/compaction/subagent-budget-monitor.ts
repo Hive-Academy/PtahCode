@@ -713,7 +713,7 @@ export class SubagentBudgetMonitor {
     this.scheduleGateTimeout();
     this.dispatcher.postSubagentNotice(
       agentId,
-      redactBudgetSecrets(nearBudgetWarning(state.contextTokens, handoffTokens, paths.notes)),
+      redactBudgetSecrets(nearBudgetWarning(state.contextTokens, handoffTokens, paths.notes, state.warnedTaskId)),
     );
     this.logger.info('[SubagentBudgetMonitor] Near-budget warning queued', {
       sessionId: session.sessionId,
@@ -890,6 +890,7 @@ export class SubagentBudgetMonitor {
             this.logger.info('[SubagentBudgetMonitor] Normal exit delivery skipped', { sessionId, agentId, toolCallId, reason: !current ? 'session released' : 'already delivered' });
             return;
           }
+          if (prepared.record) this.index.publish(prepared.record.workspace, prepared.record.name);
           if (current.spawnReturned.get(toolCallId)) {
             liveState.handoffDelivered = true;
             void this.delivery.send(current.sessionId, toolCallId, prepared.handoff).catch((error: unknown) => {
@@ -966,6 +967,7 @@ export class SubagentBudgetMonitor {
             state.contextTokens,
             this.config.getAgentBudgetSettings().handoffContextTokens,
             state.handoffPaths.notes,
+            taskId,
           )),
         );
       }
@@ -1388,9 +1390,6 @@ export class SubagentBudgetMonitor {
         )
       ) {
         state.handoffDelivered = true;
-        if (state.stopState === 'none' && state.prepared?.record) {
-          this.index.publish(state.prepared.record.workspace, state.prepared.record.name);
-        }
         await this.delivery.send(session.sessionId, id, pending.handoff);
       } else {
         // The queued notice already reached the parent. The hook must not repeat it.

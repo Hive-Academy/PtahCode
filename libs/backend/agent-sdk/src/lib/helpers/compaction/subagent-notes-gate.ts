@@ -22,7 +22,6 @@ interface GateEntry {
   firstDecisionAt?: number;
   lastDenialAt?: number;
   denials: number;
-  wroteNotes: boolean;
 }
 
 export interface GateDecision {
@@ -36,7 +35,7 @@ export class SubagentNotesGate {
 
   warn(agentId: string, notesPath: string, workspace: string, now = Date.now()): void {
     if (this.entries.has(agentId)) return;
-    this.entries.set(agentId, { notesPath: path.resolve(notesPath), workspace: path.resolve(workspace), startedAt: now, denials: 0, wroteNotes: false });
+    this.entries.set(agentId, { notesPath: path.resolve(notesPath), workspace: path.resolve(workspace), startedAt: now, denials: 0 });
   }
 
   has(agentId: string | undefined): boolean {
@@ -62,8 +61,7 @@ export class SubagentNotesGate {
     const candidate = parsed.success ? path.resolve(entry.workspace, parsed.data.file_path) : undefined;
     const relative = candidate ? path.relative(entry.workspace, candidate) : undefined;
     const inside = relative !== undefined && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
-    if (!entry.wroteNotes && (toolName === 'Write' || toolName === 'Edit') && inside && candidate && pathKey(candidate) === pathKey(entry.notesPath)) {
-      entry.wroteNotes = true;
+    if ((toolName === 'Write' || toolName === 'Edit') && inside && candidate && pathKey(candidate) === pathKey(entry.notesPath)) {
       return { stop: false };
     }
     if (entry.lastDenialAt === undefined || now - entry.lastDenialAt >= DENIAL_BURST_MS) {
