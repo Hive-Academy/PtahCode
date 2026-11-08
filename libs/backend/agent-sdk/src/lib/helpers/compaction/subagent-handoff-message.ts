@@ -53,11 +53,12 @@ export function nearBudgetWarning(
   return (
     `Ptah budget notice: your context is at ${contextTokens} tokens, close to ` +
     `the ${handoffTokens}-token limit at which Ptah's subagent budget monitor ` +
-    `stops this subagent. Before your next step, write your progress notes to ` +
+    `ends this subagent. Before your next step, write your progress notes to ` +
     `${notesPath} (create its directory if needed; overwrite the file): current ` +
     `state, findings, decisions and their reasons, files touched, and the exact ` +
-    `next steps. Then continue your task. If you are stopped, a fresh subagent ` +
-    `continues from that file.`
+    `next steps. Then end your turn with a final message that starts ` +
+    `"PTAH BUDGET HANDOFF:" and summarizes progress and next steps. ` +
+    `Do not call other tools. A fresh subagent continues from that file.`
   );
 }
 
@@ -108,7 +109,7 @@ export function handoffMessage(
     usage.reason === 'handoff'
       ? `at ${usage.contextTokens} context tokens (handoff limit ${usage.handoffTokens} tokens)`
       : `after ${Math.round(usage.weightedUsed)} weighted tokens (safety limit ${usage.stopWeightedTokens})`;
-  const { paths, taskSaved, notesWritten, unavailable } = files;
+  const { paths, taskSaved, notesWritten, notesInferred, unavailable } = files;
   const lines = [
     `Ptah's subagent budget monitor stopped subagent ${name} ${why}. ` +
       `The user did not stop it; a task notification that reports it as ` +
@@ -137,7 +138,7 @@ export function handoffMessage(
       : unavailable
         ? `Its progress notes file: unavailable (the file check did not finish); look for ${paths.notes}.`
         : notesWritten
-          ? `Its progress notes are at ${paths.notes}.`
+          ? `Its progress notes${notesInferred ? ' (host-generated, inferred)' : ''} are at ${paths.notes}.`
           : `Its progress notes file is missing: ${paths.notes} was not written.`,
   );
   lines.push(
@@ -161,5 +162,6 @@ export function handoffMessage(
     `If its task is not finished, spawn ${fresh} with ${taskSource}, ` +
       `plus this instruction: "${resume}"`,
   );
+  lines.push('Continue the unfinished work yourself now by spawning the fresh subagent. Do not wait for the user or ask for another turn. Ptah\'s token budget ended this subagent; not the user.');
   return lines.join('\n');
 }

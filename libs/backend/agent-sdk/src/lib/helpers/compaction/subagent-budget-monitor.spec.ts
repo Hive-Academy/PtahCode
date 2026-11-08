@@ -1850,10 +1850,8 @@ describe('SubagentBudgetMonitor', () => {
         const text = await stopSpawned(h);
         const notes = path.join(dir(), `${TOOL_CALL}.md`);
 
-        expect(text).toContain(
-          `Its progress notes file is missing: ${notes} was not written.`,
-        );
-        expect(text).not.toContain(`Read ${notes} first`);
+        expect(text).toContain(`Its progress notes (host-generated, inferred) are at ${notes}.`);
+        expect(fs.readFileSync(notes, 'utf8')).toContain('host-generated, inferred');
         expect(text).toContain('do not redo finished work');
         expect(fs.existsSync(path.join(dir(), `${TOOL_CALL}.task.md`))).toBe(
           true,
@@ -2184,9 +2182,155 @@ describe('SubagentBudgetMonitor', () => {
       );
       expect(h.subagentNotices.take('agent-7')).toBeUndefined();
       expect(h.streamed).toHaveLength(1);
-      expect(h.streamed[0]).toContain(
-        `Its progress notes file is missing: ${notesPath()} was not written.`,
-      );
+      expect(h.streamed[0]).toContain(`Its progress notes (host-generated, inferred) are at ${notesPath()}.`);
+      expect(fs.readFileSync(notesPath(), 'utf8')).toContain('host-generated, inferred');
+    });
+
+    it('normal completion attaches one handoff to the parent result and suppresses queued fallback', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, { workspace });
+      await h.monitor.observe(SESSION, spawn({ description: 'Test handoff', prompt: 'Finish task' }));
+      await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
+      await h.monitor.finishWarnedAgent(SESSION, 'agent-7');
+
+      const handoff = h.monitor.takeNormalHandoff(SESSION, TOOL_CALL);
+      expect(handoff).toContain("Ptah's token budget ended this subagent; not the user");
+      expect(h.monitor.takeNormalHandoff(SESSION, TOOL_CALL)).toBeUndefined();
+      await h.monitor.observe(SESSION, toolResult());
+      expect(h.dispatcher.pushParentMessage).not.toHaveBeenCalled();
+      expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
+      expect(h.recordStore.markInvoked).toHaveBeenCalledWith(TOOL_CALL);
+      expect(h.index.publish).not.toHaveBeenCalled();
+    });
+
+    it('keeps the notes gate when the safety stop has no task id, then retries after the id arrives', async () => {
+      const h = makeHarness({ agentId: 'agent-7', taskId: undefined }, { workspace });
+      await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
+      for (let i = 0; i < 3; i += 1) {
+        expect(await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {})).toContain('End your turn now');
+      }
+      await waitUntil(() => h.logger.warn.mock.calls.some((call) => String(call[0]).includes('stop deferred')));
+      expect(h.monitor.hasNotesGate('agent-7')).toBe(true);
+      expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
+      h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-late', 'Explore');
+      await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {});
+      await waitUntil(() => h.dispatcher.stopSubagent.mock.calls.length === 1);
+      await waitUntil(() => !h.monitor.hasNotesGate('agent-7'));
+    });
+
+    it('keeps the notes gate after a rejected safety stop and retries', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, { workspace });
+      h.dispatcher.stopSubagent.mockRejectedValueOnce(new Error('busy'));
+      await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
+      for (let i = 0; i < 3; i += 1) await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {});
+      await waitUntil(() => h.logger.warn.mock.calls.some((call) => String(call[0]).includes('gate remains active')));
+      expect(h.monitor.hasNotesGate('agent-7')).toBe(true);
+      await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {});
+      await waitUntil(() => h.dispatcher.stopSubagent.mock.calls.length === 2);
+      await waitUntil(() => !h.monitor.hasNotesGate('agent-7'));
+    });
+
+    it('returns a denial before stopTask settles and clears the watchdog on release', async () => {
+      jest.useFakeTimers();
+      try {
+        const h = makeHarness({ agentId: 'agent-7' }, { workspace });
+        await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
+        let finishStop: () => void = () => undefined;
+        h.dispatcher.stopSubagent.mockImplementationOnce(() => new Promise<void>((resolve) => { finishStop = resolve; }));
+        await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {});
+        await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {});
+        const reason = await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {});
+        expect(reason).toContain('End your turn now');
+        expect(h.monitor.hasNotesGate('agent-7')).toBe(true);
+        const activeTimers = jest.getTimerCount();
+        expect(activeTimers).toBeGreaterThan(0);
+        h.monitor.release(SESSION);
+        expect(jest.getTimerCount()).toBeLessThan(activeTimers);
+        finishStop();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('normal exit without a task id writes inferred notes and hands off in memory', async () => {
+      const h = makeHarness({ agentId: 'agent-7', taskId: undefined }, { workspace });
+      await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
+      await h.monitor.finishWarnedAgent(SESSION, 'agent-7');
+      expect(h.monitor.hasNotesGate('agent-7')).toBe(false);
+      expect(fs.readFileSync(notesPath(), 'utf8')).toContain('host-generated, inferred');
+      expect(h.recordStore.writeOnce).not.toHaveBeenCalled();
+      expect(h.monitor.takeNormalHandoff(SESSION, TOOL_CALL)).toContain('Continue the unfinished work yourself now');
+      expect(h.monitor.takeNormalHandoff(SESSION, TOOL_CALL)).toBeUndefined();
+      expect(h.logger.warn.mock.calls.filter((call) => String(call[0]).includes('Normal exit has no task id'))).toHaveLength(1);
+    });
+
+    it('normal exit with a failed record write still supplies inferred notes and an in-memory handoff', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, { workspace });
+      h.recordStore.writeOnce.mockResolvedValueOnce({ ok: false, errorType: 'Unavailable', errorCode: 'EIO' });
+      await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
+      await h.monitor.finishWarnedAgent(SESSION, 'agent-7');
+      expect(h.monitor.hasNotesGate('agent-7')).toBe(false);
+      expect(fs.readFileSync(notesPath(), 'utf8')).toContain('host-generated, inferred');
+      expect(h.monitor.takeNormalHandoff(SESSION, TOOL_CALL)).toContain('Its progress notes (host-generated, inferred) are at');
+      expect(h.recordStore.markInvoked).not.toHaveBeenCalled();
+      expect(h.logger.warn.mock.calls.filter((call) => String(call[0]).includes('delivering in-memory handoff'))).toHaveLength(1);
+    });
+
+    it('does not send a normal handoff after its session is released during preparation', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, { workspace });
+      await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
+      let finishWrite: (value: HandoffRecordWrite) => void = () => undefined;
+      h.recordStore.writeOnce.mockImplementationOnce(() => new Promise<HandoffRecordWrite>((resolve) => { finishWrite = resolve; }));
+      const finishing = h.monitor.finishWarnedAgent(SESSION, 'agent-7');
+      await waitUntil(() => h.recordStore.writeOnce.mock.calls.length === 1);
+      h.monitor.release(SESSION);
+      finishWrite({ ok: false, errorType: 'Unavailable', errorCode: 'EIO' });
+      await finishing;
+      expect(h.monitor.hasNotesGate('agent-7')).toBe(false);
+      expect(h.dispatcher.pushParentMessage).not.toHaveBeenCalled();
+      expect(h.index.publish).not.toHaveBeenCalled();
+    });
+
+    it('queues the normal handoff if the parent Agent hook did not run', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, { workspace });
+      await h.monitor.observe(SESSION, spawn({ description: 'Test handoff', prompt: 'Finish task' }));
+      await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
+      await h.monitor.finishWarnedAgent(SESSION, 'agent-7');
+      await h.monitor.observe(SESSION, toolResult());
+      expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
+      expect(h.monitor.takeNormalHandoff(SESSION, TOOL_CALL)).toBeUndefined();
+      expect(h.index.publish).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not duplicate the interrupted handoff when the parent tool result precedes the failure hook', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, { workspace });
+      await h.monitor.observe(SESSION, spawn({ description: 'Review task' }));
+      await h.monitor.observe(SESSION, atContext(150_000, 'm1'));
+      await h.monitor.observe(SESSION, toolResult());
+      expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
+      expect(h.monitor.takeInterruptedHandoff(SESSION, TOOL_CALL)).toBeUndefined();
+    });
+
+    it('does not queue the interrupted handoff after the failure hook has claimed it', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, { workspace });
+      await h.monitor.observe(SESSION, spawn({ description: 'Review task' }));
+      await h.monitor.observe(SESSION, atContext(150_000, 'm1'));
+      expect(h.monitor.takeInterruptedHandoff(SESSION, TOOL_CALL)).toContain('Ptah\'s token budget ended this subagent; not the user');
+      await h.monitor.observe(SESSION, toolResult());
+      expect(h.dispatcher.pushParentMessage).not.toHaveBeenCalled();
+      expect(h.monitor.takeInterruptedHandoff(SESSION, TOOL_CALL)).toBeUndefined();
+    });
+
+    it('repairs an interrupted parent result while stopTask is still pending', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, { workspace });
+      let finishStop: () => void = () => undefined;
+      h.dispatcher.stopSubagent.mockImplementationOnce(() => new Promise<void>((resolve) => { finishStop = resolve; }));
+      const observing = h.monitor.observe(SESSION, atContext(150_000, 'm1'));
+      await waitUntil(() => h.dispatcher.stopSubagent.mock.calls.length === 1);
+      expect(h.monitor.getAgentBudgetState(TOOL_CALL, SESSION)?.stopState).toBe('pending');
+      expect(h.monitor.takeInterruptedHandoff(SESSION, TOOL_CALL)).toContain('Continue the unfinished work yourself now');
+      finishStop();
+      await observing;
+      expect(h.dispatcher.postMainThreadNotice).not.toHaveBeenCalled();
     });
 
     it('the hard stop points the fresh subagent at the notes the warned subagent wrote', async () => {

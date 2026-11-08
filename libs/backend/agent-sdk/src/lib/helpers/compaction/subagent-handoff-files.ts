@@ -49,6 +49,8 @@ export interface HandoffFileState {
   readonly paths?: SubagentHandoffPaths;
   readonly taskSaved: boolean;
   readonly notesWritten: boolean;
+  /** The host inferred these notes from its snapshot after the agent left none. */
+  readonly notesInferred?: boolean;
   /** The file operations failed or did not finish in time: outcome unknown. */
   readonly unavailable?: boolean;
 }
@@ -113,6 +115,28 @@ export class SubagentHandoffFiles {
           errorCode: typeof code === 'string' ? code : undefined,
         });
       }
+      return false;
+    }
+  }
+
+  /** Persist inferred progress only when the agent did not write notes. */
+  async ensureFallbackNotes(
+    paths: SubagentHandoffPaths,
+    content: string,
+    redact: (text: string) => string,
+  ): Promise<boolean> {
+    try {
+      await fs.mkdir(path.dirname(paths.notes), { recursive: true });
+      await fs.writeFile(paths.notes, redact(content).slice(0, 16_000), {
+        encoding: 'utf8', flag: 'wx', mode: 0o600,
+      });
+      return true;
+    } catch (error: unknown) {
+      // degradation-audit: reported - an existing notes file wins; other write failures are logged.
+      if ((error as { code?: unknown } | null)?.code === 'EEXIST') return true;
+      this.logger.warn('[SubagentHandoffFiles] Could not save inferred notes', {
+        errorType: error instanceof Error ? error.name : typeof error,
+      });
       return false;
     }
   }
