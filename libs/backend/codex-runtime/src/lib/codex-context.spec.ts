@@ -23,7 +23,9 @@ describe('native child event admission', () => {
       asyncQuestionItems: new Set<string>(), subscribers: new Set(),
       turnController: new AbortController(), sequence: 0,
       finishCompact: jest.fn(),
-      options: { logger: { error: jest.fn() } },
+      pendingChildParents: new Map<string, string>(),
+      unlinkedMethodsLogged: new Set<string>(),
+      options: { logger: { error: jest.fn(), debug: jest.fn() } },
     }) as RuntimeContext;
     const feed = (method: string, params: Record<string, unknown>) => {
       const validParams = method === 'item/started'
@@ -44,11 +46,25 @@ describe('native child event admission', () => {
       senderThreadId: 'root', receiverThreadIds: [] as string[],
       status: 'inProgress', tool: 'spawnAgent', agentsStates: {},
       prompt: 'Inspect' };
+    // The protocol can announce the thread before the parent spawn item.
+    feed('thread/started', { thread: { id: 'prelinked', parentThreadId: 'root' } });
+    feed('item/started', { threadId: 'root', turnId: 'root-turn',
+      item: { ...spawn, id: 'prelink-spawn' } });
+    expect(Reflect.get(context, 'childTools')).toHaveProperty('size', 1);
+    expect((Reflect.get(context, 'childTools') as Map<string, string>).get('prelinked'))
+      .toBe('prelink-spawn');
+    feed('item/completed', { threadId: 'root', turnId: 'root-turn',
+      item: { ...spawn, id: 'prelink-spawn', status: 'completed' } });
+    (Reflect.get(context, 'childTools') as Map<string, string>).delete('prelinked');
     feed('item/started', { threadId: 'root', turnId: 'root-turn', item: spawn });
     feed('item/completed', { threadId: 'foreign', turnId: 'foreign-turn',
       item: { type: 'agentMessage', id: 'foreign-text', text: 'foreign' } });
     feed('item/completed', { threadId: 'child', turnId: 'child-turn',
       item: { type: 'agentMessage', id: 'early-text', text: 'early' } });
+    for (let index = 0; index < 100; index += 1)
+      feed('item/agentMessage/delta', { threadId: 'child', turnId: 'child-turn',
+        itemId: 'stream', delta: 'x' });
+    expect(Reflect.get(context, 'earlyChildCount')).toBeLessThan(10);
     expect(events().some((event) => event.threadId === 'child')).toBe(false);
     feed('item/started', { threadId: 'root', turnId: 'root-turn', item: {
       type: 'subAgentActivity', id: 'activity', agentPath: '/root/readme_inspection',
@@ -109,6 +125,7 @@ describe('native child event admission', () => {
     expect(Reflect.get(context, 'state')).toBe('idle');
     expect(Reflect.get(context, 'activeTurn')).toBeUndefined();
     expect(Reflect.get(context, 'earlyChildEvents')).toEqual(new Map());
+    clearTimeout(Reflect.get(context, 'compactTimer'));
     void subscription;
   });
   it('nests only linked child threads and leaves the root lifecycle separate', () => {
@@ -120,7 +137,7 @@ describe('native child event admission', () => {
   });
 
   it('logs the early child buffer overflow once per root turn', () => {
-    const logger = { error: jest.fn() };
+    const logger = { error: jest.fn(), debug: jest.fn() };
     const context = Object.assign(Object.create(RuntimeContext.prototype), {
       committedIdentity: { contextId: 'context', processGeneration: 1,
         threadId: 'root' },
@@ -131,6 +148,8 @@ describe('native child event admission', () => {
       childTurns: new Map<string, string>(),
       knownChildParents: new Map<string, string>(),
       pendingSpawns: new Map<string, Set<string>>(),
+      pendingChildParents: new Map<string, string>(),
+      unlinkedMethodsLogged: new Set<string>(),
       earlyChildEvents: new Map<string, CodexRuntimeEvent[]>(),
       earlyChildCount: 0, earlyChildOverflowLogged: false,
       rootTerminalPending: false,
@@ -153,16 +172,16 @@ describe('native child event admission', () => {
           item: { type: 'agentMessage', id: `child-text-${index}`,
             text: 'early' } });
     };
-    feedUnlinked(80);
+    feedUnlinked(520);
     expect(logger.error).toHaveBeenCalledTimes(1);
-    expect(Reflect.get(context, 'earlyChildCount')).toBe(64);
+    expect(Reflect.get(context, 'earlyChildCount')).toBe(512);
     feed('turn/completed', { threadId: 'root',
       turn: { id: 'root-turn', status: 'completed', items: [] } });
     expect(Reflect.get(context, 'earlyChildEvents')).toEqual(new Map());
     // The cleared buffer lets a later root turn report its own overflow.
-    feedUnlinked(80);
+    feedUnlinked(520);
     expect(logger.error).toHaveBeenCalledTimes(2);
-    expect(Reflect.get(context, 'earlyChildCount')).toBe(64);
+    expect(Reflect.get(context, 'earlyChildCount')).toBe(512);
   });
 });
 

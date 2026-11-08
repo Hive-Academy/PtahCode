@@ -228,6 +228,8 @@ export interface SdkHandle extends LaneAccountBindingFields {
    *  in preference to the legacy `tracked.process.stdin` path.
    *  No-op if the run no longer has a writable channel. */
   readonly steer?: (message: string) => void | Promise<void>;
+  /** Hold an internal warning for the next turn without starting a turn. */
+  readonly queueForNextTurn?: (message: string) => void;
   /** Abort the CURRENT run/turn without ending the session/agent, and resolve
    *  once the run has torn down (the stream consumer has unwound).
    *

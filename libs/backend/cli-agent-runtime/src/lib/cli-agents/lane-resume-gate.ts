@@ -120,8 +120,8 @@ export class LaneResumeGate {
       total >= input.budgetSettings.stopWeightedTokens * input.budgetSettings.warnRatio;
     if (budgetStop || nearLimit) {
       const reason = budgetStop
-        ? `CLI session cannot resume after ${input.stopReason} stop`
-        : `CLI session has reached its budget warning threshold (${Math.round(total)} tokens)`;
+        ? `budget stop: CLI session cannot resume after ${input.stopReason} stop`
+        : `near-limit (warning reached): CLI session has reached its budget warning threshold (${Math.round(total)} tokens)`;
       return { decision: 'fresh', reason, contextTokens: null, source: 'estimate', idleMs: null };
     }
     // Identity is checked before the cost gate can read context or make a

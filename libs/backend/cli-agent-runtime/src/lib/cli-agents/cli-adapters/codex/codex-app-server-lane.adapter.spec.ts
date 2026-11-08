@@ -912,8 +912,11 @@ describe('CodexAppServerLaneAdapter', () => {
     for (let tick = 0; tick < 20 && h.context.inputs.length === 0; tick += 1)
       await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
+    const steer = jest.spyOn(h.context, 'steer');
     await expect(handle.steer?.('follow up')).resolves.toBeUndefined();
+    expect(steer).toHaveBeenCalledWith({ text: 'follow up' }, 'turn-1');
     expect(h.context.inputs.at(-1)?.text).toBe('follow up');
+    expect(handle.queueForNextTurn).toBeDefined();
     jest
       .spyOn(h.context, 'steer')
       .mockResolvedValueOnce({
@@ -926,6 +929,22 @@ describe('CodexAppServerLaneAdapter', () => {
     );
     await terminal(h.context);
     await handle.done;
+    handle.abort.abort();
+  });
+
+  it('holds an idle budget warning for the next turn without starting one', async () => {
+    const h = harness();
+    const handle = await h.adapter.runSdk(options());
+    await terminal(h.context);
+    await handle.done;
+    const starts = h.context.inputs.length;
+    handle.queueForNextTurn?.('Budget warning: prepare a handoff.');
+    expect(h.context.inputs).toHaveLength(starts);
+    const next = await handle.continue?.('continue work');
+    expect(h.context.inputs.at(-1)?.text).toContain('Budget warning: prepare a handoff.');
+    expect(h.context.inputs.at(-1)?.text).toContain('continue work');
+    await terminal(h.context, 'turn-2');
+    await next?.done;
     handle.abort.abort();
   });
 

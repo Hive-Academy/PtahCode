@@ -80,6 +80,9 @@ export function childEventParent(
   return threadId === rootThreadId ? undefined : childTools.get(threadId) ?? null;
 }
 
+const MAX_EARLY_CHILD_EVENTS = 512;
+const MAX_EARLY_CHILD_THREADS = 8;
+
 /** Operations serialize RPC admission, never the lifetime of a running turn. */
 class RuntimeContext implements CodexContext {
   private committedIdentity?: CodexThreadIdentity;
@@ -96,6 +99,8 @@ class RuntimeContext implements CodexContext {
   private readonly knownChildParents = new Map<string, string>();
   private readonly childTurns = new Map<string, string>();
   private readonly pendingSpawns = new Map<string, Set<string>>();
+  private readonly pendingChildParents = new Map<string, string>();
+  private readonly unlinkedMethodsLogged = new Set<string>();
   private readonly earlyChildEvents = new Map<string, CodexRuntimeEvent[]>();
   private earlyChildCount = 0;
   private earlyChildOverflowLogged = false;
@@ -403,12 +408,27 @@ class RuntimeContext implements CodexContext {
         id: z.string(), parentThreadId: z.string().nullish(),
       }) }).safeParse(frame.params);
       if (started.success && started.data.thread.parentThreadId) {
-        const candidates = this.pendingSpawns.get(started.data.thread.parentThreadId);
+        const parentId = started.data.thread.parentThreadId;
+        if (this.pendingChildParents.size >= 256) {
+          const oldest = this.pendingChildParents.keys().next().value;
+          if (oldest) this.pendingChildParents.delete(oldest);
+        }
+        this.pendingChildParents.set(started.data.thread.id, parentId);
+        const candidates = this.pendingSpawns.get(parentId);
         if (candidates?.size === 1) {
           const toolId = [...candidates][0];
           if (toolId) this.linkChild(started.data.thread.id, toolId);
         }
       }
+    }
+    const params = frame.params;
+    if (typeof params === 'object' && params !== null && 'threadId' in params &&
+      typeof params['threadId'] === 'string' &&
+      params['threadId'] !== this.identity.threadId &&
+      !this.childTools.has(params['threadId']) &&
+      this.unlinkedMethodsLogged.size < 32 && !this.unlinkedMethodsLogged.has(frame.method)) {
+      this.unlinkedMethodsLogged.add(frame.method);
+      this.options.logger.debug('Codex unlinked thread notification', { method: frame.method });
     }
     // Compaction owns admission, so thread item activity belongs to its work.
     if (
@@ -486,6 +506,9 @@ class RuntimeContext implements CodexContext {
         const pending = this.pendingSpawns.get(event.threadId) ?? new Set<string>();
         pending.add(event.toolId);
         this.pendingSpawns.set(event.threadId, pending);
+        for (const [childId, parentId] of this.pendingChildParents)
+          if (parentId === event.threadId && pending.size === 1)
+            this.linkChild(childId, event.toolId);
       }
       if (event.type === 'toolCompleted')
         this.pendingSpawns.get(event.threadId)?.delete(event.toolId);
@@ -501,6 +524,7 @@ class RuntimeContext implements CodexContext {
   }
 
   private linkChild(threadId: string, toolId: string): void {
+    this.pendingChildParents.delete(threadId);
     if (!this.knownChildParents.has(threadId) &&
       this.knownChildParents.size >= 256) {
       const oldest = this.knownChildParents.keys().next().value;
@@ -522,9 +546,13 @@ class RuntimeContext implements CodexContext {
   }
 
   private bufferEarlyChild(event: CodexRuntimeEvent): void {
+    // High-volume deltas are superseded by completed items; keep the bounded
+    // buffer for terminal, usage and complete item events needed for accounting.
+    if (event.type === 'textDelta' ||
+      (event.type === 'reasoning' && event.phase === 'delta')) return;
     const current = this.earlyChildEvents.get(event.threadId);
-    if (this.earlyChildCount >= 64 ||
-      (!current && this.earlyChildEvents.size >= 8)) {
+    if (this.earlyChildCount >= MAX_EARLY_CHILD_EVENTS ||
+      (!current && this.earlyChildEvents.size >= MAX_EARLY_CHILD_THREADS)) {
       // One report per root turn: a still-running unlinked child keeps
       // dropping events, and per-event logging would flood the log.
       if (!this.earlyChildOverflowLogged) {
@@ -606,6 +634,7 @@ class RuntimeContext implements CodexContext {
     this.childTools.clear();
     this.childTurns.clear();
     this.pendingSpawns.clear();
+    this.pendingChildParents.clear();
     this.turnController.abort();
     this.releaseTurnSignal?.();
     this.releaseTurnSignal = undefined;
@@ -1153,6 +1182,7 @@ class RuntimeContext implements CodexContext {
     this.childTurns.clear();
     this.knownChildParents.clear();
     this.pendingSpawns.clear();
+    this.pendingChildParents.clear();
     this.earlyChildEvents.clear();
     this.earlyChildCount = 0;
     this.earlyChildOverflowLogged = false;

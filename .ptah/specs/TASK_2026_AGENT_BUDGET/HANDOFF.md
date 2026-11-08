@@ -29,7 +29,31 @@ PR: https://github.com/Hive-Academy/PtahCode/pull/986 (draft). Pushed head `5a84
 - Manager agent-process-manager.service.ts: 3849 physical / 3673 non-blank (main 3849 / 3675).
 - Side fix done for the user: PR #1000 CodeRabbit comment (commit 9cef23bb9, merged).
 
-## In progress
+## Update ~07:00 UTC (supersedes "In progress" below)
+- Pushed head `5be9cd31d` (CI green). Local commits not pushed yet: `8c3f1ae35` (round 3 report).
+- Commits since 5a8411a14: `c6c025903` live test 1 report; `dcf9e5c88` one-turn-jump warning + per-turn
+  info logs; `c7049c6e4` live test 2 report; `5be9cd31d` predictive warning, Codex queue fallback,
+  progress pointer, child linkage guess; `8c3f1ae35` live test 3 report.
+- Live proven: per-turn `Accepted lane turn` records with real tokens (catalog cost authority),
+  budget stop with source, fresh-lane resume gate, predictive warning at 91% before the stop.
+- Still failing live: (1) Codex lane warning delivery: steer reported unsupported, fallback
+  start-turn collides with the active turn; (2) native Codex child: `Codex early child event buffer
+  overflow`, no linkage, no child decisions. Resume gate denies resume at the warning threshold
+  (intended: near-limit resume denied).
+- RUNNING: fix lane Codex `3edb042b-61be-4c66-9480-9566428fd825` (session 01a1b9f3-4100-79e3-ae1c-5797e9d5a013),
+  deliverable live-test-3-fix-report.md. Then: verify, commit, push, live test round 4
+  (tester session 01a1b9d3-b5bd-7530-8861-6404201c69cb; coordinate Ptah Dev with the task 7 session
+  `ptah-ptah-extension-subagent-stop-handof-80bbf70000jlo2rcqszxa00`; Ptah Dev is FREE now).
+- #1004 MERGED (18f779e48): batch B unblocked. RUNNING: batch B lane Codex `9f18be31-d812-4f20-9938-c3a8026d0a1d`
+  (session 01a1b9f4-b44a-7332-9f59-83a06bc5d5cf) in worktree .claude-worktrees/agent-budget-sdk, branch
+  feat/agent-budget-sdk (= 8c3f1ae35 + main merge 33dacf853, local only, has node_modules junction).
+  Deliverable batch-B-report.md there. After it: verify, commit, push the branch, merge it into
+  feat/agent-budget (after the fix lane is committed), then a Haiku SDK subagent live test.
+- Dev board: limit is 20 sessions; testers close (not delete) old live-test sessions.
+- Electron regenerates MCP config files in the scratch workspace during a run; testers delete
+  the generated copies at cleanup and must never print tokens.
+
+## In progress (older)
 - LIVE TEST lane: Codex `078f8386-3449-47c6-becb-8a48f5454316` (CLI Session 01a1b982-7406-7491-8b12-96dd7f409d40),
   deliverable .ptah/specs/TASK_2026_AGENT_BUDGET/live-test.md. Checks: A CLI Codex lane budget
   (warning, stop reason budget, resume refused), B Codex-provider child (handoff 40000), C Claude

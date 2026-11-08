@@ -727,11 +727,14 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       }
     };
     void pump(opened, eventAbort.signal);
+    const nextTurnWarnings: string[] = [];
     const runTurn = (text: string, onStarted?: () => void): Promise<number> => {
       if (closed) return Promise.reject(new Error('Codex lane is closed'));
       if (active || starting)
         return Promise.reject(new Error('Codex lane turn is already active'));
       starting = true;
+      if (nextTurnWarnings.length > 0)
+        text = `${nextTurnWarnings.splice(0).join('\n\n')}\n\n${text}`;
       return new Promise<number>((resolve, reject) => {
         const start = async (): Promise<void> => {
           try {
@@ -842,12 +845,16 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
         const expectedTurnId = active?.receipt.turnId;
         if (closed || !expectedTurnId || !context || starting)
           throw new Error('Codex active turn unavailable');
-        const receipt = await context.steer({ text: message });
+        const receipt = await context.steer({ text: message }, expectedTurnId);
         if (
           receipt.turnId !== expectedTurnId ||
           active?.receipt.turnId !== expectedTurnId
         )
           throw new Error('Codex active turn changed');
+      },
+      queueForNextTurn: (message: string): void => {
+        if (closed) throw new Error('Codex lane is closed');
+        if (nextTurnWarnings.length < 1) nextTurnWarnings.push(message);
       },
       continue: (message: string): Promise<ContinuationOutcome> => {
         if (closed) return Promise.reject(new Error('Codex lane is closed'));

@@ -463,15 +463,15 @@ export class AgentProcessManager {
         const message = 'Budget warning: finish your current work, report progress, and prepare a short handoff.';
         const steered = await this.sendToAgent(agentId, message, 'steer');
         if (steered.mode !== 'unsupported') return steered;
+        const handle = this.agents.get(agentId)?.sdkHandle;
+        if (handle?.queueForNextTurn) { handle.queueForNextTurn(message); return { mode: 'queue-next-turn' }; }
         return this.sendToAgent(agentId, message, 'queue');
       },
       (agentId, reason) => { void this.stopLaneForGuard(agentId, reason, 0, 0); });
-    this.logger.info('[AgentProcessManager] Initialized');
   }
 
   /**
    * Spawn a new CLI agent process.
-   *
    * Only the cap check and the slot reservation are serialized
    * ({@link reserveSpawnSlot}). CLI detection, working-directory validation,
    * the harness preflight and the SDK launch all run OUTSIDE the mutex, so a
