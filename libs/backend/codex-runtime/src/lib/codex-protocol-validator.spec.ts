@@ -46,6 +46,13 @@ const usage = {
   reasoningOutputTokens: 0,
   totalTokens: 3,
 };
+it('preserves optional child attribution on token usage notifications', () => {
+  const params = validateCodexParams('thread/tokenUsage/updated', {
+    threadId: 'child', turnId: 'turn', parentThreadId: 'parent',
+    model: 'codex-model', tokenUsage: { last: usage, total: usage },
+  });
+  expect(params).toMatchObject({ parentThreadId: 'parent', model: 'codex-model' });
+});
 const threadResult = {
   thread: {
     id: 'thread',
@@ -1270,6 +1277,7 @@ describe('frozen schema contract', () => {
     Partial<Record<string, readonly string[]>>
   > = {
     'ClientRequest/thread/list': ['ancestorThreadId'],
+    'ServerNotification/thread/tokenUsage/updated': ['parentThreadId', 'model'],
   };
   for (const [group, methods] of groups) {
     const variants = z
