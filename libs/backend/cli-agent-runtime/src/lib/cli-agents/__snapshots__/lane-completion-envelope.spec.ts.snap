@@ -1,0 +1,13 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`lane completion envelope budget stops keeps the previous repeat-call envelope unchanged 1`] = `
+"<agent-lane-completed agent-id="agent-1" agent="worker" cli="claude" status="stopped" verdict="unverified">
+Lane worker finished: stopped after 1s.
+Task: do work
+Stopped by Ptah: repeated the same call 3 times. The caller did not stop it.
+Deliverables: none were declared at spawn, so nothing was checked. Read the lane output before you trust this result, and declare "deliverables" on the next spawn so the next signal can verify it.
+Reports sent by this lane before it ended: 0.
+CLI Session ID: real-cli-session — pass it as resume_session_id to continue this lane instead of respawning it.
+Next: read the lane output and check its claims against the files and the project tests before you use them.
+</agent-lane-completed>"
+`;

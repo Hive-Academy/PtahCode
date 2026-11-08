@@ -713,6 +713,7 @@ export function persistCliSessionReference(
       ...(info.lastActivityAt ? { lastActivityAt: info.lastActivityAt } : {}),
       status: info.status,
       ...(info.stopReason ? { stopReason: info.stopReason } : {}),
+      ...(info.agentBudget ? { agentBudget: info.agentBudget } : {}),
       ...(typeof info.stopResetAt === 'number' &&
       Number.isFinite(info.stopResetAt) &&
       info.stopResetAt > 0

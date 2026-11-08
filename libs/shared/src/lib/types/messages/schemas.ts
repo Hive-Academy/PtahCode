@@ -134,6 +134,9 @@ export const AgentMonitorParentDeliveryPayloadSchema = z.object({
   preview: z.string().max(160).optional(),
   verdict: z.enum(['delivered', 'no-deliverable', 'failed', 'unverified']).optional(),
   stopReason: z.enum([
+    'budget',
+    'telemetry-unavailable',
+    'duration',
     'repeat-call',
     'usage-limit',
     'auth',

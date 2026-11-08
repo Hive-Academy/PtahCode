@@ -243,3 +243,30 @@ describe('AgentSpawnEnvironment — agentOrchestration settings routing (D8)', (
     expect(environment.resolveAutoApprove('copilot')).toBe(true);
   });
 });
+
+describe('agent budget settings routing', () => {
+  it('reads all four agentBudget keys from the file store', () => {
+    const { environment } = makeRoutingEnvironment({
+      fileStore: {
+        'agentBudget.warnRatio': 0.7,
+        'agentBudget.stopWeightedTokens': 50_000,
+        'agentBudget.handoffContextTokens': 10_000,
+        'agentBudget.maxDurationMin': 120,
+      },
+    });
+    expect(environment.resolveAgentBudgetSettings()).toEqual({
+      warnRatio: 0.7, stopWeightedTokens: 50_000,
+      handoffContextTokens: 10_000, maxDurationMin: 120,
+    });
+  });
+
+  it('uses defaults when a stored value fails the boundary schema', () => {
+    const { environment } = makeRoutingEnvironment({
+      fileStore: { 'agentBudget.warnRatio': 'invalid' },
+    });
+    expect(environment.resolveAgentBudgetSettings()).toEqual({
+      warnRatio: 0.85, stopWeightedTokens: 3_000_000,
+      handoffContextTokens: 150_000, maxDurationMin: 90,
+    });
+  });
+});

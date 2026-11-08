@@ -854,6 +854,16 @@ export class LaneCompletionNotifier {
         : {}),
       ...(info.cliSessionId ? { cliSessionId: info.cliSessionId } : {}),
       ...(info.stopReason ? { stopReason: info.stopReason } : {}),
+      ...((info.stopReason === 'budget' || info.stopReason === 'duration' || info.stopReason === 'telemetry-unavailable')
+        ? {
+            progressPointer: `ptah_agent_read agent_id=${info.agentId} tail=200`,
+            budgetLimit: info.stopReason === 'budget'
+              ? `${info.agentBudget?.stopWeightedTokens ?? 'configured'} weighted tokens`
+              : info.stopReason === 'duration'
+                ? `${info.agentBudget?.maxDurationMin ?? 'configured'} minutes`
+                : 'completed-turn telemetry required',
+          }
+        : {}),
       ...(context.toolCalls !== undefined
         ? { toolCalls: context.toolCalls }
         : {}),

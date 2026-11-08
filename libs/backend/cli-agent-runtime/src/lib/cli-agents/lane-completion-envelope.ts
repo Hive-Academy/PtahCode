@@ -29,6 +29,8 @@ function deliverableLine(check: LaneDeliverableCheck): string {
 /** Who stopped the lane and why, for a lane the host stopped. */
 function hostStopLine(signal: LaneCompletionSignal): string | undefined {
   if (!signal.stopReason) return undefined;
+  if (isAgentBudgetStop(signal))
+    return `Stopped by Ptah (agent budget), not by the user: ${signal.stopReason}; limit: ${signal.budgetLimit ?? 'configured limit'}.`;
   const calls =
     signal.toolCalls !== undefined ? ` (${signal.toolCalls} tool calls)` : '';
   const why =
@@ -38,7 +40,14 @@ function hostStopLine(signal: LaneCompletionSignal): string | undefined {
   return `Stopped by Ptah: ${why}${calls}. The caller did not stop it.`;
 }
 
+function isAgentBudgetStop(signal: LaneCompletionSignal): boolean {
+  return signal.stopReason === 'budget' || signal.stopReason === 'duration' ||
+    signal.stopReason === 'telemetry-unavailable';
+}
+
 function nextAction(signal: LaneCompletionSignal): string {
+  if (isAgentBudgetStop(signal))
+    return 'Next: resume is refused for this CLI session. Read the progress pointer and deliverables, then start a fresh lane with the remaining work.';
   switch (signal.verdict) {
     case 'delivered':
       if (signal.stopReason) {
@@ -92,9 +101,11 @@ export function buildLaneCompletionEnvelope(
     `Reports sent by this lane before it ended: ${signal.reportsDelivered}.`,
   );
   if (signal.cliSessionId)
-    lines.push(
-      `CLI Session ID: ${signal.cliSessionId} — pass it as resume_session_id to continue this lane instead of respawning it.`,
-    );
+    lines.push(isAgentBudgetStop(signal)
+      ? `CLI Session ID: ${signal.cliSessionId} — resume is refused after this budget stop.`
+      : `CLI Session ID: ${signal.cliSessionId} — pass it as resume_session_id to continue this lane instead of respawning it.`);
+  if (isAgentBudgetStop(signal))
+    lines.push(`Progress pointer: ${(signal.progressPointer ?? `ptah_agent_read agent_id=${signal.agentId} tail=200`).slice(0, 240)}`);
   lines.push(nextAction(signal));
   return `<agent-lane-completed ${attrs}>\n${lines.join('\n')}\n</agent-lane-completed>`;
 }

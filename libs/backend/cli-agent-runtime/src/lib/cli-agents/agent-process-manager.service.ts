@@ -107,6 +107,7 @@ import {
   resolveLaneAccountResume,
 } from './lane-resume-gate';
 import { LaneBudgetGuard } from './lane-budget-guard';
+import { AgentBudgetCoordinator } from './agent-budget-coordinator';
 import type { AgentOutputJournal } from './agent-output-journal.service';
 import {
   applyOutputCheckpoint,
@@ -712,6 +713,13 @@ export class AgentProcessManager {
     const gate = await this.resumeGate.evaluate({
       cli,
       cliSessionId: resumeSessionId,
+      ...((latest?.info.agentBudget && (latest.info.agentBudget.rawTokens > 0 || latest.info.agentBudget.weightedTokens > 0)) || latest?.info.stopReason === 'budget' || latest?.info.stopReason === 'duration' || latest?.info.stopReason === 'telemetry-unavailable'
+        ? {
+            ...(latest.info.agentBudget ? { budget: latest.info.agentBudget } : {}),
+            ...(latest.info.stopReason ? { stopReason: latest.info.stopReason } : {}),
+            budgetSettings: this.spawnEnvironment.resolveAgentBudgetSettings(),
+          }
+        : {}),
       accountReference: latest ? laneAccountFields(latest.info) : undefined,
       accountBindings: this.cliDetection.getAdapter(cli)?.accountBindings,
       ...(Number.isFinite(lastActivityAt) ? { lastActivityAt } : {}),
@@ -839,9 +847,21 @@ export class AgentProcessManager {
    * first holds the original task and the last the latest activity.
    */
   private laneRecordsForSession(cliSessionId: string): TrackedAgent[] {
+    // Budget state follows the CLI-native session ID across lane records.
     return Array.from(this.agents.values())
       .filter((tracked) => tracked.info.cliSessionId === cliSessionId)
       .sort((a, b) => a.info.startedAt.localeCompare(b.info.startedAt));
+  }
+
+  private budgetRecord(budget: AgentBudgetCoordinator): NonNullable<AgentProcessInfo['agentBudget']> {
+    return {
+      weightedTokens: budget.counters.weightedTokens,
+      rawTokens: budget.counters.rawTokens,
+      turnIds: budget.counters.turnIds,
+      startedAtMs: budget.startedAtMs,
+      stopWeightedTokens: budget.settings.stopWeightedTokens,
+      maxDurationMin: budget.settings.maxDurationMin,
+    };
   }
 
   /** Most recently started record for this provider's CLI conversation. */
@@ -1353,6 +1373,27 @@ export class AgentProcessManager {
       turnSegmentStart: 0,
     };
 
+    const previousBudget = info.cliSessionId
+      ? this.previousResumeRecord(info.cli, info.cliSessionId)?.agentBudget
+      : undefined;
+    const budget = new AgentBudgetCoordinator(
+      this.spawnEnvironment.resolveAgentBudgetSettings(),
+      previousBudget?.startedAtMs ?? Date.parse(info.startedAt),
+      previousBudget ? {
+        weightedTokens: previousBudget.weightedTokens,
+        rawTokens: previousBudget.rawTokens,
+        turnIds: previousBudget.turnIds,
+        elapsedMs: 0, warned: false, stopped: false,
+      } : undefined,
+    );
+    tracked.budget = budget;
+    tracked.info = { ...tracked.info, agentBudget: this.budgetRecord(budget) };
+    tracked.budgetTimer = this.unrefTimer(setTimeout(() => {
+      if (this.agents.get(agentId) === tracked && tracked.info.status === 'running') {
+        void this.stopLaneForGuard(agentId, 'duration', 0, 0);
+      }
+    }, budget.remainingMs()));
+
     this.agents.set(agentId, tracked);
     const turn = Symbol('lane-turn');
     this.turns.set(tracked, turn);
@@ -1467,8 +1508,28 @@ export class AgentProcessManager {
       );
       sdkHandle.onSegment((segment: CliOutputSegment) => {
         if (this.agents.get(agentId) !== tracked) return;
+        if (captureSessionId) updateCliSessionId(captureSessionId());
         if (sdkHandle.outcomeUsageIsTurnTotal && segment.usage) {
           tracked.outcomeUsage = segment.usage;
+        }
+        if (segment.turnTelemetry && tracked.info.status === 'running') {
+          const result = budget.accept(segment.turnTelemetry);
+          tracked.info = { ...tracked.info, agentBudget: this.budgetRecord(budget) };
+          if (result.costUnavailable && !tracked.budgetCostWarned) {
+            tracked.budgetCostWarned = true;
+            this.logger.warn('[AgentProcessManager] Lane turn cost unavailable', { agentId });
+          }
+          if (result.warning) {
+            void this.sendToAgent(agentId,
+              'Budget warning: finish your current work, report progress, and prepare a short handoff.',
+              'steer', undefined, false,
+            ).then((outcome) => {
+              this.logger.info('[AgentProcessManager] Budget warning delivered', { agentId, mode: outcome.mode });
+            }).catch((error: unknown) => {
+              this.logger.error('[AgentProcessManager] Budget warning failed', error instanceof Error ? error : new Error(String(error)));
+            });
+          }
+          if (result.stopReason) void this.stopLaneForGuard(agentId, result.stopReason, 0, 0);
         }
         this.outputBuffer.appendSegment(
           agentId,
@@ -1478,10 +1539,6 @@ export class AgentProcessManager {
         );
         this.recordRequestContext(tracked, segment);
         this.applyLaneGuard(agentId, segment);
-        if (captureSessionId) {
-          const sessionId = captureSessionId();
-          updateCliSessionId(sessionId);
-        }
       });
     }
     if (sdkHandle.onStreamEvent) {
@@ -1779,6 +1836,7 @@ export class AgentProcessManager {
         startedAt: ref.startedAt,
         ...(ref.turnSeq !== undefined ? { turnSeq: ref.turnSeq } : {}),
         ...(ref.cliSessionId ? { cliSessionId: ref.cliSessionId } : {}),
+        ...(ref.agentBudget ? { agentBudget: ref.agentBudget } : {}),
         // The owner the run recorded (Gate 2 G3). `getCliSessionsForRestore`
         // already dropped a malformed or legacy value, so a run without one
         // stays "Unknown owner" and is never given the current owner.
@@ -2586,6 +2644,10 @@ export class AgentProcessManager {
       );
     }
 
+    if (tracked.budget?.expired()) {
+      throw new AgentContinueError('released', 'Lane lifetime budget expired; start a fresh lane.');
+    }
+
     const turn = Symbol('lane-turn');
     this.turns.set(tracked, turn);
 
@@ -2627,6 +2689,13 @@ export class AgentProcessManager {
     tracked.guardToolCalls = undefined;
     tracked.repeatedCalls = undefined;
     tracked.queuedMessagesDropped = undefined;
+    if (tracked.budget) {
+      clearTimeout(tracked.budgetTimer);
+      tracked.budgetTimer = this.unrefTimer(setTimeout(() => {
+        if (this.agents.get(agentId) === tracked && tracked.info.status === 'running')
+          void this.stopLaneForGuard(agentId, 'duration', 0, 0);
+      }, tracked.budget.remainingMs()));
+    }
     this.armInactivityWatchdog(agentId, tracked);
 
     this.events.emit('agent:spawned', tracked.info);
@@ -2721,6 +2790,8 @@ export class AgentProcessManager {
       return tracked.info;
     }
 
+    clearTimeout(tracked.budgetTimer);
+
     this.flushDelta(agentId);
     // Stamped BEFORE the kill, not after. The kill makes the handle settle,
     // which runs `handleExit` — and that path reads `status === 'running'` and
@@ -2808,6 +2879,7 @@ export class AgentProcessManager {
         clearTimeout(tracked.exitEmitHandle);
       }
       clearTimeout(tracked.timeoutHandle);
+      clearTimeout(tracked.budgetTimer);
       this.clearIdleRelease(tracked);
       this.outputBuffer.discard(agentId);
     }
@@ -2985,6 +3057,7 @@ export class AgentProcessManager {
   private async handleTimeout(agentId: string): Promise<void> {
     const tracked = this.agents.get(agentId);
     if (!tracked || tracked.info.status !== 'running') return;
+    clearTimeout(tracked.budgetTimer);
 
     this.logger.warn(
       '[AgentProcessManager] Agent produced no output for the whole inactivity window — treating it as hung',
@@ -3180,6 +3253,7 @@ export class AgentProcessManager {
     if (!tracked) return;
     if (tracked.hasExited) return;
     tracked.hasExited = true;
+    clearTimeout(tracked.budgetTimer);
     if (tracked.sdkHandle?.supportsContinuation?.() !== true) {
       void this.instructionFiles?.remove(agentId).catch((error: unknown) => {
         this.logger.warn(

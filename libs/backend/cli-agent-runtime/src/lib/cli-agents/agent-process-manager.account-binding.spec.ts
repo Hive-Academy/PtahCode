@@ -142,6 +142,10 @@ function harness(
     resolveReasoningEffort: jest.fn().mockReturnValue({ step: 'default', ignored: [] }),
     resolveAutoApprove: jest.fn().mockReturnValue(false),
     resolveLanePolicy: jest.fn().mockReturnValue({}),
+    resolveAgentBudgetSettings: jest.fn().mockReturnValue({
+      warnRatio: 0.99, stopWeightedTokens: 100_000_000,
+      handoffContextTokens: 2_000_000, maxDurationMin: 2_880,
+    }),
     maxConcurrentAgents: () => cap, sdkIdleReleaseMs: () => 100,
     scopedWorkspaceRoot: () => undefined, isWithinScope: () => true,
   });
@@ -405,6 +409,7 @@ describe('AgentProcessManager account reference lifecycle', () => {
   });
 
   it('ignores late completion, output, session resolution and cleanup from a replaced lane', async () => {
+    jest.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
     const { manager, spawnHandle, output } = harness();
     const old = lane(reference);
     await spawnHandle(old.handle);
@@ -431,6 +436,7 @@ describe('AgentProcessManager account reference lifecycle', () => {
   });
 
   it('ignores delayed exit and TTL cleanup after a completed record is replaced', async () => {
+    jest.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
     const { manager, spawnHandle } = harness();
     const old = lane(reference);
     await spawnHandle(old.handle);

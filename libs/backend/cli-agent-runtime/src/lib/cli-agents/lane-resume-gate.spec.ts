@@ -357,6 +357,20 @@ describe('LaneResumeGate', () => {
   });
 });
 
+describe('LaneResumeGate budget refusal', () => {
+  const budgetSettings = { warnRatio: 0.8, stopWeightedTokens: 100, handoffContextTokens: 1000, maxDurationMin: 10 };
+  it('starts fresh after an internal budget stop', async () => {
+    const result = await gateWith().gate.evaluate({ cli: 'claude', cliSessionId: 's', stopReason: 'budget', budgetSettings });
+    expect(result.decision).toBe('fresh');
+    expect(result.reason).toContain('cannot resume');
+  });
+  it('starts fresh at the warning threshold', async () => {
+    const result = await gateWith().gate.evaluate({ cli: 'claude', cliSessionId: 's', budgetSettings,
+      budget: { weightedTokens: 80, rawTokens: 80, startedAtMs: 0 } });
+    expect(result.decision).toBe('fresh');
+  });
+});
+
 describe('collectHandoffCarryOver', () => {
   it('uses the checkpoint text and leads with its earlier changed files', () => {
     const checkpoint = {

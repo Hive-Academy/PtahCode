@@ -2257,6 +2257,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
     });
 
     it('arms no watchdog at all when the caller passes timeout: 0', async () => {
+      setupVscodeConfig({ 'agentBudget.maxDurationMin': 600 });
       const result = await manager.spawn({
         task: 'Unbounded task',
         cli: 'codex',
@@ -2277,6 +2278,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
     // The old ceiling clamped a larger request back down to one hour and said
     // nothing, so a caller asking for four hours got one.
     it('honours a window larger than the default instead of clamping it', async () => {
+      setupVscodeConfig({ 'agentBudget.maxDurationMin': 600 });
       const result = await manager.spawn({
         task: 'Very long task',
         cli: 'codex',
@@ -2292,6 +2294,25 @@ describe('AgentProcessManager - SDK Execution Path', () => {
         'status',
         'running',
       );
+    });
+  });
+
+  describe('agent budget lifetime', () => {
+    it('stops at 90 minutes even when the inactivity watchdog is disabled', async () => {
+      setupVscodeConfig({ 'agentBudget.maxDurationMin': 90 });
+      const result = await manager.spawn({
+        task: 'Long running task', cli: 'codex',
+        workingDirectory: '/workspace/root', timeout: 0,
+      });
+
+      jest.advanceTimersByTime(90 * 60_000 - 1);
+      expect(manager.getStatus(result.agentId)).toHaveProperty('status', 'running');
+      jest.advanceTimersByTime(1);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(manager.getStatus(result.agentId)).toEqual(expect.objectContaining({
+        stopReason: 'duration', status: 'stopped',
+      }));
     });
   });
 

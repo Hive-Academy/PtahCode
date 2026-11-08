@@ -21,6 +21,8 @@ import type {
   CliType,
   LaneRequestContext,
   LaneRequestContextSource,
+  AgentBudgetSettings,
+  LaneStopReason,
 } from '@ptah-extension/shared';
 import type { IOutputChannel } from '@ptah-extension/platform-core';
 import { classifyProviderAccountBinding } from '@ptah-extension/shared/schemas';
@@ -60,6 +62,9 @@ export const HANDOFF_FINAL_TEXT_MAX_CHARS = 2_000;
 const LOG_PREFIX = '[LaneResumeGate]';
 
 export interface LaneResumeGateInput {
+  readonly budget?: { readonly weightedTokens: number; readonly rawTokens: number; readonly startedAtMs: number };
+  readonly budgetSettings?: AgentBudgetSettings;
+  readonly stopReason?: LaneStopReason;
   readonly cli: CliType | 'claude';
   readonly accountReference?: {
     readonly accountBinding?: unknown;
@@ -108,6 +113,16 @@ export class LaneResumeGate {
   ) {}
 
   async evaluate(input: LaneResumeGateInput): Promise<LaneResumeDecision> {
+    const budgetStop = input.stopReason === 'budget' || input.stopReason === 'telemetry-unavailable' || input.stopReason === 'duration';
+    const total = Math.max(input.budget?.weightedTokens ?? 0, input.budget?.rawTokens ?? 0);
+    const nearLimit = input.budgetSettings !== undefined &&
+      total >= input.budgetSettings.stopWeightedTokens * input.budgetSettings.warnRatio;
+    if (budgetStop || nearLimit) {
+      const reason = budgetStop
+        ? `CLI session cannot resume after ${input.stopReason} stop`
+        : `CLI session has reached its budget warning threshold (${Math.round(total)} tokens)`;
+      return { decision: 'fresh', reason, contextTokens: null, source: 'estimate', idleMs: null };
+    }
     // Identity is checked before the cost gate can read context or make a
     // handoff. A fresh-context decision must retain this same account.
     const accountReference = await resolveLaneAccountResume(input);

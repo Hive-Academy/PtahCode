@@ -223,6 +223,20 @@ class NativeContext implements CodexContext {
       processGeneration: this.identity.processGeneration, threadId: this.identity.threadId,
       turnId: 'turn-1', sequence: 100, status: 'completed',
       usage: { inputTokens, outputTokens: 7, cachedInputTokens: 2 },
+      // Native thread/start requires the effective model and the translator
+      // attaches it to every terminal usage snapshot.
+      evidence: {
+        threadId: this.identity.threadId, turnId: 'turn-1', modelId: 'gpt-test',
+        total: { uncachedInputTokens: inputTokens, outputTokens: 7,
+          cacheReadTokens: 2, cacheCreationTokens: 0, reasoningOutputTokens: 0,
+          totalTokens: inputTokens + 9 },
+        last: { uncachedInputTokens: inputTokens, outputTokens: 7,
+          cacheReadTokens: 2, cacheCreationTokens: 0, reasoningOutputTokens: 0,
+          totalTokens: inputTokens + 9 },
+        timestamp: Date.now(), terminalState: 'completed', resetOrStale: false,
+        accepted: true, epoch: 0, cacheSemanticsAmbiguous: false,
+        lastExceedsTotal: false, diagnostics: [],
+      },
     });
     this.wake();
   }

@@ -291,6 +291,15 @@ export interface AgentProcessInfo {
    * Unset for ordinary completion and caller stops.
    */
   stopReason?: LaneStopReason;
+  /** Durable completed-turn counters used by the CLI budget resume gate. */
+  readonly agentBudget?: {
+    readonly weightedTokens: number;
+    readonly rawTokens: number;
+    readonly turnIds: readonly string[];
+    readonly startedAtMs: number;
+    readonly stopWeightedTokens?: number;
+    readonly maxDurationMin?: number;
+  };
   /** Known provider reset time, in Unix milliseconds, for a usage-limit exit. */
   stopResetAt?: number;
   /**
@@ -318,12 +327,11 @@ export interface AgentProcessInfo {
  * (or the durable normalization of the session metadata) stamps it so a
  * resume can continue the CLI session.
  */
-export type LaneStopReason =
-  | 'repeat-call'
-  | 'usage-limit'
-  | 'auth'
-  | 'session-mismatch'
-  | 'host-restart';
+export const LANE_STOP_REASONS = [
+  'repeat-call', 'usage-limit', 'auth', 'session-mismatch', 'host-restart',
+  'budget', 'telemetry-unavailable', 'duration',
+] as const;
+export type LaneStopReason = (typeof LANE_STOP_REASONS)[number];
 
 /**
  * What the resume gate did with a `resumeSessionId` spawn (TASK_2026_597):
@@ -624,6 +632,14 @@ export interface CliSessionReference {
   readonly status: AgentStatus;
   /** Why the host stopped this lane, when known. Persisted with an interrupted restore. */
   readonly stopReason?: LaneStopReason;
+  readonly agentBudget?: {
+    readonly weightedTokens: number;
+    readonly rawTokens: number;
+    readonly turnIds: readonly string[];
+    readonly startedAtMs: number;
+    readonly stopWeightedTokens?: number;
+    readonly maxDurationMin?: number;
+  };
   /** Epoch milliseconds when a usage-limit stop resets, when known. */
   readonly stopResetAt?: number;
   /**
@@ -736,6 +752,9 @@ export interface LaneCompletionSignal {
   readonly cliSessionId?: string;
   /** Why the host stopped the lane. Absent when it ended on its own or the caller stopped it. */
   readonly stopReason?: LaneStopReason;
+  /** Short read hint for work interrupted by an agent budget stop. */
+  readonly progressPointer?: string;
+  readonly budgetLimit?: string;
   /** Tool calls the lane made in its last task, when the host counted them. */
   readonly toolCalls?: number;
   /** Caller messages a host stop discarded from the lane's queue. Absent when none were. */
