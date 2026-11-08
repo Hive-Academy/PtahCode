@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { setCustomProviderEntries } from '@ptah-extension/shared';
+import { CLI_LANE_DEFAULTS_PATCH_SCHEMA, setCustomProviderEntries } from '@ptah-extension/shared';
 import type {
   AuthGetEffectiveRouteResult,
   AuthVerifyDraftConnectionResult,
@@ -1553,6 +1553,69 @@ describe('ProvidersSettingsStateService', () => {
       saved: [],
       unsaved: ['memory.curatorModel'],
       unconfirmed: [],
+    });
+  });
+
+  describe('CLI lane default row read-back', () => {
+    let persisted: { permission?: 'plan' | 'ask' | 'auto-edit' | 'yolo'; network?: 'allow' | 'deny' } | undefined;
+    let afterWrite: (() => void) | undefined;
+
+    beforeEach(() => {
+      persisted = { permission: 'plan', network: 'allow' };
+      afterWrite = undefined;
+      handlers.set('agent:getConfig', async () => success({ cliLaneDefaults: persisted === undefined ? {} : { codex: persisted } }));
+      handlers.set('agent:setConfig', async (params) => {
+        const patch = CLI_LANE_DEFAULTS_PATCH_SCHEMA.parse(
+          params && typeof params === 'object' && 'cliLaneDefaults' in params ? params.cliLaneDefaults : undefined,
+        ).codex;
+        if (patch === null) persisted = undefined;
+        else if (patch) {
+          persisted = { ...persisted };
+          if (patch.permission === null) delete persisted.permission;
+          else if (patch.permission !== undefined) persisted.permission = patch.permission;
+          if (patch.network === null) delete persisted.network;
+          else if (patch.network !== undefined) persisted.network = patch.network;
+          if (!persisted.permission && !persisted.network) persisted = undefined;
+        }
+        afterWrite?.();
+        return success({ success: true });
+      });
+    });
+
+    it('confirms a partial edit with its retained field', async () => {
+      const reviewed = await context();
+      await service.saveSettings({ orchestration: { cliLaneDefaults: { codex: { permission: 'ask' } } } }, reviewed);
+      expect(service.commit().status).toBe('saved');
+      expect(service.orchestration().data?.cliLaneDefaults?.codex).toEqual({ permission: 'ask', network: 'allow' });
+    });
+
+    it('detects an external change to a retained field and displays the persisted row', async () => {
+      const reviewed = await context();
+      afterWrite = () => { persisted = { permission: 'ask', network: 'deny' }; };
+      await service.saveSettings({ orchestration: { cliLaneDefaults: { codex: { permission: 'ask' } } } }, reviewed);
+      expect(service.commit()).toMatchObject({ status: 'failed', saved: [], unsaved: ['agentOrchestration.cliLaneDefaults.codex'] });
+      expect(service.orchestration().data?.cliLaneDefaults?.codex).toEqual({ permission: 'ask', network: 'deny' });
+    });
+
+    it('checks the retained field when undoing a partial edit', async () => {
+      const reviewed = await context();
+      await service.saveSettings({ orchestration: { cliLaneDefaults: { codex: { permission: 'ask' } } } }, reviewed);
+      afterWrite = () => { persisted = { permission: 'plan', network: 'deny' }; };
+      await service.saveSettings({ orchestration: { cliLaneDefaults: { codex: { permission: 'plan' } } } }, reviewed);
+      expect(service.commit()).toMatchObject({ status: 'failed', saved: [], unsaved: ['agentOrchestration.cliLaneDefaults.codex'] });
+      expect(service.orchestration().data?.cliLaneDefaults?.codex).toEqual({ permission: 'plan', network: 'deny' });
+    });
+
+    it('confirms a reset only when read-back has no row', async () => {
+      const reviewed = await context();
+      await service.saveSettings({ orchestration: { cliLaneDefaults: { codex: null } } }, reviewed);
+      expect(service.commit().status).toBe('saved');
+      expect(service.orchestration().data?.cliLaneDefaults?.codex).toBeUndefined();
+      persisted = { permission: 'ask' };
+      afterWrite = () => { persisted = { permission: 'ask' }; };
+      await service.saveSettings({ orchestration: { cliLaneDefaults: { codex: null } } }, reviewed);
+      expect(service.commit()).toMatchObject({ status: 'failed', saved: [], unsaved: ['agentOrchestration.cliLaneDefaults.codex'] });
+      expect(service.orchestration().data?.cliLaneDefaults?.codex).toEqual({ permission: 'ask' });
     });
   });
 

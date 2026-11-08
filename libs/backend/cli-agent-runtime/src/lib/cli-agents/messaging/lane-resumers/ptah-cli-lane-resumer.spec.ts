@@ -30,7 +30,7 @@ const info: AgentProcessInfo = {
   ptahCliId: 'ptah-config',
 };
 
-function harness() {
+function harness(parentLevel?: (id: string | undefined) => 'plan' | undefined) {
   const onSessionResolved = jest.fn();
   const handle: SdkHandle = {
     abort: new AbortController(),
@@ -80,11 +80,18 @@ function harness() {
     registry,
     sessionMetadata,
     logger,
+    parentLevel,
   );
   return { handle, onSessionResolved, manager, registry, sessionMetadata, setAgentId, resumer, spawned };
 }
 
 describe('PtahCliLaneResumer', () => {
+  it('uses the live parent level for a registry resume', async () => {
+    const h = harness((id) => id === 'parent-session' ? 'plan' : undefined);
+    await h.resumer.resume({ ...info, effectivePolicy: { permission: 'yolo', network: 'allow' } }, 'continue');
+    expect(h.registry.spawnAgent).toHaveBeenCalledWith('ptah-config', 'prepared task',
+      expect.objectContaining({ parentLevel: 'plan' }));
+  });
   it('carries the saved permission and network policy and stores it on the new record', async () => {
     const h = harness();
     const policy = { permission: 'plan' as const, network: 'deny' as const };

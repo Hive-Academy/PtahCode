@@ -1557,6 +1557,17 @@ describe('CodexChatAdapter', () => {
     ).rejects.toMatchObject({ code: 'unsupported' });
     await adapter.interruptSession(id);
   });
+  it('exposes only the live native session permission to host-owned parent lookup', async () => {
+    const { adapter, context } = setup();
+    expect(adapter.getPermissionLevel(id)).toBeUndefined();
+    const stream = await adapter.startChatSession({ tabId });
+    for await (const event of stream) void event;
+    expect(adapter.getPermissionLevel(id)).toBe(context.turnPermissionLevel);
+    Object.defineProperty(context, 'turnPermissionLevel', { value: 'plan' });
+    expect(adapter.getPermissionLevel(id)).toBe('plan');
+    await adapter.reset();
+    expect(adapter.getPermissionLevel(id)).toBeUndefined();
+  });
   it('types a closed context as unavailable while preserving a real permission failure', async () => {
     const h = setup();
     const stream = await h.adapter.startChatSession({ tabId });

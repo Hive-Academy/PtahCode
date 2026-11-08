@@ -190,10 +190,10 @@ export class GrokCliAdapter implements CliAdapter {
       },
       roleChannel: this.roleChannel,
       permissionModes: {
-        plan: unverified('Grok ACP policy mapping is unverified.'),
-        ask: unverified('Grok ACP policy mapping is unverified.'),
-        'auto-edit': unverified('Grok ACP policy mapping is unverified.'),
-        yolo: unverified('Grok ACP policy mapping is unverified.'),
+        plan: unverified('Grok exposes no native read-only plan flag.'),
+        ask: unverified('Grok exposes no native per-lane ask flag.'),
+        'auto-edit': unverified('Grok exposes no native scoped edit flag.'),
+        yolo: { state: 'supported', nativeMode: '--always-approve', networkModes: ['allow'] },
       },
       networkModes: {
         allow: { state: 'supported' },

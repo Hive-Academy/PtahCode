@@ -205,9 +205,9 @@ function antigravityArgv(permission: LanePermissionMode | undefined): LaneArgvPo
 }
 
 function opencodeArgv(permission: LanePermissionMode | undefined): LaneArgvPolicyTranslation {
-  return permission === 'plan'
-    ? { addArgs: ['--agent', 'plan'], removeArgs: ['--auto'] }
-    : { addArgs: [], removeArgs: [] };
+  if (permission === 'plan') return { addArgs: ['--agent', 'plan'], removeArgs: ['--auto'] };
+  if (permission === 'yolo') return { addArgs: ['--auto'], removeArgs: ['--agent', 'plan'] };
+  return { addArgs: [], removeArgs: ['--auto'] };
 }
 
 /** Apply a pure argv translation without changing the default argument order. */
