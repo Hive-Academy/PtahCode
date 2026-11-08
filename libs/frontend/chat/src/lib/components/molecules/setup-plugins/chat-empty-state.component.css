@@ -79,8 +79,8 @@ h1 {
 }
 .empty-chat ptah-stat-row[data-layout='row'] {
   width: 100%;
-  grid-template-columns: repeat(3, minmax(0, 192px));
-  column-gap: 32px;
+  grid-template-columns: repeat(2, minmax(0, 224px));
+  column-gap: 48px;
 }
 .empty-chat ptah-stat-cell {
   row-gap: 10px;
@@ -101,19 +101,6 @@ ptah-stat-value {
 }
 ptah-spend-bars {
   flex-shrink: 0;
-}
-.empty-chat__meter {
-  display: inline-block;
-  width: 48px;
-  height: 5px;
-  border-radius: 4px;
-  background: oklch(var(--bc) / 0.16);
-  overflow: hidden;
-}
-.empty-chat__meter i {
-  display: block;
-  height: 100%;
-  background: oklch(var(--p));
 }
 .empty-chat__resume {
   display: flex;
@@ -148,17 +135,14 @@ button:focus-visible {
 }
 @container (max-width: 540px) {
   .empty-chat ptah-stat-row[data-layout='row'] {
-    grid-template-columns: repeat(3, minmax(0, 150px));
-    column-gap: 16px;
+    grid-template-columns: repeat(2, minmax(0, 168px));
+    column-gap: 24px;
   }
   .empty-chat ptah-prompt-launchers {
     gap: 14px 32px;
   }
   .empty-chat__stage {
     padding-inline: 16px;
-  }
-  .empty-chat__meter {
-    display: none;
   }
   ptah-stat-value {
     flex-wrap: wrap;

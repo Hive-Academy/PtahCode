@@ -1,20 +1,18 @@
 import { signal, type WritableSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { sessionContextCue, type LiveModelStats } from '@ptah-extension/chat-ui';
-import { AgentMonitorStore } from '@ptah-extension/chat-streaming';
-import type { TabState } from '@ptah-extension/chat-types';
-import { ModelStateService, PlanLimitsStore } from '@ptah-extension/core';
+import { AuthStateService, PlanLimitsStore } from '@ptah-extension/core';
 import { SessionId, type ChatSessionSummary } from '@ptah-extension/shared';
-import { ChatStore } from '../chat.store';
 import { RecentSessionsStore } from '../session-list/recent-sessions.store';
 import { ChatVitalsStore } from './chat-vitals.store';
 import {
   fact,
+  fakeAuthState,
   fakePlanLimits,
   fakeUsageCache,
   owner,
   planSnapshot,
   summary,
+  type FakeAuthState,
   type FakePlanLimits,
   type FakeUsageCache,
 } from './testing/vitals-fixtures';
@@ -38,8 +36,7 @@ describe('ChatVitalsStore', () => {
   let plan: FakePlanLimits;
   let path: WritableSignal<string | null>;
   let sessionId: WritableSignal<string | null>;
-  let tab: WritableSignal<TabState | null>;
-  let modelDisplay: WritableSignal<string>;
+  let auth: FakeAuthState;
   let recent: {
     confirmed: WritableSignal<boolean>;
     workspacePath: WritableSignal<string | null>;
@@ -54,28 +51,12 @@ describe('ChatVitalsStore', () => {
         ChatVitalsStore,
         { provide: UsageVitalsCache, useValue: usage },
         { provide: PlanLimitsStore, useValue: plan },
-        {
-          provide: ModelStateService,
-          useValue: { currentModelDisplay: modelDisplay },
-        },
+        { provide: AuthStateService, useValue: auth },
         { provide: RecentSessionsStore, useValue: recent },
-        {
-          provide: ChatStore,
-          useValue: {
-            sessionStats: signal(null),
-            liveModelStats: signal(null),
-            compactionCount: signal(0),
-          },
-        },
-        {
-          provide: AgentMonitorStore,
-          useValue: { agentsOwnedBySession: () => [] },
-        },
       ],
     });
     const store = TestBed.inject(ChatVitalsStore);
     store.bind({
-      tab: () => tab(),
       sessionId: () => sessionId(),
       workspacePath: () => path(),
     });
@@ -88,8 +69,7 @@ describe('ChatVitalsStore', () => {
     plan = fakePlanLimits();
     path = signal<string | null>('/work/ptah');
     sessionId = signal<string | null>(null);
-    tab = signal<TabState | null>(null);
-    modelDisplay = signal('');
+    auth = fakeAuthState();
     recent = {
       confirmed: signal(false),
       workspacePath: signal<string | null>(null),
@@ -139,7 +119,6 @@ describe('ChatVitalsStore', () => {
     const store = create();
     expect(() =>
       store.bind({
-        tab: () => null,
         sessionId: () => null,
         workspacePath: () => '/x',
       }),
@@ -188,11 +167,11 @@ describe('ChatVitalsStore', () => {
     expect(store.resume()).toBeNull();
   });
 
-  it("shows the session's own account, else the first known one", () => {
+  it("shows the session's own account, else the main provider's", () => {
     const store = create();
     expect(store.planRing()).toEqual(VITALS_LOADING);
     plan.snapshot.set(
-      planSnapshot([owner('a', 20), owner('b', 70)], {
+      planSnapshot([owner('lane', 90, 'gemini'), owner('a', 20), owner('b', 70)], {
         s1: { ownerKey: 'b', modelScope: null },
       }),
     );
@@ -205,70 +184,27 @@ describe('ChatVitalsStore', () => {
     );
   });
 
-  it('reads the model display name and the context cue', () => {
+  it('waits for the auth status, then never draws another provider', () => {
+    auth.isLoaded.set(false);
+    auth.isLoading.set(true);
     const store = create();
-    expect(store.model()).toBeNull();
-    modelDisplay.set('Claude Sonnet 4');
-    expect(store.model()).toBe('Claude Sonnet 4');
-    expect(store.context()).toEqual(sessionContextCue(null));
+    plan.snapshot.set(planSnapshot([owner('lane', 90, 'gemini')]));
+    expect(store.planRing()).toEqual(VITALS_LOADING);
+
+    auth.isLoaded.set(true);
+    auth.isLoading.set(false);
+    expect(store.planRing()).toEqual(VITALS_EMPTY);
+
+    auth.activeProviderId.set('gemini');
+    expect(store.planRing()).toEqual(
+      vitalsReady({ percent: 90, label: '5-hour', resetsInMs: null }),
+    );
   });
 
-  const liveContext = {
-    model: 'claude-sonnet-4',
-    contextUsed: 130_000,
-    contextWindow: 200_000,
-    contextPercent: 65,
-    contextCapacity: {
-      tokens: 200_000,
-      source: 'sdk-native',
-      providerId: null,
-      model: 'claude-sonnet-4',
-    },
-  } satisfies LiveModelStats;
-
-  it('exposes 65% for the empty-state context ring (F2)', () => {
+  it('draws nothing when the auth status could not be read', () => {
+    auth.isLoaded.set(false);
     const store = create();
-    tab.set({ liveModelStats: liveContext } as TabState);
-    expect(store.context()).toMatchObject({
-      known: true, percent: 65, label: '65%', usedTokens: 130_000,
-    });
-  });
-
-  it('exposes 13% for the sdk-native million-token window (F3)', () => {
-    const store = create();
-    tab.set({ liveModelStats: {
-      ...liveContext,
-      contextWindow: 1_000_000,
-      contextPercent: 13,
-      contextCapacity: { ...liveContext.contextCapacity, tokens: 1_000_000 },
-    } } as TabState);
-    expect(store.context()).toMatchObject({
-      known: true, percent: 13, label: '13%', usedTokens: 130_000,
-    });
-  });
-
-  it('exposes 105% before the empty-state ring clamps its width to 100% (F5)', () => {
-    const store = create();
-    tab.set({ liveModelStats: {
-      ...liveContext, contextUsed: 210_000, contextPercent: 105,
-    } } as TabState);
-    expect(store.context()).toMatchObject({
-      known: true, percent: 105, label: '105%', usedTokens: 210_000,
-    });
-  });
-
-  it.each([
-    ['unknown capacity', { ...liveContext, contextWindow: 0, contextPercent: 0,
-      contextCapacity: { ...liveContext.contextCapacity, tokens: null, source: 'unknown' as const } }],
-    ['provider catalog without provider id', { ...liveContext,
-      contextCapacity: { ...liveContext.contextCapacity, source: 'provider-catalog' as const } }],
-    ['capacity for a different model', { ...liveContext,
-      contextCapacity: { ...liveContext.contextCapacity, model: 'other-model' } }],
-  ])('shows a dash instead of 0%% for %s (F6)', (_case, live) => {
-    const store = create();
-    tab.set({ liveModelStats: live } as TabState);
-    expect(store.context()).toMatchObject({
-      known: false, percent: null, label: '—', usedTokens: null,
-    });
+    plan.snapshot.set(planSnapshot([owner('a', 20)]));
+    expect(store.planRing()).toEqual(VITALS_EMPTY);
   });
 });

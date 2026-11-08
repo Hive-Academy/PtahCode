@@ -79,8 +79,6 @@ describe('empty chat', () => {
               provide: ChatVitalsStore,
               useValue: {
                 bind,
-                context: signal(null),
-                model: signal('Test model'),
                 planRing: signal({ status: 'empty' }),
                 spend7: signal({ status: 'empty' }),
                 resume,
@@ -181,14 +179,16 @@ describe('empty chat', () => {
     expect(retry).toHaveBeenCalledTimes(1);
   });
 
-  it('renders unknown context honestly, zero spend and no resume', () => {
+  it('renders only Plan and Spend, zero spend and no resume', () => {
     const fixture = TestBed.createComponent(ChatEmptyStateViewComponent);
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Orchestrator ready');
     expect(fixture.nativeElement.textContent).toContain('$0.00');
-    const contextValue = fixture.debugElement.query(By.css('ptah-stat-value'));
-    expect(contextValue.componentInstance.text()).toBe('\u2014');
-    expect(fixture.nativeElement.textContent).not.toContain('null%');
+    const labels = fixture.debugElement
+      .queryAll(By.css('ptah-stat-cell'))
+      .map((cell) => cell.componentInstance.label());
+    expect(labels).toEqual(['Plan', 'Spend 7d']);
+    expect(fixture.nativeElement.textContent).not.toContain('Context');
     expect(
       fixture.debugElement.query(By.css('.empty-chat__resume')),
     ).toBeNull();

@@ -23,7 +23,6 @@ import {
 import { AppStateManager, VSCodeService } from '@ptah-extension/core';
 import {
   CircleDollarSign,
-  Cpu,
   Gauge,
   History,
   LucideAngularModule,
@@ -62,21 +61,6 @@ import {
         />
         <h1>Orchestrator ready</h1>
         <ptah-stat-row density="compact">
-          <ptah-stat-cell
-            label="Context"
-            [icon]="contextIcon"
-            [state]="contextPercent() === null ? 'empty' : 'ready'"
-            [caption]="contextCaption()"
-          >
-            <ptah-stat-value
-              size="md"
-              [text]="contextPercent() === null ? '—' : contextPercent() + '%'"
-            >
-              <span class="empty-chat__meter" aria-hidden="true"
-                ><i [style.width.%]="contextPercent() ?? 0"></i
-              ></span>
-            </ptah-stat-value>
-          </ptah-stat-cell>
           <ptah-stat-cell
             label="Plan"
             [icon]="planIcon"
@@ -160,7 +144,6 @@ export class ChatEmptyStateViewComponent {
   readonly showReadiness = input(false);
   readonly promptSelected = output<string>();
   readonly resumeRequested = output<string>();
-  protected readonly contextIcon = Cpu;
   protected readonly planIcon = Gauge;
   protected readonly spendIcon = CircleDollarSign;
   protected readonly historyIcon = History;
@@ -171,19 +154,6 @@ export class ChatEmptyStateViewComponent {
       ? null
       : (this.tabs.findTabByIdAcrossWorkspaces(id)?.tab ?? null);
   });
-  protected readonly contextPercent = computed(() => {
-    const context = this.vitals.context();
-    const percent = context?.percent;
-    return context?.known &&
-      percent !== null &&
-      percent !== undefined &&
-      Number.isFinite(percent)
-      ? Math.round(Math.max(0, Math.min(100, percent)))
-      : null;
-  });
-  protected readonly contextCaption = computed(
-    () => this.vitals.model() ?? 'Model unavailable',
-  );
   protected readonly plan = computed(() => {
     const load = this.vitals.planRing();
     return load.status === 'ready' ? load.value : null;
@@ -231,7 +201,6 @@ export class ChatEmptyStateViewComponent {
 
   constructor() {
     this.vitals.bind({
-      tab: this.tab,
       sessionId: () => this.tab()?.claudeSessionId ?? null,
       workspacePath: () => {
         const id = this.tabId();

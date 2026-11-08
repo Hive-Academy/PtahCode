@@ -7,6 +7,7 @@ import {
   type Signal,
 } from '@angular/core';
 import {
+  AuthStateService,
   PLAN_LIMITS_CLOCK_TICK_MS,
   PlanLimitsStore,
 } from '@ptah-extension/core';
@@ -179,18 +180,38 @@ export function toActivityVitals(
 }
 
 /**
- * The plan ring as a load: `loading` until the first plan-limits snapshot,
- * `empty` when it names no owner or window with a known use (the ring is
- * hidden). A failed first read installs an empty snapshot, so it ends as
+ * The provider that serves the main agent: `undefined` while the first auth
+ * status read is in flight, `null` when no read succeeded.
+ */
+export type MainProviderId = string | null | undefined;
+
+/**
+ * The main agent's provider (`AuthStateService.activeProviderId`), the only
+ * provider whose plan an empty screen draws. Call in an injection context.
+ */
+export function injectMainProviderId(): Signal<MainProviderId> {
+  const auth = inject(AuthStateService);
+  return computed(() => {
+    if (auth.isLoaded()) return auth.activeProviderId();
+    return auth.isLoading() ? undefined : null;
+  });
+}
+
+/**
+ * The plan ring as a load: `loading` until the first plan-limits snapshot and
+ * the main provider are known, then only that provider's plan (see
+ * `selectPlanRing`); `empty` when that owner is absent or has no window with
+ * a known use (the ring is hidden). A failed first read installs an empty snapshot, so it ends as
  * `empty` too.
  */
 export function toPlanRingLoad(
   snapshot: PlanLimitsSnapshot | null,
   sessionId: string | null,
+  mainProviderId: MainProviderId,
   now: number,
 ): VitalsLoad<PlanRingData> {
-  if (snapshot === null) return VITALS_LOADING;
-  const ring = selectPlanRing(snapshot, sessionId, now);
+  if (snapshot === null || mainProviderId === undefined) return VITALS_LOADING;
+  const ring = selectPlanRing(snapshot, sessionId, mainProviderId, now);
   return ring === null ? VITALS_EMPTY : vitalsReady(ring);
 }
 
