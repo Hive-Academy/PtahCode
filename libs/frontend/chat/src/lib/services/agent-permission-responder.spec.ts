@@ -3,19 +3,21 @@ import {
   AgentMonitorStore,
   PermissionHandlerService,
 } from '@ptah-extension/chat-streaming';
-import { VSCodeService } from '@ptah-extension/core';
-import { MESSAGE_TYPES } from '@ptah-extension/shared';
+import { ClaudeRpcService } from '@ptah-extension/core';
 import type { PermissionRequest } from '@ptah-extension/shared';
 import { AgentPermissionResponder } from './agent-permission-responder';
+import { ActionBannerService } from './action-banner.service';
 
 describe('AgentPermissionResponder', () => {
+  const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
   const queue = [{ requestId: 'first' }, { requestId: 'second' }];
-  const postMessage = jest.fn<void, [unknown]>();
+  const call = jest.fn().mockResolvedValue({ success: true, data: { success: true } });
   const clearPermission = jest.fn<void, [string, string]>((_, requestId) => {
     const index = queue.findIndex((entry) => entry.requestId === requestId);
     if (index >= 0) queue.splice(index, 1);
   });
   const handlePermissionResponse = jest.fn<boolean, [unknown, string?]>(() => true);
+  const showError = jest.fn();
   let responder: AgentPermissionResponder;
 
   beforeEach(() => {
@@ -28,9 +30,11 @@ describe('AgentPermissionResponder', () => {
     jest.clearAllMocks();
     TestBed.configureTestingModule({
       providers: [
-        { provide: VSCodeService, useValue: { postMessage } },
+        { provide: ClaudeRpcService, useValue: { call } },
+        { provide: ActionBannerService, useValue: { showError } },
         { provide: AgentMonitorStore, useValue: {
           clearPermission,
+          permissionBelongsToAgent: () => true,
           pendingPermissions: () => [{ agentId: 'agent', permissionQueue: queue }],
         } },
         {
@@ -42,40 +46,87 @@ describe('AgentPermissionResponder', () => {
     responder = TestBed.inject(AgentPermissionResponder);
   });
 
-  it('posts the existing protocol and clears only the chosen request', () => {
+  it('clears only after a positive RPC acknowledgement', async () => {
     expect(responder.respondLane('agent', 'first', 'deny')).toBe(true);
-    expect(postMessage).toHaveBeenCalledWith({
-      type: MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_RESPONSE,
-      payload: { requestId: 'first', decision: 'deny', reason: 'User denied' },
-    });
+    expect(call).toHaveBeenCalledWith('agent:permissionResponse',
+      { requestId: 'first', decision: 'deny', reason: 'User denied' });
+    expect(clearPermission).not.toHaveBeenCalled();
+    await settle();
     expect(clearPermission).toHaveBeenCalledWith('agent', 'first');
     expect(queue).toEqual([{ requestId: 'second' }]);
   });
 
-  it('does not clear a request when posting throws', () => {
-    postMessage.mockImplementationOnce(() => {
-      throw new Error('post failed');
-    });
-    expect(() => responder.respondLane('agent', 'first', 'allow')).toThrow(
-      'post failed',
-    );
+  it('keeps a request when the RPC rejects it', async () => {
+    call.mockResolvedValueOnce({ success: true, data: { success: false } });
+    expect(responder.respondLane('agent', 'first', 'allow')).toBe(true);
+    await settle();
     expect(clearPermission).not.toHaveBeenCalled();
     expect(queue).toHaveLength(2);
+    expect(showError).toHaveBeenCalledWith('This permission request is no longer pending. Refresh the lane to see its current state.');
+    expect(responder.respondLane('agent', 'first', 'deny')).toBe(true);
   });
 
-  it('posts and clears a lane request only once across repeated answers', () => {
+  it('shows a retryable error when the answer cannot be delivered', async () => {
+    call.mockRejectedValueOnce(new Error('transport unavailable'));
+    call.mockResolvedValueOnce({ success: true, data: [{ requestId: 'first' }] });
+    expect(responder.respondLane('agent', 'first', 'allow')).toBe(true);
+    await settle();
+    expect(clearPermission).not.toHaveBeenCalled();
+    await settle();
+    expect(call).toHaveBeenCalledWith('agent:pendingPermissions', undefined);
+    expect(showError).toHaveBeenCalledWith('The permission is still pending. Retry your answer.');
+  });
+
+  it('reconciles a lost acknowledgement before clearing the card', async () => {
+    call.mockRejectedValueOnce(new Error('ack lost'));
+    call.mockResolvedValueOnce({ success: true, data: [] });
+    expect(responder.respondLane('agent', 'first', 'allow')).toBe(true);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(clearPermission).toHaveBeenCalledWith('agent', 'first');
+    expect(showError).not.toHaveBeenCalled();
+  });
+
+  it('blocks retry while the pending snapshot cannot be read', async () => {
+    call.mockRejectedValueOnce(new Error('ack lost'));
+    call.mockRejectedValueOnce(new Error('replay unavailable'));
+    expect(responder.respondLane('agent', 'first', 'allow')).toBe(true);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(responder.respondLane('agent', 'first', 'deny')).toBe(false);
+    expect(call).toHaveBeenCalledTimes(3); // answer, failed snapshot, retry snapshot
+    expect(call).not.toHaveBeenCalledWith('agent:permissionResponse',
+      expect.objectContaining({ decision: 'deny' }));
+  });
+
+  it('unlocks a hung acknowledgement after bounded reconciliation', async () => {
+    jest.useFakeTimers();
+    try {
+      call.mockImplementationOnce(() => new Promise(() => undefined));
+      call.mockResolvedValueOnce({ success: true, data: [{ requestId: 'first' }] });
+      expect(responder.respondLane('agent', 'first', 'allow')).toBe(true);
+      expect(responder.respondLane('agent', 'first', 'deny')).toBe(false);
+      await jest.advanceTimersByTimeAsync(5_000);
+      expect(call).toHaveBeenCalledWith('agent:pendingPermissions', undefined);
+      await jest.advanceTimersByTimeAsync(0);
+      expect(responder.respondLane('agent', 'first', 'deny')).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('submits a lane request only once while the RPC is pending', async () => {
     expect(responder.respondLane('agent', 'first', 'allow')).toBe(true);
     expect(responder.respondLane('agent', 'first', 'deny', 'User denied')).toBe(
       false,
     );
-    expect(postMessage).toHaveBeenCalledTimes(1);
+    expect(call).toHaveBeenCalledTimes(1);
+    await settle();
     expect(clearPermission).toHaveBeenCalledTimes(1);
   });
 
   it('refuses a lane request withdrawn before an answer', () => {
     queue.splice(0, queue.length);
     expect(responder.respondLane('agent', 'first', 'allow')).toBe(false);
-    expect(postMessage).not.toHaveBeenCalled();
+    expect(call).not.toHaveBeenCalled();
   });
 
   it('forwards the deciding tab for session permissions', () => {

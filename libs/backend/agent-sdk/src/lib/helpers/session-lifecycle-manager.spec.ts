@@ -123,6 +123,7 @@ function createFakeQuery(messages: SDKMessage[] = []): FakeQueryHandle {
 
 function createMockPermissionHandler(): jest.Mocked<ISdkPermissionHandler> {
   return {
+    getPendingCliAgentPermissions: jest.fn().mockReturnValue([]),
     handleResponse: jest.fn(),
     handleQuestionResponse: jest.fn(),
     getPermissionLevel: jest.fn().mockReturnValue('ask'),

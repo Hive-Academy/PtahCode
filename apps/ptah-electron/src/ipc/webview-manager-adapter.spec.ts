@@ -20,6 +20,12 @@ import type { Logger } from '@ptah-extension/vscode-core';
 import { ElectronWebviewManagerAdapter } from './webview-manager-adapter';
 
 describe('Electron attention ingress', () => {
+  it('rejects an undelivered Copilot permission push', async () => {
+    const adapter = makeAdapter({ hasLiveRenderer: () => false, sendToRenderer: () => false });
+    await expect(adapter.broadcastMessage(MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_REQUEST, {}))
+      .rejects.toThrow('Permission window unavailable');
+  });
+
   it('observes before zero-view delivery and once for broadcast', async () => {
     const sendToRenderer = jest.fn(() => false);
     const adapter = makeAdapter({ hasLiveRenderer: () => false, sendToRenderer });
@@ -220,6 +226,15 @@ describe('ElectronWebviewManagerAdapter — through createDashboardBroadcast (TA
       surfaces: 1,
       reason: '1 of 1 attached surface(s) did not accept the spec',
     });
+  });
+
+  it('rejects a permission broadcast when the window disappears', async () => {
+    const adapter = makeAdapter({
+      hasLiveRenderer: jest.fn(() => false),
+      sendToRenderer: jest.fn(() => false),
+    });
+    await expect(adapter.broadcastMessage(MESSAGE_TYPES.PERMISSION_REQUEST, PAYLOAD))
+      .rejects.toThrow('Permission window unavailable');
   });
 
   it('type-checks as a DashboardSurfaceHost (Req 11.4)', () => {

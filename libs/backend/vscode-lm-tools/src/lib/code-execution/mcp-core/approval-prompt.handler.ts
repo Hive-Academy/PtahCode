@@ -6,7 +6,7 @@
  */
 
 import type { Logger, WebviewManager } from '@ptah-extension/vscode-core';
-import { MESSAGE_TYPES, type PermissionResponse } from '@ptah-extension/shared';
+import { MESSAGE_TYPES, TabId, type PermissionResponse } from '@ptah-extension/shared';
 import type { PermissionPromptService } from '../../permission/permission-prompt.service';
 import type { MCPRequest, MCPResponse, ApprovalPromptParams } from '../types';
 
@@ -60,7 +60,38 @@ export async function handleApprovalPrompt(
       },
     };
   }
-  const permissionRequest = permissionPromptService.createRequest(params);
+  // A card needs a verified owner. The HTTP transport stamps
+  // `_callerSessionId` from the URL and `_callerBinding` from the credential;
+  // a request body cannot set either. Producer coverage (intentional):
+  //
+  // | Producer (binding kind)                     | Result                  |
+  // | ------------------------------------------- | ----------------------- |
+  // | Claude interactive chat (`session`, UUID)   | Card on the owner tab   |
+  // | Codex chat (`session`, UUID tab id)         | Card on the owner tab   |
+  // | CLI lane (`agent`)                          | Deny, no card (1)       |
+  // | External client (`workspace` / `home`)      | Deny, no card (2)       |
+  // | Internal query (`internal-query`)           | Deny, no card (3)       |
+  // | In-process / stdio (no binding)             | Deny, no card (2)       |
+  // | Session URL that differs from the token     | Deny, no card           |
+  //
+  // (1) Lane approvals use the agent monitor surface (Copilot bridge, SDK
+  //     lane route), not this tool. (2) No Ptah chat tab owns the call, so
+  //     no surface can verify who answers it. (3) Internal queries do not
+  //     prompt a user. Each denial is immediate, so the caller never waits
+  //     for the deadline.
+  const ownerId = request._callerSessionId?.trim();
+  if (!ownerId || !TabId.safeParse(ownerId) ||
+      request._callerBinding?.kind !== 'session' ||
+      request._callerBinding.sessionId !== ownerId) {
+    logger.info('approval_prompt denied: no verified session owner', {
+      tool: params.tool_name,
+      bindingKind: request._callerBinding?.kind ?? 'none',
+    });
+    return formatApprovalResponse(request, params, {
+      id: '', decision: 'deny', reason: 'Permission request has no verified session owner',
+    }, logger);
+  }
+  const permissionRequest = permissionPromptService.createRequest(params, ownerId);
   const responsePromise = new Promise<PermissionResponse>((resolve) => {
     permissionPromptService.setPendingResolver(
       permissionRequest.id,
@@ -70,11 +101,20 @@ export async function handleApprovalPrompt(
       permissionRequest,
     );
   });
-  await webviewManager.sendMessage(
-    'ptah.main',
-    MESSAGE_TYPES.PERMISSION_REQUEST,
-    permissionRequest,
-  );
+  try {
+    const delivered = await webviewManager.sendMessage(
+      'ptah.main', MESSAGE_TYPES.PERMISSION_REQUEST, permissionRequest,
+    );
+    if (delivered === false) {
+      permissionPromptService.resolveRequest({
+        id: permissionRequest.id, decision: 'deny', reason: 'Permission window unavailable',
+      });
+    }
+  } catch {
+    permissionPromptService.resolveRequest({
+      id: permissionRequest.id, decision: 'deny', reason: 'Permission window unavailable',
+    });
+  }
   const response = await responsePromise;
   return formatApprovalResponse(request, params, response, logger);
 }

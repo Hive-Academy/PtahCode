@@ -115,16 +115,18 @@ import {
           <lucide-angular [img]="CheckIcon" class="w-3 h-3" />
           Allow
         </button>
+        @if (request().sessionId && request().canAlwaysAllow !== false) {
         <button
           class="btn btn-xs btn-info gap-0.5 px-2"
           (click)="respond('always_allow')"
           type="button"
-          aria-label="Always allow this type of request"
+          aria-label="Always allow this tool in this session"
           [disabled]="isDenyPopoverOpen()"
         >
           <lucide-angular [img]="CheckCircleIcon" class="w-3 h-3" />
-          Always
+          Always in session
         </button>
+        }
         <button
           class="btn btn-xs btn-error btn-outline gap-0.5 px-2"
           (click)="respond('deny')"

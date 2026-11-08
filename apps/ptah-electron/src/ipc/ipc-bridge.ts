@@ -19,9 +19,11 @@
  */
 
 import { ipcMain, type IpcMainEvent } from 'electron';
+import { z } from 'zod';
 import type { DependencyContainer } from 'tsyringe';
 import type { CodexChatHostPorts } from '@ptah-extension/rpc-handlers';
 import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
+import type { PermissionPromptService } from '@ptah-extension/vscode-lm-tools';
 import type { RpcHandler } from '@ptah-extension/vscode-core';
 import {
   TOKENS,
@@ -33,6 +35,7 @@ import {
   MESSAGE_TYPES,
   type ISdkPermissionHandler,
 } from '@ptah-extension/shared';
+import { PermissionResponseSchema } from '@ptah-extension/shared/schemas';
 import { isTrustedIpcSender } from './ipc-sender-policy';
 import {
   createReplayRecorderIfEnabled,
@@ -43,6 +46,25 @@ import {
   takeStreamEventBatch,
   type QueuedStreamEvent,
 } from './stream-event-batch';
+
+/**
+ * Renderer permission answers cross a process boundary, so they are parsed,
+ * not cast. Unknown fields are stripped; a missing or empty id, an unknown
+ * decision or a malformed `reason`/`modifiedInput` is refused before any
+ * Codex, MCP or SDK resolver sees it.
+ */
+const RendererPermissionResponseSchema = PermissionResponseSchema.extend({
+  id: PermissionResponseSchema.shape.id.min(1),
+});
+const RendererQuestionResponseSchema = z.object({
+  id: z.string().min(1),
+  answers: z.record(z.string(), z.string()),
+});
+const RendererAgentPermissionResponseSchema = z.object({
+  requestId: z.string().min(1),
+  decision: z.enum(['allow', 'deny']),
+  reason: z.string().optional(),
+});
 
 const STREAM_FLUSH_INTERVAL_MS = 16;
 const AGENT_OUTPUT_FLUSH_INTERVAL_MS = 64;
@@ -648,28 +670,19 @@ export class IpcBridge {
 
     switch (type) {
       case MESSAGE_TYPES.SDK_PERMISSION_RESPONSE: {
-        const response = (msg['response'] || msg['payload']) as
-          | {
-              id: string;
-              decision: string;
-              reason?: string;
-              modifiedInput?: Record<string, unknown>;
-            }
-          | undefined;
-        if (!response?.id) {
+        const raw = msg['response'] ?? msg['payload'];
+        if (raw === undefined || raw === null) {
           console.warn('[IpcBridge] SDK permission response missing payload');
           return;
         }
-        const { decision } = response;
-        if (
-          decision !== 'allow' &&
-          decision !== 'always_allow' &&
-          decision !== 'deny_with_message' &&
-          decision !== 'deny'
-        ) {
-          console.warn('[IpcBridge] SDK permission response has invalid decision');
+        const parsed = RendererPermissionResponseSchema.safeParse(raw);
+        if (!parsed.success) {
+          console.warn('[IpcBridge] SDK permission response failed validation', {
+            issues: parsed.error.issues.map((issue) => issue.path.join('.') || '(root)'),
+          });
           return;
         }
+        const response = parsed.data;
         try {
           // Codex host ports first (null when native Codex is not bound).
           const codexPorts = this.container.isRegistered(
@@ -683,20 +696,21 @@ export class IpcBridge {
               )
             : null;
           if (
-            codexPorts?.handlePermissionResponse({ ...response, decision }) === true
+            codexPorts?.handlePermissionResponse(response) === true
           ) {
             return;
+          }
+          if (this.container.isRegistered(TOKENS.PERMISSION_PROMPT_SERVICE, true)) {
+            const promptService = this.container.resolve<PermissionPromptService>(
+              TOKENS.PERMISSION_PROMPT_SERVICE,
+            );
+            if (promptService.resolveRequest(response)) return;
           }
           if (this.container.isRegistered(SDK_PERMISSION_HANDLER)) {
             const handler = this.container.resolve<ISdkPermissionHandler>(
               SDK_PERMISSION_HANDLER,
             );
-            handler.handleResponse(response.id, {
-              id: response.id,
-              decision,
-              reason: response.reason,
-              modifiedInput: response.modifiedInput,
-            });
+            handler.handleResponse(response.id, response);
             console.log('[IpcBridge] SDK permission response processed', {
               id: response.id,
               decision: response.decision,
@@ -712,12 +726,12 @@ export class IpcBridge {
       }
 
       case MESSAGE_TYPES.ASK_USER_QUESTION_RESPONSE: {
-        const payload = msg['payload'] as
-          { id: string; answers: Record<string, string> } | undefined;
-        if (!payload) {
-          console.warn('[IpcBridge] AskUserQuestion response missing payload');
+        const parsed = RendererQuestionResponseSchema.safeParse(msg['payload']);
+        if (!parsed.success) {
+          console.warn('[IpcBridge] AskUserQuestion response failed validation');
           return;
         }
+        const payload = parsed.data;
         try {
           if (this.container.isRegistered(SDK_PERMISSION_HANDLER)) {
             const handler = this.container.resolve<ISdkPermissionHandler>(
@@ -744,15 +758,14 @@ export class IpcBridge {
         // CLI-agent lanes (Ptah CLI, Copilot) answer through the same RPC the
         // VS Code host forwards this message to; without this case the answer
         // was dropped while the renderer cleared the prompt locally.
-        const payload = msg['payload'] as
-          | { requestId?: string; decision?: string; reason?: string }
-          | undefined;
-        if (!payload?.requestId) {
+        const parsed = RendererAgentPermissionResponseSchema.safeParse(msg['payload']);
+        if (!parsed.success) {
           console.warn(
-            '[IpcBridge] Agent permission response missing requestId',
+            '[IpcBridge] Agent permission response failed validation',
           );
           return;
         }
+        const payload = parsed.data;
         try {
           const response = await this.rpcHandler.handleMessage({
             method: 'agent:permissionResponse',

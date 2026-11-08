@@ -30,6 +30,8 @@ import {
   SDK_NAMED_ACCOUNT_PERSISTENCE,
   SDK_SESSION_IMPORT_BINDING_LOOKUP,
   SessionStatsReaderService,
+  SdkPermissionHandler,
+  type SdkCliAgentOwnerLookup,
 } from '@ptah-extension/agent-sdk';
 import {
   registerUsageAnalytics,
@@ -76,8 +78,10 @@ import {
   CodexAppServerLaneAdapter,
   ChildWorktreeProvisioner,
   LaneCompletionNotifier,
+  AgentProcessManager,
   registerCliAgentRuntimeServices,
 } from '@ptah-extension/cli-agent-runtime';
+import { registerElectronSdkLaneOwnerLookup } from './phase-2-libraries';
 import { registerElectronCodexLaneFactory } from './codex-lane-composition';
 import {
   SESSION_ORGANIZATION_TOKENS,
@@ -1340,6 +1344,7 @@ describe('Electron DI — session organization recorder binding (TASK_2026_580 R
     captureDetection = false,
     isPackaged = false,
     hostPlatform = { platform: 'linux', arch: 'x64' },
+    realPermissionOwner = false,
   ) {
     const c = buildMinimalContainer();
     const logger = c.resolve<Logger>(TOKENS.LOGGER);
@@ -1362,6 +1367,16 @@ describe('Electron DI — session organization recorder binding (TASK_2026_580 R
         env: process.env, platform: hostPlatform,
       });
       registerCliAgentRuntimeServices(c, logger);
+      if (realPermissionOwner) registerElectronSdkLaneOwnerLookup(c);
+      if (realPermissionOwner) {
+        c.register(TOKENS.SUBAGENT_REGISTRY_SERVICE, { useValue: {} });
+        c.register(TOKENS.WEBVIEW_MANAGER, { useValue: {} });
+        c.register(CLI_AGENT_RUNTIME_TOKENS.LANE_OWNER_RESOLVER, { useValue: {} });
+        c.register(AUTH_PROVIDERS_TOKENS.PLAN_LIMIT_LEDGER, { useValue: {} });
+        c.register<object>(LaneCompletionNotifier, {
+          useValue: { replayOutbox: jest.fn(async () => undefined) },
+        });
+      }
       for (const token of [
         TOKENS.AGENT_PROCESS_MANAGER,
         TOKENS.CLI_DETECTION_SERVICE,
@@ -1373,10 +1388,12 @@ describe('Electron DI — session organization recorder binding (TASK_2026_580 R
       ] as InjectionToken[]) {
         // A captured detector is the real one, resolved below.
         if (captureDetection && token === TOKENS.CLI_DETECTION_SERVICE) continue;
+        if (realPermissionOwner && token === TOKENS.AGENT_PROCESS_MANAGER) continue;
+        if (realPermissionOwner && token === LaneCompletionNotifier) continue;
         c.register(token, { useValue: {} });
       }
       // The constructor subscribes to prompt lifecycle events.
-      c.register(SDK_TOKENS.SDK_PERMISSION_HANDLER, {
+      if (!realPermissionOwner) c.register(SDK_TOKENS.SDK_PERMISSION_HANDLER, {
         useValue: { onPromptLifecycle: () => () => undefined },
       });
       // `AgentSpawnEnvironment` (not exported) is built for real; these two of
@@ -1517,6 +1534,26 @@ describe('Electron DI — session organization recorder binding (TASK_2026_580 R
     const { c } = composePhase2(true);
     const token = CLI_AGENT_RUNTIME_TOKENS.LANE_INSTRUCTION_FILE_STORE;
     expect(c.resolve(token)).toBe(c.resolve(token));
+  });
+
+  it('binds the production SDK lane owner port to the resolved process manager', () => {
+    const { c } = composePhase2(true, false, false, { platform: 'linux', arch: 'x64' }, true);
+    const owner = c.resolve<SdkCliAgentOwnerLookup>(SDK_TOKENS.SDK_CLI_AGENT_OWNER_LOOKUP);
+    const handler = c.resolve<SdkPermissionHandler>(SDK_TOKENS.SDK_PERMISSION_HANDLER);
+    expect(Reflect.get(handler, 'agentOwnerLookup')).toBe(owner);
+    expect(owner.findAgentInfo('lane-1')).toBeUndefined();
+
+    const manager = c.resolve<AgentProcessManager>(TOKENS.AGENT_PROCESS_MANAGER);
+    const parentSessionId = '11111111-2222-4333-8444-555555555555';
+    manager.restoreAgents([{
+      cliSessionId: 'cli-session-1',
+      cli: 'codex',
+      agentId: 'lane-1' as Parameters<AgentProcessManager['restoreAgents']>[0][number]['agentId'],
+      task: 'Review changes',
+      startedAt: '2026-11-07T10:00:00.000Z',
+      status: 'stopped',
+    }], '/workspace/root', parentSessionId);
+    expect(owner.findAgentInfo('lane-1')).toMatchObject({ parentSessionId, status: 'stopped' });
   });
 
   it('registers the lane message services once in phase 2', () => {

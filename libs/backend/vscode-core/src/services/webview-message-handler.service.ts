@@ -21,7 +21,7 @@ import type { Logger } from '../logging';
 import type { RpcHandler } from '../messaging';
 
 interface PermissionPromptServiceLike {
-  resolveRequest(payload: unknown): void;
+  resolveRequest(payload: unknown): boolean;
 }
 
 const SDK_PERMISSION_HANDLER_TOKEN = Symbol.for('SdkPermissionHandler');
@@ -456,6 +456,13 @@ export class WebviewMessageHandlerService {
           }
         | undefined;
       const requestId = String(payload?.id ?? '');
+
+      // Older webview cards send the SDK message type for MCP approvals.
+      // Consume a matching MCP request before handing the ID to the SDK handler.
+      if (payload && this.permissionPromptService?.resolveRequest(payload)) {
+        this.logger.info(`[${webviewId}] MCP Permission response processed`, { requestId });
+        return;
+      }
 
       if (this.runtimeContainer.isRegistered(SDK_PERMISSION_HANDLER_TOKEN)) {
         const permissionHandler =

@@ -38,7 +38,7 @@ interface AskUserQuestionPayload {
   tabId?: string;
 }
 
-function makeHandler(hostAttention?: { resolve(key: string, generation: number): void }, budgetMonitor?: ConstructorParameters<typeof SdkPermissionHandler>[5], targetToolCallId?: string): {
+function makeHandler(hostAttention?: { resolve(key: string, generation: number): void }, agentProcessManager?: { findAgentInfo(agentId: string): { parentSessionId?: string; startedAt?: string; status?: string } | undefined } | null, budgetMonitor?: ConstructorParameters<typeof SdkPermissionHandler>[6], targetToolCallId?: string): {
   handler: SdkPermissionHandler;
   logger: MockLogger;
   sent: SentMessage[];
@@ -78,6 +78,13 @@ function makeHandler(hostAttention?: { resolve(key: string, generation: number):
     >[2],
     undefined,
     hostAttention,
+    agentProcessManager === null ? undefined : (agentProcessManager ?? {
+      findAgentInfo: () => ({
+        parentSessionId: '11111111-2222-4333-8444-555555555555',
+        startedAt: '2026-11-07T10:00:00.000Z',
+        status: 'running',
+      }),
+    }),
     budgetMonitor,
   );
 
@@ -92,7 +99,7 @@ describe('SDK SendMessage budget gate', () => {
     [1000, true, 'deny'],
   ] as const)('routes %s tokens (stopped=%s) as %s', async (contextTokens, stopped, behavior) => {
     const monitor = { getAgentBudgetState: jest.fn(() => ({ contextTokens, stopped, stopState: stopped ? 'stopped' as const : 'none' as const, handoffTokens: 1000, warningRatio: 0.85 })) };
-    const { handler, logger } = makeHandler(undefined, monitor);
+    const { handler, logger } = makeHandler(undefined, undefined, monitor);
     handler.setPermissionLevel('yolo');
     const result = await handler.createCallback(session)('SendMessage', { to: 'agent-1', message: 'private payload' }, { signal: new AbortController().signal, toolUseID: 'send-1', requestId: 'send-1' });
     expect(result?.behavior).toBe(behavior);
@@ -103,14 +110,14 @@ describe('SDK SendMessage budget gate', () => {
   });
 
   it('allows an unknown target', async () => {
-    const { handler } = makeHandler(undefined, { getAgentBudgetState: () => undefined });
+    const { handler } = makeHandler(undefined, undefined, { getAgentBudgetState: () => undefined });
     handler.setPermissionLevel('yolo');
     expect((await handler.createCallback(session)('SendMessage', { to: 'missing' }, { signal: new AbortController().signal, toolUseID: 'send-2', requestId: 'send-2' }))?.behavior).toBe('allow');
   });
 
   it('resolves a teammate name to its spawning tool call before checking the budget', async () => {
     const monitor = { getAgentBudgetState: jest.fn(() => ({ contextTokens: 850, stopped: false, stopState: 'none' as const, handoffTokens: 1000, warningRatio: 0.85 })) };
-    const { handler } = makeHandler(undefined, monitor, 'tool-call-1');
+    const { handler } = makeHandler(undefined, undefined, monitor, 'tool-call-1');
     const result = await handler.createCallback(session)('SendMessage', { to: 'reviewer' }, { signal: new AbortController().signal, toolUseID: 'send-3', requestId: 'send-3' });
     expect(result).toEqual(expect.objectContaining({ behavior: 'deny', interrupt: false }));
     expect(monitor.getAgentBudgetState).toHaveBeenCalledWith('tool-call-1', session);
@@ -118,27 +125,27 @@ describe('SDK SendMessage budget gate', () => {
 
   it('denies a stopped teammate by name after the registry has discarded it', async () => {
     const monitor = { getAgentBudgetState: jest.fn(() => ({ contextTokens: null, stopped: true, stopState: 'stopped' as const, handoffTokens: 1000, warningRatio: 0.85 })) };
-    const { handler } = makeHandler(undefined, monitor);
+    const { handler } = makeHandler(undefined, undefined, monitor);
     const result = await handler.createCallback(session)('SendMessage', { to: 'reviewer' }, { signal: new AbortController().signal, toolUseID: 'send-4', requestId: 'send-4' });
     expect(result).toEqual(expect.objectContaining({ behavior: 'deny', interrupt: false }));
     expect(monitor.getAgentBudgetState).toHaveBeenCalledWith('reviewer', session);
   });
 
   it('denies during the pending safety-stop window even with low context', async () => {
-    const { handler } = makeHandler(undefined, { getAgentBudgetState: () => ({ contextTokens: 0, stopped: true, stopState: 'pending', handoffTokens: 1000, warningRatio: 0.85 }) });
+    const { handler } = makeHandler(undefined, undefined, { getAgentBudgetState: () => ({ contextTokens: 0, stopped: true, stopState: 'pending', handoffTokens: 1000, warningRatio: 0.85 }) });
     const result = await handler.createCallback(session)('SendMessage', { to: 'reviewer' }, { signal: new AbortController().signal, toolUseID: 'pending-send', requestId: 'pending-send' });
     expect(result).toEqual(expect.objectContaining({ behavior: 'deny', interrupt: false }));
   });
 
   it('allows steering a running agent at the warning threshold', async () => {
-    const { handler } = makeHandler(undefined, { getAgentBudgetState: () => ({ contextTokens: 850, stopped: false, stopState: 'none', running: true, handoffTokens: 1000, warningRatio: 0.85 }) });
+    const { handler } = makeHandler(undefined, undefined, { getAgentBudgetState: () => ({ contextTokens: 850, stopped: false, stopState: 'none', running: true, handoffTokens: 1000, warningRatio: 0.85 }) });
     handler.setPermissionLevel('yolo');
     expect((await handler.createCallback(session)('SendMessage', { to: 'reviewer' }, { signal: new AbortController().signal, toolUseID: 'send-5', requestId: 'send-5' }))?.behavior).toBe('allow');
   });
 
   it.each([{}, { to: 42 }])('keeps the existing policy when to is missing or not a string', async (input) => {
     const monitor = { getAgentBudgetState: jest.fn() };
-    const { handler } = makeHandler(undefined, monitor);
+    const { handler } = makeHandler(undefined, undefined, monitor);
     handler.setPermissionLevel('yolo');
     expect((await handler.createCallback(session)('SendMessage', input, { signal: new AbortController().signal, toolUseID: 'send-6', requestId: 'send-6' }))?.behavior).toBe('allow');
     expect(monitor.getAgentBudgetState).not.toHaveBeenCalled();
@@ -150,7 +157,7 @@ describe('SDK SendMessage budget gate', () => {
       contextTokens: null, stopped: true, stopState: 'stopped' as const,
       handoffTokens: 1000, warningRatio: 0.85,
     })) };
-    const { handler, logger } = makeHandler(undefined, monitor);
+    const { handler, logger } = makeHandler(undefined, undefined, monitor);
     expect(handler.budgetSendMessageRefusal('stopped-agent', session)).toContain('Start a new agent');
     handler.logBudgetSendMessageHookDenial(session, undefined, 'send-hook');
     expect(logger.debug).toHaveBeenCalledWith('[SdkPermissionHandler] Permission decision',
@@ -196,6 +203,59 @@ describe('SdkPermissionHandler published prompt lifecycle', () => {
 });
 
 describe('SdkPermissionHandler host attention resolution', () => {
+  it('waits briefly for a seeded lane record before routing its prompt', async () => {
+    jest.useFakeTimers();
+    try {
+      const findAgentInfo = jest.fn()
+        .mockReturnValueOnce(undefined)
+        .mockReturnValue({ parentSessionId: 'parent-session', startedAt: '2026-11-07T10:00:00.000Z', status: 'running' });
+      const { handler, sent } = makeHandler(undefined, { findAgentInfo });
+      const pending = handler.createCallback(asSessionId('11111111-2222-4333-8444-555555555555'), () => 'agent-seeded')(
+        'Bash', { command: 'ls' }, { signal: new AbortController().signal, toolUseID: 'lane-seeded', requestId: 'lane-seeded' },
+      );
+      await jest.advanceTimersByTimeAsync(25);
+      const request = sent.find((message) => message.type === MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_REQUEST)?.payload;
+      expect(request).toMatchObject({ agentId: 'agent-seeded', parentSessionId: 'parent-session' });
+      expect(findAgentInfo).toHaveBeenCalledTimes(2);
+      const requestId = request?.['requestId'];
+      if (typeof requestId !== 'string') throw new Error('Missing routed request ID');
+      handler.handleResponse(requestId, { id: requestId, decision: 'allow' });
+      await expect(pending).resolves.toMatchObject({ behavior: 'allow' });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+  it('captures the live lane owner and generation in the dispatched prompt', async () => {
+    const { handler, sent } = makeHandler(undefined, {
+      findAgentInfo: () => ({ parentSessionId: 'parent-session', startedAt: '2026-11-07T10:00:00.000Z', status: 'running' }),
+    });
+    const pending = handler.createCallback(asSessionId('11111111-2222-4333-8444-555555555555'), () => 'agent-1')(
+      'Bash', { command: 'ls' }, { signal: new AbortController().signal, toolUseID: 'lane-route', requestId: 'lane-route' },
+    );
+    await flushMicrotasks();
+    const request = sent.find((message) => message.type === MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_REQUEST)?.payload;
+    expect(request).toMatchObject({ agentId: 'agent-1', parentSessionId: 'parent-session', laneGeneration: '2026-11-07T10:00:00.000Z' });
+    expect(handler.getPendingCliAgentPermissions()).toEqual([request]);
+    handler.handleResponse(request!['requestId'] as string, { id: request!['requestId'] as string, decision: 'allow' });
+    await pending;
+    expect(handler.getPendingCliAgentPermissions()).toEqual([]);
+  });
+  it('denies an SDK lane prompt when its process record is unavailable', async () => {
+    const { handler, sent } = makeHandler(undefined, { findAgentInfo: () => undefined });
+    const pending = handler.createCallback(asSessionId('11111111-2222-4333-8444-555555555555'), () => 'agent-early')(
+      'Bash', { command: 'ls' }, { signal: new AbortController().signal, toolUseID: 'lane-early', requestId: 'lane-early' },
+    );
+    await expect(pending).resolves.toMatchObject({ behavior: 'deny' });
+    expect(sent.some((message) => message.type === MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_REQUEST)).toBe(false);
+  });
+  it('denies an SDK lane prompt when the host omits the owner port', async () => {
+    const { handler, sent } = makeHandler(undefined, null);
+    const pending = handler.createCallback(asSessionId('11111111-2222-4333-8444-555555555555'), () => 'agent-unowned')(
+      'Bash', { command: 'ls' }, { signal: new AbortController().signal, toolUseID: 'lane-unowned', requestId: 'lane-unowned' },
+    );
+    await expect(pending).resolves.toMatchObject({ behavior: 'deny' });
+    expect(sent.some((message) => message.type === MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_REQUEST)).toBe(false);
+  });
   it('resolves a lane answer from another surface with the lane key', async () => {
     const hostAttention = { resolve: jest.fn() };
     const { handler, sent } = makeHandler(hostAttention);
@@ -245,6 +305,147 @@ function asSessionId(s: string): SessionIdParam {
 function asTabId(s: string): TabIdParam {
   return s as TabIdParam;
 }
+
+describe('permission ownership regression', () => {
+  it('keeps a tool-wide rule in one chat as its SDK session ID rotates', async () => {
+    const { handler, sent } = makeHandler();
+    const tabA = 'aaaaaaaa-1111-4111-8111-111111111111';
+    const tabB = 'bbbbbbbb-2222-4222-8222-222222222222';
+    let realSessionId: string | undefined;
+    const callbackA = handler.createCallback(
+      asSessionId(tabA), undefined, asTabId(tabA), undefined, tabA,
+      () => realSessionId,
+    );
+    const options = (id: string) => ({
+      signal: new AbortController().signal, toolUseID: id, requestId: id,
+    });
+    const prompts = () => sent.filter((message) => message.type === MESSAGE_TYPES.PERMISSION_REQUEST);
+
+    try {
+      const first = callbackA('Bash', { command: 'printf first > first.txt' }, options('first'));
+      await flushMicrotasks();
+      expect(prompts()).toHaveLength(1);
+      const firstId = String(prompts()[0].payload['id']);
+      expect(handler.handleResponse(firstId, { id: firstId, decision: 'always_allow' })).toBe(true);
+      await expect(first).resolves.toMatchObject({ behavior: 'allow' });
+
+      realSessionId = 'cccccccc-3333-4333-8333-333333333333';
+      const afterResolution = callbackA('Bash', { command: 'printf second > second.txt' }, options('second'));
+      await flushMicrotasks();
+      expect(prompts()).toHaveLength(1);
+      await expect(afterResolution).resolves.toMatchObject({ behavior: 'allow' });
+
+      realSessionId = 'dddddddd-4444-4444-8444-444444444444';
+      const afterRotation = callbackA('Bash', { command: 'printf third > third.txt' }, options('third'));
+      await flushMicrotasks();
+      expect(prompts()).toHaveLength(1);
+      await expect(afterRotation).resolves.toMatchObject({ behavior: 'allow' });
+
+      const callbackB = handler.createCallback(
+        asSessionId(tabB), undefined, asTabId(tabB), undefined, tabB,
+        () => 'eeeeeeee-5555-4555-8555-555555555555',
+      );
+      const otherChat = callbackB('Bash', { command: 'printf other > other.txt' }, options('other'));
+      await flushMicrotasks();
+      expect(prompts()).toHaveLength(2);
+      const otherId = String(prompts()[1].payload['id']);
+      expect(handler.handleResponse(otherId, { id: otherId, decision: 'deny' })).toBe(true);
+      await expect(otherChat).resolves.toMatchObject({ behavior: 'deny' });
+    } finally {
+      handler.cleanupPendingPermissions();
+    }
+  });
+
+  it('consumes only a live response and keeps Always Allow in its session', async () => {
+    const { handler, sent } = makeHandler();
+    try {
+      const sessionA = asSessionId('11111111-2222-4333-8444-555555555555');
+      const sessionB = asSessionId('22222222-3333-4444-8555-666666666666');
+      const a = handler.createCallback(sessionA)('Bash', { command: 'echo a' }, { signal: new AbortController().signal, toolUseID: 'tool-a', requestId: 'tool-a' });
+      const b = handler.createCallback(sessionB)('Bash', { command: 'echo b' }, { signal: new AbortController().signal, toolUseID: 'tool-b', requestId: 'tool-b' });
+      await flushMicrotasks();
+      const prompts = sent.filter(message => message.type === MESSAGE_TYPES.PERMISSION_REQUEST);
+      const idA = prompts[0].payload['id'] as string;
+      const idB = prompts[1].payload['id'] as string;
+      expect(handler.handleResponse(idA, { id: idA, decision: 'always_allow' })).toBe(true);
+      await a;
+      expect(handler.handleResponse(idA, { id: idA, decision: 'allow' })).toBe(false);
+      let bSettled = false;
+      void b.then(() => { bSettled = true; });
+      await flushMicrotasks();
+      expect(bSettled).toBe(false);
+      expect(handler.handleResponse(idB, { id: idB, decision: 'deny' })).toBe(true);
+      await b;
+    } finally {
+      handler.cleanupPendingPermissions();
+    }
+  });
+
+  it('treats a sessionless Always Allow as an explicit one-time Allow', async () => {
+    const { handler, logger, sent } = makeHandler();
+    const lifecycle: PermissionPromptLifecycleEvent[] = [];
+    handler.onPromptLifecycle((event) => { lifecycle.push(event); });
+    try {
+      const tab = asTabId('33333333-4444-4555-8666-777777777777');
+      const callback = handler.createCallback(undefined, undefined, tab);
+      const options = (id: string) => ({ signal: new AbortController().signal, toolUseID: id, requestId: id });
+      const first = callback('Bash', { command: 'echo 1' }, options('tool-1'));
+      const sibling = callback('Bash', { command: 'echo 2' }, options('tool-2'));
+      await flushMicrotasks();
+      const prompts = () => sent.filter(message => message.type === MESSAGE_TYPES.PERMISSION_REQUEST);
+      expect(prompts()).toHaveLength(2);
+      const firstId = prompts()[0].payload['id'] as string;
+      const siblingId = prompts()[1].payload['id'] as string;
+
+      expect(handler.handleResponse(firstId, { id: firstId, decision: 'always_allow' })).toBe(true);
+      await expect(first).resolves.toMatchObject({ behavior: 'allow' });
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('applies once; no rule created'),
+        expect.objectContaining({ requestId: firstId, toolName: 'Bash' }),
+      );
+      expect(sent.some(message => message.type === MESSAGE_TYPES.PERMISSION_AUTO_RESOLVED)).toBe(false);
+      expect(lifecycle).toContainEqual(expect.objectContaining({ phase: 'resolved', requestId: firstId, outcome: 'allowed' }));
+
+      let siblingSettled = false;
+      void sibling.then(() => { siblingSettled = true; });
+      await flushMicrotasks();
+      expect(siblingSettled).toBe(false);
+      expect(handler.handleResponse(siblingId, { id: siblingId, decision: 'deny' })).toBe(true);
+      await sibling;
+
+      const next = callback('Bash', { command: 'echo 3' }, options('tool-3'));
+      await flushMicrotasks();
+      expect(prompts()).toHaveLength(3);
+      const nextId = prompts()[2].payload['id'] as string;
+      expect(handler.handleResponse(nextId, { id: nextId, decision: 'allow' })).toBe(true);
+      await next;
+    } finally {
+      handler.cleanupPendingPermissions();
+    }
+  });
+
+  it('waits for a lane id before routing a prompt with a UUID parent session', async () => {
+    const { handler, sent } = makeHandler();
+    try {
+      const lane: { id: string | undefined } = { id: undefined };
+      const pending = handler.createCallback(asSessionId('11111111-2222-4333-8444-555555555555'), () => lane.id)(
+        'Bash', { command: 'ls' }, { signal: new AbortController().signal, toolUseID: 'tool-lane', requestId: 'tool-lane' },
+      );
+      await flushMicrotasks();
+      expect(sent.some(message => message.type === MESSAGE_TYPES.PERMISSION_REQUEST)).toBe(false);
+      lane.id = 'lane-1';
+      await new Promise<void>(resolve => setTimeout(resolve, 35));
+      await flushMicrotasks();
+      const message = sent.find(item => item.type === MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_REQUEST);
+      expect(message?.payload['agentId']).toBe('lane-1');
+      const id = message?.payload['requestId'] as string;
+      expect(handler.handleResponse(id, { id, decision: 'allow' })).toBe(true);
+      await pending;
+    } finally {
+      handler.cleanupPendingPermissions();
+    }
+  });
+});
 
 describe('SdkPermissionHandler - createCallback use-case contracts', () => {
   afterEach(() => {
@@ -1460,7 +1661,7 @@ describe('SdkPermissionHandler - F2 unroutable deny-timeout (TASK_2026_155, Task
     expect(seen[1]).toMatchObject({ phase: 'resolved', outcome: 'allowed' });
   });
 
-  it('routed request (valid UUID sessionId) is NEVER auto-denied — no timer armed, still pending past 60s+', async () => {
+  it('routed request (valid UUID sessionId) stays answerable while its owner is present', async () => {
     jest.useFakeTimers();
     try {
       const { handler, sent } = makeHandler();
@@ -1487,8 +1688,7 @@ describe('SdkPermissionHandler - F2 unroutable deny-timeout (TASK_2026_155, Task
         broadcast!.payload as unknown as PermissionRequestPayload
       ).id;
 
-      // Routable requests arm NO timer at all (timeoutAt stays 0 / infinite
-      // wait, exactly as before F2).
+      // The verified owner may take time to decide; session teardown settles the wait.
       expect(jest.getTimerCount()).toBe(0);
 
       await jest.advanceTimersByTimeAsync(120_000);

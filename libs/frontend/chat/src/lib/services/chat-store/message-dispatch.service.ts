@@ -195,7 +195,7 @@ export class MessageDispatchService {
         perm.sessionId === tabId || perm.sessionId === tab?.claudeSessionId
       );
     }
-    return tabId === this.tabManager.activeTabId();
+    return false;
   }
 
   /**

@@ -941,7 +941,8 @@ describe('Codex chat host ports', () => {
         toolName: 'Bash',
         toolInput: { command: 'pwd' },
         toolUseId: approval.toolId,
-        timeoutAt: approval.expiresAt,
+        timeoutAt: Math.min(approval.expiresAt ?? Infinity,
+          payload.timestamp + UNROUTABLE_PERMISSION_TIMEOUT_MS),
         description: expect.stringContaining('pwd'),
       });
       expect(payload).not.toHaveProperty('allowedDecisions');
@@ -1392,7 +1393,7 @@ describe('Codex chat host ports', () => {
       return { h, approval, payload };
     }
 
-    it("keeps a UUID tab on today's card with no timer and no lifecycle", () => {
+    it('bounds a UUID tab card and declines at its deadline', () => {
       jest.useFakeTimers({ now });
       const h = harness();
       const approval = request();
@@ -1401,10 +1402,13 @@ describe('Codex chat host ports', () => {
       expect(payload).toMatchObject({
         sessionId: id,
         tabId: chatTab,
-        timeoutAt: approval.expiresAt,
+        timeoutAt: now + UNROUTABLE_PERMISSION_TIMEOUT_MS,
       });
-      jest.advanceTimersByTime(120_000);
-      expect(h.respond).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(UNROUTABLE_PERMISSION_TIMEOUT_MS);
+      expect(h.respond).toHaveBeenCalledWith(
+        { sessionId: id, threadId: id, requestId: '5' },
+        expect.objectContaining({ response: expect.objectContaining({ decision: 'decline' }) }),
+      );
       expect(h.publish).not.toHaveBeenCalled();
     });
 

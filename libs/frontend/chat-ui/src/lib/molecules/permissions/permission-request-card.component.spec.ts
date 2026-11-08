@@ -59,6 +59,19 @@ describe(PermissionRequestCardComponent.name, () => {
     jest.useRealTimers();
   });
 
+  it('offers Always only when a session owns the request', () => {
+    render({ ...request(0), canAlwaysAllow: false });
+    expect(fixture.nativeElement.querySelector('[aria-label="Always allow this tool in this session"]')).toBeNull();
+    fixture.destroy();
+
+    render({ ...request(0), sessionId: '11111111-1111-4111-8111-111111111111' as PermissionRequest['sessionId'], canAlwaysAllow: true });
+    expect(fixture.nativeElement.querySelector('[aria-label="Always allow this tool in this session"]')).not.toBeNull();
+    fixture.destroy();
+
+    render({ ...request(0), sessionId: '11111111-1111-4111-8111-111111111111' as PermissionRequest['sessionId'], canAlwaysAllow: false });
+    expect(fixture.nativeElement.querySelector('[aria-label="Always allow this tool in this session"]')).toBeNull();
+  });
+
   it('denies exactly once at the deadline and releases the shared clock', () => {
     const responded = render(request(3_000));
     expect(acquire).toHaveBeenCalledTimes(1);
