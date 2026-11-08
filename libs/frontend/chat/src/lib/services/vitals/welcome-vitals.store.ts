@@ -17,6 +17,7 @@ import { RecentWorkspacesStore } from './recent-workspaces.store';
 import { hasUsage } from './usage-vitals.model';
 import { UsageVitalsCache } from './usage-vitals.cache';
 import {
+  injectMainProviderId,
   injectVitalsSource,
   injectVitalsTick,
   toActivityVitals,
@@ -47,6 +48,7 @@ export class WelcomeVitalsStore {
   private readonly usage = inject(UsageVitalsCache);
   private readonly inventory = inject(HostInventoryCache);
   private readonly tick = injectVitalsTick();
+  private readonly mainProviderId = injectMainProviderId();
   /**
    * Tick value of the last plan-limit retry. The tick is
    * `PlanLimitsStore.now`, which also moves after every load, so the retry
@@ -79,7 +81,7 @@ export class WelcomeVitalsStore {
     toSpendVitals(this.usage7(), this.windows.spend()),
   );
 
-  /** No session here: the first account with a known plan window. */
+  /** No session here: the main provider's account, never another one. */
   readonly planRing: Signal<VitalsLoad<PlanRingData>> = computed(() => {
     const snapshot = this.planLimits.snapshot();
     // A failed load keeps a real snapshot; only the `generatedAt: 0`
@@ -87,7 +89,12 @@ export class WelcomeVitalsStore {
     if (this.planLimits.loadError() && (snapshot?.generatedAt ?? 0) === 0) {
       return VITALS_ERROR;
     }
-    return toPlanRingLoad(snapshot, null, this.planLimits.now());
+    return toPlanRingLoad(
+      snapshot,
+      null,
+      this.mainProviderId(),
+      this.planLimits.now(),
+    );
   });
 
   /** Installed, enabled CLI agents (D18: the welcome "Agents" stat). */

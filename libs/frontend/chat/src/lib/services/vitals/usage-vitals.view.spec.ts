@@ -106,11 +106,19 @@ describe('usage vitals view', () => {
 
   describe('toPlanRingLoad', () => {
     it('is loading before the first snapshot, empty without a known window', () => {
-      expect(toPlanRingLoad(null, null, 0)).toEqual(VITALS_LOADING);
-      expect(toPlanRingLoad(planSnapshot([]), null, 0)).toEqual(VITALS_EMPTY);
-      expect(toPlanRingLoad(planSnapshot([owner('a', 50)]), null, 0)).toEqual(
-        vitalsReady({ percent: 50, label: '5-hour', resetsInMs: null }),
+      expect(toPlanRingLoad(null, null, 'anthropic', 0)).toEqual(VITALS_LOADING);
+      expect(toPlanRingLoad(planSnapshot([]), null, 'anthropic', 0)).toEqual(
+        VITALS_EMPTY,
       );
+      expect(
+        toPlanRingLoad(planSnapshot([owner('a', 50)]), null, 'anthropic', 0),
+      ).toEqual(vitalsReady({ percent: 50, label: '5-hour', resetsInMs: null }));
+    });
+
+    it('is loading until the main provider is known, empty without one', () => {
+      const snapshot = planSnapshot([owner('a', 50)]);
+      expect(toPlanRingLoad(snapshot, null, undefined, 0)).toEqual(VITALS_LOADING);
+      expect(toPlanRingLoad(snapshot, null, null, 0)).toEqual(VITALS_EMPTY);
     });
   });
 

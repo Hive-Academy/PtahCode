@@ -1,11 +1,12 @@
 import { signal, type WritableSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { PlanLimitsStore } from '@ptah-extension/core';
+import { AuthStateService, PlanLimitsStore } from '@ptah-extension/core';
 import type { RecentWorkspace } from '@ptah-extension/shared';
 import { HostInventoryCache } from './host-inventory.cache';
 import { RecentWorkspacesStore } from './recent-workspaces.store';
 import {
   fact,
+  fakeAuthState,
   fakePlanLimits,
   fakeUsageCache,
   owner,
@@ -50,6 +51,7 @@ describe('WelcomeVitalsStore', () => {
         WelcomeVitalsStore,
         { provide: UsageVitalsCache, useValue: usage },
         { provide: PlanLimitsStore, useValue: plan },
+        { provide: AuthStateService, useValue: fakeAuthState() },
         {
           provide: RecentWorkspacesStore,
           useValue: { recents, load: recentsLoad },
@@ -282,12 +284,14 @@ describe('WelcomeVitalsStore', () => {
     expect(store.activity90()).toBe(before);
   });
 
-  it('shows the plan ring of the first known account, hidden when none is known', () => {
+  it("shows only the main provider's plan ring, hidden when it has none", () => {
     const store = create();
     expect(store.planRing()).toEqual(VITALS_LOADING);
     plan.snapshot.set(planSnapshot([]));
     expect(store.planRing()).toEqual(VITALS_EMPTY);
-    plan.snapshot.set(planSnapshot([owner('a', 38)]));
+    plan.snapshot.set(planSnapshot([owner('lane', 90, 'gemini')]));
+    expect(store.planRing()).toEqual(VITALS_EMPTY);
+    plan.snapshot.set(planSnapshot([owner('lane', 90, 'gemini'), owner('a', 38)]));
     expect(store.planRing()).toEqual(
       vitalsReady({ percent: 38, label: '5-hour', resetsInMs: null }),
     );

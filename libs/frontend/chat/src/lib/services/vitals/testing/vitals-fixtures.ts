@@ -48,11 +48,15 @@ export function summary(
   };
 }
 
-export function owner(key: string, percent: number): PlanLimitOwnerSnapshot {
+export function owner(
+  key: string,
+  percent: number,
+  providerId = 'anthropic',
+): PlanLimitOwnerSnapshot {
   return {
     owner: {
       key,
-      providerId: 'anthropic',
+      providerId,
       identityKind: 'account',
       label: 'Claude account',
     },
@@ -97,6 +101,22 @@ export function fakePlanLimits(): FakePlanLimits {
     loading: signal(false),
     load: jest.fn(async () => undefined),
     sessionOwner: (sessionId) => snapshot()?.sessionOwners[sessionId] ?? null,
+  };
+}
+
+/** An `AuthStateService` stand-in: the signals `injectMainProviderId` reads. */
+export interface FakeAuthState {
+  readonly isLoaded: WritableSignal<boolean>;
+  readonly isLoading: WritableSignal<boolean>;
+  readonly activeProviderId: WritableSignal<string>;
+}
+
+/** Loaded, with `anthropic` as the main provider. */
+export function fakeAuthState(): FakeAuthState {
+  return {
+    isLoaded: signal(true),
+    isLoading: signal(false),
+    activeProviderId: signal('anthropic'),
   };
 }
 

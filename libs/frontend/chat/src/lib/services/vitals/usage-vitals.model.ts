@@ -282,13 +282,10 @@ function windowPercent(window: PlanLimitWindow): number | null {
   return window.used ? usedPercent(window.used) : null;
 }
 
-function hasUsedWindow(owner: PlanLimitOwnerSnapshot): boolean {
-  return owner.windows.some((window) => windowPercent(window) !== null);
-}
-
 function ownerForSession(
   snapshot: PlanLimitsSnapshot,
   sessionId: string | null,
+  mainProviderId: string | null,
 ): PlanLimitOwnerSnapshot | null {
   if (
     sessionId !== null &&
@@ -301,22 +298,34 @@ function ownerForSession(
       return snapshot.owners.find((owner) => owner.owner.key === ownerKey) ?? null;
     }
   }
-  return snapshot.owners.find(hasUsedWindow) ?? null;
+  // No resolved session owner: only the main agent's account. Discovery lists
+  // the selected provider's owner first, then CLI-lane owners (other
+  // providers, and named accounts of the same provider). "The first owner
+  // with a reading" therefore drew a lane's account whenever the main one had
+  // no reading yet, so the ring changed from one load to the next. The first
+  // owner of the main provider is shown, or nothing is.
+  if (mainProviderId === null) return null;
+  return (
+    snapshot.owners.find((owner) => owner.owner.providerId === mainProviderId) ??
+    null
+  );
 }
 
 /**
  * The plan window to draw: the session's owner when the snapshot names one,
- * else the first owner with a known `used`; within it, the window with the
- * highest used percentage. `null` when nothing is known. A non-finite `now`
- * or `resetsAt` gives an unknown reset.
+ * else the first owner of the main provider (`mainProviderId`, the provider
+ * that serves the main agent); within it, the window with the highest used percentage.
+ * Never another provider's owner. `null` when nothing is known. A non-finite
+ * `now` or `resetsAt` gives an unknown reset.
  */
 export function selectPlanRing(
   snapshot: PlanLimitsSnapshot | null,
   sessionId: string | null,
+  mainProviderId: string | null,
   now: number,
 ): PlanRingData | null {
   if (snapshot === null) return null;
-  const owner = ownerForSession(snapshot, sessionId);
+  const owner = ownerForSession(snapshot, sessionId, mainProviderId);
   if (owner === null) return null;
 
   let best: { window: PlanLimitWindow; percent: number } | null = null;

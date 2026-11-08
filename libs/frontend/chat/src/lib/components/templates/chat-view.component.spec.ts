@@ -577,6 +577,10 @@ function makeHarness(
     codexAuthenticated: codexAuthenticatedSig.asReadonly(),
     codexTokenStale: codexTokenStaleSig.asReadonly(),
     authMethodLabel: signal<string | null>(null).asReadonly(),
+    // Read by the empty chat's plan ring (`injectMainProviderId`).
+    isLoaded: signal(true).asReadonly(),
+    isLoading: signal(false).asReadonly(),
+    activeProviderId: signal('anthropic').asReadonly(),
     loadAuthStatus: jest.fn(async (): Promise<void> => undefined),
     refreshAuthStatus: refreshAuthStatusMock,
     clearAuthRequiredBanner: clearAuthRequiredBannerMock,

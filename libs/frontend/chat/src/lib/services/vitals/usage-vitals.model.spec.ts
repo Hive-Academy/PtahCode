@@ -266,6 +266,7 @@ describe('lastNDays', () => {
 
 describe('selectPlanRing', () => {
   const NOW = Date.UTC(2026, 9, 26, 12);
+  const MAIN = 'anthropic';
 
   function window(overrides: Partial<PlanLimitWindow>): PlanLimitWindow {
     return {
@@ -277,9 +278,13 @@ describe('selectPlanRing', () => {
     };
   }
 
-  function owner(key: string, windows: PlanLimitWindow[]): PlanLimitOwnerSnapshot {
+  function owner(
+    key: string,
+    windows: PlanLimitWindow[],
+    providerId = 'anthropic',
+  ): PlanLimitOwnerSnapshot {
     return {
-      owner: { key, providerId: 'anthropic', identityKind: 'account', label: 'Claude account' },
+      owner: { key, providerId, identityKind: 'account', label: 'Claude account' },
       status: 'available',
       windowSetEstablished: true,
       windows,
@@ -304,19 +309,25 @@ describe('selectPlanRing', () => {
       used: { kind: 'amount', amount: 45, limit: 50, unit: 'requests' },
     }),
   ]);
+  const laneOwner = owner(
+    'lane',
+    [window({ key: 'weekly', kind: 'weekly', label: 'Weekly', used: { kind: 'percent', percent: 100 } })],
+    'gemini',
+  );
   const sessionOwned = owner('c', [
     window({ used: { kind: 'percent', percent: 140 }, resetsAt: NOW - 5 }),
   ]);
 
   it('returns null without a snapshot or a known window', () => {
-    expect(selectPlanRing(null, null, NOW)).toBeNull();
-    expect(selectPlanRing(snapshot([unknownOwner]), null, NOW)).toBeNull();
+    expect(selectPlanRing(null, null, MAIN, NOW)).toBeNull();
+    expect(selectPlanRing(snapshot([unknownOwner]), null, MAIN, NOW)).toBeNull();
   });
 
-  it('picks the first owner with a known window, then its highest used window', () => {
+  it("picks the main provider's first owner, then its highest used window", () => {
     const ring: PlanRingData | null = selectPlanRing(
-      snapshot([unknownOwner, firstKnown]),
+      snapshot([laneOwner, firstKnown, unknownOwner]),
       null,
+      MAIN,
       NOW,
     );
     expect(ring).toEqual({ percent: 90, label: 'Weekly', resetsInMs: null });
@@ -329,6 +340,7 @@ describe('selectPlanRing', () => {
           s1: { ownerKey: 'c', modelScope: null },
         }),
         's1',
+        MAIN,
         NOW,
       ),
     ).toEqual({ percent: 100, label: '5-hour', resetsInMs: 0 });
@@ -336,7 +348,7 @@ describe('selectPlanRing', () => {
 
   it('gives an unknown reset for a non-finite now', () => {
     expect(
-      selectPlanRing(snapshot([sessionOwned]), null, Number.NaN)?.resetsInMs,
+      selectPlanRing(snapshot([sessionOwned]), null, MAIN, Number.NaN)?.resetsInMs,
     ).toBeNull();
   });
 
@@ -347,18 +359,39 @@ describe('selectPlanRing', () => {
           s1: { ownerKey: 'a', modelScope: null },
         }),
         's1',
+        MAIN,
         NOW,
       ),
     ).toBeNull();
   });
 
-  it('falls back to the first known owner while the session owner is unresolved', () => {
+  it("falls back to the main provider's owner while the session owner is unresolved", () => {
     expect(
       selectPlanRing(
-        snapshot([firstKnown], { s1: { ownerKey: null, modelScope: null } }),
+        snapshot([laneOwner, firstKnown], {
+          s1: { ownerKey: null, modelScope: null },
+        }),
         's1',
+        MAIN,
         NOW,
       )?.percent,
     ).toBe(90);
+  });
+
+  it("never draws a later account of the main provider (a lane's named account)", () => {
+    expect(
+      selectPlanRing(snapshot([unknownOwner, firstKnown]), null, MAIN, NOW),
+    ).toBeNull();
+  });
+
+  it("never draws another provider's owner when the main one has no reading", () => {
+    expect(
+      selectPlanRing(snapshot([laneOwner, unknownOwner]), null, MAIN, NOW),
+    ).toBeNull();
+    expect(selectPlanRing(snapshot([laneOwner]), null, MAIN, NOW)).toBeNull();
+    expect(selectPlanRing(snapshot([laneOwner]), null, null, NOW)).toBeNull();
+    expect(
+      selectPlanRing(snapshot([laneOwner]), null, 'gemini', NOW)?.percent,
+    ).toBe(100);
   });
 });

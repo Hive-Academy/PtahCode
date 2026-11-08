@@ -7,13 +7,12 @@ import {
   untracked,
   type Signal,
 } from '@angular/core';
-import type { PlanRingData, SessionContextCue } from '@ptah-extension/chat-ui';
-import type { TabState } from '@ptah-extension/chat-types';
-import { ModelStateService, PlanLimitsStore } from '@ptah-extension/core';
+import type { PlanRingData } from '@ptah-extension/chat-ui';
+import { PlanLimitsStore } from '@ptah-extension/core';
 import type { ChatSessionSummary } from '@ptah-extension/shared';
 import { RecentSessionsStore } from '../session-list/recent-sessions.store';
-import { injectSessionStatsSource } from '../session-stats/session-stats-source';
 import {
+  injectMainProviderId,
   injectVitalsTick,
   injectWorkspaceUsage,
   toPlanRingLoad,
@@ -25,8 +24,6 @@ import type { VitalsLoad } from './vitals-load';
 
 /** What the empty chat hands the store; every getter is read reactively. */
 export interface ChatVitalsHost {
-  /** Tab of a scoped view; `null` in the main panel (reads the active session). */
-  readonly tab: () => TabState | null;
   /** The view's session id; `null` before the first message. */
   readonly sessionId: () => string | null;
   /** The workspace the chat belongs to. */
@@ -37,55 +34,42 @@ export interface ChatVitalsHost {
  * View model of the empty chat (`ptah-chat-empty-state`). Provide it on the
  * component and call {@link bind}.
  *
- * Sources: the session stats source (context), `ModelStateService` (model),
- * `PlanLimitsStore` (the session's plan window; the chat view registers the
- * session's plan-limits scope), the usage cache (the workspace's 7 days) and
+ * Sources: `PlanLimitsStore` (the session's plan window, else the main
+ * provider's; the chat view registers the session's plan-limits scope), the
+ * usage cache (the workspace's 7 days) and
  * `RecentSessionsStore` (the Resume row; read for each workspace shown unless
  * that workspace's list is already held). Usage is re-read on the shared clock
  * tick, so a failed read is retried while the chat is open.
  */
 @Injectable()
 export class ChatVitalsStore {
-  private readonly modelState = inject(ModelStateService);
   private readonly planLimits = inject(PlanLimitsStore);
   private readonly recentSessions = inject(RecentSessionsStore);
   private readonly tick = injectVitalsTick();
   private readonly windows = usageDayWindows(this.tick);
   private readonly host = signal<ChatVitalsHost | null>(null);
+  private readonly mainProviderId = injectMainProviderId();
 
   /** The view's session; `null` until {@link bind} or before the first message. */
   readonly sessionId = computed(() => this.host()?.sessionId() ?? null);
   /** The chat's workspace; `null` until {@link bind}. */
   readonly workspacePath = computed(() => this.host()?.workspacePath() ?? null);
 
-  private readonly stats = injectSessionStatsSource({
-    tab: () => this.host()?.tab() ?? null,
-    sessionId: () => this.sessionId(),
-    budget: () => null,
-    available: () => true,
-  });
   private readonly usage7 = injectWorkspaceUsage(
     this.workspacePath,
     7,
     this.tick,
   );
 
-  /** The context meter: used share of the window, or unknown ("—"). */
-  readonly context: Signal<SessionContextCue | null> = computed(
-    () => this.stats.inputs()?.context ?? null,
-  );
-
-  /** Display name of the selected model; `null` before the models load. */
-  readonly model: Signal<string | null> = computed(() => {
-    const name = this.modelState.currentModelDisplay();
-    return name === '' ? null : name;
-  });
-
-  /** The session's account when the snapshot names one, else the first known. */
+  /**
+   * The session's account when the snapshot names one, else the main
+   * provider's account; never another provider's.
+   */
   readonly planRing: Signal<VitalsLoad<PlanRingData>> = computed(() =>
     toPlanRingLoad(
       this.planLimits.snapshot(),
       this.sessionId(),
+      this.mainProviderId(),
       this.planLimits.now(),
     ),
   );
