@@ -7,22 +7,19 @@
  * AS10), it keeps per subagent:
  *
  * - `contextTokens`: the last request's input + cache read + cache write.
- * - `weightedUsed`: the running cost-weighted total (input 1, cache read 0.1,
- *   output 5, cache write 1.25 for the 5-minute TTL and 2 for the 1-hour TTL).
- *   The TTL split comes from `usage.cache_creation` when the message carries
- *   it, else from the session's effective subagent prompt-cache TTL
- *   (`resolveSubagentPromptCacheTtl`, Batch 37).
+ * - `weightedUsed`: the running total evaluated by the shared AgentBudgetPolicy,
+ *   including its raw-token floor and catalog pricing when available.
  *
- * Near-budget warning, at most one per subagent: at {@link NEAR_BUDGET_RATIO}
- * of `compaction.subagentHandoffTokens` the subagent is asked to write its
+ * Near-budget warning, at most one per subagent: at agentBudget.warnRatio
+ * of agentBudget.handoffContextTokens the subagent is asked to write its
  * progress notes to its handoff notes file. The notice rides on the
  * subagent's own next tool result (`SubagentNoticeQueue`, keyed by the SDK
  * agent id of its registry record), never the main thread's.
  *
  * Stops, at most one per subagent:
  *
- * - Handoff: `contextTokens` at or above `compaction.subagentHandoffTokens`.
- * - Safety: `weightedUsed` at or above `compaction.subagentStopWeightedTokens`.
+ * - Handoff: context at or above agentBudget.handoffContextTokens.
+ * - Safety: the shared policy's weighted, raw, or duration stop.
  *
  * Before the stop, the handoff text is built and written once to a handoff
  * record ({@link SubagentHandoffRecords}): `.ptah/subagent-handoffs/` in the
@@ -76,11 +73,8 @@
  * else from the registry record of the subagent. With neither, the stop is
  * deferred to the next subagent message (one log line per subagent).
  *
- * Off switch: with `compaction.enabled` false the monitor keeps counting (the
- * snapshot and the resume advice still work) but never stops a subagent.
- *
- * Failure: a subagent message without usage leaves the monitor observe-only
- * for it (one log line per session). A failed record write (handoff stop) or
+ * Failure: a subagent message without usage records unavailable telemetry and
+ * takes the safety stop path. A failed record write (handoff stop) or
  * a rejected stop is retried on the next subagent request (a new API message
  * id; the content-block messages of the request that failed do not retry).
  * Stops are given up after {@link MAX_STOP_ATTEMPTS} attempts with one log
@@ -96,7 +90,7 @@ import type {
   Logger,
   SubagentRegistryService,
 } from '@ptah-extension/vscode-core';
-import type { SubagentPromptCacheTtl } from '@ptah-extension/shared';
+import { AgentBudgetPolicy, completedTurnTelemetry, findModelPricing, initialAgentBudgetSnapshot, type AgentBudgetSnapshot, type SubagentPromptCacheTtl } from '@ptah-extension/shared';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
@@ -159,6 +153,7 @@ export interface SubagentRequestUsage {
   readonly cacheReadTokens: number;
   readonly cacheWriteTokens: number;
   readonly outputTokens: number;
+  readonly providerCostUsd?: number;
   /** TTL split of `cacheWriteTokens`; absent when the message has no `cache_creation`. */
   readonly cacheWriteByTtl?: Readonly<Record<SubagentPromptCacheTtl, number>>;
 }
@@ -178,6 +173,7 @@ export interface AgentBudgetState {
   readonly contextTokens: number | null;
   readonly handoffTokens: number;
   readonly warningRatio: number;
+  readonly warned?: boolean;
   /** A live agent may receive steering messages even near the limit. */
   readonly running?: boolean;
   readonly stopState: 'none' | 'pending' | 'stopped';
@@ -186,15 +182,6 @@ export interface AgentBudgetState {
   readonly recordPath?: string;
 }
 
-const INPUT_WEIGHT = 1;
-const CACHE_READ_WEIGHT = 0.1;
-const OUTPUT_WEIGHT = 5;
-const CACHE_WRITE_WEIGHT: Readonly<Record<SubagentPromptCacheTtl, number>> = {
-  '5m': 1.25,
-  '1h': 2,
-};
-/** TTL the SDK uses when nothing sets one (as `subagent-prompt-cache-ttl.ts`). */
-const SDK_DEFAULT_TTL: SubagentPromptCacheTtl = '5m';
 /** `stopSubagent` calls per subagent: the first one and two retries. */
 export const MAX_STOP_ATTEMPTS = 3;
 /** Handoff record writes per subagent before the handoff stop is given up. */
@@ -391,6 +378,8 @@ export function readSubagentRequestUsage(
     cacheReadTokens,
     cacheWriteTokens,
     outputTokens,
+    ...(typeof usage['cost_usd'] === 'number' && Number.isFinite(usage['cost_usd']) && usage['cost_usd'] >= 0
+      ? { providerCostUsd: usage['cost_usd'] } : {}),
     ...(write5m !== undefined || write1h !== undefined
       ? { cacheWriteByTtl: { '5m': write5m ?? 0, '1h': write1h ?? 0 } }
       : {}),
@@ -402,22 +391,6 @@ export function requestContextTokens(usage: SubagentRequestUsage): number {
   return usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
 }
 
-/** Cost-weighted size of one request; `fallbackTtl` prices cache writes without a TTL split. */
-export function weightedRequestTokens(
-  usage: SubagentRequestUsage,
-  fallbackTtl: SubagentPromptCacheTtl,
-): number {
-  const cacheWrite = usage.cacheWriteByTtl
-    ? usage.cacheWriteByTtl['5m'] * CACHE_WRITE_WEIGHT['5m'] +
-      usage.cacheWriteByTtl['1h'] * CACHE_WRITE_WEIGHT['1h']
-    : usage.cacheWriteTokens * CACHE_WRITE_WEIGHT[fallbackTtl];
-  return (
-    usage.inputTokens * INPUT_WEIGHT +
-    usage.cacheReadTokens * CACHE_READ_WEIGHT +
-    usage.outputTokens * OUTPUT_WEIGHT +
-    cacheWrite
-  );
-}
 
 /**
  * The task a spawning `Agent`/`Task` `tool_use` input describes: its
@@ -444,9 +417,15 @@ export function readSubagentTaskText(input: unknown): string | undefined {
 interface SubagentState {
   contextTokens: number;
   weightedUsed: number;
+  policySnapshot: AgentBudgetSnapshot;
+  startedAt: number;
+  costUnavailableLogged: boolean;
+  telemetryUnavailableLogged: boolean;
+  requestSequence: number;
   /** API message id of the last request counted, and its weighted share. */
   lastMessageId?: string;
   lastWeighted: number;
+  lastRaw: number;
   /** Set when the stop succeeded or its attempts ran out: no further stop. */
   stopFired: boolean;
   progressCaptureErrorLogged?: boolean;
@@ -531,7 +510,6 @@ interface SessionState {
    * whether its tool result has reached the main thread.
    */
   readonly spawnReturned: Map<string, boolean>;
-  noUsageLogged: boolean;
   stopDisabledLogged: boolean;
   /** Set when a rekey merged this record into another; a stop in flight follows it. */
   mergedInto?: SessionState;
@@ -608,7 +586,7 @@ export class SubagentBudgetMonitor {
   async observe(
     sessionId: string,
     message: unknown,
-    cacheTtl: SubagentPromptCacheTtl = SDK_DEFAULT_TTL,
+    _cacheTtl?: SubagentPromptCacheTtl,
   ): Promise<void> {
     const msg = asObject(message);
     if (msg?.['type'] === 'user' && typeof msg['parent_tool_use_id'] === 'string') {
@@ -634,13 +612,22 @@ export class SubagentBudgetMonitor {
     const session = this.sessionState(sessionId);
     const usage = readSubagentRequestUsage(msg);
     if (!usage) {
-      if (!session.noUsageLogged) {
-        session.noUsageLogged = true;
-        this.logger.info(
-          '[SubagentBudgetMonitor] Subagent message without usage; observe-only for this session',
-          { sessionId },
-        );
+      const state = this.subagentState(session, toolCallId);
+      if (!state.telemetryUnavailableLogged) {
+        state.telemetryUnavailableLogged = true;
+        this.logger.warn('[SubagentBudgetMonitor] Subagent turn telemetry unavailable; stopping', { sessionId, toolCallId });
       }
+      const settings = this.config.getAgentBudgetSettings();
+      const messageId = asObject(msg['message'])?.['id'];
+      state.requestSequence += 1;
+      state.policySnapshot = new AgentBudgetPolicy(settings).evaluate(
+        state.policySnapshot,
+        { status: 'unavailable', turnId: `${session.sessionId}:${toolCallId}:${String(messageId ?? state.requestSequence)}`, modelId: 'unknown', source: 'sdk', reason: 'missing-input-or-output-tokens' },
+        Date.now() - state.startedAt, null,
+      ).snapshot;
+      if (!state.stopFired && !state.stopInFlight) await this.stop(session, toolCallId, state, 'safety', {
+        handoffTokens: settings.handoffContextTokens, stopWeightedTokens: settings.stopWeightedTokens,
+      });
       return;
     }
 
@@ -657,7 +644,7 @@ export class SubagentBudgetMonitor {
         });
       }
     }
-    this.count(state, msg, usage, cacheTtl);
+    this.count(session, toolCallId, state, msg, usage);
     if (state.stopFired || state.stopInFlight) {
       return;
     }
@@ -670,27 +657,16 @@ export class SubagentBudgetMonitor {
       return;
     }
 
-    const { enabled, subagentHandoffTokens, subagentStopWeightedTokens } =
-      this.config.getConfig();
-    if (enabled) {
-      this.warnNearBudget(session, toolCallId, state, subagentHandoffTokens);
-    }
+    const budget = this.config.getAgentBudgetSettings();
+    const subagentHandoffTokens = budget.handoffContextTokens;
+    const subagentStopWeightedTokens = budget.stopWeightedTokens;
+    this.warnNearBudget(session, toolCallId, state, subagentHandoffTokens, budget.warnRatio);
     const reason: StopReason | undefined =
-      state.weightedUsed >= subagentStopWeightedTokens ||
+      state.policySnapshot.stopped ||
       state.contextTokens >= subagentHandoffTokens * RUNAWAY_BUDGET_MULTIPLE
         ? 'safety'
         : undefined;
     if (!reason) {
-      return;
-    }
-    if (!enabled) {
-      if (!session.stopDisabledLogged) {
-        session.stopDisabledLogged = true;
-        this.logger.info(
-          '[SubagentBudgetMonitor] Subagent over budget; not stopped because compaction.enabled is false',
-          { sessionId, toolCallId, reason },
-        );
-      }
       return;
     }
     await this.stop(session, toolCallId, state, reason, {
@@ -711,10 +687,11 @@ export class SubagentBudgetMonitor {
     toolCallId: string,
     state: SubagentState,
     handoffTokens: number,
+    warnRatio = NEAR_BUDGET_RATIO,
   ): void {
     if (
       state.warnedAgentId !== undefined ||
-      state.contextTokens < handoffTokens * NEAR_BUDGET_RATIO
+      !state.policySnapshot.warned && state.contextTokens < handoffTokens * warnRatio
     ) {
       return;
     }
@@ -778,14 +755,14 @@ export class SubagentBudgetMonitor {
     }
     for (const [toolCallId, state] of session.subagents) {
       if (state.warnedAgentId !== agentId || state.stopFired || state.stopInFlight) continue;
-      const config = this.config.getConfig();
+      const config = this.config.getAgentBudgetSettings();
       if (state.recordGaveUp) {
         this.logger.info('[SubagentBudgetMonitor] Gate stop skipped: record attempts exhausted', { sessionId: session.sessionId, toolCallId, agentId });
         return;
       }
       await this.stop(session, toolCallId, state, 'handoff', {
-        handoffTokens: config.subagentHandoffTokens,
-        stopWeightedTokens: config.subagentStopWeightedTokens,
+        handoffTokens: config.handoffContextTokens,
+        stopWeightedTokens: config.stopWeightedTokens,
       });
       if (this.notesGate.has(agentId)) {
         this.logger.warn('[SubagentBudgetMonitor] Notes gate safety stop deferred or failed; gate remains active', {
@@ -861,12 +838,12 @@ export class SubagentBudgetMonitor {
               sessionId: session.sessionId, toolCallId, agentId,
             });
           }
-          const config = this.config.getConfig();
+          const config = this.config.getAgentBudgetSettings();
           let prepared: PreparedHandoff | undefined;
           try {
             prepared = await this.prepareHandoff(session, toolCallId, state, 'handoff', {
-            handoffTokens: config.subagentHandoffTokens,
-            stopWeightedTokens: config.subagentStopWeightedTokens,
+            handoffTokens: config.handoffContextTokens,
+            stopWeightedTokens: config.stopWeightedTokens,
             }, { agentId, agentType: record?.agentType ?? started?.subagentType ?? 'subagent', teammateName: record?.teammateName, taskId: taskId ?? 'unknown' }, state.lastMessageId, true);
           } catch (error: unknown) {
             this.logger.error('[SubagentBudgetMonitor] Normal exit handoff preparation failed', {
@@ -876,7 +853,7 @@ export class SubagentBudgetMonitor {
             const fallback = handoffMessage(
               { agentId, agentType: record?.agentType ?? started?.subagentType ?? 'subagent', taskId: taskId ?? 'unknown' },
               { reason: 'handoff', contextTokens: state.contextTokens, weightedUsed: state.weightedUsed,
-                handoffTokens: config.subagentHandoffTokens, stopWeightedTokens: config.subagentStopWeightedTokens },
+                handoffTokens: config.handoffContextTokens, stopWeightedTokens: config.stopWeightedTokens },
               session.tasks.get(toolCallId)?.text,
               { paths: undefined, taskSaved: false, notesWritten: false, notesInferred: false, unavailable: true },
             );
@@ -987,7 +964,7 @@ export class SubagentBudgetMonitor {
           state.warnedAgentId,
           redactBudgetSecrets(nearBudgetWarning(
             state.contextTokens,
-            this.config.getConfig().subagentHandoffTokens,
+            this.config.getAgentBudgetSettings().handoffContextTokens,
             state.handoffPaths.notes,
           )),
         );
@@ -1015,24 +992,24 @@ export class SubagentBudgetMonitor {
       stopped: state.stopped,
       budgetReached:
         state.weightedUsed >=
-        this.config.getConfig().subagentStopWeightedTokens,
+        this.config.getAgentBudgetSettings().stopWeightedTokens,
     };
   }
 
   /** Look up by SDK agent id or spawning tool call id. */
   getAgentBudgetState(agentId: string, sessionId: string): AgentBudgetState | undefined {
-    if (!this.config.getConfig().enabled) return undefined;
     const currentId = this.currentSessionId(sessionId);
     let idleMatch: AgentBudgetState | undefined;
     const session = this.sessions.get(currentId);
     if (session) {
       for (const [toolCallId, state] of session.subagents) {
         const { record } = this.resolveRegistryRecord(session, toolCallId);
-        if (toolCallId !== agentId && state.stoppedAgentId !== agentId && state.stoppedTeammateName !== agentId && record?.agentId !== agentId && !(state.stopState === 'none' && (record?.teammateName === agentId || session.tasks.get(toolCallId)?.name === agentId))) continue;
+        if (toolCallId !== agentId && session.startedTasks.get(toolCallId)?.taskId !== agentId && record?.taskId !== agentId && state.stoppedTaskId !== agentId && state.stoppedAgentId !== agentId && state.stoppedTeammateName !== agentId && record?.agentId !== agentId && !(state.stopState === 'none' && (record?.teammateName === agentId || session.tasks.get(toolCallId)?.name === agentId))) continue;
         const match: AgentBudgetState = {
           contextTokens: state.lastMessageId === undefined ? null : state.contextTokens,
-          handoffTokens: this.config.getConfig().subagentHandoffTokens,
-          warningRatio: NEAR_BUDGET_RATIO,
+          handoffTokens: this.config.getAgentBudgetSettings().handoffContextTokens,
+          warningRatio: this.config.getAgentBudgetSettings().warnRatio,
+          warned: state.policySnapshot.warned || state.warnedAgentId !== undefined,
           running: record?.status === 'running' && state.stopState === 'none' && !state.stopInFlight,
           stopState: state.stopInFlight && state.stopState === 'none' ? 'pending' : state.stopState,
           stopped: state.stopState !== 'none' || state.stopInFlight,
@@ -1123,7 +1100,7 @@ export class SubagentBudgetMonitor {
     }
     for (const [toolCallId, state] of session.subagents) {
       if (state.stopState !== 'stopped') continue;
-      for (const identity of [toolCallId, state.stoppedAgentId, state.stoppedTeammateName]) {
+      for (const identity of [toolCallId, state.stoppedTaskId, state.stoppedAgentId, state.stoppedTeammateName]) {
         if (!identity) continue;
         const oldKey = stoppedIdentityKey(fromSessionId, identity);
         const stopped = this.stoppedByIdentity.get(oldKey);
@@ -1237,7 +1214,6 @@ export class SubagentBudgetMonitor {
         tasks: new Map(),
         startedTasks: new Map(),
         spawnReturned: new Map(),
-        noUsageLogged: false,
         stopDisabledLogged: false,
       };
       this.sessions.set(sessionId, session);
@@ -1268,7 +1244,13 @@ export class SubagentBudgetMonitor {
       state = {
         contextTokens: 0,
         weightedUsed: 0,
+        policySnapshot: initialAgentBudgetSnapshot,
+        startedAt: Date.now(),
+        costUnavailableLogged: false,
+        telemetryUnavailableLogged: false,
+        requestSequence: 0,
         lastWeighted: 0,
+        lastRaw: 0,
         stopFired: false,
         stopInFlight: false,
         stopState: 'none',
@@ -1423,19 +1405,59 @@ export class SubagentBudgetMonitor {
    * a repeated id replaces the previous share instead of adding to it.
    */
   private count(
+    session: SessionState,
+    toolCallId: string,
     state: SubagentState,
     msg: JsonObject,
     usage: SubagentRequestUsage,
-    cacheTtl: SubagentPromptCacheTtl,
   ): void {
     const messageId = asObject(msg['message'])?.['id'];
-    const weighted = weightedRequestTokens(usage, cacheTtl);
-    const sameRequest =
-      typeof messageId === 'string' && messageId === state.lastMessageId;
-    state.weightedUsed += weighted - (sameRequest ? state.lastWeighted : 0);
-    state.lastWeighted = weighted;
+    const sameRequest = typeof messageId === 'string' && messageId === state.lastMessageId;
+    if (!sameRequest) state.requestSequence += 1;
+    const model = asObject(msg['message'])?.['model'];
+    const modelId = typeof model === 'string' ? model : undefined;
+    const taskId = session.startedTasks.get(toolCallId)?.taskId ?? this.resolveRegistryRecord(session, toolCallId).record?.taskId ?? toolCallId;
+    const telemetry = completedTurnTelemetry({
+      turnId: `${session.sessionId}:${taskId}:${String(messageId ?? state.requestSequence)}`,
+      modelId, source: 'sdk', uncachedInput: true,
+      usage: {
+        inputTokens: usage.inputTokens, outputTokens: usage.outputTokens,
+        cacheReadTokens: usage.cacheReadTokens, cacheWriteTokens: usage.cacheWriteTokens,
+        contextTokens: requestContextTokens(usage),
+        costUsd: usage.providerCostUsd,
+      },
+    });
+    const settings = this.config.getAgentBudgetSettings();
+    const before = sameRequest ? {
+      ...state.policySnapshot,
+      weightedTokens: state.policySnapshot.weightedTokens - state.lastWeighted,
+      rawTokens: state.policySnapshot.rawTokens - state.lastRaw,
+      turnIds: state.policySnapshot.turnIds.slice(0, -1),
+    } : state.policySnapshot;
+    const transition = new AgentBudgetPolicy(settings).evaluate(
+      before, telemetry, Date.now() - state.startedAt,
+      modelId ? findModelPricing(modelId) : null,
+    );
+    state.lastWeighted = transition.snapshot.weightedTokens - before.weightedTokens;
+    state.lastRaw = transition.snapshot.rawTokens - before.rawTokens;
+    state.policySnapshot = transition.snapshot;
+    state.weightedUsed = transition.snapshot.weightedTokens;
     state.lastMessageId = typeof messageId === 'string' ? messageId : undefined;
     state.contextTokens = requestContextTokens(usage);
+    if (!sameRequest) {
+      const costAuthority = transition.cost.status === 'reported' ? transition.cost.source : 'unavailable';
+      this.logger.info('[SubagentBudgetMonitor] Accepted subagent turn', {
+        sessionId: session.sessionId, taskId, model: modelId ?? 'unavailable',
+        inputTokens: usage.inputTokens, outputTokens: usage.outputTokens,
+        weightedTotal: transition.snapshot.weightedTokens,
+        ratio: Math.max(transition.snapshot.rawTokens, transition.snapshot.weightedTokens) / settings.stopWeightedTokens,
+        costAuthority,
+      });
+      if (costAuthority === 'unavailable' && !state.costUnavailableLogged) {
+        state.costUnavailableLogged = true;
+        this.logger.warn('[SubagentBudgetMonitor] Turn cost unavailable', { sessionId: session.sessionId, taskId, model: modelId ?? 'unavailable' });
+      }
+    }
   }
 
   /**
@@ -1596,7 +1618,7 @@ export class SubagentBudgetMonitor {
     liveState.stopState = 'stopped';
     const stoppedState = this.getAgentBudgetState(toolCallId, sessionId);
     if (stoppedState) {
-      const identities = [toolCallId, liveState.stoppedAgentId, liveState.stoppedTeammateName];
+      const identities = [toolCallId, liveState.stoppedTaskId, liveState.stoppedAgentId, liveState.stoppedTeammateName];
       for (const identity of identities) {
         if (!identity) continue;
         const key = stoppedIdentityKey(sessionId, identity);

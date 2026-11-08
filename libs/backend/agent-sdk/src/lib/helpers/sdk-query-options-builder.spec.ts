@@ -220,7 +220,7 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
       createCallback: jest.fn().mockReturnValue(() => ({ behavior: 'allow' })),
       budgetSendMessageRefusal: jest.fn((target: string) => {
         if (target === 'boom') throw new Error('budget lookup failed');
-        return target === 'stopped' ? 'Start a fresh agent.' : undefined;
+        return target === 'stopped' || target === 'warned' ? 'Start a fresh agent.' : undefined;
       }),
       logBudgetSendMessageHookDenial: jest.fn(
         (_sessionId: string, _tabId: unknown, toolUseID: string) =>
@@ -411,6 +411,13 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
         }),
       }),
     );
+    expect(await hook?.(
+      { ...base, tool_input: { to: 'warned' } },
+      'send-2',
+      context,
+    )).toEqual(expect.objectContaining({
+      hookSpecificOutput: expect.objectContaining({ permissionDecision: 'deny' }),
+    }));
     expect(logger.debug).toHaveBeenCalledWith(
       '[SdkPermissionHandler] Permission decision',
       expect.objectContaining({

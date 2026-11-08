@@ -7,7 +7,7 @@ import type {
   SubagentRegistryService,
 } from '@ptah-extension/vscode-core';
 import { Logger as LoggerClass } from '@ptah-extension/vscode-core';
-import type { SubagentRecord } from '@ptah-extension/shared';
+import { registerProviderPricing, resetPricingMapForTesting, type SubagentRecord } from '@ptah-extension/shared';
 import type { CompactionConfigProvider } from '../compaction-config-provider';
 import { MainThreadNoticeQueue } from '../main-thread-notice-queue';
 import {
@@ -44,7 +44,6 @@ import {
   redactBudgetSecrets,
   resolveSubagentTranscriptPath,
   requestContextTokens,
-  weightedRequestTokens,
   type SubagentBudgetDispatcherPort,
   type SubagentHandoffFilesPort,
   type SubagentHandoffIndexPort,
@@ -59,6 +58,14 @@ const SESSION = 'session-1';
 const TOOL_CALL = 'toolu_task_1';
 const HANDOFF_TOKENS = 150_000;
 const STOP_WEIGHTED = 3_000_000;
+beforeAll(() => registerProviderPricing({
+  'claude-sonnet-4-5-20250929': {
+    inputCostPerToken: 3e-6, outputCostPerToken: 15e-6,
+    cacheReadCostPerToken: 0.3e-6, cacheCreationCostPerToken: 3.75e-6,
+    provider: 'anthropic',
+  },
+}));
+afterAll(() => resetPricingMapForTesting());
 
 interface Usage {
   input?: number;
@@ -76,6 +83,7 @@ function assistant(
     type: 'assistant',
     parent_tool_use_id: opts.parent === undefined ? TOOL_CALL : opts.parent,
     message: {
+      model: 'claude-sonnet-4-5-20250929',
       ...(opts.id ? { id: opts.id } : {}),
       role: 'assistant',
       content: [],
@@ -166,6 +174,7 @@ function makeHarness(
   opts: {
     enabled?: boolean;
     handoffTokens?: number;
+    maxDurationMin?: number;
     workspace?: string;
     handoffFiles?: SubagentHandoffFilesPort;
     records?: SubagentHandoffRecordsPort;
@@ -185,6 +194,12 @@ function makeHarness(
     error: jest.fn(),
   };
   const config = {
+    getAgentBudgetSettings: jest.fn(() => ({
+      warnRatio: 0.85,
+      handoffContextTokens: opts.handoffTokens ?? HANDOFF_TOKENS,
+      stopWeightedTokens: STOP_WEIGHTED,
+      maxDurationMin: opts.maxDurationMin ?? 90,
+    })),
     getConfig: jest.fn(() => ({
       enabled: opts.enabled ?? true,
       subagentHandoffTokens: opts.handoffTokens ?? HANDOFF_TOKENS,
@@ -491,10 +506,23 @@ describe('SubagentBudgetMonitor', () => {
     const h = makeHarness({ teammateName: 'reviewer' });
     await h.monitor.observe(SESSION, assistant({ input: 310_000 }, { id: 'stop-name' }));
     h.registry.get.mockReturnValue(null);
-    for (const target of ['a1', TOOL_CALL, 'reviewer'])
+    for (const target of ['a1', TOOL_CALL, 'reviewer', 'task-1'])
       expect(h.monitor.getAgentBudgetState(target, SESSION)).toEqual(expect.objectContaining({ stopped: true }));
     h.monitor.release(SESSION);
     expect(h.monitor.getAgentBudgetState('reviewer', SESSION)?.stopped).toBe(true);
+    expect(h.monitor.getAgentBudgetState('task-1', SESSION)?.stopped).toBe(true);
+  });
+
+  it('keeps Task identity through a session rekey and after release', async () => {
+    const h = makeHarness();
+    await h.monitor.observe(SESSION, assistant({ input: 310_000 }, { id: 'stop-before-rekey' }));
+    h.monitor.rekey(SESSION, 'session-rekeyed');
+    h.registry.get.mockReturnValue(null);
+    expect(h.monitor.getAgentBudgetState('task-1', 'session-rekeyed')?.stopped).toBe(true);
+    expect(h.monitor.getAgentBudgetState('task-1', SESSION)?.stopped).toBe(true);
+    h.monitor.release('session-rekeyed');
+    expect(h.monitor.getAgentBudgetState('task-1', 'session-rekeyed')?.stopped).toBe(true);
+    expect(h.monitor.getAgentBudgetState('task-1', 'other-session')).toBeUndefined();
   });
 
   it('clears a stopped name when a new same-name agent spawns without usage', async () => {
@@ -530,10 +558,10 @@ describe('SubagentBudgetMonitor', () => {
     expect(h.monitor.getAgentBudgetState('reviewer', 'session-2')).toBeUndefined();
   });
 
-  it('does not expose a budget refusal when compaction is disabled', async () => {
+  it('exposes a budget refusal independently of compaction', async () => {
     const h = makeHarness({}, { enabled: false });
     await h.monitor.observe(SESSION, assistant({ input: 310_000 }, { id: 'disabled' }));
-    expect(h.monitor.getAgentBudgetState('a1', SESSION)).toBeUndefined();
+    expect(h.monitor.getAgentBudgetState('a1', SESSION)?.stopped).toBe(true);
   });
 
   it('shows a pending stop immediately and clears it after a rejected attempt', async () => {
@@ -865,7 +893,7 @@ describe('SubagentBudgetMonitor', () => {
     expect(h.streamed).toHaveLength(0);
     expect(h.monitor.getSnapshot(SESSION, TOOL_CALL)).toEqual({
       contextTokens: 140_010,
-      weightedUsed: 10 + 10_000 + 50_000 + 250,
+      weightedUsed: 140_060, // shared policy's raw-token floor
       stopped: false,
       budgetReached: false,
     });
@@ -924,6 +952,15 @@ describe('SubagentBudgetMonitor', () => {
     expect(h.streamed).toHaveLength(1);
     expect(h.streamed[0]).toContain('safety limit 3000000');
     expect(h.monitor.getSnapshot(SESSION, TOOL_CALL)?.budgetReached).toBe(true);
+  });
+
+  it('stops on the shared maximum duration even with a small turn', async () => {
+    const h = makeHarness({}, { maxDurationMin: 0.000001 });
+    await h.monitor.observe(SESSION, assistant({ input: 1, output: 1 }, { id: 'duration' }));
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    await h.monitor.observe(SESSION, assistant({ input: 1, output: 1 }, { id: 'duration-2' }));
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledWith(SESSION, 'task-1');
+    expect(h.recordStore.writeOnce).toHaveBeenCalledTimes(1);
   });
 
   it('streams forced interruption immediately and does not claim hook delivery', async () => {
@@ -1350,7 +1387,7 @@ describe('SubagentBudgetMonitor', () => {
     expect(other.streamed[0]).not.toContain('Its task was');
   });
 
-  it('with compaction.enabled false keeps counting but never stops, logging once', async () => {
+  it('with compaction.enabled false still enforces the agent budget', async () => {
     const h = makeHarness({}, { enabled: false });
     for (let i = 0; i < 25; i++) {
       await h.monitor.observe(
@@ -1359,16 +1396,14 @@ describe('SubagentBudgetMonitor', () => {
       );
     }
 
-    expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
-    expect(h.dispatcher.postMainThreadNotice).not.toHaveBeenCalled();
-    expect(h.registry.update).not.toHaveBeenCalled();
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
+    expect(h.registry.update).toHaveBeenCalled();
     expect(h.monitor.getSnapshot(SESSION, TOOL_CALL)).toEqual(
-      expect.objectContaining({ stopped: false, budgetReached: true }),
+      expect.objectContaining({ stopped: true, budgetReached: true }),
     );
-    expect(h.logger.info).toHaveBeenCalledTimes(1);
     expect(h.logger.info).toHaveBeenCalledWith(
-      expect.stringContaining('compaction.enabled is false'),
-      expect.objectContaining({ sessionId: SESSION, toolCallId: TOOL_CALL }),
+      '[SubagentBudgetMonitor] Accepted subagent turn',
+      expect.objectContaining({ sessionId: SESSION, taskId: 'task-1' }),
     );
   });
 
@@ -1682,7 +1717,7 @@ describe('SubagentBudgetMonitor', () => {
     );
   });
 
-  it('without usage is observe-only and logs once per session', async () => {
+  it('without usage fails closed and logs once per subagent', async () => {
     const h = makeHarness();
     await h.monitor.observe(SESSION, assistant(null));
     await h.monitor.observe(
@@ -1690,12 +1725,18 @@ describe('SubagentBudgetMonitor', () => {
       assistant(null, { parent: 'toolu_other' }),
     );
 
-    expect(h.logger.info).toHaveBeenCalledTimes(1);
-    expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
-    expect(h.monitor.getSnapshot(SESSION, TOOL_CALL)).toBeUndefined();
+    expect(h.logger.warn).toHaveBeenCalledTimes(2);
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalled();
+    expect(h.monitor.getSnapshot(SESSION, TOOL_CALL)?.stopped).toBe(true);
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledWith(SESSION, 'task-1');
+    expect(h.recordStore.writeOnce).toHaveBeenCalled();
+    expect(h.logger.warn.mock.calls.filter(([message]) => message.includes('telemetry unavailable'))).toHaveLength(2);
+
+    await h.monitor.observe(SESSION, assistant(null));
+    expect(h.logger.warn.mock.calls.filter(([message]) => message.includes('telemetry unavailable'))).toHaveLength(2);
 
     await h.monitor.observe('session-2', assistant(null));
-    expect(h.logger.info).toHaveBeenCalledTimes(2);
+    expect(h.logger.warn).toHaveBeenCalledTimes(3);
   });
 
   it('release forgets the session', async () => {
@@ -2210,14 +2251,14 @@ describe('SubagentBudgetMonitor', () => {
       );
     });
 
-    it('is not sent without a workspace (no notes path) or with compaction disabled', async () => {
+    it('is not sent without a workspace, but is sent with compaction disabled', async () => {
       const noWorkspace = makeHarness();
       await noWorkspace.monitor.observe(SESSION, atContext(130_000, 'm1'));
       const disabled = makeHarness({}, { workspace, enabled: false });
       await disabled.monitor.observe(SESSION, atContext(130_000, 'm1'));
 
       expect(noWorkspace.dispatcher.postSubagentNotice).not.toHaveBeenCalled();
-      expect(disabled.dispatcher.postSubagentNotice).not.toHaveBeenCalled();
+      expect(disabled.dispatcher.postSubagentNotice).toHaveBeenCalledTimes(1);
     });
 
     it('the hard stop names the same notes path, says it is missing when unwritten, and withdraws an undelivered warning', async () => {
@@ -2879,20 +2920,7 @@ describe('readSubagentTaskText', () => {
   });
 });
 
-describe('weighted and context tokens', () => {
-  it('uses the TTL split when present and the fallback TTL otherwise', () => {
-    const split = readSubagentRequestUsage(
-      assistant({ cacheWrite: 1_000, write1h: 400 }),
-    );
-    expect(split && weightedRequestTokens(split, '5m')).toBe(
-      600 * 1.25 + 400 * 2,
-    );
-
-    const noSplit = readSubagentRequestUsage(assistant({ cacheWrite: 1_000 }));
-    expect(noSplit && weightedRequestTokens(noSplit, '1h')).toBe(2_000);
-    expect(noSplit && weightedRequestTokens(noSplit, '5m')).toBe(1_250);
-  });
-
+describe('subagent request context tokens', () => {
   it('parses the sanitized AS10 subagent transcript fixture', () => {
     const line = fs
       .readFileSync(
@@ -2918,7 +2946,7 @@ describe('weighted and context tokens', () => {
         u['cache_creation_input_tokens'],
     );
     expect(usage.cacheWriteByTtl).toBeDefined();
-    expect(weightedRequestTokens(usage, '5m')).toBeGreaterThan(0);
+    expect(requestContextTokens(usage)).toBeGreaterThan(0);
   });
 });
 

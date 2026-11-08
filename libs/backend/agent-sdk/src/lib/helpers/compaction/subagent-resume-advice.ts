@@ -9,7 +9,7 @@ import type { AgentBudgetState } from './subagent-budget-monitor';
 
 /** A refusal for a known stopped or near-limit agent; null permits forwarding. */
 export function buildBudgetResumeRefusal(state: AgentBudgetState): string | null {
-  if (!state.stopped && (state.running || state.contextTokens === null ||
+  if (!state.stopped && !state.warned && (state.running || state.contextTokens === null ||
       state.contextTokens < state.warningRatio * state.handoffTokens)) return null;
   const guidance = state.recordPath
     ? `Start a new agent with a short brief from the handoff record.`

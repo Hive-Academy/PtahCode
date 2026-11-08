@@ -137,10 +137,10 @@ describe('SDK SendMessage budget gate', () => {
     expect(result).toEqual(expect.objectContaining({ behavior: 'deny', interrupt: false }));
   });
 
-  it('allows steering a running agent at the warning threshold', async () => {
-    const { handler } = makeHandler(undefined, undefined, { getAgentBudgetState: () => ({ contextTokens: 850, stopped: false, stopState: 'none', running: true, handoffTokens: 1000, warningRatio: 0.85 }) });
+  it('denies a warned running agent before the stop', async () => {
+    const { handler } = makeHandler(undefined, undefined, { getAgentBudgetState: () => ({ contextTokens: 850, stopped: false, warned: true, stopState: 'none', running: true, handoffTokens: 1000, warningRatio: 0.85 }) });
     handler.setPermissionLevel('yolo');
-    expect((await handler.createCallback(session)('SendMessage', { to: 'reviewer' }, { signal: new AbortController().signal, toolUseID: 'send-5', requestId: 'send-5' }))?.behavior).toBe('allow');
+    expect((await handler.createCallback(session)('SendMessage', { to: 'reviewer' }, { signal: new AbortController().signal, toolUseID: 'send-5', requestId: 'send-5' }))?.behavior).toBe('deny');
   });
 
   it.each([{}, { to: 42 }])('keeps the existing policy when to is missing or not a string', async (input) => {
