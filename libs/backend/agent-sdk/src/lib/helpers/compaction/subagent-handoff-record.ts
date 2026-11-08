@@ -21,8 +21,8 @@
  * One record per tool-use id: concurrent stops of one subagent (two session
  * records not yet merged by a rekey) share the first write. Once the stop was
  * invoked with a record ({@link SubagentHandoffRecords.markInvoked}), the host
- * never deletes it; before that, {@link SubagentHandoffRecords.withdraw}
- * removes a record whose stop will not run.
+ * retains it only after publication. A failed final notes scrub disposes of
+ * an unpublished record, even if its stop was invoked.
  *
  * Trust boundary: the workspace filesystem is trusted local state, as for the
  * other `.ptah/subagent-handoffs` files. Before a write, `.ptah` and the
@@ -297,9 +297,10 @@ interface RecordWriter {
   readonly write: Promise<HandoffRecordWrite>;
   /** The record path once the write succeeded. */
   path?: string;
-  /** `stopSubagent` was called with this record: never delete it. */
+  /** `stopSubagent` was called with this record. */
   invoked: boolean;
   published?: boolean;
+  disposing?: boolean;
 }
 
 export class SubagentHandoffRecords {
@@ -357,7 +358,7 @@ export class SubagentHandoffRecords {
   /** Claim publication synchronously with disposal's ownership check. */
   publishIfOwned(toolCallId: string, recordPath: string, publish: () => void): boolean {
     const writer = this.writers.get(toolCallId);
-    if (!writer || writer.path !== recordPath) return false;
+    if (!writer || writer.disposing || writer.path !== recordPath) return false;
     writer.published = true;
     publish();
     return true;
@@ -387,17 +388,24 @@ export class SubagentHandoffRecords {
     }
   }
 
-  /** A failed final notes scrub may discard only this uninvoked writer's record. */
+  /** Remove unpublished unsafe records; retain published records without their unsafe content. */
   async disposeUnsafe(toolCallId: string, recordPath: string): Promise<void> {
     const writer = this.writers.get(toolCallId);
-    if (!writer || writer.path !== recordPath) return;
-    if (writer.invoked || writer.published) {
-      this.logger.warn('[SubagentHandoffRecords] Unsafe record retained after another stop invoked it', {
-        toolCallId, error: new Error('Record is owned by an invoked stop'),
+    if (!writer || writer.disposing || writer.path !== recordPath) return;
+    writer.disposing = true;
+    try {
+      if (writer.published) {
+        await fs.writeFile(recordPath, renderRecord('Handoff notes unavailable because final redaction failed.'), 'utf8');
+      } else {
+        await fs.unlink(recordPath);
+        this.writers.delete(toolCallId);
+      }
+    } catch (error: unknown) {
+      this.logger.warn('[SubagentHandoffRecords] Unsafe handoff record could not be disposed', {
+        toolCallId,
+        error: error instanceof Error ? error : new Error(String(error)),
       });
-      return;
     }
-    await this.withdraw(toolCallId, recordPath);
   }
 
   /**

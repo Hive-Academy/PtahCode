@@ -3102,6 +3102,31 @@ describe('SubagentBudgetMonitor handoff records', () => {
     failFirstFinal?.();
     await first;
     expect(fs.existsSync(write.path)).toBe(true);
+    expect(fs.readFileSync(write.path, 'utf8')).not.toContain(paths.notes);
+  });
+
+  it('removes an invoked unpublished record when the final notes scrub fails', async () => {
+    const logger = quietLogger();
+    const records = new SubagentHandoffRecords(logger, () => workspace);
+    const index = new SubagentHandoffIndex(logger);
+    const notes = path.join(workspace, 'unsafe-notes.md');
+    const handoffFiles = {
+      paths: jest.fn(() => ({ notes, task: path.join(workspace, 'task.md') })),
+      saveTask: jest.fn(async () => true),
+      notesExist: jest.fn(async () => true),
+      redactNotes: jest.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false),
+    };
+    const h = makeHarness({ agentId: 'a1' }, { records, index, handoffFiles });
+    await h.monitor.observe(SESSION, over('single-stop'));
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
+    const dir = path.join(workspace, '.ptah', 'subagent-handoffs');
+    const files = fs.readdirSync(dir);
+    expect(files).toHaveLength(0);
+    expect(files.some((name) => fs.readFileSync(path.join(dir, name), 'utf8').includes(notes))).toBe(false);
+    const pointer = await index.pointerFor(workspace, {
+      own: new Set([ownerHash(SESSION)]), hidden: new Set(), cursorKey: SESSION,
+    });
+    expect(pointer).toBeUndefined();
   });
 
   it.each(['budget stop', 'normal exit'])('withholds an indexed notes path when the final scrub fails on %s', async (route) => {
