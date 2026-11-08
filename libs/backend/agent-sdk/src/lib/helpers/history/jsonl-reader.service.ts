@@ -18,6 +18,7 @@ import { createReadStream } from 'node:fs';
 import * as path from 'path';
 import * as os from 'os';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
+import { claudeProjectDir } from '@ptah-extension/shared';
 import type {
   JsonlMessageLine,
   SessionHistoryMessage,
@@ -474,7 +475,7 @@ export class JsonlReaderService {
     projectsDir: string,
     workspacePath: string,
   ): Promise<string | null> {
-    const escapedPath = workspacePath.replace(/[:\\/]/g, '-');
+    const escapedPath = claudeProjectDir(workspacePath);
     const dirs = await fs.readdir(projectsDir);
 
     this.logger.debug('[JsonlReader] findSessionsDirectory', {
