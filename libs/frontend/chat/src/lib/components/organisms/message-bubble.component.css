@@ -363,12 +363,17 @@
 }
 
 /* Markdown is created inside child renderers, so pierce view encapsulation here. */
-:host ::ng-deep :is(.cs-answer, .cs-user-bubble) :is(markdown, .ptah-markdown-root) :is(p, li, h1, h2, h3, h4, h5, h6, blockquote, th, td) {
+:host ::ng-deep :is(.cs-answer, .cs-user-bubble) :is(markdown, .ptah-markdown-root) :is(p, li, h1, h2, h3, h4, h5, h6, blockquote, th, td, .code-block-note) {
   unicode-bidi: plaintext;
   text-align: start;
 }
 
 :host ::ng-deep :is(.cs-answer, .cs-user-bubble) :is(markdown, .ptah-markdown-root) :is(pre, code) {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+:host ::ng-deep :is(.cs-answer, .cs-user-bubble) :is(markdown, .ptah-markdown-root) .code-block-container {
   direction: ltr;
   unicode-bidi: isolate;
 }

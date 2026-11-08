@@ -32,8 +32,15 @@ import { TestBed } from '@angular/core/testing';
 import { SURFACE_ACTIVE } from '@ptah-extension/core';
 import type { ExecutionNode } from '@ptah-extension/shared';
 import { ThinkingBlockComponent } from './thinking-block.component';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 describe('ThinkingBlockComponent direction', () => {
+  it('isolates code controls and treats plain-text notes as prose', () => {
+    const source = readFileSync(join(__dirname, 'thinking-block.component.ts'), 'utf8');
+    expect(source).toMatch(/markdown \.code-block-container \{\s*direction: ltr;\s*unicode-bidi: isolate;/);
+    expect(source).toMatch(/th, td, \.code-block-note\) \{\s*unicode-bidi: plaintext;/);
+  });
   it('sets automatic direction on expanded markdown content', () => {
     TestBed.configureTestingModule({
       imports: [ThinkingBlockComponent],

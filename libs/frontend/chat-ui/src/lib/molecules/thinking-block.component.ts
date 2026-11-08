@@ -85,11 +85,15 @@ import type { ExecutionNode } from '@ptah-extension/shared';
     </div>
   `,
   styles: [`
-    :host ::ng-deep markdown :is(p, li, h1, h2, h3, h4, h5, h6, blockquote, th, td) {
+    :host ::ng-deep markdown :is(p, li, h1, h2, h3, h4, h5, h6, blockquote, th, td, .code-block-note) {
       unicode-bidi: plaintext;
       text-align: start;
     }
     :host ::ng-deep markdown :is(pre, code) {
+      direction: ltr;
+      unicode-bidi: isolate;
+    }
+    :host ::ng-deep markdown .code-block-container {
       direction: ltr;
       unicode-bidi: isolate;
     }

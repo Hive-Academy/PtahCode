@@ -289,7 +289,7 @@ function createEnhancedHeadingsExtension(): MarkedExtension {
         ).parser.parseInline(token.tokens);
 
         if (depth === 1 || depth === 2) {
-          return `<h${depth} class="prose-heading-accented"><span class="prose-heading-dot"></span>${text}</h${depth}>\n`;
+          return `<h${depth} class="prose-heading-accented" dir="auto"><span class="prose-heading-dot"></span>${text}</h${depth}>\n`;
         }
 
         if (depth === 3) {

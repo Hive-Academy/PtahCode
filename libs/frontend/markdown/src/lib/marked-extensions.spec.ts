@@ -331,6 +331,7 @@ describe('enhanced headings extension', () => {
     expect(out as string).toContain('<h1');
     expect(out as string).toContain('prose-heading-accented');
     expect(out as string).toContain('prose-heading-dot');
+    expect(out as string).toContain('class="prose-heading-accented" dir="auto"');
   });
 
   it('renders H2 with accented heading wrapper', () => {
@@ -346,6 +347,7 @@ describe('enhanced headings extension', () => {
     } as Tokens.Heading);
     expect(out as string).toContain('<h2');
     expect(out as string).toContain('prose-heading-accented');
+    expect(out as string).toContain('class="prose-heading-accented" dir="auto"');
   });
 
   it('renders H3 with bordered heading wrapper', () => {

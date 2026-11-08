@@ -106,7 +106,7 @@
       <!-- No tree (raw, system or error text): the raw text is the answer. -->
       <div
         class="cs-answer max-w-[600px] text-[13px] leading-[1.6]"
-        dir="auto"
+        [attr.dir]="mermaidFallbackText() ? null : 'auto'"
       >
         @if (mermaidFallbackText(); as text) {
           @defer (on immediate) {

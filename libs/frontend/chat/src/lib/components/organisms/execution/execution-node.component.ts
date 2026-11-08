@@ -219,7 +219,6 @@ function scheduleFrame(cb: () => void): FrameHandle {
         } @else if (mermaidHost()) {
           <div
             class="prose prose-sm prose-invert max-w-none my-2 exec-text-branch"
-            dir="auto"
           >
             @defer (on immediate) {
               <ptah-mermaid-message-text
@@ -441,12 +440,17 @@ function scheduleFrame(cb: () => void): FrameHandle {
         display: block;
       }
 
-      :host ::ng-deep .exec-text-branch :is(markdown, .ptah-markdown-root) :is(p, li, h1, h2, h3, h4, h5, h6, blockquote, th, td) {
+      :host ::ng-deep .exec-text-branch :is(markdown, .ptah-markdown-root) :is(p, li, h1, h2, h3, h4, h5, h6, blockquote, th, td, .code-block-note) {
         unicode-bidi: plaintext;
         text-align: start;
       }
 
       :host ::ng-deep .exec-text-branch :is(markdown, .ptah-markdown-root) :is(pre, code) {
+        direction: ltr;
+        unicode-bidi: isolate;
+      }
+
+      :host ::ng-deep .exec-text-branch :is(markdown, .ptah-markdown-root) .code-block-container {
         direction: ltr;
         unicode-bidi: isolate;
       }

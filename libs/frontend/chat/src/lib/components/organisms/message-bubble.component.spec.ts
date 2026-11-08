@@ -7,6 +7,8 @@
  */
 
 import { provideSurfaceActiveTesting } from '@ptah-extension/core/testing';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   Component,
   Input,
@@ -676,5 +678,15 @@ describe('MessageBubbleComponent — branch/rewind action buttons', () => {
         ),
       ).toBeNull();
     });
+  });
+});
+
+describe('chat markdown bidi styles', () => {
+  it('treats plain-text code notes as prose and isolates code controls', () => {
+    const css = readFileSync(join(__dirname, 'message-bubble.component.css'), 'utf8');
+    const html = readFileSync(join(__dirname, 'message-bubble.component.html'), 'utf8');
+    expect(css).toMatch(/th, td, \.code-block-note\) \{\s*unicode-bidi: plaintext;/);
+    expect(css).toMatch(/\.code-block-container \{\s*direction: ltr;\s*unicode-bidi: isolate;/);
+    expect(html).toContain('[attr.dir]="mermaidFallbackText() ? null : \'auto\'"');
   });
 });
