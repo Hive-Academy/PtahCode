@@ -7,6 +7,7 @@
 
 import type { PermissionLevel } from './model-autopilot.types';
 import type { QuestionItem } from '../type-guards/guards';
+import type { AgentPermissionRequest } from './agent-permission.types';
 
 /**
  * Sentinel value for when the parent agent's toolCallId cannot be resolved.
@@ -69,6 +70,9 @@ export interface PermissionRequest {
   /** Session ID this permission belongs to (for UI routing to correct tab) */
   readonly sessionId?: string;
 
+  /** Whether this request can store a session-scoped Always Allow rule. */
+  readonly canAlwaysAllow?: boolean;
+
   /** Frontend tab ID for direct tab routing (authoritative over `sessionId`). */
   readonly tabId?: string;
 
@@ -107,6 +111,8 @@ export interface PermissionResponse {
  * This breaks the circular dependency between vscode-core and agent-sdk.
  */
 export interface ISdkPermissionHandler {
+  /** Live CLI lane prompts for replay after a lane resumes or the renderer reconnects. */
+  getPendingCliAgentPermissions(): AgentPermissionRequest[];
   /** Optional diagnostics for SDK hosts that track budget stops. */
   recordBudgetStop?(sessionId: string): void;
   getPendingPermissionCount?(sessionId?: string): number;
@@ -115,7 +121,7 @@ export interface ISdkPermissionHandler {
    * @param requestId - The permission request ID
    * @param response - The user's response
    */
-  handleResponse(requestId: string, response: PermissionResponse): void;
+  handleResponse(requestId: string, response: PermissionResponse): boolean;
 
   /**
    * Handle question response from webview (for AskUserQuestion tool)

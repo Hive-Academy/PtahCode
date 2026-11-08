@@ -154,7 +154,7 @@ export function createCodexChatApprovalPresentation(
           ? {
               id, sessionId, ...(tabId === sessionId ? {} : { tabId }),
               ...presented, toolUseId: request.toolId, timestamp,
-              timeoutAt: request.expiresAt ?? 0,
+              timeoutAt: boundedAt,
             }
           : {
               id, ...presented, toolUseId: request.toolId,
@@ -167,17 +167,19 @@ export function createCodexChatApprovalPresentation(
             routable: false, timeoutMs,
           });
           if (!pending.has(id)) return;
-          entry.promptTimer = ports.setTimer(() => {
-            const current = takePrompt(id);
-            if (!current?.unroutable) return;
-            const reason = buildSystemAbortPermissionMessage(
-              current.unroutable.toolName,
-              `Permission request timed out after ${current.unroutable.timeoutMs}ms with no answer from the UI — denying to prevent a permanent hang.`,
-            );
-            declineApproval(current, reason);
-            publishResolved(id, current, 'timed-out');
-          }, timeoutMs);
         }
+        entry.promptTimer = ports.setTimer(() => {
+          const current = takePrompt(id);
+          if (!current) return;
+          const reason = current.unroutable
+            ? buildSystemAbortPermissionMessage(
+                presented.toolName,
+                `Permission request timed out after ${timeoutMs}ms with no answer from the UI — denying to prevent a permanent hang.`,
+              )
+            : `Permission request timed out after ${timeoutMs}ms without an answer from the UI. This was a timeout, not a user denial.`;
+          declineApproval(current, reason);
+          publishResolved(id, current, 'timed-out');
+        }, timeoutMs);
         // The manager's attention observer raises the host notice.
         void ports.webviewManager
           .broadcastMessage(MESSAGE_TYPES.PERMISSION_REQUEST, payload)

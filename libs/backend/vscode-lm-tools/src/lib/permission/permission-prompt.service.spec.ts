@@ -36,7 +36,7 @@ import type {
 } from '@ptah-extension/shared';
 import type { IStateStorage } from '@ptah-extension/platform-core';
 import { createMockStateStorage } from '@ptah-extension/platform-core/testing';
-import { PermissionPromptService } from './permission-prompt.service';
+import { MCP_PERMISSION_TIMEOUT_MS, PermissionPromptService } from './permission-prompt.service';
 import type { ApprovalPromptParams } from '../code-execution/types';
 
 interface MockLogger {
@@ -87,7 +87,7 @@ describe('PermissionPromptService', () => {
   // ========================================
 
   describe('createRequest', () => {
-    it('produces a request with UUID id, tool metadata, and timeoutAt=0', () => {
+    it('produces a request with UUID id, tool metadata, and finite deadline', () => {
       const beforeNow = Date.now();
       const req = svc.createRequest(createParams());
       const afterNow = Date.now();
@@ -98,7 +98,7 @@ describe('PermissionPromptService', () => {
       expect(req.toolName).toBe('Bash');
       expect(req.toolInput).toEqual({ command: 'ls -la' });
       expect(req.toolUseId).toBe('tool-use-abc');
-      expect(req.timeoutAt).toBe(0);
+      expect(req.timeoutAt).toBe(req.timestamp + MCP_PERMISSION_TIMEOUT_MS);
       expect(req.timestamp).toBeGreaterThanOrEqual(beforeNow);
       expect(req.timestamp).toBeLessThanOrEqual(afterNow);
     });
@@ -107,6 +107,13 @@ describe('PermissionPromptService', () => {
       const a = svc.createRequest(createParams());
       const b = svc.createRequest(createParams());
       expect(a.id).not.toBe(b.id);
+    });
+
+    it('carries the caller session URL owner into renderer routing fields', () => {
+      const owner = '22222222-2222-4222-8222-222222222222';
+      expect(svc.createRequest(createParams(), owner)).toMatchObject({
+        sessionId: owner, tabId: owner,
+      });
     });
 
     it('builds descriptive strings per tool kind (Bash/Write/Read/Edit/Glob/Grep)', () => {
@@ -177,6 +184,23 @@ describe('PermissionPromptService', () => {
         timeoutAt: 0,
       };
     }
+
+    it('denies an unanswered request at its deadline and ignores a late answer', async () => {
+      jest.useFakeTimers();
+      try {
+        const req = svc.createRequest(createParams());
+        const response = new Promise<PermissionResponse>((resolve) =>
+          svc.setPendingResolver(req.id, resolve, req));
+        jest.advanceTimersByTime(MCP_PERMISSION_TIMEOUT_MS);
+        await expect(response).resolves.toMatchObject({
+          id: req.id, decision: 'deny', reason: 'Permission request timed out',
+        });
+        expect(svc.resolveRequest({ id: req.id, decision: 'allow' })).toBe(false);
+      } finally {
+        jest.clearAllTimers();
+        jest.useRealTimers();
+      }
+    });
 
     it('resolves pending request with allow decision', async () => {
       const req = makeRequest();
@@ -293,12 +317,17 @@ describe('PermissionPromptService', () => {
         expect(service.removePendingResolver(request.id)).toBe(false);
     });
 
-    it('does not time out — setPendingResolver never schedules a timer', () => {
+    it('schedules and clears a finite deadline', () => {
       const req = makeRequest();
       const spy = jest.spyOn(global, 'setTimeout');
       try {
         svc.setPendingResolver(req.id, () => undefined, req);
-        expect(spy).not.toHaveBeenCalled();
+        expect(spy).toHaveBeenCalledWith(expect.any(Function),
+          expect.any(Number));
+        const delay = spy.mock.calls[0][1] as number;
+        expect(delay).toBeGreaterThan(0);
+        expect(delay).toBeLessThanOrEqual(MCP_PERMISSION_TIMEOUT_MS);
+        expect(svc.removePendingResolver(req.id)).toBe(true);
       } finally {
         spy.mockRestore();
       }

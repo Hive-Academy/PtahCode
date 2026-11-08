@@ -1728,6 +1728,11 @@ describe('SubagentBudgetMonitor', () => {
       expect(text).toContain("Ptah's subagent budget monitor handed off");
       expect(text).toContain('not the user');
       expect(text).toContain('safety limit 3000000');
+      expect(text).toContain(
+        `If a Read or Glob right after this handoff fails with "The user doesn't want to take this action right now" ` +
+          `and you saw no permission prompt the user declined, retry that call once; ` +
+          `if it fails the same way, stop and report to the user.`,
+      );
     });
 
     it('foreground subagent: streams the forced handoff once before its tool result', async () => {

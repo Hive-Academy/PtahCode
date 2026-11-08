@@ -46,7 +46,7 @@ describe('Codex chat approval presentation', () => {
     };
   }
 
-  function harness() {
+  function harness(tab = 'gw-conversation', expiresAt?: number) {
     const broadcastMessage = jest.fn<Promise<void>, [string, unknown]>()
       .mockResolvedValue(undefined);
     const publish = jest.fn<void, [PermissionPromptLifecycleEvent]>();
@@ -60,7 +60,7 @@ describe('Codex chat approval presentation', () => {
     const ports = createCodexChatApprovalPresentation({
       logger: Logger.prototype,
       approvals,
-      tabId: () => 'gw-conversation',
+      tabId: () => tab,
       webviewManager: { broadcastMessage },
       promptLifecycle: { publish },
       hostAttention: { resolve: resolveAttention },
@@ -68,7 +68,7 @@ describe('Codex chat approval presentation', () => {
       clearTimer: (timer) => clearTimeout(timer),
     });
     const present = () => {
-      ports.presentation.present(sessionId, request(), [...choices]);
+      ports.presentation.present(sessionId, { ...request(), expiresAt }, [...choices]);
       const payload = broadcastMessage.mock.calls[0][1];
       if (typeof payload !== 'object' || payload === null || !('id' in payload)) {
         throw new Error('Missing permission request id');
@@ -96,6 +96,24 @@ describe('Codex chat approval presentation', () => {
       phase: 'resolved', requestId: wireId, routingHint: 'gw-conversation',
       toolName: 'Bash', outcome: 'timed-out',
     });
+    expect(h.ports.handlePermissionResponse({ id: wireId, decision: 'allow' })).toBe(false);
+  });
+
+  it('denies a routable card at its earlier native deadline after renderer loss', () => {
+    const h = harness(sessionId, now + 2_000);
+    const wireId = h.present();
+    expect(h.broadcastMessage).toHaveBeenCalledWith(
+      MESSAGE_TYPES.PERMISSION_REQUEST,
+      expect.objectContaining({ id: wireId, timeoutAt: now + 2_000 }),
+    );
+    jest.advanceTimersByTime(2_000);
+    expect(h.respond).toHaveBeenCalledWith(
+      { sessionId, threadId: sessionId, requestId: '5' },
+      expect.objectContaining({ response: expect.objectContaining({
+        decision: 'decline',
+        reason: 'Permission request timed out after 2000ms without an answer from the UI. This was a timeout, not a user denial.',
+      }) }),
+    );
     expect(h.ports.handlePermissionResponse({ id: wireId, decision: 'allow' })).toBe(false);
   });
 

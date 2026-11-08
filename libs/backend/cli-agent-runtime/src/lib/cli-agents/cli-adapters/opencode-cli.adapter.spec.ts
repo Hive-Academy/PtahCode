@@ -404,7 +404,7 @@ describe('OpencodeCliAdapter', () => {
   describe('runSdk() — argument construction', () => {
     const baseOptions = { task: 'Do the thing', workingDirectory: '/proj' };
 
-    it('spawns run --format json with --auto and the prompt LAST', async () => {
+    it('spawns run --format json without implicit approval and with the prompt LAST', async () => {
       const handle = await adapter.runSdk(baseOptions);
       collect(handle);
       currentChild?.emitClose(0);
@@ -416,7 +416,7 @@ describe('OpencodeCliAdapter', () => {
       ];
       expect(binaryArg).toBe('opencode');
       expect(argsArg.slice(0, 3)).toEqual(['run', '--format', 'json']);
-      expect(argsArg).toContain('--auto');
+      expect(argsArg).not.toContain('--auto');
       expect(argsArg[argsArg.length - 1]).toContain('Do the thing');
       expect(
         argsArg[argsArg.length - 1].match(
@@ -488,6 +488,104 @@ describe('OpencodeCliAdapter', () => {
       expect(argsArg).not.toContain('--auto');
     });
 
+    it('uses --auto and merges permission allow with the existing MCP config for yolo', async () => {
+      const handle = await adapter.runSdk({ ...baseOptions, permission: 'yolo', network: 'allow',
+        mcpPort: 51820, mcpToken: 'test-token' });
+      collect(handle);
+      currentChild?.emitClose(0);
+      await handle.done;
+      const [, args, spawnOptions] = mockSpawnCli.mock.calls[0] as [string, string[], { env?: NodeJS.ProcessEnv }];
+      expect(args).toContain('--auto');
+      expect(args).toContain('--standalone');
+      const config = JSON.parse(spawnOptions.env?.['OPENCODE_CONFIG_CONTENT'] ?? '{}') as {
+        permission?: string; mcp?: { ptah?: { enabled?: boolean } };
+      };
+      expect(config.permission).toBe('allow');
+      expect(config.mcp?.ptah?.enabled).toBe(true);
+    });
+
+    it('merges inherited inline config when yolo has no Ptah MCP token', async () => {
+      const previous = process.env['OPENCODE_CONFIG_CONTENT'];
+      process.env['OPENCODE_CONFIG_CONTENT'] = JSON.stringify({ model: 'keep', mcp: { peer: { enabled: true } } });
+      try {
+        const handle = await adapter.runSdk({ ...baseOptions, permission: 'yolo', network: 'allow' });
+        collect(handle);
+        currentChild?.emitClose(0);
+        await handle.done;
+        const env = mockSpawnCli.mock.calls[0][2].env as NodeJS.ProcessEnv;
+        expect(JSON.parse(env['OPENCODE_CONFIG_CONTENT'] ?? '{}')).toEqual({
+          model: 'keep', mcp: { peer: { enabled: true } }, permission: 'allow',
+        });
+      } finally {
+        if (previous === undefined) delete process.env['OPENCODE_CONFIG_CONTENT'];
+        else process.env['OPENCODE_CONFIG_CONTENT'] = previous;
+      }
+    });
+
+    it('reports malformed inherited config and refuses yolo before spawning', async () => {
+      const previous = process.env['OPENCODE_CONFIG_CONTENT'];
+      const secret = 'SENTINEL42';
+      process.env['OPENCODE_CONFIG_CONTENT'] = secret;
+      const logger = { error: jest.fn() };
+      try {
+        adapter = new OpencodeCliAdapter(undefined, logger);
+        await expect(adapter.runSdk({ ...baseOptions, permission: 'yolo', network: 'allow' }))
+          .rejects.toThrow('valid OPENCODE_CONFIG_CONTENT');
+        expect(logger.error).toHaveBeenCalledWith(expect.any(String), expect.any(Error));
+        const logged = JSON.stringify(logger.error.mock.calls, (_key, value: unknown) =>
+          value instanceof Error ? { message: value.message, stack: value.stack } : value);
+        expect(logged).not.toContain(secret);
+        expect(mockSpawnCli).not.toHaveBeenCalled();
+      } finally {
+        if (previous === undefined) delete process.env['OPENCODE_CONFIG_CONTENT'];
+        else process.env['OPENCODE_CONFIG_CONTENT'] = previous;
+      }
+    });
+
+    it('refuses malformed inherited config for a no-MCP plan run', async () => {
+      const previous = process.env['OPENCODE_CONFIG_CONTENT'];
+      process.env['OPENCODE_CONFIG_CONTENT'] = '{bad';
+      const logger = { error: jest.fn() };
+      try {
+        adapter = new OpencodeCliAdapter(undefined, logger);
+        await expect(adapter.runSdk({ ...baseOptions, permission: 'plan', network: 'allow' }))
+          .rejects.toThrow('valid OPENCODE_CONFIG_CONTENT');
+        expect(logger.error).toHaveBeenCalledWith(expect.any(String), expect.any(Error));
+        expect(mockSpawnCli).not.toHaveBeenCalled();
+      } finally {
+        if (previous === undefined) delete process.env['OPENCODE_CONFIG_CONTENT'];
+        else process.env['OPENCODE_CONFIG_CONTENT'] = previous;
+      }
+    });
+
+    it('leaves valid inherited config untouched for a no-MCP plan run', async () => {
+      const previous = process.env['OPENCODE_CONFIG_CONTENT'];
+      const inherited = JSON.stringify({ model: 'keep', mcp: { peer: { enabled: true } } });
+      process.env['OPENCODE_CONFIG_CONTENT'] = inherited;
+      try {
+        const handle = await adapter.runSdk({ ...baseOptions, permission: 'plan', network: 'allow' });
+        collect(handle);
+        const env = mockSpawnCli.mock.calls[0][2].env as NodeJS.ProcessEnv;
+        expect(env['OPENCODE_CONFIG_CONTENT']).toBeUndefined();
+        expect(process.env['OPENCODE_CONFIG_CONTENT']).toBe(inherited);
+        currentChild?.emitClose(0);
+        await handle.done;
+      } finally {
+        if (previous === undefined) delete process.env['OPENCODE_CONFIG_CONTENT'];
+        else process.env['OPENCODE_CONFIG_CONTENT'] = previous;
+      }
+    });
+
+    it('keeps plan off --auto', async () => {
+      const handle = await adapter.runSdk({ ...baseOptions, permission: 'plan', network: 'allow' });
+      collect(handle);
+      currentChild?.emitClose(0);
+      await handle.done;
+      const args = mockSpawnCli.mock.calls[0][1] as string[];
+      expect(args).toEqual(expect.arrayContaining(['--agent', 'plan', '--standalone']));
+      expect(args).not.toContain('--auto');
+    });
+
     it('passes binaryPath through to spawnCli when provided', async () => {
       const handle = await adapter.runSdk({
         ...baseOptions,
@@ -543,6 +641,34 @@ describe('OpencodeCliAdapter', () => {
       );
 
       expect(await runArgs()).not.toContain('--standalone');
+    });
+
+    it('uses legacy --auto for a built-in yolo default on older binaries', async () => {
+      mockHelpProbe.mockImplementation(() => helpProbeChild('  --print-logs  Print logs\n'));
+      const handle = await adapter.runSdk({ ...baseOptions, permission: 'yolo', network: 'allow', permissionSource: 'built-in' });
+      collect(handle);
+      currentChild?.emitClose(0);
+      await handle.done;
+      expect(mockSpawnCli.mock.calls[0][1]).toContain('--auto');
+      expect(handle.effectivePolicy?.permission).toBeUndefined();
+    });
+
+    it('uses legacy --auto when the built-in policy help probe fails', async () => {
+      mockHelpProbe.mockImplementationOnce(() => helpProbeChild(V2_RUN_HELP, 1));
+      const handle = await adapter.runSdk({ ...baseOptions, permission: 'yolo', network: 'allow', permissionSource: 'built-in' });
+      collect(handle);
+      currentChild?.emitClose(0);
+      await handle.done;
+      expect(mockSpawnCli.mock.calls[0][1]).toContain('--auto');
+      expect(handle.effectivePolicy?.nativeDescription).toContain('legacy');
+    });
+
+    it('refuses saved yolo and plan without standalone', async () => {
+      mockHelpProbe.mockImplementation(() => helpProbeChild('  --print-logs  Print logs\n'));
+      await expect(adapter.runSdk({ ...baseOptions, permission: 'yolo', network: 'allow', permissionSource: 'saved' }))
+        .rejects.toThrow('saved yolo lane policy requires');
+      await expect(adapter.runSdk({ ...baseOptions, permission: 'plan', network: 'allow', permissionSource: 'parent-plan' }))
+        .rejects.toThrow('parent-plan plan lane policy requires');
     });
 
     it('omits --standalone and says so when the help probe exits non-zero', async () => {
@@ -1184,7 +1310,7 @@ describe('OpencodeCliAdapter', () => {
         'Also fix the tests',
       ]);
       expect(second.args).toEqual(
-        expect.arrayContaining(['--auto', '--standalone', '--model']),
+        expect.arrayContaining(['--standalone', '--model']),
       );
       expect(second.spawnOptions.cwd).toBe('/proj');
       expect(second.spawnOptions.detached).toBe(true);
@@ -1321,6 +1447,42 @@ describe('OpencodeCliAdapter', () => {
       ];
       return call?.[2]?.env;
     }
+
+    it('keeps inherited config and MCP peers during a plan run', async () => {
+      const previous = process.env['OPENCODE_CONFIG_CONTENT'];
+      process.env['OPENCODE_CONFIG_CONTENT'] = JSON.stringify({ model: 'keep',
+        plugin: ['one'], mcp: { peer: { enabled: true } } });
+      try {
+        const handle = await adapter.runSdk({ task: 'X', workingDirectory: '/proj',
+          mcpPort: 51820, mcpToken: 'lane-token', permission: 'plan', network: 'allow' });
+        collect(handle);
+        const config = JSON.parse(spawnEnv()?.['OPENCODE_CONFIG_CONTENT'] ?? '{}');
+        expect(config).toMatchObject({ model: 'keep', plugin: ['one'],
+          mcp: { peer: { enabled: true }, ptah: { enabled: true } } });
+        expect(config.permission).toBeUndefined();
+        currentChild?.emitClose(0);
+        await handle.done;
+      } finally {
+        if (previous === undefined) delete process.env['OPENCODE_CONFIG_CONTENT'];
+        else process.env['OPENCODE_CONFIG_CONTENT'] = previous;
+      }
+    });
+
+    it('refuses malformed inherited config before spawning with MCP', async () => {
+      const previous = process.env['OPENCODE_CONFIG_CONTENT'];
+      process.env['OPENCODE_CONFIG_CONTENT'] = '{bad';
+      const logger = { error: jest.fn() };
+      try {
+        adapter = new OpencodeCliAdapter(undefined, logger);
+        await expect(adapter.runSdk({ task: 'X', workingDirectory: '/proj',
+          mcpPort: 51820, mcpToken: 'lane-token' })).rejects.toThrow('valid OPENCODE_CONFIG_CONTENT');
+        expect(logger.error).toHaveBeenCalledWith(expect.any(String), expect.any(Error));
+        expect(mockSpawnCli).not.toHaveBeenCalled();
+      } finally {
+        if (previous === undefined) delete process.env['OPENCODE_CONFIG_CONTENT'];
+        else process.env['OPENCODE_CONFIG_CONTENT'] = previous;
+      }
+    });
 
     it('passes the mcp.ptah config via the OPENCODE_CONFIG_CONTENT env at spawn', async () => {
       const handle = await adapter.runSdk({

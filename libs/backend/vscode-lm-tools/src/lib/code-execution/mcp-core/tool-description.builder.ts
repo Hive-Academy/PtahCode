@@ -630,8 +630,9 @@ export function buildAgentSpawnTool({
       'signal arrives (some adapters report nothing useful, and a signal is ' +
       'refused when this session is no longer live). ' +
       'For Ptah CLI agents, pass ptahCliId (from ptah_agent_list). ' +
-      'Use modelTier to control capability level: "opus" for complex/architectural tasks, ' +
-      '"sonnet" (default) for balanced work, "haiku" for fast/simple tasks. Only applies to Ptah CLI agents. ' +
+      'Use modelTier to control capability level: "opus" for complex work, ' +
+      '"sonnet" (default for Ptah CLI agents) for balanced work, ' +
+      '"haiku" for fast work. Applies to Ptah CLI and cli "claude". ' +
       'To resume a previous CLI session, pass resume_session_id with the CLI session ID. ' +
       'Ideal for delegating: code reviews, test generation, documentation, ' +
       'and other independent subtasks.',
@@ -717,8 +718,8 @@ export function buildAgentSpawnTool({
             "The tier maps to a concrete model through the chosen provider's own " +
             'tier mappings, so the same tier resolves differently per provider — ' +
             'you pick the tier, never the model id. ' +
-            'Only applies when ptahCliId is set. Ignored for system CLI agents, ' +
-            'including cli "claude".',
+            'Also applies to system cli "claude" as a native model alias ' +
+            'when model is omitted. Other system CLIs ignore it.',
         },
         resume_session_id: {
           type: 'string',

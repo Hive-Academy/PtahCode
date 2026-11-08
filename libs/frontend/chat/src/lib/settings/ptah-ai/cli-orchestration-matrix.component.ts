@@ -23,7 +23,7 @@ import {
   NativePopoverComponent,
   ProviderMarkComponent,
 } from '@ptah-extension/ui';
-import type { SystemCliType } from '@ptah-extension/shared';
+import type { CliLaneDefaults, SystemCliType } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import {
   CLI_TEST_NOT_RUN,
@@ -61,6 +61,8 @@ import { ClaudeLaneAccountCellComponent } from './claude-lane-account-cell.compo
 import { PtahCliInstancesComponent } from './ptah-cli-instances.component';
 import { CliCapabilityCellsComponent } from './cli-capability-cells.component';
 import { CliCapabilityDetailComponent } from './cli-capability-detail.component';
+import { CliLaneDefaultCellComponent } from './cli-lane-default-cell.component';
+import { CliLaneDefaultsStore } from './cli-lane-defaults.store';
 
 /** Which popover of which row is open; one at a time. */
 type OpenCell = {
@@ -156,6 +158,7 @@ const SAVE_SCOPE = 'global';
 @Component({
   selector: 'ptah-cli-orchestration-matrix',
   standalone: true,
+  providers: [CliLaneDefaultsStore],
   imports: [
     SettingsBusyDisabledDirective,
     AgentOrchestrationConfigComponent,
@@ -171,6 +174,7 @@ const SAVE_SCOPE = 'global';
     PtahCliInstancesComponent,
     CliCapabilityCellsComponent,
     CliCapabilityDetailComponent,
+    CliLaneDefaultCellComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -199,14 +203,14 @@ const SAVE_SCOPE = 'global';
         >
       </div>
 
-      <p class="text-xs text-base-content-muted">These are CLI capabilities. A running lane may offer fewer actions.</p>
+      <p class="text-xs text-base-content-muted">These are CLI capabilities. Permission and network defaults are editable. A running lane may offer fewer actions.</p>
 
       <ptah-agent-orchestration-config />
 
       <!-- A glass tile in glass themes, a base-100 plate with a hairline in solid themes. The table fits its width
            (headers and permission badges wrap); overflow-x-auto is only a safety net. -->
       <div
-        class="overflow-x-auto rounded-lg border border-base-content/10"
+        class="min-w-0 max-w-full overflow-x-auto rounded-lg border border-base-content/10"
         data-glass-surface="tile"
       >
         <!-- table-sm density; cell padding is set in the styles below (wide and narrow).
@@ -229,6 +233,7 @@ const SAVE_SCOPE = 'global';
               <th>Model</th>
               <th>Effort</th>
               <th>Permissions &amp; Safety</th>
+              <th>Lane defaults</th>
               <th class="text-right">Actions</th>
             </tr>
           </thead>
@@ -241,7 +246,7 @@ const SAVE_SCOPE = 'global';
               @if (group.id === 'uninstalled') {
                 <!-- Decision 1 (Gate V 36): collapsed by default; the disclosure expands the rows in place. -->
                 <tr class="border-b border-base-content/10">
-                  <th colspan="8" scope="colgroup" class="py-1">
+                  <th colspan="9" scope="colgroup" class="py-1">
                     <button
                       type="button"
                       [class]="
@@ -598,6 +603,11 @@ const SAVE_SCOPE = 'global';
                       </ptah-native-popover>
                     </div>
                   </td>
+                  <td>
+                    <ptah-cli-lane-default-cell [cli]="row.cli" [name]="row.name" [manifest]="row.manifest"
+                      [saved]="state.orchestration().data?.cliLaneDefaults?.[row.cli]"
+                      [disabled]="busy() || !canWrite()" (selected)="saveLaneDefault(row, $event)" (resetRequested)="resetLaneDefault(row)" />
+                  </td>
                   <td class="text-right">
                       <div
                         class="inline-flex flex-wrap items-center justify-end gap-1"
@@ -744,7 +754,7 @@ const SAVE_SCOPE = 'global';
                 </tr>
                 @if (capabilityOpen() === row.id) {
                   <tr [id]="'cli-capability-' + row.id" class="border-b border-base-content/10">
-                    <td colspan="8" class="bg-base-200/40 px-4 py-3">
+                    <td colspan="9" class="bg-base-200/40 px-4 py-3">
                       <ptah-cli-capability-detail [manifest]="row.manifest" />
                     </td>
                   </tr>
@@ -753,7 +763,7 @@ const SAVE_SCOPE = 'global';
                 @if (group.id === 'installed') {
                   <tr>
                     <td
-                      colspan="8"
+                      colspan="9"
                       class="text-base-content-muted"
                       data-testid="cli-matrix-empty"
                     >
@@ -772,6 +782,14 @@ const SAVE_SCOPE = 'global';
       </div>
 
     </section>
+
+      @if (ptahManifest(); as manifest) {
+        <section class="rounded-lg border border-base-content/10 p-3" aria-label="Ptah CLI lane defaults">
+          <ptah-cli-lane-default-cell cli="ptah-cli" name="Ptah CLI" [manifest]="manifest"
+            [saved]="state.orchestration().data?.cliLaneDefaults?.['ptah-cli']"
+            [disabled]="busy() || !canWrite()" (selected)="savePtahDefault($event)" (resetRequested)="resetPtahDefault()" />
+        </section>
+      }
 
       <!-- The Ptah CLI instances: their own sub-section under a hairline, with Add and one card per instance. -->
       <ptah-cli-instances
@@ -818,6 +836,16 @@ const SAVE_SCOPE = 'global';
     :host {
       display: block;
       container-type: inline-size;
+      min-width: 0;
+      max-width: 100%;
+    }
+    .cli-table {
+      table-layout: fixed;
+    }
+    .cli-head > th,
+    .cli-row > td {
+      min-width: 0;
+      overflow-wrap: anywhere;
     }
     :host-context([data-glass='on']) [data-testid='settings-cli-matrix'] {
       padding: 1.25rem;
@@ -910,6 +938,7 @@ export class CliOrchestrationMatrixComponent {
     this.capabilityOpen.update((open) => open === id ? null : id);
   }
   private readonly feedback = inject(SettingsSaveFeedbackService);
+  private readonly laneDefaults = inject(CliLaneDefaultsStore);
   private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly injector = inject(Injector);
 
@@ -926,6 +955,9 @@ export class CliOrchestrationMatrixComponent {
     this.rows().installed.filter(
       (row): row is InstanceCliMatrixRow => row.kind === 'instance',
     ),
+  );
+  protected readonly ptahManifest = computed(() =>
+    this.state.orchestration().data?.detectedClis.find(cli => cli.ptahCliId)?.manifest,
   );
   /** The installed system CLIs (always, for its empty state), then the Uninstalled group when it has rows (#71). */
   protected readonly groups = computed((): readonly MatrixGroup[] => {
@@ -1280,6 +1312,20 @@ export class CliOrchestrationMatrixComponent {
       write: write(enabled),
       undo: write(row.enabled),
     });
+  }
+
+  protected async saveLaneDefault(row: SystemCliMatrixRow, choice: NonNullable<CliLaneDefaults[SystemCliType]>): Promise<void> {
+    await this.laneDefaults.save(row.cli, row.name, choice);
+  }
+  protected async savePtahDefault(choice: NonNullable<CliLaneDefaults['ptah-cli']>): Promise<void> {
+    await this.laneDefaults.save('ptah-cli', 'Ptah CLI', choice);
+  }
+
+  protected async resetLaneDefault(row: SystemCliMatrixRow): Promise<void> {
+    await this.laneDefaults.reset(row.cli, row.name);
+  }
+  protected async resetPtahDefault(): Promise<void> {
+    await this.laneDefaults.reset('ptah-cli', 'Ptah CLI');
   }
 
   /** Delete after the inline confirm (#55). No Undo: a deleted instance's stored key cannot be written back. */

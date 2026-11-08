@@ -257,6 +257,25 @@ describe('CursorCliAdapter', () => {
       workingDirectory: '/proj',
     };
 
+    it('binds yolo to agent mode with the local sandbox disabled', async () => {
+      const handle = await adapter.runSdk({ ...defaultOptions, permission: 'yolo', network: 'allow' });
+      handle.onOutput(() => {});
+      await Promise.resolve();
+      await Promise.resolve();
+      currentRun?.end();
+      await handle.done;
+      expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({
+        mode: 'agent', local: { cwd: '/proj', sandboxOptions: { enabled: false } },
+      }));
+    });
+
+    it('rejects unverified plan mode before creating an SDK agent', async () => {
+      await expect(adapter.runSdk({ ...defaultOptions, permission: 'plan', network: 'allow' }))
+        .rejects.toThrow('no local no-mutation proof');
+      expect(mockCreate).not.toHaveBeenCalled();
+      expect(mockResume).not.toHaveBeenCalled();
+    });
+
     it('creates a local agent with cwd + default model and streams text', async () => {
       const handle: SdkHandle = await adapter.runSdk(defaultOptions);
       const output: string[] = [];
@@ -406,6 +425,8 @@ describe('CursorCliAdapter', () => {
       const handle = await adapter.runSdk({
         ...defaultOptions,
         resumeSessionId: 'agent-resumed',
+        permission: 'yolo',
+        network: 'allow',
       });
       handle.onOutput(() => {
         /* drain */
@@ -417,7 +438,7 @@ describe('CursorCliAdapter', () => {
 
       expect(mockResume).toHaveBeenCalledWith(
         'agent-resumed',
-        expect.anything(),
+        expect.objectContaining({ mode: 'agent', local: { cwd: '/proj', sandboxOptions: { enabled: false } } }),
       );
       expect(mockCreate).not.toHaveBeenCalled();
     });
@@ -685,7 +706,7 @@ describe('CursorCliAdapter', () => {
         };
       });
 
-      const handle = await adapter.runSdk(defaultOptions);
+      const handle = await adapter.runSdk({ ...defaultOptions, permission: 'yolo', network: 'allow' });
       handle.onOutput(() => {
         /* drain */
       });
@@ -707,6 +728,9 @@ describe('CursorCliAdapter', () => {
 
       expect(code).toBe(0);
       expect(mockCreate).toHaveBeenCalledTimes(1);
+      expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({
+        mode: 'agent', local: { cwd: '/proj', sandboxOptions: { enabled: false } },
+      }));
       expect(mockSend).toHaveBeenCalledTimes(2);
       expect(mockSend.mock.calls[1][0]).toContain('Follow-up');
       expect(mockSend.mock.calls[1][0]).not.toContain(

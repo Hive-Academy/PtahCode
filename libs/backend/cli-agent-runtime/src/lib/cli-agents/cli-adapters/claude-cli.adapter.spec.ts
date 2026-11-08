@@ -308,10 +308,9 @@ describe('ClaudeCliAdapter native SDK execution', () => {
     },
   );
 
-  it('forwards explicit models unchanged, ignores modelTier and does not invent a default', async () => {
+  it('lets an explicit model win over the Claude model tier', async () => {
     const f = fixture();
-    const input = { ...f.input, model: 'future-model', modelTier: 'haiku' };
-    await f.adapter.runSdk(input);
+    await f.adapter.runSdk({ ...f.input, model: 'future-model' });
     expect(f.run.mock.calls[0][0].options.model).toBe('future-model');
     expect(f.run.mock.calls[0][0].options.effort).toBeUndefined();
     expect(f.run.mock.calls[0][0].options).not.toHaveProperty('modelTier');
@@ -321,6 +320,13 @@ describe('ClaudeCliAdapter native SDK execution', () => {
     await g.adapter.runSdk(g.input);
     expect(g.run.mock.calls[0][0].options).not.toHaveProperty('model');
     g.finish(0);
+  });
+
+  it('passes the manager-resolved Haiku alias to the Claude SDK', async () => {
+    const f = fixture();
+    await f.adapter.runSdk({ ...f.input, model: 'haiku' });
+    expect(f.run.mock.calls[0][0].options.model).toBe('haiku');
+    f.finish(0);
   });
 
   it('gives two fresh spawns different permission routing hints', async () => {

@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 
 jest.mock('@ptah-extension/cli-agent-runtime', () => ({
+  ...jest.requireActual('../../../../cli-agent-runtime/src/lib/cli-agents/cli-lane-policy-resolver'),
   CLI_AGENT_RUNTIME_TOKENS: {
     SDK_PTAH_CLI_REGISTRY: Symbol.for('PtahCliRegistry'),
   },
@@ -32,7 +33,7 @@ import type {
   Logger,
   RpcHandler,
 } from '@ptah-extension/vscode-core';
-import type { AgentOrchestrationConfig } from '@ptah-extension/shared';
+import type { AgentOrchestrationConfig, CliAdapterManifest } from '@ptah-extension/shared';
 import { createMockRpcHandler } from '@ptah-extension/vscode-core/testing';
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import type {
@@ -88,14 +89,30 @@ function makeHarness(
     deleteProviderKey: jest.fn().mockResolvedValue(undefined),
     hasProviderKey: jest.fn().mockResolvedValue(false),
   };
+  const supported = { state: 'supported' as const };
+  const defaultManifest: CliAdapterManifest = {
+    messaging: { steer: supported, interrupt: supported, continuation: supported, resume: supported },
+    roleChannel: 'task-prompt',
+    permissionModes: {
+      plan: { ...supported, networkModes: ['allow', 'deny'] },
+      ask: { ...supported, networkModes: ['allow', 'deny'] },
+      'auto-edit': { ...supported, networkModes: ['allow', 'deny'] },
+      yolo: { ...supported, networkModes: ['allow', 'deny'] },
+    },
+    networkModes: { allow: supported, deny: supported },
+    limitReader: { state: 'no-reliable-source' },
+    mcp: { state: 'unsupported', reason: 'test' },
+  };
+  const getAdapter = jest.fn().mockReturnValue({ capabilities: () => defaultManifest });
+  const cliDetection: Partial<CliDetectionService> = {
+    getAdapter,
+    invalidateCache: jest.fn(),
+    detectAll: jest.fn().mockResolvedValue([]),
+  };
   const handlers = new AgentRpcHandlers(
     logger as unknown as Logger,
     rpcHandler as unknown as RpcHandler,
-    {
-      getAdapter: jest.fn().mockReturnValue(undefined),
-      invalidateCache: jest.fn(),
-      detectAll: jest.fn().mockResolvedValue([]),
-    } as unknown as CliDetectionService,
+    cliDetection as CliDetectionService,
     {
       listAgents: jest.fn().mockResolvedValue([]),
     } as unknown as PtahCliRegistry,
@@ -155,14 +172,254 @@ function makeHarness(
         correlationId: 'corr-get',
       })
     ).data as AgentOrchestrationConfig;
-  return { settings, setConfig, getConfig, logger, authSecrets, workspace };
+  return { settings, setConfig, getConfig, logger, authSecrets, workspace, getAdapter };
 }
 
 describe('agent:setConfig reasoning-effort boundary', () => {
+  it('does not persist a derived Codex row on an unrelated CLI patch', async () => {
+    const h = makeHarness();
+    h.settings.set('ptah.agentOrchestration.codexSandboxMode', 'read-only');
+    expect(await h.setConfig({ cliLaneDefaults: { copilot: { permission: 'yolo' } } }))
+      .toMatchObject({ success: true });
+    expect(h.settings.get('ptah.agentOrchestration.cliLaneDefaults')).toEqual({
+      copilot: { permission: 'yolo' },
+    });
+    expect(h.settings.get('ptah.agentOrchestration.codexSandboxMode')).toBe('read-only');
+    expect(h.workspace.setConfiguration).not.toHaveBeenCalledWith(
+      'ptah', 'agentOrchestration.codexSandboxMode', expect.anything(),
+    );
+  });
+  it('projects the legacy Codex choice into the canonical map', async () => {
+    const h = makeHarness();
+    expect((await h.getConfig()).cliLaneDefaults.codex).toBeUndefined();
+    expect(await h.setConfig({ codexSandboxMode: 'read-only' })).toMatchObject({ success: true });
+    expect((await h.getConfig()).cliLaneDefaults.codex).toEqual({ permission: 'plan', network: 'deny' });
+  });
+
+  it('rejects malformed maps before writing any setting', async () => {
+    const h = makeHarness();
+    expect(await h.setConfig({ cliLaneDefaults: { codex: { permission: 'banana' } }, codexModel: 'changed' }))
+      .toMatchObject({ success: false });
+    expect(await h.setConfig({ cliLaneDefaults: { unknown: { permission: 'yolo' } } }))
+      .toMatchObject({ success: false });
+    expect(h.workspace.setConfiguration).not.toHaveBeenCalled();
+  });
+
+  it('keeps the Copilot bridge switch separate from lane defaults', async () => {
+    const h = makeHarness();
+    expect(await h.setConfig({ copilotAutoApprove: false,
+      cliLaneDefaults: { copilot: { permission: 'yolo', network: 'allow' } } })).toMatchObject({ success: true });
+    const config = await h.getConfig();
+    expect(config.copilotAutoApprove).toBe(false);
+    expect(config.cliLaneDefaults.copilot).toEqual({ permission: 'yolo', network: 'allow' });
+  });
+
+  it('keeps saved choices when another CLI row is edited', async () => {
+    const h = makeHarness();
+    expect(await h.setConfig({ cliLaneDefaults: { copilot: { permission: 'yolo' } } }))
+      .toMatchObject({ success: true });
+    expect(await h.setConfig({ cliLaneDefaults: { codex: { permission: 'plan', network: 'deny' } } }))
+      .toMatchObject({ success: true });
+    expect((await h.getConfig()).cliLaneDefaults).toMatchObject({
+      copilot: { permission: 'yolo' },
+      codex: { permission: 'plan', network: 'deny' },
+    });
+  });
+
+  it('keeps the saved network choice when editing permission in the same row', async () => {
+    const h = makeHarness();
+    expect(await h.setConfig({ cliLaneDefaults: { copilot: { permission: 'auto-edit', network: 'allow' } } }))
+      .toMatchObject({ success: true });
+    expect(await h.setConfig({ cliLaneDefaults: { copilot: { permission: 'yolo' } } }))
+      .toMatchObject({ success: true });
+    expect((await h.getConfig()).cliLaneDefaults.copilot).toEqual({ permission: 'yolo', network: 'allow' });
+  });
+
+  it('removes a saved row on null and keeps omitted rows', async () => {
+    const h = makeHarness();
+    await h.setConfig({ cliLaneDefaults: { copilot: { permission: 'yolo' }, grok: { network: 'allow' } } });
+    expect(await h.setConfig({ cliLaneDefaults: { copilot: null } })).toMatchObject({ success: true });
+    expect((await h.getConfig()).cliLaneDefaults).toEqual({ grok: { network: 'allow' } });
+  });
+
+  it('removes only null fields and keeps omitted fields', async () => {
+    const h = makeHarness();
+    await h.setConfig({ cliLaneDefaults: { copilot: { permission: 'yolo', network: 'allow' } } });
+    expect(await h.setConfig({ cliLaneDefaults: { copilot: { permission: null } } })).toMatchObject({ success: true });
+    expect((await h.getConfig()).cliLaneDefaults.copilot).toEqual({ network: 'allow' });
+    expect(await h.setConfig({ cliLaneDefaults: { copilot: { network: null } } })).toMatchObject({ success: true });
+    expect((await h.getConfig()).cliLaneDefaults.copilot).toEqual({});
+  });
+
+  it('resets Codex legacy sandbox projection with a null row', async () => {
+    const h = makeHarness();
+    await h.setConfig({ cliLaneDefaults: { codex: { permission: 'plan', network: 'deny' } } });
+    expect(await h.setConfig({ cliLaneDefaults: { codex: null } })).toMatchObject({
+      success: true, cliLaneDefaults: {}, codexSandboxMode: 'danger-full-access',
+    });
+    expect((await h.getConfig()).codexSandboxMode).toBe('danger-full-access');
+    expect((await h.getConfig()).cliLaneDefaults.codex).toBeUndefined();
+    expect(h.settings.get('ptah.agentOrchestration.cliLaneDefaults')).toEqual({});
+    expect(h.settings.has('ptah.agentOrchestration.codexSandboxMode')).toBe(false);
+  });
+
+  it('does not project a registered legacy fallback as a saved Codex row', async () => {
+    const h = makeHarness();
+    h.workspace.getConfiguration.mockImplementation((section: string, key: string, callerDefault: unknown) => {
+      const stored = h.settings.get(`${section}.${key}`);
+      return stored ?? (callerDefault !== undefined ? callerDefault : FILE_BASED_SETTINGS_DEFAULTS[key as keyof typeof FILE_BASED_SETTINGS_DEFAULTS]);
+    });
+    expect((await h.getConfig()).cliLaneDefaults.codex).toBeUndefined();
+    expect((await h.getConfig()).codexSandboxMode).toBe('danger-full-access');
+    // A unique object sentinel (never null/undefined) separates an absent key from the fallback.
+    expect(h.workspace.getConfiguration).toHaveBeenCalledWith('ptah', 'agentOrchestration.codexSandboxMode', expect.any(Object));
+    h.settings.set('ptah.agentOrchestration.codexSandboxMode', 'danger-full-access');
+    expect((await h.getConfig()).cliLaneDefaults.codex).toEqual({ permission: 'yolo', network: 'allow' });
+  });
+
+  it('projects a legacy-only Codex value and clears it on row reset', async () => {
+    const h = makeHarness();
+    h.settings.set('ptah.agentOrchestration.codexSandboxMode', 'read-only');
+    expect((await h.getConfig()).cliLaneDefaults.codex).toEqual({ permission: 'plan', network: 'deny' });
+    expect(await h.setConfig({ cliLaneDefaults: { codex: null } })).toMatchObject({ success: true });
+    expect((await h.getConfig()).cliLaneDefaults.codex).toBeUndefined();
+    expect((await h.getConfig()).codexSandboxMode).toBe('danger-full-access');
+    expect(h.settings.has('ptah.agentOrchestration.codexSandboxMode')).toBe(false);
+  });
+
+  it('clears Codex row and legacy value when both fields reset', async () => {
+    const h = makeHarness();
+    await h.setConfig({ cliLaneDefaults: { codex: { permission: 'plan', network: 'deny' } } });
+    expect(await h.setConfig({ cliLaneDefaults: { codex: { permission: null, network: null } } }))
+      .toMatchObject({ success: true });
+    expect((await h.getConfig()).cliLaneDefaults.codex).toBeUndefined();
+    expect((await h.getConfig()).codexSandboxMode).toBe('danger-full-access');
+    expect(h.settings.has('ptah.agentOrchestration.codexSandboxMode')).toBe(false);
+  });
+
+  it('serializes concurrent edits to different CLI rows', async () => {
+    const h = makeHarness();
+    const results = await Promise.all([
+      h.setConfig({ cliLaneDefaults: { copilot: { permission: 'yolo' } } }),
+      h.setConfig({ cliLaneDefaults: { codex: { permission: 'plan', network: 'deny' } } }),
+    ]);
+    expect(results).toMatchObject([{ success: true }, { success: true }]);
+    expect((await h.getConfig()).cliLaneDefaults).toMatchObject({
+      copilot: { permission: 'yolo' }, codex: { permission: 'plan', network: 'deny' },
+    });
+  });
+
+  it('rolls back the canonical map when the Codex compatibility write fails', async () => {
+    const h = makeHarness();
+    await h.setConfig({ cliLaneDefaults: { codex: { permission: 'plan', network: 'deny' } } });
+    const prior = (await h.getConfig()).cliLaneDefaults;
+    h.workspace.setConfiguration.mockImplementationOnce(async (section, key, value) => {
+      h.settings.set(`${section}.${key}`, value);
+    }).mockRejectedValueOnce(new Error('legacy write failed'));
+    expect(await h.setConfig({ cliLaneDefaults: { codex: null } })).toMatchObject({ success: false });
+    expect((await h.getConfig()).cliLaneDefaults).toEqual(prior);
+    expect((await h.getConfig()).codexSandboxMode).toBe('read-only');
+    expect(h.settings.get('ptah.agentOrchestration.codexSandboxMode')).toBe('read-only');
+  });
+
+  it.each(['set', 'reset'] as const)('restores both raw keys after either %s write mutates then rejects', async (operation) => {
+    for (const failedKey of ['agentOrchestration.cliLaneDefaults', 'agentOrchestration.codexSandboxMode']) {
+      const h = makeHarness();
+      await h.setConfig({ cliLaneDefaults: { codex: { permission: 'plan', network: 'deny' } } });
+      const beforeDefaults = h.settings.get('ptah.agentOrchestration.cliLaneDefaults');
+      const beforeLegacy = h.settings.get('ptah.agentOrchestration.codexSandboxMode');
+      h.workspace.setConfiguration.mockImplementationOnce(async (section, key, value) => {
+        if (value === undefined) h.settings.delete(`${section}.${key}`);
+        else h.settings.set(`${section}.${key}`, value);
+        if (key === failedKey) throw new Error('post-write failure');
+      });
+      if (failedKey === 'agentOrchestration.codexSandboxMode') {
+        h.workspace.setConfiguration.mockImplementationOnce(async (section, key, value) => {
+          if (value === undefined) h.settings.delete(`${section}.${key}`);
+          else h.settings.set(`${section}.${key}`, value);
+          throw new Error('post-write failure');
+        });
+      }
+      const patch = operation === 'reset' ? { codex: null }
+        : { codex: { permission: 'yolo' as const, network: 'allow' as const } };
+      expect(await h.setConfig({ cliLaneDefaults: patch })).toMatchObject({ success: false });
+      expect(h.settings.get('ptah.agentOrchestration.cliLaneDefaults')).toEqual(beforeDefaults);
+      expect(h.settings.get('ptah.agentOrchestration.codexSandboxMode')).toEqual(beforeLegacy);
+    }
+  });
+
+  it('reports an unverified recovery when restoration cannot persist', async () => {
+    const h = makeHarness();
+    await h.setConfig({ cliLaneDefaults: { codex: { permission: 'plan', network: 'deny' } } });
+    h.workspace.setConfiguration.mockImplementationOnce(async (section, key, value) => {
+      h.settings.set(`${section}.${key}`, value);
+      throw new Error('post-write failure');
+    }).mockRejectedValueOnce(new Error('recovery write failed'));
+    expect(await h.setConfig({ cliLaneDefaults: { codex: null } })).toMatchObject({
+      success: false, error: 'CLI defaults write failed and recovery could not be verified.',
+    });
+  });
+
+  it('rejects unsupported Ptah CLI and filled partial pairs before writing', async () => {
+    const h = makeHarness();
+    expect(await h.setConfig({ cliLaneDefaults: { 'ptah-cli': { network: 'deny' } } }))
+      .toMatchObject({ success: false, error: 'Unsupported cliLaneDefaults choice for ptah-cli' });
+    expect(h.workspace.setConfiguration).not.toHaveBeenCalled();
+    const supported = { state: 'supported' as const };
+    const manifest: CliAdapterManifest = {
+      messaging: { steer: supported, interrupt: supported, continuation: supported, resume: supported },
+      roleChannel: 'task-prompt',
+      permissionModes: { yolo: { ...supported, networkModes: ['allow'] } },
+      networkModes: { allow: supported, deny: { state: 'unsupported', reason: 'not available' } },
+      limitReader: { state: 'no-reliable-source' },
+      mcp: { state: 'unsupported', reason: 'test' },
+    };
+    h.getAdapter.mockReturnValue({ capabilities: () => manifest });
+    expect(await h.setConfig({ cliLaneDefaults: { grok: { network: 'deny' } } }))
+      .toMatchObject({ success: false, error: 'Unsupported cliLaneDefaults choice for grok' });
+    expect(h.workspace.setConfiguration).not.toHaveBeenCalled();
+  });
+
+  it('rejects a manifest-incompatible pair before writing settings', async () => {
+    const h = makeHarness();
+    const supported = { state: 'supported' as const };
+    const manifest: CliAdapterManifest = {
+      messaging: { steer: supported, interrupt: supported, continuation: supported, resume: supported },
+      roleChannel: 'task-prompt',
+      permissionModes: { plan: { ...supported, networkModes: ['deny'] },
+        yolo: { ...supported, networkModes: ['allow'] } },
+      networkModes: { allow: supported, deny: supported },
+      limitReader: { state: 'no-reliable-source' },
+      mcp: { state: 'unsupported', reason: 'test' },
+    };
+    h.getAdapter.mockReturnValue({ capabilities: () => manifest });
+    expect(await h.setConfig({ cliLaneDefaults: { codex: { permission: 'yolo', network: 'deny' } } }))
+      .toMatchObject({ success: false });
+    expect(h.workspace.setConfiguration).not.toHaveBeenCalled();
+  });
+
+  it('reads back a saved default and projects the Codex compatibility key', async () => {
+    const h = makeHarness();
+    expect(await h.setConfig({ cliLaneDefaults: { codex: { permission: 'auto-edit', network: 'deny' } } }))
+      .toMatchObject({ success: true });
+    expect((await h.getConfig()).cliLaneDefaults.codex).toEqual({ permission: 'auto-edit', network: 'deny' });
+    expect((await h.getConfig()).codexSandboxMode).toBe('workspace-write-no-network');
+  });
+
+  it('prefers the canonical Codex entry over a stale legacy value', async () => {
+    const h = makeHarness();
+    h.settings.set('ptah.agentOrchestration.cliLaneDefaults', {
+      codex: { permission: 'plan', network: 'deny' },
+    });
+    h.settings.set('ptah.agentOrchestration.codexSandboxMode', 'invalid');
+    const config = await h.getConfig();
+    expect(config.cliLaneDefaults.codex).toEqual({ permission: 'plan', network: 'deny' });
+    expect(config.codexSandboxMode).toBe('read-only');
+  });
   it('returns the default sandbox, persists an override, and rejects an invalid value before writes', async () => {
     const h = makeHarness();
     expect((await h.getConfig()).codexSandboxMode).toBe('danger-full-access');
-    expect(await h.setConfig({ codexSandboxMode: 'read-only' })).toEqual({ success: true });
+    expect(await h.setConfig({ codexSandboxMode: 'read-only' })).toMatchObject({ success: true });
     expect((await h.getConfig()).codexSandboxMode).toBe('read-only');
     h.workspace.setConfiguration.mockClear();
     expect(await h.setConfig({ codexSandboxMode: 'invalid', codexModel: 'changed' })).toEqual({

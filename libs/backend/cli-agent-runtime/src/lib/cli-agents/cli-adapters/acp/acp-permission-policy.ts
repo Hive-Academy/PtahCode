@@ -69,7 +69,6 @@ function firstOptionIdOfKind(
  * Options are selected by `kind`, never by `optionId`: ids and ordering differ
  * per agent (Grok lists `always-allow`, an `allow_always`, first) so only the
  * kind ladder is stable. With auto-approve on the ladder is `allow_once`, then
- * `allow_always` (noted, because it grants beyond this turn), then
  * `reject_once`, then cancelled — every `reject_always` is ignored. With
  * auto-approve off nothing is approved: `reject_once` when offered, else
  * cancelled, since there is no UI to ask and waiting only hits the
@@ -94,16 +93,6 @@ export function decideAcpPermission(
         return {
           response: selectedResponse(allowOnce),
           refused: false,
-          toolTitle: requestedTitle,
-        };
-      }
-
-      const allowAlways = firstOptionIdOfKind(offered, 'allow_always');
-      if (allowAlways !== undefined) {
-        return {
-          response: selectedResponse(allowAlways),
-          refused: false,
-          info: `${title}: the only allow option offered was a persistent grant`,
           toolTitle: requestedTitle,
         };
       }

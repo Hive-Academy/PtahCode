@@ -11,11 +11,9 @@
  *   effort therefore travel through `session/set_config_option`
  *   (`configId` `model` and `reasoning_effort`), which the runner applies only
  *   when the session advertises that option.
- * - Permissions: the lane spawns WITHOUT `--always-approve` and the runner's
- *   policy answers each `session/request_permission` with the `allow_once`
- *   option. Documented fallback, deliberately not wired: inserting
- *   `--always-approve` before `--no-leader` makes Grok approve every tool
- *   itself, at the cost of the per-request policy (and of `autoApprove: false`).
+ * - Permissions: resolved yolo inserts `--always-approve` before `stdio`.
+ *   Other modes retain the explicit ACP permission response policy; they are
+ *   not advertised as enforceable per-lane permission modes.
  * - No per-lane environment: Grok reads the login `grok login` writes to
  *   `~/.grok/auth.json`, so the host environment is passed through unchanged.
  * - The effort arrives already mapped by the lane spawn policy and is forwarded
@@ -109,8 +107,9 @@ export const grokAcpProfile: AcpVendorProfile = {
   displayName: 'Grok',
   resumeStrategy: 'resume',
 
-  buildSpawn(): AcpSpawnSpec {
-    return { args: GROK_ARGS };
+  buildSpawn(options: CliCommandOptions): AcpSpawnSpec {
+    return { args: options.permission === 'yolo'
+      ? ['agent', '--always-approve', '--no-leader', 'stdio'] : GROK_ARGS };
   },
 
   buildMcpServers(options: CliCommandOptions): readonly McpServer[] {

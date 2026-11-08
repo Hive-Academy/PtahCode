@@ -1,7 +1,7 @@
 import { buildClaudeSdkLaneOptions } from '../claude/claude-sdk-lane-options';
 import { ClaudeSdkLaneRunner } from '../claude/claude-sdk-lane-runner';
 import { injectable, inject, type DependencyContainer } from 'tsyringe';
-import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
+import { PLATFORM_TOKENS, type IWorkspaceProvider } from '@ptah-extension/platform-core';
 import {
   type AgentRoleDefinition,
   type AuthEnv,
@@ -22,6 +22,7 @@ import {
   KIMI_CODE_PROXY_TOKEN_PLACEHOLDER,
   OPENROUTER_PROXY_TOKEN_PLACEHOLDER,
   OLLAMA_CLOUD_DIRECT_BASE_URL,
+  PTAH_CLI_PERMISSION_CAPABILITIES,
 } from '@ptah-extension/shared';
 import {
   Logger,
@@ -178,6 +179,8 @@ export class PtahCliRegistry {
      */
     @inject(AUTH_PROVIDERS_TOKENS.SDK_KIMI_CODE_AUTH, { isOptional: true })
     private readonly kimiCodeAuth: IKimiCodeAuthService | null = null,
+    @inject(PLATFORM_TOKENS.WORKSPACE_PROVIDER, { isOptional: true })
+    private readonly laneWorkspace: IWorkspaceProvider | null = null,
   ) {
     this.logger.info('[PtahCliRegistry] Registry initialized');
   }
@@ -359,35 +362,7 @@ export class PtahCliRegistry {
         resume: { state: 'supported' },
       },
       roleChannel: 'system-prompt',
-      permissionModes: {
-        plan: {
-          state: 'supported',
-          nativeMode: 'plan',
-          networkModes: ['allow'],
-        },
-        ask: {
-          state: 'supported',
-          nativeMode: 'default',
-          networkModes: ['allow'],
-        },
-        'auto-edit': {
-          state: 'supported',
-          nativeMode: 'acceptEdits',
-          networkModes: ['allow'],
-        },
-        yolo: {
-          state: 'supported',
-          nativeMode: 'bypassPermissions',
-          networkModes: ['allow'],
-        },
-      },
-      networkModes: {
-        allow: { state: 'supported' },
-        deny: {
-          state: 'unsupported',
-          reason: 'The Claude SDK has no verified general network sandbox.',
-        },
-      },
+      ...PTAH_CLI_PERMISSION_CAPABILITIES,
       limitReader:
         providerId === 'claude-cli' || providerId === 'ollama-cloud'
           ? { state: 'available', source: 'PtahCliLanePlanLimits' }
@@ -774,6 +749,8 @@ export class PtahCliRegistry {
       role?: AgentRoleDefinition;
       permission?: import('@ptah-extension/shared').LanePermissionMode;
       network?: import('@ptah-extension/shared').LaneNetworkMode;
+      parentLevel?: import('@ptah-extension/shared').LanePermissionMode;
+      resumePolicy?: EffectiveLanePolicy;
     },
   ): Promise<
     | {
@@ -800,7 +777,8 @@ export class PtahCliRegistry {
         name: 'ptah-cli',
         capabilities: () => this.capabilities(agentConfig.providerId),
       },
-      { permission: options?.permission, network: options?.network },
+      { permission: options?.permission, network: options?.network, parentLevel: options?.parentLevel, resumePolicy: options?.resumePolicy },
+      this.laneWorkspace?.getConfiguration<unknown>('ptah', 'agentOrchestration.cliLaneDefaults', {}) ?? {},
     );
 
     if (!agentConfig.enabled) {
@@ -840,7 +818,9 @@ export class PtahCliRegistry {
         message: `Unknown provider "${agentConfig.providerId}" for Ptah CLI agent "${id}"`,
       };
     }
-    const agentIdHolder: { value?: string } = {};
+    // A supplied lane id is authoritative before the SDK query can request permission.
+    // Generated ids attach through setAgentId; the SDK handler waits for that attachment.
+    const agentIdHolder: { value?: string } = { value: options?.agentId };
     const { authEnv, stopProxy } = await this.buildProxyAuthEnv(
       agentConfig,
       provider,

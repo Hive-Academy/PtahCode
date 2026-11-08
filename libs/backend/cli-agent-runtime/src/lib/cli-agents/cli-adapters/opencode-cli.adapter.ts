@@ -20,7 +20,7 @@
  *   directory. Pinned by a spec asserting `--dir` never appears in argv.
  * - `run`'s prompt is a POSITIONAL arg (not a Go-style trailing string flag),
  *   so it is passed LAST but ordering is less brittle than Antigravity's.
- * - `--auto` maps to autoApprove: it auto-approves the two permission gaps
+ * - `--auto` is sent only for resolved yolo policy, paired with permission allow.
  *   (`doom_loop`, `external_directory`) that otherwise default to "ask". There
  *   is no single `--yolo`/`--dangerously-skip-permissions` switch in opencode.
  * - Every JSONL event carries a top-level `sessionID` (`ses_...`); we capture it
@@ -60,6 +60,8 @@
  */
 import { existsSync } from 'fs';
 import path from 'path';
+import { z } from 'zod';
+import type { Logger } from '@ptah-extension/vscode-core';
 import type {
   CliDetectionResult,
   CliOutputSegment,
@@ -303,7 +305,7 @@ export class OpencodeCliAdapter implements CliAdapter {
    *   synchronous `CreateProcessW` that cost 300-900 ms of event-loop lag per
    *   rival-CLI launch (TASK_2026_367).
    */
-  constructor(private readonly spawner?: IProcessSpawner) {}
+  constructor(private readonly spawner?: IProcessSpawner, private readonly logger?: Pick<Logger, 'error'>) {}
 
   /** `run --help` probe result per binary; see `supportsStandalone`. */
   private readonly standaloneSupport = new Map<
@@ -365,7 +367,7 @@ export class OpencodeCliAdapter implements CliAdapter {
         plan: { state: 'supported', nativeMode: '--agent plan', networkModes: ['allow'] },
         ask: { state: 'unsupported', reason: 'No verified native approval route.', networkModes: [] },
         'auto-edit': { state: 'unsupported', reason: 'No verified native scoped edit mode.', networkModes: [] },
-        yolo: { state: 'unsupported', reason: 'No verified native unrestricted mode.', networkModes: [] },
+        yolo: { state: 'supported', nativeMode: '--auto with permission allow', networkModes: ['allow'] },
       },
       networkModes: {
         allow: { state: 'supported' },
@@ -612,13 +614,23 @@ export class OpencodeCliAdapter implements CliAdapter {
    * highest precedence, so it never touches the shared project config on disk.
    */
   private buildMcpConfigContent(
+    inherited: Record<string, unknown>,
     port: number,
     workingDirectory: string,
     token: string,
     agentId?: string,
+    permission?: 'allow',
   ): string {
+    const mcp = z.record(z.string(), z.unknown()).safeParse(inherited['mcp'] ?? {});
+    if (!mcp.success) {
+      this.logger?.error('OpenCode inherited MCP config is invalid', new Error('Invalid OPENCODE_CONFIG_CONTENT mcp object'));
+      throw new Error('OpenCode requires a valid OPENCODE_CONFIG_CONTENT mcp object');
+    }
     return JSON.stringify({
+      ...inherited,
+      ...(permission ? { permission } : {}),
       mcp: {
+        ...mcp.data,
         ptah: {
           type: 'remote',
           // Scoped to the spawn's working directory so the server attributes
@@ -631,6 +643,19 @@ export class OpencodeCliAdapter implements CliAdapter {
         },
       },
     });
+  }
+
+  private parseInheritedConfigContent(): Record<string, unknown> {
+    const inherited = process.env['OPENCODE_CONFIG_CONTENT'];
+    if (inherited === undefined) return {};
+    try {
+      const parsed: unknown = JSON.parse(inherited);
+      return z.record(z.string(), z.unknown()).parse(parsed);
+    } catch {
+      this.logger?.error('OpenCode inherited config is invalid; refusing spawn',
+        new Error('Inherited OPENCODE_CONFIG_CONTENT is not a valid JSON object; refusing OpenCode lane spawn'));
+      throw new Error('OpenCode requires a valid OPENCODE_CONFIG_CONTENT JSON object');
+    }
   }
 
   /**
@@ -667,13 +692,18 @@ export class OpencodeCliAdapter implements CliAdapter {
 
     // Flags shared by the first turn and every `continue()` turn.
     const baseArgs: string[] = ['run', '--format', 'json'];
-    if (options.autoApprove !== false) {
+    if (policy.requested.permission === 'yolo') {
       baseArgs.push('--auto');
     }
     if (options.model) {
       baseArgs.push('--model', options.model);
     }
     const standalone = await this.supportsStandalone(binary);
+    const legacyAutoFallback = policy.requested.permission === 'yolo'
+      && options.permissionSource === 'built-in' && !standalone;
+    if (policy.requested.permission && !standalone && !legacyAutoFallback) {
+      throw new Error(`OpenCode ${options.permissionSource ?? 'explicit'} ${policy.requested.permission} lane policy requires opencode run --standalone`);
+    }
     if (standalone) {
       baseArgs.push('--standalone');
     }
@@ -692,13 +722,18 @@ export class OpencodeCliAdapter implements CliAdapter {
     }
 
     const env: NodeJS.ProcessEnv = {};
+    const inheritedConfig = this.parseInheritedConfigContent();
     if (options.mcpPort && options.mcpToken) {
       env['OPENCODE_CONFIG_CONTENT'] = this.buildMcpConfigContent(
+        inheritedConfig,
         options.mcpPort,
         options.workingDirectory,
         options.mcpToken,
         options.agentId,
+        policy.requested.permission === 'yolo' ? 'allow' : undefined,
       );
+    } else if (policy.requested.permission === 'yolo') {
+      env['OPENCODE_CONFIG_CONTENT'] = JSON.stringify({ ...inheritedConfig, permission: 'allow' });
     }
 
     // `binary` is already the native `.exe` (from resolveOpencodeNativeBinary) or
@@ -757,6 +792,9 @@ export class OpencodeCliAdapter implements CliAdapter {
     const done = startTurn(taskPrompt, options.resumeSessionId);
 
     return {
+      ...(legacyAutoFallback ? { effectivePolicy: {
+        nativeDescription: 'legacy opencode run --auto (standalone unavailable)',
+      } } : {}),
       abort: abortController,
       done,
       onOutput: output.subscribe,

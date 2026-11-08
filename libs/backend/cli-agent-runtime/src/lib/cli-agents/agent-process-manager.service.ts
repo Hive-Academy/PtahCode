@@ -564,9 +564,12 @@ export class AgentProcessManager {
       resumeDecision: gated?.resumeDecision,
       originalTask: gated?.originalTask,
       runSdk: adapter.runSdk.bind(adapter),
-      request: gated
-        ? { ...request, resumeSessionId: gated.resumeSessionId }
-        : request,
+      request: {
+        ...request,
+        ...(gated ? { resumeSessionId: gated.resumeSessionId } : {}),
+        permission: effectivePolicy.requested?.permission,
+        network: effectivePolicy.requested?.network,
+      },
       task: gated?.task ?? request.task,
       workingDirectory,
       cli,
@@ -807,11 +810,13 @@ export class AgentProcessManager {
     readonly cli: CliType;
     readonly task: string;
     readonly model?: string;
+    readonly modelTier?: 'opus' | 'sonnet' | 'haiku';
     readonly resumeSessionId?: string;
   }): Promise<PreparedSdkHandleSpawn> {
     const laneModel = this.spawnEnvironment.resolveModel(
       input.cli,
       input.model,
+      input.modelTier,
     );
     this.assertLaneModelAllowed(input.cli, laneModel.model);
     if (!input.resumeSessionId) return { task: input.task };
@@ -922,7 +927,11 @@ export class AgentProcessManager {
     const agentId = AgentId.create();
     const startedAt = new Date().toISOString();
     const previous = this.previousResumeRecord(cli, request.resumeSessionId);
-    const laneModel = this.spawnEnvironment.resolveModel(cli, request.model);
+    const laneModel = this.spawnEnvironment.resolveModel(
+      cli,
+      request.model,
+      request.modelTier,
+    );
     const resolvedModel = laneModel.model;
     // R9.5: refuse a model known to loop before anything is started — no
     // record, no event, no adapter call.
@@ -1075,6 +1084,7 @@ export class AgentProcessManager {
         autoApprove: this.spawnEnvironment.resolveAutoApprove(cli),
         permission: request.permission,
         network: request.network,
+        permissionSource: options.effectivePolicy?.requested?.permissionSource,
         // Minted above, BEFORE the CLI is asked to build its MCP config, so the
         // `/agent/{id}` segment of the URL names this exact record
         // (TASK_2026_402). The rival-CLI path needs no extra plumbing for this —
@@ -1101,7 +1111,9 @@ export class AgentProcessManager {
     // back to the task prompt the role stays on developer instructions, and
     // Pi reports its shared channel here too (4332578858).
     const effectiveChannel = sdkHandle.getRoleDelivery?.() ?? roleChannel;
-    const boundInfo = { ...scopedInfo, ...admittedReference };
+    const boundInfo = { ...scopedInfo, ...admittedReference,
+      ...(sdkHandle.effectivePolicy ? { effectivePolicy: sdkHandle.effectivePolicy } : {}),
+    };
     const effectiveInfo = roleStamp
       ? { ...boundInfo, roleChannel: effectiveChannel }
       : boundInfo;

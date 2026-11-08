@@ -10,6 +10,7 @@ import type {
   PtahCliResumeParams,
 } from './lane-resumers/ptah-cli-lane-resumer';
 import { SystemCliLaneResumer } from './lane-resumers/system-cli-lane-resumer';
+import type { ParentLaneLevel } from './parent-lane-level';
 
 /**
  * Explicit resume and cold message sends share the manager's resume gate.
@@ -25,8 +26,9 @@ export class AgentLaneResumeService {
       'spawn' | 'prepareSdkHandleSpawn' | 'releaseIdleForResume'
     >,
     private readonly ptahCli: Pick<PtahCliLaneResumer, 'resume' | 'resumePtahCli'>,
+    private readonly parentLevel?: ParentLaneLevel,
   ) {
-    this.system = new SystemCliLaneResumer(manager);
+    this.system = new SystemCliLaneResumer(manager, parentLevel);
   }
 
   resume(info: AgentProcessInfo, task: string): Promise<LaneResumeResult> {
@@ -43,7 +45,10 @@ export class AgentLaneResumeService {
         'No CLI session is available for resume.',
       );
     }
-    return this.manager.spawn(request);
+    return this.manager.spawn({ ...request,
+      ...(this.parentLevel && request.parentSessionId
+        ? { parentLevel: this.parentLevel(request.parentSessionId) } : {}),
+    });
   }
 
   prepareSdkResume(

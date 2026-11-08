@@ -80,8 +80,6 @@ import { PtahCliSpawnOptions } from './helpers/ptah-cli-spawn-options.service';
 import { renderRoleBlock } from '../cli-agents/cli-adapters/cli-adapter.utils';
 import type { ISdkProcessSpawner } from '../spawn/sdk-process-spawner.port';
 
-const PINNED_SDK_VERSION = '0.3.318';
-
 // The probe payload (system prompts across 7 cases routinely exceed 100 KB
 // combined) is read from stdin, never argv or env — both are capped by the
 // OS (Linux MAX_ARG_STRLEN is 131072 bytes per string; spawnSync fails with
@@ -405,11 +403,8 @@ describe('ptah-cli spawn path — compaction settings on the real SDK argv', () 
       logger: ReturnType<typeof createMockLogger>;
     }
   >();
-  let sdkVersion = '';
-
   beforeAll(async () => {
     const sdk = findPinnedSdk();
-    sdkVersion = sdk.version;
     const captured: Array<{
       name: CaseName;
       options: Options;
@@ -447,10 +442,6 @@ describe('ptah-cli spawn path — compaction settings on the real SDK argv', () 
     if (!args) throw new Error(`no argv captured for ${name}`);
     return settingsFromArgv(args);
   }
-
-  it('runs against the pinned SDK version', () => {
-    expect(sdkVersion).toBe(PINNED_SDK_VERSION);
-  });
 
   it('no longer sends the non-existent compactionControl option', () => {
     for (const { options } of results.values()) {

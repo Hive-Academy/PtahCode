@@ -359,6 +359,7 @@ export class CompactSessionCardComponent {
           kind: 'permission' as const,
           source: 'session' as const,
           requestId: request.id,
+          canAlwaysAllow: request.canAlwaysAllow,
           tabId: this.tabId(),
           text: request.description || request.toolName,
         },

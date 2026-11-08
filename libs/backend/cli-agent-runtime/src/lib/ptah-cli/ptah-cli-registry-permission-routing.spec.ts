@@ -78,6 +78,7 @@ const PARENT_SESSION = '11111111-2222-4333-8444-555555555555';
 function buildHarness(): {
   registry: PtahCliRegistry;
   createCallback: jest.Mock;
+  queryFn: jest.Mock;
   logger: ReturnType<typeof createMockLogger>;
 } {
   const logger = createMockLogger();
@@ -132,17 +133,42 @@ function buildHarness(): {
     createFakeSdkProcessSpawner(), // processSpawner
   );
 
-  return { registry, createCallback, logger };
+  return { registry, createCallback, queryFn, logger };
 }
 
 describe('PtahCliRegistry.spawnAgent — permission routing identity', () => {
+  it('exposes an assigned lane id before the SDK query starts', async () => {
+    const { registry, createCallback } = buildHarness();
+    await registry.spawnAgent(BASE_CONFIG.id, 'do work', { agentId: 'lane-assigned' });
+    const resolver = createCallback.mock.calls[0][1] as () => string | undefined;
+    expect(resolver()).toBe('lane-assigned');
+  });
+
+  it('caps a Ptah CLI child to plan through the static resolver path', async () => {
+    const { registry, queryFn } = buildHarness();
+    await registry.spawnAgent(BASE_CONFIG.id, 'do work', {
+      permission: 'yolo', parentLevel: 'plan',
+    });
+    expect(queryFn).toHaveBeenCalledWith(expect.objectContaining({
+      options: expect.objectContaining({ permissionMode: 'plan' }),
+    }));
+  });
+
+  it('uses the manifest built-in yolo mode when no lane choice is saved', async () => {
+    const { registry, queryFn } = buildHarness();
+    await registry.spawnAgent(BASE_CONFIG.id, 'do work');
+    expect(queryFn).toHaveBeenCalledWith(expect.objectContaining({
+      options: expect.objectContaining({ permissionMode: 'bypassPermissions' }),
+    }));
+  });
+
   it('does not throw when the spawn has neither a resume nor a parent session', async () => {
     const { registry } = buildHarness();
 
     // Previously: SessionId.from('ptah-cli:pc-perm-001') -> TypeError, and the
     // whole spawn rejected. This is exactly what agent:resumePtahCli sends
     // when the session file is gone.
-    const result = await registry.spawnAgent(BASE_CONFIG.id, 'do work');
+    const result = await registry.spawnAgent(BASE_CONFIG.id, 'do work', { permission: 'ask' });
 
     expect(result).toHaveProperty('handle');
   });
@@ -150,7 +176,7 @@ describe('PtahCliRegistry.spawnAgent — permission routing identity', () => {
   it('passes no routable session id, but keeps the raw id as a routing hint', async () => {
     const { registry, createCallback } = buildHarness();
 
-    await registry.spawnAgent(BASE_CONFIG.id, 'do work');
+    await registry.spawnAgent(BASE_CONFIG.id, 'do work', { permission: 'ask' });
 
     const [sessionId, , , , routingHint] = createCallback.mock.calls[0];
     expect(sessionId).toBeUndefined();
@@ -160,7 +186,7 @@ describe('PtahCliRegistry.spawnAgent — permission routing identity', () => {
   it('says out loud that prompts have no routable surface', async () => {
     const { registry, logger } = buildHarness();
 
-    await registry.spawnAgent(BASE_CONFIG.id, 'do work');
+    await registry.spawnAgent(BASE_CONFIG.id, 'do work', { permission: 'ask' });
 
     expect(logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('no routable session id'),
@@ -172,6 +198,7 @@ describe('PtahCliRegistry.spawnAgent — permission routing identity', () => {
     const { registry, createCallback, logger } = buildHarness();
 
     await registry.spawnAgent(BASE_CONFIG.id, 'do work', {
+      permission: 'ask',
       parentSessionId: '',
     });
 
@@ -190,6 +217,7 @@ describe('PtahCliRegistry.spawnAgent — permission routing identity', () => {
     const { registry, createCallback, logger } = buildHarness();
 
     await registry.spawnAgent(BASE_CONFIG.id, 'do work', {
+      permission: 'ask',
       parentSessionId: PARENT_SESSION,
     });
 
@@ -207,6 +235,7 @@ describe('PtahCliRegistry.spawnAgent — permission routing identity', () => {
     const resumed = '99999999-8888-4777-8666-555555555555';
 
     await registry.spawnAgent(BASE_CONFIG.id, 'do work', {
+      permission: 'ask',
       resumeSessionId: resumed,
       parentSessionId: PARENT_SESSION,
     });
