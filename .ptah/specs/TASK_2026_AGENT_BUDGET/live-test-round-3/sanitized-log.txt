@@ -1,0 +1,21 @@
+Sanitized selection from Ptah Electron-2026-11-08.log. One-based source line numbers. Only whitelisted event names, IDs, model names, counts, decisions, and errors are retained; no prompts, endpoint values, config contents, or tokens are reproduced.
+
+59548 Agent spawned: lane=fc0f3b31-ac76-42d2-bee7-046c1c632210 cli=codex model=gpt-6-luna.
+59559 CLI Session ID=01a1b9e4-7c0e-7402-a53b-606bfce21a39.
+59605 Accepted lane turn: model=gpt-6-luna input=76328 output=739 cacheRead=70016 weightedTotal=77067 ratio=0.25689 costAuthority=catalog.
+59658 Accepted lane turn: model=gpt-6-luna input=53075 output=492 cacheRead=50944 weightedTotal=130634 ratio=0.4354466667 costAuthority=catalog.
+59704 Accepted lane turn: model=gpt-6-luna input=37825 output=696 cacheRead=25088 weightedTotal=169155 ratio=0.56385 costAuthority=catalog.
+59749 Accepted lane turn: model=gpt-6-luna input=40226 output=313 cacheRead=38784 weightedTotal=209694 ratio=0.69898 costAuthority=catalog.
+59796 Accepted lane turn: model=gpt-6-luna input=62931 output=321 cacheRead=61440 weightedTotal=272946 ratio=0.90982 costAuthority=catalog turn=01a1b9e5-e6c4-78d1-a393-37f0bad79758.
+59797 Budget warning first routing mode=unsupported.
+59798 Budget warning fallback routing mode=start-turn.
+59800 Budget warning delivered mode=start-turn.
+59807-59808 AgentProcessManager continued turn error: Codex turn is already active.
+59917 Resume gate: decision=fresh; warning threshold reached at weightedTotal=272946.
+60352 Resume gate: decision=fresh; warning threshold reached.
+61230 Workspace provider settings saved: provider=openai-codex, applyTo=workspace.
+61378 Native Codex provider active in scratch workdir.
+61482 App-server notification method=thread/settings/updated.
+61500 App-server notification method=item/commandExecution/outputDelta.
+61549 Codex early child event buffer overflow.
+61550 Native child linkage was not reported within the buffer limit.
