@@ -112,6 +112,11 @@ export function registerElectronCodexLaneFactory(
     container.resolve<CodexSelectionSnapshotPort>(
       CODEX_RUNTIME_TOKENS.SelectionSnapshot,
     );
+  // Phase 2 registers this factory before the workspace port exists. Cache its
+  // instance on the first lane composition; read values from it on each use.
+  let resolvedWorkspace: IWorkspaceProvider | undefined;
+  const workspaceProvider = (): IWorkspaceProvider =>
+    (resolvedWorkspace ??= container.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER));
   const home = async (): Promise<string> => {
     if (input.env['CODEX_HOME'] === '') throw new Error('Codex home is empty');
     return canonical(
@@ -146,7 +151,7 @@ export function registerElectronCodexLaneFactory(
       return {
         lane: {
           codexSandboxMode: codexLaneSandboxMode(
-            container.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER),
+            workspaceProvider(),
           ),
           permissionLevel: 'ask',
           identity: {
@@ -199,7 +204,7 @@ export function registerElectronCodexLaneFactory(
       const profile = buildCodexExecutionProfile({
         session: {
           codexSandboxMode: codexLaneSandboxMode(
-            container.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER),
+            workspaceProvider(),
           ),
           contextId: randomUUID(),
           consumer: 'lane',

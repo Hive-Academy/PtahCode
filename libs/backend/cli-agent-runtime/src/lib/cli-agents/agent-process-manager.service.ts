@@ -109,6 +109,7 @@ import {
 } from './lane-resume-gate';
 import { LaneBudgetGuard } from './lane-budget-guard';
 import { AgentBudgetCoordinator } from './agent-budget-coordinator';
+import { createLaneBudget, armLaneBudgetDeadline, acceptLaneTurnTelemetry, laneRecordsForSession, previousResumeRecord } from './lane-budget-deadline';
 import type { AgentOutputJournal } from './agent-output-journal.service';
 import {
   applyOutputCheckpoint,
@@ -139,9 +140,7 @@ import {
 import { matchesAuthFailure } from './limits/lane-auth-classifier';
 import { matchesApiRateLimit } from './limits/lane-rate-limit-classifier';
 import { laneRouteFingerprint } from './limits/lane-limit-lookup.service';
-
 const DEFAULT_AGENT_READ_TAIL_LINES = 200;
-
 /** How much of a failed lane's output tail the limit classifier reads. */
 const LIMIT_CLASSIFIER_TAIL_CHARS = 16 * 1024;
 /** Error segments the classifier reads, newest first, and each one's cap. */
@@ -152,7 +151,6 @@ const STRUCTURED_EXIT_ZERO_LIMIT_ERROR =
   /^(?:API rate limit \(HTTP 429\)|API Error: Request rejected \((?:402|429)\)|(?:HTTP(?:\s+status)?|status(?:\s+code)?)\s*[:=]?\s*(?:402|429)\b[^\n]*(?:usage|quota|rate limit|RESOURCE_EXHAUSTED|balance exhausted|Too Many Requests))/im;
 const STRUCTURED_EXIT_ZERO_AUTH_ERROR =
   /^(?:API Error: Request rejected \(401\)|(?:HTTP(?:\s+status)?|status(?:\s+code)?)\s*[:=]?\s*401\b|Authentication (?:failed|required)\b|Invalid API key\b|Not logged in\b)/im;
-
 /**
  * How a completed system CLI lane was billed (Decision 4, S3). Only `plan`
  * clears unknown-reset exhaustion. Codex can bill credits after a limit and
@@ -164,20 +162,17 @@ const LANE_SUCCESS_BILLING: Partial<Record<CliType, PlanLimitBilling>> = {
   codex: 'unknown',
   opencode: 'unknown',
 };
-
 /** The ledger writes a lane makes. */
 type LanePlanLimitLedger = Pick<
   PlanLimitLedgerService,
   'recordWindowEvidence' | 'recordOwnerEvidence' | 'recordSuccess'
 > &
   Partial<Pick<PlanLimitLedgerService, 'snapshotFor'>>;
-
 export {
   MIN_CONCURRENT_AGENTS,
   MAX_CONCURRENT_AGENTS,
   DEFAULT_CONCURRENT_AGENTS,
 } from './agent-spawn-environment.service';
-
 /**
  * Shell metacharacters — kept for reference only.
  * spawn() is called WITHOUT shell:true, so args are passed directly
@@ -185,7 +180,6 @@ export {
  * possible. Stripping these chars corrupts legitimate prompts containing
  * code characters ($, (), {}, backticks, etc.).
  */
-
 export type AgentContinueErrorCode =
   | 'not_found'
   | 'invalid_params'
@@ -202,16 +196,13 @@ export type AgentContinueErrorCode =
   /** A Claude lane's account route was refused; the lane did not run. */
   | 'account_refused'
   | 'unknown';
-
 /** Why a subprocess was released — carried on the `agent:released` event. */
 export type AgentReleaseReason = 'idle' | 'expired' | 'stopped' | 'disposed';
-
 export interface AgentRoleStamp {
   readonly role: string;
   readonly roleDelivery: AgentRoleDelivery;
   readonly roleChannel: AgentRoleChannel;
 }
-
 interface SdkSpawnOptions {
   readonly effectivePolicy?: ReturnType<
     AgentSpawnEnvironment['resolveLanePolicy']
@@ -237,7 +228,6 @@ interface SdkSpawnOptions {
   /** First task of the lane chain, kept on a fresh lane's record. */
   readonly originalTask?: string;
 }
-
 /**
  * What the resume gate made of a `resumeSessionId` spawn: the task to hand
  * the lane, the session to resume (absent when the gate chose a fresh lane)
@@ -251,7 +241,6 @@ export interface GatedResume {
   /** First task of the lane chain, kept on a fresh lane's record. */
   readonly originalTask?: string;
 }
-
 /**
  * A spawn through {@link AgentProcessManager.spawnFromSdkHandle}, checked
  * before its handle is built. Without a resume id the task passes through
@@ -260,7 +249,6 @@ export interface GatedResume {
 export type PreparedSdkHandleSpawn = Omit<GatedResume, 'resumeDecision'> & {
   readonly resumeDecision?: AgentResumeOutcome;
 };
-
 function roleStampOf(
   record: Partial<AgentRoleStamp>,
 ): AgentRoleStamp | undefined {
@@ -271,14 +259,11 @@ function roleStampOf(
     ? { role, roleDelivery, roleChannel }
     : undefined;
 }
-
 /** `any`: return when one lane ends. `all`: return when every lane has ended. */
 export type AgentWaitMode = 'any' | 'all';
-
 /** Longest {@link AgentProcessManager.waitForAgents} wait: 15 minutes (TASK_2026_597, D13). */
 export const MAX_AGENT_WAIT_MS = 900_000;
 const MAX_RESOLVED_PARENT_SESSIONS = 256;
-
 /**
  * One requested id in a {@link AgentWaitResult}.
  *
@@ -301,7 +286,6 @@ export type AgentWaitEntry =
     }
   | { readonly agentId: string; readonly state: 'not_found' }
   | { readonly agentId: string; readonly state: 'other_workspace' };
-
 export interface AgentWaitResult {
   readonly mode: AgentWaitMode;
   /** True when the wait ended on its timer rather than on the lanes. */
@@ -316,7 +300,6 @@ export interface AgentWaitResult {
   /** One entry per distinct requested id, in request order. */
   readonly entries: readonly AgentWaitEntry[];
 }
-
 export class AgentContinueError extends Error {
   constructor(
     readonly code: AgentContinueErrorCode,
@@ -326,7 +309,6 @@ export class AgentContinueError extends Error {
     this.name = 'AgentContinueError';
   }
 }
-
 /**
  * Thrown by a spawn whose resolved model is on the lane block list
  * (TASK_2026_597, R9.5). Raised before the adapter's `runSdk`, so nothing is
@@ -340,7 +322,6 @@ export class LaneModelBlockedError extends Error {
     this.name = 'LaneModelBlockedError';
   }
 }
-
 @injectable()
 export class AgentProcessManager {
   private readonly agents = new Map<string, TrackedAgent>();
@@ -373,7 +354,6 @@ export class AgentProcessManager {
   private spawnMutex: Promise<void> = Promise.resolve();
   /** Pending recovered-output persists of restored lanes, keyed by agent id. */
   private readonly recoveredOutputWrites = new Map<string, TrackedRecoveredWrite>();
-
   /** EventEmitter for agent lifecycle events (spawned, output, exited) */
   readonly events = new EventEmitter();
 
@@ -700,7 +680,7 @@ export class AgentProcessManager {
     resumeSessionId: string,
     cli: CliType,
   ): Promise<GatedResume> {
-    const lane = this.laneRecordsForSession(resumeSessionId);
+    const lane = laneRecordsForSession(this.agents.values(), resumeSessionId);
     const latest = lane[lane.length - 1];
     const lastActivityAt = latest
       ? laneLastActivityAt(latest.info)
@@ -847,40 +827,9 @@ export class AgentProcessManager {
     throw new LaneModelBlockedError(model ?? blockedModel);
   }
 
-  /**
-   * Every record this host holds for one CLI session, oldest first. A resumed
-   * lane keeps its session id, so a lane resumed twice has three records; the
-   * first holds the original task and the last the latest activity.
-   */
-  private laneRecordsForSession(cliSessionId: string): TrackedAgent[] {
-    // Budget state follows the CLI-native session ID across lane records.
-    return Array.from(this.agents.values())
-      .filter((tracked) => tracked.info.cliSessionId === cliSessionId)
-      .sort((a, b) => a.info.startedAt.localeCompare(b.info.startedAt));
-  }
-
   private armBudgetDeadline(agentId: string, tracked: TrackedAgent): void {
-    if (!tracked.budget) return;
-    clearTimeout(tracked.budgetTimer);
-    tracked.budgetTimer = this.unrefTimer(setTimeout(() => {
-      if (this.agents.get(agentId) === tracked && tracked.info.status === 'running')
-        void this.stopLaneForGuard(agentId, 'duration', 0, 0);
-    }, tracked.budget.remainingMs()));
-  }
-
-  /** Most recently started record for this provider's CLI conversation. */
-  private previousResumeRecord(
-    cli: CliType,
-    cliSessionId: string | undefined,
-  ): AgentProcessInfo | undefined {
-    if (!cliSessionId) return undefined;
-    let latest: AgentProcessInfo | undefined;
-    for (const tracked of this.agents.values()) {
-      const info = tracked.info;
-      if (info.cli !== cli || info.cliSessionId !== cliSessionId) continue;
-      if (!latest || info.startedAt >= latest.startedAt) latest = info;
-    }
-    return latest;
+    armLaneBudgetDeadline(tracked, () => this.agents.get(agentId) === tracked,
+      () => { void this.stopLaneForGuard(agentId, 'duration', 0, 0); });
   }
 
   private resumedOwner(
@@ -945,7 +894,7 @@ export class AgentProcessManager {
     } = options;
     const agentId = AgentId.create();
     const startedAt = new Date().toISOString();
-    const previous = this.previousResumeRecord(cli, request.resumeSessionId);
+    const previous = previousResumeRecord(this.agents.values(), cli, request.resumeSessionId);
     const laneModel = this.spawnEnvironment.resolveModel(
       cli,
       request.model,
@@ -1215,7 +1164,7 @@ export class AgentProcessManager {
 
       const agentId = meta.agentId ?? AgentId.create();
       const startedAt = new Date().toISOString();
-      const previous = this.previousResumeRecord(
+      const previous = previousResumeRecord(this.agents.values(), 
         meta.cli,
         meta.resumeSessionId,
       );
@@ -1385,19 +1334,9 @@ export class AgentProcessManager {
     };
 
     const previousBudget = info.cliSessionId
-      ? this.previousResumeRecord(info.cli, info.cliSessionId)?.agentBudget
+      ? previousResumeRecord(this.agents.values(), info.cli, info.cliSessionId)?.agentBudget
       : undefined;
-    const budget = new AgentBudgetCoordinator(
-      this.spawnEnvironment.resolveAgentBudgetSettings(),
-      previousBudget?.startedAtMs ?? Date.parse(info.startedAt),
-      previousBudget ? {
-        weightedTokens: previousBudget.weightedTokens,
-        rawTokens: previousBudget.rawTokens,
-        turnIds: previousBudget.turnIds,
-        elapsedMs: 0, warned: false, stopped: false,
-      } : undefined,
-      previousBudget?.turnCount ?? previousBudget?.turnIds.length,
-    );
+    const budget = createLaneBudget(this.spawnEnvironment.resolveAgentBudgetSettings(), info.startedAt, previousBudget);
     tracked.budget = budget;
     tracked.info = { ...tracked.info, agentBudget: budget.record() };
     this.agents.set(agentId, tracked);
@@ -1411,7 +1350,7 @@ export class AgentProcessManager {
     };
     const updateCliSessionId = (sessionId: string | undefined): void => {
       if (!sessionId || sessionId === tracked.info.cliSessionId) return;
-      const prior = this.previousResumeRecord(tracked.info.cli, sessionId)?.agentBudget;
+      const prior = previousResumeRecord(this.agents.values(), tracked.info.cli, sessionId)?.agentBudget;
       if (prior && tracked.budget) {
         tracked.budget.rebindRecord(prior);
         tracked.info = { ...tracked.info, agentBudget: tracked.budget.record() };
@@ -1526,23 +1465,14 @@ export class AgentProcessManager {
           tracked.outcomeUsage = segment.usage;
         }
         if (segment.turnTelemetry && tracked.info.status === 'running') {
-          const result = budget.accept(segment.turnTelemetry);
-          tracked.info = { ...tracked.info, agentBudget: budget.record() };
-          if (result.costUnavailable && !tracked.budgetCostWarned) {
-            tracked.budgetCostWarned = true;
-            this.logger.warn('[AgentProcessManager] Lane turn cost unavailable', { agentId });
-          }
-          if (result.warning) {
-            void this.sendToAgent(agentId,
+          acceptLaneTurnTelemetry({ tracked, telemetry: segment.turnTelemetry, agentId,
+            logger: this.logger,
+            warn: () => this.sendToAgent(agentId,
               'Budget warning: finish your current work, report progress, and prepare a short handoff.',
               'steer', undefined, false,
-            ).then((outcome) => {
-              this.logger.info('[AgentProcessManager] Budget warning delivered', { agentId, mode: outcome.mode });
-            }).catch((error: unknown) => {
-              this.logger.error('[AgentProcessManager] Budget warning failed', error instanceof Error ? error : new Error(String(error)));
-            });
-          }
-          if (result.stopReason) void this.stopLaneForGuard(agentId, result.stopReason, 0, 0);
+            ),
+            stop: (reason) => { void this.stopLaneForGuard(agentId, reason, 0, 0); },
+          });
         }
         this.outputBuffer.appendSegment(
           agentId,

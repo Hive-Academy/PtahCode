@@ -270,6 +270,7 @@ export class PtahCliStreamLoop {
    * delta per result and to name the model that incurred that delta.
    */
   private readonly previousModelUsage = new Map<string, ModelUsageTotals>();
+  private previousTurnCostUsd = 0;
   /**
    * Per-turn plan-limit state (Decision 4 S1/S2), reset on every `result`.
    * Scopes and model for plan-limit signals come only from this turn's
@@ -647,15 +648,15 @@ export class PtahCliStreamLoop {
               // The same line, with the turn's usage attached for the agent
               // card's token and cost tiles (Decision 8).
               const usage = this.turnUsage(msg);
-              const billedModels = Object.keys(msg.modelUsage ?? {});
               const telemetryTurnId = `${msg.session_id ?? this.effectiveSessionId ?? 'ptah-cli'}:${this.turnIndex}`;
-              const turnTelemetry: AgentTurnTelemetry = billedModels.length > 1
-                ? { status: 'unavailable', turnId: telemetryTurnId, modelId: 'mixed-model', source: 'sdk', reason: 'mixed-model-usage' }
-                : completedTurnTelemetry({
+              const turnCostUsd = msg.total_cost_usd === undefined ? undefined
+                : Math.max(0, msg.total_cost_usd - this.previousTurnCostUsd);
+              if (msg.total_cost_usd !== undefined) this.previousTurnCostUsd = msg.total_cost_usd;
+              const turnTelemetry: AgentTurnTelemetry = completedTurnTelemetry({
                     turnId: telemetryTurnId,
-                    modelId: billedModels[0] ?? this.turnModel ?? this.sessionModel,
+                    modelId: usage?.model ?? (usage?.inputTokens !== undefined ? 'mixed-model' : undefined),
                     source: 'sdk',
-                    usage: usage ? { ...usage, costUsd: undefined } : undefined,
+                    usage: usage ? { ...usage, costUsd: turnCostUsd } : undefined,
                     uncachedInput: true,
                   });
               const attachTelemetry = usage?.inputTokens !== undefined && usage?.outputTokens !== undefined;
@@ -812,7 +813,7 @@ export class PtahCliStreamLoop {
    * main-loop usage fallback.
    */
   private turnUsage(msg: SDKResultSuccess): CliOutputSegment['usage'] {
-    const model = this.turnModel ?? this.sessionModel;
+    const model = this.turnModel;
     const modelUsageEntries = Object.entries(msg.modelUsage ?? {});
     if (modelUsageEntries.length > 0) {
       let turn: ModelUsageTotals = {
@@ -849,6 +850,7 @@ export class PtahCliStreamLoop {
           cacheWriteTokens: turn.cacheWriteTokens + modelDelta.cacheWriteTokens,
         };
       }
+      if (modelsWithDelta.length === 0) return undefined;
       return {
         // Name a model only when exactly one model incurred this turn's delta.
         ...(modelsWithDelta.length === 1 && { model: modelsWithDelta[0] }),
@@ -873,6 +875,6 @@ export class PtahCliStreamLoop {
         costUsd: msg.total_cost_usd,
       }),
     };
-    return Object.keys(usage).length > 0 ? usage : undefined;
+    return msg.usage ? usage : undefined;
   }
 }
