@@ -169,6 +169,7 @@ function makeHarness(
     handoffFiles?: SubagentHandoffFilesPort;
     records?: SubagentHandoffRecordsPort;
     index?: SubagentHandoffIndexPort;
+    lookupTranscript?: typeof resolveSubagentTranscriptPath;
   } = {},
 ) {
   // The order of record, stop and delivery calls.
@@ -253,6 +254,7 @@ function makeHarness(
     opts.index ?? index,
     budgetStops,
     stopNotices,
+    opts.lookupTranscript ?? (async () => undefined),
   );
   return {
     monitor,
@@ -371,6 +373,22 @@ describe('SubagentBudgetMonitor', () => {
     expect(redactBudgetSecrets(fake('--', name, ' ', credential))).toBe(`--${name} [redacted]`);
   });
 
+  it.each(['github-token', 'db-password', 'npm-auth-token', 'aws-secret-key'])('redacts credential-suffixed long flag %s', (name) => {
+    const credential = fake('dummy', 'value123');
+    expect(redactBudgetSecrets(fake('--', name, '=', credential))).toBe(`--${name}=[redacted]`);
+    expect(redactBudgetSecrets(fake('--', name, ' ', credential))).toBe(`--${name} [redacted]`);
+  });
+
+  it.each(['access-key', 'encryption-key', 'signing-key'])('redacts credential key flag %s', (name) => {
+    const credential = fake('dummy', 'value123');
+    expect(redactBudgetSecrets(fake('--', name, '=', credential))).toBe(`--${name}=[redacted]`);
+    expect(redactBudgetSecrets(fake('--', name, ' ', credential))).toBe(`--${name} [redacted]`);
+  });
+
+  it.each(['encryptionKey', 'signingKey', 'authKey', 'masterKey'])('redacts credential camelCase name %s', (name) => {
+    expect(redactBudgetSecrets(fake(name, '=', 'dummy', 'value123'))).toBe(`${name}=[redacted]`);
+  });
+
   it.each(['the token count is 31079', 'update the key handler', 'password reset flow',
     'Basic usage', 'Basic functionality', 'Basic configuration',
     'primary key: id', 'the key insight', 'Bearer of bad news', 'monkey: x',
@@ -403,7 +421,7 @@ describe('SubagentBudgetMonitor', () => {
     expect(performance.now() - started).toBeLessThan(1_000);
   });
 
-  it('accepts only an existing transcript in the expected session directory', () => {
+  it('accepts only an existing transcript in the expected session directory', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ptah-transcript-home-'));
     const workspace = path.join(home, 'workspace');
     const session = 'session-1';
@@ -420,12 +438,48 @@ describe('SubagentBudgetMonitor', () => {
       fs.writeFileSync(outside, '{}\n');
       fs.mkdirSync(hookDirectory, { recursive: true });
       fs.writeFileSync(hookFile, '{}\n');
-      expect(resolveSubagentTranscriptPath(home, workspace, session, agent)).toBe(fs.realpathSync(file));
-      expect(resolveSubagentTranscriptPath(home, workspace, session, agent, file)).toBe(fs.realpathSync(file));
-      expect(resolveSubagentTranscriptPath(home, workspace, session, agent, hookFile)).toBe(fs.realpathSync(hookFile));
-      expect(resolveSubagentTranscriptPath(home, workspace, session, agent, outside)).toBeUndefined();
+      await expect(resolveSubagentTranscriptPath(home, workspace, session, agent)).resolves.toBe(fs.realpathSync(file));
+      await expect(resolveSubagentTranscriptPath(home, workspace, session, agent, file)).resolves.toBe(fs.realpathSync(file));
+      await expect(resolveSubagentTranscriptPath(home, workspace, session, agent, hookFile)).resolves.toBe(fs.realpathSync(hookFile));
+      await expect(resolveSubagentTranscriptPath(home, workspace, session, agent, outside)).resolves.toBeUndefined();
+      await expect(resolveSubagentTranscriptPath(home, workspace, session, agent, `${directory}${path.sep}..${path.sep}subagents${path.sep}agent-${agent}.jsonl`)).resolves.toBeUndefined();
       fs.unlinkSync(file);
-      expect(resolveSubagentTranscriptPath(home, workspace, session, agent)).toBeUndefined();
+      await expect(resolveSubagentTranscriptPath(home, workspace, session, agent)).resolves.toBe(fs.realpathSync(hookFile));
+      fs.unlinkSync(hookFile);
+      await expect(resolveSubagentTranscriptPath(home, workspace, session, agent)).resolves.toBeUndefined();
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('prefers the current project, then the newest transcript across projects', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ptah-transcript-order-'));
+    const workspace = path.join(home, 'workspace');
+    const session = 'session-1';
+    const agent = 'agent-1';
+    const root = path.join(home, '.claude', 'projects');
+    const slug = path.resolve(workspace).replace(/[^A-Za-z0-9]/g, '-');
+    const filename = `agent-${agent}.jsonl`;
+    const current = path.join(root, slug, session, 'subagents', filename);
+    const older = path.join(root, 'other-a', session, 'subagents', filename);
+    const newer = path.join(root, 'other-b', session, 'subagents', filename);
+    try {
+      for (const file of [current, older, newer]) {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, '{}\n');
+      }
+      fs.utimesSync(current, new Date(1_000), new Date(1_000));
+      fs.utimesSync(older, new Date(2_000), new Date(2_000));
+      fs.utimesSync(newer, new Date(3_000), new Date(3_000));
+      const scan = jest.spyOn(fs.promises, 'readdir');
+      try {
+        await expect(resolveSubagentTranscriptPath(home, workspace, session, agent)).resolves.toBe(fs.realpathSync(current));
+        expect(scan).not.toHaveBeenCalled();
+      } finally {
+        scan.mockRestore();
+      }
+      fs.unlinkSync(current);
+      await expect(resolveSubagentTranscriptPath(home, workspace, session, agent)).resolves.toBe(fs.realpathSync(newer));
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
@@ -454,6 +508,16 @@ describe('SubagentBudgetMonitor', () => {
     expect(h.monitor.getAgentBudgetState(TOOL_CALL, SESSION)?.stopState).toBe('stopped');
   });
 
+  it('ignores the old registry teammate name after a same-name replacement spawns', async () => {
+    const h = makeHarness({ teammateName: 'reviewer' });
+    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'old-stop' }));
+    await h.monitor.observe(SESSION, {
+      type: 'assistant', parent_tool_use_id: null,
+      message: { content: [{ type: 'tool_use', id: 'new-call', name: 'Agent', input: { name: 'reviewer' } }] },
+    });
+    expect(h.monitor.getAgentBudgetState('reviewer', SESSION)?.stopped).not.toBe(true);
+  });
+
   it('keeps identical teammate names independent across sessions', async () => {
     const h = makeHarness({ teammateName: 'reviewer' });
     await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'first-stop' }));
@@ -480,6 +544,33 @@ describe('SubagentBudgetMonitor', () => {
     rejectStop(new Error('busy'));
     await observing;
     expect(h.monitor.getAgentBudgetState('reviewer', SESSION)).toEqual(expect.objectContaining({ stopped: false, stopState: 'none', running: true }));
+  });
+
+  it('refuses steering while handoff preparation is still in flight', async () => {
+    const h = makeHarness({ teammateName: 'reviewer' }, { workspace: RECORD_WORKSPACE });
+    let finishPreparation: () => void = () => undefined;
+    let reached: () => void = () => undefined;
+    const writing = new Promise<void>((resolve) => { reached = resolve; });
+    h.recordStore.writeOnce.mockImplementationOnce(() => new Promise<HandoffRecordWrite>((resolve) => {
+      finishPreparation = () => resolve({ ok: false, errorType: 'Unavailable' });
+      reached();
+    }));
+    const observing = h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'preparing' }));
+    await writing;
+    expect(h.monitor.getAgentBudgetState('reviewer', SESSION)).toEqual(expect.objectContaining({ stopped: true, stopState: 'pending' }));
+    finishPreparation();
+    await observing;
+    expect(h.monitor.getAgentBudgetState('reviewer', SESSION)?.stopState).toBe('none');
+  });
+
+  it('caches a missing transcript across stop preparation retries', async () => {
+    const lookupTranscript = jest.fn(async () => undefined);
+    const h = makeHarness({}, { workspace: RECORD_WORKSPACE, lookupTranscript });
+    h.recordStore.writeOnce.mockResolvedValue({ ok: false, errorType: 'Unavailable' });
+    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'first-try' }));
+    expect(lookupTranscript).toHaveBeenCalledTimes(1);
+    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'second-try' }));
+    expect(lookupTranscript).toHaveBeenCalledTimes(1);
   });
 
   it('re-arms a warning whose first task id was unknown', async () => {
@@ -2380,7 +2471,7 @@ describe('SubagentBudgetMonitor handoff records', () => {
     );
     const first = h.monitor.observe(SESSION, over('m1'));
     await writing;
-    expect(h.monitor.getAgentBudgetState(TOOL_CALL, SESSION)?.stopState).toBe('none');
+    expect(h.monitor.getAgentBudgetState(TOOL_CALL, SESSION)?.stopState).toBe('pending');
     h.monitor.release(SESSION);
     finish({
       ok: true,
