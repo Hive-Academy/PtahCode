@@ -29,7 +29,7 @@ export type CliProviderDefaultChoice = NonNullable<CliLaneDefaults[CliType]>;
         [attr.data-status]="statusKind()">{{ statusText() }}</span>
     </header>
     <div class="card-body min-h-0 min-w-0 p-1">
-      <div class="flex h-8 items-center justify-between gap-1 px-1">
+      <div class="flex h-10 shrink-0 items-center justify-between gap-1 px-1">
         <span class="min-w-0 truncate text-xs text-base-content-muted" [title]="row().codexStatusLine ?? ''">
           {{ row().codexStatusLine ?? (row().installed ? 'Installed' : 'Not installed') }}
         </span>
@@ -74,9 +74,9 @@ export type CliProviderDefaultChoice = NonNullable<CliLaneDefaults[CliType]>;
       <div class="border-t border-base-content/10 px-1 pt-1 text-xs">
         <p class="font-semibold">Current CLI mode</p><p class="truncate text-base-content-muted" [title]="row().permission.detail">{{ row().permission.badge }}</p>
       </div>
-      <div class="min-h-0 border-t border-base-content/10 px-1 pt-1 text-xs">
+      <div class="shrink-0 border-t border-base-content/10 px-1 pt-1 text-xs">
         <ptah-cli-lane-default-cell [cli]="row().cli" [name]="row().name" [manifest]="row().manifest"
-          [saved]="saved()" [disabled]="busy() || !canWrite()" layout="compact"
+          [saved]="saved()" [disabled]="busy() || !canWrite()" layout="card"
           (selected)="defaultSelected.emit($event)" (resetRequested)="defaultResetRequested.emit()" />
       </div>
       <div class="credential-slot min-w-0 px-1 text-xs">

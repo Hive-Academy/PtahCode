@@ -41,9 +41,10 @@ describe('CliProviderCardComponent', () => {
   });
   it('shows Credentials only for Cursor', () => {
     const codex = setup(row('codex'));
-    expect((codex.nativeElement as HTMLElement).textContent).not.toContain('Credentials');
+    const credentials = '[data-popover-kind="credentials"]';
+    expect((codex.nativeElement as HTMLElement).querySelector(credentials)).toBeNull();
     const cursor = setup(row('cursor'));
-    expect((cursor.nativeElement as HTMLElement).textContent).toContain('Credentials');
+    expect((cursor.nativeElement as HTMLElement).querySelector(credentials)?.textContent?.trim()).toBe('Credentials');
   });
   it('keeps Credentials on an uninstalled Cursor and offers its install guide', () => {
     const fixture = setup(row('cursor', false));

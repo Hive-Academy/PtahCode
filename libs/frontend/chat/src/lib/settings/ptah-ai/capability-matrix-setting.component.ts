@@ -92,14 +92,16 @@ const NO_PARAMS: AgentGetCapabilityMatrixParams = {};
                 <thead>
                   <tr>
                     <th scope="col" class="sticky left-0 bg-base-100">Model</th>
-                    @for (kind of tasks; track kind) { <th scope="col">{{ kind }}</th> }
+                    @for (kind of tasks; track kind) { <th scope="col" class="capitalize">{{ kind }}</th> }
                   </tr>
                 </thead>
                 @for (family of families(); track family) {
                   <tbody [id]="'family-' + family">
-                    <tr><th scope="rowgroup" colspan="7">
-                      <button type="button" class="min-h-8" [attr.aria-expanded]="expanded().has(family)" [attr.aria-controls]="'family-' + family" (click)="toggleFamily(family)">
-                        {{ family.startsWith('pc-') ? names.executor(family).text : family }}
+                    <tr><th scope="rowgroup" colspan="7" class="bg-base-content/5">
+                      <button type="button" [class]="'flex min-h-8 items-center gap-2 rounded text-sm font-semibold ' + focusRing" [attr.aria-expanded]="expanded().has(family)" [attr.aria-controls]="'family-' + family" [title]="family" (click)="toggleFamily(family)">
+                        <span aria-hidden="true" class="inline-block w-3 transition-transform" [class.rotate-90]="expanded().has(family)">›</span>
+                        <span>{{ names.executor(family).text }}</span>
+                        <span class="badge badge-ghost badge-sm font-normal">{{ modelCount(family) }}</span>
                       </button>
                       @if (family.startsWith('pc-') && names.executor(family).raw; as raw) {
                         <details><summary class="min-h-8 cursor-pointer">Executor ID details</summary><code class="break-all">{{ raw }}</code></details>
@@ -119,6 +121,7 @@ const NO_PARAMS: AgentGetCapabilityMatrixParams = {};
                               @else {
                                 <span class="font-semibold">{{ cell.score }}/100</span>
                                 <div class="h-1.5 rounded bg-base-content/15" aria-hidden="true"><div class="h-1.5 rounded bg-primary" [style.width.%]="cell.score"></div></div>
+                                <div class="mt-1 flex flex-wrap items-center gap-1.5">
                                 <span class="badge badge-ghost badge-xs">{{ cell.source }}</span>
                                 @if (cell.sampleCount !== null) { <span>n={{ cell.sampleCount }}</span> }
                                 @if (cell.stale) { <span class="badge badge-warning badge-xs">Stale</span> }
@@ -126,6 +129,7 @@ const NO_PARAMS: AgentGetCapabilityMatrixParams = {};
                                   <button trigger type="button" class="min-h-8 underline" [attr.aria-expanded]="openCell() === rowId(family, profile.model, kind)" [attr.aria-controls]="'detail-' + rowId(family, profile.model, kind)" (click)="toggleCell(family, profile.model, kind)">Details</button>
                                   <div content [id]="'detail-' + rowId(family, profile.model, kind)" class="max-w-64 bg-base-100 p-3 text-xs shadow-lg"><p>As of {{ cell.asOf }}</p><p>Source: {{ cell.sourceRef || 'None' }}</p>@if (cell.note) { <p>{{ cell.note }}</p> }</div>
                                 </ptah-native-popover>
+                                </div>
                               }
                             </td>
                           }
@@ -165,6 +169,10 @@ export class CapabilityMatrixSettingComponent implements OnInit {
 
   protected families(): readonly string[] { return [...new Set(this.profiles().map((profile) => profile.family))]; }
   protected familyProfiles(family: string): readonly AgentCapabilityMatrixProfile[] { return this.profiles().filter((profile) => profile.family === family); }
+  protected modelCount(family: string): string {
+    const count = this.familyProfiles(family).length;
+    return count === 1 ? '1 model' : `${count} models`;
+  }
   protected toggleFamily(family: string): void {
     const next = new Set(this.expanded());
     if (next.has(family)) next.delete(family); else next.add(family);

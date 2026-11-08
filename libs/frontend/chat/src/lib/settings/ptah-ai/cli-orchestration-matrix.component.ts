@@ -181,7 +181,7 @@ const SAVE_SCOPE = 'global';
           (popoverToggled)="toggleProviderPopover($event)" (popoverDismissed)="closeProviderPopover()"
           (codexSettingsRequested)="codexSettingsRequested.emit()" />
         @if (groups().length > 1) {
-          <button type="button" class="btn btn-ghost btn-sm"
+          <button type="button" class="btn btn-ghost btn-sm before:inline-block before:w-3 before:transition-transform before:content-['›'] aria-expanded:before:rotate-90"
             data-testid="cli-matrix-uninstalled-toggle" [attr.aria-expanded]="uninstalledShown()"
             (click)="toggleUninstalled()">Uninstalled CLI agents ({{ groups()[1].rows.length }})</button>
           @if (uninstalledShown()) {

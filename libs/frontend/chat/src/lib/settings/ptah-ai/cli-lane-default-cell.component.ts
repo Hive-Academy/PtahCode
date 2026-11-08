@@ -12,12 +12,12 @@ const FULL_ACCESS_WARNING = 'Full access lets Codex read and change files outsid
   selector: 'ptah-cli-lane-default-cell',
   standalone: true,
   imports: [NativePopoverComponent],
-  styles: `:host { display: block; } .compact { width: 4.75rem; } .wide { width: 100%; } .wide select { max-width: 20rem; min-width: 9rem; } @container (max-width: 479px) { .wide > .grid { grid-template-columns: minmax(0, 1fr); } }`,
+  styles: `:host { display: block; } dialog.modal:not([open]) { display: none; } .compact { width: 4.75rem; } .wide, .card-layout { width: 100%; } .wide select { max-width: 20rem; min-width: 9rem; } @container (max-width: 479px) { .wide > .grid { grid-template-columns: minmax(0, 1fr); } }`,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="flex min-w-0 max-w-full flex-col gap-1 text-xs text-base-content [overflow-wrap:anywhere]" [class.compact]="layout() === 'compact'" [class.wide]="layout() === 'wide'">
+    <div class="flex min-w-0 max-w-full flex-col gap-1 text-xs text-base-content [overflow-wrap:anywhere]" [class.compact]="layout() === 'compact'" [class.wide]="layout() === 'wide'" [class.card-layout]="layout() === 'card'">
       @if (cli() === 'ptah-cli') { <span>Shared by all Ptah CLI providers</span> }
-      @if (cli() === 'codex') { <span>This is the same setting as Codex sandbox in Orchestration.</span> }
+      @if (cli() === 'codex') { <span>Same setting as Codex sandbox in Providers › OpenAI Codex › Credentials.</span> }
       @if (showCaption()) { <span>{{ saved() ? 'Saved default' : 'Auto (default) · built-in' }}</span> }
       @if (saved()) {
         <ptah-native-popover [isOpen]="resetOpen()" placement="bottom-start" [hasBackdrop]="true" backdropClass="transparent" (closed)="resetOpen.set(false)">
@@ -26,10 +26,10 @@ const FULL_ACCESS_WARNING = 'Full access lets Codex read and change files outsid
         </ptah-native-popover>
       }
       @if (unsupportedCombination(); as reason) { <span role="status">Unsupported combination: {{ reason }}</span> }
-      <div class="grid min-w-0 grid-cols-1 gap-3" [class.grid-cols-2]="layout() === 'wide'">
+      <div class="grid min-w-0 grid-cols-1" [class.gap-3]="layout() !== 'card'" [class.gap-2]="layout() === 'card'" [class.grid-cols-2]="layout() !== 'compact'">
       @if (permissions().length) {
         <label class="flex flex-col gap-0.5">Permission
-          <select class="select select-bordered w-full min-w-0 max-w-full border-base-content/60 text-base-content" [class.select-sm]="layout() === 'wide'" [class.select-xs]="layout() === 'compact'" [attr.aria-label]="name() + ' permission default'" [title]="effectivePermission()"
+          <select class="select select-bordered w-full min-w-0 max-w-full border-base-content/60 text-base-content" [class.select-sm]="layout() === 'wide'" [class.select-xs]="layout() !== 'wide'" [attr.aria-label]="name() + ' permission default'" [title]="effectivePermission()"
             [value]="effectivePermission()" [disabled]="disabled() || pending() !== null" (change)="choosePermission($event)">
             @for (mode of permissions(); track mode) { <option [value]="mode">{{ mode }}</option> }
           </select>
@@ -42,7 +42,7 @@ const FULL_ACCESS_WARNING = 'Full access lets Codex read and change files outsid
       } @else { <span tabindex="0" [title]="reason()">Permission: Unavailable — {{ reason() }}</span> }
       @if (networks().length) {
         <label class="flex flex-col gap-0.5">Network
-          <select class="select select-bordered w-full min-w-0 max-w-full border-base-content/60 text-base-content" [class.select-sm]="layout() === 'wide'" [class.select-xs]="layout() === 'compact'" [attr.aria-label]="name() + ' network default'" [title]="effectiveNetwork()"
+          <select class="select select-bordered w-full min-w-0 max-w-full border-base-content/60 text-base-content" [class.select-sm]="layout() === 'wide'" [class.select-xs]="layout() !== 'wide'" [attr.aria-label]="name() + ' network default'" [title]="effectiveNetwork()"
             [value]="effectiveNetwork()" [disabled]="disabled() || pending() !== null" (change)="chooseNetwork($event)">
             @for (mode of networks(); track mode) { <option [value]="mode">{{ mode }}</option> }
           </select>
@@ -65,7 +65,8 @@ export class CliLaneDefaultCellComponent {
   readonly manifest = input<CliAdapterManifest>();
   readonly saved = input<Choice>();
   readonly disabled = input(false);
-  readonly layout = input<'compact' | 'wide'>('compact');
+  /** `compact`: narrow column. `wide`: settings row. `card`: full card width, Permission and Network side by side. */
+  readonly layout = input<'compact' | 'wide' | 'card'>('compact');
   readonly showCaption = input(true);
   readonly selected = output<Choice>();
   readonly resetRequested = output<void>();
