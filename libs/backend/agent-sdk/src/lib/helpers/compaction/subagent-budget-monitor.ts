@@ -132,7 +132,7 @@ import { SubagentStopNotices } from './subagent-stop-notices';
 /** The handoff file operations the monitor uses. */
 export type SubagentHandoffFilesPort = Pick<
   SubagentHandoffFiles,
-  'paths' | 'saveTask' | 'notesExist'
+  'paths' | 'saveTask' | 'notesExist' | 'redactNotes'
 >;
 
 /** The handoff record operations the monitor uses. */
@@ -223,17 +223,85 @@ function tokenCount(value: unknown): number | undefined {
     : undefined;
 }
 
+function credentialNameStrength(name: string): 'strong' | 'weak' | undefined {
+  if (/^(?:key|token)$/i.test(name)) return 'weak';
+  const segments = name.split(/[_.-]/);
+  const lastSegment = segments.at(-1);
+  const envSuffix = /^[A-Z0-9_]+$/.test(name) && /^(?:BASE|VALUE|PROD)$/.test(lastSegment ?? '')
+    && /^(?:KEY|SECRET|TOKEN|PASSWORD)$/.test(segments.at(-2) ?? '');
+  if (/^(?:password|passwd|secret|api[_-]?key|client_secret|access_token|refresh_token|private_key|credentials?)$/i.test(name)
+    || (name.includes('_') || name.includes('-') || name.includes('.'))
+      && /^(?:KEY|SECRET|TOKEN|PASSWORD)$/i.test(lastSegment ?? '')
+    || envSuffix
+    || /(?:Token|Secret|Password|Credential|Credentials)$/.test(name)
+    || /^(?:api|access|private|secret)Key$/.test(name)
+    || /^(?:SECRETKEY|ACCESSKEY|PRIVATEKEY|DBPASSWORD)$/.test(name)) return 'strong';
+  return undefined;
+}
+
+function redactedAssignment(name: string, token: string): boolean {
+  const strength = credentialNameStrength(name);
+  if (!strength) return false;
+  const quoted = /^["']/.test(token);
+  return strength === 'strong'
+    ? quoted || token.length >= 6
+    : quoted || (token.length >= 6 && /[0-9._~+/-]/.test(token));
+}
+
+/** Match assignment names without consuming the next assignment as a prose value. */
+function redactNamedAssignments(value: string): string {
+  const names = /(?<![A-Za-z0-9_.-])([A-Za-z][A-Za-z0-9_.-]*)[ \t]*[:=][ \t]*/gm;
+  const values = /"[^"]*"|'[^']*'|[^\s,;]+/y;
+  let result = '';
+  let cursor = 0;
+  for (const match of value.matchAll(names)) {
+    const start = match.index;
+    if (start < cursor || !credentialNameStrength(match[1])) continue;
+    const valueStart = start + match[0].length;
+    values.lastIndex = valueStart;
+    const token = values.exec(value)?.[0];
+    if (!token || !redactedAssignment(match[1], token)) continue;
+    const quote = /^["']/.test(token) ? token[0] : '';
+    result += value.slice(cursor, valueStart) + `${quote}[redacted]${quote}`;
+    cursor = valueStart + token.length;
+  }
+  return result + value.slice(cursor);
+}
+
+function redactCliFlags(value: string): string {
+  return value.replace(/(^|[ \t(])(--)(password|pass|token|secret|api[-_]?key|access-token|auth-token|refresh-token|client-secret|api-token|private-key)(=[ \t]*|[ \t]+)("[^"]*"|'[^']*'|[^\s,;]+)/gim,
+    (match, prefix: string, dashes: string, name: string, separator: string, token: string) => {
+      const quote = /^["']/.test(token) ? token[0] : '';
+      return `${prefix}${dashes}${name}${separator}${quote}[redacted]${quote}`;
+    });
+}
+
+function redactMarkdownLabels(value: string): string {
+  return value.replace(/(?<![A-Za-z0-9_])(\*{1,2}|_{1,2})(password|passwd|secret|token|key|api[_-]?key|client[_-]?secret|access[_-]?token|refresh[_-]?token|private[_-]?key)(:?)\1(:?)([ \t]*)("[^"]*"|'[^']*'|[^\s,;]+)/gi,
+    (match, marker: string, name: string, innerColon: string, outerColon: string, space: string, token: string) => {
+      if ((!innerColon && !outerColon) ||
+        !(redactedAssignment(name, token) || (name.toLowerCase() === 'token' && token.length >= 6))) return match;
+      const quote = /^["']/.test(token) ? token[0] : '';
+      return `${marker}${name}${innerColon}${marker}${outerColon}${space}${quote}[redacted]${quote}`;
+    });
+}
+
 /** Keep a useful excerpt while removing common credential forms from persisted prose. */
 export function redactBudgetSecrets(value: string): string {
-  return value
+  const redacted = value
     .replace(/-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z ]+ )?PRIVATE KEY-----/g, '[redacted private key]')
-    .replace(/(Authorization["']?\s*:\s*["']?\s*(?:Bearer|Basic)\s+)[^\s"'`]+/gi, '$1[redacted]')
-    .replace(/(\b(?:Bearer|Basic)\s+)[^\s"'`]+/gi, '$1[redacted]')
+    .replace(/(Authorization["']?\s*:\s*["']?\s*Basic\s+)([A-Za-z0-9._~+/-]+={0,2})(?![A-Za-z0-9._~+/=-])/gi, '$1[redacted]')
+    .replace(/(\b(?:Bearer|Basic)\s+)([A-Za-z0-9._~+/-]+={0,2})(?![A-Za-z0-9._~+/=-])/gi,
+      (match, prefix: string, token: string) =>
+        token.length >= 20 || /[0-9+/=._~-]/.test(token) ? `${prefix}[redacted]` : match)
     .replace(/(:\/\/[^\s:/@]+:)[^\s@]+(@)/g, '$1[redacted]$2')
-    .replace(/(["'](?:api[_-]?key|password|secret|token|[A-Z0-9_]*(?:_KEY|_SECRET|_TOKEN))["']\s*:\s*["'])[^"']+(["'])/gi, '$1[redacted]$2')
-    .replace(/(?<![A-Za-z0-9])([A-Za-z0-9_.-]*(?:secret|token|password|passwd|key|credential)(?:[_.-][A-Za-z0-9]+)*)\s*[:=]\s*("[^"]*"|'[^']*'|[^\s,;]+)/gi, '$1=[redacted]')
+    .replace(/(["'])([A-Za-z][A-Za-z0-9_.-]*)\1\s*:\s*(["'])([^"']+)\3/g,
+      (match, quote: string, name: string, valueQuote: string, token: string) =>
+        redactedAssignment(name, `${valueQuote}${token}${valueQuote}`)
+          ? `${quote}${name}${quote}: ${valueQuote}[redacted]${valueQuote}` : match)
     .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, '[redacted]')
     .replace(/\b(?:sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9_]{12,}|github_pat_[A-Za-z0-9_]{12,}|xox[bp]-[A-Za-z0-9-]{12,})\b/g, '[redacted]');
+  return redactNamedAssignments(redactMarkdownLabels(redactCliFlags(redacted)));
 }
 
 function safeProgressText(value: string): string {
@@ -1289,6 +1357,10 @@ export class SubagentBudgetMonitor {
     if (liveState.warnedAgentId) {
       // A warning the stopped subagent never received is moot now.
       this.dispatcher.withdrawSubagentNotice(liveState.warnedAgentId);
+    }
+    const notesPaths = preparedState.handoffPaths ?? this.handoffFiles.paths(sessionId, toolCallId);
+    if (notesPaths) {
+      await this.handoffFiles.redactNotes(notesPaths, redactBudgetSecrets);
     }
     await this.deliverHandoff(current, toolCallId, liveState, prepared.handoff);
     const prompt = current.tasks.get(toolCallId)?.prompt;
