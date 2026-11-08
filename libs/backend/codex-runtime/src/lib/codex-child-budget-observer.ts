@@ -73,8 +73,7 @@ export function settleCodexChildBudgetEvent(
     pricing: modelId ? pricing(modelId) : null,
   });
   const { warning, stopReason, handoff, coverage } = decision.transition;
-  if (warning || stopReason || handoff)
-    logger.warn('[Codex budget] Child budget decision', {
+  logger.warn('[Codex budget] Child budget decision', {
       childThreadId: event.threadId,
       warning,
       handoff,
@@ -107,10 +106,19 @@ export function observeCodexChildBudgets(
   const controller = new AbortController();
   const pricing = port.pricing ?? findModelPricing;
   const draining = new Map<string, { event: CodexRuntimeEvent; timer: ReturnType<typeof setTimeout> }>();
+  const unknownModelsLogged = new Set<string>();
   const keyOf = (event: CodexRuntimeEvent): string => `${event.threadId}\u0000${event.turnId}`;
   const settle = (event: CodexRuntimeEvent): void => {
     try {
-      settleCodexChildBudgetEvent(event, tap, logger, pricing);
+      const decision = settleCodexChildBudgetEvent(event, tap, logger, pricing);
+      if (decision?.telemetry.status === 'reported' &&
+        decision.telemetry.usage.modelId === 'codex/unknown' &&
+        !unknownModelsLogged.has(event.threadId)) {
+        unknownModelsLogged.add(event.threadId);
+        logger.warn('[Codex budget] Child model unavailable; raw tokens charged without cost', {
+          childThreadId: event.threadId,
+        });
+      }
     } catch (error: unknown) {
       // degradation-audit: reported - one failed charge must not stop later charges
       logger.warn('[Codex budget] Child budget charge failed', {

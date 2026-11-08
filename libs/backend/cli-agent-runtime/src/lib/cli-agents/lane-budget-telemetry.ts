@@ -2,6 +2,27 @@ import type { AgentBudgetStopReason, AgentMessageOutcome, AgentTurnTelemetry } f
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { TrackedAgent } from './tracked-agent';
 import { armLaneBudgetDeadline } from './lane-budget-deadline';
+import type { SdkHandle } from './cli-adapters/cli-adapter.interface';
+
+/** Queue-capable adapters receive the warning without a failed steer probe. */
+export async function deliverLaneBudgetWarning(
+  agentId: string,
+  handle: Pick<SdkHandle, 'steer' | 'queueForNextTurn'> | undefined,
+  send: (agentId: string, message: string, delivery: 'steer' | 'queue') => Promise<AgentMessageOutcome>,
+): Promise<AgentMessageOutcome> {
+  const message = 'Budget warning: finish your current work, report progress, and prepare a short handoff.';
+  if (!handle?.steer && handle?.queueForNextTurn) {
+    handle.queueForNextTurn(message);
+    return { mode: 'queue-next-turn' };
+  }
+  const steered = await send(agentId, message, 'steer');
+  if (steered.mode !== 'unsupported') return steered;
+  if (handle?.queueForNextTurn) {
+    handle.queueForNextTurn(message);
+    return { mode: 'queue-next-turn' };
+  }
+  return send(agentId, message, 'queue');
+}
 
 export interface LaneBudgetDecision {
   warning: boolean;

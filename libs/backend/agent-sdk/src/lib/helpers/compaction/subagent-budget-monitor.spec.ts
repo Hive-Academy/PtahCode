@@ -2216,7 +2216,7 @@ describe('SubagentBudgetMonitor', () => {
       expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
       const handoff = h.dispatcher.pushParentMessage.mock.calls[0][1];
       expect(handoff).toContain("Ptah's subagent budget monitor handed off subagent");
-      expect(handoff).toContain('Ptah\'s subagent budget monitor caused that interruption, not the user');
+      expect(handoff).toContain('The interruption notice in the Agent result came from Ptah\'s subagent budget monitor, not the user');
       expect(handoff).toContain('SDK task: task-1');
       expect(fs.readFileSync(notesPath(), 'utf8')).toContain('# Subagent progress (host-generated, inferred)');
       expect(h.monitor.hasNotesGate('agent-7')).toBe(false);

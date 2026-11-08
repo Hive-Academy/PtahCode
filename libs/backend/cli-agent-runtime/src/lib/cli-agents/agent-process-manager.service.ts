@@ -110,7 +110,7 @@ import {
 import { LaneBudgetGuard } from './lane-budget-guard';
 import { AgentBudgetCoordinator } from './agent-budget-coordinator';
 import { createLaneBudget } from './lane-budget-deadline';
-import { LaneBudgetTelemetry } from './lane-budget-telemetry';
+import { deliverLaneBudgetWarning, LaneBudgetTelemetry } from './lane-budget-telemetry';
 import { bindLaneSessionId } from './lane-session-binding';
 import type { AgentOutputJournal } from './agent-output-journal.service';
 import {
@@ -452,12 +452,8 @@ export class AgentProcessManager {
   ) {
     this.budgetTelemetry = new LaneBudgetTelemetry(this.logger,
       async (agentId) => {
-        const message = 'Budget warning: finish your current work, report progress, and prepare a short handoff.';
-        const steered = await this.sendToAgent(agentId, message, 'steer');
-        if (steered.mode !== 'unsupported') return steered;
-        const handle = this.agents.get(agentId)?.sdkHandle;
-        if (handle?.queueForNextTurn) { handle.queueForNextTurn(message); return { mode: 'queue-next-turn' }; }
-        return this.sendToAgent(agentId, message, 'queue');
+        return deliverLaneBudgetWarning(agentId, this.agents.get(agentId)?.sdkHandle,
+          (id, message, delivery) => this.sendToAgent(id, message, delivery));
       },
       (agentId, reason) => { void this.stopLaneForGuard(agentId, reason, 0, 0); });
   }

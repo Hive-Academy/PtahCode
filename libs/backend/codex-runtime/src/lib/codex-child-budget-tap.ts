@@ -9,6 +9,7 @@ import {
   type ModelPricing,
 } from '@ptah-extension/shared';
 import type { CodexRuntimeEvent } from './codex-runtime.types';
+import { z } from 'zod';
 
 /** Bound for every map in one tap; the oldest tracked child is released first. */
 export const CODEX_CHILD_BUDGET_MAX_ENTRIES = 128;
@@ -26,6 +27,7 @@ export class CodexChildBudgetTap {
   private readonly policy: AgentBudgetPolicy;
   private readonly parents = new Map<string, string>();
   private readonly startedAt = new Map<string, number>();
+  private readonly childModels = new Map<string, string>();
   private readonly pending = new Map<string, CodexRuntimeEvent>();
   private readonly snapshots = new Map<string, AgentBudgetSnapshot>();
   private readonly completed = new Map<string, CodexChildBudgetDecision>();
@@ -41,7 +43,13 @@ export class CodexChildBudgetTap {
   observe(event: CodexRuntimeEvent): void {
     if (event.parentThreadId) this.remember(event.threadId, event.parentThreadId);
     if ((event.type === 'toolStarted' || event.type === 'toolCompleted') && event.agentThreadIds) {
-      for (const child of event.agentThreadIds) this.remember(child, event.threadId);
+      const payload = event.type === 'toolStarted' ? event.input : event.output;
+      const parsedModel = z.object({ model: z.string().min(1) }).safeParse(payload);
+      const model = parsedModel.success ? parsedModel.data.model : undefined;
+      for (const child of event.agentThreadIds) {
+        this.remember(child, event.threadId);
+        if (model) this.childModels.set(child, model);
+      }
     }
     if ((event.type === 'usage' || event.type === 'terminal') && event.evidence?.parentThreadId)
       this.remember(event.threadId, event.evidence.parentThreadId);
@@ -98,7 +106,9 @@ export class CodexChildBudgetTap {
     const evidence = child?.evidence;
     const useChild = child !== undefined && evidence?.accepted === true;
     const usage = useChild ? child.usage : undefined;
-    const modelId = evidence?.modelId ?? input.modelId;
+    // A missing model does not invalidate real counters. Keep the identity
+    // explicit so the policy charges its raw-token floor without catalog cost.
+    const modelId = evidence?.modelId ?? input.modelId ?? this.childModels.get(childThreadId) ?? 'codex/unknown';
     const telemetry = completedTurnTelemetry({
       turnId: `${childThreadId}:${turnId}`,
       modelId,
@@ -131,6 +141,7 @@ export class CodexChildBudgetTap {
     if (parent) this.snapshots.delete(this.snapshotKey(parent, childThreadId));
     this.parents.delete(childThreadId);
     this.startedAt.delete(childThreadId);
+    this.childModels.delete(childThreadId);
     for (const key of this.pending.keys())
       if (key.startsWith(`${childThreadId}\u0000`)) this.pending.delete(key);
     for (const key of this.completed.keys())
@@ -140,6 +151,7 @@ export class CodexChildBudgetTap {
   dispose(): void {
     this.parents.clear();
     this.startedAt.clear();
+    this.childModels.clear();
     this.pending.clear();
     this.snapshots.clear();
     this.completed.clear();

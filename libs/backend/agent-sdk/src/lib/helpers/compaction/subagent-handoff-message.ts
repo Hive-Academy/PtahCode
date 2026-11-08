@@ -116,7 +116,7 @@ export function handoffMessage(
   const { paths, taskSaved, notesWritten, notesInferred, unavailable } = files;
   const lines = [
     `Ptah's subagent budget monitor handed off subagent ${name} ${why}. ` +
-      `If the Agent result says "[Request interrupted by user for tool use]", Ptah's subagent budget monitor caused that interruption, not the user. ` +
+      `The interruption notice in the Agent result came from Ptah's subagent budget monitor, not the user. ` +
       `No user input is needed; continue autonomously now.`,
   ];
   lines.push(`Budget stop reason: ${usage.reason}; SDK agent: ${subject.agentId ?? 'unknown'}; SDK task: ${subject.taskId}.`);

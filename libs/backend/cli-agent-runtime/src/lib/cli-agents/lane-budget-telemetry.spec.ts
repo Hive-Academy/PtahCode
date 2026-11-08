@@ -1,7 +1,7 @@
 import { Logger } from '@ptah-extension/vscode-core';
 import type { AgentTurnTelemetry } from '@ptah-extension/shared';
 import { AgentBudgetCoordinator } from './agent-budget-coordinator';
-import { LaneBudgetTelemetry } from './lane-budget-telemetry';
+import { deliverLaneBudgetWarning, LaneBudgetTelemetry } from './lane-budget-telemetry';
 import type { TrackedAgent } from './tracked-agent';
 
 const missing = { status: 'unavailable', reason: 'absent', source: 'stream' } as const;
@@ -11,6 +11,15 @@ const turn: AgentTurnTelemetry = { status: 'reported', usage: {
   cacheWriteTokens: missing, requestContextTokens: missing,
   providerCostUsd: missing, cacheSemantics: 'unknown',
 } };
+
+it('delivers a Codex queue warning without logging a failed steer route', async () => {
+  const queueForNextTurn = jest.fn();
+  const send = jest.fn();
+  const outcome = await deliverLaneBudgetWarning('lane', { queueForNextTurn }, send);
+  expect(outcome).toEqual({ mode: 'queue-next-turn' });
+  expect(queueForNextTurn).toHaveBeenCalledWith(expect.stringContaining('Budget warning'));
+  expect(send).not.toHaveBeenCalled();
+});
 
 it('dispatches warning, cost warning once, then stop', async () => {
   const warn = jest.fn().mockResolvedValue({ mode: 'steer' });

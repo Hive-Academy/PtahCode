@@ -90,6 +90,31 @@ function fakeContext() {
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 describe('observeCodexChildBudgets', () => {
+  it('charges two child turns across a relink with missing model ids', async () => {
+    const context = fakeContext();
+    const logger = { warn: jest.fn() };
+    const observer = observeCodexChildBudgets(context, port, logger);
+    if (usage.type !== 'usage' || !usage.evidence) throw new Error('invalid fixture');
+    const withoutModel = { ...usage, evidence: { ...usage.evidence, modelId: undefined } };
+    context.emit(spawn);
+    context.emit(withoutModel);
+    context.emit(terminal);
+    context.emit(spawn);
+    context.emit({ ...withoutModel, turnId: 'child-turn-2' });
+    context.emit({ ...terminal, turnId: 'child-turn-2' });
+    await flush();
+    const decisions = logger.warn.mock.calls.filter(
+      ([message]) => message === '[Codex budget] Child budget decision');
+    expect(decisions).toHaveLength(2);
+    expect(decisions[0][1]).toMatchObject({
+      coverage: 'price-weighting-degraded', inputTokens: 12,
+      outputTokens: 4, modelId: 'codex/unknown',
+    });
+    expect(logger.warn.mock.calls.filter(([message]) =>
+      message === '[Codex budget] Child model unavailable; raw tokens charged without cost'))
+      .toHaveLength(1);
+    observer.dispose();
+  });
   it.each(['terminal-first', 'usage-first'] as const)(
     'drains a child linked by %s and charges its usage once', async (order) => {
       const context = fakeContext();
@@ -231,7 +256,8 @@ describe('settleCodexChildBudgetEvent', () => {
     settleCodexChildBudgetEvent(unknownModelUsage, tap, { warn: jest.fn() }, pricing);
     const decision = settleCodexChildBudgetEvent(terminal, tap, { warn: jest.fn() }, pricing);
     expect(pricing).not.toHaveBeenCalled();
-    expect(decision?.telemetry.status).toBe('unavailable');
+    expect(decision?.telemetry.status).toBe('reported');
+    expect(decision?.transition.coverage).toBe('price-weighting-degraded');
   });
 });
 

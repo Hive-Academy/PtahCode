@@ -408,8 +408,10 @@ class RuntimeContext implements CodexContext {
     if (this.state === 'closed' || !this.committedIdentity) return;
     if (frame.method === 'thread/started') {
       const started = z.object({ thread: z.object({
-        id: z.string(), parentThreadId: z.string().nullish(),
+        id: z.string(), parentThreadId: z.string().nullish(), model: z.string().nullish(),
       }) }).safeParse(frame.params);
+      if (started.success && started.data.thread.model)
+        this.translator.setThreadModel(started.data.thread.id, started.data.thread.model);
       if (started.success && started.data.thread.parentThreadId) {
         const parentId = started.data.thread.parentThreadId;
         if (this.pendingChildParents.size >= 256) {
