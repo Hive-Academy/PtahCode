@@ -491,7 +491,7 @@ export class AgentReportRouter {
     const saved = await this.parentDelivery.enqueue({
       id: `lane-delivery:${key}`, dedupeKey: key, agentId: info.agentId,
       parentSessionId, kind: 'report', body: envelope, createdAt: Date.now(),
-      originName: `${info.cli} ? ${agentLabel(info)}`,
+      originName: `${info.cli} · ${agentLabel(info)}`,
     }, () => {
       this.agents.markReportDelivered(info.agentId);
       this.agents.recordAgentNote(info.agentId, {
