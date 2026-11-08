@@ -301,7 +301,7 @@ class CompactionSessionTap {
             toolUseId: block.tool_use_id.slice(0, 128),
             cause: /interrupt|stopped by user/i.test(output)
               ? 'interrupted'
-              : /denied|permission/i.test(output) ? 'denied' : 'other',
+              : /denied|permission|the user doesn.t want to take this action/i.test(output) ? 'denied' : 'other',
           });
         }
       }

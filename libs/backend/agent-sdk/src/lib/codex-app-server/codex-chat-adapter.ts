@@ -190,6 +190,13 @@ export class CodexChatAdapter implements NativeChatAdapter {
   private readonly usagePersistenceDisabled =
     new WeakSet<CodexSessionUsageOwner>();
 
+  /** Trusted live level for a native chat session, including runtime changes. */
+  getPermissionLevel(sessionId: string): 'ask' | 'auto-edit' | 'yolo' | 'plan' | undefined {
+    return SessionId.validate(sessionId)
+      ? this.sessions.get(sessionId)?.context.turnPermissionLevel
+      : undefined;
+  }
+
   constructor(
     private readonly ports: CodexChatAdapterPorts,
     private readonly turnState: Pick<

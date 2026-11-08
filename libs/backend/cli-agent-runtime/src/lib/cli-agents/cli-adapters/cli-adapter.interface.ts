@@ -147,6 +147,7 @@ export interface CliCommandOptions extends LaneAccountBindingFields {
   readonly permission?: LanePermissionMode;
   /** Explicit per-spawn network policy. Omitted preserves existing defaults. */
   readonly network?: LaneNetworkMode;
+  readonly permissionSource?: import('@ptah-extension/shared').EffectiveLanePolicy['permissionSource'];
   /**
    * The Ptah agent id this run belongs to (TASK_2026_402). Adapters that build
    * an MCP URL forward it to `ptahMcpServerUrl`, which encodes it as the
@@ -177,6 +178,8 @@ export interface CliCommandOptions extends LaneAccountBindingFields {
  * AgentProcessManager uses this instead of ChildProcess when present.
  */
 export interface SdkHandle extends LaneAccountBindingFields {
+  /** Actual policy after a supported adapter fallback. */
+  readonly effectivePolicy?: import('@ptah-extension/shared').EffectiveLanePolicy;
   /** Provider configured for a Ptah CLI handle at spawn. */
   readonly providerId?: string;
   /** Effective policy channel after adapter fallback selection. */

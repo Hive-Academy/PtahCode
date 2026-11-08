@@ -7,7 +7,7 @@ description: Find previous sessions with search, filters, sort, and groups.
 
 The **Previous sessions** view lists the sessions of the current workspace. Use it to find and open an earlier session.
 
-![History panel](/screenshots/sessions-history.webp)
+Open **Previous sessions** from the session rail. The dialog puts search, filters, sorting, grouping, and date range controls above the session rows.
 
 ## Search
 

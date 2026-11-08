@@ -286,6 +286,19 @@ describe('PtahFileSettingsManager', () => {
       ]);
     });
 
+    it('reloads saved CLI lane defaults as one map', async () => {
+      const defaults = {
+        codex: { permission: 'plan', network: 'deny' },
+        opencode: { permission: 'auto-edit', network: 'allow' },
+        'ptah-cli': { permission: 'yolo', network: 'allow' },
+      };
+      const writer = new PtahFileSettingsManager(FILE_BASED_SETTINGS_DEFAULTS);
+      await writer.set('agentOrchestration.cliLaneDefaults', defaults);
+
+      const reader = new PtahFileSettingsManager(FILE_BASED_SETTINGS_DEFAULTS);
+      expect(reader.get('agentOrchestration.cliLaneDefaults')).toEqual(defaults);
+    });
+
     // TASK_2026_646_136a. The decision-model selection is an object. Without
     // the whole-value rule, the reload would flatten it into `.kind` /
     // `.model` leaves and the key itself would read back as unset.

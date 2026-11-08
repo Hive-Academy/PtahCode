@@ -247,10 +247,10 @@ export class PiCliAdapter implements CliAdapter {
       },
       roleChannel: this.roleChannel,
       permissionModes: {
-        plan: unverified('Pi native RPC permission scope is unverified.'),
-        ask: unverified('Pi native RPC permission scope is unverified.'),
-        'auto-edit': unverified('Pi native RPC permission scope is unverified.'),
-        yolo: unverified('Pi native RPC permission scope is unverified.'),
+        plan: unverified('Pi has no native permission flag; sandboxing requires an opt-in extension.'),
+        ask: unverified('Pi has no native permission flag; sandboxing requires an opt-in extension.'),
+        'auto-edit': unverified('Pi has no native permission flag; sandboxing requires an opt-in extension.'),
+        yolo: unverified('Pi has no native permission flag; sandboxing requires an opt-in extension.'),
       },
       networkModes: {
         allow: { state: 'supported' },

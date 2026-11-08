@@ -174,7 +174,7 @@ export class CliDetectionService {
       'antigravity',
       new AntigravityCliAdapter(this.spawner, undefined, this.logger),
     );
-    this.adapters.set('opencode', new OpencodeCliAdapter(this.spawner));
+    this.adapters.set('opencode', new OpencodeCliAdapter(this.spawner, this.logger));
     this.adapters.set('pi', new PiCliAdapter(this.spawner));
     this.adapters.set('grok', new GrokCliAdapter(this.spawner, this.logger));
     // Last, so the existing auto-detect fallback order is unchanged.

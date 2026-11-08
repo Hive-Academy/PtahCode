@@ -564,9 +564,12 @@ export class AgentProcessManager {
       resumeDecision: gated?.resumeDecision,
       originalTask: gated?.originalTask,
       runSdk: adapter.runSdk.bind(adapter),
-      request: gated
-        ? { ...request, resumeSessionId: gated.resumeSessionId }
-        : request,
+      request: {
+        ...request,
+        ...(gated ? { resumeSessionId: gated.resumeSessionId } : {}),
+        permission: effectivePolicy.requested?.permission,
+        network: effectivePolicy.requested?.network,
+      },
       task: gated?.task ?? request.task,
       workingDirectory,
       cli,
@@ -1075,6 +1078,7 @@ export class AgentProcessManager {
         autoApprove: this.spawnEnvironment.resolveAutoApprove(cli),
         permission: request.permission,
         network: request.network,
+        permissionSource: options.effectivePolicy?.requested?.permissionSource,
         // Minted above, BEFORE the CLI is asked to build its MCP config, so the
         // `/agent/{id}` segment of the URL names this exact record
         // (TASK_2026_402). The rival-CLI path needs no extra plumbing for this —
@@ -1101,7 +1105,9 @@ export class AgentProcessManager {
     // back to the task prompt the role stays on developer instructions, and
     // Pi reports its shared channel here too (4332578858).
     const effectiveChannel = sdkHandle.getRoleDelivery?.() ?? roleChannel;
-    const boundInfo = { ...scopedInfo, ...admittedReference };
+    const boundInfo = { ...scopedInfo, ...admittedReference,
+      ...(sdkHandle.effectivePolicy ? { effectivePolicy: sdkHandle.effectivePolicy } : {}),
+    };
     const effectiveInfo = roleStamp
       ? { ...boundInfo, roleChannel: effectiveChannel }
       : boundInfo;

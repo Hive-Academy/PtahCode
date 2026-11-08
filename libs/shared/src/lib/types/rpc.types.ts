@@ -17,6 +17,8 @@ import type {
   UsageSummaryParams,
 } from './rpc/rpc-analytics.types';
 import type { WorkspaceListRecentResult } from './rpc/rpc-workspace.types';
+import type { CliLaneDefaults } from './cli-lane-defaults.types';
+import type { CodexSandboxMode } from './advanced-settings.types';
 export * from './rpc/rpc-config.types';
 export * from './rpc/rpc-auth.types';
 export * from './rpc/rpc-providers.types';
@@ -1733,7 +1735,8 @@ export interface RpcMethodRegistry
   };
   'agent:setConfig': {
     params: AgentSetConfigParams;
-    result: { success: boolean; error?: string };
+    result: { success: boolean; error?: string;
+      cliLaneDefaults?: CliLaneDefaults; codexSandboxMode?: CodexSandboxMode };
   };
   /** Claude built-in tool and skill catalog with the stored opt-ins (TASK_2026_853). */
   'agent:getClaudeBuiltins': {
