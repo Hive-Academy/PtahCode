@@ -76,6 +76,8 @@ function unwrapCommand(command: string): string {
         break;
       }
     }
+    // PowerShell joins every word after -Command into one script. One space
+    // between words is enough for display; the original spacing is not kept.
     if (/^-(?:command|c)$/i.test(words[index] ?? ''))
       inner = words.slice(index + 1).join(' ');
   } else if (/(?:^|[\\/])cmd(?:\.exe)?$/i.test(executable)) {
