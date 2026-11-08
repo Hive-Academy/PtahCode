@@ -101,13 +101,19 @@ export function buildTaskCreateTool(): MCPToolDefinition {
   return {
     name: 'ptah_task_create',
     description:
-      `Create a task under .ptah/specs/. Allocates the next TASK_YYYY_NNN_xxxx id, ` +
-      `claims the folder atomically, and writes a valid carrier — use this ` +
-      `instead of creating the folder and its metadata by hand, which is how ` +
-      `task folders end up invisible to the Tasks board. ${CARRIER_OWNERSHIP_NOTE}`,
+      `Create a task under .ptah/specs/ of a worktree. Call ` +
+      `ptah_git_worktree_add first and pass its path as worktreePath; never ` +
+      `create tasks in the main checkout. Allocates the next ` +
+      `TASK_YYYY_NNN_xxxx id, claims the folder atomically and writes a ` +
+      `valid carrier, so the task shows on the Tasks board. ` +
+      `${CARRIER_OWNERSHIP_NOTE}`,
     inputSchema: {
       type: 'object',
       properties: {
+        worktreePath: {
+          type: 'string',
+          description: 'Registered worktree path; defaults to workspace.',
+        },
         title: { type: 'string', description: 'Short imperative title' },
         type: {
           type: 'string',
@@ -184,6 +190,7 @@ export function buildTaskUpdateTool(): MCPToolDefinition {
     inputSchema: {
       type: 'object',
       properties: {
+        worktreePath: { type: 'string', description: 'Registered worktree path.' },
         taskId: {
           type: 'string',
           description: 'Task folder name, e.g. TASK_2026_179',
@@ -251,6 +258,7 @@ export function buildTaskGetTool(): MCPToolDefinition {
     inputSchema: {
       type: 'object',
       properties: {
+        worktreePath: { type: 'string', description: 'Registered worktree path.' },
         taskId: {
           type: 'string',
           description: 'Task folder name, e.g. TASK_2026_179',
@@ -283,6 +291,7 @@ export function buildTaskListTool(): MCPToolDefinition {
     inputSchema: {
       type: 'object',
       properties: {
+        worktreePath: { type: 'string', description: 'Registered worktree path.' },
         status: {
           type: 'array',
           items: { type: 'string', enum: [...TASK_STATUSES] },
@@ -325,7 +334,9 @@ export function buildTaskCheckTool(): MCPToolDefinition {
       `and invalidTotal giving the full counts; healthy is judged on the ` +
       `full set. Run this when a task folder you expect is missing from the ` +
       `board.`,
-    inputSchema: { type: 'object', properties: {} },
+    inputSchema: { type: 'object', properties: {
+      worktreePath: { type: 'string', description: 'Registered worktree path.' },
+    } },
     annotations: { readOnlyHint: true },
   };
 }

@@ -144,6 +144,7 @@ describe(SessionGitStatsStore.name, () => {
     expect(sessionWorkingRoot(tab, '/partition', '/fallback', null)).toBe(
       '/child',
     );
+    expect(sessionWorkingRoot(tab, '/partition', '/fallback', '/wt/organized', ['/wt/organized', '/child'])).toBe('/partition');
   });
 
   it('sums file counts, ignores directories, and marks null or binary counts partial', async () => {

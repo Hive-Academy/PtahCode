@@ -9,6 +9,7 @@ import {
   VSCodeService,
   ElectronLayoutService,
   rpcCall,
+  UnavailableGitRootsStore,
 } from '@ptah-extension/core';
 import type { MessageHandler } from '@ptah-extension/core';
 import type {
@@ -44,6 +45,7 @@ export class WorktreeService implements MessageHandler {
   private readonly vscodeService = inject(VSCodeService);
   private readonly layoutService = inject(ElectronLayoutService);
   private readonly gitStatus = inject(GitStatusService);
+  private readonly unavailableRoots = inject(UnavailableGitRootsStore);
   private readonly destroyRef = inject(DestroyRef);
 
   private readonly _worktrees = signal<GitWorktreeInfo[]>([]);
@@ -329,6 +331,10 @@ export class WorktreeService implements MessageHandler {
       | GitWorktreeChangedNotification
       | undefined;
     if (!payload || !payload.action) return;
+
+    if (payload.success !== false && payload.action === 'created' && payload.path) {
+      this.unavailableRoots.clear(payload.path);
+    }
 
     if (payload.operationId) {
       const pending = this.pendingOps.get(payload.operationId);

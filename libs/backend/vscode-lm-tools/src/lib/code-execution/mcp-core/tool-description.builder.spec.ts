@@ -444,6 +444,7 @@ describe('buildTaskListTool / buildTaskCheckTool', () => {
 
     expect(tool.description.length).toBeLessThan(DESCRIPTION_CHAR_BUDGET);
     expect(Object.keys(properties)).toEqual([
+      'worktreePath',
       'status',
       'type',
       'limit',

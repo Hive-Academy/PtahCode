@@ -29,7 +29,7 @@ import {
   type CompactSummaryMetrics,
   type CompactTodoState,
 } from '@ptah-extension/chat-ui';
-import { injectWallClock, VSCodeService } from '@ptah-extension/core';
+import { injectWallClock, VSCodeService, UnavailableGitRootsStore } from '@ptah-extension/core';
 import {
   ConversationRegistry,
   TabManagerService,
@@ -233,6 +233,7 @@ function sameLaneSummary(
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class CompactSessionCardComponent {
+  private readonly unavailableRoots = inject(UnavailableGitRootsStore);
   private readonly tabManager = inject(TabManagerService);
   private readonly permissionHandler = inject(PermissionHandlerService);
   private readonly sessionBinding = inject(TabSessionBinding);
@@ -482,6 +483,7 @@ export class CompactSessionCardComponent {
       // The same organization read the git dock scope uses, so this card's
       // counts and the dock's root agree (TASK_2026_855).
       this.worktrees.worktreeFor(this.tab().claudeSessionId).worktreePath,
+      this.unavailableRoots.roots().map((entry) => entry.path),
     ),
   );
   readonly gitStats = computed(() => this.gitStore.stateFor(this.gitRoot()), {

@@ -2933,7 +2933,7 @@ async function handleIndividualTool(
       }
 
       case 'ptah_task_check': {
-        const result = await ptahAPI.tasks.check();
+        const result = await ptahAPI.tasks.check(args);
         return await createToolSuccessResponse(
           request,
           JSON.stringify(result),

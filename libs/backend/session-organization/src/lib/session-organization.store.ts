@@ -27,6 +27,7 @@
  * throws while the connection is closed; the service catches that.
  */
 import { inject, injectable } from 'tsyringe';
+import * as path from 'path';
 import {
   PERSISTENCE_TOKENS,
   type SqliteConnectionService,
@@ -507,6 +508,31 @@ const MAX_RELATED_SESSIONS = 256;
 
 @injectable()
 export class SessionOrganizationStore {
+  clearRemovedWorktree(worktreePath: string, now: number): Map<string, string[]> {
+    const matches = new Map<string, string[]>();
+    const normalized = (value: string): string => {
+      const resolved = path.resolve(value).replace(/[\\/]+$/, '');
+      return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+    };
+    const target = normalized(worktreePath);
+    const rows = this.db.prepare(
+      'SELECT workspace_root, session_id, worktree_path FROM session_organization WHERE worktree_path IS NOT NULL',
+    ).all() as Array<{ workspace_root: string; session_id: string; worktree_path: string }>;
+    const matching = rows.filter((row) => normalized(row.worktree_path) === target);
+    this.db.transaction(() => {
+      const update = this.db.prepare(
+        'UPDATE session_organization SET worktree_path = NULL, updated_at = ? WHERE workspace_root = ? AND session_id = ? AND worktree_path = ?',
+      );
+      for (const row of matching) {
+        if (update.run(now, row.workspace_root, row.session_id, row.worktree_path).changes > 0) {
+          const ids = matches.get(row.workspace_root) ?? [];
+          ids.push(row.session_id);
+          matches.set(row.workspace_root, ids);
+        }
+      }
+    })();
+    return matches;
+  }
   constructor(
     @inject(PERSISTENCE_TOKENS.SQLITE_CONNECTION)
     private readonly connection: SqliteConnectionService,

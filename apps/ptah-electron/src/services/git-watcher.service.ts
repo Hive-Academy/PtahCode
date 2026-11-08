@@ -404,6 +404,7 @@ export class GitWatcherService {
     private readonly gitInfo: GitInfoService,
     private readonly logger: Logger,
     private readonly workspaceWatcher: IWorkspaceWatcher,
+    private readonly onWorktreeRemoved?: (path: string) => void,
   ) {}
 
   /**
@@ -1037,6 +1038,7 @@ export class GitWatcherService {
         paths: removed,
       });
       for (const worktreePath of removed) {
+        this.onWorktreeRemoved?.(worktreePath);
         const payload: GitWorktreeChangedNotification = {
           action: 'removed',
           path: worktreePath,

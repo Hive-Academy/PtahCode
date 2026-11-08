@@ -68,6 +68,16 @@ describe('resolveSessionWorkingRoot', () => {
     ).toBe('C:\\repo');
   });
 
+  it('skips refused worktree roots and selects the session cwd', () => {
+    expect(resolveSessionWorkingRoot({
+      organizationWorktreePath: '/repo/.wt/removed',
+      agentOriginWorktreePath: '/repo/.wt/removed/',
+      sessionCwd: '/repo',
+      workspaceRoot: '/repo',
+      unavailableRoots: ['/repo/.wt/removed'],
+    })).toEqual({ root: '/repo', source: 'session-cwd' });
+  });
+
   it('returns null root and source when every candidate is absent', () => {
     expect(resolveSessionWorkingRoot(EMPTY)).toEqual({
       root: null,
