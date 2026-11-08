@@ -92,6 +92,17 @@ function getStopCallback(
 const VALID_UUID = '66666666-7777-4888-8999-aaaaaaaaaaaa';
 
 describe('SubagentHookHandler — SubagentStopCallbackRegistry fan-out', () => {
+  it('reports background from registry and unknown when the SDK hook has no record', async () => {
+    for (const [record, expected] of [[{ isBackground: true }, true], [null, null]] as const) {
+      const logger = makeLogger();
+      const registry = makeRegistry(record);
+      const handler = new SubagentHookHandler(logger, registry, new SubagentStopCallbackRegistry(logger), new SessionStatsOwnerService());
+      const fn = getStopCallback(handler, '/workspace', 'parent-sess-1');
+      await fn({ hook_event_name: 'SubagentStop', session_id: 'parent-sess-1', agent_id: 'agent-xyz', agent_type: 'backend-developer', agent_transcript_path: '', stop_hook_active: false } as HookInput, 'tu-1', { signal: new AbortController().signal });
+      expect(logger.debug).toHaveBeenCalledWith('[SubagentHookHandler] SubagentStop processed successfully', expect.objectContaining({ isBackground: expected }));
+    }
+  });
+
   it('valid agent_transcript_path with UUID basename → notifyAll fires with derived subagentSessionId', async () => {
     const logger = makeLogger();
     const registry = makeRegistry({

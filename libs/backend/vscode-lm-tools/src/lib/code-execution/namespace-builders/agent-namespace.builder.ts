@@ -161,6 +161,7 @@ interface PtahCliRegistryLike {
       role?: AgentRoleDefinition;
       permission?: SpawnAgentRequest['permission'];
       network?: SpawnAgentRequest['network'];
+      parentLevel?: SpawnAgentRequest['parentLevel'];
     },
   ): Promise<
     | { handle: SdkHandle; agentName: string; setAgentId: (id: string) => void;
@@ -195,6 +196,7 @@ export interface AgentNamespaceDependencies {
   getPreferredAgentOrder?: () => string[];
   /** Resolves a tab ID to its real SDK session UUID. Used for MCP session threading. */
   resolveSessionId?: (tabIdOrSessionId: string) => string;
+  getParentLevel?: (tabIdOrSessionId: string) => SpawnAgentRequest['parentLevel'];
   /**
    * Deliver a child agent's or child session's report to the session that
    * started it (TASK_2026_402, Component 7; the `childSessionId` form is
@@ -334,6 +336,7 @@ export function buildAgentNamespace(
     getDisabledClis,
     getPreferredAgentOrder,
     resolveSessionId,
+    getParentLevel,
     deliverAgentReport,
     resolveAgentRole,
     listAgentRoles,
@@ -366,6 +369,7 @@ export function buildAgentNamespace(
       const activeSessionId = rawSessionId
         ? (resolveSessionId?.(rawSessionId) ?? rawSessionId)
         : undefined;
+      const parentLevel = rawSessionId ? getParentLevel?.(rawSessionId) : undefined;
       // An HTTP MCP caller (execute_code) without session identity gets an
       // ownerless lane. Say so in the result and the log; never guess one.
       const markParentless = <T extends { agentId: string }>(
@@ -459,6 +463,7 @@ export function buildAgentNamespace(
             role: roleDefinition,
             permission: request.permission,
             network: request.network,
+            parentLevel,
           },
         );
         if ('status' in result) {
@@ -544,6 +549,8 @@ export function buildAgentNamespace(
       // omitted, or named on a fresh spawn), and it is forwarded as typed.
       const {
         parentSessionId: _rawParentSessionId,
+        parentLevel: _rawParentLevel,
+        resumePolicy: _rawResumePolicy,
         roleDefinition: _callerRoleDefinition,
         systemPrompt: _callerSystemPrompt,
         accountSelection: _rawAccountSelection,
@@ -555,6 +562,7 @@ export function buildAgentNamespace(
         ...(accountSelection && { accountSelection }),
         ...(workingDirectory && { workingDirectory }),
         ...(activeSessionId && { parentSessionId: activeSessionId }),
+        ...(parentLevel && { parentLevel }),
         ...(roleDefinition && { roleDefinition }),
         ...(projectGuidance && { projectGuidance }),
         ...(pluginPaths && pluginPaths.length > 0 && { pluginPaths }),

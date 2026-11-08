@@ -146,9 +146,11 @@ export class ChatAttentionSourceService {
   }
 
   private findTabId(direct: string | undefined, sessionId: string | undefined, targets: readonly string[]): string | undefined {
-    if (direct && this.tabs.findTabByIdAcrossWorkspaces(direct)) return direct;
     const target = targets.find(id => this.tabs.findTabByIdAcrossWorkspaces(id));
-    return target ?? (sessionId ? this.tabs.findTabBySessionIdAcrossWorkspaces(sessionId)?.tab.id : undefined);
+    if (target) return target;
+    const directTab = direct ? this.tabs.findTabByIdAcrossWorkspaces(direct)?.tab : undefined;
+    if (directTab && (!sessionId || directTab.claudeSessionId === sessionId || directTab.id === sessionId)) return direct;
+    return sessionId ? this.tabs.findTabBySessionIdAcrossWorkspaces(sessionId)?.tab.id : undefined;
   }
 
   private add(
@@ -188,12 +190,15 @@ export class ChatAttentionSourceService {
       target.kind === 'question' ? safeQuestion : safeTool ? `Tool: ${safeTool}` : '']);
     const surfaceOwner = this.surfaceRouters.find(router =>
       !!resolvedSessionId && router.canFocus(resolvedSessionId));
+    if (!owner && !surfaceOwner && kind !== 'lane-permission') return;
     const surfaceOwned = !!surfaceOwner && (surfaceMode || !owner);
     const open = !!resolvedSessionId && (surfaceOwned || (!!owner && !surfaceMode));
     const actions: AttentionItem['actions'][number][] = kind === 'question'
       ? [{ id: 'answer', label: 'Answer', ...(!open && { disabledReason: 'Session unavailable' }) }]
       : [{ id: 'allow', label: 'Allow', ...(kind !== 'permission' && (!tabId || !canAllow) && { disabledReason: !tabId ? 'Session unavailable' : 'Unknown tool' }) },
-          ...(kind === 'permission' ? [{ id: 'always_allow', label: 'Always allow' }] : []),
+          ...(kind === 'permission' && target.kind === 'permission' &&
+            target.request.sessionId && target.request.canAlwaysAllow !== false
+            ? [{ id: 'always_allow', label: 'Always allow in session' }] : []),
           { id: 'deny', label: 'Deny', ...(kind !== 'permission' && !tabId && { disabledReason: 'Session unavailable' }) }];
     if (kind === 'permission') actions.push({ id: 'deny_with_message', label: 'Deny with message' });
     actions.push({ id: 'open', label: surfaceOwned || surfaceMode ? 'Open' : 'Show in canvas',

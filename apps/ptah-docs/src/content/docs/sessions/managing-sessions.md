@@ -7,7 +7,7 @@ description: Create, rename, organize, and delete sessions in PtahCode.
 
 A session is the unit of work in PtahCode. Use one session for each task.
 
-![Session tabs](/screenshots/sessions-tabs.webp)
+Inside an open session, lane tabs above the transcript let you switch between the Orchestrator, its sub-agents, CLI lanes and background agents.
 
 ## Create a session
 

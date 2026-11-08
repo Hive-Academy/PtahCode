@@ -36,6 +36,7 @@ jest.mock('@ptah-extension/agent-sdk', () => ({
   SDK_TOKENS: {
     SDK_SESSION_METADATA_STORE: Symbol.for('SessionMetadataStore'),
     SDK_CAPABILITY_RESOLVER: Symbol.for('SdkCapabilityResolver'),
+    SDK_PERMISSION_HANDLER: Symbol.for('SdkPermissionHandler'),
   },
   // The real Claude built-in catalog and the real never-throwing policy
   // resolution (TASK_2026_853), loaded by file so the barrel stays unloaded.
@@ -92,6 +93,7 @@ import type {
   CliDetectionResult,
   EffectiveCapabilitySet,
   ICapabilityResolver,
+  AgentPermissionRequest,
 } from '@ptah-extension/shared';
 import type { CliModelListService } from '../services/cli-model-list.service';
 import type { DependencyContainer } from 'tsyringe';
@@ -134,6 +136,7 @@ interface Harness {
     reserveAgentId: jest.Mock;
     prepareSdkHandleSpawn: jest.Mock;
     continueConversation: jest.Mock;
+    findAgentInfo: jest.Mock;
   };
   /** Stored `ptah` settings, keyed by the full key (`agentOrchestration.x`). */
   settings: Map<string, unknown>;
@@ -144,6 +147,8 @@ interface Harness {
 }
 
 interface HarnessOptions {
+  readonly sdkPending?: AgentPermissionRequest[];
+  readonly laneOwner?: { agentId: string; parentSessionId?: string; startedAt: string; status: 'running' | 'completed' };
   readonly detectedClis?: CliDetectionResult[];
   /** Registers a fake account service whose lookup is this mock. */
   readonly accountLookup?: jest.Mock;
@@ -218,6 +223,7 @@ function makeHarness(options: HarnessOptions = {}): Harness {
       }),
     ),
     continueConversation: jest.fn().mockResolvedValue(undefined),
+    findAgentInfo: jest.fn((agentId: string) => options.laneOwner?.agentId === agentId ? options.laneOwner : undefined),
   };
   const metadataStore = { createChild: jest.fn().mockResolvedValue(undefined) };
   const resumeService = {
@@ -282,6 +288,7 @@ function makeHarness(options: HarnessOptions = {}): Harness {
           (accountLookup !== undefined && token === ProviderAccountService) ||
           (capabilityResolver !== undefined &&
             token === SDK_TOKENS.SDK_CAPABILITY_RESOLVER) ||
+          (options.sdkPending !== undefined && token === SDK_TOKENS.SDK_PERMISSION_HANDLER) ||
           token === AUTH_PROVIDERS_TOKENS.SDK_AUTH_ENV,
       ),
       resolve: jest.fn((token: unknown) =>
@@ -293,6 +300,8 @@ function makeHarness(options: HarnessOptions = {}): Harness {
           ? { lookupBySdkSession: accountLookup }
           : token === SDK_TOKENS.SDK_CAPABILITY_RESOLVER
             ? capabilityResolver
+            : token === SDK_TOKENS.SDK_PERMISSION_HANDLER
+              ? { getPendingCliAgentPermissions: () => options.sdkPending }
             : token === AUTH_PROVIDERS_TOKENS.SDK_AUTH_ENV
               ? authEnv
               : undefined,
@@ -337,7 +346,7 @@ function makeHarness(options: HarnessOptions = {}): Harness {
 async function call<T>(
   h: Harness,
   method: string,
-  params: Record<string, unknown>,
+  params: Record<string, unknown> | undefined,
 ): Promise<T> {
   const response = await h.rpcHandler.handleMessage({
     method,
@@ -348,6 +357,55 @@ async function call<T>(
 }
 
 describe('AgentRpcHandlers — Codex detection', () => {
+  it('does not acknowledge a permission ID absent from pending registries', async () => {
+    const h = makeHarness();
+    const result = await call<{ success: boolean }>(h, 'agent:permissionResponse', {
+      requestId: 'stale-request', decision: 'allow',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('returns an empty pending permission snapshot without a Copilot bridge', async () => {
+    const h = makeHarness();
+    expect(await call(h, 'agent:pendingPermissions', undefined)).toEqual([]);
+  });
+
+  it('replays a pending SDK lane prompt through the shared snapshot RPC', async () => {
+    const generation = '2026-11-07T10:00:00.000Z';
+    const request: AgentPermissionRequest = {
+      requestId: 'sdk-pending', agentId: 'lane-1', parentSessionId: 'parent-1',
+      laneGeneration: generation, kind: 'tool', toolName: 'Bash',
+      toolArgs: '{}', description: 'Run command', timestamp: 1, timeoutAt: 1000,
+    };
+    const h = makeHarness({ sdkPending: [request], laneOwner: {
+      agentId: 'lane-1', parentSessionId: 'parent-1', startedAt: generation,
+      status: 'running',
+    } });
+    expect(await call(h, 'agent:pendingPermissions', undefined)).toEqual([request]);
+  });
+
+  it('replays a pending request under the current kept lane owner only', async () => {
+    const generation = '2026-11-07T10:00:00.000Z';
+    const request: AgentPermissionRequest = {
+      requestId: 'kept', agentId: 'lane-1', parentSessionId: 'old-parent',
+      laneGeneration: generation, kind: 'tool', toolName: 'Bash',
+      toolArgs: '{}', description: 'Run command', timestamp: 1, timeoutAt: 1000,
+    };
+    const h = makeHarness({ sdkPending: [request], laneOwner: {
+      agentId: 'lane-1', parentSessionId: 'successor', startedAt: generation,
+      status: 'running',
+    } });
+    expect(await call(h, 'agent:pendingPermissions', undefined)).toEqual([
+      { ...request, parentSessionId: 'successor' },
+    ]);
+    expect(request.parentSessionId).toBe('old-parent');
+    h.processManager.findAgentInfo.mockReturnValue({
+      agentId: 'lane-1', parentSessionId: 'successor',
+      startedAt: '2026-11-07T10:00:01.000Z', status: 'running',
+    });
+    expect(await call(h, 'agent:pendingPermissions', undefined)).toEqual([]);
+  });
+
   it('forwards the selected executable provenance and version', async () => {
     const selection: CliDetectionResult = {
       cli: 'codex', installed: true, path: '/bin/codex', version: '0.165.0',

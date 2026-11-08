@@ -46,8 +46,6 @@ import {
   Columns,
   Square,
 } from 'lucide-angular';
-import { VSCodeService } from '@ptah-extension/core';
-import { MESSAGE_TYPES } from '@ptah-extension/shared';
 import type { AgentPermissionRequest } from '@ptah-extension/shared';
 import {
   AgentMonitorStore,
@@ -68,6 +66,7 @@ import { AgentLaneGridComponent } from './agent-monitor/agent-lane-grid.componen
 import { laneColumnCount } from './agent-monitor/agent-lane-layout';
 import { WorkflowPermissionPresenterService } from './agent-monitor/workflow-permission-presenter.service';
 import { SESSION_CONTEXT } from '../../tokens/session-context.token';
+import { AgentPermissionResponder } from '../../services/agent-permission-responder';
 
 // Re-export the pure grouping API alongside the component for consumers that
 // import from the component barrel. The implementation lives in
@@ -497,6 +496,12 @@ function subagentToTile(r: SubagentRecord): WorkflowTileVM {
                     aria-hidden="true"
                   />
                   <span class="badge badge-xs badge-warning">Permission</span>
+                  @if (perm.timeoutAt > 0) {
+                    <span class="text-[10px] text-warning font-mono" role="timer"
+                      [attr.aria-label]="'Permission expires in ' + store.permissionSecondsRemaining(perm.timeoutAt) + ' seconds'">
+                      {{ store.permissionSecondsRemaining(perm.timeoutAt) }}s left
+                    </span>
+                  }
                 </div>
                 <div class="flex items-center gap-1.5">
                   <code
@@ -614,7 +619,7 @@ function subagentToTile(r: SubagentRecord): WorkflowTileVM {
 export class AgentMonitorPanelComponent {
   protected readonly store = inject(AgentMonitorStore);
   protected readonly resizeService = inject(PanelResizeService);
-  private readonly vscode = inject(VSCodeService);
+  private readonly permissionResponder = inject(AgentPermissionResponder);
   private readonly tabManager = inject(TabManagerService);
   private readonly strictSessionScope = !!inject(SESSION_CONTEXT, {
     optional: true,
@@ -1230,22 +1235,10 @@ export class AgentMonitorPanelComponent {
   }
 
   allowPermission(agentId: string, perm: AgentPermissionRequest): void {
-    this.vscode.postMessage({
-      type: MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_RESPONSE,
-      payload: { requestId: perm.requestId, decision: 'allow' },
-    });
-    this.store.clearPermission(agentId, perm.requestId);
+    this.permissionResponder.respondLane(agentId, perm.requestId, 'allow');
   }
 
   denyPermission(agentId: string, perm: AgentPermissionRequest): void {
-    this.vscode.postMessage({
-      type: MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_RESPONSE,
-      payload: {
-        requestId: perm.requestId,
-        decision: 'deny',
-        reason: 'User denied',
-      },
-    });
-    this.store.clearPermission(agentId, perm.requestId);
+    this.permissionResponder.respondLane(agentId, perm.requestId, 'deny');
   }
 }

@@ -119,6 +119,11 @@ export function handoffMessage(
   if (recordPath) {
     lines.push(recordLine(recordPath));
   }
+  lines.push(
+    `If a Read or Glob right after this handoff fails with "The user doesn't want to take this action right now" ` +
+      `and you saw no permission prompt the user declined, retry that call once; ` +
+      `if it fails the same way, stop and report to the user.`,
+  );
   if (taskText) {
     lines.push(`Its task was: ${taskText}`);
   }

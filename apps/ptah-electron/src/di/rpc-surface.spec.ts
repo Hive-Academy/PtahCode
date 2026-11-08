@@ -51,6 +51,13 @@ describe('Electron RPC surface', () => {
     );
   });
 
+  it('serves lane permission response and replay methods', () => {
+    expect(surface.registered).toEqual(expect.arrayContaining([
+      'agent:permissionResponse',
+      'agent:pendingPermissions',
+    ]));
+  });
+
   it('serves the community pack install plan (TASK_2026_701 B8)', () => {
     expect(surface.registered).toEqual(
       expect.arrayContaining([

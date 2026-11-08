@@ -22,6 +22,14 @@
  *
  * @see libs/backend/vscode-core/src/di/tokens.ts for canonical convention reference
  */
+export interface SdkCliAgentOwnerLookup {
+  findAgentInfo(agentId: string): {
+    parentSessionId?: string;
+    startedAt?: string;
+    status?: string;
+  } | undefined;
+}
+
 export const SDK_TOKENS = {
   SESSION_APPROVAL_ROUTER: Symbol.for('SessionApprovalRouter'),
   SESSION_RUNTIME_ROUTER: Symbol.for('SessionRuntimeRouter'),
@@ -80,6 +88,8 @@ export const SDK_TOKENS = {
    */
   SDK_SESSION_BUDGET: Symbol.for('SdkSessionBudget'),
   SDK_PERMISSION_HANDLER: Symbol.for('SdkPermissionHandler'),
+  /** Host-bound lane-owner lookup; its manager is captured at composition. */
+  SDK_CLI_AGENT_OWNER_LOOKUP: Symbol.for('SdkCliAgentOwnerLookup'),
   SDK_MESSAGE_TRANSFORMER: Symbol.for('SdkMessageTransformer'),
   SDK_SESSION_LIFECYCLE_MANAGER: Symbol.for('SdkSessionLifecycleManager'),
   SDK_CONFIG_WATCHER: Symbol.for('SdkConfigWatcher'),

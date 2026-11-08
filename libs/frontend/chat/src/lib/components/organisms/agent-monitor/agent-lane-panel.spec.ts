@@ -17,6 +17,7 @@ import { VSCodeService } from '@ptah-extension/core';
 import { SplitHandleComponent } from '@ptah-extension/chat-ui';
 import { SubagentLaneComponent } from '../subagent-lane/subagent-lane.component';
 import { AgentMonitorPanelComponent } from '../agent-monitor-panel.component';
+import { AgentPermissionResponder } from '../../../services/agent-permission-responder';
 import { AgentCardComponent } from '../../molecules/agent-card/agent-card.component';
 import { AgentContinueInputComponent } from '../../molecules/agent-continue-input/agent-continue-input.component';
 import { AgentLaneGridComponent } from './agent-lane-grid.component';
@@ -93,6 +94,7 @@ describe('agent panel lanes', () => {
   const originalObserver = globalThis.ResizeObserver;
   let postMessage: jest.Mock;
   let clearPermission: jest.Mock;
+  let respondLane: jest.Mock;
   let pendingPermissions: ReturnType<typeof signal<MonitoredAgent[]>>;
   const observers: {
     callback: ResizeObserverCallback;
@@ -112,10 +114,12 @@ describe('agent panel lanes', () => {
     };
     postMessage = jest.fn();
     clearPermission = jest.fn();
+    respondLane = jest.fn();
     pendingPermissions = signal<MonitoredAgent[]>([]);
     TestBed.configureTestingModule({
       imports: [AgentMonitorPanelComponent],
       providers: [
+        { provide: AgentPermissionResponder, useValue: { respondLane } },
         {
           provide: AgentMonitorStore,
           useValue: {
@@ -456,7 +460,7 @@ describe('agent panel lanes', () => {
         fixture.nativeElement.querySelector('.btn-success');
       expect(allow.closest('ptah-agent-lane-grid')).toBeNull();
       allow.click();
-      expect(clearPermission).toHaveBeenCalledWith('workflow', 'req-workflow');
+      expect(respondLane).toHaveBeenCalledWith('workflow', 'req-workflow', 'allow');
       // Re-emitting an already surfaced workflow request must not steal detail again.
       fixture.componentInstance.pickStandalone('a');
       pendingPermissions.set([{ ...workflow }]);
@@ -743,12 +747,8 @@ describe('agent panel lanes', () => {
       '[data-lane-id="a"] .btn-success',
     );
     allow.click();
-    expect(postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        payload: { requestId: 'req', decision: 'allow' },
-      }),
-    );
-    expect(clearPermission).toHaveBeenCalledWith('a', 'req');
+    expect(respondLane).toHaveBeenCalledWith('a', 'req', 'allow');
+    expect(clearPermission).not.toHaveBeenCalled();
   });
 
   it('measures the body through ResizeObserver and disconnects every observer', () => {

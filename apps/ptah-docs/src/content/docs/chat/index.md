@@ -9,7 +9,7 @@ sidebar:
 
 The chat view is where you talk to the agent. It streams responses, shows each tool call and sub-agent inline, and keeps the session cost and token counts in view.
 
-![Chat overview](/screenshots/chat-overview.webp)
+The Electron view places the conversation above the composer; the selected session's lane tabs sit above the transcript.
 
 ## What the chat gives you
 

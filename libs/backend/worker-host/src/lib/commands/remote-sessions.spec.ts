@@ -63,7 +63,7 @@ function setup(
     enqueue: jest.fn(async () => ({ seq: 1 })),
     degraded: false,
   } as unknown as SessionLogWriter;
-  const permissions = { handleResponse: jest.fn() };
+  const permissions = { handleResponse: jest.fn().mockReturnValue(true) };
   const requestRelease = jest.fn(async () => 'not-held');
   const log = jest.fn();
   let tap: Tap = () => undefined;

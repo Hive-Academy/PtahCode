@@ -61,6 +61,7 @@ const noHandoffFiles: SubagentHandoffFilesPort = {
   paths: () => undefined,
   saveTask: async () => false,
   notesExist: async () => false,
+  redactNotes: async () => false,
 };
 /** A monitor's handoff records: every write succeeds, nothing touches disk. */
 const memoryHandoffRecords: SubagentHandoffRecordsPort = {
@@ -1750,6 +1751,16 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
     );
     for (const [toolUseId, content, cause] of [
       ['read-2', [{ type: 'text', text: 'Permission denied' }], 'denied'],
+      [
+        'read-sdk',
+        [{ type: 'text', text: "The user doesn't want to take this action right now." }],
+        'denied',
+      ],
+      [
+        'read-sdk-typographic',
+        [{ type: 'text', text: 'The user doesn’t want to take this action right now.' }],
+        'denied',
+      ],
       ['read-3', [{ type: 'text', text: 'Request interrupted by user' }], 'interrupted'],
       ['read-4', [{ type: 'text', text: 'File missing' }], 'other'],
     ] as const) {

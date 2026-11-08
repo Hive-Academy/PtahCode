@@ -5,11 +5,10 @@
  * Responsibilities:
  * - Create and track pending permission requests
  * - Apply "Always Allow" rules for automatic approval
- * - Block indefinitely until user responds or session cleanup resolves
+ * - Settle unanswered requests at a finite deadline
  * - Persist permission rules to workspace state
  *
- * Permission requests block indefinitely until the user responds or cleanup
- * resolves them (matching Claude Code CLI behavior).
+ * Permission requests expire even if the renderer disappears.
  */
 
 import { injectable, inject } from 'tsyringe';
@@ -37,6 +36,7 @@ import type { ApprovalPromptParams } from '../code-execution/types';
  * Storage key for permission rules in workspace state
  */
 const RULES_STORAGE_KEY = 'ptah.permission.rules';
+export const MCP_PERMISSION_TIMEOUT_MS = 60_000;
 
 /**
  * Pending request state with Promise resolver
@@ -47,6 +47,7 @@ interface PendingRequest {
 
   /** Original request data for rule creation */
   request: PermissionRequest;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 @injectable()
@@ -97,9 +98,9 @@ export class PermissionPromptService {
    * Create a new permission request
    *
    * @param params - Approval prompt parameters from Claude CLI
-   * @returns Permission request with unique ID (blocks indefinitely until user responds)
+   * @returns Permission request with unique ID and finite deadline
    */
-  createRequest(params: ApprovalPromptParams): PermissionRequest {
+  createRequest(params: ApprovalPromptParams, ownerId?: string): PermissionRequest {
     const requestId = crypto.randomUUID();
     const timestamp = Date.now();
     const description = this.buildDescription(
@@ -114,7 +115,8 @@ export class PermissionPromptService {
       toolUseId: params.tool_use_id,
       timestamp,
       description,
-      timeoutAt: 0,
+      timeoutAt: timestamp + MCP_PERMISSION_TIMEOUT_MS,
+      ...(ownerId ? { sessionId: ownerId, tabId: ownerId } : {}),
     };
 
     this.logger.info('Permission request created', {
@@ -130,7 +132,7 @@ export class PermissionPromptService {
    *
    * Called by MCP server after creating request and sending to webview.
    * The resolver will be invoked when the user responds or cleanup resolves it.
-   * Blocks indefinitely -- there is no timeout.
+   * Denies the request when its deadline passes.
    *
    * @param id - Request ID
    * @param resolve - Promise resolver function
@@ -141,9 +143,12 @@ export class PermissionPromptService {
     resolve: (response: PermissionResponse) => void,
     request: PermissionRequest,
   ): void {
-    this.pendingRequests.set(id, { resolve, request });
-
-    this.logger.debug('Pending resolver stored (blocks indefinitely)', { id });
+    const timer = setTimeout(() => {
+      this.resolveRequest({ id, decision: 'deny', reason: 'Permission request timed out' });
+    }, Math.max(0, (request.timeoutAt || Date.now() + MCP_PERMISSION_TIMEOUT_MS) - Date.now()));
+    timer.unref?.();
+    this.pendingRequests.set(id, { resolve, request, timer });
+    this.logger.debug('Pending resolver stored', { id });
   }
 
   /**
@@ -159,6 +164,7 @@ export class PermissionPromptService {
   removePendingResolver(id: string): boolean {
     const pending = this.pendingRequests.get(id);
     if (pending) {
+      clearTimeout(pending.timer);
       this.pendingRequests.delete(id);
       this.logger.debug('Pending resolver removed (cleanup)', { id });
     }
@@ -184,6 +190,7 @@ export class PermissionPromptService {
       return false;
     }
     this.pendingRequests.delete(response.id);
+    clearTimeout(pending.timer);
     if (response.decision === 'always_allow') {
       this.createRuleFromRequest(pending.request);
       this.logger.info('Created "Always Allow" rule from request', {

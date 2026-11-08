@@ -22,6 +22,8 @@ import {
   type ScopedSettingEntry,
   type SettingScope,
   type PtahCliConfig,
+  type CliLaneDefaults,
+  type CliType,
 } from '@ptah-extension/shared';
 import { ClaudeRpcService } from './claude-rpc.service';
 import { AuthStateService } from './auth-state.service';
@@ -809,6 +811,7 @@ export class ProvidersSettingsStateService {
           claudeReasoningEffort: config.claudeReasoningEffort,
           detectedClis: config.detectedClis,
           disabledClis: config.disabledClis,
+          cliLaneDefaults: config.cliLaneDefaults,
           preferredAgentOrder: config.preferredAgentOrder,
           maxConcurrentAgents: config.maxConcurrentAgents,
           copilotAutoApprove: config.copilotAutoApprove,
@@ -910,6 +913,38 @@ export class ProvidersSettingsStateService {
     patch: ProvidersSettingsPatch,
     context: ProvidersEditContext,
   ): Promise<boolean> {
+    if (patch.orchestration?.cliLaneDefaults) {
+      const rows = patch.orchestration.cliLaneDefaults;
+      return this.runCommit(Object.entries(rows).map(([cli, choice]) => {
+        let expected: CliLaneDefaults[CliType] | undefined;
+        return {
+        fields: [`agentOrchestration.cliLaneDefaults.${cli}`],
+        write: async () => {
+          const before = (await this.require('agent:getConfig', undefined)).cliLaneDefaults;
+          const previous = Object.entries(before ?? {}).find(([name]) => name === cli)?.[1];
+          expected = choice === null ? undefined : {
+            ...previous,
+            ...(choice.permission === null ? { permission: undefined } :
+              choice.permission === undefined ? {} : { permission: choice.permission }),
+            ...(choice.network === null ? { network: undefined } :
+              choice.network === undefined ? {} : { network: choice.network }),
+          };
+          if (cli === 'codex' && expected?.permission === undefined && expected?.network === undefined)
+            expected = undefined;
+          return (await this.require('agent:setConfig', {
+            cliLaneDefaults: { [cli]: choice },
+          })).success;
+        },
+        readBack: async () => {
+          const saved = (await this.require('agent:getConfig', undefined)).cliLaneDefaults;
+          const row = Object.entries(saved ?? {}).find(([name]) => name === cli)?.[1];
+          return (row === undefined) === (expected === undefined) &&
+            row?.permission === expected?.permission &&
+            row?.network === expected?.network;
+        },
+      };
+      }), context);
+    }
     const operations = this.commits.operations(patch);
     return this.runCommit(operations, context, () => {
       const authTarget = patch.auth?.applyTo ?? 'global';

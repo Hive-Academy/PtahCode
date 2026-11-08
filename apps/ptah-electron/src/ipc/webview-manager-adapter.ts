@@ -19,6 +19,7 @@
 import type { IpcBridge } from './ipc-bridge';
 import type { IHostAttentionIngress, IHostAttentionObserverHost } from '@ptah-extension/platform-core';
 import type { Logger } from '@ptah-extension/vscode-core';
+import { MESSAGE_TYPES } from '@ptah-extension/shared';
 
 /**
  * Electron-compatible WebviewManager adapter.
@@ -106,7 +107,11 @@ export class ElectronWebviewManagerAdapter implements IHostAttentionObserverHost
     } catch (error: unknown) {
       this.logger?.warn(`Host attention observe failed: ${error instanceof Error ? error.name : 'UnknownError'}`);
     }
-    this.ipcBridge.sendToRenderer({ type, payload });
+    const delivered = this.ipcBridge.sendToRenderer({ type, payload });
+    if ((type === MESSAGE_TYPES.PERMISSION_REQUEST ||
+      type === MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_REQUEST) && !delivered) {
+      throw new Error('Permission window unavailable');
+    }
   }
 
   /**

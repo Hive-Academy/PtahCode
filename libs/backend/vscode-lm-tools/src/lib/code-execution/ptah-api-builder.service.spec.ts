@@ -488,6 +488,7 @@ function buildTestBuilder(
   webviewManager?: WebviewManager,
   sessionOrganizationRecorder?: ISessionOrganizationRecorder,
   logger: Logger = makeLogger(),
+  codexPermissionReader?: { getPermissionLevel(sessionId: string): 'ask' | 'auto-edit' | 'yolo' | 'plan' | undefined },
 ): PtahAPIBuilder {
   return new PtahAPIBuilder(
     {} as unknown as WorkspaceAnalyzerService,
@@ -539,6 +540,10 @@ function buildTestBuilder(
     { start: () => undefined } as unknown as DiagnosticsCacheInvalidator,
     surfaceStateService,
     sessionOrganizationRecorder,
+    undefined, // container
+    undefined, // laneLimitLookup
+    undefined, // taskEndRunReader
+    codexPermissionReader,
   );
 }
 
@@ -646,11 +651,18 @@ describe('PtahAPIBuilder.build() — agent role resolver wiring', () => {
 
   function buildAgentDeps(
     agentRoleResolver?: AgentRoleResolver,
+    codexPermissionReader?: { getPermissionLevel(sessionId: string): 'ask' | 'auto-edit' | 'yolo' | 'plan' | undefined },
   ): AgentNamespaceDependencies {
     const builder = buildTestBuilder(
       makeRawWorkspaceProvider(),
       makeSessionManager(),
       agentRoleResolver,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      makeLogger(),
+      codexPermissionReader,
     );
     builder.build();
     const mockedBuilder =
@@ -658,6 +670,13 @@ describe('PtahAPIBuilder.build() — agent role resolver wiring', () => {
     expect(mockedBuilder).toHaveBeenCalledTimes(1);
     return mockedBuilder.mock.calls[0][0] as AgentNamespaceDependencies;
   }
+
+  it('uses the live native Codex level when the SDK lifecycle has no caller session', () => {
+    const reader = { getPermissionLevel: jest.fn((id: string) => id === 'native' ? 'plan' as const : undefined) };
+    const deps = buildAgentDeps(undefined, reader);
+    expect(deps.getParentLevel?.('native')).toBe('plan');
+    expect(reader.getPermissionLevel).toHaveBeenCalledWith('native');
+  });
 
   it('resolveAgentRole delegates to the injected resolver', async () => {
     const definition = {

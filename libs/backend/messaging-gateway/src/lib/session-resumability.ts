@@ -15,6 +15,7 @@ import { injectable } from 'tsyringe';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { claudeProjectDir } from '@ptah-extension/shared';
 
 export interface ISessionResumabilityChecker {
   /**
@@ -41,7 +42,7 @@ export class JsonlSessionResumabilityChecker implements ISessionResumabilityChec
       return true;
     }
 
-    const escaped = (workspaceRoot ?? '').replace(/[:\\/]/g, '-');
+    const escaped = claudeProjectDir(workspaceRoot ?? '');
     const candidates = new Set<string>();
     if (escaped) {
       candidates.add(escaped);

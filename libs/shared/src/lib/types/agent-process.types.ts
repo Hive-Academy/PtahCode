@@ -185,6 +185,8 @@ export interface EffectiveLanePolicy {
   readonly permission?: LanePermissionMode;
   readonly network?: LaneNetworkMode;
   readonly nativeDescription?: string;
+  readonly permissionSource?: 'spawn' | 'saved' | 'built-in' | 'parent-plan';
+  readonly networkSource?: 'spawn' | 'saved' | 'built-in' | 'parent-plan';
 }
 
 export interface LaneSpawnPolicyRefusal {
@@ -388,8 +390,12 @@ export interface SpawnAgentRequest {
   readonly effort?: string;
   /** Resume a previous CLI session by its CLI-native session ID */
   readonly resumeSessionId?: string;
+  /** Original effective policy snapshot supplied by an internal lane resumer. */
+  readonly resumePolicy?: EffectiveLanePolicy;
   /** Parent Ptah Claude SDK session ID. Injected by MCP server, NOT set by callers. */
   readonly parentSessionId?: string;
+  /** Parent chat level captured by the MCP entry, never supplied by a lane caller. */
+  readonly parentLevel?: LanePermissionMode;
   /** Project-specific guidance (enhanced prompts). Injected by MCP server, NOT set by callers. */
   readonly projectGuidance?: string;
   /** Absolute paths to enabled plugin directories.
@@ -398,10 +404,10 @@ export interface SpawnAgentRequest {
   readonly pluginPaths?: string[];
   /** Ptah CLI agent ID from PtahCliRegistry. When set, spawns via Ptah CLI agent instead of CLI. */
   readonly ptahCliId?: string;
-  /** Model tier for Ptah CLI agents: 'opus' (most capable), 'sonnet' (balanced), 'haiku' (fastest).
-   *  Controls which capability tier the spawned SDK agent uses. Only applies to ptahCliId-based spawns.
-   *  The tier is resolved to the actual provider model via the agent's tier mappings.
-   *  Defaults to 'sonnet' when omitted. */
+  /** Model tier for Ptah CLI agents and system Claude lanes.
+   * Ptah CLI maps the tier through provider settings and defaults to sonnet.
+   * System Claude uses the tier as an SDK model alias when model is omitted.
+   * Other system CLIs ignore it. */
   readonly modelTier?: 'opus' | 'sonnet' | 'haiku';
   /** When set, this agent is resuming a previous agent. Frontend replaces the old card in-place. */
   readonly resumedFromAgentId?: string;

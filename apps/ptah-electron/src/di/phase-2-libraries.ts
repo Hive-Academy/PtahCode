@@ -56,6 +56,7 @@ import {
   registerSdkServices,
   wireAgentAdapterAliases,
   SDK_TOKENS,
+  type SdkCliAgentOwnerLookup,
   HARNESS_PREFLIGHT_TOKEN,
   type PluginLoaderService,
 } from '@ptah-extension/agent-sdk';
@@ -346,6 +347,7 @@ export function registerPhase2Libraries(
     platform: process,
   });
   registerCliAgentRuntimeServices(container, logger);
+  registerElectronSdkLaneOwnerLookup(container);
   container.register<IAgentSpawnTrustedRoots>(CLI_AGENT_RUNTIME_TOKENS.AGENT_SPAWN_TRUSTED_ROOTS, {
     useValue: { roots: () => [resolve(app.getPath('userData'), 'review', 'attempts')] },
   });
@@ -668,6 +670,18 @@ export function registerPhase2Libraries(
       { error: error instanceof Error ? error.message : String(error) },
     );
   }
+}
+
+/** Bind the SDK lane owner port after the CLI runtime registers its manager. */
+export function registerElectronSdkLaneOwnerLookup(container: DependencyContainer): void {
+  let permissionOwnerManager: AgentProcessManager | undefined;
+  const permissionOwnerLookup: SdkCliAgentOwnerLookup = {
+    findAgentInfo: (agentId) => permissionOwnerManager?.findAgentInfo(agentId),
+  };
+  container.registerInstance(SDK_TOKENS.SDK_CLI_AGENT_OWNER_LOOKUP, permissionOwnerLookup);
+  container.afterResolution(TOKENS.AGENT_PROCESS_MANAGER, (_token, resolved) => {
+    if (resolved instanceof AgentProcessManager) permissionOwnerManager = resolved;
+  });
 }
 
 // Native ffmpeg cannot spawn from inside app.asar (the archive is a file).

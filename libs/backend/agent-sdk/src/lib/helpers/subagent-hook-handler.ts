@@ -436,7 +436,7 @@ export class SubagentHookHandler {
       );
       const budgetSessionId = this.resolveParentSessionId(input.session_id, parentSessionId);
       if (budgetSessionId && input.agent_id && input.agent_transcript_path)
-        this.budgetMonitor?.recordTranscriptPath(budgetSessionId, input.agent_id, input.agent_transcript_path);
+        await this.budgetMonitor?.recordTranscriptPath(budgetSessionId, input.agent_id, input.agent_transcript_path);
       let resolvedToolCallId = toolUseId ?? undefined;
       let record = resolvedToolCallId
         ? this.subagentRegistry.get(resolvedToolCallId)
@@ -478,9 +478,11 @@ export class SubagentHookHandler {
         );
       }
 
-      const isBackground = record?.isBackground === true;
+      // SubagentStopHookInput has no background flag. Without a registry record
+      // the SDK does not let this hook determine whether the agent was backgrounded.
+      const isBackground = record?.isBackground ?? null;
 
-      if (isBackground && resolvedToolCallId) {
+      if (isBackground === true && resolvedToolCallId) {
         this.logger.info(
           '[SubagentHookHandler] Background subagent completed',
           {

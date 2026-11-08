@@ -5,6 +5,7 @@
  */
 
 import { z } from 'zod';
+import type { CliLaneDefaults, CliLaneDefaultsPatch } from '../cli-lane-defaults.types';
 import type { CodexSandboxMode } from '../advanced-settings.types';
 import type { PtahCliSummary } from '../ptah-cli.types';
 import type { AgentPermissionDecision } from '../agent-permission.types';
@@ -348,6 +349,7 @@ export const DECISION_MODEL_CUSTOM_KEY_NEEDS_ENDPOINT =
 export type McpExternalCallerAccess = 'read-only' | 'full';
 
 export interface AgentOrchestrationConfig {
+  cliLaneDefaults: CliLaneDefaults;
   codexSandboxMode: CodexSandboxMode;
   /** Detected CLI agents (Codex, Copilot) */
   detectedClis: import('../agent-process.types').CliDetectionResult[];
@@ -619,6 +621,7 @@ export function classifyAgentResumeAccountSelection(
 
 /** Parameters for agent:setConfig RPC method */
 export interface AgentSetConfigParams {
+  cliLaneDefaults?: CliLaneDefaultsPatch;
   codexSandboxMode?: CodexSandboxMode;
   /** User's preferred agent order for spawning. First available agent is used. Includes both CLI types and Ptah CLI IDs. */
   preferredAgentOrder?: string[];

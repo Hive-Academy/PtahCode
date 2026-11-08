@@ -6,7 +6,7 @@
  *
  * - `<id>.md`: the progress notes the subagent is asked to write when it
  *   nears its budget (state, findings, decisions, files touched, next steps).
- *   Written by the subagent; the host only checks that it exists.
+ *   Written by the subagent; the host sanitizes it after a successful stop.
  * - `<id>.task.md`: the subagent's full original task prompt, written by the
  *   host when it stops the subagent.
  *
@@ -25,6 +25,7 @@
  */
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { randomBytes } from 'node:crypto';
 import type { Logger } from '@ptah-extension/vscode-core';
 
 /** Handoff directory, relative to the session workspace. */
@@ -40,6 +41,7 @@ export interface SubagentHandoffPaths {
 
 /** Time a stop waits for one group of handoff file operations. */
 export const HANDOFF_FILES_TIMEOUT_MS = 5_000;
+const MAX_NOTES_BYTES = 1024 * 1024;
 
 /** Where the handoff files of a stopped subagent stand. */
 export interface HandoffFileState {
@@ -53,7 +55,7 @@ export interface HandoffFileState {
 
 export class SubagentHandoffFiles {
   constructor(
-    private readonly logger: Logger,
+    private readonly logger: Pick<Logger, 'warn'>,
     /** The workspace root of a session, `undefined` when unknown. */
     private readonly workspaceOf: (sessionId: string) => string | undefined,
   ) {}
@@ -112,6 +114,67 @@ export class SubagentHandoffFiles {
         });
       }
       return false;
+    }
+  }
+
+  /** Scrub agent-written notes after the agent has stopped, before forwarding their path. */
+  async redactNotes(
+    paths: SubagentHandoffPaths,
+    redact: (text: string) => string,
+  ): Promise<boolean> {
+    let tempPath: string | undefined;
+    try {
+      const before = await fs.lstat(paths.notes);
+      if (!before.isFile()) {
+        this.logger.warn('[SubagentHandoffFiles] Subagent notes are not a regular file', {
+          fileType: before.isSymbolicLink() ? 'symlink' : 'other',
+        });
+        return false;
+      }
+      if (before.size > MAX_NOTES_BYTES) {
+        this.logger.warn('[SubagentHandoffFiles] Subagent notes exceed redaction size limit', {
+          bytes: before.size,
+        });
+        return false;
+      }
+      const original = await fs.readFile(paths.notes, 'utf8');
+      if (Buffer.byteLength(original, 'utf8') > MAX_NOTES_BYTES) {
+        this.logger.warn('[SubagentHandoffFiles] Subagent notes grew beyond redaction size limit');
+        return false;
+      }
+      const safe = redact(original);
+      if (safe === original) return true;
+      const after = await fs.lstat(paths.notes);
+      if (!after.isFile() || after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ino !== before.ino) {
+        this.logger.warn('[SubagentHandoffFiles] Subagent notes changed during redaction');
+        return false;
+      }
+      tempPath = path.join(path.dirname(paths.notes), `.${path.basename(paths.notes)}.${randomBytes(8).toString('hex')}.tmp`);
+      await fs.writeFile(tempPath, safe, { encoding: 'utf8', flag: 'wx', mode: before.mode });
+      await fs.rename(tempPath, paths.notes);
+      tempPath = undefined;
+      return true;
+    } catch (error: unknown) {
+      // degradation-audit: reported - notes can be absent or unavailable after stop; report without logging their content.
+      const code = (error as { code?: unknown } | null)?.code;
+      if (code !== 'ENOENT') {
+        this.logger.warn('[SubagentHandoffFiles] Could not redact subagent notes', {
+          errorType: error instanceof Error ? error.name : typeof error,
+          errorCode: typeof code === 'string' ? code : undefined,
+        });
+      }
+      return false;
+    } finally {
+      if (tempPath) {
+        try {
+          await fs.unlink(tempPath);
+        } catch (error: unknown) {
+          // degradation-audit: reported - failed cleanup leaves an isolated temp file; its content is already redacted.
+          this.logger.warn('[SubagentHandoffFiles] Could not remove temporary redacted notes', {
+            errorType: error instanceof Error ? error.name : typeof error,
+          });
+        }
+      }
     }
   }
 }

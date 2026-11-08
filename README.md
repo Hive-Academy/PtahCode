@@ -50,7 +50,7 @@ The download is the Electron app. With a workspace open, the title bar holds the
 
 PtahCode indexes the repository, keeps decisions after the chat ends, and runs specialized agents against that map. The Electron app for Windows, macOS, and Linux hosts the product. Its Angular webview renders the interface. Provider CLI lanes run delegated work.
 
-![Chat with the built-in tool catalog](https://raw.githubusercontent.com/Hive-Academy/PtahCode/main/apps/ptah-docs/public/screenshots/chat-overview.webp)
+In Electron, the chat transcript sits above the composer; assistant turns can expand their work log to show tool activity.
 
 ---
 
@@ -77,7 +77,7 @@ flowchart LR
   F --> C
 ```
 
-![Execution tree with sub-agent delegation, tokens, and cost](https://raw.githubusercontent.com/Hive-Academy/PtahCode/main/apps/ptah-docs/public/screenshots/chat-execution-tree.webp)
+In a session, the Orchestrator, its sub-agents, CLI lanes and background agents appear as lane tabs. A completed turn can expand a **Worked** row to show its tool calls.
 
 - **CLI lanes.** Supervised processes include `claude`, `codex`, `copilot`, `cursor`, `antigravity`, `opencode`, `grok`, and `pi`, plus API providers such as Kimi, GLM, MiniMax, Qwen, DeepSeek, OpenRouter, and Ollama. Adapter manifests show potential messaging support in list rows; a live lane resolves what its current handle can actually do. Send queues during a running turn. Send now steers when supported, or offers interrupt and resume with explicit consent to lose partial work. Each accepted message has a receipt that tracks delivery through settlement.
 - **Child chats.** A parent can open up to three child sessions. Each child gets its own git worktree and branch and its own tab. That cap is separate from the rail’s nine running sessions.

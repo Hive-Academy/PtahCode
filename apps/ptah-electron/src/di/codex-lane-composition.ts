@@ -12,6 +12,7 @@ import {
   CLI_AGENT_RUNTIME_TOKENS,
   CodexAppServerLaneAdapter,
   CodexLaneWriteDacPreflight,
+  codexLaneSandboxMode,
   type CodexAdapterFactory,
   type CodexLaneBinaryProbe,
   type CodexLaneIdentityStore,
@@ -36,10 +37,6 @@ import {
   PLATFORM_TOKENS,
   type IWorkspaceProvider,
 } from '@ptah-extension/platform-core';
-import {
-  codexSandboxModeSchema,
-  DEFAULT_CODEX_SANDBOX_MODE,
-} from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import { createElectronCodexScopeFactory } from './codex-runtime-composition';
 
@@ -170,14 +167,8 @@ export function registerElectronCodexLaneFactory(
       };
       return {
         lane: {
-          codexSandboxMode: codexSandboxModeSchema.parse(
-            container
-              .resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER)
-              .getConfiguration(
-                'ptah',
-                'agentOrchestration.codexSandboxMode',
-                DEFAULT_CODEX_SANDBOX_MODE,
-              ),
+          codexSandboxMode: codexLaneSandboxMode(
+            container.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER),
           ),
           permissionLevel: 'ask',
           identity: {
@@ -229,14 +220,8 @@ export function registerElectronCodexLaneFactory(
       const catalogCwd = canonical(tmpdir());
       const profile = buildCodexExecutionProfile({
         session: {
-          codexSandboxMode: codexSandboxModeSchema.parse(
-            container
-              .resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER)
-              .getConfiguration(
-                'ptah',
-                'agentOrchestration.codexSandboxMode',
-                DEFAULT_CODEX_SANDBOX_MODE,
-              ),
+          codexSandboxMode: codexLaneSandboxMode(
+            container.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER),
           ),
           contextId: randomUUID(),
           consumer: 'lane',
@@ -399,13 +384,7 @@ function prewarmCodexLaneWriteDac(
     PLATFORM_TOKENS.WORKSPACE_PROVIDER,
   );
   const warm = (): void => {
-    const mode = codexSandboxModeSchema.parse(
-      workspace.getConfiguration(
-        'ptah',
-        'agentOrchestration.codexSandboxMode',
-        DEFAULT_CODEX_SANDBOX_MODE,
-      ),
-    );
+    const mode = codexLaneSandboxMode(workspace);
     if (mode === 'read-only' || mode === 'danger-full-access') return;
     for (const folder of workspace.getWorkspaceFolders()) {
       if (isAbsolute(folder) && !folder.includes('\0'))

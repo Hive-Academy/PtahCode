@@ -17,6 +17,13 @@ const info: AgentProcessInfo = {
 };
 
 describe('SystemCliLaneResumer', () => {
+  it('uses the current parent level on cold resume', async () => {
+    const spawn = jest.fn(async () => ({ agentId: NEW_AGENT_ID, cli: 'codex' as const, status: 'running' as const, startedAt: 'now' }));
+    const resumer = new SystemCliLaneResumer({ spawn, releaseIdleForResume: jest.fn(async () => undefined) },
+      (id) => id === 'parent-session' ? 'plan' : undefined);
+    await resumer.resume({ ...info, effectivePolicy: { permission: 'yolo', network: 'allow' } }, 'continue');
+    expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ parentLevel: 'plan' }));
+  });
   it('keeps the parent and marks the previous agent on resume', async () => {
     const releaseIdleForResume = jest.fn(async () => undefined);
     const spawn = jest.fn(async () => ({
@@ -43,6 +50,7 @@ describe('SystemCliLaneResumer', () => {
       resumedFromAgentId: AGENT_ID,
       permission: 'plan',
       network: 'deny',
+      resumePolicy: { permission: 'plan', network: 'deny' },
     });
   });
 

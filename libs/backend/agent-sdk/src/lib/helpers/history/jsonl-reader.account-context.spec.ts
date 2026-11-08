@@ -13,6 +13,7 @@ jest.mock('fs/promises', () => {
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
+import { claudeProjectDir } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type {
   ClaudeAccountNamedRoute,
@@ -24,7 +25,7 @@ import type { SessionMetadataStore } from '../../session-metadata-store';
 import { SessionStatsReaderService } from '../../session-stats/session-stats-reader.service';
 
 const workspace = path.resolve('account-fixture-workspace');
-const escaped = workspace.replace(/[:\\/]/g, '-');
+const escaped = claudeProjectDir(workspace);
 const id = '11111111-1111-4111-8111-111111111111';
 
 // Already-admitted test fixtures, matching the account-route-env specs.
