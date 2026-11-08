@@ -66,7 +66,7 @@ describe('AgentContinueInputComponent', () => {
     setup();
     expect(fixture.nativeElement.querySelector('textarea')).not.toBeNull();
     setup(makeAgent(), 'panel');
-    expect(fixture.nativeElement.querySelector('input')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('textarea')).not.toBeNull();
   });
 
   it('shows Stop without a text input while running and Resume when stopped', () => {
@@ -110,13 +110,11 @@ describe('AgentContinueInputComponent', () => {
     setup();
     const field = draft('follow up');
     sendMessage.mockResolvedValueOnce({ mode: 'unsupported', detail: 'Unavailable' });
-    (Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>)
-      .find(button => button.textContent?.trim() === 'Send') as HTMLButtonElement).click();
+    (fixture.nativeElement.querySelector('[aria-label="Send message"]') as HTMLButtonElement).click();
     await fixture.whenStable(); fixture.detectChanges();
     expect(field.value).toBe('follow up');
     expect(fixture.nativeElement.textContent).toContain('Unavailable');
-    (Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>)
-      .find(button => button.textContent?.trim() === 'Send') as HTMLButtonElement).click();
+    (fixture.nativeElement.querySelector('[aria-label="Send message"]') as HTMLButtonElement).click();
     await fixture.whenStable(); fixture.detectChanges();
     expect(sendMessage).toHaveBeenLastCalledWith(agentId, 'follow up', 'queue', false, 'key');
     expect(field.value).toBe('');
