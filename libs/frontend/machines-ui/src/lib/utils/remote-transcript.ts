@@ -58,7 +58,11 @@ export function buildRemoteTranscript(
     if (start === undefined || start.parentToolUseId) continue;
     const node = buildMessageNode(deps, messageId, state);
     if (node === null) continue;
-    items.push({ id: messageId, role: start.role, node: inertTools(node) });
+    items.push({
+      id: messageId,
+      role: start.role,
+      node: inertTools(failedTools(node)),
+    });
   }
   return items;
 }
@@ -102,6 +106,25 @@ function accumulate(state: StreamingState, event: FlatStreamEventUnion): void {
     default:
       break;
   }
+}
+
+/**
+ * A copy of `node` where a tool call whose result is an error has
+ * `status: 'error'`, so the shared header says "Failed" with its `failed`
+ * chip instead of "Completed". The shared tool-node builder marks every call
+ * with a result `complete` and keeps the error only in `isError`; a denied
+ * permission comes back as such an error result (`is_error: true`), as does
+ * a tool that ran and failed. The local agent monitor maps it the same way
+ * (`agent-monitor-tree-builder.service.ts`). A call that succeeded keeps
+ * `complete`.
+ */
+function failedTools(node: ExecutionNode): ExecutionNode {
+  const children = node.children.map(failedTools);
+  const failed =
+    node.type === 'tool' && node.status === 'complete' && node.isError === true;
+  return failed
+    ? { ...node, status: 'error', children }
+    : { ...node, children };
 }
 
 /** A copy of `node` whose markdown-file tool content is inert (see above). */

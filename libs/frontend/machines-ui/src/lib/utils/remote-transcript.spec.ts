@@ -138,6 +138,33 @@ describe('buildRemoteTranscript (plan A7 fallback)', () => {
     );
   });
 
+  it('a tool whose result is an error (a denied Write) is not "complete"', () => {
+    const denied = TOOL_TURN.map((event) => {
+      if (event.id === 'a-tool') return { ...event, toolName: 'Write' };
+      if (event.id === 'a-tool-input')
+        return {
+          ...event,
+          delta: JSON.stringify({ file_path: '/tmp/x.txt', content: 'x' }),
+        };
+      if (event.id === 'a-tool-result')
+        return {
+          ...event,
+          output: "The user doesn't want to proceed with this tool use.",
+          isError: true,
+        };
+      return event;
+    });
+    const [item] = buildRemoteTranscript(toTranscriptEvents(denied), stats);
+    const tool = item.node.children.find((child) => child.type === 'tool');
+    expect(tool).toMatchObject({ status: 'error', isError: true });
+  });
+
+  it('a tool whose result succeeded stays "complete"', () => {
+    const [item] = buildRemoteTranscript(toTranscriptEvents(TOOL_TURN), stats);
+    const tool = item.node.children.find((child) => child.type === 'tool');
+    expect(tool?.status).toBe('complete');
+  });
+
   it('an empty list gives no items', () => {
     expect(buildRemoteTranscript([], stats)).toEqual([]);
   });

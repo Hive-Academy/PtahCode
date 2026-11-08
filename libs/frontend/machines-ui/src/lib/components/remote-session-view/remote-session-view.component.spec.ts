@@ -378,6 +378,76 @@ describe('RemoteSessionViewComponent', () => {
     );
   });
 
+  it('G: an ordered list in remote markdown keeps its numbers', async () => {
+    const list: FlatStreamEventUnion = {
+      id: 'list-text',
+      eventType: 'text_delta',
+      timestamp: 1,
+      messageId: 'msg-0',
+      delta: '1. one\n2. two\n3. three',
+      blockIndex: 0,
+      source: 'history',
+    };
+    const { fixture } = await setup(
+      view({ events: [USER_MESSAGE[0], list, ...HISTORY_MESSAGE] }),
+    );
+    const root = q(fixture, 'remote-transcript');
+    const ol = root?.querySelector('.prose ol');
+    expect(ol?.querySelectorAll('li')).toHaveLength(3);
+    // Preflight sets `list-style: none` on every `ol`; the root's
+    // arbitrary variant restores decimal markers for markdown lists only.
+    expect(root?.classList.contains('[&_.prose_ol]:list-decimal')).toBe(true);
+  });
+
+  it('H: a denied tool reads "Failed", a finished one "Completed"', async () => {
+    const tool = (
+      callId: string,
+      isError: boolean,
+    ): FlatStreamEventUnion[] => [
+      {
+        id: `${callId}-start`,
+        eventType: 'tool_start',
+        timestamp: 2,
+        messageId: 'msg-1',
+        toolCallId: callId,
+        toolName: 'Write',
+        isTaskTool: false,
+        toolInput: { file_path: '/tmp/x.txt', content: 'x' },
+        source: 'history',
+      },
+      {
+        id: `${callId}-result`,
+        eventType: 'tool_result',
+        timestamp: 3,
+        messageId: 'msg-1',
+        toolCallId: callId,
+        output: isError ? "The user doesn't want to proceed." : 'Wrote file',
+        isError,
+        source: 'history',
+      },
+    ];
+    const { fixture } = await setup(
+      view({
+        events: [
+          ...USER_MESSAGE,
+          ...HISTORY_MESSAGE,
+          ...tool('denied', true),
+          ...tool('done', false),
+        ],
+      }),
+    );
+    const rows = Array.from(
+      (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLElement>(
+        '[data-testid="remote-tool"]',
+      ),
+    );
+    const status = (row: HTMLElement) =>
+      row.querySelector('[data-testid="tool-status"]')?.textContent?.trim();
+    expect(rows.map(status)).toEqual(['Failed', 'Completed']);
+    expect(rows[0].querySelector('[data-testid="tool-failed"]')).not.toBeNull();
+    expect(rows[1].querySelector('[data-testid="tool-failed"]')).toBeNull();
+  });
+
   it('S6: a markdown link in remote text is inert and shows its real target', async () => {
     const deceptive: FlatStreamEventUnion = {
       id: 'link-text',

@@ -42,6 +42,12 @@ const FILE_HREF_ATTR = 'data-ptah-file-href';
  * it may name another destination than the one it opens. A click on any
  * link here is stopped before the app could open it (on this machine or in
  * a browser) and reported through `linkActivated` with its real target.
+ *
+ * Ordered lists in remote markdown show their numbers: Tailwind's preflight
+ * sets `list-style: none` on every `ol` and the app's `.prose` rules
+ * (`styles.css`) style `ol > li::marker` but never restore the list style,
+ * so the root carries `[&_.prose_ol]:list-decimal` for markdown in this
+ * transcript only. Unordered lists keep the app's `::before` dot bullets.
  */
 @Component({
   selector: 'ptah-remote-transcript',
@@ -60,7 +66,10 @@ const FILE_HREF_ATTR = 'data-ptah-file-href';
     '(auxclick)': 'onLinkActivation($event)',
   },
   template: `
-    <ol class="flex flex-col gap-4" data-testid="remote-transcript">
+    <ol
+      class="flex flex-col gap-4 [&_.prose_ol]:list-decimal"
+      data-testid="remote-transcript"
+    >
       @for (item of items(); track item.id; let last = $last) {
         @if (item.role === 'user') {
           <li class="flex justify-end" data-testid="remote-message-user">
