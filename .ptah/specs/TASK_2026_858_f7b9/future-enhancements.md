@@ -117,3 +117,7 @@ the mobile PWA, P3 = later.
 | The Tailwind base reset removes `ol` numerals app-wide (`styles.css` `.prose ol` styles only `::marker`). The Machines transcript restores them locally; local chat markdown probably has the same defect. Fix `.prose ol` once in `apps/ptah-extension-webview/src/styles.css`. | frontend-developer report, finding G fix |
 | The local main transcript uses the same `buildToolNode`, which sets `complete` for an error result; local error tools may also read "Completed". | frontend-developer report, finding H fix |
 | Sessions created before the title fix keep their stored "Session <date>" name; `session:list` has no first-prompt field. | backend-developer report, finding D fix |
+| Ordered-list numerals in the remote transcript use the accent at 35% alpha (the app's `.prose ol > li::marker` rule) and read faint, more so in light. | visual-review.md fifth pass |
+| A resolved approval block keeps Allow once and Deny on screen, disabled. Hide them or replace them with the outcome. | visual-review.md fifth pass |
+| A screen-reader-only live region still announces "Claude is responding" after the turn ends. | visual-review.md fifth pass |
+| The fifth pass saw K and H on the 60 s auto-deny path (the manual Deny click came too late). Both paths send the same hard deny and are covered by `remote-sessions.spec.ts`; capture a manual Deny in the next visual pass. | visual-review.md fifth pass |

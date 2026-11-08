@@ -1,5 +1,39 @@
 # Phase F visual review (Electron)
 
+## Fifth pass (head dfae60162)
+
+**Verdict: PASS. K, H, G and D are fixed in dark and light. No serious or breaking finding. Two minor notes.** Electron (dist from dfae60162) driven through CDP on port 9333, window 734x774 (the CDP resize to 1280 did not persist). Dark is "Ptah Glass", light is "Ptah Glass Light".
+
+| Finding | Dark | Light | Result |
+|---|---|---|---|
+| K: turn ends after a denied tool | `3x-16-after-deny-dark`, `3x-15-list-after-deny-dark` | `3x-12-after-deny-ended-light`, `3x-13-list-after-deny-light` | Fixed. Without pressing Stop: list shows Idle, Stop disabled, composer reads "Message Claude on horus" (no "a turn is in progress"). |
+| H: denied tool reads "Failed" | `3x-16-after-deny-dark` | `3x-12-after-deny-ended-light` | Fixed. Row reads "failed" (Write, 1 line). No "Completed". |
+| G: ordered list numerals | `3x-04-fruits-ended-dark` | `3x-07-fruits-open-light`, `3x-08-fruits-light-clean` | Fixed. 1. to 5. visible, `list-style-type: decimal`, padding-left 22px, first numeral inside the card, not clipped. |
+| D: new session title | `3x-05-list-fruits-dark` | `3x-09-list-fruits-light`, `3x-13-list-after-deny-light` | Fixed. New sessions list with their first prompt; live title and list title match. Old sessions keep "Session 11/8/2026" and "Session 11/7/2026" as expected. |
+
+### Important caveat on the Deny step
+The approval block's 60 s countdown ran out before my Deny click landed (the gap between my capture and the click script was longer than 60 s). The block therefore shows "Denied by the worker: No answer within 60 s", i.e. the auto-deny path, not a user Deny. Nothing was allowed. K and H were observed on the auto-deny path. The user-Deny path was checked in the fourth pass (same RPC outcome) but not re-run here because only 2 sessions were allowed. Treat K and H as confirmed for auto-deny, and likely but not re-observed for a manual Deny.
+
+### New findings
+- **N1. Minor: resolved approval block keeps the full block.** After the denial the block stays in the transcript with Allow once and Deny rendered but disabled (`disabled=true`), plus the copy "The session continues without this tool." That is acceptable, but disabled buttons on a resolved request add noise (`3x-12-after-deny-ended-light`).
+- **N2. Minor: ordered-list numerals are faint.** The marker colour is the primary hue at 35% alpha (dark `oklch(0.876 0.096 89.7 / 0.35)`, light `oklch(0.563 0.112 76.7 / 0.35)`), so the numerals read dimmer than the text, especially in light (`3x-07-fruits-open-light`). They are decorative to the item text, so not rated higher. Not computed as a ratio. Consider full-opacity markers.
+- **N3. Minor (carried): user message has no bubble in light** (finding E), still visible in `3x-12-after-deny-ended-light`; dark shows the bubble. The "[Request interrupted by user for tool use]" line (finding I) still renders as a user line in both themes.
+- Open notes from earlier passes (E, I, J, L, M) were not re-assessed except as noted.
+
+### Checks run
+- axe-core (wcag2a, wcag2aa, wcag21aa, wcag22aa) on `ptah-machines-view` after the denial: **0 violations** in light and in dark. Incomplete: `color-contrast` 35 nodes (glass, not resolvable by axe) and `aria-prohibited-attr` 1 node (the `pre aria-label="Arguments"` in the approval block, same as the fourth pass; a `pre` has no role, so the label is ignored by some assistive tech. Minor).
+- A polite `sr-only` live region still contains "Claude is responding" after the turn ended (the visible UI is correct). Not confirmed as a defect, so noted only.
+- No keyboard pass this round (not in scope).
+
+### Sessions started
+2, both on horus: (1) the numbered fruit list; (2) the Write request under /tmp, never allowed. `/tmp/ptah-visual-check-5.txt` does not exist. Electron closed, CDP port 9333 closed. Not touched: other machines, worker config, credentials, the Claude login.
+
+### Files that show the machine name or a process id (keep out of published copies)
+All `3x-*` screenshots show the alias "horus" and `/home/horus/projects`. `3x-10-approval-light` shows "horus wants to run a command". No process ids.
+
+### Most useful screenshots
+`3x-04-fruits-ended-dark`, `3x-07-fruits-open-light`, `3x-12-after-deny-ended-light`, `3x-16-after-deny-dark`, `3x-05-list-fruits-dark`, `3x-13-list-after-deny-light`.
+
 ## Fourth pass (head 022f77005, dist from e6b538dd8)
 
 **Verdict: PASS WITH NOTES, one state not reachable (watch-only), several serious findings in the live session.** Real streams and a real tool approval now work on horus. The finding B fix is confirmed: after a turn ends, the list shows Idle. The approval block renders, counts down, and Deny works. New problems sit in the transcript (numbered lists lose their numbers, a denied tool reads "Completed", a denied turn never ends) and in session titles. Nothing was written under /tmp, the workspace or any other path: Deny was the only answer given.
