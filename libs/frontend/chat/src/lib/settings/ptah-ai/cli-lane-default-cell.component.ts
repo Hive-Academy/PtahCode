@@ -8,6 +8,8 @@ const PERMISSIONS: readonly LanePermissionMode[] = ['plan', 'ask', 'auto-edit', 
 const NETWORKS: readonly LaneNetworkMode[] = ['deny', 'allow'];
 const FULL_ACCESS_WARNING = 'Full access lets Codex read and change files outside this workspace and use the network without sandbox protection. Commands may affect your computer. Choose this only for runs you trust.';
 
+let nextTitleId = 0;
+
 @Component({
   selector: 'ptah-cli-lane-default-cell',
   standalone: true,
@@ -49,9 +51,9 @@ const FULL_ACCESS_WARNING = 'Full access lets Codex read and change files outsid
         </label>
       } @else { <span tabindex="0" [title]="reason()">Network: Unavailable — {{ reason() }}</span> }
       </div>
-      <dialog #confirmation class="modal" (cancel)="cancel($event)" (close)="cancel()" aria-labelledby="cli-full-access-title">
+      <dialog #confirmation class="modal" (cancel)="cancel($event)" (close)="cancel()" [attr.aria-labelledby]="titleId">
         <div class="modal-box border border-base-content/60 bg-base-100 text-base-content">
-          <h3 id="cli-full-access-title" tabindex="-1" class="text-base font-semibold">Confirm full access</h3>
+          <h3 [id]="titleId" tabindex="-1" class="text-base font-semibold">Confirm full access</h3>
           <p class="mt-3 text-sm">{{ cli() === 'codex' ? warning : 'Full auto can approve every action. Network access may let the lane reach external services. Choose this only for runs you trust.' }}</p>
           <div class="modal-action"><button type="button" class="btn btn-ghost btn-sm" (click)="cancel()">Cancel</button><button type="button" class="btn btn-warning btn-sm" (click)="confirm()">Confirm</button></div>
         </div>
@@ -70,6 +72,8 @@ export class CliLaneDefaultCellComponent {
   readonly showCaption = input(true);
   readonly selected = output<Choice>();
   readonly resetRequested = output<void>();
+  /** Unique per instance: every provider card renders its own dialog. */
+  protected readonly titleId = `cli-full-access-title-${++nextTitleId}`;
   protected readonly warning = FULL_ACCESS_WARNING;
   protected readonly pending = signal<{ kind: 'choice'; value: Choice } | { kind: 'reset' } | null>(null);
   protected readonly resetOpen = signal(false);
@@ -125,7 +129,7 @@ export class CliLaneDefaultCellComponent {
   private openConfirmation(action: { kind: 'choice'; value: Choice } | { kind: 'reset' }): void {
     this.pending.set(action);
     this.dialog()?.nativeElement.showModal();
-    this.dialog()?.nativeElement.querySelector<HTMLElement>('#cli-full-access-title')?.focus();
+    this.dialog()?.nativeElement.querySelector<HTMLElement>(`#${this.titleId}`)?.focus();
   }
   protected cancel(event?: Event): void {
     event?.preventDefault();
