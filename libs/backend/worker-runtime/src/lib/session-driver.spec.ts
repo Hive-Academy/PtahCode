@@ -497,3 +497,77 @@ it('drain does not wait for the session of a start whose chat:start returns afte
     failedAborts: [],
   });
 });
+
+describe('turnState (an SDK-interrupted turn has no session:turnEnded)', () => {
+  const state = (terminal: boolean, revision: number, sessionId = 's1') => ({
+    sessionId,
+    tabId: 'tab',
+    terminal,
+    revision,
+  });
+
+  it('ends a registered turn on a terminal state after its generating state, once', async () => {
+    const { driver, enqueue, mark } = setup();
+    await driver.continue('s1', 'tab', 'hello');
+    await driver.turnState(state(false, 4));
+    await driver.turnState(state(true, 5));
+    await driver.turnState(state(true, 6));
+    await driver.terminal('s1');
+    expect(types(enqueue).filter((t) => t === 'worker:turn.end')).toHaveLength(
+      1,
+    );
+    expect(mark).toHaveBeenCalledTimes(1);
+    expect(driver.driving('s1')).toBe(false);
+  });
+
+  it('ignores a terminal state with no generating state of this turn, or an older one', async () => {
+    const { driver, enqueue } = setup();
+    await driver.continue('s1', 'tab', 'hello');
+    await driver.turnState(state(true, 3));
+    await driver.turnState(state(false, 4));
+    await driver.turnState(state(true, 4));
+    expect(types(enqueue)).not.toContain('worker:turn.end');
+    expect(driver.driving('s1')).toBe(true);
+  });
+
+  it('does not end the next turn on the trailing terminal state of a turn session:turnEnded already ended', async () => {
+    const { driver, handleMessage, enqueue } = setup();
+    await driver.continue('s1', 'tab', 'one');
+    await driver.turnState(state(false, 2));
+    await driver.terminal('s1');
+    handleMessage.mockImplementation(async ({ method }: Message) => {
+      // The first turn's result arrives while the next one is admitted.
+      if (method === 'chat:continue') void driver.turnState(state(true, 3));
+      return ok;
+    });
+    await driver.continue('s1', 'tab', 'two');
+    await driver.turnState(state(true, 3));
+    expect(types(enqueue).filter((t) => t === 'worker:turn.end')).toHaveLength(
+      1,
+    );
+    expect(driver.driving('s1')).toBe(true);
+    await driver.turnState(state(false, 4));
+    await driver.turnState(state(true, 5));
+    expect(driver.driving('s1')).toBe(false);
+  });
+
+  it('ends a start whose generating and terminal states arrived during admission, keyed by its tab', async () => {
+    const { driver, handleMessage, enqueue } = setup();
+    handleMessage.mockImplementation(async ({ method }: Message) => {
+      if (method === 'chat:start') {
+        // Before the real ID is known the engine keys its state by the tab.
+        void driver.turnState(state(false, 1, 'tab'));
+        driver.tabResolved('tab', 's1');
+        void driver.turnState(state(true, 2));
+      }
+      return ok;
+    });
+    await driver.start(start, async () => undefined, jest.fn());
+    expect(types(enqueue)).toEqual([
+      'worker:baseline',
+      'worker:turn.begin',
+      'worker:turn.end',
+    ]);
+    expect(driver.driving('s1')).toBe(false);
+  });
+});

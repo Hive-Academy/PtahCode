@@ -9,6 +9,7 @@ import type {
   ISdkPermissionHandler,
   PermissionRequest,
   RpcMethodResult,
+  SessionTurnPhase,
 } from '@ptah-extension/shared';
 import type {
   ControlFrame,
@@ -39,6 +40,16 @@ const TURN_END_EVENTS = new Set([
   'session:turnEnded',
   'session:turnFailed',
   'chat:sessionEnded',
+]);
+/**
+ * The engine's turn phases that say a turn ended; `isTerminalTurnPhase` in
+ * `@ptah-extension/shared` is the same set.
+ */
+const TERMINAL_TURN_PHASES: ReadonlySet<string> = new Set<SessionTurnPhase>([
+  'awaiting-background',
+  'sleeping',
+  'idle',
+  'failed',
 ]);
 /** W6: `session.start` answers after `session:id-resolved` or fails. */
 const RESOLUTION_TIMEOUT_MS = 30_000;
@@ -121,6 +132,64 @@ function isPermissionRequest(
   value: Record<string, unknown>,
 ): value is Record<string, unknown> & PermissionRequest {
   return typeof value.id === 'string' && typeof value.toolName === 'string';
+}
+
+/**
+ * The `turn_state` event a `chat:chunk` carries, or undefined. A
+ * retirement-only state reports background work after its turn ended, so it
+ * never ends a turn.
+ */
+function turnStateOf(record: Record<string, unknown> | undefined) {
+  const event = isRecord(record?.event) ? record.event : undefined;
+  if (event?.eventType !== 'turn_state' || event.retirementOnly === true)
+    return undefined;
+  const phase = text(event, 'phase');
+  const revision = event.revision;
+  if (!phase || typeof revision !== 'number') return undefined;
+  return {
+    sessionId: text(event, 'sessionId') ?? text(record, 'sessionId'),
+    tabId: text(record, 'tabId'),
+    terminal: TERMINAL_TURN_PHASES.has(phase),
+    revision,
+  };
+}
+
+/** `session.start`'s `name` limit in `@ptah-extension/worker-protocol`. */
+export const SESSION_NAME_MAX_LENGTH = 256;
+/**
+ * C0 and C1 controls, bidi embeddings, overrides, isolates and marks, and
+ * zero-width characters: the set the Machines view drops from display text.
+ */
+const UNSAFE_NAME_CHARACTERS =
+  // eslint-disable-next-line no-control-regex -- matching control characters is the purpose: they are removed.
+  /[\u0000-\u001F\u007F-\u009F\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g;
+/** Controls that separate words; they become a space. */
+const SEPARATING_CONTROL = /[\t\n\v\f\r\u0085]/;
+
+/**
+ * A session name from its first prompt, cleaned the way the Machines view
+ * cleans display text: controls and invisible characters dropped (word
+ * separators become a space), whitespace collapsed, trimmed, and cut at
+ * {@link SESSION_NAME_MAX_LENGTH} UTF-16 units (the `session.start` name
+ * schema's measure) with an ellipsis, never inside a surrogate pair. Undefined
+ * when nothing is left, so the engine falls back to its dated name.
+ */
+export function sessionNameFromPrompt(prompt: string): string | undefined {
+  const clean = prompt
+    .replace(UNSAFE_NAME_CHARACTERS, (char) =>
+      SEPARATING_CONTROL.test(char) ? ' ' : '',
+    )
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!clean) return undefined;
+  if (clean.length <= SESSION_NAME_MAX_LENGTH) return clean;
+  // Whole code points that fit with room for the one-unit ellipsis.
+  let cut = '';
+  for (const point of clean) {
+    if (cut.length + point.length > SESSION_NAME_MAX_LENGTH - 1) break;
+    cut += point;
+  }
+  return cut.trimEnd() + '\u2026';
 }
 
 function isCapturedEvent(value: unknown): value is CapturedEvent {
@@ -448,8 +517,16 @@ export function createRemoteSessions(deps: RemoteSessionDeps): RemoteSessions {
         deps.workspaces.addFolder(workspace.path);
         const tabId = randomUUID();
         try {
+          // Named after its first prompt, as the live view titles it; the
+          // engine names a session with no usable prompt by its date.
+          const sessionName = name ?? sessionNameFromPrompt(prompt);
           const turn = await driver.start(
-            { tabId, prompt, workspacePath: workspace.path, name },
+            {
+              tabId,
+              prompt,
+              workspacePath: workspace.path,
+              ...(sessionName ? { name: sessionName } : {}),
+            },
             async (sessionId) => {
               await deps.logs.openSession(sessionId);
               sessionIndex.remember(sessionId, workspaceId);
@@ -578,6 +655,17 @@ export function createRemoteSessions(deps: RemoteSessionDeps): RemoteSessions {
       if (TURN_END_EVENTS.has(type))
         driver
           .terminal(text(record, 'sessionId'), text(record, 'tabId'))
+          .catch((error: unknown) =>
+            deps.log(
+              `[ptah-worker] turn end record failed: ${errorName(error)}`,
+            ),
+          );
+      // The engine's turn state ends a turn the SDK interrupted (a denied
+      // tool), where no `session:turnEnded` follows.
+      const turnState = type === 'chat:chunk' ? turnStateOf(record) : undefined;
+      if (turnState)
+        driver
+          .turnState(turnState)
           .catch((error: unknown) =>
             deps.log(
               `[ptah-worker] turn end record failed: ${errorName(error)}`,

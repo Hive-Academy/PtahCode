@@ -87,6 +87,8 @@ export class SessionDriver {
   private readonly turns = new Map<string, DriverTurn>();
   private readonly ending = new Set<string>();
   private readonly admissions = new Map<string, Admission>();
+  /** First `generating` turn-state revision seen per turn or admission. */
+  private readonly generating = new WeakMap<DriverTurn | Admission, number>();
   private closing = false;
   private readonly resolveTimeoutMs: number;
   constructor(
@@ -228,6 +230,34 @@ export class SessionDriver {
       if (ended) this.options.onAbandoned?.(ended);
       else this.options.onUnresolvedEnded?.();
     }
+  }
+
+  /**
+   * The engine's own turn state for a session (a `turn_state` chunk event).
+   * A terminal phase ends the turn like `terminal` does. This is the only end
+   * signal of a turn the SDK interrupted, such as a hard permission deny: the
+   * `Stop` hook, and so `session:turnEnded`, does not run on an interrupt.
+   *
+   * A terminal state ends only a turn whose own `generating` state, with a
+   * lower revision, was seen: a terminal state that trails an earlier turn
+   * (one `session:turnEnded` already ended) must not end the next turn.
+   */
+  async turnState(state: {
+    sessionId?: string;
+    tabId?: string;
+    terminal: boolean;
+    revision: number;
+  }): Promise<void> {
+    const target = this.turnOf(state.sessionId, state.tabId);
+    if (!target) return;
+    const generating = this.generating.get(target);
+    if (!state.terminal) {
+      if (generating === undefined) this.generating.set(target, state.revision);
+      return;
+    }
+    if (generating === undefined || state.revision <= generating) return;
+    if ('turnId' in target) await this.end(target.sessionId);
+    else target.ended = true;
   }
 
   async attach(
@@ -491,6 +521,8 @@ export class SessionDriver {
       // can overtake the buffered ones.
       this.turns.set(sessionId, turn);
       this.admissions.delete(admission.key);
+      const generating = this.generating.get(admission);
+      if (generating !== undefined) this.generating.set(turn, generating);
       const deliver = admission.deliver;
       if (deliver) this.resolveTab(admission.tabId, sessionId, deliver);
       else this.tabs.set(admission.tabId, sessionId);
@@ -569,6 +601,25 @@ export class SessionDriver {
       return;
     }
     admission.buffer.push(event);
+  }
+
+  /**
+   * The registered turn or the admitting start or continue an event of
+   * `sessionId` / `tabId` belongs to. A fresh session's events may carry its
+   * tab ID as the session ID until the real one is known.
+   */
+  private turnOf(
+    sessionId?: string,
+    tabId?: string,
+  ): DriverTurn | Admission | undefined {
+    for (const id of [sessionId, tabId && this.knownSession(tabId)]) {
+      const turn = id ? this.turns.get(id) : undefined;
+      if (turn) return turn;
+    }
+    return (
+      (sessionId ? this.bySession(sessionId) : undefined) ??
+      (tabId ? this.byTab(tabId) : undefined)
+    );
   }
 
   private byTab(tabId: string): Admission | undefined {

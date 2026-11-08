@@ -9,6 +9,8 @@ import type { ISessionDriverLock } from '@ptah-extension/platform-core';
 import type { ISdkPermissionHandler } from '@ptah-extension/shared';
 import {
   createRemoteSessions,
+  SESSION_NAME_MAX_LENGTH,
+  sessionNameFromPrompt,
   type RemoteSessionDeps,
 } from './remote-sessions';
 
@@ -588,5 +590,169 @@ it('still lists a session held by another process as running', async () => {
   expect(summary).toMatchObject({
     state: 'running',
     driver: { label: 'Desktop' },
+  });
+});
+
+describe('a turn the SDK interrupted after a denied tool (finding K)', () => {
+  /** The `chat:chunk` that carries the engine's turn state. */
+  const turnState = (phase: string, revision: number, sessionId = 's1') => ({
+    tabId: 'any-tab',
+    sessionId,
+    event: { eventType: 'turn_state', sessionId, phase, revision },
+  });
+  async function deniedTurn() {
+    const fake = setup((message, tap) => {
+      if (message.method === 'chat:start') {
+        fake.held.set('s1', 'nonce-s1');
+        tap('session:id-resolved', {
+          tabId: param(message, 'tabId'),
+          realSessionId: 's1',
+        });
+      }
+      if (message.method === 'session:status')
+        return engineStatus('idle', false);
+      return undefined;
+    });
+    await fake.sessions.handle(
+      'session.start',
+      { workspaceId: 'ws_1', prompt: 'write a file' },
+      grant,
+      peer,
+    );
+    fake.tap('chat:chunk', turnState('generating', 2));
+    fake.tap('permission:request', {
+      id: 'req-w',
+      toolName: 'Write',
+      toolInput: {},
+      description: 'write',
+      sessionId: 's1',
+      timestamp: Date.now(),
+      timeoutAt: 0,
+    });
+    const list = async () =>
+      (
+        (await fake.sessions.handle(
+          'sessions.list',
+          { workspaceId: 'ws_1' },
+          grant,
+          peer,
+        )) as Array<{ state: string }>
+      )[0];
+    return { fake, list };
+  }
+  const turnEnds = (fake: ReturnType<typeof setup>) =>
+    (fake.writer.enqueue as jest.Mock).mock.calls.filter(
+      ([type]) => type === 'worker:turn.end',
+    ).length;
+
+  it('ends the turn on the engine idle turn state that follows a remote Deny, with no session:turnEnded', async () => {
+    const { fake, list } = await deniedTurn();
+    expect(await list()).toMatchObject({ state: 'running' });
+    await fake.sessions.handle(
+      'permission.respond',
+      { sessionId: 's1', requestId: 'req-w', decision: 'deny' },
+      grant,
+      peer,
+    );
+    // The SDK interrupts the turn: its result settles the turn state, and
+    // the Stop hook (session:turnEnded) does not run.
+    fake.tap('chat:chunk', turnState('idle', 3));
+    await settle();
+    expect(turnEnds(fake)).toBe(1);
+    expect(await list()).toMatchObject({ state: 'idle' });
+    // A second terminal signal writes no second end record.
+    fake.tap('session:turnEnded', { sessionId: 's1' });
+    await settle();
+    expect(turnEnds(fake)).toBe(1);
+  });
+
+  it('ends the turn the same way after the 60 s auto-deny (decision 27)', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+    try {
+      const { fake, list } = await deniedTurn();
+      jest.advanceTimersByTime(runtime.REMOTE_PERMISSION_TIMEOUT_MS);
+      expect(fake.permissions.handleResponse).toHaveBeenCalledWith(
+        'req-w',
+        expect.objectContaining({ decision: 'deny' }),
+      );
+      fake.tap('chat:chunk', turnState('idle', 3));
+      await settle();
+      expect(turnEnds(fake)).toBe(1);
+      expect(await list()).toMatchObject({ state: 'idle' });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('does not end a turn on a terminal state older than its own generating state, nor on a retirement tick', async () => {
+    const { fake, list } = await deniedTurn();
+    // A trailing terminal state of an earlier turn.
+    fake.tap('chat:chunk', turnState('idle', 1));
+    fake.tap('chat:chunk', {
+      sessionId: 's1',
+      event: { ...turnState('idle', 5).event, retirementOnly: true },
+    });
+    await settle();
+    expect(turnEnds(fake)).toBe(0);
+    expect(await list()).toMatchObject({ state: 'running' });
+  });
+});
+
+describe('session titles (finding D)', () => {
+  it('names a started session after its first prompt, cleaned and capped', async () => {
+    const names: unknown[] = [];
+    const fake = setup((message, tap) => {
+      if (message.method !== 'chat:start') return undefined;
+      names.push(param(message, 'name'));
+      tap('session:id-resolved', {
+        tabId: param(message, 'tabId'),
+        realSessionId: `s${names.length}`,
+      });
+      return undefined;
+    });
+    const start = (params: Record<string, unknown>) =>
+      fake.sessions.handle(
+        'session.start',
+        { workspaceId: 'ws_1', ...params },
+        grant,
+        peer,
+      );
+    await start({ prompt: '  List\n\tthe   numbers‮ 1 to 25​ ' });
+    expect(names).toEqual(['List the numbers 1 to 25']);
+  });
+
+  it('keeps an explicit name', async () => {
+    let name: unknown;
+    const fake = setup((message, tap) => {
+      if (message.method !== 'chat:start') return undefined;
+      name = param(message, 'name');
+      tap('session:id-resolved', {
+        tabId: param(message, 'tabId'),
+        realSessionId: 's1',
+      });
+      return undefined;
+    });
+    await fake.sessions.handle(
+      'session.start',
+      { workspaceId: 'ws_1', prompt: 'go', name: 'Release notes' },
+      grant,
+      peer,
+    );
+    expect(name).toBe('Release notes');
+  });
+
+  it('cuts a long prompt at the protocol name limit with an ellipsis, and gives up on an empty one', () => {
+    const name = sessionNameFromPrompt('x'.repeat(400));
+    expect(Array.from(name ?? '')).toHaveLength(SESSION_NAME_MAX_LENGTH);
+    expect(name?.endsWith('…')).toBe(true);
+    expect(sessionNameFromPrompt(' \n​\t ')).toBeUndefined();
+  });
+
+  it('measures the limit in UTF-16 units like the session.start schema and never splits a surrogate pair', () => {
+    const name = sessionNameFromPrompt('a' + '\u{1F600}'.repeat(300)) ?? '';
+    expect(name.length).toBeLessThanOrEqual(SESSION_NAME_MAX_LENGTH);
+    expect(name.endsWith('…')).toBe(true);
+    // 'a' + 127 emoji (255 units) + the ellipsis: no lone surrogate.
+    expect(name).toBe('a' + '\u{1F600}'.repeat(127) + '…');
   });
 });
