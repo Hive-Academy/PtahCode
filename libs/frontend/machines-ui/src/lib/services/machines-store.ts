@@ -478,9 +478,19 @@ export class MachinesStore {
 
     if (push.state !== 'connected') return;
     const reattachFailed = push.reason === 'session-reattach-failed';
-    if (previous.state === 'connected' && !reattachFailed) return;
+    const reconnected = previous.state !== 'connected';
+    if (!reconnected && !reattachFailed) return;
     for (const [key, entry] of this._views()) {
       if (entry.machineId !== push.machineId) continue;
+      if (entry.reducer.mode === 'detached') {
+        // The last attach failed (often: opened while offline). Attach once
+        // per reconnect; a failed attach while connected waits for Refresh
+        // or the next reconnect, so no push can start a retry loop.
+        if (reconnected) {
+          void this.openSession(entry.machineId, entry.reducer.sessionId);
+        }
+        continue;
+      }
       this.dispatch(key, { kind: 'connected', force: reattachFailed });
     }
   }

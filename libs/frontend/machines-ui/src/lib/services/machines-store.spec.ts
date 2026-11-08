@@ -151,6 +151,50 @@ describe('MachinesStore', () => {
     expect(view()).toEqual(expected);
   });
 
+  it('re-attaches a session opened while offline once the machine reconnects', async () => {
+    const { api, store, pushState, view } = setup();
+    await store.loadMachines();
+    pushState({ state: 'offline' });
+    api.attach.mockResolvedValueOnce(fail('Horus is offline'));
+    await store.openSession(MACHINE_ID, SESSION_ID);
+    expect(view()?.error?.message).toBe('Horus is offline');
+    await expect(
+      store.sendPrompt(MACHINE_ID, SESSION_ID, 'hi'),
+    ).resolves.toEqual({ ok: false, refused: 'not-open' });
+
+    pushState({ state: 'connected' });
+    expect(api.attach).toHaveBeenCalledTimes(2);
+    await flush();
+    expect(view()?.error).toBeNull();
+    await expect(
+      store.sendPrompt(MACHINE_ID, SESSION_ID, 'hi'),
+    ).resolves.toEqual({ ok: true, value: undefined });
+  });
+
+  it('a failed attach while connected does not attach again until a reconnect', async () => {
+    const { api, store, pushState } = setup();
+    await store.loadMachines();
+    pushState({ state: 'offline' });
+    api.attach.mockResolvedValue(fail('refused'));
+    await store.openSession(MACHINE_ID, SESSION_ID);
+    pushState({ state: 'connected' });
+    await flush();
+    expect(api.attach).toHaveBeenCalledTimes(2);
+
+    // Still detached while connected: further pushes start no attach.
+    pushState({ state: 'connected', lastSeenAt: 700 });
+    pushState({ state: 'connected', reason: 'session-reattach-failed' });
+    await flush();
+    expect(api.attach).toHaveBeenCalledTimes(2);
+    expect(api.replay).not.toHaveBeenCalled();
+
+    // The next reconnect tries once more.
+    pushState({ state: 'offline' });
+    pushState({ state: 'connected' });
+    await flush();
+    expect(api.attach).toHaveBeenCalledTimes(3);
+  });
+
   it('A5: history and live events of the same message are idempotent', async () => {
     const { pushAll, view } = await openedSession();
     pushAll([

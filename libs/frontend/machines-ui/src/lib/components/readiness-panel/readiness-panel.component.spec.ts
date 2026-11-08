@@ -309,4 +309,19 @@ describe('ReadinessPanelComponent', () => {
     fixture.detectChanges();
     expect(checks(fixture)).toHaveLength(0);
   });
+
+  it('a state push for the same machine does not re-run the check', async () => {
+    const { fixture, store } = await setup();
+    expect(store.readiness).toHaveBeenCalledTimes(1);
+    // MachinesStore replaces the machine object on every push.
+    fixture.componentRef.setInput('machine', { ...HORUS, lastSeenAt: 2 });
+    fixture.detectChanges();
+    await flush();
+    expect(store.readiness).toHaveBeenCalledTimes(1);
+    fixture.componentRef.setInput('machine', { ...HORUS, machineId: 'm2' });
+    fixture.detectChanges();
+    await flush();
+    expect(store.readiness).toHaveBeenCalledTimes(2);
+    expect(store.readiness).toHaveBeenLastCalledWith('m2');
+  });
 });

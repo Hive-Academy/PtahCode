@@ -251,9 +251,15 @@ export class ReadinessPanelComponent {
     };
   });
 
+  /**
+   * The id alone: each state push replaces the machine object, and only a
+   * new machine needs a new check.
+   */
+  private readonly machineId = computed(() => this.machine().machineId);
+
   public constructor() {
     effect(() => {
-      const machineId = this.machine().machineId;
+      const machineId = this.machineId();
       untracked(() => void this.run(machineId));
     });
     inject(DestroyRef).onDestroy(() => {
@@ -263,7 +269,7 @@ export class ReadinessPanelComponent {
   }
 
   protected checkAgain(): void {
-    void this.run(this.machine().machineId);
+    void this.run(this.machineId());
   }
 
   protected errorText(error: MachinesError): string {

@@ -192,4 +192,30 @@ describe('RemoteSessionListComponent', () => {
     ]);
     expect(q(fixture, 'remote-session-new-form')).toBeNull();
   });
+
+  it('a state push for the same machine keeps the form open and reloads nothing', async () => {
+    const { fixture, store } = await setup();
+    (q(fixture, 'remote-session-new') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    const prompt = q(
+      fixture,
+      'remote-session-new-prompt',
+    ) as HTMLTextAreaElement;
+    prompt.value = 'Draft the plan';
+    prompt.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    store.loadWorkspaces.mockClear();
+    store.loadSessions.mockClear();
+    // MachinesStore replaces the machine object on every push.
+    fixture.componentRef.setInput('machine', { ...HORUS, lastSeenAt: 2 });
+    fixture.detectChanges();
+    await flush();
+    fixture.detectChanges();
+    expect(q(fixture, 'remote-session-new-form')).not.toBeNull();
+    expect(
+      (q(fixture, 'remote-session-new-prompt') as HTMLTextAreaElement).value,
+    ).toBe('Draft the plan');
+    expect(store.loadWorkspaces).not.toHaveBeenCalled();
+    expect(store.loadSessions).not.toHaveBeenCalled();
+  });
 });

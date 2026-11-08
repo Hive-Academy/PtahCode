@@ -282,8 +282,14 @@ export class RemoteSessionListComponent {
       displayText(this.machine().displayName) ||
       displayText(this.machine().alias),
   );
+  /**
+   * The id alone: each state push replaces the machine object, and only a
+   * new machine (or a change of connection) closes the form and reloads.
+   */
+  private readonly machineId = computed(() => this.machine().machineId);
+
   protected readonly groups = computed(() =>
-    this.store.sessionsByWorkspace(this.machine().machineId)(),
+    this.store.sessionsByWorkspace(this.machineId())(),
   );
 
   /** Reloads exclude each other; a newer one wins. */
@@ -291,7 +297,7 @@ export class RemoteSessionListComponent {
 
   public constructor() {
     effect(() => {
-      const machineId = this.machine().machineId;
+      const machineId = this.machineId();
       const connected = this.connected();
       untracked(() => {
         this.composing.set(false);
@@ -301,7 +307,7 @@ export class RemoteSessionListComponent {
   }
 
   protected reload(): void {
-    void this.load(this.machine().machineId);
+    void this.load(this.machineId());
   }
 
   protected stateLabel(session: RemoteMachineSessionSummary): string {
