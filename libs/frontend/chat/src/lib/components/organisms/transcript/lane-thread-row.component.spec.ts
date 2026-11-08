@@ -52,7 +52,7 @@ describe('LaneThreadRowComponent', () => {
     fixture.detectChanges();
     const item = fixture.nativeElement as HTMLElement;
     const button = item.querySelector('button')!;
-    const body = item.querySelector<HTMLElement>('#lane-thread-detail-report-1')!;
+    const body = item.querySelector<HTMLElement>('[id^="lane-thread-detail-"]')!;
     expect(button.getAttribute('aria-expanded')).toBe('false');
     expect(button.getAttribute('aria-controls')).toBe(body.id);
     expect(button.textContent).toContain('Short summary');
