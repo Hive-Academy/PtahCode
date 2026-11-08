@@ -133,7 +133,7 @@ describe('PtahCliInstancesComponent', () => {
       const summary = q('[data-testid="cli-matrix-tier-summary"]');
       expect(text(summary)).toBe('Model tiers · 2 of 3 set');
       expect(summary?.getAttribute('title')).toBe(
-        'Sonnet: glm-5.3, Haiku: glm-4.5',
+        'Sonnet: glm-5.3, Opus: Not set, Haiku: glm-4.5',
       );
     });
 

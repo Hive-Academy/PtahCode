@@ -529,10 +529,10 @@ export class PtahCliInstancesComponent {
   }
 
   protected tierList(row: InstanceCliMatrixRow): string {
-    return (
-      (row.tiers ?? []).map((tier) => `${tier.label}: ${tier.model}`).join(', ') ||
-      'No tier models'
-    );
+    if (!row.tiers?.length) return 'No tier models';
+    return this.tierSlots(row)
+      .map((tier) => `${tier.label}: ${tier.model ?? 'Not set'}`)
+      .join(', ');
   }
 
   /** This instance's last Test as the state reports it (S1: a new run drops the previous result). */
