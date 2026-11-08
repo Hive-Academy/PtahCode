@@ -257,6 +257,8 @@ describe('handleRouteToolCall', () => {
           family: 'codex',
         },
         model: 'model-name',
+        tier: 'sonnet' as const,
+        effort: 'medium' as const,
         provenance: 'configured' as const,
         score: 1,
         source: 'ranking' as const,
@@ -296,7 +298,7 @@ describe('handleRouteToolCall', () => {
   it('returns a schema-maximum 100-phase route result whole', async () => {
     const result = hundredPhaseResult(8);
     const measuredChars = JSON.stringify(result).length;
-    expect(measuredChars).toBe(54_375);
+    expect(measuredChars).toBe(57_775);
     expect(measuredChars).toBeLessThanOrEqual(MAX_CHARS);
 
     const reply = await callWith(result);
@@ -328,9 +330,9 @@ describe('handleRouteToolCall', () => {
     });
 
     it('returns a varied-reason result whole on success and through the tool budget', async () => {
-      const result = withReasons((phase) => scoredReason(phase, 300));
+      const result = withReasons((phase) => scoredReason(phase, 295));
       const text = JSON.stringify(result);
-      expect(text.length).toBe(58_775);
+      expect(text.length).toBe(61_675);
       expect(text.length).toBeLessThanOrEqual(MAX_CHARS);
       // Over a 4 chars/token budget (16,000 tokens), within the route budget.
       expect(countTokens(text)).toBeGreaterThan(MAX_CHARS / 4);
@@ -355,7 +357,7 @@ describe('handleRouteToolCall', () => {
     });
 
     it('returns a tool error for a result under the char limit but over the token limit', async () => {
-      const result = withReasons((phase) => scoredReason(phase, 340));
+      const result = withReasons((phase) => scoredReason(phase, 315));
       const text = JSON.stringify(result);
       expect(text.length).toBeLessThanOrEqual(MAX_CHARS);
       expect(countTokens(text)).toBeGreaterThan(MAX_TOKENS);
