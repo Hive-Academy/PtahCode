@@ -67,6 +67,9 @@ import {
 import { codexLaneModels } from './codex-app-server-lane-models';
 import { CodexLaneWriteDacPreflight } from './codex-lane-write-dac-preflight';
 
+/** Safety bound for app-server builds that omit a trailing usage notification. */
+export const CODEX_LANE_USAGE_DRAIN_MS = 2_000;
+
 export class CodexLaneResumeIdentityError extends Error {
   constructor() {
     super('Codex lane resume requires a matching full thread identity.');
@@ -428,9 +431,11 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       }
       return closing;
     };
+    let usageDrainTimer: ReturnType<typeof setTimeout> | undefined;
     const close = (): Promise<boolean> => {
       if (closePromise) return closePromise;
       closed = true;
+      clearTimeout(usageDrainTimer);
       abort.abort();
       eventAbort.abort();
       active?.resolve(1);
@@ -676,16 +681,21 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       for (const segment of mapped.segments) emit(segment);
       if (mapped.awaitingUsage) {
         const turn = active;
-        setTimeout(() => {
+        clearTimeout(usageDrainTimer);
+        // The app server has no separate per-turn usage-flush event. Give its
+        // trailing notification a bounded transport drain before failing closed.
+        usageDrainTimer = setTimeout(() => {
           if (active !== turn) return;
           const telemetry = turn.mapper.finishPendingUsage();
           if (telemetry) emit(telemetry);
           active = undefined;
           turn.resolve(0);
-        }, 100);
+        }, CODEX_LANE_USAGE_DRAIN_MS);
+        usageDrainTimer.unref?.();
         return;
       }
       if (mapped.terminal) {
+        clearTimeout(usageDrainTimer);
         const turn = active;
         active = undefined;
         turn.resolve(mapped.terminal === 'completed' ? 0 : 1);

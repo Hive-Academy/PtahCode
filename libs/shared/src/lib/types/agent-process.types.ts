@@ -322,9 +322,10 @@ export interface AgentProcessInfo {
  * (or the durable normalization of the session metadata) stamps it so a
  * resume can continue the CLI session.
  */
+const AGENT_BUDGET_STOP_REASONS = ['budget', 'telemetry-unavailable', 'duration'] as const;
 export const LANE_STOP_REASONS = [
   'repeat-call', 'usage-limit', 'auth', 'session-mismatch', 'host-restart',
-  'budget', 'telemetry-unavailable', 'duration',
+  ...AGENT_BUDGET_STOP_REASONS,
 ] as const;
 export type LaneStopReason = (typeof LANE_STOP_REASONS)[number];
 export interface AgentBudgetRecord {
@@ -337,7 +338,7 @@ export interface AgentBudgetRecord {
   readonly maxDurationMin?: number;
 }
 export function isAgentBudgetStopReason(reason: LaneStopReason | undefined): boolean {
-  return reason === 'budget' || reason === 'duration' || reason === 'telemetry-unavailable';
+  return reason !== undefined && AGENT_BUDGET_STOP_REASONS.some((value) => value === reason);
 }
 
 /**

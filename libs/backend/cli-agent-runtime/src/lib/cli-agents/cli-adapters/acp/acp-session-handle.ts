@@ -84,6 +84,8 @@ const HANDSHAKE_PHASE_LABEL: Readonly<Record<AcpHandshakePhase, string>> = {
  * the prompt (or exit) before the tree-kill.
  */
 export const ACP_CANCEL_GRACE_MS = 1_500;
+/** Bound for agents that return a prompt response without usage metadata or a usage_update. */
+export const ACP_USAGE_DRAIN_MS = 2_000;
 
 const ACP_PROTOCOL_VERSION = 1;
 
@@ -258,6 +260,7 @@ export function createAcpSessionHandle(
   let promptInFlight = false;
   let promptSequence = 0;
   let latestUpdateUsage: z.infer<typeof acpPromptUsageSchema> | undefined;
+  let resolveUsageUpdate: (() => void) | undefined;
   /** Title of the first request the policy refused during the current prompt. */
   let refusedThisTurn: string | undefined;
   /** Settles when the current prompt has its answer; never rejects. */
@@ -383,6 +386,7 @@ export function createAcpSessionHandle(
             ...update.data._meta.usage,
             contextTokens: update.data._meta.usage.contextTokens ?? update.data.used,
           };
+          resolveUsageUpdate?.();
         }
       }
       const mapped = mapper.map(notification.update);
@@ -787,12 +791,20 @@ export function createAcpSessionHandle(
         refusedPermissionTitle: refusedThisTurn,
         displayName: name,
       });
-      // The prompt response can precede a usage_update already queued by the agent.
-      await new Promise<void>((resolve) => setImmediate(resolve));
       if (mapped.exitCode === 0) {
         const meta = isRecord(response) ? response['_meta'] : undefined;
         const rawUsage = isRecord(meta) ? meta['usage'] : undefined;
         const promptUsage = acpPromptUsageSchema.safeParse(rawUsage);
+        if (!promptUsage.success && !latestUpdateUsage) {
+          // ACP agents can send usage_update after the prompt response. Wait
+          // for that notification, with a safety bound for agents omitting it.
+          await new Promise<void>((resolve) => {
+            const timer = setTimeout(resolve, ACP_USAGE_DRAIN_MS);
+            resolveUsageUpdate = () => { clearTimeout(timer); resolve(); };
+            if (latestUpdateUsage) resolveUsageUpdate();
+          });
+          resolveUsageUpdate = undefined;
+        }
         const usage = promptUsage.success ? promptUsage.data : latestUpdateUsage;
         segment.emit({
           type: 'info', content: usage ? `${name} turn usage.` : `${name} turn telemetry unavailable.`,
@@ -813,6 +825,7 @@ export function createAcpSessionHandle(
       return await reportFailure(error);
     } finally {
       promptInFlight = false;
+      resolveUsageUpdate = undefined;
       latestUpdateUsage = undefined;
       refusedThisTurn = undefined;
     }

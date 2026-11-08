@@ -21,6 +21,7 @@ import { CodexProtocolError, codexNotificationSchemas } from './codex-protocol-v
 import { RuntimeContext, type CodexRuntimeOptions } from './codex-context';
 import {
   observeCodexChildBudgets,
+  errorClass,
   type CodexChildBudgetObserver,
   type CodexChildBudgetPort,
 } from './codex-child-budget-observer';
@@ -130,7 +131,7 @@ class RateLimitsObserver {
       this.options.usage?.onContextClosed?.(this.profile.contextId);
     } catch (error: unknown) {
       this.options.logger.error('Codex usage context cleanup failed', {
-        errorClass: error instanceof Error ? error.constructor.name : typeof error,
+        errorClass: errorClass(error),
       });
     }
   }
@@ -350,7 +351,7 @@ export class CodexRuntime implements RuntimePort, CodexHistoryReader {
       } catch (error: unknown) {
         if (error instanceof CodexUnsupportedMethodError) throw error;
         this.options.logger.warn('Codex model catalog is unavailable', {
-          errorClass: error instanceof Error ? error.constructor.name : typeof error,
+          errorClass: errorClass(error),
         });
       }
       this.options.usage?.onContextOpened?.(profile.contextId);
@@ -481,7 +482,7 @@ export class CodexRuntime implements RuntimePort, CodexHistoryReader {
     } catch (error: unknown) {
       // degradation-audit: reported - child budgets are advisory; an invalid host setting must not refuse the open
       this.options.logger.warn('[Codex budget] Child budget observer unavailable', {
-        errorClass: error instanceof Error ? error.constructor.name : typeof error,
+        errorClass: errorClass(error),
       });
     }
   }
@@ -490,7 +491,7 @@ export class CodexRuntime implements RuntimePort, CodexHistoryReader {
   private stopChildBudget(contextId: string, owner?: CodexContext): void {
     const entry = this.childBudgets.get(contextId);
     if (!entry || (owner && entry.context !== owner)) return;
-    entry.observer.stop();
+    entry.observer.dispose();
     this.childBudgets.delete(contextId);
   }
 }

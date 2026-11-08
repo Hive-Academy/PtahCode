@@ -484,7 +484,7 @@ export class CursorCliAdapter implements CliAdapter {
           const usage = latestUsage?.usage ?? settled.usage ?? run.usage;
           reportedModel = settled.model?.id ?? reportedModel;
           emitStreamSegment({
-            type: 'info', content: 'Cursor turn usage.',
+            type: 'info', content: usage ? 'Cursor turn usage.' : 'Cursor turn telemetry unavailable.',
             ...(usage ? { usage: { model: reportedModel, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheReadTokens: usage.cacheReadTokens, cacheWriteTokens: usage.cacheWriteTokens, totalTokens: usage.totalTokens } } : {}),
             turnTelemetry: completedTurnTelemetry({ turnId: latestUsage?.run_id ?? run.id, modelId: reportedModel, source: 'sdk', usage }),
           });

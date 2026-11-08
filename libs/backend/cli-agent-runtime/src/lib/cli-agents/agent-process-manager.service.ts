@@ -1406,7 +1406,7 @@ export class AgentProcessManager {
     const updateCliSessionId = (sessionId: string | undefined): void => {
       if (!sessionId || sessionId === tracked.info.cliSessionId) return;
       const prior = this.previousResumeRecord(tracked.info.cli, sessionId)?.agentBudget;
-      if (prior && tracked.budget && tracked.budget.counters.rawTokens === 0 && tracked.budget.counters.weightedTokens === 0) {
+      if (prior && tracked.budget) {
         tracked.budget.rebindRecord(prior);
         tracked.info = { ...tracked.info, agentBudget: tracked.budget.record() };
         this.armBudgetDeadline(agentId, tracked);

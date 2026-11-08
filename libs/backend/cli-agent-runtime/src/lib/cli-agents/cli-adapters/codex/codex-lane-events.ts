@@ -39,11 +39,16 @@ export class CodexLaneEvents {
     if (!this.pendingTerminal) return undefined;
     this.pendingTerminal = false;
     this.terminal = true;
+    return this.unavailableTelemetry();
+  }
+
+  private unavailableTelemetry(usage?: CodexReportedUsage, modelId?: string): CliOutputSegment {
     return {
       type: 'info', content: 'Codex turn telemetry unavailable.',
       turnTelemetry: completedTurnTelemetry({
         turnId: this.identity.turnId,
-        modelId: this.usageModelId ?? 'codex/unknown', source: 'stream',
+        modelId: modelId ?? this.usageModelId ?? 'codex/unknown',
+        source: 'stream', ...(usage ? { usage: laneUsage(usage) } : {}),
       }),
     };
   }
@@ -67,14 +72,7 @@ export class CodexLaneEvents {
       if (event.usage.inputTokens === undefined || event.usage.outputTokens === undefined ||
         !Number.isSafeInteger(event.usage.inputTokens) || !Number.isSafeInteger(event.usage.outputTokens) ||
         event.usage.inputTokens < 0 || event.usage.outputTokens < 0)
-        return { segments: [{
-          type: 'info', content: 'Codex turn telemetry unavailable.',
-          turnTelemetry: completedTurnTelemetry({
-            turnId: this.identity.turnId,
-            modelId: event.evidence?.modelId ?? this.usageModelId ?? 'codex/unknown',
-            source: 'stream', usage: laneUsage(event.usage),
-          }),
-        }], terminal: 'completed' };
+        return { segments: [this.unavailableTelemetry(event.usage, event.evidence?.modelId)], terminal: 'completed' };
       return { segments: [{
         type: 'info', content: 'Codex turn usage.',
         usage: laneUsage(event.usage),

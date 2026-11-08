@@ -21,7 +21,7 @@ export interface CodexChildBudgetPort {
 
 export interface CodexChildBudgetObserver {
   /** Abort the subscription and release all tap state. Idempotent. */
-  stop(): void;
+  dispose(): void;
 }
 
 type ObserverLogger = Pick<CodexRuntimeLogger, 'warn'>;
@@ -44,7 +44,7 @@ export function readCodexChildBudgetSettings(
   return DEFAULT_AGENT_BUDGET_SETTINGS;
 }
 
-function errorClass(error: unknown): string {
+export function errorClass(error: unknown): string {
   return error instanceof Error ? error.constructor.name : typeof error;
 }
 
@@ -120,7 +120,7 @@ export function observeCodexChildBudgets(
     }
   })();
   return {
-    stop: () => {
+    dispose: () => {
       controller.abort();
       tap.dispose();
     },

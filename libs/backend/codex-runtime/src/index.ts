@@ -114,13 +114,10 @@ export {
 export { CodexPreTurnConfigRejectedError } from './lib/codex-runtime';
 export {
   CodexChildBudgetTap,
-  CODEX_CHILD_BUDGET_MAX_ENTRIES,
   type CodexChildBudgetDecision,
 } from './lib/codex-child-budget-tap';
 export {
   observeCodexChildBudgets,
-  readCodexChildBudgetSettings,
-  settleCodexChildBudgetEvent,
   type CodexChildBudgetObserver,
   type CodexChildBudgetPort,
   type CodexChildBudgetSettingKey,

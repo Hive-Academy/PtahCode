@@ -106,15 +106,15 @@ describe('observeCodexChildBudgets', () => {
     expect(decisions).toHaveLength(1);
     expect(decisions[0][1]).toMatchObject({ childThreadId: 'child', warning: true });
     expect(Object.values(decisions[0][1] as object)).not.toContain(undefined);
-    observer.stop();
+    observer.dispose();
   });
 
   it('aborts its subscription on stop and stays idempotent', async () => {
     const context = fakeContext();
     const observer = observeCodexChildBudgets(context, port, { warn: jest.fn() });
     await flush();
-    observer.stop();
-    observer.stop();
+    observer.dispose();
+    observer.dispose();
     await flush();
     expect(context.subscribers.size).toBe(0);
   });
@@ -140,7 +140,7 @@ describe('observeCodexChildBudgets', () => {
       '[Codex budget] Child budget decision', expect.objectContaining({ childThreadId: 'child' }),
     );
     expect(context.subscribers.size).toBe(1);
-    observer.stop();
+    observer.dispose();
   });
 });
 

@@ -22,6 +22,20 @@ function mapper() {
 }
 
 describe('CodexLaneEvents', () => {
+  it('accepts usage more than 100 ms after a completed terminal', async () => {
+    const map = mapper();
+    expect(map({ type: 'terminal', status: 'completed' }).awaitingUsage).toBe(true);
+    await new Promise<void>((resolve) => setTimeout(resolve, 150));
+    const result = map({ type: 'usage', usage: { inputTokens: 4, outputTokens: 2 } });
+    expect(result.terminal).toBe('completed');
+    expect(result.segments[0]?.turnTelemetry?.status).toBe('reported');
+  });
+
+  it('reports missing usage when the bounded drain ends', () => {
+    const events = new CodexLaneEvents(identity);
+    events.map({ ...identity, sequence: 1, type: 'terminal', status: 'completed' });
+    expect(events.finishPendingUsage()?.turnTelemetry?.status).toBe('unavailable');
+  });
   it('renders async questions as ordinary text for lane users', () => {
     const map = mapper();
     expect(map({ type: 'userInputAsync', itemId: 'question', text: 'Choose one',

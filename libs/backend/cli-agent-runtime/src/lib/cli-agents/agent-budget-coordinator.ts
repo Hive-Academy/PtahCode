@@ -13,9 +13,9 @@ import {
 export class AgentBudgetCoordinator {
   private snapshot: AgentBudgetSnapshot;
   private readonly policy: AgentBudgetPolicy;
-  startedAtMs: number;
-  stopReason?: AgentBudgetStopReason;
-  turnCount: number;
+  private _startedAtMs: number;
+  private _stopReason?: AgentBudgetStopReason;
+  private _turnCount: number;
 
   constructor(
     readonly settings: AgentBudgetSettings,
@@ -24,11 +24,14 @@ export class AgentBudgetCoordinator {
     turnCount = snapshot.turnIds.length,
   ) {
     this.policy = new AgentBudgetPolicy(settings);
-    this.startedAtMs = startedAtMs;
+    this._startedAtMs = startedAtMs;
     this.snapshot = { ...snapshot, turnIds: snapshot.turnIds.slice(-256) };
-    this.turnCount = turnCount;
+    this._turnCount = turnCount;
   }
 
+  get startedAtMs(): number { return this._startedAtMs; }
+  get stopReason(): AgentBudgetStopReason | undefined { return this._stopReason; }
+  get turnCount(): number { return this._turnCount; }
   get counters(): AgentBudgetSnapshot { return this.snapshot; }
 
   record(): AgentBudgetRecord {
@@ -44,17 +47,25 @@ export class AgentBudgetCoordinator {
   }
 
   rebindRecord(record: AgentBudgetRecord): void {
-    this.rebind(record.startedAtMs, {
-      weightedTokens: record.weightedTokens, rawTokens: record.rawTokens,
-      turnIds: record.turnIds, elapsedMs: 0, warned: false, stopped: false,
-    }, record.turnCount ?? record.turnIds.length);
+    const current = this.snapshot;
+    const priorIds = new Set(record.turnIds);
+    const novelIds = current.turnIds.filter((id) => !priorIds.has(id));
+    // A late native ID may arrive after this lane charged its first turn.
+    // Its provisional ledger and the resumed ledger must become one record.
+    const sameLedger = current.turnIds.length > 0 && novelIds.length === 0;
+    this.rebind(Math.min(this.startedAtMs, record.startedAtMs), {
+      weightedTokens: record.weightedTokens + (sameLedger ? 0 : current.weightedTokens),
+      rawTokens: record.rawTokens + (sameLedger ? 0 : current.rawTokens),
+      turnIds: [...record.turnIds, ...novelIds],
+      elapsedMs: 0, warned: current.warned, stopped: current.stopped,
+    }, (record.turnCount ?? record.turnIds.length) + (sameLedger ? 0 : this.turnCount));
   }
 
   /** Bind a late native session ID before accepting its first completed turn. */
-  rebind(startedAtMs: number, snapshot: AgentBudgetSnapshot, turnCount = snapshot.turnIds.length): void {
-    this.startedAtMs = startedAtMs;
+  private rebind(startedAtMs: number, snapshot: AgentBudgetSnapshot, turnCount = snapshot.turnIds.length): void {
+    this._startedAtMs = startedAtMs;
     this.snapshot = { ...snapshot, turnIds: snapshot.turnIds.slice(-256) };
-    this.turnCount = turnCount;
+    this._turnCount = turnCount;
   }
 
   /** A completed turn is charged once by its normalized turn ID. */
@@ -68,11 +79,11 @@ export class AgentBudgetCoordinator {
     const result = this.policy.evaluate(
       this.snapshot, telemetry, Math.max(0, nowMs - this.startedAtMs), pricing,
     );
-    if (telemetry.status === 'reported' && !this.snapshot.turnIds.includes(telemetry.usage.turnId)) this.turnCount++;
+    if (telemetry.status === 'reported' && !this.snapshot.turnIds.includes(telemetry.usage.turnId)) this._turnCount++;
     // Bound metadata and long-lived memory; an ancient duplicate is charged
     // again conservatively rather than allowing unbounded turn IDs.
     this.snapshot = { ...result.snapshot, turnIds: result.snapshot.turnIds.slice(-256) };
-    this.stopReason ??= result.stopReason;
+    this._stopReason ??= result.stopReason;
     return {
       warning: result.warning,
       ...(result.stopReason ? { stopReason: result.stopReason } : {}),

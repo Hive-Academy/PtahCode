@@ -17,6 +17,7 @@ import * as loader from './acp-sdk-loader';
 import {
   ACP_CANCEL_GRACE_MS,
   ACP_HANDSHAKE_TIMEOUTS_MS,
+  ACP_USAGE_DRAIN_MS,
   createAcpSessionHandle,
 } from './acp-session-handle';
 import {
@@ -215,6 +216,22 @@ describe('createAcpSessionHandle — first turn', () => {
         }),
       }) }),
     ]);
+  });
+
+  it('reconciles usage_update after the prompt response', async () => {
+    const h = start({
+      script: (agent) => agent.handle('session/prompt', (params, active) => {
+        setTimeout(() => {
+          void active.sessionUpdate(String(params['sessionId']), {
+            sessionUpdate: 'usage_update', used: 25, size: 1000,
+            _meta: { usage: { inputTokens: 12, outputTokens: 4, model: 'billed-model' } },
+          });
+        }, 150);
+        return { result: { stopReason: 'end_turn' } };
+      }),
+    });
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(h.segments.find((item) => item.turnTelemetry)?.turnTelemetry?.status).toBe('reported');
   });
 
   it('emits one unavailable record per completed turn without usable prompt usage', async () => {
@@ -1120,7 +1137,9 @@ describe('createAcpSessionHandle — handshake timeout', () => {
       doNotFake: ['nextTick', 'queueMicrotask', 'setImmediate'],
     });
     const h = start();
-
+    await h.agent.next(byMethod('session/prompt'));
+    await settle();
+    await jest.advanceTimersByTimeAsync(ACP_USAGE_DRAIN_MS);
     await expect(h.handle.done).resolves.toBe(0);
     expect(jest.getTimerCount()).toBe(0);
   });
