@@ -1,5 +1,70 @@
 # Phase F visual review (Electron)
 
+## Fourth pass (head 022f77005, dist from e6b538dd8)
+
+**Verdict: PASS WITH NOTES, one state not reachable (watch-only), several serious findings in the live session.** Real streams and a real tool approval now work on horus. The finding B fix is confirmed: after a turn ends, the list shows Idle. The approval block renders, counts down, and Deny works. New problems sit in the transcript (numbered lists lose their numbers, a denied tool reads "Completed", a denied turn never ends) and in session titles. Nothing was written under /tmp, the workspace or any other path: Deny was the only answer given.
+
+Method: Electron driven through CDP on port 9333, window 1280x760 (one capture set at 734 wide, marked `-734`). Dark is the "Ptah Glass" theme, light is "Ptah Glass Light". Theme was switched through the theme popover (the first attempt did not change the theme, so two early dark files were discarded).
+
+### Fourth-pass states
+
+| State | Dark | Light | Prototype | Result |
+|---|---|---|---|---|
+| Session list after a turn (finding B) | 22-list-after-turn-dark | 22-list-after-turn-light | proto-05-list-* | Fixed. All three finished sessions list as Idle, including the old third-pass one (11/7/2026). Status is plain text, no badge. |
+| 6 Stream, turn in progress | 24-stream-progress-dark-1280 (first 1.5 s), 23-stream-progress-dark-734 | 23-stream-progress-light-734 | proto-06-stream-* | Header "Caught up" and Stop, input placeholder "(a turn is in progress)". First 1 to 2 s show "No messages yet." with no echo of the user message (finding J). |
+| 6 Stream, turn ended | 23-stream-after-dark | 23-stream-after-light | proto-06-stream-* | Stop turns disabled, input re-enabled. Numbers missing from the list (finding G). Light has no user bubble (E). |
+| 7 Approval pending | 24-approval-dark | 24-approval-light | proto-07-approval-* | Renders: "Waiting for you" chip, Machine, Session, Tool, Arguments with Copy, "Denied automatically in 52 s" countdown that ticks, Allow once and Deny, "The session stays paused until someone answers." Navbar badge "Machines (1)" matches the prototype. See deviations below. |
+| 7 Approval, keyboard focus | 24-approval-programmatic-focus-*-dark (no ring, see note) | 24-approval-tab-allow-light, 24-approval-tab-deny-light | none | Tab focus shows a 2px solid outline (rgb(110,74,0) in light) on both buttons, `:focus-visible` true. Dark Tab capture not taken: the 60 s timer ran out of room. The `programmatic-focus` files used `.focus()`, which does not trigger the ring, so they show none; that is not a defect. |
+| 7 After Deny | 25-after-deny-dark, 25-after-deny-settled-dark | 25-after-deny-light | none | Approval block disappears. Tool row reads "Completed" (finding H) and a user-style bubble "[Request interrupted by user for tool use]" appears (finding I). Turn stays "in progress" (finding K). |
+| 5 List with a Running session | 26-list-after-deny-dark | 26-list-after-deny-light | proto-05-list-* | "Running" in blue plus a driver chip "Driver: Ptah worker on horus-pc". Contains the worker host name. |
+| 8 Open an existing session | 28-replay-open-dark, 27-open-running-dark | 28-replay-open-light, 27-open-running-light | proto-08-replay-* | Opens with the transcript. Title is "Session 11/8/2026", not the prompt (D). |
+| 9 Watch-only | not reachable | not reachable | proto-09-owner-* | Not reachable. It needs a second paired client that holds the session drive lock. The only other client would be a second Electron profile, which is not paired to horus, and pairing it would add a client credential to the worker. I did not do that. When I opened the Running session from the list, this client got the full drive controls (Stop, input), so the driver chip alone does not give a watch-only view. |
+| 5b, 10 | not reachable | not reachable | proto-05b, proto-10 | Unchanged from the third pass. |
+
+### Findings from earlier passes, re-checked
+
+- **B (stays "Running", Stop disabled): fixed** for a finished turn. See 22-list-after-turn-*.
+- **C (failure as plain text): not testable** now that the login works, no failed turn was produced.
+- **D (title differs, live vs list/replay): still present, and worse.** The live view title is the prompt text; the list and the reopened view show "Session 11/8/2026". The list now holds three sessions with the identical title "Session 11/8/2026", so they cannot be told apart (`22-list-after-turn-dark.png`, `28-replay-open-dark.png`). Raised from Moderate to **Serious**.
+- **E (light: no bubble on the user message): still present** (`23-stream-after-light.png`, `24-approval-light.png`). Dark shows the bubble. Moderate.
+- **F (driver chip shows machine name): changed, still present while a session is driven.** The chip now reads "Driver: Ptah worker on horus-pc" with no process id. Idle sessions show no chip. Minor.
+
+### New findings
+
+- **G. Serious (content): ordered lists lose their numbers.** The reply to "numbers 1 to 25" renders as 25 indented lines with no numerals (`23-stream-after-dark.png`, `23-stream-after-light.png`). The DOM is a real `<ol>` whose computed `list-style-type` is `none` and `padding-left` 22px, so the browser resets the markers. Impact: numbered answers read as unordered text. Fix: restore `list-style: decimal` on `ol` inside the markdown block in the Machines transcript.
+- **H. Serious (state): a denied tool is shown as "Completed".** After Deny the Write row says "Completed" with a done state, although nothing ran (`25-after-deny-dark.png`, `25-after-deny-light.png`). The prototype shows "Done" only for finished tools. Expected: "Denied".
+- **I. Moderate: the SDK line "[Request interrupted by user for tool use]" is rendered as a user bubble.** The user typed nothing (`25-after-deny-dark.png`). Render it as a system note or hide it.
+- **K. Serious (state): after Deny the turn does not end.** About 50 s later the list still shows Running, the header says "Claude is responding", Stop is enabled and Send is disabled (`26-list-after-deny-dark.png`, `27-open-running-dark.png`). Pressing Stop ended it and the list went to Idle (`27-after-stop-dark.png`). Expected: the turn ends or Claude replies. I could not tell from the renderer whether the cause is the worker or the SDK.
+- **J. Moderate: empty state during a running turn.** For about 1 to 2 s after Start the transcript shows "No messages yet." and the user's message is not echoed (`24-stream-progress-dark-1280.png`).
+- **L. Moderate (prototype deviation): approval block.** Deny is plain text, where the prototype has an outlined button (`proto-07-approval-dark.png` against `24-approval-dark.png`). The prototype's "If unanswered" copy is "Stays pending, like a local request"; the app auto-denies after 60 s ("Denied automatically in 52 s"), a behaviour change that the approved prototype does not show. The prototype also shows the proposed arguments inline, the app shows them in a code box with Copy, which is fine. Confirm that the 60 s auto-deny is intended.
+- **M. Minor: "Allow once" is the primary action and Deny the weakest control**, with the Allow button focusable first. For a destructive request the safer default is arguably Deny first; leave to design.
+
+### Approval block measurements
+
+- Text contrast (computed, blended over the panel): light, labels 8.59:1, values and countdown 15.36:1, Deny 15.36:1, "Allow once" 15.66:1. Dark, labels 13.03:1, values and countdown 15.66:1, Deny 15.66:1. The "Allow once" dark value (1.04:1) is a measurement artifact of the gold gradient fill; by eye the dark label on gold is legible, as in the third pass.
+- Targets: Allow once 82x32, Deny 48x32 CSS px. Both pass WCAG 2.2 AA 2.5.8 (24x24).
+- Countdown: starts at 60 s, ticks down every second (52, 51, 49, 39, 24, 19 s across my samples), and changes plain text only; there is no progress bar and no live-region announcement of the remaining time.
+
+### Fourth-pass checks
+
+- axe-core (wcag2a, wcag2aa, wcag21aa, wcag22aa) on `ptah-machines-view`: **0 violations** in each of: approval state dark and light, stream (opened session) dark and light, and after Deny dark. Incomplete: `color-contrast` for 39 nodes (glass), checked by hand; `aria-prohibited-attr` for 1 node while the approval was open (not reproduced after Deny, so the node was not captured; worth a look).
+- Keyboard: approval buttons reachable by Tab, ring visible in light (2px solid).
+- Layout shift: the approval block pushes content down when it appears (expected, it is appended to the transcript). No shift when the theme was switched.
+- Sessions started: 3 (list 15 items, list 25 items, Write a file under /tmp). All on horus. Only Deny was given. The third session was ended with Stop. The Electron instance was closed and the CDP port is closed.
+- Not touched: anubis, chappie, gatsby, worker config, credentials, the Claude login.
+
+### Files that show the machine name or a process id (keep out of published copies)
+
+- `26-list-after-deny-dark.png`, `26-list-after-deny-light.png` (driver chip "horus-pc")
+- Third-pass `10-list-with-session-dark.png` (machine name and process id)
+- All screenshots show the machine alias "horus" and the path `/home/horus/projects` in the header, which is the paired alias already used in earlier passes.
+
+### Most useful screenshots
+
+`22-list-after-turn-dark.png`, `22-list-after-turn-light.png`, `23-stream-after-dark.png`, `24-approval-dark.png`, `24-approval-light.png`, `24-approval-tab-deny-light.png`, `25-after-deny-dark.png`, `26-list-after-deny-light.png`.
+
+---
+
 ## Third pass (head f31e1b9e7, dist rebuilt at ffbc0b745)
 
 **Verdict: PASS WITH NOTES, approval and watch-only still NOT REVIEWED.** The account refusal is fixed: a session now starts on horus, its transcript renders and replays after a renderer reload. Claude on horus then answers "Failed to authenticate. API Error: 401 OAuth access token is invalid." The worker's Claude login is expired, so no real stream and no tool approval can happen. I did not touch credentials.
