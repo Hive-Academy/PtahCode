@@ -58,6 +58,12 @@ function fakeContext() {
         subscriber.wake?.();
       }
     },
+    close(): void {
+      for (const subscriber of subscribers) {
+        subscriber.done = true;
+        subscriber.wake?.();
+      }
+    },
     events(signal: AbortSignal): AsyncIterable<CodexRuntimeEvent> {
       const subscriber: Subscriber = { queue: [], done: signal.aborted };
       subscribers.add(subscriber);
@@ -90,9 +96,45 @@ function fakeContext() {
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 describe('observeCodexChildBudgets', () => {
+  it('settles a pending child terminal when the stream closes and clears its timer', async () => {
+    const context = fakeContext();
+    const logger = { info: jest.fn(), warn: jest.fn() };
+    const clearTimer = jest.spyOn(global, 'clearTimeout');
+    try {
+      const observer = observeCodexChildBudgets(context, port, logger);
+      context.emit({ ...terminal, parentThreadId: 'parent' });
+      await flush();
+      expect(logger.warn).not.toHaveBeenCalledWith(
+        '[Codex budget] Child budget decision', expect.anything());
+      context.close();
+      await flush();
+      const decisions = [...logger.info.mock.calls, ...logger.warn.mock.calls].filter(
+        ([message]) => message === '[Codex budget] Child budget decision');
+      expect(decisions).toHaveLength(1);
+      expect(decisions[0][1]).toMatchObject({ childThreadId: 'child' });
+      expect(clearTimer).toHaveBeenCalledTimes(1);
+      expect(context.subscribers.size).toBe(0);
+      observer.dispose();
+      expect(clearTimer).toHaveBeenCalledTimes(1);
+    } finally {
+      clearTimer.mockRestore();
+    }
+  });
+  it('logs a routine child decision at info', () => {
+    const tap = new CodexChildBudgetTap({ ...settings, stopWeightedTokens: 1_000 });
+    const logger = { info: jest.fn(), warn: jest.fn() };
+    settleCodexChildBudgetEvent(spawn, tap, logger, () => null);
+    settleCodexChildBudgetEvent(usage, tap, logger, () => null);
+    settleCodexChildBudgetEvent(terminal, tap, logger, () => null);
+    expect(logger.info).toHaveBeenCalledWith(
+      '[Codex budget] Child budget decision', expect.objectContaining({ warning: false, handoff: false }),
+    );
+    expect(logger.warn).not.toHaveBeenCalledWith(
+      '[Codex budget] Child budget decision', expect.anything());
+  });
   it('charges two child turns across a relink with missing model ids', async () => {
     const context = fakeContext();
-    const logger = { warn: jest.fn() };
+    const logger = { info: jest.fn(), warn: jest.fn() };
     const observer = observeCodexChildBudgets(context, port, logger);
     if (usage.type !== 'usage' || !usage.evidence) throw new Error('invalid fixture');
     const withoutModel = { ...usage, evidence: { ...usage.evidence, modelId: undefined } };
@@ -118,7 +160,7 @@ describe('observeCodexChildBudgets', () => {
   it.each(['terminal-first', 'usage-first'] as const)(
     'drains a child linked by %s and charges its usage once', async (order) => {
       const context = fakeContext();
-      const logger = { warn: jest.fn() };
+      const logger = { info: jest.fn(), warn: jest.fn() };
       const observer = observeCodexChildBudgets(context, port, logger);
       const linkedTerminal = { ...terminal, parentThreadId: 'parent' };
       if (order === 'terminal-first') {
@@ -145,7 +187,7 @@ describe('observeCodexChildBudgets', () => {
   );
   it('uses trailing child usage during the drain and logs context advisory once after relink', async () => {
     const context = fakeContext();
-    const logger = { warn: jest.fn() };
+    const logger = { info: jest.fn(), warn: jest.fn() };
     const observer = observeCodexChildBudgets(context, port, logger);
     context.emit(spawn);
     context.emit(terminal);
@@ -166,7 +208,7 @@ describe('observeCodexChildBudgets', () => {
   });
   it('charges a child turn through one subscription and logs the decision', async () => {
     const context = fakeContext();
-    const logger = { warn: jest.fn() };
+    const logger = { info: jest.fn(), warn: jest.fn() };
     const observer = observeCodexChildBudgets(context, port, logger);
     expect(context.subscribers.size).toBe(1);
     context.emit(spawn);
@@ -185,7 +227,7 @@ describe('observeCodexChildBudgets', () => {
 
   it('aborts its subscription on stop and stays idempotent', async () => {
     const context = fakeContext();
-    const observer = observeCodexChildBudgets(context, port, { warn: jest.fn() });
+    const observer = observeCodexChildBudgets(context, port, { info: jest.fn(), warn: jest.fn() });
     await flush();
     observer.dispose();
     observer.dispose();
@@ -195,7 +237,7 @@ describe('observeCodexChildBudgets', () => {
 
   it('keeps observing after one charge fails', async () => {
     const context = fakeContext();
-    const logger = { warn: jest.fn() };
+    const logger = { info: jest.fn(), warn: jest.fn() };
     const pricing = jest.fn()
       .mockImplementationOnce(() => { throw new Error('catalog'); })
       .mockReturnValue(null);
@@ -221,13 +263,13 @@ describe('observeCodexChildBudgets', () => {
 describe('settleCodexChildBudgetEvent', () => {
   it('ignores a terminal of an untracked thread', () => {
     const tap = new CodexChildBudgetTap(settings);
-    expect(settleCodexChildBudgetEvent(terminal, tap, { warn: jest.fn() }, () => null))
+    expect(settleCodexChildBudgetEvent(terminal, tap, { info: jest.fn(), warn: jest.fn() }, () => null))
       .toBeUndefined();
   });
 
   it('keeps a completed turn across reconnects and charges it once', () => {
     const tap = new CodexChildBudgetTap(settings);
-    const logger = { warn: jest.fn() };
+    const logger = { info: jest.fn(), warn: jest.fn() };
     settleCodexChildBudgetEvent(spawn, tap, logger, () => null);
     settleCodexChildBudgetEvent(usage, tap, logger, () => null);
     const decision = settleCodexChildBudgetEvent(terminal, tap, logger, () => null);
@@ -240,9 +282,9 @@ describe('settleCodexChildBudgetEvent', () => {
   it('prices a terminal without a model from the accepted usage model', () => {
     const tap = new CodexChildBudgetTap(settings);
     const pricing = jest.fn(() => null);
-    settleCodexChildBudgetEvent(spawn, tap, { warn: jest.fn() }, pricing);
-    settleCodexChildBudgetEvent(usage, tap, { warn: jest.fn() }, pricing);
-    settleCodexChildBudgetEvent(terminal, tap, { warn: jest.fn() }, pricing);
+    settleCodexChildBudgetEvent(spawn, tap, { info: jest.fn(), warn: jest.fn() }, pricing);
+    settleCodexChildBudgetEvent(usage, tap, { info: jest.fn(), warn: jest.fn() }, pricing);
+    settleCodexChildBudgetEvent(terminal, tap, { info: jest.fn(), warn: jest.fn() }, pricing);
     expect(pricing).toHaveBeenCalledWith('codex-model');
   });
 
@@ -252,9 +294,9 @@ describe('settleCodexChildBudgetEvent', () => {
     const unknownModelUsage = usage.type === 'usage' && usage.evidence
       ? { ...usage, evidence: { ...usage.evidence, modelId: undefined } }
       : usage;
-    settleCodexChildBudgetEvent(spawn, tap, { warn: jest.fn() }, pricing);
-    settleCodexChildBudgetEvent(unknownModelUsage, tap, { warn: jest.fn() }, pricing);
-    const decision = settleCodexChildBudgetEvent(terminal, tap, { warn: jest.fn() }, pricing);
+    settleCodexChildBudgetEvent(spawn, tap, { info: jest.fn(), warn: jest.fn() }, pricing);
+    settleCodexChildBudgetEvent(unknownModelUsage, tap, { info: jest.fn(), warn: jest.fn() }, pricing);
+    const decision = settleCodexChildBudgetEvent(terminal, tap, { info: jest.fn(), warn: jest.fn() }, pricing);
     expect(pricing).not.toHaveBeenCalled();
     expect(decision?.telemetry.status).toBe('reported');
     expect(decision?.transition.coverage).toBe('price-weighting-degraded');
@@ -264,7 +306,7 @@ describe('settleCodexChildBudgetEvent', () => {
 describe('readCodexChildBudgetSettings', () => {
   it('passes the shared default as the fallback for each key', () => {
     const readSetting = jest.fn((_key: string, fallback: number) => fallback);
-    expect(readCodexChildBudgetSettings({ readSetting }, { warn: jest.fn() }))
+    expect(readCodexChildBudgetSettings({ readSetting }, { info: jest.fn(), warn: jest.fn() }))
       .toEqual(DEFAULT_AGENT_BUDGET_SETTINGS);
     expect(readSetting).toHaveBeenCalledWith(
       'agentBudget.warnRatio', DEFAULT_AGENT_BUDGET_SETTINGS.warnRatio,
@@ -273,7 +315,7 @@ describe('readCodexChildBudgetSettings', () => {
   });
 
   it('uses the complete default set when one value is invalid', () => {
-    const logger = { warn: jest.fn() };
+    const logger = { info: jest.fn(), warn: jest.fn() };
     const readSetting = (key: string, fallback: number) =>
       key === 'agentBudget.warnRatio' ? 'high' : fallback;
     expect(readCodexChildBudgetSettings({ readSetting }, logger))

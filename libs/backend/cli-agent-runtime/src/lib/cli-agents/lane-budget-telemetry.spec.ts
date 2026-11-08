@@ -21,6 +21,24 @@ it('delivers a Codex queue warning without logging a failed steer route', async 
   expect(send).not.toHaveBeenCalled();
 });
 
+it('routes a budget warning straight to the queue when no steer handle exists', async () => {
+  const send = jest.fn().mockResolvedValue({ mode: 'queue-next-turn' });
+  const outcome = await deliverLaneBudgetWarning('lane', undefined, send);
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(send).toHaveBeenCalledWith('lane', expect.stringContaining('Budget warning'), 'queue');
+  expect(outcome).toEqual({ mode: 'queue-next-turn' });
+});
+
+it('queues a budget warning after a rejected steer without routing an unsupported probe', async () => {
+  const steer = jest.fn().mockRejectedValue(new Error('closed turn'));
+  const send = jest.fn().mockResolvedValue({ mode: 'queue-next-turn' });
+  const outcome = await deliverLaneBudgetWarning('lane', { steer }, send);
+  expect(steer).toHaveBeenCalledTimes(1);
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(send).toHaveBeenCalledWith('lane', expect.stringContaining('Budget warning'), 'queue');
+  expect(outcome).toEqual({ mode: 'queue-next-turn' });
+});
+
 it('dispatches warning, cost warning once, then stop', async () => {
   const warn = jest.fn().mockResolvedValue({ mode: 'steer' });
   const stop = jest.fn();

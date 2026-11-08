@@ -8,15 +8,22 @@ import type { SdkHandle } from './cli-adapters/cli-adapter.interface';
 export async function deliverLaneBudgetWarning(
   agentId: string,
   handle: Pick<SdkHandle, 'steer' | 'queueForNextTurn'> | undefined,
-  send: (agentId: string, message: string, delivery: 'steer' | 'queue') => Promise<AgentMessageOutcome>,
+  send: (agentId: string, message: string, delivery: 'queue') => Promise<AgentMessageOutcome>,
 ): Promise<AgentMessageOutcome> {
   const message = 'Budget warning: finish your current work, report progress, and prepare a short handoff.';
-  if (!handle?.steer && handle?.queueForNextTurn) {
-    handle.queueForNextTurn(message);
-    return { mode: 'queue-next-turn' };
+  if (!handle?.steer) {
+    if (handle?.queueForNextTurn) {
+      handle.queueForNextTurn(message);
+      return { mode: 'queue-next-turn' };
+    }
+    return send(agentId, message, 'queue');
   }
-  const steered = await send(agentId, message, 'steer');
-  if (steered.mode !== 'unsupported') return steered;
+  try {
+    await handle.steer(message);
+    return { mode: 'steer' };
+  } catch {
+    // degradation-audit: reported - caller logs the final queue delivery or failure
+  }
   if (handle?.queueForNextTurn) {
     handle.queueForNextTurn(message);
     return { mode: 'queue-next-turn' };

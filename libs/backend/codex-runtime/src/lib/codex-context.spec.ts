@@ -102,11 +102,13 @@ describe('native child event admission', () => {
       expect.objectContaining({ threadId: 'child-b', parentThreadId: 'root',
         parentToolUseId: 'spawn-b', evidence: expect.objectContaining({ modelId: 'gpt-4o' }) }),
     ]);
-    expect(logger.info).toHaveBeenCalledTimes(2);
+    expect(logger.info.mock.calls.filter(([message]) => message === 'Codex child linked'))
+      .toHaveLength(2);
     feed('turn/started', { threadId: 'child-a', turn: {
       id: 'turn-a-2', status: 'inProgress', items: [],
     } });
-    expect(logger.info).toHaveBeenCalledTimes(2);
+    expect(logger.info.mock.calls.filter(([message]) => message === 'Codex child linked'))
+      .toHaveLength(2);
     expect(logger.debug).toHaveBeenCalledWith('Codex child relinked',
       { childThreadId: 'child-a' });
     expect(logger.debug).toHaveBeenCalledWith('Codex child thread notification',

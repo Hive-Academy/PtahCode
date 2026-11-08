@@ -25,7 +25,7 @@ export interface CodexChildBudgetObserver {
   dispose(): void;
 }
 
-type ObserverLogger = Pick<CodexRuntimeLogger, 'warn'>;
+type ObserverLogger = Pick<CodexRuntimeLogger, 'info' | 'warn'>;
 const CHILD_USAGE_DRAIN_MS = 2_000;
 const MAX_PENDING_CHILD_DRAINS = 128;
 
@@ -73,7 +73,8 @@ export function settleCodexChildBudgetEvent(
     pricing: modelId ? pricing(modelId) : null,
   });
   const { warning, stopReason, handoff, coverage } = decision.transition;
-  logger.warn('[Codex budget] Child budget decision', {
+  const logDecision = warning || handoff || stopReason ? logger.warn.bind(logger) : logger.info.bind(logger);
+  logDecision('[Codex budget] Child budget decision', {
       childThreadId: event.threadId,
       warning,
       handoff,
@@ -126,6 +127,13 @@ export function observeCodexChildBudgets(
       });
     }
   };
+  const flushPending = (): void => {
+    for (const { event, timer } of draining.values()) {
+      clearTimeout(timer);
+      settle(event);
+    }
+    draining.clear();
+  };
   void (async () => {
     try {
       for await (const event of context.events(controller.signal)) {
@@ -171,16 +179,14 @@ export function observeCodexChildBudgets(
         errorClass: errorClass(error),
       });
     } finally {
-      for (const { timer } of draining.values()) clearTimeout(timer);
-      draining.clear();
+      flushPending();
       tap.dispose();
     }
   })();
   return {
     dispose: () => {
       controller.abort();
-      for (const { timer } of draining.values()) clearTimeout(timer);
-      draining.clear();
+      flushPending();
       tap.dispose();
     },
   };
