@@ -97,6 +97,59 @@ describe('SubagentHandoffFiles', () => {
     expect(logger.warn).toHaveBeenCalledTimes(1);
     expect(await files.notesExist(paths)).toBe(false);
   });
+
+  it('atomically replaces redacted notes without leaving a temp file', async () => {
+    const files = new SubagentHandoffFiles(makeLogger(), () => workspace);
+    const paths = files.paths('sess-1', 'toolu_1');
+    if (!paths) throw new Error('expected paths');
+    fs.mkdirSync(dir(), { recursive: true });
+    const marker = ['API_KEY=', 'fake', '-marker-123'].join('');
+    fs.writeFileSync(paths.notes, `Finding: ${marker}`);
+
+    expect(await files.redactNotes(paths, (text) => text.replace(marker, '[redacted]'))).toBe(true);
+    expect(fs.readFileSync(paths.notes, 'utf8')).toBe('Finding: [redacted]');
+    expect(fs.readdirSync(dir())).toEqual(['toolu_1.md']);
+  });
+
+  it('warns and skips notes over the size cap', async () => {
+    const logger = makeLogger();
+    const files = new SubagentHandoffFiles(logger, () => workspace);
+    const paths = files.paths('sess-1', 'toolu_1');
+    if (!paths) throw new Error('expected paths');
+    fs.mkdirSync(dir(), { recursive: true });
+    fs.writeFileSync(paths.notes, 'x'.repeat(1024 * 1024 + 1));
+    const redact = jest.fn((text: string) => text);
+
+    expect(await files.redactNotes(paths, redact)).toBe(false);
+    expect(redact).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[SubagentHandoffFiles] Subagent notes exceed redaction size limit',
+      { bytes: 1024 * 1024 + 1 },
+    );
+  });
+
+  it('warns and skips a symlinked notes file', async () => {
+    const logger = makeLogger();
+    const files = new SubagentHandoffFiles(logger, () => workspace);
+    const paths = files.paths('sess-1', 'toolu_1');
+    if (!paths) throw new Error('expected paths');
+    fs.mkdirSync(dir(), { recursive: true });
+    const target = path.join(workspace, 'target.md');
+    fs.writeFileSync(target, 'ordinary notes');
+    try {
+      fs.symlinkSync(target, paths.notes, 'file');
+    } catch (error: unknown) {
+      if (process.platform === 'win32' && typeof error === 'object' && error !== null && 'code' in error && error.code === 'EPERM') return;
+      throw error;
+    }
+
+    expect(await files.redactNotes(paths, (text) => text.replace('ordinary', '[redacted]'))).toBe(false);
+    expect(fs.readFileSync(target, 'utf8')).toBe('ordinary notes');
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[SubagentHandoffFiles] Subagent notes are not a regular file',
+      { fileType: 'symlink' },
+    );
+  });
 });
 
 describe('prepareHandoffFiles', () => {
