@@ -29,7 +29,20 @@ PR: https://github.com/Hive-Academy/PtahCode/pull/986 (draft). Pushed head `5a84
 - Manager agent-process-manager.service.ts: 3849 physical / 3673 non-blank (main 3849 / 3675).
 - Side fix done for the user: PR #1000 CodeRabbit comment (commit 9cef23bb9, merged).
 
-## Update ~09:00 UTC (newest)
+## Update ~09:50 UTC (newest)
+- Pushed head `13f02ffcc`. Since cc5ccd58a (CI green): `248604f00` round 6 fixes (SDK stream waits
+  for the monitor so the Ptah handoff reaches the parent first — the "stopped by user" root cause
+  was this race; same-turn warning only in the stop envelope; predictive warning with the largest
+  turn; ack timeouts as info), `13f02ffcc` 15 s bound on that wait (STREAM_MONITOR_WAIT_MS).
+- Final reviews' findings are fixed in `5b2e23c64`. A re-review of 5b2e23c64..13f02ffcc has NOT run.
+- RUNNING: live test round 7, lane `8f09d507-2f3b-4230-b221-957dcfad976a` (session
+  01a1ba8e-5301-7ae1-a699-14aad8d69b56) → live-test-round-7.md. Checks C1/C2 SDK attribution + notes,
+  A same-turn/predictive warning, B child regression. Tell the task 7 session the C results.
+- Untracked on purpose: live-test-round-6/scratch-generated-ptah/ (raw handoffs; never commit).
+- After round 7: short re-review (logic + style) of 5b2e23c64..HEAD, PR body (Summary + Test plan
+  with live results and known gaps), mark #986 ready, report to the user.
+
+## Update ~09:00 UTC
 - Pushed head `a512e806c` (CI green 18/4). Commits since cd1c9bb99: `7b6e5bd68` round 5 report,
   `ccb7aa963` SDK notes + handoff-read, `a512e806c` Codex child real usage.
 - Final reviews of the whole PR: logic code-logic-review-final.md REVISE 6/10 (1 serious: Codex
