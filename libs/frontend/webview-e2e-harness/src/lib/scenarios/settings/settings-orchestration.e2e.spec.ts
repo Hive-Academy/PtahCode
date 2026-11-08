@@ -237,7 +237,7 @@ for (const host of HOSTS) {
       page,
     }) => {
       const state = getFixtureState(page);
-      const cell = page.locator('[data-testid="cli-matrix-model-codex"]');
+      const cell = page.locator('[data-testid="cli-provider-card-codex"] [data-popover-kind="model"]');
       await cell.click();
       const popover = page.locator('[data-testid="cli-matrix-popover"]');
       const search = popover.locator('input[role="combobox"]');
@@ -267,11 +267,12 @@ for (const host of HOSTS) {
         .toBe('gpt-5.5-codex');
     });
 
-    test('on/off: a system CLI writes disabledClis and its cells turn to plain text; an instance writes ptahCli:update', async ({
+    test('on/off: a system CLI writes disabledClis and disables model editing; an instance writes ptahCli:update', async ({
       page,
     }) => {
       const state = getFixtureState(page);
-      const codex = page.locator('[data-testid="cli-matrix-toggle-codex"]');
+      const codexCard = page.locator('[data-testid="cli-provider-card-codex"]');
+      const codex = codexCard.getByRole('checkbox', { name: 'Codex enabled' });
       await expect(codex).toBeChecked();
       let before = state.calls.length;
       await codex.click();
@@ -279,20 +280,20 @@ for (const host of HOSTS) {
         disabledClis: expect.arrayContaining(['copilot', 'codex']),
       });
       await expect(codex).not.toBeChecked();
-      // A turned-off row shows its values as plain text: no model or effort trigger (#71).
+      // A turned-off card keeps its model visible but disables editing.
       await expect(
-        page.locator('[data-testid="cli-matrix-model-codex"]'),
-      ).toHaveCount(0);
+        codexCard.locator('[data-popover-kind="model"]'),
+      ).toBeDisabled();
       await expect(
-        page.locator('[data-testid="cli-matrix-row-codex"]'),
-      ).toHaveAttribute('data-dimmed', 'true');
+        codexCard.locator('[data-popover-kind="effort"]'),
+      ).toBeDisabled();
       await toastUndo(page).click();
       await expectCall(page, before, 'agent:setConfig', {
         disabledClis: ['copilot'],
       });
       await expect(codex).toBeChecked();
       await visibleEnabled(
-        page.locator('[data-testid="cli-matrix-model-codex"]'),
+        codexCard.locator('[data-popover-kind="model"]'),
       );
       // A Ptah CLI instance's on/off is its own `enabled` field.
       const glm = page.locator(`[data-testid="cli-matrix-toggle-${GLM_ID}"]`);
@@ -515,14 +516,14 @@ for (const host of HOSTS) {
       // Save a key from the Uninstalled row: the row moves to the installed group.
       await toggle.click();
       await uninstalled
-        .locator('[data-testid="cli-matrix-credentials-cursor"]')
+        .locator('[data-testid="cli-provider-card-cursor"] [data-popover-kind="credentials"]')
         .click();
       await expect(key).toBeFocused();
       await key.fill('crsr_e2e_secret_value');
       await popover.locator('[data-testid="cursor-credential-save"]').click();
       await expect(toastMessage(page)).toHaveText('Key stored, not verified.');
       const installedTrigger = page.locator(
-        'tbody:not([data-testid="cli-matrix-uninstalled"]) [data-testid="cli-matrix-credentials-cursor"]',
+        '[data-testid="cli-provider-card-cursor"] [data-popover-kind="credentials"]',
       );
       await expect(installedTrigger).toBeVisible();
       await expect(
@@ -557,7 +558,7 @@ for (const host of HOSTS) {
       await expect(popover).toHaveCount(0);
       await expect(toggle).toHaveAttribute('aria-expanded', 'false');
       await expect(
-        page.locator('[data-testid="cli-matrix-credentials-cursor"]'),
+        page.locator('[data-testid="cli-provider-card-cursor"]'),
       ).toHaveCount(0);
       await expect(toggle).toBeFocused();
       // Esc on the toggle closes nothing else: the tab stays as it is.
@@ -580,7 +581,7 @@ for (const host of HOSTS) {
         .locator('[data-testid="cli-matrix-uninstalled-toggle"]')
         .click();
       const trigger = page.locator(
-        '[data-testid="cli-matrix-credentials-cursor"]',
+        '[data-testid="cli-provider-card-cursor"] [data-popover-kind="credentials"]',
       );
       await trigger.click();
       const popover = page.locator('[data-testid="cursor-credential-popover"]');
