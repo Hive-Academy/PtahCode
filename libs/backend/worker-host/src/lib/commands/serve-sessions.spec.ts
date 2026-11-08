@@ -105,7 +105,7 @@ function fakeEngine(behaviour: EngineBehaviour = {}) {
     dispose: jest.fn(async () => undefined),
   };
   const permissions = {
-    handleResponse: jest.fn(),
+    handleResponse: jest.fn().mockReturnValue(true),
     handleQuestionResponse: jest.fn(),
     getPermissionLevel: jest.fn(() => 'ask'),
     cleanupPendingPermissions: jest.fn(),
