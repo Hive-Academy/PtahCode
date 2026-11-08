@@ -11,7 +11,7 @@ import {
   createMockFileSystemProvider,
   createMockWorkspaceProvider,
 } from '@ptah-extension/platform-core/testing';
-import type { GitWorktreeInfo } from '@ptah-extension/shared';
+import { GIT_ROOT_MISSING_MESSAGE, type GitWorktreeInfo } from '@ptah-extension/shared';
 
 import {
   GIT_ROOT_UNAVAILABLE_MESSAGE,
@@ -107,6 +107,17 @@ describe('GitRootResolver', () => {
     await expect(
       resolver.resolve(WORKTREE, 'git:removeWorktree', 'folder'),
     ).rejects.toMatchObject(unavailable);
+  });
+
+  it('uses the missing error only when the requested folder is absent', async () => {
+    const { resolver, probe } = build();
+    probe.directory.mockResolvedValue({ kind: 'absent' });
+    await expect(resolver.resolve('/gone', 'git:info', 'folder-or-worktree'))
+      .rejects.toMatchObject({ errorCode: 'GIT_ROOT_UNAVAILABLE', message: GIT_ROOT_MISSING_MESSAGE });
+    probe.directory.mockResolvedValue({ kind: 'exists' });
+    probe.listWorktrees.mockResolvedValue(listed(FOLDER));
+    await expect(resolver.resolve('/present', 'git:info', 'folder-or-worktree'))
+      .rejects.toMatchObject({ errorCode: 'GIT_ROOT_UNAVAILABLE', message: GIT_ROOT_UNAVAILABLE_MESSAGE });
   });
 
   it('refuses an unregistered path with a warn and no fallback', async () => {
@@ -372,11 +383,11 @@ describe('GitRootResolver', () => {
     for (const method of ['git:info', 'git:branches', 'git:stashList']) {
       await expect(
         resolver.resolve(GONE, method, 'folder-or-worktree'),
-      ).rejects.toMatchObject(unavailable);
+      ).rejects.toMatchObject({ errorCode: 'GIT_ROOT_UNAVAILABLE', message: GIT_ROOT_MISSING_MESSAGE });
     }
     await expect(
       resolver.resolve(OTHER, 'git:info', 'folder-or-worktree'),
-    ).rejects.toMatchObject(unavailable);
+    ).rejects.toMatchObject({ errorCode: 'GIT_ROOT_UNAVAILABLE', message: GIT_ROOT_MISSING_MESSAGE });
 
     expect(warn.mock.calls).toEqual([
       [
@@ -402,7 +413,7 @@ describe('GitRootResolver', () => {
     now = GIT_ROOT_WARNING_INTERVAL_MS;
     await expect(
       resolver.resolve(GONE, 'git:lastCommit', 'folder-or-worktree'),
-    ).rejects.toMatchObject(unavailable);
+    ).rejects.toMatchObject({ errorCode: 'GIT_ROOT_UNAVAILABLE', message: GIT_ROOT_MISSING_MESSAGE });
     expect(warn).toHaveBeenLastCalledWith(
       '[GitRoot] git:lastCommit refused workspaceRoot',
       {

@@ -10,6 +10,7 @@ import type { MessageHandler } from '@ptah-extension/core';
 import {
   GIT_FETCH_TIMEOUT_MS,
   GIT_ROOT_PROBE_FAILED_MESSAGE,
+  GIT_ROOT_MISSING_MESSAGE,
   GIT_HOOK_TIMEOUT_MS,
   MESSAGE_TYPES,
   gitRpcTimeoutFor,
@@ -111,6 +112,8 @@ export class GitBranchesService implements MessageHandler {
   static readonly READ_TIMEOUT_BACKOFF_MS = 30_000;
   private readonly readFlights = new Map<string, Promise<unknown>>();
   private readonly readBackoffUntil = new Map<string, number>();
+  private readonly unavailableRoots = new Set<string>();
+  private readonly readGenerations = new Map<string, number>();
   private readonly vscodeService = inject(VSCodeService);
   private readonly destroyRef = inject(DestroyRef);
 
@@ -224,6 +227,7 @@ export class GitBranchesService implements MessageHandler {
     ) {
       return;
     }
+    this.reactivateRoot(this.workspaceKey() ?? '');
     void this.refreshForCauses(payload?.causes);
   }
 
@@ -246,6 +250,7 @@ export class GitBranchesService implements MessageHandler {
   switchWorkspace(workspacePath: string): void {
     if (this._activeWorkspacePath === workspacePath) return;
     this._activeWorkspacePath = workspacePath;
+    this.reactivateRoot(workspacePath);
     this.resetState();
     this.restoreRecentBranches();
     void this.refreshBranches();
@@ -304,6 +309,7 @@ export class GitBranchesService implements MessageHandler {
    * when the pass that covers their slices has drained.
    */
   private requestRefresh(slices: RefreshSlices): Promise<void> {
+    if (this.unavailableRoots.has(this.workspaceKey() ?? '')) return Promise.resolve();
     if (!slices.branches && !slices.stash && !slices.lastCommit) {
       return Promise.resolve();
     }
@@ -349,13 +355,14 @@ export class GitBranchesService implements MessageHandler {
         if (!slices) break;
 
         const workspaceAtRequest = this.workspaceKey();
+        const generation = this.readGenerations.get(workspaceAtRequest ?? '') ?? 0;
         const tasks: Promise<unknown>[] = [];
         if (slices.branches)
-          tasks.push(this.refreshBranchList(workspaceAtRequest));
+          tasks.push(this.refreshBranchList(workspaceAtRequest, generation));
         if (slices.stash)
-          tasks.push(this.refreshStashCount(workspaceAtRequest));
+          tasks.push(this.refreshStashCount(workspaceAtRequest, generation));
         if (slices.lastCommit)
-          tasks.push(this.refreshLastCommit(workspaceAtRequest));
+          tasks.push(this.refreshLastCommit(workspaceAtRequest, generation));
         await Promise.all(tasks);
       }
     } finally {
@@ -396,7 +403,18 @@ export class GitBranchesService implements MessageHandler {
    * which skips slices whose triggers never fired.
    */
   async refreshBranches(): Promise<void> {
+    this.reactivateRoot(this.workspaceKey() ?? '', false);
     await this.refreshForCauses(['initial']);
+  }
+
+  private reactivateRoot(root: string, clearBackoff = true): void {
+    this.readGenerations.set(root, (this.readGenerations.get(root) ?? 0) + 1);
+    this.unavailableRoots.delete(root);
+    if (clearBackoff) {
+      for (const key of this.readBackoffUntil.keys()) {
+        if (key.endsWith(`:${root}`)) this.readBackoffUntil.delete(key);
+      }
+    }
   }
 
   /**
@@ -407,42 +425,49 @@ export class GitBranchesService implements MessageHandler {
    * written straight over the new folder's. Mirrors the `workspaceAtFetchTime`
    * guard in `GitStatusService.fetchGitInfo`.
    */
-  private isStale(workspaceAtRequest: string | null): boolean {
-    return this.workspaceKey() !== workspaceAtRequest;
+  private isStale(workspaceAtRequest: string | null, generation: number): boolean {
+    return this.workspaceKey() !== workspaceAtRequest ||
+      (this.readGenerations.get(workspaceAtRequest ?? '') ?? 0) !== generation ||
+      this.unavailableRoots.has(workspaceAtRequest ?? '');
   }
 
   /** Refresh the local + remote branch list signal. */
   private async refreshBranchList(
     workspaceAtRequest: string | null = this.workspaceKey(),
+    generation = this.readGenerations.get(workspaceAtRequest ?? '') ?? 0,
   ): Promise<void> {
     const result = await this.safeRpc<GitBranchesResult>('git:branches', {
       includeRemote: true,
       ...this.scopeParams(),
-    });
-    if (result && !this.isStale(workspaceAtRequest)) this._branches.set(result);
+    }, generation);
+    if (result && !this.isStale(workspaceAtRequest, generation)) this._branches.set(result);
   }
 
   /** Refresh the stash count badge signal. */
   private async refreshStashCount(
     workspaceAtRequest: string | null = this.workspaceKey(),
+    generation = this.readGenerations.get(workspaceAtRequest ?? '') ?? 0,
   ): Promise<void> {
     const result = await this.safeRpc<GitStashListResult>(
       'git:stashList',
       this.scopeParams(),
+      generation,
     );
-    if (result && !this.isStale(workspaceAtRequest))
+    if (result && !this.isStale(workspaceAtRequest, generation))
       this._stashCount.set(result.count);
   }
 
   /** Refresh the last-commit-on-HEAD signal. */
   private async refreshLastCommit(
     workspaceAtRequest: string | null = this.workspaceKey(),
+    generation = this.readGenerations.get(workspaceAtRequest ?? '') ?? 0,
   ): Promise<void> {
     const result = await this.safeRpc<GitLastCommitResult>(
       'git:lastCommit',
       this.scopeParams(),
+      generation,
     );
-    if (result && !this.isStale(workspaceAtRequest))
+    if (result && !this.isStale(workspaceAtRequest, generation))
       this._lastCommit.set(result);
   }
 
@@ -452,11 +477,14 @@ export class GitBranchesService implements MessageHandler {
    * never reaches the template.
    */
   async refreshRemotes(): Promise<void> {
+    const workspaceAtRequest = this.workspaceKey();
+    const generation = this.readGenerations.get(workspaceAtRequest ?? '') ?? 0;
     const result = await this.safeRpc<GitRemotesResult>(
       'git:remotes',
       this.scopeParams(),
+      generation,
     );
-    if (!result) return;
+    if (!result || this.isStale(workspaceAtRequest, generation)) return;
     const remotes: unknown = result.remotes;
     this._remotes.set(Array.isArray(remotes) ? (remotes as RemoteInfo[]) : []);
   }
@@ -640,18 +668,23 @@ export class GitBranchesService implements MessageHandler {
   private async safeRpc<T>(
     method: Parameters<typeof rpcCall>[1],
     params: Record<string, unknown>,
+    generation = this.readGenerations.get(this.workspaceKey() ?? '') ?? 0,
   ): Promise<T | null> {
-    const key = `${method}:${this.workspaceKey() ?? ''}`;
+    const root = this.workspaceKey() ?? '';
+    if ((this.readGenerations.get(root) ?? 0) !== generation) return null;
+    if (this.unavailableRoots.has(root)) return null;
+    const key = `${method}:${root}`;
     if (Date.now() < (this.readBackoffUntil.get(key) ?? 0)) return null;
-    const active = this.readFlights.get(key);
+    const flightKey = `${key}:${generation}`;
+    const active = this.readFlights.get(flightKey);
     if (active) return active as Promise<T | null>;
-    const flight = this.readRpc<T>(method, params, key);
-    this.readFlights.set(key, flight);
+    const flight = this.readRpc<T>(method, params, key, root, generation);
+    this.readFlights.set(flightKey, flight);
     try {
       return await flight;
     } finally {
       // A mutation may have replaced this flight; never drop the newer one.
-      if (this.readFlights.get(key) === flight) this.readFlights.delete(key);
+      if (this.readFlights.get(flightKey) === flight) this.readFlights.delete(flightKey);
     }
   }
 
@@ -668,12 +701,28 @@ export class GitBranchesService implements MessageHandler {
     method: Parameters<typeof rpcCall>[1],
     params: Record<string, unknown>,
     key: string,
+    root: string,
+    generation: number,
   ): Promise<T | null> {
     try {
       const response = await rpcCall<T>(this.vscodeService, method, params, 75_000);
+      if ((this.readGenerations.get(root) ?? 0) !== generation) return null;
       if (response.success && response.data !== undefined) {
         this.readBackoffUntil.delete(key);
         return response.data;
+      }
+      if (response.error === GIT_ROOT_MISSING_MESSAGE) {
+        if (!this.unavailableRoots.has(root)) {
+          this.unavailableRoots.add(root);
+          if (this.workspaceKey() === root) {
+            this._branches.set(EMPTY_BRANCHES);
+            this._stashCount.set(0);
+            this._lastCommit.set(null);
+            this._remotes.set([]);
+          }
+          console.warn(`[GitBranchesService] ${response.error}`);
+        }
+        return null;
       }
       if (response.error === GIT_ROOT_PROBE_FAILED_MESSAGE || /timeout/i.test(response.error ?? '')) {
         this.readBackoffUntil.set(key, Date.now() + GitBranchesService.READ_TIMEOUT_BACKOFF_MS);
@@ -685,6 +734,7 @@ export class GitBranchesService implements MessageHandler {
       }
       return null;
     } catch (err: unknown) {
+      if ((this.readGenerations.get(root) ?? 0) !== generation) return null;
       // degradation-audit: reported - log once and suppress repeated timeout reads.
       if (err instanceof Error && /timeout/i.test(err.message)) {
         this.readBackoffUntil.set(key, Date.now() + GitBranchesService.READ_TIMEOUT_BACKOFF_MS);

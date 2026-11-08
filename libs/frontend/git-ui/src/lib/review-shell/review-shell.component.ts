@@ -520,6 +520,7 @@ export class ReviewShellComponent {
 
   protected retryStatus(): void {
     void this.gitStatus.refresh();
+    void this.gitBranches.refreshBranches();
   }
 
   constructor() {

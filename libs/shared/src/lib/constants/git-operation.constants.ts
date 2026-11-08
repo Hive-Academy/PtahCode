@@ -50,12 +50,17 @@ export function gitRpcTimeoutFor(backendMs: number): number {
 
 /**
  * Message of the `GIT_ROOT_UNAVAILABLE` RPC error: a `git:*` call named a
- * root that is no longer a workspace folder or a live worktree of one
- * (directory absent, listed `prunable`, or git says it is not this
- * repository). A probe timeout uses {@link GIT_ROOT_PROBE_FAILED_MESSAGE}.
+ * root that is not a registered workspace folder or a live worktree of one
+ * while its directory exists. A missing directory on a read uses
+ * {@link GIT_ROOT_MISSING_MESSAGE}; probe timeout uses
+ * {@link GIT_ROOT_PROBE_FAILED_MESSAGE}.
  */
 export const GIT_ROOT_UNAVAILABLE_MESSAGE =
   'This worktree is no longer available.';
+
+/** A requested git root whose directory is confirmed absent on disk. */
+export const GIT_ROOT_MISSING_MESSAGE =
+  'This worktree folder no longer exists on disk.';
 
 /**
  * Message of the `GIT_ROOT_PROBE_FAILED` RPC error. Distinct from

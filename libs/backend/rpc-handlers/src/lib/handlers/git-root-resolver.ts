@@ -6,10 +6,10 @@
  * - A named root is accepted when it is a registered workspace folder, or —
  *   under the `'folder-or-worktree'` policy — a live worktree of an open
  *   folder's repository (see {@link probeRegisteredWorktree} for the checks).
- * - A confirmed missing named root throws `RpcUserError('GIT_ROOT_UNAVAILABLE')`
+ * - A confirmed missing named root throws a distinct missing-folder message
  *   and never falls back to the active folder: a stale or hostile request
  *   must not read from, or mutate, a different repository. The webview shows
- *   the error's message ("This worktree is no longer available."), not the
+ *   error's message, not the
  *   handlers' "No workspace folder open", which stays for the no-folder case.
  * - A probe that could not answer throws the retryable
  *   `GIT_ROOT_PROBE_FAILED`, up to {@link MAX_CONSECUTIVE_PROBE_FAILURES} in a
@@ -34,6 +34,7 @@ import type {
 } from '@ptah-extension/platform-core';
 import {
   GIT_ROOT_UNAVAILABLE_MESSAGE,
+  GIT_ROOT_MISSING_MESSAGE,
   GIT_ROOT_PROBE_FAILED_MESSAGE,
 } from '@ptah-extension/shared';
 import {
@@ -209,10 +210,36 @@ export class GitRootResolver {
         policy,
       },
     );
-    throw new RpcUserError(
-      GIT_ROOT_UNAVAILABLE_MESSAGE,
-      'GIT_ROOT_UNAVAILABLE',
-    );
+    if (
+      READ_ONLY_GIT_METHODS.has(method) &&
+      (await this.isConfirmedAbsent(requested))
+    ) {
+      throw new RpcUserError(GIT_ROOT_MISSING_MESSAGE, 'GIT_ROOT_UNAVAILABLE');
+    }
+    throw new RpcUserError(GIT_ROOT_UNAVAILABLE_MESSAGE, 'GIT_ROOT_UNAVAILABLE');
+  }
+
+  /**
+   * True only when the directory read says the root is absent. A failed read
+   * keeps the retryable {@link GIT_ROOT_UNAVAILABLE_MESSAGE}, so the webview
+   * does not stop git reads on an unconfirmed answer.
+   */
+  private async isConfirmedAbsent(requested: string): Promise<boolean> {
+    try {
+      const directory = await this.deps.probe.directory(requested);
+      return directory.kind === 'absent';
+    } catch (error: unknown) {
+      this.warnLimited(
+        'probe-failed',
+        requested,
+        '[GitRoot] directory read failed',
+        {
+          workspaceRoot: requested,
+          cause: error instanceof Error ? error.message : String(error),
+        },
+      );
+      return false;
+    }
   }
 
   /**

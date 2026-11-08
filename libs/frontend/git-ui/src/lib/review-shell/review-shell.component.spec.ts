@@ -476,6 +476,19 @@ describe('ReviewShellComponent', () => {
     expect(canvas(fixture)).toBeNull();
   });
 
+  it('retries branch reads from the existing status Retry action', async () => {
+    gitStatus.statusUnavailable.set('error');
+    gitStatus.staleReason.set('error');
+    const fixture = await render();
+    const retry = [...fixture.nativeElement.querySelectorAll('button')].find(
+      (button: HTMLButtonElement) => button.textContent?.trim() === 'Retry',
+    );
+    expect(retry).toBeDefined();
+    retry?.click();
+    expect(gitStatus.refresh).toHaveBeenCalled();
+    expect(gitBranches.refreshBranches).toHaveBeenCalledTimes(2);
+  });
+
   it('says "not a Git repository" only for a readable result without a repo', async () => {
     gitStatus.isGitRepo.set(false);
 
