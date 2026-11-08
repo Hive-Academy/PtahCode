@@ -4,6 +4,7 @@ import type {
 } from '@ptah-extension/shared';
 import {
   cliMatrixRows,
+  systemCliDisplayName,
   cliModelDisplay,
   cliVersionLabel,
   type CliMatrixRow,
@@ -11,6 +12,14 @@ import {
   type InstanceCliMatrixRow,
   type SystemCliMatrixRow,
 } from './cli-matrix-rows';
+
+describe('systemCliDisplayName', () => {
+  it('uses the existing system labels and leaves unknown IDs unresolved', () => {
+    expect(systemCliDisplayName('codex')).toBe('Codex');
+    expect(systemCliDisplayName('opencode')).toBe('OpenCode');
+    expect(systemCliDisplayName('missing')).toBeNull();
+  });
+});
 import { cliPermissionNote } from './cli-permission-notes';
 
 type Orchestration = NonNullable<CliMatrixSources['orchestration']>;

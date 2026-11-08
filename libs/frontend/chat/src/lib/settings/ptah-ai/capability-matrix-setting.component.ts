@@ -2,11 +2,12 @@ import {
   ChangeDetectionStrategy,
   Component,
   OnInit,
-  computed,
   inject,
   signal,
 } from '@angular/core';
 import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
+import { NativePopoverComponent } from '@ptah-extension/ui';
+import { RoutingDisplayNamesStore } from './routing-display-names.store';
 import {
   OUTCOME_TASK_KINDS,
   type AgentCapabilityMatrixProfile,
@@ -19,17 +20,6 @@ const FOCUS =
 const RPC_TIMEOUT_MS = 5_000;
 const NO_PARAMS: AgentGetCapabilityMatrixParams = {};
 
-interface MatrixRow {
-  readonly track: string;
-  readonly family: string;
-  readonly model: string;
-  readonly kind: OutcomeTaskKind;
-  readonly scoreLabel: string;
-  readonly source: string;
-  readonly samples: string;
-  readonly stale: string;
-}
-
 /**
  * Read-only capability matrix (`agent:getCapabilityMatrix`). Electron only:
  * the parent mounts it under `isElectron`. Unknown cells render as "unrated".
@@ -37,6 +27,7 @@ interface MatrixRow {
 @Component({
   selector: 'ptah-capability-matrix-setting',
   standalone: true,
+  imports: [NativePopoverComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -88,40 +79,61 @@ interface MatrixRow {
           </div>
         }
         @default {
-          @if (rows().length === 0) {
+          @if (profiles().length === 0) {
             <p
               class="text-xs text-base-content-muted"
               data-testid="capability-matrix-empty"
             >
-              No capability matrix yet.
+              Evidence appears here after runs.
             </p>
           } @else {
             <div class="overflow-x-auto">
-              <table class="table table-xs" data-testid="capability-matrix-table">
+              <table class="table table-xs min-w-[780px]" data-testid="capability-matrix-table">
                 <thead>
                   <tr>
-                    <th scope="col">Family</th>
-                    <th scope="col">Model</th>
-                    <th scope="col">Task</th>
-                    <th scope="col">Score</th>
-                    <th scope="col">Source</th>
-                    <th scope="col">Samples</th>
-                    <th scope="col">Stale</th>
+                    <th scope="col" class="sticky left-0 bg-base-100">Model</th>
+                    @for (kind of tasks; track kind) { <th scope="col">{{ kind }}</th> }
                   </tr>
                 </thead>
-                <tbody>
-                  @for (row of rows(); track row.track) {
-                    <tr [attr.data-testid]="'matrix-row-' + row.track">
-                      <td>{{ row.family }}</td>
-                      <td>{{ row.model }}</td>
-                      <td>{{ row.kind }}</td>
-                      <td>{{ row.scoreLabel }}</td>
-                      <td>{{ row.source }}</td>
-                      <td>{{ row.samples }}</td>
-                      <td>{{ row.stale }}</td>
-                    </tr>
+                @for (family of families(); track family) {
+                  <tbody [id]="'family-' + family">
+                    <tr><th scope="rowgroup" colspan="7">
+                      <button type="button" class="min-h-8" [attr.aria-expanded]="expanded().has(family)" [attr.aria-controls]="'family-' + family" (click)="toggleFamily(family)">
+                        {{ family.startsWith('pc-') ? names.executor(family).text : family }}
+                      </button>
+                      @if (family.startsWith('pc-') && names.executor(family).raw; as raw) {
+                        <details><summary class="min-h-8 cursor-pointer">Executor ID details</summary><code class="break-all">{{ raw }}</code></details>
+                      }
+                    </th></tr>
+                    @if (expanded().has(family)) {
+                      @for (profile of familyProfiles(family); track profile.model) {
+                        <tr>
+                          <th scope="row" class="sticky left-0 bg-base-100" style="overflow-wrap:anywhere">
+                            {{ names.model(profile.model).text }}
+                            @if (names.model(profile.model).raw; as raw) { <span class="sr-only">Raw model ID {{ raw }}</span> }
+                          </th>
+                          @for (kind of tasks; track kind) {
+                            @let cell = profile.cells[kind];
+                            <td class="min-w-24 p-2 min-[1600px]:p-3" [attr.data-testid]="'matrix-row-' + family + '-' + profile.model + '-' + kind">
+                              @if (cell.kind === 'unknown') { <span class="text-base-content-muted">— Unrated</span> }
+                              @else {
+                                <span class="font-semibold">{{ cell.score }}/100</span>
+                                <div class="h-1.5 rounded bg-base-content/15" aria-hidden="true"><div class="h-1.5 rounded bg-primary" [style.width.%]="cell.score"></div></div>
+                                <span class="badge badge-ghost badge-xs">{{ cell.source }}</span>
+                                @if (cell.sampleCount !== null) { <span>n={{ cell.sampleCount }}</span> }
+                                @if (cell.stale) { <span class="badge badge-warning badge-xs">Stale</span> }
+                                <ptah-native-popover [isOpen]="openCell() === rowId(family, profile.model, kind)" [hasBackdrop]="true" (closed)="openCell.set(null)">
+                                  <button trigger type="button" class="min-h-8 underline" [attr.aria-expanded]="openCell() === rowId(family, profile.model, kind)" [attr.aria-controls]="'detail-' + rowId(family, profile.model, kind)" (click)="toggleCell(family, profile.model, kind)">Details</button>
+                                  <div content [id]="'detail-' + rowId(family, profile.model, kind)" class="max-w-64 bg-base-100 p-3 text-xs shadow-lg"><p>As of {{ cell.asOf }}</p><p>Source: {{ cell.sourceRef || 'None' }}</p>@if (cell.note) { <p>{{ cell.note }}</p> }</div>
+                                </ptah-native-popover>
+                              }
+                            </td>
+                          }
+                        </tr>
+                      }
+                    }
+                  </tbody>
                   }
-                </tbody>
               </table>
             </div>
           }
@@ -138,6 +150,10 @@ interface MatrixRow {
 export class CapabilityMatrixSettingComponent implements OnInit {
   private readonly rpc = inject(ClaudeRpcService);
   private readonly logger = inject(LoggingService);
+  protected readonly names = inject(RoutingDisplayNamesStore);
+  protected readonly tasks = OUTCOME_TASK_KINDS;
+  protected readonly expanded = signal<ReadonlySet<string>>(new Set());
+  protected readonly openCell = signal<string | null>(null);
 
   protected readonly focusRing = FOCUS;
   protected readonly load = signal<'loading' | 'ready' | 'error'>('loading');
@@ -145,7 +161,20 @@ export class CapabilityMatrixSettingComponent implements OnInit {
     [],
   );
 
-  protected readonly rows = computed(() => flatten(this.profiles()));
+
+
+  protected families(): readonly string[] { return [...new Set(this.profiles().map((profile) => profile.family))]; }
+  protected familyProfiles(family: string): readonly AgentCapabilityMatrixProfile[] { return this.profiles().filter((profile) => profile.family === family); }
+  protected toggleFamily(family: string): void {
+    const next = new Set(this.expanded());
+    if (next.has(family)) next.delete(family); else next.add(family);
+    this.expanded.set(next);
+  }
+  protected rowId(family: string, model: string, kind: OutcomeTaskKind): string { return `${family}-${model}-${kind}`; }
+  protected toggleCell(family: string, model: string, kind: OutcomeTaskKind): void {
+    const id = this.rowId(family, model, kind);
+    this.openCell.set(this.openCell() === id ? null : id);
+  }
 
   ngOnInit(): void {
     void this.reload();
@@ -165,6 +194,7 @@ export class CapabilityMatrixSettingComponent implements OnInit {
         return;
       }
       this.profiles.set(response.data.profiles);
+      this.expanded.set(new Set(response.data.profiles.length ? [response.data.profiles[0].family] : []));
       this.load.set('ready');
     } catch (error: unknown) {
       // degradation-audit: reported - a failed read shows the error row with Retry.
@@ -175,28 +205,4 @@ export class CapabilityMatrixSettingComponent implements OnInit {
       this.load.set('error');
     }
   }
-}
-
-function flatten(
-  profiles: readonly AgentCapabilityMatrixProfile[],
-): readonly MatrixRow[] {
-  const rows: MatrixRow[] = [];
-  for (const profile of profiles) {
-    for (const kind of OUTCOME_TASK_KINDS) {
-      const cell = profile.cells[kind];
-      const unrated = cell.kind === 'unknown';
-      rows.push({
-        track: `${profile.family}-${profile.model}-${kind}`,
-        family: profile.family,
-        model: profile.model,
-        kind,
-        scoreLabel: unrated ? 'unrated' : String(cell.score),
-        source: unrated ? '—' : cell.source,
-        samples:
-          unrated || cell.sampleCount === null ? '—' : String(cell.sampleCount),
-        stale: unrated ? '—' : cell.stale ? 'yes' : 'no',
-      });
-    }
-  }
-  return rows;
 }

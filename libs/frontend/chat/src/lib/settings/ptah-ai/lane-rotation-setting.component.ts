@@ -8,6 +8,7 @@ import {
 import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
 import type { AgentGetCapabilityMatrixParams } from '@ptah-extension/shared';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
+import { RoutingDisplayNamesStore } from './routing-display-names.store';
 import {
   SettingsSaveFeedbackService,
   settingNotConfirmedMessage,
@@ -43,7 +44,7 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
   template: `
     <section
       data-glass-surface="content"
-      class="flex flex-col gap-3 text-sm text-base-content"
+      class="flex flex-col gap-3 text-sm text-base-content [container-type:inline-size]"
       aria-labelledby="lane-rotation-heading"
       data-testid="lane-rotation-setting"
     >
@@ -77,14 +78,24 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
           it picks. Off keeps the first candidate.
         </p>
         @if (lastPicks().length > 0) {
-          <ul class="mt-2 text-xs text-base-content-muted" data-testid="lane-rotation-last-picks">
+          <ul class="rotation-picks mt-3 grid grid-cols-1 gap-2 text-xs" data-testid="lane-rotation-last-picks">
             @for (pick of lastPicks(); track pick.key) {
-              <li>Last pick ({{ pick.key }}): {{ pick.candidateId }}</li>
+              <li class="min-h-11 rounded-lg border border-base-content/20 bg-base-200/40 p-2">
+                <span class="block text-base-content-muted">Last pick ({{ names.route(pick.key).text }})</span>
+                <span class="font-medium text-base-content">{{ names.executor(pick.candidateId).text }}</span>
+                @if (names.executor(pick.candidateId).raw; as raw) {
+                  <details class="mt-1"><summary class="flex min-h-11 cursor-pointer items-center">ID details</summary><code class="break-all">{{ raw }}</code></details>
+                }
+              </li>
             }
           </ul>
+        } @else if (load() === 'ready' && !lastPicksUnavailable()) {
+          <p class="mt-2 text-xs text-base-content-muted">No recent picks yet</p>
         }
         @if (lastPicksUnavailable()) {
-          <p class="mt-2 text-xs text-warning" role="status">Recent picks are unavailable.</p>
+          <div class="mt-2 flex items-center gap-2 text-xs text-warning" role="status">Recent picks unavailable
+            <button type="button" class="btn btn-outline btn-sm" (click)="retryPicks()">Retry</button>
+          </div>
         }
       </div>
 
@@ -125,12 +136,15 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
     :host-context([data-glass='on']) [data-glass-surface='content'] {
       padding: 1.25rem;
     }
+    @container (min-width: 480px) { .rotation-picks { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @container (min-width: 850px) { .rotation-picks { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
   `,
 })
 export class LaneRotationSettingComponent implements OnInit {
   private readonly rpc = inject(ClaudeRpcService);
   private readonly logger = inject(LoggingService);
   protected readonly feedback = inject(SettingsSaveFeedbackService);
+  protected readonly names = inject(RoutingDisplayNamesStore);
 
   protected readonly focusRing = FOCUS;
   protected readonly label = LABEL;
@@ -173,6 +187,11 @@ export class LaneRotationSettingComponent implements OnInit {
       this.logger.warn('LaneRotationSetting', 'rotation history read failed', { errorType: errorTypeOf(error) });
       this.lastPicksUnavailable.set(true);
     }
+  }
+
+  protected async retryPicks(): Promise<void> {
+    this.lastPicksUnavailable.set(false);
+    await this.readLastPicks();
   }
 
   async toggle(event: Event): Promise<void> {
