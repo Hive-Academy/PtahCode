@@ -1,3 +1,7 @@
+import { createHash } from 'node:crypto';
+import { access, stat } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { dirname } from 'node:path';
 import { inject, injectable } from 'tsyringe';
 import { ulid } from 'ulid';
 import { TOKENS } from '@ptah-extension/vscode-core';
@@ -28,6 +32,15 @@ import {
 import { HostBridgeEmbedder } from './search-worker-host-embedder';
 import { MEMORY_TOKENS } from './di/tokens';
 import type { ISqliteSearchWorker } from './search-worker.port';
+
+function isMissingRoot(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error.code === 'ENOENT' || error.code === 'ENOTDIR')
+  );
+}
 
 export interface CodeSymbolInsert {
   readonly workspaceRoot: string;
@@ -178,6 +191,7 @@ export class CodeSymbolStore implements ICodeSymbolReader {
    * so the next time it loads, leftovers from that outage are removed.
    */
   private vecOrphansReconciled = false;
+  private lastStaleRootPurgeAt = Number.NEGATIVE_INFINITY;
 
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: CuratorLogger,
@@ -189,6 +203,115 @@ export class CodeSymbolStore implements ICodeSymbolReader {
     @inject(MEMORY_TOKENS.SQLITE_SEARCH_WORKER, { isOptional: true })
     private readonly searchWorker: ISqliteSearchWorker | null = null,
   ) {}
+
+  /** Remove only roots confirmed absent. An inaccessible root is retained. */
+  async purgeStaleRoots(
+    nowMs = Date.now(),
+    statPath: (path: string) => ReturnType<typeof stat> = stat,
+  ): Promise<{ roots: number; rows: number }> {
+    if (nowMs - this.lastStaleRootPurgeAt < 6 * 60 * 60 * 1000) {
+      return { roots: 0, rows: 0 };
+    }
+    this.lastStaleRootPurgeAt = nowMs;
+    const db = this.connection.db;
+    const roots = db.prepare(
+      'SELECT DISTINCT workspace_root AS root FROM code_symbols',
+    ).all() as Array<{ root: string }>;
+    let purgedRoots = 0;
+    let purgedRows = 0;
+    for (const { root } of roots) {
+      try {
+        await statPath(root);
+        continue;
+      } catch (error: unknown) {
+        if (!isMissingRoot(error)) {
+          this.logger.warn('[code-symbol-store] Cannot inspect indexed root; retaining it', { root, error });
+          continue;
+        }
+      }
+      const parent = dirname(root);
+      try {
+        const parentStat = await stat(parent);
+        if (!parentStat.isDirectory()) {
+          this.logger.info('[code-symbol-store] Indexed root parent is not a directory; retaining it', { root, parent });
+          continue;
+        }
+        await access(parent, constants.R_OK);
+      } catch (error: unknown) {
+        if (isMissingRoot(error)) {
+          this.logger.info('[code-symbol-store] Indexed root parent is missing; retaining it', { root, parent });
+        } else {
+          this.logger.warn('[code-symbol-store] Cannot read indexed root parent; retaining it', { root, parent, error });
+        }
+        continue;
+      }
+      const vecAvailable = this.vecStatus.available;
+      const select = db.prepare(
+        'SELECT rowid AS rowid FROM code_symbols WHERE workspace_root = ? LIMIT 128',
+      );
+      const deleteSymbol = db.prepare('DELETE FROM code_symbols WHERE rowid = ?');
+      const deleteVec = vecAvailable
+        ? db.prepare('DELETE FROM code_symbols_vec WHERE rowid = ?')
+        : null;
+      let removedForRoot = 0;
+      for (;;) {
+        const ids = select.all(root) as Array<{ rowid: number }>;
+        if (ids.length === 0) break;
+        try {
+          await statPath(root);
+          this.logger.warn('[code-symbol-store] Indexed root reappeared; stopping purge', { root });
+          break;
+        } catch (error: unknown) {
+          if (!isMissingRoot(error)) {
+            this.logger.warn('[code-symbol-store] Cannot confirm indexed root is absent; stopping purge', { root, error });
+            break;
+          }
+        }
+        try {
+          const parentStat = await stat(parent);
+          if (!parentStat.isDirectory()) {
+            this.logger.warn('[code-symbol-store] Indexed root parent changed; stopping purge', { root, parent });
+            break;
+          }
+          await access(parent, constants.R_OK);
+        } catch (error: unknown) {
+          this.logger.warn('[code-symbol-store] Cannot read indexed root parent; stopping purge', { root, parent, error });
+          break;
+        }
+        try {
+          db.transaction((): void => {
+            for (const { rowid } of ids) {
+              deleteVec?.run(rowid);
+              deleteSymbol.run(rowid);
+            }
+            if (!vecAvailable) this.markVecStale();
+          })();
+        } catch (error: unknown) {
+          this.connection.handleFatalWriteError(error);
+          throw error;
+        }
+        removedForRoot += ids.length;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      if (removedForRoot === 0) continue;
+      purgedRoots++;
+      purgedRows += removedForRoot;
+      this.revision++;
+      // Only the path-derived fingerprint is unambiguously owned by this
+      // root. Git/package fingerprints can also belong to a live checkout.
+      const pathFp = createHash('sha256')
+        .update(`path:${root}`, 'utf8')
+        .digest('hex')
+        .slice(0, 16);
+      db.prepare('DELETE FROM indexing_state WHERE workspace_fingerprint = ?')
+        .run(pathFp);
+    }
+    this.logger.info('[code-symbol-store] stale-root maintenance complete', {
+      roots: purgedRoots,
+      rows: purgedRows,
+    });
+    return { roots: purgedRoots, rows: purgedRows };
+  }
 
   /**
    * `code_symbols.id` is `TEXT PRIMARY KEY` (migration 0013), not

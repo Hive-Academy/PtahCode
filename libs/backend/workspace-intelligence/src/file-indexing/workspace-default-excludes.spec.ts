@@ -26,6 +26,14 @@ describe('DEFAULT_WORKSPACE_EXCLUDES', () => {
     );
   });
 
+  it('excludes Ptah scratch files', () => {
+    const matches = picomatch([...DEFAULT_WORKSPACE_EXCLUDES], { dot: true });
+    expect(matches('.ptah/specs/task/prototype/example.ts')).toBe(true);
+    expect(matches('nested/.ptah/specs/task/evidence/example.ts')).toBe(true);
+    expect(matches('.ptah/skills/example/SKILL.md')).toBe(false);
+    expect(matches('src/example.ts')).toBe(false);
+  });
+
   // Matched the way `WorkspaceFileIndexService` matches: picomatch, dot: true,
   // over forward-slash workspace-relative paths. Deliberately NO `nocase`:
   // case-insensitivity must come from the derived globs themselves.

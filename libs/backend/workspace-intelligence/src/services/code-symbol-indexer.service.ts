@@ -1016,6 +1016,15 @@ export class CodeSymbolIndexer {
     options: CodeSymbolIndexerOptions | undefined,
     active: ActiveCensus,
   ): Promise<{ stats: IndexingStats; complete: boolean }> {
+    if ('purgeStaleRoots' in this.sink &&
+        typeof this.sink.purgeStaleRoots === 'function') {
+      try {
+        await this.sink.purgeStaleRoots();
+      } catch (error: unknown) {
+        // degradation-audit: catch | Maintenance failure must not block indexing; warn and continue.
+        this.logger.warn('[CodeSymbolIndexer] Stale-root maintenance failed; continuing indexing', { workspaceRoot, error });
+      }
+    }
     const startMs = Date.now();
     const batchSize = options?.batchSize ?? DEFAULT_BATCH_SIZE;
     const maxFilesPerRun = options?.maxFilesPerRun;

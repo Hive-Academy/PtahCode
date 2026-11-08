@@ -18,6 +18,7 @@ export const DEFAULT_WORKSPACE_EXCLUDES: readonly string[] = [
   '**/dist/**',
   '**/build/**',
   '**/.git/**',
+  '**/.ptah/specs/**',
   '**/.svn/**',
   '**/.hg/**',
   '**/out/**',

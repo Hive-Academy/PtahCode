@@ -136,6 +136,31 @@ function fakeTsFiles(n: number): string[] {
 // ---------------------------------------------------------------------------
 
 describe('CodeSymbolIndexer', () => {
+  it('indexes a worktree root in the background', async () => {
+    const indexer = makeIndexer([]);
+    const service = new CodeSymbolIndexer(
+      makeLogger(), makeAst(), indexer, makeFs(), makeSymbolSink(),
+    );
+    const root = '/workspace/.claude-worktrees/feature';
+    await service.indexWorkspace(root);
+    expect(indexer.indexWorkspaceStream).toHaveBeenCalledTimes(1);
+  });
+
+  it('continues indexing when stale-root maintenance fails', async () => {
+    const indexer = makeIndexer([]);
+    const logger = makeLogger();
+    const sink = Object.assign(makeSymbolSink(), {
+      purgeStaleRoots: jest.fn().mockRejectedValue(new Error('maintenance failed')),
+    });
+    const service = new CodeSymbolIndexer(logger, makeAst(), indexer, makeFs(), sink);
+    await service.indexWorkspace('/workspace');
+    expect(indexer.indexWorkspaceStream).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Stale-root maintenance failed'),
+      expect.objectContaining({ workspaceRoot: '/workspace', error: expect.any(Error) }),
+    );
+  });
+
   describe('indexWorkspace — AbortSignal cooperative cancellation', () => {
     it('aborts at a batch boundary and returns partial stats when signal fires mid-run', async () => {
       // Arrange: 3 batches of 3 files = 9 files total (small for speed).
