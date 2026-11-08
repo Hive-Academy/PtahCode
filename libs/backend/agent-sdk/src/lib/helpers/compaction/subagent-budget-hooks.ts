@@ -34,7 +34,7 @@ export function createSubagentBudgetHooks(
         toolUseId: data.tool_use_id, isInterrupt: data.is_interrupt,
         timestamp: Date.now(),
       });
-      const sessionId = capturedSessionId ?? data.session_id;
+      const sessionId = data.session_id ?? capturedSessionId;
       if (!sessionId) return { continue: true };
       try {
         if (event === 'PreToolUse' && data.tool_name) {
@@ -56,7 +56,7 @@ export function createSubagentBudgetHooks(
           } };
           if (handoff && event === 'PostToolUseFailure') return { hookSpecificOutput: {
             hookEventName: 'PostToolUseFailure' as const,
-            additionalContext: `Ptah's token budget ended this subagent; not the user. The SDK's STOP and wait text does not apply. ${handoff}`,
+            additionalContext: "Ptah's token budget ended this subagent; not the user. The SDK's STOP and wait text does not apply. The handoff follows as a separate message.",
           } };
         }
       } catch (error: unknown) {

@@ -569,9 +569,12 @@ describe('SubagentBudgetMonitor', () => {
     const lookupTranscript = jest.fn(async () => undefined);
     const h = makeHarness({}, { workspace: RECORD_WORKSPACE, lookupTranscript });
     h.recordStore.writeOnce.mockResolvedValue({ ok: false, errorType: 'Unavailable' });
-    await h.monitor.observe(SESSION, assistant({ input: 310_000 }, { id: 'first-try' }));
+    await h.monitor.observe(SESSION, assistant({ input: 130_000 }, { id: 'first-try' }));
+    for (let i = 0; i < 3; i += 1) await h.monitor.checkNotesTool(SESSION, 'a1', 'Read', {});
+    await waitUntil(() => h.recordStore.writeOnce.mock.calls.length === 1);
     expect(lookupTranscript).toHaveBeenCalledTimes(1);
-    await h.monitor.observe(SESSION, assistant({ input: 310_000 }, { id: 'second-try' }));
+    await h.monitor.checkNotesTool(SESSION, 'a1', 'Read', {});
+    await waitUntil(() => h.recordStore.writeOnce.mock.calls.length === 2);
     expect(lookupTranscript).toHaveBeenCalledTimes(1);
   });
 
@@ -620,8 +623,8 @@ describe('SubagentBudgetMonitor', () => {
     await h.monitor.observe(SESSION, assistant({ input: 100 }, { id: 'm1' }));
     const jump = assistant({ input: 186_000 }, { id: 'm2' }) as { message: { content: unknown[] } };
     jump.message.content = [
-      { type: 'text', text: 'Changed the parser token=SECRET_VALUE' },
-      { type: 'tool_use', id: 'edit-1', name: 'Edit', input: { file_path: 'src/parser.ts', new_string: 'SECRET_VALUE' } },
+      { type: 'text', text: 'Changed the parser token=PLACEHOLDER_NOT_A_SECRET' },
+      { type: 'tool_use', id: 'edit-1', name: 'Edit', input: { file_path: 'src/parser.ts', new_string: 'PLACEHOLDER_NOT_A_SECRET' } },
     ];
     await h.monitor.observe(SESSION, jump);
     expect(h.dispatcher.postSubagentNotice).toHaveBeenCalledTimes(1);
@@ -629,6 +632,13 @@ describe('SubagentBudgetMonitor', () => {
     expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
     expect(h.monitor.getAgentBudgetState('a1', SESSION)).toEqual(expect.objectContaining({ stopped: false, contextTokens: 186_000 }));
     expect(h.monitor.hasNotesGate('a1')).toBe(true);
+    expect(h.subagentNotices.take('a1')).toContain('budget');
+    for (let i = 0; i < 3; i += 1) await h.monitor.checkNotesTool(SESSION, 'a1', 'Read', { file_path: 'remaining.txt' });
+    await waitUntil(() => h.recordStore.writeOnce.mock.calls.length > 0);
+    const recordText = h.recordStore.writeOnce.mock.calls[0][2];
+    expect(recordText).toContain('src/parser.ts');
+    expect(recordText).toContain('Changed the parser token=[redacted]');
+    expect(recordText).not.toContain('PLACEHOLDER_NOT_A_SECRET');
   });
   it('tracks tool result outcomes and keeps only the last ten tool calls', async () => {
     const h = makeHarness();
@@ -1727,7 +1737,7 @@ describe('SubagentBudgetMonitor', () => {
       const text = h.streamed[0];
       expect(text).toContain("Ptah's subagent budget monitor handed off");
       expect(text).toContain('not the user');
-      expect(text).toContain('safety limit 3000000');
+      expect(text).toContain('2x handoff ceiling 300000');
       expect(text).toContain(
         `If a Read or Glob right after this handoff fails with "The user doesn't want to take this action right now" ` +
           `and you saw no permission prompt the user declined, retry that call once; ` +
@@ -2393,6 +2403,19 @@ describe('SubagentBudgetMonitor', () => {
 
       expect(fs.readFileSync(notesPath(), 'utf8')).toBe('Finding: API_KEY=[redacted]\nBasic usage');
       expect(h.streamed[0]).toContain(notesPath());
+    });
+
+    it('redacts agent-written key-value notes on normal exit and saves the handoff record', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, { workspace });
+      await h.monitor.observe(SESSION, atContext(130_000, 'normal-notes'));
+      fs.mkdirSync(path.dirname(notesPath()), { recursive: true });
+      fs.writeFileSync(notesPath(), 'Progress: read ten files\napi_key=PLACEHOLDER_NOT_A_SECRET\nNext: read remaining files');
+
+      await h.monitor.finishWarnedAgent(SESSION, 'agent-7');
+
+      expect(fs.readFileSync(notesPath(), 'utf8')).toBe('Progress: read ten files\napi_key=[redacted]\nNext: read remaining files');
+      expect(h.recordStore.writeOnce).toHaveBeenCalledTimes(1);
+      expect(h.monitor.takeNormalHandoff(SESSION, TOOL_CALL)).toContain('This handoff is saved at');
     });
 
     it('release drops a warning no tool result drained', async () => {

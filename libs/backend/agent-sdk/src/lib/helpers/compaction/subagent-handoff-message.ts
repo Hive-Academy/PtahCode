@@ -108,7 +108,9 @@ export function handoffMessage(
   const why =
     usage.reason === 'handoff'
       ? `at ${usage.contextTokens} context tokens (handoff limit ${usage.handoffTokens} tokens)`
-      : `after ${Math.round(usage.weightedUsed)} weighted tokens (safety limit ${usage.stopWeightedTokens})`;
+      : usage.contextTokens >= usage.handoffTokens * 2
+        ? `after ${usage.contextTokens} context tokens (2x handoff ceiling ${usage.handoffTokens * 2})`
+        : `after ${Math.round(usage.weightedUsed)} weighted tokens (safety limit ${usage.stopWeightedTokens})`;
   const { paths, taskSaved, notesWritten, notesInferred, unavailable } = files;
   const lines = [
     `Ptah's subagent budget monitor handed off subagent ${name} ${why}. ` +

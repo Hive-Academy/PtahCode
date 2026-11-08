@@ -41,9 +41,27 @@ describe('subagent budget hooks', () => {
     expect(await invoke('PostToolUseFailure', 'tool-1', true)).toEqual({
       hookSpecificOutput: {
         hookEventName: 'PostToolUseFailure',
-        additionalContext: expect.stringContaining("Ptah's token budget ended this subagent; not the user"),
+        additionalContext: "Ptah's token budget ended this subagent; not the user. The SDK's STOP and wait text does not apply. The handoff follows as a separate message.",
       },
     });
+  });
+
+  it('routes live SDK agent hooks by their parent session id rather than the captured tab id', async () => {
+    const parentSession = 'fa5028c2-7d72-4c51-b9bd-133b6fa31ec5';
+    const agent = 'a04a16d19daddac4f';
+    const liveHooks = createSubagentBudgetHooks(logger, monitor, 'd121cbf9-a3bb-45cd-8264-3f6253f3fc3a');
+    const readHook = liveHooks.PreToolUse?.[0]?.hooks[0];
+    const stopHook = liveHooks.SubagentStop?.[0]?.hooks[0];
+    if (!readHook || !stopHook) throw new Error('budget hooks missing');
+    await readHook({ hook_event_name: 'PreToolUse', session_id: parentSession, agent_id: agent,
+      tool_name: 'Read', tool_use_id: 'toolu_01SJ4zSLrsZ3QPsYUi51AgYZ', tool_input: { file_path: 'note-11.txt' },
+    } as HookInput, 'toolu_01SJ4zSLrsZ3QPsYUi51AgYZ', { signal: new AbortController().signal });
+    await stopHook({ hook_event_name: 'SubagentStop', session_id: parentSession, agent_id: agent,
+      tool_use_id: 'c813c1a5-542f-4f8d-b701-0f90e1dc54d1', cwd: 'C:/workspace', transcript_path: 'C:/workspace/agent.jsonl',
+      stop_hook_active: false, agent_transcript_path: 'C:/workspace/subagent.jsonl', agent_type: 'general-purpose',
+    } as HookInput, 'c813c1a5-542f-4f8d-b701-0f90e1dc54d1', { signal: new AbortController().signal });
+    expect(monitor.checkNotesTool).toHaveBeenCalledWith(parentSession, agent, 'Read', { file_path: 'note-11.txt' });
+    expect(monitor.finishWarnedAgent).toHaveBeenCalledWith(parentSession, agent);
   });
 
   it('logs a rejected notes check and denies a gated agent without rejecting the hook', async () => {
