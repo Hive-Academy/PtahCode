@@ -127,7 +127,7 @@ describe('callout extension', () => {
     expect(inline.raw).toBe('hello');
   });
 
-  it('renderer.blockquote returns false when no calloutType is tagged', () => {
+  it('renders an ordinary blockquote with its own direction', () => {
     const out = (
       rendererOf(ext()).blockquote as (
         this: unknown,
@@ -135,12 +135,12 @@ describe('callout extension', () => {
       ) => string | false
     ).call(makeParserCtx(), {
       type: 'blockquote',
-      tokens: [],
+      tokens: [{ type: 'paragraph' } as Tokens.Generic],
     } as Tokens.Blockquote);
-    expect(out).toBe(false);
+    expect(out).toBe('<blockquote dir="auto">\n[paragraph]</blockquote>\n');
   });
 
-  it('renderer.blockquote returns false for unknown callout types', () => {
+  it('renders unknown callout types as ordinary blockquotes', () => {
     const tok = {
       type: 'blockquote',
       tokens: [],
@@ -152,7 +152,7 @@ describe('callout extension', () => {
         token: Tokens.Blockquote,
       ) => string | false
     ).call(makeParserCtx(), tok);
-    expect(out).toBe(false);
+    expect(out).toBe('<blockquote dir="auto">\n</blockquote>\n');
   });
 
   it('renderer.blockquote wraps tagged blockquotes in a callout card', () => {
@@ -259,6 +259,22 @@ describe('code block header extension', () => {
     expect(out as string).toContain('&amp;');
     expect(out as string).toContain('&quot;');
     expect(out as string).not.toContain('<script>');
+  });
+
+  it('leaves a fenced code block containing <ul> escaped', () => {
+    const out = (
+      rendererOf(ext()).code as (
+        this: unknown,
+        token: Tokens.Code,
+      ) => string | false
+    ).call(makeParserCtx(), {
+      type: 'code',
+      raw: '```html\n<ul>\n```',
+      text: '<ul>',
+      lang: 'html',
+    } as Tokens.Code);
+    expect(out as string).toContain('&lt;ul&gt;');
+    expect(out as string).not.toContain('<ul dir="auto">');
   });
 
   describe('short plain-text fences', () => {
@@ -400,7 +416,8 @@ describe('list card extension', () => {
       ],
     } as Tokens.List);
     expect(out as string).toContain('prose-list-card');
-    expect(out as string).toContain('<ul>');
+    expect(out as string).toContain('<ul dir="auto">');
+    expect(out as string).toContain('<li>[text]</li>');
   });
 
   it('wraps ordered lists in prose-list-card with <ol>', () => {
@@ -417,7 +434,7 @@ describe('list card extension', () => {
         { tokens: [{ type: 'text' } as Tokens.Generic] } as Tokens.ListItem,
       ],
     } as Tokens.List);
-    expect(out as string).toContain('<ol>');
+    expect(out as string).toContain('<ol dir="auto">');
   });
 
   it('emits a start attribute when ordered list does not start at 1', () => {
@@ -434,7 +451,38 @@ describe('list card extension', () => {
         { tokens: [{ type: 'text' } as Tokens.Generic] } as Tokens.ListItem,
       ],
     } as Tokens.List);
-    expect(out as string).toContain('start="5"');
+    expect(out as string).toContain('<ol dir="auto" start="5">');
+  });
+
+  it('renders nested lists with direction on each list container', () => {
+    const renderList = rendererOf(ext()).list as (
+      this: unknown,
+      token: Tokens.List,
+    ) => string | false;
+    const nested = {
+      type: 'list',
+      ordered: true,
+      start: 3,
+      items: [{ tokens: [{ type: 'text', text: 'nested' }] }],
+    } as Tokens.List;
+    const parent = {
+      type: 'list',
+      ordered: false,
+      start: 1,
+      items: [{ tokens: [nested] }],
+    } as Tokens.List;
+    const context = {
+      parser: {
+        parse: (tokens: Tokens.Generic[]) =>
+          tokens.map((token) => token.type === 'list'
+            ? renderList.call(context, token as Tokens.List)
+            : token.type === 'text' ? token['text'] : '').join(''),
+      },
+    };
+    const out = renderList.call(context, parent) as string;
+    expect(out).toContain('<ul dir="auto">');
+    expect(out).toContain('<ol dir="auto" start="3">');
+    expect(out).not.toContain('<li dir=');
   });
 });
 

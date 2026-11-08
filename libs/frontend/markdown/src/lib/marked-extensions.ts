@@ -77,15 +77,13 @@ function createCalloutExtension(): MarkedExtension {
         const calloutType = (token as unknown as Record<string, unknown>)[
           'calloutType'
         ] as string | undefined;
-        if (!calloutType) return false; // Fall back to default renderer
-
-        const meta = CALLOUT_TYPES[calloutType];
-        if (!meta) return false;
-
-        const typeLower = calloutType.toLowerCase();
         const body = (
           this as { parser: { parse: (tokens: Tokens.Generic[]) => string } }
         ).parser.parse(token.tokens);
+        const meta = calloutType ? CALLOUT_TYPES[calloutType] : undefined;
+        if (!calloutType || !meta) return `<blockquote dir="auto">\n${body}</blockquote>\n`;
+
+        const typeLower = calloutType.toLowerCase();
 
         return `<div class="callout callout-${typeLower}">
   <div class="callout-header">
@@ -329,10 +327,10 @@ function createListCardExtension(): MarkedExtension {
 
         if (token.ordered) {
           const startAttr = token.start !== 1 ? ` start="${token.start}"` : '';
-          return `<div class="prose-list-card"><ol${startAttr}>\n${body}\n</ol></div>\n`;
+          return `<div class="prose-list-card"><ol dir="auto"${startAttr}>\n${body}\n</ol></div>\n`;
         }
 
-        return `<div class="prose-list-card"><ul>\n${body}\n</ul></div>\n`;
+        return `<div class="prose-list-card"><ul dir="auto">\n${body}\n</ul></div>\n`;
       },
     },
   };

@@ -100,6 +100,15 @@ function fullSanitizer(): (html: string) => string {
   return (html) => unwrapContainmentRoot(sanitize(html));
 }
 
+it('full preset preserves direction on lists and blockquotes', () => {
+  const out = fullSanitizer()('<ul dir="auto"><li>عربي</li></ul>' +
+    '<ol dir="auto" start="5"><li>عربي</li></ol>' +
+    '<blockquote dir="auto"><p>عربي</p></blockquote>');
+  expect(out).toContain('<ul dir="auto">');
+  expect(out).toContain('<ol dir="auto" start="5">');
+  expect(out).toContain('<blockquote dir="auto">');
+});
+
 function memberConfig(): CapturedMarkdownConfig {
   return presetConfig('member');
 }
@@ -129,6 +138,15 @@ describe("the 'member' preset sanitizer (member-authored UGC)", () => {
     expect(out).toContain('class="language-ts"');
     expect(out).toContain('<blockquote>');
     expect(out).toContain('<td>cell</td>');
+  });
+
+  it('preserves direction on lists and blockquotes', () => {
+    const out = sanitize('<ul dir="auto"><li>عربي</li></ul>' +
+      '<ol dir="auto" start="5"><li>عربي</li></ol>' +
+      '<blockquote dir="auto"><p>عربي</p></blockquote>');
+    expect(out).toContain('<ul dir="auto">');
+    expect(out).toContain('<ol dir="auto" start="5">');
+    expect(out).toContain('<blockquote dir="auto">');
   });
 
   it('strips <script>', () => {
