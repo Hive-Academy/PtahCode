@@ -63,6 +63,7 @@ import {
   type WritableSignal,
 } from '@angular/core';
 import { ChatInputComponent } from './chat-input.component';
+import { readFileSync } from 'node:fs';
 import { ComposerDraftStore } from '../../../services/composer-draft.store';
 import { ComposerCompactStore } from '../../../services/composer-compact.store';
 import { ComposerAttachmentsService } from '../../../services/composer-attachments.service';
@@ -101,6 +102,12 @@ import { SessionId, TabId as SharedTabId } from '@ptah-extension/shared';
 
 describe('ChatInputComponent', () => {
   let component: ChatInputComponent;
+
+  it('uses automatic direction on the native textarea', () => {
+    const source = readFileSync(__dirname + '/chat-input.component.ts', 'utf8');
+    const template = source.replace(/<!--[\s\S]*?-->/g, '');
+    expect(template).toMatch(/<textarea[^>]*\bdir="auto"/);
+  });
 
   // Mock services
   const mockChatStore = {

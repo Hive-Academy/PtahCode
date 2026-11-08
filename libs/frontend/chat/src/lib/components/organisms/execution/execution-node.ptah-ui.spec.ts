@@ -666,3 +666,12 @@ describe('execution agent tile mode', () => {
     ).toBe(false);
   });
 });
+
+describe('execution markdown bidi styles', () => {
+  it('keeps Mermaid controls out of automatic direction and isolates code controls', () => {
+    const source = readFileSync(join(__dirname, 'execution-node.component.ts'), 'utf8');
+    expect(source).toMatch(/@else if \(mermaidHost\(\)\) \{\s*<div\s+class="[^"]*exec-text-branch"\s*>/);
+    expect(source).toMatch(/th, td, \.code-block-note\) \{\s*unicode-bidi: plaintext;/);
+    expect(source).toMatch(/\.code-block-container \{\s*direction: ltr;\s*unicode-bidi: isolate;/);
+  });
+});

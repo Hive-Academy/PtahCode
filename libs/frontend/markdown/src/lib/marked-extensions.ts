@@ -77,20 +77,18 @@ function createCalloutExtension(): MarkedExtension {
         const calloutType = (token as unknown as Record<string, unknown>)[
           'calloutType'
         ] as string | undefined;
-        if (!calloutType) return false; // Fall back to default renderer
-
-        const meta = CALLOUT_TYPES[calloutType];
-        if (!meta) return false;
-
-        const typeLower = calloutType.toLowerCase();
         const body = (
           this as { parser: { parse: (tokens: Tokens.Generic[]) => string } }
         ).parser.parse(token.tokens);
+        const meta = calloutType ? CALLOUT_TYPES[calloutType] : undefined;
+        if (!calloutType || !meta) return `<blockquote dir="auto">\n${body}</blockquote>\n`;
 
-        return `<div class="callout callout-${typeLower}">
+        const typeLower = calloutType.toLowerCase();
+
+        return `<div class="callout callout-${typeLower}" dir="auto">
   <div class="callout-header">
     <span class="callout-dot"></span>
-    <span class="callout-title">${meta.title}</span>
+    <span class="callout-title" dir="ltr">${meta.title}</span>
   </div>
   <div class="callout-body">${body}</div>
 </div>\n`;
@@ -289,11 +287,11 @@ function createEnhancedHeadingsExtension(): MarkedExtension {
         ).parser.parseInline(token.tokens);
 
         if (depth === 1 || depth === 2) {
-          return `<h${depth} class="prose-heading-accented"><span class="prose-heading-dot"></span>${text}</h${depth}>\n`;
+          return `<h${depth} class="prose-heading-accented" dir="auto"><span class="prose-heading-dot"></span>${text}</h${depth}>\n`;
         }
 
         if (depth === 3) {
-          return `<h3 class="prose-heading-bordered">${text}</h3>\n`;
+          return `<h3 class="prose-heading-bordered" dir="auto">${text}</h3>\n`;
         }
         return false;
       },
@@ -329,10 +327,10 @@ function createListCardExtension(): MarkedExtension {
 
         if (token.ordered) {
           const startAttr = token.start !== 1 ? ` start="${token.start}"` : '';
-          return `<div class="prose-list-card"><ol${startAttr}>\n${body}\n</ol></div>\n`;
+          return `<div class="prose-list-card"><ol dir="auto"${startAttr}>\n${body}\n</ol></div>\n`;
         }
 
-        return `<div class="prose-list-card"><ul>\n${body}\n</ul></div>\n`;
+        return `<div class="prose-list-card"><ul dir="auto">\n${body}\n</ul></div>\n`;
       },
     },
   };
