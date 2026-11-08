@@ -8,6 +8,9 @@ import type {
 } from '@ptah-extension/vscode-core';
 import { Logger as LoggerClass } from '@ptah-extension/vscode-core';
 import { registerProviderPricing, resetPricingMapForTesting, type SubagentRecord } from '@ptah-extension/shared';
+import type { SessionId } from '@ptah-extension/shared';
+import type { SDKMessage } from '../../types/sdk-types/claude-sdk.types';
+import { STREAM_MONITOR_WAIT_MS, waitForMonitorMessage } from '../stream-transformer';
 import type { CompactionConfigProvider } from '../compaction-config-provider';
 import { MainThreadNoticeQueue } from '../main-thread-notice-queue';
 import {
@@ -2249,6 +2252,39 @@ describe('SubagentBudgetMonitor', () => {
       expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
       expect(h.dispatcher.pushParentMessage).toHaveBeenCalledWith(SESSION, expect.stringContaining('SDK task: task-1'));
     });
+
+    it('pushes the forced handoff when observe finishes after the stream wait expires', async () => {
+        const h = makeHarness({ agentId: 'agent-7' }, {
+          workspace, handoffTokens: 40_000, stopWeightedTokens: 40_000,
+        });
+        let releaseStop: () => void = () => undefined;
+        h.dispatcher.stopSubagent.mockImplementationOnce(() => new Promise<void>((resolve) => {
+          releaseStop = resolve;
+        }));
+        await h.monitor.observe(SESSION, spawn({ description: 'Review the auth module' }));
+        let observed = Promise.resolve();
+        const pendingWait = waitForMonitorMessage(
+          h.logger as unknown as Logger,
+          SESSION as SessionId,
+          atContext(40_000, 'late-stop') as SDKMessage,
+          (message) => {
+            observed = h.monitor.observe(SESSION, message);
+            return observed;
+          },
+        );
+        await pendingWait;
+        expect(h.dispatcher.pushParentMessage).not.toHaveBeenCalled();
+        expect(h.logger.warn).toHaveBeenCalledWith(
+          '[StreamTransformer] onMessage wait timed out; the stream continues',
+          expect.objectContaining({ sessionId: SESSION, toolUseId: TOOL_CALL, waitedMs: STREAM_MONITOR_WAIT_MS }),
+        );
+        releaseStop();
+        await observed;
+        expect(h.dispatcher.pushParentMessage).toHaveBeenCalledWith(
+          SESSION,
+          expect.stringContaining("Ptah's subagent budget monitor handed off subagent"),
+        );
+    }, STREAM_MONITOR_WAIT_MS + 15_000);
 
     it('routes a 54k to 101k threshold jump into the notes gate', async () => {
       const h = makeHarness({ agentId: 'agent-7' }, { workspace, handoffTokens: 60_000 });
