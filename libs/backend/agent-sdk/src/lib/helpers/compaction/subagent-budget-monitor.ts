@@ -137,6 +137,8 @@ export type SubagentHandoffRecordsPort = Pick<
   | 'writeOnce'
   | 'markInvoked'
   | 'withdraw'
+  | 'disposeUnsafe'
+  | 'publishIfOwned'
   | 'forget'
   | 'writeStub'
 >;
@@ -706,7 +708,7 @@ export class SubagentBudgetMonitor {
 
   /** Gate only the warned SDK agent; an absent agent_id is the parent. */
   async checkNotesTool(
-    sessionId: string,
+    sessionId: string | undefined,
     agentId: string | undefined,
     toolName: string,
     toolInput: unknown,
@@ -714,7 +716,7 @@ export class SubagentBudgetMonitor {
   ): Promise<string | undefined> {
     if (!agentId || !this.notesGate.has(agentId)) return undefined;
     const decision = this.notesGate.check(agentId, toolName, toolInput, now);
-    if (decision.stop) {
+    if (decision.stop && sessionId) {
       void this.stopWarnedAgent(sessionId, agentId).catch((error: unknown) => {
         this.logger.error('[SubagentBudgetMonitor] Notes gate safety stop failed', {
           error: error instanceof Error ? error : new Error(String(error)),
@@ -852,7 +854,9 @@ export class SubagentBudgetMonitor {
           }
           if (!await this.finalizeNotes(prepared, toolCallId)) return;
           // Publish a safe record even if the parent session was released during preparation.
-          if (prepared.record) this.index.publish(prepared.record.workspace, prepared.record.name);
+          const handoffRecord = prepared.record;
+          if (handoffRecord && !this.records.publishIfOwned(toolCallId, handoffRecord.path,
+            () => this.index.publish(handoffRecord.workspace, handoffRecord.name))) return;
           const live = this.liveSession(session);
           if (!live) {
             this.logger.info('[SubagentBudgetMonitor] Normal exit skipped: session released', { sessionId, agentId, toolCallId });
@@ -865,6 +869,7 @@ export class SubagentBudgetMonitor {
           }
           liveState.prepared = prepared;
           liveState.stopFired = true;
+          this.clearStopRetry(liveState);
           liveState.stopped = true;
           liveState.stoppedAgentId = agentId;
           liveState.stoppedRecordPath = prepared.record?.path;
@@ -1621,7 +1626,9 @@ export class SubagentBudgetMonitor {
     // The stop may have ended the subagent even when it rejected: from here
     // on the record is kept and named on main-thread prompts.
     if (!await this.finalizeNotes(prepared, toolCallId)) return;
-    if (prepared.record) this.index.publish(prepared.record.workspace, prepared.record.name);
+    const record = prepared.record;
+    if (record && !this.records.publishIfOwned(toolCallId, record.path,
+      () => this.index.publish(record.workspace, record.name))) return;
 
     // Released while the stop ran: the session is over, so no retry and no handoff.
     const current = this.liveSession(session);
@@ -1721,17 +1728,7 @@ export class SubagentBudgetMonitor {
       this.logger.error('[SubagentBudgetMonitor] Handoff notes redaction failed; delivery withheld',
         error instanceof Error ? error : new Error(String(error)));
       if (prepared.record) {
-        await this.records.withdraw(toolCallId, prepared.record.path);
-        // An invoked stop keeps its writer, so withdraw alone cannot remove that record.
-        try {
-          await fs.unlink(prepared.record.path);
-        } catch (removeError: unknown) {
-          // degradation-audit: optional-capability - the record was already removed by withdraw.
-          if (!(removeError instanceof Error && 'code' in removeError && removeError.code === 'ENOENT')) {
-            this.logger.error('[SubagentBudgetMonitor] Unsafe handoff record removal failed',
-              removeError instanceof Error ? removeError : new Error(String(removeError)));
-          }
-        }
+        await this.records.disposeUnsafe(toolCallId, prepared.record.path);
       }
       return false;
     }

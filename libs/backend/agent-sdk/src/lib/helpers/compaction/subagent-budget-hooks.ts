@@ -41,12 +41,27 @@ export function createSubagentBudgetHooks(
         logger.warn('[SubagentBudgetHooks] Hook missing session id', {
           hasSessionId: false, eventName: event, agentId: data.agent_id, toolName: data.tool_name,
         });
-        // A warned agent's tool call must be blocked; lifecycle hooks and ungated calls pass.
         if (event === 'PreToolUse' && monitor.hasNotesGate(data.agent_id)) {
-          return { hookSpecificOutput: {
+          if (!data.tool_name) return { hookSpecificOutput: {
             hookEventName: 'PreToolUse' as const, permissionDecision: 'deny' as const,
             permissionDecisionReason: NOTES_GATE_FAILURE_REASON,
           } };
+          try {
+            const reason = await monitor.checkNotesTool(undefined, data.agent_id, data.tool_name, data.tool_input);
+            return reason ? { hookSpecificOutput: {
+              hookEventName: 'PreToolUse' as const, permissionDecision: 'deny' as const,
+              permissionDecisionReason: reason,
+            } } : { continue: true };
+          } catch (error: unknown) {
+            logger.error('[SubagentBudgetHooks] Hook failed', {
+              error: error instanceof Error ? error : new Error(String(error)), eventName: event,
+              agentId: data.agent_id, toolUseId: data.tool_use_id,
+            });
+            return { hookSpecificOutput: {
+              hookEventName: 'PreToolUse' as const, permissionDecision: 'deny' as const,
+              permissionDecisionReason: NOTES_GATE_FAILURE_REASON,
+            } };
+          }
         }
         return { continue: true };
       }

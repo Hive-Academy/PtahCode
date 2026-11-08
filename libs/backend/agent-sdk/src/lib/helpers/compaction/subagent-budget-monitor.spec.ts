@@ -153,6 +153,13 @@ function fakeRecords(order: string[]) {
     withdraw: jest.fn(async (_toolCallId: string, _recordPath: string) => {
       order.push('withdraw');
     }),
+    disposeUnsafe: jest.fn(async (_toolCallId: string, _recordPath: string) => {
+      order.push('disposeUnsafe');
+    }),
+    publishIfOwned: jest.fn((_toolCallId: string, _recordPath: string, publish: () => void) => {
+      publish();
+      return true;
+    }),
     forget: jest.fn((_sessionIds: ReadonlySet<string>) => undefined),
     writeStub: jest.fn(
       async (_prompt: string, _agentType: string, _recordPath: string) =>
@@ -3055,6 +3062,48 @@ describe('SubagentBudgetMonitor handoff records', () => {
     expect(jest.getTimerCount()).toBe(0);
   });
 
+  it('clears a pending failed-stop retry immediately on normal exit', async () => {
+    jest.useFakeTimers();
+    const h = makeHarness({}, { workspace });
+    await h.monitor.observe(SESSION, assistant({ input: 130_000 }, { id: 'warn' }));
+    expect(h.monitor.hasNotesGate('a1')).toBe(true);
+    h.dispatcher.stopSubagent.mockRejectedValueOnce(new Error('busy'));
+    await h.monitor.observe(SESSION, over('m1'));
+    expect(jest.getTimerCount()).toBeGreaterThan(0);
+    await h.monitor.finishWarnedAgent(SESSION, 'a1');
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('keeps an invoked shared record when a later final notes scrub fails', async () => {
+    const records = new SubagentHandoffRecords(quietLogger(), () => workspace);
+    const writeOnce = jest.spyOn(records, 'writeOnce');
+    const paths = { notes: '/ws/private-notes.md', task: '/ws/task.md' };
+    let redactions = 0;
+    let failFirstFinal: (() => void) | undefined;
+    const handoffFiles = {
+      paths: jest.fn(() => paths), saveTask: jest.fn(async () => true),
+      notesExist: jest.fn(async () => true),
+      redactNotes: jest.fn(async () => {
+        redactions += 1;
+        if (redactions === 2) {
+          return new Promise<boolean>((resolve) => { failFirstFinal = () => resolve(false); });
+        }
+        return true;
+      }),
+    };
+    const h = makeHarness({ agentId: 'a1' }, { records, handoffFiles });
+    const first = h.monitor.observe('session-a', over('a1'));
+    await waitUntil(() => failFirstFinal !== undefined);
+    const second = h.monitor.observe('session-b', over('b1'));
+    await second;
+    const write = await writeOnce.mock.results[0].value as HandoffRecordWrite;
+    if (!write.ok) throw new Error('record setup failed');
+    expect(h.index.publish).toHaveBeenCalledWith(write.workspace, write.name);
+    failFirstFinal?.();
+    await first;
+    expect(fs.existsSync(write.path)).toBe(true);
+  });
+
   it.each(['budget stop', 'normal exit'])('withholds an indexed notes path when the final scrub fails on %s', async (route) => {
     const paths = { notes: '/ws/private-notes.md', task: '/ws/task.md' };
     const handoffFiles = {
@@ -3072,7 +3121,7 @@ describe('SubagentBudgetMonitor handoff records', () => {
     }
     expect(h.recordStore.writeOnce.mock.calls[0][2]).toContain(paths.notes);
     expect(h.index.publish).not.toHaveBeenCalled();
-    expect(h.recordStore.withdraw).toHaveBeenCalledTimes(1);
+    expect(h.recordStore.disposeUnsafe).toHaveBeenCalledTimes(1);
     expect(h.logger.error).toHaveBeenCalledWith(expect.stringContaining('redaction failed'), expect.any(Error));
   });
 

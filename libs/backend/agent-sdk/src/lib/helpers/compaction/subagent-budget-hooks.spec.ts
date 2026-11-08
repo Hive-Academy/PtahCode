@@ -103,6 +103,7 @@ describe('subagent budget hooks', () => {
 
   it('denies a warned agent without a session id when it calls a non-notes tool', async () => {
     monitor.hasNotesGate.mockReturnValueOnce(true);
+    monitor.checkNotesTool.mockResolvedValueOnce('write notes first');
     const noSessionHooks = createSubagentBudgetHooks(logger, monitor);
     const callback = noSessionHooks.PreToolUse?.[0]?.hooks[0];
     if (!callback) throw new Error('missing PreToolUse hook');
@@ -111,12 +112,30 @@ describe('subagent budget hooks', () => {
     } as HookInput, 'tool-3', { signal: new AbortController().signal })).toEqual({
       hookSpecificOutput: {
         hookEventName: 'PreToolUse', permissionDecision: 'deny',
-        permissionDecisionReason: 'Ptah notes gate failed. End your turn now; do not call other tools.',
+        permissionDecisionReason: 'write notes first',
       },
     });
     expect(monitor.hasNotesGate).toHaveBeenCalledWith('agent-7');
+    expect(monitor.checkNotesTool).toHaveBeenCalledWith(undefined, 'agent-7', 'Bash', { command: 'pwd' });
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('missing session id'),
       expect.objectContaining({ hasSessionId: false, eventName: 'PreToolUse', agentId: 'agent-7', toolName: 'Bash' }));
+  });
+
+  it('allows a warned agent notes write without a session id before expiry and denies it after expiry', async () => {
+    monitor.hasNotesGate.mockReturnValueOnce(true).mockReturnValueOnce(true);
+    monitor.checkNotesTool.mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce('Ptah budget handoff expired. End your turn now.');
+    const callback = createSubagentBudgetHooks(logger, monitor).PreToolUse?.[0]?.hooks[0];
+    if (!callback) throw new Error('missing PreToolUse hook');
+    const input = { hook_event_name: 'PreToolUse', agent_id: 'agent-7',
+      tool_name: 'Write', tool_input: { file_path: 'notes.md', content: 'progress' } } as HookInput;
+    expect(await callback(input, 'tool-4', { signal: new AbortController().signal })).toEqual({ continue: true });
+    expect(await callback(input, 'tool-5', { signal: new AbortController().signal })).toEqual({
+      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny',
+        permissionDecisionReason: 'Ptah budget handoff expired. End your turn now.' },
+    });
+    expect(monitor.checkNotesTool).toHaveBeenCalledWith(undefined, 'agent-7', 'Write',
+      { file_path: 'notes.md', content: 'progress' });
   });
 
   it('warns and allows an unwarned agent when a notes hook cannot resolve a session id', async () => {

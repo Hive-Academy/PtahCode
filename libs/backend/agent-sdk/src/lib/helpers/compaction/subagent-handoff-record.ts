@@ -299,6 +299,7 @@ interface RecordWriter {
   path?: string;
   /** `stopSubagent` was called with this record: never delete it. */
   invoked: boolean;
+  published?: boolean;
 }
 
 export class SubagentHandoffRecords {
@@ -353,6 +354,15 @@ export class SubagentHandoffRecords {
     }
   }
 
+  /** Claim publication synchronously with disposal's ownership check. */
+  publishIfOwned(toolCallId: string, recordPath: string, publish: () => void): boolean {
+    const writer = this.writers.get(toolCallId);
+    if (!writer || writer.path !== recordPath) return false;
+    writer.published = true;
+    publish();
+    return true;
+  }
+
   /**
    * The stop of `toolCallId` will not run (released session, or another stop
    * finished first): delete its record at `recordPath`, unless a stop was
@@ -360,7 +370,7 @@ export class SubagentHandoffRecords {
    */
   async withdraw(toolCallId: string, recordPath: string): Promise<void> {
     const writer = this.writers.get(toolCallId);
-    if (!writer || writer.invoked || writer.path !== recordPath) {
+    if (!writer || writer.invoked || writer.published || writer.path !== recordPath) {
       return;
     }
     this.writers.delete(toolCallId);
@@ -375,6 +385,19 @@ export class SubagentHandoffRecords {
         { toolCallId, ...errorDetails(error) },
       );
     }
+  }
+
+  /** A failed final notes scrub may discard only this uninvoked writer's record. */
+  async disposeUnsafe(toolCallId: string, recordPath: string): Promise<void> {
+    const writer = this.writers.get(toolCallId);
+    if (!writer || writer.path !== recordPath) return;
+    if (writer.invoked || writer.published) {
+      this.logger.warn('[SubagentHandoffRecords] Unsafe record retained after another stop invoked it', {
+        toolCallId, error: new Error('Record is owned by an invoked stop'),
+      });
+      return;
+    }
+    await this.withdraw(toolCallId, recordPath);
   }
 
   /**

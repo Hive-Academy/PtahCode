@@ -73,7 +73,12 @@ const memoryHandoffRecords: SubagentHandoffRecordsPort = {
     name: 'record.handoff.md',
   }),
   markInvoked: () => undefined,
+  publishIfOwned: (_toolCallId, _recordPath, publish) => {
+    publish();
+    return true;
+  },
   withdraw: async () => undefined,
+  disposeUnsafe: async () => undefined,
   forget: () => undefined,
   writeStub: async () => undefined,
 };
