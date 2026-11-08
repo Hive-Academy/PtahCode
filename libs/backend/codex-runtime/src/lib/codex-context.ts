@@ -97,6 +97,7 @@ class RuntimeContext implements CodexContext {
   private readonly terminalTurns = new Set<string>();
   private readonly childTools = new Map<string, string>();
   private readonly knownChildParents = new Map<string, string>();
+  private readonly childParentThreads = new Map<string, string>();
   private readonly childTurns = new Map<string, string>();
   private readonly pendingSpawns = new Map<string, Set<string>>();
   private readonly pendingChildParents = new Map<string, string>();
@@ -417,18 +418,24 @@ class RuntimeContext implements CodexContext {
         const candidates = this.pendingSpawns.get(parentId);
         if (candidates?.size === 1) {
           const toolId = [...candidates][0];
-          if (toolId) this.linkChild(started.data.thread.id, toolId);
+          if (toolId) this.linkChild(started.data.thread.id, toolId, parentId);
         }
       }
     }
     const params = frame.params;
-    if (typeof params === 'object' && params !== null && 'threadId' in params &&
+    if (typeof params === 'object' && params !== null && !Array.isArray(params) &&
       typeof params['threadId'] === 'string' &&
-      params['threadId'] !== this.identity.threadId &&
-      !this.childTools.has(params['threadId']) &&
-      this.unlinkedMethodsLogged.size < 32 && !this.unlinkedMethodsLogged.has(frame.method)) {
-      this.unlinkedMethodsLogged.add(frame.method);
-      this.options.logger.debug('Codex unlinked thread notification', { method: frame.method });
+      params['threadId'] !== this.identity.threadId) {
+      const threadId = params['threadId'];
+      const wasUnlinked = !this.childTools.has(threadId);
+      if (wasUnlinked) this.linkChild(threadId, threadId);
+      if (this.unlinkedMethodsLogged.size < 32 &&
+        !this.unlinkedMethodsLogged.has(frame.method)) {
+        this.unlinkedMethodsLogged.add(frame.method);
+        this.options.logger.debug('Codex child thread notification', {
+          method: frame.method, fields: Object.keys(params).sort().join(','),
+        });
+      }
     }
     // Compaction owns admission, so thread item activity belongs to its work.
     if (
@@ -449,7 +456,7 @@ class RuntimeContext implements CodexContext {
         if (candidates?.size === 1) {
           const toolId = [...candidates][0];
           if (toolId && parsed.item.agentThreadId !== parsed.threadId)
-            this.linkChild(parsed.item.agentThreadId, toolId);
+            this.linkChild(parsed.item.agentThreadId, toolId, parsed.threadId);
         }
       }
       if (
@@ -508,7 +515,7 @@ class RuntimeContext implements CodexContext {
         this.pendingSpawns.set(event.threadId, pending);
         for (const [childId, parentId] of this.pendingChildParents)
           if (parentId === event.threadId && pending.size === 1)
-            this.linkChild(childId, event.toolId);
+            this.linkChild(childId, event.toolId, event.threadId);
       }
       if (event.type === 'toolCompleted')
         this.pendingSpawns.get(event.threadId)?.delete(event.toolId);
@@ -523,12 +530,25 @@ class RuntimeContext implements CodexContext {
     }
   }
 
-  private linkChild(threadId: string, toolId: string): void {
+  private linkChild(
+    threadId: string, toolId: string,
+    parentThreadId = this.identity.threadId,
+  ): void {
+    if (threadId === this.identity.threadId) return;
+    if (!this.childParentThreads.has(threadId))
+      this.options.logger.info('Codex child linked', {
+        parentThreadId, childThreadId: threadId,
+      });
+    this.childParentThreads.set(threadId, parentThreadId);
     this.pendingChildParents.delete(threadId);
     if (!this.knownChildParents.has(threadId) &&
       this.knownChildParents.size >= 256) {
       const oldest = this.knownChildParents.keys().next().value;
-      if (oldest) this.knownChildParents.delete(oldest);
+      if (oldest) {
+        this.knownChildParents.delete(oldest);
+        this.childParentThreads.delete(oldest);
+        this.childTools.delete(oldest);
+      }
       this.options.logger.error(
         'Codex child thread linkage cache limit reached',
         { reason: 'Oldest inactive child linkage was removed' },
@@ -574,10 +594,16 @@ class RuntimeContext implements CodexContext {
     event: CodexRuntimeEvent,
     parentToolUseId: string | undefined,
   ): void {
+      const parentThreadId = this.childParentThreads.get(event.threadId);
+      if (parentThreadId) event = { ...event, parentThreadId };
+      if (parentThreadId && (event.type === 'usage' || event.type === 'terminal') &&
+        event.evidence)
+        event = { ...event, evidence: { ...event.evidence, parentThreadId } };
       if (event.type === 'terminal') {
         if (parentToolUseId !== undefined) {
           this.emit({ ...event, parentToolUseId });
           this.childTools.delete(event.threadId);
+           this.childParentThreads.delete(event.threadId);
           this.childTurns.delete(event.threadId);
           this.pendingSpawns.delete(event.threadId);
           if (this.rootTerminalPending && this.childTools.size === 0)
@@ -620,7 +646,8 @@ class RuntimeContext implements CodexContext {
           presentation: card ? 'card' : 'text',
           text: event.text || event.questions.map((question) => question.title).join('\n'),
         });
-      } else this.emit(parentToolUseId === undefined ? event : { ...event, parentToolUseId });
+       } else this.emit(parentToolUseId === undefined ? event :
+         { ...event, parentToolUseId });
   }
 
   private finishActiveTurn(): void {

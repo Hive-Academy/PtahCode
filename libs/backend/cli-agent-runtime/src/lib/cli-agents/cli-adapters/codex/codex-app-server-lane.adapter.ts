@@ -733,8 +733,12 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       if (active || starting)
         return Promise.reject(new Error('Codex lane turn is already active'));
       starting = true;
-      if (nextTurnWarnings.length > 0)
+      if (nextTurnWarnings.length > 0) {
+        this.logger.debug('[CodexAppServerLaneAdapter] Budget warning injected', {
+          warningId: 'agent-budget-warning',
+        });
         text = `${nextTurnWarnings.splice(0).join('\n\n')}\n\n${text}`;
+      }
       return new Promise<number>((resolve, reject) => {
         const start = async (): Promise<void> => {
           try {

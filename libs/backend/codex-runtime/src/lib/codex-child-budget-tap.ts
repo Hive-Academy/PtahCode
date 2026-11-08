@@ -40,6 +40,7 @@ export class CodexChildBudgetTap {
 
   /** Track attribution and accepted usage; events of untracked threads leave no state. */
   observe(event: CodexRuntimeEvent): void {
+    if (event.parentThreadId) this.remember(event.threadId, event.parentThreadId);
     if ((event.type === 'toolStarted' || event.type === 'toolCompleted') && event.agentThreadIds) {
       for (const child of event.agentThreadIds) this.remember(child, event.threadId);
     }

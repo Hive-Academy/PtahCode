@@ -29,7 +29,25 @@ PR: https://github.com/Hive-Academy/PtahCode/pull/986 (draft). Pushed head `5a84
 - Manager agent-process-manager.service.ts: 3849 physical / 3673 non-blank (main 3849 / 3675).
 - Side fix done for the user: PR #1000 CodeRabbit comment (commit 9cef23bb9, merged).
 
-## Update ~07:00 UTC (supersedes "In progress" below)
+## Update ~07:35 UTC (newest; supersedes the sections below)
+- feat/agent-budget pushed head `a55115439` (steer/queue warning, thread/started linkage); local
+  commit `67a6cb4cf` (live test round 4 report) not pushed yet. CI watch on a55115439 running.
+- Live test round 4: CLI lane path PROVEN end to end (per-turn records, one warning before stop via
+  queue-next-turn, budget stop + progress pointer, resume refused with budget-stop reason).
+  Open: warning text inside the lane not proven; native Codex child still unlinked (child thread
+  sends no thread/started; method order in live-test-round-4.md).
+- RUNNING: fix lane `7cc7ed48-89c4-44c9-be2b-14c73b34351b` (session 01a1ba12-e2e4-7932-82b9-0f94f7b19d03):
+  link unknown threadIds on the same Codex context as children; one charge per child turn; inject
+  queued warning into next turn input with a debug log. Deliverable live-test-4-fix-report.md.
+- RUNNING: batch B second pass lane `0afb4c55-0e5c-4a41-b987-5a790baf184f` (session
+  01a1b9f4-b44a-7332-9f59-83a06bc5d5cf) in .claude-worktrees/agent-budget-sdk; may add
+  `parent-delta` to agent-turn-usage.types.ts. Fix lane must not edit that file.
+- Ptah Dev is FREE; the task 7 session does not plan to use it (tell it when a run ends).
+- Then: commit fix, push, live test round 5 (B child + warning text via the Codex rollout JSONL),
+  commit+push batch B branch, merge it into feat/agent-budget, Haiku SDK live test, round 4 reviews
+  (logic + style) of the whole PR, PR body, ready for review.
+
+## Update ~07:00 UTC
 - Pushed head `5be9cd31d` (CI green). Local commits not pushed yet: `8c3f1ae35` (round 3 report).
 - Commits since 5a8411a14: `c6c025903` live test 1 report; `dcf9e5c88` one-turn-jump warning + per-turn
   info logs; `c7049c6e4` live test 2 report; `5be9cd31d` predictive warning, Codex queue fallback,
