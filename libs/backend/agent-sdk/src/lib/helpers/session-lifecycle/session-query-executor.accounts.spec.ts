@@ -541,6 +541,13 @@ describe('named SDK bootstrap and final admission', () => {
     await f.flow.dispose();
   });
 
+  it('accepts a decorated init version with the certified numeric triple', async () => {
+    const f = fixture({ initPatch: { claude_code_version: '2.1.310-beta.1 (Claude Code)' } });
+    await f.run();
+    await f.flow.dispose();
+    expect(f.admission.releaseReservation).toHaveBeenCalledTimes(1);
+  });
+
   it.each<[string, Partial<Options>, string]>([
     ['a flag-tier credential override', { settings: { apiKeyHelper: 'helper' } }, 'identity-unproved'],
     ['a flag-tier override as JSON', { settings: JSON.stringify({ forceLoginOrgUUID: 'x' }) }, 'identity-unproved'],

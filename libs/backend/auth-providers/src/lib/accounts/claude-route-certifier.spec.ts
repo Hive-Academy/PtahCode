@@ -264,6 +264,7 @@ describe('ClaudeRouteCertifier.certify', () => {
     expect(h.probe.status).not.toHaveBeenCalled();
     expect(logger.warn.mock.calls).toEqual([
       ['[ClaudeRouteCertifier] Claude CLI version is outside the policy coverage', { version, inspected: '2.1.310' }],
+      ['[ClaudeRouteCertifier] Named account certification refused', { step: 'cli-version' }],
     ]);
   });
 

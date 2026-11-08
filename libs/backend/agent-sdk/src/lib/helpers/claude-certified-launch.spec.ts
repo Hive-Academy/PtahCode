@@ -5,8 +5,6 @@ import type {
 } from '@ptah-extension/auth-providers-tokens';
 import {
   CLAUDE_CERTIFIED_ENV_KEYS,
-  CLAUDE_PERSONAL_ACCOUNT_INFO_SUBSCRIPTIONS,
-  CLAUDE_PERSONAL_SUBSCRIPTIONS,
   CLAUDE_SETTINGS_SAFE_ENV_KEYS,
   ClaudeCertifiedLaunchRefusal,
   assertCertifiedLaunch,
@@ -271,10 +269,6 @@ describe('allowlist helpers', () => {
     expect(Object.keys(env)).not.toContain('MCP_TIMEOUT');
   });
 
-  it('lists the personal subscriptions', () => {
-    expect(CLAUDE_PERSONAL_SUBSCRIPTIONS).toEqual(['pro', 'max']);
-  });
-
   it('excludes run-policy keys and undefined values from the digest', () => {
     const env = { A: '1', B: '2' };
     expect(certifiedEnvDigest({ B: '2', A: '1' })).toBe(
@@ -304,13 +298,6 @@ describe('claudePersonalLoginCheck', () => {
     apiProvider: 'firstParty',
   };
 
-  it('lists the accountInfo display names for personal subscriptions', () => {
-    expect(CLAUDE_PERSONAL_ACCOUNT_INFO_SUBSCRIPTIONS).toEqual([
-      'Claude Pro',
-      'Claude Max',
-    ]);
-  });
-
   it.each<[string, ClaudeRunningLoginInfo]>([
     ['the bundled CLI Claude Max shape', bundled],
     ['the bundled CLI Claude Pro shape', { subscriptionType: 'Claude Pro' }],
@@ -321,6 +308,9 @@ describe('claudePersonalLoginCheck', () => {
       { tokenSource: 'claude.ai', subscriptionType: 'pro' },
     ],
     ['raw max', { subscriptionType: 'max', apiProvider: 'firstParty' }],
+    ['max tier', { subscriptionType: 'max_20x' }],
+    ['display max tier', { subscriptionType: 'Claude Max 20x' }],
+    ['lower-case display', { subscriptionType: 'claude max' }],
   ])('passes %s', (_label, info) => {
     expect(passes(info)).toBe(true);
   });
@@ -342,7 +332,15 @@ describe('claudePersonalLoginCheck', () => {
     ['Claude API', { ...bundled, subscriptionType: 'Claude API' }],
     ['raw team', { ...bundled, subscriptionType: 'team' }],
     ['an unknown word', { ...bundled, subscriptionType: 'Claude Ultra' }],
-    ['a lower-case display name', { ...bundled, subscriptionType: 'claude max' }],
+    ['prefixed unknown family', { ...bundled, subscriptionType: 'claude_max' }],
+    ['substring maximum', { ...bundled, subscriptionType: 'maximum' }],
+    ['substring promax', { ...bundled, subscriptionType: 'promax' }],
+    ['a team-qualified max', { ...bundled, subscriptionType: 'Max Team' }],
+    ['an enterprise-qualified max', { ...bundled, subscriptionType: 'max-enterprise' }],
+    ['a parenthesized qualifier', { ...bundled, subscriptionType: 'Claude Max (Team)' }],
+    ['a qualified pro', { ...bundled, subscriptionType: 'pro team' }],
+    ['enterprise_max', { ...bundled, subscriptionType: 'enterprise_max' }],
+    ['empty subscription', { ...bundled, subscriptionType: '' }],
     ['no subscription', { apiProvider: 'firstParty' }],
     ['an empty object', {}],
   ])('refuses %s', (_label, info) => {
@@ -359,6 +357,9 @@ describe('claudePersonalLoginCheck', () => {
     ['max', 'max'],
     ['team', 'team'],
     ['enterprise', 'enterprise'],
+    ['Max Team', 'other'],
+    ['max_20x', 'max'],
+    ['enterprise_max', 'enterprise'],
     ['someone@example.test', 'other'],
     [undefined, 'absent'],
   ])('classifies subscription %s as the fixed word %s', (word, cls) => {

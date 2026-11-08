@@ -89,20 +89,6 @@ export const CLAUDE_SETTINGS_SAFE_ENV_KEYS = [
   'CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR',
 ] as const;
 
-/** Subscription words that classify a Claude login as personal (class P). */
-export const CLAUDE_PERSONAL_SUBSCRIPTIONS = ['pro', 'max'] as const;
-
-/**
- * Subscription display names a running child's `accountInfo()` / init reports
- * for a personal claude.ai login. The bundled Claude Code CLI (2.1.278) maps
- * its raw plan word to these names (`Claude Max`, `Claude Pro`, ...), unlike
- * `claude auth status --json`, which reports the raw words above.
- */
-export const CLAUDE_PERSONAL_ACCOUNT_INFO_SUBSCRIPTIONS = [
-  'Claude Pro',
-  'Claude Max',
-] as const;
-
 /** Fixed class of a running child's subscription word, safe to log. */
 export type ClaudeLoginSubscriptionClass =
   | 'pro'
@@ -113,24 +99,29 @@ export type ClaudeLoginSubscriptionClass =
   | 'other'
   | 'absent';
 
-/** Known raw and display subscription words; any other word is `other`. */
-const SUBSCRIPTION_CLASSES: ReadonlyMap<string, ClaudeLoginSubscriptionClass> =
-  new Map<string, ClaudeLoginSubscriptionClass>([
-    ['pro', 'pro'],
-    ['max', 'max'],
-    ['team', 'team'],
-    ['enterprise', 'enterprise'],
-    ['Claude Pro', 'pro'],
-    ['Claude Max', 'max'],
-    ['Claude Team', 'team'],
-    ['Claude Enterprise', 'enterprise'],
-    ['Claude API', 'api'],
-  ]);
+/** `pro` or `max`, alone or with a size suffix such as `_20x` or ` 20x`. */
+const PERSONAL_PLAN = /^(pro|max)(?:[\s_-]*\d+x)?$/;
 
-const PERSONAL_LOGIN_SUBSCRIPTIONS: ReadonlySet<string> = new Set<string>([
-  ...CLAUDE_PERSONAL_SUBSCRIPTIONS,
-  ...CLAUDE_PERSONAL_ACCOUNT_INFO_SUBSCRIPTIONS,
-]);
+/**
+ * Classify a raw (`max_20x`) or display (`Claude Max 20x`) subscription.
+ * A personal family needs the whole word to be the plan plus an optional size
+ * suffix: any other qualifier (`Max Team`, `max-enterprise`) is `other`.
+ * A non-personal family is read from the first word only.
+ */
+export function claudeSubscriptionFamily(word: string | undefined): ClaudeLoginSubscriptionClass {
+  if (word === undefined) return 'absent';
+  const plan = word.trim().replace(/^Claude\s+/i, '').toLowerCase();
+  const personal = PERSONAL_PLAN.exec(plan);
+  if (personal) return personal[1] === 'pro' ? 'pro' : 'max';
+  const first = plan.split(/[\s_-]/, 1)[0];
+  return first === 'team' || first === 'enterprise' || first === 'api' ? first : 'other';
+}
+
+/** Extract a leading numeric CLI version without pinning its suffix. */
+export function claudeLeadingVersion(value: string | undefined): string | null {
+  const match = /^(\d+)\.(\d+)\.(\d+)(?=$|[^\d.])/.exec(value ?? '');
+  return match ? `${match[1]}.${match[2]}.${match[3]}` : null;
+}
 
 /** The login fields of a running child's `accountInfo()` / init. */
 export interface ClaudeRunningLoginInfo {
@@ -164,7 +155,7 @@ export interface ClaudePersonalLoginCheck {
 export function claudePersonalLoginCheck(
   info: ClaudeRunningLoginInfo,
 ): ClaudePersonalLoginCheck {
-  const subscription = info.subscriptionType;
+  const subscription = claudeSubscriptionFamily(info.subscriptionType);
   return Object.freeze({
     tokenSource:
       info.tokenSource === undefined || info.tokenSource === 'claude.ai',
@@ -172,12 +163,8 @@ export function claudePersonalLoginCheck(
       info.apiKeySource === undefined || info.apiKeySource === 'none',
     apiProvider:
       info.apiProvider === undefined || info.apiProvider === 'firstParty',
-    subscription:
-      subscription === undefined
-        ? 'absent'
-        : (SUBSCRIPTION_CLASSES.get(subscription) ?? 'other'),
-    personalSubscription:
-      subscription !== undefined && PERSONAL_LOGIN_SUBSCRIPTIONS.has(subscription),
+    subscription,
+    personalSubscription: subscription === 'pro' || subscription === 'max',
   });
 }
 

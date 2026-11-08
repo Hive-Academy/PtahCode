@@ -1220,6 +1220,7 @@ describe('named lane final child init after the first turn (D68)', () => {
 
   it.each<[string, Message]>([
     ['a different CLI version', init({ claude_code_version: '2.1.278' })],
+    ['an unparseable CLI version', init({ claude_code_version: 'unknown' })],
     ['a non-personal key source', init({ apiKeySource: 'user' })],
   ])('refuses %s and forwards nothing', async (_label, message) => {
     const f = fixture({ init: message });
@@ -1227,6 +1228,11 @@ describe('named lane final child init after the first turn (D68)', () => {
     expect(f.commitRunBinding).not.toHaveBeenCalled();
     expect(f.attachSdkSession).not.toHaveBeenCalled();
     expect(f.admission.query).toBeUndefined();
+  });
+
+  it('accepts a decorated init version with the certified numeric triple', async () => {
+    const f = fixture({ init: init({ claude_code_version: '2.1.310-beta.1' }) });
+    await expect(f.run()).resolves.toBeUndefined();
   });
 
   it('refuses when no init arrives before the deadline', async () => {

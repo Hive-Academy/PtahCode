@@ -266,7 +266,6 @@ export {
 export { applyClaudeAccountRouteEnv } from './claude-account-route-env';
 export {
   CLAUDE_CERTIFIED_ENV_KEYS,
-  CLAUDE_PERSONAL_SUBSCRIPTIONS,
   CLAUDE_SETTINGS_SAFE_ENV_KEYS,
   ClaudeCertifiedLaunchRefusal,
   assertCertifiedLaunch,
