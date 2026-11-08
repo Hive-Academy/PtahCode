@@ -744,7 +744,8 @@ export class PiCliAdapter implements CliAdapter {
     try {
       event = JSON.parse(line);
     } catch {
-      // A text line is not a completion event; the normal output handler processes it.
+      // degradation-audit: optional-capability - a non-JSON text line is not a
+      // completion event; the normal output handler processes it.
       return undefined;
     }
     const parsed = piCompletionUsageSchema.safeParse(event);

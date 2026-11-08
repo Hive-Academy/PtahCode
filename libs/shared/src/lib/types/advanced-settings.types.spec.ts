@@ -33,9 +33,9 @@ const booleanSettings = ADVANCED_SETTINGS.filter(
 );
 
 describe('ADVANCED_SETTINGS table', () => {
-  it('describes the 26 surfaced keys, each once', () => {
+  it('describes the 28 surfaced keys, each once', () => {
     const keys = ADVANCED_SETTINGS.map((setting) => setting.key);
-    expect(keys).toHaveLength(26);
+    expect(keys).toHaveLength(28);
     expect(new Set(keys).size).toBe(keys.length);
   });
 
@@ -83,9 +83,11 @@ describe('ADVANCED_SETTINGS table', () => {
    */
   it.each([
     ['compaction.toolOutputBudgetTokens', 100, 200_000, true],
-    ['compaction.subagentHandoffTokens', 1_000, 2_000_000, true],
+    ['agentBudget.handoffContextTokens', 1_000, 2_000_000, true],
     ['compaction.rotationSuggestTokens', 1_000, 5_000_000, true],
-    ['compaction.subagentStopWeightedTokens', 1_000, 100_000_000, true],
+    ['agentBudget.stopWeightedTokens', 1_000, 100_000_000, true],
+    ['agentBudget.warnRatio', 0.01, 0.99, false],
+    ['agentBudget.maxDurationMin', 1, 1_440, true],
     ['compaction.idleCompactionMinTokens', 100_000, 5_000_000, true],
     ['agentOrchestration.codexAutoCompactTokens', 0, 2_000_000, true],
     ['agentOrchestration.codexToolOutputTokenLimit', 0, 200_000, true],
@@ -192,7 +194,7 @@ describe('validateAdvancedSettingValue', () => {
 
     it('groups thousands in the message', () => {
       const result = validateAdvancedSettingValue(
-        numberSetting('compaction.subagentStopWeightedTokens'),
+        numberSetting('agentBudget.stopWeightedTokens'),
         0,
       );
       expect(result).toEqual({
