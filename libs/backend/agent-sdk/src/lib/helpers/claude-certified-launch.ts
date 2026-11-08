@@ -117,10 +117,44 @@ export function claudeSubscriptionFamily(word: string | undefined): ClaudeLoginS
   return first === 'team' || first === 'enterprise' || first === 'api' ? first : 'other';
 }
 
-/** Extract a leading numeric CLI version without pinning its suffix. */
-export function claudeLeadingVersion(value: string | undefined): string | null {
-  const match = /^(\d+)\.(\d+)\.(\d+)(?=$|[^\d.])/.exec(value ?? '');
-  return match ? `${match[1]}.${match[2]}.${match[3]}` : null;
+/** Parse the complete leading CLI semver identity; a banner may follow whitespace. */
+export function claudeVersionIdentity(value: string | undefined): string | null {
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?=$|\s)/.exec(value ?? '');
+  return match?.[0] ?? null;
+}
+
+/** Compare parsed semver identities by precedence (build metadata is ignored). */
+export function compareClaudeVersions(left: string, right: string): number {
+  const parse = (value: string) => {
+    const withoutBuild = value.split('+', 1)[0];
+    const dash = withoutBuild.indexOf('-');
+    const core = dash < 0 ? withoutBuild : withoutBuild.slice(0, dash);
+    return { numbers: core.split('.').map(Number), prerelease: dash < 0 ? undefined : withoutBuild.slice(dash + 1).split('.') };
+  };
+  const a = parse(left);
+  const b = parse(right);
+  for (let index = 0; index < 3; index += 1) {
+    if (a.numbers[index] !== b.numbers[index]) return a.numbers[index] < b.numbers[index] ? -1 : 1;
+  }
+  if (!a.prerelease) return b.prerelease ? 1 : 0;
+  if (!b.prerelease) return -1;
+  for (let index = 0; index < Math.max(a.prerelease.length, b.prerelease.length); index += 1) {
+    const x = a.prerelease[index];
+    const y = b.prerelease[index];
+    if (x === undefined || y === undefined) return x === undefined ? -1 : 1;
+    if (x === y) continue;
+    const numericX = /^\d+$/.test(x);
+    const numericY = /^\d+$/.test(y);
+    if (numericX && numericY) {
+      const first = BigInt(x);
+      const second = BigInt(y);
+      if (first === second) continue;
+      return first < second ? -1 : 1;
+    }
+    if (numericX !== numericY) return numericX ? -1 : 1;
+    return x < y ? -1 : 1;
+  }
+  return 0;
 }
 
 /** The login fields of a running child's `accountInfo()` / init. */

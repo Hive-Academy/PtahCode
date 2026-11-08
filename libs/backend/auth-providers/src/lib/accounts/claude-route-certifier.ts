@@ -1,4 +1,4 @@
-import { buildCertifiedClaudeEnv, certifiedEnvDigest } from '@ptah-extension/agent-sdk';
+import { buildCertifiedClaudeEnv, certifiedEnvDigest, claudeVersionIdentity, compareClaudeVersions } from '@ptah-extension/agent-sdk';
 import type {
   ClaudeCertifiedExecutable,
   ClaudeCertifiedLaunchContext,
@@ -145,16 +145,8 @@ export interface ClaudeRouteCertifyRequest extends ClaudeAuthContextRequest {
   readonly reuse?: ClaudeCertificationScope;
 }
 
-function parseVersion(version: string): readonly [number, number, number] | null {
-  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
-  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
-}
-
-function belowMinimum(version: readonly [number, number, number]): boolean {
-  for (let index = 0; index < 3; index += 1) {
-    if (version[index] !== MIN_SUPPORTED_VERSION[index]) return version[index] < MIN_SUPPORTED_VERSION[index];
-  }
-  return false;
+function belowMinimum(version: string): boolean {
+  return compareClaudeVersions(version, MIN_SUPPORTED_VERSION.join('.')) < 0;
 }
 
 function refuse(code: ClaudeCertificationRefusalCode, terminated: boolean): ClaudeCertificationRefusal {
@@ -391,7 +383,7 @@ export class ClaudeRouteCertifier {
       return probed.closeReceipt ? { ...refusal, closeReceipts: Object.freeze([probed.closeReceipt]) } : refusal;
     }
     if (!probed.terminated) return refuse('identity-unproved', false);
-    const version = parseVersion(probed.executable.version);
+    const version = claudeVersionIdentity(probed.executable.version);
     if (!version) return refuse('identity-unproved', true);
     if (belowMinimum(version)) return refuse('unsupported-store', true);
     if (!claudeCoverageAcceptsVersion(entry, probed.executable.version)) {

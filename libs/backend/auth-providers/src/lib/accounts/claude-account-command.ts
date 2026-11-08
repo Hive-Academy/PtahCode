@@ -1,7 +1,7 @@
 import { stat as statFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { win32 } from 'node:path';
-import { buildCertifiedClaudeEnv, claudeLeadingVersion, type ClaudeCliDetector } from '@ptah-extension/agent-sdk';
+import { buildCertifiedClaudeEnv, claudeVersionIdentity, compareClaudeVersions, type ClaudeCliDetector } from '@ptah-extension/agent-sdk';
 import type { ClaudeCertifiedExecutable, ClaudeCertifiedExecutableFingerprint } from '@ptah-extension/auth-providers-tokens';
 import {
   killProcessTree, type IProcessSpawner, type SpawnedProcessHandle, type SpawnLaunchGuard,
@@ -230,11 +230,8 @@ function sameFingerprint(a: ClaudeCertifiedExecutableFingerprint, b: ClaudeCerti
   return a.size === b.size && a.mtimeMs === b.mtimeMs;
 }
 
-function belowMinimum(version: readonly number[]): boolean {
-  for (let index = 0; index < MIN_VERSION.length; index += 1) {
-    if (version[index] !== MIN_VERSION[index]) return version[index] < MIN_VERSION[index];
-  }
-  return false;
+function belowMinimum(version: string): boolean {
+  return compareClaudeVersions(version, MIN_VERSION.join('.')) < 0;
 }
 
 function envValue(env: Readonly<Record<string, string>>, name: string): string | undefined {
@@ -314,11 +311,10 @@ export class ClaudeAccountCommand implements ClaudeCliProbe {
     if (!run.terminated || run.exitCode !== 0) {
       return { ok: false, code: 'identity-unproved', terminated: run.terminated, ...receipt };
     }
-    // The first non-blank line leads with the version; any suffix after it is ignored.
-    const version = claudeLeadingVersion(run.stdout.trimStart().split(/\r?\n/, 1)[0]);
+    // The first non-blank line leads with a semver identity; banner text follows whitespace.
+    const version = claudeVersionIdentity(run.stdout.trimStart().split(/\r?\n/, 1)[0]);
     if (!version) return { ok: false, code: 'identity-unproved', terminated: true };
-    const parts = version.split('.').map(Number);
-    if (belowMinimum(parts)) return { ok: false, code: 'unsupported-store', terminated: true };
+    if (belowMinimum(version)) return { ok: false, code: 'unsupported-store', terminated: true };
 
     // The fingerprint belongs to the probed build only if it did not change during the probe.
     const after = await this.fingerprint(sdkExecutablePath);
@@ -328,7 +324,7 @@ export class ClaudeAccountCommand implements ClaudeCliProbe {
       command,
       prefixArgs: Object.freeze([...prefixArgs]),
       sdkExecutablePath,
-      version: parts.join('.'),
+      version,
       fingerprint: Object.freeze({ size: after.size, mtimeMs: after.mtimeMs }),
     });
     this.cached = { key, executable };

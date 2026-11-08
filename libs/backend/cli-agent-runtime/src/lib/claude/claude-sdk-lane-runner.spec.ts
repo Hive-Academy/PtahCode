@@ -1230,8 +1230,13 @@ describe('named lane final child init after the first turn (D68)', () => {
     expect(f.admission.query).toBeUndefined();
   });
 
-  it('accepts a decorated init version with the certified numeric triple', async () => {
+  it('refuses an init prerelease when the certified version is stable', async () => {
     const f = fixture({ init: init({ claude_code_version: '2.1.310-beta.1' }) });
+    await expect(f.run()).rejects.toMatchObject({ code: 'identity-unproved' });
+  });
+
+  it('accepts a decorated init with the certified identity', async () => {
+    const f = fixture({ init: init({ claude_code_version: '2.1.310 (build)' }) });
     await expect(f.run()).resolves.toBeUndefined();
   });
 

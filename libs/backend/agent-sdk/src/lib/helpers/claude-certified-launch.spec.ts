@@ -13,12 +13,38 @@ import {
   certifiedNamedEnv,
   claudePersonalLoginCheck,
   claudePersonalLoginPassed,
+  claudeVersionIdentity,
+  compareClaudeVersions,
   claudeSettingsOverride,
   type ClaudeRunningLoginInfo,
   isCertifiedClaudeEnvKey,
   isClaudeSettingsEnvKeyAllowed,
   type ClaudeActualLaunch,
 } from './claude-certified-launch';
+
+describe('Claude CLI semver identity', () => {
+  it.each([
+    ['2.1.319', '2.1.319'],
+    ['2.1.320 (Claude Code)', '2.1.320'],
+    ['2.1.320-beta.1 (Claude Code)', '2.1.320-beta.1'],
+    ['2.1.320+build.5', '2.1.320+build.5'],
+    ['2.1.320 leading text after whitespace', '2.1.320'],
+    ['2.1.320garbage', null],
+    ['2.1.320.4', null],
+    ['v2.1.320', null],
+    ['2.1', null],
+    ['', null],
+    [undefined, null],
+  ])('parses %s as %s', (input, expected) => {
+    expect(claudeVersionIdentity(input)).toBe(expected);
+  });
+
+  it('uses semver prerelease precedence and ignores build metadata', () => {
+    expect(compareClaudeVersions('2.1.301-rc.1', '2.1.301')).toBe(-1);
+    expect(compareClaudeVersions('2.1.310+meta', '2.1.310')).toBe(0);
+    expect(compareClaudeVersions('2.1.320-beta.1', '2.1.310')).toBe(1);
+  });
+});
 
 // Admission is outside this unit. Routes are already-admitted fixtures; the
 // certification brand is not constructible through the public API.

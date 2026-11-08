@@ -272,6 +272,8 @@ export {
   buildCertifiedClaudeEnv,
   certifiedEnvDigest,
   certifiedNamedEnv,
+  claudeVersionIdentity,
+  compareClaudeVersions,
   claudeSettingsOverride,
   isCertifiedClaudeEnvKey,
   isClaudeSettingsEnvKeyAllowed,

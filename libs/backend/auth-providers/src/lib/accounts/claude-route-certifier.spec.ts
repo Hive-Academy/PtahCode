@@ -252,7 +252,7 @@ describe('ClaudeRouteCertifier.certify', () => {
     expect(h.probe.queryRegistry).not.toHaveBeenCalled();
   });
 
-  it.each(['2.1.309', '3.0.0'])('refuses the uncovered win32 version %s after the scan, without a status child', async (version) => {
+  it.each(['2.1.309', '2.1.310-beta.1', '3.0.0'])('refuses the uncovered win32 version %s after the scan, without a status child', async (version) => {
     const logger = { warn: jest.fn() };
     const h = harness('win32', Date.now, logger);
     h.version = version;
@@ -268,7 +268,7 @@ describe('ClaudeRouteCertifier.certify', () => {
     ]);
   });
 
-  it.each(['2.1.312', '2.2.0'])('certifies the later build %s of the inspected major line and warns once', async (version) => {
+  it.each(['2.1.312', '2.1.320-beta.1', '2.2.0'])('certifies the later build %s of the inspected major line and warns once', async (version) => {
     const logger = { warn: jest.fn() };
     const h = harness('win32', Date.now, logger);
     h.version = version;
@@ -286,6 +286,12 @@ describe('ClaudeRouteCertifier.certify', () => {
     h.version = '2.1.300';
     await expect(h.certifier.certify(certifyRequest(newRoute()))).resolves.toMatchObject({ ok: false, code: 'unsupported-store' });
     expect(h.probe.status).not.toHaveBeenCalled();
+  });
+
+  it('refuses a prerelease of the minimum build', async () => {
+    const h = harness();
+    h.version = '2.1.301-rc.1';
+    await expect(h.certifier.certify(certifyRequest(newRoute()))).resolves.toMatchObject({ ok: false, code: 'unsupported-store' });
   });
 
   describe('unresolved managed source with a status that would succeed', () => {

@@ -4,7 +4,7 @@ import {
   assertCertifiedLaunch,
   claudeIdentityReference,
   claudePersonalLoginCheck,
-  claudeLeadingVersion,
+  claudeVersionIdentity,
   claudePersonalLoginPassed,
   createNamedAccountPromptGate,
   isChildExitProved,
@@ -820,8 +820,9 @@ export class ClaudeNamedLaneAdmission {
         // personal key source (independent of account info), before any output
         // is forwarded, any tool runs or the binding is committed.
         this.step = 'init-version';
-        if (claudeLeadingVersion(next.value.claude_code_version) === null ||
-            claudeLeadingVersion(next.value.claude_code_version) !== claudeLeadingVersion(version))
+        const initVersion = claudeVersionIdentity(next.value.claude_code_version);
+        const certifiedVersion = claudeVersionIdentity(version);
+        if (initVersion === null || certifiedVersion === null || initVersion !== certifiedVersion)
           throw claudeLaneRefusal('identity-unproved');
         this.step = 'init-key-source';
         if (!INIT_PERSONAL_KEY_SOURCES.has(String(next.value.apiKeySource)))

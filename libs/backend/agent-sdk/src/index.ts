@@ -602,7 +602,8 @@ export { applyClaudeAccountRouteEnv } from './lib/helpers/claude-account-route-e
 export {
   CLAUDE_CERTIFIED_ENV_KEYS,
   claudeSubscriptionFamily,
-  claudeLeadingVersion,
+  claudeVersionIdentity,
+  compareClaudeVersions,
   CLAUDE_SETTINGS_SAFE_ENV_KEYS,
   ClaudeCertifiedLaunchRefusal,
   assertCertifiedLaunch,
