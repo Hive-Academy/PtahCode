@@ -48,9 +48,7 @@ function budgetDefault(key: string): number {
 
 const BUDGET_KEYS = [
   'compaction.toolOutputBudgetTokens',
-  'compaction.subagentHandoffTokens',
   'compaction.rotationSuggestTokens',
-  'compaction.subagentStopWeightedTokens',
 ] as const;
 
 /**
@@ -72,11 +70,11 @@ export interface CompactionConfig {
   readonly envWindow: number | null;
   /** Per-tool-output cap in tokens (`compaction.toolOutputBudgetTokens`). */
   readonly toolOutputBudgetTokens: number;
-  /** Subagent handoff size in tokens (`compaction.subagentHandoffTokens`). */
+  /** Subagent handoff size in tokens (`agentBudget.handoffContextTokens`). */
   readonly subagentHandoffTokens: number;
   /** Session size at which rotation is suggested (`compaction.rotationSuggestTokens`). */
   readonly rotationSuggestTokens: number;
-  /** Weighted-token total at which a subagent is stopped (`compaction.subagentStopWeightedTokens`). */
+  /** Weighted-token total at which a subagent is stopped (`agentBudget.stopWeightedTokens`). */
   readonly subagentStopWeightedTokens: number;
 }
 
@@ -185,6 +183,7 @@ export class CompactionConfigProvider {
     }
 
     const envWindow = this.readEnvWindow();
+    const agentBudget = this.getAgentBudgetSettings();
 
     const compactionConfig: CompactionConfig = {
       enabled,
@@ -193,15 +192,11 @@ export class CompactionConfigProvider {
       toolOutputBudgetTokens: this.readBudget(
         'compaction.toolOutputBudgetTokens',
       ),
-      subagentHandoffTokens: this.readBudget(
-        'compaction.subagentHandoffTokens',
-      ),
+      subagentHandoffTokens: agentBudget.handoffContextTokens,
       rotationSuggestTokens: this.readBudget(
         'compaction.rotationSuggestTokens',
       ),
-      subagentStopWeightedTokens: this.readBudget(
-        'compaction.subagentStopWeightedTokens',
-      ),
+      subagentStopWeightedTokens: agentBudget.stopWeightedTokens,
     };
 
     this.logger.debug(

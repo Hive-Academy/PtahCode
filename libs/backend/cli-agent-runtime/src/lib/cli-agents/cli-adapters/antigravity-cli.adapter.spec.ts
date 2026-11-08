@@ -959,7 +959,7 @@ describe('AntigravityCliAdapter', () => {
       await handle.done;
 
       expect(segments).toEqual([
-        expect.objectContaining({ type: 'error', content: expect.stringContaining('telemetry unavailable') }),
+        expect.objectContaining({ type: 'info', content: expect.stringContaining('telemetry unavailable') }),
         expect.objectContaining({ turnTelemetry: expect.objectContaining({ status: 'unavailable', reason: 'no-usage-event' }) }),
       ]);
     });
@@ -980,7 +980,7 @@ describe('AntigravityCliAdapter', () => {
       await handle.done;
 
       expect(segments).toEqual([
-        expect.objectContaining({ type: 'error', content: expect.stringContaining('telemetry unavailable') }),
+        expect.objectContaining({ type: 'info', content: expect.stringContaining('telemetry unavailable') }),
         expect.objectContaining({ turnTelemetry: expect.objectContaining({ status: 'unavailable', reason: 'no-usage-event' }) }),
       ]);
     });

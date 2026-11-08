@@ -69,7 +69,7 @@ import type {
   CliDetectionResult,
   CliOutputSegment,
 } from '@ptah-extension/shared';
-import { completedTurnTelemetry } from '@ptah-extension/shared';
+import { completedTurnTelemetry, turnIdentity } from '@ptah-extension/shared';
 import { z } from 'zod';
 import type {
   CliAdapterManifest,
@@ -482,7 +482,7 @@ export class PiCliAdapter implements CliAdapter {
       let turnModel = options.model;
       const messageUsage: PiMessageUsage[] = [];
       const endUsage: PiMessageUsage[] = [];
-      const turnId = `${resumeSessionId ?? capturedSessionId ?? 'pi'}:${spawnedChildrenSequence++}`;
+      const turnSequence = spawnedChildrenSequence++;
 
       return new Promise<number>((resolve) => {
         let settled = false;
@@ -542,7 +542,9 @@ export class PiCliAdapter implements CliAdapter {
                 type: 'info',
                 content: usage ? 'Pi turn usage.' : 'Pi turn telemetry unavailable.',
                 ...(usage ? { usage: { model: turnModel, ...usage } } : {}),
-                turnTelemetry: completedTurnTelemetry({ turnId, modelId: turnModel, source: 'sdk', usage }),
+                turnTelemetry: completedTurnTelemetry({ ...turnIdentity({ provider: 'pi',
+                  sessionId: resumeSessionId ?? capturedSessionId, sequence: turnSequence,
+                  modelId: turnModel, source: 'sdk' }), usage }),
               });
               finish(0);
             }

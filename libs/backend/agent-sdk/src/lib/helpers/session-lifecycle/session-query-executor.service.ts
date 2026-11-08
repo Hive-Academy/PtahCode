@@ -60,7 +60,6 @@ import type {
   AuthEnv,
   EffectiveCapabilitySet,
   ICapabilityResolver,
-  SubagentPromptCacheTtl,
 } from '@ptah-extension/shared';
 import {
   isDirectAnthropic,
@@ -228,8 +227,6 @@ class CompactionSessionTap {
   private readonly subagentIds = new Set<string>();
   private readonly signalledStops = new Set<string>();
   private released = false;
-  /** Unset until the options build resolves it; the monitor default applies. */
-  private subagentCacheTtl: SubagentPromptCacheTtl | undefined;
   private readonly requestTracker = new MainRequestTracker(Date.now());
 
   constructor(
@@ -253,15 +250,6 @@ class CompactionSessionTap {
 
   attachQuery(query: Query): void {
     this.query = query;
-  }
-
-  /**
-   * The session's effective subagent prompt-cache TTL, known only once the
-   * options builder has run (the tap exists before it). The monitor prices
-   * cache writes with it when a message does not report its TTL split.
-   */
-  setSubagentCacheTtl(ttl: SubagentPromptCacheTtl | undefined): void {
-    this.subagentCacheTtl = ttl;
   }
 
   observe(message: SDKMessage): void {
@@ -365,18 +353,15 @@ class CompactionSessionTap {
   /**
    * A subagent message (or a main-loop message that may spawn one) goes to
    * the budget monitor under the session id the dispatcher and registry use,
-   * priced with the session's effective subagent prompt-cache TTL (the
-   * monitor's default while the build has not set one).
    */
   private feedSubagentMonitor(message: SDKMessage): void {
     const monitor = this.subagentMonitor;
     if (!monitor) return;
     const id = this.monitorSessionId(message);
     if (!id) return;
-    const cacheTtl = this.subagentCacheTtl;
     // The executor runs observe() now; a synchronous throw becomes a rejection.
     new Promise<void>((resolve) =>
-      resolve(monitor.observe(id, message, cacheTtl)),
+      resolve(monitor.observe(id, message)),
     ).then(() => {
       const toolCallId = 'parent_tool_use_id' in message ? message.parent_tool_use_id : undefined;
       if (typeof toolCallId === 'string' && monitor.getAgentBudgetState(toolCallId, id)?.stopState === 'stopped' && !this.signalledStops.has(toolCallId)) {
@@ -1864,7 +1849,6 @@ export class SessionQueryExecutor {
       const queryOptions = await (named
         ? named.wait(buildOptions)
         : buildOptions);
-      compactionTap.setSubagentCacheTtl(queryOptions.subagentPromptCacheTtl);
       const isResume = !!resumeSessionId;
       // Never a raw string. A string prompt is what sets the SDK's
       // `isSingleUserTurn`, and that flag closes the transport input on the

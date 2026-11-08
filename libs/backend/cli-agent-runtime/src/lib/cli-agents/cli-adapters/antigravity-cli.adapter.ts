@@ -93,7 +93,7 @@ import { laneMcpAuthUrl } from './lane-mcp-credentials';
 import { ptahMcpServerUrl } from './ptah-mcp-url';
 import { classifyCliStderr } from './cli-stderr-severity';
 import { z } from 'zod';
-import { completedTurnTelemetry } from '@ptah-extension/shared';
+import { completedTurnTelemetry, turnIdentity } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
   formatAgyDiagnostics,
@@ -837,8 +837,9 @@ export class AntigravityCliAdapter implements CliAdapter {
         segment.emit({
           type: 'info', content: 'Antigravity turn telemetry',
           turnTelemetry: completedTurnTelemetry({
-            turnId: currentTurnId || `${capturedSessionId ?? options.agentId ?? `agy:${child.pid ?? 'unknown'}`}:${turnSequence}`,
-            modelId: observedModelId ?? 'antigravity/unknown', source: 'stream',
+            ...turnIdentity({ provider: 'antigravity', turnId: currentTurnId,
+              sessionId: capturedSessionId ?? options.agentId ?? `agy:${child.pid ?? 'unknown'}`,
+              sequence: turnSequence, modelId: observedModelId, source: 'stream' }),
             usage: usage ? {
               inputTokens: usage.input_tokens,
               outputTokens: usage.output_tokens,
@@ -1454,7 +1455,7 @@ export class AntigravityCliAdapter implements CliAdapter {
           },
         });
       } else {
-        emitSegment({ type: 'error', content: 'Antigravity turn telemetry unavailable: complete input/output totals missing.' });
+        emitSegment({ type: 'info', content: 'Antigravity turn telemetry unavailable: complete input/output totals missing.' });
       }
     }
   }

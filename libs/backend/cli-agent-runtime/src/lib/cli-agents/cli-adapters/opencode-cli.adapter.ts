@@ -60,7 +60,7 @@
  */
 import { existsSync } from 'fs';
 import path from 'path';
-import { completedTurnTelemetry } from '@ptah-extension/shared';
+import { completedTurnTelemetry, turnIdentity } from '@ptah-extension/shared';
 import { z } from 'zod';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type {
@@ -956,9 +956,9 @@ export class OpencodeCliAdapter implements CliAdapter {
           emitSegment({
             type: 'info', content: 'OpenCode turn telemetry',
             turnTelemetry: completedTurnTelemetry({
-              turnId: state.turnId ?? `${boundSessionId ?? launch.expectedSessionId ?? `opencode:${child.pid ?? 'unknown'}`}:${launch.turnNumber}`,
-              modelId: state.observedModelId ?? 'opencode/unknown',
-              source: 'stream',
+              ...turnIdentity({ provider: 'opencode', turnId: state.turnId,
+                sessionId: boundSessionId ?? launch.expectedSessionId ?? `opencode:${child.pid ?? 'unknown'}`,
+                sequence: launch.turnNumber, modelId: state.observedModelId, source: 'stream' }),
               usage: tokens ? {
                 inputTokens: tokens.input, outputTokens: tokens.output,
                 costUsd: state.finalUsage?.cost,

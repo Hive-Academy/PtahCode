@@ -186,7 +186,6 @@ export {
  * possible. Stripping these chars corrupts legitimate prompts containing
  * code characters ($, (), {}, backticks, etc.).
  */
-
 export type AgentContinueErrorCode =
   | 'not_found'
   | 'invalid_params'
@@ -205,7 +204,6 @@ export type AgentContinueErrorCode =
   | 'unknown';
 
 /** Why a subprocess was released — carried on the `agent:released` event. */
-
 export type AgentReleaseReason = 'idle' | 'expired' | 'stopped' | 'disposed';
 
 export interface AgentRoleStamp {
@@ -245,7 +243,6 @@ interface SdkSpawnOptions {
  * the lane, the session to resume (absent when the gate chose a fresh lane)
  * and the decision to report to the caller.
  */
-
 export interface GatedResume {
   readonly accountReference?: LaneAccountReference;
   readonly task: string;
@@ -260,7 +257,6 @@ export interface GatedResume {
  * before its handle is built. Without a resume id the task passes through
  * and no decision is reported.
  */
-
 export type PreparedSdkHandleSpawn = Omit<GatedResume, 'resumeDecision'> & {
   readonly resumeDecision?: AgentResumeOutcome;
 };
@@ -277,11 +273,9 @@ function roleStampOf(
 }
 
 /** `any`: return when one lane ends. `all`: return when every lane has ended. */
-
 export type AgentWaitMode = 'any' | 'all';
 
 /** Longest {@link AgentProcessManager.waitForAgents} wait: 15 minutes (TASK_2026_597, D13). */
-
 export const MAX_AGENT_WAIT_MS = 900_000;
 
 const MAX_RESOLVED_PARENT_SESSIONS = 256;
@@ -295,7 +289,6 @@ const MAX_RESOLVED_PARENT_SESSIONS = 256;
  * - `other_workspace`: the record exists but belongs to another workspace, so
  *   this caller may not see it (the same scope rule as `getStatus`).
  */
-
 export type AgentWaitEntry =
   | {
       readonly agentId: string;
@@ -340,7 +333,6 @@ export class AgentContinueError extends Error {
  * (TASK_2026_597, R9.5). Raised before the adapter's `runSdk`, so nothing is
  * started. Extends `Error` directly, like every other error in this lib.
  */
-
 export class LaneModelBlockedError extends Error {
   constructor(readonly model: string) {
     super(
@@ -1195,7 +1187,7 @@ export class AgentProcessManager {
 
       const agentId = meta.agentId ?? AgentId.create();
       const startedAt = new Date().toISOString();
-      const previous = previousResumeRecord(this.agents.values(), 
+      const previous = previousResumeRecord(this.agents.values(),
         meta.cli,
         meta.resumeSessionId,
       );

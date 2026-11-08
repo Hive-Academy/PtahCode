@@ -63,13 +63,7 @@ export class AgentBudgetCoordinator {
       turnIds: [...record.turnIds, ...novelIds],
       elapsedMs: 0, warned: current.warned, stopped: current.stopped,
     }, turnCountOf(record) + (sameLedger ? 0 : this.turnCount));
-    const total = Math.max(this.snapshot.rawTokens, this.snapshot.weightedTokens);
-    const expired = this.expired(nowMs);
-    const stopReason = !this.snapshot.stopped
-      ? expired ? 'duration' as const : total >= this.settings.stopWeightedTokens ? 'budget' as const : undefined
-      : undefined;
-    const warning = !this.snapshot.warned && !this.snapshot.stopped
-      && total >= this.settings.stopWeightedTokens * this.settings.warnRatio;
+    const { warning, stopReason } = this.policy.assess(this.snapshot, Math.max(0, nowMs - this.startedAtMs));
     this.snapshot = { ...this.snapshot, warned: this.snapshot.warned || warning,
       stopped: this.snapshot.stopped || stopReason !== undefined };
     this._stopReason ??= stopReason;
@@ -116,8 +110,4 @@ export class AgentBudgetCoordinator {
     return Math.max(0, this.settings.maxDurationMin * 60_000 - (nowMs - this.startedAtMs));
   }
 
-  /** A resume gets a fresh warning only after the old counters pass the gate. */
-  resumeSnapshot(): AgentBudgetSnapshot {
-    return { ...this.snapshot, warned: false };
-  }
 }

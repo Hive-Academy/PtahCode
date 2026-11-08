@@ -37,7 +37,7 @@
  * - session.error             -> error
  * - result                    -> info (final stats); resolves done promise
  */
-import { completedTurnTelemetry } from '@ptah-extension/shared';
+import { completedTurnTelemetry, turnIdentity } from '@ptah-extension/shared';
 import type {
   CliAdapterManifest,
   CliDetectionResult,
@@ -509,9 +509,9 @@ export class CopilotSdkAdapter implements CliAdapter {
             segment.emit({
               type: 'info', content: 'Copilot turn telemetry',
               turnTelemetry: completedTurnTelemetry({
-                turnId: nativeTurnId ?? `${capturedSessionId ?? resumeSessionId ?? `copilot:${child.pid ?? options.agentId ?? 'unknown'}`}:${turnNumber}`,
-                modelId: turnUsage?.model ?? 'copilot/unknown',
-                source: 'stream', usage: turnUsage ? {
+                ...turnIdentity({ provider: 'copilot', turnId: nativeTurnId,
+                  sessionId: capturedSessionId ?? resumeSessionId ?? `copilot:${child.pid ?? options.agentId ?? 'unknown'}`,
+                  sequence: turnNumber, modelId: turnUsage?.model, source: 'stream' }), usage: turnUsage ? {
                   inputTokens: turnUsage.inputTokens,
                   outputTokens: turnUsage.outputTokens,
                   costUsd: turnUsage.costUsd,
@@ -774,7 +774,7 @@ export class CopilotSdkAdapter implements CliAdapter {
           !Number.isSafeInteger(inputTokens) || inputTokens < 0 ||
           !Number.isSafeInteger(outputTokens) || outputTokens < 0
         ) {
-          emitSegment({ type: 'error', content: 'Copilot turn telemetry unavailable: complete input/output totals missing.' });
+          emitSegment({ type: 'info', content: 'Copilot turn telemetry unavailable: complete input/output totals missing.' });
           return undefined;
         }
         if (parts.length > 0 || inputTokens === 0 || outputTokens === 0) {

@@ -35,7 +35,8 @@ export class LaneBudgetTelemetry {
         cacheReadTokens: usage.cacheReadTokens.status === 'reported' ? usage.cacheReadTokens.value : null,
         cacheWriteTokens: usage.cacheWriteTokens.status === 'reported' ? usage.cacheWriteTokens.value : null,
         weightedTotal: budget.counters.weightedTokens,
-        ratio: budget.counters.weightedTokens / budget.settings.stopWeightedTokens,
+        ratio: Math.max(budget.counters.rawTokens, budget.counters.weightedTokens) /
+          budget.settings.stopWeightedTokens,
         costAuthority: decision.costAuthority,
       });
     } else if (telemetry.status === 'unavailable') {

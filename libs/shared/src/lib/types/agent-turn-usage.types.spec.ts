@@ -1,4 +1,4 @@
-import { agentTurnTelemetrySchema, agentTurnUsageSchema, completedTurnTelemetry } from './agent-turn-usage.types';
+import { agentTurnTelemetrySchema, agentTurnUsageSchema, completedTurnTelemetry, turnIdentity } from './agent-turn-usage.types';
 
 const missing = { status: 'unavailable', reason: 'not emitted', source: 'stream' } as const;
 const usage = {
@@ -25,5 +25,13 @@ describe('agent turn usage contract', () => {
   });
   it('never converts a missing usage event into zero', () => {
     expect(completedTurnTelemetry({ turnId: 't', modelId: 'm', source: 'stream' })).toMatchObject({ status: 'unavailable', reason: 'no-usage-event' });
+  });
+  it('uses one stable fallback identity and preserves provider-labelled model accounting', () => {
+    const identity = turnIdentity({ provider: 'codex', sessionId: 'session', sequence: 2, source: 'stream' });
+    expect(identity).toEqual({ turnId: 'session:2', modelId: 'codex/unknown', source: 'stream' });
+    expect(completedTurnTelemetry({ ...identity, usage: { inputTokens: 3, outputTokens: 1 } }))
+      .toMatchObject({ status: 'reported', usage: { modelId: 'codex/unknown' } });
+    expect(turnIdentity({ provider: 'codex', turnId: 'native', source: 'sdk', modelId: 'model' }))
+      .toEqual({ turnId: 'native', modelId: 'model', source: 'sdk' });
   });
 });

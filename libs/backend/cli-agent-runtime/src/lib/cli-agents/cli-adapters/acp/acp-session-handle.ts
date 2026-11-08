@@ -30,7 +30,7 @@ import type { IProcessSpawner } from '@ptah-extension/platform-core';
 import type { Logger } from '@ptah-extension/vscode-core';
 import { MCP_ATTACHMENT_TIMEOUT_MS } from '../../mcp-attachment-probe.port';
 import type { CliOutputSegment } from '@ptah-extension/shared';
-import { completedTurnTelemetry } from '@ptah-extension/shared';
+import { completedTurnTelemetry, turnIdentity } from '@ptah-extension/shared';
 import { z } from 'zod';
 import type {
   CliCommandOptions,
@@ -819,7 +819,7 @@ export function createAcpSessionHandle(
           type: 'info', content: usage ? `${name} turn usage.` : `${name} turn telemetry unavailable.`,
           ...(usage ? { usage: { ...usage, model: usage.model ?? `${name}/unknown` } } : {}),
           turnTelemetry: completedTurnTelemetry({
-            turnId, modelId: usage?.model ?? `${name}/unknown`, source: 'sdk',
+            ...turnIdentity({ provider: name, turnId, modelId: usage?.model, source: 'sdk' }),
             usage,
           }),
         });

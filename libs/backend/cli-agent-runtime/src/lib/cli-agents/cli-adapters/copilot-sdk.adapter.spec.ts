@@ -687,6 +687,7 @@ describe('CopilotSdkAdapter', () => {
       expect(segments).toContainEqual(expect.objectContaining({
         turnTelemetry: expect.objectContaining({ status: 'unavailable', reason: 'no-usage-event' }),
       }));
+      expect(segments.some((item) => item.type === 'error')).toBe(false);
     });
 
     it('captures sessionId from result event', async () => {

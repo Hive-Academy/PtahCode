@@ -113,11 +113,6 @@ export {
 } from './lib/codex-app-server-process';
 export { CodexPreTurnConfigRejectedError } from './lib/codex-runtime';
 export {
-  CodexChildBudgetTap,
-  type CodexChildBudgetDecision,
-} from './lib/codex-child-budget-tap';
-export {
-  observeCodexChildBudgets,
   type CodexChildBudgetObserver,
   type CodexChildBudgetPort,
   type CodexChildBudgetSettingKey,

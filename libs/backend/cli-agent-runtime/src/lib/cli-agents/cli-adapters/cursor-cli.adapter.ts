@@ -18,7 +18,7 @@ import type {
   CliDetectionResult,
   CliOutputSegment,
 } from '@ptah-extension/shared';
-import { completedTurnTelemetry } from '@ptah-extension/shared';
+import { completedTurnTelemetry, turnIdentity } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type {
   CliAdapterManifest,
@@ -486,7 +486,8 @@ export class CursorCliAdapter implements CliAdapter {
           emitStreamSegment({
             type: 'info', content: usage ? 'Cursor turn usage.' : 'Cursor turn telemetry unavailable.',
             ...(usage ? { usage: { model: reportedModel, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheReadTokens: usage.cacheReadTokens, cacheWriteTokens: usage.cacheWriteTokens, totalTokens: usage.totalTokens } } : {}),
-            turnTelemetry: completedTurnTelemetry({ turnId: latestUsage?.run_id ?? run.id, modelId: reportedModel, source: 'sdk', usage }),
+            turnTelemetry: completedTurnTelemetry({ ...turnIdentity({ provider: 'cursor',
+              turnId: latestUsage?.run_id ?? run.id, modelId: reportedModel, source: 'sdk' }), usage }),
           });
         }
 

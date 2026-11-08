@@ -69,4 +69,10 @@ describe('AgentBudgetPolicy', () => {
   it('enforces duration without a token threshold', () => {
     expect(policy.evaluate(initialAgentBudgetSnapshot, { status: 'reported', usage: { ...usage, inputTokens: 1, outputTokens: 1, cacheReadTokens: reported(0), cacheWriteTokens: reported(0), requestContextTokens: missing } }, 120_000, rates).stopReason).toBe('duration');
   });
+  it('uses the raw floor and context ceiling for persisted and live decisions', () => {
+    const snapshot = { ...initialAgentBudgetSnapshot, rawTokens: 100, weightedTokens: 40 };
+    expect(policy.assess(snapshot, 0)).toMatchObject({ warning: true, stopReason: 'budget' });
+    expect(policy.assess(initialAgentBudgetSnapshot, 0, 100)).toMatchObject({ warning: true, stopReason: 'budget', handoff: true });
+    expect(policy.assess(initialAgentBudgetSnapshot, 120_000)).toMatchObject({ stopReason: 'duration' });
+  });
 });

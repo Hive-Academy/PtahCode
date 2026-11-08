@@ -46,6 +46,24 @@ export const agentTurnTelemetrySchema = z.discriminatedUnion('status', [
 ]);
 export type AgentTurnTelemetry = z.infer<typeof agentTurnTelemetrySchema>;
 
+/** Stable accounting identity for one completed turn. The provider-labelled
+ * unknown model preserves existing fail-open accounting when totals are present;
+ * pricing can still report that this model is unknown. */
+export function turnIdentity(input: {
+  provider: string;
+  source: AgentUsageSource;
+  turnId?: string;
+  sessionId?: string;
+  sequence?: string | number;
+  modelId?: string;
+}): { turnId: string; modelId: string; source: AgentUsageSource } {
+  return {
+    turnId: input.turnId?.trim() || `${input.sessionId?.trim() || input.provider}:${input.sequence ?? 0}`,
+    modelId: input.modelId?.trim() || `${input.provider}/unknown`,
+    source: input.source,
+  };
+}
+
 /** Parse a transport's completed-turn counters without inventing missing totals. */
 export function completedTurnTelemetry(input: {
   turnId: string;

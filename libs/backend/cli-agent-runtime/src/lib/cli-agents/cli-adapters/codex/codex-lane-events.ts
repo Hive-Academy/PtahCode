@@ -4,7 +4,7 @@ import {
   type CodexReportedUsage,
   type CodexRuntimeEvent,
 } from '@ptah-extension/codex-runtime';
-import { completedTurnTelemetry, type CliOutputSegment } from '@ptah-extension/shared';
+import { completedTurnTelemetry, turnIdentity, type CliOutputSegment } from '@ptah-extension/shared';
 
 export type CodexLaneTurnIdentity = Pick<
   CodexRuntimeEvent,
@@ -46,9 +46,9 @@ export class CodexLaneEvents {
     return {
       type: 'info', content: 'Codex turn telemetry unavailable.',
       turnTelemetry: completedTurnTelemetry({
-        turnId: this.identity.turnId,
-        modelId: modelId ?? this.usageModelId ?? 'codex/unknown',
-        source: 'stream', ...(usage ? { usage: laneUsage(usage) } : {}),
+        ...turnIdentity({ provider: 'codex', turnId: this.identity.turnId,
+          modelId: modelId ?? this.usageModelId, source: 'stream' }),
+        ...(usage ? { usage: laneUsage(usage) } : {}),
       }),
     };
   }
@@ -77,9 +77,9 @@ export class CodexLaneEvents {
         type: 'info', content: 'Codex turn usage.',
         usage: laneUsage(event.usage),
         turnTelemetry: completedTurnTelemetry({
-          turnId: this.identity.turnId,
-          modelId: event.evidence?.modelId ?? this.usageModelId ?? 'codex/unknown',
-          source: 'stream', usage: laneUsage(event.usage),
+          ...turnIdentity({ provider: 'codex', turnId: this.identity.turnId,
+            modelId: event.evidence?.modelId ?? this.usageModelId, source: 'stream' }),
+          usage: laneUsage(event.usage),
         }),
       }], terminal: 'completed' };
     }
@@ -232,9 +232,8 @@ export class CodexLaneEvents {
           return { segments: [], awaitingUsage: true };
         }
         const telemetry = completedTurnTelemetry({
-          turnId: this.identity.turnId,
-          modelId: event.evidence?.modelId ?? this.usageModelId ?? 'codex/unknown',
-          source: 'stream',
+          ...turnIdentity({ provider: 'codex', turnId: this.identity.turnId,
+            modelId: event.evidence?.modelId ?? this.usageModelId, source: 'stream' }),
           usage: usage ? laneUsage(usage) : undefined,
         });
         const segments: CliOutputSegment[] =

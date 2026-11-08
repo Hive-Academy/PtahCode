@@ -553,8 +553,6 @@ class RuntimeContext implements CodexContext {
       });
     else if (!this.childParentThreads.has(threadId))
       this.options.logger.debug('Codex child relinked', { childThreadId: threadId });
-    if (!this.knownChildParents.has(threadId) && this.observedModel)
-      this.translator.setThreadModel(threadId, this.observedModel);
     this.childParentThreads.set(threadId, parentThreadId);
     this.pendingChildParents.delete(threadId);
     if (!this.knownChildParents.has(threadId) &&

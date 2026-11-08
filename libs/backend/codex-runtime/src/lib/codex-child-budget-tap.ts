@@ -17,8 +17,7 @@ export interface CodexChildBudgetDecision {
   readonly parentThreadId: string;
   readonly childThreadId: string;
   readonly telemetry: AgentTurnTelemetry;
-  /** The parent delta is safe only when the caller can isolate one child turn. */
-  readonly provenance: 'child-thread' | 'parent-delta' | 'telemetry-unavailable';
+  readonly provenance: 'child-thread' | 'telemetry-unavailable';
   readonly transition: AgentBudgetTransition;
 }
 
@@ -87,8 +86,6 @@ export class CodexChildBudgetTap {
     modelId?: string;
     elapsedMs: number;
     pricing: ModelPricing | null;
-    /** Explicitly isolated parent-thread delta; never infer it from a shared parent turn. */
-    parentDelta?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number };
   }): CodexChildBudgetDecision {
     const { parentThreadId, childThreadId, turnId } = input;
     if (this.parents.get(childThreadId) !== parentThreadId)
@@ -100,7 +97,7 @@ export class CodexChildBudgetTap {
     const child = event?.type === 'usage' ? event : undefined;
     const evidence = child?.evidence;
     const useChild = child !== undefined && evidence?.accepted === true;
-    const usage = useChild ? child.usage : input.parentDelta;
+    const usage = useChild ? child.usage : undefined;
     const modelId = evidence?.modelId ?? input.modelId;
     const telemetry = completedTurnTelemetry({
       turnId: `${childThreadId}:${turnId}`,
@@ -109,17 +106,12 @@ export class CodexChildBudgetTap {
       usage: usage && {
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
-        cacheReadTokens: useChild
-          ? evidence?.cacheSemanticsAmbiguous ? undefined : child?.usage.cachedInputTokens
-          : input.parentDelta?.cacheReadTokens,
-        cacheWriteTokens: useChild
-          ? evidence?.cacheSemanticsAmbiguous ? undefined : child?.usage.cacheWriteInputTokens
-          : input.parentDelta?.cacheWriteTokens,
+        cacheReadTokens: evidence?.cacheSemanticsAmbiguous ? undefined : child?.usage.cachedInputTokens,
+        cacheWriteTokens: evidence?.cacheSemanticsAmbiguous ? undefined : child?.usage.cacheWriteInputTokens,
         contextTokens: useChild ? evidence?.lastRequestTotalTokens : undefined,
       },
     });
-    const provenance = telemetry.status === 'unavailable' ? 'telemetry-unavailable' :
-      useChild ? 'child-thread' : 'parent-delta';
+    const provenance = telemetry.status === 'unavailable' ? 'telemetry-unavailable' : 'child-thread';
     const key = this.snapshotKey(parentThreadId, childThreadId);
     const transition = this.policy.evaluate(
       this.snapshots.get(key) ?? initialAgentBudgetSnapshot,

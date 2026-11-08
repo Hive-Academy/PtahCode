@@ -59,17 +59,6 @@ describe('CodexChildBudgetTap', () => {
     expect(decision.transition.stopReason).toBe('telemetry-unavailable');
   });
 
-  it('marks an explicitly isolated fallback as parent-delta', () => {
-    const tap = new CodexChildBudgetTap(settings);
-    tap.observe(spawn);
-    const decision = tap.completeChildTurn({ parentThreadId: 'parent',
-      childThreadId: 'child', turnId: 'child-turn', modelId: 'codex-model',
-      parentDelta: { inputTokens: 3, outputTokens: 2 },
-      elapsedMs: 100, pricing: null });
-    expect(decision.provenance).toBe('parent-delta');
-    expect(decision.transition.snapshot.rawTokens).toBe(5);
-  });
-
   it('keeps at most the cap of children and releases the oldest first', () => {
     const tap = new CodexChildBudgetTap(settings);
     const total = CODEX_CHILD_BUDGET_MAX_ENTRIES + 2;

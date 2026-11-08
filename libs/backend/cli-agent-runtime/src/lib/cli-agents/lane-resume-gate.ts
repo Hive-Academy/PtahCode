@@ -25,6 +25,7 @@ import type {
   LaneStopReason,
   AgentBudgetRecord,
 } from '@ptah-extension/shared';
+import { AgentBudgetPolicy, initialAgentBudgetSnapshot } from '@ptah-extension/shared';
 import type { IOutputChannel } from '@ptah-extension/platform-core';
 import { classifyProviderAccountBinding } from '@ptah-extension/shared/schemas';
 import { PROVIDER_ACCOUNT_RESULT_CODES, isAgentBudgetStopReason } from '@ptah-extension/shared';
@@ -116,8 +117,11 @@ export class LaneResumeGate {
   async evaluate(input: LaneResumeGateInput): Promise<LaneResumeDecision> {
     const budgetStop = isAgentBudgetStopReason(input.stopReason);
     const total = Math.max(input.budget?.weightedTokens ?? 0, input.budget?.rawTokens ?? 0);
-    const nearLimit = input.budgetSettings !== undefined &&
-      total >= input.budgetSettings.stopWeightedTokens * input.budgetSettings.warnRatio;
+    const nearLimit = input.budgetSettings !== undefined && new AgentBudgetPolicy(input.budgetSettings).assess({
+      ...initialAgentBudgetSnapshot,
+      rawTokens: input.budget?.rawTokens ?? 0,
+      weightedTokens: input.budget?.weightedTokens ?? 0,
+    }, 0).warning;
     if (budgetStop || nearLimit) {
       const reason = budgetStop
         ? `budget stop: CLI session cannot resume after ${input.stopReason} stop`

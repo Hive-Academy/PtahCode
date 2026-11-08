@@ -1719,8 +1719,7 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
     const sub = subAssistant();
     feed(run, sub);
     expect(observe).toHaveBeenCalledTimes(1);
-    // The build reported no TTL, so the monitor's own default applies.
-    expect(observe).toHaveBeenCalledWith(REAL, sub, undefined);
+    expect(observe).toHaveBeenCalledWith(REAL, sub);
     run.abortController.abort();
   });
 
@@ -1848,7 +1847,7 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
     });
     feed(run, spawning);
     expect(observe).toHaveBeenCalledTimes(1);
-    expect(observe).toHaveBeenCalledWith(REAL, spawning, undefined);
+    expect(observe).toHaveBeenCalledWith(REAL, spawning);
     run.abortController.abort();
   });
 

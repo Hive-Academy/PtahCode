@@ -229,6 +229,7 @@ tmp-scratch-*
 # Managed by Ptah. Derived copies of ~/.ptah/user — edit the source, not these.
 # Delete this whole block to opt out, or set harness.manageGitignore to false.
 .github/skills/
+.opencode/agent/
 # ptah:harness:end
 .ptah/specs/**/*.log
 

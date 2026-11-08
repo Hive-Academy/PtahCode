@@ -81,8 +81,21 @@ function pricedClasses(usage: AgentTurnUsage, pricing: ModelPricing | null): num
 export class AgentBudgetPolicy {
   constructor(private readonly settings: AgentBudgetSettings) { agentBudgetSettingsSchema.parse(settings); }
 
+  /** The same threshold decision applies to completed turns and persisted ledgers. */
+  assess(snapshot: AgentBudgetSnapshot, elapsedMs: number, contextTokens?: number, nextTurnTokens = 0): { warning: boolean; stopReason?: AgentBudgetStopReason; handoff: boolean } {
+    const total = Math.max(snapshot.rawTokens, snapshot.weightedTokens);
+    const contextWarning = contextTokens !== undefined && contextTokens >= this.settings.handoffContextTokens * this.settings.warnRatio;
+    const warning = !snapshot.warned && !snapshot.stopped &&
+      (total >= this.settings.stopWeightedTokens * this.settings.warnRatio ||
+        total + nextTurnTokens >= this.settings.stopWeightedTokens || contextWarning);
+    const stopReason = snapshot.stopped ? undefined
+      : elapsedMs >= this.settings.maxDurationMin * 60_000 ? 'duration' as const
+      : total >= this.settings.stopWeightedTokens || (contextTokens !== undefined && contextTokens >= this.settings.handoffContextTokens * 2) ? 'budget' as const
+      : undefined;
+    return { warning, stopReason, handoff: contextTokens !== undefined && contextTokens >= this.settings.handoffContextTokens };
+  }
+
   evaluate(snapshot: AgentBudgetSnapshot, telemetry: AgentTurnTelemetry, elapsedMs: number, pricing: ModelPricing | null): AgentBudgetTransition {
-    const duration = elapsedMs >= this.settings.maxDurationMin * 60_000;
     if (telemetry.status === 'unavailable') return {
       snapshot: { ...snapshot, elapsedMs, stopped: true }, warning: false,
       stopReason: snapshot.stopped ? undefined : 'telemetry-unavailable', handoff: false, coverage: 'telemetry-unavailable',
@@ -106,16 +119,14 @@ export class AgentBudgetPolicy {
     const weighted = priced === null ? raw : Math.max(raw, priced / REFERENCE_INPUT_USD_PER_TOKEN);
     const rawTokens = snapshot.rawTokens + (duplicate ? 0 : raw);
     const weightedTokens = snapshot.weightedTokens + (duplicate ? 0 : weighted);
-    const total = Math.max(rawTokens, weightedTokens);
-    const budget = total >= this.settings.stopWeightedTokens;
-    const contextWarning = usage.requestContextTokens.status === 'reported' && usage.requestContextTokens.value >= this.settings.handoffContextTokens * this.settings.warnRatio;
-    const nextTurnWouldStop = total + (duplicate ? 0 : Math.max(raw, weighted)) >= this.settings.stopWeightedTokens;
-    const warning = !duplicate && !snapshot.warned && !snapshot.stopped && (total >= this.settings.stopWeightedTokens * this.settings.warnRatio || nextTurnWouldStop || contextWarning);
-    const stopReason = snapshot.stopped ? undefined : duration ? 'duration' as const : budget ? 'budget' as const : undefined;
+    const contextTokens = usage.requestContextTokens.status === 'reported' ? usage.requestContextTokens.value : undefined;
+    const decision = this.assess({ ...snapshot, rawTokens, weightedTokens }, elapsedMs, contextTokens, duplicate ? 0 : Math.max(raw, weighted));
+    const warning = !duplicate && decision.warning;
+    const stopReason = decision.stopReason;
     return {
       snapshot: { weightedTokens, rawTokens, elapsedMs, warned: snapshot.warned || warning, stopped: snapshot.stopped || stopReason !== undefined, turnIds: duplicate ? snapshot.turnIds : [...snapshot.turnIds, usage.turnId] },
       warning, stopReason,
-      handoff: usage.requestContextTokens.status === 'reported' && usage.requestContextTokens.value >= this.settings.handoffContextTokens,
+      handoff: decision.handoff,
       coverage: priced === null ? 'price-weighting-degraded' : 'complete',
       cost: usage.models?.length && usage.providerCostUsd.status !== 'reported' && priced !== null
         ? { status: 'reported', value: priced, source: 'catalog' }

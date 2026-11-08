@@ -9,6 +9,27 @@ import { settleCodexChildBudgetEvent } from './codex-child-budget-observer';
 import { DEFAULT_AGENT_BUDGET_SETTINGS } from '@ptah-extension/shared';
 
 describe('native child event admission', () => {
+  it('does not seed an unreported child model from the observed root model', () => {
+    const translator = new CodexEventTranslator('context', 1);
+    translator.setThreadModel('root', 'gpt-4o');
+    const context = Object.assign(Object.create(RuntimeContext.prototype), {
+      committedIdentity: { contextId: 'context', processGeneration: 1, threadId: 'root' },
+      observedModel: 'gpt-4o', translator,
+      knownChildParents: new Map<string, string>(),
+      childParentThreads: new Map<string, string>(),
+      pendingChildParents: new Map<string, string>(),
+      childTools: new Map<string, string>(),
+      earlyChildEvents: new Map<string, CodexRuntimeEvent[]>(), earlyChildCount: 0,
+      options: { logger: { info: jest.fn(), debug: jest.fn(), error: jest.fn() } },
+    }) as RuntimeContext;
+    Reflect.apply(Reflect.get(context, 'linkChild'), context, ['child', 'spawn']);
+    const counts = { inputTokens: 12, cachedInputTokens: 0,
+      outputTokens: 4, reasoningOutputTokens: 0, totalTokens: 16 };
+    const childUsage = translator.translate({ method: 'thread/tokenUsage/updated',
+      params: { threadId: 'child', turnId: 'turn', tokenUsage: { last: counts, total: counts } },
+    });
+    expect(childUsage[0]).not.toHaveProperty('evidence.modelId');
+  });
   it('links two children on first notification, charges each terminal once, and accepts a later spawn confirmation', () => {
     const logger = { error: jest.fn(), debug: jest.fn(), info: jest.fn(), warn: jest.fn() };
     const context = Object.assign(Object.create(RuntimeContext.prototype), {

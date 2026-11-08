@@ -275,6 +275,7 @@ function makeHarness(
   );
   return {
     monitor,
+    config,
     order,
     recordStore,
     index,
@@ -329,6 +330,11 @@ function spawn(input: Record<string, unknown>, name = 'Agent'): unknown {
 const fake = (...parts: string[]): string => parts.join('');
 
 describe('SubagentBudgetMonitor', () => {
+  it('loads budget settings once for an accepted assistant message', async () => {
+    const h = makeHarness();
+    await h.monitor.observe(SESSION, assistant({ input: 10 }, { id: 'settings-once' }));
+    expect(h.config.getAgentBudgetSettings).toHaveBeenCalledTimes(1);
+  });
   it.each([
     fake('Authorization: Bear', 'er ', 'eyJhbGci', 'OiJIUzI1NiJ9', '.very-secret'),
     fake('Authorization: Bas', 'ic ', 'dXNlcjpw', 'YXNz'),
@@ -2946,7 +2952,6 @@ describe('subagent request context tokens', () => {
         u['cache_read_input_tokens'] +
         u['cache_creation_input_tokens'],
     );
-    expect(usage.cacheWriteByTtl).toBeDefined();
     expect(requestContextTokens(usage)).toBeGreaterThan(0);
   });
 });

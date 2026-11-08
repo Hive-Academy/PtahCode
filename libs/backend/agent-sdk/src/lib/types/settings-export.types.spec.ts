@@ -13,6 +13,7 @@
  * passive documentation, it is a write into a user-facing artifact.
  */
 import { KNOWN_CONFIG_KEYS } from './settings-export.types';
+import { ADVANCED_SETTINGS } from '@ptah-extension/shared';
 
 describe('KNOWN_CONFIG_KEYS', () => {
   describe('llm.vscode.model — removed dead key (TASK_2026_250 follow-up B)', () => {
@@ -43,6 +44,11 @@ describe('KNOWN_CONFIG_KEYS', () => {
   });
 
   describe('list hygiene', () => {
+    it('exports every agent budget setting', () => {
+      const keys = ADVANCED_SETTINGS.filter(({ key }) => key.startsWith('agentBudget.')).map(({ key }) => key);
+      expect(keys).toHaveLength(4);
+      expect(KNOWN_CONFIG_KEYS).toEqual(expect.arrayContaining(keys));
+    });
     it('contains no duplicate keys', () => {
       expect([...new Set(KNOWN_CONFIG_KEYS)]).toHaveLength(
         KNOWN_CONFIG_KEYS.length,
@@ -74,12 +80,15 @@ describe('KNOWN_CONFIG_KEYS', () => {
         expect.arrayContaining([
           'compaction.threshold',
           'compaction.toolOutputBudgetTokens',
-          'compaction.subagentHandoffTokens',
           'compaction.rotationSuggestTokens',
-          'compaction.subagentStopWeightedTokens',
           'agentOrchestration.laneRepeatCallStopAt',
         ]),
       );
+    });
+
+    it('does not export the removed subagent compaction keys', () => {
+      expect(KNOWN_CONFIG_KEYS).not.toContain('compaction.subagentHandoffTokens');
+      expect(KNOWN_CONFIG_KEYS).not.toContain('compaction.subagentStopWeightedTokens');
     });
 
     it('exports both idle compaction settings', () => {

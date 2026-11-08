@@ -90,7 +90,7 @@ import type {
   Logger,
   SubagentRegistryService,
 } from '@ptah-extension/vscode-core';
-import { AgentBudgetPolicy, completedTurnTelemetry, findModelPricing, initialAgentBudgetSnapshot, type AgentBudgetSnapshot, type SubagentPromptCacheTtl } from '@ptah-extension/shared';
+import { AgentBudgetPolicy, completedTurnTelemetry, findModelPricing, initialAgentBudgetSnapshot, type AgentBudgetSnapshot, type AgentBudgetSettings } from '@ptah-extension/shared';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
@@ -154,8 +154,6 @@ export interface SubagentRequestUsage {
   readonly cacheWriteTokens: number;
   readonly outputTokens: number;
   readonly providerCostUsd?: number;
-  /** TTL split of `cacheWriteTokens`; absent when the message has no `cache_creation`. */
-  readonly cacheWriteByTtl?: Readonly<Record<SubagentPromptCacheTtl, number>>;
 }
 
 /** What the monitor knows about one subagent. */
@@ -164,7 +162,7 @@ export interface SubagentBudgetSnapshot {
   readonly weightedUsed: number;
   /** The monitor stopped this subagent (handoff or safety stop). */
   readonly stopped: boolean;
-  /** `weightedUsed` reached `compaction.subagentStopWeightedTokens`. */
+  /** Raw or weighted usage reached the configured budget stop. */
   readonly budgetReached: boolean;
 }
 
@@ -186,10 +184,6 @@ export interface AgentBudgetState {
 export const MAX_STOP_ATTEMPTS = 3;
 /** Handoff record writes per subagent before the handoff stop is given up. */
 export const MAX_RECORD_ATTEMPTS = 3;
-/** Share of `compaction.subagentHandoffTokens` at which a subagent is asked to write its notes. */
-export const NEAR_BUDGET_RATIO = 0.85;
-/** Absolute runaway ceiling; normal budget crossings use the notes gate. */
-export const RUNAWAY_BUDGET_MULTIPLE = 2;
 const TRANSCRIPT_MISS_TTL_MS = 5_000;
 /** Tools that spawn a subagent (`Task` is the SDK's earlier name for `Agent`). */
 const SUBAGENT_TOOL_NAMES: ReadonlySet<string> = new Set(['Agent', 'Task']);
@@ -370,9 +364,6 @@ export function readSubagentRequestUsage(
   const cacheReadTokens = tokenCount(usage['cache_read_input_tokens']) ?? 0;
   const cacheWriteTokens =
     tokenCount(usage['cache_creation_input_tokens']) ?? 0;
-  const creation = asObject(usage['cache_creation']);
-  const write5m = tokenCount(creation?.['ephemeral_5m_input_tokens']);
-  const write1h = tokenCount(creation?.['ephemeral_1h_input_tokens']);
   return {
     inputTokens,
     cacheReadTokens,
@@ -380,9 +371,6 @@ export function readSubagentRequestUsage(
     outputTokens,
     ...(typeof usage['cost_usd'] === 'number' && Number.isFinite(usage['cost_usd']) && usage['cost_usd'] >= 0
       ? { providerCostUsd: usage['cost_usd'] } : {}),
-    ...(write5m !== undefined || write1h !== undefined
-      ? { cacheWriteByTtl: { '5m': write5m ?? 0, '1h': write1h ?? 0 } }
-      : {}),
   };
 }
 
@@ -580,14 +568,8 @@ export class SubagentBudgetMonitor {
    * Resolves once any stop or delivery it triggered has finished; never
    * rejects.
    *
-   * @param cacheTtl - The session's effective subagent prompt-cache TTL, used
-   *   to price cache writes whose TTL split the message does not report.
    */
-  async observe(
-    sessionId: string,
-    message: unknown,
-    _cacheTtl?: SubagentPromptCacheTtl,
-  ): Promise<void> {
+  async observe(sessionId: string, message: unknown): Promise<void> {
     const msg = asObject(message);
     if (msg?.['type'] === 'user' && typeof msg['parent_tool_use_id'] === 'string') {
       const state = this.sessions.get(this.currentSessionId(sessionId))?.subagents.get(msg['parent_tool_use_id']);
@@ -611,16 +593,17 @@ export class SubagentBudgetMonitor {
     }
     const session = this.sessionState(sessionId);
     const usage = readSubagentRequestUsage(msg);
+    const settings = this.config.getAgentBudgetSettings();
+    const policy = new AgentBudgetPolicy(settings);
     if (!usage) {
       const state = this.subagentState(session, toolCallId);
       if (!state.telemetryUnavailableLogged) {
         state.telemetryUnavailableLogged = true;
         this.logger.warn('[SubagentBudgetMonitor] Subagent turn telemetry unavailable; stopping', { sessionId, toolCallId });
       }
-      const settings = this.config.getAgentBudgetSettings();
       const messageId = asObject(msg['message'])?.['id'];
       state.requestSequence += 1;
-      state.policySnapshot = new AgentBudgetPolicy(settings).evaluate(
+      state.policySnapshot = policy.evaluate(
         state.policySnapshot,
         { status: 'unavailable', turnId: `${session.sessionId}:${toolCallId}:${String(messageId ?? state.requestSequence)}`, modelId: 'unknown', source: 'sdk', reason: 'missing-input-or-output-tokens' },
         Date.now() - state.startedAt, null,
@@ -644,7 +627,7 @@ export class SubagentBudgetMonitor {
         });
       }
     }
-    this.count(session, toolCallId, state, msg, usage);
+    this.count(session, toolCallId, state, msg, usage, settings, policy);
     if (state.stopFired || state.stopInFlight) {
       return;
     }
@@ -657,15 +640,10 @@ export class SubagentBudgetMonitor {
       return;
     }
 
-    const budget = this.config.getAgentBudgetSettings();
-    const subagentHandoffTokens = budget.handoffContextTokens;
-    const subagentStopWeightedTokens = budget.stopWeightedTokens;
-    this.warnNearBudget(session, toolCallId, state, subagentHandoffTokens, budget.warnRatio);
-    const reason: StopReason | undefined =
-      state.policySnapshot.stopped ||
-      state.contextTokens >= subagentHandoffTokens * RUNAWAY_BUDGET_MULTIPLE
-        ? 'safety'
-        : undefined;
+    const subagentHandoffTokens = settings.handoffContextTokens;
+    const subagentStopWeightedTokens = settings.stopWeightedTokens;
+    this.warnNearBudget(session, toolCallId, state, subagentHandoffTokens);
+    const reason: StopReason | undefined = state.policySnapshot.stopped ? 'safety' : undefined;
     if (!reason) {
       return;
     }
@@ -676,7 +654,7 @@ export class SubagentBudgetMonitor {
   }
 
   /**
-   * At {@link NEAR_BUDGET_RATIO} of the handoff size, ask the subagent once to
+   * At the policy warning threshold, ask the subagent once to
    * write its progress notes to its handoff notes file. The notice goes to
    * the subagent's own next tool result, keyed by its SDK agent id from the
    * registry record (`SubagentStart` hook). Without that id or a workspace it
@@ -687,12 +665,8 @@ export class SubagentBudgetMonitor {
     toolCallId: string,
     state: SubagentState,
     handoffTokens: number,
-    warnRatio = NEAR_BUDGET_RATIO,
   ): void {
-    if (
-      state.warnedAgentId !== undefined ||
-      !state.policySnapshot.warned && state.contextTokens < handoffTokens * warnRatio
-    ) {
+    if (state.warnedAgentId !== undefined || !state.policySnapshot.warned) {
       return;
     }
     const { record } = this.resolveRegistryRecord(session, toolCallId);
@@ -992,9 +966,9 @@ export class SubagentBudgetMonitor {
       contextTokens: state.contextTokens,
       weightedUsed: state.weightedUsed,
       stopped: state.stopped,
-      budgetReached:
-        state.weightedUsed >=
-        this.config.getAgentBudgetSettings().stopWeightedTokens,
+      budgetReached: new AgentBudgetPolicy(this.config.getAgentBudgetSettings()).assess(
+        { ...state.policySnapshot, stopped: false }, 0,
+      ).stopReason === 'budget',
     };
   }
 
@@ -1409,6 +1383,8 @@ export class SubagentBudgetMonitor {
     state: SubagentState,
     msg: JsonObject,
     usage: SubagentRequestUsage,
+    settings: AgentBudgetSettings,
+    policy: AgentBudgetPolicy,
   ): void {
     const messageId = asObject(msg['message'])?.['id'];
     const sameRequest = typeof messageId === 'string' && messageId === state.lastMessageId;
@@ -1426,14 +1402,13 @@ export class SubagentBudgetMonitor {
         costUsd: usage.providerCostUsd,
       },
     });
-    const settings = this.config.getAgentBudgetSettings();
     const before = sameRequest ? {
       ...state.policySnapshot,
       weightedTokens: state.policySnapshot.weightedTokens - state.lastWeighted,
       rawTokens: state.policySnapshot.rawTokens - state.lastRaw,
       turnIds: state.policySnapshot.turnIds.slice(0, -1),
     } : state.policySnapshot;
-    const transition = new AgentBudgetPolicy(settings).evaluate(
+    const transition = policy.evaluate(
       before, telemetry, Date.now() - state.startedAt,
       modelId ? findModelPricing(modelId) : null,
     );

@@ -5,7 +5,7 @@ import {
   type AgentBudgetSettings,
   type ModelPricing,
 } from '@ptah-extension/shared';
-import { CodexChildBudgetTap, CODEX_CHILD_BUDGET_MAX_ENTRIES,
+import { CodexChildBudgetTap,
   type CodexChildBudgetDecision } from './codex-child-budget-tap';
 import type { CodexRuntimeLogger } from './codex-runtime-ports';
 import type { CodexContext, CodexRuntimeEvent } from './codex-runtime.types';
@@ -27,6 +27,7 @@ export interface CodexChildBudgetObserver {
 
 type ObserverLogger = Pick<CodexRuntimeLogger, 'warn'>;
 const CHILD_USAGE_DRAIN_MS = 2_000;
+const MAX_PENDING_CHILD_DRAINS = 128;
 
 /** Invalid host values fall back to the shared defaults as one complete set. */
 export function readCodexChildBudgetSettings(
@@ -120,11 +121,14 @@ export function observeCodexChildBudgets(
   void (async () => {
     try {
       for await (const event of context.events(controller.signal)) {
+        // A terminal may be the first event to carry its child's parent link.
+        // Establish that link before deciding whether usage needs time to arrive.
+        if (event.type === 'terminal') tap.observe(event);
         if (event.type === 'terminal' && tap.parentOf(event.threadId) &&
           !tap.hasAcceptedUsage(event.threadId, event.turnId)) {
           const key = keyOf(event);
           if (!draining.has(key)) {
-            if (draining.size >= CODEX_CHILD_BUDGET_MAX_ENTRIES) {
+            if (draining.size >= MAX_PENDING_CHILD_DRAINS) {
               const oldestKey = draining.keys().next().value;
               const oldest = oldestKey === undefined ? undefined : draining.get(oldestKey);
               if (oldestKey && oldest) {
@@ -137,6 +141,7 @@ export function observeCodexChildBudgets(
               draining.delete(key);
               settle(event);
             }, CHILD_USAGE_DRAIN_MS);
+            timer.unref?.();
             draining.set(key, { event, timer });
           }
           continue;

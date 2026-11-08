@@ -12,7 +12,7 @@ import type {
   CliOutputSegment,
   FlatStreamEventUnion,
 } from '@ptah-extension/shared';
-import { SessionId, completedTurnTelemetry } from '@ptah-extension/shared';
+import { SessionId, completedTurnTelemetry, turnIdentity } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
   SdkMessageTransformer,
@@ -650,16 +650,16 @@ export class PtahCliStreamLoop {
               // The same line, with the turn's usage attached for the agent
               // card's token and cost tiles (Decision 8).
               const rawUsage = this.turnUsage(msg);
-              const telemetryTurnId = `${msg.session_id ?? this.effectiveSessionId ?? 'ptah-cli'}:${this.turnIndex}`;
               const turnCostUsd = msg.total_cost_usd === undefined ? undefined
                 : Math.max(0, msg.total_cost_usd - this.previousResultCostUsd);
               if (msg.total_cost_usd !== undefined) this.previousResultCostUsd = msg.total_cost_usd;
               const usage = rawUsage && { ...rawUsage,
                 ...(turnCostUsd !== undefined && { costUsd: turnCostUsd }) };
               const turnTelemetry: AgentTurnTelemetry = completedTurnTelemetry({
-                    turnId: telemetryTurnId,
-                    modelId: usage?.model ?? (usage?.inputTokens !== undefined ? MULTI_MODEL_ID : undefined),
-                    source: 'sdk',
+                    ...turnIdentity({ provider: 'ptah-cli', sessionId: msg.session_id ?? this.effectiveSessionId,
+                      sequence: this.turnIndex,
+                      modelId: usage?.model ?? (usage?.inputTokens !== undefined ? MULTI_MODEL_ID : undefined),
+                      source: 'sdk' }),
                     usage: usage ? { ...usage, costUsd: turnCostUsd,
                       ...(this.turnModelDeltas.length > 1 && { models: this.turnModelDeltas }) } : undefined,
                     uncachedInput: true,

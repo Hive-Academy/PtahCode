@@ -90,6 +90,34 @@ function fakeContext() {
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 describe('observeCodexChildBudgets', () => {
+  it.each(['terminal-first', 'usage-first'] as const)(
+    'drains a child linked by %s and charges its usage once', async (order) => {
+      const context = fakeContext();
+      const logger = { warn: jest.fn() };
+      const observer = observeCodexChildBudgets(context, port, logger);
+      const linkedTerminal = { ...terminal, parentThreadId: 'parent' };
+      if (order === 'terminal-first') {
+        context.emit(linkedTerminal);
+        await flush();
+        expect(logger.warn).not.toHaveBeenCalledWith(
+          '[Codex budget] Child budget decision', expect.anything());
+        context.emit(usage);
+      } else {
+        context.emit(usage);
+        context.emit(linkedTerminal);
+      }
+      await flush();
+      context.emit(linkedTerminal);
+      await flush();
+      const decisions = logger.warn.mock.calls.filter(
+        ([message]) => message === '[Codex budget] Child budget decision');
+      expect(decisions).toHaveLength(1);
+      expect(decisions[0][1]).toMatchObject({
+        inputTokens: 12, outputTokens: 4, modelId: 'codex-model', warning: true,
+      });
+      observer.dispose();
+    },
+  );
   it('uses trailing child usage during the drain and logs context advisory once after relink', async () => {
     const context = fakeContext();
     const logger = { warn: jest.fn() };
@@ -191,6 +219,19 @@ describe('settleCodexChildBudgetEvent', () => {
     settleCodexChildBudgetEvent(usage, tap, { warn: jest.fn() }, pricing);
     settleCodexChildBudgetEvent(terminal, tap, { warn: jest.fn() }, pricing);
     expect(pricing).toHaveBeenCalledWith('codex-model');
+  });
+
+  it('does not price a child from its parent when no child model was observed', () => {
+    const tap = new CodexChildBudgetTap(settings);
+    const pricing = jest.fn(() => null);
+    const unknownModelUsage = usage.type === 'usage' && usage.evidence
+      ? { ...usage, evidence: { ...usage.evidence, modelId: undefined } }
+      : usage;
+    settleCodexChildBudgetEvent(spawn, tap, { warn: jest.fn() }, pricing);
+    settleCodexChildBudgetEvent(unknownModelUsage, tap, { warn: jest.fn() }, pricing);
+    const decision = settleCodexChildBudgetEvent(terminal, tap, { warn: jest.fn() }, pricing);
+    expect(pricing).not.toHaveBeenCalled();
+    expect(decision?.telemetry.status).toBe('unavailable');
   });
 });
 
