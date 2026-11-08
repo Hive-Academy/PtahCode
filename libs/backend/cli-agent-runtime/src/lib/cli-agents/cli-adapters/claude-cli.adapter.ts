@@ -181,7 +181,7 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
         );
       hostStep = 'assembly';
       const defaults = this.deps.defaults();
-      const model = input.model || defaults.model || '';
+      const model = input.model?.trim() || defaults.model || '';
       const effort = await this.resolveEffort(input, model, defaults);
       const policy = await this.deps.policy(input.workingDirectory);
       await this.deps.syncHarness(policy);

@@ -404,10 +404,10 @@ export interface SpawnAgentRequest {
   readonly pluginPaths?: string[];
   /** Ptah CLI agent ID from PtahCliRegistry. When set, spawns via Ptah CLI agent instead of CLI. */
   readonly ptahCliId?: string;
-  /** Model tier for Ptah CLI agents: 'opus' (most capable), 'sonnet' (balanced), 'haiku' (fastest).
-   *  Controls which capability tier the spawned SDK agent uses. Only applies to ptahCliId-based spawns.
-   *  The tier is resolved to the actual provider model via the agent's tier mappings.
-   *  Defaults to 'sonnet' when omitted. */
+  /** Model tier for Ptah CLI agents and system Claude lanes.
+   * Ptah CLI maps the tier through provider settings and defaults to sonnet.
+   * System Claude uses the tier as an SDK model alias when model is omitted.
+   * Other system CLIs ignore it. */
   readonly modelTier?: 'opus' | 'sonnet' | 'haiku';
   /** When set, this agent is resuming a previous agent. Frontend replaces the old card in-place. */
   readonly resumedFromAgentId?: string;

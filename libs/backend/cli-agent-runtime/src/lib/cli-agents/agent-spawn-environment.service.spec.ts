@@ -303,6 +303,24 @@ describe('AgentSpawnEnvironment', () => {
   });
 
   describe('resolveModel()', () => {
+    it('uses a Claude tier as a model alias only without an explicit model', () => {
+      const { environment } = makeEnvironment({
+        config: { claudeModel: 'sonnet' },
+      });
+      expect(environment.resolveModel('claude', undefined, 'haiku')).toEqual({
+        model: 'haiku',
+        source: 'request',
+      });
+      expect(environment.resolveModel('claude', 'opus', 'haiku')).toEqual({
+        model: 'opus',
+        source: 'request',
+      });
+      expect(environment.resolveModel('codex', undefined, 'haiku')).toEqual({
+        model: undefined,
+        source: 'cli-default',
+      });
+    });
+
     it('prefers the requested model over the configured one', () => {
       const { environment } = makeEnvironment({
         config: { codexModel: 'gpt-configured' },

@@ -810,11 +810,13 @@ export class AgentProcessManager {
     readonly cli: CliType;
     readonly task: string;
     readonly model?: string;
+    readonly modelTier?: 'opus' | 'sonnet' | 'haiku';
     readonly resumeSessionId?: string;
   }): Promise<PreparedSdkHandleSpawn> {
     const laneModel = this.spawnEnvironment.resolveModel(
       input.cli,
       input.model,
+      input.modelTier,
     );
     this.assertLaneModelAllowed(input.cli, laneModel.model);
     if (!input.resumeSessionId) return { task: input.task };
@@ -925,7 +927,11 @@ export class AgentProcessManager {
     const agentId = AgentId.create();
     const startedAt = new Date().toISOString();
     const previous = this.previousResumeRecord(cli, request.resumeSessionId);
-    const laneModel = this.spawnEnvironment.resolveModel(cli, request.model);
+    const laneModel = this.spawnEnvironment.resolveModel(
+      cli,
+      request.model,
+      request.modelTier,
+    );
     const resolvedModel = laneModel.model;
     // R9.5: refuse a model known to loop before anything is started — no
     // record, no event, no adapter call.

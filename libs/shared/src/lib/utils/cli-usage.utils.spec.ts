@@ -34,7 +34,7 @@ function codexTurn(input: number, output: number): CliOutputSegment {
 // `stats-bar.utils.spec.ts` and `stats-accumulation.spec.ts` for
 // `extractCliAgentStats`, whose fold this function now owns.
 describe('addCliUsage (stats-bar oracle cases)', () => {
-  it('sums per-turn token counts and retains the latest reported model, cost and duration', () => {
+  it('sums tokens and keeps the latest label on an unlabeled token report', () => {
     expect(
       foldAll([
         info({
@@ -89,6 +89,24 @@ describe('addCliUsage (stats-bar oracle cases)', () => {
       inputTokens: 300,
       outputTokens: 80,
     });
+  });
+
+  it('keeps the last known model when later token usage has no label', () => {
+    expect(
+      foldAll([
+        info({ model: 'haiku', inputTokens: 10, costUsd: 0.01 }),
+        info({ inputTokens: 5, costUsd: 0.02 }),
+      ])?.model,
+    ).toBe('haiku');
+  });
+
+  it('keeps the model for a later cost-only update', () => {
+    expect(
+      foldAll([
+        info({ model: 'haiku', inputTokens: 10 }),
+        info({ costUsd: 0.02 }),
+      ])?.model,
+    ).toBe('haiku');
   });
 
   it('preserves accumulated counts when the next turn reports zero', () => {
