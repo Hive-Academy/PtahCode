@@ -706,6 +706,43 @@ describe('PtahCliStreamLoop plan-limit signals and usage', () => {
     expect(emitSegment.mock.calls[1][0].usage).not.toHaveProperty('model');
   });
 
+  it('names the model from the per-turn delta when a later turn uses only another model', async () => {
+    const { loop, emitSegment } = makeSignalLoop();
+    const haikuOnlyTurn = {
+      ...usageResult,
+      modelUsage: {
+        'claude-sonnet-4-6': {
+          inputTokens: 1200,
+          outputTokens: 80,
+          cacheReadInputTokens: 900,
+          cacheCreationInputTokens: 300,
+        },
+        'claude-haiku-4-5': {
+          inputTokens: 200,
+          outputTokens: 40,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0,
+        },
+      },
+      total_cost_usd: 0.015,
+    } as unknown as SDKMessage;
+
+    await loop.run(
+      manyMessages([messageStart('claude-sonnet-4-6'), usageResult, haikuOnlyTurn]),
+    );
+
+    expect(emitSegment.mock.calls[0][0].usage.model).toBe('claude-sonnet-4-6');
+    expect(emitSegment.mock.calls[1][0].usage).toEqual(
+      expect.objectContaining({
+        model: 'claude-haiku-4-5',
+        inputTokens: 200,
+        outputTokens: 40,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      }),
+    );
+  });
+
   it('reports the SDK usage model instead of a stale stream model', async () => {
     const { loop, emitSegment } = makeSignalLoop();
     const haikuResult = {
