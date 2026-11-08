@@ -18,6 +18,7 @@ import {
 } from '@ptah-extension/shared';
 import { KimiCodeLoginProgressComponent } from './kimi-code-login-progress.component';
 import { CodexSignInBlockComponent } from './codex-sign-in-block.component';
+import { CodexAgentBehaviorComponent } from './codex-agent-behavior.component';
 import type { ConnectionKind } from './connection-kind';
 import type { DrawerWriteOutcome } from './drawer-write';
 import { KEY_UNREADABLE_TEXT } from '../provider-connection-card.state';
@@ -124,7 +125,7 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
   selector: 'ptah-connection-credentials-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NgTemplateOutlet, KimiCodeLoginProgressComponent, CodexSignInBlockComponent],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NgTemplateOutlet, KimiCodeLoginProgressComponent, CodexSignInBlockComponent, CodexAgentBehaviorComponent],
   template: `
     <div class="space-y-4 text-sm" data-testid="connection-credentials">
       @switch (view()) {
@@ -198,6 +199,11 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
                 data-testid="credentials-open-login">Sign in with Codex</button>
             }
           </div>
+          @defer (on viewport) {
+            <ptah-codex-agent-behavior />
+          } @placeholder {
+            <div class="min-h-[2.75rem] border-b border-base-content/10" aria-busy="true" data-testid="codex-agent-behavior-placeholder"></div>
+          }
         }
         @case ('kimi-code') {
           <div class="space-y-2 rounded border border-base-300 bg-base-200 p-3" data-testid="credentials-kimi">

@@ -59,6 +59,12 @@ describe('ADVANCED_SETTINGS table', () => {
     }
   });
 
+  it('keeps the Codex group id and web search key while naming its new destination', () => {
+    expect(ADVANCED_SETTING_GROUPS.find((group) => group.id === 'codex-agents'))
+      .toMatchObject({ title: 'Agent behavior' });
+    expect(booleanSetting('agentOrchestration.codexWebSearch').group).toBe('codex-agents');
+  });
+
   it.each(ADVANCED_SETTINGS.map((setting) => [setting.key, setting] as const))(
     '%s has a label, help text and a default its own validator accepts',
     (_key, setting) => {

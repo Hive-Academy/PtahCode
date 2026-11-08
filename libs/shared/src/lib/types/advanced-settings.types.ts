@@ -97,8 +97,8 @@ export const ADVANCED_SETTING_GROUPS: readonly AdvancedSettingGroup[] = [
   },
   {
     id: 'codex-agents',
-    title: 'Codex agents',
-    description: 'Limits Ptah passes to the Codex agents it starts.',
+    title: 'Agent behavior',
+    description: 'How Codex agents search the web and access your workspace.',
   },
   {
     id: 'background-queries',
