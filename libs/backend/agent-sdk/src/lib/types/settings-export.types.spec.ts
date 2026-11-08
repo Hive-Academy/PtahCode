@@ -68,8 +68,6 @@ describe('KNOWN_CONFIG_KEYS', () => {
     it('exports the Codex lane budget keys (TASK_2026_597)', () => {
       expect(KNOWN_CONFIG_KEYS).toEqual(
         expect.arrayContaining([
-          'agentOrchestration.codexAutoCompactTokens',
-          'agentOrchestration.codexToolOutputTokenLimit',
           'agentOrchestration.codexWebSearch',
         ]),
       );

@@ -89,12 +89,10 @@ The setting keys start with `compaction.`, for example `compaction.toolOutputBud
 
 ## Codex agents
 
-**Codex agents** sets the limits that PtahCode gives to the Codex agents that it starts. These values apply to the next Codex agent that you start.
+Codex CLI lanes use the global **Tool output size** for each tool result and compact at floor(**Budget warning ratio** × **Agent handoff context**). These values apply when the next Codex lane starts.
 
 | Field | Key | Default | What it does |
 | ----- | --- | ------- | ------------ |
-| **Codex auto-compact size** | `agentOrchestration.codexAutoCompactTokens` | `120,000` tokens | Codex compacts its conversation at this size. `0` uses the Codex default |
-| **Codex tool output limit** | `agentOrchestration.codexToolOutputTokenLimit` | `2,500` tokens | Codex cuts each tool result down to this size. `0` uses the Codex default |
 | **Codex web search** | `agentOrchestration.codexWebSearch` | On | Lets Codex agents search the web |
 
 For the other Codex settings, see [Codex](/providers/codex/).

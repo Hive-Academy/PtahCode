@@ -2,14 +2,11 @@
  * Codex lane budgets as a lane may use them (TASK_2026_597, R4.1, R4.2, R4.4).
  *
  * The settings import path writes values without validation, so a settings
- * file can hold any JSON for `agentOrchestration.codexAutoCompactTokens`,
- * `agentOrchestration.codexToolOutputTokenLimit` or
- * `agentOrchestration.codexWebSearch`. The lane applies the same rule as
- * `agent:setConfig` / `agent:getConfig` (rpc-handlers `agent-rpc.handlers.ts`,
- * `isNonNegativeInteger`) so the UI and the lane never disagree:
+ * file can hold any JSON for the global budgets or Codex web search.
+ * The lane validates those values at spawn:
  *
- * - a token budget is a safe integer >= 0 (`-0` counts as 0, which leaves
- *   Codex's own runtime default in place);
+ * - the handoff context is a positive safe integer and warning ratio is finite in (0, 1);
+ * - the tool output budget is a positive safe integer;
  * - web search is a boolean;
  * - anything else is replaced by the default, with one warning naming the key.
  *
@@ -18,16 +15,17 @@
 
 import type { CliLaneBudgets } from '../cli-adapter.interface';
 
-/** Same values as `FILE_BASED_SETTINGS_DEFAULTS` (pinned by the spec). */
+/** Derived from registered global defaults (pinned by the spec). */
 export const CODEX_DEFAULT_LANE_BUDGETS: CliLaneBudgets = {
-  autoCompactTokens: 120000,
+  autoCompactTokens: 127500,
   toolOutputTokenLimit: 2500,
   webSearch: true,
 };
 
 /** Raw budget values, as read from settings or passed by a caller. */
 export interface RawCodexLaneBudgets {
-  readonly autoCompactTokens?: unknown;
+  readonly warnRatio?: unknown;
+  readonly handoffContextTokens?: unknown;
   readonly toolOutputTokenLimit?: unknown;
   readonly webSearch?: unknown;
 }
@@ -45,14 +43,9 @@ export function resolveCodexLaneBudgets(
   const defaults = CODEX_DEFAULT_LANE_BUDGETS;
   return {
     budgets: {
-      autoCompactTokens: tokenBudget(
-        'agentOrchestration.codexAutoCompactTokens',
-        raw?.autoCompactTokens,
-        defaults.autoCompactTokens,
-        warnings,
-      ),
+      autoCompactTokens: autoCompactBudget(raw, warnings),
       toolOutputTokenLimit: tokenBudget(
-        'agentOrchestration.codexToolOutputTokenLimit',
+        'compaction.toolOutputBudgetTokens',
         raw?.toolOutputTokenLimit,
         defaults.toolOutputTokenLimit,
         warnings,
@@ -63,6 +56,24 @@ export function resolveCodexLaneBudgets(
   };
 }
 
+function autoCompactBudget(raw: RawCodexLaneBudgets | undefined, warnings: string[]): number {
+  const ratio = raw?.warnRatio;
+  const context = raw?.handoffContextTokens;
+  const ratioValid = ratio === undefined ||
+    (typeof ratio === 'number' && Number.isFinite(ratio) && ratio > 0 && ratio < 1);
+  const contextValid = context === undefined ||
+    (typeof context === 'number' && Number.isSafeInteger(context) && context > 0);
+  if (!ratioValid || !contextValid) {
+    warnings.push('Invalid agentBudget.warnRatio or agentBudget.handoffContextTokens; using registered defaults.');
+    return CODEX_DEFAULT_LANE_BUDGETS.autoCompactTokens;
+  }
+  const effectiveRatio = typeof ratio === 'number' ? ratio : 0.85;
+  const effectiveContext = typeof context === 'number' ? context : 150000;
+  // The epsilon keeps float error (0.29 * 100 = 28.999...) from flooring one token low;
+  // the floor of 1 keeps a tiny product from becoming 0, which Codex treats as "unset".
+  return Math.max(1, Math.floor(effectiveRatio * effectiveContext + 1e-9));
+}
+
 function tokenBudget(
   key: string,
   value: unknown,
@@ -70,12 +81,11 @@ function tokenBudget(
   warnings: string[],
 ): number {
   if (value === undefined) return fallback;
-  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) {
-    // `-0` passes both checks; normalise it so no `-0` reaches a log or argv.
-    return value === 0 ? 0 : value;
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) {
+    return value;
   }
   warnings.push(
-    `Ignored ${key}=${describe(value)}: expected a whole number of 0 or more; using ${fallback}.`,
+    `Ignored ${key}=${describe(value)}: expected a positive whole number; using ${fallback}.`,
   );
   return fallback;
 }

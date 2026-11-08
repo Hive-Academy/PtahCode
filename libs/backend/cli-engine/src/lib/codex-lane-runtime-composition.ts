@@ -157,7 +157,8 @@ export function registerCliCodexLaneFactory(
         ? await identities.readByThreadId(options.resumeSessionId)
         : undefined;
       const budgets = options.laneBudgets ?? {
-        autoCompactTokens: 120000,
+        // floor(agentBudget.warnRatio 0.85 x agentBudget.handoffContextTokens 150000)
+        autoCompactTokens: 127500,
         toolOutputTokenLimit: 2500,
         webSearch: true,
       };
