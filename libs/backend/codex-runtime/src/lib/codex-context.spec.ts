@@ -24,6 +24,7 @@ describe('native child event admission', () => {
       terminalTurns: new Set<string>(), targets: new Map(), asyncQuestionItems: new Set(),
       subscribers: new Set(), turnController: new AbortController(), sequence: 0,
       options: { logger },
+      observedModel: 'gpt-4o',
     }) as RuntimeContext;
     const feed = (method: string, params: Record<string, unknown>): void => {
       Reflect.apply(Reflect.get(context, 'onNotification'), context, [{ method, params }]);
@@ -42,6 +43,7 @@ describe('native child event admission', () => {
       outputTokens: 10, reasoningOutputTokens: 0, totalTokens: 40 };
     // Round 4 wire order: no thread/started. Parent activity is interleaved.
     feed('thread/status/changed', { threadId: 'child-a', status: { type: 'active' } });
+    feed('thread/settings/updated', { threadId: 'child-a', threadSettings: { model: 'gpt-5' } });
     feed('mcpServer/startupStatus/updated', { threadId: 'child-a' });
     feed('turn/started', { threadId: 'child-a', turn: {
       id: 'turn-a', status: 'inProgress', items: [],
@@ -56,7 +58,7 @@ describe('native child event admission', () => {
       itemId: 'msg-a', delta: 'done' });
     feed('turn/moderationMetadata', { threadId: 'child-a', turnId: 'turn-a' });
     feed('thread/tokenUsage/updated', { threadId: 'child-a', turnId: 'turn-a',
-      model: 'gpt-4o', tokenUsage: { last: counts, total: counts } });
+      tokenUsage: { last: counts, total: counts, modelContextWindow: 200000 } });
     feed('turn/completed', { threadId: 'child-a',
       turn: { id: 'turn-a', status: 'completed', items: [] } });
     feed('item/started', { threadId: 'root', turnId: 'root-turn',
@@ -75,11 +77,17 @@ describe('native child event admission', () => {
     expect(events().filter((event) => event.type === 'terminal' &&
       event.threadId.startsWith('child-'))).toEqual([
       expect.objectContaining({ threadId: 'child-a', parentThreadId: 'root',
-        parentToolUseId: 'spawn-a', evidence: expect.objectContaining({ modelId: 'gpt-4o' }) }),
+        parentToolUseId: 'spawn-a', evidence: expect.objectContaining({ modelId: 'gpt-5' }) }),
       expect.objectContaining({ threadId: 'child-b', parentThreadId: 'root',
         parentToolUseId: 'spawn-b', evidence: expect.objectContaining({ modelId: 'gpt-4o' }) }),
     ]);
     expect(logger.info).toHaveBeenCalledTimes(2);
+    feed('turn/started', { threadId: 'child-a', turn: {
+      id: 'turn-a-2', status: 'inProgress', items: [],
+    } });
+    expect(logger.info).toHaveBeenCalledTimes(2);
+    expect(logger.debug).toHaveBeenCalledWith('Codex child relinked',
+      { childThreadId: 'child-a' });
     expect(logger.debug).toHaveBeenCalledWith('Codex child thread notification',
       expect.objectContaining({ method: 'thread/status/changed', fields: 'status,threadId' }));
   });

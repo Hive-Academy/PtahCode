@@ -60,6 +60,14 @@ export class CodexChildBudgetTap {
     return event?.type === 'usage' ? event.evidence?.modelId : undefined;
   }
 
+  hasAcceptedUsage(childThreadId: string, turnId: string): boolean {
+    return this.pending.has(this.turnKey(childThreadId, turnId));
+  }
+
+  isCompleted(childThreadId: string, turnId: string): boolean {
+    return this.completed.has(this.turnKey(childThreadId, turnId));
+  }
+
   /** Time since the child was first attributed; zero for an untracked child. */
   elapsedMs(childThreadId: string): number {
     const started = this.startedAt.get(childThreadId);

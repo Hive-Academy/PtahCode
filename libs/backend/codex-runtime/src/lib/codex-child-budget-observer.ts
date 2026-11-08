@@ -5,7 +5,8 @@ import {
   type AgentBudgetSettings,
   type ModelPricing,
 } from '@ptah-extension/shared';
-import { CodexChildBudgetTap, type CodexChildBudgetDecision } from './codex-child-budget-tap';
+import { CodexChildBudgetTap, CODEX_CHILD_BUDGET_MAX_ENTRIES,
+  type CodexChildBudgetDecision } from './codex-child-budget-tap';
 import type { CodexRuntimeLogger } from './codex-runtime-ports';
 import type { CodexContext, CodexRuntimeEvent } from './codex-runtime.types';
 
@@ -25,6 +26,7 @@ export interface CodexChildBudgetObserver {
 }
 
 type ObserverLogger = Pick<CodexRuntimeLogger, 'warn'>;
+const CHILD_USAGE_DRAIN_MS = 2_000;
 
 /** Invalid host values fall back to the shared defaults as one complete set. */
 export function readCodexChildBudgetSettings(
@@ -59,29 +61,34 @@ export function settleCodexChildBudgetEvent(
   if (event.type !== 'terminal') return undefined;
   const parentThreadId = tap.parentOf(event.threadId);
   if (!parentThreadId) return undefined;
+  if (tap.isCompleted(event.threadId, event.turnId)) return undefined;
   const modelId = event.evidence?.modelId ?? tap.modelIdFor(event.threadId, event.turnId);
-  try {
-    const decision = tap.completeChildTurn({
-      parentThreadId,
+  const decision = tap.completeChildTurn({
+    parentThreadId,
+    childThreadId: event.threadId,
+    turnId: event.turnId,
+    modelId,
+    elapsedMs: tap.elapsedMs(event.threadId),
+    pricing: modelId ? pricing(modelId) : null,
+  });
+  const { warning, stopReason, handoff, coverage } = decision.transition;
+  if (warning || stopReason || handoff)
+    logger.warn('[Codex budget] Child budget decision', {
       childThreadId: event.threadId,
-      turnId: event.turnId,
-      modelId,
-      elapsedMs: tap.elapsedMs(event.threadId),
-      pricing: modelId ? pricing(modelId) : null,
+      warning,
+      handoff,
+      coverage,
+      ...(decision.telemetry.status === 'reported' ? {
+        ...(decision.telemetry.usage.requestContextTokens.status === 'reported' ? {
+          contextTokens: decision.telemetry.usage.requestContextTokens.value,
+        } : {}),
+        inputTokens: decision.telemetry.usage.inputTokens,
+        outputTokens: decision.telemetry.usage.outputTokens,
+        modelId: decision.telemetry.usage.modelId,
+      } : { reason: decision.telemetry.reason }),
+      ...(stopReason ? { stopReason } : {}),
     });
-    const { warning, stopReason, handoff, coverage } = decision.transition;
-    if (warning || stopReason || handoff)
-      logger.warn('[Codex budget] Child budget decision', {
-        childThreadId: event.threadId,
-        warning,
-        handoff,
-        coverage,
-        ...(stopReason ? { stopReason } : {}),
-      });
-    return decision;
-  } finally {
-    tap.releaseChild(event.threadId);
-  }
+  return decision;
 }
 
 /**
@@ -98,16 +105,51 @@ export function observeCodexChildBudgets(
   const tap = new CodexChildBudgetTap(readCodexChildBudgetSettings(port, logger), now);
   const controller = new AbortController();
   const pricing = port.pricing ?? findModelPricing;
+  const draining = new Map<string, { event: CodexRuntimeEvent; timer: ReturnType<typeof setTimeout> }>();
+  const keyOf = (event: CodexRuntimeEvent): string => `${event.threadId}\u0000${event.turnId}`;
+  const settle = (event: CodexRuntimeEvent): void => {
+    try {
+      settleCodexChildBudgetEvent(event, tap, logger, pricing);
+    } catch (error: unknown) {
+      // degradation-audit: reported - one failed charge must not stop later charges
+      logger.warn('[Codex budget] Child budget charge failed', {
+        errorClass: errorClass(error),
+      });
+    }
+  };
   void (async () => {
     try {
       for await (const event of context.events(controller.signal)) {
-        try {
-          settleCodexChildBudgetEvent(event, tap, logger, pricing);
-        } catch (error: unknown) {
-          // degradation-audit: reported - one failed charge must not stop the stream or later charges
-          logger.warn('[Codex budget] Child budget charge failed', {
-            errorClass: errorClass(error),
-          });
+        if (event.type === 'terminal' && tap.parentOf(event.threadId) &&
+          !tap.hasAcceptedUsage(event.threadId, event.turnId)) {
+          const key = keyOf(event);
+          if (!draining.has(key)) {
+            if (draining.size >= CODEX_CHILD_BUDGET_MAX_ENTRIES) {
+              const oldestKey = draining.keys().next().value;
+              const oldest = oldestKey === undefined ? undefined : draining.get(oldestKey);
+              if (oldestKey && oldest) {
+                clearTimeout(oldest.timer);
+                draining.delete(oldestKey);
+                settle(oldest.event);
+              }
+            }
+            const timer = setTimeout(() => {
+              draining.delete(key);
+              settle(event);
+            }, CHILD_USAGE_DRAIN_MS);
+            draining.set(key, { event, timer });
+          }
+          continue;
+        }
+        settle(event);
+        if (event.type === 'usage' && event.evidence?.accepted) {
+          const key = keyOf(event);
+          const waiting = draining.get(key);
+          if (waiting) {
+            clearTimeout(waiting.timer);
+            draining.delete(key);
+            settle(waiting.event);
+          }
         }
       }
     } catch (error: unknown) {
@@ -116,12 +158,16 @@ export function observeCodexChildBudgets(
         errorClass: errorClass(error),
       });
     } finally {
+      for (const { timer } of draining.values()) clearTimeout(timer);
+      draining.clear();
       tap.dispose();
     }
   })();
   return {
     dispose: () => {
       controller.abort();
+      for (const { timer } of draining.values()) clearTimeout(timer);
+      draining.clear();
       tap.dispose();
     },
   };

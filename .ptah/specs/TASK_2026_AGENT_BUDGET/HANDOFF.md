@@ -29,7 +29,26 @@ PR: https://github.com/Hive-Academy/PtahCode/pull/986 (draft). Pushed head `5a84
 - Manager agent-process-manager.service.ts: 3849 physical / 3673 non-blank (main 3849 / 3675).
 - Side fix done for the user: PR #1000 CodeRabbit comment (commit 9cef23bb9, merged).
 
-## Update ~07:35 UTC (newest; supersedes the sections below)
+## Update ~08:15 UTC (newest)
+- feat/agent-budget pushed head `cd1c9bb99` (batch B merged; child linkage `9007e4b11`); local
+  commit `7b6e5bd68` (live test round 5 report) not pushed. CI watch on cd1c9bb99 running.
+- Live test round 5: Codex lane PROVEN end to end incl. warning text in the Codex rollout; native
+  Codex child LINKED; Haiku SDK subagent: per-turn accounting, warning, stop, one handoff record,
+  Ptah attribution, PreToolUse denial burst counted as one, fresh Task reads handoff — PASS.
+  Open: Codex child decisions `telemetry-unavailable` (+ relink per connection); SDK child notes
+  stub not updated after notice / no notes in C1/C2; false "Handoff not read by the parent in time".
+  SDK resume not testable (native Agent tool has no resume).
+- The task 7 session handed (1) notes and (2) handoff-read to #986; it will not edit agent-sdk.
+  Send it the commit when they land.
+- RUNNING in .claude-worktrees/agent-budget (file-disjoint, one committer = me):
+  - `c42dc15d-11c3-43d3-a988-c066d7fd030c` (session 01a1ba37-dfec-7f02-b883-b0ba328b01a8) Codex child
+    telemetry, codex-runtime/cli-agent-runtime → live-test-5-fix-report.md
+  - `14ecc331-c4b1-49bb-b7e4-ab8cf8e6d2f7` (session 01a1ba38-286e-72a2-8d9c-ddb358bd398e) SDK notes +
+    handoff-read, agent-sdk only → live-test-5-sdk-fix-report.md
+- Then: verify, commit, push, live test round 6 (B child counters + C notes), round 4 reviews of
+  the whole PR, PR body, ready for review.
+
+## Update ~07:35 UTC
 - feat/agent-budget pushed head `a55115439` (steer/queue warning, thread/started linkage); local
   commit `67a6cb4cf` (live test round 4 report) not pushed yet. CI watch on a55115439 running.
 - Live test round 4: CLI lane path PROVEN end to end (per-turn records, one warning before stop via

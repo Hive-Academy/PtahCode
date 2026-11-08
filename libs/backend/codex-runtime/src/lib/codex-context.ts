@@ -111,6 +111,7 @@ class RuntimeContext implements CodexContext {
   private revision = 0;
   private turnRevision = 0;
   private sentInitialInput = false;
+  private observedModel?: string;
   private turnHistory = false;
   private settings: CodexTurnSettings;
   private levelPolicy: Pick<
@@ -296,6 +297,7 @@ class RuntimeContext implements CodexContext {
       throw new Error('Codex resumed a different thread');
     if (this.isClosed()) throw new Error('Codex context closed');
     this.translator.setThreadModel(result.thread.id, result.model);
+    this.observedModel = result.model;
     const identity: CodexThreadIdentity = Object.freeze({
       threadId: result.thread.id,
       contextId: this.profile.contextId,
@@ -437,6 +439,16 @@ class RuntimeContext implements CodexContext {
         });
       }
     }
+    if (frame.method === 'thread/settings/updated') {
+      const settings = z.object({ threadId: z.string(), threadSettings: z.object({
+        model: z.string().min(1),
+      }) }).safeParse(frame.params);
+      if (settings.success) {
+        this.translator.setThreadModel(settings.data.threadId, settings.data.threadSettings.model);
+        if (settings.data.threadId === this.identity.threadId)
+          this.observedModel = settings.data.threadSettings.model;
+      }
+    }
     // Compaction owns admission, so thread item activity belongs to its work.
     if (
       this.finishCompact &&
@@ -535,10 +547,14 @@ class RuntimeContext implements CodexContext {
     parentThreadId = this.identity.threadId,
   ): void {
     if (threadId === this.identity.threadId) return;
-    if (!this.childParentThreads.has(threadId))
+    if (!this.knownChildParents.has(threadId))
       this.options.logger.info('Codex child linked', {
         parentThreadId, childThreadId: threadId,
       });
+    else if (!this.childParentThreads.has(threadId))
+      this.options.logger.debug('Codex child relinked', { childThreadId: threadId });
+    if (!this.knownChildParents.has(threadId) && this.observedModel)
+      this.translator.setThreadModel(threadId, this.observedModel);
     this.childParentThreads.set(threadId, parentThreadId);
     this.pendingChildParents.delete(threadId);
     if (!this.knownChildParents.has(threadId) &&
@@ -756,7 +772,10 @@ class RuntimeContext implements CodexContext {
       this.wirePermissionLevel = level;
       // Usage notifications may arrive before the turn/start response. The
       // validated request is the effective model for this accepted turn.
-      if (params.model) this.translator.setThreadModel(this.identity.threadId, params.model);
+      if (params.model) {
+        this.observedModel = params.model;
+        this.translator.setThreadModel(this.identity.threadId, params.model);
+      }
       const result = await this.process.request('turn/start', params);
       const turnId = result.turn.id;
       if (params.model) this.translator.setTurnModel(this.identity.threadId, turnId, params.model);

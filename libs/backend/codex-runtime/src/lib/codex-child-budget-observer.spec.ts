@@ -90,6 +90,27 @@ function fakeContext() {
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 describe('observeCodexChildBudgets', () => {
+  it('uses trailing child usage during the drain and logs context advisory once after relink', async () => {
+    const context = fakeContext();
+    const logger = { warn: jest.fn() };
+    const observer = observeCodexChildBudgets(context, port, logger);
+    context.emit(spawn);
+    context.emit(terminal);
+    await flush();
+    expect(logger.warn).not.toHaveBeenCalledWith(
+      '[Codex budget] Child budget decision', expect.anything());
+    if (usage.type !== 'usage' || !usage.evidence) throw new Error('invalid fixture');
+    context.emit({ ...usage, evidence: { ...usage.evidence, lastRequestTotalTokens: 110 } });
+    context.emit(spawn);
+    context.emit(terminal);
+    await flush();
+    const decisions = logger.warn.mock.calls.filter(
+      ([message]) => message === '[Codex budget] Child budget decision');
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0][1]).toMatchObject({ contextTokens: 110, handoff: true,
+      modelId: 'codex-model', inputTokens: 12, outputTokens: 4 });
+    observer.dispose();
+  });
   it('charges a child turn through one subscription and logs the decision', async () => {
     const context = fakeContext();
     const logger = { warn: jest.fn() };
@@ -151,14 +172,16 @@ describe('settleCodexChildBudgetEvent', () => {
       .toBeUndefined();
   });
 
-  it('releases the child after its terminal is charged', () => {
+  it('keeps a completed turn across reconnects and charges it once', () => {
     const tap = new CodexChildBudgetTap(settings);
     const logger = { warn: jest.fn() };
     settleCodexChildBudgetEvent(spawn, tap, logger, () => null);
     settleCodexChildBudgetEvent(usage, tap, logger, () => null);
     const decision = settleCodexChildBudgetEvent(terminal, tap, logger, () => null);
     expect(decision?.provenance).toBe('child-thread');
-    expect(tap.trackedChildren).toBe(0);
+    expect(tap.trackedChildren).toBe(1);
+    expect(settleCodexChildBudgetEvent(terminal, tap, logger, () => null))
+      .toBeUndefined();
   });
 
   it('prices a terminal without a model from the accepted usage model', () => {
