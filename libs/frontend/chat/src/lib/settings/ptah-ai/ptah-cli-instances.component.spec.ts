@@ -176,6 +176,16 @@ describe('PtahCliInstancesComponent', () => {
   });
 
   describe('actions emit to the matrix', () => {
+    it('keeps three summary chips and exposes full capability detail in a popover', () => {
+      const chips = q('[data-testid="cli-capability-summary"]');
+      expect(chips?.querySelectorAll('.badge').length).toBe(3);
+      const trigger = Array.from(chips?.querySelectorAll('button') ?? []).find(button => button.textContent?.includes('Show capabilities'));
+      expect(trigger?.getAttribute('aria-expanded')).toBe('false');
+      trigger?.click();
+      fixture.detectChanges();
+      expect(trigger?.getAttribute('aria-expanded')).toBe('true');
+      expect(chips?.textContent).toContain('Messaging');
+    });
     it('toggle, Tiers and Test', () => {
       const component = fixture.componentInstance;
       const seen: string[] = [];
