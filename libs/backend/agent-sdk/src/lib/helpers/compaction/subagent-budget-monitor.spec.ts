@@ -1697,11 +1697,11 @@ describe('SubagentBudgetMonitor', () => {
       SESSION,
       assistant({ input: 310_000 }, { id: 'a2' }),
     );
-    await jest.advanceTimersByTimeAsync(STOP_RETRY_BASE_DELAY_MS * 2);
     let settleF: () => void = () => undefined;
     h.dispatcher.stopSubagent.mockReturnValueOnce(
       new Promise<void>((resolve) => (settleF = resolve)),
     );
+    await jest.advanceTimersByTimeAsync(STOP_RETRY_BASE_DELAY_MS * 2);
     const pendingF = h.monitor.observe(
       SESSION,
       assistant({ input: 310_000 }, { id: 'a3' }),
@@ -1721,6 +1721,7 @@ describe('SubagentBudgetMonitor', () => {
     await pendingE;
     settleF();
     await pendingF;
+    await jest.advanceTimersByTimeAsync(0);
 
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(4);
     jest.useRealTimers();
@@ -2558,6 +2559,28 @@ describe('SubagentBudgetMonitor', () => {
       expect(h.dispatcher.pushParentMessage).not.toHaveBeenCalled();
     });
 
+    it('publishes a normal-exit record after release during file preparation without delivering', async () => {
+      const paths = { notes: path.join(workspace, 'notes.md'), task: path.join(workspace, 'task.md') };
+      let finishFiles: (saved: boolean) => void = () => undefined;
+      const handoffFiles = {
+        paths: jest.fn(() => paths),
+        saveTask: jest.fn(() => new Promise<boolean>((resolve) => { finishFiles = resolve; })),
+        notesExist: jest.fn(async () => false),
+        redactNotes: jest.fn(async () => true),
+      };
+      const h = makeHarness({ agentId: 'agent-7' }, { workspace, handoffFiles });
+      await h.monitor.observe(SESSION, spawn({ prompt: 'Finish task' }));
+      await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
+      const finishing = h.monitor.finishWarnedAgent(SESSION, 'agent-7');
+      await waitUntil(() => handoffFiles.saveTask.mock.calls.length === 1);
+      h.monitor.release(SESSION);
+      finishFiles(true);
+      await finishing;
+      expect(h.recordStore.writeOnce).toHaveBeenCalledTimes(1);
+      expect(h.index.publish).toHaveBeenCalledTimes(1);
+      expect(h.dispatcher.pushParentMessage).not.toHaveBeenCalled();
+    });
+
     it('queues the normal handoff if the parent Agent hook did not run', async () => {
       const h = makeHarness({ agentId: 'agent-7' }, { workspace });
       await h.monitor.observe(SESSION, spawn({ description: 'Test handoff', prompt: 'Finish task' }));
@@ -3007,6 +3030,50 @@ describe('SubagentBudgetMonitor handoff records', () => {
     expect(warnings(h.logger, 'giving up')).toHaveLength(1);
     expect(h.logger.warn).toHaveBeenCalledWith(expect.stringContaining('giving up'),
       expect.objectContaining({ toolCallId: TOOL_CALL, attempts: MAX_STOP_ATTEMPTS }));
+  });
+
+  it('retries failed safety stops on timers without new messages and clears them on release', async () => {
+    jest.useFakeTimers();
+    const h = makeHarness();
+    h.dispatcher.stopSubagent.mockRejectedValue(new Error('busy'));
+    await h.monitor.observe(SESSION, over('m1'));
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(STOP_RETRY_BASE_DELAY_MS - 1);
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(1);
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(2);
+    await jest.advanceTimersByTimeAsync(STOP_RETRY_BASE_DELAY_MS * 2);
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(MAX_STOP_ATTEMPTS);
+    expect(warnings(h.logger, 'giving up')).toHaveLength(1);
+    h.monitor.release(SESSION);
+    expect(jest.getTimerCount()).toBe(0);
+    const released = makeHarness();
+    released.dispatcher.stopSubagent.mockRejectedValue(new Error('busy'));
+    await released.monitor.observe(SESSION, over('m2'));
+    expect(jest.getTimerCount()).toBeGreaterThan(0);
+    released.monitor.release(SESSION);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it.each(['budget stop', 'normal exit'])('withholds an indexed notes path when the final scrub fails on %s', async (route) => {
+    const paths = { notes: '/ws/private-notes.md', task: '/ws/task.md' };
+    const handoffFiles = {
+      paths: jest.fn(() => paths),
+      saveTask: jest.fn(async () => true),
+      notesExist: jest.fn(async () => true),
+      redactNotes: jest.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false),
+    };
+    const h = makeHarness({ agentId: 'a1' }, { handoffFiles });
+    if (route === 'normal exit') {
+      await h.monitor.observe(SESSION, assistant({ input: 130_000 }, { id: 'm1' }));
+      await h.monitor.finishWarnedAgent(SESSION, 'a1');
+    } else {
+      await h.monitor.observe(SESSION, over('m1'));
+    }
+    expect(h.recordStore.writeOnce.mock.calls[0][2]).toContain(paths.notes);
+    expect(h.index.publish).not.toHaveBeenCalled();
+    expect(h.recordStore.withdraw).toHaveBeenCalledTimes(1);
+    expect(h.logger.error).toHaveBeenCalledWith(expect.stringContaining('redaction failed'), expect.any(Error));
   });
 
   it('omits handoff notes when their redaction fails before record creation', async () => {

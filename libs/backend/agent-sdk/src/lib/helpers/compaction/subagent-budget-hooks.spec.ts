@@ -101,7 +101,25 @@ describe('subagent budget hooks', () => {
     expect(logger.error).toHaveBeenCalledWith('[SubagentBudgetHooks] Hook failed', expect.objectContaining({ error: expect.any(Error) }));
   });
 
-  it('warns when a notes hook cannot resolve a session id', async () => {
+  it('denies a warned agent without a session id when it calls a non-notes tool', async () => {
+    monitor.hasNotesGate.mockReturnValueOnce(true);
+    const noSessionHooks = createSubagentBudgetHooks(logger, monitor);
+    const callback = noSessionHooks.PreToolUse?.[0]?.hooks[0];
+    if (!callback) throw new Error('missing PreToolUse hook');
+    expect(await callback({ hook_event_name: 'PreToolUse', agent_id: 'agent-7',
+      tool_name: 'Bash', tool_input: { command: 'pwd' },
+    } as HookInput, 'tool-3', { signal: new AbortController().signal })).toEqual({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse', permissionDecision: 'deny',
+        permissionDecisionReason: 'Ptah notes gate failed. End your turn now; do not call other tools.',
+      },
+    });
+    expect(monitor.hasNotesGate).toHaveBeenCalledWith('agent-7');
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('missing session id'),
+      expect.objectContaining({ hasSessionId: false, eventName: 'PreToolUse', agentId: 'agent-7', toolName: 'Bash' }));
+  });
+
+  it('warns and allows an unwarned agent when a notes hook cannot resolve a session id', async () => {
     const noSessionHooks = createSubagentBudgetHooks(logger, monitor);
     const callback = noSessionHooks.PreToolUse?.[0]?.hooks[0];
     if (!callback) throw new Error('missing PreToolUse hook');

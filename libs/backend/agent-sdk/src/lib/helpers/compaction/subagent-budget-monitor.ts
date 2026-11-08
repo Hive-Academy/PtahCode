@@ -426,6 +426,7 @@ interface SubagentState {
   /** `stopSubagent` calls that rejected. */
   stopFailures: number;
   nextStopAttemptAt?: number;
+  stopRetryTimer?: ReturnType<typeof setTimeout>;
   /** API message id of the request whose stop or record write last failed; its other blocks do not retry. */
   failedAttemptMessageId?: string;
   /** Handoff records that could not be saved for a handoff stop. */
@@ -849,11 +850,7 @@ export class SubagentBudgetMonitor {
             this.logger.info('[SubagentBudgetMonitor] Normal exit skipped: handoff unavailable', { sessionId: session.sessionId, toolCallId, agentId });
             return;
           }
-          if (prepared.notesPathToRedact && !await this.handoffFiles.redactNotes(prepared.notesPathToRedact, redactBudgetSecrets)) {
-            this.logger.error('[SubagentBudgetMonitor] Handoff notes redaction failed; delivery withheld',
-              new Error(`Could not redact handoff notes for agent ${agentId}`));
-            return;
-          }
+          if (!await this.finalizeNotes(prepared, toolCallId)) return;
           // Publish a safe record even if the parent session was released during preparation.
           if (prepared.record) this.index.publish(prepared.record.workspace, prepared.record.name);
           const live = this.liveSession(session);
@@ -1070,9 +1067,13 @@ export class SubagentBudgetMonitor {
         const kept = session.subagents.get(toolCallId);
         if (!kept || (!hasStopStarted(kept) && hasStopStarted(state))) {
           if (kept?.deadlineTimer) clearTimeout(kept.deadlineTimer);
+          if (kept) this.clearStopRetry(kept);
           session.subagents.set(toolCallId, state);
         } else if (state.deadlineTimer) {
           clearTimeout(state.deadlineTimer);
+          this.clearStopRetry(state);
+        } else {
+          this.clearStopRetry(state);
         }
       }
       for (const [toolUseId, task] of existing.tasks) {
@@ -1133,6 +1134,7 @@ export class SubagentBudgetMonitor {
     for (const state of this.sessions.get(sessionId)?.subagents.values() ??
       []) {
       if (state.deadlineTimer) clearTimeout(state.deadlineTimer);
+      this.clearStopRetry(state);
       if (state.warnedAgentId) {
         this.notesGate.finish(state.warnedAgentId);
         this.dispatcher.withdrawSubagentNotice(state.warnedAgentId);
@@ -1518,6 +1520,7 @@ export class SubagentBudgetMonitor {
     },
   ): Promise<void> {
     if (state.nextStopAttemptAt && Date.now() < state.nextStopAttemptAt) return;
+    this.clearStopRetry(state);
     const started = session.startedTasks.get(toolCallId);
     const { record: registryRecord, registryToolCallId } =
       this.resolveRegistryRecord(session, toolCallId);
@@ -1617,9 +1620,8 @@ export class SubagentBudgetMonitor {
     }
     // The stop may have ended the subagent even when it rejected: from here
     // on the record is kept and named on main-thread prompts.
-    if (prepared.record) {
-      this.index.publish(prepared.record.workspace, prepared.record.name);
-    }
+    if (!await this.finalizeNotes(prepared, toolCallId)) return;
+    if (prepared.record) this.index.publish(prepared.record.workspace, prepared.record.name);
 
     // Released while the stop ran: the session is over, so no retry and no handoff.
     const current = this.liveSession(session);
@@ -1646,6 +1648,7 @@ export class SubagentBudgetMonitor {
       return;
     }
     liveState.stopFired = true;
+    this.clearStopRetry(liveState);
     liveState.stopped = true;
     liveState.stopState = 'stopped';
     const stoppedState = this.getAgentBudgetState(toolCallId, sessionId);
@@ -1698,11 +1701,6 @@ export class SubagentBudgetMonitor {
       // A warning the stopped subagent never received is moot now.
       this.dispatcher.withdrawSubagentNotice(liveState.warnedAgentId);
     }
-    if (prepared.notesPathToRedact && !await this.handoffFiles.redactNotes(prepared.notesPathToRedact, redactBudgetSecrets)) {
-      this.logger.error('[SubagentBudgetMonitor] Handoff notes redaction failed; delivery withheld',
-        new Error(`Could not redact handoff notes for agent ${prepared.handoff.subject.agentId ?? toolCallId}`));
-      return;
-    }
     await this.deliverHandoff(current, toolCallId, liveState, prepared.handoff, reason === 'safety');
     const prompt = current.tasks.get(toolCallId)?.prompt;
     if (prepared.record && prompt) {
@@ -1712,6 +1710,36 @@ export class SubagentBudgetMonitor {
         prepared.record.path,
       );
     }
+  }
+
+  private async finalizeNotes(prepared: PreparedHandoff, toolCallId: string): Promise<boolean> {
+    if (!prepared.notesPathToRedact) return true;
+    try {
+      if (await this.handoffFiles.redactNotes(prepared.notesPathToRedact, redactBudgetSecrets)) return true;
+      throw new Error(`Could not redact handoff notes for agent ${prepared.handoff.subject.agentId ?? toolCallId}`);
+    } catch (error: unknown) {
+      this.logger.error('[SubagentBudgetMonitor] Handoff notes redaction failed; delivery withheld',
+        error instanceof Error ? error : new Error(String(error)));
+      if (prepared.record) {
+        await this.records.withdraw(toolCallId, prepared.record.path);
+        // An invoked stop keeps its writer, so withdraw alone cannot remove that record.
+        try {
+          await fs.unlink(prepared.record.path);
+        } catch (removeError: unknown) {
+          // degradation-audit: optional-capability - the record was already removed by withdraw.
+          if (!(removeError instanceof Error && 'code' in removeError && removeError.code === 'ENOENT')) {
+            this.logger.error('[SubagentBudgetMonitor] Unsafe handoff record removal failed',
+              removeError instanceof Error ? removeError : new Error(String(removeError)));
+          }
+        }
+      }
+      return false;
+    }
+  }
+
+  private clearStopRetry(state: SubagentState): void {
+    if (state.stopRetryTimer) clearTimeout(state.stopRetryTimer);
+    state.stopRetryTimer = undefined;
   }
 
   /**
@@ -1747,11 +1775,12 @@ export class SubagentBudgetMonitor {
     }
     // Released while the files were written: the session is over.
     const live = this.liveSession(session);
-    if (!live) {
+    if (!live && !allowInMemoryOnFailure) {
       return undefined;
     }
     // Read after the wait: a background tool result may have named the output file.
-    const task = live.tasks.get(toolCallId);
+    const durableSession = live ?? session;
+    const task = durableSession.tasks.get(toolCallId);
     const subject: HandoffSubject = {
       ...who,
       teammateName: who.teammateName ?? task?.name,
@@ -1765,14 +1794,14 @@ export class SubagentBudgetMonitor {
       stopWeightedTokens: limits.stopWeightedTokens,
     };
     if (who.agentId && !state.transcriptPath) {
-      const workspace = this.records.workspaceOf(live.sessionId);
+      const workspace = this.records.workspaceOf(durableSession.sessionId);
       if (workspace) {
-        const cached = this.transcriptLookup.get(stoppedIdentityKey(live.sessionId, who.agentId));
+        const cached = this.transcriptLookup.get(stoppedIdentityKey(durableSession.sessionId, who.agentId));
         if (cached && cached.expiresAt > Date.now()) {
           state.transcriptPath = cached.path;
         } else {
-          state.transcriptPath = await this.lookupTranscript(os.homedir(), workspace, live.sessionId, who.agentId);
-          this.cacheTranscript(live.sessionId, who.agentId, state.transcriptPath);
+          state.transcriptPath = await this.lookupTranscript(os.homedir(), workspace, durableSession.sessionId, who.agentId);
+          this.cacheTranscript(durableSession.sessionId, who.agentId, state.transcriptPath);
         }
       }
     }
@@ -1802,7 +1831,7 @@ export class SubagentBudgetMonitor {
     }
     const recordText = redactBudgetSecrets(handoffMessage(subject, usage, task?.text, files, undefined, progress));
     const write = await this.records.writeOnce(
-      live.sessionId,
+      durableSession.sessionId,
       toolCallId,
       recordText,
     );
@@ -1821,11 +1850,11 @@ export class SubagentBudgetMonitor {
         },
       };
     }
-    const current = this.liveSession(live);
+    const current = live ? this.liveSession(live) : undefined;
     if (reason === 'handoff') {
       if (allowInMemoryOnFailure) {
         this.logger.warn('[SubagentBudgetMonitor] Normal exit record unavailable; delivering in-memory handoff', {
-          sessionId: current?.sessionId ?? live.sessionId, toolCallId,
+          sessionId: current?.sessionId ?? durableSession.sessionId, toolCallId,
           errorType: write.errorType, errorCode: write.errorCode,
         });
         return { handoff: { text: recordText, subject }, notesPathToRedact: files.notesWritten ? files.paths : undefined };
@@ -1844,7 +1873,7 @@ export class SubagentBudgetMonitor {
     this.logger.warn(
       '[SubagentBudgetMonitor] Safety stop without a durable record',
       {
-        sessionId: current?.sessionId ?? live.sessionId,
+        sessionId: current?.sessionId ?? durableSession.sessionId,
         toolCallId,
         errorType: write.errorType,
         errorCode: write.errorCode,
@@ -1937,17 +1966,32 @@ export class SubagentBudgetMonitor {
     state.stopFailures += 1;
     state.failedAttemptMessageId = attemptMessageId;
     if (state.stopFailures < MAX_STOP_ATTEMPTS) {
-      state.nextStopAttemptAt = Date.now() + Math.min(
+      const delay = Math.min(
         STOP_RETRY_MAX_DELAY_MS,
         STOP_RETRY_BASE_DELAY_MS * 2 ** (state.stopFailures - 1),
       );
+      state.nextStopAttemptAt = Date.now() + delay;
+      this.clearStopRetry(state);
+      state.stopRetryTimer = setTimeout(() => {
+        state.stopRetryTimer = undefined;
+        const session = this.sessions.get(this.currentSessionId(sessionId));
+        if (!session || session.subagents.get(toolCallId) !== state || state.stopFired || state.stopInFlight) return;
+        const settings = this.config.getAgentBudgetSettings();
+        void this.stop(session, toolCallId, state, reason, {
+          handoffTokens: settings.handoffContextTokens,
+          stopWeightedTokens: settings.stopWeightedTokens,
+        }).catch((error: unknown) => this.logger.error('[SubagentBudgetMonitor] Stop retry failed',
+          error instanceof Error ? error : new Error(String(error))));
+      }, delay);
+      state.stopRetryTimer.unref?.();
       this.logger.debug(
-        '[SubagentBudgetMonitor] Stopping the subagent failed; retrying on its next message',
+         '[SubagentBudgetMonitor] Stopping the subagent failed; retrying after backoff',
         { sessionId, toolCallId, reason, attempt: state.stopFailures },
       );
       return;
     }
     state.stopFired = true;
+    this.clearStopRetry(state);
     state.nextStopAttemptAt = undefined;
     this.logger.warn(
       recordKept
