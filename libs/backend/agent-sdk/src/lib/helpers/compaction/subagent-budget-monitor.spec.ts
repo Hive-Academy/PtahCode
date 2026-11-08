@@ -175,6 +175,7 @@ function makeHarness(
     enabled?: boolean;
     handoffTokens?: number;
     maxDurationMin?: number;
+    stopWeightedTokens?: number;
     workspace?: string;
     handoffFiles?: SubagentHandoffFilesPort;
     records?: SubagentHandoffRecordsPort;
@@ -197,13 +198,13 @@ function makeHarness(
     getAgentBudgetSettings: jest.fn(() => ({
       warnRatio: 0.85,
       handoffContextTokens: opts.handoffTokens ?? HANDOFF_TOKENS,
-      stopWeightedTokens: STOP_WEIGHTED,
+      stopWeightedTokens: opts.stopWeightedTokens ?? STOP_WEIGHTED,
       maxDurationMin: opts.maxDurationMin ?? 90,
     })),
     getConfig: jest.fn(() => ({
       enabled: opts.enabled ?? true,
       subagentHandoffTokens: opts.handoffTokens ?? HANDOFF_TOKENS,
-      subagentStopWeightedTokens: STOP_WEIGHTED,
+      subagentStopWeightedTokens: opts.stopWeightedTokens ?? STOP_WEIGHTED,
     })),
   };
   // Every handoff the monitor delivered, by either route.
@@ -2195,6 +2196,59 @@ describe('SubagentBudgetMonitor', () => {
     /** 85% of the handoff size is 127 500 context tokens. */
     const atContext = (tokens: number, id: string) =>
       assistant({ input: tokens }, { id });
+
+    it('forces one policy stop and pushes the full handoff when a turn crosses warning and stop together', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, {
+        workspace, handoffTokens: 40_000, stopWeightedTokens: 40_000,
+      });
+      await h.monitor.observe(SESSION, spawn({ description: 'Review the auth module' }));
+      await h.monitor.observe(SESSION, atContext(17_000, 'round-6-before'));
+      expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
+
+      await h.monitor.observe(SESSION, atContext(38_251, 'round-6-crossing'));
+
+      expect(h.dispatcher.postSubagentNotice).toHaveBeenCalledTimes(1);
+      expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
+      expect(h.dispatcher.stopSubagent).toHaveBeenCalledWith(SESSION, 'task-1');
+      expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
+      const handoff = h.dispatcher.pushParentMessage.mock.calls[0][1];
+      expect(handoff).toContain("Ptah's subagent budget monitor handed off subagent");
+      expect(handoff).toContain('Ptah\'s subagent budget monitor caused that interruption, not the user');
+      expect(handoff).toContain('SDK task: task-1');
+      expect(fs.readFileSync(notesPath(), 'utf8')).toContain('# Subagent progress (host-generated, inferred)');
+      expect(h.monitor.hasNotesGate('agent-7')).toBe(false);
+      await h.monitor.observe(SESSION, atContext(40_000, 'late-message'));
+      expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
+      expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it('finds the forced handoff by parent session and Agent tool id after a rekey', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, {
+        workspace, handoffTokens: 40_000, stopWeightedTokens: 40_000,
+      });
+      await h.monitor.observe(SESSION, spawn({ description: 'Review the auth module' }));
+      h.monitor.rekey(SESSION, 'sdk-rekeyed');
+      await h.monitor.observe('sdk-rekeyed', atContext(40_000, 'round-6-rekeyed'));
+
+      expect(h.dispatcher.stopSubagent).toHaveBeenCalledWith('sdk-rekeyed', 'task-1');
+      expect(h.dispatcher.pushParentMessage).toHaveBeenCalledWith('sdk-rekeyed', expect.stringContaining('SDK task: task-1'));
+      expect(h.monitor.takeInterruptedHandoff(SESSION, TOOL_CALL)).toContain('SDK task: task-1');
+      expect(h.monitor.takeInterruptedHandoff('sdk-rekeyed', TOOL_CALL)).toContain('SDK task: task-1');
+      expect(h.monitor.takeNormalHandoff('sdk-rekeyed', TOOL_CALL)).toBeUndefined();
+    });
+
+    it('starts the policy handoff push without waiting for SDK input acknowledgment', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, {
+        workspace, handoffTokens: 40_000, stopWeightedTokens: 40_000,
+      });
+      h.dispatcher.pushParentMessage.mockReturnValueOnce(new Promise<void>(() => undefined));
+      await h.monitor.observe(SESSION, spawn({ description: 'Review the auth module' }));
+      await h.monitor.observe(SESSION, atContext(40_000, 'round-6-no-ack'));
+
+      expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
+      expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
+      expect(h.dispatcher.pushParentMessage).toHaveBeenCalledWith(SESSION, expect.stringContaining('SDK task: task-1'));
+    });
 
     it('routes a 54k to 101k threshold jump into the notes gate', async () => {
       const h = makeHarness({ agentId: 'agent-7' }, { workspace, handoffTokens: 60_000 });

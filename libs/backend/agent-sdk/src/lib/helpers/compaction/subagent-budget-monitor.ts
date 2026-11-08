@@ -1644,7 +1644,7 @@ export class SubagentBudgetMonitor {
     if (notesPaths) {
       await this.handoffFiles.redactNotes(notesPaths, redactBudgetSecrets);
     }
-    await this.deliverHandoff(current, toolCallId, liveState, prepared.handoff);
+    await this.deliverHandoff(current, toolCallId, liveState, prepared.handoff, reason === 'safety');
     const prompt = current.tasks.get(toolCallId)?.prompt;
     if (prepared.record && prompt) {
       await this.records.writeStub(
@@ -1831,11 +1831,23 @@ export class SubagentBudgetMonitor {
     toolCallId: string,
     stoppedState: SubagentState,
     handoff: Handoff,
+    releaseAfterPush = false,
   ): Promise<void> {
     const sessionId = live.sessionId;
     if (stoppedState.handoffDelivered) return;
     stoppedState.handoffDelivered = true;
-    await this.delivery.send(sessionId, toolCallId, handoff);
+    const delivery = this.delivery.send(sessionId, toolCallId, handoff);
+    if (releaseAfterPush) {
+      // The SDK can acknowledge streamInput only while the output iterator
+      // continues. The call above starts the full parent push in order; let
+      // its bounded acceptance check finish without holding that iterator.
+      void delivery.catch((error: unknown) => this.logger.error(
+        '[SubagentBudgetMonitor] Parent handoff delivery failed',
+        { error: error instanceof Error ? error : new Error(String(error)), sessionId, toolCallId },
+      ));
+      return;
+    }
+    await delivery;
   }
 
   /**

@@ -29,6 +29,25 @@ describe('AgentBudgetPolicy', () => {
     expect(stop.warning).toBe(false);
     expect(stop.stopReason).toBe('budget');
   });
+  it('warns before a 209587 to 251031 jump at a 250000 stop', () => {
+    const predictive = new AgentBudgetPolicy({ warnRatio: 0.85, stopWeightedTokens: 250000, handoffContextTokens: 500000, maxDurationMin: 2 });
+    const before = { ...initialAgentBudgetSnapshot, rawTokens: 168143, weightedTokens: 168143, largestTurnTokens: 41444 };
+    const turn = { ...usage, turnId: 'before-stop', inputTokens: 41444, outputTokens: 0,
+      cacheReadTokens: reported(0), cacheWriteTokens: reported(0), requestContextTokens: missing };
+    const warning = predictive.evaluate(before, { status: 'reported', usage: turn }, 1, null);
+    expect(warning.snapshot.rawTokens).toBe(209587);
+    expect(warning.warning).toBe(true);
+    expect(warning.stopReason).toBeUndefined();
+    const stop = predictive.evaluate(warning.snapshot, { status: 'reported', usage: { ...turn, turnId: 'stop' } }, 2, null);
+    expect(stop.snapshot.rawTokens).toBe(251031);
+    expect(stop.warning).toBe(false);
+    expect(stop.stopReason).toBe('budget');
+  });
+  it('uses the largest prior turn when the last turn was smaller', () => {
+    const predictive = new AgentBudgetPolicy({ warnRatio: 0.9, stopWeightedTokens: 250, handoffContextTokens: 1000, maxDurationMin: 2 });
+    const snapshot = { ...initialAgentBudgetSnapshot, rawTokens: 205, weightedTokens: 205, largestTurnTokens: 50 };
+    expect(predictive.assess(snapshot, 0, undefined, 10).warning).toBe(true);
+  });
   it('weights each billed model in a mixed-model turn', () => {
     registerProviderPricing({
       'priced-expensive': { inputCostPerToken: 30e-6, outputCostPerToken: 60e-6 },

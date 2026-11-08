@@ -36,6 +36,7 @@ export interface AgentBudgetSnapshot {
   readonly warned: boolean;
   readonly stopped: boolean;
   readonly turnIds: readonly string[];
+  readonly largestTurnTokens?: number;
 }
 export interface AgentBudgetTransition {
   readonly snapshot: AgentBudgetSnapshot;
@@ -87,7 +88,7 @@ export class AgentBudgetPolicy {
     const contextWarning = contextTokens !== undefined && contextTokens >= this.settings.handoffContextTokens * this.settings.warnRatio;
     const warning = !snapshot.warned && !snapshot.stopped &&
       (total >= this.settings.stopWeightedTokens * this.settings.warnRatio ||
-        total + nextTurnTokens >= this.settings.stopWeightedTokens || contextWarning);
+        total + Math.max(nextTurnTokens, snapshot.largestTurnTokens ?? 0) >= this.settings.stopWeightedTokens || contextWarning);
     const stopReason = snapshot.stopped ? undefined
       : elapsedMs >= this.settings.maxDurationMin * 60_000 ? 'duration' as const
       : total >= this.settings.stopWeightedTokens || (contextTokens !== undefined && contextTokens >= this.settings.handoffContextTokens * 2) ? 'budget' as const
@@ -120,11 +121,13 @@ export class AgentBudgetPolicy {
     const rawTokens = snapshot.rawTokens + (duplicate ? 0 : raw);
     const weightedTokens = snapshot.weightedTokens + (duplicate ? 0 : weighted);
     const contextTokens = usage.requestContextTokens.status === 'reported' ? usage.requestContextTokens.value : undefined;
-    const decision = this.assess({ ...snapshot, rawTokens, weightedTokens }, elapsedMs, contextTokens, duplicate ? 0 : Math.max(raw, weighted));
+    const turnTokens = duplicate ? 0 : Math.max(raw, weighted);
+    const largestTurnTokens = Math.max(snapshot.largestTurnTokens ?? 0, turnTokens);
+    const decision = this.assess({ ...snapshot, rawTokens, weightedTokens, largestTurnTokens }, elapsedMs, contextTokens, turnTokens);
     const warning = !duplicate && decision.warning;
     const stopReason = decision.stopReason;
     return {
-      snapshot: { weightedTokens, rawTokens, elapsedMs, warned: snapshot.warned || warning, stopped: snapshot.stopped || stopReason !== undefined, turnIds: duplicate ? snapshot.turnIds : [...snapshot.turnIds, usage.turnId] },
+      snapshot: { weightedTokens, rawTokens, elapsedMs, largestTurnTokens, warned: snapshot.warned || warning, stopped: snapshot.stopped || stopReason !== undefined, turnIds: duplicate ? snapshot.turnIds : [...snapshot.turnIds, usage.turnId] },
       warning, stopReason,
       handoff: decision.handoff,
       coverage: priced === null ? 'price-weighting-degraded' : 'complete',

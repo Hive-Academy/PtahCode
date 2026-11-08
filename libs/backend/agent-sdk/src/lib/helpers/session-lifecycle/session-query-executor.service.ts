@@ -252,20 +252,19 @@ class CompactionSessionTap {
     this.query = query;
   }
 
-  observe(message: SDKMessage): void {
+  observe(message: SDKMessage): void | Promise<void> {
     if (this.released) return;
     try {
-      this.handle(message);
+      return this.handle(message);
     } catch (error: unknown) {
       // A malformed message must not break the stream loop that called us.
       this.warn('Compaction tap failed on a stream message', 'observe', error);
     }
   }
 
-  private handle(message: SDKMessage): void {
+  private handle(message: SDKMessage): void | Promise<void> {
     if ('parent_tool_use_id' in message && message.parent_tool_use_id) {
-      this.feedSubagentMonitor(message);
-      return;
+      return this.feedSubagentMonitor(message);
     }
     const id =
       'session_id' in message && typeof message.session_id === 'string'
@@ -354,13 +353,13 @@ class CompactionSessionTap {
    * A subagent message (or a main-loop message that may spawn one) goes to
    * the budget monitor under the session id the dispatcher and registry use,
    */
-  private feedSubagentMonitor(message: SDKMessage): void {
+  private feedSubagentMonitor(message: SDKMessage): Promise<void> | undefined {
     const monitor = this.subagentMonitor;
     if (!monitor) return;
     const id = this.monitorSessionId(message);
     if (!id) return;
     // The executor runs observe() now; a synchronous throw becomes a rejection.
-    new Promise<void>((resolve) =>
+    return new Promise<void>((resolve) =>
       resolve(monitor.observe(id, message)),
     ).then(() => {
       const toolCallId = 'parent_tool_use_id' in message ? message.parent_tool_use_id : undefined;

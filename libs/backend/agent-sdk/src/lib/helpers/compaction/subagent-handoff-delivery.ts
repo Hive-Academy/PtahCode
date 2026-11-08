@@ -19,11 +19,10 @@
  * handoff record (`subagent-handoff-record.ts`), which stays `pending` until
  * the parent sets its status, and every main-thread prompt names it.
  *
- * A push that timed out (`SEND_TIMEOUT`) counts as delivered: it is not
- * retried. The dispatcher's timeout only stops waiting; the SDK's
- * `streamInput` has already written the message to the CLI input (or
- * buffered it until the process is ready) and keeps running, so a second
- * copy would be a duplicate handoff.
+ * A push that timed out (`SEND_TIMEOUT`) has unknown acceptance: it is not
+ * retried. The dispatcher's timeout stops waiting for `streamInput` but does
+ * not cancel it; a second copy could become a duplicate handoff. The durable
+ * record remains available to the parent until it is consumed.
  *
  * Released session: each attempt resolves the session's current id first
  * (rekeys move it); once the session is released the handoff is dropped.
@@ -64,7 +63,7 @@ export interface Handoff {
   readonly recordPath?: string;
 }
 
-/** `settled`: sent, timed out (taken as sent), or the session was released. */
+/** `settled`: sent, timed out (no retry), or the session was released. */
 type PushOutcome = { settled: true } | { settled: false; errorType: string };
 
 function wait(ms: number): Promise<void> {
@@ -149,8 +148,8 @@ export class SubagentHandoffDelivery {
           error instanceof RpcUserError &&
           error.errorCode === 'SEND_TIMEOUT'
         ) {
-          this.logger.warn(
-            '[SubagentBudgetMonitor] Parent message acknowledgment timed out; the write stays queued and is not resent',
+          this.logger.info(
+            '[SubagentBudgetMonitor] Parent message acceptance unconfirmed after timeout; no retry to avoid a duplicate handoff',
             { sessionId: liveId, toolCallId, attempt },
           );
           return { settled: true };

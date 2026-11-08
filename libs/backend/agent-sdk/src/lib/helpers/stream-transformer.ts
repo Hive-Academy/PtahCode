@@ -275,7 +275,7 @@ export interface StreamTransformConfig {
    * compaction tap reads `result`, `status: 'compacting'` and
    * `compact_boundary` here. A throw is logged and the stream continues.
    */
-  onMessage?: (message: SDKMessage) => void;
+  onMessage?: (message: SDKMessage) => void | Promise<void>;
   /**
    * Fired once when this stream tears down: normal end, error or abort. The
    * query run releases what its compaction tap tracked here (TASK_2026_614
@@ -623,12 +623,16 @@ export class StreamTransformer {
             activityWatchdog?.observe(sdkMessage);
             // An observer must never break the stream it observes.
             if (onMessage) {
-              runGuardedCallback(
-                logger,
-                '[StreamTransformer] onMessage callback failed; the stream continues',
-                { sessionId, messageType: sdkMessage.type },
-                () => onMessage(sdkMessage),
-              );
+              try {
+                // A budget stop must finish its parent handoff before the
+                // interrupted Agent result can advance the parent stream.
+                await onMessage(sdkMessage);
+              } catch (callbackError: unknown) {
+                logger.warn('[StreamTransformer] onMessage callback failed; the stream continues', {
+                  sessionId, messageType: sdkMessage.type,
+                  error: callbackError instanceof Error ? callbackError.name : typeof callbackError,
+                });
+              }
             }
             sdkMessageCount++;
 

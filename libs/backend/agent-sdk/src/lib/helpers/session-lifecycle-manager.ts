@@ -334,7 +334,7 @@ export interface ExecuteQueryResult {
    * reach it (the coordinator, context-usage port and subagent budget monitor
    * are fed from it). Never throws.
    */
-  onMessage: (message: SDKMessage) => void;
+  onMessage: (message: SDKMessage) => void | Promise<void>;
   /**
    * The run's compaction tap, teardown half. Pass it to
    * `StreamTransformer.transform` as `onStreamEnd`: it releases what the run

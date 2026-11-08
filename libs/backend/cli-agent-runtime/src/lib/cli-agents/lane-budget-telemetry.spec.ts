@@ -31,7 +31,7 @@ it('dispatches warning, cost warning once, then stop', async () => {
   expect(logger.warn).toHaveBeenCalledTimes(1);
 });
 
-it('records a threshold-crossing turn and logs unavailable telemetry', () => {
+it('puts a same-turn warning in the stop envelope without sending to a closed lane', () => {
   const warn = jest.fn().mockResolvedValue({ mode: 'queue-next-turn' });
   const stop = jest.fn();
   const logger = Object.assign(Object.create(Logger.prototype) as Logger, {
@@ -42,7 +42,7 @@ it('records a threshold-crossing turn and logs unavailable telemetry', () => {
     stopWeightedTokens: 80, handoffContextTokens: 50, maxDurationMin: 2 }, Date.now()),
     info: { status: 'running' } } as TrackedAgent;
   telemetry.accept('lane', tracked, turn);
-  expect(warn).toHaveBeenCalledTimes(1);
+  expect(warn).not.toHaveBeenCalled();
   expect(stop).toHaveBeenCalledWith('lane', 'budget');
   expect(logger.info).toHaveBeenCalledWith('[LaneBudgetTelemetry] Accepted lane turn', expect.objectContaining({
     agentId: 'lane', turnId: 'one', model: 'unpriced-test-model', inputTokens: 80,

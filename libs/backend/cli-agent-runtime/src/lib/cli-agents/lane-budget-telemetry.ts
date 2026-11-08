@@ -53,7 +53,8 @@ export class LaneBudgetTelemetry {
       tracked.budgetCostWarned = true;
       this.logger.warn('[LaneBudgetTelemetry] Lane turn cost unavailable', { agentId });
     }
-    if (decision.warning) {
+    // A completed turn can cross both thresholds; the completion envelope carries the warning.
+    if (decision.warning && !decision.stopReason) {
       void this.warn(agentId).then((outcome) => {
         if (outcome.mode === 'unsupported')
           this.logger.info('[LaneBudgetTelemetry] Budget warning unavailable; stop message will carry warning', { agentId, reason: outcome.reasonCode ?? outcome.detail });

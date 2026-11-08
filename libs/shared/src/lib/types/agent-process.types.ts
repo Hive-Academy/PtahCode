@@ -331,6 +331,7 @@ export type LaneStopReason = (typeof LANE_STOP_REASONS)[number];
 export interface AgentBudgetRecord {
   readonly weightedTokens: number;
   readonly rawTokens: number;
+  readonly largestTurnTokens?: number;
   readonly turnIds: readonly string[];
   readonly turnCount?: number;
   readonly startedAtMs: number;

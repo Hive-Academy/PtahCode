@@ -42,6 +42,7 @@ export class AgentBudgetCoordinator {
     return {
       weightedTokens: this.snapshot.weightedTokens,
       rawTokens: this.snapshot.rawTokens,
+      largestTurnTokens: this.snapshot.largestTurnTokens,
       turnIds: this.snapshot.turnIds,
       turnCount: this.turnCount,
       startedAtMs: this.startedAtMs,
@@ -60,6 +61,7 @@ export class AgentBudgetCoordinator {
     this.rebind(Math.min(this.startedAtMs, record.startedAtMs), {
       weightedTokens: record.weightedTokens + (sameLedger ? 0 : current.weightedTokens),
       rawTokens: record.rawTokens + (sameLedger ? 0 : current.rawTokens),
+      largestTurnTokens: Math.max(record.largestTurnTokens ?? 0, current.largestTurnTokens ?? 0),
       turnIds: [...record.turnIds, ...novelIds],
       elapsedMs: 0, warned: current.warned, stopped: current.stopped,
     }, turnCountOf(record) + (sameLedger ? 0 : this.turnCount));

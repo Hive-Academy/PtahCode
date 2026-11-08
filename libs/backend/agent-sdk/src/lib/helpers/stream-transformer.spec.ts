@@ -3683,6 +3683,28 @@ describe('StreamTransformer — onMessage / onStreamEnd (TASK_2026_614 D.11)', (
     );
   });
 
+  it('waits for a child stop callback before consuming the next SDK message', async () => {
+    const { transformer } = makeHarness();
+    const messages: SDKMessage[] = [
+      compactingStatus(),
+      compactBoundary(),
+    ];
+    let release: () => void = () => undefined;
+    const hold = new Promise<void>((resolve) => { release = resolve; });
+    const onMessage = jest.fn((message: SDKMessage) => message === messages[0] ? hold : undefined);
+    const pending = drain(transformer.transform({
+      sdkQuery: asAsyncIterable(messages),
+      sessionId: 'sess-1' as SessionId,
+      initialModel: MODEL,
+      onMessage,
+    }));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    release();
+    await pending;
+    expect(onMessage).toHaveBeenCalledTimes(2);
+  });
+
   it('fires onStreamEnd once when the stream throws, and the error is unchanged', async () => {
     const { transformer } = makeHarness();
     const onStreamEnd = jest.fn();
