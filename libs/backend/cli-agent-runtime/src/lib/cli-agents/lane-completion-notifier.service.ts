@@ -856,7 +856,7 @@ export class LaneCompletionNotifier {
       ...(info.stopReason ? { stopReason: info.stopReason } : {}),
       ...(isAgentBudgetStopReason(info.stopReason)
         ? {
-            progressPointer: deliverables.find((item) => item.exists)?.path
+            progressPointer: deliverables.find((item) => item.exists && (item.bytes ?? 0) > 0 && item.writtenAfterSpawn !== false)?.path
               ?? `last completed turn ${info.agentBudget?.turnIds.at(-1) ?? 'unavailable'} in CLI Session ID ${info.cliSessionId ?? 'unavailable'}`,
             budgetLimit: info.stopReason === 'budget'
               ? `${info.agentBudget?.stopWeightedTokens ?? 'configured'} weighted tokens`

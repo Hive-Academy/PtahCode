@@ -3891,6 +3891,18 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       continuableControls.resolve(0);
     });
 
+    it('refuses a completed turn once its budget stop is recorded', async () => {
+      const agentId = await spawnContinuable();
+      await completeTurn1();
+      const tracked = (Reflect.get(manager, 'agents') as Map<string, { info: AgentProcessInfo }>).get(agentId);
+      expect(tracked?.info).toHaveProperty('status', 'completed');
+      Object.assign(tracked?.info ?? {}, { stopReason: 'budget' });
+
+      await expect(manager.continueConversation(agentId, 'another turn'))
+        .rejects.toMatchObject({ code: 'released' });
+      expect(continuableControls.continueCallCount()).toBe(0);
+    });
+
     it('emits agent:spawned with supportsContinuation in the info payload', async () => {
       const spawnedInfos: Array<{ supportsContinuation?: boolean }> = [];
       manager.events.on('agent:spawned', (info) => spawnedInfos.push(info));

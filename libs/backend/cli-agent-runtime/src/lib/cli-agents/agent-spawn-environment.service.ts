@@ -26,7 +26,7 @@ import { CliDetectionService } from './cli-detection.service';
 import type { CliLaneBudgets } from './cli-adapters/cli-adapter.interface';
 import type { CliAdapter } from './cli-adapters/cli-adapter.interface';
 import type { CliAdapterManifest, SpawnAgentRequest } from '@ptah-extension/shared';
-import { agentBudgetSettingsSchema, DEFAULT_AGENT_BUDGET_SETTINGS, type AgentBudgetSettings } from '@ptah-extension/shared';
+import { parseAgentBudgetSetting, DEFAULT_AGENT_BUDGET_SETTINGS, type AgentBudgetSettings } from '@ptah-extension/shared';
 import { translateLaneSpawnPolicy } from './lane-spawn-policy';
 import { resolveCliLanePolicy } from './cli-lane-policy-resolver';
 import { CODEX_DEFAULT_LANE_BUDGETS } from './cli-adapters/codex/codex-lane-budgets';
@@ -273,14 +273,20 @@ export class AgentSpawnEnvironment {
       handoffContextTokens: this.workspace.getConfiguration('ptah', 'agentBudget.handoffContextTokens', defaults.handoffContextTokens),
       maxDurationMin: this.workspace.getConfiguration('ptah', 'agentBudget.maxDurationMin', defaults.maxDurationMin),
     };
-    const parsed = agentBudgetSettingsSchema.safeParse(values);
-    if (parsed.success) return parsed.data;
-    const signature = `agentBudget\u0000${JSON.stringify(values)}`;
-    if (!this.warnedLaneGuard.has(signature)) {
-      this.warnedLaneGuard.add(signature);
-      this.logger.warn('[AgentSpawnEnvironment] Invalid agent budget settings; using defaults');
+    const resolved = { ...defaults };
+    for (const key of Object.keys(defaults) as Array<keyof AgentBudgetSettings>) {
+      const parsed = parseAgentBudgetSetting(key, values[key]);
+      if (parsed !== undefined) {
+        resolved[key] = parsed;
+      } else {
+        const signature = `agentBudget.${key}\u0000${typeof values[key]}:${String(values[key])}`;
+        if (!this.warnedLaneGuard.has(signature)) {
+          this.warnedLaneGuard.add(signature);
+          this.logger.warn(`[AgentSpawnEnvironment] Invalid agent budget setting ${key}; using default`);
+        }
+      }
     }
-    return defaults;
+    return resolved;
   }
 
   /** Warn once per distinct key and rejected values, not on every spawn. */

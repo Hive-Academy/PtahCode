@@ -12,7 +12,7 @@
 import { injectable, inject } from 'tsyringe';
 import { FILE_BASED_SETTINGS_DEFAULTS } from '@ptah-extension/platform-core';
 import { Logger, ConfigManager, TOKENS } from '@ptah-extension/vscode-core';
-import { agentBudgetSettingsSchema, DEFAULT_AGENT_BUDGET_SETTINGS, type AgentBudgetSettings } from '@ptah-extension/shared';
+import { agentBudgetSettingsSchema, parseAgentBudgetSetting, DEFAULT_AGENT_BUDGET_SETTINGS, type AgentBudgetSettings } from '@ptah-extension/shared';
 import {
   isValidAutoCompactWindow,
   parseAutoCompactWindowEnv,
@@ -94,9 +94,9 @@ export class CompactionConfigProvider {
     const values: Record<keyof AgentBudgetSettings, number> = { ...DEFAULT_AGENT_BUDGET_SETTINGS };
     for (const key of Object.keys(values) as Array<keyof AgentBudgetSettings>) {
       const raw = this.config.get<unknown>(`agentBudget.${key}`);
-      if (raw === undefined) continue;
-      const parsed = agentBudgetSettingsSchema.shape[key].safeParse(raw);
-      if (parsed.success) values[key] = parsed.data;
+      if (raw === undefined || raw === null) continue;
+      const parsed = parseAgentBudgetSetting(key, raw);
+      if (parsed !== undefined) values[key] = parsed;
       else this.warnOnce(`agentBudget.${key}:${String(raw)}`, '[CompactionConfigProvider] Invalid agent budget setting; using default', { key, providedType: typeof raw });
     }
     return agentBudgetSettingsSchema.parse(values);

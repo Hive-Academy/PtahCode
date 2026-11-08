@@ -225,6 +225,10 @@ describe('native child event admission', () => {
     expect(Reflect.get(context, 'finishCompact')).not.toHaveBeenCalled();
     feed('turn/completed', { threadId: 'child',
       turn: { id: 'child-turn', status: 'completed', items: [] } });
+    const trailingCounts = { inputTokens: 1, outputTokens: 1,
+      cachedInputTokens: 0, cachedOutputTokens: 0, totalTokens: 2 };
+    feed('thread/tokenUsage/updated', { threadId: 'child', turnId: 'child-turn',
+      tokenUsage: { last: trailingCounts, total: trailingCounts, modelContextWindow: 200000 } });
     expect(Reflect.get(context, 'activeTurn')).toBe('root-turn');
     expect(Reflect.get(context, 'state')).toBe('running');
     expect(Reflect.get(context, 'childTools')).toEqual(new Map([

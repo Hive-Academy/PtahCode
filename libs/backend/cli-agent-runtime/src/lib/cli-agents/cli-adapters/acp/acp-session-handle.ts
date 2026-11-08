@@ -21,6 +21,7 @@
  * `done` and every continuation `done` resolve with 0 or 1 and never reject;
  * failures become one `error` segment.
  */
+import { randomUUID } from 'node:crypto';
 import type {
   InitializeResponse,
   McpServer,
@@ -259,6 +260,7 @@ export function createAcpSessionHandle(
   let processExit: AcpProcessExit | undefined;
   let promptInFlight = false;
   let promptSequence = 0;
+  const budgetRunId = options.agentId ?? randomUUID();
   let latestUpdateUsage: z.infer<typeof acpPromptUsageSchema> | undefined;
   let resolveUsageUpdate: (() => void) | undefined;
   /** Title of the first request the policy refused during the current prompt. */
@@ -775,7 +777,7 @@ export function createAcpSessionHandle(
     }
     promptInFlight = true;
     latestUpdateUsage = undefined;
-    const turnId = `${id}:${++promptSequence}`;
+    const turnId = `${id}:${budgetRunId}:${++promptSequence}`;
     refusedThisTurn = undefined;
     try {
       const response: unknown = await call('session/prompt', () =>

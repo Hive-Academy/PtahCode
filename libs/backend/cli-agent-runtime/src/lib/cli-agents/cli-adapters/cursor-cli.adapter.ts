@@ -480,9 +480,16 @@ export class CursorCliAdapter implements CliAdapter {
         }
 
         if (!abortController.signal.aborted) {
-          const settled = await run.wait();
-          const usage = latestUsage?.usage ?? settled.usage ?? run.usage;
-          reportedModel = settled.model?.id ?? reportedModel;
+          let settled: Awaited<ReturnType<typeof run.wait>> | undefined;
+          try {
+            settled = await run.wait();
+          } catch {
+            // degradation-audit: optional-capability - the completed stream already has usage;
+            // a failed SDK wait cannot invalidate a completed turn.
+            this.logger?.warn('[CursorCliAdapter] run.wait failed after stream completion');
+          }
+          const usage = latestUsage?.usage ?? settled?.usage ?? run.usage;
+          reportedModel = settled?.model?.id ?? reportedModel;
           emitStreamSegment({
             type: 'info', content: usage ? 'Cursor turn usage.' : 'Cursor turn telemetry unavailable.',
             ...(usage ? { usage: { model: reportedModel, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheReadTokens: usage.cacheReadTokens, cacheWriteTokens: usage.cacheWriteTokens, totalTokens: usage.totalTokens } } : {}),

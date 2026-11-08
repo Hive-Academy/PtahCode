@@ -721,7 +721,7 @@ export class AgentProcessManager {
     const gate = await this.resumeGate.evaluate({
       cli,
       cliSessionId: resumeSessionId,
-      ...((latest?.info.agentBudget && (latest.info.agentBudget.rawTokens > 0 || latest.info.agentBudget.weightedTokens > 0)) || isAgentBudgetStopReason(latest?.info.stopReason)
+      ...(latest?.info.agentBudget || isAgentBudgetStopReason(latest?.info.stopReason)
         ? {
             ...(latest.info.agentBudget ? { budget: latest.info.agentBudget } : {}),
             ...(latest.info.stopReason ? { stopReason: latest.info.stopReason } : {}),
@@ -2578,8 +2578,8 @@ export class AgentProcessManager {
       );
     }
 
-    if (tracked.budget?.expired()) {
-      throw new AgentContinueError('released', 'Lane lifetime budget expired; start a fresh lane.');
+    if (tracked.budget?.expired() || isAgentBudgetStopReason(tracked.info.stopReason)) {
+      throw new AgentContinueError('released', 'Lane budget exhausted; start a fresh lane.');
     }
 
     const turn = Symbol('lane-turn');

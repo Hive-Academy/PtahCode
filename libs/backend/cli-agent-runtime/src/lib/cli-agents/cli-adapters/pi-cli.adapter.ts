@@ -543,7 +543,7 @@ export class PiCliAdapter implements CliAdapter {
                 content: usage ? 'Pi turn usage.' : 'Pi turn telemetry unavailable.',
                 ...(usage ? { usage: { model: turnModel, ...usage } } : {}),
                 turnTelemetry: completedTurnTelemetry({ ...turnIdentity({ provider: 'pi',
-                  sessionId: resumeSessionId ?? capturedSessionId, sequence: turnSequence,
+                  sessionId: resumeSessionId ?? capturedSessionId, runId: options.agentId, sequence: turnSequence,
                   modelId: turnModel, source: 'sdk' }), usage }),
               });
               finish(0);

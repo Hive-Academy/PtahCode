@@ -34,4 +34,10 @@ describe('agent turn usage contract', () => {
     expect(turnIdentity({ provider: 'codex', turnId: 'native', source: 'sdk', modelId: 'model' }))
       .toEqual({ turnId: 'native', modelId: 'model', source: 'sdk' });
   });
+  it('keeps fallback identities distinct across resumed runs while preserving native IDs', () => {
+    const first = turnIdentity({ provider: 'pi', sessionId: 'same', runId: 'old-run', sequence: 0, source: 'sdk' });
+    const resumed = turnIdentity({ provider: 'pi', sessionId: 'same', runId: 'new-run', sequence: 0, source: 'sdk' });
+    expect(first.turnId).not.toBe(resumed.turnId);
+    expect(turnIdentity({ provider: 'pi', sessionId: 'same', runId: 'new-run', turnId: 'native', source: 'sdk' }).turnId).toBe('native');
+  });
 });

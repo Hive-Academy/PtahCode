@@ -176,6 +176,22 @@ afterEach(async () => {
 });
 
 describe('createAcpSessionHandle — first turn', () => {
+  it('separates turn IDs across runs that resume the same ACP session', async () => {
+    const script = (agent: FakeAcpAgent): void => {
+      agent.handle('session/prompt', () => ({ result: {
+        stopReason: 'end_turn', _meta: { usage: { inputTokens: 1, outputTokens: 1 } },
+      } }));
+    };
+    const first = start({ options: { agentId: 'run-a' }, script });
+    const resumed = start({ options: { agentId: 'run-b' }, script });
+    await expect(first.handle.done).resolves.toBe(0);
+    await expect(resumed.handle.done).resolves.toBe(0);
+    expect(first.segments.find((item) => item.turnTelemetry)?.turnTelemetry)
+      .toMatchObject({ status: 'reported', usage: { turnId: 'sess-1:run-a:1' } });
+    expect(resumed.segments.find((item) => item.turnTelemetry)?.turnTelemetry)
+      .toMatchObject({ status: 'reported', usage: { turnId: 'sess-1:run-b:1' } });
+  });
+
   it('reports prompt _meta.usage and preserves the UI usage segment', async () => {
     const h = start({
       options: { model: 'grok-test' },

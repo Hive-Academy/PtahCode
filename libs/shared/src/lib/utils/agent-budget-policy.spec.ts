@@ -1,5 +1,5 @@
 import { AgentTurnUsage } from '../types/agent-turn-usage.types';
-import { AgentBudgetPolicy, initialAgentBudgetSnapshot, resolveAgentTurnCost } from './agent-budget-policy';
+import { AgentBudgetPolicy, initialAgentBudgetSnapshot, parseAgentBudgetSetting, resolveAgentTurnCost } from './agent-budget-policy';
 import { registerProviderPricing, resetPricingMapForTesting } from './pricing.utils';
 
 const reported = (value: number) => ({ status: 'reported', value, source: 'stream' } as const);
@@ -14,6 +14,12 @@ const rates = { inputCostPerToken: 3e-6, outputCostPerToken: 12e-6, cacheReadCos
 const policy = new AgentBudgetPolicy({ warnRatio: 0.8, stopWeightedTokens: 100, handoffContextTokens: 50, maxDurationMin: 2 });
 
 describe('AgentBudgetPolicy', () => {
+  it('enforces contributed bounds at the settings boundary', () => {
+    expect(parseAgentBudgetSetting('stopWeightedTokens', 100)).toBeUndefined();
+    expect(parseAgentBudgetSetting('stopWeightedTokens', 2_000)).toBe(2_000);
+    expect(parseAgentBudgetSetting('maxDurationMin', 0.5)).toBeUndefined();
+    expect(parseAgentBudgetSetting('maxDurationMin', 1_441)).toBeUndefined();
+  });
   afterEach(() => resetPricingMapForTesting());
   it('warns once when another turn of the same size would cross the stop', () => {
     const predictive = new AgentBudgetPolicy({ warnRatio: 0.85, stopWeightedTokens: 300, handoffContextTokens: 1000, maxDurationMin: 2 });

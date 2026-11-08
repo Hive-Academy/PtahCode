@@ -182,7 +182,7 @@ interface OpencodeTurnState {
   stoppedAfterLastError: boolean;
   /** Error-classified stderr received after that final `step_finish`. */
   stderrErrorAfterStop?: string;
-  finalUsage?: OpencodePart;
+  readonly stepUsages: Array<{ part: OpencodePart; modelId?: string }>;
   turnId?: string;
   observedModelId?: string;
 }
@@ -190,6 +190,7 @@ interface OpencodeTurnState {
 /** Everything one `opencode run` spawn needs; see `runTurn`. */
 interface OpencodeTurnLaunch {
   readonly turnNumber: number;
+  readonly runId?: string;
   readonly command: string;
   readonly args: string[];
   readonly workingDirectory: string;
@@ -770,6 +771,7 @@ export class OpencodeCliAdapter implements CliAdapter {
       assertCommandLineWithinLimit(spawnDescriptor.command, args);
       return this.runTurn({
         turnNumber: ++turnSequence,
+        runId: options.agentId,
         command: spawnDescriptor.command,
         args,
         workingDirectory: options.workingDirectory,
@@ -874,6 +876,7 @@ export class OpencodeCliAdapter implements CliAdapter {
 
     const state: OpencodeTurnState = {
       textTracker: new Map<string, string>(),
+      stepUsages: [],
       stoppedAfterLastError: false,
     };
     let boundSessionId = launch.expectedSessionId;
@@ -952,17 +955,28 @@ export class OpencodeCliAdapter implements CliAdapter {
         const exitCode = code ?? (exitSignal ? 1 : 0);
         const settled = sessionMismatch ? 1 : this.settleExitCode(exitCode, state, signal.aborted, launch);
         if (settled === 0 && !signal.aborted) {
-          const tokens = state.finalUsage?.tokens;
+          const steps = state.stepUsages;
+          const complete = steps.length > 0 && steps.every(({ part, modelId }) =>
+            modelId && Number.isSafeInteger(part.tokens?.input) &&
+            Number.isSafeInteger(part.tokens?.output) &&
+            (part.tokens?.input ?? -1) >= 0 && (part.tokens?.output ?? -1) >= 0);
+          const usage = complete ? {
+            inputTokens: steps.reduce((sum, { part }) => sum + (part.tokens?.input ?? 0), 0),
+            outputTokens: steps.reduce((sum, { part }) => sum + (part.tokens?.output ?? 0), 0),
+            ...(steps.every(({ part }) => part.cost !== undefined && Number.isFinite(part.cost) && part.cost >= 0)
+              ? { costUsd: steps.reduce((sum, { part }) => sum + (part.cost ?? 0), 0) } : {}),
+            models: steps.map(({ part, modelId }) => ({
+              modelId: modelId ?? 'unknown', inputTokens: part.tokens?.input ?? 0,
+              outputTokens: part.tokens?.output ?? 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+            })),
+          } : undefined;
           emitSegment({
             type: 'info', content: 'OpenCode turn telemetry',
             turnTelemetry: completedTurnTelemetry({
               ...turnIdentity({ provider: 'opencode', turnId: state.turnId,
                 sessionId: boundSessionId ?? launch.expectedSessionId ?? `opencode:${child.pid ?? 'unknown'}`,
-                sequence: launch.turnNumber, modelId: state.observedModelId, source: 'stream' }),
-              usage: tokens ? {
-                inputTokens: tokens.input, outputTokens: tokens.output,
-                costUsd: state.finalUsage?.cost,
-              } : undefined,
+                runId: launch.runId, sequence: launch.turnNumber, modelId: state.observedModelId, source: 'stream' }),
+              usage,
             }),
           });
         }
@@ -1070,9 +1084,9 @@ export class OpencodeCliAdapter implements CliAdapter {
         this.handleToolUse(event, emitOutput, emitSegment);
         break;
       case 'step_finish':
+        if (event.part) turn.stepUsages.push({ part: event.part, modelId: turn.observedModelId });
         if (event.part?.reason === 'stop') {
           turn.stoppedAfterLastError = true;
-          turn.finalUsage = event.part;
           turn.turnId = event.part.id;
         }
         this.handleStepFinish(event, emitOutput, emitSegment);

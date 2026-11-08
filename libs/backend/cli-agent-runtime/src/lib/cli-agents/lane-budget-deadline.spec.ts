@@ -34,6 +34,19 @@ describe('armLaneBudgetDeadline', () => {
     expect(staleStop).not.toHaveBeenCalled();
     expect(currentStop).toHaveBeenCalledTimes(1);
   });
+  it('rearms a lifetime longer than the maximum timer delay', () => {
+    const budget = new AgentBudgetCoordinator({
+      warnRatio: 0.8, stopWeightedTokens: 100,
+      handoffContextTokens: 50, maxDurationMin: 40_000,
+    }, Date.now());
+    const tracked = { budget, info: { status: 'running' as const } } as TrackedAgent;
+    const stop = jest.fn();
+    armLaneBudgetDeadline(tracked, () => true, stop);
+    jest.advanceTimersByTime(2_147_483_647);
+    expect(stop).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(40_000 * 60_000 - 2_147_483_647);
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
 });
 
 it('restores budget counters and start time from a previous record', () => {

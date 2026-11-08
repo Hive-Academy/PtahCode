@@ -13,6 +13,16 @@ export const agentBudgetSettingsSchema = z.object({
   maxDurationMin: z.number().finite().positive(),
 }).strict();
 export type AgentBudgetSettings = z.infer<typeof agentBudgetSettingsSchema>;
+/** Apply contributed-setting bounds at the external configuration boundary. */
+export function parseAgentBudgetSetting(key: keyof AgentBudgetSettings, raw: unknown): number | undefined {
+  const parsed = agentBudgetSettingsSchema.shape[key].safeParse(raw);
+  const descriptor = findAdvancedSetting(`agentBudget.${key}`);
+  if (!parsed.success || !descriptor || descriptor.kind !== 'number') return undefined;
+  if (descriptor.integer && !Number.isInteger(parsed.data)) return undefined;
+  if (descriptor.min !== undefined && parsed.data < descriptor.min) return undefined;
+  if (descriptor.max !== undefined && parsed.data > descriptor.max) return undefined;
+  return parsed.data;
+}
 function budgetDefault(key: keyof AgentBudgetSettings): number {
   const descriptor = findAdvancedSetting(`agentBudget.${key}`);
   if (!descriptor || descriptor.kind !== 'number') throw new Error(`Missing agent budget default: ${key}`);

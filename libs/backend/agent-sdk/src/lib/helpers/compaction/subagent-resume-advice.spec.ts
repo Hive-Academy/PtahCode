@@ -6,9 +6,14 @@ describe('buildBudgetResumeRefusal', () => {
     expect(buildBudgetResumeRefusal(state)).toBeNull();
     expect(buildBudgetResumeRefusal({ ...state, contextTokens: null })).toBeNull();
     expect(buildBudgetResumeRefusal({ ...state, contextTokens: 850, recordPath: 'handoff.md' }))
-      .toBe("Ptah's budget monitor refuses this resume at the 85% budget warning (current: 850 tokens; limit: 1000 tokens; handoff record: handoff.md). Start a new agent with a short brief from the handoff record.");
+      .toBe("Ptah's budget monitor refuses this resume at the 85% budget warning (current: 850 context tokens; handoff limit: 1000 tokens) (handoff record: handoff.md). Start a new agent with a short brief from the handoff record.");
     expect(buildBudgetResumeRefusal({ ...state, contextTokens: null, stopped: true }))
       .toContain('stopped this agent');
+  });
+  it('reports the configured warning ratio without implying a context limit for a weighted warning', () => {
+    const refusal = buildBudgetResumeRefusal({ ...state, warned: true, warningRatio: 0.7, contextTokens: 100 });
+    expect(refusal).toContain('70% budget warning');
+    expect(refusal).not.toContain('handoff limit');
   });
 
   it('allows steering a running agent and never invents a handoff record', () => {

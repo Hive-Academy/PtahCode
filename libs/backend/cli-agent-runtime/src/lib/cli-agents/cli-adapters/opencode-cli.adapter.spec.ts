@@ -1011,6 +1011,25 @@ describe('OpencodeCliAdapter', () => {
       }));
     });
 
+    it('charges every step of a multi-step turn', async () => {
+      const handle = await adapter.runSdk({ ...baseOptions, model: 'provider/model' });
+      const { segments } = collect(handle);
+      currentChild?.stdout.write(JSON.stringify({ type: 'step_start', sessionID: 'ses_1' }) + '\n');
+      for (const [reason, input, output] of [['tool-calls', 100, 20], ['stop', 50, 10]] as const) {
+        currentChild?.stdout.write(JSON.stringify({ type: 'step_finish', sessionID: 'ses_1',
+          providerID: 'billed-provider', modelID: 'billed-model',
+          part: { type: 'step-finish', reason, tokens: { input, output }, cost: 0.1 },
+        }) + '\n');
+      }
+      currentChild?.emitClose(0);
+      await handle.done;
+      const telemetry = [...segments].reverse().find((segment) => segment.turnTelemetry)?.turnTelemetry;
+      expect(telemetry).toMatchObject({
+        status: 'reported', usage: { inputTokens: 150, outputTokens: 30,
+          providerCostUsd: { status: 'reported', value: 0.2 } },
+      });
+    });
+
     it('records one unavailable turn when a successful run has no final usage', async () => {
       const handle = await adapter.runSdk({ ...baseOptions, model: 'requested/alias' });
       const { segments } = collect(handle);

@@ -121,6 +121,17 @@ function makeEnvironment(
 }
 
 describe('AgentSpawnEnvironment', () => {
+  it('retains valid budget limits when another key is invalid', () => {
+    const { environment, logger } = makeEnvironment({ config: {
+      warnRatio: 2,
+      stopWeightedTokens: 2_000,
+      maxDurationMin: 30,
+    } });
+    expect(environment.resolveAgentBudgetSettings()).toMatchObject({
+      warnRatio: 0.85, stopWeightedTokens: 2_000, maxDurationMin: 30,
+    });
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+  });
   beforeEach(() => {
     mockedRealpath.mockImplementation(async (p) => String(p));
   });

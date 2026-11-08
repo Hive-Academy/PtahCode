@@ -54,11 +54,12 @@ export function turnIdentity(input: {
   source: AgentUsageSource;
   turnId?: string;
   sessionId?: string;
+  runId?: string;
   sequence?: string | number;
   modelId?: string;
 }): { turnId: string; modelId: string; source: AgentUsageSource } {
   return {
-    turnId: input.turnId?.trim() || `${input.sessionId?.trim() || input.provider}:${input.sequence ?? 0}`,
+    turnId: input.turnId?.trim() || `${input.sessionId?.trim() || input.provider}:${input.runId ? `${input.runId}:` : ''}${input.sequence ?? 0}`,
     modelId: input.modelId?.trim() || `${input.provider}/unknown`,
     source: input.source,
   };

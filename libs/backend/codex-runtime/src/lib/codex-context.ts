@@ -431,8 +431,10 @@ class RuntimeContext implements CodexContext {
       typeof params['threadId'] === 'string' &&
       params['threadId'] !== this.identity.threadId) {
       const threadId = params['threadId'];
-      const wasUnlinked = !this.childTools.has(threadId);
-      if (wasUnlinked) this.linkChild(threadId, threadId);
+      const trailingUsage = frame.method === 'thread/tokenUsage/updated' &&
+        typeof params['turnId'] === 'string' && this.terminalTurns.has(params['turnId']);
+      if (!this.childTools.has(threadId) && !trailingUsage)
+        this.linkChild(threadId, threadId);
       if (this.unlinkedMethodsLogged.size < 32 &&
         !this.unlinkedMethodsLogged.has(frame.method)) {
         this.unlinkedMethodsLogged.add(frame.method);
@@ -618,6 +620,7 @@ class RuntimeContext implements CodexContext {
       if (event.type === 'terminal') {
         if (parentToolUseId !== undefined) {
           this.emit({ ...event, parentToolUseId });
+          this.terminalTurns.add(event.turnId);
           this.childTools.delete(event.threadId);
            this.childParentThreads.delete(event.threadId);
           this.childTurns.delete(event.threadId);

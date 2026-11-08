@@ -7,6 +7,7 @@
  *
  */
 
+import { randomUUID } from 'node:crypto';
 import type {
   AgentTurnTelemetry,
   CliOutputSegment,
@@ -272,6 +273,7 @@ export class PtahCliStreamLoop {
    * delta per result and to name the model that incurred that delta.
    */
   private readonly previousModelUsage = new Map<string, ModelUsageTotals>();
+  private readonly budgetRunId = randomUUID();
   /** Previous cumulative result cost, used to recover a turn delta on resume. */
   private previousResultCostUsd = 0;
   /**
@@ -657,7 +659,7 @@ export class PtahCliStreamLoop {
                 ...(turnCostUsd !== undefined && { costUsd: turnCostUsd }) };
               const turnTelemetry: AgentTurnTelemetry = completedTurnTelemetry({
                     ...turnIdentity({ provider: 'ptah-cli', sessionId: msg.session_id ?? this.effectiveSessionId,
-                      sequence: this.turnIndex,
+                      runId: this.budgetRunId, sequence: this.turnIndex,
                       modelId: usage?.model ?? (usage?.inputTokens !== undefined ? MULTI_MODEL_ID : undefined),
                       source: 'sdk' }),
                     usage: usage ? { ...usage, costUsd: turnCostUsd,

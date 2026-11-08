@@ -839,7 +839,7 @@ export class AntigravityCliAdapter implements CliAdapter {
           turnTelemetry: completedTurnTelemetry({
             ...turnIdentity({ provider: 'antigravity', turnId: currentTurnId,
               sessionId: capturedSessionId ?? options.agentId ?? `agy:${child.pid ?? 'unknown'}`,
-              sequence: turnSequence, modelId: observedModelId, source: 'stream' }),
+              runId: options.agentId, sequence: turnSequence, modelId: observedModelId, source: 'stream' }),
             usage: usage ? {
               inputTokens: usage.input_tokens,
               outputTokens: usage.output_tokens,

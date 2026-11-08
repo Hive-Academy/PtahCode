@@ -20,8 +20,10 @@ export function armLaneBudgetDeadline(tracked: TrackedAgent, isCurrent: () => bo
   if (!tracked.budget) return;
   clearTimeout(tracked.budgetTimer);
   const timer = setTimeout(() => {
-    if (isCurrent() && tracked.info.status === 'running') stop();
-  }, tracked.budget.remainingMs());
+    if (!isCurrent() || tracked.info.status !== 'running') return;
+    if (tracked.budget?.remainingMs() === 0) stop();
+    else armLaneBudgetDeadline(tracked, isCurrent, stop);
+  }, Math.min(tracked.budget.remainingMs(), 2_147_483_647));
   timer.unref();
   tracked.budgetTimer = timer;
 }

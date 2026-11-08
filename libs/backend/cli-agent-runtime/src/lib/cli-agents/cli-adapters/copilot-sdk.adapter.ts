@@ -511,7 +511,7 @@ export class CopilotSdkAdapter implements CliAdapter {
               turnTelemetry: completedTurnTelemetry({
                 ...turnIdentity({ provider: 'copilot', turnId: nativeTurnId,
                   sessionId: capturedSessionId ?? resumeSessionId ?? `copilot:${child.pid ?? options.agentId ?? 'unknown'}`,
-                  sequence: turnNumber, modelId: turnUsage?.model, source: 'stream' }), usage: turnUsage ? {
+                  runId: options.agentId, sequence: turnNumber, modelId: turnUsage?.model, source: 'stream' }), usage: turnUsage ? {
                   inputTokens: turnUsage.inputTokens,
                   outputTokens: turnUsage.outputTokens,
                   costUsd: turnUsage.costUsd,

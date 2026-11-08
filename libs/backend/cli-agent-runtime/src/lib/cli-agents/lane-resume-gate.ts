@@ -121,11 +121,14 @@ export class LaneResumeGate {
       ...initialAgentBudgetSnapshot,
       rawTokens: input.budget?.rawTokens ?? 0,
       weightedTokens: input.budget?.weightedTokens ?? 0,
-    }, 0).warning;
-    if (budgetStop || nearLimit) {
+    }, input.budget ? Math.max(0, this.now() - input.budget.startedAtMs) : 0).warning;
+    const expired = input.budget !== undefined && input.budgetSettings !== undefined &&
+      this.now() - input.budget.startedAtMs >= input.budgetSettings.maxDurationMin * 60_000;
+    if (budgetStop || nearLimit || expired) {
       const reason = budgetStop
         ? `budget stop: CLI session cannot resume after ${input.stopReason} stop`
-        : `near-limit (warning reached): CLI session has reached its budget warning threshold (${Math.round(total)} tokens)`;
+        : expired ? 'lane lifetime budget expired' :
+          `near-limit (warning reached): CLI session has reached its budget warning threshold (${Math.round(total)} tokens)`;
       return { decision: 'fresh', reason, contextTokens: null, source: 'estimate', idleMs: null };
     }
     // Identity is checked before the cost gate can read context or make a

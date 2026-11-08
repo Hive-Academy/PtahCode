@@ -42,6 +42,13 @@ afterEach(() => {
 });
 
 describe('CompactionConfigProvider.getConfig', () => {
+  it('keeps defaults for null and out-of-range budget values', () => {
+    const { provider, warn } = makeProvider({ 'agentBudget.maxDurationMin': 1_000_000,
+      'agentBudget.warnRatio': null, 'agentBudget.stopWeightedTokens': 2_000 });
+    expect(provider.getAgentBudgetSettings()).toMatchObject({ maxDurationMin: 90,
+      warnRatio: 0.85, stopWeightedTokens: 2_000 });
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
   it('uses the injected development idle minimum', () => {
     expect(makeProvider({}, 1_000).provider.getIdleCompactionConfig().minTokens).toBe(1_000);
   });
