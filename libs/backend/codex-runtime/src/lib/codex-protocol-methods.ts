@@ -429,10 +429,13 @@ export const codexNotificationSchemas = {
   'turn/completed': z.object({ ...threadId, turn }),
   'thread/tokenUsage/updated': z.object({
     ...turnIds,
+    parentThreadId: string.nullish(),
+    model: string.nullish(),
     tokenUsage: z.object({
       last: usage,
       total: usage,
       modelContextWindow: integer.nullish(),
+      counterReset: z.literal(true).optional(),
     }),
   }),
   error: z.object({
