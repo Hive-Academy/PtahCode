@@ -1,0 +1,476 @@
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  Injector,
+  afterNextRender,
+  computed,
+  effect,
+  inject,
+  signal,
+  untracked,
+  viewChild,
+  type ElementRef,
+  type OnInit,
+} from '@angular/core';
+import { ArrowLeft, LucideAngularModule } from 'lucide-angular';
+import {
+  MachinesStore,
+  type MachinesOutcome,
+  type RemoteMachine,
+} from '../../services/machines-store';
+import { DisplayTextPipe, displayText } from '../../utils/display-text';
+import {
+  machineBanners,
+  type MachineBanner,
+} from '../../utils/machine-banners';
+import { errorSentence } from '../../utils/remote-session-copy';
+import { AddMachinePaneComponent } from '../add-machine-pane/add-machine-pane.component';
+import { MachineListComponent } from '../machine-list/machine-list.component';
+import { MachineStatusComponent } from '../machine-status/machine-status.component';
+import { ReadinessPanelComponent } from '../readiness-panel/readiness-panel.component';
+import {
+  RemoteSessionListComponent,
+  type RemoteSessionOpenRequest,
+} from '../remote-session-list/remote-session-list.component';
+import { RemoteSessionViewComponent } from '../remote-session-view/remote-session-view.component';
+import { MachinesIntroComponent } from './machines-intro.component';
+
+/** What the right pane shows. */
+export type MachinesPaneMode =
+  | 'detail'
+  | 'add'
+  | 'repair'
+  | 'readiness'
+  | 'session';
+
+
+const CLOCK_TICK_MS = 1000;
+
+
+/**
+ * The Machines surface (design 3, 4.1-4.5): the machine list on the left and,
+ * on the right, the empty introduction, the add/pair form, the readiness
+ * check, or the selected machine's header with its state banner.
+ *
+ * Machine state is read only from {@link MachinesStore} (`machines:state`),
+ * never from session state (3.4). One clock ticks per second only while the
+ * selected machine is offline or reconnecting, for "Lost contact" and "Next
+ * attempt"; it stops otherwise and on destroy.
+ *
+ * The detail lists the machine's remote sessions; "Open" shows one session
+ * in the pane, with a way back to the machine.
+ */
+@Component({
+  selector: 'ptah-machines-view',
+  standalone: true,
+  imports: [
+    LucideAngularModule,
+    DisplayTextPipe,
+    MachineListComponent,
+    MachineStatusComponent,
+    AddMachinePaneComponent,
+    ReadinessPanelComponent,
+    RemoteSessionListComponent,
+    RemoteSessionViewComponent,
+    MachinesIntroComponent,
+  ],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { class: 'flex h-full min-h-0 min-w-0 flex-1 bg-base-100' },
+  template: `
+    <div
+      class="flex min-h-0 min-w-0 flex-1 flex-col min-[760px]:flex-row"
+      data-testid="machines-view"
+    >
+      <ptah-machine-list
+        class="max-h-[45%] shrink-0 border-b border-surface-border min-[760px]:max-h-none min-[760px]:w-[300px] min-[760px]:border-b-0 min-[760px]:border-r"
+        [machines]="store.machines()"
+        [selectedId]="selected()?.machineId ?? null"
+        [loading]="store.loading()"
+        [error]="store.error()"
+        [now]="now()"
+        (selected)="select($event)"
+        (add)="openAdd()"
+        (retryLoad)="reload()"
+      />
+
+      <section
+        class="min-h-0 min-w-0 flex-1 overflow-y-auto"
+        aria-label="Machine details"
+        data-testid="machines-pane"
+      >
+        @switch (paneMode()) {
+          @case ('add') {
+            <ptah-add-machine-pane
+              (paired)="onPaired($event)"
+              (cancelled)="closePane()"
+            />
+          }
+          @case ('repair') {
+            @if (selected(); as machine) {
+              <ptah-add-machine-pane
+                [machine]="machine"
+                (paired)="onPaired($event)"
+                (cancelled)="closePane()"
+              />
+            }
+          }
+          @case ('readiness') {
+            @if (selected(); as machine) {
+              <div class="px-5 pt-4">
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-xs gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                  data-testid="machines-back"
+                  (click)="closePane()"
+                >
+                  <lucide-angular
+                    [img]="ArrowLeftIcon"
+                    class="h-3.5 w-3.5"
+                    aria-hidden="true"
+                  />
+                  Back to {{ machineName(machine) }}
+                </button>
+              </div>
+              <ptah-readiness-panel [machine]="machine" />
+            }
+          }
+          @case ('session') {
+            @if (selected(); as machine) {
+              @if (openSession(); as session) {
+                <div class="flex h-full min-h-0 flex-col">
+                  <div class="px-5 pt-3">
+                    <button
+                      type="button"
+                      class="btn btn-ghost btn-xs gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                      data-testid="machines-session-back"
+                      (click)="closeSession()"
+                    >
+                      <lucide-angular
+                        [img]="ArrowLeftIcon"
+                        class="h-3.5 w-3.5"
+                        aria-hidden="true"
+                      />
+                      Back to {{ machineName(machine) }}
+                    </button>
+                  </div>
+                  <ptah-remote-session-view
+                    [machineId]="machine.machineId"
+                    [sessionId]="session.sessionId"
+                    [title]="session.title"
+                    [workspacePath]="session.workspacePath"
+                  />
+                </div>
+              }
+            }
+          }
+          @default {
+            @if (selected(); as machine) {
+              <div class="flex flex-col gap-4 p-5" data-testid="machine-detail">
+                <header
+                  class="flex flex-wrap items-start justify-between gap-3"
+                >
+                  <div class="flex min-w-0 flex-col gap-1">
+                    <div class="flex min-w-0 items-center gap-2">
+                      <h2
+                        class="truncate text-base font-semibold text-base-content"
+                      >
+                        {{ machineName(machine) }}
+                      </h2>
+                      <ptah-machine-status [state]="machine.state" />
+                    </div>
+                    <p
+                      class="text-xs text-base-content-muted"
+                      data-testid="machine-detail-meta"
+                    >
+                      via SSH alias
+                      <span class="font-mono">{{
+                        machine.alias | displayText
+                      }}</span>
+                      @if (machine.versions?.remote; as remote) {
+                        · ptah {{ remote.ptahVersion | displayText: 24 }} ·
+                        protocol {{ remote.protocol.max }}
+                      }
+                    </p>
+                  </div>
+                  <div class="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      class="btn btn-ghost btn-sm border border-surface-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                      data-testid="machine-readiness"
+                      (click)="paneMode.set('readiness')"
+                    >
+                      Readiness check
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-ghost btn-sm text-state-err focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                      data-testid="machine-remove"
+                      [disabled]="busy()"
+                      (click)="askRemove()"
+                    >
+                      Remove machine
+                    </button>
+                  </div>
+                </header>
+
+                @if (confirmingRemove()) {
+                  <div
+                    class="flex flex-col gap-2 rounded-box border border-state-err bg-base-200 px-4 py-3"
+                    role="alertdialog"
+                    aria-labelledby="ptah-remove-title"
+                    aria-describedby="ptah-remove-text"
+                    data-testid="machine-remove-confirm"
+                    (keydown.escape)="confirmingRemove.set(false)"
+                  >
+                    <span
+                      id="ptah-remove-title"
+                      class="text-sm font-bold text-base-content"
+                      >Remove {{ machineName(machine) }}?</span
+                    >
+                    <span
+                      id="ptah-remove-text"
+                      class="text-sm text-base-content"
+                      >Deletes the stored token and stops the tunnel. Sessions
+                      on {{ machineName(machine) }} keep running there.</span
+                    >
+                    <div class="flex gap-2">
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-sm text-state-err border border-state-err focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                        data-testid="machine-remove-confirm-yes"
+                        [disabled]="busy()"
+                        (click)="remove(machine)"
+                      >
+                        Remove machine
+                      </button>
+                      <button
+                        #removeCancel
+                        type="button"
+                        class="btn btn-ghost btn-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                        data-testid="machine-remove-confirm-no"
+                        (click)="confirmingRemove.set(false)"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                }
+
+                @if (actionError(); as failure) {
+                  <div
+                    class="flex flex-col gap-1 rounded-box border border-state-err px-4 py-3 text-sm"
+                    role="alert"
+                    data-testid="machine-action-error"
+                  >
+                    <span class="font-bold text-base-content">{{
+                      failure.label
+                    }}</span>
+                    <span class="text-base-content">{{ failure.text }}</span>
+                  </div>
+                }
+
+                @for (banner of banners(); track banner.label) {
+                  <div
+                    class="flex flex-wrap items-start justify-between gap-3 rounded-box border px-4 py-3 text-sm"
+                    [class.border-state-err]="banner.tone === 'err'"
+                    [class.border-state-need]="banner.tone === 'need'"
+                    [attr.role]="banner.role"
+                    data-testid="machine-banner"
+                  >
+                    <span class="flex min-w-0 flex-1 flex-col gap-1">
+                      <span class="font-bold text-base-content">{{
+                        banner.label
+                      }}</span>
+                      <span class="text-base-content">{{ banner.text }}</span>
+                    </span>
+                    @switch (banner.action) {
+                      @case ('repair') {
+                        <button
+                          type="button"
+                          class="btn btn-primary btn-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                          data-testid="machine-repair"
+                          (click)="paneMode.set('repair')"
+                        >
+                          {{ machine.reason ? 'Re-pair' : 'Pair' }}
+                        </button>
+                      }
+                      @case ('retry') {
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-sm border border-surface-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                          data-testid="machine-retry"
+                          [disabled]="busy()"
+                          (click)="retry(machine)"
+                        >
+                          Retry now
+                        </button>
+                      }
+                    }
+                  </div>
+                }
+
+                <ptah-remote-session-list
+                  [machine]="machine"
+                  (opened)="showSession($event)"
+                />
+              </div>
+            } @else if (!store.loading() && store.machines().length === 0) {
+              <ptah-machines-intro (add)="openAdd()" />
+            }
+          }
+        }
+      </section>
+    </div>
+  `,
+})
+export class MachinesViewComponent implements OnInit {
+  protected readonly store = inject(MachinesStore);
+  private readonly injector = inject(Injector);
+
+  protected readonly paneMode = signal<MachinesPaneMode>('detail');
+  private readonly selectedId = signal<string | null>(null);
+  protected readonly confirmingRemove = signal(false);
+  protected readonly busy = signal(false);
+  protected readonly actionError = signal<{
+    readonly label: string;
+    readonly text: string;
+  } | null>(null);
+  protected readonly now = signal(Date.now());
+  protected readonly openSession = signal<RemoteSessionOpenRequest | null>(
+    null,
+  );
+
+  protected readonly ArrowLeftIcon = ArrowLeft;
+
+  private readonly removeCancel =
+    viewChild<ElementRef<HTMLButtonElement>>('removeCancel');
+  private clock: ReturnType<typeof setInterval> | undefined;
+
+  /** The selected machine; the first one when none (or a removed one) is selected. */
+  protected readonly selected = computed<RemoteMachine | null>(() => {
+    const machines = this.store.machines();
+    const id = this.selectedId();
+    return machines.find((m) => m.machineId === id) ?? machines[0] ?? null;
+  });
+
+  protected readonly banners = computed<readonly MachineBanner[]>(() => {
+    const machine = this.selected();
+    if (machine === null) return [];
+    return machineBanners(machine, this.now());
+  });
+
+  public constructor() {
+    effect(() => {
+      // A new list or selection refreshes "last seen"; the clock runs only
+      // while the selected machine is not connected.
+      this.store.machines();
+      const state = this.selected()?.state;
+      untracked(() => {
+        this.now.set(Date.now());
+        this.setClock(state === 'offline' || state === 'reconnecting');
+      });
+    });
+    inject(DestroyRef).onDestroy(() => this.setClock(false));
+  }
+
+  public ngOnInit(): void {
+    void this.store.loadMachines();
+  }
+
+  protected machineName(machine: RemoteMachine): string {
+    return displayText(machine.displayName) || displayText(machine.alias);
+  }
+
+  protected select(machineId: string): void {
+    if (machineId !== this.selected()?.machineId) {
+      this.confirmingRemove.set(false);
+      this.actionError.set(null);
+    }
+    this.selectedId.set(machineId);
+    this.openSession.set(null);
+    this.paneMode.set('detail');
+  }
+
+  protected showSession(session: RemoteSessionOpenRequest): void {
+    this.openSession.set(session);
+    this.paneMode.set('session');
+  }
+
+  protected closeSession(): void {
+    this.openSession.set(null);
+    this.paneMode.set('detail');
+  }
+
+  protected openAdd(): void {
+    this.confirmingRemove.set(false);
+    this.paneMode.set('add');
+  }
+
+  protected closePane(): void {
+    this.paneMode.set('detail');
+  }
+
+  protected reload(): void {
+    void this.store.loadMachines();
+  }
+
+  protected onPaired(machine: RemoteMachine): void {
+    this.selectedId.set(machine.machineId);
+    this.actionError.set(null);
+    // Design 4.2: a successful pairing goes straight to the readiness check.
+    this.paneMode.set('readiness');
+  }
+
+  protected askRemove(): void {
+    this.confirmingRemove.set(true);
+    afterNextRender(() => this.removeCancel()?.nativeElement.focus(), {
+      injector: this.injector,
+    });
+  }
+
+  protected async remove(machine: RemoteMachine): Promise<void> {
+    await this.act('Remove failed', () => this.store.remove(machine.machineId));
+    if (this.actionError() === null) {
+      this.confirmingRemove.set(false);
+      this.selectedId.set(null);
+    }
+  }
+
+  protected async retry(machine: RemoteMachine): Promise<void> {
+    await this.act('Retry failed', () => this.store.retry(machine.machineId));
+  }
+
+  private async act(
+    label: string,
+    call: () => Promise<MachinesOutcome<unknown>>,
+  ): Promise<void> {
+    if (this.busy()) return;
+    this.busy.set(true);
+    this.actionError.set(null);
+    try {
+      const outcome = await call();
+      if (!outcome.ok) {
+        this.actionError.set({
+          label,
+          text:
+            'error' in outcome
+              ? errorSentence(outcome.error)
+              : 'The request was refused.',
+        });
+      }
+    } finally {
+      this.busy.set(false);
+    }
+  }
+
+  private setClock(running: boolean): void {
+    if (!running) {
+      clearInterval(this.clock);
+      this.clock = undefined;
+      return;
+    }
+    if (this.clock !== undefined) return;
+    this.clock = setInterval(() => this.now.set(Date.now()), CLOCK_TICK_MS);
+  }
+}

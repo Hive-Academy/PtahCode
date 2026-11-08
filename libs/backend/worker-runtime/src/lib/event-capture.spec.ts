@@ -20,3 +20,23 @@ it('routes only captured events synchronously without assigning sequence numbers
   ]);
   expect(capture.dropped).toBe(1);
 });
+
+it('stamps the worker deadline on a captured permission request', () => {
+  const queued: Array<{ payload: unknown }> = [];
+  const capture = new WorkerEventCapture(
+    () => 's',
+    (_sessionId, event) => queued.push(event),
+  );
+  capture.capture('permission:request', {
+    id: 'r',
+    timestamp: 10,
+    timeoutAt: 0,
+  });
+  capture.capture('chat:chunk', { timestamp: 10, timeoutAt: 0 });
+  expect(queued[0].payload).toEqual({
+    id: 'r',
+    timestamp: 10,
+    timeoutAt: 60_010,
+  });
+  expect(queued[1].payload).toEqual({ timestamp: 10, timeoutAt: 0 });
+});

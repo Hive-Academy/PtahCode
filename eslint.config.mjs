@@ -267,6 +267,10 @@ export default [
             '@ptah-extension/marketplace/harness',
             // TasksChangedFeed (a MESSAGE_HANDLERS service) must register at app bootstrap.
             '@ptah-extension/tasks-ui/presentation',
+            // TASK_2026_858: MachinesFeed (MESSAGE_HANDLERS) and the store the
+            // Electron shell badge reads are eager; the Machines view loads
+            // through `loadComponent`. The entry exports no component.
+            '@ptah-extension/machines-ui/services',
             // `shared` is an eager dependency of every lib. Chat lazy-loads only
             // the narrow `/mcp-apps-contracts` entry (89d2d6720) to keep the
             // artifact Zod schemas out of the initial bundle; the project-

@@ -1,0 +1,261 @@
+# Phase F visual review (Electron)
+
+## Fifth pass (head dfae60162)
+
+**Verdict: PASS. K, H, G and D are fixed in dark and light. No serious or breaking finding. Two minor notes.** Electron (dist from dfae60162) driven through CDP on port 9333, window 734x774 (the CDP resize to 1280 did not persist). Dark is "Ptah Glass", light is "Ptah Glass Light".
+
+| Finding | Dark | Light | Result |
+|---|---|---|---|
+| K: turn ends after a denied tool | `3x-16-after-deny-dark`, `3x-15-list-after-deny-dark` | `3x-12-after-deny-ended-light`, `3x-13-list-after-deny-light` | Fixed. Without pressing Stop: list shows Idle, Stop disabled, composer reads "Message Claude on horus" (no "a turn is in progress"). |
+| H: denied tool reads "Failed" | `3x-16-after-deny-dark` | `3x-12-after-deny-ended-light` | Fixed. Row reads "failed" (Write, 1 line). No "Completed". |
+| G: ordered list numerals | `3x-04-fruits-ended-dark` | `3x-07-fruits-open-light`, `3x-08-fruits-light-clean` | Fixed. 1. to 5. visible, `list-style-type: decimal`, padding-left 22px, first numeral inside the card, not clipped. |
+| D: new session title | `3x-05-list-fruits-dark` | `3x-09-list-fruits-light`, `3x-13-list-after-deny-light` | Fixed. New sessions list with their first prompt; live title and list title match. Old sessions keep "Session 11/8/2026" and "Session 11/7/2026" as expected. |
+
+### Important caveat on the Deny step
+The approval block's 60 s countdown ran out before my Deny click landed (the gap between my capture and the click script was longer than 60 s). The block therefore shows "Denied by the worker: No answer within 60 s", i.e. the auto-deny path, not a user Deny. Nothing was allowed. K and H were observed on the auto-deny path. The user-Deny path was checked in the fourth pass (same RPC outcome) but not re-run here because only 2 sessions were allowed. Treat K and H as confirmed for auto-deny, and likely but not re-observed for a manual Deny.
+
+### New findings
+- **N1. Minor: resolved approval block keeps the full block.** After the denial the block stays in the transcript with Allow once and Deny rendered but disabled (`disabled=true`), plus the copy "The session continues without this tool." That is acceptable, but disabled buttons on a resolved request add noise (`3x-12-after-deny-ended-light`).
+- **N2. Minor: ordered-list numerals are faint.** The marker colour is the primary hue at 35% alpha (dark `oklch(0.876 0.096 89.7 / 0.35)`, light `oklch(0.563 0.112 76.7 / 0.35)`), so the numerals read dimmer than the text, especially in light (`3x-07-fruits-open-light`). They are decorative to the item text, so not rated higher. Not computed as a ratio. Consider full-opacity markers.
+- **N3. Minor (carried): user message has no bubble in light** (finding E), still visible in `3x-12-after-deny-ended-light`; dark shows the bubble. The "[Request interrupted by user for tool use]" line (finding I) still renders as a user line in both themes.
+- Open notes from earlier passes (E, I, J, L, M) were not re-assessed except as noted.
+
+### Checks run
+- axe-core (wcag2a, wcag2aa, wcag21aa, wcag22aa) on `ptah-machines-view` after the denial: **0 violations** in light and in dark. Incomplete: `color-contrast` 35 nodes (glass, not resolvable by axe) and `aria-prohibited-attr` 1 node (the `pre aria-label="Arguments"` in the approval block, same as the fourth pass; a `pre` has no role, so the label is ignored by some assistive tech. Minor).
+- A polite `sr-only` live region still contains "Claude is responding" after the turn ended (the visible UI is correct). Not confirmed as a defect, so noted only.
+- No keyboard pass this round (not in scope).
+
+### Sessions started
+2, both on horus: (1) the numbered fruit list; (2) the Write request under /tmp, never allowed. `/tmp/ptah-visual-check-5.txt` does not exist. Electron closed, CDP port 9333 closed. Not touched: other machines, worker config, credentials, the Claude login.
+
+### Files that show the machine name or a process id (keep out of published copies)
+All `3x-*` screenshots show the alias "horus" and `/home/horus/projects`. `3x-10-approval-light` shows "horus wants to run a command". No process ids.
+
+### Most useful screenshots
+`3x-04-fruits-ended-dark`, `3x-07-fruits-open-light`, `3x-12-after-deny-ended-light`, `3x-16-after-deny-dark`, `3x-05-list-fruits-dark`, `3x-13-list-after-deny-light`.
+
+## Fourth pass (head 022f77005, dist from e6b538dd8)
+
+**Verdict: PASS WITH NOTES, one state not reachable (watch-only), several serious findings in the live session.** Real streams and a real tool approval now work on horus. The finding B fix is confirmed: after a turn ends, the list shows Idle. The approval block renders, counts down, and Deny works. New problems sit in the transcript (numbered lists lose their numbers, a denied tool reads "Completed", a denied turn never ends) and in session titles. Nothing was written under /tmp, the workspace or any other path: Deny was the only answer given.
+
+Method: Electron driven through CDP on port 9333, window 1280x760 (one capture set at 734 wide, marked `-734`). Dark is the "Ptah Glass" theme, light is "Ptah Glass Light". Theme was switched through the theme popover (the first attempt did not change the theme, so two early dark files were discarded).
+
+### Fourth-pass states
+
+| State | Dark | Light | Prototype | Result |
+|---|---|---|---|---|
+| Session list after a turn (finding B) | 22-list-after-turn-dark | 22-list-after-turn-light | proto-05-list-* | Fixed. All three finished sessions list as Idle, including the old third-pass one (11/7/2026). Status is plain text, no badge. |
+| 6 Stream, turn in progress | 24-stream-progress-dark-1280 (first 1.5 s), 23-stream-progress-dark-734 | 23-stream-progress-light-734 | proto-06-stream-* | Header "Caught up" and Stop, input placeholder "(a turn is in progress)". First 1 to 2 s show "No messages yet." with no echo of the user message (finding J). |
+| 6 Stream, turn ended | 23-stream-after-dark | 23-stream-after-light | proto-06-stream-* | Stop turns disabled, input re-enabled. Numbers missing from the list (finding G). Light has no user bubble (E). |
+| 7 Approval pending | 24-approval-dark | 24-approval-light | proto-07-approval-* | Renders: "Waiting for you" chip, Machine, Session, Tool, Arguments with Copy, "Denied automatically in 52 s" countdown that ticks, Allow once and Deny, "The session stays paused until someone answers." Navbar badge "Machines (1)" matches the prototype. See deviations below. |
+| 7 Approval, keyboard focus | 24-approval-programmatic-focus-*-dark (no ring, see note) | 24-approval-tab-allow-light, 24-approval-tab-deny-light | none | Tab focus shows a 2px solid outline (rgb(110,74,0) in light) on both buttons, `:focus-visible` true. Dark Tab capture not taken: the 60 s timer ran out of room. The `programmatic-focus` files used `.focus()`, which does not trigger the ring, so they show none; that is not a defect. |
+| 7 After Deny | 25-after-deny-dark, 25-after-deny-settled-dark | 25-after-deny-light | none | Approval block disappears. Tool row reads "Completed" (finding H) and a user-style bubble "[Request interrupted by user for tool use]" appears (finding I). Turn stays "in progress" (finding K). |
+| 5 List with a Running session | 26-list-after-deny-dark | 26-list-after-deny-light | proto-05-list-* | "Running" in blue plus a driver chip "Driver: Ptah worker on horus-pc". Contains the worker host name. |
+| 8 Open an existing session | 28-replay-open-dark, 27-open-running-dark | 28-replay-open-light, 27-open-running-light | proto-08-replay-* | Opens with the transcript. Title is "Session 11/8/2026", not the prompt (D). |
+| 9 Watch-only | not reachable | not reachable | proto-09-owner-* | Not reachable. It needs a second paired client that holds the session drive lock. The only other client would be a second Electron profile, which is not paired to horus, and pairing it would add a client credential to the worker. I did not do that. When I opened the Running session from the list, this client got the full drive controls (Stop, input), so the driver chip alone does not give a watch-only view. |
+| 5b, 10 | not reachable | not reachable | proto-05b, proto-10 | Unchanged from the third pass. |
+
+### Findings from earlier passes, re-checked
+
+- **B (stays "Running", Stop disabled): fixed** for a finished turn. See 22-list-after-turn-*.
+- **C (failure as plain text): not testable** now that the login works, no failed turn was produced.
+- **D (title differs, live vs list/replay): still present, and worse.** The live view title is the prompt text; the list and the reopened view show "Session 11/8/2026". The list now holds three sessions with the identical title "Session 11/8/2026", so they cannot be told apart (`22-list-after-turn-dark.png`, `28-replay-open-dark.png`). Raised from Moderate to **Serious**.
+- **E (light: no bubble on the user message): still present** (`23-stream-after-light.png`, `24-approval-light.png`). Dark shows the bubble. Moderate.
+- **F (driver chip shows machine name): changed, still present while a session is driven.** The chip now reads "Driver: Ptah worker on horus-pc" with no process id. Idle sessions show no chip. Minor.
+
+### New findings
+
+- **G. Serious (content): ordered lists lose their numbers.** The reply to "numbers 1 to 25" renders as 25 indented lines with no numerals (`23-stream-after-dark.png`, `23-stream-after-light.png`). The DOM is a real `<ol>` whose computed `list-style-type` is `none` and `padding-left` 22px, so the browser resets the markers. Impact: numbered answers read as unordered text. Fix: restore `list-style: decimal` on `ol` inside the markdown block in the Machines transcript.
+- **H. Serious (state): a denied tool is shown as "Completed".** After Deny the Write row says "Completed" with a done state, although nothing ran (`25-after-deny-dark.png`, `25-after-deny-light.png`). The prototype shows "Done" only for finished tools. Expected: "Denied".
+- **I. Moderate: the SDK line "[Request interrupted by user for tool use]" is rendered as a user bubble.** The user typed nothing (`25-after-deny-dark.png`). Render it as a system note or hide it.
+- **K. Serious (state): after Deny the turn does not end.** About 50 s later the list still shows Running, the header says "Claude is responding", Stop is enabled and Send is disabled (`26-list-after-deny-dark.png`, `27-open-running-dark.png`). Pressing Stop ended it and the list went to Idle (`27-after-stop-dark.png`). Expected: the turn ends or Claude replies. I could not tell from the renderer whether the cause is the worker or the SDK.
+- **J. Moderate: empty state during a running turn.** For about 1 to 2 s after Start the transcript shows "No messages yet." and the user's message is not echoed (`24-stream-progress-dark-1280.png`).
+- **L. Moderate (prototype deviation): approval block.** Deny is plain text, where the prototype has an outlined button (`proto-07-approval-dark.png` against `24-approval-dark.png`). The prototype's "If unanswered" copy is "Stays pending, like a local request"; the app auto-denies after 60 s ("Denied automatically in 52 s"), a behaviour change that the approved prototype does not show. The prototype also shows the proposed arguments inline, the app shows them in a code box with Copy, which is fine. Confirm that the 60 s auto-deny is intended.
+- **M. Minor: "Allow once" is the primary action and Deny the weakest control**, with the Allow button focusable first. For a destructive request the safer default is arguably Deny first; leave to design.
+
+### Approval block measurements
+
+- Text contrast (computed, blended over the panel): light, labels 8.59:1, values and countdown 15.36:1, Deny 15.36:1, "Allow once" 15.66:1. Dark, labels 13.03:1, values and countdown 15.66:1, Deny 15.66:1. The "Allow once" dark value (1.04:1) is a measurement artifact of the gold gradient fill; by eye the dark label on gold is legible, as in the third pass.
+- Targets: Allow once 82x32, Deny 48x32 CSS px. Both pass WCAG 2.2 AA 2.5.8 (24x24).
+- Countdown: starts at 60 s, ticks down every second (52, 51, 49, 39, 24, 19 s across my samples), and changes plain text only; there is no progress bar and no live-region announcement of the remaining time.
+
+### Fourth-pass checks
+
+- axe-core (wcag2a, wcag2aa, wcag21aa, wcag22aa) on `ptah-machines-view`: **0 violations** in each of: approval state dark and light, stream (opened session) dark and light, and after Deny dark. Incomplete: `color-contrast` for 39 nodes (glass), checked by hand; `aria-prohibited-attr` for 1 node while the approval was open (not reproduced after Deny, so the node was not captured; worth a look).
+- Keyboard: approval buttons reachable by Tab, ring visible in light (2px solid).
+- Layout shift: the approval block pushes content down when it appears (expected, it is appended to the transcript). No shift when the theme was switched.
+- Sessions started: 3 (list 15 items, list 25 items, Write a file under /tmp). All on horus. Only Deny was given. The third session was ended with Stop. The Electron instance was closed and the CDP port is closed.
+- Not touched: anubis, chappie, gatsby, worker config, credentials, the Claude login.
+
+### Files that show the machine name or a process id (keep out of published copies)
+
+- `26-list-after-deny-dark.png`, `26-list-after-deny-light.png` (driver chip "horus-pc")
+- Third-pass `10-list-with-session-dark.png` (machine name and process id)
+- All screenshots show the machine alias "horus" and the path `/home/horus/projects` in the header, which is the paired alias already used in earlier passes.
+
+### Most useful screenshots
+
+`22-list-after-turn-dark.png`, `22-list-after-turn-light.png`, `23-stream-after-dark.png`, `24-approval-dark.png`, `24-approval-light.png`, `24-approval-tab-deny-light.png`, `25-after-deny-dark.png`, `26-list-after-deny-light.png`.
+
+---
+
+## Third pass (head f31e1b9e7, dist rebuilt at ffbc0b745)
+
+**Verdict: PASS WITH NOTES, approval and watch-only still NOT REVIEWED.** The account refusal is fixed: a session now starts on horus, its transcript renders and replays after a renderer reload. Claude on horus then answers "Failed to authenticate. API Error: 401 OAuth access token is invalid." The worker's Claude login is expired, so no real stream and no tool approval can happen. I did not touch credentials.
+
+### Second-pass findings re-checked
+
+- Finding 1 (wrong message "The machine is unreachable"): **fixed for this cause.** The start is accepted and no error shows (`08-stream-start-dark.png`). The generic mapping in `mapMachineError` still exists for other causes, not re-tested.
+- Finding 2 (readiness missed the refusal): **fixed.** Readiness shows 9 checks, including "Main database - The main database is open" and a local driver lock check (`04b-readiness-9-dark.png`, `04b-readiness-9-light.png`). It still reports "Provider ready - Claude CLI is available" while the Claude login is invalid (new finding A).
+- Findings 3 and 4 (plain error text, 28px shift): not re-tested (the form error no longer appears on this path).
+
+### Third-pass states
+
+| State | Dark | Light | Prototype | Result |
+|---|---|---|---|---|
+| Readiness, 9 checks | 04b-readiness-9-dark | 04b-readiness-9-light | proto-04-readiness-* | Matches. |
+| 6 Stream (turn in progress) | 08-stream-start-dark | not captured (turn ended in under 2 s) | proto-06-stream-* | Header shows "Caught up" and Stop, input placeholder "(a turn is in progress)". Layout matches the prototype. |
+| 6 After (turn ended with 401) | 08-stream-after-dark | 08-stream-after-light | proto-06-stream-* | Renders. Stop becomes disabled. See findings B, C, E. |
+| Session list with a session | 10-list-with-session-dark | not captured | proto-05-list-* | Shows status, title, driver chip, provider, Open. |
+| 8 Replay (reload renderer, Open) | 11-replay-opening-dark, 11-replay-dark | 11-replay-light | proto-08-replay-* | Transcript replays identically. Title differs from the live view (finding D). |
+| Keyboard focus in the session view | 09-focus-back-dark, 09-focus-message-dark, 09-focus-send-dark | the same with `-light` | none | Pass: a visible ring on each stop. Stop is disabled and skipped. |
+| 7 Approval | not reachable | not reachable | proto-07-approval-* | The login is invalid, so no tool call can run. Nothing was written to /tmp or the workspace. |
+| 5b Reconnecting | not reachable | not reachable | proto-05b-* | Needs a dropped worker link; I did not disturb the workers. Back to horus and Open again worked. |
+| 9 Watch-only | not reachable | not reachable | proto-09-owner-* | Needs a second client holding the driver lock. |
+| 10 No local folder | not reachable | not reachable | proto-10-nofolders-* | Needs a profile without a workspace folder; the Ptah Dev profile was not changed. |
+
+### New findings
+
+- **A. Serious (readiness gap): readiness says "Provider ready" while the Claude login on the worker is expired,** so a session starts and fails on its first turn. Add an authentication check to readiness, or label the check "CLI installed".
+- **B. Serious (state): the session stays "Running" in the list after its only turn failed, and Stop is disabled,** so a user cannot stop or clear it from the app (`10-list-with-session-dark.png`, `08-stream-after-dark.png`). It is idle on horus and I could not stop it from the UI. Expected: a failed or idle status, and an enabled Stop or a Remove.
+- **C. Moderate: the failure is plain assistant text** ("Failed to authenticate...") with no error styling, retry hint or pointer to re-login on the worker.
+- **D. Moderate: the title differs between the live view ("Reply with the word ok.") and the replay or list ("Session 11/7/2026").** Use one title source.
+- **E. Moderate: in light, the user's message has no bubble** (`08-stream-after-light.png`); in dark it has a filled bubble (`08-stream-after-dark.png`). It reads as unstyled in light.
+- **F. Minor: the driver chip in the list shows the worker's machine name and a process id.** `10-list-with-session-dark.png` therefore contains them; keep it out of any published copy.
+
+### Third-pass checks
+
+- axe-core (wcag2a, wcag2aa, wcag21aa, wcag22aa) on `ptah-machines-view` in the stream state, dark and light: 0 violations. `color-contrast` incomplete for 20 nodes (glass), checked by hand.
+- Manual contrast, stream state: lowest enabled text is 6.63:1 in light (Connected) and 8.03:1 in dark. The disabled Stop button measures 2.44:1 light and 3.53:1 dark, exempt as a disabled control. The gold gradient buttons defeat a simple measurement; the dark label on gold is legible by eye.
+- Approval-state axe, contrast and focus on the approval buttons: not run (state not reachable).
+- Sessions started: 1 (one short prompt). It remains idle in the list (finding B). The Electron instance was closed.
+
+---
+
+## Second pass (head 11262af8a)
+
+**Verdict: PASS WITH NOTES, session half still NOT REVIEWED.** The two first-pass visual fixes are confirmed. The tabId blocker is fixed (the worker no longer rejects the start), but starting a session on horus is now refused by a different, worker-side cause, so the stream, approval, replay, watch-only and no-folder states were again not reachable.
+
+### First-pass findings re-checked
+
+- Finding 1 (session start fails): **partly fixed, still blocked.** The worker log on horus (read-only) showed the old `tabId must be a UUID v4` rejection at 21:30/21:31 and none after the new deb was installed, so the tabId fix works. The new attempt (one start, "Reply with the word ok.") fails in about 16 ms with `MACHINE_UNREACHABLE`. The worker log for that attempt reads "The session account could not be verified. The conversation was preserved." That text is the provider-account admission refusal (`mainSessionAccountFailure` in `chat-slash-command-router.service.ts:72-80`): horus has no admitted provider account for the session. Fixing it means giving the worker a Claude account, which I did not do (no credentials were copied or changed). anubis still runs the old deb and was not used.
+- Finding 2 (selected row invisible in light): **fixed.** `05f-selected-light.png` shows horus with a clear 1px inset outline; the computed inset shadow is the base-content colour at 60% (dark navy on a near-white panel, well above 3:1). `05f-selected-dark.png` shows the same outline in light grey on the dark panel. `aria-current="true"` is still set.
+
+### New findings (second pass)
+
+1. **Serious (functional and copy): the start failure message is wrong.** The user sees "The machine is unreachable." while the header says Connected and readiness passed (`06-start-refused-dark.png`, `06-start-refused-light.png`). The real cause is an account refusal on the worker. `mapMachineError` (`machines-rpc.handlers.ts:30-62`) maps any unmapped `WorkerClientError` to `MACHINE_UNREACHABLE`. Suggested fix: add a distinct code and text for an account refusal, for example "horus has no Claude account set up for sessions".
+2. **Serious (readiness gap): the readiness check reports "Sessions can start" while a session start is refused for lack of a provider account.** Add an account-admission check to the readiness list on the worker.
+3. **Moderate: the start error is plain body text.** `<p role="alert">` uses `text-sm text-base-content`, with no error colour or icon, so it reads like a label. The prototype uses the error treatment on failures. The text itself contrasts well (dark text on the light panel, light text on the dark panel). Fix: use `text-state-err` with an icon.
+4. **Minor: after a failed start the form keeps its content and Start stays enabled.** That is the right behaviour, and the layout moves by 28px when the alert appears (the buttons shift down). A reserved line would stop the shift.
+
+### Second-pass state rows
+
+| State | Dark | Light | Prototype | Result |
+|---|---|---|---|---|
+| Selected machine row | 05f-selected-dark | 05f-selected-light | proto-05-list-* | Matches. Fix confirmed. |
+| Start refused (account) | 06-start-refused-dark | 06-start-refused-light | none | Renders cleanly; wrong message (new finding 1). |
+| Focus on Start | 07-focus-start-dark | 07-focus-start-light | none | Pass. |
+| Focus on Cancel | 07-focus-cancel-dark | 07-focus-cancel-light | none | Pass: 2px ring in the base-content colour, visible in both themes. |
+| 5b Reconnecting | not reachable | not reachable | proto-05b-* | Not covered: it needs a dropped connection and I did not disturb the workers. |
+| 6 Stream | not reachable | not reachable | proto-06-stream-* | Blocked by new finding 1 (no account on horus). |
+| 7 Approval | not reachable | not reachable | proto-07-approval-* | Blocked, same cause. Nothing was written under the workspace. |
+| 8 Replay | not reachable | not reachable | proto-08-replay-* | No session exists to replay. |
+| 9 Watch-only | not reachable | not reachable | proto-09-owner-* | Needs a second client holding the driver lock on a live session. |
+| 10 No local folder | not reachable | not reachable | proto-10-nofolders-* | Needs a profile without a workspace folder; the Ptah Dev profile has folders and was not changed. |
+
+The prototype captures for these states already exist in `visual-review/` (`proto-05b` to `proto-10`), so no new `proto-*` files were needed. Sessions started: 2 attempts in total (one per theme), both refused, so nothing is running on horus. The Electron instance was closed.
+
+### Second-pass checks
+
+- axe-core (wcag2a, wcag2aa, wcag21aa, wcag22aa) on `ptah-machines-view` with the start form and error open, dark and light: 0 violations. `color-contrast` was reported as incomplete for 28 nodes (translucent glass), so contrast was checked by hand where stated above. axe was not run on stream or approval states because they were not reachable.
+- Keyboard: Tab from the message box goes to Start, then Cancel, with a visible ring on each (`07-focus-*`). The approval buttons could not be checked.
+- The Escape and renderer-reload replay checks were not run, since no session exists.
+
+---
+
+## First pass (head 73dca4808)
+
+## Verdict
+
+**PASS WITH NOTES** for the states that could be reached. One functional blocker stopped the review of the whole session half of the view: starting a session on a paired, ready machine fails with "The machine is unreachable." (Finding 1). Stream, approval, replay and watch-only states were not captured from the app (see Not covered). The reachable states match the prototype in layout and tokens, with the deviations below.
+
+## Environment
+
+- Launched: `NODE_ENV=development node_modules/.bin/electron dist/apps/ptah-electron/main.mjs --remote-debugging-port=9333`, driven with `playwright-core` over CDP. The existing dist build was used and no rebuild was done.
+- Profile: the existing `Ptah Dev` profile (`~/.config/Ptah Dev`). It had no machines. Nothing was reset.
+- Head: 73dca4808 on `feat/remote-workers-phase-f` (first pass). Second pass head: 11262af8a. The dist build (main.mjs 21:53:56) is newer than the last code commit (0604520e8, 21:50:42) and contains the tabId fix.
+- Viewport: Electron window size cannot be set over CDP, so the renderer viewport was emulated at 1280x760 (same as the prototype captures). Narrow captures at 700x760.
+- Themes: switched through the app's own theme popover (`ptah-glass`, `ptah-glass-light`).
+- Real data: `horus` and `anubis` were paired through the app's Add machine flow, using "Pair automatically via SSH". A deliberately wrong code (8 x `Z`) exercised the pairing failure. No tokens, codes or addresses are recorded here. Both machines are still paired in the Ptah Dev profile. The Electron instance started for this review was closed.
+- Prototype: `prototype/index.html` captures (`proto-*`), rendered in headless Chromium at 1280x760.
+
+## States
+
+Screenshots are in `visual-review/`.
+
+| State | Dark | Light | Prototype | Match |
+|---|---|---|---|---|
+| 1 Empty | 01-empty-dark | 01-empty-light | proto-01-empty-* | Matches. Copy and "What is checked?" disclosure present. |
+| 2 Add | 02-add-dark | 02-add-light | proto-02-add-* | Matches. 8 code cells, copy command, SSH pairing button. |
+| 3 Pairing failed | 03-pairfail-dark | 03-pairfail-light | proto-03-pairfail-* | Deviates, minor (Findings 4, 5). |
+| 4 Readiness | 04-readiness-dark | 04-readiness-light | proto-04-readiness-* | Matches. All 8 checks pass, and the Ready banner shows in both themes. |
+| 5 List (one machine) | 05-list-dark | 05-list-light | proto-05-list-* | Deviates (Findings 2, 3, 6). Only the empty-sessions state was reachable. |
+| 5 List (two machines) | 05e-list-two-machines-dark | 05e-list-two-machines-light | proto-05-list-* | Deviates: selection invisible in light (Finding 2). |
+| New session form | 05c-newsession-* | 05c-newsession-* | none in prototype | Form renders cleanly in both themes. |
+| New session error | 05d-newsession-error-* | 05d-newsession-error-* | none | Error text is shown, but the cause is generic (Finding 1). |
+| Remove confirmation | seen, not saved | not captured | none | Renders as a bordered inline card. |
+| Not paired | seen, not saved | 03 (accidental) | none | Renders as a warning card with a Pair button. |
+| 5b Reconnecting | not reachable | not reachable | proto-05b-* | Not covered. |
+| 6 Stream, 7 Approval, 8 Replay, 9 Watch-only | not reachable | not reachable | proto-06..09-* | Not covered (Finding 1). |
+| 10 No local folder | not reachable | not reachable | proto-10-* | Not covered. |
+| Narrow list and add (700px) | 11-narrow-700-list-dark, 11b-narrow-700-add-dark | 11-narrow-700-list-light, 11b-narrow-700-add-light | narrow.html not captured | Stacked layout. No horizontal overflow (scrollWidth equals clientWidth, 700). |
+| Keyboard focus | 12-focus-a-dark, 12-focus-b-dark, 12-focus-addmachine-dark | the same names with `-light` | none | Pass (see Checks run). |
+
+## Findings
+
+1. **Blocking (functional, found while capturing visuals): a session cannot be started on a ready machine.**
+   - On both paired workers (horus, anubis) the readiness check passes with all 8 checks ("Sessions can start on ..."). The header shows Connected, and the workspace and session list calls succeed.
+   - "Start" in the New session form then fails every time with "The machine is unreachable." (`machines:session.start` returns `MACHINE_UNREACHABLE`). Evidence: `05d-newsession-error-dark.png` and `05d-newsession-error-light.png`.
+   - The user sees a generic reachability message while the machine shows Connected. `libs/backend/remote-machines/src/lib/machines-rpc.handlers.ts:36-62` collapses several causes into `MACHINE_UNREACHABLE`, so the real cause is hidden. I did not find the root cause; it may be worker or tunnel side rather than renderer.
+   - Suggested fix: find why start fails after a passing readiness check, and map distinct causes to distinct messages.
+2. **Serious: the selected machine row is not visible in the light theme.**
+   - `machine-list` marks the selected row with `bg-base-300`, which computes to about 78% of a near-white colour over a near-white panel. The row has `aria-current="true"`, but nothing visible marks it.
+   - Evidence: `05e-list-two-machines-light.png` (anubis is selected, no highlight) against `proto-05-list-light.png`, which shows a tinted row with a border. In dark the highlight shows (`05e-list-two-machines-dark.png`).
+   - This fails the 3:1 non-text contrast expectation for a state indicator (WCAG 1.4.11).
+   - Suggested fix: add a border or an inset accent to the selected row, as in the prototype. Component: `libs/frontend/machines-ui/src/lib/components/machine-list/`.
+3. **Minor: action styling differs from the prototype.**
+   - "Remove machine" is a plain text button, where the prototype uses an outlined red button (`proto-05-list-*`).
+   - "New session" is an `xs` primary button, smaller than the prototype's.
+   - The navbar Machines tab has no count badge (the prototype shows one for attention items). This may be intentional while there is nothing pending.
+4. **Minor: pairing code cells do not show the error border.**
+   - After a failed pairing the cells use the neutral border (`border-state-err` is present in the class list, but the computed border is neutral), where the prototype shows red cell borders. Evidence: `03-pairfail-*` against `proto-03-pairfail-*`.
+   - Suggested fix: make the error border win over the DaisyUI `input-bordered` border. Component: `add-machine-pane.component.ts` around lines 167-180.
+5. **Minor: the prototype's failure copy includes "(N attempts left)", the app's does not.** The app shows no attempt count, and the heading reads "Re-pair horus" after the first failure because the machine was already registered. The failure card and the "Nothing was stored" line match.
+6. **Minor, observation: Escape closes the Add machine pane.** It also closes the pane while the theme popover is open. My first captures lost the Add pane this way. Not a defect on its own, but a global Escape handler should not also close the pane while a popover is handling the key.
+7. **Minor: the pairing attempt with a wrong code takes about 7 to 10 seconds to fail.** The button shows "Pairing..." and the SSH button is disabled during that time, which is acceptable feedback. The pane stays put and does not shift.
+
+## Not covered
+
+- Stream, approval, replay and watch-only (owner) states and "answered elsewhere": blocked by Finding 1, since no session could be started.
+- Reconnecting (5b): it needs a dropped worker connection, and I did not disturb the workers.
+- No local folder (10): it needs a profile with no workspace folder. The Ptah Dev profile has folders, and I did not change it.
+- Prototype `narrow.html` was not captured, so the narrow check compares only against the narrow rules in the design spec.
+- A wide (>1600px) capture was not taken.
+
+## Checks run
+
+- axe-core 4.x (wcag2a, wcag2aa, wcag21aa, wcag22aa) on `ptah-machines-view`, dark and light: 0 violations in the states open at the time. Colour contrast over the translucent glass panel may be reported as "incomplete" and was checked by hand instead.
+- Manual contrast (text colour against the blended background): the lowest text pair in the list state is 6.63:1 in light (Connected status) and 8.03:1 in dark. Muted secondary text is 8.6:1 in light and 9.9:1 in dark or higher. All pass AA 4.5:1.
+- Keyboard: Tab order is Add machine, the machine list (roving tabindex, one stop for the list), Readiness check, Remove machine, Reload, New session, then the Git panel and the navbar. Every stop shows a visible ring (2px outline in the theme's base-content colour; the primary buttons also have a glow). Screenshots: `12-focus-*`.
+- Narrow (700px): the layout stacks with no horizontal overflow in the list and add states, in both themes.
+- Layout shift: none observed while pairing, switching theme or opening forms.

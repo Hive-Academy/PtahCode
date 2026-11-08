@@ -84,6 +84,8 @@ export const RPC_USER_ERROR_CODES = [
   'MACHINE_NOT_FOUND_OR_FORBIDDEN',
   /** The worker refused the pairing code (wrong, expired or window closed). */
   'MACHINE_PAIRING_REJECTED',
+  /** The worker could not read the session's transcript (attach refresh). */
+  'MACHINE_TRANSCRIPT_UNAVAILABLE',
 ] as const;
 
 export type RpcUserErrorCode = (typeof RPC_USER_ERROR_CODES)[number];

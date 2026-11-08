@@ -47,6 +47,33 @@ describe('InProcessRpc', () => {
     });
   });
 
+  it('validates the session:status result and keeps the turn phase', async () => {
+    const answer = (data: unknown) =>
+      new InProcessRpc({
+        handleMessage: async () => ({ success: true, data }),
+      }).call(
+        'session:status',
+        { sessionId: 's1' },
+        IN_PROCESS_SPECS['session:status'] as never,
+      );
+    expect(
+      await answer({
+        isActive: true,
+        isStreaming: false,
+        turnState: { phase: 'failed', revision: 2, backgroundTasks: [] },
+      }),
+    ).toEqual({
+      ok: true,
+      value: expect.objectContaining({
+        turnState: expect.objectContaining({ phase: 'failed' }),
+      }),
+    });
+    expect(await answer({ isActive: 'yes' })).toEqual({
+      ok: false,
+      error: expect.objectContaining({ code: 'INTERNAL' }),
+    });
+  });
+
   it('logs redacted raw errors and returns only fixed copy', async () => {
     const log = jest.fn();
     const rpc = new InProcessRpc(

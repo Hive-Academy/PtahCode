@@ -143,6 +143,8 @@ import { TaskSessionLinksService } from '@ptah-extension/tasks-ui/services';
 // subscribes to it once the board opens (TASK_2026_871 — registering the store
 // here put it and its folder state in the initial bundle).
 import { TasksChangedFeed } from '@ptah-extension/tasks-ui/presentation';
+// Component-free entry: the Machines view itself loads through `loadComponent`.
+import { MachinesFeed } from '@ptah-extension/machines-ui/services';
 import { VecEmbedderRecoveryService } from '@ptah-extension/memory-curator-ui/services';
 import {
   MARKDOWN_FILE_LINK_HANDLER,
@@ -361,6 +363,9 @@ export const appConfig: ApplicationConfig = {
       multi: true,
     },
     { provide: MESSAGE_HANDLERS, useExisting: TasksChangedFeed, multi: true },
+    // `machines:event` / `machines:state` pushes. Registered on every host like
+    // the tasks feed; only Electron main ever sends them (TASK_2026_858).
+    { provide: MESSAGE_HANDLERS, useExisting: MachinesFeed, multi: true },
     ...provideModelRefreshControl(),
     ...provideWizardInternalState(),
     ...provideOnboardingFocusRouter(),

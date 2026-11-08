@@ -7,6 +7,7 @@ import type {
   CliBootstrapResult,
   CliWebviewManagerAdapter,
 } from '@ptah-extension/cli-engine';
+import type { DriverHolder } from '@ptah-extension/platform-core';
 import { serveCommand } from './serve';
 
 jest.mock('@ptah-extension/platform-core', () => ({
@@ -75,19 +76,37 @@ function fakeEngine(behaviour: EngineBehaviour = {}) {
   };
   const sessionsByPath = new Map<string, string[]>();
   const held = new Map<string, string>();
+  /** Refresh acquisitions: like the kernel lock, each keeps its owner's copy. */
+  const refreshes = new Map<string, { nonce: string; owner: DriverHolder }>();
+  let refreshCount = 0;
   let started = 0;
   const lock = {
     setLiveRecordCheck: jest.fn(),
     setReleaseGate: jest.fn(),
-    acquire: jest.fn(async () => ({ ok: true as const, nonce: 'refresh' })),
+    // In-process acquire is re-entrant, as in the kernel lock.
+    acquire: jest.fn(async (sessionId: string, owner: DriverHolder) => {
+      const drive = held.get(sessionId);
+      if (drive) return { ok: true as const, nonce: drive };
+      const existing = refreshes.get(sessionId);
+      if (existing) return { ok: true as const, nonce: existing.nonce };
+      const nonce = `refresh-${++refreshCount}`;
+      refreshes.set(sessionId, {
+        nonce,
+        owner: { ...owner, responding: true },
+      });
+      return { ok: true as const, nonce };
+    }),
     annotate: jest.fn(),
-    release: jest.fn(async (sessionId: string) => {
-      held.delete(sessionId);
+    // As in the kernel lock: only a matching nonce releases an entry.
+    release: jest.fn(async (sessionId: string, nonce: string) => {
+      if (refreshes.get(sessionId)?.nonce === nonce)
+        refreshes.delete(sessionId);
+      else if (held.get(sessionId) === nonce) held.delete(sessionId);
       return 'released' as const;
     }),
     holder: jest.fn(async () => null),
-    held: jest.fn(() =>
-      [...held].map(([sessionId, nonce]) => ({
+    held: jest.fn(() => [
+      ...[...held].map(([sessionId, nonce]) => ({
         sessionId,
         nonce,
         purpose: 'drive' as const,
@@ -101,7 +120,14 @@ function fakeEngine(behaviour: EngineBehaviour = {}) {
           responding: true,
         },
       })),
-    ),
+      ...[...refreshes].map(([sessionId, { nonce, owner }]) => ({
+        sessionId,
+        nonce,
+        purpose: 'refresh' as const,
+        state: 'held' as const,
+        owner,
+      })),
+    ]),
     dispose: jest.fn(async () => undefined),
   };
   const permissions = {

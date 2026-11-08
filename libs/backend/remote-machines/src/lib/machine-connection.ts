@@ -13,6 +13,7 @@ import {
 } from '@ptah-extension/worker-protocol';
 import type {
   MachineConnectionState,
+  MachineStateReason,
   MachinesEventPayload,
   MachinesStatePayload,
   MachineVersions,
@@ -20,6 +21,10 @@ import type {
 import { createSshStdioTransport } from './ssh-stdio-transport';
 
 const BACKOFF = [1000, 2000, 5000, 10000, 30000] as const;
+type SessionCursor = { epoch?: string; seq: number };
+type AttachCall = (
+  params: WorkerMethodParams<'session.attach'>,
+) => Promise<WorkerMethodResult<'session.attach'>>;
 type Timer = ReturnType<typeof setTimeout>;
 export interface MachineConnectionOptions {
   machineId: string;
@@ -54,7 +59,8 @@ export class MachineConnection {
   private generation = 0;
   private closing = false;
   private workerMachineId?: string;
-  reason?: string;
+  /** Closed-set cause of the current state, pushed with `machines:state`. */
+  reason?: MachineStateReason;
   private transport?: Duplex;
   private timer?: Timer;
   private attempts = 0;
@@ -65,10 +71,9 @@ export class MachineConnection {
     grant: WorkerMethodResult<'pair.exchange'>['grant'];
     workerMachineId: string;
   }>;
-  private readonly sessions = new Map<
-    string,
-    { epoch?: string; seq: number }
-  >();
+  private readonly sessions = new Map<string, SessionCursor>();
+  /** Cursors written by delivered events, as opposed to by an attach. */
+  private readonly observed = new WeakSet<SessionCursor>();
   state: MachineConnectionState;
   nextRetryAt?: number;
   lastSeenAt?: number;
@@ -81,7 +86,7 @@ export class MachineConnection {
     this.state =
       options.token && options.workerMachineId ? 'offline' : 'unpaired';
     if (options.token && !options.workerMachineId)
-      this.reason = 'Re-pair this machine to verify its worker identity.';
+      this.reason = 're-pair-required';
     this.workerMachineId = options.workerMachineId;
   }
 
@@ -132,6 +137,7 @@ export class MachineConnection {
       nextRetryAt: this.nextRetryAt,
       lastSeenAt: this.lastSeenAt,
       versions: this.versions,
+      ...(this.reason ? { reason: this.reason } : {}),
     });
   }
   private cancelTimer(): void {
@@ -166,6 +172,7 @@ export class MachineConnection {
     this.transport = undefined;
     if (code === 4409) {
       this.cancelTimer();
+      this.reason = undefined;
       this.state = 'version-mismatch';
       this.emit();
       return;
@@ -179,6 +186,7 @@ export class MachineConnection {
   private rejectToken(): void {
     this.token = undefined;
     this.cancelTimer();
+    this.reason = 're-pair-required';
     this.state = 'unpaired';
     this.emit();
     // degradation-audit: reported - the machine is already 'unpaired' and the state
@@ -193,6 +201,7 @@ export class MachineConnection {
     )
       return;
     this.cancelTimer();
+    this.reason = undefined;
     this.state = 'offline';
     const base = BACKOFF[Math.min(this.attempts++, BACKOFF.length - 1)];
     const delay = Math.round(
@@ -213,11 +222,11 @@ export class MachineConnection {
     const previous = this.sessions.get(frame.sessionId);
     if (previous && previous.epoch === frame.epoch && frame.seq <= previous.seq)
       return;
-    if (previous)
-      this.sessions.set(frame.sessionId, {
-        epoch: frame.epoch,
-        seq: frame.seq,
-      });
+    if (previous) {
+      const cursor = { epoch: frame.epoch, seq: frame.seq };
+      this.observed.add(cursor);
+      this.sessions.set(frame.sessionId, cursor);
+    }
     this.options.onEvent?.({
       machineId: this.machineId,
       sessionId: frame.sessionId,
@@ -233,12 +242,13 @@ export class MachineConnection {
     if (this.disposed || !this.token) return Promise.resolve();
     if (!this.workerMachineId) {
       this.cancelTimer();
-      this.reason = 'Re-pair this machine to verify its worker identity.';
+      this.reason = 're-pair-required';
       this.state = 'unpaired';
       this.emit();
       return Promise.resolve();
     }
     this.cancelTimer();
+    this.reason = undefined;
     this.state = 'reconnecting';
     this.emit();
     const attempt = this.open();
@@ -280,7 +290,7 @@ export class MachineConnection {
         this.workerMachineId &&
         hello.worker.machineId !== this.workerMachineId
       ) {
-        this.reason = `A different worker answers on ${this.alias}.`;
+        this.reason = 'worker-identity-changed';
         this.state = 'unpaired';
         throw new WorkerClientError('PAIRING_REJECTED');
       }
@@ -288,18 +298,23 @@ export class MachineConnection {
       if (!token) throw new WorkerClientError('NOT_CONNECTED');
       await client.call('auth', { token });
       if (this.disposed) return;
+      let reattachFailed = false;
       for (const [sessionId, cursor] of this.sessions) {
         try {
-          await client.call('session.attach', {
+          await this.attachLog(
+            (params) => client.call('session.attach', params),
             sessionId,
-            afterSeq: cursor.seq,
-            ...(cursor.epoch ? { epoch: cursor.epoch } : {}),
-          });
+            cursor,
+          );
         } catch {
+          // degradation-audit: reported - the worker refused this session (ended or no
+          // longer granted); the connected push carries 'session-reattach-failed'.
           this.sessions.delete(sessionId);
+          reattachFailed = true;
         }
         if (this.disposed) return;
       }
+      this.reason = reattachFailed ? 'session-reattach-failed' : undefined;
       this.state = 'connected';
       this.attempts = 0;
       this.lastSeenAt = (this.options.now ?? Date.now)();
@@ -310,6 +325,7 @@ export class MachineConnection {
           error instanceof WorkerClientError &&
           error.code === 'VERSION_MISMATCH'
         ) {
+          this.reason = undefined;
           this.state = 'version-mismatch';
           this.cancelTimer();
           this.emit();
@@ -317,6 +333,8 @@ export class MachineConnection {
           error instanceof WorkerClientError &&
           error.code === 'PAIRING_REJECTED'
         ) {
+          // Keeps 'worker-identity-changed' when the hello check raised it.
+          this.reason ??= 're-pair-required';
           this.state = 'unpaired';
           this.cancelTimer();
           this.emit();
@@ -408,6 +426,7 @@ export class MachineConnection {
   clearToken(): void {
     this.token = undefined;
     this.cancelTimer();
+    this.reason = undefined;
     this.state = 'unpaired';
     this.closing = true;
     this.client?.close();
@@ -417,6 +436,7 @@ export class MachineConnection {
   }
   setToken(token: string): void {
     this.token = token;
+    this.reason = undefined;
     this.state = 'offline';
     this.attempts = 0;
     this.emit();
@@ -442,23 +462,77 @@ export class MachineConnection {
   }
   async attach(sessionId: string, afterSeq = 0) {
     const previous = this.sessions.get(sessionId);
-    this.sessions.set(sessionId, {
-      epoch: previous?.epoch,
-      seq: afterSeq,
-    });
+    const attempt = { epoch: previous?.epoch, seq: afterSeq };
+    this.sessions.set(sessionId, attempt);
     try {
-      const result = await this.call('session.attach', { sessionId, afterSeq });
-      const current = this.sessions.get(sessionId);
-      if (result.mode === 'log')
-        this.sessions.set(sessionId, {
-          epoch: result.epoch,
-          seq: Math.max(afterSeq, current?.seq ?? 0),
-        });
-      return result;
+      return await this.attachLog(
+        (params) => this.call('session.attach', params),
+        sessionId,
+        attempt,
+      );
     } catch (error) {
-      this.sessions.delete(sessionId);
+      // A failed re-attach keeps the cursor the app already tracked, so the
+      // next reconnect re-attaches from it, unless events delivered while the
+      // attach was in flight advanced it: that newer cursor stays. A first
+      // attach that fails leaves nothing tracked, again unless events
+      // advanced it: those events were delivered, so the session is live.
+      // The caller gets the error and pushes no state: the renderer answers a
+      // 'session-reattach-failed' push by replaying every log view of the
+      // machine, so a replay failure that pushed it would replay again on
+      // each refusal. Only a reconnect's re-attach pass reports that reason.
+      const current = this.sessions.get(sessionId);
+      const advanced = current !== undefined && this.observed.has(current);
+      if (!advanced) {
+        if (previous) this.sessions.set(sessionId, previous);
+        else this.sessions.delete(sessionId);
+      }
       throw error;
     }
+  }
+  /**
+   * Attaches from `cursor` and moves the tracked cursor to the result. The
+   * epoch rides along, so a worker whose log was recreated answers from the
+   * new log's start (W7). A cursor past the head of the log the worker
+   * answered from belongs to a log it no longer has: attach again from the
+   * start of the current epoch.
+   */
+  private async attachLog(
+    call: AttachCall,
+    sessionId: string,
+    cursor: SessionCursor,
+  ): Promise<WorkerMethodResult<'session.attach'>> {
+    const result = await call({
+      sessionId,
+      afterSeq: cursor.seq,
+      ...(cursor.epoch ? { epoch: cursor.epoch } : {}),
+    });
+    if (result.mode !== 'log') return result;
+    if (result.fromSeq > result.headSeq) {
+      const restart = await call({
+        sessionId,
+        afterSeq: 0,
+        epoch: result.epoch,
+      });
+      // The replay follows the result, so the cursor starts at its origin
+      // even if frames of the first attach arrived meanwhile.
+      if (restart.mode === 'log')
+        this.sessions.set(sessionId, {
+          epoch: restart.epoch,
+          seq: restart.fromSeq,
+        });
+      return restart;
+    }
+    // Frames of the same epoch seen during the call keep their cursor; a new
+    // epoch starts at the replay origin, below any old epoch's sequence.
+    const current = this.sessions.get(sessionId);
+    this.sessions.set(sessionId, {
+      epoch: result.epoch,
+      seq:
+        current?.epoch === result.epoch
+          ? Math.max(result.fromSeq, current.seq)
+          : result.fromSeq,
+    });
+    return result;
   }
   detach(sessionId: string): Promise<unknown> {
     this.sessions.delete(sessionId);

@@ -9,6 +9,7 @@ import type {
   ISdkPermissionHandler,
   PermissionRequest,
   RpcMethodResult,
+  SessionTurnPhase,
 } from '@ptah-extension/shared';
 import type {
   ControlFrame,
@@ -39,6 +40,16 @@ const TURN_END_EVENTS = new Set([
   'session:turnEnded',
   'session:turnFailed',
   'chat:sessionEnded',
+]);
+/**
+ * The engine's turn phases that say a turn ended; `isTerminalTurnPhase` in
+ * `@ptah-extension/shared` is the same set.
+ */
+const TERMINAL_TURN_PHASES: ReadonlySet<string> = new Set<SessionTurnPhase>([
+  'awaiting-background',
+  'sleeping',
+  'idle',
+  'failed',
 ]);
 /** W6: `session.start` answers after `session:id-resolved` or fails. */
 const RESOLUTION_TIMEOUT_MS = 30_000;
@@ -121,6 +132,64 @@ function isPermissionRequest(
   value: Record<string, unknown>,
 ): value is Record<string, unknown> & PermissionRequest {
   return typeof value.id === 'string' && typeof value.toolName === 'string';
+}
+
+/**
+ * The `turn_state` event a `chat:chunk` carries, or undefined. A
+ * retirement-only state reports background work after its turn ended, so it
+ * never ends a turn.
+ */
+function turnStateOf(record: Record<string, unknown> | undefined) {
+  const event = isRecord(record?.event) ? record.event : undefined;
+  if (event?.eventType !== 'turn_state' || event.retirementOnly === true)
+    return undefined;
+  const phase = text(event, 'phase');
+  const revision = event.revision;
+  if (!phase || typeof revision !== 'number') return undefined;
+  return {
+    sessionId: text(event, 'sessionId') ?? text(record, 'sessionId'),
+    tabId: text(record, 'tabId'),
+    terminal: TERMINAL_TURN_PHASES.has(phase),
+    revision,
+  };
+}
+
+/** `session.start`'s `name` limit in `@ptah-extension/worker-protocol`. */
+export const SESSION_NAME_MAX_LENGTH = 256;
+/**
+ * C0 and C1 controls, bidi embeddings, overrides, isolates and marks, and
+ * zero-width characters: the set the Machines view drops from display text.
+ */
+const UNSAFE_NAME_CHARACTERS =
+  // eslint-disable-next-line no-control-regex -- matching control characters is the purpose: they are removed.
+  /[\u0000-\u001F\u007F-\u009F\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g;
+/** Controls that separate words; they become a space. */
+const SEPARATING_CONTROL = /[\t\n\v\f\r\u0085]/;
+
+/**
+ * A session name from its first prompt, cleaned the way the Machines view
+ * cleans display text: controls and invisible characters dropped (word
+ * separators become a space), whitespace collapsed, trimmed, and cut at
+ * {@link SESSION_NAME_MAX_LENGTH} UTF-16 units (the `session.start` name
+ * schema's measure) with an ellipsis, never inside a surrogate pair. Undefined
+ * when nothing is left, so the engine falls back to its dated name.
+ */
+export function sessionNameFromPrompt(prompt: string): string | undefined {
+  const clean = prompt
+    .replace(UNSAFE_NAME_CHARACTERS, (char) =>
+      SEPARATING_CONTROL.test(char) ? ' ' : '',
+    )
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!clean) return undefined;
+  if (clean.length <= SESSION_NAME_MAX_LENGTH) return clean;
+  // Whole code points that fit with room for the one-unit ellipsis.
+  let cut = '';
+  for (const point of clean) {
+    if (cut.length + point.length > SESSION_NAME_MAX_LENGTH - 1) break;
+    cut += point;
+  }
+  return cut.trimEnd() + '\u2026';
 }
 
 function isCapturedEvent(value: unknown): value is CapturedEvent {
@@ -244,12 +313,15 @@ export function createRemoteSessions(deps: RemoteSessionDeps): RemoteSessions {
     (await listSessions(workspaceId)).map((session) => session.id),
   );
   const authorizer = new runtime.WorkerAuthorizer(deps.machineId, sessionIndex);
-  const pending = new runtime.PendingPermissionIndex(deps.permissions);
   /** requestId → sessionId, so `permission:auto-resolved` reaches its log. */
   const permissionSessions = new Map<string, string>();
+  // An unanswered remote request is denied after 60 s (decision 27); the
+  // expiry writes the same answered record a controller's reply would.
+  const pending = new runtime.PendingPermissionIndex(deps.permissions, {
+    findWriter: (sessionId) => deps.logs.findWriter(sessionId),
+    onExpired: (requestId) => permissionSessions.delete(requestId),
+  });
   const tabsBySession = new Map<string, string>();
-  /** Permission requests that carry only the tab of a start not yet resolved. */
-  const heldPermissions = new Map<string, PermissionRequest[]>();
   /** peer id → session id → unsubscribe. */
   const subscriptions = new Map<string, Map<string, () => void>>();
 
@@ -322,6 +394,47 @@ export function createRemoteSessions(deps: RemoteSessionDeps): RemoteSessions {
     });
   };
 
+  /**
+   * True when this process's lock on the session is only the engine's idle
+   * record: the engine keeps its record, and so its drive lock, after a turn
+   * ends (success or failure). It needs all of:
+   * - a session this worker started or continued, with no turn of this
+   *   driver that may still run;
+   * - a held drive lock of this process (not a refresh, not releasing);
+   * - the engine's own turn state (`session:status`) saying the turn ended
+   *   (`idle` or `failed`) with no background tasks and no session crons. This covers a turn admitted by any other
+   *   in-process path, which `driver.running` cannot see.
+   * Any doubt (status refused, no turn state, generating, background work)
+   * answers false, so the lock is listed as a running driver.
+   */
+  const idleEngineSession = async (sessionId: string): Promise<boolean> => {
+    if (!attributable(sessionId) || driver.running(sessionId)) return false;
+    const drive = deps.lock
+      .held()
+      .some(
+        (held) =>
+          held.sessionId === sessionId &&
+          held.purpose === 'drive' &&
+          held.state === 'held',
+      );
+    if (!drive) return false;
+    const status = await rpc.call(
+      'session:status',
+      { sessionId },
+      runtime.IN_PROCESS_SPECS['session:status'] as unknown as RpcSpec<
+        RpcMethodResult<'session:status'>
+      >,
+    );
+    if (!status.ok || status.value.isStreaming) return false;
+    const turn = status.value.turnState;
+    // A failed turn keeps the background tasks and crons it reported
+    // (`settleTurn` picks `failed` first): those still count as running.
+    return (
+      (turn?.phase === 'idle' || turn?.phase === 'failed') &&
+      turn.backgroundTasks?.length === 0 &&
+      turn.sessionCrons?.length === 0
+    );
+  };
   const holderOf = async (sessionId: string) => {
     try {
       return await deps.lock.holder(sessionId);
@@ -355,7 +468,11 @@ export function createRemoteSessions(deps: RemoteSessionDeps): RemoteSessions {
         sessions.map(async (session): Promise<RemoteSessionSummary> => {
           sessionIndex.remember(session.id, workspaceId);
           const driving = driver.driving(session.id);
-          const holder = driving ? null : await holderOf(session.id);
+          // The engine's idle record keeps this process's lock between
+          // turns; that lock is not a running driver.
+          const idleHere = !driving && (await idleEngineSession(session.id));
+          const holder =
+            driving || idleHere ? null : await holderOf(session.id);
           const driverInfo = driving
             ? { kind: owner.kind, label: owner.label }
             : holder
@@ -398,10 +515,18 @@ export function createRemoteSessions(deps: RemoteSessionDeps): RemoteSessions {
         const workspace = workspaceById(workspaceId);
         if (!workspace) throw new RemoteMethodError('NOT_FOUND_OR_FORBIDDEN');
         deps.workspaces.addFolder(workspace.path);
-        const tabId = `worker-${randomUUID()}`;
+        const tabId = randomUUID();
         try {
+          // Named after its first prompt, as the live view titles it; the
+          // engine names a session with no usable prompt by its date.
+          const sessionName = name ?? sessionNameFromPrompt(prompt);
           const turn = await driver.start(
-            { tabId, prompt, workspacePath: workspace.path, name },
+            {
+              tabId,
+              prompt,
+              workspacePath: workspace.path,
+              ...(sessionName ? { name: sessionName } : {}),
+            },
             async (sessionId) => {
               await deps.logs.openSession(sessionId);
               sessionIndex.remember(sessionId, workspaceId);
@@ -412,8 +537,9 @@ export function createRemoteSessions(deps: RemoteSessionDeps): RemoteSessions {
           return { sessionId: turn.sessionId, turnId: turn.turnId };
         } finally {
           // A timed-out start can still resolve: its held requests are bound
-          // on the late `session:id-resolved` (see tap).
-          if (!driver.awaitingSession(tabId)) heldPermissions.delete(tabId);
+          // on the late `session:id-resolved` (see tap). Otherwise nothing
+          // can answer them, so they are denied now.
+          if (!driver.awaitingSession(tabId)) pending.denyHeld(tabId);
         }
       },
     ),
@@ -426,7 +552,7 @@ export function createRemoteSessions(deps: RemoteSessionDeps): RemoteSessions {
         if (!workspace) throw new RemoteMethodError('NOT_FOUND_OR_FORBIDDEN');
         deps.workspaces.addFolder(workspace.path);
         await deps.logs.openSession(sessionId);
-        const tabId = tabsBySession.get(sessionId) ?? `worker-${randomUUID()}`;
+        const tabId = tabsBySession.get(sessionId) ?? randomUUID();
         tabsBySession.set(sessionId, tabId);
         const turn = await driver.continue(sessionId, tabId, prompt);
         return { turnId: turn.turnId };
@@ -489,11 +615,20 @@ export function createRemoteSessions(deps: RemoteSessionDeps): RemoteSessions {
           pending.add(record, sessionId);
           permissionSessions.set(record.id, sessionId);
         } else if (tabId && driver.awaitingSession(tabId)) {
-          // Bound to its session when `session:id-resolved` arrives.
-          const held = heldPermissions.get(tabId) ?? [];
-          if (held.length < HELD_PERMISSIONS_LIMIT) held.push(record);
-          else deps.log('[ptah-worker] held permission request dropped');
-          heldPermissions.set(tabId, held);
+          // Bound to its session when `session:id-resolved` arrives; its
+          // 60 s deadline runs from now on (decision 27).
+          if (pending.heldCount(tabId) < HELD_PERMISSIONS_LIMIT)
+            pending.hold(record, tabId);
+          else {
+            // Over the hold limit: deny now, so the SDK never waits on a
+            // request that no deadline covers (decision 27).
+            deps.log('[ptah-worker] held permission request denied: limit');
+            deps.permissions.handleResponse(record.id, {
+              id: record.id,
+              decision: 'deny',
+              reason: 'Too many remote permission requests are pending',
+            });
+          }
         }
       } else if (type === 'permission:auto-resolved') {
         const requestId = text(record, 'id');
@@ -506,11 +641,8 @@ export function createRemoteSessions(deps: RemoteSessionDeps): RemoteSessions {
         const sessionId = text(record, 'realSessionId');
         if (tabId && sessionId) {
           driver.tabResolved(tabId, sessionId);
-          for (const request of heldPermissions.get(tabId) ?? []) {
-            pending.add(request, sessionId);
-            permissionSessions.set(request.id, sessionId);
-          }
-          heldPermissions.delete(tabId);
+          for (const requestId of pending.bindTab(tabId, sessionId))
+            permissionSessions.set(requestId, sessionId);
         }
       }
       capture.capture(type, payload);
@@ -523,6 +655,17 @@ export function createRemoteSessions(deps: RemoteSessionDeps): RemoteSessions {
       if (TURN_END_EVENTS.has(type))
         driver
           .terminal(text(record, 'sessionId'), text(record, 'tabId'))
+          .catch((error: unknown) =>
+            deps.log(
+              `[ptah-worker] turn end record failed: ${errorName(error)}`,
+            ),
+          );
+      // The engine's turn state ends a turn the SDK interrupted (a denied
+      // tool), where no `session:turnEnded` follows.
+      const turnState = type === 'chat:chunk' ? turnStateOf(record) : undefined;
+      if (turnState)
+        driver
+          .turnState(turnState)
           .catch((error: unknown) =>
             deps.log(
               `[ptah-worker] turn end record failed: ${errorName(error)}`,
@@ -543,6 +686,9 @@ export function createRemoteSessions(deps: RemoteSessionDeps): RemoteSessions {
     },
 
     async drain() {
+      // The listener is closed, so no answer can arrive: stop every expiry
+      // timer before the logs close.
+      pending.dispose();
       const { unresolvedTabs, failedAborts } = await driver.drain();
       if (unresolvedTabs.length > 0)
         deps.log(

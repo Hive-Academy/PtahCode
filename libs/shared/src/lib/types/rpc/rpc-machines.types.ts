@@ -502,6 +502,26 @@ export interface MachinesEventPayload {
   readonly payload: unknown;
 }
 
+/**
+ * Why a machine is in its current state, when Electron main detected a cause
+ * the user can act on. A closed set: it never carries worker-supplied text,
+ * so the renderer maps each value to its own copy.
+ *
+ * - `worker-identity-changed`: a different worker (another machine ID)
+ *   answers on the SSH alias. State is `unpaired`; the user re-pairs or
+ *   removes the machine.
+ * - `re-pair-required`: the stored token cannot be used (the worker rejected
+ *   it, or it predates worker-ID checks). State is `unpaired`.
+ * - `session-reattach-failed`: the worker refused to re-attach a session this
+ *   app was watching. State stays as it is (usually `connected`).
+ */
+export const MACHINE_STATE_REASONS = [
+  'worker-identity-changed',
+  're-pair-required',
+  'session-reattach-failed',
+] as const;
+export type MachineStateReason = (typeof MACHINE_STATE_REASONS)[number];
+
 /** Payload of `machines:state`: one machine's connection state changed. */
 export interface MachinesStatePayload {
   readonly machineId: string;
@@ -509,4 +529,6 @@ export interface MachinesStatePayload {
   readonly nextRetryAt?: number;
   readonly versions?: MachineVersions;
   readonly lastSeenAt?: number;
+  /** Set only for a cause listed in `MACHINE_STATE_REASONS`. */
+  readonly reason?: MachineStateReason;
 }

@@ -2,6 +2,7 @@ import {
   CAPTURED_EVENT_TYPES,
   type CapturedEventType,
 } from '@ptah-extension/worker-protocol';
+import { withRemotePermissionDeadline } from './pending-permissions';
 
 export interface CapturedEvent {
   type: CapturedEventType;
@@ -25,6 +26,14 @@ export class WorkerEventCapture {
       this.dropped += 1;
       return;
     }
-    this.enqueue(sessionId, { type: type as CapturedEventType, payload });
+    this.enqueue(sessionId, {
+      type: type as CapturedEventType,
+      // A worker denies an unanswered request after 60 s; the logged copy
+      // carries that deadline so a controller can count it down.
+      payload:
+        type === 'permission:request'
+          ? withRemotePermissionDeadline(payload)
+          : payload,
+    });
   }
 }

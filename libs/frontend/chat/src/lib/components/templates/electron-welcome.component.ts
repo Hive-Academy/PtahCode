@@ -16,6 +16,10 @@
  * keep 4.5:1. Every figure comes from `WelcomeVitalsStore`, provided here so
  * its reads live as long as the screen; the mapping is in
  * `welcome-vitals.view.ts`.
+ *
+ * Remote machines need no local folder, so a secondary "Machines (N
+ * connected)" button sits next to Open Folder (TASK_2026_858, design-spec
+ * section 3). N comes from `MachinesStore`, which this screen loads once.
  */
 
 import {
@@ -34,15 +38,19 @@ import {
   Gauge,
   LucideAngularModule,
   RotateCw,
+  Server,
   TriangleAlert,
 } from 'lucide-angular';
 import {
+  AppStateManager,
   ElectronLayoutService,
   LoggingService,
   VSCodeService,
   injectWallClock,
 } from '@ptah-extension/core';
 import { ActivityGridComponent } from '@ptah-extension/chat-ui';
+// Component-free entry; the Machines view itself loads through its route.
+import { MachinesStore } from '@ptah-extension/machines-ui/services';
 // The welcome-only molecules come from the lazy `vitals` entry point: this
 // component loads inside electron-shell's `@defer`, and the main barrel is
 // eager (see libs/frontend/chat-ui/src/vitals.ts).
@@ -97,24 +105,39 @@ const LOG_CONTEXT = 'ElectronWelcome';
           <h1 class="text-[28px] leading-tight font-semibold text-base-content">
             Open a workspace
           </h1>
-          <button
-            type="button"
-            class="btn btn-primary gap-2 rounded-full px-6"
-            data-testid="welcome-open-folder"
-            (click)="addFolder()"
-          >
-            <lucide-angular
-              [img]="FolderOpenIcon"
-              class="size-4"
-              aria-hidden="true"
-            />
-            Open Folder
-            <lucide-angular
-              [img]="ArrowRightIcon"
-              class="size-4"
-              aria-hidden="true"
-            />
-          </button>
+          <div class="flex flex-wrap items-center justify-center gap-2">
+            <button
+              type="button"
+              class="btn btn-primary gap-2 rounded-full px-6"
+              data-testid="welcome-open-folder"
+              (click)="addFolder()"
+            >
+              <lucide-angular
+                [img]="FolderOpenIcon"
+                class="size-4"
+                aria-hidden="true"
+              />
+              Open Folder
+              <lucide-angular
+                [img]="ArrowRightIcon"
+                class="size-4"
+                aria-hidden="true"
+              />
+            </button>
+            <button
+              type="button"
+              class="btn btn-ghost gap-2 rounded-full px-5"
+              data-testid="welcome-open-machines"
+              (click)="openMachines()"
+            >
+              <lucide-angular
+                [img]="MachinesIcon"
+                class="size-4"
+                aria-hidden="true"
+              />
+              {{ machinesLabel() }}
+            </button>
+          </div>
         </div>
 
         @if (openFailed()) {
@@ -248,6 +271,8 @@ const LOG_CONTEXT = 'ElectronWelcome';
 })
 export class ElectronWelcomeComponent {
   private readonly layout = inject(ElectronLayoutService);
+  private readonly appState = inject(AppStateManager);
+  private readonly machines = inject(MachinesStore);
   private readonly vscodeService = inject(VSCodeService);
   private readonly logger = inject(LoggingService);
   private readonly recentWorkspaces = inject(RecentWorkspacesStore);
@@ -262,6 +287,7 @@ export class ElectronWelcomeComponent {
   protected readonly SpendIcon = CircleDollarSign;
   protected readonly AgentsIcon = Bot;
   protected readonly SkillsIcon = BookOpen;
+  protected readonly MachinesIcon = Server;
 
   protected readonly ptahIconUri = this.vscodeService.getPtahIconUri();
 
@@ -293,6 +319,38 @@ export class ElectronWelcomeComponent {
   protected readonly skills = computed(() =>
     toCountCell(this.vitals.skillCount()),
   );
+
+  private readonly machinesKnown = signal(false);
+  /**
+   * "Machines (N connected)" once the list is known. Before the first answer
+   * and when the list cannot be read, no count is claimed: plain "Machines".
+   */
+  protected readonly machinesLabel = computed(() => {
+    if (!this.machinesKnown()) return 'Machines';
+    return `Machines (${this.machines.connectedCount()} connected)`;
+  });
+  public constructor() {
+    void this.loadMachines();
+  }
+
+  private async loadMachines(): Promise<void> {
+    try {
+      await this.machines.loadMachines();
+    } catch (error: unknown) {
+      // degradation-audit: reported — a transport failure is logged and leaves the label count-free; the view reports the error and offers Try again.
+      this.logger.warn(
+        LOG_CONTEXT,
+        'Machine list could not be loaded',
+        error instanceof Error ? error.message : String(error),
+      );
+      return;
+    }
+    this.machinesKnown.set(this.machines.error() === null);
+  }
+
+  protected openMachines(): void {
+    this.appState.setCurrentView('machines');
+  }
 
   protected addFolder(): void {
     this.openFailed.set(false);

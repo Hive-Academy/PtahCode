@@ -71,6 +71,35 @@ const defaultChecks: ServeChecks = {
   ptahVersion: bundleVersion,
 };
 
+/**
+ * `PERSISTENCE_TOKENS.SQLITE_CONNECTION` of persistence-sqlite. The token is
+ * a registered symbol, so the same key resolves it without a new dependency.
+ */
+const SQLITE_CONNECTION = Symbol.for('PtahSqliteConnection');
+
+interface MainDatabaseContainer {
+  isRegistered(token: symbol): boolean;
+  resolve<T>(token: symbol): T;
+}
+
+/** Readiness of the main database; the reason only, never a path. */
+export function mainDatabaseState(container: MainDatabaseContainer): {
+  open: boolean;
+  detail: string;
+} {
+  if (!container.isRegistered(SQLITE_CONNECTION))
+    return { open: false, detail: 'The main database is not registered.' };
+  const state = container.resolve<{
+    readonly unavailable: { readonly reason: string } | null;
+  }>(SQLITE_CONNECTION).unavailable;
+  return state === null
+    ? { open: true, detail: 'The main database is open.' }
+    : {
+        open: false,
+        detail: `The main database is unavailable (${state.reason}).`,
+      };
+}
+
 export async function serveCommand(options: ServeOptions): Promise<void> {
   const checks = options.checks ?? defaultChecks;
   await import('@ptah-extension/platform-core');
@@ -122,7 +151,10 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     {},
     {
       mode: 'full',
-      thoth: 'off',
+      // 'oneshot' opens and migrates the main SQLite database (no memory,
+      // cron or gateway). The account gate of chat:start reads it; with
+      // 'off' every fresh remote session is refused as unavailable-storage.
+      thoth: 'oneshot',
       hostProfile: runtime.createWorkerRpcHostProfile(),
       pushAdapter,
       ...(options.bootstrap ? { bootstrap: options.bootstrap } : {}),
@@ -202,6 +234,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
                 : route.blockers.join('; '),
             };
           },
+          mainDatabase: () => mainDatabaseState(engine.container),
           driverLock: async () => {
             const listings = await listLocalDriverLocks();
             return {

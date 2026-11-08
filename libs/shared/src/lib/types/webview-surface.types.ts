@@ -39,6 +39,9 @@
  * the list stays one list, but its route refuses to match outside Electron
  * and the `**` fallback lands the user on `chat` instead.
  * `command-center` is Electron-only via the route guard, with the same fallback.
+ * `machines` (TASK_2026_858) is Electron-only the same way: the remote-machine
+ * workers are an Electron main-process service, so its route refuses to match
+ * on every other host and the `**` fallback lands on `chat`.
  *
  * `onboarding` (TASK_2026_ONBOARDING) is the first-run and setup surface. It
  * is routable on every host; only the automatic first-run redirect onto it is
@@ -59,7 +62,8 @@ export type ViewType =
   | 'tasks'
   | 'apps'
   | 'command-center'
-  | 'review-runs';
+  | 'review-runs'
+  | 'machines';
 
 /**
  * Every surface that has a route, in the order the route table declares them.
@@ -80,6 +84,7 @@ export const SURFACE_ROUTE_IDS: readonly ViewType[] = [
   'apps',
   'command-center',
   'review-runs',
+  'machines',
 ];
 
 /**

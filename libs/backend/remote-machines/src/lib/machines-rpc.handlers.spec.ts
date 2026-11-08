@@ -41,11 +41,24 @@ describe('MachinesRpcHandlers', () => {
     ['PAIRING_REJECTED', 'MACHINE_PAIRING_REJECTED'],
     ['SESSION_DRIVEN_ELSEWHERE', 'SESSION_DRIVEN_ELSEWHERE'],
     ['DRIVER_LOCK_UNAVAILABLE', 'SESSION_DRIVER_LOCK_UNAVAILABLE'],
+    ['TRANSCRIPT_UNAVAILABLE', 'MACHINE_TRANSCRIPT_UNAVAILABLE'],
     ['NOT_CONNECTED', 'MACHINE_UNREACHABLE'],
   ] as const)('maps %s to %s', (input, output) => {
     expect(mapMachineError(new WorkerClientError(input))).toMatchObject({
       errorCode: output,
     });
+  });
+  it('keeps the worker text of a transcript failure out of the parent error', () => {
+    const mapped = mapMachineError(
+      new WorkerClientError('TRANSCRIPT_UNAVAILABLE', {
+        detail: { sessionId: 's-1' },
+        cause: new Error('read failed at /home/x'),
+      }),
+    );
+    expect(mapped.message).toBe(
+      'The session transcript could not be read on the machine. Open the session again, or check the Ptah log on the machine.',
+    );
+    expect(mapped.message).not.toContain('/home/x');
   });
 });
 

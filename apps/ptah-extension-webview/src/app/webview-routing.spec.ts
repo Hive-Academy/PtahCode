@@ -49,6 +49,7 @@ import {
   MESSAGE_HANDLERS,
   MemoryPlatformLocation,
   MessageRouterService,
+  SURFACE_ACTIVE,
   SURFACE_ROUTE_IDS,
   SurfaceRouterService,
   VSCodeService,
@@ -86,7 +87,12 @@ interface HostWindow {
  * loops drive them on the Electron host; the VS Code refusal is pinned by its
  * own describe block, never by dropping them from a loop.
  */
-const ELECTRON_ONLY_SURFACES: readonly string[] = ['apps', 'command-center', 'review-runs'];
+const ELECTRON_ONLY_SURFACES: readonly string[] = [
+  'apps',
+  'command-center',
+  'review-runs',
+  'machines',
+];
 
 /**
  * Pin which host the renderer believes it is running in.
@@ -257,7 +263,7 @@ describe('webview routing composition', () => {
     // without changing the project's timeout or reducing surface coverage.
     //
     // Driven on the Electron host so the Electron-only surfaces (including the
-    // last one, `command-center`) are really navigated to. The
+    // last one, `machines`) are really navigated to. The
     // `file:` document of the Electron renderer is also the host that rejects
     // `history.pushState`, so it is the one this property matters most on.
     it('never calls window.history while navigating every surface', async () => {
@@ -269,7 +275,7 @@ describe('webview routing composition', () => {
       }
       await settle();
 
-      expect(surfaceRouter.currentSurface()).toBe('review-runs');
+      expect(surfaceRouter.currentSurface()).toBe('machines');
       for (const [name, spy] of Object.entries(history)) {
         expect(spy).not.toHaveBeenCalled();
         expect(name).toBeTruthy();
@@ -584,7 +590,9 @@ describe('webview routing composition', () => {
       const boot = runBoot();
       expect(
         surfaceNavigationLanded(
-          await TestBed.inject(SurfaceRouterService).navigateToSurface('settings'),
+          await TestBed.inject(SurfaceRouterService).navigateToSurface(
+            'settings',
+          ),
         ),
       ).toBe(true);
       workspaceResolved.set(true);
@@ -895,6 +903,7 @@ describe('webview routing composition', () => {
     let loadApps: jest.SpyInstance;
     let loadCommandCenter: jest.SpyInstance;
     let loadReviewRuns: jest.SpyInstance;
+    let loadMachines: jest.SpyInstance;
 
     beforeEach(() => {
       // Installed before anything injects the Router, so the Router's copy of
@@ -906,6 +915,7 @@ describe('webview routing composition', () => {
         'loadComponent',
       );
       loadReviewRuns = jest.spyOn(routeFor('review-runs'), 'loadComponent');
+      loadMachines = jest.spyOn(routeFor('machines'), 'loadComponent');
       TestBed.inject(MessageRouterService);
       TestBed.inject(AppStateManager);
     });
@@ -943,6 +953,14 @@ describe('webview routing composition', () => {
         await bootWithInitialView('review-runs');
         expect(TestBed.inject(Router).url).toBe('/chat');
         expect(loadReviewRuns).not.toHaveBeenCalled();
+      });
+
+      it('lands initialView "machines" on chat without requesting its lazy chunk', async () => {
+        Object.assign(window, { ptahConfig: { initialView: 'machines' } });
+        await bootWithInitialView('machines');
+        expect(TestBed.inject(Router).url).toBe('/chat');
+        expect(TestBed.inject(AppStateManager).currentView()).toBe('chat');
+        expect(loadMachines).not.toHaveBeenCalled();
       });
 
       it('lands SWITCH_VIEW "apps" on chat without loading the chunk', async () => {
@@ -1033,6 +1051,14 @@ describe('webview routing composition', () => {
         await bootWithInitialView('review-runs');
         expect(TestBed.inject(Router).url).toBe('/review-runs');
         expect(loadReviewRuns).toHaveBeenCalledTimes(1);
+      }, 30_000);
+
+      it('opens machines through its lazy view', async () => {
+        Object.assign(window, { ptahConfig: { initialView: 'machines' } });
+        await bootWithInitialView('machines');
+        expect(TestBed.inject(Router).url).toBe('/machines');
+        expect(TestBed.inject(AppStateManager).currentView()).toBe('machines');
+        expect(loadMachines).toHaveBeenCalledTimes(1);
       }, 30_000);
 
       it('lands SWITCH_VIEW "apps" on the apps route', async () => {
@@ -1163,7 +1189,7 @@ describe('app.routes', () => {
     },
   );
 
-  it.each(['tasks', 'apps', 'command-center', 'review-runs'])(
+  it.each(['tasks', 'apps', 'command-center', 'review-runs', 'machines'])(
     'defers %s with loadComponent',
     (path) => {
       const route = appRoutes.find((candidate) => candidate.path === path);
@@ -1209,21 +1235,41 @@ describe('app.routes', () => {
       .map((route) => route.path);
 
     expect(guarded).toEqual([...ELECTRON_ONLY_SURFACES]);
-    for (const path of ['apps', 'command-center']) {
+    for (const path of ['apps', 'command-center', 'machines']) {
       expect(routeFor(path).canMatch).toEqual([electronOnlySurface]);
     }
     expect(routeFor('review-runs').canMatch).toEqual([reviewOnlySurface]);
   });
 
-  it('places review runs after command-center and before the fallbacks', () => {
+  it('places review runs after command-center, then machines, before the fallbacks', () => {
     const order = appRoutes.map((route) => route.path);
     expect(order.indexOf('apps')).toBe(order.indexOf('tasks') + 1);
     expect(order.indexOf('command-center')).toBe(order.indexOf('apps') + 1);
-    expect(order.indexOf('review-runs')).toBe(order.indexOf('command-center') + 1);
-    expect(order.indexOf('review-runs')).toBe(appRoutes.length - 3);
+    expect(order.indexOf('review-runs')).toBe(
+      order.indexOf('command-center') + 1,
+    );
+    expect(order.indexOf('machines')).toBe(order.indexOf('review-runs') + 1);
+    expect(order.indexOf('machines')).toBe(appRoutes.length - 3);
   });
 
-  it.each(['tasks', 'apps', 'command-center', 'review-runs'])(
+  it('provides SURFACE_ACTIVE on the machines route, as on tasks', () => {
+    // The remote transcript's thinking, tool input and code output blocks
+    // inject SURFACE_ACTIVE (batch-25 report); the route is their provider.
+    const providers = routeFor('machines').providers ?? [];
+    expect(providers).toHaveLength(1);
+    expect((providers[0] as { provide: unknown }).provide).toBe(SURFACE_ACTIVE);
+  });
+
+  it('resolves machines to the machines-ui MachinesViewComponent', async () => {
+    const loaded = await (
+      routeFor('machines').loadComponent as () => Promise<unknown>
+    )();
+    const module = await import('@ptah-extension/machines-ui');
+
+    expect(loaded).toBe(module.MachinesViewComponent);
+  }, 30_000);
+
+  it.each(['tasks', 'apps', 'command-center', 'review-runs', 'machines'])(
     'resolves %s to a real component class',
     async (path) => {
       // Pins the barrel export each `loadComponent` names. A rename would
