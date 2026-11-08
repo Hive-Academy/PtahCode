@@ -41,7 +41,7 @@ import {
   DEFAULT_CODEX_SANDBOX_MODE,
 } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
-import { createElectronCodexScopeFactory } from './codex-runtime-composition';
+import { createElectronCodexScopeFactory, observeElectronCodexChildBudgets } from './codex-runtime-composition';
 
 export interface ElectronCodexLaneInput {
   readonly isPackaged: boolean;
@@ -351,7 +351,7 @@ export function registerElectronCodexLaneFactory(
         scope.container,
         input,
       ).open(profile, resume, secrets);
-      return ownedContext(context, scope.dispose);
+      return ownedContext(observeElectronCodexChildBudgets(context, container, logger), scope.dispose);
     } catch (error) {
       await scope.dispose();
       throw error;
