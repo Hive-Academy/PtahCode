@@ -201,6 +201,8 @@ export const MAX_STOP_ATTEMPTS = 3;
 export const MAX_RECORD_ATTEMPTS = 3;
 /** Share of `compaction.subagentHandoffTokens` at which a subagent is asked to write its notes. */
 export const NEAR_BUDGET_RATIO = 0.85;
+/** Absolute runaway ceiling; normal budget crossings use the notes gate. */
+export const RUNAWAY_BUDGET_MULTIPLE = 2;
 const TRANSCRIPT_MISS_TTL_MS = 5_000;
 /** Tools that spawn a subagent (`Task` is the SDK's earlier name for `Agent`). */
 const SUBAGENT_TOOL_NAMES: ReadonlySet<string> = new Set(['Agent', 'Task']);
@@ -674,11 +676,10 @@ export class SubagentBudgetMonitor {
       this.warnNearBudget(session, toolCallId, state, subagentHandoffTokens);
     }
     const reason: StopReason | undefined =
-      state.contextTokens >= subagentHandoffTokens && !state.recordGaveUp
-        ? 'handoff'
-        : state.weightedUsed >= subagentStopWeightedTokens
-          ? 'safety'
-          : undefined;
+      state.weightedUsed >= subagentStopWeightedTokens ||
+      state.contextTokens >= subagentHandoffTokens * RUNAWAY_BUDGET_MULTIPLE
+        ? 'safety'
+        : undefined;
     if (!reason) {
       return;
     }
@@ -795,7 +796,7 @@ export class SubagentBudgetMonitor {
       void (async () => {
         for (const session of this.sessions.values()) {
           for (const state of session.subagents.values()) {
-            if (state.warnedAgentId && this.notesGate.expired(state.warnedAgentId)) {
+            if (state.warnedAgentId && !state.stopFired && this.notesGate.expired(state.warnedAgentId)) {
               await this.stopWarnedAgent(session.sessionId, state.warnedAgentId);
             }
           }
@@ -806,7 +807,7 @@ export class SubagentBudgetMonitor {
           error: error instanceof Error ? error : new Error(String(error)),
         });
       }).finally(() => {
-        if ([...this.sessions.values()].some((session) => [...session.subagents.values()].some((state) => this.notesGate.has(state.warnedAgentId)))) {
+        if ([...this.sessions.values()].some((session) => [...session.subagents.values()].some((state) => !state.stopFired && this.notesGate.has(state.warnedAgentId)))) {
           this.scheduleGateTimeout();
         }
       });
@@ -835,7 +836,10 @@ export class SubagentBudgetMonitor {
         state.stopInFlight = true;
         try {
           const started = session.startedTasks.get(toolCallId);
-          const { record } = this.resolveRegistryRecord(session, toolCallId);
+          const resolved = this.resolveRegistryRecord(session, toolCallId);
+          const hookToolCallId = this.registry.getToolCallIdByAgentId(agentId);
+          const hookRecord = hookToolCallId ? this.registry.get(hookToolCallId) : null;
+          const record = resolved.record ?? (hookRecord?.parentSessionId === session.sessionId ? hookRecord : null);
           const taskId = started?.taskId ?? record?.taskId;
           if (!taskId) {
             this.logger.warn('[SubagentBudgetMonitor] Normal exit has no task id; preparing an in-memory handoff', {
@@ -843,10 +847,28 @@ export class SubagentBudgetMonitor {
             });
           }
           const config = this.config.getConfig();
-          const prepared = await this.prepareHandoff(session, toolCallId, state, 'handoff', {
+          let prepared: PreparedHandoff | undefined;
+          try {
+            prepared = await this.prepareHandoff(session, toolCallId, state, 'handoff', {
             handoffTokens: config.subagentHandoffTokens,
             stopWeightedTokens: config.subagentStopWeightedTokens,
-          }, { agentId, agentType: record?.agentType ?? started?.subagentType ?? 'subagent', teammateName: record?.teammateName, taskId: taskId ?? 'unknown' }, state.lastMessageId, true, !taskId);
+            }, { agentId, agentType: record?.agentType ?? started?.subagentType ?? 'subagent', teammateName: record?.teammateName, taskId: taskId ?? 'unknown' }, state.lastMessageId, true);
+          } catch (error: unknown) {
+            this.logger.error('[SubagentBudgetMonitor] Normal exit handoff preparation failed', {
+              error: error instanceof Error ? error : new Error(String(error)),
+              sessionId: session.sessionId, toolCallId,
+            });
+            const fallback = handoffMessage(
+              { agentId, agentType: record?.agentType ?? started?.subagentType ?? 'subagent', taskId: taskId ?? 'unknown' },
+              { reason: 'handoff', contextTokens: state.contextTokens, weightedUsed: state.weightedUsed,
+                handoffTokens: config.subagentHandoffTokens, stopWeightedTokens: config.subagentStopWeightedTokens },
+              session.tasks.get(toolCallId)?.text,
+              { paths: undefined, taskSaved: false, notesWritten: false, notesInferred: false, unavailable: true },
+            );
+            prepared = { handoff: { text: redactBudgetSecrets(fallback), subject: {
+              agentId, agentType: record?.agentType ?? started?.subagentType ?? 'subagent', taskId: taskId ?? 'unknown',
+            } } };
+          }
           if (!prepared) {
             this.logger.warn('[SubagentBudgetMonitor] Normal exit handoff could not be prepared', {
               sessionId: session.sessionId, toolCallId, agentId,
@@ -868,7 +890,7 @@ export class SubagentBudgetMonitor {
           if (!current || liveState.handoffDelivered) return;
           if (current.spawnReturned.get(toolCallId)) {
             liveState.handoffDelivered = true;
-            await this.delivery.send(current.sessionId, toolCallId, prepared.handoff);
+            void this.delivery.send(current.sessionId, toolCallId, prepared.handoff);
           } else {
             liveState.pendingNotice = { sessionId: current.sessionId, handoff: prepared.handoff };
           }
@@ -896,13 +918,12 @@ export class SubagentBudgetMonitor {
   /** Repair the SDK's user interruption wording for Ptah's forced stop. */
   takeInterruptedHandoff(sessionId: string, toolCallId: string): string | undefined {
     const state = this.sessions.get(this.currentSessionId(sessionId))?.subagents.get(toolCallId);
-    if (!state || state.handoffDelivered || (state.stopState !== 'stopped' && state.stopState !== 'pending')) return undefined;
+    if (!state || (state.stopState !== 'stopped' && state.stopState !== 'pending')) return undefined;
     const text = state.pendingNotice?.handoff.text ?? state.prepared?.handoff.text;
     if (state.pendingNotice) {
       this.dispatcher.withdrawMainThreadNotice(state.pendingNotice.sessionId, text ?? '');
       state.pendingNotice = undefined;
     }
-    state.handoffDelivered = true;
     return text;
   }
 
@@ -1435,6 +1456,7 @@ export class SubagentBudgetMonitor {
       }
       return;
     }
+    if (reason === 'handoff' && state.recordGaveUp) return;
 
     // Set over the preparation too: an overlapping message starts no other stop.
     state.stopInFlight = true;
@@ -1598,7 +1620,7 @@ export class SubagentBudgetMonitor {
     if (notesPaths) {
       await this.handoffFiles.redactNotes(notesPaths, redactBudgetSecrets);
     }
-    await this.deliverHandoff(current, toolCallId, liveState, prepared.handoff);
+    await this.deliverHandoff(current, toolCallId, liveState, prepared.handoff, true);
     const prompt = current.tasks.get(toolCallId)?.prompt;
     if (prepared.record && prompt) {
       await this.records.writeStub(
@@ -1787,9 +1809,15 @@ export class SubagentBudgetMonitor {
     toolCallId: string,
     stoppedState: SubagentState,
     handoff: Handoff,
+    forced = false,
   ): Promise<void> {
     const sessionId = live.sessionId;
     if (stoppedState.handoffDelivered) return;
+    if (forced) {
+      stoppedState.handoffDelivered = true;
+      await this.delivery.send(sessionId, toolCallId, handoff);
+      return;
+    }
     if (live.spawnReturned.get(toolCallId) === true) {
       // Background subagent: its tool result already came back, so no
       // main-thread tool result is due to carry a queued notice.
