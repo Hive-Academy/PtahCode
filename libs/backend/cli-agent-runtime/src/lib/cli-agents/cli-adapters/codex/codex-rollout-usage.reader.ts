@@ -21,6 +21,7 @@
 import { open, readdir, stat } from 'fs/promises';
 import { join } from 'path';
 import { codexHomeDir } from '@ptah-extension/harness-sync';
+import type { AgentUsageDatum } from '@ptah-extension/shared';
 
 /** What the gate reads from one rollout. */
 export interface CodexRolloutUsage {
@@ -28,6 +29,8 @@ export interface CodexRolloutUsage {
   readonly file: string;
   /** `info.last_token_usage.input_tokens` of the last `token_count` record. */
   readonly lastRequestInputTokens: number;
+  /** Most recent request context, separate from cumulative turn usage. */
+  readonly requestContext?: AgentUsageDatum;
   /** The file's modification time: the thread's last write. */
   readonly modifiedAtMs: number;
 }
@@ -71,7 +74,7 @@ export async function readCodexRolloutUsage(
   const tokens = await readLastRequestInputTokens(file, size);
   return tokens === null
     ? null
-    : { file, lastRequestInputTokens: tokens, modifiedAtMs: mtimeMs };
+    : { file, lastRequestInputTokens: tokens, requestContext: { status: 'reported', value: tokens, source: 'session-file' }, modifiedAtMs: mtimeMs };
 }
 
 /**

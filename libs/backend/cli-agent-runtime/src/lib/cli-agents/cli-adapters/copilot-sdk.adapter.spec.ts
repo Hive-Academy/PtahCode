@@ -670,6 +670,22 @@ describe('CopilotSdkAdapter', () => {
           durationMs: 3500,
         },
       });
+      expect(segments).toContainEqual(expect.objectContaining({
+        turnTelemetry: expect.objectContaining({
+          status: 'reported', usage: expect.objectContaining({ inputTokens: 1000, outputTokens: 500, modelId: 'claude-sonnet-4.5' }),
+        }),
+      }));
+    });
+
+    it('fails closed when a successful turn has no usage event', async () => {
+      const handle = await adapter.runSdk(defaultOptions);
+      const segments: CliOutputSegment[] = [];
+      handle.onSegment?.((item) => segments.push(item));
+      currentChild?.emitClose(0);
+      await handle.done;
+      expect(segments).toContainEqual(expect.objectContaining({
+        turnTelemetry: expect.objectContaining({ status: 'unavailable', reason: 'no-usage-event' }),
+      }));
     });
 
     it('captures sessionId from result event', async () => {

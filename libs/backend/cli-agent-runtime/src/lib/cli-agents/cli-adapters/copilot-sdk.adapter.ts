@@ -37,6 +37,8 @@
  * - session.error             -> error
  * - result                    -> info (final stats); resolves done promise
  */
+import { randomUUID } from 'crypto';
+import { completedTurnTelemetry } from '@ptah-extension/shared';
 import type {
   CliAdapterManifest,
   CliDetectionResult,
@@ -418,6 +420,11 @@ export class CopilotSdkAdapter implements CliAdapter {
       let receivedDeltas = false;
       let receivedReasoningDeltas = false;
       const toolCallIdToName = new Map<string, string>();
+      let turnUsage: CliOutputSegment['usage'];
+      const emitTurnSegment = (item: CliOutputSegment): void => {
+        if (item.usage) turnUsage = item.usage;
+        segment.emit(item);
+      };
       let lineBuf = '';
       let stderrBuf = '';
 
@@ -432,7 +439,7 @@ export class CopilotSdkAdapter implements CliAdapter {
           const sessionId = this.handleJsonLine(
             trimmed,
             output.emit,
-            segment.emit,
+            emitTurnSegment,
             {
               getReceivedDeltas: () => receivedDeltas,
               setReceivedDeltas: () => {
@@ -472,7 +479,7 @@ export class CopilotSdkAdapter implements CliAdapter {
             const sessionId = this.handleJsonLine(
               lineBuf.trim(),
               output.emit,
-              segment.emit,
+              emitTurnSegment,
               {
                 getReceivedDeltas: () => receivedDeltas,
                 setReceivedDeltas: () => {
@@ -493,7 +500,21 @@ export class CopilotSdkAdapter implements CliAdapter {
           // Turn ended — invalidate the abort/getPid target so a stale, dead PID
           // can't be returned. continue()'s runTurn re-points activeChild.
           activeChild = undefined;
-          resolve(code ?? (signal ? 1 : 0));
+          const exitCode = code ?? (signal ? 1 : 0);
+          if (exitCode === 0 && !abortController.signal.aborted) {
+            segment.emit({
+              type: 'info', content: 'Copilot turn telemetry',
+              turnTelemetry: completedTurnTelemetry({
+                turnId: randomUUID(), modelId: turnUsage?.model ?? options.model,
+                source: 'stream', usage: turnUsage ? {
+                  inputTokens: turnUsage.inputTokens,
+                  outputTokens: turnUsage.outputTokens,
+                  costUsd: turnUsage.costUsd,
+                } : undefined,
+              }),
+            });
+          }
+          resolve(exitCode);
         });
 
         child.on('error', (err) => {
@@ -743,10 +764,14 @@ export class CopilotSdkAdapter implements CliAdapter {
         if (duration !== undefined)
           parts.push(`${(duration / 1000).toFixed(1)}s`);
         if (
-          parts.length > 0 ||
-          inputTokens !== undefined ||
-          outputTokens !== undefined
+          inputTokens === undefined || outputTokens === undefined ||
+          !Number.isSafeInteger(inputTokens) || inputTokens < 0 ||
+          !Number.isSafeInteger(outputTokens) || outputTokens < 0
         ) {
+          emitSegment({ type: 'error', content: 'Copilot turn telemetry unavailable: complete input/output totals missing.' });
+          return undefined;
+        }
+        if (parts.length > 0 || inputTokens === 0 || outputTokens === 0) {
           const usageStr = `Usage: ${parts.join(', ')}`;
           emitOutput(`\n[${usageStr}]\n`);
           emitSegment({

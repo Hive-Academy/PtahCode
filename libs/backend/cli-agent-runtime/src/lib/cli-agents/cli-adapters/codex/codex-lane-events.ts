@@ -4,7 +4,7 @@ import {
   type CodexReportedUsage,
   type CodexRuntimeEvent,
 } from '@ptah-extension/codex-runtime';
-import type { CliOutputSegment } from '@ptah-extension/shared';
+import { completedTurnTelemetry, type CliOutputSegment } from '@ptah-extension/shared';
 
 export type CodexLaneTurnIdentity = Pick<
   CodexRuntimeEvent,
@@ -28,6 +28,7 @@ export class CodexLaneEvents {
     { readonly raw: string; readonly presented: string }
   >();
   private usage?: CodexReportedUsage;
+  private usageModelId?: string;
   private errorEmitted = false;
 
   constructor(private readonly identity: CodexLaneTurnIdentity) {}
@@ -178,24 +179,35 @@ export class CodexLaneEvents {
         // Core reports turn snapshots. CLI totals add segments, so emit only once,
         // on terminal, instead of counting every snapshot (and terminal) again.
         this.usage = event.usage;
+        this.usageModelId = event.evidence?.modelId ?? this.usageModelId;
         return { segments: [] };
       case 'error':
         return { segments: this.error() };
       case 'terminal': {
         this.terminal = true;
         const usage = event.usage ?? this.usage;
+        const telemetry = completedTurnTelemetry({
+          turnId: this.identity.turnId,
+          modelId: event.evidence?.modelId ?? this.usageModelId,
+          source: 'stream',
+          usage: usage ? laneUsage(usage) : undefined,
+        });
         const segments: CliOutputSegment[] =
           event.error || event.status === 'failed' ? this.error() : [];
-        if (usage !== undefined)
+        if (usage !== undefined && Number.isSafeInteger(usage.inputTokens) && Number.isSafeInteger(usage.outputTokens) && usage.inputTokens !== undefined && usage.outputTokens !== undefined && usage.inputTokens >= 0 && usage.outputTokens >= 0)
           segments.push({
             type: 'info',
             content: 'Codex turn usage.',
             usage: laneUsage(usage),
+            turnTelemetry: telemetry,
           });
+        else if (event.status !== 'failed')
+          segments.push({ type: 'error', content: 'Codex turn telemetry unavailable: complete input/output totals missing.', turnTelemetry: telemetry });
         this.text.clear();
         this.reasoning.clear();
         this.tools.clear();
         this.usage = undefined;
+        this.usageModelId = undefined;
         return { segments, terminal: event.status };
       }
     }

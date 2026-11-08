@@ -136,7 +136,7 @@ function start(
     errors: () =>
       segments.filter((s) => s.type === 'error').map((s) => s.content),
     infos: () =>
-      segments.filter((s) => s.type === 'info').map((s) => s.content),
+      segments.filter((s) => s.type === 'info' && !s.turnTelemetry).map((s) => s.content),
     resolvedIds,
     spawn: () => spawn,
     logger,
@@ -175,6 +175,40 @@ afterEach(async () => {
 });
 
 describe('createAcpSessionHandle — first turn', () => {
+  it('reports prompt _meta.usage and preserves the UI usage segment', async () => {
+    const h = start({
+      options: { model: 'grok-test' },
+      script: (agent) => agent.handle('session/prompt', () => ({
+        result: { stopReason: 'end_turn', _meta: { usage: {
+          inputTokens: 12, outputTokens: 4, cacheReadTokens: 2, costUsd: 0.03,
+        } } },
+      })),
+    });
+    await expect(h.handle.done).resolves.toBe(0);
+    const telemetry = h.segments.filter((segment) => segment.turnTelemetry);
+    expect(telemetry).toHaveLength(1);
+    expect(telemetry[0].turnTelemetry).toMatchObject({ status: 'reported', usage: {
+      modelId: 'grok-test', inputTokens: 12, outputTokens: 4,
+    } });
+    expect(telemetry[0].usage).toMatchObject({ inputTokens: 12, outputTokens: 4 });
+  });
+
+  it('marks missing or invalid prompt usage unavailable without failing the turn', async () => {
+    const h = start({ options: { model: 'grok-test' } });
+    await expect(h.handle.done).resolves.toBe(0);
+    h.agent.handle('session/prompt', () => ({
+      result: { stopReason: 'end_turn', _meta: { usage: { inputTokens: -1, outputTokens: 2 } } },
+    }));
+    const next = await h.handle.continue?.('Follow up');
+    await expect(next?.done).resolves.toBe(0);
+    const telemetry = h.segments.filter((segment) => segment.turnTelemetry);
+    expect(telemetry).toHaveLength(2);
+    expect(telemetry.map((segment) => segment.turnTelemetry)).toEqual([
+      expect.objectContaining({ status: 'unavailable', reason: 'no-usage-event' }),
+      expect.objectContaining({ status: 'unavailable', reason: 'no-usage-event' }),
+    ]);
+  });
+
   it('waits for the Ptah MCP attachment before the first prompt', async () => {
     let attach: (value: McpAttachment) => void = () => {
       throw new Error('attachment waiter was not installed');
@@ -450,7 +484,7 @@ describe('createAcpSessionHandle — stop reasons', () => {
     await expect(h.handle.done).resolves.toBe(code);
 
     const notable = h.segments.filter(
-      (s) => s.type === 'error' || s.type === 'info',
+      (s) => (s.type === 'error' || s.type === 'info') && !s.turnTelemetry,
     );
     expect(notable).toEqual(expected ? [expected] : []);
   });

@@ -257,6 +257,45 @@ describe('CursorCliAdapter', () => {
       workingDirectory: '/proj',
     };
 
+    it('emits one completed-turn telemetry record from the SDK usage event', async () => {
+      const handle = await adapter.runSdk(defaultOptions);
+      const segments: Array<import('@ptah-extension/shared').CliOutputSegment> = [];
+      handle.onSegment?.((value) => segments.push(value));
+      await Promise.resolve();
+      await Promise.resolve();
+      currentRun?.push({ type: 'usage', agent_id: 'agent-abc', run_id: 'run-1', usage: { inputTokens: 12, outputTokens: 3, cacheReadTokens: 2, cacheWriteTokens: 1, totalTokens: 15 } });
+      currentRun?.end();
+      await handle.done;
+      expect(segments.filter((segment) => segment.turnTelemetry)).toHaveLength(1);
+      expect(segments.find((segment) => segment.turnTelemetry)?.turnTelemetry).toMatchObject({ status: 'reported', usage: { turnId: 'run-1', modelId: 'composer-2.5', inputTokens: 12, outputTokens: 3 } });
+    });
+
+    it('uses only the final usage snapshot when the SDK repeats it', async () => {
+      const handle = await adapter.runSdk(defaultOptions);
+      const segments: Array<import('@ptah-extension/shared').CliOutputSegment> = [];
+      handle.onSegment?.((value) => segments.push(value));
+      await Promise.resolve();
+      await Promise.resolve();
+      currentRun?.push({ type: 'usage', agent_id: 'agent-abc', run_id: 'run-1', usage: { inputTokens: 5, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 6 } });
+      currentRun?.push({ type: 'usage', agent_id: 'agent-abc', run_id: 'run-1', usage: { inputTokens: 12, outputTokens: 3, cacheReadTokens: 2, cacheWriteTokens: 1, totalTokens: 15 } });
+      currentRun?.end();
+      await handle.done;
+      const records = segments.filter((segment) => segment.turnTelemetry);
+      expect(records).toHaveLength(1);
+      expect(records[0]?.turnTelemetry).toMatchObject({ status: 'reported', usage: { inputTokens: 12, outputTokens: 3 } });
+    });
+
+    it('marks a successful turn without usage as unavailable', async () => {
+      const handle = await adapter.runSdk(defaultOptions);
+      const segments: Array<import('@ptah-extension/shared').CliOutputSegment> = [];
+      handle.onSegment?.((value) => segments.push(value));
+      await Promise.resolve();
+      await Promise.resolve();
+      currentRun?.end();
+      await handle.done;
+      expect(segments.find((segment) => segment.turnTelemetry)?.turnTelemetry).toMatchObject({ status: 'unavailable', reason: 'no-usage-event' });
+    });
+
     it('creates a local agent with cwd + default model and streams text', async () => {
       const handle: SdkHandle = await adapter.runSdk(defaultOptions);
       const output: string[] = [];

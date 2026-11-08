@@ -8,10 +8,11 @@
  */
 
 import type {
+  AgentTurnTelemetry,
   CliOutputSegment,
   FlatStreamEventUnion,
 } from '@ptah-extension/shared';
-import { SessionId } from '@ptah-extension/shared';
+import { SessionId, completedTurnTelemetry } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
   SdkMessageTransformer,
@@ -643,11 +644,26 @@ export class PtahCliStreamLoop {
               // The same line, with the turn's usage attached for the agent
               // card's token and cost tiles (Decision 8).
               const usage = this.turnUsage(msg);
+              const billedModels = Object.keys(msg.modelUsage ?? {});
+              const telemetryTurnId = `${msg.session_id ?? this.effectiveSessionId ?? 'ptah-cli'}:${this.turnIndex}`;
+              const turnTelemetry: AgentTurnTelemetry = billedModels.length > 1
+                ? { status: 'unavailable', turnId: telemetryTurnId, modelId: 'mixed-model', source: 'sdk', reason: 'mixed-model-usage' }
+                : completedTurnTelemetry({
+                    turnId: telemetryTurnId,
+                    modelId: billedModels[0] ?? this.turnModel ?? this.sessionModel,
+                    source: 'sdk',
+                    usage: usage ? { ...usage, costUsd: undefined } : undefined,
+                    uncachedInput: true,
+                  });
+              const attachTelemetry = usage?.inputTokens !== undefined && usage?.outputTokens !== undefined;
               emitSegment({
                 type: 'info',
                 content: usageStr,
                 ...(usage && { usage }),
+                ...(attachTelemetry && { turnTelemetry }),
               });
+              if (!attachTelemetry)
+                emitSegment({ type: 'info', content: 'Ptah CLI turn telemetry.', turnTelemetry });
               if (!msg.is_error) this.reportTurnSuccess();
               else if (isApiRateLimitResult(msg)) {
                 // The turn still exits 0, so the process manager reads this

@@ -30,6 +30,8 @@ import type { IProcessSpawner } from '@ptah-extension/platform-core';
 import type { Logger } from '@ptah-extension/vscode-core';
 import { MCP_ATTACHMENT_TIMEOUT_MS } from '../../mcp-attachment-probe.port';
 import type { CliOutputSegment } from '@ptah-extension/shared';
+import { completedTurnTelemetry } from '@ptah-extension/shared';
+import { z } from 'zod';
 import type {
   CliCommandOptions,
   ContinuationOutcome,
@@ -93,6 +95,16 @@ const MAX_REPORTED_EXTENSION_METHODS = 32;
 
 /** Title used when a refused permission request carried none. */
 const FALLBACK_REFUSED_TITLE = 'a tool call';
+
+/** ACP prompt response extension; reject malformed counters without failing the turn. */
+const acpPromptUsageSchema = z.object({
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  cacheReadTokens: z.number().int().nonnegative().optional(),
+  cacheWriteTokens: z.number().int().nonnegative().optional(),
+  contextTokens: z.number().int().nonnegative().optional(),
+  costUsd: z.number().finite().nonnegative().optional(),
+}).passthrough();
 
 export interface AcpSessionHandleConfig {
   readonly profile: AcpVendorProfile;
@@ -237,6 +249,7 @@ export function createAcpSessionHandle(
   let onMcpTimeout: (() => void) | undefined;
   let processExit: AcpProcessExit | undefined;
   let promptInFlight = false;
+  let promptSequence = 0;
   /** Title of the first request the policy refused during the current prompt. */
   let refusedThisTurn: string | undefined;
   /** Settles when the current prompt has its answer; never rejects. */
@@ -740,6 +753,7 @@ export function createAcpSessionHandle(
       return 1;
     }
     promptInFlight = true;
+    const turnId = `${id}:${++promptSequence}`;
     refusedThisTurn = undefined;
     try {
       const response: unknown = await call('session/prompt', () =>
@@ -755,6 +769,16 @@ export function createAcpSessionHandle(
         refusedPermissionTitle: refusedThisTurn,
         displayName: name,
       });
+      if (mapped.exitCode === 0) {
+        const meta = isRecord(response) ? response['_meta'] : undefined;
+        const rawUsage = isRecord(meta) ? meta['usage'] : undefined;
+        const usage = acpPromptUsageSchema.safeParse(rawUsage);
+        segment.emit({
+          type: 'info', content: usage.success ? `${name} turn usage.` : `${name} turn telemetry unavailable.`,
+          ...(usage.success ? { usage: { model: options.model, ...usage.data } } : {}),
+          turnTelemetry: completedTurnTelemetry({ turnId, modelId: options.model, source: 'sdk', usage: usage.success ? usage.data : undefined }),
+        });
+      }
       if (mapped.segment?.type === 'error') {
         emitError(mapped.segment.content);
       } else if (mapped.segment) {

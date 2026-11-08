@@ -60,6 +60,8 @@
  */
 import { existsSync } from 'fs';
 import path from 'path';
+import { randomUUID } from 'crypto';
+import { completedTurnTelemetry } from '@ptah-extension/shared';
 import type {
   CliDetectionResult,
   CliOutputSegment,
@@ -175,6 +177,8 @@ interface OpencodeTurnState {
   stoppedAfterLastError: boolean;
   /** Error-classified stderr received after that final `step_finish`. */
   stderrErrorAfterStop?: string;
+  finalUsage?: OpencodePart;
+  turnId?: string;
 }
 
 /** Everything one `opencode run` spawn needs; see `runTurn`. */
@@ -191,6 +195,7 @@ interface OpencodeTurnLaunch {
   readonly onExited: (child: ReturnType<typeof spawnCli>) => void;
   readonly onSessionId: (sessionId: string) => void;
   readonly expectedSessionId?: string;
+  readonly modelId?: string;
 }
 
 /** The readable message of an `error` event, whichever shape it has. */
@@ -748,6 +753,7 @@ export class OpencodeCliAdapter implements CliAdapter {
           }
         },
         expectedSessionId: sessionId,
+        modelId: options.model,
       });
     };
 
@@ -901,7 +907,22 @@ export class OpencodeCliAdapter implements CliAdapter {
           lineBuf = '';
         }
         const exitCode = code ?? (exitSignal ? 1 : 0);
-        resolve(sessionMismatch ? 1 : this.settleExitCode(exitCode, state, signal.aborted, launch));
+        const settled = sessionMismatch ? 1 : this.settleExitCode(exitCode, state, signal.aborted, launch);
+        if (settled === 0 && !signal.aborted) {
+          const tokens = state.finalUsage?.tokens;
+          emitSegment({
+            type: 'info', content: 'OpenCode turn telemetry',
+            turnTelemetry: completedTurnTelemetry({
+              turnId: state.turnId ?? randomUUID(), modelId: launch.modelId,
+              source: 'stream',
+              usage: tokens ? {
+                inputTokens: tokens.input, outputTokens: tokens.output,
+                costUsd: state.finalUsage?.cost,
+              } : undefined,
+            }),
+          });
+        }
+        resolve(settled);
       });
 
       child.on('error', (err) => {
@@ -1004,6 +1025,8 @@ export class OpencodeCliAdapter implements CliAdapter {
       case 'step_finish':
         if (event.part?.reason === 'stop') {
           turn.stoppedAfterLastError = true;
+          turn.finalUsage = event.part;
+          turn.turnId = event.part.id;
         }
         this.handleStepFinish(event, emitOutput, emitSegment);
         break;
@@ -1119,10 +1142,15 @@ export class OpencodeCliAdapter implements CliAdapter {
     if (part?.reason !== 'stop') return;
 
     const tokens = part.tokens;
-    if (!tokens) return;
-    const usageStr = `Usage: ${tokens.input ?? 0} input, ${
-      tokens.output ?? 0
-    } output tokens`;
+    if (
+      !tokens ||
+      !Number.isSafeInteger(tokens.input) || tokens.input === undefined || tokens.input < 0 ||
+      !Number.isSafeInteger(tokens.output) || tokens.output === undefined || tokens.output < 0
+    ) {
+      emitSegment({ type: 'error', content: 'OpenCode turn telemetry unavailable: complete input/output totals missing.' });
+      return;
+    }
+    const usageStr = `Usage: ${tokens.input} input, ${tokens.output} output tokens`;
     emitOutput(`\n[${usageStr}]\n`);
     emitSegment({
       type: 'info',

@@ -56,6 +56,7 @@ describe('readCodexRolloutUsage', () => {
     expect(usage).toEqual({
       file,
       lastRequestInputTokens: 48_973,
+      requestContext: { status: 'reported', value: 48_973, source: 'session-file' },
       modifiedAtMs: expect.any(Number),
     });
   });

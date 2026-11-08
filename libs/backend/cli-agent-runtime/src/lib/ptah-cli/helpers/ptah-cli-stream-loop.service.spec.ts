@@ -653,7 +653,7 @@ describe('PtahCliStreamLoop plan-limit signals and usage', () => {
 
     const line = 'Completed: 1200 input, 80 output, $0.0123, 1.5s, 2 turns';
     expect(emitOutput).toHaveBeenCalledWith(`\n[${line}]\n`);
-    expect(emitSegment).toHaveBeenCalledWith({
+    expect(emitSegment).toHaveBeenCalledWith(expect.objectContaining({
       type: 'info',
       content: line,
       usage: {
@@ -664,7 +664,7 @@ describe('PtahCliStreamLoop plan-limit signals and usage', () => {
         cacheWriteTokens: 300,
         costUsd: 0.0123,
       },
-    });
+    }));
   });
 
   it('emits modelUsage deltas so the token totals match the cumulative cost scope', async () => {
@@ -898,6 +898,14 @@ describe('PtahCliStreamLoop plan-limit signals and usage', () => {
     expect(exitCode).toBe(0);
     expect(onTurnComplete).toHaveBeenCalledWith(0);
     expect(logger.debug).toHaveBeenCalledTimes(2);
+  });
+
+  it('emits a separate normalized turn record without changing the UI usage segment', async () => {
+    const { loop, emitSegment } = makeSignalLoop();
+    await loop.run(singleMessage(usageResult));
+    const records = emitSegment.mock.calls.map(([segment]) => segment.turnTelemetry).filter(Boolean);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ status: 'reported', usage: { modelId: 'claude-sonnet-4-6' } });
   });
 });
 

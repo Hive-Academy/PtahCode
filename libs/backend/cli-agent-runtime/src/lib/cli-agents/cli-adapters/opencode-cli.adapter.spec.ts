@@ -855,7 +855,7 @@ describe('OpencodeCliAdapter', () => {
     });
 
     it('emits an info usage segment on step_finish with reason stop', async () => {
-      const handle = await adapter.runSdk(baseOptions);
+      const handle = await adapter.runSdk({ ...baseOptions, model: 'provider/model' });
       const { segments } = collect(handle);
       currentChild?.stdout.write(JSON.stringify({ type: 'step_start', sessionID: 'ses_1' }) + '\n');
 
@@ -874,10 +874,13 @@ describe('OpencodeCliAdapter', () => {
       await handle.done;
 
       const info = segments.filter((s) => s.type === 'info');
-      expect(info).toHaveLength(1);
+      expect(info).toHaveLength(2);
       expect(info[0].content).toContain('671 input');
       expect(info[0].content).toContain('8 output');
       expect(info[0].usage).toEqual({ inputTokens: 671, outputTokens: 8 });
+      expect(info[1].turnTelemetry).toEqual(expect.objectContaining({
+        status: 'reported', usage: expect.objectContaining({ inputTokens: 671, outputTokens: 8, modelId: 'provider/model' }),
+      }));
     });
 
     it('maps a top-level error event to an error segment', async () => {
@@ -931,7 +934,9 @@ describe('OpencodeCliAdapter', () => {
       currentChild?.emitClose(0);
       await handle.done;
 
-      expect(segments).toHaveLength(0);
+      expect(segments).toEqual([expect.objectContaining({
+        turnTelemetry: expect.objectContaining({ status: 'unavailable', reason: 'no-usage-event' }),
+      })]);
     });
 
     it('resolves done with the child exit code and reports a non-zero exit', async () => {

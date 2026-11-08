@@ -63,6 +63,8 @@ export * from './lib/types/library-provenance';
 export * from './lib/types/user-layer-agents';
 export * from './lib/types/agent-models.types';
 export * from './lib/types/session-budget.types';
+export * from './lib/types/agent-turn-usage.types';
+export * from './lib/utils/agent-budget-policy';
 export * from './lib/types/advanced-settings.types';
 export * from './lib/type-guards/guards';
 export * from './lib/cli-version-label';

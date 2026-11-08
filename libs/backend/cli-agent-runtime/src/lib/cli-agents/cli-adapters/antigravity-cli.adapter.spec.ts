@@ -675,8 +675,8 @@ describe('AntigravityCliAdapter', () => {
       });
 
     it('settles once per result, writes a continuation on the same stdin, and then closes stdin', async () => {
-      const handle = await adapter.runSdk(baseOptions);
-      collect(handle);
+      const handle = await adapter.runSdk({ ...baseOptions, model: 'agy-model' });
+      const { segments } = collect(handle);
       const firstDone = handle.done;
 
       currentChild?.stdout.write(
@@ -687,7 +687,7 @@ describe('AntigravityCliAdapter', () => {
             status: 'SUCCESS',
             response: 'first',
             num_turns: 1,
-            usage: { total_tokens: 100 },
+            usage: { input_tokens: 100, output_tokens: 20, cache_read_tokens: 30 },
           },
         }) + '\n',
       );
@@ -702,6 +702,11 @@ describe('AntigravityCliAdapter', () => {
         })}\n`,
       );
 
+      currentChild?.stdout.write(stepLine({
+        step_index: 8, state: 'DONE', step_type: 'agent_response',
+        usage: { input_tokens: 150, output_tokens: 30, cache_read_tokens: 45 },
+      }) + '\n');
+
       currentChild?.stdout.write(
         JSON.stringify({
           event: 'result',
@@ -710,11 +715,16 @@ describe('AntigravityCliAdapter', () => {
             status: 'SUCCESS',
             response: 'second',
             num_turns: 2,
-            usage: { total_tokens: 200 },
+            usage: { input_tokens: 250, output_tokens: 50, cache_read_tokens: 75 },
           },
         }) + '\n',
       );
       await expect(continuation?.done).resolves.toBe(0);
+      const telemetry = segments.flatMap((item) => item.turnTelemetry?.status === 'reported' ? [item.turnTelemetry.usage] : []);
+      expect(telemetry.map((usage) => [usage.inputTokens, usage.outputTokens, usage.cacheReadTokens])).toEqual([
+        [100, 20, { status: 'reported', value: 30, source: 'stream' }],
+        [150, 30, { status: 'reported', value: 45, source: 'stream' }],
+      ]);
       await new Promise<void>((resolve) => setImmediate(resolve));
       expect(currentChild?.child.stdin.end).toHaveBeenCalledTimes(1);
 
@@ -947,11 +957,8 @@ describe('AntigravityCliAdapter', () => {
       await handle.done;
 
       expect(segments).toEqual([
-        {
-          type: 'info',
-          content: 'Usage: 168 output tokens',
-          usage: { outputTokens: 168 },
-        },
+        expect.objectContaining({ type: 'error', content: expect.stringContaining('telemetry unavailable') }),
+        expect.objectContaining({ turnTelemetry: expect.objectContaining({ status: 'unavailable', reason: 'no-usage-event' }) }),
       ]);
     });
 
@@ -971,16 +978,13 @@ describe('AntigravityCliAdapter', () => {
       await handle.done;
 
       expect(segments).toEqual([
-        {
-          type: 'info',
-          content: 'Usage: 11867 total tokens',
-          usage: { totalTokens: 11867 },
-        },
+        expect.objectContaining({ type: 'error', content: expect.stringContaining('telemetry unavailable') }),
+        expect.objectContaining({ turnTelemetry: expect.objectContaining({ status: 'unavailable', reason: 'no-usage-event' }) }),
       ]);
     });
 
     it('does not emit cumulative result usage or repeat the response', async () => {
-      const handle = await adapter.runSdk(baseOptions);
+      const handle = await adapter.runSdk({ ...baseOptions, model: 'agy-model' });
       const { segments } = collect(handle);
 
       currentChild?.stdout.write(initLine + '\n');
@@ -1000,7 +1004,11 @@ describe('AntigravityCliAdapter', () => {
       currentChild?.emitClose(0);
       await handle.done;
 
-      expect(segments).toEqual([]);
+      expect(segments).toEqual([expect.objectContaining({
+        turnTelemetry: expect.objectContaining({
+          status: 'reported', usage: expect.objectContaining({ inputTokens: 25269, outputTokens: 2562, modelId: 'agy-model' }),
+        }),
+      })]);
     });
 
     it('emits an error segment for a non-SUCCESS result', async () => {
@@ -1154,6 +1162,7 @@ describe('AntigravityCliAdapter', () => {
           type: 'info',
           content: '{"event":"future_event","payload":1}',
         },
+        expect.objectContaining({ turnTelemetry: expect.objectContaining({ status: 'unavailable', reason: 'no-usage-event' }) }),
       ]);
     });
 

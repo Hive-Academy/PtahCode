@@ -4,6 +4,7 @@
  * Branded AgentId, status enum, process tracking types.
  */
 import { v4 as uuidv4 } from 'uuid';
+import type { AgentTurnTelemetry } from './agent-turn-usage.types';
 import type { FlatStreamEventUnion } from './execution';
 import type { QuotaOwnerRef } from './plan-limit.types';
 import type {
@@ -544,6 +545,7 @@ export type CliOutputSegmentType =
 export interface CliOutputSegment {
   readonly type: CliOutputSegmentType;
   readonly content: string;
+  readonly turnTelemetry?: AgentTurnTelemetry;
   readonly usage?: {
     readonly model?: string;
     readonly inputTokens?: number;
