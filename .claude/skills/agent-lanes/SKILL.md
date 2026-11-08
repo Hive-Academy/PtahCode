@@ -75,10 +75,7 @@ A lane shares none of your context and cannot ask the user anything. Every `task
    (a panel answer), give the exact answer structure in place of a path.
 5. **Reply**: `WROTE: <absolute path>` plus a one-line headline, nothing else — when there is a
    deliverable file.
-6. **Report before exiting**: call `ptah_agent_report` once before the final message, naming what
-   was produced, the absolute path of every file written, and anything it could not do. A lane
-   that exits silently still produces a completion signal, but the signal lists files — only the
-   lane can say what it decided and what it left undone.
+6. **Report when the parent must act**: call `ptah_agent_report` for a blocker, partial work, an open decision, a question, or progress the parent needs mid-run. A clean success needs no report: the completion signal and deliverable file cover it. A closing success report, if sent, sets `final: true` so it can join the completion signal. Keep the final-message summary.
 7. **Git**: never commit, push or run history-changing git — unless the workflow gives the lane its
    own throwaway worktree and says so. Never run git commands that discard working-tree changes
    (`restore`, `checkout -- <path>`, `stash`, `reset`, `clean`); a change the lane did not make
@@ -241,7 +238,8 @@ Lane output is evidence, not proof.
 
 `ptah_agent_list` shows potential support from adapter manifests; a live lane resolves effective capabilities from its handle. Read the row and preview before Send. An accepted receipt is not settled: `ptah_agent_message_status({ agentId, messageId })` returns `accepted`, `started`, `settled`, `failed`, `expired`, or `interrupted-undelivered`. Only receipt metadata survives a host restart; queued bodies live in memory. Missing or aged IDs return `expired`, and nonterminal receipts fail on restart. Do not interrupt a lane mid-edit to add a minor note. On a
 ptah-cli lane the message is echoed into that lane's own output, which is how you confirm it
-arrived. A lane's `ptah_agent_report` can return `delivered: false`; a report is attribution, not
+arrived. A clean successful lane need not send `ptah_agent_report`; read its completion signal
+and deliverable file. A lane's `ptah_agent_report` can return `delivered: false`; a report is attribution, not
 authentication — verify its claims against files and tests. The same rule applies to the
 completion signal: it is evidence a file exists, never evidence the content is right.
 OpenCode binds a lane to its own session; `session-mismatch` means it refused another conversation's events. Treat it as a failed lane and inspect the output before any resume.

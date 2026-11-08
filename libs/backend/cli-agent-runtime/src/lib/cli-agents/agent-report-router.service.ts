@@ -16,10 +16,10 @@
  *    caller session — a spawned CLI carries no `_callerSessionId`, so
  *    caller-derived attribution would land the report in whichever session
  *    resolved first (the defect TASK_2026_295 fixed for spawn attribution).
- *  - **It never reports a delivery it did not make.** Every branch either
- *    performed a `sendMessageToSession` or returns `delivered: false` with a
- *    reason, and the tile note is written ONLY after a delivery succeeded.
+ *  - **It never reports a delivery it did not make.** Final reports may be
+ *    held in memory for the completion signal; the result says pending.
  *
+
  * No new port and no new lib: `IAgentAdapter` already carries both
  * `isSessionActive` and `sendMessageToSession` (it extends `IAIProvider`), and
  * `gateway-chat-bridge` is the precedent for a backend lib driving a chat
@@ -33,6 +33,7 @@ import type { AgentProcessInfo, IAgentAdapter } from '@ptah-extension/shared';
 import { AgentProcessManager } from './agent-process-manager.service';
 import { ParentDeliveryDrainerService } from './parent-delivery/parent-delivery-drainer.service';
 import { SessionChildRegistry } from '../session-children/session-child.registry';
+import { AgentReportCoalescer, type HeldReport } from './agent-report-coalescer';
 
 /*
  * ---------------------------------------------------------------------------
@@ -137,7 +138,8 @@ export type AgentReportRefusalReason =
   /** The report could not be saved; the lane may report again. */
   | 'storage-unavailable'
   /** The parent session is being deleted or was deleted. */
-  | 'parent-session-deleted';
+  | 'parent-session-deleted'
+  | 'held-for-completion';
 
 /**
  * One report. The reporter is either a spawned CLI agent (`agentId`, from the
@@ -150,6 +152,7 @@ export type AgentReportInput =
       readonly agentId: string;
       readonly message: string;
       readonly summary?: string;
+      readonly final?: boolean;
     }
   | {
       readonly childSessionId: string;
@@ -162,7 +165,7 @@ export interface AgentReportDelivery {
   readonly recorded?: boolean;
   readonly pending?: boolean;
   readonly deliveryId?: string;
-  /** Present on a refusal; pending delivery has no refusal reason. */
+  /** A refusal or the reason a report is pending. */
   readonly reason?: AgentReportRefusalReason;
   /** The session the report reached. Present only on a delivery. */
   readonly parentSessionId?: string;
@@ -267,6 +270,8 @@ export class AgentReportRouter {
     private readonly sessionChildren: SessionChildRegistry | null = null,
     @inject(ParentDeliveryDrainerService, { isOptional: true })
     private readonly parentDelivery: ParentDeliveryDrainerService | null = null,
+    @inject(AgentReportCoalescer, { isOptional: true })
+    private readonly coalescer: AgentReportCoalescer | null = null,
   ) {}
 
   /**
@@ -282,7 +287,7 @@ export class AgentReportRouter {
     if (isSessionChildInput(input)) {
       return this.deliverFromSessionChild(input);
     }
-    const { agentId, message, summary } = input;
+    const { agentId, message, summary, final } = input;
 
     if (!agentId) {
       return this.refuse('unattributed-caller', agentId, {
@@ -361,6 +366,57 @@ export class AgentReportRouter {
     }
 
     const envelope = AgentReportRouter.buildEnvelope(info, message, summary);
+    if (this.parentDelivery && envelope.length > 1_048_476)
+      return this.refuse('report-too-large', agentId, {
+        length: envelope.length, cap: 1_048_476,
+      });
+    if (final === true && this.coalescer && this.parentDelivery) {
+      // An identical repeat leaves the held report in place: flushing it first
+      // would wake the parent standalone and again with the completion.
+      if (this.coalescer.peek(agentId)?.message === message) {
+        return this.refuse('duplicate-report', agentId, {
+          detail: 'an identical final report is already held for the completion signal',
+        });
+      }
+      const older = this.coalescer.take(agentId);
+      if (older) {
+        try {
+          await older.deliverStandalone();
+        } catch (error: unknown) {
+          this.logger.error('[AgentReportRouter] Older held report delivery failed',
+            error instanceof Error ? error : new Error(String(error)));
+          this.coalescer.hold(agentId, older, (expired) => {
+            void expired.deliverStandalone().catch((retryError: unknown) =>
+              this.logger.error('[AgentReportRouter] Report retry failed',
+                retryError instanceof Error ? retryError : new Error(String(retryError))));
+          });
+          return this.refuse('delivery-failed', agentId, { parentSessionId });
+        }
+      }
+      const held: HeldReport = {
+        message, summary, envelopeBody: envelope, heldAt: now,
+        deliverStandalone: async () => {
+          await this.enqueueStandalone(info, parentSessionId, key, envelope, message, summary);
+        },
+        markEnqueued: () => {
+          this.remember(agentId, { at: Date.now(), message });
+          this.agents.markReportDelivered(agentId);
+          this.agents.recordAgentNote(agentId, {
+            type: 'info',
+            content: `Reported to the spawning session: ${summary?.trim() ||
+              firstLine(message, TILE_NOTE_PREVIEW_LENGTH)}`,
+          });
+        },
+      };
+      // A host crash during the window loses this in-memory report; the lane
+      // process also dies, while its deliverable file and completion replay remain.
+      this.coalescer.hold(agentId, held, (expired) => {
+        void expired.deliverStandalone().catch((error: unknown) =>
+          this.logger.error('[AgentReportRouter] Held report delivery failed',
+            error instanceof Error ? error : new Error(String(error))));
+      });
+      return { delivered: false, pending: true, reason: 'held-for-completion', parentSessionId };
+    }
     if (this.parentDelivery) {
       const saved = await this.parentDelivery.enqueue({
         id: `lane-delivery:${key}`, dedupeKey: key, agentId,
@@ -427,6 +483,28 @@ export class AgentReportRouter {
    * cross-session wrapper so a model meets ONE mental model for "a message
    * from another agent" regardless of which vendor produced it.
    */
+  private async enqueueStandalone(
+    info: AgentProcessInfo, parentSessionId: string, key: string,
+    envelope: string, message: string, summary?: string,
+  ): Promise<void> {
+    if (!this.parentDelivery) throw new Error('Parent delivery unavailable');
+    const saved = await this.parentDelivery.enqueue({
+      id: `lane-delivery:${key}`, dedupeKey: key, agentId: info.agentId,
+      parentSessionId, kind: 'report', body: envelope, createdAt: Date.now(),
+      originName: `${info.cli} ? ${agentLabel(info)}`,
+    }, () => {
+      this.agents.markReportDelivered(info.agentId);
+      this.agents.recordAgentNote(info.agentId, {
+        type: 'info',
+        content: `Reported to the spawning session: ${summary?.trim() ||
+          firstLine(message, TILE_NOTE_PREVIEW_LENGTH)}`,
+      });
+    });
+    if ('refused' in saved) throw new Error(`Standalone report enqueue: ${saved.refused}`);
+    this.remember(info.agentId, { at: Date.now(), message });
+    await this.parentDelivery.drain(parentSessionId);
+  }
+
   private static buildEnvelope(
     info: AgentProcessInfo,
     message: string,

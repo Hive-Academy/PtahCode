@@ -785,6 +785,7 @@ const AgentReportArgsSchema = z
   .object({
     message: z.string().min(1).max(MAX_AGENT_REPORT_LENGTH),
     summary: z.string().min(1).max(200).optional(),
+    final: z.boolean().optional(),
   })
   .strict();
 
@@ -1610,10 +1611,11 @@ async function handleIndividualTool(
         // session itself. Neither id -> today's `unattributed-caller`.
         const callerAgentId = getCallerAgentId();
         const callerSessionId = getCallerSessionId()?.trim() || undefined;
-        const { message, summary } = parsed.data;
+        const { message, summary, final } = parsed.data;
         let reportInput: Parameters<PtahAPI['agent']['report']>[0];
         if (callerAgentId !== undefined) {
-          reportInput = { agentId: callerAgentId, message, summary };
+          reportInput = { agentId: callerAgentId, message, summary,
+            ...(final !== undefined ? { final } : {}) };
         } else if (callerSessionId !== undefined) {
           reportInput = { childSessionId: callerSessionId, message, summary };
         } else {

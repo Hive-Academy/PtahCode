@@ -389,6 +389,8 @@ describe('buildAgentReportTool', () => {
     const tool = buildAgentReportTool();
     expect(tool.name).toBe('ptah_agent_report');
     expect(tool.inputSchema.required).toEqual(['message']);
+    expect(tool.inputSchema.properties).toHaveProperty('final');
+    expect(tool.description).toContain('A clean success needs no report');
     expect(Object.keys(tool.inputSchema.properties ?? {})).not.toContain(
       'agentId',
     );
