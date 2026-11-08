@@ -57,7 +57,7 @@ Any flow adding or redesigning a UI surface inserts [designer → prototype → 
   contents ([task-tracking.md § Continuation](references/task-tracking.md#continuation)).
 - `/orchestrate TASK_A TASK_B ...` or an explicit fleet request → validate every task ID before
   spawning, then load [fleet.md](references/fleet.md). One ID keeps ordinary continuation.
-- Anything else → **new task**: allocate the ID and create `task.md` **first**, then `context.md`
+- Anything else → **new task**: 1. Create the worktree from `main` (`ptah_git_worktree_add`). 2. Create the task folder inside it (`ptah_task_create { worktreePath }`), then write `context.md`. Never create task files in the main checkout. Create `task.md` first inside the worktree
   ([task-tracking.md § New task](references/task-tracking.md#new-task)).
 - `parity-inventory.md` is **REQUIRED** when replacing, consolidating, rebuilding or redesigning
   an existing surface. PM writes it from the **OLD code before design starts**. In flows without

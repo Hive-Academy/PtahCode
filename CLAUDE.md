@@ -44,17 +44,21 @@ main agent, every subagent and every CLI lane. Repeat them in any task prompt yo
 
 ## Git: start every task in its own worktree
 
-- Prefer `ptah_git_worktree_add` when listed; it links the worktree to the chat session. Otherwise use `git worktree add`.
-- Before you change any file for a new task, create a worktree on a new branch from `main`:
-  `git worktree add -b <type>/<short-name> .claude-worktrees/<short-name> main`.
-  `.claude-worktrees/` is git-ignored. Keep `<type>` to the commit type (`fix`, `feat`, ...).
+- Start a new task in this order, before you write any file for it:
+  1. Create the worktree on a new branch from `main`. Prefer `ptah_git_worktree_add`, which
+     links the worktree to the chat session. Otherwise run
+     `git worktree add -b <type>/<short-name> .claude-worktrees/<short-name> main`.
+     `.claude-worktrees/` is git-ignored. Keep `<type>` to the commit type (`fix`, `feat`, ...).
+  2. Create the task folder inside that worktree: `ptah_task_create { worktreePath }`, or
+     `.ptah/specs/<TASK_ID>/` under the worktree by hand.
+- Never create task files (`.ptah/specs/**`) or task changes in the main checkout.
 - Make every edit, check and commit of the task inside that worktree. The main checkout stays
   on `main` with no task changes in it. Give the worktree path to each subagent and as the
   `workingDirectory` of each CLI lane for that task.
 - Pure questions, read-only investigation and status commands need no worktree.
-- Changes that are already in the main checkout move to a worktree before more work starts:
-  create the worktree, copy the changed files, confirm they are identical (`cmp`), and only
-  then revert them in the main checkout.
+- Recovery only, not a normal step: if task changes already exist in the main checkout, move
+  them before more work starts. Create the worktree, copy the changed files, confirm they are
+  identical (`cmp`), and only then revert them in the main checkout.
 - The worktree and its branch stay until the user says to remove them. After the PR merges
   and the user authorizes cleanup, use `git worktree remove .claude-worktrees/<short-name>`.
 

@@ -20,6 +20,11 @@ Invoke the orchestration skill for development workflows.
 
 Resolve every supplied task ID against an existing `.ptah/specs/<id>/task.md` and reject missing, malformed, or duplicate IDs before any agent spawn. Do not create a task for an invalid ID. A single resolved ID continues the ordinary task workflow, including when the request says “fleet.” Multiple resolved IDs or an explicit fleet request covering several tasks selects fleet mode; load `references/fleet.md` from the orchestration skill directory and reconstruct progress from disk artifacts. If an explicit fleet request has no usable task set, resolve it before spawning. A task description without existing IDs starts the normal new-task workflow.
 
+## New-task order
+
+1. Create the worktree from `main` (`ptah_git_worktree_add`).
+2. Create the task folder inside it (`ptah_task_create { worktreePath }`). Never create task files in the main checkout.
+
 ## Execution
 
 1. Invoke the `orchestration` skill (Skill tool) — do not Read it by relative path

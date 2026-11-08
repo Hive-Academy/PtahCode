@@ -1,3 +1,4 @@
+import 'reflect-metadata';
 /**
  * Specs for system namespace builders.
  *
