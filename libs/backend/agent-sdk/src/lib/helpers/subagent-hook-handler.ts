@@ -45,6 +45,7 @@ import { resolveHookSessionId } from './hook-session-resolver';
 import { SubagentStopCallbackRegistry } from './subagent-stop-callback-registry';
 import type { SessionStatsOwnerService } from '../session-stats/session-stats-owner.service';
 import type { SubagentBudgetMonitor } from './compaction/subagent-budget-monitor';
+import { createSubagentBudgetHooks } from './compaction/subagent-budget-hooks';
 
 /**
  * SubagentHookHandler Service
@@ -73,7 +74,7 @@ export class SubagentHookHandler {
     @inject(SDK_TOKENS.SDK_SESSION_STATS_OWNER)
     private readonly statsOwner: SessionStatsOwnerService,
     @inject(SDK_TOKENS.SDK_SUBAGENT_BUDGET_MONITOR, { isOptional: true })
-    private readonly budgetMonitor?: Pick<SubagentBudgetMonitor, 'recordTranscriptPath'>,
+    private readonly budgetMonitor?: Pick<SubagentBudgetMonitor, 'recordTranscriptPath'> & Partial<Pick<SubagentBudgetMonitor, 'checkNotesTool' | 'hasNotesGate' | 'finishWarnedAgent' | 'takeNormalHandoff' | 'takeInterruptedHandoff'>>,
   ) {}
 
   /**
@@ -134,7 +135,7 @@ export class SubagentHookHandler {
       parentSessionId: capturedParentSessionId,
     });
 
-    return {
+    const hooks: Partial<Record<HookEvent, HookCallbackMatcher[]>> = {
       SubagentStart: [
         {
           hooks: [
@@ -213,6 +214,23 @@ export class SubagentHookHandler {
         },
       ],
     };
+    const monitor = this.budgetMonitor;
+    if (monitor?.checkNotesTool && monitor.hasNotesGate && monitor.finishWarnedAgent && monitor.takeNormalHandoff && monitor.takeInterruptedHandoff) {
+      const budgetHooks = createSubagentBudgetHooks(this.logger, {
+        checkNotesTool: monitor.checkNotesTool.bind(monitor),
+        hasNotesGate: monitor.hasNotesGate.bind(monitor),
+        finishWarnedAgent: monitor.finishWarnedAgent.bind(monitor),
+        takeNormalHandoff: monitor.takeNormalHandoff.bind(monitor),
+        takeInterruptedHandoff: monitor.takeInterruptedHandoff.bind(monitor),
+      }, capturedParentSessionId);
+      for (const [event, matchers] of Object.entries(budgetHooks)) {
+        const key = event as HookEvent;
+        hooks[key] = [...(matchers ?? []), ...(hooks[key] ?? [])];
+      }
+    } else if (monitor) {
+      this.logger.warn('[SubagentHookHandler] Budget hook methods unavailable; budget hooks disabled');
+    }
+    return hooks;
   }
 
   /**

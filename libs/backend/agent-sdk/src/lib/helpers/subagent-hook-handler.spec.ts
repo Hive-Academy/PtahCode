@@ -123,6 +123,7 @@ describe('SubagentHookHandler — SubagentStopCallbackRegistry fan-out', () => {
       budgetMonitor,
     );
     const fn = getStopCallback(handler, '/workspace', 'parent-sess-1');
+    expect(logger.warn).toHaveBeenCalledWith('[SubagentHookHandler] Budget hook methods unavailable; budget hooks disabled');
 
     const input = {
       hook_event_name: 'SubagentStop',

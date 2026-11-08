@@ -81,6 +81,16 @@ describe('SubagentHandoffFiles', () => {
     expect(await files.notesExist(paths)).toBe(true);
   });
 
+  it('writes redacted inferred notes only when notes are absent', async () => {
+    const files = new SubagentHandoffFiles({ warn: jest.fn() }, () => workspace);
+    const paths = files.paths('sess-1', 'toolu_1');
+    if (!paths) throw new Error('expected paths');
+    expect(await files.ensureFallbackNotes(paths, 'host-generated, inferred: secret', (text) => text.replace('secret', '[REDACTED]'))).toBe(true);
+    expect(fs.readFileSync(paths.notes, 'utf8')).toContain('[REDACTED]');
+    expect(await files.ensureFallbackNotes(paths, 'second', (text) => text)).toBe(true);
+    expect(fs.readFileSync(paths.notes, 'utf8')).not.toContain('second');
+  });
+
   it('reports a failed save as false with one warning, never throwing', async () => {
     const logger = makeLogger();
     // A file where the handoff directory should be makes mkdir fail.

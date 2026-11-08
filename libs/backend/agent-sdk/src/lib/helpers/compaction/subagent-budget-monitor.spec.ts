@@ -165,6 +165,7 @@ function makeHarness(
   record: Partial<SubagentRecord> | null = {},
   opts: {
     enabled?: boolean;
+    handoffTokens?: number;
     workspace?: string;
     handoffFiles?: SubagentHandoffFilesPort;
     records?: SubagentHandoffRecordsPort;
@@ -175,6 +176,7 @@ function makeHarness(
   // The order of record, stop and delivery calls.
   const order: string[] = [];
   const recordStore = fakeRecords(order);
+  if (opts.workspace) recordStore.workspaceOf.mockReturnValue(opts.workspace);
   const index = fakeIndex();
   const logger = {
     debug: jest.fn(),
@@ -185,7 +187,7 @@ function makeHarness(
   const config = {
     getConfig: jest.fn(() => ({
       enabled: opts.enabled ?? true,
-      subagentHandoffTokens: HANDOFF_TOKENS,
+      subagentHandoffTokens: opts.handoffTokens ?? HANDOFF_TOKENS,
       subagentStopWeightedTokens: STOP_WEIGHTED,
     })),
   };
@@ -487,7 +489,7 @@ describe('SubagentBudgetMonitor', () => {
 
   it('retains stopped identities by SDK id, spawning call, and teammate name after registry removal', async () => {
     const h = makeHarness({ teammateName: 'reviewer' });
-    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'stop-name' }));
+    await h.monitor.observe(SESSION, assistant({ input: 310_000 }, { id: 'stop-name' }));
     h.registry.get.mockReturnValue(null);
     for (const target of ['a1', TOOL_CALL, 'reviewer'])
       expect(h.monitor.getAgentBudgetState(target, SESSION)).toEqual(expect.objectContaining({ stopped: true }));
@@ -497,7 +499,7 @@ describe('SubagentBudgetMonitor', () => {
 
   it('clears a stopped name when a new same-name agent spawns without usage', async () => {
     const h = makeHarness({ teammateName: 'reviewer' });
-    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'old-stop' }));
+    await h.monitor.observe(SESSION, assistant({ input: 310_000 }, { id: 'old-stop' }));
     h.registry.get.mockReturnValue(null);
     await h.monitor.observe(SESSION, {
       type: 'assistant', parent_tool_use_id: null,
@@ -510,7 +512,7 @@ describe('SubagentBudgetMonitor', () => {
 
   it('ignores the old registry teammate name after a same-name replacement spawns', async () => {
     const h = makeHarness({ teammateName: 'reviewer' });
-    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'old-stop' }));
+    await h.monitor.observe(SESSION, assistant({ input: 310_000 }, { id: 'old-stop' }));
     await h.monitor.observe(SESSION, {
       type: 'assistant', parent_tool_use_id: null,
       message: { content: [{ type: 'tool_use', id: 'new-call', name: 'Agent', input: { name: 'reviewer' } }] },
@@ -520,7 +522,7 @@ describe('SubagentBudgetMonitor', () => {
 
   it('keeps identical teammate names independent across sessions', async () => {
     const h = makeHarness({ teammateName: 'reviewer' });
-    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'first-stop' }));
+    await h.monitor.observe(SESSION, assistant({ input: 310_000 }, { id: 'first-stop' }));
     h.registry.get.mockReturnValue(null);
     expect(h.monitor.getAgentBudgetState('reviewer', SESSION)?.stopState).toBe('stopped');
     expect(h.monitor.getAgentBudgetState('reviewer', 'session-2')).toBeUndefined();
@@ -530,7 +532,7 @@ describe('SubagentBudgetMonitor', () => {
 
   it('does not expose a budget refusal when compaction is disabled', async () => {
     const h = makeHarness({}, { enabled: false });
-    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'disabled' }));
+    await h.monitor.observe(SESSION, assistant({ input: 310_000 }, { id: 'disabled' }));
     expect(h.monitor.getAgentBudgetState('a1', SESSION)).toBeUndefined();
   });
 
@@ -555,21 +557,25 @@ describe('SubagentBudgetMonitor', () => {
       finishPreparation = () => resolve({ ok: false, errorType: 'Unavailable' });
       reached();
     }));
-    const observing = h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'preparing' }));
+    const observing = h.monitor.observe(SESSION, assistant({ input: 310_000 }, { id: 'preparing' }));
     await writing;
     expect(h.monitor.getAgentBudgetState('reviewer', SESSION)).toEqual(expect.objectContaining({ stopped: true, stopState: 'pending' }));
     finishPreparation();
     await observing;
-    expect(h.monitor.getAgentBudgetState('reviewer', SESSION)?.stopState).toBe('none');
+    expect(h.monitor.getAgentBudgetState('reviewer', SESSION)?.stopState).toBe('stopped');
   });
 
   it('caches a missing transcript across stop preparation retries', async () => {
     const lookupTranscript = jest.fn(async () => undefined);
     const h = makeHarness({}, { workspace: RECORD_WORKSPACE, lookupTranscript });
     h.recordStore.writeOnce.mockResolvedValue({ ok: false, errorType: 'Unavailable' });
-    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'first-try' }));
+    await h.monitor.observe(SESSION, assistant({ input: 130_000 }, { id: 'first-try' }));
+    const denialAt = Date.now();
+    for (let i = 0; i < 3; i += 1) await h.monitor.checkNotesTool(SESSION, 'a1', 'Read', {}, denialAt + i * 2_001);
+    await waitUntil(() => h.recordStore.writeOnce.mock.calls.length === 1);
     expect(lookupTranscript).toHaveBeenCalledTimes(1);
-    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'second-try' }));
+    await h.monitor.checkNotesTool(SESSION, 'a1', 'Read', {});
+    await waitUntil(() => h.recordStore.writeOnce.mock.calls.length === 2);
     expect(lookupTranscript).toHaveBeenCalledTimes(1);
   });
 
@@ -596,7 +602,7 @@ describe('SubagentBudgetMonitor', () => {
     expect(h.monitor.getAgentBudgetState('task-agent', SESSION)).toEqual(
       expect.objectContaining({ running: true, stopped: false }),
     );
-    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'stop' }));
+    await h.monitor.observe(SESSION, assistant({ input: 310_000 }, { id: 'stop' }));
     expect(h.monitor.getAgentBudgetState('task-agent', SESSION)).toEqual(
       expect.objectContaining({ stopped: true }),
     );
@@ -618,17 +624,23 @@ describe('SubagentBudgetMonitor', () => {
     await h.monitor.observe(SESSION, assistant({ input: 100 }, { id: 'm1' }));
     const jump = assistant({ input: 186_000 }, { id: 'm2' }) as { message: { content: unknown[] } };
     jump.message.content = [
-      { type: 'text', text: 'Changed the parser token=SECRET_VALUE' },
-      { type: 'tool_use', id: 'edit-1', name: 'Edit', input: { file_path: 'src/parser.ts', new_string: 'SECRET_VALUE' } },
+      { type: 'text', text: 'Changed the parser token=PLACEHOLDER_NOT_A_SECRET' },
+      { type: 'tool_use', id: 'edit-1', name: 'Edit', input: { file_path: 'src/parser.ts', new_string: 'PLACEHOLDER_NOT_A_SECRET' } },
     ];
     await h.monitor.observe(SESSION, jump);
     expect(h.dispatcher.postSubagentNotice).toHaveBeenCalledTimes(1);
-    expect(h.recordStore.writeOnce.mock.calls[0][2]).toContain('Changed the parser');
-    expect(h.recordStore.writeOnce.mock.calls[0][2]).toContain('src/parser.ts');
-    expect(h.recordStore.writeOnce.mock.calls[0][2]).not.toContain('SECRET_VALUE');
-    expect(h.stopNotices.noticeFor('task-1')).toContain('The user did not stop it');
-    expect(h.monitor.getAgentBudgetState('a1', SESSION)).toEqual(expect.objectContaining({ stopped: true, stopReason: 'handoff', contextTokens: 186_000 }));
-    expect(h.monitor.getAgentBudgetState(TOOL_CALL, SESSION)?.recordPath).toBeDefined();
+    expect(h.recordStore.writeOnce).not.toHaveBeenCalled();
+    expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
+    expect(h.monitor.getAgentBudgetState('a1', SESSION)).toEqual(expect.objectContaining({ stopped: false, contextTokens: 186_000 }));
+    expect(h.monitor.hasNotesGate('a1')).toBe(true);
+    expect(h.subagentNotices.take('a1')).toContain('budget');
+    const denialAt = Date.now();
+    for (let i = 0; i < 3; i += 1) await h.monitor.checkNotesTool(SESSION, 'a1', 'Read', { file_path: 'remaining.txt' }, denialAt + i * 2_001);
+    await waitUntil(() => h.recordStore.writeOnce.mock.calls.length > 0);
+    const recordText = h.recordStore.writeOnce.mock.calls[0][2];
+    expect(recordText).toContain('src/parser.ts');
+    expect(recordText).toContain('Changed the parser token=[redacted]');
+    expect(recordText).not.toContain('PLACEHOLDER_NOT_A_SECRET');
   });
   it('tracks tool result outcomes and keeps only the last ten tool calls', async () => {
     const h = makeHarness();
@@ -641,7 +653,7 @@ describe('SubagentBudgetMonitor', () => {
       type: 'user', parent_tool_use_id: TOOL_CALL,
       message: { content: [{ type: 'tool_result', tool_use_id: 'call-11', is_error: true }] },
     });
-    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'stop-tools' }));
+    await h.monitor.observe(SESSION, assistant({ input: 310_000 }, { id: 'stop-tools' }));
     const record = h.recordStore.writeOnce.mock.calls[0][2];
     expect(record).toContain('file-11.txt');
     expect(record).toContain('failed');
@@ -650,7 +662,7 @@ describe('SubagentBudgetMonitor', () => {
   });
   it('redacts a long private key before applying the progress text cap', async () => {
     const h = makeHarness();
-    const progress = assistant({ input: 160_000 }, { id: 'stop-pem' }) as { message: { content: unknown[] } };
+    const progress = assistant({ input: 310_000 }, { id: 'stop-pem' }) as { message: { content: unknown[] } };
     const secret = 'Q'.repeat(3000);
     progress.message.content = [{ type: 'text', text: `-----BEGIN PRIVATE KEY-----\n${secret}\n-----END PRIVATE KEY-----` }];
     await h.monitor.observe(SESSION, progress);
@@ -666,11 +678,11 @@ describe('SubagentBudgetMonitor', () => {
     });
     await h.monitor.observe(
       SESSION,
-      assistant({ input: 160_000 }, { id: 'm1' }),
+      assistant({ input: 310_000 }, { id: 'm1' }),
     );
     await h.monitor.observe(
       SESSION,
-      assistant({ input: 170_000 }, { id: 'm2' }),
+      assistant({ input: 320_000 }, { id: 'm2' }),
     );
     expect(observed).toHaveLength(1);
     expect(observed[0]).toEqual({
@@ -693,7 +705,7 @@ describe('SubagentBudgetMonitor', () => {
     h.budgetStops.register(observed);
     h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-agent');
 
-    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'stop' }));
+    await h.monitor.observe(SESSION, assistant({ input: 310_000 }, { id: 'stop' }));
 
     expect(h.registry.getToolCallIdByAgentId).toHaveBeenCalledWith('task-agent');
     expect(observed).toHaveBeenCalledWith(expect.objectContaining({ agentId: 'task-agent' }));
@@ -703,7 +715,7 @@ describe('SubagentBudgetMonitor', () => {
   it('prefers the direct tool ID over an agent ID join', async () => {
     const h = makeHarness({ agentId: 'direct', taskId: 'task-agent' });
     h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-agent');
-    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'stop' }));
+    await h.monitor.observe(SESSION, assistant({ input: 310_000 }, { id: 'stop' }));
     expect(h.registry.getToolCallIdByAgentId).not.toHaveBeenCalled();
     expect(h.registry.update).toHaveBeenCalledWith(TOOL_CALL, expect.objectContaining({ status: 'completed' }));
   });
@@ -722,7 +734,7 @@ describe('SubagentBudgetMonitor', () => {
     const observed = jest.fn();
     h.budgetStops.register(observed);
     h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-agent');
-    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'stop' }));
+    await h.monitor.observe(SESSION, assistant({ input: 310_000 }, { id: 'stop' }));
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledWith(SESSION, 'task-agent');
     expect(observed).not.toHaveBeenCalled();
     expect(h.registry.update).not.toHaveBeenCalled();
@@ -733,7 +745,7 @@ describe('SubagentBudgetMonitor', () => {
     const observed = jest.fn();
     h.budgetStops.register(observed);
     h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-agent');
-    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'stop' }));
+    await h.monitor.observe(SESSION, assistant({ input: 310_000 }, { id: 'stop' }));
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledWith(SESSION, 'task-agent');
     expect(observed).not.toHaveBeenCalled();
     expect(h.registry.update).not.toHaveBeenCalled();
@@ -748,7 +760,7 @@ describe('SubagentBudgetMonitor', () => {
     h.registry.get.mockImplementation((id: string) => records.get(id) ?? null);
     h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'first');
     h.monitor.recordTaskStarted(SESSION, 'toolu_second', 'second');
-    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'stop' }));
+    await h.monitor.observe(SESSION, assistant({ input: 310_000 }, { id: 'stop' }));
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledWith(SESSION, 'first');
     expect(h.registry.update).toHaveBeenCalledTimes(1);
@@ -763,7 +775,7 @@ describe('SubagentBudgetMonitor', () => {
     h.dispatcher.stopSubagent.mockRejectedValueOnce(new Error('busy'));
     await h.monitor.observe(
       SESSION,
-      assistant({ input: 160_000 }, { id: 'm1' }),
+      assistant({ input: 310_000 }, { id: 'm1' }),
     );
     expect(observed).not.toHaveBeenCalled();
   });
@@ -800,7 +812,7 @@ describe('SubagentBudgetMonitor', () => {
     h.budgetStops.register(observed);
     await h.monitor.observe(
       SESSION,
-      assistant({ input: 200_000 }, { id: 'm1' }),
+      assistant({ input: 310_000 }, { id: 'm1' }),
     );
 
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
@@ -824,12 +836,12 @@ describe('SubagentBudgetMonitor', () => {
     });
     await h.monitor.observe(
       SESSION,
-      assistant({ input: 160_000 }, { id: 'm1' }),
+      assistant({ input: 310_000 }, { id: 'm1' }),
     );
     expect(observed).toHaveLength(1);
     await h.monitor.observe(
       SESSION,
-      assistant({ input: 170_000 }, { id: 'm2' }),
+      assistant({ input: 320_000 }, { id: 'm2' }),
     );
 
     expect(observed).toHaveLength(1);
@@ -882,7 +894,7 @@ describe('SubagentBudgetMonitor', () => {
     );
     await h.monitor.observe(
       SESSION,
-      assistant({ input: 1, cacheRead: 160_000 }, { id: 'm2' }),
+      assistant({ input: 1, cacheRead: 310_000 }, { id: 'm2' }),
     );
 
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
@@ -893,7 +905,7 @@ describe('SubagentBudgetMonitor', () => {
     );
     expect(h.streamed).toHaveLength(1);
     expect(h.streamed[0]).toContain('`Explore`');
-    expect(h.streamed[0]).toContain('150000 context tokens');
+    expect(h.streamed[0]).toContain('310001 context tokens of 150000');
     expect(h.streamed[0]).toContain('spawn a fresh `Explore` subagent');
     expect(h.monitor.getSnapshot(SESSION, TOOL_CALL)?.stopped).toBe(true);
   });
@@ -914,11 +926,27 @@ describe('SubagentBudgetMonitor', () => {
     expect(h.monitor.getSnapshot(SESSION, TOOL_CALL)?.budgetReached).toBe(true);
   });
 
+  it('streams forced interruption immediately and does not claim hook delivery', async () => {
+    const h = makeHarness();
+    for (let i = 0; i < 45; i++) {
+      await h.monitor.observe(SESSION, assistant({ input: 1_000, output: 30_000 }, { id: `runaway-${i}` }));
+    }
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
+    expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
+    expect(h.streamed[0]).toContain("Ptah's subagent budget monitor");
+    expect(h.streamed[0]).toContain('No user input is needed');
+    expect(h.streamed[0]).toContain('SMALLER scope');
+    expect(h.streamed[0]).toContain('Give the replacement this instruction:');
+    expect(h.streamed[0]).not.toContain('plus this instruction:');
+    expect(h.monitor.takeInterruptedHandoff(SESSION, TOOL_CALL)).toContain('Ptah');
+    expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     {
-      reason: 'handoff size',
-      usage: { input: 150_000 },
-      amount: '150000 of 150000 tokens',
+      reason: 'safety limit',
+      usage: { input: 300_000 },
+      amount: '300000 of 3000000 tokens',
     },
     {
       reason: 'safety limit',
@@ -977,11 +1005,11 @@ describe('SubagentBudgetMonitor', () => {
     const h = makeHarness({ taskId: undefined });
     await h.monitor.observe(
       SESSION,
-      assistant({ input: 200_000 }, { id: 'm1' }),
+      assistant({ input: 310_000 }, { id: 'm1' }),
     );
     await h.monitor.observe(
       SESSION,
-      assistant({ input: 200_000 }, { id: 'm2' }),
+      assistant({ input: 310_000 }, { id: 'm2' }),
     );
 
     expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
@@ -997,7 +1025,7 @@ describe('SubagentBudgetMonitor', () => {
     } as SubagentRecord);
     await h.monitor.observe(
       SESSION,
-      assistant({ input: 200_000 }, { id: 'm3' }),
+      assistant({ input: 310_000 }, { id: 'm3' }),
     );
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
   });
@@ -1008,7 +1036,7 @@ describe('SubagentBudgetMonitor', () => {
       h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-started-1', 'Plan');
       await h.monitor.observe(
         SESSION,
-        assistant({ input: 200_000 }, { id: 'm1' }),
+        assistant({ input: 310_000 }, { id: 'm1' }),
       );
 
       expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
@@ -1018,7 +1046,7 @@ describe('SubagentBudgetMonitor', () => {
       );
       expect(h.registry.update).not.toHaveBeenCalled();
       expect(h.streamed).toHaveLength(1);
-      expect(h.streamed[0]).toContain('stopped subagent `Plan`');
+      expect(h.streamed[0]).toContain('handed off subagent `Plan`');
       expect(h.streamed[0]).toContain('spawn a fresh `Plan` subagent');
       expect(h.logger.warn).toHaveBeenCalledTimes(1);
       expect(h.logger.warn).toHaveBeenCalledWith(
@@ -1033,10 +1061,10 @@ describe('SubagentBudgetMonitor', () => {
       h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-started-1');
       await h.monitor.observe(
         SESSION,
-        assistant({ input: 200_000 }, { id: 'm1' }),
+        assistant({ input: 310_000 }, { id: 'm1' }),
       );
 
-      expect(h.streamed[0]).toContain('stopped subagent `subagent`');
+      expect(h.streamed[0]).toContain('handed off subagent `subagent`');
     });
 
     it('stops with the recorded task id when the registry record has none, and marks the record', async () => {
@@ -1044,7 +1072,7 @@ describe('SubagentBudgetMonitor', () => {
       h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-started-1', 'Plan');
       await h.monitor.observe(
         SESSION,
-        assistant({ input: 200_000 }, { id: 'm1' }),
+        assistant({ input: 310_000 }, { id: 'm1' }),
       );
 
       expect(h.dispatcher.stopSubagent).toHaveBeenCalledWith(
@@ -1064,7 +1092,7 @@ describe('SubagentBudgetMonitor', () => {
       h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-started-1');
       await h.monitor.observe(
         SESSION,
-        assistant({ input: 200_000 }, { id: 'm1' }),
+        assistant({ input: 310_000 }, { id: 'm1' }),
       );
 
       expect(h.dispatcher.stopSubagent).toHaveBeenCalledWith(
@@ -1079,11 +1107,11 @@ describe('SubagentBudgetMonitor', () => {
       h.monitor.recordTaskStarted(SESSION, 'toolu_bash_1', 'task-bash-1');
       await h.monitor.observe(
         SESSION,
-        assistant({ input: 200_000 }, { id: 'm1' }),
+        assistant({ input: 310_000 }, { id: 'm1' }),
       );
       await h.monitor.observe(
         SESSION,
-        assistant({ input: 200_000 }, { id: 'm2' }),
+        assistant({ input: 310_000 }, { id: 'm2' }),
       );
 
       expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
@@ -1100,12 +1128,12 @@ describe('SubagentBudgetMonitor', () => {
       const h = makeHarness(null);
       await h.monitor.observe(
         SESSION,
-        assistant({ input: 200_000 }, { id: 'm1' }),
+        assistant({ input: 310_000 }, { id: 'm1' }),
       );
       h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-started-1');
       await h.monitor.observe(
         SESSION,
-        assistant({ input: 200_000 }, { id: 'm2' }),
+        assistant({ input: 310_000 }, { id: 'm2' }),
       );
 
       expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
@@ -1119,7 +1147,7 @@ describe('SubagentBudgetMonitor', () => {
       h.monitor.recordTaskStarted(SESSION, TOOL_CALL, '');
       await h.monitor.observe(
         SESSION,
-        assistant({ input: 200_000 }, { id: 'm1' }),
+        assistant({ input: 310_000 }, { id: 'm1' }),
       );
 
       expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
@@ -1132,11 +1160,11 @@ describe('SubagentBudgetMonitor', () => {
       h.monitor.recordTaskStarted(SESSION, 'toolu_task_2', 'task-started-2');
       await h.monitor.observe(
         'session-2',
-        assistant({ input: 200_000 }, { id: 'm1' }),
+        assistant({ input: 310_000 }, { id: 'm1' }),
       );
       await h.monitor.observe(
         'session-2',
-        assistant({ input: 200_000 }, { id: 'm2', parent: 'toolu_task_2' }),
+        assistant({ input: 310_000 }, { id: 'm2', parent: 'toolu_task_2' }),
       );
 
       expect(h.dispatcher.stopSubagent).toHaveBeenNthCalledWith(
@@ -1158,7 +1186,7 @@ describe('SubagentBudgetMonitor', () => {
       h.monitor.rekey(SESSION, 'session-2');
       await h.monitor.observe(
         'session-2',
-        assistant({ input: 200_000 }, { id: 'm1' }),
+        assistant({ input: 310_000 }, { id: 'm1' }),
       );
 
       expect(h.dispatcher.stopSubagent).toHaveBeenCalledWith(
@@ -1173,7 +1201,7 @@ describe('SubagentBudgetMonitor', () => {
       h.monitor.release(SESSION);
       await h.monitor.observe(
         SESSION,
-        assistant({ input: 200_000 }, { id: 'm1' }),
+        assistant({ input: 310_000 }, { id: 'm1' }),
       );
 
       expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
@@ -1186,7 +1214,7 @@ describe('SubagentBudgetMonitor', () => {
     for (let i = 0; i < MAX_STOP_ATTEMPTS + 3; i++) {
       await h.monitor.observe(
         SESSION,
-        assistant({ input: 200_000 }, { id: `m${i}` }),
+        assistant({ input: 310_000 }, { id: `m${i}` }),
       );
     }
 
@@ -1200,7 +1228,7 @@ describe('SubagentBudgetMonitor', () => {
       expect.objectContaining({ attempts: MAX_STOP_ATTEMPTS }),
     );
     expect(h.monitor.getSnapshot(SESSION, TOOL_CALL)?.stopped).toBe(false);
-    expect(h.stopNotices.noticeFor('task-1')).toContain('handoff size');
+    expect(h.stopNotices.noticeFor('task-1')).toContain('safety limit');
   });
 
   it('a retried stop that succeeds hands off once', async () => {
@@ -1209,7 +1237,7 @@ describe('SubagentBudgetMonitor', () => {
     for (let i = 0; i < 4; i++) {
       await h.monitor.observe(
         SESSION,
-        assistant({ input: 200_000 }, { id: `m${i}` }),
+        assistant({ input: 310_000 }, { id: `m${i}` }),
       );
     }
 
@@ -1226,11 +1254,11 @@ describe('SubagentBudgetMonitor', () => {
     );
     const first = h.monitor.observe(
       SESSION,
-      assistant({ input: 200_000 }, { id: 'm1' }),
+      assistant({ input: 310_000 }, { id: 'm1' }),
     );
     await h.monitor.observe(
       SESSION,
-      assistant({ input: 200_000 }, { id: 'm2' }),
+      assistant({ input: 310_000 }, { id: 'm2' }),
     );
     settle();
     await first;
@@ -1253,7 +1281,7 @@ describe('SubagentBudgetMonitor', () => {
     );
     const first = h.monitor.observe(
       SESSION,
-      assistant({ input: 200_000 }, { id: 'm1' }),
+      assistant({ input: 310_000 }, { id: 'm1' }),
     );
     await stopCalled;
     h.monitor.release(SESSION);
@@ -1286,7 +1314,7 @@ describe('SubagentBudgetMonitor', () => {
     );
     await h.monitor.observe(
       SESSION,
-      assistant({ input: 200_000 }, { id: 'm1' }),
+      assistant({ input: 310_000 }, { id: 'm1' }),
     );
 
     expect(h.streamed).toHaveLength(1);
@@ -1294,10 +1322,10 @@ describe('SubagentBudgetMonitor', () => {
       'Its task was: Map the auth module: List every auth entry point.',
     );
     expect(h.streamed[0]).not.toContain('x'.repeat(301));
-    expect(h.dispatcher.postMainThreadNotice).toHaveBeenCalledWith(
+    expect(h.dispatcher.pushParentMessage).toHaveBeenCalledWith(
       SESSION,
       h.streamed[0],
-      expect.any(Function),
+
     );
   });
 
@@ -1309,7 +1337,7 @@ describe('SubagentBudgetMonitor', () => {
     );
     await h.monitor.observe(
       SESSION,
-      assistant({ input: 200_000 }, { id: 'm1' }),
+      assistant({ input: 310_000 }, { id: 'm1' }),
     );
     expect(h.streamed[0]).toContain('Its task was: Fix the build');
 
@@ -1317,7 +1345,7 @@ describe('SubagentBudgetMonitor', () => {
     await other.monitor.observe(SESSION, spawn({ prompt: 'ignored' }, 'Bash'));
     await other.monitor.observe(
       SESSION,
-      assistant({ input: 200_000 }, { id: 'm1' }),
+      assistant({ input: 310_000 }, { id: 'm1' }),
     );
     expect(other.streamed[0]).not.toContain('Its task was');
   });
@@ -1357,16 +1385,16 @@ describe('SubagentBudgetMonitor', () => {
 
     await h.monitor.observe(
       'session-2',
-      assistant({ input: 200_000 }, { id: 'm2' }),
+      assistant({ input: 310_000 }, { id: 'm2' }),
     );
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledWith(
       'session-2',
       'task-1',
     );
-    expect(h.dispatcher.postMainThreadNotice).toHaveBeenCalledWith(
+    expect(h.dispatcher.pushParentMessage).toHaveBeenCalledWith(
       'session-2',
       expect.stringContaining('Its task was: Audit logs'),
-      expect.any(Function),
+
     );
   });
 
@@ -1397,18 +1425,18 @@ describe('SubagentBudgetMonitor', () => {
     );
     const pending = h.monitor.observe(
       'session-2',
-      assistant({ input: 200_000 }, { id: 'm1' }),
+      assistant({ input: 310_000 }, { id: 'm1' }),
     );
     await h.monitor.observe(SESSION, assistant({ input: 10 }, { id: 'm0' }));
     h.monitor.rekey(SESSION, 'session-2');
     settle();
     await pending;
 
-    expect(h.dispatcher.postMainThreadNotice).toHaveBeenCalledTimes(1);
-    expect(h.dispatcher.postMainThreadNotice).toHaveBeenCalledWith(
+    expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
+    expect(h.dispatcher.pushParentMessage).toHaveBeenCalledWith(
       'session-2',
       expect.any(String),
-      expect.any(Function),
+
     );
     expect(h.registry.update).toHaveBeenCalledTimes(1);
     expect(h.registry.update).toHaveBeenCalledWith(
@@ -1422,7 +1450,7 @@ describe('SubagentBudgetMonitor', () => {
       assistant({ input: 300_000 }, { id: 'm2' }),
     );
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
-    expect(h.dispatcher.postMainThreadNotice).toHaveBeenCalledTimes(1);
+    expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
   });
 
   it('a stop in flight across a rekey merge sends no handoff once released', async () => {
@@ -1433,7 +1461,7 @@ describe('SubagentBudgetMonitor', () => {
     );
     const pending = h.monitor.observe(
       'session-2',
-      assistant({ input: 200_000 }, { id: 'm1' }),
+      assistant({ input: 310_000 }, { id: 'm1' }),
     );
     await h.monitor.observe(SESSION, assistant({ input: 10 }, { id: 'm0' }));
     h.monitor.rekey(SESSION, 'session-2');
@@ -1473,17 +1501,17 @@ describe('SubagentBudgetMonitor', () => {
 
     await h.monitor.observe(
       SESSION,
-      assistant({ input: 200_000 }, { id: 'm3' }),
+      assistant({ input: 310_000 }, { id: 'm3' }),
     );
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledWith(
       'session-2',
       'task-1',
     );
-    expect(h.dispatcher.postMainThreadNotice).toHaveBeenCalledWith(
+    expect(h.dispatcher.pushParentMessage).toHaveBeenCalledWith(
       'session-2',
       expect.any(String),
-      expect.any(Function),
+
     );
   });
 
@@ -1519,14 +1547,14 @@ describe('SubagentBudgetMonitor', () => {
     for (let i = 0; i < 3; i++) {
       await h.monitor.observe(
         SESSION,
-        assistant({ input: 200_000 }, { id: 'm1' }),
+        assistant({ input: 310_000 }, { id: 'm1' }),
       );
     }
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
 
     await h.monitor.observe(
       SESSION,
-      assistant({ input: 200_000 }, { id: 'm2' }),
+      assistant({ input: 310_000 }, { id: 'm2' }),
     );
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(2);
     expect(h.logger.warn).not.toHaveBeenCalled();
@@ -1540,7 +1568,7 @@ describe('SubagentBudgetMonitor', () => {
     );
     const pending = h.monitor.observe(
       'session-2',
-      assistant({ input: 200_000 }, { id: 'm1' }),
+      assistant({ input: 310_000 }, { id: 'm1' }),
     );
     await h.monitor.observe(SESSION, assistant({ input: 10 }, { id: 'm0' }));
     h.monitor.rekey(SESSION, 'session-2');
@@ -1555,10 +1583,10 @@ describe('SubagentBudgetMonitor', () => {
 
     await h.monitor.observe(
       'session-2',
-      assistant({ input: 200_000 }, { id: 'm2' }),
+      assistant({ input: 310_000 }, { id: 'm2' }),
     );
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(2);
-    expect(h.dispatcher.postMainThreadNotice).toHaveBeenCalledTimes(1);
+    expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
     expect(h.monitor.getSnapshot('session-2', TOOL_CALL)?.stopped).toBe(true);
   });
 
@@ -1570,11 +1598,11 @@ describe('SubagentBudgetMonitor', () => {
       .mockRejectedValueOnce(new Error('busy'));
     await h.monitor.observe(
       SESSION,
-      assistant({ input: 200_000 }, { id: 'a1' }),
+      assistant({ input: 310_000 }, { id: 'a1' }),
     );
     await h.monitor.observe(
       SESSION,
-      assistant({ input: 200_000 }, { id: 'a2' }),
+      assistant({ input: 310_000 }, { id: 'a2' }),
     );
     let settleF: () => void = () => undefined;
     h.dispatcher.stopSubagent.mockReturnValueOnce(
@@ -1582,7 +1610,7 @@ describe('SubagentBudgetMonitor', () => {
     );
     const pendingF = h.monitor.observe(
       SESSION,
-      assistant({ input: 200_000 }, { id: 'a3' }),
+      assistant({ input: 310_000 }, { id: 'a3' }),
     );
     // Target record: its own stop (E) in flight.
     let failE: (error: Error) => void = () => undefined;
@@ -1591,7 +1619,7 @@ describe('SubagentBudgetMonitor', () => {
     );
     const pendingE = h.monitor.observe(
       'session-2',
-      assistant({ input: 200_000 }, { id: 'b1' }),
+      assistant({ input: 310_000 }, { id: 'b1' }),
     );
 
     h.monitor.rekey(SESSION, 'session-2');
@@ -1606,11 +1634,11 @@ describe('SubagentBudgetMonitor', () => {
       expect.anything(),
     );
     expect(h.registry.update).toHaveBeenCalledTimes(1);
-    expect(h.dispatcher.postMainThreadNotice).toHaveBeenCalledTimes(1);
-    expect(h.dispatcher.postMainThreadNotice).toHaveBeenCalledWith(
+    expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
+    expect(h.dispatcher.pushParentMessage).toHaveBeenCalledWith(
       'session-2',
       expect.any(String),
-      expect.any(Function),
+
     );
     expect(h.monitor.getSnapshot('session-2', TOOL_CALL)?.stopped).toBe(true);
   });
@@ -1619,9 +1647,9 @@ describe('SubagentBudgetMonitor', () => {
     const h = makeHarness();
     await h.monitor.observe(
       'session-2',
-      assistant({ input: 200_000 }, { id: 'm1' }),
+      assistant({ input: 310_000 }, { id: 'm1' }),
     );
-    expect(h.dispatcher.postMainThreadNotice).toHaveBeenCalledTimes(1);
+    expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
     await h.monitor.observe(SESSION, assistant({ input: 10 }, { id: 'm0' }));
     h.monitor.rekey(SESSION, 'session-2');
 
@@ -1631,7 +1659,7 @@ describe('SubagentBudgetMonitor', () => {
       assistant({ input: 300_000 }, { id: 'm2' }),
     );
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
-    expect(h.dispatcher.postMainThreadNotice).toHaveBeenCalledTimes(1);
+    expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
   });
 
   it('the handoff after a rekey restates the task recorded on the merged-away record (rereview m3)', async () => {
@@ -1644,13 +1672,13 @@ describe('SubagentBudgetMonitor', () => {
     h.monitor.rekey(SESSION, 'session-2');
     await h.monitor.observe(
       'session-2',
-      assistant({ input: 200_000 }, { id: 'm1' }),
+      assistant({ input: 310_000 }, { id: 'm1' }),
     );
 
-    expect(h.dispatcher.postMainThreadNotice).toHaveBeenCalledWith(
+    expect(h.dispatcher.pushParentMessage).toHaveBeenCalledWith(
       'session-2',
       expect.stringContaining('Its task was: Trace the bug'),
-      expect.any(Function),
+
     );
   });
 
@@ -1684,7 +1712,7 @@ describe('SubagentBudgetMonitor', () => {
       await h.monitor.observe(SESSION, toolResult());
       await h.monitor.observe(
         SESSION,
-        assistant({ input: 200_000 }, { id: 'm1' }),
+        assistant({ input: 310_000 }, { id: 'm1' }),
       );
 
       expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
@@ -1707,13 +1735,13 @@ describe('SubagentBudgetMonitor', () => {
       await h.monitor.observe(SESSION, toolResult());
       await h.monitor.observe(
         SESSION,
-        assistant({ input: 200_000 }, { id: 'm1' }),
+        assistant({ input: 310_000 }, { id: 'm1' }),
       );
 
       const text = h.streamed[0];
-      expect(text).toContain("Ptah's subagent budget monitor stopped");
-      expect(text).toContain('The user did not stop it');
-      expect(text).toContain('handoff limit 150000 tokens');
+      expect(text).toContain("Ptah's subagent budget monitor handed off");
+      expect(text).toContain('not the user');
+      expect(text).toContain('2x handoff ceiling 300000');
       expect(text).toContain(
         `If a Read or Glob right after this handoff fails with "The user doesn't want to take this action right now" ` +
           `and you saw no permission prompt the user declined, retry that call once; ` +
@@ -1721,43 +1749,41 @@ describe('SubagentBudgetMonitor', () => {
       );
     });
 
-    it('foreground subagent: posts the handoff to the notice queue once; its drained tool result delivers nothing more', async () => {
+    it('foreground subagent: streams the forced handoff once before its tool result', async () => {
       const h = makeHarness();
       await h.monitor.observe(SESSION, spawn({ description: 'Map auth' }));
       await h.monitor.observe(
         SESSION,
-        assistant({ input: 200_000 }, { id: 'm1' }),
+        assistant({ input: 310_000 }, { id: 'm1' }),
       );
 
-      expect(h.dispatcher.postMainThreadNotice).toHaveBeenCalledTimes(1);
-      expect(h.dispatcher.pushParentMessage).not.toHaveBeenCalled();
-      // The `Agent` tool result's PostToolUse drains it.
-      expect(h.notices.take(SESSION)).toContain('Its task was: Map auth');
+      expect(h.dispatcher.postMainThreadNotice).not.toHaveBeenCalled();
+      expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
+      expect(h.streamed[0]).toContain('Its task was: Map auth');
       await h.monitor.observe(SESSION, toolResult());
 
-      expect(h.dispatcher.withdrawMainThreadNotice).toHaveBeenCalledTimes(1);
-      expect(h.dispatcher.pushParentMessage).not.toHaveBeenCalled();
+      expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
       expect(h.streamed).toHaveLength(1);
     });
 
-    it('foreground subagent whose tool result arrives with the notice still pending: withdraws it and streams it as a user turn, once', async () => {
+    it('foreground subagent whose tool result arrives after the forced stream does not duplicate it', async () => {
       const h = makeHarness();
       await h.monitor.observe(SESSION, spawn({ description: 'Map auth' }));
       await h.monitor.observe(
         SESSION,
-        assistant({ input: 200_000 }, { id: 'm1' }),
+        assistant({ input: 310_000 }, { id: 'm1' }),
       );
       await h.monitor.observe(SESSION, toolResult());
       await h.monitor.observe(SESSION, toolResult());
 
-      expect(h.dispatcher.postMainThreadNotice).toHaveBeenCalledTimes(1);
+      expect(h.dispatcher.postMainThreadNotice).not.toHaveBeenCalled();
       expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
       expect(h.dispatcher.pushParentMessage).toHaveBeenCalledWith(
         SESSION,
-        h.dispatcher.postMainThreadNotice.mock.calls[0][1],
+        h.streamed[0],
       );
       const parentHandoff = h.dispatcher.pushParentMessage.mock.calls[0][1];
-      expect(parentHandoff).toContain('The user did not stop it');
+      expect(parentHandoff).toContain('not the user');
       expect(parentHandoff).not.toContain('stopped by user');
       expect(h.notices.take(SESSION)).toBeUndefined();
     });
@@ -1771,7 +1797,7 @@ describe('SubagentBudgetMonitor', () => {
       );
       const pending = h.monitor.observe(
         SESSION,
-        assistant({ input: 200_000 }, { id: 'm1' }),
+        assistant({ input: 310_000 }, { id: 'm1' }),
       );
       await h.monitor.observe(SESSION, toolResult());
       settle();
@@ -1787,7 +1813,7 @@ describe('SubagentBudgetMonitor', () => {
       await h.monitor.observe(SESSION, toolResult());
       await h.monitor.observe(
         SESSION,
-        assistant({ input: 200_000 }, { id: 'm1' }),
+        assistant({ input: 310_000 }, { id: 'm1' }),
       );
 
       expect(h.dispatcher.stopSubagent).toHaveBeenCalledWith(SESSION, 'task-9');
@@ -1819,7 +1845,7 @@ describe('SubagentBudgetMonitor', () => {
         await h.monitor.observe(SESSION, toolResult());
         await h.monitor.observe(
           SESSION,
-          assistant({ input: 200_000 }, { id: 'm1' }),
+          assistant({ input: 310_000 }, { id: 'm1' }),
         );
         return h.streamed[0];
       }
@@ -1835,7 +1861,7 @@ describe('SubagentBudgetMonitor', () => {
 
         expect(fs.readFileSync(taskFile, 'utf8')).toBe(longPrompt);
         expect(text).not.toContain(' END');
-        expect(text).toContain(`saved at ${taskFile}`);
+        expect(text).toContain(`original task prompt at ${taskFile}`);
         expect(text).toContain(`Its progress notes are at ${notes}.`);
         expect(text).toContain(
           "spawn a fresh `architect` subagent named 'arch'",
@@ -1855,10 +1881,8 @@ describe('SubagentBudgetMonitor', () => {
         const text = await stopSpawned(h);
         const notes = path.join(dir(), `${TOOL_CALL}.md`);
 
-        expect(text).toContain(
-          `Its progress notes file is missing: ${notes} was not written.`,
-        );
-        expect(text).not.toContain(`Read ${notes} first`);
+        expect(text).toContain(`Its progress notes (host-generated, inferred) are at ${notes}.`);
+        expect(fs.readFileSync(notes, 'utf8')).toContain('host-generated, inferred');
         expect(text).toContain('do not redo finished work');
         expect(fs.existsSync(path.join(dir(), `${TOOL_CALL}.task.md`))).toBe(
           true,
@@ -1876,7 +1900,7 @@ describe('SubagentBudgetMonitor', () => {
           'Its progress notes file: unavailable (workspace unknown).',
         );
         expect(text).toContain(
-          'its full original task prompt from the Agent call that spawned it',
+          'only the remaining items from its original Agent task',
         );
       });
     });
@@ -1910,7 +1934,7 @@ describe('SubagentBudgetMonitor', () => {
         });
         await h.monitor.observe(
           SESSION,
-          assistant({ input: 200_000 }, { id: `m-${id}`, parent: id }),
+          assistant({ input: 310_000 }, { id: `m-${id}`, parent: id }),
         );
       }
 
@@ -1921,22 +1945,20 @@ describe('SubagentBudgetMonitor', () => {
           await stopForeground(h, id, `task-fg-${i + 1}`);
         }
 
-        // The fifth post evicted the first; it went out as a user turn.
-        expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
-        const drained = h.notices.take(SESSION) ?? '';
+        expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(5);
+        expect(h.notices.take(SESSION)).toBeUndefined();
         for (const id of ids) {
           await h.monitor.observe(SESSION, toolResult(id));
         }
 
         const delivered = [
-          drained,
           ...h.dispatcher.pushParentMessage.mock.calls.map((call) => call[1]),
         ].join('\n');
         for (let i = 1; i <= ids.length; i += 1) {
           const marker = `task notification for task task-fg-${i}.`;
           expect(delivered.split(marker)).toHaveLength(2);
         }
-        expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
+        expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(5);
       });
 
       it('background handoff whose first push rejects is retried and sent once', async () => {
@@ -1949,7 +1971,7 @@ describe('SubagentBudgetMonitor', () => {
         );
         const pending = h.monitor.observe(
           SESSION,
-          assistant({ input: 200_000 }, { id: 'm1' }),
+          assistant({ input: 310_000 }, { id: 'm1' }),
         );
         await jest.advanceTimersByTimeAsync(PARENT_PUSH_RETRY_DELAY_MS);
         await pending;
@@ -1969,7 +1991,7 @@ describe('SubagentBudgetMonitor', () => {
         );
         const pending = h.monitor.observe(
           SESSION,
-          assistant({ input: 200_000 }, { id: 'm1' }),
+          assistant({ input: 310_000 }, { id: 'm1' }),
         );
         await jest.advanceTimersByTimeAsync(
           PARENT_PUSH_RETRY_DELAY_MS * PARENT_PUSH_ATTEMPTS,
@@ -1998,7 +2020,7 @@ describe('SubagentBudgetMonitor', () => {
         const allRetriesMs = PARENT_PUSH_RETRY_DELAY_MS * PARENT_PUSH_ATTEMPTS;
         const pending = h.monitor.observe(
           SESSION,
-          assistant({ input: 200_000 }, { id: 'm1' }),
+          assistant({ input: 310_000 }, { id: 'm1' }),
         );
         await jest.advanceTimersByTimeAsync(allRetriesMs);
         await pending;
@@ -2039,7 +2061,7 @@ describe('SubagentBudgetMonitor', () => {
         await h.monitor.observe(SESSION, toolResult());
         const pending = h.monitor.observe(
           SESSION,
-          assistant({ input: 200_000 }, { id: 'm1' }),
+          assistant({ input: 310_000 }, { id: 'm1' }),
         );
         await jest.advanceTimersByTimeAsync(HANDOFF_FILES_TIMEOUT_MS);
         await pending;
@@ -2083,7 +2105,7 @@ describe('SubagentBudgetMonitor', () => {
         });
         await h.monitor.observe(
           SESSION,
-          assistant({ input: 200_000 }, { id: 'm1' }),
+          assistant({ input: 310_000 }, { id: 'm1' }),
         );
 
         expect(h.dispatcher.pushParentMessage).toHaveBeenCalledWith(
@@ -2105,11 +2127,11 @@ describe('SubagentBudgetMonitor', () => {
       await h.monitor.observe(SESSION, toolResult('toolu_read'));
       await h.monitor.observe(
         SESSION,
-        assistant({ input: 200_000 }, { id: 'm1' }),
+        assistant({ input: 310_000 }, { id: 'm1' }),
       );
 
-      expect(h.dispatcher.postMainThreadNotice).toHaveBeenCalledTimes(1);
-      expect(h.dispatcher.pushParentMessage).not.toHaveBeenCalled();
+      expect(h.dispatcher.postMainThreadNotice).not.toHaveBeenCalled();
+      expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -2126,6 +2148,25 @@ describe('SubagentBudgetMonitor', () => {
     /** 85% of the handoff size is 127 500 context tokens. */
     const atContext = (tokens: number, id: string) =>
       assistant({ input: tokens }, { id });
+
+    it('routes a 54k to 101k threshold jump into the notes gate', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, { workspace, handoffTokens: 60_000 });
+      await h.monitor.observe(SESSION, atContext(54_000, 'jump-before'));
+      await h.monitor.observe(SESSION, atContext(101_000, 'jump-after'));
+      expect(h.monitor.hasNotesGate('agent-7')).toBe(true);
+      expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
+    });
+
+    it('normal background exit writes a record when the SDK gives no task id', async () => {
+      const h = makeHarness({ agentId: 'agent-7', taskId: undefined }, { workspace });
+      await h.monitor.observe(SESSION, spawn({ description: 'Review remaining files' }));
+      await h.monitor.observe(SESSION, toolResult());
+      await h.monitor.observe(SESSION, atContext(130_000, 'background-warning'));
+      await h.monitor.finishWarnedAgent(SESSION, 'agent-7');
+      expect(h.recordStore.writeOnce).toHaveBeenCalledTimes(1);
+      expect(h.recordStore.markInvoked).toHaveBeenCalledWith(TOOL_CALL);
+      expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
+    });
 
     it("goes once to the subagent's own agent id, keyed by its registry record, naming the notes path", async () => {
       const h = makeHarness({ agentId: 'agent-7' }, { workspace });
@@ -2182,16 +2223,165 @@ describe('SubagentBudgetMonitor', () => {
     it('the hard stop names the same notes path, says it is missing when unwritten, and withdraws an undelivered warning', async () => {
       const h = makeHarness({ agentId: 'agent-7' }, { workspace });
       await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
-      await h.monitor.observe(SESSION, atContext(150_000, 'm2'));
+      await h.monitor.observe(SESSION, atContext(310_000, 'm2'));
 
       expect(h.dispatcher.withdrawSubagentNotice).toHaveBeenCalledWith(
         'agent-7',
       );
       expect(h.subagentNotices.take('agent-7')).toBeUndefined();
       expect(h.streamed).toHaveLength(1);
-      expect(h.streamed[0]).toContain(
-        `Its progress notes file is missing: ${notesPath()} was not written.`,
-      );
+      expect(h.streamed[0]).toContain(`Its progress notes (host-generated, inferred) are at ${notesPath()}.`);
+      expect(fs.readFileSync(notesPath(), 'utf8')).toContain('host-generated, inferred');
+    });
+
+    it('normal completion attaches one handoff to the parent result and suppresses queued fallback', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, { workspace });
+      await h.monitor.observe(SESSION, spawn({ description: 'Test handoff', prompt: 'Finish task' }));
+      await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
+      await h.monitor.finishWarnedAgent(SESSION, 'agent-7');
+
+      const handoff = h.monitor.takeNormalHandoff(SESSION, TOOL_CALL);
+      expect(handoff).toContain("Ptah's subagent budget monitor handed off");
+      expect(h.monitor.takeNormalHandoff(SESSION, TOOL_CALL)).toBeUndefined();
+      await h.monitor.observe(SESSION, toolResult());
+      expect(h.dispatcher.pushParentMessage).not.toHaveBeenCalled();
+      expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
+      expect(h.recordStore.markInvoked).toHaveBeenCalledWith(TOOL_CALL);
+      expect(h.index.publish).not.toHaveBeenCalled();
+    });
+
+    it('keeps the notes gate when the safety stop has no task id, then retries after the id arrives', async () => {
+      const h = makeHarness({ agentId: 'agent-7', taskId: undefined }, { workspace });
+      await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
+      const denialAt = Date.now();
+      for (let i = 0; i < 3; i += 1) {
+        expect(await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {}, denialAt + i * 2_001)).toContain('End your turn now');
+      }
+      await waitUntil(() => h.logger.warn.mock.calls.some((call) => String(call[0]).includes('stop deferred')));
+      expect(h.monitor.hasNotesGate('agent-7')).toBe(true);
+      expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
+      h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-late', 'Explore');
+      await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {}, denialAt + 6_003);
+      await waitUntil(() => h.dispatcher.stopSubagent.mock.calls.length === 1);
+      await waitUntil(() => !h.monitor.hasNotesGate('agent-7'));
+    });
+
+    it('keeps the notes gate after a rejected safety stop and retries', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, { workspace });
+      h.dispatcher.stopSubagent.mockRejectedValueOnce(new Error('busy'));
+      await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
+      const denialAt = Date.now();
+      for (let i = 0; i < 3; i += 1) await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {}, denialAt + i * 2_001);
+      await waitUntil(() => h.logger.warn.mock.calls.some((call) => String(call[0]).includes('gate remains active')));
+      expect(h.monitor.hasNotesGate('agent-7')).toBe(true);
+      await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {}, denialAt + 6_003);
+      await waitUntil(() => h.dispatcher.stopSubagent.mock.calls.length === 2);
+      await waitUntil(() => !h.monitor.hasNotesGate('agent-7'));
+    });
+
+    it('returns a denial before stopTask settles and clears the watchdog on release', async () => {
+      jest.useFakeTimers();
+      try {
+        const h = makeHarness({ agentId: 'agent-7' }, { workspace });
+        await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
+        let finishStop: () => void = () => undefined;
+        h.dispatcher.stopSubagent.mockImplementationOnce(() => new Promise<void>((resolve) => { finishStop = resolve; }));
+        const startedAt = Date.now();
+        await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {}, startedAt);
+        await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {}, startedAt + 2_001);
+        const reason = await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {}, startedAt + 4_002);
+        expect(reason).toContain('End your turn now');
+        expect(h.monitor.hasNotesGate('agent-7')).toBe(true);
+        const activeTimers = jest.getTimerCount();
+        expect(activeTimers).toBeGreaterThan(0);
+        h.monitor.release(SESSION);
+        expect(jest.getTimerCount()).toBeLessThan(activeTimers);
+        finishStop();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('normal exit without a task id writes inferred notes and hands off in memory', async () => {
+      const h = makeHarness({ agentId: 'agent-7', taskId: undefined }, { workspace });
+      await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
+      await h.monitor.finishWarnedAgent(SESSION, 'agent-7');
+      expect(h.monitor.hasNotesGate('agent-7')).toBe(false);
+      expect(fs.readFileSync(notesPath(), 'utf8')).toContain('host-generated, inferred');
+      expect(h.recordStore.writeOnce).toHaveBeenCalledTimes(1);
+      expect(h.monitor.takeNormalHandoff(SESSION, TOOL_CALL)).toContain('Continue unfinished work autonomously now');
+      expect(h.monitor.takeNormalHandoff(SESSION, TOOL_CALL)).toBeUndefined();
+      expect(h.logger.warn.mock.calls.filter((call) => String(call[0]).includes('Normal exit has no task id'))).toHaveLength(1);
+    });
+
+    it('normal exit with a failed record write still supplies inferred notes and an in-memory handoff', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, { workspace });
+      h.recordStore.writeOnce.mockResolvedValueOnce({ ok: false, errorType: 'Unavailable', errorCode: 'EIO' });
+      await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
+      await h.monitor.finishWarnedAgent(SESSION, 'agent-7');
+      expect(h.monitor.hasNotesGate('agent-7')).toBe(false);
+      expect(fs.readFileSync(notesPath(), 'utf8')).toContain('host-generated, inferred');
+      expect(h.monitor.takeNormalHandoff(SESSION, TOOL_CALL)).toContain('Its progress notes (host-generated, inferred) are at');
+      expect(h.recordStore.markInvoked).not.toHaveBeenCalled();
+      expect(h.logger.warn.mock.calls.filter((call) => String(call[0]).includes('delivering in-memory handoff'))).toHaveLength(1);
+    });
+
+    it('does not send a normal handoff after its session is released during preparation', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, { workspace });
+      await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
+      let finishWrite: (value: HandoffRecordWrite) => void = () => undefined;
+      h.recordStore.writeOnce.mockImplementationOnce(() => new Promise<HandoffRecordWrite>((resolve) => { finishWrite = resolve; }));
+      const finishing = h.monitor.finishWarnedAgent(SESSION, 'agent-7');
+      await waitUntil(() => h.recordStore.writeOnce.mock.calls.length === 1);
+      h.monitor.release(SESSION);
+      finishWrite({ ok: false, errorType: 'Unavailable', errorCode: 'EIO' });
+      await finishing;
+      expect(h.monitor.hasNotesGate('agent-7')).toBe(false);
+      expect(h.dispatcher.pushParentMessage).not.toHaveBeenCalled();
+      expect(h.index.publish).not.toHaveBeenCalled();
+    });
+
+    it('queues the normal handoff if the parent Agent hook did not run', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, { workspace });
+      await h.monitor.observe(SESSION, spawn({ description: 'Test handoff', prompt: 'Finish task' }));
+      await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
+      await h.monitor.finishWarnedAgent(SESSION, 'agent-7');
+      await h.monitor.observe(SESSION, toolResult());
+      expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
+      expect(h.monitor.takeNormalHandoff(SESSION, TOOL_CALL)).toBeUndefined();
+      expect(h.index.publish).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not duplicate the interrupted handoff when the parent tool result precedes the failure hook', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, { workspace });
+      await h.monitor.observe(SESSION, spawn({ description: 'Review task' }));
+      await h.monitor.observe(SESSION, atContext(310_000, 'm1'));
+      await h.monitor.observe(SESSION, toolResult());
+      expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
+      expect(h.monitor.takeInterruptedHandoff(SESSION, TOOL_CALL)).toContain("Ptah's subagent budget monitor");
+    });
+
+    it('does not queue the interrupted handoff after the failure hook has claimed it', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, { workspace });
+      await h.monitor.observe(SESSION, spawn({ description: 'Review task' }));
+      await h.monitor.observe(SESSION, atContext(310_000, 'm1'));
+      expect(h.monitor.takeInterruptedHandoff(SESSION, TOOL_CALL)).toContain("Ptah's subagent budget monitor");
+      await h.monitor.observe(SESSION, toolResult());
+      expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
+      expect(h.monitor.takeInterruptedHandoff(SESSION, TOOL_CALL)).toContain("Ptah's subagent budget monitor");
+    });
+
+    it('repairs an interrupted parent result while stopTask is still pending', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, { workspace });
+      let finishStop: () => void = () => undefined;
+      h.dispatcher.stopSubagent.mockImplementationOnce(() => new Promise<void>((resolve) => { finishStop = resolve; }));
+      const observing = h.monitor.observe(SESSION, atContext(310_000, 'm1'));
+      await waitUntil(() => h.dispatcher.stopSubagent.mock.calls.length === 1);
+      expect(h.monitor.getAgentBudgetState(TOOL_CALL, SESSION)?.stopState).toBe('pending');
+      expect(h.monitor.takeInterruptedHandoff(SESSION, TOOL_CALL)).toContain('continue autonomously now');
+      finishStop();
+      await observing;
+      expect(h.dispatcher.postMainThreadNotice).not.toHaveBeenCalled();
     });
 
     it('the hard stop points the fresh subagent at the notes the warned subagent wrote', async () => {
@@ -2199,7 +2389,7 @@ describe('SubagentBudgetMonitor', () => {
       await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
       fs.mkdirSync(path.dirname(notesPath()), { recursive: true });
       fs.writeFileSync(notesPath(), 'next: wire the guard');
-      await h.monitor.observe(SESSION, atContext(150_000, 'm2'));
+      await h.monitor.observe(SESSION, atContext(310_000, 'm2'));
 
       expect(h.streamed[0]).toContain(
         `"Read ${notesPath()} first and continue from it; do not redo finished work. This handoff is saved at`,
@@ -2216,10 +2406,23 @@ describe('SubagentBudgetMonitor', () => {
         expect(fs.readFileSync(notesPath(), 'utf8')).toContain(marker);
       });
 
-      await h.monitor.observe(SESSION, atContext(150_000, 'm2'));
+      await h.monitor.observe(SESSION, atContext(310_000, 'm2'));
 
       expect(fs.readFileSync(notesPath(), 'utf8')).toBe('Finding: API_KEY=[redacted]\nBasic usage');
       expect(h.streamed[0]).toContain(notesPath());
+    });
+
+    it('redacts agent-written key-value notes on normal exit and saves the handoff record', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, { workspace });
+      await h.monitor.observe(SESSION, atContext(130_000, 'normal-notes'));
+      fs.mkdirSync(path.dirname(notesPath()), { recursive: true });
+      fs.writeFileSync(notesPath(), 'Progress: read ten files\napi_key=PLACEHOLDER_NOT_A_SECRET\nNext: read remaining files');
+
+      await h.monitor.finishWarnedAgent(SESSION, 'agent-7');
+
+      expect(fs.readFileSync(notesPath(), 'utf8')).toBe('Progress: read ten files\napi_key=[redacted]\nNext: read remaining files');
+      expect(h.recordStore.writeOnce).toHaveBeenCalledTimes(1);
+      expect(h.monitor.takeNormalHandoff(SESSION, TOOL_CALL)).toContain('This handoff is saved at');
     });
 
     it('release drops a warning no tool result drained', async () => {
@@ -2264,7 +2467,24 @@ function quietLogger() {
 }
 
 describe('SubagentBudgetMonitor handoff records', () => {
-  const over = (id: string) => assistant({ input: 200_000 }, { id });
+  const over = (id: string) => assistant({ input: 310_000 }, { id });
+  async function gateAttempt(
+    h: ReturnType<typeof makeHarness>,
+    id: string,
+    done: () => boolean = () => h.recordStore.writeOnce.mock.calls.length > 0,
+    settle = true,
+  ): Promise<void> {
+    await h.monitor.observe(SESSION, assistant({ input: 130_000 }, { id }));
+    expect(h.monitor.hasNotesGate('a1')).toBe(true);
+    const denialAt = Date.now();
+    for (let i = 0; i < 3; i += 1) {
+      await h.monitor.checkNotesTool(SESSION, 'a1', 'Read', {}, denialAt + i * 2_001);
+    }
+    if (settle) {
+      await waitUntil(done);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+  }
   const failed = (errorCode?: string): HandoffRecordWrite => ({
     ok: false,
     errorType: errorCode ? 'Error' : 'Timeout',
@@ -2332,7 +2552,7 @@ describe('SubagentBudgetMonitor handoff records', () => {
       'writeOnce',
       'markInvoked',
       'stopSubagent',
-      'post',
+      'push',
     ]);
   });
 
@@ -2342,22 +2562,23 @@ describe('SubagentBudgetMonitor handoff records', () => {
   ])(
     'after %s stops nothing; the next request retries the write, then stops',
     async (_label, failure) => {
-      const h = makeHarness();
+      const h = makeHarness({}, { workspace });
       h.recordStore.writeOnce.mockResolvedValueOnce(failure);
 
-      await h.monitor.observe(SESSION, over('m1'));
+      await gateAttempt(h, 'm1');
       // Another content block of the request whose write failed: no retry.
-      await h.monitor.observe(SESSION, over('m1'));
+      await h.monitor.observe(SESSION, assistant({ input: 130_000 }, { id: 'm1' }));
       expect(h.recordStore.writeOnce).toHaveBeenCalledTimes(1);
       expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
       expect(h.streamed).toHaveLength(0);
       expect(h.monitor.getSnapshot(SESSION, TOOL_CALL)?.stopped).toBe(false);
 
-      await h.monitor.observe(SESSION, over('m2'));
+      await gateAttempt(h, 'm2', () => h.recordStore.writeOnce.mock.calls.length === 2);
+      await waitUntil(() => h.streamed.length === 1);
       expect(h.recordStore.writeOnce).toHaveBeenCalledTimes(2);
       expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
       expect(h.streamed).toHaveLength(1);
-      expect(h.logger.warn).not.toHaveBeenCalled();
+      expect(warnings(h.logger, 'not saved after 3 attempts')).toHaveLength(0);
     },
   );
 
@@ -2365,39 +2586,54 @@ describe('SubagentBudgetMonitor handoff records', () => {
     jest.useFakeTimers({
       doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'],
     });
-    // Gate the publish of the record name (the write's last step).
-    const realLink = fs.promises.link;
     let open: () => void = () => undefined;
     const gate = new Promise<void>((resolve) => (open = resolve));
-    const link = jest
-      .spyOn(fs.promises, 'link')
-      .mockImplementationOnce(async (...args) => {
-        await gate;
-        return realLink(...args);
-      });
+    let reached: () => void = () => undefined;
+    const publishing = new Promise<void>((resolve) => (reached = resolve));
+    let complete: () => void = () => undefined;
+    const published = new Promise<void>((resolve) => (complete = resolve));
+    let publishedPath = '';
+    let temporaryPath = '';
     const records = new SubagentHandoffRecords(quietLogger(), () => workspace);
-    const h = makeHarness({}, { records });
+    // Hold the final publish until the monitor's record timeout has elapsed.
+    Object.defineProperty(records, 'publishComplete', {
+      value: async (recordPath: string, content: string): Promise<void> => {
+        temporaryPath = `${recordPath}.tmp`;
+        await fs.promises.writeFile(temporaryPath, content);
+        reached();
+        await gate;
+        await fs.promises.link(temporaryPath, recordPath);
+        await fs.promises.unlink(temporaryPath);
+        publishedPath = recordPath;
+        expect(fs.existsSync(recordPath)).toBe(true);
+        complete();
+      },
+    });
+    const writeSpy = jest.spyOn(records, 'writeOnce');
+    const h = makeHarness({}, { records, workspace });
 
-    const first = h.monitor.observe(SESSION, over('m1'));
-    await waitUntil(() => link.mock.calls.length === 1);
+    const first = gateAttempt(h, 'm1', () => true, false);
+    await publishing;
+    expect(writeSpy).toHaveBeenCalledTimes(1);
     jest.advanceTimersByTime(HANDOFF_FILES_TIMEOUT_MS);
     await first;
     expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
     expect(h.index.publish).not.toHaveBeenCalled();
 
     open();
-    await link.mock.results[0].value;
-    const dir = path.join(workspace, '.ptah', 'subagent-handoffs');
-    // The late record and its temporary file are both removed.
-    await waitUntil(() => fs.readdirSync(dir).length === 0);
+    jest.useRealTimers();
+    await published;
+    // The record published after the timeout is withdrawn by the real record store.
+    await waitUntil(() => !fs.existsSync(publishedPath));
+    expect(fs.existsSync(temporaryPath)).toBe(false);
     expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
-  });
+  }, 30_000);
 
   it(`after ${MAX_RECORD_ATTEMPTS} failed writes: one warn, no handoff stop, and the later safety stop runs without a record`, async () => {
-    const h = makeHarness();
+    const h = makeHarness({}, { workspace });
     h.recordStore.writeOnce.mockResolvedValue(failed('EIO'));
     for (let i = 1; i <= MAX_RECORD_ATTEMPTS + 2; i += 1) {
-      await h.monitor.observe(SESSION, over(`m${i}`));
+      await gateAttempt(h, `m${i}`, () => h.recordStore.writeOnce.mock.calls.length >= Math.min(i, MAX_RECORD_ATTEMPTS));
     }
 
     expect(h.recordStore.writeOnce).toHaveBeenCalledTimes(MAX_RECORD_ATTEMPTS);
@@ -2407,7 +2643,7 @@ describe('SubagentBudgetMonitor handoff records', () => {
     // Output weight 5: 600 000 output tokens reach the 3 000 000 safety limit.
     await h.monitor.observe(
       SESSION,
-      assistant({ input: 200_000, output: 600_000 }, { id: 'm-safety' }),
+      assistant({ input: 310_000, output: 600_000 }, { id: 'm-safety' }),
     );
     expect(h.recordStore.writeOnce).toHaveBeenCalledTimes(
       MAX_RECORD_ATTEMPTS + 1,
