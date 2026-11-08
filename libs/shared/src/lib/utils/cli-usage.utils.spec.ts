@@ -34,7 +34,7 @@ function codexTurn(input: number, output: number): CliOutputSegment {
 // `stats-bar.utils.spec.ts` and `stats-accumulation.spec.ts` for
 // `extractCliAgentStats`, whose fold this function now owns.
 describe('addCliUsage (stats-bar oracle cases)', () => {
-  it('sums tokens and clears a label on an unlabeled token report', () => {
+  it('sums tokens and keeps the latest label on an unlabeled token report', () => {
     expect(
       foldAll([
         info({
@@ -54,7 +54,7 @@ describe('addCliUsage (stats-bar oracle cases)', () => {
         info({ outputTokens: 3 }),
       ]),
     ).toEqual({
-      model: undefined,
+      model: 'latest-model',
       inputTokens: 150,
       outputTokens: 23,
       costUsd: 0,
@@ -91,13 +91,13 @@ describe('addCliUsage (stats-bar oracle cases)', () => {
     });
   });
 
-  it('clears a stale model when aggregate tokens have no single model', () => {
+  it('keeps the last known model when later token usage has no label', () => {
     expect(
       foldAll([
         info({ model: 'haiku', inputTokens: 10, costUsd: 0.01 }),
         info({ inputTokens: 5, costUsd: 0.02 }),
       ])?.model,
-    ).toBeUndefined();
+    ).toBe('haiku');
   });
 
   it('keeps the model for a later cost-only update', () => {
@@ -271,7 +271,7 @@ describe('addCliUsage (incremental fold)', () => {
     const forward = foldAll(segments);
     const reversed = foldAll([...segments].reverse());
     expect(forward).toEqual({
-      model: undefined,
+      model: 'b',
       inputTokens: 15,
       outputTokens: 5,
       totalTokens: 7,
