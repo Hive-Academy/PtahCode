@@ -50,8 +50,14 @@ describe('native child event admission', () => {
     feed('item/completed', { threadId: 'child', turnId: 'child-turn',
       item: { type: 'agentMessage', id: 'early-text', text: 'early' } });
     expect(events().some((event) => event.threadId === 'child')).toBe(false);
+    feed('item/started', { threadId: 'root', turnId: 'root-turn', item: {
+      type: 'subAgentActivity', id: 'activity', agentPath: '/root/readme_inspection',
+      agentThreadId: 'child', kind: 'started',
+    } });
+    expect(events().filter((event) => event.threadId === 'child' && event.type === 'textFinal')).toHaveLength(1);
     feed('item/completed', { threadId: 'root', turnId: 'root-turn',
       item: { ...spawn, status: 'completed', receiverThreadIds: ['child'] } });
+    expect(events().filter((event) => event.threadId === 'child' && event.type === 'textFinal')).toHaveLength(1);
     expect(events()).toContainEqual(expect.objectContaining({
       threadId: 'child', type: 'textFinal', text: 'early',
       parentToolUseId: 'spawn',

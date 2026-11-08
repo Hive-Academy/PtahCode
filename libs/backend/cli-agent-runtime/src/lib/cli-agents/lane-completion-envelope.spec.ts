@@ -28,4 +28,9 @@ describe('lane completion envelope budget stops', () => {
     expect(buildLaneCompletionEnvelope({ ...base, stopReason: 'repeat-call', repeatedCalls: 3 }))
        .toMatchSnapshot();
   });
+  it('includes a concrete progress file and the true CLI session on budget stop', () => {
+    const text = buildLaneCompletionEnvelope({ ...base, stopReason: 'budget', progressPointer: '/work/.ptah/progress.md' });
+    expect(text).toContain('Progress pointer: /work/.ptah/progress.md');
+    expect(text).toContain('CLI Session ID: real-cli-session');
+  });
 });

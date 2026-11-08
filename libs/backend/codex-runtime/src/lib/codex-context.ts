@@ -424,6 +424,14 @@ class RuntimeContext implements CodexContext {
       const parsed = codexNotificationSchemas['item/started'].parse(
         frame.params,
       );
+      if (parsed.item.type === 'subAgentActivity' && 'agentThreadId' in parsed.item) {
+        const candidates = this.pendingSpawns.get(parsed.threadId);
+        if (candidates?.size === 1) {
+          const toolId = [...candidates][0];
+          if (toolId && parsed.item.agentThreadId !== parsed.threadId)
+            this.linkChild(parsed.item.agentThreadId, toolId);
+        }
+      }
       if (
         (parsed.threadId === this.identity.threadId &&
           parsed.turnId === this.activeTurn) ||

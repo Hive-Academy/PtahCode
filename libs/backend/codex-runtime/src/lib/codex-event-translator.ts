@@ -689,7 +689,7 @@ export class CodexEventTranslator {
                 toolId: item.id,
                 status: toolStatus(item.status),
                 output: { receiverThreadIds: item.receiverThreadIds },
-                ...(item.tool === 'spawnAgent' ? { agentThreadIds: item.receiverThreadIds } : {}),
+                ...(item.tool === 'spawnAgent' ? { agentThreadIds: [...new Set([...item.receiverThreadIds, ...Object.keys(item.agentsStates)])] } : {}),
               },
             ]
           : [
@@ -700,7 +700,7 @@ export class CodexEventTranslator {
                 input: item.tool === 'spawnAgent'
                   ? agentInput(item)
                   : { receiverThreadIds: item.receiverThreadIds },
-                ...(item.tool === 'spawnAgent' ? { agentThreadIds: item.receiverThreadIds } : {}),
+                ...(item.tool === 'spawnAgent' ? { agentThreadIds: [...new Set([...item.receiverThreadIds, ...Object.keys(item.agentsStates)])] } : {}),
               },
             ];
       case 'webSearch':

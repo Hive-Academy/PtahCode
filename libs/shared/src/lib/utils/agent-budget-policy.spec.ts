@@ -15,6 +15,20 @@ const policy = new AgentBudgetPolicy({ warnRatio: 0.8, stopWeightedTokens: 100, 
 
 describe('AgentBudgetPolicy', () => {
   afterEach(() => resetPricingMapForTesting());
+  it('warns once when another turn of the same size would cross the stop', () => {
+    const predictive = new AgentBudgetPolicy({ warnRatio: 0.85, stopWeightedTokens: 300, handoffContextTokens: 1000, maxDurationMin: 2 });
+    const turn = { ...usage, inputTokens: 61, outputTokens: 0, cacheReadTokens: reported(0), cacheWriteTokens: reported(0), requestContextTokens: missing };
+    let snapshot = initialAgentBudgetSnapshot;
+    for (let index = 0; index < 4; index++) {
+      const result = predictive.evaluate(snapshot, { status: 'reported', usage: { ...turn, turnId: `t${index}` } }, index, null);
+      expect(result.warning).toBe(index === 3);
+      expect(result.stopReason).toBeUndefined();
+      snapshot = result.snapshot;
+    }
+    const stop = predictive.evaluate(snapshot, { status: 'reported', usage: { ...turn, turnId: 'stop' } }, 5, null);
+    expect(stop.warning).toBe(false);
+    expect(stop.stopReason).toBe('budget');
+  });
   it('weights each billed model in a mixed-model turn', () => {
     registerProviderPricing({
       'priced-expensive': { inputCostPerToken: 30e-6, outputCostPerToken: 60e-6 },

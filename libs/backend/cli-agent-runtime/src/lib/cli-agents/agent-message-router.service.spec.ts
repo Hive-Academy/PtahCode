@@ -102,6 +102,20 @@ describe('AgentMessageRouter', () => {
     logger = createLogger();
   });
 
+  it('queues a Codex budget warning after the completed turn rejects steer', async () => {
+    const router = new AgentMessageRouter(logger, createDetection({ steer: true, interrupt: false, continuation: true }));
+    const tracked = createRecord({ sdkHandle: {
+      steer: async () => { throw new Error('Codex active turn unavailable'); },
+      supportsContinuation: () => true,
+      continue: jest.fn(),
+    } as unknown as SdkHandle });
+    const steered = await router.route(AGENT_ID, tracked, 'Budget warning', createDispatcher(), 'steer');
+    expect(steered).toMatchObject({ mode: 'unsupported', reasonCode: 'steer-rejected' });
+    const queued = await router.route(AGENT_ID, tracked, 'Budget warning', createDispatcher(), 'queue');
+    expect(queued.mode).toBe('queue-next-turn');
+    expect(tracked.pendingMessages).toHaveLength(1);
+  });
+
   it('returns typed queue-full and no-session refusal codes', async () => {
     const router = new AgentMessageRouter(logger, createDetection({ steer: false, interrupt: false, continuation: true }));
     const tracked = createRecord({ pendingMessages: Array.from({ length: MAX_PENDING_MESSAGES }, (_, n) => ({ messageId: String(n), cliSessionId: 'session-1', text: 'queued' })) });

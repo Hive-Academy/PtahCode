@@ -884,6 +884,8 @@ describe('CodexEventTranslator', () => {
     expect(translator.translate(itemFrame(wait))).toMatchObject([{ type: 'toolStarted', toolId: 'wait-1' }]);
     expect(translator.translate(itemFrame({ ...wait, status: 'completed' }, true)))
       .toMatchObject([{ type: 'toolCompleted', toolId: 'wait-1', status: 'completed' }]);
+    expect(translator.translate(itemFrame({ ...spawn, receiverThreadIds: [], agentsStates: { child: { status: 'running' } } })))
+      .toMatchObject([{ type: 'toolStarted', agentThreadIds: ['child'] }]);
   });
 
   it('passes MCP failure result content with the error text and drops _meta', () => {

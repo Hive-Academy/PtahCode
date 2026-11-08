@@ -54,7 +54,9 @@ export class LaneBudgetTelemetry {
     }
     if (decision.warning) {
       void this.warn(agentId).then((outcome) => {
-        this.logger.info('[LaneBudgetTelemetry] Budget warning delivered', { agentId, mode: outcome.mode });
+        if (outcome.mode === 'unsupported')
+          this.logger.info('[LaneBudgetTelemetry] Budget warning unavailable; stop message will carry warning', { agentId, reason: outcome.reasonCode ?? outcome.detail });
+        else this.logger.info('[LaneBudgetTelemetry] Budget warning delivered', { agentId, mode: outcome.mode });
       }).catch((error: unknown) => {
         this.logger.error('[LaneBudgetTelemetry] Budget warning failed', error instanceof Error ? error : new Error(String(error)));
       });

@@ -105,7 +105,7 @@ export function buildLaneCompletionEnvelope(
       ? `CLI Session ID: ${signal.cliSessionId} — resume is refused after this budget stop.`
       : `CLI Session ID: ${signal.cliSessionId} — pass it as resume_session_id to continue this lane instead of respawning it.`);
   if (isAgentBudgetStop(signal))
-    lines.push(`Progress pointer: ${(signal.progressPointer ?? `ptah_agent_read agent_id=${signal.agentId} tail=200`).slice(0, 240)}`);
+    lines.push(`Progress pointer: ${(signal.progressPointer ?? `CLI Session ID ${signal.cliSessionId ?? 'unavailable'}; inspect lane ${signal.agentId} output`).slice(0, 240)}`);
   lines.push(nextAction(signal));
   return `<agent-lane-completed ${attrs}>\n${lines.join('\n')}\n</agent-lane-completed>`;
 }

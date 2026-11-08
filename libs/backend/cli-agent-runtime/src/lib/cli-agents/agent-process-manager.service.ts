@@ -459,9 +459,12 @@ export class AgentProcessManager {
     private readonly outputJournal?: AgentOutputJournal,
   ) {
     this.budgetTelemetry = new LaneBudgetTelemetry(this.logger,
-      (agentId) => this.sendToAgent(agentId,
-        'Budget warning: finish your current work, report progress, and prepare a short handoff.',
-        'steer', undefined, false),
+      async (agentId) => {
+        const message = 'Budget warning: finish your current work, report progress, and prepare a short handoff.';
+        const steered = await this.sendToAgent(agentId, message, 'steer');
+        if (steered.mode !== 'unsupported') return steered;
+        return this.sendToAgent(agentId, message, 'queue');
+      },
       (agentId, reason) => { void this.stopLaneForGuard(agentId, reason, 0, 0); });
     this.logger.info('[AgentProcessManager] Initialized');
   }
@@ -2413,11 +2416,8 @@ export class AgentProcessManager {
    * Deliver one message to a spawned agent by the best mechanism it supports,
    * and report which mechanism actually fired.
    *
-   * This replaces the old `steer()`, which could only ever answer "steering is
-   * not supported" for five of the six CLIs. Mode selection and the pending
-   * queue live in {@link AgentMessageRouter}; this method owns the three record
-   * states no mechanism can serve, because they are states of the MAP, not of
-   * the agent's messaging surface.
+   * Mode selection and the pending queue live in {@link AgentMessageRouter}; this method owns the three record
+   * states no mechanism can serve, because they belong to the agent record.
    *
    * A completed-but-alive continuation-capable agent is deliberately NOT one of
    * them: the honest answer there is "this message starts a new turn", which is
