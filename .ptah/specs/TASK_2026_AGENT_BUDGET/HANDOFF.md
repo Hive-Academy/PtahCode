@@ -29,7 +29,37 @@ PR: https://github.com/Hive-Academy/PtahCode/pull/986 (draft). Pushed head `5a84
 - Manager agent-process-manager.service.ts: 3849 physical / 3673 non-blank (main 3849 / 3675).
 - Side fix done for the user: PR #1000 CodeRabbit comment (commit 9cef23bb9, merged).
 
-## Update ~08:15 UTC (newest)
+## Update ~09:00 UTC (newest)
+- Pushed head `a512e806c` (CI green 18/4). Commits since cd1c9bb99: `7b6e5bd68` round 5 report,
+  `ccb7aa963` SDK notes + handoff-read, `a512e806c` Codex child real usage.
+- Final reviews of the whole PR: logic code-logic-review-final.md REVISE 6/10 (1 serious: Codex
+  child terminal-first skips the 2 s drain; 1 minor), style code-style-review-final.md
+  NEEDS_REVISION 7/10 (7 serious S1–S7 incl. settings export allowlist missing agentBudget keys).
+- RUNNING: final fix lane `230c61d0-89b5-4e07-83f4-6f9c131d30ab` (session 01a1ba56-bac7-7d92-b391-d3a8cc3ed8cc)
+  → fix-round-final-report.md. Do NOT commit while it runs.
+- Live test round 6 (UNCOMMITTED: live-test-round-6.md + live-test-round-6/; commit after the fix
+  lane; check live-test-round-6/scratch-generated-ptah for secrets before adding, probably exclude it):
+  B Codex child PASS (linked, real counters, advisory near 40000). A FAIL: warning and stop in the
+  same turn (209587 → 251031 at 250000) → warning routed `unsupported`, `Codex lane is closed`;
+  must fold the warning into the stop message without delivery, and widen the predictive margin
+  (e.g. max of last and largest turn delta). C FAIL: same-turn jump at low limits; #1004
+  REGRESSION: parent's first reply said "stopped by user" before reading the handoff; 4 new
+  acknowledgment-timeout warnings. These need a follow-up fix lane AFTER 230c61d0, then live test 7.
+- Told the task 7 session the round 6 results. Its pointers for the "stopped by user" regression
+  (line numbers from #1004 head e8de3d6d0): (1) subagent-budget-monitor.ts `deliverHandoff` (~1833)
+  must push the full handoff via `dispatcher.pushParentMessage` on EVERY forced stop, before the
+  parent's next reply; (2) subagent-handoff-message.ts parent builder (~107-117) first sentence
+  "Ptah's subagent budget monitor handed off subagent ..."; (3) subagent-budget-hooks.ts ~50-60
+  takeNormalHandoff/takeInterruptedHandoff (SDK drops that additionalContext, so route 1 matters);
+  (4) subagent-budget-hooks.ts:37 session key `data.session_id ?? capturedSessionId` — check the
+  batch B re-key (parent session + task id) still finds the state; (5) PROBABLE ROOT CAUSE: the
+  batch B AgentBudgetPolicy hard stop at the stop limit bypasses the #1004 path (warnNearBudget
+  ~676 notes gate; forced stops only from 3 denial bursts, gate deadline, weighted limit,
+  RUNAWAY_BUDGET_MULTIPLE=2 ~205/680) → no notice, no notes update, no route-1 delivery. The
+  policy stop must go through the same forced-stop path (deliverHandoff route 1). See also
+  .ptah/specs/TASK_2026_SUBAGENT_STOP_HANDOFF/live-test.md in main (same failure in #1004 live 1).
+
+## Update ~08:15 UTC
 - feat/agent-budget pushed head `cd1c9bb99` (batch B merged; child linkage `9007e4b11`); local
   commit `7b6e5bd68` (live test round 5 report) not pushed. CI watch on cd1c9bb99 running.
 - Live test round 5: Codex lane PROVEN end to end incl. warning text in the Codex rollout; native
