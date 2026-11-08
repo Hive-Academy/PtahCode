@@ -39,8 +39,8 @@ import type { LaneThreadEntry } from './lane-thread';
           <span class="badge badge-xs shrink-0" [class.badge-info]="badgeTone() === 'info'"
             [class.badge-success]="badgeTone() === 'success'" [class.badge-warning]="badgeTone() === 'warning'"
             [class.badge-error]="badgeTone() === 'error'">{{ badgeLabel() }}</span>
-          <span class="min-w-0 flex-1 truncate text-base-content/70" [title]="summary()">{{ summary() }}</span>
-          <time class="shrink-0 text-base-content/60" [attr.datetime]="iso()" [title]="absoluteTime()">{{ shortTime() }}</time>
+          <span class="min-w-0 flex-1 truncate text-base-content-muted" [title]="summary()">{{ summary() }}</span>
+          <time class="shrink-0 text-base-content-muted" [attr.datetime]="iso()" [title]="absoluteTime()">{{ shortTime() }}</time>
           <lucide-angular [img]="expanded() ? ChevronDownIcon : ChevronRightIcon" class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         </button>
         @if (!expanded() && deliveryNeedsAttention() && entry().parentDelivery; as delivery) {
