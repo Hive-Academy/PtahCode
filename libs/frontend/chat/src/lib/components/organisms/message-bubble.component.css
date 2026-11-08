@@ -16,7 +16,7 @@
   margin-left: auto;
   border-radius: 1rem 1rem 0.375rem 1rem;
   border-width: 1px;
-  text-align: left;
+  text-align: start;
 }
 
 .cs-peer-chat .cs-user-bubble {
@@ -222,9 +222,12 @@
 
 /* --- Blockquotes: callout card style --- */
 :host ::ng-deep markdown blockquote {
-  border-left: 3px solid oklch(var(--s) / 0.22);
+  border-inline-start: 3px solid oklch(var(--s) / 0.22);
   background-color: oklch(var(--b2) / 0.25);
-  border-radius: 0 0.375rem 0.375rem 0;
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+  border-start-end-radius: 0.375rem;
+  border-end-end-radius: 0.375rem;
   padding: 0.6em 0.85em;
   margin: 0.75em 0;
   font-style: italic;
@@ -242,7 +245,7 @@
 /* --- Lists: custom bullets and comfortable spacing --- */
 :host ::ng-deep markdown ul,
 :host ::ng-deep markdown ol {
-  padding-left: 1.5em;
+  padding-inline-start: 1.5em;
   margin: 0.6em 0;
 }
 
@@ -252,7 +255,7 @@
 
 :host ::ng-deep markdown ul > li {
   position: relative;
-  padding-left: 0.15em;
+  padding-inline-start: 0.15em;
   margin-bottom: 0.35em;
   line-height: 1.6;
 }
@@ -261,7 +264,7 @@
 :host ::ng-deep markdown ul > li::before {
   content: '';
   position: absolute;
-  left: -1.1em;
+  inset-inline-start: -1.1em;
   top: 0.55em;
   width: 5px;
   height: 5px;
@@ -271,7 +274,7 @@
 
 :host ::ng-deep markdown ol > li {
   margin-bottom: 0.35em;
-  padding-left: 0.15em;
+  padding-inline-start: 0.15em;
   line-height: 1.6;
 }
 
@@ -342,7 +345,7 @@
   background-color: oklch(var(--b2) / 0.5);
   border-bottom: 2px solid oklch(var(--s) / 0.08);
   padding: 0.5em 0.75em;
-  text-align: left;
+  text-align: start;
   font-weight: 600;
   font-size: 0.88em;
   color: oklch(var(--bc) / 0.9);
@@ -353,10 +356,25 @@
 :host ::ng-deep markdown td {
   border-bottom: 1px solid oklch(var(--bc) / 0.06);
   padding: 0.45em 0.75em;
-  text-align: left;
+  text-align: start;
   word-wrap: break-word;
   max-width: 300px;
   color: oklch(var(--bc) / 0.85);
+}
+
+/* Markdown is created inside child renderers, so pierce view encapsulation here. */
+:host ::ng-deep :is(.cs-answer, .cs-user-bubble) :is(markdown, .ptah-markdown-root) :is(p, li, h1, h2, h3, h4, h5, h6, blockquote, th, td) {
+  unicode-bidi: plaintext;
+  text-align: start;
+}
+
+:host ::ng-deep :is(.cs-answer, .cs-user-bubble) :is(markdown, .ptah-markdown-root) :is(pre, code) {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+:host ::ng-deep :is(.cs-answer, .cs-user-bubble) :is(markdown, .ptah-markdown-root) pre {
+  text-align: left;
 }
 
 :host ::ng-deep markdown tr:last-child td {

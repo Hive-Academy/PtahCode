@@ -87,6 +87,15 @@ describe('MessageBubbleComponent — branch/rewind action buttons', () => {
     fixture.detectChanges();
   }
 
+  it('sets automatic direction on assistant content and user markdown', () => {
+    setMessage(createExecutionChatMessage({ id: 'rtl-assistant', role: 'assistant', rawContent: 'مرحبا' }));
+    expect((fixture.nativeElement as HTMLElement).querySelector('.cs-answer')?.getAttribute('dir')).toBe('auto');
+    expect((fixture.nativeElement as HTMLElement).querySelector('.cs-answer markdown')?.getAttribute('dir')).toBe('auto');
+
+    setMessage(createExecutionChatMessage({ id: 'rtl-user', role: 'user', rawContent: 'مرحبا' }));
+    expect((fixture.nativeElement as HTMLElement).querySelector('.cs-user-bubble markdown')?.getAttribute('dir')).toBe('auto');
+  });
+
   it('shows Interrupted after a partial assistant reply', () => {
     setMessage(createExecutionChatMessage({
       id: 'partial', role: 'assistant', rawContent: 'Partial reply', isInterrupted: true,

@@ -76,6 +76,7 @@ import type { ExecutionNode } from '@ptah-extension/shared';
             class="prose prose-sm prose-invert max-w-none text-base-content-muted leading-relaxed"
           >
             <markdown
+              dir="auto"
               [data]="node().content || '' | surfaceMarkdown: surfaceActive()"
             />
           </div>
@@ -83,6 +84,19 @@ import type { ExecutionNode } from '@ptah-extension/shared';
       }
     </div>
   `,
+  styles: [`
+    :host ::ng-deep markdown :is(p, li, h1, h2, h3, h4, h5, h6, blockquote, th, td) {
+      unicode-bidi: plaintext;
+      text-align: start;
+    }
+    :host ::ng-deep markdown :is(pre, code) {
+      direction: ltr;
+      unicode-bidi: isolate;
+    }
+    :host ::ng-deep markdown pre {
+      text-align: left;
+    }
+  `],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ThinkingBlockComponent {
