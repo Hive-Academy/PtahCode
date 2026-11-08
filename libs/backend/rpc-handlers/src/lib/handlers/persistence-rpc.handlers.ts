@@ -32,6 +32,9 @@ import {
   KEEP_BY_KIND,
   PERSISTENCE_TOKENS,
   SqliteConnectionService,
+  SqliteIntegrityService,
+  INTEGRITY_WORKER_BUDGET_MS,
+  IntegrityCheckStateStore,
   VecStatusService,
 } from '@ptah-extension/persistence-sqlite';
 import type {
@@ -162,6 +165,10 @@ export class PersistenceRpcHandlers {
      */
     @inject(PERSISTENCE_TOKENS.SQLITE_EXCLUSIVE_ACCESS, { isOptional: true })
     private readonly exclusiveAccess: ISqliteExclusiveAccess | null = null,
+    @inject(IntegrityCheckStateStore)
+    private readonly integrityState: IntegrityCheckStateStore | null = null,
+    @inject(PERSISTENCE_TOKENS.SQLITE_INTEGRITY_SERVICE, { isOptional: true })
+    private readonly integrityService: SqliteIntegrityService | null = null,
   ) {}
 
   /** Register all `db:*` methods with the shared RpcHandler. */
@@ -303,33 +310,19 @@ export class PersistenceRpcHandlers {
       vecExtensionLoaded: vecSnapshot.available,
       vecDiagnostic: toVecDiagnosticWire(vecSnapshot.diagnostic),
       lastMigrationVersion: this.connection.lastMigrationVersion,
-      fullCheckRun: fullCheck,
+      fullCheckRun: false,
       integrityCheckPassed: null,
     };
 
     try {
       const db = this.connection.db;
-      try {
-        const qc = db.pragma('quick_check', { simple: true }) as string;
-        result.quickCheckPassed = qc === 'ok';
-      } catch (err: unknown) {
-        this.logger.warn('[persistence] db:health quick_check failed', {
-          error: err instanceof Error ? err.message : String(err),
-        });
+      const stored = this.integrityState?.read();
+      if (stored) {
+        result.quickCheckPassed = stored.quickCheckOk;
+        result.foreignKeyViolations = stored.foreignKeyViolations;
       }
-      try {
-        const rows = db.pragma('foreign_key_check') as Array<{
-          table: string;
-          rowid: number;
-          parent: string;
-          fkid: number;
-        }>;
-        result.foreignKeyViolations = rows.length;
-        result.foreignKeyViolationSample = rows.slice(0, 3);
-      } catch (err: unknown) {
-        this.logger.warn('[persistence] db:health foreign_key_check failed', {
-          error: err instanceof Error ? err.message : String(err),
-        });
+      if (!fullCheck && this.integrityService?.isDue()) {
+        void this.integrityService.dispatchIfDue({ healthPoll: true });
       }
       try {
         const pageCount = db.pragma('page_count', { simple: true }) as number;
@@ -355,17 +348,6 @@ export class PersistenceRpcHandlers {
       } catch {
         result.walSizeKb = null;
       }
-      if (fullCheck) {
-        try {
-          const ic = db.pragma('integrity_check', { simple: true }) as string;
-          result.integrityCheckPassed = ic === 'ok';
-        } catch (err: unknown) {
-          this.logger.warn('[persistence] db:health integrity_check failed', {
-            error: err instanceof Error ? err.message : String(err),
-          });
-          result.integrityCheckPassed = false;
-        }
-      }
     } catch (err: unknown) {
       this.logger.warn('[persistence] db:health lost connection during check', {
         error: err instanceof Error ? err.message : String(err),
@@ -384,6 +366,23 @@ export class PersistenceRpcHandlers {
         fullCheckRun: false,
         integrityCheckPassed: null,
       };
+    }
+
+    if (fullCheck && this.integrityService) {
+      const checked = await this.integrityService.runFullCheck();
+      if (checked) {
+        result.fullCheckRun = true;
+        result.quickCheckPassed = checked.verdict === 'ok';
+        result.foreignKeyViolations = checked.foreignKeyViolations;
+        result.foreignKeyViolationSample = checked.foreignKeyViolationSample ?? [];
+        result.integrityCheckPassed = checked.integrityCheckPassed ?? null;
+      }
+    } else if (fullCheck) {
+      this.logger.warn('[persistence] db:health full check unavailable', {
+        reason: 'integrity service unavailable',
+        durationMs: 0,
+        budgetMs: INTEGRITY_WORKER_BUDGET_MS,
+      });
     }
 
     return result;

@@ -200,8 +200,8 @@ describe('PersistenceRpcHandlers', () => {
     const result = (await rpcHandler._call('db:health', {})) as DbHealthResult;
 
     expect(result.isOpen).toBe(true);
-    expect(result.quickCheckPassed).toBe(true);
-    expect(result.foreignKeyViolations).toBe(0);
+    expect(result.quickCheckPassed).toBeNull();
+    expect(result.foreignKeyViolations).toBeNull();
     expect(result.foreignKeyViolationSample).toEqual([]);
     expect(result.dbSizeMb).toBeGreaterThanOrEqual(0);
     expect(result.vecExtensionLoaded).toBe(true);
@@ -238,8 +238,14 @@ describe('PersistenceRpcHandlers', () => {
     expect(result.integrityCheckPassed).toBeNull();
   });
 
-  it('db:health with fullCheck=true runs integrity_check and sets fullCheckRun', async () => {
-    const { conn } = makeConnection({ isOpen: true });
+  it('db:health with fullCheck=true uses the worker result', async () => {
+    const { conn, db } = makeConnection({ isOpen: true });
+    const integrityService = {
+      runFullCheck: jest.fn().mockResolvedValue({
+        verdict: 'ok', foreignKeyViolations: 0,
+        foreignKeyViolationSample: [], integrityCheckPassed: true,
+      }),
+    };
 
     const handler = new PersistenceRpcHandlers(
       logger as never,
@@ -248,6 +254,9 @@ describe('PersistenceRpcHandlers', () => {
       backup as never,
       vecStatus as never,
       userInteraction as never,
+      null,
+      null,
+      integrityService as never,
     );
     handler.register();
 
@@ -257,13 +266,13 @@ describe('PersistenceRpcHandlers', () => {
 
     expect(result.fullCheckRun).toBe(true);
     expect(result.integrityCheckPassed).toBe(true);
+    expect(db.pragma).not.toHaveBeenCalledWith('quick_check', expect.anything());
+    expect(db.pragma).not.toHaveBeenCalledWith('integrity_check', expect.anything());
   });
 
-  it('db:health reports quick_check failure without throwing', async () => {
-    const { conn } = makeConnection({
-      isOpen: true,
-      pragmaResponses: { quick_check: 'integrity check failed' },
-    });
+  it('db:health uses the stored failed verdict without checking on the main connection', async () => {
+    const { conn, db } = makeConnection({ isOpen: true });
+    const state = { read: jest.fn(() => ({ quickCheckOk: false, foreignKeyViolations: 4 })) };
 
     const handler = new PersistenceRpcHandlers(
       logger as never,
@@ -272,6 +281,8 @@ describe('PersistenceRpcHandlers', () => {
       backup as never,
       vecStatus as never,
       userInteraction as never,
+      null,
+      state as never,
     );
     handler.register();
 
@@ -279,20 +290,15 @@ describe('PersistenceRpcHandlers', () => {
 
     expect(result.isOpen).toBe(true);
     expect(result.quickCheckPassed).toBe(false);
+    expect(result.foreignKeyViolations).toBe(4);
+    expect(db.pragma).not.toHaveBeenCalledWith('quick_check', expect.anything());
+    expect(db.pragma).not.toHaveBeenCalledWith('foreign_key_check');
     // Handler must not throw — always returns a structured result
   });
 
-  it('db:health reports FK violations in the sample (up to 3)', async () => {
-    const violations = [
-      { table: 'memories', rowid: 1, parent: 'sessions', fkid: 0 },
-      { table: 'memories', rowid: 2, parent: 'sessions', fkid: 0 },
-      { table: 'memories', rowid: 3, parent: 'sessions', fkid: 0 },
-      { table: 'memories', rowid: 4, parent: 'sessions', fkid: 0 },
-    ];
-    const { conn } = makeConnection({
-      isOpen: true,
-      pragmaResponses: { foreign_key_check: violations },
-    });
+  it('db:health reports stored FK count without a main connection check', async () => {
+    const { conn, db } = makeConnection({ isOpen: true });
+    const state = { read: jest.fn(() => ({ quickCheckOk: true, foreignKeyViolations: 4 })) };
 
     const handler = new PersistenceRpcHandlers(
       logger as never,
@@ -301,13 +307,16 @@ describe('PersistenceRpcHandlers', () => {
       backup as never,
       vecStatus as never,
       userInteraction as never,
+      null,
+      state as never,
     );
     handler.register();
 
     const result = (await rpcHandler._call('db:health', {})) as DbHealthResult;
 
     expect(result.foreignKeyViolations).toBe(4);
-    expect(result.foreignKeyViolationSample).toHaveLength(3);
+    expect(result.foreignKeyViolationSample).toEqual([]);
+    expect(db.pragma).not.toHaveBeenCalledWith('foreign_key_check');
   });
 
   it('db:health returns walSizeKb=null when WAL file is absent', async () => {

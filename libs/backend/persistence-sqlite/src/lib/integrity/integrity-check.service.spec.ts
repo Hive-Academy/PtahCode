@@ -17,6 +17,7 @@ import {
   SqliteIntegrityService,
   DB_INTEGRITY_CHECK_INTERVAL_MS,
   INTEGRITY_WORKER_BUDGET_MS,
+  DB_HEALTH_CHECK_COOLDOWN_MS,
 } from './integrity-check.service';
 import type {
   IntegrityCheckStateStore,
@@ -42,6 +43,42 @@ const CLEAN_RESPONSE: IntegrityCheckResponse = {
   pageCount: 256_183,
   detail: null,
 };
+
+describe('db:health poll cooldown and explicit full check', () => {
+  it('starts one background attempt per cooldown even when the result is inconclusive', async () => {
+    let now = NOW;
+    const clock = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const { service, workers, spawnCount, writes } = makeHarness({ state: null });
+      const first = service.dispatchIfDue({ healthPoll: true });
+      expect(spawnCount()).toBe(1);
+      workers[0].emitMessage({ ...CLEAN_RESPONSE, verdict: 'unavailable', detail: 'busy' });
+      await first;
+      now += DB_HEALTH_CHECK_COOLDOWN_MS - 1;
+      await service.dispatchIfDue({ healthPoll: true });
+      expect(spawnCount()).toBe(1);
+      expect(writes).toHaveLength(0);
+      now += 1;
+      const second = service.dispatchIfDue({ healthPoll: true });
+      expect(spawnCount()).toBe(2);
+      workers[1].emitMessage(CLEAN_RESPONSE);
+      await second;
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('coalesces concurrent explicit full checks onto one worker and promise', async () => {
+    const { service, workers, spawnCount } = makeHarness({ state: null });
+    const first = service.runFullCheck();
+    const second = service.runFullCheck();
+    expect(second).toBe(first);
+    expect(spawnCount()).toBe(1);
+    workers[0].emitMessage({ ...CLEAN_RESPONSE, integrityCheckPassed: true });
+    await expect(first).resolves.toMatchObject({ integrityCheckPassed: true });
+    expect(spawnCount()).toBe(1);
+  });
+});
 
 /**
  * A clean record `days` old relative to `base`.

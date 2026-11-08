@@ -229,6 +229,12 @@ function runCheck(request: IntegrityCheckRequest): IntegrityWorkerOutbound {
     // the pair's warm cost — so it is always worth running once we are here.
     const fkRows = db.pragma('foreign_key_check');
     const foreignKeyViolations = Array.isArray(fkRows) ? fkRows.length : 0;
+    const foreignKeyViolationSample = Array.isArray(fkRows)
+      ? fkRows.slice(0, 3) as Array<{ table: string; rowid: number; parent: string; fkid: number }>
+      : [];
+    const integrityCheckPassed = request.fullCheck
+      ? db.pragma('integrity_check', { simple: true }) === 'ok'
+      : undefined;
 
     const pageCountRaw = db.pragma('page_count', { simple: true });
     const pageCount = typeof pageCountRaw === 'number' ? pageCountRaw : 0;
@@ -248,6 +254,8 @@ function runCheck(request: IntegrityCheckRequest): IntegrityWorkerOutbound {
       verdict,
       quickCheck,
       foreignKeyViolations,
+      foreignKeyViolationSample,
+      integrityCheckPassed,
       durationMs: Date.now() - startedAt,
       pageCount,
       detail,
