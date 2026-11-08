@@ -1,4 +1,5 @@
 import type { CodexApprovalRequest } from './codex-runtime.types';
+import { splitCodexShellWords } from './codex-shell-words';
 
 /**
  * How a native Codex App Server tool call or approval request is presented to
@@ -58,51 +59,35 @@ function named(
 
 /** Display only: unwrap a known shell launcher without changing the raw input. */
 function unwrapCommand(command: string): string {
-  const launcher = /^\s*(?:"([^"]+)"|(\S+))\s+([\s\S]*)$/.exec(command);
-  if (!launcher) return command;
-  const executable = launcher[1] ?? launcher[2] ?? '';
-  const args = launcher[3] ?? '';
-  if (/(?:^|[\\/])cmd(?:\.exe)?$/i.test(executable)) {
-    const match = /^(?:\/d\s+)?(?:\/s\s+)?\/c\s+([\s\S]+)$/i.exec(args);
-    if (!match) return command;
-    const rawInner = match[1].trim();
-    const quote = rawInner[0];
-    if ((quote === '"' || quote === "'") && !rawInner.endsWith(quote))
-      return command;
-    if (
-      (quote === '"' || quote === "'") &&
-      rawInner.slice(1, -1).includes(quote)
-    )
-      return command;
-    const inner =
-      (quote === '"' || quote === "'") &&
-      rawInner.endsWith(quote) &&
-      !rawInner.slice(1, -1).includes(quote)
-        ? rawInner.slice(1, -1)
-        : rawInner;
-    return inner.trim() ? inner : command;
-  }
-  if (!/(?:^|[\\/])(?:powershell|pwsh)(?:\.exe)?$/i.test(executable))
-    return command;
-  let rest = args;
-  while (true) {
-    const option = /^-(?:NoProfile|NonInteractive)(?:\s+|$)/i.exec(rest);
-    if (option) {
-      rest = rest.slice(option[0].length);
-      continue;
+  const words = splitCodexShellWords(command);
+  if (!words?.length) return command;
+  const executable = words[0];
+  let index = 1;
+  let inner: string | undefined;
+
+  if (/(?:^|[\\/])(?:powershell|pwsh)(?:\.exe)?$/i.test(executable)) {
+    while (index < words.length) {
+      const option = words[index].toLowerCase();
+      if (['-noprofile', '-noninteractive', '-nologo'].includes(option)) {
+        index++;
+      } else if (option === '-executionpolicy' && index + 1 < words.length) {
+        index += 2;
+      } else {
+        break;
+      }
     }
-    const policy = /^-ExecutionPolicy\s+\S+\s+/i.exec(rest);
-    if (policy) {
-      rest = rest.slice(policy[0].length);
-      continue;
-    }
-    break;
+    if (/^-(?:command|c)$/i.test(words[index] ?? ''))
+      inner = words.slice(index + 1).join(' ');
+  } else if (/(?:^|[\\/])cmd(?:\.exe)?$/i.test(executable)) {
+    while (/^\/(?:d|s)$/i.test(words[index] ?? '')) index++;
+    if (/^\/c$/i.test(words[index] ?? ''))
+      inner = words.slice(index + 1).join(' ');
+  } else if (/(?:^|[\\/])(?:bash|sh|zsh)$/i.test(executable)) {
+    if (words[index] === '-l') index++;
+    if (words[index] === '-c' || words[index] === '-lc')
+      inner = words[index + 1];
   }
-  const invocation = /^-Command\s+(["'])([\s\S]*)\1\s*$/i.exec(rest);
-  if (!invocation) return command;
-  const inner = invocation[2];
-  if (!inner.trim() || inner.includes(invocation[1])) return command;
-  return inner;
+  return inner?.trim() ? inner : command;
 }
 
 /**

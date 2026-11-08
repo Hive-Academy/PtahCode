@@ -2,6 +2,8 @@ import type {
   CodexApprovalRequest,
   CodexJsonValue,
 } from './codex-runtime.types';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   CODEX_DENIED_TOOL_RESULT_TEXT,
   presentCodexApproval,
@@ -30,6 +32,36 @@ function approval(
 }
 
 describe('shell wrapper display', () => {
+  const capturedCommands: string[] = JSON.parse(
+    readFileSync(
+      resolve(__dirname, '../../../../../.ptah/specs/TASK_codex_command_unquote/raw-command-samples.json'),
+      'utf8',
+    ),
+  );
+  const capturedDisplays = [
+    'Get-Content .ptah/specs/TASK_2026_AGENT_BUDGET/usage-burn-investigation.md -TotalCount 100',
+    'Get-Content .ptah/specs/TASK_2026_AGENT_BUDGET/usage-scripts/analyze.py -TotalCount 100',
+    'Get-Content .ptah/specs/TASK_2026_AGENT_BUDGET/usage-burn-investigation.md -Tail 24',
+    "Get-ChildItem C:\\Users\\abdal\\.ptah,C:\\Users\\abdal\\.ptah-dev -Force | Where-Object { $_.Name -notmatch 'credential|auth|token|secret|env' } | Select-Object DirectoryName,Name,Mode",
+    "Get-ChildItem C:\\Users\\abdal\\.ptah,C:\\Users\\abdal\\.ptah-dev,$env:APPDATA,$env:LOCALAPPDATA -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match 'ptah' -and $_.Extension -in '.db','.sqlite','.sqlite3' } | Select-Object -ExpandProperty FullName",
+    "rg -n 'certifiedNamedEnv|persistSession|CLAUDE_CONFIG_DIR' libs/backend/agent-sdk/src/lib/helpers/sdk-query-options-builder.ts libs/backend/auth-providers/src/lib/accounts/claude-certified-launch.ts",
+    "rg -n 'accountProfileId|sessionId|usage|model' libs/backend/persistence-sqlite/src/lib --glob '*.ts' | Select-Object -First 75",
+    "rg --files libs/backend | rg 'claude-certified-launch|session-store|sdk-query-options-builder' | Select-Object -First 30",
+    'Get-Content libs/backend/agent-sdk/src/lib/helpers/sdk-query-options-builder.ts | Select-Object -Skip 1170 -First 65',
+    'Get-Content libs/backend/agent-sdk/src/lib/helpers/sdk-query-options-builder.ts | Select-Object -Skip 1575 -First 55',
+    'python -I -c "import sqlite3, pathlib; p=pathlib.Path(r\'C:\\Users\\abdal\\.ptah\\state\'); dbs=[\'ptah.sqlite\',\'ptah-dev.sqlite\',\'sessions.sqlite\',\'sessions-dev.sqlite\']; [(lambda c,n: print(n, [(r[0],r[1][:180]) for r in c.execute(\\"select name,sql from sqlite_master where type=\'table\' and (name like \'%session%\' or name like \'%usage%\' or name like \'%message%\')\\")]))(sqlite3.connect(\'file:\'+str(p/n)+\'?mode=ro\',uri=True),n) for n in dbs if (p/n).exists()]"',
+    'python -I .ptah/specs/TASK_2026_AGENT_BUDGET/usage-scripts/named_db.py',
+  ];
+
+  it('unwraps every captured Codex command exactly', () => {
+    expect(capturedCommands).toHaveLength(capturedDisplays.length);
+    capturedCommands.forEach((raw, index) => {
+      expect(presentCodexTool('commandExecution', { command: raw }).toolInput).toEqual({
+        command: capturedDisplays[index],
+      });
+    });
+  });
+
   it.each([
     [
       '"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -Command "rg -n test"',
@@ -49,23 +81,24 @@ describe('shell wrapper display', () => {
       presentCodexTool('commandExecution', { command: raw }).toolInput,
     ).toEqual({ command: display });
   });
-  it('leaves uncertain syntax alone', () => {
-    const raw = 'pwsh -Command "echo "nested""';
-    expect(
-      presentCodexTool('commandExecution', { command: raw }).toolInput,
-    ).toMatchObject({ command: raw });
+  it.each([
+    ["pwsh -NoLogo -c 'Write-Output $env:APPDATA'", 'Write-Output $env:APPDATA'],
+    ['cmd /d /s /c "echo hello && echo world"', 'echo hello && echo world'],
+    ["/bin/bash -lc 'printf '\"'\"'%s'\"'\"' hello'", "printf '%s' hello"],
+    ["/bin/sh -l -c 'echo hello'", 'echo hello'],
+  ])('unwraps additional launcher %s', (raw, display) => {
+    expect(presentCodexTool('commandExecution', { command: raw }).toolInput).toEqual({ command: display });
   });
   it.each([
-    'pwsh -Command "a" "b"',
-    'pwsh -Command "a"; echo "b"',
-    'pwsh -Command "a \\" b"',
-    'pwsh -Command "a" trailing',
     'pwsh -EncodedCommand ZQBjAGgAbwA=',
     'pwsh -File script.ps1',
-    'pwsh -Command echo hi',
     'C:\\Program Files\\PowerShell\\pwsh.exe -Command "echo hi"',
     'pwsh -Command "   "',
     'cmd /c "   "',
+    'pwsh -Command "unterminated',
+    'python -c "echo hello"',
+    'cmd.exe /c dir C:\\x',
+    'powershell.exe -Command Get-Content C:\\Users\\x\\file.txt',
   ])('preserves unparseable %s', (raw) => {
     expect(
       presentCodexTool('commandExecution', { command: raw }).toolInput,
