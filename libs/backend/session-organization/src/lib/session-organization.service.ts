@@ -32,6 +32,7 @@
  * Logs through `IOutputChannel` with the `[SessionOrganization]` prefix (D15).
  */
 import { inject, injectable } from 'tsyringe';
+import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import {
   PLATFORM_TOKENS,
   normalizeWorkspaceRoot,
@@ -91,7 +92,7 @@ interface DeferredDelete {
 }
 
 type RecorderInput<K extends keyof ISessionOrganizationRecorder> = Parameters<
-  ISessionOrganizationRecorder[K]
+  NonNullable<ISessionOrganizationRecorder[K]>
 >[0];
 
 /** The part of the metadata store this service reads. */
@@ -204,6 +205,23 @@ export function toSessionOrganizationSummary(
 export class SessionOrganizationService
   implements ISessionOrganizationRecorder, IDisposable
 {
+  clearRemovedWorktree(worktreePath: string): { cleared: number } | { error: Error } {
+    if (!worktreePath.trim()) return { cleared: 0 };
+    if (!this.isAvailable()) return { error: new Error(UNAVAILABLE_MESSAGE) };
+    try {
+      let cleared = 0;
+      for (const [workspaceRoot, sessionIds] of this.store.clearRemovedWorktree(worktreePath, Date.now())) {
+        cleared += sessionIds.length;
+        this.emitChange({ workspaceRoot, sessionIds, reason: 'capture' });
+      }
+      return { cleared };
+    } catch (error: unknown) {
+      const failure = error instanceof Error ? error : new Error(describe(error));
+      if (this.logger) this.logger.error('clearRemovedWorktree failed', failure);
+      else this.log(`clearRemovedWorktree failed: ${failure.message}`);
+      return { error: failure };
+    }
+  }
   private readonly listeners = new Set<
     (e: SessionOrganizationChange) => void
   >();
@@ -221,6 +239,8 @@ export class SessionOrganizationService
     private readonly metadata: SessionOrganizationMetadataReader,
     @inject(PLATFORM_TOKENS.OUTPUT_CHANNEL)
     private readonly output: IOutputChannel,
+    @inject(TOKENS.LOGGER, { isOptional: true })
+    private readonly logger?: Logger,
   ) {}
 
   /** Fires after every committed write. Released by `dispose()`. */

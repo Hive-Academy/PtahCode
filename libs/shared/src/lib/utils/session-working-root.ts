@@ -29,6 +29,8 @@ export type SessionWorkingRootSource =
   | 'workspace-root';
 
 export interface SessionWorkingRootInput {
+  /** Roots already refused by git for this session. */
+  readonly unavailableRoots?: readonly string[];
   readonly organizationWorktreePath: string | null;
   readonly agentOriginWorktreePath: string | null;
   /** The session's own working directory, when the caller knows one. */
@@ -65,7 +67,7 @@ export function resolveSessionWorkingRoot(
   ];
   for (const [source, value] of candidates) {
     const root = present(value);
-    if (root !== null) return { root, source };
+    if (root !== null && !input.unavailableRoots?.some((excluded) => isSameWorkingRoot(excluded, root))) return { root, source };
   }
   return NO_ROOT;
 }

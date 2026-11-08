@@ -8,7 +8,7 @@ import {
   signal,
 } from '@angular/core';
 import { TabManagerService } from '@ptah-extension/chat-state';
-import { VSCodeService } from '@ptah-extension/core';
+import { VSCodeService, UnavailableGitRootsStore } from '@ptah-extension/core';
 import {
   GitBranch,
   LoaderCircle,
@@ -100,6 +100,7 @@ let nextGitId = 0;
   `,
 })
 export class InspectorGitSectionComponent {
+  private readonly unavailableRoots = inject(UnavailableGitRootsStore);
   private readonly tabs = inject(TabManagerService);
   private readonly gitStore = inject(SessionGitStatsStore);
   private readonly vscode = inject(VSCodeService);
@@ -130,6 +131,7 @@ export class InspectorGitSectionComponent {
           this.vscode.config().workspaceRoot,
           // Same organization read as the git dock scope (TASK_2026_855).
           this.worktrees.worktreeFor(found.tab.claudeSessionId).worktreePath,
+          this.unavailableRoots.roots().map((entry) => entry.path),
         )
       : null;
   });

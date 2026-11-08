@@ -10,6 +10,7 @@ import type { TabState } from '@ptah-extension/chat-types';
 import { sameGitState, type CompactGitState } from '@ptah-extension/chat-ui';
 import {
   VSCodeService,
+  UnavailableGitRootsStore,
   rpcCall,
   type MessageHandler,
 } from '@ptah-extension/core';
@@ -153,12 +154,14 @@ export function sessionWorkingRoot(
   partitionPath: string | null,
   fallback: string | undefined,
   organizationWorktreePath: string | null = null,
+  unavailableRoots: readonly string[] = [],
 ): string | null {
   return resolveSessionWorkingRoot({
     organizationWorktreePath,
     agentOriginWorktreePath: tab.agentOrigin?.worktreePath ?? null,
     sessionCwd: partitionPath,
     workspaceRoot: fallback ?? null,
+    unavailableRoots,
   }).root;
 }
 
@@ -166,6 +169,7 @@ export function sessionWorkingRoot(
 @Injectable({ providedIn: 'root' })
 export class SessionGitStatsStore implements MessageHandler {
   private readonly vscode = inject(VSCodeService);
+  private readonly unavailableRoots = inject(UnavailableGitRootsStore);
   private readonly tabManager = inject(TabManagerService);
   private readonly entries = new Map<string, RootEntry>();
   private readonly queue: RootEntry[] = [];
@@ -338,11 +342,13 @@ export class SessionGitStatsStore implements MessageHandler {
         entry.generation === generation
       ) {
         if (result.success && isGitInfo(result.data)) {
+          this.unavailableRoots.clear(entry.root);
           entry.backoffUntil = undefined;
           this.setState(entry, toState(result.data));
         } else {
           console.warn(`${LOG_PREFIX} Git read failed.`, result.error);
           if (result.error === GIT_ROOT_UNAVAILABLE_MESSAGE) {
+            this.unavailableRoots.mark(entry.root);
             entry.backoffUntil = Date.now() + UNAVAILABLE_ROOT_BACKOFF_MS;
           }
           if (result.error === GIT_ROOT_PROBE_FAILED_MESSAGE) {
