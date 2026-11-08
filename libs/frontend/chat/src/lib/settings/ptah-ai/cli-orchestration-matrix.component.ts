@@ -210,7 +210,7 @@ const SAVE_SCOPE = 'global';
       <!-- A glass tile in glass themes, a base-100 plate with a hairline in solid themes. The table fits its width
            (headers and permission badges wrap); overflow-x-auto is only a safety net. -->
       <div
-        class="overflow-x-auto rounded-lg border border-base-content/10"
+        class="min-w-0 max-w-full overflow-x-auto rounded-lg border border-base-content/10"
         data-glass-surface="tile"
       >
         <!-- table-sm density; cell padding is set in the styles below (wide and narrow).
@@ -836,6 +836,16 @@ const SAVE_SCOPE = 'global';
     :host {
       display: block;
       container-type: inline-size;
+      min-width: 0;
+      max-width: 100%;
+    }
+    .cli-table {
+      table-layout: fixed;
+    }
+    .cli-head > th,
+    .cli-row > td {
+      min-width: 0;
+      overflow-wrap: anywhere;
     }
     :host-context([data-glass='on']) [data-testid='settings-cli-matrix'] {
       padding: 1.25rem;

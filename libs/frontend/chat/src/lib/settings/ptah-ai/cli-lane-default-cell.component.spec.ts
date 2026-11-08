@@ -19,7 +19,7 @@ const manifest: CliAdapterManifest = {
 };
 
 describe('CliLaneDefaultCellComponent', () => {
-  function setup(cli: 'codex' | 'ptah-cli' = 'codex', value?: { permission?: 'plan' | 'yolo'; network?: 'allow' | 'deny' }) {
+  function setup(cli: 'codex' | 'ptah-cli' | 'cursor' = 'codex', value?: { permission?: 'plan' | 'yolo'; network?: 'allow' | 'deny' }) {
     const fixture = TestBed.createComponent(CliLaneDefaultCellComponent);
     fixture.componentRef.setInput('cli', cli);
     fixture.componentRef.setInput('name', cli);
@@ -46,6 +46,24 @@ describe('CliLaneDefaultCellComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('Unavailable');
     expect(fixture.nativeElement.textContent).toContain('Native enforcement is unverified.');
     expect(fixture.nativeElement.querySelector('[tabindex="0"]')).toBeTruthy();
+  });
+
+  it('explains Cursor permission modes that cannot be selected', () => {
+    const fixture = setup('cursor');
+    fixture.componentRef.setInput('manifest', {
+      ...manifest,
+      permissionModes: {
+        plan: { ...unsupported, reason: 'Plan has no local proof.', networkModes: [] },
+        ask: { ...unsupported, reason: 'Ask has no binding.', networkModes: [] },
+        'auto-edit': { ...unsupported, reason: 'Scoped edit has no binding.', networkModes: [] },
+        yolo: { ...supported, networkModes: ['allow'] },
+      },
+    });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('plan unavailable: Plan has no local proof.');
+    expect(fixture.nativeElement.textContent).toContain('ask unavailable: Ask has no binding.');
+    expect(fixture.nativeElement.textContent).toContain('auto-edit unavailable: Scoped edit has no binding.');
+    expect(fixture.nativeElement.querySelectorAll('[tabindex="0"]').length).toBe(3);
   });
 
   it('requires confirmation for full auto and cancel preserves the saved choice', () => {

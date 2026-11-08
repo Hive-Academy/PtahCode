@@ -25,6 +25,11 @@ const FULL_ACCESS_WARNING = 'Full access lets Codex read and change files outsid
             @for (mode of permissions(); track mode) { <option [value]="mode">{{ mode }}</option> }
           </select>
         </label>
+        @if (cli() === 'cursor') {
+          @for (mode of unavailablePermissions(); track mode.mode) {
+            <span class="text-base-content" tabindex="0">{{ mode.mode }} unavailable: {{ mode.reason }}</span>
+          }
+        }
       } @else { <span tabindex="0" [title]="reason()">Permission: Unavailable — {{ reason() }}</span> }
       @if (networks().length) {
         <label class="flex flex-col gap-0.5">Network
@@ -61,6 +66,10 @@ export class CliLaneDefaultCellComponent {
   readonly unsupportedCombination = computed(() => { const pair = this.effectivePair(); return 'unsupported' in pair ? pair.unsupported : null; });
   readonly permissions = computed(() => PERMISSIONS.filter(mode => this.manifest()?.permissionModes[mode]?.state === 'supported' &&
     NETWORKS.some(network => this.manifest()?.networkModes[network].state === 'supported' && this.manifest()?.permissionModes[mode]?.networkModes.includes(network))));
+  readonly unavailablePermissions = computed(() => PERMISSIONS.flatMap(mode => {
+    const capability = this.manifest()?.permissionModes[mode];
+    return capability?.state === 'unsupported' ? [{ mode, reason: capability.reason }] : [];
+  }));
   readonly effectivePermission = computed(() => { const pair = this.effectivePair(); return 'permission' in pair ? pair.permission : undefined; });
   readonly networks = computed(() => {
     const permission = this.effectivePermission();

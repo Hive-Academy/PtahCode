@@ -263,6 +263,20 @@ describe('agent:setConfig reasoning-effort boundary', () => {
     expect(h.settings.has('ptah.agentOrchestration.codexSandboxMode')).toBe(false);
   });
 
+  it('does not project a registered legacy fallback as a saved Codex row', async () => {
+    const h = makeHarness();
+    h.workspace.getConfiguration.mockImplementation((section: string, key: string, callerDefault: unknown) => {
+      const stored = h.settings.get(`${section}.${key}`);
+      return stored ?? (callerDefault !== undefined ? callerDefault : FILE_BASED_SETTINGS_DEFAULTS[key as keyof typeof FILE_BASED_SETTINGS_DEFAULTS]);
+    });
+    expect((await h.getConfig()).cliLaneDefaults.codex).toBeUndefined();
+    expect((await h.getConfig()).codexSandboxMode).toBe('danger-full-access');
+    // A unique object sentinel (never null/undefined) separates an absent key from the fallback.
+    expect(h.workspace.getConfiguration).toHaveBeenCalledWith('ptah', 'agentOrchestration.codexSandboxMode', expect.any(Object));
+    h.settings.set('ptah.agentOrchestration.codexSandboxMode', 'danger-full-access');
+    expect((await h.getConfig()).cliLaneDefaults.codex).toEqual({ permission: 'yolo', network: 'allow' });
+  });
+
   it('projects a legacy-only Codex value and clears it on row reset', async () => {
     const h = makeHarness();
     h.settings.set('ptah.agentOrchestration.codexSandboxMode', 'read-only');

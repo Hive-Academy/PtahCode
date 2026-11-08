@@ -14,8 +14,15 @@ const section = 'ptah';
 const defaultsKey = 'agentOrchestration.cliLaneDefaults';
 const legacyKey = 'agentOrchestration.codexSandboxMode';
 
+/** Unique default: only an absent key returns this exact object. */
+const ABSENT: Readonly<Record<string, never>> = Object.freeze({});
+
 function readRaw(workspace: IWorkspaceProvider, key: string): unknown {
-  return workspace.getConfiguration<unknown>(section, key, undefined);
+  // File settings supply a registered fallback when no caller default is given.
+  // A unique sentinel separates an absent key from that fallback, and keeps a
+  // persisted null visible so that validation can refuse it.
+  const value = workspace.getConfiguration<unknown>(section, key, ABSENT);
+  return value === ABSENT ? undefined : value;
 }
 
 function codexChoice(mode: CodexSandboxMode): CliLaneDefaults['codex'] {
