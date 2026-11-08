@@ -164,11 +164,9 @@ it('keeps the tracked cursor when an explicit re-attach fails, so reconnect re-a
   await h.connection.attach('s');
   h.callbacks[0].onEvent(frame(4));
   refuse = true;
+  const pushed = states.length;
   await expect(h.connection.attach('s', 2)).rejects.toThrow();
-  expect(states.at(-1)).toMatchObject({
-    state: 'connected',
-    reason: 'session-reattach-failed',
-  });
+  expect(states).toHaveLength(pushed);
   refuse = false;
   h.callbacks[0].onClose(1006);
   await h.connection.retry();
@@ -178,6 +176,43 @@ it('keeps the tracked cursor when an explicit re-attach fails, so reconnect re-a
     afterSeq: 4,
     epoch: 'e',
   });
+  expect(h.connection.state).toBe('connected');
+  expect(h.connection.reason).toBeUndefined();
+  h.connection.dispose();
+});
+
+// The renderer replays every log view of a machine when a connected push
+// carries 'session-reattach-failed'; a replay failure that pushed it would
+// loop replays while the worker keeps refusing.
+it('pushes no state when replays of a connected machine keep failing', async () => {
+  const states: unknown[] = [];
+  let refuse = false;
+  const h = harness(
+    { onState: (state) => states.push(state) },
+    async (method) => {
+      if (method === 'session.attach' && refuse)
+        throw new WorkerClientError('NOT_FOUND_OR_FORBIDDEN');
+      return method === 'hello'
+        ? hello
+        : method === 'auth'
+          ? auth
+          : attachResult;
+    },
+  );
+  await h.connection.connect();
+  await h.connection.attach('a');
+  await h.connection.attach('b');
+  refuse = true;
+  const pushed = states.length;
+  for (let round = 0; round < 3; round += 1) {
+    await expect(h.connection.attach('a', 1)).rejects.toThrow(
+      WorkerClientError,
+    );
+    await expect(h.connection.attach('b', 1)).rejects.toThrow(
+      WorkerClientError,
+    );
+  }
+  expect(states).toHaveLength(pushed);
   expect(h.connection.state).toBe('connected');
   expect(h.connection.reason).toBeUndefined();
   h.connection.dispose();

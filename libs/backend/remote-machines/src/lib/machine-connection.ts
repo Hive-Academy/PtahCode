@@ -476,15 +476,15 @@ export class MachineConnection {
       // attach was in flight advanced it: that newer cursor stays. A first
       // attach that fails leaves nothing tracked, again unless events
       // advanced it: those events were delivered, so the session is live.
+      // The caller gets the error and pushes no state: the renderer answers a
+      // 'session-reattach-failed' push by replaying every log view of the
+      // machine, so a replay failure that pushed it would replay again on
+      // each refusal. Only a reconnect's re-attach pass reports that reason.
       const current = this.sessions.get(sessionId);
       const advanced = current !== undefined && this.observed.has(current);
       if (!advanced) {
         if (previous) this.sessions.set(sessionId, previous);
         else this.sessions.delete(sessionId);
-      }
-      if (previous && this.state === 'connected') {
-        this.reason = 'session-reattach-failed';
-        this.emit();
       }
       throw error;
     }
