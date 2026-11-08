@@ -242,6 +242,18 @@ describe('buildAgentNamespace — outcome metadata validation', () => {
 });
 
 describe('buildAgentNamespace — spawn (non-ptahCli)', () => {
+  it('forwards the verified parent plan level and drops caller policy metadata', async () => {
+    const { deps, mocks } = makeDeps();
+    deps.getParentLevel = (id) => id === 'verified' ? 'plan' : undefined;
+    mocks.processManager.spawn.mockResolvedValue({ agentId: 'a1' });
+    await runWithMcpRequestContext({ callerSessionId: 'verified' }, () =>
+      buildAgentNamespace(deps).spawn({ task: 't', parentLevel: 'yolo',
+        resumePolicy: { permission: 'yolo', network: 'allow' } }),
+    );
+    expect(mocks.processManager.spawn).toHaveBeenCalledWith(expect.objectContaining({ parentLevel: 'plan' }));
+    expect(mocks.processManager.spawn.mock.calls[0][0].resumePolicy).toBeUndefined();
+  });
+
   it('uses the verified execute_code caller and reports an ownerless spawn', async () => {
     const { deps, mocks } = makeDeps();
     mocks.processManager.spawn.mockResolvedValue({

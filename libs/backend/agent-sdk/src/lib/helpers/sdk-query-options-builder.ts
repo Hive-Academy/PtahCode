@@ -1313,32 +1313,46 @@ export class SdkQueryOptionsBuilder {
     // The SDK may auto-allow SendMessage before canUseTool. PreToolUse still
     // runs for auto-allowed tools and can deny a stopped or near-limit target.
     const budgetMessageGate: HookCallback = async (hookInput) => {
-      if (hookInput.hook_event_name !== 'PreToolUse' || hookInput.tool_name !== 'SendMessage') {
+      if (
+        hookInput.hook_event_name !== 'PreToolUse' ||
+        hookInput.tool_name !== 'SendMessage'
+      ) {
         return {};
       }
       try {
-        const toolInput = z.object({ to: z.string() }).safeParse(hookInput.tool_input);
+        const toolInput = z
+          .object({ to: z.string() })
+          .safeParse(hookInput.tool_input);
         if (!toolInput.success) return {};
         const budgetSession = sessionIdResolver?.() ?? sessionId;
         if (!budgetSession) return {};
         const refusal = this.permissionHandler.budgetSendMessageRefusal(
-          toolInput.data.to, budgetSession,
+          toolInput.data.to,
+          budgetSession,
         );
         if (!refusal) return {};
         this.permissionHandler.logBudgetSendMessageHookDenial(
-          budgetSession, routingTabId ?? undefined, hookInput.tool_use_id,
+          budgetSession,
+          routingTabId ?? undefined,
+          hookInput.tool_use_id,
         );
-        return { hookSpecificOutput: {
-          hookEventName: 'PreToolUse', permissionDecision: 'deny',
-          permissionDecisionReason: refusal,
-        } };
+        return {
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason: refusal,
+          },
+        };
       } catch (error: unknown) {
         // degradation-audit: reported - logged at warn; the budget gate fails
         // open so a defect in it never blocks every SendMessage.
-        this.logger.warn('[SdkQueryOptionsBuilder] SendMessage budget gate failed; allowing the call', {
-          toolUseId: hookInput.tool_use_id,
-          error: error instanceof Error ? error.message : String(error),
-        });
+        this.logger.warn(
+          '[SdkQueryOptionsBuilder] SendMessage budget gate failed; allowing the call',
+          {
+            toolUseId: hookInput.tool_use_id,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
         return {};
       }
     };
@@ -2166,8 +2180,8 @@ export class SdkQueryOptionsBuilder {
    * the only id that exists yet, since the canonical SDK UUID does not arrive
    * until the system `init` message.
    *
-   * Apps sessions use `/session/{id}/profile/apps`; coding sessions keep the
-   * bare `/session/{id}` URL. The reader is `extractCallerToolProfile` in
+   * Apps sessions append `/profile/apps` after the workspace segment.
+   * The reader is `extractCallerToolProfile` in
    * vscode-lm-tools `http-server.handler.ts`.
    *
    * @throws SdkError when no routing id is available. Dropping the segment
@@ -2217,7 +2231,7 @@ export class SdkQueryOptionsBuilder {
       `claude-interactive:${routingSessionId}`,
       4 * 60 * 60 * 1000,
     );
-    const sessionUrl = `http://localhost:${PTAH_MCP_PORT}/session/${encodeURIComponent(routingSessionId)}`;
+    const sessionUrl = `http://localhost:${PTAH_MCP_PORT}/session/${encodeURIComponent(routingSessionId)}/workspace/${encodeURIComponent(cwd)}`;
     const mcpConfig: Record<string, McpHttpServerConfig> = {
       ptah: {
         type: 'http',

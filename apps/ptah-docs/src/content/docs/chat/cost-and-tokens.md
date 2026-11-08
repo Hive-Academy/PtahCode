@@ -9,7 +9,7 @@ sidebar:
 
 PtahCode counts the tokens of each turn and shows the session totals and cost.
 
-![Cost summary card at the top of the chat](/screenshots/chat-cost-bar.webp)
+The session details panel shows token and cost totals, time, and models for the selected session. The agents list breaks usage out by agent when reported.
 
 ## What PtahCode counts
 

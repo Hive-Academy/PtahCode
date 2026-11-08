@@ -26,6 +26,8 @@ describe('isFileBasedSettingKey', () => {
   });
   it('routes the Codex sandbox choice to file settings with the networked default', () => {
     expect(isFileBasedSettingKey('agentOrchestration.codexSandboxMode')).toBe(true);
+    expect(isFileBasedSettingKey('agentOrchestration.cliLaneDefaults')).toBe(true);
+    expect(FILE_BASED_SETTINGS_DEFAULTS['agentOrchestration.cliLaneDefaults']).toEqual({});
     expect(FILE_BASED_SETTINGS_DEFAULTS['agentOrchestration.codexSandboxMode']).toBe('danger-full-access');
   });
   describe('static SET membership', () => {

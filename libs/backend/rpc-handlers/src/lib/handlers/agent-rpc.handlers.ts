@@ -109,9 +109,12 @@ import {
   DECISION_MODEL_INVALID_BASE_URL,
   DECISION_MODEL_INVALID_MODEL,
   codexSandboxModeSchema,
-  DEFAULT_CODEX_SANDBOX_MODE,
+  CLI_LANE_DEFAULTS_PATCH_SCHEMA,
+  type CliLaneDefaults,
   type CodexSandboxMode,
 } from '@ptah-extension/shared';
+import { readCliLaneDefaults, readCodexSandboxMode, saveCliLaneDefaults,
+  UnsupportedCliLaneDefaultError, validateCliLaneDefaultsPatch } from './agent-config/cli-lane-defaults-config';
 import { classifyProviderAccountBinding } from '@ptah-extension/shared/schemas';
 import {
   AUTH_PROVIDERS_TOKENS,
@@ -492,6 +495,7 @@ export class AgentRpcHandlers {
           const cursorKey = await this.getCursorApiKeyStatus();
 
           const result: AgentOrchestrationConfig = {
+            cliLaneDefaults: this.getCliLaneDefaults(),
             detectedClis,
             preferredAgentOrder: this.getAgentCfg<string[]>(
               'preferredAgentOrder',
@@ -899,7 +903,7 @@ export class AgentRpcHandlers {
   private registerSetConfig(): void {
     this.rpcHandler.registerMethod<
       AgentSetConfigParams,
-      { success: boolean; error?: string }
+      { success: boolean; error?: string; cliLaneDefaults?: CliLaneDefaults; codexSandboxMode?: CodexSandboxMode }
     >('agent:setConfig', (params) => {
       // One call at a time: the writes await one key after another, so two
       // overlapping calls would interleave their keys. Each call waits for the
@@ -920,7 +924,7 @@ export class AgentRpcHandlers {
    */
   private async applySetConfig(
     params: AgentSetConfigParams,
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<{ success: boolean; error?: string; cliLaneDefaults?: CliLaneDefaults; codexSandboxMode?: CodexSandboxMode }> {
     try {
       // Field names only: params can carry credentials such as cursorApiKey.
       this.logger.debug('RPC: agent:setConfig called', {
@@ -1000,6 +1004,26 @@ export class AgentRpcHandlers {
       const invalidBudget = invalidCodexBudget(params);
       if (params.codexSandboxMode !== undefined && !codexSandboxModeSchema.safeParse(params.codexSandboxMode).success) {
         return { success: false, error: 'Unsupported codexSandboxMode value' };
+      }
+      const parsedLaneDefaults = params.cliLaneDefaults === undefined
+        ? undefined : CLI_LANE_DEFAULTS_PATCH_SCHEMA.safeParse(params.cliLaneDefaults);
+      if (parsedLaneDefaults && !parsedLaneDefaults.success) {
+        return { success: false, error: 'Unsupported cliLaneDefaults value' };
+      }
+      if (parsedLaneDefaults?.success || params.codexSandboxMode !== undefined) {
+        try {
+          validateCliLaneDefaultsPatch(
+            this.workspace,
+            parsedLaneDefaults?.success ? parsedLaneDefaults.data : undefined,
+            params.codexSandboxMode,
+            (cli) => this.cliDetection.getAdapter(cli)?.capabilities(),
+          );
+        } catch (error: unknown) {
+          if (error instanceof UnsupportedCliLaneDefaultError) {
+            return { success: false, error: error.message };
+          }
+          throw error;
+        }
       }
       if (
         params.mcpExternalCallerAccess !== undefined &&
@@ -1109,8 +1133,14 @@ export class AgentRpcHandlers {
       if (params.codexWebSearch !== undefined) {
         await this.setAgentCfg('codexWebSearch', params.codexWebSearch);
       }
-      if (params.codexSandboxMode !== undefined) {
-        await this.setAgentCfg('codexSandboxMode', params.codexSandboxMode);
+      let laneReadBack: { defaults: CliLaneDefaults; codexSandboxMode: CodexSandboxMode } | undefined;
+      if (parsedLaneDefaults?.success || params.codexSandboxMode !== undefined) {
+        laneReadBack = await saveCliLaneDefaults(
+          this.workspace,
+          parsedLaneDefaults?.success ? parsedLaneDefaults.data : undefined,
+          params.codexSandboxMode,
+          (cli) => this.cliDetection.getAdapter(cli)?.capabilities(),
+        );
       }
       if (params.subagentPromptCacheTtl !== undefined) {
         await this.setAgentCfg(
@@ -1216,8 +1246,17 @@ export class AgentRpcHandlers {
         );
       }
       this.logger.debug('RPC: agent:setConfig success');
-      return { success: true };
+      return laneReadBack
+        ? { success: true, cliLaneDefaults: laneReadBack.defaults, codexSandboxMode: laneReadBack.codexSandboxMode }
+        : { success: true };
     } catch (error: unknown) {
+      if (error instanceof UnsupportedCliLaneDefaultError) {
+        return { success: false, error: error.message };
+      }
+      if (error instanceof AggregateError && error.message === 'CLI defaults write and recovery failed') {
+        this.logger.error('RPC: CLI defaults recovery could not be established', error);
+        return { success: false, error: 'CLI defaults write failed and recovery could not be verified.' };
+      }
       // Raw errors can carry paths or credentials (params may hold
       // cursorApiKey), so the log gets the error type and the client gets
       // fixed text. SettingsPersistError's message is fixed by construction.
@@ -1962,16 +2001,11 @@ export class AgentRpcHandlers {
 
   /** Read the Codex sandbox mode; only an absent key reads as the default, null is invalid. */
   private getCodexSandboxMode(): CodexSandboxMode {
-    const absent = Symbol('codexSandboxMode absent');
-    const stored: unknown = this.workspace.getConfiguration<unknown>(
-      'ptah',
-      'agentOrchestration.codexSandboxMode',
-      absent,
-    );
-    const value = stored === absent ? DEFAULT_CODEX_SANDBOX_MODE : stored;
-    const parsed = codexSandboxModeSchema.safeParse(value);
-    if (!parsed.success) throw new Error('Invalid agentOrchestration.codexSandboxMode setting');
-    return parsed.data;
+    return readCodexSandboxMode(this.workspace);
+  }
+
+  private getCliLaneDefaults() {
+    return readCliLaneDefaults(this.workspace);
   }
 
   private getCodexWebSearch(): boolean {

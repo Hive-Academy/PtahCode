@@ -1,5 +1,6 @@
 import type { AgentProcessInfo } from '@ptah-extension/shared';
 import type { AgentProcessManager } from '../../agent-process-manager.service';
+import type { ParentLaneLevel } from '../parent-lane-level';
 import { LaneAccountResumeError } from '../../lane-resume-gate';
 import {
   LaneResumeError,
@@ -14,7 +15,8 @@ export type SystemCliLaneResumerManager = Pick<
 
 /** Resumes a system CLI through the process manager's spawn and resume gate. */
 export class SystemCliLaneResumer implements LaneResumer {
-  constructor(private readonly manager: SystemCliLaneResumerManager) {}
+  constructor(private readonly manager: SystemCliLaneResumerManager,
+    private readonly parentLevel?: ParentLaneLevel) {}
 
   async resume(
     info: AgentProcessInfo,
@@ -34,10 +36,13 @@ export class SystemCliLaneResumer implements LaneResumer {
         workingDirectory: info.workingDirectory,
         resumeSessionId: info.cliSessionId,
         parentSessionId: info.parentSessionId,
+        ...(this.parentLevel && info.parentSessionId
+          ? { parentLevel: this.parentLevel(info.parentSessionId) } : {}),
         ptahCliId: info.ptahCliId,
         resumedFromAgentId: info.agentId,
         permission: info.effectivePolicy?.permission,
         network: info.effectivePolicy?.network,
+        resumePolicy: info.effectivePolicy,
       });
     } catch (error: unknown) {
       if (

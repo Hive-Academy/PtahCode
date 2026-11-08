@@ -59,7 +59,8 @@ interface CursorMcpServerConfig {
 interface CursorAgentOptions {
   apiKey?: string;
   model?: CursorModelSelection;
-  local?: { cwd?: string };
+  local?: { cwd?: string; sandboxOptions?: { enabled: boolean } };
+  mode?: 'agent' | 'plan';
   mcpServers?: Record<string, CursorMcpServerConfig>;
 }
 
@@ -287,10 +288,10 @@ export class CursorCliAdapter implements CliAdapter {
       },
       roleChannel: this.roleChannel,
       permissionModes: {
-        plan: unverified('Cursor SDK policy binding is unverified.'),
-        ask: unverified('Cursor SDK policy binding is unverified.'),
-        'auto-edit': unverified('Cursor SDK policy binding is unverified.'),
-        yolo: unverified('Cursor SDK policy binding is unverified.'),
+        plan: unverified('Cursor SDK plan mode has no local no-mutation proof.'),
+        ask: unverified('Cursor SDK exposes no verified ask policy binding.'),
+        'auto-edit': unverified('Cursor SDK exposes no verified scoped edit policy binding.'),
+        yolo: { state: 'supported', nativeMode: 'agent with sandbox disabled', networkModes: ['allow'] },
       },
       networkModes: {
         allow: { state: 'supported' },
@@ -419,7 +420,9 @@ export class CursorCliAdapter implements CliAdapter {
           const agentOptions: CursorAgentOptions = {
             apiKey,
             model: { id: options.model ?? DEFAULT_CURSOR_MODEL },
-            local: { cwd: options.workingDirectory },
+            local: { cwd: options.workingDirectory,
+              ...(options.permission === 'yolo' ? { sandboxOptions: { enabled: false } } : {}) },
+            ...(options.permission === 'yolo' ? { mode: 'agent' as const } : {}),
           };
           if (options.mcpPort && options.mcpToken) {
             agentOptions.mcpServers = {

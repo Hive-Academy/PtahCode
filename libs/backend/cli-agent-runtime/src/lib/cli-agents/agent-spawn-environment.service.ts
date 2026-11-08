@@ -28,6 +28,7 @@ import type { CliAdapter } from './cli-adapters/cli-adapter.interface';
 import type { CliAdapterManifest, SpawnAgentRequest } from '@ptah-extension/shared';
 import { agentBudgetSettingsSchema, DEFAULT_AGENT_BUDGET_SETTINGS, type AgentBudgetSettings } from '@ptah-extension/shared';
 import { translateLaneSpawnPolicy } from './lane-spawn-policy';
+import { resolveCliLanePolicy } from './cli-lane-policy-resolver';
 import { CODEX_DEFAULT_LANE_BUDGETS } from './cli-adapters/codex/codex-lane-budgets';
 import {
   resolveLaneEffort,
@@ -164,16 +165,25 @@ export class AgentSpawnEnvironment {
   /** Validate explicit spawn controls before an adapter creates a process. */
   resolveLanePolicy(
     adapter: CliAdapter,
-    request: Pick<SpawnAgentRequest, 'permission' | 'network'>,
+    request: Pick<SpawnAgentRequest, 'permission' | 'network' | 'parentLevel' | 'resumePolicy'>,
   ) {
-    return AgentSpawnEnvironment.resolveLanePolicy(adapter, request);
+    const saved = this.workspace.getConfiguration<unknown>('ptah', 'agentOrchestration.cliLaneDefaults', {});
+    const absent = Symbol('codex sandbox mode absent');
+    const storedLegacy = adapter.name === 'codex'
+      ? this.workspace.getConfiguration<string | typeof absent>('ptah', 'agentOrchestration.codexSandboxMode', absent)
+      : absent;
+    const legacy = storedLegacy === absent ? undefined : storedLegacy;
+    return AgentSpawnEnvironment.resolveLanePolicy(adapter, request, saved, legacy);
   }
 
   static resolveLanePolicy(
     adapter: { readonly name: CliType; capabilities(): CliAdapterManifest },
-    request: Pick<SpawnAgentRequest, 'permission' | 'network'>,
+    request: Pick<SpawnAgentRequest, 'permission' | 'network' | 'parentLevel' | 'resumePolicy'>,
+    saved: unknown = {},
+    legacyCodexMode?: string,
   ) {
-    return translateLaneSpawnPolicy(adapter.name, adapter.capabilities(), request);
+    const resolved = resolveCliLanePolicy({ cli: adapter.name, manifest: adapter.capabilities(), request, saved, legacyCodexMode, parentLevel: request.parentLevel, resumePolicy: request.resumePolicy });
+    return translateLaneSpawnPolicy(adapter.name, adapter.capabilities(), resolved);
   }
 
   /** The lane's model and where it came from (see `resolveLaneModel`). */

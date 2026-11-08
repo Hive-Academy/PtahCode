@@ -90,6 +90,10 @@ describe('grokAcpProfile', () => {
   });
 
   describe('buildSpawn', () => {
+    it('places native yolo approval before stdio and retains it on resume', () => {
+      const args = grokAcpProfile.buildSpawn({ ...BASE_OPTIONS, permission: 'yolo', resumeSessionId: 'sess-1' }).args;
+      expect(args).toEqual(['agent', '--always-approve', '--no-leader', 'stdio']);
+    });
     it('spawns exactly `agent --no-leader stdio` with no extra environment', () => {
       const spec = grokAcpProfile.buildSpawn(BASE_OPTIONS);
       expect(spec.args).toEqual(['agent', '--no-leader', 'stdio']);

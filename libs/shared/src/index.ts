@@ -25,6 +25,7 @@ export * from './lib/types/webview-surface.types';
 export * from './lib/types/webview-route-state';
 export * from './lib/types/model-autopilot.types';
 export * from './lib/types/agent-process.types';
+export * from './lib/types/cli-lane-defaults.types';
 export * from './lib/types/lane-outcome.types';
 export * from './lib/types/plan-limit.types';
 export * from './lib/types/cli-skill-sync.types';

@@ -7,6 +7,24 @@ describe('AgentLaneResumeService', () => {
   const info = { agentId: AgentId.create(), cli: 'codex', status: 'completed', task: 'original',
     workingDirectory: '.', cliSessionId: 'session', parentSessionId: 'parent' } as AgentProcessInfo;
 
+  it('caps an explicit resume using the live parent level', async () => {
+    const spawn = jest.fn().mockResolvedValue({ agentId: AgentId.create() });
+    const resume = new AgentLaneResumeService({ spawn, prepareSdkHandleSpawn: jest.fn(), releaseIdleForResume: jest.fn() }, ptahCli(),
+      (id) => id === 'parent' ? 'plan' : undefined);
+    await resume.resumeRequest({ cli: 'codex', task: 'continue', workingDirectory: '.', resumeSessionId: 'session', parentSessionId: 'parent' });
+    expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ parentLevel: 'plan' }));
+  });
+
+  it('keeps an explicitly parentless resume parentless', async () => {
+    const spawn = jest.fn().mockResolvedValue({ agentId: AgentId.create() });
+    const lookup = jest.fn(() => 'plan' as const);
+    const resume = new AgentLaneResumeService({ spawn, prepareSdkHandleSpawn: jest.fn(), releaseIdleForResume: jest.fn() }, ptahCli(), lookup);
+    await resume.resumeRequest({ cli: 'codex', task: 'continue', workingDirectory: '.', resumeSessionId: 'session' });
+    expect(lookup).not.toHaveBeenCalled();
+    expect(spawn.mock.calls[0][0].parentSessionId).toBeUndefined();
+    expect(spawn.mock.calls[0][0].parentLevel).toBeUndefined();
+  });
+
   it('uses the manager resume gate and forwards the original session', async () => {
     const spawn = jest.fn().mockResolvedValue({ agentId: AgentId.create() });
     const releaseIdleForResume = jest.fn().mockResolvedValue(undefined);
