@@ -570,7 +570,8 @@ describe('SubagentBudgetMonitor', () => {
     const h = makeHarness({}, { workspace: RECORD_WORKSPACE, lookupTranscript });
     h.recordStore.writeOnce.mockResolvedValue({ ok: false, errorType: 'Unavailable' });
     await h.monitor.observe(SESSION, assistant({ input: 130_000 }, { id: 'first-try' }));
-    for (let i = 0; i < 3; i += 1) await h.monitor.checkNotesTool(SESSION, 'a1', 'Read', {});
+    const denialAt = Date.now();
+    for (let i = 0; i < 3; i += 1) await h.monitor.checkNotesTool(SESSION, 'a1', 'Read', {}, denialAt + i * 2_001);
     await waitUntil(() => h.recordStore.writeOnce.mock.calls.length === 1);
     expect(lookupTranscript).toHaveBeenCalledTimes(1);
     await h.monitor.checkNotesTool(SESSION, 'a1', 'Read', {});
@@ -633,7 +634,8 @@ describe('SubagentBudgetMonitor', () => {
     expect(h.monitor.getAgentBudgetState('a1', SESSION)).toEqual(expect.objectContaining({ stopped: false, contextTokens: 186_000 }));
     expect(h.monitor.hasNotesGate('a1')).toBe(true);
     expect(h.subagentNotices.take('a1')).toContain('budget');
-    for (let i = 0; i < 3; i += 1) await h.monitor.checkNotesTool(SESSION, 'a1', 'Read', { file_path: 'remaining.txt' });
+    const denialAt = Date.now();
+    for (let i = 0; i < 3; i += 1) await h.monitor.checkNotesTool(SESSION, 'a1', 'Read', { file_path: 'remaining.txt' }, denialAt + i * 2_001);
     await waitUntil(() => h.recordStore.writeOnce.mock.calls.length > 0);
     const recordText = h.recordStore.writeOnce.mock.calls[0][2];
     expect(recordText).toContain('src/parser.ts');
@@ -934,6 +936,8 @@ describe('SubagentBudgetMonitor', () => {
     expect(h.streamed[0]).toContain("Ptah's subagent budget monitor");
     expect(h.streamed[0]).toContain('No user input is needed');
     expect(h.streamed[0]).toContain('SMALLER scope');
+    expect(h.streamed[0]).toContain('Give the replacement this instruction:');
+    expect(h.streamed[0]).not.toContain('plus this instruction:');
     expect(h.monitor.takeInterruptedHandoff(SESSION, TOOL_CALL)).toContain('Ptah');
     expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
   });
@@ -2249,14 +2253,15 @@ describe('SubagentBudgetMonitor', () => {
     it('keeps the notes gate when the safety stop has no task id, then retries after the id arrives', async () => {
       const h = makeHarness({ agentId: 'agent-7', taskId: undefined }, { workspace });
       await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
+      const denialAt = Date.now();
       for (let i = 0; i < 3; i += 1) {
-        expect(await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {})).toContain('End your turn now');
+        expect(await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {}, denialAt + i * 2_001)).toContain('End your turn now');
       }
       await waitUntil(() => h.logger.warn.mock.calls.some((call) => String(call[0]).includes('stop deferred')));
       expect(h.monitor.hasNotesGate('agent-7')).toBe(true);
       expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
       h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-late', 'Explore');
-      await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {});
+      await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {}, denialAt + 6_003);
       await waitUntil(() => h.dispatcher.stopSubagent.mock.calls.length === 1);
       await waitUntil(() => !h.monitor.hasNotesGate('agent-7'));
     });
@@ -2265,10 +2270,11 @@ describe('SubagentBudgetMonitor', () => {
       const h = makeHarness({ agentId: 'agent-7' }, { workspace });
       h.dispatcher.stopSubagent.mockRejectedValueOnce(new Error('busy'));
       await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
-      for (let i = 0; i < 3; i += 1) await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {});
+      const denialAt = Date.now();
+      for (let i = 0; i < 3; i += 1) await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {}, denialAt + i * 2_001);
       await waitUntil(() => h.logger.warn.mock.calls.some((call) => String(call[0]).includes('gate remains active')));
       expect(h.monitor.hasNotesGate('agent-7')).toBe(true);
-      await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {});
+      await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {}, denialAt + 6_003);
       await waitUntil(() => h.dispatcher.stopSubagent.mock.calls.length === 2);
       await waitUntil(() => !h.monitor.hasNotesGate('agent-7'));
     });
@@ -2280,9 +2286,10 @@ describe('SubagentBudgetMonitor', () => {
         await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
         let finishStop: () => void = () => undefined;
         h.dispatcher.stopSubagent.mockImplementationOnce(() => new Promise<void>((resolve) => { finishStop = resolve; }));
-        await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {});
-        await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {});
-        const reason = await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {});
+        const startedAt = Date.now();
+        await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {}, startedAt);
+        await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {}, startedAt + 2_001);
+        const reason = await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {}, startedAt + 4_002);
         expect(reason).toContain('End your turn now');
         expect(h.monitor.hasNotesGate('agent-7')).toBe(true);
         const activeTimers = jest.getTimerCount();
@@ -2469,8 +2476,9 @@ describe('SubagentBudgetMonitor handoff records', () => {
   ): Promise<void> {
     await h.monitor.observe(SESSION, assistant({ input: 130_000 }, { id }));
     expect(h.monitor.hasNotesGate('a1')).toBe(true);
+    const denialAt = Date.now();
     for (let i = 0; i < 3; i += 1) {
-      await h.monitor.checkNotesTool(SESSION, 'a1', 'Read', {});
+      await h.monitor.checkNotesTool(SESSION, 'a1', 'Read', {}, denialAt + i * 2_001);
     }
     if (settle) {
       await waitUntil(done);

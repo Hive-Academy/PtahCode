@@ -166,7 +166,7 @@ export function handoffMessage(
     : resumeFiles;
   lines.push(
     `If its task is not finished, spawn ${fresh} with a SMALLER scope: ${taskSource}, split into parts if needed. Never relaunch the same full task. ` +
-      `plus this instruction: "${resume}"`,
+      `Give the replacement this instruction: "${resume}"`,
   );
   lines.push('Continue unfinished work autonomously now. Do not ask the user or wait for another turn. If replacement subagents repeatedly hit this budget, finish the remaining work yourself or summarize the limit.');
   return lines.join('\n');

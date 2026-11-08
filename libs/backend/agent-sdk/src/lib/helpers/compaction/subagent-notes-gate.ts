@@ -3,6 +3,8 @@ import { z } from 'zod';
 
 export const NOTES_GATE_DENIAL_LIMIT = 3;
 export const NOTES_GATE_TIMEOUT_MS = 45_000;
+export const NOTES_GATE_GRACE_MS = 120_000;
+const DENIAL_BURST_MS = 2_000;
 
 const writeInput = z.object({ file_path: z.string().min(1) });
 
@@ -17,6 +19,8 @@ interface GateEntry {
   readonly notesPath: string;
   readonly workspace: string;
   readonly startedAt: number;
+  firstDecisionAt?: number;
+  lastDenialAt?: number;
   denials: number;
   wroteNotes: boolean;
 }
@@ -45,12 +49,15 @@ export class SubagentNotesGate {
 
   expired(agentId: string, now = Date.now()): boolean {
     const entry = this.entries.get(agentId);
-    return !!entry && now - entry.startedAt >= NOTES_GATE_TIMEOUT_MS;
+    return !!entry && (entry.firstDecisionAt === undefined
+      ? now - entry.startedAt >= NOTES_GATE_GRACE_MS
+      : now - entry.firstDecisionAt >= NOTES_GATE_TIMEOUT_MS);
   }
 
   check(agentId: string | undefined, toolName: string, input: unknown, now = Date.now()): GateDecision {
     const entry = agentId ? this.entries.get(agentId) : undefined;
     if (!entry || !agentId) return { stop: false };
+    entry.firstDecisionAt ??= now;
     const parsed = writeInput.safeParse(input);
     const candidate = parsed.success ? path.resolve(entry.workspace, parsed.data.file_path) : undefined;
     const relative = candidate ? path.relative(entry.workspace, candidate) : undefined;
@@ -59,7 +66,10 @@ export class SubagentNotesGate {
       entry.wroteNotes = true;
       return { stop: false };
     }
-    entry.denials += 1;
+    if (entry.lastDenialAt === undefined || now - entry.lastDenialAt >= DENIAL_BURST_MS) {
+      entry.denials += 1;
+    }
+    entry.lastDenialAt = now;
     return {
       reason: `Ptah budget handoff: write your notes to ${entry.notesPath}, then end your turn with a final message starting "PTAH BUDGET HANDOFF:" that summarizes progress and next steps. Do not call other tools. End your turn now.`,
       stop: entry.denials >= NOTES_GATE_DENIAL_LIMIT || this.expired(agentId, now),

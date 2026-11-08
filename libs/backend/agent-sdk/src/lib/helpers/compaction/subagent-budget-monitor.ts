@@ -751,9 +751,10 @@ export class SubagentBudgetMonitor {
     agentId: string | undefined,
     toolName: string,
     toolInput: unknown,
+    now = Date.now(),
   ): Promise<string | undefined> {
     if (!agentId || !this.notesGate.has(agentId)) return undefined;
-    const decision = this.notesGate.check(agentId, toolName, toolInput);
+    const decision = this.notesGate.check(agentId, toolName, toolInput, now);
     if (decision.stop) {
       void this.stopWarnedAgent(sessionId, agentId).catch((error: unknown) => {
         this.logger.error('[SubagentBudgetMonitor] Notes gate safety stop failed', {

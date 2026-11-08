@@ -1,5 +1,5 @@
 import * as path from 'node:path';
-import { SubagentNotesGate, NOTES_GATE_TIMEOUT_MS } from './subagent-notes-gate';
+import { SubagentNotesGate, NOTES_GATE_GRACE_MS, NOTES_GATE_TIMEOUT_MS } from './subagent-notes-gate';
 
 describe('SubagentNotesGate', () => {
   const root = path.resolve('C:/fake-workspace');
@@ -16,15 +16,36 @@ describe('SubagentNotesGate', () => {
     expect(gate.check('agent-1', 'Read', { file_path: notes }, 104).reason).toContain('End your turn now');
   });
 
-  it('bounds repeated denials and elapsed time', () => {
+  it('counts three separate denial bursts but not three parallel calls', () => {
     const gate = new SubagentNotesGate();
     gate.warn('agent-1', notes, root, 100);
     expect(gate.check('agent-1', 'Bash', {}, 101).stop).toBe(false);
     expect(gate.check('agent-1', 'Bash', {}, 102).stop).toBe(false);
-    expect(gate.check('agent-1', 'Bash', {}, 103).stop).toBe(true);
-    gate.warn('agent-2', notes, root, 100);
-    expect(gate.check('agent-2', 'Write', { file_path: notes }, 100 + NOTES_GATE_TIMEOUT_MS).reason).toBeUndefined();
-    expect(gate.check('agent-2', 'Read', {}, 101 + NOTES_GATE_TIMEOUT_MS).stop).toBe(true);
+    expect(gate.check('agent-1', 'Bash', {}, 103).stop).toBe(false);
+    expect(gate.check('agent-1', 'Bash', {}, 2_104).stop).toBe(false);
+    expect(gate.check('agent-1', 'Bash', {}, 4_105).stop).toBe(true);
+  });
+
+  it('starts the watchdog at the first gate decision and grants time before it', () => {
+    jest.useFakeTimers().setSystemTime(100);
+    try {
+      const gate = new SubagentNotesGate();
+      gate.warn('agent-2', notes, root);
+      jest.setSystemTime(100 + NOTES_GATE_TIMEOUT_MS);
+      expect(gate.expired('agent-2')).toBe(false);
+      jest.setSystemTime(100 + NOTES_GATE_GRACE_MS - 1);
+      expect(gate.expired('agent-2')).toBe(false);
+      expect(gate.check('agent-2', 'Write', { file_path: notes }).reason).toBeUndefined();
+      jest.setSystemTime(100 + NOTES_GATE_GRACE_MS - 1 + NOTES_GATE_TIMEOUT_MS - 1);
+      expect(gate.expired('agent-2')).toBe(false);
+      jest.advanceTimersByTime(1);
+      expect(gate.expired('agent-2')).toBe(true);
+      const silent = new SubagentNotesGate();
+      silent.warn('agent-3', notes, root, 100);
+      expect(silent.expired('agent-3')).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('accepts Windows drive casing and forward slashes for the exact notes path', () => {
