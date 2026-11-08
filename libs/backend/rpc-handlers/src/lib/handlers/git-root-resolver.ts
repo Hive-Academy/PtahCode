@@ -229,6 +229,7 @@ export class GitRootResolver {
       const directory = await this.deps.probe.directory(requested);
       return directory.kind === 'absent';
     } catch (error: unknown) {
+      // degradation-audit: reported - a failed directory read keeps the retryable message; warned.
       this.warnLimited(
         'probe-failed',
         requested,

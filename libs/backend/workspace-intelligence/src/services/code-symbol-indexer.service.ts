@@ -1021,7 +1021,7 @@ export class CodeSymbolIndexer {
       try {
         await this.sink.purgeStaleRoots();
       } catch (error: unknown) {
-        // degradation-audit: catch | Maintenance failure must not block indexing; warn and continue.
+        // degradation-audit: reported - maintenance failure must not block indexing; warn and continue.
         this.logger.warn('[CodeSymbolIndexer] Stale-root maintenance failed; continuing indexing', { workspaceRoot, error });
       }
     }

@@ -239,6 +239,7 @@ export class SqliteIntegrityService {
       this.logFullCheckUnavailable(reason, startedAt);
       return null;
     } catch (error: unknown) {
+      // degradation-audit: reported - an inconclusive full check returns null; warned with reason.
       this.logFullCheckUnavailable(error instanceof Error ? error.message : String(error), startedAt);
       return null;
     } finally {

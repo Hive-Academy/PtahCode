@@ -734,8 +734,8 @@ export class GitBranchesService implements MessageHandler {
       }
       return null;
     } catch (err: unknown) {
-      if ((this.readGenerations.get(root) ?? 0) !== generation) return null;
       // degradation-audit: reported - log once and suppress repeated timeout reads.
+      if ((this.readGenerations.get(root) ?? 0) !== generation) return null;
       if (err instanceof Error && /timeout/i.test(err.message)) {
         this.readBackoffUntil.set(key, Date.now() + GitBranchesService.READ_TIMEOUT_BACKOFF_MS);
       }
