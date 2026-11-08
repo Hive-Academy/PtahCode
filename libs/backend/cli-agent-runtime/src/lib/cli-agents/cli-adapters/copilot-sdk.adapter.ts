@@ -426,7 +426,6 @@ export class CopilotSdkAdapter implements CliAdapter {
       let nativeTurnId: string | undefined;
       const emitTurnSegment = (item: CliOutputSegment): void => {
         if (item.usage) turnUsages.push(item.usage);
-        if (item.content.startsWith('Copilot turn telemetry unavailable:')) incompleteUsage = true;
         segment.emit(item);
       };
       let lineBuf = '';
@@ -455,6 +454,7 @@ export class CopilotSdkAdapter implements CliAdapter {
               },
               toolCallIdToName,
               onResultId: (id) => { nativeTurnId = id; },
+              onUsageUnavailable: () => { incompleteUsage = true; },
             },
           );
           if (sessionId) {
@@ -496,6 +496,7 @@ export class CopilotSdkAdapter implements CliAdapter {
                 },
                 toolCallIdToName,
                 onResultId: (id) => { nativeTurnId = id; },
+                onUsageUnavailable: () => { incompleteUsage = true; },
               },
             );
             if (sessionId) {
@@ -591,6 +592,7 @@ export class CopilotSdkAdapter implements CliAdapter {
       setReceivedReasoningDeltas: () => void;
       toolCallIdToName: Map<string, string>;
       onResultId?: (id: string) => void;
+      onUsageUnavailable?: () => void;
     },
   ): string | undefined {
     let event: CopilotCliEvent;
@@ -795,6 +797,7 @@ export class CopilotSdkAdapter implements CliAdapter {
           !Number.isSafeInteger(inputTokens) || inputTokens < 0 ||
           !Number.isSafeInteger(outputTokens) || outputTokens < 0
         ) {
+          state.onUsageUnavailable?.();
           emitSegment({ type: 'info', content: 'Copilot turn telemetry unavailable: complete input/output totals missing.' });
           return undefined;
         }

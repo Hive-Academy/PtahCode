@@ -695,6 +695,47 @@ describe('CopilotSdkAdapter', () => {
       });
     });
 
+    it('keeps usage reported when assistant text starts with the telemetry diagnostic prefix', async () => {
+      const handle = await adapter.runSdk(defaultOptions);
+      const segments: CliOutputSegment[] = [];
+      handle.onSegment?.((item) => segments.push(item));
+      const text = 'Copilot turn telemetry unavailable: quoted by the assistant';
+      currentChild?.stdout.write(JSON.stringify({ type: 'assistant.message', data: { content: text } }) + '\n');
+      currentChild?.stdout.write(JSON.stringify({ type: 'assistant.usage', data: {
+        model: 'model-a', inputTokens: 100, outputTokens: 20,
+      } }) + '\n');
+      currentChild?.emitClose(0);
+      await handle.done;
+
+      expect(segments).toContainEqual({ type: 'text', content: text });
+      expect(segments.find((item) => item.turnTelemetry)?.turnTelemetry).toMatchObject({
+        status: 'reported', usage: { inputTokens: 100, outputTokens: 20, modelId: 'model-a' },
+      });
+    });
+
+    it('marks usage unavailable for missing totals and keeps the diagnostic segment', async () => {
+      const handle = await adapter.runSdk(defaultOptions);
+      const segments: CliOutputSegment[] = [];
+      handle.onSegment?.((item) => segments.push(item));
+      currentChild?.stdout.write(JSON.stringify({ type: 'assistant.usage', data: {
+        model: 'model-a', inputTokens: 100, outputTokens: 20,
+      } }) + '\n');
+      // Exercise the final buffered-line path as well as a preceding valid usage event.
+      currentChild?.stdout.write(JSON.stringify({ type: 'assistant.usage', data: {
+        model: 'model-a', inputTokens: 50,
+      } }));
+      currentChild?.emitClose(0);
+      await handle.done;
+
+      expect(segments).toContainEqual({
+        type: 'info',
+        content: 'Copilot turn telemetry unavailable: complete input/output totals missing.',
+      });
+      expect(segments.find((item) => item.turnTelemetry)?.turnTelemetry).toMatchObject({
+        status: 'unavailable',
+      });
+    });
+
     it('fails closed when a successful turn has no usage event', async () => {
       const handle = await adapter.runSdk(defaultOptions);
       const segments: CliOutputSegment[] = [];
