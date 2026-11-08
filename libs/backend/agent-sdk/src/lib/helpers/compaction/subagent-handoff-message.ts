@@ -53,11 +53,12 @@ export function nearBudgetWarning(
   return (
     `Ptah budget notice: your context is at ${contextTokens} tokens, close to ` +
     `the ${handoffTokens}-token limit at which Ptah's subagent budget monitor ` +
-    `stops this subagent. Before your next step, write your progress notes to ` +
+    `ends this subagent. Before your next step, write your progress notes to ` +
     `${notesPath} (create its directory if needed; overwrite the file): current ` +
     `state, findings, decisions and their reasons, files touched, and the exact ` +
-    `next steps. Then continue your task. If you are stopped, a fresh subagent ` +
-    `continues from that file.`
+    `next steps. Then end your turn with a final message that starts ` +
+    `"PTAH BUDGET HANDOFF:" and summarizes progress and next steps. ` +
+    `Do not call other tools. A fresh subagent continues from that file.`
   );
 }
 
@@ -107,12 +108,14 @@ export function handoffMessage(
   const why =
     usage.reason === 'handoff'
       ? `at ${usage.contextTokens} context tokens (handoff limit ${usage.handoffTokens} tokens)`
-      : `after ${Math.round(usage.weightedUsed)} weighted tokens (safety limit ${usage.stopWeightedTokens})`;
-  const { paths, taskSaved, notesWritten, unavailable } = files;
+      : usage.contextTokens >= usage.handoffTokens * 2
+        ? `after ${usage.contextTokens} context tokens (2x handoff ceiling ${usage.handoffTokens * 2})`
+        : `after ${Math.round(usage.weightedUsed)} weighted tokens (safety limit ${usage.stopWeightedTokens})`;
+  const { paths, taskSaved, notesWritten, notesInferred, unavailable } = files;
   const lines = [
-    `Ptah's subagent budget monitor stopped subagent ${name} ${why}. ` +
-      `The user did not stop it; a task notification that reports it as ` +
-      `stopped by the user refers to this automatic stop. It cannot be resumed.`,
+    `Ptah's subagent budget monitor handed off subagent ${name} ${why}. ` +
+      `If the Agent result says "[Request interrupted by user for tool use]", Ptah's subagent budget monitor caused that interruption, not the user. ` +
+      `No user input is needed; continue autonomously now.`,
   ];
   lines.push(`Budget stop reason: ${usage.reason}; SDK agent: ${subject.agentId ?? 'unknown'}; SDK task: ${subject.taskId}.`);
   lines.push(`Usage: ${usage.contextTokens} context tokens of ${usage.handoffTokens}; ${Math.round(usage.weightedUsed)} weighted tokens of ${usage.stopWeightedTokens}.`);
@@ -132,17 +135,16 @@ export function handoffMessage(
   lines.push(`Files targeted: ${progress?.filePaths.length ? progress.filePaths.join(', ') : 'unknown'}`);
   lines.push(`Recent tools: ${progress?.toolCalls.length ? progress.toolCalls.map((call) => `${call.name}${call.targetPath ? ` (${call.targetPath})` : ''}: ${call.outcome}`).join('; ') : 'unknown'}`);
   lines.push(`Subagent transcript: ${progress?.transcriptPath ?? 'unknown'}`);
-  const taskSource =
-    paths && taskSaved
-      ? `its full original task prompt, saved at ${paths.task}`
-      : 'its full original task prompt from the Agent call that spawned it';
+  const taskSource = paths && taskSaved
+    ? `the remaining items from its original task prompt at ${paths.task}`
+    : 'only the remaining items from its original Agent task';
   lines.push(
     !paths
       ? 'Its progress notes file: unavailable (workspace unknown).'
       : unavailable
         ? `Its progress notes file: unavailable (the file check did not finish); look for ${paths.notes}.`
         : notesWritten
-          ? `Its progress notes are at ${paths.notes}.`
+          ? `Its progress notes${notesInferred ? ' (host-generated, inferred)' : ''} are at ${paths.notes}.`
           : `Its progress notes file is missing: ${paths.notes} was not written.`,
   );
   lines.push(
@@ -163,8 +165,9 @@ export function handoffMessage(
     ? `${resumeFiles} ${recordLine(recordPath)}`
     : resumeFiles;
   lines.push(
-    `If its task is not finished, spawn ${fresh} with ${taskSource}, ` +
-      `plus this instruction: "${resume}"`,
+    `If its task is not finished, spawn ${fresh} with a SMALLER scope: ${taskSource}, split into parts if needed. Never relaunch the same full task. ` +
+      `Give the replacement this instruction: "${resume}"`,
   );
+  lines.push('Continue unfinished work autonomously now. Do not ask the user or wait for another turn. If replacement subagents repeatedly hit this budget, finish the remaining work yourself or summarize the limit.');
   return lines.join('\n');
 }

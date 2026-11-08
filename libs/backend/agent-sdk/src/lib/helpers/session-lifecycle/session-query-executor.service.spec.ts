@@ -1673,7 +1673,7 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
       expect(port.pushParentMessage).toHaveBeenCalledTimes(1);
       expect(port.pushParentMessage).toHaveBeenCalledWith(
         REAL,
-        expect.stringContaining("Ptah's subagent budget monitor stopped"),
+        expect.stringContaining("Ptah's subagent budget monitor handed off"),
       );
       expect(port.postMainThreadNotice).not.toHaveBeenCalled();
       run.abortController.abort();
@@ -1681,7 +1681,7 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
 
     it('lets a real monitor stop a subagent the registry never recorded and hand off', async () => {
       const { monitor, port, registry } = handoffMonitor();
-      const { stopSubagent, postMainThreadNotice } = port;
+      const { stopSubagent } = port;
       const { executor } = makeHarness('ask', {} as AuthEnv, {
         subagentMonitor: monitor,
       });
@@ -1694,14 +1694,11 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
       feed(run, bigSubagentRequest());
       await flush();
       expect(stopSubagent).toHaveBeenCalledWith(REAL, 'task-1');
-      // Foreground: the handoff rides on the `Agent` tool result still due.
-      expect(postMainThreadNotice).toHaveBeenCalledTimes(1);
-      expect(postMainThreadNotice).toHaveBeenCalledWith(
+      expect(port.pushParentMessage).toHaveBeenCalledWith(
         REAL,
         expect.stringContaining('`Explore`'),
-        expect.any(Function),
       );
-      expect(port.pushParentMessage).not.toHaveBeenCalled();
+      expect(port.postMainThreadNotice).not.toHaveBeenCalled();
       expect(registry.update).not.toHaveBeenCalled();
       run.abortController.abort();
     });
