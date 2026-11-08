@@ -44,16 +44,13 @@ export interface DocsOptions {
    * more than one project. The opened workspace is always included first.
    */
   extraWorkspaceFolders: string[];
-  /** Replay saved state from the development profile for this workspace. */
-  useDevSessionStorage: boolean;
 }
 
 export const test = base.extend<DocsFixtures & DocsOptions>({
   workspace: [DOCS_WORKSPACE, { option: true }],
   extraWorkspaceFolders: [[], { option: true }],
-  useDevSessionStorage: [false, { option: true }],
 
-  app: async ({ workspace, extraWorkspaceFolders, useDevSessionStorage }, use) => {
+  app: async ({ workspace, extraWorkspaceFolders }, use) => {
     const settingsHash = productionSettingsHash();
     const sample = workspace === SAMPLE_REPO ? createDocsSampleRepo() : null;
     try {
@@ -65,9 +62,7 @@ export const test = base.extend<DocsFixtures & DocsOptions>({
       );
     }
     const profile = prepareDocsProfile(
-      extraWorkspaceFolders.length > 0
-        ? { folders: [path.resolve(root), ...extraWorkspaceFolders], ...(useDevSessionStorage ? { devSessionWorkspace: root } : {}) }
-        : useDevSessionStorage ? { folders: [path.resolve(root)], devSessionWorkspace: root } : {},
+      extraWorkspaceFolders.length > 0 ? { folders: [path.resolve(root), ...extraWorkspaceFolders] } : {},
     );
     let app: ElectronApplication | undefined;
     try {

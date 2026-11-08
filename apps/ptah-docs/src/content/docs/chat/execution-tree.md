@@ -9,7 +9,7 @@ sidebar:
 
 The Execution Tree shows what happened during a turn. Each assistant message renders as a tree of nodes in the transcript.
 
-![Execution Tree for a complex turn](/screenshots/chat-execution-tree.webp)
+In the transcript, expand a completed **Worked** disclosure to see its tool rows. A sub-agent has its own lane tab and transcript.
 
 ## Node types
 
