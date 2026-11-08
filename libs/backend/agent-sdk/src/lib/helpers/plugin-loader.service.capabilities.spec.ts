@@ -321,7 +321,13 @@ describe('PluginLoaderService — capability layers', () => {
       const b = tempDir('ptah-policy-b-');
       const a = tempDir('ptah-policy-a-');
       const alias = path.join(b, 'alias');
-      fs.symlinkSync(a, alias, 'dir');
+      try {
+        fs.symlinkSync(a, alias, 'dir');
+      } catch (error: unknown) {
+        // Windows without symlink privilege cannot exercise this filesystem case.
+        if (process.platform === 'win32' && typeof error === 'object' && error !== null && 'code' in error && error.code === 'EPERM') return;
+        throw error;
+      }
       const { storage, stores } = scopedStores([b, a]);
       stores
         .get(a)

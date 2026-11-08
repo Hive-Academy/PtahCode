@@ -1041,6 +1041,7 @@ describe('SessionQueryExecutor — compaction coordinator wiring (TASK_2026_597 
 
     function realMonitor(): SubagentBudgetMonitor {
       const config = {
+        getAgentBudgetSettings: () => ({ warnRatio: 0.85, handoffContextTokens: Number.MAX_SAFE_INTEGER, stopWeightedTokens: Number.MAX_SAFE_INTEGER, maxDurationMin: 90 }),
         getConfig: () => ({
           enabled: true,
           subagentHandoffTokens: Number.MAX_SAFE_INTEGER,
@@ -1602,6 +1603,7 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
       const monitor = new SubagentBudgetMonitor(
         makeLogger(),
         {
+          getAgentBudgetSettings: () => ({ warnRatio: 0.85, handoffContextTokens: 1_000, stopWeightedTokens: Number.MAX_SAFE_INTEGER, maxDurationMin: 90 }),
           getConfig: () => ({
             enabled: true,
             subagentHandoffTokens: 1_000,
@@ -1627,6 +1629,7 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
         parent_tool_use_id: 'toolu_big',
         message: {
           id: 'msg_big',
+          model: 'local',
           usage: {
             input_tokens: 2_000,
             output_tokens: 0,
@@ -1673,7 +1676,7 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
       expect(port.pushParentMessage).toHaveBeenCalledTimes(1);
       expect(port.pushParentMessage).toHaveBeenCalledWith(
         REAL,
-        expect.stringContaining("Ptah's subagent budget monitor stopped"),
+        expect.stringContaining("Ptah's subagent budget monitor handed off"),
       );
       expect(port.postMainThreadNotice).not.toHaveBeenCalled();
       run.abortController.abort();
@@ -1681,7 +1684,7 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
 
     it('lets a real monitor stop a subagent the registry never recorded and hand off', async () => {
       const { monitor, port, registry } = handoffMonitor();
-      const { stopSubagent, postMainThreadNotice } = port;
+      const { stopSubagent } = port;
       const { executor } = makeHarness('ask', {} as AuthEnv, {
         subagentMonitor: monitor,
       });
@@ -1694,14 +1697,11 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
       feed(run, bigSubagentRequest());
       await flush();
       expect(stopSubagent).toHaveBeenCalledWith(REAL, 'task-1');
-      // Foreground: the handoff rides on the `Agent` tool result still due.
-      expect(postMainThreadNotice).toHaveBeenCalledTimes(1);
-      expect(postMainThreadNotice).toHaveBeenCalledWith(
+      expect(port.pushParentMessage).toHaveBeenCalledWith(
         REAL,
         expect.stringContaining('`Explore`'),
-        expect.any(Function),
       );
-      expect(port.pushParentMessage).not.toHaveBeenCalled();
+      expect(port.postMainThreadNotice).not.toHaveBeenCalled();
       expect(registry.update).not.toHaveBeenCalled();
       run.abortController.abort();
     });
@@ -1850,78 +1850,6 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
     expect(observe).toHaveBeenCalledTimes(1);
     expect(observe).toHaveBeenCalledWith(REAL, spawning, undefined);
     run.abortController.abort();
-  });
-
-  describe('effective subagent prompt-cache TTL (TASK_2026_614 D.7)', () => {
-    /** A real monitor whose limits are never reached, so no stop fires. */
-    function realMonitor(): SubagentBudgetMonitor {
-      const config = {
-        getConfig: () => ({
-          subagentHandoffTokens: Number.MAX_SAFE_INTEGER,
-          subagentStopWeightedTokens: Number.MAX_SAFE_INTEGER,
-        }),
-      } as unknown as CompactionConfigProvider;
-      return new SubagentBudgetMonitor(
-        makeLogger(),
-        config,
-        {
-          stopSubagent: jest.fn(),
-          pushParentMessage: jest.fn(),
-          postMainThreadNotice: jest.fn(),
-          withdrawMainThreadNotice: jest.fn(),
-          postSubagentNotice: jest.fn(),
-          withdrawSubagentNotice: jest.fn(),
-        },
-        {} as SubagentRegistryService,
-        noHandoffFiles,
-        memoryHandoffRecords,
-        noHandoffIndex,
-        new SubagentBudgetStopCallbackRegistry(makeLogger()),
-        new SubagentStopNotices(),
-      );
-    }
-    /** 1000 cache-write tokens and no `cache_creation` TTL split. */
-    const unsplitWrite = () =>
-      msg({
-        type: 'assistant',
-        session_id: REAL,
-        parent_tool_use_id: 'toolu_ttl',
-        message: {
-          id: 'msg_ttl',
-          usage: {
-            input_tokens: 0,
-            output_tokens: 0,
-            cache_read_input_tokens: 0,
-            cache_creation_input_tokens: 1000,
-          },
-        },
-      });
-
-    async function weightedFor(
-      ttl: SubagentPromptCacheTtl | undefined,
-      tabId: string,
-    ): Promise<number | undefined> {
-      const monitor = realMonitor();
-      const { executor } = makeHarness('ask', {} as AuthEnv, {
-        subagentMonitor: monitor,
-        subagentCacheTtl: ttl,
-      });
-      const run = await executor.executeQuery(makeConfig(tabId));
-      feed(run, init());
-      feed(run, unsplitWrite());
-      await flush();
-      const weighted = monitor.getSnapshot(REAL, 'toolu_ttl')?.weightedUsed;
-      run.abortController.abort();
-      return weighted;
-    }
-
-    it('a 1h-effective session prices an unsplit cache write at weight 2', async () => {
-      expect(await weightedFor('1h', 'tab_ttl_1h')).toBe(2000);
-    });
-
-    it('stays on the 5m default (weight 1.25) when the build reports no TTL', async () => {
-      expect(await weightedFor(undefined, 'tab_ttl_none')).toBe(1250);
-    });
   });
 
   it('releases the monitor once on session end', async () => {
