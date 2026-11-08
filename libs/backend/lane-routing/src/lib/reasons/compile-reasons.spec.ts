@@ -7,6 +7,7 @@ import {
   UnavailableEntrySchema,
 } from '../contracts/route-decide-result.schema';
 import type { MatrixCell } from '../matrix/matrix.types';
+import { withPolicyReason } from '../pipeline/assemble-gate';
 import {
   MISSING_INPUT_REASON,
   MISSING_INPUTS,
@@ -446,6 +447,12 @@ describe('requirement 13.2 chosen facts', () => {
       cell: seedCell(true),
       fallbackCause: 'timeout',
     });
+    const compiled = compileChosenReason(input);
+    const reason = withPolicyReason(
+      compiled,
+      { ruleId: 'R2', tier: 'sonnet', effort: 'high' },
+      { shape: 'logic', weight: 3 },
+    );
     const parsed = ChosenEntrySchema.safeParse({
       phaseId: input.phaseId,
       status: 'chosen',
@@ -456,6 +463,8 @@ describe('requirement 13.2 chosen facts', () => {
         family: 'grok',
       },
       model: input.model,
+      tier: 'sonnet',
+      effort: 'high',
       provenance: 'reported',
       score: input.score,
       source: input.source,
@@ -463,9 +472,13 @@ describe('requirement 13.2 chosen facts', () => {
       confidence: input.reportedConfidence,
       fallbackCause: input.fallbackCause,
       modelProposal: null,
-      reason: compileChosenReason(input),
+      reason,
     });
     expect(parsed.success).toBe(true);
+    expect(reason).toContain(compiled);
+    expect(reason).toContain('executor lane grok');
+    expect(reason).toContain('fallback cause timeout');
+    expect(reason).toMatch(/; policy R2; tier sonnet, effort high, shape logic, weight 3$/);
   });
 });
 
@@ -592,6 +605,12 @@ describe('requirement 13.2 unavailable facts', () => {
       source: 'ranking',
       inputRowIds: ['codex'],
     };
+    const compiled = compileUnavailableReason(input);
+    const reason = withPolicyReason(
+      compiled,
+      { ruleId: 'R5', tier: 'haiku', effort: 'low' },
+      {},
+    );
     const parsed = UnavailableEntrySchema.safeParse({
       phaseId: input.phaseId,
       status: 'unavailable',
@@ -602,13 +621,18 @@ describe('requirement 13.2 unavailable facts', () => {
       needsDisclosedFallback: input.needsDisclosedFallback,
       source: input.source,
       model: null,
+      tier: 'haiku',
+      effort: 'low',
       provenance: null,
       score: null,
       confidence: null,
       fallbackCause: null,
-      reason: compileUnavailableReason(input),
+      reason,
     });
     expect(parsed.success).toBe(true);
+    expect(reason).toContain(compiled);
+    expect(reason).toContain('reviewer-family');
+    expect(reason).toMatch(/; policy R5; tier haiku, effort low, shape unset, weight unset$/);
   });
 });
 

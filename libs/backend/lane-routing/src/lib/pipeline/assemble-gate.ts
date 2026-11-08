@@ -249,6 +249,10 @@ function rosterFrom(
   let unavailableIndex = 0;
   const roster: (ChosenEntry | UnavailableEntry)[] = [];
   for (const draft of drafts) {
+    const phase = args.phases.find((input) => input.id === draft.phaseId);
+    if (phase === undefined) {
+      throw new Error(`phase ${draft.phaseId} is missing its input`);
+    }
     if (draft.kind === 'unavailable') {
       const reason = reasonAt(
         unavailableReasons,
@@ -256,7 +260,12 @@ function rosterFrom(
         draft.phaseId,
       );
       unavailableIndex += 1;
-      roster.push(unavailableEntry(draft.plan, reason));
+      roster.push(
+        unavailableEntry(
+          draft.plan,
+          withPolicyReason(reason, draft.plan.policy, phase),
+        ),
+      );
       continue;
     }
     const reason = withOnlyEligible(
@@ -264,12 +273,23 @@ function rosterFrom(
       draft.plan,
     );
     chosenIndex += 1;
-    roster.push(chosenEntry(draft, reason));
+    roster.push(
+      chosenEntry(draft, withPolicyReason(reason, draft.plan.policy, phase)),
+    );
   }
   if (roster.length !== args.phases.length) {
     throw new Error('route decide roster does not cover every phase');
   }
   return roster;
+}
+
+export function withPolicyReason(
+  reason: string,
+  policy: PhasePlan['policy'],
+  phase: Pick<GateArgs['phases'][number], 'shape' | 'weight'>,
+): string {
+  const { ruleId, tier, effort } = policy;
+  return `${reason}; policy ${ruleId}; tier ${tier}, effort ${effort}, shape ${phase.shape ?? 'unset'}, weight ${phase.weight ?? 'unset'}`;
 }
 
 function reasonAt(
@@ -299,6 +319,8 @@ function unavailableEntry(plan: PhasePlan, reason: string): UnavailableEntry {
     source:
       plan.constraint.exclusionReason === 'pin-unavailable' ? 'pin' : 'ranking',
     model: null,
+    tier: plan.policy.tier,
+    effort: plan.policy.effort,
     provenance: null,
     score: null,
     confidence: null,
@@ -326,6 +348,8 @@ function chosenEntry(draft: ChosenDraft, reason: string): ChosenEntry {
     status: 'chosen',
     executor: executorOf(draft.resolution.candidate),
     model: row.scored.model,
+    tier: draft.plan.policy.tier,
+    effort: draft.plan.policy.effort,
     provenance: row.scored.provenance,
     score: row.scored.score,
     source: draft.resolution.source,

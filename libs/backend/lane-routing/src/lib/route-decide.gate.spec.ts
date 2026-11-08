@@ -265,6 +265,93 @@ function implement(id = 'build') {
   };
 }
 
+describe('gate phase policy roster', () => {
+  it('keeps the legacy executor and adds the default policy to its row', async () => {
+    const run = harness({ rotate: false, selection: { kind: 'unset' } });
+    const result = await run.service.decide(implement(), run.source);
+    expect(GateResultSchema.safeParse(result).success).toBe(true);
+    if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
+    expect(result.roster).toHaveLength(1);
+    expect(result.roster[0]).toMatchObject({
+      status: 'chosen',
+      executor: { id: 'codex' },
+      tier: 'sonnet',
+      effort: 'medium',
+    });
+    expect(result.roster[0].reason).toMatch(
+      /; policy R5; tier sonnet, effort medium, shape unset, weight unset$/,
+    );
+  });
+
+  it('applies weighted policy without changing executor eligibility or choice', async () => {
+    const phases = [
+      { id: 'mechanical', kind: 'implement' as const, shape: 'mechanical' as const, weight: 2000 },
+      { id: 'logic', kind: 'implement' as const, shape: 'logic' as const, weight: 9000 },
+      { id: 'review', kind: 'review' as const, shape: 'docs' as const, weight: 2000 },
+    ];
+    const baseline = harness({ rotate: false, selection: { kind: 'unset' } });
+    const weighted = harness({ rotate: false, selection: { kind: 'unset' } });
+    const baseResult = await baseline.service.decide(
+      { ...implement(), phases: phases.map(({ id, kind }) => ({ id, kind })) }, baseline.source,
+    );
+    const result = await weighted.service.decide({ ...implement(), phases }, weighted.source);
+    expect(GateResultSchema.safeParse(baseResult).success).toBe(true);
+    expect(GateResultSchema.safeParse(result).success).toBe(true);
+    if (baseResult.stage !== 'gate-0.1' || result.stage !== 'gate-0.1')
+      throw new Error('expected gate results');
+    expect(result.roster.map((row) => row.executor)).toEqual(
+      baseResult.roster.map((row) => row.executor),
+    );
+    expect(result.roster).toEqual([
+      expect.objectContaining({ phaseId: 'mechanical', tier: 'haiku', effort: 'low', reason: expect.stringMatching(/; policy R4; tier haiku, effort low, shape mechanical, weight 2000$/) }),
+      expect.objectContaining({ phaseId: 'logic', tier: 'opus', effort: 'xhigh', reason: expect.stringMatching(/; policy R3; tier opus, effort xhigh, shape logic, weight 9000$/) }),
+      expect.objectContaining({ phaseId: 'review', tier: 'opus', effort: 'high', reason: expect.stringMatching(/; policy R2; tier opus, effort high, shape docs, weight 2000$/) }),
+    ]);
+  });
+
+  it('preserves a subagent model pin while reporting phase policy', async () => {
+    const run = harness({ rotate: false, selection: { kind: 'unset' } });
+    const result = await run.service.decide({
+      ...implement(),
+      phases: [{ id: 'build', kind: 'implement', shape: 'mechanical', weight: 2000 }],
+      pins: [{ phaseId: 'build', executor: 'subagent:backend-developer', model: 'haiku' }],
+    }, run.source);
+    expect(GateResultSchema.safeParse(result).success).toBe(true);
+    if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
+    expect(result.roster[0]).toMatchObject({
+      status: 'chosen', source: 'pin', executor: { id: 'subagent:backend-developer' },
+      model: 'haiku', tier: 'haiku', effort: 'low',
+    });
+    expect(result.roster[0].reason).toMatch(/; policy R4; tier haiku, effort low, shape mechanical, weight 2000$/);
+  });
+
+  it('keeps policy fields and fallback text when the decision model times out', async () => {
+    const run = harness({ reply: () => ({ ok: false, cause: 'timeout', notFound: false, detail: 'slow' }) });
+    const result = await run.service.decide(implement(), run.source);
+    expect(GateResultSchema.safeParse(result).success).toBe(true);
+    if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
+    expect(result.roster[0]).toMatchObject({ status: 'chosen', source: 'ranking', fallbackCause: 'timeout', tier: 'sonnet', effort: 'medium' });
+    expect(result.roster[0].reason).toContain('timeout');
+    expect(result.roster[0].reason).toMatch(/; policy R5; tier sonnet, effort medium, shape unset, weight unset$/);
+  });
+
+  it('keeps policy fields and unavailability text on a null-model row', async () => {
+    const limits = new Map<string, LaneLimitState>([
+      ['codex', 'at-limit'], ['grok', 'at-limit'], ['opencode', 'at-limit'],
+    ]);
+    const run = harness({ limits });
+    const result = await run.service.decide({
+      ...implement(),
+      phases: [{ id: 'build', kind: 'implement', role: 'custom-role', shape: 'logic', weight: 9000 }],
+    }, run.source);
+    expect(GateResultSchema.safeParse(result).success).toBe(true);
+    if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
+    expect(result.roster[0]).toMatchObject({ status: 'unavailable', model: null, exclusionReason: 'no-eligible-candidate', tier: 'opus', effort: 'xhigh' });
+    expect(result.roster[0].reason).toContain('exclusion reason no-eligible-candidate');
+    expect(result.roster[0].reason).toMatch(/; policy R3; tier opus, effort xhigh, shape logic, weight 9000$/);
+  });
+});
+
 describe('route decide outcome figures', () => {
   it('passes only offered lane and phase-kind figures to the captured payload', async () => {
     const matrix: RouteMatrix = {
