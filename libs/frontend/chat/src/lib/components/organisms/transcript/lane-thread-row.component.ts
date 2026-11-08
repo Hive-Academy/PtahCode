@@ -3,6 +3,9 @@ import { ChevronDown, ChevronRight, CircleCheckBig, CircleX, Eye, MessageSquareT
 import { DeliveryStatusComponent } from '../../molecules/delivery-status/delivery-status.component';
 import type { LaneThreadEntry } from './lane-thread';
 
+/** Entry ids repeat across lanes (every lane has a `completion`), so detail ids count row instances. */
+let nextRowInstance = 0;
+
 @Component({
   selector: 'ptah-lane-thread-row', standalone: true, imports: [LucideAngularModule, DeliveryStatusComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -108,7 +111,8 @@ export class LaneThreadRowComponent {
   protected kindLabel(): string {
     return this.entry().kind === 'ack' ? 'acknowledgment' : this.entry().kind;
   }
-  protected bodyId(): string { return `lane-thread-detail-${this.entry().id}`; }
+  private readonly detailId = `lane-thread-detail-${nextRowInstance++}`;
+  protected bodyId(): string { return this.detailId; }
   protected badgeLabel(): string {
     if (this.entry().kind === 'completion') return this.entry().verdict || 'Completion';
     if (this.entry().kind === 'ack') {

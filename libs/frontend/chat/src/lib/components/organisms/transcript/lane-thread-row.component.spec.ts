@@ -109,4 +109,18 @@ describe('LaneThreadRowComponent', () => {
     item.querySelector('button')!.click(); fixture.detectChanges();
     expect(item.querySelectorAll('ptah-delivery-status')).toHaveLength(1);
   });
+
+  it('gives two lanes with the same entry id their own detail ids', () => {
+    const entry = { id: 'completion', sender: 'codex', senderKind: 'this-lane', kind: 'completion',
+      timestamp: 1, body: '', verdict: 'Deliverables written' } satisfies LaneThreadEntry;
+    const rows = [0, 1].map(() => {
+      const fixture = TestBed.createComponent(LaneThreadRowComponent);
+      fixture.componentRef.setInput('entry', entry);
+      fixture.detectChanges();
+      return fixture.nativeElement as HTMLElement;
+    });
+    const ids = rows.map(row => row.querySelector('[id^="lane-thread-detail"]')!.id);
+    expect(new Set(ids).size).toBe(2);
+    rows.forEach((row, index) => expect(row.querySelector('button')!.getAttribute('aria-controls')).toBe(ids[index]));
+  });
 });
