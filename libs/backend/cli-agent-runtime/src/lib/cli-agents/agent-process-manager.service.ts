@@ -1608,7 +1608,9 @@ export class AgentProcessManager {
     const tracked = this.agents.get(agentId);
     if (!tracked || tracked.info.status !== 'running') return;
 
-    this.logger.warn('[AgentProcessManager] Lane guard tripped; stopping', {
+    this.logger.warn(isAgentBudgetStopReason(stopReason)
+      ? '[AgentProcessManager] Agent budget tripped; stopping'
+      : '[AgentProcessManager] Lane repeat guard tripped; stopping', {
       agentId,
       stopReason,
       repeats,

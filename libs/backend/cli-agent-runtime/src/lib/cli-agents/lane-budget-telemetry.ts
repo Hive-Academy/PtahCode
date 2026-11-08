@@ -24,8 +24,25 @@ export class LaneBudgetTelemetry {
   accept(agentId: string, tracked: TrackedAgent, telemetry: AgentTurnTelemetry): void {
     const budget = tracked.budget;
     if (!budget || tracked.info.status !== 'running') return;
+    const duplicate = telemetry.status === 'reported' && budget.counters.turnIds.includes(telemetry.usage.turnId);
     const decision = budget.accept(telemetry);
     tracked.info = { ...tracked.info, agentBudget: budget.record() };
+    if (telemetry.status === 'reported' && !duplicate) {
+      const usage = telemetry.usage;
+      this.logger.info('[LaneBudgetTelemetry] Accepted lane turn', {
+        agentId, turnId: usage.turnId, model: usage.modelId,
+        inputTokens: usage.inputTokens, outputTokens: usage.outputTokens,
+        cacheReadTokens: usage.cacheReadTokens.status === 'reported' ? usage.cacheReadTokens.value : null,
+        cacheWriteTokens: usage.cacheWriteTokens.status === 'reported' ? usage.cacheWriteTokens.value : null,
+        weightedTotal: budget.counters.weightedTokens,
+        ratio: budget.counters.weightedTokens / budget.settings.stopWeightedTokens,
+        costAuthority: decision.costAuthority,
+      });
+    } else if (telemetry.status === 'unavailable') {
+      this.logger.info('[LaneBudgetTelemetry] Lane turn telemetry unavailable', {
+        agentId, turnId: telemetry.turnId, reason: telemetry.reason,
+      });
+    }
     this.dispatch(agentId, tracked, decision);
   }
 

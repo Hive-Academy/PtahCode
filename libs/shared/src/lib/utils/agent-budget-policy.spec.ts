@@ -35,6 +35,7 @@ describe('AgentBudgetPolicy', () => {
     const first = policy.evaluate(initialAgentBudgetSnapshot, { status: 'reported', usage }, 10, rates);
     expect(first.snapshot.weightedTokens).toBeCloseTo(135);
     expect(first.stopReason).toBe('budget');
+    expect(first.warning).toBe(true);
     expect(first.handoff).toBe(true);
     const duplicate = policy.evaluate(first.snapshot, { status: 'reported', usage }, 11, rates);
     expect(duplicate.snapshot.weightedTokens).toBe(first.snapshot.weightedTokens);

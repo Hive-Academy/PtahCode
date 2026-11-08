@@ -31,7 +31,7 @@ function deliverableLine(check: LaneDeliverableCheck): string {
 function hostStopLine(signal: LaneCompletionSignal): string | undefined {
   if (!signal.stopReason) return undefined;
   if (isAgentBudgetStop(signal))
-    return `Stopped by Ptah (agent budget), not by the user: ${signal.stopReason}; limit: ${signal.budgetLimit ?? 'configured limit'}.`;
+    return `Stopped by Ptah (agent budget), not by the user: ${signal.stopReason}; limit: ${signal.budgetLimit ?? 'configured limit'}.${signal.stopReason === 'budget' ? ' Budget warning: finish current work, report progress, and prepare a short handoff before a fresh lane.' : ''}`;
   const calls =
     signal.toolCalls !== undefined ? ` (${signal.toolCalls} tool calls)` : '';
   const why =

@@ -20,6 +20,7 @@ describe('lane completion envelope budget stops', () => {
       expect(text).toContain('Progress pointer: ptah_agent_read');
       expect(text).toContain('resume is refused');
       expect(text).not.toContain('pass it as resume_session_id');
+      if (stopReason === 'budget') expect(text).toContain('Budget warning: finish current work');
     },
   );
 

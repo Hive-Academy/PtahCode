@@ -109,7 +109,7 @@ export class AgentBudgetPolicy {
     const total = Math.max(rawTokens, weightedTokens);
     const budget = total >= this.settings.stopWeightedTokens;
     const contextWarning = usage.requestContextTokens.status === 'reported' && usage.requestContextTokens.value >= this.settings.handoffContextTokens * this.settings.warnRatio;
-    const warning = !duplicate && !snapshot.warned && !snapshot.stopped && !budget && (total >= this.settings.stopWeightedTokens * this.settings.warnRatio || contextWarning);
+    const warning = !duplicate && !snapshot.warned && !snapshot.stopped && (total >= this.settings.stopWeightedTokens * this.settings.warnRatio || contextWarning);
     const stopReason = snapshot.stopped ? undefined : duration ? 'duration' as const : budget ? 'budget' as const : undefined;
     return {
       snapshot: { weightedTokens, rawTokens, elapsedMs, warned: snapshot.warned || warning, stopped: snapshot.stopped || stopReason !== undefined, turnIds: duplicate ? snapshot.turnIds : [...snapshot.turnIds, usage.turnId] },

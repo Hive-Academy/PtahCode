@@ -68,7 +68,7 @@ export class AgentBudgetCoordinator {
     const stopReason = !this.snapshot.stopped
       ? expired ? 'duration' as const : total >= this.settings.stopWeightedTokens ? 'budget' as const : undefined
       : undefined;
-    const warning = !this.snapshot.warned && !this.snapshot.stopped && !stopReason
+    const warning = !this.snapshot.warned && !this.snapshot.stopped
       && total >= this.settings.stopWeightedTokens * this.settings.warnRatio;
     this.snapshot = { ...this.snapshot, warned: this.snapshot.warned || warning,
       stopped: this.snapshot.stopped || stopReason !== undefined };
@@ -88,6 +88,7 @@ export class AgentBudgetCoordinator {
     warning: boolean;
     stopReason?: AgentBudgetStopReason;
     costUnavailable: boolean;
+    costAuthority: 'provider' | 'catalog' | 'unavailable';
   } {
     const pricing = telemetry.status === 'reported' && !telemetry.usage.models?.length
       ? findModelPricing(telemetry.usage.modelId) : null;
@@ -103,6 +104,7 @@ export class AgentBudgetCoordinator {
       warning: result.warning,
       ...(result.stopReason ? { stopReason: result.stopReason } : {}),
       costUnavailable: result.cost.status === 'unavailable',
+      costAuthority: result.cost.status === 'reported' ? result.cost.source : 'unavailable',
     };
   }
 

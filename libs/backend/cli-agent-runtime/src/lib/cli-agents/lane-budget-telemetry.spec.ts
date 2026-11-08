@@ -30,3 +30,26 @@ it('dispatches warning, cost warning once, then stop', async () => {
   expect(stop).toHaveBeenCalledWith('lane', 'budget');
   expect(logger.warn).toHaveBeenCalledTimes(1);
 });
+
+it('records a threshold-crossing turn and logs unavailable telemetry', () => {
+  const warn = jest.fn().mockResolvedValue({ mode: 'queue-next-turn' });
+  const stop = jest.fn();
+  const logger = Object.assign(Object.create(Logger.prototype) as Logger, {
+    warn: jest.fn(), info: jest.fn(), error: jest.fn(),
+  });
+  const telemetry = new LaneBudgetTelemetry(logger, warn, stop);
+  const tracked = { budget: new AgentBudgetCoordinator({ warnRatio: 0.8,
+    stopWeightedTokens: 80, handoffContextTokens: 50, maxDurationMin: 2 }, Date.now()),
+    info: { status: 'running' } } as TrackedAgent;
+  telemetry.accept('lane', tracked, turn);
+  expect(warn).toHaveBeenCalledTimes(1);
+  expect(stop).toHaveBeenCalledWith('lane', 'budget');
+  expect(logger.info).toHaveBeenCalledWith('[LaneBudgetTelemetry] Accepted lane turn', expect.objectContaining({
+    agentId: 'lane', turnId: 'one', model: 'unpriced-test-model', inputTokens: 80,
+    outputTokens: 0, weightedTotal: 80, ratio: 1, costAuthority: 'unavailable',
+  }));
+  telemetry.accept('lane', tracked, { status: 'unavailable', turnId: 'missing',
+    modelId: 'unpriced-test-model', source: 'stream', reason: 'missing-totals' });
+  expect(logger.info).toHaveBeenCalledWith('[LaneBudgetTelemetry] Lane turn telemetry unavailable',
+    { agentId: 'lane', turnId: 'missing', reason: 'missing-totals' });
+});
