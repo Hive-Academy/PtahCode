@@ -168,7 +168,7 @@ export function createApplicationMenu(
       {
         label: 'Documentation',
         click: async () => {
-          await shell.openExternal('https://ptah.live/docs');
+          await shell.openExternal('https://docs.ptah.live');
         },
       },
       { type: 'separator' },

@@ -75,7 +75,7 @@ export class ElectronHostAttentionNotifications implements IHostAttentionNotific
     const notice = entry.notice;
     try {
       const handle = this.capabilities.createNotification?.({
-        title: 'Ptah',
+        title: 'PtahCode',
         body: count > 1
           ? `${count} requests need you — ${notice.sessionTitle}`
           : `${notice.label} — ${notice.sessionTitle}`,

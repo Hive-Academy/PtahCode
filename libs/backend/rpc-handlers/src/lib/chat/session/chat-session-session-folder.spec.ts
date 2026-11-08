@@ -63,8 +63,8 @@ const TEST_ROOT = mkdtempSync(join(tmpdir(), 'ptah-session-policy-'));
 afterAll(() => rmSync(TEST_ROOT, { recursive: true, force: true }));
 for (const part of ['a', 'b', 'b/child', 'b/.claude/worktrees/task'])
   mkdirSync(join(TEST_ROOT, part), { recursive: true });
-const PROJECT_A = `${TEST_ROOT}/a`;
-const PROJECT_B = `${TEST_ROOT}/b`;
+const PROJECT_A = join(TEST_ROOT, 'a');
+const PROJECT_B = join(TEST_ROOT, 'b');
 const SESSION_ID = '11111111-1111-4111-8111-111111111111' as SessionId;
 const TAB_ID = '22222222-2222-4222-8222-222222222222';
 
@@ -73,6 +73,7 @@ function makeHarness(
     folders?: string[];
     metadata?: Record<string, unknown> | null;
     ptahCli?: boolean;
+    awaitRecoveredOutput?: jest.Mock;
   } = {},
 ) {
   const noop = jest.fn();
@@ -154,6 +155,9 @@ function makeHarness(
         : { error: '__NOT_PTAH_CLI__' },
     );
   const restoreAgents = jest.fn();
+  const awaitRecoveredOutput =
+    opts.awaitRecoveredOutput ?? jest.fn().mockResolvedValue(undefined);
+  const findAgentInfo = jest.fn().mockReturnValue(undefined);
   const captureException = jest.fn();
 
   const service = new ChatSessionService(
@@ -209,7 +213,7 @@ function makeHarness(
     new SessionMcpStatusRegistry(),
     { register: jest.fn().mockReturnValue(() => undefined) } as never,
     { register: jest.fn().mockReturnValue(() => undefined) } as never,
-    { restoreAgents } as never,
+    { restoreAgents, awaitRecoveredOutput, findAgentInfo } as never,
     undefined,
     undefined,
     undefined,
@@ -229,6 +233,7 @@ function makeHarness(
     routeFollowUpSlashCommand,
     injectInterruptedAgentsContext,
     restoreAgents,
+    awaitRecoveredOutput,
     captureException,
     registerResumedSession,
     registryMocks,
@@ -357,7 +362,7 @@ describe("ChatSessionService — the session's own folder (MP-3)", () => {
       expect(h.resumeSession).not.toHaveBeenCalled();
     });
     it('restores the provable immediate lineage when a child folder is resolved', async () => {
-      const child = `${PROJECT_B}/child`;
+      const child = join(PROJECT_B, 'child');
       const h = makeHarness({
         metadata: { workspaceId: PROJECT_B, workingDirectory: child },
       });
@@ -470,7 +475,7 @@ describe("ChatSessionService — the session's own folder (MP-3)", () => {
   });
 
   describe('chat:resume', () => {
-    it("reads history and restores agents in the session's own project", async () => {
+    it("reads history and restores agents in the session's own project, under that parent", async () => {
       const h = makeHarness();
 
       const result = await h.service.resumeSession({
@@ -486,7 +491,36 @@ describe("ChatSessionService — the session's own folder (MP-3)", () => {
       expect(h.restoreAgents).toHaveBeenCalledWith(
         [{ agentId: 'agent-1' }],
         PROJECT_B,
+        SESSION_ID,
       );
+      expect(h.awaitRecoveredOutput).toHaveBeenCalledWith(['agent-1']);
+    });
+
+    it('resolves only after the recovered output write settled', async () => {
+      let land = (): void => undefined;
+      let markWaiting = (): void => undefined;
+      const waiting = new Promise<void>((resolve) => { markWaiting = resolve; });
+      const awaitRecoveredOutput = jest.fn(
+        () => new Promise<void>((resolve) => { land = resolve; markWaiting(); }),
+      );
+      const h = makeHarness({ awaitRecoveredOutput });
+
+      let answered = false;
+      const pending = h.service
+        .resumeSession({ sessionId: SESSION_ID, tabId: TAB_ID, workspacePath: PROJECT_A })
+        .then((result) => {
+          answered = true;
+          return result;
+        });
+      // The handler is now parked on the recovered-output wait.
+      await waiting;
+      expect(awaitRecoveredOutput).toHaveBeenCalledTimes(1);
+      expect(answered).toBe(false);
+      land();
+      await expect(pending).resolves.toMatchObject({
+        success: true,
+        cliSessions: [{ agentId: 'agent-1' }],
+      });
     });
 
     it('files a resumed Ptah CLI session under its own project', async () => {

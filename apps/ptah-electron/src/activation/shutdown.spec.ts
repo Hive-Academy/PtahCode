@@ -26,6 +26,7 @@ import {
   CHAT_SESSION_DISPOSE_BUDGET_MS,
   CODEX_SIGN_IN_STOP_BUDGET_MS,
   RUN_CHECK_KILL_BUDGET_MS,
+  TASK_END_HOOK_STOP_BUDGET_MS,
   CODEX_DISPOSE_BUDGET_MS,
   handleWillQuit,
   requiresDeferredDisposal,
@@ -201,6 +202,24 @@ describe('will-quit — the run-check kill', () => {
     expect(deps.quit).toHaveBeenCalledTimes(1);
   });
 
+  it('stops the WAL checkpoint scheduler before SQLite close', () => {
+    const order: string[] = [];
+    const refs = minimalRefs(order);
+    refs.walCheckpointScheduler = {
+      dispose: () => {
+        order.push('walCheckpointScheduler');
+      },
+    };
+
+    expect(handleWillQuit(quitDeps(refs))).toBe(true);
+
+    expect(order).toEqual([
+      'walCheckpointScheduler',
+      'sqliteConnection',
+      'diagnostics',
+    ]);
+  });
+
   it('aborts and awaits the review worker before SQLite close', async () => {
     const order: string[] = [];
     let finish!: () => void;
@@ -216,6 +235,47 @@ describe('will-quit — the run-check kill', () => {
     finish();
     await flushMicrotasks();
     expect(order).toEqual(['review abort', 'review wait', 'sqliteConnection', 'diagnostics']);
+  });
+
+  it('disposes and awaits the task-end hook before SQLite close', async () => {
+    const order: string[] = [];
+    let finish!: () => void;
+    const refs = minimalRefs(order);
+    refs.taskEndHook = {
+      dispose: () => { order.push('task-end dispose'); },
+      awaitStopped: () => new Promise<void>((resolve) => { finish = resolve; order.push('task-end wait'); }),
+    };
+    expect(requiresDeferredDisposal(refs)).toBe(true);
+    expect(handleWillQuit(quitDeps(refs))).toBe(false);
+    await flushMicrotasks();
+    expect(order).toEqual(['task-end dispose', 'task-end wait']);
+    finish();
+    await flushMicrotasks();
+    expect(order).toEqual(['task-end dispose', 'task-end wait', 'sqliteConnection', 'diagnostics']);
+  });
+
+  it('stops waiting for the task-end hook at its budget', async () => {
+    const order: string[] = [];
+    const refs = minimalRefs(order);
+    refs.taskEndHook = {
+      dispose: () => { order.push('task-end dispose'); },
+      awaitStopped: () => new Promise<void>(() => { order.push('task-end wait'); }),
+    };
+    expect(handleWillQuit(quitDeps(refs))).toBe(false);
+    await jest.advanceTimersByTimeAsync(TASK_END_HOOK_STOP_BUDGET_MS - 1);
+    expect(order).toEqual(['task-end dispose', 'task-end wait']);
+    await jest.advanceTimersByTimeAsync(1);
+    await flushMicrotasks();
+    expect(order).toEqual(['task-end dispose', 'task-end wait', 'sqliteConnection', 'diagnostics']);
+  });
+
+  it('treats a null task-end hook as nothing to wait for', () => {
+    const order: string[] = [];
+    const refs = minimalRefs(order);
+    expect(refs.taskEndHook).toBeNull();
+    expect(requiresDeferredDisposal(refs)).toBe(false);
+    expect(handleWillQuit(quitDeps(refs))).toBe(true);
+    expect(order).toEqual(['sqliteConnection', 'diagnostics']);
   });
 });
 
@@ -459,6 +519,13 @@ describe('will-quit — main-chat sessions release leases before SQLite close', 
     expect(handleWillQuit(quitDeps(refs))).toBe(false);
   });
 
+  it('defers the quit when the search worker is the only asynchronous ref', () => {
+    const refs = minimalRefs([]);
+    refs.searchWorker = { dispose: async () => undefined } as BootRefs['searchWorker'];
+    expect(requiresDeferredDisposal(refs)).toBe(true);
+    expect(handleWillQuit(quitDeps(refs))).toBe(false);
+  });
+
   it('waits for SDK teardown before draining usage and closing SQLite', async () => {
     const order: string[] = [];
     let finish!: () => void;
@@ -595,5 +662,52 @@ describe('will-quit — main-chat sessions release leases before SQLite close', 
       expect.stringContaining('Chat session disposal failed'),
       expect.objectContaining({ message: 'teardown failed' }),
     );
+  });
+});
+
+describe('will-quit — the tree-sitter worker', () => {
+  beforeEach(() => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    kill.mockReset().mockResolvedValue(undefined);
+    pids.mockReset().mockReturnValue([]);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('disposes the captured parser: its pending parse settles and its child is killed', async () => {
+    // The parser's contract (pinned in workspace-intelligence's
+    // tree-sitter-parser.service.worker.spec.ts): dispose() kills the child and
+    // answers every waiting request with an error.
+    const child = { killed: false };
+    let settle: (outcome: string) => void = () => undefined;
+    const pending = new Promise<string>((resolve) => {
+      settle = resolve;
+    });
+    const order: string[] = [];
+    const refs = minimalRefs(order);
+    refs.treeSitterParser = {
+      dispose: () => {
+        order.push('treeSitterParser');
+        child.killed = true;
+        settle('terminated');
+      },
+    };
+    const deps = quitDeps(refs);
+    deps.disposeVoiceWorker.mockImplementation(() => { order.push('voice'); });
+    handleWillQuit(deps);
+    await flushMicrotasks();
+    await expect(pending).resolves.toBe('terminated');
+    expect(child.killed).toBe(true);
+    expect(order.indexOf('treeSitterParser')).toBe(order.indexOf('voice') + 1);
+  });
+
+  it('continues the quit when no parser was captured', async () => {
+    const order: string[] = [];
+    const deps = quitDeps(minimalRefs(order));
+    handleWillQuit(deps);
+    await flushMicrotasks();
+    expect(order).toContain('diagnostics');
   });
 });

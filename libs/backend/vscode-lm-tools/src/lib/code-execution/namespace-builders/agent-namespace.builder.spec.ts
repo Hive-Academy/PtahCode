@@ -51,6 +51,7 @@ import {
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { PtahAPI } from '../types';
 import { runWithMcpRequestContext } from '../mcp-core/mcp-request-context';
+import { AgentMessageControlIdentityError } from './agent-message-control-actor';
 import {
   EXECUTION_CANCELLED_MESSAGE,
   executeCode,
@@ -1794,4 +1795,183 @@ describe('buildAgentNamespace — spawn accountSelection', () => {
       expect(mocks.processManager.spawn).not.toHaveBeenCalled();
     },
   );
+});
+
+// ---------------------------------------------------------------------------
+// messaging — sender, idempotency key, control (TASK_2026_AGENT_MESSAGING P1-E)
+// ---------------------------------------------------------------------------
+
+describe('buildAgentNamespace — messaging', () => {
+  const LANE = '11111111-2222-4333-8444-555555555555';
+  const CALLER_LANE = '66666666-7777-4888-8999-aaaaaaaaaaaa';
+  const MESSAGE = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
+
+  function withCoordinator() {
+    const coordinator = {
+      send: jest.fn().mockResolvedValue({ mode: 'queue-next-turn' }),
+      getReceipt: jest.fn().mockResolvedValue({ id: MESSAGE, state: 'accepted' }),
+      retry: jest.fn().mockResolvedValue({ mode: 'queue-next-turn', messageId: MESSAGE }),
+      cancel: jest.fn().mockResolvedValue({ id: MESSAGE, state: 'cancelled' }),
+      acknowledge: jest.fn().mockResolvedValue({ ok: true, messageId: MESSAGE, ackState: 'read', changed: true }),
+    };
+    const { deps } = makeDeps();
+    const ns = buildAgentNamespace({ ...deps, getMessageCoordinator: () => coordinator });
+    return { ns, coordinator };
+  }
+
+  it('sends as the calling session, with its idempotency key', async () => {
+    const { ns, coordinator } = withCoordinator();
+    await runWithMcpRequestContext({ callerSessionId: 'tab-1' }, () =>
+      ns.message(LANE, 'go', 'queue', undefined, 'k-1'));
+    expect(coordinator.send).toHaveBeenCalledWith(
+      { agentId: LANE, message: 'go', delivery: 'queue', allowPartialTurnLoss: undefined, idempotencyKey: 'k-1' },
+      { kind: 'parent', sessionId: 'tab-1' },
+    );
+  });
+
+  it('refuses an agent URL caller without a verified binding as identity-missing', async () => {
+    const { ns, coordinator } = withCoordinator();
+    const outcome = await runWithMcpRequestContext({ callerAgentId: CALLER_LANE, callerSessionId: 'tab-1' }, () =>
+      ns.message(LANE, 'go'));
+    expect(outcome).toMatchObject({ mode: 'unsupported', reasonCode: 'identity-missing' });
+    const legacy = { kind: 'agent', agentId: CALLER_LANE, capability: 'read-only' } as const;
+    await runWithMcpRequestContext({ callerAgentId: CALLER_LANE, callerBinding: legacy }, () =>
+      ns.message(LANE, 'go'));
+    expect(coordinator.send).not.toHaveBeenCalled();
+  });
+
+  it('sends as the verified lane its binding names, with the binding root, ignoring the URL', async () => {
+    const { ns, coordinator } = withCoordinator();
+    const callerBinding = {
+      kind: 'agent', agentId: CALLER_LANE, workspaceRoot: '/repo/wt', capability: 'privileged',
+    } as const;
+    await runWithMcpRequestContext({ callerAgentId: LANE, callerSessionId: 'victim-tab', callerBinding }, () =>
+      ns.message(LANE, 'go'));
+    expect(coordinator.send).toHaveBeenCalledWith(
+      { agentId: LANE, message: 'go', delivery: undefined, allowPartialTurnLoss: undefined },
+      { kind: 'lane', agentId: CALLER_LANE, verified: true },
+      { agentId: CALLER_LANE, workspaceRoot: '/repo/wt' },
+    );
+  });
+
+  it('scopes status to the verified lane viewer, and refuses an unproven lane caller', async () => {
+    const { ns, coordinator } = withCoordinator();
+    const callerBinding = { kind: 'agent', agentId: CALLER_LANE, capability: 'privileged' } as const;
+    await runWithMcpRequestContext({ callerAgentId: CALLER_LANE, callerBinding }, () =>
+      ns.messageStatus(LANE, MESSAGE));
+    expect(coordinator.getReceipt).toHaveBeenCalledWith(LANE, MESSAGE,
+      { kind: 'lane', agentId: CALLER_LANE, verified: true });
+    await expect(runWithMcpRequestContext({ callerAgentId: CALLER_LANE }, () =>
+      ns.messageStatus(LANE, MESSAGE))).rejects.toMatchObject({ code: 'not_found' });
+    expect(coordinator.getReceipt).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed for lane callers when no coordinator is wired, and keeps the parent fallback', async () => {
+    const { deps, mocks } = makeDeps();
+    const ns = buildAgentNamespace({ ...deps, getMessageCoordinator: () => undefined });
+    const callerBinding = { kind: 'agent', agentId: CALLER_LANE, workspaceRoot: '/repo', capability: 'privileged' } as const;
+
+    await expect(runWithMcpRequestContext({ callerAgentId: CALLER_LANE, callerBinding }, () =>
+      ns.message(LANE, 'go'))).resolves.toMatchObject({ mode: 'unsupported', reasonCode: 'delivery-refused' });
+    await expect(runWithMcpRequestContext({ callerAgentId: CALLER_LANE }, () =>
+      ns.message(LANE, 'go'))).resolves.toMatchObject({ mode: 'unsupported', reasonCode: 'identity-missing' });
+    expect(mocks.processManager.sendToAgent).not.toHaveBeenCalled();
+
+    await expect(runWithMcpRequestContext({ callerAgentId: CALLER_LANE, callerBinding }, () =>
+      ns.messageStatus(LANE, MESSAGE))).rejects.toMatchObject({ code: 'not_found' });
+
+    await runWithMcpRequestContext({ callerSessionId: 'tab-1' }, () => ns.message(LANE, 'go'));
+    expect(mocks.processManager.sendToAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends as an anonymous parent without request identity, so a key is refused by the coordinator', async () => {
+    const { ns, coordinator } = withCoordinator();
+    coordinator.send.mockResolvedValueOnce({
+      mode: 'unsupported', reasonCode: 'idempotency-key-requires-identity', detail: 'idempotency-key-requires-identity',
+    });
+    const outcome = await ns.message(LANE, 'go', undefined, undefined, 'k-1');
+    expect(coordinator.send.mock.calls[0][1]).toEqual({ kind: 'parent' });
+    expect(outcome).toMatchObject({ mode: 'unsupported', reasonCode: 'idempotency-key-requires-identity' });
+  });
+
+  it('reads status through the alias-aware receipt lookup with no viewer filter', async () => {
+    const { ns, coordinator } = withCoordinator();
+    await ns.messageStatus(LANE, MESSAGE);
+    expect(coordinator.getReceipt).toHaveBeenCalledWith(LANE, MESSAGE);
+  });
+
+  it('retries and cancels as the parent session its credential is bound to', async () => {
+    const { ns, coordinator } = withCoordinator();
+    const callerBinding = { kind: 'session', sessionId: 'tab-1', capability: 'privileged' } as const;
+    await runWithMcpRequestContext({ callerSessionId: 'tab-1', callerBinding }, async () => {
+      await ns.control(LANE, MESSAGE, 'retry', true);
+      await ns.control(LANE, MESSAGE, 'cancel');
+    });
+    const actor = { kind: 'parent', sessionId: 'tab-1' };
+    expect(coordinator.retry).toHaveBeenCalledWith(LANE, MESSAGE, actor, { confirmDuplicateRisk: true });
+    expect(coordinator.cancel).toHaveBeenCalledWith(LANE, MESSAGE, actor);
+  });
+
+  it('acts as the verified lane its credential is bound to', async () => {
+    const { ns, coordinator } = withCoordinator();
+    const callerBinding = { kind: 'agent', agentId: CALLER_LANE, capability: 'privileged' } as const;
+    await runWithMcpRequestContext({ callerAgentId: CALLER_LANE, callerBinding }, () =>
+      ns.control(LANE, MESSAGE, 'cancel'));
+    expect(coordinator.cancel).toHaveBeenCalledWith(LANE, MESSAGE, { kind: 'lane', agentId: CALLER_LANE, verified: true });
+  });
+
+  it('ignores a spoofed URL identity and acts as the bound caller', async () => {
+    const { ns, coordinator } = withCoordinator();
+    const callerBinding = { kind: 'agent', agentId: CALLER_LANE, capability: 'privileged' } as const;
+    await runWithMcpRequestContext({ callerAgentId: LANE, callerSessionId: 'victim-tab', callerBinding }, () =>
+      ns.control(LANE, MESSAGE, 'retry'));
+    expect(coordinator.retry).toHaveBeenCalledWith(LANE, MESSAGE,
+      { kind: 'lane', agentId: CALLER_LANE, verified: true }, { confirmDuplicateRisk: undefined });
+  });
+
+  it('refuses control with URL identity only, an unverified credential, or no owner identity', async () => {
+    const { ns, coordinator } = withCoordinator();
+    await expect(runWithMcpRequestContext({ callerAgentId: CALLER_LANE, callerSessionId: 'tab-1' }, () =>
+      ns.control(LANE, MESSAGE, 'cancel'))).rejects.toMatchObject({ code: 'identity-missing' });
+    await expect(ns.control(LANE, MESSAGE, 'retry')).rejects.toBeInstanceOf(AgentMessageControlIdentityError);
+    const legacy = { kind: 'agent', agentId: CALLER_LANE, capability: 'read-only' } as const;
+    await expect(runWithMcpRequestContext({ callerAgentId: CALLER_LANE, callerBinding: legacy }, () =>
+      ns.control(LANE, MESSAGE, 'cancel'))).rejects.toMatchObject({ code: 'identity-unverified' });
+    const workspace = { kind: 'workspace', workspaceRoot: '/ws', capability: 'privileged' } as const;
+    await expect(runWithMcpRequestContext({ callerAgentId: CALLER_LANE, callerBinding: workspace }, () =>
+      ns.control(LANE, MESSAGE, 'cancel'))).rejects.toMatchObject({ code: 'identity-missing' });
+    expect(coordinator.retry).not.toHaveBeenCalled();
+    expect(coordinator.cancel).not.toHaveBeenCalled();
+  });
+
+  it('acks as the lane its credential is bound to, ignoring the URL identity', async () => {
+    const { ns, coordinator } = withCoordinator();
+    const callerBinding = { kind: 'agent', agentId: CALLER_LANE, capability: 'lane-report' } as const;
+    await runWithMcpRequestContext({ callerAgentId: LANE, callerBinding }, () =>
+      ns.ack(MESSAGE, 'acted', 'done'));
+    expect(coordinator.acknowledge).toHaveBeenCalledWith(
+      { messageId: MESSAGE, state: 'acted', note: 'done' }, { agentId: CALLER_LANE });
+  });
+
+  it('answers unattributed-caller without an agent-bound credential', async () => {
+    const { ns, coordinator } = withCoordinator();
+    const unattributed = { ok: false, messageId: MESSAGE, code: 'unattributed-caller' };
+    expect(await runWithMcpRequestContext({ callerAgentId: CALLER_LANE }, () => ns.ack(MESSAGE, 'read')))
+      .toEqual(unattributed);
+    const legacy = { kind: 'agent', agentId: CALLER_LANE, capability: 'read-only' } as const;
+    expect(await runWithMcpRequestContext({ callerAgentId: CALLER_LANE, callerBinding: legacy }, () =>
+      ns.ack(MESSAGE, 'read'))).toEqual(unattributed);
+    const session = { kind: 'session', sessionId: 'tab-1', capability: 'privileged' } as const;
+    expect(await runWithMcpRequestContext({ callerBinding: session }, () => ns.ack(MESSAGE, 'read')))
+      .toEqual(unattributed);
+    expect(await ns.ack(MESSAGE, 'read')).toEqual(unattributed);
+    expect(coordinator.acknowledge).not.toHaveBeenCalled();
+  });
+
+  it('refuses control without a coordinator and for an invalid agent id', async () => {
+    const { deps } = makeDeps();
+    const ns = buildAgentNamespace(deps);
+    await expect(ns.control(LANE, MESSAGE, 'cancel')).rejects.toThrow(/unavailable/);
+    await expect(ns.control('invalid', MESSAGE, 'cancel')).rejects.toMatchObject({ code: 'not_found' });
+  });
 });

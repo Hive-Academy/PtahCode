@@ -7,6 +7,7 @@ import {
   type Page,
 } from '@playwright/test';
 import { launchPtah } from './electron-launcher';
+import { attachAppLogsOnFailure } from './attach-app-logs';
 import { UiDriver } from './ui-driver';
 import { RpcBridge } from './rpc-bridge';
 import { createThreeHunkRepo, type ScratchRepo } from './git-scratch-repo';
@@ -256,7 +257,7 @@ export const test = base.extend<RealRpcFixtures>({
     }
   },
 
-  electronApp: async ({ repo, ptahHome }, use) => {
+  electronApp: async ({ repo, ptahHome }, use, testInfo) => {
     const env: Record<string, string> = {};
     for (const key of HOME_ENV_KEYS) env[key] = ptahHome;
     // The first non-flag argv becomes the workspace root — see
@@ -269,6 +270,7 @@ export const test = base.extend<RealRpcFixtures>({
     try {
       await use(app);
     } finally {
+      await attachAppLogsOnFailure(app, testInfo);
       await app.close().catch(() => {});
     }
   },

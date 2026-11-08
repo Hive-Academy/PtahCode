@@ -16,8 +16,8 @@ export interface ClaudePolicyCoverageEntry {
   readonly id: string;
   readonly platform: NodeJS.Platform;
   /**
-   * The `x.y.z` build whose binary was inspected. Later patch builds of the
-   * same `x.y` line are accepted too (see {@link claudeCoverageAcceptsVersion}).
+   * The `x.y.z` build whose binary was inspected. Later builds of the same
+   * major line are accepted too (see {@link claudeCoverageAcceptsVersion}).
    */
   readonly inspectedVersion: string;
   /** Directory of the machine-managed settings file and its drop-in directory. */
@@ -57,8 +57,8 @@ function posixEntry(platform: NodeJS.Platform): ClaudePolicyCoverageEntry {
  * posix platforms use the Linux path). Sources that a scan cannot read (for example a macOS
  * MDM profile) are not a refusal on their own: the account class check and the
  * post-init `accountInfo()` identity check still refuse any login other than
- * the stored personal one. Later patch builds of the inspected `x.y` line reuse
- * the source set (see {@link claudeCoverageAcceptsVersion}).
+ * the stored personal one. Later builds of the inspected major line reuse the
+ * source set (see {@link claudeCoverageAcceptsVersion}).
  */
 export const CLAUDE_POLICY_COVERAGE: readonly ClaudePolicyCoverageEntry[] = Object.freeze([
   Object.freeze({
@@ -97,14 +97,18 @@ function parseCliVersion(version: string): readonly [number, number, number] | n
 }
 
 /**
- * True for the inspected build and every later patch build of its `x.y` line.
- * An earlier patch, another `x.y` line or an unparsable version refuses.
+ * True for the inspected build and every later build of its major line (a
+ * later patch or minor). The certifier logs a warning for any build other than
+ * the inspected one. An earlier build, another major line or an unparsable
+ * version refuses: a new major may move or add policy sources.
  */
 export function claudeCoverageAcceptsVersion(entry: ClaudePolicyCoverageEntry, version: string): boolean {
   const actual = parseCliVersion(version);
   const inspected = parseCliVersion(entry.inspectedVersion);
   if (!actual || !inspected) return false;
-  return actual[0] === inspected[0] && actual[1] === inspected[1] && actual[2] >= inspected[2];
+  if (actual[0] !== inspected[0]) return false;
+  if (actual[1] !== inspected[1]) return actual[1] > inspected[1];
+  return actual[2] >= inspected[2];
 }
 
 /** Server-managed settings cache and consent files under the Claude config home (S9). */

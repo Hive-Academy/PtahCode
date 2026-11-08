@@ -29,6 +29,7 @@ import type {
   LaneAccountBindingPort,
   LaneAccountReference,
 } from './cli-adapters/cli-adapter.interface';
+import type { AgentOutputCheckpoint } from './agent-output-journal.service';
 import {
   readCodexRolloutUsage,
   type CodexRolloutUsage,
@@ -47,6 +48,11 @@ export const RESUME_GATE_MAX_CONTEXT_TOKENS = 150_000;
 
 /** A lane idle for longer than this starts fresh (the prompt cache is cold). */
 export const RESUME_GATE_MAX_IDLE_MS = 600_000;
+/** Maximum age of a host-restart-interrupted lane, measured from its persisted
+ * spawn time (`startedAt`; a `continue` turn does not move it, so a lane spawned
+ * over 24 h ago goes fresh with a handoff task even if its last turn was recent).
+ * Restore time is excluded because a long host outage would reset the clock. */
+export const RESUME_GATE_MAX_HOST_RESTART_AGE_MS = 24 * 60 * 60_000;
 
 /** How much of the previous lane's final text a handoff carries. */
 export const HANDOFF_FINAL_TEXT_MAX_CHARS = 2_000;
@@ -55,7 +61,10 @@ const LOG_PREFIX = '[LaneResumeGate]';
 
 export interface LaneResumeGateInput {
   readonly cli: CliType | 'claude';
-  readonly accountReference?: { readonly accountBinding?: unknown; readonly accountBindingId?: unknown };
+  readonly accountReference?: {
+    readonly accountBinding?: unknown;
+    readonly accountBindingId?: unknown;
+  };
   readonly accountBindings?: LaneAccountBindingPort;
   /** The CLI-native session (Codex thread id) the caller asked to resume. */
   readonly cliSessionId: string;
@@ -63,6 +72,8 @@ export interface LaneResumeGateInput {
   readonly lastActivityAt?: number;
   /** A persisted running lane was interrupted by a host restart. */
   readonly interruptedByHostRestart?: boolean;
+  /** Epoch ms of the interrupted lane's spawn (`startedAt`), persisted before the crash. */
+  readonly hostRestartLaneStartedAt?: number;
   /** The figure recorded from the lane's stream, when there is one. */
   readonly lastRequestContext?: LaneRequestContext;
 }
@@ -107,7 +118,13 @@ export class LaneResumeGate {
         ? null
         : Math.max(0, this.now() - lastActivityAt);
 
-    const decision = decide(figure.tokens, idleMs, input.interruptedByHostRestart === true);
+    const interruptionAgeMs = input.interruptedByHostRestart
+      ? input.hostRestartLaneStartedAt === undefined ||
+        !Number.isFinite(input.hostRestartLaneStartedAt)
+        ? Number.POSITIVE_INFINITY
+        : Math.max(0, this.now() - input.hostRestartLaneStartedAt)
+      : null;
+    const decision = decide(figure.tokens, idleMs, interruptionAgeMs);
     const result: LaneResumeDecision = {
       ...decision,
       contextTokens: figure.tokens,
@@ -172,8 +189,11 @@ export class LaneAccountResumeError extends Error {
 }
 
 export function laneAccountErrorCode(error: unknown): string | undefined {
-  if (typeof error !== 'object' || error === null || !('code' in error)) return undefined;
-  return PROVIDER_ACCOUNT_RESULT_CODES.find(code => code !== 'ok' && code === error.code);
+  if (typeof error !== 'object' || error === null || !('code' in error))
+    return undefined;
+  return PROVIDER_ACCOUNT_RESULT_CODES.find(
+    (code) => code !== 'ok' && code === error.code,
+  );
 }
 
 /** Read untrusted restore data without erasing present-but-corrupt fields. */
@@ -185,14 +205,21 @@ export function laneAccountFields(value: object): {
   const id = 'accountBindingId' in value ? value.accountBindingId : undefined;
   const parsed = classifyProviderAccountBinding(binding);
   if (parsed.status === 'absent' && id === undefined) return {};
-  if (parsed.status !== 'bound' || parsed.binding.provider !== 'claude' || id !== parsed.binding.runId) {
+  if (
+    parsed.status !== 'bound' ||
+    parsed.binding.provider !== 'claude' ||
+    id !== parsed.binding.runId
+  ) {
     // Preserve corruption as a safe sentinel, without broadcasting arbitrary
     // persisted values (which could include physical directories).
     return { accountBinding: null };
   }
   return {
     accountBindingId: id,
-    accountBinding: Object.freeze({ ...parsed.binding, identity: Object.freeze({ ...parsed.binding.identity }) }),
+    accountBinding: Object.freeze({
+      ...parsed.binding,
+      identity: Object.freeze({ ...parsed.binding.identity }),
+    }),
   };
 }
 
@@ -201,9 +228,13 @@ export function snapshotLaneAccountReference(value: {
   readonly accountBindingId?: unknown;
 }): LaneAccountReference | undefined {
   const parsed = classifyProviderAccountBinding(value.accountBinding);
-  if (parsed.status === 'absent' && value.accountBindingId === undefined) return undefined;
-  if (parsed.status !== 'bound' || parsed.binding.provider !== 'claude' ||
-      value.accountBindingId !== parsed.binding.runId) {
+  if (parsed.status === 'absent' && value.accountBindingId === undefined)
+    return undefined;
+  if (
+    parsed.status !== 'bound' ||
+    parsed.binding.provider !== 'claude' ||
+    value.accountBindingId !== parsed.binding.runId
+  ) {
     throw new LaneAccountResumeError('invalid-bound');
   }
   return Object.freeze({
@@ -216,20 +247,30 @@ export function snapshotLaneAccountReference(value: {
 }
 
 export async function resolveLaneAccountResume(
-  input: Pick<LaneResumeGateInput, 'cli' | 'cliSessionId' | 'accountReference' | 'accountBindings'>,
+  input: Pick<
+    LaneResumeGateInput,
+    'cli' | 'cliSessionId' | 'accountReference' | 'accountBindings'
+  >,
 ): Promise<LaneAccountReference | undefined> {
   const local = snapshotLaneAccountReference(input.accountReference ?? {});
   if (input.cli !== 'claude' && !local) return undefined;
   const port = input.accountBindings;
   if (!port) throw new LaneAccountResumeError('unavailable-storage');
   try {
-    const found = await port.lookupBySdkSession({ provider: 'claude', sdkSessionId: input.cliSessionId });
+    const found = await port.lookupBySdkSession({
+      provider: 'claude',
+      sdkSessionId: input.cliSessionId,
+    });
     if (found.status === 'absent') {
       if (local) throw new LaneAccountResumeError('invalid-bound');
       return undefined; // Only authoritative absence is ambient legacy.
     }
-    if (found.status !== 'bound') throw new LaneAccountResumeError(found.status);
-    const reference = snapshotLaneAccountReference({ accountBinding: found.binding, accountBindingId: found.binding.runId });
+    if (found.status !== 'bound')
+      throw new LaneAccountResumeError(found.status);
+    const reference = snapshotLaneAccountReference({
+      accountBinding: found.binding,
+      accountBindingId: found.binding.runId,
+    });
     if (!reference || reference.accountBinding.identity.kind !== 'known') {
       throw new LaneAccountResumeError('identity-unproved');
     }
@@ -242,14 +283,16 @@ export async function resolveLaneAccountResume(
   } catch (error: unknown) {
     if (error instanceof LaneAccountResumeError) throw error;
     // Never expose dependency errors (which may contain physical paths).
-    throw new LaneAccountResumeError(laneAccountErrorCode(error) ?? 'unavailable-storage');
+    throw new LaneAccountResumeError(
+      laneAccountErrorCode(error) ?? 'unavailable-storage',
+    );
   }
 }
 
 function decide(
   contextTokens: number | null,
   idleMs: number | null,
-  interruptedByHostRestart: boolean,
+  interruptionAgeMs: number | null,
 ): Pick<LaneResumeDecision, 'decision' | 'reason'> {
   if (
     contextTokens !== null &&
@@ -260,7 +303,21 @@ function decide(
       reason: `last request ${contextTokens} tokens exceeds ${RESUME_GATE_MAX_CONTEXT_TOKENS}`,
     };
   }
-  if (!interruptedByHostRestart && idleMs !== null && idleMs > RESUME_GATE_MAX_IDLE_MS) {
+  if (
+    interruptionAgeMs !== null &&
+    interruptionAgeMs > RESUME_GATE_MAX_HOST_RESTART_AGE_MS
+  ) {
+    return {
+      decision: 'fresh',
+      reason: `host restart interruption: interrupted lane started more than ${RESUME_GATE_MAX_HOST_RESTART_AGE_MS / 3_600_000}h ago`,
+    };
+  }
+  const interruptedByHostRestart = interruptionAgeMs !== null;
+  if (
+    !interruptedByHostRestart &&
+    idleMs !== null &&
+    idleMs > RESUME_GATE_MAX_IDLE_MS
+  ) {
     return {
       decision: 'fresh',
       reason: `idle ${Math.ceil(idleMs / 1000)}s exceeds ${RESUME_GATE_MAX_IDLE_MS / 1000}s`,
@@ -282,21 +339,37 @@ export interface LaneHandoffCarryOver {
   readonly changedFiles: readonly string[];
 }
 
-/** Collect the handoff fields from accumulated segments. No git process. */
+function textOf(segments: readonly CliOutputSegment[]): string {
+  let text = '';
+  for (const segment of segments) {
+    if (segment.type === 'text') text += segment.content;
+  }
+  return text.trim();
+}
+
+/**
+ * Collect the handoff fields from accumulated segments. No git process.
+ *
+ * A running-output checkpoint, when the lane has one, carries the files changed
+ * before its bounded segment tail, so they lead the list. Its text stands in
+ * when the segments hold none (a lane restored after a host crash keeps only
+ * the checkpoint's tail).
+ */
 export function collectHandoffCarryOver(
   segments: readonly CliOutputSegment[],
+  checkpoint?: Pick<AgentOutputCheckpoint, 'segmentsTail' | 'stdoutTail' | 'changedFiles'>,
 ): LaneHandoffCarryOver {
-  const changed = new Set<string>();
-  let text = '';
+  const changed = new Set<string>(checkpoint?.changedFiles ?? []);
   for (const segment of segments) {
     if (segment.type === 'file-change' && segment.content.trim() !== '') {
       changed.add(segment.content.trim());
-    } else if (segment.type === 'text') {
-      text += segment.content;
     }
   }
+  const text =
+    textOf(segments) ||
+    (checkpoint ? textOf(checkpoint.segmentsTail) || checkpoint.stdoutTail.trim() : '');
   return {
-    finalText: text.trim().slice(-HANDOFF_FINAL_TEXT_MAX_CHARS),
+    finalText: text.slice(-HANDOFF_FINAL_TEXT_MAX_CHARS),
     changedFiles: [...changed],
   };
 }

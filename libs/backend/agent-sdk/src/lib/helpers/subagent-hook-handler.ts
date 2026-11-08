@@ -44,6 +44,7 @@ import { SDK_TOKENS } from '../di/tokens';
 import { resolveHookSessionId } from './hook-session-resolver';
 import { SubagentStopCallbackRegistry } from './subagent-stop-callback-registry';
 import type { SessionStatsOwnerService } from '../session-stats/session-stats-owner.service';
+import type { SubagentBudgetMonitor } from './compaction/subagent-budget-monitor';
 
 /**
  * SubagentHookHandler Service
@@ -71,6 +72,8 @@ export class SubagentHookHandler {
     /** Session accounting: every subagent identity counts once (TASK_2026_533). */
     @inject(SDK_TOKENS.SDK_SESSION_STATS_OWNER)
     private readonly statsOwner: SessionStatsOwnerService,
+    @inject(SDK_TOKENS.SDK_SUBAGENT_BUDGET_MONITOR, { isOptional: true })
+    private readonly budgetMonitor?: Pick<SubagentBudgetMonitor, 'recordTranscriptPath'>,
   ) {}
 
   /**
@@ -421,7 +424,6 @@ export class SubagentHookHandler {
     try {
       this.logger.debug('[SubagentHookHandler] SubagentStop received', {
         agentId: input.agent_id,
-        transcriptPath: input.agent_transcript_path,
         stopHookActive: input.stop_hook_active,
         toolUseId,
       });
@@ -432,6 +434,9 @@ export class SubagentHookHandler {
         parentSessionId,
         input.agent_id,
       );
+      const budgetSessionId = this.resolveParentSessionId(input.session_id, parentSessionId);
+      if (budgetSessionId && input.agent_id && input.agent_transcript_path)
+        this.budgetMonitor?.recordTranscriptPath(budgetSessionId, input.agent_id, input.agent_transcript_path);
       let resolvedToolCallId = toolUseId ?? undefined;
       let record = resolvedToolCallId
         ? this.subagentRegistry.get(resolvedToolCallId)
@@ -544,7 +549,7 @@ export class SubagentHookHandler {
         if (transcriptPath !== null && derivedSessionId === null) {
           this.logger.warn(
             '[subagent-hook] could not derive subagentSessionId from agent_transcript_path',
-            { transcriptPath },
+            { agentId: input.agent_id },
           );
         }
       }

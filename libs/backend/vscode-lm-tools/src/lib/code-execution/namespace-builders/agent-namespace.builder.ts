@@ -17,7 +17,10 @@ import {
 } from '../mcp-core/agent-spawn-args.schema';
 import { readProviderAccountSelectionField } from '@ptah-extension/shared/schemas';
 import { getExecutionAbortSignal } from '../mcp-core/code-execution.engine';
+import { mcpAckCallerAgentId, mcpControlActor } from './agent-message-control-actor';
 import {
+  getCallerAgentId,
+  getCallerBinding,
   getCallerSessionId,
   isMcpRequestInFlight,
 } from '../mcp-core/mcp-request-context';
@@ -32,8 +35,11 @@ import {
   type CliDetectionService,
   type LaneLimitLookupService,
   type SdkHandle,
+  type VerifiedLaneSender,
 } from '@ptah-extension/cli-agent-runtime';
 import type {
+  AgentMessageOutcome,
+  AgentMessageSender,
   AgentRoleDefinition,
   CliAdapterManifest,
   EffectiveLanePolicy,
@@ -50,6 +56,54 @@ import {
   classifyLaneState,
   laneFamilyOf,
 } from '@ptah-extension/shared';
+
+/**
+ * The lane the in-flight call's credential binding proves (Component 15):
+ * an `agent` binding the HTTP gate accepted, never the untokened read-only
+ * caller whose binding is built from its URL, and never a URL field.
+ */
+function mcpVerifiedLaneSender(): VerifiedLaneSender | undefined {
+  const binding = getCallerBinding();
+  if (!binding || binding.kind !== 'agent' || binding.capability === 'read-only') return undefined;
+  if (binding.agentId === undefined || !AgentId.validate(binding.agentId)) return undefined;
+  return {
+    agentId: AgentId.from(binding.agentId),
+    ...(binding.workspaceRoot ? { workspaceRoot: binding.workspaceRoot } : {}),
+    ...(binding.sessionId ? { sessionId: binding.sessionId } : {}),
+  };
+}
+
+/**
+ * The sender of an MCP message, from the request context:
+ * - a verified lane binding is that lane; the coordinator runs the lane policy;
+ * - an `/agent/{id}` caller without one has no proven identity (`null`);
+ * - else a `/session/{id}` caller is that parent session (unchanged);
+ * - else an anonymous parent, which may not use an idempotency key.
+ */
+function mcpMessageSender():
+  | { readonly sender: AgentMessageSender; readonly lane?: VerifiedLaneSender }
+  | null {
+  const lane = mcpVerifiedLaneSender();
+  if (lane) return { sender: { kind: 'lane', agentId: lane.agentId, verified: true }, lane };
+  if (getCallerAgentId()) return null;
+  const sessionId = getCallerSessionId();
+  return { sender: sessionId ? { kind: 'parent', sessionId } : { kind: 'parent' } };
+}
+
+/**
+ * The viewer of an MCP status read: a verified lane sees only envelopes it
+ * sent or that target it; an unproven lane caller sees none (`null`); any
+ * other caller keeps the Phase 1 unfiltered read.
+ */
+function mcpStatusViewer(): AgentMessageSender | undefined | null {
+  const lane = mcpVerifiedLaneSender();
+  if (lane) return { kind: 'lane', agentId: lane.agentId, verified: true };
+  return getCallerAgentId() ? null : undefined;
+}
+
+function identityMissingOutcome(agentId: AgentId): AgentMessageOutcome {
+  return { mode: 'unsupported', reasonCode: 'identity-missing', detail: 'identity-missing', requestedAgentId: agentId };
+}
 
 /**
  * Minimal summary returned by PtahCliRegistry.listAgents().
@@ -119,7 +173,7 @@ interface PtahCliRegistryLike {
  * Dependencies for agent namespace
  */
 export interface AgentNamespaceDependencies {
-  getMessageCoordinator?: () => Pick<import('@ptah-extension/cli-agent-runtime').AgentMessageCoordinator, 'send' | 'getReceipt'> | undefined;
+  getMessageCoordinator?: () => Pick<import('@ptah-extension/cli-agent-runtime').AgentMessageCoordinator, 'send' | 'getReceipt' | 'retry' | 'cancel' | 'acknowledge'> | undefined;
   agentProcessManager: AgentProcessManager;
   cliDetectionService: CliDetectionService;
   /** Lazy getter for workspace root path. Called at spawn time to get the current workspace root. */
@@ -516,10 +570,28 @@ export function buildAgentNamespace(
       return agentProcessManager.readOutput(agentId, tail, offset);
     },
 
-    message: async (agentId, message, delivery, allowPartialTurnLoss) => {
+    message: async (agentId, message, delivery, allowPartialTurnLoss, idempotencyKey) => {
       if (!AgentId.validate(agentId)) throw new AgentMessageError('not_found', 'Agent not found.');
       const coordinator = deps.getMessageCoordinator?.();
-      if (coordinator) return coordinator.send({ agentId: AgentId.from(agentId), message, delivery, allowPartialTurnLoss });
+      if (coordinator) {
+        const caller = mcpMessageSender();
+        // An agent caller without a verified binding is never attributed by URL.
+        if (!caller) return identityMissingOutcome(AgentId.from(agentId));
+        const request = {
+          agentId: AgentId.from(agentId), message, delivery, allowPartialTurnLoss,
+          ...(idempotencyKey ? { idempotencyKey } : {}),
+        };
+        return caller.lane
+          ? coordinator.send(request, caller.sender, caller.lane)
+          : coordinator.send(request, caller.sender);
+      }
+      // Without a coordinator no lane policy can run, so a lane or unproven
+      // agent caller fails closed; only parent and user callers fall back.
+      const fallbackCaller = mcpMessageSender();
+      if (!fallbackCaller) return identityMissingOutcome(AgentId.from(agentId));
+      if (fallbackCaller.lane) {
+        return { mode: 'unsupported', reasonCode: 'delivery-refused', detail: 'delivery-refused', requestedAgentId: AgentId.from(agentId) };
+      }
       // The outcome is RETURNED, not swallowed: `unsupported` means nothing
       // was delivered and `interrupt-resume` means a turn's partial work was
       // discarded. A `void` return would have made both look like a success.
@@ -528,8 +600,39 @@ export function buildAgentNamespace(
     messageStatus: async (agentId, messageId) => {
       if (!AgentId.validate(agentId)) throw new AgentMessageError('not_found', 'Agent not found.');
       const coordinator = deps.getMessageCoordinator?.();
-      return coordinator ? coordinator.getReceipt(AgentId.from(agentId), messageId)
-        : agentProcessManager.getAgentMessageStatus(agentId, messageId);
+      const viewer = mcpStatusViewer();
+      if (viewer === null) throw new AgentMessageError('not_found', 'Message receipt not found.');
+      if (!coordinator) {
+        // No coordinator means no viewer scoping: a lane caller sees nothing.
+        if (viewer) throw new AgentMessageError('not_found', 'Message receipt not found.');
+        return agentProcessManager.getAgentMessageStatus(agentId, messageId);
+      }
+      return viewer
+        ? coordinator.getReceipt(AgentId.from(agentId), messageId, viewer)
+        : coordinator.getReceipt(AgentId.from(agentId), messageId);
+    },
+    control: async (agentId, messageId, action, confirmDuplicateRisk) => {
+      if (!AgentId.validate(agentId)) throw new AgentMessageError('not_found', 'Agent not found.');
+      const coordinator = deps.getMessageCoordinator?.();
+      if (!coordinator) {
+        throw new Error('Message retry and cancel are unavailable: no message coordinator is wired into this host.');
+      }
+      // The actor comes from the verified caller binding, never the URL, so a
+      // caller acts only on messages it sent. Absent or unverified identity throws.
+      const actor = mcpControlActor();
+      return action === 'retry'
+        ? coordinator.retry(AgentId.from(agentId), messageId, actor, { confirmDuplicateRisk })
+        : coordinator.cancel(AgentId.from(agentId), messageId, actor);
+    },
+    ack: async (messageId, state, note) => {
+      // The acknowledging lane is the credential's agent, never an argument.
+      const callerAgentId = mcpAckCallerAgentId();
+      if (!callerAgentId) return { ok: false, messageId, code: 'unattributed-caller' };
+      const coordinator = deps.getMessageCoordinator?.();
+      if (!coordinator) {
+        throw new Error('Message acknowledgment is unavailable: no message coordinator is wired into this host.');
+      }
+      return coordinator.acknowledge({ messageId, state, ...(note ? { note } : {}) }, { agentId: callerAgentId });
     },
 
     report: async (input) => {

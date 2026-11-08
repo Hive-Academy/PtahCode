@@ -18,8 +18,7 @@ import {
  */
 export interface TranscriptTurn {
   /**
-   * The turn's last assistant message. The tests row renders right after it,
-   * next to the change-set card that anchors the same way.
+   * The turn's last assistant message. The turn summary chip renders after it.
    */
   readonly endMessageId: string;
   /**

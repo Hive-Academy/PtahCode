@@ -51,6 +51,7 @@ import {
 
 const ITEM: HarnessRetiredItemId = 'mcp:alpha';
 const HOME_FRAGMENT = '~/.claude.json#mcp.alpha';
+const posixPath = (value: string): string => value.replace(/\\/g, '/');
 const FACETS: HarnessFacetMatrix = {
   skills: 'supported',
   commands: 'supported',
@@ -131,6 +132,7 @@ async function makeGitWorkspace(name: string): Promise<string> {
   const dir = path.join(tempBase, 'workspaces', name);
   await fs.mkdir(dir, { recursive: true });
   git(dir, 'init', '-q');
+  await fs.mkdir(path.join(dir, '.ptah'));
   return dir;
 }
 
@@ -275,7 +277,7 @@ describe('InstallScopeMigrationService fixtures (real git workspaces)', () => {
     const afterFirst = await readLedger();
     expect(afterFirst.completedAt).toBeUndefined();
     expect(Object.keys(afterFirst.items[ITEM].failedPaths)).toEqual([
-      `${w2}/.claude/skills/alpha`,
+      `${posixPath(w2)}/.claude/skills/alpha`,
     ]);
     expect(afterFirst.items[ITEM].outcome).toBeUndefined();
     expect(afterFirst.workspaces[w1].passedAt).toBeDefined();
@@ -296,11 +298,11 @@ describe('InstallScopeMigrationService fixtures (real git workspaces)', () => {
     expect(afterSecond.items[ITEM].failedPaths).toEqual({});
     expect(afterSecond.items[ITEM].outcome).toBe('removed');
     expect(Object.keys(afterSecond.items[ITEM].removedPaths).sort()).toEqual([
-      `${w1}/.claude/skills/alpha`,
-      `${w2}/.claude/skills/alpha`,
+      `${posixPath(w1)}/.claude/skills/alpha`,
+      `${posixPath(w2)}/.claude/skills/alpha`,
     ]);
-    expect(afterSecond.items[ITEM].removedPaths[`${w1}/.claude/skills/alpha`]).toBe(
-      afterFirst.items[ITEM].removedPaths[`${w1}/.claude/skills/alpha`],
+    expect(afterSecond.items[ITEM].removedPaths[`${posixPath(w1)}/.claude/skills/alpha`]).toBe(
+      afterFirst.items[ITEM].removedPaths[`${posixPath(w1)}/.claude/skills/alpha`],
     );
 
     const third = await makeService().run();
@@ -338,11 +340,11 @@ describe('InstallScopeMigrationService fixtures (real git workspaces)', () => {
     expect(first.counts).toEqual({ retired: 1, removed: 2, kept: 1, onDisk: 0 });
     const afterFirst = await readLedger();
     const homeStamp = afterFirst.items[ITEM].removedPaths[HOME_FRAGMENT];
-    const keptKey = `${w1}/.cursor/rules/alpha`;
+    const keptKey = `${posixPath(w1)}/.cursor/rules/alpha`;
     expect(homeStamp).toBeDefined();
     expect(afterFirst.items[ITEM].keptPaths[keptKey]).toBe('git-tracked');
     expect(Object.keys(afterFirst.items[ITEM].failedPaths)).toEqual([
-      `${w2}/.claude/skills/alpha`,
+      `${posixPath(w2)}/.claude/skills/alpha`,
     ]);
 
     const second = await makeService().run();
@@ -357,8 +359,8 @@ describe('InstallScopeMigrationService fixtures (real git workspaces)', () => {
     expect(Object.keys(item.removedPaths).sort()).toEqual(
       [
         HOME_FRAGMENT,
-        `${w1}/.claude/skills/alpha`,
-        `${w2}/.claude/skills/alpha`,
+        `${posixPath(w1)}/.claude/skills/alpha`,
+        `${posixPath(w2)}/.claude/skills/alpha`,
       ].sort(),
     );
     expect(item.failedPaths).toEqual({});

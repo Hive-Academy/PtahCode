@@ -1,5 +1,4 @@
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import {
   test as base,
@@ -9,48 +8,21 @@ import {
 import { launchPtah } from '../../support/electron-launcher';
 import { UiDriver } from '../../support/ui-driver';
 import { sizeForCapture } from './shooter';
-import { prepareDocsProfile } from './docs-profile';
+import { prepareDocsProfile, productionSettingsHash, assertSettingsOrRetain, assertChildHome, closeDocsApp } from './docs-profile';
 import { createDocsSampleRepo } from './docs-repo';
 
 /**
- * Fixtures for the docs screenshot pass — the REAL app against a REAL project.
- *
- * This is deliberately neither of the two existing harnesses:
- *
- * - `src/support/fixtures.ts` swaps the whole `rpc` IPC listener for a mock
- *   table. Every surface then paints an empty state (or an error, as the
- *   dashboard does when `session:list` returns `{}`), which is exactly what a
- *   documentation screenshot must never show.
- * - The developer's own authenticated profile holds too much real, private
- *   state to publish as an asset.
- *
- * So: the e2e launcher (throwaway profile, no leaked keys) pointed at a real
- * workspace via the CLI argument `bootstrap.ts` already accepts, with NO RPC
- * mocks — the real file-tree, git, session and task handlers answer. Override
- * the project with `PTAH_DOCS_WORKSPACE`.
+ * Run the real Electron app against a throwaway sample repository and profile.
+ * The launcher supplies an isolated database. Individual shots may mock RPC.
  */
 
-/** The project the shots are taken against. A real, dirty git repo. */
-export const DOCS_WORKSPACE =
-  process.env['PTAH_DOCS_WORKSPACE'] ?? 'D:\\projects\\property-hub';
-
-/**
- * Opt in to capturing against the REAL production database.
- *
- * A capture run boots the working tree, and a boot migrates whatever database
- * it opens. That is how this harness — throwaway Electron profile, but the
- * developer's real home directory — carried working-tree migrations into
- * `~/.ptah/state/ptah.sqlite` and left the installed build unable to open it
- * (TASK_2026_291). The default is now the launcher's isolated database, so
- * DB-backed surfaces (memory, skills, cron history) shoot empty unless someone
- * sets `PTAH_DOCS_REAL_DB=1` and accepts the migration.
- */
-const REAL_DB_OPT_IN = process.env['PTAH_DOCS_REAL_DB'] === '1';
+/** All default captures use the throwaway sample repository. */
+export const DOCS_WORKSPACE = 'sample-repo';
 
 export interface DocsFixtures {
   app: ElectronApplication;
   page: Page;
-  /** Navigation helpers only — no `installFakeRpcListener` is ever called. */
+  /** Navigation helpers; shots may opt into a fake renderer RPC listener. */
   ui: UiDriver;
 }
 
@@ -63,9 +35,8 @@ export const SAMPLE_REPO = 'sample-repo';
 
 export interface DocsOptions {
   /**
-   * Project the app opens for this file's shots. Session-heavy surfaces set
-   * this to a workspace with a real session history; git surfaces use
-   * {@link SAMPLE_REPO}; the rest use the default.
+   * Project the app opens for this file's shots. The default and git surfaces
+   * use {@link SAMPLE_REPO}.
    */
   workspace: string;
   /**
@@ -73,61 +44,52 @@ export interface DocsOptions {
    * more than one project. The opened workspace is always included first.
    */
   extraWorkspaceFolders: string[];
+  /** Replay saved state from the development profile for this workspace. */
+  useDevSessionStorage: boolean;
 }
 
 export const test = base.extend<DocsFixtures & DocsOptions>({
   workspace: [DOCS_WORKSPACE, { option: true }],
   extraWorkspaceFolders: [[], { option: true }],
+  useDevSessionStorage: [false, { option: true }],
 
-  app: async ({ workspace, extraWorkspaceFolders }, use) => {
+  app: async ({ workspace, extraWorkspaceFolders, useDevSessionStorage }, use) => {
+    const settingsHash = productionSettingsHash();
     const sample = workspace === SAMPLE_REPO ? createDocsSampleRepo() : null;
+    try {
     const root = sample ? sample.root : workspace;
     if (!fs.existsSync(root)) {
       throw new Error(
         `[docs-shot] workspace not found: ${root}\n` +
-          `Set PTAH_DOCS_WORKSPACE to a real project folder before capturing.`,
+          `Use an existing workspace path or the sample-repo fixture.`,
       );
     }
     const profile = prepareDocsProfile(
       extraWorkspaceFolders.length > 0
-        ? { folders: [path.resolve(root), ...extraWorkspaceFolders] }
-        : {},
+        ? { folders: [path.resolve(root), ...extraWorkspaceFolders], ...(useDevSessionStorage ? { devSessionWorkspace: root } : {}) }
+        : useDevSessionStorage ? { folders: [path.resolve(root)], devSessionWorkspace: root } : {},
     );
+    let app: ElectronApplication | undefined;
+    try {
     // A real project boots much slower than the empty e2e workspace: the
     // backend indexes it before the window is shown.
-    const app = await launchPtah({
-      args: [path.resolve(root)],
-      userDataDir: profile.dir,
-      timeout: 180_000,
-      ...(REAL_DB_OPT_IN
-        ? {
-            env: {
-              PTAH_DB_PATH: path.join(
-                os.homedir(),
-                '.ptah',
-                'state',
-                'ptah.sqlite',
-              ),
-            },
-          }
-        : {}),
-    });
-    try {
+    app = await launchPtah({
+        args: [path.resolve(root)],
+        userDataDir: profile.dir,
+        env: profile.env,
+        timeout: 180_000,
+      });
+      await assertChildHome(app, profile.home);
       await use(app);
     } finally {
       // The real app shuts a lot down on quit (cron, gateway, embedder, SQLite)
       // and has been seen to hang past Playwright's teardown budget. Give it a
       // grace period, then take the process down so the run still reports.
-      const closed = await Promise.race([
-        app.close().then(() => true),
-        new Promise<boolean>((resolve) =>
-          setTimeout(() => resolve(false), 20_000),
-        ),
-      ]).catch(() => false);
-      if (!closed) app.process().kill();
+      if (app) await closeDocsApp(app);
+      assertSettingsOrRetain(settingsHash, profile.runDir);
       profile.cleanup();
-      sample?.cleanup();
     }
+    } finally { sample?.cleanup(); }
   },
 
   page: async ({ app }, use) => {

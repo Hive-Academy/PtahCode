@@ -3,8 +3,10 @@ import { MarkdownModule } from 'ngx-markdown';
 import { SurfaceMarkdownPipe } from '@ptah-extension/markdown';
 import { AgentAvatarComponent } from '@ptah-extension/chat-ui';
 import { SURFACE_ACTIVE } from '@ptah-extension/core';
-import { AgentMonitorStore } from '@ptah-extension/chat-streaming';
-import { ChevronRight, GitBranch, Image, LucideAngularModule, Undo2, MessageSquareText, CircleCheckBig, CircleX } from 'lucide-angular';
+import { AgentDeliveryStore, type DeliveryStatus, type ParentDeliveryItem } from '@ptah-extension/chat-streaming';
+import type { AgentDeliveryReceipt, AgentMessageAckState } from '@ptah-extension/shared';
+import { DeliveryStatusComponent } from '../delivery-status/delivery-status.component';
+import { ChevronRight, GitBranch, Image, LucideAngularModule, Undo2, MessageSquareText, CircleCheckBig, CircleX, TriangleAlert } from 'lucide-angular';
 import { toUserMessageMarkdown } from '../../../utils/user-message-markdown.utils';
 import type { LaneEventRow } from './lane-event-row.types';
 import { deriveLaneEventPresentation, laneEventTime, parseLaneCompletion, type LaneEventMetrics, type LaneEventTone } from './lane-event-row.presentation';
@@ -12,10 +14,26 @@ import { deriveLaneEventPresentation, laneEventTime, parseLaneCompletion, type L
 /** About what line 2 shows, after its indent and caption, at the narrow card minimum. */
 const LONG_SUMMARY_CHARS = 20;
 
+const PARENT_DELIVERY_KINDS = ['completion', 'report'] as const;
+
+interface ParentDeliveryEntry {
+  readonly kind: (typeof PARENT_DELIVERY_KINDS)[number];
+  readonly item: ParentDeliveryItem;
+  readonly attention: boolean;
+}
+
+interface AckChipView {
+  readonly state: AgentMessageAckState;
+  readonly label: string;
+  readonly tone: LaneEventTone;
+  readonly ariaLabel: string;
+  readonly title?: string;
+}
+
 @Component({
   selector: 'ptah-lane-event',
   standalone: true,
-  imports: [LucideAngularModule, MarkdownModule, SurfaceMarkdownPipe, AgentAvatarComponent],
+  imports: [LucideAngularModule, MarkdownModule, SurfaceMarkdownPipe, AgentAvatarComponent, DeliveryStatusComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './lane-event-row.component.html',
   // The card takes a faint wash of its status color and the chip a soft pill
@@ -31,14 +49,17 @@ const LONG_SUMMARY_CHARS = 20;
 })
 export class LaneEventRowComponent {
   readonly row = input.required<LaneEventRow>();
+  readonly receipt = input<AgentDeliveryReceipt | null>(null);
   readonly monitorAgent = input<LaneEventMetrics | null>(null);
   readonly monitorStatus = input<string | null>(null);
   readonly laterCompleted = input(false);
   readonly isSessionActive = input(false);
+  /** ISO time after which the lane's output was lost in a host restart (`AgentProcessInfo.outputLostAfter`). */
+  readonly outputLostAfter = input<string | null>(null);
   readonly branchRequested = output<string>();
   readonly rewindRequested = output<string>();
   protected readonly surfaceActive = inject(SURFACE_ACTIVE);
-  protected readonly monitor = inject(AgentMonitorStore, { optional: true });
+  private readonly delivery = inject(AgentDeliveryStore, { optional: true });
   protected readonly expanded = signal(false);
   protected readonly ChevronRightIcon = ChevronRight;
   protected readonly ImageIcon = Image;
@@ -47,6 +68,13 @@ export class LaneEventRowComponent {
   protected readonly ReportIcon = MessageSquareText;
   protected readonly CompletionIcon = CircleCheckBig;
   protected readonly FailedIcon = CircleX;
+  protected readonly OutputLostIcon = TriangleAlert;
+  /** Epoch ms of `outputLostAfter`; null when unset or not a valid time. */
+  protected readonly outputLost = computed<number | null>(() => {
+    const value = this.outputLostAfter();
+    const at = value ? Date.parse(value) : NaN;
+    return Number.isNaN(at) ? null : at;
+  });
   protected verdict(value: string | undefined): string {
     switch (value) {
       case 'delivered': return 'Deliverables written';
@@ -55,9 +83,54 @@ export class LaneEventRowComponent {
       default: return 'Unverified';
     }
   }
-  protected parentSignal(kind: 'report' | 'completion'): string {
-    this.monitor?.parentDelivery();
-    return this.monitor?.parentDeliveryState(this.row().agentId)[kind] ?? 'Waiting for parent';
+  protected readonly latestReceipt = computed<AgentDeliveryReceipt | null>(() => {
+    const direct = this.receipt();
+    if (direct) return direct;
+    const list = this.delivery?.receipts().get(this.row().agentId);
+    return list && list.length > 0 ? list[list.length - 1] : null;
+  });
+  protected readonly receiptStatus = computed<DeliveryStatus | null>(() => {
+    const item = this.latestReceipt();
+    return item && this.delivery ? this.delivery.receiptStatus(item) : null;
+  });
+  protected readonly isLimitReceipt = computed(() => this.latestReceipt()?.reason === 'lane-at-limit');
+  protected readonly ackChip = computed<AckChipView | null>(() => {
+    const item = this.latestReceipt();
+    const state = item?.ackState;
+    const label = AgentDeliveryStore.ackLabel(item);
+    if (!state || !label) return null;
+    const tone: LaneEventTone =
+      state === 'acted' ? 'done'
+      : state === 'rejected' ? 'err'
+      : state === 'read' ? 'run'
+      : 'need';
+    const note = item?.ackNote?.trim();
+    return {
+      state,
+      label,
+      tone,
+      ariaLabel: `${this.row().agent} lane acknowledgment: ${label}`,
+      ...(state === 'rejected' && note ? { title: note } : {}),
+    };
+  });
+  /**
+   * The newest completion and report deliveries to the parent; none when no
+   * push or hydration reported one. An item that needs the user shows on the
+   * collapsed card; the others show in the expanded body.
+   */
+  private readonly parentDeliveries = computed<readonly ParentDeliveryEntry[]>(() => {
+    const store = this.delivery;
+    if (!store) return [];
+    const agentId = this.row().agentId;
+    return PARENT_DELIVERY_KINDS.flatMap((kind) => {
+      const item = store.latestParentDelivery(agentId, kind);
+      return item ? [{ kind, item, attention: store.parentStatus(item).attention }] : [];
+    });
+  });
+  protected readonly attentionDeliveries = computed(() => this.parentDeliveries().filter((entry) => entry.attention));
+  protected readonly quietDeliveries = computed(() => this.parentDeliveries().filter((entry) => !entry.attention));
+  protected deliverySubject(kind: 'report' | 'completion'): string {
+    return `${kind} from ${this.row().agent} to the parent`;
   }
   protected readonly latest = computed(() => this.row().events[this.row().events.length - 1]);
   protected readonly completed = computed(() => this.row().events.some(event => event.kind === 'completed'));

@@ -53,6 +53,7 @@ import {
   mergeStatusTypeFacets,
   type ExcludedTaskFolder,
   type TaskChildRollup,
+  type TaskEndRunRecord,
   type TaskEstimate,
   type TaskMetadataPatch,
   type TaskSpecDetail,
@@ -134,10 +135,27 @@ export interface TaskSpecIndexLike {
   ): Promise<TaskSpecDetail | null>;
 }
 
+/**
+ * The subset of the task-end hook's `TaskEndRunReader` this namespace uses
+ * (TASK_2026_886). Structural, so `vscode-lm-tools` never imports
+ * `@ptah-extension/task-end-hook`: `ptah-api-builder.service.ts` injects the
+ * reader by its interned `Symbol.for` token. `null` means the task has no
+ * task-end run yet.
+ */
+export interface TaskEndRunReaderLike {
+  latestForTask(workspaceRoot: string, taskId: string): TaskEndRunRecord | null;
+}
+
 export interface TasksNamespaceDependencies {
   getWriter: () => TaskSpecWriterLike | undefined;
   getIndex: () => TaskSpecIndexLike | undefined;
   getWorkspaceRoot: () => string;
+  /**
+   * The task-end run reader. Optional: only the Electron host registers the
+   * hook, so VS Code and the CLI engine build this namespace without it, and
+   * `ptah_task_get` then carries no `endHook` field.
+   */
+  getEndHookReader?: () => TaskEndRunReaderLike | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -317,7 +335,17 @@ export interface TaskDerivedRelations {
 }
 
 export type TaskGetResult =
-  | { ok: true; task: TaskSpecDetail; derived: TaskDerivedRelations }
+  | {
+      ok: true;
+      task: TaskSpecDetail;
+      derived: TaskDerivedRelations;
+      /**
+       * The task's latest task-end run (TASK_2026_886), `null` when it has
+       * none. Absent when the host has no reader or the read failed: the
+       * end-hook block never fails the task read itself.
+       */
+      endHook?: TaskEndRunRecord | null;
+    }
   | { ok: false; error: string; code?: string };
 
 /**
@@ -693,6 +721,26 @@ export function buildTasksNamespace(
   const failure = (error: unknown): string =>
     error instanceof Error ? error.message : String(error);
 
+  /**
+   * The optional `endHook` block for `get`, as a spreadable fragment: the key
+   * is present (possibly `null`) only when a reader answered.
+   */
+  const readEndHook = (
+    root: string,
+    taskId: string,
+  ): { endHook?: TaskEndRunRecord | null } => {
+    const reader = deps.getEndHookReader?.();
+    if (!reader) return {};
+    try {
+      return { endHook: reader.latestForTask(root, taskId) };
+    } catch {
+      // degradation-audit: optional-capability - the end-hook block is an
+      // enrichment of `ptah_task_get`; a failing reader omits the field and
+      // the task read still succeeds (TASK_2026_886 Component 11).
+      return {};
+    }
+  };
+
   return {
     async create(args: unknown): Promise<TaskMutationResult> {
       const parsed = TaskCreateArgsSchema.safeParse(args ?? {});
@@ -810,6 +858,7 @@ export function buildTasksNamespace(
           ok: true,
           task,
           derived: deriveFor(tasks, parsed.data.taskId),
+          ...readEndHook(context.root, parsed.data.taskId),
         };
       } catch (error: unknown) {
         return { ok: false, error: failure(error) };

@@ -252,7 +252,7 @@ describe('ClaudeRouteCertifier.certify', () => {
     expect(h.probe.queryRegistry).not.toHaveBeenCalled();
   });
 
-  it.each(['2.1.309', '2.2.0'])('refuses the uncovered win32 version %s after the scan, without a status child', async (version) => {
+  it.each(['2.1.309', '3.0.0'])('refuses the uncovered win32 version %s after the scan, without a status child', async (version) => {
     const logger = { warn: jest.fn() };
     const h = harness('win32', Date.now, logger);
     h.version = version;
@@ -267,16 +267,16 @@ describe('ClaudeRouteCertifier.certify', () => {
     ]);
   });
 
-  it('certifies a later patch build of the inspected line and warns once per version', async () => {
+  it.each(['2.1.312', '2.2.0'])('certifies the later build %s of the inspected major line and warns once', async (version) => {
     const logger = { warn: jest.fn() };
     const h = harness('win32', Date.now, logger);
-    h.version = '2.1.312';
+    h.version = version;
     await expect(h.certifier.certify(certifyRequest(newRoute()))).resolves.toMatchObject({ ok: true });
     await expect(h.certifier.certify(certifyRequest(newRoute()))).resolves.toMatchObject({ ok: true });
     expect(h.probe.status).toHaveBeenCalledTimes(2);
     expect(logger.warn.mock.calls).toEqual([
       ['[ClaudeRouteCertifier] Claude CLI version was not inspected; using the inspected policy sources',
-        { version: '2.1.312', inspected: '2.1.310' }],
+        { version, inspected: '2.1.310' }],
     ]);
   });
 
@@ -546,7 +546,7 @@ describe('ClaudeRouteCertifier.checkLaunch', () => {
     const h = harness();
     const launch = await certified(h);
     h.events.length = 0;
-    const uncovered = { ...launch, executable: { ...launch.executable, version: '2.2.0' } };
+    const uncovered = { ...launch, executable: { ...launch.executable, version: '3.0.0' } };
     await expect(h.certifier.checkLaunch(uncovered, signal())).resolves.toEqual({ ok: false, code: 'unsupported-source', terminated: true });
     expect(h.events).toEqual([]);
   });

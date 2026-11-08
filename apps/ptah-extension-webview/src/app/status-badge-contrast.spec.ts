@@ -202,14 +202,12 @@ describe('anubis ink overrides', () => {
 });
 
 /**
- * The change-set card (libs/frontend/chat-ui, P3 visual review) relies on:
- * - the global 2 px `button:focus-visible` outline for its rows: `--s` in
- *   anubis (the light theme's `--ptah-gold-strong` is measured below);
- * - `--bcm` as its neutral accent border (non-text, 3:1);
- * - `text-base-content` on 9 px ghost badges, whose fill is base-200 under
- *   the card's base-300 tint, so base-content must hold 4.5:1 on all layers.
+ * The turn summary files card uses the global 2 px `button:focus-visible`
+ * outline for its Review actions and ghost badges for conflicted rows.
+ * These theme checks cover that focus ring, neutral accents elsewhere in the
+ * panel, and base-content ink on every base surface.
  */
-describe('change-set card colour pairs', () => {
+describe('turn summary files card colour pairs', () => {
   it.each(BASE_LAYERS)(
     `anubis row focus ring (--s) clears ${AA_NON_TEXT}:1 against %s`,
     (layer) => {

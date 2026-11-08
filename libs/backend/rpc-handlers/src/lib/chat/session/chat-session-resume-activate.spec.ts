@@ -83,7 +83,7 @@ for (const part of [
   'my-repo/.claude/worktrees/fix',
 ])
   mkdirSync(join(TEST_ROOT, part), { recursive: true });
-const OPEN_FOLDER = `${TEST_ROOT}/my-repo`;
+const OPEN_FOLDER = join(TEST_ROOT, 'my-repo');
 const SESSION_ID = '11111111-1111-4111-8111-111111111111' as SessionId;
 const TAB_ID = '22222222-2222-4222-8222-222222222222';
 
@@ -344,8 +344,8 @@ describe('ChatSessionService — resumeSession activate:true (TS-04)', () => {
   });
   it.each([
     {
-      roots: [`${TEST_ROOT}/my-repo/ancestor`],
-      expected: [`${TEST_ROOT}/my-repo/ancestor`],
+      roots: [join(TEST_ROOT, 'my-repo', 'ancestor')],
+      expected: [join(TEST_ROOT, 'my-repo', 'ancestor')],
     },
     { roots: [], expected: [] },
   ])(

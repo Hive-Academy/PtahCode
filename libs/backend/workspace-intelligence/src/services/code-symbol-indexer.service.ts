@@ -41,6 +41,7 @@ import {
   recognisedSourceExtensions,
   supportedLanguagesFor,
 } from '../ast/language-registry';
+import { BACKGROUND_PARSE } from '../ast/tree-sitter-request-options';
 
 export interface CodeSymbolIndexerOptions {
   /** Number of files to process per batch before yielding. Default: 20 */
@@ -88,6 +89,11 @@ export interface IndexingStats {
   symbolsIndexed: number;
   errors: number;
   durationMs: number;
+}
+
+/** Set synchronously when indexWorkspace chooses to join an active census. */
+export interface IndexingCensusPromise extends Promise<IndexingStats> {
+  readonly joinedActiveCensus: boolean;
 }
 
 /**
@@ -297,7 +303,8 @@ interface RootRecord {
 
 /**
  * The one full census in flight for a root. Joiners share `promise`.
- * There is no follow-up: the workspace index lifecycle owns trailing runs.
+ * The indexer itself does not queue a follow-up. Forced RPC starts that join
+ * boot are followed by a fresh run in IndexingRpcHandlers.
  */
 interface ActiveCensus {
   readonly promise: Promise<IndexingStats>;
@@ -475,7 +482,7 @@ export class CodeSymbolIndexer {
   /**
    * The one full census per root identity. An entry exists only while that
    * census is running, and is removed in its `finally` before the promise
-   * settles. There is no follow-up queue.
+   * settles. Forced RPC follow-ups are queued by IndexingRpcHandlers.
    */
   private readonly activeCensuses = new Map<string, ActiveCensus>();
   /**
@@ -548,26 +555,39 @@ export class CodeSymbolIndexer {
    * the joiner's promise rejects with `DOMException` (`'Aborted'`, name
    * `'AbortError'`, the same error {@link throwIfAborted} throws). The
    * active census continues under the starter's signal. There is no
-   * follow-up census here; a later full run is a new call after this one
-   * settles. The workspace index lifecycle owns that trailing run.
+   * follow-up census here. The forced `indexing:start` handler starts one
+   * new run after a joined boot census settles, coalescing forced requests.
    */
-  async indexWorkspace(
+  indexWorkspace(
     workspaceRoot: string,
     options?: CodeSymbolIndexerOptions,
-  ): Promise<IndexingStats> {
+  ): IndexingCensusPromise {
     if (!workspaceRoot) {
       this.logger.warn(
         '[CodeSymbolIndexer] indexWorkspace called with empty workspaceRoot — skipping',
       );
-      return EMPTY_INDEX_STATS;
+      return Object.assign(Promise.resolve(EMPTY_INDEX_STATS), {
+        joinedActiveCensus: false,
+      });
     }
 
-    const key = graphPathIdentity(workspaceRoot);
-    const active = this.activeCensuses.get(key);
-    if (active !== undefined) {
-      return this.joinActiveCensus(active, options);
+    try {
+      const key = graphPathIdentity(workspaceRoot);
+      const active = this.activeCensuses.get(key);
+      if (active !== undefined) {
+        const joined = this.joinActiveCensus(active, options);
+        return Object.assign(joined.then((stats) => stats), {
+          joinedActiveCensus: true,
+        });
+      }
+      return Object.assign(this.startCensus(workspaceRoot, key, options), {
+        joinedActiveCensus: false,
+      });
+    } catch (error: unknown) {
+      return Object.assign(Promise.reject(error), {
+        joinedActiveCensus: false,
+      });
     }
-    return this.startCensus(workspaceRoot, key, options);
   }
 
   /**
@@ -575,8 +595,9 @@ export class CodeSymbolIndexer {
    * path identity, so a trailing slash is the same run. A per-file
    * `reindexFile` does not count. The flag is the active-census record:
    * it is set before discovery and cleared in the census `finally`, before
-   * the census promise settles, including when the census rejects. There
-   * is no follow-up wait, so a gap between two full runs reads false.
+   * the census promise settles, including when the census rejects. The RPC
+   * handler can start a follow-up after a forced boot join, so a gap
+   * between the two full runs reads false.
    */
   isIndexing(workspaceRoot: string): boolean {
     if (!workspaceRoot) return false;
@@ -1080,6 +1101,7 @@ export class CodeSymbolIndexer {
     let totalSymbols = 0;
     let totalErrors = 0;
     let attempted = 0;
+    let runtimeSkipped = 0;
 
     let filesProcessed = 0;
     // Before any write, after every batch (including the last), and again
@@ -1092,6 +1114,15 @@ export class CodeSymbolIndexer {
       const batch = files.slice(i, i + batchSize);
 
       for (const file of batch) {
+        if (
+          this.astAnalysis.isRuntimeUnavailable() &&
+          !file.unreadable &&
+          file.size <= MAX_INDEXED_FILE_BYTES
+        ) {
+          runtimeSkipped++;
+          filesProcessed++;
+          continue;
+        }
         if (file.unreadable || file.size > MAX_INDEXED_FILE_BYTES) {
           this.recordWrite(
             workspaceRoot,
@@ -1142,7 +1173,20 @@ export class CodeSymbolIndexer {
     // or last batch. It must not be reported as a finished index.
     this.throwIfAborted(options?.signal);
 
-    if (attempted > 0 && totalSymbols === 0 && totalErrors === attempted) {
+    // A run that skipped files is not a finished index: it must neither purge
+    // nor report `complete`, so the caller's retry policy indexes the skipped
+    // files once the runtime recovers. One error for the whole run, not one
+    // line per file.
+    if (runtimeSkipped > 0) {
+      throw new Error(
+        `[CodeSymbolIndexer] tree-sitter runtime unavailable — skipped ${runtimeSkipped} files; next retry in ${this.astAnalysis.runtimeRetryInMs()}ms`,
+      );
+    }
+    if (
+      attempted > 0 &&
+      totalSymbols === 0 &&
+      totalErrors === attempted
+    ) {
       throw new Error(
         `Code symbol indexing failed: all ${totalErrors} files errored and 0 symbols were produced. ` +
           `This usually means the tree-sitter WASM runtime or the symbol sink failed to initialize — check the logs for the underlying error.`,
@@ -1403,15 +1447,18 @@ export class CodeSymbolIndexer {
       };
     }
 
+    // Indexing is bulk work: it queues behind interactive parses.
     const result = await this.astAnalysis.analyzeSource(
       content,
       language,
       normalizedFilePath,
+      BACKGROUND_PARSE,
     );
     if (result.isErr()) {
-      this.logger.warn(
-        `[CodeSymbolIndexer] AST parse failed for ${normalizedFilePath}: ${result.error?.message ?? 'Unknown error'}`,
-      );
+      if (!this.astAnalysis.isRuntimeUnavailable())
+        this.logger.warn(
+          `[CodeSymbolIndexer] AST parse failed for ${normalizedFilePath}: ${result.error?.message ?? 'Unknown error'}`,
+        );
       return {
         symbolsIndexed: 0,
         errors: 1,

@@ -17,6 +17,7 @@ import {
   VSCodeService,
   provideVSCodeService,
   provideMessageRouter,
+  RendererFrameMonitorService,
   MESSAGE_HANDLERS,
   ATTENTION_ACTION_DISPATCHER,
   ATTENTION_LANE_OPENER,
@@ -248,6 +249,8 @@ export const appConfig: ApplicationConfig = {
     provideAppInitializer(() => {
       inject(ChatAttentionSourceService);
     }),
+    RendererFrameMonitorService,
+    provideAppInitializer(() => { inject(RendererFrameMonitorService); }),
     {
       provide: SurfaceRouterService.generationRouteTabValidatorToken,
       useFactory: () => {
@@ -315,9 +318,9 @@ export const appConfig: ApplicationConfig = {
       useExisting: AgentMonitorMessageHandler,
       multi: true,
     },
-    // Turn change-set cards (TASK_2026_576): live `git:turnChangeSet` pushes,
+    // Turn change sets (TASK_2026_576; chip: TASK_2026_623): live `git:turnChangeSet` pushes,
     // plus `session:turnEnded` and `git:status-update` as reconcile triggers.
-    // Eager because a push for the open session must merge before any card
+    // Eager because a push for the open session must merge before any chip
     // chunk loads; the store imports nothing from git-ui.
     { provide: MESSAGE_HANDLERS, useExisting: ChangeSetStore, multi: true },
     {

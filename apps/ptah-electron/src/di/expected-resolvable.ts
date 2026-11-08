@@ -1,4 +1,5 @@
 import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
+import { MEMORY_TOKENS } from '@ptah-extension/memory-curator';
 import { CLI_AGENT_RUNTIME_TOKENS } from '@ptah-extension/cli-agent-runtime';
 import { AUTH_PROVIDERS_TOKENS } from '@ptah-extension/auth-providers-tokens';
 import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
@@ -28,6 +29,8 @@ import {
   REVIEW_LANE_TOKENS,
 } from '@ptah-extension/review-core';
 import { REVIEW_GITHUB_TOKENS } from '@ptah-extension/review-github';
+import { TASK_END_TOKENS } from '@ptah-extension/task-end-hook';
+import { PERSISTENCE_TOKENS } from '@ptah-extension/persistence-sqlite';
 import { CODEX_SIGN_IN_QUIT_HANDLE } from './codex-login-composition';
 
 export const EXPECTED_RESOLVABLE = [
@@ -81,13 +84,50 @@ export const EXPECTED_RESOLVABLE_TOKENS = [
   ['CODEX_SIGN_IN_QUIT_HANDLE', CODEX_SIGN_IN_QUIT_HANDLE],
   ['SDK_CODEX_LOGIN', AUTH_PROVIDERS_TOKENS.SDK_CODEX_LOGIN],
   ['SDK_CODEX_READINESS', AUTH_PROVIDERS_TOKENS.SDK_CODEX_READINESS],
+  // Slow SQLite statements -> hang breadcrumbs; bound in phase 2 before the
+  // persistence registration, optional in the lib (main-loop-sync-blocks).
+  [
+    'SQLITE_SLOW_STATEMENT_SINK',
+    PERSISTENCE_TOKENS.SQLITE_SLOW_STATEMENT_SINK,
+  ],
+  ['SQLITE_SEARCH_WORKER', MEMORY_TOKENS.SQLITE_SEARCH_WORKER],
+  // WAL checkpoints off the main thread (main-loop-sync-blocks fix 11): the
+  // worker factory is bound in phase 2 before the persistence registration,
+  // which registers the scheduler. VS Code and the CLI bind no factory.
+  [
+    'WAL_CHECKPOINT_WORKER_FACTORY',
+    PERSISTENCE_TOKENS.WAL_CHECKPOINT_WORKER_FACTORY,
+  ],
+  ['WAL_CHECKPOINT_SCHEDULER', PERSISTENCE_TOKENS.WAL_CHECKPOINT_SCHEDULER],
+  // `db:reset` pauses the checkpoint worker through this port (review-11).
+  ['SQLITE_EXCLUSIVE_ACCESS', PERSISTENCE_TOKENS.SQLITE_EXCLUSIVE_ACCESS],
+] as const;
+
+/**
+ * Task-end hook services (TASK_2026_886, R6), bound by
+ * `registerTaskEndHookComposition` in phase 2 when SQLite is registered. The
+ * run reader is the slot `PtahAPIBuilder` takes optionally; resolving it
+ * builds the detector with every host port (D39).
+ */
+export const EXPECTED_TASK_END_TOKENS = [
+  ['TASK_END_STORE', TASK_END_TOKENS.STORE],
+  ['TASK_END_WORKER', TASK_END_TOKENS.WORKER],
+  ['TASK_END_RUN_READER', TASK_END_TOKENS.RUN_READER],
 ] as const;
 
 /** Runtime-owned message services, available after phase 2 registration. */
 export const EXPECTED_AGENT_MESSAGE_TOKENS = [
   CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_COORDINATOR,
-  CLI_AGENT_RUNTIME_TOKENS.AGENT_DELIVERY_RECEIPT_STORE,
+  CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_ENVELOPE_STORE,
   CLI_AGENT_RUNTIME_TOKENS.AGENT_LANE_RESUME,
+  CLI_AGENT_RUNTIME_TOKENS.AGENT_ID_ALIAS_REGISTRY,
+  CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_SCHEDULER,
+  CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_ACK,
+  CLI_AGENT_RUNTIME_TOKENS.LANE_DELIVERY_LIMIT_GATE,
+  CLI_AGENT_RUNTIME_TOKENS.LANE_MESSAGE_POLICY,
+  CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_DISPATCH_JOURNAL,
+  CLI_AGENT_RUNTIME_TOKENS.AGENT_OUTPUT_JOURNAL,
+  CLI_AGENT_RUNTIME_TOKENS.PARENT_SESSION_PURGE,
 ] as const;
 
 /**

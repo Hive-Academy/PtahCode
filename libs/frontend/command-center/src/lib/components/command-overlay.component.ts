@@ -56,6 +56,7 @@ export const COMMAND_OVERLAY_CLOSE_DELAY_MS = 200;
   styleUrl: './command-overlay.component.css',
   template: `
     <div class="pointer-events-none absolute inset-0">
+      <div class="pointer-events-none absolute inset-0" [style.clip-path]="'inset(' + reservedTop() + 'px 0 0)'">
       @for (node of projection().nodes; track node.id) {
         <button
           type="button"
@@ -72,7 +73,7 @@ export const COMMAND_OVERLAY_CLOSE_DELAY_MS = 200;
           [class.outline-warning]="selectedId() === node.id"
           [style.visibility]="
             visibleLabelIds() === null || visibleLabelIds()?.includes(node.id)
-              ? 'visible'
+              ? null
               : 'hidden'
           "
           [attr.data-node-id]="node.id"
@@ -177,6 +178,7 @@ export const COMMAND_OVERLAY_CLOSE_DELAY_MS = 200;
           }
         </button>
       }
+      </div>
       <span
         #cardAnchor
         aria-hidden="true"
@@ -227,6 +229,7 @@ export const COMMAND_OVERLAY_CLOSE_DELAY_MS = 200;
 })
 export class CommandOverlayComponent {
   public readonly visibleLabelIds = input<readonly string[] | null>(null);
+  public readonly reservedTop = input(0);
   private readonly store = inject(CommandCenterStore);
   public readonly projection = input.required<ProjectionResult>();
   public readonly hoveredNodeId = input<string | null>(null);

@@ -76,6 +76,7 @@ export { CLAUDE_LANE_ACCOUNT_PERSISTENCE } from './lib/di/tokens';
 export type { ClaudeLaneAccountPersistence } from './lib/claude/claude-sdk-lane-runner';
 export { registerCliAgentRuntimeServices } from './lib/di/register';
 export { LaneAccountResumeError } from './lib/cli-agents/lane-resume-gate';
+export { withRestoredOutputLoss } from './lib/cli-agents/lane-restore';
 
 export {
   wireSdkCallbacks,
@@ -92,6 +93,61 @@ export {
   type WireAgentEventListenersContext,
   type AgentEventPlatform,
 } from './lib/wiring/agent-events';
-export { AgentMessageCoordinator } from './lib/cli-agents/messaging/agent-message-coordinator.service';
+export {
+  AgentMessageCoordinator,
+  CAPABILITY_METADATA_UNAVAILABLE,
+  type AgentMessageCoordinatorDeps,
+} from './lib/cli-agents/messaging/agent-message-coordinator.service';
 export { AgentLaneResumeService } from './lib/cli-agents/messaging/agent-lane-resume.service';
+export {
+  AgentMessageAckService,
+  AGENT_MESSAGE_ACK_NOTE_MAX_CHARS,
+  type AgentMessageAckRefusal,
+  type AgentMessageAckRequest,
+  type AgentMessageAckRequestState,
+  type AgentMessageAckResult,
+} from './lib/cli-agents/messaging/agent-message-ack.service';
+export { ParentDeliveryDrainerService } from './lib/cli-agents/parent-delivery/parent-delivery-drainer.service';
+export {
+  AgentMessageEnvelopeStore,
+  AgentMessageStorageError,
+  AgentMessageValidationError,
+  type AgentMessagePersistence,
+} from './lib/cli-agents/messaging/envelope/agent-message-envelope.store';
+export type { AgentMessageEnvelope } from './lib/cli-agents/messaging/envelope/agent-message-envelope.schema';
+export { AgentIdAliasRegistry } from './lib/cli-agents/messaging/agent-id-alias.registry';
+export {
+  AgentMessageDeliveryScheduler,
+  type AgentMessageDeliveryScheduling,
+} from './lib/cli-agents/messaging/agent-message-delivery.scheduler';
+export {
+  LaneDeliveryLimitGate,
+  LANE_LIMIT_GATE_DEADLINE_MS,
+  LANE_LIMIT_RESET_RETRY_DELAY_MS,
+  planLimitRetry,
+  requiresLimitGate,
+  type LaneDeliveryLimitLookup,
+  type LimitGateDecision,
+  type LimitRetryPlan,
+} from './lib/cli-agents/messaging/lane-delivery-limit.gate';
+export type { AgentMessageDispatchJournal } from './lib/cli-agents/messaging/agent-message-dispatch-journal.port';
+export {
+  LaneMessagePolicy,
+  type LaneMessageDecision,
+  type LaneMessageDenyReason,
+  type LaneMessagePolicyDeps,
+  type VerifiedLaneSender,
+} from './lib/cli-agents/messaging/lane-message.policy';
+export {
+  LaneSenderRateLimiter,
+  LANE_SENDER_RATE_LIMIT,
+  LANE_SENDER_RATE_WINDOW_MS,
+} from './lib/cli-agents/messaging/lane-sender-rate.limiter';
+export {
+  ParentSessionPurgeService,
+  type ParentSessionPurge,
+  type ParentSessionPurgeOutcome,
+  type ParentSessionExistence,
+} from './lib/cli-agents/messaging/parent-session-purge.service';
+export type { AgentDeliveryReceiptEventSink } from './lib/cli-agents/messaging/agent-delivery-receipt-event-sink';
 export { LaneSpawnPolicyError } from './lib/cli-agents/lane-spawn-policy';

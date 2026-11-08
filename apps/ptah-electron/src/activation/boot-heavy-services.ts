@@ -26,7 +26,11 @@ import {
 import type { BootCoordinator } from './boot-coordinator';
 import { normalizeWorkspaceRoot } from '@ptah-extension/shared';
 import { startReviewWorker } from './review-worker.activation';
+import { startTaskEndHook } from './task-end-hook.activation';
+import { startSearchWorkerAfterMigrations } from './search-worker-prestart';
+import { startWalCheckpointsAfterMigrations } from './wal-checkpoint-start';
 import { REVIEW_CORE_TOKENS } from '@ptah-extension/review-core';
+import { TASK_END_TOKENS } from '@ptah-extension/task-end-hook';
 
 /**
  * The heavy half of Electron activation, extracted from `wire-runtime.ts`
@@ -179,6 +183,11 @@ export function createHeavyServicesBooter(
     }
   };
 
+  // One task-end hook per process, not per booted root: its detector covers
+  // every registered workspace folder and follows folder changes itself. Set
+  // synchronously so two roots booting at once cannot both start it.
+  let taskEndHookClaimed = false;
+
   const bootHeavyServicesOnce = async (
     workspaceRoot: string | undefined,
   ): Promise<void> => {
@@ -220,6 +229,12 @@ export function createHeavyServicesBooter(
     coordinator.markPersistenceSettled({
       sqliteOpen: thoth.sqliteConnection?.isOpen ?? false,
     });
+    // Migrated: fork the read-only search worker now, not on the first search.
+    if (thoth.sqliteConnection?.isOpen) startSearchWorkerAfterMigrations(container);
+    // Migrated: move WAL checkpoints out of main-thread COMMITs (fix 11).
+    if (thoth.sqliteConnection?.isOpen) {
+      refs.walCheckpointScheduler = startWalCheckpointsAfterMigrations(container);
+    }
     coordinator.setPhase('harness', 'Syncing skills and agents');
     refs.memoryCurator = thoth.memoryCurator;
     refs.memoryTrigger = thoth.memoryTrigger;
@@ -500,6 +515,20 @@ export function createHeavyServicesBooter(
     coordinator.setPhase('index', 'Starting background services');
     if (container.isRegistered(REVIEW_CORE_TOKENS.ORCHESTRATOR)) {
       refs.reviewWorker = await startReviewWorker(
+        container,
+        signal,
+        container.resolve<Logger>(TOKENS.LOGGER),
+      );
+    }
+    if (signal.aborted) return;
+    // Registered only when SQLite is (Batch 17 composition); the guard keeps
+    // a host without it from resolving the logger for nothing.
+    if (
+      !taskEndHookClaimed &&
+      container.isRegistered(TASK_END_TOKENS.DETECTOR)
+    ) {
+      taskEndHookClaimed = true;
+      refs.taskEndHook = await startTaskEndHook(
         container,
         signal,
         container.resolve<Logger>(TOKENS.LOGGER),

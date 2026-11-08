@@ -61,7 +61,10 @@ export {
   salienceRankOrderBy,
 } from './lib/salience-ranking';
 export type { SalienceRankRow } from './lib/salience-ranking';
-export { MemoryTriggerService } from './lib/triggers/memory-trigger.service';
+export {
+  MemoryTriggerService,
+  type TaskEndCurateOutcome,
+} from './lib/triggers/memory-trigger.service';
 export {
   DEFAULT_CUE_LIST,
   MEMORY_TRIGGER_DEFAULTS,
@@ -124,6 +127,14 @@ export type {
   CuratorWindowPlan,
 } from './lib/curator-llm/transcript-windows';
 export { EmbedderWorkerClient } from './lib/embedder/embedder-worker-client';
+export { SearchWorkerClient } from './lib/search-worker.client';
+export type { SearchWorkerClientOptions } from './lib/search-worker.client';
+export type {
+  ISearchWorkerFactory,
+  ISearchWorkerProcess,
+  ISqliteSearchWorker,
+  SearchWorkerDatabaseConfig,
+} from './lib/search-worker.port';
 export type {
   Disposable,
   PipelineProgressInfo,

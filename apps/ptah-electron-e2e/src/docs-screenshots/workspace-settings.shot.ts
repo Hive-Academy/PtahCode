@@ -8,9 +8,6 @@ import { shoot } from './_harness/shooter';
  * project — the workspace rail, settings sections and Setup Hub all read better
  * with a real folder name in them than with a temp directory.
  */
-test.use({
-  extraWorkspaceFolders: ['D:\\projects\\ptah-extension'],
-});
 
 test.describe('docs screenshots — workspace, settings, setup', () => {
   test('workspace rail and recent workspaces', async ({ page }) => {
@@ -48,6 +45,14 @@ test.describe('docs screenshots — workspace, settings, setup', () => {
       .waitFor({ state: 'visible', timeout: 10_000 })
       .catch(() => undefined);
     await page.waitForTimeout(1_500);
+    // Crop away machine-specific custom connection names before publishing.
+    await page.locator('[data-testid="provider-connection-card"]').filter({ hasText: 'Custom' }).evaluateAll((cards) => {
+      for (const card of cards) card.remove();
+    });
+    const cliMatrix = page.getByTestId('cli-matrix');
+    await expect(cliMatrix).toHaveAttribute('aria-busy', 'false', { timeout: 60_000 });
+    await expect(cliMatrix.locator('tbody:not([data-testid="cli-matrix-uninstalled"]) [data-testid^="cli-matrix-row-"]').first()).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId('policy-redetect')).toContainText('Re-detect CLIs', { timeout: 60_000 });
     await shoot(page, 'settings-overview');
 
     // The CLI agent matrix sits on the Providers tab, under the Main agent and

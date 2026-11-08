@@ -112,6 +112,7 @@
         "di-lint",
         "review-contracts",
         "review-core",
+        "task-end-hook",
         "review-github",
         "review-runs-ui",
         "review-eval"

@@ -69,6 +69,7 @@ import {
   type LaneOutcomesDisposer,
 } from '@ptah-extension/lane-outcomes';
 import { registerSkillSynthesisServices } from '@ptah-extension/skill-synthesis';
+import { registerTaskSpecsServices } from '@ptah-extension/task-specs';
 import {
   CLAUDE_LANE_ACCOUNT_PERSISTENCE,
   CLI_AGENT_RUNTIME_TOKENS,
@@ -107,6 +108,7 @@ import {
   DECISION_MODEL_CATALOG_TOKEN,
   DECISION_MODEL_CONFIG_TOKEN,
   EXPECTED_RESOLVABLE,
+  EXPECTED_TASK_END_TOKENS,
   EXPECTED_AGENT_MESSAGE_TOKENS,
   EXPECTED_RESOLVABLE_TOKENS,
   EXPECTED_RUNTIME_TOKENS,
@@ -120,6 +122,7 @@ import { registerPhase0Platform } from './phase-0-platform';
 import { registerPhase1Infra } from './phase-1-infra';
 import { registerPhase4Handlers } from './phase-4-handlers';
 import { registerClaudeNamedAccountBindings } from './claude-named-account-bindings';
+import { registerTaskEndHookComposition } from './task-end-hook-composition';
 import { UPDATE_MANAGER_TOKEN } from '../services/update/update-tokens';
 import { GitRootWatcherPool } from '../services/git-root-watcher-pool';
 import { createElectronRpcHostProfile } from '../rpc-host-profile';
@@ -161,6 +164,36 @@ describe('Electron DI — skill telemetry seam', () => {
     expect(() =>
       child.resolve(LANE_OUTCOME_TOKENS.SKILL_TELEMETRY_SEAM),
     ).not.toThrow();
+  });
+});
+
+describe('Electron DI WAL checkpoint worker registration', () => {
+  it('binds the worker factory before the persistence registration', () => {
+    const phase = fs.readFileSync(path.join(__dirname, 'phase-2-libraries.ts'), 'utf8');
+    const factory = phase.indexOf(
+      'container.register(PERSISTENCE_TOKENS.WAL_CHECKPOINT_WORKER_FACTORY, {',
+    );
+    const sqlite = phase.indexOf('registerPersistenceSqliteServices(container, logger);');
+    expect(factory).toBeGreaterThan(-1);
+    expect(factory).toBeLessThan(sqlite);
+    expect(phase).toContain('new ElectronWalCheckpointWorkerFactory(');
+    for (const name of [
+      'WAL_CHECKPOINT_WORKER_FACTORY',
+      'WAL_CHECKPOINT_SCHEDULER',
+      'SQLITE_EXCLUSIVE_ACCESS',
+    ]) {
+      expect(EXPECTED_RESOLVABLE_TOKENS.some(([entry]) => entry === name)).toBe(true);
+    }
+  });
+});
+
+describe('Electron DI search worker registration', () => {
+  it('includes the host worker port in the resolvable census', () => {
+    const entry = EXPECTED_RESOLVABLE_TOKENS.find(([name]) => name === 'SQLITE_SEARCH_WORKER');
+    expect(entry).toBeDefined();
+    const phase = fs.readFileSync(path.join(__dirname, 'phase-2-libraries.ts'), 'utf8');
+    expect(phase).toContain('container.register(MEMORY_TOKENS.SQLITE_SEARCH_WORKER, {');
+    expect(phase).toContain('new ElectronSearchWorkerFactory(');
   });
 });
 
@@ -566,6 +599,26 @@ describe('Electron DI — named Claude account persistence (TASK_2026_719 B17)',
     expect(sdk).toBeGreaterThan(-1);
     expect(bind).toBeGreaterThan(sqlite);
     expect(bind).toBeGreaterThan(sdk);
+  });
+
+  it('phase 2 binds the slow-statement sink before the SQLite connection is registered', () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, 'phase-2-libraries.ts'),
+      'utf8',
+    );
+    const sink = source.indexOf(
+      'container.register(PERSISTENCE_TOKENS.SQLITE_SLOW_STATEMENT_SINK',
+    );
+    const sqlite = source.indexOf(
+      'registerPersistenceSqliteServices(container, logger);',
+    );
+    expect(sink).toBeGreaterThan(-1);
+    expect(sink).toBeLessThan(sqlite);
+    expect(
+      EXPECTED_RESOLVABLE_TOKENS.some(
+        ([name]) => name === 'SQLITE_SLOW_STATEMENT_SINK',
+      ),
+    ).toBe(true);
   });
 });
 
@@ -1534,6 +1587,29 @@ describe('Electron DI — session organization recorder binding (TASK_2026_580 R
     );
     expect(registered).toEqual([...LanePlanLimitsRpcHandlers.METHODS]);
     expect(registered).toEqual(['agent:getLanePlanLimits']);
+  });
+
+  /**
+   * TASK_2026_886 D39. `PtahAPIBuilder` takes the task-end run reader as an
+   * optional slot, so once phase 2 binds the hook, building the API builder
+   * builds the reader and the detector with every host port. Phase 2 order:
+   * task-specs, then the hook composition (SQLite registered), then phase 3.
+   */
+  it('resolves the API builder with the task-end hook bound, and every task-end token (D39)', () => {
+    const { c, logger } = composePhase2(false);
+    registerTaskSpecsServices(c, logger);
+    registerTaskEndHookComposition(c, logger);
+    composePhase3(c, logger);
+
+    const builder = c.resolve<{ taskEndRunReader: unknown }>(
+      TOKENS.PTAH_API_BUILDER,
+    );
+    for (const [, token] of EXPECTED_TASK_END_TOKENS) {
+      expect(c.resolve(token)).toBe(c.resolve(token));
+    }
+    expect(builder.taskEndRunReader).toBe(
+      c.resolve(EXPECTED_TASK_END_TOKENS[2][1]),
+    );
   });
 });
 

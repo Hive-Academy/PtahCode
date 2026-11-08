@@ -13,17 +13,42 @@
 import 'reflect-metadata';
 import type {
   ICallerWorkspaceResolver,
+  IFileSystemProvider,
+  IOutputChannel,
   IWorkspaceProvider,
 } from '@ptah-extension/platform-core';
 import type {
   AgentId,
   AgentProcessInfo,
   CliSessionReference,
+  IAgentAdapter,
 } from '@ptah-extension/shared';
 import { AgentProcessManager } from './agent-process-manager.service';
+import { SessionMetadataStore } from '@ptah-extension/agent-sdk';
+import { createMockStateStorage } from '@ptah-extension/platform-core/testing';
 import { AgentMessageRouter } from './agent-message-router.service';
 import { AgentSpawnEnvironment } from './agent-spawn-environment.service';
 import { AgentOutputBuffer } from './agent-output-buffer.service';
+import { manifestFixture } from './testing/manifest.fixture';
+import {
+  AGENT_OUTPUT_CHECKPOINT_KEY_PREFIX,
+  AgentOutputJournal,
+  type AgentOutputCheckpoint,
+} from './agent-output-journal.service';
+import {
+  LaneResumeGate,
+  type LaneResumeGateInput,
+} from './lane-resume-gate';
+import type { Logger } from '@ptah-extension/vscode-core';
+import { LaneCompletionNotifier } from './lane-completion-notifier.service';
+import { FakeStateStorage } from './parent-delivery/__fixtures__/fake-state-storage';
+import { ParentEnvelopeStoreService } from './parent-delivery/parent-envelope-store.service';
+import { ParentDeliveryDrainerService } from './parent-delivery/parent-delivery-drainer.service';
+import {
+  PARENT_COMPLETION_KEYS_PREFIX,
+  PARENT_COMPLETION_OUTBOX_PREFIX,
+  type ParentCompletionOutboxEntry,
+} from './parent-delivery/parent-envelope.schema';
 
 // `readOutput` runs the id through `AgentId.from`, which validates the UUID
 // shape — spec ids have to be real v4-shaped strings, not readable labels.
@@ -39,9 +64,13 @@ function makeManager(options: {
   providerRoot: string | undefined;
   resolver?: ICallerWorkspaceResolver | null;
   rememberLaneOwner?: jest.Mock;
+  evaluateResume?: jest.Mock;
+  info?: jest.Mock;
+  laneCompletion?: LaneCompletionNotifier;
+  outputJournal?: AgentOutputJournal;
 }): AgentProcessManager {
   const logger = {
-    info: jest.fn(),
+    info: options.info ?? jest.fn(),
     warn: jest.fn(),
     error: jest.fn(),
     debug: jest.fn(),
@@ -85,14 +114,16 @@ function makeManager(options: {
     // No completion signal in these tests: the notifier's own spec covers the
     // signal, and a stub keeps a lane teardown here from reaching for a chat
     // session (TASK_2026_515).
-    {
-      signal: jest.fn(async () => ({
-        delivered: false,
-        reason: 'chat-runtime-unavailable',
-      })),
-    } as unknown as Args[7],
-    // Never consulted: these tests make no resume spawn.
-    { evaluate: jest.fn() } as unknown as Args[8],
+    options.laneCompletion ??
+      ({
+        signal: jest.fn(async () => ({
+          delivered: false,
+          reason: 'chat-runtime-unavailable',
+        })),
+        replayOutbox: jest.fn(async () => undefined),
+      } as unknown as Args[7]),
+    // The default is never consulted: these tests make no resume spawn.
+    { evaluate: options.evaluateResume ?? jest.fn() } as unknown as Args[8],
     // No quota owner and no ledger: plan limits are pinned by the manager spec.
     {
       ownerForLane: jest.fn(() => undefined),
@@ -103,6 +134,14 @@ function makeManager(options: {
       recordOwnerEvidence: jest.fn(),
       recordSuccess: jest.fn(),
     } as unknown as Args[10],
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    options.outputJournal,
   );
 }
 
@@ -150,7 +189,9 @@ describe('AgentProcessManager.restoreAgents', () => {
   it('preserves a persisted turn sequence', () => {
     const manager = makeManager({ providerRoot: ROOT_A });
     manager.restoreAgents([makeRef({ turnSeq: 3 })], ROOT_A);
-    expect((manager.getStatus(RESTORED_ID) as AgentProcessInfo).turnSeq).toBe(3);
+    expect((manager.getStatus(RESTORED_ID) as AgentProcessInfo).turnSeq).toBe(
+      3,
+    );
   });
   it('readOutput returns an empty stdout buffer for a lean restored reference', () => {
     const manager = makeManager({ providerRoot: ROOT_A });
@@ -189,6 +230,75 @@ describe('AgentProcessManager.restoreAgents', () => {
     ).toHaveLength(1);
   });
 
+  it('restores identity beside lifecycle without overriding lifecycle fields', () => {
+    const manager = makeManager({ providerRoot: ROOT_A });
+    const manifest = manifestFixture();
+
+    manager.restoreAgents(
+      [
+        makeRef({
+          status: 'stopped',
+          stopReason: 'host-restart',
+          completedAt: '2026-09-01T10:01:00.000Z',
+          lastActivityAt: '2026-09-01T10:00:30.000Z',
+          ptahCliId: 'ptah-cli-7',
+          workspaceKey: 'd:/projects/workspace-a',
+          potentialCapabilities: manifest,
+        }),
+      ],
+      ROOT_A,
+      'parent-session',
+    );
+
+    expect(manager.getStatus(RESTORED_ID)).toMatchObject({
+      parentSessionId: 'parent-session',
+      ptahCliId: 'ptah-cli-7',
+      workspaceKey: 'd:/projects/workspace-a',
+      potentialCapabilities: manifest,
+      status: 'stopped',
+      stopReason: 'host-restart',
+      completedAt: '2026-09-01T10:01:00.000Z',
+      lastActivityAt: '2026-09-01T10:00:30.000Z',
+    });
+  });
+
+  it('logs one redacted restart line per host-restart ref and none for other terminal refs', () => {
+    const info = jest.fn();
+    const manager = makeManager({ providerRoot: ROOT_A, info });
+    // The store normalizes an interrupted lane to stopped / host-restart
+    // before restore; a `running` ref is a live lane of another host.
+    manager.restoreAgents(
+      [
+        makeRef({ status: 'stopped', stopReason: 'host-restart' }),
+        makeRef({
+          agentId: IN_SCOPE_ID as AgentId,
+          status: 'stopped',
+          stopReason: 'host-restart',
+          cliSessionId: '',
+        }),
+        makeRef({ agentId: OUT_OF_SCOPE_ID as AgentId, status: 'completed' }),
+      ],
+      ROOT_A,
+    );
+    const lines = info.mock.calls.filter(
+      ([message]) =>
+        message === '[AgentProcessManager] Lane interrupted by host restart',
+    );
+    expect(lines).toHaveLength(2);
+    expect(lines[0][1]).toEqual({
+      agentId: RESTORED_ID,
+      cli: 'codex',
+      startedAt: '2026-09-01T10:00:00.000Z',
+      cliSessionIdPresent: true,
+    });
+    expect(lines[1][1]).toEqual({
+      agentId: IN_SCOPE_ID,
+      cli: 'codex',
+      startedAt: '2026-09-01T10:00:00.000Z',
+      cliSessionIdPresent: false,
+    });
+  });
+
   it('does NOT overwrite a live tracked agent with the same id', () => {
     const manager = makeManager({ providerRoot: ROOT_A });
     const live: AgentProcessInfo = {
@@ -218,31 +328,338 @@ describe('AgentProcessManager.restoreAgents', () => {
     expect(manager.readOutput(RESTORED_ID).stdout).toBe('live output');
   });
 
-  it("normalizes a ref persisted as 'running' to 'stopped' — its process died with the host", () => {
-    const manager = makeManager({ providerRoot: ROOT_A });
+  it('does not install a live foreign running ref or mark it interrupted', async () => {
+    const evaluateResume = jest.fn().mockResolvedValue({
+      decision: 'fresh',
+      reason: 'no local record',
+      contextTokens: null,
+      source: 'estimate',
+      idleMs: 0,
+    });
+    const manager = makeManager({ providerRoot: ROOT_A, evaluateResume });
 
-    const before = Date.now();
-    manager.restoreAgents([makeRef({ status: 'running' })], ROOT_A);
-
-    expect((manager.getStatus(RESTORED_ID) as AgentProcessInfo).status).toBe(
-      'stopped',
+    const count = manager.restoreAgents(
+      [makeRef({ status: 'running' })],
+      ROOT_A,
     );
+
+    expect(count).toBe(0);
+    expect(manager.findAgentInfo(RESTORED_ID)).toBeUndefined();
+    // The tools learn the lane belongs to a live host, not to spawn a duplicate.
+    expect(() => manager.readOutput(RESTORED_ID)).toThrow(
+      /^Agent not found: .*running under another live Ptah host/,
+    );
+    expect(() => manager.readOutput(RESTORED_ID)).not.toThrow(/spawn a new agent/);
+    await manager['gateResume']('Continue', 'cli-session-1', 'codex');
+    expect(evaluateResume).toHaveBeenCalledWith(
+      expect.not.objectContaining({ interruptedByHostRestart: true }),
+    );
+  });
+
+  it('restores a foreign lane only after its host lease becomes stale', async () => {
+    jest.useFakeTimers();
+    try {
+      const now = Date.parse('2026-10-17T12:00:00.000Z');
+      jest.setSystemTime(now);
+      const evaluateResume = jest.fn().mockResolvedValue({
+        decision: 'resume',
+        reason: 'test gate',
+        contextTokens: null,
+        source: 'estimate',
+        idleMs: 0,
+      });
+      const manager = makeManager({ providerRoot: ROOT_A, evaluateResume });
+      const storage = createMockStateStorage();
+      const hostB = new SessionMetadataStore(storage, manager['logger']);
+      await hostB.create('sess-1', ROOT_A, 'parent');
+      const metadata = await hostB.get('sess-1');
+      if (!metadata) throw new Error('Expected seeded session metadata');
+      const lastActivityAt = new Date(now - 30_000).toISOString();
+      await hostB.save({
+        ...metadata,
+        cliSessions: [
+          makeRef({
+            status: 'running',
+            hostRunId: 'host-run-a',
+            lastActivityAt,
+          }),
+        ],
+      });
+      await storage.update('ptah.hostRunLease.host-run-a', now);
+
+      const [live] = await hostB.getCliSessionsForRestore('sess-1');
+      expect(live).toMatchObject({ status: 'running', lastActivityAt });
+      expect(live).not.toHaveProperty('hostRunId');
+      expect(manager.restoreAgents([live], ROOT_A)).toBe(0);
+      expect(manager.findAgentInfo(RESTORED_ID)).toBeUndefined();
+      await manager['gateResume']('Continue', 'cli-session-1', 'codex');
+      expect(evaluateResume).toHaveBeenNthCalledWith(
+        1,
+        expect.not.objectContaining({ interruptedByHostRestart: true }),
+      );
+
+      // Host A crashed: its key remains, but no beat arrives for over 90 s.
+      jest.setSystemTime(now + 91_000);
+      const [interrupted] = await hostB.getCliSessionsForRestore('sess-1');
+      expect(interrupted).toMatchObject({
+        status: 'stopped',
+        stopReason: 'host-restart',
+        completedAt: lastActivityAt,
+        lastActivityAt,
+      });
+      expect(manager.restoreAgents([interrupted], ROOT_A)).toBe(1);
+      await manager['gateResume']('Continue', 'cli-session-1', 'codex');
+      expect(evaluateResume).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          interruptedByHostRestart: true,
+          lastActivityAt: Date.parse(lastActivityAt),
+        }),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('restores a store-normalized host interruption without an exit code', () => {
+    const manager = makeManager({ providerRoot: ROOT_A });
+    const lastActivityAt = '2026-09-01T10:59:30.000Z';
+
+    manager.restoreAgents(
+      [
+        makeRef({
+          status: 'stopped',
+          stopReason: 'host-restart',
+          completedAt: lastActivityAt,
+          lastActivityAt,
+        }),
+      ],
+      ROOT_A,
+    );
+
     const info = manager.getStatus(RESTORED_ID) as AgentProcessInfo;
+    expect(info).toMatchObject({
+      status: 'stopped',
+      stopReason: 'host-restart',
+      completedAt: lastActivityAt,
+      lastActivityAt,
+    });
+    expect(info.exitCode).toBeUndefined();
+  });
+
+  it('keeps the interruption instant supplied by the store without prior activity', () => {
+    const manager = makeManager({ providerRoot: ROOT_A });
+    const interruptedAt = new Date().toISOString();
+
+    manager.restoreAgents(
+      [
+        makeRef({
+          status: 'stopped',
+          stopReason: 'host-restart',
+          completedAt: interruptedAt,
+          lastActivityAt: interruptedAt,
+        }),
+      ],
+      ROOT_A,
+    );
+
+    const info = manager.getStatus(RESTORED_ID) as AgentProcessInfo;
+    expect(info.status).toBe('stopped');
     expect(info.stopReason).toBe('host-restart');
-    expect(Date.parse(info.completedAt ?? '')).toBeGreaterThanOrEqual(before);
-    expect(Date.parse(info.completedAt ?? '')).toBeLessThanOrEqual(Date.now());
+    expect(info.completedAt).toBe(interruptedAt);
+    expect(info.lastActivityAt).toBe(interruptedAt);
+  });
+
+  it('resumes an interrupted long-running lane from last activity, not spawn', async () => {
+    const evaluateResume = jest.fn().mockResolvedValue({
+      decision: 'resume',
+      reason: 'within the context and idle limits',
+      contextTokens: null,
+      source: 'estimate',
+      idleMs: 30_000,
+    });
+    const manager = makeManager({ providerRoot: ROOT_A, evaluateResume });
+    const now = Date.now();
+    const lastActivityAt = new Date(now - 30_000).toISOString();
+    manager.restoreAgents(
+      [
+        makeRef({
+          status: 'stopped',
+          stopReason: 'host-restart',
+          startedAt: new Date(now - 3_600_000).toISOString(),
+          lastActivityAt,
+          completedAt: lastActivityAt,
+        }),
+      ],
+      ROOT_A,
+    );
+
+    const gated = await manager['gateResume'](
+      'Continue the work',
+      'cli-session-1',
+      'codex',
+    );
+
+    expect(evaluateResume).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cliSessionId: 'cli-session-1',
+        lastActivityAt: Date.parse(lastActivityAt),
+        interruptedByHostRestart: true,
+      }),
+    );
+    expect(gated.resumeDecision).toEqual({
+      decision: 'resumed',
+      reason: 'within the context and idle limits',
+      sessionKnown: true,
+    });
+  });
+
+  it('resumes an interrupted lane through the real gate past the idle limit', async () => {
+    const now = Date.now();
+    const output: IOutputChannel = {
+      name: 'Ptah',
+      appendLine: jest.fn(),
+      append: jest.fn(),
+      clear: jest.fn(),
+      show: jest.fn(),
+      dispose: jest.fn(),
+    };
+    const gate = new LaneResumeGate(
+      output,
+      jest.fn(async () => null),
+      () => now,
+    );
+    const evaluateResume = jest.fn((input: LaneResumeGateInput) =>
+      gate.evaluate(input),
+    );
+    const manager = makeManager({ providerRoot: ROOT_A, evaluateResume });
+    manager.restoreAgents(
+      [
+        makeRef({
+          cli: 'copilot',
+          status: 'stopped',
+          stopReason: 'host-restart',
+          startedAt: new Date(now - 3_600_000).toISOString(),
+          lastActivityAt: new Date(now - 601_000).toISOString(),
+          completedAt: new Date(now - 601_000).toISOString(),
+        }),
+      ],
+      ROOT_A,
+    );
+
+    const gated = await manager['gateResume'](
+      'Continue the work',
+      'cli-session-1',
+      'copilot',
+    );
+
+    expect(gated.resumeDecision).toEqual({
+      decision: 'resumed',
+      reason: 'host restart interrupted the lane; resuming its CLI session',
+      sessionKnown: true,
+    });
+  });
+
+  it('clamps a future checkpoint before the real resume idle gate', async () => {
+    jest.useFakeTimers();
+    try {
+      const now = Date.parse('2026-10-17T12:00:00.000Z');
+      jest.setSystemTime(now);
+      const output: IOutputChannel = {
+        name: 'Ptah',
+        appendLine: jest.fn(),
+        append: jest.fn(),
+        clear: jest.fn(),
+        show: jest.fn(),
+        dispose: jest.fn(),
+      };
+      const gate = new LaneResumeGate(
+        output,
+        jest.fn(async () => null),
+        () => Date.now(),
+      );
+      const manager = makeManager({
+        providerRoot: ROOT_A,
+        evaluateResume: jest.fn((input: LaneResumeGateInput) =>
+          gate.evaluate(input),
+        ),
+      });
+      manager.restoreAgents(
+        [
+          makeRef({
+            cli: 'copilot',
+            status: 'stopped',
+            stopReason: 'host-restart',
+            startedAt: new Date(now - 3_600_000).toISOString(),
+            lastActivityAt: new Date(now + 3_600_000).toISOString(),
+            completedAt: new Date(now).toISOString(),
+          }),
+        ],
+        ROOT_A,
+      );
+
+      jest.setSystemTime(now + 601_000);
+      const gated = await manager['gateResume'](
+        'Continue the work',
+        'cli-session-1',
+        'copilot',
+      );
+
+      expect(manager.findAgentInfo(RESTORED_ID)?.lastActivityAt).toBe(
+        new Date(now).toISOString(),
+      );
+      expect(gated.resumeDecision).toEqual({
+        decision: 'resumed',
+        reason: 'host restart interrupted the lane; resuming its CLI session',
+        sessionKnown: true,
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('passes an interrupted legacy lane restore time to the resume gate', async () => {
+    const evaluateResume = jest.fn().mockResolvedValue({
+      decision: 'resume',
+      reason: 'within the context and idle limits',
+      contextTokens: null,
+      source: 'estimate',
+      idleMs: 0,
+    });
+    const manager = makeManager({ providerRoot: ROOT_A, evaluateResume });
+    const beforeRestore = Date.now();
+    manager.restoreAgents(
+      [
+        makeRef({
+          status: 'stopped',
+          stopReason: 'host-restart',
+          startedAt: new Date(beforeRestore - 3_600_000).toISOString(),
+          lastActivityAt: new Date(beforeRestore).toISOString(),
+          completedAt: new Date(beforeRestore).toISOString(),
+        }),
+      ],
+      ROOT_A,
+    );
+
+    await manager['gateResume']('Continue', 'cli-session-1', 'codex');
+
+    const input = evaluateResume.mock.calls[0][0] as { lastActivityAt: number };
+    expect(input.lastActivityAt).toBeGreaterThanOrEqual(beforeRestore);
+    expect(input.lastActivityAt).toBeLessThanOrEqual(Date.now());
   });
 
   it.each(['completed', 'failed', 'timeout', 'stopped'] as const)(
     'carries the terminal status %s through unchanged',
     (status) => {
       const manager = makeManager({ providerRoot: ROOT_A });
-      manager.restoreAgents([makeRef({ status, completedAt: '2026-09-01T11:00:00.000Z' })], ROOT_A);
-      expect((manager.getStatus(RESTORED_ID) as AgentProcessInfo).status).toBe(
-        status,
+      manager.restoreAgents(
+        [makeRef({ status, completedAt: '2026-09-01T10:05:00.000Z' })],
+        ROOT_A,
       );
-      expect((manager.getStatus(RESTORED_ID) as AgentProcessInfo).completedAt).toBe('2026-09-01T11:00:00.000Z');
-      expect((manager.getStatus(RESTORED_ID) as AgentProcessInfo).stopReason).toBeUndefined();
+      const info = manager.getStatus(RESTORED_ID) as AgentProcessInfo;
+      expect(info.status).toBe(status);
+      expect(info.completedAt).toBe('2026-09-01T10:05:00.000Z');
+      expect(info.stopReason).toBeUndefined();
     },
   );
 
@@ -405,6 +822,274 @@ describe('AgentProcessManager.restoreAgents', () => {
     }
   });
 
+  describe('with a running-output checkpoint (P3-K)', () => {
+    const checkpointAt = '2026-09-01T10:05:00.000Z';
+    function journalWith(checkpoint: AgentOutputCheckpoint): AgentOutputJournal {
+      const storage = new FakeStateStorage();
+      void storage.update(`${AGENT_OUTPUT_CHECKPOINT_KEY_PREFIX}${checkpoint.agentId}`, checkpoint);
+      const silent = Object.assign(Object.create(null) as Logger, {
+        info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn(),
+      });
+      return new AgentOutputJournal(storage, silent, () => ({
+        readOutput: () => undefined,
+        hasRunningLanes: () => false,
+      }));
+    }
+    const checkpoint: AgentOutputCheckpoint = {
+      agentId: RESTORED_ID,
+      seq: 4,
+      at: checkpointAt,
+      stdoutTail: 'checkpoint stdout',
+      segmentsTail: [
+        { type: 'file-change', content: 'src/tail.ts' },
+        { type: 'text', content: 'checkpoint text' },
+      ],
+      changedFiles: ['src/early.ts', 'src/tail.ts'],
+    };
+    const interrupted = (overrides: Partial<CliSessionReference> = {}) =>
+      makeRef({
+        cli: 'copilot',
+        status: 'stopped',
+        stopReason: 'host-restart',
+        segments: [{ type: 'text', content: 'stale ref text' }],
+        ...overrides,
+      });
+
+    it('restores output up to the checkpoint, keeps host-restart and sets outputLostAfter', () => {
+      const manager = makeManager({ providerRoot: ROOT_A, outputJournal: journalWith(checkpoint) });
+      const recovered: AgentProcessInfo[] = [];
+      manager.events.on('agent:output-recovered', (info: AgentProcessInfo) => recovered.push(info));
+      manager.restoreAgents([interrupted()], ROOT_A, 'parent-1');
+
+      const info = manager.getStatus(RESTORED_ID) as AgentProcessInfo;
+      expect(info).toMatchObject({
+        status: 'stopped',
+        stopReason: 'host-restart',
+        outputLostAfter: checkpointAt,
+      });
+      // Replaced, not appended: the checkpoint is the only output (no replay).
+      expect(manager.readOutputForPersistence(RESTORED_ID)).toMatchObject({
+        stdout: 'checkpoint stdout',
+        segments: checkpoint.segmentsTail,
+      });
+      expect(recovered).toHaveLength(1);
+      expect(recovered[0]).toMatchObject({ outputLostAfter: checkpointAt, stopReason: 'host-restart' });
+    });
+
+    describe('awaitRecoveredOutput', () => {
+      function deferred(): { promise: Promise<void>; resolve: () => void } {
+        let resolve: () => void = () => undefined;
+        const promise = new Promise<void>((r) => { resolve = r; });
+        return { promise, resolve };
+      }
+      function restoredWithWrite(write: Promise<void>): AgentProcessManager {
+        const manager = makeManager({ providerRoot: ROOT_A, outputJournal: journalWith(checkpoint) });
+        manager.events.on(
+          'agent:output-recovered',
+          (_info: AgentProcessInfo, track: (settled: Promise<void>) => void) => track(write),
+        );
+        manager.restoreAgents([interrupted()], ROOT_A, 'parent-1');
+        return manager;
+      }
+
+      it('waits until the recovered reference write settles', async () => {
+        const write = deferred();
+        const manager = restoredWithWrite(write.promise);
+        let done = false;
+        const waiting = manager.awaitRecoveredOutput([RESTORED_ID]).then(() => { done = true; });
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(done).toBe(false);
+        write.resolve();
+        await waiting;
+        expect(done).toBe(true);
+        expect(manager['logger'].warn).not.toHaveBeenCalled();
+      });
+
+      it('continues after the bound and logs when the write is slow', async () => {
+        jest.useFakeTimers();
+        try {
+          const manager = restoredWithWrite(new Promise<void>(() => undefined));
+          const waiting = manager.awaitRecoveredOutput([RESTORED_ID], 3_000);
+          await jest.advanceTimersByTimeAsync(3_000);
+          await waiting;
+          expect(manager['logger'].warn).toHaveBeenCalledWith(
+            expect.stringContaining('not persisted in time'),
+            { pending: 1, timeoutMs: 3_000 },
+          );
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+
+      it('leaves no waiter on a stuck write after each timed-out load, and drops it once it lands', async () => {
+        jest.useFakeTimers();
+        try {
+          const landing = { resolve: (): void => undefined };
+          const write = new Promise<void>((resolve) => { landing.resolve = resolve; });
+          const manager = restoredWithWrite(write);
+          const writes = manager['recoveredOutputWrites'];
+          const tracked = writes.get(RESTORED_ID);
+          const timersBefore = jest.getTimerCount();
+          for (let load = 0; load < 3; load++) {
+            let done = false;
+            const waiting = manager.awaitRecoveredOutput([RESTORED_ID], 3_000).then(() => { done = true; });
+            expect(tracked?.waiters.size).toBe(1);
+            await jest.advanceTimersByTimeAsync(2_999);
+            expect(done).toBe(false);
+            await jest.advanceTimersByTimeAsync(1);
+            await waiting;
+            // The timed-out waiter removed itself; the same entry stays tracked.
+            expect(tracked?.waiters.size).toBe(0);
+            expect(writes.get(RESTORED_ID)).toBe(tracked);
+          }
+          expect(manager['logger'].warn).toHaveBeenCalledTimes(3);
+          expect(jest.getTimerCount()).toBe(timersBefore);
+
+          // Only a landed write drops the entry, and it does so at once.
+          landing.resolve();
+          await jest.advanceTimersByTimeAsync(0);
+          expect(writes.has(RESTORED_ID)).toBe(false);
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+
+      it('registers one waiter for a repeated agent id and removes it on timeout', async () => {
+        jest.useFakeTimers();
+        try {
+          const manager = restoredWithWrite(new Promise<void>(() => undefined));
+          const tracked = manager['recoveredOutputWrites'].get(RESTORED_ID);
+          const waiting = manager.awaitRecoveredOutput([RESTORED_ID, RESTORED_ID], 3_000);
+          expect(tracked?.waiters.size).toBe(1);
+          await jest.advanceTimersByTimeAsync(3_000);
+          await waiting;
+          expect(tracked?.waiters.size).toBe(0);
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+
+      it('releases every concurrent waiter when the write lands', async () => {
+        jest.useFakeTimers();
+        try {
+          const landing = { resolve: (): void => undefined };
+          const write = new Promise<void>((resolve) => { landing.resolve = resolve; });
+          const manager = restoredWithWrite(write);
+          const timersBefore = jest.getTimerCount();
+          const first = manager.awaitRecoveredOutput([RESTORED_ID], 3_000);
+          const second = manager.awaitRecoveredOutput([RESTORED_ID], 3_000);
+          landing.resolve();
+          await jest.advanceTimersByTimeAsync(0);
+          await Promise.all([first, second]);
+          expect(manager['logger'].warn).not.toHaveBeenCalled();
+          expect(jest.getTimerCount()).toBe(timersBefore);
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+
+      it('continues without a timeout warning when the write failed', async () => {
+        const manager = restoredWithWrite(Promise.reject(new Error('store down')));
+        await manager.awaitRecoveredOutput([RESTORED_ID]);
+        expect(manager['logger'].warn).not.toHaveBeenCalled();
+      });
+
+      it('does not wait when nothing was recovered', async () => {
+        jest.useFakeTimers();
+        try {
+          const manager = makeManager({ providerRoot: ROOT_A });
+          manager.restoreAgents([interrupted()], ROOT_A, 'parent-1');
+          const timersBefore = jest.getTimerCount();
+          let done = false;
+          const waiting = manager.awaitRecoveredOutput([RESTORED_ID]).then(() => { done = true; });
+          // No bound timer was armed: nothing recovered means nothing to wait on.
+          expect(jest.getTimerCount()).toBe(timersBefore);
+          await Promise.resolve();
+          await Promise.resolve();
+          expect(done).toBe(true);
+          await waiting;
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+    });
+
+    it('does not recover again once the reference carries the checkpoint time', () => {
+      const manager = makeManager({ providerRoot: ROOT_A, outputJournal: journalWith(checkpoint) });
+      const recovered = jest.fn();
+      manager.events.on('agent:output-recovered', recovered);
+      manager.restoreAgents([interrupted({ outputLostAfter: checkpointAt })], ROOT_A);
+      expect(recovered).not.toHaveBeenCalled();
+      expect((manager.getStatus(RESTORED_ID) as AgentProcessInfo).outputLostAfter).toBe(checkpointAt);
+    });
+
+    it('ignores a checkpoint older than the saved output on restore and in the handoff', async () => {
+      const savedAt = '2026-09-01T10:06:00.000Z';
+      const manager = makeManager({
+        providerRoot: ROOT_A,
+        outputJournal: journalWith(checkpoint),
+        evaluateResume: jest.fn(async () => ({
+          decision: 'fresh', reason: 'too large', contextTokens: null, source: 'estimate', idleMs: null,
+        })),
+      });
+      const recovered = jest.fn();
+      manager.events.on('agent:output-recovered', recovered);
+      manager.restoreAgents(
+        [interrupted({ outputLostAfter: savedAt, segments: [{ type: 'text', content: 'saved ref text' }] })],
+        ROOT_A,
+      );
+
+      expect(recovered).not.toHaveBeenCalled();
+      expect((manager.getStatus(RESTORED_ID) as AgentProcessInfo).outputLostAfter).toBe(savedAt);
+      expect(manager.readOutputForPersistence(RESTORED_ID)).toMatchObject({
+        segments: [{ type: 'text', content: 'saved ref text' }],
+      });
+      const gated = await manager['gateResume']('Continue the work', 'cli-session-1', 'copilot');
+      expect(gated.task).toContain('saved ref text');
+      expect(gated.task).not.toContain('checkpoint text');
+      expect(gated.task).not.toContain('src/early.ts');
+    });
+
+    it('still skips the idle rule on resume when restored from a checkpoint', async () => {
+      const now = Date.now();
+      const output: IOutputChannel = {
+        name: 'Ptah', appendLine: jest.fn(), append: jest.fn(), clear: jest.fn(), show: jest.fn(), dispose: jest.fn(),
+      };
+      const gate = new LaneResumeGate(output, jest.fn(async () => null), () => now);
+      const manager = makeManager({
+        providerRoot: ROOT_A,
+        outputJournal: journalWith(checkpoint),
+        evaluateResume: jest.fn((input: LaneResumeGateInput) => gate.evaluate(input)),
+      });
+      manager.restoreAgents(
+        [interrupted({
+          startedAt: new Date(now - 3_600_000).toISOString(),
+          lastActivityAt: new Date(now - 601_000).toISOString(),
+          completedAt: new Date(now - 601_000).toISOString(),
+        })],
+        ROOT_A,
+      );
+      const gated = await manager['gateResume']('Continue the work', 'cli-session-1', 'copilot');
+      expect(gated.resumeDecision).toMatchObject({ decision: 'resumed' });
+    });
+
+    it('builds the fresh handoff from the checkpoint text and changed files', async () => {
+      const manager = makeManager({
+        providerRoot: ROOT_A,
+        outputJournal: journalWith(checkpoint),
+        evaluateResume: jest.fn(async () => ({
+          decision: 'fresh', reason: 'too large', contextTokens: null, source: 'estimate', idleMs: null,
+        })),
+      });
+      manager.restoreAgents([interrupted()], ROOT_A);
+      const gated = await manager['gateResume']('Continue the work', 'cli-session-1', 'copilot');
+      expect(gated.task).toContain(['- src/early.ts', '- src/tail.ts'].join('\n'));
+      expect(gated.task).toContain('checkpoint text');
+      expect(gated.task).not.toContain('stale ref text');
+    });
+  });
+
   it('an unknown id says no record exists in this host at all, keeping the "Agent not found" prefix', () => {
     const manager = makeManager({ providerRoot: ROOT_A });
 
@@ -416,5 +1101,156 @@ describe('AgentProcessManager.restoreAgents', () => {
       expect(read).toThrow(/nor one restored from persisted session state/);
       expect(read).toThrow(/spawn a new agent/);
     }
+  });
+});
+
+describe('AgentProcessManager.restoreAgents completion outbox replay', () => {
+  const PARENT = '11111111-2222-4333-8444-555555555555';
+  const LANE_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-0000000000aa';
+  const COMPLETED_AT = '2026-11-01T00:00:00.000Z';
+  const KEY = `${LANE_ID}:${COMPLETED_AT}`;
+  const OUTBOX_KEY = `${PARENT_COMPLETION_OUTBOX_PREFIX}${PARENT}`;
+  const SHARD_KEY = `${PARENT_COMPLETION_KEYS_PREFIX}${PARENT}`;
+  const DAY = 24 * 60 * 60 * 1000;
+  const disposers: Array<() => void> = [];
+
+  afterEach(() => {
+    for (const dispose of disposers.splice(0)) dispose();
+  });
+
+  function quietLogger(): Logger {
+    const log: Pick<Logger, 'info' | 'warn' | 'error' | 'debug'> = {
+      info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn(),
+    };
+    return log as Logger;
+  }
+
+  function outboxEntry(createdAt: number): ParentCompletionOutboxEntry {
+    return {
+      dedupeKey: KEY, agentId: LANE_ID as AgentId, parentSessionId: PARENT,
+      completedAt: COMPLETED_AT, body: 'lane finished', verdict: 'delivered',
+      originName: 'codex · lane', createdAt,
+    };
+  }
+
+  function outboxSize(storage: FakeStateStorage): number {
+    const value = storage.values.get(OUTBOX_KEY);
+    if (!value || typeof value !== 'object' || !('entries' in value)) return 0;
+    return Array.isArray(value.entries) ? value.entries.length : 0;
+  }
+
+  /** One host run: the real notifier, store and drainer behind a manager. */
+  async function world(storage: FakeStateStorage) {
+    const log = quietLogger();
+    const store = new ParentEnvelopeStoreService(log, storage);
+    await store.ready;
+    const send = jest.fn<Promise<void>, Parameters<IAgentAdapter['sendMessageToSession']>>(
+      async () => undefined);
+    const adapter: Pick<IAgentAdapter, 'isSessionActive' | 'sendMessageToSession'> = {
+      isSessionActive: () => true, sendMessageToSession: send,
+    };
+    const drainer = new ParentDeliveryDrainerService(log, store, adapter as IAgentAdapter, null, null);
+    disposers.push(() => drainer.dispose());
+    const fileSystem: Pick<IFileSystemProvider, 'exists' | 'stat'> = {
+      exists: jest.fn(async () => false), stat: jest.fn(async () => { throw new Error('none'); }),
+    };
+    const notifier = new LaneCompletionNotifier(log, fileSystem as IFileSystemProvider,
+      adapter as IAgentAdapter, () => null, drainer, () => null);
+    const manager = makeManager({ providerRoot: ROOT_A, laneCompletion: notifier });
+    const replayOutbox = jest.spyOn(notifier, 'replayOutbox');
+    const enqueue = jest.spyOn(drainer, 'enqueue');
+    const listOutbox = jest.spyOn(drainer, 'listCompletionOutbox');
+    /** Restores the parent and awaits the fire-and-forget replay it starts. */
+    const restore = async (refs: readonly CliSessionReference[]): Promise<void> => {
+      const calls = replayOutbox.mock.results.length;
+      manager.restoreAgents(refs, ROOT_A, PARENT);
+      expect(replayOutbox).toHaveBeenCalledTimes(calls + 1);
+      await replayOutbox.mock.results[calls].value;
+    };
+    return { store, drainer, notifier, send, manager, replayOutbox, enqueue, listOutbox, restore };
+  }
+
+  it.each([
+    ['fresh', 0],
+    ['8 days old', 8 * DAY],
+  ])('replays an outbox entry with no parent record once (%s)', async (_label, age) => {
+    const storage = new FakeStateStorage();
+    storage.values.set(OUTBOX_KEY, { version: 1, entries: [outboxEntry(Date.now() - age)] });
+    const w = await world(storage);
+
+    await w.restore([makeRef()]);
+    await w.restore([makeRef()]);
+
+    expect(w.replayOutbox).toHaveBeenNthCalledWith(1, PARENT);
+    expect(w.enqueue).toHaveBeenCalledTimes(1);
+    expect(w.enqueue.mock.calls[0][0]).toMatchObject({
+      id: `lane-delivery:${KEY}`, kind: 'completion', agentId: LANE_ID,
+    });
+    expect(w.send).toHaveBeenCalledTimes(1);
+    expect(w.store.list(PARENT)).toEqual([
+      expect.objectContaining({ dedupeKey: KEY, state: 'delivered' }),
+    ]);
+    expect(outboxSize(storage)).toBe(0);
+  });
+
+  it('enqueues nothing for an index-satisfied entry and removes it only after the shard key is durable', async () => {
+    const storage = new FakeStateStorage();
+    storage.failWrites = (key) => key === SHARD_KEY;
+    const first = await world(storage);
+    await first.store.putCompletionOutbox(outboxEntry(Date.now()));
+    expect(await first.notifier.replay(outboxEntry(Date.now()))).toMatchObject({ recorded: true });
+    expect(outboxSize(storage)).toBe(1);
+    first.drainer.dispose();
+
+    const restarted = await world(storage);
+    await restarted.restore([makeRef()]);
+    expect(restarted.enqueue).not.toHaveBeenCalled();
+    expect(outboxSize(storage)).toBe(1);
+
+    storage.failWrites = () => false;
+    storage.writes.length = 0;
+    await restarted.restore([makeRef()]);
+    expect(restarted.enqueue).not.toHaveBeenCalled();
+    expect(outboxSize(storage)).toBe(0);
+    const shardWrite = storage.writes.indexOf(SHARD_KEY);
+    expect(shardWrite).toBeGreaterThanOrEqual(0);
+    expect(storage.writes.indexOf(OUTBOX_KEY)).toBeGreaterThan(shardWrite);
+  });
+
+  it('enqueues nothing for a key-only satisfied entry and removes it', async () => {
+    const storage = new FakeStateStorage();
+    storage.values.set(SHARD_KEY, {
+      version: 1, keys: [{ dedupeKey: KEY, state: 'accepted', at: Date.now() - 9 * DAY }],
+    });
+    storage.values.set(OUTBOX_KEY, { version: 1, entries: [outboxEntry(Date.now() - 9 * DAY)] });
+    const w = await world(storage);
+
+    await w.restore([makeRef()]);
+
+    expect(w.enqueue).not.toHaveBeenCalled();
+    expect(w.send).not.toHaveBeenCalled();
+    expect(w.store.list(PARENT)).toEqual([]);
+    expect(outboxSize(storage)).toBe(0);
+  });
+
+  it('never selects session refs as replay candidates', async () => {
+    const storage = new FakeStateStorage();
+    const w = await world(storage);
+
+    await w.restore([
+      makeRef({ status: 'completed', completedAt: COMPLETED_AT }),
+      makeRef({
+        agentId: LANE_ID as AgentId, cliSessionId: 'cli-session-2', status: 'failed',
+        completedAt: COMPLETED_AT,
+      }),
+    ]);
+
+    expect(w.listOutbox).toHaveBeenCalledWith(PARENT);
+    expect(w.enqueue).not.toHaveBeenCalled();
+    expect(w.send).not.toHaveBeenCalled();
+    expect(w.store.list()).toEqual([]);
+
+    w.manager.restoreAgents([makeRef({ agentId: IN_SCOPE_ID as AgentId })], ROOT_A);
+    expect(w.replayOutbox).toHaveBeenCalledTimes(1);
   });
 });

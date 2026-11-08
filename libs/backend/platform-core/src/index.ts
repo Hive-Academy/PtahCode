@@ -145,6 +145,10 @@ export type {
   SessionRecordListOptions,
 } from './interfaces/session-record-repository.interface';
 export type {
+  HostRunLeaseRecord,
+  IHostRunLeaseRepository,
+} from './interfaces/host-run-lease-repository.interface';
+export type {
   IHttpServerProvider,
   IHttpServerHandle,
   HttpServerRequestHandler,
@@ -372,7 +376,8 @@ export {
   terminalExecutableCandidates,
 } from './utils/terminal-launch';
 export type { TerminalLaunch } from './utils/terminal-launch';
-export { PtahFileSettingsManager } from './file-settings-manager';
+export { PtahFileSettingsManager, resolvePtahSettingsDir, seedPtahSettingsFile } from './file-settings-manager';
+export { migrateLegacyCompactionThreshold } from './legacy-threshold-migration';
 export type { FileSettingsDefaults } from './file-settings-manager';
 export { SettingsPersistError } from './file-settings-errors';
 export {

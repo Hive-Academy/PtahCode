@@ -12,7 +12,11 @@ import * as os from 'os';
 import * as path from 'path';
 import { performance } from 'node:perf_hooks';
 import { z } from 'zod';
-import type { Logger, WebviewManager } from '@ptah-extension/vscode-core';
+import type {
+  HangBreadcrumbs,
+  Logger,
+  WebviewManager,
+} from '@ptah-extension/vscode-core';
 import {
   compactCoverage,
   type CompactCoverage,
@@ -45,6 +49,13 @@ import {
   MAX_AGENT_REPORT_LENGTH,
 } from '@ptah-extension/cli-agent-runtime';
 import { AgentSpawnArgsSchema } from './agent-spawn-args.schema';
+import {
+  AgentMessageAckArgsSchema,
+  AgentMessageArgsSchema,
+  AgentMessageControlArgsSchema,
+  AgentMessageStatusArgsSchema,
+} from './agent-message-args.schema';
+import { agentMessageStatusView } from './agent-message-status.view';
 import {
   AgentWaitArgsSchema,
   HTTP_MAX_AGENT_WAIT_SEC,
@@ -82,6 +93,7 @@ import type {
   SymbolIndexPage,
 } from '../types';
 import { parseSymbolIndexQuery } from '../namespace-builders/symbol-index-query';
+import { AgentMessageControlIdentityError } from '../namespace-builders/agent-message-control-actor';
 import {
   buildExecuteCodeTool,
   buildApprovalPromptTool,
@@ -97,8 +109,9 @@ import {
   buildAgentReadTool,
   buildAgentMessageTool,
   buildAgentMessageStatusTool,
+  buildAgentMessageControlTool,
+  buildAgentMessageAckTool,
   buildAgentReportTool,
-  MAX_AGENT_MESSAGE_LENGTH,
   buildAgentListTool,
   buildAgentStopTool,
   buildWebSearchTool,
@@ -360,6 +373,13 @@ export interface ProtocolHandlerDependencies {
    * its arguments and answers `outcome store unavailable`.
    */
   resolveOutcomeReport?: () => OutcomeReportDependencies | undefined;
+  /**
+   * The host's hang breadcrumbs (`hangBreadcrumbs` from vscode-core), so a
+   * main-loop hang line names the MCP tools in flight. Passed in rather than
+   * imported: a value import of the vscode-core barrel breaks this file's
+   * suite (see `mcpSlowToolWarnMs`). Absent → no breadcrumbs.
+   */
+  hangBreadcrumbs?: Pick<HangBreadcrumbs, 'begin' | 'end'>;
 }
 
 /**
@@ -602,6 +622,8 @@ function buildToolDefinitions(
           buildAgentReadTool(),
           buildAgentMessageTool(),
           buildAgentMessageStatusTool(),
+          buildAgentMessageControlTool(),
+          buildAgentMessageAckTool(),
           buildAgentReportTool(),
           buildAgentStopTool(),
           buildAgentListTool(),
@@ -751,28 +773,6 @@ const WebSearchArgsSchema = z
   .strict();
 
 /**
- * `ptah_agent_message` arguments (TASK_2026_402).
- *
- * `strict()` for the same reason `WebSearchArgsSchema` is: the retired
- * `ptah_agent_steer` took an `instruction` key, so a model working from stale
- * guidance will send one. Reported as an error, that is a one-line correction;
- * dropped silently, it is a tool call that reports a mode for a message with
- * no body.
- */
-const AgentMessageArgsSchema = z
-  .object({
-    agentId: z.string().min(1),
-    message: z.string().min(1).max(MAX_AGENT_MESSAGE_LENGTH),
-    delivery: z.enum(['queue', 'now', 'steer']).optional(),
-    allowPartialTurnLoss: z.boolean().optional(),
-  })
-  .strict();
-
-const AgentMessageStatusArgsSchema = z
-  .object({ agentId: z.string().min(1), messageId: z.string().uuid() })
-  .strict();
-
-/**
  * `ptah_agent_report` arguments (TASK_2026_402).
  *
  * There is deliberately NO `agentId`: the reporting agent is taken from the
@@ -912,6 +912,7 @@ async function handleToolsCall(
 ): Promise<MCPResponse> {
   const toolName = telemetryToolName(toolNameOf(request));
   const startedAt = performance.now();
+  const breadcrumb = deps.hangBreadcrumbs?.begin('mcp', toolName);
   let response: MCPResponse | undefined;
   try {
     if (
@@ -928,6 +929,7 @@ async function handleToolsCall(
     response = await dispatchToolsCall(request, deps);
     return response;
   } finally {
+    if (breadcrumb !== undefined) deps.hangBreadcrumbs?.end(breadcrumb);
     const durationMs = Math.round((performance.now() - startedAt) * 10) / 10;
     runObserver(() =>
       deps.logger.debug(
@@ -1459,6 +1461,7 @@ async function handleIndividualTool(
             parsed.data.message,
             parsed.data.delivery,
             parsed.data.allowPartialTurnLoss,
+            parsed.data.idempotencyKey,
           );
           return await createToolSuccessResponse(
             request,
@@ -1489,17 +1492,94 @@ async function handleIndividualTool(
             request,
             `Error: invalid ptah_agent_message_status arguments — ${describeZodIssues(parsed.error)}`,
           );
-        const status = await ptahAPI.agent.messageStatus(
-          parsed.data.agentId,
-          parsed.data.messageId,
-        );
+        let status: Awaited<ReturnType<typeof ptahAPI.agent.messageStatus>>;
+        try {
+          // A bound lane caller is scoped to envelopes it sent or that target
+          // it (Component 15); any other envelope answers `not_found`.
+          status = await ptahAPI.agent.messageStatus(
+            parsed.data.agentId,
+            parsed.data.messageId,
+          );
+        } catch (error: unknown) {
+          if (error instanceof AgentMessageError) {
+            return toolErrorResponse(
+              request,
+              `Error: ptah_agent_message_status found no message ${parsed.data.messageId} for agent ${parsed.data.agentId} — ${error.code}: ${error.message}`,
+            );
+          }
+          throw error;
+        }
         return await createToolSuccessResponse(
           request,
-          JSON.stringify({
-            agentId: parsed.data.agentId,
-            messageId: parsed.data.messageId,
-            ...status,
-          }),
+          JSON.stringify(
+            agentMessageStatusView(
+              parsed.data.agentId,
+              parsed.data.messageId,
+              status,
+            ),
+          ),
+          deps,
+        );
+      }
+
+      case 'ptah_agent_message_control': {
+        const parsed = AgentMessageControlArgsSchema.safeParse(
+          args !== null && typeof args === 'object' ? args : {},
+        );
+        if (!parsed.success)
+          return toolErrorResponse(
+            request,
+            `Error: invalid ptah_agent_message_control arguments — ${describeZodIssues(parsed.error)}. Required: "agentId", "messageId" and "action" ("retry" or "cancel").`,
+          );
+        const { agentId, messageId, action, confirmDuplicateRisk } =
+          parsed.data;
+        try {
+          const result = await ptahAPI.agent.control(
+            agentId,
+            messageId,
+            action,
+            confirmDuplicateRisk,
+          );
+          return await createToolSuccessResponse(
+            request,
+            JSON.stringify({ agentId, messageId, action, ...result }),
+            deps,
+          );
+        } catch (error: unknown) {
+          if (
+            error instanceof AgentMessageError ||
+            error instanceof AgentMessageControlIdentityError
+          ) {
+            return toolErrorResponse(
+              request,
+              `Error: ptah_agent_message_control could not ${action} message ${messageId} — ${error.code}: ${error.message}`,
+            );
+          }
+          throw error;
+        }
+      }
+
+      case 'ptah_agent_message_ack': {
+        const parsed = AgentMessageAckArgsSchema.safeParse(
+          args !== null && typeof args === 'object' ? args : {},
+        );
+        if (!parsed.success)
+          return toolErrorResponse(
+            request,
+            `Error: invalid ptah_agent_message_ack arguments — ${describeZodIssues(parsed.error)}. Required: "messageId" and "state" ("read", "acted" or "rejected"). There is no "agentId" argument — the acknowledging agent is identified by its connection.`,
+          );
+        // Identity comes from the credential binding inside `agent.ack`,
+        // never from the arguments (the strict schema refuses an agentId).
+        const { messageId, state, note } = parsed.data;
+        const result = await ptahAPI.agent.ack(messageId, state, note);
+        // The receipt stays out of the reply: the lane needs its ack state
+        // and the transport state, not the sender's session details.
+        const reply = result.ok
+          ? { ok: true, messageId, ackState: result.ackState, changed: result.changed, state: result.receipt.state }
+          : result;
+        return await createToolSuccessResponse(
+          request,
+          JSON.stringify(reply),
           deps,
         );
       }

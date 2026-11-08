@@ -155,6 +155,7 @@ interface Harness {
   buildSpy: jest.Mock;
   getPermissionLevelSpy: jest.Mock;
   cleanupSpy: jest.Mock;
+  recordBudgetStopSpy: jest.Mock;
   sdkQuery: Query;
 }
 
@@ -184,9 +185,12 @@ function makeHarness(
     .fn()
     .mockReturnValue(globalPermissionLevel);
   const cleanupSpy = jest.fn();
+  const recordBudgetStopSpy = jest.fn();
   const permissionHandler = {
     getPermissionLevel: getPermissionLevelSpy,
     cleanupPendingPermissions: cleanupSpy,
+    recordBudgetStop: recordBudgetStopSpy,
+    getPendingPermissionCount: () => 2,
   } as unknown as ISdkPermissionHandler;
 
   const queryFn = jest.fn();
@@ -254,6 +258,7 @@ function makeHarness(
     buildSpy,
     getPermissionLevelSpy,
     cleanupSpy,
+    recordBudgetStopSpy,
     sdkQuery,
   };
 }
@@ -1588,7 +1593,11 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
         postSubagentNotice: jest.fn(),
         withdrawSubagentNotice: jest.fn(),
       };
-      const registry = { get: jest.fn(() => undefined), update: jest.fn() };
+      const registry = {
+        get: jest.fn(() => undefined),
+        getToolCallIdByAgentId: jest.fn(() => undefined),
+        update: jest.fn(),
+      };
       const monitor = new SubagentBudgetMonitor(
         makeLogger(),
         {
@@ -1711,6 +1720,95 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
     expect(observe).toHaveBeenCalledTimes(1);
     // The build reported no TTL, so the monitor's own default applies.
     expect(observe).toHaveBeenCalledWith(REAL, sub, undefined);
+    run.abortController.abort();
+  });
+
+  it('correlates one budget stop with the parent turn despite later messages', async () => {
+    const { monitor } = makeMonitor();
+    Object.assign(monitor, { getAgentBudgetState: () => ({ stopped: true, stopState: 'stopped' }) });
+    const logger = makeLogger();
+    const { executor, recordBudgetStopSpy } = makeHarness('ask', {} as AuthEnv, {
+      subagentMonitor: monitor, logger,
+    });
+    const run = await executor.executeQuery(makeConfig('tab-stop-once'));
+    feed(run, init());
+    feed(run, subAssistant());
+    feed(run, subAssistant());
+    await flush();
+    expect(recordBudgetStopSpy).toHaveBeenCalledTimes(1);
+    expect(logger.info).toHaveBeenCalledWith(
+      '[SessionQueryExecutor] Subagent budget stop parent turn',
+      expect.objectContaining({ sessionId: 'tab-stop-once', tabId: 'tab-stop-once', toolCallId: 'toolu_1', abortSignalAborted: false, pendingPermissionRequests: 2 }),
+    );
+    feed(run, msg({
+      type: 'user', session_id: REAL, parent_tool_use_id: null,
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'read-1', is_error: true, content: 'Permission denied' }] },
+    }));
+    expect(logger.info).toHaveBeenCalledWith(
+      '[SessionQueryExecutor] Tool result error after subagent budget stop',
+      expect.objectContaining({ toolUseId: 'read-1', cause: 'denied' }),
+    );
+    for (const [toolUseId, content, cause] of [
+      ['read-2', [{ type: 'text', text: 'Permission denied' }], 'denied'],
+      ['read-3', [{ type: 'text', text: 'Request interrupted by user' }], 'interrupted'],
+      ['read-4', [{ type: 'text', text: 'File missing' }], 'other'],
+    ] as const) {
+      feed(run, msg({
+        type: 'user', session_id: REAL, parent_tool_use_id: null,
+        message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, is_error: true, content }] },
+      }));
+      expect(logger.info).toHaveBeenCalledWith(
+        '[SessionQueryExecutor] Tool result error after subagent budget stop',
+        expect.objectContaining({ toolUseId, cause }),
+      );
+    }
+    const longId = 'x'.repeat(200);
+    feed(run, msg({
+      type: 'user', session_id: REAL, parent_tool_use_id: null,
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: longId, is_error: true, content: 'Permission denied' }] },
+    }));
+    expect(logger.info).toHaveBeenCalledWith(
+      '[SessionQueryExecutor] Tool result error after subagent budget stop',
+      expect.objectContaining({ toolUseId: 'x'.repeat(128), cause: 'denied' }),
+    );
+    run.abortController.abort();
+  });
+
+  it('does not latch a pending stop; a later completed stop signals once', async () => {
+    const { monitor } = makeMonitor();
+    let stopState: 'pending' | 'none' | 'stopped' = 'pending';
+    Object.assign(monitor, { getAgentBudgetState: () => ({ stopState }) });
+    const { executor, recordBudgetStopSpy } = makeHarness('ask', {} as AuthEnv, { subagentMonitor: monitor });
+    const run = await executor.executeQuery(makeConfig('tab-pending-stop'));
+    feed(run, init());
+    feed(run, subAssistant());
+    await flush();
+    expect(recordBudgetStopSpy).not.toHaveBeenCalled();
+    stopState = 'none';
+    feed(run, subAssistant());
+    await flush();
+    expect(recordBudgetStopSpy).not.toHaveBeenCalled();
+    stopState = 'stopped';
+    feed(run, subAssistant());
+    feed(run, subAssistant());
+    await flush();
+    expect(recordBudgetStopSpy).toHaveBeenCalledTimes(1);
+    run.abortController.abort();
+  });
+
+  it('does not log error tool results before a budget stop', async () => {
+    const logger = makeLogger();
+    const { executor } = makeHarness('ask', {} as AuthEnv, { logger });
+    const run = await executor.executeQuery(makeConfig('tab-no-stop-log'));
+    feed(run, init());
+    feed(run, msg({
+      type: 'user', session_id: REAL, parent_tool_use_id: null,
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'read-1', is_error: true, content: 'Permission denied' }] },
+    }));
+    expect(logger.info).not.toHaveBeenCalledWith(
+      '[SessionQueryExecutor] Tool result error after subagent budget stop',
+      expect.anything(),
+    );
     run.abortController.abort();
   });
 

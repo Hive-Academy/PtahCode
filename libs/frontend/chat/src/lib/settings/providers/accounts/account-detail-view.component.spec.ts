@@ -150,6 +150,14 @@ describe('AccountDetailViewComponent (flat panel)', () => {
       expect(q('account-detail-state')?.querySelector('.loading-spinner')).not.toBeNull();
     });
 
+    it('points to the terminal while a pending sign-in opened no window (a fallback script was sent)', () => {
+      host.operation.set(SIGN_IN_OP);
+      host.fallback.set(SCRIPT);
+      setAccount(account('pending'));
+      expect(q('account-detail-state')?.textContent?.trim()).toBe('Waiting for sign-in: use terminal');
+      expect(q('account-detail-state')?.querySelector('.loading-spinner')).not.toBeNull();
+    });
+
     it('marks failed and disconnected with the attention bar', () => {
       setAccount(account('failed'));
       expect(q('account-detail-state')?.textContent?.trim()).toBe('Sign-in failed');

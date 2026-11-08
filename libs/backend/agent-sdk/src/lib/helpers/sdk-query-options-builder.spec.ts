@@ -218,6 +218,14 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
 
     const permissionHandler = {
       createCallback: jest.fn().mockReturnValue(() => ({ behavior: 'allow' })),
+      budgetSendMessageRefusal: jest.fn((target: string) => {
+        if (target === 'boom') throw new Error('budget lookup failed');
+        return target === 'stopped' ? 'Start a fresh agent.' : undefined;
+      }),
+      logBudgetSendMessageHookDenial: jest.fn((_sessionId: string, _tabId: unknown, toolUseID: string) =>
+        logger.debug('[SdkPermissionHandler] Permission decision', {
+          toolName: 'SendMessage', toolUseID, route: 'deny', decisionSource: 'subagent-budget',
+        })),
     };
 
     const subagentHookHandler = {
@@ -318,6 +326,7 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
   }
 
   interface BuildOverrides {
+    sessionId?: string;
     mcpToolProfile?: McpToolProfile;
     enableFileCheckpointing?: boolean;
     permissionMode?: SdkQueryOptions['permissionMode'];
@@ -366,6 +375,41 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
     });
     return { options: cfg.options, logger };
   }
+
+  it('routes SDK SendMessage through PreToolUse before an auto-allow skips canUseTool', async () => {
+    const { options, logger } = await buildWithLogger({ sessionId: 'session-1' });
+    const gate = options.hooks?.PreToolUse?.[0];
+    expect(gate?.matcher).toBe('SendMessage');
+    const hook = gate?.hooks[0];
+    expect(hook).toBeDefined();
+    const base = {
+      hook_event_name: 'PreToolUse' as const, session_id: 'session-1',
+      transcript_path: '', cwd: 'D:/tmp/ws', tool_name: 'SendMessage', tool_use_id: 'send-1',
+    };
+    const context = { signal: new AbortController().signal };
+    const denied = await hook?.({ ...base, tool_input: { to: 'stopped' } }, 'send-1', context);
+    expect(denied).toEqual(expect.objectContaining({ hookSpecificOutput: expect.objectContaining({
+      permissionDecision: 'deny', permissionDecisionReason: 'Start a fresh agent.',
+    }) }));
+    expect(logger.debug).toHaveBeenCalledWith('[SdkPermissionHandler] Permission decision',
+      expect.objectContaining({ toolName: 'SendMessage', route: 'deny', decisionSource: 'subagent-budget' }));
+    expect(await hook?.({ ...base, tool_input: { to: 'running' } }, 'send-1', context)).toEqual({});
+  });
+
+  it('fails open with a warning when the SendMessage budget gate throws', async () => {
+    const { options, logger } = await buildWithLogger({ sessionId: 'session-1' });
+    const hook = options.hooks?.PreToolUse?.[0]?.hooks[0];
+    const input = {
+      hook_event_name: 'PreToolUse' as const, session_id: 'session-1', transcript_path: '',
+      cwd: 'D:/tmp/ws', tool_name: 'SendMessage', tool_use_id: 'send-2', tool_input: { to: 'boom' },
+    };
+    const result = await hook?.(input, 'send-2', { signal: new AbortController().signal });
+    expect(result).toEqual({});
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[SdkQueryOptionsBuilder] SendMessage budget gate failed; allowing the call',
+      expect.objectContaining({ toolUseId: 'send-2', error: 'budget lookup failed' }),
+    );
+  });
 
   it('builds the Apps MCP URL from sessionConfig', async () => {
     const options = await buildWith({ mcpToolProfile: 'apps' });
@@ -525,6 +569,7 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
       autoDreamEnabled: false,
       crossSessionInbound: 'accept',
       subagentPromptCacheTtl: '1h',
+      autoCompactWindow: 200_000,
     });
   });
 
@@ -835,15 +880,13 @@ describe('SdkQueryOptionsBuilder.build — auto-compact control', () => {
     expect(PTAH_DISABLE_SDK_AUTO_MEMORY).toEqual(snapshot);
   });
 
-  it('first-party with defaults sends neither auto-compact key — the shared constant serialized, plus the inbound value', async () => {
+  it('first-party with defaults sends the 200000 auto-compact window', async () => {
     const snapshot = { ...PTAH_DISABLE_SDK_AUTO_MEMORY };
     const opts = await buildOptions(
       'https://api.anthropic.com',
       'claude-sonnet-4-5',
     );
-    // No auto-compact key at all: absence is the only correct "no opinion"
-    // value, and serializing the tier must not invent one.
-    expect(parsedSettings(opts)).toEqual({ ...ALWAYS });
+    expect(parsedSettings(opts)).toEqual({ ...ALWAYS, autoCompactWindow: 200_000 });
     expect(PTAH_DISABLE_SDK_AUTO_MEMORY).toEqual(snapshot);
   });
 });

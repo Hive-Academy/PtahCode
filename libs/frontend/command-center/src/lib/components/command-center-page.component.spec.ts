@@ -3,7 +3,7 @@ import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DisplayDockState } from '@ptah-extension/chat';
+import { DisplayDockState, PanelResizeService, ResizeHandleComponent } from '@ptah-extension/chat';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import { sessionContextCue } from '@ptah-extension/chat-ui';
 import { VSCodeService } from '@ptah-extension/core';
@@ -233,6 +233,26 @@ describe('CommandCenterPageComponent', () => {
     expect(chip.textContent).toContain('Context 42%');
     expect(chip.textContent).not.toContain('91%');
     expect(chip.classList.contains('text-state-need')).toBe(false);
+    fixture.destroy();
+  });
+
+  it('scopes the rail width and resize handle to this page', () => {
+    const fixture = TestBed.createComponent(CommandCenterPageComponent);
+    fixture.detectChanges();
+    const resize = fixture.debugElement.query(By.directive(ResizeHandleComponent));
+    const service = fixture.debugElement.injector.get(PanelResizeService);
+    expect(service).toBe(fixture.componentInstance.panelResize);
+    expect(service).not.toBe(TestBed.inject(PanelResizeService));
+    expect(resize).not.toBeNull();
+    expect(resize.componentInstance.container()).toBe(
+      fixture.nativeElement.querySelector('.deck'),
+    );
+    service.setCustomWidth(500, 1000);
+    fixture.detectChanges();
+    expect((fixture.nativeElement.querySelector('.deck') as HTMLElement).style.getPropertyValue('--rail-width')).toBe('500px');
+    service.resetWidth();
+    fixture.detectChanges();
+    expect((fixture.nativeElement.querySelector('.deck') as HTMLElement).style.getPropertyValue('--rail-width')).toBe('');
     fixture.destroy();
   });
 
@@ -590,7 +610,7 @@ describe('CommandCenterPageComponent', () => {
       join(__dirname, 'command-center-page.component.css'),
       'utf8',
     );
-    const rail = styles.match(/\.rail[^{}]*\{([^}]*)\}/)?.[1];
+    const rail = styles.match(/^\.rail\s*\{([^}]*)\}/m)?.[1];
     const workList = styles.match(/^\.work-list-region\s*\{([^}]*)\}/m)?.[1];
     const workListHost = styles.match(/^\.work-list-region > ptah-command-work-list\s*\{([^}]*)\}/m)?.[1];
     const narrow = styles.split('@container (max-width: 720px)')[1];
@@ -629,7 +649,10 @@ describe('CommandCenterPageComponent', () => {
       expect.arrayContaining([expect.stringContaining('stage-column'), expect.stringContaining('dock'), expect.stringContaining('rail')]),
     );
     expect(css).toContain('grid-template-areas: \'stage rail\' \'dock rail\'');
-    expect(css).toContain('296px');
+    // Same default widths as the chat stats sidebar; a dragged width overrides them.
+    expect(css).toContain('min(var(--rail-width, 360px), 75%)');
+    expect(css).toContain('min(var(--rail-width, 440px), 75%)');
+    expect(css).toContain('min(var(--rail-width, 540px), 75%)');
     expect(css).toContain('padding: 16px');
     expect(css).toContain('column-gap: 12px');
     expect(css).toContain('row-gap: 10px');
@@ -641,7 +664,16 @@ describe('CommandCenterPageComponent', () => {
     expect(css).toContain('@container (min-width: 1100px)');
     expect(css).toContain('height: 72px');
     expect(css).toContain('@container (max-width: 1000px)');
-    expect(css).toContain('240px');
+    // Container tiers match the chat sidebar widths; a dragged width applies in every band.
+    expect(css).toContain('@container (min-width: 1280px) { .layout');
+    expect(css).toContain('@container (min-width: 1536px) { .layout');
+    expect(css).toContain(
+      '@container (max-width: 1000px) { .layout { grid-template-columns: minmax(0, 1fr) min(var(--rail-width, 300px), 75%);',
+    );
+    // A drag cannot change the stacked layout, so its handle is hidden there.
+    expect(css.split('@container (max-width: 720px)')[1]).toContain(
+      '.rail-resize-handle { display: none; }',
+    );
     expect(css).toContain('570px');
     expect(css).toContain('@container (max-width: 720px)');
     expect(css).toContain('flex-direction: column');
