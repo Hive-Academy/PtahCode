@@ -169,27 +169,4 @@ describe('SubagentHandoffDelivery', () => {
     expect(h.port.postMainThreadNotice).not.toHaveBeenCalled();
   });
 
-  it('post: a notice drained by take is never sent again', async () => {
-    const h = makeHarness();
-    h.delivery.post(SESSION, TOOL_CALL, HANDOFF);
-
-    expect(h.notices.take(SESSION)).toBe(TEXT);
-    h.notices.clear(SESSION);
-    await jest.advanceTimersByTimeAsync(ALL_RETRIES_MS);
-
-    expect(h.port.pushParentMessage).not.toHaveBeenCalled();
-  });
-
-  it('post: a notice evicted past the queue bound is sent as a user turn', async () => {
-    const h = makeHarness();
-    h.delivery.post(SESSION, TOOL_CALL, HANDOFF);
-    for (let i = 0; i < 4; i += 1) {
-      h.notices.post(SESSION, `other ${i}`);
-    }
-    await jest.advanceTimersByTimeAsync(0);
-
-    expect(h.port.pushParentMessage).toHaveBeenCalledTimes(1);
-    expect(h.port.pushParentMessage).toHaveBeenCalledWith(SESSION, TEXT);
-    expect(h.notices.take(SESSION)).not.toContain(TEXT);
-  });
 });

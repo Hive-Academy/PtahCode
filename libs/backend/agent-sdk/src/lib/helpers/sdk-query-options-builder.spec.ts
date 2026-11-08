@@ -462,6 +462,17 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
     );
   });
 
+  it('warns when SendMessage has no resolvable session id', async () => {
+    const { options, logger } = await buildWithLogger();
+    const hook = options.hooks?.PreToolUse?.[0]?.hooks[0];
+    expect(await hook?.({
+      hook_event_name: 'PreToolUse', session_id: '', transcript_path: '', cwd: 'D:/tmp/ws',
+      tool_name: 'SendMessage', tool_use_id: 'send-no-session', tool_input: { to: 'stopped' },
+    }, 'send-no-session', { signal: new AbortController().signal })).toEqual({});
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('missing session id'),
+      expect.objectContaining({ hasSessionId: false, eventName: 'PreToolUse', agentId: 'stopped', toolName: 'SendMessage' }));
+  });
+
   it('builds the Apps MCP URL from sessionConfig', async () => {
     const options = await buildWith({ mcpToolProfile: 'apps' });
     expect(options.mcpServers?.['ptah']).toEqual(

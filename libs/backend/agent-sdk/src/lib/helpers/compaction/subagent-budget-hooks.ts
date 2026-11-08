@@ -15,7 +15,7 @@ const base = z.object({
 
 /** Hook side of the cooperative exit. All input fields are parsed before use. */
 export function createSubagentBudgetHooks(
-  logger: Pick<Logger, 'info' | 'debug' | 'error'>,
+  logger: Pick<Logger, 'info' | 'debug' | 'warn' | 'error'>,
   monitor: Pick<SubagentBudgetMonitor, 'checkNotesTool' | 'hasNotesGate' | 'finishWarnedAgent' | 'takeNormalHandoff' | 'takeInterruptedHandoff'>,
   capturedSessionId?: string,
 ): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
@@ -35,7 +35,13 @@ export function createSubagentBudgetHooks(
         timestamp: Date.now(),
       });
       const sessionId = data.session_id ?? capturedSessionId;
-      if (!sessionId) return { continue: true };
+      if (!sessionId) {
+        logger.warn('[SubagentBudgetHooks] Hook missing session id; allowing the call', {
+          hasSessionId: false, eventName: event, agentId: data.agent_id, toolName: data.tool_name,
+        });
+        // Lifecycle hooks must pass; without a session id, this gate cannot identify a stopped target.
+        return { continue: true };
+      }
       try {
         if (event === 'PreToolUse' && data.tool_name) {
           const reason = await monitor.checkNotesTool(sessionId, data.agent_id, data.tool_name, data.tool_input);

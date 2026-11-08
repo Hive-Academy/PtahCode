@@ -49,6 +49,15 @@ describe('SubagentNotesGate', () => {
     }
   });
 
+  it('checks every notes write and stops an expired second write', () => {
+    const gate = new SubagentNotesGate();
+    gate.warn('agent-1', notes, root, 100);
+    expect(gate.check('agent-1', 'Write', { file_path: notes }, 101).stop).toBe(false);
+    expect(gate.check('agent-1', 'Edit', { file_path: notes }, 102).stop).toBe(false);
+    expect(gate.check('agent-1', 'Read', {}, 103).reason).toContain('End your turn now');
+    expect(gate.check('agent-1', 'Write', { file_path: notes }, 101 + NOTES_GATE_TIMEOUT_MS).stop).toBe(true);
+  });
+
   it('accepts Windows drive casing and forward slashes for the exact notes path', () => {
     if (process.platform !== 'win32') return;
     const gate = new SubagentNotesGate();

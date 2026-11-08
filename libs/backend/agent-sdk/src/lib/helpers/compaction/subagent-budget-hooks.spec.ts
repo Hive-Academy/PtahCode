@@ -9,7 +9,7 @@ describe('subagent budget hooks', () => {
     takeNormalHandoff: jest.fn(),
     takeInterruptedHandoff: jest.fn(),
   };
-  const logger = { info: jest.fn(), debug: jest.fn(), error: jest.fn() };
+  const logger = { info: jest.fn(), debug: jest.fn(), warn: jest.fn(), error: jest.fn() };
   const hooks = createSubagentBudgetHooks(logger, monitor, 'parent-session');
 
   async function invoke(event: 'PostToolUse' | 'PostToolUseFailure', toolUseId: string, interrupt = false) {
@@ -99,5 +99,16 @@ describe('subagent budget hooks', () => {
       agent_id: 'other-agent', tool_name: 'Read', tool_input: { file_path: 'x' },
     } as HookInput, 'tool-2', { signal: new AbortController().signal })).toEqual({ continue: true });
     expect(logger.error).toHaveBeenCalledWith('[SubagentBudgetHooks] Hook failed', expect.objectContaining({ error: expect.any(Error) }));
+  });
+
+  it('warns when a notes hook cannot resolve a session id', async () => {
+    const noSessionHooks = createSubagentBudgetHooks(logger, monitor);
+    const callback = noSessionHooks.PreToolUse?.[0]?.hooks[0];
+    if (!callback) throw new Error('missing PreToolUse hook');
+    expect(await callback({ hook_event_name: 'PreToolUse', agent_id: 'agent-7',
+      tool_name: 'Write', tool_input: { file_path: 'notes.md' },
+    } as HookInput, 'tool-3', { signal: new AbortController().signal })).toEqual({ continue: true });
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('missing session id'),
+      expect.objectContaining({ hasSessionId: false, eventName: 'PreToolUse', agentId: 'agent-7', toolName: 'Write' }));
   });
 });

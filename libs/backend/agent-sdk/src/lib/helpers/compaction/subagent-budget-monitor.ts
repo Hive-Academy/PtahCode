@@ -849,6 +849,13 @@ export class SubagentBudgetMonitor {
             this.logger.info('[SubagentBudgetMonitor] Normal exit skipped: handoff unavailable', { sessionId: session.sessionId, toolCallId, agentId });
             return;
           }
+          if (prepared.notesPathToRedact && !await this.handoffFiles.redactNotes(prepared.notesPathToRedact, redactBudgetSecrets)) {
+            this.logger.error('[SubagentBudgetMonitor] Handoff notes redaction failed; delivery withheld',
+              new Error(`Could not redact handoff notes for agent ${agentId}`));
+            return;
+          }
+          // Publish a safe record even if the parent session was released during preparation.
+          if (prepared.record) this.index.publish(prepared.record.workspace, prepared.record.name);
           const live = this.liveSession(session);
           if (!live) {
             this.logger.info('[SubagentBudgetMonitor] Normal exit skipped: session released', { sessionId, agentId, toolCallId });
@@ -865,17 +872,11 @@ export class SubagentBudgetMonitor {
           liveState.stoppedAgentId = agentId;
           liveState.stoppedRecordPath = prepared.record?.path;
           if (prepared.record) this.records.markInvoked(toolCallId);
-          if (prepared.notesPathToRedact && !await this.handoffFiles.redactNotes(prepared.notesPathToRedact, redactBudgetSecrets)) {
-            this.logger.error('[SubagentBudgetMonitor] Handoff notes redaction failed; delivery withheld',
-              new Error(`Could not redact handoff notes for agent ${agentId}`));
-            return;
-          }
           const current = this.liveSession(session);
           if (!current || liveState.handoffDelivered) {
             this.logger.info('[SubagentBudgetMonitor] Normal exit delivery skipped', { sessionId, agentId, toolCallId, reason: !current ? 'session released' : 'already delivered' });
             return;
           }
-          if (prepared.record) this.index.publish(prepared.record.workspace, prepared.record.name);
           if (current.spawnReturned.get(toolCallId)) {
             liveState.handoffDelivered = true;
             void this.delivery.send(current.sessionId, toolCallId, prepared.handoff).catch((error: unknown) => {

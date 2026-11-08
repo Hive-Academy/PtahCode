@@ -13,6 +13,7 @@ import type { SDKMessage } from '../../types/sdk-types/claude-sdk.types';
 import { STREAM_MONITOR_WAIT_MS, waitForMonitorMessage } from '../stream-transformer';
 import type { CompactionConfigProvider } from '../compaction-config-provider';
 import { MainThreadNoticeQueue } from '../main-thread-notice-queue';
+import { NOTES_GATE_TIMEOUT_MS } from './subagent-notes-gate';
 import {
   SubagentBudgetStopCallbackRegistry,
   type SubagentBudgetStopPayload,
@@ -2494,6 +2495,16 @@ describe('SubagentBudgetMonitor', () => {
       }
     });
 
+    it('stops the warned agent when an inline notes check reaches gate expiry', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, { workspace });
+      await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
+      const startedAt = Date.now();
+      expect(await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Write', { file_path: notesPath() }, startedAt)).toBeUndefined();
+      expect(await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Write', { file_path: notesPath() }, startedAt + NOTES_GATE_TIMEOUT_MS)).toContain('expired');
+      await waitUntil(() => h.dispatcher.stopSubagent.mock.calls.length === 1);
+      expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
+    });
+
     it('normal exit without a task id writes inferred notes and hands off in memory', async () => {
       const h = makeHarness({ agentId: 'agent-7', taskId: undefined }, { workspace });
       await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
@@ -2531,6 +2542,20 @@ describe('SubagentBudgetMonitor', () => {
       expect(h.monitor.hasNotesGate('agent-7')).toBe(false);
       expect(h.dispatcher.pushParentMessage).not.toHaveBeenCalled();
       expect(h.index.publish).not.toHaveBeenCalled();
+    });
+
+    it('publishes a safe normal-exit record when the session was released during preparation', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, { workspace });
+      await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
+      let finishWrite: (value: HandoffRecordWrite) => void = () => undefined;
+      h.recordStore.writeOnce.mockImplementationOnce(() => new Promise<HandoffRecordWrite>((resolve) => { finishWrite = resolve; }));
+      const finishing = h.monitor.finishWarnedAgent(SESSION, 'agent-7');
+      await waitUntil(() => h.recordStore.writeOnce.mock.calls.length === 1);
+      h.monitor.release(SESSION);
+      finishWrite({ ok: true, path: path.join(workspace, 'record.md'), workspace, name: 'record.md' });
+      await finishing;
+      expect(h.index.publish).toHaveBeenCalledWith(workspace, 'record.md');
+      expect(h.dispatcher.pushParentMessage).not.toHaveBeenCalled();
     });
 
     it('queues the normal handoff if the parent Agent hook did not run', async () => {
