@@ -41,6 +41,7 @@ import {
 import {
   MAX_RECORD_ATTEMPTS,
   MAX_STOP_ATTEMPTS,
+  STOP_RETRY_BASE_DELAY_MS,
   SubagentBudgetMonitor,
   readSubagentRequestUsage,
   readSubagentTaskText,
@@ -1288,9 +1289,11 @@ describe('SubagentBudgetMonitor', () => {
   });
 
   it('retries a rejected stop on the next subagent message and gives up after the cap', async () => {
+    jest.useFakeTimers();
     const h = makeHarness();
     h.dispatcher.stopSubagent.mockRejectedValue(new Error('gone'));
     for (let i = 0; i < MAX_STOP_ATTEMPTS + 3; i++) {
+      if (i > 0) await jest.advanceTimersByTimeAsync(STOP_RETRY_BASE_DELAY_MS * 2 ** Math.min(i - 1, 2));
       await h.monitor.observe(
         SESSION,
         assistant({ input: 310_000 }, { id: `m${i}` }),
@@ -1308,12 +1311,15 @@ describe('SubagentBudgetMonitor', () => {
     );
     expect(h.monitor.getSnapshot(SESSION, TOOL_CALL)?.stopped).toBe(false);
     expect(h.stopNotices.noticeFor('task-1')).toContain('safety limit');
+    jest.useRealTimers();
   });
 
   it('a retried stop that succeeds hands off once', async () => {
+    jest.useFakeTimers();
     const h = makeHarness();
     h.dispatcher.stopSubagent.mockRejectedValueOnce(new Error('busy'));
     for (let i = 0; i < 4; i++) {
+      if (i > 0) await jest.advanceTimersByTimeAsync(STOP_RETRY_BASE_DELAY_MS);
       await h.monitor.observe(
         SESSION,
         assistant({ input: 310_000 }, { id: `m${i}` }),
@@ -1323,6 +1329,7 @@ describe('SubagentBudgetMonitor', () => {
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(2);
     expect(h.streamed).toHaveLength(1);
     expect(h.monitor.getSnapshot(SESSION, TOOL_CALL)?.stopped).toBe(true);
+    jest.useRealTimers();
   });
 
   it('starts no second stop while one is in flight', async () => {
@@ -1618,6 +1625,7 @@ describe('SubagentBudgetMonitor', () => {
   });
 
   it('a rejected stop retries on the next request, not on the other blocks of the same one (FM-6)', async () => {
+    jest.useFakeTimers();
     const h = makeHarness();
     h.dispatcher.stopSubagent.mockRejectedValue(new Error('busy'));
     // One request streamed as three content-block messages.
@@ -1629,15 +1637,18 @@ describe('SubagentBudgetMonitor', () => {
     }
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
 
+    await jest.advanceTimersByTimeAsync(STOP_RETRY_BASE_DELAY_MS);
     await h.monitor.observe(
       SESSION,
       assistant({ input: 310_000 }, { id: 'm2' }),
     );
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(2);
     expect(h.logger.warn).not.toHaveBeenCalled();
+    jest.useRealTimers();
   });
 
   it('a stop rejecting across a rekey merge counts once and retries on the next request (rereview m3)', async () => {
+    jest.useFakeTimers();
     const h = makeHarness();
     let fail: (error: Error) => void = () => undefined;
     h.dispatcher.stopSubagent.mockReturnValueOnce(
@@ -1658,6 +1669,7 @@ describe('SubagentBudgetMonitor', () => {
     );
     expect(h.dispatcher.postMainThreadNotice).not.toHaveBeenCalled();
 
+    await jest.advanceTimersByTimeAsync(STOP_RETRY_BASE_DELAY_MS);
     await h.monitor.observe(
       'session-2',
       assistant({ input: 310_000 }, { id: 'm2' }),
@@ -1665,9 +1677,11 @@ describe('SubagentBudgetMonitor', () => {
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(2);
     expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(1);
     expect(h.monitor.getSnapshot('session-2', TOOL_CALL)?.stopped).toBe(true);
+    jest.useRealTimers();
   });
 
   it('with stops in flight on both merged records, a failure on the last attempt does not hide the other success (rereview m1, m3)', async () => {
+    jest.useFakeTimers();
     const h = makeHarness();
     // Source record: two attempts rejected, the third (F) left in flight.
     h.dispatcher.stopSubagent
@@ -1677,10 +1691,12 @@ describe('SubagentBudgetMonitor', () => {
       SESSION,
       assistant({ input: 310_000 }, { id: 'a1' }),
     );
+    await jest.advanceTimersByTimeAsync(STOP_RETRY_BASE_DELAY_MS);
     await h.monitor.observe(
       SESSION,
       assistant({ input: 310_000 }, { id: 'a2' }),
     );
+    await jest.advanceTimersByTimeAsync(STOP_RETRY_BASE_DELAY_MS * 2);
     let settleF: () => void = () => undefined;
     h.dispatcher.stopSubagent.mockReturnValueOnce(
       new Promise<void>((resolve) => (settleF = resolve)),
@@ -1706,6 +1722,7 @@ describe('SubagentBudgetMonitor', () => {
     await pendingF;
 
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(4);
+    jest.useRealTimers();
     expect(h.logger.warn).not.toHaveBeenCalledWith(
       expect.stringContaining('giving up'),
       expect.anything(),
@@ -2437,6 +2454,9 @@ describe('SubagentBudgetMonitor', () => {
     });
 
     it('keeps the notes gate after a rejected safety stop and retries', async () => {
+      const originalNow = Date.now();
+      let currentNow = originalNow;
+      const clock = jest.spyOn(Date, 'now').mockImplementation(() => currentNow);
       const h = makeHarness({ agentId: 'agent-7' }, { workspace });
       h.dispatcher.stopSubagent.mockRejectedValueOnce(new Error('busy'));
       await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
@@ -2444,9 +2464,11 @@ describe('SubagentBudgetMonitor', () => {
       for (let i = 0; i < 3; i += 1) await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {}, denialAt + i * 2_001);
       await waitUntil(() => h.logger.warn.mock.calls.some((call) => String(call[0]).includes('gate remains active')));
       expect(h.monitor.hasNotesGate('agent-7')).toBe(true);
+      currentNow += STOP_RETRY_BASE_DELAY_MS;
       await h.monitor.checkNotesTool(SESSION, 'agent-7', 'Read', {}, denialAt + 6_003);
       await waitUntil(() => h.dispatcher.stopSubagent.mock.calls.length === 2);
       await waitUntil(() => !h.monitor.hasNotesGate('agent-7'));
+      clock.mockRestore();
     });
 
     it('returns a denial before stopTask settles and clears the watchdog on release', async () => {
@@ -2573,7 +2595,7 @@ describe('SubagentBudgetMonitor', () => {
       const marker = fake('API_KEY=', 'fake', '-marker-123');
       fs.writeFileSync(notesPath(), `Finding: ${marker}\nBasic usage`);
       h.dispatcher.stopSubagent.mockImplementation(async () => {
-        expect(fs.readFileSync(notesPath(), 'utf8')).toContain(marker);
+        expect(fs.readFileSync(notesPath(), 'utf8')).not.toContain(marker);
       });
 
       await h.monitor.observe(SESSION, atContext(310_000, 'm2'));
@@ -2899,6 +2921,7 @@ describe('SubagentBudgetMonitor handoff records', () => {
   });
 
   it('a rejected stop keeps and publishes its record; the retry reuses it without a second write', async () => {
+    jest.useFakeTimers();
     const h = makeHarness();
     h.dispatcher.stopSubagent.mockRejectedValueOnce(new Error('busy'));
 
@@ -2908,6 +2931,7 @@ describe('SubagentBudgetMonitor handoff records', () => {
     expect(h.recordStore.withdraw).not.toHaveBeenCalled();
     expect(h.streamed).toHaveLength(0);
 
+    await jest.advanceTimersByTimeAsync(STOP_RETRY_BASE_DELAY_MS);
     await h.monitor.observe(SESSION, over('m2'));
     expect(h.recordStore.writeOnce).toHaveBeenCalledTimes(1);
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(2);
@@ -2916,9 +2940,11 @@ describe('SubagentBudgetMonitor handoff records', () => {
   });
 
   it(`stops rejected ${MAX_STOP_ATTEMPTS} times: one write, the record kept, one give-up warn, no handoff`, async () => {
+    jest.useFakeTimers();
     const h = makeHarness();
     h.dispatcher.stopSubagent.mockRejectedValue(new Error('busy'));
     for (let i = 1; i <= MAX_STOP_ATTEMPTS + 1; i += 1) {
+      if (i > 1) await jest.advanceTimersByTimeAsync(STOP_RETRY_BASE_DELAY_MS * 2 ** (i - 2));
       await h.monitor.observe(SESSION, over(`m${i}`));
     }
 
@@ -2932,6 +2958,47 @@ describe('SubagentBudgetMonitor handoff records', () => {
       ),
     ).toHaveLength(1);
     expect(h.streamed).toHaveLength(0);
+  });
+
+  it('backs off failed stops and gives up after the bounded attempts', async () => {
+    jest.useFakeTimers();
+    const h = makeHarness();
+    h.dispatcher.stopSubagent.mockRejectedValue(new Error('busy'));
+    await h.monitor.observe(SESSION, over('m1'));
+    await h.monitor.observe(SESSION, over('m2'));
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(STOP_RETRY_BASE_DELAY_MS);
+    await h.monitor.observe(SESSION, over('m3'));
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(2);
+    await jest.advanceTimersByTimeAsync(STOP_RETRY_BASE_DELAY_MS);
+    await h.monitor.observe(SESSION, over('m4'));
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(2);
+    await jest.advanceTimersByTimeAsync(STOP_RETRY_BASE_DELAY_MS);
+    await h.monitor.observe(SESSION, over('m5'));
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(MAX_STOP_ATTEMPTS);
+    await jest.advanceTimersByTimeAsync(10_000);
+    await h.monitor.observe(SESSION, over('m6'));
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(MAX_STOP_ATTEMPTS);
+    expect(warnings(h.logger, 'giving up')).toHaveLength(1);
+    expect(h.logger.warn).toHaveBeenCalledWith(expect.stringContaining('giving up'),
+      expect.objectContaining({ toolCallId: TOOL_CALL, attempts: MAX_STOP_ATTEMPTS }));
+  });
+
+  it('omits handoff notes when their redaction fails before record creation', async () => {
+    const paths = { notes: '/ws/secret-notes.md', task: '/ws/task.md' };
+    const handoffFiles = {
+      paths: jest.fn(() => paths),
+      saveTask: jest.fn(async () => true),
+      notesExist: jest.fn(async () => true),
+      redactNotes: jest.fn(async () => false),
+    };
+    const h = makeHarness({}, { handoffFiles });
+    await h.monitor.observe(SESSION, over('m1'));
+    const recordText = h.recordStore.writeOnce.mock.calls[0][2];
+    expect(recordText).not.toContain(paths.notes);
+    expect(h.streamed.join('\n')).not.toContain(paths.notes);
+    expect(h.logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('redaction failed'), expect.any(Error));
   });
 
   it('two in-flight stops of one tool id reserved under different sessions, then rekeyed, write one record file and publish one name', async () => {

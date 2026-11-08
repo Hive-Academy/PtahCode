@@ -182,6 +182,8 @@ export interface AgentBudgetState {
 
 /** `stopSubagent` calls per subagent: the first one and two retries. */
 export const MAX_STOP_ATTEMPTS = 3;
+export const STOP_RETRY_BASE_DELAY_MS = 1_000;
+export const STOP_RETRY_MAX_DELAY_MS = 4_000;
 /** Handoff record writes per subagent before the handoff stop is given up. */
 export const MAX_RECORD_ATTEMPTS = 3;
 const TRANSCRIPT_MISS_TTL_MS = 5_000;
@@ -423,6 +425,7 @@ interface SubagentState {
   stopState: 'none' | 'pending' | 'stopped';
   /** `stopSubagent` calls that rejected. */
   stopFailures: number;
+  nextStopAttemptAt?: number;
   /** API message id of the request whose stop or record write last failed; its other blocks do not retry. */
   failedAttemptMessageId?: string;
   /** Handoff records that could not be saved for a handoff stop. */
@@ -466,6 +469,7 @@ interface SavedRecord {
 interface PreparedHandoff {
   readonly record?: SavedRecord;
   readonly handoff: Handoff;
+  readonly notesPathToRedact?: SubagentHandoffPaths;
 }
 
 /** What the SDK's `task_started` message reported for one spawning tool_use. */
@@ -633,6 +637,7 @@ export class SubagentBudgetMonitor {
     if (state.stopFired || state.stopInFlight) {
       return;
     }
+    if (state.nextStopAttemptAt && Date.now() < state.nextStopAttemptAt) return;
     if (
       state.failedAttemptMessageId !== undefined &&
       state.failedAttemptMessageId === state.lastMessageId
@@ -860,7 +865,11 @@ export class SubagentBudgetMonitor {
           liveState.stoppedAgentId = agentId;
           liveState.stoppedRecordPath = prepared.record?.path;
           if (prepared.record) this.records.markInvoked(toolCallId);
-          if (liveState.handoffPaths) await this.handoffFiles.redactNotes(liveState.handoffPaths, redactBudgetSecrets);
+          if (prepared.notesPathToRedact && !await this.handoffFiles.redactNotes(prepared.notesPathToRedact, redactBudgetSecrets)) {
+            this.logger.error('[SubagentBudgetMonitor] Handoff notes redaction failed; delivery withheld',
+              new Error(`Could not redact handoff notes for agent ${agentId}`));
+            return;
+          }
           const current = this.liveSession(session);
           if (!current || liveState.handoffDelivered) {
             this.logger.info('[SubagentBudgetMonitor] Normal exit delivery skipped', { sessionId, agentId, toolCallId, reason: !current ? 'session released' : 'already delivered' });
@@ -1507,6 +1516,7 @@ export class SubagentBudgetMonitor {
       readonly stopWeightedTokens: number;
     },
   ): Promise<void> {
+    if (state.nextStopAttemptAt && Date.now() < state.nextStopAttemptAt) return;
     const started = session.startedTasks.get(toolCallId);
     const { record: registryRecord, registryToolCallId } =
       this.resolveRegistryRecord(session, toolCallId);
@@ -1687,9 +1697,10 @@ export class SubagentBudgetMonitor {
       // A warning the stopped subagent never received is moot now.
       this.dispatcher.withdrawSubagentNotice(liveState.warnedAgentId);
     }
-    const notesPaths = preparedState.handoffPaths ?? this.handoffFiles.paths(sessionId, toolCallId);
-    if (notesPaths) {
-      await this.handoffFiles.redactNotes(notesPaths, redactBudgetSecrets);
+    if (prepared.notesPathToRedact && !await this.handoffFiles.redactNotes(prepared.notesPathToRedact, redactBudgetSecrets)) {
+      this.logger.error('[SubagentBudgetMonitor] Handoff notes redaction failed; delivery withheld',
+        new Error(`Could not redact handoff notes for agent ${prepared.handoff.subject.agentId ?? toolCallId}`));
+      return;
     }
     await this.deliverHandoff(current, toolCallId, liveState, prepared.handoff, reason === 'safety');
     const prompt = current.tasks.get(toolCallId)?.prompt;
@@ -1783,6 +1794,11 @@ export class SubagentBudgetMonitor {
       const written = await this.handoffFiles.ensureFallbackNotes?.(files.paths, inferred, redactBudgetSecrets);
       if (written) files = { ...files, notesWritten: true, notesInferred: true };
     }
+    if (files.paths && files.notesWritten && !await this.handoffFiles.redactNotes(files.paths, redactBudgetSecrets)) {
+      this.logger.error('[SubagentBudgetMonitor] Handoff notes redaction failed; notes omitted',
+        new Error(`Could not redact handoff notes for agent ${who.agentId ?? toolCallId}`));
+      files = { taskSaved: files.taskSaved, notesWritten: false, unavailable: true };
+    }
     const recordText = redactBudgetSecrets(handoffMessage(subject, usage, task?.text, files, undefined, progress));
     const write = await this.records.writeOnce(
       live.sessionId,
@@ -1791,6 +1807,7 @@ export class SubagentBudgetMonitor {
     );
     if (write.ok) {
       return {
+        notesPathToRedact: files.notesWritten ? files.paths : undefined,
         record: {
           path: write.path,
           workspace: write.workspace,
@@ -1810,7 +1827,7 @@ export class SubagentBudgetMonitor {
           sessionId: current?.sessionId ?? live.sessionId, toolCallId,
           errorType: write.errorType, errorCode: write.errorCode,
         });
-        return { handoff: { text: recordText, subject } };
+        return { handoff: { text: recordText, subject }, notesPathToRedact: files.notesWritten ? files.paths : undefined };
       }
       if (current) {
         this.onRecordFailed(
@@ -1832,7 +1849,7 @@ export class SubagentBudgetMonitor {
         errorCode: write.errorCode,
       },
     );
-    return { handoff: { text: recordText, subject } };
+    return { handoff: { text: recordText, subject }, notesPathToRedact: files.notesWritten ? files.paths : undefined };
   }
 
   /**
@@ -1919,6 +1936,10 @@ export class SubagentBudgetMonitor {
     state.stopFailures += 1;
     state.failedAttemptMessageId = attemptMessageId;
     if (state.stopFailures < MAX_STOP_ATTEMPTS) {
+      state.nextStopAttemptAt = Date.now() + Math.min(
+        STOP_RETRY_MAX_DELAY_MS,
+        STOP_RETRY_BASE_DELAY_MS * 2 ** (state.stopFailures - 1),
+      );
       this.logger.debug(
         '[SubagentBudgetMonitor] Stopping the subagent failed; retrying on its next message',
         { sessionId, toolCallId, reason, attempt: state.stopFailures },
@@ -1926,6 +1947,7 @@ export class SubagentBudgetMonitor {
       return;
     }
     state.stopFired = true;
+    state.nextStopAttemptAt = undefined;
     this.logger.warn(
       recordKept
         ? '[SubagentBudgetMonitor] Stopping the subagent failed; giving up, record kept'
@@ -1933,6 +1955,7 @@ export class SubagentBudgetMonitor {
       {
         sessionId,
         toolCallId,
+        agentId: state.stoppedAgentId ?? toolCallId,
         reason,
         attempts: state.stopFailures,
         ...failure,
