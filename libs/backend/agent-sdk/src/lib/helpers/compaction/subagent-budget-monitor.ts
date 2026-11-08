@@ -407,6 +407,7 @@ interface SubagentState {
   weightedUsed: number;
   policySnapshot: AgentBudgetSnapshot;
   startedAt: number;
+  deadlineTimer?: ReturnType<typeof setTimeout>;
   costUnavailableLogged: boolean;
   telemetryUnavailableLogged: boolean;
   requestSequence: number;
@@ -475,6 +476,7 @@ interface StartedTask {
 
 /** What a spawning `Agent`/`Task` tool_use input says about its subagent. */
 interface SpawnTask {
+  readonly startedAt?: number;
   /** Description and prompt excerpt ({@link readSubagentTaskText}). */
   readonly text?: string;
   /** The full prompt, saved to the task file at a stop. */
@@ -596,7 +598,7 @@ export class SubagentBudgetMonitor {
     const settings = this.config.getAgentBudgetSettings();
     const policy = new AgentBudgetPolicy(settings);
     if (!usage) {
-      const state = this.subagentState(session, toolCallId);
+      const state = this.subagentState(session, toolCallId, settings);
       if (!state.telemetryUnavailableLogged) {
         state.telemetryUnavailableLogged = true;
         this.logger.warn('[SubagentBudgetMonitor] Subagent turn telemetry unavailable; stopping', { sessionId, toolCallId });
@@ -614,7 +616,7 @@ export class SubagentBudgetMonitor {
       return;
     }
 
-    const state = this.subagentState(session, toolCallId);
+    const state = this.subagentState(session, toolCallId, settings);
     try {
       this.captureProgress(state, msg, toolCallId);
     } catch (error: unknown) {
@@ -951,6 +953,9 @@ export class SubagentBudgetMonitor {
       subagentType: subagentType || undefined,
     });
     trackSpawn(session, toolUseId);
+    if (session.tasks.has(toolUseId) || session.subagents.has(toolUseId)) {
+      this.armDeadline(session, toolUseId, this.subagentState(session, toolUseId));
+    }
   }
 
   /** What the monitor knows about a subagent, or `undefined` when it saw none of its usage. */
@@ -1054,7 +1059,10 @@ export class SubagentBudgetMonitor {
       for (const [toolCallId, state] of existing.subagents) {
         const kept = session.subagents.get(toolCallId);
         if (!kept || (!hasStopStarted(kept) && hasStopStarted(state))) {
+          if (kept?.deadlineTimer) clearTimeout(kept.deadlineTimer);
           session.subagents.set(toolCallId, state);
+        } else if (state.deadlineTimer) {
+          clearTimeout(state.deadlineTimer);
         }
       }
       for (const [toolUseId, task] of existing.tasks) {
@@ -1114,6 +1122,7 @@ export class SubagentBudgetMonitor {
     // A near-budget warning no tool result drained ends with the session.
     for (const state of this.sessions.get(sessionId)?.subagents.values() ??
       []) {
+      if (state.deadlineTimer) clearTimeout(state.deadlineTimer);
       if (state.warnedAgentId) {
         this.notesGate.finish(state.warnedAgentId);
         this.dispatcher.withdrawSubagentNotice(state.warnedAgentId);
@@ -1214,14 +1223,17 @@ export class SubagentBudgetMonitor {
   private subagentState(
     session: SessionState,
     toolCallId: string,
+    settings?: AgentBudgetSettings,
   ): SubagentState {
     let state = session.subagents.get(toolCallId);
     if (!state) {
+      const recordedStart = this.registry.get?.(toolCallId)?.startedAt;
       state = {
         contextTokens: 0,
         weightedUsed: 0,
         policySnapshot: initialAgentBudgetSnapshot,
-        startedAt: Date.now(),
+        startedAt: recordedStart && recordedStart > 0
+          ? recordedStart : session.tasks.get(toolCallId)?.startedAt ?? Date.now(),
         costUnavailableLogged: false,
         telemetryUnavailableLogged: false,
         requestSequence: 0,
@@ -1239,8 +1251,38 @@ export class SubagentBudgetMonitor {
         toolCalls: [],
       };
       session.subagents.set(toolCallId, state);
+      this.armDeadline(session, toolCallId, state, settings);
     }
     return state;
+  }
+
+  private armDeadline(session: SessionState, toolCallId: string, state: SubagentState, liveSettings?: AgentBudgetSettings): void {
+    if (state.deadlineTimer) clearTimeout(state.deadlineTimer);
+    if (hasStopStarted(state)) return;
+    const settings = liveSettings ?? this.config.getAgentBudgetSettings();
+    const remaining = state.startedAt + settings.maxDurationMin * 60_000 - Date.now();
+    const delay = Math.max(1, Math.min(remaining, 2_147_483_647));
+    state.deadlineTimer = setTimeout(() => {
+      state.deadlineTimer = undefined;
+      const live = this.liveSession(session);
+      if (!live || live.subagents.get(toolCallId) !== state || hasStopStarted(state)) return;
+      const { record } = this.resolveRegistryRecord(live, toolCallId);
+      if (record && record.status !== 'running') return;
+      const current = this.config.getAgentBudgetSettings();
+      const assessment = new AgentBudgetPolicy(current).assess(state.policySnapshot, Date.now() - state.startedAt);
+      if (assessment.stopReason === 'duration') {
+        void this.stop(live, toolCallId, state, 'safety', {
+          handoffTokens: current.handoffContextTokens,
+          stopWeightedTokens: current.stopWeightedTokens,
+        }).catch((error: unknown) => {
+          this.logger.error('[SubagentBudgetMonitor] Deadline stop failed',
+            error instanceof Error ? error : new Error(String(error)));
+        });
+      } else {
+        this.armDeadline(live, toolCallId, state);
+      }
+    }, delay);
+    state.deadlineTimer.unref?.();
   }
 
   private captureProgress(state: SubagentState, msg: JsonObject, toolCallId: string): void {
@@ -1305,6 +1347,7 @@ export class SubagentBudgetMonitor {
         }
       }
       session.tasks.set(id, {
+        startedAt: session.tasks.get(id)?.startedAt ?? Date.now(),
         text: readSubagentTaskText(input),
         prompt:
           typeof prompt === 'string' && prompt.trim() ? prompt : undefined,
@@ -1484,6 +1527,10 @@ export class SubagentBudgetMonitor {
 
     // Set over the preparation too: an overlapping message starts no other stop.
     state.stopInFlight = true;
+    if (state.deadlineTimer) {
+      clearTimeout(state.deadlineTimer);
+      state.deadlineTimer = undefined;
+    }
     const attemptMessageId = state.lastMessageId;
     let prepared: PreparedHandoff | undefined;
     try {

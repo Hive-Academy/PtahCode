@@ -16,13 +16,13 @@ export function turnCountOf(record: AgentBudgetRecord): number {
 /** Lifetime accounting for one CLI session, including resumed turns. */
 export class AgentBudgetCoordinator {
   private snapshot: AgentBudgetSnapshot;
-  private readonly policy: AgentBudgetPolicy;
+  private policy: AgentBudgetPolicy;
   private _startedAtMs: number;
   private _stopReason?: AgentBudgetStopReason;
   private _turnCount: number;
 
   constructor(
-    readonly settings: AgentBudgetSettings,
+    public settings: AgentBudgetSettings,
     startedAtMs: number,
     snapshot: AgentBudgetSnapshot = initialAgentBudgetSnapshot,
     turnCount = snapshot.turnIds.length,
@@ -37,6 +37,16 @@ export class AgentBudgetCoordinator {
   get stopReason(): AgentBudgetStopReason | undefined { return this._stopReason; }
   get turnCount(): number { return this._turnCount; }
   get counters(): AgentBudgetSnapshot { return this.snapshot; }
+
+  updateSettings(settings: AgentBudgetSettings, nowMs = Date.now()): { warning: boolean; stopReason?: AgentBudgetStopReason } {
+    this.settings = settings;
+    this.policy = new AgentBudgetPolicy(settings);
+    const decision = this.policy.assess(this.snapshot, Math.max(0, nowMs - this.startedAtMs));
+    this.snapshot = { ...this.snapshot, warned: this.snapshot.warned || decision.warning,
+      stopped: this.snapshot.stopped || decision.stopReason !== undefined };
+    this._stopReason ??= decision.stopReason;
+    return { warning: decision.warning, ...(decision.stopReason ? { stopReason: decision.stopReason } : {}) };
+  }
 
   record(): AgentBudgetRecord {
     return {

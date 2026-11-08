@@ -13,6 +13,22 @@ const usage: AgentTurnUsage = {
 };
 
 describe('AgentBudgetCoordinator', () => {
+  it('reassesses changed limits without losing charged turns or restarting duration', () => {
+    const coordinator = new AgentBudgetCoordinator({ ...settings, stopWeightedTokens: 200 }, 1_000);
+    coordinator.accept({ status: 'reported', usage: { ...usage, inputTokens: 30, outputTokens: 10 } }, 2_000);
+    expect(coordinator.updateSettings({ ...settings, stopWeightedTokens: 50 }, 3_000).stopReason).toBeUndefined();
+    expect(coordinator.updateSettings({ ...settings, stopWeightedTokens: 35 }, 4_000).stopReason).toBe('budget');
+    expect(coordinator.turnCount).toBe(1);
+    expect(coordinator.counters.rawTokens).toBe(40);
+    expect(coordinator.startedAtMs).toBe(1_000);
+    expect(coordinator.record().stopWeightedTokens).toBe(35);
+  });
+
+  it('applies a shorter lifetime to the existing start time', () => {
+    const coordinator = new AgentBudgetCoordinator(settings, 1_000);
+    expect(coordinator.updateSettings({ ...settings, maxDurationMin: 1 }, 61_000).stopReason).toBe('duration');
+    expect(coordinator.remainingMs(61_000)).toBe(0);
+  });
   it('warns once, deduplicates turn IDs, and stops at the limit', () => {
     const coordinator = new AgentBudgetCoordinator(settings, 0);
     const first = coordinator.accept({ status: 'reported', usage }, 10);

@@ -394,6 +394,12 @@ function wireAgentMonitorListeners(
     }
   });
 
+  agentProcessManager.events.on('agent:turn-settled', (info: AgentProcessInfo) => {
+    if (persistCliSession && info.cliSessionId && info.agentBudget) {
+      persistCliSessionReference(container, logger, tag, info, getSdkSessionId);
+    }
+  });
+
   agentProcessManager.events.on('agent:exited', (info: AgentProcessInfo) => {
     activityCheckpoints.delete(String(info.agentId));
     // Completion only persists output. It cannot attach an SDK session or

@@ -264,6 +264,13 @@ export class AgentSpawnEnvironment {
     return { repeatAt: repeatOk ? repeat : d.repeatAt };
   }
 
+  /** Call `listener` when any `ptah.agentBudget.*` setting changes. */
+  onAgentBudgetSettingsChanged(listener: () => void): { dispose(): void } {
+    return this.workspace.onDidChangeConfiguration?.((event) => {
+      if (event.affectsConfiguration('ptah.agentBudget')) listener();
+    }) ?? { dispose() { /* Test hosts without a configuration event. */ } };
+  }
+
   /** Read the live budget settings through the same workspace configuration surface. */
   resolveAgentBudgetSettings(): AgentBudgetSettings {
     const defaults = DEFAULT_AGENT_BUDGET_SETTINGS;

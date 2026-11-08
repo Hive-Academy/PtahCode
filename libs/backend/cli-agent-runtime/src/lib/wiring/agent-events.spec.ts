@@ -1162,6 +1162,26 @@ function wireCheckpointLane(
 }
 
 describe('wireAgentEventListeners — running activity checkpoints', () => {
+  it('persists a settled turn budget even inside the activity throttle window', async () => {
+    const { addCliSession, durable, attemptsReached } = createWriteLog();
+    const current = buildInfo({
+      cli: 'codex', status: 'running', parentSessionId: PARENT_SESSION,
+      cliSessionId: 'cli-sess-1', lastActivityAt: '2026-10-17T12:00:00.000Z',
+    });
+    const events = wireCheckpointLane(addCliSession, () => current);
+    events.emit('agent:output', { agentId: current.agentId });
+    await attemptsReached(1);
+    const budget = {
+      weightedTokens: 10, rawTokens: 10, largestTurnTokens: 10,
+      turnIds: ['turn-1'], turnCount: 1, startedAtMs: Date.now(),
+      stopWeightedTokens: 3_000_000, maxDurationMin: 90,
+    };
+    events.emit('agent:turn-settled', { ...current, agentBudget: budget });
+    await attemptsReached(2);
+    await drainMicrotasks();
+    expect(durable.at(-1)?.agentBudget).toEqual(budget);
+    expect(addCliSession).toHaveBeenCalledTimes(2);
+  });
   it('persists throttled activity without output and resets on exit', async () => {
     const { addCliSession, durable, attemptsReached } = createWriteLog();
     let current = buildInfo({

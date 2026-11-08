@@ -368,6 +368,7 @@ export class AgentProcessManager {
   private readonly laneGuards = new Map<string, LaneBudgetGuard>();
   private readonly completionClaims = new Set<string>();
   private readonly budgetTelemetry: LaneBudgetTelemetry;
+  private readonly budgetSettingsSubscription?: { dispose(): void };
   /** Counter for in-flight spawn operations (not yet in agents map) */
   private spawning = 0;
   /** Promise-based mutex to serialize spawn operations and prevent TOCTOU race in concurrent limit check */
@@ -456,6 +457,17 @@ export class AgentProcessManager {
           (id, message, delivery) => this.sendToAgent(id, message, delivery));
       },
       (agentId, reason) => { void this.stopLaneForGuard(agentId, reason, 0, 0); });
+    this.budgetSettingsSubscription = this.spawnEnvironment.onAgentBudgetSettingsChanged?.(() => {
+      const settings = this.spawnEnvironment.resolveAgentBudgetSettings();
+      for (const [agentId, tracked] of this.agents) {
+        if (tracked.info.status !== 'running' || !tracked.budget) continue;
+        const decision = tracked.budget.updateSettings(settings);
+        tracked.info = { ...tracked.info, agentBudget: tracked.budget.record() };
+        if (decision.stopReason) clearTimeout(tracked.budgetTimer);
+        else this.budgetTelemetry.armDeadline(agentId, tracked, () => this.agents.get(agentId) === tracked);
+        this.budgetTelemetry.dispatch(agentId, tracked, decision);
+      }
+    });
   }
 
   /**
@@ -2783,6 +2795,7 @@ export class AgentProcessManager {
    * tree-kill and the host stops waiting on it.
    */
   async disposeAll(): Promise<void> {
+    this.budgetSettingsSubscription?.dispose();
     const entries = Array.from(this.agents.entries());
     this.logger.info('[AgentProcessManager] Disposing all agents...', {
       agents: entries.length,

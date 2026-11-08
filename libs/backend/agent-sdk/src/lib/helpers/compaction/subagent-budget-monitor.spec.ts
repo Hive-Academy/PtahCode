@@ -334,6 +334,38 @@ function spawn(input: Record<string, unknown>, name = 'Agent'): unknown {
 const fake = (...parts: string[]): string => parts.join('');
 
 describe('SubagentBudgetMonitor', () => {
+  it('stops a task at its lifetime deadline without a subagent assistant message', async () => {
+    jest.useFakeTimers();
+    try {
+      jest.setSystemTime(100_000);
+      const h = makeHarness({ startedAt: 99_970 }, { maxDurationMin: 0.001 });
+      await h.monitor.observe(SESSION, spawn({ prompt: 'Inspect code', subagent_type: 'Explore' }));
+      h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-1', 'Explore');
+      await jest.advanceTimersByTimeAsync(29);
+      expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
+      await jest.advanceTimersByTimeAsync(2);
+      expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(100);
+      expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
+      h.monitor.release(SESSION);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('clears a pending lifetime deadline when the session ends', async () => {
+    jest.useFakeTimers();
+    try {
+      const h = makeHarness({}, { maxDurationMin: 0.001 });
+      await h.monitor.observe(SESSION, spawn({ prompt: 'Inspect code' }));
+      h.monitor.recordTaskStarted(SESSION, TOOL_CALL, 'task-1', 'Explore');
+      h.monitor.release(SESSION);
+      await jest.advanceTimersByTimeAsync(100);
+      expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
   it('loads budget settings once for an accepted assistant message', async () => {
     const h = makeHarness();
     await h.monitor.observe(SESSION, assistant({ input: 10 }, { id: 'settings-once' }));
