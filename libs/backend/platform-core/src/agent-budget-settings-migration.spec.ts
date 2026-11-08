@@ -39,4 +39,12 @@ describe('migrateAgentBudgetSettings', () => {
     migrate();
     expect(warnings).toHaveLength(2);
   });
+
+  it('leaves malformed JSON untouched without stamping migration', () => {
+    const file = path.join(dir, 'settings.json');
+    fs.writeFileSync(file, '{ invalid');
+    expect(migrate).not.toThrow();
+    expect(fs.readFileSync(file, 'utf8')).toBe('{ invalid');
+    expect(warnings).toEqual(['Invalid settings.json: agent budget migration skipped; the file was left unchanged']);
+  });
 });

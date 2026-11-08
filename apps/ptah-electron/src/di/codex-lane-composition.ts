@@ -22,6 +22,7 @@ import {
   CODEX_RUNTIME_TOKENS,
   CodexRuntime,
   buildCodexExecutionProfile,
+  ownCodexContext,
   type ApprovalSink,
   type CodexContext,
   type CodexExecutionProfile,
@@ -41,7 +42,7 @@ import {
   DEFAULT_CODEX_SANDBOX_MODE,
 } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
-import { createElectronCodexScopeFactory, observeElectronCodexChildBudgets } from './codex-runtime-composition';
+import { createElectronCodexScopeFactory } from './codex-runtime-composition';
 
 export interface ElectronCodexLaneInput {
   readonly isPackaged: boolean;
@@ -87,29 +88,6 @@ function paths(home: string, cwd: string): CodexExecutionProfileInput['paths'] {
     platform: process.platform === 'win32' ? 'win32' : 'posix',
     baseDirectory: cwd,
     entries: { [home]: pathEntry(home), [cwd]: pathEntry(cwd) },
-  };
-}
-
-function ownedContext(
-  context: CodexContext,
-  dispose: () => Promise<void>,
-): CodexContext {
-  let closing: Promise<void> | undefined;
-  return {
-    get identity() {
-      return context.identity;
-    },
-    get turnPermissionLevel() {
-      return context.turnPermissionLevel;
-    },
-    listModels: () => context.listModels(),
-    events: (signal) => context.events(signal),
-    startTurn: (input) => context.startTurn(input),
-    steer: (input) => context.steer(input),
-    interrupt: (turnId) => context.interrupt(turnId),
-    updateNextTurn: (patch) => context.updateNextTurn(patch),
-    compact: () => context.compact(),
-    close: () => (closing ??= dispose()),
   };
 }
 
@@ -351,7 +329,7 @@ export function registerElectronCodexLaneFactory(
         scope.container,
         input,
       ).open(profile, resume, secrets);
-      return ownedContext(observeElectronCodexChildBudgets(context, container, logger), scope.dispose);
+      return ownCodexContext(context, scope.dispose);
     } catch (error) {
       await scope.dispose();
       throw error;

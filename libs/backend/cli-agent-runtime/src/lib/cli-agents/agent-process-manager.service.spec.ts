@@ -2298,6 +2298,34 @@ describe('AgentProcessManager - SDK Execution Path', () => {
   });
 
   describe('agent budget lifetime', () => {
+    it('rehydrates counters and the original clock when a native ID arrives after tracking', async () => {
+      const firstStarted = Date.now() - 10 * 60_000;
+      manager.restoreAgents([{
+        cliSessionId: 'late-native', cli: 'codex',
+        agentId: 'prior-budget-lane' as CliSessionReference['agentId'],
+        task: 'Prior turn', startedAt: new Date(firstStarted).toISOString(),
+        status: 'completed',
+        agentBudget: {
+          weightedTokens: 900, rawTokens: 700,
+          turnIds: ['late-native:1'], turnCount: 1,
+          startedAtMs: firstStarted, stopWeightedTokens: 1000, maxDurationMin: 90,
+        },
+      }], '/workspace/root');
+      let resolved: ((id: string) => void) | undefined;
+      Object.assign(sdkControls.handle, {
+        onSessionResolved: (callback: (id: string) => void) => { resolved = callback; },
+      });
+      const spawned = await manager.spawn({
+        task: 'Next turn', cli: 'codex', workingDirectory: '/workspace/root', timeout: 0,
+      });
+      expect((manager.getStatus(spawned.agentId) as AgentProcessInfo).agentBudget?.rawTokens).toBe(0);
+      resolved?.('late-native');
+      const budget = (manager.getStatus(spawned.agentId) as AgentProcessInfo).agentBudget;
+      expect(budget).toMatchObject({
+        rawTokens: 700, weightedTokens: 900,
+        startedAtMs: firstStarted, turnCount: 1,
+      });
+    });
     it('stops at 90 minutes even when the inactivity watchdog is disabled', async () => {
       setupVscodeConfig({ 'agentBudget.maxDurationMin': 90 });
       const result = await manager.spawn({

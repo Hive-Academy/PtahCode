@@ -113,6 +113,8 @@ interface CursorRun {
   readonly id: string;
   readonly agentId: string;
   stream(): AsyncGenerator<CursorSdkMessage, void>;
+  wait(): Promise<{ usage?: Extract<CursorSdkMessage, { type: 'usage' }>['usage']; model?: CursorModelSelection }>;
+  readonly usage?: Extract<CursorSdkMessage, { type: 'usage' }>['usage'];
   cancel(): Promise<void>;
 }
 
@@ -452,7 +454,7 @@ export class CursorCliAdapter implements CliAdapter {
 
         const textTracker = { last: '' };
         const seenToolCalls = new Set<string>();
-        let reportedModel = options.model ?? DEFAULT_CURSOR_MODEL;
+        let reportedModel = 'cursor/unknown';
         let latestUsage: Extract<CursorSdkMessage, { type: 'usage' }> | undefined;
 
         for await (const message of run.stream()) {
@@ -474,15 +476,16 @@ export class CursorCliAdapter implements CliAdapter {
           );
         }
 
-        if (latestUsage && !abortController.signal.aborted) {
-          const usage = latestUsage.usage;
+        if (!abortController.signal.aborted) {
+          const settled = await run.wait();
+          const usage = latestUsage?.usage ?? settled.usage ?? run.usage;
+          reportedModel = settled.model?.id ?? reportedModel;
           emitStreamSegment({
             type: 'info', content: 'Cursor turn usage.',
-            usage: { model: reportedModel, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheReadTokens: usage.cacheReadTokens, cacheWriteTokens: usage.cacheWriteTokens, totalTokens: usage.totalTokens },
-            turnTelemetry: completedTurnTelemetry({ turnId: latestUsage.run_id, modelId: reportedModel, source: 'sdk', usage }),
+            ...(usage ? { usage: { model: reportedModel, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheReadTokens: usage.cacheReadTokens, cacheWriteTokens: usage.cacheWriteTokens, totalTokens: usage.totalTokens } } : {}),
+            turnTelemetry: completedTurnTelemetry({ turnId: latestUsage?.run_id ?? run.id, modelId: reportedModel, source: 'sdk', usage }),
           });
-        } else if (!abortController.signal.aborted)
-          emitStreamSegment({ type: 'info', content: 'Cursor turn telemetry unavailable.', turnTelemetry: completedTurnTelemetry({ turnId: run.id, modelId: reportedModel, source: 'sdk' }) });
+        }
 
         return abortController.signal.aborted ? 1 : 0;
       } catch (error: unknown) {

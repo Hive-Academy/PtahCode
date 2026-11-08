@@ -674,6 +674,17 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       }
       const mapped = active.mapper.map(event);
       for (const segment of mapped.segments) emit(segment);
+      if (mapped.awaitingUsage) {
+        const turn = active;
+        setTimeout(() => {
+          if (active !== turn) return;
+          const telemetry = turn.mapper.finishPendingUsage();
+          if (telemetry) emit(telemetry);
+          active = undefined;
+          turn.resolve(0);
+        }, 100);
+        return;
+      }
       if (mapped.terminal) {
         const turn = active;
         active = undefined;

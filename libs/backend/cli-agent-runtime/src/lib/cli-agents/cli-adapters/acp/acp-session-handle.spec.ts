@@ -181,6 +181,7 @@ describe('createAcpSessionHandle — first turn', () => {
       script: (agent) => agent.handle('session/prompt', () => ({
         result: { stopReason: 'end_turn', _meta: { usage: {
           inputTokens: 12, outputTokens: 4, cacheReadTokens: 2, costUsd: 0.03,
+          model: 'grok-billed',
         } } },
       })),
     });
@@ -188,12 +189,35 @@ describe('createAcpSessionHandle — first turn', () => {
     const telemetry = h.segments.filter((segment) => segment.turnTelemetry);
     expect(telemetry).toHaveLength(1);
     expect(telemetry[0].turnTelemetry).toMatchObject({ status: 'reported', usage: {
-      modelId: 'grok-test', inputTokens: 12, outputTokens: 4,
+      modelId: 'grok-billed', inputTokens: 12, outputTokens: 4,
     } });
     expect(telemetry[0].usage).toMatchObject({ inputTokens: 12, outputTokens: 4 });
   });
 
-  it('marks missing or invalid prompt usage unavailable without failing the turn', async () => {
+  it('reconciles usage_update metadata when the prompt response omits usage', async () => {
+    const h = start({
+      options: { model: 'requested-alias' },
+      script: (agent) => agent.handle('session/prompt', async (params, active) => {
+        await active.sessionUpdate(String(params['sessionId']), {
+          sessionUpdate: 'usage_update', used: 25, size: 1000,
+          _meta: { usage: { inputTokens: 12, outputTokens: 4, model: 'billed-model' } },
+        });
+        return { result: { stopReason: 'end_turn' } };
+      }),
+    });
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(h.segments.filter((item) => item.turnTelemetry)).toEqual([
+      expect.objectContaining({ turnTelemetry: expect.objectContaining({
+        status: 'reported', usage: expect.objectContaining({
+          inputTokens: 12, outputTokens: 4,
+          requestContextTokens: expect.objectContaining({ status: 'reported', value: 25 }),
+          modelId: 'billed-model',
+        }),
+      }) }),
+    ]);
+  });
+
+  it('emits one unavailable record per completed turn without usable prompt usage', async () => {
     const h = start({ options: { model: 'grok-test' } });
     await expect(h.handle.done).resolves.toBe(0);
     h.agent.handle('session/prompt', () => ({
@@ -207,6 +231,10 @@ describe('createAcpSessionHandle — first turn', () => {
       expect.objectContaining({ status: 'unavailable', reason: 'no-usage-event' }),
       expect.objectContaining({ status: 'unavailable', reason: 'no-usage-event' }),
     ]);
+    const unavailable = telemetry.flatMap((segment) =>
+      segment.turnTelemetry?.status === 'unavailable' ? [segment.turnTelemetry] : [],
+    );
+    expect(unavailable[0].turnId).not.toBe(unavailable[1].turnId);
   });
 
   it('waits for the Ptah MCP attachment before the first prompt', async () => {

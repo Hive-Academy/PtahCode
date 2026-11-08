@@ -14,6 +14,7 @@ export interface CodexLaneEventOutput {
   readonly segments: readonly CliOutputSegment[];
   /** Settle the lane immediately on this result; process exit is not required. */
   readonly terminal?: 'completed' | 'interrupted' | 'failed';
+  readonly awaitingUsage?: boolean;
 }
 
 /** One mapper per turn. The owner discards it on terminal or abort. */
@@ -29,13 +30,27 @@ export class CodexLaneEvents {
   >();
   private usage?: CodexReportedUsage;
   private usageModelId?: string;
+  private pendingTerminal = false;
   private errorEmitted = false;
 
   constructor(private readonly identity: CodexLaneTurnIdentity) {}
 
+  finishPendingUsage(): CliOutputSegment | undefined {
+    if (!this.pendingTerminal) return undefined;
+    this.pendingTerminal = false;
+    this.terminal = true;
+    return {
+      type: 'info', content: 'Codex turn telemetry unavailable.',
+      turnTelemetry: completedTurnTelemetry({
+        turnId: this.identity.turnId,
+        modelId: this.usageModelId ?? 'codex/unknown', source: 'stream',
+      }),
+    };
+  }
+
   map(event: CodexRuntimeEvent): CodexLaneEventOutput {
     if (
-      this.terminal ||
+      (this.terminal && !this.pendingTerminal) ||
       event.sequence <= this.sequence ||
       event.contextId !== this.identity.contextId ||
       event.processGeneration !== this.identity.processGeneration ||
@@ -45,6 +60,31 @@ export class CodexLaneEvents {
       return { segments: [] };
     }
     this.sequence = event.sequence;
+    if (this.pendingTerminal) {
+      if (event.type !== 'usage') return { segments: [] };
+      this.pendingTerminal = false;
+      this.terminal = true;
+      if (event.usage.inputTokens === undefined || event.usage.outputTokens === undefined ||
+        !Number.isSafeInteger(event.usage.inputTokens) || !Number.isSafeInteger(event.usage.outputTokens) ||
+        event.usage.inputTokens < 0 || event.usage.outputTokens < 0)
+        return { segments: [{
+          type: 'info', content: 'Codex turn telemetry unavailable.',
+          turnTelemetry: completedTurnTelemetry({
+            turnId: this.identity.turnId,
+            modelId: event.evidence?.modelId ?? this.usageModelId ?? 'codex/unknown',
+            source: 'stream', usage: laneUsage(event.usage),
+          }),
+        }], terminal: 'completed' };
+      return { segments: [{
+        type: 'info', content: 'Codex turn usage.',
+        usage: laneUsage(event.usage),
+        turnTelemetry: completedTurnTelemetry({
+          turnId: this.identity.turnId,
+          modelId: event.evidence?.modelId ?? this.usageModelId ?? 'codex/unknown',
+          source: 'stream', usage: laneUsage(event.usage),
+        }),
+      }], terminal: 'completed' };
+    }
     switch (event.type) {
       case 'textDelta':
         return this.content(
@@ -186,9 +226,16 @@ export class CodexLaneEvents {
       case 'terminal': {
         this.terminal = true;
         const usage = event.usage ?? this.usage;
+        if (event.status === 'completed' &&
+          (usage === undefined || usage.inputTokens === undefined || usage.outputTokens === undefined ||
+            !Number.isSafeInteger(usage.inputTokens) || !Number.isSafeInteger(usage.outputTokens) ||
+            usage.inputTokens < 0 || usage.outputTokens < 0)) {
+          this.pendingTerminal = true;
+          return { segments: [], awaitingUsage: true };
+        }
         const telemetry = completedTurnTelemetry({
           turnId: this.identity.turnId,
-          modelId: event.evidence?.modelId ?? this.usageModelId,
+          modelId: event.evidence?.modelId ?? this.usageModelId ?? 'codex/unknown',
           source: 'stream',
           usage: usage ? laneUsage(usage) : undefined,
         });
@@ -201,8 +248,6 @@ export class CodexLaneEvents {
             usage: laneUsage(usage),
             turnTelemetry: telemetry,
           });
-        else if (event.status !== 'failed')
-          segments.push({ type: 'error', content: 'Codex turn telemetry unavailable: complete input/output totals missing.', turnTelemetry: telemetry });
         this.text.clear();
         this.reasoning.clear();
         this.tools.clear();

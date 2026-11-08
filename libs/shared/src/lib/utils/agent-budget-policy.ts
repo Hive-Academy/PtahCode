@@ -1,6 +1,7 @@
 import { z } from 'zod';
-import { AgentTurnTelemetry, AgentTurnUsage } from '../types/agent-turn-usage.types';
-import { ModelPricing } from './pricing.utils';
+import type { AgentTurnTelemetry, AgentTurnUsage } from '../types/agent-turn-usage.types';
+import type { ModelPricing } from './pricing.utils';
+import { findAdvancedSetting } from '../types/advanced-settings.types';
 
 /** Fixed $3 per million input tokens, independent of catalog updates. */
 export const REFERENCE_INPUT_USD_PER_TOKEN = 0.000003;
@@ -12,6 +13,17 @@ export const agentBudgetSettingsSchema = z.object({
   maxDurationMin: z.number().finite().positive(),
 }).strict();
 export type AgentBudgetSettings = z.infer<typeof agentBudgetSettingsSchema>;
+function budgetDefault(key: keyof AgentBudgetSettings): number {
+  const descriptor = findAdvancedSetting(`agentBudget.${key}`);
+  if (!descriptor || descriptor.kind !== 'number') throw new Error(`Missing agent budget default: ${key}`);
+  return descriptor.default;
+}
+export const DEFAULT_AGENT_BUDGET_SETTINGS: AgentBudgetSettings = {
+  warnRatio: budgetDefault('warnRatio'),
+  stopWeightedTokens: budgetDefault('stopWeightedTokens'),
+  handoffContextTokens: budgetDefault('handoffContextTokens'),
+  maxDurationMin: budgetDefault('maxDurationMin'),
+};
 export type AgentBudgetStopReason = 'budget' | 'telemetry-unavailable' | 'duration';
 export type AgentBudgetCoverage = 'complete' | 'price-weighting-degraded' | 'telemetry-unavailable';
 export type AgentBudgetCost =

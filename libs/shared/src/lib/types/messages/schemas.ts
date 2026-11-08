@@ -4,7 +4,7 @@
 
 import { z } from 'zod';
 
-import { AgentId } from '../agent-process.types';
+import { AgentId, LANE_STOP_REASONS } from '../agent-process.types';
 
 import {
   SessionIdSchema,
@@ -133,16 +133,7 @@ export const AgentMonitorParentDeliveryPayloadSchema = z.object({
   removed: z.literal(true).optional(),
   preview: z.string().max(160).optional(),
   verdict: z.enum(['delivered', 'no-deliverable', 'failed', 'unverified']).optional(),
-  stopReason: z.enum([
-    'budget',
-    'telemetry-unavailable',
-    'duration',
-    'repeat-call',
-    'usage-limit',
-    'auth',
-    'session-mismatch',
-    'host-restart',
-  ]).optional(),
+  stopReason: z.enum(LANE_STOP_REASONS).optional(),
 }).strict();
 
 /**

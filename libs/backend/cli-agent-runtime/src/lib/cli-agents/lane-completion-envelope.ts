@@ -2,6 +2,7 @@ import type {
   LaneCompletionSignal,
   LaneDeliverableCheck,
 } from '@ptah-extension/shared';
+import { isAgentBudgetStopReason } from '@ptah-extension/shared';
 
 function escape(value: string): string {
   return value
@@ -41,8 +42,7 @@ function hostStopLine(signal: LaneCompletionSignal): string | undefined {
 }
 
 function isAgentBudgetStop(signal: LaneCompletionSignal): boolean {
-  return signal.stopReason === 'budget' || signal.stopReason === 'duration' ||
-    signal.stopReason === 'telemetry-unavailable';
+  return isAgentBudgetStopReason(signal.stopReason);
 }
 
 function nextAction(signal: LaneCompletionSignal): string {

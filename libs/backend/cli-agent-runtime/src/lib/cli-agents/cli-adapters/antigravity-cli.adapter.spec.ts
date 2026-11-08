@@ -725,6 +725,8 @@ describe('AntigravityCliAdapter', () => {
         [100, 20, { status: 'reported', value: 30, source: 'stream' }],
         [150, 30, { status: 'reported', value: 45, source: 'stream' }],
       ]);
+      expect(telemetry[0]?.turnId).toBeTruthy();
+      expect(telemetry[1]?.turnId).not.toBe(telemetry[0]?.turnId);
       await new Promise<void>((resolve) => setImmediate(resolve));
       expect(currentChild?.child.stdin.end).toHaveBeenCalledTimes(1);
 
@@ -997,16 +999,23 @@ describe('AntigravityCliAdapter', () => {
             response: 'Here are the files in the repo root.',
             duration_seconds: 6.72,
             num_turns: 1,
+            model: 'agy-billed',
             usage: { input_tokens: 25269, output_tokens: 2562 },
           },
         }) + '\n',
       );
+      currentChild?.stdout.write(JSON.stringify({
+        event: 'result', result: {
+          conversation_id: CONV_ID, status: 'SUCCESS', num_turns: 1,
+          usage: { input_tokens: 25269, output_tokens: 2562 },
+        },
+      }) + '\n');
       currentChild?.emitClose(0);
       await handle.done;
 
       expect(segments).toEqual([expect.objectContaining({
         turnTelemetry: expect.objectContaining({
-          status: 'reported', usage: expect.objectContaining({ inputTokens: 25269, outputTokens: 2562, modelId: 'agy-model' }),
+          status: 'reported', usage: expect.objectContaining({ turnId: `${CONV_ID}:1`, inputTokens: 25269, outputTokens: 2562, modelId: 'agy-billed' }),
         }),
       })]);
     });

@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { findAdvancedSetting, validateAdvancedSettingValue } from '@ptah-extension/shared';
 
 type SettingsObject = Record<string, unknown>;
-type WarningLogger = Pick<{ warn(message: string): void }, 'warn'>;
+interface AgentBudgetMigrationLogger { warn(message: string): void }
 
 function object(value: unknown): value is SettingsObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -21,11 +21,21 @@ function stored(settings: SettingsObject, section: string, key: string): { prese
 }
 
 /** Migrate each legacy budget key once, before a file settings manager loads defaults. */
-export function migrateAgentBudgetSettings(settingsDir: string, logger: WarningLogger): void {
+export function migrateAgentBudgetSettings(settingsDir: string, logger: AgentBudgetMigrationLogger): void {
   const settingsPath = path.join(settingsDir, 'settings.json');
   if (!fs.existsSync(settingsPath)) return;
-  const parsed: unknown = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-  if (!object(parsed)) throw new Error('Ptah settings must be a JSON object');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    logger.warn('Invalid settings.json: agent budget migration skipped; the file was left unchanged');
+    return;
+  }
+  if (!object(parsed)) {
+    logger.warn('Invalid settings.json object: agent budget migration skipped; the file was left unchanged');
+    return;
+  }
   const migrations = object(parsed['__migrations']) ? parsed['__migrations'] : {};
   if (migrations['agentBudgetV1'] === true) return;
 

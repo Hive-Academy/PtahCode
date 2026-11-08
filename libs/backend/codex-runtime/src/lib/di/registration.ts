@@ -9,6 +9,7 @@ import {
 } from '../codex-runtime';
 import type { CodexRuntimeOptions } from '../codex-context';
 import type { CodexExecutionProfile } from '../codex-runtime.types';
+import type { CodexChildBudgetPort } from '../codex-child-budget-observer';
 import { CODEX_RUNTIME_TOKENS } from './tokens';
 
 export interface CodexRuntimeRegistrationPorts extends CodexRuntimeOptions {
@@ -18,6 +19,8 @@ export interface CodexRuntimeRegistrationPorts extends CodexRuntimeOptions {
     /** Composition supplies the complete usage profile for this normalized home. */
     readonly profileForHome: (home: string) => CodexExecutionProfile;
   }) | null;
+  /** Child-budget observation for each opened context; absent or null turns it off. */
+  readonly childBudget?: CodexChildBudgetPort | null;
 }
 
 /** Register once per host-owned container. The owner closes runtime and usage on exit.

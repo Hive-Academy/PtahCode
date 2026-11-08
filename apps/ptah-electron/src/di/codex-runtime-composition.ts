@@ -17,8 +17,6 @@ import {
   codexSandboxModeSchema,
   DEFAULT_CODEX_SANDBOX_MODE,
   type SessionId,
-  agentBudgetSettingsSchema,
-  findModelPricing,
 } from '@ptah-extension/shared';
 import {
   AUTH_PROVIDERS_TOKENS,
@@ -73,8 +71,6 @@ import {
   type CodexExecutionProfile,
   type CodexThreadIdentity,
   type CodexRuntimeRegistrationPorts,
-  CodexChildBudgetTap,
-  type CodexContext,
 } from '@ptah-extension/codex-runtime';
 
 import type {
@@ -225,76 +221,6 @@ export interface ElectronCodexScopeInput extends ElectronCodexRoutingInput {
   };
 }
 
-/** Attach the host budget observer to the stream consumed by chat and lanes. */
-export function observeElectronCodexChildBudgets(
-  context: CodexContext,
-  parent: DependencyContainer,
-  logger: Logger,
-): CodexContext {
-  const workspace = parent.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER);
-  const defaults = { warnRatio: 0.85, stopWeightedTokens: 3_000_000,
-    handoffContextTokens: 150_000, maxDurationMin: 90 };
-  const parsed = agentBudgetSettingsSchema.safeParse({
-    warnRatio: workspace.getConfiguration('ptah', 'agentBudget.warnRatio', defaults.warnRatio),
-    stopWeightedTokens: workspace.getConfiguration('ptah', 'agentBudget.stopWeightedTokens', defaults.stopWeightedTokens),
-    handoffContextTokens: workspace.getConfiguration('ptah', 'agentBudget.handoffContextTokens', defaults.handoffContextTokens),
-    maxDurationMin: workspace.getConfiguration('ptah', 'agentBudget.maxDurationMin', defaults.maxDurationMin),
-  });
-  if (!parsed.success) logger.warn('[Codex budget] Invalid agent budget settings; using defaults');
-  const tap = new CodexChildBudgetTap(parsed.success ? parsed.data : defaults);
-  const parents = new Map<string, string>();
-  const started = new Map<string, number>();
-  const remember = (child: string, parentId: string): void => {
-    if (!parents.has(child) && parents.size >= 128) {
-      const oldest = parents.keys().next().value;
-      if (oldest !== undefined) { parents.delete(oldest); started.delete(oldest); tap.releaseChild(oldest); }
-    }
-    parents.set(child, parentId);
-    if (!started.has(child)) started.set(child, Date.now());
-  };
-  return {
-    get identity() { return context.identity; },
-    get turnPermissionLevel() { return context.turnPermissionLevel; },
-    listModels: () => context.listModels(),
-    events: (signal) => (async function* () {
-      for await (const event of context.events(signal)) {
-        if ((event.type === 'toolStarted' || event.type === 'toolCompleted') && event.agentThreadIds)
-          for (const child of event.agentThreadIds) remember(child, event.threadId);
-        if ((event.type === 'usage' || event.type === 'terminal') && event.evidence?.parentThreadId)
-          remember(event.threadId, event.evidence.parentThreadId);
-        if (event.type === 'toolStarted' || event.type === 'toolCompleted' || parents.has(event.threadId)) tap.observe(event);
-        if (event.type === 'terminal') {
-          const parentId = parents.get(event.threadId);
-          if (parentId) {
-            const modelId = event.evidence?.modelId;
-            const decision = tap.completeChildTurn({
-              parentThreadId: parentId, childThreadId: event.threadId, turnId: event.turnId,
-              modelId, elapsedMs: Date.now() - (started.get(event.threadId) ?? Date.now()),
-              pricing: modelId ? findModelPricing(modelId) : null,
-            });
-            if (decision.transition.warning || decision.transition.stopReason || decision.transition.handoff)
-              logger.warn('[Codex budget] Child budget decision', {
-                childThreadId: event.threadId, warning: decision.transition.warning,
-                stopReason: decision.transition.stopReason, handoff: decision.transition.handoff,
-                coverage: decision.transition.coverage,
-              });
-            parents.delete(event.threadId);
-            started.delete(event.threadId);
-            tap.releaseChild(event.threadId);
-          }
-        }
-        yield event;
-      }
-    })(),
-    startTurn: (input) => context.startTurn(input),
-    steer: (input) => context.steer(input),
-    interrupt: (turnId) => context.interrupt(turnId),
-    updateNextTurn: (patch) => context.updateNextTurn(patch),
-    compact: () => context.compact(),
-    close: async () => { tap.dispose(); parents.clear(); started.clear(); await context.close(); },
-  };
-}
-
 /**
  * Per-session registration, never a runtime on the parent. The adapter calls
  * dispose on failed opens as well as normal closure. Usage owns explicit-home
@@ -316,6 +242,13 @@ export function createElectronCodexScopeFactory(
         usage: input.ports.usage
           ? { ...input.ports.usage, ...input.usageNotifications }
           : null,
+        // Chat and lane scopes both register here, so each context is observed once.
+        childBudget: {
+          readSetting: (key, fallback) =>
+            input.parent
+              .resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER)
+              .getConfiguration('ptah', key, fallback),
+        },
         sink,
       });
       // Lifecycle ownership is the only allowed use of the raw token. Resolving
@@ -323,12 +256,6 @@ export function createElectronCodexScopeFactory(
       const runtime = container.resolve<CodexRuntime>(
         CODEX_RUNTIME_TOKENS.Runtime,
       );
-      const originalOpen = runtime.open.bind(runtime);
-      runtime.open = async (profile, resume, secrets) =>
-        observeElectronCodexChildBudgets(
-          await originalOpen(profile, resume, secrets), input.parent,
-          input.parent.resolve<Logger>(TOKENS.LOGGER),
-        );
       const usage = container.resolve<CodexAccountUsageClient | null>(
         CodexAccountUsageClient,
       );

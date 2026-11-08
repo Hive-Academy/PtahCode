@@ -39,7 +39,7 @@ import {
   PLATFORM_TOKENS,
   type IFileSystemProvider,
 } from '@ptah-extension/platform-core';
-import { SessionId } from '@ptah-extension/shared';
+import { SessionId, isAgentBudgetStopReason } from '@ptah-extension/shared';
 import {
   resolveTaskKind,
   type LaneOutcomeRecorder,
@@ -854,7 +854,7 @@ export class LaneCompletionNotifier {
         : {}),
       ...(info.cliSessionId ? { cliSessionId: info.cliSessionId } : {}),
       ...(info.stopReason ? { stopReason: info.stopReason } : {}),
-      ...((info.stopReason === 'budget' || info.stopReason === 'duration' || info.stopReason === 'telemetry-unavailable')
+      ...(isAgentBudgetStopReason(info.stopReason)
         ? {
             progressPointer: `ptah_agent_read agent_id=${info.agentId} tail=200`,
             budgetLimit: info.stopReason === 'budget'

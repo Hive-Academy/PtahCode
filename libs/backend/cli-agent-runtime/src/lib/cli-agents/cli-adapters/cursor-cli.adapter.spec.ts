@@ -19,6 +19,7 @@ interface FakeRunControls {
     id: string;
     agentId: string;
     stream: () => AsyncGenerator<unknown, void>;
+    wait: jest.Mock;
     cancel: jest.Mock;
   };
 }
@@ -68,7 +69,7 @@ function createFakeRun(agentId: string): FakeRunControls {
       wake();
     },
     cancel,
-    run: { id: 'run-1', agentId, stream, cancel },
+    run: { id: 'run-1', agentId, stream, cancel, wait: jest.fn(async () => ({ id: 'run-1', status: 'completed' })) },
   };
 }
 
@@ -267,7 +268,7 @@ describe('CursorCliAdapter', () => {
       currentRun?.end();
       await handle.done;
       expect(segments.filter((segment) => segment.turnTelemetry)).toHaveLength(1);
-      expect(segments.find((segment) => segment.turnTelemetry)?.turnTelemetry).toMatchObject({ status: 'reported', usage: { turnId: 'run-1', modelId: 'composer-2.5', inputTokens: 12, outputTokens: 3 } });
+      expect(segments.find((segment) => segment.turnTelemetry)?.turnTelemetry).toMatchObject({ status: 'reported', usage: { turnId: 'run-1', modelId: 'cursor/unknown', inputTokens: 12, outputTokens: 3 } });
     });
 
     it('uses only the final usage snapshot when the SDK repeats it', async () => {
@@ -285,7 +286,7 @@ describe('CursorCliAdapter', () => {
       expect(records[0]?.turnTelemetry).toMatchObject({ status: 'reported', usage: { inputTokens: 12, outputTokens: 3 } });
     });
 
-    it('marks a successful turn without usage as unavailable', async () => {
+    it('records unavailable telemetry when a successful stream has no usage', async () => {
       const handle = await adapter.runSdk(defaultOptions);
       const segments: Array<import('@ptah-extension/shared').CliOutputSegment> = [];
       handle.onSegment?.((value) => segments.push(value));
@@ -293,7 +294,28 @@ describe('CursorCliAdapter', () => {
       await Promise.resolve();
       currentRun?.end();
       await handle.done;
-      expect(segments.find((segment) => segment.turnTelemetry)?.turnTelemetry).toMatchObject({ status: 'unavailable', reason: 'no-usage-event' });
+      expect(segments.filter((segment) => segment.turnTelemetry)).toHaveLength(1);
+      expect(segments.find((segment) => segment.turnTelemetry)?.turnTelemetry).toMatchObject({
+        status: 'unavailable', reason: 'no-usage-event',
+      });
+    });
+
+    it('reconciles usage from the final run result when the stream omits it', async () => {
+      const handle = await adapter.runSdk(defaultOptions);
+      const segments: Array<import('@ptah-extension/shared').CliOutputSegment> = [];
+      handle.onSegment?.((value) => segments.push(value));
+      await Promise.resolve();
+      await Promise.resolve();
+      currentRun?.run.wait.mockResolvedValue({
+        id: 'run-1', status: 'completed', model: { id: 'billed-model' },
+        usage: { inputTokens: 9, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 11 },
+      });
+      currentRun?.end();
+      await handle.done;
+      expect(segments.filter((segment) => segment.turnTelemetry)).toHaveLength(1);
+      expect(segments.find((segment) => segment.turnTelemetry)?.turnTelemetry).toMatchObject({
+        status: 'reported', usage: { turnId: 'run-1', modelId: 'billed-model', inputTokens: 9, outputTokens: 2 },
+      });
     });
 
     it('creates a local agent with cwd + default model and streams text', async () => {

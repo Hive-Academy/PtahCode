@@ -1,4 +1,4 @@
-import { CodexChildBudgetTap } from './codex-child-budget-tap';
+import { CodexChildBudgetTap, CODEX_CHILD_BUDGET_MAX_ENTRIES } from './codex-child-budget-tap';
 import type { CodexRuntimeEvent } from './codex-runtime.types';
 
 const settings = {
@@ -68,5 +68,40 @@ describe('CodexChildBudgetTap', () => {
       elapsedMs: 100, pricing: null });
     expect(decision.provenance).toBe('parent-delta');
     expect(decision.transition.snapshot.rawTokens).toBe(5);
+  });
+
+  it('keeps at most the cap of children and releases the oldest first', () => {
+    const tap = new CodexChildBudgetTap(settings);
+    const total = CODEX_CHILD_BUDGET_MAX_ENTRIES + 2;
+    for (let index = 0; index < total; index++)
+      tap.observe({ ...spawn, agentThreadIds: [`child-${index}`] });
+    expect(tap.trackedChildren).toBe(CODEX_CHILD_BUDGET_MAX_ENTRIES);
+    expect(tap.parentOf('child-0')).toBeUndefined();
+    expect(tap.parentOf('child-1')).toBeUndefined();
+    expect(tap.parentOf(`child-${total - 1}`)).toBe('parent');
+  });
+
+  it('keeps no usage for a thread without parent attribution', () => {
+    const tap = new CodexChildBudgetTap(settings);
+    const evidence = usage.type === 'usage' ? usage.evidence : undefined;
+    if (!evidence) throw new Error('fixture needs evidence');
+    tap.observe({ ...usage, evidence: { ...evidence, parentThreadId: undefined } });
+    expect(tap.trackedChildren).toBe(0);
+    tap.observe(spawn);
+    const decision = tap.completeChildTurn({ parentThreadId: 'parent',
+      childThreadId: 'child', turnId: 'child-turn', elapsedMs: 0, pricing: null });
+    expect(decision.provenance).toBe('telemetry-unavailable');
+  });
+
+  it('measures elapsed time from the first attribution and clears it on release', () => {
+    let now = 1_000;
+    const tap = new CodexChildBudgetTap(settings, () => now);
+    tap.observe(spawn);
+    now = 1_250;
+    tap.observe(spawn);
+    expect(tap.elapsedMs('child')).toBe(250);
+    tap.releaseChild('child');
+    expect(tap.elapsedMs('child')).toBe(0);
+    expect(tap.trackedChildren).toBe(0);
   });
 });

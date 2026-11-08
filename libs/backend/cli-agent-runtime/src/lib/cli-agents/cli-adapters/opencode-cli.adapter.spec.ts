@@ -863,6 +863,8 @@ describe('OpencodeCliAdapter', () => {
         JSON.stringify({
           type: 'step_finish',
           sessionID: 'ses_1',
+           providerID: 'billed-provider',
+           modelID: 'billed-model',
           part: {
             type: 'step-finish',
             reason: 'stop',
@@ -879,8 +881,19 @@ describe('OpencodeCliAdapter', () => {
       expect(info[0].content).toContain('8 output');
       expect(info[0].usage).toEqual({ inputTokens: 671, outputTokens: 8 });
       expect(info[1].turnTelemetry).toEqual(expect.objectContaining({
-        status: 'reported', usage: expect.objectContaining({ inputTokens: 671, outputTokens: 8, modelId: 'provider/model' }),
+        status: 'reported', usage: expect.objectContaining({ inputTokens: 671, outputTokens: 8, modelId: 'billed-provider/billed-model' }),
       }));
+    });
+
+    it('records one unavailable turn when a successful run has no final usage', async () => {
+      const handle = await adapter.runSdk({ ...baseOptions, model: 'requested/alias' });
+      const { segments } = collect(handle);
+      currentChild?.stdout.write(JSON.stringify({ type: 'step_start', sessionID: 'ses_1' }) + '\n');
+      currentChild?.emitClose(0);
+      await handle.done;
+      const records = segments.filter((segment) => segment.turnTelemetry);
+      expect(records).toHaveLength(1);
+      expect(records[0]?.turnTelemetry).toMatchObject({ status: 'unavailable', reason: 'no-usage-event', modelId: 'opencode/unknown' });
     });
 
     it('maps a top-level error event to an error segment', async () => {
@@ -934,9 +947,8 @@ describe('OpencodeCliAdapter', () => {
       currentChild?.emitClose(0);
       await handle.done;
 
-      expect(segments).toEqual([expect.objectContaining({
-        turnTelemetry: expect.objectContaining({ status: 'unavailable', reason: 'no-usage-event' }),
-      })]);
+      expect(segments.filter((segment) => segment.turnTelemetry)).toHaveLength(1);
+      expect(segments.find((segment) => segment.turnTelemetry)?.turnTelemetry).toMatchObject({ status: 'unavailable' });
     });
 
     it('resolves done with the child exit code and reports a non-zero exit', async () => {

@@ -31,6 +31,7 @@ import {
   AgentOutput,
   CliType,
   normalizeWorkspaceRoot,
+  isAgentBudgetStopReason,
 } from '@ptah-extension/shared';
 import type {
   AgentMessageOutcome,
@@ -713,7 +714,7 @@ export class AgentProcessManager {
     const gate = await this.resumeGate.evaluate({
       cli,
       cliSessionId: resumeSessionId,
-      ...((latest?.info.agentBudget && (latest.info.agentBudget.rawTokens > 0 || latest.info.agentBudget.weightedTokens > 0)) || latest?.info.stopReason === 'budget' || latest?.info.stopReason === 'duration' || latest?.info.stopReason === 'telemetry-unavailable'
+      ...((latest?.info.agentBudget && (latest.info.agentBudget.rawTokens > 0 || latest.info.agentBudget.weightedTokens > 0)) || isAgentBudgetStopReason(latest?.info.stopReason)
         ? {
             ...(latest.info.agentBudget ? { budget: latest.info.agentBudget } : {}),
             ...(latest.info.stopReason ? { stopReason: latest.info.stopReason } : {}),
@@ -853,15 +854,13 @@ export class AgentProcessManager {
       .sort((a, b) => a.info.startedAt.localeCompare(b.info.startedAt));
   }
 
-  private budgetRecord(budget: AgentBudgetCoordinator): NonNullable<AgentProcessInfo['agentBudget']> {
-    return {
-      weightedTokens: budget.counters.weightedTokens,
-      rawTokens: budget.counters.rawTokens,
-      turnIds: budget.counters.turnIds,
-      startedAtMs: budget.startedAtMs,
-      stopWeightedTokens: budget.settings.stopWeightedTokens,
-      maxDurationMin: budget.settings.maxDurationMin,
-    };
+  private armBudgetDeadline(agentId: string, tracked: TrackedAgent): void {
+    if (!tracked.budget) return;
+    clearTimeout(tracked.budgetTimer);
+    tracked.budgetTimer = this.unrefTimer(setTimeout(() => {
+      if (this.agents.get(agentId) === tracked && tracked.info.status === 'running')
+        void this.stopLaneForGuard(agentId, 'duration', 0, 0);
+    }, tracked.budget.remainingMs()));
   }
 
   /** Most recently started record for this provider's CLI conversation. */
@@ -1385,16 +1384,12 @@ export class AgentProcessManager {
         turnIds: previousBudget.turnIds,
         elapsedMs: 0, warned: false, stopped: false,
       } : undefined,
+      previousBudget?.turnCount ?? previousBudget?.turnIds.length,
     );
     tracked.budget = budget;
-    tracked.info = { ...tracked.info, agentBudget: this.budgetRecord(budget) };
-    tracked.budgetTimer = this.unrefTimer(setTimeout(() => {
-      if (this.agents.get(agentId) === tracked && tracked.info.status === 'running') {
-        void this.stopLaneForGuard(agentId, 'duration', 0, 0);
-      }
-    }, budget.remainingMs()));
-
+    tracked.info = { ...tracked.info, agentBudget: budget.record() };
     this.agents.set(agentId, tracked);
+    this.armBudgetDeadline(agentId, tracked);
     const turn = Symbol('lane-turn');
     this.turns.set(tracked, turn);
     sdkHandle.setAgentId?.(agentId);
@@ -1404,6 +1399,12 @@ export class AgentProcessManager {
     };
     const updateCliSessionId = (sessionId: string | undefined): void => {
       if (!sessionId || sessionId === tracked.info.cliSessionId) return;
+      const prior = this.previousResumeRecord(tracked.info.cli, sessionId)?.agentBudget;
+      if (prior && tracked.budget && tracked.budget.counters.rawTokens === 0 && tracked.budget.counters.weightedTokens === 0) {
+        tracked.budget.rebindRecord(prior);
+        tracked.info = { ...tracked.info, agentBudget: tracked.budget.record() };
+        this.armBudgetDeadline(agentId, tracked);
+      }
       const previous = tracked.info.cliSessionId;
       // Only a Codex lane abandons its first thread (bundled fallback before
       // any turn). For other CLIs a different resolved id is not a
@@ -1514,7 +1515,7 @@ export class AgentProcessManager {
         }
         if (segment.turnTelemetry && tracked.info.status === 'running') {
           const result = budget.accept(segment.turnTelemetry);
-          tracked.info = { ...tracked.info, agentBudget: this.budgetRecord(budget) };
+          tracked.info = { ...tracked.info, agentBudget: budget.record() };
           if (result.costUnavailable && !tracked.budgetCostWarned) {
             tracked.budgetCostWarned = true;
             this.logger.warn('[AgentProcessManager] Lane turn cost unavailable', { agentId });
@@ -2689,13 +2690,7 @@ export class AgentProcessManager {
     tracked.guardToolCalls = undefined;
     tracked.repeatedCalls = undefined;
     tracked.queuedMessagesDropped = undefined;
-    if (tracked.budget) {
-      clearTimeout(tracked.budgetTimer);
-      tracked.budgetTimer = this.unrefTimer(setTimeout(() => {
-        if (this.agents.get(agentId) === tracked && tracked.info.status === 'running')
-          void this.stopLaneForGuard(agentId, 'duration', 0, 0);
-      }, tracked.budget.remainingMs()));
-    }
+    if (tracked.budget) this.armBudgetDeadline(agentId, tracked);
     this.armInactivityWatchdog(agentId, tracked);
 
     this.events.emit('agent:spawned', tracked.info);

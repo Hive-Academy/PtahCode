@@ -652,6 +652,7 @@ describe('CopilotSdkAdapter', () => {
           },
         }) + '\n',
       );
+      currentChild?.stdout.write(JSON.stringify({ type: 'result', id: 'native-turn-1', sessionId: 'session-1' }) + '\n');
       currentChild?.emitClose(0);
       await handle.done;
 
@@ -672,7 +673,7 @@ describe('CopilotSdkAdapter', () => {
       });
       expect(segments).toContainEqual(expect.objectContaining({
         turnTelemetry: expect.objectContaining({
-          status: 'reported', usage: expect.objectContaining({ inputTokens: 1000, outputTokens: 500, modelId: 'claude-sonnet-4.5' }),
+          status: 'reported', usage: expect.objectContaining({ turnId: 'native-turn-1', inputTokens: 1000, outputTokens: 500, modelId: 'claude-sonnet-4.5' }),
         }),
       }));
     });

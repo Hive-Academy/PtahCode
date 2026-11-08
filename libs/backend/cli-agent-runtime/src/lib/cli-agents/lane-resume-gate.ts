@@ -23,10 +23,11 @@ import type {
   LaneRequestContextSource,
   AgentBudgetSettings,
   LaneStopReason,
+  AgentBudgetRecord,
 } from '@ptah-extension/shared';
 import type { IOutputChannel } from '@ptah-extension/platform-core';
 import { classifyProviderAccountBinding } from '@ptah-extension/shared/schemas';
-import { PROVIDER_ACCOUNT_RESULT_CODES } from '@ptah-extension/shared';
+import { PROVIDER_ACCOUNT_RESULT_CODES, isAgentBudgetStopReason } from '@ptah-extension/shared';
 import type {
   LaneAccountBindingPort,
   LaneAccountReference,
@@ -62,7 +63,7 @@ export const HANDOFF_FINAL_TEXT_MAX_CHARS = 2_000;
 const LOG_PREFIX = '[LaneResumeGate]';
 
 export interface LaneResumeGateInput {
-  readonly budget?: { readonly weightedTokens: number; readonly rawTokens: number; readonly startedAtMs: number };
+  readonly budget?: AgentBudgetRecord;
   readonly budgetSettings?: AgentBudgetSettings;
   readonly stopReason?: LaneStopReason;
   readonly cli: CliType | 'claude';
@@ -113,7 +114,7 @@ export class LaneResumeGate {
   ) {}
 
   async evaluate(input: LaneResumeGateInput): Promise<LaneResumeDecision> {
-    const budgetStop = input.stopReason === 'budget' || input.stopReason === 'telemetry-unavailable' || input.stopReason === 'duration';
+    const budgetStop = isAgentBudgetStopReason(input.stopReason);
     const total = Math.max(input.budget?.weightedTokens ?? 0, input.budget?.rawTokens ?? 0);
     const nearLimit = input.budgetSettings !== undefined &&
       total >= input.budgetSettings.stopWeightedTokens * input.budgetSettings.warnRatio;

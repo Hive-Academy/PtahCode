@@ -10,6 +10,9 @@ import {
 } from '@ptah-extension/shared';
 import type { CodexRuntimeEvent } from './codex-runtime.types';
 
+/** Bound for every map in one tap; the oldest tracked child is released first. */
+export const CODEX_CHILD_BUDGET_MAX_ENTRIES = 128;
+
 export interface CodexChildBudgetDecision {
   readonly parentThreadId: string;
   readonly childThreadId: string;
@@ -23,25 +26,48 @@ export interface CodexChildBudgetDecision {
 export class CodexChildBudgetTap {
   private readonly policy: AgentBudgetPolicy;
   private readonly parents = new Map<string, string>();
+  private readonly startedAt = new Map<string, number>();
   private readonly pending = new Map<string, CodexRuntimeEvent>();
   private readonly snapshots = new Map<string, AgentBudgetSnapshot>();
   private readonly completed = new Map<string, CodexChildBudgetDecision>();
 
-  constructor(settings: AgentBudgetSettings) {
+  constructor(
+    settings: AgentBudgetSettings,
+    private readonly now: () => number = Date.now,
+  ) {
     this.policy = new AgentBudgetPolicy(settings);
   }
 
+  /** Track attribution and accepted usage; events of untracked threads leave no state. */
   observe(event: CodexRuntimeEvent): void {
     if ((event.type === 'toolStarted' || event.type === 'toolCompleted') && event.agentThreadIds) {
-      for (const child of event.agentThreadIds) this.parents.set(child, event.threadId);
+      for (const child of event.agentThreadIds) this.remember(child, event.threadId);
     }
-    if (event.type === 'usage' && event.evidence?.accepted) {
-      this.pending.set(this.turnKey(event.threadId, event.turnId), event);
-      if (event.evidence.parentThreadId)
-        this.parents.set(event.threadId, event.evidence.parentThreadId);
-    }
-    if (event.type === 'terminal' && event.evidence?.parentThreadId)
-      this.parents.set(event.threadId, event.evidence.parentThreadId);
+    if ((event.type === 'usage' || event.type === 'terminal') && event.evidence?.parentThreadId)
+      this.remember(event.threadId, event.evidence.parentThreadId);
+    if (event.type === 'usage' && event.evidence?.accepted && this.parents.has(event.threadId))
+      this.setBounded(this.pending, this.turnKey(event.threadId, event.turnId), event);
+  }
+
+  parentOf(childThreadId: string): string | undefined {
+    return this.parents.get(childThreadId);
+  }
+
+  /** Model of the accepted usage for this child turn, when the terminal does not carry one. */
+  modelIdFor(childThreadId: string, turnId: string): string | undefined {
+    const event = this.pending.get(this.turnKey(childThreadId, turnId));
+    return event?.type === 'usage' ? event.evidence?.modelId : undefined;
+  }
+
+  /** Time since the child was first attributed; zero for an untracked child. */
+  elapsedMs(childThreadId: string): number {
+    const started = this.startedAt.get(childThreadId);
+    return started === undefined ? 0 : Math.max(0, this.now() - started);
+  }
+
+  /** Number of tracked children; never more than CODEX_CHILD_BUDGET_MAX_ENTRIES. */
+  get trackedChildren(): number {
+    return this.parents.size;
   }
 
   /** Call after the child terminal and any trailing usage notifications are drained. */
@@ -85,7 +111,7 @@ export class CodexChildBudgetTap {
     });
     const provenance = telemetry.status === 'unavailable' ? 'telemetry-unavailable' :
       useChild ? 'child-thread' : 'parent-delta';
-    const key = `${parentThreadId}\u0000${childThreadId}`;
+    const key = this.snapshotKey(parentThreadId, childThreadId);
     const transition = this.policy.evaluate(
       this.snapshots.get(key) ?? initialAgentBudgetSnapshot,
       telemetry,
@@ -94,15 +120,16 @@ export class CodexChildBudgetTap {
     );
     this.snapshots.set(key, transition.snapshot);
     const decision = { parentThreadId, childThreadId, telemetry, provenance, transition } as const;
-    this.completed.set(turnKey, decision);
+    this.setBounded(this.completed, turnKey, decision);
     this.pending.delete(turnKey);
     return decision;
   }
 
   releaseChild(childThreadId: string): void {
     const parent = this.parents.get(childThreadId);
-    if (parent) this.snapshots.delete(`${parent}\u0000${childThreadId}`);
+    if (parent) this.snapshots.delete(this.snapshotKey(parent, childThreadId));
     this.parents.delete(childThreadId);
+    this.startedAt.delete(childThreadId);
     for (const key of this.pending.keys())
       if (key.startsWith(`${childThreadId}\u0000`)) this.pending.delete(key);
     for (const key of this.completed.keys())
@@ -111,9 +138,36 @@ export class CodexChildBudgetTap {
 
   dispose(): void {
     this.parents.clear();
+    this.startedAt.clear();
     this.pending.clear();
     this.snapshots.clear();
     this.completed.clear();
+  }
+
+  private remember(child: string, parent: string): void {
+    const prior = this.parents.get(child);
+    if (prior === parent) return;
+    if (prior === undefined) {
+      while (this.parents.size >= CODEX_CHILD_BUDGET_MAX_ENTRIES) {
+        const oldest = this.parents.keys().next().value;
+        if (oldest === undefined) break;
+        this.releaseChild(oldest);
+      }
+      this.startedAt.set(child, this.now());
+    } else this.snapshots.delete(this.snapshotKey(prior, child));
+    this.parents.set(child, parent);
+  }
+
+  private setBounded<T>(map: Map<string, T>, key: string, value: T): void {
+    if (!map.has(key) && map.size >= CODEX_CHILD_BUDGET_MAX_ENTRIES) {
+      const oldest = map.keys().next().value;
+      if (oldest !== undefined) map.delete(oldest);
+    }
+    map.set(key, value);
+  }
+
+  private snapshotKey(parentThreadId: string, childThreadId: string): string {
+    return `${parentThreadId}\u0000${childThreadId}`;
   }
 
   private turnKey(threadId: string, turnId: string): string {

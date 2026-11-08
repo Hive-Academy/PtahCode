@@ -438,7 +438,7 @@ describe('GrokCliAdapter', () => {
           sessionUpdate: 'agent_message_chunk',
           content: { type: 'text', text: 'Hello from Grok' },
         });
-        return { result: { stopReason: 'end_turn', _meta: { usage: { inputTokens: 44, outputTokens: 7, cacheReadTokens: 5 } } } };
+        return { result: { stopReason: 'end_turn', _meta: { usage: { inputTokens: 44, outputTokens: 7, cacheReadTokens: 5, model: 'grok-4.7' } } } };
       });
 
       const handle = await adapter.runSdk({

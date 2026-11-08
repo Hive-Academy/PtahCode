@@ -98,12 +98,19 @@ const FALLBACK_REFUSED_TITLE = 'a tool call';
 
 /** ACP prompt response extension; reject malformed counters without failing the turn. */
 const acpPromptUsageSchema = z.object({
+  model: z.string().optional(),
   inputTokens: z.number().int().nonnegative(),
   outputTokens: z.number().int().nonnegative(),
   cacheReadTokens: z.number().int().nonnegative().optional(),
   cacheWriteTokens: z.number().int().nonnegative().optional(),
   contextTokens: z.number().int().nonnegative().optional(),
   costUsd: z.number().finite().nonnegative().optional(),
+}).passthrough();
+
+const acpUsageUpdateSchema = z.object({
+  sessionUpdate: z.literal('usage_update'),
+  used: z.number().int().nonnegative(),
+  _meta: z.object({ usage: acpPromptUsageSchema.optional() }).passthrough().nullish(),
 }).passthrough();
 
 export interface AcpSessionHandleConfig {
@@ -250,6 +257,7 @@ export function createAcpSessionHandle(
   let processExit: AcpProcessExit | undefined;
   let promptInFlight = false;
   let promptSequence = 0;
+  let latestUpdateUsage: z.infer<typeof acpPromptUsageSchema> | undefined;
   /** Title of the first request the policy refused during the current prompt. */
   let refusedThisTurn: string | undefined;
   /** Settles when the current prompt has its answer; never rejects. */
@@ -368,6 +376,15 @@ export function createAcpSessionHandle(
     sessionUpdate: async (notification) => {
       if (!isOwnSession(notification.sessionId)) return;
       if (isReplayedUpdate(notification)) return;
+      if (promptInFlight) {
+        const update = acpUsageUpdateSchema.safeParse(notification.update);
+        if (update.success && update.data._meta?.usage) {
+          latestUpdateUsage = {
+            ...update.data._meta.usage,
+            contextTokens: update.data._meta.usage.contextTokens ?? update.data.used,
+          };
+        }
+      }
       const mapped = mapper.map(notification.update);
       if (mapped.output) output.emit(mapped.output);
       for (const item of mapped.segments) segment.emit(item);
@@ -753,6 +770,7 @@ export function createAcpSessionHandle(
       return 1;
     }
     promptInFlight = true;
+    latestUpdateUsage = undefined;
     const turnId = `${id}:${++promptSequence}`;
     refusedThisTurn = undefined;
     try {
@@ -769,14 +787,20 @@ export function createAcpSessionHandle(
         refusedPermissionTitle: refusedThisTurn,
         displayName: name,
       });
+      // The prompt response can precede a usage_update already queued by the agent.
+      await new Promise<void>((resolve) => setImmediate(resolve));
       if (mapped.exitCode === 0) {
         const meta = isRecord(response) ? response['_meta'] : undefined;
         const rawUsage = isRecord(meta) ? meta['usage'] : undefined;
-        const usage = acpPromptUsageSchema.safeParse(rawUsage);
+        const promptUsage = acpPromptUsageSchema.safeParse(rawUsage);
+        const usage = promptUsage.success ? promptUsage.data : latestUpdateUsage;
         segment.emit({
-          type: 'info', content: usage.success ? `${name} turn usage.` : `${name} turn telemetry unavailable.`,
-          ...(usage.success ? { usage: { model: options.model, ...usage.data } } : {}),
-          turnTelemetry: completedTurnTelemetry({ turnId, modelId: options.model, source: 'sdk', usage: usage.success ? usage.data : undefined }),
+          type: 'info', content: usage ? `${name} turn usage.` : `${name} turn telemetry unavailable.`,
+          ...(usage ? { usage: { ...usage, model: usage.model ?? `${name}/unknown` } } : {}),
+          turnTelemetry: completedTurnTelemetry({
+            turnId, modelId: usage?.model ?? `${name}/unknown`, source: 'sdk',
+            usage,
+          }),
         });
       }
       if (mapped.segment?.type === 'error') {
@@ -789,6 +813,7 @@ export function createAcpSessionHandle(
       return await reportFailure(error);
     } finally {
       promptInFlight = false;
+      latestUpdateUsage = undefined;
       refusedThisTurn = undefined;
     }
   };

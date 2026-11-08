@@ -26,6 +26,7 @@ import {
   createNodeCodexExecutableProbes,
   CodexRuntime,
   buildCodexExecutionProfile,
+  ownCodexContext,
   registerCodexRuntime,
   type ApprovalSink,
   type CodexContext,
@@ -36,7 +37,6 @@ import {
   type CodexSelectionSnapshotPort,
   type CodexRuntimeRegistrationPorts,
   type CodexThreadIdentity,
-  CodexChildBudgetTap,
 } from '@ptah-extension/codex-runtime';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
@@ -46,8 +46,6 @@ import {
 import {
   codexSandboxModeSchema,
   DEFAULT_CODEX_SANDBOX_MODE,
-  agentBudgetSettingsSchema,
-  findModelPricing,
 } from '@ptah-extension/shared';
 
 export interface CliCodexLaneInput {
@@ -85,73 +83,6 @@ function paths(home: string, cwd: string): CodexExecutionProfileInput['paths'] {
     platform: process.platform === 'win32' ? 'win32' : 'posix',
     baseDirectory: cwd,
     entries: { [home]: pathEntry(home), [cwd]: pathEntry(cwd) },
-  };
-}
-
-function ownedContext(
-  context: CodexContext,
-  dispose: () => Promise<void>,
-  budget?: { tap: CodexChildBudgetTap; logger: Logger },
-): CodexContext {
-  let closing: Promise<void> | undefined;
-  const parents = new Map<string, string>();
-  const started = new Map<string, number>();
-  const remember = (child: string, parent: string): void => {
-    if (!parents.has(child) && parents.size >= 128) {
-      const oldest = parents.keys().next().value;
-      if (oldest !== undefined) { parents.delete(oldest); started.delete(oldest); budget?.tap.releaseChild(oldest); }
-    }
-    parents.set(child, parent);
-    if (!started.has(child)) started.set(child, Date.now());
-  };
-  return {
-    get identity() {
-      return context.identity;
-    },
-    get turnPermissionLevel() {
-      return context.turnPermissionLevel;
-    },
-    listModels: () => context.listModels(),
-    events: (signal) => (async function* () {
-      for await (const event of context.events(signal)) {
-        if (budget) {
-          if ((event.type === 'toolStarted' || event.type === 'toolCompleted') && event.agentThreadIds)
-            for (const child of event.agentThreadIds) remember(child, event.threadId);
-          if ((event.type === 'usage' || event.type === 'terminal') && event.evidence?.parentThreadId)
-            remember(event.threadId, event.evidence.parentThreadId);
-          if (event.type === 'toolStarted' || event.type === 'toolCompleted' || parents.has(event.threadId))
-            budget.tap.observe(event);
-          if (event.type === 'terminal') {
-            const parent = parents.get(event.threadId);
-            if (parent) {
-              const modelId = event.evidence?.modelId;
-              const decision = budget.tap.completeChildTurn({
-                parentThreadId: parent, childThreadId: event.threadId, turnId: event.turnId,
-                modelId, elapsedMs: Date.now() - (started.get(event.threadId) ?? Date.now()),
-                pricing: modelId ? findModelPricing(modelId) : null,
-              });
-              if (decision.transition.warning || decision.transition.stopReason || decision.transition.handoff)
-                budget.logger.warn('[Codex budget] Child budget decision', {
-                  childThreadId: event.threadId, warning: decision.transition.warning,
-                  stopReason: decision.transition.stopReason, handoff: decision.transition.handoff,
-                  coverage: decision.transition.coverage,
-                });
-              parents.delete(event.threadId); started.delete(event.threadId);
-              budget.tap.releaseChild(event.threadId);
-            }
-          }
-        }
-        yield event;
-      }
-    })(),
-    startTurn: (input) => context.startTurn(input),
-    steer: (input) => context.steer(input),
-    interrupt: (turnId) => context.interrupt(turnId),
-    updateNextTurn: (patch) => context.updateNextTurn(patch),
-    compact: () => context.compact(),
-    close: () => (closing ??= (async () => {
-      budget?.tap.dispose(); parents.clear(); started.clear(); await dispose();
-    })()),
   };
 }
 
@@ -429,6 +360,12 @@ export function registerCliCodexLaneFactory(
           return {};
         },
         usage: null,
+        childBudget: {
+          readSetting: (key, fallback) =>
+            container
+              .resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER)
+              .getConfiguration('ptah', key, fallback),
+        },
       };
       registerCodexRuntime(scope, ports);
       registered = true;
@@ -436,19 +373,7 @@ export function registerCliCodexLaneFactory(
         scope,
         input.platform,
       ).open(profile, resume, secrets);
-      const workspace = container.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER);
-      const defaults = { warnRatio: 0.85, stopWeightedTokens: 3_000_000,
-        handoffContextTokens: 150_000, maxDurationMin: 90 };
-      const parsed = agentBudgetSettingsSchema.safeParse({
-        warnRatio: workspace.getConfiguration('ptah', 'agentBudget.warnRatio', defaults.warnRatio),
-        stopWeightedTokens: workspace.getConfiguration('ptah', 'agentBudget.stopWeightedTokens', defaults.stopWeightedTokens),
-        handoffContextTokens: workspace.getConfiguration('ptah', 'agentBudget.handoffContextTokens', defaults.handoffContextTokens),
-        maxDurationMin: workspace.getConfiguration('ptah', 'agentBudget.maxDurationMin', defaults.maxDurationMin),
-      });
-      if (!parsed.success) logger.warn('[Codex budget] Invalid agent budget settings; using defaults');
-      return ownedContext(context, dispose, {
-        tap: new CodexChildBudgetTap(parsed.success ? parsed.data : defaults), logger,
-      });
+      return ownCodexContext(context, dispose);
     } catch (error) {
       try {
         await dispose();

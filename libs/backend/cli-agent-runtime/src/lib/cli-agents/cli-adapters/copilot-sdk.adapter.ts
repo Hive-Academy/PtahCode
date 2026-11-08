@@ -37,7 +37,6 @@
  * - session.error             -> error
  * - result                    -> info (final stats); resolves done promise
  */
-import { randomUUID } from 'crypto';
 import { completedTurnTelemetry } from '@ptah-extension/shared';
 import type {
   CliAdapterManifest,
@@ -319,6 +318,7 @@ export class CopilotSdkAdapter implements CliAdapter {
     const resolvedBinaryPath = binaryPath;
     const spawnDescriptor = await resolveDirectSpawn(resolvedBinaryPath);
     let capturedSessionId: string | undefined;
+    let turnSequence = 0;
     let activeChild: ReturnType<typeof spawnCli> | undefined;
 
     const isStackFrame = (line: string): boolean =>
@@ -358,6 +358,7 @@ export class CopilotSdkAdapter implements CliAdapter {
       prompt: string,
       resumeSessionId?: string,
     ): Promise<number> => {
+      const turnNumber = ++turnSequence;
       const args: string[] = [
         '-p',
         prompt,
@@ -421,6 +422,7 @@ export class CopilotSdkAdapter implements CliAdapter {
       let receivedReasoningDeltas = false;
       const toolCallIdToName = new Map<string, string>();
       let turnUsage: CliOutputSegment['usage'];
+      let nativeTurnId: string | undefined;
       const emitTurnSegment = (item: CliOutputSegment): void => {
         if (item.usage) turnUsage = item.usage;
         segment.emit(item);
@@ -450,6 +452,7 @@ export class CopilotSdkAdapter implements CliAdapter {
                 receivedReasoningDeltas = true;
               },
               toolCallIdToName,
+              onResultId: (id) => { nativeTurnId = id; },
             },
           );
           if (sessionId) {
@@ -490,6 +493,7 @@ export class CopilotSdkAdapter implements CliAdapter {
                   receivedReasoningDeltas = true;
                 },
                 toolCallIdToName,
+                onResultId: (id) => { nativeTurnId = id; },
               },
             );
             if (sessionId) {
@@ -505,7 +509,8 @@ export class CopilotSdkAdapter implements CliAdapter {
             segment.emit({
               type: 'info', content: 'Copilot turn telemetry',
               turnTelemetry: completedTurnTelemetry({
-                turnId: randomUUID(), modelId: turnUsage?.model ?? options.model,
+                turnId: nativeTurnId ?? `${capturedSessionId ?? resumeSessionId ?? `copilot:${child.pid ?? options.agentId ?? 'unknown'}`}:${turnNumber}`,
+                modelId: turnUsage?.model ?? 'copilot/unknown',
                 source: 'stream', usage: turnUsage ? {
                   inputTokens: turnUsage.inputTokens,
                   outputTokens: turnUsage.outputTokens,
@@ -564,6 +569,7 @@ export class CopilotSdkAdapter implements CliAdapter {
       getReceivedReasoningDeltas: () => boolean;
       setReceivedReasoningDeltas: () => void;
       toolCallIdToName: Map<string, string>;
+      onResultId?: (id: string) => void;
     },
   ): string | undefined {
     let event: CopilotCliEvent;
@@ -812,6 +818,7 @@ export class CopilotSdkAdapter implements CliAdapter {
       }
 
       case 'result': {
+        if (typeof event.id === 'string' && event.id.trim()) state.onResultId?.(event.id.trim());
         const sessionId =
           typeof event.sessionId === 'string' && event.sessionId.trim()
             ? event.sessionId.trim()

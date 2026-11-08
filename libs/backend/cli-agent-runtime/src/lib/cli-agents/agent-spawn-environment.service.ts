@@ -26,7 +26,7 @@ import { CliDetectionService } from './cli-detection.service';
 import type { CliLaneBudgets } from './cli-adapters/cli-adapter.interface';
 import type { CliAdapter } from './cli-adapters/cli-adapter.interface';
 import type { CliAdapterManifest, SpawnAgentRequest } from '@ptah-extension/shared';
-import { agentBudgetSettingsSchema, type AgentBudgetSettings } from '@ptah-extension/shared';
+import { agentBudgetSettingsSchema, DEFAULT_AGENT_BUDGET_SETTINGS, type AgentBudgetSettings } from '@ptah-extension/shared';
 import { translateLaneSpawnPolicy } from './lane-spawn-policy';
 import { CODEX_DEFAULT_LANE_BUDGETS } from './cli-adapters/codex/codex-lane-budgets';
 import {
@@ -254,10 +254,7 @@ export class AgentSpawnEnvironment {
 
   /** Read the live budget settings through the same workspace configuration surface. */
   resolveAgentBudgetSettings(): AgentBudgetSettings {
-    const defaults: AgentBudgetSettings = {
-      warnRatio: 0.85, stopWeightedTokens: 3_000_000,
-      handoffContextTokens: 150_000, maxDurationMin: 90,
-    };
+    const defaults = DEFAULT_AGENT_BUDGET_SETTINGS;
     const values = {
       warnRatio: this.workspace.getConfiguration('ptah', 'agentBudget.warnRatio', defaults.warnRatio),
       stopWeightedTokens: this.workspace.getConfiguration('ptah', 'agentBudget.stopWeightedTokens', defaults.stopWeightedTokens),
@@ -266,7 +263,11 @@ export class AgentSpawnEnvironment {
     };
     const parsed = agentBudgetSettingsSchema.safeParse(values);
     if (parsed.success) return parsed.data;
-    this.logger.warn('[AgentSpawnEnvironment] Invalid agent budget settings; using defaults');
+    const signature = `agentBudget\u0000${JSON.stringify(values)}`;
+    if (!this.warnedLaneGuard.has(signature)) {
+      this.warnedLaneGuard.add(signature);
+      this.logger.warn('[AgentSpawnEnvironment] Invalid agent budget settings; using defaults');
+    }
     return defaults;
   }
 

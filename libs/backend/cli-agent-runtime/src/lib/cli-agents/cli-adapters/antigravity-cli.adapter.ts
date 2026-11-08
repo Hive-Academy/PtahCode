@@ -93,7 +93,6 @@ import { laneMcpAuthUrl } from './lane-mcp-credentials';
 import { ptahMcpServerUrl } from './ptah-mcp-url';
 import { classifyCliStderr } from './cli-stderr-severity';
 import { z } from 'zod';
-import { randomUUID } from 'crypto';
 import { completedTurnTelemetry } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
@@ -178,6 +177,7 @@ const AgyResultSchema = z
     error: z.unknown().optional(),
     duration_seconds: z.number().optional(),
     num_turns: z.number().optional(),
+    model: z.string().optional(),
     usage: AgyUsageSchema.optional(),
   })
   .passthrough();
@@ -816,6 +816,10 @@ export class AntigravityCliAdapter implements CliAdapter {
       let processClosed = false;
       let stdinClosed = false;
       let currentTurn = createTurnDeferred();
+      let turnSequence = 1;
+      let currentTurnId = '';
+      let observedModelId: string | undefined;
+      const seenResultIds = new Set<string>();
       const firstTurn = currentTurn;
       const errorSteps: AgyStepUpdate[] = [];
       const agyErrors: string[] = [];
@@ -833,7 +837,8 @@ export class AntigravityCliAdapter implements CliAdapter {
         segment.emit({
           type: 'info', content: 'Antigravity turn telemetry',
           turnTelemetry: completedTurnTelemetry({
-            turnId: randomUUID(), modelId: options.model, source: 'stream',
+            turnId: currentTurnId || `${capturedSessionId ?? options.agentId ?? `agy:${child.pid ?? 'unknown'}`}:${turnSequence}`,
+            modelId: observedModelId ?? 'antigravity/unknown', source: 'stream',
             usage: usage ? {
               inputTokens: usage.input_tokens,
               outputTokens: usage.output_tokens,
@@ -859,6 +864,12 @@ export class AntigravityCliAdapter implements CliAdapter {
         }
       };
       const onResult = (event: z.infer<typeof AgyResultEventSchema>): void => {
+        const nativeTurnId = event.result.conversation_id && event.result.num_turns !== undefined
+          ? `${event.result.conversation_id}:${event.result.num_turns}` : undefined;
+        currentTurnId = nativeTurnId ?? `${event.result.conversation_id}:${turnSequence}`;
+        if (seenResultIds.has(currentTurnId) && (!failedResult || event.result.status !== 'SUCCESS')) return;
+        seenResultIds.add(currentTurnId);
+        observedModelId = event.result.model ?? observedModelId;
         sawResult = true;
         failedResult = event.result.status !== 'SUCCESS';
         failedEvent = failedResult ? event : undefined;
@@ -1207,6 +1218,9 @@ export class AntigravityCliAdapter implements CliAdapter {
                 const previousTurn = currentTurn;
                 const nextTurn = createTurnDeferred();
                 currentTurn = nextTurn;
+                turnSequence++;
+                currentTurnId = '';
+                observedModelId = undefined;
                 failedResult = false;
                 failedEvent = undefined;
                 sawResult = false;

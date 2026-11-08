@@ -366,7 +366,7 @@ describe('LaneResumeGate budget refusal', () => {
   });
   it('starts fresh at the warning threshold', async () => {
     const result = await gateWith().gate.evaluate({ cli: 'claude', cliSessionId: 's', budgetSettings,
-      budget: { weightedTokens: 80, rawTokens: 80, startedAtMs: 0 } });
+      budget: { weightedTokens: 80, rawTokens: 80, turnIds: [], startedAtMs: 0 } });
     expect(result.decision).toBe('fresh');
   });
 });

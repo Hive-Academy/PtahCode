@@ -60,7 +60,6 @@
  */
 import { existsSync } from 'fs';
 import path from 'path';
-import { randomUUID } from 'crypto';
 import { completedTurnTelemetry } from '@ptah-extension/shared';
 import type {
   CliDetectionResult,
@@ -130,6 +129,8 @@ interface OpencodeToolState {
 /** Nested `part` object present on most opencode JSONL events. */
 interface OpencodePart {
   readonly id?: string;
+  readonly modelID?: string;
+  readonly providerID?: string;
   readonly type?: string;
   readonly text?: string;
   readonly tool?: string;
@@ -156,6 +157,8 @@ interface OpencodePart {
 interface OpencodeEvent {
   readonly type?: string;
   readonly sessionID?: string;
+  readonly modelID?: string;
+  readonly providerID?: string;
   readonly timestamp?: number;
   readonly part?: OpencodePart;
   readonly message?: string;
@@ -179,10 +182,12 @@ interface OpencodeTurnState {
   stderrErrorAfterStop?: string;
   finalUsage?: OpencodePart;
   turnId?: string;
+  observedModelId?: string;
 }
 
 /** Everything one `opencode run` spawn needs; see `runTurn`. */
 interface OpencodeTurnLaunch {
+  readonly turnNumber: number;
   readonly command: string;
   readonly args: string[];
   readonly workingDirectory: string;
@@ -195,7 +200,6 @@ interface OpencodeTurnLaunch {
   readonly onExited: (child: ReturnType<typeof spawnCli>) => void;
   readonly onSessionId: (sessionId: string) => void;
   readonly expectedSessionId?: string;
-  readonly modelId?: string;
 }
 
 /** The readable message of an `error` event, whichever shape it has. */
@@ -713,6 +717,7 @@ export class OpencodeCliAdapter implements CliAdapter {
     // off-Windows / for a resolved `.exe`.
     const spawnDescriptor = await resolveDirectSpawn(binary);
 
+    let turnSequence = 0;
     const startTurn = (
       prompt: string,
       sessionId: string | undefined,
@@ -729,6 +734,7 @@ export class OpencodeCliAdapter implements CliAdapter {
       args.push(prompt);
       assertCommandLineWithinLimit(spawnDescriptor.command, args);
       return this.runTurn({
+        turnNumber: ++turnSequence,
         command: spawnDescriptor.command,
         args,
         workingDirectory: options.workingDirectory,
@@ -753,7 +759,6 @@ export class OpencodeCliAdapter implements CliAdapter {
           }
         },
         expectedSessionId: sessionId,
-        modelId: options.model,
       });
     };
 
@@ -913,7 +918,8 @@ export class OpencodeCliAdapter implements CliAdapter {
           emitSegment({
             type: 'info', content: 'OpenCode turn telemetry',
             turnTelemetry: completedTurnTelemetry({
-              turnId: state.turnId ?? randomUUID(), modelId: launch.modelId,
+              turnId: state.turnId ?? `${boundSessionId ?? launch.expectedSessionId ?? `opencode:${child.pid ?? 'unknown'}`}:${launch.turnNumber}`,
+              modelId: state.observedModelId ?? 'opencode/unknown',
               source: 'stream',
               usage: tokens ? {
                 inputTokens: tokens.input, outputTokens: tokens.output,
@@ -1011,6 +1017,9 @@ export class OpencodeCliAdapter implements CliAdapter {
     }
 
     if (!acceptSession(event)) return;
+    const modelId = event.modelID ?? event.part?.modelID;
+    const providerId = event.providerID ?? event.part?.providerID;
+    if (modelId && providerId) turn.observedModelId = `${providerId}/${modelId}`;
 
     switch (event.type) {
       case 'step_start':
@@ -1147,7 +1156,6 @@ export class OpencodeCliAdapter implements CliAdapter {
       !Number.isSafeInteger(tokens.input) || tokens.input === undefined || tokens.input < 0 ||
       !Number.isSafeInteger(tokens.output) || tokens.output === undefined || tokens.output < 0
     ) {
-      emitSegment({ type: 'error', content: 'OpenCode turn telemetry unavailable: complete input/output totals missing.' });
       return;
     }
     const usageStr = `Usage: ${tokens.input} input, ${tokens.output} output tokens`;
