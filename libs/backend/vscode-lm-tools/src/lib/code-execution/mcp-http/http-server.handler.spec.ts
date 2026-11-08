@@ -519,17 +519,20 @@ describe('HTTP request handling', () => {
       'the wrong JSON-RPC version',
       JSON.stringify({ jsonrpc: '1.0', id: 1, method: 'tools/list' }),
     ],
-  ])('returns a fixed Invalid Request response for %s', async (_case, input) => {
-    const { status, body } = await fetchPath(port, 'POST', '/', input);
+  ])(
+    'returns a fixed Invalid Request response for %s',
+    async (_case, input) => {
+      const { status, body } = await fetchPath(port, 'POST', '/', input);
 
-    expect(status).toBe(400);
-    expect(JSON.parse(body)).toEqual({
-      jsonrpc: '2.0',
-      id: null,
-      error: { code: -32600, message: 'Invalid Request' },
-    });
-    expect(onMCPRequest).not.toHaveBeenCalled();
-  });
+      expect(status).toBe(400);
+      expect(JSON.parse(body)).toEqual({
+        jsonrpc: '2.0',
+        id: null,
+        error: { code: -32600, message: 'Invalid Request' },
+      });
+      expect(onMCPRequest).not.toHaveBeenCalled();
+    },
+  );
 
   it('does not stamp _callerSessionId when URL path has no /session/ prefix', async () => {
     await fetchPath(
@@ -1163,6 +1166,44 @@ describe('HTTP caller authentication', () => {
     });
     expect(onMCPRequest).not.toHaveBeenCalled();
   });
+
+  it.each(['/projects/x y/', 'D:\\projects\\x y'])(
+    'accepts a workspace-bound session URL and rejects the session-only URL: %s',
+    async (workspaceRoot) => {
+      const registry = new McpCallerTokenRegistry({ logger: credentialLogger });
+      const token = registry.issue(
+        {
+          kind: 'session',
+          sessionId: 'tab-abc',
+          workspaceRoot,
+          capability: 'privileged',
+        },
+        'fake-test-session',
+        60_000,
+      );
+      await listen((input) => registry.authorize(input));
+      const headers = { authorization: `Bearer ${token}` };
+      const accepted = await fetchPath(
+        port,
+        'POST',
+        `/session/tab-abc/workspace/${encodeURIComponent(workspaceRoot)}`,
+        jsonBody,
+        headers,
+      );
+      expect(accepted.status).toBe(200);
+      expect(seenRequest()._callerWorkspaceRoot).toBe(workspaceRoot);
+      const rejected = await fetchPath(
+        port,
+        'POST',
+        '/session/tab-abc',
+        jsonBody,
+        headers,
+      );
+      expect(rejected.status).toBe(403);
+      expect(JSON.parse(rejected.body).error.code).toBe(-32003);
+      expect(onMCPRequest).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it('returns 403 when a lane-report token names another agent', async () => {
     const registry = new McpCallerTokenRegistry({ logger: credentialLogger });
