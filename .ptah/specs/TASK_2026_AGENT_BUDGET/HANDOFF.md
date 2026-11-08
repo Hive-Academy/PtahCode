@@ -29,7 +29,20 @@ PR: https://github.com/Hive-Academy/PtahCode/pull/986 (draft). Pushed head `5a84
 - Manager agent-process-manager.service.ts: 3849 physical / 3673 non-blank (main 3849 / 3675).
 - Side fix done for the user: PR #1000 CodeRabbit comment (commit 9cef23bb9, merged).
 
-## Update ~09:50 UTC (newest)
+## Update ~11:20 UTC (newest)
+- #986 is READY FOR REVIEW (not draft). Head `89e086992`, CI green (18 pass, 4 skipped). Title
+  "feat: shared agent budget for SDK, Codex and CLI agent lanes"; body from pr-body.md here.
+- Since 13f02ffcc: `1d060d43b` live 7 report, `948ab6ce2` round 7 fixes, `d96022bbf` second final
+  review fixes (child drains settle on stream close; queued warning logs no unsupported),
+  `89e086992` live 8 report. Live 8 proved the Codex child counters/relinks, lane warning before
+  stop, paraphrased SDK handoff. d96022bbf is spec-only.
+- Waiting: CodeRabbit review (background watcher). Address actionable comments, then report.
+- OpenCode free usage is exhausted; use Codex lanes for reviews.
+- Known gaps are listed in the PR body Test plan.
+- Never merge; keep worktrees (agent-budget, agent-budget-sdk, -settings, -codex) until the user
+  authorizes cleanup (remove node_modules junctions first with `cmd /c rmdir`).
+
+## Update ~09:50 UTC
 - Pushed head `13f02ffcc`. Since cc5ccd58a (CI green): `248604f00` round 6 fixes (SDK stream waits
   for the monitor so the Ptah handoff reaches the parent first — the "stopped by user" root cause
   was this race; same-turn warning only in the stop envelope; predictive warning with the largest
