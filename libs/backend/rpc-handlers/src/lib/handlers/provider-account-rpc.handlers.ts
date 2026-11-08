@@ -180,7 +180,7 @@ const REFUSAL_COPY: Record<RefusalCode, string> = {
   'missing-profile': 'This account is no longer available.',
   'wrong-provider': 'This action requires a Claude account.',
   'unsupported-store': 'This account store cannot be verified.',
-  'unsupported-source': 'The account authentication source cannot be verified.',
+  'unsupported-source': 'The Claude CLI build, account plan or a Claude settings source could not be certified for named accounts (see the Ptah log for the step).',
   'identity-mismatch': 'The account identity has changed.',
   'identity-unproved': 'The account identity could not be verified.',
   'route-changed': 'The account directory has changed.',

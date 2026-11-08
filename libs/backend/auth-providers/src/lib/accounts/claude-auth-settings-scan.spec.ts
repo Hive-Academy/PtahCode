@@ -135,6 +135,9 @@ describe('CLAUDE_POLICY_COVERAGE', () => {
 
   it.each([
     ['2.1.310', true],
+    ['2.1.310-beta.1', false],
+    ['2.1.320-beta.1', true],
+    ['2.1.310+meta', true],
     ['2.1.312', true],
     ['2.1.999', true],
     ['2.1.309', false],
@@ -145,8 +148,8 @@ describe('CLAUDE_POLICY_COVERAGE', () => {
     ['3.1.310', false],
     ['1.1.310', false],
     ['2.1', false],
-    ['2.1.312 (Claude Code)', false],
-    ['2.1.312-beta', false],
+    ['2.1.312 (Claude Code)', true],
+    ['2.1.312-beta', true],
   ] as const)('accepts version %s: %s', (version, accepted) => {
     const win = claudePolicyCoverage('win32');
     expect(claudeCoverageAcceptsVersion(win, version)).toBe(accepted);

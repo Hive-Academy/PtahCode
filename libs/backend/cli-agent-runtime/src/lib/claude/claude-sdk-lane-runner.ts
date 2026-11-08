@@ -4,6 +4,7 @@ import {
   assertCertifiedLaunch,
   claudeIdentityReference,
   claudePersonalLoginCheck,
+  claudeVersionIdentity,
   claudePersonalLoginPassed,
   createNamedAccountPromptGate,
   isChildExitProved,
@@ -325,7 +326,7 @@ const CLAUDE_LANE_REFUSAL_MESSAGES: Readonly<
   'unsupported-store':
     'Claude account refused (unsupported-store): the account directory or the installed Claude CLI is not usable for named accounts',
   'unsupported-source':
-    'Claude account refused (unsupported-source): a Claude settings source for this working directory or machine policy is not supported for named accounts',
+    'Claude account refused (unsupported-source): the Claude CLI build, account plan or a Claude settings source could not be certified for named accounts (see the Ptah log for the step)',
   'identity-mismatch':
     'Claude account refused (identity-mismatch): the signed-in Claude login is not the stored account',
   'identity-unproved':
@@ -819,7 +820,9 @@ export class ClaudeNamedLaneAdmission {
         // personal key source (independent of account info), before any output
         // is forwarded, any tool runs or the binding is committed.
         this.step = 'init-version';
-        if (next.value.claude_code_version !== version)
+        const initVersion = claudeVersionIdentity(next.value.claude_code_version);
+        const certifiedVersion = claudeVersionIdentity(version);
+        if (initVersion === null || certifiedVersion === null || initVersion !== certifiedVersion)
           throw claudeLaneRefusal('identity-unproved');
         this.step = 'init-key-source';
         if (!INIT_PERSONAL_KEY_SOURCES.has(String(next.value.apiKeySource)))

@@ -1435,7 +1435,7 @@ describe('ProviderAccountRpcHandlers', () => {
         ok: false,
         result: {
           code: 'unsupported-source',
-          summary: 'The account authentication source cannot be verified.',
+          summary: 'The Claude CLI build, account plan or a Claude settings source could not be certified for named accounts (see the Ptah log for the step).',
         },
       });
       expect(actions.commands).toEqual([

@@ -141,6 +141,22 @@ describe('ClaudeAccountCommand (account child owner)', () => {
         version: '2.1.310', fingerprint: { size: 10, mtimeMs: 1 } } });
     });
 
+    it.each([
+      ['2.1.320-beta.1 (Claude Code)', '2.1.320-beta.1'],
+      ['2.1.320 (Claude Code, build x)', '2.1.320'],
+      ['2.1.320+build.5', '2.1.320+build.5'],
+    ])(
+      'records the full version identity from %s', async (banner, identity) => {
+        expect(await version(`${banner}\nextra output`)).toMatchObject({
+          ok: true, executable: { version: identity, fingerprint: { size: 10, mtimeMs: 1 } },
+        });
+      },
+    );
+
+    it('refuses malformed version output', async () => {
+      expect(await version('2.1.320garbage')).toMatchObject({ ok: false, code: 'identity-unproved' });
+    });
+
     it('reuses the cache for the same path and fingerprint (one spawn for two calls)', async () => {
       await version('2.1.310 (Claude Code)');
       const second = await command.certifyExecutable(new AbortController().signal);
