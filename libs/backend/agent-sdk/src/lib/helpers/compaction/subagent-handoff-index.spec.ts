@@ -261,14 +261,12 @@ describe('SubagentHandoffIndex', () => {
     fs.unlinkSync(file);
     clock += INDEX_RESCAN_MS;
     await index.pointerFor(root, audience());
-    await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await index['workspaces'].get(path.resolve(root))?.loading;
 
     fs.writeFileSync(file, renderRecord(BODY));
     clock += INDEX_RESCAN_MS;
     await index.pointerFor(root, audience());
-    await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await index['workspaces'].get(path.resolve(root))?.loading;
     expect(listed(await index.pointerFor(root, audience()))).toEqual([file]);
   });
 

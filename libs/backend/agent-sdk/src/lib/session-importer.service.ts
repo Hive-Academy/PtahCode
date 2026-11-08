@@ -13,7 +13,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
-import { SessionId } from '@ptah-extension/shared';
+import { claudeProjectDir, SessionId } from '@ptah-extension/shared';
 import type { ProviderAccountBinding } from '@ptah-extension/shared';
 import {
   SessionMetadataStore,
@@ -1049,7 +1049,7 @@ export class SessionImporterService {
         throw new ClaudeAccountResourceError('unavailable');
       return null;
     }
-    const escapedPath = workspacePath.replace(/[:\\/]/g, '-');
+    const escapedPath = claudeProjectDir(workspacePath);
 
     this.logger.debug('[SessionImporter] findSessionsDirectory', {
       workspacePath,

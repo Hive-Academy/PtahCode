@@ -95,6 +95,26 @@ describe('IpcBridge — CLI-agent permission answers', () => {
     bridge.dispose();
   });
 
+  it.each([
+    { requestId: 'req-1', decision: 'always_allow' },
+    { requestId: 'req-1', decision: 'allow', reason: 42 },
+  ])('rejects a malformed lane decision at IPC', async (payload) => {
+    const { bridge, handleMessage, send } = setup();
+    await send({ type: MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_RESPONSE, payload });
+    expect(handleMessage).not.toHaveBeenCalled();
+    bridge.dispose();
+  });
+
+  it('rejects malformed AskUserQuestion answers at IPC', async () => {
+    const { bridge, handleMessage, send } = setup();
+    await send({
+      type: MESSAGE_TYPES.ASK_USER_QUESTION_RESPONSE,
+      payload: { id: 'question-1', answers: { choice: 42 } },
+    });
+    expect(handleMessage).not.toHaveBeenCalled();
+    bridge.dispose();
+  });
+
   it('logs a failed answer without throwing', async () => {
     const warn = jest
       .spyOn(console, 'warn')

@@ -137,6 +137,13 @@ function buildHarness(): {
 }
 
 describe('PtahCliRegistry.spawnAgent — permission routing identity', () => {
+  it('exposes an assigned lane id before the SDK query starts', async () => {
+    const { registry, createCallback } = buildHarness();
+    await registry.spawnAgent(BASE_CONFIG.id, 'do work', { agentId: 'lane-assigned' });
+    const resolver = createCallback.mock.calls[0][1] as () => string | undefined;
+    expect(resolver()).toBe('lane-assigned');
+  });
+
   it('caps a Ptah CLI child to plan through the static resolver path', async () => {
     const { registry, queryFn } = buildHarness();
     await registry.spawnAgent(BASE_CONFIG.id, 'do work', {

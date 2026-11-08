@@ -15,6 +15,7 @@ import { VSCodeService } from '@ptah-extension/core';
 import { PanelResizeService } from '../../services/panel-resize.service';
 import { SESSION_CARD_ACTIONS, SESSION_CONTEXT } from '../../tokens/session-context.token';
 import { AgentMonitorPanelComponent } from './agent-monitor-panel.component';
+import { AgentPermissionResponder } from '../../services/agent-permission-responder';
 
 const OTHER_SESSION = 'session-other';
 
@@ -68,6 +69,7 @@ describe('AgentMonitorPanelComponent — unresolved session scope', () => {
     TestBed.configureTestingModule({
       imports: [AgentMonitorPanelComponent],
       providers: [
+        { provide: AgentPermissionResponder, useValue: { respondLane: jest.fn() } },
         provideSurfaceActiveTesting(),
         { provide: SESSION_CONTEXT, useValue: signal<string | null>('tab-scoped') },
         { provide: AgentMonitorStore, useValue: storeMock },

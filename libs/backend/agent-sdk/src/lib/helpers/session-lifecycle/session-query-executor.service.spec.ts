@@ -61,6 +61,7 @@ const noHandoffFiles: SubagentHandoffFilesPort = {
   paths: () => undefined,
   saveTask: async () => false,
   notesExist: async () => false,
+  redactNotes: async () => false,
 };
 /** A monitor's handoff records: every write succeeds, nothing touches disk. */
 const memoryHandoffRecords: SubagentHandoffRecordsPort = {

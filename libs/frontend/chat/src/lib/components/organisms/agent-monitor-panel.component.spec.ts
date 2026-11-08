@@ -26,6 +26,7 @@ import { TabManagerService } from '@ptah-extension/chat-state';
 import { VSCodeService } from '@ptah-extension/core';
 import { PanelResizeService } from '../../services/panel-resize.service';
 import { AgentMonitorPanelComponent } from './agent-monitor-panel.component';
+import { AgentPermissionResponder } from '../../services/agent-permission-responder';
 import { SubagentLaneComponent } from './subagent-lane/subagent-lane.component';
 import { groupAgentsByWorkflowRun } from './agent-monitor-panel.grouping';
 
@@ -253,6 +254,7 @@ describe('AgentMonitorPanelComponent — overlay focus', () => {
     TestBed.configureTestingModule({
       imports: [AgentMonitorPanelComponent],
       providers: [
+        { provide: AgentPermissionResponder, useValue: { respondLane: jest.fn() } },
         {
           provide: AgentMonitorStore,
           useValue: {
@@ -369,6 +371,7 @@ describe('AgentMonitorPanelComponent — sticky-to-bottom scrolling', () => {
     TestBed.configureTestingModule({
       imports: [AgentMonitorPanelComponent],
       providers: [
+        { provide: AgentPermissionResponder, useValue: { respondLane: jest.fn() } },
         {
           provide: AgentMonitorStore,
           useValue: {
@@ -537,6 +540,7 @@ describe('AgentMonitorPanelComponent — session subagents', () => {
     TestBed.configureTestingModule({
       imports: [AgentMonitorPanelComponent],
       providers: [
+        { provide: AgentPermissionResponder, useValue: { respondLane: jest.fn() } },
         provideSurfaceActiveTesting(),
         {
           provide: AgentMonitorStore,

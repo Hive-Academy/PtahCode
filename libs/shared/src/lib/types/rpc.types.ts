@@ -26,6 +26,7 @@ export * from './rpc/rpc-provider-accounts.types';
 export * from './rpc/rpc-setup.types';
 export * from './rpc/rpc-setup-decisions.types';
 export * from './rpc/rpc-agents.types';
+import type { AgentPermissionRequest } from './agent-permission.types';
 export * from './rpc/rpc-misc.types';
 export * from './rpc/rpc-file-binary.types';
 export * from './rpc/rpc-git.types';
@@ -1802,6 +1803,10 @@ export interface RpcMethodRegistry
   'agent:permissionResponse': {
     params: AgentPermissionDecision;
     result: { success: boolean; error?: string };
+  };
+  'agent:pendingPermissions': {
+    params: void;
+    result: AgentPermissionRequest[];
   };
   /**
    * TEST-ONLY seam (TASK_2026_264). Invokes the real
@@ -3759,6 +3764,7 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'agent:cancelParentDelivery': true,
   'agent:listCliModels': true,
   'agent:permissionResponse': true, // Copilot SDK permission response
+  'agent:pendingPermissions': true,
   'agent:e2eSeedPermission': true, // TEST-ONLY seam, PTAH_E2E-gated (TASK_2026_264)
   'agent:stop': true,
   'agent:continue': true,

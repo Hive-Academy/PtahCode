@@ -3176,6 +3176,12 @@ describe('protocol-handlers › approval_prompt auto-allow', () => {
       makeRequest({
         id: 'approval-with-view',
         method: 'tools/call',
+        _callerSessionId: '22222222-2222-4222-8222-222222222222',
+        _callerBinding: {
+          kind: 'session',
+          sessionId: '22222222-2222-4222-8222-222222222222',
+          capability: 'privileged',
+        },
         params: {
           name: 'approval_prompt',
           arguments: { tool_name: 'Bash', input: { cmd: 'ls' } },

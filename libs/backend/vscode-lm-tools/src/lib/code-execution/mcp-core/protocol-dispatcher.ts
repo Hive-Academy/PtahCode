@@ -1275,7 +1275,7 @@ async function handleIndividualTool(
           cli: spawnArgs.cli ?? (ptahCliId ? 'ptah-cli' : 'auto-detect'),
           ptahCliId,
           model: spawnArgs.model ?? 'default',
-          modelTier: modelTier ?? 'sonnet',
+          modelTier: modelTier ?? 'unset',
           task: task.substring(0, 100) + (task.length > 100 ? '...' : ''),
           timeout: spawnArgs.timeout,
           files: spawnArgs.files?.length ?? 0,

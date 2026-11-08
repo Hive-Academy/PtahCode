@@ -3,6 +3,7 @@ export { mergeHarnessConfigUpdates } from './merge-harness-config-updates';
 export * from './retry.utils';
 export * from './json.utils';
 export { WorkspacePathEncoder } from './workspace-path-encoder';
+export { claudeProjectDir } from './claude-project-dir';
 export { lastPathSegment } from './path-display.utils';
 export { assertNever } from './assert-never';
 export {

@@ -1405,7 +1405,7 @@ describe(`${CompactSessionActivityComponent.name} board layout`, () => {
     buttonByText(root, 'Open')?.click();
     expect(opened).toHaveBeenCalledWith(session);
     buttonByText(root, 'More')?.click(); fixture.detectChanges();
-    buttonByText(root, 'Always allow')?.click();
+    buttonByText(root, 'Always allow in session')?.click();
     expect(decided).toHaveBeenLastCalledWith({ callout: session, decision: 'always_allow', reason: undefined });
     fixture.detectChanges();
     buttonByText(root, 'More')?.click(); fixture.detectChanges();

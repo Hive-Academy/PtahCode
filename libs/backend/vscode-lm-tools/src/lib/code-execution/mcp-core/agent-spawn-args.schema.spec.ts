@@ -387,9 +387,12 @@ describe('spawn descriptions stay truthful about the claude lane', () => {
     expect(text).not.toMatch(/release/i);
   });
 
-  it('says modelTier is Ptah CLI only and names the claude SDK lane', () => {
+  it('says modelTier also controls cli claude and names the SDK lane', () => {
     expect(properties['modelTier'].description).toContain(
-      'including cli "claude"',
+      'Also applies to system cli "claude"',
+    );
+    expect(properties['modelTier'].description).toContain(
+      'Other system CLIs ignore it',
     );
     const cli = properties['cli'].description ?? '';
     expect(cli).toContain('Claude Agent SDK session');

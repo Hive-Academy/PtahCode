@@ -64,6 +64,7 @@ jest.mock('fs/promises', () => ({
   ...jest.requireActual('fs/promises'),
   access: jest.fn(),
   readdir: jest.fn(),
+  copyFile: jest.fn(),
   stat: jest.fn(),
   unlink: jest.fn(),
   rmdir: jest.fn(),
@@ -82,6 +83,7 @@ mkdirSync(join(TEST_ROOT, 'workspace'), { recursive: true });
 mkdirSync(join(TEST_ROOT, 'other-project'), { recursive: true });
 const mockAccess = fs.access as jest.MockedFunction<typeof fs.access>;
 const mockReaddir = fs.readdir as jest.MockedFunction<typeof fs.readdir>;
+const mockCopyFile = fs.copyFile as jest.MockedFunction<typeof fs.copyFile>;
 const mockStat = fs.stat as jest.MockedFunction<typeof fs.stat>;
 const mockUnlink = fs.unlink as jest.MockedFunction<typeof fs.unlink>;
 const mockRmdir = fs.rmdir as jest.MockedFunction<typeof fs.rmdir>;
@@ -90,6 +92,7 @@ const mockRename = fs.rename as jest.MockedFunction<typeof fs.rename>;
 beforeEach(() => {
   mockAccess.mockReset().mockRejectedValue(new Error('ENOENT'));
   mockReaddir.mockReset().mockRejectedValue(new Error('ENOENT'));
+  mockCopyFile.mockReset().mockResolvedValue(undefined);
   mockStat.mockReset().mockRejectedValue(new Error('ENOENT'));
   mockUnlink.mockReset().mockResolvedValue(undefined);
   mockRmdir.mockReset().mockResolvedValue(undefined);
@@ -2374,6 +2377,146 @@ describe('SessionRpcHandlers', () => {
   // -------------------------------------------------------------------------
 
   describe('session:validate', () => {
+    it('finds a dotted Windows workspace transcript before a basename decoy', async () => {
+      const workspace = 'D:\\projects\\ptah-extension\\.claude-worktrees\\x\\.ptah\\live-test-ws';
+      const encodedDir = 'D--projects-ptah-extension--claude-worktrees-x--ptah-live-test-ws';
+      const decoyDir = 'C--Temp-ptah-live-test-ws-claude';
+      const projectsDir = path.join(os.homedir(), '.claude', 'projects');
+      const expectedFilePath = path.join(projectsDir, encodedDir, `${VALID_SESSION_ID}.jsonl`);
+      const h = makeHarness({ workspaceFolders: [workspace] });
+      mockReaddir.mockImplementation(async () => [decoyDir, encodedDir] as never);
+      mockAccess.mockImplementation(async (target: PathLike) => {
+        if (String(target) === projectsDir || String(target) === expectedFilePath) return;
+        throw new Error('ENOENT');
+      });
+      h.handlers.register();
+
+      expect(await call<{ exists: boolean; filePath?: string }>(h, 'session:validate', {
+        sessionId: VALID_SESSION_ID, workspacePath: workspace,
+      })).toEqual({ exists: true, filePath: expectedFilePath });
+      expect(await call<{ exists: boolean }>(h, 'session:validate', {
+        sessionId: 'missing-session-id', workspacePath: workspace,
+      })).toEqual({ exists: false });
+    });
+
+    it('checks every basename candidate for a known session id', async () => {
+      const workspace = '/projects/live-test-ws';
+      const projectsDir = path.join(os.homedir(), '.claude', 'projects');
+      const realDir = 'Z--archive-live-test-ws';
+      const expectedFilePath = path.join(projectsDir, realDir, `${VALID_SESSION_ID}.jsonl`);
+      const h = makeHarness({ workspaceFolders: [workspace] });
+      mockReaddir.mockImplementation(async () => ['A--decoy-live-test-ws', realDir] as never);
+      mockAccess.mockImplementation(async (target: PathLike) => {
+        if (String(target) === projectsDir || String(target) === expectedFilePath) return;
+        throw new Error('ENOENT');
+      });
+      h.handlers.register();
+      expect(await call<{ exists: boolean; filePath?: string }>(h, 'session:validate', {
+        sessionId: VALID_SESSION_ID, workspacePath: workspace,
+      })).toEqual({ exists: true, filePath: expectedFilePath });
+    });
+
+    it.each(['/ws', 'C:\\'])('skips basename guesses for short or root workspace %s', async (workspace) => {
+      const projectsDir = path.join(os.homedir(), '.claude', 'projects');
+      const h = makeHarness({ workspaceFolders: [workspace] });
+      mockReaddir.mockImplementation(async () => ['A--unrelated-ws', 'B--another-project'] as never);
+      mockAccess.mockImplementation(async (target: PathLike) => {
+        if (String(target) === projectsDir) return;
+        throw new Error('ENOENT');
+      });
+      h.handlers.register();
+      expect(await call<{ exists: boolean }>(h, 'session:validate', {
+        sessionId: VALID_SESSION_ID, workspacePath: workspace,
+      })).toEqual({ exists: false });
+      expect(mockAccess).toHaveBeenCalledWith(projectsDir);
+      expect(mockAccess).not.toHaveBeenCalledWith(
+        path.join(projectsDir, 'A--unrelated-ws', `${VALID_SESSION_ID}.jsonl`),
+      );
+    });
+
+    it('sorts basename guesses and probes at most 20 candidate files', async () => {
+      const workspace = '/projects/live-test-ws';
+      const projectsDir = path.join(os.homedir(), '.claude', 'projects');
+      const dirs = Array.from({ length: 25 }, (_, i) =>
+        `A${String(i).padStart(2, '0')}-live-test-ws`).reverse();
+      const h = makeHarness({ workspaceFolders: [workspace] });
+      mockReaddir.mockImplementation(async () => dirs as never);
+      mockAccess.mockImplementation(async (target: PathLike) => {
+        if (String(target) === projectsDir) return;
+        throw new Error('ENOENT');
+      });
+      h.handlers.register();
+      expect(await call<{ exists: boolean }>(h, 'session:validate', {
+        sessionId: VALID_SESSION_ID, workspacePath: workspace,
+      })).toEqual({ exists: false });
+      const probes = mockAccess.mock.calls.map(([target]) => String(target))
+        .filter((target) => target.endsWith(`${VALID_SESSION_ID}.jsonl`));
+      expect(probes).toHaveLength(20);
+      expect(probes[1]).toBe(path.join(projectsDir, 'A00-live-test-ws', `${VALID_SESSION_ID}.jsonl`));
+      expect(probes).not.toContain(path.join(projectsDir, 'A19-live-test-ws', `${VALID_SESSION_ID}.jsonl`));
+    });
+
+    it.each(['exact', 'older'] as const)('recovers only the %s workspace directory, not basename guesses', async (variant) => {
+      const workspace = '/projects/.ptah/live-test-ws';
+      const projectsDir = path.join(os.homedir(), '.claude', 'projects');
+      const exactKey = '-projects--ptah-live-test-ws';
+      const olderKey = '-projects-.ptah-live-test-ws';
+      const selectedKey = variant === 'exact' ? exactKey : olderKey;
+      const decoyKey = 'A--decoy-live-test-ws';
+      const decoyFile = path.join(projectsDir, decoyKey, `${VALID_SESSION_ID}.jsonl`);
+      const h = makeHarness({ workspaceFolders: [workspace] });
+      h.metadataStore.get.mockResolvedValue(makeMetadata({
+        sessionId: VALID_SESSION_ID, workspaceId: workspace,
+        workingDirectory: workspace,
+      }) as never);
+      mockReaddir.mockImplementation(async (target: unknown) =>
+        (String(target) === projectsDir ? [decoyKey, selectedKey] : []) as never);
+      mockAccess.mockImplementation(async (target: PathLike) => {
+        if (String(target) === projectsDir || String(target) === decoyFile) return;
+        throw new Error('ENOENT');
+      });
+      h.handlers.register();
+      expect(await call<{ exists: boolean; filePath?: string }>(h, 'session:validate', {
+        sessionId: VALID_SESSION_ID, workspacePath: workspace,
+      })).toEqual({ exists: true, filePath: decoyFile });
+      expect(mockReaddir).toHaveBeenCalledWith(path.join(projectsDir, selectedKey));
+      expect(mockReaddir).not.toHaveBeenCalledWith(path.join(projectsDir, decoyKey));
+    });
+
+    it('recovers a staged transcript from a case-variant exact directory', async () => {
+      const workspace = 'D:\\projects\\.ptah\\live-test-ws';
+      const projectsDir = path.join(os.homedir(), '.claude', 'projects');
+      const caseVariantKey = 'd--projects--ptah-live-test-ws';
+      const sessionDir = path.join(projectsDir, caseVariantKey);
+      const sessionFile = path.join(sessionDir, `${VALID_SESSION_ID}.jsonl`);
+      const stagedFile = `${sessionFile}.ptah-deleting`;
+      let restored = false;
+      const h = makeHarness({ workspaceFolders: [workspace] });
+      h.metadataStore.get.mockResolvedValue(makeMetadata({
+        sessionId: VALID_SESSION_ID, workspaceId: workspace,
+        workingDirectory: workspace,
+      }) as never);
+      mockReaddir.mockImplementation(async (target: unknown) =>
+        (String(target) === projectsDir ? [caseVariantKey] : []) as never);
+      mockAccess.mockImplementation(async (target: PathLike) => {
+        if (String(target) === projectsDir || String(target) === stagedFile ||
+            (String(target) === sessionFile && restored)) return;
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      });
+      mockCopyFile.mockImplementation(async (source, target) => {
+        expect(String(source)).toBe(stagedFile);
+        expect(String(target)).toBe(sessionFile);
+        restored = true;
+      });
+      h.handlers.register();
+
+      expect(await call<{ exists: boolean; filePath?: string }>(h, 'session:validate', {
+        sessionId: VALID_SESSION_ID, workspacePath: workspace,
+      })).toEqual({ exists: true, filePath: sessionFile });
+      expect(mockCopyFile).toHaveBeenCalledWith(stagedFile, sessionFile, expect.any(Number));
+      expect(mockUnlink).toHaveBeenCalledWith(stagedFile);
+    });
+
     function nativeMetadata(): SessionMetadata {
       return {
         ...makeMetadata({
@@ -2486,11 +2629,11 @@ describe('SessionRpcHandlers', () => {
     });
 
     it('finds a child session transcript in its recorded worktree directory', async () => {
-      const worktreePath = '/child-root/child';
+      const worktreePath = '/child-root/.ptah/child';
       const h = makeHarness({
         workspaceFolders: [WORKSPACE, '/child-root'],
       });
-      const escapedWorktreeDir = worktreePath.replace(/[:\\/]/g, '-');
+      const escapedWorktreeDir = '-child-root--ptah-child';
       const projectsDir = path.join(os.homedir(), '.claude', 'projects');
       const expectedFilePath = path.join(
         projectsDir,

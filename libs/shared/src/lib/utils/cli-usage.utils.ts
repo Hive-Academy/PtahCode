@@ -50,7 +50,8 @@ export function cliUsageTokenTotal(
  * Fold one usage report into the running totals.
  *
  * Token counts are summed; the latest reported model, cost and duration are
- * kept. A field no report has carried stays absent — never 0. A report with no
+ * kept, including across unlabeled token reports. A field no
+ * report has carried stays absent — never 0. A report with no
  * defined field is ignored, so the result stays `null` until any usage is
  * seen.
  */

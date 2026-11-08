@@ -131,7 +131,7 @@ export class CompactSessionCalloutComponent {
       actionable: true, soundEligible: false,
       actions: [
         { id: 'allow', label: 'Allow' },
-        ...(session ? [{ id: 'always_allow', label: 'Always allow' }] : []),
+        ...(session && request.canAlwaysAllow !== false ? [{ id: 'always_allow', label: 'Always allow in session' }] : []),
         { id: 'deny', label: 'Deny' },
         ...(session ? [{ id: 'deny_with_message', label: 'Deny with message' }] : []),
       ],

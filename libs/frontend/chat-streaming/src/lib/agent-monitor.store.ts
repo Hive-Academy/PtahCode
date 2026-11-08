@@ -60,6 +60,7 @@ import {
 import { TabManagerService } from '@ptah-extension/chat-state';
 import {
   ClaudeRpcService,
+  LoggingService,
   ProviderAccountsStateService,
   VSCodeService,
 } from '@ptah-extension/core';
@@ -810,6 +811,39 @@ export class AgentMonitorStore implements OnDestroy {
   }
 
   private readonly _agents = signal<readonly MonitoredAgent[]>([]);
+  private readonly logger = inject(LoggingService);
+  private readonly permissionClock = signal(Date.now());
+  private permissionClockTimer: ReturnType<typeof setInterval> | undefined;
+
+  permissionSecondsRemaining(timeoutAt: number): number {
+    return Math.max(0, Math.ceil((timeoutAt - this.permissionClock()) / 1000));
+  }
+
+  private ensurePermissionClock(): void {
+    if (this.permissionClockTimer) return;
+    this.permissionClockTimer = setInterval(() => {
+      const now = Date.now();
+      this.permissionClock.set(now);
+      this.updateAgents(list => {
+        let changed = false;
+        const next = list.map(agent => {
+          const permissionQueue = agent.permissionQueue.filter(request =>
+            request.timeoutAt <= 0 || request.timeoutAt > now);
+          if (permissionQueue.length === agent.permissionQueue.length) return agent;
+          changed = true;
+          return { ...agent, permissionQueue };
+        });
+        return changed ? next : list;
+      });
+      this.stopPermissionClockIfIdle();
+    }, 1000);
+  }
+
+  private stopPermissionClockIfIdle(): void {
+    if (this._agents().some(agent => agent.permissionQueue.some(request => request.timeoutAt > 0))) return;
+    clearInterval(this.permissionClockTimer);
+    this.permissionClockTimer = undefined;
+  }
 
   /**
    * Internal O(1) lookup index. Recomputed whenever `_agents` changes.
@@ -1354,6 +1388,8 @@ export class AgentMonitorStore implements OnDestroy {
   readonly panelOpenRequest = this._panelOpenRequest.asReadonly();
 
   ngOnDestroy(): void {
+    clearInterval(this.permissionClockTimer);
+    this.permissionClockTimer = undefined;
     this.historyCandidates.clear();
     this._historyCandidates.set([]);
     // Apply queued output before teardown so the last deltas are not lost;
@@ -1605,8 +1641,25 @@ export class AgentMonitorStore implements OnDestroy {
         this.onPermissionRequest(req);
       }
     }
+    void this.rehydratePendingPermissions(info.agentId);
     if (!hadAgents && !this._userExplicitlyClosed) {
       this._panelOpen.set(true);
+    }
+  }
+
+  private async rehydratePendingPermissions(agentId: string): Promise<void> {
+    try {
+      const result = await this.rpc.call('agent:pendingPermissions', undefined);
+      if (!result?.success || !Array.isArray(result.data)) {
+        this.logger.warn('AgentMonitorStore', 'Permission replay failed');
+        return;
+      }
+      for (const request of result.data) {
+        if (request.agentId === agentId) this.onPermissionRequest(request);
+      }
+    } catch (error: unknown) {
+      // degradation-audit: reported - Replay failure is logged; live events can still deliver the prompt.
+      this.logger.warn('AgentMonitorStore', 'Permission replay failed', error);
     }
   }
 
@@ -1869,6 +1922,7 @@ export class AgentMonitorStore implements OnDestroy {
 
   /** Handle incoming permission request from CLI agent (Copilot SDK or Ptah CLI) */
   onPermissionRequest(request: AgentPermissionRequest): void {
+    if (request.timeoutAt > 0 && request.timeoutAt <= Date.now()) return;
     this.updateAgents((list) => {
       let foundIndex = -1;
       for (let i = 0; i < list.length; i++) {
@@ -1883,12 +1937,14 @@ export class AgentMonitorStore implements OnDestroy {
           request.agentId,
         );
         const buf = this._pendingPermissionBuffer.get(request.agentId) ?? [];
-        buf.push(request);
+        if (!buf.some((pending) => pending.requestId === request.requestId)) buf.push(request);
         this._pendingPermissionBuffer.set(request.agentId, buf);
         return list;
       }
 
       const agent = list[foundIndex];
+      if (!this.permissionBelongsToAgent(request, agent)) return list;
+      if (agent.permissionQueue.some((pending) => pending.requestId === request.requestId)) return list;
       const next = [...list];
       next[foundIndex] = {
         ...agent,
@@ -1899,6 +1955,19 @@ export class AgentMonitorStore implements OnDestroy {
       return next;
     });
     this._panelOpen.set(true);
+    if (request.timeoutAt > 0 && this._agents().some(agent =>
+      agent.permissionQueue.some(pending => pending.requestId === request.requestId))) {
+      this.permissionClock.set(Date.now());
+      this.ensurePermissionClock();
+    }
+  }
+
+  permissionBelongsToAgent(request: AgentPermissionRequest, agent: MonitoredAgent): boolean {
+    if (!request.parentSessionId && !request.laneGeneration) return false;
+    if (!request.parentSessionId || !request.laneGeneration) return false;
+    const parent = this.sessionAliases.get(request.parentSessionId) ?? request.parentSessionId;
+    return parent === agent.parentSessionId &&
+      Date.parse(request.laneGeneration) === agent.startedAt;
   }
 
   /** Remove a specific permission from the queue by requestId (after user responds). */
@@ -1923,6 +1992,7 @@ export class AgentMonitorStore implements OnDestroy {
       };
       return next;
     });
+    this.stopPermissionClockIfIdle();
   }
 
   toggleAgentExpanded(agentId: string): void {
@@ -2348,7 +2418,11 @@ export class AgentMonitorStore implements OnDestroy {
       const next = list.map((a) => {
         if (ids.has(a.agentId) && a.parentSessionId !== target) {
           changed = true;
-          return { ...a, parentSessionId: target };
+          // Keep the live requests already validated for this exact lane, but
+          // bind their actions to the successor rather than the old session.
+          return { ...a, parentSessionId: target, permissionQueue: a.permissionQueue
+            .filter((request) => this.permissionBelongsToAgent(request, a))
+            .map((request) => ({ ...request, parentSessionId: target })) };
         }
         return a;
       });
@@ -2369,6 +2443,13 @@ export class AgentMonitorStore implements OnDestroy {
       }
       return changed ? next : map;
     });
+    // A request emitted just before adoption can arrive after this event with
+    // its old owner stamp. Replay asks the backend for the current lane owner.
+    for (const agent of this._agents()) {
+      if (ids.has(agent.agentId) && agent.parentSessionId === target) {
+        void this.rehydratePendingPermissions(agent.agentId);
+      }
+    }
   }
 
   clearCompleted(): void {

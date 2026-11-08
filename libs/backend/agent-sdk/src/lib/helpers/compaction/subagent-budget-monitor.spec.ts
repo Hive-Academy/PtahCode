@@ -169,6 +169,7 @@ function makeHarness(
     handoffFiles?: SubagentHandoffFilesPort;
     records?: SubagentHandoffRecordsPort;
     index?: SubagentHandoffIndexPort;
+    lookupTranscript?: typeof resolveSubagentTranscriptPath;
   } = {},
 ) {
   // The order of record, stop and delivery calls.
@@ -253,6 +254,7 @@ function makeHarness(
     opts.index ?? index,
     budgetStops,
     stopNotices,
+    opts.lookupTranscript ?? (async () => undefined),
   );
   return {
     monitor,
@@ -315,7 +317,7 @@ describe('SubagentBudgetMonitor', () => {
     fake('Authorization: Bas', 'ic ', 'dXNlcjpw', 'YXNz'),
     '"apiKey": "very-secret"',
     'AWS_SECRET_ACCESS_KEY=very-secret',
-    'SERVICE_TOKEN_VALUE=very-secret',
+    fake('SERVICE_', 'TOKEN=', 'very-', 'secret'),
     'MY_PRIVATE_KEY=very-secret',
     fake('AK', 'IA', '1234567890ABCDEF'),
     fake('AS', 'IA', '1234567890ABCDEF'),
@@ -330,6 +332,11 @@ describe('SubagentBudgetMonitor', () => {
     fake('"Authorization": "Bear', 'er ', 'abc123"'),
     fake('Authorization: Bas', 'ic ', 'abc123'),
     fake('Bear', 'er ', 'abc123.jwt'),
+    fake('Bear', 'er ', 'abc123def456', ')'),
+    fake('Bas', 'ic ', 'dXNlcjpw', 'YXNz=', ']'),
+    fake('pass', 'word: ', 'correct', 'horse', 'battery'),
+    fake('access', 'Token=', 'letters', 'only'),
+    fake('postgres://', 'user:', 'pass', '/word', '@host'),
     fake('pass', 'word', ' = "two words"'),
     fake('postgres://', 'user:', 'pass', '@host'),
     fake('-----BEGIN PRIV', 'ATE KEY-----\nvery-secret\n-----END PRIV', 'ATE KEY-----'),
@@ -337,11 +344,84 @@ describe('SubagentBudgetMonitor', () => {
     expect(redactBudgetSecrets(secret)).not.toContain(secret.includes('very-secret') ? 'very-secret' : secret);
   });
 
-  it.each(['the token count is 31079', 'update the key handler', 'password reset flow'])('preserves normal sentence: %s', (sentence) => {
+  it.each([
+    [fake('--pass', 'word=', 'dummy', 'value123'), '--password=[redacted]'],
+    [fake('--to', 'ken=', 'dummy', 'value123'), '--token=[redacted]'],
+    [fake('--se', 'cret=', 'dummy', 'value123'), '--secret=[redacted]'],
+    [fake('--api-', 'key ', 'dummy', 'value123'), '--api-key [redacted]'],
+    [fake('--api-', 'key=', 'dummy', 'value123'), '--api-key=[redacted]'],
+    [fake('--pa', 'ss=', 'dummy', 'value123'), '--pass=[redacted]'],
+    [fake('**Pass', 'word:** ', 'dummy', 'value123'), '**Password:** [redacted]'],
+    [fake('*To', 'ken*: ', 'dummy', 'value123'), '*Token*: [redacted]'],
+    [fake('__Se', 'cret__: ', 'dummy', 'value123'), '__Secret__: [redacted]'],
+    [fake('pass', 'word=', '123', '456'), 'password=[redacted]'],
+    [fake('SECRET_', 'KEY_BASE=', 'dummy', 'value123'), 'SECRET_KEY_BASE=[redacted]'],
+    [fake('SERVICE_', 'TOKEN_VALUE=', 'dummy', 'value123'), 'SERVICE_TOKEN_VALUE=[redacted]'],
+    [fake('access', 'Key=', 'dummy', 'value123'), 'accessKey=[redacted]'],
+    [fake('secret', 'Key=', 'dummy', 'value123'), 'secretKey=[redacted]'],
+    [fake('private', 'Key=', 'dummy', 'value123'), 'privateKey=[redacted]'],
+  ])('redacts flagged or formatted credential: %s', (input, expected) => {
+    expect(redactBudgetSecrets(input)).toBe(expected);
+  });
+
+  it.each([
+    fake('access', '-token'), fake('auth', '-token'), fake('refresh', '-token'),
+    fake('client', '-secret'), fake('api', '-token'), fake('private', '-key'),
+  ])('redacts compound long flag with equals and space: %s', (name) => {
+    const credential = fake('dummy', 'value123');
+    expect(redactBudgetSecrets(fake('--', name, '=', credential))).toBe(`--${name}=[redacted]`);
+    expect(redactBudgetSecrets(fake('--', name, ' ', credential))).toBe(`--${name} [redacted]`);
+  });
+
+  it.each(['github-token', 'db-password', 'npm-auth-token', 'aws-secret-key'])('redacts credential-suffixed long flag %s', (name) => {
+    const credential = fake('dummy', 'value123');
+    expect(redactBudgetSecrets(fake('--', name, '=', credential))).toBe(`--${name}=[redacted]`);
+    expect(redactBudgetSecrets(fake('--', name, ' ', credential))).toBe(`--${name} [redacted]`);
+  });
+
+  it.each(['access-key', 'encryption-key', 'signing-key'])('redacts credential key flag %s', (name) => {
+    const credential = fake('dummy', 'value123');
+    expect(redactBudgetSecrets(fake('--', name, '=', credential))).toBe(`--${name}=[redacted]`);
+    expect(redactBudgetSecrets(fake('--', name, ' ', credential))).toBe(`--${name} [redacted]`);
+  });
+
+  it.each(['encryptionKey', 'signingKey', 'authKey', 'masterKey'])('redacts credential camelCase name %s', (name) => {
+    expect(redactBudgetSecrets(fake(name, '=', 'dummy', 'value123'))).toBe(`${name}=[redacted]`);
+  });
+
+  it.each(['the token count is 31079', 'update the key handler', 'password reset flow',
+    'Basic usage', 'Basic functionality', 'Basic configuration',
+    'primary key: id', 'the key insight', 'Bearer of bad news', 'monkey: x',
+    'timeout: 123456',
+    fake('token-', 'budget: 130000'),
+    fake('token_', 'count: 42'),
+    fake('key_', 'count=123456'),
+    fake('password_', 'reset_url: 123456'),
+    fake('max-', 'tokens=130000'),
+    fake('sort', 'Key: 123456'),
+    fake('mkdir ', '-p src/lib'),
+    fake('ls ', '-p dir'),
+    fake('npm ', '-p pkg'),
+  ])('preserves normal sentence: %s', (sentence) => {
     expect(redactBudgetSecrets(sentence)).toBe(sentence);
   });
 
-  it('accepts only an existing transcript in the expected session directory', () => {
+  it('handles a long delimiter chain without repeated suffix scans', () => {
+    const line = 'a-'.repeat(50_000);
+    const started = performance.now();
+    expect(redactBudgetSecrets(line)).toBe(line);
+    expect(redactBudgetSecrets(`${line}: abc123`)).toBe(`${line}: abc123`);
+    expect(performance.now() - started).toBeLessThan(2_000);
+  });
+
+  it('handles a 1 MiB base64url-like line with many underscores in under one second', () => {
+    const line = 'ab_'.repeat(349_525);
+    const started = performance.now();
+    expect(redactBudgetSecrets(line)).toBe(line);
+    expect(performance.now() - started).toBeLessThan(1_000);
+  });
+
+  it('accepts only an existing transcript in the expected session directory', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ptah-transcript-home-'));
     const workspace = path.join(home, 'workspace');
     const session = 'session-1';
@@ -358,12 +438,48 @@ describe('SubagentBudgetMonitor', () => {
       fs.writeFileSync(outside, '{}\n');
       fs.mkdirSync(hookDirectory, { recursive: true });
       fs.writeFileSync(hookFile, '{}\n');
-      expect(resolveSubagentTranscriptPath(home, workspace, session, agent)).toBe(fs.realpathSync(file));
-      expect(resolveSubagentTranscriptPath(home, workspace, session, agent, file)).toBe(fs.realpathSync(file));
-      expect(resolveSubagentTranscriptPath(home, workspace, session, agent, hookFile)).toBe(fs.realpathSync(hookFile));
-      expect(resolveSubagentTranscriptPath(home, workspace, session, agent, outside)).toBeUndefined();
+      await expect(resolveSubagentTranscriptPath(home, workspace, session, agent)).resolves.toBe(fs.realpathSync(file));
+      await expect(resolveSubagentTranscriptPath(home, workspace, session, agent, file)).resolves.toBe(fs.realpathSync(file));
+      await expect(resolveSubagentTranscriptPath(home, workspace, session, agent, hookFile)).resolves.toBe(fs.realpathSync(hookFile));
+      await expect(resolveSubagentTranscriptPath(home, workspace, session, agent, outside)).resolves.toBeUndefined();
+      await expect(resolveSubagentTranscriptPath(home, workspace, session, agent, `${directory}${path.sep}..${path.sep}subagents${path.sep}agent-${agent}.jsonl`)).resolves.toBeUndefined();
       fs.unlinkSync(file);
-      expect(resolveSubagentTranscriptPath(home, workspace, session, agent)).toBeUndefined();
+      await expect(resolveSubagentTranscriptPath(home, workspace, session, agent)).resolves.toBe(fs.realpathSync(hookFile));
+      fs.unlinkSync(hookFile);
+      await expect(resolveSubagentTranscriptPath(home, workspace, session, agent)).resolves.toBeUndefined();
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('prefers the current project, then the newest transcript across projects', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ptah-transcript-order-'));
+    const workspace = path.join(home, 'workspace');
+    const session = 'session-1';
+    const agent = 'agent-1';
+    const root = path.join(home, '.claude', 'projects');
+    const slug = path.resolve(workspace).replace(/[^A-Za-z0-9]/g, '-');
+    const filename = `agent-${agent}.jsonl`;
+    const current = path.join(root, slug, session, 'subagents', filename);
+    const older = path.join(root, 'other-a', session, 'subagents', filename);
+    const newer = path.join(root, 'other-b', session, 'subagents', filename);
+    try {
+      for (const file of [current, older, newer]) {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, '{}\n');
+      }
+      fs.utimesSync(current, new Date(1_000), new Date(1_000));
+      fs.utimesSync(older, new Date(2_000), new Date(2_000));
+      fs.utimesSync(newer, new Date(3_000), new Date(3_000));
+      const scan = jest.spyOn(fs.promises, 'readdir');
+      try {
+        await expect(resolveSubagentTranscriptPath(home, workspace, session, agent)).resolves.toBe(fs.realpathSync(current));
+        expect(scan).not.toHaveBeenCalled();
+      } finally {
+        scan.mockRestore();
+      }
+      fs.unlinkSync(current);
+      await expect(resolveSubagentTranscriptPath(home, workspace, session, agent)).resolves.toBe(fs.realpathSync(newer));
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
@@ -392,6 +508,16 @@ describe('SubagentBudgetMonitor', () => {
     expect(h.monitor.getAgentBudgetState(TOOL_CALL, SESSION)?.stopState).toBe('stopped');
   });
 
+  it('ignores the old registry teammate name after a same-name replacement spawns', async () => {
+    const h = makeHarness({ teammateName: 'reviewer' });
+    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'old-stop' }));
+    await h.monitor.observe(SESSION, {
+      type: 'assistant', parent_tool_use_id: null,
+      message: { content: [{ type: 'tool_use', id: 'new-call', name: 'Agent', input: { name: 'reviewer' } }] },
+    });
+    expect(h.monitor.getAgentBudgetState('reviewer', SESSION)?.stopped).not.toBe(true);
+  });
+
   it('keeps identical teammate names independent across sessions', async () => {
     const h = makeHarness({ teammateName: 'reviewer' });
     await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'first-stop' }));
@@ -418,6 +544,33 @@ describe('SubagentBudgetMonitor', () => {
     rejectStop(new Error('busy'));
     await observing;
     expect(h.monitor.getAgentBudgetState('reviewer', SESSION)).toEqual(expect.objectContaining({ stopped: false, stopState: 'none', running: true }));
+  });
+
+  it('refuses steering while handoff preparation is still in flight', async () => {
+    const h = makeHarness({ teammateName: 'reviewer' }, { workspace: RECORD_WORKSPACE });
+    let finishPreparation: () => void = () => undefined;
+    let reached: () => void = () => undefined;
+    const writing = new Promise<void>((resolve) => { reached = resolve; });
+    h.recordStore.writeOnce.mockImplementationOnce(() => new Promise<HandoffRecordWrite>((resolve) => {
+      finishPreparation = () => resolve({ ok: false, errorType: 'Unavailable' });
+      reached();
+    }));
+    const observing = h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'preparing' }));
+    await writing;
+    expect(h.monitor.getAgentBudgetState('reviewer', SESSION)).toEqual(expect.objectContaining({ stopped: true, stopState: 'pending' }));
+    finishPreparation();
+    await observing;
+    expect(h.monitor.getAgentBudgetState('reviewer', SESSION)?.stopState).toBe('none');
+  });
+
+  it('caches a missing transcript across stop preparation retries', async () => {
+    const lookupTranscript = jest.fn(async () => undefined);
+    const h = makeHarness({}, { workspace: RECORD_WORKSPACE, lookupTranscript });
+    h.recordStore.writeOnce.mockResolvedValue({ ok: false, errorType: 'Unavailable' });
+    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'first-try' }));
+    expect(lookupTranscript).toHaveBeenCalledTimes(1);
+    await h.monitor.observe(SESSION, assistant({ input: 160_000 }, { id: 'second-try' }));
+    expect(lookupTranscript).toHaveBeenCalledTimes(1);
   });
 
   it('re-arms a warning whose first task id was unknown', async () => {
@@ -1871,6 +2024,7 @@ describe('SubagentBudgetMonitor', () => {
         };
         const handoffFiles = {
           paths: jest.fn(() => paths),
+          redactNotes: jest.fn(async () => true),
           saveTask: jest.fn(
             () => new Promise<boolean>((resolve) => (finishSave = resolve)),
           ),
@@ -2050,6 +2204,22 @@ describe('SubagentBudgetMonitor', () => {
       expect(h.streamed[0]).toContain(
         `"Read ${notesPath()} first and continue from it; do not redo finished work. This handoff is saved at`,
       );
+    });
+
+    it('redacts agent-written notes before the parent receives the handoff', async () => {
+      const h = makeHarness({ agentId: 'agent-7' }, { workspace });
+      await h.monitor.observe(SESSION, atContext(130_000, 'm1'));
+      fs.mkdirSync(path.dirname(notesPath()), { recursive: true });
+      const marker = fake('API_KEY=', 'fake', '-marker-123');
+      fs.writeFileSync(notesPath(), `Finding: ${marker}\nBasic usage`);
+      h.dispatcher.stopSubagent.mockImplementation(async () => {
+        expect(fs.readFileSync(notesPath(), 'utf8')).toContain(marker);
+      });
+
+      await h.monitor.observe(SESSION, atContext(150_000, 'm2'));
+
+      expect(fs.readFileSync(notesPath(), 'utf8')).toBe('Finding: API_KEY=[redacted]\nBasic usage');
+      expect(h.streamed[0]).toContain(notesPath());
     });
 
     it('release drops a warning no tool result drained', async () => {
@@ -2301,7 +2471,7 @@ describe('SubagentBudgetMonitor handoff records', () => {
     );
     const first = h.monitor.observe(SESSION, over('m1'));
     await writing;
-    expect(h.monitor.getAgentBudgetState(TOOL_CALL, SESSION)?.stopState).toBe('none');
+    expect(h.monitor.getAgentBudgetState(TOOL_CALL, SESSION)?.stopState).toBe('pending');
     h.monitor.release(SESSION);
     finish({
       ok: true,

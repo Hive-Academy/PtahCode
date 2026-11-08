@@ -265,8 +265,11 @@ export class PtahCliStreamLoop {
   private readonly emittedToolCallIds = new Set<string>();
   /** Model the system init reported; the usage segment's fallback model. */
   private sessionModel: string | undefined;
-  /** Previous cumulative SDK modelUsage snapshot, used to emit one delta per result. */
-  private previousModelUsage: ModelUsageTotals | null = null;
+  /**
+   * Previous cumulative SDK modelUsage snapshot per model, used to emit one
+   * delta per result and to name the model that incurred that delta.
+   */
+  private readonly previousModelUsage = new Map<string, ModelUsageTotals>();
   /**
    * Per-turn plan-limit state (Decision 4 S1/S2), reset on every `result`.
    * Scopes and model for plan-limit signals come only from this turn's
@@ -810,33 +813,49 @@ export class PtahCliStreamLoop {
    */
   private turnUsage(msg: SDKResultSuccess): CliOutputSegment['usage'] {
     const model = this.turnModel ?? this.sessionModel;
-    const modelUsage = Object.values(msg.modelUsage ?? {});
-    if (modelUsage.length > 0) {
-      const cumulative = modelUsage.reduce<ModelUsageTotals>(
-        (total, usage) => ({
-          inputTokens: total.inputTokens + usage.inputTokens,
-          outputTokens: total.outputTokens + usage.outputTokens,
-          cacheReadTokens: total.cacheReadTokens + usage.cacheReadInputTokens,
-          cacheWriteTokens:
-            total.cacheWriteTokens + usage.cacheCreationInputTokens,
-        }),
-        {
-          inputTokens: 0,
-          outputTokens: 0,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-        },
-      );
-      const previous = this.previousModelUsage;
-      this.previousModelUsage = cumulative;
-      const delta = (key: keyof ModelUsageTotals): number =>
-        Math.max(0, cumulative[key] - (previous?.[key] ?? 0));
+    const modelUsageEntries = Object.entries(msg.modelUsage ?? {});
+    if (modelUsageEntries.length > 0) {
+      let turn: ModelUsageTotals = {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      };
+      const modelsWithDelta: string[] = [];
+      for (const [modelId, usage] of modelUsageEntries) {
+        const current: ModelUsageTotals = {
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          cacheReadTokens: usage.cacheReadInputTokens,
+          cacheWriteTokens: usage.cacheCreationInputTokens,
+        };
+        const previous = this.previousModelUsage.get(modelId);
+        this.previousModelUsage.set(modelId, current);
+        const delta = (key: keyof ModelUsageTotals): number =>
+          Math.max(0, current[key] - (previous?.[key] ?? 0));
+        const modelDelta: ModelUsageTotals = {
+          inputTokens: delta('inputTokens'),
+          outputTokens: delta('outputTokens'),
+          cacheReadTokens: delta('cacheReadTokens'),
+          cacheWriteTokens: delta('cacheWriteTokens'),
+        };
+        if (Object.values(modelDelta).some((value) => value > 0)) {
+          modelsWithDelta.push(modelId);
+        }
+        turn = {
+          inputTokens: turn.inputTokens + modelDelta.inputTokens,
+          outputTokens: turn.outputTokens + modelDelta.outputTokens,
+          cacheReadTokens: turn.cacheReadTokens + modelDelta.cacheReadTokens,
+          cacheWriteTokens: turn.cacheWriteTokens + modelDelta.cacheWriteTokens,
+        };
+      }
       return {
-        ...(model && { model }),
-        inputTokens: delta('inputTokens'),
-        outputTokens: delta('outputTokens'),
-        cacheReadTokens: delta('cacheReadTokens'),
-        cacheWriteTokens: delta('cacheWriteTokens'),
+        // Name a model only when exactly one model incurred this turn's delta.
+        ...(modelsWithDelta.length === 1 && { model: modelsWithDelta[0] }),
+        inputTokens: turn.inputTokens,
+        outputTokens: turn.outputTokens,
+        cacheReadTokens: turn.cacheReadTokens,
+        cacheWriteTokens: turn.cacheWriteTokens,
         ...(msg.total_cost_usd !== undefined && {
           costUsd: msg.total_cost_usd,
         }),

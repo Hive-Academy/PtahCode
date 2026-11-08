@@ -30,6 +30,7 @@
 
 import 'reflect-metadata';
 import * as path from 'path';
+import { claudeProjectDir } from '@ptah-extension/shared';
 import { Readable } from 'node:stream';
 import { expectNormalizedPath } from '@ptah-extension/shared/testing';
 
@@ -387,7 +388,7 @@ describe('JsonlReaderService', () => {
         mockedStat.mockResolvedValue(dirStats(1000));
         mockedReaddir.mockResolvedValue(
           workspaces.map((w) =>
-            w.replace(/[:\\/]/g, '-'),
+            claudeProjectDir(w),
           ) as unknown as Awaited<ReturnType<typeof fs.readdir>>,
         );
 
@@ -413,7 +414,7 @@ describe('JsonlReaderService', () => {
         mockedStat.mockResolvedValue(dirStats(1000));
         mockedReaddir.mockResolvedValue(
           [hot, ...filler].map((w) =>
-            w.replace(/[:\\/]/g, '-'),
+            claudeProjectDir(w),
           ) as unknown as Awaited<ReturnType<typeof fs.readdir>>,
         );
 

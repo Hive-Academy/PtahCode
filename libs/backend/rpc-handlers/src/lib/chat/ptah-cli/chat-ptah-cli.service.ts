@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { injectable, inject } from 'tsyringe';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
+import { claudeProjectDir } from '@ptah-extension/shared';
 import {
   CLI_AGENT_RUNTIME_TOKENS,
   PtahCliRegistry,
@@ -406,7 +407,7 @@ export class ChatPtahCliService {
     }
 
     const projectsDir = path.join(os.homedir(), '.claude', 'projects');
-    const escapedPath = workspacePath.replace(/[:\\/]/g, '-');
+    const escapedPath = claudeProjectDir(workspacePath);
 
     let dirs: string[];
     try {
