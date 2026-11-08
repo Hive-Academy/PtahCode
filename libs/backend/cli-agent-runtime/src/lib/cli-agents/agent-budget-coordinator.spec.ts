@@ -36,14 +36,26 @@ describe('AgentBudgetCoordinator', () => {
   it('merges a prior ledger after its provisional first charge', () => {
     const coordinator = new AgentBudgetCoordinator(settings, 5_000);
     coordinator.accept({ status: 'reported', usage }, 5_100);
-    coordinator.rebindRecord({ weightedTokens: 40, rawTokens: 30,
+    const decision = coordinator.rebindRecord({ weightedTokens: 40, rawTokens: 30,
       turnIds: ['native:1'], turnCount: 1, startedAtMs: 1_000,
-      stopWeightedTokens: 100, maxDurationMin: 2 });
+      stopWeightedTokens: 100, maxDurationMin: 2 }, 6_000);
     expect(coordinator.counters.rawTokens).toBe(110);
     expect(coordinator.counters.turnIds).toEqual(['native:1', 'turn-1']);
     expect(coordinator.turnCount).toBe(2);
     expect(coordinator.startedAtMs).toBe(1_000);
     expect(coordinator.remainingMs(6_000)).toBe(115_000);
     expect(coordinator.record().rawTokens).toBe(110);
+    expect(decision.stopReason).toBe('budget');
+    expect(coordinator.stopReason).toBe('budget');
+  });
+
+  it('warns immediately when a late ledger merge crosses the warning threshold', () => {
+    const coordinator = new AgentBudgetCoordinator(settings, Date.now());
+    coordinator.accept({ status: 'reported', usage: { ...usage, inputTokens: 30, outputTokens: 10 } });
+    const decision = coordinator.rebindRecord({ weightedTokens: 45, rawTokens: 45,
+      turnIds: ['native:1'], turnCount: 1, startedAtMs: Date.now(),
+      stopWeightedTokens: 100, maxDurationMin: 2 });
+    expect(decision).toEqual({ warning: true });
+    expect(coordinator.counters.warned).toBe(true);
   });
 });

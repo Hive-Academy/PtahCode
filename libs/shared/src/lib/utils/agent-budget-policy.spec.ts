@@ -1,5 +1,6 @@
 import { AgentTurnUsage } from '../types/agent-turn-usage.types';
 import { AgentBudgetPolicy, initialAgentBudgetSnapshot, resolveAgentTurnCost } from './agent-budget-policy';
+import { registerProviderPricing, resetPricingMapForTesting } from './pricing.utils';
 
 const reported = (value: number) => ({ status: 'reported', value, source: 'stream' } as const);
 const missing = { status: 'unavailable', reason: 'absent', source: 'stream' } as const;
@@ -13,6 +14,23 @@ const rates = { inputCostPerToken: 3e-6, outputCostPerToken: 12e-6, cacheReadCos
 const policy = new AgentBudgetPolicy({ warnRatio: 0.8, stopWeightedTokens: 100, handoffContextTokens: 50, maxDurationMin: 2 });
 
 describe('AgentBudgetPolicy', () => {
+  afterEach(() => resetPricingMapForTesting());
+  it('weights each billed model in a mixed-model turn', () => {
+    registerProviderPricing({
+      'priced-expensive': { inputCostPerToken: 30e-6, outputCostPerToken: 60e-6 },
+      'priced-cheap': { inputCostPerToken: 3e-6, outputCostPerToken: 6e-6 },
+    });
+    const mixed = { ...usage, modelId: 'mixed-model', inputTokens: 20, outputTokens: 20,
+      cacheReadTokens: reported(0), cacheWriteTokens: reported(0),
+      models: [
+        { modelId: 'priced-expensive', inputTokens: 10, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        { modelId: 'priced-cheap', inputTokens: 10, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      ],
+    };
+    const result = policy.evaluate(initialAgentBudgetSnapshot, { status: 'reported', usage: mixed }, 0, null);
+    expect(result.snapshot.weightedTokens).toBeCloseTo(330);
+    expect(result.stopReason).toBe('budget');
+  });
   it('weights all four classes and stops once', () => {
     const first = policy.evaluate(initialAgentBudgetSnapshot, { status: 'reported', usage }, 10, rates);
     expect(first.snapshot.weightedTokens).toBeCloseTo(135);

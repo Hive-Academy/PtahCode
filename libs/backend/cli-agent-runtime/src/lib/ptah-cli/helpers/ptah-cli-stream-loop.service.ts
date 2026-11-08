@@ -235,6 +235,9 @@ export interface PtahCliStreamLoopConfig {
   readonly planBilledSuccess?: boolean;
 }
 
+/** Aggregate display ID; pricing uses the billed models in `usage.models`. */
+const MULTI_MODEL_ID = 'mixed-model';
+
 /**
  * PtahCliStreamLoop - Consumes the SDK async iterable and dispatches
  * structured segments, raw text, and FlatStreamEventUnion events.
@@ -263,14 +266,14 @@ export class PtahCliStreamLoop {
   private readonly emittedMessageIds = new Set<string>();
   /** Track toolCallIds already emitted via stream_event to avoid duplicate tool_start from assistant */
   private readonly emittedToolCallIds = new Set<string>();
-  /** Model the system init reported; the usage segment's fallback model. */
-  private sessionModel: string | undefined;
+  private turnModelDeltas: Array<{ modelId: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }> = [];
   /**
    * Previous cumulative SDK modelUsage snapshot per model, used to emit one
    * delta per result and to name the model that incurred that delta.
    */
   private readonly previousModelUsage = new Map<string, ModelUsageTotals>();
-  private previousTurnCostUsd = 0;
+  /** Previous cumulative result cost, used to recover a turn delta on resume. */
+  private previousResultCostUsd = 0;
   /**
    * Per-turn plan-limit state (Decision 4 S1/S2), reset on every `result`.
    * Scopes and model for plan-limit signals come only from this turn's
@@ -472,7 +475,6 @@ export class PtahCliStreamLoop {
             if (msg.session_id) {
               this.effectiveSessionId = SessionId.from(msg.session_id);
             }
-            if (msg.model) this.sessionModel = msg.model;
             const model = msg.model ?? 'unknown';
             emitOutput(`[PtahCli] Session started (model: ${model})\n`);
             emitSegment({
@@ -647,16 +649,19 @@ export class PtahCliStreamLoop {
               emitOutput(`\n[${usageStr}]\n`);
               // The same line, with the turn's usage attached for the agent
               // card's token and cost tiles (Decision 8).
-              const usage = this.turnUsage(msg);
+              const rawUsage = this.turnUsage(msg);
               const telemetryTurnId = `${msg.session_id ?? this.effectiveSessionId ?? 'ptah-cli'}:${this.turnIndex}`;
               const turnCostUsd = msg.total_cost_usd === undefined ? undefined
-                : Math.max(0, msg.total_cost_usd - this.previousTurnCostUsd);
-              if (msg.total_cost_usd !== undefined) this.previousTurnCostUsd = msg.total_cost_usd;
+                : Math.max(0, msg.total_cost_usd - this.previousResultCostUsd);
+              if (msg.total_cost_usd !== undefined) this.previousResultCostUsd = msg.total_cost_usd;
+              const usage = rawUsage && { ...rawUsage,
+                ...(turnCostUsd !== undefined && { costUsd: turnCostUsd }) };
               const turnTelemetry: AgentTurnTelemetry = completedTurnTelemetry({
                     turnId: telemetryTurnId,
-                    modelId: usage?.model ?? (usage?.inputTokens !== undefined ? 'mixed-model' : undefined),
+                    modelId: usage?.model ?? (usage?.inputTokens !== undefined ? MULTI_MODEL_ID : undefined),
                     source: 'sdk',
-                    usage: usage ? { ...usage, costUsd: turnCostUsd } : undefined,
+                    usage: usage ? { ...usage, costUsd: turnCostUsd,
+                      ...(this.turnModelDeltas.length > 1 && { models: this.turnModelDeltas }) } : undefined,
                     uncachedInput: true,
                   });
               const attachTelemetry = usage?.inputTokens !== undefined && usage?.outputTokens !== undefined;
@@ -813,6 +818,7 @@ export class PtahCliStreamLoop {
    * main-loop usage fallback.
    */
   private turnUsage(msg: SDKResultSuccess): CliOutputSegment['usage'] {
+    this.turnModelDeltas = [];
     const model = this.turnModel;
     const modelUsageEntries = Object.entries(msg.modelUsage ?? {});
     if (modelUsageEntries.length > 0) {
@@ -842,6 +848,8 @@ export class PtahCliStreamLoop {
         };
         if (Object.values(modelDelta).some((value) => value > 0)) {
           modelsWithDelta.push(modelId);
+          this.turnModelDeltas.push({ modelId, ...modelDelta,
+            inputTokens: modelDelta.inputTokens + modelDelta.cacheReadTokens + modelDelta.cacheWriteTokens });
         }
         turn = {
           inputTokens: turn.inputTokens + modelDelta.inputTokens,
@@ -858,9 +866,6 @@ export class PtahCliStreamLoop {
         outputTokens: turn.outputTokens,
         cacheReadTokens: turn.cacheReadTokens,
         cacheWriteTokens: turn.cacheWriteTokens,
-        ...(msg.total_cost_usd !== undefined && {
-          costUsd: msg.total_cost_usd,
-        }),
       };
     }
     const usage: NonNullable<CliOutputSegment['usage']> = {
@@ -870,9 +875,6 @@ export class PtahCliStreamLoop {
         outputTokens: msg.usage.output_tokens,
         cacheReadTokens: msg.usage.cache_read_input_tokens,
         cacheWriteTokens: msg.usage.cache_creation_input_tokens,
-      }),
-      ...(msg.total_cost_usd !== undefined && {
-        costUsd: msg.total_cost_usd,
       }),
     };
     return msg.usage ? usage : undefined;

@@ -297,7 +297,6 @@ export function registerCliCodexLaneFactory(
     if (container.isRegistered(CODEX_RUNTIME_TOKENS.Runtime, true))
       throw new Error('Codex runtime must be owned by a lane scope');
     const scope = container.createChildContainer();
-    const workspaceProvider = container.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER);
     let registered = false;
     let disposed: Promise<void> | undefined;
     const dispose = (): Promise<void> =>
@@ -321,6 +320,7 @@ export function registerCliCodexLaneFactory(
         }
       })());
     try {
+      const workspace = container.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER);
       const ports: CodexRuntimeRegistrationPorts = {
         selectionSnapshot: boundSnapshot,
         store: getStore(),
@@ -347,7 +347,7 @@ export function registerCliCodexLaneFactory(
         },
         usage: null,
         childBudget: {
-          readSetting: (key, fallback) => workspaceProvider.getConfiguration('ptah', key, fallback),
+          readSetting: (key, fallback) => workspace.getConfiguration('ptah', key, fallback),
         },
       };
       registerCodexRuntime(scope, ports);

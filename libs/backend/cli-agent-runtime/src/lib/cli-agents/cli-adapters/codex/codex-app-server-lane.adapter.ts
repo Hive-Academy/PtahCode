@@ -691,7 +691,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
           active = undefined;
           turn.resolve(0);
         }, CODEX_LANE_USAGE_DRAIN_MS);
-        usageDrainTimer.unref?.();
+        usageDrainTimer.unref();
         return;
       }
       if (mapped.terminal) {

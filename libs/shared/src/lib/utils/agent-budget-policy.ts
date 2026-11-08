@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { AgentTurnTelemetry, AgentTurnUsage } from '../types/agent-turn-usage.types';
-import type { ModelPricing } from './pricing.utils';
+import { findModelPricing, type ModelPricing } from './pricing.utils';
 import { findAdvancedSetting } from '../types/advanced-settings.types';
 
 /** Fixed $3 per million input tokens, independent of catalog updates. */
@@ -91,7 +91,18 @@ export class AgentBudgetPolicy {
     const usage = telemetry.usage;
     const duplicate = snapshot.turnIds.includes(usage.turnId);
     const raw = usage.inputTokens + usage.outputTokens;
-    const priced = pricedClasses(usage, pricing);
+    const priced = usage.models?.length
+      ? usage.models.reduce<number | null>((sum, model) => {
+          if (sum === null) return null;
+          const modelCost = pricedClasses({ ...usage, modelId: model.modelId,
+            inputTokens: model.inputTokens, outputTokens: model.outputTokens,
+            cacheReadTokens: { status: 'reported', value: model.cacheReadTokens, source: usage.source },
+            cacheWriteTokens: { status: 'reported', value: model.cacheWriteTokens, source: usage.source },
+            cacheSemantics: 'verified-subsets',
+          }, findModelPricing(model.modelId));
+          return modelCost === null ? null : sum + modelCost;
+        }, 0)
+      : pricedClasses(usage, pricing);
     const weighted = priced === null ? raw : Math.max(raw, priced / REFERENCE_INPUT_USD_PER_TOKEN);
     const rawTokens = snapshot.rawTokens + (duplicate ? 0 : raw);
     const weightedTokens = snapshot.weightedTokens + (duplicate ? 0 : weighted);
@@ -105,7 +116,9 @@ export class AgentBudgetPolicy {
       warning, stopReason,
       handoff: usage.requestContextTokens.status === 'reported' && usage.requestContextTokens.value >= this.settings.handoffContextTokens,
       coverage: priced === null ? 'price-weighting-degraded' : 'complete',
-      cost: resolveAgentTurnCost(usage, pricing),
+      cost: usage.models?.length && usage.providerCostUsd.status !== 'reported' && priced !== null
+        ? { status: 'reported', value: priced, source: 'catalog' }
+        : resolveAgentTurnCost(usage, pricing),
     };
   }
 }

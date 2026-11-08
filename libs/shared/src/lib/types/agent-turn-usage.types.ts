@@ -30,6 +30,13 @@ export const agentTurnUsageSchema = z.object({
   requestContextTokens: agentTokenDatumSchema,
   providerCostUsd: agentUsageDatumSchema,
   cacheSemantics: z.enum(['verified-subsets', 'unknown']),
+  models: z.array(z.object({
+    modelId: z.string().min(1),
+    inputTokens: z.number().int().nonnegative(),
+    outputTokens: z.number().int().nonnegative(),
+    cacheReadTokens: z.number().int().nonnegative(),
+    cacheWriteTokens: z.number().int().nonnegative(),
+  }).strict()).optional(),
 }).strict();
 export type AgentTurnUsage = z.infer<typeof agentTurnUsageSchema>;
 
@@ -51,6 +58,7 @@ export function completedTurnTelemetry(input: {
     cacheWriteTokens?: number;
     contextTokens?: number;
     costUsd?: number;
+    models?: Array<{ modelId: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }>;
   };
   /** True only when the transport proves input is uncached and cache buckets are disjoint. */
   uncachedInput?: boolean;
@@ -82,6 +90,7 @@ export function completedTurnTelemetry(input: {
     cacheReadTokens: metric(read), cacheWriteTokens: metric(write),
     requestContextTokens: metric(usage.contextTokens), providerCostUsd: cost,
     cacheSemantics,
+    ...(usage.models && { models: usage.models }),
   });
   return parsed.success ? { status: 'reported', usage: parsed.data } : unavailable('invalid-usage-values');
 }

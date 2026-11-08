@@ -9,6 +9,10 @@ import {
   type AgentBudgetRecord,
 } from '@ptah-extension/shared';
 
+export function turnCountOf(record: AgentBudgetRecord): number {
+  return record.turnCount ?? record.turnIds.length;
+}
+
 /** Lifetime accounting for one CLI session, including resumed turns. */
 export class AgentBudgetCoordinator {
   private snapshot: AgentBudgetSnapshot;
@@ -46,7 +50,7 @@ export class AgentBudgetCoordinator {
     };
   }
 
-  rebindRecord(record: AgentBudgetRecord): void {
+  rebindRecord(record: AgentBudgetRecord, nowMs = Date.now()): { warning: boolean; stopReason?: AgentBudgetStopReason } {
     const current = this.snapshot;
     const priorIds = new Set(record.turnIds);
     const novelIds = current.turnIds.filter((id) => !priorIds.has(id));
@@ -58,10 +62,21 @@ export class AgentBudgetCoordinator {
       rawTokens: record.rawTokens + (sameLedger ? 0 : current.rawTokens),
       turnIds: [...record.turnIds, ...novelIds],
       elapsedMs: 0, warned: current.warned, stopped: current.stopped,
-    }, (record.turnCount ?? record.turnIds.length) + (sameLedger ? 0 : this.turnCount));
+    }, turnCountOf(record) + (sameLedger ? 0 : this.turnCount));
+    const total = Math.max(this.snapshot.rawTokens, this.snapshot.weightedTokens);
+    const expired = this.expired(nowMs);
+    const stopReason = !this.snapshot.stopped
+      ? expired ? 'duration' as const : total >= this.settings.stopWeightedTokens ? 'budget' as const : undefined
+      : undefined;
+    const warning = !this.snapshot.warned && !this.snapshot.stopped && !stopReason
+      && total >= this.settings.stopWeightedTokens * this.settings.warnRatio;
+    this.snapshot = { ...this.snapshot, warned: this.snapshot.warned || warning,
+      stopped: this.snapshot.stopped || stopReason !== undefined };
+    this._stopReason ??= stopReason;
+    return { warning, ...(stopReason ? { stopReason } : {}) };
   }
 
-  /** Bind a late native session ID before accepting its first completed turn. */
+  /** Bind a late native session ID, including turns charged before it arrived. */
   private rebind(startedAtMs: number, snapshot: AgentBudgetSnapshot, turnCount = snapshot.turnIds.length): void {
     this._startedAtMs = startedAtMs;
     this.snapshot = { ...snapshot, turnIds: snapshot.turnIds.slice(-256) };
@@ -74,7 +89,7 @@ export class AgentBudgetCoordinator {
     stopReason?: AgentBudgetStopReason;
     costUnavailable: boolean;
   } {
-    const pricing = telemetry.status === 'reported'
+    const pricing = telemetry.status === 'reported' && !telemetry.usage.models?.length
       ? findModelPricing(telemetry.usage.modelId) : null;
     const result = this.policy.evaluate(
       this.snapshot, telemetry, Math.max(0, nowMs - this.startedAtMs), pricing,

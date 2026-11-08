@@ -312,6 +312,7 @@ export interface AgentProcessInfo {
   readonly routingSource?: Exclude<OutcomeRoutingSource, 'not-routed'>;
 }
 
+const AGENT_BUDGET_STOP_REASONS = ['budget', 'telemetry-unavailable', 'duration'] as const;
 /**
  * Why the host ended a lane (TASK_2026_597, R9.4):
  * `repeat-call` — the lane guard saw one identical tool call repeated up to
@@ -322,7 +323,6 @@ export interface AgentProcessInfo {
  * (or the durable normalization of the session metadata) stamps it so a
  * resume can continue the CLI session.
  */
-const AGENT_BUDGET_STOP_REASONS = ['budget', 'telemetry-unavailable', 'duration'] as const;
 export const LANE_STOP_REASONS = [
   'repeat-call', 'usage-limit', 'auth', 'session-mismatch', 'host-restart',
   ...AGENT_BUDGET_STOP_REASONS,
@@ -337,6 +337,7 @@ export interface AgentBudgetRecord {
   readonly stopWeightedTokens?: number;
   readonly maxDurationMin?: number;
 }
+/** True for a budget-owned stop, including unavailable turn telemetry. */
 export function isAgentBudgetStopReason(reason: LaneStopReason | undefined): boolean {
   return reason !== undefined && AGENT_BUDGET_STOP_REASONS.some((value) => value === reason);
 }

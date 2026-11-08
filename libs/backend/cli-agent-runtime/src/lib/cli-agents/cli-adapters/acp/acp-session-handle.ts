@@ -798,12 +798,21 @@ export function createAcpSessionHandle(
         if (!promptUsage.success && !latestUpdateUsage) {
           // ACP agents can send usage_update after the prompt response. Wait
           // for that notification, with a safety bound for agents omitting it.
-          await new Promise<void>((resolve) => {
-            const timer = setTimeout(resolve, ACP_USAGE_DRAIN_MS);
-            resolveUsageUpdate = () => { clearTimeout(timer); resolve(); };
-            if (latestUpdateUsage) resolveUsageUpdate();
-          });
-          resolveUsageUpdate = undefined;
+          let usageDrainTimer: NodeJS.Timeout | undefined;
+          const onAbort = (): void => { resolveUsageUpdate?.(); };
+          try {
+            await new Promise<void>((resolve) => {
+              usageDrainTimer = setTimeout(resolve, ACP_USAGE_DRAIN_MS);
+              usageDrainTimer.unref();
+              resolveUsageUpdate = resolve;
+              abort.signal.addEventListener('abort', onAbort, { once: true });
+              if (latestUpdateUsage || abort.signal.aborted) resolve();
+            });
+          } finally {
+            clearTimeout(usageDrainTimer);
+            abort.signal.removeEventListener('abort', onAbort);
+            resolveUsageUpdate = undefined;
+          }
         }
         const usage = promptUsage.success ? promptUsage.data : latestUpdateUsage;
         segment.emit({

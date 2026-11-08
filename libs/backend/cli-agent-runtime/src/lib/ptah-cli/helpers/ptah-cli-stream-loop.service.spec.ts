@@ -699,7 +699,7 @@ describe('PtahCliStreamLoop plan-limit signals and usage', () => {
           outputTokens: 80,
           cacheReadTokens: 150,
           cacheWriteTokens: 50,
-          costUsd: 0.02,
+          costUsd: 0.0077,
         }),
       }),
     );
@@ -972,6 +972,10 @@ describe('PtahCliStreamLoop plan-limit signals and usage', () => {
     expect(records[0]).toMatchObject({ status: 'reported', usage: {
       modelId: 'mixed-model', inputTokens: 2410, outputTokens: 82,
       providerCostUsd: { status: 'reported', value: 0.0123 },
+      models: [
+        { modelId: 'claude-sonnet-4-6', inputTokens: 2400, outputTokens: 80 },
+        { modelId: 'claude-haiku-4-5', inputTokens: 10, outputTokens: 2 },
+      ],
     } });
   });
 

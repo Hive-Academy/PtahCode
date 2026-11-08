@@ -109,7 +109,9 @@ import {
 } from './lane-resume-gate';
 import { LaneBudgetGuard } from './lane-budget-guard';
 import { AgentBudgetCoordinator } from './agent-budget-coordinator';
-import { createLaneBudget, armLaneBudgetDeadline, acceptLaneTurnTelemetry, laneRecordsForSession, previousResumeRecord } from './lane-budget-deadline';
+import { createLaneBudget } from './lane-budget-deadline';
+import { LaneBudgetTelemetry } from './lane-budget-telemetry';
+import { bindLaneSessionId } from './lane-session-binding';
 import type { AgentOutputJournal } from './agent-output-journal.service';
 import {
   applyOutputCheckpoint,
@@ -122,6 +124,8 @@ import {
   waitForRecoveredWrites,
   type TrackedRecoveredWrite,
   stampWorkspaceKey,
+  laneRecordsForSession,
+  previousResumeRecord,
 } from './lane-restore';
 import { findBlockedLaneModel } from './lane-spawn-policy';
 import { CLI_AGENT_RUNTIME_TOKENS } from '../di/tokens';
@@ -168,11 +172,13 @@ type LanePlanLimitLedger = Pick<
   'recordWindowEvidence' | 'recordOwnerEvidence' | 'recordSuccess'
 > &
   Partial<Pick<PlanLimitLedgerService, 'snapshotFor'>>;
+
 export {
   MIN_CONCURRENT_AGENTS,
   MAX_CONCURRENT_AGENTS,
   DEFAULT_CONCURRENT_AGENTS,
 } from './agent-spawn-environment.service';
+
 /**
  * Shell metacharacters — kept for reference only.
  * spawn() is called WITHOUT shell:true, so args are passed directly
@@ -180,6 +186,7 @@ export {
  * possible. Stripping these chars corrupts legitimate prompts containing
  * code characters ($, (), {}, backticks, etc.).
  */
+
 export type AgentContinueErrorCode =
   | 'not_found'
   | 'invalid_params'
@@ -196,13 +203,17 @@ export type AgentContinueErrorCode =
   /** A Claude lane's account route was refused; the lane did not run. */
   | 'account_refused'
   | 'unknown';
+
 /** Why a subprocess was released — carried on the `agent:released` event. */
+
 export type AgentReleaseReason = 'idle' | 'expired' | 'stopped' | 'disposed';
+
 export interface AgentRoleStamp {
   readonly role: string;
   readonly roleDelivery: AgentRoleDelivery;
   readonly roleChannel: AgentRoleChannel;
 }
+
 interface SdkSpawnOptions {
   readonly effectivePolicy?: ReturnType<
     AgentSpawnEnvironment['resolveLanePolicy']
@@ -228,11 +239,13 @@ interface SdkSpawnOptions {
   /** First task of the lane chain, kept on a fresh lane's record. */
   readonly originalTask?: string;
 }
+
 /**
  * What the resume gate made of a `resumeSessionId` spawn: the task to hand
  * the lane, the session to resume (absent when the gate chose a fresh lane)
  * and the decision to report to the caller.
  */
+
 export interface GatedResume {
   readonly accountReference?: LaneAccountReference;
   readonly task: string;
@@ -241,14 +254,17 @@ export interface GatedResume {
   /** First task of the lane chain, kept on a fresh lane's record. */
   readonly originalTask?: string;
 }
+
 /**
  * A spawn through {@link AgentProcessManager.spawnFromSdkHandle}, checked
  * before its handle is built. Without a resume id the task passes through
  * and no decision is reported.
  */
+
 export type PreparedSdkHandleSpawn = Omit<GatedResume, 'resumeDecision'> & {
   readonly resumeDecision?: AgentResumeOutcome;
 };
+
 function roleStampOf(
   record: Partial<AgentRoleStamp>,
 ): AgentRoleStamp | undefined {
@@ -259,11 +275,17 @@ function roleStampOf(
     ? { role, roleDelivery, roleChannel }
     : undefined;
 }
+
 /** `any`: return when one lane ends. `all`: return when every lane has ended. */
+
 export type AgentWaitMode = 'any' | 'all';
+
 /** Longest {@link AgentProcessManager.waitForAgents} wait: 15 minutes (TASK_2026_597, D13). */
+
 export const MAX_AGENT_WAIT_MS = 900_000;
+
 const MAX_RESOLVED_PARENT_SESSIONS = 256;
+
 /**
  * One requested id in a {@link AgentWaitResult}.
  *
@@ -273,6 +295,7 @@ const MAX_RESOLVED_PARENT_SESSIONS = 256;
  * - `other_workspace`: the record exists but belongs to another workspace, so
  *   this caller may not see it (the same scope rule as `getStatus`).
  */
+
 export type AgentWaitEntry =
   | {
       readonly agentId: string;
@@ -286,6 +309,7 @@ export type AgentWaitEntry =
     }
   | { readonly agentId: string; readonly state: 'not_found' }
   | { readonly agentId: string; readonly state: 'other_workspace' };
+
 export interface AgentWaitResult {
   readonly mode: AgentWaitMode;
   /** True when the wait ended on its timer rather than on the lanes. */
@@ -300,6 +324,7 @@ export interface AgentWaitResult {
   /** One entry per distinct requested id, in request order. */
   readonly entries: readonly AgentWaitEntry[];
 }
+
 export class AgentContinueError extends Error {
   constructor(
     readonly code: AgentContinueErrorCode,
@@ -309,11 +334,13 @@ export class AgentContinueError extends Error {
     this.name = 'AgentContinueError';
   }
 }
+
 /**
  * Thrown by a spawn whose resolved model is on the lane block list
  * (TASK_2026_597, R9.5). Raised before the adapter's `runSdk`, so nothing is
  * started. Extends `Error` directly, like every other error in this lib.
  */
+
 export class LaneModelBlockedError extends Error {
   constructor(readonly model: string) {
     super(
@@ -348,6 +375,7 @@ export class AgentProcessManager {
    */
   private readonly laneGuards = new Map<string, LaneBudgetGuard>();
   private readonly completionClaims = new Set<string>();
+  private readonly budgetTelemetry: LaneBudgetTelemetry;
   /** Counter for in-flight spawn operations (not yet in agents map) */
   private spawning = 0;
   /** Promise-based mutex to serialize spawn operations and prevent TOCTOU race in concurrent limit check */
@@ -430,6 +458,11 @@ export class AgentProcessManager {
     @inject(CLI_AGENT_RUNTIME_TOKENS.AGENT_OUTPUT_JOURNAL, { isOptional: true })
     private readonly outputJournal?: AgentOutputJournal,
   ) {
+    this.budgetTelemetry = new LaneBudgetTelemetry(this.logger,
+      (agentId) => this.sendToAgent(agentId,
+        'Budget warning: finish your current work, report progress, and prepare a short handoff.',
+        'steer', undefined, false),
+      (agentId, reason) => { void this.stopLaneForGuard(agentId, reason, 0, 0); });
     this.logger.info('[AgentProcessManager] Initialized');
   }
 
@@ -825,11 +858,6 @@ export class AgentProcessManager {
       blockedModel,
     });
     throw new LaneModelBlockedError(model ?? blockedModel);
-  }
-
-  private armBudgetDeadline(agentId: string, tracked: TrackedAgent): void {
-    armLaneBudgetDeadline(tracked, () => this.agents.get(agentId) === tracked,
-      () => { void this.stopLaneForGuard(agentId, 'duration', 0, 0); });
   }
 
   private resumedOwner(
@@ -1340,7 +1368,7 @@ export class AgentProcessManager {
     tracked.budget = budget;
     tracked.info = { ...tracked.info, agentBudget: budget.record() };
     this.agents.set(agentId, tracked);
-    this.armBudgetDeadline(agentId, tracked);
+    this.budgetTelemetry.armDeadline(agentId, tracked, () => this.agents.get(agentId) === tracked);
     const turn = Symbol('lane-turn');
     this.turns.set(tracked, turn);
     sdkHandle.setAgentId?.(agentId);
@@ -1349,31 +1377,11 @@ export class AgentProcessManager {
       this.flushDelta(agentId);
     };
     const updateCliSessionId = (sessionId: string | undefined): void => {
-      if (!sessionId || sessionId === tracked.info.cliSessionId) return;
-      const prior = previousResumeRecord(this.agents.values(), tracked.info.cli, sessionId)?.agentBudget;
-      if (prior && tracked.budget) {
-        tracked.budget.rebindRecord(prior);
-        tracked.info = { ...tracked.info, agentBudget: tracked.budget.record() };
-        this.armBudgetDeadline(agentId, tracked);
+      const decision = bindLaneSessionId(tracked, sessionId, this.agents.values());
+      if (decision) {
+        this.budgetTelemetry.armDeadline(agentId, tracked, () => this.agents.get(agentId) === tracked);
+        this.budgetTelemetry.dispatch(agentId, tracked, decision);
       }
-      const previous = tracked.info.cliSessionId;
-      // Only a Codex lane abandons its first thread (bundled fallback before
-      // any turn). For other CLIs a different resolved id is not a
-      // replacement: the pre-set resume id must keep its own reference.
-      const replaced =
-        previous && tracked.info.cli === 'codex'
-          ? [
-              ...new Set([
-                ...(tracked.info.replacesCliSessionIds ?? []),
-                previous,
-              ]),
-            ]
-          : tracked.info.replacesCliSessionIds;
-      tracked.info = {
-        ...tracked.info,
-        cliSessionId: sessionId,
-        ...(replaced ? { replacesCliSessionIds: replaced } : {}),
-      };
     };
     sdkHandle.onOutput((data: string) => {
       const current = this.agents.get(agentId);
@@ -1464,15 +1472,8 @@ export class AgentProcessManager {
         if (sdkHandle.outcomeUsageIsTurnTotal && segment.usage) {
           tracked.outcomeUsage = segment.usage;
         }
-        if (segment.turnTelemetry && tracked.info.status === 'running') {
-          acceptLaneTurnTelemetry({ tracked, telemetry: segment.turnTelemetry, agentId,
-            logger: this.logger,
-            warn: () => this.sendToAgent(agentId,
-              'Budget warning: finish your current work, report progress, and prepare a short handoff.',
-              'steer', undefined, false,
-            ),
-            stop: (reason) => { void this.stopLaneForGuard(agentId, reason, 0, 0); },
-          });
+        if (segment.turnTelemetry) {
+          this.budgetTelemetry.accept(agentId, tracked, segment.turnTelemetry);
         }
         this.outputBuffer.appendSegment(
           agentId,
@@ -2632,7 +2633,7 @@ export class AgentProcessManager {
     tracked.guardToolCalls = undefined;
     tracked.repeatedCalls = undefined;
     tracked.queuedMessagesDropped = undefined;
-    if (tracked.budget) this.armBudgetDeadline(agentId, tracked);
+    if (tracked.budget) this.budgetTelemetry.armDeadline(agentId, tracked, () => this.agents.get(agentId) === tracked);
     this.armInactivityWatchdog(agentId, tracked);
 
     this.events.emit('agent:spawned', tracked.info);

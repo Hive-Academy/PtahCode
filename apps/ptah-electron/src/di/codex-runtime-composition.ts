@@ -236,8 +236,8 @@ export function createElectronCodexScopeFactory(
       throw new Error('Codex runtime must be owned by a session scope');
     }
     const container = input.parent.createChildContainer();
-    const budgetSettings = input.parent.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER);
     try {
+      const workspace = input.parent.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER);
       registerCodexRuntime(container, {
         ...input.ports,
         usage: input.ports.usage
@@ -245,7 +245,7 @@ export function createElectronCodexScopeFactory(
           : null,
         // Chat and lane scopes both register here, so each context is observed once.
         childBudget: {
-          readSetting: (key, fallback) => budgetSettings.getConfiguration('ptah', key, fallback),
+          readSetting: (key, fallback) => workspace.getConfiguration('ptah', key, fallback),
         },
         sink,
       });
