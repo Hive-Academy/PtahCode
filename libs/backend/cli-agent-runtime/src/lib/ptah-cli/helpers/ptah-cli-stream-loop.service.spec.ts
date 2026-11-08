@@ -703,6 +703,24 @@ describe('PtahCliStreamLoop plan-limit signals and usage', () => {
         }),
       }),
     );
+    expect(emitSegment.mock.calls[1][0].usage).not.toHaveProperty('model');
+  });
+
+  it('reports the SDK usage model instead of a stale stream model', async () => {
+    const { loop, emitSegment } = makeSignalLoop();
+    const haikuResult = {
+      ...usageResult,
+      modelUsage: {
+        'claude-haiku-4-5': {
+          inputTokens: 1200,
+          outputTokens: 80,
+          cacheReadInputTokens: 900,
+          cacheCreationInputTokens: 300,
+        },
+      },
+    } as unknown as SDKMessage;
+    await loop.run(manyMessages([messageStart('claude-sonnet-4-6'), haikuResult]));
+    expect(emitSegment.mock.calls[0][0].usage.model).toBe('claude-haiku-4-5');
   });
 
   it('falls back to the init model and leaves unreported values out', async () => {

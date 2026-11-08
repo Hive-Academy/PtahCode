@@ -50,7 +50,8 @@ export function cliUsageTokenTotal(
  * Fold one usage report into the running totals.
  *
  * Token counts are summed; the latest reported model, cost and duration are
- * kept. A field no report has carried stays absent — never 0. A report with no
+ * kept. An unlabeled token report clears an earlier model label. A field no
+ * report has carried stays absent — never 0. A report with no
  * defined field is ignored, so the result stays `null` until any usage is
  * seen.
  */
@@ -63,7 +64,7 @@ export function addCliUsage(
   }
   const base: CliUsageTotals = total ?? {};
   return {
-    model: usage.model ?? base.model,
+    model: usage.model ?? (hasTokenUsage(usage) ? undefined : base.model),
     inputTokens: sumDefined(base.inputTokens, usage.inputTokens),
     outputTokens: sumDefined(base.outputTokens, usage.outputTokens),
     cacheReadTokens: sumDefined(base.cacheReadTokens, usage.cacheReadTokens),
@@ -73,6 +74,16 @@ export function addCliUsage(
     costUsd: usage.costUsd ?? base.costUsd,
     durationMs: usage.durationMs ?? base.durationMs,
   };
+}
+
+function hasTokenUsage(usage: NonNullable<CliOutputSegment['usage']>): boolean {
+  return (
+    usage.inputTokens !== undefined ||
+    usage.outputTokens !== undefined ||
+    usage.cacheReadTokens !== undefined ||
+    usage.cacheWriteTokens !== undefined ||
+    usage.totalTokens !== undefined
+  );
 }
 
 function sumDefined(

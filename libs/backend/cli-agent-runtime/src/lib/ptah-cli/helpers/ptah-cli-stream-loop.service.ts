@@ -794,7 +794,8 @@ export class PtahCliStreamLoop {
    */
   private turnUsage(msg: SDKResultSuccess): CliOutputSegment['usage'] {
     const model = this.turnModel ?? this.sessionModel;
-    const modelUsage = Object.values(msg.modelUsage ?? {});
+    const modelUsageEntries = Object.entries(msg.modelUsage ?? {});
+    const modelUsage = modelUsageEntries.map(([, usage]) => usage);
     if (modelUsage.length > 0) {
       const cumulative = modelUsage.reduce<ModelUsageTotals>(
         (total, usage) => ({
@@ -816,7 +817,7 @@ export class PtahCliStreamLoop {
       const delta = (key: keyof ModelUsageTotals): number =>
         Math.max(0, cumulative[key] - (previous?.[key] ?? 0));
       return {
-        ...(model && { model }),
+        ...(modelUsageEntries.length === 1 && { model: modelUsageEntries[0][0] }),
         inputTokens: delta('inputTokens'),
         outputTokens: delta('outputTokens'),
         cacheReadTokens: delta('cacheReadTokens'),

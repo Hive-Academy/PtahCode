@@ -179,9 +179,11 @@ export class AgentSpawnEnvironment {
   resolveModel(
     cli: CliType,
     requestModel: string | undefined,
+    modelTier?: SpawnAgentRequest['modelTier'],
   ): LaneModelResolution {
     // A whitespace-only value means "unset", never a model id to send.
-    const request = requestModel?.trim() || undefined;
+    const request =
+      requestModel?.trim() || (cli === 'claude' ? modelTier : undefined);
     const configKey = AgentSpawnEnvironment.MODEL_CONFIG_KEYS[cli];
     const configuredModel =
       !request && configKey

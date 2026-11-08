@@ -1858,6 +1858,33 @@ describe('AgentProcessManager - SDK Execution Path', () => {
           }),
         ).rejects.toBeInstanceOf(LaneModelBlockedError);
       });
+
+      it('checks a model resolved from the Claude tier before SDK spawn', async () => {
+        const resolveModel = jest.spyOn(
+          AgentSpawnEnvironment.prototype,
+          'resolveModel',
+        );
+        resolveModel.mockReturnValue({
+          model: 'mimo-v2.6-flash-free',
+          source: 'request',
+        });
+        try {
+          await expect(
+            manager.prepareSdkHandleSpawn({
+              cli: 'claude',
+              task: 'New work',
+              modelTier: 'haiku',
+            }),
+          ).rejects.toBeInstanceOf(LaneModelBlockedError);
+          expect(resolveModel).toHaveBeenCalledWith(
+            'claude',
+            undefined,
+            'haiku',
+          );
+        } finally {
+          resolveModel.mockRestore();
+        }
+      });
     });
 
     it('records a declared terminal turn total and hands its input estimate to the gate', async () => {
