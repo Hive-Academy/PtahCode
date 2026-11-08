@@ -421,10 +421,12 @@ export class CopilotSdkAdapter implements CliAdapter {
       let receivedDeltas = false;
       let receivedReasoningDeltas = false;
       const toolCallIdToName = new Map<string, string>();
-      let turnUsage: CliOutputSegment['usage'];
+      const turnUsages: NonNullable<CliOutputSegment['usage']>[] = [];
+      let incompleteUsage = false;
       let nativeTurnId: string | undefined;
       const emitTurnSegment = (item: CliOutputSegment): void => {
-        if (item.usage) turnUsage = item.usage;
+        if (item.usage) turnUsages.push(item.usage);
+        if (item.content.startsWith('Copilot turn telemetry unavailable:')) incompleteUsage = true;
         segment.emit(item);
       };
       let lineBuf = '';
@@ -506,16 +508,35 @@ export class CopilotSdkAdapter implements CliAdapter {
           activeChild = undefined;
           const exitCode = code ?? (signal ? 1 : 0);
           if (exitCode === 0 && !abortController.signal.aborted) {
+            const valid = (value: number | undefined): value is number =>
+              value !== undefined && Number.isSafeInteger(value) && value >= 0;
+            const complete = !incompleteUsage && turnUsages.length > 0 &&
+              turnUsages.every((usage) => valid(usage.inputTokens) && valid(usage.outputTokens));
+            const inputTokens = turnUsages.reduce((sum, usage) => sum + (usage.inputTokens ?? 0), 0);
+            const outputTokens = turnUsages.reduce((sum, usage) => sum + (usage.outputTokens ?? 0), 0);
+            const models = new Map<string, { modelId: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }>();
+            for (const usage of turnUsages) {
+              const modelId = usage.model || 'copilot/unknown';
+              const total = models.get(modelId) ?? { modelId, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+              total.inputTokens += usage.inputTokens ?? 0;
+              total.outputTokens += usage.outputTokens ?? 0;
+              models.set(modelId, total);
+            }
+            const costsComplete = turnUsages.every((usage) =>
+              usage.costUsd !== undefined && Number.isFinite(usage.costUsd) && usage.costUsd >= 0);
+            const usage = complete && valid(inputTokens) && valid(outputTokens) ? {
+              inputTokens, outputTokens,
+              ...(costsComplete ? { costUsd: turnUsages.reduce((sum, item) => sum + (item.costUsd ?? 0), 0) } : {}),
+              ...(models.size > 1 ? { models: [...models.values()] } : {}),
+            } : undefined;
             segment.emit({
               type: 'info', content: 'Copilot turn telemetry',
               turnTelemetry: completedTurnTelemetry({
                 ...turnIdentity({ provider: 'copilot', turnId: nativeTurnId,
                   sessionId: capturedSessionId ?? resumeSessionId ?? `copilot:${child.pid ?? options.agentId ?? 'unknown'}`,
-                  runId: options.agentId, sequence: turnNumber, modelId: turnUsage?.model, source: 'stream' }), usage: turnUsage ? {
-                  inputTokens: turnUsage.inputTokens,
-                  outputTokens: turnUsage.outputTokens,
-                  costUsd: turnUsage.costUsd,
-                } : undefined,
+                   runId: options.agentId, sequence: turnNumber,
+                   modelId: models.size === 1 ? [...models.keys()][0] : 'copilot/multi-model', source: 'stream' }),
+                usage,
               }),
             });
           }

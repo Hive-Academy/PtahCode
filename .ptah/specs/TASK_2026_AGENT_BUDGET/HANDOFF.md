@@ -29,7 +29,15 @@ PR: https://github.com/Hive-Academy/PtahCode/pull/986 (draft). Pushed head `5a84
 - Manager agent-process-manager.service.ts: 3849 physical / 3673 non-blank (main 3849 / 3675).
 - Side fix done for the user: PR #1000 CodeRabbit comment (commit 9cef23bb9, merged).
 
-## Update ~11:20 UTC (newest)
+## Update ~12:40 UTC (newest)
+- Head `281e23be7` pushed, CI green (19 pass, 3 skipped). `a34117e92` fixed all 13 CodeRabbit
+  comments of pass 1 (coderabbit-fix-report.md); PR note posted.
+- CodeRabbit pass 2 on 281e23be7: 4 actionable (8 root comments, some may be re-anchored old
+  threads) saved in coderabbit-comments-2.md. RUNNING: lane `ba16b1a0-12f7-4124-abcd-39910698ebdf`
+  (session 01a1bb2a-eaf4-7b00-b6dc-28d836bd9c57) → coderabbit-fix-report-2.md. Then: check diff,
+  commit, push, reply on Already-fixed/Disputed threads, watch CI + CodeRabbit pass 3, report.
+
+## Update ~11:20 UTC
 - #986 is READY FOR REVIEW (not draft). Head `89e086992`, CI green (18 pass, 4 skipped). Title
   "feat: shared agent budget for SDK, Codex and CLI agent lanes"; body from pr-body.md here.
 - Since 13f02ffcc: `1d060d43b` live 7 report, `948ab6ce2` round 7 fixes, `d96022bbf` second final

@@ -678,6 +678,23 @@ describe('CopilotSdkAdapter', () => {
       }));
     });
 
+    it('aggregates every model call in one turn', async () => {
+      const handle = await adapter.runSdk(defaultOptions);
+      const segments: CliOutputSegment[] = [];
+      handle.onSegment?.((item) => segments.push(item));
+      for (const data of [
+        { model: 'model-a', inputTokens: 100, outputTokens: 20, cost: 0.01 },
+        { model: 'model-b', inputTokens: 50, outputTokens: 10, cost: 0.02 },
+      ]) currentChild?.stdout.write(JSON.stringify({ type: 'assistant.usage', data }) + '\n');
+      currentChild?.emitClose(0);
+      await handle.done;
+      expect(segments.find((item) => item.turnTelemetry)?.turnTelemetry).toMatchObject({
+        status: 'reported', usage: { inputTokens: 150, outputTokens: 30,
+          modelId: 'copilot/multi-model', providerCostUsd: { status: 'reported', value: 0.03 },
+          models: [{ modelId: 'model-a', inputTokens: 100 }, { modelId: 'model-b', inputTokens: 50 }] },
+      });
+    });
+
     it('fails closed when a successful turn has no usage event', async () => {
       const handle = await adapter.runSdk(defaultOptions);
       const segments: CliOutputSegment[] = [];

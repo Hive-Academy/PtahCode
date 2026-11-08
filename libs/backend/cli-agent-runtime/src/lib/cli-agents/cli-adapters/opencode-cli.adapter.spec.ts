@@ -1030,6 +1030,20 @@ describe('OpencodeCliAdapter', () => {
       });
     });
 
+    it('keeps token totals when stream model IDs are absent', async () => {
+      const handle = await adapter.runSdk(baseOptions);
+      const { segments } = collect(handle);
+      currentChild?.stdout.write(JSON.stringify({ type: 'step_start', sessionID: 'ses_1' }) + '\n');
+      currentChild?.stdout.write(JSON.stringify({ type: 'step_finish', sessionID: 'ses_1',
+        part: { type: 'step-finish', reason: 'stop', tokens: { input: 12, output: 3 } },
+      }) + '\n');
+      currentChild?.emitClose(0);
+      await handle.done;
+      expect(segments.find((item) => item.turnTelemetry)?.turnTelemetry).toMatchObject({
+        status: 'reported', usage: { inputTokens: 12, outputTokens: 3, modelId: 'opencode/unknown' },
+      });
+    });
+
     it('records one unavailable turn when a successful run has no final usage', async () => {
       const handle = await adapter.runSdk({ ...baseOptions, model: 'requested/alias' });
       const { segments } = collect(handle);
@@ -1038,7 +1052,7 @@ describe('OpencodeCliAdapter', () => {
       await handle.done;
       const records = segments.filter((segment) => segment.turnTelemetry);
       expect(records).toHaveLength(1);
-      expect(records[0]?.turnTelemetry).toMatchObject({ status: 'unavailable', reason: 'no-usage-event', modelId: 'opencode/unknown' });
+      expect(records[0]?.turnTelemetry).toMatchObject({ status: 'unavailable', reason: 'no-usage-event', modelId: 'requested/alias' });
     });
 
     it('maps a top-level error event to an error segment', async () => {

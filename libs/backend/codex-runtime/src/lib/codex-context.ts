@@ -516,9 +516,12 @@ class RuntimeContext implements CodexContext {
         this.childTurns.set(parsed.threadId, parsed.turn.id);
     }
     for (const event of this.translator.translate(frame)) {
-      const parentToolUseId = childEventParent(
+      let parentToolUseId = childEventParent(
         event.threadId, this.identity.threadId, this.childTools,
       );
+      if (parentToolUseId === null && event.type === 'usage' &&
+        this.terminalTurns.has(event.turnId))
+        parentToolUseId = this.knownChildParents.get(event.threadId) ?? null;
       if (parentToolUseId === null) {
         this.bufferEarlyChild(event);
         continue;

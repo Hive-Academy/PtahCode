@@ -191,6 +191,7 @@ interface OpencodeTurnState {
 interface OpencodeTurnLaunch {
   readonly turnNumber: number;
   readonly runId?: string;
+  readonly requestedModelId?: string;
   readonly command: string;
   readonly args: string[];
   readonly workingDirectory: string;
@@ -772,6 +773,7 @@ export class OpencodeCliAdapter implements CliAdapter {
       return this.runTurn({
         turnNumber: ++turnSequence,
         runId: options.agentId,
+        requestedModelId: options.model,
         command: spawnDescriptor.command,
         args,
         workingDirectory: options.workingDirectory,
@@ -878,6 +880,7 @@ export class OpencodeCliAdapter implements CliAdapter {
       textTracker: new Map<string, string>(),
       stepUsages: [],
       stoppedAfterLastError: false,
+      observedModelId: launch.requestedModelId,
     };
     let boundSessionId = launch.expectedSessionId;
     let firstSessionEvent = true;
@@ -956,8 +959,8 @@ export class OpencodeCliAdapter implements CliAdapter {
         const settled = sessionMismatch ? 1 : this.settleExitCode(exitCode, state, signal.aborted, launch);
         if (settled === 0 && !signal.aborted) {
           const steps = state.stepUsages;
-          const complete = steps.length > 0 && steps.every(({ part, modelId }) =>
-            modelId && Number.isSafeInteger(part.tokens?.input) &&
+          const complete = steps.length > 0 && steps.every(({ part }) =>
+            Number.isSafeInteger(part.tokens?.input) &&
             Number.isSafeInteger(part.tokens?.output) &&
             (part.tokens?.input ?? -1) >= 0 && (part.tokens?.output ?? -1) >= 0);
           const usage = complete ? {
@@ -966,7 +969,7 @@ export class OpencodeCliAdapter implements CliAdapter {
             ...(steps.every(({ part }) => part.cost !== undefined && Number.isFinite(part.cost) && part.cost >= 0)
               ? { costUsd: steps.reduce((sum, { part }) => sum + (part.cost ?? 0), 0) } : {}),
             models: steps.map(({ part, modelId }) => ({
-              modelId: modelId ?? 'unknown', inputTokens: part.tokens?.input ?? 0,
+              modelId: modelId ?? 'opencode/unknown', inputTokens: part.tokens?.input ?? 0,
               outputTokens: part.tokens?.output ?? 0, cacheReadTokens: 0, cacheWriteTokens: 0,
             })),
           } : undefined;
