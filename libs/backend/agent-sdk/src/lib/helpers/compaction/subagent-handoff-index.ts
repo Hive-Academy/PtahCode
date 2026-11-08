@@ -19,8 +19,8 @@
  * (`POINTER_TIMEOUT_MS`) so that line reaches the prompt. A resolved record
  * (`consumed`/`dismissed`) leaves the list; one older than
  * {@link HANDOFF_RETENTION_MS} is deleted. A pending or malformed record is
- * never deleted. A record whose head cannot be read is listed with a note to
- * open it directly, and the cursor moves past it.
+ * never deleted. A record whose head cannot be read stays hidden, and the
+ * cursor moves past it.
  *
  * Audience comes from the record name's owner hash: a record owned by a
  * session in `hidden` (another live session of this process) is not shown; one
@@ -34,6 +34,7 @@ import { SUBAGENT_HANDOFF_DIR } from './subagent-handoff-files';
 import {
   HANDOFF_RECORD_HEAD_BYTES,
   checkHandoffDir,
+  hasScrubProof,
   parseRecordHead,
   parseRecordName,
   type HandoffRecordStatus,
@@ -69,7 +70,6 @@ const FOREIGN_SUFFIX =
   ' (from another or an ended session; continue it only if that session is ' +
   'not running, else leave it)';
 const MALFORMED_SUFFIX = ' (frontmatter unreadable)';
-const UNREADABLE_SUFFIX = ' (could not be read; open it directly)';
 
 /** Who sees which records on one prompt. */
 export interface HandoffPointerAudience {
@@ -131,6 +131,7 @@ type HeadRead =
   | {
       readonly kind: 'status';
       readonly status: HandoffRecordStatus;
+      readonly scrubbed: boolean;
       readonly mtimeMs: number;
     };
 
@@ -339,7 +340,7 @@ export class SubagentHandoffIndex {
       this.logger.debug('[SubagentHandoffIndex] Handoff record head not read', {
         errorCode: errorCodeOf(error),
       });
-      return `${prefix}${UNREADABLE_SUFFIX}`;
+      return undefined;
     }
     if (read.kind === 'gone') {
       removeName(index.names, name);
@@ -353,6 +354,7 @@ export class SubagentHandoffIndex {
       }
       return undefined;
     }
+    if (!read.scrubbed) return undefined;
     return read.status === 'malformed'
       ? `${prefix}${MALFORMED_SUFFIX}`
       : prefix;
@@ -369,6 +371,7 @@ export class SubagentHandoffIndex {
       return {
         kind: 'status',
         status: parseRecordHead(head),
+        scrubbed: hasScrubProof(head),
         mtimeMs: stat.mtimeMs,
       };
     } catch (error: unknown) {

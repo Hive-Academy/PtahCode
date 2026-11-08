@@ -79,6 +79,7 @@ const memoryHandoffRecords: SubagentHandoffRecordsPort = {
   },
   withdraw: async () => undefined,
   disposeUnsafe: async () => undefined,
+  markScrubbed: async () => true,
   forget: () => undefined,
   writeStub: async () => undefined,
 };

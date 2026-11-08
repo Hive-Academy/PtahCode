@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { Logger } from '@ptah-extension/vscode-core';
+import { SubagentHandoffIndex } from './subagent-handoff-index';
 import {
   SubagentHandoffRecords,
   ownerHash,
@@ -9,6 +10,7 @@ import {
   parseRecordName,
   recordFileName,
   renderRecord,
+  hasScrubProof,
   taskFolderOf,
 } from './subagent-handoff-record';
 
@@ -166,6 +168,49 @@ describe('SubagentHandoffRecords', () => {
     expect(parseRecordHead(content)).toBe('pending');
     expect(content).toContain('SECRET handoff');
     expect(JSON.stringify(logger.info.mock.calls)).not.toContain('SECRET');
+  });
+
+  it.each(['unlink', 'writeFile'] as const)(
+    'does not expose unsanitized notes after a failed scrub and failed %s cleanup',
+    async (operation) => {
+      const { store, logger } = makeStore();
+      const result = await store.writeOnce(SESSION, TOOL, 'notes: /secret/unredacted');
+      if (!result.ok) throw new Error('expected a record');
+      store.markInvoked(TOOL);
+      if (operation === 'writeFile') {
+        store.publishIfOwned(TOOL, result.path, () => undefined);
+      }
+      const fault = new Error('injected I/O failure');
+      const spy = jest.spyOn(fs.promises, operation).mockRejectedValueOnce(fault);
+      try {
+        // The final scrub failed; disposal also fails and leaves the record on disk.
+        await store.disposeUnsafe(TOOL, result.path);
+      } finally {
+        spy.mockRestore();
+      }
+      expect(fs.readFileSync(result.path, 'utf8')).toContain('/secret/unredacted');
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('could not be disposed'),
+        expect.objectContaining({ error: fault }),
+      );
+      const fresh = new SubagentHandoffIndex(logger as unknown as Logger);
+      const pointer = await fresh.pointerFor(workspace, {
+        own: new Set([ownerHash(SESSION)]), hidden: new Set(), cursorKey: SESSION,
+      });
+      expect(pointer ?? '').not.toContain(result.path);
+    },
+  );
+
+  it('persists scrub proof and exposes the record on a fresh index', async () => {
+    const { store, logger } = makeStore();
+    const result = await store.writeOnce(SESSION, TOOL, 'notes: /safe/path');
+    if (!result.ok) throw new Error('expected a record');
+    expect(await store.markScrubbed(TOOL, result.path)).toBe(true);
+    expect(hasScrubProof(fs.readFileSync(result.path, 'utf8'))).toBe(true);
+    const fresh = new SubagentHandoffIndex(logger as unknown as Logger);
+    expect(await fresh.pointerFor(workspace, {
+      own: new Set([ownerHash(SESSION)]), hidden: new Set(), cursorKey: SESSION,
+    })).toContain(result.path);
   });
 
   it('fails without a workspace, writing nothing', async () => {

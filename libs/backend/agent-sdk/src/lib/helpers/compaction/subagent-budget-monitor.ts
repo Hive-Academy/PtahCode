@@ -138,6 +138,7 @@ export type SubagentHandoffRecordsPort = Pick<
   | 'markInvoked'
   | 'withdraw'
   | 'disposeUnsafe'
+  | 'markScrubbed'
   | 'publishIfOwned'
   | 'forget'
   | 'writeStub'
@@ -1720,9 +1721,14 @@ export class SubagentBudgetMonitor {
   }
 
   private async finalizeNotes(prepared: PreparedHandoff, toolCallId: string): Promise<boolean> {
-    if (!prepared.notesPathToRedact) return true;
+    if (!prepared.notesPathToRedact) {
+      return !prepared.record || this.records.markScrubbed(toolCallId, prepared.record.path);
+    }
     try {
-      if (await this.handoffFiles.redactNotes(prepared.notesPathToRedact, redactBudgetSecrets)) return true;
+      if (await this.handoffFiles.redactNotes(prepared.notesPathToRedact, redactBudgetSecrets)) {
+        if (!prepared.record || await this.records.markScrubbed(toolCallId, prepared.record.path)) return true;
+        throw new Error('Handoff scrub proof could not be persisted');
+      }
       throw new Error(`Could not redact handoff notes for agent ${prepared.handoff.subject.agentId ?? toolCallId}`);
     } catch (error: unknown) {
       this.logger.error('[SubagentBudgetMonitor] Handoff notes redaction failed; delivery withheld',

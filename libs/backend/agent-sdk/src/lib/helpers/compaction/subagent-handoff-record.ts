@@ -14,8 +14,9 @@
  *
  * The file is written once under a temporary `.<name>.tmp` name the index
  * ignores, then published under its record name by an exclusive hard link,
- * so that name only ever shows a complete record; the host never rewrites
- * it. Its frontmatter carries only `status`: `pending` when written;
+ * so that name only ever shows a complete record. After the final notes scrub,
+ * the host atomically replaces it with a scrub-proof version. Its frontmatter
+ * starts with `status: pending` and gains `notesScrubbed: true` only then;
  * the agent that reads it sets `consumed` or `dismissed`.
  *
  * One record per tool-use id: concurrent stops of one subagent (two session
@@ -175,6 +176,15 @@ export function parseRecordHead(head: string): HandoffRecordStatus {
   }
   // No closing fence inside the head.
   return 'malformed';
+}
+
+/** Only a completed final notes scrub authorizes a record pointer. */
+export function hasScrubProof(head: string): boolean {
+  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(head)?.[1];
+  return frontmatter !== undefined &&
+    frontmatter.split(/\r?\n/).filter((line) => line === 'notesScrubbed: true').length === 1 &&
+    !frontmatter.split(/\r?\n/).some((line) =>
+      line.startsWith('notesScrubbed:') && line !== 'notesScrubbed: true');
 }
 
 function isKnownStatus(
@@ -405,6 +415,38 @@ export class SubagentHandoffRecords {
         toolCallId,
         error: error instanceof Error ? error : new Error(String(error)),
       });
+    }
+  }
+
+  /** Publish durable proof only after final redaction succeeded. */
+  async markScrubbed(toolCallId: string, recordPath: string): Promise<boolean> {
+    const writer = this.writers.get(toolCallId);
+    if (!writer || writer.disposing || writer.path !== recordPath) return false;
+    const tempPath = `${recordPath}.${randomBytes(4).toString('hex')}.scrub.tmp`;
+    try {
+      const content = await fs.readFile(recordPath, 'utf8');
+      if (!content.startsWith('---\nstatus: pending\n---\n')) {
+        throw new Error('Handoff record frontmatter changed before scrub proof');
+      }
+      await fs.writeFile(tempPath,
+        content.replace('---\nstatus: pending\n---\n',
+          '---\nstatus: pending\nnotesScrubbed: true\n---\n'), 'utf8');
+      await fs.rename(tempPath, recordPath);
+      return true;
+    } catch (error: unknown) {
+      this.logger.error('[SubagentHandoffRecords] Scrub proof not persisted',
+        error instanceof Error ? error : new Error(String(error)));
+      return false;
+    } finally {
+      try {
+        await fs.unlink(tempPath);
+      } catch (error: unknown) {
+        if (errorCodeOf(error) !== 'ENOENT') {
+          this.logger.warn('[SubagentHandoffRecords] Scrub proof temp not removed', {
+            error: error instanceof Error ? error : new Error(String(error)),
+          });
+        }
+      }
     }
   }
 

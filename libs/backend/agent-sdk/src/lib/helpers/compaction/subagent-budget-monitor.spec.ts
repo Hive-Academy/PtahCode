@@ -156,6 +156,7 @@ function fakeRecords(order: string[]) {
     disposeUnsafe: jest.fn(async (_toolCallId: string, _recordPath: string) => {
       order.push('disposeUnsafe');
     }),
+    markScrubbed: jest.fn(async () => true),
     publishIfOwned: jest.fn((_toolCallId: string, _recordPath: string, publish: () => void) => {
       publish();
       return true;
@@ -3209,12 +3210,13 @@ describe('SubagentBudgetMonitor handoff records', () => {
       await live(h, 'a.b');
       await live(h, 'a_b');
       expect(ownerHash('a.b')).not.toBe(ownerHash('a_b'));
-      const dotted = savedName(
-        await records.writeOnce('a.b', 'toolu_dot', 'handoff of a.b'),
-      );
-      const underscored = savedName(
-        await records.writeOnce('a_b', 'toolu_under', 'handoff of a_b'),
-      );
+      const dottedRecord = await records.writeOnce('a.b', 'toolu_dot', 'handoff of a.b');
+      const underscoredRecord = await records.writeOnce('a_b', 'toolu_under', 'handoff of a_b');
+      const dotted = savedName(dottedRecord);
+      const underscored = savedName(underscoredRecord);
+      if (!dottedRecord.ok || !underscoredRecord.ok) throw new Error('expected records');
+      expect(await records.markScrubbed('toolu_dot', dottedRecord.path)).toBe(true);
+      expect(await records.markScrubbed('toolu_under', underscoredRecord.path)).toBe(true);
 
       const forDotted = await h.monitor.handoffPointer('a.b', undefined);
       expect(forDotted).toContain(dotted);
@@ -3238,9 +3240,10 @@ describe('SubagentBudgetMonitor handoff records', () => {
     it('a record written under an id later rekeyed is the new id’s own', async () => {
       const { h, records } = pointerHarness();
       await live(h, 'A');
-      const name = savedName(
-        await records.writeOnce('A', 'toolu_a', 'handoff of A'),
-      );
+      const written = await records.writeOnce('A', 'toolu_a', 'handoff of A');
+      const name = savedName(written);
+      if (!written.ok) throw new Error('expected a record');
+      expect(await records.markScrubbed('toolu_a', written.path)).toBe(true);
       h.monitor.rekey('A', 'A2');
 
       const pointer = await h.monitor.handoffPointer('A2', undefined);
