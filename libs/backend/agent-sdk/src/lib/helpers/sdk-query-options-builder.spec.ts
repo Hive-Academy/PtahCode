@@ -222,10 +222,15 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
         if (target === 'boom') throw new Error('budget lookup failed');
         return target === 'stopped' ? 'Start a fresh agent.' : undefined;
       }),
-      logBudgetSendMessageHookDenial: jest.fn((_sessionId: string, _tabId: unknown, toolUseID: string) =>
-        logger.debug('[SdkPermissionHandler] Permission decision', {
-          toolName: 'SendMessage', toolUseID, route: 'deny', decisionSource: 'subagent-budget',
-        })),
+      logBudgetSendMessageHookDenial: jest.fn(
+        (_sessionId: string, _tabId: unknown, toolUseID: string) =>
+          logger.debug('[SdkPermissionHandler] Permission decision', {
+            toolName: 'SendMessage',
+            toolUseID,
+            route: 'deny',
+            decisionSource: 'subagent-budget',
+          }),
+      ),
     };
 
     const subagentHookHandler = {
@@ -377,37 +382,76 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
   }
 
   it('routes SDK SendMessage through PreToolUse before an auto-allow skips canUseTool', async () => {
-    const { options, logger } = await buildWithLogger({ sessionId: 'session-1' });
+    const { options, logger } = await buildWithLogger({
+      sessionId: 'session-1',
+    });
     const gate = options.hooks?.PreToolUse?.[0];
     expect(gate?.matcher).toBe('SendMessage');
     const hook = gate?.hooks[0];
     expect(hook).toBeDefined();
     const base = {
-      hook_event_name: 'PreToolUse' as const, session_id: 'session-1',
-      transcript_path: '', cwd: 'D:/tmp/ws', tool_name: 'SendMessage', tool_use_id: 'send-1',
+      hook_event_name: 'PreToolUse' as const,
+      session_id: 'session-1',
+      transcript_path: '',
+      cwd: 'D:/tmp/ws',
+      tool_name: 'SendMessage',
+      tool_use_id: 'send-1',
     };
     const context = { signal: new AbortController().signal };
-    const denied = await hook?.({ ...base, tool_input: { to: 'stopped' } }, 'send-1', context);
-    expect(denied).toEqual(expect.objectContaining({ hookSpecificOutput: expect.objectContaining({
-      permissionDecision: 'deny', permissionDecisionReason: 'Start a fresh agent.',
-    }) }));
-    expect(logger.debug).toHaveBeenCalledWith('[SdkPermissionHandler] Permission decision',
-      expect.objectContaining({ toolName: 'SendMessage', route: 'deny', decisionSource: 'subagent-budget' }));
-    expect(await hook?.({ ...base, tool_input: { to: 'running' } }, 'send-1', context)).toEqual({});
+    const denied = await hook?.(
+      { ...base, tool_input: { to: 'stopped' } },
+      'send-1',
+      context,
+    );
+    expect(denied).toEqual(
+      expect.objectContaining({
+        hookSpecificOutput: expect.objectContaining({
+          permissionDecision: 'deny',
+          permissionDecisionReason: 'Start a fresh agent.',
+        }),
+      }),
+    );
+    expect(logger.debug).toHaveBeenCalledWith(
+      '[SdkPermissionHandler] Permission decision',
+      expect.objectContaining({
+        toolName: 'SendMessage',
+        route: 'deny',
+        decisionSource: 'subagent-budget',
+      }),
+    );
+    expect(
+      await hook?.(
+        { ...base, tool_input: { to: 'running' } },
+        'send-1',
+        context,
+      ),
+    ).toEqual({});
   });
 
   it('fails open with a warning when the SendMessage budget gate throws', async () => {
-    const { options, logger } = await buildWithLogger({ sessionId: 'session-1' });
+    const { options, logger } = await buildWithLogger({
+      sessionId: 'session-1',
+    });
     const hook = options.hooks?.PreToolUse?.[0]?.hooks[0];
     const input = {
-      hook_event_name: 'PreToolUse' as const, session_id: 'session-1', transcript_path: '',
-      cwd: 'D:/tmp/ws', tool_name: 'SendMessage', tool_use_id: 'send-2', tool_input: { to: 'boom' },
+      hook_event_name: 'PreToolUse' as const,
+      session_id: 'session-1',
+      transcript_path: '',
+      cwd: 'D:/tmp/ws',
+      tool_name: 'SendMessage',
+      tool_use_id: 'send-2',
+      tool_input: { to: 'boom' },
     };
-    const result = await hook?.(input, 'send-2', { signal: new AbortController().signal });
+    const result = await hook?.(input, 'send-2', {
+      signal: new AbortController().signal,
+    });
     expect(result).toEqual({});
     expect(logger.warn).toHaveBeenCalledWith(
       '[SdkQueryOptionsBuilder] SendMessage budget gate failed; allowing the call',
-      expect.objectContaining({ toolUseId: 'send-2', error: 'budget lookup failed' }),
+      expect.objectContaining({
+        toolUseId: 'send-2',
+        error: 'budget lookup failed',
+      }),
     );
   });
 
@@ -415,7 +459,7 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
     const options = await buildWith({ mcpToolProfile: 'apps' });
     expect(options.mcpServers?.['ptah']).toEqual(
       expect.objectContaining({
-        url: expect.stringMatching(/\/session\/tab-fixture\/profile\/apps$/),
+        url: expect.stringMatching(/\/session\/tab-fixture\/workspace\/D%3A%2Ftmp%2Fws\/profile\/apps$/),
       }),
     );
   });
@@ -886,7 +930,10 @@ describe('SdkQueryOptionsBuilder.build — auto-compact control', () => {
       'https://api.anthropic.com',
       'claude-sonnet-4-5',
     );
-    expect(parsedSettings(opts)).toEqual({ ...ALWAYS, autoCompactWindow: 200_000 });
+    expect(parsedSettings(opts)).toEqual({
+      ...ALWAYS,
+      autoCompactWindow: 200_000,
+    });
     expect(PTAH_DISABLE_SDK_AUTO_MEMORY).toEqual(snapshot);
   });
 });
@@ -2198,40 +2245,50 @@ describe('SdkQueryOptionsBuilder.buildMcpServers — caller session segment (TAS
   it('appends the apps profile after the routing id', () => {
     expect(
       makeMcpBuilder().buildMcpServers(true, 'tab-abc', 'apps')['ptah'].url,
-    ).toMatch(/\/session\/tab-abc\/profile\/apps$/);
+    ).toMatch(/\/session\/tab-abc\/workspace\/%2Fwork\/profile\/apps$/);
   });
 
-  it('issues a four-hour privileged credential bound to routing id, cwd, and profile', () => {
-    const issue = jest.fn().mockReturnValue('in-memory-token');
-    const revokeSubject = jest.fn();
-    const ctor = SdkQueryOptionsBuilder as unknown as new (
-      ...args: unknown[]
-    ) => SdkQueryOptionsBuilder;
-    const builder = Object.assign(new ctor({ info: jest.fn() }), {
-      mcpCallerCredentials: { issue, revokeSubject },
-    }) as unknown as BuilderWithMcp &
-      Pick<SdkQueryOptionsBuilder, 'revokeMcpSubject'>;
-    const config = builder.buildMcpServers(true, 'tab-abc', 'apps', '/work');
-    expect(config['ptah']).toEqual(
-      expect.objectContaining({
-        url: expect.stringMatching(/\/session\/tab-abc\/profile\/apps$/),
-        headers: { Authorization: 'Bearer in-memory-token' },
-      }),
-    );
-    expect(issue).toHaveBeenCalledWith(
-      {
-        kind: 'session',
-        sessionId: 'tab-abc',
-        workspaceRoot: '/work',
-        toolProfile: 'apps',
-        capability: 'privileged',
-      },
-      'claude-interactive:tab-abc',
-      4 * 60 * 60 * 1000,
-    );
-    builder.revokeMcpSubject('tab-abc');
-    expect(revokeSubject).toHaveBeenCalledWith('claude-interactive:tab-abc');
-  });
+  it.each(['/projects/x y/', 'D:\\projects\\x y'])(
+    'issues a credential bound to the workspace encoded in its URL: %s',
+    (workspaceRoot) => {
+      const issue = jest.fn().mockReturnValue('in-memory-token');
+      const revokeSubject = jest.fn();
+      const ctor = SdkQueryOptionsBuilder as unknown as new (
+        ...args: unknown[]
+      ) => SdkQueryOptionsBuilder;
+      const builder = Object.assign(new ctor({ info: jest.fn() }), {
+        mcpCallerCredentials: { issue, revokeSubject },
+      }) as unknown as BuilderWithMcp &
+        Pick<SdkQueryOptionsBuilder, 'revokeMcpSubject'>;
+      const config = builder.buildMcpServers(
+        true,
+        'tab-abc',
+        'apps',
+        workspaceRoot,
+      );
+      expect(config['ptah']).toEqual(
+        expect.objectContaining({
+          headers: { Authorization: 'Bearer in-memory-token' },
+        }),
+      );
+      expect(new URL(config['ptah'].url).pathname).toBe(
+        `/session/tab-abc/workspace/${encodeURIComponent(workspaceRoot)}/profile/apps`,
+      );
+      expect(issue).toHaveBeenCalledWith(
+        {
+          kind: 'session',
+          sessionId: 'tab-abc',
+          workspaceRoot,
+          toolProfile: 'apps',
+          capability: 'privileged',
+        },
+        'claude-interactive:tab-abc',
+        4 * 60 * 60 * 1000,
+      );
+      builder.revokeMcpSubject('tab-abc');
+      expect(revokeSubject).toHaveBeenCalledWith('claude-interactive:tab-abc');
+    },
+  );
 
   it.each(['coding', undefined] as const)(
     'preserves the exact default URL for %s',
@@ -2242,7 +2299,7 @@ describe('SdkQueryOptionsBuilder.buildMcpServers — caller session segment (TAS
       );
       expect(
         builder.buildMcpServers(true, 'tab-abc', profile)['ptah'].url,
-      ).toMatch(/\/session\/tab-abc$/);
+      ).toMatch(/\/session\/tab-abc\/workspace\/%2Fwork$/);
     },
   );
 
@@ -2254,14 +2311,20 @@ describe('SdkQueryOptionsBuilder.buildMcpServers — caller session segment (TAS
 
   it('encodes the routing id as a /session/{id} segment', () => {
     const config = makeMcpBuilder().buildMcpServers(true, 'tab-abc');
-    expect(config['ptah'].url).toMatch(/\/session\/tab-abc$/);
+    expect(config['ptah'].url).toMatch(
+      /\/session\/tab-abc\/workspace\/%2Fwork$/,
+    );
   });
 
   it('percent-encodes an id that is not URL-safe so the consumer decodes it back intact', () => {
     const config = makeMcpBuilder().buildMcpServers(true, 'tab one/two');
-    expect(config['ptah'].url).toMatch(/\/session\/tab%20one%2Ftwo$/);
+    expect(config['ptah'].url).toMatch(
+      /\/session\/tab%20one%2Ftwo\/workspace\/%2Fwork$/,
+    );
     // Round-trips through the consumer's decodeURIComponent.
-    const segment = config['ptah'].url.split('/session/')[1];
+    const segment = config['ptah'].url
+      .split('/session/')[1]
+      .split('/workspace/')[0];
     expect(decodeURIComponent(segment)).toBe('tab one/two');
   });
 
