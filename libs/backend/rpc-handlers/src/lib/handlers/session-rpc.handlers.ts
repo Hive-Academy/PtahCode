@@ -8,7 +8,7 @@
  */
 
 import { injectable, inject } from 'tsyringe';
-import { normalizeWorkspaceRoot } from '@ptah-extension/shared';
+import { claudeProjectDir, normalizeWorkspaceRoot } from '@ptah-extension/shared';
 import { SYSTEM_PROMPT_MAX_LENGTH } from './chat-rpc.schema';
 import {
   Logger,
@@ -1993,40 +1993,64 @@ export class SessionRpcHandlers {
     workspacePath: string,
     opts: { recoverStaged: boolean },
   ): Promise<string | null> {
-    const sessionDir = await this.resolveSessionsDir(workspacePath, {
-      allowPartialMatch: true,
-    });
-    if (!sessionDir) {
-      return null;
-    }
-    if (opts.recoverStaged) {
-      await this.recoverStagedSessionFiles(sessionDir, sessionId);
-    }
-
-    const sessionFilePath = path.join(sessionDir, `${sessionId}.jsonl`);
-
+    const projectsDir = path.join(os.homedir(), '.claude', 'projects');
+    const exactKey = claudeProjectDir(workspacePath);
+    const exactDir = path.join(projectsDir, exactKey);
     try {
-      await fs.access(sessionFilePath);
-      return sessionFilePath;
+      await fs.access(projectsDir);
     } catch {
-      // degradation-audit: optional-capability - the access call is a
-      // transcript existence probe; null means no session file for this id.
+      // degradation-audit: optional-capability - no Claude project directory.
       return null;
     }
+    const dirs = await fs.readdir(projectsDir);
+    const olderKey = workspacePath.replace(/[:\\/]/g, '-');
+    const normalize = (value: string) => value.toLowerCase().replace(/[-_]/g, '-');
+    const matchingDirs = [
+      dirs.find((dir) => dir.toLowerCase() === exactKey.toLowerCase()),
+      dirs.find((dir) => normalize(dir) === normalize(exactKey)),
+      dirs.find((dir) => dir.toLowerCase() === olderKey.toLowerCase()),
+    ].filter((dir): dir is string => Boolean(dir));
+    const recoveryKey = matchingDirs[0];
+    const workspaceName = path.win32.basename(workspacePath);
+    const exactCandidates = [...new Set([
+      exactDir,
+      ...matchingDirs.map((dir) => path.join(projectsDir, dir)),
+    ])];
+    const partialDirs = workspaceName.length >= 3
+      ? dirs.filter((dir) =>
+          dir.toLowerCase().includes(workspaceName.toLowerCase()) ||
+          normalize(dir).includes(normalize(workspaceName)),
+        ).sort().slice(0, 20 - exactCandidates.length)
+      : [];
+    const candidates = [
+      ...exactCandidates,
+      ...partialDirs.map((dir) => path.join(projectsDir, dir)),
+    ];
+    for (const sessionDir of new Set(candidates)) {
+      if (opts.recoverStaged && recoveryKey && sessionDir === path.join(projectsDir, recoveryKey)) {
+        await this.recoverStagedSessionFiles(sessionDir, sessionId);
+      }
+      const sessionFilePath = path.join(sessionDir, `${sessionId}.jsonl`);
+      try {
+        await fs.access(sessionFilePath);
+        return sessionFilePath;
+      } catch {
+        // degradation-audit: optional-capability - probe the next candidate.
+      }
+    }
+    return null;
   }
 
   /**
    * Resolve the Claude SDK sessions directory for a workspace.
    *
    * The CLI escapes the workspace path into a directory name under
-   * `~/.claude/projects/`, but its escaping is not identical to ours (it also
-   * folds `_` to `-`), so exact match is tried first, then case-insensitive,
-   * then `[-_]`-normalized.
+   * `~/.claude/projects/`. Match the SDK key first, then case/underscore
+   * variants and older Ptah keys that preserved punctuation.
    *
    * `allowPartialMatch` adds a final basename-contains guess. It is a guess:
    * a workspace named `api` matches any project directory containing "api".
-   * Callers that only probe for one known file (`findSessionFile`) tolerate a
-   * wrong directory — it degrades to "not found". Callers that treat the
+   * Known-file probes check every candidate for the session id. Callers that treat the
    * directory listing as authoritative must NOT enable it, since a wrong
    * directory would report live sessions as having no transcript.
    */
@@ -2045,7 +2069,7 @@ export class SessionRpcHandlers {
       return null;
     }
 
-    const escapedPath = workspacePath.replace(/[:\\/]/g, '-');
+    const escapedPath = claudeProjectDir(workspacePath);
     const dirs = await fs.readdir(projectsDir);
 
     let sessionDir: string | undefined = escapedPath;
@@ -2058,8 +2082,13 @@ export class SessionRpcHandlers {
         sessionDir = dirs.find((d) => normalize(d) === normalize(escapedPath));
       }
 
+      if (!sessionDir) {
+        const olderKey = workspacePath.replace(/[:\\/]/g, '-');
+        sessionDir = dirs.find((d) => d.toLowerCase() === olderKey.toLowerCase());
+      }
+
       if (!sessionDir && opts.allowPartialMatch) {
-        const workspaceName = path.basename(workspacePath);
+        const workspaceName = path.win32.basename(workspacePath);
         const normalize = (s: string) => s.toLowerCase().replace(/[-_]/g, '-');
         sessionDir = dirs.find(
           (d) =>

@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { claudeProjectDir } from '@ptah-extension/shared';
 import type { ElectronApplication } from '@playwright/test';
 import { launchPtah } from './electron-launcher';
 import { RpcBridge } from './rpc-bridge';
@@ -10,7 +11,7 @@ import { RpcBridge } from './rpc-bridge';
  * Seeded Claude-CLI session files for real-backend Electron specs.
  *
  * `SessionImporterService.findSessionsDirectory` resolves
- * `os.homedir()/.claude/projects/<workspacePath with [:\\/] replaced by '-'>/`,
+ * `os.homedir()/.claude/projects/<Claude project key>/`,
  * so a spec that wants the importer to see specific files must (a) move
  * `os.homedir()` somewhere disposable and (b) write the files under the escaped
  * name of the workspace it is going to launch with. Both happen here, before
@@ -57,11 +58,10 @@ export interface SeededWorkspace {
 }
 
 /**
- * Mirrors `SessionImporterService.findSessionsDirectory`'s escape rule
- * exactly: every `:`, `\` and `/` becomes `-`.
+ * Mirrors the Claude CLI project-directory key.
  */
 export function escapeWorkspacePath(workspacePath: string): string {
-  return workspacePath.replace(/[:\\/]/g, '-');
+  return claudeProjectDir(workspacePath);
 }
 
 /**
