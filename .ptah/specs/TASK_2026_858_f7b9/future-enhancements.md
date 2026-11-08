@@ -121,3 +121,10 @@ the mobile PWA, P3 = later.
 | A resolved approval block keeps Allow once and Deny on screen, disabled. Hide them or replace them with the outcome. | visual-review.md fifth pass |
 | A screen-reader-only live region still announces "Claude is responding" after the turn ends. | visual-review.md fifth pass |
 | The fifth pass saw K and H on the 60 s auto-deny path (the manual Deny click came too late). Both paths send the same hard deny and are covered by `remote-sessions.spec.ts`; capture a manual Deny in the next visual pass. | visual-review.md fifth pass |
+
+## PR #982 CodeRabbit round 1 (added 2026-11-08)
+
+| Item | Source |
+| --- | --- |
+| Add a store test where a reconnect arrives during an explicit attach. The `attaching` state suppresses a second attach; a failed in-flight attach stays detached until Refresh or the next reconnect. Document that recovery. | pr982-coderabbit-round-1-review.md |
+| Add reference-image, table, setext and entity cases to `remote-markdown.spec.ts` (a direct marked probe found no bypass). | pr982-coderabbit-round-1-review.md |
