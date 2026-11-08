@@ -31,6 +31,13 @@ Task({
 
 - Every Mode 2/3 call is a **fresh** team-leader `Task()`. In Mode 2, give it the batch report path
   (plus the review path only when you return with a phase review verdict) rather than resuming an earlier team-leader with its long thread.
+- Mode 1 writes `batches.md`. Each self-contained batch entry records its id and state; shape
+  (`mechanical|logic|contract|test|docs|review`); estimated weight (read-set plus write-set tokens
+  measured with `ptah_count_tokens`, plus 10% framing); actual lane tokens (`pending` until measured,
+  `unavailable` if unknown, never guessed); write set; read set with line ranges; inline contract
+  excerpts; dependencies; parallel-safe flag; routed executor/tier/effort/reason; exact verify command
+  (`npm run verify -- -p A,B`); and acceptance criteria.
+- Mode 2 records actual lane tokens beside each batch estimate in `batches.md` for calibration by shape.
 - "Re-invoke the same executor" (below) means resume it only if its last activity was under
   5 minutes ago; otherwise start a fresh one with the batch section and the report paths.
 - Risk-based review: no per-batch review; each batch passes its scoped typecheck, lint and tests
@@ -88,13 +95,20 @@ A hook failure during its commit is your gate: [git-standards.md](git-standards.
 
 ## Spawning a batch executor
 
-Read the batch's `Recommended executor` and `Execution mode` in `batches.md`.
+Read that batch entry's executor, tier, effort and parallel-safe flag in `batches.md`. Build each
+executor prompt **only** from that entry plus the generic lane policy and role; do not paste the
+plan, `context.md` or other batches. The entry must contain everything the executor needs.
 
-- **Sequential, subagent** → one `Task()` with the executor prompt from the return.
+When `ptah_route_decide` is listed, pass each batch as a phase with optional `shape` and `weight`;
+the roster returns `tier` and `effort`. For a subagent, pass `tier` as the Agent call's `model`
+alias and `effort` where supported. For CLI lanes, `tier` is advisory; model resolution remains
+request model → `agentOrchestration.<cli>Model` setting → native CLI default.
+
+- **Sequential, subagent** → one `Task()` with the prompt built from that batch entry.
 - **Sequential, CLI lane** → one capable lane for the bounded batch, including coupled files;
   give it the self-contained task prompt and verify its report before Mode 2.
 - **Parallel, CLI lanes** → one lane per task, file-disjoint, each with a self-contained prompt built
-  from that task's entry. Run them per the `agent-lanes` skill; merge the lane results into **one**
+  from its task in that batch entry. Run them per the `agent-lanes` skill; merge the lane results into **one**
   implementation report; re-invoke Mode 2 with it.
 - **Recommended executor unavailable** (lanes disabled at Gate 0.1, or no such lane) → use the
   batch's `Fallback executor`.
