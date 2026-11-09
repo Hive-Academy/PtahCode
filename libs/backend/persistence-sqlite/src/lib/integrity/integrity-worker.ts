@@ -31,9 +31,9 @@
  * `quick_check` and record a clean verdict for a file nobody checked — the same
  * trap `backup.service.ts:56-69` guards.
  *
- * EVERY FAILURE IS `'unavailable'`, NEVER `'corrupt'`. A missing native module,
- * an ABI mismatch, a locked file, a refused open, a thrown pragma: none of them
- * is evidence about the data. `'corrupt'` is reserved for `quick_check` having
+ * Failures before the quick and foreign-key checks are `'unavailable'`, never
+ * `'corrupt'`. A failed full integrity check retains those completed results
+ * with a null full-check outcome and an error detail. `'corrupt'` is reserved for `quick_check` having
  * actually run and answered something other than `ok`. The driving service
  * writes NO record for `'unavailable'`, so an inconclusive check retries in the
  * next window instead of being remembered as clean.
@@ -212,8 +212,8 @@ function describe(error: unknown): string {
 }
 
 /**
- * Run both pragmas and build the response. Never throws: the whole body is one
- * try, and every escape lands on the `'unavailable'` verdict.
+ * Run the checks and build the response. A failed full integrity check retains
+ * earlier results; failures in the outer try return `'unavailable'`.
  */
 function runCheck(request: IntegrityCheckRequest): IntegrityWorkerOutbound {
   const startedAt = Date.now();
@@ -232,9 +232,17 @@ function runCheck(request: IntegrityCheckRequest): IntegrityWorkerOutbound {
     const foreignKeyViolationSample = Array.isArray(fkRows)
       ? fkRows.slice(0, 3) as Array<{ table: string; rowid: number; parent: string; fkid: number }>
       : [];
-    const integrityCheckPassed = request.fullCheck
-      ? db.pragma('integrity_check', { simple: true }) === 'ok'
-      : undefined;
+    let integrityCheckPassed: boolean | null | undefined;
+    let integrityCheckError: string | null = null;
+    if (request.fullCheck) {
+      try {
+        integrityCheckPassed = db.pragma('integrity_check', { simple: true }) === 'ok';
+      } catch (error: unknown) {
+        // degradation-audit: reported - retain completed checks and report the failed full check.
+        integrityCheckPassed = null;
+        integrityCheckError = describe(error);
+      }
+    }
 
     const pageCountRaw = db.pragma('page_count', { simple: true });
     const pageCount = typeof pageCountRaw === 'number' ? pageCountRaw : 0;
@@ -246,6 +254,9 @@ function runCheck(request: IntegrityCheckRequest): IntegrityWorkerOutbound {
       detail = quickCheck;
     } else if (verdict === 'ok' && foreignKeyViolations > 0) {
       detail = `${foreignKeyViolations} foreign key violation(s)`;
+    }
+    if (integrityCheckError) {
+      detail = detail ? `${detail}; integrity_check failed: ${integrityCheckError}` : `integrity_check failed: ${integrityCheckError}`;
     }
 
     return {

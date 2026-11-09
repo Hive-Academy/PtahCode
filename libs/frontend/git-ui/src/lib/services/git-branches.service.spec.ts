@@ -769,6 +769,33 @@ describe('GitBranchesService (TASK_2026_111)', () => {
       expect(refreshSpy).toHaveBeenCalledWith(['head']);
     });
 
+    it('keeps an in-flight branch read after a workspace-only push', async () => {
+      jest.useFakeTimers();
+      try {
+        const branchData = { current: 'feature/ready', local: [], remote: [] };
+        let resolveBranches!: (value: { success: boolean; data: typeof branchData }) => void;
+        const branchesReply = new Promise<{ success: boolean; data: typeof branchData }>((resolve) => {
+          resolveBranches = resolve;
+        });
+        mockRpcCall.mockImplementation((_vscode: unknown, method: string) => {
+          if (method === 'git:branches') return branchesReply;
+          return makeRpcSuccess(method === 'git:stashList' ? EMPTY_STASH : EMPTY_COMMIT);
+        });
+
+        service.startListening();
+        const refresh = service.refreshBranches();
+        await jest.advanceTimersByTimeAsync(201);
+        expect(mockRpcCall.mock.calls.some((call) => call[1] === 'git:branches')).toBe(true);
+        push({ causes: ['workspace'] });
+        resolveBranches({ success: true, data: branchData });
+        await refresh;
+
+        expect(service.branches()).toEqual(branchData);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
     it('drops a push that arrives BEFORE startListening()', async () => {
       const refreshSpy = jest
         .spyOn(service, 'refreshForCauses')

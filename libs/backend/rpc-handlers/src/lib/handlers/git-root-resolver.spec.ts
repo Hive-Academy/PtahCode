@@ -120,6 +120,19 @@ describe('GitRootResolver', () => {
       .rejects.toMatchObject({ errorCode: 'GIT_ROOT_UNAVAILABLE', message: GIT_ROOT_UNAVAILABLE_MESSAGE });
   });
 
+  it('warns and keeps the retryable error when a directory read fails', async () => {
+    const { resolver, probe, warn } = build();
+    const cause = new Error('EACCES');
+    probe.directory.mockResolvedValue({ kind: 'failed', cause });
+
+    await expect(resolver.resolve('/denied', 'git:info', 'folder'))
+      .rejects.toMatchObject({ errorCode: 'GIT_ROOT_UNAVAILABLE', message: GIT_ROOT_UNAVAILABLE_MESSAGE });
+    expect(warn).toHaveBeenCalledWith(
+      '[GitRoot] directory read failed',
+      expect.objectContaining({ workspaceRoot: '/denied', cause }),
+    );
+  });
+
   it('refuses an unregistered path with a warn and no fallback', async () => {
     const { resolver, warn } = build();
 

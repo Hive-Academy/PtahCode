@@ -227,6 +227,13 @@ export class GitRootResolver {
   private async isConfirmedAbsent(requested: string): Promise<boolean> {
     try {
       const directory = await this.deps.probe.directory(requested);
+      if (directory.kind === 'failed') {
+        this.warnLimited('probe-failed', requested, '[GitRoot] directory read failed', {
+          workspaceRoot: requested,
+          cause: directory.cause,
+        });
+        return false;
+      }
       return directory.kind === 'absent';
     } catch (error: unknown) {
       // degradation-audit: reported - a failed directory read keeps the retryable message; warned.

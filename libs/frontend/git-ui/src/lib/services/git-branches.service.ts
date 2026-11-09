@@ -227,7 +227,8 @@ export class GitBranchesService implements MessageHandler {
     ) {
       return;
     }
-    this.reactivateRoot(this.workspaceKey() ?? '');
+    const root = this.workspaceKey() ?? '';
+    if (this.unavailableRoots.has(root)) this.reactivateRoot(root);
     void this.refreshForCauses(payload?.causes);
   }
 

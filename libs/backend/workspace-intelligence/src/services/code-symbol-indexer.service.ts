@@ -1016,8 +1016,7 @@ export class CodeSymbolIndexer {
     options: CodeSymbolIndexerOptions | undefined,
     active: ActiveCensus,
   ): Promise<{ stats: IndexingStats; complete: boolean }> {
-    if ('purgeStaleRoots' in this.sink &&
-        typeof this.sink.purgeStaleRoots === 'function') {
+    if (this.sink.purgeStaleRoots) {
       try {
         await this.sink.purgeStaleRoots();
       } catch (error: unknown) {
