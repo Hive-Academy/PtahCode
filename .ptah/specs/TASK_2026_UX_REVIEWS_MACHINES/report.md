@@ -77,7 +77,20 @@ anubis tokens. These rules do not match DESIGN.md:
 | Blue primary | DaisyUI `btn-primary` (light theme primary is teal; the token handles it) |
 | Gold `#d4af37` | `secondary` / `--ptah-gold` only on meters and the active indicator |
 
-## 5. Open questions
+## 5. Open questions — decided 2026-11-09
+
+The user accepted every recommended answer (relayed by the session master):
+
+| # | Decision |
+| --- | --- |
+| 1 | `ptah-page-header` title uses the Settings style `text-lg font-semibold tracking-tight`. |
+| 2 | `ptah-stat-card` gets a size input. Default `text-2xl`; dense pages use `text-xl`. |
+| 3 | Reviews minimum severity stays read-only: "Minimum severity: Minor (fixed)". No contract change. |
+| 4 | The findings-load bug (`review:listFindings` never called) is a separate bug-fix PR first. |
+| 5 | Reviews pagination uses a "Load more" button at the end of the list. |
+| 6 | Reviews polls only while a run is `running`. No backend change. |
+
+The original questions:
 
 1. Page title style: Settings uses `text-lg font-semibold tracking-tight`
    (`settings.component.html:42`). The dashboard uses `text-xl font-bold`. `ptah-page-header`
