@@ -1,466 +1,166 @@
-/**
- * AutoHandoffSourceCloserService (TASK_2026_863): the automatic hand-off may
- * close its SOURCE tab once the new session is adopted — only for an
- * automatic claim, only with `sessionBudget.closeSourceAfterAutoHandoff` on,
- * only when the tab is idle and clean, and only ONCE.
- *
- * Real closer and real SessionAutoHandoffService (the claim store). The tab
- * manager, the partition, the permission dispatch and the logger are fakes;
- * `closeTabAcrossWorkspaces` is the facade the closer delegates to and is
- * asserted on, not executed (its own spec covers the cross-partition close).
- */
-
 import { TestBed } from '@angular/core/testing';
-import { signal, type WritableSignal } from '@angular/core';
-import { LoggingService } from '@ptah-extension/core';
-import {
-  QueuedFollowUpStore,
-  TabManagerService,
-  TabWorkspacePartitionService,
-} from '@ptah-extension/chat-state';
+import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
+import { QueuedFollowUpStore, TabManagerService } from '@ptah-extension/chat-state';
 import type { TabState } from '@ptah-extension/chat-types';
-import type { SessionHandoffOpenedPayload } from '@ptah-extension/shared';
 import { MessageDispatchService } from './chat-store/message-dispatch.service';
 import { AutoHandoffSourceCloserService } from './auto-handoff-source-closer.service';
-import { SessionAutoHandoffService } from './session-auto-handoff.service';
 
-const TAB = 'tab-1';
-const NEW_TAB = 'tab-2';
-const SESSION = '11111111-1111-4111-8111-111111111111';
-const LOG_CONTEXT = '[SessionAutoHandoff]';
-const CLOSE_BUDGET = {
-  sessionId: SESSION,
-  stage: 'limit',
-  unit: 'tokens',
-  measure: 'tokens',
-  used: 50_000_000,
-  limit: 50_000_000,
-  percent: 100,
-  lowerBound: false,
-  revision: 12,
-  compactions: 0,
-  autoHandoff: true,
-  closeSourceAfterAutoHandoff: true,
-} as const;
-
-/** Flush the effect's queueMicrotask continuation. */
-const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+const request = { requestId: 'r1', predecessorTabId: 'tab-1', predecessorSdkId: 'sdk-1' };
+const tab = (changes: Partial<TabState> = {}): TabState => ({
+  id: 'tab-1', claudeSessionId: 'sdk-1', status: 'loaded', isDirty: false,
+  pendingBackgroundTasks: [], commandCenterOrigin: null, ...changes,
+} as TabState);
 
 describe('AutoHandoffSourceCloserService', () => {
-  let activeTabs: WritableSignal<TabState[]>;
-  let backgroundTabs: TabState[];
-  let backgroundRevision: WritableSignal<number>;
-  let closeTabAcrossWorkspaces: jest.Mock;
-  let hasPendingPermission: jest.Mock;
+  let currentTab: TabState | null;
+  let queued: boolean;
+  let permission: boolean;
+  let close: jest.Mock;
+  let call: jest.Mock;
   let info: jest.Mock;
   let warn: jest.Mock;
-  let autoHandoff: SessionAutoHandoffService;
-  let followUps: QueuedFollowUpStore;
-  let closer: AutoHandoffSourceCloserService;
-
-  function makeTab(
-    id: string,
-    overrides: Record<string, unknown> = {},
-  ): TabState {
-    return {
-      id,
-      title: 'Session',
-      // The source runs its own hand-off turn while it streams.
-      status: 'streaming',
-      messages: [],
-      streamingState: null,
-      currentMessageId: null,
-      claudeSessionId: SESSION,
-      isDirty: false,
-      pendingBackgroundTasks: [],
-      commandCenterOrigin: null,
-      sessionBudget: { ...CLOSE_BUDGET },
-      ...overrides,
-    } as unknown as TabState;
-  }
-
-  const allTabs = () => [...activeTabs(), ...backgroundTabs];
-  const tab = () => allTabs().find((t) => t.id === TAB) as TabState;
-  const isBackground = (id: string) =>
-    !activeTabs().some((t) => t.id === id) &&
-    backgroundTabs.some((t) => t.id === id);
-
-  function patch(id: string, update: Record<string, unknown>): void {
-    if (activeTabs().some((t) => t.id === id)) {
-      activeTabs.update((all) =>
-        all.map((t) => (t.id === id ? { ...t, ...update } : t)),
-      );
-      return;
-    }
-    const index = backgroundTabs.findIndex((t) => t.id === id);
-    if (index === -1) return;
-    backgroundTabs[index] = { ...backgroundTabs[index], ...update };
-    backgroundRevision.update((revision) => revision + 1);
-  }
-
-  function mount(
-    states: 'active' | 'background',
-    tabState: TabState | null = makeTab(TAB),
-  ): void {
-    if (tabState === null) return;
-    if (states === 'active') activeTabs.set([tabState]);
-    else {
-      backgroundTabs = [tabState];
-      backgroundRevision.update((revision) => revision + 1);
-    }
-  }
-
-  function descriptor(
-    overrides: Partial<SessionHandoffOpenedPayload> = {},
-  ): SessionHandoffOpenedPayload {
-    return {
-      tabId: NEW_TAB,
-      fromTabId: TAB,
-      fromSessionId: SESSION,
-      workspaceRoot: '/ws',
-      cwd: '/ws',
-      label: 'Continue',
-      displayPrompt: 'read HANDOFF.md',
-      startedAt: 7,
-      ...overrides,
-    };
-  }
-
-  /** Tick the effect, then let its queueMicrotask settle run. */
-  async function run(): Promise<void> {
-    TestBed.tick();
-    await flush();
-  }
-
-  /** Arm the close the way adoption does: an automatic claim, then adoption. */
-  function arm(overrides: Partial<SessionHandoffOpenedPayload> = {}): void {
-    expect(autoHandoff.claim(SESSION)).toBe(true);
-    closer.onHandoffAdopted(descriptor(overrides));
-  }
+  let service: AutoHandoffSourceCloserService;
 
   beforeEach(() => {
-    activeTabs = signal<TabState[]>([]);
-    backgroundTabs = [];
-    backgroundRevision = signal(0);
-    closeTabAcrossWorkspaces = jest.fn(() => true);
-    hasPendingPermission = jest.fn(() => false);
+    currentTab = tab(); queued = false; permission = false;
+    close = jest.fn().mockResolvedValue(true);
+    call = jest.fn().mockResolvedValue({ success: true });
     info = jest.fn();
     warn = jest.fn();
+    TestBed.configureTestingModule({ providers: [
+      AutoHandoffSourceCloserService,
+      { provide: TabManagerService, useValue: {
+        closeHandoffPredecessor: close,
+        findTabByIdAcrossWorkspaces: () => currentTab ? { tab: currentTab, workspacePath: '/ws' } : null,
+      } },
+      { provide: MessageDispatchService, useValue: { hasPendingPermissionForTab: () => permission } },
+      { provide: QueuedFollowUpStore, useValue: { forTab: () => queued ? [{}] : [] } },
+      { provide: LoggingService, useValue: { info, warn } },
+      { provide: ClaudeRpcService, useValue: { call } },
+    ] });
+    service = TestBed.inject(AutoHandoffSourceCloserService);
+  });
+  afterEach(() => TestBed.resetTestingModule());
 
-    TestBed.configureTestingModule({
-      providers: [
-        AutoHandoffSourceCloserService,
-        QueuedFollowUpStore,
-        {
-          provide: TabManagerService,
-          useValue: {
-            tabs: () => activeTabs(),
-            backgroundTabsRevision: () => backgroundRevision(),
-            findTabByIdAcrossWorkspaces: (id: string) => {
-              const found = allTabs().find((t) => t.id === id);
-              return found
-                ? { tab: found, workspacePath: isBackground(id) ? '/ws/other' : '/ws' }
-                : null;
-            },
-            closeTabAcrossWorkspaces,
-          },
-        },
-        {
-          provide: TabWorkspacePartitionService,
-          useValue: {
-            findTabBySessionIdAcrossWorkspaces: (sessionId: string) => {
-              const found = allTabs().find(
-                (t) => t.claudeSessionId === sessionId,
-              );
-              return found
-                ? { tab: found, workspacePath: isBackground(found.id) ? '/ws/other' : '/ws' }
-                : null;
-            },
-          },
-        },
-        {
-          provide: MessageDispatchService,
-          useValue: { hasPendingPermissionForTab: hasPendingPermission },
-        },
-        { provide: LoggingService, useValue: { info, warn } },
-      ],
-    });
-    autoHandoff = TestBed.inject(SessionAutoHandoffService);
-    followUps = TestBed.inject(QueuedFollowUpStore);
-    closer = TestBed.inject(AutoHandoffSourceCloserService);
+  it('replies true after the exact-pair close resolves, with no extra abort', async () => {
+    let finish: (closed: boolean) => void = () => undefined;
+    close.mockReturnValue(new Promise<boolean>((resolve) => { finish = resolve; }));
+    const pending = service.closePredecessor(request);
+    expect(close).toHaveBeenCalledWith('tab-1', 'sdk-1');
+    expect(call).not.toHaveBeenCalled();
+    finish(true);
+    await pending;
+    expect(call.mock.calls).toEqual([['session:handoffCloseResult', { requestId: 'r1', outcome: 'closed' }]]);
   });
 
-  afterEach(() => {
-    TestBed.resetTestingModule();
+  it('mismatched SDK id replies false and leaves the tab open', async () => {
+    currentTab = tab({ claudeSessionId: 'other' as TabState['claudeSessionId'] });
+    await service.closePredecessor(request);
+    expect(close).not.toHaveBeenCalled();
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked' });
   });
 
-  describe('arming', () => {
-    it('ignores an adoption without a source session id', async () => {
-      mount('active');
-      closer.onHandoffAdopted(descriptor({ fromSessionId: null }));
-
-      await run();
-      expect(closeTabAcrossWorkspaces).not.toHaveBeenCalled();
-      expect(info).not.toHaveBeenCalled();
-    });
-
-    it('never closes for a hand-off without an automatic claim', async () => {
-      mount('active');
-      closer.onHandoffAdopted(descriptor());
-
-      await run();
-      patch(TAB, { status: 'loaded' });
-      await run();
-      expect(closeTabAcrossWorkspaces).not.toHaveBeenCalled();
-    });
-
-    it('never closes for a cancelled automatic hand-off', async () => {
-      mount('active');
-      expect(autoHandoff.claim(SESSION)).toBe(true);
-      autoHandoff.cancel(SESSION);
-
-      closer.onHandoffAdopted(descriptor());
-      await run();
-      patch(TAB, { status: 'loaded' });
-      await run();
-
-      expect(closeTabAcrossWorkspaces).not.toHaveBeenCalled();
-    });
-
-    it('does not arm when the close-source setting is off', async () => {
-      mount('active', makeTab(TAB, {
-        sessionBudget: { ...CLOSE_BUDGET, closeSourceAfterAutoHandoff: false },
-      }));
-      arm();
-      await run();
-      patch(TAB, { status: 'loaded' });
-      await run();
-
-      expect(closeTabAcrossWorkspaces).not.toHaveBeenCalled();
-    });
-
-    it('does not arm when the budget does not name the source session', async () => {
-      mount('active', makeTab(TAB, {
-        sessionBudget: { ...CLOSE_BUDGET, sessionId: 'other-session' },
-      }));
-      arm();
-      await run();
-      patch(TAB, { status: 'loaded' });
-      await run();
-
-      expect(closeTabAcrossWorkspaces).not.toHaveBeenCalled();
-    });
-
-    it('does not arm a session the user wrapped up by hand', async () => {
-      mount('active');
-      expect(autoHandoff.claim(SESSION)).toBe(true);
-      autoHandoff.markManualWrapUp(SESSION);
-
-      closer.onHandoffAdopted(descriptor());
-      await run();
-      patch(TAB, { status: 'loaded' });
-      await run();
-
-      expect(closeTabAcrossWorkspaces).not.toHaveBeenCalled();
-      expect(info).not.toHaveBeenCalled();
-    });
-
-    it('logs and does nothing when the source is not mounted', async () => {
-      mount('active', null);
-      arm();
-
-      expect(info).toHaveBeenCalledWith(
-        LOG_CONTEXT,
-        expect.stringContaining('not mounted in this panel'),
-        expect.objectContaining({ sessionId: SESSION }),
-      );
-      await run();
-      expect(closeTabAcrossWorkspaces).not.toHaveBeenCalled();
-    });
-
-    it('locates the source by session id when fromTabId names another tab', async () => {
-      mount('active');
-      arm({ fromTabId: 'a-tab-that-was-closed' });
-
-      patch(TAB, { status: 'loaded' });
-      await run();
-
-      expect(closeTabAcrossWorkspaces).toHaveBeenCalledWith(TAB, SESSION);
-    });
+  it('missing tab replies absent', async () => {
+    currentTab = null;
+    await service.closePredecessor(request);
+    expect(close).not.toHaveBeenCalled();
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'absent' });
   });
 
-  describe('the close', () => {
-    it('waits for the hand-off turn to end, then closes once', async () => {
-      mount('active');
-      arm();
-      patch(TAB, { status: 'resuming' });
-      await run();
-      expect(closeTabAcrossWorkspaces).not.toHaveBeenCalled();
-
-      patch(TAB, { status: 'loaded' });
-      await run();
-      expect(closeTabAcrossWorkspaces).toHaveBeenCalledTimes(1);
-      expect(closeTabAcrossWorkspaces).toHaveBeenCalledWith(TAB, SESSION);
-
-      // One evaluation only: further updates never close it again.
-      patch(TAB, { sessionBudget: { ...CLOSE_BUDGET, revision: 13 } });
-      await run();
-      expect(closeTabAcrossWorkspaces).toHaveBeenCalledTimes(1);
-    });
-
-    it('closes right away when the source is already idle at adoption', async () => {
-      mount('active', makeTab(TAB, { status: 'loaded' }));
-      arm();
-      await run();
-
-      expect(closeTabAcrossWorkspaces).toHaveBeenCalledTimes(1);
-      expect(info).not.toHaveBeenCalled();
-      expect(warn).not.toHaveBeenCalled();
-    });
-
-    it('closes a source parked in a background workspace partition', async () => {
-      mount('background', makeTab(TAB, { status: 'loaded' }));
-      arm();
-      await run();
-
-      expect(closeTabAcrossWorkspaces).toHaveBeenCalledWith(TAB, SESSION);
-    });
-
-    it('warns when the close is refused, and never retries it', async () => {
-      mount('active', makeTab(TAB, { status: 'loaded' }));
-      closeTabAcrossWorkspaces.mockReturnValue(false);
-      arm();
-      await run();
-
-      expect(warn).toHaveBeenCalledWith(
-        LOG_CONTEXT,
-        expect.stringContaining('was refused'),
-        expect.objectContaining({ tabId: TAB, sessionId: SESSION }),
-      );
-
-      closeTabAcrossWorkspaces.mockReturnValue(true);
-      await run();
-      expect(closeTabAcrossWorkspaces).toHaveBeenCalledTimes(1);
-    });
-
-    it('keeps a source that was rebound to another session', async () => {
-      mount('active');
-      arm();
-      patch(TAB, { claudeSessionId: 'other-session', status: 'loaded' });
-      await run();
-
-      expect(closeTabAcrossWorkspaces).not.toHaveBeenCalled();
-      expect(info).toHaveBeenCalledWith(
-        LOG_CONTEXT,
-        expect.stringContaining('rebound'),
-        expect.objectContaining({ tabId: TAB, sessionId: SESSION }),
-      );
-    });
+  it.each([null, undefined])('null SDK id matches an unset tab session (%s)', async (sdkId) => {
+    currentTab = tab({ claudeSessionId: sdkId as TabState['claudeSessionId'] });
+    await service.closePredecessor({ ...request, predecessorSdkId: null });
+    expect(close).toHaveBeenCalledWith('tab-1', null);
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'closed' });
   });
 
-  describe('blockers keep the source open, once', () => {
-    it.each<[string, () => void, string]>([
-      ['unsent input', () => patch(TAB, { isDirty: true }), 'unsent input'],
-      [
-        'a queued message',
-        () => followUps.add({
-          clientMessageId: 'queued-1',
-          tabId: TAB,
-          sessionId: SESSION,
-          content: '/next turn',
-          isCommand: true,
-          phase: 'queued',
-        }),
-        'queued message',
-      ],
-      [
-        'background work in flight',
-        () => patch(TAB, { pendingBackgroundTasks: [{}] }),
-        'background work',
-      ],
-      [
-        'an open permission prompt',
-        () => hasPendingPermission.mockReturnValue(true),
-        'permission prompt',
-      ],
-      [
-        'a Command Center tab',
-        () => patch(TAB, { commandCenterOrigin: 'command-center' }),
-        'Command Center tab',
-      ],
-      [
-        'a sleeping source',
-        () => patch(TAB, { status: 'sleeping' }),
-        "its state is 'sleeping'",
-      ],
-      [
-        'the setting turned off meanwhile',
-        () =>
-          patch(TAB, {
-            sessionBudget: { ...CLOSE_BUDGET, closeSourceAfterAutoHandoff: false },
-          }),
-        'setting was turned off',
-      ],
-      [
-        'a budget that no longer names the session',
-        () =>
-          patch(TAB, {
-            sessionBudget: { ...CLOSE_BUDGET, sessionId: 'other-session' },
-          }),
-        'no longer names the handed-off session',
-      ],
-      [
-        'a released claim',
-        () => autoHandoff.release(SESSION),
-        'claim was released',
-      ],
-      [
-        'a manual wrap-up meanwhile',
-        () => autoHandoff.markManualWrapUp(SESSION),
-        'wrapped up by hand',
-      ],
-    ])('keeps the source open for %s', async (_label, block, reason) => {
-      mount('active', makeTab(TAB, { status: 'loaded' }));
-      arm();
-      block();
-      await run();
+  it('null SDK id does not match a bound tab', async () => {
+    await service.closePredecessor({ ...request, predecessorSdkId: null });
+    expect(close).not.toHaveBeenCalled();
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked' });
+  });
 
-      expect(closeTabAcrossWorkspaces).not.toHaveBeenCalled();
-      expect(info).toHaveBeenCalledWith(
-        LOG_CONTEXT,
-        expect.stringContaining(reason),
-        expect.objectContaining({ tabId: TAB, sessionId: SESSION }),
-      );
+  it('replies false when closeHandoffPredecessor leaves the tab present', async () => {
+    close.mockResolvedValue(false);
+    await service.closePredecessor(request);
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked' });
+  });
 
-      // One evaluation only: clearing the blocker later never closes it.
-      patch(TAB, {
-        status: 'loaded',
-        isDirty: false,
-        pendingBackgroundTasks: [],
-        commandCenterOrigin: null,
-        sessionBudget: { ...CLOSE_BUDGET },
-      });
-      followUps.settle('queued-1', 'delivered');
-      hasPendingPermission.mockReturnValue(false);
-      autoHandoff.release(SESSION);
-      autoHandoff.claim(SESSION);
-      autoHandoff.clearManualWrapUp(SESSION);
-      await run();
-      expect(closeTabAcrossWorkspaces).not.toHaveBeenCalled();
-    });
+  it('a thrown close replies false', async () => {
+    close.mockRejectedValue(new Error('close failed'));
+    await service.closePredecessor(request);
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked' });
+  });
 
-    it('keeps a cancelled source open and logs why once', async () => {
-      mount('active', makeTab(TAB, { status: 'loaded' }));
-      arm();
-      autoHandoff.cancel(SESSION);
-      await run();
+  it('duplicate request ID replies only once', async () => {
+    await service.closePredecessor(request);
+    await service.closePredecessor(request);
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(call).toHaveBeenCalledTimes(1);
+  });
 
-      expect(closeTabAcrossWorkspaces).not.toHaveBeenCalled();
-      expect(info).toHaveBeenCalledWith(
-        LOG_CONTEXT,
-        expect.stringContaining('cancelled the automatic hand-off'),
-        expect.objectContaining({ tabId: TAB, sessionId: SESSION }),
-      );
-    });
+  it('ignores a concurrent duplicate while the first close is awaiting', async () => {
+    let finish: (closed: boolean) => void = () => undefined;
+    close.mockReturnValue(new Promise<boolean>((resolve) => { finish = resolve; }));
+    const pending = service.closePredecessor(request);
+    await service.closePredecessor(request);
+    expect(close).toHaveBeenCalledTimes(1);
+    finish(true);
+    await pending;
+    expect(call).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores an invalid payload with the in-flight request ID', async () => {
+    let finish: (closed: boolean) => void = () => undefined;
+    close.mockReturnValue(new Promise<boolean>((resolve) => { finish = resolve; }));
+    const pending = service.closePredecessor(request);
+    await service.closePredecessor({ requestId: 'r1', predecessorTabId: 123 });
+    expect(call).not.toHaveBeenCalled();
+    finish(true);
+    await pending;
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'closed' });
+  });
+
+  it.each([
+    ['rejected', () => Promise.reject(new Error('offline'))],
+    ['failed result', () => Promise.resolve({ success: false, error: 'offline' })],
+  ])('logs an RPC %s', async (_case, response) => {
+    call.mockImplementation(response);
+    await service.closePredecessor(request);
+    expect(warn).toHaveBeenCalledWith('[SessionAutoHandoff]', 'predecessor close reply failed', expect.objectContaining({ requestId: 'r1' }));
+  });
+
+  it('evicts the oldest answered request after 128 entries', async () => {
+    for (let index = 0; index < 129; index++) {
+      await service.closePredecessor({ ...request, requestId: `r${index}` });
+    }
+    await service.closePredecessor({ ...request, requestId: 'r0' });
+    expect(close).toHaveBeenCalledTimes(130);
+    expect(call).toHaveBeenCalledTimes(130);
+  });
+
+  it('invalid payload with a usable request ID replies false', async () => {
+    await service.closePredecessor({ requestId: 'r1', predecessorTabId: 123 });
+    expect(close).not.toHaveBeenCalled();
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked' });
+  });
+
+  it.each([
+    ['streaming', () => { currentTab = tab({ status: 'streaming' }); }],
+    ['resuming', () => { currentTab = tab({ status: 'resuming' }); }],
+    ['switching', () => { currentTab = tab({ status: 'switching' }); }],
+    ['sleeping', () => { currentTab = tab({ status: 'sleeping' }); }],
+    ['dirty input', () => { currentTab = tab({ isDirty: true }); }],
+    ['queued follow-up', () => { queued = true; }],
+    ['background work', () => { currentTab = tab({ pendingBackgroundTasks: [{ id: 'task', type: 'tool', status: 'running', description: 'work' }] as TabState['pendingBackgroundTasks'] }); }],
+    ['permission prompt', () => { permission = true; }],
+    ['Command Center', () => { currentTab = tab({ commandCenterOrigin: { workspaceId: '/ws' } as TabState['commandCenterOrigin'] }); }],
+  ] as const)('%s blocks close and replies false', async (_name, block) => {
+    block();
+    await service.closePredecessor(request);
+    expect(close).not.toHaveBeenCalled();
+    expect(currentTab).not.toBeNull();
+    expect(info).toHaveBeenCalled();
+    expect(call.mock.calls).toEqual([['session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked' }]]);
   });
 });

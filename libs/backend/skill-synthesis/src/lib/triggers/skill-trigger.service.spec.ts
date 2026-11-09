@@ -1,17 +1,16 @@
 import 'reflect-metadata';
 import { SkillTriggerService } from './skill-trigger.service';
-import type { PostToolUsePayload, SubagentStopPayload, StopPayload, UserPromptExpansionPayload } from '@ptah-extension/agent-sdk';
+import { StopCallbackRegistry, type PostToolUsePayload, type SubagentStopPayload, type UserPromptExpansionPayload } from '@ptah-extension/agent-sdk';
 
 function harness(enabled = true) {
   const logger = { info: jest.fn(), warn: jest.fn(), debug: jest.fn(), error: jest.fn() };
   const recorder = { recordSkillEvent: jest.fn() };
-  const harvester = { harvest: jest.fn().mockResolvedValue(undefined) };
+  const stopRegistry = new StopCallbackRegistry(logger as never);
   const extractor = { extract: jest.fn() };
   const callbacks: {
     subagent?: (payload: SubagentStopPayload) => void;
     tool?: (payload: PostToolUsePayload) => void;
     expansion?: (payload: UserPromptExpansionPayload) => void;
-    stop?: (payload: StopPayload) => void;
   } = {};
   const register = <T>(save: (callback: T) => void) => ({
     register: (callback: T) => { save(callback); return jest.fn(); },
@@ -25,12 +24,10 @@ function harness(enabled = true) {
     register<(payload: PostToolUsePayload) => void>((cb) => { callbacks.tool = cb; }) as never,
     register<(payload: UserPromptExpansionPayload) => void>((cb) => { callbacks.expansion = cb; }) as never,
     recorder as never,
-    register<(payload: StopPayload) => void>((cb) => { callbacks.stop = cb; }) as never,
-    harvester as never,
     extractor as never,
   );
   service.start();
-  return { service, callbacks, recorder, harvester, logger };
+  return { service, callbacks, recorder, stopRegistry };
 }
 
 describe('SkillTriggerService retained hooks', () => {
@@ -98,30 +95,13 @@ describe('SkillTriggerService retained hooks', () => {
     h.service.stop();
   });
 
-  it('harvests specs after Stop', async () => {
-    jest.useFakeTimers();
+  it('does not harvest specs after Stop', () => {
     const h = harness();
-    h.callbacks.stop?.({ workspaceRoot: '/ws', sessionId: 'session' } as never);
-    jest.advanceTimersByTime(90_000);
-    await Promise.resolve();
-    expect(h.harvester.harvest).toHaveBeenCalledWith('/ws', { trigger: 'auto' });
-    h.service.stop();
-    jest.useRealTimers();
-  });
-
-  it('logs a failed auto harvest at warn', async () => {
-    jest.useFakeTimers();
-    const h = harness();
-    h.harvester.harvest.mockRejectedValueOnce(new Error('specs unreadable'));
-    h.callbacks.stop?.({ workspaceRoot: '/ws', sessionId: 'session' } as never);
-    jest.advanceTimersByTime(90_000);
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(h.logger.warn).toHaveBeenCalledWith('[skill-synthesis] spec harvest failed', {
-      error: 'specs unreadable',
+    h.stopRegistry.notifyAll({
+      workspaceRoot: '/ws', sessionId: 'session', lastAssistantMessage: null,
+      effortLevel: null, hasBackgroundWork: false, timestamp: 100,
     });
-    expect(h.logger.debug).not.toHaveBeenCalledWith('[skill-synthesis] spec harvest failed', expect.anything());
+    expect(h.stopRegistry.size).toBe(0);
     h.service.stop();
-    jest.useRealTimers();
   });
 });

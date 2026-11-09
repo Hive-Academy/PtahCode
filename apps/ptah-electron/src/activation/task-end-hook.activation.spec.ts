@@ -1,6 +1,9 @@
 import 'reflect-metadata';
 import { container } from 'tsyringe';
 import { TASK_END_TOKENS } from '@ptah-extension/task-end-hook';
+import { TASK_SPECS_TOKENS } from '@ptah-extension/task-specs';
+import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
+import { SESSION_ORGANIZATION_TOKENS } from '@ptah-extension/session-organization';
 import { startTaskEndHook } from './task-end-hook.activation';
 
 /** Detector and worker doubles that record every lifecycle call in order. */
@@ -28,6 +31,7 @@ function scopeWithHook(
         }),
     ),
     subscribe: jest.fn(() => order.push('subscribe')),
+    cachedRepoId: jest.fn(() => 'repo-1'),
     dispose: jest.fn(() => order.push('detector.dispose')),
     whenIdle: jest.fn(async () => {
       order.push('detector.whenIdle');
@@ -47,6 +51,48 @@ function scopeWithHook(
 }
 
 describe('startTaskEndHook', () => {
+  it('starts PR reconciliation in the background and disposes its subscription', async () => {
+    const order: string[] = [];
+    const { scope } = scopeWithHook(order);
+    let notify: ((event: { workspaceRoot: string }) => void) | undefined;
+    const unsubscribe = jest.fn();
+    const reconcile = jest.fn(async () => { order.push('pr.reconcile'); });
+    const disposeReconciler = jest.fn();
+    scope.register(TASK_END_TOKENS.STORE, { useValue: { getCloseOutForTask: () => null } });
+    scope.register(TASK_END_TOKENS.PR_RECONCILER, {
+      useValue: { reconcile, dispose: disposeReconciler },
+    });
+    scope.register(TASK_SPECS_TOKENS.TASK_INDEX_SERVICE, {
+      useValue: {
+        list: async () => ({ tasks: [{ id: 'TASK_2026_898_c1a5', status: 'in_progress', frontmatterValid: true }] }),
+        onDidChangeIndex: (listener: (event: { workspaceRoot: string }) => void) => {
+          notify = listener;
+          return { dispose: unsubscribe };
+        },
+      },
+    });
+    scope.register(PLATFORM_TOKENS.WORKSPACE_PROVIDER, {
+      useValue: { getWorkspaceFolders: () => ['/repo'], getConfiguration: () => false },
+    });
+    scope.register(SESSION_ORGANIZATION_TOKENS.STORE, {
+      useValue: {
+        listTaskLinks: () => [{ sessionId: 's1' }],
+        getOrganization: () => ({ worktreePath: '/repo/.claude-worktrees/task', branch: 'feat/task' }),
+      },
+    });
+    const handle = await startTaskEndHook(scope, new AbortController().signal, { error: jest.fn() });
+    expect(handle).not.toBeNull();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(reconcile).toHaveBeenCalledWith(expect.objectContaining({
+      repoId: 'repo-1', taskId: 'TASK_2026_898_c1a5', branch: 'feat/task',
+      autoRemoveMergedWorktreeAndBranch: false,
+    }));
+    notify?.({ workspaceRoot: '/repo' });
+    handle?.dispose();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    expect(disposeReconciler).toHaveBeenCalledTimes(1);
+  });
   it('returns null when the hook is not registered (no SQLite)', async () => {
     const logger = { error: jest.fn() };
     const handle = await startTaskEndHook(

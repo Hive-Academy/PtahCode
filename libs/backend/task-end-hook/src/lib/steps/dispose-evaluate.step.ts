@@ -28,7 +28,8 @@ import type { SessionLinkPort } from '../ports/session-link.port';
 /**
  * Dispose-evaluate step (plan Component 6.3). Report-only: it evaluates P2 to
  * P11 for every candidate worktree of the task and records one outcome per
- * worktree. It deletes, moves, archives and writes nothing on disk (C1); the
+ * worktree. Removal belongs to TaskCloseOutService through GitCleanupPort.
+ * It deletes, moves, archives and writes nothing on disk (C1); the
  * only writes are the step rows through `ITaskEndStore`.
  *
  * The run's `dispose/''` placeholder is replaced by one entry per discovered
@@ -192,14 +193,19 @@ export class DisposeEvaluateStep {
       }
       let outcome: TaskEndDisposeOutcome;
       try {
-        outcome = decideDisposal(
-          await this.collector.collect(
-            survey,
-            entry.subject,
-            collectorSettings,
-            signal,
-          ),
+        const input = await this.collector.collect(
+          survey,
+          entry.subject,
+          collectorSettings,
+          signal,
         );
+        outcome = decideDisposal(input);
+        if (
+          outcome.state === 'skipped' &&
+          !snapshot.taskCloseOut?.autoRemoveMergedWorktreeAndBranch
+        ) {
+          outcome = { ...outcome, reason: 'pending-user-approval' };
+        }
       } catch (error: unknown) {
         // Only an abort of `signal` reaches here from the collector: the
         // entry stays `running`, which the worker re-runs as pending.

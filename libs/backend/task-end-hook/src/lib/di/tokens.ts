@@ -28,8 +28,11 @@ export const TASK_END_TOKENS = {
   ACTIVITY_PORT: Symbol.for('PtahTaskEndActivityPort'),
   /** PrStatusPort — open pull request lookup. */
   PR_STATUS_PORT: Symbol.for('PtahTaskEndPrStatusPort'),
+  CLOSE_OUT_PR_STATUS_PORT: Symbol.for('PtahTaskEndCloseOutPrStatusPort'),
   /** GitReadRunner — raw git argument-vector runner, wrapped by ReadOnlyGit. */
   GIT_READ_RUNNER: Symbol.for('PtahTaskEndGitReadRunner'),
+  /** GitCleanupPort — guarded worktree and branch removal. */
+  GIT_CLEANUP_PORT: Symbol.for('PtahTaskEndGitCleanupPort'),
 
   // Library classes (registered by registerTaskEndHook)
   /** ITaskEndStore — the only writer of the migration 0072 tables. */
@@ -52,6 +55,8 @@ export const TASK_END_TOKENS = {
   RUN_READER: Symbol.for('PtahTaskEndRunReader'),
   /** TaskEndHookSettingsReader — typed `ptah.taskEndHook.*` snapshot. */
   SETTINGS_READER: Symbol.for('PtahTaskEndSettingsReader'),
+  CLOSE_OUT_SERVICE: Symbol.for('PtahTaskEndCloseOutService'),
+  PR_RECONCILER: Symbol.for('PtahTaskEndPrReconciler'),
 } as const;
 
 export type TaskEndDIToken = keyof typeof TASK_END_TOKENS;

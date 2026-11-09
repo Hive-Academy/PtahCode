@@ -36,6 +36,7 @@ import { PtahCliRegistry } from '../ptah-cli';
 import type { ISdkProcessSpawner } from '../spawn/sdk-process-spawner.port';
 import { ClaudeCliAdapter } from '../cli-agents/cli-adapters/claude-cli.adapter';
 import { ClaudeSdkLaneRunner } from '../claude/claude-sdk-lane-runner';
+import { SessionHandoffAckStore } from '../session-children/session-handoff-ack.store';
 
 function createMockLogger(): Logger {
   return {
@@ -156,6 +157,11 @@ describe('registerCliAgentRuntimeServices — PtahCliRegistry DI smoke', () => {
 
   beforeEach(() => {
     container = buildSmokeContainer();
+  });
+
+  it('binds one acknowledgement store singleton to the public token', () => {
+    expect(container.resolve(CLI_AGENT_RUNTIME_TOKENS.SESSION_HANDOFF_ACK_STORE))
+      .toBe(container.resolve(SessionHandoffAckStore));
   });
 
   it('registers a cached constructible Claude adapter with the real SDK runner and spawner', () => {

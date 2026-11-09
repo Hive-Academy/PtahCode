@@ -44,6 +44,7 @@ import {
   type ElectronWorkspaceWatcherOptions,
 } from './workspace-watch/electron-workspace-watcher';
 import { ElectronHostAttentionNotifications, type ElectronAttentionCapabilities } from './implementations/electron-host-attention-notifications';
+import { TaskCleanupAdapter } from './git/task-cleanup.adapter';
 
 /**
  * The shared `TOKENS.LOGGER` registry key. Spelled out here because a value
@@ -51,6 +52,8 @@ import { ElectronHostAttentionNotifications, type ElectronAttentionCapabilities 
  * (including `vscode`) into this host-neutral platform lib.
  */
 const LOGGER_TOKEN = Symbol.for('Logger');
+/** Mirrors TASK_END_TOKENS.GIT_CLEANUP_PORT without importing task-end-hook. */
+const TASK_END_GIT_CLEANUP_PORT = Symbol.for('PtahTaskEndGitCleanupPort');
 
 /**
  * Options for Electron platform registration.
@@ -103,6 +106,9 @@ export function registerPlatformElectronServices(
   container: DependencyContainer,
   options: ElectronPlatformOptions,
 ): void {
+  container.register(TASK_END_GIT_CLEANUP_PORT, {
+    useFactory: child => new TaskCleanupAdapter(child.resolve<Logger>(LOGGER_TOKEN)),
+  });
   const workspaceStoragePath = options.initialFolders?.[0]
     ? path.join(
         options.userDataPath,

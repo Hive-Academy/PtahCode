@@ -101,6 +101,14 @@ function reasonOf(outcome: TaskEndDisposeOutcome): string {
 }
 
 describe('decideDisposal', () => {
+  it('passes P11 for a manual-only harvest and still blocks a real no-carrier', () => {
+    expect(reasonOf(decideDisposal(withRecord({ harvestOutcome: 'manual-only' })))).toBe(
+      'skipped/eligible-report-only',
+    );
+    expect(reasonOf(decideDisposal(withRecord({ harvestOutcome: 'no-carrier' })))).toBe(
+      'blocked/harvest-no-carrier',
+    );
+  });
   it('returns skipped/eligible-report-only when every precondition holds', () => {
     expect(decideDisposal(eligible())).toEqual({
       step: 'dispose',

@@ -39,13 +39,16 @@ export function decideDisposal(
     checkMerge, // P8
     checkOpenPr, // P9
     checkActivity, // P10
-    checkHarvest, // P11
   ];
   for (const row of rows) {
     const reason = row(record);
     if (reason !== null) {
       return { step: 'dispose', state: 'blocked', reason, ...mode };
     }
+  }
+  const harvestBlock = checkHarvest(record);
+  if (harvestBlock !== null) {
+    return { step: 'dispose', state: 'blocked', reason: harvestBlock, ...mode };
   }
   if (record.probeErrors.length > 0) {
     return {
@@ -276,11 +279,12 @@ function checkActivity(r: DisposalInputRecord): RowVerdict {
   return used ? 'in-use' : null;
 }
 
-/** P11: the run's harvest step ended `harvested` or `already-harvested`. */
+/** P11: completed or deliberately manual harvest passes; a missing carrier blocks. */
 function checkHarvest(r: DisposalInputRecord): RowVerdict {
   switch (r.harvestOutcome) {
     case 'harvested':
     case 'already-harvested':
+    case 'manual-only':
       return null;
     case 'pending':
       return 'harvest-pending';

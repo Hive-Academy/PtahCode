@@ -21,7 +21,13 @@ export type {
 export type {
   PrStatusPort,
   TaskEndPrStatus,
+  CloseOutPrStatusPort,
+  TaskCloseOutPrStatus,
 } from './lib/ports/pr-status.port';
+export type { GitCleanupPort, TaskWorktreeInspection, GitCleanupResult } from './lib/ports/git-cleanup.port';
+export { TASK_END_HOOK_SECTION, TASK_END_HOOK_KEYS, TASK_END_HOOK_DEFAULTS } from './lib/config/task-end-hook-config';
+export { TaskCloseOutService } from './lib/close-out/task-close-out.service';
+export { TaskPrReconcilerService, type TaskPrReconcileTask } from './lib/close-out/task-pr-reconciler.service';
 export type {
   GitReadResult,
   GitReadRunner,
@@ -31,6 +37,7 @@ export type {
 // Persistence contract
 export type {
   ITaskEndStore,
+  ITaskCloseOutStore,
   TaskEndBaselineEntry,
   TaskEndDedupeKey,
   TaskEndDeferredCensusStep,

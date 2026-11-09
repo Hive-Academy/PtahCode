@@ -371,15 +371,12 @@ describe('TaskEndRunWorker', () => {
       'succeeded/curated',
       'succeeded/curated',
     ]);
-    expect(outcomes(h, runId, 'harvest')).toEqual(['succeeded/harvested']);
+    expect(outcomes(h, runId, 'harvest')).toEqual(['skipped/manual-only']);
     expect(outcomes(h, runId, 'dispose')).toEqual([
       'blocked/precondition-unverifiable',
     ]);
     expect(outcomes(h, runId, 'index')).toEqual(['succeeded/census-completed']);
-    expect(h.ports.harvest.harvestTask).toHaveBeenCalledWith(
-      h.root,
-      'TASK_2026_001',
-    );
+    expect(h.ports.harvest.harvestTask).not.toHaveBeenCalled();
     // One info line per step outcome (AC 6.4), codes only.
     const lines = jest
       .mocked(h.logger.info)
@@ -393,7 +390,7 @@ describe('TaskEndRunWorker', () => {
     ).toEqual([
       'close-curate:s1:succeeded/curated',
       'close-curate:s2:succeeded/curated',
-      'harvest::succeeded/harvested',
+      'harvest::skipped/manual-only',
       'dispose::blocked/precondition-unverifiable',
       'index::running/census-requested',
       'index::succeeded/census-completed',
@@ -418,15 +415,16 @@ describe('TaskEndRunWorker', () => {
     await flush(h, 0, second);
 
     expect(JSON.stringify(run(h, runId))).toBe(before);
-    expect(h.ports.harvest.harvestTask).toHaveBeenCalledTimes(1);
+    expect(h.ports.harvest.harvestTask).not.toHaveBeenCalled();
     expect(h.ports.census.requestCensus).toHaveBeenCalledTimes(1);
   });
 
-  it('stops before dispose when the task is reopened after harvest (AC 1.2b)', async () => {
+  it('stops before dispose when the task is reopened after curation (AC 1.2b)', async () => {
     const h = setup();
-    h.ports.harvest.harvestTask.mockImplementation(async (root, taskId) => {
-      writeCarrier(root, taskId, 'in_progress');
-      return { outcome: 'harvested', reconciled: 0 };
+    h.ports.sessionLinks.linkedSessions.mockReturnValue(['s1']);
+    h.ports.curation.curateEndedSession.mockImplementation(async () => {
+      writeCarrier(h.root, 'TASK_2026_001', 'in_progress');
+      return RAN;
     });
     const runId = journal(h, 'TASK_2026_001');
     h.worker.start();
@@ -437,38 +435,35 @@ describe('TaskEndRunWorker', () => {
       'cancelled',
       'status-reverted',
     ]);
-    expect(outcomes(h, runId, 'harvest')).toEqual(['succeeded/harvested']);
+    expect(outcomes(h, runId, 'harvest')).toEqual(['pending']);
     expect(outcomes(h, runId, 'dispose')).toEqual(['pending']);
     expect(outcomes(h, runId, 'index')).toEqual(['pending']);
     expect(h.ports.git.run).not.toHaveBeenCalled();
   });
 
-  it('keeps a done-to-cancelled run going and maps not-completed harvest to harvest-failed', async () => {
+  it('keeps a done-to-cancelled run going without automatic harvest', async () => {
     const h = setup();
-    h.ports.harvest.harvestTask.mockResolvedValue({
-      outcome: 'not-completed',
-      reconciled: 0,
-    });
     const runId = journal(h, 'TASK_2026_001');
     writeCarrier(h.root, 'TASK_2026_001', 'cancelled');
     h.worker.start();
     await flush(h, SETTLE_MS);
 
     expect(run(h, runId).state).toBe('completed');
-    expect(outcomes(h, runId, 'harvest')).toEqual(['failed/harvest-failed']);
+    expect(outcomes(h, runId, 'harvest')).toEqual(['skipped/manual-only']);
     expect(outcomes(h, runId, 'dispose')[0]).toMatch(/^blocked\//);
   });
 
   it('runs queued runs in FIFO order', async () => {
     const h = setup();
     const ids = ['TASK_2026_001', 'TASK_2026_002', 'TASK_2026_003'];
-    for (const id of ids) journal(h, id);
+    const runIds = ids.map((id) => journal(h, id));
     h.worker.start();
     await flush(h, SETTLE_MS);
 
-    expect(
-      h.ports.harvest.harvestTask.mock.calls.map((call) => call[1]),
-    ).toEqual(ids);
+    expect(h.ports.harvest.harvestTask).not.toHaveBeenCalled();
+    for (const runId of runIds) {
+      expect(outcomes(h, runId, 'harvest')).toEqual(['skipped/manual-only']);
+    }
   });
 
   it('never runs a run created as skipped/queue-full, and keeps its journal entry', async () => {
@@ -485,9 +480,7 @@ describe('TaskEndRunWorker', () => {
     expect(
       h.store.latestRun({ repoId: 'repo-1' }, 'TASK_2026_002')?.runId,
     ).toBe(second);
-    expect(
-      h.ports.harvest.harvestTask.mock.calls.map((call) => call[1]),
-    ).toEqual(['TASK_2026_001']);
+    expect(h.ports.harvest.harvestTask).not.toHaveBeenCalled();
   });
 
   it('releases the slot while a run waits on its census (AC 5.8)', async () => {
@@ -571,7 +564,7 @@ describe('TaskEndRunWorker', () => {
     h.worker.start();
     await flush(h, SETTLE_MS);
 
-    expect(outcomes(h, runId, 'harvest')).toEqual(['failed/harvest-failed']);
+    expect(outcomes(h, runId, 'harvest')).toEqual(['skipped/manual-only']);
     expect(outcomes(h, runId, 'dispose')).toEqual([
       'blocked/precondition-unverifiable',
     ]);
@@ -593,7 +586,6 @@ describe('TaskEndRunWorker', () => {
   };
   const throwers: ReadonlyArray<[string, (p: Ports) => Throwing[]]> = [
     ['curation', (p) => [p.curation.curateEndedSession]],
-    ['harvest', (p) => [p.harvest.harvestTask]],
     ['session link', (p) => Object.values(p.sessionLinks)],
     ['activity', (p) => Object.values(p.activity)],
     ['pr status', (p) => [p.prStatus.openPrStatus]],
@@ -623,7 +615,7 @@ describe('TaskEndRunWorker', () => {
     },
   );
 
-  it('without a main root records dispose unverifiable and index main-root-unresolved, and still curates and harvests', async () => {
+  it('without a main root records dispose unverifiable and index main-root-unresolved, and still curates', async () => {
     const h = setup();
     h.ports.sessionLinks.linkedSessions.mockReturnValue(['s1']);
     const runId = journal(h, 'TASK_2026_001', { mainRoot: null });
@@ -631,7 +623,7 @@ describe('TaskEndRunWorker', () => {
     await flush(h, SETTLE_MS);
 
     expect(outcomes(h, runId, 'close-curate')).toEqual(['succeeded/curated']);
-    expect(outcomes(h, runId, 'harvest')).toEqual(['succeeded/harvested']);
+    expect(outcomes(h, runId, 'harvest')).toEqual(['skipped/manual-only']);
     expect(outcomes(h, runId, 'dispose')).toEqual([
       'blocked/precondition-unverifiable',
     ]);

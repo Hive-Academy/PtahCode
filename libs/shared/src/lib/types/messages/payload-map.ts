@@ -123,6 +123,7 @@ import type {
 import type {
   SessionHandoffLinkedPayload,
   SessionHandoffOpenedPayload,
+  SessionHandoffClosePredecessorPayload,
 } from './session-handoff';
 import type {
   IndexingProgressEvent,
@@ -464,6 +465,7 @@ export interface MessagePayloadMap {
   'session:organizationChanged': SessionOrganizationChangedPayload;
   'agentSession:opened': AgentSessionOpenedPayload;
   'sessionHandoff:opened': SessionHandoffOpenedPayload;
+  'sessionHandoff:closePredecessor': SessionHandoffClosePredecessorPayload;
   'sessionHandoff:linked': SessionHandoffLinkedPayload;
   'agent-monitor:reparented': AgentMonitorReparentedPayload;
   'agent-monitor:message-receipt': AgentMonitorMessageReceiptPayload;

@@ -29,6 +29,7 @@ describe('readTaskEndHookSettings', () => {
       censusCooldownMs: 21_600_000,
       maxWorktreesPerRun: 8,
       archive: { maxBytes: 268_435_456, maxFiles: 5000 },
+      taskCloseOut: { autoRemoveMergedWorktreeAndBranch: false },
       memory: {
         enabled: true,
         sessionEndEnabled: true,
@@ -48,6 +49,7 @@ describe('readTaskEndHookSettings', () => {
         [TASK_END_HOOK_KEYS.maxWorktreesPerRun]: 3,
         [TASK_END_HOOK_KEYS.archiveMaxBytes]: 1024,
         [TASK_END_HOOK_KEYS.archiveMaxFiles]: 10,
+        [TASK_END_HOOK_KEYS.autoRemoveMergedWorktreeAndBranch]: true,
         [TASK_END_HOOK_KEYS.memoryEnabled]: false,
         [TASK_END_HOOK_KEYS.memorySessionEndEnabled]: false,
         [TASK_END_HOOK_KEYS.memoryBootScanIdleBackoffMs]: 1000,
@@ -61,6 +63,7 @@ describe('readTaskEndHookSettings', () => {
       censusCooldownMs: 0,
       maxWorktreesPerRun: 3,
       archive: { maxBytes: 1024, maxFiles: 10 },
+      taskCloseOut: { autoRemoveMergedWorktreeAndBranch: true },
       memory: {
         enabled: false,
         sessionEndEnabled: false,
@@ -76,6 +79,16 @@ describe('readTaskEndHookSettings', () => {
         seeded({ [TASK_END_HOOK_KEYS.disposalMode]: mode }),
       );
       expect(out.disposalMode).toBe(mode);
+    },
+  );
+
+  it.each(['true', 1, null])(
+    'keeps automatic cleanup disabled for invalid value %j',
+    (raw) => {
+      const out = readTaskEndHookSettings(
+        seeded({ [TASK_END_HOOK_KEYS.autoRemoveMergedWorktreeAndBranch]: raw }),
+      );
+      expect(out.taskCloseOut?.autoRemoveMergedWorktreeAndBranch).toBe(false);
     },
   );
 

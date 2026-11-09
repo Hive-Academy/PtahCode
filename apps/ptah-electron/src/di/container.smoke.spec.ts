@@ -1634,6 +1634,16 @@ describe('Electron DI — session organization recorder binding (TASK_2026_580 R
    */
   it('resolves the API builder with the task-end hook bound, and every task-end token (D39)', () => {
     const { c, logger } = composePhase2(false);
+    // Phase 0 (`registerPlatformElectronServices`) binds the git cleanup port
+    // in the real host; this harness skips phase 0, so stub it. The API
+    // builder's optional close-out slot builds TaskCloseOutService eagerly.
+    c.register(Symbol.for('PtahTaskEndGitCleanupPort'), {
+      useValue: {
+        inspectTaskWorktree: jest.fn(),
+        removeWorktree: jest.fn(),
+        deleteBranch: jest.fn(),
+      },
+    });
     registerTaskSpecsServices(c, logger);
     registerTaskEndHookComposition(c, logger);
     composePhase3(c, logger);

@@ -50,6 +50,7 @@ const READ_TOOLS: ReadonlySet<string> = new Set([
   'ptah_task_get',
   'ptah_task_list',
   'ptah_task_check',
+  'ptah_task_close_out_status',
   'ptah_git_worktree_list',
   'ptah_agent_list',
   'ptah_agent_status',
@@ -84,6 +85,8 @@ const AGENT_CONTROL_TOOLS: ReadonlySet<string> = new Set([
 const TASK_GIT_TOOLS: ReadonlySet<string> = new Set([
   'ptah_task_create',
   'ptah_task_update',
+  'ptah_task_close_out',
+  'ptah_task_cleanup_completed',
   'ptah_session_link_task',
   'ptah_git_worktree_add',
   'ptah_git_worktree_remove',

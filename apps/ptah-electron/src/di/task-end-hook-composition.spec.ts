@@ -20,6 +20,7 @@ import {
   type GitReadRunner,
   type HarvestPort,
   type PrStatusPort,
+  type CloseOutPrStatusPort,
   type SessionLinkPort,
 } from '@ptah-extension/task-end-hook';
 import { TOKENS, execGit, type Logger } from '@ptah-extension/vscode-core';
@@ -485,6 +486,17 @@ describe('activity adapter', () => {
 });
 
 describe('PR status adapter', () => {
+  it('does not report a PR merged into another base as merged', async () => {
+    const { c } = compose();
+    c.register(TOKENS.GIT_INFO_SERVICE, { useValue: {
+      readPrStatus: jest.fn().mockResolvedValue({ status: 'ok', pr: {
+        number: 7, url: 'https://github.com/a/b/pull/7', state: 'MERGED',
+        headRefName: 'feat/x', baseRefName: 'release',
+      } }),
+    } });
+    const port = c.resolve<CloseOutPrStatusPort>(TASK_END_TOKENS.CLOSE_OUT_PR_STATUS_PORT);
+    await expect(port.prStatus('/repo', 'feat/x')).resolves.toEqual({ kind: 'unknown' });
+  });
   const unavailable = (
     reason: Extract<GitPrStatusResult, { status: 'unavailable' }>['reason'],
   ): GitPrStatusResult => ({ status: 'unavailable', reason });

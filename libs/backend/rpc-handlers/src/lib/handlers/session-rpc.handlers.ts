@@ -8,6 +8,7 @@
  */
 
 import { injectable, inject } from 'tsyringe';
+import { SessionHandoffCloser } from './session-handoff-closer';
 import { claudeProjectDir, normalizeWorkspaceRoot } from '@ptah-extension/shared';
 import { SYSTEM_PROMPT_MAX_LENGTH } from './chat-rpc.schema';
 import {
@@ -237,6 +238,7 @@ export class SessionRpcHandlers {
     'session:forkSession',
     'session:rewindFiles',
     'session:status',
+    'session:handoffCloseResult',
   ] as const satisfies readonly RpcMethodName[];
 
   private readonly reportedCorruptSessionIds = new Set<string>();
@@ -323,6 +325,8 @@ export class SessionRpcHandlers {
     private readonly webviewManager: WebviewManager | null = null,
     @inject(SessionStatsRepository, { isOptional: true })
     private readonly statsRepository: SessionStatsRepository | null = null,
+    @inject(SessionHandoffCloser, { isOptional: true })
+    private readonly handoffCloser: SessionHandoffCloser | null = null,
   ) {
     this.messageCounter = new SessionMessageCounter(jsonlReader, logger);
   }
@@ -472,6 +476,13 @@ export class SessionRpcHandlers {
     this.registerForkSession();
     this.registerRewindFiles();
     this.registerSessionStatus();
+    this.rpcHandler.registerMethod<{ requestId: string; outcome: 'closed' | 'absent' | 'blocked' }, { accepted: boolean }>(
+      'session:handoffCloseResult', async (params) => {
+        const parsed = z.object({ requestId: z.string().uuid(), outcome: z.enum(['closed', 'absent', 'blocked']) }).strict().safeParse(params);
+        if (!parsed.success) throw new RpcUserError('Invalid session:handoffCloseResult params', 'INVALID_PARAMS');
+        return { accepted: this.handoffCloser?.complete(parsed.data.requestId, parsed.data.outcome) ?? false };
+      },
+    );
 
     this.logger.debug('Session RPC handlers registered', {
       methods: [
@@ -486,6 +497,7 @@ export class SessionRpcHandlers {
         'session:forkSession',
         'session:rewindFiles',
         'session:status',
+        'session:handoffCloseResult',
       ],
     });
   }

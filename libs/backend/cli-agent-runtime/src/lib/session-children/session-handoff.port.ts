@@ -73,6 +73,23 @@ export type SessionHandoffResult =
 export interface ISessionHandoff {
   /** Never throws: every failure is a closed refusal. */
   handoff(request: SessionHandoffRequest): Promise<SessionHandoffResult>;
+  acknowledge(request: SessionHandoffAckRequest): Promise<SessionHandoffAckResult>;
+}
+
+export interface SessionHandoffAckRequest {
+  readonly callerSessionId: string | undefined;
+  readonly predecessorSessionId: string;
+  readonly handoffPath: string;
+}
+
+export type SessionHandoffAckResult = {
+  readonly status: 'closed' | 'already-closed' | 'retryable-failure' | 'refused';
+  readonly reason: string;
+};
+
+/** Host bridge must close only the exact predecessor binding supplied here. */
+export interface HandoffPredecessorCloser {
+  close(predecessorTabId: string, predecessorSdkId: string | null): Promise<boolean>;
 }
 
 /**

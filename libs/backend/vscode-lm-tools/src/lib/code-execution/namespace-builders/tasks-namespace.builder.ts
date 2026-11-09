@@ -40,6 +40,7 @@ import { z } from 'zod';
 import { existsSync, realpathSync } from 'node:fs';
 import { isAbsolute, normalize } from 'node:path';
 import { execGit, WORKTREE_GIT_TIMEOUT_MS } from '@ptah-extension/vscode-core';
+import { buildTaskCloseOutNamespace, type TaskCloseOutDeps, type TaskCloseOutNamespace } from './task-close-out.namespace';
 import {
   LabelSchema,
   TASK_METADATA_PATCH_SHAPE,
@@ -150,7 +151,7 @@ export interface TaskEndRunReaderLike {
   latestForTask(workspaceRoot: string, taskId: string): TaskEndRunRecord | null;
 }
 
-export interface TasksNamespaceDependencies {
+export interface TasksNamespaceDependencies extends TaskCloseOutDeps {
   getWriter: () => TaskSpecWriterLike | undefined;
   getIndex: () => TaskSpecIndexLike | undefined;
   getWorkspaceRoot: () => string;
@@ -458,7 +459,7 @@ export interface TaskListOptions {
   fits?: (text: string) => boolean;
 }
 
-export interface TasksNamespace {
+export interface TasksNamespace extends TaskCloseOutNamespace {
   create(args: unknown): Promise<TaskMutationResult>;
   update(args: unknown): Promise<TaskMutationResult>;
   get(args: unknown): Promise<TaskGetResult>;
@@ -780,6 +781,7 @@ export function buildTasksNamespace(
   };
 
   return {
+    ...buildTaskCloseOutNamespace(deps),
     async create(args: unknown): Promise<TaskMutationResult> {
       const parsed = TaskCreateArgsSchema.safeParse(args ?? {});
       if (!parsed.success) {

@@ -1,5 +1,6 @@
 import { inject, injectable } from 'tsyringe';
 import { ulid } from 'ulid';
+import { z } from 'zod';
 import {
   PERSISTENCE_TOKENS,
   SqliteConnectionService,
@@ -16,6 +17,11 @@ import {
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import type {
   ITaskEndStore,
+  ITaskCloseOutStore,
+  CloseOutIdentity,
+  CloseOutRunRecord,
+  CloseOutStep,
+  CloseOutStepState,
   TaskEndBaselineEntry,
   TaskEndDeferredCensusStep,
   TaskEndExpandableStep,
@@ -107,6 +113,20 @@ const DISPOSE_NOT_TERMINAL = `EXISTS (SELECT 1 FROM task_end_steps s
 const ordinalOf = (step: TaskEndStepKind): number =>
   TASK_END_STEP_KINDS.indexOf(step);
 
+const closeOutIdentitySchema = z.object({
+  repoId: z.string().min(1), taskId: z.string().min(1),
+  prNumber: z.number().int().positive(), prUrl: z.string().url(),
+  mainRoot: z.string().min(1), worktreePath: z.string().min(1),
+  branch: z.string().min(1),
+});
+const closeOutRunRow = closeOutIdentitySchema.extend({ runId: z.string().min(1) });
+const closeOutStepRow = z.object({
+  step: z.enum(['memory', 'learning', 'worktree', 'branch']),
+  state: z.enum(['pending', 'running', 'ok', 'failed', 'refused', 'skipped']),
+  reason: z.string().nullable(), attempts: z.number().int().nonnegative(),
+});
+const CLOSE_OUT_STEPS = ['memory', 'learning', 'worktree', 'branch'] as const;
+
 /**
  * SQLite implementation of {@link ITaskEndStore} over the migration 0072
  * tables (plan Component 3). The only writer of those tables.
@@ -115,7 +135,7 @@ const ordinalOf = (step: TaskEndStepKind): number =>
  * malformed row is logged and skipped. Storage failures throw.
  */
 @injectable()
-export class SqliteTaskEndStore implements ITaskEndStore {
+export class SqliteTaskEndStore implements ITaskEndStore, ITaskCloseOutStore {
   private readonly fault: (point: TaskEndStoreFaultPoint) => void;
   private readonly now: () => number;
   private readonly mapper: TaskEndRowMapper;
@@ -137,6 +157,79 @@ export class SqliteTaskEndStore implements ITaskEndStore {
 
   private get db(): SqliteDatabase {
     return this.sqlite.db;
+  }
+
+  getOrCreateCloseOut(identity: CloseOutIdentity): CloseOutRunRecord {
+    const value = closeOutIdentitySchema.parse(identity);
+    return this.db.transaction(() => {
+      const now = this.now();
+      const runId = ulid();
+      this.db.prepare(`INSERT OR IGNORE INTO task_close_out_runs
+        (run_id, repo_id, task_id, pr_number, pr_url, main_root,
+         worktree_path, branch, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(runId, value.repoId, value.taskId, value.prNumber, value.prUrl,
+          value.mainRoot, value.worktreePath, value.branch, now, now);
+      const row = closeOutRunRow.parse(this.db.prepare(`SELECT run_id AS runId,
+        repo_id AS repoId, task_id AS taskId, pr_number AS prNumber,
+        pr_url AS prUrl, main_root AS mainRoot, worktree_path AS worktreePath,
+        branch FROM task_close_out_runs
+        WHERE repo_id = ? AND task_id = ? AND pr_number = ?`)
+        .get(value.repoId, value.taskId, value.prNumber));
+      if (row.prUrl !== value.prUrl || row.mainRoot !== value.mainRoot ||
+          row.worktreePath !== value.worktreePath || row.branch !== value.branch) {
+        throw new Error('close-out identity conflict');
+      }
+      for (const step of CLOSE_OUT_STEPS) {
+        this.db.prepare(`INSERT OR IGNORE INTO task_close_out_steps
+          (run_id, step, state, reason, attempts, updated_at)
+          VALUES (?, ?, 'pending', NULL, 0, ?)`)
+          .run(row.runId, step, now);
+      }
+      const record = this.getCloseOut(row.runId);
+      if (record === null) throw new Error('close-out run disappeared');
+      return record;
+    })();
+  }
+
+  getCloseOut(runId: string): CloseOutRunRecord | null {
+    const raw = this.db.prepare(`SELECT run_id AS runId, repo_id AS repoId,
+      task_id AS taskId, pr_number AS prNumber, pr_url AS prUrl,
+      main_root AS mainRoot, worktree_path AS worktreePath, branch
+      FROM task_close_out_runs WHERE run_id = ?`).get(runId);
+    if (raw === undefined) return null;
+    const row = closeOutRunRow.parse(raw);
+    const steps = this.db.prepare(`SELECT step, state, reason, attempts
+      FROM task_close_out_steps WHERE run_id = ? ORDER BY rowid`).all(runId)
+      .map((step) => closeOutStepRow.parse(step));
+    return { ...row, steps };
+  }
+
+  getCloseOutForTask(repoId: string, taskId: string): CloseOutRunRecord | null {
+    const row = this.db.prepare(`SELECT run_id AS runId FROM task_close_out_runs
+      WHERE repo_id = ? AND task_id = ? ORDER BY created_at DESC LIMIT 1`)
+      .get(repoId, taskId);
+    const parsed = z.object({ runId: z.string() }).safeParse(row);
+    return parsed.success ? this.getCloseOut(parsed.data.runId) : null;
+  }
+
+  startCloseOutStep(runId: string, step: CloseOutStep): void {
+    const result = this.db.prepare(`UPDATE task_close_out_steps
+      SET state = 'running', reason = NULL, attempts = attempts + 1,
+          updated_at = ? WHERE run_id = ? AND step = ?
+          AND state IN ('pending', 'running', 'failed', 'refused')`)
+      .run(this.now(), runId, step);
+    if (result.changes !== 1) throw new Error('close-out step unavailable');
+  }
+
+  finishCloseOutStep(runId: string, step: CloseOutStep,
+    state: Exclude<CloseOutStepState, 'pending' | 'running'>,
+    reason: string | null): void {
+    const result = this.db.prepare(`UPDATE task_close_out_steps
+      SET state = ?, reason = ?, updated_at = ?
+      WHERE run_id = ? AND step = ? AND state = 'running'`)
+      .run(state, reason, this.now(), runId, step);
+    if (result.changes !== 1) throw new Error('close-out step unavailable');
   }
 
   // --- Journal -------------------------------------------------------------

@@ -230,7 +230,7 @@ export type TaskEndHarvestOutcome =
   | {
       readonly step: 'harvest';
       readonly state: 'skipped';
-      readonly reason: 'no-carrier';
+      readonly reason: 'no-carrier' | 'manual-only';
     }
   | {
       readonly step: 'harvest';
@@ -242,7 +242,7 @@ export type TaskEndDisposeOutcome =
   | ({
       readonly step: 'dispose';
       readonly state: 'skipped';
-      readonly reason: 'eligible-report-only';
+      readonly reason: 'eligible-report-only' | 'pending-user-approval';
     } & TaskEndDisposeModeFields)
   | ({
       readonly step: 'dispose';
@@ -390,9 +390,11 @@ export const TASK_END_OUTCOME_TABLE = [
   { step: 'harvest', state: 'succeeded', reason: 'harvested' },
   { step: 'harvest', state: 'succeeded', reason: 'already-harvested' },
   { step: 'harvest', state: 'skipped', reason: 'no-carrier' },
+  { step: 'harvest', state: 'skipped', reason: 'manual-only' },
   { step: 'harvest', state: 'failed', reason: 'harvest-failed' },
   // dispose
   { step: 'dispose', state: 'skipped', reason: 'eligible-report-only' },
+  { step: 'dispose', state: 'skipped', reason: 'pending-user-approval' },
   { step: 'dispose', state: 'blocked', reason: 'status-not-eligible' },
   { step: 'dispose', state: 'blocked', reason: 'no-linked-worktree' },
   { step: 'dispose', state: 'blocked', reason: 'linked-to-other-task' },
@@ -476,10 +478,12 @@ export const TASK_END_REASON_MESSAGES: Readonly<Record<TaskEndReasonCode, string
   harvested: 'The task folder was harvested.',
   'already-harvested': 'The task folder had already been harvested.',
   'no-carrier': 'The task has no task folder to harvest.',
+  'manual-only': 'Task learning runs after a confirmed merge or an explicit request.',
   'harvest-failed': 'Harvesting the task folder failed.',
   // dispose
   'eligible-report-only':
     'The worktree is eligible for removal; this version only reports it.',
+  'pending-user-approval': 'The worktree is eligible, but automatic removal is off.',
   'status-not-eligible': 'The task status does not allow worktree removal.',
   'no-linked-worktree': 'The task has no linked worktree.',
   'linked-to-other-task': 'The worktree is linked to another task.',

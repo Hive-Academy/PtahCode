@@ -46,6 +46,7 @@ function harness(overrides: Partial<SessionNamespaceDependencies> = {}) {
   const spawner = fakeSpawner();
   const handoff: jest.Mocked<ISessionHandoff> = {
     handoff: jest.fn().mockResolvedValue(HANDED_OFF),
+    acknowledge: jest.fn().mockResolvedValue({ status: 'closed', reason: 'Closed.' }),
   };
   let caller: string | undefined = 'tab-parent';
   const onWorktreeChanged = jest.fn();
@@ -72,6 +73,14 @@ function harness(overrides: Partial<SessionNamespaceDependencies> = {}) {
 }
 
 describe('buildSessionNamespace', () => {
+  it('acknowledges with the transport caller and resolves the service for each call', async () => {
+    const h = harness();
+    const input = { predecessorSessionId: 'old', handoffPath: '/repo/HANDOFF.md' };
+    await h.session.acknowledge(input);
+    await h.session.acknowledge(input);
+    expect(h.handoff.acknowledge).toHaveBeenCalledWith({ ...input, callerSessionId: 'tab-parent' });
+    expect(h.getHandoff).toHaveBeenCalledTimes(2);
+  });
   it('passes the transport caller to every operation, never an argument', async () => {
     const h = harness();
 

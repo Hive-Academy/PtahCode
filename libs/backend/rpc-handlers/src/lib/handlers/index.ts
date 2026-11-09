@@ -24,6 +24,7 @@ export {
   ImagePickerRpcHandlers,
 } from './file-rpc.handlers';
 export { SessionRpcHandlers } from './session-rpc.handlers';
+export { SessionHandoffCloser } from './session-handoff-closer';
 export { ContextRpcHandlers } from './context-rpc.handlers';
 export { AutocompleteRpcHandlers } from './autocomplete-rpc.handlers';
 export { SubagentRpcHandlers } from './subagent-rpc.handlers';

@@ -5,6 +5,8 @@ import {
 } from '@ptah-extension/persistence-sqlite';
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import { TaskEndHookSettingsReader } from '../config/task-end-hook-config';
+import { TaskCloseOutService } from '../close-out/task-close-out.service';
+import { TaskPrReconcilerService } from '../close-out/task-pr-reconciler.service';
 import type { ITaskEndStore } from '../persistence/task-end-store.interface';
 import { SqliteTaskEndStore } from '../persistence/sqlite-task-end.store';
 import { TaskEndRunReader } from '../read/task-end-run.reader';
@@ -72,6 +74,8 @@ export function registerTaskEndHook(container: DependencyContainer): void {
   );
   container.registerSingleton(TASK_END_TOKENS.WORKER, TaskEndRunWorker);
   container.registerSingleton(TASK_END_TOKENS.RUN_READER, TaskEndRunReader);
+  container.registerSingleton(TASK_END_TOKENS.CLOSE_OUT_SERVICE, TaskCloseOutService);
+  container.registerSingleton(TASK_END_TOKENS.PR_RECONCILER, TaskPrReconcilerService);
 }
 
 /**

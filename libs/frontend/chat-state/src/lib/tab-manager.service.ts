@@ -1488,7 +1488,7 @@ export class TabManagerService {
    * Uses custom confirmation dialog since window.confirm doesn't work in VS Code webviews.
    * @param tabId - Tab ID to close
    */
-  async closeTab(tabId: string): Promise<void> {
+  async closeTab(tabId: string, skipConfirmation = false): Promise<void> {
     const initialTab = this._tabs().find((t) => t.id === tabId);
 
     if (!initialTab) return;
@@ -1502,7 +1502,7 @@ export class TabManagerService {
       initialTab.status === 'awaiting-background' ||
       initialTab.status === 'sleeping';
 
-    if (needsConfirmation) {
+    if (needsConfirmation && !skipConfirmation) {
       const confirmed = await this.confirmationDialog.confirm({
         title: 'Close Tab?',
         message: validCommandCenterOrigin(initialTab.commandCenterOrigin)
@@ -1628,6 +1628,29 @@ export class TabManagerService {
     return closeBackgroundTab({
       tab,
       workspacePath,
+      partition: this.workspacePartition,
+      abortStreaming: (id) => this.abortStreamingForTab(id),
+      emitClosed: (event) => this.emitTabClosed(event),
+    });
+  }
+
+  /**
+   * Await the same close path used by the UI, without a programmatic confirmation.
+   * Only AutoHandoffSourceCloserService may call this after checking all close blockers.
+   */
+  async closeHandoffPredecessor(tabId: string, expectedSessionId: string | null): Promise<boolean> {
+    const lookup = this.findTabByIdAcrossWorkspaces(tabId);
+    if (!lookup || (expectedSessionId === null
+      ? lookup.tab.claudeSessionId != null
+      : lookup.tab.claudeSessionId !== expectedSessionId)) return false;
+    if (lookup.workspacePath === this.activeWorkspacePath) {
+      await this.closeTab(tabId, true);
+      return this.findTabByIdAcrossWorkspaces(tabId) === null;
+    }
+    if (lookup.workspacePath === null) return false;
+    return closeBackgroundTab({
+      tab: lookup.tab,
+      workspacePath: lookup.workspacePath,
       partition: this.workspacePartition,
       abortStreaming: (id) => this.abortStreamingForTab(id),
       emitClosed: (event) => this.emitTabClosed(event),

@@ -29,6 +29,7 @@ import {
 } from '@ptah-extension/vscode-core';
 import {
   SessionRpcHandlers,
+  SessionHandoffCloser,
   ArtifactRpcHandlers,
   DisplayWindowRpcHandlers,
   ChatRpcHandlers,
@@ -75,6 +76,7 @@ import {
   registerSharedRpcHandlers,
 } from '@ptah-extension/rpc-handlers';
 import { UpdateManager } from '../services/update/update-manager';
+import { CLI_AGENT_RUNTIME_TOKENS } from '@ptah-extension/cli-agent-runtime';
 import { UPDATE_MANAGER_TOKEN } from '../services/update/update-tokens';
 import { GitRootWatcherPool } from '../services/git-root-watcher-pool';
 import {
@@ -104,6 +106,8 @@ export function registerPhase4Handlers(
   registerHarnessServices(container);
   registerChatServices(container);
   registerHostRouting(container);
+  container.registerSingleton(SessionHandoffCloser);
+  container.register(CLI_AGENT_RUNTIME_TOKENS.HANDOFF_PREDECESSOR_CLOSER, { useToken: SessionHandoffCloser });
   container.registerSingleton(SessionRpcHandlers);
   container.registerSingleton(ArtifactRpcHandlers);
   container.registerSingleton(DisplayWindowRpcHandlers);

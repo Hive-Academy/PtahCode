@@ -58,6 +58,48 @@ describe('TabManagerService — cross-workspace routing (TASK_2026_154)', () => 
     TestBed.resetTestingModule();
   });
 
+  describe('closeHandoffPredecessor', () => {
+    it('closes an unbound predecessor in a background workspace', async () => {
+      service.switchWorkspace(WS_A);
+      const tabId = service.createTab('source');
+      service.switchWorkspace(WS_B);
+      expect(await service.closeHandoffPredecessor(tabId, null)).toBe(true);
+      expect(service.findTabByIdAcrossWorkspaces(tabId)).toBeNull();
+    });
+
+    it('does not match a bound background tab when the expected SDK id is null', async () => {
+      service.switchWorkspace(WS_A);
+      const tabId = service.createTab('source');
+      service.attachSession(tabId, SessionId.create());
+      service.switchWorkspace(WS_B);
+      expect(await service.closeHandoffPredecessor(tabId, null)).toBe(false);
+      expect(service.findTabByIdAcrossWorkspaces(tabId)).not.toBeNull();
+    });
+
+    it('closes only the exact tab/session pair across workspaces', async () => {
+      service.switchWorkspace(WS_A);
+      const tabId = service.createTab('source');
+      const sdkId = SessionId.create();
+      service.attachSession(tabId, sdkId);
+      service.switchWorkspace(WS_B);
+      expect(await service.closeHandoffPredecessor(tabId, 'other')).toBe(false);
+      expect(service.findTabByIdAcrossWorkspaces(tabId)).not.toBeNull();
+      expect(await service.closeHandoffPredecessor(tabId, sdkId)).toBe(true);
+      expect(service.findTabByIdAcrossWorkspaces(tabId)).toBeNull();
+      expect(await service.closeHandoffPredecessor(tabId, sdkId)).toBe(false);
+    });
+  });
+
+  it('closeTab(id, true) skips the confirmation dialog for a busy tab', async () => {
+    service.switchWorkspace(WS_A);
+    const tabId = service.createTab('source');
+    service.markTabStreaming(tabId);
+    const confirm = jest.spyOn(TestBed.inject(ConfirmationDialogService), 'confirm');
+    await service.closeTab(tabId, true);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(service.findTabByIdAcrossWorkspaces(tabId)).toBeNull();
+  });
+
   describe('findTabByIdAcrossWorkspaces', () => {
     it('resolves a tab in the active workspace', () => {
       service.switchWorkspace(WS_A);

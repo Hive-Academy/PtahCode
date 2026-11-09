@@ -55,6 +55,8 @@ export const CLI_AGENT_RUNTIME_TOKENS = {
    * `register.ts`; consumers resolve it optionally.
    */
   SESSION_HANDOFF: Symbol.for('SessionHandoff'),
+  SESSION_HANDOFF_ACK_STORE: Symbol.for('SessionHandoffAckStore'),
+  HANDOFF_PREDECESSOR_CLOSER: Symbol.for('HandoffPredecessorCloser'),
   /**
    * `IHandoffTurnFlush` on the same `SessionHandoffService` singleton as
    * `SESSION_HANDOFF`. The stream broadcaster calls it after a terminal flush.

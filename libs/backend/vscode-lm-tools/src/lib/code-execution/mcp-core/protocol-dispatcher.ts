@@ -200,6 +200,7 @@ import {
   buildSessionStopTool,
 } from './session-tools';
 import { handleSessionToolCall } from './session-tool-handlers';
+import { lifecycleTools } from './lifecycle-tools';
 import { ROUTE_DECIDE_TOOL_NAME, buildRouteDecideTool } from './route-tools';
 import { describeZodIssues, handleRouteToolCall } from './route-tool-handlers';
 import {
@@ -597,6 +598,7 @@ function buildToolDefinitions(
     // Always-on (TASK_2026_655): the budget banner's handoff action relies on
     // it, so the `agent` toggle must not remove it.
     buildSessionHandoffTool(),
+    ...lifecycleTools.map((tool) => tool.definition),
     // Always-on (TASK_2026_646): staffing one request stays listed when the
     // `agent` toggle is off. Not eager — see ALWAYS_EAGER_TOOLS.
     buildRouteDecideTool(),
@@ -1137,7 +1139,14 @@ async function handleIndividualTool(
 ): Promise<MCPResponse | null> {
   const { ptahAPI, logger } = deps;
 
+  const lifecycle = lifecycleTools.find(
+    (tool) => tool.definition.name === name,
+  );
   try {
+    if (lifecycle) {
+      const reply = await lifecycle.handler(args, ptahAPI, deps.logger);
+      return await createToolSuccessResponse(request, reply, deps);
+    }
     switch (name) {
       case 'ptah_workspace_analyze': {
         const result = await ptahAPI.workspace.analyze();
@@ -1576,7 +1585,13 @@ async function handleIndividualTool(
         // The receipt stays out of the reply: the lane needs its ack state
         // and the transport state, not the sender's session details.
         const reply = result.ok
-          ? { ok: true, messageId, ackState: result.ackState, changed: result.changed, state: result.receipt.state }
+          ? {
+              ok: true,
+              messageId,
+              ackState: result.ackState,
+              changed: result.changed,
+              state: result.receipt.state,
+            }
           : result;
         return await createToolSuccessResponse(
           request,

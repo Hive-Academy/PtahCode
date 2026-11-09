@@ -525,6 +525,16 @@ async function callRaw(
 // ---------------------------------------------------------------------------
 
 describe('SessionRpcHandlers', () => {
+  it('validates handoff close results and rejects an unknown request', async () => {
+    const h = makeHarness();
+    h.handlers.register();
+    await expect(call<{ accepted: boolean }>(h, 'session:handoffCloseResult', {
+      requestId: 'f6154596-2e31-4a32-96e3-287635c042e7', outcome: 'closed',
+    })).resolves.toEqual({ accepted: false });
+    const invalid = await callRaw(h, 'session:handoffCloseResult', { requestId: 'bad', outcome: 'closed' });
+    expect(invalid.success).toBe(false);
+    expect(invalid.errorCode).toBe('INVALID_PARAMS');
+  });
   describe('anchor hint sanitization', () => {
     const sanitize = (value: unknown) => {
       const harness = makeHarness();
@@ -578,6 +588,7 @@ describe('SessionRpcHandlers', () => {
           'session:cli-sessions',
           'session:delete',
           'session:forkSession',
+          'session:handoffCloseResult',
           'session:list',
           'session:load',
           'session:rename',

@@ -112,6 +112,7 @@ import {
 // Imported from the builder file, not the barrel: only this injection site
 // names the reader shape.
 import type { TaskEndRunReaderLike } from './namespace-builders/tasks-namespace.builder';
+import type { TaskCloseOutServiceLike } from './namespace-builders/task-close-out.namespace';
 import type {
   CallerWorktreeRecord,
   WorktreeChangeCallback,
@@ -265,6 +266,14 @@ const MEMORY_WRITER_TOKEN = Symbol.for('PlatformMemoryWriter');
  * @warning Keep Symbol.for() string value in sync with the canonical definition
  */
 const TASK_END_RUN_READER_TOKEN = Symbol.for('PtahTaskEndRunReader');
+const TASK_END_DETECTOR_TOKEN = Symbol.for('PtahTaskEndTransitionDetector');
+const TASK_END_CLOSE_OUT_PR_STATUS_TOKEN = Symbol.for(
+  'PtahTaskEndCloseOutPrStatusPort',
+);
+const SESSION_ORGANIZATION_STORE_TOKEN = Symbol.for('SessionOrganizationStore');
+const TASK_END_CLOSE_OUT_SERVICE_TOKEN = Symbol.for(
+  'PtahTaskEndCloseOutService',
+);
 
 /**
  * DI token for IDE capabilities (VS Code-specific).
@@ -280,7 +289,14 @@ interface SdkSessionLifecycleManagerLike {
   getActiveSessionIds(): string[];
   getActiveSessionWorkspace(): string | undefined;
   getSessionWorkspace(idOrTabId: string): string | undefined;
-  find(id: string): { realSessionId: string | null; permissionLevel?: 'ask' | 'plan' | 'auto-edit' | 'yolo' } | undefined;
+  find(
+    id: string,
+  ):
+    | {
+        realSessionId: string | null;
+        permissionLevel?: 'ask' | 'plan' | 'auto-edit' | 'yolo';
+      }
+    | undefined;
 }
 
 interface EnhancedPromptsServiceLike {
@@ -555,8 +571,35 @@ export class PtahAPIBuilder {
 
     @inject(CODEX_CHAT_ADAPTER, { isOptional: true })
     private readonly codexChatPermissionReader?: {
-      getPermissionLevel(sessionId: string): 'ask' | 'auto-edit' | 'yolo' | 'plan' | undefined;
+      getPermissionLevel(
+        sessionId: string,
+      ): 'ask' | 'auto-edit' | 'yolo' | 'plan' | undefined;
     },
+
+    @inject(TASK_END_DETECTOR_TOKEN, { isOptional: true })
+    private readonly taskEndDetector?: {
+      cachedRepoId(root: string): string | null;
+    },
+    @inject(TASK_END_CLOSE_OUT_PR_STATUS_TOKEN, { isOptional: true })
+    private readonly closeOutPrStatus?: {
+      prStatus(
+        root: string,
+        branch: string,
+      ): Promise<{ kind: string; number?: number; url?: string }>;
+    },
+    @inject(SESSION_ORGANIZATION_STORE_TOKEN, { isOptional: true })
+    private readonly taskSessionStore?: {
+      listTaskLinks(
+        root: string,
+        taskIds: readonly string[],
+      ): Array<{ sessionId: string }>;
+      getOrganization(
+        root: string,
+        sessionId: string,
+      ): { worktreePath?: string; branch?: string } | null;
+    },
+    @inject(TASK_END_CLOSE_OUT_SERVICE_TOKEN, { isOptional: true })
+    private readonly taskCloseOutService?: TaskCloseOutServiceLike,
   ) {
     diagnosticsCacheInvalidator.start();
     this.logger.info('PtahAPIBuilder initialized with 22 namespaces');
@@ -722,10 +765,12 @@ export class PtahAPIBuilder {
               return tabIdOrSessionId;
             }
           },
-          getParentLevel: (tabIdOrSessionId: string) => parentLanePermission(
-            tabIdOrSessionId, this.sdkSessionLifecycleManager,
-            this.codexChatPermissionReader,
-          ),
+          getParentLevel: (tabIdOrSessionId: string) =>
+            parentLanePermission(
+              tabIdOrSessionId,
+              this.sdkSessionLifecycleManager,
+              this.codexChatPermissionReader,
+            ),
           getProjectGuidance: async () => {
             if (!this.enhancedPromptsService) return undefined;
             try {
@@ -887,6 +932,26 @@ export class PtahAPIBuilder {
           getIndex: () => this.taskIndex,
           getWorkspaceRoot: () => this.getWorkspaceRoot(),
           getEndHookReader: () => this.taskEndRunReader,
+          getCloseOutService: () => this.taskCloseOutService,
+          getRepoId: () =>
+            this.taskEndDetector?.cachedRepoId(this.getWorkspaceRoot()) ?? null,
+          getLinks: (root, taskId) =>
+            this.taskSessionStore
+              ?.listTaskLinks(root, [taskId])
+              .map((link) => ({
+                sessionId: link.sessionId,
+                ...this.taskSessionStore?.getOrganization(root, link.sessionId),
+              })) ?? [],
+          getPrStatus: (root, branch) =>
+            this.closeOutPrStatus?.prStatus(root, branch) ??
+            Promise.resolve({ kind: 'unknown' }),
+          allowRemoval: () =>
+            this.workspaceProvider.getConfiguration<unknown>(
+              'ptah',
+              'taskCloseOut.autoRemoveMergedWorktreeAndBranch',
+              false,
+            ) === true,
+          logger: this.logger,
         }),
       ),
       sessionOrganization: this.buildNamespaceSafe('sessionOrganization', () =>
@@ -1201,8 +1266,15 @@ export class PtahAPIBuilder {
 
     return (event) => {
       if (event.action === 'removed' && event.worktreePath) {
-        const cleanup = this.sessionOrganizationRecorder?.clearRemovedWorktree?.(event.worktreePath);
-        if (cleanup && 'error' in cleanup) logger.warn('[PtahAPIBuilder] Worktree removed but session link cleanup failed', { error: cleanup.error.message });
+        const cleanup =
+          this.sessionOrganizationRecorder?.clearRemovedWorktree?.(
+            event.worktreePath,
+          );
+        if (cleanup && 'error' in cleanup)
+          logger.warn(
+            '[PtahAPIBuilder] Worktree removed but session link cleanup failed',
+            { error: cleanup.error.message },
+          );
       }
       if (!webviewManager) {
         logger.debug(

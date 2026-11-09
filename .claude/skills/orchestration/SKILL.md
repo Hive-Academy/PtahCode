@@ -67,6 +67,11 @@ Any flow adding or redesigning a UI surface inserts [designer → prototype → 
   Columns: capability, where today (file:line), backing RPC/API, decision
   (keep/move/remove-proposed), new location, test that proves it. Record user approval for removals.
 - Status changes: `Edit` exactly the `status:` line of `task.md`. Never rewrite the carrier.
+- After the task PR opens, set `task.md` to `in_review`. After review and a confirmed merge,
+  the host sets it to `done` and starts journaled close-out in the background (task memory
+  curation, learning, and cleanup evaluation). See [task tracking](references/task-tracking.md#taskmd--the-carrier).
+- Skill-trajectory harvest no longer runs automatically on Stop. It runs as the close-out
+  learning step (`ptah_task_close_out`), or explicitly through `skillSynthesis:harvestSpecs`.
 
 ## Decide first, ask last
 

@@ -42,7 +42,11 @@ export type {
   SessionHandoffRefusalCode,
   SessionHandoffRequest,
   SessionHandoffResult,
+  SessionHandoffAckRequest,
+  SessionHandoffAckResult,
+  HandoffPredecessorCloser,
 } from './session-handoff.port';
+export { SessionHandoffAckStore, HANDOFF_ACK_STORAGE_KEY } from './session-handoff-ack.store';
 export type {
   ISessionHandoffChain,
   SessionHandoffLinkWritten,
