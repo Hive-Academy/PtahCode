@@ -2,7 +2,15 @@ import {
   TASK_END_TOKENS,
   connectTaskEndHook,
   type TaskEndHookHandle,
+  type TaskPrReconcilerService,
+  type TaskPrReconcileTask,
+  TASK_END_HOOK_SECTION,
+  TASK_END_HOOK_KEYS,
+  TASK_END_HOOK_DEFAULTS,
 } from '@ptah-extension/task-end-hook';
+import { TASK_SPECS_TOKENS, type TaskIndexService } from '@ptah-extension/task-specs';
+import { PLATFORM_TOKENS, type IWorkspaceProvider, type IDisposable } from '@ptah-extension/platform-core';
+import { SESSION_ORGANIZATION_TOKENS, type SessionOrganizationStore } from '@ptah-extension/session-organization';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { DependencyContainer } from 'tsyringe';
 
@@ -52,10 +60,14 @@ export async function startTaskEndHook(
   }
 
   let disposed = false;
+  let reconcileSubscription: IDisposable | null = null;
+  let reconciler: TaskPrReconcilerService | null = null;
   const dispose = (): void => {
     if (disposed) return;
     disposed = true;
     signal.removeEventListener('abort', dispose);
+    reconcileSubscription?.dispose();
+    reconciler?.dispose();
     hook.dispose();
   };
   // An abort mid-reconcile disposes the detector, which aborts its in-flight
@@ -67,6 +79,47 @@ export async function startTaskEndHook(
     if (disposed) return null;
     hook.worker.start();
     hook.detector.subscribe();
+    if (container.isRegistered(TASK_END_TOKENS.PR_RECONCILER)) {
+      reconciler = container.resolve<TaskPrReconcilerService>(TASK_END_TOKENS.PR_RECONCILER);
+      const index = container.resolve<TaskIndexService>(TASK_SPECS_TOKENS.TASK_INDEX_SERVICE);
+      const workspace = container.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER);
+      const organization = container.resolve<SessionOrganizationStore>(SESSION_ORGANIZATION_TOKENS.STORE);
+      const scan = async (root: string): Promise<void> => {
+        const listing = await index.list(root);
+        const repoId = hook.detector.cachedRepoId(root);
+        if (!repoId || disposed) return;
+        for (const row of listing.tasks) {
+          if (!row.frontmatterValid || (row.status !== 'in_review' && row.status !== 'done')) continue;
+          const sessionIds = organization.listTaskLinks(root, [row.id]).map((link) => link.sessionId);
+          const candidate = sessionIds
+            .map((id) => organization.getOrganization(root, id))
+            .find((entry) => entry?.worktreePath && entry.branch);
+          if (!candidate?.worktreePath || !candidate.branch) continue;
+          const task: TaskPrReconcileTask = {
+            repoId, taskId: row.id, mainRoot: root,
+            worktreePath: candidate.worktreePath, branch: candidate.branch,
+            status: row.status, sessionIds,
+            autoRemoveMergedWorktreeAndBranch:
+              workspace.getConfiguration<unknown>(
+                TASK_END_HOOK_SECTION,
+                TASK_END_HOOK_KEYS.autoRemoveMergedWorktreeAndBranch,
+                TASK_END_HOOK_DEFAULTS.autoRemoveMergedWorktreeAndBranch,
+              ) === true,
+          };
+          if (disposed) return;
+          await reconciler?.reconcile(task);
+        }
+      };
+      const report = (error: unknown): void => {
+        logger.error('Task PR reconcile failed', error instanceof Error ? error : new Error(String(error)));
+      };
+      reconcileSubscription = index.onDidChangeIndex((event) => {
+        void scan(event.workspaceRoot).catch(report);
+      });
+      for (const root of workspace.getWorkspaceFolders()) {
+        void scan(root).catch(report);
+      }
+    }
   } catch (_error: unknown) {
     dispose();
     logger.error(

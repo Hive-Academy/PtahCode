@@ -39,9 +39,9 @@ export class TaskPrReconcilerService {
   private disposed = false;
 
   constructor(
-    @inject(TASK_END_TOKENS.PR_STATUS_PORT) private readonly prs: CloseOutPrStatusPort,
+    @inject(TASK_END_TOKENS.CLOSE_OUT_PR_STATUS_PORT) private readonly prs: CloseOutPrStatusPort,
     @inject(TASK_END_TOKENS.DETECTOR) private readonly detector: TaskEndTransitionDetector,
-    @inject(TaskCloseOutService) private readonly closeOut: TaskCloseOutService,
+    @inject(TASK_END_TOKENS.CLOSE_OUT_SERVICE) private readonly closeOut: TaskCloseOutService,
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
   ) {}
 

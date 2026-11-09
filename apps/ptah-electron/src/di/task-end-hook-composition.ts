@@ -60,6 +60,8 @@ import {
   type GitReadRunner,
   type HarvestPort,
   type PrStatusPort,
+  type CloseOutPrStatusPort,
+  type TaskCloseOutPrStatus,
   type SessionLinkPort,
   type TaskEndPrStatus,
   type TaskEndProbeResult,
@@ -443,6 +445,33 @@ function createPrStatusPort(
   };
 }
 
+function createCloseOutPrStatusPort(
+  container: DependencyContainer,
+  logger: Logger,
+): CloseOutPrStatusPort {
+  return {
+    async prStatus(mainRoot, branch): Promise<TaskCloseOutPrStatus> {
+      try {
+        const git = requireEngine<GitInfoService>(
+          container, TOKENS.GIT_INFO_SERVICE, 'git info service',
+        );
+        const result = await git.readPrStatus(mainRoot, branch);
+        if (result.status !== 'ok' || result.pr.headRefName !== branch || !result.pr.url) {
+          return { kind: 'unknown' };
+        }
+        const { number, url, state } = result.pr;
+        if (state === 'OPEN') return { kind: 'open', number, url };
+        if (state === 'MERGED') return { kind: 'merged', number, url };
+        if (state === 'CLOSED') return { kind: 'closed-unmerged', number, url };
+        return { kind: 'unknown' };
+      } catch (error: unknown) {
+        logger.error('[Electron DI] close-out PR status read failed', error instanceof Error ? error : new Error(String(error)));
+        return { kind: 'unknown' };
+      }
+    },
+  };
+}
+
 /**
  * `execGit` at background priority, through the off-thread spawner when this
  * host bound one. The library wraps this runner in `ReadOnlyGit`, which
@@ -493,6 +522,9 @@ export function registerTaskEndHookComposition(
   });
   container.register<PrStatusPort>(TASK_END_TOKENS.PR_STATUS_PORT, {
     useValue: createPrStatusPort(container, logger),
+  });
+  container.register<CloseOutPrStatusPort>(TASK_END_TOKENS.CLOSE_OUT_PR_STATUS_PORT, {
+    useValue: createCloseOutPrStatusPort(container, logger),
   });
   container.register<GitReadRunner>(TASK_END_TOKENS.GIT_READ_RUNNER, {
     useValue: createGitReadRunner(container),
