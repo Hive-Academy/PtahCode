@@ -460,6 +460,14 @@ export class SessionControl {
       for (const rec of records) {
         rec.abortController.abort();
       }
+      // A build() that resumed during the wait can issue a token after the
+      // first revoke. After the abort, build() issues no more tokens, so this
+      // second revoke leaves none live. Skip a tab a newer session now owns.
+      for (const rec of records) {
+        if (this.registry.find(rec.tabId) === rec) {
+          this.revokeMcpSubject?.(rec.tabId);
+        }
+      }
     } finally {
       for (const registryId of teardownIds) {
         this.subagentRegistry.endSessionTeardown(registryId);
@@ -757,8 +765,8 @@ export class SessionControl {
    * Lower ONE session's auto-compact window (`window`) and report what
    * actually happened. This is the session budget's `tighten` action.
    *
-    * It reads the effective runtime threshold back before deciding whether
-    * lowering is needed. Lowering is:
+   * It reads the effective runtime threshold back before deciding whether
+   * lowering is needed. Lowering is:
    *
    * 1. skip with `env-override` when `CLAUDE_CODE_AUTO_COMPACT_WINDOW` is set
    *    (the runtime ranks it above every setting);

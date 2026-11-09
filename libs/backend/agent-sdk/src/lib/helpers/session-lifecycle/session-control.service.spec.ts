@@ -140,6 +140,41 @@ describe('SessionControl MCP credential teardown', () => {
     await h.control.disposeAllSessions();
     expect(revoke).toHaveBeenCalledWith(KEY);
   });
+
+  it('revokes again after disposeAllSessions aborts, so a token issued during the wait dies', async () => {
+    const abort = new AbortController();
+    const abortedAtRevoke: boolean[] = [];
+    const h = makeHarness(null, null, () =>
+      abortedAtRevoke.push(abort.signal.aborted),
+    );
+    h.registry.register(KEY, makeConfig(), abort);
+    await h.control.disposeAllSessions();
+    expect(abortedAtRevoke).toEqual([false, true]);
+  });
+
+  it('does not revoke a tab that a newer session took during disposeAllSessions', async () => {
+    const revoke = jest.fn();
+    const h = makeHarness(null, null, revoke);
+    const oldRec = h.registry.register(
+      KEY,
+      makeConfig(),
+      new AbortController(),
+    );
+    let releaseInterrupt: () => void = () => undefined;
+    oldRec.query = {
+      interrupt: jest.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseInterrupt = resolve;
+          }),
+      ),
+    } as unknown as typeof oldRec.query;
+    const disposing = h.control.disposeAllSessions();
+    h.registry.register(KEY, makeConfig(), new AbortController());
+    releaseInterrupt();
+    await disposing;
+    expect(revoke).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('SessionControl unavailable settings', () => {
