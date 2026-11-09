@@ -1,5 +1,7 @@
 import 'reflect-metadata';
 
+import * as path from 'node:path';
+
 import {
   resolveVecBinaryName,
   resolveVecPackageName,
@@ -46,5 +48,29 @@ describe('createCliVecPathResolver', () => {
     expect(
       resolveVecPackageName('aix' as never, 'mips' as never),
     ).toBeUndefined();
+  });
+});
+
+describe('createCliVecPathResolver in a packaged app', () => {
+  const resources = path.join(path.sep, 'opt', 'Ptah', 'resources');
+  const tail = path.join('node_modules', 'sqlite-vec-linux-x64', 'vec0.so');
+  const packed = path.join(resources, 'app.asar', tail);
+  const unpacked = path.join(resources, 'app.asar.unpacked', tail);
+
+  afterEach(() => {
+    jest.resetModules();
+    jest.dontMock('sqlite-vec');
+  });
+
+  it('returns the app.asar.unpacked path from getLoadablePath', () => {
+    jest.doMock('sqlite-vec', () => ({ getLoadablePath: () => packed }));
+    jest.isolateModules(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const mod = require('./cli-vec-path-resolver') as {
+        createCliVecPathResolver: typeof createCliVecPathResolver;
+      };
+      const resolver = mod.createCliVecPathResolver(makeLogger() as never);
+      expect(resolver()).toBe(unpacked);
+    });
   });
 });

@@ -1,4 +1,4 @@
-import { CLAUDE_PERSONAL_SUBSCRIPTIONS, claudeIdentityReference } from '@ptah-extension/agent-sdk';
+import { claudeSubscriptionFamily, claudeIdentityReference } from '@ptah-extension/agent-sdk';
 
 /**
  * Account class (decisions.md D13). `P`: a personal Pro/Max claude.ai login
@@ -22,24 +22,6 @@ export type ClaudeAccountStatus =
       readonly configDirectoryMatches: boolean;
     };
 
-/** Every key the 2.1.310 status builder can emit. Any other key makes the result class O. */
-const KNOWN_STATUS_KEYS: ReadonlySet<string> = new Set([
-  'loggedIn',
-  'authMethod',
-  'apiProvider',
-  'analyticsDisabled',
-  'projectsDirectory',
-  'configDirectory',
-  'forcedLoginMethod',
-  'allowedProviders',
-  'apiKeySource',
-  'email',
-  'orgId',
-  'orgName',
-  'subscriptionType',
-]);
-
-const PERSONAL_SUBSCRIPTIONS: ReadonlySet<string> = new Set(CLAUDE_PERSONAL_SUBSCRIPTIONS);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -63,13 +45,21 @@ function normalizeDirectory(directory: string, platform: NodeJS.Platform): strin
   return platform === 'win32' ? forward.toLowerCase() : forward;
 }
 
+/**
+ * Class P is decided only by the fields that select or restrict the login.
+ * Keys this check does not read are ignored: a later CLI build adds status
+ * keys (2.1.319 added `loginExpiresAt`, `storedClaudeAiLogin`, `planTier`),
+ * and an exact key list refused every such build. The post-init
+ * `accountInfo()` identity check still guards each named run.
+ */
 function isPersonalClass(status: Record<string, unknown>): boolean {
   if (status['authMethod'] !== 'claude.ai' || status['apiProvider'] !== 'firstParty') return false;
   const subscription = status['subscriptionType'];
-  if (typeof subscription !== 'string' || !PERSONAL_SUBSCRIPTIONS.has(subscription)) return false;
-  if (has(status, 'forcedLoginMethod') || has(status, 'allowedProviders')) return false;
+  const family = claudeSubscriptionFamily(typeof subscription === 'string' ? subscription : undefined);
+  if (family !== 'pro' && family !== 'max') return false;
+  if (status['forcedLoginMethod'] != null && status['forcedLoginMethod'] !== 'claudeai') return false;
+  if (status['allowedProviders'] != null) return false;
   if (has(status, 'apiKeySource') && status['apiKeySource'] !== 'none') return false;
-  if (Object.keys(status).some((key) => !KNOWN_STATUS_KEYS.has(key))) return false;
   if (typeof status['email'] !== 'string' || status['email'].trim() === '') return false;
   // orgId / orgName are filled for every claude.ai login (A-C2): typed, never a class signal.
   if (!isStringOrNull(status['orgId']) || !isStringOrNull(status['orgName'])) return false;

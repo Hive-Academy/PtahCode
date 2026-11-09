@@ -117,6 +117,7 @@ const AgentReportSchema = z
   .object({
     message: z.string().min(1).max(MAX_AGENT_REPORT_LENGTH),
     summary: z.string().min(1).max(200).optional(),
+    final: z.boolean().optional(),
   })
   .strict();
 
@@ -786,6 +787,7 @@ export class AgentToolDispatcher {
         agentId: callerAgentId,
         message: parsed.data.message,
         summary: parsed.data.summary,
+        ...(parsed.data.final !== undefined ? { final: parsed.data.final } : {}),
       });
       return await this.toolSuccess(
         request,
@@ -793,6 +795,7 @@ export class AgentToolDispatcher {
         formatAgentReport(delivery),
         {
           delivered: delivery.delivered,
+          ...(delivery.pending !== undefined ? { pending: delivery.pending } : {}),
           ...(delivery.reason !== undefined ? { reason: delivery.reason } : {}),
           ...(delivery.parentSessionId !== undefined
             ? { parentSessionId: delivery.parentSessionId }

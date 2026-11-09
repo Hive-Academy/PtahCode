@@ -5,6 +5,7 @@ import type { Logger } from '@ptah-extension/vscode-core';
 import {
   resolveVecPackageName,
   resolveVecBinaryName,
+  toUnpackedAsarPath,
   type SqliteVecPathResolver,
 } from '@ptah-extension/persistence-sqlite';
 
@@ -18,7 +19,7 @@ export function createCliVecPathResolver(
         getLoadablePath?: () => string;
       };
       if (typeof sqliteVec.getLoadablePath === 'function') {
-        return sqliteVec.getLoadablePath();
+        return toUnpackedAsarPath(sqliteVec.getLoadablePath());
       }
     } catch (error: unknown) {
       logger.debug(
@@ -35,6 +36,8 @@ export function createCliVecPathResolver(
     }
     const binaryName = resolveVecBinaryName();
     const packageJsonPath = req.resolve(`${packageName}/package.json`);
-    return path.join(path.dirname(packageJsonPath), binaryName);
+    return toUnpackedAsarPath(
+      path.join(path.dirname(packageJsonPath), binaryName),
+    );
   };
 }

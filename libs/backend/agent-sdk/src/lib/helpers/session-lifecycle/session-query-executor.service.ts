@@ -52,6 +52,7 @@ import {
   assertCertifiedLaunch,
   claudePersonalLoginCheck,
   claudePersonalLoginPassed,
+  claudeVersionIdentity,
 } from '../claude-certified-launch';
 import { claudeIdentityReference } from '../claude-identity-reference';
 import { withNamedAccountToolGate } from '../named-account-prompt-gate';
@@ -1195,8 +1196,10 @@ export class NamedAccountQueryAdmission {
         buffered.push(next.value);
         if (next.value.type === 'system' && next.value.subtype === 'init') {
           // The running CLI must be the certified version on a login key source.
+          const initVersion = claudeVersionIdentity(next.value.claude_code_version);
+          const certifiedVersion = claudeVersionIdentity(launch.executable.version);
           if (
-            next.value.claude_code_version !== launch.executable.version ||
+            initVersion === null || certifiedVersion === null || initVersion !== certifiedVersion ||
             !CERTIFIED_INIT_KEY_SOURCES.has(next.value.apiKeySource)
           )
             throw namedAccountRefusal('identity-unproved', 'init-unproven');

@@ -12,6 +12,7 @@
  */
 
 import type { DependencyContainer } from 'tsyringe';
+import { PLATFORM_TOKENS, type ISessionOrganizationRecorder } from '@ptah-extension/platform-core';
 import type { Logger } from '@ptah-extension/vscode-core';
 import { TOKENS } from '@ptah-extension/vscode-core';
 import {
@@ -116,6 +117,9 @@ export function wireSdkCallbacks(
         logger,
         tag,
         options.resolveWorktreePath,
+        container.isRegistered(PLATFORM_TOKENS.SESSION_ORGANIZATION_RECORDER, true)
+          ? container.resolve<ISessionOrganizationRecorder>(PLATFORM_TOKENS.SESSION_ORGANIZATION_RECORDER)
+          : undefined,
       );
     }
 
@@ -413,6 +417,7 @@ function wireWorktreeCallbacks(
   tag: string,
   resolveWorktreePath:
     ((data: WorktreeCreatedData) => Promise<string | undefined>) | undefined,
+  organization?: ISessionOrganizationRecorder,
 ): void {
   sdkAdapter.setWorktreeCreatedCallback(async (data) => {
     logger.info(
@@ -449,6 +454,8 @@ function wireWorktreeCallbacks(
   });
 
   sdkAdapter.setWorktreeRemovedCallback((data) => {
+    const cleanup = organization?.clearRemovedWorktree?.(data.worktreePath);
+    if (cleanup && 'error' in cleanup) logger.warn(`${tag} Worktree removed but session link cleanup failed`, { error: cleanup.error.message });
     logger.info(
       `${tag} Worktree removed: path=${data.worktreePath}, sessionId=${data.sessionId}`,
     );

@@ -50,6 +50,8 @@ export const TOOL_OUTPUT_MARKDOWN_STYLES = `
   }
   :host ::ng-deep .tool-output-markdown pre,
   :host ::ng-deep .tool-output-markdown code {
+    direction: ltr;
+    unicode-bidi: isolate;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }

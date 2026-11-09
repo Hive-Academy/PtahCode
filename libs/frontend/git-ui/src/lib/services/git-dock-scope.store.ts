@@ -9,6 +9,7 @@ import {
 import {
   GIT_SESSION_SCOPE_SOURCE,
   VSCodeService,
+  UnavailableGitRootsStore,
   type GitSessionScopeCandidate,
 } from '@ptah-extension/core';
 import {
@@ -32,6 +33,8 @@ export type GitDockScopeMode = 'follow-session' | 'pinned';
 
 /** What the git dock is scoped to. */
 export interface GitDockScope {
+  /** Explanation shown when a removed worktree forced a fallback. */
+  readonly fallbackReason?: string | null;
   readonly mode: GitDockScopeMode;
   /** The root every dock read and write uses; null when no folder is open. */
   readonly root: string | null;
@@ -80,6 +83,7 @@ interface PinnedScope {
  * (TASK_2026_855 D21).
  */
 interface ScopeInputs {
+  readonly unavailableRoots: readonly string[];
   readonly workspacePath: string | null;
   readonly followEnabled: boolean;
   readonly pinned: PinnedScope | null;
@@ -96,6 +100,7 @@ interface WorkspaceAwareService {
 function resolveCandidate(
   candidate: GitSessionScopeCandidate,
   workspacePath: string | null,
+  unavailableRoots: readonly string[],
 ): CandidateRoot {
   // Never guess for a session whose record is not loaded: falling through to
   // the cwd/workspace folder would point stage/commit/discard at the main
@@ -106,6 +111,7 @@ function resolveCandidate(
     agentOriginWorktreePath: candidate.agentOriginWorktreePath,
     sessionCwd: candidate.sessionCwd,
     workspaceRoot: workspacePath,
+    unavailableRoots,
   });
   return { ...resolved, unresolved: false };
 }
@@ -124,6 +130,43 @@ function workspaceScope(
   };
 }
 
+/**
+ * The banner text when the candidate's own worktree was refused and the dock
+ * fell back. `showsWorktree` is true when the fallback root is itself another
+ * worktree (a session cwd), so the text never claims the main repository.
+ */
+function fallbackReason(
+  candidate: GitSessionScopeCandidate | null,
+  resolved: CandidateRoot,
+  roots: readonly string[],
+  showsWorktree: boolean,
+): string | undefined {
+  if (
+    !candidate ||
+    (resolved.source !== 'session-cwd' && resolved.source !== 'workspace-root')
+  ) {
+    return undefined;
+  }
+  const excluded = [
+    candidate.organizationWorktreePath,
+    candidate.agentOriginWorktreePath,
+  ].some(
+    (path) =>
+      path !== null && roots.some((root) => isSameWorkingRoot(root, path)),
+  );
+  if (!excluded) return undefined;
+  return showsWorktree
+    ? 'Worktree removed. Showing the session folder.'
+    : 'Worktree removed. Showing the main repository.';
+}
+
+/** Spreads `fallbackReason` only when there is one (keeps sameScope stable). */
+function withFallbackReason(
+  reason: string | undefined,
+): { fallbackReason?: string } {
+  return reason === undefined ? {} : { fallbackReason: reason };
+}
+
 /** The scope the inputs describe. Pure. */
 function scopeFrom(inputs: ScopeInputs): GitDockScope {
   const { workspacePath, pinned } = inputs;
@@ -140,7 +183,7 @@ function scopeFrom(inputs: ScopeInputs): GitDockScope {
     const resolved =
       candidate === null
         ? pinned.last
-        : resolveCandidate(candidate, workspacePath);
+        : resolveCandidate(candidate, workspacePath, inputs.unavailableRoots);
     return {
       mode: 'pinned',
       root: resolved.root,
@@ -152,12 +195,20 @@ function scopeFrom(inputs: ScopeInputs): GitDockScope {
       },
       isWorktree: isWorktree(resolved.root),
       unresolved: resolved.unresolved,
+      ...withFallbackReason(
+        fallbackReason(
+          candidate,
+          resolved,
+          inputs.unavailableRoots,
+          isWorktree(resolved.root),
+        ),
+      ),
     };
   }
 
   const active = inputs.active;
   if (active === null) return workspaceScope(workspacePath, 'follow-session');
-  const resolved = resolveCandidate(active, workspacePath);
+  const resolved = resolveCandidate(active, workspacePath, inputs.unavailableRoots);
   return {
     mode: 'follow-session',
     root: resolved.root,
@@ -165,6 +216,14 @@ function scopeFrom(inputs: ScopeInputs): GitDockScope {
     session: { tabId: active.tabId, name: active.sessionName, closed: false },
     isWorktree: isWorktree(resolved.root),
     unresolved: resolved.unresolved,
+    ...withFallbackReason(
+      fallbackReason(
+        active,
+        resolved,
+        inputs.unavailableRoots,
+        isWorktree(resolved.root),
+      ),
+    ),
   };
 }
 
@@ -175,6 +234,7 @@ function sameScope(a: GitDockScope, b: GitDockScope): boolean {
     a.source === b.source &&
     a.isWorktree === b.isWorktree &&
     a.unresolved === b.unresolved &&
+    a.fallbackReason === b.fallbackReason &&
     a.session?.tabId === b.session?.tabId &&
     a.session?.name === b.session?.name &&
     a.session?.closed === b.session?.closed
@@ -215,6 +275,9 @@ export class GitDockScopeStore {
   private readonly vscode = inject(VSCodeService);
   private readonly leases = inject(GitRootWatchLeaseService);
   private readonly gate = inject(GitDockMutationGate);
+  private readonly status = inject(GitStatusService);
+  private readonly unavailableRootsStore = inject(UnavailableGitRootsStore);
+  private readonly unavailableRoots = computed(() => this.unavailableRootsStore.roots().map((entry) => entry.path));
   private readonly services: readonly WorkspaceAwareService[] = [
     inject(GitStatusService),
     inject(GitBranchesService),
@@ -247,6 +310,13 @@ export class GitDockScopeStore {
   readonly mode = computed<GitDockScopeMode>(() => this.scope().mode);
 
   constructor() {
+    effect(() => {
+      if (this.status.statusUnavailable() !== 'root-unavailable') return;
+      const scope = this.scope();
+      if (scope.root === null || (scope.source !== 'organization-worktree' && scope.source !== 'agent-origin-worktree')) return;
+      if (!isSameWorkingRoot(this.status.activeWorkspacePath(), scope.root)) return;
+      this.unavailableRootsStore.mark(scope.root);
+    });
     effect(() => {
       const inputs = this.readInputs();
       untracked(() => this.reconcile(inputs));
@@ -330,12 +400,13 @@ export class GitDockScopeStore {
       tabId,
       workspacePath,
       name: candidate.sessionName,
-      last: resolveCandidate(candidate, workspacePath),
+      last: resolveCandidate(candidate, workspacePath, this.unavailableRoots()),
     });
     this.reconcileNow();
   }
 
   private readInputs(): ScopeInputs {
+    const unavailableRoots = this.unavailableRoots();
     const workspacePath = this._workspacePath();
     const followEnabled = this.followsSessions();
     const pinned = this._pinned();
@@ -348,6 +419,7 @@ export class GitDockScopeStore {
         pinnedCandidate: null,
         active: null,
         open: [],
+        unavailableRoots,
       };
     }
     return {
@@ -358,6 +430,7 @@ export class GitDockScopeStore {
         pinned === null ? null : source.candidateForTab(pinned.tabId),
       active: source.activeSession(),
       open: source.openSessions(),
+      unavailableRoots,
     };
   }
 
@@ -383,7 +456,7 @@ export class GitDockScopeStore {
     if (!inputs.followEnabled) return;
     const workspacePath = inputs.workspacePath;
     const sessionRoots = inputs.open
-      .map((candidate) => resolveCandidate(candidate, workspacePath).root)
+      .map((candidate) => resolveCandidate(candidate, workspacePath, inputs.unavailableRoots).root)
       .filter(
         (candidate): candidate is string =>
           candidate !== null && !isSameWorkingRoot(candidate, workspacePath),

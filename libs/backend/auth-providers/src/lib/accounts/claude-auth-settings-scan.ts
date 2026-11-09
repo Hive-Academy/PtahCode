@@ -1,5 +1,5 @@
 import { posix, win32 } from 'node:path';
-import { claudeSettingsOverride } from '@ptah-extension/agent-sdk';
+import { claudeSettingsOverride, claudeVersionIdentity, compareClaudeVersions } from '@ptah-extension/agent-sdk';
 import type { ClaudeCertifiedLaunchPolicy } from '@ptah-extension/auth-providers-tokens';
 import type { ClaudeChildCloseReceipt } from './claude-account-command';
 
@@ -91,10 +91,6 @@ export function claudePolicyCoverage(platform: NodeJS.Platform): ClaudePolicyCov
   return other;
 }
 
-function parseCliVersion(version: string): readonly [number, number, number] | null {
-  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
-  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
-}
 
 /**
  * True for the inspected build and every later build of its major line (a
@@ -103,12 +99,11 @@ function parseCliVersion(version: string): readonly [number, number, number] | n
  * version refuses: a new major may move or add policy sources.
  */
 export function claudeCoverageAcceptsVersion(entry: ClaudePolicyCoverageEntry, version: string): boolean {
-  const actual = parseCliVersion(version);
-  const inspected = parseCliVersion(entry.inspectedVersion);
+  const actual = claudeVersionIdentity(version);
+  const inspected = claudeVersionIdentity(entry.inspectedVersion);
   if (!actual || !inspected) return false;
-  if (actual[0] !== inspected[0]) return false;
-  if (actual[1] !== inspected[1]) return actual[1] > inspected[1];
-  return actual[2] >= inspected[2];
+  if (actual.split('.', 1)[0] !== inspected.split('.', 1)[0]) return false;
+  return compareClaudeVersions(actual, inspected) >= 0;
 }
 
 /** Server-managed settings cache and consent files under the Claude config home (S9). */

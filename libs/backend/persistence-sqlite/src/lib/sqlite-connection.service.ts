@@ -35,6 +35,7 @@ import {
   buildBaseDiagnostic,
   resolveVecBinaryName,
   resolveVecPackageName,
+  toUnpackedAsarPath,
   type VecLoadAttemptError,
   type VecLoadDiagnostic,
   type VecLoadReason,
@@ -854,7 +855,9 @@ const requireResolveVecPath: SqliteVecPathResolver = () => {
   }
   const binaryName = resolveVecBinaryName();
   const baseDir = path.dirname(require.resolve('sqlite-vec'));
-  const candidate = path.join(baseDir, '..', packageName, binaryName);
+  const candidate = toUnpackedAsarPath(
+    path.join(baseDir, '..', packageName, binaryName),
+  );
   if (!fs.existsSync(candidate)) {
     throw new Error(
       `sqlite-vec platform binary does not exist on disk: ${candidate}`,
@@ -876,7 +879,7 @@ export const defaultBetterSqlite3Factory: SqliteDatabaseFactory = (
 /** Lazy resolver that requires sqlite-vec only when invoked. */
 const defaultSqliteVecPathResolver: SqliteVecPathResolver = () => {
   const sqliteVec = require('sqlite-vec') as { getLoadablePath: () => string };
-  return sqliteVec.getLoadablePath();
+  return toUnpackedAsarPath(sqliteVec.getLoadablePath());
 };
 
 function stringifyError(err: unknown): string {

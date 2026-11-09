@@ -100,6 +100,21 @@ function fullSanitizer(): (html: string) => string {
   return (html) => unwrapContainmentRoot(sanitize(html));
 }
 
+it('full preset preserves direction on lists and blockquotes', () => {
+  const out = fullSanitizer()('<ul dir="auto"><li>عربي</li></ul>' +
+    '<ol dir="auto" start="5"><li>عربي</li></ol>' +
+    '<blockquote dir="auto"><p>عربي</p></blockquote>');
+  expect(out).toContain('<ul dir="auto">');
+  expect(out).toContain('<ol dir="auto" start="5">');
+  expect(out).toContain('<blockquote dir="auto">');
+});
+
+it('full preset preserves direction on callout cards and titles', () => {
+  const out = fullSanitizer()('<div class="callout" dir="auto"><span class="callout-title" dir="ltr">Tip</span><p>عربي</p></div>');
+  expect(out).toContain('class="callout" dir="auto"');
+  expect(out).toContain('class="callout-title" dir="ltr"');
+});
+
 function memberConfig(): CapturedMarkdownConfig {
   return presetConfig('member');
 }
@@ -129,6 +144,21 @@ describe("the 'member' preset sanitizer (member-authored UGC)", () => {
     expect(out).toContain('class="language-ts"');
     expect(out).toContain('<blockquote>');
     expect(out).toContain('<td>cell</td>');
+  });
+
+  it('preserves direction on lists and blockquotes', () => {
+    const out = sanitize('<ul dir="auto"><li>عربي</li></ul>' +
+      '<ol dir="auto" start="5"><li>عربي</li></ol>' +
+      '<blockquote dir="auto"><p>عربي</p></blockquote>');
+    expect(out).toContain('<ul dir="auto">');
+    expect(out).toContain('<ol dir="auto" start="5">');
+    expect(out).toContain('<blockquote dir="auto">');
+  });
+
+  it('preserves direction on callout titles (div cards are not member markup)', () => {
+    const out = sanitize('<div class="callout" dir="auto"><span class="callout-title" dir="ltr">Tip</span><p>عربي</p></div>');
+    expect(out).not.toContain('<div');
+    expect(out).toContain('class="callout-title" dir="ltr"');
   });
 
   it('strips <script>', () => {

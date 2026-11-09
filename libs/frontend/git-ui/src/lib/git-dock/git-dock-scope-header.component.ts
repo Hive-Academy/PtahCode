@@ -76,6 +76,9 @@ const SOURCE_HINTS: Record<SessionWorkingRootSource, string> = {
             }}</span
           >
         }
+        @if (scope().fallbackReason; as reason) {
+          <span class="shrink-0 text-warning" role="status">{{ reason }}</span>
+        }
         @if (!compact() && hint(); as hintText) {
           <span
             class="shrink-0 text-base-content-muted"

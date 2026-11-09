@@ -9,6 +9,7 @@ import { TestBed } from '@angular/core/testing';
 import {
   GIT_SESSION_SCOPE_SOURCE,
   VSCodeService,
+  UnavailableGitRootsStore,
   type GitSessionScopeCandidate,
   type GitSessionScopeSource,
 } from '@ptah-extension/core';
@@ -44,6 +45,8 @@ describe('GitDockScopeStore', () => {
   let calls: string[];
   let leaseUpdates: (readonly (string | null)[])[];
   const isElectron = signal(true);
+  const statusReason = signal<'root-unavailable' | null>(null);
+  const statusActive = signal<string | null>(null);
   const tabs = signal<Record<string, GitSessionScopeCandidate>>({});
   const activeTabId = signal<string | null>(null);
 
@@ -58,9 +61,17 @@ describe('GitDockScopeStore', () => {
 
   function fakeService(name: string) {
     return {
-      switchWorkspace: jest.fn((root: string) =>
-        calls.push(`${name}.switch:${root}`),
-      ),
+      statusUnavailable: () => statusReason(),
+      activeWorkspacePath: () => statusActive(),
+      switchWorkspace: jest.fn((root: string) => {
+        // Like GitStatusService.switchWorkspace: the target root's own
+        // status replaces the previous root's unavailable reason.
+        if (name === 'status') {
+          statusActive.set(root);
+          statusReason.set(null);
+        }
+        calls.push(`${name}.switch:${root}`);
+      }),
       removeWorkspaceState: jest.fn((root: string) =>
         calls.push(`${name}.remove:${root}`),
       ),
@@ -102,6 +113,8 @@ describe('GitDockScopeStore', () => {
     calls.filter((call) => call.includes('.switch:'));
 
   beforeEach(() => {
+    statusReason.set(null);
+    statusActive.set(null);
     isElectron.set(true);
     activeTabId.set(null);
     tabs.set({
@@ -112,6 +125,48 @@ describe('GitDockScopeStore', () => {
   });
 
   afterEach(() => TestBed.resetTestingModule());
+
+  it('falls back to the session cwd after git refuses a removed worktree', () => {
+    const store = setup();
+    store.setWorkspace(WS);
+    activeTabId.set('a');
+    TestBed.tick();
+    expect(store.scope().root).toBe('/wt/a');
+    statusReason.set('root-unavailable');
+    TestBed.tick();
+    expect(store.scope().root).toBe(WS);
+    expect(store.scope().fallbackReason).toBe(
+      'Worktree removed. Showing the main repository.',
+    );
+    activeTabId.set('b');
+    TestBed.tick();
+    expect(store.scope().fallbackReason).toBeUndefined();
+    statusReason.set(null);
+    TestBed.inject(UnavailableGitRootsStore).clear('/wt/a');
+    activeTabId.set('a');
+    TestBed.tick();
+    expect(store.scope().root).toBe('/wt/a');
+  });
+
+  it('names the session folder when the cwd fallback is another worktree', () => {
+    tabs.set({
+      d: candidate('d', {
+        organizationWorktreePath: '/wt/d',
+        sessionCwd: '/wt/other',
+      }),
+    });
+    const store = setup();
+    store.setWorkspace(WS);
+    activeTabId.set('d');
+    TestBed.tick();
+    expect(store.scope().root).toBe('/wt/d');
+    statusReason.set('root-unavailable');
+    TestBed.tick();
+    expect(store.scope().root).toBe('/wt/other');
+    expect(store.scope().fallbackReason).toBe(
+      'Worktree removed. Showing the session folder.',
+    );
+  });
 
   it('switches the five services in order when only the active tab changes (D21)', () => {
     const store = setup();

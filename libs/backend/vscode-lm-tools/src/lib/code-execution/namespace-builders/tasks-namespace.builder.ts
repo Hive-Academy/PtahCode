@@ -37,6 +37,9 @@ import {
   timingSafeEqual,
 } from 'node:crypto';
 import { z } from 'zod';
+import { existsSync, realpathSync } from 'node:fs';
+import { isAbsolute, normalize } from 'node:path';
+import { execGit, WORKTREE_GIT_TIMEOUT_MS } from '@ptah-extension/vscode-core';
 import {
   LabelSchema,
   TASK_METADATA_PATCH_SHAPE,
@@ -51,6 +54,7 @@ import {
   buildTaskGraph,
   filterTasks,
   mergeStatusTypeFacets,
+  parseWorktreeList,
   type ExcludedTaskFolder,
   type TaskChildRollup,
   type TaskEndRunRecord,
@@ -179,8 +183,12 @@ const estimateEnum = z.enum(TASK_ESTIMATES);
  * An agent is exactly the caller that produces those shapes.
  */
 const taskIdSchema = TaskIdRefSchema;
+const worktreePathSchema = z.string().trim().min(1).refine(isAbsolute, {
+  message: 'worktreePath must be an absolute path',
+});
 
 export const TaskCreateArgsSchema = z.object({
+  worktreePath: worktreePathSchema.optional(),
   title: z.string().min(1),
   type: typeEnum,
   description: z.string().optional(),
@@ -215,17 +223,17 @@ export const TaskCreateArgsSchema = z.object({
  * rejection, not a write that refreshes `updated` and changes nothing.
  */
 export const TaskUpdateArgsSchema = z
-  .object({ taskId: taskIdSchema })
+  .object({ taskId: taskIdSchema, worktreePath: worktreePathSchema.optional() })
   .extend(TASK_METADATA_PATCH_SHAPE)
   .refine(
     (args) =>
       Object.entries(args).some(
-        ([key, value]) => key !== 'taskId' && value !== undefined,
+        ([key, value]) => key !== 'taskId' && key !== 'worktreePath' && value !== undefined,
       ),
     { message: 'give at least one field to change (status, labels, …)' },
   );
 
-export const TaskGetArgsSchema = z.object({ taskId: taskIdSchema });
+export const TaskGetArgsSchema = z.object({ taskId: taskIdSchema, worktreePath: worktreePathSchema.optional() });
 
 /** Rows per `ptah_task_list` page when the agent names no `limit`. */
 export const TASK_LIST_DEFAULT_LIMIT = 25;
@@ -244,6 +252,7 @@ export const TASK_CHECK_ENTRY_CAP = 50;
  * one INVALID_CURSOR refusal rather than a generic argument error.
  */
 export const TaskListArgsSchema = z.object({
+  worktreePath: worktreePathSchema.optional(),
   status: z.array(statusEnum).optional(),
   type: z.array(typeEnum).optional(),
   limit: z
@@ -454,7 +463,7 @@ export interface TasksNamespace {
   update(args: unknown): Promise<TaskMutationResult>;
   get(args: unknown): Promise<TaskGetResult>;
   list(args?: unknown, options?: TaskListOptions): Promise<TaskListResult>;
-  check(): Promise<TaskCheckResult>;
+  check(args?: unknown): Promise<TaskCheckResult>;
 }
 
 /**
@@ -693,7 +702,7 @@ export function buildTasksNamespace(
    * missing. Warming the index here (rather than per-method) keeps the derived
    * board in step with a write the agent is about to make.
    */
-  const ready = async (): Promise<
+  const ready = async (worktreePath?: string): Promise<
     | {
         ok: true;
         root: string;
@@ -702,9 +711,38 @@ export function buildTasksNamespace(
       }
     | { ok: false; error: string }
   > => {
-    const root = deps.getWorkspaceRoot();
-    if (!root) {
+    const workspaceRoot = deps.getWorkspaceRoot();
+    if (!workspaceRoot) {
       return { ok: false, error: 'No workspace is open.' };
+    }
+    let root = workspaceRoot;
+    if (worktreePath !== undefined) {
+      try {
+        const canonical = (value: string): string => {
+          const resolved = normalize(realpathSync(value));
+          return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+        };
+        const requested = canonical(worktreePath);
+        if (requested !== canonical(workspaceRoot)) {
+          const result = await execGit(
+            ['worktree', 'list', '--porcelain', '-z'],
+            workspaceRoot,
+            { timeoutMs: WORKTREE_GIT_TIMEOUT_MS },
+          );
+          if (result.exitCode !== 0) {
+            return { ok: false, error: 'Cannot validate worktreePath: git worktree list failed.' };
+          }
+          const registered = parseWorktreeList(result.stdout).some(
+            (entry) => existsSync(entry.path) && canonical(entry.path) === requested,
+          );
+          if (!registered) {
+            return { ok: false, error: 'worktreePath must be the workspace root or a registered git worktree of this repository.' };
+          }
+        }
+        root = worktreePath;
+      } catch (error: unknown) {
+        return { ok: false, error: `Invalid worktreePath: ${failure(error)}` };
+      }
     }
     const index = deps.getIndex();
     if (index) {
@@ -751,7 +789,7 @@ export function buildTasksNamespace(
           code: 'INVALID_ARGS',
         };
       }
-      const context = await ready();
+      const context = await ready(parsed.data.worktreePath);
       if (!context.ok) return { ok: false, error: context.error };
       if (!context.writer) {
         return {
@@ -760,7 +798,8 @@ export function buildTasksNamespace(
         };
       }
       try {
-        const result = await context.writer.create(context.root, parsed.data);
+        const { worktreePath: _worktreePath, ...input } = parsed.data;
+        const result = await context.writer.create(context.root, input);
         if (!result.success) {
           return {
             ok: false,
@@ -790,7 +829,7 @@ export function buildTasksNamespace(
           code: 'INVALID_ARGS',
         };
       }
-      const context = await ready();
+      const context = await ready(parsed.data.worktreePath);
       if (!context.ok) return { ok: false, error: context.error };
       if (!context.writer) {
         return {
@@ -798,7 +837,7 @@ export function buildTasksNamespace(
           error: 'Task specs are not available on this runtime.',
         };
       }
-      const { taskId, ...patch } = parsed.data;
+      const { taskId, worktreePath: _worktreePath, ...patch } = parsed.data;
       try {
         const result = await context.writer.updateMetadata(
           context.root,
@@ -830,7 +869,7 @@ export function buildTasksNamespace(
           code: 'INVALID_ARGS',
         };
       }
-      const context = await ready();
+      const context = await ready(parsed.data.worktreePath);
       if (!context.ok) return { ok: false, error: context.error };
       if (!context.index) {
         return {
@@ -888,7 +927,7 @@ export function buildTasksNamespace(
           error: INVALID_CURSOR_MESSAGE,
         };
       }
-      const context = await ready();
+      const context = await ready(parsed.data.worktreePath);
       if (!context.ok) return { ok: false, error: context.error };
       if (!context.index) {
         return {
@@ -976,8 +1015,10 @@ export function buildTasksNamespace(
       }
     },
 
-    async check(): Promise<TaskCheckResult> {
-      const context = await ready();
+    async check(args?: unknown): Promise<TaskCheckResult> {
+      const parsed = z.object({ worktreePath: worktreePathSchema.optional() }).safeParse(args ?? {});
+      if (!parsed.success) return { ok: false, error: formatZodError(parsed.error) };
+      const context = await ready(parsed.data.worktreePath);
       if (!context.ok) return { ok: false, error: context.error };
       if (!context.index) {
         return {

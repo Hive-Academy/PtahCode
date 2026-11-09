@@ -45,6 +45,7 @@ import {
   type LaneOutcomeRecorder,
 } from '@ptah-extension/lane-outcomes';
 import { enqueueLaneCompletionOutcome } from './lane-completion-outcome';
+import { AgentReportCoalescer, attachFinalReport, type HeldReport } from './agent-report-coalescer';
 import { buildLaneCompletionEnvelope } from './lane-completion-envelope';
 import { ParentDeliveryDrainerService } from './parent-delivery/parent-delivery-drainer.service';
 import { readReviewDeliverables } from './review-deliverable.reader';
@@ -327,6 +328,7 @@ export class LaneCompletionNotifier {
   private readonly signalledKeys: string[] = [];
   /** Keys whose first signal is still running, so its side effects run once. */
   private readonly inFlightKeys = new Set<string>();
+  private readonly pendingReportMarks = new Map<string, HeldReport>();
   /** Completions with no durable record anywhere; retried on the drainer tick. */
   private readonly pendingReplays: PendingCompletionReplays;
   private checkpointMissingLogged = false;
@@ -348,6 +350,7 @@ export class LaneCompletionNotifier {
       | null = () => null,
     private readonly parentDelivery: ParentDeliveryDrainerService | null = null,
     private readonly terminalCheckpoint: () => LaneTerminalCheckpoint | null = () => null,
+    private readonly coalescer: AgentReportCoalescer | null = null,
   ) {
     this.pendingReplays = new PendingCompletionReplays(logger);
     this.parentDelivery?.onRetryTick(() => this.retryTick());
@@ -411,13 +414,28 @@ export class LaneCompletionNotifier {
     firstSignal: boolean,
   ): Promise<LaneCompletionResult> {
 
-    const signal = await this.buildSignal(info, completedAt, context);
+    let signal = await this.buildSignal(info, completedAt, context);
     const parentSessionId = SessionId.safeParse(info.parentSessionId?.trim()) ?? info.parentSessionId?.trim();
     const activeParentSessionId =
       parentSessionId && SessionId.safeParse(parentSessionId) &&
       this.agentAdapter?.isSessionActive(SessionId.from(parentSessionId))
         ? parentSessionId
         : null;
+    const held = this.coalescer?.take(info.agentId);
+    const withReport = held
+      ? { ...signal, reportsDelivered: signal.reportsDelivered + 1 }
+      : signal;
+    const candidate = held
+      ? attachFinalReport(this.completionEnvelope(withReport, info), held.envelopeBody)
+      : undefined;
+    const fits = candidate !== undefined && candidate.length <= 1_048_476;
+    let completionSignal = fits ? withReport : signal;
+    let completionBody = fits && candidate ? candidate : this.completionEnvelope(signal, info);
+    if (held && !fits && await this.releaseStandalone(info.agentId, held)) {
+      signal = { ...signal, reportsDelivered: signal.reportsDelivered + 1 };
+      completionSignal = signal;
+      completionBody = this.completionEnvelope(signal, info);
+    }
     if (firstSignal) enqueueLaneCompletionOutcome(
       this.outcomeRecorder,
       this.logger,
@@ -466,18 +484,25 @@ export class LaneCompletionNotifier {
         agentId: info.agentId,
         parentSessionId,
         completedAt,
-        body: this.completionEnvelope(signal, info),
+        body: completionBody,
         verdict: signal.verdict,
         ...(signal.stopReason ? { stopReason: signal.stopReason } : {}),
         originName: `${signal.cli} · ${signal.agentLabel}`,
         createdAt: Date.now(),
       };
       const checkpoint = await this.checkpoint(entry);
+      // A durable checkpoint owns the report even when envelope indexing fails.
+      if (held && fits && checkpoint === 'durable') held.markEnqueued();
       const saved = await this.parentDelivery.enqueue(completionEnqueueInput(entry));
+      if (held && fits && checkpoint !== 'durable' && !('refused' in saved))
+        held.markEnqueued();
+      if (held && fits && checkpoint !== 'durable' && 'refused' in saved)
+        this.pendingReportMarks.set(key, held);
       queueReviewCapture();
       const result = await this.settleEnqueue(entry, saved, checkpoint === 'durable');
       if (result.reason !== 'storage-unavailable') this.remember(key);
-      return { ...result, signal };
+      return { ...result, signal: checkpoint === 'durable' || !('refused' in saved)
+        ? completionSignal : signal };
     }
 
     if (!activeParentSessionId) {
@@ -521,6 +546,22 @@ export class LaneCompletionNotifier {
     return { delivered: true, parentSessionId, signal };
   }
 
+  private async releaseStandalone(agentId: string, report: HeldReport): Promise<boolean> {
+    try {
+      await report.deliverStandalone();
+      return true;
+    } catch (error: unknown) {
+      this.logger.error('[LaneCompletionNotifier] Standalone report delivery failed',
+        error instanceof Error ? error : new Error(String(error)));
+      this.coalescer?.hold(agentId, report, (expired) => {
+        void expired.deliverStandalone().catch((retryError: unknown) =>
+          this.logger.error('[LaneCompletionNotifier] Report retry failed',
+            retryError instanceof Error ? retryError : new Error(String(retryError))));
+      });
+      return false;
+    }
+  }
+
   /**
    * Re-enqueue a durable or pending completion without rebuilding its signal,
    * rerunning the outcome recorder or the review capture. A key already in the
@@ -541,8 +582,22 @@ export class LaneCompletionNotifier {
         error instanceof Error ? error : new Error('Completion dedupe read failed'));
       return { delivered: false, recorded: false, reason: 'storage-unavailable' };
     }
-    if (satisfied) return this.settleSatisfied(entry);
+    if (satisfied) {
+      const report = this.pendingReportMarks.get(entry.dedupeKey);
+      if (report) {
+        report.markEnqueued();
+        this.pendingReportMarks.delete(entry.dedupeKey);
+      }
+      return this.settleSatisfied(entry);
+    }
     const saved = await parentDelivery.enqueue(completionEnqueueInput(entry));
+    if (!('refused' in saved)) {
+      const report = this.pendingReportMarks.get(entry.dedupeKey);
+      if (report) {
+        report.markEnqueued();
+        this.pendingReportMarks.delete(entry.dedupeKey);
+      }
+    }
     return this.settleEnqueue(entry, saved, true);
   }
 

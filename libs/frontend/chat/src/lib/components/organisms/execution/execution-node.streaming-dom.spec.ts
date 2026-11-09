@@ -119,6 +119,8 @@ describe('ExecutionNodeComponent — incremental streaming DOM', () => {
 
     expect(root().getAttribute('style')).toContain('contain: layout paint');
     expect(root().getAttribute('style')).toContain('isolation: isolate');
+    expect(root().getAttribute('dir')).toBe('auto');
+    expect(tail()?.getAttribute('dir')).toBe('auto');
   });
 
   it('keeps an already-rendered block as the same DOM node when a later block arrives', () => {
@@ -211,6 +213,7 @@ describe('ExecutionNodeComponent — incremental streaming DOM', () => {
     const host = fixture.nativeElement as HTMLElement;
     expect(host.querySelector('.ptah-markdown-root')).toBeNull();
     expect(host.querySelector('markdown')).not.toBeNull();
+    expect(host.querySelector('markdown')?.getAttribute('dir')).toBe('auto');
   });
 
   describe('a text child with a later sibling while the turn streams', () => {

@@ -1,7 +1,7 @@
 import { stat as statFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { win32 } from 'node:path';
-import { buildCertifiedClaudeEnv, type ClaudeCliDetector } from '@ptah-extension/agent-sdk';
+import { buildCertifiedClaudeEnv, claudeVersionIdentity, compareClaudeVersions, type ClaudeCliDetector } from '@ptah-extension/agent-sdk';
 import type { ClaudeCertifiedExecutable, ClaudeCertifiedExecutableFingerprint } from '@ptah-extension/auth-providers-tokens';
 import {
   killProcessTree, type IProcessSpawner, type SpawnedProcessHandle, type SpawnLaunchGuard,
@@ -23,7 +23,7 @@ const COPY: Record<ProviderAccountResultCode, string> = {
   'missing-profile': 'This account is no longer available.',
   'wrong-provider': 'This action requires a Claude account.',
   'unsupported-store': 'This account store cannot be verified.',
-  'unsupported-source': 'The account authentication source cannot be verified.',
+  'unsupported-source': 'The Claude CLI build, account plan or a Claude settings source could not be certified for named accounts (see the Ptah log for the step).',
   'identity-mismatch': 'The account identity has changed.',
   'identity-unproved': 'The account identity could not be verified.',
   'route-changed': 'The account directory has changed.',
@@ -55,7 +55,6 @@ export const CLAUDE_ACCOUNT_CHILD_LIMITS = Object.freeze({
 
 /** Oldest CLI build whose account store layout is supported. */
 const MIN_VERSION = [2, 1, 301] as const;
-const VERSION_OUTPUT = /^(\d+)\.(\d+)\.(\d+) \(Claude Code\)$/;
 /** Hive-relative key paths the policy scan asks for; anything else never reaches `reg.exe`. */
 const REGISTRY_PATH = /^(?:HKLM|HKCU)\\[A-Za-z0-9_][A-Za-z0-9 _.\\-]{0,254}$/;
 
@@ -231,11 +230,8 @@ function sameFingerprint(a: ClaudeCertifiedExecutableFingerprint, b: ClaudeCerti
   return a.size === b.size && a.mtimeMs === b.mtimeMs;
 }
 
-function belowMinimum(version: readonly number[]): boolean {
-  for (let index = 0; index < MIN_VERSION.length; index += 1) {
-    if (version[index] !== MIN_VERSION[index]) return version[index] < MIN_VERSION[index];
-  }
-  return false;
+function belowMinimum(version: string): boolean {
+  return compareClaudeVersions(version, MIN_VERSION.join('.')) < 0;
 }
 
 function envValue(env: Readonly<Record<string, string>>, name: string): string | undefined {
@@ -315,10 +311,10 @@ export class ClaudeAccountCommand implements ClaudeCliProbe {
     if (!run.terminated || run.exitCode !== 0) {
       return { ok: false, code: 'identity-unproved', terminated: run.terminated, ...receipt };
     }
-    const match = VERSION_OUTPUT.exec(run.stdout.trim());
-    if (!match) return { ok: false, code: 'identity-unproved', terminated: true };
-    const parts = [Number(match[1]), Number(match[2]), Number(match[3])];
-    if (belowMinimum(parts)) return { ok: false, code: 'unsupported-store', terminated: true };
+    // The first non-blank line leads with a semver identity; banner text follows whitespace.
+    const version = claudeVersionIdentity(run.stdout.trimStart().split(/\r?\n/, 1)[0]);
+    if (!version) return { ok: false, code: 'identity-unproved', terminated: true };
+    if (belowMinimum(version)) return { ok: false, code: 'unsupported-store', terminated: true };
 
     // The fingerprint belongs to the probed build only if it did not change during the probe.
     const after = await this.fingerprint(sdkExecutablePath);
@@ -328,7 +324,7 @@ export class ClaudeAccountCommand implements ClaudeCliProbe {
       command,
       prefixArgs: Object.freeze([...prefixArgs]),
       sdkExecutablePath,
-      version: parts.join('.'),
+      version,
       fingerprint: Object.freeze({ size: after.size, mtimeMs: after.mtimeMs }),
     });
     this.cached = { key, executable };
