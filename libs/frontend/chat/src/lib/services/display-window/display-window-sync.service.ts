@@ -186,11 +186,11 @@ export class DisplayWindowSync implements MessageHandler {
   }
 
   /** A Detach request makes its view the sole snapshot and action source. */
-  selectSource(source: DisplayWindowSource): void {
-    if (this.sources.includes(source) && source.tabId() !== null) {
-      this.hasFocused = true;
-      this.source.set(source);
-    }
+  selectSource(source: DisplayWindowSource): boolean {
+    if (!this.sources.includes(source) || source.tabId() === null) return false;
+    this.hasFocused = true;
+    this.source.set(source);
+    return true;
   }
 
   isBoundSource(source: DisplayWindowSource): boolean {

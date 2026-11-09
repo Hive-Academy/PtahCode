@@ -635,7 +635,7 @@ function makeHarness(
     error: displayWindowErrorSig.asReadonly(),
     count: signal(3).asReadonly(),
     bindSource: jest.fn(() => unbindDisplayWindowMock),
-    selectSource: jest.fn(),
+    selectSource: jest.fn(() => true),
     isBoundSource: jest.fn(() => false),
     detach: jest.fn(async () => undefined),
     focus: jest.fn(async () => undefined),
@@ -3801,6 +3801,22 @@ describe('ChatViewComponent — Display sidebar (Electron)', () => {
     ).toBeNull();
     h.fixture.destroy();
     expect(h.unbindDisplayWindowMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not detach from a canvas tile when its source cannot be selected', () => {
+    const h = makeHarness({
+      isElectron: true,
+      renderCompactTemplate: true,
+      sessionContextTabId: 'tab-1',
+    });
+    h.fixture.detectChanges();
+    h.displayWindowStub.selectSource.mockReturnValueOnce(false);
+    const sheet = (h.fixture.nativeElement as HTMLElement).querySelector(
+      'ptah-display-sheet',
+    );
+    sheet?.dispatchEvent(new CustomEvent('detachRequested'));
+    expect(h.displayWindowStub.selectSource).toHaveBeenCalledTimes(1);
+    expect(h.displayWindowStub.detach).not.toHaveBeenCalled();
   });
 
   it('does not touch the Electron-only services in VS Code', () => {

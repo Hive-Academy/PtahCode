@@ -222,6 +222,8 @@ describe('CanvasDetailTranscriptComponent visibility', () => {
           useValue: {
             isElectron: true,
             config: jest.fn(() => ({ workspaceRoot: '/w' })),
+            getState: jest.fn(() => undefined),
+            setState: jest.fn(),
             getPtahIconUri: () => 'data:,',
             getPtahUserIconUri: () => 'data:,',
           },
@@ -302,7 +304,10 @@ describe('CanvasDetailTranscriptComponent visibility', () => {
         },
       ],
     });
-    const displaySheet = componentImport(ChatViewComponent, 'ptah-display-sheet');
+    const displaySheet = componentImport(
+      ChatViewComponent,
+      'ptah-display-sheet',
+    );
     TestBed.overrideComponent(ChatViewComponent, {
       set: {
         imports: [SidebarTabComponent, displaySheet, RailAgentPanelStub],
@@ -422,9 +427,9 @@ describe('CanvasDetailTranscriptComponent visibility', () => {
       jest.advanceTimersByTime(4000);
       fixture.detectChanges();
       expect(status.querySelector('span')).toBeNull();
-      expect(fixture.nativeElement.querySelector(':scope > [role="status"]')).toBe(
-        status,
-      );
+      expect(
+        fixture.nativeElement.querySelector(':scope > [role="status"]'),
+      ).toBe(status);
       const scheduled = jest.spyOn(global, 'setTimeout');
       const cleared = jest.spyOn(global, 'clearTimeout');
       actions.openLane('sub:missing');

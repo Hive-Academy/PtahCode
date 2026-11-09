@@ -45,7 +45,11 @@ export interface DisplaySidebarConnection {
   /** The separate-window sync; `null` without a local Display sheet. */
   readonly window: DisplayWindowSync | null;
   readonly bound: Signal<boolean>;
-  activateWindow(): void;
+  /**
+   * Selects this view as the window source. `false` means the window must
+   * not open: an embed without a tab would show another view's tab.
+   */
+  activateWindow(): boolean;
 }
 
 /** Must run in an injection context (a component constructor or field). */
@@ -58,7 +62,7 @@ export function connectDisplaySidebar(
       commitWidth: () => undefined,
       window: null,
       bound: signal(false).asReadonly(),
-      activateWindow: () => undefined,
+      activateWindow: () => false,
     };
 
   const layout = options.main ? inject(ElectronLayoutService) : null;
@@ -101,7 +105,7 @@ export function connectDisplaySidebar(
     commitWidth: (width) => layout?.setDisplaySidebarWidth(width),
     window: displayWindow,
     bound: computed(() => displayWindow.isBoundSource(source)),
-    activateWindow: () => displayWindow.selectSource(source),
+    activateWindow: () => displayWindow.selectSource(source) || options.main,
   };
 }
 

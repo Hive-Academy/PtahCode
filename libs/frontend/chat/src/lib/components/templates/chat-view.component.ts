@@ -781,8 +781,8 @@ export class ChatViewComponent implements OnDestroy {
   }
 
   protected detachDisplay(): void {
-    this.displaySidebar?.activateWindow();
-    void this.displaySidebar?.window?.detach();
+    if (!this.displaySidebar?.activateWindow()) return;
+    void this.displaySidebar.window?.detach();
   }
 
   protected focusDisplayWindow(): void {
