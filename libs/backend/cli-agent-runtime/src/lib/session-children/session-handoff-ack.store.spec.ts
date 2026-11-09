@@ -1,6 +1,10 @@
 import 'reflect-metadata';
 import type { IStateStorage } from '@ptah-extension/platform-core';
-import { SessionHandoffAckStore, HANDOFF_ACK_STORAGE_KEY } from './session-handoff-ack.store';
+import {
+  SessionHandoffAckStore,
+  HANDOFF_ACK_QUARANTINE_KEY,
+  HANDOFF_ACK_STORAGE_KEY,
+} from './session-handoff-ack.store';
 
 describe('SessionHandoffAckStore', () => {
   it('recovers invalid state and prunes oldest completed records', async () => {
@@ -21,6 +25,26 @@ describe('SessionHandoffAckStore', () => {
     expect(await store.findByPredecessor('before-0')).toBeUndefined();
     expect(await store.findByPredecessor('before-1')).toBeUndefined();
     expect(await store.findByPredecessor('before-2')).toBeDefined();
+  });
+  it('keeps invalid records unchanged and quarantines an invalid document', async () => {
+    const bad = { predecessorTabId: '', state: 'unknown' };
+    const valid = { predecessorTabId: 'kept', predecessorSdkId: null, successorTabId: 'kept-after', successorSdkId: null, workspaceRoot: '/workspace', handoffPath: '/workspace/HANDOFF.md', state: 'recorded' as const };
+    const values = new Map<string, unknown>([[HANDOFF_ACK_STORAGE_KEY, { schemaVersion: 1, records: [valid, bad] }]]);
+    const storage: IStateStorage = {
+      get: <T>(key: string) => values.get(key) as T | undefined,
+      update: async (key, value) => { values.set(key, value); },
+      keys: () => [...values.keys()],
+    };
+    const store = new SessionHandoffAckStore(storage, { error: jest.fn() } as never);
+    expect(await store.compareAndSet('kept', 'recorded', { state: 'closePending' })).toBe(true);
+    const doc = values.get(HANDOFF_ACK_STORAGE_KEY) as { records: unknown[] };
+    expect(doc.records).toEqual([{ ...valid, state: 'closePending' }, bad]);
+
+    const whole = { schemaVersion: 99, records: [valid] };
+    values.set(HANDOFF_ACK_STORAGE_KEY, whole);
+    await store.record({ ...valid, predecessorTabId: 'fresh' });
+    expect(values.get(HANDOFF_ACK_QUARANTINE_KEY)).toEqual(whole);
+    expect((values.get(HANDOFF_ACK_STORAGE_KEY) as { records: unknown[] }).records).toHaveLength(1);
   });
   it('persists a pair and compare-and-set transitions across store instances', async () => {
     const values = new Map<string, unknown>();

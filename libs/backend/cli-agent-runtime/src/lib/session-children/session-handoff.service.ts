@@ -217,6 +217,11 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
     try {
       const record = await this.ackStore.findByPredecessor(request.predecessorSessionId);
       if (!record) return refused('handoff record missing');
+      // Check the caller before joining an in-flight attempt, so a stranger never
+      // receives another caller's result.
+      if (request.callerSessionId !== record.successorTabId && request.callerSessionId !== record.successorSdkId) {
+        return refused('caller is not the recorded successor');
+      }
       const existing = this.ackAttempts.get(record.predecessorTabId);
       if (existing) return existing;
       const attempt = this.acknowledgeRecord(request, record);

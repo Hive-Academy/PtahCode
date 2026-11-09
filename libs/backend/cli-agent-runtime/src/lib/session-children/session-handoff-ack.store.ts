@@ -19,8 +19,19 @@ const RecordSchema = z.object({
   handoffPath: z.string().min(1),
   state: z.enum(['recorded', 'closePending', 'closeCompleted']),
 }).strict();
-const DocumentSchema = z.object({ schemaVersion: z.literal(1), records: z.array(RecordSchema) }).strict();
+const DocumentSchema = z.object({ schemaVersion: z.literal(1), records: z.array(z.unknown()) }).strict();
 export type HandoffAckRecord = z.infer<typeof RecordSchema>;
+
+/** The previous document is copied here once before an invalid document is replaced. */
+export const HANDOFF_ACK_QUARANTINE_KEY = `${HANDOFF_ACK_STORAGE_KEY}.quarantine`;
+
+interface AckDocumentState {
+  records: HandoffAckRecord[];
+  /** Entries that failed validation. Written back unchanged so no data is lost. */
+  invalid: unknown[];
+  /** The raw document when it was invalid as a whole, quarantined on the next write. */
+  quarantine?: unknown;
+}
 
 @injectable()
 export class SessionHandoffAckStore {
@@ -33,19 +44,42 @@ export class SessionHandoffAckStore {
     private readonly logger: Logger | null = null,
   ) {}
 
-  private async read(): Promise<HandoffAckRecord[]> {
+  private async readState(): Promise<AckDocumentState> {
     if (!this.storage) throw new Error('handoff acknowledgement storage unavailable');
     if (hasStateStorageReadiness(this.storage)) await this.storage.whenReady();
     const raw: unknown = isAsyncStateStorage(this.storage)
       ? await this.storage.getAsync(HANDOFF_ACK_STORAGE_KEY)
       : this.storage.get(HANDOFF_ACK_STORAGE_KEY);
-    if (raw === undefined) return [];
+    if (raw === undefined) return { records: [], invalid: [] };
     const parsed = DocumentSchema.safeParse(raw);
     if (!parsed.success) {
       this.logger?.error('Invalid handoff acknowledgement document', new Error('Invalid persisted handoff acknowledgement schema'));
-      return [];
+      return { records: [], invalid: [], quarantine: raw };
     }
-    return parsed.data.records;
+    const state: AckDocumentState = { records: [], invalid: [] };
+    for (const entry of parsed.data.records) {
+      const record = RecordSchema.safeParse(entry);
+      if (record.success) state.records.push(record.data);
+      else state.invalid.push(entry);
+    }
+    if (state.invalid.length > 0) {
+      this.logger?.error('Invalid handoff acknowledgement records kept unchanged', new Error(`${state.invalid.length} invalid handoff acknowledgement record(s)`));
+    }
+    return state;
+  }
+
+  private async read(): Promise<HandoffAckRecord[]> {
+    return (await this.readState()).records;
+  }
+
+  private async write(state: AckDocumentState): Promise<void> {
+    if (state.quarantine !== undefined) {
+      await this.storage!.update(HANDOFF_ACK_QUARANTINE_KEY, state.quarantine);
+    }
+    await this.storage!.update(HANDOFF_ACK_STORAGE_KEY, {
+      schemaVersion: 1,
+      records: [...this.prune(state.records), ...state.invalid],
+    });
   }
 
   private serialized<T>(action: () => Promise<T>): Promise<T> {
@@ -68,12 +102,12 @@ export class SessionHandoffAckStore {
 
   async record(value: HandoffAckRecord): Promise<void> {
     await this.serialized(async () => {
-      const records = await this.read();
-      if (records.some((entry) => entry.predecessorTabId === value.predecessorTabId)) {
+      const state = await this.readState();
+      if (state.records.some((entry) => entry.predecessorTabId === value.predecessorTabId)) {
         throw new Error('handoff predecessor already recorded');
       }
-      records.push(RecordSchema.parse(value));
-      await this.storage!.update(HANDOFF_ACK_STORAGE_KEY, { schemaVersion: 1, records: this.prune(records) });
+      state.records.push(RecordSchema.parse(value));
+      await this.write(state);
     });
   }
 
@@ -83,11 +117,12 @@ export class SessionHandoffAckStore {
     patch: Partial<Pick<HandoffAckRecord, 'state' | 'successorSdkId'>>,
   ): Promise<boolean> {
     return this.serialized(async () => {
-      const records = await this.read();
+      const state = await this.readState();
+      const { records } = state;
       const index = records.findIndex((entry) => entry.predecessorTabId === predecessorTabId);
       if (index < 0 || records[index].state !== expected) return false;
       records[index] = RecordSchema.parse({ ...records[index], ...patch });
-      await this.storage!.update(HANDOFF_ACK_STORAGE_KEY, { schemaVersion: 1, records: this.prune(records) });
+      await this.write(state);
       return true;
     });
   }
