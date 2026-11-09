@@ -8363,7 +8363,7 @@ describe('MCP tool profile listing, eager loading and dispatch', () => {
       // +3: agent_wait, run_check and HTTP-only run_check_wait. +1:
       // ptah_session_handoff, always-on (TASK_2026_655). +1:
       // ptah_agent_message_control (P1-E). +1: ptah_agent_message_ack (P2-G).
-      expect(coding).toHaveLength(hasIDECapabilities ? 69 : 66);
+      expect(coding).toHaveLength(hasIDECapabilities ? 70 : 67);
       expect(coding.map((tool) => tool.name)).toContain(
         'ptah_artifact_publish',
       );
@@ -8733,12 +8733,17 @@ const HANDOFF_ARGS = {
 };
 
 /** A real session namespace over a fake handoff service and no spawner. */
-function handoffDeps(handoff: ISessionHandoff | undefined) {
+function handoffDeps(
+  handoff: Pick<ISessionHandoff, 'handoff'> & Partial<ISessionHandoff> | undefined,
+) {
+  const service: ISessionHandoff | undefined = handoff
+    ? { acknowledge: jest.fn(), ...handoff }
+    : undefined;
   return buildDeps({
     ptahAPI: buildPtahAPIStub({
       session: buildSessionNamespace({
         getSpawner: () => undefined,
-        getHandoff: () => handoff,
+        getHandoff: () => service,
         getCallerSessionId,
       }),
     }),
@@ -8848,6 +8853,9 @@ describe('protocol-handlers › route and outcome registration', () => {
     ).tools;
     const names = tools.map((tool) => tool.name);
     expect(names[names.indexOf('ptah_session_handoff') + 1]).toBe(
+      'ptah_session_handoff_ack',
+    );
+    expect(names[names.indexOf('ptah_session_handoff') + 2]).toBe(
       'ptah_route_decide',
     );
     expect(names).toContain('ptah_outcome_report');

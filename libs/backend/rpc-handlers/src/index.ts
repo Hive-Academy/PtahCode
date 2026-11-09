@@ -7,6 +7,7 @@
  */
 
 export { SessionDriverLockCoordinator } from './lib/chat/session/session-driver-lock-coordinator';
+export { SessionHandoffCloser } from './lib/handlers/session-handoff-closer';
 
 export {
   AgentRpcHandlers,

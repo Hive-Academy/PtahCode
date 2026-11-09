@@ -1214,6 +1214,10 @@ export interface RpcMethodRegistry
     params: SessionHandoffChainParams;
     result: SessionHandoffChainResult;
   };
+  'session:handoffCloseResult': {
+    params: { requestId: string; closed: boolean };
+    result: { accepted: boolean };
+  };
   'session:linkTask': {
     params: SessionLinkTaskParams;
     result: SessionLinkTaskResult;
@@ -3612,6 +3616,7 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'session:setOrganization': true,
   'session:getOrganization': true,
   'session:handoffChain': true,
+  'session:handoffCloseResult': true,
   'session:linkTask': true,
   'session:unlinkTask': true,
   'session:addPrLink': true,

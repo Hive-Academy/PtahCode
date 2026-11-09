@@ -26,6 +26,12 @@ export interface SessionHandoffOpenedPayload {
   readonly startedAt: number;
 }
 
+export interface SessionHandoffClosePredecessorPayload {
+  readonly requestId: string;
+  readonly predecessorTabId: string;
+  readonly predecessorSdkId: string | null;
+}
+
 /**
  * Payload for `sessionHandoff:linked` (TASK_2026_876).
  *

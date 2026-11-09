@@ -30,6 +30,8 @@ import type {
   SessionChildStartRequest,
   SessionChildStartResult,
   SessionHandoffRequest,
+  SessionHandoffAckRequest,
+  SessionHandoffAckResult,
   SessionHandoffResult,
   SessionSendMode,
 } from '@ptah-extension/cli-agent-runtime';
@@ -55,6 +57,7 @@ export type SessionHandoffInput = Omit<
   SessionHandoffRequest,
   'callerSessionId'
 >;
+export type SessionHandoffAckInput = Omit<SessionHandoffAckRequest, 'callerSessionId'>;
 
 export interface SessionSendInput {
   readonly childSessionId: string;
@@ -84,6 +87,7 @@ export interface SessionNamespace {
   stop(childSessionId: string): Promise<SessionStopOutcome>;
   /** Hand the caller off to a new top-level session (never throws past the lookup). */
   handoff(input: SessionHandoffInput): Promise<SessionHandoffResult>;
+  acknowledge(input: SessionHandoffAckInput): Promise<SessionHandoffAckResult>;
   /**
    * Completions of the caller's children held while the caller was not live,
    * returned ONCE (the spawner marks them delivered). Empty when the host has
@@ -158,6 +162,12 @@ export function buildSessionNamespace(
       const handoff = deps.getHandoff();
       if (!handoff) throw new Error(SESSION_HANDOFF_UNAVAILABLE_MESSAGE);
       return handoff.handoff({ ...input, callerSessionId: caller() });
+    },
+
+    acknowledge: async (input) => {
+      const handoff = deps.getHandoff();
+      if (!handoff) throw new Error(SESSION_HANDOFF_UNAVAILABLE_MESSAGE);
+      return handoff.acknowledge({ ...input, callerSessionId: caller() });
     },
 
     takeHeldCompletions: () =>

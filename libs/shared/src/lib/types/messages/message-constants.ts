@@ -211,6 +211,7 @@ export const MESSAGE_TYPES = {
    * new tab is an ordinary chat, not a child.
    */
   SESSION_HANDOFF_OPENED: 'sessionHandoff:opened',
+  SESSION_HANDOFF_CLOSE_PREDECESSOR: 'sessionHandoff:closePredecessor',
   /**
    * Backend → Frontend: a kept handoff wrote a durable edge between two SDK
    * session ids (TASK_2026_876). The open inspector reloads
