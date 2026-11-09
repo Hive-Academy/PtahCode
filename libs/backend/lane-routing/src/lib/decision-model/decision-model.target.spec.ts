@@ -126,6 +126,7 @@ describe('resolveDecisionEndpoint', () => {
         probe: 'daemon',
         locality: 'local',
         timeoutMs: LOCAL,
+        timeoutExplicit: false,
       });
       expect('apiKey' in result).toBe(false);
     });
@@ -170,6 +171,7 @@ describe('resolveDecisionEndpoint', () => {
         probe: 'none',
         locality: 'remote',
         timeoutMs: REMOTE,
+        timeoutExplicit: false,
       });
     });
 
@@ -200,6 +202,7 @@ describe('resolveDecisionEndpoint', () => {
         probe: 'endpoint',
         locality: 'remote',
         timeoutMs: REMOTE,
+        timeoutExplicit: false,
       });
     });
 
@@ -216,6 +219,7 @@ describe('resolveDecisionEndpoint', () => {
         probe: 'daemon',
         locality: 'remote',
         timeoutMs: REMOTE,
+        timeoutExplicit: false,
       });
       expect('apiKey' in result).toBe(false);
     });
@@ -462,6 +466,7 @@ describe('resolveDecisionEndpoint', () => {
         probe: 'endpoint',
         locality: 'remote',
         timeoutMs: REMOTE,
+        timeoutExplicit: false,
       });
     });
 
@@ -689,8 +694,35 @@ describe('resolveDecisionEndpoint request timeout setting', () => {
     async (value) => {
       await expect(timeoutWith(local, value)).resolves.toBe(LOCAL);
       await expect(timeoutWith(remote, value)).resolves.toBe(REMOTE);
+      const h = harness({ config: { [TIMEOUT_CONFIG]: value } });
+      expect(
+        asEndpoint(await resolveDecisionEndpoint(local, h.deps))
+          .timeoutExplicit,
+      ).toBe(false);
     },
   );
+
+  it('marks a saved timeout as explicit, including one the clamp adjusts', async () => {
+    const saved = harness({ config: { [TIMEOUT_CONFIG]: 5_000 } });
+    const explicit = asEndpoint(
+      await resolveDecisionEndpoint(local, saved.deps),
+    );
+    expect(explicit.timeoutMs).toBe(5_000);
+    expect(explicit.timeoutExplicit).toBe(true);
+
+    const clamped = harness({ config: { [TIMEOUT_CONFIG]: 1 } });
+    const adjusted = asEndpoint(
+      await resolveDecisionEndpoint(local, clamped.deps),
+    );
+    expect(adjusted.timeoutMs).toBe(DECISION_MODEL_TIMEOUT_MIN_MS);
+    expect(adjusted.timeoutExplicit).toBe(true);
+
+    const unset = asEndpoint(
+      await resolveDecisionEndpoint(local, harness().deps),
+    );
+    expect(unset.timeoutMs).toBe(LOCAL);
+    expect(unset.timeoutExplicit).toBe(false);
+  });
 });
 
 describe('localityOfSelection', () => {

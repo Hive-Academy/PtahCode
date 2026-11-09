@@ -327,6 +327,7 @@ describe('route decide preflight', () => {
         probe: 'daemon',
         locality: 'local',
         timeoutMs: DECISION_REQUEST_TIMEOUT_MS,
+        timeoutExplicit: false,
       }).timeoutMs,
     ).toBe(DECISION_REQUEST_TIMEOUT_MS);
     expect(result).toMatchObject({

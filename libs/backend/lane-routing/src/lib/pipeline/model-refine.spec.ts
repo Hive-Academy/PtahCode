@@ -1,5 +1,14 @@
-import type { DecisionPayload } from '../decision-model/decision-payload';
+import {
+  buildDecisionPayload,
+  type DecisionPayload,
+} from '../decision-model/decision-payload';
 import type { LaneRoutingLogger } from '../lane-routing-logger';
+import {
+  serializeSystemOneRequest,
+  SYSTEM_ONE_MAX_REQUEST_BYTES,
+  SystemOneClient,
+} from '../decision-model/system-one.client';
+import { SYSTEM_ONE_KEEP_ALIVE } from '../decision-model/system-one.residency';
 import { runFixedRequest, runLaneRequest, type LaneQuestion } from './model-refine';
 
 const logger: LaneRoutingLogger = {
@@ -148,3 +157,142 @@ describe('runLaneRequest outcome figures', () => {
     expect(captured.payloads[0].state.pastOutcomes).toEqual({});
   });
 });
+
+describe('System One body cap includes keep_alive', () => {
+  it('refuses a body that fits without keep_alive and not with it', async () => {
+    const model = 'nimble';
+    const keepAlive = SYSTEM_ONE_KEEP_ALIVE;
+    const fitted = fixedRequestOnKeepAliveBoundary(model, keepAlive);
+    const payload = buildDecisionPayload({
+      request: fitted.request,
+      questions: [
+        {
+          kind: 'fixed-criteria',
+          phaseId: fitted.questions[0].key,
+          instructions: fitted.questions[0].instructions,
+          criteria: fitted.questions[0].criteria,
+        },
+      ],
+      outcomeFigures: [],
+    });
+    const without = requestBytes(model, payload);
+    const withKeep = requestBytes(model, payload, keepAlive);
+    expect(without).toBeLessThanOrEqual(SYSTEM_ONE_MAX_REQUEST_BYTES);
+    expect(withKeep).toBeGreaterThan(SYSTEM_ONE_MAX_REQUEST_BYTES);
+
+    const accepted = await runFixedRequest({
+      request: fitted.request,
+      questions: fitted.questions,
+      maxRequestBytes: SYSTEM_ONE_MAX_REQUEST_BYTES,
+      dispatch: {
+        kind: 'system-one',
+        model,
+        caller: {
+          decide: async () => ({
+            ok: true,
+            result: { model, answers: {} },
+          }),
+        },
+      },
+      logger,
+    });
+    expect(accepted.sent).toBe(true);
+
+    const fetches: string[] = [];
+    const client = new SystemOneClient(
+      {
+        baseUrl: 'http://127.0.0.1:11434',
+        model,
+        keepAlive,
+      },
+      {
+        fetch: (_url, init) => {
+          fetches.push(init?.body ?? '');
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            text: async () => JSON.stringify({ model, answers: {} }),
+          });
+        },
+      },
+    );
+    const refused = await runFixedRequest({
+      request: fitted.request,
+      questions: fitted.questions,
+      maxRequestBytes: SYSTEM_ONE_MAX_REQUEST_BYTES,
+      dispatch: { kind: 'system-one', caller: client, model, keepAlive },
+      logger,
+    });
+    expect(refused.sent).toBe(false);
+    expect(refused.requestCause).toBe('payload-too-large');
+    expect(fetches).toEqual([]);
+
+    const direct = await client.decide(payload);
+    expect(direct).toMatchObject({ ok: false, cause: 'payload-too-large' });
+  });
+});
+
+function requestBytes(
+  model: string,
+  payload: DecisionPayload,
+  keepAlive?: string,
+): number {
+  return new TextEncoder()
+    .encode(serializeSystemOneRequest({ model, payload, keepAlive }))
+    .byteLength;
+}
+
+/**
+ * A fixed question whose System One body is at most 64 KiB without
+ * `keep_alive` and over that cap with it. Fixed criteria are not narrowed,
+ * so the fit must refuse rather than hand the body to the client.
+ */
+function fixedRequestOnKeepAliveBoundary(
+  model: string,
+  keepAlive: string,
+): {
+  readonly request: string;
+  readonly questions: readonly [
+    { readonly key: string; readonly instructions: string; readonly criteria: { readonly FEATURE: string } },
+  ];
+} {
+  const request = 'classify';
+  const key = 'task_type';
+  const instructions = 'Classify';
+  const measure = (pad: string): { readonly without: number; readonly withKeep: number } => {
+    const payload = buildDecisionPayload({
+      request,
+      questions: [
+        {
+          kind: 'fixed-criteria',
+          phaseId: key,
+          instructions,
+          criteria: { FEATURE: pad },
+        },
+      ],
+      outcomeFigures: [],
+    });
+    return {
+      without: requestBytes(model, payload),
+      withKeep: requestBytes(model, payload, keepAlive),
+    };
+  };
+  const base = measure('a');
+  if (base.withKeep > SYSTEM_ONE_MAX_REQUEST_BYTES) {
+    throw new Error('base payload already exceeds the cap');
+  }
+  const pad = 'a'.repeat(1 + (SYSTEM_ONE_MAX_REQUEST_BYTES - base.withKeep + 1));
+  const sized = measure(pad);
+  if (
+    sized.without > SYSTEM_ONE_MAX_REQUEST_BYTES ||
+    sized.withKeep <= SYSTEM_ONE_MAX_REQUEST_BYTES
+  ) {
+    throw new Error(
+      `keep_alive boundary missed without=${sized.without} with=${sized.withKeep}`,
+    );
+  }
+  return {
+    request,
+    questions: [{ key, instructions, criteria: { FEATURE: pad } }],
+  };
+}

@@ -18,9 +18,10 @@ import { systemOneUrl } from './decision-endpoint.url';
 export const SYSTEM_ONE_KEEP_ALIVE = '30m';
 
 /**
- * Abort budget for a decision request whose model is not loaded.
- * Warm inference stays on the per-request budget (3000 ms by default).
- * Matches the longest decision-model timeout the settings allow.
+ * Abort budget for a decision request whose model is not loaded, and only
+ * when no `decisionModelTimeoutMs` is saved. A saved timeout bounds every
+ * request. Warm inference stays on the per-request budget (3000 ms by
+ * default). Matches the longest decision-model timeout the settings allow.
  */
 export const SYSTEM_ONE_LOAD_TIMEOUT_MS = 60_000;
 

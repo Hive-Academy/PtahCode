@@ -497,6 +497,7 @@ describe('route decide gate', () => {
         probe: 'daemon',
         locality: 'local',
         timeoutMs: DECISION_REQUEST_TIMEOUT_MS,
+        timeoutExplicit: false,
       }).timeoutMs,
     ).toBe(DECISION_REQUEST_TIMEOUT_MS);
   });

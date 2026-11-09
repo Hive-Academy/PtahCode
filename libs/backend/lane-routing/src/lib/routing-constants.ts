@@ -124,10 +124,12 @@ export const DECISION_RETURN_MARGIN_MS = 250;
  * warm p50 665 ms, p95 977 ms. Both are <= 3000 ms (margins 1482 ms and
  * 2023 ms), so the value stays 3000.
  *
- * This number is an inference budget. A local Ollama cold load is not in
- * it: the client uses `SYSTEM_ONE_LOAD_TIMEOUT_MS` until `GET /api/ps`
- * shows the model loaded, and sends `keep_alive` so the next call stays
- * warm. A warm call that exceeds this budget still falls back.
+ * This number is an inference budget. When no decision-model timeout is
+ * saved, a local Ollama cold load uses `SYSTEM_ONE_LOAD_TIMEOUT_MS` until
+ * `GET /api/ps` shows the model loaded, and the request sends `keep_alive`
+ * so the next call stays warm. A saved timeout bounds every request,
+ * including that cold load. A warm call that exceeds its budget still
+ * falls back.
  */
 export const DECISION_REQUEST_TIMEOUT_REMOTE_MS = 3000;
 

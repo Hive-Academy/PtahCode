@@ -95,6 +95,9 @@ export class DecisionCaller {
       kind: 'system-one',
       caller: factory(options),
       model: caller.target.model,
+      ...(options.keepAlive !== undefined
+        ? { keepAlive: options.keepAlive }
+        : {}),
     };
   }
 

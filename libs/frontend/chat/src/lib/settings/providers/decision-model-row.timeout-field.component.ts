@@ -103,8 +103,10 @@ export function decisionTimeoutText(value: unknown): string {
     >
       How long one decision request may take before routing falls back.
       Raise it for a slow model, such as one running on a CPU. Applies to
-      every decision model except a structured-output model. Saves on its own
-      when you press Enter or leave the field; empty uses the default.
+      every decision model except a structured-output model. Without a saved
+      value, the first request may wait up to 60 s while a local model loads.
+      A saved value bounds every request. Saves on its own when you press
+      Enter or leave the field; empty uses the default.
     </p>
     @if (readFailed()) {
       <p

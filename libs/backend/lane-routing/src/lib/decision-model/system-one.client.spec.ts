@@ -1,6 +1,7 @@
 import type { LaneRoutingLogger } from '../lane-routing-logger';
 import { buildDecisionPayload } from './decision-payload';
 import {
+  serializeSystemOneRequest,
   SYSTEM_ONE_MAX_REQUEST_BYTES,
   SYSTEM_ONE_PATH,
   SYSTEM_ONE_TIMEOUT_MS,
@@ -150,6 +151,9 @@ describe('SystemOneClient', () => {
       state: payload.state,
       questions: payload.questions,
     });
+    expect(calls[0].init.body).toBe(
+      serializeSystemOneRequest({ model: 'nimble', payload }),
+    );
   });
 
   it('sends no authorization header when the key is absent', async () => {
@@ -585,10 +589,13 @@ describe('SystemOneClient', () => {
 
     expect(result.answers['implement'].choice).toBe('o1');
     expect(daemon.posts).toHaveLength(1);
-    expect(JSON.parse(daemon.posts[0]?.body ?? '{}')).toMatchObject({
-      model: 'nimble',
-      keep_alive: '30m',
-    });
+    expect(daemon.posts[0]?.body).toBe(
+      serializeSystemOneRequest({
+        model: 'nimble',
+        payload,
+        keepAlive: SYSTEM_ONE_KEEP_ALIVE,
+      }),
+    );
     expect(daemon.probes).toEqual(['http://127.0.0.1:11434/api/ps']);
   });
 

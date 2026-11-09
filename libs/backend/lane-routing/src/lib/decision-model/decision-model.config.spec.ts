@@ -761,6 +761,7 @@ describe('DecisionModelConfig credential, locality and other kinds', () => {
       probe: 'none',
       locality: 'remote',
       timeoutMs: DECISION_REQUEST_TIMEOUT_REMOTE_MS,
+      timeoutExplicit: false,
     });
 
     await h.config.keys.set('jev', null);

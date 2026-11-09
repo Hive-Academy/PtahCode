@@ -10,6 +10,7 @@ import {
 } from './system-one.residency';
 import {
   SystemOneResultSchema,
+  type SystemOneRequestBody,
   type SystemOneResult,
 } from './system-one.schema';
 
@@ -101,6 +102,25 @@ export interface SystemOneClientOptions {
   readonly coldTimeoutMs?: number;
 }
 
+/**
+ * The JSON `POST /v1/systemone` sends. Fitting and the client both measure
+ * this string, so `keep_alive` is inside the 64 KiB cap when the call will
+ * send it and absent when it will not.
+ */
+export function serializeSystemOneRequest(input: {
+  readonly model: string;
+  readonly payload: DecisionPayload;
+  readonly keepAlive?: string;
+}): string {
+  const body: SystemOneRequestBody = {
+    model: input.model,
+    state: input.payload.state,
+    questions: input.payload.questions,
+    ...(input.keepAlive !== undefined ? { keep_alive: input.keepAlive } : {}),
+  };
+  return JSON.stringify(body);
+}
+
 export interface SystemOneClientDependencies {
   /** Test seam; the Node global `fetch` by default. */
   readonly fetch?: SystemOneFetch;
@@ -128,20 +148,13 @@ export class SystemOneClient {
    * (`DecisionModelStatus.recheckAfterLiveNotFound`), never to the client.
    */
   async decide(payload: DecisionPayload): Promise<SystemOneCallResult> {
-    const requestBody: {
-      model: string;
-      state: DecisionPayload['state'];
-      questions: DecisionPayload['questions'];
-      keep_alive?: string;
-    } = {
+    const body = serializeSystemOneRequest({
       model: this.options.model,
-      state: payload.state,
-      questions: payload.questions,
-    };
-    if (this.options.keepAlive !== undefined) {
-      requestBody.keep_alive = this.options.keepAlive;
-    }
-    const body = JSON.stringify(requestBody);
+      payload,
+      ...(this.options.keepAlive !== undefined
+        ? { keepAlive: this.options.keepAlive }
+        : {}),
+    });
     const bodyBytes = this.encoder.encode(body).byteLength;
     if (bodyBytes > SYSTEM_ONE_MAX_REQUEST_BYTES) {
       return this.logged(
