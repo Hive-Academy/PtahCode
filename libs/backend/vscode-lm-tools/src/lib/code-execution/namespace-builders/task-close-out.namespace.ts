@@ -26,7 +26,7 @@ export interface TaskCloseOutServiceLike {
     merged: true;
     sessionIds: string[];
     autoRemoveMergedWorktreeAndBranch: boolean;
-  }): CloseOutRunLike;
+  }, manual?: boolean): CloseOutRunLike;
   status(runId: string): CloseOutRunLike | null;
   cleanupCompleted(
     runId: string,
@@ -149,7 +149,7 @@ export function buildTaskCloseOutNamespace(
           merged: true,
           sessionIds: links.map((link) => link.sessionId),
           autoRemoveMergedWorktreeAndBranch: deps.allowRemoval?.() === true,
-        });
+        }, true);
         return { status: 'accepted', runId: run.runId };
       } catch (error: unknown) {
         deps.logger?.error(

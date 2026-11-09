@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_898_c1a5
-status: in_progress
+status: in_review
 type: FEATURE
 title: Close handed-off sessions and automate task close-out
 depends_on: []

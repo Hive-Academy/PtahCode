@@ -147,6 +147,10 @@ describe('TaskCloseOutService', () => {
     for (let i = 0; i < 8; i++) await service.run({ ...input, autoRemoveMergedWorktreeAndBranch: true });
     expect(cleanup.inspectTaskWorktree).toHaveBeenCalledTimes(1);
     expect(harvest.harvestTask).toHaveBeenCalledTimes(5);
+    service.start({ ...input, autoRemoveMergedWorktreeAndBranch: true }, true);
+    await service.run(input);
+    expect(harvest.harvestTask).toHaveBeenCalledTimes(6);
+    expect(cleanup.inspectTaskWorktree).toHaveBeenCalledTimes(2);
   });
 
   it('curates all sessions and aggregates failures after gated results', async () => {

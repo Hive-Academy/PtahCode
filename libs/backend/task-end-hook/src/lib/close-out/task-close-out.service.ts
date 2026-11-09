@@ -54,8 +54,11 @@ export class TaskCloseOutService {
     return this.active.get(run.runId) ?? run;
   }
 
-  /** Accept a task-keyed run immediately; status is persisted before execution. */
-  start(input: TaskCloseOutRequest): CloseOutRunRecord {
+  /**
+   * Accept a task-keyed run immediately; status is persisted before execution.
+   * A manual start (the ptah_task_close_out tool) also retries capped or refused steps.
+   */
+  start(input: TaskCloseOutRequest, manual = false): CloseOutRunRecord {
     const request = requestSchema.parse(input);
     const identity: CloseOutIdentity = request;
     let run: CloseOutRunRecord;
@@ -73,7 +76,7 @@ export class TaskCloseOutService {
     }
     const existing = this.active.get(run.runId);
     if (existing) return run;
-    const work = Promise.resolve().then(() => this.execute(run.runId, request));
+    const work = Promise.resolve().then(() => this.execute(run.runId, request, manual));
     this.track(run.runId, work);
     void work.catch((error: unknown) => {
       this.logger.error(
@@ -121,6 +124,7 @@ export class TaskCloseOutService {
   private async execute(
     runId: string,
     request: TaskCloseOutRequest,
+    manual: boolean,
   ): Promise<CloseOutRunRecord> {
     await this.step(runId, 'memory', async () => {
       if (request.sessionIds.length === 0)
@@ -146,7 +150,7 @@ export class TaskCloseOutService {
       if (gated === new Set(request.sessionIds).size)
         return { state: 'skipped', reason: 'all-sessions-gated' };
       return { state: 'ok', reason: null };
-    });
+    }, false, manual);
     await this.step(runId, 'learning', async () => {
       const result = await this.harvest.harvestTask(
         request.mainRoot,
@@ -160,8 +164,8 @@ export class TaskCloseOutService {
       if (result.outcome === 'not-completed')
         return { state: 'refused', reason: 'task-not-completed' };
       return { state: 'failed', reason: result.outcome };
-    });
-    await this.cleanupSteps(runId, request);
+    }, false, manual);
+    await this.cleanupSteps(runId, request, manual);
     const final = this.store.getCloseOut(runId);
     if (final === null) throw new Error('close-out run disappeared');
     return final;
