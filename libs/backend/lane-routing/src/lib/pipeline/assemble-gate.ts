@@ -249,10 +249,6 @@ function rosterFrom(
   let unavailableIndex = 0;
   const roster: (ChosenEntry | UnavailableEntry)[] = [];
   for (const draft of drafts) {
-    const phase = args.phases.find((input) => input.id === draft.phaseId);
-    if (phase === undefined) {
-      throw new Error(`phase ${draft.phaseId} is missing its input`);
-    }
     if (draft.kind === 'unavailable') {
       const reason = reasonAt(
         unavailableReasons,
@@ -263,7 +259,7 @@ function rosterFrom(
       roster.push(
         unavailableEntry(
           draft.plan,
-          withPolicyReason(reason, draft.plan.policy, phase),
+          withPolicyReason(reason, draft.plan),
         ),
       );
       continue;
@@ -274,7 +270,7 @@ function rosterFrom(
     );
     chosenIndex += 1;
     roster.push(
-      chosenEntry(draft, withPolicyReason(reason, draft.plan.policy, phase)),
+      chosenEntry(draft, withPolicyReason(reason, draft.plan)),
     );
   }
   if (roster.length !== args.phases.length) {
@@ -285,11 +281,10 @@ function rosterFrom(
 
 export function withPolicyReason(
   reason: string,
-  policy: PhasePlan['policy'],
-  phase: Pick<GateArgs['phases'][number], 'shape' | 'weight'>,
+  plan: Pick<PhasePlan, 'policy' | 'shape' | 'weight'>,
 ): string {
-  const { ruleId, tier, effort } = policy;
-  return `${reason}; policy ${ruleId}; tier ${tier}, effort ${effort}, shape ${phase.shape ?? 'unset'}, weight ${phase.weight ?? 'unset'}`;
+  const { ruleId, tier, effort } = plan.policy;
+  return `${reason}; policy ${ruleId}; tier ${tier}, effort ${effort}, shape ${plan.shape ?? 'unset'}, weight ${plan.weight ?? 'unset'}`;
 }
 
 function reasonAt(

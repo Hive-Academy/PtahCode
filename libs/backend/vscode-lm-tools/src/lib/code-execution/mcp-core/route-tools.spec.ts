@@ -83,6 +83,8 @@ describe('buildRouteDecideTool', () => {
     for (const term of ['shape', 'weight', 'tier', 'effort']) {
       expect(description).toContain(term);
     }
+    expect(description).toContain('"tier" is the model alias to pass');
+    expect(description).toContain('for CLI lanes, both are advisory');
   });
 
   it('is deterministic', () => {

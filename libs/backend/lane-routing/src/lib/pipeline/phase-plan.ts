@@ -84,6 +84,8 @@ export interface PhasePlan {
   readonly phaseId: string;
   readonly kind: PhaseKind;
   readonly taskKind: OutcomeTaskKind;
+  readonly shape?: GatePhase['shape'];
+  readonly weight?: GatePhase['weight'];
   readonly policy: PhasePolicy;
   readonly constraint: PhaseConstraintResult;
   readonly ranked: readonly ScoredCandidate[];
@@ -147,6 +149,8 @@ export function planRoutePhases(
         phaseId: phase.id,
         kind: phase.kind,
         taskKind,
+        shape: phase.shape,
+        weight: phase.weight,
         policy,
         constraint,
         ranked: [],
@@ -183,6 +187,8 @@ export function planRoutePhases(
       phaseId: phase.id,
       kind: phase.kind,
       taskKind,
+      shape: phase.shape,
+      weight: phase.weight,
       policy,
       constraint,
       ranked: orderScored(scored, spreadResult.ranking),

@@ -450,8 +450,7 @@ describe('requirement 13.2 chosen facts', () => {
     const compiled = compileChosenReason(input);
     const reason = withPolicyReason(
       compiled,
-      { ruleId: 'R2', tier: 'sonnet', effort: 'high' },
-      { shape: 'logic', weight: 3 },
+      { policy: { ruleId: 'R2', tier: 'sonnet', effort: 'high' }, shape: 'logic', weight: 3 },
     );
     const parsed = ChosenEntrySchema.safeParse({
       phaseId: input.phaseId,
@@ -608,8 +607,7 @@ describe('requirement 13.2 unavailable facts', () => {
     const compiled = compileUnavailableReason(input);
     const reason = withPolicyReason(
       compiled,
-      { ruleId: 'R5', tier: 'haiku', effort: 'low' },
-      {},
+      { policy: { ruleId: 'R5', tier: 'haiku', effort: 'low' } },
     );
     const parsed = UnavailableEntrySchema.safeParse({
       phaseId: input.phaseId,

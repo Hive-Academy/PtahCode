@@ -65,6 +65,52 @@ it('scores a subagent with the policy tier and keeps a lane configured model', (
   expect(plans[2].ranked[0].scored.provenance).toBe('tier');
 });
 
+function subagentPlan(weight?: number, pinModel?: string): PhasePlan {
+  const gathered: GatheredCall = {
+    lanes: [], roles: [], rotation: { version: 1, entries: [] },
+    rotationUnavailable: false, missing: [], detailReasons: [], models: new Map(),
+    matrix: {
+      reasons: [], outcomeFigures: () => null,
+      resolve: (family, model, taskKind) => ({
+        family, model, taskKind, score: 50, cell: { kind: 'unknown' as const },
+        profileModel: model, noProfile: true,
+      }),
+    },
+  };
+  const args: GateArgs = {
+    stage: 'gate-0.1', request: 'Implement a small change',
+    taskType: TASK_TYPES[0], depth: 'Full',
+    phases: [{ id: 'small', kind: 'implement',
+      ...(weight === undefined ? {} : { shape: 'mechanical' as const, weight }),
+    }],
+    ...(pinModel === undefined ? {} : {
+      pins: [{ phaseId: 'small', executor: 'subagent:backend-developer', model: pinModel }],
+    }),
+  };
+  return planRoutePhases(
+    args.phases, args, gathered, gathered.rotation, false, [], () => undefined,
+  ).plans[0];
+}
+
+it('scores an unpinned subagent on a light R4 phase with the haiku tier', () => {
+  const phase = subagentPlan(2000);
+  expect(phase.policy).toEqual({ tier: 'haiku', effort: 'low', ruleId: 'R4' });
+  expect(phase.ranked[0].scored).toMatchObject({ model: 'haiku', provenance: 'tier' });
+});
+
+it('applies a haiku subagent pin as a tier pin on a light R4 phase', () => {
+  const phase = subagentPlan(2000, 'haiku');
+  expect(phase.constraint).toMatchObject({ status: 'eligible', pinAccepted: true });
+  expect(phase.ranked[0].scored).toMatchObject({ model: 'haiku', provenance: 'tier' });
+});
+
+it('keeps the selected sonnet tier when a legacy phase pins unlisted haiku', () => {
+  const phase = subagentPlan(undefined, 'haiku');
+  expect(phase.policy).toEqual({ tier: 'sonnet', effort: 'medium', ruleId: 'R5' });
+  expect(phase.constraint).toMatchObject({ status: 'eligible', pinAccepted: true });
+  expect(phase.ranked[0].scored).toMatchObject({ model: 'sonnet', provenance: 'tier' });
+});
+
 it('falls back to ranking when the band has one member', () => {
   const phase = plan([80, 70, 60]);
   expect(laneQuestion(phase).options).toHaveLength(1);
