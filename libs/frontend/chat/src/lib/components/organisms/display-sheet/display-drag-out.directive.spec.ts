@@ -62,6 +62,8 @@ describe('DisplayDragOutDirective', () => {
     const release = jest.fn();
     host.releasePointerCapture = release;
     pointer(host, 'pointerdown', 100);
+    fixture.detectChanges();
+    expect(host.style.userSelect).toBe('none');
     pointer(host, 'pointermove', 120);
     fixture.detectChanges();
     expect(host.style.userSelect).toBe('none');
@@ -71,6 +73,18 @@ describe('DisplayDragOutDirective', () => {
     expect(release).toHaveBeenCalledTimes(1);
     pointer(host, 'pointerup', 200);
     expect(fixture.componentInstance.detach).not.toHaveBeenCalled();
+    pointer(host, 'pointerdown', 100);
+    fixture.detectChanges();
+    expect(host.style.userSelect).toBe('none');
+    pointer(host, 'pointerup', 100);
+    fixture.detectChanges();
+    expect(host.style.userSelect).toBe('');
+    pointer(host, 'pointerdown', 100);
+    fixture.detectChanges();
+    expect(host.style.userSelect).toBe('none');
+    pointer(host, 'pointercancel', 100);
+    fixture.detectChanges();
+    expect(host.style.userSelect).toBe('');
     fixture.destroy();
   });
 });

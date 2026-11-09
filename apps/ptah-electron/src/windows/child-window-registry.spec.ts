@@ -22,6 +22,11 @@ describe('ChildWindowRegistry', () => {
     registry.registerView('display', { singleton: true, allowedMethods: new Set(['displayWindow:getState']) });
   });
 
+  it('exposes registration without a window factory', () => {
+    expect('createWindow' in registry).toBe(false);
+    expect(typeof registry.register).toBe('function');
+  });
+
   it('keys by view and instance and enforces singleton policy', () => {
     const first = fakeWindow(11);
     registry.register('display', 'one', first);

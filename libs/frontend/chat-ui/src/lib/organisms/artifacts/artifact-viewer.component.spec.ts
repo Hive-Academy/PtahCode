@@ -377,6 +377,50 @@ describe('ArtifactViewerComponent', () => {
       }
     });
 
+    it('focuses the fallback dialog so Escape on the focused element exits', () => {
+      const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'moveBefore');
+      Object.defineProperty(Element.prototype, 'moveBefore', { configurable: true, value: undefined });
+      try {
+        const fixture = createViewer();
+        const button = fixture.nativeElement.querySelector('[data-testid="artifact-viewer-fullscreen-toggle"]') as HTMLButtonElement;
+        button.focus();
+        button.click();
+        fixture.detectChanges();
+        const dialog = document.body.querySelector('[role="dialog"]') as HTMLElement;
+        expect(dialog.tabIndex).toBe(-1);
+        expect(dialog.contains(document.activeElement)).toBe(true);
+        document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+        fixture.detectChanges();
+        expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+        fixture.destroy();
+      } finally {
+        if (descriptor) Object.defineProperty(Element.prototype, 'moveBefore', descriptor);
+        else Reflect.deleteProperty(Element.prototype, 'moveBefore');
+      }
+    });
+
+    it('accepts the first frame load after moveBefore throws before the frame loaded', () => {
+      const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'moveBefore');
+      const moveBefore = jest.fn(() => { throw new DOMException('unsupported', 'InvalidStateError'); });
+      Object.defineProperty(Element.prototype, 'moveBefore', { configurable: true, value: moveBefore });
+      try {
+        const fixture = createViewer();
+        const frame = frameOf(fixture);
+        const button = fixture.nativeElement.querySelector('[data-testid="artifact-viewer-fullscreen-toggle"]') as HTMLButtonElement;
+        button.click();
+        fixture.detectChanges();
+        expect(moveBefore).toHaveBeenCalledTimes(1);
+        frame.dispatchEvent(new Event('load'));
+        fixture.detectChanges();
+        expect(fixture.componentInstance.bridge.nonce()).not.toBeNull();
+        expect(document.body.querySelector('[data-testid="artifact-viewer-error"]')).toBeNull();
+        fixture.destroy();
+      } finally {
+        if (descriptor) Object.defineProperty(Element.prototype, 'moveBefore', descriptor);
+        else Reflect.deleteProperty(Element.prototype, 'moveBefore');
+      }
+    });
+
     it('re-portals a recreated dialog and restores focus only on exit', () => {
       jest.useFakeTimers();
       const opener = document.createElement('button');

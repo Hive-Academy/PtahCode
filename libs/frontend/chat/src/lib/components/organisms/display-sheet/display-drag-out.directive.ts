@@ -22,7 +22,7 @@ export function draggedOutsideWindow(
   host: {
     '[class.cursor-grab]': 'enabled() && !dragging()',
     '[class.cursor-grabbing]': 'dragging()',
-    '[style.user-select]': "dragging() ? 'none' : null",
+    '[style.user-select]': "pointerCaptured() ? 'none' : null",
     '(pointerdown)': 'onPointerDown($event)',
     '(pointermove)': 'onPointerMove($event)',
     '(pointerup)': 'onPointerUp($event)',
@@ -35,6 +35,7 @@ export class DisplayDragOutDirective {
   readonly enabled = input(false, { alias: 'ptahDisplayDragOut' });
   readonly draggedOut = output<void>();
   protected readonly dragging = signal(false);
+  protected readonly pointerCaptured = signal(false);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
   private readonly view = inject(DOCUMENT).defaultView;
   private start: ScreenPoint | null = null;
@@ -52,6 +53,7 @@ export class DisplayDragOutDirective {
     }
     this.start = { x: event.screenX, y: event.screenY };
     this.pointerId = event.pointerId;
+    this.pointerCaptured.set(true);
   }
 
   protected onPointerMove(event: PointerEvent): void {
@@ -77,6 +79,7 @@ export class DisplayDragOutDirective {
     this.start = null;
     this.pointerId = null;
     this.dragging.set(false);
+    this.pointerCaptured.set(false);
     if (this.host.hasPointerCapture(pointerId)) this.host.releasePointerCapture(pointerId);
   }
 }

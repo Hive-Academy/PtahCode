@@ -125,6 +125,7 @@ export function clampArtifactHeight(px: number): number {
     } @else {
       <div
         #dialog
+        tabindex="-1"
         [class]="containerClass()"
         [attr.role]="fullscreenActive() ? 'dialog' : null"
         [attr.aria-modal]="fullscreenActive() ? 'true' : null"
@@ -289,6 +290,7 @@ export class ArtifactViewerComponent implements OnDestroy {
       if (dialog) this.moveToBody(dialog);
       else {
         this.restoreInline();
+        if (fullscreen && this.opener !== null) this.opener.focus({ preventScroll: true });
         if (!fullscreen && this.opener !== null) {
           this.opener.focus();
           this.opener = null;
@@ -321,6 +323,9 @@ export class ArtifactViewerComponent implements OnDestroy {
     this.portalElement = element;
     element.parentNode.insertBefore(this.portalAnchor, element);
     moveNode(this.document.body, element, null);
+    if (!element.contains(this.document.activeElement)) {
+      element.focus({ preventScroll: true });
+    }
   }
 
   private restoreInline(): void {

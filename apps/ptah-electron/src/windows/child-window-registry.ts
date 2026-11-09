@@ -1,6 +1,5 @@
-import type { BrowserWindow, Rectangle } from 'electron';
+import type { Rectangle } from 'electron';
 import * as path from 'path';
-import { createChildWindow } from './create-child-window';
 
 export type ChildViewKind = 'display';
 export interface ChildContext {
@@ -40,10 +39,6 @@ export class ChildWindowRegistry {
   registerView(viewKind: ChildViewKind, policy: ChildViewPolicy): void {
     if (this.policies.has(viewKind)) throw new Error(`View already registered: ${viewKind}`);
     this.policies.set(viewKind, policy);
-  }
-
-  createWindow(options: ChildWindowOptions): BrowserWindow {
-    return createChildWindow(options);
   }
 
   register(viewKind: ChildViewKind, instanceId: string, window: ChildWindowHandle, context?: unknown): void {
