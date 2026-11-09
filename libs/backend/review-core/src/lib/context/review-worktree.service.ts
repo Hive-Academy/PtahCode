@@ -137,6 +137,45 @@ export class ReviewWorktreeService {
     await this.files.remove(paths.root);
   }
 
+  /**
+   * Removes the `src/` worktree of an ended attempt, which holds the checkout and its installed
+   * dependencies (several GB). `out/` and `meta/` stay because the artifact reader serves them.
+   * Returns false when there was no source to remove.
+   */
+  async releaseSource(repo: RepoIdentity, repoRoot: string, attemptsRoot: string, attemptId: string): Promise<boolean> {
+    const root = resolve(attemptsRoot, AttemptIdSchema.parse(attemptId));
+    const src = resolve(root, 'src');
+    if (!insideRoot(attemptsRoot, root) || !insideRoot(root, src)) throw new Error('Attempt path escapes root');
+    if (!await this.files.exists(src)) return false;
+    // Deleting several GB of installed dependencies can outlast the 60 s Git timeout.
+    const removed = await this.commands.run(repo, 'git', ['worktree', 'remove', '--force', src], repoRoot, WorktreeTimeoutMs);
+    if (removed.timedOut) throw new ReviewGitTimeoutError();
+    if (await this.files.exists(src)) throw new Error('Review source removal failed');
+    return true;
+  }
+
+  /** Attempt IDs that still have a `src/` worktree registered under `attemptsRoot`. */
+  async listAttemptSources(repo: RepoIdentity, repoRoot: string, attemptsRoot: string): Promise<string[]> {
+    // No `-z`: it needs Git 2.36, and attempt paths are generated, so they hold no newline.
+    const listed = await this.commands.run(repo, 'git', ['worktree', 'list', '--porcelain'], repoRoot, GitTimeoutMs);
+    if (listed.timedOut) throw new ReviewGitTimeoutError();
+    if (listed.exitCode !== 0 || listed.unavailable) throw new Error('Git worktree list failed');
+    const ids = new Set<string>();
+    for (const line of listed.stdout.split(/\r?\n/)) {
+      if (!line.startsWith('worktree ')) continue;
+      const parts = relative(resolve(attemptsRoot), resolve(line.slice('worktree '.length))).split(sep);
+      if (parts.length === 2 && parts[1] === 'src' && AttemptIdSchema.safeParse(parts[0]).success) ids.add(parts[0]);
+    }
+    return [...ids];
+  }
+
+  /** Drops worktree records whose directory is gone. */
+  async prune(repo: RepoIdentity, repoRoot: string): Promise<void> {
+    const pruned = await this.commands.run(repo, 'git', ['worktree', 'prune'], repoRoot, GitTimeoutMs);
+    if (pruned.timedOut) throw new ReviewGitTimeoutError();
+    if (pruned.exitCode !== 0 || pruned.unavailable) throw new Error('Git worktree prune failed');
+  }
+
   private async git(repo: RepoIdentity, cwd: string, args: readonly string[], allowExitOne = false, signal?: AbortSignal): Promise<string> {
     const result = await this.commands.run(repo, 'git', args, cwd, GitTimeoutMs, signal);
     if (result.timedOut) throw new ReviewGitTimeoutError();
