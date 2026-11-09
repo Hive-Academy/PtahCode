@@ -17,13 +17,20 @@ export const sessionHandoffAckTool: MCPToolDefinition = {
   }, required: ['predecessorSessionId', 'handoffPath'], additionalProperties: false },
 };
 
-export async function callSessionHandoffAck(input: unknown, session: SessionNamespace): Promise<string> {
+/** Logs MCP-boundary failures before they are reduced to a safe result. */
+export interface HandoffAckErrorLogger { error(message: string, error: Error): void }
+
+export async function callSessionHandoffAck(
+  input: unknown,
+  session: SessionNamespace,
+  logger: HandoffAckErrorLogger,
+): Promise<string> {
   const parsed = SessionHandoffAckArgsSchema.safeParse(input);
   if (!parsed.success) return JSON.stringify({ status: 'refused', reason: 'Invalid predecessorSessionId or handoffPath.' });
   try {
     return JSON.stringify(await session.acknowledge(parsed.data));
-  } catch (_error: unknown) {
-    // degradation-audit: The MCP boundary intentionally reduces internal errors to a safe retryable result.
+  } catch (error: unknown) {
+    logger.error('[session-handoff-ack] acknowledge failed', error instanceof Error ? error : new Error(String(error)));
     return JSON.stringify({ status: 'retryable-failure', reason: 'Acknowledgement is temporarily unavailable.' });
   }
 }

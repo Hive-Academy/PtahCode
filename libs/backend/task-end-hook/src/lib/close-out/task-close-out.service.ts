@@ -116,9 +116,11 @@ export class TaskCloseOutService {
 
   private track(runId: string, work: Promise<CloseOutRunRecord>): void {
     this.active.set(runId, work);
+    // degradation-audit: reported - start() logs this rejection as
+    // "run failed" and cleanupCompleted callers log their own failure.
     void work.finally(() => {
       if (this.active.get(runId) === work) this.active.delete(runId);
-    }).catch(() => { /* The caller observes the original promise. */ });
+    }).catch(() => undefined);
   }
 
   private async execute(

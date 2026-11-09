@@ -1142,7 +1142,7 @@ async function handleIndividualTool(
     (tool) => tool.definition.name === name,
   );
   if (lifecycle) {
-    const reply = await lifecycle.handler(args, ptahAPI);
+    const reply = await lifecycle.handler(args, ptahAPI, deps.logger);
     return await createToolSuccessResponse(request, reply, deps);
   }
 
