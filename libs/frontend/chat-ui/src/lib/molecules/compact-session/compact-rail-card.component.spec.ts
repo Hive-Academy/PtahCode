@@ -99,12 +99,23 @@ describe(CompactRailCardComponent.name, () => {
   it('shows known summary badges including zero context and preserves the diff', () => {
     const f = render();
     const value = summary();
-    f.componentRef.setInput('summary', { ...value, metrics: { ...value.metrics, agentCount: 2 } });
+    f.componentRef.setInput('summary', {
+      ...value,
+      metrics: { ...value.metrics, agentCount: 2 },
+    });
     f.componentRef.setInput('lanes', lanes(1));
     f.componentRef.setInput('contextPercent', 35);
-    f.componentRef.setInput('gitStats', { kind: 'known', additions: 35, deletions: 0, partial: false });
+    f.componentRef.setInput('gitStats', {
+      kind: 'known',
+      additions: 35,
+      deletions: 0,
+      partial: false,
+    });
     f.detectChanges();
-    const badges = () => [...(f.nativeElement as HTMLElement).querySelectorAll('.badge')].map(b => b.textContent?.trim());
+    const badges = () =>
+      [...(f.nativeElement as HTMLElement).querySelectorAll('.badge')].map(
+        (b) => b.textContent?.trim(),
+      );
     expect(badges()).toEqual(['2 agents', '1 CLI', '35% ctx']);
     expect(f.nativeElement.textContent).toContain('+35');
     expect(f.nativeElement.textContent).not.toContain('42 tokens');
@@ -145,7 +156,9 @@ describe(CompactRailCardComponent.name, () => {
     f.componentRef.setInput('lanes', lanes(4));
     f.detectChanges();
     expect(
-      f.nativeElement.querySelectorAll('.rc-lane-rows button'),
+      f.nativeElement.querySelectorAll(
+        '.rc-lane-rows button, ptah-compact-rail-meta button',
+      ),
     ).toHaveLength(4);
     const selected = jest.fn();
     const more = jest.fn();
@@ -157,24 +170,18 @@ describe(CompactRailCardComponent.name, () => {
     expect(more).toHaveBeenCalledTimes(1);
   });
 
-  it('places the comfortable overflow action on the 16px header above three 18px rows', () => {
+  it('places comfortable overflow in meta beside three lane rows', () => {
     const f = render();
     f.componentRef.setInput('lanes', lanes(4));
     f.detectChanges();
-    const header = f.nativeElement.querySelector(
-      '.rc-lane-rows > .rc-line',
-    ) as HTMLElement;
-    const rows = f.nativeElement.querySelectorAll(
-      '.rc-lane-buttons > button',
-    ) as NodeListOf<HTMLElement>;
-    expect(header.classList.contains('h-4')).toBe(true);
-    expect(header.querySelector('button')?.textContent?.trim()).toBe('+1 more');
-    expect(header.querySelector('button')?.classList.contains('rc-lane-overflow')).toBe(true);
-    expect(rows).toHaveLength(3);
-    expect([...rows].every((row) => row.classList.contains('h-[18px]'))).toBe(
-      true,
-    );
-    expect(16 + rows.length * 18).toBe(70);
+    expect(
+      f.nativeElement
+        .querySelector('ptah-compact-rail-meta .rc-lane-overflow')
+        ?.textContent?.trim(),
+    ).toBe('+1 more');
+    expect(
+      f.nativeElement.querySelectorAll('.rc-lane-buttons > button'),
+    ).toHaveLength(3);
   });
 
   it('shows paint-only hover on the card, lane rows and actions without a geometry shift', () => {
@@ -189,7 +196,8 @@ describe(CompactRailCardComponent.name, () => {
       '.rc-lane-row:hover',
     ]);
     for (const rule of rules) {
-      for (const [prop] of rule.declarations) expect(PAINT_ONLY).toContain(prop);
+      for (const [prop] of rule.declarations)
+        expect(PAINT_ONLY).toContain(prop);
     }
     const rows = [
       ...f.nativeElement.querySelectorAll('.rc-lane-buttons > button'),
@@ -207,18 +215,13 @@ describe(CompactRailCardComponent.name, () => {
     );
   });
 
-  it('keeps rc-lane-overflow as a 16px action that shares the action hover', () => {
+  it('keeps the overflow action in the meta line', () => {
     const f = render();
     f.componentRef.setInput('lanes', lanes(5));
     f.detectChanges();
-    const overflow = button(f.nativeElement, '+2 more');
-    expect(overflow?.classList.contains('rc-action')).toBe(true);
-    expect(overflow?.classList.contains('rc-lane-overflow')).toBe(true);
-    const sizing = cssRules().find(
-      (rule) => rule.selector === '.rc-action.rc-lane-overflow',
-    );
-    expect(sizing?.declarations).toContainEqual(['height', '16px']);
-    expect(sizing?.declarations).toContainEqual(['line-height', '16px']);
+    expect(
+      button(f.nativeElement, '+2 more')?.closest('ptah-compact-rail-meta'),
+    ).not.toBeNull();
   });
 
   it('marks only the focused card with a primary frame and tint that cannot shift layout', () => {
@@ -278,7 +281,9 @@ describe(CompactRailCardComponent.name, () => {
     const f = render();
     f.componentRef.setInput('state', 'done');
     f.detectChanges();
-    const select = f.nativeElement.querySelector('.rc-select') as HTMLButtonElement;
+    const select = f.nativeElement.querySelector(
+      '.rc-select',
+    ) as HTMLButtonElement;
     expect(select.getAttribute('aria-label')).toBe('Session A, Done');
     expect(select.getAttribute('aria-current')).toBeNull();
     f.componentRef.setInput('focused', true);
@@ -295,10 +300,14 @@ describe(CompactRailCardComponent.name, () => {
     f.componentRef.setInput('state', 'needs');
     f.componentRef.setInput('focused', true);
     f.detectChanges();
-    const select = f.nativeElement.querySelector('.rc-select') as HTMLButtonElement;
+    const select = f.nativeElement.querySelector(
+      '.rc-select',
+    ) as HTMLButtonElement;
     expect(select.getAttribute('aria-current')).toBe('true');
     expect(select.tabIndex).toBe(-1);
-    expect((f.nativeElement.querySelector('.rc-pill') as HTMLElement).textContent).toBe('Needs input');
+    expect(
+      (f.nativeElement.querySelector('.rc-pill') as HTMLElement).textContent,
+    ).toBe('Needs input');
     f.componentRef.setInput('focused', false);
     f.componentRef.setInput('tabStop', true);
     f.detectChanges();
@@ -343,7 +352,11 @@ describe(CompactRailCardComponent.name, () => {
     expect(rule?.declarations).toEqual([
       [
         'color',
-        'color-mix(in oklab, var(--rail-state-ink) 70%, oklch(var(--bc)))',
+        'color-mix(in oklab, var(--rail-state-ink) 60%, oklch(var(--bc)))',
+      ],
+      [
+        'background',
+        'color-mix(in oklch, var(--rail-state-ink) 12%, transparent)',
       ],
     ]);
   });
@@ -351,7 +364,8 @@ describe(CompactRailCardComponent.name, () => {
   it('reserves the top-right corner on the title line only when asked, at both densities', () => {
     const f = render();
     const host = f.nativeElement as HTMLElement;
-    const title = () => host.querySelector('.rc-body > .rc-title') as HTMLElement;
+    const title = () =>
+      host.querySelector('.rc-body > .rc-title') as HTMLElement;
     expect(title()).toBe(host.querySelector('.rc-body > .rc-line'));
     expect(title().querySelector('.rc-pill')).not.toBeNull();
     expect(host.classList.contains('rc-corner-reserved')).toBe(false);
@@ -413,12 +427,17 @@ describe(CompactRailCardComponent.name, () => {
 
   it('does not render the streamed text preview', () => {
     const f = render();
-    f.componentRef.setInput('summary', summary('Now I will send the updated fix prompt'));
+    f.componentRef.setInput(
+      'summary',
+      summary('Now I will send the updated fix prompt'),
+    );
     f.detectChanges();
     expect(f.nativeElement.textContent).not.toContain('Now I will send');
-    expect(f.nativeElement.querySelector('.rc-title')?.textContent).toContain('Session A');
+    expect(f.nativeElement.querySelector('.rc-title')?.textContent).toContain(
+      'Session A',
+    );
   });
-  it('shows an em dash and the unknown todo title', () => {
+  it('omits an unknown todo without an empty meta row', () => {
     const f = render();
     f.componentRef.setInput('todos', { kind: 'unknown' });
     f.detectChanges();
@@ -427,10 +446,9 @@ describe(CompactRailCardComponent.name, () => {
       f.nativeElement.querySelector('[title]')?.getAttribute('title'),
     ).toBeTruthy();
     expect(
-      f.nativeElement
-        .querySelector('.rc-body > div:last-child')
-        ?.getAttribute('title'),
-    ).toContain('Todos unknown');
+      f.nativeElement.querySelector('ptah-compact-rail-meta [title]'),
+    ).toBeNull();
+    expect(f.nativeElement.querySelector('ptah-compact-rail-meta')).toBeNull();
   });
 
   it('shows no linked task by default', () => {
@@ -567,4 +585,3 @@ describe(CompactRailCardComponent.name, () => {
     },
   );
 });
-

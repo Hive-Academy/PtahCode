@@ -36,7 +36,7 @@ describe('CanvasLayoutPersistenceService', () => {
     jest.restoreAllMocks();
   });
 
-  it('round-trips v4 per encoded workspace and panel', () => {
+  it('round-trips v5 per encoded workspace and panel', () => {
     service.markHydrated(path, true);
     service.schedule(path, () => ({ tiles: intent, board }));
     jest.advanceTimersByTime(CANVAS_LAYOUT_SAVE_DEBOUNCE_MS);
@@ -48,6 +48,19 @@ describe('CanvasLayoutPersistenceService', () => {
       needsWrite: false,
       readOnlyReason: null,
     });
+    expect(JSON.parse(localStorage.getItem(service.storageKey(path))!).version).toBe(5);
+  });
+
+  it.each([
+    ['dense', 96, 56],
+    ['comfortable', 176, 128],
+  ] as const)('keeps the same visible card when a v4 %s rail reopens', (density, oldHeight, newHeight) => {
+    localStorage.setItem(service.storageKey(path), JSON.stringify({
+      version: 4,
+      tiles: intent,
+      board: { ...board, railDensity: density, railScrollTop: oldHeight * 2 + 12 },
+    }));
+    expect(service.load(path).board?.railScrollTop).toBe(newHeight * 2 + 12);
     expect(JSON.parse(localStorage.getItem(service.storageKey(path))!).version).toBe(4);
   });
 
@@ -57,7 +70,7 @@ describe('CanvasLayoutPersistenceService', () => {
 
     expect(service.load(path)).toEqual({
       tiles: intent,
-      board,
+      board: { ...board, railScrollTop: 83 },
       writable: true,
       needsWrite: false,
       readOnlyReason: null,
@@ -69,7 +82,7 @@ describe('CanvasLayoutPersistenceService', () => {
     service.flush();
 
     const stored = JSON.parse(localStorage.getItem(service.storageKey(path))!);
-    expect(stored.version).toBe(4);
+    expect(stored.version).toBe(5);
     expect(stored.board).toEqual({ ...board, railScrollTop: 456 });
     expect(stored.tiles).toEqual(intent);
   });
@@ -77,12 +90,12 @@ describe('CanvasLayoutPersistenceService', () => {
   it('migrates a v3 board to the default sort and keeps its manual tile order', () => {
     const manual = { ...board, railSort: 'manual' as const };
     localStorage.setItem(service.storageKey(path), JSON.stringify({ version: 3, tiles: intent, board: { mode: 'rail', railCollapsed: true, railDensity: 'dense', railScrollTop: 123 } }));
-    expect(service.load(path)).toMatchObject({ tiles: intent, board: { ...board, railSort: 'recent' }, writable: true });
+    expect(service.load(path)).toMatchObject({ tiles: intent, board: { ...board, railSort: 'recent', railScrollTop: 83 }, writable: true });
 
     service.markHydrated(path, true);
     service.schedule(path, () => ({ tiles: intent, board: manual }));
     service.flush();
-    expect(JSON.parse(localStorage.getItem(service.storageKey(path))!)).toMatchObject({ version: 4, tiles: intent, board: manual });
+    expect(JSON.parse(localStorage.getItem(service.storageKey(path))!)).toMatchObject({ version: 5, tiles: intent, board: manual });
   });
 
   it('rejects a v3 record that carries the v4-only railSort field', () => {
@@ -121,7 +134,7 @@ describe('CanvasLayoutPersistenceService', () => {
     expect(service.load(path).tiles).toBeNull();
   });
 
-  it.each([99, 4.5, 5])('preserves future-version %s bytes and disables writes', (version) => {
+  it.each([99, 4.5, 6])('preserves future-version %s bytes and disables writes', (version) => {
     const raw = `{"version":${version},"future":true}`;
     localStorage.setItem(service.storageKey(path), raw);
     const loaded = service.load(path);

@@ -16,7 +16,7 @@ import type {
   CompactLinkedTask,
   CompactTodoState,
 } from './compact-session-metrics';
-import { gitTitle, linkedTaskTitle, todoTitle } from './compact-session-metrics';
+import { CompactRailMetaComponent } from './compact-rail-meta.component';
 import { compactRailStateLabel } from './compact-rail-state-label.util';
 import type { CompactSessionSummary } from './compact-session-summary';
 import {
@@ -40,6 +40,7 @@ const EMPTY_LANES: CompactLaneSummary = {
   selector: 'ptah-compact-rail-card',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [CompactRailMetaComponent],
   host: {
     class:
       'rc-card block relative overflow-hidden rounded-lg border border-base-content/10 text-base-content',
@@ -59,7 +60,11 @@ const EMPTY_LANES: CompactLaneSummary = {
         box-sizing: border-box;
         padding: 4px 10px 4px 14px;
         --rc-focus-frame: oklch(var(--p));
-        --rail-active-fill: color-mix(in oklch, oklch(var(--p)) 22%, oklch(var(--b3)));
+        --rail-active-fill: color-mix(
+          in oklch,
+          oklch(var(--p)) 22%,
+          oklch(var(--b3))
+        );
         background-color: transparent;
       }
       :host(:hover:not(.rc-focused)) {
@@ -67,7 +72,8 @@ const EMPTY_LANES: CompactLaneSummary = {
       }
       @media (prefers-reduced-motion: no-preference) {
         :host {
-          transition: background-color 180ms cubic-bezier(0.22, 0.61, 0.36, 1),
+          transition:
+            background-color 180ms cubic-bezier(0.22, 0.61, 0.36, 1),
             border-color 180ms cubic-bezier(0.22, 0.61, 0.36, 1),
             box-shadow 180ms cubic-bezier(0.22, 0.61, 0.36, 1);
         }
@@ -108,11 +114,11 @@ const EMPTY_LANES: CompactLaneSummary = {
       .rc-body {
         height: 100%;
         display: grid;
-        grid-template-rows: 26px 16px 70px 22px;
+        grid-template-rows: 26px 16px 54px 22px;
         min-width: 0;
       }
       :host(.rc-dense) .rc-body {
-        grid-template-rows: 26px 22px 18px;
+        grid-template-rows: 24px 22px;
       }
       .rc-line {
         min-width: 0;
@@ -159,13 +165,6 @@ const EMPTY_LANES: CompactLaneSummary = {
         font-size: 10px;
         line-height: 18px;
       }
-      .rc-action.rc-lane-overflow {
-        height: 16px;
-        line-height: 16px;
-      }
-      .rc-action.rc-lane-overflow:focus-visible {
-        outline-offset: -2px;
-      }
       .rc-action::after {
         content: '';
         position: absolute;
@@ -183,7 +182,7 @@ const EMPTY_LANES: CompactLaneSummary = {
         outline-offset: -4px;
       }
       /* Hover changes paint only (no padding, border width or size), so the
-         176/96 px card and the 70 px lane block never shift. The state inks
+         128/56 px card and the lane block never shift. The state inks
          clear 3:1 on base-100/200/300 in both themes (state-ink-contrast.spec);
          the inactive card now shows its underlying rail surface. */
       :host(:hover) {
@@ -217,21 +216,24 @@ const EMPTY_LANES: CompactLaneSummary = {
         color: oklch(var(--bc));
       }
       /* 10 px pill text needs 4.5:1. The raw state inks are a 3:1 UI tier
-         (idle 3.18:1 on the dark focused tint), so the pill pulls its ink 30%
-         toward base-content in OKLab (no hue rotation): at least 4.99:1 on
-         the focused tint and 5.63:1 on base-200 in both anubis themes. */
+         (idle 3.18:1 on the dark focused tint), so the pill pulls its ink 40%
+         toward base-content in OKLab (no hue rotation). At 30% it measured
+         at least 4.99:1 on the focused tint and 5.63:1 on base-200; the extra
+         10% offsets the 12% ink tint behind the pill text. */
       .rc-pill {
-        color: color-mix(in oklab, var(--rail-state-ink) 70%, oklch(var(--bc)));
+        color: color-mix(in oklab, var(--rail-state-ink) 60%, oklch(var(--bc)));
+        background: color-mix(in oklch, var(--rail-state-ink) 12%, transparent);
       }
       .rc-lanes {
         min-height: 0;
         overflow: hidden;
       }
       :host(.rc-dense) .rc-meta,
-      :host(.rc-dense) .rc-lane-rows {
+      :host(.rc-dense) .rc-lanes {
         display: none;
       }
-      :host(.rc-dense) .rc-lanes {
+      :host(.rc-dense) .rc-lanes.rc-dense-callout {
+        display: block;
         height: 22px;
       }
     `,
@@ -256,7 +258,9 @@ const EMPTY_LANES: CompactLaneSummary = {
         <span class="rc-ellipsis flex-1 font-semibold" [title]="title()">{{
           title()
         }}</span>
-        <span class="rc-pill shrink-0 text-[10px]">{{ stateLabel() }}</span>
+        <span class="rc-pill shrink-0 rounded px-1 text-[10px]">{{
+          stateLabel()
+        }}</span>
       </div>
       @if (density() === 'comfortable') {
         <div class="rc-line rc-meta text-[11px] text-base-content-muted">
@@ -266,7 +270,24 @@ const EMPTY_LANES: CompactLaneSummary = {
           >
         </div>
       }
-      <div class="rc-lanes">
+      @if (density() === 'dense' && !callout() && hasMeta()) {
+        <ptah-compact-rail-meta
+          [title]="title()"
+          [density]="density()"
+          [lanes]="lanes()"
+          [todos]="todos()"
+          [linkedTask]="linkedTask()"
+          [agentCount]="summary().metrics.agentCount"
+          [contextPercent]="contextPercent()"
+          [gitStats]="gitStats()"
+          [innerTabbable]="innerTabbable()"
+          (moreLanes)="moreLanes.emit()"
+        />
+      }
+      <div
+        class="rc-lanes"
+        [class.rc-dense-callout]="density() === 'dense' && !!callout()"
+      >
         @if (callout(); as current) {
           @for (c of [current]; track c.requestId) {
             <div
@@ -334,42 +355,8 @@ const EMPTY_LANES: CompactLaneSummary = {
               }
             </div>
           }
-        } @else if (density() === 'dense') {
-          <div class="rc-line h-full text-base-content-muted">
-            @if (lanes().total >= 1) {
-              <button
-                type="button"
-                class="rc-action bg-base-300 text-base-content"
-                [attr.aria-label]="
-                  'Open the ' + lanes().total + ' lanes of ' + title()
-                "
-                [tabIndex]="innerTabbable() ? 0 : -1"
-                (click)="moreLanes.emit()"
-              >
-                +{{ lanes().total }}
-              </button>
-            }
-          </div>
         } @else {
           <div class="rc-lane-rows">
-            <div class="rc-line h-4 text-base-content-muted">
-              @if (lanes().moreCount > 0) {
-                <button
-                  type="button"
-                  class="rc-action rc-lane-overflow ml-auto bg-base-300 text-base-content"
-                  [attr.aria-label]="
-                    'Open ' +
-                    lanes().moreCount +
-                    ' more lanes of ' +
-                    title()
-                  "
-                  [tabIndex]="innerTabbable() ? 0 : -1"
-                  (click)="moreLanes.emit()"
-                >
-                  +{{ lanes().moreCount }} more
-                </button>
-              }
-            </div>
             <div class="rc-lane-buttons">
               @for (row of lanes().rows.slice(0, 3); track row.id) {
                 <button
@@ -388,39 +375,24 @@ const EMPTY_LANES: CompactLaneSummary = {
           </div>
         }
       </div>
-      <div
-        class="rc-line text-[11px] text-base-content-muted"
-        [title]="todoTitle(todos()) + '; ' + gitTitle(gitStats())"
-      >
-        @if (todos().kind === 'known') { <span>{{ todoCount() }}</span> }
-        @if (linkedTask(); as task) {
-          <span
-            class="rc-ellipsis font-mono"
-            data-testid="rail-linked-task"
-            [class.line-through]="task.missing"
-            [title]="linkedTaskTitle(task)"
-            [attr.aria-label]="linkedTaskTitle(task)"
-            >{{ task.taskId }}</span
-          >
-        }
-        @if (summary().metrics.agentCount > 0) {
-          <span class="badge badge-xs badge-outline">{{ summary().metrics.agentCount }} {{ summary().metrics.agentCount === 1 ? 'agent' : 'agents' }}</span>
-        }
-        @if (cliCount(); as count) {
-          <span class="badge badge-xs badge-outline">{{ count }} CLI</span>
-        }
-        @if (roundedContextPercent() !== null) {
-          <span class="badge badge-xs badge-outline" aria-label="Context used">{{ roundedContextPercent() }}% ctx</span>
-        }
-        <span class="ml-auto shrink-0">{{ gitCount() }}</span>
-      </div>
+      @if (density() === 'comfortable' && hasMeta()) {
+        <ptah-compact-rail-meta
+          [title]="title()"
+          [density]="density()"
+          [lanes]="lanes()"
+          [todos]="todos()"
+          [linkedTask]="linkedTask()"
+          [agentCount]="summary().metrics.agentCount"
+          [contextPercent]="contextPercent()"
+          [gitStats]="gitStats()"
+          [innerTabbable]="innerTabbable()"
+          (moreLanes)="moreLanes.emit()"
+        />
+      }
     </div>
   `,
 })
 export class CompactRailCardComponent implements DoCheck {
-  readonly todoTitle = todoTitle;
-  readonly gitTitle = gitTitle;
-  readonly linkedTaskTitle = linkedTaskTitle;
   private readonly host = inject(ElementRef<HTMLElement>);
   private readonly injector = inject(Injector);
   readonly title = input('');
@@ -450,6 +422,17 @@ export class CompactRailCardComponent implements DoCheck {
   readonly answer = output<string>();
   readonly showOutput = output<string>();
   readonly moreLanes = output<void>();
+  readonly hasMeta = computed(
+    () =>
+      this.lanes().total > 0 ||
+      this.lanes().moreCount > 0 ||
+      this.todos().kind === 'known' ||
+      this.linkedTask() !== null ||
+      this.summary().metrics.agentCount > 0 ||
+      this.lanes().kinds.cli > 0 ||
+      this.contextPercent() !== null ||
+      this.gitStats().kind === 'known',
+  );
   readonly cardHeight = computed(
     () => COMPACT_RAIL_CARD_HEIGHT[this.density()],
   );
@@ -494,5 +477,4 @@ export class CompactRailCardComponent implements DoCheck {
       this.seenRequestId = id;
     }
   }
-
 }

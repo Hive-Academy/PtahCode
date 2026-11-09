@@ -1,6 +1,7 @@
 import { DestroyRef, Injectable, inject, signal } from '@angular/core';
 import { z } from 'zod';
 import { VSCodeService } from '@ptah-extension/core';
+import { COMPACT_RAIL_CARD_HEIGHT } from '@ptah-extension/chat-ui';
 import {
   MAX_CANVAS_TILES,
   TILE_SPANS,
@@ -12,7 +13,19 @@ import { DEFAULT_BOARD_STATE, type CanvasBoardState } from './canvas-board-mode'
 /** Delay that coalesces a burst of intent mutations into one storage write. */
 export const CANVAS_LAYOUT_SAVE_DEBOUNCE_MS = 250;
 
-const LATEST_VERSION = 4;
+const LATEST_VERSION = 5;
+const OLD_RAIL_CARD_HEIGHT = { dense: 96, comfortable: 176 } as const;
+
+function migrateRailScrollTop(board: CanvasBoardState): CanvasBoardState {
+  const oldHeight = OLD_RAIL_CARD_HEIGHT[board.railDensity];
+  const newHeight = COMPACT_RAIL_CARD_HEIGHT[board.railDensity];
+  const cardIndex = Math.floor(board.railScrollTop / oldHeight);
+  const withinCard = board.railScrollTop % oldHeight;
+  return {
+    ...board,
+    railScrollTop: cardIndex * newHeight + Math.min(withinCard, newHeight - 1),
+  };
+}
 
 const tabIdSchema = z.string().min(1);
 const orderSchema = z.number().int().nonnegative();
@@ -71,6 +84,12 @@ const v3Schema = z.strictObject({
  */
 const v4Schema = z.strictObject({
   version: z.literal(4),
+  tiles: tilesSchema,
+  board: boardSchema,
+});
+
+const v5Schema = z.strictObject({
+  version: z.literal(5),
   tiles: tilesSchema,
   board: boardSchema,
 });
@@ -239,10 +258,15 @@ export class CanvasLayoutPersistenceService {
       return { tiles: null, board: null, writable: false, needsWrite: false, readOnlyReason: 'newer-version' };
     }
 
+    const v5 = v5Schema.safeParse(parsed);
+    if (v5.success) {
+      this.lastWritten.set(workspacePath, raw);
+      return { tiles: normalize(v5.data.tiles), board: v5.data.board, writable: true, needsWrite: false, readOnlyReason: null };
+    }
+
     const v4 = v4Schema.safeParse(parsed);
     if (v4.success) {
-      this.lastWritten.set(workspacePath, raw);
-      return { tiles: normalize(v4.data.tiles), board: v4.data.board, writable: true, needsWrite: false, readOnlyReason: null };
+      return { tiles: normalize(v4.data.tiles), board: migrateRailScrollTop(v4.data.board), writable: true, needsWrite: false, readOnlyReason: null };
     }
 
     const v3 = v3Schema.safeParse(parsed);
@@ -250,7 +274,7 @@ export class CanvasLayoutPersistenceService {
       // Lossless: v3 tiles and board settings carry over; the sort takes its default.
       return {
         tiles: normalize(v3.data.tiles),
-        board: { ...v3.data.board, railSort: DEFAULT_BOARD_STATE.railSort },
+        board: migrateRailScrollTop({ ...v3.data.board, railSort: DEFAULT_BOARD_STATE.railSort }),
         writable: true,
         needsWrite: false,
         readOnlyReason: null,
@@ -277,7 +301,7 @@ export class CanvasLayoutPersistenceService {
         readOnlyReason: null,
       };
     }
-    this.warn('parse', v4.error);
+    this.warn('parse', v5.error);
     return { tiles: null, board: null, writable: true, needsWrite: false, readOnlyReason: null };
   }
 
@@ -342,8 +366,8 @@ export class CanvasLayoutPersistenceService {
 
   private write(workspacePath: string, snapshot: CanvasWorkspaceRecord): void {
     if (!this.writable.has(workspacePath)) return;
-    const record: CanvasWorkspaceIntentV4 = {
-      version: 4,
+    const record: z.infer<typeof v5Schema> = {
+      version: 5,
       tiles: snapshot.tiles.map((tile) => ({
         tabId: tile.tabId,
         order: tile.order,

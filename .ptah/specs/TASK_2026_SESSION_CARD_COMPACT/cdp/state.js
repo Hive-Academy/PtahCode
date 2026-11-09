@@ -1,0 +1,1 @@
+(() => JSON.stringify({ theme: document.documentElement.dataset.theme, cards: [...document.querySelectorAll('[data-rail-card]')].map((x) => x.dataset.state + ':' + Math.round(x.getBoundingClientRect().height)) }))()

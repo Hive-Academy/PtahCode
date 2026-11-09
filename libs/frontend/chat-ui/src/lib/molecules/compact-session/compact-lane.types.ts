@@ -78,16 +78,11 @@ export type CompactCallout =
  * or a background command of the session still runs.
  */
 export type CompactRailState =
-  | 'running'
-  | 'background'
-  | 'needs'
-  | 'error'
-  | 'done'
-  | 'idle';
+  'running' | 'background' | 'needs' | 'error' | 'done' | 'idle';
 export type CompactRailDensity = 'comfortable' | 'dense';
 export const COMPACT_RAIL_CARD_HEIGHT: Readonly<
   Record<CompactRailDensity, number>
 > = {
-  comfortable: 176,
-  dense: 96,
+  comfortable: 128,
+  dense: 56,
 };

@@ -193,7 +193,8 @@ class RealRailCardHost {
   selector: 'ptah-send-to-messaging',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: '<button type="button" role="menuitem" data-action="hand-off">Hand off session to…</button>',
+  template:
+    '<button type="button" role="menuitem" data-action="hand-off">Hand off session to…</button>',
   host: { '[attr.data-tab-id]': 'tabId()' },
 })
 class HandOffStub {
@@ -212,13 +213,18 @@ describe('CanvasRailCardComponent', () => {
   const sessionId = SessionId.create();
   const available = signal(false);
   let loaded = false;
-  const rowFor = jest.fn(() => loaded ? { id: sessionId } : null);
-  const organizeOpen = jest.fn((_id: typeof sessionId, _restore: () => void) => undefined);
+  const rowFor = jest.fn(() => (loaded ? { id: sessionId } : null));
+  const organizeOpen = jest.fn(
+    (_id: typeof sessionId, _restore: () => void) => undefined,
+  );
   const organizeClose = jest.fn(() => {
     const restore = organizeOpen.mock.calls.at(-1)?.[1];
     afterNextRender(() => restore?.(), { injector: TestBed.inject(Injector) });
   });
-  const openForSession = jest.fn(async (_id: typeof sessionId, _name: string, _restore: () => void) => 'opened');
+  const openForSession = jest.fn(
+    async (_id: typeof sessionId, _name: string, _restore: () => void) =>
+      'opened',
+  );
   const rename = jest.fn().mockResolvedValue('renamed');
   let persisted = true;
   let workflow: 'harness-configure' | undefined;
@@ -240,22 +246,45 @@ describe('CanvasRailCardComponent', () => {
           provide: TabManagerService,
           useValue: {
             findTabByIdAcrossWorkspaces: () => ({
-              tab: { id: 'a', title: 'Alpha', claudeSessionId: persisted ? sessionId : null, workflow, viewMode: viewMode() },
+              tab: {
+                id: 'a',
+                title: 'Alpha',
+                claudeSessionId: persisted ? sessionId : null,
+                workflow,
+                viewMode: viewMode(),
+              },
             }),
             activeTabId,
             toggleTabViewMode,
           },
         },
-        { provide: CanvasStore, useValue: { focusTile, isSessionRunning: (id: string) => id === 'a' && running() } },
+        {
+          provide: CanvasStore,
+          useValue: {
+            focusTile,
+            isSessionRunning: (id: string) => id === 'a' && running(),
+          },
+        },
         { provide: ChatStore, useValue: { abortWithConfirmation } },
         { provide: LoggingService, useValue: { error: logError } },
         { provide: CanvasDetailService, useValue: { open } },
-        { provide: SessionOrganizerService, useValue: { available, rowFor, open: organizeOpen, openForSession, close: organizeClose } },
+        {
+          provide: SessionOrganizerService,
+          useValue: {
+            available,
+            rowFor,
+            open: organizeOpen,
+            openForSession,
+            close: organizeClose,
+          },
+        },
         { provide: SessionRowActionsService, useValue: { rename } },
       ],
     });
     TestBed.overrideComponent(CanvasRailCardComponent, {
-      remove: { imports: [CompactSessionCardComponent, SendToMessagingComponent] },
+      remove: {
+        imports: [CompactSessionCardComponent, SendToMessagingComponent],
+      },
       add: { imports: [CardStub, HandOffStub] },
     });
   });
@@ -269,122 +298,251 @@ describe('CanvasRailCardComponent', () => {
   it('shows the pending chip and emits the inline action without selecting the session', () => {
     const fixture = mount();
     const item: AttentionItem = {
-      key: 'question:one', generation: 1, kind: 'question', source: 'chat', workspacePath: '/local',
-      workspaceName: 'local', sessionId, severity: 'info', title: 'Question needs an answer',
-      detail: 'Which approach?', actions: [{ id: 'answer', label: 'Answer' }], actionable: true, soundEligible: false,
+      key: 'question:one',
+      generation: 1,
+      kind: 'question',
+      source: 'chat',
+      workspacePath: '/local',
+      workspaceName: 'local',
+      sessionId,
+      severity: 'info',
+      title: 'Question needs an answer',
+      detail: 'Which approach?',
+      actions: [{ id: 'answer', label: 'Answer' }],
+      actionable: true,
+      soundEligible: false,
     };
-    const emitted = jest.fn(); fixture.componentInstance.attentionAction.subscribe(emitted);
-    fixture.componentRef.setInput('attentionItems', [item]); fixture.detectChanges();
+    const emitted = jest.fn();
+    fixture.componentInstance.attentionAction.subscribe(emitted);
+    fixture.componentRef.setInput('attentionItems', [item]);
+    fixture.detectChanges();
     const host = fixture.nativeElement as HTMLElement;
     expect(host.dataset['attentionExtra']).toBe('88');
-    expect(host.style.height).toBe(`${COMPACT_RAIL_CARD_HEIGHT.comfortable + 88}px`);
-    expect(host.querySelector('[data-testid="rail-card-needs-you"]')?.textContent).toContain('Needs you');
-    const frame = host.querySelector('[data-testid="rail-attention-frame"]') as HTMLElement;
+    expect(host.style.height).toBe(
+      `${COMPACT_RAIL_CARD_HEIGHT.comfortable + 88}px`,
+    );
+    expect(
+      host.querySelector('[data-testid="rail-card-needs-you"]')?.textContent,
+    ).toContain('Needs you');
+    const frame = host.querySelector(
+      '[data-testid="rail-attention-frame"]',
+    ) as HTMLElement;
     expect(frame).not.toBeNull();
-    expect(frame.contains(host.querySelector('ptah-compact-session-card'))).toBe(true);
-    expect(frame.contains(host.querySelector('[data-testid="rail-card-needs-you"]'))).toBe(true);
-    expect([...frame.classList]).toEqual(expect.arrayContaining(['rounded-lg', 'border']));
+    expect(
+      frame.contains(host.querySelector('ptah-compact-session-card')),
+    ).toBe(true);
+    expect(
+      frame.contains(host.querySelector('[data-testid="rail-card-needs-you"]')),
+    ).toBe(true);
+    expect([...frame.classList]).toEqual(
+      expect.arrayContaining(['rounded-lg', 'border']),
+    );
     expect(frame.classList.contains('bg-base-200')).toBe(false);
-    (host.querySelector('[data-testid="rail-card-needs-you"] button') as HTMLButtonElement).click();
+    (
+      host.querySelector(
+        '[data-testid="rail-card-needs-you"] button',
+      ) as HTMLButtonElement
+    ).click();
     expect(emitted).toHaveBeenCalledWith({ item, actionId: 'answer' });
     expect(focusTile).not.toHaveBeenCalled();
   });
   it('offers every permission option inline and grows while the menu and denial form are open', () => {
     const fixture = mount();
     const item: AttentionItem = {
-      key: 'permission:full', generation: 1, kind: 'permission', source: 'chat', workspacePath: '/local',
-      workspaceName: 'local', sessionId, severity: 'warning', title: 'Permission required',
-      detail: 'Tool: Bash', permissionPreview: 'Input: npm run test',
-      actions: [{ id: 'allow', label: 'Allow' }, { id: 'always_allow', label: 'Always allow' },
-        { id: 'deny', label: 'Deny' }, { id: 'deny_with_message', label: 'Deny with message' },
-        { id: 'open', label: 'Show in canvas' }],
-      actionable: true, soundEligible: false,
+      key: 'permission:full',
+      generation: 1,
+      kind: 'permission',
+      source: 'chat',
+      workspacePath: '/local',
+      workspaceName: 'local',
+      sessionId,
+      severity: 'warning',
+      title: 'Permission required',
+      detail: 'Tool: Bash',
+      permissionPreview: 'Input: npm run test',
+      actions: [
+        { id: 'allow', label: 'Allow' },
+        { id: 'always_allow', label: 'Always allow' },
+        { id: 'deny', label: 'Deny' },
+        { id: 'deny_with_message', label: 'Deny with message' },
+        { id: 'open', label: 'Show in canvas' },
+      ],
+      actionable: true,
+      soundEligible: false,
     };
-    const emitted = jest.fn(); fixture.componentInstance.attentionAction.subscribe(emitted);
-    fixture.componentRef.setInput('attentionItems', [item]); fixture.detectChanges();
+    const emitted = jest.fn();
+    fixture.componentInstance.attentionAction.subscribe(emitted);
+    fixture.componentRef.setInput('attentionItems', [item]);
+    fixture.detectChanges();
     const host = fixture.nativeElement as HTMLElement;
-    const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('[data-testid="rail-card-needs-you"] button')]
-      .find(candidate => candidate.textContent?.trim() === label);
+    const button = (label: string) =>
+      [
+        ...host.querySelectorAll<HTMLButtonElement>(
+          '[data-testid="rail-card-needs-you"] button',
+        ),
+      ].find((candidate) => candidate.textContent?.trim() === label);
     // The operation is visible before Always allow can be chosen.
-    expect(host.querySelector('[data-testid="rail-card-needs-you"]')?.textContent).toContain('Input: npm run test');
+    expect(
+      host.querySelector('[data-testid="rail-card-needs-you"]')?.textContent,
+    ).toContain('Input: npm run test');
     expect(host.dataset['attentionExtra']).toBe('136');
-    button('More')!.click(); fixture.detectChanges();
+    button('More')!.click();
+    fixture.detectChanges();
     expect(host.dataset['attentionExtra']).toBe('200');
     button('Always allow')!.click();
-    expect(emitted).toHaveBeenLastCalledWith({ item, actionId: 'always_allow', reason: undefined });
+    expect(emitted).toHaveBeenLastCalledWith({
+      item,
+      actionId: 'always_allow',
+      reason: undefined,
+    });
     fixture.detectChanges();
-    button('More')!.click(); fixture.detectChanges();
-    button('Deny with message')!.click(); fixture.detectChanges();
+    button('More')!.click();
+    fixture.detectChanges();
+    button('Deny with message')!.click();
+    fixture.detectChanges();
     expect(host.dataset['attentionExtra']).toBe('248');
-    const reason = host.querySelector<HTMLInputElement>('[data-testid="rail-card-needs-you"] input')!;
-    reason.value = 'Use the staging database'; reason.dispatchEvent(new Event('input'));
+    const reason = host.querySelector<HTMLInputElement>(
+      '[data-testid="rail-card-needs-you"] input',
+    )!;
+    reason.value = 'Use the staging database';
+    reason.dispatchEvent(new Event('input'));
     button('Send denial')!.click();
-    expect(emitted).toHaveBeenLastCalledWith({ item, actionId: 'deny_with_message', reason: 'Use the staging database' });
+    expect(emitted).toHaveBeenLastCalledWith({
+      item,
+      actionId: 'deny_with_message',
+      reason: 'Use the staging database',
+    });
   });
   it('gives the next request fresh controls instead of the previous open form and reason', () => {
     const fixture = mount();
     const first: AttentionItem = {
-      key: 'permission:first', generation: 1, kind: 'permission', source: 'chat', workspacePath: '/local',
-      workspaceName: 'local', sessionId, severity: 'warning', title: 'Permission required',
-      actions: [{ id: 'allow', label: 'Allow' }, { id: 'deny', label: 'Deny' },
-        { id: 'deny_with_message', label: 'Deny with message' }],
-      actionable: true, soundEligible: false,
+      key: 'permission:first',
+      generation: 1,
+      kind: 'permission',
+      source: 'chat',
+      workspacePath: '/local',
+      workspaceName: 'local',
+      sessionId,
+      severity: 'warning',
+      title: 'Permission required',
+      actions: [
+        { id: 'allow', label: 'Allow' },
+        { id: 'deny', label: 'Deny' },
+        { id: 'deny_with_message', label: 'Deny with message' },
+      ],
+      actionable: true,
+      soundEligible: false,
     };
-    fixture.componentRef.setInput('attentionItems', [first]); fixture.detectChanges();
+    fixture.componentRef.setInput('attentionItems', [first]);
+    fixture.detectChanges();
     const host = fixture.nativeElement as HTMLElement;
-    const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('[data-testid="rail-card-needs-you"] button')]
-      .find(candidate => candidate.textContent?.trim() === label);
-    button('More')!.click(); fixture.detectChanges();
-    button('Deny with message')!.click(); fixture.detectChanges();
-    host.querySelector<HTMLInputElement>('[data-testid="rail-card-needs-you"] input')!.value = 'not this repo';
+    const button = (label: string) =>
+      [
+        ...host.querySelectorAll<HTMLButtonElement>(
+          '[data-testid="rail-card-needs-you"] button',
+        ),
+      ].find((candidate) => candidate.textContent?.trim() === label);
+    button('More')!.click();
+    fixture.detectChanges();
+    button('Deny with message')!.click();
+    fixture.detectChanges();
+    host.querySelector<HTMLInputElement>(
+      '[data-testid="rail-card-needs-you"] input',
+    )!.value = 'not this repo';
     expect(host.dataset['attentionExtra']).toBe('248');
-    fixture.componentRef.setInput('attentionItems', [{ ...first, key: 'permission:second' }]); fixture.detectChanges();
-    expect(host.querySelector('[data-testid="rail-card-needs-you"] input')).toBeNull();
+    fixture.componentRef.setInput('attentionItems', [
+      { ...first, key: 'permission:second' },
+    ]);
+    fixture.detectChanges();
+    expect(
+      host.querySelector('[data-testid="rail-card-needs-you"] input'),
+    ).toBeNull();
     expect(host.dataset['attentionExtra']).toBe('136');
   });
   it('reports the larger attention height once and clears it when collapsed', () => {
     const fixture = mount();
     const item: AttentionItem = {
-      key: 'permission:height', generation: 1, kind: 'permission', source: 'chat', workspacePath: '/local',
-      workspaceName: 'local', sessionId, severity: 'warning', title: 'Permission required',
-      actions: [{ id: 'allow', label: 'Allow' }, { id: 'deny', label: 'Deny' }, { id: 'open', label: 'Show in canvas' }],
-      actionable: true, soundEligible: false,
+      key: 'permission:height',
+      generation: 1,
+      kind: 'permission',
+      source: 'chat',
+      workspacePath: '/local',
+      workspaceName: 'local',
+      sessionId,
+      severity: 'warning',
+      title: 'Permission required',
+      actions: [
+        { id: 'allow', label: 'Allow' },
+        { id: 'deny', label: 'Deny' },
+        { id: 'open', label: 'Show in canvas' },
+      ],
+      actionable: true,
+      soundEligible: false,
     };
     const host = fixture.nativeElement as HTMLElement;
     expect(host.dataset['attentionExtra']).toBe('0');
-    fixture.componentRef.setInput('attentionItems', [item]); fixture.detectChanges();
+    fixture.componentRef.setInput('attentionItems', [item]);
+    fixture.detectChanges();
     expect(host.dataset['attentionExtra']).toBe('136');
-    expect(host.style.height).toBe(`${COMPACT_RAIL_CARD_HEIGHT.comfortable + 136}px`);
-    fixture.componentRef.setInput('collapsed', true); fixture.detectChanges();
+    expect(host.style.height).toBe(
+      `${COMPACT_RAIL_CARD_HEIGHT.comfortable + 136}px`,
+    );
+    fixture.componentRef.setInput('collapsed', true);
+    fixture.detectChanges();
     expect(host.dataset['attentionExtra']).toBe('0');
     expect(host.style.height).toBe('56px');
   });
   it('promotes the enabled decision, then Show in canvas when the decision is disabled', () => {
     const fixture = mount();
     const item: AttentionItem = {
-      key: 'permission:card', generation: 1, kind: 'permission', source: 'chat', workspacePath: '/local',
-      workspaceName: 'local', sessionId, severity: 'warning', title: 'Permission required',
-      actions: [{ id: 'allow', label: 'Allow' }, { id: 'open', label: 'Show in canvas' }],
-      actionable: true, soundEligible: false,
+      key: 'permission:card',
+      generation: 1,
+      kind: 'permission',
+      source: 'chat',
+      workspacePath: '/local',
+      workspaceName: 'local',
+      sessionId,
+      severity: 'warning',
+      title: 'Permission required',
+      actions: [
+        { id: 'allow', label: 'Allow' },
+        { id: 'open', label: 'Show in canvas' },
+      ],
+      actionable: true,
+      soundEligible: false,
     };
-    fixture.componentRef.setInput('attentionItems', [item]); fixture.detectChanges();
-    const buttons = () => (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('[data-testid="rail-card-needs-you"] button');
+    fixture.componentRef.setInput('attentionItems', [item]);
+    fixture.detectChanges();
+    const buttons = () =>
+      (
+        fixture.nativeElement as HTMLElement
+      ).querySelectorAll<HTMLButtonElement>(
+        '[data-testid="rail-card-needs-you"] button',
+      );
     expect(buttons()[0].classList).toContain('btn-primary');
     expect(buttons()[0].classList).not.toContain('btn-ghost');
-    fixture.componentRef.setInput('attentionItems', [{ ...item, actions: [
-      { id: 'allow', label: 'Allow', disabledReason: 'Already decided' },
-      { id: 'open', label: 'Show in canvas' },
-    ] }]); fixture.detectChanges();
+    fixture.componentRef.setInput('attentionItems', [
+      {
+        ...item,
+        actions: [
+          { id: 'allow', label: 'Allow', disabledReason: 'Already decided' },
+          { id: 'open', label: 'Show in canvas' },
+        ],
+      },
+    ]);
+    fixture.detectChanges();
     expect(buttons()[0].disabled).toBe(true);
     expect(buttons()[0].classList).not.toContain('btn-primary');
     expect(buttons()[0].classList).toContain('btn-ghost');
     expect(buttons()[1].classList).toContain('btn-primary');
     expect(buttons()[1].classList).not.toContain('btn-ghost');
-    fixture.componentRef.setInput('submittingKeys', new Set([item.key])); fixture.detectChanges();
-    expect([...buttons()].every(button => button.disabled)).toBe(true);
+    fixture.componentRef.setInput('submittingKeys', new Set([item.key]));
+    fixture.detectChanges();
+    expect([...buttons()].every((button) => button.disabled)).toBe(true);
     fixture.componentRef.setInput('submittingKeys', new Set());
-    fixture.componentRef.setInput('blockedKeys', new Set([item.key])); fixture.detectChanges();
-    expect([...buttons()].every(button => button.disabled)).toBe(true);
+    fixture.componentRef.setInput('blockedKeys', new Set([item.key]));
+    fixture.detectChanges();
+    expect([...buttons()].every((button) => button.disabled)).toBe(true);
   });
 
   it('shows the workflow badge on an expanded tagged card only', () => {
@@ -455,14 +613,18 @@ describe('CanvasRailCardComponent', () => {
 
   it('routes a CLI turn-chip key through the Rail action to detail.open', () => {
     const fixture = mount();
-    const actions = (fixture.debugElement.children[0].componentInstance as CardStub).actions;
+    const actions = (
+      fixture.debugElement.children[0].componentInstance as CardStub
+    ).actions;
     actions?.openLane('cli:agent-1');
     expect(open).toHaveBeenCalledWith('a', 'cli:agent-1');
   });
 
   it('forwards repeated stale actions and rerenders the live notice; Enter focuses the session', async () => {
     const fixture = mount();
-    const live = (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>('[aria-live="polite"]')!;
+    const live = (
+      fixture.nativeElement as HTMLElement
+    ).querySelector<HTMLElement>('[aria-live="polite"]')!;
     const stale = jest.fn();
     fixture.componentInstance.staleAction.subscribe(stale);
     (
@@ -473,7 +635,9 @@ describe('CanvasRailCardComponent', () => {
     expect(live.textContent).toBe('');
     await settle();
     fixture.detectChanges();
-    expect(live.textContent).toBe('This request has changed. Open the current request.');
+    expect(live.textContent).toBe(
+      'This request has changed. Open the current request.',
+    );
     (
       fixture.debugElement.children[0].componentInstance as CardStub
     ).staleAction.emit();
@@ -481,7 +645,9 @@ describe('CanvasRailCardComponent', () => {
     expect(live.textContent).toBe('');
     await settle();
     fixture.detectChanges();
-    expect(live.textContent).toBe('This request has changed. Open the current request.');
+    expect(live.textContent).toBe(
+      'This request has changed. Open the current request.',
+    );
     const event = new KeyboardEvent('keydown', {
       key: 'Enter',
       bubbles: true,
@@ -617,7 +783,19 @@ describe('CanvasRailCardComponent', () => {
     expect(item(host, 'rename').getAttribute('aria-haspopup')).toBe('dialog');
     expect(host.querySelector('[data-action="organize"]')).toBeNull();
     expect(host.querySelector('[data-action="delete"]')).toBeNull();
-    expect([...host.querySelectorAll('[role="menuitem"]')].map((node) => node.getAttribute('data-action'))).toEqual(['open-beside', 'rename', 'move-up', 'move-down', 'toggle-view', 'hand-off', 'close-session']);
+    expect(
+      [...host.querySelectorAll('[role="menuitem"]')].map((node) =>
+        node.getAttribute('data-action'),
+      ),
+    ).toEqual([
+      'open-beside',
+      'rename',
+      'move-up',
+      'move-down',
+      'toggle-view',
+      'hand-off',
+      'close-session',
+    ]);
   });
 
   it('drops Move up and Move down, and their keys, while the rail is not in manual order', async () => {
@@ -628,13 +806,27 @@ describe('CanvasRailCardComponent', () => {
     fixture.detectChanges();
     const up = jest.fn();
     fixture.componentInstance.moveUpRequested.subscribe(up);
-    const select = (fixture.nativeElement as HTMLElement).querySelector('.rc-select') as HTMLElement;
-    expect(keydown(select, 'ArrowUp', { altKey: true, shiftKey: true }).defaultPrevented).toBe(false);
+    const select = (fixture.nativeElement as HTMLElement).querySelector(
+      '.rc-select',
+    ) as HTMLElement;
+    expect(
+      keydown(select, 'ArrowUp', { altKey: true, shiftKey: true })
+        .defaultPrevented,
+    ).toBe(false);
     fixture.componentInstance.moveUp();
     expect(up).not.toHaveBeenCalled();
     const host = await openMenu(fixture);
-    expect([...host.querySelectorAll('[role="menuitem"]')].map((node) => node.getAttribute('data-action')))
-      .toEqual(['open-beside', 'rename', 'toggle-view', 'hand-off', 'close-session']);
+    expect(
+      [...host.querySelectorAll('[role="menuitem"]')].map((node) =>
+        node.getAttribute('data-action'),
+      ),
+    ).toEqual([
+      'open-beside',
+      'rename',
+      'toggle-view',
+      'hand-off',
+      'close-session',
+    ]);
   });
 
   it('keeps draft Rename and Organize focusable with the save reason', async () => {
@@ -644,7 +836,9 @@ describe('CanvasRailCardComponent', () => {
     const host = await openMenu(fixture);
     for (const action of ['rename', 'organize']) {
       expect(item(host, action).getAttribute('aria-disabled')).toBe('true');
-      expect(item(host, action).textContent).toContain('Send a first message to save this session.');
+      expect(item(host, action).textContent).toContain(
+        'Send a first message to save this session.',
+      );
       item(host, action).click();
     }
     expect(host.querySelector('[role="menu"]')).not.toBeNull();
@@ -662,7 +856,9 @@ describe('CanvasRailCardComponent', () => {
     fixture.detectChanges();
     await settle();
     fixture.detectChanges();
-    const input = host.querySelector<HTMLInputElement>('input[aria-label="Session name"]')!;
+    const input = host.querySelector<HTMLInputElement>(
+      'input[aria-label="Session name"]',
+    )!;
     expect(input).not.toBeNull();
     expect(document.activeElement).toBe(input);
     input.value = 'Renamed';
@@ -685,7 +881,9 @@ describe('CanvasRailCardComponent', () => {
     fixture.detectChanges();
     await settle();
     fixture.detectChanges();
-    const input = host.querySelector<HTMLInputElement>('input[aria-label="Session name"]')!;
+    const input = host.querySelector<HTMLInputElement>(
+      'input[aria-label="Session name"]',
+    )!;
     keydown(input, 'Escape');
     fixture.detectChanges();
     await settle();
@@ -702,10 +900,16 @@ describe('CanvasRailCardComponent', () => {
     fixture.detectChanges();
     await settle();
     fixture.detectChanges();
-    const input = host.querySelector<HTMLInputElement>('[role="dialog"] input')!;
-    const buttons = host.querySelectorAll<HTMLButtonElement>('[role="dialog"] button');
+    const input = host.querySelector<HTMLInputElement>(
+      '[role="dialog"] input',
+    )!;
+    const buttons = host.querySelectorAll<HTMLButtonElement>(
+      '[role="dialog"] button',
+    );
     input.focus();
-    expect(keydown(input, 'Tab', { shiftKey: true }).defaultPrevented).toBe(true);
+    expect(keydown(input, 'Tab', { shiftKey: true }).defaultPrevented).toBe(
+      true,
+    );
     expect(document.activeElement).toBe(buttons[1]);
     expect(keydown(buttons[1], 'Tab').defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(input);
@@ -714,7 +918,9 @@ describe('CanvasRailCardComponent', () => {
     expect(keydown(document.body, 'Tab').defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(input);
     input.blur();
-    expect(keydown(document.body, 'Tab', { shiftKey: true }).defaultPrevented).toBe(true);
+    expect(
+      keydown(document.body, 'Tab', { shiftKey: true }).defaultPrevented,
+    ).toBe(true);
     expect(document.activeElement).toBe(buttons[1]);
     keydown(input, 'Enter', { isComposing: true });
     expect(rename).not.toHaveBeenCalled();
@@ -735,13 +941,17 @@ describe('CanvasRailCardComponent', () => {
     // and placed below the trigger so shift can move it along x into view.
     expect(panel.classList).toContain('max-w-[calc(100vw-1rem)]');
     expect(panel.classList).toContain('p-4');
-    expect(panel.closest('ptah-native-popover')?.className).toContain('[&>.popover-panel]:p-0');
+    expect(panel.closest('ptah-native-popover')?.className).toContain(
+      '[&>.popover-panel]:p-0',
+    );
     const renamePopover = fixture.debugElement
       .queryAll(By.directive(NativePopoverComponent))
       .map((node) => node.componentInstance as NativePopoverComponent)
       .find((popover) => popover.isOpen());
     expect(renamePopover?.placement()).toBe('bottom-end');
-    expect(panel.querySelector('h3')?.classList).toContain('text-base-content-muted');
+    expect(panel.querySelector('h3')?.classList).toContain(
+      'text-base-content-muted',
+    );
     expect(panel.querySelector('input')?.classList).toContain('input-sm');
     // One 2 px ring over the 1 px border in the theme-measured focus ink
     // (styles.css maps the --s utility to >= 3:1 inks in light themes); no
@@ -755,13 +965,21 @@ describe('CanvasRailCardComponent', () => {
         'focus-visible:outline-[oklch(var(--s))]',
       ]),
     );
-    expect(inputClasses.some((name) => name.startsWith('focus:border-'))).toBe(false);
+    expect(inputClasses.some((name) => name.startsWith('focus:border-'))).toBe(
+      false,
+    );
     // Equal-width actions: two equal grid columns, not flex-1 (border skew).
     const actionRow = panel.querySelector('button')?.parentElement;
     expect([...(actionRow?.classList ?? [])]).toEqual(
       expect.arrayContaining(['grid', 'grid-cols-2']),
     );
-    expect([...panel.querySelectorAll('button')].every((button) => button.classList.contains('w-full') && !button.classList.contains('flex-1'))).toBe(true);
+    expect(
+      [...panel.querySelectorAll('button')].every(
+        (button) =>
+          button.classList.contains('w-full') &&
+          !button.classList.contains('flex-1'),
+      ),
+    ).toBe(true);
   });
 
   it('raises the actions cell above later page content only while a panel is open', async () => {
@@ -781,7 +999,9 @@ describe('CanvasRailCardComponent', () => {
     fixture.detectChanges();
     expect(host.querySelector('[role="dialog"]')).not.toBeNull();
     expect(cell().classList).toContain('z-50');
-    host.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')[0].click();
+    host
+      .querySelectorAll<HTMLButtonElement>('[role="dialog"] button')[0]
+      .click();
     fixture.detectChanges();
     expect(cell().classList).toContain('z-10');
     expect(cell().classList).not.toContain('z-50');
@@ -808,18 +1028,24 @@ describe('CanvasRailCardComponent', () => {
       fixture.detectChanges();
       await settle();
       fixture.detectChanges();
-      const input = host.querySelector<HTMLInputElement>('input[aria-label="Session name"]')!;
+      const input = host.querySelector<HTMLInputElement>(
+        'input[aria-label="Session name"]',
+      )!;
       expect(document.activeElement).toBe(input);
       input.value = 'Renamed';
       input.dispatchEvent(new Event('input', { bubbles: true }));
       return { host, input };
     }
     const saveButton = (host: HTMLElement) =>
-      [...host.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(
+      [
+        ...host.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
+      ].find(
         (button) => button.textContent?.trim() === 'Save',
       ) as HTMLButtonElement;
     const cancelButton = (host: HTMLElement) =>
-      [...host.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(
+      [
+        ...host.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
+      ].find(
         (button) => button.textContent?.trim() === 'Cancel',
       ) as HTMLButtonElement;
 
@@ -925,8 +1151,12 @@ describe('CanvasRailCardComponent', () => {
       fixture.detectChanges();
       expect(host.querySelector('[role="dialog"]')).not.toBeNull();
       expect(input.value).toBe('Renamed');
-      expect(input.getAttribute('aria-describedby')).toBe('rail-rename-error-a');
-      expect(host.querySelector('#rail-rename-error-a')?.textContent).toBe("Couldn't rename. Try again.");
+      expect(input.getAttribute('aria-describedby')).toBe(
+        'rail-rename-error-a',
+      );
+      expect(host.querySelector('#rail-rename-error-a')?.textContent).toBe(
+        "Couldn't rename. Try again.",
+      );
       expect(live.textContent).toBe("Couldn't rename. Try again.");
       keydown(input, 'Enter');
       resolveRename('failed');
@@ -1019,8 +1249,14 @@ describe('CanvasRailCardComponent', () => {
     await settle();
     await settle();
     fixture.detectChanges();
-    expect(openForSession).toHaveBeenCalledWith(sessionId, 'Alpha', expect.any(Function));
-    expect(live.textContent).toBe("Could not load this session's organization.");
+    expect(openForSession).toHaveBeenCalledWith(
+      sessionId,
+      'Alpha',
+      expect.any(Function),
+    );
+    expect(live.textContent).toBe(
+      "Could not load this session's organization.",
+    );
     openForSession.mockResolvedValueOnce('failed');
     await openMenu(fixture);
     item(host, 'organize').click();
@@ -1029,21 +1265,26 @@ describe('CanvasRailCardComponent', () => {
     await settle();
     await settle();
     fixture.detectChanges();
-    expect(live.textContent).toBe("Could not load this session's organization.");
+    expect(live.textContent).toBe(
+      "Could not load this session's organization.",
+    );
   });
 
-  it.each(['cancelled', 'unavailable'])('does not announce or move focus for %s Organize result', async (result) => {
-    available.set(true);
-    openForSession.mockResolvedValueOnce(result);
-    const fixture = mount();
-    const host = await openMenu(fixture);
-    item(host, 'organize').click();
-    const focusedAfterClick = document.activeElement;
-    await settle();
-    fixture.detectChanges();
-    expect(fixture.componentInstance.announcement()).toBe('');
-    expect(document.activeElement).toBe(focusedAfterClick);
-  });
+  it.each(['cancelled', 'unavailable'])(
+    'does not announce or move focus for %s Organize result',
+    async (result) => {
+      available.set(true);
+      openForSession.mockResolvedValueOnce(result);
+      const fixture = mount();
+      const host = await openMenu(fixture);
+      item(host, 'organize').click();
+      const focusedAfterClick = document.activeElement;
+      await settle();
+      fixture.detectChanges();
+      expect(fixture.componentInstance.announcement()).toBe('');
+      expect(document.activeElement).toBe(focusedAfterClick);
+    },
+  );
 
   function keydown(
     target: Element,
@@ -1112,8 +1353,14 @@ describe('CanvasRailCardComponent', () => {
         host.querySelector(`[id="${describedBy}"]`)?.textContent?.trim(),
       ).toBe(reason);
       expect(openBeside.textContent).toContain(reason);
-      expect(openBeside.querySelector('span[aria-hidden="true"]')?.classList).toContain('truncate');
-      expect(openBeside.querySelector('span[aria-hidden="true"]')?.getAttribute('title')).toBe(reason);
+      expect(
+        openBeside.querySelector('span[aria-hidden="true"]')?.classList,
+      ).toContain('truncate');
+      expect(
+        openBeside
+          .querySelector('span[aria-hidden="true"]')
+          ?.getAttribute('title'),
+      ).toBe(reason);
       openBeside.click();
       fixture.detectChanges();
       expect(beside).not.toHaveBeenCalled();
@@ -1122,29 +1369,53 @@ describe('CanvasRailCardComponent', () => {
   );
 
   const menuLabels = (host: HTMLElement) =>
-    Array.from(host.querySelectorAll('[role="menu"] [role="menuitem"], [role="menu"] [role="separator"]')).map(
-      (element) =>
-        element.getAttribute('role') === 'separator'
-          ? '---'
-          : (element.querySelector('span')?.textContent ?? element.textContent)?.trim(),
+    Array.from(
+      host.querySelectorAll(
+        '[role="menu"] [role="menuitem"], [role="menu"] [role="separator"]',
+      ),
+    ).map((element) =>
+      element.getAttribute('role') === 'separator'
+        ? '---'
+        : (
+            element.querySelector('span')?.textContent ?? element.textContent
+          )?.trim(),
     );
 
   it('lists the session actions in order, with Stop only while this session runs', async () => {
     const fixture = mount();
     let host = await openMenu(fixture);
     expect(menuLabels(host)).toEqual([
-      'Open beside', 'Rename', '---', 'Move up', 'Move down', '---',
-      'Switch to compact view', 'Hand off session to…', '---', 'Close session',
+      'Open beside',
+      'Rename',
+      '---',
+      'Move up',
+      'Move down',
+      '---',
+      'Switch to compact view',
+      'Hand off session to…',
+      '---',
+      'Close session',
     ]);
-    expect(host.querySelector('ptah-send-to-messaging')?.getAttribute('data-tab-id')).toBe('a');
+    expect(
+      host.querySelector('ptah-send-to-messaging')?.getAttribute('data-tab-id'),
+    ).toBe('a');
     fixture.componentInstance.closeMenu();
     fixture.detectChanges();
     running.set(true);
     viewMode.set('compact');
     host = await openMenu(fixture);
     expect(menuLabels(host)).toEqual([
-      'Open beside', 'Rename', '---', 'Move up', 'Move down', '---',
-      'Switch to full view', 'Hand off session to…', 'Stop session', '---', 'Close session',
+      'Open beside',
+      'Rename',
+      '---',
+      'Move up',
+      'Move down',
+      '---',
+      'Switch to full view',
+      'Hand off session to…',
+      'Stop session',
+      '---',
+      'Close session',
     ]);
   });
 
@@ -1182,18 +1453,28 @@ describe('CanvasRailCardComponent', () => {
     const fixture = mount();
     await expect(fixture.componentInstance.stop()).resolves.toBeUndefined();
     expect(focusTile).not.toHaveBeenCalled();
-    expect(logError).toHaveBeenCalledWith('CanvasRailCard', 'Could not stop session', failure);
+    expect(logError).toHaveBeenCalledWith(
+      'CanvasRailCard',
+      'Could not stop session',
+      failure,
+    );
     await settle();
     fixture.detectChanges();
-    expect(fixture.componentInstance.announcement()).toBe('Could not stop this session.');
-    const live = (fixture.nativeElement as HTMLElement).querySelector('[aria-live="polite"]');
+    expect(fixture.componentInstance.announcement()).toBe(
+      'Could not stop this session.',
+    );
+    const live = (fixture.nativeElement as HTMLElement).querySelector(
+      '[aria-live="polite"]',
+    );
     expect(live?.textContent).toContain('Could not stop this session.');
   });
 
   it('Close session by keyboard leaves focus on the trigger, so the board can move it to a neighbour', async () => {
     const fixture = mount();
     const host = await openMenu(fixture);
-    item(host, 'close-session').dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+    item(host, 'close-session').dispatchEvent(
+      new MouseEvent('click', { bubbles: true, detail: 0 }),
+    );
     fixture.detectChanges();
     expect(document.activeElement).toBe(trigger(host));
   });
@@ -1211,21 +1492,29 @@ describe('CanvasRailCardComponent', () => {
     // A press runs before the trigger takes focus; the click then opens the menu.
     trigger(host).dispatchEvent(new Event('pointerdown', { bubbles: true }));
     trigger(host).focus();
-    trigger(host).dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    trigger(host).dispatchEvent(
+      new MouseEvent('click', { bubbles: true, detail: 1 }),
+    );
     fixture.detectChanges();
     await settle();
     fixture.detectChanges();
-    item(host, 'close-session').dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    item(host, 'close-session').dispatchEvent(
+      new MouseEvent('click', { bubbles: true, detail: 1 }),
+    );
     TestBed.tick();
     expect(closed).toHaveBeenCalledWith('a');
     expect(document.activeElement).toBe(composer);
     // A keyboard reopen forgets the earlier press: a later pointer close keeps the trigger.
     trigger(host).focus();
-    trigger(host).dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+    trigger(host).dispatchEvent(
+      new MouseEvent('click', { bubbles: true, detail: 0 }),
+    );
     fixture.detectChanges();
     await settle();
     fixture.detectChanges();
-    item(host, 'close-session').dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    item(host, 'close-session').dispatchEvent(
+      new MouseEvent('click', { bubbles: true, detail: 1 }),
+    );
     TestBed.tick();
     expect(document.activeElement).toBe(trigger(host));
     composer.remove();
@@ -1389,8 +1678,8 @@ describe('CanvasRailCardComponent', () => {
     expect(down).not.toHaveBeenCalled();
   });
 
-  it('keeps 176/96/56 px heights with a full-width card, the trigger in its corner and +N more still fitting (N6b)', () => {
-    expect(COMPACT_RAIL_CARD_HEIGHT).toEqual({ comfortable: 176, dense: 96 });
+  it('keeps 128/56/56 px heights with a full-width card, the trigger in its corner and +N more still fitting (N6b)', () => {
+    expect(COMPACT_RAIL_CARD_HEIGHT).toEqual({ comfortable: 128, dense: 56 });
     // The real chat-ui compact card, not CardStub: its own overflow control.
     TestBed.overrideComponent(CanvasRailCardComponent, {
       remove: { imports: [CardStub] },
@@ -1454,7 +1743,9 @@ describe('CanvasRailCardComponent', () => {
       expect(title?.querySelector('.rc-pill')).not.toBeNull();
       // The real overflow control: the lanes button of this density.
       const overflow = [
-        ...card.querySelectorAll<HTMLButtonElement>('.rc-lanes button'),
+        ...card.querySelectorAll<HTMLButtonElement>(
+          'ptah-compact-rail-meta button',
+        ),
       ].find((button) => button.textContent?.trim().startsWith('+'));
       expect(overflow?.textContent?.trim()).toBe(expected[density]);
       expect(overflow?.classList).toContain('rc-action');
@@ -1471,7 +1762,7 @@ describe('CanvasRailCardComponent', () => {
       // It closes its lane line, below the title line, so the corner trigger
       // never sits over it.
       expect(overflow?.parentElement?.classList).toContain('rc-line');
-      expect(overflow?.parentElement?.lastElementChild).toBe(overflow);
+      expect(overflow?.parentElement?.firstElementChild).toBe(overflow);
       expect(title?.contains(overflow as HTMLElement)).toBe(false);
     }
     // jsdom has no layout, so the pixel fit at the narrowest (sm, 272 px)
