@@ -63,7 +63,6 @@ describe('SessionBudgetConfigProvider.getConfig', () => {
     expect(provider.getConfig()).toEqual({
       enabled: true,
       autoHandoffAtLimit: false,
-      closeSourceAfterAutoHandoff: false,
       unit: 'tokens',
       tokens: 50_000_000,
       usd: 30,
@@ -195,23 +194,6 @@ describe('SessionBudgetConfigProvider.getConfig', () => {
         expect(warn).toHaveBeenCalledTimes(1);
       },
     );
-  });
-
-  describe('closeSourceAfterAutoHandoff', () => {
-    it('reads true when enabled', () => {
-      const { provider } = makeProvider({
-        'sessionBudget.closeSourceAfterAutoHandoff': true,
-      });
-      expect(provider.getConfig().closeSourceAfterAutoHandoff).toBe(true);
-    });
-
-    it('uses false for an invalid value', () => {
-      const { provider, warn } = makeProvider({
-        'sessionBudget.closeSourceAfterAutoHandoff': 'true',
-      });
-      expect(provider.getConfig().closeSourceAfterAutoHandoff).toBe(false);
-      expect(warn).toHaveBeenCalledTimes(1);
-    });
   });
 
   describe('booleans', () => {

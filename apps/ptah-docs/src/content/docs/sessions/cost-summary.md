@@ -32,7 +32,8 @@ PtahCode stores these keys in `~/.ptah/settings.json`. You can also change them 
 | `sessionBudget.handoffAfterCompactions`   | `3`          | Number of compactions that starts the handoff stage.     |
 | `sessionBudget.tightenWindowTokens`       | not set      | Auto-compact window to apply at the tighten stage.       |
 | `sessionBudget.autoHandoffAtLimit`        | `false`      | Hands off to a new session automatically at the limit.   |
-| `sessionBudget.closeSourceAfterAutoHandoff` | `false`    | Closes the old session after an automatic handoff.       |
+
+After an automatic handoff, the previous tab closes when the successor acknowledges the handoff and the source tab passes the safety checks.
 
 The tighten percent must be lower than the handoff percent.
 

@@ -34,7 +34,6 @@ const STORE_WARN_KEY = 'sessionBudget.*';
 export const SESSION_BUDGET_DEFAULT_CONFIG: SessionBudgetConfig = {
   enabled: SESSION_BUDGET_SETTINGS.enabled.default,
   autoHandoffAtLimit: SESSION_BUDGET_SETTINGS.autoHandoffAtLimit.default,
-  closeSourceAfterAutoHandoff: SESSION_BUDGET_SETTINGS.closeSourceAfterAutoHandoff.default,
   unit: SESSION_BUDGET_SETTINGS.unit.default,
   tokens: SESSION_BUDGET_SETTINGS.tokens.default,
   usd: SESSION_BUDGET_SETTINGS.usd.default,
@@ -76,7 +75,7 @@ function describeValue(value: unknown): string {
 export class SessionBudgetConfigProvider {
   /**
    * Last rejected value per key, so each bad value warns once. Bounded by the
-   * ten keys plus the two composite keys above.
+   * nine keys plus the two composite keys above.
    */
   private readonly lastWarned = new Map<string, string>();
 
@@ -129,10 +128,6 @@ export class SessionBudgetConfigProvider {
       autoHandoffAtLimit: this.readBoolean(
         read,
         SESSION_BUDGET_SETTINGS.autoHandoffAtLimit,
-      ),
-      closeSourceAfterAutoHandoff: this.readBoolean(
-        read,
-        SESSION_BUDGET_SETTINGS.closeSourceAfterAutoHandoff,
       ),
       unit: this.readEnum(read, SESSION_BUDGET_SETTINGS.unit),
       tokens: this.devBudgetTokens ?? this.readNumber(read, SESSION_BUDGET_SETTINGS.tokens),

@@ -17,7 +17,6 @@ const BASE: SessionBudgetState = {
   revision: 7,
   compactions: 0,
   autoHandoff: false,
-  closeSourceAfterAutoHandoff: false,
 };
 
 describe('SessionBudgetBannerComponent', () => {

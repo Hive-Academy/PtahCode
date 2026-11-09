@@ -43,7 +43,6 @@ const BUDGET: SessionBudgetState = {
   revision: 9,
   compactions: 0,
   autoHandoff: false,
-  closeSourceAfterAutoHandoff: false,
 };
 
 describe('SessionBudgetActionsService', () => {

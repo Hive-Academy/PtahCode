@@ -82,7 +82,6 @@ function makeBudget(sessionId: string): SessionBudgetState {
     revision: null,
     compactions: 1,
     autoHandoff: false,
-    closeSourceAfterAutoHandoff: false,
   };
 }
 

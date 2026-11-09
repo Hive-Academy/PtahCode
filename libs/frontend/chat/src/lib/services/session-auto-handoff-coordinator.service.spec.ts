@@ -16,7 +16,7 @@ const COMMAND = '/session-handoff This session has used 50.0M tokens.';
 const BUDGET: SessionBudgetState = {
   sessionId: SESSION, stage: 'limit', unit: 'tokens', measure: 'tokens',
   used: 50_000_000, limit: 50_000_000, percent: 100, lowerBound: false,
-  revision: 12, compactions: 0, autoHandoff: true, closeSourceAfterAutoHandoff: false,
+  revision: 12, compactions: 0, autoHandoff: true,
 };
 const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 function makeTab(id: string, overrides: Partial<TabState> = {}): TabState {
