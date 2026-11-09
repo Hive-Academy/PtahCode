@@ -120,4 +120,40 @@ describe('SessionHandoffService acknowledgement recovery', () => {
     expect(await service.acknowledge(h.request)).toMatchObject({ status: 'already-closed' });
     expect(h.closer.close).toHaveBeenCalledTimes(1);
   });
+
+  it('retries after close succeeded but closeCompleted persistence failed', async () => {
+    const h = harness();
+    const store = h.makeStore();
+    await record(store);
+    const service = h.makeService(store);
+    await armAndFlush(service, h.request);
+    const original = store.compareAndSet.bind(store);
+    jest.spyOn(store, 'compareAndSet').mockRejectedValueOnce(new Error('disk unavailable')).mockImplementation(original);
+    expect(await service.acknowledge(h.request)).toMatchObject({ status: 'retryable-failure' });
+    expect(await service.acknowledge(h.request)).toMatchObject({ status: 'closed' });
+    expect(await store.findByPredecessor(predecessorSessionId)).toMatchObject({ state: 'closeCompleted' });
+  });
+
+  it('deduplicates concurrent aliases by recorded predecessor', async () => {
+    const h = harness();
+    const store = h.makeStore();
+    await record(store);
+    const service = h.makeService(store);
+    await armAndFlush(service, h.request);
+    const [first, second] = await Promise.all([
+      service.acknowledge(h.request),
+      service.acknowledge({ ...h.request, handoffPath: join(root, '.', 'HANDOFF.md') }),
+    ]);
+    expect(first.status).toBe('closed');
+    expect(second.status).toBe('closed');
+    expect(h.closer.close).toHaveBeenCalledTimes(1);
+  });
+  it('accepts the recorded normalized path after the handoff file is removed', async () => {
+    const h = harness();
+    const store = h.makeStore();
+    await record(store);
+    const service = h.makeService(store);
+    rmSync(handoffPath);
+    expect(await service.acknowledge(h.request)).toMatchObject({ status: 'retryable-failure' });
+  });
 });

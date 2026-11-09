@@ -18,13 +18,15 @@ describe('AutoHandoffSourceCloserService', () => {
   let close: jest.Mock;
   let call: jest.Mock;
   let info: jest.Mock;
+  let warn: jest.Mock;
   let service: AutoHandoffSourceCloserService;
 
   beforeEach(() => {
     currentTab = tab(); queued = false; permission = false;
     close = jest.fn().mockResolvedValue(true);
-    call = jest.fn().mockResolvedValue({ accepted: true });
+    call = jest.fn().mockResolvedValue({ success: true });
     info = jest.fn();
+    warn = jest.fn();
     TestBed.configureTestingModule({ providers: [
       AutoHandoffSourceCloserService,
       { provide: TabManagerService, useValue: {
@@ -33,7 +35,7 @@ describe('AutoHandoffSourceCloserService', () => {
       } },
       { provide: MessageDispatchService, useValue: { hasPendingPermissionForTab: () => permission } },
       { provide: QueuedFollowUpStore, useValue: { forTab: () => queued ? [{}] : [] } },
-      { provide: LoggingService, useValue: { info, warn: jest.fn() } },
+      { provide: LoggingService, useValue: { info, warn } },
       { provide: ClaudeRpcService, useValue: { call } },
     ] });
     service = TestBed.inject(AutoHandoffSourceCloserService);
@@ -58,10 +60,29 @@ describe('AutoHandoffSourceCloserService', () => {
     expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', closed: false });
   });
 
-  it('missing tab replies false', async () => {
+  it('missing tab replies true so a lost completion can be retried', async () => {
     currentTab = null;
     await service.closePredecessor(request);
     expect(close).not.toHaveBeenCalled();
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', closed: true });
+  });
+
+  it.each([null, undefined])('null SDK id matches an unset tab session (%s)', async (sdkId) => {
+    currentTab = tab({ claudeSessionId: sdkId as TabState['claudeSessionId'] });
+    await service.closePredecessor({ ...request, predecessorSdkId: null });
+    expect(close).toHaveBeenCalledWith('tab-1', null);
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', closed: true });
+  });
+
+  it('null SDK id does not match a bound tab', async () => {
+    await service.closePredecessor({ ...request, predecessorSdkId: null });
+    expect(close).not.toHaveBeenCalled();
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', closed: false });
+  });
+
+  it('replies false when closeHandoffPredecessor leaves the tab present', async () => {
+    close.mockResolvedValue(false);
+    await service.closePredecessor(request);
     expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', closed: false });
   });
 
@@ -76,6 +97,46 @@ describe('AutoHandoffSourceCloserService', () => {
     await service.closePredecessor(request);
     expect(close).toHaveBeenCalledTimes(1);
     expect(call).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores a concurrent duplicate while the first close is awaiting', async () => {
+    let finish: (closed: boolean) => void = () => undefined;
+    close.mockReturnValue(new Promise<boolean>((resolve) => { finish = resolve; }));
+    const pending = service.closePredecessor(request);
+    await service.closePredecessor(request);
+    expect(close).toHaveBeenCalledTimes(1);
+    finish(true);
+    await pending;
+    expect(call).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores an invalid payload with the in-flight request ID', async () => {
+    let finish: (closed: boolean) => void = () => undefined;
+    close.mockReturnValue(new Promise<boolean>((resolve) => { finish = resolve; }));
+    const pending = service.closePredecessor(request);
+    await service.closePredecessor({ requestId: 'r1', predecessorTabId: 123 });
+    expect(call).not.toHaveBeenCalled();
+    finish(true);
+    await pending;
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', closed: true });
+  });
+
+  it.each([
+    ['rejected', () => Promise.reject(new Error('offline'))],
+    ['failed result', () => Promise.resolve({ success: false, error: 'offline' })],
+  ])('logs an RPC %s', async (_case, response) => {
+    call.mockImplementation(response);
+    await service.closePredecessor(request);
+    expect(warn).toHaveBeenCalledWith('[SessionAutoHandoff]', 'predecessor close reply failed', expect.objectContaining({ requestId: 'r1' }));
+  });
+
+  it('evicts the oldest answered request after 128 entries', async () => {
+    for (let index = 0; index < 129; index++) {
+      await service.closePredecessor({ ...request, requestId: `r${index}` });
+    }
+    await service.closePredecessor({ ...request, requestId: 'r0' });
+    expect(close).toHaveBeenCalledTimes(130);
+    expect(call).toHaveBeenCalledTimes(130);
   });
 
   it('invalid payload with a usable request ID replies false', async () => {

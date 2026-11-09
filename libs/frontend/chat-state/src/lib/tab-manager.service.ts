@@ -1634,10 +1634,15 @@ export class TabManagerService {
     });
   }
 
-  /** Await the same close path used by the UI, without a programmatic confirmation. */
+  /**
+   * Await the same close path used by the UI, without a programmatic confirmation.
+   * Only AutoHandoffSourceCloserService may call this after checking all close blockers.
+   */
   async closeHandoffPredecessor(tabId: string, expectedSessionId: string | null): Promise<boolean> {
     const lookup = this.findTabByIdAcrossWorkspaces(tabId);
-    if (!lookup || (expectedSessionId !== null && lookup.tab.claudeSessionId !== expectedSessionId)) return false;
+    if (!lookup || (expectedSessionId === null
+      ? lookup.tab.claudeSessionId != null
+      : lookup.tab.claudeSessionId !== expectedSessionId)) return false;
     if (lookup.workspacePath === this.activeWorkspacePath) {
       await this.closeTab(tabId, true);
       return this.findTabByIdAcrossWorkspaces(tabId) === null;

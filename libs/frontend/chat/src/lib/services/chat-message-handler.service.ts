@@ -22,7 +22,7 @@
  */
 
 import { Injectable, Injector, inject } from '@angular/core';
-import { type MessageHandler } from '@ptah-extension/core';
+import { LoggingService, type MessageHandler } from '@ptah-extension/core';
 import {
   FlatStreamEventUnion,
   type ChatStreamSnapshotPayload,
@@ -97,6 +97,7 @@ export class ChatMessageHandler implements MessageHandler {
   private readonly organizationCache = inject(SessionOrganizationCache);
   private readonly handoffChain = inject(HandoffChainClient);
   private readonly injector = inject(Injector);
+  private readonly logger = inject(LoggingService);
   /**
    * Authoritative StreamRouter.
    *
@@ -270,7 +271,11 @@ export class ChatMessageHandler implements MessageHandler {
         this.handleSessionHandoffOpened(message.payload);
         break;
       case MESSAGE_TYPES.SESSION_HANDOFF_CLOSE_PREDECESSOR:
-        void this.injector.get(AutoHandoffSourceCloserService).closePredecessor(message.payload);
+        try {
+          void this.injector.get(AutoHandoffSourceCloserService).closePredecessor(message.payload);
+        } catch (error: unknown) {
+          this.logger.warn('[SessionAutoHandoff]', 'predecessor close dispatch failed', { error });
+        }
         break;
       case MESSAGE_TYPES.SESSION_HANDOFF_LINKED:
         this.handleSessionHandoffLinked(message.payload);

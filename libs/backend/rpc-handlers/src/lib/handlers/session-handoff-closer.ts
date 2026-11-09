@@ -9,6 +9,8 @@ interface BroadcastHost {
 }
 
 @injectable()
+/** Broadcast assumes one renderer owns the predecessor. A false reply waits
+ * until the timeout so another attached renderer can still reply true. */
 export class SessionHandoffCloser implements HandoffPredecessorCloser {
   private readonly pending = new Map<string, (closed: boolean) => void>();
   timeoutMs = 30_000;
@@ -21,21 +23,32 @@ export class SessionHandoffCloser implements HandoffPredecessorCloser {
   async close(predecessorTabId: string, predecessorSdkId: string | null): Promise<boolean> {
     const requestId = randomUUID();
     return new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => this.complete(requestId, false), this.timeoutMs);
+      const timer = setTimeout(() => this.finish(requestId, false), this.timeoutMs);
+      timer.unref?.();
       this.pending.set(requestId, (closed) => {
         clearTimeout(timer);
         resolve(closed);
       });
-      void this.broadcaster.broadcastMessage(MESSAGE_TYPES.SESSION_HANDOFF_CLOSE_PREDECESSOR, {
-        requestId, predecessorTabId, predecessorSdkId,
-      }).catch((error: unknown) => {
+      try {
+        void this.broadcaster.broadcastMessage(MESSAGE_TYPES.SESSION_HANDOFF_CLOSE_PREDECESSOR, {
+          requestId, predecessorTabId, predecessorSdkId,
+        }).catch((error: unknown) => {
+          this.logger.error('Failed to request predecessor closure', error instanceof Error ? error : new Error('Broadcast failed'));
+          this.finish(requestId, false);
+        });
+      } catch (error: unknown) {
         this.logger.error('Failed to request predecessor closure', error instanceof Error ? error : new Error('Broadcast failed'));
-        this.complete(requestId, false);
-      });
+        this.finish(requestId, false);
+      }
     });
   }
 
   complete(requestId: string, closed: boolean): boolean {
+    if (!closed) return this.pending.has(requestId);
+    return this.finish(requestId, true);
+  }
+
+  private finish(requestId: string, closed: boolean): boolean {
     const resolve = this.pending.get(requestId);
     if (!resolve) {
       this.logger.warn('Unknown or stale handoff close result', { requestId });

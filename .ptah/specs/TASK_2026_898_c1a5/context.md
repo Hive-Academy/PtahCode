@@ -37,3 +37,6 @@
   grok AT LIMIT (resets 2026-11-12); kimi code AT LIMIT (resets 2026-11-25);
   copilot/opencode disabled; cursor/pi not installed; claude installed (avoid: same usage).
 - `ptah_route_decide` pre-flight timed out → skill table used.
+
+- 2026-11-09 02:48Z: lane Glm (ptahCliId pc-355b645d…, family ollama-cloud) usage limit hit, reset unknown. Phase A review lane 7c97eb9a stopped on agent budget with no deliverable. Skipping Glm for the rest of this run. Phase A review moves to grok (backend) and antigravity (UI), both with unknown limit state. Codex is excluded as the implementer family.
+- 2026-11-09 02:50Z: grok lane (family grok) failed after 10 s with 0 tool calls. Its row shows Weekly 100%, resets 2026-11-12 20:04 UTC. Skipping grok. The backend review waits for the antigravity lane to free up (same family as the UI review, different from the codex implementer).

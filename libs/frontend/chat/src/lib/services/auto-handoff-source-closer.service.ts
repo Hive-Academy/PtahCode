@@ -31,7 +31,8 @@ export class AutoHandoffSourceCloserService {
     if (!parsed.success) {
       this.logger.warn(LOG_CONTEXT, 'invalid predecessor close request');
       if (payload && typeof payload === 'object' && 'requestId' in payload &&
-          typeof payload.requestId === 'string' && payload.requestId.length > 0) {
+          typeof payload.requestId === 'string' && payload.requestId.length > 0 &&
+          !this.processingRequests.has(payload.requestId)) {
         await this.replyOnce(payload.requestId, false);
       }
       return;
@@ -39,22 +40,29 @@ export class AutoHandoffSourceCloserService {
     const { requestId, predecessorTabId, predecessorSdkId } = parsed.data;
     if (this.answeredRequests.has(requestId) || this.processingRequests.has(requestId)) return;
     this.processingRequests.add(requestId);
-    let closed = false;
     try {
-      const lookup = this.tabManager.findTabByIdAcrossWorkspaces(predecessorTabId);
-      if (lookup && (predecessorSdkId === null || lookup.tab.claudeSessionId === predecessorSdkId)) {
-        const blocker = this.closeBlocker(lookup.tab);
-        if (blocker) {
-          this.logger.info(LOG_CONTEXT, `the handed-off source tab stays open: ${blocker}`, { tabId: predecessorTabId });
-        } else {
-          closed = await this.tabManager.closeHandoffPredecessor(predecessorTabId, predecessorSdkId);
+      let closed = false;
+      try {
+        const lookup = this.tabManager.findTabByIdAcrossWorkspaces(predecessorTabId);
+        if (!lookup) {
+          closed = true;
+        } else if (predecessorSdkId === null
+          ? lookup.tab.claudeSessionId == null
+          : lookup.tab.claudeSessionId === predecessorSdkId) {
+          const blocker = this.closeBlocker(lookup.tab);
+          if (blocker) {
+            this.logger.info(LOG_CONTEXT, `the handed-off source tab stays open: ${blocker}`, { tabId: predecessorTabId });
+          } else {
+            closed = await this.tabManager.closeHandoffPredecessor(predecessorTabId, predecessorSdkId);
+          }
         }
+      } catch (error: unknown) {
+        this.logger.warn(LOG_CONTEXT, 'predecessor close failed', { requestId, error });
       }
-    } catch (error: unknown) {
-      this.logger.warn(LOG_CONTEXT, 'predecessor close failed', { requestId, error });
+      await this.replyOnce(requestId, closed);
+    } finally {
+      this.processingRequests.delete(requestId);
     }
-    await this.replyOnce(requestId, closed);
-    this.processingRequests.delete(requestId);
   }
 
   private closeBlocker(tab: TabState): string | null {
@@ -76,7 +84,10 @@ export class AutoHandoffSourceCloserService {
     }
     this.answeredRequests.add(requestId);
     try {
-      await this.rpc.call('session:handoffCloseResult', { requestId, closed });
+      const result = await this.rpc.call('session:handoffCloseResult', { requestId, closed });
+      if (!result.success) {
+        this.logger.warn(LOG_CONTEXT, 'predecessor close reply failed', { requestId, error: result.error });
+      }
     } catch (error: unknown) {
       this.logger.warn(LOG_CONTEXT, 'predecessor close reply failed', { requestId, error });
     }

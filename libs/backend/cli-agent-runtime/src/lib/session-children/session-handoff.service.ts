@@ -205,12 +205,7 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
   }
 
   acknowledge(request: SessionHandoffAckRequest): Promise<SessionHandoffAckResult> {
-    const key = `${request.predecessorSessionId}\u0000${request.callerSessionId ?? ''}\u0000${request.handoffPath}`;
-    const existing = this.ackAttempts.get(key);
-    if (existing) return existing;
-    const attempt = this.acknowledgeOnce(request).finally(() => this.ackAttempts.delete(key));
-    this.ackAttempts.set(key, attempt);
-    return attempt;
+    return this.acknowledgeOnce(request);
   }
 
   private async acknowledgeOnce(request: SessionHandoffAckRequest): Promise<SessionHandoffAckResult> {
@@ -222,28 +217,48 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
     try {
       const record = await this.ackStore.findByPredecessor(request.predecessorSessionId);
       if (!record) return refused('handoff record missing');
+      const existing = this.ackAttempts.get(record.predecessorTabId);
+      if (existing) return existing;
+      const attempt = this.acknowledgeRecord(request, record);
+      this.ackAttempts.set(record.predecessorTabId, attempt);
+      try { return await attempt; }
+      finally { this.ackAttempts.delete(record.predecessorTabId); }
+    } catch (error: unknown) {
+      this.reportError('handoff acknowledgement failed', error);
+      return retry('handoff close failed; retry later');
+    }
+  }
+
+  private async acknowledgeRecord(request: SessionHandoffAckRequest, record: import('./session-handoff-ack.store').HandoffAckRecord): Promise<SessionHandoffAckResult> {
+    const refused = (reason: string): SessionHandoffAckResult => ({ status: 'refused', reason });
+    const retry = (reason: string): SessionHandoffAckResult => ({ status: 'retryable-failure', reason });
+    try {
       if (request.callerSessionId !== record.successorTabId && request.callerSessionId !== record.successorSdkId) {
         return refused('caller is not the recorded successor');
       }
       if (!request.handoffPath || !isAbsolute(request.handoffPath)) return refused('handoff path missing');
       let canonicalPath: string;
       try { canonicalPath = await fs.realpath(request.handoffPath); }
-      catch { return refused('handoff file missing'); }
+      catch { canonicalPath = resolve(request.handoffPath); }
       if (canonicalPath !== record.handoffPath) return refused('handoff path does not match');
       if (record.state === 'closeCompleted') return { status: 'already-closed', reason: 'predecessor already closed' };
-      if (record.state === 'recorded') {
-        await this.ackStore.compareAndSet(record.predecessorTabId, 'recorded', { state: 'closePending' });
-      }
       if (!this.container?.isRegistered(CLI_AGENT_RUNTIME_TOKENS.HANDOFF_PREDECESSOR_CLOSER, true)) {
-        return retry('predecessor close is unavailable; retry later');
+        return refused('predecessor close is unavailable in this host');
       }
-      const closer = this.container.resolve<HandoffPredecessorCloser>(CLI_AGENT_RUNTIME_TOKENS.HANDOFF_PREDECESSOR_CLOSER);
+      if (record.state === 'recorded') {
+        const moved = await this.ackStore!.compareAndSet(record.predecessorTabId, 'recorded', { state: 'closePending' });
+        if (!moved && !await this.ackStore!.findByPredecessor(record.predecessorTabId)) return refused('handoff record missing');
+      }
+      const closer = this.container!.resolve<HandoffPredecessorCloser>(CLI_AGENT_RUNTIME_TOKENS.HANDOFF_PREDECESSOR_CLOSER);
       if (!this.stopped.has(record.predecessorTabId)) {
+        if (this.stopWaiters.has(record.predecessorTabId)) return retry('predecessor stop already pending');
         const stop = new Promise<boolean>((resolveStop) => this.stopWaiters.set(record.predecessorTabId, resolveStop));
         this.armed.set(record.predecessorTabId, { callerTabId: record.predecessorTabId, callerSdkId: record.predecessorSdkId });
         if (this.flushed.has(record.predecessorTabId) || (record.predecessorSdkId && this.flushed.has(record.predecessorSdkId))) {
           this.onCallerTurnFlushed({ tabId: record.predecessorTabId, sessionId: record.predecessorSdkId ?? record.predecessorTabId });
-          if (!await stop) return retry('predecessor execution stop failed; retry later');
+          const stopped = await withDeadline(stop, 30_000);
+          if (stopped === TIMED_OUT) this.stopWaiters.delete(record.predecessorTabId);
+          if (stopped !== true) return retry('predecessor execution stop failed; retry later');
         } else {
           this.stopWaiters.delete(record.predecessorTabId);
           return retry('waiting for predecessor turn to flush; retry later');
@@ -252,7 +267,7 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
       if (!await closer.close(record.predecessorTabId, record.predecessorSdkId)) {
         return retry('predecessor tab close failed; retry later');
       }
-      await this.ackStore.compareAndSet(record.predecessorTabId, 'closePending', { state: 'closeCompleted' });
+      await this.ackStore!.compareAndSet(record.predecessorTabId, 'closePending', { state: 'closeCompleted' });
       return { status: 'closed', reason: 'predecessor closed' };
     } catch (error: unknown) {
       this.reportError('handoff acknowledgement failed', error);
@@ -362,24 +377,38 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
       sdkSessionId: record.realSessionId,
       tabId,
     });
+    let recordSaved = false;
     try {
       if (!this.ackStore) throw new Error('handoff acknowledgement storage unavailable');
+      const handoffPath = await fs.realpath(request.handoffPath);
       await this.ackStore.record({
         predecessorTabId: record.tabId,
         predecessorSdkId: record.realSessionId,
         successorTabId: tabId,
         successorSdkId: this.pending.get(tabId)?.resolvedSdkId ?? null,
         workspaceRoot: resolve(paths.root),
-        handoffPath: await fs.realpath(request.handoffPath),
+        handoffPath,
         state: 'recorded',
       });
+      recordSaved = true;
     } catch (error: unknown) {
       this.reportError('handoff acknowledgement record failed', error);
-      return this.refuse('session-start-failed', 'the handoff opened, but its acknowledgement record could not be saved');
     }
     const pending = this.pending.get(tabId);
     if (pending) {
+      // The start settled either way: the chain lineage must still commit when
+      // the successor's SDK id resolves later, even without an ack record.
       pending.committed = true;
+      if (recordSaved && pending.resolvedSdkId && this.ackStore) {
+        try {
+          const saved = await this.ackStore.findBySuccessor(tabId);
+          if (saved && saved.successorSdkId !== pending.resolvedSdkId) {
+            await this.ackStore.compareAndSet(saved.predecessorTabId, saved.state, { successorSdkId: pending.resolvedSdkId });
+          }
+        } catch (error: unknown) {
+          this.reportError('handoff successor binding failed', error);
+        }
+      }
       if (pending.resolvedSdkId) this.commitPendingChain(tabId, pending);
     }
     if (adoption.lanes.length > 0 || adoption.children.length > 0) {

@@ -1,5 +1,6 @@
 import { inject, injectable } from 'tsyringe';
 import { z } from 'zod';
+import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import {
   PLATFORM_TOKENS,
   hasStateStorageReadiness,
@@ -28,6 +29,8 @@ export class SessionHandoffAckStore {
   constructor(
     @inject(PLATFORM_TOKENS.WORKSPACE_STATE_STORAGE, { isOptional: true })
     private readonly storage: IStateStorage | null = null,
+    @inject(TOKENS.LOGGER, { isOptional: true })
+    private readonly logger: Logger | null = null,
   ) {}
 
   private async read(): Promise<HandoffAckRecord[]> {
@@ -37,7 +40,12 @@ export class SessionHandoffAckStore {
       ? await this.storage.getAsync(HANDOFF_ACK_STORAGE_KEY)
       : this.storage.get(HANDOFF_ACK_STORAGE_KEY);
     if (raw === undefined) return [];
-    return DocumentSchema.parse(raw).records;
+    const parsed = DocumentSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.logger?.error('Invalid handoff acknowledgement document', new Error('Invalid persisted handoff acknowledgement schema'));
+      return [];
+    }
+    return parsed.data.records;
   }
 
   private serialized<T>(action: () => Promise<T>): Promise<T> {
@@ -65,7 +73,7 @@ export class SessionHandoffAckStore {
         throw new Error('handoff predecessor already recorded');
       }
       records.push(RecordSchema.parse(value));
-      await this.storage!.update(HANDOFF_ACK_STORAGE_KEY, { schemaVersion: 1, records });
+      await this.storage!.update(HANDOFF_ACK_STORAGE_KEY, { schemaVersion: 1, records: this.prune(records) });
     });
   }
 
@@ -79,8 +87,13 @@ export class SessionHandoffAckStore {
       const index = records.findIndex((entry) => entry.predecessorTabId === predecessorTabId);
       if (index < 0 || records[index].state !== expected) return false;
       records[index] = RecordSchema.parse({ ...records[index], ...patch });
-      await this.storage!.update(HANDOFF_ACK_STORAGE_KEY, { schemaVersion: 1, records });
+      await this.storage!.update(HANDOFF_ACK_STORAGE_KEY, { schemaVersion: 1, records: this.prune(records) });
       return true;
     });
+  }
+
+  private prune(records: HandoffAckRecord[]): HandoffAckRecord[] {
+    let completed = records.filter((record) => record.state === 'closeCompleted').length;
+    return records.filter((record) => record.state !== 'closeCompleted' || --completed < 200);
   }
 }

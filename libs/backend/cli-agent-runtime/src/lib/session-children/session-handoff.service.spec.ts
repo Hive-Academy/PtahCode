@@ -1212,4 +1212,14 @@ describe('SessionHandoffService', () => {
       );
     });
   });
+
+  it('returns success when acknowledgement record persistence fails after start', async () => {
+    const h = makeHarness();
+    jest.spyOn(h.ackStore, 'record').mockRejectedValueOnce(new Error('storage down'));
+    const result = await h.service.handoff(h.request());
+    expect(result.ok).toBe(true);
+    expect(h.host.startHandoffSession).toHaveBeenCalledTimes(1);
+    expect(h.stopLogger.error).toHaveBeenCalled();
+    expect(await h.service.handoff(h.request())).toMatchObject({ ok: false, refusal: 'already-handed-off' });
+  });
 });
