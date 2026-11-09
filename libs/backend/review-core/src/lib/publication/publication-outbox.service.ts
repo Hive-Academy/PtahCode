@@ -17,7 +17,6 @@ export interface PublicationRequest {
   walkthrough: string;
   overview: string;
   candidates: PublicationInlineComment[];
-  publishedFindingIds?: string[];
   followUps?: { findingId: string; body: string }[];
   validRightAnchors: ReadonlySet<string>;
 }
@@ -97,10 +96,7 @@ export class PublicationOutboxService {
           outbox.state(review.id, 'confirmed', String(result.review.id));
           outbox.confirmFindingMarkers(
             review.id,
-            input.publishedFindingIds ??
-              input.candidates
-                .map((item) => item.findingId)
-                .filter((id) => !!id),
+            result.publishedFindingIds,
           );
         } else outbox.state(review.id, 'confirmed');
         for (const item of followUps)

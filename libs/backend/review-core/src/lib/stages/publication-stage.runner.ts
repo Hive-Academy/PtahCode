@@ -76,7 +76,7 @@ export class PublicationStageRunner {
     if (this.publication && triageCompleted) await this.publication.publish(claim, walkthrough, context.promptInput.diff,
       verdicts, operatorSettings, baseConfig, secrets, context.incrementalScope, signal,
       lenses.map(({ lens, result }) => ({ lens, family: result.status === 'completed' ? result.family : 'unavailable',
-        verdict: result.status === 'completed' ? 'completed' : 'unavailable' })));
+        status: result.status === 'completed' ? 'completed' : `unavailable: ${result.reason}` })));
     return { artifactPath, exportPath, acceptedCount: accepted.length, suppressedCount: suppressed.length };
   }
 }

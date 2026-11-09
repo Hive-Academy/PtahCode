@@ -53,6 +53,7 @@ describe('PublicationOutboxService', () => {
             threads: [],
           },
           deferred: [],
+          publishedFindingIds: [],
         };
       },
     };

@@ -1,11 +1,11 @@
 import { inject, injectable } from 'tsyringe';
 import { z } from 'zod';
-import type { GitHubInlineComment, GitHubIssueComment, GitHubReview, IGitHubReviewPort, RepoIdentity } from '@ptah-extension/review-contracts';
+import type { GitHubInlineComment, GitHubIssueComment, GitHubReview, IGitHubReviewPort } from '@ptah-extension/review-contracts';
 import { RepoIdentitySchema, ShaSchema, rightAnchorKey } from '@ptah-extension/review-contracts';
 import { PLATFORM_TOKENS, type ISecretStorage } from '@ptah-extension/platform-core';
 import { REVIEW_GITHUB_TOKEN_KEY, REVIEW_GITHUB_TOKENS } from '../di/tokens';
 import { GitHubReviewError } from './github-review.error';
-import { boundedBody } from './github-body-budget';
+import { boundedBody, MAX_BODY_CHARS } from './github-body-budget';
 
 const API = 'https://api.github.com';
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -37,6 +37,32 @@ export interface PublicationResult {
   walkthrough: GitHubIssueComment;
   review: GitHubReview | null;
   deferred: PublicationInlineComment[];
+  publishedFindingIds: string[];
+}
+
+function bodyWithFindings(base: string, findings: readonly PublicationInlineComment[], markers: readonly string[]):
+  { body: string; ids: string[] } {
+  let body = boundedBody(base, markers);
+  const ids: string[] = [];
+  for (const finding of findings) {
+    const marker = findingMarker(finding.findingId);
+    const addition = `\n\n- ${finding.body}\n${marker}`;
+    if (body.length + addition.length <= MAX_BODY_CHARS) {
+      body += addition;
+    } else {
+      const available = MAX_BODY_CHARS - body.length - 4;
+      if (available <= marker.length) continue;
+      try {
+        body += `\n\n- ${boundedBody(finding.body, [marker], available)}`;
+      } catch (error) {
+        if (!(error instanceof GitHubReviewError) || error.code !== 'publication-unavailable') throw error;
+        // Intentional: leave an unfit finding unmarked so a later attempt can retry it.
+        continue;
+      }
+    }
+    ids.push(finding.findingId);
+  }
+  return { body, ids };
 }
 export interface IGitHubReviewPublicationPort {
   publish(target: PublicationTarget, walkthrough: string, overview: string,
@@ -148,7 +174,8 @@ export class GithubReviewPublicationAdapter implements IGitHubReviewPublicationP
     const token = await this.secrets.get(REVIEW_GITHUB_TOKEN_KEY);
     if (!token) throw new GitHubReviewError('missing-token', 'GitHub bot token is unavailable');
     const content = [walkthrough, overview, ...candidates.map(x => x.body)].join('\n');
-    if (content.includes(token)) throw new GitHubReviewError('publication-unavailable', 'Publication contains a secret');
+    if (content.replace(/\\(?=[_-])/g, '').includes(token))
+      throw new GitHubReviewError('publication-unavailable', 'Publication contains a secret');
     const existing = await this.ownWalkthrough(target);
     const walkthroughBody = boundedBody(walkthrough, [walkthroughMarker]);
     let publishedWalkthrough: GitHubIssueComment;
@@ -163,7 +190,6 @@ export class GithubReviewPublicationAdapter implements IGitHubReviewPublicationP
     }
     const reviews = await this.ownReviews(target);
     const marker = reviewMarker(target.headSha);
-    const prior = reviews.find(review => review.body.includes(marker));
     const alreadyPosted = new Set(reviews.flatMap(review =>
       [review.body, ...review.threads.map(thread => thread.body)].flatMap(body =>
         [...body.matchAll(/<!-- ptah-review:finding:([^>]+) -->/g)].map(match => match[1]))));
@@ -181,25 +207,29 @@ export class GithubReviewPublicationAdapter implements IGitHubReviewPublicationP
       .map(match => match[0]);
     const complete = reviews.find(review => review.body.includes(marker) &&
       followUpMarkers.every(followUp => review.body.includes(followUp)));
-    if (fresh.length === 0 && complete) return { walkthrough: publishedWalkthrough, review: complete, deferred };
-    const fallback = deferred.map(x => `- ${x.body}`).join('\n');
-    const markers = [...followUpMarkers, ...fresh.map(x => findingMarker(x.findingId)), marker];
-    const body = boundedBody(`${overview}${fallback ? `\n\nAdditional verified findings (${deferred.length}):\n${fallback}` : ''}`, markers);
-    const comments: (GitHubInlineComment & { side: 'RIGHT' })[] = inline.map(x => ({
+    if (fresh.length === 0 && complete) return { walkthrough: publishedWalkthrough, review: complete, deferred, publishedFindingIds: [] };
+    const inlineReady = inline;
+    const bodyCandidates = deferred;
+    const normal = bodyWithFindings(overview, bodyCandidates, [...followUpMarkers, marker]);
+    const comments: (GitHubInlineComment & { side: 'RIGHT' })[] = inlineReady.map(x => ({
       path: x.path, line: x.line, side: 'RIGHT', body: boundedBody(x.body, [findingMarker(x.findingId)]),
     }));
     const suffix = `/pulls/${target.number}/reviews`;
     let response = await this.request(target, 'POST', suffix,
-      { commit_id: target.headSha, event: 'COMMENT', body, comments });
+      { commit_id: target.headSha, event: 'COMMENT', body: normal.body, comments });
+    let publishedIds = [...normal.ids, ...inlineReady.map(x => x.findingId)];
     if (response.status === 422 && comments.length) {
       // GitHub rejected an anchor. Recheck head and policy before the body-only fallback.
-      const moved = inline.map(x => `- ${x.body}`).join('\n');
+      const moved = bodyWithFindings(`${overview}\n\nInline anchors rejected by GitHub:`, fresh,
+        [...followUpMarkers, marker]);
       response = await this.request(target, 'POST', suffix, { commit_id: target.headSha,
-        event: 'COMMENT', body: boundedBody(`${overview}\n\nInline anchors rejected by GitHub:\n${moved}`, markers), comments: [] });
+        event: 'COMMENT', body: moved.body, comments: [] });
+      publishedIds = moved.ids;
     }
     if (!response.ok) throw new GitHubReviewError('http', `GitHub returned HTTP ${response.status}`);
     const raw = await this.json(response, reviewResponse);
     return { walkthrough: publishedWalkthrough,
-      review: { id: raw.id, body: raw.body ?? '', submittedAt: raw.submitted_at ?? '', threads: [] }, deferred };
+      review: { id: raw.id, body: raw.body ?? '', submittedAt: raw.submitted_at ?? '', threads: [] }, deferred,
+      publishedFindingIds: publishedIds };
   }
 }

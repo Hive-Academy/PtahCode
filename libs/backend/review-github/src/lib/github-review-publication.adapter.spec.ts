@@ -84,7 +84,9 @@ function setup() {
         id: 9,
         body: String(body['body']),
         submittedAt: stamp,
-        threads: [],
+        threads: ((body['comments'] ?? []) as { body: string; path: string; line: number }[])
+          .map((comment, index) => ({ id: String(index), path: comment.path, line: comment.line,
+            body: comment.body, resolved: false })),
       };
       reviews.push(review);
       return reply({ id: 9, body: review.body, submitted_at: stamp });
@@ -95,10 +97,34 @@ function setup() {
     reader,
     guard,
   );
-  return { adapter, writes, comments, reviews, guard, reader, fetcher };
+  return { adapter, writes, comments, reviews, guard, reader, fetcher, secrets };
 }
 
 describe('GithubReviewPublicationAdapter', () => {
+  it('rejects an escaped bot token before publishing', async () => {
+    const env = setup();
+    await expect(env.adapter.publish(target, 'secret\\-canary', 'Overview', [], new Set()))
+      .rejects.toMatchObject({ code: 'publication-unavailable' });
+    jest.mocked(env.secrets.get).mockResolvedValue('secret_name-canary');
+    await expect(env.adapter.publish(target, 'secret\\_name\\-canary', 'Overview', [], new Set()))
+      .rejects.toMatchObject({ code: 'publication-unavailable' });
+    expect(env.writes).toHaveLength(0);
+  });
+
+  it('truncates a schema-sized inline finding and confirms its marker', async () => {
+    const env = setup();
+    const result = await env.adapter.publish(target, 'Walkthrough', 'Overview',
+      [{ findingId: 'large', path: 'src/a.ts', line: 2,
+        body: `### Major · Large finding\n\n**Impact:** broken\n\n${'x'.repeat(70_000)}` }],
+      new Set([rightAnchorKey('src/a.ts', 2)]));
+    const posted = (env.writes[1].body['comments'] as { body: string }[])[0].body;
+    expect(posted).toContain('### Major · Large finding');
+    expect(posted).toContain('**Impact:** broken');
+    expect(posted).toContain('sections omitted');
+    expect(posted).toContain('<!-- ptah-review:finding:large -->');
+    expect(posted.length).toBeLessThanOrEqual(65_536);
+    expect(result.publishedFindingIds).toContain('large');
+  });
   it('bounds every outbound body and retains exact dedupe markers', async () => {
     const env = setup();
     await env.adapter.publish(target, `Walkthrough\n\n${'🐛'.repeat(20_000)}`,
@@ -107,7 +133,7 @@ describe('GithubReviewPublicationAdapter', () => {
       new Set([rightAnchorKey('src/a.ts', 2)]));
     const bodies = [String(env.writes[0].body['body']), String(env.writes[1].body['body']),
       ...((env.writes[1].body['comments'] as { body: string }[]).map(comment => comment.body))];
-    expect(bodies.every(body => Buffer.byteLength(body, 'utf8') <= 65_536)).toBe(true);
+    expect(bodies.every(body => body.length <= 65_536)).toBe(true);
     expect(bodies[0]).toContain('<!-- ptah-review:walkthrough -->');
     expect(bodies[1]).toContain(`<!-- ptah-review:head:${headSha} -->`);
     expect(bodies[2]).toContain('<!-- ptah-review:finding:root -->');
@@ -119,7 +145,7 @@ describe('GithubReviewPublicationAdapter', () => {
       [{ findingId: 'new-root', path: 'src/a.ts', line: 2, body: 'New verified finding' }],
       new Set([rightAnchorKey('src/a.ts', 2)]));
     expect(env.writes.filter(x => x.body['event'] === 'COMMENT')).toHaveLength(1);
-    expect(String(env.writes[1].body['body'])).toContain('ptah-review:finding:new-root');
+    expect(JSON.stringify(env.writes[1].body)).toContain('ptah-review:finding:new-root');
   });
   it('upserts the walkthrough and creates one COMMENT review per head with ten RIGHT anchors', async () => {
     const env = setup();
@@ -149,9 +175,7 @@ describe('GithubReviewPublicationAdapter', () => {
         (x) => x.side === 'RIGHT',
       ),
     ).toBe(true);
-    expect(String(reviewWrite['body'])).toContain(
-      'Additional verified findings (5)',
-    );
+    expect(String(reviewWrite['body'])).toContain('Finding 14');
     expect(JSON.stringify(env.writes)).not.toContain('secret-canary');
     await env.adapter.publish(
       target,
@@ -190,6 +214,49 @@ describe('GithubReviewPublicationAdapter', () => {
     );
     expect(reviewCalls).toBe(2);
     expect(env.guard.mayPublish).toHaveBeenCalledTimes(6);
+  });
+
+  it('keeps fallback markers only with whole findings and retries omitted ids', async () => {
+    const env = setup();
+    const original = env.fetcher.getMockImplementation();
+    let reviewCalls = 0;
+    env.fetcher.mockImplementation(async (url: string, init: RequestInit) => {
+      if (url.includes('/reviews') && reviewCalls++ === 0) return reply({}, 422);
+      return original?.(url, init);
+    });
+    const candidates = [
+      { findingId: 'kept', path: 'src/a.ts', line: 2, body: 'Short finding' },
+      { findingId: 'omitted', path: 'src/a.ts', line: 3, body: 'Huge finding ' + 'x'.repeat(65_480) },
+    ];
+    const anchors = new Set(candidates.map(x => rightAnchorKey(x.path, x.line)));
+    const first = await env.adapter.publish(target, 'Walkthrough', 'Overview', candidates, anchors);
+    const fallback = String(env.writes[1].body['body']);
+    expect(fallback).toContain('Short finding\n<!-- ptah-review:finding:kept -->');
+    expect(fallback).not.toContain('ptah-review:finding:omitted');
+    expect(first.publishedFindingIds).toEqual(['kept']);
+    const second = await env.adapter.publish(target, 'Walkthrough', 'Overview', candidates, anchors);
+    expect(second.publishedFindingIds).toContain('omitted');
+    expect(second.publishedFindingIds).not.toContain('kept');
+  });
+
+  it('truncates an oversized finding in a 422 body fallback', async () => {
+    const env = setup();
+    const original = env.fetcher.getMockImplementation();
+    let reviewCalls = 0;
+    env.fetcher.mockImplementation(async (url: string, init: RequestInit) => {
+      if (url.includes('/reviews') && reviewCalls++ === 0) return reply({}, 422);
+      return original?.(url, init);
+    });
+    const result = await env.adapter.publish(target, 'Walkthrough', 'Overview',
+      [{ findingId: 'large-fallback', path: 'src/a.ts', line: 2,
+        body: `### Finding\n\n**Impact:** broken\n\n${'x'.repeat(70_000)}` }],
+      new Set([rightAnchorKey('src/a.ts', 2)]));
+    const body = String(env.writes[1].body['body']);
+    expect(body).toContain('**Impact:** broken');
+    expect(body).toContain('sections omitted');
+    expect(body).toContain('<!-- ptah-review:finding:large-fallback -->');
+    expect(result.publishedFindingIds).toContain('large-fallback');
+    expect(body.length).toBeLessThanOrEqual(65_536);
   });
 
   it('blocks a mutation when the head or pause switch changes', async () => {
