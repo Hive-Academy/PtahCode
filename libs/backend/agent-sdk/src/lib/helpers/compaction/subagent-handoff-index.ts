@@ -343,6 +343,7 @@ export class SubagentHandoffIndex {
     try {
       read = await this.readHead(file);
     } catch (error: unknown) {
+      // degradation-audit: optional-capability - an unreadable record stays hidden (fail closed).
       this.logger.debug('[SubagentHandoffIndex] Handoff record head not read', {
         errorCode: errorCodeOf(error),
       });
