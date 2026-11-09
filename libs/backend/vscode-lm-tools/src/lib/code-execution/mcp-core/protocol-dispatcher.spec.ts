@@ -8363,7 +8363,7 @@ describe('MCP tool profile listing, eager loading and dispatch', () => {
       // +3: agent_wait, run_check and HTTP-only run_check_wait. +1:
       // ptah_session_handoff, always-on (TASK_2026_655). +1:
       // ptah_agent_message_control (P1-E). +1: ptah_agent_message_ack (P2-G).
-      expect(coding).toHaveLength(hasIDECapabilities ? 70 : 67);
+      expect(coding).toHaveLength(hasIDECapabilities ? 73 : 70);
       expect(coding.map((tool) => tool.name)).toContain(
         'ptah_artifact_publish',
       );
@@ -8855,7 +8855,10 @@ describe('protocol-handlers › route and outcome registration', () => {
     expect(names[names.indexOf('ptah_session_handoff') + 1]).toBe(
       'ptah_session_handoff_ack',
     );
-    expect(names[names.indexOf('ptah_session_handoff') + 2]).toBe(
+    expect(names[names.indexOf('ptah_session_handoff') + 2]).toBe('ptah_task_close_out');
+    expect(names[names.indexOf('ptah_session_handoff') + 3]).toBe('ptah_task_close_out_status');
+    expect(names[names.indexOf('ptah_session_handoff') + 4]).toBe('ptah_task_cleanup_completed');
+    expect(names[names.indexOf('ptah_session_handoff') + 5]).toBe(
       'ptah_route_decide',
     );
     expect(names).toContain('ptah_outcome_report');

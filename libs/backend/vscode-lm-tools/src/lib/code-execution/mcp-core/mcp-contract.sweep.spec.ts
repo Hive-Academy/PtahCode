@@ -933,6 +933,18 @@ const TOOL_DRIVERS: Readonly<Record<string, ToolDriver>> = {
       api.tasks = { check: async () => bigJsonBlob(marker) };
     },
   },
+  ptah_task_close_out: {
+    args: { taskId: 'TASK_2026_898_c1a5', workspaceRoot: '/repo' },
+    mock: (api, marker) => { api.tasks = { closeOut: async () => bigJsonBlob(marker) }; },
+  },
+  ptah_task_close_out_status: {
+    args: { runId: 'run-1' },
+    mock: (api, marker) => { api.tasks = { closeOutStatus: async () => bigJsonBlob(marker) }; },
+  },
+  ptah_task_cleanup_completed: {
+    args: { runId: 'run-1', taskId: 'TASK_2026_898_c1a5', workspaceRoot: '/repo' },
+    mock: (api, marker) => { api.tasks = { cleanupCompleted: async () => bigJsonBlob(marker) }; },
+  },
   ptah_session_link_task: {
     // The success text is one fixed line around the echoed ids; an oversized
     // task id (the real namespace would refuse it) is the only way to push
@@ -1981,7 +1993,7 @@ describe('coverage matrix — served tools across host, caller and transport (de
     // run_check and HTTP-only run_check_wait. +1: ptah_session_handoff,
     // always-on (TASK_2026_655). +1: ptah_agent_message_control
     // (TASK_2026_AGENT_MESSAGING P1-E). +1: ptah_agent_message_ack (P2-G).
-    expect(namesPerCaller[0]).toHaveLength(70);
+    expect(namesPerCaller[0]).toHaveLength(73);
     expect(namesPerCaller[0]).toContain('ptah_artifact_publish');
   });
 
@@ -2009,7 +2021,7 @@ describe('coverage matrix — served tools across host, caller and transport (de
     // 63 in total minus the 3 IDE-gated tools; see the note above
     // (TASK_2026_655: +1, ptah_session_handoff; P1-E: +1,
     // ptah_agent_message_control; P2-G: +1, ptah_agent_message_ack).
-    expect(namesPerCaller[0]).toHaveLength(67);
+    expect(namesPerCaller[0]).toHaveLength(70);
     expect(namesPerCaller[0]).toContain('ptah_artifact_publish');
     for (const ideOnly of [
       'ptah_lsp_references',
@@ -2050,7 +2062,7 @@ describe('coverage matrix — served tools across host, caller and transport (de
         );
         // TASK_2026_655: +1, ptah_session_handoff (always-on). P1-E: +1,
         // ptah_agent_message_control. P2-G: +1, ptah_agent_message_ack.
-        expect(apps).toHaveLength(hasIDECapabilities ? 73 : 70);
+        expect(apps).toHaveLength(hasIDECapabilities ? 76 : 73);
         expect(apps.filter((name) => !APPS_ONLY_TOOL_NAMES.has(name))).toEqual(
           coding,
         );
@@ -2534,6 +2546,9 @@ describe('MCP dispatcher contract sweep (TASK_2026_559 Batch 21, Task 21.1)', ()
       ptah_session_handoff: 764,
       // TASK_2026_898, measured 2026-11-09: 149 chars; ceil(149 * 1.1) + 10.
       ptah_session_handoff_ack: 174,
+      ptah_task_close_out: 201,
+      ptah_task_close_out_status: 125,
+      ptah_task_cleanup_completed: 209,
       ptah_route_decide: 1_000,
       ptah_outcome_report: 1_000,
       // TASK_2026_597 Batch 34, measured 2026-10-04: 498 and 491 chars.

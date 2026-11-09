@@ -1138,9 +1138,11 @@ async function handleIndividualTool(
 ): Promise<MCPResponse | null> {
   const { ptahAPI, logger } = deps;
 
-  const lifecycle = lifecycleTools.find((tool) => tool.definition.name === name);
+  const lifecycle = lifecycleTools.find(
+    (tool) => tool.definition.name === name,
+  );
   if (lifecycle) {
-    const reply = await lifecycle.handler(args, ptahAPI.session);
+    const reply = await lifecycle.handler(args, ptahAPI);
     return await createToolSuccessResponse(request, reply, deps);
   }
 
@@ -1583,7 +1585,13 @@ async function handleIndividualTool(
         // The receipt stays out of the reply: the lane needs its ack state
         // and the transport state, not the sender's session details.
         const reply = result.ok
-          ? { ok: true, messageId, ackState: result.ackState, changed: result.changed, state: result.receipt.state }
+          ? {
+              ok: true,
+              messageId,
+              ackState: result.ackState,
+              changed: result.changed,
+              state: result.receipt.state,
+            }
           : result;
         return await createToolSuccessResponse(
           request,
