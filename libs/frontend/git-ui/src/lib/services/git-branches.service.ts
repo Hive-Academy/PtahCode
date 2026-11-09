@@ -212,6 +212,10 @@ export class GitBranchesService implements MessageHandler {
    * behaviour matches the raw listener this replaced: a push arriving before
    * the surface arms the service, or after it disarms, is dropped. A push for
    * a different workspace folder is dropped too.
+   *
+   * A push for a root this service stopped reading (a `GIT_ROOT_MISSING`
+   * refusal) resumes it with a full 'initial' refresh: the refusal cleared
+   * every slice, so the push's own causes may select nothing to refill.
    */
   handleMessage(message: { type: string; payload?: unknown }): void {
     if (!this._isListening) return;
@@ -228,8 +232,13 @@ export class GitBranchesService implements MessageHandler {
       return;
     }
     const root = this.workspaceKey() ?? '';
-    if (this.unavailableRoots.has(root)) this.reactivateRoot(root);
-    void this.refreshForCauses(payload?.causes);
+    // A resumed root had every slice cleared when the refusal arrived (see
+    // `readRpc`), so the push's own cause selection could select nothing —
+    // a 'workspace'-only push would leave branch, stash and commit state
+    // empty after the root came back. Resume with a full ('initial') read.
+    const resumed = this.unavailableRoots.has(root);
+    if (resumed) this.reactivateRoot(root);
+    void this.refreshForCauses(resumed ? ['initial'] : payload?.causes);
   }
 
   /**

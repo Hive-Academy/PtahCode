@@ -8,6 +8,7 @@ import {
 import { VSCodeService, rpcCall } from '@ptah-extension/core';
 import type { MessageHandler } from '@ptah-extension/core';
 import {
+  GIT_ROOT_MISSING_MESSAGE,
   GIT_ROOT_UNAVAILABLE_MESSAGE,
   MESSAGE_TYPES,
   normalizeWorkspaceRoot,
@@ -199,10 +200,23 @@ export function isRpcTimeout(error: string | undefined): boolean {
 }
 
 /**
+ * Whether an error message is the backend refusing the scoped root: either
+ * its directory is confirmed gone (`GIT_ROOT_MISSING`: a removed worktree)
+ * or it is not a registered, live root (`GIT_ROOT_UNAVAILABLE`). Both mean
+ * the root — not git — is what failed, so both read and back off the same.
+ */
+function isRootRefusal(error: string | undefined): boolean {
+  return (
+    error === GIT_ROOT_UNAVAILABLE_MESSAGE ||
+    error === GIT_ROOT_MISSING_MESSAGE
+  );
+}
+
+/**
  * Reason for a `git:info` read that produced no usable result: `timeout`
  * when the RPC itself timed out, `root-unavailable` when the backend refused
- * the scoped root (`GIT_ROOT_UNAVAILABLE`: a removed or pruned worktree),
- * `error` for any other transport failure or a malformed payload.
+ * the scoped root (see {@link isRootRefusal}), `error` for any other
+ * transport failure or a malformed payload.
  */
 function readFailureReason(
   success: boolean,
@@ -210,7 +224,7 @@ function readFailureReason(
 ): GitStatusUnavailableReason {
   if (success) return 'error';
   if (isRpcTimeout(error)) return 'timeout';
-  return error === GIT_ROOT_UNAVAILABLE_MESSAGE ? 'root-unavailable' : 'error';
+  return isRootRefusal(error) ? 'root-unavailable' : 'error';
 }
 
 @Injectable({ providedIn: 'root' })
@@ -275,6 +289,11 @@ export class GitStatusService implements MessageHandler {
     equal: operationEqual,
   });
   private fetchGeneration = 0;
+  /**
+   * How long a backend-refused root (see `isRootRefusal`) goes unread: the
+   * same 60 s `UnavailableGitRootsStore` records, so every surface re-probes
+   * a refused root on one cadence. A successful read clears it early.
+   */
   static readonly UNAVAILABLE_ROOT_BACKOFF_MS = 60_000;
   private readonly unavailableRoots = new Map<string, number>();
 
@@ -597,8 +616,13 @@ export class GitStatusService implements MessageHandler {
         this.unavailableRoots.delete(normalizeWorkspaceRoot(workspaceAtFetchTime));
         this.applyGitInfo(result.data, workspaceAtFetchTime);
       } else {
-        if (result.error === GIT_ROOT_UNAVAILABLE_MESSAGE) {
-          this.unavailableRoots.set(normalizeWorkspaceRoot(workspaceAtFetchTime), Date.now() + GitStatusService.UNAVAILABLE_ROOT_BACKOFF_MS);
+        // A refused root goes unread for the backoff window; a matching
+        // watcher push still applies (it carries a read that succeeded).
+        if (isRootRefusal(result.error)) {
+          this.unavailableRoots.set(
+            normalizeWorkspaceRoot(workspaceAtFetchTime),
+            Date.now() + GitStatusService.UNAVAILABLE_ROOT_BACKOFF_MS,
+          );
         }
         this.markReadFailed(readFailureReason(result.success, result.error));
       }

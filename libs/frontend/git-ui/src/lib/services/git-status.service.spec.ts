@@ -12,7 +12,7 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { VSCodeService } from '@ptah-extension/core';
-import { MESSAGE_TYPES } from '@ptah-extension/shared';
+import { GIT_ROOT_MISSING_MESSAGE, MESSAGE_TYPES } from '@ptah-extension/shared';
 import type { GitInfoResult } from '@ptah-extension/shared';
 import { GitStatusService } from './git-status.service';
 
@@ -700,6 +700,88 @@ describe('GitStatusService keeps last good data when status is unavailable (TASK
       await service.refresh();
 
       expectKeptAndStale('root-unavailable');
+    });
+
+    it('marks a missing root as "root-unavailable" and suppresses the next read for it (PR #1012 F2)', async () => {
+      await loadGood();
+      mockRpcCall.mockResolvedValue({
+        success: false,
+        error: GIT_ROOT_MISSING_MESSAGE,
+      });
+
+      await service.refresh();
+
+      expectKeptAndStale('root-unavailable');
+
+      // The refused root is not read again while the backoff window holds.
+      mockRpcCall.mockClear();
+      mockRpcCall.mockResolvedValue(rpcOk(gitInfo()));
+      await service.refresh();
+
+      expect(mockRpcCall).not.toHaveBeenCalled();
+      expect(service.statusUnavailable()).toBe('root-unavailable');
+    });
+
+    it('lets the Retry refresh path read again once the backoff window has passed (PR #1012 F2)', async () => {
+      await loadGood();
+      mockRpcCall.mockResolvedValue({
+        success: false,
+        error: GIT_ROOT_MISSING_MESSAGE,
+      });
+
+      await service.refresh();
+
+      expectKeptAndStale('root-unavailable');
+
+      // Retry reaches this service as `refresh()` (the review shell's Retry
+      // and the attention notice action). Past the refusal window the root
+      // is read again.
+      const realNow = Date.now;
+      const advanced = realNow() + GitStatusService.UNAVAILABLE_ROOT_BACKOFF_MS + 1;
+      jest.spyOn(Date, 'now').mockReturnValue(advanced);
+      try {
+        mockRpcCall.mockClear();
+        mockRpcCall.mockResolvedValue(rpcOk(gitInfo()));
+
+        await service.refresh();
+
+        expect(mockRpcCall).toHaveBeenCalledWith(expect.anything(), 'git:info', {
+          workspaceRoot: '/ws/a',
+        }, 75_000);
+        expect(service.statusUnavailable()).toBeNull();
+        expect(service.staleReason()).toBeNull();
+        expect(service.isStale()).toBe(false);
+      } finally {
+        (Date.now as jest.Mock).mockRestore();
+      }
+    });
+
+    it('applies a matching git:status-update push while the backoff holds (PR #1012 F2)', async () => {
+      await loadGood();
+      mockRpcCall.mockResolvedValue({
+        success: false,
+        error: GIT_ROOT_MISSING_MESSAGE,
+      });
+
+      await service.refresh();
+
+      expectKeptAndStale('root-unavailable');
+
+      service.startListening(); // the refused root is not fetched again
+      mockRpcCall.mockClear();
+
+      // A watcher push for the same root carries a read that already
+      // succeeded on the host side; it applies without any fetch.
+      service.handleMessage({
+        type: MESSAGE_TYPES.GIT_STATUS_UPDATE,
+        payload: { ...gitInfo(), workspaceRoot: '/ws/a' },
+      });
+
+      expect(mockRpcCall).not.toHaveBeenCalled();
+      expect(service.statusUnavailable()).toBeNull();
+      expect(service.staleReason()).toBeNull();
+      expect(service.branchName()).toBe('main');
+      expect(service.changedFileCount()).toBe(1);
     });
 
     it('keeps the last list and marks it stale with "error" on a transport failure', async () => {

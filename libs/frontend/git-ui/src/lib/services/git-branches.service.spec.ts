@@ -192,6 +192,64 @@ describe('GitBranchesService (TASK_2026_111)', () => {
     }
   });
 
+  it('refills every slice when a stopped root resumes on a workspace-only push (PR #1012 F4)', async () => {
+    jest.useFakeTimers();
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      mockRpcCall.mockResolvedValue({ success: false, error: GIT_ROOT_MISSING_MESSAGE });
+      const first = service.refreshBranches();
+      await jest.advanceTimersByTimeAsync(1_000);
+      await first;
+      expect(mockRpcCall).toHaveBeenCalledTimes(3);
+      // The refusal cleared every slice for the stopped root.
+      expect(service.branches()).toEqual(EMPTY_BRANCHES);
+      expect(service.stashCount()).toBe(0);
+      expect(service.lastCommit()).toBeNull();
+
+      service.startListening();
+      mockRpcCall.mockClear();
+      mockRpcCall.mockImplementation((_v: unknown, method: string) => {
+        if (method === 'git:stashList') return makeRpcSuccess({ count: 2, entries: [] });
+        if (method === 'git:lastCommit') return makeRpcSuccess({ ...EMPTY_COMMIT, subject: 'root back' });
+        return makeRpcSuccess({ current: 'feature/back', local: [], remote: [] });
+      });
+      service.handleMessage({
+        type: MESSAGE_TYPES.GIT_STATUS_UPDATE,
+        payload: { workspaceRoot: '/test-workspace', causes: ['workspace'] },
+      });
+      await jest.advanceTimersByTimeAsync(1_000);
+
+      // A resumed root reads ALL slices, even though the push's own causes
+      // ('workspace' only) would have selected none.
+      const methods = mockRpcCall.mock.calls.map(([, m]: [unknown, string]) => m);
+      expect(methods).toEqual(
+        expect.arrayContaining(['git:branches', 'git:stashList', 'git:lastCommit']),
+      );
+      expect(service.currentBranch()).toBe('feature/back');
+      expect(service.stashCount()).toBe(2);
+      expect(service.lastCommit()?.subject).toBe('root back');
+    } finally {
+      warn.mockRestore();
+      jest.useRealTimers();
+    }
+  });
+
+  it('keeps the cause-based refresh for a root that was never stopped (PR #1012 F4)', async () => {
+    jest.useFakeTimers();
+    try {
+      service.startListening();
+      mockRpcCall.mockClear();
+      service.handleMessage({
+        type: MESSAGE_TYPES.GIT_STATUS_UPDATE,
+        payload: { workspaceRoot: '/test-workspace', causes: ['workspace'] },
+      });
+      await jest.advanceTimersByTimeAsync(1_000);
+      expect(mockRpcCall).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('ignores an old missing reply after Retry and starts fresh reads', async () => {
     jest.useFakeTimers();
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
