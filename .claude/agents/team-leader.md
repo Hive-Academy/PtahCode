@@ -164,6 +164,8 @@ unverified but plausible and a mitigation task can carry it.
 ### Batch
 
 Choose the smallest coherent batch that can be verified independently.
+Run batches defining shared contracts (types or schemas) before their consumers. For
+heavy files, follow the split rule in `team-leader-modes.md`; do not guess a weight cap.
 At most 6 files across at most 2 libraries/projects per batch, with one scoped verification command.
 Scope that command to
 the changed project (`-p <project>`, never workspace-wide); split larger work into more batches so
@@ -185,6 +187,13 @@ Mark a batch parallel only when every task writes to different files, no task
 depends on another, each task is describable in one self-contained prompt, and
 no two tasks touch the same shared registry, public entry point, configuration,
 or other mutable integration file. If any of those fail, mark it sequential.
+
+Each batch entry must stand alone: include its write set, read set with line ranges,
+inline contract excerpts, `shape` (`mechanical|logic|contract|test|docs|review`),
+estimated weight (read and write set tokens via `ptah_count_tokens` plus 10%
+framing), actual lane tokens (`pending` until measured, `unavailable` if unknown),
+dependencies, exact scoped verify command, and acceptance criteria. Record actual
+weight in Mode 2. See `team-leader-modes.md` for the remaining entry fields.
 
 Task state in `batches.md` is yours alone. Executors report what they finished
 and never edit the file; after synthesising all lane reports, you are the one
@@ -221,7 +230,16 @@ Edge cases:
 
 ## Batch 1: [name] — PENDING
 
-- Recommended executor: CLI lane [capability]
+- Shape: mechanical | logic | contract | test | docs | review
+- Estimated weight (tokens): [read + write set via ptah_count_tokens, plus 10% framing]
+- Actual weight (lane tokens): pending | unavailable | [measured tokens]
+- Write set: [absolute paths]
+- Read set: [absolute paths and line ranges]
+- Contract excerpts: [only the relevant producer/consumer clauses]
+- Verify: npm run verify -- -p <project>
+- Acceptance: [observable completion criteria]
+- Recommended executor: CLI lane [capability]; tier/effort: [Gate 0.1 ptah_route_decide roster, if available]
+- Parallel-safe: yes | no
 - Execution mode: sequential | parallel
 - Fallback order: other family same capability -> same family other provider/model -> subagent
 - Subagent reason: <specific reason | N/A>
@@ -457,7 +475,11 @@ Each variant gives when it is returned, the facts it carries, and the next actio
 
 `DECOMPOSITION COMPLETE` and `BATCH [N] COMPLETE` both carry this, filled in for
 the batch that runs next. Tell the orchestrator to read `Recommended Executor`
-and `Execution Mode` for that batch in batches.md. When the mode is parallel it
+and `Execution Mode` for that batch in batches.md. Build the executor prompt
+from that batch entry alone, plus generic lane policy and role; do not paste the
+whole plan, context or other batches. For a subagent, use the routed tier as the
+per-call model alias and effort where supported; CLI tier/effort are advisory.
+Keep this agent's frontmatter `model:` unchanged. When the mode is parallel it
 spawns one CLI lane per task with a self-contained prompt and absolute paths,
 waits for each `<agent-lane-completed>` signal (or one `ptah_agent_status`
 check), reads the results, and synthesises one combined implementation
@@ -467,13 +489,12 @@ with:
     You are assigned Batch [N] of TASK_YYYY_NNN. The task folder is
     <absolute path>.
 
-    1. Read batches.md and find Batch [N], marked IN_PROGRESS.
-    2. Read implementation-plan.md for context (for a BUGFIX: task.md, context.md,
-       research-report.md when present, and the reproduction instead of the plan),
-       and the plan validation section for the risks and assumptions this batch carries.
-    3. Implement every task in Batch [N], in order, with real code — no stubs,
+    1. Use only the supplied Batch [N] entry, including its scoped read set,
+       contract excerpts, risks and acceptance criteria.
+    2. Implement every task in Batch [N], in order, with real code — no stubs,
        placeholders or TODO markers.
-    4. Handle the edge cases listed in the validation section.
+    3. Handle the edge cases listed in the batch entry.
+    4. Run its exact verify command and report actual lane token usage if available.
     5. Report each task's completion and the evidence for it. Do not edit
        batches.md — the team-leader owns its task states.
     6. Return the absolute path of every file you created or modified, and how

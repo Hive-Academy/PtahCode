@@ -2,6 +2,7 @@ import type { z } from 'zod';
 import { MAX_DECISION_REQUESTS } from '../routing-constants';
 import { RouteDecideArgsSchema } from './route-decide-args.schema';
 import {
+  ChosenEntrySchema,
   GateResultSchema,
   PreflightResultSchema,
   RouteDecideResultSchema,
@@ -36,6 +37,8 @@ const unavailable = {
   needsDisclosedFallback: false,
   source: 'ranking',
   model: null,
+  tier: 'sonnet',
+  effort: 'medium',
   provenance: null,
   score: null,
   confidence: null,
@@ -48,6 +51,8 @@ const chosen = {
   status: 'chosen',
   executor: { kind: 'lane', id: 'claude', cli: 'claude', family: 'anthropic' },
   model: 'sonnet',
+  tier: 'sonnet',
+  effort: 'medium',
   provenance: 'reported',
   score: 80,
   source: 'ranking',
@@ -58,7 +63,51 @@ const chosen = {
   reason: 'Highest eligible score',
 };
 
+describe('roster tier and effort', () => {
+  it('requires both fields on chosen and unavailable entries', () => {
+    expect(ChosenEntrySchema.safeParse(chosen).success).toBe(true);
+    expect(UnavailableEntrySchema.safeParse(unavailable).success).toBe(true);
+    for (const [schema, row] of [
+      [ChosenEntrySchema, chosen],
+      [UnavailableEntrySchema, unavailable],
+    ] as const) {
+      expect(schema.safeParse({ ...row, tier: undefined }).success).toBe(false);
+      expect(schema.safeParse({ ...row, effort: undefined }).success).toBe(false);
+    }
+  });
+});
+
 describe('route-decide arguments', () => {
+  it('accepts legacy phases without batch hints', () => {
+    expect(RouteDecideArgsSchema.safeParse(gateArgs).success).toBe(true);
+  });
+
+  it('accepts valid phase shapes and estimated source-token weights', () => {
+    for (const shape of ['mechanical', 'logic', 'contract', 'test', 'docs', 'review']) {
+      expect(RouteDecideArgsSchema.safeParse({
+        ...gateArgs,
+        phases: [{ id: 'implement', kind: 'implement', shape, weight: 200000 }],
+      }).success).toBe(true);
+    }
+    expect(RouteDecideArgsSchema.safeParse({
+      ...gateArgs,
+      phases: [{ id: 'implement', kind: 'implement', weight: 0 }],
+    }).success).toBe(true);
+  });
+
+  it('rejects invalid phase shapes and weights', () => {
+    for (const weight of [-1, 1.5, 200001]) {
+      expect(RouteDecideArgsSchema.safeParse({
+        ...gateArgs,
+        phases: [{ id: 'implement', kind: 'implement', weight }],
+      }).success).toBe(false);
+    }
+    expect(RouteDecideArgsSchema.safeParse({
+      ...gateArgs,
+      phases: [{ id: 'implement', kind: 'implement', shape: 'unknown' }],
+    }).success).toBe(false);
+  });
+
   it('accepts the two strict stage shapes', () => {
     expect(
       RouteDecideArgsSchema.safeParse({

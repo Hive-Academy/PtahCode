@@ -115,7 +115,12 @@ export function buildRouteDecideTool(): MCPToolDefinition {
       'Choose how to staff one engineering request. stage "pre-flight" takes ' +
       '"request" and returns task type and depth. stage "gate-0.1" also takes ' +
       '"taskType", "depth", "phases" and optional "pins", "preferenceSource" ' +
-      'and "preferences", and returns one roster entry per phase. Invalid ' +
+      'and "preferences", and returns one roster entry per phase. Each phase ' +
+      'may include "shape" (mechanical, logic, contract, test, docs, review) ' +
+      'and "weight" (estimated source tokens in its batch read and write sets, ' +
+      'plus 10% framing). ' +
+      'Each roster row includes "tier" and "effort". For subagents, "tier" ' +
+      'is the model alias to pass; for CLI lanes, both are advisory. Invalid ' +
       'arguments are an error that names the field. The call updates rotation ' +
       `state. Results are capped at 64,000 characters and 25,600 tokens; a larger result is returned as a tool error. When routing is not registered in this host, the error is: ${ROUTING_UNAVAILABLE_MESSAGE}.`,
     inputSchema: inputSchemaOf(RouteDecideArgsSchema),

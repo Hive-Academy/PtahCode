@@ -130,6 +130,14 @@ Templates, skip conditions and rejection handling: [checkpoints.md](references/c
 - Every `Task()` prompt carries `**Task Folder**`, a `**Deliverable**:` absolute path and the
   instruction to reply `WROTE: <path>` + a one-line verdict. Shape and filenames:
   [agent-catalog.md § Invocation](references/agent-catalog.md#invocation).
+- Build each executor prompt from its one batch entry: write set, read set with line ranges,
+  contract excerpts, dependencies, verify command and acceptance. Do not send the whole plan,
+  context or other batches.
+- For subagent Agent/Task calls, pass the chosen roster `tier` as per-call `model` alias and
+  `effort` where the host and model support it. In supported Claude Code versions, model
+  precedence is call -> agent frontmatter -> `CLAUDE_CODE_SUBAGENT_MODEL` -> parent;
+  `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` and `CLAUDE_CODE_EFFORT_LEVEL` can override.
+  When no chosen roster row exists, keep the agent frontmatter `model:` default. Record requested vs observed model when observable.
 - **Team-leader** is advisory and spawns nothing. Each return ends in a `### Next action:` line —
   do exactly that: [team-leader-modes.md](references/team-leader-modes.md).
 - **CLI lanes**: Gate 0.1 decides whether they are used. Who may spawn them and how phases,
@@ -218,7 +226,7 @@ Every tool call in any agent or lane resends its whole thread, so cost is reques
 | [agent-catalog.md](references/agent-catalog.md)         | Choosing or invoking an agent                                                     |
 | [team-leader-modes.md](references/team-leader-modes.md) | Invoking team-leader or acting on its return                                      |
 | [task-tracking.md](references/task-tracking.md)         | Creating or continuing a task folder                                              |
-| [lane-assignment.md](references/lane-assignment.md)     | Gate 0.1 enabled lanes, or the user pinned a phase to a lane                      |
+| [lane-assignment.md](references/lane-assignment.md)     | Whenever `ptah_route_decide` is listed (any lane mode), or the user pinned a phase to a lane                      |
 | [fleet.md](references/fleet.md)                         | `/orchestrate TASK_A TASK_B ...` or an explicit fleet request; validate IDs first |
 | [git-standards.md](references/git-standards.md)         | Writing a commit or handling a hook failure                                       |
 

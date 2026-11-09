@@ -17,16 +17,31 @@ How to run any lane (discovery, addressing, prompts, resume, review, revise cap)
 
 ## Gate 0.1 outcome
 
-If `ptah_route_decide` is listed, call it once with `stage:'gate-0.1'`, the user
-`request`, chosen `taskType` and `depth`, and `phases` (`id`, `kind`, optional `role` and
-`reviews`). Pass explicit user `pins` and known `preferenceSource`/`preferences` when
-available. A current user pin wins. Use `roster` entries with `status:'chosen'` to
+If `ptah_route_decide` is listed, make the initial `stage:'gate-0.1'` call with the planned phases, the user
+`request`, chosen `taskType` and `depth`, and `phases` (`id`, `kind`, optional `role`,
+`reviews`, `shape`, `weight`). After Mode 1 writes `batches.md`, make one more `stage:'gate-0.1'` call with one phase per batch, its shape and weight, and the same preferences. Re-key each user pin to the `id` of the batch phase it covers. A current user pin still wins. `shape` is
+`mechanical|logic|contract|test|docs|review`; `weight` is the integer 0-200000 token
+estimate for the batch read and write sets from `ptah_count_tokens`, plus 10% framing.
+Pass explicit user `pins` and known `preferenceSource`/`preferences` when
+available. Use `roster` entries with `status:'chosen'` to
 select the reported executor and model; an `unavailable` entry follows the existing
 disclosed fallback. Show phase, executor, model, reason, source and confidence (`—`
 for null), plus `overallSource`, `overallConfidence` and reasons. Record the result
 in `decisions.md` with stage, source, confidence, reasons, fallback cause and any
 low-confidence model proposal. If the tool is not listed, skip it silently and use
 the live-list rules below.
+
+Each chosen roster row returns `executor`, `model` (null when unavailable), `tier`
+(`haiku|sonnet|opus`), `effort` (`low|medium|high|xhigh|max`) and a `reason` ending
+`policy Rn; tier ..., effort ..., shape ..., weight ...`. For subagent Agent/Task calls,
+pass `tier` as per-call `model` alias and `effort` where host and model support it.
+Keep frontmatter `model:` as the per-role default; record requested vs observed model
+when observable. In supported Claude Code versions, model precedence is call ->
+frontmatter -> `CLAUDE_CODE_SUBAGENT_MODEL` -> parent; `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1`
+and `CLAUDE_CODE_EFFORT_LEVEL` can override. For CLI lanes, `tier`/`effort` are advisory:
+model resolution stays request `model` (raw ID from that lane's list) ->
+`agentOrchestration.<cli>Model` -> native CLI default. `modelTier` maps only for
+ptah-cli providers and `cli: "claude"`; a per-CLI tier map is future work.
 
 Record it in `context.md` under `## CLI Lanes`: the preference source, mode (`enabled` / `auto` / `disabled`), the
 approval mode (`Approval: lane-review` / `Approval: user`, per

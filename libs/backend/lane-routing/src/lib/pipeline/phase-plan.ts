@@ -14,6 +14,7 @@ import type { DecisionModelSelection } from '../decision-model/decision-model.ty
 import type { DecisionOption } from '../decision-model/decision-payload';
 import type { RouteDecideArgs } from '../contracts/route-decide-args.schema';
 import type { GatheredCall } from './gather';
+import { ModelTierSchema } from '../contracts/route-decide-result.schema';
 import type { LaneQuestion, ModelRequestOutcome } from './model-refine';
 import { resolvePhase } from './phase-resolve';
 import {
@@ -31,6 +32,7 @@ import {
 import { score, type CandidateScore } from '../ranking/score';
 import { spread, type SpreadResult } from '../ranking/spread';
 import type { FallbackCause } from '../reasons/compile-reasons';
+import { policyForPhase, type PhasePolicy } from './tier-effort-policy';
 
 const LANE_INSTRUCTIONS = 'Choose the executor for this phase. Each score already includes past outcomes; pastOutcomes lists the delivered and failed run counts behind it. No entry means no verified runs were available for that executor in the outcome window.';
 
@@ -83,6 +85,9 @@ export interface PhasePlan {
   readonly phaseId: string;
   readonly kind: PhaseKind;
   readonly taskKind: OutcomeTaskKind;
+  readonly shape?: GatePhase['shape'];
+  readonly weight?: GatePhase['weight'];
+  readonly policy: PhasePolicy;
   readonly constraint: PhaseConstraintResult;
   readonly ranked: readonly ScoredCandidate[];
   readonly spread: SpreadResult | null;
@@ -126,6 +131,7 @@ export function planRoutePhases(
   const plans: PhasePlan[] = [];
   let cursor = rotation;
   for (const phase of phases) {
+    const policy = policyForPhase(phase.kind, phase.shape, phase.weight);
     const candidates = candidatesFor(phase, gathered);
     remember(candidates);
     const pin = args.pins?.find((entry) => entry.phaseId === phase.id);
@@ -144,6 +150,9 @@ export function planRoutePhases(
         phaseId: phase.id,
         kind: phase.kind,
         taskKind,
+        shape: phase.shape,
+        weight: phase.weight,
+        policy,
         constraint,
         ranked: [],
         spread: null,
@@ -155,7 +164,7 @@ export function planRoutePhases(
       candidate,
       scored: scoreCandidate(
         candidate,
-        phase.kind,
+        policy.tier,
         taskKind,
         pinModel,
         gathered,
@@ -179,6 +188,9 @@ export function planRoutePhases(
       phaseId: phase.id,
       kind: phase.kind,
       taskKind,
+      shape: phase.shape,
+      weight: phase.weight,
+      policy,
       constraint,
       ranked: orderScored(scored, spreadResult.ranking),
       spread: spreadResult,
@@ -274,12 +286,11 @@ function constraintInput(
 
 function scoreCandidate(
   candidate: RoutingCandidate,
-  kind: PhaseKind,
+  tier: PhasePolicy['tier'],
   taskKind: OutcomeTaskKind,
   pinModel: string | undefined,
   gathered: GatheredCall,
 ): CandidateScore {
-  const tier = tierFor(kind);
   const facts =
     candidate.kind === 'lane' ? gathered.models.get(candidate.id) : undefined;
   const configuredModel =
@@ -301,7 +312,6 @@ function scoreCandidate(
     candidate,
     pinModel,
     facts?.models ?? [],
-    tier,
     taskKind,
     gathered,
   );
@@ -315,13 +325,12 @@ function applyPinModel(
     readonly id: string;
     readonly provenance: CandidateScore['provenance'];
   }[],
-  tier: string,
   taskKind: OutcomeTaskKind,
   gathered: GatheredCall,
 ): CandidateScore {
   const listed = models.find((model) => model.id === pinModel);
   const laneDefault = pinModel === LANE_DEFAULT_MODEL;
-  const tierPin = candidate.kind === 'subagent' && pinModel === tier;
+  const tierPin = candidate.kind === 'subagent' && ModelTierSchema.safeParse(pinModel).success;
   if (listed === undefined && !laneDefault && !tierPin) return scored;
   const modelId = laneDefault ? LANE_DEFAULT_MODEL : pinModel;
   const resolved = gathered.matrix.resolve(candidate.family, modelId, taskKind);
@@ -341,18 +350,6 @@ function applyPinModel(
     profileModel: resolved.profileModel,
     noProfile: resolved.noProfile,
   };
-}
-
-function tierFor(kind: PhaseKind): 'opus' | 'sonnet' {
-  if (
-    kind === 'plan' ||
-    kind === 'architecture' ||
-    kind === 'review' ||
-    kind === 'document-review'
-  ) {
-    return 'opus';
-  }
-  return 'sonnet';
 }
 
 function taskKindFor(kind: PhaseKind): OutcomeTaskKind {

@@ -101,12 +101,22 @@ const ChosenExecutorSchema = z
     }
   });
 
+export const MODEL_TIERS = ['haiku', 'sonnet', 'opus'] as const;
+export const ModelTierSchema = z.enum(MODEL_TIERS);
+export type ModelTier = z.infer<typeof ModelTierSchema>;
+
+export const MODEL_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+export const ModelEffortSchema = z.enum(MODEL_EFFORTS);
+export type ModelEffort = z.infer<typeof ModelEffortSchema>;
+
 export const ChosenEntrySchema = z
   .object({
     phaseId: z.string(),
     status: z.literal('chosen'),
     executor: ChosenExecutorSchema,
     model: z.string(),
+    tier: ModelTierSchema,
+    effort: ModelEffortSchema,
     provenance: z.enum(PROVENANCE),
     score: z.number().int().min(SCORE_MIN).max(SCORE_MAX),
     source: z.enum(CHOSEN_SOURCES),
@@ -145,6 +155,8 @@ export const UnavailableEntrySchema = z
     needsDisclosedFallback: z.boolean(),
     source: z.enum(UNAVAILABLE_SOURCES),
     model: z.null(),
+    tier: ModelTierSchema,
+    effort: ModelEffortSchema,
     provenance: z.null(),
     score: z.null(),
     confidence: z.null(),

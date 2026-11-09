@@ -60,6 +60,34 @@ describe('buildRouteDecideTool', () => {
     expect(stage).toMatchObject({ enum: ['pre-flight', 'gate-0.1'] });
   });
 
+  it('advertises optional phase shape and weight while accepting legacy phases', () => {
+    const phases = buildRouteDecideTool().inputSchema.properties['phases'];
+    expect(phases).toMatchObject({
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          shape: {
+            type: 'string',
+            enum: ['mechanical', 'logic', 'contract', 'test', 'docs', 'review'],
+          },
+          weight: { type: 'integer', minimum: 0, maximum: 200000 },
+        },
+        required: ['id', 'kind'],
+      },
+    });
+  });
+
+  it('describes phase inputs and roster outputs', () => {
+    const description = buildRouteDecideTool().description;
+    for (const term of ['shape', 'weight', 'tier', 'effort']) {
+      expect(description).toContain(term);
+    }
+    expect(description).toContain('"tier" is the model alias to pass');
+    expect(description).toContain('for CLI lanes, both are advisory');
+    expect(description).toContain('read and write sets, plus 10% framing');
+  });
+
   it('is deterministic', () => {
     expect(JSON.stringify(buildRouteDecideTool())).toBe(
       JSON.stringify(buildRouteDecideTool()),
