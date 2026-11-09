@@ -18,9 +18,10 @@
    ========================================================================== */
 
 :host ::ng-deep .callout {
-  border-left: 3px solid oklch(var(--in));
+  border-inline-start: 3px solid oklch(var(--in));
   background-color: oklch(var(--b2) / 0.3);
-  border-radius: 0 0.375rem 0.375rem 0;
+  border-start-end-radius: 0.375rem;
+  border-end-end-radius: 0.375rem;
   padding: 0.45em 0.65em;
   margin: 0.6em 0;
   font-size: 0.85em;
@@ -56,7 +57,7 @@
 
 /* Callout variants */
 :host ::ng-deep .callout-note {
-  border-left-color: oklch(var(--in));
+  border-inline-start-color: oklch(var(--in));
   background-color: oklch(var(--in) / 0.07);
 }
 
@@ -65,7 +66,7 @@
 }
 
 :host ::ng-deep .callout-tip {
-  border-left-color: oklch(var(--su));
+  border-inline-start-color: oklch(var(--su));
   background-color: oklch(var(--su) / 0.07);
 }
 
@@ -74,7 +75,7 @@
 }
 
 :host ::ng-deep .callout-warning {
-  border-left-color: oklch(var(--wa));
+  border-inline-start-color: oklch(var(--wa));
   background-color: oklch(var(--wa) / 0.07);
 }
 
@@ -83,7 +84,7 @@
 }
 
 :host ::ng-deep .callout-important {
-  border-left-color: oklch(var(--s));
+  border-inline-start-color: oklch(var(--s));
   background-color: oklch(var(--s) / 0.07);
 }
 
@@ -92,7 +93,7 @@
 }
 
 :host ::ng-deep .callout-caution {
-  border-left-color: oklch(var(--er));
+  border-inline-start-color: oklch(var(--er));
   background-color: oklch(var(--er) / 0.07);
 }
 
@@ -212,8 +213,8 @@
 }
 
 :host ::ng-deep .prose-heading-bordered {
-  padding-left: 0.5em;
-  border-left: 3px solid oklch(var(--s) / 0.18);
+  padding-inline-start: 0.5em;
+  border-inline-start: 3px solid oklch(var(--s) / 0.18);
 }
 
 /* ==========================================================================
@@ -228,20 +229,25 @@
   background-color: oklch(var(--b2) / 0.12);
   border: 1px solid oklch(var(--bc) / 0.06);
   border-radius: 0.5rem;
-  padding: 0.5em 0.65em 0.5em 0.35em;
+  padding-block: 0.5em;
+  padding-inline: 0.35em 0.65em;
   margin: 0.7em 0;
   font-size: 0.88em;
+}
+
+:host ::ng-deep .prose-list-card:has(> :dir(rtl)) {
+  direction: rtl;
 }
 
 :host ::ng-deep .prose-list-card ol,
 :host ::ng-deep .prose-list-card ul {
   margin: 0;
-  padding-left: 1.7em;
+  padding-inline-start: 1.7em;
 }
 
 :host ::ng-deep .prose-list-card li {
   margin-bottom: 0.35em;
-  padding-left: 0.15em;
+  padding-inline-start: 0.15em;
   line-height: 1.6;
 }
 
@@ -275,7 +281,7 @@
 :host ::ng-deep .prose-list-card ul > li::before {
   content: '';
   position: absolute;
-  left: -1.1em;
+  inset-inline-start: -1.1em;
   top: 0.55em;
   width: 5px;
   height: 5px;

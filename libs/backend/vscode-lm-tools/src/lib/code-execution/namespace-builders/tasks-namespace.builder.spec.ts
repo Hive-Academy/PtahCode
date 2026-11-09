@@ -1,3 +1,4 @@
+import 'reflect-metadata';
 /**
  * `ptah.tasks.*` — the MCP agent write path.
  *
@@ -40,6 +41,24 @@ import {
 } from './tasks-namespace.builder';
 
 const ROOT = 'd:/workspace';
+
+describe('worktreePath boundary', () => {
+  it('rejects relative paths on every task operation before touching collaborators', async () => {
+    const { tasks, writer, index } = build();
+    expect(TaskCreateArgsSchema.safeParse({ title: 'Task', type: 'FEATURE', worktreePath: '../other' }).success).toBe(false);
+    expect(TaskUpdateArgsSchema.safeParse({ taskId: 'TASK_2026_400', status: 'done', worktreePath: '../other' }).success).toBe(false);
+    expect(TaskGetArgsSchema.safeParse({ taskId: 'TASK_2026_400', worktreePath: '../other' }).success).toBe(false);
+    expect(await tasks.create({ title: 'Task', type: 'FEATURE', worktreePath: '../other' })).toMatchObject({ ok: false, code: 'INVALID_ARGS' });
+    expect(await tasks.list({ worktreePath: '../other' })).toMatchObject({ ok: false, code: 'INVALID_ARGS' });
+    expect(await tasks.check({ worktreePath: '../other' })).toMatchObject({ ok: false });
+    expect(writer.create).not.toHaveBeenCalled();
+    expect(index.list).not.toHaveBeenCalled();
+  });
+
+  it('does not count worktreePath alone as a metadata update', () => {
+    expect(TaskUpdateArgsSchema.safeParse({ taskId: 'TASK_2026_400', worktreePath: 'C:\\repo' }).success).toBe(false);
+  });
+});
 
 function summary(
   overrides: Partial<TaskSpecSummary> & { id: string },

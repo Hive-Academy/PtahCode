@@ -22,7 +22,6 @@ import { HostRoutingSettingComponent } from './host-routing-setting.component';
 import { LaneRotationSettingComponent } from './lane-rotation-setting.component';
 import { CapabilityMatrixSettingComponent } from './capability-matrix-setting.component';
 import { AdvancedSettingsGroupComponent } from '../advanced/advanced-settings-group.component';
-import { CodexSandboxSettingComponent } from '../advanced/codex-sandbox-setting.component';
 
 @Component({
   selector: 'ptah-subagent-cache-ttl-setting',
@@ -82,14 +81,6 @@ class AdvancedGroupStub {
   readonly groupId = input.required<string>();
 }
 
-@Component({
-  selector: 'ptah-codex-sandbox-setting',
-  standalone: true,
-  changeDetection: ChangeDetectionStrategy.OnPush,
-  template: '<section data-testid="codex-sandbox-setting">Sandbox</section>',
-})
-class CodexSandboxStub {}
-
 const idle: ProvidersSettingsCommit = {
   status: 'idle',
   saved: [],
@@ -130,7 +121,6 @@ describe('OrchestrationSettingsComponent', () => {
             LaneRotationSettingComponent,
             CapabilityMatrixSettingComponent,
             AdvancedSettingsGroupComponent,
-            CodexSandboxSettingComponent,
           ],
         },
         add: {
@@ -142,7 +132,6 @@ describe('OrchestrationSettingsComponent', () => {
             LaneRotationStub,
             CapabilityMatrixStub,
             AdvancedGroupStub,
-            CodexSandboxStub,
           ],
         },
       })
@@ -252,7 +241,6 @@ describe('OrchestrationSettingsComponent', () => {
     await blocks[1].render(DeferBlockState.Complete);
     expect(groupIds()).toEqual([
       'group-context-budgets',
-      'group-codex-agents',
       'group-background-queries',
     ]);
     const first = element.querySelector(
@@ -268,7 +256,7 @@ describe('OrchestrationSettingsComponent', () => {
     }
   });
 
-  it('mounts the Codex sandbox setting in the deferred chunk, between the Codex agents and background query groups (TASK_2026_885)', async () => {
+  it('keeps Codex controls out of Context management while preserving background queries', async () => {
     await render();
     const sandbox = () =>
       element.querySelector('[data-testid="codex-sandbox-setting"]');
@@ -278,19 +266,12 @@ describe('OrchestrationSettingsComponent', () => {
     expect(sandbox()).toBeNull();
 
     await blocks[2].render(DeferBlockState.Complete);
-    const codexAgents = element.querySelector(
-      '[data-testid="group-codex-agents"]',
-    );
     const backgroundQueries = element.querySelector(
       '[data-testid="group-background-queries"]',
     );
-    expect(sandbox()).not.toBeNull();
-    expect(codexAgents?.compareDocumentPosition(sandbox() as Node)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-    expect(
-      sandbox()?.compareDocumentPosition(backgroundQueries as Node),
-    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(sandbox()).toBeNull();
+    expect(element.querySelector('[data-testid="group-codex-agents"]')).toBeNull();
+    expect(backgroundQueries).not.toBeNull();
   });
 
   it('mounts Routing suggestions in Electron, directly after Lane guards and before the advanced groups', async () => {

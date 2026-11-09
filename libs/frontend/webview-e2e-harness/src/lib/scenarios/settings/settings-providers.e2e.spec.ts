@@ -58,6 +58,14 @@ for (const host of HOSTS) {
       await providersTab(page);
     });
 
+    if (host === 'electron') {
+      test('Codex settings opens the OpenAI Codex Credentials drawer', async ({ page }) => {
+        await page.getByRole('button', { name: 'Codex settings' }).click();
+        await expect(page.locator('[data-testid="connection-drawer-title"]')).toContainText('OpenAI Codex');
+        await expect(page.getByRole('tab', { name: 'Credentials' })).toHaveAttribute('aria-selected', 'true');
+      });
+    }
+
     for (const { kind, card, tabs: baseTabs } of KINDS) {
       // Named Claude accounts (TASK_2026_719 P5): only the Electron host serves them, so only there the claude-cli drawer has Accounts second.
       const tabs =

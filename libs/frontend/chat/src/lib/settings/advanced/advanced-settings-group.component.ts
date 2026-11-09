@@ -131,7 +131,7 @@ function formatValue(
             </div>
           }
           @default {
-            <div class="grid items-start gap-x-4 gap-y-5 sm:grid-cols-2 xl:grid-cols-3">
+            <div class="settings-grid grid grid-cols-1 items-start gap-x-4 gap-y-5">
               @for (setting of settings(); track setting.key) {
                 <div
                   class="flex min-w-0 flex-col gap-1"
@@ -256,8 +256,19 @@ function formatValue(
     }
   `,
   styles: `
+    :host {
+      display: block;
+      container-type: inline-size;
+    }
     :host-context([data-glass='on']) [data-glass-surface='content'] {
       padding: 1.25rem;
+    }
+    /* Columns follow the group's own width, so a narrow drawer gets one column. */
+    @container (min-width: 36rem) {
+      .settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @container (min-width: 56rem) {
+      .settings-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     }
   `,
 })

@@ -7,7 +7,7 @@ import { MermaidTextPart, segmentMermaidFences } from './mermaid-fences';
 @Component({
   selector: 'ptah-mermaid-message-text', standalone: true,
   imports: [MarkdownModule, SurfaceMarkdownPipe, MermaidDiagramComponent], changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `@for (part of parts(); track $index) { @if (part.kind === 'markdown') { <markdown [data]="part.text | surfaceMarkdown: active()" /> } @else { <ptah-mermaid-diagram [source]="part.source" /> } }`,
+  template: `@for (part of parts(); track $index) { @if (part.kind === 'markdown') { <markdown dir="auto" [data]="part.text | surfaceMarkdown: active()" /> } @else { <ptah-mermaid-diagram [source]="part.source" /> } }`,
 })
 export class MermaidMessageTextComponent {
   readonly text = input.required<string>();

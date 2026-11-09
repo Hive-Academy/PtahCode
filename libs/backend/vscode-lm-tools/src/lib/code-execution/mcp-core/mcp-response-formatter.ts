@@ -2044,15 +2044,23 @@ export function formatAgentMessage(
  */
 export function formatAgentReport(result: {
   delivered: boolean;
+  pending?: boolean;
   reason?: string;
   parentSessionId?: string;
 }): string {
   try {
     return json2md([
-      { h2: result.delivered ? 'Report Delivered' : 'Report NOT Delivered' },
+      {
+        h2: result.delivered
+          ? 'Report Delivered'
+          : result.pending ? 'Report Pending' : 'Report NOT Delivered',
+      },
       {
         p: [
           `**Delivered:** ${result.delivered ? 'Yes' : 'No'}`,
+          ...(result.pending ? ['**Pending:** Yes'] : []),
+          ...(result.reason === 'held-for-completion'
+            ? ['This report will arrive with the completion signal.'] : []),
           ...(result.reason ? [`**Reason:** ${result.reason}`] : []),
           ...(result.parentSessionId
             ? [`**Parent Session:** ${result.parentSessionId}`]

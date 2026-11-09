@@ -15,6 +15,11 @@ never rename a folder to "fix" it.
 
 ## New task
 
+1. Create the worktree from `main` with `ptah_git_worktree_add`.
+2. Create the task folder inside it with `ptah_task_create { worktreePath }`. Never create task files in the main checkout.
+
+If the tool is unavailable, perform the allocation and writes below inside the new worktree only.
+
 1. **Prefer the `tasks:create` RPC** where it is available — it reserves atomically and never
    overwrites.
 2. **Allocating by hand**: scan `.ptah/specs` on `origin/main` (`git fetch`, then `git ls-tree`),

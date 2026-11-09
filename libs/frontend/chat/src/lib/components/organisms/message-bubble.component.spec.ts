@@ -7,6 +7,8 @@
  */
 
 import { provideSurfaceActiveTesting } from '@ptah-extension/core/testing';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   Component,
   Input,
@@ -86,6 +88,15 @@ describe('MessageBubbleComponent — branch/rewind action buttons', () => {
     fixture.componentRef.setInput('message', message);
     fixture.detectChanges();
   }
+
+  it('sets automatic direction on assistant content and user markdown', () => {
+    setMessage(createExecutionChatMessage({ id: 'rtl-assistant', role: 'assistant', rawContent: 'مرحبا' }));
+    expect((fixture.nativeElement as HTMLElement).querySelector('.cs-answer')?.getAttribute('dir')).toBe('auto');
+    expect((fixture.nativeElement as HTMLElement).querySelector('.cs-answer markdown')?.getAttribute('dir')).toBe('auto');
+
+    setMessage(createExecutionChatMessage({ id: 'rtl-user', role: 'user', rawContent: 'مرحبا' }));
+    expect((fixture.nativeElement as HTMLElement).querySelector('.cs-user-bubble markdown')?.getAttribute('dir')).toBe('auto');
+  });
 
   it('shows Interrupted after a partial assistant reply', () => {
     setMessage(createExecutionChatMessage({
@@ -667,5 +678,35 @@ describe('MessageBubbleComponent — branch/rewind action buttons', () => {
         ),
       ).toBeNull();
     });
+  });
+});
+
+describe('chat markdown bidi styles', () => {
+  it('uses logical edges for callouts, bordered headings, and list cards', () => {
+    const css = readFileSync(join(__dirname, 'message-bubble-prose.component.css'), 'utf8');
+    const rules = [
+      '.callout', '.callout-note', '.callout-tip', '.callout-warning',
+      '.callout-important', '.callout-caution', '.prose-heading-bordered',
+      '.prose-list-card ul', '.prose-list-card li', '.prose-list-card ul > li::before',
+    ];
+    for (const selector of rules) {
+      const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const rule = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))?.[1];
+      expect(rule).toBeDefined();
+      expect(rule).not.toMatch(/(?:padding|border|margin)-(?:left|right)\s*:|(?:^|[;\n])\s*(?:left|right)\s*:/);
+    }
+    expect(css).toMatch(/\.callout \{[^}]*border-inline-start:/);
+    expect(css).toMatch(/\.prose-heading-bordered \{[^}]*padding-inline-start:[^}]*border-inline-start:/);
+    expect(css).toMatch(/\.prose-list-card ol,[^{]*\{[^}]*padding-inline-start:/);
+    expect(css).toMatch(/\.prose-list-card ul > li::before \{[^}]*inset-inline-start:/);
+    expect(css).toMatch(/\.prose-list-card:has\(> :dir\(rtl\)\) \{\s*direction: rtl;/);
+  });
+
+  it('treats plain-text code notes as prose and isolates code controls', () => {
+    const css = readFileSync(join(__dirname, 'message-bubble.component.css'), 'utf8');
+    const html = readFileSync(join(__dirname, 'message-bubble.component.html'), 'utf8');
+    expect(css).toMatch(/th, td, \.code-block-note\) \{\s*unicode-bidi: plaintext;/);
+    expect(css).toMatch(/\.code-block-container \{\s*direction: ltr;\s*unicode-bidi: isolate;/);
+    expect(html).toContain('[attr.dir]="mermaidFallbackText() ? null : \'auto\'"');
   });
 });

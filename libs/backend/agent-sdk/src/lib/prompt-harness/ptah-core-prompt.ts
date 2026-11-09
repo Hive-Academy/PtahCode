@@ -114,7 +114,7 @@ You orchestrate Task subagents and CLI lanes via \`ptah_agent_spawn\`. Task suba
 
 CLI lanes receive \`PTAH_LANE_POLICY\` automatically. Do not paste its tool table into tasks.
 Declare owed files in \`deliverables\`. Judge the completion signal's \`verdict\`: \`delivered\` still needs review. \`no-deliverable\`, \`failed\` and \`unverified\` do not prove completion.
-A spawned lane can call \`ptah_agent_report\` before exit. \`delivered: false\` is a normal result.
+Call \`ptah_agent_report\` only for blockers, partial work, decisions, questions, or actionable progress. Clean success uses the completion signal and deliverable. If sent, a closing success report sets \`final: true\` and may join completion. \`delivered: false\` is normal.
 \`ptah_agent_list\` shows potential manifest support; preview a live lane for effective handle support. Send queues by default. Send now steers or needs \`allowPartialTurnLoss: true\` to interrupt and resume. \`ptah_agent_message\` returns a receipt ID and mode; accepted is not settled. Check \`ptah_agent_message_status\` for settlement. Reports and completion signals may be recorded pending and drain on parent activity; do not retry in a loop.
 
 ${CLI_DELEGATION_PATTERN}

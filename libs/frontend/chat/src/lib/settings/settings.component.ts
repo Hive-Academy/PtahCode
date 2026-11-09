@@ -22,7 +22,7 @@ import { MotionStageDirective, PROVIDER_MODELS_LOADER } from '@ptah-extension/ui
 // Two declarations on purpose: each component import must hold only the `@defer`-only class, or
 // Angular keeps the whole tab (Providers with its named-accounts UI and agents routing, Context Management) in the eager chunk.
 import { ProvidersSettingsComponent } from './providers/providers-settings.component';
-import type { ProvidersSettingsFocusTarget } from './providers/providers-settings.component';
+import type { ProvidersSettingsDrawerRequest, ProvidersSettingsFocusTarget } from './providers/providers-settings.component';
 import { ProvidersModelsLoader } from './providers/providers-models-loader.service';
 import { SettingsSaveFeedbackService } from './feedback/settings-save-feedback.service';
 import { SettingsToastComponent } from './feedback/settings-toast.component';
@@ -220,6 +220,12 @@ export class SettingsComponent implements OnInit {
    * which opens the setup wizard for that provider.
    */
   readonly requestedProviderId = signal<string | undefined>(undefined);
+  readonly requestedDrawer = signal<ProvidersSettingsDrawerRequest | null>(null);
+
+  openCodexSettings(): void {
+    this.setActiveTab('providers');
+    this.requestedDrawer.set(this.isElectron ? { providerId: 'openai-codex', tab: 'credentials' } : null);
+  }
 
   readonly isElectron = this.vscodeService.isElectron;
   /** Header "App: …" label. */
@@ -303,6 +309,7 @@ export class SettingsComponent implements OnInit {
       'providers' | 'claude-auth' | 'orchestration' | 'pro-features' | 'tools',
   ): void {
     const next = tab === 'providers' ? 'claude-auth' : tab;
+    if (next !== 'claude-auth') this.requestedDrawer.set(null);
     if (next !== this.activeSettingsTab()) {
       // A deep-link target belongs to the visit it opened: a tab is torn down when left and rebuilt on return, and a
       // kept target would re-open the roles (or a role's popover) and take focus again (Batch 35 revise, R3).

@@ -1,7 +1,8 @@
 import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject, input, output, signal, untracked, viewChild } from '@angular/core';
-import { ChevronDown, LucideAngularModule, Pencil } from 'lucide-angular';
+import { ArrowUp, ChevronDown, LucideAngularModule, Pencil } from 'lucide-angular';
 import { AgentDeliveryStore, AgentMonitorStore } from '@ptah-extension/chat-streaming';
 import type { AgentDeliveryReceipt } from '@ptah-extension/shared';
+import { COMPOSER_CARD_BORDER_CLASS, COMPOSER_CARD_CLASS, COMPOSER_SEND_BUTTON_CLASS, COMPOSER_TEXTAREA_CLASS, COMPOSER_TOOLBAR_CLASS } from './composer-card';
 
 /** One delivery contract for a lane, shown at full or compact width. */
 @Component({
@@ -13,45 +14,40 @@ import type { AgentDeliveryReceipt } from '@ptah-extension/shared';
   template: `
     <div class="relative min-w-0 space-y-1.5" (keydown.escape)="closeOverlays()">
       <label class="sr-only" [for]="fieldId()">Message {{ laneLabel() }}</label>
-      <div class="flex min-w-0 items-start gap-2" [class.flex-col]="variant() === 'full'">
-      @if (variant() === 'full') {
-        <textarea [id]="fieldId()" rows="2" class="textarea textarea-bordered w-full text-sm"
-          [value]="draft()" [readonly]="confirmLoss()" [placeholder]="'Message ' + laneLabel() + '…'" (focus)="refreshPreviews()"
-          (input)="setDraft($event)" (keydown.enter)="onEnter($event)"
-          (keydown.control.enter)="onEnter($event)" (keydown.meta.enter)="onEnter($event)"></textarea>
-      } @else {
-        <input [id]="fieldId()" type="text" class="input input-bordered input-sm min-w-0 flex-1 text-sm"
-          [value]="draft()" [readonly]="confirmLoss()" [placeholder]="'Message ' + laneLabel() + '…'" (focus)="refreshPreviews()"
-          (input)="setDraft($event)" (keydown.enter)="onEnter($event)"
-          (keydown.control.enter)="onEnter($event)" (keydown.meta.enter)="onEnter($event)" />
-      }
-
-      <div class="flex items-center gap-2 self-end">
-      <ng-content select="[laneControls]" />
-      @if (stopped()) {
-        <button type="button" class="btn btn-primary btn-sm shrink-0" [disabled]="queueDisabled()"
-          (click)="send('queue')">Resume with message</button>
-      } @else {
-        <div class="relative inline-flex shrink-0">
-          <button type="button" class="btn btn-primary btn-sm rounded-r-none" [disabled]="queueDisabled()"
-            [title]="state().queueDisabledReason ?? ''" (click)="send('queue')">Send</button>
-          <button type="button" class="btn btn-primary btn-sm rounded-l-none border-l border-primary-content/20 px-2"
-            [attr.aria-expanded]="menuOpen()" aria-label="Send options"
-            (click)="menuOpen.set(!menuOpen()); refreshPreviews()">
-            <lucide-angular [img]="ChevronIcon" class="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
-          @if (menuOpen()) {
-            <div class="absolute bottom-full left-0 z-20 mb-1 min-w-40 rounded-box border border-base-content/20 bg-base-100 p-1 shadow-lg">
-              <button #sendNowButton type="button" class="btn btn-ghost btn-sm w-full justify-start"
-                [disabled]="nowDisabled()" [title]="state().nowDisabledReason ?? ''"
-                (click)="requestNow()">Send now</button>
+      <div [class]="composerCardClass" data-glass-surface="tile">
+        <textarea [id]="fieldId()" rows="2" style="field-sizing: content" [class]="textareaClass"
+          [value]="draft()" [readonly]="confirmLoss()" [placeholder]="'Message ' + laneLabel() + '...'"
+          (focus)="refreshPreviews()" (input)="setDraft($event)"
+          (keydown.enter)="onEnter($event)" (keydown.control.enter)="onEnter($event)"
+          (keydown.meta.enter)="onEnter($event)"></textarea>
+        <div [class]="toolbarClass">
+          <ng-content select="[laneControls]" />
+          <span class="mr-auto min-w-0 truncate text-[11px] text-base-content-muted" [title]="hint()" aria-live="polite">{{ hint() }}</span>
+          @if (!stopped()) {
+            <div class="relative shrink-0">
+              <button type="button"
+                class="inline-flex h-7 w-7 items-center justify-center rounded-md text-base-content-muted transition-colors hover:bg-surface-2 hover:text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))]"
+                [attr.aria-expanded]="menuOpen()" aria-label="Send options"
+                (click)="menuOpen.set(!menuOpen()); refreshPreviews()">
+                <lucide-angular [img]="ChevronIcon" class="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+              @if (menuOpen()) {
+                <div class="absolute bottom-full right-0 z-20 mb-1 min-w-40 rounded-box border border-base-content/20 bg-base-100 p-1 shadow-lg">
+                  <button #sendNowButton type="button" class="btn btn-ghost btn-sm w-full justify-start"
+                    [disabled]="nowDisabled()" [title]="state().nowDisabledReason ?? ''"
+                    (click)="requestNow()">Send now</button>
+                </div>
+              }
             </div>
           }
+          <button type="button" [class]="sendButtonClass" [disabled]="queueDisabled()"
+            [title]="stopped() ? hint() : (state().queueDisabledReason ?? 'Send message')"
+            [attr.aria-label]="stopped() ? 'Resume with message' : 'Send message'"
+            (click)="send('queue')">
+            <lucide-angular [img]="ArrowUpIcon" class="w-4 h-4" aria-hidden="true" />
+          </button>
         </div>
-      }
       </div>
-      </div>
-      <p class="min-h-4 text-xs text-base-content-muted" aria-live="polite">{{ hint() }}</p>
       @if (error(); as message) { <p class="min-h-4 text-xs text-error" role="alert">{{ message }}</p> }
       @if (!state().queue || !state().now) { <button type="button" class="btn btn-ghost btn-xs" (click)="refreshPreviews()">Retry message options</button> }
 
@@ -106,7 +102,12 @@ export class LaneComposerComponent {
   protected readonly menuOpen = signal(false);
   protected readonly confirmLoss = signal(false);
   protected readonly ChevronIcon = ChevronDown;
+  protected readonly ArrowUpIcon = ArrowUp;
   protected readonly EditIcon = Pencil;
+  protected readonly composerCardClass = `${COMPOSER_CARD_CLASS} ${COMPOSER_CARD_BORDER_CLASS}`;
+  protected readonly textareaClass = COMPOSER_TEXTAREA_CLASS;
+  protected readonly toolbarClass = COMPOSER_TOOLBAR_CLASS;
+  protected readonly sendButtonClass = COMPOSER_SEND_BUTTON_CLASS;
   protected readonly state = computed(() => this.store.composerState(this.agentId()));
   private readonly previewKey = computed(() => `${this.stopped()}:${this.monitor.agentsById().get(this.agentId())?.status ?? ''}:${this.state().queue?.mode ?? ''}:${this.state().now?.mode ?? ''}`);
   protected readonly queuedReceipts = computed(() =>
@@ -211,7 +212,7 @@ export class LaneComposerComponent {
   protected onEnter(event: Event): void {
     const key = event as KeyboardEvent;
     if (key.isComposing || key.keyCode === 229) return;
-    if (key.shiftKey && this.variant() === 'full') return;
+    if (key.shiftKey) return;
     key.preventDefault();
     if (key.ctrlKey || key.metaKey) this.requestNow();
     else void this.send('queue');

@@ -89,20 +89,6 @@ export const CLAUDE_SETTINGS_SAFE_ENV_KEYS = [
   'CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR',
 ] as const;
 
-/** Subscription words that classify a Claude login as personal (class P). */
-export const CLAUDE_PERSONAL_SUBSCRIPTIONS = ['pro', 'max'] as const;
-
-/**
- * Subscription display names a running child's `accountInfo()` / init reports
- * for a personal claude.ai login. The bundled Claude Code CLI (2.1.278) maps
- * its raw plan word to these names (`Claude Max`, `Claude Pro`, ...), unlike
- * `claude auth status --json`, which reports the raw words above.
- */
-export const CLAUDE_PERSONAL_ACCOUNT_INFO_SUBSCRIPTIONS = [
-  'Claude Pro',
-  'Claude Max',
-] as const;
-
 /** Fixed class of a running child's subscription word, safe to log. */
 export type ClaudeLoginSubscriptionClass =
   | 'pro'
@@ -113,24 +99,63 @@ export type ClaudeLoginSubscriptionClass =
   | 'other'
   | 'absent';
 
-/** Known raw and display subscription words; any other word is `other`. */
-const SUBSCRIPTION_CLASSES: ReadonlyMap<string, ClaudeLoginSubscriptionClass> =
-  new Map<string, ClaudeLoginSubscriptionClass>([
-    ['pro', 'pro'],
-    ['max', 'max'],
-    ['team', 'team'],
-    ['enterprise', 'enterprise'],
-    ['Claude Pro', 'pro'],
-    ['Claude Max', 'max'],
-    ['Claude Team', 'team'],
-    ['Claude Enterprise', 'enterprise'],
-    ['Claude API', 'api'],
-  ]);
+/** `pro` or `max`, alone or with a size suffix such as `_20x` or ` 20x`. */
+const PERSONAL_PLAN = /^(pro|max)(?:[\s_-]*\d+x)?$/;
 
-const PERSONAL_LOGIN_SUBSCRIPTIONS: ReadonlySet<string> = new Set<string>([
-  ...CLAUDE_PERSONAL_SUBSCRIPTIONS,
-  ...CLAUDE_PERSONAL_ACCOUNT_INFO_SUBSCRIPTIONS,
-]);
+/**
+ * Classify a raw (`max_20x`) or display (`Claude Max 20x`) subscription.
+ * A personal family needs the whole word to be the plan plus an optional size
+ * suffix: any other qualifier (`Max Team`, `max-enterprise`) is `other`.
+ * A non-personal family is read from the first word only.
+ */
+export function claudeSubscriptionFamily(word: string | undefined): ClaudeLoginSubscriptionClass {
+  if (word === undefined) return 'absent';
+  const plan = word.trim().replace(/^Claude\s+/i, '').toLowerCase();
+  const personal = PERSONAL_PLAN.exec(plan);
+  if (personal) return personal[1] === 'pro' ? 'pro' : 'max';
+  const first = plan.split(/[\s_-]/, 1)[0];
+  return first === 'team' || first === 'enterprise' || first === 'api' ? first : 'other';
+}
+
+/** Parse the complete leading CLI semver identity; a banner may follow whitespace. */
+export function claudeVersionIdentity(value: string | undefined): string | null {
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?=$|\s)/.exec(value ?? '');
+  return match?.[0] ?? null;
+}
+
+/** Compare parsed semver identities by precedence (build metadata is ignored). */
+export function compareClaudeVersions(left: string, right: string): number {
+  const parse = (value: string) => {
+    const withoutBuild = value.split('+', 1)[0];
+    const dash = withoutBuild.indexOf('-');
+    const core = dash < 0 ? withoutBuild : withoutBuild.slice(0, dash);
+    return { numbers: core.split('.').map(Number), prerelease: dash < 0 ? undefined : withoutBuild.slice(dash + 1).split('.') };
+  };
+  const a = parse(left);
+  const b = parse(right);
+  for (let index = 0; index < 3; index += 1) {
+    if (a.numbers[index] !== b.numbers[index]) return a.numbers[index] < b.numbers[index] ? -1 : 1;
+  }
+  if (!a.prerelease) return b.prerelease ? 1 : 0;
+  if (!b.prerelease) return -1;
+  for (let index = 0; index < Math.max(a.prerelease.length, b.prerelease.length); index += 1) {
+    const x = a.prerelease[index];
+    const y = b.prerelease[index];
+    if (x === undefined || y === undefined) return x === undefined ? -1 : 1;
+    if (x === y) continue;
+    const numericX = /^\d+$/.test(x);
+    const numericY = /^\d+$/.test(y);
+    if (numericX && numericY) {
+      const first = BigInt(x);
+      const second = BigInt(y);
+      if (first === second) continue;
+      return first < second ? -1 : 1;
+    }
+    if (numericX !== numericY) return numericX ? -1 : 1;
+    return x < y ? -1 : 1;
+  }
+  return 0;
+}
 
 /** The login fields of a running child's `accountInfo()` / init. */
 export interface ClaudeRunningLoginInfo {
@@ -164,7 +189,7 @@ export interface ClaudePersonalLoginCheck {
 export function claudePersonalLoginCheck(
   info: ClaudeRunningLoginInfo,
 ): ClaudePersonalLoginCheck {
-  const subscription = info.subscriptionType;
+  const subscription = claudeSubscriptionFamily(info.subscriptionType);
   return Object.freeze({
     tokenSource:
       info.tokenSource === undefined || info.tokenSource === 'claude.ai',
@@ -172,12 +197,8 @@ export function claudePersonalLoginCheck(
       info.apiKeySource === undefined || info.apiKeySource === 'none',
     apiProvider:
       info.apiProvider === undefined || info.apiProvider === 'firstParty',
-    subscription:
-      subscription === undefined
-        ? 'absent'
-        : (SUBSCRIPTION_CLASSES.get(subscription) ?? 'other'),
-    personalSubscription:
-      subscription !== undefined && PERSONAL_LOGIN_SUBSCRIPTIONS.has(subscription),
+    subscription,
+    personalSubscription: subscription === 'pro' || subscription === 'max',
   });
 }
 

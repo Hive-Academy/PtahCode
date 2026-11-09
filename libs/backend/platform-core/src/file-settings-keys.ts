@@ -107,8 +107,6 @@ export const FILE_BASED_SETTINGS_KEYS = new Set<string>([
   'agentOrchestration.codexModel',
   'agentOrchestration.codexReasoningEffort',
   'agentOrchestration.codexAutoApprove',
-  'agentOrchestration.codexAutoCompactTokens',
-  'agentOrchestration.codexToolOutputTokenLimit',
   'agentOrchestration.codexWebSearch',
   'agentOrchestration.codexSandboxMode',
   'agentOrchestration.cliLaneDefaults',

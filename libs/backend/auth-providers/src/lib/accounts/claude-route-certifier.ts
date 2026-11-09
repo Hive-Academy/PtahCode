@@ -1,4 +1,4 @@
-import { buildCertifiedClaudeEnv, certifiedEnvDigest } from '@ptah-extension/agent-sdk';
+import { buildCertifiedClaudeEnv, certifiedEnvDigest, claudeVersionIdentity, compareClaudeVersions } from '@ptah-extension/agent-sdk';
 import type {
   ClaudeCertifiedExecutable,
   ClaudeCertifiedLaunchContext,
@@ -145,16 +145,8 @@ export interface ClaudeRouteCertifyRequest extends ClaudeAuthContextRequest {
   readonly reuse?: ClaudeCertificationScope;
 }
 
-function parseVersion(version: string): readonly [number, number, number] | null {
-  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
-  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
-}
-
-function belowMinimum(version: readonly [number, number, number]): boolean {
-  for (let index = 0; index < 3; index += 1) {
-    if (version[index] !== MIN_SUPPORTED_VERSION[index]) return version[index] < MIN_SUPPORTED_VERSION[index];
-  }
-  return false;
+function belowMinimum(version: string): boolean {
+  return compareClaudeVersions(version, MIN_SUPPORTED_VERSION.join('.')) < 0;
 }
 
 function refuse(code: ClaudeCertificationRefusalCode, terminated: boolean): ClaudeCertificationRefusal {
@@ -192,6 +184,18 @@ export class ClaudeRouteCertifier {
     this.reused = new ClaudeCertificationCache(now);
   }
 
+  /**
+   * Logs which step refused (a fixed word, never a value) and returns the
+   * refusal. Callers that pass a refusal through only log, and drop the result.
+   */
+  private unsupportedSource(
+    step: 'account-class' | 'policy-scan' | 'cli-version' | 'remote-signals' | 'coverage',
+    terminated: boolean,
+  ): { readonly ok: false; readonly code: 'unsupported-source'; readonly terminated: boolean } {
+    this.logger?.warn('[ClaudeRouteCertifier] Named account certification refused', { step });
+    return { ok: false, code: 'unsupported-source', terminated };
+  }
+
   /** Steps 1-5 with `cwd = canonicalDir`, for sign-in, status and sign-out. */
   async authContext(request: ClaudeAuthContextRequest): Promise<ClaudeAuthContextOutcome> {
     return this.prepare(request.route.canonicalPath, request.route, request.signal);
@@ -200,8 +204,9 @@ export class ClaudeRouteCertifier {
   /** Re-runs steps 1-2 (S9 signals included) before a settings-reading auth child. */
   async checkCoverage(context: ClaudeAuthContext, signal: AbortSignal): Promise<ClaudeCoverageOutcome> {
     const entry = claudePolicyCoverage(this.platform);
-    if (entry.id !== context.policy.coverage) return refuse('unsupported-source', true);
+    if (entry.id !== context.policy.coverage) return this.unsupportedSource('coverage', true);
     const scan = await this.scan(context.cwd, context.canonicalDir, entry, signal, context.executable.version);
+    if (!scan.ok && scan.code === 'unsupported-source') this.unsupportedSource('policy-scan', scan.terminated);
     return scan.ok ? { ok: true } : scan;
   }
 
@@ -291,7 +296,7 @@ export class ClaudeRouteCertifier {
     const status = probed.status;
     if (!status || !status.loggedIn) return refuse('identity-unproved', terminated);
     // Step 6b: class O refuses before any identity comparison (D14 note 2).
-    if (status.accountClass !== 'P') return refuse('unsupported-source', terminated);
+    if (status.accountClass !== 'P') return this.unsupportedSource('account-class', terminated);
     if (profile.identityRef === null) return refuse('identity-unproved', terminated);
     if (!status.configDirectoryMatches || status.identityReference !== profile.identityRef) {
       return refuse('identity-mismatch', terminated);
@@ -299,7 +304,7 @@ export class ClaudeRouteCertifier {
 
     // Step 7: a refusal signal only; absence proves nothing.
     if (!(await claudeRemoteSignalsAbsent(canonicalDir, this.platform, this.fs))) {
-      return refuse('unsupported-source', terminated);
+      return this.unsupportedSource('remote-signals', terminated);
     }
 
     // Step 8.
@@ -330,9 +335,9 @@ export class ClaudeRouteCertifier {
    * only children are `reg.exe` probes) and never re-runs `--version`.
    */
   async checkLaunch(launch: ClaudeCertifiedLaunchContext, signal: AbortSignal): Promise<ClaudeLaunchBoundaryOutcome> {
-    if (launch.accountClass !== 'personal') return { ok: false, code: 'unsupported-source', terminated: true };
+    if (launch.accountClass !== 'personal') return this.unsupportedSource('account-class', true);
     const entry = claudePolicyCoverage(this.platform);
-    if (entry.id !== launch.policy.coverage) return { ok: false, code: 'unsupported-source', terminated: true };
+    if (entry.id !== launch.policy.coverage) return this.unsupportedSource('coverage', true);
     const canonicalDir = launch.env['CLAUDE_CONFIG_DIR'];
     if (!canonicalDir) return { ok: false, code: 'identity-unproved', terminated: true };
 
@@ -340,7 +345,9 @@ export class ClaudeRouteCertifier {
     if (!scan.ok) {
       this.reused.forgetLaunch(launch);
       withoutReceipts(scan);
-      return { ok: false, code: scan.code === 'cancelled' ? 'identity-unproved' : 'unsupported-source', terminated: scan.terminated };
+      return scan.code === 'cancelled'
+        ? { ok: false, code: 'identity-unproved', terminated: scan.terminated }
+        : this.unsupportedSource('policy-scan', scan.terminated);
     }
 
     const expected = launch.executable.fingerprint;
@@ -363,7 +370,10 @@ export class ClaudeRouteCertifier {
     const canonicalDir = route.canonicalPath;
     const entry = claudePolicyCoverage(this.platform);
     const scan = await this.scan(cwd, canonicalDir, entry, signal);
-    if (!scan.ok) return scan;
+    if (!scan.ok) {
+      if (scan.code === 'unsupported-source') this.unsupportedSource('policy-scan', scan.terminated);
+      return scan;
+    }
 
     if (signal.aborted) return refuse('cancelled', true);
     const probed = await this.probe.certifyExecutable(signal);
@@ -373,14 +383,14 @@ export class ClaudeRouteCertifier {
       return probed.closeReceipt ? { ...refusal, closeReceipts: Object.freeze([probed.closeReceipt]) } : refusal;
     }
     if (!probed.terminated) return refuse('identity-unproved', false);
-    const version = parseVersion(probed.executable.version);
+    const version = claudeVersionIdentity(probed.executable.version);
     if (!version) return refuse('identity-unproved', true);
     if (belowMinimum(version)) return refuse('unsupported-store', true);
     if (!claudeCoverageAcceptsVersion(entry, probed.executable.version)) {
       // Fixed text and the version only; no path or CLI output.
       this.logger?.warn('[ClaudeRouteCertifier] Claude CLI version is outside the policy coverage',
         { version: probed.executable.version, inspected: entry.inspectedVersion });
-      return refuse('unsupported-source', true);
+      return this.unsupportedSource('cli-version', true);
     }
     this.warnUninspected(entry, probed.executable.version);
 

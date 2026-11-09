@@ -71,7 +71,9 @@ import { AgentsRoutingSettingsComponent } from './providers/agents-routing-setti
   template:
     '<table data-testid="cli-matrix" tabindex="-1" aria-label="CLI matrix"><tbody><tr><td>Codex</td></tr></tbody></table>',
 })
-class CliMatrixStub {}
+class CliMatrixStub {
+  readonly codexSettingsRequested = output<void>();
+}
 
 /** The slice of the shared Providers state the shell, the agents routing and the Context Management container read. */
 function providersStateFake() {
@@ -150,6 +152,7 @@ describe('SettingsComponent deep-link', () => {
   });
 
   afterEach(() => {
+    vscodeServiceStub.isElectron = false;
     TestBed.resetTestingModule();
     jest.clearAllMocks();
   });
@@ -175,6 +178,24 @@ describe('SettingsComponent deep-link', () => {
 
     expect(fixture.componentInstance.activeSettingsTab()).toBe('orchestration');
     expect(appState.consumePendingSettingsTab()).toBeNull();
+  });
+  it('routes Codex to Providers and clears the drawer request on tab departure', () => {
+    vscodeServiceStub.isElectron = true;
+    const fixture = TestBed.createComponent(SettingsComponent);
+    const shell = fixture.componentInstance;
+    shell.setActiveTab('orchestration');
+    shell.openCodexSettings();
+    expect(shell.activeSettingsTab()).toBe('claude-auth');
+    expect(shell.requestedDrawer()).toEqual({ providerId: 'openai-codex', tab: 'credentials' });
+    shell.setActiveTab('tools');
+    expect(shell.requestedDrawer()).toBeNull();
+  });
+
+  it('opens ordinary Providers on non-Electron hosts', () => {
+    const fixture = TestBed.createComponent(SettingsComponent);
+    fixture.componentInstance.openCodexSettings();
+    expect(fixture.componentInstance.activeSettingsTab()).toBe('claude-auth');
+    expect(fixture.componentInstance.requestedDrawer()).toBeNull();
   });
 
   async function landWith(request: PendingSettingsTab) {

@@ -15,7 +15,6 @@ import { HostRoutingSettingComponent } from './host-routing-setting.component';
 import { LaneRotationSettingComponent } from './lane-rotation-setting.component';
 import { CapabilityMatrixSettingComponent } from './capability-matrix-setting.component';
 import { AdvancedSettingsGroupComponent } from '../advanced/advanced-settings-group.component';
-import { CodexSandboxSettingComponent } from '../advanced/codex-sandbox-setting.component';
 
 /**
  * Context Management tab (internal tab id `'orchestration'`, kept so the `PendingSettingsTab` and app-state contracts
@@ -24,7 +23,7 @@ import { CodexSandboxSettingComponent } from '../advanced/codex-sandbox-setting.
  *
  * Order: the subagent prompt-cache TTL, the session budget, Lane guards, then Electron-only routing
  * suggestions, executor rotation and the capability matrix, then the advanced groups (context budgets,
- * Codex agents and the Codex sandbox mode (TASK_2026_885), background query limits; TASK_2026_658) in one
+ * background query limits; TASK_2026_658) in one
  * viewport-deferred chunk. The CLI matrix and the
  * background model roles moved to the Providers tab (`AgentsRoutingSettingsComponent`), with their deep links.
  *
@@ -43,7 +42,6 @@ import { CodexSandboxSettingComponent } from '../advanced/codex-sandbox-setting.
     LaneRotationSettingComponent,
     CapabilityMatrixSettingComponent,
     AdvancedSettingsGroupComponent,
-    CodexSandboxSettingComponent,
   ],
   template: `
     <!-- Same box and rhythm as the Providers page: the Settings shell sets the width, centring and side padding. -->
@@ -84,9 +82,6 @@ import { CodexSandboxSettingComponent } from '../advanced/codex-sandbox-setting.
            budget and the always-available Lane guards; the placeholder is one row. -->
       @defer (on viewport) {
         <ptah-advanced-settings-group groupId="context-budgets" />
-        <ptah-advanced-settings-group groupId="codex-agents" />
-        <!-- Codex sandbox mode (TASK_2026_885): with the Codex agents values, in the same deferred chunk. -->
-        <ptah-codex-sandbox-setting />
         <ptah-advanced-settings-group groupId="background-queries" />
       } @placeholder {
         <div

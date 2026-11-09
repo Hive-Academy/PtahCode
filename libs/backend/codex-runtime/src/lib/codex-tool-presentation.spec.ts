@@ -2,6 +2,8 @@ import type {
   CodexApprovalRequest,
   CodexJsonValue,
 } from './codex-runtime.types';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   CODEX_DENIED_TOOL_RESULT_TEXT,
   presentCodexApproval,
@@ -30,6 +32,30 @@ function approval(
 }
 
 describe('shell wrapper display', () => {
+  /** Raw `commandExecution.command` strings captured from Codex lanes, each paired with its display. */
+  const capturedSamples: ReadonlyArray<{ readonly raw: string; readonly display: string }> = JSON.parse(
+    readFileSync(resolve(__dirname, '__fixtures__/codex-command-samples.json'), 'utf8'),
+  );
+
+  it('unwraps every captured Codex command exactly', () => {
+    expect(capturedSamples).toHaveLength(12);
+    for (const { raw, display } of capturedSamples) {
+      expect(presentCodexTool('commandExecution', { command: raw }).toolInput).toEqual({ command: display });
+    }
+  });
+
+  // PowerShell joins every word after -Command into one script, so these shapes unwrap.
+  // The display joins the words with one space; it is never executed.
+  it.each([
+    ['pwsh -Command echo hi', 'echo hi'],
+    ['pwsh -Command "a" "b"', 'a b'],
+    ['pwsh -Command "a"; echo "b"', 'a; echo b'],
+    ['pwsh -Command "a \\" b"', 'a " b'],
+    ['pwsh -Command "a" trailing', 'a trailing'],
+  ])('unwraps multi-word PowerShell command %s', (raw, display) => {
+    expect(presentCodexTool('commandExecution', { command: raw }).toolInput).toEqual({ command: display });
+  });
+
   it.each([
     [
       '"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -Command "rg -n test"',
@@ -49,23 +75,24 @@ describe('shell wrapper display', () => {
       presentCodexTool('commandExecution', { command: raw }).toolInput,
     ).toEqual({ command: display });
   });
-  it('leaves uncertain syntax alone', () => {
-    const raw = 'pwsh -Command "echo "nested""';
-    expect(
-      presentCodexTool('commandExecution', { command: raw }).toolInput,
-    ).toMatchObject({ command: raw });
+  it.each([
+    ["pwsh -NoLogo -c 'Write-Output $env:APPDATA'", 'Write-Output $env:APPDATA'],
+    ['cmd /d /s /c "echo hello && echo world"', 'echo hello && echo world'],
+    ["/bin/bash -lc 'printf '\"'\"'%s'\"'\"' hello'", "printf '%s' hello"],
+    ["/bin/sh -l -c 'echo hello'", 'echo hello'],
+  ])('unwraps additional launcher %s', (raw, display) => {
+    expect(presentCodexTool('commandExecution', { command: raw }).toolInput).toEqual({ command: display });
   });
   it.each([
-    'pwsh -Command "a" "b"',
-    'pwsh -Command "a"; echo "b"',
-    'pwsh -Command "a \\" b"',
-    'pwsh -Command "a" trailing',
     'pwsh -EncodedCommand ZQBjAGgAbwA=',
     'pwsh -File script.ps1',
-    'pwsh -Command echo hi',
     'C:\\Program Files\\PowerShell\\pwsh.exe -Command "echo hi"',
     'pwsh -Command "   "',
     'cmd /c "   "',
+    'pwsh -Command "unterminated',
+    'python -c "echo hello"',
+    'cmd.exe /c dir C:\\x',
+    'powershell.exe -Command Get-Content C:\\Users\\x\\file.txt',
   ])('preserves unparseable %s', (raw) => {
     expect(
       presentCodexTool('commandExecution', { command: raw }).toolInput,

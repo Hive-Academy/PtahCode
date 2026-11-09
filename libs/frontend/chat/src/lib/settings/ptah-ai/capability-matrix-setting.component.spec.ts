@@ -1,5 +1,6 @@
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
-import { ClaudeRpcService } from '@ptah-extension/core';
+import { signal } from '@angular/core';
+import { ClaudeRpcService, ProvidersSettingsStateService } from '@ptah-extension/core';
 import { rpcError, rpcSuccess } from '@ptah-extension/core/testing';
 import type { AgentGetCapabilityMatrixResult } from '@ptah-extension/shared';
 import { CapabilityMatrixSettingComponent } from './capability-matrix-setting.component';
@@ -53,7 +54,13 @@ describe('CapabilityMatrixSettingComponent', () => {
     call = jest.fn();
     TestBed.configureTestingModule({
       imports: [CapabilityMatrixSettingComponent],
-      providers: [{ provide: ClaudeRpcService, useValue: { call } }],
+      providers: [
+        { provide: ClaudeRpcService, useValue: { call } },
+        { provide: ProvidersSettingsStateService, useValue: {
+          cliAgents: signal({ status: 'ready', data: [] }),
+          cliModels: signal({ status: 'ready', data: {} }),
+        } },
+      ],
     });
   });
 
@@ -73,13 +80,19 @@ describe('CapabilityMatrixSettingComponent', () => {
       {},
       { timeout: 5_000 },
     );
-    expect(row('plan')).toContain('unrated');
+    expect(row('plan')).toContain('Unrated');
     expect(row('plan')).not.toContain('50');
     expect(row('implement')).toContain('55');
     expect(row('implement')).toContain('local');
     expect(row('implement')).toContain('2');
-    expect(row('implement')).not.toContain('unrated');
+    expect(row('implement')).not.toContain('Unrated');
     expect(text()).not.toContain('50');
+    expect((fixture.nativeElement as HTMLElement).querySelectorAll('thead th')).toHaveLength(7);
+    const family = (fixture.nativeElement as HTMLElement).querySelector('th[scope="rowgroup"] button') as HTMLButtonElement;
+    expect(family.getAttribute('aria-expanded')).toBe('true');
+    family.click();
+    fixture.detectChanges();
+    expect(family.getAttribute('aria-expanded')).toBe('false');
   });
 
   it('shows retry when the read fails', async () => {

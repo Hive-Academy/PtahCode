@@ -25,6 +25,7 @@ export type {
 export {
   resolveVecPackageName,
   resolveVecBinaryName,
+  toUnpackedAsarPath,
 } from './lib/vec-load-diagnostic';
 
 export type { IBackupService, BackupKind } from './lib/backup.service';

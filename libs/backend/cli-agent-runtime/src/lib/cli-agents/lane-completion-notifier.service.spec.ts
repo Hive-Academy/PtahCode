@@ -25,6 +25,7 @@ import type { AgentProcessInfo } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { IFileSystemProvider } from '@ptah-extension/platform-core';
 import type { SessionUsageSink } from '@ptah-extension/agent-sdk';
+import { AgentReportCoalescer, type HeldReport } from './agent-report-coalescer';
 import { FileType } from '@ptah-extension/platform-core';
 import {
   LaneCompletionNotifier,
@@ -155,6 +156,70 @@ function createHarness(
 }
 
 describe('LaneCompletionNotifier.signal', () => {
+  it('delivers a held closing report inside one completion envelope', async () => {
+    const h = createHarness();
+    const store = new ParentEnvelopeStoreService(h.logger, new FakeStateStorage());
+    const adapter = { isSessionActive: h.isSessionActive,
+      sendMessageToSession: h.sendMessageToSession } as never;
+    const drainer = new ParentDeliveryDrainerService(h.logger, store, adapter, null, null);
+    const coalescer = new AgentReportCoalescer();
+    const markEnqueued = jest.fn();
+    const held: HeldReport = { message: 'Done', envelopeBody: '<agent-report>Done</agent-report>',
+      heldAt: Date.now(), deliverStandalone: jest.fn().mockResolvedValue(undefined), markEnqueued };
+    coalescer.hold(AGENT_ID, held, jest.fn());
+    const notifier = new LaneCompletionNotifier(h.logger,
+      { exists: h.exists, stat: h.stat } as never, adapter, () => null, drainer,
+      () => null, coalescer);
+    const result = await notifier.signal(createInfo());
+    expect(h.sendMessageToSession).toHaveBeenCalledTimes(1);
+    expect(h.envelope()).toContain('Closing report:\n<agent-report>Done</agent-report>');
+    expect(result.signal?.reportsDelivered).toBe(1);
+    expect(markEnqueued).toHaveBeenCalledTimes(1);
+    expect(store.list(PARENT).filter((entry) => entry.kind === 'report')).toHaveLength(0);
+    drainer.dispose();
+  });
+
+  it('sends an oversize report standalone and completes without embedding it', async () => {
+    const h = createHarness();
+    const store = new ParentEnvelopeStoreService(h.logger, new FakeStateStorage());
+    const adapter = { isSessionActive: h.isSessionActive,
+      sendMessageToSession: h.sendMessageToSession } as never;
+    const drainer = new ParentDeliveryDrainerService(h.logger, store, adapter, null, null);
+    const coalescer = new AgentReportCoalescer();
+    const deliverStandalone = jest.fn().mockResolvedValue(undefined);
+    coalescer.hold(AGENT_ID, { message: 'large', envelopeBody: 'x'.repeat(1_048_476),
+      heldAt: Date.now(), deliverStandalone, markEnqueued: jest.fn() }, jest.fn());
+    const notifier = new LaneCompletionNotifier(h.logger,
+      { exists: h.exists, stat: h.stat } as never, adapter, () => null, drainer,
+      () => null, coalescer);
+    const result = await notifier.signal(createInfo());
+    expect(deliverStandalone).toHaveBeenCalledTimes(1);
+    expect(result.signal?.reportsDelivered).toBe(1);
+    expect(h.envelope()).not.toContain('Closing report:');
+    drainer.dispose();
+  });
+
+  it('keeps an embedded report in the completion after a rejected send', async () => {
+    const h = createHarness();
+    h.sendMessageToSession.mockRejectedValueOnce(new Error('send refused'));
+    const store = new ParentEnvelopeStoreService(h.logger, new FakeStateStorage());
+    const adapter = { isSessionActive: h.isSessionActive,
+      sendMessageToSession: h.sendMessageToSession } as never;
+    const drainer = new ParentDeliveryDrainerService(h.logger, store, adapter, null, null);
+    const coalescer = new AgentReportCoalescer();
+    const standalone = jest.fn().mockResolvedValue(undefined);
+    coalescer.hold(AGENT_ID, { message: 'Done', envelopeBody: '<agent-report>Done</agent-report>',
+      heldAt: Date.now(), deliverStandalone: standalone, markEnqueued: jest.fn() }, jest.fn());
+    const notifier = new LaneCompletionNotifier(h.logger,
+      { exists: h.exists, stat: h.stat } as never, adapter, () => null, drainer,
+      () => null, coalescer);
+    await notifier.signal(createInfo());
+    expect(store.list(PARENT).filter((entry) => entry.kind === 'report')).toHaveLength(0);
+    expect(store.list(PARENT).find((entry) => entry.kind === 'completion')).toBeDefined();
+    expect(standalone).not.toHaveBeenCalled();
+    drainer.dispose();
+  });
+
   it('holds a tab-id completion until the real parent session resolves', async () => {
     const h = createHarness();
     const store = new ParentEnvelopeStoreService(h.logger, new FakeStateStorage());

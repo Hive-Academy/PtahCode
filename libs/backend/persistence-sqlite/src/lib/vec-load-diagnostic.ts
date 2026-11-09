@@ -1,3 +1,5 @@
+import * as path from 'node:path';
+
 export type VecLoadReason =
   | 'ok'
   | 'binary-missing'
@@ -59,6 +61,28 @@ export function resolveVecBinaryName(
   platform: NodeJS.Platform = process.platform,
 ): string {
   return PLATFORM_BINARY_MAP[platform] ?? 'vec0.so';
+}
+
+/**
+ * SQLite loads an extension with dlopen, which cannot read inside an asar
+ * archive. In a packaged Electron app (also the headless worker mode),
+ * `require.resolve` and `sqlite-vec`'s `getLoadablePath()` return
+ * `.../resources/app.asar/node_modules/...`, while electron-builder unpacks
+ * the binary to `app.asar.unpacked`. Rewrite that path segment; any other
+ * path (dev checkout, plain Node) is returned unchanged.
+ */
+export function toUnpackedAsarPath(
+  candidate: string,
+  sep: string = path.sep,
+): string {
+  const packed = `${sep}app.asar${sep}`;
+  const index = candidate.indexOf(packed);
+  if (index === -1) return candidate;
+  return (
+    candidate.slice(0, index) +
+    `${sep}app.asar.unpacked${sep}` +
+    candidate.slice(index + packed.length)
+  );
 }
 
 export function buildBaseDiagnostic(
