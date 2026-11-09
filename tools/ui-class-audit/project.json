@@ -1,0 +1,54 @@
+{
+  "name": "ui-class-audit",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "tools/ui-class-audit",
+  "projectType": "application",
+  "tags": ["type:tool"],
+  "implicitDependencies": ["ptah-extension-webview", "tag:scope:webview"],
+  "targets": {
+    "lint": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/check-ui-classes.ts",
+        "{projectRoot}/baseline.json",
+        "{workspaceRoot}/apps/ptah-extension-webview/src/**/*.html",
+        "{workspaceRoot}/apps/ptah-extension-webview/src/**/*.ts",
+        "{workspaceRoot}/libs/frontend/**/src/**/*.html",
+        "{workspaceRoot}/libs/frontend/**/src/**/*.ts"
+      ],
+      "options": {
+        "command": "npx ts-node --transpile-only tools/ui-class-audit/check-ui-classes.ts",
+        "cwd": "{workspaceRoot}"
+      }
+    },
+    "update-baseline": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "npx ts-node --transpile-only tools/ui-class-audit/check-ui-classes.ts --update-baseline",
+        "cwd": "{workspaceRoot}"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["default", "jestRuntime"],
+      "outputs": ["{workspaceRoot}/coverage/tools/ui-class-audit"],
+      "options": {
+        "cwd": "tools/ui-class-audit",
+        "env": {
+          "TS_NODE_COMPILER_OPTIONS": "{\"moduleResolution\":\"node10\",\"module\":\"commonjs\",\"customConditions\":null}"
+        },
+        "command": "jest"
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "options": {
+        "command": "tsc --noEmit --project tools/ui-class-audit/tsconfig.json"
+      }
+    }
+  }
+}

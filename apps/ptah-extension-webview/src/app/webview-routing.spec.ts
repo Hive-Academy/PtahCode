@@ -1128,7 +1128,7 @@ describe('app.routes', () => {
 
   it('declares canonical surfaces in order without old setup routes', () => {
     expect(canonicalPaths).toEqual([...SURFACE_ROUTE_IDS]);
-    expect(paths.filter((path) => !canonicalPaths.includes(path))).toEqual([]);
+    expect(paths.filter((path) => !canonicalPaths.includes(path))).toEqual(['ui-gallery']);
   });
 
   it('roots every parameter route in a declared surface', () => {
@@ -1234,7 +1234,7 @@ describe('app.routes', () => {
       .filter((route) => route.canMatch !== undefined)
       .map((route) => route.path);
 
-    expect(guarded).toEqual([...ELECTRON_ONLY_SURFACES]);
+    expect(guarded).toEqual([...ELECTRON_ONLY_SURFACES, 'ui-gallery']);
     for (const path of ['apps', 'command-center', 'machines']) {
       expect(routeFor(path).canMatch).toEqual([electronOnlySurface]);
     }
@@ -1249,7 +1249,8 @@ describe('app.routes', () => {
       order.indexOf('command-center') + 1,
     );
     expect(order.indexOf('machines')).toBe(order.indexOf('review-runs') + 1);
-    expect(order.indexOf('machines')).toBe(appRoutes.length - 3);
+    expect(order.indexOf('ui-gallery')).toBe(order.indexOf('machines') + 1);
+    expect(order.indexOf('ui-gallery')).toBe(appRoutes.length - 3);
   });
 
   it('provides SURFACE_ACTIVE on the machines route, as on tasks', () => {

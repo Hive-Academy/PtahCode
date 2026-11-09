@@ -13,6 +13,7 @@ export class PtahFieldControlDirective {
 
   constructor() {
     const control = this.element.nativeElement;
-    control.classList.add(`${control.tagName.toLowerCase()}-sm`);
+    const type = control.tagName.toLowerCase();
+    control.classList.add(type, `${type}-sm`, 'border-surface-border', 'text-sm');
   }
 }

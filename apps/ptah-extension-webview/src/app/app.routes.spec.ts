@@ -10,6 +10,7 @@ import { onboardingFirstRunGuard } from '@ptah-extension/onboarding/services';
 
 import { appRoutes } from './app.routes';
 import { reviewOnlySurface } from './review-only-surface.guard';
+import { electronOnlySurface } from './electron-only-surface.guard';
 
 describe('Electron shell layout boundary', () => {
   it('bounds the outer row and configuration host', () => {
@@ -36,6 +37,28 @@ function routeFor(path: string): Route {
   if (!route) throw new Error(`Missing route: ${path}`);
   return route;
 }
+
+describe('UI gallery route', () => {
+  it('keeps listbox selection explicit and shows the shared surfaces', () => {
+    const source = readFileSync(join(__dirname, 'ui-gallery.component.ts'), 'utf-8');
+    expect(source).toContain('ngListbox selectionMode="explicit"');
+    expect(source).toContain('<ptah-surface-card>');
+    expect(source).toContain('<ptah-surface-tile');
+  });
+
+  it('loads only on Electron before the wildcard', async () => {
+    const route = routeFor('ui-gallery');
+    expect(route.canMatch).toEqual([electronOnlySurface]);
+    expect(route.canMatch?.[0]).toBe(electronOnlySurface);
+    expect(route.data?.['standalone']).toBe(true);
+    expect(route.component).toBeUndefined();
+    expect(typeof route.loadComponent).toBe('function');
+    expect(route.providers).toBeUndefined();
+    expect(appRoutes.findIndex((entry) => entry.path === 'ui-gallery')).toBeLessThan(appRoutes.findIndex((entry) => entry.path === '**'));
+    const { UiGalleryComponent } = await import('./ui-gallery.component');
+    expect(await route.loadComponent?.()).toBe(UiGalleryComponent);
+  });
+});
 
 describe('review runs route', () => {
   it('lazily resolves the review runs page on Electron', async () => {

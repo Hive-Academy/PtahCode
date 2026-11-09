@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node10",
+    "noEmit": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "lib": ["es2022"],
+    "types": ["node", "jest"],
+    "ignoreDeprecations": "6.0"
+  },
+  "include": ["*.ts"],
+  "exclude": ["node_modules"]
+}
