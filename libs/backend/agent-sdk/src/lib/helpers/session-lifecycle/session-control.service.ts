@@ -331,9 +331,13 @@ export class SessionControl {
     const deregister = (): void => {
       if (deregistered) return;
       deregistered = true;
+      // The interrupt wait can let a replacement take this tab. The abort
+      // revokes this record's own token, so revoke the whole tab only while
+      // this record still owns it.
+      const ownsTab = this.registry.find(rec.tabId) === rec;
       rec.abortController.abort();
       this.registry.remove(rec);
-      this.revokeMcpSubject?.(rec.tabId);
+      if (ownsTab) this.revokeMcpSubject?.(rec.tabId);
     };
 
     try {

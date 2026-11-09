@@ -18,6 +18,7 @@
  * teardown notifications are jest mocks.
  */
 
+import 'reflect-metadata';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { SubagentRegistryService } from '@ptah-extension/vscode-core';
 import type {
@@ -28,6 +29,7 @@ import type {
 
 import { SessionControl } from './session-control.service';
 import { SessionRegistry } from './session-registry.service';
+import { SdkQueryOptionsBuilder } from '../sdk-query-options-builder';
 import type { IModelResolver } from '../../auth-env.port';
 import type { SessionEndCallbackRegistry } from '../session-end-callback-registry';
 import type { CompactionConfig } from '../compaction-config-provider';
@@ -174,6 +176,64 @@ describe('SessionControl MCP credential teardown', () => {
     releaseInterrupt();
     await disposing;
     expect(revoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the replacement credential when an old endSession finishes late', async () => {
+    // Real builder bookkeeping over a store that models credential validity.
+    const live = new Set<string>();
+    const credentials = {
+      issue: jest.fn((_binding: unknown, subject: string) => {
+        live.add(subject);
+        return subject;
+      }),
+      revokeSubject: jest.fn((subject: string) => live.delete(subject)),
+    };
+    const ctor = SdkQueryOptionsBuilder as unknown as new (
+      ...args: unknown[]
+    ) => SdkQueryOptionsBuilder;
+    const builder = Object.assign(new ctor({ info: jest.fn() }), {
+      mcpCallerCredentials: credentials,
+    }) as unknown as Pick<SdkQueryOptionsBuilder, 'revokeMcpSubject'> & {
+      buildMcpServers(
+        running: boolean,
+        tabId: string,
+        profile: undefined,
+        cwd: string,
+        signal: AbortSignal,
+      ): unknown;
+    };
+    // The fake store returns the subject as the token value.
+    const issueFor = (signal: AbortSignal): string => {
+      builder.buildMcpServers(true, KEY, undefined, '/w', signal);
+      const results = credentials.issue.mock.results;
+      return results[results.length - 1].value as string;
+    };
+
+    const h = makeHarness(null, null, (tabId) =>
+      builder.revokeMcpSubject(tabId),
+    );
+    const oldAbort = new AbortController();
+    const oldRec = h.registry.register(KEY, makeConfig(), oldAbort);
+    const oldToken = issueFor(oldAbort.signal);
+    let releaseInterrupt: () => void = () => undefined;
+    oldRec.query = {
+      interrupt: jest.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseInterrupt = resolve;
+          }),
+      ),
+    } as unknown as typeof oldRec.query;
+
+    const ending = h.control.endSession(KEY_ID);
+    const newAbort = new AbortController();
+    h.registry.register(KEY, makeConfig(), newAbort);
+    const newToken = issueFor(newAbort.signal);
+    releaseInterrupt();
+    await ending;
+
+    expect(live.has(oldToken)).toBe(false);
+    expect(live.has(newToken)).toBe(true);
   });
 });
 
