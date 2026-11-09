@@ -60,7 +60,7 @@ const FOCUS =
     <div class="flex flex-col gap-8 font-sans text-sm text-base-content">
       <!-- Deferred (own chunk; the eager bundle is at its budget) behind a same-footprint placeholder. -->
       @defer (on immediate) {
-        <ptah-cli-orchestration-matrix #cliMatrix />
+        <ptah-cli-orchestration-matrix #cliMatrix (codexSettingsRequested)="codexSettingsRequested.emit()" />
       } @placeholder {
         <div
           class="min-h-[22rem] border-b border-base-content/10"
@@ -162,6 +162,7 @@ const FOCUS =
   `,
 })
 export class AgentsRoutingSettingsComponent {
+  readonly codexSettingsRequested = output<void>();
   readonly focusTarget = input<AgentsRoutingFocusTarget | null>(null);
   /** The current `focusTarget` has been applied; the host clears it (Settings' `agentsRoutingTarget`). */
   readonly focusTargetConsumed = output<void>();

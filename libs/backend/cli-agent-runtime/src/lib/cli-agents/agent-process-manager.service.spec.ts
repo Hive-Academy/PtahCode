@@ -1294,14 +1294,14 @@ describe('AgentProcessManager - SDK Execution Path', () => {
     });
 
     it('passes the model source and the Codex lane budgets to the adapter', async () => {
-      setupVscodeConfig({ codexAutoCompactTokens: 90000 });
+      setupVscodeConfig({ 'agentBudget.handoffContextTokens': 100000 });
 
       const runSdkCall = await spawnCodex();
 
       expect(runSdkCall.model).toBeUndefined();
       expect(runSdkCall.modelSource).toBe('cli-default');
       expect(runSdkCall.laneBudgets).toEqual({
-        autoCompactTokens: 90000,
+        autoCompactTokens: 85000,
         toolOutputTokenLimit: 2500,
         webSearch: true,
       });

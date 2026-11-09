@@ -186,15 +186,15 @@ describe('AgentSpawnEnvironment — agentOrchestration settings routing (D8)', (
   it('reads the Codex lane budgets from the file store', () => {
     const { environment } = makeRoutingEnvironment({
       fileStore: {
-        'agentOrchestration.codexAutoCompactTokens': 90000,
-        'agentOrchestration.codexToolOutputTokenLimit': 0,
+        'agentBudget.handoffContextTokens': 100000,
+        'compaction.toolOutputBudgetTokens': 4000,
         'agentOrchestration.codexWebSearch': false,
       },
     });
 
     expect(environment.resolveLaneBudgets()).toEqual({
-      autoCompactTokens: 90000,
-      toolOutputTokenLimit: 0,
+      autoCompactTokens: 85000,
+      toolOutputTokenLimit: 4000,
       webSearch: false,
     });
   });
@@ -219,7 +219,7 @@ describe('AgentSpawnEnvironment — agentOrchestration settings routing (D8)', (
     expect(environment.resolveAutoApprove('copilot')).toBe(true);
     expect(environment.resolveReasoningEffort('pi').effort).toBeUndefined();
     expect(environment.resolveLaneBudgets()).toEqual({
-      autoCompactTokens: 120000,
+      autoCompactTokens: 127500,
       toolOutputTokenLimit: 2500,
       webSearch: true,
     });

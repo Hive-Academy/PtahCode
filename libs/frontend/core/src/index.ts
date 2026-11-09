@@ -86,3 +86,4 @@ export {
 export { ORCHESTRA_CANVAS_COMPONENT } from './lib/tokens/lazy-view-components.token';
 
 export * from './lib/routing';
+export { UnavailableGitRootsStore, UNAVAILABLE_GIT_ROOT_MS } from './lib/services/unavailable-git-roots.store';

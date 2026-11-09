@@ -8,7 +8,7 @@ import {
   type Signal,
   type WritableSignal,
 } from '@angular/core';
-import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
+import { ClaudeRpcService, LoggingService, UnavailableGitRootsStore } from '@ptah-extension/core';
 import type { SessionOrganizationSummary } from '@ptah-extension/shared';
 import { ChatStore } from '../chat.store';
 
@@ -59,6 +59,7 @@ export class SessionOrganizationCache {
   private readonly chatStore = inject(ChatStore);
   private readonly rpc = inject(ClaudeRpcService);
   private readonly logger = inject(LoggingService);
+  private readonly unavailableRoots = inject(UnavailableGitRootsStore);
 
   /** Insertion order is recency: the first key is the least recently asked. */
   private readonly entries = new Map<string, CacheEntry>();
@@ -119,6 +120,8 @@ export class SessionOrganizationCache {
     for (const id of sessionIds) {
       const entry = this.entries.get(id);
       if (!entry) continue;
+      const path = entry.view()?.worktreePath;
+      if (path) this.unavailableRoots.clear(path);
       if (entry.state === 'loading') {
         entry.stale = true;
       } else {

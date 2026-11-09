@@ -271,6 +271,13 @@ const SYSTEM_CLIS: Readonly<Record<SystemCliSpecKey, SystemCliSpec>> = {
   },
 };
 
+/** Labels shared by routing displays without changing persisted executor IDs. */
+export function systemCliDisplayName(id: string): string | null {
+  return Object.prototype.hasOwnProperty.call(SYSTEM_CLIS, id)
+    ? SYSTEM_CLIS[id as SystemCliSpecKey].name
+    : null;
+}
+
 const READY: CliMatrixStatus = {
   kind: 'ready',
   label: 'Installed',

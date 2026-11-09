@@ -43,6 +43,47 @@ describe('LaneComposerComponent', () => {
     ] });
   });
 
+  it('shows one icon send action and a resume hint inside the card toolbar', () => {
+    store.composerState.mockImplementation(() => {
+      const queue = { supported: true, mode: 'queue-next-turn', usesResume: true };
+      return { queue, now: { supported: false, mode: 'unsupported' } };
+    });
+    const fixture = TestBed.createComponent(LaneComposerComponent);
+    fixture.componentRef.setInput('agentId', agentId);
+    fixture.componentRef.setInput('stopped', true);
+    fixture.componentRef.setInput('resumePath', 'Resume CLI session 01a1bc68');
+    fixture.detectChanges();
+    const card = fixture.nativeElement.querySelector('[data-glass-surface="tile"]') as HTMLElement;
+    expect(card.querySelectorAll('button[aria-label="Resume with message"]')).toHaveLength(1);
+    expect(card.querySelector('button[aria-label="Resume with message"] lucide-angular')).not.toBeNull();
+    expect(card.querySelector('button[aria-label="Resume with message"]')?.textContent?.trim()).toBe('');
+    expect(card.querySelector('span[aria-live="polite"]')?.textContent).toContain('Resume CLI session 01a1bc68');
+    expect(fixture.nativeElement.querySelector('p[aria-live="polite"]')).toBeNull();
+  });
+
+  it('sends on Enter, keeps Shift+Enter for a newline, and disables empty send', async () => {
+    sendMessage.mockResolvedValue({ mode: 'queue-next-turn', receipt });
+    const fixture = TestBed.createComponent(LaneComposerComponent);
+    fixture.componentRef.setInput('agentId', agentId);
+    fixture.detectChanges();
+    const field = fixture.nativeElement.querySelector('textarea') as HTMLTextAreaElement;
+    const send = fixture.nativeElement.querySelector('button[aria-label="Send message"]') as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    field.value = 'Hello';
+    field.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    expect(send.disabled).toBe(false);
+    const newline = new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, cancelable: true });
+    field.dispatchEvent(newline);
+    expect(newline.defaultPrevented).toBe(false);
+    expect(sendMessage).not.toHaveBeenCalled();
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', cancelable: true });
+    field.dispatchEvent(enter);
+    await fixture.whenStable();
+    expect(enter.defaultPrevented).toBe(true);
+    expect(sendMessage).toHaveBeenCalledWith(agentId, 'Hello', 'queue', false, expect.any(String));
+  });
+
   it('restores cancelled queued text alongside an existing draft', async () => {
     sendMessage.mockResolvedValue({ mode: 'queue-next-turn', receipt });
     cancelMessage.mockResolvedValue({ ...receipt, state: 'failed', reason: 'cancelled-by-user' });
@@ -53,7 +94,7 @@ describe('LaneComposerComponent', () => {
     field.value = 'Earlier text';
     field.dispatchEvent(new Event('input'));
     fixture.detectChanges();
-    fixture.nativeElement.querySelector('button.btn-primary').click();
+    fixture.nativeElement.querySelector('button[aria-label="Send message"]').click();
     await fixture.whenStable();
     expect(sendMessage).toHaveBeenCalled();
     receipts.set(new Map([[agentId, [receipt]]]));
@@ -76,7 +117,7 @@ describe('LaneComposerComponent', () => {
     field.value = 'Earlier text';
     field.dispatchEvent(new Event('input'));
     fixture.detectChanges();
-    fixture.nativeElement.querySelector('button.btn-primary').click();
+    fixture.nativeElement.querySelector('button[aria-label="Send message"]').click();
     await fixture.whenStable();
     receipts.set(new Map([[agentId, [{ ...receipt, state: 'failed', reason: 'agent_stopped', updatedAt: 2 }]]]));
     fixture.detectChanges();
@@ -93,7 +134,7 @@ describe('LaneComposerComponent', () => {
     field.value = 'Recover after tab switch';
     field.dispatchEvent(new Event('input'));
     first.detectChanges();
-    first.nativeElement.querySelector('button.btn-primary').click();
+    first.nativeElement.querySelector('button[aria-label="Send message"]').click();
     await first.whenStable();
     first.destroy();
     receipts.set(new Map([[agentId, [{ ...receipt, id: 'remount-receipt', state: 'expired', updatedAt: 2 }]]]));
@@ -112,7 +153,7 @@ describe('LaneComposerComponent', () => {
     field.value = 'Keep this';
     field.dispatchEvent(new Event('input'));
     fixture.detectChanges();
-    fixture.nativeElement.querySelector('button.btn-primary').click();
+    fixture.nativeElement.querySelector('button[aria-label="Send message"]').click();
     await fixture.whenStable();
     fixture.detectChanges();
     expect(field.value).toBe('Keep this');
@@ -138,14 +179,14 @@ describe('LaneComposerComponent', () => {
     field.value = 'Earlier text';
     field.dispatchEvent(new Event('input'));
     fixture.detectChanges();
-    fixture.nativeElement.querySelector('button.btn-primary').click();
+    fixture.nativeElement.querySelector('button[aria-label="Send message"]').click();
     await fixture.whenStable();
     receipts.set(new Map([[agentId, [receipt]]]));
     fixture.detectChanges();
     field.value = 'New thought';
     field.dispatchEvent(new Event('input'));
     fixture.detectChanges();
-    fixture.nativeElement.querySelector('button.btn-primary').click();
+    fixture.nativeElement.querySelector('button[aria-label="Send message"]').click();
     await fixture.whenStable();
     expect(sendMessage).toHaveBeenLastCalledWith(agentId, 'Earlier text\nNew thought', 'queue', false, expect.any(String));
     expect(cancelMessage.mock.invocationCallOrder[0]).toBeGreaterThan(sendMessage.mock.invocationCallOrder[1]);
@@ -165,11 +206,11 @@ describe('LaneComposerComponent', () => {
     fixture.detectChanges();
     const field = fixture.nativeElement.querySelector('textarea') as HTMLTextAreaElement;
     field.value = 'Earlier text'; field.dispatchEvent(new Event('input')); fixture.detectChanges();
-    fixture.nativeElement.querySelector('button.btn-primary').click();
+    fixture.nativeElement.querySelector('button[aria-label="Send message"]').click();
     await fixture.whenStable();
     receipts.set(new Map([[agentId, [receipt]]])); fixture.detectChanges();
     field.value = 'New thought'; field.dispatchEvent(new Event('input')); fixture.detectChanges();
-    fixture.nativeElement.querySelector('button.btn-primary').click();
+    fixture.nativeElement.querySelector('button[aria-label="Send message"]').click();
     await fixture.whenStable(); fixture.detectChanges();
     expect(cancelMessage).toHaveBeenCalledWith(agentId, 'message-1');
     expect(field.value).toBe('');
@@ -184,11 +225,11 @@ describe('LaneComposerComponent', () => {
     fixture.detectChanges();
     const field = fixture.nativeElement.querySelector('textarea') as HTMLTextAreaElement;
     field.value = 'Earlier text'; field.dispatchEvent(new Event('input')); fixture.detectChanges();
-    fixture.nativeElement.querySelector('button.btn-primary').click();
+    fixture.nativeElement.querySelector('button[aria-label="Send message"]').click();
     await fixture.whenStable();
     receipts.set(new Map([[agentId, [receipt]]])); fixture.detectChanges();
     field.value = 'New thought'; field.dispatchEvent(new Event('input')); fixture.detectChanges();
-    fixture.nativeElement.querySelector('button.btn-primary').click();
+    fixture.nativeElement.querySelector('button[aria-label="Send message"]').click();
     await fixture.whenStable(); fixture.detectChanges();
     expect(sendMessage).toHaveBeenLastCalledWith(agentId, 'Earlier text\nNew thought', 'queue', false, expect.any(String));
     expect(cancelMessage).not.toHaveBeenCalled();
@@ -226,7 +267,7 @@ describe('LaneComposerComponent', () => {
     field.value = 'Earlier text';
     field.dispatchEvent(new Event('input'));
     fixture.detectChanges();
-    fixture.nativeElement.querySelector('button.btn-primary').click();
+    fixture.nativeElement.querySelector('button[aria-label="Send message"]').click();
     await fixture.whenStable();
     receipts.set(new Map([[agentId, [receipt]]]));
     fixture.detectChanges();
@@ -234,7 +275,7 @@ describe('LaneComposerComponent', () => {
     field.value = 'New thought';
     field.dispatchEvent(new Event('input'));
     fixture.detectChanges();
-    fixture.nativeElement.querySelector('button.btn-primary').click();
+    fixture.nativeElement.querySelector('button[aria-label="Send message"]').click();
     await fixture.whenStable();
     fixture.detectChanges();
 
@@ -256,7 +297,7 @@ describe('LaneComposerComponent', () => {
     field.value = 'Earlier text\nNew thought';
     field.dispatchEvent(new Event('input'));
     fixture.detectChanges();
-    fixture.nativeElement.querySelector('button.btn-primary').click();
+    fixture.nativeElement.querySelector('button[aria-label="Send message"]').click();
     await fixture.whenStable();
 
     const secondKey = sendMessage.mock.calls[1][4];
@@ -432,10 +473,10 @@ describe('LaneComposerComponent', () => {
     field.value = 'Same text';
     field.dispatchEvent(new Event('input'));
     fixture.detectChanges();
-    fixture.nativeElement.querySelector('button.btn-primary').click();
+    fixture.nativeElement.querySelector('button[aria-label="Send message"]').click();
     await fixture.whenStable();
     fixture.detectChanges();
-    fixture.nativeElement.querySelector('button.btn-primary').click();
+    fixture.nativeElement.querySelector('button[aria-label="Send message"]').click();
     await fixture.whenStable();
     expect(sendMessage).toHaveBeenCalledTimes(2);
     expect(sendMessage.mock.calls[0][4]).toBe(sendMessage.mock.calls[1][4]);
@@ -443,7 +484,7 @@ describe('LaneComposerComponent', () => {
     field.dispatchEvent(new Event('input'));
     fixture.detectChanges();
     sendMessage.mockResolvedValueOnce({ mode: 'queue-next-turn', receipt: { ...receipt, id: 'message-3' } });
-    fixture.nativeElement.querySelector('button.btn-primary').click();
+    fixture.nativeElement.querySelector('button[aria-label="Send message"]').click();
     await fixture.whenStable();
     expect(sendMessage.mock.calls[2][4]).not.toBe(sendMessage.mock.calls[0][4]);
   });

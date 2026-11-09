@@ -601,8 +601,9 @@ export const AGENT_SDK_VERSION = '0.0.1';
 export { applyClaudeAccountRouteEnv } from './lib/helpers/claude-account-route-env';
 export {
   CLAUDE_CERTIFIED_ENV_KEYS,
-  CLAUDE_PERSONAL_ACCOUNT_INFO_SUBSCRIPTIONS,
-  CLAUDE_PERSONAL_SUBSCRIPTIONS,
+  claudeSubscriptionFamily,
+  claudeVersionIdentity,
+  compareClaudeVersions,
   CLAUDE_SETTINGS_SAFE_ENV_KEYS,
   ClaudeCertifiedLaunchRefusal,
   assertCertifiedLaunch,

@@ -11,6 +11,7 @@ import { TriageStageRunner } from './stages/triage-stage.runner';
 import { LensStageRunner } from './stages/lens-stage.runner';
 import { VerificationStageRunner } from './stages/verification-stage.runner';
 import { PublicationStageRunner } from './stages/publication-stage.runner';
+import { ReviewWorktreeService } from './context/review-worktree.service';
 
 const sha = 'a'.repeat(40);
 const claim: ReviewQueueClaim = { repo: { owner: 'Hive-Academy', name: 'PtahCode' }, prNumber: 1,
@@ -60,13 +61,18 @@ function fixture() {
     upsertWalkthrough: jest.fn(), createCommentReview: jest.fn(), replyToFinding: jest.fn() };
   const logger = Object.create(Logger.prototype) as Logger;
   jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+  jest.spyOn(logger, 'info').mockImplementation(() => undefined);
+  const worktree = Object.create(ReviewWorktreeService.prototype) as ReviewWorktreeService;
+  const releaseSource = jest.spyOn(worktree, 'releaseSource').mockResolvedValue(true);
+  const listAttemptSources = jest.spyOn(worktree, 'listAttemptSources').mockResolvedValue([]);
+  const prune = jest.spyOn(worktree, 'prune').mockResolvedValue(undefined);
   const settingsStore = { getSettings: jest.fn().mockResolvedValue(settings), updateSettings: jest.fn(), listRepositories: jest.fn(),
     setPublicationPause: jest.fn(), getLiveGate: jest.fn(), setLiveGate: jest.fn() } as jest.Mocked<IReviewSettingsStore>;
   const coordinator = new ReviewOrchestratorService(discovery, context, triage, lenses, verification, publication, queue,
     new ReviewPolicyService(), repository, github,
     { resolve: async () => ({ repoRoot: '/repo', attemptsRoot: '/attempts' }), settings: async () => settings, baseConfig: async () => null }, logger,
-    settingsStore);
-  return { settingsStore, coordinator, stages, checkpoints, repository, logger, claimMock, release, discover, contextRun, triageRun, lensRun,
+    settingsStore, worktree);
+  return { releaseSource, listAttemptSources, prune, settingsStore, coordinator, stages, checkpoints, repository, logger, claimMock, release, discover, contextRun, triageRun, lensRun,
     verificationRun, publicationRun, github };
 }
 
@@ -81,6 +87,59 @@ describe('ReviewOrchestratorService', () => {
     await f.coordinator.drain('worker', Date.now() + 500, controller.signal);
     expect(f.repository.saveFailure).not.toHaveBeenCalled();
     expect(f.release).not.toHaveBeenCalled();
+    expect(f.releaseSource).not.toHaveBeenCalled();
+  });
+
+  it('removes the source worktree of an attempt after it is released', async () => {
+    const f = fixture();
+    await f.coordinator.drain('worker', Date.now() + 500);
+    expect(f.release).toHaveBeenCalledWith(claim.attemptId, 'worker', expect.any(String));
+    expect(f.releaseSource).toHaveBeenCalledWith(claim.repo, '/repo', '/attempts', claim.attemptId);
+    expect(f.release.mock.invocationCallOrder[0]).toBeLessThan(f.releaseSource.mock.invocationCallOrder[0]);
+  });
+
+  it('keeps the source worktree when the lease was lost and release did not apply', async () => {
+    const f = fixture();
+    f.release.mockResolvedValueOnce(false);
+    await f.coordinator.drain('worker', Date.now() + 500);
+    expect(f.releaseSource).not.toHaveBeenCalled();
+  });
+
+  it('removes the source worktree of a failed attempt and contains a cleanup failure', async () => {
+    const f = fixture();
+    f.contextRun.mockRejectedValueOnce(new Error('No space left on device'));
+    f.releaseSource.mockRejectedValueOnce(new Error('Review source removal failed'));
+    await expect(f.coordinator.drain('worker', Date.now() + 500)).resolves.toBe(1);
+    expect(f.release).toHaveBeenCalledWith(claim.attemptId, 'worker', 'failed');
+    expect(f.releaseSource).toHaveBeenCalledTimes(1);
+    expect(f.logger.error).toHaveBeenCalledWith('Review attempt source cleanup failed', new Error('Review source removal failed'));
+  });
+
+  it('startup sweep removes sources of ended attempts only', async () => {
+    const f = fixture();
+    f.listAttemptSources.mockResolvedValueOnce(['done', 'failed', 'cancelled', 'running', 'queued', 'unknown']);
+    const states: Record<string, string> = { done: 'completed', failed: 'failed', cancelled: 'cancelled', running: 'running', queued: 'queued' };
+    jest.mocked(f.repository.getAttempt).mockImplementation(async (id) => states[id]
+      ? { attemptId: id, state: states[id] } as Awaited<ReturnType<IReviewRepository['getAttempt']>> : null);
+    await expect(f.coordinator.releaseEndedSources()).resolves.toBe(3);
+    expect(f.listAttemptSources).toHaveBeenCalledWith(claim.repo, '/repo', '/attempts');
+    expect(f.releaseSource.mock.calls.map((call) => call[3])).toEqual(['done', 'failed', 'cancelled']);
+    expect(f.prune).toHaveBeenCalledWith(claim.repo, '/repo');
+  });
+
+  it('startup sweep continues after one attempt fails and never throws', async () => {
+    const f = fixture();
+    f.listAttemptSources.mockResolvedValueOnce(['a', 'b']);
+    jest.mocked(f.repository.getAttempt).mockImplementation(async (id) =>
+      ({ attemptId: id, state: 'completed' }) as Awaited<ReturnType<IReviewRepository['getAttempt']>>);
+    f.releaseSource.mockRejectedValueOnce(new Error('busy'));
+    await expect(f.coordinator.releaseEndedSources()).resolves.toBe(1);
+    expect(f.releaseSource.mock.calls.map((call) => call[3])).toEqual(['a', 'b']);
+    f.listAttemptSources.mockRejectedValueOnce(new Error('Git worktree list failed'));
+    await expect(f.coordinator.releaseEndedSources()).resolves.toBe(0);
+    f.settingsStore.getSettings.mockRejectedValueOnce(new Error('settings unavailable'));
+    await expect(f.coordinator.releaseEndedSources()).resolves.toBe(0);
+    expect(f.logger.error).toHaveBeenCalledWith('Review attempt source sweep failed', new Error('Git worktree list failed'));
   });
 
   it('contains failure persistence errors and releases the attempt as failed', async () => {

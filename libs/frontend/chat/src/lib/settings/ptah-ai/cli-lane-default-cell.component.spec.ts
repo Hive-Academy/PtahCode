@@ -19,6 +19,10 @@ const manifest: CliAdapterManifest = {
 };
 
 describe('CliLaneDefaultCellComponent', () => {
+  beforeEach(() => {
+    HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
+    HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
+  });
   function setup(cli: 'codex' | 'ptah-cli' | 'cursor' = 'codex', value?: { permission?: 'plan' | 'yolo'; network?: 'allow' | 'deny' }) {
     const fixture = TestBed.createComponent(CliLaneDefaultCellComponent);
     fixture.componentRef.setInput('cli', cli);
@@ -76,7 +80,8 @@ describe('CliLaneDefaultCellComponent', () => {
     fixture.detectChanges();
     expect(selected).not.toHaveBeenCalled();
     expect(select.value).toBe('plan');
-    (fixture.nativeElement.querySelector('button:last-child') as HTMLButtonElement).click();
+    expect((fixture.nativeElement.querySelector('dialog') as HTMLDialogElement).open).toBe(true);
+    (fixture.nativeElement.querySelector('dialog button') as HTMLButtonElement).click();
     fixture.detectChanges();
     expect(selected).not.toHaveBeenCalled();
   });
@@ -86,7 +91,9 @@ describe('CliLaneDefaultCellComponent', () => {
     const reset = jest.fn();
     fixture.componentInstance.resetRequested.subscribe(reset);
     expect(fixture.nativeElement.textContent).toContain('Saved default');
-    const resetButton = fixture.nativeElement.querySelector('button') as HTMLButtonElement;
+    (fixture.nativeElement.querySelector('button') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    const resetButton = Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>).find(button => button.textContent?.includes('Reset to default'))!;
     expect(resetButton.textContent).toContain('Auto — full access');
     resetButton.click();
     fixture.detectChanges();
@@ -96,7 +103,9 @@ describe('CliLaneDefaultCellComponent', () => {
     fixture.detectChanges();
     expect(reset).not.toHaveBeenCalled();
     expect((fixture.nativeElement.querySelector('select') as HTMLSelectElement).value).toBe('plan');
-    resetButton.click();
+    (fixture.nativeElement.querySelector('button') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>).find(button => button.textContent?.includes('Reset to default'))?.click();
     fixture.detectChanges();
     buttons().find(button => button.textContent?.trim() === 'Confirm')?.click();
     expect(reset).toHaveBeenCalledTimes(1);

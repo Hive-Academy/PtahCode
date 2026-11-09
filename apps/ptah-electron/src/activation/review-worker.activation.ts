@@ -73,6 +73,11 @@ export async function startReviewWorker(
   };
   signal.addEventListener('abort', dispose, { once: true });
   drain();
+  // Detached: removing ended attempts' checkouts (GBs each) must not delay reviews. It touches
+  // only ended attempts, so it is safe beside the drain. An interrupted sweep repeats next start.
+  void orchestrator.releaseEndedSources().catch((_error: unknown) => {
+    logger.error('Review attempt source sweep failed', new Error('Review attempt source sweep failed'));
+  });
   return { dispose, awaitStopped: () => activeDrain ?? Promise.resolve() };
 }
 

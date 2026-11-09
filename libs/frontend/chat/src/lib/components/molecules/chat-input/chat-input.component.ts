@@ -291,6 +291,7 @@ function folderName(root: string): string {
                field (design-spec §2.2, which field-sizing ignores); it grows
                to 8 lines, then scrolls. -->
           <textarea
+            dir="auto"
             #inputElement
             [id]="inputId"
             style="field-sizing: content"

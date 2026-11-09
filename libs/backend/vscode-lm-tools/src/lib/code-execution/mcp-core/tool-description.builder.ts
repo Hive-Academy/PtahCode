@@ -101,13 +101,19 @@ export function buildTaskCreateTool(): MCPToolDefinition {
   return {
     name: 'ptah_task_create',
     description:
-      `Create a task under .ptah/specs/. Allocates the next TASK_YYYY_NNN_xxxx id, ` +
-      `claims the folder atomically, and writes a valid carrier — use this ` +
-      `instead of creating the folder and its metadata by hand, which is how ` +
-      `task folders end up invisible to the Tasks board. ${CARRIER_OWNERSHIP_NOTE}`,
+      `Create a task under .ptah/specs/ of a worktree. Call ` +
+      `ptah_git_worktree_add first and pass its path as worktreePath; never ` +
+      `create tasks in the main checkout. Allocates the next ` +
+      `TASK_YYYY_NNN_xxxx id, claims the folder atomically and writes a ` +
+      `valid carrier, so the task shows on the Tasks board. ` +
+      `${CARRIER_OWNERSHIP_NOTE}`,
     inputSchema: {
       type: 'object',
       properties: {
+        worktreePath: {
+          type: 'string',
+          description: 'Registered worktree path; defaults to workspace.',
+        },
         title: { type: 'string', description: 'Short imperative title' },
         type: {
           type: 'string',
@@ -184,6 +190,7 @@ export function buildTaskUpdateTool(): MCPToolDefinition {
     inputSchema: {
       type: 'object',
       properties: {
+        worktreePath: { type: 'string', description: 'Registered worktree path.' },
         taskId: {
           type: 'string',
           description: 'Task folder name, e.g. TASK_2026_179',
@@ -251,6 +258,7 @@ export function buildTaskGetTool(): MCPToolDefinition {
     inputSchema: {
       type: 'object',
       properties: {
+        worktreePath: { type: 'string', description: 'Registered worktree path.' },
         taskId: {
           type: 'string',
           description: 'Task folder name, e.g. TASK_2026_179',
@@ -283,6 +291,7 @@ export function buildTaskListTool(): MCPToolDefinition {
     inputSchema: {
       type: 'object',
       properties: {
+        worktreePath: { type: 'string', description: 'Registered worktree path.' },
         status: {
           type: 'array',
           items: { type: 'string', enum: [...TASK_STATUSES] },
@@ -325,7 +334,9 @@ export function buildTaskCheckTool(): MCPToolDefinition {
       `and invalidTotal giving the full counts; healthy is judged on the ` +
       `full set. Run this when a task folder you expect is missing from the ` +
       `board.`,
-    inputSchema: { type: 'object', properties: {} },
+    inputSchema: { type: 'object', properties: {
+      worktreePath: { type: 'string', description: 'Registered worktree path.' },
+    } },
     annotations: { readOnlyHint: true },
   };
 }
@@ -1024,18 +1035,18 @@ export function buildAgentReportTool(): MCPToolDefinition {
     name: 'ptah_agent_report',
     description:
       'Report back to the session that spawned you — a blocker, a finding, ' +
-      'or a question — without waiting to finish. Call it once more BEFORE ' +
-      'your final message, naming what you produced and the absolute path of ' +
-      'every file you wrote: that report is the only account of your work ' +
-      'the spawning session gets without reading your whole output. The ' +
-      'message appears in ' +
-      'that session immediately and on your own agent tile. You are ' +
+      'or a question during the run. A clean success needs no report: the ' +
+      'completion signal and deliverable file cover it. If you send a ' +
+      'closing success report, set final: true so it can join the ' +
+      'completion signal. The ' +
+      'message appears in that session when delivered and on your own agent tile. You are ' +
       'identified automatically; there is no agent id to pass and you cannot ' +
-      'report on behalf of another agent. Returns "delivered": false with a ' +
-      '"reason" when the report reached nobody — it never claims a delivery ' +
-      'it did not make. Rate-limited per agent; send considered updates, not ' +
-      'a running commentary. A child session started by ptah_session_start ' +
-      'can call it too; its report reaches the session that started it.',
+      'report on behalf of another agent. A refused report returns ' +
+      '"delivered": false with a reason. Rate-limited per agent; send considered ' +
+      'updates. A final report may return pending: true with ' +
+      'reason held-for-completion; do not resend it. ' +
+      'A child session started by ptah_session_start can call it too; ' +
+      'its report reaches the session that started it and ignores final.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1047,6 +1058,10 @@ export function buildAgentReportTool(): MCPToolDefinition {
           type: 'string',
           description:
             'Optional one-line summary (max 200 characters) shown on the agent tile',
+        },
+        final: {
+          type: 'boolean',
+          description: 'Closing success report, about to exit; held briefly for completion.',
         },
       },
       required: ['message'],

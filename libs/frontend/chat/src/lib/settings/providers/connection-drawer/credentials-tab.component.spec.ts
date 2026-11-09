@@ -1,4 +1,4 @@
-import { TestBed, type ComponentFixture } from '@angular/core/testing';
+import { DeferBlockState, TestBed, type ComponentFixture } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { CodexSignInService } from '@ptah-extension/core';
 import type { CodexLoginState } from '@ptah-extension/shared';
@@ -14,6 +14,13 @@ import {
 import type { ConnectionKind } from './connection-kind';
 import { isDisabledControl } from '../../feedback/busy-disabled.testing';
 import { SettingsSaveFeedbackService } from '../../feedback/settings-save-feedback.service';
+import { CodexAgentBehaviorComponent } from './codex-agent-behavior.component';
+import { ChangeDetectionStrategy, Component } from '@angular/core';
+
+@Component({ selector: 'ptah-codex-agent-behavior', standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: '<section data-testid="agent-behavior-stub">Agent behavior</section>' })
+class AgentBehaviorStub {}
 
 const connection = (overrides: Partial<ProvidersConnection> = {}): ProvidersConnection => ({
   id: 'requesty', name: 'Requesty', authMode: 'apiKey', hasKey: true, configured: true, custom: false,
@@ -85,6 +92,9 @@ describe('CredentialsTabComponent', () => {
         { provide: SettingsSaveFeedbackService, useValue: { announce } },
         { provide: CodexSignInService, useValue: { state: codexState, nothingSeen: signal(false), start: jest.fn(), restart: jest.fn(), cancel: jest.fn() } },
       ],
+    }).overrideComponent(CredentialsTabComponent, {
+      remove: { imports: [CodexAgentBehaviorComponent] },
+      add: { imports: [AgentBehaviorStub] },
     });
     fixture = TestBed.createComponent(CredentialsTabComponent);
     element = fixture.nativeElement as HTMLElement;
@@ -369,6 +379,17 @@ describe('CredentialsTabComponent', () => {
     expect(action).toHaveBeenCalledWith('sign-in');
     render({ connection: connection({ id: 'openai-codex', name: 'OpenAI Codex', authMode: 'oauth', hasKey: false, tokenStale: false }) });
     expect(query('credentials-codex-copy')?.textContent).toContain('uses the Codex login');
+  });
+
+  it('offers deferred Agent behavior after sign-in even while Codex is signed out', async () => {
+    render({ connection: connection({ id: 'openai-codex', name: 'OpenAI Codex', authMode: 'oauth', hasKey: false, tokenStale: true }), kind: 'oauth' });
+    const [block] = await fixture.getDeferBlocks();
+    await block.render(DeferBlockState.Complete);
+    fixture.detectChanges();
+    const signIn = query('credentials-codex');
+    const behavior = query('agent-behavior-stub');
+    expect(behavior).not.toBeNull();
+    expect(signIn?.compareDocumentPosition(behavior as Node)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it('Claude CLI shows the sign-in and install commands with Copy, and Check again (#10)', async () => {

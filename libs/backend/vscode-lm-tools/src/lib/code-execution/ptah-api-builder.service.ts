@@ -1200,6 +1200,10 @@ export class PtahAPIBuilder {
     const webviewManager = this.webviewManager;
 
     return (event) => {
+      if (event.action === 'removed' && event.worktreePath) {
+        const cleanup = this.sessionOrganizationRecorder?.clearRemovedWorktree?.(event.worktreePath);
+        if (cleanup && 'error' in cleanup) logger.warn('[PtahAPIBuilder] Worktree removed but session link cleanup failed', { error: cleanup.error.message });
+      }
       if (!webviewManager) {
         logger.debug(
           '[PtahAPIBuilder] WebviewManager not registered, skipping worktree notification',

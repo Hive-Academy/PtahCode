@@ -25,6 +25,7 @@ const PARENT = '5d8e1f40-1c2b-4a3d-8e9f-0a1b2c3d4e5f';
 const TAB_ID = 'tab_1727000000000_x7k2p';
 
 type StoreMethod =
+  | 'clearRemovedWorktree'
   | 'isReady'
   | 'listWorkspace'
   | 'listTaskLinks'
@@ -72,6 +73,7 @@ function createStore(signal: OpenSignal): FakeStore {
       };
     }),
     isReady: jest.fn(() => true),
+    clearRemovedWorktree: jest.fn(() => new Map<string, string[]>()),
     listWorkspace: jest.fn(() => new Map<string, StoredOrganization>()),
     listTaskLinks: jest.fn(() => []),
     upsertOrganization: jest.fn(),
@@ -185,6 +187,19 @@ function callEveryRecorderMethod(
 // ── Specs ────────────────────────────────────────────────────────────────────
 
 describe('SessionOrganizationService', () => {
+  it('publishes organization changes for every session whose removed worktree was cleared', () => {
+    const h = setup();
+    h.store.clearRemovedWorktree.mockReturnValue(new Map([[KEY, [SESSION, PARENT]]]));
+    expect(h.service.clearRemovedWorktree('/wt/removed')).toEqual({ cleared: 2 });
+    expect(h.store.clearRemovedWorktree).toHaveBeenCalledWith('/wt/removed', expect.any(Number));
+    expect(h.changes).toEqual([{ workspaceRoot: KEY, sessionIds: [SESSION, PARENT], reason: 'capture' }]);
+  });
+  it('reports a failed cleanup for retry after Git removal', () => {
+    const h = setup();
+    const failure = new Error('storage failed');
+    h.store.clearRemovedWorktree.mockImplementation(() => { throw failure; });
+    expect(h.service.clearRemovedWorktree('/wt/removed')).toEqual({ error: failure });
+  });
   describe('availability', () => {
     it('reads store readiness live on every call', () => {
       const h = setup();

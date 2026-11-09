@@ -3,6 +3,7 @@ import {
   PLATFORM_TOKENS,
   ContentDownloadService,
   type IWorkspaceWatcher,
+  type ISessionOrganizationRecorder,
 } from '@ptah-extension/platform-core';
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
@@ -463,10 +464,17 @@ export function createHeavyServicesBooter(
         const workspaceWatcher = container.resolve<IWorkspaceWatcher>(
           PLATFORM_TOKENS.WORKSPACE_WATCHER,
         );
+        const organization = container.isRegistered(PLATFORM_TOKENS.SESSION_ORGANIZATION_RECORDER, true)
+          ? container.resolve<ISessionOrganizationRecorder>(PLATFORM_TOKENS.SESSION_ORGANIZATION_RECORDER)
+          : undefined;
         const watcher = new GitWatcherService(
           gitInfoSvc,
           logger,
           workspaceWatcher,
+          (path) => {
+            const cleanup = organization?.clearRemovedWorktree?.(path);
+            if (cleanup && 'error' in cleanup) logger.warn('[GitWatcher] Worktree removed but session link cleanup failed', { error: cleanup.error.message });
+          },
         );
         const broadcast = (type: string, payload: unknown): void => {
           webviewManager.broadcastMessage(type, payload);

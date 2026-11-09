@@ -41,8 +41,8 @@ That sample is one machine's output at one moment — yours will differ.
 | `task`                | Required. The self-contained prompt (§3).                                                                                                                                                                                                                             |
 | `cli`                 | A system CLI from an `installed` row. Omit for the user's default CLI.                                                                                                                                                                                                |
 | `ptahCliId`           | A ptah-cli row's id. When set, `cli` is ignored.                                                                                                                                                                                                                      |
-| `model`               | Raw model id. For a ptah-cli lane it overrides the tier mapping. Read ids from that lane's own model list; never invent one.                                                                                                                                          |
-| `modelTier`           | `opus` / `sonnet` / `haiku`, ptah-cli lanes only; the provider maps the tier to a model.                                                                                                                                                                              |
+| `model`               | Raw model ID from that lane's own model list; overrides tier mapping where available. Never invent one.                                                                                                                                                              |
+| `modelTier`           | `opus` / `sonnet` / `haiku`; mapped only for ptah-cli providers and `cli: "claude"`.                                                                                                                                                                                     |
 | `permission`, `network` | Optional requested lane policies. Check the manifest first; unsupported combinations return `UNSUPPORTED_LANE_POLICY` before launch. `no-reliable-source` means no verified mapping. |
 | `role`                | Name of a role generated for this workspace. `ptah_agent_list` lists the valid names. The spawn result reports `roleDelivery` and `roleChannel`.                                                                                                                      |
 | `workingDirectory`    | Inside the workspace. A worktree path when lanes edit the same files in parallel.                                                                                                                                                                                     |
@@ -61,7 +61,16 @@ rejects any key not listed here — pass only the documented parameters.
 When a `Routing:` system reminder is present, reuse its taskType, depth and executor
 suggestions; do not repeat host pre-flight routing. Gate 0.1 still applies.
 
+The `tier` and `effort` in a `ptah_route_decide` roster are advisory for system CLI lanes,
+not universal CLI model IDs. System CLI model resolution is request `model` →
+`agentOrchestration.<cli>Model` setting → native CLI default. A per-CLI tier map is future work.
+
 ## 3. Task contract
+
+For an implementation lane, build `task` from **one batch entry**: write set (files it may edit),
+read set (files and line ranges), inline contract excerpts (interfaces, types, signatures),
+dependencies, exact verify command, and acceptance criteria. The lane reads beyond that set only
+when a type error or failing test names another file, and reports each extra read.
 
 A lane shares none of your context and cannot ask the user anything. Every `task` carries:
 
@@ -75,10 +84,7 @@ A lane shares none of your context and cannot ask the user anything. Every `task
    (a panel answer), give the exact answer structure in place of a path.
 5. **Reply**: `WROTE: <absolute path>` plus a one-line headline, nothing else — when there is a
    deliverable file.
-6. **Report before exiting**: call `ptah_agent_report` once before the final message, naming what
-   was produced, the absolute path of every file written, and anything it could not do. A lane
-   that exits silently still produces a completion signal, but the signal lists files — only the
-   lane can say what it decided and what it left undone.
+6. **Report when the parent must act**: call `ptah_agent_report` for a blocker, partial work, an open decision, a question, or progress the parent needs mid-run. A clean success needs no report: the completion signal and deliverable file cover it. A closing success report, if sent, sets `final: true` so it can join the completion signal. Keep the final-message summary.
 7. **Git**: never commit, push or run history-changing git — unless the workflow gives the lane its
    own throwaway worktree and says so. Never run git commands that discard working-tree changes
    (`restore`, `checkout -- <path>`, `stash`, `reset`, `clean`); a change the lane did not make
@@ -241,7 +247,8 @@ Lane output is evidence, not proof.
 
 `ptah_agent_list` shows potential support from adapter manifests; a live lane resolves effective capabilities from its handle. Read the row and preview before Send. An accepted receipt is not settled: `ptah_agent_message_status({ agentId, messageId })` returns `accepted`, `started`, `settled`, `failed`, `expired`, or `interrupted-undelivered`. Only receipt metadata survives a host restart; queued bodies live in memory. Missing or aged IDs return `expired`, and nonterminal receipts fail on restart. Do not interrupt a lane mid-edit to add a minor note. On a
 ptah-cli lane the message is echoed into that lane's own output, which is how you confirm it
-arrived. A lane's `ptah_agent_report` can return `delivered: false`; a report is attribution, not
+arrived. A clean successful lane need not send `ptah_agent_report`; read its completion signal
+and deliverable file. A lane's `ptah_agent_report` can return `delivered: false`; a report is attribution, not
 authentication — verify its claims against files and tests. The same rule applies to the
 completion signal: it is evidence a file exists, never evidence the content is right.
 OpenCode binds a lane to its own session; `session-mismatch` means it refused another conversation's events. Treat it as a failed lane and inspect the output before any resume.
@@ -270,8 +277,12 @@ them polling, and 1.23 billion input tokens in total.
   says little about cost (most of the input is cheap cache reads). Ptah stops a lane only when it
   repeats one identical call in a loop (`laneRepeatCallStopAt`, default 20). Do not state a call
   budget in `task`.
-- Bound cost by scope instead: split work by files and deliverables, not by call count. One lane
-  per batch-sized scope; a larger phase is several sequential lanes, each with its own file list.
+- Size each batch by context weight: `ptah_count_tokens` for its read set plus write set, then
+  add 10% for framing. Target 4,000–12,000 tokens; hard ceiling 16,000. Keep at most six write
+  files and two Nx projects as secondary limits. A coherent batch may fall below 4,000 tokens;
+  lane fixed overhead makes tiny batches wasteful. If one file exceeds the ceiling, first batch
+  a behavior-preserving split, then batch the rewiring.
+- Record actual lane tokens per batch for calibration; write "unavailable" when unknown. Never guess.
 - Give the lane its file list up front (`files` plus absolute paths in `task`) so it edits instead
   of exploring. Exploration is the calls you pay for twice — once to search, once as context.
 - A lane whose context balloons from a log or a whole-file read pays that context on every call

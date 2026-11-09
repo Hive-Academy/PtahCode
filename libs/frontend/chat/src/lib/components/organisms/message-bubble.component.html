@@ -82,6 +82,7 @@
       @if (parts.answer.length > 0) {
         <div
           class="cs-answer max-w-[600px] text-[13px] leading-[1.6]"
+          dir="auto"
           [class.pt-2]="hasLog() || disclosureLabel() !== null"
         >
           @for (child of parts.answer; track child.id; let last = $last) {
@@ -105,6 +106,7 @@
       <!-- No tree (raw, system or error text): the raw text is the answer. -->
       <div
         class="cs-answer max-w-[600px] text-[13px] leading-[1.6]"
+        [attr.dir]="mermaidFallbackText() ? null : 'auto'"
       >
         @if (mermaidFallbackText(); as text) {
           @defer (on immediate) {
@@ -115,17 +117,20 @@
             />
           } @placeholder {
             <markdown
+              dir="auto"
               [data]="text | surfaceMarkdown: surfaceActive()"
               class="prose prose-sm max-w-none"
             />
           } @error {
             <markdown
+              dir="auto"
               [data]="text | surfaceMarkdown: surfaceActive()"
               class="prose prose-sm max-w-none"
             />
           }
         } @else {
           <markdown
+            dir="auto"
             [data]="
               message().rawContent || '' | surfaceMarkdown: surfaceActive()
             "
@@ -305,12 +310,14 @@
           </button>
           @if (!isContinuationCollapsed()) {
             <markdown
+              dir="auto"
               [data]="userDisplayContent() | surfaceMarkdown: surfaceActive()"
               class="prose prose-sm max-w-none [&_*]:text-base-content mt-2"
             />
           }
         } @else {
           <markdown
+            dir="auto"
             [data]="userDisplayContent() | surfaceMarkdown: surfaceActive()"
             class="prose prose-sm max-w-none [&_*]:text-base-content"
           />

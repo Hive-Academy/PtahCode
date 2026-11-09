@@ -628,112 +628,21 @@ describe('CLI model settings share the string check and trim', () => {
   });
 });
 
-describe('Codex lane budget settings (TASK_2026_597)', () => {
-  const budgetKeys = [
-    'codexAutoCompactTokens',
-    'codexToolOutputTokenLimit',
-    'codexWebSearch',
-  ] as const;
-
-  it('getConfig returns the file-settings defaults when nothing is stored', async () => {
-    const h = makeHarness();
-    const result = await h.getConfig();
-    for (const key of budgetKeys) {
-      expect(result[key]).toBe(
-        FILE_BASED_SETTINGS_DEFAULTS[`agentOrchestration.${key}`],
-      );
-    }
-    expect(result.codexAutoCompactTokens).toBe(120000);
-    expect(result.codexToolOutputTokenLimit).toBe(2500);
-    expect(result.codexWebSearch).toBe(true);
-  });
-
-  it('round-trips valid values, including 0 and false', async () => {
-    const h = makeHarness();
-    expect(
-      await h.setConfig({
-        codexAutoCompactTokens: 0,
-        codexToolOutputTokenLimit: 4000,
-        codexWebSearch: false,
-      }),
-    ).toEqual({ success: true });
-    expect(
-      h.settings.get('ptah.agentOrchestration.codexAutoCompactTokens'),
-    ).toBe(0);
-    const result = await h.getConfig();
-    expect(result.codexAutoCompactTokens).toBe(0);
-    expect(result.codexToolOutputTokenLimit).toBe(4000);
-    expect(result.codexWebSearch).toBe(false);
-  });
-
-  it.each([
-    ['codexAutoCompactTokens', -1],
-    ['codexAutoCompactTokens', 1.5],
-    ['codexAutoCompactTokens', '120000'],
-    ['codexAutoCompactTokens', null],
-    ['codexAutoCompactTokens', Number.NaN],
-    ['codexAutoCompactTokens', Number.MAX_SAFE_INTEGER + 1],
-    ['codexToolOutputTokenLimit', Number.MAX_SAFE_INTEGER + 2],
-    ['codexToolOutputTokenLimit', Number.POSITIVE_INFINITY],
-    ['codexToolOutputTokenLimit', -2500],
-    ['codexToolOutputTokenLimit', true],
-    ['codexWebSearch', 'false'],
-    ['codexWebSearch', 0],
-    ['codexWebSearch', null],
-  ])(
-    'rejects %s = %p with its own message and writes nothing (never clamped)',
-    async (field, value) => {
+describe('Codex web search setting', () => {
+  it.each(['AutoCompactTokens', 'ToolOutputTokenLimit'])(
+    'ignores removed Codex %s fields in setConfig', async (suffix) => {
       const h = makeHarness();
-      const result = await h.setConfig({
-        [field]: value,
-        piModel: 'openai/gpt-4o',
-      });
-      expect(result).toEqual({
-        success: false,
-        error: `Unsupported ${field} value`,
-      });
-      expect(result.error).not.toBe(
-        'Could not save the orchestration settings.',
-      );
-      expect(h.workspace.setConfiguration).not.toHaveBeenCalled();
-      expect(h.settings.size).toBe(0);
+      const field = `codex${suffix}`;
+      await h.setConfig(Object.assign({ codexWebSearch: false }, { [field]: 42 }));
+      expect(h.settings.has(`ptah.agentOrchestration.${field}`)).toBe(false);
+      expect(await h.getConfig()).not.toHaveProperty(field);
     },
   );
 
-  it.each(['codexAutoCompactTokens', 'codexToolOutputTokenLimit'] as const)(
-    'accepts %s = -0 and stores it as 0',
-    async (field) => {
-      const h = makeHarness();
-      expect(await h.setConfig({ [field]: -0 })).toEqual({ success: true });
-      // toBe uses Object.is, so -0 would fail here.
-      expect(h.settings.get(`ptah.agentOrchestration.${field}`)).toBe(0);
-      expect((await h.getConfig())[field]).toBe(0);
-    },
-  );
-
-  it('a rejected budget field is not masked by the generic catch even when writes would throw', async () => {
+  it('round trips the boolean setting', async () => {
     const h = makeHarness();
-    h.workspace.setConfiguration.mockRejectedValue(new Error('disk full'));
-    const result = await h.setConfig({
-      codexWebSearch: false,
-      codexToolOutputTokenLimit: -1,
-    });
-    expect(result).toEqual({
-      success: false,
-      error: 'Unsupported codexToolOutputTokenLimit value',
-    });
-    expect(h.logger.error).not.toHaveBeenCalled();
-  });
-
-  it('getConfig reports hand-edited invalid file values as the defaults', async () => {
-    const h = makeHarness();
-    h.settings.set('ptah.agentOrchestration.codexAutoCompactTokens', -5);
-    h.settings.set('ptah.agentOrchestration.codexToolOutputTokenLimit', 'lots');
-    h.settings.set('ptah.agentOrchestration.codexWebSearch', 'yes');
-    const result = await h.getConfig();
-    expect(result.codexAutoCompactTokens).toBe(120000);
-    expect(result.codexToolOutputTokenLimit).toBe(2500);
-    expect(result.codexWebSearch).toBe(true);
+    expect(await h.setConfig({ codexWebSearch: false })).toEqual({ success: true });
+    expect((await h.getConfig()).codexWebSearch).toBe(false);
   });
 });
 

@@ -42,7 +42,7 @@ import type {
   RpcHandler,
   WebviewManager,
 } from '@ptah-extension/vscode-core';
-import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
+import { PLATFORM_TOKENS, type ISessionOrganizationRecorder } from '@ptah-extension/platform-core';
 import type {
   IWorkspaceProvider,
   IFileSystemProvider,
@@ -169,6 +169,8 @@ export class GitRpcHandlers {
     private readonly webviewManager: WebviewManager,
     @inject(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER)
     private readonly fileSystem: IFileSystemProvider,
+    @inject(PLATFORM_TOKENS.SESSION_ORGANIZATION_RECORDER, { isOptional: true })
+    private readonly organization?: ISessionOrganizationRecorder,
   ) {
     this.roots = new GitRootResolver({
       workspace,
@@ -442,7 +444,13 @@ export class GitRpcHandlers {
         wsRoot,
         params.path,
         params.force,
-      );
+      ).then((result) => {
+        if (result.success) {
+          const cleanup = this.organization?.clearRemovedWorktree?.(params.path);
+          if (cleanup && 'error' in cleanup) this.logger.warn('[GitRpc] Worktree removed but session link cleanup failed', { error: cleanup.error.message });
+        }
+        return result;
+      });
 
       if (!params.operationId) {
         return work;

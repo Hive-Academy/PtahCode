@@ -179,7 +179,7 @@ function scheduleFrame(cb: () => void): FrameHandle {
                doesn't stack on top of the finalize layout settle. We swap to
                a class-driven keyframe so the gate can flip dynamically
                (animate.enter is a static dir). -->
-          <div class="exec-text-branch" [class.exec-fade-in]="!isFinalizing()">
+          <div class="exec-text-branch" dir="auto" [class.exec-fade-in]="!isFinalizing()">
             <ptah-agent-summary [content]="node().content || ''" />
           </div>
         } @else if (ptahUiHost(); as host) {
@@ -191,6 +191,7 @@ function scheduleFrame(cb: () => void): FrameHandle {
                placeholder and a chunk-load error render today's markdown. -->
           <div
             class="prose prose-sm prose-invert max-w-none my-2 exec-text-branch"
+            dir="auto"
           >
             @defer (on immediate) {
               <ptah-ui-message-text
@@ -205,10 +206,12 @@ function scheduleFrame(cb: () => void): FrameHandle {
               />
             } @placeholder {
               <markdown
+                dir="auto"
                 [data]="bodyText() | surfaceMarkdown: surfaceActive()"
               />
             } @error {
               <markdown
+                dir="auto"
                 [data]="bodyText() | surfaceMarkdown: surfaceActive()"
               />
             }
@@ -225,10 +228,12 @@ function scheduleFrame(cb: () => void): FrameHandle {
               />
             } @placeholder {
               <markdown
+                dir="auto"
                 [data]="bodyText() | surfaceMarkdown: surfaceActive()"
               />
             } @error {
               <markdown
+                dir="auto"
                 [data]="bodyText() | surfaceMarkdown: surfaceActive()"
               />
             }
@@ -236,6 +241,7 @@ function scheduleFrame(cb: () => void): FrameHandle {
         } @else {
           <div
             class="prose prose-sm prose-invert max-w-none my-2 exec-text-branch"
+            dir="auto"
             [class.exec-fade-in]="!isFinalizing()"
           >
             <!-- renderedContent() is the throttled mirror of node().content:
@@ -249,17 +255,19 @@ function scheduleFrame(cb: () => void): FrameHandle {
                    The open tail is interpolated as text and never parsed. -->
               <div
                 class="ptah-markdown-root"
+                dir="auto"
                 style="contain: layout paint; isolation: isolate; overflow-x: auto;"
               >
                 @for (block of streamingBlocks(); track block.id) {
                   <div class="contents" [innerHTML]="block.html"></div>
                 }
                 @if (streamingTail()) {
-                  <p class="whitespace-pre-line">{{ streamingTail() }}</p>
+                  <p class="whitespace-pre-line" dir="auto">{{ streamingTail() }}</p>
                 }
               </div>
             } @else {
               <markdown
+                dir="auto"
                 [data]="bodyText() | surfaceMarkdown: surfaceActive()"
               />
             }
@@ -430,6 +438,25 @@ function scheduleFrame(cb: () => void): FrameHandle {
     `
       :host {
         display: block;
+      }
+
+      :host ::ng-deep .exec-text-branch :is(markdown, .ptah-markdown-root) :is(p, li, h1, h2, h3, h4, h5, h6, blockquote, th, td, .code-block-note) {
+        unicode-bidi: plaintext;
+        text-align: start;
+      }
+
+      :host ::ng-deep .exec-text-branch :is(markdown, .ptah-markdown-root) :is(pre, code) {
+        direction: ltr;
+        unicode-bidi: isolate;
+      }
+
+      :host ::ng-deep .exec-text-branch :is(markdown, .ptah-markdown-root) .code-block-container {
+        direction: ltr;
+        unicode-bidi: isolate;
+      }
+
+      :host ::ng-deep .exec-text-branch :is(markdown, .ptah-markdown-root) pre {
+        text-align: left;
       }
 
       :host(.fill-height),

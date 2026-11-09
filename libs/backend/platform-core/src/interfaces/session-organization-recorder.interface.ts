@@ -23,6 +23,8 @@ import type {
 } from '@ptah-extension/shared';
 
 export interface ISessionOrganizationRecorder {
+  /** Clear links to a worktree after Git confirms its removal. */
+  clearRemovedWorktree?(worktreePath: string): { cleared: number } | { error: Error };
   /** Record the git worktree (and branch, when known) a session runs in. */
   recordWorktree(input: {
     sessionId: string;

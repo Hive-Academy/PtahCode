@@ -16,12 +16,25 @@ export const PHASE_KINDS = [
 
 export const DEPTHS = ['Full', 'Partial', 'Minimal'] as const;
 
+export const PHASE_SHAPES = [
+  'mechanical',
+  'logic',
+  'contract',
+  'test',
+  'docs',
+  'review',
+] as const;
+export const PhaseShapeSchema = z.enum(PHASE_SHAPES);
+export type PhaseShape = z.infer<typeof PhaseShapeSchema>;
+
 const PhaseSchema = z
   .object({
     id: z.string().min(1).max(64),
     kind: z.enum(PHASE_KINDS),
     role: z.string().min(1).max(64).optional(),
     reviews: z.array(z.string().max(200)).max(64).optional(),
+    shape: PhaseShapeSchema.optional(),
+    weight: z.number().int().min(0).max(200000).optional(),
   })
   .strict();
 

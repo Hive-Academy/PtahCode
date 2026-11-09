@@ -940,7 +940,7 @@ const orchestrationPolicy: readonly ReachabilityEntry[] = [
     status: 'present',
     reach: async (page) => {
       await agentsRoutingTab(page);
-      const codex = page.locator('[data-testid="cli-matrix-row-codex"]');
+      const codex = page.locator('[data-testid="cli-provider-card-codex"]');
       await expect(codex).toContainText('v1.4.0');
       await expect(codex).toContainText('Ready');
     },

@@ -548,12 +548,12 @@ describe('buildTaskPrompt', () => {
       mcpPort: 41739,
     };
 
-    it('names the child-side report tool', () => {
+    it('describes conditional closing reports', () => {
       const prompt = buildTaskPrompt(base);
 
       expect(prompt).toContain('`ptah_agent_report`');
-      expect(prompt).toContain('(no agent id)');
-      expect(prompt).toContain('`delivered: false`');
+      expect(prompt).toContain('only for blockers, partial work');
+      expect(prompt).toContain('`final: true`');
     });
 
     it('distinguishes queue acceptance from settlement', () => {

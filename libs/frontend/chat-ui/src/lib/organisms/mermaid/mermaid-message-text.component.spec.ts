@@ -68,6 +68,12 @@ describe('Mermaid chat fences', () => {
     expect(initialize).toHaveBeenCalledWith(expect.objectContaining({ startOnLoad: false, securityLevel: 'strict' }));
   });
 
+  it('sets automatic direction only on prose beside a diagram', async () => {
+    const native = await show('مرحبا\n```mermaid\nflowchart TD\n  A-->B\n```', true);
+    expect(native.querySelector('markdown')?.getAttribute('dir')).toBe('auto');
+    expect(native.querySelector('ptah-mermaid-diagram')?.hasAttribute('dir')).toBe(false);
+  });
+
   it('falls back to source and one short error line for invalid syntax', async () => {
     render.mockRejectedValueOnce(new Error('parse error'));
     const native = await show('```mermaid\nnot valid\n```', true);

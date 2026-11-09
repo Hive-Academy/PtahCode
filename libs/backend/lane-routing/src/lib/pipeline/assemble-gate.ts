@@ -7,8 +7,10 @@ import { type LaneLimitState } from '@ptah-extension/shared';
 import type {
   ChosenEntry,
   GateResult,
+  ModelTier,
   UnavailableEntry,
 } from '../contracts/route-decide-result.schema';
+import { ModelTierSchema } from '../contracts/route-decide-result.schema';
 import type { DecisionOption } from '../decision-model/decision-payload';
 import type { GatheredCall } from './gather';
 import type { ModelRequestOutcome } from './model-refine';
@@ -256,7 +258,12 @@ function rosterFrom(
         draft.phaseId,
       );
       unavailableIndex += 1;
-      roster.push(unavailableEntry(draft.plan, reason));
+      roster.push(
+        unavailableEntry(
+          draft.plan,
+          withPolicyReason(reason, draft.plan),
+        ),
+      );
       continue;
     }
     const reason = withOnlyEligible(
@@ -264,12 +271,23 @@ function rosterFrom(
       draft.plan,
     );
     chosenIndex += 1;
-    roster.push(chosenEntry(draft, reason));
+    roster.push(
+      chosenEntry(draft, reason),
+    );
   }
   if (roster.length !== args.phases.length) {
     throw new Error('route decide roster does not cover every phase');
   }
   return roster;
+}
+
+export function withPolicyReason(
+  reason: string,
+  plan: Pick<PhasePlan, 'policy' | 'shape' | 'weight'>,
+  chosenTier: ModelTier = plan.policy.tier,
+): string {
+  const { ruleId, effort } = plan.policy;
+  return `${reason}; policy ${ruleId}; tier ${chosenTier}, effort ${effort}, shape ${plan.shape ?? 'unset'}, weight ${plan.weight ?? 'unset'}`;
 }
 
 function reasonAt(
@@ -299,6 +317,8 @@ function unavailableEntry(plan: PhasePlan, reason: string): UnavailableEntry {
     source:
       plan.constraint.exclusionReason === 'pin-unavailable' ? 'pin' : 'ranking',
     model: null,
+    tier: plan.policy.tier,
+    effort: plan.policy.effort,
     provenance: null,
     score: null,
     confidence: null,
@@ -321,11 +341,18 @@ function chosenEntry(draft: ChosenDraft, reason: string): ChosenEntry {
     source: draft.resolution.source,
     reportedConfidence: draft.resolution.reported,
   });
+  const pinnedTier = draft.resolution.candidate.kind === 'subagent' &&
+    row.scored.provenance === 'tier'
+    ? ModelTierSchema.safeParse(row.scored.model)
+    : null;
+  const tier = pinnedTier?.success ? pinnedTier.data : draft.plan.policy.tier;
   return {
     phaseId: draft.phaseId,
     status: 'chosen',
     executor: executorOf(draft.resolution.candidate),
     model: row.scored.model,
+    tier,
+    effort: draft.plan.policy.effort,
     provenance: row.scored.provenance,
     score: row.scored.score,
     source: draft.resolution.source,
@@ -333,7 +360,7 @@ function chosenEntry(draft: ChosenDraft, reason: string): ChosenEntry {
     confidence,
     fallbackCause: draft.resolution.cause,
     modelProposal: draft.resolution.proposal,
-    reason,
+    reason: withPolicyReason(reason, draft.plan, tier),
   };
 }
 

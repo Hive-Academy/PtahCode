@@ -541,6 +541,19 @@ describe('named SDK bootstrap and final admission', () => {
     await f.flow.dispose();
   });
 
+  it('refuses an init prerelease when the certified version is stable', async () => {
+    const f = fixture({ initPatch: { claude_code_version: '2.1.310-beta.1 (Claude Code)' } });
+    await expect(f.run()).rejects.toMatchObject({ code: 'identity-unproved' });
+    await f.flow.dispose();
+  });
+
+  it('accepts a decorated init with the certified identity', async () => {
+    const f = fixture({ initPatch: { claude_code_version: '2.1.310 (build)' } });
+    await f.run();
+    await f.flow.dispose();
+    expect(f.admission.releaseReservation).toHaveBeenCalledTimes(1);
+  });
+
   it.each<[string, Partial<Options>, string]>([
     ['a flag-tier credential override', { settings: { apiKeyHelper: 'helper' } }, 'identity-unproved'],
     ['a flag-tier override as JSON', { settings: JSON.stringify({ forceLoginOrgUUID: 'x' }) }, 'identity-unproved'],

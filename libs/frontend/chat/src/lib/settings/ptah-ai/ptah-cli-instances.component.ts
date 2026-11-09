@@ -3,6 +3,7 @@ import {
   Component,
   input,
   output,
+  signal,
 } from '@angular/core';
 import { ChevronDown, Ellipsis, LucideAngularModule, Plus } from 'lucide-angular';
 import {
@@ -20,13 +21,12 @@ import {
   type PtahCliInstanceToggle,
 } from './cli-matrix-rows';
 import {
-  CLI_MATRIX_ACTION,
   CLI_MATRIX_CELL_BASE,
   CLI_MATRIX_DOT,
   CLI_MATRIX_FOCUS,
 } from './cli-matrix-styles';
 import { CliModelEffortPopoverComponent } from './cli-model-effort-popover.component';
-import { CliCapabilityCellsComponent } from './cli-capability-cells.component';
+import { cliCapabilityView } from './cli-capability-view';
 
 /** The three tiers of an instance's mapping, in the tier modal's order. */
 const TIERS: readonly Pick<CliTierBadge, 'tier' | 'label'>[] = [
@@ -62,7 +62,6 @@ const LABEL = 'text-xs font-semibold uppercase tracking-wide text-base-content-m
     ProviderMarkComponent,
     SettingsBusyDisabledDirective,
     CliModelEffortPopoverComponent,
-    CliCapabilityCellsComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -126,13 +125,14 @@ const LABEL = 'text-xs font-semibold uppercase tracking-wide text-base-content-m
         <ul class="space-y-2">
           @for (row of rows(); track row.id) {
             <li
-              class="relative rounded-lg border border-base-content/10 p-3 hover:bg-base-content/5 has-[[role=dialog]]:z-30"
+              class="relative rounded-lg border border-base-content/10 p-4 hover:bg-base-content/5"
               [class.border-primary]="rowOpen(row.id)"
               [attr.data-testid]="'cli-matrix-row-' + row.id"
               data-kind="instance"
               [attr.data-dimmed]="row.interactive ? null : 'true'"
             >
-              <div class="flex flex-wrap items-start gap-x-3 gap-y-2">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <label class="inline-flex min-h-10 min-w-10 items-center justify-center">
                 <input
                   type="checkbox"
                   [class]="'cli-check checkbox checkbox-primary checkbox-sm mt-0.5 ' + focusRing"
@@ -142,6 +142,7 @@ const LABEL = 'text-xs font-semibold uppercase tracking-wide text-base-content-m
                   (change)="toggled.emit({ row, event: $event })"
                   [attr.data-testid]="'cli-matrix-toggle-' + row.id"
                 />
+                </label>
                 <div class="min-w-0 flex-[1_1_12rem]">
                   <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                     <span
@@ -175,7 +176,24 @@ const LABEL = 'text-xs font-semibold uppercase tracking-wide text-base-content-m
                       >{{ row.keyStatus.label }}</span
                     >
                   </div>
-                  <ptah-cli-capability-cells [manifest]="row.manifest" />
+                  <div class="mt-2 flex flex-wrap gap-1.5" data-testid="cli-capability-summary">
+                    @for (badge of capabilityBadges(row); track badge.label) {
+                      <span class="badge badge-sm inline-flex whitespace-nowrap border-base-content/40 bg-base-200 text-base-content">{{ badge.label }}: {{ badge.value }}</span>
+                    }
+                    <ptah-native-popover [isOpen]="capabilitiesOpen() === row.id" placement="bottom-start" [hasBackdrop]="true" backdropClass="transparent" (closed)="capabilitiesOpen.set(null)">
+                      <button trigger type="button" class="btn btn-ghost btn-xs" [attr.aria-expanded]="capabilitiesOpen() === row.id" [attr.aria-controls]="'instance-capabilities-' + row.id" (click)="capabilitiesOpen.set(capabilitiesOpen() === row.id ? null : row.id)">Show capabilities</button>
+                      @if (capabilitiesOpen() === row.id) {
+                        <div content [id]="'instance-capabilities-' + row.id" class="max-h-72 w-72 overflow-auto p-3 text-xs">
+                          @for (group of capabilityView(row).groups; track group.heading) {
+                            <h4 class="mt-2 font-semibold">{{ group.heading }}</h4>
+                            @for (line of group.lines; track line.label) {
+                              <p class="mt-1" [title]="line.reason || ''">{{ line.label }}: {{ line.value }} @if (line.reason) { · {{ line.reason }} }</p>
+                            }
+                          }
+                        </div>
+                      }
+                    </ptah-native-popover>
+                  </div>
                 </div>
 
                 <div class="ml-auto flex shrink-0 items-center gap-1">
@@ -296,7 +314,7 @@ const LABEL = 'text-xs font-semibold uppercase tracking-wide text-base-content-m
               </div>
 
               <!-- Details: model and effort with the last Test, beside the three tier models (stacked in a narrow card). -->
-              <div class="inst-details mt-3 grid gap-3 border-t border-base-300 pt-3">
+              <div class="inst-details mt-3 grid grid-cols-1 gap-5 border-t border-base-300 pt-3">
                 <div class="min-w-0 space-y-1.5">
                   <p [class]="label">Model</p>
                   <dl class="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1 text-xs">
@@ -383,7 +401,7 @@ const LABEL = 'text-xs font-semibold uppercase tracking-wide text-base-content-m
                   <ul class="grid grid-cols-3 gap-1.5">
                     @for (tier of tierSlots(row); track tier.tier) {
                       <li
-                        class="min-w-0 rounded-md border border-base-content/10 px-2 py-1"
+                        class="min-w-0 rounded-md border border-base-content/60 px-2 py-1"
                         [attr.data-tier]="tier.tier"
                         [title]="tier.model ?? unsetTitle"
                       >
@@ -419,7 +437,7 @@ const LABEL = 'text-xs font-semibold uppercase tracking-wide text-base-content-m
     }
     /* Model and effort beside the tier models once the card has room for both (1024 px Electron with the Workspaces
        panel open, glass included: about 36rem). */
-    @container (min-width: 34rem) {
+    @container (min-width: 761px) {
       .inst-details {
         grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
       }
@@ -436,12 +454,15 @@ const LABEL = 'text-xs font-semibold uppercase tracking-wide text-base-content-m
   `,
 })
 export class PtahCliInstancesComponent {
+  protected readonly capabilitiesOpen = signal<string | null>(null);
+  protected capabilityView(row: InstanceCliMatrixRow) { return cliCapabilityView(row.manifest); }
+  protected capabilityBadges(row: InstanceCliMatrixRow) { return this.capabilityView(row).badges.slice(0, 3); }
   protected readonly PlusIcon = Plus;
   protected readonly MoreIcon = Ellipsis;
   protected readonly ChevronIcon = ChevronDown;
   protected readonly focusRing = CLI_MATRIX_FOCUS;
   protected readonly cell = CELL;
-  protected readonly action = CLI_MATRIX_ACTION;
+  protected readonly action = `btn btn-outline btn-sm px-2 text-xs font-medium text-base-content ${CLI_MATRIX_FOCUS}`;
   protected readonly menuItem = MENU_ITEM;
   protected readonly label = LABEL;
   protected readonly dot = CLI_MATRIX_DOT;
@@ -508,10 +529,10 @@ export class PtahCliInstancesComponent {
   }
 
   protected tierList(row: InstanceCliMatrixRow): string {
-    return (
-      (row.tiers ?? []).map((tier) => `${tier.label}: ${tier.model}`).join(', ') ||
-      'No tier models'
-    );
+    if (!row.tiers?.length) return 'No tier models';
+    return this.tierSlots(row)
+      .map((tier) => `${tier.label}: ${tier.model ?? 'Not set'}`)
+      .join(', ');
   }
 
   /** This instance's last Test as the state reports it (S1: a new run drops the previous result). */

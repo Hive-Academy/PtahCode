@@ -343,11 +343,11 @@ async function captureMatrixPopovers(
   const matrix = page.locator('[data-testid="cli-matrix"]');
   await expect(matrix).toBeVisible();
   const rows = await matrix
-    .locator('tr[data-testid^="cli-matrix-row-"]')
+    .locator('[data-testid^="cli-provider-card-"]')
     .evaluateAll((all) =>
       all.map(
         (row) =>
-          `${row.getAttribute('data-testid')?.replace('cli-matrix-row-', '')}:${Math.round(row.getBoundingClientRect().height)}`,
+          `${row.getAttribute('data-testid')?.replace('cli-provider-card-', '')}:${Math.round(row.getBoundingClientRect().height)}`,
       ),
     );
   // Every column fits its box in both hosts (Electron moves the provider under the agent name): nothing scrolls sideways.
@@ -356,8 +356,7 @@ async function captureMatrixPopovers(
     return box ? box.scrollWidth - box.clientWidth : 0;
   });
   console.log(
-    `B30 matrix ${host}/${theme}: header bottom ${await bottomOf(page, '[data-testid="cli-matrix"] thead')}, ` +
-      `first row bottom ${await bottomOf(page, '[data-testid="cli-matrix"] tbody tr')}; overflow ${overflow}px; rows ${rows.join(', ')}`,
+    `B30 matrix ${host}/${theme}: first card bottom ${await bottomOf(page, '[data-testid="cli-provider-grid"] [data-testid^="cli-provider-card-"]')}; overflow ${overflow}px; cards ${rows.join(', ')}`,
   );
   expect(overflow, 'CLI matrix horizontal overflow').toBeLessThanOrEqual(0);
   const viewport = page.viewportSize();
@@ -390,7 +389,7 @@ async function captureMatrixPopovers(
   };
   const popover = '[data-testid="cli-matrix-popover"]';
   // Model: the cell opens the popover with its search focused and the list open (interactions/orchestration-2).
-  await page.locator('[data-testid="cli-matrix-model-codex"]').click();
+  await page.locator('[data-testid="cli-provider-card-codex"] [data-popover-kind="model"]').click();
   const search = page.locator(`${popover} input[role="combobox"]`);
   await expect(search).toBeEnabled();
   await expect(search).toBeFocused();
@@ -407,7 +406,7 @@ async function captureMatrixPopovers(
   await page.keyboard.press('Escape');
   await expect(page.locator(popover)).toHaveCount(0);
   // Effort: the CLI's allowlist as a two-column grid, the saved value pressed (interactions/orchestration-3).
-  await page.locator('[data-testid="cli-matrix-effort-codex"]').click();
+  await page.locator('[data-testid="cli-provider-card-codex"] [data-popover-kind="effort"]').click();
   await expect(page.locator(`${popover} [aria-pressed="true"]`)).toHaveText(
     'Medium',
   );
@@ -418,37 +417,37 @@ async function captureMatrixPopovers(
   await expect(page.locator(popover)).toHaveCount(0);
   // Permission ℹ (the copy shown to the user at Gate V 36).
   await page
-    .locator('[data-testid="cli-matrix-permission-info-codex"]')
+    .locator('[data-testid="cli-provider-card-codex"] [data-popover-kind="permission"]')
     .click();
   await expect(
-    page.locator('[data-testid="cli-permission-popover"]'),
+    page.locator('[data-testid="cli-provider-popover-content"]'),
   ).toBeVisible();
-  await onScreen('[data-testid="cli-permission-popover"]');
+  await onScreen('[data-testid="cli-provider-popover-content"]');
   await capture(page, 'orchestration-popover-permission', host, theme);
   await page.keyboard.press('Escape');
   await expect(
-    page.locator('[data-testid="cli-permission-popover"]'),
+    page.locator('[data-testid="cli-provider-popover-content"]'),
   ).toHaveCount(0);
   // Batch 31: Copilot's permission popover with the moved auto-approve toggle, and Cursor's Credentials popover.
   await page
-    .locator('[data-testid="cli-matrix-permission-info-copilot"]')
+    .locator('[data-testid="cli-provider-card-copilot"] [data-popover-kind="permission"]')
     .click();
   await expect(
     page.locator(
-      '[data-testid="cli-permission-popover"] [data-testid="copilot-auto-approve"]',
+      '[data-testid="cli-provider-popover-content"] [data-testid="copilot-auto-approve"]',
     ),
   ).toBeEnabled();
-  await onScreen('[data-testid="cli-permission-popover"]');
-  await noOverflow('[data-testid="cli-permission-popover"]');
+  await onScreen('[data-testid="cli-provider-popover-content"]');
+  await noOverflow('[data-testid="cli-provider-popover-content"]');
   await assertPopoverOnTop(
     page,
-    '[data-testid="cli-permission-popover"]',
+    '[data-testid="cli-provider-popover-content"]',
     'h3, p, input',
   );
   await capture(page, 'orchestration-popover-copilot', host, theme);
   await page.keyboard.press('Escape');
   await expect(
-    page.locator('[data-testid="cli-permission-popover"]'),
+    page.locator('[data-testid="cli-provider-popover-content"]'),
   ).toHaveCount(0);
   // Gate V 36 decision 1: Cursor's row is in the Uninstalled group, collapsed by default.
   const uninstalledToggle = page.locator(
@@ -456,7 +455,7 @@ async function captureMatrixPopovers(
   );
   if ((await uninstalledToggle.getAttribute('aria-expanded')) === 'false')
     await uninstalledToggle.click();
-  await page.locator('[data-testid="cli-matrix-credentials-cursor"]').click();
+  await page.locator('[data-testid="cli-matrix-uninstalled"] [data-testid="cli-provider-card-cursor"] [data-popover-kind="credentials"]').click();
   const cursorPopover = '[data-testid="cursor-credential-popover"]';
   await expect(
     page.locator(`${cursorPopover} [data-testid="cursor-credential-key"]`),
@@ -585,10 +584,10 @@ async function assertOrchestrationFold(
   }));
   const bottoms: Record<OrchestrationFoldRegion, number> = {
     policyBar: await bottomOf(page, '[data-testid="orchestration-policy-bar"]'),
-    matrixHeader: await bottomOf(page, '[data-testid="cli-matrix"] thead'),
+    matrixHeader: await bottomOf(page, '[data-testid="cli-provider-card-codex"] header'),
     firstRow: await bottomOf(
       page,
-      '[data-testid="cli-matrix"] tbody tr[data-testid^="cli-matrix-row-"]',
+      '[data-testid="cli-provider-grid"] [data-testid^="cli-provider-card-"]',
     ),
     rolesSummary: await bottomOf(
       page,
@@ -596,21 +595,21 @@ async function assertOrchestrationFold(
     ),
   };
   const rowHeights = await matrix
-    .locator('tr[data-testid^="cli-matrix-row-"]')
+    .locator('[data-testid^="cli-provider-card-"]')
     .evaluateAll((rows) =>
       rows.map(
         (row) =>
-          `${row.getAttribute('data-testid')?.replace('cli-matrix-row-', '')}:${Math.round(row.getBoundingClientRect().height)}`,
+          `${row.getAttribute('data-testid')?.replace('cli-provider-card-', '')}:${Math.round(row.getBoundingClientRect().height)}`,
       ),
     );
   const uninstalledHeader = await matrix
-    .locator('[data-testid="cli-matrix-uninstalled"] tr')
+    .locator('[data-testid="cli-matrix-uninstalled-toggle"]')
     .first()
     .evaluate((row) => Math.round(row.getBoundingClientRect().height));
   const installed = await matrix
-    .locator(
-      'tbody:not([data-testid="cli-matrix-uninstalled"]) tr[data-testid^="cli-matrix-row-"]',
-    )
+    .locator('[data-testid="cli-provider-grid"]')
+    .first()
+    .locator('[data-testid^="cli-provider-card-"]')
     .count();
   // The Ptah CLI instances sit under the table in their own sub-section (one card each).
   const instances = await page
@@ -623,7 +622,7 @@ async function assertOrchestrationFold(
   await expect(uninstalledToggle).toHaveAttribute('aria-expanded', 'false');
   await expect(
     matrix.locator(
-      '[data-testid="cli-matrix-uninstalled"] tr[data-testid^="cli-matrix-row-"]',
+      '[data-testid="cli-matrix-uninstalled"] [data-testid^="cli-provider-card-"]',
     ),
   ).toHaveCount(0);
   const uninstalled = Number(
@@ -649,7 +648,9 @@ async function assertOrchestrationFold(
     instances: 1,
     uninstalled: 2,
   });
-  await expect(matrix).toHaveClass(/\btable-sm\b/);
+  const providerGrid = matrix.locator('[data-testid="cli-provider-grid"].provider-grid').first();
+  await expect(providerGrid).toBeVisible();
+  expect(await providerGrid.evaluate((grid) => getComputedStyle(grid).display)).toBe('grid');
   const consumers = page.locator('[data-testid="consumer-table"]');
   await expect(consumers).toHaveClass(/\bgrid\b/);
   await expect(consumers).toHaveClass(/\bgap-2\b/);
@@ -846,7 +847,7 @@ async function openSettingsAt(
   await waitForSettled(page);
   if (tab === 'Providers')
     await expect(
-      page.locator('[data-testid="cli-matrix-toggle-codex"]'),
+      page.locator('[data-testid="cli-provider-card-codex"] input[aria-label="Codex enabled"]'),
     ).toBeVisible();
 }
 
@@ -870,7 +871,7 @@ for (const host of ['vscode', 'electron'] as const) {
         // section or the On ticks mid-bounce (Batch 36c.i).
         if (tab.name === 'providers')
           await expect(
-            page.locator('[data-testid="cli-matrix-toggle-codex"]'),
+            page.locator('[data-testid="cli-provider-card-codex"] input[aria-label="Codex enabled"]'),
           ).toBeVisible();
         await capture(page, tab.name, host, theme);
       }
@@ -1398,7 +1399,7 @@ for (const host of ['vscode', 'electron'] as const) {
       await gotoSettingsTab(page, 'Providers');
       await waitForSettled(page);
       await expect(
-        page.locator('[data-testid="cli-matrix-toggle-codex"]'),
+        page.locator('[data-testid="cli-provider-card-codex"] input[aria-label="Codex enabled"]'),
       ).toBeVisible();
       await assertOrderStripWhole(page, host, theme, 6);
       // 52.1: one normalised version beside each name, on the name's line.
@@ -1410,13 +1411,13 @@ for (const host of ['vscode', 'electron'] as const) {
       };
       for (const [cli, label] of Object.entries(expected)) {
         const version = page.locator(
-          `[data-testid="cli-matrix-row-${cli}"] [data-testid="cli-matrix-version"]`,
+          `[data-testid="cli-provider-card-${cli}"] [data-testid="cli-matrix-version"]`,
         );
         await expect(version).toHaveText(label);
         await expect(version).toHaveAttribute('title', LIVE_VERSIONS[cli]);
         const line = await version.evaluate((element) => {
           const name =
-            element.parentElement?.firstElementChild?.getBoundingClientRect();
+            element.parentElement?.querySelector('h3')?.getBoundingClientRect();
           const own = element.getBoundingClientRect();
           return {
             nameTop: name?.top ?? 0,
@@ -1430,9 +1431,9 @@ for (const host of ['vscode', 'electron'] as const) {
       }
       // 52.2: the Antigravity model cell shows the id once, on at most two lines, with the name in its title.
       const model = page.locator(
-        '[data-testid="cli-matrix-model-antigravity"]',
+        '[data-testid="cli-provider-card-antigravity"] [data-popover-kind="model"]',
       );
-      await expect(model.locator('span').first()).toHaveText(
+      await expect(model).toHaveText(
         'claude-sonnet-4-6',
       );
       await expect(model).toHaveAttribute(
@@ -1440,8 +1441,6 @@ for (const host of ['vscode', 'electron'] as const) {
         'claude-sonnet-4-6 (Claude Sonnet 4.6 (Thinking))',
       );
       const modelLines = await model
-        .locator('span')
-        .first()
         .evaluate((element) =>
           Math.round(
             element.getBoundingClientRect().height /

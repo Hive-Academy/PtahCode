@@ -85,7 +85,7 @@ describe('parseClaudeAccountStatus', () => {
   });
 
   describe('class P (personal pro/max)', () => {
-    it.each(['max', 'pro'])('classifies %s with a non-null orgId as P', (subscriptionType) => {
+    it.each(['max', 'pro', 'Max', 'max_20x', 'Claude Max', 'Claude Max 20x', 'Claude Pro'])('classifies %s with a non-null orgId as P', (subscriptionType) => {
       expect(parse(signedIn({ subscriptionType }))).toMatchObject({ loggedIn: true, accountClass: 'P' });
     });
 
@@ -95,6 +95,23 @@ describe('parseClaudeAccountStatus', () => {
 
     it('accepts apiKeySource none (cli 2.1.278 source-derived)', () => {
       expect(parse(signedIn({ apiKeySource: 'none' }))).toMatchObject({ accountClass: 'P' });
+    });
+
+    it.each([null, 'claudeai'])('accepts inactive/personal forcedLoginMethod %s', (forcedLoginMethod) => {
+      expect(parse(signedIn({ forcedLoginMethod }))).toMatchObject({ accountClass: 'P' });
+    });
+
+    it('accepts null allowedProviders', () => {
+      expect(parse(signedIn({ allowedProviders: null }))).toMatchObject({ accountClass: 'P' });
+    });
+
+    it('ignores keys a later CLI build adds (cli 2.1.319 observed)', () => {
+      const later = signedIn({ loginExpiresAt: '2026-12-01T00:00:00.000Z', storedClaudeAiLogin: true, planTier: 'max_20x' });
+      expect(parse(later)).toMatchObject({ loggedIn: true, accountClass: 'P', configDirectoryMatches: true });
+    });
+
+    it('ignores any unknown key that does not select or restrict the login', () => {
+      expect(parse(signedIn({ orgRole: 'admin', someFutureKey: { nested: 1 } }))).toMatchObject({ accountClass: 'P' });
     });
 
     it('classifies a status without optional metadata as P', () => {
@@ -110,13 +127,17 @@ describe('parseClaudeAccountStatus', () => {
       ['enterprise', signedIn({ subscriptionType: 'enterprise' })],
       ['null subscription', signedIn({ subscriptionType: null })],
       ['missing subscription', without(signedIn(), 'subscriptionType')],
-      ['Max (case differs)', signedIn({ subscriptionType: 'Max' })],
       ['claude_max', signedIn({ subscriptionType: 'claude_max' })],
-      ['max + forcedLoginMethod', signedIn({ forcedLoginMethod: 'claudeai' })],
+      ['maximum', signedIn({ subscriptionType: 'maximum' })],
+      ['promax', signedIn({ subscriptionType: 'promax' })],
+      ['empty subscription', signedIn({ subscriptionType: '' })],
+      ['team-qualified max', signedIn({ subscriptionType: 'Max Team' })],
+      ['enterprise-qualified max', signedIn({ subscriptionType: 'max-enterprise' })],
+      ['enterprise_max', signedIn({ subscriptionType: 'enterprise_max' })],
+      ['max + forcedLoginMethod console', signedIn({ forcedLoginMethod: 'console' })],
       ['max + allowedProviders', signedIn({ allowedProviders: ['firstParty'] })],
       ['max + apiKeySource apiKeyHelper', signedIn({ apiKeySource: 'apiKeyHelper' })],
       ['max + apiKeySource ANTHROPIC_API_KEY', signedIn({ apiKeySource: 'ANTHROPIC_API_KEY' })],
-      ['max + unknown key orgRole', signedIn({ orgRole: 'admin' })],
       ['apiProvider bedrock', signedIn({ apiProvider: 'bedrock' })],
       ['apiProvider vertex', signedIn({ apiProvider: 'vertex' })],
       ['authMethod console', signedIn({ authMethod: 'console' })],
