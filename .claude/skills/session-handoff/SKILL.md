@@ -47,7 +47,8 @@ Record facts you checked, not intentions. Leave out what the next session can re
 ## 3. Hand off
 
 Compose the continuation prompt. It must stand on its own: the goal in one or two sentences,
-the ABSOLUTE path of HANDOFF.md, an instruction to read it first and continue from Next steps,
+the ABSOLUTE path of HANDOFF.md, this session's ID as `predecessorSessionId`, an instruction
+to read that file first and continue from Next steps,
 the repository rules that matter, and a note that it can run `/session-handoff` itself when its
 own budget runs low.
 
@@ -58,10 +59,20 @@ On success, the result lists the lanes and child sessions the new session adopte
 them here. Any of their signals that still reach this session can be ignored. Then read
 `tabOpened`:
 
-- `true`: tell the user the new session is open and this session was stopped and its history was kept.
-- `false`: tell the user the new session started, no tab appeared, it is in the session list, and this session was stopped and its history was kept.
+- `true`: tell the user the new session is open. This session closes after the successor acknowledges the handoff.
+- `false`: tell the user the new session started, no tab appeared, and it is in the session list. This session closes after the successor acknowledges the handoff.
 
 Do no further work here.
+
+## Successor: accept the handoff
+
+Read the exact HANDOFF.md path supplied in the continuation prompt, and no other handoff file.
+Take over the adopted work and continue from its Next steps. Call `ptah_session_handoff_ack`
+once with the predecessorSessionId and handoffPath supplied by the handoff. If it returns
+`retryable-failure`, retry at most twice more, a few seconds apart. After the last failure,
+tell the user the old session stays open and they can close it by hand. If it returns `refused`,
+do not retry; tell the user its reason. If the tool is absent (CLI host or older build), skip the
+acknowledgement and tell the user the old session stays open and can be closed by hand.
 
 ## Fallback
 
