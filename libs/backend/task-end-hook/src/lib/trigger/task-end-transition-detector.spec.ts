@@ -51,6 +51,24 @@ const TASK_1 = 'TASK_2026_601';
 const TASK_2 = 'TASK_2026_602';
 const TASK_3 = 'TASK_2026_603';
 
+describe('carrier status patch', () => {
+  it('changes only the status line and keeps other bytes', async () => {
+    const harness = setup();
+    const root = makeMainCheckout();
+    const folder = path.join(root, '.ptah', 'specs', TASK_1);
+    fs.mkdirSync(folder, { recursive: true });
+    const carrier = path.join(folder, 'task.md');
+    const before = '---\r\nstatus: in_progress\r\nupdated: yesterday\r\n---\r\n# body\r\nstatus: untouched\r\n';
+    fs.writeFileSync(carrier, before);
+    const detector = harness.detector();
+    expect(await detector.setCarrierStatus(root, TASK_1, 'in_review')).toBe(true);
+    expect(fs.readFileSync(carrier, 'utf8')).toBe(before.replace('status: in_progress', 'status: in_review'));
+    expect(await detector.setCarrierStatus(root, TASK_1, 'in_review')).toBe(false);
+    detector.dispose();
+    harness.db.close();
+  });
+});
+
 // --- Fixtures --------------------------------------------------------------
 
 let tmpBase: string;
