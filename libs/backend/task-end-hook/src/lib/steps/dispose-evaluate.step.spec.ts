@@ -471,7 +471,7 @@ describe('DisposeEvaluateStep', () => {
     const rows = h.store.dispose();
     expect(rows.map((r) => r.subject)).toEqual([a, b]);
     expect(reasonOf(rows[0].outcome as TaskEndDisposeOutcome)).toBe(
-      'skipped/eligible-report-only',
+      'skipped/pending-user-approval',
     );
     expect(reasonOf(rows[1].outcome as TaskEndDisposeOutcome)).toBe(
       'blocked/dirty-tracked',
@@ -554,7 +554,24 @@ describe('DisposeEvaluateStep', () => {
 
     expect(
       reasonOf(h.store.dispose()[0].outcome as TaskEndDisposeOutcome),
-    ).toBe('skipped/eligible-report-only');
+    ).toBe('skipped/pending-user-approval');
+  });
+
+  it.each([false, true])('only evaluates an eligible tree with close-out opt-in %s', async (enabled) => {
+    const a = makeWorktree(`a-${TASK}`);
+    const h = harness({
+      script: { worktrees: [{ path: a, branch: `feat/${TASK}` }] },
+      settings: settings({
+        taskCloseOut: { autoRemoveMergedWorktreeAndBranch: enabled },
+      }),
+    });
+
+    await h.step.run(makeRun(), signal());
+
+    expect(reasonOf(h.store.dispose()[0].outcome as TaskEndDisposeOutcome)).toBe(
+      enabled ? 'skipped/eligible-report-only' : 'skipped/pending-user-approval',
+    );
+    expectReadOnly(h);
   });
 
   it('does not query gh after an earlier failure, and queries it from the main root otherwise', async () => {
@@ -633,7 +650,7 @@ describe('DisposeEvaluateStep', () => {
     expect(h.pr).toHaveBeenCalledWith(main, `feat/${TASK}`);
     expect(
       reasonOf(h.store.dispose()[0].outcome as TaskEndDisposeOutcome),
-    ).toBe('skipped/eligible-report-only');
+    ).toBe('skipped/pending-user-approval');
     expectReadOnly(h);
   });
 
@@ -674,7 +691,7 @@ describe('DisposeEvaluateStep', () => {
     ]);
     for (const row of h.store.dispose()) {
       expect(reasonOf(row.outcome as TaskEndDisposeOutcome)).toBe(
-        'skipped/eligible-report-only',
+        'skipped/pending-user-approval',
       );
     }
   });
@@ -706,7 +723,7 @@ describe('DisposeEvaluateStep', () => {
 
     const rows = h.store.dispose();
     expect(reasonOf(rows[0].outcome as TaskEndDisposeOutcome)).toBe(
-      'skipped/eligible-report-only',
+      'skipped/pending-user-approval',
     );
     expect(reasonOf(rows[1].outcome as TaskEndDisposeOutcome)).toBe(
       'blocked/precondition-unverifiable',
@@ -737,7 +754,7 @@ describe('DisposeEvaluateStep', () => {
     await fits.step.run(makeRun(), signal());
     expect(
       reasonOf(fits.store.dispose()[0].outcome as TaskEndDisposeOutcome),
-    ).toBe('skipped/eligible-report-only');
+    ).toBe('skipped/pending-user-approval');
     const readdirTargets = (fsp.readdir as unknown as jest.Mock).mock.calls.map(
       ([dir]) => String(dir),
     );
@@ -793,7 +810,7 @@ describe('DisposeEvaluateStep', () => {
     ).toBe(false);
     expect(
       reasonOf(h.store.dispose()[0].outcome as TaskEndDisposeOutcome),
-    ).toBe('skipped/eligible-report-only');
+    ).toBe('skipped/pending-user-approval');
   });
 
   it('records merge-unverified for a detached HEAD without asking gh', async () => {

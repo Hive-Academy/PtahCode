@@ -331,6 +331,17 @@ export class TaskEndRunWorker {
       if (run === null || this.disposed) return;
       if (!this.hasWork(run, kind)) continue;
       if (!(await this.carrierStillTerminal(runId))) return;
+      if (kind === 'harvest') {
+        // Task status observations carry no confirmed PR merge or explicit
+        // harvest request. The close-out service owns those harvests.
+        this.store.markStepRunning(runId, 'harvest', '');
+        this.recordOutcome(run, '', {
+          step: 'harvest',
+          state: 'skipped',
+          reason: 'manual-only',
+        });
+        continue;
+      }
       await this.runStep(runId, kind);
     }
 

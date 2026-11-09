@@ -563,12 +563,12 @@ describe('task-end hook (integration)', () => {
       'steps-terminal',
     ]);
     expect(outcomes(h, runId, 'close-curate')).toEqual(['succeeded/curated']);
-    expect(outcomes(h, runId, 'harvest')).toEqual(['succeeded/harvested']);
+    expect(outcomes(h, runId, 'harvest')).toEqual(['skipped/manual-only']);
     expect(outcomes(h, runId, 'dispose')).toEqual([
-      'skipped/eligible-report-only',
+      'skipped/pending-user-approval',
     ]);
     expect(outcomes(h, runId, 'index')).toEqual(['succeeded/census-completed']);
-    expect(h.ports.harvest.harvestTask).toHaveBeenCalledWith(h.root, TASK);
+    expect(h.ports.harvest.harvestTask).not.toHaveBeenCalled();
     expect(h.ports.census.requestCensus).toHaveBeenCalledTimes(1);
 
     // C1: the removal outcome cannot be recorded; the mode is the literal off.
@@ -722,9 +722,7 @@ describe('task-end hook (integration)', () => {
         await flush(h);
         await until(() => runOf(h, runId).state === 'completed');
 
-        expect(h.ports.harvest.harvestTask).toHaveBeenCalledTimes(
-          boundary >= 2 ? 0 : 1,
-        );
+        expect(h.ports.harvest.harvestTask).not.toHaveBeenCalled();
         expect(h.ports.curation.curateEndedSession).not.toHaveBeenCalled();
         expect(h.git.calls.length).toBeGreaterThan(0);
         const record = runOf(h, runId);
@@ -736,7 +734,9 @@ describe('task-end hook (integration)', () => {
         expect(outcomes(h, runId, 'close-curate')).toEqual([
           'skipped/no-linked-sessions',
         ]);
-        expect(outcomes(h, runId, 'harvest')).toHaveLength(1);
+        expect(outcomes(h, runId, 'harvest')).toEqual([
+          boundary >= 2 ? 'succeeded/harvested' : 'skipped/manual-only',
+        ]);
         expect(outcomes(h, runId, 'dispose')).toHaveLength(1);
         expect(outcomes(h, runId, 'index')).toEqual([
           'succeeded/census-completed',

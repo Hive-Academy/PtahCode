@@ -191,7 +191,7 @@ const harvestOutcome = z.union([
   z.strictObject({
     step: z.literal('harvest'),
     state: z.literal('skipped'),
-    reason: z.literal('no-carrier'),
+    reason: z.enum(['no-carrier', 'manual-only']),
   }),
   z.strictObject({
     step: z.literal('harvest'),
@@ -211,7 +211,7 @@ const disposeOutcome = z.union([
   z.strictObject({
     step: z.literal('dispose'),
     state: z.literal('skipped'),
-    reason: z.literal('eligible-report-only'),
+    reason: z.enum(['eligible-report-only', 'pending-user-approval']),
     ...disposeModeFields,
   }),
   z.strictObject({

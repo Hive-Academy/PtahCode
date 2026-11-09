@@ -133,6 +133,7 @@ export type DisposalActivity =
 export type DisposalHarvestOutcome =
   | 'harvested'
   | 'already-harvested'
+  | 'manual-only'
   | 'no-carrier'
   | 'harvest-failed'
   | 'pending';
