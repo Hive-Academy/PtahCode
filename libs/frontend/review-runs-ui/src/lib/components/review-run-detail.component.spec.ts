@@ -1,7 +1,7 @@
 import { signal } from '@angular/core';
 import { ReviewRunsStore } from '../review-runs.store';
 import { TestBed } from '@angular/core/testing';
-import type { ReviewRun } from '@ptah-extension/review-contracts';
+import type { ReviewFinding, ReviewRun } from '@ptah-extension/review-contracts';
 import { ReviewRunDetailComponent } from './review-run-detail.component';
 
 const run: ReviewRun = {
@@ -12,6 +12,17 @@ const run: ReviewRun = {
     { name: 'lenses', status: 'partial', family: 'Codex', scope: null, durationMs: 1000, error: null, artifactPath: null },
     { name: 'verification', status: 'succeeded', family: 'Codex', scope: null, durationMs: 300, error: null, artifactPath: null },
   ],
+};
+
+const finding: ReviewFinding = {
+  schemaVersion: 1, lens: 'security-privacy', title: 'Settings parsed without a schema',
+  failureMode: 'A crafted settings file can change runtime behavior.',
+  affectedBehavior: 'The settings loader accepts arbitrary keys.',
+  scenario: 'A workspace contains a crafted settings file.', path: 'src/settings.ts', line: 42,
+  evidence: [{ path: 'src/settings.ts', line: 42, excerpt: 'const parsed = JSON.parse(raw);' }],
+  affectedCaller: 'loadSettings', severity: 'Major', category: 'security', confidence: 0.9,
+  verification: 'cross-family', suggestedDiff: null,
+  fixPrompt: 'Validate the parsed settings against a schema.',
 };
 
 describe('ReviewRunDetailComponent', () => {
@@ -42,6 +53,54 @@ describe('ReviewRunDetailComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('lane-failed: codex; exit 1');
     expect(fixture.nativeElement.textContent).toContain('security-privacy');
     expect(fixture.nativeElement.textContent).toContain('Ran without a limit check');
+  });
+  it('renders the findings loaded for the selected run', () => {
+    TestBed.configureTestingModule({ imports: [ReviewRunDetailComponent], providers: [{ provide: ReviewRunsStore, useValue: {
+      rerunState: signal('idle'), hasToken: signal(false), settings: signal(null), rerun: jest.fn(),
+    } }] });
+    const fixture = TestBed.createComponent(ReviewRunDetailComponent);
+    fixture.componentRef.setInput('run', run);
+    fixture.componentRef.setInput('findings', [finding]);
+    fixture.detectChanges();
+    const rendered = fixture.nativeElement.textContent;
+    expect(rendered).toContain('Major');
+    expect(rendered).toContain('src/settings.ts:42');
+    expect(rendered).toContain(finding.title);
+    expect(rendered).toContain(finding.failureMode);
+    expect(rendered).toContain('90%');
+  });
+  it('shows findings loading and error states without raw errors', () => {
+    TestBed.configureTestingModule({ imports: [ReviewRunDetailComponent], providers: [{ provide: ReviewRunsStore, useValue: {
+      rerunState: signal('idle'), hasToken: signal(false), settings: signal(null), rerun: jest.fn(),
+    } }] });
+    const fixture = TestBed.createComponent(ReviewRunDetailComponent);
+    fixture.componentRef.setInput('run', run);
+    fixture.componentRef.setInput('findings', [finding]);
+    fixture.componentRef.setInput('findingsState', 'loading');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Loading findings');
+    expect(fixture.nativeElement.querySelector('table')).toBeNull();
+    fixture.componentRef.setInput('findingsState', 'error');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Findings are unavailable.');
+    expect(fixture.nativeElement.textContent).not.toContain('offline');
+    expect(fixture.nativeElement.querySelector('table')).toBeNull();
+  });
+  it('emits retryFindings from the findings error Retry button', () => {
+    TestBed.configureTestingModule({ imports: [ReviewRunDetailComponent], providers: [{ provide: ReviewRunsStore, useValue: {
+      rerunState: signal('idle'), hasToken: signal(false), settings: signal(null), rerun: jest.fn(),
+    } }] });
+    const fixture = TestBed.createComponent(ReviewRunDetailComponent);
+    fixture.componentRef.setInput('run', run);
+    fixture.componentRef.setInput('findingsState', 'error');
+    const retryFindings = jest.fn();
+    fixture.componentInstance.retryFindings.subscribe(retryFindings);
+    fixture.detectChanges();
+    const retry = Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>)
+      .find((button) => button.textContent?.trim() === 'Retry');
+    expect(retry).toBeInstanceOf(HTMLButtonElement);
+    retry?.click();
+    expect(retryFindings).toHaveBeenCalledTimes(1);
   });
   it('asks before starting a live rerun', () => {
     TestBed.configureTestingModule({ imports: [ReviewRunDetailComponent], providers: [{ provide: ReviewRunsStore, useValue: {

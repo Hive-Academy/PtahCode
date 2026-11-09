@@ -221,7 +221,10 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
         <ptah-review-run-detail
           [run]="run"
           [loadState]="store.detailState()"
+          [findings]="store.findings()"
+          [findingsState]="store.findingsState()"
           (retry)="store.loadRun(run.attemptId)"
+          (retryFindings)="store.reloadFindings()"
           (closed)="store.closeRun()"
         />
       }

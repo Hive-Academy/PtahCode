@@ -7,6 +7,7 @@ import {
   type OperatorSettings,
   type RepositorySettings,
   type RepoIdentity,
+  type ReviewFinding,
   type ReviewRun,
 } from '@ptah-extension/review-contracts';
 import { z } from 'zod';
@@ -42,6 +43,8 @@ const defaultSettings: OperatorSettings = {
 export class ReviewRunsStore {
   private readonly rpc = inject(ClaudeRpcService);
   private readonly logger = inject(LoggingService);
+  /** Monotonic findings-request generation; replies from superseded loads are ignored. */
+  private findingsGeneration = 0;
   readonly runs = signal<ReviewRun[]>([]);
   readonly poll = signal<{
     status: 'succeeded' | 'failed' | null;
@@ -57,6 +60,8 @@ export class ReviewRunsStore {
   readonly selectedAttemptId = signal<string | null>(null);
   readonly selectedRun = signal<ReviewRun | null>(null);
   readonly detailState = signal<'loading' | 'ready' | 'error'>('ready');
+  readonly findings = signal<readonly ReviewFinding[]>([]);
+  readonly findingsState = signal<'loading' | 'ready' | 'error'>('ready');
   readonly settings = signal<OperatorSettings | null>(null);
   readonly draftSettings = signal<OperatorSettings>(defaultSettings);
   readonly hasToken = signal(false);
@@ -202,11 +207,15 @@ export class ReviewRunsStore {
     void this.loadRun(attemptId);
   }
   closeRun(): void {
+    this.findingsGeneration++;
     this.selectedAttemptId.set(null);
     this.selectedRun.set(null);
+    this.findings.set([]);
+    this.findingsState.set('ready');
   }
   async loadRun(attemptId: string): Promise<void> {
     this.detailState.set('loading');
+    void this.loadFindings(attemptId);
     try {
       const run = await this.request(
         'review:getRun',
@@ -223,6 +232,33 @@ export class ReviewRunsStore {
     } catch {
       if (this.selectedAttemptId() === attemptId) this.detailState.set('error');
     }
+  }
+  /** Loads the findings of the selected run; late replies for another or superseded load are ignored. */
+  private async loadFindings(attemptId: string): Promise<void> {
+    const generation = ++this.findingsGeneration;
+    this.findings.set([]);
+    this.findingsState.set('loading');
+    try {
+      const result = await this.request(
+        'review:listFindings',
+        ReviewRpcSchemas['review:listFindings'].params.parse({ attemptId }),
+        ReviewRpcSchemas['review:listFindings'].result,
+      );
+      if (this.findingsGeneration !== generation || this.selectedAttemptId() !== attemptId) return;
+      this.findings.set(result.findings);
+      this.findingsState.set('ready');
+    } catch {
+      if (this.findingsGeneration === generation && this.selectedAttemptId() === attemptId) {
+        this.findings.set([]);
+        this.findingsState.set('error');
+      }
+    }
+  }
+  /** Reloads the findings of the selected run; does nothing when no run is selected. */
+  reloadFindings(): void {
+    const attemptId = this.selectedAttemptId();
+    if (attemptId === null) return;
+    void this.loadFindings(attemptId);
   }
   async loadSettings(): Promise<void> {
     this.settingsState.set('loading');
@@ -419,6 +455,7 @@ export class ReviewRunsStore {
       | 'review:listRepositories'
       | 'review:listRuns'
       | 'review:getRun'
+      | 'review:listFindings'
       | 'review:getSettings'
       | 'review:updateSettings'
       | 'review:setPublicationPause'
