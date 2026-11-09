@@ -39,9 +39,11 @@ import {
   type IEvent,
   type IWorkspaceProvider,
 } from '@ptah-extension/platform-core';
-import type {
-  TaskEndTriggerSource,
-  TaskSpecSummary,
+import {
+  CARRIER_FILE,
+  SPEC_ROOT_SEGMENTS,
+  type TaskEndTriggerSource,
+  type TaskSpecSummary,
 } from '@ptah-extension/shared';
 import {
   TASK_SPECS_TOKENS,
@@ -168,7 +170,7 @@ export class TaskEndTransitionDetector {
   /** Patch exactly one carrier status line, preserving all other bytes. */
   async setCarrierStatus(root: string, taskId: string, status: 'in_review' | 'done'): Promise<boolean> {
     const id = z.string().regex(/^TASK_\d{4}_\d{3,4}(?:_[a-zA-Z0-9]+)?$/).parse(taskId);
-    const target = path.join(root, '.ptah', 'specs', id, 'task.md');
+    const target = path.join(root, ...SPEC_ROOT_SEGMENTS, id, CARRIER_FILE);
     const specsRoot = await fs.realpath(path.join(root, '.ptah', 'specs'));
     const realTarget = await fs.realpath(target);
     const relative = path.relative(specsRoot, realTarget);
