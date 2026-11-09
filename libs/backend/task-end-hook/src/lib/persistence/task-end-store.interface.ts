@@ -166,6 +166,7 @@ export interface ITaskCloseOutStore {
   /** Atomic identity lookup/create; concurrent callers join the same run. */
   getOrCreateCloseOut(identity: CloseOutIdentity): CloseOutRunRecord;
   getCloseOut(runId: string): CloseOutRunRecord | null;
+  getCloseOutForTask(repoId: string, taskId: string): CloseOutRunRecord | null;
   /** A step is checkpointed before its side effect. */
   startCloseOutStep(runId: string, step: CloseOutStep): void;
   finishCloseOutStep(

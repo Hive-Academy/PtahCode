@@ -58,12 +58,13 @@ describe('startTaskEndHook', () => {
     const unsubscribe = jest.fn();
     const reconcile = jest.fn(async () => { order.push('pr.reconcile'); });
     const disposeReconciler = jest.fn();
+    scope.register(TASK_END_TOKENS.STORE, { useValue: { getCloseOutForTask: () => null } });
     scope.register(TASK_END_TOKENS.PR_RECONCILER, {
       useValue: { reconcile, dispose: disposeReconciler },
     });
     scope.register(TASK_SPECS_TOKENS.TASK_INDEX_SERVICE, {
       useValue: {
-        list: async () => ({ tasks: [{ id: 'TASK_2026_898_c1a5', status: 'in_review', frontmatterValid: true }] }),
+        list: async () => ({ tasks: [{ id: 'TASK_2026_898_c1a5', status: 'in_progress', frontmatterValid: true }] }),
         onDidChangeIndex: (listener: (event: { workspaceRoot: string }) => void) => {
           notify = listener;
           return { dispose: unsubscribe };

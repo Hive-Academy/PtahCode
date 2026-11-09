@@ -1,8 +1,8 @@
-import { realpath } from 'node:fs/promises';
+import { realpath, lstat } from 'node:fs/promises';
 import * as path from 'node:path';
 import { TaskCleanupAdapter, type GitRunner } from './task-cleanup.adapter';
 
-jest.mock('node:fs/promises', () => ({ realpath: jest.fn(async (value: string) => value) }));
+jest.mock('node:fs/promises', () => ({ realpath: jest.fn(async (value: string) => value), lstat: jest.fn(async () => ({})) }));
 
 const root = path.resolve('repo');
 const tree = path.join(root, '.claude-worktrees', 'task');
@@ -31,7 +31,10 @@ function fixture(status = '', merged = true) {
 }
 
 describe('TaskCleanupAdapter', () => {
-  beforeEach(() => jest.mocked(realpath).mockImplementation(async value => value.toString()));
+  beforeEach(() => {
+    jest.mocked(realpath).mockImplementation(async value => value.toString());
+    jest.mocked(lstat).mockResolvedValue({} as Awaited<ReturnType<typeof lstat>>);
+  });
 
   it('inspects a registered clean merged task worktree', async () => {
     const { adapter } = fixture();
@@ -53,4 +56,23 @@ describe('TaskCleanupAdapter', () => {
     expect(calls).toContainEqual(['branch', '-d', '--', branch]);
     expect(calls.some(args => args.includes('--force') || args.includes('-D'))).toBe(false);
   });
+
+  it('treats an unknown merge ref as a refusal', async () => {
+    const run: GitRunner = async args => {
+      if (args[0] === 'worktree') return { stdout: list, exitCode: 0 };
+      if (args[0] === 'symbolic-ref') return { stdout: 'main\n', exitCode: 0 };
+      if (args[0] === 'merge-base') return { stdout: '', exitCode: 128 };
+      return { stdout: '', exitCode: 0 };
+    };
+    expect((await new TaskCleanupAdapter({ error: jest.fn() }, run)
+      .inspectTaskWorktree(root, tree, branch)).kind).toBe('refused');
+  });
+
+  it('recognizes a missing and unregistered worktree', async () => {
+    jest.mocked(lstat).mockRejectedValueOnce(Object.assign(new Error('missing'), { code: 'ENOENT' }));
+    const run: GitRunner = async () => ({ stdout: `worktree ${root}\nHEAD abc\nbranch refs/heads/main\n`, exitCode: 0 });
+    expect(await new TaskCleanupAdapter({ error: jest.fn() }, run)
+      .inspectTaskWorktree(root, tree, branch)).toEqual({ kind: 'already-removed', reason: 'already-removed' });
+  });
+
 });

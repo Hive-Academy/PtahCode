@@ -9,6 +9,7 @@ export interface TaskWorktreeInspection {
 
 export type GitCleanupResult<T> =
   | { readonly kind: 'ok'; readonly value: T }
+  | { readonly kind: 'already-removed'; readonly reason: string }
   | { readonly kind: 'refused'; readonly reason: string }
   | { readonly kind: 'failed'; readonly reason: string };
 

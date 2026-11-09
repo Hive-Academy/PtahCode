@@ -26,6 +26,7 @@ class Store implements ITaskCloseOutStore {
     return this.record;
   }
   getCloseOut(): CloseOutRunRecord | null { return this.record; }
+  getCloseOutForTask(): CloseOutRunRecord | null { return this.record; }
   startCloseOutStep(_runId: string, step: CloseOutStep): void {
     this.change(step, 'running', null, true);
   }
@@ -82,4 +83,83 @@ describe('TaskCloseOutService', () => {
     expect(cleanup.removeWorktree).not.toHaveBeenCalled();
     expect(cleanup.deleteBranch).not.toHaveBeenCalled();
   });
+
+  it('serializes concurrent manual cleanup and start', async () => {
+    const store = new Store();
+    let release: (() => void) | undefined;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const cleanup: GitCleanupPort = {
+      inspectTaskWorktree: jest.fn().mockResolvedValue({ kind: 'ok', value: {
+        canonicalPath: '/repo/task', branch: 'task', clean: true, branchMergedIntoMain: true } }),
+      removeWorktree: jest.fn().mockImplementation(async () => { await held; return { kind: 'ok', value: undefined }; }),
+      deleteBranch: jest.fn().mockResolvedValue({ kind: 'ok', value: undefined }),
+    };
+    const harvest = { harvestTask: jest.fn().mockResolvedValue({ outcome: 'harvested', reconciled: 1 }) } as HarvestPort;
+    const service = new TaskCloseOutService(store, { curateEndedSession: jest.fn() }, harvest, cleanup, logger());
+    const first = await service.run(input);
+    const a = service.cleanupCompleted(first.runId, true);
+    const b = service.cleanupCompleted(first.runId, true);
+    service.start({ ...input, autoRemoveMergedWorktreeAndBranch: true });
+    await Promise.resolve();
+    expect(harvest.harvestTask).toHaveBeenCalledTimes(1);
+    release?.();
+    await Promise.all([a, b]);
+    expect(cleanup.removeWorktree).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses removal when the second inspection finds a dirty worktree', async () => {
+    const store = new Store();
+    const cleanup: GitCleanupPort = {
+      inspectTaskWorktree: jest.fn()
+        .mockResolvedValueOnce({ kind: 'ok', value: { canonicalPath: '/repo/task', branch: 'task', clean: true, branchMergedIntoMain: true } })
+        .mockResolvedValueOnce({ kind: 'ok', value: { canonicalPath: '/repo/task', branch: 'task', clean: false, branchMergedIntoMain: true } }),
+      removeWorktree: jest.fn(), deleteBranch: jest.fn(),
+    };
+    const service = new TaskCloseOutService(store, { curateEndedSession: jest.fn() },
+      { harvestTask: jest.fn().mockResolvedValue({ outcome: 'harvested' }) }, cleanup, logger());
+    const result = await service.run({ ...input, autoRemoveMergedWorktreeAndBranch: true });
+    expect(result.steps.find(step => step.step === 'worktree')?.state).toBe('refused');
+    expect(cleanup.removeWorktree).not.toHaveBeenCalled();
+  });
+
+  it('continues branch cleanup when the worktree was already removed', async () => {
+    const store = new Store();
+    const cleanup: GitCleanupPort = {
+      inspectTaskWorktree: jest.fn().mockResolvedValue({ kind: 'already-removed', reason: 'already-removed' }),
+      removeWorktree: jest.fn(), deleteBranch: jest.fn().mockResolvedValue({ kind: 'ok', value: undefined }),
+    };
+    const service = new TaskCloseOutService(store, { curateEndedSession: jest.fn() },
+      { harvestTask: jest.fn().mockResolvedValue({ outcome: 'harvested' }) }, cleanup, logger());
+    const result = await service.run({ ...input, autoRemoveMergedWorktreeAndBranch: true });
+    expect(result.steps.find(step => step.step === 'worktree')?.reason).toBe('already-removed');
+    expect(cleanup.deleteBranch).toHaveBeenCalledTimes(1);
+  });
+
+
+  it('does not repeat unchanged refusals and caps automatic failures', async () => {
+    const store = new Store();
+    const cleanup: GitCleanupPort = {
+      inspectTaskWorktree: jest.fn().mockResolvedValue({ kind: 'refused', reason: 'dirty' }),
+      removeWorktree: jest.fn(), deleteBranch: jest.fn(),
+    };
+    const harvest = { harvestTask: jest.fn().mockResolvedValue({ outcome: 'failed' }) } as HarvestPort;
+    const service = new TaskCloseOutService(store, { curateEndedSession: jest.fn() }, harvest, cleanup, logger());
+    for (let i = 0; i < 8; i++) await service.run({ ...input, autoRemoveMergedWorktreeAndBranch: true });
+    expect(cleanup.inspectTaskWorktree).toHaveBeenCalledTimes(1);
+    expect(harvest.harvestTask).toHaveBeenCalledTimes(5);
+  });
+
+  it('curates all sessions and aggregates failures after gated results', async () => {
+    const store = new Store();
+    const curation = { curateEndedSession: jest.fn()
+      .mockResolvedValueOnce({ kind: 'gated', gate: 'disabled' })
+      .mockResolvedValueOnce({ kind: 'failed' }) } as CurationPort;
+    const service = new TaskCloseOutService(store, curation,
+      { harvestTask: jest.fn().mockResolvedValue({ outcome: 'harvested' }) },
+      { inspectTaskWorktree: jest.fn(), removeWorktree: jest.fn(), deleteBranch: jest.fn() }, logger());
+    const result = await service.run({ ...input, sessionIds: ['s1', 's2'] });
+    expect(curation.curateEndedSession).toHaveBeenCalledTimes(2);
+    expect(result.steps.find(step => step.step === 'memory')?.state).toBe('failed');
+  });
+
 });

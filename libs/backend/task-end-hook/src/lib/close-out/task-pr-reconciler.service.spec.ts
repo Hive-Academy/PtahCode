@@ -49,4 +49,21 @@ describe('TaskPrReconcilerService', () => {
     expect(closeOut.run).toHaveBeenCalledWith(expect.objectContaining({ merged: true, autoRemoveMergedWorktreeAndBranch: false }));
     reconciler.dispose();
   });
+
+  it('leaves cancelled tasks untouched after merge', async () => {
+    const { reconciler, detector, closeOut } = setup({ kind: 'merged', number: 7, url: 'https://github.com/a/b/pull/7' });
+    await reconciler.reconcile({ ...task, status: 'cancelled' });
+    expect(detector.setCarrierStatus).not.toHaveBeenCalled();
+    expect(closeOut.run).not.toHaveBeenCalled();
+    reconciler.dispose();
+  });
+
+  it('starts close-out even when the carrier write fails', async () => {
+    const { reconciler, detector, closeOut } = setup({ kind: 'merged', number: 7, url: 'https://github.com/a/b/pull/7' });
+    jest.mocked(detector.setCarrierStatus).mockRejectedValueOnce(new Error('write failed'));
+    await reconciler.reconcile(task);
+    expect(closeOut.run).toHaveBeenCalledTimes(1);
+    reconciler.dispose();
+  });
+
 });

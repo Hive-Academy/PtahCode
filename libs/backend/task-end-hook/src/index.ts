@@ -37,6 +37,7 @@ export type {
 // Persistence contract
 export type {
   ITaskEndStore,
+  ITaskCloseOutStore,
   TaskEndBaselineEntry,
   TaskEndDedupeKey,
   TaskEndDeferredCensusStep,

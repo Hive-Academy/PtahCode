@@ -1,11 +1,11 @@
 import { execFile } from 'node:child_process';
-import { realpath } from 'node:fs/promises';
+import { realpath, lstat } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Logger } from '@ptah-extension/vscode-core';
 
 export interface GitResult { readonly stdout: string; readonly exitCode: number }
 export type GitRunner = (args: readonly string[], cwd: string) => Promise<GitResult>;
-type Result<T> = { readonly kind: 'ok'; readonly value: T } | { readonly kind: 'refused' | 'failed'; readonly reason: string };
+type Result<T> = { readonly kind: 'already-removed'; readonly reason: string } | { readonly kind: 'ok'; readonly value: T } | { readonly kind: 'refused' | 'failed'; readonly reason: string };
 interface Inspection { readonly canonicalPath: string; readonly branch: string; readonly clean: boolean; readonly branchMergedIntoMain: boolean }
 interface GitCleanupPort {
   inspectTaskWorktree(mainRoot: string, worktreePath: string, branch: string): Promise<Result<Inspection>>;
@@ -61,6 +61,20 @@ export class TaskCleanupAdapter implements GitCleanupPort {
 
   async inspectTaskWorktree(mainRoot: string, worktreePath: string, branch: string): Promise<Result<Inspection>> {
     try {
+      const context = await this.context(mainRoot);
+      const resolved = path.resolve(worktreePath);
+      if (!branch || branch === 'main' || branch === 'master' || !inside(resolved, context.area))
+        return { kind: 'refused', reason: 'Worktree path or branch is not eligible' };
+      try {
+        await lstat(resolved);
+      } catch (error: unknown) {
+        if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+          if (!context.entries.some(entry => path.resolve(entry.path) === resolved))
+            return { kind: 'already-removed', reason: 'already-removed' };
+          return { kind: 'refused', reason: 'Registered worktree path is missing' };
+        }
+        throw error;
+      }
       const target = await this.candidate(mainRoot, worktreePath);
       if (!target || !branch || branch === 'main' || branch === 'master' || target.branch !== branch) return { kind: 'refused', reason: 'Worktree path or branch is not an eligible task worktree' };
       const current = await this.run(['symbolic-ref', '--quiet', '--short', 'HEAD'], target.root);
@@ -68,6 +82,7 @@ export class TaskCleanupAdapter implements GitCleanupPort {
       if (current.stdout.trim() === branch) return { kind: 'refused', reason: 'Cannot clean the current branch' };
       const status = await this.run(['status', '--porcelain'], target.canonicalPath);
       const merged = await this.run(['merge-base', '--is-ancestor', branch, 'main'], target.root);
+      if (merged.exitCode === 128) return { kind: 'refused', reason: 'Unknown merge reference' };
       if (status.exitCode !== 0 || (merged.exitCode !== 0 && merged.exitCode !== 1)) return { kind: 'failed', reason: 'Unable to verify worktree status or merge' };
       return { kind: 'ok', value: { canonicalPath: target.canonicalPath, branch, clean: status.stdout.length === 0, branchMergedIntoMain: merged.exitCode === 0 } };
     } catch (error) { this.logger.error('Git cleanup inspection failed', error instanceof Error ? error : new Error(String(error))); return { kind: 'failed', reason: 'Unable to inspect task worktree' }; }
@@ -97,7 +112,7 @@ export class TaskCleanupAdapter implements GitCleanupPort {
       if (exists.exitCode !== 0) return { kind: 'failed', reason: 'Unable to verify branch' };
       if (context.entries.some(entry => entry.branch === branch)) return { kind: 'refused', reason: 'Branch still has a worktree' };
       const merged = await this.run(['merge-base', '--is-ancestor', branch, 'main'], context.root);
-      if (merged.exitCode !== 0) return merged.exitCode === 1 ? { kind: 'refused', reason: 'Branch is not merged into main' } : { kind: 'failed', reason: 'Unable to verify merge' };
+      if (merged.exitCode !== 0) return merged.exitCode === 1 || merged.exitCode === 128 ? { kind: 'refused', reason: 'Branch is not proven merged into main' } : { kind: 'failed', reason: 'Unable to verify merge' };
       const result = await this.run(['branch', '-d', '--', branch], context.root);
       return result.exitCode === 0 ? { kind: 'ok', value: undefined } : { kind: 'failed', reason: 'Git branch deletion failed' };
     } catch (error) { this.logger.error('Git branch deletion failed', error instanceof Error ? error : new Error(String(error))); return { kind: 'failed', reason: 'Unable to delete task branch' }; }

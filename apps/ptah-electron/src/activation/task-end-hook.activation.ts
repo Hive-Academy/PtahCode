@@ -4,6 +4,7 @@ import {
   type TaskEndHookHandle,
   type TaskPrReconcilerService,
   type TaskPrReconcileTask,
+  type ITaskCloseOutStore,
   TASK_END_HOOK_SECTION,
   TASK_END_HOOK_KEYS,
   TASK_END_HOOK_DEFAULTS,
@@ -79,8 +80,14 @@ export async function startTaskEndHook(
     if (disposed) return null;
     hook.worker.start();
     hook.detector.subscribe();
-    if (container.isRegistered(TASK_END_TOKENS.PR_RECONCILER)) {
+    try {
+    if (container.isRegistered(TASK_END_TOKENS.PR_RECONCILER) &&
+        container.isRegistered(TASK_END_TOKENS.STORE) &&
+        container.isRegistered(TASK_SPECS_TOKENS.TASK_INDEX_SERVICE) &&
+        container.isRegistered(PLATFORM_TOKENS.WORKSPACE_PROVIDER) &&
+        container.isRegistered(SESSION_ORGANIZATION_TOKENS.STORE)) {
       reconciler = container.resolve<TaskPrReconcilerService>(TASK_END_TOKENS.PR_RECONCILER);
+      const store = container.resolve<ITaskCloseOutStore>(TASK_END_TOKENS.STORE);
       const index = container.resolve<TaskIndexService>(TASK_SPECS_TOKENS.TASK_INDEX_SERVICE);
       const workspace = container.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER);
       const organization = container.resolve<SessionOrganizationStore>(SESSION_ORGANIZATION_TOKENS.STORE);
@@ -89,7 +96,15 @@ export async function startTaskEndHook(
         const repoId = hook.detector.cachedRepoId(root);
         if (!repoId || disposed) return;
         for (const row of listing.tasks) {
-          if (!row.frontmatterValid || (row.status !== 'in_review' && row.status !== 'done')) continue;
+          if (!row.frontmatterValid || (row.status !== 'in_progress' && row.status !== 'in_review' && row.status !== 'done')) continue;
+          const optedIn = workspace.getConfiguration<unknown>(
+            TASK_END_HOOK_SECTION, TASK_END_HOOK_KEYS.autoRemoveMergedWorktreeAndBranch,
+            TASK_END_HOOK_DEFAULTS.autoRemoveMergedWorktreeAndBranch) === true;
+          if (row.status === 'done') {
+            const previous = store.getCloseOutForTask(repoId, row.id);
+            if (previous && previous.steps.every(step => step.state === 'ok' || step.state === 'skipped' ||
+                (step.state === 'refused' && (step.reason !== 'pending-user-approval' || !optedIn)))) continue;
+          }
           const sessionIds = organization.listTaskLinks(root, [row.id]).map((link) => link.sessionId);
           const candidate = sessionIds
             .map((id) => organization.getOrganization(root, id))
@@ -99,12 +114,7 @@ export async function startTaskEndHook(
             repoId, taskId: row.id, mainRoot: root,
             worktreePath: candidate.worktreePath, branch: candidate.branch,
             status: row.status, sessionIds,
-            autoRemoveMergedWorktreeAndBranch:
-              workspace.getConfiguration<unknown>(
-                TASK_END_HOOK_SECTION,
-                TASK_END_HOOK_KEYS.autoRemoveMergedWorktreeAndBranch,
-                TASK_END_HOOK_DEFAULTS.autoRemoveMergedWorktreeAndBranch,
-              ) === true,
+            autoRemoveMergedWorktreeAndBranch: optedIn,
           };
           if (disposed) return;
           await reconciler?.reconcile(task);
@@ -113,12 +123,30 @@ export async function startTaskEndHook(
       const report = (error: unknown): void => {
         logger.error('Task PR reconcile failed', error instanceof Error ? error : new Error(String(error)));
       };
-      reconcileSubscription = index.onDidChangeIndex((event) => {
-        void scan(event.workspaceRoot).catch(report);
-      });
-      for (const root of workspace.getWorkspaceFolders()) {
-        void scan(root).catch(report);
-      }
+      const scans = new Map<string, { running: boolean; queued: boolean }>();
+      const schedule = (root: string): void => {
+        const state = scans.get(root) ?? { running: false, queued: false };
+        if (state.running) { state.queued = true; return; }
+        state.running = true;
+        scans.set(root, state);
+        void (async () => {
+          do {
+            state.queued = false;
+            try { await scan(root); } catch (error: unknown) { report(error); }
+          } while (state.queued && !disposed);
+          state.running = false;
+          scans.delete(root);
+        })();
+      };
+      reconcileSubscription = index.onDidChangeIndex((event) => schedule(event.workspaceRoot));
+      for (const root of workspace.getWorkspaceFolders()) schedule(root);
+    }
+    } catch (error: unknown) {
+      reconcileSubscription?.dispose();
+      reconciler?.dispose();
+      reconcileSubscription = null;
+      reconciler = null;
+      logger.error('Task PR reconciler wiring failed', error instanceof Error ? error : new Error(String(error)));
     }
   } catch (_error: unknown) {
     dispose();

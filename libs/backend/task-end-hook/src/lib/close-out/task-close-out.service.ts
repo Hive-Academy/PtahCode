@@ -37,6 +37,7 @@ type StepResult = {
 @injectable()
 export class TaskCloseOutService {
   private readonly active = new Map<string, Promise<CloseOutRunRecord>>();
+  private readonly conflictWarnings = new Set<string>();
 
   constructor(
     @inject(TASK_END_TOKENS.STORE) private readonly store: ITaskCloseOutStore,
@@ -57,13 +58,23 @@ export class TaskCloseOutService {
   start(input: TaskCloseOutRequest): CloseOutRunRecord {
     const request = requestSchema.parse(input);
     const identity: CloseOutIdentity = request;
-    const run = this.store.getOrCreateCloseOut(identity);
+    let run: CloseOutRunRecord;
+    try {
+      run = this.store.getOrCreateCloseOut(identity);
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === 'close-out identity conflict') {
+        const key = `${request.repoId}\0${request.taskId}`;
+        if (!this.conflictWarnings.has(key)) {
+          this.conflictWarnings.add(key);
+          this.logger.warn('[task-close-out] identity conflict');
+        }
+      }
+      throw error;
+    }
     const existing = this.active.get(run.runId);
     if (existing) return run;
-    const work = this.execute(run.runId, request).finally(() => {
-      this.active.delete(run.runId);
-    });
-    this.active.set(run.runId, work);
+    const work = Promise.resolve().then(() => this.execute(run.runId, request));
+    this.track(run.runId, work);
     void work.catch((error: unknown) => {
       this.logger.error(
         '[task-close-out] run failed',
@@ -84,15 +95,27 @@ export class TaskCloseOutService {
   ): Promise<CloseOutRunRecord | null> {
     const run = this.status(runId);
     if (!run) return null;
-    const active = this.active.get(runId);
-    if (active) await active;
-    await this.cleanupSteps(runId, {
+    const previous = this.active.get(runId);
+    const work = (previous ?? Promise.resolve(run)).catch(() => run).then(async () => {
+      await this.cleanupSteps(runId, {
       ...run,
       merged: true,
       sessionIds: [],
       autoRemoveMergedWorktreeAndBranch: allowRemoval,
+      }, true);
+      const result = this.status(runId);
+      if (!result) throw new Error('close-out run disappeared');
+      return result;
     });
-    return this.status(runId);
+    this.track(runId, work);
+    return work;
+  }
+
+  private track(runId: string, work: Promise<CloseOutRunRecord>): void {
+    this.active.set(runId, work);
+    void work.finally(() => {
+      if (this.active.get(runId) === work) this.active.delete(runId);
+    }).catch(() => { /* The caller observes the original promise. */ });
   }
 
   private async execute(
@@ -102,6 +125,8 @@ export class TaskCloseOutService {
     await this.step(runId, 'memory', async () => {
       if (request.sessionIds.length === 0)
         return { state: 'skipped', reason: 'no-linked-sessions' };
+      let failed = false;
+      let gated = 0;
       for (const sessionId of new Set(request.sessionIds)) {
         const result = await this.curation.curateEndedSession(
           sessionId,
@@ -113,11 +138,13 @@ export class TaskCloseOutService {
           result.kind === 'threw' ||
           result.kind === 'stalled'
         ) {
-          return { state: 'failed', reason: 'curation-failed' };
+          failed = true;
         }
-        if (result.kind === 'gated')
-          return { state: 'skipped', reason: result.gate };
+        if (result.kind === 'gated') gated++;
       }
+      if (failed) return { state: 'failed', reason: 'curation-failed' };
+      if (gated === new Set(request.sessionIds).size)
+        return { state: 'skipped', reason: 'all-sessions-gated' };
       return { state: 'ok', reason: null };
     });
     await this.step(runId, 'learning', async () => {
@@ -143,6 +170,7 @@ export class TaskCloseOutService {
   private async cleanupSteps(
     runId: string,
     request: TaskCloseOutRequest,
+    manual = false,
   ): Promise<void> {
     await this.step(runId, 'worktree', async () => {
       if (!request.autoRemoveMergedWorktreeAndBranch)
@@ -169,7 +197,7 @@ export class TaskCloseOutService {
           second.value.canonicalPath,
         ),
       );
-    });
+    }, request.autoRemoveMergedWorktreeAndBranch, manual);
     await this.step(runId, 'branch', async () => {
       const current = this.store.getCloseOut(runId);
       const worktree = current?.steps.find((step) => step.step === 'worktree');
@@ -180,19 +208,25 @@ export class TaskCloseOutService {
       return this.cleanupResult(
         await this.cleanup.deleteBranch(request.mainRoot, request.branch),
       );
-    });
+    }, request.autoRemoveMergedWorktreeAndBranch, manual);
   }
 
   private async step(
     runId: string,
     name: CloseOutStep,
     action: () => Promise<StepResult>,
+    optedIn = false,
+    manual = false,
   ): Promise<void> {
     const current = this.store
       .getCloseOut(runId)
       ?.steps.find((step) => step.step === name);
     if (!current || current.state === 'ok' || current.state === 'skipped')
       return;
+    if (!manual && current.state === 'failed' && current.attempts >= 5) return;
+    if (!manual && current.state === 'refused' &&
+        !((current.reason === 'pending-user-approval' ||
+            current.reason === 'worktree-removal-pending') && optedIn)) return;
     this.store.startCloseOutStep(runId, name);
     let result: StepResult;
     try {
@@ -211,6 +245,7 @@ export class TaskCloseOutService {
     result: Awaited<ReturnType<GitCleanupPort['inspectTaskWorktree']>>,
     request: TaskCloseOutRequest,
   ): StepResult | null {
+    if (result.kind === 'already-removed') return { state: 'ok', reason: 'already-removed' };
     if (result.kind !== 'ok') return this.cleanupResult(result);
     if (
       result.value.canonicalPath !== request.worktreePath ||
@@ -224,8 +259,8 @@ export class TaskCloseOutService {
   }
 
   private cleanupResult(result: GitCleanupResult<unknown>): StepResult {
-    return result.kind === 'ok'
-      ? { state: 'ok', reason: null }
+    return result.kind === 'ok' || result.kind === 'already-removed'
+      ? { state: 'ok', reason: result.kind === 'already-removed' ? 'already-removed' : null }
       : {
           state: result.kind,
           reason: result.kind === 'refused' ? 'git-refused' : 'git-failed',

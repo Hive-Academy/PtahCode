@@ -70,7 +70,14 @@ export class TaskPrReconcilerService {
     }
     this.watched.delete(key);
     this.arm();
-    if (task.status !== 'done') await this.detector.setCarrierStatus(task.mainRoot, task.taskId, 'done');
+    if (task.status === 'cancelled') return { kind: 'merged', number: pr.number };
+    if (task.status !== 'done') {
+      try {
+        await this.detector.setCarrierStatus(task.mainRoot, task.taskId, 'done');
+      } catch (error: unknown) {
+        this.logger.error('[task-pr-reconciler] carrier update failed', error instanceof Error ? error : new Error(String(error)));
+      }
+    }
     // Close-out is deliberately detached from the hook callback. Its store owns retry state.
     void this.closeOut.run({
       repoId: task.repoId, taskId: task.taskId, prNumber: pr.number,
@@ -78,7 +85,8 @@ export class TaskPrReconcilerService {
       branch: task.branch, merged: true, sessionIds: task.sessionIds,
       autoRemoveMergedWorktreeAndBranch: task.autoRemoveMergedWorktreeAndBranch,
     }).catch((error: unknown) => {
-      this.logger.error('[task-pr-reconciler] close-out failed', error instanceof Error ? error : new Error(String(error)));
+      if (!(error instanceof Error && error.message === 'close-out identity conflict'))
+        this.logger.error('[task-pr-reconciler] close-out failed', error instanceof Error ? error : new Error(String(error)));
     });
     return { kind: 'merged', number: pr.number };
   }

@@ -205,6 +205,14 @@ export class SqliteTaskEndStore implements ITaskEndStore, ITaskCloseOutStore {
     return { ...row, steps };
   }
 
+  getCloseOutForTask(repoId: string, taskId: string): CloseOutRunRecord | null {
+    const row = this.db.prepare(`SELECT run_id AS runId FROM task_close_out_runs
+      WHERE repo_id = ? AND task_id = ? ORDER BY created_at DESC LIMIT 1`)
+      .get(repoId, taskId);
+    const parsed = z.object({ runId: z.string() }).safeParse(row);
+    return parsed.success ? this.getCloseOut(parsed.data.runId) : null;
+  }
+
   startCloseOutStep(runId: string, step: CloseOutStep): void {
     const result = this.db.prepare(`UPDATE task_close_out_steps
       SET state = 'running', reason = NULL, attempts = attempts + 1,
