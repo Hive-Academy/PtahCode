@@ -376,17 +376,40 @@ describe('DisplayWindowSync', () => {
     const { sync, dock: chatDock } = setup();
     const commandDock = new DisplayDockState();
     const focusedSession = signal<string | null>('command-root');
-    commandDock.openFile('command-root', { kind: 'markdown-file', path: '/root/report.md', workspaceRoot: '/root', title: 'report.md' });
-    const unbind = sync.bindSource({ tabId: focusedSession, dock: commandDock, focusVersion: signal(0) });
+    commandDock.openFile('command-root', {
+      kind: 'markdown-file',
+      path: '/root/report.md',
+      workspaceRoot: '/root',
+      title: 'report.md',
+    });
+    const unbind = sync.bindSource({
+      tabId: focusedSession,
+      dock: commandDock,
+      focusVersion: signal(0),
+    });
     await sync.detach();
     expect(sync.count()).toBe(1);
-    sync.handleMessage({ type: 'displayWindow:action', payload: { tabId: 'command-root', action: { type: 'select', key: 'file:chosen' } } });
-    expect(commandDock.tab('command-root').selection).toEqual({ kind: 'file', fileKey: 'file:chosen' });
+    sync.handleMessage({
+      type: 'displayWindow:action',
+      payload: {
+        tabId: 'command-root',
+        action: { type: 'select', key: 'file:chosen' },
+      },
+    });
+    expect(commandDock.tab('command-root').selection).toEqual({
+      kind: 'file',
+      fileKey: 'file:chosen',
+    });
     expect(chatDock.tab('tab-1').selection).toBeNull();
     focusedSession.set('command-child');
     expect(sync.count()).toBe(0);
     unbind();
-    chatDock.openFile('tab-1', { kind: 'image-file', path: '/root/photo.png', workspaceRoot: '/root', title: 'photo.png' });
+    chatDock.openFile('tab-1', {
+      kind: 'image-file',
+      path: '/root/photo.png',
+      workspaceRoot: '/root',
+      title: 'photo.png',
+    });
     expect(sync.count()).toBe(1);
   });
 
@@ -395,9 +418,17 @@ describe('DisplayWindowSync', () => {
     const chatFocus = signal(0);
     const commandFocus = signal(0);
     const chatTab = signal<string | null>('chat-focused');
-    const unbindChat = sync.bindSource({ tabId: chatTab, dock: chatDock, focusVersion: chatFocus });
+    const unbindChat = sync.bindSource({
+      tabId: chatTab,
+      dock: chatDock,
+      focusVersion: chatFocus,
+    });
     const commandDock = new DisplayDockState();
-    const unbindCommand = sync.bindSource({ tabId: signal('command-focused'), dock: commandDock, focusVersion: commandFocus });
+    const unbindCommand = sync.bindSource({
+      tabId: signal('command-focused'),
+      dock: commandDock,
+      focusVersion: commandFocus,
+    });
     await sync.detach();
     chatFocus.set(1);
     await flushFrame();
@@ -415,6 +446,58 @@ describe('DisplayWindowSync', () => {
     unbindChat();
   });
 
+  it('keeps the main view bound when a passive embed registers later', async () => {
+    const { sync } = setup();
+    const embed = {
+      tabId: signal<string | null>('tab-embed'),
+      dock: new DisplayDockState(),
+      focusVersion: signal(0),
+      passive: true,
+    };
+    const unbindEmbed = sync.bindSource(embed);
+    expect(sync.isBoundSource(embed)).toBe(false);
+    await sync.detach();
+    await flushFrame();
+    expect(lastPublished().tabId).toBe('tab-1');
+    sync.selectSource(embed);
+    await flushFrame();
+    expect(lastPublished().tabId).toBe('tab-embed');
+    unbindEmbed();
+  });
+
+  it('rebinds to the view that requests Detach and ignores inactive view updates', async () => {
+    const { sync, dock: firstDock } = setup();
+    const secondDock = new DisplayDockState();
+    const second = {
+      tabId: signal<string | null>('tab-2'),
+      dock: secondDock,
+      focusVersion: signal(0),
+      passive: true,
+    };
+    const unbindSecond = sync.bindSource(second);
+    await sync.detach();
+    await flushFrame();
+    expect(lastPublished().tabId).toBe('tab-1');
+    secondDock.openArtifact('tab-2', artifact.id);
+    await flushFrame();
+    expect(publishCalls()).toHaveLength(1);
+    sync.selectSource(second);
+    await sync.detach();
+    await flushFrame();
+    expect(lastPublished().tabId).toBe('tab-2');
+    firstDock.openArtifact('tab-1', artifact.id);
+    await flushFrame();
+    expect(publishCalls()).toHaveLength(2);
+    unbindSecond();
+    await flushFrame();
+    expect(sync.isBoundSource(second)).toBe(false);
+    expect(sync.count()).toBe(0);
+    const publishedAfterUnbind = publishCalls().length;
+    secondDock.openArtifact('tab-2', 'another');
+    await flushFrame();
+    expect(publishCalls()).toHaveLength(publishedAfterUnbind);
+  });
+
   it('unbinding stops the actions and the snapshot', async () => {
     TestBed.configureTestingModule({
       providers: [
@@ -429,7 +512,11 @@ describe('DisplayWindowSync', () => {
     });
     const sync = TestBed.inject(DisplayWindowSync);
     const dock = new DisplayDockState();
-    const unbind = sync.bindSource({ tabId: signal('tab-1'), dock, focusVersion: signal(0) });
+    const unbind = sync.bindSource({
+      tabId: signal('tab-1'),
+      dock,
+      focusVersion: signal(0),
+    });
     unbind();
     sync.handleMessage({
       type: 'displayWindow:action',

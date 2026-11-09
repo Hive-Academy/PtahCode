@@ -38,8 +38,13 @@ export interface DisplayWindowSource {
   /** The main view's active tab; `null` when no tab is open. */
   readonly tabId: Signal<string | null>;
   readonly dock: DisplayDockState;
-  /** Increments whenever this surface receives user interaction. */
+  /** Increments when a main view receives user interaction. */
   readonly focusVersion: Signal<number>;
+  /**
+   * An embed (canvas tile or host dock): it never takes the binding on
+   * registration or as a fallback, only through `selectSource`.
+   */
+  readonly passive?: boolean;
 }
 
 const UNAVAILABLE_TEXT: Readonly<
@@ -70,7 +75,7 @@ const PUBLISH_RETRY_BASE_MS = 500;
  *
  * - `detach()` opens the window (`displayWindow:open`), `focus()` raises it
  *   (the same RPC), `attach()` closes it (`displayWindow:close`).
- * - `bindSource` is called only by the main ChatView. While detached, one
+ * - `bindSource` registers each ChatView with a Display sheet. While detached, one
  *   effect builds the bound tab's display view; it is published with
  *   `displayWindow:publishState` at most once per ~16 ms timer tick (not
  *   rAF, which stops while the main window is minimized), and only when its
@@ -142,37 +147,54 @@ export class DisplayWindowSync implements MessageHandler {
   }
 
   /**
-   * Binds the main view's tab and dock. Returns the unbind function; it
+   * Registers a view's tab and dock. Returns the unbind function; it
    * clears the binding only if it is still this source.
    */
   bindSource(source: DisplayWindowSource): () => void {
     this.sources.push(source);
-    if (this.source() === null || !this.hasFocused) this.source.set(source);
+    if (!source.passive && (this.source() === null || !this.hasFocused))
+      this.source.set(source);
     let lastFocusVersion = source.focusVersion();
-    const focusEffect = effect(() => {
-      const focusVersion = source.focusVersion();
-      const tabId = source.tabId();
-      if (focusVersion !== lastFocusVersion && tabId !== null) {
-        this.hasFocused = true;
-        const index = this.sources.indexOf(source);
-        if (index >= 0) {
-          this.sources.splice(index, 1);
-          this.sources.push(source);
-          this.source.set(source);
+    const focusEffect = effect(
+      () => {
+        const focusVersion = source.focusVersion();
+        const tabId = source.tabId();
+        if (focusVersion !== lastFocusVersion && tabId !== null) {
+          this.hasFocused = true;
+          const index = this.sources.indexOf(source);
+          if (index >= 0) {
+            this.sources.splice(index, 1);
+            this.sources.push(source);
+            this.source.set(source);
+          }
         }
-      }
-      lastFocusVersion = focusVersion;
-      if (this.source() === source && tabId === null)
-        this.source.set(this.lastBoundSource(source));
-    }, { injector: this.injector });
+        lastFocusVersion = focusVersion;
+        if (this.source() === source && tabId === null)
+          this.source.set(this.lastBoundSource(source));
+      },
+      { injector: this.injector },
+    );
     return () => {
       focusEffect.destroy();
       const index = this.sources.lastIndexOf(source);
       if (index < 0) return;
       this.sources.splice(index, 1);
+      // Fall back to another main view; `lastBoundSource` never promotes an embed.
       if (untracked(this.source) === source)
         this.source.set(this.lastBoundSource(null));
     };
+  }
+
+  /** A Detach request makes its view the sole snapshot and action source. */
+  selectSource(source: DisplayWindowSource): void {
+    if (this.sources.includes(source) && source.tabId() !== null) {
+      this.hasFocused = true;
+      this.source.set(source);
+    }
+  }
+
+  isBoundSource(source: DisplayWindowSource): boolean {
+    return this.source() === source;
   }
 
   /**
@@ -184,7 +206,12 @@ export class DisplayWindowSync implements MessageHandler {
   ): DisplayWindowSource | null {
     for (let index = this.sources.length - 1; index >= 0; index -= 1) {
       const candidate = this.sources[index];
-      if (candidate !== exclude && candidate.tabId() !== null) return candidate;
+      if (
+        candidate !== exclude &&
+        !candidate.passive &&
+        candidate.tabId() !== null
+      )
+        return candidate;
     }
     return null;
   }

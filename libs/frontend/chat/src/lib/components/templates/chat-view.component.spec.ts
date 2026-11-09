@@ -556,8 +556,14 @@ function makeHarness(
   const authRequiredBannerSig = authBannerSig;
   const codexAuthenticatedSig = signal(false);
   const codexTokenStaleSig = signal(false);
-  const codexStateSig = signal<{ attemptId: string; mode: 'browser'; status: 'starting' | 'running' | 'awaiting-user' | 'succeeded' } | null>(null);
-  const codexConfirmationSig = signal<'idle' | 'checking' | 'confirmed' | 'failed'>('idle');
+  const codexStateSig = signal<{
+    attemptId: string;
+    mode: 'browser';
+    status: 'starting' | 'running' | 'awaiting-user' | 'succeeded';
+  } | null>(null);
+  const codexConfirmationSig = signal<
+    'idle' | 'checking' | 'confirmed' | 'failed'
+  >('idle');
   const codexRefreshFailedSig = signal(false);
   const codexNothingSeenSig = signal(false);
   const codexRefreshingSig = signal(false);
@@ -571,7 +577,9 @@ function makeHarness(
     codexRefreshFailedSig.set(!confirmed);
     codexConfirmationSig.set(confirmed ? 'confirmed' : 'failed');
   });
-  const clearAuthRequiredBannerMock = jest.fn(() => authRequiredBannerSig.set(null));
+  const clearAuthRequiredBannerMock = jest.fn(() =>
+    authRequiredBannerSig.set(null),
+  );
   const authStateStub = {
     authRequiredBanner: authRequiredBannerSig.asReadonly(),
     codexAuthenticated: codexAuthenticatedSig.asReadonly(),
@@ -627,6 +635,8 @@ function makeHarness(
     error: displayWindowErrorSig.asReadonly(),
     count: signal(3).asReadonly(),
     bindSource: jest.fn(() => unbindDisplayWindowMock),
+    selectSource: jest.fn(),
+    isBoundSource: jest.fn(() => false),
     detach: jest.fn(async () => undefined),
     focus: jest.fn(async () => undefined),
     attach: jest.fn(async () => undefined),
@@ -841,9 +851,16 @@ describe('ChatViewComponent — Codex re-auth', () => {
 
   it('starts in-app sign-in from the Codex auth banner', async () => {
     const h = makeHarness();
-    h.authRequiredBannerSig.set({ providerId: 'openai-codex', message: 'Sign in again', generation: 1, origin: null });
+    h.authRequiredBannerSig.set({
+      providerId: 'openai-codex',
+      message: 'Sign in again',
+      generation: 1,
+      origin: null,
+    });
 
-    await (h.component as unknown as { onAuthReauth(): Promise<void> }).onAuthReauth();
+    await (
+      h.component as unknown as { onAuthReauth(): Promise<void> }
+    ).onAuthReauth();
 
     expect(h.codexStartMock).toHaveBeenCalledTimes(1);
     expect(h.clearAuthRequiredBannerMock).not.toHaveBeenCalled();
@@ -851,13 +868,30 @@ describe('ChatViewComponent — Codex re-auth', () => {
 
   it('renders the compact block and Cancel while banner sign-in is active', async () => {
     const h = makeHarness({ renderAuthBannerTemplate: true });
-    h.authRequiredBannerSig.set({ providerId: 'openai-codex', message: 'Sign in again', generation: 1, origin: null });
-    h.codexStateSig.set({ attemptId: 'attempt-1', mode: 'browser', status: 'running' });
-    await (h.component as unknown as { onAuthReauth(): Promise<void> }).onAuthReauth();
+    h.authRequiredBannerSig.set({
+      providerId: 'openai-codex',
+      message: 'Sign in again',
+      generation: 1,
+      origin: null,
+    });
+    h.codexStateSig.set({
+      attemptId: 'attempt-1',
+      mode: 'browser',
+      status: 'running',
+    });
+    await (
+      h.component as unknown as { onAuthReauth(): Promise<void> }
+    ).onAuthReauth();
     h.fixture.detectChanges();
 
-    expect(h.fixture.nativeElement.querySelector('[data-testid="codex-sign-in-block"]')).not.toBeNull();
-    const cancel = h.fixture.nativeElement.querySelector('button[data-testid="codex-reauth-cancel"]') as HTMLButtonElement | null;
+    expect(
+      h.fixture.nativeElement.querySelector(
+        '[data-testid="codex-sign-in-block"]',
+      ),
+    ).not.toBeNull();
+    const cancel = h.fixture.nativeElement.querySelector(
+      'button[data-testid="codex-reauth-cancel"]',
+    ) as HTMLButtonElement | null;
     expect(cancel?.textContent).toContain('Cancel sign-in');
     cancel?.click();
     expect(h.codexCancelMock).toHaveBeenCalledTimes(1);
@@ -865,52 +899,144 @@ describe('ChatViewComponent — Codex re-auth', () => {
 
   it('does not render Codex controls for another provider', async () => {
     const h = makeHarness({ renderAuthBannerTemplate: true });
-    h.authRequiredBannerSig.set({ providerId: 'openai-codex', message: 'Sign in again', generation: 1, origin: null });
-    h.codexStateSig.set({ attemptId: 'attempt-2', mode: 'browser', status: 'running' });
-    await (h.component as unknown as { onAuthReauth(): Promise<void> }).onAuthReauth();
-    h.authRequiredBannerSig.set({ providerId: 'anthropic', message: 'Sign in again', generation: 1, origin: null });
+    h.authRequiredBannerSig.set({
+      providerId: 'openai-codex',
+      message: 'Sign in again',
+      generation: 1,
+      origin: null,
+    });
+    h.codexStateSig.set({
+      attemptId: 'attempt-2',
+      mode: 'browser',
+      status: 'running',
+    });
+    await (
+      h.component as unknown as { onAuthReauth(): Promise<void> }
+    ).onAuthReauth();
+    h.authRequiredBannerSig.set({
+      providerId: 'anthropic',
+      message: 'Sign in again',
+      generation: 1,
+      origin: null,
+    });
     h.fixture.detectChanges();
 
-    expect(h.fixture.nativeElement.querySelector('ptah-codex-sign-in-block')).toBeNull();
-    expect(h.fixture.nativeElement.querySelector('button[data-testid="codex-reauth-cancel"]')).toBeNull();
+    expect(
+      h.fixture.nativeElement.querySelector('ptah-codex-sign-in-block'),
+    ).toBeNull();
+    expect(
+      h.fixture.nativeElement.querySelector(
+        'button[data-testid="codex-reauth-cancel"]',
+      ),
+    ).toBeNull();
   });
 
   it('hides the sign-in block when another Codex banner replaces the active one', async () => {
     const h = makeHarness({ renderAuthBannerTemplate: true });
-    h.authRequiredBannerSig.set({ providerId: 'openai-codex', message: 'First refusal', generation: 1, origin: null });
-    h.codexStateSig.set({ attemptId: 'attempt-1', mode: 'browser', status: 'running' });
-    await (h.component as unknown as { onAuthReauth(): Promise<void> }).onAuthReauth();
+    h.authRequiredBannerSig.set({
+      providerId: 'openai-codex',
+      message: 'First refusal',
+      generation: 1,
+      origin: null,
+    });
+    h.codexStateSig.set({
+      attemptId: 'attempt-1',
+      mode: 'browser',
+      status: 'running',
+    });
+    await (
+      h.component as unknown as { onAuthReauth(): Promise<void> }
+    ).onAuthReauth();
     h.fixture.detectChanges();
-    expect(h.fixture.nativeElement.querySelector('[data-testid="codex-sign-in-block"]')).not.toBeNull();
+    expect(
+      h.fixture.nativeElement.querySelector(
+        '[data-testid="codex-sign-in-block"]',
+      ),
+    ).not.toBeNull();
 
-    h.authRequiredBannerSig.set({ providerId: 'openai-codex', message: 'Second refusal', generation: 2, origin: null });
+    h.authRequiredBannerSig.set({
+      providerId: 'openai-codex',
+      message: 'Second refusal',
+      generation: 2,
+      origin: null,
+    });
     h.fixture.detectChanges();
-    expect(h.fixture.nativeElement.querySelector('[data-testid="codex-sign-in-block"]')).toBeNull();
-    expect((h.component as unknown as { codexReauthStarted(): boolean }).codexReauthStarted()).toBe(false);
+    expect(
+      h.fixture.nativeElement.querySelector(
+        '[data-testid="codex-sign-in-block"]',
+      ),
+    ).toBeNull();
+    expect(
+      (
+        h.component as unknown as { codexReauthStarted(): boolean }
+      ).codexReauthStarted(),
+    ).toBe(false);
   });
 
   it('does not reuse old sign-in state after the banner is cleared elsewhere', async () => {
     const h = makeHarness({ renderAuthBannerTemplate: true });
-    h.authRequiredBannerSig.set({ providerId: 'openai-codex', message: 'First refusal', generation: 1, origin: null });
-    await (h.component as unknown as { onAuthReauth(): Promise<void> }).onAuthReauth();
+    h.authRequiredBannerSig.set({
+      providerId: 'openai-codex',
+      message: 'First refusal',
+      generation: 1,
+      origin: null,
+    });
+    await (
+      h.component as unknown as { onAuthReauth(): Promise<void> }
+    ).onAuthReauth();
     h.authRequiredBannerSig.set(null);
     h.fixture.detectChanges();
-    h.authRequiredBannerSig.set({ providerId: 'openai-codex', message: 'Later refusal', generation: 2, origin: null });
+    h.authRequiredBannerSig.set({
+      providerId: 'openai-codex',
+      message: 'Later refusal',
+      generation: 2,
+      origin: null,
+    });
     h.fixture.detectChanges();
-    expect(h.fixture.nativeElement.querySelector('[data-testid="codex-sign-in-block"]')).toBeNull();
-    expect((h.component as unknown as { codexReauthStarted(): boolean; codexReauthFailure(): string | null }).codexReauthStarted()).toBe(false);
-    expect((h.component as unknown as { codexReauthFailure(): string | null }).codexReauthFailure()).toBeNull();
+    expect(
+      h.fixture.nativeElement.querySelector(
+        '[data-testid="codex-sign-in-block"]',
+      ),
+    ).toBeNull();
+    expect(
+      (
+        h.component as unknown as {
+          codexReauthStarted(): boolean;
+          codexReauthFailure(): string | null;
+        }
+      ).codexReauthStarted(),
+    ).toBe(false);
+    expect(
+      (
+        h.component as unknown as { codexReauthFailure(): string | null }
+      ).codexReauthFailure(),
+    ).toBeNull();
   });
 
   it('refreshes auth before clearing the banner after sign-in succeeds', async () => {
     const h = makeHarness();
     h.codexAuthenticatedSig.set(true);
-    h.authRequiredBannerSig.set({ providerId: 'openai-codex', message: 'Sign in again', generation: 1, origin: null });
+    h.authRequiredBannerSig.set({
+      providerId: 'openai-codex',
+      message: 'Sign in again',
+      generation: 1,
+      origin: null,
+    });
     let resolveRefresh!: (value: boolean) => void;
-    h.refreshAuthStatusMock.mockReturnValue(new Promise<boolean>((resolve) => { resolveRefresh = resolve; }));
-    await (h.component as unknown as { onAuthReauth(): Promise<void> }).onAuthReauth();
+    h.refreshAuthStatusMock.mockReturnValue(
+      new Promise<boolean>((resolve) => {
+        resolveRefresh = resolve;
+      }),
+    );
+    await (
+      h.component as unknown as { onAuthReauth(): Promise<void> }
+    ).onAuthReauth();
 
-    h.codexStateSig.set({ attemptId: 'attempt-1', mode: 'browser', status: 'succeeded' });
+    h.codexStateSig.set({
+      attemptId: 'attempt-1',
+      mode: 'browser',
+      status: 'succeeded',
+    });
     const pending = h.codexCheckAuthStatusMock();
     h.fixture.detectChanges();
     expect(h.refreshAuthStatusMock).toHaveBeenCalledTimes(1);
@@ -925,55 +1051,122 @@ describe('ChatViewComponent — Codex re-auth', () => {
 
   it('keeps the banner when the post-sign-in auth refresh fails', async () => {
     const h = makeHarness();
-    h.authRequiredBannerSig.set({ providerId: 'openai-codex', message: 'Sign in again', generation: 1, origin: null });
+    h.authRequiredBannerSig.set({
+      providerId: 'openai-codex',
+      message: 'Sign in again',
+      generation: 1,
+      origin: null,
+    });
     h.refreshAuthStatusMock.mockResolvedValue(false);
-    await (h.component as unknown as { onAuthReauth(): Promise<void> }).onAuthReauth();
+    await (
+      h.component as unknown as { onAuthReauth(): Promise<void> }
+    ).onAuthReauth();
 
-    h.codexStateSig.set({ attemptId: 'attempt-2', mode: 'browser', status: 'succeeded' });
+    h.codexStateSig.set({
+      attemptId: 'attempt-2',
+      mode: 'browser',
+      status: 'succeeded',
+    });
     await h.codexCheckAuthStatusMock();
     h.fixture.detectChanges();
 
     expect(h.refreshAuthStatusMock).toHaveBeenCalledTimes(1);
     expect(h.clearAuthRequiredBannerMock).not.toHaveBeenCalled();
-    expect((h.component as unknown as { codexReauthFailure(): string | null }).codexReauthFailure()).toContain('could not check');
+    expect(
+      (
+        h.component as unknown as { codexReauthFailure(): string | null }
+      ).codexReauthFailure(),
+    ).toContain('could not check');
   });
 
   it('keeps the banner when the refreshed Codex token is stale', async () => {
     const h = makeHarness();
     h.codexAuthenticatedSig.set(true);
     h.codexTokenStaleSig.set(true);
-    h.authRequiredBannerSig.set({ providerId: 'openai-codex', message: 'Sign in again', generation: 1, origin: null });
-    await (h.component as unknown as { onAuthReauth(): Promise<void> }).onAuthReauth();
-    h.codexStateSig.set({ attemptId: 'attempt-3', mode: 'browser', status: 'succeeded' });
+    h.authRequiredBannerSig.set({
+      providerId: 'openai-codex',
+      message: 'Sign in again',
+      generation: 1,
+      origin: null,
+    });
+    await (
+      h.component as unknown as { onAuthReauth(): Promise<void> }
+    ).onAuthReauth();
+    h.codexStateSig.set({
+      attemptId: 'attempt-3',
+      mode: 'browser',
+      status: 'succeeded',
+    });
     await h.codexCheckAuthStatusMock();
     h.fixture.detectChanges();
     expect(h.clearAuthRequiredBannerMock).not.toHaveBeenCalled();
-    expect((h.component as unknown as { codexReauthFailure(): string | null }).codexReauthFailure()).toContain('still not ready');
+    expect(
+      (
+        h.component as unknown as { codexReauthFailure(): string | null }
+      ).codexReauthFailure(),
+    ).toContain('still not ready');
   });
 
   it('clears the banner and failure after Check again confirms sign-in', async () => {
     const h = makeHarness();
-    h.authRequiredBannerSig.set({ providerId: 'openai-codex', message: 'Sign in again', generation: 1, origin: null });
-    h.refreshAuthStatusMock.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
-    await (h.component as unknown as { onAuthReauth(): Promise<void> }).onAuthReauth();
-    h.codexStateSig.set({ attemptId: 'attempt-4', mode: 'browser', status: 'succeeded' });
+    h.authRequiredBannerSig.set({
+      providerId: 'openai-codex',
+      message: 'Sign in again',
+      generation: 1,
+      origin: null,
+    });
+    h.refreshAuthStatusMock
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    await (
+      h.component as unknown as { onAuthReauth(): Promise<void> }
+    ).onAuthReauth();
+    h.codexStateSig.set({
+      attemptId: 'attempt-4',
+      mode: 'browser',
+      status: 'succeeded',
+    });
     await h.codexCheckAuthStatusMock();
     h.fixture.detectChanges();
-    expect((h.component as unknown as { codexReauthFailure(): string | null }).codexReauthFailure()).toContain('could not check');
+    expect(
+      (
+        h.component as unknown as { codexReauthFailure(): string | null }
+      ).codexReauthFailure(),
+    ).toContain('could not check');
     h.codexAuthenticatedSig.set(true);
     await h.codexCheckAuthStatusMock();
     h.fixture.detectChanges();
     expect(h.refreshAuthStatusMock).toHaveBeenCalledTimes(2);
     expect(h.clearAuthRequiredBannerMock).toHaveBeenCalledTimes(1);
-    expect((h.component as unknown as { codexReauthFailure(): string | null }).codexReauthFailure()).toBeNull();
+    expect(
+      (
+        h.component as unknown as { codexReauthFailure(): string | null }
+      ).codexReauthFailure(),
+    ).toBeNull();
   });
 
   it('does not clear a later unrelated banner when Codex confirms', async () => {
     const h = makeHarness();
-    h.authRequiredBannerSig.set({ providerId: 'openai-codex', message: 'Sign in again', generation: 1, origin: null });
-    await (h.component as unknown as { onAuthReauth(): Promise<void> }).onAuthReauth();
-    h.codexStateSig.set({ attemptId: 'attempt-5', mode: 'browser', status: 'succeeded' });
-    h.authRequiredBannerSig.set({ providerId: 'anthropic', message: 'Sign in again', generation: 1, origin: null });
+    h.authRequiredBannerSig.set({
+      providerId: 'openai-codex',
+      message: 'Sign in again',
+      generation: 1,
+      origin: null,
+    });
+    await (
+      h.component as unknown as { onAuthReauth(): Promise<void> }
+    ).onAuthReauth();
+    h.codexStateSig.set({
+      attemptId: 'attempt-5',
+      mode: 'browser',
+      status: 'succeeded',
+    });
+    h.authRequiredBannerSig.set({
+      providerId: 'anthropic',
+      message: 'Sign in again',
+      generation: 1,
+      origin: null,
+    });
     h.codexAuthenticatedSig.set(true);
     await h.codexCheckAuthStatusMock();
     h.fixture.detectChanges();
@@ -1229,32 +1422,74 @@ describe('ChatViewComponent — question session routing', () => {
 
   it('shows a pending question only in its owning session', () => {
     const h = makeHarness({ sessionId: 'owner-session' });
-    h.questionRequestsSig.set([{
-      id: 'q-owner', sessionId: 'owner-session', toolName: 'AskUserQuestion',
-      questions: [{ question: 'Proceed?', header: 'Choice', options: [], multiSelect: false }],
-      timestamp: Date.now(), timeoutAt: 0,
-    }]);
-    expect(h.component.resolvedQuestionRequests().map(request => request.id)).toEqual(['q-owner']);
-    h.questionRequestsSig.set([{
-      id: 'q-other', sessionId: 'other-session', toolName: 'AskUserQuestion',
-      questions: [{ question: 'Proceed?', header: 'Choice', options: [], multiSelect: false }],
-      timestamp: Date.now(), timeoutAt: 0,
-    }]);
+    h.questionRequestsSig.set([
+      {
+        id: 'q-owner',
+        sessionId: 'owner-session',
+        toolName: 'AskUserQuestion',
+        questions: [
+          {
+            question: 'Proceed?',
+            header: 'Choice',
+            options: [],
+            multiSelect: false,
+          },
+        ],
+        timestamp: Date.now(),
+        timeoutAt: 0,
+      },
+    ]);
+    expect(
+      h.component.resolvedQuestionRequests().map((request) => request.id),
+    ).toEqual(['q-owner']);
+    h.questionRequestsSig.set([
+      {
+        id: 'q-other',
+        sessionId: 'other-session',
+        toolName: 'AskUserQuestion',
+        questions: [
+          {
+            question: 'Proceed?',
+            header: 'Choice',
+            options: [],
+            multiSelect: false,
+          },
+        ],
+        timestamp: Date.now(),
+        timeoutAt: 0,
+      },
+    ]);
     expect(h.component.resolvedQuestionRequests()).toEqual([]);
   });
 
   it('repaints when a router target attaches after the first projection', () => {
     const h = makeHarness({ sessionId: 'owner-session' });
-    h.questionRequestsSig.set([{
-      id: 'late-target', sessionId: 'stale-session', toolName: 'AskUserQuestion',
-      questions: [{ question: 'Proceed?', header: 'Choice', options: [], multiSelect: false }],
-      timestamp: Date.now(), timeoutAt: 0,
-    }]);
+    h.questionRequestsSig.set([
+      {
+        id: 'late-target',
+        sessionId: 'stale-session',
+        toolName: 'AskUserQuestion',
+        questions: [
+          {
+            question: 'Proceed?',
+            header: 'Choice',
+            options: [],
+            multiSelect: false,
+          },
+        ],
+        timestamp: Date.now(),
+        timeoutAt: 0,
+      },
+    ]);
     expect(h.component.resolvedQuestionRequests()).toEqual([]);
     const targetTab = h.activeTabIdSig();
-    h.chatStoreStub.questionTargetTabsFor.mockReturnValue(targetTab ? [targetTab] : []);
-    h.chatStoreStub.routingTargetRevision.update(value => value + 1);
-    expect(h.component.resolvedQuestionRequests().map(request => request.id)).toEqual(['late-target']);
+    h.chatStoreStub.questionTargetTabsFor.mockReturnValue(
+      targetTab ? [targetTab] : [],
+    );
+    h.chatStoreStub.routingTargetRevision.update((value) => value + 1);
+    expect(
+      h.component.resolvedQuestionRequests().map((request) => request.id),
+    ).toEqual(['late-target']);
   });
 });
 
@@ -2198,7 +2433,10 @@ describe('ChatViewComponent — per-tile banner scoping', () => {
       renderCompactTemplate: true,
       sessionContextTabId: 'tile-A',
     });
-    h.realActionBanner.showInfo('Continued with Claude in a new chat.', 'tile-A');
+    h.realActionBanner.showInfo(
+      'Continued with Claude in a new chat.',
+      'tile-A',
+    );
     h.fixture.detectChanges();
 
     const notice = Array.from(
@@ -3531,14 +3769,28 @@ describe('ChatViewComponent — Display sidebar (Electron)', () => {
     expect(h.unbindDisplayWindowMock).toHaveBeenCalledTimes(1);
   });
 
-  it('never binds the separate window or persists the width from a canvas tile', () => {
+  it('offers Detach from a canvas tile and binds its source without persisting width', () => {
     const h = makeHarness({
       isElectron: true,
       renderCompactTemplate: true,
       sessionContextTabId: 'tab-1',
     });
     h.fixture.detectChanges();
-    expect(h.displayWindowStub.bindSource).not.toHaveBeenCalled();
+    expect(h.displayWindowStub.bindSource).toHaveBeenCalledTimes(1);
+    expect(h.displayWindowStub.bindSource).toHaveBeenCalledWith(
+      expect.objectContaining({ dock: dockOf(h) }),
+    );
+    // The harness renders the sheet as an unknown element (NO_ERRORS_SCHEMA):
+    // assert the input binding and fire its `detachRequested` output.
+    const sheet = (h.fixture.nativeElement as HTMLElement).querySelector(
+      'ptah-display-sheet',
+    ) as (HTMLElement & { detachable?: boolean }) | null;
+    expect(sheet?.detachable).toBe(true);
+    sheet?.dispatchEvent(new CustomEvent('detachRequested'));
+    expect(h.displayWindowStub.selectSource).toHaveBeenCalledWith(
+      expect.objectContaining({ dock: dockOf(h) }),
+    );
+    expect(h.displayWindowStub.detach).toHaveBeenCalledTimes(1);
     keydown(h, 'ArrowLeft');
     keydown(h, 'Enter');
     expect(h.layoutStub.setDisplaySidebarWidth).not.toHaveBeenCalled();
@@ -3547,6 +3799,8 @@ describe('ChatViewComponent — Display sidebar (Electron)', () => {
         '[data-testid="display-detached-rail"]',
       ),
     ).toBeNull();
+    h.fixture.destroy();
+    expect(h.unbindDisplayWindowMock).toHaveBeenCalledTimes(1);
   });
 
   it('does not touch the Electron-only services in VS Code', () => {

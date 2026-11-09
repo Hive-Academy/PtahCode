@@ -15,12 +15,7 @@ import {
   InjectionToken,
   Signal,
 } from '@angular/core';
-import {
-  LucideAngularModule,
-  Clock,
-  Pencil,
-  Trash2,
-} from 'lucide-angular';
+import { LucideAngularModule, Clock, Pencil, Trash2 } from 'lucide-angular';
 import { ChatTranscriptComponent } from '../organisms/transcript/chat-transcript.component';
 import { ChatEmptyStateComponent } from '../molecules/setup-plugins/chat-empty-state.component';
 import { AgentMonitorPanelComponent } from '../organisms/agent-monitor-panel.component';
@@ -28,7 +23,10 @@ import { AgentMonitorPanelComponent } from '../organisms/agent-monitor-panel.com
 // entry stays out of this chunk because the sheet names that panel only
 // inside its own `@defer` (decisions #84, #89, #107).
 import { DisplaySheetComponent } from '../organisms/display-sheet/display-sheet.component';
-import { DisplayDockState, DisplayDockRegistry } from '../../services/display-dock/display-dock.state';
+import {
+  DisplayDockState,
+  DisplayDockRegistry,
+} from '../../services/display-dock/display-dock.state';
 import {
   connectDisplaySidebar,
   type DisplaySidebarConnection,
@@ -168,7 +166,11 @@ export const DISPLAY_DOCK_DEFAULT_WIDTH = 400;
 const DOCK_MIN_WIDTH = 300;
 const DOCK_MAX_WIDTH_RATIO = 0.75;
 /** Read the current motion preset at each switch; jsdom has no root tokens. */
-function motionDurationMs(style: CSSStyleDeclaration | null, token: string, fallbackMs: number): number {
+function motionDurationMs(
+  style: CSSStyleDeclaration | null,
+  token: string,
+  fallbackMs: number,
+): number {
   const value = style?.getPropertyValue(token).trim() ?? '';
   const match = /^(\d+(?:\.\d+)?)(ms|s)$/.exec(value);
   return match ? Number(match[1]) * (match[2] === 's' ? 1000 : 1) : fallbackMs;
@@ -289,29 +291,46 @@ export class ChatViewComponent implements OnDestroy {
   protected readonly codexReauthRunning = computed(() => {
     if (!this.codexReauthStarted()) return false;
     const status = this.codexSignIn.state()?.status;
-    return status === 'starting' || status === 'running' || status === 'awaiting-user';
+    return (
+      status === 'starting' ||
+      status === 'running' ||
+      status === 'awaiting-user'
+    );
   });
 
   /** Inline re-auth banner state (set when a send fails needing auth). */
   protected readonly authRequiredBanner = this._authState.authRequiredBanner;
-  protected readonly codexReauthVisible = computed(() =>
-    this.codexReauthStarted() && this.authRequiredBanner() === this.codexReauthBanner);
+  protected readonly codexReauthVisible = computed(
+    () =>
+      this.codexReauthStarted() &&
+      this.authRequiredBanner() === this.codexReauthBanner,
+  );
   private completeCodexReauth(): void {
-    if (!this.codexReauthStarted() || this.authRequiredBanner() !== this.codexReauthBanner) return;
+    if (
+      !this.codexReauthStarted() ||
+      this.authRequiredBanner() !== this.codexReauthBanner
+    )
+      return;
     const confirmation = this.codexSignIn.confirmation();
     if (confirmation === 'idle' || confirmation === 'checking') {
       this.codexReauthFailure.set(null);
       return;
     }
-    if (confirmation === 'confirmed' && this._authState.codexAuthenticated() && !this._authState.codexTokenStale()) {
+    if (
+      confirmation === 'confirmed' &&
+      this._authState.codexAuthenticated() &&
+      !this._authState.codexTokenStale()
+    ) {
       this.codexReauthStarted.set(false);
       this.codexReauthFailure.set(null);
       this.codexReauthBanner = null;
       this._authState.clearAuthRequiredBanner();
     } else {
-      this.codexReauthFailure.set(confirmation === 'confirmed'
-        ? 'Codex is still not ready. Check your sign-in and try again.'
-        : 'Ptah could not check your Codex sign-in. Try again.');
+      this.codexReauthFailure.set(
+        confirmation === 'confirmed'
+          ? 'Codex is still not ready. Check your sign-in and try again.'
+          : 'Ptah could not check your Codex sign-in. Try again.',
+      );
     }
   }
 
@@ -569,7 +588,9 @@ export class ChatViewComponent implements OnDestroy {
   );
   /** The panel lives in the separate window: the main view shows the rail. */
   protected readonly displayDetached = computed(
-    () => this.displaySidebar?.window?.detached() ?? false,
+    () =>
+      (this.displaySidebar?.window?.detached() ?? false) &&
+      (!this._sessionContext || (this.displaySidebar?.bound() ?? false)),
   );
   protected readonly displayWindowError = computed(
     () => this.displaySidebar?.window?.error() ?? null,
@@ -760,6 +781,7 @@ export class ChatViewComponent implements OnDestroy {
   }
 
   protected detachDisplay(): void {
+    this.displaySidebar?.activateWindow();
     void this.displaySidebar?.window?.detach();
   }
 
@@ -1226,8 +1248,11 @@ export class ChatViewComponent implements OnDestroy {
       clearTimeout(this.leavingTimer);
       this.leavingTimer = null;
     }
-    const enterWindowMs = typeof matchMedia === 'function' &&
-      matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 180;
+    const enterWindowMs =
+      typeof matchMedia === 'function' &&
+      matchMedia('(prefers-reduced-motion: reduce)').matches
+        ? 0
+        : 180;
     this.enteringTabId.set(tabId);
     this.ngZone.runOutsideAngular(() => {
       this.enteringTimer = setTimeout(() => {
@@ -1241,7 +1266,10 @@ export class ChatViewComponent implements OnDestroy {
   }
 
   protected onEntranceScrollRestored(tabId: string): void {
-    if (this.resolvedTabId() === tabId && this.pendingEntranceTabId() === null) {
+    if (
+      this.resolvedTabId() === tabId &&
+      this.pendingEntranceTabId() === null
+    ) {
       this.leavingTabId.set(null);
     }
   }
@@ -1261,12 +1289,17 @@ export class ChatViewComponent implements OnDestroy {
 
   private armLeaveSafety(): void {
     if (this.leavingTimer !== null || this.leavingTabId() === null) return;
-    const style = typeof getComputedStyle === 'function'
-      ? getComputedStyle(this.hostEl.nativeElement) : null;
+    const style =
+      typeof getComputedStyle === 'function'
+        ? getComputedStyle(this.hostEl.nativeElement)
+        : null;
     const switchMs = motionDurationMs(style, '--ptah-motion-switch', 380);
     const leaveMs = motionDurationMs(style, '--ptah-motion-out', 180);
     // Show the new tab's loading state even if history never becomes ready.
-    const safetyWindowMs = Math.min(2000, Math.max(1000, switchMs + leaveMs + 40));
+    const safetyWindowMs = Math.min(
+      2000,
+      Math.max(1000, switchMs + leaveMs + 40),
+    );
     this.ngZone.runOutsideAngular(() => {
       this.leavingTimer = setTimeout(() => {
         this.leavingTimer = null;
@@ -1367,13 +1400,15 @@ export class ChatViewComponent implements OnDestroy {
     const tabId = this.resolvedTabId(); // frontend UUID (e.g. "tab-abc123")
     const sessionId = this.resolvedSessionId();
 
-    return allQuestions.filter(q => questionBelongsToTab(
-      q,
-      this.chatStore.questionTargetTabsFor(q.id),
-      this.chatStore.isQuestionClaimedByWorkflow(q),
-      tabId,
-      sessionId,
-    ));
+    return allQuestions.filter((q) =>
+      questionBelongsToTab(
+        q,
+        this.chatStore.questionTargetTabsFor(q.id),
+        this.chatStore.isQuestionClaimedByWorkflow(q),
+        tabId,
+        sessionId,
+      ),
+    );
   });
 
   constructor() {
@@ -1420,6 +1455,7 @@ export class ChatViewComponent implements OnDestroy {
             dock,
             tabId: this.resolvedTabId,
             main: this.displaySheetEnabled && !this._sessionContext,
+            windowEnabled: this.displaySheetEnabled,
             resize: this.panelResizeService,
           });
     if (dock !== null) {
