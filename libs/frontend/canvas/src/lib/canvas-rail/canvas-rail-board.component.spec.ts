@@ -72,7 +72,7 @@ type TestHost = Omit<HTMLElement, 'querySelector'> & {
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<div class="overflow-y-auto" style="height:200px">
     <ul>
-       @for (tile of displayedTiles(); track tile.tabId) {
+      @for (tile of displayedTiles(); track tile.tabId) {
         <li
           data-rail-card
           [attr.data-tab-id]="tile.tabId"
@@ -94,9 +94,11 @@ class RailStub {
   readonly states = input<ReadonlyMap<string, CompactRailState>>(new Map());
   readonly displayedTiles = computed(() => {
     const grouped = groupRailTiles(this.tiles(), this.states());
-    return grouped.groups.flatMap(group =>
+    return grouped.groups.flatMap((group) =>
       group.key === 'finished' && !this.collapsed() && grouped.counts.done > 3
-        ? [] : group.tiles);
+        ? []
+        : group.tiles,
+    );
   });
   readonly focusedTabId = input<string | null>(null);
   readonly density = input<CompactRailDensity>('comfortable');
@@ -315,7 +317,13 @@ function completeDeferBlocks(
   selector: 'ptah-canvas-empty-board',
   standalone: true,
   template: `<main data-testid="canvas-rail-empty-board">
-    <button type="button" data-testid="canvas-hero-new-session" (click)="request($event)">New session</button>
+    <button
+      type="button"
+      data-testid="canvas-hero-new-session"
+      (click)="request($event)"
+    >
+      New session
+    </button>
   </main>`,
 })
 class EmptyBoardStub {
@@ -327,7 +335,8 @@ class EmptyBoardStub {
   readonly noticeDismissed = output<string>();
   readonly previousSessionsRequested = output<void>();
   request(event: MouseEvent): void {
-    if (event.currentTarget instanceof HTMLElement) this.newSessionRequested.emit(event.currentTarget);
+    if (event.currentTarget instanceof HTMLElement)
+      this.newSessionRequested.emit(event.currentTarget);
   }
 }
 
@@ -446,11 +455,20 @@ describe('CanvasRailBoardComponent rendering', () => {
       .mockImplementation(function (this: HTMLElement) {
         const height = Number.parseFloat(this.style.height) || 0;
         const list = this.closest<HTMLElement>('.overflow-y-auto');
-        const cards = [...(list?.querySelectorAll<HTMLElement>('[data-rail-card]') ?? [])];
+        const cards = [
+          ...(list?.querySelectorAll<HTMLElement>('[data-rail-card]') ?? []),
+        ];
         const index = cards.indexOf(this);
-        const top = index < 0 ? 0 : cards.slice(0, index).reduce(
-          (sum, card) => sum + (Number.parseFloat(card.style.height) || 0), 0,
-        ) - (list?.scrollTop ?? 0);
+        const top =
+          index < 0
+            ? 0
+            : cards
+                .slice(0, index)
+                .reduce(
+                  (sum, card) =>
+                    sum + (Number.parseFloat(card.style.height) || 0),
+                  0,
+                ) - (list?.scrollTop ?? 0);
         return { top, height } as DOMRect;
       });
     const tiles = signal<readonly CanvasTile[]>(
@@ -614,9 +632,7 @@ describe('CanvasRailBoardComponent rendering', () => {
     });
     TestBed.overrideComponent(CanvasInspectorDockComponent, {
       set: {
-        imports: [
-          InspectorStub, NgTemplateOutlet, SplitHandleComponent,
-        ],
+        imports: [InspectorStub, NgTemplateOutlet, SplitHandleComponent],
         schemas: [NO_ERRORS_SCHEMA],
       },
     });
@@ -853,8 +869,14 @@ describe('CanvasRailBoardComponent rendering', () => {
   it('does not reserve an inspector column when the board has no focused session', async () => {
     const { fixture } = mount(true, 0);
     await completeDeferBlocks(fixture);
-    expect(fixture.nativeElement.querySelector('[data-testid="canvas-rail-empty-board"]')).not.toBeNull();
-    expect(fixture.nativeElement.querySelector('[data-inspector-dock]')).toBeNull();
+    expect(
+      fixture.nativeElement.querySelector(
+        '[data-testid="canvas-rail-empty-board"]',
+      ),
+    ).not.toBeNull();
+    expect(
+      fixture.nativeElement.querySelector('[data-inspector-dock]'),
+    ).toBeNull();
     expect(fixture.nativeElement.querySelector('[data-stats-tab]')).toBeNull();
   });
 
@@ -977,23 +999,32 @@ describe('CanvasRailBoardComponent rendering', () => {
     list.scrollTop = 0;
     fixture.componentInstance.toggleDensity();
     fixture.detectChanges();
-    expect(list.scrollTop).toBe(92);
+    // Card b's bottom edge (two dense cards down) aligns with the 100 px viewport.
+    expect(list.scrollTop).toBe(COMPACT_RAIL_CARD_HEIGHT.dense * 2 - 100);
   });
 
   it('anchors from the rendered card bounds when group headers change its position', () => {
     const { fixture } = mount(true, 3, 'a');
-    const list = fixture.nativeElement.querySelector<HTMLElement>('.overflow-y-auto')!;
-    const card = list.querySelector<HTMLElement>('[data-rail-card][data-tab-id="a"]')!;
+    const list =
+      fixture.nativeElement.querySelector<HTMLElement>('.overflow-y-auto')!;
+    const card = list.querySelector<HTMLElement>(
+      '[data-rail-card][data-tab-id="a"]',
+    )!;
     const header = document.createElement('div');
     header.textContent = 'Running';
     card.parentElement!.insertBefore(header, card);
     Object.defineProperty(list, 'clientHeight', { value: 100 });
-    jest.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    jest
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
       .mockImplementation(function (this: HTMLElement) {
-        if (this.matches('.overflow-y-auto')) return { top: 10, height: 100 } as DOMRect;
+        if (this.matches('.overflow-y-auto'))
+          return { top: 10, height: 100 } as DOMRect;
         if (this.matches('[data-rail-card][data-tab-id="a"]'))
           return { top: 64, height: 176 } as DOMRect;
-        return { top: 0, height: Number.parseFloat(this.style.height) || 0 } as DOMRect;
+        return {
+          top: 0,
+          height: Number.parseFloat(this.style.height) || 0,
+        } as DOMRect;
       });
     list.scrollTop = 0;
     fixture.componentInstance.anchor('a');
@@ -1004,13 +1035,20 @@ describe('CanvasRailBoardComponent rendering', () => {
   it('restores persisted scroll while Finished cards are collapsed', () => {
     const { fixture, board } = mount(true, 5);
     const instance = fixture.componentInstance;
-    const list = fixture.nativeElement.querySelector<HTMLElement>('.overflow-y-auto')!;
+    const list =
+      fixture.nativeElement.querySelector<HTMLElement>('.overflow-y-auto')!;
     Object.defineProperty(list, 'scrollHeight', { value: 500 });
     Object.defineProperty(list, 'clientHeight', { value: 100 });
-    instance.railStates.set(new Map<string, CompactRailState>([
-      ['a', 'running'], ['b', 'done'], ['c', 'done'], ['d', 'done'], ['e', 'done'],
-    ]));
-    board.update(value => ({ ...value, railScrollTop: 140 }));
+    instance.railStates.set(
+      new Map<string, CompactRailState>([
+        ['a', 'running'],
+        ['b', 'done'],
+        ['c', 'done'],
+        ['d', 'done'],
+        ['e', 'done'],
+      ]),
+    );
+    board.update((value) => ({ ...value, railScrollTop: 140 }));
     Object.assign(instance, { restoredScroll: false });
     fixture.detectChanges();
     expect(list.querySelectorAll('[data-rail-card]')).toHaveLength(1);
@@ -1092,7 +1130,9 @@ describe('CanvasRailBoardComponent rendering', () => {
     await completeDeferBlocks(fixture);
     fixture.detectChanges();
     expect(
-      fixture.nativeElement.querySelectorAll('ptah-canvas-lane-tabs[inspectorRailAgents]'),
+      fixture.nativeElement.querySelectorAll(
+        'ptah-canvas-lane-tabs[inspectorRailAgents]',
+      ),
     ).toHaveLength(1);
     dockParts(fixture.nativeElement).tab?.click();
     fixture.detectChanges();
@@ -1103,7 +1143,9 @@ describe('CanvasRailBoardComponent rendering', () => {
       fixture.nativeElement.querySelector('[data-inspector-skeleton]'),
     ).not.toBeNull();
     expect(
-      fixture.nativeElement.querySelectorAll('ptah-canvas-lane-tabs[inspectorRailAgents]'),
+      fixture.nativeElement.querySelectorAll(
+        'ptah-canvas-lane-tabs[inspectorRailAgents]',
+      ),
     ).toHaveLength(0);
     await completeDeferBlocks(fixture);
     fixture.detectChanges();
@@ -1118,7 +1160,9 @@ describe('CanvasRailBoardComponent rendering', () => {
     expect(inspector.selectedAgentKey()).toBe('orchestrator');
     // The expanded sidebar lists agents in its AGENTS section, not a strip.
     expect(
-      fixture.nativeElement.querySelectorAll('ptah-canvas-lane-tabs[inspectorRailAgents]'),
+      fixture.nativeElement.querySelectorAll(
+        'ptah-canvas-lane-tabs[inspectorRailAgents]',
+      ),
     ).toHaveLength(0);
   });
 
@@ -1316,7 +1360,11 @@ describe('CanvasRailBoardComponent rendering', () => {
       const separator = dockParts(fixture.nativeElement).separator;
       if (boardWidth < 1000) {
         expect(separator).toBeNull();
-        expect(dockParts(fixture.nativeElement).aside?.classList.contains('absolute')).toBe(true);
+        expect(
+          dockParts(fixture.nativeElement).aside?.classList.contains(
+            'absolute',
+          ),
+        ).toBe(true);
         return;
       }
       expect(separator?.getAttribute('aria-valuemax')).toBe(`${max}`);
@@ -1852,15 +1900,29 @@ describe('CanvasRailBoardComponent rendering', () => {
     const { fixture } = mount(true, 0);
     const requested = jest.fn();
     fixture.componentInstance.newSessionRequested.subscribe(requested);
-    expect(fixture.nativeElement.querySelector('ptah-canvas-focus-area')).toBeNull();
+    expect(
+      fixture.nativeElement.querySelector('ptah-canvas-focus-area'),
+    ).toBeNull();
     // Until the chunk loads, a same-size placeholder holds the slot.
-    const placeholder = fixture.nativeElement.querySelector<HTMLElement>('[data-testid="canvas-empty-board-placeholder"]');
+    const placeholder = fixture.nativeElement.querySelector<HTMLElement>(
+      '[data-testid="canvas-empty-board-placeholder"]',
+    );
     expect(placeholder.classList).toContain('order-first');
     expect(placeholder.classList).toContain('flex-1');
-    expect(fixture.nativeElement.querySelector('[data-testid="canvas-rail-empty-board"]')).toBeNull();
+    expect(
+      fixture.nativeElement.querySelector(
+        '[data-testid="canvas-rail-empty-board"]',
+      ),
+    ).toBeNull();
     await completeDeferBlocks(fixture);
-    expect(fixture.nativeElement.querySelector('[data-testid="canvas-empty-board-placeholder"]')).toBeNull();
-    const trigger = fixture.nativeElement.querySelector<HTMLButtonElement>('[data-testid="canvas-hero-new-session"]');
+    expect(
+      fixture.nativeElement.querySelector(
+        '[data-testid="canvas-empty-board-placeholder"]',
+      ),
+    ).toBeNull();
+    const trigger = fixture.nativeElement.querySelector<HTMLButtonElement>(
+      '[data-testid="canvas-hero-new-session"]',
+    );
     trigger.click();
     expect(requested).toHaveBeenCalledWith(trigger);
   });
@@ -1868,8 +1930,12 @@ describe('CanvasRailBoardComponent rendering', () => {
   it('0 tiles: the Sessions tab stands in for the Rail, opens it, and never persists', async () => {
     const { fixture, tiles, store } = mount(true, 0);
     await completeDeferBlocks(fixture);
-    const rail = fixture.nativeElement.querySelector<HTMLElement>('ptah-canvas-rail');
-    const tab = () => fixture.nativeElement.querySelector<HTMLElement>('[data-sessions-tab] button');
+    const rail =
+      fixture.nativeElement.querySelector<HTMLElement>('ptah-canvas-rail');
+    const tab = () =>
+      fixture.nativeElement.querySelector<HTMLElement>(
+        '[data-sessions-tab] button',
+      );
     expect(rail.style.display).toBe('none');
     expect(tab().getAttribute('aria-expanded')).toBe('false');
     expect(tab().getAttribute('aria-label')).toContain('Sessions');
@@ -1880,7 +1946,9 @@ describe('CanvasRailBoardComponent rendering', () => {
     expect(store.setRailCollapsed).not.toHaveBeenCalled();
     tiles.set([{ tabId: 'a', order: 0 } as CanvasTile]);
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('[data-sessions-tab]')).toBeNull();
+    expect(
+      fixture.nativeElement.querySelector('[data-sessions-tab]'),
+    ).toBeNull();
     expect(fixture.nativeElement.querySelector('ptah-canvas-rail')).toBe(rail);
     expect(rail.style.display).toBe('');
     // Back to empty: the tab starts closed again.
@@ -1921,13 +1989,22 @@ describe('CanvasRailBoardComponent rendering', () => {
     await completeDeferBlocks(fixture);
     const dismissed = jest.fn();
     fixture.componentInstance.noticeDismissed.subscribe(dismissed);
-    const notice = { kind: 'write-failure', text: 'Layout could not be saved.', key: 'save:1' } as const;
+    const notice = {
+      kind: 'write-failure',
+      text: 'Layout could not be saved.',
+      key: 'save:1',
+    } as const;
     fixture.componentRef.setInput('notice', notice);
     fixture.detectChanges();
-    const hero = fixture.debugElement.query(By.directive(EmptyBoardStub)).componentInstance as EmptyBoardStub;
+    const hero = fixture.debugElement.query(By.directive(EmptyBoardStub))
+      .componentInstance as EmptyBoardStub;
     expect(hero.notice()).toEqual(notice);
     // The board's own notice is for populated boards only; the hero renders this one.
-    expect(fixture.nativeElement.querySelector('[data-testid="canvas-board-notice"]')).toBeNull();
+    expect(
+      fixture.nativeElement.querySelector(
+        '[data-testid="canvas-board-notice"]',
+      ),
+    ).toBeNull();
     hero.noticeDismissed.emit('save:1');
     expect(dismissed).toHaveBeenCalledWith('save:1');
   });
@@ -2021,7 +2098,9 @@ describe('CanvasRailBoardComponent rendering', () => {
   it('0 tiles: the deferred hero gets the running-cap reason and the workspace', async () => {
     const { fixture, canStart } = mount(true, 0);
     await completeDeferBlocks(fixture);
-    const hero = () => fixture.debugElement.query(By.directive(EmptyBoardStub)).componentInstance as EmptyBoardStub;
+    const hero = () =>
+      fixture.debugElement.query(By.directive(EmptyBoardStub))
+        .componentInstance as EmptyBoardStub;
     expect(hero().workspacePath()).toBe('workspace');
     expect(hero().visible()).toBe(true);
     expect(hero().newSessionBlockReason()).toBeNull();
@@ -2033,32 +2112,60 @@ describe('CanvasRailBoardComponent rendering', () => {
   it('0 tiles: the hero opens the previous-sessions dialog', async () => {
     const { fixture } = mount(true, 0);
     await completeDeferBlocks(fixture);
-    const hero = fixture.debugElement.query(By.directive(EmptyBoardStub)).componentInstance as EmptyBoardStub;
+    const hero = fixture.debugElement.query(By.directive(EmptyBoardStub))
+      .componentInstance as EmptyBoardStub;
     hero.previousSessionsRequested.emit();
-    expect(TestBed.inject(PreviousSessionsDialogService).open).toHaveBeenCalledTimes(1);
+    expect(
+      TestBed.inject(PreviousSessionsDialogService).open,
+    ).toHaveBeenCalledTimes(1);
   });
 
   it('0 tiles: a failed hero chunk shows a Reload alert', async () => {
     const { fixture } = mount(true, 0);
     const [block] = await fixture.getDeferBlocks();
     await block.render(DeferBlockState.Error);
-    const error = fixture.nativeElement.querySelector<HTMLElement>('[data-testid="canvas-empty-board-error"]');
-    expect(error.querySelector('[role="alert"]')?.textContent).toContain('could not load');
+    const error = fixture.nativeElement.querySelector<HTMLElement>(
+      '[data-testid="canvas-empty-board-error"]',
+    );
+    expect(error.querySelector('[role="alert"]')?.textContent).toContain(
+      'could not load',
+    );
     expect(error.querySelector('button')?.textContent).toContain('Reload');
-    expect(fixture.nativeElement.querySelector('[data-testid="canvas-rail-empty-board"]')).toBeNull();
+    expect(
+      fixture.nativeElement.querySelector(
+        '[data-testid="canvas-rail-empty-board"]',
+      ),
+    ).toBeNull();
   });
 
   it('0 tiles: the board notice shows while the hero chunk loads and after it fails', async () => {
     const { fixture } = mount(true, 0);
-    fixture.componentRef.setInput('notice', { kind: 'read-only', text: 'This layout is read only.', key: 'read:1' });
+    fixture.componentRef.setInput('notice', {
+      kind: 'read-only',
+      text: 'This layout is read only.',
+      key: 'read:1',
+    });
     fixture.detectChanges();
-    const placeholder = fixture.nativeElement.querySelector<HTMLElement>('[data-testid="canvas-empty-board-placeholder"]');
-    expect(placeholder.querySelector('[data-testid="canvas-board-notice"]')?.textContent).toContain('read only');
+    const placeholder = fixture.nativeElement.querySelector<HTMLElement>(
+      '[data-testid="canvas-empty-board-placeholder"]',
+    );
+    expect(
+      placeholder.querySelector('[data-testid="canvas-board-notice"]')
+        ?.textContent,
+    ).toContain('read only');
     const [block] = await fixture.getDeferBlocks();
     await block.render(DeferBlockState.Error);
-    const error = fixture.nativeElement.querySelector<HTMLElement>('[data-testid="canvas-empty-board-error"]');
-    expect(error.querySelector('[data-testid="canvas-board-notice"]')?.textContent).toContain('read only');
-    expect(fixture.nativeElement.querySelectorAll('[data-testid="canvas-board-notice"]')).toHaveLength(1);
+    const error = fixture.nativeElement.querySelector<HTMLElement>(
+      '[data-testid="canvas-empty-board-error"]',
+    );
+    expect(
+      error.querySelector('[data-testid="canvas-board-notice"]')?.textContent,
+    ).toContain('read only');
+    expect(
+      fixture.nativeElement.querySelectorAll(
+        '[data-testid="canvas-board-notice"]',
+      ),
+    ).toHaveLength(1);
   });
 
   it('routes the footer New session to the named popover request', () => {
@@ -2561,7 +2668,9 @@ describe('CanvasRailBoardComponent rendering', () => {
       instance.toggleDetails();
       fixture.detectChanges();
       const dock = () =>
-        fixture.nativeElement.querySelector<HTMLElement>('[data-inspector-dock]');
+        fixture.nativeElement.querySelector<HTMLElement>(
+          '[data-inspector-dock]',
+        );
       expect(dock()?.getAttribute('role')).toBe('dialog');
       expect(dock()?.classList.contains('absolute')).toBe(true);
       expect(dock()?.classList.contains('fixed')).toBe(false);
@@ -2578,7 +2687,7 @@ describe('CanvasRailBoardComponent rendering', () => {
     },
   );
 
-  it('expected reorder permutation with 176/96/56 heights and persistence write failure via the service', async () => {
+  it('expected reorder permutation with 128/56/56 heights and persistence write failure via the service', async () => {
     const { fixture, tiles, store, writeFailed, board, metrics } = mount(
       true,
       3,
@@ -2612,10 +2721,10 @@ describe('CanvasRailBoardComponent rendering', () => {
     const height = () =>
       (fixture.nativeElement.querySelector('[data-rail-card]') as HTMLElement)
         .style.height;
-    expect(height()).toBe('176px');
+    expect(height()).toBe('128px');
     board.update((value) => ({ ...value, railDensity: 'dense' }));
     fixture.detectChanges();
-    expect(height()).toBe('96px');
+    expect(height()).toBe('56px');
     board.update((value) => ({ ...value, railCollapsed: true }));
     fixture.detectChanges();
     expect(height()).toBe('56px');
@@ -2634,13 +2743,20 @@ describe('CanvasRailBoardComponent rendering', () => {
   it('moves only within a displayed group while preserving unrelated stored slots', () => {
     const { fixture, store } = mount(true, 4);
     const instance = fixture.componentInstance;
-    instance.railStates.set(new Map([
-      ['a', 'needs'], ['b', 'running'], ['c', 'idle'], ['d', 'running'],
-    ]));
+    instance.railStates.set(
+      new Map([
+        ['a', 'needs'],
+        ['b', 'running'],
+        ['c', 'idle'],
+        ['d', 'running'],
+      ]),
+    );
     fixture.detectChanges();
-    expect([...fixture.nativeElement.querySelectorAll('[data-rail-card]')]
-      .map((node: Element) => node.getAttribute('data-tab-id')))
-      .toEqual(['b', 'd', 'a', 'c']);
+    expect(
+      [...fixture.nativeElement.querySelectorAll('[data-rail-card]')].map(
+        (node: Element) => node.getAttribute('data-tab-id'),
+      ),
+    ).toEqual(['b', 'd', 'a', 'c']);
     instance.move('b', 1);
     expect(store.reorderTiles).toHaveBeenCalledWith(['a', 'd', 'c', 'b']);
     const calls = (store.reorderTiles as jest.Mock).mock.calls.length;
@@ -2650,18 +2766,33 @@ describe('CanvasRailBoardComponent rendering', () => {
   });
   describe('sort mode', () => {
     const displayed = (fixture: ReturnType<typeof mount>['fixture']) =>
-      [...fixture.nativeElement.querySelectorAll('[data-rail-card]')]
-        .map((node: Element) => node.getAttribute('data-tab-id'));
+      [...fixture.nativeElement.querySelectorAll('[data-rail-card]')].map(
+        (node: Element) => node.getAttribute('data-tab-id'),
+      );
 
     it('orders each group by recent activity, tie-broken by stored order, and follows new activity', () => {
       // `a` stays first before grouping: the stub re-emits its source state for the first tile.
       const { fixture, board, activity } = mount(true, 5);
-      activity.set(new Map([['a', 100], ['b', 10], ['c', 20], ['d', 30], ['e', 40]]));
+      activity.set(
+        new Map([
+          ['a', 100],
+          ['b', 10],
+          ['c', 20],
+          ['d', 30],
+          ['e', 40],
+        ]),
+      );
       board.update((value) => ({ ...value, railSort: 'recent' }));
       const instance = fixture.componentInstance;
-      instance.railStates.set(new Map([
-        ['a', 'idle'], ['b', 'done'], ['c', 'background'], ['d', 'background'], ['e', 'done'],
-      ]));
+      instance.railStates.set(
+        new Map([
+          ['a', 'idle'],
+          ['b', 'done'],
+          ['c', 'background'],
+          ['d', 'background'],
+          ['e', 'done'],
+        ]),
+      );
       fixture.detectChanges();
       expect(displayed(fixture)).toEqual(['d', 'c', 'a', 'e', 'b']);
       activity.update((current) => new Map(current).set('b', 50));
@@ -2681,7 +2812,9 @@ describe('CanvasRailBoardComponent rendering', () => {
       fixture.detectChanges();
       fixture.componentInstance.move('b', -1);
       expect(store.reorderTiles).not.toHaveBeenCalled();
-      expect(fixture.componentInstance.announcement()).toContain('manual order');
+      expect(fixture.componentInstance.announcement()).toContain(
+        'manual order',
+      );
     });
 
     it('toggles and persists the sort through the store', () => {
@@ -2693,7 +2826,9 @@ describe('CanvasRailBoardComponent rendering', () => {
       fixture.detectChanges();
       expect(store.setRailSort).toHaveBeenCalledWith('workspace', 'recent');
       expect(rail.sort()).toBe('recent');
-      expect(fixture.componentInstance.announcement()).toBe('Sessions sorted by recent activity.');
+      expect(fixture.componentInstance.announcement()).toBe(
+        'Sessions sorted by recent activity.',
+      );
       rail.sortToggled.emit();
       expect(store.setRailSort).toHaveBeenLastCalledWith('workspace', 'manual');
     });
@@ -2702,9 +2837,14 @@ describe('CanvasRailBoardComponent rendering', () => {
   it('jumps through status matches in grouped display order', () => {
     const { fixture, store } = mount(true, 4, 'b');
     const instance = fixture.componentInstance;
-    instance.railStates.set(new Map([
-      ['a', 'needs'], ['b', 'running'], ['c', 'needs'], ['d', 'running'],
-    ]));
+    instance.railStates.set(
+      new Map([
+        ['a', 'needs'],
+        ['b', 'running'],
+        ['c', 'needs'],
+        ['d', 'running'],
+      ]),
+    );
     fixture.detectChanges();
     instance.jumpTo('needs');
     expect(store.focusTile).toHaveBeenCalledWith('a');
@@ -2803,7 +2943,9 @@ describe('CanvasRailBoardComponent rendering', () => {
     const rail = fixture.debugElement.query(By.directive(RailStub))
       .componentInstance as RailStub;
     const card = (id: string) =>
-      fixture.nativeElement.querySelector(`[data-rail-card][data-tab-id="${id}"] .rc-select`) as HTMLElement | null;
+      fixture.nativeElement.querySelector(
+        `[data-rail-card][data-tab-id="${id}"] .rc-select`,
+      ) as HTMLElement | null;
     card('b')?.focus();
     rail.closeRequested.emit('b');
     await fixture.whenStable();
@@ -2816,14 +2958,24 @@ describe('CanvasRailBoardComponent rendering', () => {
 
   it('closes to the next displayed card across groups for selection and DOM focus', async () => {
     const { fixture, store } = mount(true, 4, 'b');
-    fixture.componentInstance.railStates.set(new Map<string, CompactRailState>([
-      ['a', 'idle'], ['b', 'running'], ['c', 'idle'], ['d', 'running'],
-    ]));
+    fixture.componentInstance.railStates.set(
+      new Map<string, CompactRailState>([
+        ['a', 'idle'],
+        ['b', 'running'],
+        ['c', 'idle'],
+        ['d', 'running'],
+      ]),
+    );
     fixture.detectChanges();
-    const card = (id: string) => fixture.nativeElement.querySelector<HTMLElement>(
-      `[data-rail-card][data-tab-id="${id}"] .rc-select`);
-    expect([...fixture.nativeElement.querySelectorAll('[data-rail-card]')]
-      .map(node => node.getAttribute('data-tab-id'))).toEqual(['b', 'd', 'a', 'c']);
+    const card = (id: string) =>
+      fixture.nativeElement.querySelector<HTMLElement>(
+        `[data-rail-card][data-tab-id="${id}"] .rc-select`,
+      );
+    expect(
+      [...fixture.nativeElement.querySelectorAll('[data-rail-card]')].map(
+        (node) => node.getAttribute('data-tab-id'),
+      ),
+    ).toEqual(['b', 'd', 'a', 'c']);
     card('b')?.focus();
     await fixture.componentInstance.close('b');
     fixture.detectChanges();
@@ -2834,15 +2986,26 @@ describe('CanvasRailBoardComponent rendering', () => {
 
   it('skips collapsed Finished cards when closing the last visible running card', async () => {
     const { fixture, store } = mount(true, 6, 'b');
-    fixture.componentInstance.railStates.set(new Map<string, CompactRailState>([
-      ['a', 'done'], ['b', 'running'], ['c', 'done'], ['d', 'done'],
-      ['e', 'done'], ['f', 'needs'],
-    ]));
+    fixture.componentInstance.railStates.set(
+      new Map<string, CompactRailState>([
+        ['a', 'done'],
+        ['b', 'running'],
+        ['c', 'done'],
+        ['d', 'done'],
+        ['e', 'done'],
+        ['f', 'needs'],
+      ]),
+    );
     fixture.detectChanges();
-    const card = (id: string) => fixture.nativeElement.querySelector<HTMLElement>(
-      `[data-rail-card][data-tab-id="${id}"] .rc-select`);
-    expect([...fixture.nativeElement.querySelectorAll('[data-rail-card]')]
-      .map(node => node.getAttribute('data-tab-id'))).toEqual(['b', 'f']);
+    const card = (id: string) =>
+      fixture.nativeElement.querySelector<HTMLElement>(
+        `[data-rail-card][data-tab-id="${id}"] .rc-select`,
+      );
+    expect(
+      [...fixture.nativeElement.querySelectorAll('[data-rail-card]')].map(
+        (node) => node.getAttribute('data-tab-id'),
+      ),
+    ).toEqual(['b', 'f']);
     card('b')?.focus();
     await fixture.componentInstance.close('b');
     fixture.detectChanges();
@@ -2984,7 +3147,9 @@ describe('CanvasRailBoardComponent rendering', () => {
   });
 
   const cardControl = (fixture: Fixture, id: string) =>
-    fixture.nativeElement.querySelector(`[data-rail-card][data-tab-id="${id}"] .rc-select`);
+    fixture.nativeElement.querySelector(
+      `[data-rail-card][data-tab-id="${id}"] .rc-select`,
+    );
 
   it('close active pane releases that host, focuses the survivor in its own host and its Sessions rail card', async () => {
     const { fixture, focused, store } = mount(true, 3);
@@ -3020,7 +3185,9 @@ describe('CanvasRailBoardComponent rendering', () => {
       fixture.nativeElement.querySelectorAll('ptah-canvas-lane-view'),
     ).toHaveLength(1);
     // Single view renders no per-pane controls: focus goes to the survivor's card in the Sessions rail.
-    expect(paneOf(fixture, 'left')?.querySelector('[data-header-menu]')).toBeNull();
+    expect(
+      paneOf(fixture, 'left')?.querySelector('[data-header-menu]'),
+    ).toBeNull();
     expect(document.activeElement).toBe(cardControl(fixture, 'a'));
     expect(instance.announcement()).toBe('Pane closed. a stays open.');
     expect(store.removeTile).not.toHaveBeenCalled();

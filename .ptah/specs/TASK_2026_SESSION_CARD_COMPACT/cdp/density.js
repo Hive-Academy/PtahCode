@@ -1,0 +1,1 @@
+((want) => { const t = [...document.querySelectorAll('button[aria-pressed]')].find((b) => /dens|compact/i.test((b.getAttribute('aria-label') || '') + b.title + b.textContent)); if (!t) return 'no toggle'; const dense = t.getAttribute('aria-pressed') === 'true'; if ((want === 'dense') !== dense) t.click(); return (t.getAttribute('aria-label') || t.title) + ' was ' + dense; })
