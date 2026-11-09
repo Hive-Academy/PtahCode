@@ -1215,7 +1215,7 @@ export interface RpcMethodRegistry
     result: SessionHandoffChainResult;
   };
   'session:handoffCloseResult': {
-    params: { requestId: string; closed: boolean };
+    params: { requestId: string; outcome: 'closed' | 'absent' | 'blocked' };
     result: { accepted: boolean };
   };
   'session:linkTask': {

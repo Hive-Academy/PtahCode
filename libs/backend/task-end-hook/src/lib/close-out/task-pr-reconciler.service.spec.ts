@@ -20,7 +20,7 @@ function setup(result: TaskCloseOutPrStatus) {
   const logger = Object.create(Logger.prototype) as Logger;
   logger.error = jest.fn();
   const reconciler = new TaskPrReconcilerService(prs, detector, closeOut, logger);
-  return { reconciler, detector, closeOut };
+  return { reconciler, detector, closeOut, logger };
 }
 
 describe('TaskPrReconcilerService', () => {
@@ -30,6 +30,24 @@ describe('TaskPrReconcilerService', () => {
     expect(detector.setCarrierStatus).toHaveBeenCalledWith('/main', task.taskId, 'in_review');
     expect(closeOut.run).not.toHaveBeenCalled();
     reconciler.dispose();
+  });
+
+  it('keeps watching after an in_review write fails and retries on the next poll', async () => {
+    jest.useFakeTimers();
+    try {
+      const { reconciler, detector, closeOut, logger } = setup({ kind: 'open', number: 7, url: 'https://github.com/a/b/pull/7' });
+      const failure = new Error('write failed');
+      jest.mocked(detector.setCarrierStatus).mockRejectedValueOnce(failure);
+      await expect(reconciler.reconcile(task)).resolves.toEqual({ kind: 'open', number: 7 });
+      expect(logger.error).toHaveBeenCalledWith('[task-pr-reconciler] carrier update failed', failure);
+      await jest.advanceTimersByTimeAsync(10 * 60_000);
+      expect(detector.setCarrierStatus).toHaveBeenCalledTimes(2);
+      expect(detector.setCarrierStatus).toHaveBeenLastCalledWith('/main', task.taskId, 'in_review');
+      expect(closeOut.run).not.toHaveBeenCalled();
+      reconciler.dispose();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('does nothing on unknown or closed-unmerged PR state', async () => {

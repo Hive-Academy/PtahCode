@@ -476,11 +476,11 @@ export class SessionRpcHandlers {
     this.registerForkSession();
     this.registerRewindFiles();
     this.registerSessionStatus();
-    this.rpcHandler.registerMethod<{ requestId: string; closed: boolean }, { accepted: boolean }>(
-      'session:handoffCloseResult', async (params: { requestId: string; closed: boolean }) => {
-        const parsed = z.object({ requestId: z.string().uuid(), closed: z.boolean() }).strict().safeParse(params);
+    this.rpcHandler.registerMethod<{ requestId: string; outcome: 'closed' | 'absent' | 'blocked' }, { accepted: boolean }>(
+      'session:handoffCloseResult', async (params) => {
+        const parsed = z.object({ requestId: z.string().uuid(), outcome: z.enum(['closed', 'absent', 'blocked']) }).strict().safeParse(params);
         if (!parsed.success) throw new RpcUserError('Invalid session:handoffCloseResult params', 'INVALID_PARAMS');
-        return { accepted: this.handoffCloser?.complete(parsed.data.requestId, parsed.data.closed) ?? false };
+        return { accepted: this.handoffCloser?.complete(parsed.data.requestId, parsed.data.outcome) ?? false };
       },
     );
 

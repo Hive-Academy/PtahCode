@@ -33,7 +33,7 @@ export class AutoHandoffSourceCloserService {
       if (payload && typeof payload === 'object' && 'requestId' in payload &&
           typeof payload.requestId === 'string' && payload.requestId.length > 0 &&
           !this.processingRequests.has(payload.requestId)) {
-        await this.replyOnce(payload.requestId, false);
+        await this.replyOnce(payload.requestId, 'blocked');
       }
       return;
     }
@@ -41,11 +41,11 @@ export class AutoHandoffSourceCloserService {
     if (this.answeredRequests.has(requestId) || this.processingRequests.has(requestId)) return;
     this.processingRequests.add(requestId);
     try {
-      let closed = false;
+      let outcome: 'closed' | 'absent' | 'blocked' = 'blocked';
       try {
         const lookup = this.tabManager.findTabByIdAcrossWorkspaces(predecessorTabId);
         if (!lookup) {
-          closed = true;
+          outcome = 'absent';
         } else if (predecessorSdkId === null
           ? lookup.tab.claudeSessionId == null
           : lookup.tab.claudeSessionId === predecessorSdkId) {
@@ -53,13 +53,13 @@ export class AutoHandoffSourceCloserService {
           if (blocker) {
             this.logger.info(LOG_CONTEXT, `the handed-off source tab stays open: ${blocker}`, { tabId: predecessorTabId });
           } else {
-            closed = await this.tabManager.closeHandoffPredecessor(predecessorTabId, predecessorSdkId);
+            outcome = await this.tabManager.closeHandoffPredecessor(predecessorTabId, predecessorSdkId) ? 'closed' : 'blocked';
           }
         }
       } catch (error: unknown) {
         this.logger.warn(LOG_CONTEXT, 'predecessor close failed', { requestId, error });
       }
-      await this.replyOnce(requestId, closed);
+      await this.replyOnce(requestId, outcome);
     } finally {
       this.processingRequests.delete(requestId);
     }
@@ -76,7 +76,7 @@ export class AutoHandoffSourceCloserService {
     return null;
   }
 
-  private async replyOnce(requestId: string, closed: boolean): Promise<void> {
+  private async replyOnce(requestId: string, outcome: 'closed' | 'absent' | 'blocked'): Promise<void> {
     if (this.answeredRequests.has(requestId)) return;
     if (this.answeredRequests.size >= 128) {
       const oldest = this.answeredRequests.values().next().value;
@@ -84,7 +84,7 @@ export class AutoHandoffSourceCloserService {
     }
     this.answeredRequests.add(requestId);
     try {
-      const result = await this.rpc.call('session:handoffCloseResult', { requestId, closed });
+      const result = await this.rpc.call('session:handoffCloseResult', { requestId, outcome });
       if (!result.success) {
         this.logger.warn(LOG_CONTEXT, 'predecessor close reply failed', { requestId, error: result.error });
       }

@@ -31,6 +31,7 @@ export const GH_PR_LIST_JSON_FIELDS = [
   'statusCheckRollup',
   'reviewDecision',
   'headRefName',
+  'baseRefName',
   'headRepositoryOwner',
 ].join(',');
 
@@ -136,6 +137,7 @@ interface RawPrPayload {
   readonly reviewDecision?: unknown;
   readonly url?: unknown;
   readonly headRefName?: unknown;
+  readonly baseRefName?: unknown;
   readonly headRepositoryOwner?: unknown;
   readonly statusCheckRollup?: unknown;
 }
@@ -299,6 +301,9 @@ function toPrInfo(raw: RawPrPayload): GitPrInfo {
     ...(url ? { url } : {}),
     ...(typeof raw.headRefName === 'string'
       ? { headRefName: raw.headRefName }
+      : {}),
+    ...(typeof raw.baseRefName === 'string'
+      ? { baseRefName: raw.baseRefName }
       : {}),
   };
 }

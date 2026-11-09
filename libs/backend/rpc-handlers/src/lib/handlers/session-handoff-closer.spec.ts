@@ -9,8 +9,8 @@ describe('SessionHandoffCloser', () => {
     const closer = new SessionHandoffCloser(logger, broadcaster);
     const pending = closer.close('tab', 'sdk');
     const payload = broadcaster.broadcastMessage.mock.calls[0][1] as { requestId: string };
-    expect(closer.complete('unknown', true)).toBe(false);
-    expect(closer.complete(payload.requestId, true)).toBe(true);
+    expect(closer.complete('unknown', 'closed')).toBe(false);
+    expect(closer.complete(payload.requestId, 'closed')).toBe(true);
     await expect(pending).resolves.toBe(true);
   });
   it('times out without a result', async () => {
@@ -22,13 +22,28 @@ describe('SessionHandoffCloser', () => {
     await expect(pending).resolves.toBe(false);
     jest.useRealTimers();
   });
-  it('accepts a later true after a renderer replies false', async () => {
+  it('keeps an absent reply pending until timeout', async () => {
+    jest.useFakeTimers();
+    try {
+      const broadcaster = { broadcastMessage: jest.fn().mockResolvedValue(undefined) };
+      const closer = new SessionHandoffCloser({ warn: jest.fn(), error: jest.fn() } as Pick<Logger, 'warn' | 'error'> as Logger, broadcaster);
+      closer.timeoutMs = 10;
+      const pending = closer.close('tab', null);
+      const { requestId } = broadcaster.broadcastMessage.mock.calls[0][1] as { requestId: string };
+      expect(closer.complete(requestId, 'absent')).toBe(true);
+      jest.advanceTimersByTime(10);
+      await expect(pending).resolves.toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+  it('accepts a closed reply after an absent reply', async () => {
     const broadcaster = { broadcastMessage: jest.fn().mockResolvedValue(undefined) };
     const closer = new SessionHandoffCloser({ warn: jest.fn(), error: jest.fn() } as Pick<Logger, 'warn' | 'error'> as Logger, broadcaster);
     const pending = closer.close('tab', null);
     const { requestId } = broadcaster.broadcastMessage.mock.calls[0][1] as { requestId: string };
-    expect(closer.complete(requestId, false)).toBe(true);
-    expect(closer.complete(requestId, true)).toBe(true);
+    expect(closer.complete(requestId, 'absent')).toBe(true);
+    expect(closer.complete(requestId, 'closed')).toBe(true);
     await expect(pending).resolves.toBe(true);
   });
   it('cleans up a synchronous broadcast failure', async () => {

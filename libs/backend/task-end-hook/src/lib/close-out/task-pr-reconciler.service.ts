@@ -63,8 +63,14 @@ export class TaskPrReconcilerService {
     }
     if (pr.kind === 'open') {
       if (task.status !== 'done' && task.status !== 'cancelled') {
-        await this.detector.setCarrierStatus(task.mainRoot, task.taskId, 'in_review');
-        this.watch(key, { ...task, status: 'in_review' }, false);
+        let writeFailed = false;
+        try {
+          await this.detector.setCarrierStatus(task.mainRoot, task.taskId, 'in_review');
+        } catch (error: unknown) {
+          writeFailed = true;
+          this.logger.error('[task-pr-reconciler] carrier update failed', error instanceof Error ? error : new Error(String(error)));
+        }
+        this.watch(key, { ...task, status: writeFailed ? task.status : 'in_review' }, writeFailed);
       }
       return { kind: 'open', number: pr.number };
     }

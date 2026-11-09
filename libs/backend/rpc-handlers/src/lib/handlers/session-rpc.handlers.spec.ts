@@ -529,9 +529,9 @@ describe('SessionRpcHandlers', () => {
     const h = makeHarness();
     h.handlers.register();
     await expect(call<{ accepted: boolean }>(h, 'session:handoffCloseResult', {
-      requestId: 'f6154596-2e31-4a32-96e3-287635c042e7', closed: true,
+      requestId: 'f6154596-2e31-4a32-96e3-287635c042e7', outcome: 'closed',
     })).resolves.toEqual({ accepted: false });
-    const invalid = await callRaw(h, 'session:handoffCloseResult', { requestId: 'bad', closed: true });
+    const invalid = await callRaw(h, 'session:handoffCloseResult', { requestId: 'bad', outcome: 'closed' });
     expect(invalid.success).toBe(false);
     expect(invalid.errorCode).toBe('INVALID_PARAMS');
   });

@@ -50,46 +50,46 @@ describe('AutoHandoffSourceCloserService', () => {
     expect(call).not.toHaveBeenCalled();
     finish(true);
     await pending;
-    expect(call.mock.calls).toEqual([['session:handoffCloseResult', { requestId: 'r1', closed: true }]]);
+    expect(call.mock.calls).toEqual([['session:handoffCloseResult', { requestId: 'r1', outcome: 'closed' }]]);
   });
 
   it('mismatched SDK id replies false and leaves the tab open', async () => {
     currentTab = tab({ claudeSessionId: 'other' as TabState['claudeSessionId'] });
     await service.closePredecessor(request);
     expect(close).not.toHaveBeenCalled();
-    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', closed: false });
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked' });
   });
 
-  it('missing tab replies true so a lost completion can be retried', async () => {
+  it('missing tab replies absent', async () => {
     currentTab = null;
     await service.closePredecessor(request);
     expect(close).not.toHaveBeenCalled();
-    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', closed: true });
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'absent' });
   });
 
   it.each([null, undefined])('null SDK id matches an unset tab session (%s)', async (sdkId) => {
     currentTab = tab({ claudeSessionId: sdkId as TabState['claudeSessionId'] });
     await service.closePredecessor({ ...request, predecessorSdkId: null });
     expect(close).toHaveBeenCalledWith('tab-1', null);
-    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', closed: true });
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'closed' });
   });
 
   it('null SDK id does not match a bound tab', async () => {
     await service.closePredecessor({ ...request, predecessorSdkId: null });
     expect(close).not.toHaveBeenCalled();
-    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', closed: false });
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked' });
   });
 
   it('replies false when closeHandoffPredecessor leaves the tab present', async () => {
     close.mockResolvedValue(false);
     await service.closePredecessor(request);
-    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', closed: false });
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked' });
   });
 
   it('a thrown close replies false', async () => {
     close.mockRejectedValue(new Error('close failed'));
     await service.closePredecessor(request);
-    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', closed: false });
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked' });
   });
 
   it('duplicate request ID replies only once', async () => {
@@ -118,7 +118,7 @@ describe('AutoHandoffSourceCloserService', () => {
     expect(call).not.toHaveBeenCalled();
     finish(true);
     await pending;
-    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', closed: true });
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'closed' });
   });
 
   it.each([
@@ -142,7 +142,7 @@ describe('AutoHandoffSourceCloserService', () => {
   it('invalid payload with a usable request ID replies false', async () => {
     await service.closePredecessor({ requestId: 'r1', predecessorTabId: 123 });
     expect(close).not.toHaveBeenCalled();
-    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', closed: false });
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked' });
   });
 
   it.each([
@@ -161,6 +161,6 @@ describe('AutoHandoffSourceCloserService', () => {
     expect(close).not.toHaveBeenCalled();
     expect(currentTab).not.toBeNull();
     expect(info).toHaveBeenCalled();
-    expect(call.mock.calls).toEqual([['session:handoffCloseResult', { requestId: 'r1', closed: false }]]);
+    expect(call.mock.calls).toEqual([['session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked' }]]);
   });
 });

@@ -984,6 +984,7 @@ export interface GitPrInfo {
   /** HTTPS URL to the pull request on GitHub; omitted if not an https: URL */
   url?: string;
   headRefName?: string;
+  baseRefName?: string;
 }
 
 /**

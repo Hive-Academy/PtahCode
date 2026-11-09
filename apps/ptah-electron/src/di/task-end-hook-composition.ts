@@ -461,7 +461,9 @@ function createCloseOutPrStatusPort(
         }
         const { number, url, state } = result.pr;
         if (state === 'OPEN') return { kind: 'open', number, url };
-        if (state === 'MERGED') return { kind: 'merged', number, url };
+        if (state === 'MERGED') return result.pr.baseRefName === 'main'
+          ? { kind: 'merged', number, url }
+          : { kind: 'unknown' };
         if (state === 'CLOSED') return { kind: 'closed-unmerged', number, url };
         return { kind: 'unknown' };
       } catch (error: unknown) {

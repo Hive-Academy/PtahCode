@@ -159,6 +159,7 @@ describe('GitHubPrStatusReader', () => {
         state: 'OPEN',
         isDraft: false,
         reviewDecision: 'APPROVED',
+        baseRefName: 'main',
         url: 'https://github.com/org/repo/pull/42',
         statusCheckRollup: [],
       });
@@ -192,6 +193,7 @@ describe('GitHubPrStatusReader', () => {
           reviewDecision: 'APPROVED',
           url: 'https://github.com/org/repo/pull/42',
           headRefName: 'feat/my-branch',
+          baseRefName: 'main',
         },
         checks: {
           passing: 0,

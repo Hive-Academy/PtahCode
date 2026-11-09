@@ -9,8 +9,8 @@ interface BroadcastHost {
 }
 
 @injectable()
-/** Broadcast assumes one renderer owns the predecessor. A false reply waits
- * until the timeout so another attached renderer can still reply true. */
+/** Broadcast assumes one renderer owns the predecessor. Other replies wait
+ * until the timeout so the owning renderer can still report closure. */
 export class SessionHandoffCloser implements HandoffPredecessorCloser {
   private readonly pending = new Map<string, (closed: boolean) => void>();
   timeoutMs = 30_000;
@@ -43,8 +43,8 @@ export class SessionHandoffCloser implements HandoffPredecessorCloser {
     });
   }
 
-  complete(requestId: string, closed: boolean): boolean {
-    if (!closed) return this.pending.has(requestId);
+  complete(requestId: string, outcome: 'closed' | 'absent' | 'blocked'): boolean {
+    if (outcome !== 'closed') return this.pending.has(requestId);
     return this.finish(requestId, true);
   }
 
