@@ -49,6 +49,7 @@ import {
   type RegisteredWorktreeOutcome,
   type WorktreeRootProbe,
 } from './git-workspace-root';
+import { checkLinkedPathForm } from './workspace-file-path';
 
 /**
  * `'folder'`: only a registered workspace folder (worktree create/remove).
@@ -225,6 +226,7 @@ export class GitRootResolver {
    * does not stop git reads on an unconfirmed answer.
    */
   private async isConfirmedAbsent(requested: string): Promise<boolean> {
+    if (!checkLinkedPathForm(requested, this.deps.platform).ok) return false;
     try {
       const directory = await this.deps.probe.directory(requested);
       if (directory.kind === 'failed') {

@@ -161,6 +161,28 @@ describe('CodeSymbolIndexer', () => {
     );
   });
 
+  it('does not start stale-root maintenance for an aborted starter', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const sink = Object.assign(makeSymbolSink(), { purgeStaleRoots: jest.fn() });
+    const service = new CodeSymbolIndexer(makeLogger(), makeAst(), makeIndexer([]), makeFs(), sink);
+    await expect(service.indexWorkspace('/workspace', { signal: controller.signal }))
+      .rejects.toMatchObject({ name: 'AbortError' });
+    expect(sink.purgeStaleRoots).not.toHaveBeenCalled();
+  });
+
+  it('propagates an AbortError from stale-root maintenance', async () => {
+    const sink = Object.assign(makeSymbolSink(), {
+      purgeStaleRoots: jest.fn().mockRejectedValue(new DOMException('Aborted', 'AbortError')),
+    });
+    const logger = makeLogger();
+    const service = new CodeSymbolIndexer(logger, makeAst(), makeIndexer([]), makeFs(), sink);
+    await expect(service.indexWorkspace('/workspace')).rejects.toMatchObject({ name: 'AbortError' });
+    expect(logger.warn).not.toHaveBeenCalledWith(
+      expect.stringContaining('Stale-root maintenance failed'), expect.anything(),
+    );
+  });
+
   describe('indexWorkspace — AbortSignal cooperative cancellation', () => {
     it('aborts at a batch boundary and returns partial stats when signal fires mid-run', async () => {
       // Arrange: 3 batches of 3 files = 9 files total (small for speed).

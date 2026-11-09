@@ -1017,10 +1017,15 @@ export class CodeSymbolIndexer {
     active: ActiveCensus,
   ): Promise<{ stats: IndexingStats; complete: boolean }> {
     if (this.sink.purgeStaleRoots) {
+      this.throwIfAborted(options?.signal);
       try {
-        await this.sink.purgeStaleRoots();
+        await this.sink.purgeStaleRoots(options?.signal);
       } catch (error: unknown) {
         // degradation-audit: reported - maintenance failure must not block indexing; warn and continue.
+        if (
+          (error instanceof Error || error instanceof DOMException) &&
+          error.name === 'AbortError'
+        ) throw error;
         this.logger.warn('[CodeSymbolIndexer] Stale-root maintenance failed; continuing indexing', { workspaceRoot, error });
       }
     }

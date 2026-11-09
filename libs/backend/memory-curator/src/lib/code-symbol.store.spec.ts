@@ -345,6 +345,28 @@ describe('CodeSymbolStore (native-gated)', () => {
     }
   });
 
+  maybe('stops purging between deletion batches when aborted', async () => {
+    const { service, store, dbPath } = await bootstrap();
+    const root = path.join(path.dirname(dbPath), 'aborted-worktree');
+    const controller = new AbortController();
+    const stat = await import('node:fs/promises');
+    let probes = 0;
+    const statPath: (filePath: string) => ReturnType<typeof stat.stat> = async (filePath) => {
+      if (filePath === root && ++probes === 3) controller.abort();
+      return stat.stat(filePath);
+    };
+    try {
+      await store.insertBatch(Array.from({ length: 129 }, (_, i) =>
+        makeEntry({ workspaceRoot: root, filePath: path.join(root, `${i}.ts`), subject: `code:abort:${i}` }),
+      ));
+      await expect(store.purgeStaleRoots(0, statPath, controller.signal))
+        .rejects.toMatchObject({ name: 'AbortError' });
+      expect(store.count(root)).toBe(1);
+    } finally {
+      service.close();
+    }
+  });
+
   maybe('keeps a missing root when its parent is also missing', async () => {
     const { service, store, dbPath } = await bootstrap();
     const root = path.join(path.dirname(dbPath), 'missing-parent', 'removed-worktree');

@@ -120,6 +120,13 @@ describe('GitRootResolver', () => {
       .rejects.toMatchObject({ errorCode: 'GIT_ROOT_UNAVAILABLE', message: GIT_ROOT_UNAVAILABLE_MESSAGE });
   });
 
+  it('refuses a UNC root without reading its directory', async () => {
+    const { resolver, probe } = build();
+    await expect(resolver.resolve('\\\\server\\share\\worktree', 'git:info', 'folder-or-worktree'))
+      .rejects.toMatchObject({ errorCode: 'GIT_ROOT_UNAVAILABLE', message: GIT_ROOT_UNAVAILABLE_MESSAGE });
+    expect(probe.directory).not.toHaveBeenCalled();
+  });
+
   it('warns and keeps the retryable error when a directory read fails', async () => {
     const { resolver, probe, warn } = build();
     const cause = new Error('EACCES');

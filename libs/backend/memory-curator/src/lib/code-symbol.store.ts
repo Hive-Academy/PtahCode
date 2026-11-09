@@ -208,7 +208,12 @@ export class CodeSymbolStore implements ICodeSymbolReader {
   async purgeStaleRoots(
     nowMs = Date.now(),
     statPath: (path: string) => ReturnType<typeof stat> = stat,
+    signal?: AbortSignal,
   ): Promise<{ roots: number; rows: number }> {
+    const throwIfAborted = (): void => {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    };
+    throwIfAborted();
     if (nowMs - this.lastStaleRootPurgeAt < 6 * 60 * 60 * 1000) {
       return { roots: 0, rows: 0 };
     }
@@ -220,6 +225,7 @@ export class CodeSymbolStore implements ICodeSymbolReader {
     let purgedRoots = 0;
     let purgedRows = 0;
     for (const { root } of roots) {
+      throwIfAborted();
       try {
         await statPath(root);
         continue;
@@ -255,6 +261,7 @@ export class CodeSymbolStore implements ICodeSymbolReader {
         : null;
       let removedForRoot = 0;
       for (;;) {
+        throwIfAborted();
         const ids = select.all(root) as Array<{ rowid: number }>;
         if (ids.length === 0) break;
         try {
@@ -278,6 +285,7 @@ export class CodeSymbolStore implements ICodeSymbolReader {
           this.logger.warn('[code-symbol-store] Cannot read indexed root parent; stopping purge', { root, parent, error });
           break;
         }
+        throwIfAborted();
         try {
           db.transaction((): void => {
             for (const { rowid } of ids) {

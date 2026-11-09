@@ -18,7 +18,7 @@ export interface SymbolChunkInsert {
 
 export interface ISymbolSink {
   /** Remove symbols belonging to workspace roots that no longer exist. */
-  purgeStaleRoots?(): Promise<{ roots: number; rows: number }>;
+  purgeStaleRoots?(signal?: AbortSignal): Promise<{ roots: number; rows: number }>;
   /**
    * Delete all symbol chunks for a given file + workspace before re-indexing.
    * Returns count of deleted memory rows.
