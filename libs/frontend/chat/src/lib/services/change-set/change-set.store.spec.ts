@@ -10,6 +10,7 @@ import { TestBed } from '@angular/core/testing';
 import { VSCodeService } from '@ptah-extension/core';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import {
+  GIT_ROOT_MISSING_MESSAGE,
   GIT_ROOT_PROBE_FAILED_MESSAGE,
   MESSAGE_TYPES,
   type GitFileStatus,
@@ -539,6 +540,30 @@ describe('ChangeSetStore', () => {
       store.handleMessage({ type: MESSAGE_TYPES.SESSION_TURN_ENDED, payload: { sessionId: 's1' } });
       await passDebounce();
       expect(store.marksFor(set).reconciled.size).toBe(2);
+    });
+
+    it('backs off a missing root like an unavailable root and clears its snapshot', async () => {
+      const store = createStore();
+      await openSession('s1');
+      await passDebounce();
+      gitInfo = status([]);
+      store.handleMessage({ type: MESSAGE_TYPES.SESSION_TURN_ENDED, payload: { sessionId: 's1' } });
+      await passDebounce();
+      const [set] = store.changeSetsFor('s1');
+      expect(store.marksFor(set).reconciled.size).toBe(2);
+      mockRpcCall.mockImplementation(async (_vscode, method: string) =>
+        method === 'git:info'
+          ? { success: false, error: GIT_ROOT_MISSING_MESSAGE }
+          : { success: true, data: { changeSets: persisted } },
+      );
+
+      store.handleMessage({ type: MESSAGE_TYPES.SESSION_TURN_ENDED, payload: { sessionId: 's1' } });
+      await passDebounce();
+      expect(store.marksFor(set).reconciled.size).toBe(0);
+      const reads = rpcCallsFor('git:info').length;
+      store.handleMessage({ type: MESSAGE_TYPES.SESSION_TURN_ENDED, payload: { sessionId: 's1' } });
+      await passDebounce();
+      expect(rpcCallsFor('git:info')).toHaveLength(reads);
     });
 
     it.each([

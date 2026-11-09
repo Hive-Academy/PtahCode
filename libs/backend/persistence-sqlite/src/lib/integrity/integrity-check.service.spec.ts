@@ -17,6 +17,7 @@ import {
   SqliteIntegrityService,
   DB_INTEGRITY_CHECK_INTERVAL_MS,
   INTEGRITY_WORKER_BUDGET_MS,
+  DB_HEALTH_CHECK_COOLDOWN_MS,
 } from './integrity-check.service';
 import type {
   IntegrityCheckStateStore,
@@ -42,6 +43,116 @@ const CLEAN_RESPONSE: IntegrityCheckResponse = {
   pageCount: 256_183,
   detail: null,
 };
+
+describe('db:health poll cooldown and explicit full check', () => {
+  it('starts one background attempt per cooldown even when the result is inconclusive', async () => {
+    let now = NOW;
+    const clock = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const { service, workers, spawnCount, writes } = makeHarness({ state: null });
+      const first = service.dispatchIfDue({ healthPoll: true });
+      expect(spawnCount()).toBe(1);
+      workers[0].emitMessage({ ...CLEAN_RESPONSE, verdict: 'unavailable', detail: 'busy' });
+      await first;
+      now += DB_HEALTH_CHECK_COOLDOWN_MS - 1;
+      await service.dispatchIfDue({ healthPoll: true });
+      expect(spawnCount()).toBe(1);
+      expect(writes).toHaveLength(0);
+      now += 1;
+      const second = service.dispatchIfDue({ healthPoll: true });
+      expect(spawnCount()).toBe(2);
+      workers[1].emitMessage(CLEAN_RESPONSE);
+      await second;
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('coalesces concurrent explicit full checks onto one worker and promise', async () => {
+    const { service, workers, spawnCount } = makeHarness({ state: null });
+    const first = service.runFullCheck();
+    const second = service.runFullCheck();
+    expect(second).toBe(first);
+    expect(spawnCount()).toBe(1);
+    workers[0].emitMessage({ ...CLEAN_RESPONSE, integrityCheckPassed: true });
+    await expect(first).resolves.toMatchObject({ integrityCheckPassed: true });
+    expect(spawnCount()).toBe(1);
+  });
+});
+
+describe('SqliteIntegrityService.runFullCheck — what gets recorded', () => {
+  it('a PASSED full check refreshes the clean record', async () => {
+    const harness = makeHarness({
+      state: null,
+      readBackWrites: true,
+      onSpawn: (w) =>
+        queueMicrotask(() =>
+          w.emitMessage({ ...CLEAN_RESPONSE, integrityCheckPassed: true }),
+        ),
+    });
+    const response = await harness.service.runFullCheck();
+    expect(response?.integrityCheckPassed).toBe(true);
+    expect(harness.writes).toHaveLength(1);
+    expect(harness.writes[0].quickCheckOk).toBe(true);
+    expect(harness.service.isDue()).toBe(false);
+  });
+
+  it('a full check whose integrity_check FAILED persists a NOT-OK verdict, so the check stays due', async () => {
+    // quick_check answered `ok`, but integrity_check answered something else.
+    // The record must not read as clean: `isDue()` treats a not-ok record as
+    // due regardless of age, so the failure keeps being re-checked instead of
+    // being trusted for seven days.
+    const harness = makeHarness({
+      state: null,
+      readBackWrites: true,
+      onSpawn: (w) =>
+        queueMicrotask(() =>
+          w.emitMessage({ ...CLEAN_RESPONSE, integrityCheckPassed: false }),
+        ),
+    });
+    const response = await harness.service.runFullCheck();
+    expect(response?.integrityCheckPassed).toBe(false);
+    expect(harness.writes).toHaveLength(1);
+    expect(harness.writes[0]).toMatchObject({
+      quickCheckOk: false,
+      detail: 'integrity_check failed',
+    });
+    expect(harness.service.isDue()).toBe(true);
+    expect(
+      harness.logger.entries.some(
+        (e) => e.level === 'error' && /integrity_check FAILED/.test(e.message),
+      ),
+    ).toBe(true);
+  });
+
+  it('a full check whose integrity_check THREW writes no record, so the check stays due', async () => {
+    // `integrityCheckPassed: null` is inconclusive — the same rule as an
+    // 'unavailable' verdict. No record, no clean timestamp: the next window
+    // asks again.
+    const harness = makeHarness({
+      state: null,
+      readBackWrites: true,
+      onSpawn: (w) =>
+        queueMicrotask(() =>
+          w.emitMessage({
+            ...CLEAN_RESPONSE,
+            integrityCheckPassed: null,
+            detail: 'integrity_check failed: database is locked',
+          }),
+        ),
+    });
+    const response = await harness.service.runFullCheck();
+    expect(response?.integrityCheckPassed).toBeNull();
+    expect(harness.writes).toHaveLength(0);
+    expect(harness.service.isDue()).toBe(true);
+    expect(
+      harness.logger.entries.some(
+        (e) =>
+          e.level === 'warn' && /full integrity check inconclusive/.test(e.message),
+      ),
+    ).toBe(true);
+  });
+});
 
 /**
  * A clean record `days` old relative to `base`.
@@ -110,13 +221,23 @@ interface Harness {
 function makeHarness(opts: {
   state?: IntegrityCheckState | null;
   withFactory?: boolean;
+  /**
+   * Make `read()` return the last record written, so a spec can assert the
+   * post-check `isDue()` decision rather than only the written fields.
+   */
+  readBackWrites?: boolean;
   /** Called with the freshly spawned worker so a test can script its reply. */
   onSpawn?: (worker: FakeWorker) => void;
 }): Harness {
   const logger = createMockLogger();
   const writes: IntegrityCheckState[] = [];
   const store = {
-    read: () => opts.state ?? null,
+    read: () => {
+      if (opts.readBackWrites && writes.length > 0) {
+        return writes[writes.length - 1];
+      }
+      return opts.state ?? null;
+    },
     write: (s: IntegrityCheckState) => {
       writes.push(s);
     },

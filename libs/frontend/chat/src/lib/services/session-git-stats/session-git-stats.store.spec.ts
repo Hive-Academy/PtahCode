@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import { VSCodeService, rpcCall } from '@ptah-extension/core';
-import { GIT_ROOT_UNAVAILABLE_MESSAGE, GIT_ROOT_PROBE_FAILED_MESSAGE, MESSAGE_TYPES, type GitInfoResult } from '@ptah-extension/shared';
+import { GIT_ROOT_MISSING_MESSAGE, GIT_ROOT_UNAVAILABLE_MESSAGE, GIT_ROOT_PROBE_FAILED_MESSAGE, MESSAGE_TYPES, type GitInfoResult } from '@ptah-extension/shared';
 import {
   SessionGitStatsStore,
   sessionBranch,
@@ -51,14 +51,45 @@ describe(SessionGitStatsStore.name, () => {
   });
   it('stops re-requesting an unavailable root while it remains tracked', async () => {
     tabs.set('one', { tab: { claudeSessionId: 'session' } });
-    call.mockResolvedValue({ success: false, error: GIT_ROOT_UNAVAILABLE_MESSAGE });
+    call.mockResolvedValue({ success: false, error: GIT_ROOT_MISSING_MESSAGE });
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
-      store.track('/gone', 'one');
+      const release = store.track('/gone', 'one');
       await tick();
       turn('session');
       await tick();
       expect(call).toHaveBeenCalledTimes(1);
+      jest.advanceTimersByTime(120_000);
+      turn('session');
+      await tick();
+      expect(call).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledTimes(1);
+      release();
+      store.track('/gone', 'one');
+      await tick();
+      expect(call).toHaveBeenCalledTimes(2);
+      push('/gone', info());
+      expect(store.stateFor('/gone').kind).toBe('known');
+      turn('session');
+      await tick();
+      expect(call).toHaveBeenCalledTimes(3);
+      store.track('/new-root', 'one');
+      await tick();
+      expect(call).toHaveBeenCalledTimes(4);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+  it('retries an unregistered root after a session turn', async () => {
+    tabs.set('one', { tab: { claudeSessionId: 'session' } });
+    call.mockResolvedValue({ success: false, error: GIT_ROOT_UNAVAILABLE_MESSAGE });
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      store.track('/present', 'one');
+      await tick();
+      turn('session');
+      await tick();
+      expect(call).toHaveBeenCalledTimes(2);
     } finally {
       warn.mockRestore();
     }

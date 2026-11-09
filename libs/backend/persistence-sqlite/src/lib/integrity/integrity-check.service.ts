@@ -12,8 +12,8 @@
  * it was wrapped in try/catch and never marked the connection unavailable, so
  * it gated nothing and moving it out of band is behaviour-preserving.
  *
- * PUBLIC SURFACE IS EXACTLY `isDue(now?)`, `dispatchIfDue(options?)` AND
- * `dispose()`. Nothing else is exported from the class, because every other
+ * PUBLIC SURFACE IS `isDue(now?)`, `dispatchIfDue(options?)`, `runFullCheck()`
+ * AND `dispose()`. Nothing else is exported from the class, because every other
  * question — when to call, from which host, on what cadence — belongs to the
  * caller.
  *
@@ -75,6 +75,8 @@ export const DB_INTEGRITY_CHECK_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
  * would silently mean "never checked" forever.
  */
 export const INTEGRITY_WORKER_BUDGET_MS = 5 * 60 * 1000;
+/** Minimum time between checks started by repeated db:health polls. */
+export const DB_HEALTH_CHECK_COOLDOWN_MS = 30 * 60 * 1000;
 
 @injectable()
 export class SqliteIntegrityService {
@@ -83,6 +85,10 @@ export class SqliteIntegrityService {
    * two `dispatchIfDue()` calls in the same tick produce one spawn.
    */
   private dispatching = false;
+  private lastHealthAttemptAt: number | null = null;
+  private fullCheckInFlight: Promise<IntegrityCheckResponse | null> | null = null;
+  private dispatchFinished: Promise<void> = Promise.resolve();
+  private finishDispatch: (() => void) | null = null;
   /** The "no worker factory in this host" line is worth saying exactly once. */
   private noFactoryLogged = false;
   /**
@@ -142,7 +148,7 @@ export class SqliteIntegrityService {
    * flight writes NO record: an interrupted check is inconclusive, so the next
    * window asks again.
    */
-  async dispatchIfDue(options?: { signal?: AbortSignal }): Promise<void> {
+  async dispatchIfDue(options?: { signal?: AbortSignal; healthPoll?: boolean }): Promise<void> {
     if (options?.signal?.aborted) {
       this.logger.debug(
         '[persistence-sqlite] integrity dispatch skipped; already aborted',
@@ -150,6 +156,10 @@ export class SqliteIntegrityService {
       return;
     }
     if (this.dispatching) return;
+    const now = Date.now();
+    if (options?.healthPoll && this.lastHealthAttemptAt !== null &&
+        now >= this.lastHealthAttemptAt &&
+        now - this.lastHealthAttemptAt < DB_HEALTH_CHECK_COOLDOWN_MS) return;
 
     const factory = this.factory;
     if (!factory) {
@@ -173,7 +183,8 @@ export class SqliteIntegrityService {
       return;
     }
 
-    this.dispatching = true;
+    if (options?.healthPoll) this.lastHealthAttemptAt = now;
+    this.beginDispatch();
     try {
       const outcome = await this.runCheck(factory, options?.signal);
       if (outcome.aborted) {
@@ -190,8 +201,71 @@ export class SqliteIntegrityService {
         error: error instanceof Error ? error.message : String(error),
       });
     } finally {
-      this.dispatching = false;
+      this.endDispatch();
     }
+  }
+
+  /** Force a check for an explicit health request, using the worker budget. */
+  runFullCheck(): Promise<IntegrityCheckResponse | null> {
+    if (this.fullCheckInFlight) return this.fullCheckInFlight;
+    const attempt = this.executeFullCheck();
+    this.fullCheckInFlight = attempt;
+    void attempt.finally(() => {
+      if (this.fullCheckInFlight === attempt) this.fullCheckInFlight = null;
+    });
+    return attempt;
+  }
+
+  private async executeFullCheck(): Promise<IntegrityCheckResponse | null> {
+    const startedAt = Date.now();
+    if (!this.factory) {
+      this.logFullCheckUnavailable('worker unavailable', startedAt);
+      return null;
+    }
+    while (this.dispatching) await this.dispatchFinished;
+    this.beginDispatch();
+    try {
+      const outcome = await this.runCheck(this.factory, undefined, true);
+      if (outcome.aborted) {
+        this.logFullCheckUnavailable('worker aborted', startedAt);
+        return null;
+      }
+      this.record(outcome.response, true);
+      const response = outcome.response;
+      if (response?.ok === true && response.verdict !== 'unavailable') return response;
+      const reason = response === null ? 'worker returned no result or exceeded budget'
+        : response.ok === false ? `worker error: ${response.error}`
+        : `inconclusive verdict: ${response.detail ?? 'unavailable'}`;
+      this.logFullCheckUnavailable(reason, startedAt);
+      return null;
+    } catch (error: unknown) {
+      // degradation-audit: reported - an inconclusive full check returns null; warned with reason.
+      this.logFullCheckUnavailable(error instanceof Error ? error.message : String(error), startedAt);
+      return null;
+    } finally {
+      this.endDispatch();
+    }
+  }
+
+  private logFullCheckUnavailable(reason: string, startedAt: number): void {
+    this.logger.warn('[persistence-sqlite] full integrity check unavailable', {
+      reason,
+      durationMs: Date.now() - startedAt,
+      budgetMs: INTEGRITY_WORKER_BUDGET_MS,
+    });
+  }
+
+  private beginDispatch(): void {
+    this.dispatching = true;
+    this.dispatchFinished = new Promise<void>((resolve) => {
+      this.finishDispatch = resolve;
+    });
+  }
+
+  private endDispatch(): void {
+    this.dispatching = false;
+    this.finishDispatch?.();
+    this.finishDispatch = null;
   }
 
   /**
@@ -228,6 +302,7 @@ export class SqliteIntegrityService {
   private async runCheck(
     factory: IIntegrityWorkerProcessFactory,
     signal: AbortSignal | undefined,
+    fullCheck = false,
   ): Promise<{
     aborted: boolean;
     response: IntegrityCheckOutbound | null;
@@ -236,6 +311,7 @@ export class SqliteIntegrityService {
       id: 1,
       type: 'check',
       dbPath: this.dbPath,
+      ...(fullCheck ? { fullCheck: true } : {}),
     };
     const run = this.runner.run<IntegrityCheckOutbound>(factory, {
       label: 'integrity',
@@ -287,8 +363,20 @@ export class SqliteIntegrityService {
    * `null`, an `error` response and an `'unavailable'` verdict all write no
    * record, so the check simply re-runs in the next window. Writing one would
    * mean remembering a question we never asked as an answer.
+   *
+   * A FULL CHECK IS HELD TO A STRICTER BAR. `fullCheck` marks a reply to an
+   * explicit `runFullCheck()` request, where the worker also ran
+   * `PRAGMA integrity_check` and answered `integrityCheckPassed`. Only a passed
+   * full check may refresh the clean record: a `false` answer is a DEFINITE
+   * failure, so it persists a not-ok verdict and `isDue()` keeps the check due
+   * through the existing not-ok rule; a `null` or missing answer (the pragma
+   * threw, or the reply lost the field) is inconclusive and writes nothing, so
+   * the next window retries.
    */
-  private record(response: IntegrityCheckOutbound | null): void {
+  private record(
+    response: IntegrityCheckOutbound | null,
+    fullCheck = false,
+  ): void {
     if (!response) {
       this.logger.warn(
         '[persistence-sqlite] integrity check produced no result; not recorded',
@@ -306,6 +394,34 @@ export class SqliteIntegrityService {
         '[persistence-sqlite] integrity check inconclusive; not recorded',
         { detail: response.detail },
       );
+      return;
+    }
+
+    if (
+      fullCheck &&
+      response.verdict === 'ok' &&
+      response.integrityCheckPassed !== true
+    ) {
+      if (response.integrityCheckPassed === false) {
+        this.store.write({
+          checkedAt: Date.now(),
+          quickCheckOk: false,
+          foreignKeyViolations: response.foreignKeyViolations,
+          durationMs: response.durationMs,
+          pageCount: response.pageCount,
+          detail: response.detail ?? 'integrity_check failed',
+        });
+        this.logger.error('[persistence-sqlite] integrity_check FAILED', {
+          detail: response.detail,
+          durationMs: response.durationMs,
+          pageCount: response.pageCount,
+        });
+      } else {
+        this.logger.warn(
+          '[persistence-sqlite] full integrity check inconclusive; not recorded',
+          { detail: response.detail },
+        );
+      }
       return;
     }
 

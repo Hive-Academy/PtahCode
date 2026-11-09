@@ -306,6 +306,171 @@ describe('CodeSymbolStore (native-gated)', () => {
     return { service, store, embedder, dbPath };
   }
 
+  maybe('purges a missing root in batches and keeps a present root', async () => {
+    const { service, store, dbPath } = await bootstrap();
+    const presentRoot = path.dirname(dbPath);
+    const missingRoot = path.join(presentRoot, 'removed-worktree');
+    try {
+      await store.insertBatch([
+        makeEntry({ workspaceRoot: presentRoot, filePath: path.join(presentRoot, 'a.ts'), subject: 'code:present:a' }),
+        makeEntry({ workspaceRoot: missingRoot, filePath: path.join(missingRoot, 'b.ts'), subject: 'code:missing:b' }),
+      ]);
+      const result = await store.purgeStaleRoots();
+      expect(result).toEqual({ roots: 1, rows: 1 });
+      expect(store.count(presentRoot)).toBe(1);
+      expect(store.count(missingRoot)).toBe(0);
+    } finally {
+      service.close();
+    }
+  });
+
+  maybe('keeps later batches when a root is recreated after the first batch', async () => {
+    const { service, store, dbPath } = await bootstrap();
+    const root = path.join(path.dirname(dbPath), 'recreated-worktree');
+    const stat = await import('node:fs/promises');
+    let probes = 0;
+    const statPath: (filePath: string) => ReturnType<typeof stat.stat> = async (filePath) => {
+      if (filePath === root && ++probes === 3) fs.mkdirSync(root);
+      return stat.stat(filePath);
+    };
+    try {
+      await store.insertBatch(Array.from({ length: 129 }, (_, i) =>
+        makeEntry({ workspaceRoot: root, filePath: path.join(root, `${i}.ts`), subject: `code:recreated:${i}` }),
+      ));
+      expect(await store.purgeStaleRoots(0, statPath)).toEqual({ roots: 1, rows: 128 });
+      expect(store.count(root)).toBe(1);
+    } finally {
+      service.close();
+      if (fs.existsSync(root)) fs.rmdirSync(root);
+    }
+  });
+
+  maybe('stops purging between deletion batches when aborted', async () => {
+    const { service, store, dbPath } = await bootstrap();
+    const root = path.join(path.dirname(dbPath), 'aborted-worktree');
+    const controller = new AbortController();
+    const stat = await import('node:fs/promises');
+    let probes = 0;
+    const statPath: (filePath: string) => ReturnType<typeof stat.stat> = async (filePath) => {
+      if (filePath === root && ++probes === 3) controller.abort();
+      return stat.stat(filePath);
+    };
+    try {
+      await store.insertBatch(Array.from({ length: 129 }, (_, i) =>
+        makeEntry({ workspaceRoot: root, filePath: path.join(root, `${i}.ts`), subject: `code:abort:${i}` }),
+      ));
+      await expect(store.purgeStaleRoots(0, statPath, controller.signal))
+        .rejects.toMatchObject({ name: 'AbortError' });
+      expect(store.count(root)).toBe(1);
+    } finally {
+      service.close();
+    }
+  });
+
+  maybe('an aborted purge does not suppress the next purge call', async () => {
+    const { service, store, dbPath } = await bootstrap();
+    const root = path.join(path.dirname(dbPath), 'aborted-retry-worktree');
+    const controller = new AbortController();
+    const stat = await import('node:fs/promises');
+    let probes = 0;
+    const statPath: (filePath: string) => ReturnType<typeof stat.stat> = async (filePath) => {
+      if (filePath === root && ++probes === 3) controller.abort();
+      return stat.stat(filePath);
+    };
+    try {
+      await store.insertBatch(Array.from({ length: 129 }, (_, i) =>
+        makeEntry({ workspaceRoot: root, filePath: path.join(root, `${i}.ts`), subject: `code:abort-retry:${i}` }),
+      ));
+      await expect(store.purgeStaleRoots(0, statPath, controller.signal))
+        .rejects.toMatchObject({ name: 'AbortError' });
+      expect(store.count(root)).toBe(1);
+      // The aborted attempt must not advance the six-hour throttle: the next
+      // call runs the scan again and removes the row the abort left behind.
+      expect(await store.purgeStaleRoots(0, statPath)).toEqual({ roots: 1, rows: 1 });
+      expect(store.count(root)).toBe(0);
+    } finally {
+      service.close();
+    }
+  });
+
+  maybe('a concurrent second call does not start a second scan', async () => {
+    const { service, store, dbPath } = await bootstrap();
+    const root = path.dirname(dbPath);
+    let checks = 0;
+    const statPath: (filePath: string) => ReturnType<typeof import('node:fs/promises').stat> =
+      async (filePath) => {
+        checks++;
+        return import('node:fs/promises').then((fs) => fs.stat(filePath));
+      };
+    try {
+      await store.insertBatch([makeEntry({ workspaceRoot: root, filePath: path.join(root, 'a.ts') })]);
+      const first = store.purgeStaleRoots(0, statPath);
+      const second = store.purgeStaleRoots(0, statPath);
+      await Promise.all([first, second]);
+      // One stat call proves only the first call scanned; the second returned
+      // through the in-flight guard without touching the filesystem.
+      expect(checks).toBe(1);
+    } finally {
+      service.close();
+    }
+  });
+
+  maybe('keeps a missing root when its parent is also missing', async () => {
+    const { service, store, dbPath } = await bootstrap();
+    const root = path.join(path.dirname(dbPath), 'missing-parent', 'removed-worktree');
+    try {
+      await store.insertBatch([makeEntry({ workspaceRoot: root, filePath: path.join(root, 'a.ts') })]);
+      expect(await store.purgeStaleRoots()).toEqual({ roots: 0, rows: 0 });
+      expect(store.count(root)).toBe(1);
+    } finally {
+      service.close();
+    }
+  });
+
+  maybe.each(['EACCES', 'EPERM'])('keeps an inaccessible root (%s) and purges another', async (code) => {
+    const { service, store, dbPath } = await bootstrap();
+    const parent = path.dirname(dbPath);
+    const inaccessible = path.join(parent, 'inaccessible-worktree');
+    const missing = path.join(parent, 'removed-worktree');
+    try {
+      await store.insertBatch([
+        makeEntry({ workspaceRoot: inaccessible, filePath: path.join(inaccessible, 'a.ts') }),
+        makeEntry({ workspaceRoot: missing, filePath: path.join(missing, 'b.ts') }),
+      ]);
+      const statPath: (filePath: string) => ReturnType<typeof import('node:fs/promises').stat> =
+        async (filePath) => {
+          if (filePath === inaccessible) throw Object.assign(new Error('inaccessible'), { code });
+          return import('node:fs/promises').then((fs) => fs.stat(filePath));
+        };
+      expect(await store.purgeStaleRoots(0, statPath)).toEqual({ roots: 1, rows: 1 });
+      expect(store.count(inaccessible)).toBe(1);
+      expect(store.count(missing)).toBe(0);
+    } finally {
+      service.close();
+    }
+  });
+
+  maybe('throttles full stale-root scans for six hours', async () => {
+    const { service, store, dbPath } = await bootstrap();
+    const root = path.dirname(dbPath);
+    let checks = 0;
+    const statPath: (filePath: string) => ReturnType<typeof import('node:fs/promises').stat> =
+      async (filePath) => {
+        checks++;
+        return import('node:fs/promises').then((fs) => fs.stat(filePath));
+      };
+    try {
+      await store.insertBatch([makeEntry({ workspaceRoot: root, filePath: path.join(root, 'a.ts') })]);
+      await store.purgeStaleRoots(0, statPath);
+      await store.purgeStaleRoots(6 * 60 * 60 * 1000 - 1, statPath);
+      expect(checks).toBe(1);
+      await store.purgeStaleRoots(6 * 60 * 60 * 1000, statPath);
+      expect(checks).toBe(2);
+    } finally {
+      service.close();
+    }
+  });
+
   maybe(
     'insertBatch writes symbol + vec rows with matching rowid',
     async () => {

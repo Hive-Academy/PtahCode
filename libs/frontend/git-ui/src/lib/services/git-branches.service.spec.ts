@@ -19,7 +19,7 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { VSCodeService } from '@ptah-extension/core';
-import { GIT_ROOT_PROBE_FAILED_MESSAGE, MESSAGE_TYPES } from '@ptah-extension/shared';
+import { GIT_ROOT_PROBE_FAILED_MESSAGE, GIT_ROOT_MISSING_MESSAGE, GIT_ROOT_UNAVAILABLE_MESSAGE, MESSAGE_TYPES } from '@ptah-extension/shared';
 import { GitBranchesService } from './git-branches.service';
 
 // ---------------------------------------------------------------------------
@@ -139,6 +139,161 @@ describe('GitBranchesService (TASK_2026_111)', () => {
       await jest.advanceTimersByTimeAsync(1_000);
       await recovered;
       expect(branchCalls()).toHaveLength(2);
+    } finally {
+      warn.mockRestore();
+      jest.useRealTimers();
+    }
+  });
+
+  it('stops reads and logs once for a removed root until an explicit refresh or root change', async () => {
+    jest.useFakeTimers();
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      mockRpcCall.mockResolvedValue({ success: false, error: GIT_ROOT_MISSING_MESSAGE });
+      const first = service.refreshBranches();
+      await jest.advanceTimersByTimeAsync(1_000);
+      await first;
+      expect(mockRpcCall).toHaveBeenCalledTimes(3);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(service.branches()).toEqual(EMPTY_BRANCHES);
+      const event = service.refreshForCauses(['initial']);
+      await jest.advanceTimersByTimeAsync(1_000);
+      await event;
+      expect(mockRpcCall).toHaveBeenCalledTimes(3);
+      const manual = service.refreshBranches();
+      await jest.advanceTimersByTimeAsync(1_000);
+      await manual;
+      expect(mockRpcCall).toHaveBeenCalledTimes(6);
+      service.switchWorkspace('/another-root');
+      await jest.advanceTimersByTimeAsync(1_000);
+      expect(mockRpcCall).toHaveBeenCalledTimes(9);
+    } finally {
+      warn.mockRestore();
+      jest.useRealTimers();
+    }
+  });
+
+  it('resumes a stopped root on a matching status push', async () => {
+    jest.useFakeTimers();
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      mockRpcCall.mockResolvedValue({ success: false, error: GIT_ROOT_MISSING_MESSAGE });
+      const first = service.refreshBranches();
+      await jest.advanceTimersByTimeAsync(1_000);
+      await first;
+      expect(mockRpcCall).toHaveBeenCalledTimes(3);
+      service.startListening();
+      service.handleMessage({ type: MESSAGE_TYPES.GIT_STATUS_UPDATE, payload: { workspaceRoot: '/test-workspace', causes: ['initial'] } });
+      await jest.advanceTimersByTimeAsync(1_000);
+      expect(mockRpcCall).toHaveBeenCalledTimes(6);
+    } finally {
+      warn.mockRestore();
+      jest.useRealTimers();
+    }
+  });
+
+  it('refills every slice when a stopped root resumes on a workspace-only push (PR #1012 F4)', async () => {
+    jest.useFakeTimers();
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      mockRpcCall.mockResolvedValue({ success: false, error: GIT_ROOT_MISSING_MESSAGE });
+      const first = service.refreshBranches();
+      await jest.advanceTimersByTimeAsync(1_000);
+      await first;
+      expect(mockRpcCall).toHaveBeenCalledTimes(3);
+      // The refusal cleared every slice for the stopped root.
+      expect(service.branches()).toEqual(EMPTY_BRANCHES);
+      expect(service.stashCount()).toBe(0);
+      expect(service.lastCommit()).toBeNull();
+
+      service.startListening();
+      mockRpcCall.mockClear();
+      mockRpcCall.mockImplementation((_v: unknown, method: string) => {
+        if (method === 'git:stashList') return makeRpcSuccess({ count: 2, entries: [] });
+        if (method === 'git:lastCommit') return makeRpcSuccess({ ...EMPTY_COMMIT, subject: 'root back' });
+        return makeRpcSuccess({ current: 'feature/back', local: [], remote: [] });
+      });
+      service.handleMessage({
+        type: MESSAGE_TYPES.GIT_STATUS_UPDATE,
+        payload: { workspaceRoot: '/test-workspace', causes: ['workspace'] },
+      });
+      await jest.advanceTimersByTimeAsync(1_000);
+
+      // A resumed root reads ALL slices, even though the push's own causes
+      // ('workspace' only) would have selected none.
+      const methods = mockRpcCall.mock.calls.map(([, m]: [unknown, string]) => m);
+      expect(methods).toEqual(
+        expect.arrayContaining(['git:branches', 'git:stashList', 'git:lastCommit']),
+      );
+      expect(service.currentBranch()).toBe('feature/back');
+      expect(service.stashCount()).toBe(2);
+      expect(service.lastCommit()?.subject).toBe('root back');
+    } finally {
+      warn.mockRestore();
+      jest.useRealTimers();
+    }
+  });
+
+  it('keeps the cause-based refresh for a root that was never stopped (PR #1012 F4)', async () => {
+    jest.useFakeTimers();
+    try {
+      service.startListening();
+      mockRpcCall.mockClear();
+      service.handleMessage({
+        type: MESSAGE_TYPES.GIT_STATUS_UPDATE,
+        payload: { workspaceRoot: '/test-workspace', causes: ['workspace'] },
+      });
+      await jest.advanceTimersByTimeAsync(1_000);
+      expect(mockRpcCall).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('ignores an old missing reply after Retry and starts fresh reads', async () => {
+    jest.useFakeTimers();
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      let releaseOld!: () => void;
+      const oldReply = new Promise<void>((resolve) => { releaseOld = resolve; });
+      let stashCalls = 0;
+      mockRpcCall.mockImplementation(async (_service: unknown, method: string) => {
+        if (method === 'git:stashList' && ++stashCalls === 1) {
+          await oldReply;
+          return { success: false, error: GIT_ROOT_MISSING_MESSAGE };
+        }
+        return { success: true, data: method === 'git:stashList' ? EMPTY_STASH : method === 'git:lastCommit' ? EMPTY_COMMIT : EMPTY_BRANCHES };
+      });
+      const first = service.refreshBranches();
+      await jest.advanceTimersByTimeAsync(1_000);
+      const retry = service.refreshBranches();
+      releaseOld();
+      await Promise.all([first, retry]);
+      expect(mockRpcCall.mock.calls.filter((call) => call[1] === 'git:branches')).toHaveLength(2);
+      expect(warn).not.toHaveBeenCalledWith(`[GitBranchesService] ${GIT_ROOT_MISSING_MESSAGE}`);
+      const next = service.refreshForCauses(['initial']);
+      await jest.advanceTimersByTimeAsync(1_000);
+      await next;
+      expect(mockRpcCall.mock.calls.filter((call) => call[1] === 'git:branches')).toHaveLength(3);
+    } finally {
+      warn.mockRestore();
+      jest.useRealTimers();
+    }
+  });
+
+  it('retries a present but unregistered root on the next event', async () => {
+    jest.useFakeTimers();
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      mockRpcCall.mockResolvedValue({ success: false, error: GIT_ROOT_UNAVAILABLE_MESSAGE });
+      const first = service.refreshForCauses(['initial']);
+      await jest.advanceTimersByTimeAsync(1_000);
+      await first;
+      expect(mockRpcCall).toHaveBeenCalledTimes(3);
+      const second = service.refreshForCauses(['initial']);
+      await jest.advanceTimersByTimeAsync(1_000);
+      await second;
+      expect(mockRpcCall).toHaveBeenCalledTimes(6);
     } finally {
       warn.mockRestore();
       jest.useRealTimers();
@@ -670,6 +825,33 @@ describe('GitBranchesService (TASK_2026_111)', () => {
 
       expect(refreshSpy).toHaveBeenCalledTimes(1);
       expect(refreshSpy).toHaveBeenCalledWith(['head']);
+    });
+
+    it('keeps an in-flight branch read after a workspace-only push', async () => {
+      jest.useFakeTimers();
+      try {
+        const branchData = { current: 'feature/ready', local: [], remote: [] };
+        let resolveBranches!: (value: { success: boolean; data: typeof branchData }) => void;
+        const branchesReply = new Promise<{ success: boolean; data: typeof branchData }>((resolve) => {
+          resolveBranches = resolve;
+        });
+        mockRpcCall.mockImplementation((_vscode: unknown, method: string) => {
+          if (method === 'git:branches') return branchesReply;
+          return makeRpcSuccess(method === 'git:stashList' ? EMPTY_STASH : EMPTY_COMMIT);
+        });
+
+        service.startListening();
+        const refresh = service.refreshBranches();
+        await jest.advanceTimersByTimeAsync(201);
+        expect(mockRpcCall.mock.calls.some((call) => call[1] === 'git:branches')).toBe(true);
+        push({ causes: ['workspace'] });
+        resolveBranches({ success: true, data: branchData });
+        await refresh;
+
+        expect(service.branches()).toEqual(branchData);
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('drops a push that arrives BEFORE startListening()', async () => {

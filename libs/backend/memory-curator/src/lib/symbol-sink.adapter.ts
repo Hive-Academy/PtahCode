@@ -24,6 +24,9 @@ function parseSubject(
 
 @injectable()
 export class MemoryStoreSymbolSink implements ISymbolSink {
+  purgeStaleRoots(signal?: AbortSignal): Promise<{ roots: number; rows: number }> {
+    return this.codeSymbols.purgeStaleRoots(Date.now(), undefined, signal);
+  }
   constructor(
     @inject(MEMORY_TOKENS.CODE_SYMBOL_STORE)
     private readonly codeSymbols: CodeSymbolStore,

@@ -61,6 +61,8 @@ export interface IntegrityCheckRequest {
   readonly type: 'check';
   /** Absolute path to the database file. Opened read-only, never written. */
   readonly dbPath: string;
+  /** Run the slower integrity_check as well as the regular checks. */
+  readonly fullCheck?: boolean;
 }
 
 /**
@@ -122,6 +124,8 @@ export interface IntegrityCheckResponse {
   readonly quickCheck: string;
   /** Row count from `PRAGMA foreign_key_check`; `0` when it never ran. */
   readonly foreignKeyViolations: number;
+  readonly foreignKeyViolationSample?: Array<{ table: string; rowid: number; parent: string; fkid: number }>;
+  readonly integrityCheckPassed?: boolean | null;
   /** Wall-clock cost of the pair of pragmas, in ms. */
   readonly durationMs: number;
   /** `PRAGMA page_count`; `0` when the file could not be opened. */

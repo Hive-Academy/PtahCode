@@ -15,8 +15,9 @@ import {
   type MessageHandler,
 } from '@ptah-extension/core';
 import {
-  GIT_ROOT_UNAVAILABLE_MESSAGE,
+  GIT_ROOT_MISSING_MESSAGE,
   GIT_ROOT_PROBE_FAILED_MESSAGE,
+  GIT_ROOT_UNAVAILABLE_MESSAGE,
   MESSAGE_TYPES,
   resolveSessionWorkingRoot,
   type GitInfoResult,
@@ -42,7 +43,6 @@ export type SessionGitState =
       readonly branch: string | null;
     });
 
-export const UNAVAILABLE_ROOT_BACKOFF_MS = 60_000;
 const NONE: SessionGitState = { kind: 'none' };
 
 /** `sameGitState` plus the branch, so a checkout alone publishes a new state. */
@@ -138,6 +138,7 @@ interface RootEntry {
   inFlight: boolean;
   rerun: boolean;
   backoffUntil?: number;
+  unavailable?: boolean;
 }
 
 /**
@@ -210,6 +211,7 @@ export class SessionGitStatsStore implements MessageHandler {
         queued: false,
         inFlight: false,
         rerun: false,
+        unavailable: false,
       };
       this.entries.set(key, entry);
       this.request(entry, false);
@@ -247,6 +249,8 @@ export class SessionGitStatsStore implements MessageHandler {
           : this.vscode.config().workspaceRoot;
       const entry = this.entries.get(normalizeWorkspaceRoot(root ?? ''));
       if (!entry) return;
+      entry.unavailable = false;
+      entry.backoffUntil = undefined;
       entry.generation++;
       entry.rerun = false;
       if (entry.timer !== null) clearTimeout(entry.timer);
@@ -284,6 +288,7 @@ export class SessionGitStatsStore implements MessageHandler {
   }
 
   private request(entry: RootEntry, forced: boolean): void {
+    if (entry.unavailable) return;
     if ((entry.backoffUntil ?? 0) > Date.now()) return;
     if (!forced && Date.now() - entry.readAt < FRESHNESS_MS) return;
     if (entry.inFlight) {
@@ -322,6 +327,7 @@ export class SessionGitStatsStore implements MessageHandler {
       entry.queued = false;
       if (this.entries.get(normalizeWorkspaceRoot(entry.root)) !== entry)
         continue;
+      if (entry.unavailable) continue;
       void this.read(entry);
     }
   }
@@ -346,10 +352,17 @@ export class SessionGitStatsStore implements MessageHandler {
           entry.backoffUntil = undefined;
           this.setState(entry, toState(result.data));
         } else {
+          if (result.error === GIT_ROOT_MISSING_MESSAGE) {
+            if (!entry.unavailable) console.warn(`${LOG_PREFIX} Git read failed.`, result.error);
+            entry.unavailable = true;
+            this.unavailableRoots.mark(entry.root);
+            this.setState(entry, { kind: 'unknown', reason: 'unavailable' });
+            entry.readAt = Date.now();
+            return;
+          }
           console.warn(`${LOG_PREFIX} Git read failed.`, result.error);
           if (result.error === GIT_ROOT_UNAVAILABLE_MESSAGE) {
             this.unavailableRoots.mark(entry.root);
-            entry.backoffUntil = Date.now() + UNAVAILABLE_ROOT_BACKOFF_MS;
           }
           if (result.error === GIT_ROOT_PROBE_FAILED_MESSAGE) {
             entry.backoffUntil = Date.now() + TIMEOUT_BACKOFF_MS;

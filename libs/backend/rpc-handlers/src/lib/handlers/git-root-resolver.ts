@@ -6,10 +6,10 @@
  * - A named root is accepted when it is a registered workspace folder, or —
  *   under the `'folder-or-worktree'` policy — a live worktree of an open
  *   folder's repository (see {@link probeRegisteredWorktree} for the checks).
- * - A confirmed missing named root throws `RpcUserError('GIT_ROOT_UNAVAILABLE')`
+ * - A confirmed missing named root throws a distinct missing-folder message
  *   and never falls back to the active folder: a stale or hostile request
  *   must not read from, or mutate, a different repository. The webview shows
- *   the error's message ("This worktree is no longer available."), not the
+ *   error's message, not the
  *   handlers' "No workspace folder open", which stays for the no-folder case.
  * - A probe that could not answer throws the retryable
  *   `GIT_ROOT_PROBE_FAILED`, up to {@link MAX_CONSECUTIVE_PROBE_FAILURES} in a
@@ -27,13 +27,15 @@
  * probe. A method not in the list is treated as a write (review M1).
  */
 
-import { FileType } from '@ptah-extension/platform-core';
+import { FileType, isPathWithinRoots } from '@ptah-extension/platform-core';
+import * as path from 'node:path';
 import type {
   IFileSystemProvider,
   IWorkspaceProvider,
 } from '@ptah-extension/platform-core';
 import {
   GIT_ROOT_UNAVAILABLE_MESSAGE,
+  GIT_ROOT_MISSING_MESSAGE,
   GIT_ROOT_PROBE_FAILED_MESSAGE,
 } from '@ptah-extension/shared';
 import {
@@ -48,6 +50,7 @@ import {
   type RegisteredWorktreeOutcome,
   type WorktreeRootProbe,
 } from './git-workspace-root';
+import { checkLinkedPathForm } from './workspace-file-path';
 
 /**
  * `'folder'`: only a registered workspace folder (worktree create/remove).
@@ -209,10 +212,77 @@ export class GitRootResolver {
         policy,
       },
     );
+    if (
+      READ_ONLY_GIT_METHODS.has(method) &&
+      (await this.isConfirmedAbsent(requested))
+    ) {
+      throw new RpcUserError(GIT_ROOT_MISSING_MESSAGE, 'GIT_ROOT_UNAVAILABLE');
+    }
     throw new RpcUserError(
       GIT_ROOT_UNAVAILABLE_MESSAGE,
       'GIT_ROOT_UNAVAILABLE',
     );
+  }
+
+  /**
+   * True only when the directory read says the root is absent. A failed read
+   * keeps the retryable {@link GIT_ROOT_UNAVAILABLE_MESSAGE}, so the webview
+   * does not stop git reads on an unconfirmed answer.
+   */
+  private async isConfirmedAbsent(requested: string): Promise<boolean> {
+    if (!checkLinkedPathForm(requested, this.deps.platform).ok) return false;
+    // The missing-root message must not become an existence oracle for any
+    // caller-named path. Answer it only inside a workspace folder or as a
+    // sibling of one (the usual worktree location).
+    if (!this.isNearWorkspace(requested)) return false;
+    try {
+      const directory = await this.deps.probe.directory(requested);
+      if (directory.kind === 'failed') {
+        this.warnLimited(
+          'probe-failed',
+          requested,
+          '[GitRoot] directory read failed',
+          {
+            workspaceRoot: requested,
+            cause: directory.cause,
+          },
+        );
+        return false;
+      }
+      return directory.kind === 'absent';
+    } catch (error: unknown) {
+      // degradation-audit: reported - a failed directory read keeps the retryable message; warned.
+      this.warnLimited(
+        'probe-failed',
+        requested,
+        '[GitRoot] directory read failed',
+        {
+          workspaceRoot: requested,
+          cause: error instanceof Error ? error.message : String(error),
+        },
+      );
+      return false;
+    }
+  }
+
+  /**
+   * True when `requested` is inside a registered workspace folder, or is a
+   * direct child of a folder's parent directory (not a filesystem root).
+   */
+  private isNearWorkspace(requested: string): boolean {
+    const { workspace, platform } = this.deps;
+    const folders = workspace.getWorkspaceFolders();
+    if (isPathWithinRoots(requested, folders, platform)) return true;
+    const paths = platform === 'win32' ? path.win32 : path.posix;
+    const requestedParent = paths.dirname(paths.resolve(requested));
+    return folders.some((root) => {
+      const parent = paths.dirname(paths.resolve(root));
+      if (parent === paths.parse(parent).root) return false;
+      return (
+        isPathWithinRoots(requestedParent, [parent], platform) &&
+        isPathWithinRoots(parent, [requestedParent], platform)
+      );
+    });
   }
 
   /**

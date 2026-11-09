@@ -15,6 +15,7 @@ import {
 import { TabManagerService } from '@ptah-extension/chat-state';
 import {
   GIT_ROOT_UNAVAILABLE_MESSAGE,
+  GIT_ROOT_MISSING_MESSAGE,
   GIT_ROOT_PROBE_FAILED_MESSAGE,
   MESSAGE_TYPES,
   type GitInfoResult,
@@ -663,7 +664,7 @@ export class ChangeSetStore implements MessageHandler {
         if (result.error === GIT_ROOT_PROBE_FAILED_MESSAGE) {
           this.failedUntil.set(sessionId, Date.now() + RECONCILE_FAILURE_BACKOFF_MS);
           snapshot = current ?? null;
-        } else if (result.error === GIT_ROOT_UNAVAILABLE_MESSAGE) {
+        } else if (result.error === GIT_ROOT_UNAVAILABLE_MESSAGE || result.error === GIT_ROOT_MISSING_MESSAGE) {
           this.unavailableRoots.set(sessionId, { root, until: Date.now() + ChangeSetStore.UNAVAILABLE_ROOT_BACKOFF_MS });
         } else {
           this.failedUntil.set(sessionId, Date.now() + RECONCILE_FAILURE_BACKOFF_MS);
