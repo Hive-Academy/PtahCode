@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, computed, inject, input, output } from '@angular/core';
 import { NativePopoverComponent, ProviderMarkComponent } from '@ptah-extension/ui';
 import type { CliLaneDefaults, CliType } from '@ptah-extension/shared';
 import { cliModelDisplay, type SystemCliMatrixRow } from './cli-matrix-rows';
@@ -81,7 +81,7 @@ export type CliProviderDefaultChoice = NonNullable<CliLaneDefaults[CliType]>;
       </div>
       <div class="credential-slot min-w-0 px-1 text-xs">
         @if (row().credentialAction) {
-          <ptah-native-popover [isOpen]="openKind() === 'credentials'" placement="bottom-start" [hasBackdrop]="true" backdropClass="transparent" (closed)="popoverClosed.emit()">
+          <ptah-native-popover [isOpen]="openKind() === 'credentials'" placement="bottom-start" [hasBackdrop]="true" backdropClass="transparent" (opened)="focusCredentialKey()" (closed)="popoverClosed.emit()">
             <button trigger type="button" class="btn btn-ghost btn-xs" data-popover-kind="credentials" [attr.aria-expanded]="openKind() === 'credentials'"
               (click)="popoverRequested.emit('credentials')">Credentials</button>
             @if (openKind() === 'credentials') { <ptah-cursor-credential-popover content (closed)="popoverClosed.emit()" /> }
@@ -136,6 +136,11 @@ export class CliProviderCardComponent {
       return;
     }
     this.toggled.emit({ row: this.row(), event });
+  }
+  private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
+  /** The Credentials popover's key field takes focus once the panel is positioned. */
+  protected focusCredentialKey(): void {
+    this.element.nativeElement.querySelector<HTMLElement>('[data-testid="cursor-credential-key"]:not([disabled])')?.focus();
   }
   protected requestPopover(kind: CliProviderOpenKind): void {
     if (!this.busy()) this.popoverRequested.emit(kind);
