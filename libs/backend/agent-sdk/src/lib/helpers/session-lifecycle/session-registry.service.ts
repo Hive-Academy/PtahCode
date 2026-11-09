@@ -763,6 +763,9 @@ export class SessionRegistry {
         this.bySessionId.delete(rec.realSessionId);
       }
       this.recomputeLastActiveOnRemoval(rec.tabId);
+      // No teardown can find an evicted record. Abort it, so a pending
+      // initialization stops and its MCP credential is revoked.
+      rec.abortController.abort();
       evicted += 1;
       this.logger.warn(
         `[SessionRegistry] Evicted stale session record: ${rec.tabId} ` +
