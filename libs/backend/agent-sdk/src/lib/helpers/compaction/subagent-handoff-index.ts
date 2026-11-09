@@ -19,8 +19,8 @@
  * (`POINTER_TIMEOUT_MS`) so that line reaches the prompt. A resolved record
  * (`consumed`/`dismissed`) leaves the list; one older than
  * {@link HANDOFF_RETENTION_MS} is deleted. A pending or malformed record is
- * never deleted. A record whose head cannot be read is listed with a note to
- * open it directly, and the cursor moves past it.
+ * never deleted. A record whose head cannot be read stays hidden, and the
+ * cursor moves past it.
  *
  * Audience comes from the record name's owner hash: a record owned by a
  * session in `hidden` (another live session of this process) is not shown; one
@@ -31,9 +31,11 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import type { Logger } from '@ptah-extension/vscode-core';
 import { SUBAGENT_HANDOFF_DIR } from './subagent-handoff-files';
+import { NEUTRALIZE_MIN_AGE_MS, neutralizeOrphanRecord } from './subagent-handoff-neutralize';
 import {
   HANDOFF_RECORD_HEAD_BYTES,
   checkHandoffDir,
+  hasScrubProof,
   parseRecordHead,
   parseRecordName,
   type HandoffRecordStatus,
@@ -52,11 +54,13 @@ export const MAX_TEMP_CLEANUPS = 10;
 
 /** `.<record name>.tmp`: a record write that was never removed (`publishComplete`). */
 function isRecordTempName(name: string): boolean {
-  return (
+  if (
     name.startsWith('.') &&
     name.endsWith('.tmp') &&
     parseRecordName(name.slice(1, -'.tmp'.length)) !== undefined
-  );
+  ) return true;
+  const scrub = /^(.*\.handoff\.md)\.[0-9a-f]{8}\.scrub\.tmp$/.exec(name);
+  return scrub !== null && parseRecordName(scrub[1]) !== undefined;
 }
 
 const POINTER_HEADER =
@@ -69,7 +73,6 @@ const FOREIGN_SUFFIX =
   ' (from another or an ended session; continue it only if that session is ' +
   'not running, else leave it)';
 const MALFORMED_SUFFIX = ' (frontmatter unreadable)';
-const UNREADABLE_SUFFIX = ' (could not be read; open it directly)';
 
 /** Who sees which records on one prompt. */
 export interface HandoffPointerAudience {
@@ -123,6 +126,7 @@ interface WorkspaceIndex {
   readonly cursors: Map<string, string>;
   /** Where the next load's temp-file cleanup starts (rotates across loads). */
   tempCursor: number;
+  neutralizedThisScan: number;
 }
 
 /** What one head read found. */
@@ -131,6 +135,7 @@ type HeadRead =
   | {
       readonly kind: 'status';
       readonly status: HandoffRecordStatus;
+      readonly scrubbed: boolean;
       readonly mtimeMs: number;
     };
 
@@ -205,6 +210,7 @@ export class SubagentHandoffIndex {
         resolved: new Set(),
         cursors: new Map(),
         tempCursor: 0,
+        neutralizedThisScan: 0,
       };
       this.workspaces.set(workspace, index);
     }
@@ -254,6 +260,7 @@ export class SubagentHandoffIndex {
       index.names = [...names].sort();
       index.ready = true;
       index.loadedAt = this.now();
+      index.neutralizedThisScan = 0;
       if (check.ok) {
         await this.removeStaleTemps(index, check.dir, found);
       }
@@ -336,10 +343,11 @@ export class SubagentHandoffIndex {
     try {
       read = await this.readHead(file);
     } catch (error: unknown) {
+      // degradation-audit: optional-capability - an unreadable record stays hidden (fail closed).
       this.logger.debug('[SubagentHandoffIndex] Handoff record head not read', {
         errorCode: errorCodeOf(error),
       });
-      return `${prefix}${UNREADABLE_SUFFIX}`;
+      return undefined;
     }
     if (read.kind === 'gone') {
       removeName(index.names, name);
@@ -350,6 +358,19 @@ export class SubagentHandoffIndex {
       index.resolved.add(name);
       if (this.now() - read.mtimeMs > HANDOFF_RETENTION_MS) {
         await this.deleteResolved(file);
+      }
+      return undefined;
+    }
+    if (!read.scrubbed) {
+      if (read.status === 'pending' && this.now() - read.mtimeMs >= NEUTRALIZE_MIN_AGE_MS
+        && index.neutralizedThisScan < MAX_TEMP_CLEANUPS) {
+        index.neutralizedThisScan += 1;
+        try {
+          await neutralizeOrphanRecord(file, this.now());
+        } catch (error: unknown) {
+          this.logger.error('[SubagentHandoffIndex] Proofless handoff record not neutralized',
+            error instanceof Error ? error : new Error(String(error)));
+        }
       }
       return undefined;
     }
@@ -369,6 +390,7 @@ export class SubagentHandoffIndex {
       return {
         kind: 'status',
         status: parseRecordHead(head),
+        scrubbed: hasScrubProof(head),
         mtimeMs: stat.mtimeMs,
       };
     } catch (error: unknown) {
@@ -432,7 +454,7 @@ export class SubagentHandoffIndex {
 }
 
 function timeoutLine(dir: string): string {
-  return `Ptah: handoff records could not be checked in time; look in \`${dir}\` for \`*.handoff.md\` files with \`status: pending\`.`;
+  return `Ptah: handoff records could not be checked in time; look in \`${dir}\` for \`*.handoff.md\` files with both \`status: pending\` and \`notesScrubbed: true\`.`;
 }
 
 /** What {@link raceDeadline} returns when `ms` passed first. */

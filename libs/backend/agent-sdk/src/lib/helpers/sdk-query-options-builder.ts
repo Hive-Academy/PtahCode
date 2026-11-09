@@ -1325,7 +1325,14 @@ export class SdkQueryOptionsBuilder {
           .safeParse(hookInput.tool_input);
         if (!toolInput.success) return {};
         const budgetSession = sessionIdResolver?.() ?? sessionId;
-        if (!budgetSession) return {};
+        if (!budgetSession) {
+          this.logger.warn('[SdkQueryOptionsBuilder] SendMessage budget gate missing session id; allowing the call', {
+            hasSessionId: false, eventName: hookInput.hook_event_name,
+            agentId: toolInput.data.to, toolName: hookInput.tool_name,
+          });
+          // No session-independent stopped-target state is available here, so allow this call.
+          return {};
+        }
         const refusal = this.permissionHandler.budgetSendMessageRefusal(
           toolInput.data.to,
           budgetSession,

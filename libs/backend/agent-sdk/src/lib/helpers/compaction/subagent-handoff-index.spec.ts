@@ -3,6 +3,7 @@ import * as fsp from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { Logger } from '@ptah-extension/vscode-core';
+import { NEUTRALIZE_MIN_AGE_MS } from './subagent-handoff-neutralize';
 import {
   HANDOFF_RETENTION_MS,
   INDEX_RESCAN_MS,
@@ -101,7 +102,8 @@ describe('SubagentHandoffIndex', () => {
         seq.toString(16).padStart(8, '0'),
       ) ?? '';
     const file = path.join(dir, name);
-    fs.writeFileSync(file, opts.content ?? renderRecord(BODY));
+    fs.writeFileSync(file, opts.content ?? renderRecord(BODY).replace(
+      'status: pending\n', 'status: pending\nnotesScrubbed: true\n'));
     if (opts.ageMs !== undefined) {
       const at = new Date(NOW - opts.ageMs);
       fs.utimesSync(file, at, at);
@@ -115,6 +117,57 @@ describe('SubagentHandoffIndex', () => {
       .filter((line) => line.startsWith('- '))
       .map((line) => line.slice(2).split(' (')[0]);
   }
+
+  it('ignores old-format records without durable scrub proof', async () => {
+    const file = record({ content: renderRecord('notes: /old/secret'), ageMs: NEUTRALIZE_MIN_AGE_MS + 1 });
+    const stub = path.join(root, 'old-stub.md');
+    fs.writeFileSync(stub, `Read ${file} when status: pending`);
+    const { index } = makeIndex();
+    expect((await index.pointerFor(root, audience())) ?? '').not.toContain(file);
+    expect(fs.readFileSync(file, 'utf8')).not.toContain('/old/secret');
+    expect(fs.readFileSync(stub, 'utf8')).toContain(file);
+  });
+
+  it('keeps a failed neutralization hidden and logs the Error', async () => {
+    const file = record({ content: renderRecord('notes: /old/secret'), ageMs: NEUTRALIZE_MIN_AGE_MS + 1 });
+    const fault = new Error('rename refused');
+    const rename = jest.spyOn(require('node:fs/promises') as typeof import('node:fs/promises'), 'rename')
+      .mockRejectedValueOnce(fault);
+    try {
+      const { index, logger } = makeIndex();
+      expect((await index.pointerFor(root, audience())) ?? '').not.toContain(file);
+      expect(logger.error).toHaveBeenCalledWith(expect.any(String), fault);
+      expect(fs.readFileSync(file, 'utf8')).toContain('/old/secret');
+    } finally {
+      rename.mockRestore();
+    }
+  });
+
+  it('leaves a young proofless record from another process untouched', async () => {
+    const file = record({ owner: OTHER, content: renderRecord('notes: /young/secret'), ageMs: NEUTRALIZE_MIN_AGE_MS - 1 });
+    const { index } = makeIndex();
+    expect((await index.pointerFor(root, audience())) ?? '').not.toContain(file);
+    expect(fs.readFileSync(file, 'utf8')).toContain('/young/secret');
+  });
+
+  it('preserves the primary failure when temp cleanup also fails', async () => {
+    const file = record({ content: renderRecord('notes: /old/secret'), ageMs: NEUTRALIZE_MIN_AGE_MS + 1 });
+    const primary = new Error('rename refused');
+    const cleanup = new Error('unlink refused');
+    const promises = require('node:fs/promises') as typeof import('node:fs/promises');
+    const rename = jest.spyOn(promises, 'rename').mockRejectedValueOnce(primary);
+    const unlink = jest.spyOn(promises, 'unlink').mockRejectedValueOnce(cleanup);
+    try {
+      const { index, logger } = makeIndex();
+      expect((await index.pointerFor(root, audience())) ?? '').not.toContain(file);
+      const logged = logger.error.mock.calls[0]?.[1];
+      expect(logged).toBeInstanceOf(AggregateError);
+      expect(logged.errors).toEqual([primary, cleanup]);
+    } finally {
+      rename.mockRestore();
+      unlink.mockRestore();
+    }
+  });
 
   it("lists a previous run's pending record with the header, paths only", async () => {
     const file = record();
@@ -182,7 +235,7 @@ describe('SubagentHandoffIndex', () => {
     const files = nodeFs({
       readdir: async () => [...names].reverse(),
       lstat: async () => ({ isFile: () => true, mtimeMs: NOW }),
-      readHead: async () => renderRecord(BODY),
+      readHead: async () => renderRecord(BODY).replace('status: pending\n', 'status: pending\nnotesScrubbed: true\n'),
     });
     const { index } = makeIndex(files);
     const seen = new Set<string>();
@@ -213,8 +266,8 @@ describe('SubagentHandoffIndex', () => {
 
     const pointer = await index.pointerFor(root, audience());
 
-    expect(listed(pointer)).toEqual([oldPending, oldMalformed]);
-    expect(pointer).toContain(`- ${oldMalformed} (frontmatter unreadable)`);
+    expect(listed(pointer)).toEqual([oldPending]);
+    expect(pointer).not.toContain(oldMalformed);
     expect(fs.existsSync(oldConsumed)).toBe(false);
     expect(fs.existsSync(newConsumed)).toBe(true);
     expect(fs.existsSync(dismissed)).toBe(true);
@@ -222,11 +275,8 @@ describe('SubagentHandoffIndex', () => {
     expect(fs.existsSync(oldMalformed)).toBe(true);
     expect(HANDOFF_RETENTION_MS).toBe(7 * DAY);
 
-    // Resolved records left the list: the next prompt reads only the two left.
-    expect(listed(await index.pointerFor(root, audience()))).toEqual([
-      oldPending,
-      oldMalformed,
-    ]);
+    // The malformed record has no proof and stays hidden.
+    expect(listed(await index.pointerFor(root, audience()))).toEqual([oldPending]);
   });
 
   it('does not recheck resolved heads or claim more records after a rescan', async () => {
@@ -263,7 +313,7 @@ describe('SubagentHandoffIndex', () => {
     await index.pointerFor(root, audience());
     await index['workspaces'].get(path.resolve(root))?.loading;
 
-    fs.writeFileSync(file, renderRecord(BODY));
+    fs.writeFileSync(file, renderRecord(BODY).replace('status: pending\n', 'status: pending\nnotesScrubbed: true\n'));
     clock += INDEX_RESCAN_MS;
     await index.pointerFor(root, audience());
     await index['workspaces'].get(path.resolve(root))?.loading;
@@ -278,6 +328,17 @@ describe('SubagentHandoffIndex', () => {
     fs.utimesSync(temp, old, old);
     const { index } = makeIndex();
 
+    await expect(index.pointerFor(root, audience())).resolves.toBeUndefined();
+    expect(fs.existsSync(temp)).toBe(false);
+  });
+
+  it('cleans an old scrub temp without treating it as a record', async () => {
+    const file = record();
+    const temp = `${file}.1234abcd.scrub.tmp`;
+    fs.renameSync(file, temp);
+    const old = new Date(NOW - 8 * DAY);
+    fs.utimesSync(temp, old, old);
+    const { index } = makeIndex();
     await expect(index.pointerFor(root, audience())).resolves.toBeUndefined();
     expect(fs.existsSync(temp)).toBe(false);
   });
@@ -379,7 +440,7 @@ describe('SubagentHandoffIndex', () => {
 
     const pointer = await index.pointerFor(root, audience());
     expect(pointer).toBe(
-      `Ptah: handoff records could not be checked in time; look in \`${dir}\` for \`*.handoff.md\` files with \`status: pending\`.`,
+      `Ptah: handoff records could not be checked in time; look in \`${dir}\` for \`*.handoff.md\` files with both \`status: pending\` and \`notesScrubbed: true\`.`,
     );
 
     release();
@@ -406,7 +467,7 @@ describe('SubagentHandoffIndex', () => {
     const pointer = await index.pointerFor(root, audience());
 
     expect(pointer).toBe(
-      `Ptah: handoff records could not be checked in time; look in \`${dir}\` for \`*.handoff.md\` files with \`status: pending\`.`,
+      `Ptah: handoff records could not be checked in time; look in \`${dir}\` for \`*.handoff.md\` files with both \`status: pending\` and \`notesScrubbed: true\`.`,
     );
     stalled.clear();
     // The cursor did not move past the abandoned visit: both are named.
@@ -482,7 +543,7 @@ describe('SubagentHandoffIndex', () => {
     expect(listed(await index.pointerFor(root, audience()))).toEqual([later]);
   });
 
-  it('a record whose head read fails on every prompt is listed to open directly and never starves the rest', async () => {
+  it('a record whose head read fails stays hidden and never starves the rest', async () => {
     const failing = record();
     const files = Array.from({ length: 12 }, () => record());
     const { index, logger } = makeIndex(
@@ -499,10 +560,8 @@ describe('SubagentHandoffIndex', () => {
     const first = await index.pointerFor(root, audience());
     const second = await index.pointerFor(root, audience());
 
-    expect(first).toContain(
-      `- ${failing} (could not be read; open it directly)`,
-    );
-    expect(listed(first)).toEqual([failing, ...files.slice(0, 9)]);
+    expect(first).not.toContain(failing);
+    expect(listed(first)).toEqual(files.slice(0, 9));
     expect(listed(second)).toEqual(files.slice(9));
     expect(fs.existsSync(failing)).toBe(true);
     expect(logger.debug).toHaveBeenCalledWith(
@@ -511,7 +570,7 @@ describe('SubagentHandoffIndex', () => {
     );
   });
 
-  it('a failing record and a readable pending one are both listed on every prompt', async () => {
+  it('a failing record stays hidden while a readable pending one is listed', async () => {
     const failing = record();
     const readable = record();
     const { index } = makeIndex(
@@ -527,10 +586,8 @@ describe('SubagentHandoffIndex', () => {
 
     for (let i = 0; i < 3; i += 1) {
       const pointer = await index.pointerFor(root, audience());
-      expect(listed(pointer)).toEqual([failing, readable]);
-      expect(pointer).toContain(
-        `- ${failing} (could not be read; open it directly)`,
-      );
+      expect(listed(pointer)).toEqual([readable]);
+      expect(pointer).not.toContain(failing);
     }
   });
 

@@ -14,15 +14,16 @@
  *
  * The file is written once under a temporary `.<name>.tmp` name the index
  * ignores, then published under its record name by an exclusive hard link,
- * so that name only ever shows a complete record; the host never rewrites
- * it. Its frontmatter carries only `status`: `pending` when written;
+ * so that name only ever shows a complete record. After the final notes scrub,
+ * the host atomically replaces it with a scrub-proof version. Its frontmatter
+ * starts with `status: pending` and gains `notesScrubbed: true` only then;
  * the agent that reads it sets `consumed` or `dismissed`.
  *
  * One record per tool-use id: concurrent stops of one subagent (two session
  * records not yet merged by a rekey) share the first write. Once the stop was
  * invoked with a record ({@link SubagentHandoffRecords.markInvoked}), the host
- * never deletes it; before that, {@link SubagentHandoffRecords.withdraw}
- * removes a record whose stop will not run.
+ * retains it only after publication. A failed final notes scrub disposes of
+ * an unpublished record, even if its stop was invoked.
  *
  * Trust boundary: the workspace filesystem is trusted local state, as for the
  * other `.ptah/subagent-handoffs` files. Before a write, `.ptah` and the
@@ -177,6 +178,15 @@ export function parseRecordHead(head: string): HandoffRecordStatus {
   return 'malformed';
 }
 
+/** Only a completed final notes scrub authorizes a record pointer. */
+export function hasScrubProof(head: string): boolean {
+  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(head)?.[1];
+  return frontmatter !== undefined &&
+    frontmatter.split(/\r?\n/).filter((line) => line === 'notesScrubbed: true').length === 1 &&
+    !frontmatter.split(/\r?\n/).some((line) =>
+      line.startsWith('notesScrubbed:') && line !== 'notesScrubbed: true');
+}
+
 function isKnownStatus(
   value: string | undefined,
 ): value is Exclude<HandoffRecordStatus, 'malformed'> {
@@ -203,8 +213,9 @@ function errorDetails(error: unknown): {
   };
 }
 
-function errorCodeOf(error: unknown): string | undefined {
-  return errorDetails(error).errorCode;
+export function errorCodeOf(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return undefined;
+  return typeof error.code === 'string' ? error.code : undefined;
 }
 
 /** Path comparison as the platform's filesystem compares them. */
@@ -297,8 +308,18 @@ interface RecordWriter {
   readonly write: Promise<HandoffRecordWrite>;
   /** The record path once the write succeeded. */
   path?: string;
-  /** `stopSubagent` was called with this record: never delete it. */
+  /** `stopSubagent` was called with this record. */
   invoked: boolean;
+  published?: boolean;
+  disposing?: boolean;
+  scrub?: Promise<boolean>;
+}
+
+/** Paths whose writer may still publish scrub proof in this process. */
+const liveRecordPaths = new Set<string>();
+
+export function hasLiveRecordWriter(recordPath: string): boolean {
+  return liveRecordPaths.has(recordPath);
 }
 
 export class SubagentHandoffRecords {
@@ -353,6 +374,15 @@ export class SubagentHandoffRecords {
     }
   }
 
+  /** Claim publication synchronously with disposal's ownership check. */
+  publishIfOwned(toolCallId: string, recordPath: string, publish: () => void): boolean {
+    const writer = this.writers.get(toolCallId);
+    if (!writer || writer.disposing || writer.path !== recordPath) return false;
+    writer.published = true;
+    publish();
+    return true;
+  }
+
   /**
    * The stop of `toolCallId` will not run (released session, or another stop
    * finished first): delete its record at `recordPath`, unless a stop was
@@ -360,11 +390,12 @@ export class SubagentHandoffRecords {
    */
   async withdraw(toolCallId: string, recordPath: string): Promise<void> {
     const writer = this.writers.get(toolCallId);
-    if (!writer || writer.invoked || writer.path !== recordPath) {
+    if (!writer || writer.invoked || writer.published || writer.path !== recordPath) {
       return;
     }
     this.writers.delete(toolCallId);
     try {
+      await writer.scrub;
       await fs.unlink(recordPath);
       this.logger.debug('[SubagentHandoffRecords] Handoff record withdrawn', {
         toolCallId,
@@ -374,6 +405,87 @@ export class SubagentHandoffRecords {
         '[SubagentHandoffRecords] Handoff record not withdrawn',
         { toolCallId, ...errorDetails(error) },
       );
+    } finally {
+      liveRecordPaths.delete(recordPath);
+    }
+  }
+
+  /** Remove unpublished unsafe records; retain published records without their unsafe content. */
+  async disposeUnsafe(toolCallId: string, recordPath: string): Promise<void> {
+    const writer = this.writers.get(toolCallId);
+    if (!writer || writer.disposing || writer.path !== recordPath) return;
+    writer.disposing = true;
+    try {
+      await writer.scrub;
+      if (writer.published) {
+        await fs.writeFile(recordPath, renderRecord('Handoff notes unavailable because final redaction failed.'), 'utf8');
+      } else {
+        await fs.unlink(recordPath);
+        this.writers.delete(toolCallId);
+      }
+    } catch (error: unknown) {
+      this.logger.warn('[SubagentHandoffRecords] Unsafe handoff record could not be disposed', {
+        toolCallId,
+        error: error instanceof Error ? error : new Error(String(error)),
+      });
+    } finally {
+      liveRecordPaths.delete(recordPath);
+    }
+  }
+
+  /** Publish durable proof only after final redaction succeeded. */
+  markScrubbed(toolCallId: string, recordPath: string): Promise<boolean> {
+    const writer = this.writers.get(toolCallId);
+    if (!writer || writer.disposing || writer.path !== recordPath) return Promise.resolve(false);
+    if (writer.scrub) return writer.scrub;
+    const scrub = this.persistScrubProof(toolCallId, recordPath, writer);
+    writer.scrub = scrub;
+    void scrub.then(
+      () => { if (writer.scrub === scrub) writer.scrub = undefined; },
+      () => { if (writer.scrub === scrub) writer.scrub = undefined; },
+    );
+    return scrub;
+  }
+
+  private async persistScrubProof(toolCallId: string, recordPath: string, writer: RecordWriter): Promise<boolean> {
+    let tempPath: string | undefined;
+    try {
+      tempPath = `${recordPath}.${randomBytes(4).toString('hex')}.scrub.tmp`;
+      const content = await fs.readFile(recordPath, 'utf8');
+      if (hasScrubProof(content)) {
+        return !writer.disposing && this.writers.get(toolCallId) === writer && writer.path === recordPath;
+      }
+      if (!content.startsWith('---\nstatus: pending\n---\n')) {
+        throw new Error('Handoff record frontmatter changed before scrub proof');
+      }
+      await fs.writeFile(tempPath,
+        content.replace('---\nstatus: pending\n---\n',
+          '---\nstatus: pending\nnotesScrubbed: true\n---\n'), 'utf8');
+      if (writer.disposing || this.writers.get(toolCallId) !== writer || writer.path !== recordPath) {
+        return false;
+      }
+      if (await fs.readFile(recordPath, 'utf8') !== content) {
+        throw new Error('Handoff record changed before scrub proof publication');
+      }
+      if (writer.disposing || this.writers.get(toolCallId) !== writer || writer.path !== recordPath) {
+        return false;
+      }
+      await fs.rename(tempPath, recordPath);
+      return true;
+    } catch (error: unknown) {
+      this.logger.error('[SubagentHandoffRecords] Scrub proof not persisted',
+        error instanceof Error ? error : new Error(String(error)));
+      return false;
+    } finally {
+      try {
+        if (tempPath) await fs.unlink(tempPath);
+      } catch (error: unknown) {
+        if (errorCodeOf(error) !== 'ENOENT') {
+          this.logger.warn('[SubagentHandoffRecords] Scrub proof temp not removed', {
+            error: error instanceof Error ? error : new Error(String(error)),
+          });
+        }
+      }
     }
   }
 
@@ -385,6 +497,7 @@ export class SubagentHandoffRecords {
   forget(sessionIds: ReadonlySet<string>): void {
     for (const [toolCallId, writer] of this.writers) {
       if (writer.invoked && sessionIds.has(writer.sessionId)) {
+        if (writer.path) liveRecordPaths.delete(writer.path);
         this.writers.delete(toolCallId);
       }
     }
@@ -478,7 +591,13 @@ export class SubagentHandoffRecords {
         return { ok: false, errorType: 'GuardRefused' };
       }
       const recordPath = path.join(check.dir, name);
-      await this.publishComplete(recordPath, renderRecord(text));
+      liveRecordPaths.add(recordPath);
+      try {
+        await this.publishComplete(recordPath, renderRecord(text));
+      } catch (error: unknown) {
+        liveRecordPaths.delete(recordPath);
+        throw error;
+      }
       return { ok: true, path: recordPath, workspace, name };
     } catch (error: unknown) {
       return { ok: false, ...errorDetails(error) };
@@ -534,6 +653,7 @@ export class SubagentHandoffRecords {
   ): Promise<void> {
     try {
       await fs.unlink(recordPath);
+      liveRecordPaths.delete(recordPath);
     } catch (error: unknown) {
       this.logger.warn(
         '[SubagentHandoffRecords] Late handoff record not withdrawn',
@@ -567,7 +687,7 @@ export class SubagentHandoffRecords {
         path.join(target, fileName),
         'Ptah subagent handoff stub. Never edit this file. The handoff ' +
           `record is \`${recordPath}\`: if its frontmatter has ` +
-          '`status: pending`, read it, continue from it, then set ' +
+          '`status: pending` and `notesScrubbed: true`, read it, continue from it, then set ' +
           '`status: consumed` in the record.\n',
         { encoding: 'utf8', flag: 'wx' },
       );

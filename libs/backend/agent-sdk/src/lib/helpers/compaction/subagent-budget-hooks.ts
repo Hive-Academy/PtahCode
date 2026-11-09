@@ -13,9 +13,11 @@ const base = z.object({
   tool_input: z.unknown().optional(),
 });
 
+const NOTES_GATE_FAILURE_REASON = 'Ptah notes gate failed. End your turn now; do not call other tools.';
+
 /** Hook side of the cooperative exit. All input fields are parsed before use. */
 export function createSubagentBudgetHooks(
-  logger: Pick<Logger, 'info' | 'debug' | 'error'>,
+  logger: Pick<Logger, 'info' | 'debug' | 'warn' | 'error'>,
   monitor: Pick<SubagentBudgetMonitor, 'checkNotesTool' | 'hasNotesGate' | 'finishWarnedAgent' | 'takeNormalHandoff' | 'takeInterruptedHandoff'>,
   capturedSessionId?: string,
 ): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
@@ -35,7 +37,34 @@ export function createSubagentBudgetHooks(
         timestamp: Date.now(),
       });
       const sessionId = data.session_id ?? capturedSessionId;
-      if (!sessionId) return { continue: true };
+      if (!sessionId) {
+        logger.warn('[SubagentBudgetHooks] Hook missing session id', {
+          hasSessionId: false, eventName: event, agentId: data.agent_id, toolName: data.tool_name,
+        });
+        if (event === 'PreToolUse' && monitor.hasNotesGate(data.agent_id)) {
+          if (!data.tool_name) return { hookSpecificOutput: {
+            hookEventName: 'PreToolUse' as const, permissionDecision: 'deny' as const,
+            permissionDecisionReason: NOTES_GATE_FAILURE_REASON,
+          } };
+          try {
+            const reason = await monitor.checkNotesTool(undefined, data.agent_id, data.tool_name, data.tool_input);
+            return reason ? { hookSpecificOutput: {
+              hookEventName: 'PreToolUse' as const, permissionDecision: 'deny' as const,
+              permissionDecisionReason: reason,
+            } } : { continue: true };
+          } catch (error: unknown) {
+            logger.error('[SubagentBudgetHooks] Hook failed', {
+              error: error instanceof Error ? error : new Error(String(error)), eventName: event,
+              agentId: data.agent_id, toolUseId: data.tool_use_id,
+            });
+            return { hookSpecificOutput: {
+              hookEventName: 'PreToolUse' as const, permissionDecision: 'deny' as const,
+              permissionDecisionReason: NOTES_GATE_FAILURE_REASON,
+            } };
+          }
+        }
+        return { continue: true };
+      }
       try {
         if (event === 'PreToolUse' && data.tool_name) {
           const reason = await monitor.checkNotesTool(sessionId, data.agent_id, data.tool_name, data.tool_input);
@@ -67,7 +96,7 @@ export function createSubagentBudgetHooks(
         if (event === 'PreToolUse' && monitor.hasNotesGate(data.agent_id)) {
           return { hookSpecificOutput: {
             hookEventName: 'PreToolUse' as const, permissionDecision: 'deny' as const,
-            permissionDecisionReason: 'Ptah notes gate failed. End your turn now; do not call other tools.',
+            permissionDecisionReason: NOTES_GATE_FAILURE_REASON,
           } };
         }
       }

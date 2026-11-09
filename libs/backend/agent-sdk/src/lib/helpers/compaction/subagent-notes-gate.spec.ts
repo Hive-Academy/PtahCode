@@ -49,6 +49,24 @@ describe('SubagentNotesGate', () => {
     }
   });
 
+  it.each([NOTES_GATE_GRACE_MS, NOTES_GATE_GRACE_MS + 1])('expires a first decision at grace + %i', (elapsed) => {
+    const gate = new SubagentNotesGate();
+    gate.warn('agent-1', notes, root, 100);
+    expect(gate.check('agent-1', 'Write', { file_path: notes }, 100 + elapsed)).toEqual({
+      reason: 'Ptah budget handoff expired. End your turn now.', stop: true,
+    });
+    expect(gate.expired('agent-1', 100 + elapsed)).toBe(true);
+  });
+
+  it('checks every notes write and stops an expired second write', () => {
+    const gate = new SubagentNotesGate();
+    gate.warn('agent-1', notes, root, 100);
+    expect(gate.check('agent-1', 'Write', { file_path: notes }, 101).stop).toBe(false);
+    expect(gate.check('agent-1', 'Edit', { file_path: notes }, 102).stop).toBe(false);
+    expect(gate.check('agent-1', 'Read', {}, 103).reason).toContain('End your turn now');
+    expect(gate.check('agent-1', 'Write', { file_path: notes }, 101 + NOTES_GATE_TIMEOUT_MS).stop).toBe(true);
+  });
+
   it('accepts Windows drive casing and forward slashes for the exact notes path', () => {
     if (process.platform !== 'win32') return;
     const gate = new SubagentNotesGate();

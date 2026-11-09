@@ -4,10 +4,6 @@
  *
  * Routes:
  *
- * - {@link SubagentHandoffDelivery.post} (foreground subagent): the handoff
- *   waits in the main-thread notice queue for the spawning tool result. If
- *   the queue drops it undelivered (past its bound, or cleared at turn or
- *   session end), it is sent as a user turn instead.
  * - {@link SubagentHandoffDelivery.send} (background subagent, or a notice
  *   withdrawn undrained): a host-authored user turn (`pushParentMessage`),
  *   tried up to {@link PARENT_PUSH_ATTEMPTS} times with a linear backoff of
@@ -81,15 +77,6 @@ export class SubagentHandoffDelivery {
     /** The id a session lives on as now, `undefined` once it was released. */
     private readonly liveSessionId: (sessionId: string) => string | undefined,
   ) {}
-
-  /** Queue the handoff for the spawning tool result; a dropped notice is sent as a user turn. */
-  post(sessionId: string, toolCallId: string, handoff: Handoff): void {
-    this.port.postMainThreadNotice(
-      sessionId,
-      handoff.text,
-      () => void this.send(sessionId, toolCallId, handoff),
-    );
-  }
 
   /**
    * Send the handoff as a user turn, with bounded retries. When they all
