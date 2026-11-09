@@ -1,13 +1,13 @@
 import { inject, injectable } from 'tsyringe';
 import { PERSISTENCE_TOKENS, type SqliteDatabase } from '@ptah-extension/persistence-sqlite';
-import { ReviewFindingSchema } from '@ptah-extension/review-contracts';
-import { rightAnchorKey } from '@ptah-extension/review-github';
+import { ReviewFindingSchema, rightAnchorKey } from '@ptah-extension/review-contracts';
 import { ReviewPolicyService } from '../review-policy.service';
 import type { ReviewQueueClaim } from '../review-queue.service';
 import type { VerificationResult } from '../stages/verification-stage.runner';
 import type { IncrementalScope } from '../context/incremental-scope.service';
 import { PublicationOutboxRepository } from './publication-outbox.repository';
 import { PublicationOutboxService } from './publication-outbox.service';
+import { escapeText, renderInline, renderSummary, type ReviewRunRow } from './review-markdown.renderer';
 
 const severityRank = { Critical: 4, Major: 3, Minor: 2, Nitpick: 1 } as const;
 const unsafeText = /(?:[A-Za-z]:\\[^\s]+|\/(?:Users|home|tmp|var|private)\/[^\s]+|(?:ghp_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|(?:ignore previous instructions|system prompt|developer message))/gi;
@@ -15,7 +15,7 @@ const unsafeText = /(?:[A-Za-z]:\\[^\s]+|\/(?:Users|home|tmp|var|private)\/[^\s]
 function safeText(value: string, secrets: readonly string[]): string {
   let text = value.replace(unsafeText, '[redacted]');
   for (const secret of secrets) if (secret.length >= 4) text = text.split(secret).join('[redacted]');
-  return text;
+  return text.replace(/<!--\s*ptah-review:finding:/gi, '&lt;!-- ptah-review:finding:');
 }
 
 /** Parses RIGHT-side added lines from a unified diff. */
@@ -23,15 +23,32 @@ export function rightAnchors(diff: string): ReadonlySet<string> {
   const anchors = new Set<string>();
   let path: string | null = null;
   let line = 0;
+  let inHunk = false;
   for (const row of diff.split('\n')) {
-    if (row.startsWith('+++ b/')) { path = row.slice(6).trim(); continue; }
+    if (row.startsWith('diff --git ')) { path = null; inHunk = false; continue; }
+    if (!inHunk && row.startsWith('+++ b/')) { path = row.slice(6).trim(); continue; }
     const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(row);
-    if (hunk) { line = Number(hunk[1]); continue; }
-    if (row.startsWith('diff --git ')) { path = null; continue; }
-    if (row.startsWith('+') && !row.startsWith('+++')) { if (path) anchors.add(rightAnchorKey(path, line)); line++; }
-    else if (row.startsWith(' ')) line++;
+    if (hunk) { line = Number(hunk[1]); inHunk = true; continue; }
+    if (inHunk && row.startsWith('+')) { if (path) anchors.add(rightAnchorKey(path, line)); line++; }
+    else if (inHunk && row.startsWith(' ')) line++;
   }
   return anchors;
+}
+
+function rightLines(diff: string): ReadonlyMap<string, string> {
+  const lines = new Map<string, string>();
+  let path: string | null = null;
+  let line = 0;
+  let inHunk = false;
+  for (const row of diff.split('\n')) {
+    if (row.startsWith('diff --git ')) { path = null; inHunk = false; continue; }
+    if (!inHunk && row.startsWith('+++ b/')) { path = row.slice(6).trim(); continue; }
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(row);
+    if (hunk) { line = Number(hunk[1]); inHunk = true; continue; }
+    if (inHunk && row.startsWith('+')) { if (path) lines.set(rightAnchorKey(path, line), row.slice(1).replace(/\r$/, '')); line++; }
+    else if (inHunk && row.startsWith(' ')) line++;
+  }
+  return lines;
 }
 
 @injectable()
@@ -44,7 +61,7 @@ export class ReviewPublicationService {
 
   async publish(claim: ReviewQueueClaim, walkthrough: string, diff: string, verdicts: readonly VerificationResult[],
     settingsInput: unknown, baseConfig: unknown | null, secrets: readonly string[],
-    scope?: IncrementalScope, signal?: AbortSignal): Promise<void> {
+    scope?: IncrementalScope, signal?: AbortSignal, runRows: readonly ReviewRunRow[] = []): Promise<void> {
     const decision = claim.dryRun ? { allowed: false } : this.policy.publication(settingsInput, baseConfig, claim.repo);
     if (!decision.allowed) return;
     const settings = this.policy.effectiveSettings(settingsInput, baseConfig);
@@ -56,6 +73,7 @@ export class ReviewPublicationService {
     const followUps: { findingId: string; body: string }[] = [];
     const selected: { findingId: string; candidateId: string; path: string; line: number; body: string; rank: number;
       finding: ReturnType<typeof ReviewFindingSchema.parse>; verifierFamily: string }[] = [];
+    const anchorLines = rightLines(diff);
     for (const item of verdicts) {
       const output = item.result.status === 'completed' && 'verdict' in item.result.output ? item.result.output : null;
       if (scope && output?.verdict === 'disproved' && output.headSha === claim.headSha &&
@@ -69,7 +87,7 @@ export class ReviewPublicationService {
             failurePathEvidence: output.checkedEvidence.map(e => e.observation).join('; ').slice(0, 4000),
           });
           if (result.outcome === 'addressed' || repository.pendingFollowUp(claim.attemptId, verdict.priorFindingId) === 'addressed') followUps.push({ findingId: verdict.priorFindingId,
-            body: safeText(`Addressed ${finding.title}: ${output.reason}. Evidence: ${output.checkedEvidence.map(e => `${e.path}:${e.line} ${e.observation}`).join('; ')}`, secrets)
+            body: escapeText(safeText(`Addressed ${finding.title}: ${output.reason}. Evidence: ${output.checkedEvidence.map(e => `${e.path}:${e.line} ${e.observation}`).join('; ')}`, secrets))
               + `\n<!-- ptah-review:addressed:${verdict.priorFindingId} -->` });
           continue;
         }
@@ -91,7 +109,7 @@ export class ReviewPublicationService {
       const identity = repository.identity(claim.attemptId, finding, verdict, output.verifierFamily);
       if (identity.findingId === null) { suppressed.push(`${safeText(finding.title, secrets)}: identity-uncertain`); continue; }
       if (identity.outcome === 'reopened' || repository.pendingFollowUp(claim.attemptId, identity.findingId) === 'reopened') {
-        followUps.push({ findingId: identity.findingId, body: safeText(`Reopened finding ${identity.findingId}: ${finding.title}. Evidence: ${finding.evidence.map(e => `${e.path}:${e.line} ${e.excerpt}`).join('; ')}`, secrets)
+         followUps.push({ findingId: identity.findingId, body: escapeText(safeText(`Reopened finding ${identity.findingId}: ${finding.title}. Evidence: ${finding.evidence.map(e => `${e.path}:${e.line} ${e.excerpt}`).join('; ')}`, secrets))
           + `\n<!-- ptah-review:reopened:${identity.findingId} -->` });
         continue;
       }
@@ -110,7 +128,8 @@ export class ReviewPublicationService {
         repository.suppress(claim.attemptId, output.candidateId, finding, 'outside-diff', output.verifierFamily);
         continue;
       }
-      const body = safeText(`**${finding.severity}: ${finding.title}** (${finding.category})\n\n${finding.failureMode}\n\n${finding.affectedBehavior}\n\nEvidence: ${finding.evidence.map(e => `${e.path}:${e.line} ${e.excerpt}`).join('; ')}\n\nPrompt for AI agents: ${finding.fixPrompt}`, secrets);
+      const body = renderInline(finding, claim.repo, claim.headSha, value => safeText(value, secrets),
+        anchorLines.get(rightAnchorKey(finding.path, finding.line)));
       selected.push({ findingId: identity.findingId, candidateId: output.candidateId, path: finding.path,
         line: finding.line, body, finding, verifierFamily: output.verifierFamily,
         rank: severityRank[finding.severity] * 100 + Math.round(finding.confidence * 10) + (finding.verification === 'cross-family' ? 5 : 0) });
@@ -119,17 +138,16 @@ export class ReviewPublicationService {
     const anchors = rightAnchors(diff);
     const inline = selected.filter(item => anchors.has(rightAnchorKey(item.path, item.line))).slice(0, Math.min(settings.maxNewInline, 10));
     for (const item of selected) if (!inline.includes(item)) {
-      suppressed.push(`${safeText(item.body.split('\n')[0], secrets)}: rank-cap-or-outside-diff`);
+      suppressed.push(`${safeText(item.finding.title, secrets)}: rank-cap-or-outside-diff`);
       repository.suppress(claim.attemptId, item.candidateId, item.finding, 'rank-cap-or-outside-diff', item.verifierFamily);
     }
     const overflow = selected.filter(item => !inline.includes(item));
-    const overview = safeText(`Ptah review for ${claim.headSha.slice(0, 12)}. ${selected.length} verified findings; ${suppressed.length} held locally.`, secrets)
-      + (overflow.length ? `\n\nAdditional verified findings (${overflow.length}):\n${overflow.map(item => `- ${item.body}`).join('\n')}` : '')
-      + (followUps.length ? `\n\nFinding follow-ups (${followUps.length}):\n${followUps.map(item => `- ${item.body}`).join('\n')}` : '');
+    const overview = renderSummary(claim.headSha, runRows, inline, suppressed.length,
+      followUps.map(item => item.body), value => safeText(value, secrets))
+      + (overflow.length ? `\n\n${overflow.length} additional findings held locally.` : '');
     await this.outbox.publish({ attemptId: claim.attemptId, target: { repo: claim.repo, number: claim.prNumber, headSha: claim.headSha },
       walkthrough: safeText(walkthrough, secrets), overview,
       candidates: inline.map(({ findingId, path, line, body }) => ({ findingId, path, line, body })),
-      publishedFindingIds: selected.map(item => item.findingId),
       followUps, validRightAnchors: anchors }, signal);
   }
 }
