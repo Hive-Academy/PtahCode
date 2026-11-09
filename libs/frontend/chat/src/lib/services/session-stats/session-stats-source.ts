@@ -83,7 +83,9 @@ export function toStatsLimitLaneRun(agent: MonitoredAgent): StatsLimitLaneRun {
   return {
     runId: agent.agentId,
     cli: agent.cli,
+    ...(agent.cli === 'ptah-cli' && agent.ptahCliId ? { ptahCliId: agent.ptahCliId } : {}),
     cliLabel: agent.displayName || CLI_LABELS[agent.cli],
+    ...(agent.displayName ? {} : { cliLabelSource: 'product' as const }),
     role: agent.role ?? null,
     model: agent.usageTotals?.model ?? agent.model ?? null,
     modelScope: agent.modelScope ?? null,

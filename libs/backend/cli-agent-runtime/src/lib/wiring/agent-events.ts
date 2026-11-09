@@ -763,6 +763,9 @@ export function persistCliSessionReference(
         ? { segments: persistedOutput.segments }
         : {}),
       ...(info.ptahCliId ? { ptahCliId: info.ptahCliId } : {}),
+      // The agent's configured name, so a card rebuilt from this reference
+      // keeps "Glm" instead of falling back to "Ptah CLI" (TASK_2026_905).
+      ...(info.ptahCliName ? { ptahCliName: info.ptahCliName } : {}),
       ...(info.potentialCapabilities !== undefined
         ? { potentialCapabilities: info.potentialCapabilities }
         : {}),

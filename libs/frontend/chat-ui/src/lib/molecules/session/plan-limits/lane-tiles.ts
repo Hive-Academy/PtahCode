@@ -83,7 +83,29 @@ export function groupLaneRuns(
 }
 
 function laneTileId(run: StatsLimitLaneRun): string {
-  return `lane:${run.cli}:${run.role || 'none'}`;
+  return `lane:${laneProviderKey(run)}:${run.role || 'none'}`;
+}
+
+/**
+ * The provider a run belongs to: the CLI id, plus the Ptah CLI agent id for a
+ * `ptah-cli` run, so "Glm" and "kimi code" never share a tile (TASK_2026_905).
+ */
+export function laneProviderKey(run: StatsLimitLaneRun): string {
+  return run.ptahCliId ? `${run.cli}:${run.ptahCliId}` : run.cli;
+}
+
+/**
+ * The label of a group of same-provider runs: the newest run's configured
+ * name. A run restored from an older record may carry only the CLI product
+ * name, so a product-name label is used only when no run has a configured
+ * name (TASK_2026_905).
+ */
+export function laneGroupLabel(runs: readonly StatsLimitLaneRun[]): string {
+  const named = runs.filter((run) => run.cliLabelSource !== 'product');
+  const pool = named.length > 0 ? named : runs;
+  let newest = pool[0];
+  for (const run of pool) if (run.startedAt > newest.startedAt) newest = run;
+  return newest.cliLabel;
 }
 
 const IDENTITY_KINDS: ReadonlySet<QuotaOwnerIdentityKind> = new Set([
@@ -151,7 +173,7 @@ export function laneTile(
   const runChip = laneRunChip(runs);
   return {
     id: laneTileId(first),
-    label: first.role ? `${first.cliLabel} · ${first.role}` : first.cliLabel,
+    label: first.role ? `${laneGroupLabel(runs)} · ${first.role}` : laneGroupLabel(runs),
     caption: LANE_CAPTION,
     tokensText:
       knownTokens.length === 0

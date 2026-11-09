@@ -66,6 +66,7 @@ import {
 } from '@ptah-extension/core';
 import { BackgroundAgentStore } from './background-agent.store';
 import { agentVisibleInSession, knownSessionId } from './session-scope';
+import { restoredDisplayName } from './restored-display-name';
 import {
   MAX_AGENT_SEGMENTS,
   MAX_FRONTEND_BUFFER,
@@ -1508,6 +1509,9 @@ export class AgentMonitorStore implements OnDestroy {
           completedAt: undefined,
           exitCode: undefined,
           cliSessionId: info.cliSessionId || existing.cliSessionId,
+          // A card restored without a name learns it from the respawn.
+          displayName:
+            info.displayName || info.ptahCliName || existing.displayName,
           // Prefer-known, never downgrade: a respawn that arrives before the
           // session UUID resolves must not erase an owner we already captured.
           parentSessionId: parentSessionId ?? existing.parentSessionId,
@@ -2090,7 +2094,11 @@ export class AgentMonitorStore implements OnDestroy {
 
       for (const ref of cliSessions) {
         if (existingIds.has(ref.agentId)) continue;
-        const live = liveUsageOf(rebuilt.get(ref.agentId), ref);
+        const previous = rebuilt.get(ref.agentId);
+        const live = liveUsageOf(previous, ref);
+        // A rebuilt card keeps the agent's configured name; without it the
+        // stats popover and the card fall back to "Ptah CLI" (TASK_2026_905).
+        const displayName = restoredDisplayName(ref, previous);
 
         const ts = new Date(ref.startedAt).getTime();
         // The backend restore read already turned a lane left running by an
@@ -2137,6 +2145,7 @@ export class AgentMonitorStore implements OnDestroy {
           cliSessionId: ref.cliSessionId,
           parentSessionId,
           ptahCliId: ref.ptahCliId,
+          ...(displayName ? { displayName } : {}),
           permissionQueue: [],
           // Restored tokens and cost are unknown, not 0 (Req 8.4); persisted
           // segments are not folded. The recorded owner may be absent.

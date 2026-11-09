@@ -865,6 +865,11 @@ const cliAdapterManifestSchema = z.object({
   mcp: laneCapabilitySupportSchema,
 }).strict();
 const restoredWorkspaceKeySchema = z.string().min(1).max(2_048);
+/** A persisted Ptah CLI agent name: a non-blank, bounded label (TASK_2026_905). */
+const restoredPtahCliNameSchema = z
+  .string()
+  .max(200)
+  .refine((name) => name.trim().length > 0);
 
 /**
  * A restored reference carries its `quotaOwner` and `modelScope` only when
@@ -885,7 +890,8 @@ function restoreQuotaOwner(ref: CliSessionReference): CliSessionReference {
     !('quotaOwnerKey' in stored) &&
     !('modelScope' in stored) &&
     !('potentialCapabilities' in stored) &&
-    !('workspaceKey' in stored)
+    !('workspaceKey' in stored) &&
+    !('ptahCliName' in stored)
   ) {
     return ref;
   }
@@ -895,6 +901,7 @@ function restoreQuotaOwner(ref: CliSessionReference): CliSessionReference {
     modelScope,
     potentialCapabilities,
     workspaceKey,
+    ptahCliName,
     ...rest
   } = stored;
   const owner = parseQuotaOwnerRef(quotaOwner);
@@ -902,11 +909,13 @@ function restoreQuotaOwner(ref: CliSessionReference): CliSessionReference {
     modelScope === null || typeof modelScope === 'string' ? { modelScope } : {};
   const capabilities = cliAdapterManifestSchema.safeParse(potentialCapabilities);
   const workspace = restoredWorkspaceKeySchema.safeParse(workspaceKey);
+  const agentName = restoredPtahCliNameSchema.safeParse(ptahCliName);
   const identity = {
     ...(capabilities.success
       ? { potentialCapabilities: capabilities.data }
       : {}),
     ...(workspace.success ? { workspaceKey: workspace.data } : {}),
+    ...(agentName.success ? { ptahCliName: agentName.data } : {}),
   };
   return owner
     ? { ...rest, quotaOwner: owner, ...scope, ...identity }

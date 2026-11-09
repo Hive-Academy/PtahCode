@@ -1115,6 +1115,38 @@ describe('inspector provider grouping', () => {
     expect(vm.providerLimits[0].ownerDetails).toContain('Unknown owner · Limits not tracked');
   });
 
+  it('gives each Ptah CLI agent its own tile under its configured name (TASK_2026_905)', () => {
+    const vm = buildStatsLimitViewModel(input({ laneRuns: [
+      run({ ptahCliId: 'glm-id', cliLabel: 'Glm', role: null }),
+      run({ ptahCliId: 'kimi-id', cliLabel: 'kimi code', role: null }),
+    ] }));
+    expect(vm.providerLimits.map(p => [p.id, p.label])).toEqual([
+      ['provider:ptah-cli:glm-id', 'Glm'],
+      ['provider:ptah-cli:kimi-id', 'kimi code'],
+    ]);
+    expect(vm.laneTiles.map(tile => tile.label)).toEqual(['Glm', 'kimi code']);
+  });
+
+  it.each([
+    ['older', NOW - 2 * HOUR],
+    ['newer', NOW],
+  ])('labels an agent group by its configured name when the nameless restore is %s (TASK_2026_905)', (_order, nameless) => {
+    const vm = buildStatsLimitViewModel(input({ laneRuns: [
+      run({ ptahCliId: 'glm-id', cliLabel: 'Ptah CLI', cliLabelSource: 'product', restored: true, startedAt: nameless, role: null }),
+      run({ ptahCliId: 'glm-id', cliLabel: 'Glm', startedAt: NOW - HOUR, role: null }),
+    ] }));
+    expect(vm.providerLimits).toHaveLength(1);
+    expect(vm.providerLimits[0].label).toBe('Glm');
+    expect(vm.laneTiles[0].label).toBe('Glm');
+  });
+
+  it('falls back to the product name only when no run has a configured name (TASK_2026_905)', () => {
+    const vm = buildStatsLimitViewModel(input({ laneRuns: [
+      run({ ptahCliId: 'glm-id', cliLabel: 'Ptah CLI', cliLabelSource: 'product', role: null }),
+    ] }));
+    expect(vm.providerLimits[0].label).toBe('Ptah CLI');
+  });
+
   it('does not present a model-specific window as the whole provider when scopes differ', () => {
     const vm = buildStatsLimitViewModel(input({
       owners: [snapshot(CLAUDE_A, { windows: [weeklyOpusExhausted()] })],

@@ -534,6 +534,26 @@ describe('persistCliSessionReference — completion time', () => {
     });
   });
 
+  it('persists the Ptah CLI agent name beside its id (TASK_2026_905)', () => {
+    const addCliSession = jest.fn().mockResolvedValue(undefined);
+    persist(
+      buildInfo({
+        parentSessionId: PARENT_SESSION,
+        cliSessionId: 'cli-sess-1',
+        ptahCliId: 'glm-id',
+        ptahCliName: 'Glm',
+        status: 'completed',
+        completedAt,
+      }),
+      addCliSession,
+    );
+
+    expect(addCliSession).toHaveBeenCalledWith(
+      PARENT_SESSION,
+      expect.objectContaining({ ptahCliId: 'glm-id', ptahCliName: 'Glm' }),
+    );
+  });
+
   it('omits completion time when the process has none', () => {
     const addCliSession = jest.fn().mockResolvedValue(undefined);
     const info = buildInfo({

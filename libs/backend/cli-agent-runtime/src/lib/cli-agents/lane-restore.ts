@@ -78,7 +78,11 @@ export function restoreLaneIdentity(
   parentSessionId?: string,
 ): Pick<
   AgentProcessInfo,
-  'parentSessionId' | 'potentialCapabilities' | 'ptahCliId' | 'workspaceKey'
+  | 'parentSessionId'
+  | 'potentialCapabilities'
+  | 'ptahCliId'
+  | 'ptahCliName'
+  | 'workspaceKey'
 > {
   return {
     ...(parentSessionId ? { parentSessionId } : {}),
@@ -86,6 +90,10 @@ export function restoreLaneIdentity(
       ? { potentialCapabilities: ref.potentialCapabilities }
       : {}),
     ...(ref.ptahCliId ? { ptahCliId: ref.ptahCliId } : {}),
+    // Persisted data: keep only a non-blank string name.
+    ...(typeof ref.ptahCliName === 'string' && ref.ptahCliName.trim()
+      ? { ptahCliName: ref.ptahCliName }
+      : {}),
     ...(ref.workspaceKey ? { workspaceKey: ref.workspaceKey } : {}),
   };
 }
