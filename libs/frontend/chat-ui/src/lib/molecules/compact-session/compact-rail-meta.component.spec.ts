@@ -121,12 +121,37 @@ describe(CompactRailMetaComponent.name, () => {
     ]);
     const diff = el.querySelector('.tabular-nums') as HTMLElement;
     expect(diff.textContent?.trim()).toBe('+12 −4');
-    expect(diff.title).toBe('Uncommitted changes');
+    expect(diff.title).toBe('Uncommitted changes (+12 −4)');
     fixture.componentRef.setInput('agentCount', 3);
     fixture.detectChanges();
     expect(el.querySelectorAll('.rc-chip')[1].textContent?.trim()).toBe(
       '3 agents',
     );
+  });
+
+  it('uses short dense labels and keeps the full text in title and aria', () => {
+    const fixture = render();
+    fixture.componentRef.setInput('density', 'dense');
+    fixture.componentRef.setInput('agentCount', 3);
+    fixture.componentRef.setInput('contextPercent', 9);
+    fixture.componentRef.setInput('gitStats', {
+      kind: 'known',
+      additions: 3829,
+      deletions: 10,
+      partial: false,
+    });
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    const chips = Array.from(el.querySelectorAll<HTMLElement>('.rc-chip'));
+    expect(chips.map((c) => c.textContent?.trim())).toEqual(['3 ag', '9%']);
+    expect(chips.map((c) => c.getAttribute('aria-label'))).toEqual([
+      '3 agents',
+      '9% context used',
+    ]);
+    expect(chips.map((c) => c.title)).toEqual(['3 agents', '9% context used']);
+    const diff = el.querySelector('.tabular-nums') as HTMLElement;
+    expect(diff.textContent?.trim()).toBe('+3.8k −10');
+    expect(diff.title).toBe('Uncommitted changes (+3829 −10)');
   });
 
   it('keeps the diff stats from shrinking while chips can shrink', () => {
@@ -138,6 +163,8 @@ describe(CompactRailMetaComponent.name, () => {
     expect(css).toMatch(
       /\.rc-chip\s*\{[^}]*flex-shrink:\s*1;[^}]*text-overflow:\s*ellipsis/,
     );
+    // The task id gives up its width before any chip does.
+    expect(css).toMatch(/\.rc-task\s*\{[^}]*flex-shrink:\s*1000;/);
     expect(
       (fixture.nativeElement.querySelector('.tabular-nums') as HTMLElement)
         .classList,

@@ -27,6 +27,7 @@ import type {
   host: {
     class:
       'rc-line flex min-w-0 items-center gap-1 overflow-hidden text-[11px] text-base-content-muted',
+    '[class.rc-meta-dense]': 'dense()',
   },
   styles: [
     `
@@ -36,9 +37,11 @@ import type {
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+      /* The task id gives up its width first; its full id is in the title. */
       .rc-task {
         max-width: 72px;
-        flex-shrink: 1;
+        min-width: 1.25rem;
+        flex-shrink: 1000;
       }
       .rc-action {
         flex-shrink: 0;
@@ -64,6 +67,12 @@ import type {
         white-space: nowrap;
         display: inline-block;
         border-radius: 4px;
+      }
+      :host(.rc-meta-dense) {
+        gap: 3px;
+      }
+      :host(.rc-meta-dense) .badge.rc-chip {
+        padding: 0 3px;
       }
     `,
   ],
@@ -111,7 +120,8 @@ import type {
       <span
         class="badge badge-xs badge-outline rc-chip"
         [title]="agentLabel()"
-        >{{ agentLabel() }}</span
+        [attr.aria-label]="agentLabel()"
+        >{{ dense() ? agentCount() + ' ag' : agentLabel() }}</span
       >
     }
     @if (lanes().kinds.cli; as count) {
@@ -124,16 +134,14 @@ import type {
     @if (roundedContextPercent() !== null) {
       <span
         class="badge badge-xs badge-outline rc-chip"
-        aria-label="Context used"
+        [attr.aria-label]="roundedContextPercent() + '% context used'"
         [title]="roundedContextPercent() + '% context used'"
-        >{{ roundedContextPercent() }}% ctx</span
+        >{{ roundedContextPercent() }}%{{ dense() ? '' : ' ctx' }}</span
       >
     }
-    <span
-      class="ml-auto shrink-0 tabular-nums"
-      [title]="gitTitle(gitStats())"
-      >{{ gitCount() }}</span
-    >
+    <span class="ml-auto shrink-0 tabular-nums" [title]="gitTooltip()">{{
+      gitCount()
+    }}</span>
   `,
 })
 export class CompactRailMetaComponent {
@@ -162,8 +170,22 @@ export class CompactRailMetaComponent {
     const percent = this.contextPercent();
     return percent === null ? null : Math.round(percent);
   });
+  readonly dense = computed(() => this.density() === 'dense');
+  /** Dense cards show 1000+ line counts as "3.8k"; the title keeps the exact numbers. */
   readonly gitCount = computed(() => {
     const git = this.gitStats();
-    return git.kind === 'known' ? `+${git.additions} −${git.deletions}` : '—';
+    if (git.kind !== 'known') return '—';
+    const n = (value: number) =>
+      this.dense() && value >= 1000
+        ? `${(value / 1000).toFixed(1)}k`
+        : `${value}`;
+    return `+${n(git.additions)} −${n(git.deletions)}`;
+  });
+  readonly gitTooltip = computed(() => {
+    const git = this.gitStats();
+    const base = gitTitle(git);
+    return git.kind === 'known'
+      ? `${base} (+${git.additions} −${git.deletions})`
+      : base;
   });
 }

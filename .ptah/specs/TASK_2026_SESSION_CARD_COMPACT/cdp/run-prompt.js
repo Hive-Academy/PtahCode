@@ -1,7 +1,7 @@
 (async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const btn = (t) => [...document.querySelectorAll('button')].find((b) => b.textContent.trim().endsWith(t));
-  if (!btn('Create')) { (btn('New session') || [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'New')).click(); await sleep(1500); }
+  if (!btn('Create')) { ([...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'New') || btn('New session')).click(); await sleep(3500); }
   btn('Create').click();
   await sleep(2500);
   const ta = document.querySelector('textarea[role=combobox]');
