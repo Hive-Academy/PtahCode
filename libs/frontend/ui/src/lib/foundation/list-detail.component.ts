@@ -1,4 +1,4 @@
-import { afterRenderEffect, ChangeDetectionStrategy, Component, computed, ElementRef, input, output, viewChild } from '@angular/core';
+import { afterRenderEffect, ChangeDetectionStrategy, Component, computed, DestroyRef, ElementRef, inject, input, output, viewChild } from '@angular/core';
 import { PtahButtonDirective } from '../surfaces/button.directive';
 
 /** Consumers using ngListbox must set selectionMode="explicit" so arrow keys do not hide the narrow list. */
@@ -24,8 +24,26 @@ export class PtahListDetailComponent {
   private readonly backButton = viewChild<ElementRef<HTMLButtonElement>>('backButton');
   private previousSelection: string | null | undefined;
   private previousOption: HTMLElement | null = null;
+  private readonly host = inject(ElementRef<HTMLElement>);
+  private readonly destroyRef = inject(DestroyRef);
 
   constructor() {
+    if (typeof ResizeObserver !== 'undefined') {
+      let previousWidth = this.host.nativeElement.clientWidth;
+      const observer = new ResizeObserver(([entry]) => {
+        if (!entry) return;
+        const width = entry.contentRect.width;
+        if (previousWidth >= 768 && width < 768 && this.hasSelection()) {
+          const list = this.list()?.nativeElement;
+          if (list?.contains(document.activeElement)) {
+            this.backButton()?.nativeElement.focus();
+          }
+        }
+        previousWidth = width;
+      });
+      observer.observe(this.host.nativeElement);
+      this.destroyRef.onDestroy(() => observer.disconnect());
+    }
     afterRenderEffect(() => {
       const selected = this.hasSelection() ? this.selectedId() : null;
       const list = this.list()?.nativeElement;

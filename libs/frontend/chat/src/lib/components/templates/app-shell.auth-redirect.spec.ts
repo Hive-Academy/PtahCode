@@ -218,6 +218,35 @@ describe('AppShellComponent startup auth redirect', () => {
     expect(appState.currentView()).toBe('settings');
   });
 
+  it('keeps a standalone route when auth resolves without credentials', async () => {
+    const auth = createAuthStub(false);
+    configure(auth);
+    const fixture = TestBed.createComponent(AppShellComponent);
+    const router = TestBed.inject(Router);
+    const appState = TestBed.inject(AppStateManager);
+    router.resetConfig([
+      { path: 'chat', children: [] },
+      { path: 'settings', children: [] },
+      { path: 'ui-gallery', data: { standalone: true }, children: [] },
+    ]);
+    fixture.detectChanges();
+    await settle(fixture);
+    await router.navigateByUrl('/chat');
+    await settle(fixture);
+    expect(auth.loadAuthStatus).toHaveBeenCalled();
+
+    await router.navigateByUrl('/ui-gallery');
+    await settle(fixture);
+    expect(fixture.componentInstance.isStandaloneView()).toBe(true);
+    expect(appState.currentView()).toBe('chat');
+
+    auth.settle();
+    await settle(fixture);
+
+    expect(router.url).toBe('/ui-gallery');
+    expect(appState.currentView()).toBe('chat');
+  });
+
   it('does not redirect when a credential IS configured', async () => {
     const auth = createAuthStub(true);
     configure(auth);

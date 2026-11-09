@@ -296,6 +296,7 @@ export class AppShellComponent {
         .then(() => {
           if (!this.authState.isLoaded()) return;
           if (this.currentView() !== DEFAULT_SURFACE_ID) return;
+          if (this.isStandaloneView()) return;
           // `currentView()` follows NavigationEnd, so it still reads `chat`
           // for as long as a lazy route's chunk is loading. Click Thoth, let
           // `loadAuthStatus()` resolve with no credentials before that chunk

@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { Router } from '@angular/router';
 import { Listbox, Option } from '@angular/aria/listbox';
 import {
   PtahButtonDirective, PtahFieldComponent, PtahFieldControlDirective,
@@ -18,7 +19,7 @@ import {
     PtahStatePanelComponent, PtahToolbarComponent, PtahMeterComponent, SurfaceSectionComponent, SurfaceCardComponent, SurfaceTileComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<main class="surface-0 mx-auto max-w-[1600px] p-4 md:p-6">
-    <ptah-page-header title="UI foundation gallery" description="Reviews and Machines sample states" backLabel="Back to chat" (back)="selection.set(null)">
+    <ptah-page-header title="UI foundation gallery" description="Reviews and Machines sample states" backLabel="Back to chat" (back)="goToChat()">
       <ptah-status-badge status="online" label="Electron preview" />
       <button ptahButton actions variant="ghost" type="button">Refresh preview</button>
     </ptah-page-header>
@@ -57,6 +58,8 @@ import {
   </main>`,
 })
 export class UiGalleryComponent {
+  private readonly router = inject(Router);
+  public goToChat(): void { void this.router.navigateByUrl('/chat'); }
   public readonly variants = ['primary', 'secondary', 'ghost', 'danger'] as const;
   public readonly sizes = ['xs', 'sm'] as const;
   public readonly statuses: PtahStatus[] = ['running', 'queued', 'pending', 'needs-review', 'warning', 'failed', 'offline', 'completed', 'online'];

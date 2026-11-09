@@ -33,3 +33,34 @@ it('moves focus to back and restores the selected list option', async () => {
   expect(fixture.nativeElement.querySelector('ptah-list-detail section:first-child').classList.contains('hidden')).toBe(false);
   expect(fixture.nativeElement.querySelector('ptah-list-detail button:not([list])')).toBeNull();
 });
+
+it('moves focus from the list to detail when a selected view narrows', async () => {
+  const originalObserver = globalThis.ResizeObserver;
+  let notifyResize: ((width: number) => void) | undefined;
+  const disconnect = jest.fn();
+  class MockResizeObserver {
+    constructor(callback: ResizeObserverCallback) {
+      notifyResize = (width) => callback([{ contentRect: { width } } as ResizeObserverEntry], this as ResizeObserver);
+    }
+    observe(): void { /* The test drives resize notifications. */ }
+    disconnect(): void { disconnect(); }
+  }
+  globalThis.ResizeObserver = MockResizeObserver as typeof ResizeObserver;
+  try {
+    const fixture = TestBed.createComponent(Host);
+    fixture.detectChanges();
+    notifyResize?.(900);
+    fixture.componentInstance.selected.set('row');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const row = fixture.nativeElement.querySelector('[list]') as HTMLButtonElement;
+    const back = fixture.nativeElement.querySelector('ptah-list-detail button:not([list])') as HTMLButtonElement;
+    row.focus();
+    notifyResize?.(600);
+    expect(document.activeElement).toBe(back);
+    fixture.destroy();
+    expect(disconnect).toHaveBeenCalledTimes(1);
+  } finally {
+    globalThis.ResizeObserver = originalObserver;
+  }
+});
