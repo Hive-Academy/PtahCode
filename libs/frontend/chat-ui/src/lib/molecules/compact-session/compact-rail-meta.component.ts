@@ -37,6 +37,10 @@ const COMPACT_COUNT = new Intl.NumberFormat('en', {
   },
   styles: [
     `
+      :host button,
+      :host a[href] {
+        pointer-events: auto;
+      }
       .rc-ellipsis {
         min-width: 0;
         overflow: hidden;

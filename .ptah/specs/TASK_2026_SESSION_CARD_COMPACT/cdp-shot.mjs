@@ -6,8 +6,11 @@ import { readFileSync, writeFileSync } from 'node:fs';
 
 const [port = '9334', ...steps] = process.argv.slice(2);
 const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
-const page = targets.find((t) => t.type === 'page' && !t.url.startsWith('devtools'));
-if (!page) throw new Error('no page target');
+const pages = targets.filter((t) =>
+  t.type === 'page' && /^file:\/\/\/.*\/ptah-electron\/.*\/index\.html(?:[?#]|$)/i.test(t.url),
+);
+if (pages.length !== 1) throw new Error(`Expected one Ptah Electron renderer target, found ${pages.length}`);
+const page = pages[0];
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
 let id = 0;

@@ -47,6 +47,7 @@ describe(CompactRailMetaComponent.name, () => {
     const button = fixture.nativeElement.querySelector(
       'button',
     ) as HTMLButtonElement;
+    expect(getComputedStyle(button).pointerEvents).toBe('auto');
     expect(button.getAttribute('aria-label')).toContain('2 lanes of Session');
     button.click();
     expect(emitted).toHaveBeenCalledTimes(1);
@@ -61,6 +62,7 @@ describe(CompactRailMetaComponent.name, () => {
     const button = fixture.nativeElement.querySelector(
       'button.rc-lane-overflow',
     ) as HTMLButtonElement;
+    expect(getComputedStyle(button).pointerEvents).toBe('auto');
     expect(button.textContent?.trim()).toBe('+2 more');
     expect(button.getAttribute('aria-label')).toBe(
       'Open 2 more lanes of Session',
