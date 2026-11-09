@@ -628,6 +628,8 @@ function makeHarness(
     ),
   };
   const displayWindowDetachedSig = signal(false);
+  const displayWindowBoundSig = signal(false);
+  const displayWindowHasBoundSourceSig = signal(false);
   const displayWindowErrorSig = signal<string | null>(null);
   const unbindDisplayWindowMock = jest.fn();
   const displayWindowStub = {
@@ -636,7 +638,8 @@ function makeHarness(
     count: signal(3).asReadonly(),
     bindSource: jest.fn(() => unbindDisplayWindowMock),
     selectSource: jest.fn(() => true),
-    isBoundSource: jest.fn(() => false),
+    isBoundSource: jest.fn(() => displayWindowBoundSig()),
+    hasBoundSource: jest.fn(() => displayWindowHasBoundSourceSig()),
     detach: jest.fn(async () => undefined),
     focus: jest.fn(async () => undefined),
     attach: jest.fn(async () => undefined),
@@ -784,6 +787,8 @@ function makeHarness(
     layoutStub,
     displayWindowStub,
     displayWindowDetachedSig,
+    displayWindowBoundSig,
+    displayWindowHasBoundSourceSig,
     displayWindowErrorSig,
     unbindDisplayWindowMock,
     rewindFilesMock,
@@ -3778,7 +3783,7 @@ describe('ChatViewComponent — Display sidebar (Electron)', () => {
     h.fixture.detectChanges();
     expect(h.displayWindowStub.bindSource).toHaveBeenCalledTimes(1);
     expect(h.displayWindowStub.bindSource).toHaveBeenCalledWith(
-      expect.objectContaining({ dock: dockOf(h) }),
+      expect.objectContaining({ dock: dockOf(h), passive: true }),
     );
     // The harness renders the sheet as an unknown element (NO_ERRORS_SCHEMA):
     // assert the input binding and fire its `detachRequested` output.
@@ -3801,6 +3806,39 @@ describe('ChatViewComponent — Display sidebar (Electron)', () => {
     ).toBeNull();
     h.fixture.destroy();
     expect(h.unbindDisplayWindowMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows an embed rail only while that view is bound to the detached window', () => {
+    const h = makeHarness({
+      isElectron: true,
+      renderCompactTemplate: true,
+      sessionContextTabId: 'tab-1',
+    });
+    h.displayWindowDetachedSig.set(true);
+    h.fixture.detectChanges();
+    const rail = () => (h.fixture.nativeElement as HTMLElement).querySelector(
+      '[data-testid="display-detached-rail"]',
+    );
+    expect(rail()).toBeNull();
+    h.displayWindowBoundSig.set(true);
+    h.fixture.detectChanges();
+    expect(rail()).not.toBeNull();
+    h.displayWindowBoundSig.set(false);
+    h.fixture.detectChanges();
+    expect(rail()).toBeNull();
+  });
+
+  it('keeps the main sheet while an embed is bound and shows a rail if no source is bound', () => {
+    const h = makeHarness({ isElectron: true, renderCompactTemplate: true });
+    h.displayWindowDetachedSig.set(true);
+    h.displayWindowHasBoundSourceSig.set(true);
+    h.fixture.detectChanges();
+    const host = h.fixture.nativeElement as HTMLElement;
+    expect(host.querySelector('[data-testid="display-detached-rail"]')).toBeNull();
+    expect(host.querySelector('ptah-display-sheet')).not.toBeNull();
+    h.displayWindowHasBoundSourceSig.set(false);
+    h.fixture.detectChanges();
+    expect(host.querySelector('[data-testid="display-detached-rail"]')).not.toBeNull();
   });
 
   it('does not detach from a canvas tile when its source cannot be selected', () => {

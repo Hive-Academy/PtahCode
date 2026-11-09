@@ -127,7 +127,11 @@ export class DisplayWindowRpcHandlers {
     this.parseEmpty('displayWindow:status', params);
     const host = this.resolveHost();
     if (!host) return { supported: false, open: false };
-    return { supported: host.supported, open: host.isOpen() };
+    return {
+      supported: host.supported,
+      open: host.isOpen(),
+      tabId: host.getState()?.tabId ?? null,
+    };
   }
 
   private async publishState(params: unknown): Promise<DisplayWindowPublishStateResult> {

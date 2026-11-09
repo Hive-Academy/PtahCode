@@ -158,6 +158,8 @@ export interface DisplayWindowCloseResult {
 export interface DisplayWindowStatusResult {
   readonly supported: boolean;
   readonly open: boolean;
+  /** Last cached snapshot tab, when available. Older hosts may omit it. */
+  readonly tabId?: string | null;
 }
 
 /** `displayWindow:publishState`: `true` when the host cached and forwarded it. */

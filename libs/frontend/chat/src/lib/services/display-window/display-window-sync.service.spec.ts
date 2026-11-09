@@ -11,7 +11,7 @@ import {
 } from '@ptah-extension/shared';
 import { ArtifactStore } from '../artifact.store';
 import { DisplayDockState } from '../display-dock/display-dock.state';
-import { DisplayWindowSync } from './display-window-sync.service';
+import { DisplayWindowSync, type DisplayWindowSource } from './display-window-sync.service';
 
 const artifact: ArtifactRecord = {
   id: 'abcdefghijklmnop',
@@ -81,6 +81,9 @@ describe('DisplayWindowSync', () => {
     sync: DisplayWindowSync;
     dock: DisplayDockState;
     tabId: WritableSignal<string | null>;
+    source: DisplayWindowSource;
+    unbind: () => void;
+    focusVersion: WritableSignal<number>;
   } {
     TestBed.configureTestingModule({
       providers: [
@@ -102,8 +105,10 @@ describe('DisplayWindowSync', () => {
     const sync = TestBed.inject(DisplayWindowSync);
     const dock = new DisplayDockState();
     const tabId = signal<string | null>('tab-1');
-    sync.bindSource({ tabId, dock, focusVersion: signal(0) });
-    return { sync, dock, tabId };
+    const focusVersion = signal(0);
+    const source = { tabId, dock, focusVersion };
+    const unbind = sync.bindSource(source);
+    return { sync, dock, tabId, source, unbind, focusVersion };
   }
 
   function publishCalls(): unknown[][] {
@@ -139,6 +144,21 @@ describe('DisplayWindowSync', () => {
     await settle();
     expect(call).toHaveBeenCalledWith('displayWindow:status', {});
     expect(sync.detached()).toBe(true);
+  });
+
+  it('replaces a cached embed snapshot with a notice after reload has no bound source', async () => {
+    replies['displayWindow:status'] = {
+      success: true,
+      data: { supported: true, open: true, tabId: 'tab-embed' },
+    };
+    const { sync, unbind } = setup();
+    unbind();
+    await settle();
+    await flushFrame();
+    expect(sync.detached()).toBe(true);
+    expect(lastPublished().tabId).toBe('tab-embed');
+    expect(lastPublished().state).toMatchObject({ notice: expect.any(String) });
+
   });
 
   it('does not ask the status outside Electron', () => {
@@ -465,8 +485,24 @@ describe('DisplayWindowSync', () => {
     unbindEmbed();
   });
 
+  it('keeps an explicitly selected passive embed bound through main view focus', async () => {
+    const { sync, source: mainSource, focusVersion: mainFocus } = setup();
+    const embed = {
+      tabId: signal<string | null>('tab-embed'),
+      dock: new DisplayDockState(),
+      focusVersion: signal(0),
+      passive: true,
+    };
+    sync.bindSource(embed);
+    expect(sync.selectSource(embed)).toBe(true);
+    mainFocus.update((version) => version + 1);
+    TestBed.tick();
+    expect(sync.isBoundSource(embed)).toBe(true);
+    expect(sync.isBoundSource(mainSource)).toBe(false);
+  });
+
   it('rebinds to the view that requests Detach and ignores inactive view updates', async () => {
-    const { sync, dock: firstDock } = setup();
+    const { sync, dock: firstDock, source: mainSource } = setup();
     const secondDock = new DisplayDockState();
     const second = {
       tabId: signal<string | null>('tab-2'),
@@ -491,6 +527,7 @@ describe('DisplayWindowSync', () => {
     unbindSecond();
     await flushFrame();
     expect(sync.isBoundSource(second)).toBe(false);
+    expect(sync.isBoundSource(mainSource)).toBe(true);
     expect(sync.count()).toBe(0);
     const publishedAfterUnbind = publishCalls().length;
     secondDock.openArtifact('tab-2', 'another');

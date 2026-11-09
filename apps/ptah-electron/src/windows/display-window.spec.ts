@@ -434,6 +434,7 @@ describe('ElectronDisplayWindowHost — Electron behaviour', () => {
     const h = harness();
     await h.host.open();
     expect(h.host.publishState(SNAPSHOT)).toBe(true);
+    expect(h.host.getState()?.tabId).toBe(SNAPSHOT.tabId);
     expect(h.children[0].sent).toEqual([
       {
         channel: 'to-renderer',

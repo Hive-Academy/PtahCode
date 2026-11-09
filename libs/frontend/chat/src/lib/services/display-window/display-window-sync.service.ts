@@ -21,6 +21,7 @@ import {
   type DisplayWindowJsonObject,
   type DisplayWindowUnavailableReason,
 } from '@ptah-extension/shared';
+import { z } from 'zod';
 import { ArtifactStore } from '../artifact.store';
 import type { DisplayDockState } from '../display-dock/display-dock.state';
 import {
@@ -58,6 +59,11 @@ const OPEN_FAILED_TEXT = 'Could not open the Display window.';
 const CLOSE_FAILED_TEXT = 'Could not close the Display window.';
 const TOO_LARGE_TEXT = 'The display is too large to show in a separate window.';
 const NO_TAB_TEXT = 'The main window has no chat tab to show right now.';
+const statusSchema = z.object({
+  supported: z.boolean(),
+  open: z.boolean(),
+  tabId: z.string().nullable().optional(),
+});
 
 /**
  * Publish coalescing delay (about one frame). A timer, not
@@ -165,7 +171,8 @@ export class DisplayWindowSync implements MessageHandler {
           if (index >= 0) {
             this.sources.splice(index, 1);
             this.sources.push(source);
-            this.source.set(source);
+            if (untracked(this.source)?.passive !== true)
+              this.source.set(source);
           }
         }
         lastFocusVersion = focusVersion;
@@ -195,6 +202,10 @@ export class DisplayWindowSync implements MessageHandler {
 
   isBoundSource(source: DisplayWindowSource): boolean {
     return this.source() === source;
+  }
+
+  hasBoundSource(): boolean {
+    return this.source() !== null;
   }
 
   /**
@@ -290,8 +301,11 @@ export class DisplayWindowSync implements MessageHandler {
   private async restoreStatus(): Promise<void> {
     try {
       const result = await this.rpc.call('displayWindow:status', {});
-      if (result.success && result.data?.supported && result.data.open)
+      const status = result.success ? statusSchema.safeParse(result.data) : null;
+      if (status?.success && status.data.supported && status.data.open) {
+        this.lastTabId = status.data.tabId ?? null;
         this.markDetached();
+      }
     } catch {
       // degradation-audit: optional-capability — an unknown status keeps the panel attached.
     }

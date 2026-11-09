@@ -214,8 +214,7 @@
   <!-- Display sidebar (Electron): right column, overlay drawer when narrow,
        or a rail while the panel is in its separate window. -->
   @if (displaySheetEnabled && !showCompactCard()) {
-    @if (resolvedTabId(); as displayTabId) {
-      @if (displayDetached()) {
+    @if (displayDetached()) {
         <aside
           class="flex w-36 flex-shrink-0 flex-col gap-2 border-l border-base-content/15 bg-base-200 p-2 text-xs"
           data-glass-surface="chrome"
@@ -246,7 +245,8 @@
             <p role="alert" class="text-error">{{ windowError }}</p>
           }
         </aside>
-      } @else {
+    } @else {
+      @if (resolvedTabId(); as displayTabId) {
         @if (panelOpen() && !isOverlay()) {
           <div
             class="flex items-center justify-center cursor-col-resize px-1 flex-shrink-0 z-10 group touch-none focus-visible:outline focus-visible:outline-2"

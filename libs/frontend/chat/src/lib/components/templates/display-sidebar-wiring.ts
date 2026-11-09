@@ -104,7 +104,11 @@ export function connectDisplaySidebar(
   return {
     commitWidth: (width) => layout?.setDisplaySidebarWidth(width),
     window: displayWindow,
-    bound: computed(() => displayWindow.isBoundSource(source)),
+    bound: computed(
+      () =>
+        displayWindow.isBoundSource(source) ||
+        (options.main && !displayWindow.hasBoundSource()),
+    ),
     activateWindow: () => displayWindow.selectSource(source) || options.main,
   };
 }

@@ -590,7 +590,7 @@ export class ChatViewComponent implements OnDestroy {
   protected readonly displayDetached = computed(
     () =>
       (this.displaySidebar?.window?.detached() ?? false) &&
-      (!this._sessionContext || (this.displaySidebar?.bound() ?? false)),
+      (this.displaySidebar?.bound() ?? false),
   );
   protected readonly displayWindowError = computed(
     () => this.displaySidebar?.window?.error() ?? null,
