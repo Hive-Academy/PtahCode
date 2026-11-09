@@ -137,6 +137,45 @@ export type TaskEndExpandableStep = Extract<
   'close-curate' | 'dispose'
 >;
 
+export type CloseOutStep = 'memory' | 'learning' | 'worktree' | 'branch';
+export type CloseOutStepState = 'pending' | 'running' | 'ok' | 'failed' | 'refused' | 'skipped';
+
+export interface CloseOutIdentity {
+  readonly repoId: string;
+  readonly taskId: string;
+  readonly prNumber: number;
+  readonly prUrl: string;
+  readonly mainRoot: string;
+  readonly worktreePath: string;
+  readonly branch: string;
+}
+
+export interface CloseOutStepRecord {
+  readonly step: CloseOutStep;
+  readonly state: CloseOutStepState;
+  readonly reason: string | null;
+  readonly attempts: number;
+}
+
+export interface CloseOutRunRecord extends CloseOutIdentity {
+  readonly runId: string;
+  readonly steps: readonly CloseOutStepRecord[];
+}
+
+export interface ITaskCloseOutStore {
+  /** Atomic identity lookup/create; concurrent callers join the same run. */
+  getOrCreateCloseOut(identity: CloseOutIdentity): CloseOutRunRecord;
+  getCloseOut(runId: string): CloseOutRunRecord | null;
+  /** A step is checkpointed before its side effect. */
+  startCloseOutStep(runId: string, step: CloseOutStep): void;
+  finishCloseOutStep(
+    runId: string,
+    step: CloseOutStep,
+    state: Exclude<CloseOutStepState, 'pending' | 'running'>,
+    reason: string | null,
+  ): void;
+}
+
 export interface ITaskEndStore {
   // --- Journal -------------------------------------------------------------
 

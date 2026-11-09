@@ -98,6 +98,7 @@ import { sql as sql0069ReviewAttemptDryRun } from './0069_review_attempt_dry_run
 import { sql as sql0070IndexingLastRun } from './0070_indexing_last_run';
 import { sql as sql0071SkillInvEventsTaskUnreconciled } from './0071_skill_inv_events_task_unreconciled';
 import { sql as sql0072TaskEndHook } from './0072_task_end_hook';
+import { sql as sql0073TaskCloseOut } from './0073_task_close_out';
 import type { SqliteDatabase } from '../sqlite-connection.service';
 
 export interface Migration {
@@ -499,5 +500,10 @@ export const MIGRATIONS: readonly Migration[] = [
     version: 72,
     name: '0072_task_end_hook',
     sql: sql0072TaskEndHook,
+  },
+  {
+    version: 73,
+    name: '0073_task_close_out',
+    sql: sql0073TaskCloseOut,
   },
 ];

@@ -114,6 +114,24 @@ describe('SqliteTaskEndStore', () => {
   beforeEach(() => {
     h = setup();
   });
+
+  it('joins one task/PR close-out and persists independent step checkpoints', () => {
+    const store = h.store();
+    const identity = { repoId: 'repo', taskId: 'TASK_2026_001', prNumber: 12,
+      prUrl: 'https://github.com/example/repo/pull/12', mainRoot: '/repo',
+      worktreePath: '/repo/task', branch: 'task' };
+    const first = store.getOrCreateCloseOut(identity);
+    expect(store.getOrCreateCloseOut(identity).runId).toBe(first.runId);
+    store.startCloseOutStep(first.runId, 'memory');
+    store.finishCloseOutStep(first.runId, 'memory', 'ok', null);
+    store.startCloseOutStep(first.runId, 'learning');
+    store.finishCloseOutStep(first.runId, 'learning', 'failed', 'harvest-failed');
+    const restarted = h.store().getCloseOut(first.runId);
+    expect(restarted?.steps.find((step) => step.step === 'memory')?.state).toBe('ok');
+    expect(restarted?.steps.find((step) => step.step === 'learning')).toMatchObject({ state: 'failed', attempts: 1 });
+    h.store().startCloseOutStep(first.runId, 'learning');
+    expect(store.getCloseOut(first.runId)?.steps.find((step) => step.step === 'learning')?.attempts).toBe(2);
+  });
   afterEach(() => h.db.close());
 
   describe('journalObservation classification', () => {
