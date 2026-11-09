@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_900_a3f1
-status: in_progress
+status: in_review
 type: FEATURE
 title: Rich PtahCode review comments on GitHub
 created: "2026-11-09T18:05:45.000Z"
