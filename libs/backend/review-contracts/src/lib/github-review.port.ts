@@ -1,5 +1,10 @@
 import type { RepoIdentity } from './review-run.schema';
 
+/** Stable identity for a RIGHT-side diff line. */
+export function rightAnchorKey(path: string, line: number): string {
+  return JSON.stringify([path, line]);
+}
+
 export interface GitHubPull {
   number: number;
   title?: string;

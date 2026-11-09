@@ -99,6 +99,19 @@ function setup() {
 }
 
 describe('GithubReviewPublicationAdapter', () => {
+  it('bounds every outbound body and retains exact dedupe markers', async () => {
+    const env = setup();
+    await env.adapter.publish(target, `Walkthrough\n\n${'🐛'.repeat(20_000)}`,
+      `Overview\n\n${'🐛'.repeat(20_000)}`,
+      [{ findingId: 'root', path: 'src/a.ts', line: 2, body: `### Major\n\n**Impact:** broken\n\n${'🐛'.repeat(20_000)}` }],
+      new Set([rightAnchorKey('src/a.ts', 2)]));
+    const bodies = [String(env.writes[0].body['body']), String(env.writes[1].body['body']),
+      ...((env.writes[1].body['comments'] as { body: string }[]).map(comment => comment.body))];
+    expect(bodies.every(body => Buffer.byteLength(body, 'utf8') <= 65_536)).toBe(true);
+    expect(bodies[0]).toContain('<!-- ptah-review:walkthrough -->');
+    expect(bodies[1]).toContain(`<!-- ptah-review:head:${headSha} -->`);
+    expect(bodies[2]).toContain('<!-- ptah-review:finding:root -->');
+  });
   it('posts an unposted finding even when a head review already exists', async () => {
     const env = setup();
     env.reviews.push({ id: 1, body: `Old overview\n<!-- ptah-review:head:${headSha} -->`, submittedAt: stamp, threads: [] });

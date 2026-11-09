@@ -1,10 +1,11 @@
 import { inject, injectable } from 'tsyringe';
 import { z } from 'zod';
 import type { GitHubInlineComment, GitHubIssueComment, GitHubReview, IGitHubReviewPort, RepoIdentity } from '@ptah-extension/review-contracts';
-import { RepoIdentitySchema, ShaSchema } from '@ptah-extension/review-contracts';
+import { RepoIdentitySchema, ShaSchema, rightAnchorKey } from '@ptah-extension/review-contracts';
 import { PLATFORM_TOKENS, type ISecretStorage } from '@ptah-extension/platform-core';
 import { REVIEW_GITHUB_TOKEN_KEY, REVIEW_GITHUB_TOKENS } from '../di/tokens';
 import { GitHubReviewError } from './github-review.error';
+import { boundedBody } from './github-body-budget';
 
 const API = 'https://api.github.com';
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -43,9 +44,7 @@ export interface IGitHubReviewPublicationPort {
 }
 
 /** Stable key supplied by the diff validator for a RIGHT-side changed line. */
-export function rightAnchorKey(path: string, line: number): string {
-  return JSON.stringify([path, line]);
-}
+export { rightAnchorKey } from '@ptah-extension/review-contracts';
 
 @injectable()
 export class GithubReviewPublicationAdapter implements IGitHubReviewPublicationPort {
@@ -151,7 +150,7 @@ export class GithubReviewPublicationAdapter implements IGitHubReviewPublicationP
     const content = [walkthrough, overview, ...candidates.map(x => x.body)].join('\n');
     if (content.includes(token)) throw new GitHubReviewError('publication-unavailable', 'Publication contains a secret');
     const existing = await this.ownWalkthrough(target);
-    const walkthroughBody = `${walkthrough}\n\n${walkthroughMarker}`;
+    const walkthroughBody = boundedBody(walkthrough, [walkthroughMarker]);
     let publishedWalkthrough: GitHubIssueComment;
     if (existing?.body === walkthroughBody) {
       publishedWalkthrough = existing;
@@ -184,9 +183,10 @@ export class GithubReviewPublicationAdapter implements IGitHubReviewPublicationP
       followUpMarkers.every(followUp => review.body.includes(followUp)));
     if (fresh.length === 0 && complete) return { walkthrough: publishedWalkthrough, review: complete, deferred };
     const fallback = deferred.map(x => `- ${x.body}`).join('\n');
-    const body = `${overview}${fallback ? `\n\nAdditional verified findings (${deferred.length}):\n${fallback}` : ''}\n\n${fresh.map(x => findingMarker(x.findingId)).join('\n')}\n${marker}`;
+    const markers = [...followUpMarkers, ...fresh.map(x => findingMarker(x.findingId)), marker];
+    const body = boundedBody(`${overview}${fallback ? `\n\nAdditional verified findings (${deferred.length}):\n${fallback}` : ''}`, markers);
     const comments: (GitHubInlineComment & { side: 'RIGHT' })[] = inline.map(x => ({
-      path: x.path, line: x.line, side: 'RIGHT', body: `${x.body}\n\n${findingMarker(x.findingId)}`,
+      path: x.path, line: x.line, side: 'RIGHT', body: boundedBody(x.body, [findingMarker(x.findingId)]),
     }));
     const suffix = `/pulls/${target.number}/reviews`;
     let response = await this.request(target, 'POST', suffix,
@@ -195,7 +195,7 @@ export class GithubReviewPublicationAdapter implements IGitHubReviewPublicationP
       // GitHub rejected an anchor. Recheck head and policy before the body-only fallback.
       const moved = inline.map(x => `- ${x.body}`).join('\n');
       response = await this.request(target, 'POST', suffix, { commit_id: target.headSha,
-        event: 'COMMENT', body: `${body}\n\nInline anchors rejected by GitHub:\n${moved}`, comments: [] });
+        event: 'COMMENT', body: boundedBody(`${overview}\n\nInline anchors rejected by GitHub:\n${moved}`, markers), comments: [] });
     }
     if (!response.ok) throw new GitHubReviewError('http', `GitHub returned HTTP ${response.status}`);
     const raw = await this.json(response, reviewResponse);

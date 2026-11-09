@@ -1,13 +1,13 @@
 import { inject, injectable } from 'tsyringe';
 import { PERSISTENCE_TOKENS, type SqliteDatabase } from '@ptah-extension/persistence-sqlite';
-import { ReviewFindingSchema } from '@ptah-extension/review-contracts';
-import { rightAnchorKey } from '@ptah-extension/review-github';
+import { ReviewFindingSchema, rightAnchorKey } from '@ptah-extension/review-contracts';
 import { ReviewPolicyService } from '../review-policy.service';
 import type { ReviewQueueClaim } from '../review-queue.service';
 import type { VerificationResult } from '../stages/verification-stage.runner';
 import type { IncrementalScope } from '../context/incremental-scope.service';
 import { PublicationOutboxRepository } from './publication-outbox.repository';
 import { PublicationOutboxService } from './publication-outbox.service';
+import { renderInline, renderSummary, type ReviewRunRow } from './review-markdown.renderer';
 
 const severityRank = { Critical: 4, Major: 3, Minor: 2, Nitpick: 1 } as const;
 const unsafeText = /(?:[A-Za-z]:\\[^\s]+|\/(?:Users|home|tmp|var|private)\/[^\s]+|(?:ghp_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|(?:ignore previous instructions|system prompt|developer message))/gi;
@@ -44,7 +44,7 @@ export class ReviewPublicationService {
 
   async publish(claim: ReviewQueueClaim, walkthrough: string, diff: string, verdicts: readonly VerificationResult[],
     settingsInput: unknown, baseConfig: unknown | null, secrets: readonly string[],
-    scope?: IncrementalScope, signal?: AbortSignal): Promise<void> {
+    scope?: IncrementalScope, signal?: AbortSignal, runRows: readonly ReviewRunRow[] = []): Promise<void> {
     const decision = claim.dryRun ? { allowed: false } : this.policy.publication(settingsInput, baseConfig, claim.repo);
     if (!decision.allowed) return;
     const settings = this.policy.effectiveSettings(settingsInput, baseConfig);
@@ -110,7 +110,7 @@ export class ReviewPublicationService {
         repository.suppress(claim.attemptId, output.candidateId, finding, 'outside-diff', output.verifierFamily);
         continue;
       }
-      const body = safeText(`**${finding.severity}: ${finding.title}** (${finding.category})\n\n${finding.failureMode}\n\n${finding.affectedBehavior}\n\nEvidence: ${finding.evidence.map(e => `${e.path}:${e.line} ${e.excerpt}`).join('; ')}\n\nPrompt for AI agents: ${finding.fixPrompt}`, secrets);
+      const body = safeText(renderInline(finding, claim.repo, claim.headSha), secrets);
       selected.push({ findingId: identity.findingId, candidateId: output.candidateId, path: finding.path,
         line: finding.line, body, finding, verifierFamily: output.verifierFamily,
         rank: severityRank[finding.severity] * 100 + Math.round(finding.confidence * 10) + (finding.verification === 'cross-family' ? 5 : 0) });
@@ -123,9 +123,9 @@ export class ReviewPublicationService {
       repository.suppress(claim.attemptId, item.candidateId, item.finding, 'rank-cap-or-outside-diff', item.verifierFamily);
     }
     const overflow = selected.filter(item => !inline.includes(item));
-    const overview = safeText(`Ptah review for ${claim.headSha.slice(0, 12)}. ${selected.length} verified findings; ${suppressed.length} held locally.`, secrets)
-      + (overflow.length ? `\n\nAdditional verified findings (${overflow.length}):\n${overflow.map(item => `- ${item.body}`).join('\n')}` : '')
-      + (followUps.length ? `\n\nFinding follow-ups (${followUps.length}):\n${followUps.map(item => `- ${item.body}`).join('\n')}` : '');
+    const overview = safeText(renderSummary(claim.headSha, runRows, selected, suppressed.length,
+      followUps.map(item => item.body)), secrets)
+      + (overflow.length ? `\n\nAdditional verified findings (${overflow.length}):\n${overflow.map(item => `- ${item.body}`).join('\n')}` : '');
     await this.outbox.publish({ attemptId: claim.attemptId, target: { repo: claim.repo, number: claim.prNumber, headSha: claim.headSha },
       walkthrough: safeText(walkthrough, secrets), overview,
       candidates: inline.map(({ findingId, path, line, body }) => ({ findingId, path, line, body })),

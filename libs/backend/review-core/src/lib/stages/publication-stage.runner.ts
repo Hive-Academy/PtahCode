@@ -74,7 +74,9 @@ export class PublicationStageRunner {
     if (signal?.aborted) throw new Error('Review publication aborted');
     if (this.sqlite) await persistExportArtifact(this.sqlite.db, claim.attemptId, exportPath);
     if (this.publication && triageCompleted) await this.publication.publish(claim, walkthrough, context.promptInput.diff,
-      verdicts, operatorSettings, baseConfig, secrets, context.incrementalScope, signal);
+      verdicts, operatorSettings, baseConfig, secrets, context.incrementalScope, signal,
+      lenses.map(({ lens, result }) => ({ lens, family: result.status === 'completed' ? result.family : 'unavailable',
+        verdict: result.status === 'completed' ? 'completed' : 'unavailable' })));
     return { artifactPath, exportPath, acceptedCount: accepted.length, suppressedCount: suppressed.length };
   }
 }
