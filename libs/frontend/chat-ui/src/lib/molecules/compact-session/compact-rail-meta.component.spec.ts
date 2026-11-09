@@ -152,6 +152,14 @@ describe(CompactRailMetaComponent.name, () => {
     const diff = el.querySelector('.tabular-nums') as HTMLElement;
     expect(diff.textContent?.trim()).toBe('+3.8k −10');
     expect(diff.title).toBe('Uncommitted changes (+3829 −10)');
+    fixture.componentRef.setInput('gitStats', {
+      kind: 'known',
+      additions: 999950,
+      deletions: 1000,
+      partial: false,
+    });
+    fixture.detectChanges();
+    expect(diff.textContent?.trim()).toBe('+1m −1k');
   });
 
   it('keeps the diff stats from shrinking while chips can shrink', () => {

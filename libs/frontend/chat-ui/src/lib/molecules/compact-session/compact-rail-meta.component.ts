@@ -20,6 +20,12 @@ import type {
   CompactRailDensity,
 } from './compact-lane.types';
 
+/** 3829 → "3.8K", 999950 → "1M" (lower-cased in the template text). */
+const COMPACT_COUNT = new Intl.NumberFormat('en', {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+});
+
 @Component({
   selector: 'ptah-compact-rail-meta',
   standalone: true,
@@ -177,7 +183,7 @@ export class CompactRailMetaComponent {
     if (git.kind !== 'known') return '—';
     const n = (value: number) =>
       this.dense() && value >= 1000
-        ? `${(value / 1000).toFixed(1)}k`
+        ? COMPACT_COUNT.format(value).toLowerCase()
         : `${value}`;
     return `+${n(git.additions)} −${n(git.deletions)}`;
   });
