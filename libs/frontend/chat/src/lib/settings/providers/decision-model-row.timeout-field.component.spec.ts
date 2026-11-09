@@ -105,6 +105,17 @@ describe('DecisionModelTimeoutFieldComponent', () => {
 
   afterEach(() => fixture?.destroy());
 
+  it('says an unsaved timeout may wait for a local load and a saved one bounds every request', async () => {
+    await create();
+    const help = (fixture.nativeElement as HTMLElement).querySelector(
+      '[data-testid="decision-timeout-help"]',
+    );
+    expect(help?.textContent).toContain(
+      'first request may wait up to 60 s while a local model loads',
+    );
+    expect(help?.textContent).toContain('saved value bounds every request');
+  });
+
   it('reads the stored value in seconds', async () => {
     stored = 12_000;
     await create();

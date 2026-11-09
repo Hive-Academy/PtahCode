@@ -25,10 +25,15 @@ import type { OutcomeFigureLookup } from '../matrix/outcome-figures';
 import type { SystemOneTarget } from '../decision-model/decision-model.config';
 import type { StructuredDecisionCompleter } from '../decision-model/structured-decision.port';
 import {
+  serializeSystemOneRequest,
   SystemOneClient,
   type SystemOneCallResult,
   type SystemOneClientOptions,
 } from '../decision-model/system-one.client';
+import {
+  SYSTEM_ONE_KEEP_ALIVE,
+  SYSTEM_ONE_LOAD_TIMEOUT_MS,
+} from '../decision-model/system-one.residency';
 import type { FallbackCause } from '../reasons/compile-reasons';
 import type { ChoiceValidation } from './answer-validation';
 import {
@@ -81,6 +86,11 @@ export type ModelDispatch =
       readonly kind: 'system-one';
       readonly caller: SystemOneCaller;
       readonly model: string;
+      /**
+       * Ollama `keep_alive` this caller will send. The fit measures the same
+       * JSON the client posts, including this field.
+       */
+      readonly keepAlive?: string;
     }
   | {
       readonly kind: 'structured';
@@ -94,15 +104,41 @@ export type ModelDispatch =
  * Client options for one System One call. The timeout is the target's
  * per-locality budget (DC8); a call past it fails with `timeout` and the
  * pipeline falls back. No retry.
+ *
+ * A local Ollama daemon also gets `keep_alive`. When the target timeout is
+ * the unsaved locality default, a definite residency miss uses the load
+ * budget. A saved `decisionModelTimeoutMs` (`timeoutExplicit`) bounds every
+ * request, so a cold call is not given a longer budget. A warm call that
+ * exceeds `timeoutMs` still falls back.
  */
 export function systemOneClientOptions(
   target: SystemOneTarget,
 ): SystemOneClientOptions {
+  const localDaemon = target.locality === 'local' && target.probe === 'daemon';
   return {
     baseUrl: target.baseUrl,
     model: target.model,
     timeoutMs: target.timeoutMs,
     ...(target.apiKey !== undefined ? { apiKey: target.apiKey } : {}),
+    ...(localDaemon ? localDaemonCallOptions(target) : {}),
+  };
+}
+
+/**
+ * `keep_alive` holds the model after a successful call. The load budget is
+ * only for an unsaved timeout: a saved value is already `timeoutMs`, and a
+ * cold call must not wait longer than that.
+ */
+function localDaemonCallOptions(
+  target: SystemOneTarget,
+): Pick<SystemOneClientOptions, 'keepAlive' | 'coldTimeoutMs'> {
+  return {
+    keepAlive: SYSTEM_ONE_KEEP_ALIVE,
+    ...(target.timeoutExplicit
+      ? {}
+      : {
+          coldTimeoutMs: Math.max(target.timeoutMs, SYSTEM_ONE_LOAD_TIMEOUT_MS),
+        }),
   };
 }
 
@@ -171,7 +207,7 @@ export async function runFixedRequest(input: {
   const model = input.dispatch.model;
   const bytes =
     input.dispatch.kind === 'system-one'
-      ? bodyBytes(model, payload)
+      ? bodyBytes(model, payload, input.dispatch.keepAlive)
       : textBytes(JSON.stringify({ prompt, jsonSchema: schema }));
   if (bytes > input.maxRequestBytes) {
     return emptyOutcome('payload-too-large');
@@ -247,7 +283,7 @@ function fitLane(input: {
     const schema = choiceSchema(questions);
     const bytes =
       input.dispatch.kind === 'system-one'
-        ? bodyBytes(input.dispatch.model, payload)
+        ? bodyBytes(input.dispatch.model, payload, input.dispatch.keepAlive)
         : textBytes(JSON.stringify({ prompt, jsonSchema: schema }));
     if (bytes <= input.maxRequestBytes) {
       return { payload, prompt, schema, offered, figureCount: figures.length };
@@ -302,12 +338,16 @@ function laneQuestions(
   }));
 }
 
-function bodyBytes(model: string, payload: DecisionPayload): number {
+function bodyBytes(
+  model: string,
+  payload: DecisionPayload,
+  keepAlive: string | undefined,
+): number {
   return textBytes(
-    JSON.stringify({
+    serializeSystemOneRequest({
       model,
-      state: payload.state,
-      questions: payload.questions,
+      payload,
+      ...(keepAlive !== undefined ? { keepAlive } : {}),
     }),
   );
 }

@@ -61,6 +61,13 @@ export interface DecisionEndpoint {
    * setting when set, else the default for this locality (DC8).
    */
   readonly timeoutMs: number;
+  /**
+   * True when `timeoutMs` is a saved `decisionModelTimeoutMs` (after the
+   * usual round and clamp). A saved value bounds every request, including a
+   * cold local load. False means the locality default, and only then may a
+   * definite residency miss use the load budget.
+   */
+  readonly timeoutExplicit: boolean;
 }
 
 /**
@@ -180,16 +187,24 @@ export function localityOfSelection(
 /**
  * Per-request budget of one System One call: the request timeout setting
  * when it holds a usable value, else the default for the locality (DC8).
+ * `timeoutExplicit` is true only for that saved value, so a cold load cannot
+ * be given a longer budget than the user saved.
  */
-function requestTimeoutMs(
+function requestTimeout(
   locality: DecisionModelLocality,
   workspace: Pick<IWorkspaceProvider, 'getConfiguration'>,
-): number {
+): { readonly timeoutMs: number; readonly timeoutExplicit: boolean } {
   const configured = configuredRequestTimeoutMs(workspace);
-  if (configured !== null) return configured;
-  return locality === 'local'
-    ? DECISION_REQUEST_TIMEOUT_MS
-    : DECISION_REQUEST_TIMEOUT_REMOTE_MS;
+  if (configured !== null) {
+    return { timeoutMs: configured, timeoutExplicit: true };
+  }
+  return {
+    timeoutMs:
+      locality === 'local'
+        ? DECISION_REQUEST_TIMEOUT_MS
+        : DECISION_REQUEST_TIMEOUT_REMOTE_MS,
+    timeoutExplicit: false,
+  };
 }
 
 /**
@@ -309,12 +324,14 @@ function endpoint(
   locality: DecisionModelLocality,
   workspace: Pick<IWorkspaceProvider, 'getConfiguration'>,
 ): DecisionEndpoint {
+  const timeout = requestTimeout(locality, workspace);
   const target = {
     baseUrl,
     model,
     probe,
     locality,
-    timeoutMs: requestTimeoutMs(locality, workspace),
+    timeoutMs: timeout.timeoutMs,
+    timeoutExplicit: timeout.timeoutExplicit,
   };
   return apiKey === null ? target : { ...target, apiKey };
 }

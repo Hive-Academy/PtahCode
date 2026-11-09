@@ -66,6 +66,11 @@ export const SystemOneRequestBodySchema = z
     model: z.string(),
     state: SystemOneStateSchema,
     questions: SystemOneQuestionsSchema,
+    /**
+     * Ollama only. How long to keep the model loaded after this request.
+     * Absent on Jev and on remote calls.
+     */
+    keep_alive: z.union([z.string().min(1), z.number()]).optional(),
   })
   .strict();
 

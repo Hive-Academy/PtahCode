@@ -7,6 +7,11 @@ import {
   type SystemOneFetch,
 } from '../decision-model/system-one.client';
 import {
+  SYSTEM_ONE_KEEP_ALIVE,
+  SYSTEM_ONE_LOAD_TIMEOUT_MS,
+  SYSTEM_ONE_RESIDENCY_PROBE_TIMEOUT_MS,
+} from '../decision-model/system-one.residency';
+import {
   DECISION_REQUEST_TIMEOUT_MS,
   DECISION_REQUEST_TIMEOUT_REMOTE_MS,
   DECISION_RETURN_MARGIN_MS,
@@ -22,6 +27,7 @@ const LOCAL_TARGET: SystemOneTarget = {
   probe: 'daemon',
   locality: 'local',
   timeoutMs: DECISION_REQUEST_TIMEOUT_MS,
+  timeoutExplicit: false,
 };
 
 const REMOTE_TARGET: SystemOneTarget = {
@@ -31,6 +37,7 @@ const REMOTE_TARGET: SystemOneTarget = {
   probe: 'endpoint',
   locality: 'remote',
   timeoutMs: DECISION_REQUEST_TIMEOUT_REMOTE_MS,
+  timeoutExplicit: false,
 };
 
 const PAYLOAD: DecisionPayload = {
@@ -130,6 +137,8 @@ describe('System One target timeout (DC8, 5.4)', () => {
       baseUrl: LOCAL_TARGET.baseUrl,
       model: LOCAL_TARGET.model,
       timeoutMs: DECISION_REQUEST_TIMEOUT_MS,
+      keepAlive: SYSTEM_ONE_KEEP_ALIVE,
+      coldTimeoutMs: SYSTEM_ONE_LOAD_TIMEOUT_MS,
     });
     expect(systemOneClientOptions(REMOTE_TARGET)).toEqual({
       baseUrl: REMOTE_TARGET.baseUrl,
@@ -161,4 +170,67 @@ describe('System One target timeout (DC8, 5.4)', () => {
     expect(outcome.answers.size).toBe(0);
     expect(hanging.calls).toBe(1);
   });
+
+  it('caps a cold call at a saved timeout', async () => {
+    const savedMs = 5_000;
+    const options = systemOneClientOptions({
+      ...LOCAL_TARGET,
+      timeoutMs: savedMs,
+      timeoutExplicit: true,
+    });
+    expect(options).toEqual({
+      baseUrl: LOCAL_TARGET.baseUrl,
+      model: LOCAL_TARGET.model,
+      timeoutMs: savedMs,
+      keepAlive: SYSTEM_ONE_KEEP_ALIVE,
+    });
+
+    const budgets = await budgetsFor(options, { models: [] });
+    const requestBudgets = budgets.filter(
+      (ms) => ms !== SYSTEM_ONE_RESIDENCY_PROBE_TIMEOUT_MS,
+    );
+    expect(requestBudgets).toEqual([savedMs]);
+    expect(budgets).not.toContain(SYSTEM_ONE_LOAD_TIMEOUT_MS);
+  });
+
+  it('uses the load budget on a residency miss when no timeout is saved', async () => {
+    const options = systemOneClientOptions(LOCAL_TARGET);
+    expect(options.coldTimeoutMs).toBe(SYSTEM_ONE_LOAD_TIMEOUT_MS);
+
+    const budgets = await budgetsFor(options, { models: [] });
+    expect(budgets).toContain(SYSTEM_ONE_RESIDENCY_PROBE_TIMEOUT_MS);
+    expect(budgets).toContain(SYSTEM_ONE_LOAD_TIMEOUT_MS);
+  });
 });
+
+/** Records every `AbortSignal.timeout` budget while one cold-or-warm call runs. */
+async function budgetsFor(
+  options: ReturnType<typeof systemOneClientOptions>,
+  psBody: { readonly models: readonly { readonly name: string }[] },
+): Promise<readonly number[]> {
+  const budgets: number[] = [];
+  const timeout = jest
+    .spyOn(AbortSignal, 'timeout')
+    .mockImplementation((ms: number) => {
+      budgets.push(ms);
+      return new AbortController().signal;
+    });
+  const fetch: SystemOneFetch = (url) => {
+    const body =
+      new URL(url).pathname === '/api/ps'
+        ? psBody
+        : { model: 'nimble', answers: {} };
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(body),
+    });
+  };
+  try {
+    const client = new SystemOneClient(options, { fetch });
+    await client.decide(PAYLOAD);
+    return budgets;
+  } finally {
+    timeout.mockRestore();
+  }
+}
