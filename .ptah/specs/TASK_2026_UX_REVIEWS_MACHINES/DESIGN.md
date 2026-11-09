@@ -250,8 +250,9 @@ running → `run`, queued/pending → `idle`, needs review/warning → `need`, f
 ### 8.11 Meter — existing pattern from the inspector, extract **NEW** `ptah-meter`
 
 Track `h-1.5 overflow-hidden rounded-full bg-[var(--surface-border-strong)]`, fill in
-`--ptah-gold` by default, `--state-ink-need` from 75 %, `--state-ink-err` from 90 % (one
-threshold, design audit D2). Label row `text-xs font-medium` + value `text-xs font-semibold
+`--ptah-gold` by default, `--state-ink-need` from 90 % (`NEAR_LIMIT_PERCENT`,
+`libs/shared/src/lib/utils/plan-limits/evidence-precedence.ts:11`), `--state-ink-err` at 100 %
+(at limit). One near-limit threshold, design audit D2. No 75 % step. Label row `text-xs font-medium` + value `text-xs font-semibold
 tabular-nums`. `role="meter"` with `aria-valuenow/min/max`.
 
 ### 8.12 Empty / loading / error / no-permission / partial — **NEW** `ptah-state-panel`
