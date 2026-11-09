@@ -58,6 +58,21 @@ describe('TabManagerService — cross-workspace routing (TASK_2026_154)', () => 
     TestBed.resetTestingModule();
   });
 
+  describe('closeHandoffPredecessor', () => {
+    it('closes only the exact tab/session pair across workspaces', async () => {
+      service.switchWorkspace(WS_A);
+      const tabId = service.createTab('source');
+      const sdkId = SessionId.create();
+      service.attachSession(tabId, sdkId);
+      service.switchWorkspace(WS_B);
+      expect(await service.closeHandoffPredecessor(tabId, 'other')).toBe(false);
+      expect(service.findTabByIdAcrossWorkspaces(tabId)).not.toBeNull();
+      expect(await service.closeHandoffPredecessor(tabId, sdkId)).toBe(true);
+      expect(service.findTabByIdAcrossWorkspaces(tabId)).toBeNull();
+      expect(await service.closeHandoffPredecessor(tabId, sdkId)).toBe(false);
+    });
+  });
+
   describe('findTabByIdAcrossWorkspaces', () => {
     it('resolves a tab in the active workspace', () => {
       service.switchWorkspace(WS_A);

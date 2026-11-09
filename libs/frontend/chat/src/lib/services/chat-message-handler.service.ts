@@ -21,7 +21,7 @@
  * - CHAT_QUEUED_MESSAGE_STATE: A backend-held follow-up changed state, any tab (TASK_2026_884)
  */
 
-import { Injectable, inject } from '@angular/core';
+import { Injectable, Injector, inject } from '@angular/core';
 import { type MessageHandler } from '@ptah-extension/core';
 import {
   FlatStreamEventUnion,
@@ -58,6 +58,7 @@ import {
   parseSessionHandoffOpenedPayload,
 } from './agent-session-adoption.service';
 import { HandoffChainClient } from './session-inspector/handoff-chain.client';
+import { AutoHandoffSourceCloserService } from './auto-handoff-source-closer.service';
 import {
   AgentMonitorStore,
   BackgroundTaskStore,
@@ -95,6 +96,7 @@ export class ChatMessageHandler implements MessageHandler {
   private readonly organizer = inject(SessionOrganizerService);
   private readonly organizationCache = inject(SessionOrganizationCache);
   private readonly handoffChain = inject(HandoffChainClient);
+  private readonly injector = inject(Injector);
   /**
    * Authoritative StreamRouter.
    *
@@ -174,6 +176,7 @@ export class ChatMessageHandler implements MessageHandler {
     MESSAGE_TYPES.GATEWAY_SESSION_DETACHED,
     MESSAGE_TYPES.AGENT_SESSION_OPENED,
     MESSAGE_TYPES.SESSION_HANDOFF_OPENED,
+    MESSAGE_TYPES.SESSION_HANDOFF_CLOSE_PREDECESSOR,
     MESSAGE_TYPES.SESSION_HANDOFF_LINKED,
     MESSAGE_TYPES.CHAT_QUEUED_MESSAGE_STATE,
   ] as const;
@@ -265,6 +268,9 @@ export class ChatMessageHandler implements MessageHandler {
         break;
       case MESSAGE_TYPES.SESSION_HANDOFF_OPENED:
         this.handleSessionHandoffOpened(message.payload);
+        break;
+      case MESSAGE_TYPES.SESSION_HANDOFF_CLOSE_PREDECESSOR:
+        void this.injector.get(AutoHandoffSourceCloserService).closePredecessor(message.payload);
         break;
       case MESSAGE_TYPES.SESSION_HANDOFF_LINKED:
         this.handleSessionHandoffLinked(message.payload);
