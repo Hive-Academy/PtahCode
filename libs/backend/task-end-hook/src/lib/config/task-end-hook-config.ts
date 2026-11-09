@@ -23,6 +23,8 @@ export const TASK_END_HOOK_KEYS = {
   maxWorktreesPerRun: 'taskEndHook.maxWorktreesPerRun',
   archiveMaxBytes: 'taskEndHook.archive.maxBytes',
   archiveMaxFiles: 'taskEndHook.archive.maxFiles',
+  autoRemoveMergedWorktreeAndBranch:
+    'taskCloseOut.autoRemoveMergedWorktreeAndBranch',
   /**
    * Memory keys the hook reads, never writes. The strings and defaults mirror
    * `MEMORY_TRIGGER_KEYS` / `MEMORY_TRIGGER_DEFAULTS` (`memory-trigger-config.ts`
@@ -48,6 +50,7 @@ export const TASK_END_HOOK_DEFAULTS = {
   /** 256 MiB; evaluated only (P7, report-only). */
   archiveMaxBytes: 268_435_456,
   archiveMaxFiles: 5000,
+  autoRemoveMergedWorktreeAndBranch: false,
   memoryEnabled: true,
   memorySessionEndEnabled: true,
   memoryBootScanIdleBackoffMs: 300_000,
@@ -76,6 +79,10 @@ export interface TaskEndHookSettings {
   readonly archive: {
     readonly maxBytes: number;
     readonly maxFiles: number;
+  };
+  /** Optional for existing settings snapshots; the reader always supplies it. */
+  readonly taskCloseOut?: {
+    readonly autoRemoveMergedWorktreeAndBranch: boolean;
   };
   readonly memory: {
     readonly enabled: boolean;
@@ -165,6 +172,13 @@ export function readTaskEndHookSettings(
     archive: {
       maxBytes: readNonNegative(ws, k.archiveMaxBytes, d.archiveMaxBytes, true),
       maxFiles: readNonNegative(ws, k.archiveMaxFiles, d.archiveMaxFiles, true),
+    },
+    taskCloseOut: {
+      autoRemoveMergedWorktreeAndBranch: readBoolean(
+        ws,
+        k.autoRemoveMergedWorktreeAndBranch,
+        d.autoRemoveMergedWorktreeAndBranch,
+      ),
     },
     memory: {
       enabled: readBoolean(ws, k.memoryEnabled, d.memoryEnabled),

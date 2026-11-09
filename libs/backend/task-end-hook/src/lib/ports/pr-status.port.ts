@@ -22,3 +22,28 @@ export interface PrStatusPort {
   /** Never rejects: every failure is the `error` member. */
   openPrStatus(mainRoot: string, branch: string): Promise<TaskEndPrStatus>;
 }
+
+/** PR lifecycle state used when reconciling task close-out. */
+export type TaskCloseOutPrStatus =
+  | { readonly kind: 'open'; readonly number: number; readonly url: string }
+  | {
+      readonly kind: 'merged';
+      readonly number: number;
+      readonly url: string;
+      readonly mergeCommit?: string;
+    }
+  | {
+      readonly kind: 'closed-unmerged';
+      readonly number: number;
+      readonly url: string;
+    }
+  | {
+      readonly kind: 'unknown';
+      readonly number?: number;
+      readonly url?: string;
+    };
+
+/** Host PR lookup for close-out; failures become `unknown`. */
+export interface CloseOutPrStatusPort {
+  prStatus(mainRoot: string, branch: string): Promise<TaskCloseOutPrStatus>;
+}

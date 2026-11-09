@@ -30,6 +30,8 @@ export const TASK_END_TOKENS = {
   PR_STATUS_PORT: Symbol.for('PtahTaskEndPrStatusPort'),
   /** GitReadRunner — raw git argument-vector runner, wrapped by ReadOnlyGit. */
   GIT_READ_RUNNER: Symbol.for('PtahTaskEndGitReadRunner'),
+  /** GitCleanupPort — guarded worktree and branch removal. */
+  GIT_CLEANUP_PORT: Symbol.for('PtahTaskEndGitCleanupPort'),
 
   // Library classes (registered by registerTaskEndHook)
   /** ITaskEndStore — the only writer of the migration 0072 tables. */
