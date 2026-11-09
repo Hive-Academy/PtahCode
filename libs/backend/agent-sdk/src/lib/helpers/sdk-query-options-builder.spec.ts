@@ -37,7 +37,10 @@ import type {
   ClaudeAccountNamedRoute,
   ClaudeCertifiedLaunchContext,
 } from '@ptah-extension/auth-providers-tokens';
-import type { IWorkspaceProvider } from '@ptah-extension/platform-core';
+import {
+  INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,
+  type IWorkspaceProvider,
+} from '@ptah-extension/platform-core';
 import {
   CODEX_PROXY_TOKEN_PLACEHOLDER,
   KIMI_CODE_PROXY_TOKEN_PLACEHOLDER,
@@ -220,7 +223,9 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
       createCallback: jest.fn().mockReturnValue(() => ({ behavior: 'allow' })),
       budgetSendMessageRefusal: jest.fn((target: string) => {
         if (target === 'boom') throw new Error('budget lookup failed');
-        return target === 'stopped' || target === 'warned' ? 'Start a fresh agent.' : undefined;
+        return target === 'stopped' || target === 'warned'
+          ? 'Start a fresh agent.'
+          : undefined;
       }),
       logBudgetSendMessageHookDenial: jest.fn(
         (_sessionId: string, _tabId: unknown, toolUseID: string) =>
@@ -411,13 +416,19 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
         }),
       }),
     );
-    expect(await hook?.(
-      { ...base, tool_input: { to: 'warned' } },
-      'send-2',
-      context,
-    )).toEqual(expect.objectContaining({
-      hookSpecificOutput: expect.objectContaining({ permissionDecision: 'deny' }),
-    }));
+    expect(
+      await hook?.(
+        { ...base, tool_input: { to: 'warned' } },
+        'send-2',
+        context,
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        hookSpecificOutput: expect.objectContaining({
+          permissionDecision: 'deny',
+        }),
+      }),
+    );
     expect(logger.debug).toHaveBeenCalledWith(
       '[SdkPermissionHandler] Permission decision',
       expect.objectContaining({
@@ -477,7 +488,9 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
     const options = await buildWith({ mcpToolProfile: 'apps' });
     expect(options.mcpServers?.['ptah']).toEqual(
       expect.objectContaining({
-        url: expect.stringMatching(/\/session\/tab-fixture\/workspace\/D%3A%2Ftmp%2Fws\/profile\/apps$/),
+        url: expect.stringMatching(
+          /\/session\/tab-fixture\/workspace\/D%3A%2Ftmp%2Fws\/profile\/apps$/,
+        ),
       }),
     );
   });
@@ -2235,8 +2248,31 @@ describe('SdkQueryOptionsBuilder.buildMcpServers — caller session segment (TAS
       routingSessionId?: string,
       toolProfile?: McpToolProfile,
       cwd?: string,
+      signal?: AbortSignal,
     ): Record<string, McpHttpServerConfig>;
   }
+
+  it('issues no credential after teardown aborted the session', () => {
+    const issue = jest.fn().mockReturnValue('late-token');
+    const ctor = SdkQueryOptionsBuilder as unknown as new (
+      ...args: unknown[]
+    ) => SdkQueryOptionsBuilder;
+    const builder = Object.assign(new ctor({ info: jest.fn() }), {
+      mcpCallerCredentials: { issue, revokeSubject: jest.fn() },
+    }) as unknown as BuilderWithMcp;
+    const controller = new AbortController();
+    controller.abort();
+    expect(() =>
+      builder.buildMcpServers(
+        true,
+        'tab-abc',
+        undefined,
+        '/work',
+        controller.signal,
+      ),
+    ).toThrow('Session ended before its Ptah MCP credential was issued.');
+    expect(issue).not.toHaveBeenCalled();
+  });
 
   function makeMcpBuilder(): BuilderWithMcp {
     const logger = {
@@ -2300,13 +2336,54 @@ describe('SdkQueryOptionsBuilder.buildMcpServers — caller session segment (TAS
           toolProfile: 'apps',
           capability: 'privileged',
         },
-        'claude-interactive:tab-abc',
-        4 * 60 * 60 * 1000,
+        expect.stringMatching(/^claude-interactive:tab-abc:/),
+        INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,
       );
+      const subject = issue.mock.calls[0][1] as string;
       builder.revokeMcpSubject('tab-abc');
-      expect(revokeSubject).toHaveBeenCalledWith('claude-interactive:tab-abc');
+      expect(revokeSubject).toHaveBeenCalledWith(subject);
     },
   );
+
+  it('revokes a displaced session token and keeps the replacement token', () => {
+    const issue = jest.fn().mockReturnValue('token');
+    const revokeSubject = jest.fn();
+    const ctor = SdkQueryOptionsBuilder as unknown as new (
+      ...args: unknown[]
+    ) => SdkQueryOptionsBuilder;
+    const builder = Object.assign(new ctor({ info: jest.fn() }), {
+      mcpCallerCredentials: { issue, revokeSubject },
+    }) as unknown as BuilderWithMcp &
+      Pick<SdkQueryOptionsBuilder, 'revokeMcpSubject'>;
+    const oldSession = new AbortController();
+    const newSession = new AbortController();
+    builder.buildMcpServers(
+      true,
+      'tab-abc',
+      undefined,
+      '/w',
+      oldSession.signal,
+    );
+    builder.buildMcpServers(
+      true,
+      'tab-abc',
+      undefined,
+      '/w',
+      newSession.signal,
+    );
+    const [oldSubject, newSubject] = issue.mock.calls.map(
+      (call) => call[1] as string,
+    );
+    expect(oldSubject).not.toBe(newSubject);
+
+    oldSession.abort();
+    expect(revokeSubject).toHaveBeenCalledTimes(1);
+    expect(revokeSubject).toHaveBeenCalledWith(oldSubject);
+
+    builder.revokeMcpSubject('tab-abc');
+    expect(revokeSubject).toHaveBeenCalledTimes(2);
+    expect(revokeSubject).toHaveBeenLastCalledWith(newSubject);
+  });
 
   it.each(['coding', undefined] as const)(
     'preserves the exact default URL for %s',

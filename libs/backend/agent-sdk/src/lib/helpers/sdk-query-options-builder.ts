@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import {
   PLATFORM_TOKENS,
+  INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,
   type HostKind,
   type IWorkspaceProvider,
   type IMcpCallerCredentials,
@@ -1074,8 +1075,45 @@ export interface QueryConfig {
  */
 @injectable()
 export class SdkQueryOptionsBuilder {
+  /** Live interactive credential subjects, keyed by tab id. */
+  private readonly interactiveSubjects = new Map<string, Set<string>>();
+
+  /** Revokes every interactive credential issued for this tab. */
   revokeMcpSubject(tabId: string): void {
-    this.mcpCallerCredentials?.revokeSubject(`claude-interactive:${tabId}`);
+    const subjects = this.interactiveSubjects.get(tabId);
+    if (!subjects) return;
+    this.interactiveSubjects.delete(tabId);
+    for (const subject of subjects) {
+      this.mcpCallerCredentials?.revokeSubject(subject);
+    }
+  }
+
+  /**
+   * Records an issued subject. When the session's controller aborts, its
+   * own subject is revoked. Thus a displaced session loses its token and a
+   * replacement session in the same tab keeps its token.
+   */
+  private trackInteractiveSubject(
+    tabId: string,
+    subject: string,
+    signal: AbortSignal | undefined,
+  ): void {
+    let subjects = this.interactiveSubjects.get(tabId);
+    if (!subjects) {
+      subjects = new Set<string>();
+      this.interactiveSubjects.set(tabId, subjects);
+    }
+    subjects.add(subject);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        this.mcpCallerCredentials?.revokeSubject(subject);
+        const live = this.interactiveSubjects.get(tabId);
+        live?.delete(subject);
+        if (live?.size === 0) this.interactiveSubjects.delete(tabId);
+      },
+      { once: true },
+    );
   }
 
   constructor(
@@ -1525,6 +1563,7 @@ export class SdkQueryOptionsBuilder {
           routingId,
           sessionConfig.mcpToolProfile,
           cwd,
+          abortController.signal,
         ),
         mcpServersOverride,
       ),
@@ -2206,6 +2245,7 @@ export class SdkQueryOptionsBuilder {
     routingSessionId?: string,
     toolProfile?: McpToolProfile,
     cwd?: string,
+    signal?: AbortSignal,
   ): Record<string, McpHttpServerConfig> {
     if (!mcpServerRunning) {
       this.logger.info(
@@ -2227,6 +2267,17 @@ export class SdkQueryOptionsBuilder {
         'MCP caller credentials are unavailable for this session.',
       );
     }
+    // Teardown aborts the controller and then revokes this tab's subject. If
+    // that ran while build() awaited, a token issued now would outlive the
+    // session. A teardown after this point revokes the token it issues.
+    if (signal?.aborted) {
+      throw new SdkError(
+        'Session ended before its Ptah MCP credential was issued.',
+      );
+    }
+    // Each token gets its own subject, so a teardown of one session never
+    // revokes the token of a newer session in the same tab.
+    const subject = `claude-interactive:${routingSessionId}:${randomUUID()}`;
     const token = this.mcpCallerCredentials.issue(
       {
         kind: 'session',
@@ -2235,9 +2286,10 @@ export class SdkQueryOptionsBuilder {
         ...(toolProfile === 'apps' ? { toolProfile: 'apps' as const } : {}),
         capability: 'privileged',
       },
-      `claude-interactive:${routingSessionId}`,
-      4 * 60 * 60 * 1000,
+      subject,
+      INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,
     );
+    this.trackInteractiveSubject(routingSessionId, subject, signal);
     const sessionUrl = `http://localhost:${PTAH_MCP_PORT}/session/${encodeURIComponent(routingSessionId)}/workspace/${encodeURIComponent(cwd)}`;
     const mcpConfig: Record<string, McpHttpServerConfig> = {
       ptah: {

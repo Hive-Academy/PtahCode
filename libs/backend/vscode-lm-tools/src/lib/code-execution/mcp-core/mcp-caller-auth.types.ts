@@ -16,11 +16,17 @@ export const MCP_AUTH_REQUIRED_CODE = -32001;
 export const MCP_CALLER_FORBIDDEN_CODE = -32003;
 
 export const MCP_AUTH_REQUIRED_MESSAGE = 'Authentication required';
+/**
+ * Sent for a well-formed bearer that matches no live record. The registry
+ * cannot tell unknown from expired or revoked, so the wording covers session,
+ * lane and config tokens alike.
+ */
+export const MCP_CREDENTIAL_INVALID_MESSAGE =
+  'Ptah MCP credential is unknown, expired or was revoked. Restart the session, agent lane or MCP config that issued it to get a new credential.';
 export const MCP_CALLER_FORBIDDEN_MESSAGE =
   'Caller is not allowed to use this resource';
 export const MCP_TOOL_DENIED_MESSAGE = 'Tool is not permitted for this caller';
-export const MCP_CONTENT_TYPE_MESSAGE =
-  'Content-Type must be application/json';
+export const MCP_CONTENT_TYPE_MESSAGE = 'Content-Type must be application/json';
 
 /** Values of `mcp.externalCallerAccess`. Anything else stays read-only. */
 export type McpExternalAccess = 'read-only' | 'full';
@@ -56,11 +62,13 @@ export interface McpHttpAuthInput {
   readonly toolProfile?: string;
 }
 
-export function authRequiredFailure(): McpAuthFailure {
+export function authRequiredFailure(
+  message = MCP_AUTH_REQUIRED_MESSAGE,
+): McpAuthFailure {
   return {
     httpStatus: 401,
     jsonRpcCode: MCP_AUTH_REQUIRED_CODE,
-    message: MCP_AUTH_REQUIRED_MESSAGE,
+    message,
   };
 }
 
@@ -78,7 +86,9 @@ function present(value: string | undefined): string | undefined {
   return value;
 }
 
-function profileOf(value: string | undefined): McpCallerToolProfile | undefined {
+function profileOf(
+  value: string | undefined,
+): McpCallerToolProfile | undefined {
   if (value === 'coding' || value === 'apps') return value;
   return undefined;
 }

@@ -18,6 +18,7 @@
  * teardown notifications are jest mocks.
  */
 
+import 'reflect-metadata';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { SubagentRegistryService } from '@ptah-extension/vscode-core';
 import type {
@@ -28,6 +29,7 @@ import type {
 
 import { SessionControl } from './session-control.service';
 import { SessionRegistry } from './session-registry.service';
+import { SdkQueryOptionsBuilder } from '../sdk-query-options-builder';
 import type { IModelResolver } from '../../auth-env.port';
 import type { SessionEndCallbackRegistry } from '../session-end-callback-registry';
 import type { CompactionConfig } from '../compaction-config-provider';
@@ -112,6 +114,39 @@ function makeHarness(
   };
 }
 
+/** Real builder bookkeeping over a store that models credential validity. */
+function makeCredentialBuilder() {
+  const live = new Set<string>();
+  const credentials = {
+    issue: jest.fn((_binding: unknown, subject: string) => {
+      live.add(subject);
+      return subject;
+    }),
+    revokeSubject: jest.fn((subject: string) => live.delete(subject)),
+  };
+  const ctor = SdkQueryOptionsBuilder as unknown as new (
+    ...args: unknown[]
+  ) => SdkQueryOptionsBuilder;
+  const builder = Object.assign(new ctor({ info: jest.fn() }), {
+    mcpCallerCredentials: credentials,
+  }) as unknown as Pick<SdkQueryOptionsBuilder, 'revokeMcpSubject'> & {
+    buildMcpServers(
+      running: boolean,
+      tabId: string,
+      profile: undefined,
+      cwd: string,
+      signal: AbortSignal,
+    ): unknown;
+  };
+  // The fake store returns the subject as the token value.
+  const issueFor = (signal: AbortSignal): string => {
+    builder.buildMcpServers(true, KEY, undefined, '/w', signal);
+    const results = credentials.issue.mock.results;
+    return results[results.length - 1].value as string;
+  };
+  return { live, builder, issueFor };
+}
+
 describe('SessionControl MCP credential teardown', () => {
   it('revokes the routing tab on endSession', async () => {
     const revoke = jest.fn();
@@ -139,6 +174,96 @@ describe('SessionControl MCP credential teardown', () => {
     h.registry.register(KEY, makeConfig(), new AbortController());
     await h.control.disposeAllSessions();
     expect(revoke).toHaveBeenCalledWith(KEY);
+  });
+
+  it('revokes again after disposeAllSessions aborts, so a token issued during the wait dies', async () => {
+    const abort = new AbortController();
+    const abortedAtRevoke: boolean[] = [];
+    const h = makeHarness(null, null, () =>
+      abortedAtRevoke.push(abort.signal.aborted),
+    );
+    h.registry.register(KEY, makeConfig(), abort);
+    await h.control.disposeAllSessions();
+    expect(abortedAtRevoke).toEqual([false, true]);
+  });
+
+  it('does not revoke a tab that a newer session took during disposeAllSessions', async () => {
+    const revoke = jest.fn();
+    const h = makeHarness(null, null, revoke);
+    const oldRec = h.registry.register(
+      KEY,
+      makeConfig(),
+      new AbortController(),
+    );
+    let releaseInterrupt: () => void = () => undefined;
+    oldRec.query = {
+      interrupt: jest.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseInterrupt = resolve;
+          }),
+      ),
+    } as unknown as typeof oldRec.query;
+    const disposing = h.control.disposeAllSessions();
+    h.registry.register(KEY, makeConfig(), new AbortController());
+    releaseInterrupt();
+    await disposing;
+    expect(revoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the replacement credential when an old endSession finishes late', async () => {
+    const { live, builder, issueFor } = makeCredentialBuilder();
+    const h = makeHarness(null, null, (tabId) =>
+      builder.revokeMcpSubject(tabId),
+    );
+    const oldAbort = new AbortController();
+    const oldRec = h.registry.register(KEY, makeConfig(), oldAbort);
+    const oldToken = issueFor(oldAbort.signal);
+    let releaseInterrupt: () => void = () => undefined;
+    oldRec.query = {
+      interrupt: jest.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseInterrupt = resolve;
+          }),
+      ),
+    } as unknown as typeof oldRec.query;
+
+    const ending = h.control.endSession(KEY_ID);
+    const newAbort = new AbortController();
+    h.registry.register(KEY, makeConfig(), newAbort);
+    const newToken = issueFor(newAbort.signal);
+    releaseInterrupt();
+    await ending;
+
+    expect(live.has(oldToken)).toBe(false);
+    expect(live.has(newToken)).toBe(true);
+  });
+
+  it('kills the credential of an evicted record and keeps the replacement credential', () => {
+    const { live, builder, issueFor } = makeCredentialBuilder();
+    const h = makeHarness(null, null, (tabId) =>
+      builder.revokeMcpSubject(tabId),
+    );
+    const TTL = 1_000;
+    h.registry.setClockForTesting(() => 0);
+    const oldAbort = new AbortController();
+    h.registry.register(KEY, makeConfig(), oldAbort);
+    // Initialization issued a token, but the query has not started yet.
+    const oldToken = issueFor(oldAbort.signal);
+
+    expect(h.registry.evictStale(TTL, TTL)).toBe(1);
+    expect(live.has(oldToken)).toBe(false);
+    // Initialization that resumes after the eviction issues no new token.
+    expect(() => issueFor(oldAbort.signal)).toThrow(
+      'Session ended before its Ptah MCP credential was issued.',
+    );
+
+    const newAbort = new AbortController();
+    h.registry.register(KEY, makeConfig(), newAbort);
+    const newToken = issueFor(newAbort.signal);
+    expect(live.has(newToken)).toBe(true);
+    expect(live.size).toBe(1);
   });
 });
 

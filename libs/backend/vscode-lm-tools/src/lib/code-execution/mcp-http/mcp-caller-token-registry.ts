@@ -22,6 +22,7 @@ import type {
 import { MCP_LEGACY_UNTOKENED_READ_ONLY } from '../mcp-core/mcp-caller-policy';
 import {
   authRequiredFailure,
+  MCP_CREDENTIAL_INVALID_MESSAGE,
   bindingMatchesUrl,
   callerForbiddenFailure,
   legacyReadOnlyBinding,
@@ -70,8 +71,7 @@ export interface PersistentReconcileResult {
   readonly token: string;
 }
 
-export interface PreparedPersistentCredential
-  extends PersistentReconcileResult {
+export interface PreparedPersistentCredential extends PersistentReconcileResult {
   /** Commit only after the config writer accepts the credential. */
   readonly commit: () => Promise<void>;
 }
@@ -191,9 +191,7 @@ export class McpCallerTokenRegistry {
     const existing =
       fileDigest === undefined
         ? undefined
-        : records.find((record) =>
-            digestsEqual(fileDigest, record.tokenHash),
-          );
+        : records.find((record) => digestsEqual(fileDigest, record.tokenHash));
 
     if (existing !== undefined && fileToken !== undefined) {
       await this.writeCapability(existing, capability);
@@ -225,8 +223,12 @@ export class McpCallerTokenRegistry {
                   ),
                   latest,
                 ];
-                await this.persist(next.map((record) => this.clampRecord(record)));
-                this.persistent = next.map((record) => this.clampRecord(record));
+                await this.persist(
+                  next.map((record) => this.clampRecord(record)),
+                );
+                this.persistent = next.map((record) =>
+                  this.clampRecord(record),
+                );
               },
       };
     }
@@ -306,16 +308,27 @@ export class McpCallerTokenRegistry {
   clampExternalCallerAccess(access: McpExternalAccess): void {
     this.currentAccess = access;
     if (access === 'read-only') {
-      this.persistent = this.persistent.map((record) => this.clampRecord(record));
+      this.persistent = this.persistent.map((record) =>
+        this.clampRecord(record),
+      );
     }
   }
 
-  private allowedCapability(kind: 'workspace' | 'home', requested: McpExternalAccess): McpCallerCapability {
-    return capabilityFor(kind, requested === 'full' && this.currentAccess !== 'read-only' ? 'full' : 'read-only');
+  private allowedCapability(
+    kind: 'workspace' | 'home',
+    requested: McpExternalAccess,
+  ): McpCallerCapability {
+    return capabilityFor(
+      kind,
+      requested === 'full' && this.currentAccess !== 'read-only'
+        ? 'full'
+        : 'read-only',
+    );
   }
 
   private clampRecord(record: PersistentRecord): PersistentRecord {
-    return this.currentAccess === 'read-only' && record.capability !== 'read-only'
+    return this.currentAccess === 'read-only' &&
+      record.capability !== 'read-only'
       ? { ...record, capability: 'read-only' }
       : record;
   }
@@ -345,7 +358,10 @@ export class McpCallerTokenRegistry {
     const digest = digestToken(input.token);
     const binding = this.lookup(digest);
     if (binding === undefined) {
-      return { ok: false, failure: authRequiredFailure() };
+      return {
+        ok: false,
+        failure: authRequiredFailure(MCP_CREDENTIAL_INVALID_MESSAGE),
+      };
     }
     if (!bindingMatchesUrl(binding, input)) {
       return { ok: false, failure: callerForbiddenFailure() };
@@ -429,7 +445,10 @@ export class McpCallerTokenRegistry {
     existing: PersistentRecord,
     capability: McpCallerCapability,
   ): Promise<void> {
-    const nextCapability = this.allowedCapability(existing.kind, capability === 'privileged' ? 'full' : 'read-only');
+    const nextCapability = this.allowedCapability(
+      existing.kind,
+      capability === 'privileged' ? 'full' : 'read-only',
+    );
     if (existing.capability === nextCapability) return;
     const next = this.persistent.map((record) =>
       record.configPath === existing.configPath
@@ -479,21 +498,28 @@ export class McpCallerTokenRegistry {
   private async persist(records: readonly PersistentRecord[]): Promise<void> {
     if (this.options.state === undefined) return;
     const run = this.persistQueue.then(() => this.persistNow(records));
-    this.persistQueue = run.then(() => undefined, () => undefined);
+    this.persistQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
     return run;
   }
 
-  private async persistNow(records: readonly PersistentRecord[]): Promise<void> {
+  private async persistNow(
+    records: readonly PersistentRecord[],
+  ): Promise<void> {
     const payload = {
-      records: records.map((entry) => this.clampRecord(entry)).map((record) => ({
-        configPath: record.configPath,
-        tokenHashB64: record.tokenHash.toString('base64'),
-        kind: record.kind,
-        capability: record.capability,
-        ...(record.workspaceRoot === undefined
-          ? {}
-          : { workspaceRoot: record.workspaceRoot }),
-      })),
+      records: records
+        .map((entry) => this.clampRecord(entry))
+        .map((record) => ({
+          configPath: record.configPath,
+          tokenHashB64: record.tokenHash.toString('base64'),
+          kind: record.kind,
+          capability: record.capability,
+          ...(record.workspaceRoot === undefined
+            ? {}
+            : { workspaceRoot: record.workspaceRoot }),
+        })),
     };
     try {
       await this.options.state?.update(STORE_KEY, payload);
