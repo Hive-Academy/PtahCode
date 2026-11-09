@@ -3,6 +3,12 @@ import type { LaneRoutingLogger } from '../lane-routing-logger';
 import { originOf, systemOneUrl } from './decision-endpoint.url';
 import type { DecisionPayload } from './decision-payload';
 import {
+  ollamaPsUrl,
+  residentFromPsBody,
+  selectRequestBudgetMs,
+  SYSTEM_ONE_RESIDENCY_PROBE_TIMEOUT_MS,
+} from './system-one.residency';
+import {
   SystemOneResultSchema,
   type SystemOneResult,
 } from './system-one.schema';
@@ -83,6 +89,16 @@ export interface SystemOneClientOptions {
   readonly apiKey?: string;
   /** Per-request abort budget; defaults to `SYSTEM_ONE_TIMEOUT_MS`. */
   readonly timeoutMs?: number;
+  /**
+   * Ollama `keep_alive` for a local daemon. Omitted for Jev and for remote
+   * calls: those servers do not use the field.
+   */
+  readonly keepAlive?: string;
+  /**
+   * Abort budget when a residency probe proves the model is not loaded.
+   * Absent, or not larger than `timeoutMs`, means every call uses `timeoutMs`.
+   */
+  readonly coldTimeoutMs?: number;
 }
 
 export interface SystemOneClientDependencies {
@@ -105,16 +121,27 @@ export class SystemOneClient {
   }
 
   /**
-   * One POST; no retries (part A §5). Nothing is persisted here: the result
-   * is plain data, and any `unsupported` mark belongs to the status layer
+   * One POST; no retries (part A §5). A local daemon may first GET `/api/ps`
+   * so a cold load is not aborted by the inference budget. Nothing is
+   * persisted here: the result is plain data, and any `unsupported` mark
+   * belongs to the status layer
    * (`DecisionModelStatus.recheckAfterLiveNotFound`), never to the client.
    */
   async decide(payload: DecisionPayload): Promise<SystemOneCallResult> {
-    const body = JSON.stringify({
+    const requestBody: {
+      model: string;
+      state: DecisionPayload['state'];
+      questions: DecisionPayload['questions'];
+      keep_alive?: string;
+    } = {
       model: this.options.model,
       state: payload.state,
       questions: payload.questions,
-    });
+    };
+    if (this.options.keepAlive !== undefined) {
+      requestBody.keep_alive = this.options.keepAlive;
+    }
+    const body = JSON.stringify(requestBody);
     const bodyBytes = this.encoder.encode(body).byteLength;
     if (bodyBytes > SYSTEM_ONE_MAX_REQUEST_BYTES) {
       return this.logged(
@@ -133,7 +160,7 @@ export class SystemOneClient {
       );
     }
 
-    const timeoutMs = this.options.timeoutMs ?? SYSTEM_ONE_TIMEOUT_MS;
+    const timeoutMs = await this.requestBudgetMs();
     const signal = AbortSignal.timeout(timeoutMs);
     const headers: Record<string, string> = {
       'content-type': 'application/json',
@@ -147,6 +174,7 @@ export class SystemOneClient {
       model: this.options.model,
       questions: Object.keys(payload.questions).length,
       bodyBytes,
+      timeoutMs,
     });
 
     let response: Awaited<ReturnType<SystemOneFetch>>;
@@ -201,6 +229,40 @@ export class SystemOneClient {
       answers: Object.keys(validated.data.answers).length,
     });
     return { ok: true, result: validated.data };
+  }
+
+  /**
+   * Warm calls use `timeoutMs`. A local daemon whose model is not loaded
+   * uses `coldTimeoutMs` instead, so the abort does not cancel the load.
+   * A probe that fails or does not answer keeps the warm budget: an unknown
+   * residency must not turn a dead daemon into a minute-long wait.
+   */
+  private async requestBudgetMs(): Promise<number> {
+    const warm = this.options.timeoutMs ?? SYSTEM_ONE_TIMEOUT_MS;
+    const cold = this.options.coldTimeoutMs;
+    if (cold === undefined || cold <= warm) return warm;
+    const resident = await this.probeResident();
+    return selectRequestBudgetMs({ warmMs: warm, coldMs: cold, resident });
+  }
+
+  private async probeResident(): Promise<boolean | null> {
+    const url = ollamaPsUrl(this.options.baseUrl);
+    if (url === null) return null;
+    const signal = AbortSignal.timeout(SYSTEM_ONE_RESIDENCY_PROBE_TIMEOUT_MS);
+    let response: Awaited<ReturnType<SystemOneFetch>> | undefined;
+    let bodyText: string | undefined;
+    let failed = false;
+    try {
+      response = await this.fetchImpl(url, { method: 'GET', signal });
+      if (response.ok) bodyText = await response.text();
+    } catch (error: unknown) {
+      this.logger?.debug('[lane-routing] system one residency probe failed', {
+        name: loggableErrorName(error),
+      });
+      failed = true;
+    }
+    if (failed || bodyText === undefined) return null;
+    return residentFromPsBody(bodyText, this.options.model);
   }
 
   /**

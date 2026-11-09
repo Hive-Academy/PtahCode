@@ -7,6 +7,10 @@ import {
   type SystemOneFetch,
 } from '../decision-model/system-one.client';
 import {
+  SYSTEM_ONE_KEEP_ALIVE,
+  SYSTEM_ONE_LOAD_TIMEOUT_MS,
+} from '../decision-model/system-one.residency';
+import {
   DECISION_REQUEST_TIMEOUT_MS,
   DECISION_REQUEST_TIMEOUT_REMOTE_MS,
   DECISION_RETURN_MARGIN_MS,
@@ -130,6 +134,8 @@ describe('System One target timeout (DC8, 5.4)', () => {
       baseUrl: LOCAL_TARGET.baseUrl,
       model: LOCAL_TARGET.model,
       timeoutMs: DECISION_REQUEST_TIMEOUT_MS,
+      keepAlive: SYSTEM_ONE_KEEP_ALIVE,
+      coldTimeoutMs: SYSTEM_ONE_LOAD_TIMEOUT_MS,
     });
     expect(systemOneClientOptions(REMOTE_TARGET)).toEqual({
       baseUrl: REMOTE_TARGET.baseUrl,

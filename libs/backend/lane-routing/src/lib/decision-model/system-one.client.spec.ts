@@ -9,6 +9,7 @@ import {
   type SystemOneCallResult,
   type SystemOneFetch,
 } from './system-one.client';
+import { SYSTEM_ONE_KEEP_ALIVE } from './system-one.residency';
 import type { SystemOneResult } from './system-one.schema';
 
 /*
@@ -566,4 +567,145 @@ describe('SystemOneClient', () => {
     expect(JSON.stringify(entries)).not.toContain(key);
     expect(JSON.stringify(entries)).not.toContain('Authorization');
   });
+
+  it('waits out a cold load and asks the daemon to keep the model', async () => {
+    const daemon = residencyFetch(JSON.stringify({ models: [] }), 50);
+    const client = new SystemOneClient(
+      {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'nimble',
+        timeoutMs: 20,
+        coldTimeoutMs: 400,
+        keepAlive: SYSTEM_ONE_KEEP_ALIVE,
+      },
+      { fetch: daemon.fetch },
+    );
+
+    const result = requireSuccess(await client.decide(payload));
+
+    expect(result.answers['implement'].choice).toBe('o1');
+    expect(daemon.posts).toHaveLength(1);
+    expect(JSON.parse(daemon.posts[0]?.body ?? '{}')).toMatchObject({
+      model: 'nimble',
+      keep_alive: '30m',
+    });
+    expect(daemon.probes).toEqual(['http://127.0.0.1:11434/api/ps']);
+  });
+
+  it('keeps the warm budget when the model is already loaded', async () => {
+    const daemon = residencyFetch(
+      JSON.stringify({
+        models: [{ name: 'nimble:latest', model: 'nimble:latest' }],
+      }),
+      400,
+    );
+    const client = new SystemOneClient(
+      {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'nimble',
+        timeoutMs: 40,
+        coldTimeoutMs: 400,
+        keepAlive: SYSTEM_ONE_KEEP_ALIVE,
+      },
+      { fetch: daemon.fetch },
+    );
+
+    const failure = requireFailure(await client.decide(payload));
+
+    expect(failure).toEqual({
+      ok: false,
+      cause: 'timeout',
+      detail: 'request timed out after 40 ms',
+      notFound: false,
+    });
+    expect(daemon.posts).toHaveLength(1);
+  });
+
+  it('keeps the warm budget when the residency probe fails', async () => {
+    const daemon = residencyFetch('throw', 400);
+    const client = new SystemOneClient(
+      {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'nimble',
+        timeoutMs: 40,
+        coldTimeoutMs: 400,
+        keepAlive: SYSTEM_ONE_KEEP_ALIVE,
+      },
+      { fetch: daemon.fetch },
+    );
+
+    const failure = requireFailure(await client.decide(payload));
+
+    expect(failure.cause).toBe('timeout');
+    expect(failure.detail).toBe('request timed out after 40 ms');
+  });
+
+  it('still falls back when a cold model does not finish loading', async () => {
+    const daemon = residencyFetch(JSON.stringify({ models: [] }), 400);
+    const client = new SystemOneClient(
+      {
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'nimble',
+        timeoutMs: 20,
+        coldTimeoutMs: 50,
+        keepAlive: SYSTEM_ONE_KEEP_ALIVE,
+      },
+      { fetch: daemon.fetch },
+    );
+
+    const failure = requireFailure(await client.decide(payload));
+
+    expect(failure).toEqual({
+      ok: false,
+      cause: 'timeout',
+      detail: 'request timed out after 50 ms',
+      notFound: false,
+    });
+  });
 });
+
+/**
+ * GET `/api/ps` answers immediately. The decision POST resolves after
+ * `delayMs` unless its abort signal fires first.
+ */
+function residencyFetch(
+  psBody: string | 'throw',
+  delayMs: number,
+): {
+  readonly fetch: SystemOneFetch;
+  readonly posts: Array<{ readonly url: string; readonly body: string }>;
+  readonly probes: string[];
+} {
+  const posts: Array<{ url: string; body: string }> = [];
+  const probes: string[] = [];
+  const fetch: SystemOneFetch = (url, init) => {
+    if (new URL(url).pathname === '/api/ps') {
+      probes.push(url);
+      if (psBody === 'throw') return Promise.reject(new TypeError('fetch failed'));
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: async () => psBody,
+      });
+    }
+    posts.push({ url, body: init?.body ?? '' });
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        resolve({
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify(successBody),
+        });
+      }, delayMs);
+      init?.signal?.addEventListener(
+        'abort',
+        () => {
+          clearTimeout(timer);
+          reject(init.signal?.reason ?? new Error('aborted'));
+        },
+        { once: true },
+      );
+    });
+  };
+  return { fetch, posts, probes };
+}

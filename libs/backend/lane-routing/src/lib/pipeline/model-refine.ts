@@ -29,6 +29,10 @@ import {
   type SystemOneCallResult,
   type SystemOneClientOptions,
 } from '../decision-model/system-one.client';
+import {
+  SYSTEM_ONE_KEEP_ALIVE,
+  SYSTEM_ONE_LOAD_TIMEOUT_MS,
+} from '../decision-model/system-one.residency';
 import type { FallbackCause } from '../reasons/compile-reasons';
 import type { ChoiceValidation } from './answer-validation';
 import {
@@ -94,15 +98,26 @@ export type ModelDispatch =
  * Client options for one System One call. The timeout is the target's
  * per-locality budget (DC8); a call past it fails with `timeout` and the
  * pipeline falls back. No retry.
+ *
+ * A local Ollama daemon also gets `keep_alive` and a load budget. The load
+ * budget applies only while `GET /api/ps` shows the model is not in memory,
+ * so a warm call that exceeds `timeoutMs` still falls back.
  */
 export function systemOneClientOptions(
   target: SystemOneTarget,
 ): SystemOneClientOptions {
+  const localDaemon = target.locality === 'local' && target.probe === 'daemon';
   return {
     baseUrl: target.baseUrl,
     model: target.model,
     timeoutMs: target.timeoutMs,
     ...(target.apiKey !== undefined ? { apiKey: target.apiKey } : {}),
+    ...(localDaemon
+      ? {
+          keepAlive: SYSTEM_ONE_KEEP_ALIVE,
+          coldTimeoutMs: Math.max(target.timeoutMs, SYSTEM_ONE_LOAD_TIMEOUT_MS),
+        }
+      : {}),
   };
 }
 
