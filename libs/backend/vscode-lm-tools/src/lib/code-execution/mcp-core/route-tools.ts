@@ -117,7 +117,8 @@ export function buildRouteDecideTool(): MCPToolDefinition {
       '"taskType", "depth", "phases" and optional "pins", "preferenceSource" ' +
       'and "preferences", and returns one roster entry per phase. Each phase ' +
       'may include "shape" (mechanical, logic, contract, test, docs, review) ' +
-      'and "weight" (estimated source tokens in its batch read and write sets). ' +
+      'and "weight" (estimated source tokens in its batch read and write sets, ' +
+      'plus 10% framing). ' +
       'Each roster row includes "tier" and "effort". For subagents, "tier" ' +
       'is the model alias to pass; for CLI lanes, both are advisory. Invalid ' +
       'arguments are an error that names the field. The call updates rotation ' +
