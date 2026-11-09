@@ -11,7 +11,10 @@ import {
   createMockFileSystemProvider,
   createMockWorkspaceProvider,
 } from '@ptah-extension/platform-core/testing';
-import { GIT_ROOT_MISSING_MESSAGE, type GitWorktreeInfo } from '@ptah-extension/shared';
+import {
+  GIT_ROOT_MISSING_MESSAGE,
+  type GitWorktreeInfo,
+} from '@ptah-extension/shared';
 
 import {
   GIT_ROOT_UNAVAILABLE_MESSAGE,
@@ -112,18 +115,84 @@ describe('GitRootResolver', () => {
   it('uses the missing error only when the requested folder is absent', async () => {
     const { resolver, probe } = build();
     probe.directory.mockResolvedValue({ kind: 'absent' });
-    await expect(resolver.resolve('/gone', 'git:info', 'folder-or-worktree'))
-      .rejects.toMatchObject({ errorCode: 'GIT_ROOT_UNAVAILABLE', message: GIT_ROOT_MISSING_MESSAGE });
+    await expect(
+      resolver.resolve(
+        '/workspace/.claude-worktrees/gone',
+        'git:info',
+        'folder-or-worktree',
+      ),
+    ).rejects.toMatchObject({
+      errorCode: 'GIT_ROOT_UNAVAILABLE',
+      message: GIT_ROOT_MISSING_MESSAGE,
+    });
     probe.directory.mockResolvedValue({ kind: 'exists' });
     probe.listWorktrees.mockResolvedValue(listed(FOLDER));
-    await expect(resolver.resolve('/present', 'git:info', 'folder-or-worktree'))
-      .rejects.toMatchObject({ errorCode: 'GIT_ROOT_UNAVAILABLE', message: GIT_ROOT_UNAVAILABLE_MESSAGE });
+    await expect(
+      resolver.resolve(
+        '/workspace/.claude-worktrees/present',
+        'git:info',
+        'folder-or-worktree',
+      ),
+    ).rejects.toMatchObject({
+      errorCode: 'GIT_ROOT_UNAVAILABLE',
+      message: GIT_ROOT_UNAVAILABLE_MESSAGE,
+    });
+  });
+
+  it('keeps the generic error for an absent path outside the workspace area', async () => {
+    const { resolver, probe } = build();
+    probe.directory.mockResolvedValue({ kind: 'absent' });
+
+    await expect(
+      resolver.resolve('/elsewhere/gone', 'git:info', 'folder-or-worktree'),
+    ).rejects.toMatchObject({ message: GIT_ROOT_UNAVAILABLE_MESSAGE });
+  });
+
+  it('reports an absent sibling of the workspace folder as missing', async () => {
+    const { resolver, probe } = build(['/home/dev/repo']);
+    probe.listWorktrees.mockResolvedValue(listed('/home/dev/repo'));
+    probe.directory.mockResolvedValue({ kind: 'absent' });
+
+    await expect(
+      resolver.resolve(
+        '/home/dev/repo-feature',
+        'git:info',
+        'folder-or-worktree',
+      ),
+    ).rejects.toMatchObject({ message: GIT_ROOT_MISSING_MESSAGE });
+    await expect(
+      resolver.resolve('/home/other/gone', 'git:info', 'folder-or-worktree'),
+    ).rejects.toMatchObject({ message: GIT_ROOT_UNAVAILABLE_MESSAGE });
+  });
+
+  it('reports a removed worktree under the registered workspace as missing', async () => {
+    const { resolver, probe } = build();
+    probe.directory.mockResolvedValue({ kind: 'absent' });
+
+    await expect(
+      resolver.resolve(
+        '/workspace/.claude-worktrees/gone',
+        'git:info',
+        'folder-or-worktree',
+      ),
+    ).rejects.toMatchObject({ message: GIT_ROOT_MISSING_MESSAGE });
+    expect(probe.directory).toHaveBeenCalledWith(
+      '/workspace/.claude-worktrees/gone',
+    );
   });
 
   it('refuses a UNC root without reading its directory', async () => {
     const { resolver, probe } = build();
-    await expect(resolver.resolve('\\\\server\\share\\worktree', 'git:info', 'folder-or-worktree'))
-      .rejects.toMatchObject({ errorCode: 'GIT_ROOT_UNAVAILABLE', message: GIT_ROOT_UNAVAILABLE_MESSAGE });
+    await expect(
+      resolver.resolve(
+        '\\\\server\\share\\worktree',
+        'git:info',
+        'folder-or-worktree',
+      ),
+    ).rejects.toMatchObject({
+      errorCode: 'GIT_ROOT_UNAVAILABLE',
+      message: GIT_ROOT_UNAVAILABLE_MESSAGE,
+    });
     expect(probe.directory).not.toHaveBeenCalled();
   });
 
@@ -132,11 +201,15 @@ describe('GitRootResolver', () => {
     const cause = new Error('EACCES');
     probe.directory.mockResolvedValue({ kind: 'failed', cause });
 
-    await expect(resolver.resolve('/denied', 'git:info', 'folder'))
-      .rejects.toMatchObject({ errorCode: 'GIT_ROOT_UNAVAILABLE', message: GIT_ROOT_UNAVAILABLE_MESSAGE });
+    await expect(
+      resolver.resolve('/workspace/denied', 'git:info', 'folder'),
+    ).rejects.toMatchObject({
+      errorCode: 'GIT_ROOT_UNAVAILABLE',
+      message: GIT_ROOT_UNAVAILABLE_MESSAGE,
+    });
     expect(warn).toHaveBeenCalledWith(
       '[GitRoot] directory read failed',
-      expect.objectContaining({ workspaceRoot: '/denied', cause }),
+      expect.objectContaining({ workspaceRoot: '/workspace/denied', cause }),
     );
   });
 
@@ -403,11 +476,17 @@ describe('GitRootResolver', () => {
     for (const method of ['git:info', 'git:branches', 'git:stashList']) {
       await expect(
         resolver.resolve(GONE, method, 'folder-or-worktree'),
-      ).rejects.toMatchObject({ errorCode: 'GIT_ROOT_UNAVAILABLE', message: GIT_ROOT_MISSING_MESSAGE });
+      ).rejects.toMatchObject({
+        errorCode: 'GIT_ROOT_UNAVAILABLE',
+        message: GIT_ROOT_MISSING_MESSAGE,
+      });
     }
     await expect(
       resolver.resolve(OTHER, 'git:info', 'folder-or-worktree'),
-    ).rejects.toMatchObject({ errorCode: 'GIT_ROOT_UNAVAILABLE', message: GIT_ROOT_MISSING_MESSAGE });
+    ).rejects.toMatchObject({
+      errorCode: 'GIT_ROOT_UNAVAILABLE',
+      message: GIT_ROOT_MISSING_MESSAGE,
+    });
 
     expect(warn.mock.calls).toEqual([
       [
@@ -433,7 +512,10 @@ describe('GitRootResolver', () => {
     now = GIT_ROOT_WARNING_INTERVAL_MS;
     await expect(
       resolver.resolve(GONE, 'git:lastCommit', 'folder-or-worktree'),
-    ).rejects.toMatchObject({ errorCode: 'GIT_ROOT_UNAVAILABLE', message: GIT_ROOT_MISSING_MESSAGE });
+    ).rejects.toMatchObject({
+      errorCode: 'GIT_ROOT_UNAVAILABLE',
+      message: GIT_ROOT_MISSING_MESSAGE,
+    });
     expect(warn).toHaveBeenLastCalledWith(
       '[GitRoot] git:lastCommit refused workspaceRoot',
       {

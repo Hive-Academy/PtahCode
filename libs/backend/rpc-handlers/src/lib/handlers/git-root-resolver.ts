@@ -27,7 +27,8 @@
  * probe. A method not in the list is treated as a write (review M1).
  */
 
-import { FileType } from '@ptah-extension/platform-core';
+import { FileType, isPathWithinRoots } from '@ptah-extension/platform-core';
+import * as path from 'node:path';
 import type {
   IFileSystemProvider,
   IWorkspaceProvider,
@@ -217,7 +218,10 @@ export class GitRootResolver {
     ) {
       throw new RpcUserError(GIT_ROOT_MISSING_MESSAGE, 'GIT_ROOT_UNAVAILABLE');
     }
-    throw new RpcUserError(GIT_ROOT_UNAVAILABLE_MESSAGE, 'GIT_ROOT_UNAVAILABLE');
+    throw new RpcUserError(
+      GIT_ROOT_UNAVAILABLE_MESSAGE,
+      'GIT_ROOT_UNAVAILABLE',
+    );
   }
 
   /**
@@ -227,13 +231,22 @@ export class GitRootResolver {
    */
   private async isConfirmedAbsent(requested: string): Promise<boolean> {
     if (!checkLinkedPathForm(requested, this.deps.platform).ok) return false;
+    // The missing-root message must not become an existence oracle for any
+    // caller-named path. Answer it only inside a workspace folder or as a
+    // sibling of one (the usual worktree location).
+    if (!this.isNearWorkspace(requested)) return false;
     try {
       const directory = await this.deps.probe.directory(requested);
       if (directory.kind === 'failed') {
-        this.warnLimited('probe-failed', requested, '[GitRoot] directory read failed', {
-          workspaceRoot: requested,
-          cause: directory.cause,
-        });
+        this.warnLimited(
+          'probe-failed',
+          requested,
+          '[GitRoot] directory read failed',
+          {
+            workspaceRoot: requested,
+            cause: directory.cause,
+          },
+        );
         return false;
       }
       return directory.kind === 'absent';
@@ -250,6 +263,26 @@ export class GitRootResolver {
       );
       return false;
     }
+  }
+
+  /**
+   * True when `requested` is inside a registered workspace folder, or is a
+   * direct child of a folder's parent directory (not a filesystem root).
+   */
+  private isNearWorkspace(requested: string): boolean {
+    const { workspace, platform } = this.deps;
+    const folders = workspace.getWorkspaceFolders();
+    if (isPathWithinRoots(requested, folders, platform)) return true;
+    const paths = platform === 'win32' ? path.win32 : path.posix;
+    const requestedParent = paths.dirname(paths.resolve(requested));
+    return folders.some((root) => {
+      const parent = paths.dirname(paths.resolve(root));
+      if (parent === paths.parse(parent).root) return false;
+      return (
+        isPathWithinRoots(requestedParent, [parent], platform) &&
+        isPathWithinRoots(parent, [requestedParent], platform)
+      );
+    });
   }
 
   /**
