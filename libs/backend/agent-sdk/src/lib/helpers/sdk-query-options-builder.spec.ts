@@ -2237,8 +2237,31 @@ describe('SdkQueryOptionsBuilder.buildMcpServers — caller session segment (TAS
       routingSessionId?: string,
       toolProfile?: McpToolProfile,
       cwd?: string,
+      signal?: AbortSignal,
     ): Record<string, McpHttpServerConfig>;
   }
+
+  it('issues no credential after teardown aborted the session', () => {
+    const issue = jest.fn().mockReturnValue('late-token');
+    const ctor = SdkQueryOptionsBuilder as unknown as new (
+      ...args: unknown[]
+    ) => SdkQueryOptionsBuilder;
+    const builder = Object.assign(new ctor({ info: jest.fn() }), {
+      mcpCallerCredentials: { issue, revokeSubject: jest.fn() },
+    }) as unknown as BuilderWithMcp;
+    const controller = new AbortController();
+    controller.abort();
+    expect(() =>
+      builder.buildMcpServers(
+        true,
+        'tab-abc',
+        undefined,
+        '/work',
+        controller.signal,
+      ),
+    ).toThrow('Session ended before its Ptah MCP credential was issued.');
+    expect(issue).not.toHaveBeenCalled();
+  });
 
   function makeMcpBuilder(): BuilderWithMcp {
     const logger = {

@@ -1519,6 +1519,7 @@ export class SdkQueryOptionsBuilder {
           routingId,
           sessionConfig.mcpToolProfile,
           cwd,
+          abortController.signal,
         ),
         mcpServersOverride,
       ),
@@ -2200,6 +2201,7 @@ export class SdkQueryOptionsBuilder {
     routingSessionId?: string,
     toolProfile?: McpToolProfile,
     cwd?: string,
+    signal?: AbortSignal,
   ): Record<string, McpHttpServerConfig> {
     if (!mcpServerRunning) {
       this.logger.info(
@@ -2219,6 +2221,14 @@ export class SdkQueryOptionsBuilder {
     if (!this.mcpCallerCredentials || !cwd) {
       throw new SdkError(
         'MCP caller credentials are unavailable for this session.',
+      );
+    }
+    // Teardown aborts the controller and then revokes this tab's subject. If
+    // that ran while build() awaited, a token issued now would outlive the
+    // session. A teardown after this point revokes the token it issues.
+    if (signal?.aborted) {
+      throw new SdkError(
+        'Session ended before its Ptah MCP credential was issued.',
       );
     }
     const token = this.mcpCallerCredentials.issue(
