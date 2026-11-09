@@ -67,7 +67,6 @@ function budgetState(
     revision,
     compactions: 0,
     autoHandoff: false,
-    closeSourceAfterAutoHandoff: false,
   };
 }
 

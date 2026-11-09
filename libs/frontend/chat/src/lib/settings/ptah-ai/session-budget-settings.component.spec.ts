@@ -514,34 +514,6 @@ describe('SessionBudgetSettingsComponent', () => {
       expect(tabManager.clearSessionBudgets).not.toHaveBeenCalled();
     });
 
-    it('keeps "Close the source chat" disabled while the automatic hand-off is off, then writes it once on', async () => {
-      await create();
-      const closeBox = field('closeSourceAfterAutoHandoff');
-      expect(closeBox.checked).toBe(false);
-      // The automatic hand-off is off by default: a lasting reason, so a
-      // native disabled; a click on it cannot write anything.
-      expect(closeBox.disabled).toBe(true);
-      closeBox.click();
-      await settle();
-      expect(writes()).toEqual([]);
-
-      // Turning the automatic hand-off on enables the toggle (read-back value).
-      const handoffBox = field('autoHandoffAtLimit');
-      handoffBox.checked = true;
-      handoffBox.dispatchEvent(new Event('change'));
-      await settle();
-      expect(closeBox.disabled).toBe(false);
-
-      closeBox.checked = true;
-      closeBox.dispatchEvent(new Event('change'));
-      await settle();
-      expect(writes()).toEqual([
-        { key: 'sessionBudget.autoHandoffAtLimit', value: true },
-        { key: 'sessionBudget.closeSourceAfterAutoHandoff', value: true },
-      ]);
-      expect(closeBox.checked).toBe(true);
-      expect(tabManager.clearSessionBudgets).not.toHaveBeenCalled();
-    });
 
     // TASK_2026_614 F.4 / F-D: turning the budget off clears every tab's banner.
     it('clears the budget on every tab once "enabled" is saved off', async () => {

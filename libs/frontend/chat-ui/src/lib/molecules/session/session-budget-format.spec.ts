@@ -21,7 +21,6 @@ const TOKENS_BUDGET: SessionBudgetState = {
   revision: 4,
   compactions: 0,
   autoHandoff: false,
-  closeSourceAfterAutoHandoff: false,
 };
 
 const COST_BUDGET: SessionBudgetState = {

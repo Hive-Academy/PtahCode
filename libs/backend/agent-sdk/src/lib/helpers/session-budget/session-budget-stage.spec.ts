@@ -290,7 +290,6 @@ describe('evaluateSessionBudget', () => {
   ): SessionBudgetState => ({
     sessionId: SESSION_ID,
     autoHandoff: false,
-    closeSourceAfterAutoHandoff: false,
     ...evaluateSessionBudget({
       snapshot: s,
       config: extra.config ?? config(),
@@ -309,7 +308,6 @@ describe('evaluateSessionBudget', () => {
     expect(state).toEqual({
       sessionId: SESSION_ID,
       autoHandoff: false,
-    closeSourceAfterAutoHandoff: false,
       stage: 'tighten',
       unit: 'tokens',
       measure: 'tokens',

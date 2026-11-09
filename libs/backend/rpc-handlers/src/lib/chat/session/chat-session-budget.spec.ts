@@ -85,7 +85,6 @@ function statsAt(tokenCount: number, revision?: number): SessionStatsEntry {
 const BUDGET_CONFIG: SessionBudgetConfig = {
   enabled: true,
   autoHandoffAtLimit: false,
-  closeSourceAfterAutoHandoff: false,
   unit: 'tokens',
   tokens: LIMIT,
   usd: 30,

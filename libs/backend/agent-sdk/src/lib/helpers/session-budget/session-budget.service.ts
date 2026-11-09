@@ -125,7 +125,7 @@ type ObserveSource = 'live' | 'loaded';
 
 function configKeyOf(config: SessionBudgetConfig): string {
   // Auto hand-off only changes the webview's action, not the measured stage.
-  const { autoHandoffAtLimit: _autoHandoff, closeSourceAfterAutoHandoff: _closeSource, ...measured } = config;
+  const { autoHandoffAtLimit: _autoHandoff, ...measured } = config;
   return JSON.stringify(measured);
 }
 
@@ -534,7 +534,6 @@ export class SessionBudgetService {
       sessionId: entry.sessionId,
       ...figure,
       autoHandoff: config.autoHandoffAtLimit,
-      closeSourceAfterAutoHandoff: config.closeSourceAfterAutoHandoff,
       ...(entry.window ? { window: entry.window } : {}),
       ...this.rotationField(entry.sessionId),
     };
@@ -568,7 +567,6 @@ export class SessionBudgetService {
     return {
       sessionId: snapshot.sessionId,
       autoHandoff: config.autoHandoffAtLimit,
-      closeSourceAfterAutoHandoff: config.closeSourceAfterAutoHandoff,
       stage: 'unknown',
       unit: config.unit,
       measure: tokens ? 'tokens' : 'cost',

@@ -18,7 +18,6 @@ const BUDGET: SessionBudgetState = {
   sessionId: SESSION, stage: 'handoff', unit: 'tokens', measure: 'tokens',
   used: 41_200_000, limit: 50_000_000, percent: 82.4, lowerBound: false,
   revision: 9, compactions: 0, autoHandoff: false,
-  closeSourceAfterAutoHandoff: false,
 };
 
 describe('SessionBudgetActionsService manual wrap-up', () => {
