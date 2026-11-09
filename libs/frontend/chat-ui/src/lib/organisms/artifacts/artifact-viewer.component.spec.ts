@@ -326,6 +326,83 @@ describe('ArtifactViewerComponent', () => {
   });
 
   describe('full screen', () => {
+    it('uses moveBefore in both directions and keeps the iframe node', () => {
+      const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'moveBefore');
+      const moveBefore = jest.fn((node: Node, before: Node | null) => {
+        if (before === null) document.body.appendChild(node);
+        else before.parentNode?.insertBefore(node, before);
+      });
+      Object.defineProperty(Element.prototype, 'moveBefore', { configurable: true, value: moveBefore });
+      try {
+        const fixture = createViewer();
+        const frame = loadedFrame(fixture);
+        const button = fixture.nativeElement.querySelector('[data-testid="artifact-viewer-fullscreen-toggle"]') as HTMLButtonElement;
+        button.click();
+        fixture.detectChanges();
+        expect(moveBefore).toHaveBeenCalledWith(frame.parentElement, null);
+        button.click();
+        fixture.detectChanges();
+        expect(moveBefore).toHaveBeenCalledTimes(2);
+        expect(frameOf(fixture)).toBe(frame);
+        fixture.destroy();
+      } finally {
+        if (descriptor) Object.defineProperty(Element.prototype, 'moveBefore', descriptor);
+        else Reflect.deleteProperty(Element.prototype, 'moveBefore');
+      }
+    });
+
+    it('falls back to appendChild and insertBefore when moveBefore is absent', () => {
+      const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'moveBefore');
+      Reflect.deleteProperty(Element.prototype, 'moveBefore');
+      const append = jest.spyOn(document.body, 'appendChild');
+      try {
+        const fixture = createViewer();
+        const frame = loadedFrame(fixture);
+        const button = fixture.nativeElement.querySelector('[data-testid="artifact-viewer-fullscreen-toggle"]') as HTMLButtonElement;
+        const inlineParent = frame.parentElement?.parentNode;
+        if (!inlineParent) throw new Error('missing inline parent');
+        const insert = jest.spyOn(inlineParent, 'insertBefore');
+        button.click();
+        fixture.detectChanges();
+        expect(append).toHaveBeenCalledWith(frame.parentElement);
+        button.click();
+        fixture.detectChanges();
+        expect(insert).toHaveBeenCalledWith(frame.parentElement, expect.any(Comment));
+        expect(frameOf(fixture)).toBe(frame);
+        insert.mockRestore();
+        fixture.destroy();
+      } finally {
+        append.mockRestore();
+        if (descriptor) Object.defineProperty(Element.prototype, 'moveBefore', descriptor);
+      }
+    });
+
+    it('re-portals a recreated dialog and restores focus only on exit', () => {
+      jest.useFakeTimers();
+      const opener = document.createElement('button');
+      document.body.appendChild(opener);
+      try {
+        const fixture = createViewer();
+        opener.focus();
+        const toggle = fixture.nativeElement.querySelector('[data-testid="artifact-viewer-fullscreen-toggle"]') as HTMLButtonElement;
+        toggle.click();
+        fixture.detectChanges();
+        jest.advanceTimersByTime(10_001);
+        fixture.detectChanges();
+        expect(document.activeElement).toBe(opener);
+        const retry = fixture.nativeElement.querySelector('[data-testid="artifact-viewer-error"] button') as HTMLButtonElement;
+        retry.click();
+        fixture.detectChanges();
+        expect(document.body.querySelector('[data-testid="artifact-viewer"]')).not.toBeNull();
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+        fixture.detectChanges();
+        expect(document.activeElement).toBe(opener);
+        fixture.destroy();
+      } finally {
+        opener.remove();
+        jest.useRealTimers();
+      }
+    });
     it('lets the frame fill the overlay and restores the reported height on exit', () => {
       const fixture = createViewer();
       const frame = loadedFrame(fixture);
@@ -357,7 +434,7 @@ describe('ArtifactViewerComponent', () => {
     });
     it('toggles a dialog overlay, closes on Escape and restores focus', () => {
       const fixture = createViewer();
-      loadedFrame(fixture);
+      const frame = loadedFrame(fixture);
       const button = fixture.nativeElement.querySelector(
         '[data-testid="artifact-viewer-fullscreen-toggle"]',
       ) as HTMLButtonElement;
@@ -368,9 +445,11 @@ describe('ArtifactViewerComponent', () => {
       button.focus();
       button.click();
       fixture.detectChanges();
-      const overlay = fixture.nativeElement.querySelector(
+      const overlay = document.body.querySelector(
         '[data-testid="artifact-viewer"]',
-      );
+      ) as HTMLElement;
+      expect(overlay.parentElement).toBe(document.body);
+      expect(overlay.querySelector('iframe')).toBe(frame);
       expect(overlay.getAttribute('role')).toBe('dialog');
       expect(overlay.getAttribute('aria-modal')).toBe('true');
       expect(states).toEqual([true]);
