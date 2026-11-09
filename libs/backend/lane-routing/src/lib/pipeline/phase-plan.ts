@@ -14,6 +14,7 @@ import type { DecisionModelSelection } from '../decision-model/decision-model.ty
 import type { DecisionOption } from '../decision-model/decision-payload';
 import type { RouteDecideArgs } from '../contracts/route-decide-args.schema';
 import type { GatheredCall } from './gather';
+import { ModelTierSchema } from '../contracts/route-decide-result.schema';
 import type { LaneQuestion, ModelRequestOutcome } from './model-refine';
 import { resolvePhase } from './phase-resolve';
 import {
@@ -311,7 +312,6 @@ function scoreCandidate(
     candidate,
     pinModel,
     facts?.models ?? [],
-    tier,
     taskKind,
     gathered,
   );
@@ -325,13 +325,12 @@ function applyPinModel(
     readonly id: string;
     readonly provenance: CandidateScore['provenance'];
   }[],
-  tier: string,
   taskKind: OutcomeTaskKind,
   gathered: GatheredCall,
 ): CandidateScore {
   const listed = models.find((model) => model.id === pinModel);
   const laneDefault = pinModel === LANE_DEFAULT_MODEL;
-  const tierPin = candidate.kind === 'subagent' && pinModel === tier;
+  const tierPin = candidate.kind === 'subagent' && ModelTierSchema.safeParse(pinModel).success;
   if (listed === undefined && !laneDefault && !tierPin) return scored;
   const modelId = laneDefault ? LANE_DEFAULT_MODEL : pinModel;
   const resolved = gathered.matrix.resolve(candidate.family, modelId, taskKind);

@@ -99,7 +99,7 @@ Read that batch entry's executor, tier, effort and parallel-safe flag in `batche
 executor prompt **only** from that entry plus the generic lane policy and role; do not paste the
 plan, `context.md` or other batches. The entry must contain everything the executor needs.
 
-When `ptah_route_decide` is listed, pass each batch as a phase with optional `shape` and `weight`;
+When `ptah_route_decide` is listed, make the post-decomposition routing call with each batch as a phase with its `shape` and `weight`;
 the roster returns `tier` and `effort`. For a subagent, pass `tier` as the Agent call's `model`
 alias and `effort` where supported. For CLI lanes, `tier` is advisory; model resolution remains
 request model → `agentOrchestration.<cli>Model` setting → native CLI default.

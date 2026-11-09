@@ -7,8 +7,10 @@ import { type LaneLimitState } from '@ptah-extension/shared';
 import type {
   ChosenEntry,
   GateResult,
+  ModelTier,
   UnavailableEntry,
 } from '../contracts/route-decide-result.schema';
+import { ModelTierSchema } from '../contracts/route-decide-result.schema';
 import type { DecisionOption } from '../decision-model/decision-payload';
 import type { GatheredCall } from './gather';
 import type { ModelRequestOutcome } from './model-refine';
@@ -270,7 +272,7 @@ function rosterFrom(
     );
     chosenIndex += 1;
     roster.push(
-      chosenEntry(draft, withPolicyReason(reason, draft.plan)),
+      chosenEntry(draft, reason),
     );
   }
   if (roster.length !== args.phases.length) {
@@ -282,9 +284,10 @@ function rosterFrom(
 export function withPolicyReason(
   reason: string,
   plan: Pick<PhasePlan, 'policy' | 'shape' | 'weight'>,
+  chosenTier: ModelTier = plan.policy.tier,
 ): string {
-  const { ruleId, tier, effort } = plan.policy;
-  return `${reason}; policy ${ruleId}; tier ${tier}, effort ${effort}, shape ${plan.shape ?? 'unset'}, weight ${plan.weight ?? 'unset'}`;
+  const { ruleId, effort } = plan.policy;
+  return `${reason}; policy ${ruleId}; tier ${chosenTier}, effort ${effort}, shape ${plan.shape ?? 'unset'}, weight ${plan.weight ?? 'unset'}`;
 }
 
 function reasonAt(
@@ -338,12 +341,17 @@ function chosenEntry(draft: ChosenDraft, reason: string): ChosenEntry {
     source: draft.resolution.source,
     reportedConfidence: draft.resolution.reported,
   });
+  const pinnedTier = draft.resolution.candidate.kind === 'subagent' &&
+    row.scored.provenance === 'tier'
+    ? ModelTierSchema.safeParse(row.scored.model)
+    : null;
+  const tier = pinnedTier?.success ? pinnedTier.data : draft.plan.policy.tier;
   return {
     phaseId: draft.phaseId,
     status: 'chosen',
     executor: executorOf(draft.resolution.candidate),
     model: row.scored.model,
-    tier: draft.plan.policy.tier,
+    tier,
     effort: draft.plan.policy.effort,
     provenance: row.scored.provenance,
     score: row.scored.score,
@@ -352,7 +360,7 @@ function chosenEntry(draft: ChosenDraft, reason: string): ChosenEntry {
     confidence,
     fallbackCause: draft.resolution.cause,
     modelProposal: draft.resolution.proposal,
-    reason,
+    reason: withPolicyReason(reason, draft.plan, tier),
   };
 }
 

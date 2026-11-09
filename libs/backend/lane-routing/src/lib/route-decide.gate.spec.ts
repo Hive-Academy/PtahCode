@@ -309,20 +309,20 @@ describe('gate phase policy roster', () => {
     ]);
   });
 
-  it('preserves a subagent model pin while reporting phase policy', async () => {
+  it('uses a pinned subagent tier while retaining policy effort', async () => {
     const run = harness({ rotate: false, selection: { kind: 'unset' } });
     const result = await run.service.decide({
       ...implement(),
       phases: [{ id: 'build', kind: 'implement', shape: 'mechanical', weight: 2000 }],
-      pins: [{ phaseId: 'build', executor: 'subagent:backend-developer', model: 'haiku' }],
+      pins: [{ phaseId: 'build', executor: 'subagent:backend-developer', model: 'sonnet' }],
     }, run.source);
     expect(GateResultSchema.safeParse(result).success).toBe(true);
     if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
     expect(result.roster[0]).toMatchObject({
       status: 'chosen', source: 'pin', executor: { id: 'subagent:backend-developer' },
-      model: 'haiku', tier: 'haiku', effort: 'low',
+      model: 'sonnet', tier: 'sonnet', effort: 'low', provenance: 'tier',
     });
-    expect(result.roster[0].reason).toMatch(/; policy R4; tier haiku, effort low, shape mechanical, weight 2000$/);
+    expect(result.roster[0].reason).toMatch(/; policy R4; tier sonnet, effort low, shape mechanical, weight 2000$/);
   });
 
   it('keeps policy fields and fallback text when the decision model times out', async () => {

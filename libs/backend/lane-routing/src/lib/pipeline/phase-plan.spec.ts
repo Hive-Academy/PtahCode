@@ -126,11 +126,24 @@ it('applies a haiku subagent pin as a tier pin on a light R4 phase', () => {
   expect(phase.ranked[0].scored).toMatchObject({ model: 'haiku', provenance: 'tier' });
 });
 
-it('keeps the selected sonnet tier when a legacy phase pins unlisted haiku', () => {
+it('applies a sonnet subagent pin over a light R4 policy tier', () => {
+  const phase = subagentPlan({ shape: 'mechanical', weight: 2000 }, 'sonnet');
+  expect(phase.policy).toEqual({ tier: 'haiku', effort: 'low', ruleId: 'R4' });
+  expect(phase.constraint).toMatchObject({ status: 'eligible', pinAccepted: true });
+  expect(phase.ranked[0].scored).toMatchObject({ model: 'sonnet', provenance: 'tier' });
+});
+
+it('applies an unlisted haiku pin over the selected sonnet tier', () => {
   const phase = subagentPlan({}, 'haiku');
   expect(phase.policy).toEqual({ tier: 'sonnet', effort: 'medium', ruleId: 'R5' });
   expect(phase.constraint).toMatchObject({ status: 'eligible', pinAccepted: true });
-  expect(phase.ranked[0].scored).toMatchObject({ model: 'sonnet', provenance: 'tier' });
+  expect(phase.ranked[0].scored).toMatchObject({ model: 'haiku', provenance: 'tier' });
+});
+
+it('ignores a subagent pin model that is not a tier alias', () => {
+  const phase = subagentPlan({ shape: 'mechanical', weight: 2000 }, 'gpt-unlisted');
+  expect(phase.constraint).toMatchObject({ status: 'eligible', pinAccepted: true });
+  expect(phase.ranked[0].scored).toMatchObject({ model: 'haiku', provenance: 'tier' });
 });
 
 it('falls back to ranking when the band has one member', () => {

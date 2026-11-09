@@ -17,13 +17,13 @@ How to run any lane (discovery, addressing, prompts, resume, review, revise cap)
 
 ## Gate 0.1 outcome
 
-If `ptah_route_decide` is listed, call it once with `stage:'gate-0.1'`, the user
+If `ptah_route_decide` is listed, make the initial `stage:'gate-0.1'` call with the planned phases, the user
 `request`, chosen `taskType` and `depth`, and `phases` (`id`, `kind`, optional `role`,
-`reviews`, `shape`, `weight`). Use one phase per batch when batches are known. `shape` is
+`reviews`, `shape`, `weight`). After Mode 1 writes `batches.md`, make one more `stage:'gate-0.1'` call with one phase per batch, its shape and weight, and the same preferences. Re-key each user pin to the `id` of the batch phase it covers. A current user pin still wins. `shape` is
 `mechanical|logic|contract|test|docs|review`; `weight` is the integer 0-200000 token
 estimate for the batch read and write sets from `ptah_count_tokens`, plus 10% framing.
 Pass explicit user `pins` and known `preferenceSource`/`preferences` when
-available. A current user pin wins. Use `roster` entries with `status:'chosen'` to
+available. Use `roster` entries with `status:'chosen'` to
 select the reported executor and model; an `unavailable` entry follows the existing
 disclosed fallback. Show phase, executor, model, reason, source and confidence (`—`
 for null), plus `overallSource`, `overallConfidence` and reasons. Record the result
