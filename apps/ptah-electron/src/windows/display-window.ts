@@ -243,12 +243,14 @@ export class ElectronDisplayWindowHost implements IDisplayWindowHost {
     } catch (error: unknown) {
       this.window = null;
       console.error('[Ptah Electron] Display window could not be registered:', errorMessage(error));
+      // degradation-audit: reported — BrowserWindow.close() is synchronous (not the host's async close); the failure is logged above.
       if (!child.isDestroyed()) child.close();
       return { ok: false, reason: 'not-ready' };
     }
 
     // The child never outlives the main window.
     const closeWithMain = (): void => {
+      // degradation-audit: reported — BrowserWindow.close() is synchronous (not the host's async close); nothing to await.
       if (!child.isDestroyed()) child.close();
     };
     main.once('closed', closeWithMain);
@@ -298,6 +300,7 @@ export class ElectronDisplayWindowHost implements IDisplayWindowHost {
     // sender and tells the main renderer once Electron has torn it down.
     this.window = null;
     this.options.bridge.childWindows.unregister('display', 'default', child);
+    // degradation-audit: reported — BrowserWindow.close() is synchronous (not the host's async close); nothing to await.
     child.close();
     return true;
   }
