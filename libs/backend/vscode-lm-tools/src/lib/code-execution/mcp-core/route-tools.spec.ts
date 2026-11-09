@@ -85,6 +85,7 @@ describe('buildRouteDecideTool', () => {
     }
     expect(description).toContain('"tier" is the model alias to pass');
     expect(description).toContain('for CLI lanes, both are advisory');
+    expect(description).toContain('read and write sets, plus 10% framing');
   });
 
   it('is deterministic', () => {
