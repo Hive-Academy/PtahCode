@@ -50,6 +50,7 @@ import { SessionChildRegistry } from '../session-children/session-child.registry
 import { ChildWorktreeProvisioner } from '../session-children/child-worktree.provisioner';
 import { SessionSpawnerService } from '../session-children/session-spawner.service';
 import { SessionHandoffService } from '../session-children/session-handoff.service';
+import { SessionHandoffAckStore } from '../session-children/session-handoff-ack.store';
 import { SessionHandoffChainStore } from '../session-children/session-handoff-chain.store';
 import { AgentRoleResolver } from '../roles';
 import {
@@ -405,6 +406,8 @@ export function registerCliAgentRuntimeServices(
     useToken: SessionHandoffChainStore,
   });
   container.registerSingleton(SessionHandoffService);
+  container.registerSingleton(SessionHandoffAckStore);
+  container.register(CLI_AGENT_RUNTIME_TOKENS.SESSION_HANDOFF_ACK_STORE, { useToken: SessionHandoffAckStore });
   container.register(CLI_AGENT_RUNTIME_TOKENS.SESSION_HANDOFF, {
     useToken: SessionHandoffService,
   });

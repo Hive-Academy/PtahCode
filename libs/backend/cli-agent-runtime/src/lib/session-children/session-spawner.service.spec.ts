@@ -43,6 +43,19 @@ import type {
 import type { ChildChatSessionStartInput } from './child-chat-session-host.port';
 import { CLI_AGENT_RUNTIME_TOKENS } from '../di/tokens';
 import { SessionHandoffService } from './session-handoff.service';
+import { SessionHandoffAckStore } from './session-handoff-ack.store';
+
+/** In-memory storage for the handoff acknowledgement store. */
+function memoryAckStorage() {
+  const stored = new Map<string, unknown>();
+  return {
+    get: <T>(key: string) => stored.get(key) as T | undefined,
+    update: async (key: string, value: unknown) => {
+      stored.set(key, value);
+    },
+    keys: () => [...stored.keys()],
+  };
+}
 
 const PARENT = '11111111-2222-4333-8444-555555555555';
 const PARENT_SDK = '22222222-3333-4444-8555-666666666666';
@@ -1611,6 +1624,11 @@ describe('SessionSpawnerService — after ptah_session_handoff', () => {
       h.adapter as never,
       h.containerWith(handoffHost),
       h.mcpStatus as never,
+      null,
+      null,
+      null,
+      null,
+      new SessionHandoffAckStore(memoryAckStorage()),
     );
 
     const result = await handoff.handoff({
