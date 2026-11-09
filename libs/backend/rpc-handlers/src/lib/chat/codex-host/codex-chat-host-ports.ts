@@ -24,6 +24,7 @@ import type {
   IPlatformInfo,
   IMcpCallerCredentials,
 } from '@ptah-extension/platform-core';
+import { INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS } from '@ptah-extension/platform-core';
 import {
   type McpHttpServerOverride,
   codexSandboxModeSchema,
@@ -87,7 +88,6 @@ export interface CodexChatHostPorts extends Omit<
 }
 
 export const CODEX_CHAT_PTAH_AUTH_REFERENCE = 'mcp.ptah.authorization';
-const CODEX_CHAT_MCP_TTL_MS = 4 * 60 * 60 * 1000;
 
 /** Ptah MCP is running but the chat has neither a tab id nor a session id to route by. */
 export class CodexChatRoutingError extends Error {
@@ -406,7 +406,7 @@ export function createCodexChatHostPorts(
                   capability: 'privileged',
                 },
                 routingId,
-                CODEX_CHAT_MCP_TTL_MS,
+                INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,
               ),
             );
           mcpServers.set('ptah', {

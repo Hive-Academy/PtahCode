@@ -42,6 +42,7 @@ import {
 import { McpCallerTokenRegistry } from './mcp-caller-token-registry';
 import {
   MCP_AUTH_REQUIRED_MESSAGE,
+  MCP_CREDENTIAL_INVALID_MESSAGE,
   MCP_CALLER_FORBIDDEN_MESSAGE,
   MCP_CONTENT_TYPE_MESSAGE,
   MCP_TOOL_DENIED_MESSAGE,
@@ -1133,10 +1134,11 @@ describe('HTTP caller authentication', () => {
       );
       expect(status).toBe(401);
       expect(body).not.toContain(token);
+      expect(body).toContain('unknown, expired or was revoked');
       expect(JSON.parse(body)).toEqual({
         jsonrpc: '2.0',
         id: null,
-        error: { code: -32001, message: MCP_AUTH_REQUIRED_MESSAGE },
+        error: { code: -32001, message: MCP_CREDENTIAL_INVALID_MESSAGE },
       });
     }
     expect(onMCPRequest).not.toHaveBeenCalled();

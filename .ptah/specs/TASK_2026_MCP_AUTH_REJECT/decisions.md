@@ -1,0 +1,24 @@
+# Decisions — TASK_2026_MCP_AUTH_REJECT
+
+| # | Decision | Evidence | Reversible |
+| - | -------- | -------- | ---------- |
+| 1 | Type BUGFIX, depth Partial, investigation first | task.md "type: BUGFIX (investigation first)"; root cause unknown | yes |
+| 2 | Lanes `enabled`, approval `lane-review` | global CLAUDE.md lane rule; memory lanes-first/codex-first; codex has confirmed room | yes |
+| 3 | Investigation lane: codex, role researcher-expert, read-only | codex is the only non-Claude lane with confirmed room | yes |
+| 4 | Moved task.md from main checkout to the worktree | project CLAUDE.md recovery rule (copy, cmp, remove) | yes |
+| 5 | Root cause accepted: 4 h fixed TTL on the interactive session bearer, no renewal (high confidence) | investigation.md Q1/Q5; orchestrator check of transcript `~/.claude/projects/D--projects-ptah-extension/7e549dc0-….jsonl`: first entry 18:24:43 UTC, last ptah success 22:17:19 UTC, first 401 22:30:14 UTC; 18:24:43 + 4 h = 22:24:43 falls between them. `.mcp.json` rewrite is a different credential (not the cause). | n/a |
+| 6 | Same defect class also exists in the Codex chat host (`codex-chat-host-ports.ts:90`, 4 h). Lane tokens (`lane-mcp-credentials.ts:5`, 4 h) are bounded by the lane process and stay out of scope. | grep of `.issue(` callers | yes |
+| 7 | Fix approach (credential lifetime) is security-relevant → user-reserved; asked the user | checkpoints.md user-reserved list (security) | — |
+| 8 | User chose "Session lifetime": 7-day max age, teardown/stop revoke, clear 401 message | AskUserQuestion answer 2026-11-09 | yes |
+| 9 | No team-leader decomposition: one small file-disjoint batch (≈4 libs, few lines); orchestrator wrote fix-plan.md; one codex backend-developer lane implements | scope in fix-plan.md; token economy | yes |
+| 10 | Code review family must differ from codex: plan antigravity lane, fallback in-process Claude subagent | agent-lanes §6 Shipping code | yes |
+| 11 | Review ea244dd9 (antigravity, REVISE 5/10) fix round, done by the orchestrator as a trivial bounded edit (implementer lane budget-stopped, resume refused) | agent-lanes §6; user global rule (trivial edits in main session) | yes |
+| 12 | F1 Serious ACCEPTED: removed the dead `sessions` wrapper, `pendingSubjects`/`sessionSubjects` and its spec lines from `codex-chat-host-ports.ts`. Electron's override (`codex-runtime-composition.ts:921-939`) already revokes `id` and `tabId(id)` on close with try/finally. | orchestrator read of composition file | yes |
+| 13 | F2 Serious DEFERRED (named follow-up): token issued in `profile()` is not revoked when open fails before `opened`. Pre-existing; raw token only reaches the never-started Codex process; record is in memory, localhost only, cleared at server stop. Lifetime of the stale record grows 4 h → 7 d. Follow-up: revoke on `profile()` failure / discarded prepared profile. | review F2; code reading | yes |
+| 14 | F3 Serious DISPUTED (pre-existing, not worsened): tab-keyed subject means a late close of session A revokes session B in the same tab. Revocation is immediate, so TTL length does not change this window. Out of scope; follow-up candidate: unique per-issue subjects. | review F3; revocation semantics | yes |
+| 15 | F4 Moderate moot: the wrapper was removed (F1). | — | yes |
+| 16 | F5 Moderate ACCEPTED: neutral message `MCP_CREDENTIAL_INVALID_MESSAGE` that covers session, lane and config tokens. | review F5 | yes |
+| 17 | F6 Moderate RESOLVED: specs did execute in orchestrator verify after the node_modules junction (agent-sdk, rpc-handlers, vscode-lm-tools test targets passed). | /tmp/mcp-auth-verify.log | n/a |
+| 18 | F7 Minor ACCEPTED: prettier on changed files; the pre-commit hook runs `nx format:write` on staged files anyway, so whole-file reformat of registry files is expected churn. | `.lintstagedrc.mjs` | yes |
+| 20 | Re-review 6d8186df (antigravity, APPROVED 8/10) accepts the F1/F5/F7 fixes and agrees with the F2 deferral and the F3 dispute. Its one Minor (7 d TTL widens the deferred F2 leak) is already recorded in row 13. Final PR review rule 5 is skipped: one phase, and no commit followed the phase review. | code-logic-re-review.md; orchestration lean rule 5 | yes |
+| 19 | The two platform-core failures (`session-driver-lock/control-endpoint.spec.ts:68`, `kernel-session-driver-lock.spec.ts:62`) are pre-existing: the same 2 tests fail on `main` (2 failed, 15 passed). Not caused by this task. | main baseline run, nx terminal output 2189655000528011238 | n/a |

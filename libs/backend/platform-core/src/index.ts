@@ -163,6 +163,7 @@ export type {
   McpSessionWiring,
 } from './interfaces/mcp-server-status.interface';
 export { resolveMcpSessionWiring } from './interfaces/mcp-server-status.interface';
+export { INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS } from './interfaces/mcp-caller-credentials.interface';
 export type {
   IMcpCallerCredentials,
   McpCallerBinding,
@@ -376,7 +377,11 @@ export {
   terminalExecutableCandidates,
 } from './utils/terminal-launch';
 export type { TerminalLaunch } from './utils/terminal-launch';
-export { PtahFileSettingsManager, resolvePtahSettingsDir, seedPtahSettingsFile } from './file-settings-manager';
+export {
+  PtahFileSettingsManager,
+  resolvePtahSettingsDir,
+  seedPtahSettingsFile,
+} from './file-settings-manager';
 export { migrateLegacyCompactionThreshold } from './legacy-threshold-migration';
 export { migrateAgentBudgetSettings } from './agent-budget-settings-migration';
 export type { FileSettingsDefaults } from './file-settings-manager';

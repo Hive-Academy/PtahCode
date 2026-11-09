@@ -37,7 +37,10 @@ import type {
   ClaudeAccountNamedRoute,
   ClaudeCertifiedLaunchContext,
 } from '@ptah-extension/auth-providers-tokens';
-import type { IWorkspaceProvider } from '@ptah-extension/platform-core';
+import {
+  INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,
+  type IWorkspaceProvider,
+} from '@ptah-extension/platform-core';
 import {
   CODEX_PROXY_TOKEN_PLACEHOLDER,
   KIMI_CODE_PROXY_TOKEN_PLACEHOLDER,
@@ -220,7 +223,9 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
       createCallback: jest.fn().mockReturnValue(() => ({ behavior: 'allow' })),
       budgetSendMessageRefusal: jest.fn((target: string) => {
         if (target === 'boom') throw new Error('budget lookup failed');
-        return target === 'stopped' || target === 'warned' ? 'Start a fresh agent.' : undefined;
+        return target === 'stopped' || target === 'warned'
+          ? 'Start a fresh agent.'
+          : undefined;
       }),
       logBudgetSendMessageHookDenial: jest.fn(
         (_sessionId: string, _tabId: unknown, toolUseID: string) =>
@@ -411,13 +416,19 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
         }),
       }),
     );
-    expect(await hook?.(
-      { ...base, tool_input: { to: 'warned' } },
-      'send-2',
-      context,
-    )).toEqual(expect.objectContaining({
-      hookSpecificOutput: expect.objectContaining({ permissionDecision: 'deny' }),
-    }));
+    expect(
+      await hook?.(
+        { ...base, tool_input: { to: 'warned' } },
+        'send-2',
+        context,
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        hookSpecificOutput: expect.objectContaining({
+          permissionDecision: 'deny',
+        }),
+      }),
+    );
     expect(logger.debug).toHaveBeenCalledWith(
       '[SdkPermissionHandler] Permission decision',
       expect.objectContaining({
@@ -466,7 +477,9 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
     const options = await buildWith({ mcpToolProfile: 'apps' });
     expect(options.mcpServers?.['ptah']).toEqual(
       expect.objectContaining({
-        url: expect.stringMatching(/\/session\/tab-fixture\/workspace\/D%3A%2Ftmp%2Fws\/profile\/apps$/),
+        url: expect.stringMatching(
+          /\/session\/tab-fixture\/workspace\/D%3A%2Ftmp%2Fws\/profile\/apps$/,
+        ),
       }),
     );
   });
@@ -2290,7 +2303,7 @@ describe('SdkQueryOptionsBuilder.buildMcpServers — caller session segment (TAS
           capability: 'privileged',
         },
         'claude-interactive:tab-abc',
-        4 * 60 * 60 * 1000,
+        INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,
       );
       builder.revokeMcpSubject('tab-abc');
       expect(revokeSubject).toHaveBeenCalledWith('claude-interactive:tab-abc');

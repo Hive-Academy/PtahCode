@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import {
   PLATFORM_TOKENS,
+  INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,
   type HostKind,
   type IWorkspaceProvider,
   type IMcpCallerCredentials,
@@ -2229,7 +2230,7 @@ export class SdkQueryOptionsBuilder {
         capability: 'privileged',
       },
       `claude-interactive:${routingSessionId}`,
-      4 * 60 * 60 * 1000,
+      INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,
     );
     const sessionUrl = `http://localhost:${PTAH_MCP_PORT}/session/${encodeURIComponent(routingSessionId)}/workspace/${encodeURIComponent(cwd)}`;
     const mcpConfig: Record<string, McpHttpServerConfig> = {

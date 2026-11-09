@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createMockWorkspaceProvider } from '@ptah-extension/platform-core/testing';
+import { INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS } from '@ptah-extension/platform-core';
 import {
   PTAH_UI_HINT_CODEX,
   UNROUTABLE_PERMISSION_TIMEOUT_MS,
@@ -501,7 +502,7 @@ describe('Codex chat host ports', () => {
       },
     ]);
   });
-  it('binds a four-hour session token and returns it only in secrets', async () => {
+  it('binds a seven-day session token and returns it only in secrets', async () => {
     const h = harness();
     const prepared = await h.ports.profile({
       ...config(),
@@ -517,7 +518,7 @@ describe('Codex chat host ports', () => {
         capability: 'privileged',
       },
       'tab-1',
-      4 * 60 * 60 * 1000,
+      INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,
     );
     expect(prepared.secrets).toEqual(
       new Map([['mcp.ptah.authorization', mcpToken]]),
@@ -941,8 +942,10 @@ describe('Codex chat host ports', () => {
         toolName: 'Bash',
         toolInput: { command: 'pwd' },
         toolUseId: approval.toolId,
-        timeoutAt: Math.min(approval.expiresAt ?? Infinity,
-          payload.timestamp + UNROUTABLE_PERMISSION_TIMEOUT_MS),
+        timeoutAt: Math.min(
+          approval.expiresAt ?? Infinity,
+          payload.timestamp + UNROUTABLE_PERMISSION_TIMEOUT_MS,
+        ),
         description: expect.stringContaining('pwd'),
       });
       expect(payload).not.toHaveProperty('allowedDecisions');
@@ -1407,7 +1410,9 @@ describe('Codex chat host ports', () => {
       jest.advanceTimersByTime(UNROUTABLE_PERMISSION_TIMEOUT_MS);
       expect(h.respond).toHaveBeenCalledWith(
         { sessionId: id, threadId: id, requestId: '5' },
-        expect.objectContaining({ response: expect.objectContaining({ decision: 'decline' }) }),
+        expect.objectContaining({
+          response: expect.objectContaining({ decision: 'decline' }),
+        }),
       );
       expect(h.publish).not.toHaveBeenCalled();
     });

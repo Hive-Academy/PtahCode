@@ -1,5 +1,9 @@
 import * as crypto from 'node:crypto';
-import type { IStateStorage } from '@ptah-extension/platform-core';
+import {
+  INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,
+  type IStateStorage,
+} from '@ptah-extension/platform-core';
+import { MCP_CREDENTIAL_INVALID_MESSAGE } from '../mcp-core/mcp-caller-auth.types';
 import {
   McpCallerTokenRegistry,
   type McpCredentialLogger,
@@ -97,7 +101,7 @@ describe('McpCallerTokenRegistry', () => {
     });
     expect(unknown).toMatchObject({
       ok: false,
-      failure: { httpStatus: 401, message: 'Authentication required' },
+      failure: { httpStatus: 401, message: MCP_CREDENTIAL_INVALID_MESSAGE },
     });
   });
 
@@ -124,9 +128,46 @@ describe('McpCallerTokenRegistry', () => {
       true,
     );
     registry.revokeSubject('lane-b');
-    expect(registry.authorize({ token: live, agentId: 'lane-b' })).toMatchObject(
-      { ok: false, failure: { httpStatus: 401 } },
+    expect(
+      registry.authorize({ token: live, agentId: 'lane-b' }),
+    ).toMatchObject({ ok: false, failure: { httpStatus: 401 } });
+  });
+
+  it('keeps an interactive credential after four hours, then expires or revokes it', () => {
+    const clock = { now: 5_000 };
+    const registry = new McpCallerTokenRegistry({
+      logger: logger(),
+      now: () => clock.now,
+    });
+    const binding = {
+      kind: 'session' as const,
+      sessionId: 'tab-1',
+      workspaceRoot: '/ws',
+      capability: 'privileged' as const,
+    };
+    const token = registry.issue(
+      binding,
+      'claude-interactive:tab-1',
+      INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,
     );
+    const input = { token, sessionId: 'tab-1', workspaceRoot: '/ws' };
+    clock.now += 4 * 60 * 60 * 1000 + 60_000;
+    expect(registry.authorize(input).ok).toBe(true);
+    clock.now = 5_000 + INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS;
+    expect(registry.authorize(input)).toMatchObject({
+      ok: false,
+      failure: { httpStatus: 401, message: MCP_CREDENTIAL_INVALID_MESSAGE },
+    });
+    const replacement = registry.issue(
+      binding,
+      'claude-interactive:tab-1',
+      INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,
+    );
+    registry.revokeSubject('claude-interactive:tab-1');
+    expect(registry.authorize({ ...input, token: replacement })).toMatchObject({
+      ok: false,
+      failure: { httpStatus: 401, message: MCP_CREDENTIAL_INVALID_MESSAGE },
+    });
   });
 
   it('returns 403 when a valid token is presented on another identity', () => {
@@ -140,15 +181,15 @@ describe('McpCallerTokenRegistry', () => {
       'query-1',
       1_000,
     );
-    expect(
-      registry.authorize({ token, workspaceRoot: '/ws-b' }),
-    ).toMatchObject({
-      ok: false,
-      failure: {
-        httpStatus: 403,
-        message: 'Caller is not allowed to use this resource',
+    expect(registry.authorize({ token, workspaceRoot: '/ws-b' })).toMatchObject(
+      {
+        ok: false,
+        failure: {
+          httpStatus: 403,
+          message: 'Caller is not allowed to use this resource',
+        },
       },
-    });
+    );
     expect(registry.authorize({ token, workspaceRoot: '/ws-a' }).ok).toBe(true);
   });
 
@@ -212,9 +253,7 @@ describe('McpCallerTokenRegistry', () => {
     });
     expect(second.preserveFile).toBe(true);
     expect(JSON.stringify(state.read(STORE_KEY))).toBe(afterFull);
-    expect(
-      reloaded.authorize({ token, workspaceRoot: '/ws' }),
-    ).toMatchObject({
+    expect(reloaded.authorize({ token, workspaceRoot: '/ws' })).toMatchObject({
       ok: true,
       binding: { capability: 'privileged', kind: 'workspace' },
     });
@@ -359,7 +398,9 @@ describe('McpCallerTokenRegistry', () => {
     expect(
       registry.authorize({ token: unknown, workspaceRoot: '/ws' }).ok,
     ).toBe(false);
-    expect(registry.authorize({ token: replacement.token, workspaceRoot: '/ws' })).toMatchObject({
+    expect(
+      registry.authorize({ token: replacement.token, workspaceRoot: '/ws' }),
+    ).toMatchObject({
       ok: true,
       binding: { capability: 'read-only' },
     });
@@ -490,11 +531,16 @@ describe('McpCallerTokenRegistry', () => {
     state.failNextUpdate = true;
     await expect(prepared.commit()).rejects.toThrow('state write failed');
     const restartedBeforeRetry = new McpCallerTokenRegistry({
-      state, logger: logger(), externalCallerAccess: 'read-only',
+      state,
+      logger: logger(),
+      externalCallerAccess: 'read-only',
     });
-    expect(restartedBeforeRetry.authorize({
-      token: prepared.token, workspaceRoot: '/ws',
-    })).toMatchObject({ ok: true, binding: { capability: 'read-only' } });
+    expect(
+      restartedBeforeRetry.authorize({
+        token: prepared.token,
+        workspaceRoot: '/ws',
+      }),
+    ).toMatchObject({ ok: true, binding: { capability: 'read-only' } });
     expect(
       registry.authorize({ token: prepared.token, workspaceRoot: '/ws' }),
     ).toMatchObject({
@@ -524,12 +570,21 @@ describe('McpCallerTokenRegistry', () => {
   it('keeps a published token read-only when registration and a failed reconcile overlap a downgrade', async () => {
     const state = new FailingWriteState();
     const registry = new McpCallerTokenRegistry({
-      state, logger: logger(), externalCallerAccess: 'full',
+      state,
+      logger: logger(),
+      externalCallerAccess: 'full',
     });
-    const slot = { configPath: '/ws/.mcp.json', kind: 'workspace' as const, workspaceRoot: '/ws', setting: 'full' as const };
+    const slot = {
+      configPath: '/ws/.mcp.json',
+      kind: 'workspace' as const,
+      workspaceRoot: '/ws',
+      setting: 'full' as const,
+    };
     const prepared = await registry.preparePersistent(slot);
     let finishWrite: (() => void) | undefined;
-    const writing = new Promise<void>((resolve) => { finishWrite = resolve; });
+    const writing = new Promise<void>((resolve) => {
+      finishWrite = resolve;
+    });
     let fileToken: string | undefined;
     const registration = (async () => {
       await writing;
@@ -538,25 +593,45 @@ describe('McpCallerTokenRegistry', () => {
     })();
     registry.clampExternalCallerAccess('read-only');
     state.failNextUpdate = true;
-    await expect(registry.applyExternalCallerAccess('read-only')).rejects.toThrow('state write failed');
+    await expect(
+      registry.applyExternalCallerAccess('read-only'),
+    ).rejects.toThrow('state write failed');
     finishWrite?.();
     await registration;
     expect(fileToken).toBe(prepared.token);
-    expect(registry.authorize({ token: fileToken, workspaceRoot: '/ws' }))
-      .toMatchObject({ ok: true, binding: { capability: 'read-only' } });
-    const restarted = new McpCallerTokenRegistry({ state, logger: logger(), externalCallerAccess: 'read-only' });
-    expect(restarted.authorize({ token: fileToken, workspaceRoot: '/ws' }))
-      .toMatchObject({ ok: true, binding: { capability: 'read-only' } });
+    expect(
+      registry.authorize({ token: fileToken, workspaceRoot: '/ws' }),
+    ).toMatchObject({ ok: true, binding: { capability: 'read-only' } });
+    const restarted = new McpCallerTokenRegistry({
+      state,
+      logger: logger(),
+      externalCallerAccess: 'read-only',
+    });
+    expect(
+      restarted.authorize({ token: fileToken, workspaceRoot: '/ws' }),
+    ).toMatchObject({ ok: true, binding: { capability: 'read-only' } });
   });
 
   it('lets a downgrade win over an in-flight upgrade', async () => {
     const state = new MemoryState();
-    const registry = new McpCallerTokenRegistry({ state, logger: logger(), externalCallerAccess: 'read-only' });
-    const token = await registry.issuePersistent({ configPath: '/ws/.mcp.json', kind: 'workspace', workspaceRoot: '/ws', setting: 'read-only' });
+    const registry = new McpCallerTokenRegistry({
+      state,
+      logger: logger(),
+      externalCallerAccess: 'read-only',
+    });
+    const token = await registry.issuePersistent({
+      configPath: '/ws/.mcp.json',
+      kind: 'workspace',
+      workspaceRoot: '/ws',
+      setting: 'read-only',
+    });
     let release: (() => void) | undefined;
     const original = state.update.bind(state);
     state.update = async (key, value) => {
-      if (release === undefined) await new Promise<void>((resolve) => { release = resolve; });
+      if (release === undefined)
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
       await original(key, value);
     };
     const upgrade = registry.applyExternalCallerAccess('full');
@@ -565,34 +640,63 @@ describe('McpCallerTokenRegistry', () => {
     const downgrade = registry.applyExternalCallerAccess('read-only');
     release?.();
     await Promise.all([upgrade, downgrade]);
-    expect(registry.authorize({ token, workspaceRoot: '/ws' }))
-      .toMatchObject({ ok: true, binding: { capability: 'read-only' } });
-    const restarted = new McpCallerTokenRegistry({ state, logger: logger(), externalCallerAccess: 'read-only' });
-    expect(restarted.authorize({ token, workspaceRoot: '/ws' }))
-      .toMatchObject({ ok: true, binding: { capability: 'read-only' } });
+    expect(registry.authorize({ token, workspaceRoot: '/ws' })).toMatchObject({
+      ok: true,
+      binding: { capability: 'read-only' },
+    });
+    const restarted = new McpCallerTokenRegistry({
+      state,
+      logger: logger(),
+      externalCallerAccess: 'read-only',
+    });
+    expect(restarted.authorize({ token, workspaceRoot: '/ws' })).toMatchObject({
+      ok: true,
+      binding: { capability: 'read-only' },
+    });
   });
 
   it('clamps a matching file token when its capability write races a downgrade', async () => {
     const state = new MemoryState();
-    const registry = new McpCallerTokenRegistry({ state, logger: logger(), externalCallerAccess: 'read-only' });
-    const slot = { configPath: '/ws/.mcp.json', kind: 'workspace' as const, workspaceRoot: '/ws' };
-    const token = await registry.issuePersistent({ ...slot, setting: 'read-only' });
+    const registry = new McpCallerTokenRegistry({
+      state,
+      logger: logger(),
+      externalCallerAccess: 'read-only',
+    });
+    const slot = {
+      configPath: '/ws/.mcp.json',
+      kind: 'workspace' as const,
+      workspaceRoot: '/ws',
+    };
+    const token = await registry.issuePersistent({
+      ...slot,
+      setting: 'read-only',
+    });
     registry.clampExternalCallerAccess('full');
     let release: (() => void) | undefined;
     let markEntered: (() => void) | undefined;
-    const entered = new Promise<void>((resolve) => { markEntered = resolve; });
+    const entered = new Promise<void>((resolve) => {
+      markEntered = resolve;
+    });
     const original = state.update.bind(state);
     state.update = async (key, value) => {
       markEntered?.();
-      await new Promise<void>((resolve) => { release = resolve; });
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
       await original(key, value);
     };
-    const matching = registry.preparePersistent({ ...slot, setting: 'full', fileToken: token });
+    const matching = registry.preparePersistent({
+      ...slot,
+      setting: 'full',
+      fileToken: token,
+    });
     await entered;
     registry.clampExternalCallerAccess('read-only');
     release?.();
     await matching;
-    expect(registry.authorize({ token, workspaceRoot: '/ws' }))
-      .toMatchObject({ ok: true, binding: { capability: 'read-only' } });
+    expect(registry.authorize({ token, workspaceRoot: '/ws' })).toMatchObject({
+      ok: true,
+      binding: { capability: 'read-only' },
+    });
   });
 });

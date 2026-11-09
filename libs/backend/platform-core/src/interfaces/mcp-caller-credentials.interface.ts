@@ -24,6 +24,9 @@ export type McpCallerBindingKind =
 /** Profile segment the URL carried when the token was minted. */
 export type McpCallerToolProfile = 'coding' | 'apps';
 
+/** Interactive credentials cover a session's maximum age; teardown revokes them. */
+export const INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
 /** Identity and capability bound to one token. No raw secret. */
 export interface McpCallerBinding {
   readonly kind: McpCallerBindingKind;
