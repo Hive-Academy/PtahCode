@@ -109,3 +109,54 @@ describe('ReviewWorktreeService.snapshot', () => {
     await expect(service.assertIntegrity(repo, '/attempt/src', original)).rejects.toThrow('Review source checksum changed');
   });
 });
+
+describe('ReviewWorktreeService.releaseSource', () => {
+  const src = resolve('/attempts', 'attempt-1', 'src');
+
+  it('removes only the src worktree and keeps out/ and meta/', async () => {
+    const { service, run, remove, files } = setup(() => ok());
+    jest.mocked(files.exists).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    await expect(service.releaseSource(repo, '/repo', '/attempts', 'attempt-1')).resolves.toBe(true);
+    expect(run).toHaveBeenCalledWith(repo, 'git', ['worktree', 'remove', '--force', src], '/repo', 180_000);
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when the attempt has no source', async () => {
+    const { service, run } = setup(() => ok());
+    await expect(service.releaseSource(repo, '/repo', '/attempts', 'attempt-1')).resolves.toBe(false);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('fails when the source is still there after git removal', async () => {
+    const { service, files } = setup(() => ({ ...ok(), exitCode: 128 }));
+    jest.mocked(files.exists).mockResolvedValue(true);
+    await expect(service.releaseSource(repo, '/repo', '/attempts', 'attempt-1')).rejects.toThrow('Review source removal failed');
+  });
+
+  it('rejects an attempt ID that could escape the attempts root', async () => {
+    const { service, run } = setup(() => ok());
+    await expect(service.releaseSource(repo, '/repo', '/attempts', '../repo')).rejects.toThrow();
+    expect(run).not.toHaveBeenCalled();
+  });
+});
+
+describe('ReviewWorktreeService.listAttemptSources', () => {
+  it('returns attempt IDs of src worktrees under the attempts root only', async () => {
+    const porcelain = [
+      'worktree /repo', 'HEAD ' + sha, 'branch refs/heads/main', '',
+      `worktree ${resolve('/attempts', 'a1', 'src')}`, 'HEAD ' + sha, 'detached', '',
+      `worktree ${resolve('/attempts', 'a2', 'src')}`, 'HEAD ' + sha, 'detached', 'prunable gitdir file points to non-existent location', '',
+      `worktree ${resolve('/attempts', 'a3', 'src', 'nested')}`, '',
+      `worktree ${resolve('/elsewhere', 'a4', 'src')}`, '',
+      `worktree ${resolve('/attempts', 'bad.id', 'src')}`, '',
+    ].join('\n');
+    const { service, run } = setup((args) => args[1] === 'list' ? ok(porcelain) : ok());
+    await expect(service.listAttemptSources(repo, '/repo', '/attempts')).resolves.toEqual(['a1', 'a2']);
+    expect(run).toHaveBeenCalledWith(repo, 'git', ['worktree', 'list', '--porcelain'], '/repo', 60_000);
+  });
+
+  it('throws when git cannot list worktrees', async () => {
+    const { service } = setup(() => ({ ...ok(), exitCode: 1 }));
+    await expect(service.listAttemptSources(repo, '/repo', '/attempts')).rejects.toThrow('Git worktree list failed');
+  });
+});

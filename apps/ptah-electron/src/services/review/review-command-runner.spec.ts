@@ -76,6 +76,7 @@ describe('ReviewCommandRunner', () => {
         ['cat-file', '-e', `${'a'.repeat(40)}^{commit}`],
         ['fetch', '--no-tags', 'origin', '+refs/pull/123/head'],
         ['worktree', 'prune'],
+        ['worktree', 'list', '--porcelain'],
       ];
       const rejected = [
         ['cat-file', '-e', 'a'.repeat(40)],
@@ -87,6 +88,9 @@ describe('ReviewCommandRunner', () => {
         ['fetch', '--no-tags', 'origin', '+refs/pull/0/head'],
         ['fetch', '--no-tags', 'origin', '+refs/pull/1/head:refs/x'],
         ['worktree', 'prune', '--expire', 'now'],
+        ['worktree', 'list'],
+        ['worktree', 'list', '--porcelain', '-z'],
+        ['worktree', 'list', '--verbose'],
         ['status'],
         ['checkout', 'main'],
       ];

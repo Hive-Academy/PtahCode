@@ -5,7 +5,8 @@ import { z } from 'zod';
 import { REVIEW_CORE_TOKENS } from '../di/tokens';
 import { ReviewQueueService, type ReviewQueueClaim } from './review-queue.service';
 import { ReviewPolicyService } from './review-policy.service';
-import type { IReviewRepository, ReviewStageRecord } from './persistence/review-repository.interface';
+import type { IReviewRepository, ReviewAttemptRecord, ReviewStageRecord } from './persistence/review-repository.interface';
+import { ReviewWorktreeService } from './context/review-worktree.service';
 import type { IReviewSettingsStore } from './persistence/review-settings.store';
 import { DiscoveryStageRunner } from './stages/discovery-stage.runner';
 import { ContextStageRunner, resolveReviewRoots, type ReviewStageEnvironment } from './stages/context-stage.runner';
@@ -27,6 +28,8 @@ const VerificationSchema = z.array(z.object({ lens: z.string(), finding: Candida
   result: z.discriminatedUnion('status', [z.object({ status: z.literal('partial'), reason: z.string() }),
     z.object({ status: z.literal('completed'), family: z.string(), evidenceStrength: z.enum(['strong', 'weaker']).optional(), output: VerifierVerdictSchema })]),
 }));
+/** Attempt states that never run again; a retry makes a new attempt ID. */
+const ENDED_ATTEMPT_STATES: ReadonlySet<ReviewAttemptRecord['state']> = new Set(['completed', 'failed', 'cancelled']);
 /** An attempt gets its own review window; drain's deadline only limits new claims. */
 const REVIEW_ATTEMPT_WINDOW_MS = 60 * 60_000;
 
@@ -51,6 +54,7 @@ export class ReviewOrchestratorService {
     @inject(REVIEW_CORE_TOKENS.ENVIRONMENT) private readonly environment: ReviewStageEnvironment,
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
     @inject(REVIEW_CORE_TOKENS.SETTINGS_STORE) private readonly settingsStore: IReviewSettingsStore,
+    @inject(ReviewWorktreeService) private readonly worktree: ReviewWorktreeService,
   ) {}
 
   async lastPollAt(repo: RepoIdentity): Promise<number | null> { return this.repository.getLastPollAt(repo); }
@@ -85,6 +89,54 @@ export class ReviewOrchestratorService {
 
   async reconcileStartup(): Promise<number> {
     return this.queue.reconcileStartup([]);
+  }
+
+  /**
+   * Startup sweep: removes `src/` of attempts that ended but kept it (a crash between release
+   * and cleanup, or attempts from builds without cleanup). It touches only ended attempts, which
+   * never run again, so the host may run it while the queue drains. It never throws.
+   */
+  async releaseEndedSources(): Promise<number> {
+    let released = 0;
+    let repositories: ReadonlyArray<{ owner: string; name: string }> = [];
+    try { repositories = (await this.settingsStore.getSettings())?.repositories ?? []; }
+    catch (error: unknown) {
+      // degradation-audit: reported — without settings there is no repository to sweep.
+      this.logger.error('Review attempt source sweep failed', error instanceof Error ? error : new Error(String(error)));
+    }
+    for (const entry of repositories) {
+      const repo: RepoIdentity = { owner: entry.owner, name: entry.name };
+      try {
+        const roots = await resolveReviewRoots(this.environment, repo);
+        for (const attemptId of await this.worktree.listAttemptSources(repo, roots.repoRoot, roots.attemptsRoot)) {
+          try {
+            const attempt = await this.repository.getAttempt(attemptId);
+            if (!attempt || !ENDED_ATTEMPT_STATES.has(attempt.state)) continue;
+            if (await this.worktree.releaseSource(repo, roots.repoRoot, roots.attemptsRoot, attemptId)) released++;
+          } catch (error: unknown) {
+            // degradation-audit: reported — one attempt's cleanup failure must not stop the sweep.
+            this.logger.error('Review attempt source cleanup failed', error instanceof Error ? error : new Error(String(error)));
+          }
+        }
+        await this.worktree.prune(repo, roots.repoRoot);
+      } catch (error: unknown) {
+        // degradation-audit: reported — a repository without a local checkout has nothing to sweep.
+        this.logger.error('Review attempt source sweep failed', error instanceof Error ? error : new Error(String(error)));
+      }
+    }
+    if (released > 0) this.logger.info(`Review startup removed ${released} ended attempt sources`);
+    return released;
+  }
+
+  /** Best-effort: frees the attempt's checkout after it ended; never fails the attempt. */
+  private async releaseAttemptSource(claim: ReviewQueueClaim): Promise<void> {
+    try {
+      const roots = await resolveReviewRoots(this.environment, claim.repo);
+      await this.worktree.releaseSource(claim.repo, roots.repoRoot, roots.attemptsRoot, claim.attemptId);
+    } catch (error: unknown) {
+      // degradation-audit: reported — the startup sweep retries ended attempts that kept src/.
+      this.logger.error('Review attempt source cleanup failed', error instanceof Error ? error : new Error(String(error)));
+    }
   }
 
   /** Polls every enabled repository; one repository's failure does not stop the others. */
@@ -179,7 +231,10 @@ export class ReviewOrchestratorService {
     } finally {
       clearInterval(heartbeat);
       await Promise.allSettled(pendingHeartbeats);
-      if (!signal?.aborted) await this.queue.release(claim.attemptId, claim.lease.owner, status);
+      // Only a released attempt has ended. An aborted one keeps src/ because it is requeued and resumes.
+      if (!signal?.aborted && await this.queue.release(claim.attemptId, claim.lease.owner, status)) {
+        await this.releaseAttemptSource(claim);
+      }
     }
   }
 

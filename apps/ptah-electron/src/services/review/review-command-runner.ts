@@ -21,6 +21,7 @@ const invocationSchema = z.object({
  * Read-only or self-limiting git commands the worktree service runs from the
  * repository root before it creates an attempt tree: probe the PR head, fetch
  * the PR ref when the head is missing, and prune a failed worktree record.
+ * `worktree list --porcelain` is read-only: the startup sweep finds ended attempts with it.
  */
 function isRepositoryRootGitCommand(command: string, args: readonly string[]): boolean {
   if (command !== 'git') return false;
@@ -28,6 +29,7 @@ function isRepositoryRootGitCommand(command: string, args: readonly string[]): b
     return /^[a-f0-9]{40}\^\{commit\}$/i.test(args[2]);
   if (args.length === 4 && args[0] === 'fetch' && args[1] === '--no-tags' && args[2] === 'origin')
     return /^\+refs\/pull\/[1-9][0-9]{0,9}\/head$/.test(args[3]);
+  if (args.length === 3 && args[0] === 'worktree' && args[1] === 'list') return args[2] === '--porcelain';
   return args.length === 2 && args[0] === 'worktree' && args[1] === 'prune';
 }
 

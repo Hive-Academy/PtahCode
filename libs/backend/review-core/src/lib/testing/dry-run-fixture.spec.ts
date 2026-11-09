@@ -17,6 +17,7 @@ import { TriageStageRunner } from '../stages/triage-stage.runner';
 import { LensStageRunner, type LensStageResult } from '../stages/lens-stage.runner';
 import { VerificationStageRunner, type VerificationResult } from '../stages/verification-stage.runner';
 import { PublicationStageRunner } from '../stages/publication-stage.runner';
+import { ReviewWorktreeService } from '../context/review-worktree.service';
 const REVIEW_REPO = { owner: 'Hive-Academy', name: 'PtahCode' } as const;
 
 const sha = 'a'.repeat(40);
@@ -71,6 +72,9 @@ describe('dry-run fixture without UI or GitHub mutation', () => {
       const contextValue: ContextStageResult = { attemptRoot, coverage: ['lint:unavailable'], promptInput: {
         headSha: sha, title: 'Fixture', body: '', diff: '', comments: '', fileContent: '',
         deterministicEvidence: '', repositoryRules: '' } };
+      const worktree = Object.create(ReviewWorktreeService.prototype) as ReviewWorktreeService;
+      jest.spyOn(worktree, 'releaseSource').mockResolvedValue(false);
+      jest.spyOn(worktree, 'listAttemptSources').mockResolvedValue([]);
       const context = Object.create(ContextStageRunner.prototype) as ContextStageRunner;
       jest.spyOn(context, 'run').mockResolvedValue(contextValue);
       const triage = Object.create(TriageStageRunner.prototype) as TriageStageRunner;
@@ -94,7 +98,8 @@ describe('dry-run fixture without UI or GitHub mutation', () => {
       const coordinator = new ReviewOrchestratorService(new DiscoveryStageRunner(github, queue, policy, environment),
         context, triage, lens, verification, publication, queue, policy, first.repository, github, environment, logger,
         { getSettings: jest.fn().mockResolvedValue(settings), updateSettings: jest.fn(), listRepositories: jest.fn(),
-          setPublicationPause: jest.fn(), getLiveGate: jest.fn(), setLiveGate: jest.fn() } as IReviewSettingsStore);
+          setPublicationPause: jest.fn(), getLiveGate: jest.fn(), setLiveGate: jest.fn() } as IReviewSettingsStore,
+        worktree);
       const discoverySummary = (await coordinator.discoveryHandler()).summary;
       expect(logger.error).not.toHaveBeenCalled();
       expect(discoverySummary).toContain('Enqueued 1');
