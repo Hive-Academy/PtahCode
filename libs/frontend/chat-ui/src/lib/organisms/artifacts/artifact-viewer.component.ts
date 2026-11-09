@@ -51,17 +51,19 @@ function canMoveBefore(node: Node): node is Node & MoveBeforeCapable {
   return 'moveBefore' in node && typeof node.moveBefore === 'function';
 }
 
-function moveNode(parent: Node, node: Node, before: Node | null): void {
+/** Return whether moveBefore preserved the iframe's loading state. */
+function moveNode(parent: Node, node: Node, before: Node | null): boolean {
   if (canMoveBefore(parent)) {
     try {
       parent.moveBefore(node, before);
-      return;
+      return true;
     } catch (error: unknown) {
       if (!(error instanceof DOMException)) throw error;
     }
   }
   if (before === null) parent.appendChild(node);
   else parent.insertBefore(node, before);
+  return false;
 }
 
 /**
@@ -322,7 +324,7 @@ export class ArtifactViewerComponent implements OnDestroy {
     this.portalAnchor = this.document.createComment('artifact-viewer-anchor');
     this.portalElement = element;
     element.parentNode.insertBefore(this.portalAnchor, element);
-    moveNode(this.document.body, element, null);
+    this.moveViewerNode(this.document.body, element, null);
     if (!element.contains(this.document.activeElement)) {
       element.focus({ preventScroll: true });
     }
@@ -332,13 +334,21 @@ export class ArtifactViewerComponent implements OnDestroy {
     const anchor = this.portalAnchor;
     if (!anchor) return;
     if (anchor.parentNode && this.portalElement?.isConnected) {
-      moveNode(anchor.parentNode, this.portalElement, anchor);
+      this.moveViewerNode(anchor.parentNode, this.portalElement, anchor);
     } else {
       this.portalElement?.remove();
     }
     anchor.remove();
     this.portalAnchor = null;
     this.portalElement = null;
+  }
+
+  private moveViewerNode(parent: Node, element: HTMLElement, before: Node | null): void {
+    const preserved = moveNode(parent, element, before);
+    const frame = this.frameRef()?.nativeElement;
+    if (!preserved && frame && element.contains(frame) && VIEWER_URL_PATTERN.test(this.artifact().viewerUrl)) {
+      this.armLoadTimeout();
+    }
   }
 
   protected toggleFullscreen(): void {

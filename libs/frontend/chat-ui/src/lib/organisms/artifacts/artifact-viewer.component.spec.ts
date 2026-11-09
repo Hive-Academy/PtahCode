@@ -377,6 +377,45 @@ describe('ArtifactViewerComponent', () => {
       }
     });
 
+    it('times out stalled fallback iframe reloads on entry and exit, and clears the timer on load', () => {
+      jest.useFakeTimers();
+      const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'moveBefore');
+      Object.defineProperty(Element.prototype, 'moveBefore', { configurable: true, value: undefined });
+      try {
+        for (const move of ['enter', 'leave'] as const) {
+          for (const loadsAfterMove of [false, true]) {
+            const fixture = createViewer();
+            try {
+              const frame = loadedFrame(fixture);
+              const button = fixture.nativeElement.querySelector('[data-testid="artifact-viewer-fullscreen-toggle"]') as HTMLButtonElement;
+              button.click();
+              fixture.detectChanges();
+              if (move === 'leave') {
+                frame.dispatchEvent(new Event('load'));
+                fixture.detectChanges();
+                button.click();
+                fixture.detectChanges();
+              }
+              if (loadsAfterMove) {
+                frame.dispatchEvent(new Event('load'));
+                fixture.detectChanges();
+              }
+              jest.advanceTimersByTime(10_001);
+              fixture.detectChanges();
+              const error = document.body.querySelector('[data-testid="artifact-viewer-error"]');
+              expect(error !== null).toBe(!loadsAfterMove);
+            } finally {
+              fixture.destroy();
+            }
+          }
+        }
+      } finally {
+        if (descriptor) Object.defineProperty(Element.prototype, 'moveBefore', descriptor);
+        else Reflect.deleteProperty(Element.prototype, 'moveBefore');
+        jest.useRealTimers();
+      }
+    });
+
     it('focuses the fallback dialog so Escape on the focused element exits', () => {
       const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'moveBefore');
       Object.defineProperty(Element.prototype, 'moveBefore', { configurable: true, value: undefined });
