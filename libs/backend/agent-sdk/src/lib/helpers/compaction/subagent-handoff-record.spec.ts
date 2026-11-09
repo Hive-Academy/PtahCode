@@ -213,6 +213,65 @@ describe('SubagentHandoffRecords', () => {
     })).toContain(result.path);
   });
 
+  it.each(['dispose', 'withdraw'] as const)(
+    'does not publish scrub proof after %s starts during a read', async (action) => {
+      const { store } = makeStore();
+      const result = await store.writeOnce(SESSION, TOOL, 'notes: /secret/unredacted');
+      if (!result.ok) throw new Error('expected a record');
+      let release: () => void = () => undefined;
+      let entered: () => void = () => undefined;
+      const reading = new Promise<void>((resolve) => { entered = resolve; });
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const original = fs.promises.readFile;
+      const spy = jest.spyOn(fs.promises, 'readFile').mockImplementationOnce(async (...args) => {
+        entered();
+        await gate;
+        return original(...args);
+      });
+      try {
+        const scrub = store.markScrubbed(TOOL, result.path);
+        await reading;
+        const cleanup = action === 'dispose'
+          ? store.disposeUnsafe(TOOL, result.path)
+          : store.withdraw(TOOL, result.path);
+        release();
+        expect(await scrub).toBe(false);
+        await cleanup;
+      } finally {
+        spy.mockRestore();
+      }
+      expect(fs.existsSync(result.path)).toBe(false);
+    },
+  );
+
+  it('keeps a resolved status changed during scrub proof publication', async () => {
+    const { store } = makeStore();
+    const result = await store.writeOnce(SESSION, TOOL, 'safe notes');
+    if (!result.ok) throw new Error('expected a record');
+    let release: () => void = () => undefined;
+    let entered: () => void = () => undefined;
+    const reading = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const original = fs.promises.readFile;
+    let reads = 0;
+    const spy = jest.spyOn(fs.promises, 'readFile').mockImplementation(async (...args) => {
+      reads += 1;
+      if (reads === 2) { entered(); await gate; }
+      return original(...args);
+    });
+    try {
+      const scrub = store.markScrubbed(TOOL, result.path);
+      await reading;
+      fs.writeFileSync(result.path, fs.readFileSync(result.path, 'utf8').replace('status: pending', 'status: consumed'));
+      release();
+      expect(await scrub).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(parseRecordHead(fs.readFileSync(result.path, 'utf8'))).toBe('consumed');
+    expect(hasScrubProof(fs.readFileSync(result.path, 'utf8'))).toBe(false);
+  });
+
   it('fails without a workspace, writing nothing', async () => {
     const store = new SubagentHandoffRecords(
       makeLogger() as unknown as Logger,

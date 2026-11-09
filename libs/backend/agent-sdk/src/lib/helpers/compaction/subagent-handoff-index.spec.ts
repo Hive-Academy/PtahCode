@@ -286,6 +286,17 @@ describe('SubagentHandoffIndex', () => {
     expect(fs.existsSync(temp)).toBe(false);
   });
 
+  it('cleans an old scrub temp without treating it as a record', async () => {
+    const file = record();
+    const temp = `${file}.1234abcd.scrub.tmp`;
+    fs.renameSync(file, temp);
+    const old = new Date(NOW - 8 * DAY);
+    fs.utimesSync(temp, old, old);
+    const { index } = makeIndex();
+    await expect(index.pointerFor(root, audience())).resolves.toBeUndefined();
+    expect(fs.existsSync(temp)).toBe(false);
+  });
+
   it('rotates temp cleanup across loads, so 10 files that keep failing do not block the rest', async () => {
     const old = new Date(NOW - 8 * DAY);
     const temps: string[] = [];
@@ -383,7 +394,7 @@ describe('SubagentHandoffIndex', () => {
 
     const pointer = await index.pointerFor(root, audience());
     expect(pointer).toBe(
-      `Ptah: handoff records could not be checked in time; look in \`${dir}\` for \`*.handoff.md\` files with \`status: pending\`.`,
+      `Ptah: handoff records could not be checked in time; look in \`${dir}\` for \`*.handoff.md\` files with both \`status: pending\` and \`notesScrubbed: true\`.`,
     );
 
     release();
@@ -410,7 +421,7 @@ describe('SubagentHandoffIndex', () => {
     const pointer = await index.pointerFor(root, audience());
 
     expect(pointer).toBe(
-      `Ptah: handoff records could not be checked in time; look in \`${dir}\` for \`*.handoff.md\` files with \`status: pending\`.`,
+      `Ptah: handoff records could not be checked in time; look in \`${dir}\` for \`*.handoff.md\` files with both \`status: pending\` and \`notesScrubbed: true\`.`,
     );
     stalled.clear();
     // The cursor did not move past the abandoned visit: both are named.

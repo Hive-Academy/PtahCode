@@ -311,6 +311,7 @@ interface RecordWriter {
   invoked: boolean;
   published?: boolean;
   disposing?: boolean;
+  scrub?: Promise<boolean>;
 }
 
 export class SubagentHandoffRecords {
@@ -386,6 +387,7 @@ export class SubagentHandoffRecords {
     }
     this.writers.delete(toolCallId);
     try {
+      await writer.scrub;
       await fs.unlink(recordPath);
       this.logger.debug('[SubagentHandoffRecords] Handoff record withdrawn', {
         toolCallId,
@@ -404,6 +406,7 @@ export class SubagentHandoffRecords {
     if (!writer || writer.disposing || writer.path !== recordPath) return;
     writer.disposing = true;
     try {
+      await writer.scrub;
       if (writer.published) {
         await fs.writeFile(recordPath, renderRecord('Handoff notes unavailable because final redaction failed.'), 'utf8');
       } else {
@@ -419,9 +422,19 @@ export class SubagentHandoffRecords {
   }
 
   /** Publish durable proof only after final redaction succeeded. */
-  async markScrubbed(toolCallId: string, recordPath: string): Promise<boolean> {
+  markScrubbed(toolCallId: string, recordPath: string): Promise<boolean> {
     const writer = this.writers.get(toolCallId);
-    if (!writer || writer.disposing || writer.path !== recordPath) return false;
+    if (!writer || writer.disposing || writer.path !== recordPath) return Promise.resolve(false);
+    if (writer.scrub) return writer.scrub;
+    const scrub = this.persistScrubProof(toolCallId, recordPath, writer);
+    writer.scrub = scrub;
+    void scrub.then(() => {
+      if (writer.scrub === scrub) writer.scrub = undefined;
+    });
+    return scrub;
+  }
+
+  private async persistScrubProof(toolCallId: string, recordPath: string, writer: RecordWriter): Promise<boolean> {
     const tempPath = `${recordPath}.${randomBytes(4).toString('hex')}.scrub.tmp`;
     try {
       const content = await fs.readFile(recordPath, 'utf8');
@@ -431,6 +444,15 @@ export class SubagentHandoffRecords {
       await fs.writeFile(tempPath,
         content.replace('---\nstatus: pending\n---\n',
           '---\nstatus: pending\nnotesScrubbed: true\n---\n'), 'utf8');
+      if (writer.disposing || this.writers.get(toolCallId) !== writer || writer.path !== recordPath) {
+        return false;
+      }
+      if (await fs.readFile(recordPath, 'utf8') !== content) {
+        throw new Error('Handoff record changed before scrub proof publication');
+      }
+      if (writer.disposing || this.writers.get(toolCallId) !== writer || writer.path !== recordPath) {
+        return false;
+      }
       await fs.rename(tempPath, recordPath);
       return true;
     } catch (error: unknown) {

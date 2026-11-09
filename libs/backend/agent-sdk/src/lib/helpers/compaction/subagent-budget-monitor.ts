@@ -1721,11 +1721,9 @@ export class SubagentBudgetMonitor {
   }
 
   private async finalizeNotes(prepared: PreparedHandoff, toolCallId: string): Promise<boolean> {
-    if (!prepared.notesPathToRedact) {
-      return !prepared.record || this.records.markScrubbed(toolCallId, prepared.record.path);
-    }
     try {
-      if (await this.handoffFiles.redactNotes(prepared.notesPathToRedact, redactBudgetSecrets)) {
+      if (!prepared.notesPathToRedact ||
+          await this.handoffFiles.redactNotes(prepared.notesPathToRedact, redactBudgetSecrets)) {
         if (!prepared.record || await this.records.markScrubbed(toolCallId, prepared.record.path)) return true;
         throw new Error('Handoff scrub proof could not be persisted');
       }

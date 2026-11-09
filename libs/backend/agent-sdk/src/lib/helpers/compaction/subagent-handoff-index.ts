@@ -53,11 +53,13 @@ export const MAX_TEMP_CLEANUPS = 10;
 
 /** `.<record name>.tmp`: a record write that was never removed (`publishComplete`). */
 function isRecordTempName(name: string): boolean {
-  return (
+  if (
     name.startsWith('.') &&
     name.endsWith('.tmp') &&
     parseRecordName(name.slice(1, -'.tmp'.length)) !== undefined
-  );
+  ) return true;
+  const scrub = /^(.*\.handoff\.md)\.[0-9a-f]{8}\.scrub\.tmp$/.exec(name);
+  return scrub !== null && parseRecordName(scrub[1]) !== undefined;
 }
 
 const POINTER_HEADER =
@@ -435,7 +437,7 @@ export class SubagentHandoffIndex {
 }
 
 function timeoutLine(dir: string): string {
-  return `Ptah: handoff records could not be checked in time; look in \`${dir}\` for \`*.handoff.md\` files with \`status: pending\`.`;
+  return `Ptah: handoff records could not be checked in time; look in \`${dir}\` for \`*.handoff.md\` files with both \`status: pending\` and \`notesScrubbed: true\`.`;
 }
 
 /** What {@link raceDeadline} returns when `ms` passed first. */

@@ -3151,6 +3151,25 @@ describe('SubagentBudgetMonitor handoff records', () => {
     expect(h.logger.error).toHaveBeenCalledWith(expect.stringContaining('redaction failed'), expect.any(Error));
   });
 
+  it.each(['false', 'reject'] as const)('disposes a record when a no-notes scrub proof returns %s', async (outcome) => {
+    const h = makeHarness({}, {
+      handoffFiles: {
+        paths: jest.fn(() => undefined),
+        saveTask: jest.fn(async () => true),
+        notesExist: jest.fn(async () => false),
+        redactNotes: jest.fn(async () => true),
+      },
+    });
+    h.recordStore.markScrubbed.mockImplementation(async () => {
+      if (outcome === 'reject') throw new Error('proof failed');
+      return false;
+    });
+    await h.monitor.observe(SESSION, over('m1'));
+    expect(h.recordStore.disposeUnsafe).toHaveBeenCalledTimes(1);
+    expect(h.index.publish).not.toHaveBeenCalled();
+    expect(h.logger.error).toHaveBeenCalledWith(expect.stringContaining('redaction failed'), expect.any(Error));
+  });
+
   it('omits handoff notes when their redaction fails before record creation', async () => {
     const paths = { notes: '/ws/secret-notes.md', task: '/ws/task.md' };
     const handoffFiles = {
