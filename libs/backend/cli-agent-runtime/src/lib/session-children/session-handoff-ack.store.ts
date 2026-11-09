@@ -22,8 +22,9 @@ const RecordSchema = z.object({
 const DocumentSchema = z.object({ schemaVersion: z.literal(1), records: z.array(z.unknown()) }).strict();
 export type HandoffAckRecord = z.infer<typeof RecordSchema>;
 
-/** The previous document is copied here once before an invalid document is replaced. */
+/** Invalid documents are appended here (newest last) before they are replaced. */
 export const HANDOFF_ACK_QUARANTINE_KEY = `${HANDOFF_ACK_STORAGE_KEY}.quarantine`;
+const MAX_QUARANTINED = 5;
 
 interface AckDocumentState {
   records: HandoffAckRecord[];
@@ -74,7 +75,15 @@ export class SessionHandoffAckStore {
 
   private async write(state: AckDocumentState): Promise<void> {
     if (state.quarantine !== undefined) {
-      await this.storage!.update(HANDOFF_ACK_QUARANTINE_KEY, state.quarantine);
+      // Append, never overwrite: keep the newest MAX_QUARANTINED invalid documents.
+      const previous: unknown = isAsyncStateStorage(this.storage!)
+        ? await this.storage!.getAsync(HANDOFF_ACK_QUARANTINE_KEY)
+        : this.storage!.get(HANDOFF_ACK_QUARANTINE_KEY);
+      const kept = Array.isArray(previous) ? previous : previous === undefined ? [] : [previous];
+      await this.storage!.update(
+        HANDOFF_ACK_QUARANTINE_KEY,
+        [...kept, state.quarantine].slice(-MAX_QUARANTINED),
+      );
     }
     await this.storage!.update(HANDOFF_ACK_STORAGE_KEY, {
       schemaVersion: 1,

@@ -43,8 +43,13 @@ describe('SessionHandoffAckStore', () => {
     const whole = { schemaVersion: 99, records: [valid] };
     values.set(HANDOFF_ACK_STORAGE_KEY, whole);
     await store.record({ ...valid, predecessorTabId: 'fresh' });
-    expect(values.get(HANDOFF_ACK_QUARANTINE_KEY)).toEqual(whole);
+    expect(values.get(HANDOFF_ACK_QUARANTINE_KEY)).toEqual([whole]);
     expect((values.get(HANDOFF_ACK_STORAGE_KEY) as { records: unknown[] }).records).toHaveLength(1);
+
+    const second = { schemaVersion: 98 };
+    values.set(HANDOFF_ACK_STORAGE_KEY, second);
+    await store.record({ ...valid, predecessorTabId: 'later' });
+    expect(values.get(HANDOFF_ACK_QUARANTINE_KEY)).toEqual([whole, second]);
   });
   it('persists a pair and compare-and-set transitions across store instances', async () => {
     const values = new Map<string, unknown>();
