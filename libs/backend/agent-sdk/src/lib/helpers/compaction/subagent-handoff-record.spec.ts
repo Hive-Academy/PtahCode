@@ -142,13 +142,14 @@ describe('SubagentHandoffRecords', () => {
 
   function makeStore(ws: string | undefined = workspace) {
     const logger = makeLogger();
+    const typedLogger = logger as unknown as Logger;
     const store = new SubagentHandoffRecords(
-      logger as unknown as Logger,
+      typedLogger,
       () => ws,
       () => NOW,
       () => nonce,
     );
-    return { store, logger };
+    return { store, logger, index: new SubagentHandoffIndex(typedLogger) };
   }
 
   function handoffDir(): string {
@@ -211,6 +212,34 @@ describe('SubagentHandoffRecords', () => {
     expect(await fresh.pointerFor(workspace, {
       own: new Set([ownerHash(SESSION)]), hidden: new Set(), cursorKey: SESSION,
     })).toContain(result.path);
+  });
+
+  it('retries scrub proof after nonce generation fails', async () => {
+    const { store, logger } = makeStore();
+    const result = await store.writeOnce(SESSION, TOOL, 'notes: /safe/path');
+    if (!result.ok) throw new Error('expected a record');
+    const fault = new Error('nonce unavailable');
+    const random = jest.spyOn(require('node:crypto') as typeof import('node:crypto'), 'randomBytes')
+      .mockImplementationOnce(() => { throw fault; });
+    try {
+      expect(await store.markScrubbed(TOOL, result.path)).toBe(false);
+      expect(logger.error).toHaveBeenCalledWith(expect.any(String), fault);
+      expect(await store.markScrubbed(TOOL, result.path)).toBe(true);
+    } finally {
+      random.mockRestore();
+    }
+  });
+
+  it('leaves a proofless record of a live writer untouched during index scan', async () => {
+    const { store, index } = makeStore();
+    const result = await store.writeOnce(SESSION, TOOL, 'notes: /live/secret');
+    if (!result.ok) throw new Error('expected a record');
+    const pointer = await index.pointerFor(workspace, {
+      own: new Set([ownerHash(SESSION)]), hidden: new Set(), cursorKey: SESSION,
+    });
+    expect(pointer ?? '').not.toContain(result.path);
+    expect(fs.readFileSync(result.path, 'utf8')).toContain('/live/secret');
+    await store.withdraw(TOOL, result.path);
   });
 
   it.each(['dispose', 'withdraw'] as const)(
@@ -457,6 +486,8 @@ describe('SubagentHandoffRecords', () => {
       expect(
         fs.readFileSync(path.join(specs, 'TASK_1', stub), 'utf8'),
       ).toContain(recordPath);
+      expect(fs.readFileSync(path.join(specs, 'TASK_1', stub), 'utf8'))
+        .toContain('`status: pending` and `notesScrubbed: true`');
     });
 
     it.each([

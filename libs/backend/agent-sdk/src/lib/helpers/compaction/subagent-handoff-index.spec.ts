@@ -119,8 +119,27 @@ describe('SubagentHandoffIndex', () => {
 
   it('ignores old-format records without durable scrub proof', async () => {
     const file = record({ content: renderRecord('notes: /old/secret') });
+    const stub = path.join(root, 'old-stub.md');
+    fs.writeFileSync(stub, `Read ${file} when status: pending`);
     const { index } = makeIndex();
     expect((await index.pointerFor(root, audience())) ?? '').not.toContain(file);
+    expect(fs.readFileSync(file, 'utf8')).not.toContain('/old/secret');
+    expect(fs.readFileSync(stub, 'utf8')).toContain(file);
+  });
+
+  it('keeps a failed neutralization hidden and logs the Error', async () => {
+    const file = record({ content: renderRecord('notes: /old/secret') });
+    const fault = new Error('rename refused');
+    const rename = jest.spyOn(require('node:fs/promises') as typeof import('node:fs/promises'), 'rename')
+      .mockRejectedValueOnce(fault);
+    try {
+      const { index, logger } = makeIndex();
+      expect((await index.pointerFor(root, audience())) ?? '').not.toContain(file);
+      expect(logger.error).toHaveBeenCalledWith(expect.any(String), fault);
+      expect(fs.readFileSync(file, 'utf8')).toContain('/old/secret');
+    } finally {
+      rename.mockRestore();
+    }
   });
 
   it("lists a previous run's pending record with the header, paths only", async () => {

@@ -31,6 +31,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import type { Logger } from '@ptah-extension/vscode-core';
 import { SUBAGENT_HANDOFF_DIR } from './subagent-handoff-files';
+import { neutralizeOrphanRecord } from './subagent-handoff-neutralize';
 import {
   HANDOFF_RECORD_HEAD_BYTES,
   checkHandoffDir,
@@ -125,6 +126,7 @@ interface WorkspaceIndex {
   readonly cursors: Map<string, string>;
   /** Where the next load's temp-file cleanup starts (rotates across loads). */
   tempCursor: number;
+  neutralizedThisScan: number;
 }
 
 /** What one head read found. */
@@ -208,6 +210,7 @@ export class SubagentHandoffIndex {
         resolved: new Set(),
         cursors: new Map(),
         tempCursor: 0,
+        neutralizedThisScan: 0,
       };
       this.workspaces.set(workspace, index);
     }
@@ -257,6 +260,7 @@ export class SubagentHandoffIndex {
       index.names = [...names].sort();
       index.ready = true;
       index.loadedAt = this.now();
+      index.neutralizedThisScan = 0;
       if (check.ok) {
         await this.removeStaleTemps(index, check.dir, found);
       }
@@ -356,7 +360,18 @@ export class SubagentHandoffIndex {
       }
       return undefined;
     }
-    if (!read.scrubbed) return undefined;
+    if (!read.scrubbed) {
+      if (read.status === 'pending' && index.neutralizedThisScan < MAX_TEMP_CLEANUPS) {
+        index.neutralizedThisScan += 1;
+        try {
+          await neutralizeOrphanRecord(file);
+        } catch (error: unknown) {
+          this.logger.error('[SubagentHandoffIndex] Proofless handoff record not neutralized',
+            error instanceof Error ? error : new Error(String(error)));
+        }
+      }
+      return undefined;
+    }
     return read.status === 'malformed'
       ? `${prefix}${MALFORMED_SUFFIX}`
       : prefix;

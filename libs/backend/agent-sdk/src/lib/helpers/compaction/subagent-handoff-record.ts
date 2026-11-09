@@ -314,6 +314,13 @@ interface RecordWriter {
   scrub?: Promise<boolean>;
 }
 
+/** Paths whose writer may still publish scrub proof in this process. */
+const liveRecordPaths = new Set<string>();
+
+export function hasLiveRecordWriter(recordPath: string): boolean {
+  return liveRecordPaths.has(recordPath);
+}
+
 export class SubagentHandoffRecords {
   /** Writers by spawning tool-use id (S5: SDK tool-use ids are unique across sessions). */
   private readonly writers = new Map<string, RecordWriter>();
@@ -389,6 +396,7 @@ export class SubagentHandoffRecords {
     try {
       await writer.scrub;
       await fs.unlink(recordPath);
+      liveRecordPaths.delete(recordPath);
       this.logger.debug('[SubagentHandoffRecords] Handoff record withdrawn', {
         toolCallId,
       });
@@ -413,6 +421,7 @@ export class SubagentHandoffRecords {
         await fs.unlink(recordPath);
         this.writers.delete(toolCallId);
       }
+      liveRecordPaths.delete(recordPath);
     } catch (error: unknown) {
       this.logger.warn('[SubagentHandoffRecords] Unsafe handoff record could not be disposed', {
         toolCallId,
@@ -428,15 +437,17 @@ export class SubagentHandoffRecords {
     if (writer.scrub) return writer.scrub;
     const scrub = this.persistScrubProof(toolCallId, recordPath, writer);
     writer.scrub = scrub;
-    void scrub.then(() => {
-      if (writer.scrub === scrub) writer.scrub = undefined;
-    });
+    void scrub.then(
+      () => { if (writer.scrub === scrub) writer.scrub = undefined; },
+      () => { if (writer.scrub === scrub) writer.scrub = undefined; },
+    );
     return scrub;
   }
 
   private async persistScrubProof(toolCallId: string, recordPath: string, writer: RecordWriter): Promise<boolean> {
-    const tempPath = `${recordPath}.${randomBytes(4).toString('hex')}.scrub.tmp`;
+    let tempPath: string | undefined;
     try {
+      tempPath = `${recordPath}.${randomBytes(4).toString('hex')}.scrub.tmp`;
       const content = await fs.readFile(recordPath, 'utf8');
       if (!content.startsWith('---\nstatus: pending\n---\n')) {
         throw new Error('Handoff record frontmatter changed before scrub proof');
@@ -461,7 +472,7 @@ export class SubagentHandoffRecords {
       return false;
     } finally {
       try {
-        await fs.unlink(tempPath);
+        if (tempPath) await fs.unlink(tempPath);
       } catch (error: unknown) {
         if (errorCodeOf(error) !== 'ENOENT') {
           this.logger.warn('[SubagentHandoffRecords] Scrub proof temp not removed', {
@@ -480,6 +491,7 @@ export class SubagentHandoffRecords {
   forget(sessionIds: ReadonlySet<string>): void {
     for (const [toolCallId, writer] of this.writers) {
       if (writer.invoked && sessionIds.has(writer.sessionId)) {
+        if (writer.path) liveRecordPaths.delete(writer.path);
         this.writers.delete(toolCallId);
       }
     }
@@ -573,7 +585,13 @@ export class SubagentHandoffRecords {
         return { ok: false, errorType: 'GuardRefused' };
       }
       const recordPath = path.join(check.dir, name);
-      await this.publishComplete(recordPath, renderRecord(text));
+      liveRecordPaths.add(recordPath);
+      try {
+        await this.publishComplete(recordPath, renderRecord(text));
+      } catch (error: unknown) {
+        liveRecordPaths.delete(recordPath);
+        throw error;
+      }
       return { ok: true, path: recordPath, workspace, name };
     } catch (error: unknown) {
       return { ok: false, ...errorDetails(error) };
@@ -629,6 +647,7 @@ export class SubagentHandoffRecords {
   ): Promise<void> {
     try {
       await fs.unlink(recordPath);
+      liveRecordPaths.delete(recordPath);
     } catch (error: unknown) {
       this.logger.warn(
         '[SubagentHandoffRecords] Late handoff record not withdrawn',
@@ -662,7 +681,7 @@ export class SubagentHandoffRecords {
         path.join(target, fileName),
         'Ptah subagent handoff stub. Never edit this file. The handoff ' +
           `record is \`${recordPath}\`: if its frontmatter has ` +
-          '`status: pending`, read it, continue from it, then set ' +
+          '`status: pending` and `notesScrubbed: true`, read it, continue from it, then set ' +
           '`status: consumed` in the record.\n',
         { encoding: 'utf8', flag: 'wx' },
       );
