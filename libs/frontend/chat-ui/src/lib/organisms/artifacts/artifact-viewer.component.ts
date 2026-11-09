@@ -43,6 +43,29 @@ const LOAD_TIMEOUT_MS = 10_000;
 /** Minimum spacing between applied height changes (fixed decision: ≥ 100 ms). */
 const HEIGHT_THROTTLE_MS = 100;
 
+interface MoveBeforeCapable {
+  moveBefore(node: Node, child: Node | null): void;
+}
+
+function canMoveBefore(node: Node): node is Node & MoveBeforeCapable {
+  return 'moveBefore' in node && typeof node.moveBefore === 'function';
+}
+
+/** Return whether moveBefore preserved the iframe's loading state. */
+function moveNode(parent: Node, node: Node, before: Node | null): boolean {
+  if (canMoveBefore(parent)) {
+    try {
+      parent.moveBefore(node, before);
+      return true;
+    } catch (error: unknown) {
+      if (!(error instanceof DOMException)) throw error;
+    }
+  }
+  if (before === null) parent.appendChild(node);
+  else parent.insertBefore(node, before);
+  return false;
+}
+
 /**
  * Clamp a page height into the fixed [ARTIFACT_HEIGHT_MIN, ARTIFACT_HEIGHT_MAX]
  * window. The schema already rejects values outside the range, so this is
@@ -75,8 +98,9 @@ export function clampArtifactHeight(px: number): number {
  * - The listener is removed on destroy and on every src change, and the
  *   bridge detaches with it, so a stale frame cannot reach the host.
  *
- * Full screen reuses the SAME frame (the container classes switch, the iframe
- * element is never re-created): a fixed overlay with `role="dialog"` and
+ * Full screen portals the container to a fixed overlay, preserving iframe
+ * state where moveBefore is supported; the fallback may reload the frame.
+ * The overlay has `role="dialog"` and
  * `aria-modal`, closed by Escape or the header button, restoring focus to
  * the element that opened it.
  */
@@ -103,6 +127,7 @@ export function clampArtifactHeight(px: number): number {
     } @else {
       <div
         #dialog
+        tabindex="-1"
         [class]="containerClass()"
         [attr.role]="fullscreenActive() ? 'dialog' : null"
         [attr.aria-modal]="fullscreenActive() ? 'true' : null"
@@ -218,20 +243,23 @@ export class ArtifactViewerComponent implements OnDestroy {
     () => this.fullscreen() || this.internalFullscreen(),
   );
 
-  /** In-panel column vs fixed overlay; the iframe inside is never re-created. */
+  /** In-panel column vs viewport overlay; the same node is portaled to body. */
   protected readonly containerClass = computed(() =>
     this.fullscreenActive()
-      ? 'fixed inset-0 z-50 flex flex-col gap-2 bg-base-100 p-4 shadow-xl'
+      ? 'fixed inset-0 z-[9999] flex flex-col gap-2 bg-base-100 p-4 shadow-xl'
       : 'flex min-h-0 flex-1 flex-col gap-2',
   );
 
   /** The element that had focus when full screen opened, for restoration. */
   private opener: HTMLElement | null = null;
+  private portalAnchor: Comment | null = null;
+  private portalElement: HTMLElement | null = null;
   private loadTimer: ReturnType<typeof setTimeout> | null = null;
   private heightTimer: ReturnType<typeof setTimeout> | null = null;
   private messageListener: ((event: MessageEvent) => void) | null = null;
   private lastHeightAt = 0;
   private pendingHeight: number | null = null;
+  private frameLoaded = false;
 
   constructor() {
     // A different viewerUrl is a new frame session: drop the old listener and
@@ -248,21 +276,28 @@ export class ArtifactViewerComponent implements OnDestroy {
         untracked(() => this.internalFullscreen.set(false));
       }
     });
-    // Full screen: capture the opener on entry, restore focus on exit.
+    // Capture the opener on entry; restore it after the portal returns inline.
     effect(() => {
       const on = this.fullscreenActive();
       untracked(() => {
         if (on) {
           const active = this.document.activeElement;
           this.opener = active instanceof HTMLElement ? active : null;
-        } else if (this.opener !== null) {
-          this.opener.focus();
-          this.opener = null;
         }
       });
     });
     effect(() => {
-      const dialog = this.fullscreenActive() ? this.dialogRef()?.nativeElement ?? null : null;
+      const fullscreen = this.fullscreenActive();
+      const dialog = fullscreen ? this.dialogRef()?.nativeElement ?? null : null;
+      if (dialog) this.moveToBody(dialog);
+      else {
+        this.restoreInline();
+        if (fullscreen && this.opener !== null) this.opener.focus({ preventScroll: true });
+        if (!fullscreen && this.opener !== null) {
+          this.opener.focus();
+          this.opener = null;
+        }
+      }
       if (this.dialogElement === dialog) return;
       this.detachDialogEscape();
       if (dialog !== null) {
@@ -273,12 +308,47 @@ export class ArtifactViewerComponent implements OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.restoreInline();
+    this.opener?.focus();
     this.detachDialogEscape();
     this.clearLoadTimer();
     this.clearHeightTimer();
     this.removeMessageListener();
     this.bridge.detach();
     this.opener = null;
+  }
+
+  private moveToBody(element: HTMLElement): void {
+    if (this.portalElement !== null && this.portalElement !== element) this.restoreInline();
+    if (this.portalAnchor || !element.parentNode) return;
+    this.portalAnchor = this.document.createComment('artifact-viewer-anchor');
+    this.portalElement = element;
+    element.parentNode.insertBefore(this.portalAnchor, element);
+    this.moveViewerNode(this.document.body, element, null);
+    if (!element.contains(this.document.activeElement)) {
+      element.focus({ preventScroll: true });
+    }
+  }
+
+  private restoreInline(): void {
+    const anchor = this.portalAnchor;
+    if (!anchor) return;
+    if (anchor.parentNode && this.portalElement?.isConnected) {
+      this.moveViewerNode(anchor.parentNode, this.portalElement, anchor);
+    } else {
+      this.portalElement?.remove();
+    }
+    anchor.remove();
+    this.portalAnchor = null;
+    this.portalElement = null;
+  }
+
+  private moveViewerNode(parent: Node, element: HTMLElement, before: Node | null): void {
+    const preserved = moveNode(parent, element, before);
+    const frame = this.frameRef()?.nativeElement;
+    if (!preserved && frame && element.contains(frame) && VIEWER_URL_PATTERN.test(this.artifact().viewerUrl)) {
+      this.armLoadTimeout();
+    }
   }
 
   protected toggleFullscreen(): void {
@@ -310,12 +380,18 @@ export class ArtifactViewerComponent implements OnDestroy {
     this.clearLoadTimer();
     const contentWindow = this.frameRef()?.nativeElement.contentWindow;
     if (contentWindow === null || contentWindow === undefined) { this.loadFailed.set(true); return; }
+    if (this.frameLoaded) {
+      this.removeMessageListener();
+      this.bridge.detach();
+    }
+    this.frameLoaded = true;
     this.bridge.attach(contentWindow);
     this.addMessageListener();
   }
 
   private resetFrame(url: string): void {
     this.clearLoadTimer();
+    this.frameLoaded = false;
     this.removeMessageListener();
     this.bridge.detach();
     this.loadFailed.set(false);

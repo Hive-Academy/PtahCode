@@ -68,7 +68,7 @@ describe('DisplayWindowRpcHandlers', () => {
       const host = fakeHost({ getState: jest.fn(() => snapshot), isOpen: jest.fn(() => false) });
       const h = setup(host);
       expect(await h.call('displayWindow:close', {})).toEqual({ closed: true });
-      expect(await h.call('displayWindow:status', {})).toEqual({ supported: true, open: false });
+      expect(await h.call('displayWindow:status', {})).toEqual({ supported: true, open: false, tabId: 'tab-a' });
       expect(await h.call('displayWindow:getState', {})).toEqual({ state: snapshot });
     });
 

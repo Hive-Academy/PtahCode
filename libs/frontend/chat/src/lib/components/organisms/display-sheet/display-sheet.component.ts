@@ -29,6 +29,7 @@ import {
   selectionForKey,
   selectionKey,
 } from '../../../services/display-window/display-window-wire';
+import { DisplayDragOutDirective } from './display-drag-out.directive';
 
 /**
  * The session's Display collection as a right sidebar (TASK_2026_853_3401, D1).
@@ -42,7 +43,7 @@ import {
 @Component({
   selector: 'ptah-display-sheet',
   standalone: true,
-  imports: [DisplayPanelComponent, SidebarTabComponent],
+  imports: [DisplayPanelComponent, SidebarTabComponent, DisplayDragOutDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     class: 'min-w-0',
@@ -115,7 +116,9 @@ import {
             aria-hidden="true"
           ></span>
         }
-        <div class="flex h-9 flex-shrink-0 items-center gap-1 px-2">
+        <div class="flex h-9 flex-shrink-0 items-center gap-1 px-2"
+          [ptahDisplayDragOut]="detachable()"
+          (draggedOut)="detachRequested.emit()">
           <h2
             class="min-w-0 flex-1 truncate text-sm font-semibold"
             data-testid="display-sheet-title"

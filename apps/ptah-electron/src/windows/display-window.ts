@@ -12,8 +12,7 @@
  * `IpcBridge`), and every failure here is contained to the child.
  */
 
-import { BrowserWindow, type Rectangle } from 'electron';
-import * as path from 'path';
+import { type Rectangle } from 'electron';
 import type {
   IDisplayWindowHost,
   IStateStorage,
@@ -27,10 +26,11 @@ import {
 } from '@ptah-extension/shared';
 import { PRODUCT_DISPLAY_NAME } from '../config/product-identity';
 import {
-  installNavigationGuard,
   isOnScreen,
   type WindowBounds,
 } from './window-guards';
+import { ChildWindowRegistry } from './child-window-registry';
+import { createChildWindow } from './create-child-window';
 
 /** Storage key, beside the main window's `window.bounds`. */
 export const DISPLAY_WINDOW_BOUNDS_KEY = 'displayWindow.bounds';
@@ -90,7 +90,7 @@ export interface DisplayMainWindow {
 
 /** The part of `IpcBridge` the adapter drives. */
 export interface DisplayWindowIpcBridge {
-  setDisplayWindowSender(webContentsId: number | null): void;
+  readonly childWindows: ChildWindowRegistry;
   sendToRenderer(message: unknown): boolean;
 }
 
@@ -129,29 +129,14 @@ export interface CreateDisplayWindowOptions {
  */
 export function createDisplayWindow(
   options: CreateDisplayWindowOptions,
-): BrowserWindow {
-  const { placement, appDir } = options;
-  const window = new BrowserWindow({
-    width: placement.width,
-    height: placement.height,
-    ...(placement.x !== undefined && placement.y !== undefined
-      ? { x: placement.x, y: placement.y }
-      : {}),
+): DisplayChildWindow {
+  return createChildWindow({
+    placement: options.placement,
+    appDir: options.appDir,
     minWidth: DISPLAY_WINDOW_MIN_WIDTH,
     minHeight: DISPLAY_WINDOW_MIN_HEIGHT,
     title: DISPLAY_WINDOW_TITLE,
-    icon: path.join(appDir, 'assets', 'icons', 'icon.png'),
-    show: true,
-    webPreferences: {
-      preload: path.join(appDir, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webSecurity: true,
-    },
   });
-  installNavigationGuard(window);
-  return window;
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -223,8 +208,7 @@ export class ElectronDisplayWindowHost implements IDisplayWindowHost {
   async open(): Promise<DisplayWindowOpenResult> {
     const existing = this.liveWindow();
     if (existing) {
-      if (existing.isMinimized()) existing.restore();
-      existing.focus();
+      this.options.bridge.childWindows.focus('display', 'default');
       return { ok: true };
     }
 
@@ -254,10 +238,19 @@ export class ElectronDisplayWindowHost implements IDisplayWindowHost {
     }
 
     this.window = child;
-    this.options.bridge.setDisplayWindowSender(child.webContents.id);
+    try {
+      this.options.bridge.childWindows.register('display', 'default', child);
+    } catch (error: unknown) {
+      this.window = null;
+      console.error('[Ptah Electron] Display window could not be registered:', errorMessage(error));
+      // degradation-audit: reported — BrowserWindow.close() is synchronous (not the host's async close); the failure is logged above.
+      if (!child.isDestroyed()) child.close();
+      return { ok: false, reason: 'not-ready' };
+    }
 
     // The child never outlives the main window.
     const closeWithMain = (): void => {
+      // degradation-audit: reported — BrowserWindow.close() is synchronous (not the host's async close); nothing to await.
       if (!child.isDestroyed()) child.close();
     };
     main.once('closed', closeWithMain);
@@ -291,13 +284,8 @@ export class ElectronDisplayWindowHost implements IDisplayWindowHost {
       closeBroken('renderer is gone', details.reason);
     });
 
-    const rendererPath = path.join(
-      this.options.appDir,
-      'renderer',
-      'index.html',
-    );
-    child
-      .loadFile(rendererPath, { query: { ptahWindow: 'display' } })
+    this.options.bridge.childWindows
+      .loadRenderer('display', child, this.options.appDir)
       .catch((error: unknown) => {
         closeBroken('renderer did not load', errorMessage(error));
       });
@@ -311,6 +299,8 @@ export class ElectronDisplayWindowHost implements IDisplayWindowHost {
     // `isOpen()` turns false now; the `closed` handler still untrusts the
     // sender and tells the main renderer once Electron has torn it down.
     this.window = null;
+    this.options.bridge.childWindows.unregister('display', 'default', child);
+    // degradation-audit: reported — BrowserWindow.close() is synchronous (not the host's async close); nothing to await.
     child.close();
     return true;
   }
@@ -355,7 +345,7 @@ export class ElectronDisplayWindowHost implements IDisplayWindowHost {
   private liveWindow(): DisplayChildWindow | null {
     const child = this.window;
     if (!child) return null;
-    if (child.isDestroyed()) {
+    if (!this.options.bridge.childWindows.get('display', 'default')) {
       this.window = null;
       return null;
     }
@@ -382,7 +372,6 @@ export class ElectronDisplayWindowHost implements IDisplayWindowHost {
     if (this.window !== null && this.window !== child) return;
     this.window = null;
     this.snapshot = null;
-    this.options.bridge.setDisplayWindowSender(null);
     this.options.bridge.sendToRenderer({
       type: DISPLAY_WINDOW_PUSH_TYPES.closed,
     });

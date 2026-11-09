@@ -37,6 +37,7 @@ import {
 } from '@ptah-extension/shared';
 import { PermissionResponseSchema } from '@ptah-extension/shared/schemas';
 import { isTrustedIpcSender } from './ipc-sender-policy';
+import { ChildWindowRegistry, type ChildViewKind } from '../windows/child-window-registry';
 import {
   createReplayRecorderIfEnabled,
   tapReplayRecorder,
@@ -142,7 +143,7 @@ type IpcSenderEvent = Pick<IpcMainEvent, 'sender' | 'senderFrame'>;
  * document with the main window, so the sender policy trusts it the same way,
  * and this bridge then narrows what it may call.
  */
-type IpcSenderRole = 'main' | 'display';
+type IpcSenderRole = 'main' | ChildViewKind;
 
 /**
  * The only RPC methods the detached Display window may call. Everything it
@@ -195,8 +196,7 @@ export class IpcBridge {
   private hasHadWindow = false;
   /** Sender ids already warned about, so a misbehaving frame logs once. */
   private readonly warnedSenderIds = new Set<number>();
-  /** `webContents.id` of the open detached Display window, or `null`. */
-  private displayWindowSenderId: number | null = null;
+  readonly childWindows = new ChildWindowRegistry();
   private readonly recorder: ReplayRecorder | null;
 
   /**
@@ -211,6 +211,7 @@ export class IpcBridge {
     private readonly trustedDocumentPaths: readonly string[],
     recorder?: ReplayRecorder | null,
   ) {
+    this.childWindows.registerView('display', { singleton: true, allowedMethods: DISPLAY_WINDOW_ALLOWED_METHODS });
     this.rpcHandler = container.resolve<RpcHandler>(TOKENS.RPC_HANDLER);
     this.stateStorage = container.resolve<IStateStorage>(
       PLATFORM_TOKENS.WORKSPACE_STATE_STORAGE,
@@ -275,16 +276,6 @@ export class IpcBridge {
       tapReplayRecorder(this.recorder, (r) => r.recordPush(message));
     }
     return true;
-  }
-
-  /**
-   * Trust (or, with `null`, stop trusting) the detached Display window's
-   * webContents. Called by `ElectronDisplayWindowHost` when the window is
-   * created and when it closes. Its calls are limited to
-   * {@link DISPLAY_WINDOW_ALLOWED_METHODS} and the `get-state` read.
-   */
-  setDisplayWindowSender(webContentsId: number | null): void {
-    this.displayWindowSenderId = webContentsId;
   }
 
   /**
@@ -486,9 +477,7 @@ export class IpcBridge {
       const trustedIds: number[] = [];
       const mainId = this.getWindow()?.webContents.id;
       if (mainId !== undefined) trustedIds.push(mainId);
-      if (this.displayWindowSenderId !== null) {
-        trustedIds.push(this.displayWindowSenderId);
-      }
+      trustedIds.push(...this.childWindows.senderIds());
       trusted = isTrustedIpcSender(
         {
           webContentsId: senderId,
@@ -506,7 +495,9 @@ export class IpcBridge {
       // the call is dropped (fail closed) and the drop is warned about below.
     }
     if (trusted && senderId !== undefined) {
-      return senderId === this.displayWindowSenderId ? 'display' : 'main';
+      return senderId === this.getWindow()?.webContents.id
+        ? 'main'
+        : this.childWindows.sender(senderId)?.viewKind ?? null;
     }
     // A sender with no readable id is not remembered, so each such drop warns.
     if (senderId === undefined || !this.warnedSenderIds.has(senderId)) {
@@ -573,7 +564,7 @@ export class IpcBridge {
           }
           return;
         }
-        if (role === 'display' && !DISPLAY_WINDOW_ALLOWED_METHODS.has(method)) {
+        if (role !== 'main' && !this.childWindows.allows(event.sender.id, method)) {
           this.refuseDisplayWindow(`rpc ${method}`);
           if (correlationId && !event.sender.isDestroyed()) {
             event.sender.send('to-renderer', {
@@ -931,6 +922,7 @@ export class IpcBridge {
    * Cleanup IPC listeners. Call on app shutdown.
    */
   dispose(): void {
+    this.childWindows.closeAll();
     // Shutdown cannot leave the final output or lifecycle event on a later
     // macrotask. Batches stay bounded, but teardown drains them synchronously.
     while (this.streamQueue.length > 0) {
