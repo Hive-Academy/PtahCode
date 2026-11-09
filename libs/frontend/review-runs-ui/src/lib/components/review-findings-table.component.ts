@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
-import type { Lens, Severity } from '@ptah-extension/review-contracts';
+import type { Lens, ReviewFinding, Severity } from '@ptah-extension/review-contracts';
 
 /** Presentation shape supplied by a validated finding RPC in P1-16. */
 export interface ReviewFindingRow {
@@ -11,6 +11,27 @@ export interface ReviewFindingRow {
   status: 'accepted' | 'suppressed';
   reason: string | null;
   confidence: number;
+}
+
+/**
+ * Maps a validated `review:listFindings` payload onto table rows. The RPC lists
+ * accepted findings only (`review-query.repository.ts` selects kind
+ * 'accepted'), and the wire shape carries no row id, so the id is derived from
+ * the location and the payload order.
+ */
+export function reviewFindingRows(
+  findings: readonly ReviewFinding[],
+): ReviewFindingRow[] {
+  return findings.map((finding, index) => ({
+    id: `${finding.lens}:${finding.path}:${finding.line ?? 0}:${index}`,
+    severity: finding.severity,
+    lens: finding.lens,
+    path: finding.path,
+    line: finding.line,
+    status: 'accepted',
+    reason: null,
+    confidence: finding.confidence,
+  }));
 }
 type SortField = 'severity' | 'lens' | 'location' | 'status' | 'confidence';
 const severityOrder: Record<Severity, number> = { Critical: 0, Major: 1, Minor: 2, Nitpick: 3 };
@@ -29,7 +50,7 @@ const severityOrder: Record<Severity, number> = { Critical: 0, Major: 1, Minor: 
           <option value="all">All lenses</option>@for (lens of lenses; track lens) { <option [value]="lens">{{ lens }}</option> }
         </select>
       </div>
-      @if (rows().length === 0) { <p class="text-sm text-base-content-muted">Findings unavailable for this run.</p> }
+      @if (rows().length === 0) { <p class="text-sm text-base-content-muted">No accepted findings for this run.</p> }
       @else if (visibleRows().length === 0) { <p class="text-sm text-base-content-muted">No matching findings.</p> }
       @else { <div class="overflow-x-auto"><table class="table table-zebra table-sm">
         <caption class="sr-only">Findings for selected review run</caption>

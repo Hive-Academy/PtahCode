@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
-import type { ReviewRun } from '@ptah-extension/review-contracts';
+import type { ReviewFinding, ReviewRun } from '@ptah-extension/review-contracts';
 import { ReviewRunsStore } from './review-runs.store';
 
 const run: ReviewRun = {
@@ -18,6 +18,39 @@ const run: ReviewRun = {
   coverage: [],
   stages: [],
 };
+
+const finding: ReviewFinding = {
+  schemaVersion: 1,
+  lens: 'security-privacy',
+  title: 'Settings parsed without a schema',
+  failureMode: 'A crafted settings file can change runtime behavior.',
+  affectedBehavior: 'The settings loader accepts arbitrary keys.',
+  scenario: 'A workspace contains a crafted settings file.',
+  path: 'src/settings.ts',
+  line: 42,
+  evidence: [
+    { path: 'src/settings.ts', line: 42, excerpt: 'const parsed = JSON.parse(raw);' },
+  ],
+  affectedCaller: 'loadSettings',
+  severity: 'Major',
+  category: 'security',
+  confidence: 0.9,
+  verification: 'cross-family',
+  suggestedDiff: null,
+  fixPrompt: 'Validate the parsed settings against a schema.',
+};
+
+/** Lets the fire-and-forget run and findings loads of selectRun settle. */
+const settle = (): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+
+/** A pending `review:listFindings` reply a test settles by hand. */
+interface PendingFindingsReply {
+  resolve: (response: { isSuccess: () => boolean; data: unknown }) => void;
+  reject: (reason?: unknown) => void;
+}
 
 describe('ReviewRunsStore', () => {
   const call = jest.fn();
@@ -271,6 +304,197 @@ describe('ReviewRunsStore', () => {
     expect(store.poll()?.status).toBe('failed');
     expect(store.refreshError()).toBe(true);
     expect(store.state()).toBe('ready');
+  });
+
+  it('loads findings for the selected run through review:listFindings', async () => {
+    call.mockImplementation((method: string) =>
+      Promise.resolve({
+        isSuccess: () => true,
+        data: method === 'review:getRun' ? run : { findings: [finding] },
+      }),
+    );
+    store.selectRun(run.attemptId);
+    await settle();
+    expect(call).toHaveBeenCalledWith(
+      'review:listFindings',
+      { attemptId: run.attemptId },
+      { timeout: 5_000 },
+    );
+    expect(store.findingsState()).toBe('ready');
+    expect(store.findings()).toEqual([finding]);
+  });
+
+  it('reports an empty findings list as ready', async () => {
+    call.mockImplementation((method: string) =>
+      Promise.resolve({
+        isSuccess: () => true,
+        data: method === 'review:getRun' ? run : { findings: [] },
+      }),
+    );
+    store.selectRun(run.attemptId);
+    await settle();
+    expect(store.findingsState()).toBe('ready');
+    expect(store.findings()).toEqual([]);
+  });
+
+  it('reloads findings when the selected run changes', async () => {
+    const findingsFor = (attemptId: string): { findings: ReviewFinding[] } => ({
+      findings: [
+        {
+          ...finding,
+          path: `src/${attemptId}.ts`,
+          evidence: [
+            {
+              path: `src/${attemptId}.ts`,
+              line: 42,
+              excerpt: 'const parsed = JSON.parse(raw);',
+            },
+          ],
+        },
+      ],
+    });
+    call.mockImplementation((method: string, params: { attemptId: string }) =>
+      Promise.resolve({
+        isSuccess: () => true,
+        data:
+          method === 'review:getRun'
+            ? { ...run, attemptId: params.attemptId }
+            : findingsFor(params.attemptId),
+      }),
+    );
+    store.selectRun('rvw-428-a');
+    await settle();
+    expect(store.findings()).toEqual(findingsFor('rvw-428-a').findings);
+    store.selectRun('rvw-428-b');
+    await settle();
+    expect(
+      call.mock.calls
+        .filter(([method]) => method === 'review:listFindings')
+        .map(([, params]) => params),
+    ).toEqual([{ attemptId: 'rvw-428-a' }, { attemptId: 'rvw-428-b' }]);
+    expect(store.findings()).toEqual(findingsFor('rvw-428-b').findings);
+  });
+
+  it('ignores a late findings response for a previously selected run', async () => {
+    const resolvers = new Map<
+      string,
+      (response: { isSuccess: () => boolean; data: unknown }) => void
+    >();
+    call.mockImplementation((method: string, params: { attemptId: string }) => {
+      if (method === 'review:getRun')
+        return Promise.resolve({
+          isSuccess: () => true,
+          data: { ...run, attemptId: params.attemptId },
+        });
+      return new Promise((resolve) => {
+        resolvers.set(params.attemptId, resolve);
+      });
+    });
+    store.selectRun('rvw-428-a');
+    store.selectRun('rvw-428-b');
+    await settle();
+    const resolveLate = resolvers.get('rvw-428-a');
+    const resolveCurrent = resolvers.get('rvw-428-b');
+    expect(resolveLate).toBeInstanceOf(Function);
+    expect(resolveCurrent).toBeInstanceOf(Function);
+    const currentFinding: ReviewFinding = { ...finding, path: 'src/current.ts' };
+    resolveCurrent?.({
+      isSuccess: () => true,
+      data: { findings: [currentFinding] },
+    });
+    await settle();
+    expect(store.findings()).toEqual([currentFinding]);
+    resolveLate?.({ isSuccess: () => true, data: { findings: [finding] } });
+    await settle();
+    expect(store.findings()).toEqual([currentFinding]);
+    expect(store.findingsState()).toBe('ready');
+  });
+
+  it('keeps the run detail ready and reports a findings failure', async () => {
+    call.mockImplementation((method: string) =>
+      method === 'review:getRun'
+        ? Promise.resolve({ isSuccess: () => true, data: run })
+        : Promise.reject(new Error('offline with host secret')),
+    );
+    store.selectRun(run.attemptId);
+    await settle();
+    expect(store.detailState()).toBe('ready');
+    expect(store.findingsState()).toBe('error');
+    expect(store.findings()).toEqual([]);
+  });
+
+  it('ignores an older same-attempt findings reply that settles after a newer success', async () => {
+    const resolvers: PendingFindingsReply[] = [];
+    call.mockImplementation((method: string) =>
+      method === 'review:getRun'
+        ? Promise.resolve({ isSuccess: () => true, data: run })
+        : new Promise((resolve, reject) => {
+            resolvers.push({ resolve, reject });
+          }),
+    );
+    store.selectRun(run.attemptId);
+    store.reloadFindings();
+    expect(resolvers).toHaveLength(2);
+    const newerFinding: ReviewFinding = { ...finding, path: 'src/newer.ts' };
+    resolvers[1].resolve({
+      isSuccess: () => true,
+      data: { findings: [newerFinding] },
+    });
+    await settle();
+    expect(store.findings()).toEqual([newerFinding]);
+    resolvers[0].resolve({ isSuccess: () => true, data: { findings: [finding] } });
+    await settle();
+    expect(store.findings()).toEqual([newerFinding]);
+    expect(store.findingsState()).toBe('ready');
+  });
+
+  it('ignores an older same-attempt findings rejection that settles after a newer success', async () => {
+    const resolvers: PendingFindingsReply[] = [];
+    call.mockImplementation((method: string) =>
+      method === 'review:getRun'
+        ? Promise.resolve({ isSuccess: () => true, data: run })
+        : new Promise((resolve, reject) => {
+            resolvers.push({ resolve, reject });
+          }),
+    );
+    store.selectRun(run.attemptId);
+    store.reloadFindings();
+    const newerFinding: ReviewFinding = { ...finding, path: 'src/newer.ts' };
+    resolvers[1].resolve({
+      isSuccess: () => true,
+      data: { findings: [newerFinding] },
+    });
+    await settle();
+    resolvers[0].reject(new Error('older findings request failed'));
+    await settle();
+    expect(store.findings()).toEqual([newerFinding]);
+    expect(store.findingsState()).toBe('ready');
+  });
+
+  it('ignores findings replies from before the run closed and reloads on reopen', async () => {
+    const resolvers: PendingFindingsReply[] = [];
+    call.mockImplementation((method: string) =>
+      method === 'review:getRun'
+        ? Promise.resolve({ isSuccess: () => true, data: run })
+        : new Promise((resolve, reject) => {
+            resolvers.push({ resolve, reject });
+          }),
+    );
+    store.selectRun(run.attemptId);
+    store.closeRun();
+    call.mockClear();
+    store.reloadFindings();
+    expect(call).not.toHaveBeenCalled();
+    resolvers[0].resolve({ isSuccess: () => true, data: { findings: [finding] } });
+    await settle();
+    expect(store.findings()).toEqual([]);
+    expect(store.findingsState()).toBe('ready');
+    store.selectRun(run.attemptId);
+    expect(resolvers).toHaveLength(2);
+    resolvers[1].resolve({ isSuccess: () => true, data: { findings: [finding] } });
+    await settle();
+    expect(store.findings()).toEqual([finding]);
+    expect(store.findingsState()).toBe('ready');
   });
 
   it('shows a safe error when bot verification fails', async () => {

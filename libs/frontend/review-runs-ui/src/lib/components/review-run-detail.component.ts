@@ -1,8 +1,8 @@
-import { ChangeDetectionStrategy, Component, ElementRef, AfterViewInit, OnDestroy, input, output, inject, signal } from '@angular/core';
-import type { ReviewRun, StageRecord } from '@ptah-extension/review-contracts';
+import { ChangeDetectionStrategy, Component, ElementRef, AfterViewInit, OnDestroy, input, output, inject, signal, computed } from '@angular/core';
+import type { ReviewFinding, ReviewRun, StageRecord } from '@ptah-extension/review-contracts';
 import { ReviewRunsStore } from '../review-runs.store';
 import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component';
-import { ReviewFindingsTableComponent, type ReviewFindingRow } from './review-findings-table.component';
+import { ReviewFindingsTableComponent, reviewFindingRows } from './review-findings-table.component';
 
 @Component({
   selector: 'ptah-review-run-detail', standalone: true, imports: [ReviewFindingsTableComponent, ReviewConfirmDialogComponent],
@@ -53,7 +53,11 @@ import { ReviewFindingsTableComponent, type ReviewFindingRow } from './review-fi
               <button type="button" class="btn btn-primary btn-sm" [disabled]="store.rerunState() === 'running' || !store.hasToken() || store.settings()?.globalPublicationPaused" (click)="confirmLive.set(true)">Rerun live</button></div>
             @if (store.rerunState() === 'error') { <p role="alert" class="text-sm text-error">Rerun could not be started.</p> }
           </section>
-          <section class="mt-6"><h3 class="font-semibold">Findings</h3><ptah-review-findings-table [rows]="findings()" /></section>
+          <section class="mt-6"><h3 class="font-semibold">Findings</h3>
+            @if (findingsState() === 'loading') { <p class="mt-1 text-sm text-base-content-muted" role="status">Loading findings…</p> }
+            @else if (findingsState() === 'error') { <p class="mt-1 text-sm text-base-content-muted" role="alert">Findings are unavailable. <button type="button" class="btn btn-ghost btn-sm" (click)="retryFindings.emit()">Retry</button></p> }
+            @else { <ptah-review-findings-table [rows]="findingRows()" /> }
+          </section>
           <section class="mt-6"><h3 class="font-semibold">Walkthrough preview</h3><p class="text-sm text-base-content-muted">Walkthrough preview unavailable.</p></section>
           <section class="mt-6"><h3 class="font-semibold">Artifacts</h3><p class="text-sm text-base-content-muted">Artifact list unavailable.</p></section>
         }
@@ -69,10 +73,13 @@ export class ReviewRunDetailComponent implements AfterViewInit, OnDestroy {
   readonly store = inject(ReviewRunsStore);
   readonly confirmLive = signal(false);
   readonly run = input.required<ReviewRun>();
-  readonly findings = input<readonly ReviewFindingRow[]>([]);
+  readonly findings = input<readonly ReviewFinding[]>([]);
+  readonly findingsState = input<'loading' | 'ready' | 'error'>('ready');
+  readonly findingRows = computed(() => reviewFindingRows(this.findings()));
   readonly loadState = input<'loading' | 'ready' | 'error'>('ready');
   readonly closed = output<void>();
   readonly retry = output<void>();
+  readonly retryFindings = output<void>();
   ngAfterViewInit(): void { const doc = this.element.nativeElement.ownerDocument; this.returnFocus = doc.activeElement instanceof HTMLElement ? doc.activeElement : null; this.element.nativeElement.querySelector<HTMLElement>('#review-detail-title')?.focus(); }
   ngOnDestroy(): void { this.returnFocus?.focus(); }
   startLiveRerun(): void { this.confirmLive.set(false); void this.store.rerun(this.run().attemptId, false); }

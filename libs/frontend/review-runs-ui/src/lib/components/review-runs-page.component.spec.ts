@@ -1,7 +1,27 @@
 import { TestBed } from '@angular/core/testing';
 import { ClaudeRpcService } from '@ptah-extension/core';
+import type { ReviewFinding, ReviewRun } from '@ptah-extension/review-contracts';
 import { ReviewRunsStore } from '../review-runs.store';
 import { ReviewRunsPageComponent } from './review-runs-page.component';
+
+const run: ReviewRun = {
+  repo: { owner: 'Hive-Academy', name: 'PtahCode' }, prNumber: 428,
+  headSha: 'a'.repeat(40), attemptId: 'rvw-428', trigger: 'poll', configHash: 'b'.repeat(40),
+  status: 'succeeded', createdAt: '2026-11-03T10:00:00.000Z', startedAt: '2026-11-03T10:00:01.000Z',
+  completedAt: '2026-11-03T10:05:00.000Z', deadlineAt: '2026-11-03T11:00:00.000Z',
+  coverage: [], stages: [],
+};
+
+const finding: ReviewFinding = {
+  schemaVersion: 1, lens: 'security-privacy', title: 'Settings parsed without a schema',
+  failureMode: 'A crafted settings file can change runtime behavior.',
+  affectedBehavior: 'The settings loader accepts arbitrary keys.',
+  scenario: 'A workspace contains a crafted settings file.', path: 'src/settings.ts', line: 42,
+  evidence: [{ path: 'src/settings.ts', line: 42, excerpt: 'const parsed = JSON.parse(raw);' }],
+  affectedCaller: 'loadSettings', severity: 'Major', category: 'security', confidence: 0.9,
+  verification: 'cross-family', suggestedDiff: null,
+  fixPrompt: 'Validate the parsed settings against a schema.',
+};
 
 describe('ReviewRunsPageComponent', () => {
   it('filters the visible list through labelled selects', async () => {
@@ -119,6 +139,71 @@ describe('ReviewRunsPageComponent', () => {
     fixture.nativeElement.querySelector('#review-page-resume-confirm')?.parentElement?.querySelectorAll('button')[1]?.click();
     await fixture.whenStable();
     expect(call).toHaveBeenCalledWith('review:setPublicationPause', { paused: false }, { timeout: 5_000 });
+  });
+
+  it('loads and renders findings for the run opened from the list', async () => {
+    const call = jest.fn().mockImplementation((method: string) => Promise.resolve({
+      isSuccess: () => true,
+      data: method === 'review:listRepositories'
+        ? [{ owner: 'Hive-Academy', name: 'PtahCode', enabled: true, dryRun: true, publicationPaused: false }]
+        : method === 'review:listRuns'
+          ? { runs: [run], nextCursor: null, poll: { status: null, error: null, lastSuccessAt: null, lastErrorAt: null } }
+          : method === 'review:getRun' ? run
+            : method === 'review:listFindings' ? { findings: [finding] }
+              : method === 'review:getSettings' ? { settings: null, hasToken: false, tokenStorage: 'encrypted' }
+                : null,
+    }));
+    TestBed.configureTestingModule({ imports: [ReviewRunsPageComponent], providers: [{ provide: ClaudeRpcService, useValue: { call } }] });
+    const fixture = TestBed.createComponent(ReviewRunsPageComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    (fixture.nativeElement.querySelector('[role="listitem"] button') as HTMLButtonElement).click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(call).toHaveBeenCalledWith('review:listFindings', { attemptId: run.attemptId }, { timeout: 5_000 });
+    expect(fixture.nativeElement.textContent).toContain('src/settings.ts:42');
+    expect(fixture.nativeElement.textContent).toContain('Major');
+  });
+
+  it('retries the findings load from the drawer error state', async () => {
+    let findingsFail = true;
+    const call = jest.fn().mockImplementation((method: string) => {
+      if (method === 'review:listFindings')
+        return findingsFail
+          ? Promise.reject(new Error('offline'))
+          : Promise.resolve({ isSuccess: () => true, data: { findings: [finding] } });
+      return Promise.resolve({
+        isSuccess: () => true,
+        data: method === 'review:listRepositories'
+          ? [{ owner: 'Hive-Academy', name: 'PtahCode', enabled: true, dryRun: true, publicationPaused: false }]
+          : method === 'review:listRuns'
+            ? { runs: [run], nextCursor: null, poll: { status: null, error: null, lastSuccessAt: null, lastErrorAt: null } }
+            : method === 'review:getRun' ? run
+              : method === 'review:getSettings' ? { settings: null, hasToken: false, tokenStorage: 'encrypted' }
+                : null,
+      });
+    });
+    TestBed.configureTestingModule({ imports: [ReviewRunsPageComponent], providers: [{ provide: ClaudeRpcService, useValue: { call } }] });
+    const fixture = TestBed.createComponent(ReviewRunsPageComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    (fixture.nativeElement.querySelector('[role="listitem"] button') as HTMLButtonElement).click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Findings are unavailable.');
+    findingsFail = false;
+    const retry = Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>)
+      .find((button) => button.textContent?.trim() === 'Retry');
+    expect(retry).toBeInstanceOf(HTMLButtonElement);
+    retry?.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const findingsCalls = call.mock.calls.filter(([method]) => method === 'review:listFindings');
+    expect(findingsCalls).toHaveLength(2);
+    expect(findingsCalls[1][1]).toEqual({ attemptId: run.attemptId });
+    expect(fixture.nativeElement.textContent).toContain('src/settings.ts:42');
   });
 });
 
