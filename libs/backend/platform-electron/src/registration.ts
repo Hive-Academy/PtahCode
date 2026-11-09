@@ -44,6 +44,7 @@ import {
   type ElectronWorkspaceWatcherOptions,
 } from './workspace-watch/electron-workspace-watcher';
 import { ElectronHostAttentionNotifications, type ElectronAttentionCapabilities } from './implementations/electron-host-attention-notifications';
+import { TaskCleanupAdapter } from './git/task-cleanup.adapter';
 
 /**
  * The shared `TOKENS.LOGGER` registry key. Spelled out here because a value
@@ -103,6 +104,9 @@ export function registerPlatformElectronServices(
   container: DependencyContainer,
   options: ElectronPlatformOptions,
 ): void {
+  container.register(Symbol.for('PtahTaskEndGitCleanupPort'), {
+    useFactory: child => new TaskCleanupAdapter(child.resolve<Logger>(LOGGER_TOKEN)),
+  });
   const workspaceStoragePath = options.initialFolders?.[0]
     ? path.join(
         options.userDataPath,

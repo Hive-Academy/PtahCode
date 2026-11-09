@@ -34,6 +34,10 @@ import { CliHttpServerProvider } from './implementations/cli-http-server-provide
 import { CliWorkspaceWatcher } from './implementations/cli-workspace-watcher';
 import { CliHostAttentionNotifications } from './implementations/cli-host-attention-notifications';
 import type { CliPlatformOptions } from './types';
+import type { Logger } from '@ptah-extension/vscode-core';
+import { TaskCleanupAdapter } from './git/task-cleanup.adapter';
+
+const LOGGER_TOKEN = Symbol.for('Logger');
 
 /**
  * Register all CLI platform implementations in the DI container.
@@ -45,6 +49,9 @@ export function registerPlatformCliServices(
   container: DependencyContainer,
   options: CliPlatformOptions,
 ): void {
+  container.register(Symbol.for('PtahTaskEndGitCleanupPort'), {
+    useFactory: child => new TaskCleanupAdapter(child.resolve<Logger>(LOGGER_TOKEN)),
+  });
   const userDataPath = options.userDataPath ?? path.join(homedir(), '.ptah');
   const logsPath = options.logsPath ?? path.join(userDataPath, 'logs');
   const workspacePath = options.workspacePath
