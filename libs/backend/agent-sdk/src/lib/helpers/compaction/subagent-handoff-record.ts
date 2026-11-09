@@ -213,8 +213,9 @@ function errorDetails(error: unknown): {
   };
 }
 
-function errorCodeOf(error: unknown): string | undefined {
-  return errorDetails(error).errorCode;
+export function errorCodeOf(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return undefined;
+  return typeof error.code === 'string' ? error.code : undefined;
 }
 
 /** Path comparison as the platform's filesystem compares them. */
@@ -396,7 +397,6 @@ export class SubagentHandoffRecords {
     try {
       await writer.scrub;
       await fs.unlink(recordPath);
-      liveRecordPaths.delete(recordPath);
       this.logger.debug('[SubagentHandoffRecords] Handoff record withdrawn', {
         toolCallId,
       });
@@ -405,6 +405,8 @@ export class SubagentHandoffRecords {
         '[SubagentHandoffRecords] Handoff record not withdrawn',
         { toolCallId, ...errorDetails(error) },
       );
+    } finally {
+      liveRecordPaths.delete(recordPath);
     }
   }
 
@@ -421,12 +423,13 @@ export class SubagentHandoffRecords {
         await fs.unlink(recordPath);
         this.writers.delete(toolCallId);
       }
-      liveRecordPaths.delete(recordPath);
     } catch (error: unknown) {
       this.logger.warn('[SubagentHandoffRecords] Unsafe handoff record could not be disposed', {
         toolCallId,
         error: error instanceof Error ? error : new Error(String(error)),
       });
+    } finally {
+      liveRecordPaths.delete(recordPath);
     }
   }
 

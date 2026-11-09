@@ -11,6 +11,7 @@ import {
   recordFileName,
   renderRecord,
   hasScrubProof,
+  hasLiveRecordWriter,
   taskFolderOf,
 } from './subagent-handoff-record';
 
@@ -190,6 +191,7 @@ describe('SubagentHandoffRecords', () => {
         spy.mockRestore();
       }
       expect(fs.readFileSync(result.path, 'utf8')).toContain('/secret/unredacted');
+      expect(hasLiveRecordWriter(result.path)).toBe(false);
       expect(logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('could not be disposed'),
         expect.objectContaining({ error: fault }),
@@ -201,6 +203,21 @@ describe('SubagentHandoffRecords', () => {
       expect(pointer ?? '').not.toContain(result.path);
     },
   );
+
+  it('releases writer ownership when withdrawal unlink fails', async () => {
+    const { store, logger } = makeStore();
+    const result = await store.writeOnce(SESSION, TOOL, 'notes: /secret/unredacted');
+    if (!result.ok) throw new Error('expected a record');
+    const fault = new Error('unlink refused');
+    const unlink = jest.spyOn(fs.promises, 'unlink').mockRejectedValueOnce(fault);
+    try {
+      await store.withdraw(TOOL, result.path);
+    } finally {
+      unlink.mockRestore();
+    }
+    expect(hasLiveRecordWriter(result.path)).toBe(false);
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('not withdrawn'), expect.any(Object));
+  });
 
   it('persists scrub proof and exposes the record on a fresh index', async () => {
     const { store, logger } = makeStore();

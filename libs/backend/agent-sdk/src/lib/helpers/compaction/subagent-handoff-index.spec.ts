@@ -3,6 +3,7 @@ import * as fsp from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { Logger } from '@ptah-extension/vscode-core';
+import { NEUTRALIZE_MIN_AGE_MS } from './subagent-handoff-neutralize';
 import {
   HANDOFF_RETENTION_MS,
   INDEX_RESCAN_MS,
@@ -118,7 +119,7 @@ describe('SubagentHandoffIndex', () => {
   }
 
   it('ignores old-format records without durable scrub proof', async () => {
-    const file = record({ content: renderRecord('notes: /old/secret') });
+    const file = record({ content: renderRecord('notes: /old/secret'), ageMs: NEUTRALIZE_MIN_AGE_MS + 1 });
     const stub = path.join(root, 'old-stub.md');
     fs.writeFileSync(stub, `Read ${file} when status: pending`);
     const { index } = makeIndex();
@@ -128,7 +129,7 @@ describe('SubagentHandoffIndex', () => {
   });
 
   it('keeps a failed neutralization hidden and logs the Error', async () => {
-    const file = record({ content: renderRecord('notes: /old/secret') });
+    const file = record({ content: renderRecord('notes: /old/secret'), ageMs: NEUTRALIZE_MIN_AGE_MS + 1 });
     const fault = new Error('rename refused');
     const rename = jest.spyOn(require('node:fs/promises') as typeof import('node:fs/promises'), 'rename')
       .mockRejectedValueOnce(fault);
@@ -139,6 +140,32 @@ describe('SubagentHandoffIndex', () => {
       expect(fs.readFileSync(file, 'utf8')).toContain('/old/secret');
     } finally {
       rename.mockRestore();
+    }
+  });
+
+  it('leaves a young proofless record from another process untouched', async () => {
+    const file = record({ owner: OTHER, content: renderRecord('notes: /young/secret'), ageMs: NEUTRALIZE_MIN_AGE_MS - 1 });
+    const { index } = makeIndex();
+    expect((await index.pointerFor(root, audience())) ?? '').not.toContain(file);
+    expect(fs.readFileSync(file, 'utf8')).toContain('/young/secret');
+  });
+
+  it('preserves the primary failure when temp cleanup also fails', async () => {
+    const file = record({ content: renderRecord('notes: /old/secret'), ageMs: NEUTRALIZE_MIN_AGE_MS + 1 });
+    const primary = new Error('rename refused');
+    const cleanup = new Error('unlink refused');
+    const promises = require('node:fs/promises') as typeof import('node:fs/promises');
+    const rename = jest.spyOn(promises, 'rename').mockRejectedValueOnce(primary);
+    const unlink = jest.spyOn(promises, 'unlink').mockRejectedValueOnce(cleanup);
+    try {
+      const { index, logger } = makeIndex();
+      expect((await index.pointerFor(root, audience())) ?? '').not.toContain(file);
+      const logged = logger.error.mock.calls[0]?.[1];
+      expect(logged).toBeInstanceOf(AggregateError);
+      expect(logged.errors).toEqual([primary, cleanup]);
+    } finally {
+      rename.mockRestore();
+      unlink.mockRestore();
     }
   });
 

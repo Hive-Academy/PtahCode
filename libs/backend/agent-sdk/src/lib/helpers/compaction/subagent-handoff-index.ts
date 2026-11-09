@@ -31,7 +31,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import type { Logger } from '@ptah-extension/vscode-core';
 import { SUBAGENT_HANDOFF_DIR } from './subagent-handoff-files';
-import { neutralizeOrphanRecord } from './subagent-handoff-neutralize';
+import { NEUTRALIZE_MIN_AGE_MS, neutralizeOrphanRecord } from './subagent-handoff-neutralize';
 import {
   HANDOFF_RECORD_HEAD_BYTES,
   checkHandoffDir,
@@ -361,10 +361,11 @@ export class SubagentHandoffIndex {
       return undefined;
     }
     if (!read.scrubbed) {
-      if (read.status === 'pending' && index.neutralizedThisScan < MAX_TEMP_CLEANUPS) {
+      if (read.status === 'pending' && this.now() - read.mtimeMs >= NEUTRALIZE_MIN_AGE_MS
+        && index.neutralizedThisScan < MAX_TEMP_CLEANUPS) {
         index.neutralizedThisScan += 1;
         try {
-          await neutralizeOrphanRecord(file);
+          await neutralizeOrphanRecord(file, this.now());
         } catch (error: unknown) {
           this.logger.error('[SubagentHandoffIndex] Proofless handoff record not neutralized',
             error instanceof Error ? error : new Error(String(error)));
