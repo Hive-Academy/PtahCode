@@ -3,7 +3,7 @@ import { ChangeDetectionStrategy, Component, computed, input } from '@angular/co
 export type PtahStatus = 'running' | 'queued' | 'pending' | 'needs-review' | 'warning' | 'failed' | 'offline' | 'completed' | 'online';
 
 @Component({
-  selector: 'ptah-status-badge', standalone: true,
+  selector: 'ptah-ui-status-badge', standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<span class="badge badge-sm gap-1.5 text-xs"><span aria-hidden="true" class="inline-block size-2 shrink-0" [class.rounded-full]="ink() === 'run' || ink() === 'idle' || ink() === 'done'" [class.border]="ink() === 'run' || ink() === 'idle'" [class.border-state-run]="ink() === 'run'" [class.animate-pulse]="ink() === 'run'" [class.motion-reduce:animate-none]="ink() === 'run'" [class.rotate-45]="ink() === 'need'" [class.bg-state-need]="ink() === 'need'" [class.bg-state-err]="ink() === 'err'" [class.bg-state-done]="ink() === 'done'"></span><span>{{ label() ?? displayLabel() }}</span></span>`,
 })
