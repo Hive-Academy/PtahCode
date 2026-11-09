@@ -1,11 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import type { ReviewFinding } from '@ptah-extension/review-contracts';
-import { ReviewFindingsTableComponent, reviewFindingRows, type ReviewFindingRow } from './review-findings-table.component';
-
-const rows: ReviewFindingRow[] = [
-  { id: 'minor', severity: 'Minor', lens: 'security-privacy', path: 'a.ts', line: 4, status: 'suppressed', reason: 'Below confidence floor', confidence: 0.5 },
-  { id: 'major', severity: 'Major', lens: 'contracts-callers', path: 'b.ts', line: 8, status: 'accepted', reason: null, confidence: 0.9 },
-];
+import { ReviewFindingsTableComponent, reviewFindingRows } from './review-findings-table.component';
 
 const finding: ReviewFinding = {
   schemaVersion: 1, lens: 'security-privacy', title: 'Settings parsed without a schema',
@@ -19,15 +14,29 @@ const finding: ReviewFinding = {
 };
 
 describe('ReviewFindingsTableComponent', () => {
-  it('sorts by severity, filters status and shows suppression reason', () => {
+  it('shows the finding title and explanation after findings load', () => {
     TestBed.configureTestingModule({ imports: [ReviewFindingsTableComponent] });
     const fixture = TestBed.createComponent(ReviewFindingsTableComponent);
-    fixture.componentRef.setInput('rows', rows); fixture.detectChanges();
-    expect((fixture.nativeElement.querySelector('tbody tr') as HTMLElement).textContent).toContain('Major');
-    const filter = fixture.nativeElement.querySelector('#finding-status') as HTMLSelectElement;
-    filter.value = 'suppressed'; filter.dispatchEvent(new Event('change')); fixture.detectChanges();
+    fixture.componentRef.setInput('rows', reviewFindingRows([finding])); fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Settings parsed without a schema');
+    const details = fixture.nativeElement.querySelector('details') as HTMLDetailsElement;
+    details.open = true;
+    fixture.detectChanges();
+    expect(details.textContent).toContain('A crafted settings file can change runtime behavior.');
+    expect(details.textContent).toContain('The settings loader accepts arbitrary keys.');
+    expect(details.textContent).toContain('A workspace contains a crafted settings file.');
+    expect(details.textContent).toContain('const parsed = JSON.parse(raw);');
+    expect(details.textContent).toContain('Validate the parsed settings against a schema.');
     expect(fixture.nativeElement.querySelectorAll('tbody tr')).toHaveLength(1);
-    expect(fixture.nativeElement.textContent).toContain('Below confidence floor');
+  });
+
+  it('has no status options for the accepted-only findings RPC', () => {
+    TestBed.configureTestingModule({ imports: [ReviewFindingsTableComponent] });
+    const fixture = TestBed.createComponent(ReviewFindingsTableComponent);
+    fixture.componentRef.setInput('rows', reviewFindingRows([finding])); fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('#finding-status')).toBeNull();
+    expect(Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('option')).map(option => option.textContent?.trim()))
+      .toEqual(['All lenses', 'correctness-lifecycle', 'contracts-callers', 'security-privacy', 'host-di-config']);
     fixture.nativeElement.querySelector('th button').click(); fixture.detectChanges();
     expect(fixture.componentInstance.ascending()).toBe(false);
   });
@@ -48,7 +57,10 @@ describe('ReviewFindingsTableComponent', () => {
     expect(mapped[0]).toEqual({
       id: 'security-privacy:src/settings.ts:42:0', severity: 'Major',
       lens: 'security-privacy', path: 'src/settings.ts', line: 42,
-      status: 'accepted', reason: null, confidence: 0.9,
+      title: finding.title, failureMode: finding.failureMode,
+      affectedBehavior: finding.affectedBehavior, scenario: finding.scenario,
+      evidence: finding.evidence, fixPrompt: finding.fixPrompt,
+      status: 'accepted', confidence: 0.9,
     });
     expect(mapped.map((row) => row.id)).toEqual([
       'security-privacy:src/settings.ts:42:0',

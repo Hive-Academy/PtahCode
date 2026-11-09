@@ -65,7 +65,8 @@ describe('ReviewRunDetailComponent', () => {
     const rendered = fixture.nativeElement.textContent;
     expect(rendered).toContain('Major');
     expect(rendered).toContain('src/settings.ts:42');
-    expect(rendered).toContain('accepted');
+    expect(rendered).toContain(finding.title);
+    expect(rendered).toContain(finding.failureMode);
     expect(rendered).toContain('90%');
   });
   it('shows findings loading and error states without raw errors', () => {
