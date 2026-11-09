@@ -10,17 +10,12 @@ import {
   type PostToolUsePayload,
   type UserPromptExpansionCallbackRegistry,
   type UserPromptExpansionPayload,
-  type StopCallbackRegistry,
-  type StopPayload,
 } from '@ptah-extension/agent-sdk';
 import { deriveWorkspaceFingerprint } from '@ptah-extension/memory-curator';
 import { SKILL_SYNTHESIS_TOKENS } from '../di/tokens';
 import { SkillInvocationRecorder } from '../skill-invocation-recorder';
-import { SpecHarvesterService } from '../spec-harvester.service';
 import type { SubagentMetricsExtractor, ExtractedSubagentRun } from '../subagent-metrics-extractor';
 import type { SubagentRunMetrics } from '../types';
-
-const HARVEST_DEBOUNCE_MS = 90 * 1000;
 
 @injectable()
 export class SkillTriggerService {
@@ -28,8 +23,6 @@ export class SkillTriggerService {
   private subagentStopDisposer: (() => void) | null = null;
   private postToolUseDisposer: (() => void) | null = null;
   private userPromptExpansionDisposer: (() => void) | null = null;
-  private stopDisposer: (() => void) | null = null;
-  private readonly harvestTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
@@ -45,10 +38,6 @@ export class SkillTriggerService {
     private readonly userPromptExpansionRegistry: UserPromptExpansionCallbackRegistry,
     @inject(SKILL_SYNTHESIS_TOKENS.SKILL_INVOCATION_RECORDER)
     private readonly recorder: SkillInvocationRecorder,
-    @inject(SDK_TOKENS.SDK_STOP_CALLBACK_REGISTRY)
-    private readonly stopRegistry: StopCallbackRegistry,
-    @inject(SKILL_SYNTHESIS_TOKENS.SPEC_HARVESTER_SERVICE)
-    private readonly harvester: SpecHarvesterService,
     @inject(SKILL_SYNTHESIS_TOKENS.SUBAGENT_METRICS_EXTRACTOR)
     private readonly metricsExtractor: SubagentMetricsExtractor,
   ) {}
@@ -66,9 +55,6 @@ export class SkillTriggerService {
       this.userPromptExpansionRegistry.register((payload) => {
         this.onUserPromptExpansion(payload);
       });
-    this.stopDisposer = this.stopRegistry.register((payload) => {
-      this.onStop(payload);
-    });
     this.logger.info('[skill-synthesis] trigger service started');
   }
 
@@ -77,21 +63,11 @@ export class SkillTriggerService {
     this.subagentStopDisposer?.();
     this.postToolUseDisposer?.();
     this.userPromptExpansionDisposer?.();
-    this.stopDisposer?.();
     this.subagentStopDisposer = null;
     this.postToolUseDisposer = null;
     this.userPromptExpansionDisposer = null;
-    this.stopDisposer = null;
-    for (const timer of this.harvestTimers.values()) clearTimeout(timer);
-    this.harvestTimers.clear();
     this.started = false;
     this.logger.info('[skill-synthesis] trigger service stopped');
-  }
-
-  private onStop(payload: StopPayload): void {
-    if (blankToUndefined(payload.workspaceRoot)) {
-      this.scheduleHarvest(payload.workspaceRoot);
-    }
   }
 
   private onSubagentStop(payload: SubagentStopPayload): void {
@@ -137,29 +113,6 @@ export class SkillTriggerService {
         isError: !payload.success,
         invokedAt: payload.timestamp,
         source: 'subagent',
-      });
-    }
-  }
-  private scheduleHarvest(workspaceRoot: string): void {
-    const pending = this.harvestTimers.get(workspaceRoot);
-    if (pending) clearTimeout(pending);
-    this.harvestTimers.set(
-      workspaceRoot,
-      setTimeout(() => {
-        this.harvestTimers.delete(workspaceRoot);
-        void this.fireHarvest(workspaceRoot);
-      }, HARVEST_DEBOUNCE_MS),
-    );
-  }
-
-  private async fireHarvest(workspaceRoot: string): Promise<void> {
-    // Capture task specs independently of invocation telemetry.
-    try {
-      await this.harvester.harvest(workspaceRoot, { trigger: 'auto' });
-    } catch (error: unknown) {
-      // degradation-audit: reported - logged at warn; the next Stop schedules another harvest.
-      this.logger.warn('[skill-synthesis] spec harvest failed', {
-        error: error instanceof Error ? error.message : String(error),
       });
     }
   }

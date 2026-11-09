@@ -51,8 +51,6 @@ function makeHarness() {
     postToolUseRegistry,
     userPromptExpansionRegistry,
     { recordSkillEvent } as never,
-    stopRegistry,
-    { harvest } as never,
     { extract } as never,
   );
   return {
@@ -71,20 +69,19 @@ describe('SkillTriggerService retained hook integration', () => {
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => jest.useRealTimers());
 
-  it('registers and disposes the four retained hooks', () => {
+  it('registers and disposes the three retained hooks without a Stop hook', () => {
     const h = makeHarness();
     h.service.start();
     h.service.start();
     expect(h.subagentStopRegistry.size).toBe(1);
     expect(h.postToolUseRegistry.size).toBe(1);
     expect(h.userPromptExpansionRegistry.size).toBe(1);
-    expect(h.stopRegistry.size).toBe(1);
+    expect(h.stopRegistry.size).toBe(0);
 
     h.service.stop();
     expect(h.subagentStopRegistry.size).toBe(0);
     expect(h.postToolUseRegistry.size).toBe(0);
     expect(h.userPromptExpansionRegistry.size).toBe(0);
-    expect(h.stopRegistry.size).toBe(0);
   });
 
   it('captures Skill and Task tool invocations', async () => {
@@ -170,7 +167,7 @@ describe('SkillTriggerService retained hook integration', () => {
     h.service.stop();
   });
 
-  it('harvests specs after Stop for a workspace', async () => {
+  it('does not harvest specs after Stop (harvest is manual)', async () => {
     const h = makeHarness();
     h.service.start();
     h.stopRegistry.notifyAll({
@@ -182,8 +179,7 @@ describe('SkillTriggerService retained hook integration', () => {
       timestamp: 1000,
     });
     await jest.advanceTimersByTimeAsync(90_000);
-    expect(h.harvest).toHaveBeenCalledTimes(1);
-    expect(h.harvest).toHaveBeenCalledWith('/ws', { trigger: 'auto' });
+    expect(h.harvest).not.toHaveBeenCalled();
     h.service.stop();
   });
 });
