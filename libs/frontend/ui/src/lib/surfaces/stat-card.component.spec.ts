@@ -4,7 +4,7 @@ import { PtahStatCardComponent } from './stat-card.component';
 @Component({
   standalone: true,
   imports: [PtahStatCardComponent],
-  template: `<ptah-stat-card label="Sessions" [value]="42" trend="Up 10%"
+  template: `<ptah-stat-card label="Sessions" [value]="42" trend="Up 10%" size="dense"
     ><button actions>Open</button></ptah-stat-card
   >`,
 })
@@ -22,5 +22,6 @@ describe('PtahStatCardComponent', () => {
     expect(card.textContent).toContain('Up 10%');
     expect(card.querySelector('button')?.textContent).toContain('Open');
     expect(card.className).toContain('surface-2');
+    expect(card.querySelector('.text-xl')?.textContent).toContain('42');
   });
 });

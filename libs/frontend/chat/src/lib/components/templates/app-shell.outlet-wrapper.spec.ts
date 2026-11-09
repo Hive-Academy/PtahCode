@@ -53,6 +53,11 @@ function outletWrapperTag(source: string): string {
 }
 
 describe('app-shell router-outlet wrapper (TASK_2026_524 risk 1)', () => {
+  it('shows opted-in routed components outside the surface ID contract', () => {
+    const shell = readFileSync(join(__dirname, 'app-shell.component.ts'), 'utf8');
+    expect(shell).toContain("data['standalone'] === true");
+    expect(shell).toContain('this.currentView() !== DEFAULT_SURFACE_ID || this.routedStandalone()');
+  });
   it('reads the real shell template', () => {
     expect(existsSync(SHELL_TEMPLATE)).toBe(true);
   });

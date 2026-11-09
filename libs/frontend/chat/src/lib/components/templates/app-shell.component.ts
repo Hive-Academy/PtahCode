@@ -11,7 +11,9 @@ import {
 } from '@angular/core';
 import { NgComponentOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { RouterOutlet } from '@angular/router';
+import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { filter, map } from 'rxjs';
 import {
   LucideAngularModule,
   Check,
@@ -160,6 +162,14 @@ export class AppShellComponent {
    * `AppStateManager.setCurrentView`, so there is one write path.
    */
   private readonly surfaceRouter = inject(SurfaceRouterService);
+  private readonly router = inject(Router);
+  private readonly routedStandalone = toSignal(
+    this.router.events.pipe(
+      filter((event): event is NavigationEnd => event instanceof NavigationEnd),
+      map(() => this.router.routerState.snapshot.root.firstChild?.data['standalone'] === true),
+    ),
+    { initialValue: this.router.routerState.snapshot.root.firstChild?.data['standalone'] === true },
+  );
   // Injected only to instantiate the root singleton eagerly: it ends the backend session of a closed tab.
   private readonly _closedTabSessionEnder = inject(
     ClosedTabSessionEnderService,
@@ -194,12 +204,11 @@ export class AppShellComponent {
    * This used to be a hand-maintained `STANDALONE_VIEWS` list that the class
    * doc required be "kept in sync with the @switch cases" — a fourth copy of
    * the surface list, next to the three `initialView` allow-lists. It is now
-   * derived: `currentView()` reads the Router, and every route except the
-   * component-less `chat` route IS a standalone surface, so there is nothing
-   * left to keep in sync.
+   * Surface routes derive from `currentView()`. A route outside the surface
+   * contract opts in through route data after its navigation settles.
    */
   readonly isStandaloneView = computed(
-    () => this.currentView() !== DEFAULT_SURFACE_ID,
+    () => this.currentView() !== DEFAULT_SURFACE_ID || this.routedStandalone(),
   );
 
   /**

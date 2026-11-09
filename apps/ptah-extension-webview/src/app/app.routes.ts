@@ -201,6 +201,12 @@ export const appRoutes: Routes = [
         (m) => m.MachinesViewComponent,
       ),
   },
+  {
+    path: 'ui-gallery',
+    canMatch: [electronOnlySurface],
+    data: { standalone: true },
+    loadComponent: () => import('./ui-gallery.component').then((m) => m.UiGalleryComponent),
+  },
   // An unaddressable URL is the chat surface, not an error page: the host can
   // send an `initialView` this build does not know, and a webview has nowhere
   // to show a 404.
