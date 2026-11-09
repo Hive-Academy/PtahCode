@@ -10,6 +10,7 @@ import 'reflect-metadata';
 import { AgentProcessInfo, CliOutputSegment } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { AgentProcessManager } from './agent-process-manager.service';
+import { AgentReportCoalescer } from './agent-report-coalescer';
 import {
   AGENT_REPORT_BURST_LIMIT,
   AGENT_REPORT_BURST_WINDOW_MS,
@@ -98,6 +99,72 @@ function createHarness(
 }
 
 describe('AgentReportRouter.deliver', () => {
+  it('holds only final reports and keeps the tile truthful until delivery', async () => {
+    const h = createHarness();
+    const store = new ParentEnvelopeStoreService(h.logger, new FakeStateStorage());
+    const adapter = { isSessionActive: h.isSessionActive,
+      sendMessageToSession: h.sendMessageToSession } as never;
+    const drainer = new ParentDeliveryDrainerService(h.logger, store, adapter, null, null);
+    const manager = { findAgentInfo: h.findAgentInfo,
+      recordAgentNote: h.recordAgentNote, markReportDelivered: h.markReportDelivered } as never;
+    const coalescer = new AgentReportCoalescer();
+    const router = new AgentReportRouter(h.logger, manager, adapter, null, drainer, coalescer);
+    const held = await router.deliver({ agentId: AGENT_ID, message: 'finished', final: true });
+    expect(held).toMatchObject({ delivered: false, pending: true,
+      reason: 'held-for-completion' });
+    expect(h.sendMessageToSession).not.toHaveBeenCalled();
+    expect(h.markReportDelivered).not.toHaveBeenCalled();
+    const urgent = await router.deliver({ agentId: AGENT_ID, message: 'Need a decision' });
+    expect(urgent.delivered).toBe(true);
+    expect(h.sendMessageToSession).toHaveBeenCalledTimes(1);
+    coalescer.dispose();
+    drainer.dispose();
+  });
+
+  it('refuses an identical final report without flushing the held one', async () => {
+    const h = createHarness();
+    const store = new ParentEnvelopeStoreService(h.logger, new FakeStateStorage());
+    const adapter = { isSessionActive: h.isSessionActive,
+      sendMessageToSession: h.sendMessageToSession } as never;
+    const drainer = new ParentDeliveryDrainerService(h.logger, store, adapter, null, null);
+    const manager = { findAgentInfo: h.findAgentInfo,
+      recordAgentNote: h.recordAgentNote, markReportDelivered: h.markReportDelivered } as never;
+    const coalescer = new AgentReportCoalescer();
+    const router = new AgentReportRouter(h.logger, manager, adapter, null, drainer, coalescer);
+    try {
+      await router.deliver({ agentId: AGENT_ID, message: 'closing', final: true });
+      const repeat = await router.deliver({ agentId: AGENT_ID, message: 'closing', final: true });
+      expect(repeat).toMatchObject({ delivered: false, reason: 'duplicate-report' });
+      expect(h.sendMessageToSession).not.toHaveBeenCalled();
+      expect(coalescer.peek(AGENT_ID)?.message).toBe('closing');
+    } finally {
+      coalescer.take(AGENT_ID);
+      drainer.dispose();
+    }
+  });
+
+  it('delivers a held report standalone when its window expires', async () => {
+    jest.useFakeTimers();
+    const h = createHarness();
+    const store = new ParentEnvelopeStoreService(h.logger, new FakeStateStorage());
+    const adapter = { isSessionActive: h.isSessionActive,
+      sendMessageToSession: h.sendMessageToSession } as never;
+    const drainer = new ParentDeliveryDrainerService(h.logger, store, adapter, null, null);
+    const manager = { findAgentInfo: h.findAgentInfo,
+      recordAgentNote: h.recordAgentNote, markReportDelivered: h.markReportDelivered } as never;
+    const coalescer = new AgentReportCoalescer();
+    const router = new AgentReportRouter(h.logger, manager, adapter, null, drainer, coalescer);
+    try {
+      await router.deliver({ agentId: AGENT_ID, message: 'closing', final: true });
+      await jest.advanceTimersByTimeAsync(120_000);
+      expect(h.sendMessageToSession).toHaveBeenCalledTimes(1);
+      expect(h.markReportDelivered).toHaveBeenCalledTimes(1);
+    } finally {
+      drainer.dispose();
+      jest.useRealTimers();
+    }
+  });
+
   it('does not infer completion from report prose', async () => {
     const h = createHarness();
     await h.router.deliver({ agentId: AGENT_ID, message: 'Progress: wrote a draft' });

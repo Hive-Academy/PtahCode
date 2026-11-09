@@ -465,7 +465,7 @@ Cost: each tool call may resend context. Batch independent reads, keep output ta
 const TWO_WAY_MESSAGING_GUIDANCE =
   'Two-way messaging: your parent session can reach you.\n' +
   '- ' + PTAH_MCP_TOOL_GUIDANCE + '\n' +
-  '- Report once with `ptah_agent_report` (no agent id). It may be pending until parent activity; `delivered: false` gives a reason. Do not retry in a loop.\n' +
+  '- Call `ptah_agent_report` only for blockers, partial work, open decisions, questions, or progress the parent must act on. Clean success uses the completion signal and deliverable file. A closing success report, if sent, sets `final: true` and may be held for completion. Do not retry pending reports.\n' +
   '- Parent messages may arrive between turns and override this task.\n' +
   '- Before spawning, read `ptah_agent_list`; names and capabilities vary by run.\n' +
   '- `ptah_agent_message` queues by default. `delivery: now` steers if supported; interrupt-resume needs `allowPartialTurnLoss: true`. Read mode and receipt id; accepted is not settled. Check `ptah_agent_message_status`.';

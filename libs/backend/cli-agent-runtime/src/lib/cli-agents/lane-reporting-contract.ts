@@ -10,12 +10,9 @@
  *    whose task string is handed to the SDK verbatim and never passes through
  *    `buildTaskPrompt`.
  *
- * The contract asks the lane to state its deliverable BEFORE it exits. That is
- * belt and braces with {@link LaneCompletionNotifier}, deliberately: the
- * notifier tells the orchestrator whether the files exist, and the lane's own
- * report tells it what the lane believes it did. A lane that exits silently
- * still produces a signal, so the orchestrator is never left waiting — but a
- * lane that reports gives the orchestrator the account a file listing cannot.
+ * The contract asks the lane to write its deliverable before exit. The notifier
+ * checks the file. Reports are for blockers, questions, partial work and
+ * decisions that need parent action.
  */
 
 import { PTAH_MCP_TOOL_GUIDANCE } from './ptah-mcp-tool-guidance.constant';
@@ -56,13 +53,7 @@ export function renderLaneCompletionContract(
   lines.push(
     input.canUsePtahMcp === false
       ? 'Put what you produced, the absolute path of each file, and anything you could not do in your final message; Ptah MCP reporting is unavailable.'
-      : PTAH_MCP_TOOL_GUIDANCE + '\nThen call `ptah_agent_report` once with: what you produced, the absolute ' +
-      'path of each file you wrote, and anything you could NOT do. That call ' +
-      'is recorded for the session that spawned you. It may be pending until ' +
-      'parent activity, then sent — it is how the ' +
-      'orchestrator learns what you did without reading your whole output. ' +
-      'If it returns `pending: true`, do not resend the report. If it returns ' +
-      '`delivered: false` with a `reason`, put the same summary in your final message.',
+      : PTAH_MCP_TOOL_GUIDANCE + '\nCall `ptah_agent_report` only for blockers, partial work, open decisions, questions, or progress the parent must act on. A clean success needs no report: the completion signal and deliverable file cover it. If a closing success report is sent, set `final: true`; it may be held for completion. Keep the final-message summary.',
     'Never end a turn claiming success for a file you did not write.',
   );
 

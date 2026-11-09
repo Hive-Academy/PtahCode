@@ -645,6 +645,17 @@ describe('AgentToolDispatcher — agent_report', () => {
     });
   });
 
+  it('passes an explicit closing-report flag to the agent router', async () => {
+    const { dispatcher, report } = createMessagingHarness('agent-from-url');
+    await dispatcher.dispatch('agent_report', request, {
+      message: 'closing', final: true,
+    });
+    expect(report).toHaveBeenCalledWith({
+      agentId: 'agent-from-url', message: 'closing',
+      summary: undefined, final: true,
+    });
+  });
+
   it('REJECTS a sender-supplied agentId', async () => {
     // Accepting one would let any agent report as any other agent.
     const { dispatcher, report } = createMessagingHarness('agent-from-url');

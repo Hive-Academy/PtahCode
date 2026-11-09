@@ -43,6 +43,7 @@ import { ParentEnvelopeStoreService } from '../cli-agents/parent-delivery/parent
 import { ParentDeliveryDrainerService } from '../cli-agents/parent-delivery/parent-delivery-drainer.service';
 import { LaneResumeGate } from '../cli-agents/lane-resume-gate';
 import { AgentReportRouter } from '../cli-agents/agent-report-router.service';
+import { AgentReportCoalescer } from '../cli-agents/agent-report-coalescer';
 import { LaneOwnerResolver } from '../cli-agents/limits/lane-owner.resolver';
 import { LaneLimitLookupService } from '../cli-agents/limits/lane-limit-lookup.service';
 import { PlanLimitOwnerDiscoveryService } from '../cli-agents/limits/plan-limit-owner-discovery.service';
@@ -308,6 +309,7 @@ export function registerCliAgentRuntimeServices(
   // construct the notifier while the adapter is still absent (TASK_2026_515).
   container.registerSingleton(ParentEnvelopeStoreService);
   container.registerSingleton(ParentDeliveryDrainerService);
+  container.registerSingleton(AgentReportCoalescer);
   // Before the router and manager: the router injects the journal optionally.
   registerAgentMessageJournal(container);
   registerAgentOutputJournal(container);
@@ -332,6 +334,7 @@ export function registerCliAgentRuntimeServices(
                   CLI_AGENT_RUNTIME_TOKENS.LANE_TERMINAL_CHECKPOINT,
                 )
               : null,
+          c.resolve(AgentReportCoalescer),
         ),
     ),
   });
