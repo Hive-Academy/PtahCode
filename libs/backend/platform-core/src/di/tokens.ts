@@ -196,4 +196,7 @@ export const PLATFORM_TOKENS = {
    * IpcBridge) / DesktopOnlyDisplayWindowHost (platform-core, VS Code and CLI).
    */
   DISPLAY_WINDOW_HOST: Symbol.for('PlatformDisplayWindowHost'),
+
+  /** GitWindowHost — Electron-only detached Git dock; unbound elsewhere. */
+  GIT_WINDOW_HOST: Symbol.for('PlatformGitWindowHost'),
 } as const;
