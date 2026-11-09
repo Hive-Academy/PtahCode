@@ -230,7 +230,7 @@ export class SqliteIntegrityService {
         this.logFullCheckUnavailable('worker aborted', startedAt);
         return null;
       }
-      this.record(outcome.response);
+      this.record(outcome.response, true);
       const response = outcome.response;
       if (response?.ok === true && response.verdict !== 'unavailable') return response;
       const reason = response === null ? 'worker returned no result or exceeded budget'
@@ -363,8 +363,20 @@ export class SqliteIntegrityService {
    * `null`, an `error` response and an `'unavailable'` verdict all write no
    * record, so the check simply re-runs in the next window. Writing one would
    * mean remembering a question we never asked as an answer.
+   *
+   * A FULL CHECK IS HELD TO A STRICTER BAR. `fullCheck` marks a reply to an
+   * explicit `runFullCheck()` request, where the worker also ran
+   * `PRAGMA integrity_check` and answered `integrityCheckPassed`. Only a passed
+   * full check may refresh the clean record: a `false` answer is a DEFINITE
+   * failure, so it persists a not-ok verdict and `isDue()` keeps the check due
+   * through the existing not-ok rule; a `null` or missing answer (the pragma
+   * threw, or the reply lost the field) is inconclusive and writes nothing, so
+   * the next window retries.
    */
-  private record(response: IntegrityCheckOutbound | null): void {
+  private record(
+    response: IntegrityCheckOutbound | null,
+    fullCheck = false,
+  ): void {
     if (!response) {
       this.logger.warn(
         '[persistence-sqlite] integrity check produced no result; not recorded',
@@ -382,6 +394,34 @@ export class SqliteIntegrityService {
         '[persistence-sqlite] integrity check inconclusive; not recorded',
         { detail: response.detail },
       );
+      return;
+    }
+
+    if (
+      fullCheck &&
+      response.verdict === 'ok' &&
+      response.integrityCheckPassed !== true
+    ) {
+      if (response.integrityCheckPassed === false) {
+        this.store.write({
+          checkedAt: Date.now(),
+          quickCheckOk: false,
+          foreignKeyViolations: response.foreignKeyViolations,
+          durationMs: response.durationMs,
+          pageCount: response.pageCount,
+          detail: response.detail ?? 'integrity_check failed',
+        });
+        this.logger.error('[persistence-sqlite] integrity_check FAILED', {
+          detail: response.detail,
+          durationMs: response.durationMs,
+          pageCount: response.pageCount,
+        });
+      } else {
+        this.logger.warn(
+          '[persistence-sqlite] full integrity check inconclusive; not recorded',
+          { detail: response.detail },
+        );
+      }
       return;
     }
 

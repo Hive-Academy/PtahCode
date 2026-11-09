@@ -367,6 +367,54 @@ describe('CodeSymbolStore (native-gated)', () => {
     }
   });
 
+  maybe('an aborted purge does not suppress the next purge call', async () => {
+    const { service, store, dbPath } = await bootstrap();
+    const root = path.join(path.dirname(dbPath), 'aborted-retry-worktree');
+    const controller = new AbortController();
+    const stat = await import('node:fs/promises');
+    let probes = 0;
+    const statPath: (filePath: string) => ReturnType<typeof stat.stat> = async (filePath) => {
+      if (filePath === root && ++probes === 3) controller.abort();
+      return stat.stat(filePath);
+    };
+    try {
+      await store.insertBatch(Array.from({ length: 129 }, (_, i) =>
+        makeEntry({ workspaceRoot: root, filePath: path.join(root, `${i}.ts`), subject: `code:abort-retry:${i}` }),
+      ));
+      await expect(store.purgeStaleRoots(0, statPath, controller.signal))
+        .rejects.toMatchObject({ name: 'AbortError' });
+      expect(store.count(root)).toBe(1);
+      // The aborted attempt must not advance the six-hour throttle: the next
+      // call runs the scan again and removes the row the abort left behind.
+      expect(await store.purgeStaleRoots(0, statPath)).toEqual({ roots: 1, rows: 1 });
+      expect(store.count(root)).toBe(0);
+    } finally {
+      service.close();
+    }
+  });
+
+  maybe('a concurrent second call does not start a second scan', async () => {
+    const { service, store, dbPath } = await bootstrap();
+    const root = path.dirname(dbPath);
+    let checks = 0;
+    const statPath: (filePath: string) => ReturnType<typeof import('node:fs/promises').stat> =
+      async (filePath) => {
+        checks++;
+        return import('node:fs/promises').then((fs) => fs.stat(filePath));
+      };
+    try {
+      await store.insertBatch([makeEntry({ workspaceRoot: root, filePath: path.join(root, 'a.ts') })]);
+      const first = store.purgeStaleRoots(0, statPath);
+      const second = store.purgeStaleRoots(0, statPath);
+      await Promise.all([first, second]);
+      // One stat call proves only the first call scanned; the second returned
+      // through the in-flight guard without touching the filesystem.
+      expect(checks).toBe(1);
+    } finally {
+      service.close();
+    }
+  });
+
   maybe('keeps a missing root when its parent is also missing', async () => {
     const { service, store, dbPath } = await bootstrap();
     const root = path.join(path.dirname(dbPath), 'missing-parent', 'removed-worktree');

@@ -192,6 +192,12 @@ export class CodeSymbolStore implements ICodeSymbolReader {
    */
   private vecOrphansReconciled = false;
   private lastStaleRootPurgeAt = Number.NEGATIVE_INFINITY;
+  /**
+   * A stale-root scan is running. The throttle timestamp advances only after
+   * a completed scan, so this flag — not the timestamp — is what stops a
+   * concurrent call from starting a second scan.
+   */
+  private staleRootPurgeInFlight = false;
 
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: CuratorLogger,
@@ -204,7 +210,15 @@ export class CodeSymbolStore implements ICodeSymbolReader {
     private readonly searchWorker: ISqliteSearchWorker | null = null,
   ) {}
 
-  /** Remove only roots confirmed absent. An inaccessible root is retained. */
+  /**
+   * Remove only roots confirmed absent. An inaccessible root is retained.
+   *
+   * The six-hour throttle advances only after a COMPLETED scan: an abort or a
+   * database failure must not suppress the next attempt. While a scan runs, an
+   * in-flight flag holds the place the early timestamp advance used to hold,
+   * so a concurrent call still cannot start a second scan. The flag is set
+   * synchronously, before the first `await`, and cleared in a `finally`.
+   */
   async purgeStaleRoots(
     nowMs = Date.now(),
     statPath: (path: string) => ReturnType<typeof stat> = stat,
@@ -214,10 +228,27 @@ export class CodeSymbolStore implements ICodeSymbolReader {
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     };
     throwIfAborted();
+    if (this.staleRootPurgeInFlight) {
+      return { roots: 0, rows: 0 };
+    }
     if (nowMs - this.lastStaleRootPurgeAt < 6 * 60 * 60 * 1000) {
       return { roots: 0, rows: 0 };
     }
-    this.lastStaleRootPurgeAt = nowMs;
+    this.staleRootPurgeInFlight = true;
+    try {
+      const purged = await this.scanAndPurgeStaleRoots(statPath, throwIfAborted);
+      this.lastStaleRootPurgeAt = nowMs;
+      return purged;
+    } finally {
+      this.staleRootPurgeInFlight = false;
+    }
+  }
+
+  /** One stale-root scan and purge, driven by {@link purgeStaleRoots}. */
+  private async scanAndPurgeStaleRoots(
+    statPath: (path: string) => ReturnType<typeof stat>,
+    throwIfAborted: () => void,
+  ): Promise<{ roots: number; rows: number }> {
     const db = this.connection.db;
     const roots = db.prepare(
       'SELECT DISTINCT workspace_root AS root FROM code_symbols',

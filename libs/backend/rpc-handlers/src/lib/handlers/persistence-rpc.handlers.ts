@@ -371,7 +371,10 @@ export class PersistenceRpcHandlers {
     if (fullCheck && this.integrityService) {
       const checked = await this.integrityService.runFullCheck();
       if (checked) {
-        result.fullCheckRun = true;
+        // `fullCheckRun` answers "did integrity_check run to a verdict". Only
+        // a boolean outcome counts: `null` means the pragma itself could not
+        // run, so the full check produced no answer and must not read as done.
+        result.fullCheckRun = typeof checked.integrityCheckPassed === 'boolean';
         result.quickCheckPassed = checked.verdict === 'ok';
         result.foreignKeyViolations = checked.foreignKeyViolations;
         result.foreignKeyViolationSample = checked.foreignKeyViolationSample ?? [];

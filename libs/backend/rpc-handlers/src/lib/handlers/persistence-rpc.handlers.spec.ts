@@ -270,6 +270,69 @@ describe('PersistenceRpcHandlers', () => {
     expect(db.pragma).not.toHaveBeenCalledWith('integrity_check', expect.anything());
   });
 
+  it('db:health with fullCheck=true reports fullCheckRun=false when integrity_check could not run', async () => {
+    const { conn } = makeConnection({ isOpen: true });
+    // verdict 'ok' with integrityCheckPassed null: the worker ran, quick_check
+    // answered, but integrity_check itself threw. The full check produced no
+    // verdict, so it must not read as done.
+    const integrityService = {
+      runFullCheck: jest.fn().mockResolvedValue({
+        verdict: 'ok', foreignKeyViolations: 0,
+        foreignKeyViolationSample: [], integrityCheckPassed: null,
+      }),
+    };
+
+    const handler = new PersistenceRpcHandlers(
+      logger as never,
+      rpcHandler as never,
+      conn as never,
+      backup as never,
+      vecStatus as never,
+      userInteraction as never,
+      null,
+      null,
+      integrityService as never,
+    );
+    handler.register();
+
+    const result = (await rpcHandler._call('db:health', {
+      fullCheck: true,
+    })) as DbHealthResult;
+
+    expect(result.fullCheckRun).toBe(false);
+    expect(result.integrityCheckPassed).toBeNull();
+  });
+
+  it('db:health with fullCheck=true reports fullCheckRun=true when integrity_check answered false', async () => {
+    const { conn } = makeConnection({ isOpen: true });
+    const integrityService = {
+      runFullCheck: jest.fn().mockResolvedValue({
+        verdict: 'ok', foreignKeyViolations: 0,
+        foreignKeyViolationSample: [], integrityCheckPassed: false,
+      }),
+    };
+
+    const handler = new PersistenceRpcHandlers(
+      logger as never,
+      rpcHandler as never,
+      conn as never,
+      backup as never,
+      vecStatus as never,
+      userInteraction as never,
+      null,
+      null,
+      integrityService as never,
+    );
+    handler.register();
+
+    const result = (await rpcHandler._call('db:health', {
+      fullCheck: true,
+    })) as DbHealthResult;
+
+    expect(result.fullCheckRun).toBe(true);
+    expect(result.integrityCheckPassed).toBe(false);
+  });
+
   it('db:health uses the stored failed verdict without checking on the main connection', async () => {
     const { conn, db } = makeConnection({ isOpen: true });
     const state = { read: jest.fn(() => ({ quickCheckOk: false, foreignKeyViolations: 4 })) };
