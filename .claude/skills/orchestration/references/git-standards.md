@@ -39,7 +39,7 @@ host marks it `done` and runs journaled close-out in the background. Worktree an
 requires user authorization: the opt-in `taskCloseOut.autoRemoveMergedWorktreeAndBranch`
 setting (default `false`), or the user removing the worktree after they authorize it. Removal
 by the host requires a clean worktree and merged branch; otherwise cleanup is
-`pending-user-approval`. Agents must not remove worktrees on their own. `ptah_task_cleanup_completed { runId, taskId, workspaceRoot }` is the manual
+`pending-user-approval` when opt-in is missing, or `refused` with a reason when the worktree is dirty or unmerged. Agents must not remove worktrees on their own. `ptah_task_cleanup_completed { runId, taskId, workspaceRoot }` is the manual
 completed-task cleanup hook.
 
 Never commit to or merge into the default branch without the user's authorization.

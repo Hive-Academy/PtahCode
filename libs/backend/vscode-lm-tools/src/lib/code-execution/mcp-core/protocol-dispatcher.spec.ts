@@ -8841,6 +8841,24 @@ describe('protocol-handlers › ptah_session_handoff', () => {
 });
 
 describe('protocol-handlers › route and outcome registration', () => {
+  it('returns isError and notifies observers when a lifecycle handler throws', async () => {
+    const onToolResult = jest.fn();
+    const deps = buildDeps({
+      ptahAPI: buildPtahAPIStub({ tasks: {
+        cleanupCompleted: jest.fn().mockRejectedValue(new Error('cleanup exploded')),
+      } }),
+      onToolResult,
+    });
+    const response = await handleMCPRequest(makeRequest({
+      id: 'cleanup-throws', method: 'tools/call', params: {
+        name: 'ptah_task_cleanup_completed', arguments: {
+          runId: 'run-1', taskId: 'TASK_2026_898_c1a5', workspaceRoot: process.cwd(),
+        },
+      },
+    }), deps);
+    expect(agentToolResult(response).isError).toBe(true);
+    expect(onToolResult).toHaveBeenCalledWith('cleanup-throws', 'cleanup exploded', true);
+  });
   it('keeps route listed after handoff with agent disabled and outcome deferred', async () => {
     const response = await handleMCPRequest(
       makeRequest({ method: 'tools/list' }),

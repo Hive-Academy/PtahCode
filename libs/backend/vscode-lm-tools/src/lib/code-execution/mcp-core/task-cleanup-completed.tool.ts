@@ -12,7 +12,7 @@ export const TaskCleanupCompletedArgsSchema = z
 export const taskCleanupCompletedTool: MCPToolDefinition = {
   name: 'ptah_task_cleanup_completed',
   description:
-    'Manually retry the shared journalled cleanup for a completed merged task. Removal requires the opt-in setting and a clean, merged worktree; otherwise returns pending-user-approval.',
+    'Retry cleanup for a completed merged task. Removal requires opt-in and a clean, merged worktree. Missing approval returns pending-user-approval; unsafe cleanup returns refused with a reason.',
   inputSchema: {
     type: 'object',
     properties: {

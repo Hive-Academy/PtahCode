@@ -44,6 +44,39 @@ class Store implements ITaskCloseOutStore {
 }
 
 describe('TaskCloseOutService', () => {
+  it('retries not-completed learning on a later automatic run', async () => {
+    const store = new Store();
+    const harvest = { harvestTask: jest.fn()
+      .mockResolvedValueOnce({ outcome: 'not-completed' })
+      .mockResolvedValue({ outcome: 'harvested' }) };
+    const service = new TaskCloseOutService(store, { curateEndedSession: jest.fn() },
+      harvest, { inspectTaskWorktree: jest.fn(), removeWorktree: jest.fn(),
+        deleteBranch: jest.fn() }, logger());
+    const first = await service.run(input);
+    expect(first.steps.find((step) => step.step === 'learning')).toMatchObject({
+      state: 'failed', reason: 'task-not-completed' });
+    const second = await service.run(input);
+    expect(second.steps.find((step) => step.step === 'learning')?.state).toBe('ok');
+    expect(harvest.harvestTask).toHaveBeenCalledTimes(2);
+  });
+
+  it('accepts a stored worktree path with a trailing separator', async () => {
+    const store = new Store();
+    const cleanup: GitCleanupPort = {
+      inspectTaskWorktree: jest.fn().mockResolvedValue({ kind: 'ok', value: {
+        canonicalPath: '/repo/task', branch: 'task', clean: true,
+        branchMergedIntoMain: true } }),
+      removeWorktree: jest.fn().mockResolvedValue({ kind: 'ok', value: undefined }),
+      deleteBranch: jest.fn().mockResolvedValue({ kind: 'ok', value: undefined }),
+    };
+    const service = new TaskCloseOutService(store, { curateEndedSession: jest.fn() },
+      { harvestTask: jest.fn().mockResolvedValue({ outcome: 'harvested' }) },
+      cleanup, logger());
+    const run = await service.run({ ...input, worktreePath: '/repo/task/',
+      autoRemoveMergedWorktreeAndBranch: true });
+    expect(run.steps.find((step) => step.step === 'worktree')?.state).toBe('ok');
+    expect(cleanup.removeWorktree).toHaveBeenCalledTimes(1);
+  });
   it('joins a run, retains completed learning, and retries only cleanup after opt-in', async () => {
     const store = new Store();
     const curation = { curateEndedSession: jest.fn() } as CurationPort;

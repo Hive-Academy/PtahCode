@@ -7,6 +7,24 @@ import {
 } from './session-handoff-ack.store';
 
 describe('SessionHandoffAckStore', () => {
+  it('replaces a stale recorded successor after restart and acknowledges the new one', async () => {
+    const old = { predecessorTabId: 'before', predecessorSdkId: null,
+      successorTabId: 'old', successorSdkId: null, workspaceRoot: '/workspace',
+      handoffPath: '/workspace/HANDOFF.md', state: 'recorded' as const };
+    const values = new Map<string, unknown>([[HANDOFF_ACK_STORAGE_KEY,
+      { schemaVersion: 1, records: [old] }]]);
+    const storage: IStateStorage = {
+      get: <T>(key: string) => values.get(key) as T | undefined,
+      update: async (key, value) => { values.set(key, value); },
+      keys: () => [...values.keys()],
+    };
+    const restarted = new SessionHandoffAckStore(storage);
+    await restarted.record({ ...old, successorTabId: 'new' });
+    expect(await restarted.findBySuccessor('old')).toBeUndefined();
+    expect(await restarted.findBySuccessor('new')).toMatchObject({ state: 'recorded' });
+    expect(await restarted.compareAndSet('before', 'recorded', { state: 'closePending' })).toBe(true);
+    await expect(restarted.record({ ...old, successorTabId: 'third' })).rejects.toThrow();
+  });
   it('recovers invalid state and prunes oldest completed records', async () => {
     const values = new Map<string, unknown>([[HANDOFF_ACK_STORAGE_KEY, { schemaVersion: 99, records: [] }]]);
     const logger = { error: jest.fn() };

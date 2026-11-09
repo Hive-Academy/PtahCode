@@ -1141,12 +1141,11 @@ async function handleIndividualTool(
   const lifecycle = lifecycleTools.find(
     (tool) => tool.definition.name === name,
   );
-  if (lifecycle) {
-    const reply = await lifecycle.handler(args, ptahAPI, deps.logger);
-    return await createToolSuccessResponse(request, reply, deps);
-  }
-
   try {
+    if (lifecycle) {
+      const reply = await lifecycle.handler(args, ptahAPI, deps.logger);
+      return await createToolSuccessResponse(request, reply, deps);
+    }
     switch (name) {
       case 'ptah_workspace_analyze': {
         const result = await ptahAPI.workspace.analyze();

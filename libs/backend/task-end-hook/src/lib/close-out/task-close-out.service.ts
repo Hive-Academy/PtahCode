@@ -1,5 +1,6 @@
 import { inject, injectable } from 'tsyringe';
 import { z } from 'zod';
+import { resolve } from 'node:path';
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import { TASK_END_TOKENS } from '../di/tokens';
 import type {
@@ -164,7 +165,7 @@ export class TaskCloseOutService {
       )
         return { state: 'ok', reason: null };
       if (result.outcome === 'not-completed')
-        return { state: 'refused', reason: 'task-not-completed' };
+        return { state: 'failed', reason: 'task-not-completed' };
       return { state: 'failed', reason: result.outcome };
     }, false, manual);
     await this.cleanupSteps(runId, request, manual);
@@ -254,7 +255,9 @@ export class TaskCloseOutService {
     if (result.kind === 'already-removed') return { state: 'ok', reason: 'already-removed' };
     if (result.kind !== 'ok') return this.cleanupResult(result);
     if (
-      result.value.canonicalPath !== request.worktreePath ||
+      (process.platform === 'win32'
+        ? resolve(result.value.canonicalPath).toLowerCase() !== resolve(request.worktreePath).toLowerCase()
+        : resolve(result.value.canonicalPath) !== resolve(request.worktreePath)) ||
       result.value.branch !== request.branch ||
       !result.value.clean ||
       !result.value.branchMergedIntoMain

@@ -87,7 +87,8 @@ merged PR); inspect its run with `ptah_task_close_out_status { runId }`. Skill-t
 no longer runs on Stop: it is the close-out learning step, or call `skillSynthesis:harvestSpecs`
 explicitly. An agent cleaning up a completed task calls
 `ptah_task_cleanup_completed { runId, taskId, workspaceRoot }`, which retries the journaled cleanup
-steps and returns `pending-user-approval` unless the opt-in setting allows removal.
+steps and returns `pending-user-approval` when approval is missing. A dirty or unmerged
+worktree returns `refused` with the reason; dependency failures return `retryable-failure`.
 
 ## `context.md` template
 

@@ -49,4 +49,22 @@ describe('ptah_task_cleanup_completed', () => {
       ).status,
     ).toBe('refused');
   });
+  it('reports a dirty worktree as refused with its reason', async () => {
+    const run = { runId: input.runId, taskId: input.taskId,
+      mainRoot: input.workspaceRoot, steps: [
+        { step: 'worktree', state: 'refused', reason: 'worktree-not-clean-and-merged', attempts: 1 },
+        { step: 'branch', state: 'refused', reason: 'worktree-removal-pending', attempts: 1 },
+      ] };
+    const service = { start: jest.fn().mockReturnValue(run),
+      status: jest.fn().mockReturnValue(run),
+      cleanupCompleted: jest.fn().mockResolvedValue(run) };
+    const tasks = buildTaskCloseOutNamespace({
+      getCloseOutService: () => service, getIndex: () => undefined,
+      getWorkspaceRoot: () => input.workspaceRoot,
+    });
+    const api = Object.assign({} as PtahAPI, { tasks });
+    expect(JSON.parse(await callTaskCleanupCompleted(input, api))).toMatchObject({
+      status: 'refused', reason: 'worktree-not-clean-and-merged',
+    });
+  });
 });

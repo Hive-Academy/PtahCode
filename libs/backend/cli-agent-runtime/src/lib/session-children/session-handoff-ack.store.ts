@@ -112,10 +112,16 @@ export class SessionHandoffAckStore {
   async record(value: HandoffAckRecord): Promise<void> {
     await this.serialized(async () => {
       const state = await this.readState();
-      if (state.records.some((entry) => entry.predecessorTabId === value.predecessorTabId)) {
-        throw new Error('handoff predecessor already recorded');
+      const index = state.records.findIndex((entry) => entry.predecessorTabId === value.predecessorTabId);
+      if (index >= 0) {
+        const existing = state.records[index];
+        if (existing.state !== 'recorded' || existing.successorTabId === value.successorTabId) {
+          throw new Error('handoff predecessor already recorded');
+        }
+        state.records[index] = RecordSchema.parse(value);
+      } else {
+        state.records.push(RecordSchema.parse(value));
       }
-      state.records.push(RecordSchema.parse(value));
       await this.write(state);
     });
   }

@@ -211,14 +211,18 @@ export function buildTaskCloseOutNamespace(
           (step) => step.step === 'worktree',
         );
         const branch = updated?.steps.find((step) => step.step === 'branch');
-        const pending =
-          worktree?.state === 'refused' || branch?.state === 'refused';
+        const pending = worktree?.reason === 'pending-user-approval' ||
+          branch?.reason === 'pending-user-approval';
+        const refusal = [worktree, branch].find((step) => step?.state === 'refused');
         return {
           status: pending
             ? 'pending-user-approval'
-            : worktree?.state === 'failed' || branch?.state === 'failed'
+            : refusal
+              ? 'refused'
+              : worktree?.state === 'failed' || branch?.state === 'failed'
               ? 'retryable-failure'
               : 'completed',
+          ...(refusal && !pending ? { reason: refusal.reason } : {}),
           run: updated,
         };
       } catch (error: unknown) {
