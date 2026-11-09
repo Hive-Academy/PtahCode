@@ -727,6 +727,8 @@ describe('named lane identity proof', () => {
   it.each<[string, Record<string, unknown>]>([
     ['the bundled CLI Claude Max shape', bundledCliPersonal],
     ['the bundled CLI Claude Pro shape', { subscriptionType: 'Claude Pro' }],
+    // CLI 2.1.321 reports a personal Max 20x login as `Claude Ultra` (TASK_2026_907).
+    ['the bundled CLI Claude Ultra shape', { ...bundledCliPersonal, subscriptionType: 'Claude Ultra' }],
     ['the bundled CLI shape with apiKeySource none', { ...bundledCliPersonal, apiKeySource: 'none' }],
     ['the claude.ai token source shape', personalNoEmail],
   ])('passes the personal-login tripwire for %s', async (_label, info) => {
@@ -760,6 +762,11 @@ describe('named lane identity proof', () => {
       { subscription: 'enterprise', ...refusedSubscription },
     ],
     ['a Claude API subscription', { ...bundledCliPersonal, subscriptionType: 'Claude API' }, { subscription: 'api', ...refusedSubscription }],
+    [
+      'a team-qualified ultra subscription',
+      { ...bundledCliPersonal, subscriptionType: 'Ultra Team' },
+      { subscription: 'other', ...refusedSubscription },
+    ],
     ['an unknown subscription word', { ...personalNoEmail, subscriptionType: 'future' }, { subscription: 'other', ...refusedSubscription }],
     ['no subscription', { tokenSource: 'claude.ai' }, { subscription: 'absent', ...refusedSubscription }],
     ['no subscription and no token source', { apiProvider: 'firstParty' }, { subscription: 'absent', ...refusedSubscription }],
