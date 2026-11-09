@@ -22,8 +22,19 @@ export interface StatsLimitLaneRun {
   readonly runId: string;
   /** CLI id (`codex`, `ptah-cli`, …); part of the lane tile id. */
   readonly cli: string;
-  /** Display name of the CLI ("Codex"). */
+  /**
+   * Ptah CLI agent registry id; set only for `ptah-cli` runs. Two Ptah CLI
+   * agents ("Glm", "kimi code") are different providers, so the lane and
+   * provider tiles key on it beside `cli` (TASK_2026_905).
+   */
+  readonly ptahCliId?: string | null;
+  /** Display name of the CLI ("Codex") or of the Ptah CLI agent ("Glm"). */
   readonly cliLabel: string;
+  /**
+   * `product` when `cliLabel` is only the CLI product-name fallback ("Ptah
+   * CLI") because the run carries no display name. Absent reads `agent`.
+   */
+  readonly cliLabelSource?: 'agent' | 'product';
   readonly role?: string | null;
   /** Model id as reported, for display; absent when unknown. */
   readonly model?: string | null;

@@ -206,4 +206,15 @@ describe('lane usage mapping', () => {
     expect(toStatsLimitLaneRun({ ...agent, usageTotals }).usageTotals).toBe(usageTotals);
     expect(toStatsLimitLaneRun({ ...agent, segments: [] }).usageTotals).toBeNull();
   });
+
+  it('carries the Ptah CLI agent id and name, and falls back only without a name (TASK_2026_905)', () => {
+    const glm = { ...agent, cli: 'ptah-cli', ptahCliId: 'glm-id', displayName: 'Glm' } as MonitoredAgent;
+    expect(toStatsLimitLaneRun(glm)).toMatchObject({ ptahCliId: 'glm-id', cliLabel: 'Glm' });
+    expect(toStatsLimitLaneRun(glm)).not.toHaveProperty('cliLabelSource');
+    expect(toStatsLimitLaneRun({ ...glm, displayName: undefined })).toMatchObject({
+      cliLabel: 'Ptah CLI',
+      cliLabelSource: 'product',
+    });
+    expect(toStatsLimitLaneRun({ ...agent, cli: 'codex', ptahCliId: 'x' } as MonitoredAgent)).not.toHaveProperty('ptahCliId');
+  });
 });

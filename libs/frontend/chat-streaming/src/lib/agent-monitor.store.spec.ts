@@ -607,6 +607,59 @@ describe('AgentMonitorStore', () => {
     expect(restored?.completedAt).toBeUndefined();
   });
 
+  describe('Ptah CLI agent name across a rebuild (TASK_2026_905)', () => {
+    const glm: AgentProcessInfo = {
+      agentId: 'glm-run' as AgentId,
+      cli: 'ptah-cli',
+      task: 'Review',
+      workingDirectory: '/workspace/root',
+      startedAt: '2026-11-09T10:00:00.000Z',
+      status: 'running',
+      parentSessionId: 'session-1',
+      ptahCliId: 'glm-id',
+      ptahCliName: 'Glm',
+    };
+    const glmRef: CliSessionReference = {
+      cliSessionId: 'cli-glm',
+      cli: 'ptah-cli',
+      agentId: glm.agentId,
+      task: 'Review',
+      startedAt: glm.startedAt,
+      completedAt: '2026-11-09T10:00:05.000Z',
+      status: 'error',
+      ptahCliId: 'glm-id',
+    };
+    const card = () => store.agents().find((a) => a.agentId === glm.agentId);
+
+    it('keeps the name when a resync rebuilds the card from a nameless reference', () => {
+      store.onAgentSpawned(glm);
+      expect(card()?.displayName).toBe('Glm');
+      store.onAgentExited({ ...glm, status: 'error', exitCode: 1 });
+
+      // The limit-hit exit persists the reference; the session resync then
+      // rebuilds every finished card of the session from it.
+      store.loadCliSessions([glmRef], 'session-1');
+
+      expect(card()).toMatchObject({ restored: true, displayName: 'Glm' });
+    });
+
+    it('restores the recorded name on a cold restore', () => {
+      store.loadCliSessions([{ ...glmRef, ptahCliName: 'Glm' }], 'session-1');
+      expect(card()?.displayName).toBe('Glm');
+    });
+
+    it('leaves the name unknown when nothing recorded one', () => {
+      store.loadCliSessions([glmRef], 'session-1');
+      expect(card()?.displayName).toBeUndefined();
+    });
+
+    it('names a nameless restored card when the run is spawned again', () => {
+      store.loadCliSessions([glmRef], 'session-1');
+      store.onAgentSpawned({ ...glm, ptahCliName: 'kimi code' });
+      expect(card()?.displayName).toBe('kimi code');
+    });
+  });
+
   function spawnAgent(
     agentId: string,
     parentSessionId?: string,

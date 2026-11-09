@@ -32,7 +32,14 @@ import {
   NEAR_LIMIT_PERCENT,
   windowObservedAt,
 } from '@ptah-extension/shared';
-import { groupLaneRuns, laneTile, runRow, subtotalTile } from './lane-tiles';
+import {
+  groupLaneRuns,
+  laneGroupLabel,
+  laneProviderKey,
+  laneTile,
+  runRow,
+  subtotalTile,
+} from './lane-tiles';
 import { sessionPlan } from './plan-limit-tiles';
 import type {
   StatsLimitContext,
@@ -82,11 +89,12 @@ export function buildStatsLimitViewModel(
   });
   const providers = new Map<string, StatsLimitViewModelInput['laneRuns'][number][]>();
   for (const run of input.laneRuns) {
-    const group = providers.get(run.cli) ?? [];
+    const key = laneProviderKey(run);
+    const group = providers.get(key) ?? [];
     group.push(run);
-    providers.set(run.cli, group);
+    providers.set(key, group);
   }
-  const providerLimits: ProviderLaneLimitModel[] = [...providers].map(([cli, runs]) => {
+  const providerLimits: ProviderLaneLimitModel[] = [...providers].map(([providerKey, runs]) => {
     const ownerKeys = [...new Set(runs.map(run => run.quotaOwner?.key).filter((key): key is string => !!key))];
     const ownerDetails = ownerKeys.flatMap(key => {
       const owner = input.owners.find(snapshot => snapshot.owner.key === key);
@@ -99,7 +107,7 @@ export function buildStatsLimitViewModel(
     });
     const hasUnownedRun = runs.some(run => !run.quotaOwner);
     if (ownerKeys.length !== 1 || hasUnownedRun) return {
-      id: `provider:${cli}`, label: runs[0].cliLabel,
+      id: `provider:${providerKey}`, label: laneGroupLabel(runs),
       ownerState: ownerKeys.length > 1 || ownerKeys.length > 0 && hasUnownedRun ? 'multiple' as const : 'untracked' as const,
       windows: [],
       message: ownerKeys.length > 1 || ownerKeys.length > 0 && hasUnownedRun ? 'Multiple accounts' : 'Limits not tracked',
@@ -109,14 +117,14 @@ export function buildStatsLimitViewModel(
     const ownerSnapshot = input.owners.find(snapshot => snapshot.owner.key === ownerKey);
     const scopes = [...new Set(runs.filter(run => run.quotaOwner?.key === ownerKey).map(run => run.modelScope ?? null))];
     if (scopes.length > 1) return {
-      id: `provider:${cli}`, label: runs[0].cliLabel,
+      id: `provider:${providerKey}`, label: laneGroupLabel(runs),
       ownerState: 'single' as const, windows: [], message: 'Multiple scopes · Usage unknown',
       ownerDetails,
     };
     const ownerPlan = sessionPlan({ ...input, sessionOwnerKey: ownerKey, sessionModelScope: scopes.length === 1 ? scopes[0] : null }, ctx);
     const windows = ownerPlan.tiles.filter(tile => tile.kind === 'window' || tile.kind === 'cooldown' || tile.kind === 'evidence');
     return {
-      id: `provider:${cli}`, label: runs[0].cliLabel,
+      id: `provider:${providerKey}`, label: laneGroupLabel(runs),
       ownerState: 'single' as const, windows,
       message: windows.some(tile => tile.kind === 'window') ? ''
         : ownerSnapshot?.status === 'no-usage-source' || ownerSnapshot?.status === 'provider-unsupported'

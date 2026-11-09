@@ -40,6 +40,15 @@ function ref(overrides: Partial<CliSessionReference> = {}): CliSessionReference 
 }
 
 describe('restoreLaneIdentity', () => {
+  it('restores the Ptah CLI agent name and drops a blank one (TASK_2026_905)', () => {
+    expect(
+      restoreLaneIdentity(ref({ ptahCliId: 'glm-id', ptahCliName: 'Glm' })),
+    ).toMatchObject({ ptahCliId: 'glm-id', ptahCliName: 'Glm' });
+    expect(
+      restoreLaneIdentity(ref({ ptahCliId: 'glm-id', ptahCliName: '  ' })),
+    ).not.toHaveProperty('ptahCliName');
+  });
+
   it('restores parent, manifest, Ptah CLI identity and workspace beside lifecycle', () => {
     const reference = ref({
       ptahCliId: 'ptah-config',

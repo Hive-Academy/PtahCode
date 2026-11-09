@@ -1864,6 +1864,29 @@ describe('SessionMetadataStore', () => {
         });
       });
 
+      it('keeps a valid Ptah CLI agent name on restore (TASK_2026_905)', async () => {
+        const { hostA, hostB } = await runningLaneOfHostA({
+          ptahCliId: 'glm-id',
+          ptahCliName: 'Glm',
+        });
+        await hostA.flushForShutdown();
+
+        const [read] = await hostB.getCliSessionsForRestore('sess-1');
+        expect(read).toMatchObject({ ptahCliId: 'glm-id', ptahCliName: 'Glm' });
+      });
+
+      it('drops a blank or over-long Ptah CLI agent name on restore (TASK_2026_905)', async () => {
+        const { hostA, hostB } = await runningLaneOfHostA({
+          ptahCliId: 'glm-id',
+          ptahCliName: 'x'.repeat(201),
+        });
+        await hostA.flushForShutdown();
+
+        const [read] = await hostB.getCliSessionsForRestore('sess-1');
+        expect(read).toMatchObject({ ptahCliId: 'glm-id' });
+        expect(read).not.toHaveProperty('ptahCliName');
+      });
+
       it('interrupts a lane at once after its host exited cleanly', async () => {
         const { hostA, hostB } = await runningLaneOfHostA();
         await hostA.flushForShutdown();
