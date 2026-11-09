@@ -52,6 +52,8 @@ import { TaskCleanupAdapter } from './git/task-cleanup.adapter';
  * (including `vscode`) into this host-neutral platform lib.
  */
 const LOGGER_TOKEN = Symbol.for('Logger');
+/** Mirrors TASK_END_TOKENS.GIT_CLEANUP_PORT without importing task-end-hook. */
+const TASK_END_GIT_CLEANUP_PORT = Symbol.for('PtahTaskEndGitCleanupPort');
 
 /**
  * Options for Electron platform registration.
@@ -104,7 +106,7 @@ export function registerPlatformElectronServices(
   container: DependencyContainer,
   options: ElectronPlatformOptions,
 ): void {
-  container.register(Symbol.for('PtahTaskEndGitCleanupPort'), {
+  container.register(TASK_END_GIT_CLEANUP_PORT, {
     useFactory: child => new TaskCleanupAdapter(child.resolve<Logger>(LOGGER_TOKEN)),
   });
   const workspaceStoragePath = options.initialFolders?.[0]

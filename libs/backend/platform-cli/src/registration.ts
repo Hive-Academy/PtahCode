@@ -38,6 +38,8 @@ import type { Logger } from '@ptah-extension/vscode-core';
 import { TaskCleanupAdapter } from './git/task-cleanup.adapter';
 
 const LOGGER_TOKEN = Symbol.for('Logger');
+/** Mirrors TASK_END_TOKENS.GIT_CLEANUP_PORT without importing task-end-hook. */
+const TASK_END_GIT_CLEANUP_PORT = Symbol.for('PtahTaskEndGitCleanupPort');
 
 /**
  * Register all CLI platform implementations in the DI container.
@@ -49,7 +51,7 @@ export function registerPlatformCliServices(
   container: DependencyContainer,
   options: CliPlatformOptions,
 ): void {
-  container.register(Symbol.for('PtahTaskEndGitCleanupPort'), {
+  container.register(TASK_END_GIT_CLEANUP_PORT, {
     useFactory: child => new TaskCleanupAdapter(child.resolve<Logger>(LOGGER_TOKEN)),
   });
   const userDataPath = options.userDataPath ?? path.join(homedir(), '.ptah');
