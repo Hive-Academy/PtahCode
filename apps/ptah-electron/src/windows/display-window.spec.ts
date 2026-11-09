@@ -16,6 +16,7 @@ jest.mock('./window-guards', () => ({
 
 import type { Rectangle } from 'electron';
 import type { IStateStorage } from '@ptah-extension/platform-core';
+import { ChildWindowRegistry } from './child-window-registry';
 import { runDisplayWindowHostContract } from '@ptah-extension/platform-core/testing';
 import type {
   DisplayWindowAction,
@@ -168,21 +169,17 @@ class FakeChildWindow extends FakeEmitter implements DisplayChildWindow {
 }
 
 class FakeBridge implements DisplayWindowIpcBridge {
-  senderIds: Array<number | null> = [];
+  readonly childWindows = new ChildWindowRegistry();
+  get senderIds(): number[] { return this.childWindows.senderIds(); }
   pushes: unknown[] = [];
   deliver = true;
-
-  setDisplayWindowSender(webContentsId: number | null): void {
-    this.senderIds.push(webContentsId);
-  }
+  constructor() { this.childWindows.registerView('display', { singleton: true, allowedMethods: new Set() }); }
   sendToRenderer(message: unknown): boolean {
     this.pushes.push(message);
     return this.deliver;
   }
   get currentSender(): number | null {
-    return this.senderIds.length === 0
-      ? null
-      : this.senderIds[this.senderIds.length - 1];
+    return this.senderIds[0] ?? null;
   }
 }
 
@@ -289,6 +286,25 @@ describe('ElectronDisplayWindowHost — Electron behaviour', () => {
   beforeEach(() => {
     onScreen.mockReset();
     onScreen.mockReturnValue(true);
+  });
+
+  it('closes an unregistered child and returns not-ready when registration throws', async () => {
+    const h = harness();
+    jest.spyOn(h.bridge.childWindows, 'register').mockImplementation(() => {
+      throw new Error('registration failed');
+    });
+    const logged = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await expect(h.host.open()).resolves.toEqual({ ok: false, reason: 'not-ready' });
+      expect(h.children[0].destroyed).toBe(true);
+      expect(h.host.isOpen()).toBe(false);
+      expect(logged).toHaveBeenCalledWith(
+        '[Ptah Electron] Display window could not be registered:',
+        'registration failed',
+      );
+    } finally {
+      logged.mockRestore();
+    }
   });
 
   it('answers not-ready without a main window and creates nothing', async () => {

@@ -2,7 +2,7 @@
  * TASK_2026_853_3401 batch 7 — the detached Display window's IPC role.
  *
  * The child window shares the preload and the renderer document with the main
- * window. Once `setDisplayWindowSender(id)` trusts it, it may call only
+ * window. Once the registry trusts it, it may call only
  * `DISPLAY_WINDOW_ALLOWED_METHODS` on `rpc` and read `get-state`. Everything
  * else is refused, and the main window keeps its full surface.
  */
@@ -119,6 +119,21 @@ describe('IpcBridge — detached Display window sender role', () => {
     });
   }
 
+  function trustDisplay() {
+    const window = {
+      webContents: { id: DISPLAY_ID },
+      isDestroyed: () => false,
+      isMinimized: () => false,
+      restore: () => undefined,
+      focus: () => undefined,
+      close: () => undefined,
+      once: () => undefined,
+      loadFile: async () => undefined,
+    };
+    bridge.childWindows.register('display', 'default', window);
+    return window;
+  }
+
   it('lists exactly the display-window methods', () => {
     expect([...DISPLAY_WINDOW_ALLOWED_METHODS].sort()).toEqual([
       'artifacts:openLink',
@@ -139,7 +154,7 @@ describe('IpcBridge — detached Display window sender role', () => {
   it.each([...DISPLAY_WINDOW_ALLOWED_METHODS])(
     'routes the allowed method %s and replies to the child',
     async (method) => {
-      bridge.setDisplayWindowSender(DISPLAY_ID);
+      trustDisplay();
       await rpc(display, method);
       expect(handleMessage).toHaveBeenCalledWith(
         expect.objectContaining({ method }),
@@ -161,7 +176,7 @@ describe('IpcBridge — detached Display window sender role', () => {
     'displayWindow:open',
     'settings:set',
   ])('answers %s from the child with an RPC error and never routes it', async (method) => {
-    bridge.setDisplayWindowSender(DISPLAY_ID);
+    trustDisplay();
     await rpc(display, method);
     expect(handleMessage).not.toHaveBeenCalled();
     expect(display.sent).toEqual([
@@ -175,7 +190,7 @@ describe('IpcBridge — detached Display window sender role', () => {
   });
 
   it('keeps the main window unrestricted while the child is trusted', async () => {
-    bridge.setDisplayWindowSender(DISPLAY_ID);
+    trustDisplay();
     await rpc(main, 'chat:start');
     expect(handleMessage).toHaveBeenCalledWith(
       expect.objectContaining({ method: 'chat:start' }),
@@ -186,7 +201,7 @@ describe('IpcBridge — detached Display window sender role', () => {
   });
 
   it('refuses fire-and-forget messages from the child', async () => {
-    bridge.setDisplayWindowSender(DISPLAY_ID);
+    trustDisplay();
     const message = {
       type: MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_RESPONSE,
       payload: { requestId: 'r1', decision: 'allow' },
@@ -203,7 +218,7 @@ describe('IpcBridge — detached Display window sender role', () => {
   });
 
   it('lets the child read get-state but not write set-state', async () => {
-    bridge.setDisplayWindowSender(DISPLAY_ID);
+    trustDisplay();
     const read = eventFrom(display);
     listeners.get('get-state')?.(read);
     expect(read.returnValue).toEqual({ ptahRoute: { route: '/chat' } });
@@ -216,16 +231,16 @@ describe('IpcBridge — detached Display window sender role', () => {
   });
 
   it('refuses diag:cpu-profile from the child', async () => {
-    bridge.setDisplayWindowSender(DISPLAY_ID);
+    trustDisplay();
     await expect(
       handlers.get('diag:cpu-profile')?.(eventFrom(display), 5_000),
     ).rejects.toThrow('Display window');
     expect(capture).not.toHaveBeenCalled();
   });
 
-  it('stops trusting the child after setDisplayWindowSender(null)', async () => {
-    bridge.setDisplayWindowSender(DISPLAY_ID);
-    bridge.setDisplayWindowSender(null);
+  it('stops trusting the child after unregister', async () => {
+    const trustedWindow = trustDisplay();
+    bridge.childWindows.unregister('display', 'default', trustedWindow);
     await rpc(display, 'displayWindow:getState');
     const read = eventFrom(display);
     listeners.get('get-state')?.(read);
@@ -235,3 +250,4 @@ describe('IpcBridge — detached Display window sender role', () => {
     expect(warn).toHaveBeenCalled();
   });
 });
+
