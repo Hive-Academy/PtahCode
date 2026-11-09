@@ -49,6 +49,15 @@ describe('SubagentNotesGate', () => {
     }
   });
 
+  it.each([NOTES_GATE_GRACE_MS, NOTES_GATE_GRACE_MS + 1])('expires a first decision at grace + %i', (elapsed) => {
+    const gate = new SubagentNotesGate();
+    gate.warn('agent-1', notes, root, 100);
+    expect(gate.check('agent-1', 'Write', { file_path: notes }, 100 + elapsed)).toEqual({
+      reason: 'Ptah budget handoff expired. End your turn now.', stop: true,
+    });
+    expect(gate.expired('agent-1', 100 + elapsed)).toBe(true);
+  });
+
   it('checks every notes write and stops an expired second write', () => {
     const gate = new SubagentNotesGate();
     gate.warn('agent-1', notes, root, 100);

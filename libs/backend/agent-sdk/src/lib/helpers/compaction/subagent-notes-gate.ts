@@ -56,10 +56,10 @@ export class SubagentNotesGate {
   check(agentId: string | undefined, toolName: string, input: unknown, now = Date.now()): GateDecision {
     const entry = agentId ? this.entries.get(agentId) : undefined;
     if (!entry || !agentId) return { stop: false };
-    entry.firstDecisionAt ??= now;
     if (this.expired(agentId, now)) {
       return { reason: 'Ptah budget handoff expired. End your turn now.', stop: true };
     }
+    entry.firstDecisionAt ??= now;
     const parsed = writeInput.safeParse(input);
     const candidate = parsed.success ? path.resolve(entry.workspace, parsed.data.file_path) : undefined;
     const relative = candidate ? path.relative(entry.workspace, candidate) : undefined;

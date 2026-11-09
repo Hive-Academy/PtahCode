@@ -452,6 +452,9 @@ export class SubagentHandoffRecords {
     try {
       tempPath = `${recordPath}.${randomBytes(4).toString('hex')}.scrub.tmp`;
       const content = await fs.readFile(recordPath, 'utf8');
+      if (hasScrubProof(content)) {
+        return !writer.disposing && this.writers.get(toolCallId) === writer && writer.path === recordPath;
+      }
       if (!content.startsWith('---\nstatus: pending\n---\n')) {
         throw new Error('Handoff record frontmatter changed before scrub proof');
       }

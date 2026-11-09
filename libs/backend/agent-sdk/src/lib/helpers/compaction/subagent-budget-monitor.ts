@@ -1975,6 +1975,7 @@ export class SubagentBudgetMonitor {
       this.clearStopRetry(state);
       state.stopRetryTimer = setTimeout(() => {
         state.stopRetryTimer = undefined;
+        state.nextStopAttemptAt = undefined;
         const session = this.sessions.get(this.currentSessionId(sessionId));
         if (!session || session.subagents.get(toolCallId) !== state || state.stopFired || state.stopInFlight) return;
         const settings = this.config.getAgentBudgetSettings();

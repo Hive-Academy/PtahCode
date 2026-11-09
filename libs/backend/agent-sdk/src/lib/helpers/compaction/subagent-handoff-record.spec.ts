@@ -219,6 +219,16 @@ describe('SubagentHandoffRecords', () => {
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('not withdrawn'), expect.any(Object));
   });
 
+  it('marks an already scrubbed owned record without changing its content', async () => {
+    const { store } = makeStore();
+    const result = await store.writeOnce(SESSION, TOOL, 'notes: /safe/path');
+    if (!result.ok) throw new Error('expected a record');
+    expect(await store.markScrubbed(TOOL, result.path)).toBe(true);
+    const content = fs.readFileSync(result.path, 'utf8');
+    expect(await store.markScrubbed(TOOL, result.path)).toBe(true);
+    expect(fs.readFileSync(result.path, 'utf8')).toBe(content);
+  });
+
   it('persists scrub proof and exposes the record on a fresh index', async () => {
     const { store, logger } = makeStore();
     const result = await store.writeOnce(SESSION, TOOL, 'notes: /safe/path');

@@ -3040,6 +3040,18 @@ describe('SubagentBudgetMonitor handoff records', () => {
       expect.objectContaining({ toolCallId: TOOL_CALL, attempts: MAX_STOP_ATTEMPTS }));
   });
 
+  it('retries when the timer fires one millisecond before its deadline', async () => {
+    jest.useFakeTimers();
+    const h = makeHarness();
+    h.dispatcher.stopSubagent.mockRejectedValueOnce(new Error('busy'));
+    await h.monitor.observe(SESSION, over('m1'));
+    const early = Date.now() + STOP_RETRY_BASE_DELAY_MS - 1;
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(early);
+    await jest.advanceTimersByTimeAsync(STOP_RETRY_BASE_DELAY_MS);
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(2);
+    clock.mockRestore();
+  });
+
   it('retries failed safety stops on timers without new messages and clears them on release', async () => {
     jest.useFakeTimers();
     const h = makeHarness();
