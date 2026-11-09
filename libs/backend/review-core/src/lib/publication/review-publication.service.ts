@@ -138,7 +138,7 @@ export class ReviewPublicationService {
     const anchors = rightAnchors(diff);
     const inline = selected.filter(item => anchors.has(rightAnchorKey(item.path, item.line))).slice(0, Math.min(settings.maxNewInline, 10));
     for (const item of selected) if (!inline.includes(item)) {
-      suppressed.push(`${safeText(item.body.split('\n')[0], secrets)}: rank-cap-or-outside-diff`);
+      suppressed.push(`${safeText(item.finding.title, secrets)}: rank-cap-or-outside-diff`);
       repository.suppress(claim.attemptId, item.candidateId, item.finding, 'rank-cap-or-outside-diff', item.verifierFamily);
     }
     const overflow = selected.filter(item => !inline.includes(item));

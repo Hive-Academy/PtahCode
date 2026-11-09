@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { GitHubInlineComment, GitHubIssueComment, GitHubReview, IGitHubReviewPort } from '@ptah-extension/review-contracts';
 import { RepoIdentitySchema, ShaSchema, rightAnchorKey } from '@ptah-extension/review-contracts';
 import { PLATFORM_TOKENS, type ISecretStorage } from '@ptah-extension/platform-core';
+import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import { REVIEW_GITHUB_TOKEN_KEY, REVIEW_GITHUB_TOKENS } from '../di/tokens';
 import { GitHubReviewError } from './github-review.error';
 import { boundedBody, MAX_BODY_CHARS } from './github-body-budget';
@@ -52,6 +53,8 @@ function bodyWithFindings(base: string, findings: readonly PublicationInlineComm
     } else {
       const available = MAX_BODY_CHARS - body.length - 4;
       if (available <= marker.length) continue;
+      // A single paragraph cannot be shortened without losing its finding context.
+      if (!finding.body.includes('\n\n')) continue;
       try {
         body += `\n\n- ${boundedBody(finding.body, [marker], available)}`;
       } catch (error) {
@@ -79,6 +82,7 @@ export class GithubReviewPublicationAdapter implements IGitHubReviewPublicationP
     @inject(REVIEW_GITHUB_TOKENS.FETCH) private readonly fetcher: typeof fetch,
     @inject(REVIEW_GITHUB_TOKENS.REVIEW_PORT) private readonly reader: IGitHubReviewPort,
     @inject(REVIEW_GITHUB_TOKENS.PUBLICATION_GUARD) private readonly guard: ReviewPublicationGuard,
+    @inject(TOKENS.LOGGER) private readonly logger: Logger,
   ) {}
 
   private async check(target: PublicationTarget): Promise<void> {
@@ -177,7 +181,15 @@ export class GithubReviewPublicationAdapter implements IGitHubReviewPublicationP
     if (content.replace(/\\(?=[_-])/g, '').includes(token))
       throw new GitHubReviewError('publication-unavailable', 'Publication contains a secret');
     const existing = await this.ownWalkthrough(target);
-    const walkthroughBody = boundedBody(walkthrough, [walkthroughMarker]);
+    let walkthroughBody: string;
+    try {
+      walkthroughBody = boundedBody(walkthrough, [walkthroughMarker]);
+    } catch (error) {
+      if (!(error instanceof GitHubReviewError) || error.code !== 'publication-unavailable') throw error;
+      // Intentional: publish a minimal walkthrough when its body cannot fit the marker.
+      this.logger.warn('Review walkthrough exceeded GitHub body limit; publishing minimal walkthrough');
+      walkthroughBody = boundedBody('Walkthrough omitted because of GitHub comment limit.', [walkthroughMarker]);
+    }
     let publishedWalkthrough: GitHubIssueComment;
     if (existing?.body === walkthroughBody) {
       publishedWalkthrough = existing;
@@ -208,20 +220,46 @@ export class GithubReviewPublicationAdapter implements IGitHubReviewPublicationP
     const complete = reviews.find(review => review.body.includes(marker) &&
       followUpMarkers.every(followUp => review.body.includes(followUp)));
     if (fresh.length === 0 && complete) return { walkthrough: publishedWalkthrough, review: complete, deferred, publishedFindingIds: [] };
-    const inlineReady = inline;
+    const comments: (GitHubInlineComment & { side: 'RIGHT' })[] = [];
+    const inlineReady: PublicationInlineComment[] = [];
+    for (const candidate of inline) {
+      try {
+        comments.push({ path: candidate.path, line: candidate.line, side: 'RIGHT',
+          body: boundedBody(candidate.body, [findingMarker(candidate.findingId)]) });
+        inlineReady.push(candidate);
+      } catch (error) {
+        if (!(error instanceof GitHubReviewError) || error.code !== 'publication-unavailable') throw error;
+        // Intentional: omit an unfit inline comment and its marker so a later attempt can retry it.
+        this.logger.warn('Review inline comment exceeded GitHub body limit; deferring finding');
+        deferred.push(candidate);
+      }
+    }
     const bodyCandidates = deferred;
-    const normal = bodyWithFindings(overview, bodyCandidates, [...followUpMarkers, marker]);
-    const comments: (GitHubInlineComment & { side: 'RIGHT' })[] = inlineReady.map(x => ({
-      path: x.path, line: x.line, side: 'RIGHT', body: boundedBody(x.body, [findingMarker(x.findingId)]),
-    }));
+    let normal: { body: string; ids: string[] };
+    try {
+      normal = bodyWithFindings(overview, bodyCandidates, [...followUpMarkers, marker]);
+    } catch (error) {
+      if (!(error instanceof GitHubReviewError) || error.code !== 'publication-unavailable') throw error;
+      // Intentional: preserve the head marker when an overview cannot fit in the review body.
+      this.logger.warn('Review overview exceeded GitHub body limit; publishing minimal overview');
+      normal = bodyWithFindings('Review overview omitted because of GitHub comment limit.', bodyCandidates, [marker]);
+    }
     const suffix = `/pulls/${target.number}/reviews`;
     let response = await this.request(target, 'POST', suffix,
       { commit_id: target.headSha, event: 'COMMENT', body: normal.body, comments });
     let publishedIds = [...normal.ids, ...inlineReady.map(x => x.findingId)];
     if (response.status === 422 && comments.length) {
       // GitHub rejected an anchor. Recheck head and policy before the body-only fallback.
-      const moved = bodyWithFindings(`${overview}\n\nInline anchors rejected by GitHub:`, fresh,
-        [...followUpMarkers, marker]);
+      let moved: { body: string; ids: string[] };
+      try {
+        moved = bodyWithFindings(`${overview}\n\nInline anchors rejected by GitHub:`, fresh,
+          [...followUpMarkers, marker]);
+      } catch (error) {
+        if (!(error instanceof GitHubReviewError) || error.code !== 'publication-unavailable') throw error;
+        // Intentional: keep the head marker and retry a minimal review after an oversized overview.
+        this.logger.warn('Review fallback overview exceeded GitHub body limit; publishing minimal overview');
+        moved = bodyWithFindings('Inline anchors rejected by GitHub.', fresh, [marker]);
+      }
       response = await this.request(target, 'POST', suffix, { commit_id: target.headSha,
         event: 'COMMENT', body: moved.body, comments: [] });
       publishedIds = moved.ids;

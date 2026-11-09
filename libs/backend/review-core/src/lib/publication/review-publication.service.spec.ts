@@ -65,6 +65,14 @@ describe('ReviewPublicationService regression', () => {
     await service().publish(claim, 'Walkthrough', diff, [verdict('candidate', 'accepted')], settings, null, [], scope);
     expect(publish.mock.calls[0][0].candidates).toHaveLength(1);
   });
+  it('suppresses a ranked finding outside the diff using its finding title', async () => {
+    const outside = { ...verdict('candidate', 'accepted'), finding: { ...finding, title: 'Outside diff', line: 13 } };
+    await service().publish(claim, 'Walkthrough', diff, [outside], settings, null, []);
+    expect(publish.mock.calls[0][0].candidates).toHaveLength(0);
+    expect(PublicationOutboxRepository.prototype.suppress).toHaveBeenCalledWith(
+      claim.attemptId, 'candidate', expect.objectContaining({ title: 'Outside diff' }),
+      'rank-cap-or-outside-diff', 'codex');
+  });
   it('omits confirmed prior roots before selecting incremental inline comments', async () => {
     jest.spyOn(PublicationOutboxRepository.prototype, 'hasConfirmedFinding').mockReturnValue(true);
     await service().publish(claim, 'Walkthrough', diff, [verdict('candidate', 'accepted')], settings, null, [], scope);

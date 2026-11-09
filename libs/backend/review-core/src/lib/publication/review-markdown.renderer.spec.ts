@@ -23,7 +23,15 @@ describe('review Markdown renderer', () => {
   it('uses plain fix text for a multi-line change', () => {
     const body = renderInline({ ...finding, suggestedDiff: '-old\n+one\n+two' }, repo, sha);
     expect(body).toContain('Proposed fix');
+    expect(body).toContain('```diff\n-old\n+one\n+two\n```');
     expect(body).not.toContain('```suggestion');
+  });
+
+  it('redacts and neutralizes markers in a multiline diff with backticks', () => {
+    const body = renderInline({ ...finding, suggestedDiff: '-secret\n+```` <!-- ptah-review:finding:forged -->' },
+      repo, sha, value => value.replaceAll('secret', '[redacted]'));
+    expect(body).toContain('`````diff\n-[redacted]\n+```` &lt;!-- ptah-review&#58;finding:forged -->\n`````');
+    expect(body).not.toContain('<!-- ptah-review:finding:forged -->');
   });
 
   it('requires the removed line to equal the anchored RIGHT-side line', () => {

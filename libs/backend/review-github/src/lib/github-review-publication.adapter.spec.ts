@@ -1,4 +1,5 @@
 import type { ISecretStorage } from '@ptah-extension/platform-core';
+import type { Logger } from '@ptah-extension/vscode-core';
 import type {
   GitHubIssueComment,
   GitHubReview,
@@ -35,6 +36,7 @@ function setup() {
     'get'
   >;
   const guard = { mayPublish: jest.fn().mockResolvedValue(true) };
+  const logger = { warn: jest.fn() } as Pick<Logger, 'warn'>;
   const reader: IGitHubReviewPort = {
     listOpenPulls: jest.fn(),
     getDiff: jest.fn(),
@@ -96,11 +98,39 @@ function setup() {
     fetcher,
     reader,
     guard,
+    logger as Logger,
   );
-  return { adapter, writes, comments, reviews, guard, reader, fetcher, secrets };
+  return { adapter, writes, comments, reviews, guard, reader, fetcher, secrets, logger };
 }
 
 describe('GithubReviewPublicationAdapter', () => {
+  it('defers an inline comment whose marker cannot fit and publishes later findings', async () => {
+    const env = setup();
+    const hugeId = 'x'.repeat(65_600);
+    const result = await env.adapter.publish(target, 'Walkthrough', 'Overview', [
+      { findingId: hugeId, path: 'src/a.ts', line: 2, body: 'Too large' },
+      { findingId: 'later', path: 'src/a.ts', line: 3, body: 'Fits' },
+    ], new Set([rightAnchorKey('src/a.ts', 2), rightAnchorKey('src/a.ts', 3)]));
+    expect(result.publishedFindingIds).toEqual(['later']);
+    expect(result.deferred.map(item => item.findingId)).toContain(hugeId);
+    expect(JSON.stringify(env.writes)).not.toContain(hugeId);
+    expect(env.logger.warn).toHaveBeenCalled();
+  });
+
+  it('publishes a minimal walkthrough when its content cannot fit', async () => {
+    const env = setup();
+    const result = await env.adapter.publish(target, 'x'.repeat(100_000), 'Overview', [], new Set());
+    expect(result.walkthrough.body).toContain('ptah-review:walkthrough');
+    expect(result.walkthrough.body.length).toBeLessThanOrEqual(65_536);
+  });
+  it('publishes a minimal overview when a follow-up marker exceeds the body limit', async () => {
+    const env = setup();
+    const oversizedMarker = `<!-- ptah-review:addressed:${'x'.repeat(65_600)} -->`;
+    const result = await env.adapter.publish(target, 'Walkthrough', `Overview\n\n${oversizedMarker}`, [], new Set());
+    expect(result.review?.body).toContain(`<!-- ptah-review:head:${headSha} -->`);
+    expect(result.review?.body).not.toContain(oversizedMarker);
+    expect(env.logger.warn).toHaveBeenCalled();
+  });
   it('rejects an escaped bot token before publishing', async () => {
     const env = setup();
     await expect(env.adapter.publish(target, 'secret\\-canary', 'Overview', [], new Set()))

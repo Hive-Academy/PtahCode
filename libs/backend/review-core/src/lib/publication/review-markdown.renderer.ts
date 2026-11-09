@@ -46,7 +46,12 @@ export function renderInline(finding: ReviewFinding, repo: RepoIdentity, headSha
   const candidate = finding.line !== null ? replacement(finding.suggestedDiff, anchoredLine) : null;
   const suggestion = candidate !== null && redact(candidate) === candidate ? candidate : null;
   if (suggestion !== null) parts.push(`**Suggested fix**\n\n\`\`\`suggestion\n${suggestion}\n\`\`\``);
-  else if (finding.suggestedDiff) parts.push(`**Proposed fix:** ${safe(finding.suggestedDiff)}`);
+  else if (finding.suggestedDiff) {
+    const diff = redact(finding.suggestedDiff).replaceAll('<!--', '&lt;!--').replaceAll('ptah-review:', 'ptah-review&#58;');
+    const longestRun = Math.max(2, ...[...diff.matchAll(/`+/g)].map(match => match[0].length));
+    const fence = '`'.repeat(longestRun + 1);
+    parts.push(`**Proposed fix**\n\n${fence}diff\n${diff}\n${fence}`);
+  }
   parts.push(`<details><summary>Prompt for AI agents</summary>\n\n${safe(finding.fixPrompt)}\n\n</details>`);
   return parts.join('\n\n');
 }
