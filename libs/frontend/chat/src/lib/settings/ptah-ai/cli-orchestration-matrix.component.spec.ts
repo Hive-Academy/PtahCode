@@ -1,4 +1,4 @@
-import { ApplicationRef, signal } from '@angular/core';
+import { signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import {
   ClaudeAmbientStatusService,
@@ -24,7 +24,6 @@ import {
   CLI_INSTALL_GUIDES,
   CliOrchestrationMatrixComponent,
 } from './cli-orchestration-matrix.component';
-import { isDisabledControl } from '../feedback/busy-disabled.testing';
 
 const ready = <T>(data: T): ProvidersSettingsSection<T> => ({
   status: 'ready',
@@ -223,35 +222,19 @@ class AmbientStub {
 describe('CliOrchestrationMatrixComponent', () => {
   let fixture: ComponentFixture<CliOrchestrationMatrixComponent>;
   let state: StateStub;
+  let feedback: SettingsSaveFeedbackService;
   let accounts: AccountsStub;
   let ambient: AmbientStub;
-  /** Read when a cell is created; the matrix itself never injects the account services. */
-  let electron = true;
-  let feedback: SettingsSaveFeedbackService;
+  let electron: boolean;
   const element = () => fixture.nativeElement as HTMLElement;
-  const q = <T extends HTMLElement = HTMLElement>(selector: string) =>
-    element().querySelector(selector) as T | null;
-  const row = (id: string) => q(`[data-testid="cli-matrix-row-${id}"]`);
-  const rowIds = (selector: string) =>
-    Array.from(
-      element().querySelectorAll(
-        `${selector} tr[data-testid^="cli-matrix-row-"]`,
-      ),
-    ).map((node) =>
-      node.getAttribute('data-testid')?.replace('cli-matrix-row-', ''),
-    );
-  const statusOf = (id: string) =>
-    row(id)
-      ?.querySelector('[data-testid="cli-matrix-status"]')
-      ?.textContent?.trim();
-  async function flush() {
-    for (let i = 0; i < 8; i += 1) await Promise.resolve();
-    fixture.detectChanges();
-  }
+  const q = <T extends HTMLElement = HTMLElement>(selector: string) => element().querySelector(selector) as T | null;
+  const card = (id: string) => q(`[data-testid="cli-provider-card-${id}"]`);
+  const button = (root: Element | null, label: string) => Array.from(root?.querySelectorAll('button') ?? [])
+    .find(candidate => candidate.textContent?.trim().includes(label)) as HTMLButtonElement | undefined;
+  const toggle = (id: string) => card(id)?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+  async function flush() { for (let i = 0; i < 8; i += 1) await Promise.resolve(); fixture.detectChanges(); }
   function check(id: string, checked: boolean) {
-    const input = q<HTMLInputElement>(
-      `[data-testid="cli-matrix-toggle-${id}"]`,
-    );
+    const input = toggle(id);
     if (!input) throw new Error(`No toggle for ${id}`);
     input.checked = checked;
     input.dispatchEvent(new Event('change'));
@@ -264,1333 +247,330 @@ describe('CliOrchestrationMatrixComponent', () => {
     }));
     fixture.detectChanges();
   }
-  /** Decision 1: the Uninstalled group starts collapsed; most cases look inside it. */
-  function expandUninstalled() {
-    q<HTMLButtonElement>(
-      '[data-testid="cli-matrix-uninstalled-toggle"]',
-    )?.click();
-    fixture.detectChanges();
-  }
-  /** V36-7: Edit and Delete live in the row's "More actions" popover. */
-  function more(id: string) {
-    q<HTMLButtonElement>(`[data-testid="cli-matrix-more-${id}"]`)?.click();
-    fixture.detectChanges();
-  }
-  /** Runs afterNextRender callbacks (focus moves). */
-  function render() {
-    TestBed.inject(ApplicationRef).tick();
-    fixture.detectChanges();
-  }
-
+  function expandUninstalled() { q<HTMLButtonElement>('[data-testid="cli-matrix-uninstalled-toggle"]')?.click(); fixture.detectChanges(); }
   beforeAll(() => {
-    // jsdom has no <dialog> API; the Batch 32 modals use showModal()/close().
-    HTMLDialogElement.prototype.showModal ??= function (
-      this: HTMLDialogElement,
-    ) {
-      this.setAttribute('open', '');
-    };
-    HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) {
-      this.removeAttribute('open');
-    };
+    HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.setAttribute('open', ''); };
+    HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) { this.removeAttribute('open'); };
   });
-
   beforeEach(() => {
-    Object.defineProperty(Element.prototype, 'scrollIntoView', {
-      writable: true,
-      configurable: true,
-      value: jest.fn(),
-    });
+    Object.defineProperty(Element.prototype, 'scrollIntoView', { writable: true, configurable: true, value: jest.fn() });
     state = new StateStub();
-    accounts = new AccountsStub();
-    ambient = new AmbientStub();
-    electron = true;
+    accounts = new AccountsStub(); ambient = new AmbientStub(); electron = true;
     TestBed.configureTestingModule({
       imports: [CliOrchestrationMatrixComponent],
       providers: [
         { provide: ProvidersSettingsStateService, useValue: state },
-        {
-          // A getter: other children inject this service when the matrix is created, before a test flips `electron`.
-          provide: VSCodeService,
-          useValue: {
-            get isElectron() {
-              return electron;
-            },
-          },
-        },
+        { provide: VSCodeService, useValue: { get isElectron() { return electron; } } },
         { provide: ProviderAccountsStateService, useValue: accounts },
         { provide: ClaudeAmbientStatusService, useValue: ambient },
-        {
-          provide: PROVIDER_MODELS_LOADER,
-          useValue: {
-            listModels: jest.fn(async () => ({ models: [], totalCount: 0 })),
-          },
-        },
+        { provide: PROVIDER_MODELS_LOADER, useValue: { listModels: jest.fn(async () => ({ models: [], totalCount: 0 })) } },
         SettingsSaveFeedbackService,
       ],
     });
     feedback = TestBed.inject(SettingsSaveFeedbackService);
     fixture = TestBed.createComponent(CliOrchestrationMatrixComponent);
     fixture.detectChanges();
+  });
+  afterEach(() => { feedback.dismiss(); TestBed.resetTestingModule(); });
+
+  it('mounts installed cards in preferred order, then uninstalled cards, with instances and shared defaults below', () => {
+    state.orchestration.set(ready({ ...ORCHESTRATION,
+      detectedClis: ORCHESTRATION.detectedClis.map(cli =>
+        cli.cli === 'ptah-cli' ? { ...cli, manifest: laneManifest } : cli),
+    }));
+    fixture.detectChanges();
+    expect(Array.from(q('[data-testid="cli-matrix"]')?.querySelectorAll('ptah-cli-provider-grid:first-child ptah-cli-provider-card article') ?? [])
+      .map(node => node.getAttribute('data-testid'))).toEqual([
+        'cli-provider-card-codex', 'cli-provider-card-antigravity', 'cli-provider-card-copilot', 'cli-provider-card-opencode',
+      ]);
+    expect(card('cursor')).toBeNull();
     expandUninstalled();
+    expect(card('cursor')).not.toBeNull();
+    expect(card('pi')).not.toBeNull();
+    expect(q('ptah-cli-shared-defaults')).not.toBeNull();
+    expect(q('ptah-cli-instances')).not.toBeNull();
+    expect(card('glm-1')).toBeNull();
   });
-  afterEach(() => {
-    feedback.dismiss();
-    TestBed.resetTestingModule();
+  it('keeps the Uninstalled disclosure collapsed with its count and omits it when all CLIs are installed', () => {
+    const disclosure = q<HTMLButtonElement>('[data-testid="cli-matrix-uninstalled-toggle"]');
+    expect(disclosure?.textContent).toContain('Uninstalled CLI agents (2)');
+    expect(disclosure?.getAttribute('aria-expanded')).toBe('false');
+    expect(q('[data-testid="cli-matrix-uninstalled"]')).toBeNull();
+    disclosure?.click(); fixture.detectChanges();
+    expect(q('[data-testid="cli-matrix-uninstalled"]')?.querySelectorAll('ptah-cli-provider-card')).toHaveLength(2);
+    state.orchestration.set(ready({ ...ORCHESTRATION, detectedClis: [detected('codex', true)] }));
+    fixture.detectChanges();
+    expect(q('[data-testid="cli-matrix-uninstalled-toggle"]')).toBeNull();
   });
-
-  describe('structure (prototype section 2, design-spec §3.5)', () => {
-    it('gives the CLI matrix its own glass content section', () => {
-      expect(q('[data-testid="settings-cli-matrix"]')?.getAttribute('data-glass-surface')).toBe('content');
-      expect(q('[data-testid="cli-instances"]')?.closest('[data-testid="settings-cli-matrix"]')).toBeNull();
-    });
-    it('is a table-sm with the prototype columns', () => {
-      const table = q('[data-testid="cli-matrix"]');
-      expect(table?.tagName).toBe('TABLE');
-      expect(table?.className).toContain('table-sm');
-      expect(table?.className).not.toContain('table-xs');
-      expect(
-        Array.from(table?.querySelectorAll('thead th') ?? []).map((th) =>
-          th.textContent?.trim(),
-        ),
-      ).toEqual([
-        'On',
-        'Agent / Instance',
-        'Status',
-        'Provider',
-        'Model',
-        'Effort',
-        'Permissions & Safety',
-        'Lane defaults',
-        'Actions',
-      ]);
-      expect(q('#cli-matrix-heading')?.textContent).toContain(
-        'CLI Agents & Custom Instances Matrix',
-      );
-    });
-
-    it('lists installed system rows by preferred order, then the Uninstalled group (#71); instances below the table', () => {
-      expect(
-        rowIds('tbody:not([data-testid="cli-matrix-uninstalled"])'),
-      ).toEqual(['codex', 'antigravity', 'copilot', 'opencode']);
-      expect(
-        Array.from(
-          element().querySelectorAll(
-            '[data-testid="cli-instances"] li[data-kind="instance"]',
-          ),
-        ).map((node) => node.getAttribute('data-testid')),
-      ).toEqual(['cli-matrix-row-glm-1']);
-      expect(q('table [data-testid="cli-matrix-row-glm-1"]')).toBeNull();
-      expect(rowIds('[data-testid="cli-matrix-uninstalled"]')).toEqual([
-        'cursor',
-        'pi',
-      ]);
-      expect(
-        q('[data-testid="cli-matrix-uninstalled"] th')?.textContent,
-      ).toContain('Uninstalled CLI agents');
-    });
-
-    it('Batch 54.1: an uninstalled CLI toggle stays natively disabled; an installed one only goes aria-disabled while busy', () => {
-      const cursor = q<HTMLInputElement>(
-        '[data-testid="cli-matrix-toggle-cursor"]',
-      );
-      const codex = q<HTMLInputElement>(
-        '[data-testid="cli-matrix-toggle-codex"]',
-      );
-      expect(cursor?.disabled).toBe(true);
-      expect(codex?.disabled).toBe(false);
-      expect(codex?.getAttribute('aria-disabled')).toBeNull();
-    });
-
-    it('omits the Uninstalled group when every CLI is installed', () => {
-      state.orchestration.set(
-        ready({ ...ORCHESTRATION, detectedClis: [detected('codex', true)] }),
-      );
-      fixture.detectChanges();
+  it('shows loading and empty states', () => {
+    state.orchestration.set(unloaded()); state.cliAgents.set(unloaded()); fixture.detectChanges();
+    expect(q('[data-testid="cli-matrix"]')?.getAttribute('aria-busy')).toBe('true');
+    expect(q('[data-testid="cli-matrix-empty"]')?.textContent).toContain('Loading CLI agents');
+    state.orchestration.set(ready({ ...ORCHESTRATION, detectedClis: [detected('pi', false)] }));
+    state.cliAgents.set(ready([])); fixture.detectChanges();
+    expect(q('[data-testid="cli-matrix-empty"]')?.textContent).toContain('No CLI agent is installed');
+  });
+  it('keeps installed toggles focusable but aria-disabled while a save runs', () => {
+    expandUninstalled();
+    expect(toggle('cursor')?.disabled).toBe(true);
+    state.commit.set({ ...idle, status: 'saving' }); fixture.detectChanges();
+    expect(toggle('codex')?.disabled).toBe(false);
+    expect(toggle('codex')?.getAttribute('aria-disabled')).toBe('true');
+    check('codex', false);
+    expect(state.saveSettings).not.toHaveBeenCalled();
+    expect(toggle('codex')?.checked).toBe(true);
+  });
+  it('renders normalized versions, a single model id and the Codex executable line', () => {
+    state.orchestration.set(ready({ ...ORCHESTRATION,
+      detectedClis: ORCHESTRATION.detectedClis.map(cli => cli.cli === 'codex'
+        ? { ...cli, version: 'codex-cli 0.155.1', codexSource: 'system' }
+        : cli),
+      antigravityModel: 'claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)',
+    })); fixture.detectChanges();
+    expect(card('codex')?.querySelector('[data-testid="cli-matrix-version"]')?.textContent?.trim()).toBe('v0.155.1');
+    expect(card('codex')?.querySelector('[data-testid="cli-matrix-version"]')?.getAttribute('title')).toBe('codex-cli 0.155.1');
+    expect(card('antigravity')?.querySelector('button[title*="Claude Sonnet 4.6"]')?.textContent?.trim()).toBe('claude-sonnet-4-6');
+    expect(card('codex')?.textContent).toContain('codex-cli');
+  });
+  it('shows model and effort actions only for enabled installed cards', () => {
+    expandUninstalled();
+    expect(button(card('codex'), 'gpt-5.5-codex')?.disabled).toBe(false);
+    expect(button(card('copilot'), 'CLI default')?.disabled).toBe(true);
+    expect(button(card('cursor'), 'CLI default')?.disabled).toBe(true);
+  });
+  it('preserves matrix concurrency changes and preferred order edits', async () => {
+    const concurrency = q<HTMLInputElement>('[data-testid="policy-max-concurrent-input"]');
+    expect(concurrency?.value).toBe('3');
+    if (!concurrency) throw new Error('Missing concurrency input');
+    concurrency.value = '4'; concurrency.dispatchEvent(new Event('change'));
+    await flush();
+    expect(state.saveSettings).toHaveBeenCalledWith(
+      { orchestration: { maxConcurrentAgents: 4 } }, CONTEXT);
+    q<HTMLButtonElement>('[data-testid="policy-order-edit"]')?.click(); fixture.detectChanges();
+    q<HTMLButtonElement>('[data-testid="policy-order-up-antigravity"]')?.click(); await flush();
+    expect(state.saveSettings).toHaveBeenCalledWith(
+      { orchestration: { preferredAgentOrder: ['antigravity', 'codex', 'glm-1', 'copilot', 'opencode'] } }, CONTEXT);
+  });
+  it('renders card status and a live test slot', () => {
+    expect(card('codex')?.querySelector('.status-slot')?.textContent?.trim()).toBeTruthy();
+    expect(card('codex')?.querySelector('[aria-live="polite"]')).not.toBeNull();
+  });
+  it('keeps Credentials on Cursor only and Install guide on uninstalled cards', () => {
+    expandUninstalled();
+    expect(button(card('cursor'), 'Credentials')).toBeDefined();
+    expect(button(card('codex'), 'Credentials')).toBeUndefined();
+    expect(button(card('pi'), 'Install guide')).toBeDefined();
+    button(card('pi'), 'Install guide')?.click(); fixture.detectChanges();
+    expect(element().textContent).toContain(CLI_INSTALL_GUIDES.pi.note);
+  });
+  it('forwards Codex settings request through the public output', () => {
+    const requested = jest.fn();
+    fixture.componentInstance.codexSettingsRequested.subscribe(requested);
+    button(card('codex'), 'Codex settings')?.click();
+    expect(requested).toHaveBeenCalledTimes(1);
+  });
+  it('saves a lane default and Undo restores the previous choice', async () => {
+    showSavedCodexDefault();
+    const select = card('codex')?.querySelector('select') as HTMLSelectElement;
+    select.value = 'auto-edit'; select.dispatchEvent(new Event('change'));
+    await flush();
+    expect(state.saveSettings).toHaveBeenCalledWith(
+      { orchestration: { cliLaneDefaults: { codex: { permission: 'auto-edit', network: 'deny' } } } }, CONTEXT);
+    await feedback.undo();
+    expect(state.saveSettings).toHaveBeenLastCalledWith(
+      { orchestration: { cliLaneDefaults: { codex: { permission: 'plan', network: 'deny' } } } }, CONTEXT);
+  });
+  it('opens lane default actions before Reset and restores the saved choice on Undo', async () => {
+    showSavedCodexDefault();
+    button(card('codex'), 'More default actions')?.click(); fixture.detectChanges();
+    button(element(), 'Reset to default')?.click(); await flush();
+    expect(state.saveSettings).not.toHaveBeenCalled();
+    button(card('codex'), 'Confirm')?.click(); await flush();
+    expect(state.saveSettings).toHaveBeenCalledWith({ orchestration: { cliLaneDefaults: { codex: null } } }, CONTEXT);
+    await feedback.undo();
+    expect(state.saveSettings).toHaveBeenLastCalledWith(
+      { orchestration: { cliLaneDefaults: { codex: { permission: 'plan', network: 'deny' } } } }, CONTEXT);
+  });
+  it('requires confirmation before saving full access', async () => {
+    showSavedCodexDefault();
+    const select = card('codex')?.querySelector('select') as HTMLSelectElement;
+    select.value = 'yolo'; select.dispatchEvent(new Event('change')); fixture.detectChanges();
+    expect(state.saveSettings).not.toHaveBeenCalled();
+    expect(card('codex')?.querySelector('dialog[open]')).not.toBeNull();
+    button(card('codex'), 'Confirm')?.click(); await flush();
+    expect(state.saveSettings).toHaveBeenCalled();
+  });
+  it('toggles system CLI through disabledClis with Undo and preserves the saved checkbox until readback', async () => {
+    check('codex', false); await flush();
+    expect(state.saveSettings).toHaveBeenCalledWith({ orchestration: { disabledClis: ['copilot', 'codex'] } }, CONTEXT);
+    expect(toggle('codex')?.checked).toBe(true);
+    await feedback.undo();
+    expect(state.saveSettings).toHaveBeenLastCalledWith({ orchestration: { disabledClis: ['copilot'] } }, CONTEXT);
+  });
+  it('disables uninstalled toggles and marks installed toggles aria-disabled when writing is unavailable', () => {
+    expandUninstalled();
+    expect(toggle('pi')?.disabled).toBe(true);
+    state.scopes.set(unloaded()); fixture.detectChanges();
+    expect(toggle('codex')?.disabled).toBe(false);
+    expect(toggle('codex')?.getAttribute('aria-disabled')).toBe('true');
+  });
+  it('mounts the Claude lane account cell only for installed Claude on Electron', () => {
+    expect(q('ptah-claude-lane-account-cell')).toBeNull();
+    expect(accounts.open).not.toHaveBeenCalled();
+    state.orchestration.set(ready({ ...ORCHESTRATION,
+      detectedClis: [...ORCHESTRATION.detectedClis, detected('claude', true, { version: '2.1.0' })],
+    })); fixture.detectChanges();
+    expect(card('claude')?.querySelector('ptah-claude-lane-account-cell')).not.toBeNull();
+    expect(accounts.open).toHaveBeenCalledWith('claude');
+    expect(ambient.read).toHaveBeenCalledWith(false);
+    state.orchestration.set(ready({ ...ORCHESTRATION,
+      detectedClis: [...ORCHESTRATION.detectedClis, detected('claude', false)],
+    })); fixture.detectChanges(); expandUninstalled();
+    expect(card('claude')?.querySelector('ptah-claude-lane-account-cell')).toBeNull();
+  });
+  it('renders and reads no Claude account off Electron', () => {
+    electron = false;
+    state.orchestration.set(ready({ ...ORCHESTRATION,
+      detectedClis: [...ORCHESTRATION.detectedClis, detected('claude', true)],
+    })); fixture.detectChanges();
+    expect(card('claude')?.querySelector('[data-testid="cli-matrix-account-trigger"]')).toBeNull();
+    expect(accounts.open).not.toHaveBeenCalled();
+    expect(accounts.state).not.toHaveBeenCalled();
+    expect(ambient.read).not.toHaveBeenCalled();
+  });
+  it('owns one provider popover across installed and uninstalled grids', () => {
+    expandUninstalled();
+    button(card('codex'), 'Info')?.click(); fixture.detectChanges();
+    expect(card('codex')?.querySelector('[data-testid="cli-provider-popover-content"]')).not.toBeNull();
+    button(card('cursor'), 'Install guide')?.click(); fixture.detectChanges();
+    expect(card('codex')?.querySelector('[data-testid="cli-provider-popover-content"]')).toBeNull();
+    expect(card('cursor')?.querySelector('[data-testid="cli-provider-popover-content"]')).not.toBeNull();
+  });
+  it('keeps a moved Cursor popover open and returns focus to its new trigger', async () => {
+    document.body.appendChild(fixture.nativeElement);
+    try {
+      expandUninstalled();
+      button(card('cursor'), 'Credentials')?.click(); fixture.detectChanges();
+      state.orchestration.set(ready({ ...ORCHESTRATION,
+        detectedClis: ORCHESTRATION.detectedClis.map(cli => cli.cli === 'cursor' ? { ...cli, installed: true } : cli),
+      })); fixture.detectChanges();
+      expect(card('cursor')?.querySelector('[data-testid="cursor-credential-popover"]')).not.toBeNull();
+      card('cursor')?.querySelector<HTMLButtonElement>('[data-testid="cursor-credential-popover"] button[aria-label="Close"]')?.click();
+      fixture.detectChanges(); await flush();
+      expect(document.activeElement).toBe(card('cursor')?.querySelector('[data-popover-kind="credentials"]'));
+    } finally { fixture.nativeElement.remove(); }
+  });
+  it('opens a collapsed Uninstalled group for a moved popover, then focuses its disclosure on close', async () => {
+    document.body.appendChild(fixture.nativeElement);
+    try {
+      state.orchestration.set(ready({ ...ORCHESTRATION,
+        detectedClis: ORCHESTRATION.detectedClis.map(cli => cli.cli === 'cursor' ? { ...cli, installed: true } : cli),
+      })); fixture.detectChanges();
+      button(card('cursor'), 'Credentials')?.click(); fixture.detectChanges();
+      state.orchestration.set(ready(ORCHESTRATION)); fixture.detectChanges();
+      expect(q('[data-testid="cli-matrix-uninstalled-toggle"]')?.getAttribute('aria-expanded')).toBe('true');
+      expect(card('cursor')?.querySelector('[data-testid="cursor-credential-popover"]')).not.toBeNull();
+      card('cursor')?.querySelector<HTMLButtonElement>('[data-testid="cursor-credential-popover"] button[aria-label="Close"]')?.click();
+      fixture.detectChanges(); await flush();
       expect(q('[data-testid="cli-matrix-uninstalled"]')).toBeNull();
-    });
-
-    it('shows an empty state with no installed CLI and no instance, and a loading one before any read', () => {
-      state.orchestration.set(
-        ready({ ...ORCHESTRATION, detectedClis: [detected('pi', false)] }),
-      );
-      state.cliAgents.set(ready([]));
-      fixture.detectChanges();
-      expect(q('[data-testid="cli-matrix-empty"]')?.textContent).toContain(
-        'No CLI agent is installed',
-      );
-      state.orchestration.set(unloaded());
-      state.cliAgents.set(unloaded());
-      fixture.detectChanges();
-      expect(q('[data-testid="cli-matrix-empty"]')?.textContent).toContain(
-        'Loading CLI agents',
-      );
-      expect(q('[data-testid="cli-matrix"]')?.getAttribute('aria-busy')).toBe(
-        'true',
-      );
-    });
-
-    it('uses transparent rows and the table-sm density', () => {
-      expect(q('[data-testid="cli-matrix"]')?.className).toContain('table-sm');
-      expect(q('[data-testid="cli-matrix"]')?.className).not.toContain('py-3');
-      for (const id of ['copilot', 'cursor', 'pi']) {
-        expect(row(id)?.className).not.toContain('surface-2');
-        expect(row(id)?.getAttribute('data-dimmed')).toBe('true');
-      }
-      for (const id of ['codex', 'glm-1'])
-        expect(row(id)?.getAttribute('data-dimmed')).toBeNull();
-      expect(row('glm-1')?.className).not.toContain('surface-2');
-      state.cliAgents.set(ready([{ ...GLM, enabled: false }]));
-      fixture.detectChanges();
-      expect(row('glm-1')?.className).not.toContain('surface-2');
-    });
-
-    it('has one Add, and Tiers / More (Edit, Delete) on instance rows only (Batch 32, V36-7); Credentials only on Cursor', () => {
-      const labels = Array.from(element().querySelectorAll('button')).map(
-        (button) => button.textContent?.trim() ?? '',
-      );
-      expect(
-        labels.filter((label) => label === 'Add Ptah CLI Instance'),
-      ).toHaveLength(1);
-      expect(labels.filter((label) => label === 'Tiers')).toHaveLength(1);
-      expect(q('[data-testid="cli-matrix-edit-glm-1"]')).toBeNull();
-      more('glm-1');
-      expect(
-        q('[data-testid="cli-matrix-edit-glm-1"]')?.textContent?.trim(),
-      ).toBe('Edit name or key');
-      expect(
-        row('glm-1')?.querySelector('[data-testid="cli-matrix-tiers-glm-1"]'),
-      ).not.toBeNull();
-      expect(
-        row('codex')?.querySelector('[data-testid^="cli-matrix-tiers-"]'),
-      ).toBeNull();
-      expect(labels.filter((label) => label === 'Credentials')).toHaveLength(1);
-    });
-
-    it('opens the add modal empty, the edit modal on the instance, and the tier modal for it', () => {
-      const dialogOpen = (testid: string) =>
-        q(`[data-testid="${testid}"]`)?.closest('dialog')?.hasAttribute('open');
-      q<HTMLButtonElement>('[data-testid="cli-matrix-add"]')?.click();
-      fixture.detectChanges();
-      expect(dialogOpen('add-cli-instance-modal')).toBe(true);
-      expect(
-        q('[data-testid="add-cli-instance-modal"]')?.textContent,
-      ).toContain('Add Ptah CLI Agent Instance');
-      q<HTMLButtonElement>(
-        '[data-testid="add-cli-instance-modal"] button[aria-label="Close"]',
-      )?.click();
-      fixture.detectChanges();
-      expect(dialogOpen('add-cli-instance-modal')).toBe(false);
-      more('glm-1');
-      q<HTMLButtonElement>('[data-testid="cli-matrix-edit-glm-1"]')?.click();
-      fixture.detectChanges();
-      expect(
-        q('[data-testid="add-cli-instance-modal"]')?.textContent,
-      ).toContain('Edit Glm');
-      expect(
-        q<HTMLInputElement>('[data-testid="add-cli-instance-name"]')?.value,
-      ).toBe('Glm');
-      q<HTMLButtonElement>(
-        '[data-testid="add-cli-instance-modal"] button[aria-label="Close"]',
-      )?.click();
-      q<HTMLButtonElement>('[data-testid="cli-matrix-tiers-glm-1"]')?.click();
-      fixture.detectChanges();
-      expect(dialogOpen('cli-tier-mapping-modal')).toBe(true);
-      expect(
-        q('[data-testid="cli-tier-mapping-modal"]')?.textContent,
-      ).toContain('Glm Tier Model Mapping');
-      expect(state.refreshTiers).toHaveBeenCalledWith({
-        providerId: 'ollama-cloud',
-        scope: 'cliAgent',
-      });
-    });
-
-    it('shows an Add row when there is no Ptah CLI instance yet', () => {
-      expect(q('[data-testid="cli-matrix-no-instances"]')).toBeNull();
-      state.cliAgents.set(ready([]));
-      fixture.detectChanges();
-      expect(
-        q('[data-testid="cli-matrix-no-instances"]')?.textContent,
-      ).toContain('No Ptah CLI instance yet.');
-    });
+      expect(document.activeElement).toBe(q('[data-testid="cli-matrix-uninstalled-toggle"]'));
+    } finally { fixture.nativeElement.remove(); }
   });
-
-  describe('cells', () => {
-    it('shows only detection states for system CLIs (D11) and the instance status, with its last latency on the card (#43)', () => {
-      expect(statusOf('codex')).toBe('Installed');
-      expect(statusOf('copilot')).toBe('Disabled');
-      expect(statusOf('pi')).toBe('Not installed');
-      expect(statusOf('cursor')).toBe('Needs API key');
-      expect(statusOf('glm-1')).toBe('Installed');
-      expect(element().textContent?.toLowerCase()).not.toContain('quota');
-      state.cliTest.set(
-        ready({ id: 'glm-1', success: true, latencyMs: 112, reason: null }),
-      );
-      fixture.detectChanges();
-      expect(statusOf('glm-1')).toBe('Installed');
-      expect(
-        row('glm-1')
-          ?.querySelector('[data-testid="cli-matrix-test-result"]')
-          ?.textContent?.trim(),
-      ).toBe('Passed in 112ms');
-    });
-
-    it('shows the instance key status and its three tier models (#44, #54) in the Ptah CLI instances section', () => {
-      const subline = row('glm-1')?.querySelector(
-        '[data-testid="cli-matrix-instance-subline"]',
-      );
-      expect(
-        subline
-          ?.querySelector('[data-testid="cli-matrix-key-status"]')
-          ?.textContent?.trim(),
-      ).toBe('Key set');
-      expect(
-        Array.from(row('glm-1')?.querySelectorAll('[data-tier]') ?? []).map(
-          (node) => node.textContent?.replace(/\s+/g, ''),
-        ),
-      ).toEqual(['Sonnet:glm-5.3', 'Opus:glm-4.7', 'Haiku:glm-4.5']);
-      expect(
-        row('glm-1')?.closest('[data-testid="cli-instances"]')?.textContent,
-      ).toContain('Ptah CLI instances');
-    });
-
-    it('shows versions, providers and the CLI defaults', () => {
-      expect(row('codex')?.textContent).toContain('v1.4.0');
-      expect(row('codex')?.textContent).toContain('OpenAI Codex');
-      expect(row('opencode')?.textContent).toContain('opencode');
-      expect(row('pi')?.textContent).toContain('None');
-      expect(
-        q('[data-testid="cli-matrix-effort-antigravity"]')?.textContent?.trim(),
-      ).toBe('default');
-      expect(
-        q('[data-testid="cli-matrix-effort-glm-1"]')?.textContent?.trim(),
-      ).toBe('default');
-    });
-
-    it('shows one readable Codex executable status line', () => {
-      state.orchestration.set(ready({ ...ORCHESTRATION, detectedClis: [
-        detected('codex', true, {
-          version: '0.165.0', codexSource: 'bundled',
-          codexReason: 'Installed Codex 0.160.0 is below the supported minimum 0.165.0; using bundled Codex 0.165.0.',
-        }),
-      ] }));
-      render();
-      expect(row('codex')?.querySelector('[data-testid="cli-matrix-codex-source"]')?.textContent)
-        .toBe('Bundled Codex 0.165.0 — Installed Codex 0.160.0 is below the supported minimum 0.165.0');
-    });
-
-    it('makes model and effort cells buttons only on enabled, installed rows', () => {
-      expect(q('[data-testid="cli-matrix-model-codex"]')?.tagName).toBe(
-        'BUTTON',
-      );
-      expect(
-        q('[data-testid="cli-matrix-effort-codex"]')?.textContent?.trim(),
-      ).toBe('medium');
-      expect(
-        q('[data-testid="cli-matrix-model-glm-1"]')?.textContent?.trim(),
-      ).toBe('glm-5.3:cloud');
-      // Disabled (Copilot) and not installed (Pi): plain text.
-      expect(q('[data-testid="cli-matrix-model-copilot"]')).toBeNull();
-      expect(row('copilot')?.textContent).toContain('provider default');
-      expect(q('[data-testid="cli-matrix-model-pi"]')).toBeNull();
-      expect(row('pi')?.querySelectorAll('td')[4]?.textContent?.trim()).toBe(
-        '—',
-      );
-    });
-
-    it('keeps badge and status text base-content; colour sits on dots and badge fills (deviation 6)', () => {
-      const permission = row('codex')?.querySelector(
-        '[data-testid="cli-matrix-permission"]',
-      );
-      expect(permission?.textContent?.trim()).toBe('Full auto');
-      expect(permission?.className).toContain('text-base-content');
-      expect(permission?.className).toContain('bg-warning/10');
-      expect(
-        row('codex')?.querySelector('[data-testid="cli-matrix-status"]')
-          ?.className,
-      ).toContain('text-base-content');
-      expect(
-        row('codex')?.querySelector(
-          '[data-testid="cli-matrix-status"] .bg-success',
-        ),
-      ).not.toBeNull();
-      expect(
-        row('copilot')
-          ?.querySelector('[data-testid="cli-matrix-permission"]')
-          ?.textContent?.trim(),
-      ).toBe('Auto-approve: Off');
-    });
+  it('opens and closes a model popover in one click', async () => {
+    const trigger = card('codex')?.querySelector<HTMLButtonElement>('[data-popover-kind="model"]');
+    trigger?.click(); fixture.detectChanges(); await flush();
+    expect(card('codex')?.querySelector('[data-testid="cli-matrix-popover"]')?.getAttribute('data-field')).toBe('model');
+    expect(trigger?.getAttribute('aria-expanded')).toBe('true');
+    card('codex')?.querySelector<HTMLButtonElement>('[data-testid="cli-matrix-popover"] button[aria-label="Close"]')?.click();
+    fixture.detectChanges();
+    expect(card('codex')?.querySelector('[data-testid="cli-matrix-popover"]')).toBeNull();
   });
-
-  describe('popovers', () => {
-    it('opens the model popover from the cell (one click) and closes it', async () => {
-      q<HTMLButtonElement>('[data-testid="cli-matrix-model-codex"]')?.click();
-      fixture.detectChanges();
-      await flush();
-      const panel = q('[data-testid="cli-matrix-popover"]');
-      expect(panel?.getAttribute('data-field')).toBe('model');
-      expect(panel?.getAttribute('data-row')).toBe('codex');
-      expect(
-        q('[data-testid="cli-matrix-model-codex"]')?.getAttribute(
-          'aria-expanded',
-        ),
-      ).toBe('true');
-      (
-        panel?.querySelector('button[aria-label="Close"]') as HTMLButtonElement
-      ).click();
-      fixture.detectChanges();
-      expect(q('[data-testid="cli-matrix-popover"]')).toBeNull();
-    });
-
-    it('saves an effort in two clicks: cell, then value (RUX-8)', async () => {
-      q<HTMLButtonElement>('[data-testid="cli-matrix-effort-codex"]')?.click();
-      fixture.detectChanges();
-      q<HTMLButtonElement>(
-        '[data-testid="cli-matrix-popover"] [data-effort="high"]',
-      )?.click();
-      await flush();
-      expect(state.saveSettings).toHaveBeenCalledTimes(1);
-      expect(state.saveSettings).toHaveBeenCalledWith(
-        { orchestration: { codexReasoningEffort: 'high' } },
-        CONTEXT,
-      );
-      expect(q('[data-testid="cli-matrix-popover"]')).toBeNull();
-    });
-
-    it('Batch 55b F3: while a cell save runs, Esc closes the popover and focus returns to the cell (aria-disabled, not native)', async () => {
-      document.body.appendChild(fixture.nativeElement);
-      try {
-        let release: (saved: boolean) => void = () => undefined;
-        state.saveSettings.mockImplementationOnce(() => {
-          state.commit.set({ ...idle, status: 'saving' });
-          return new Promise<boolean>((resolve) => {
-            release = (saved) => {
-              state.commit.set({ ...idle, status: 'saved' });
-              resolve(saved);
-            };
-          });
-        });
-        const trigger = q<HTMLButtonElement>(
-          '[data-testid="cli-matrix-effort-codex"]',
-        );
-        trigger?.focus();
-        trigger?.click();
-        fixture.detectChanges();
-        await flush();
-        const high = q<HTMLButtonElement>(
-          '[data-testid="cli-matrix-popover"] [data-effort="high"]',
-        );
-        high?.focus();
-        high?.click();
-        await flush();
-        expect(feedback.saving()).toBe(true);
-        expect(trigger?.disabled).toBe(false);
-        expect(trigger?.getAttribute('aria-disabled')).toBe('true');
-        expect(document.activeElement).toBe(high);
-        high?.dispatchEvent(
-          new KeyboardEvent('keydown', {
-            key: 'Escape',
-            bubbles: true,
-            cancelable: true,
-          }),
-        );
-        fixture.detectChanges();
-        await flush();
-        expect(q('[data-testid="cli-matrix-popover"]')).toBeNull();
-        expect(document.activeElement).toBe(trigger);
-        release(true);
-        await flush();
-        expect(trigger?.getAttribute('aria-disabled')).toBeNull();
-      } finally {
-        fixture.nativeElement.remove();
-      }
-    });
-
-    it("shows each CLI's permission note in its ℹ popover (#70)", () => {
-      q<HTMLButtonElement>(
-        '[data-testid="cli-matrix-permission-info-pi"]',
-      )?.click();
-      fixture.detectChanges();
-      const popover = q('[data-testid="cli-permission-popover"]');
-      expect(popover?.textContent).toContain('Pi permissions');
-      expect(popover?.textContent).toContain(
-        'No approval gate and no MCP support',
-      );
-    });
-
-    it('keeps Cursor actionable in the Uninstalled group: Credentials opens its popover (#64, Batch 31)', () => {
-      const credentials = q<HTMLButtonElement>(
-        '[data-testid="cli-matrix-credentials-cursor"]',
-      );
-      expect(
-        credentials?.closest('[data-testid="cli-matrix-uninstalled"]'),
-      ).not.toBeNull();
-      expect(
-        row('cursor')?.querySelector(
-          '[data-testid="cli-matrix-install-cursor"]',
-        ),
-      ).not.toBeNull();
-      credentials?.click();
-      fixture.detectChanges();
-      expect(q('[data-testid="cursor-credential-popover"]')).not.toBeNull();
-      expect(credentials?.getAttribute('aria-expanded')).toBe('true');
-    });
-
-    it('offers Credentials on an installed Cursor row too, and on no other row', () => {
-      state.orchestration.set(
-        ready({
-          ...ORCHESTRATION,
-          detectedClis: [
-            detected('cursor', true, { version: 'sdk' }),
-            detected('codex', true),
-          ],
-        }),
-      );
-      fixture.detectChanges();
-      expect(
-        q(
-          'tbody:not([data-testid="cli-matrix-uninstalled"]) [data-testid="cli-matrix-credentials-cursor"]',
-        ),
-      ).not.toBeNull();
-      expect(
-        element().querySelectorAll('[data-testid^="cli-matrix-credentials-"]'),
-      ).toHaveLength(1);
-    });
-
-    it("shows Copilot's auto-approve toggle in its permission popover only (moved from the policy section)", () => {
-      q<HTMLButtonElement>(
-        '[data-testid="cli-matrix-permission-info-copilot"]',
-      )?.click();
-      fixture.detectChanges();
-      const popover = q('[data-testid="cli-permission-popover"]');
-      expect(popover?.textContent).toContain('Copilot permissions');
-      expect(
-        popover?.querySelector('[data-testid="copilot-auto-approve"]'),
-      ).not.toBeNull();
-      q<HTMLButtonElement>(
-        '[data-testid="cli-matrix-permission-info-codex"]',
-      )?.click();
-      fixture.detectChanges();
-      expect(
-        q(
-          '[data-testid="cli-permission-popover"] [data-testid="copilot-auto-approve"]',
-        ),
-      ).toBeNull();
-    });
-
-    it('opens one popover at a time', () => {
-      q<HTMLButtonElement>(
-        '[data-testid="cli-matrix-permission-info-codex"]',
-      )?.click();
-      fixture.detectChanges();
-      q<HTMLButtonElement>('[data-testid="cli-matrix-install-pi"]')?.click();
-      fixture.detectChanges();
-      expect(q('[data-testid="cli-permission-popover"]')).toBeNull();
-      expect(q('[data-testid="cli-install-popover"]')?.textContent).toContain(
-        'npm install -g @earendil-works/pi-coding-agent',
-      );
-    });
-
-    describe('install guide Re-detect', () => {
-      function openPiGuide() {
-        q<HTMLButtonElement>('[data-testid="cli-matrix-install-pi"]')?.click();
-        fixture.detectChanges();
-      }
-      /** The guide's outcome is announced through the page toast, never inline. */
-      const note = () => {
-        expect(q('[data-testid="cli-install-redetect-note"]')).toBeNull();
-        return feedback.toast()?.message;
-      };
-
-      it('closes the guide and focuses the row once the CLI is found', async () => {
-        state.onRedetect = () =>
-          state.orchestration.set(
-            ready({
-              ...ORCHESTRATION,
-              detectedClis: ORCHESTRATION.detectedClis.map((cli) =>
-                cli.cli === 'pi'
-                  ? detected('pi', true, { version: '0.80.3' })
-                  : cli,
-              ),
-            }),
-          );
-        openPiGuide();
-        q<HTMLButtonElement>(
-          '[data-testid="cli-install-redetect-pi"]',
-        )?.click();
-        await flush();
-        render();
-        expect(state.redetectClis).toHaveBeenCalledTimes(1);
-        expect(q('[data-testid="cli-install-popover"]')).toBeNull();
-        expect(rowIds('[data-testid="cli-matrix-uninstalled"]')).not.toContain(
-          'pi',
-        );
-        expect(document.activeElement?.getAttribute('data-testid')).toBe(
-          'cli-matrix-toggle-pi',
-        );
-      });
-
-      it('says the CLI is still missing when detection does not find it', async () => {
-        openPiGuide();
-        q<HTMLButtonElement>(
-          '[data-testid="cli-install-redetect-pi"]',
-        )?.click();
-        await flush();
-        expect(q('[data-testid="cli-install-popover"]')).not.toBeNull();
-        expect(note()).toBe(
-          'Still not found. Check the step above, then try again.',
-        );
-        expect(feedback.toast()?.tone).toBe('status');
-      });
-
-      it('says detection failed when the re-read fails', async () => {
-        state.onRedetect = () =>
-          state.cliDetection.set({
-            status: 'error',
-            data: null,
-            error: 'Could not load this section. Retry.',
-          });
-        openPiGuide();
-        q<HTMLButtonElement>(
-          '[data-testid="cli-install-redetect-pi"]',
-        )?.click();
-        await flush();
-        expect(note()).toBe('Detection failed. Try again.');
-        expect(feedback.toast()?.tone).toBe('alert');
-      });
-
-      it('decides on its own detection result, not the shared section an overlapping re-detect replaced', async () => {
-        // This call failed, but a later policy-bar re-detect already left the shared section ready.
-        state.redetectClis.mockResolvedValueOnce(false);
-        openPiGuide();
-        q<HTMLButtonElement>(
-          '[data-testid="cli-install-redetect-pi"]',
-        )?.click();
-        await flush();
-        expect(state.cliDetection().status).toBe('ready');
-        expect(note()).toBe('Detection failed. Try again.');
-      });
-    });
-
-    it('has install copy for every system CLI, Codex and Copilot as before (#77)', () => {
-      expect(CLI_INSTALL_GUIDES.codex.command).toBe(
-        'npm install -g @openai/codex',
-      );
-      expect(CLI_INSTALL_GUIDES.copilot.command).toBe(
-        'npm install -g @github/copilot',
-      );
-      for (const guide of Object.values(CLI_INSTALL_GUIDES))
-        expect(guide.note).toContain('Re-detect');
-      q<HTMLButtonElement>(
-        '[data-testid="cli-matrix-install-cursor"]',
-      )?.click();
-      fixture.detectChanges();
-      expect(q('[data-testid="cli-install-popover"] code')).toBeNull();
-      expect(q('[data-testid="cli-install-popover"]')?.textContent).toContain(
-        'CURSOR_API_KEY',
-      );
-    });
+  it('saves an effort in two clicks', async () => {
+    card('codex')?.querySelector<HTMLButtonElement>('[data-popover-kind="effort"]')?.click(); fixture.detectChanges();
+    card('codex')?.querySelector<HTMLButtonElement>('[data-testid="cli-matrix-popover"] [data-effort="high"]')?.click();
+    await flush();
+    expect(state.saveSettings).toHaveBeenCalledWith({ orchestration: { codexReasoningEffort: 'high' } }, CONTEXT);
   });
-
-  describe('writes (every write is state.saveSettings through the feedback service)', () => {
-    it('saves a lane default and Undo restores the previous row', async () => {
-      showSavedCodexDefault();
-      const select = row('codex')?.querySelector('select') as HTMLSelectElement;
-      select.value = 'auto-edit';
-      select.dispatchEvent(new Event('change'));
-      expect(select.value).toBe('plan');
-      await flush();
-      expect(state.saveSettings).toHaveBeenCalledWith(
-        { orchestration: { cliLaneDefaults: { codex: { permission: 'auto-edit', network: 'deny' } } } }, CONTEXT,
-      );
-      await feedback.undo();
-      expect(state.saveSettings).toHaveBeenLastCalledWith(
-        { orchestration: { cliLaneDefaults: { codex: { permission: 'plan', network: 'deny' } } } }, CONTEXT,
-      );
-    });
-
-    it('resets a saved default with a null row and Undo restores it', async () => {
-      showSavedCodexDefault();
-      const reset = Array.from(row('codex')?.querySelectorAll('button') ?? [])
-        .find(button => button.textContent?.includes('Reset to default'));
-      reset?.click();
-      fixture.detectChanges();
-      expect(state.saveSettings).not.toHaveBeenCalled();
-      const confirm = Array.from(row('codex')?.querySelectorAll('button') ?? [])
-        .find(button => button.textContent?.trim() === 'Confirm');
-      confirm?.click();
-      await flush();
-      expect(state.saveSettings).toHaveBeenCalledWith(
-        { orchestration: { cliLaneDefaults: { codex: null } } }, CONTEXT,
-      );
-      await feedback.undo();
-      expect(state.saveSettings).toHaveBeenLastCalledWith(
-        { orchestration: { cliLaneDefaults: { codex: { permission: 'plan', network: 'deny' } } } }, CONTEXT,
-      );
-    });
-
-    it('keeps the prior selection when a write is rejected', async () => {
-      showSavedCodexDefault();
-      state.saveSettings.mockImplementationOnce(async () => {
-        state.commit.set({ ...idle, status: 'failed', unsaved: ['agentOrchestration.cliLaneDefaults.codex'], message: 'Unsupported choice.' });
-        return true;
-      });
-      const select = row('codex')?.querySelector('select') as HTMLSelectElement;
-      select.value = 'auto-edit';
-      select.dispatchEvent(new Event('change'));
-      await flush();
-      expect(select.value).toBe('plan');
-      expect(feedback.toast()?.tone).toBe('alert');
-      expect(feedback.toast()?.message).toContain('Unsupported choice.');
-    });
-    it('switches a system CLI off through disabledClis, with Undo', async () => {
-      check('codex', false);
-      await flush();
-      expect(state.saveSettings).toHaveBeenCalledWith(
-        { orchestration: { disabledClis: ['copilot', 'codex'] } },
-        CONTEXT,
-      );
-      expect(feedback.toast()).toEqual({
-        tone: 'status',
-        message: 'Saved Codex off to All Ptah apps.',
-        canUndo: true,
-      });
-      await feedback.undo();
-      expect(state.saveSettings).toHaveBeenLastCalledWith(
-        { orchestration: { disabledClis: ['copilot'] } },
-        CONTEXT,
-      );
-    });
-
-    it('switches a system CLI on by removing it from disabledClis', async () => {
-      check('copilot', true);
-      await flush();
-      expect(state.saveSettings).toHaveBeenCalledWith(
-        { orchestration: { disabledClis: [] } },
-        CONTEXT,
-      );
-    });
-
-    it('switches an instance through ptahCli:update.enabled, with Undo', async () => {
-      check('glm-1', false);
-      await flush();
-      expect(state.saveSettings).toHaveBeenCalledWith(
-        {
-          cli: [{ action: 'update', params: { id: 'glm-1', enabled: false } }],
-        },
-        CONTEXT,
-      );
-      await feedback.undo();
-      expect(state.saveSettings).toHaveBeenLastCalledWith(
-        { cli: [{ action: 'update', params: { id: 'glm-1', enabled: true } }] },
-        CONTEXT,
-      );
-    });
-
-    it('keeps the checkbox on the saved value until the read-back moves it', async () => {
-      check('codex', false);
-      expect(
-        q<HTMLInputElement>('[data-testid="cli-matrix-toggle-codex"]')?.checked,
-      ).toBe(true);
-      await flush();
-    });
-
-    it('disables uninstalled toggles, and every toggle while a save runs or the scopes are not loaded', () => {
-      expect(
-        isDisabledControl(
-          q<HTMLInputElement>('[data-testid="cli-matrix-toggle-pi"]'),
-        ),
-      ).toBe(true);
-      expect(
-        q<HTMLInputElement>('[data-testid="cli-matrix-toggle-pi"]')?.checked,
-      ).toBe(false);
-      state.commit.set({ ...idle, status: 'saving' });
-      fixture.detectChanges();
-      expect(
-        isDisabledControl(
-          q<HTMLInputElement>('[data-testid="cli-matrix-toggle-codex"]'),
-        ),
-      ).toBe(true);
-      state.commit.set(idle);
-      state.scopes.set({ status: 'loading', data: null, error: null });
-      fixture.detectChanges();
-      expect(
-        isDisabledControl(
-          q<HTMLInputElement>('[data-testid="cli-matrix-toggle-glm-1"]'),
-        ),
-      ).toBe(true);
-    });
-
-    it('deletes an instance after the inline confirm, with no Undo', async () => {
-      more('glm-1');
-      q<HTMLButtonElement>('[data-testid="cli-matrix-delete-glm-1"]')?.click();
-      fixture.detectChanges();
-      expect(state.saveSettings).not.toHaveBeenCalled();
-      expect(row('glm-1')?.textContent).toContain('Delete Glm?');
-      q<HTMLButtonElement>('button[aria-label="Confirm delete Glm"]')?.click();
-      await flush();
-      expect(state.saveSettings).toHaveBeenCalledWith(
-        { cli: [{ action: 'delete', params: { id: 'glm-1' } }] },
-        CONTEXT,
-      );
-      expect(feedback.toast()?.canUndo).toBe(false);
-    });
-
-    it('cancels a delete without writing; focus moves to the confirm, then back to More', () => {
-      more('glm-1');
-      q<HTMLButtonElement>('[data-testid="cli-matrix-delete-glm-1"]')?.click();
-      render();
-      const cancel = Array.from(
-        row('glm-1')?.querySelectorAll('button') ?? [],
-      ).find((button) => button.textContent?.trim() === 'Cancel');
-      expect(document.activeElement).toBe(cancel);
-      cancel?.click();
-      render();
-      expect(q('[data-testid="cli-matrix-more-glm-1"]')).not.toBeNull();
-      expect(document.activeElement).toBe(
-        q('[data-testid="cli-matrix-more-glm-1"]'),
-      );
-      expect(state.saveSettings).not.toHaveBeenCalled();
-    });
-
-    it('M2: a refused delete keeps the confirm even when commit() still says an earlier save landed', async () => {
-      state.commit.set({ ...idle, status: 'saved' });
-      state.saveSettings.mockImplementationOnce(async () => false);
-      more('glm-1');
-      q<HTMLButtonElement>('[data-testid="cli-matrix-delete-glm-1"]')?.click();
-      fixture.detectChanges();
-      q<HTMLButtonElement>('button[aria-label="Confirm delete Glm"]')?.click();
-      await flush();
-      expect(row('glm-1')?.textContent).toContain('Delete Glm?');
-    });
-
-    it('Minor 4: Undo of a system on/off restores only that CLI, against the list as it is at Undo time', async () => {
-      check('codex', false);
-      await flush();
-      // Another path disables opencode meanwhile; Undo must keep that change.
-      state.orchestration.set(
-        ready({
-          ...ORCHESTRATION,
-          disabledClis: ['copilot', 'codex', 'opencode'],
-        }),
-      );
-      await feedback.undo();
-      expect(state.saveSettings).toHaveBeenLastCalledWith(
-        { orchestration: { disabledClis: ['copilot', 'opencode'] } },
-        CONTEXT,
-      );
-    });
-  });
-
-  describe('Gate V 36 layout (V36-1/-2/-7, decision 1)', () => {
-    it('decision 1: the Uninstalled group starts collapsed behind a keyboard disclosure with its count', () => {
-      const fresh = TestBed.createComponent(CliOrchestrationMatrixComponent);
-      fresh.detectChanges();
-      const host = fresh.nativeElement as HTMLElement;
-      const toggle = host.querySelector<HTMLButtonElement>(
-        '[data-testid="cli-matrix-uninstalled-toggle"]',
-      );
-      expect(toggle?.tagName).toBe('BUTTON');
-      expect(toggle?.getAttribute('aria-expanded')).toBe('false');
-      expect(toggle?.textContent?.trim()).toBe('Uninstalled CLI agents (2)');
-      expect(
-        host.querySelectorAll(
-          '[data-testid="cli-matrix-uninstalled"] tr[data-testid^="cli-matrix-row-"]',
-        ),
-      ).toHaveLength(0);
-      toggle?.click();
-      fresh.detectChanges();
-      expect(toggle?.getAttribute('aria-expanded')).toBe('true');
-      expect(
-        host.querySelectorAll(
-          '[data-testid="cli-matrix-uninstalled"] tr[data-testid^="cli-matrix-row-"]',
-        ),
-      ).toHaveLength(2);
-      toggle?.click();
-      fresh.detectChanges();
-      expect(toggle?.getAttribute('aria-expanded')).toBe('false');
-      fresh.destroy();
-    });
-
-    it('decision 1: a popover whose row moves into the collapsed group keeps that group open', () => {
-      expandUninstalled();
-      expect(
-        q('[data-testid="cli-matrix-uninstalled-toggle"]')?.getAttribute(
-          'aria-expanded',
-        ),
-      ).toBe('false');
-      state.orchestration.set(
-        ready({
-          ...ORCHESTRATION,
-          detectedClis: [
-            ...ORCHESTRATION.detectedClis.filter((cli) => cli.cli !== 'cursor'),
-            detected('cursor', true, { version: 'sdk' }),
-          ],
-          cursorApiKeyStored: true,
-          cursorApiKeyConfigured: true,
-        }),
-      );
-      fixture.detectChanges();
-      q<HTMLButtonElement>(
-        '[data-testid="cli-matrix-credentials-cursor"]',
-      )?.click();
-      fixture.detectChanges();
-      // The key is removed: Cursor moves back into the (collapsed) Uninstalled group with its popover open.
-      state.orchestration.set(ready(ORCHESTRATION));
-      fixture.detectChanges();
-      expect(
-        q(
-          '[data-testid="cli-matrix-uninstalled"] [data-testid="cursor-credential-popover"]',
-        ),
-      ).not.toBeNull();
-    });
-
-    it("M3: after the Cursor row moves groups, closing its credentials returns focus to the moved row's trigger", () => {
-      q<HTMLButtonElement>(
-        '[data-testid="cli-matrix-credentials-cursor"]',
-      )?.click();
-      fixture.detectChanges();
-      state.orchestration.set(
-        ready({
-          ...ORCHESTRATION,
-          detectedClis: [
-            ...ORCHESTRATION.detectedClis.filter((cli) => cli.cli !== 'cursor'),
-            detected('cursor', true, { version: 'sdk' }),
-          ],
-          cursorApiKeyStored: true,
-          cursorApiKeyConfigured: true,
-        }),
-      );
-      fixture.detectChanges();
-      const moved = q<HTMLButtonElement>(
-        'tbody:not([data-testid="cli-matrix-uninstalled"]) [data-testid="cli-matrix-credentials-cursor"]',
-      );
-      expect(moved).not.toBeNull();
-      q<HTMLButtonElement>(
-        '[data-testid="cursor-credential-popover"] button[aria-label="Close"]',
-      )?.click();
-      render();
-      expect(document.activeElement).toBe(moved);
-    });
-
-    it("re-check N-2: a removed key moves the row into the collapsed group; closing focuses that group's disclosure, not body", () => {
-      expandUninstalled();
-      state.orchestration.set(
-        ready({
-          ...ORCHESTRATION,
-          detectedClis: [
-            ...ORCHESTRATION.detectedClis.filter((cli) => cli.cli !== 'cursor'),
-            detected('cursor', true, { version: 'sdk' }),
-          ],
-          cursorApiKeyStored: true,
-          cursorApiKeyConfigured: true,
-        }),
-      );
-      fixture.detectChanges();
-      q<HTMLButtonElement>(
-        '[data-testid="cli-matrix-credentials-cursor"]',
-      )?.click();
-      fixture.detectChanges();
-      state.orchestration.set(ready(ORCHESTRATION));
-      fixture.detectChanges();
-      q<HTMLButtonElement>(
-        '[data-testid="cursor-credential-popover"] button[aria-label="Close"]',
-      )?.click();
-      render();
-      const toggle = q<HTMLButtonElement>(
-        '[data-testid="cli-matrix-uninstalled-toggle"]',
-      );
-      expect(toggle?.getAttribute('aria-expanded')).toBe('false');
-      expect(q('[data-testid="cli-matrix-credentials-cursor"]')).toBeNull();
-      expect(document.activeElement).toBe(toggle);
-    });
-
-    it('the On box is the "cli-check" checkbox-sm (20 px, centred tick), primary, not daisyUI\'s low-tick checkbox-xs', () => {
-      const box = q<HTMLInputElement>(
-        '[data-testid="cli-matrix-toggle-codex"]',
-      );
-      const classes = box?.className.split(/\s+/) ?? [];
-      expect(classes).toEqual(
-        expect.arrayContaining([
-          'cli-check',
-          'checkbox',
-          'checkbox-primary',
-          'checkbox-sm',
-        ]),
-      );
-      expect(classes).not.toContain('checkbox-xs');
-    });
-
-    it('V36-7: narrow actions move Tiers and Test into More actions', () => {
-      const inlineTiers = q<HTMLButtonElement>(
-        '[data-testid="cli-matrix-tiers-glm-1"]',
-      );
-      // The container rule hides the inline pair and shows the More items below 28rem.
-      expect(inlineTiers?.className).toContain('inst-inline-action');
-      expect(
-        inlineTiers?.parentElement?.querySelector(
-          '[data-testid="cli-matrix-test-glm-1"]',
-        )?.className,
-      ).toContain('inst-inline-action');
-      const trigger = q<HTMLButtonElement>(
-        '[data-testid="cli-matrix-more-glm-1"]',
-      );
-      expect(trigger?.getAttribute('aria-label')).toBe('More actions for Glm');
-      expect(trigger?.getAttribute('aria-expanded')).toBe('false');
-      more('glm-1');
-      expect(trigger?.getAttribute('aria-expanded')).toBe('true');
-      expect(
-        q('[data-testid="cli-matrix-more-menu"]')?.getAttribute('aria-label'),
-      ).toBe('More actions for Glm');
-      const tiers = q<HTMLButtonElement>(
-        '[data-testid="cli-matrix-more-tiers-glm-1"]',
-      );
-      const test = q<HTMLButtonElement>(
-        '[data-testid="cli-matrix-more-test-glm-1"]',
-      );
-      expect(tiers?.getAttribute('aria-label')).toBe('Tiers for Glm');
-      expect(test?.getAttribute('aria-label')).toBe('Test Glm');
-      expect(tiers?.className).toContain('inst-menu-action');
-      expect(test?.className).toContain('inst-menu-action');
-      // Visual re-check N1: the items stack in a column inside the panel (the actions line is whitespace-nowrap).
-      const menuClasses =
-        q('[data-testid="cli-matrix-more-menu"]')?.className.split(/\s+/) ?? [];
-      expect(menuClasses).toEqual(
-        expect.arrayContaining(['flex', 'flex-col', 'w-40']),
-      );
-      for (const item of Array.from(
-        q('[data-testid="cli-matrix-more-menu"]')?.querySelectorAll('button') ??
-          [],
-      )) {
-        expect(item.className.split(/\s+/)).toContain('w-full');
-      }
-      q<HTMLButtonElement>('[data-testid="cli-matrix-edit-glm-1"]')?.click();
-      fixture.detectChanges();
-      expect(q('[data-testid="cli-matrix-more-menu"]')).toBeNull();
-      expect(
-        q('[data-testid="add-cli-instance-modal"]')
-          ?.closest('dialog')
-          ?.hasAttribute('open'),
-      ).toBe(true);
-      more('glm-1');
-      q<HTMLButtonElement>(
-        '[data-testid="cli-matrix-more-test-glm-1"]',
-      )?.click();
-      expect(state.testCliConnection).toHaveBeenCalledWith('glm-1');
-    });
-
-    it('shows a tier summary with the full list as its title, and every unset tier as "Not set"', () => {
-      const summary = () =>
-        row('glm-1')?.querySelector(
-          '[data-testid="cli-matrix-tier-summary"]',
-        ) as HTMLElement;
-      expect(summary().getAttribute('title')).toBe(
-        'Sonnet: glm-5.3, Opus: glm-4.7, Haiku: glm-4.5',
-      );
-      expect(summary().textContent?.replace(/\s+/g, ' ').trim()).toBe(
-        'Model tiers · 3 of 3 set',
-      );
-      state.cliModels.set(
-        ready({
-          'glm-1': { selectedModel: '', tierMappings: { sonnet: 'glm-5.3' } },
-        }),
-      );
-      fixture.detectChanges();
-      expect(summary().textContent).toContain('1 of 3 set');
-      expect(
-        Array.from(row('glm-1')?.querySelectorAll('[data-tier]') ?? []).map(
-          (node) => node.textContent?.replace(/\s+/g, ''),
-        ),
-      ).toEqual(['Sonnet:glm-5.3', 'Opus:Notset', 'Haiku:Notset']);
-    });
-
-    it('fold round 2: the narrow status and provider stay on one line with an accessible provider name', () => {
-      const inline = row('codex')?.querySelector(
-        '[data-testid="cli-matrix-narrow-inline"]',
-      ) as HTMLElement;
-      expect(inline.className).toContain('flex-nowrap');
-      const provider = inline.querySelector(
-        ':scope > span:last-child',
-      ) as HTMLElement;
-      expect(provider.getAttribute('title')).toBe('OpenAI Codex');
-      expect(provider.textContent?.trim()).toBe('Provider: OpenAI Codex');
-    });
-
-    it('V36-2: helper text is 12 px: subtitle, version, provider subline', () => {
-      expect(
-        Array.from(
-          element().querySelectorAll(
-            '[data-testid="settings-cli-matrix"] span',
-          ),
-        ).find((span) =>
-          span.textContent?.includes('Click model or effort cells'),
-        )?.className,
-      ).toContain('text-xs');
-      const version = Array.from(
-        row('codex')?.querySelectorAll('span') ?? [],
-      ).find((span) => span.textContent?.trim() === 'v1.4.0');
-      expect(version?.className).toContain('text-xs');
-      expect(
-        row('codex')?.querySelector(
-          '[data-testid="cli-matrix-narrow-inline"] > span:last-child',
-        )?.className,
-      ).toContain('text-xs');
-      expect(element().innerHTML).not.toContain('text-[10px]');
-      expect(element().innerHTML).not.toContain('text-[9px]');
-      expect(element().innerHTML).not.toContain('text-[11px]');
-    });
-  });
-
-  describe('Test (#52, RUX-11)', () => {
-    const inlineResult = () =>
-      row('glm-1')?.querySelector('[data-testid="cli-matrix-test-result"]') ??
-      null;
-
-    it('tests the instance, announces the latency in the toast, and keeps it as the card last test', async () => {
-      expect(inlineResult()?.textContent?.trim()).toBe('Not run yet');
-      q<HTMLButtonElement>('[data-testid="cli-matrix-test-glm-1"]')?.click();
-      await flush();
-      expect(state.testCliConnection).toHaveBeenCalledWith('glm-1');
-      expect(feedback.toast()).toEqual({
-        tone: 'status',
-        message: 'Glm: Test passed in 112ms.',
-        canUndo: false,
-      });
-      expect(inlineResult()?.textContent?.trim()).toBe('Passed in 112ms');
-      expect(statusOf('glm-1')).toBe('Installed');
-    });
-
-    it("M1: a failure is a fixed sentence, followed only by the state's own fixed reason", async () => {
-      state.testResult = {
-        id: 'glm-1',
-        success: false,
-        latencyMs: null,
-        reason: null,
-      };
-      q<HTMLButtonElement>('[data-testid="cli-matrix-test-glm-1"]')?.click();
-      await flush();
-      expect(inlineResult()?.textContent?.trim()).toBe(
-        'The connection test failed.',
-      );
-      expect(feedback.toast()).toEqual({
-        tone: 'alert',
-        message: 'Glm: The connection test failed.',
-        canUndo: false,
-      });
-      expect(statusOf('glm-1')).toBe('Installed');
-      state.testResult = {
-        id: 'glm-1',
-        success: false,
-        latencyMs: null,
-        reason: 'The provider did not respond.',
-      };
-      q<HTMLButtonElement>('[data-testid="cli-matrix-test-glm-1"]')?.click();
-      await flush();
-      expect(feedback.toast()?.message).toBe(
-        'Glm: The connection test failed. The provider did not respond.',
-      );
-    });
-
-    it('S1: a failed or timed-out run never reports the earlier pass', async () => {
-      q<HTMLButtonElement>('[data-testid="cli-matrix-test-glm-1"]')?.click();
-      await flush();
-      expect(feedback.toast()?.message).toBe('Glm: Test passed in 112ms.');
-      let fail: () => void = () => undefined;
-      state.testCliConnection.mockImplementationOnce(async () => {
-        // The real state drops the previous result when a run starts.
-        state.cliTest.set({ status: 'loading', data: null, error: null });
-        await new Promise<void>((resolve) => {
-          fail = resolve;
-        });
-        state.cliTest.set({
-          status: 'error',
-          data: null,
-          error: 'Could not load this section. Retry.',
+  it('Escape closes the effort popover and returns focus during a save', async () => {
+    document.body.appendChild(fixture.nativeElement);
+    try {
+      let release: (saved: boolean) => void = () => undefined;
+      state.saveSettings.mockImplementationOnce(() => {
+        state.commit.set({ ...idle, status: 'saving' });
+        return new Promise<boolean>(resolve => {
+          release = saved => { state.commit.set({ ...idle, status: 'saved' }); resolve(saved); };
         });
       });
-      q<HTMLButtonElement>('[data-testid="cli-matrix-test-glm-1"]')?.click();
-      fixture.detectChanges();
-      expect(statusOf('glm-1')).toBe('Installed');
-      fail();
-      await flush();
-      expect(feedback.toast()).toEqual({
-        tone: 'alert',
-        message: 'Glm: The test could not run. Try again.',
-        canUndo: false,
-      });
-      expect(row('glm-1')?.textContent).not.toContain('112ms');
-    });
-
-    it('says when the test itself could not run', async () => {
-      state.testCliConnection.mockImplementationOnce(async () => {
-        state.cliTest.set({
-          status: 'error',
-          data: null,
-          error: 'Could not load this section. Retry.',
-        });
-      });
-      q<HTMLButtonElement>('[data-testid="cli-matrix-test-glm-1"]')?.click();
-      await flush();
-      expect(inlineResult()?.textContent?.trim()).toBe('Not run yet');
-      expect(feedback.toast()?.message).toContain('could not run');
-    });
-
-    it("M4 / Minor 2: a create runs the new instance's Test; from the empty-state button focus moves to its first action", async () => {
-      state.cliAgents.set(ready([]));
-      fixture.detectChanges();
-      Array.from(
-        q('[data-testid="cli-matrix-no-instances"]')?.querySelectorAll(
-          'button',
-        ) ?? [],
-      )[0]?.click();
-      fixture.detectChanges();
-      state.cliAgents.set(ready([{ ...GLM, id: 'kimi-9', name: 'Kimi' }]));
-      state.cliModels.set(
-        ready({ 'kimi-9': { selectedModel: '', tierMappings: {} } }),
-      );
-      fixture.debugElement
-        .query((node) => node.name === 'ptah-add-cli-instance-modal')
-        ?.triggerEventHandler('created', 'kimi');
-      fixture.debugElement
-        .query((node) => node.name === 'ptah-add-cli-instance-modal')
-        ?.triggerEventHandler('closed');
-      render();
-      expect(state.testCliConnection).toHaveBeenCalledWith('kimi-9');
-      expect(document.activeElement).toBe(
-        q('[data-testid="cli-matrix-tiers-kimi-9"]'),
-      );
-    });
-
-    it('re-check N-1: a create the refreshed list does not hold runs no Test and says so in a fixed toast', () => {
-      fixture.debugElement
-        .query((node) => node.name === 'ptah-add-cli-instance-modal')
-        ?.triggerEventHandler('created', 'Kimi');
-      expect(state.testCliConnection).not.toHaveBeenCalled();
-      expect(feedback.toast()).toEqual({
-        tone: 'alert',
-        canUndo: false,
-        message:
-          'Created Kimi. Its connection test did not start. Use Test on its row once it shows.',
-      });
-    });
-
-    it('renders no Test for system CLIs (D11)', () => {
-      expect(
-        row('codex')?.querySelector('[data-testid^="cli-matrix-test-"]'),
-      ).toBeNull();
-      expect(row('codex')?.querySelectorAll('td')[8]?.textContent?.trim()).toBe(
-        '',
-      );
-    });
+      const trigger = card('codex')?.querySelector<HTMLButtonElement>('[data-popover-kind="effort"]');
+      trigger?.focus(); trigger?.click(); fixture.detectChanges(); await flush();
+      const high = card('codex')?.querySelector<HTMLButtonElement>('[data-testid="cli-matrix-popover"] [data-effort="high"]');
+      high?.focus(); high?.click(); await flush();
+      expect(feedback.saving()).toBe(true);
+      expect(trigger?.disabled).toBe(false);
+      expect(trigger?.getAttribute('aria-disabled')).toBe('true');
+      high?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      fixture.detectChanges(); await flush();
+      expect(card('codex')?.querySelector('[data-testid="cli-matrix-popover"]')).toBeNull();
+      expect(document.activeElement).toBe(trigger);
+      release(true); await flush();
+    } finally { fixture.nativeElement.remove(); }
   });
-
-  describe('Batch 52: live-shaped values', () => {
-    beforeEach(() => {
-      state.orchestration.set(
-        ready({
-          ...ORCHESTRATION,
-          detectedClis: ORCHESTRATION.detectedClis.map((cli) =>
-            cli.cli === 'codex'
-              ? { ...cli, version: 'codex-cli 0.155.1' }
-              : cli.cli === 'copilot'
-                ? { ...cli, version: 'GitHub Copilot CLI 1.0.83.' }
-                : cli.cli === 'opencode'
-                  ? { ...cli, version: 'opencode v2.0.12' }
-                  : cli,
-          ),
-          antigravityModel: 'claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)',
-        }),
-      );
-      fixture.detectChanges();
-    });
-
-    it("52.1: the version beside the name is the normalised token, on the name's line, with the CLI line as its title", () => {
-      const version = (id: string) =>
-        row(id)?.querySelector('[data-testid="cli-matrix-version"]');
-      expect(version('codex')?.textContent?.trim()).toBe('v0.155.1');
-      expect(version('codex')?.getAttribute('title')).toBe('codex-cli 0.155.1');
-      expect(version('copilot')?.textContent?.trim()).toBe('v1.0.83');
-      expect(version('opencode')?.textContent?.trim()).toBe('v2.0.12');
-      expect(version('codex')?.className).toContain('truncate');
-      expect(version('codex')?.parentElement?.className).toContain(
-        'flex-nowrap',
-      );
-      expect(row('codex')?.textContent).not.toContain('vcodex');
-    });
-
-    it('52.2: the model cell shows the model id once (at most two lines), with the display name in its title', () => {
-      const cell = q<HTMLButtonElement>(
-        '[data-testid="cli-matrix-model-antigravity"]',
-      );
-      expect(cell?.querySelector('span')?.textContent?.trim()).toBe(
-        'claude-sonnet-4-6',
-      );
-      expect(cell?.querySelector('span')?.className).toContain('line-clamp-2');
-      expect(cell?.getAttribute('title')).toBe(
-        'claude-sonnet-4-6 (Claude Sonnet 4.6 (Thinking))',
-      );
-      expect(cell?.getAttribute('aria-label')).toBe(
-        'Antigravity model: claude-sonnet-4-6. Change',
-      );
-    });
+  it('shows instance key status, tier models, and unset tiers in the instance section', () => {
+    const instance = q('[data-testid="cli-matrix-row-glm-1"]');
+    expect(instance?.querySelector('[data-testid="cli-matrix-key-status"]')?.textContent).toContain('Key');
+    expect(Array.from(instance?.querySelectorAll('[data-tier]') ?? []).map(tier => tier.textContent?.replace(/\s+/g, '')))
+      .toEqual(['Sonnet:glm-5.3', 'Opus:glm-4.7', 'Haiku:glm-4.5']);
+    const summary = instance?.querySelector('[data-testid="cli-matrix-tier-summary"]');
+    expect(summary?.getAttribute('title')).toBe('Sonnet: glm-5.3, Opus: glm-4.7, Haiku: glm-4.5');
+    state.cliModels.set(ready({ 'glm-1': { selectedModel: '', tierMappings: { sonnet: 'glm-5.3' } } }));
+    fixture.detectChanges();
+    expect(q('[data-testid="cli-matrix-tier-summary"]')?.textContent).toContain('1 of 3 set');
+    expect(Array.from(q('[data-testid="cli-matrix-row-glm-1"]')?.querySelectorAll('[data-tier]') ?? [])
+      .map(tier => tier.textContent?.replace(/\s+/g, '')))
+      .toEqual(['Sonnet:glm-5.3', 'Opus:Notset', 'Haiku:Notset']);
   });
-
-  describe('P6 lane account cell (L1, acceptance 8)', () => {
-    const cellIn = (id: string) =>
-      row(id)?.querySelector('ptah-claude-lane-account-cell') ?? null;
-    function detectClaude(installed: boolean) {
-      state.orchestration.set(
-        ready({
-          ...ORCHESTRATION,
-          detectedClis: [
-            ...ORCHESTRATION.detectedClis,
-            detected('claude', installed, installed ? { version: '2.1.0' } : {}),
-          ],
-        }),
-      );
-      fixture.detectChanges();
-    }
-
-    it('is absent while no Claude row exists, and reads nothing', () => {
-      expect(q('ptah-claude-lane-account-cell')).toBeNull();
-      expect(accounts.open).not.toHaveBeenCalled();
-    });
-
-    it('sits under the installed Claude row name line only', () => {
-      detectClaude(true);
-      const cell = cellIn('claude');
-      expect(cell).not.toBeNull();
-      expect(cell?.previousElementSibling?.className).toContain('cli-name-line');
-      expect(
-        cell?.querySelector('[data-testid="cli-matrix-account-trigger"]')
-          ?.textContent,
-      ).toContain('Existing Claude login');
-      expect(
-        element().querySelectorAll('ptah-claude-lane-account-cell'),
-      ).toHaveLength(1);
-      for (const id of ['codex', 'antigravity', 'glm-1', 'copilot']) {
-        expect(cellIn(id)).toBeNull();
-      }
-      expect(accounts.open).toHaveBeenCalledWith('claude');
-      expect(ambient.read).toHaveBeenCalledWith(false);
-    });
-
-    it('is absent on an uninstalled Claude row', () => {
-      detectClaude(false);
-      expect(row('claude')).not.toBeNull();
-      expect(q('ptah-claude-lane-account-cell')).toBeNull();
-    });
-
-    it('renders nothing and reads nothing off Electron', () => {
-      electron = false;
-      detectClaude(true);
-      expect(
-        cellIn('claude')?.querySelector(
-          '[data-testid="cli-matrix-account-trigger"]',
-        ) ?? null,
-      ).toBeNull();
-      expect(accounts.open).not.toHaveBeenCalled();
-      expect(accounts.state).not.toHaveBeenCalled();
-      expect(ambient.read).not.toHaveBeenCalled();
-    });
+  it('opens add empty, edit populated, and tier modals through the instance section', () => {
+    const dialogOpen = (id: string) => q(`[data-testid="${id}"]`)?.closest('dialog')?.hasAttribute('open');
+    q<HTMLButtonElement>('[data-testid="cli-matrix-add"]')?.click(); fixture.detectChanges();
+    expect(dialogOpen('add-cli-instance-modal')).toBe(true);
+    expect(q<HTMLInputElement>('[data-testid="add-cli-instance-name"]')?.value).toBe('');
+    q<HTMLButtonElement>('[data-testid="add-cli-instance-modal"] button[aria-label="Close"]')?.click(); fixture.detectChanges();
+    q<HTMLButtonElement>('[data-testid="cli-matrix-more-glm-1"]')?.click(); fixture.detectChanges();
+    q<HTMLButtonElement>('[data-testid="cli-matrix-edit-glm-1"]')?.click(); fixture.detectChanges();
+    expect(dialogOpen('add-cli-instance-modal')).toBe(true);
+    expect(q<HTMLInputElement>('[data-testid="add-cli-instance-name"]')?.value).toBe('Glm');
+    q<HTMLButtonElement>('[data-testid="add-cli-instance-modal"] button[aria-label="Close"]')?.click(); fixture.detectChanges();
+    q<HTMLButtonElement>('[data-testid="cli-matrix-tiers-glm-1"]')?.click(); fixture.detectChanges();
+    expect(dialogOpen('cli-tier-mapping-modal')).toBe(true);
+  });
+  it('offers Add from the instance empty state', () => {
+    state.cliAgents.set(ready([])); fixture.detectChanges();
+    expect(q('[data-testid="cli-matrix-no-instances"]')?.textContent).toContain('No Ptah CLI instance yet.');
+    button(q('[data-testid="cli-matrix-no-instances"]'), 'Add Ptah CLI Instance')?.click(); fixture.detectChanges();
+    expect(q('[data-testid="add-cli-instance-modal"]')?.closest('dialog')?.hasAttribute('open')).toBe(true);
+  });
+  it('shows each permission note and Copilot auto approve only for Copilot', () => {
+    button(card('copilot'), 'Auto-approve: Off')?.click(); fixture.detectChanges();
+    expect(card('copilot')?.querySelector('ptah-cli-provider-card-popovers')).not.toBeNull();
+    expect(card('copilot')?.querySelector('ptah-copilot-auto-approve-toggle')).not.toBeNull();
+    button(card('codex'), 'Ask')?.click(); fixture.detectChanges();
+    expect(card('codex')?.querySelector('ptah-copilot-auto-approve-toggle')).toBeNull();
+  });
+  it('tests a system CLI and displays its latest result in the card', async () => {
+    state.testResult = { id: 'codex', success: true, latencyMs: 112, reason: null };
+    button(card('codex'), 'Test')?.click(); await flush();
+    expect(state.testCliConnection).toHaveBeenCalledWith('codex');
+    expect(card('codex')?.querySelector('.test-status')?.textContent).toContain('112ms');
+  });
+  it('re-detects from an install guide and moves a found card into the installed grid', async () => {
+    expandUninstalled();
+    state.onRedetect = () => state.orchestration.set(ready({ ...ORCHESTRATION,
+      detectedClis: ORCHESTRATION.detectedClis.map(cli => cli.cli === 'pi' ? { ...cli, installed: true } : cli),
+    }));
+    button(card('pi'), 'Install guide')?.click(); fixture.detectChanges();
+    button(card('pi'), 'Re-detect')?.click(); await flush();
+    expect(state.redetectClis).toHaveBeenCalledTimes(1);
+    expect(q('[data-testid="cli-matrix-uninstalled"] [data-testid="cli-provider-card-pi"]')).toBeNull();
+    expect(card('pi')).not.toBeNull();
   });
 });

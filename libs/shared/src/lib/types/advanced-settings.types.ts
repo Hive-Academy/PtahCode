@@ -97,8 +97,8 @@ export const ADVANCED_SETTING_GROUPS: readonly AdvancedSettingGroup[] = [
   },
   {
     id: 'codex-agents',
-    title: 'Codex agents',
-    description: 'Limits Ptah passes to the Codex agents it starts.',
+    title: 'Agent behavior',
+    description: 'How Codex agents search the web and access your workspace.',
   },
   {
     id: 'background-queries',
@@ -210,33 +210,7 @@ export const ADVANCED_SETTINGS: readonly AdvancedSetting[] = [
     default: 200_000,
     apply: 'live',
   },
-  // Codex agents. Read on each Codex spawn; 0 leaves the key out.
-  {
-    key: 'agentOrchestration.codexAutoCompactTokens',
-    group: 'codex-agents',
-    kind: 'number',
-    label: 'Codex auto-compact size',
-    help: 'Codex compacts its conversation when it reaches this size. 0 uses the Codex default.',
-    unit: 'tokens',
-    min: 0,
-    max: 2_000_000,
-    integer: true,
-    default: 120_000,
-    apply: 'next-agent',
-  },
-  {
-    key: 'agentOrchestration.codexToolOutputTokenLimit',
-    group: 'codex-agents',
-    kind: 'number',
-    label: 'Codex tool output limit',
-    help: 'Codex cuts each tool result down to this size. 0 uses the Codex default.',
-    unit: 'tokens',
-    min: 0,
-    max: 200_000,
-    integer: true,
-    default: 2_500,
-    apply: 'next-agent',
-  },
+  // Codex agents. Read on each Codex spawn.
   {
     key: 'agentOrchestration.codexWebSearch',
     group: 'codex-agents',

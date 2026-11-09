@@ -1,0 +1,11 @@
+:host { display: block; min-width: 0; }
+.provider-card { height: 548px; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+.card-body { display: flex; flex: 1; flex-direction: column; gap: 2px; overflow: visible; }
+.status-slot { width: 6.75rem; min-width: 6.75rem; justify-content: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.test-button { width: 6.5rem; min-width: 6.5rem; }
+.test-status { height: 1.25rem; min-height: 1.25rem; }
+.credential-slot { height: 1.9rem; min-height: 1.9rem; }
+.capability-strip { height: 2.25rem; overflow: hidden; }
+:host ::ng-deep .capability-strip [data-testid='cli-capability-summary'] { flex-wrap: nowrap; overflow: hidden; }
+:host ::ng-deep .capability-strip [data-testid='cli-capability-summary'] .badge:nth-child(n+3) { display: none; }
+:host button:focus-visible, :host input:focus-visible { outline: 2px solid var(--ptah-gold-strong); outline-offset: 2px; }

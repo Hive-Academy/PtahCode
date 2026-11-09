@@ -305,6 +305,7 @@ describe('AdvancedSettingsGroupComponent', () => {
 
     it('names the next Codex agent for codex keys and right away for live keys', async () => {
       await create('codex-agents');
+      expect(host().textContent).toContain('Agent behavior');
       expect(
         byTestId('advanced-setting-agentOrchestration.codexWebSearch-field')
           ?.textContent,

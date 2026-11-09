@@ -29,7 +29,7 @@ import type { CliAdapterManifest, SpawnAgentRequest } from '@ptah-extension/shar
 import { parseAgentBudgetSetting, DEFAULT_AGENT_BUDGET_SETTINGS, type AgentBudgetSettings } from '@ptah-extension/shared';
 import { translateLaneSpawnPolicy } from './lane-spawn-policy';
 import { resolveCliLanePolicy } from './cli-lane-policy-resolver';
-import { CODEX_DEFAULT_LANE_BUDGETS } from './cli-adapters/codex/codex-lane-budgets';
+import { CODEX_DEFAULT_LANE_BUDGETS, resolveCodexLaneBudgets } from './cli-adapters/codex/codex-lane-budgets';
 import {
   resolveLaneEffort,
   resolveLaneModel,
@@ -210,32 +210,22 @@ export class AgentSpawnEnvironment {
   }
 
   /**
-   * The Codex lane budgets, with the `FILE_BASED_SETTINGS_DEFAULTS` values
-   * when a key is unset. The values are passed on as read: the adapter
-   * validates them (`resolveCodexLaneBudgets`) and warns once per invalid key.
+   * Resolve the global budgets at spawn, before passing them to Codex.
    */
   resolveLaneBudgets(): CliLaneBudgets {
     const defaults = CODEX_DEFAULT_LANE_BUDGETS;
-    return {
-      autoCompactTokens:
-        this.workspace.getConfiguration<number>(
-          'ptah',
-          'agentOrchestration.codexAutoCompactTokens',
-          defaults.autoCompactTokens,
-        ) ?? defaults.autoCompactTokens,
-      toolOutputTokenLimit:
-        this.workspace.getConfiguration<number>(
-          'ptah',
-          'agentOrchestration.codexToolOutputTokenLimit',
-          defaults.toolOutputTokenLimit,
-        ) ?? defaults.toolOutputTokenLimit,
-      webSearch:
-        this.workspace.getConfiguration<boolean>(
-          'ptah',
-          'agentOrchestration.codexWebSearch',
-          defaults.webSearch,
-        ) ?? defaults.webSearch,
-    };
+    const resolved = resolveCodexLaneBudgets({
+      warnRatio: this.workspace.getConfiguration('ptah', 'agentBudget.warnRatio', DEFAULT_AGENT_BUDGET_SETTINGS.warnRatio),
+      handoffContextTokens: this.workspace.getConfiguration('ptah', 'agentBudget.handoffContextTokens', DEFAULT_AGENT_BUDGET_SETTINGS.handoffContextTokens),
+      toolOutputTokenLimit: this.workspace.getConfiguration('ptah', 'compaction.toolOutputBudgetTokens', defaults.toolOutputTokenLimit),
+      webSearch: this.workspace.getConfiguration('ptah', 'agentOrchestration.codexWebSearch', defaults.webSearch),
+    });
+    for (const warning of resolved.warnings) {
+      if (this.warnedLaneGuard.has(warning)) continue;
+      this.warnedLaneGuard.add(warning);
+      this.logger.warn(`[AgentSpawnEnvironment] ${warning}`);
+    }
+    return resolved.budgets;
   }
 
   /**

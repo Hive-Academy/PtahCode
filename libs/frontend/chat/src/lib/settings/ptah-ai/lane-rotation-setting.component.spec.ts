@@ -56,7 +56,7 @@ describe('LaneRotationSettingComponent', () => {
         { provide: ClaudeRpcService, useValue: { call: host.call } },
         {
           provide: ProvidersSettingsStateService,
-          useValue: { commit: signal({ status: 'idle' }) },
+          useValue: { commit: signal({ status: 'idle' }), cliAgents: signal({ status: 'ready', data: [] }), cliModels: signal({ status: 'ready', data: {} }) },
         },
         SettingsSaveFeedbackService,
       ],
@@ -78,7 +78,8 @@ describe('LaneRotationSettingComponent', () => {
     await create();
     expect(host.call).toHaveBeenCalledWith('settings:get', { key: KEY }, TIMEOUT);
     expect(toggle()?.checked).toBe(true);
-    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Last pick (implement|implement): codex');
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Last pick (Implement · implement)');
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Codex');
   });
 
   it('writes the opposite value through settings:set', async () => {

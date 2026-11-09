@@ -17,8 +17,7 @@ The tab shows these sections, from top to bottom:
 3. **Lane guards**
 4. **Routing suggestions**, **Rotate close executors**, and **Capability matrix**
 5. **Context budgets**
-6. **Codex agents** and **Codex sandbox**
-7. **Background query limits**
+6. **Background query limits**
 
 ## Subagent prompt-cache TTL
 
@@ -87,38 +86,7 @@ If there are no scores, the section shows **No capability matrix yet**.
 
 The setting keys start with `compaction.`, for example `compaction.toolOutputBudgetTokens`.
 
-## Codex agents
-
-**Codex agents** sets the limits that PtahCode gives to the Codex agents that it starts. These values apply to the next Codex agent that you start.
-
-| Field | Key | Default | What it does |
-| ----- | --- | ------- | ------------ |
-| **Codex auto-compact size** | `agentOrchestration.codexAutoCompactTokens` | `120,000` tokens | Codex compacts its conversation at this size. `0` uses the Codex default |
-| **Codex tool output limit** | `agentOrchestration.codexToolOutputTokenLimit` | `2,500` tokens | Codex cuts each tool result down to this size. `0` uses the Codex default |
-| **Codex web search** | `agentOrchestration.codexWebSearch` | On | Lets Codex agents search the web |
-
-For the other Codex settings, see [Codex](/providers/codex/).
-
-## Codex sandbox
-
-**Codex sandbox** sets the sandbox mode for all new Codex chat turns and Codex CLI lanes.
-
-| Mode | What Codex can do |
-| ---- | ----------------- |
-| **Read only** | Read files. It cannot change files or use the network |
-| **Workspace write, no network** | Change files in this workspace. Network access is disabled where the platform supports it |
-| **Workspace write with network** | Change files in this workspace and use the network |
-| **Full access** (default) | Read and change files outside this workspace and use the network, with no sandbox protection |
-
-:::caution
-With **Full access**, commands can affect your computer. Use it only for runs that you trust. When you change to **Full access** from another mode, PtahCode asks you to confirm. Click **Use full access** to confirm.
-:::
-
-On Windows, the workspace-write modes block child processes, so some build and test tools cannot run. Network blocking on Windows is not complete.
-
-For runs that PtahCode starts, this setting takes precedence over `~/.codex/config.toml`. A change applies from the next turn. A turn that is already running keeps its sandbox. **In effect** shows the mode that is in use.
-
-Approval prompts in Codex chat still follow your permission level. Codex CLI lanes run without approval prompts.
+Codex CLI lanes also use **Tool output size**, and they compact at floor(**Budget warning ratio** × **Agent handoff context**). The Codex web search and sandbox settings are on the Codex connection. See [Codex agent behavior](/providers/codex/#agent-behavior).
 
 ## Background query limits
 

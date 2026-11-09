@@ -173,11 +173,14 @@
           [focusTarget]="providersTarget()"
           [requestedProviderId]="requestedProviderId() ?? ''"
           (requestedProviderConsumed)="consumeRequestedProvider($event)"
+          [requestedDrawer]="requestedDrawer()"
+          (requestedDrawerConsumed)="requestedDrawer.set(null)"
         />
         <ptah-agents-routing-settings
           class="block"
           [focusTarget]="agentsRoutingTarget()"
           (focusTargetConsumed)="agentsRoutingTarget.set(null)"
+          (codexSettingsRequested)="openCodexSettings()"
         />
         </div>
       } @placeholder {

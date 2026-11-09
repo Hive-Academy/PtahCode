@@ -199,53 +199,10 @@ function invalidReasoningEffort(params: AgentSetConfigParams): string | null {
   return null;
 }
 
-/** Codex lane token budgets: integers >= 0, where 0 = Codex runtime default. */
-const CODEX_BUDGET_TOKEN_FIELDS = [
-  'codexAutoCompactTokens',
-  'codexToolOutputTokenLimit',
-] as const;
-
-type CodexBudgetTokenField = (typeof CODEX_BUDGET_TOKEN_FIELDS)[number];
-
-/**
- * Read-side defaults for the Codex lane budget keys. Mirrors
- * `FILE_BASED_SETTINGS_DEFAULTS` in `platform-core`; the set-config spec pins
- * the two against each other.
- */
-const CODEX_BUDGET_DEFAULTS: Readonly<
-  Record<CodexBudgetTokenField, number> & { codexWebSearch: boolean }
-> = {
-  codexAutoCompactTokens: 120000,
-  codexToolOutputTokenLimit: 2500,
-  codexWebSearch: true,
-};
-
-function isNonNegativeInteger(value: unknown): value is number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
-}
-
-/**
- * Host-boundary check for the Codex lane budget writes. An invalid value is
- * rejected with its field name and never clamped, so the user sees exactly
- * which setting was refused. Returns the first invalid field, or null.
- */
+const CODEX_WEB_SEARCH_DEFAULT = true;
 function invalidCodexBudget(params: AgentSetConfigParams): string | null {
-  for (const field of CODEX_BUDGET_TOKEN_FIELDS) {
-    const value: unknown = params[field];
-    if (value !== undefined && !isNonNegativeInteger(value)) {
-      return field;
-    }
-  }
   const webSearch: unknown = params.codexWebSearch;
-  if (webSearch !== undefined && typeof webSearch !== 'boolean') {
-    return 'codexWebSearch';
-  }
-  return null;
-}
-
-/** `-0` passes the integer check; it is persisted as `0`. */
-function withoutNegativeZero(value: number): number {
-  return Object.is(value, -0) ? 0 : value;
+  return webSearch !== undefined && typeof webSearch !== 'boolean' ? 'codexWebSearch' : null;
 }
 
 /**
@@ -532,12 +489,6 @@ export class AgentRpcHandlers {
             codexReasoningEffort: this.getAgentCfg<string>(
               'codexReasoningEffort',
               '',
-            ),
-            codexAutoCompactTokens: this.getCodexBudgetTokens(
-              'codexAutoCompactTokens',
-            ),
-            codexToolOutputTokenLimit: this.getCodexBudgetTokens(
-              'codexToolOutputTokenLimit',
             ),
             codexWebSearch: this.getCodexWebSearch(),
             laneRepeatCallStopAt: this.getLaneRepeatCallStopAt(),
@@ -1121,12 +1072,6 @@ export class AgentRpcHandlers {
           'codexReasoningEffort',
           params.codexReasoningEffort,
         );
-      }
-      for (const field of CODEX_BUDGET_TOKEN_FIELDS) {
-        const value = params[field];
-        if (value !== undefined) {
-          await this.setAgentCfg(field, withoutNegativeZero(value));
-        }
       }
       if (params.laneRepeatCallStopAt !== undefined) {
         await this.setAgentCfg(
@@ -2009,16 +1954,6 @@ export class AgentRpcHandlers {
   }
 
   /**
-   * Read a Codex lane token budget. A hand-edited invalid file value (not an
-   * integer >= 0) is reported as the default, the same value the lane uses.
-   */
-  private getCodexBudgetTokens(field: CodexBudgetTokenField): number {
-    const fallback = CODEX_BUDGET_DEFAULTS[field];
-    const value = this.getAgentCfg<unknown>(field, fallback);
-    return isNonNegativeInteger(value) ? value : fallback;
-  }
-
-  /**
    * Read the lane repeat-call guard. A hand-edited value below the minimum or
    * not an integer is reported as the default.
    */
@@ -2038,7 +1973,7 @@ export class AgentRpcHandlers {
   }
 
   private getCodexWebSearch(): boolean {
-    const fallback = CODEX_BUDGET_DEFAULTS.codexWebSearch;
+    const fallback = CODEX_WEB_SEARCH_DEFAULT;
     const value = this.getAgentCfg<unknown>('codexWebSearch', fallback);
     return typeof value === 'boolean' ? value : fallback;
   }

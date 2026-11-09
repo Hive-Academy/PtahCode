@@ -76,13 +76,10 @@ export type ProvidersSettingsFocusTarget =
   | 'connections'
   | 'more-providers';
 
-/** A deep link that opens a connection drawer on a tab. Only the Claude Accounts drawer is requestable. */
-export interface ProvidersSettingsDrawerRequest {
-  /** A `ConnectionKind` value, resolved like `openAccountSignIn` does. */
-  readonly connection: 'claude-cli';
-  /** A `ConnectionDrawerTabId` member. */
-  readonly tab: 'accounts';
-}
+/** A deep link to one connection and its destination tab. */
+export type ProvidersSettingsDrawerRequest =
+  | { readonly connection: 'claude-cli'; readonly tab: 'accounts' }
+  | { readonly providerId: 'openai-codex'; readonly tab: 'credentials' };
 
 const CONTROL =
   'btn btn-outline btn-sm border-base-content-muted bg-base-100 text-base-content hover:bg-base-100 hover:text-base-content hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
@@ -286,6 +283,9 @@ const CONTROL =
                 </button>
               </div>
             </div>
+            @if (requestedDrawer()?.tab === 'credentials' && state.connections().status === 'ready' && !codexConnectionPresent()) {
+              <button type="button" class="btn btn-primary btn-sm mt-3" data-testid="connect-codex" (click)="connectMissingCodex()">Connect Codex</button>
+            }
             <!-- Catalog caption, directly under the header: one passive line, the names truncate (full list in the
                  title). "Connect provider" above is the one way into the catalog. -->
             <div
@@ -560,6 +560,10 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
   readonly focusTarget = input<ProvidersSettingsFocusTarget | null>(null);
   /** Opens the requested connection drawer once the connection list is ready (Electron only: Accounts is D34). */
   readonly requestedDrawer = input<ProvidersSettingsDrawerRequest | null>(null);
+  readonly requestedDrawerConsumed = output<void>();
+  protected readonly codexConnectionPresent = computed(() =>
+    this.state.connections().data?.some((connection) => connection.id === 'openai-codex') ?? false,
+  );
   protected readonly state = inject(ProvidersSettingsStateService);
   /** Accounts is Electron only (D34): elsewhere the drawer tab is absent and the account reads never run. */
   protected readonly accountsAvailable = inject(VSCodeService).isElectron;
@@ -1040,13 +1044,15 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
         drawerOpenedFor = '';
         return;
       }
-      const key = `${request.connection}:${request.tab}`;
+      const key = `${'providerId' in request ? request.providerId : request.connection}:${request.tab}`;
       if (key === drawerOpenedFor || this.state.connections().status !== 'ready')
         return;
       drawerOpenedFor = key;
       untracked(() => {
-        const claude = (this.state.connections().data ?? []).find((connection) => this.isClaudeCli(connection));
-        if (claude) this.openDrawer(claude.id, request.tab);
+        const connection = (this.state.connections().data ?? []).find((entry) =>
+          'providerId' in request ? entry.id === request.providerId : this.isClaudeCli(entry),
+        );
+        if (connection) this.openDrawer(connection.id, request.tab);
       });
     });
     afterRenderEffect(() => {
@@ -1235,6 +1241,7 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
   }
   protected closeDrawer(): void {
     this.drawerId.set(null);
+    if (this.requestedDrawer()) this.requestedDrawerConsumed.emit();
     this.resetDrawerSession();
     // D41: the badge re-reads after the drawer (where accounts change) closes; pushes cover the rest.
     void this.accounts?.refresh('claude');
@@ -1244,6 +1251,10 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
     this.drawerSession += 1;
     this.drawerCommit.set(null);
     this.drawerExternalFor.set(null);
+  }
+  protected connectMissingCodex(): void {
+    this.requestedDrawerConsumed.emit();
+    this.openWizard('openai-codex');
   }
   protected drawerExternalAction(
     providerId: string,

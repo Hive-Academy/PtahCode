@@ -1173,6 +1173,7 @@ describe('ProvidersSettingsComponent named Claude accounts (P5 F5, D41)', () => 
   }
 
   const ACCOUNTS_REQUEST: ProvidersSettingsDrawerRequest = { connection: 'claude-cli', tab: 'accounts' };
+  const CODEX_REQUEST: ProvidersSettingsDrawerRequest = { providerId: 'openai-codex', tab: 'credentials' };
   const openDrawer = () => fixture.debugElement.query(By.directive(ConnectionDetailDrawerComponent))
     ?.injector.get(ConnectionDetailDrawerComponent) ?? null;
   async function requestDrawer(request: ProvidersSettingsDrawerRequest | null) {
@@ -1181,6 +1182,41 @@ describe('ProvidersSettingsComponent named Claude accounts (P5 F5, D41)', () => 
   }
 
   describe('requestedDrawer (onboarding deep link, component 11)', () => {
+    it('waits for connections, then opens signed-out Codex on Credentials and consumes on close', async () => {
+      await setup(true);
+      const codex: ProvidersConnection = { ...connection('openai-codex'), name: 'OpenAI Codex', authMode: 'oauth', hasKey: false };
+      stateStub.connections.set({ status: 'loading', data: null, error: null });
+      await requestDrawer(CODEX_REQUEST);
+      expect(openDrawer()).toBeNull();
+      stateStub.connections.set(ready([claudeCli, codex]));
+      await render();
+      expect(openDrawer()?.connection()?.id).toBe('openai-codex');
+      expect(openDrawer()?.initialTab()).toBe('credentials');
+      const consumed = jest.fn();
+      fixture.componentInstance.requestedDrawerConsumed.subscribe(consumed);
+      await closeDrawerFromFooter();
+      expect(consumed).toHaveBeenCalledTimes(1);
+      expect(openDrawer()).toBeNull();
+      await render();
+      expect(openDrawer()).toBeNull();
+    });
+
+    it('offers Connect Codex when its connection is missing', async () => {
+      await setup(true);
+      await requestDrawer(CODEX_REQUEST);
+      const connect = element.querySelector<HTMLButtonElement>('[data-testid="connect-codex"]');
+      expect(connect?.textContent).toContain('Connect Codex');
+      connect?.click();
+      await render();
+      expect(fixture.debugElement.query(By.directive(WizardStub)).injector.get(WizardStub).deepLinkProviderId()).toBe('openai-codex');
+    });
+
+    it('does not force a Codex drawer on a non-Electron host', async () => {
+      await setup(false);
+      stateStub.connections.set(ready([claudeCli, connection('openai-codex')]));
+      await requestDrawer(CODEX_REQUEST);
+      expect(openDrawer()).toBeNull();
+    });
     it('in Electron, opens the Claude drawer on Accounts when connections are ready', async () => {
       await setup(true);
       expect(openDrawer()).toBeNull();

@@ -50,7 +50,9 @@ class ConsumerStub {
   template:
     '<table data-testid="cli-matrix" tabindex="-1" aria-label="CLI matrix"><tbody><tr><td>Codex</td></tr></tbody></table>',
 })
-class CliMatrixStub {}
+class CliMatrixStub {
+  readonly codexSettingsRequested = output<void>();
+}
 
 const ready = <T>(data: T): ProvidersSettingsSection<T> => ({
   status: 'ready',
@@ -147,6 +149,13 @@ describe('AgentsRoutingSettingsComponent', () => {
   it('does not open the shared state (the Providers page beside it does)', async () => {
     await render();
     expect(state.open).not.toHaveBeenCalled();
+  });
+  it('forwards the Codex settings request from the matrix', async () => {
+    const received = jest.fn();
+    fixture.componentInstance.codexSettingsRequested.subscribe(received);
+    await render();
+    fixture.debugElement.query(By.directive(CliMatrixStub)).injector.get(CliMatrixStub).codexSettingsRequested.emit();
+    expect(received).toHaveBeenCalledTimes(1);
   });
 
   // Batch 34: the old Ptah CLI instance manager is gone; the matrix (deferred) holds every instance capability.

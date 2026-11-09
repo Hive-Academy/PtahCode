@@ -86,8 +86,6 @@ export const KNOWN_CONFIG_KEYS = [
   'agentOrchestration.piModel',
   'agentOrchestration.codexAutoApprove',
   'agentOrchestration.copilotAutoApprove',
-  'agentOrchestration.codexAutoCompactTokens',
-  'agentOrchestration.codexToolOutputTokenLimit',
   'agentOrchestration.codexWebSearch',
   'agentOrchestration.codexSandboxMode',
   'agentOrchestration.laneRepeatCallStopAt',
