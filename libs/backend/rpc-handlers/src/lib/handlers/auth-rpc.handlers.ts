@@ -80,6 +80,7 @@ export class AuthRpcHandlers {
     'auth:getStatus',
     'auth:saveSettings',
     'auth:setApiKey',
+    'auth:setDirectAnthropicApiKey',
     'auth:deleteStoredKey',
     'auth:testConnection',
     'auth:copilotLogin',
@@ -294,6 +295,7 @@ export class AuthRpcHandlers {
     this.apiKeyMethods.registerGetStatus();
     this.connectionSettingsMethods.registerSaveSettings();
     this.apiKeyMethods.registerSetApiKey();
+    this.apiKeyMethods.registerSetDirectAnthropicApiKey();
     this.apiKeyMethods.registerDeleteStoredKey();
     this.connectionSettingsMethods.registerTestConnection();
     this.interactiveLoginMethods.registerCopilotLogin();
@@ -324,6 +326,7 @@ export class AuthRpcHandlers {
         'auth:getStatus',
         'auth:saveSettings',
         'auth:setApiKey',
+        'auth:setDirectAnthropicApiKey',
         'auth:deleteStoredKey',
         'auth:testConnection',
         'auth:copilotLogin',

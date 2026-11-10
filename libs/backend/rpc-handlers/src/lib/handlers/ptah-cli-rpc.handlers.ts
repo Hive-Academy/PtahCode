@@ -11,6 +11,7 @@
  */
 
 import { injectable, inject } from 'tsyringe';
+import { z } from 'zod';
 import {
   Logger,
   RpcHandler,
@@ -18,7 +19,7 @@ import {
   TOKENS,
 } from '@ptah-extension/vscode-core';
 import type { SentryService } from '@ptah-extension/vscode-core';
-import { getAnthropicProvider } from '@ptah-extension/agent-sdk';
+import { getPtahCliLaneProvider } from '@ptah-extension/shared';
 import {
   CLI_AGENT_RUNTIME_TOKENS,
   PtahCliRegistry,
@@ -141,10 +142,14 @@ export class PtahCliRpcHandlers {
             providerId: params.providerId,
           });
 
+          const input = z.object({
+            name: z.string().min(1),
+            providerId: z.string().min(1),
+            apiKey: z.string().optional(),
+            credentialSource: z.enum(['instance', 'shared-connection']).optional(),
+          }).parse(params);
           const agent = await this.ptahCliRegistry.createAgent(
-            params.name,
-            params.providerId,
-            params.apiKey,
+            input.name, input.providerId, input.apiKey, input.credentialSource,
           );
 
           this.logger.info('RPC: ptahCli:create success', {
@@ -179,6 +184,7 @@ export class PtahCliRpcHandlers {
             tierMappings?: { sonnet?: string; opus?: string; haiku?: string };
             selectedModel?: string;
             reasoningEffort?: '' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+            credentialSource?: 'instance' | 'shared-connection';
           } = {};
 
           if (params.name !== undefined) {
@@ -197,6 +203,9 @@ export class PtahCliRpcHandlers {
             updates.reasoningEffort = PtahCliReasoningEffortInputSchema.parse(
               params.reasoningEffort,
             );
+          }
+          if (params.credentialSource !== undefined) {
+            updates.credentialSource = z.enum(['instance', 'shared-connection']).parse(params.credentialSource);
           }
 
           await this.ptahCliRegistry.updateAgent(
@@ -307,7 +316,7 @@ export class PtahCliRpcHandlers {
           });
           return { models: [], isStatic: true, error: 'Agent not found' };
         }
-        const provider = getAnthropicProvider(agent.providerId);
+        const provider = getPtahCliLaneProvider(agent.providerId);
 
         if (!provider) {
           this.logger.warn('RPC: ptahCli:listModels - provider not found', {

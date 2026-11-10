@@ -23,6 +23,7 @@ import {
   OPENROUTER_PROXY_TOKEN_PLACEHOLDER,
   OLLAMA_CLOUD_DIRECT_BASE_URL,
   PTAH_CLI_PERMISSION_CAPABILITIES,
+  getPtahCliLaneProvider,
 } from '@ptah-extension/shared';
 import {
   Logger,
@@ -81,6 +82,11 @@ import {
 } from './helpers/ptah-cli-lane-plan-limits';
 import type { AgentProcessManager } from '../cli-agents/agent-process-manager.service';
 import { createPromptMailbox } from './helpers/ptah-cli-prompt-mailbox';
+import { parsePtahCliCredentialSource } from './helpers/ptah-cli-credential-source';
+
+function resolveLaneProvider(id: string): AnthropicProvider | undefined {
+  return id === 'anthropic-api' ? getPtahCliLaneProvider(id) : getAnthropicProvider(id);
+}
 import { AgentSpawnEnvironment } from '../cli-agents/agent-spawn-environment.service';
 import { CLI_AGENT_RUNTIME_TOKENS } from '../di/tokens';
 import {
@@ -243,7 +249,12 @@ export class PtahCliRegistry {
   private async resolveAgentCredential(
     id: string,
     provider: AnthropicProvider | undefined,
+    config?: PtahCliConfig,
   ): Promise<AgentCredential | undefined> {
+    if (config && parsePtahCliCredentialSource(config.providerId, config.credentialSource) === 'shared-connection') {
+      const key = await this.authSecrets.getCredential('apiKey');
+      return key?.trim() ? { kind: 'instance-key', key } : undefined;
+    }
     if (this.isTrulyLocal(provider)) {
       return { kind: 'instance-key', key: OLLAMA_AUTH_TOKEN_PLACEHOLDER };
     }
@@ -303,11 +314,11 @@ export class PtahCliRegistry {
         async (
           agentConfig,
         ): Promise<PtahCliSummary & { manifest: CliAdapterManifest }> => {
-          const provider = getAnthropicProvider(agentConfig.providerId);
+          const provider = resolveLaneProvider(agentConfig.providerId);
           const trulyLocal = this.isTrulyLocal(provider);
-          const hasStoredKey = await this.authSecrets.hasProviderKey(
-            `${PTAH_CLI_KEY_PREFIX}.${agentConfig.id}`,
-          );
+          const hasStoredKey = parsePtahCliCredentialSource(agentConfig.providerId, agentConfig.credentialSource) === 'shared-connection'
+            ? !!(await this.authSecrets.getCredential('apiKey'))?.trim()
+            : await this.authSecrets.hasProviderKey(`${PTAH_CLI_KEY_PREFIX}.${agentConfig.id}`);
           // Runnable: truly-local, key stored, signin-capable (authType none), or
           // a key-less Kimi Code agent while the host's Kimi Code connection is
           // usable.
@@ -330,6 +341,7 @@ export class PtahCliRegistry {
             name: agentConfig.name,
             providerName: provider?.name ?? 'Unknown',
             providerId: agentConfig.providerId,
+            credentialSource: agentConfig.credentialSource ?? 'instance',
             hasApiKey: hasKey,
             hasStoredKey,
             status,
@@ -380,15 +392,23 @@ export class PtahCliRegistry {
   async createAgent(
     name: string,
     providerId: string,
-    apiKey: string,
+    apiKey?: string,
+    credentialSource?: PtahCliConfig['credentialSource'],
   ): Promise<PtahCliSummary> {
     await this.configPersistence.ensureMigrated();
-    const provider = getAnthropicProvider(providerId);
+    const provider = resolveLaneProvider(providerId);
     if (!provider) {
       throw new SdkError(`Unknown provider: ${providerId}`);
     }
 
-    assertNotReservedKey(apiKey);
+    const source = parsePtahCliCredentialSource(providerId, credentialSource);
+    if (source === 'shared-connection' && apiKey !== undefined) {
+      throw new SdkError('A shared connection cannot store an instance API key');
+    }
+    if (source === 'instance' && !apiKey?.trim() && provider.authType === 'apiKey') {
+      throw new SdkError('An API key is required for an instance credential');
+    }
+    if (apiKey) assertNotReservedKey(apiKey);
     const id = generateAgentId();
     const tierMappings = this.buildDefaultTierMappings(provider);
 
@@ -396,15 +416,15 @@ export class PtahCliRegistry {
       id,
       name,
       providerId,
+      credentialSource: source,
       enabled: true,
       tierMappings,
       updatedAt: Date.now(),
     };
 
-    await this.authSecrets.setProviderKey(
-      `${PTAH_CLI_KEY_PREFIX}.${id}`,
-      apiKey,
-    );
+    if (source === 'instance' && apiKey !== undefined) {
+      await this.authSecrets.setProviderKey(`${PTAH_CLI_KEY_PREFIX}.${id}`, apiKey);
+    }
 
     try {
       const configs = this.configPersistence.loadConfigs();
@@ -415,11 +435,11 @@ export class PtahCliRegistry {
       // API key written above after the config save failed; the original error
       // is rethrown below regardless, so the failure is never hidden from the
       // caller — only a failed cleanup attempt is swallowed.
-      await this.authSecrets
-        .deleteProviderKey(`${PTAH_CLI_KEY_PREFIX}.${id}`)
-        .catch(() => {
+      if (source === 'instance' && apiKey !== undefined) {
+        await this.authSecrets.deleteProviderKey(`${PTAH_CLI_KEY_PREFIX}.${id}`).catch(() => {
           /* rollback best-effort */
         });
+      }
       throw err;
     }
 
@@ -429,14 +449,18 @@ export class PtahCliRegistry {
 
     const modelCount = provider.staticModels?.length ?? 0;
 
+    const hasKey = source === 'shared-connection'
+      ? !!(await this.authSecrets.getCredential('apiKey'))?.trim()
+      : !!apiKey?.trim() || provider.authType === 'none';
     return {
       id,
       name,
       providerName: provider.name,
       providerId,
-      hasApiKey: true,
-      hasStoredKey: !this.isTrulyLocal(provider) && apiKey.trim().length > 0,
-      status: 'available',
+      credentialSource: source,
+      hasApiKey: hasKey,
+      hasStoredKey: hasKey && !this.isTrulyLocal(provider),
+      status: hasKey ? 'available' : 'unconfigured',
       enabled: true,
       modelCount,
     };
@@ -455,6 +479,7 @@ export class PtahCliRegistry {
         | 'tierMappings'
         | 'selectedModel'
         | 'reasoningEffort'
+        | 'credentialSource'
       >
     >,
     apiKey?: string,
@@ -469,16 +494,30 @@ export class PtahCliRegistry {
     }
 
     const existing = configs[index];
+    const source = parsePtahCliCredentialSource(
+      existing.providerId,
+      updates.credentialSource ?? existing.credentialSource,
+    );
+    if (source === 'instance' && updates.credentialSource === 'instance' && !apiKey?.trim()) {
+      throw new SdkError('An API key is required for an instance credential');
+    }
+    if (source === 'shared-connection' && apiKey !== undefined) {
+      throw new SdkError('A shared connection cannot store an instance API key');
+    }
     const updated: PtahCliConfig = {
       ...existing,
       ...updates,
+      credentialSource: source,
       updatedAt: Date.now(),
     };
     configs[index] = updated;
 
     await this.configPersistence.saveConfigs(configs);
 
-    if (apiKey !== undefined) {
+    if (source === 'shared-connection' && existing.credentialSource !== 'shared-connection') {
+      await this.authSecrets.deleteProviderKey(`${PTAH_CLI_KEY_PREFIX}.${id}`);
+    }
+    if (apiKey !== undefined && source === 'instance') {
       await this.authSecrets.setProviderKey(
         `${PTAH_CLI_KEY_PREFIX}.${id}`,
         apiKey,
@@ -537,7 +576,7 @@ export class PtahCliRegistry {
       return undefined;
     }
 
-    const provider = getAnthropicProvider(agentConfig.providerId);
+    const provider = resolveLaneProvider(agentConfig.providerId);
     if (!provider) {
       this.logger.warn(
         `[PtahCliRegistry] getProfile: unknown provider: ${agentConfig.providerId}`,
@@ -553,7 +592,7 @@ export class PtahCliRegistry {
       return undefined;
     }
 
-    const credential = await this.resolveAgentCredential(id, provider);
+    const credential = await this.resolveAgentCredential(id, provider, agentConfig);
     if (!credential) {
       this.logger.warn(`[PtahCliRegistry] getProfile: no API key for: ${id}`);
       return undefined;
@@ -606,7 +645,7 @@ export class PtahCliRegistry {
         return { success: false, error: 'Agent configuration not found' };
       }
 
-      const testProvider = getAnthropicProvider(agentConfig.providerId);
+      const testProvider = resolveLaneProvider(agentConfig.providerId);
       if (!testProvider) {
         return {
           success: false,
@@ -621,7 +660,7 @@ export class PtahCliRegistry {
           error: CODEX_NATIVE_RUNTIME_REQUIRED_MESSAGE,
         };
       }
-      const credential = await this.resolveAgentCredential(id, testProvider);
+      const credential = await this.resolveAgentCredential(id, testProvider, agentConfig);
       if (!credential) {
         return {
           success: false,
@@ -788,7 +827,7 @@ export class PtahCliRegistry {
         message: `Ptah CLI agent "${id}" is disabled`,
       };
     }
-    const provider = getAnthropicProvider(agentConfig.providerId);
+    const provider = resolveLaneProvider(agentConfig.providerId);
     // Codex runs only through the native Codex runtime. Refuse on the
     // provider id: no Codex proxy factory exists here, so the placeholder
     // token never appears in a freshly built auth env.
@@ -797,14 +836,16 @@ export class PtahCliRegistry {
         providerId: 'openai-codex',
       });
     }
-    const credential = await this.resolveAgentCredential(id, provider);
+    const credential = await this.resolveAgentCredential(id, provider, agentConfig);
     if (!credential) {
       this.logger.warn(
         `[PtahCliRegistry] spawnAgent: no API key for agent: ${id}`,
       );
       return {
         status: 'no_api_key',
-        message: isKimiCodeProvider(provider)
+        message: agentConfig.credentialSource === 'shared-connection'
+          ? 'Connect Claude API in provider settings to run this lane'
+          : isKimiCodeProvider(provider)
           ? KIMI_CODE_MISSING_CREDENTIAL_MESSAGE
           : `No API key configured for Ptah CLI agent "${id}"`,
       };
@@ -1522,7 +1563,9 @@ export class PtahCliRegistry {
       provider.id === 'ollama-cloud' && apiKey !== OLLAMA_AUTH_TOKEN_PLACEHOLDER
         ? OLLAMA_CLOUD_DIRECT_BASE_URL
         : provider.baseUrl;
-    const authEnvVar = getProviderAuthEnvVar(agentConfig.providerId);
+    const authEnvVar = provider.id === 'anthropic-api'
+      ? 'ANTHROPIC_API_KEY'
+      : getProviderAuthEnvVar(agentConfig.providerId);
     authEnv[authEnvVar] = apiKey;
 
     this.applyTierEnv(authEnv, agentConfig, provider);

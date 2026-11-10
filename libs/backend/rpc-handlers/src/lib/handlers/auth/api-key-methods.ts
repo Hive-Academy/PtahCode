@@ -16,9 +16,13 @@ import type {
   AuthDeleteStoredKeyResult,
   AuthGetApiKeyStatusResult,
 } from '@ptah-extension/shared';
+import { ANTHROPIC_DIRECT_PROVIDER_ID } from '@ptah-extension/shared';
 import { maskKeyHint } from '../../utils/mask-key-hint';
 import type { ConnectionCheckRecorder } from '../../utils/connection-check-recorder';
-import { AuthDeleteStoredKeySchema } from '../auth-rpc.schema';
+import {
+  AuthDeleteStoredKeySchema,
+  AuthSetDirectAnthropicApiKeySchema,
+} from '../auth-rpc.schema';
 import { keyStoreReadFailure } from './key-store-read-failure';
 
 export interface ApiKeyMethodsDeps {
@@ -38,6 +42,45 @@ export interface ApiKeyMethodsDeps {
  */
 export class ApiKeyMethods {
   constructor(private readonly deps: ApiKeyMethodsDeps) {}
+
+  /** Store or delete the direct Anthropic secret without changing the route. */
+  registerSetDirectAnthropicApiKey(): void {
+    const { authSecretsService, connectionChecks, logger, sentryService } =
+      this.deps;
+    this.deps.rpcHandler.registerMethod<
+      unknown,
+      { success: boolean; error?: string }
+    >('auth:setDirectAnthropicApiKey', async (raw: unknown) => {
+      const parsed = AuthSetDirectAnthropicApiKeySchema.safeParse(raw);
+      if (!parsed.success) {
+        return { success: false, error: 'Invalid API key request.' };
+      }
+      try {
+        if (parsed.data.apiKey === null) {
+          await authSecretsService.deleteCredential('apiKey');
+        } else {
+          await authSecretsService.setCredential('apiKey', parsed.data.apiKey);
+        }
+        return { success: true };
+      } catch (error: unknown) {
+        const errorType = error instanceof Error ? error.name : 'unknown';
+        logger.error('RPC: auth:setDirectAnthropicApiKey failed', { errorType });
+        sentryService.captureException(
+          new Error(`auth:setDirectAnthropicApiKey failed (${errorType})`),
+          { errorSource: 'AuthRpcHandlers.registerSetDirectAnthropicApiKey' },
+        );
+        return {
+          success: false,
+          error: parsed.data.apiKey === null
+            ? 'Could not delete the stored key.'
+            : 'Could not save the API key.',
+        };
+      } finally {
+        connectionChecks.clear(ANTHROPIC_DIRECT_PROVIDER_ID);
+        this.deps.invalidateAuthStatusCache();
+      }
+    });
+  }
 
   /**
    * auth:getStatus - Compact auth status for the active Anthropic provider.

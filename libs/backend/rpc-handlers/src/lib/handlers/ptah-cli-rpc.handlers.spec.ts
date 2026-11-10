@@ -369,6 +369,7 @@ describe('PtahCliRpcHandlers', () => {
         'My Agent',
         'z-ai',
         'sk-test',
+        undefined,
       );
       expect(result.success).toBe(true);
       expect(result.agent).toEqual(created);
