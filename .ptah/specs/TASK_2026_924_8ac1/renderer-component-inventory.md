@@ -78,6 +78,51 @@ element counts.
 | `<textarea>` outside Settings | 30 | 25 (A 3, B 2, C 20) | Lanes do not count 5 that are in TypeScript strings |
 | 12 `file:line` examples read in the code | not applicable | 11 point to the element, 1 points to a comment line above it | Accepted. Each example in this document was read or comes from the same lane tables. |
 
+### 1.5 Exact-DOM duplicate groups
+
+A count of rows of the same kind does not show how many rows can adopt one shared component
+with no DOM change. The Settings session found this (2026-11-10): the field shell had the same
+DOM as the label and hint markup in one Settings tab only. Thus section 4.1 gives a second
+number for each family: the exact-DOM duplicate groups.
+
+The script `inventory/exact-dom-groups.mjs` makes the count. It reads the same 1546 files, reads
+each template (an `.html` file or an inline `template` string) and builds the element tree. Run
+it at the repository root:
+
+```sh
+node .ptah/specs/TASK_2026_924_8ac1/inventory/exact-dom-groups.mjs > exact-dom-groups.md
+```
+
+Definitions:
+
+- **Host recipe:** the tag, the sorted static class tokens, the static `type` and `role`, and
+  the names of the `[class.x]` bindings. A `[class]` or `[ngClass]` binding adds a marker. Two
+  elements with the same host recipe get the same DOM for the element itself.
+- **Frame:** the host recipe of an element and the host recipes of its direct children, in
+  sequence. Text is one token, and a control-flow block (`@if`, `@for`) is one token. For form
+  controls (text input, textarea, native select, checkbox, radio) the frame is the parent
+  element and its direct children, because the label and the hint are siblings of the control.
+- **Group:** all elements with the same host recipe (host group) or the same frame (frame
+  group). A group with one element has no duplicate.
+
+Limits:
+
+- The class order is ignored. A strict DOM comparison sees the order, but the computed style
+  does not change.
+- Other attributes (`id`, `aria-*`, `data-*`, `title`) are ignored. A component can take them
+  as inputs.
+- A layout class on the host (`w-full`, `mt-2`) makes a different host recipe. Thus the number
+  of host recipes is higher than the number of looks, and the groups are a lower limit of the
+  duplication.
+- The frame has a depth of one level. A deeper difference is not seen, so the frame groups are
+  an upper limit of the exact-DOM duplication.
+- The parser is a tokenizer, not the Angular compiler. Templates that are built from more than
+  one string are read as they are written.
+
+Check: the script finds 89 text inputs, 59 checkboxes and radios and 1155 buttons outside
+Settings and the ui lib (raw and lane counts: 89, 60 to 63, 1137 to 1167). It finds 43 text
+inputs and 17 native selects in Settings, the same as the 919 inventory.
+
 ## 2. Raw counts for the full renderer
 
 "Rest" is the renderer without Settings and without `libs/frontend/ui`. "Groups" is the number
@@ -210,6 +255,85 @@ Lane C counts by lib (the 17 feature page libs):
 | mcp-apps-page | 0 | 1 | 0 | 0 | 6 | 3 | 0 | 0 | 2 | 0 | 1 | 4 | 0 | 0 |
 | cron-scheduler-ui | 3 | 1 | 1 | 1 | 16 | 3 | 12 | 1 | 4 | 0 | 3 | 1 | 0 | 19 |
 | workspace-indexing | 0 | 0 | 0 | 2 | 12 | 1 | 0 | 0 | 2 | 0 | 5 | 7 | 0 | 2 |
+
+### 4.1 Exact-DOM duplicate groups (both numbers)
+
+Method: section 1.5. Full output with the largest groups and one example for each:
+`inventory/exact-dom-groups.md`. "Elements" is the number of rows of the same kind. "Host
+recipes" and "Frame groups" are the numbers of exact groups. The percent values are a part of
+the elements of the family.
+
+
+**Renderer without Settings and without the ui lib**
+
+| Family | Elements | Host recipes | Largest host recipe | Top 5 host recipes | Frame groups | Frames with one element | Largest frame group | Top 5 frame groups | Elements in a frame group of 2 or more |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| F1 text input | 89 | 61 | 6 (7 %) | 18 (20 %) | 74 | 63 | 4 (4 %) | 14 (16 %) | 26 (29 %) |
+| F2 textarea | 26 | 22 | 2 (8 %) | 9 (35 %) | 23 | 20 | 2 (8 %) | 8 (31 %) | 6 (23 %) |
+| F3 native select | 32 | 13 | 8 (25 %) | 22 (69 %) | 26 | 21 | 3 (9 %) | 11 (34 %) | 11 (34 %) |
+| F3 menu, listbox, dropdown | 34 | 28 | 6 (18 %) | 11 (32 %) | 34 | 34 | 1 (3 %) | 5 (15 %) | 0 (0 %) |
+| F4 checkbox, radio, toggle | 59 | 28 | 9 (15 %) | 29 (49 %) | 46 | 38 | 6 (10 %) | 15 (25 %) | 21 (36 %) |
+| F5 button | 1155 | 521 | 113 (10 %) | 272 (24 %) | 621 | 453 | 101 (9 %) | 229 (20 %) | 702 (61 %) |
+| F6 tabs, segmented | 32 | 22 | 7 (22 %) | 15 (47 %) | 30 | 29 | 3 (9 %) | 7 (22 %) | 3 (9 %) |
+| F7 dialog, drawer, popover | 63 | 38 | 10 (16 %) | 28 (44 %) | 60 | 58 | 3 (5 %) | 8 (13 %) | 5 (8 %) |
+| F8 table | 10 | 7 | 3 (30 %) | 8 (80 %) | 8 | 7 | 3 (30 %) | 7 (70 %) | 3 (30 %) |
+| F8 table row | 19 | 6 | 13 (68 %) | 18 (95 %) | 19 | 19 | 1 (5 %) | 5 (26 %) | 0 (0 %) |
+| F8 list item | 223 | 108 | 84 (38 %) | 107 (48 %) | 161 | 143 | 20 (9 %) | 46 (21 %) | 80 (36 %) |
+| F9 card, glass surface | 162 | 107 | 10 (6 %) | 39 (24 %) | 142 | 130 | 5 (3 %) | 18 (11 %) | 32 (20 %) |
+| F10 badge | 206 | 141 | 11 (5 %) | 33 (16 %) | 144 | 114 | 10 (5 %) | 32 (16 %) | 92 (45 %) |
+| F11 spinner | 125 | 25 | 79 (63 %) | 98 (78 %) | 25 | 15 | 79 (63 %) | 98 (78 %) | 110 (88 %) |
+| F11 skeleton | 101 | 68 | 6 (6 %) | 24 (24 %) | 68 | 51 | 6 (6 %) | 24 (24 %) | 50 (50 %) |
+| F12 alert | 254 | 176 | 9 (4 %) | 32 (13 %) | 196 | 166 | 9 (4 %) | 30 (12 %) | 88 (35 %) |
+| F13 mark, avatar | 46 | 7 | 14 (30 %) | 44 (96 %) | 7 | 2 | 14 (30 %) | 44 (96 %) | 44 (96 %) |
+| F14 stat, progress | 27 | 13 | 13 (48 %) | 19 (70 %) | 23 | 19 | 2 (7 %) | 9 (33 %) | 8 (30 %) |
+
+**Settings only**
+
+| Family | Elements | Host recipes | Largest host recipe | Top 5 host recipes | Frame groups | Frames with one element | Largest frame group | Top 5 frame groups | Elements in a frame group of 2 or more |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| F1 text input | 43 | 19 | 11 (26 %) | 24 (56 %) | 31 | 23 | 4 (9 %) | 14 (33 %) | 20 (47 %) |
+| F2 textarea | 1 | 1 | 1 (100 %) | 1 (100 %) | 1 | 1 | 1 (100 %) | 1 (100 %) | 0 (0 %) |
+| F3 native select | 17 | 6 | 8 (47 %) | 16 (94 %) | 16 | 15 | 2 (12 %) | 6 (35 %) | 2 (12 %) |
+| F3 menu, listbox, dropdown | 1 | 1 | 1 (100 %) | 1 (100 %) | 1 | 1 | 1 (100 %) | 1 (100 %) | 0 (0 %) |
+| F4 checkbox, radio, toggle | 34 | 11 | 12 (35 %) | 28 (82 %) | 17 | 12 | 12 (35 %) | 22 (65 %) | 22 (65 %) |
+| F5 button | 327 | 75 | 126 (39 %) | 185 (57 %) | 103 | 64 | 94 (29 %) | 155 (47 %) | 263 (80 %) |
+| F6 tabs, segmented | 6 | 4 | 3 (50 %) | 6 (100 %) | 5 | 4 | 2 (33 %) | 6 (100 %) | 2 (33 %) |
+| F7 dialog, drawer, popover | 46 | 18 | 21 (46 %) | 33 (72 %) | 42 | 39 | 3 (7 %) | 9 (20 %) | 7 (15 %) |
+| F8 table | 13 | 5 | 7 (54 %) | 13 (100 %) | 6 | 4 | 6 (46 %) | 12 (92 %) | 9 (69 %) |
+| F8 table row | 41 | 2 | 40 (98 %) | 41 (100 %) | 23 | 15 | 11 (27 %) | 20 (49 %) | 26 (63 %) |
+| F8 list item | 16 | 13 | 3 (19 %) | 8 (50 %) | 16 | 16 | 1 (6 %) | 5 (31 %) | 0 (0 %) |
+| F9 card, glass surface | 25 | 14 | 7 (28 %) | 16 (64 %) | 24 | 23 | 2 (8 %) | 6 (24 %) | 2 (8 %) |
+| F10 badge | 47 | 30 | 7 (15 %) | 22 (47 %) | 36 | 31 | 7 (15 %) | 16 (34 %) | 16 (34 %) |
+| F11 spinner | 20 | 3 | 17 (85 %) | 20 (100 %) | 3 | 1 | 17 (85 %) | 20 (100 %) | 19 (95 %) |
+| F11 skeleton | 13 | 6 | 4 (31 %) | 12 (92 %) | 6 | 3 | 4 (31 %) | 12 (92 %) | 10 (77 %) |
+| F12 alert | 54 | 32 | 7 (13 %) | 22 (41 %) | 33 | 23 | 7 (13 %) | 20 (37 %) | 31 (57 %) |
+| F13 mark, avatar | 8 | 1 | 8 (100 %) | 8 (100 %) | 1 | 0 | 8 (100 %) | 8 (100 %) | 8 (100 %) |
+| F14 stat, progress | 3 | 2 | 2 (67 %) | 3 (100 %) | 2 | 1 | 2 (67 %) | 3 (100 %) | 2 (67 %) |
+
+
+How to read the tables:
+
+- **Buttons:** 1155 elements have 521 host recipes. The largest recipe
+  (`btn btn-ghost btn-xs`) has 113 elements, and the five largest have 272 (24 %). With the
+  content, the largest frame group is a `btn btn-ghost btn-xs` button with only text: 101
+  elements in 17 libs.
+- **Text inputs:** 89 elements are in 74 frame groups, and 63 frames have one element. The
+  largest frame group has 4 elements, in one lib. No field frame is in more than one lib.
+- **Native selects:** 13 host recipes, but 26 frame groups for 32 elements. The control is
+  often the same, and the label structure around it is different each time.
+- **Menus and listboxes:** 34 elements, 34 frame groups. No duplicate.
+- **Spinner:** one recipe (`loading loading-spinner loading-xs`) has 79 of 125 elements in 9
+  libs. This is the only large family that is almost one exact group.
+- **Marks:** 44 of 46 elements are in five groups, because owners exist.
+- **Settings:** the same pattern. 43 text inputs are in 31 frame groups, and 17 native selects
+  are in 16 frame groups. This agrees with the finding of the Settings session: the field shell
+  has zero-DOM adopters in one tab only. Settings buttons are more regular: one host recipe has
+  126 of 327 buttons.
+
+Result: rows of the same kind are not exact duplicates. Only an owner on the host element
+(button, checkbox, badge, spinner) can get adopters with no DOM change, and only for its largest
+recipes. A frame owner (field shell, dialog, alert, card, tabs, menu) gets 11 % to 22 % at most.
+The plan uses these numbers in its section 4.3.
 
 ## 5. Families in detail
 

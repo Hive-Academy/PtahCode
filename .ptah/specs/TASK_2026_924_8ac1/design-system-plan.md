@@ -107,12 +107,26 @@ Each family goes through the same four steps. Each step is one or more small pul
 1. **Extract.** Take the best current markup as it is and move it into `libs/frontend/ui`.
    The source is a polished page when one exists (TASK_2026_904 tier map: chat, canvas, voice,
    setup wizard and onboarding). Adopt the component on the source first.
-2. **Adopt.** Replace the duplicates, lib by lib. Order: poor pages (machines, reviews), then
-   semi pages (marketplace, Thoth, tasks, Settings, analytics, apps, command center), then the
+2. **Adopt with zero pixels.** Replace only the elements that have the exact DOM of the owner
+   (the same duplicate group). Section 4.3 gives the size of this step for each family. For most
+   families it is small.
+3. **Approve the look.** Change the look one time, in the component and the tokens only. The
+   user approves the family look sheet one time (gate "Look approval" in section 4.1).
+4. **Adopt with the approved look.** Move the remaining elements to the owner, lib by lib. Each
+   of these batches is a planned visual change. Order: poor pages (machines, reviews), then semi
+   pages (marketplace, Thoth, tasks, Settings, analytics, apps, command center), then the
    remaining polished pages.
-3. **Close.** Add the ratchet rule for the family. Lower the baseline after each adoption batch.
-4. **Restyle.** Change the look one time, in the component and the tokens only. The user reviews
-   the gallery in Electron before the merge.
+5. **Close.** Add the ratchet rule for the family after step 2. Lower the baseline after each
+   adoption batch.
+
+Reason for this order (finding of the Settings session, 2026-11-10): under the zero-pixel rule a
+shared component gets adopters only where the DOM is equal already. In Settings, the field shell
+`div[ptahSettingsField]` matched the label and hint markup of one tab only. The other tabs use
+table rows and other structures, so the estimate of 44 rows was wrong and the field shell
+batches stopped. Record: `batch-02-field-shell.md` in TASK_2026_922_d4ad and section 0.4 of
+`settings-forms-plan.md` in TASK_2026_919_8ffc (pull request #1056, head `30df3f1a2`). Thus a
+row moves one time only: with zero pixels if its DOM is equal, or together with the new look.
+No row moves two times.
 
 ### 4.1 Gates
 
@@ -120,9 +134,10 @@ Each family goes through the same four steps. Each step is one or more small pul
 |---|---|---|
 | DOM equality | Each extract and adopt batch | A Jest test renders the consumer before and after the change. The serialized DOM is equal after normalization (Angular scope attributes, comment nodes, generated ids). The snapshot of the old markup is committed first, in the same pull request. Method origin: TASK_2026_919 phase 2 (`phase2/batch-01-*.md`). |
 | Zero pixel | A batch that touches a polished source page | The visual-parity harness reports 0 changed pixels on each source state. Run it under `node scripts/verify.mjs --exec`. |
-| Declared DOM delta | An adopt batch where the old markup differs from the owner (a different class recipe) | The pull request lists each class that changes and why. A screenshot pair in Electron shows the consumer before and after. This is the only step where a consumer page can change its look before step 4. |
+| Look approval | Step 3, one time for each family | DOM equality cannot gate a planned visual change, so the user is the gate. The pull request has a look sheet `family-<n>-look.md` with: (a) the gallery page of the family in Electron, each variant and state, in the dark and the light Ptah theme; (b) Electron screenshot pairs (before and after) of three to five named reference pages that have the most elements of the family; (c) the list of variants and the old recipes that each variant replaces. The user approves the sheet one time. The approval and the screenshot file hashes are recorded in the sheet. |
+| Declared DOM delta | Each batch of step 4 | The batch uses only variants from the approved look sheet. The pull request lists, for each replaced element, the old recipe and the variant. A Jest test asserts the new DOM of the consumer (a committed snapshot). Electron screenshot pairs of the changed pages are in the pull request, and a reviewer lane compares them with the look sheet. No new user approval is necessary. A batch that needs a new variant stops and goes back to the look sheet. |
 | Accessibility | Each extract batch | The component spec asserts name, role, keyboard path and focus ring. The gaps that the inventory lists for the family are closed or listed as open. |
-| Gallery | Each extract and restyle batch | The gallery shows the component in each state. The gallery spec renders it. |
+| Gallery | Each extract batch and each look sheet | The gallery shows the component in each state. The gallery spec renders it. |
 | Scoped checks | Each batch | `npm run verify -- -p <ui>,<consumer>,ui-class-audit`. Never a workspace-wide run. |
 
 ### 4.2 Batch size
@@ -136,6 +151,64 @@ Each family goes through the same four steps. Each step is one or more small pul
   A lane reports the lines that it needs in these files. It does not edit them.
 - Large libs split by folder. Examples: `chat` splits into `chat-input`, `session-inspector`,
   `execution`, `templates`. `marketplace`, `onboarding` and `tasks-ui` split by component folder.
+
+### 4.3 Coverage: zero-pixel extraction against planned visual change
+
+Source: `inventory/exact-dom-groups.md` (made by `inventory/exact-dom-groups.mjs`) and section 4.1
+of the inventory. Scope of the numbers: the renderer without Settings and without the ui lib.
+The Settings numbers are in the inventory.
+
+The type of owner sets the limit of the zero-pixel step:
+
+- **Host owner** (a directive or component on the element itself: button, input control,
+  checkbox, badge, spinner). The content of the element is projected, so only the host recipe
+  must be equal. The limit is the number of elements in the host recipes that the variants
+  reproduce exactly. The column uses the five largest host recipes.
+- **Frame owner** (a component that owns a wrapper and its children: field shell, dialog, alert,
+  card, tabs, list row). The wrapper and its direct children must be equal. The limit is the
+  size of the frame groups. The column uses the five largest frame groups.
+
+| Family | Owner type | Elements | Zero-pixel step (maximum) | Planned visual change (minimum) | Note |
+|---|---|---:|---:|---:|---|
+| 1 Button | Host | 1155 | 272 (24 %) | 883 (76 %) | 521 host recipes. The largest, `btn btn-ghost btn-xs`, has 113 elements. Settings: 185 of 327 (57 %). |
+| 2 Text input, control only | Host | 89 | 18 (20 %) | 71 (80 %) | 61 host recipes. The largest has 6 elements. |
+| 2 Field shell (label, control, hint) | Frame | 89 | 14 (16 %) | 75 (84 %) | 74 frame groups, 63 with one element. The largest has 4 elements, in one lib. |
+| 2 Textarea | Frame | 26 | 8 (31 %) | 18 (69 %) | 23 frame groups. No group has more than 2 elements. |
+| 3 Toggle, checkbox, radio | Host | 59 | 29 (49 %) | 30 (51 %) | With the label as a frame: 15 (25 %). |
+| 4 Native select | None | 32 | 0 | 32 (100 %) | Closed decision: the rich select replaces the native select. The DOM changes by design. |
+| 4 Menu, listbox, dropdown | Frame | 34 | 0 | 34 (100 %) | 34 frame groups for 34 elements. |
+| 5 Badge | Host | 206 | 33 (16 %) | 173 (84 %) | 141 host recipes. |
+| 6 Spinner | Host | 125 | 98 (78 %) | 27 (22 %) | `loading loading-spinner loading-xs` has 79 elements in 9 libs. |
+| 6 Skeleton | Host | 101 | 24 (24 %) | 77 (76 %) | 68 host recipes. |
+| 7 Alert, banner | Frame | 254 | 30 (12 %) | 224 (88 %) | Includes each `role="alert"` text line. |
+| 8 Dialog, drawer, popover | Frame | 63 | 8 (13 %) | 55 (87 %) | 37 of the 63 use a `ptah-native-*` owner already. The other dialogs are one of a kind. |
+| 9 Tabs, segmented | Frame | 32 | 7 (22 %) | 25 (78 %) | 30 frame groups. |
+| 10 Card, glass surface | Frame | 162 | 18 (11 %) | 144 (89 %) | 142 frame groups, 130 with one element. |
+| 11 List item | Frame | 223 | 46 (21 %) | 177 (79 %) | 84 list items have no class. Most of them are text content and stay as they are. |
+| 11 Table | Frame | 10 | 7 (70 %) | 3 (30 %) | Low count. Settings has 13 more. |
+| 12 Mark, avatar | Host | 46 | 44 (96 %) | 2 (4 %) | Owners exist already. |
+
+Limits of these numbers:
+
+- The zero-pixel column is a maximum for five variants. A variant set with more than five
+  variants covers more. An element that has the recipe and also a layout class (`w-full`,
+  `gap-1`) is in a different host recipe here, but it can keep the layout class on the host.
+  Thus the real number for host owners is higher. The extract batch of each family measures it.
+- For frame owners the number is firm in one direction: an element in a frame group with one
+  element cannot be a zero-pixel adopter of a shared frame.
+
+Conclusions:
+
+1. A zero-pixel extraction gives most of its value for host owners with a small number of
+   large recipes: spinner (78 %), mark (96 %), checkbox and toggle (49 %), button (24 % and
+   more).
+2. Frame owners get almost no zero-pixel adopters (11 % to 22 %). For the field shell, alert,
+   dialog, card, tabs and menu, the plan goes directly from the extraction (step 1 on the
+   source) to the look approval (step 3). Step 2 is skipped or is one batch.
+3. The select family has no zero-pixel step.
+4. Thus the look approval of the user (step 3) is the main gate of this program, not DOM
+   equality. The user-reserved decision U1 (visual direction) blocks step 4 of each family, and
+   that is about 80 % of the adoption work.
 
 ## 5. Family order
 
@@ -245,7 +318,7 @@ from the source markup.
   // <ptah-search-input>: search icon, clear button (11 search bars use `join` today)
   ```
 
-- **Gate:** DOM equality. The floating label is step 4 (restyle), not step 1.
+- **Gate:** DOM equality. The floating label is step 3 (look approval), not step 1. Zero-pixel adopters: a maximum of 16 % (section 4.3).
 - **Ratchet:** roots `input` (336) and `textarea` (49) exist. New tag rule: `<input>` (not
   checkbox, radio, hidden, file) and `<textarea>` in a feature lib without `ptahInput` or
   `ptahTextarea`.
@@ -268,7 +341,7 @@ from the source markup.
   // <ptah-radio-group value = model<T>() label orientation> with <ptah-radio [value] label hint>
   ```
 
-- **Gate:** DOM equality. One toggle look after step 4 (919 decision D3).
+- **Gate:** DOM equality. One toggle look after step 3 (919 decision D3).
 - **Ratchet:** new roots `toggle`, `checkbox`, `radio`. New attribute rule `type="checkbox"` and
   `type="radio"`. Estimate of the first baseline outside Settings: 50 checkbox, 13 radio.
 - **Accessibility closed here:** toggle without a name (3 in chat, 16 candidates on feature
@@ -445,7 +518,7 @@ from the source markup.
 | Task | State today | In this plan |
 |---|---|---|
 | TASK_2026_904 | Wave 1 merged (3 extractions, 2 consumer libs). Wave 1b offered, not started. | Close it after Wave 1. Wave 1b does not start as a separate wave. Its items move: chat send and stop to family 1, composer layout to family 2 (exception in 6.2), suggestions frame and glass menu to family 4. Its tier map (`polish-map.md`), its zero-pixel gate and its rule "extract as is from a polished page" stay in force as step 1 of each family. |
-| TASK_2026_919_8ffc | Pull request #1056 open. Inventory (114 controls), plan and phase 2 batch 01 (field shell). | It continues as the Settings stream of families 2, 3 and 4. Its inventory and decisions stay valid. Its `forms/` contracts and `extracted/settings-field` become the first batch of family 2. Its later batches follow the family order of this plan, not a tab order. Its open decisions D3 and D5 to D8 move to section 9. |
+| TASK_2026_919_8ffc | Pull request #1056 open. Inventory (114 controls), plan and phase 2 batch 01 (field shell). | It continues as the Settings stream of families 2, 3 and 4. Its field shell batches stopped after batch 2 (no more zero-DOM adopters, head `30df3f1a2`). The other Settings rows move in step 4 of family 2, with the approved look. Its inventory and decisions stay valid. Its `forms/` contracts and `extracted/settings-field` become the first batch of family 2. Its later batches follow the family order of this plan, not a tab order. Its open decisions D3 and D5 to D8 move to section 9. |
 | Pull request #1028 generics | `ptahButton`, `ptahFieldControl`, `ptah-field`, `ptah-state-panel`, `ptah-page-header`, `ptah-toolbar`, `ptah-list-row` | Each one merges into the owner of its family when that family starts. The name can stay. The look comes from the extracted source. |
 
 **Owner of `libs/frontend/ui`:** TASK_2026_924_8ac1 is the umbrella task from now on. Each family
@@ -456,7 +529,7 @@ row in this plan.
 
 **What was in conflict:** TASK_2026_904 said "do not put generic components on polished pages"
 and "zero pixel". The approved method says "then change the look one time per family". The two
-agree when they are in sequence. Steps 1 to 3 keep each page as it is (904 rule). Step 4 changes
+agree when they are in sequence. Steps 1 and 2 keep each page as it is (904 rule). Steps 3 and 4 change
 the look in one place, with user review in the gallery, and the polished pages change with it
 (see U2).
 
@@ -468,7 +541,7 @@ the look in one place, with user review in the gallery, and the polished pages c
 | Many one-of-a-kind recipes (cards, banners, rows) | DOM equality fails for most adoptions | Declared-delta gate with screenshots. Approve the variant list in the gallery first. |
 | The ratchet counts classes, so a wrapper with the same classes hides a duplicate | False progress | Tag rules count raw tags. Feature libs cannot use `<button>`, `<input>`, `<select>` without an owner directive. |
 | Two tasks write `libs/frontend/ui` at the same time | Merge conflicts in index files and the gallery | One owner for shared files. Lanes report the lines that they need. |
-| Step 4 changes polished pages | The user does not accept the new look | Gallery review before the merge. One pull request per family, so a revert is one commit. |
+| Steps 3 and 4 change polished pages | The user does not accept the new look | Gallery review before the merge. One pull request per family, so a revert is one commit. |
 | `@angular/aria` behavior differs from the current keyboard service | Keyboard regressions in chat (suggestions, model picker) | Parity test first (919 D7). Chat adopts last in family 4. |
 | About 60 button batches | Long calendar time, review load | Parallel lanes on disjoint libs. Mechanical batches, same review checklist. The ratchet shows progress per lib. |
 | 4 Ptah themes, the stock DaisyUI themes, and glass on or off | A token works in one theme only | Each token reads a theme variable. The gallery has the theme switch. Visual review in Electron on a dark, a light and a glass state. |
@@ -484,11 +557,12 @@ the look in one place, with user review in the gallery, and the polished pages c
 | P1 | Extend the existing ratchet and the existing gallery. | Extend, or build new ones | Both exist and are in CI (`ui-class-audit` lint target, route `ui-gallery`). | Yes |
 | P2 | Button family first after batch 0. | Button first, or forms first | `btn` is 63 % of the ratchet baseline (3531 of 5572) and each later family contains buttons. Forms work continues in parallel in the 919 stream, so the order does not stop it. | Yes |
 | P3 | DOM equality is the default gate. Zero pixel applies only when a batch touches a polished source. | Zero pixel on each batch, or DOM equality | The pixel harness needs a built Electron app and one verify slot per run. DOM equality runs in Jest. | Yes |
-| P4 | A declared-delta gate exists for adoptions where the old recipe differs. | Never change a consumer before step 4, or permit a declared delta | The inventory shows 416 raw button recipes. Without this gate, the owner must copy each recipe as a variant. | Yes |
+| P4 | A declared-delta gate exists for adoptions where the old recipe differs. | Never change a consumer before the look approval, or permit a declared delta | The inventory shows 416 raw button recipes. Without this gate, the owner must copy each recipe as a variant. | Yes |
 | P5 | Tag rules in the ratchet, not only class roots. | Class roots only, or class roots and tags | 83 buttons and 6 selects have no class, so a class rule does not see them. | Yes |
-| P6 | The select family uses behavior parity in place of DOM equality. | Keep the native select until step 4, or replace in step 1 with parity | The closed user decision removes the native select. Equal DOM is not possible. | No (the native select goes away) |
+| P6 | The select family uses behavior parity in place of DOM equality. | Keep the native select until step 3, or replace in step 1 with parity | The closed user decision removes the native select. Equal DOM is not possible. | No (the native select goes away) |
 | P7 | One umbrella task owns `libs/frontend/ui` and the shared files. | One umbrella, or one task per page area | Two tasks (904, 919) wrote the same lib in the same week. | Yes |
 | P8 | Batch limit: six write files, two Nx projects, one pull request. | Larger batches by lib, or the 919 limit | The 919 limit is in use and matches the memory rules. | Yes |
+| P9 | Each element moves one time: with zero pixels if its DOM is equal to the owner, or in step 4 with the approved look. The look approval of the user is the gate for a planned visual change. | Adopt as-is in all libs before the look change, or split by exact-DOM group | The Settings session found that the field shell has zero-DOM adopters in one tab only. The exact-DOM count (section 4.3) shows the same for each frame owner: 11 % to 22 %. | Yes |
 
 ### 9.2 User-reserved decisions
 
@@ -498,7 +572,7 @@ that depends on an open decision merges before the answer.
 | # | Decision | Options | Recommendation |
 |---|---|---|---|
 | U1 | Visual direction for the families that have no stated direction (button, badge, alert, card, tabs, table). | (a) Keep the look of the polished pages (onboarding buttons, chat glass) as the final look. (b) New direction for each family, shown in the gallery first. | (a) for steps 1 to 3. Decide (b) family by family at step 4, in the gallery. |
-| U2 | Can step 4 change the look of the polished pages (chat, canvas, voice, setup wizard and onboarding)? | (a) Yes, each family has one look in the full application. (b) No, polished pages keep a variant of their own. | (a), with two exceptions that keep their look: the chat composer and the canvas rail. |
+| U2 | Can steps 3 and 4 change the look of the polished pages (chat, canvas, voice, setup wizard and onboarding)? | (a) Yes, each family has one look in the full application. (b) No, polished pages keep a variant of their own. | (a), with two exceptions that keep their look: the chat composer and the canvas rail. |
 | U3 | Removal of overlap inside `libs/frontend/ui`: `native/` against `overlays/` and `selection/`, `ptah-field` and `ptahSetupField` against the new field shell, `native/card` against `surfaces/`. | (a) Merge into one owner per family and delete the others after adoption. (b) Keep all and mark the old ones deprecated. | (a). Each deletion is its own pull request with a preserve list. |
 | U4 | Replace native `title` tooltips (669) with a shared tooltip. | (a) Replace all. (b) Replace only on icon buttons (the `label` input gives it). (c) Keep `title=`. | (b). It closes the accessibility gap with no bulk edit. |
 | U5 | New dependency. | (a) None. (b) Add a table or virtual-scroll package later. | (a). `@angular/cdk`, `@angular/aria` and Floating UI cover each family. |
