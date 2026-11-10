@@ -369,6 +369,12 @@ describe('LaneResumeGate budget refusal', () => {
       budget: { weightedTokens: 800, rawTokens: 800, turnIds: [], startedAtMs: NOW - 1_000 } });
     expect(result.decision).toBe('fresh');
   });
+  it('uses the weighted total for a discounted lane', async () => {
+    const result = await gateWith().gate.evaluate({ cli: 'copilot', cliSessionId: 's', budgetSettings,
+      budget: { weightedTokens: 100, rawTokens: 900, turnIds: [], startedAtMs: NOW - 1_000 },
+      lastActivityAt: NOW - 1_000, lastRequestContext: { tokens: 1_000, source: 'estimate' } });
+    expect(result.decision).toBe('resume');
+  });
   it('refuses a token-empty lane after its lifetime expires', async () => {
     const result = await gateWith().gate.evaluate({ cli: 'claude', cliSessionId: 's', budgetSettings,
       budget: { weightedTokens: 0, rawTokens: 0, turnIds: [], startedAtMs: NOW - 11 * 60_000 } });

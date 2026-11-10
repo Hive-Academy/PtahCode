@@ -296,6 +296,7 @@ export function buildSessionChildCompletionEnvelope(
 }
 
 export interface LaneCompletionContext {
+  readonly heldBudgetWarning?: boolean;
   /** Reports this lane delivered through `ptah_agent_report` before it ended. */
   readonly reportsDelivered: number;
   readonly reportClaimsCompletion?: boolean;
@@ -904,6 +905,7 @@ export class LaneCompletionNotifier {
         context.reportsDelivered,
       ),
       reportsDelivered: context.reportsDelivered,
+      ...(context.heldBudgetWarning ? { heldBudgetWarning: true } : {}),
       ...(info.mcpAttachmentWarning
         ? { mcpAttachmentWarning: info.mcpAttachmentWarning }
         : {}),

@@ -5,6 +5,11 @@ import { findAdvancedSetting } from '../types/advanced-settings.types';
 
 /** Fixed $3 per million input tokens, independent of catalog updates. */
 export const REFERENCE_INPUT_USD_PER_TOKEN = 0.000003;
+/** Verified cache reads contribute 10% to the lifetime token floor. */
+export const VERIFIED_CACHE_READ_WEIGHT = 0.1;
+/** Stop after this many consecutive completed turns without usage telemetry. */
+export const MAX_CONSECUTIVE_UNAVAILABLE_TURNS = 3;
+export interface AgentBudgetPolicyOptions { readonly laneAccounting?: boolean; }
 
 export const agentBudgetSettingsSchema = z.object({
   warnRatio: z.number().finite().gt(0).lt(1),
@@ -47,6 +52,7 @@ export interface AgentBudgetSnapshot {
   readonly stopped: boolean;
   readonly turnIds: readonly string[];
   readonly largestTurnTokens?: number;
+  readonly unavailableTurns?: number;
 }
 export interface AgentBudgetTransition {
   readonly snapshot: AgentBudgetSnapshot;
@@ -90,11 +96,11 @@ function pricedClasses(usage: AgentTurnUsage, pricing: ModelPricing | null): num
 
 /** Pure transition; callers persist the snapshot and deduplicate by turn ID. */
 export class AgentBudgetPolicy {
-  constructor(private readonly settings: AgentBudgetSettings) { agentBudgetSettingsSchema.parse(settings); }
+  constructor(private readonly settings: AgentBudgetSettings, private readonly options: AgentBudgetPolicyOptions = {}) { agentBudgetSettingsSchema.parse(settings); }
 
   /** The same threshold decision applies to completed turns and persisted ledgers. */
   assess(snapshot: AgentBudgetSnapshot, elapsedMs: number, contextTokens?: number, nextTurnTokens = 0): { warning: boolean; stopReason?: AgentBudgetStopReason; handoff: boolean } {
-    const total = Math.max(snapshot.rawTokens, snapshot.weightedTokens);
+    const total = this.options.laneAccounting ? snapshot.weightedTokens : Math.max(snapshot.rawTokens, snapshot.weightedTokens);
     const contextWarning = contextTokens !== undefined && contextTokens >= this.settings.handoffContextTokens * this.settings.warnRatio;
     const warning = !snapshot.warned && !snapshot.stopped &&
       (total >= this.settings.stopWeightedTokens * this.settings.warnRatio ||
@@ -106,15 +112,56 @@ export class AgentBudgetPolicy {
     return { warning, stopReason, handoff: contextTokens !== undefined && contextTokens >= this.settings.handoffContextTokens };
   }
 
-  evaluate(snapshot: AgentBudgetSnapshot, telemetry: AgentTurnTelemetry, elapsedMs: number, pricing: ModelPricing | null): AgentBudgetTransition {
-    if (telemetry.status === 'unavailable') return {
-      snapshot: { ...snapshot, elapsedMs, stopped: true }, warning: false,
-      stopReason: snapshot.stopped ? undefined : 'telemetry-unavailable', handoff: false, coverage: 'telemetry-unavailable',
-      cost: { status: 'unavailable', reason: telemetry.reason },
+  private decideTurn(snapshot: AgentBudgetSnapshot, previousWeightedTokens: number, elapsedMs: number, duplicate: boolean,
+    contextTokens?: number, turnTokens = 0): { warning: boolean; stopReason?: AgentBudgetStopReason; handoff: boolean } {
+    const decision = this.assess(snapshot, elapsedMs, contextTokens, turnTokens);
+    const contextCeiling = contextTokens !== undefined && contextTokens >= this.settings.handoffContextTokens * 2;
+    const deferTokenStop = !duplicate && previousWeightedTokens < this.settings.stopWeightedTokens &&
+      snapshot.weightedTokens >= this.settings.stopWeightedTokens && decision.stopReason === 'budget' && !contextCeiling;
+    return {
+      warning: !duplicate && (decision.warning || deferTokenStop),
+      stopReason: duplicate && decision.stopReason === 'budget' && !contextCeiling ? undefined
+        : deferTokenStop ? undefined : decision.stopReason,
+      handoff: decision.handoff,
     };
+  }
+
+  evaluate(snapshot: AgentBudgetSnapshot, telemetry: AgentTurnTelemetry, elapsedMs: number, pricing: ModelPricing | null): AgentBudgetTransition {
+    if (telemetry.status === 'unavailable') {
+      if (!this.options.laneAccounting) return {
+        snapshot: { ...snapshot, elapsedMs, stopped: true }, warning: false,
+        stopReason: snapshot.stopped ? undefined : 'telemetry-unavailable', handoff: false, coverage: 'telemetry-unavailable',
+        cost: { status: 'unavailable', reason: telemetry.reason },
+      };
+      if (snapshot.stopped) return {
+        snapshot: { ...snapshot, elapsedMs }, warning: false, stopReason: undefined,
+        handoff: false, coverage: 'telemetry-unavailable',
+        cost: { status: 'unavailable', reason: telemetry.reason },
+      };
+      const duplicate = snapshot.turnIds.includes(telemetry.turnId);
+      const unavailableTurns = duplicate ? snapshot.unavailableTurns : (snapshot.unavailableTurns ?? 0) + 1;
+      const weightedTokens = snapshot.weightedTokens + (duplicate ? 0 : snapshot.largestTurnTokens ?? 0);
+      const updated = { ...snapshot, elapsedMs, unavailableTurns, weightedTokens,
+        turnIds: duplicate ? snapshot.turnIds : [...snapshot.turnIds, telemetry.turnId] };
+      const decision = this.decideTurn(updated, snapshot.weightedTokens, elapsedMs, duplicate);
+      const stopReason = !duplicate && unavailableTurns !== undefined && unavailableTurns >= MAX_CONSECUTIVE_UNAVAILABLE_TURNS
+        ? 'telemetry-unavailable' as const : decision.stopReason;
+      const warning = stopReason === 'telemetry-unavailable' ? false : decision.warning;
+      return {
+        snapshot: { ...updated, warned: snapshot.warned || warning, stopped: stopReason !== undefined },
+        warning, stopReason, handoff: false, coverage: 'telemetry-unavailable',
+        cost: { status: 'unavailable', reason: telemetry.reason },
+      };
+    }
     const usage = telemetry.usage;
     const duplicate = snapshot.turnIds.includes(usage.turnId);
     const raw = usage.inputTokens + usage.outputTokens;
+    const cacheRead = usage.models?.length
+      ? usage.models.reduce((sum, model) => sum + Math.min(model.inputTokens, Math.max(0, model.cacheReadTokens)), 0)
+      : usage.cacheSemantics === 'verified-subsets' && usage.cacheReadTokens.status === 'reported'
+        ? usage.cacheReadTokens.value : 0;
+    const verifiedCacheRead = Math.min(usage.inputTokens, Math.max(0, cacheRead));
+    const floor = raw - (1 - VERIFIED_CACHE_READ_WEIGHT) * verifiedCacheRead;
     const priced = usage.models?.length
       ? usage.models.reduce<number | null>((sum, model) => {
           if (sum === null) return null;
@@ -127,17 +174,20 @@ export class AgentBudgetPolicy {
           return modelCost === null ? null : sum + modelCost;
         }, 0)
       : pricedClasses(usage, pricing);
-    const weighted = priced === null ? raw : Math.max(raw, priced / REFERENCE_INPUT_USD_PER_TOKEN);
+    const weighted = priced === null ? (this.options.laneAccounting ? floor : raw)
+      : Math.max(this.options.laneAccounting ? floor : raw, priced / REFERENCE_INPUT_USD_PER_TOKEN);
     const rawTokens = snapshot.rawTokens + (duplicate ? 0 : raw);
     const weightedTokens = snapshot.weightedTokens + (duplicate ? 0 : weighted);
     const contextTokens = usage.requestContextTokens.status === 'reported' ? usage.requestContextTokens.value : undefined;
-    const turnTokens = duplicate ? 0 : Math.max(raw, weighted);
+    const turnTokens = duplicate ? 0 : (this.options.laneAccounting ? weighted : Math.max(raw, weighted));
     const largestTurnTokens = Math.max(snapshot.largestTurnTokens ?? 0, turnTokens);
-    const decision = this.assess({ ...snapshot, rawTokens, weightedTokens, largestTurnTokens }, elapsedMs, contextTokens, turnTokens);
-    const warning = !duplicate && decision.warning;
+    const decision = this.options.laneAccounting
+      ? this.decideTurn({ ...snapshot, rawTokens, weightedTokens, largestTurnTokens }, snapshot.weightedTokens, elapsedMs, duplicate, contextTokens, turnTokens)
+      : this.assess({ ...snapshot, rawTokens, weightedTokens, largestTurnTokens }, elapsedMs, contextTokens, turnTokens);
+    const warning = this.options.laneAccounting ? decision.warning : !duplicate && decision.warning;
     const stopReason = decision.stopReason;
     return {
-      snapshot: { weightedTokens, rawTokens, elapsedMs, largestTurnTokens, warned: snapshot.warned || warning, stopped: snapshot.stopped || stopReason !== undefined, turnIds: duplicate ? snapshot.turnIds : [...snapshot.turnIds, usage.turnId] },
+      snapshot: { weightedTokens, rawTokens, elapsedMs, largestTurnTokens, ...(this.options.laneAccounting ? { unavailableTurns: duplicate ? snapshot.unavailableTurns : 0 } : {}), warned: snapshot.warned || warning, stopped: snapshot.stopped || stopReason !== undefined, turnIds: duplicate ? snapshot.turnIds : [...snapshot.turnIds, usage.turnId] },
       warning, stopReason,
       handoff: decision.handoff,
       coverage: priced === null ? 'price-weighting-degraded' : 'complete',

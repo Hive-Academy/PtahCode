@@ -83,6 +83,8 @@ export function buildLaneCompletionEnvelope(
   if (stopLine) lines.push(stopLine);
   else if (signal.toolCalls !== undefined)
     lines.push(`Tool calls: ${signal.toolCalls}.`);
+  if (signal.heldBudgetWarning && !isAgentBudgetStop(signal))
+    lines.push('Budget warning: this lane passed its warning threshold; its next accounted turn stops it. The lane has not received this warning yet.');
   if (signal.queuedMessagesDropped)
     lines.push(
       `Queued messages dropped by the stop: ${signal.queuedMessagesDropped}. Send them again if they still matter.`,

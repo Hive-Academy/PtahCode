@@ -116,8 +116,8 @@ export class LaneResumeGate {
 
   async evaluate(input: LaneResumeGateInput): Promise<LaneResumeDecision> {
     const budgetStop = isAgentBudgetStopReason(input.stopReason);
-    const total = Math.max(input.budget?.weightedTokens ?? 0, input.budget?.rawTokens ?? 0);
-    const nearLimit = input.budgetSettings !== undefined && new AgentBudgetPolicy(input.budgetSettings).assess({
+    const total = input.budget?.weightedTokens ?? 0;
+    const nearLimit = input.budgetSettings !== undefined && new AgentBudgetPolicy(input.budgetSettings, { laneAccounting: true }).assess({
       ...initialAgentBudgetSnapshot,
       rawTokens: input.budget?.rawTokens ?? 0,
       weightedTokens: input.budget?.weightedTokens ?? 0,

@@ -398,6 +398,15 @@ describe('LaneCompletionNotifier.signal', () => {
     );
   });
   describe('normal completion', () => {
+    it('forwards a held budget warning into the parent completion envelope', async () => {
+      const h = createHarness();
+      const result = await h.notifier.signal(createInfo(), {
+        reportsDelivered: 0, heldBudgetWarning: true,
+      });
+      expect(result.signal?.heldBudgetWarning).toBe(true);
+      expect(h.envelope()).toContain('Budget warning: this lane passed its warning threshold');
+    });
+
     it('delivers one turn to the parent session with the peer origin', async () => {
       const h = createHarness({ files: { '/ws/tf/report.md': 42 } });
 

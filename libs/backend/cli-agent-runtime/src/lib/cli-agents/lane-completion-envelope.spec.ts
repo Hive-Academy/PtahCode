@@ -10,6 +10,21 @@ const base: LaneCompletionSignal = {
 };
 
 describe('lane completion envelope budget stops', () => {
+  it('tells the parent about a held warning when the lane ends', () => {
+    const text = buildLaneCompletionEnvelope({ ...base, status: 'completed', heldBudgetWarning: true });
+    expect(text).toContain('Budget warning: this lane passed its warning threshold; its next accounted turn stops it.');
+  });
+
+  it('omits the held warning once a budget stop is reported', () => {
+    const text = buildLaneCompletionEnvelope({ ...base, stopReason: 'budget', heldBudgetWarning: true });
+    expect(text).toContain('Stopped by Ptah (agent budget)');
+    expect(text).not.toContain('passed its warning threshold');
+  });
+
+  it('keeps the envelope unchanged after a warning was delivered', () => {
+    const text = buildLaneCompletionEnvelope({ ...base, status: 'completed' });
+    expect(text).not.toContain('passed its warning threshold');
+  });
   it.each(['budget', 'duration', 'telemetry-unavailable'] as const)(
     'explains %s and provides a bounded progress pointer', (stopReason) => {
       const text = buildLaneCompletionEnvelope({ ...base, stopReason,
