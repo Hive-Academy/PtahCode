@@ -183,6 +183,11 @@ export class SessionAutoHandoffCoordinatorService {
     return found;
   }
 
+  private atLimit(tabId: string): boolean {
+    const tab = this.tabManager.findTabByIdAcrossWorkspaces(tabId)?.tab ?? null;
+    return tab !== null && budgetStage(tab) === 'limit';
+  }
+
   /** Tabs in both partitions; the tracked reads re-run the effect when either changes. */
   private budgetTabs(): readonly TabState[] {
     const activeTabs = this.tabManager.tabs();
@@ -328,8 +333,9 @@ export class SessionAutoHandoffCoordinatorService {
       }
       if (this.autoHandoff.entry(sessionId)?.state === 'cancelled') return;
       this.autoHandoff.release(sessionId);
-      // Withdrawn here because the stage fell below the limit: not a failure.
-      if (this.withdrawing.has(sessionId)) return;
+      // Withdrawn because the confirmed stage is below the limit (here, or by
+      // the queue at its send): not a failure. A later limit fires again.
+      if (outcome === 'withdrawn' && !this.atLimit(queued.tabId)) return;
       this.deferAttempt(
         sessionId,
         outcome === 'failed'

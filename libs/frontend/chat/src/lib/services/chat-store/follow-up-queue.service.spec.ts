@@ -31,6 +31,7 @@ import { ComposerRestoreService } from '../composer-restore.service';
 import { MessageSenderService } from '../message-sender.service';
 import { StreamViewportController } from '../stream-viewport-controller.service';
 import { FollowUpQueueService } from './follow-up-queue.service';
+import { SessionAutoHandoffService } from '../session-auto-handoff.service';
 
 const S1 = '11111111-1111-4111-8111-111111111111';
 const S2 = '22222222-2222-4222-8222-222222222222';
@@ -398,6 +399,31 @@ describe('FollowUpQueueService', () => {
       await flush();
       expect(submit).toHaveBeenCalledTimes(2);
       expect(submit.mock.calls[1][0].content).toBe('after the command');
+    });
+
+    it('does not send an automatic hand-off whose confirmed stage is below the limit when the turn ends', async () => {
+      const handoff = TestBed.inject(SessionAutoHandoffService);
+      const queued = service.enqueue('tab-1', '/session-handoff')!;
+      handoff.claim(S1);
+      handoff.recordQueued(S1, queued);
+      const settled = jest.fn();
+      store.onSettled(queued.clientMessageId, settled);
+      // The turn ends and the queue reaches the command before any withdrawal.
+      patchTab('tab-1', { status: 'loaded', sessionBudget: { sessionId: S1, stage: 'handoff' } as TabState['sessionBudget'] });
+      await flush();
+      expect(send).not.toHaveBeenCalled();
+      expect(settled).toHaveBeenCalledWith('withdrawn');
+      expect(store.forTab('tab-1')).toHaveLength(0);
+    });
+
+    it('sends an automatic hand-off whose confirmed stage is the limit', async () => {
+      const handoff = TestBed.inject(SessionAutoHandoffService);
+      const queued = service.enqueue('tab-1', '/session-handoff')!;
+      handoff.claim(S1);
+      handoff.recordQueued(S1, queued);
+      patchTab('tab-1', { status: 'loaded', sessionBudget: { sessionId: S1, stage: 'limit' } as TabState['sessionBudget'] });
+      await flush();
+      expect(send).toHaveBeenCalledWith('/session-handoff', { tabId: 'tab-1' });
     });
 
     it('fires for a HIDDEN tab from the status-only terminal copy', async () => {
