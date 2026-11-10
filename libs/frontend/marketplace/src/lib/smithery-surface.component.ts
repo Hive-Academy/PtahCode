@@ -24,6 +24,7 @@ import {
   StorefrontPanelComponent,
   resolveListingBrandSlug,
   type CatalogCardBadge,
+  PtahButtonDirective,
 } from '@ptah-extension/ui';
 import type {
   McpRegistryEntry,
@@ -151,6 +152,7 @@ const VERIFIED_BADGE: CatalogCardBadge = { label: 'Verified', tone: 'info' };
   selector: 'ptah-smithery-surface',
   standalone: true,
   imports: [
+    PtahButtonDirective,
     LucideAngularModule,
     JsonSchemaFormComponent,
     BrandMarkComponent,
@@ -383,7 +385,7 @@ const VERIFIED_BADGE: CatalogCardBadge = { label: 'Verified', tone: 'info' };
             <div class="alert alert-error alert-sm py-1 px-2">
               <span class="text-xs">{{ browseError() }}</span>
               <button
-                class="btn btn-ghost btn-xs"
+                ptahButton variant="ghost" size="xs"
                 (click)="browseError.set(null)"
                 type="button"
               >
@@ -569,7 +571,7 @@ const VERIFIED_BADGE: CatalogCardBadge = { label: 'Verified', tone: 'info' };
                           @if (!isLoadingDetails() && !detailError()) {
                             <div panel-footer>
                               <button
-                                class="btn btn-primary btn-sm"
+                                ptahButton variant="primary" size="sm"
                                 [disabled]="
                                   !canSetup() || isBusy(card.server.name)
                                 "

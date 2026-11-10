@@ -14,6 +14,7 @@ import {
 } from '@angular/core';
 import { Check, LucideAngularModule } from 'lucide-angular';
 import { MARKETPLACE_RPC_TIMEOUTS } from '@ptah-extension/chat-ui';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import { ClaudeRpcService } from '@ptah-extension/core';
 import type {
   FileDecision,
@@ -377,7 +378,7 @@ interface RepairResultRow {
 @Component({
   selector: 'ptah-kept-items-repair-prompt',
   standalone: true,
-  imports: [MarketplaceKeepReplaceComponent],
+  imports: [MarketplaceKeepReplaceComponent, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dialog
@@ -453,7 +454,9 @@ interface RepairResultRow {
                 </span>
                 <button
                   type="button"
-                  class="btn btn-ghost btn-xs"
+                  ptahButton
+                  variant="ghost"
+                  size="xs"
                   [disabled]="busy()"
                   (click)="setAll('keep')"
                 >
@@ -461,7 +464,9 @@ interface RepairResultRow {
                 </button>
                 <button
                   type="button"
-                  class="btn btn-ghost btn-xs"
+                  ptahButton
+                  variant="ghost"
+                  size="xs"
                   [disabled]="busy()"
                   (click)="setAll('replace')"
                 >
@@ -521,7 +526,9 @@ interface RepairResultRow {
           @if (result()) {
             <button
               type="button"
-              class="btn btn-primary btn-sm"
+              ptahButton
+              variant="primary"
+              size="sm"
               data-testid="kept-items-repair-done"
               (click)="closed.emit()"
             >
@@ -530,7 +537,9 @@ interface RepairResultRow {
           } @else {
             <button
               type="button"
-              class="btn btn-ghost btn-sm"
+              ptahButton
+              variant="ghost"
+              size="sm"
               [disabled]="busy()"
               (click)="closed.emit()"
             >
@@ -538,7 +547,9 @@ interface RepairResultRow {
             </button>
             <button
               type="button"
-              class="btn btn-primary btn-sm"
+              ptahButton
+              variant="primary"
+              size="sm"
               data-testid="kept-items-repair-confirm"
               [disabled]="busy()"
               (click)="confirm()"
