@@ -58,6 +58,8 @@ export class ReviewRunsStore {
   readonly stateFilter = signal<ReviewStateFilter>('all');
   readonly lastRefreshedAt = signal<Date | null>(null);
   readonly selectedAttemptId = signal<string | null>(null);
+  /** The registered workspace folder of the reviewed repository of the loaded findings; null when it is not open. */
+  readonly repositoryRoot = signal<string | null>(null);
   readonly selectedRun = signal<ReviewRun | null>(null);
   readonly detailState = signal<'loading' | 'ready' | 'error'>('ready');
   readonly findings = signal<readonly ReviewFinding[]>([]);
@@ -237,6 +239,7 @@ export class ReviewRunsStore {
   private async loadFindings(attemptId: string): Promise<void> {
     const generation = ++this.findingsGeneration;
     this.findings.set([]);
+    this.repositoryRoot.set(null);
     this.findingsState.set('loading');
     try {
       const result = await this.request(
@@ -246,6 +249,7 @@ export class ReviewRunsStore {
       );
       if (this.findingsGeneration !== generation || this.selectedAttemptId() !== attemptId) return;
       this.findings.set(result.findings);
+      this.repositoryRoot.set(result.repositoryRoot ?? null);
       this.findingsState.set('ready');
     } catch {
       if (this.findingsGeneration === generation && this.selectedAttemptId() === attemptId) {

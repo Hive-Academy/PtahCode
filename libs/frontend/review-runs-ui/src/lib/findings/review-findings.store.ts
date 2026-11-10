@@ -3,7 +3,7 @@ import { ClaudeRpcService } from '@ptah-extension/core';
 import { ReviewRpcSchemas } from '@ptah-extension/review-contracts';
 import type { FileOpenParams, FileOpenResult } from '@ptah-extension/shared';
 import { ReviewRunsStore } from '../review-runs.store';
-import { openTriage, type FindingTriage, type ReviewFindingView, type TriageMap } from './review-finding-view';
+import { isRepositoryRelativePath, openTriage, type FindingTriage, type ReviewFindingView, type TriageMap } from './review-finding-view';
 
 @Injectable({ providedIn: 'root' })
 export class ReviewFindingsStore {
@@ -53,6 +53,7 @@ export class ReviewFindingsStore {
         const errors = {
           'no-thread': 'This finding has no published GitHub thread.',
           'ambiguous-thread': 'More than one GitHub thread matches this finding. Reply on GitHub.',
+          'publication-unavailable': 'GitHub publication is paused or the pull request has new commits. The reply was not posted.',
           'github-error': 'GitHub rejected the reply.',
           'run-not-found': 'This review run is unavailable.',
         };
@@ -68,28 +69,44 @@ export class ReviewFindingsStore {
   }
 
   async openEvidence(path: string, line: number | null): Promise<void> {
+    // A late result of an earlier run must not write the signals of the run that is selected now.
+    const attemptId = this.runs.selectedAttemptId();
+    const current = (): boolean => this.runs.selectedAttemptId() === attemptId;
     this.openError.set(null);
+    const workspaceRoot = this.runs.repositoryRoot();
+    if (!workspaceRoot) {
+      this.openError.set('The reviewed repository is not open in Ptah. Add its folder as a workspace.');
+      return;
+    }
+    if (!isRepositoryRelativePath(path)) {
+      this.openError.set('Could not open the file. Its path is not inside the reviewed repository.');
+      return;
+    }
     try {
-      const params: FileOpenParams = { path, ...(line === null ? {} : { line }) };
+      // The host resolves the path against workspaceRoot and refuses a path that leaves that root.
+      const params: FileOpenParams = { path, workspaceRoot, ...(line === null ? {} : { line }) };
       const response = await this.rpc.call('file:open', params, { timeout: 30_000 });
+      if (!current()) return;
       if (!response.isSuccess()) throw new Error('rpc');
       const result: FileOpenResult = response.data;
-      if (!result.success && !result.cancelled) this.openError.set('Could not open the file. Make sure that the reviewed repository is the open workspace.');
+      if (!result.success && !result.cancelled) this.openError.set('Could not open the file from the reviewed repository.');
     } catch {
-      this.openError.set('Could not open the file. Make sure that the reviewed repository is the open workspace.');
+      if (current()) this.openError.set('Could not open the file from the reviewed repository.');
     }
   }
 
   async sendToLane(view: ReviewFindingView): Promise<void> {
+    const attemptId = this.runs.selectedAttemptId();
+    const current = (): boolean => this.runs.selectedAttemptId() === attemptId;
     this.copyError.set(null);
     this.copied.set(false);
     const evidence = view.evidence.map(item => `${item.path}:${item.line} ${item.excerpt}`).join('\n');
     const prompt = `${view.title}\n${view.path}:${view.line ?? 'unknown'}\n\nEvidence:\n${evidence}\n\n${view.fixPrompt}`;
     try {
       await navigator.clipboard.writeText(prompt);
-      this.copied.set(true);
+      if (current()) this.copied.set(true);
     } catch {
-      this.copyError.set('Could not copy the fix prompt.');
+      if (current()) this.copyError.set('Could not copy the fix prompt.');
     }
   }
 }

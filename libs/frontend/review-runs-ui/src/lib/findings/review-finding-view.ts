@@ -23,6 +23,16 @@ export interface FindingFilters {
 export const severityOrder: Record<Severity, number> = { Critical: 0, Major: 1, Minor: 2, Nitpick: 3 };
 export const openTriage: FindingTriage = { state: 'open', pending: false, error: null, replied: false };
 
+/**
+ * True when the path is relative and stays inside the repository root.
+ * A finding path comes from model output, so an absolute path or a parent segment is refused before file:open.
+ */
+export function isRepositoryRelativePath(path: string): boolean {
+  if (path.trim() === '' || /^[\\/]/.test(path) || /^[A-Za-z]:/.test(path)) return false;
+  if ([...path].some(char => char.charCodeAt(0) < 32)) return false;
+  return !path.split(/[\\/]/).some(segment => segment === '..');
+}
+
 export function toFindingViews(findings: readonly ReviewFinding[]): ReviewFindingView[] {
   return findings.map((finding, index) => ({
     ...finding,
