@@ -6,8 +6,8 @@ import {
   ClaudeRpcService, ElectronLayoutService, GIT_SESSION_SCOPE_SOURCE,
   MESSAGE_HANDLERS, MessageRouterService, VSCodeService,
 } from '@ptah-extension/core';
-import { GIT_WINDOW_CONTEXT } from '@ptah-extension/git-ui';
-import { GitDockScopeStore } from '@ptah-extension/git-ui/services';
+
+import { GIT_WINDOW_CONTEXT, GitDockScopeStore } from '@ptah-extension/git-ui/services';
 import { GIT_WINDOW_PUSH_TYPES, type GitWindowScope } from '@ptah-extension/shared';
 import { ChildGitSessionScopeSource, GitWindowScopeHandler, gitWindowConfig, mountGitWindowHost } from './git-window.config';
 
@@ -19,7 +19,10 @@ const scope: GitWindowScope = {
 function providers(): unknown[] {
   const result: unknown[] = [];
   const walk = (items: readonly (Provider | EnvironmentProviders)[]): void => {
-    for (const item of items) Array.isArray(item) ? walk(item) : result.push(item);
+    for (const item of items) {
+      if (Array.isArray(item)) walk(item);
+      else result.push(item);
+    }
   };
   walk(gitWindowConfig.providers);
   return result;

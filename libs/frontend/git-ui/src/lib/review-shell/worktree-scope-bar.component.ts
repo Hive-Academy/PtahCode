@@ -44,7 +44,6 @@ export function worktreeFolderName(path: string): string {
         >Viewing <span class="font-semibold">{{ worktreeLabel() }}</span>
         worktree (read-only)</span
       >
-      @if (!hideOpenAsWorkspace()) {
       <button
         type="button"
         class="btn btn-ghost btn-xs {{ focusRing }}"
@@ -53,6 +52,7 @@ export function worktreeFolderName(path: string): string {
       >
         Back to {{ activeLabel() }}
       </button>
+      @if (!hideOpenAsWorkspace()) {
       <button
         type="button"
         class="btn btn-ghost btn-xs {{ focusRing }}"

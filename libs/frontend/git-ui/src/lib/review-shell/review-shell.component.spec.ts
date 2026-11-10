@@ -26,7 +26,7 @@ import type {
   GitStatusUnavailableReason,
 } from '@ptah-extension/shared';
 import type { OpenInRequest } from '../open-in/open-in-button.component';
-import { GIT_WINDOW_CONTEXT } from '../git-window-context.token';
+import { GIT_WINDOW_CONTEXT, type GitWindowContext } from '../git-window-context.token';
 import { EditorLauncherService } from '../services/editor-launcher.service';
 import { FileContentChangesService } from '../services/file-content-changes.service';
 import { GitBranchesService } from '../services/git-branches.service';
@@ -223,7 +223,10 @@ describe('ReviewShellComponent', () => {
       requestWindowMode: jest.Mock;
   };
 
+  let windowContext: GitWindowContext | null = null;
+
   beforeEach(() => {
+    windowContext = null;
     worktreeStatus = makeWorktreeStatus();
     scopeStore = {
       followsSessions: signal(true),
@@ -266,6 +269,7 @@ describe('ReviewShellComponent', () => {
         { provide: ReviewWorktreeStatusService, useValue: worktreeStatus },
         { provide: ElectronLayoutService, useValue: layout },
         { provide: GitDockScopeStore, useValue: scopeStore },
+        { provide: GIT_WINDOW_CONTEXT, useFactory: () => windowContext },
       ],
     });
     navigation = TestBed.inject(ReviewNavigationService);
@@ -1165,7 +1169,7 @@ describe('ReviewShellComponent', () => {
 
     it('shows Detach in the main header when available', async () => {
       const detach = jest.fn();
-      TestBed.overrideProvider(GIT_WINDOW_CONTEXT, { useValue: { role: 'main', detach } });
+      windowContext = { role: 'main', detach };
       const fixture = await render();
       const button = query(fixture, '[data-testid="git-dock-detach"]') as HTMLButtonElement;
       expect(button).not.toBeNull();
@@ -1174,9 +1178,7 @@ describe('ReviewShellComponent', () => {
     });
 
     it('hides Detach and delegates pin requests in the child', async () => {
-      TestBed.overrideProvider(GIT_WINDOW_CONTEXT, {
-        useValue: { role: 'child', applyCandidates: jest.fn(), setMode: jest.fn() },
-      });
+      windowContext = { role: 'child', applyCandidates: jest.fn(), setMode: jest.fn() };
       const fixture = await render();
       expect(query(fixture, '[data-testid="git-dock-detach"]')).toBeNull();
       (query(fixture, '[data-testid="git-dock-scope-pin"]') as HTMLButtonElement).click();

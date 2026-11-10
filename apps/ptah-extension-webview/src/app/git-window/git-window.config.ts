@@ -29,14 +29,14 @@ export function mountGitWindowHost(doc: Document): void {
 export class ChildGitSessionScopeSource implements GitSessionScopeSource {
   private readonly active = signal<GitSessionScopeCandidate | null>(null);
   private readonly open = signal<readonly GitSessionScopeCandidate[]>([]);
-  readonly activeSession: Signal<GitSessionScopeCandidate | null> = this.active.asReadonly();
-  readonly openSessions: Signal<readonly GitSessionScopeCandidate[]> = this.open.asReadonly();
+  public readonly activeSession: Signal<GitSessionScopeCandidate | null> = this.active.asReadonly();
+  public readonly openSessions: Signal<readonly GitSessionScopeCandidate[]> = this.open.asReadonly();
 
-  candidateForTab(tabId: string): GitSessionScopeCandidate | null {
+  public candidateForTab(tabId: string): GitSessionScopeCandidate | null {
     return this.open().find((candidate) => candidate.tabId === tabId) ?? null;
   }
 
-  applyCandidates(scope: GitWindowScope): void {
+  public applyCandidates(scope: GitWindowScope): void {
     this.active.set(scope.active);
     this.open.set(scope.open);
   }
@@ -44,16 +44,16 @@ export class ChildGitSessionScopeSource implements GitSessionScopeSource {
 
 @Injectable({ providedIn: 'root' })
 export class GitWindowScopeHandler implements MessageHandler {
-  readonly handledMessageTypes = [GIT_WINDOW_PUSH_TYPES.scope] as const;
+  public readonly handledMessageTypes = [GIT_WINDOW_PUSH_TYPES.scope] as const;
   private readonly store = inject(GitDockScopeStore);
   private readonly current = signal<GitWindowScope | null>(null);
-  readonly scope = this.current.asReadonly();
+  public readonly scope = this.current.asReadonly();
 
-  handleMessage(message: { type: string; payload?: unknown }): void {
+  public handleMessage(message: { type: string; payload?: unknown }): void {
     if (message.type === GIT_WINDOW_PUSH_TYPES.scope) this.apply(message.payload);
   }
 
-  apply(payload: unknown): boolean {
+  public apply(payload: unknown): boolean {
     const parsed = GitWindowScopeSchema.safeParse(payload);
     if (!parsed.success || (this.current()?.sequence ?? -1) >= parsed.data.sequence) return false;
     if (!this.store.applyWindowScope(parsed.data)) return false;

@@ -3,7 +3,7 @@ import {
   ChangeDetectionStrategy, Component, DestroyRef, Type, inject, signal,
 } from '@angular/core';
 import { ClaudeRpcService } from '@ptah-extension/core';
-import { GitDockScopeStore } from '@ptah-extension/git-ui/services';
+import { GitDockScopeStore, loadReviewShell } from '@ptah-extension/git-ui/services';
 import { GitWindowScopeSchema } from '@ptah-extension/shared';
 import { GitWindowScopeHandler } from './git-window.config';
 
@@ -34,14 +34,14 @@ export class GitWindowComponent {
   private readonly rpc = inject(ClaudeRpcService);
   private readonly store = inject(GitDockScopeStore);
   private readonly destroyRef = inject(DestroyRef);
-  readonly scopeHandler = inject(GitWindowScopeHandler);
-  readonly error = signal<string | null>(null);
-  readonly shell = signal<Type<unknown> | null>(null);
+  public readonly scopeHandler = inject(GitWindowScopeHandler);
+  public readonly error = signal<string | null>(null);
+  public readonly shell = signal<Type<unknown> | null>(null);
   private destroyed = false;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private abort = new AbortController();
 
-  constructor() {
+  public constructor() {
     this.destroyRef.onDestroy(() => {
       this.destroyed = true;
       this.abort.abort();
@@ -50,7 +50,7 @@ export class GitWindowComponent {
     void this.load();
   }
 
-  retry(): void {
+  public retry(): void {
     if (this.retryTimer !== null) clearTimeout(this.retryTimer);
     this.abort.abort();
     this.abort = new AbortController();
@@ -58,7 +58,7 @@ export class GitWindowComponent {
     void this.load();
   }
 
-  async attach(): Promise<void> {
+  public async attach(): Promise<void> {
     const result = await this.rpc.call('gitWindow:close', {}, { timeout: 10_000 });
     if (!result.success) this.error.set(result.error ?? 'Could not attach the Git dock');
   }
@@ -82,7 +82,7 @@ export class GitWindowComponent {
           }
         }
         try {
-          const { ReviewShellComponent } = await import('@ptah-extension/git-ui');
+          const ReviewShellComponent = await loadReviewShell();
           if (!signal.aborted && !this.destroyed) this.shell.set(ReviewShellComponent);
         } catch {
           if (!signal.aborted && !this.destroyed) this.error.set('The Git view could not be loaded.');

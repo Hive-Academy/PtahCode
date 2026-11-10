@@ -16,6 +16,8 @@
  * deferred (TASK_2026_576, Requirement 3.1).
  */
 
+import type { Type } from '@angular/core';
+
 export { GitStatusService } from './lib/services/git-status.service';
 export { provideGitStatusAttention } from './lib/services/git-status-attention.service';
 export { GitBranchesService } from './lib/services/git-branches.service';
@@ -32,3 +34,14 @@ export {
 } from './lib/services/git-dock-scope.store';
 export { GIT_WINDOW_CONTEXT, type GitWindowContext } from './lib/git-window-context.token';
 export { GitRootWatchLeaseService } from './lib/services/git-root-watch-lease.service';
+
+/**
+ * Loads the review shell from its own chunk. A host app that imports this
+ * services entry statically cannot also import the main entry dynamically
+ * (module-boundary rule), so the lazy import lives here.
+ */
+export function loadReviewShell(): Promise<Type<unknown>> {
+  return import('./lib/review-shell/review-shell.component').then(
+    (m) => m.ReviewShellComponent,
+  );
+}
