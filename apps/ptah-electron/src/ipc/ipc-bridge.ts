@@ -590,8 +590,10 @@ export class IpcBridge {
           params,
           correlationId,
         });
-        if (role !== 'main' && response.success) {
-          this.childWindows.observeResult(event.sender.id, method, params, response.data);
+        if (role !== 'main') {
+          // A failed call is observed too (with no data): it is the end of its operation.
+          const data: unknown = response.success ? response.data : undefined;
+          this.childWindows.observeResult(event.sender.id, method, params, data);
         }
         this.flushStreamQueue();
         // The renderer can be torn down (app quitting / window closed) while an

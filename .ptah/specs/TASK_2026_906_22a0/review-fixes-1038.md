@@ -129,6 +129,18 @@ in the commit `fix(electron): bind Git window operations and worktree paths to t
   main window (it has the `operationId` of the main window) is not forwarded; the child lists the worktrees
   again with its next `git:worktrees` call.
 
+- Independent review of this commit (codex lane, `scope-guard-security-review-2.md`): REVISE, 2 findings.
+  Both are confirmed and corrected in the next commit
+  `fix(electron): reset the Git window guard on close and check the default worktree folder`.
+  1. High: with no `path`, `git:addWorktree` uses the default folder `.claude-worktrees` of the root, which
+     can be a link. The guard now checks this folder with the real-path helper.
+  2. Medium: a child that closed and opened again on the same roots kept the operations. The host now calls
+     `guard.reset()` when the child closes.
+  Also: `IpcBridge` now reports a failed child call to `observeResult` (with no data), so a refused or
+  failed operation keeps no record.
+- Not tested through the bridge: the `reset()` call on close (the window fake cannot open a second child).
+  The guard spec tests `reset()` directly.
+
 ## Environment note
 
 The worktree had no `node_modules`. I made a directory junction `node_modules` to

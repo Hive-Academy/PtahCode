@@ -141,6 +141,7 @@ export class ElectronGitWindowHost implements GitWindowHost {
       if (this.window !== null && this.window !== child) return;
       this.window = null;
       this.scope = null;
+      this.guard.reset();
       if (!main.isDestroyed() && !this.options.bridge.childWindows.isClosingAll) this.notifyClosed();
     });
     const broken = (reason: string, error: unknown): void => {

@@ -1,5 +1,6 @@
-import { isAbsolute } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { z } from 'zod';
+import { AGENT_WORKTREE_DIR } from '@ptah-extension/shared';
 import type { GitWindowCandidate, GitWindowScope } from '@ptah-extension/shared';
 import { absoluteTarget, isInside, isPhysicallyInside, keys, rootKey } from './git-window-scope-paths';
 
@@ -101,6 +102,13 @@ export class GitWindowScopeGuard {
     if (scope === null || !this.authorizeScoped(scope, method, params)) return false;
     if (operation.success && OPERATION_METHODS.has(method)) this.rememberOperation(operation.data.operationId);
     return true;
+  }
+
+  /** The child closed: its listed worktrees and its operations are not for the next child. */
+  reset(): void {
+    this.owner = null;
+    this.listed = new Set<string>();
+    this.operations.clear();
   }
 
   /** The current scope. A change of its roots drops the listed worktrees and the operations. */
@@ -206,9 +214,8 @@ export class GitWindowScopeGuard {
       // With no target the host makes the worktree in its own folder of the named root.
       const target = AddWorktreeParamsSchema.safeParse(params);
       if (!target.success) return false;
-      const requested = target.data.path;
-      if (requested !== undefined &&
-          !isPhysicallyInside(absoluteTarget(parsed.data.workspaceRoot, requested), scopeRoots)) return false;
+      const requested = target.data.path ?? join(AGENT_WORKTREE_DIR, 'new');
+      if (!isPhysicallyInside(absoluteTarget(parsed.data.workspaceRoot, requested), scopeRoots)) return false;
     }
     if (method === 'git:removeWorktree') {
       const target = RemoveWorktreeParamsSchema.safeParse(params);

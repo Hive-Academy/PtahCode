@@ -61,6 +61,11 @@ describe('GitWindowScopeGuard — symbolic links', () => {
     expect(add('../repo-b/wt')).toBe(false);
     expect(add(path.join(repoA, '.wt', 'f'))).toBe(true);
     expect(add('.wt/f')).toBe(true);
+    // With no target the host uses its default folder: a link there is refused too.
+    const byDefault = () => guard.authorize('git:addWorktree', { workspaceRoot: repoA, branch: 'f' });
+    expect(byDefault()).toBe(true);
+    fs.symlinkSync(repoB, path.join(repoA, '.claude-worktrees'), 'junction');
+    expect(byDefault()).toBe(false);
   });
 
   it('refuses the removal of a worktree through a link or outside the scope', () => {
@@ -74,6 +79,16 @@ describe('GitWindowScopeGuard — symbolic links', () => {
     expect(remove(sibling)).toBe(false);
     guard.observeResult('git:worktrees', { workspaceRoot: repoA }, { worktrees: [{ path: sibling }] });
     expect(remove(sibling)).toBe(true);
+  });
+
+  it('does not give the operations of a closed child to the next child', () => {
+    const cancel = () => guard.authorize('git:cancelOperation', { operationId: 'op-old' });
+    expect(guard.authorize('git:commit', { workspaceRoot: repoA, message: 'm', operationId: 'op-old' })).toBe(true);
+    expect(cancel()).toBe(true);
+    // The host calls reset() when the child closes; the next child gets the same roots.
+    guard.reset();
+    expect(cancel()).toBe(false);
+    expect(guard.filterPush({ type: 'git:operationOutput', payload: { operationId: 'op-old' } } as { type: string })).toBeNull();
   });
 
   it('forwards the worktree push of a session of the scope for an adjacent worktree', () => {

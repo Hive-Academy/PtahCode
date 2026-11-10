@@ -376,6 +376,12 @@ describe('IpcBridge — detached Git window scope and pushes', () => {
     // The commit result is not `pending`: the operation ended with the response.
     await rpc(git, 'git:commit', { workspaceRoot: REPO_A, message: 'm', operationId: 'op-done' });
     await rpc(git, 'git:addWorktree', { workspaceRoot: REPO_A, branch: 'f', operationId: 'op-wt' });
+    // A refused or failed call (for example an ID that runs in another window) keeps no record.
+    handleMessage.mockResolvedValueOnce({ success: false, error: 'refused' });
+    await rpc(git, 'git:addWorktree', { workspaceRoot: REPO_A, branch: 'g', operationId: 'op-failed' });
+    handleMessage.mockClear();
+    await rpc(git, 'git:cancelOperation', { operationId: 'op-failed' });
+    expect(handleMessage).not.toHaveBeenCalled();
     const ended = { type: 'git:worktreeChanged', payload: { action: 'created', operationId: 'op-wt' } };
     git.sent.length = 0;
     bridge.sendToRenderer(ended);
