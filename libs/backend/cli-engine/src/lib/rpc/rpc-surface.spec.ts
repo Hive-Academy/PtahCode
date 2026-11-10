@@ -94,6 +94,7 @@ const EXPECTED_ABSENT_METHOD_NAMES: readonly string[] = [
   'review:listRuns',
   'review:refresh',
   'review:rerun',
+  'review:respondToFinding',
   'review:retryHead',
   'review:setBotToken',
   'review:setPublicationPause',

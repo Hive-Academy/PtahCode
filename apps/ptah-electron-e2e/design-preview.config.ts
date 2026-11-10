@@ -3,7 +3,7 @@ import { defineConfig } from '@playwright/test';
 /** Opt-in Electron captures for design preview pages. Never part of the default e2e target, never a gate. */
 export default defineConfig({
   testDir: './src/design-preview',
-  testMatch: '**/*.preview.ts',
+  testMatch: ['**/*.preview.ts', '**/*.shot.ts'],
   workers: 1,
   fullyParallel: false,
   retries: 0,

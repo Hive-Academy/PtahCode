@@ -1,9 +1,12 @@
+import { realpath } from 'node:fs/promises';
+import { relative } from 'node:path';
 import { inject, injectable } from 'tsyringe';
 import { ulid } from 'ulid';
 import { z, ZodError } from 'zod';
 import {
   ReviewRpcSchemas,
   type IGitHubReviewPort,
+  type RepoIdentity,
 } from '@ptah-extension/review-contracts';
 import {
   REVIEW_CORE_TOKENS,
@@ -20,10 +23,13 @@ import {
 import {
   PLATFORM_TOKENS,
   type ISecretStorage,
+  type IWorkspaceProvider,
 } from '@ptah-extension/platform-core';
 import {
   REVIEW_GITHUB_TOKEN_KEY,
   REVIEW_GITHUB_TOKENS,
+  type IGitHubFindingReplyPort,
+  type IGitHubFindingThreadPort,
 } from '@ptah-extension/review-github';
 import {
   RpcUserError,
@@ -32,6 +38,7 @@ import {
   type RpcHandler,
 } from '@ptah-extension/vscode-core';
 import type { RpcMethodName } from '@ptah-extension/shared';
+import { ReviewFindingResponder } from './review-finding-response';
 
 const empty = z.object({}).strict();
 const ok = z.object({ ok: z.literal(true) }).strict();
@@ -54,6 +61,7 @@ const identity = z
 @injectable()
 export class ReviewRpcHandlers {
   private readonly refreshPolls = new Map<string, Promise<number>>();
+  private readonly responder: ReviewFindingResponder;
   static readonly METHODS = [
     'review:getBotIdentity',
     'review:setBotToken',
@@ -69,6 +77,7 @@ export class ReviewRpcHandlers {
     'review:retryHead',
     'review:refresh',
     'review:exportRun',
+    'review:respondToFinding',
   ] as const satisfies readonly RpcMethodName[];
 
   constructor(
@@ -98,7 +107,33 @@ export class ReviewRpcHandlers {
     @inject(ReviewPolicyService) private readonly policy: ReviewPolicyService,
     @inject(REVIEW_CORE_TOKENS.ENVIRONMENT)
     private readonly environment: ReviewStageEnvironment,
-  ) {}
+    @inject(REVIEW_GITHUB_TOKENS.PUBLICATION_PORT)
+    private readonly replies: IGitHubFindingReplyPort,
+    @inject(PLATFORM_TOKENS.WORKSPACE_PROVIDER)
+    private readonly workspace: Pick<IWorkspaceProvider, 'getWorkspaceFolders'>,
+    @inject(REVIEW_GITHUB_TOKENS.REVIEW_PORT) threads: IGitHubFindingThreadPort,
+  ) {
+    this.responder = new ReviewFindingResponder({ query, threads, replies, environment, logger });
+  }
+
+  /** The registered workspace folder that is the checkout of the repository, or null when that checkout is not open. */
+  private async repositoryRoot(repo: RepoIdentity): Promise<string | null> {
+    let checkout: string;
+    try {
+      // An old run stays readable after its repository is disabled: checkoutRoot does not examine the settings.
+      checkout = this.environment.checkoutRoot
+        ? await this.environment.checkoutRoot(repo)
+        : (await this.environment.resolve(repo)).repoRoot;
+    } catch (_error: unknown) {
+      // degradation-audit: reported — a null root makes the renderer tell the operator that the repository is not open.
+      return null;
+    }
+    const folders = this.workspace.getWorkspaceFolders();
+    const real = await Promise.allSettled(folders.map((folder) => realpath(folder)));
+    // path.relative compares without case on Windows, as the file system does.
+    const index = real.findIndex((item) => item.status === 'fulfilled' && relative(item.value, checkout) === '');
+    return index === -1 ? null : folders[index];
+  }
 
   private async safe<T>(run: () => Promise<T>): Promise<T> {
     try {
@@ -303,9 +338,12 @@ export class ReviewRpcHandlers {
       this.safe(async () => {
         const { attemptId } =
           ReviewRpcSchemas['review:listFindings'].params.parse(raw);
-        if (!(await this.query.getRun(attemptId))) return { findings: [] };
+        const run = await this.query.getRun(attemptId);
+        if (!run) return { findings: [] };
         return ReviewRpcSchemas['review:listFindings'].result.parse({
-          findings: await this.query.listFindings(attemptId),
+          // The renderer can copy these fields to the clipboard: remove the configured secrets, as publication does.
+          findings: await this.query.listFindings(attemptId, (await this.environment.redactionSecrets?.()) ?? []),
+          repositoryRoot: await this.repositoryRoot(run.repo),
         });
       }),
     );
@@ -448,6 +486,15 @@ export class ReviewRpcHandlers {
         return ReviewRpcSchemas['review:exportRun'].result.parse(
           await this.artifacts.exportRun(attemptId),
         );
+      }),
+    );
+    this.rpc.registerMethod('review:respondToFinding', (raw) =>
+      this.safe(async () => {
+        const params = ReviewRpcSchemas['review:respondToFinding'].params.parse(raw);
+        const run = await this.query.getRun(params.attemptId);
+        const response = ReviewRpcSchemas['review:respondToFinding'].result;
+        if (!run) return response.parse({ ok: false, code: 'run-not-found', error: 'Review run not found' });
+        return this.responder.respond(run, params);
       }),
     );
     this.logger.info('[review] RPC handlers registered');

@@ -11,6 +11,22 @@ import {
 } from '../index';
 
 const sha = 'a'.repeat(40);
+describe('respond to finding RPC', () => {
+  const params = { attemptId: 'attempt-1', path: 'src/save.ts', line: 3, title: 'Lost update' };
+  it('accepts actions and optional notes', () => {
+    const schema = ReviewRpcSchemas['review:respondToFinding'].params;
+    expect(schema.safeParse({ ...params, action: 'accept' }).success).toBe(true);
+    expect(schema.safeParse({ ...params, action: 'dismiss', body: ' reason ' }).success).toBe(true);
+    expect(schema.safeParse({ ...params, action: 'reply', body: ' reply ' }).success).toBe(true);
+  });
+  it('rejects unsafe paths and replies without text', () => {
+    const schema = ReviewRpcSchemas['review:respondToFinding'].params;
+    expect(schema.safeParse({ ...params, path: '../secret', action: 'accept' }).success).toBe(false);
+    expect(schema.safeParse({ ...params, action: 'reply' }).success).toBe(false);
+    expect(schema.safeParse({ ...params, action: 'reply', body: '   ' }).success).toBe(false);
+    expect(ReviewRpcSchemas['review:respondToFinding'].result.safeParse({ ok: false }).success).toBe(false);
+  });
+});
 const finding = {
   schemaVersion: 1,
   lens: 'correctness-lifecycle',

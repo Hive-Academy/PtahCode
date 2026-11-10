@@ -1,0 +1,5 @@
+[
+  {"title": "Run detail drawer is translucent", "detail": "Text of the page behind the drawer (filters, run row, \"Pause all publication\") shows through the drawer in the two themes. Cause: the drawer uses .surface-1, which is a glass reading plane, not an overlay. Component: review-run-detail.component.ts (it is on main; not new in PR #1040).", "state": "Open. A test with data-glass-surface=overlay made the dark drawer opaque but broke the drawer layout in the light theme, so that edit was removed."},
+  {"title": "Drawer header is behind the navigation bar", "detail": "The title \"PR #428 review\" and the Close button are below the top navigation bar. The drawer starts at the top of the window with z-50. The review settings drawer has the same structure.", "state": "Open. Not fixed in this run."},
+  {"title": "Accept button stays gold after triage", "detail": "On an accepted or dismissed card the Accept button keeps the primary color and only Dismiss looks inactive. The state text below the buttons is correct.", "state": "Open. Not fixed in this run."}
+]

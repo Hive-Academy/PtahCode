@@ -107,6 +107,29 @@ describe('GithubReviewAdapter', () => {
     expect((await adapter.listOwnIssueComments(repo, 4)).items.map(x => x.id)).toEqual([1]);
   });
 
+  it('reads each comment page one time and attaches the bot replies to their thread', async () => {
+    const comment = (id: number, login: string, extra: object = {}) => ({ id, pull_request_review_id: 9, path: 'src/a.ts', line: 3,
+      original_line: 3, body: `body-${id}`, user: { login }, ...extra });
+    const fetcher = jest.fn().mockResolvedValueOnce(response({ login: 'bot' }))
+      .mockResolvedValueOnce(response([comment(1, 'bot'), comment(2, 'person', { in_reply_to_id: 1 })], 200, {
+        link: '<https://api.github.com/repos/Hive-Academy/PtahCode/pulls/4/comments?page=2>; rel="next"' }))
+      .mockResolvedValueOnce(response([comment(3, 'bot', { in_reply_to_id: 1 }), comment(4, 'person')]));
+    const { adapter } = setup(fetcher);
+    expect(await adapter.listFindingThreads(repo, 4)).toEqual({ complete: true,
+      threads: [{ id: '1', path: 'src/a.ts', line: 3, body: 'body-1', resolved: false, replies: ['body-3'] }] });
+    const urls = fetcher.mock.calls.map(call => String(call[0]));
+    expect(urls.filter(url => url.includes('/comments?'))).toHaveLength(2);
+    expect(urls.some(url => url.includes('/reviews'))).toBe(false);
+  });
+
+  it('reports an incomplete finding thread scan at the page limit', async () => {
+    const fetcher = jest.fn(async (url: string) => String(url).endsWith('/user') ? response({ login: 'bot' })
+      : response([], 200, { link: '<https://api.github.com/repos/Hive-Academy/PtahCode/pulls/4/comments?page=2>; rel="next"' }));
+    const { adapter } = setup(fetcher as typeof fetch);
+    expect(await adapter.listFindingThreads(repo, 4)).toEqual({ threads: [], complete: false });
+    expect(fetcher).toHaveBeenCalledTimes(11);
+  });
+
   it('reads diff and file metadata and marks omitted patches truncated', async () => {
     const fetcher = jest.fn().mockResolvedValueOnce(response(pull))
       .mockResolvedValueOnce(new Response('diff --git a/x b/x', { status: 200 }))

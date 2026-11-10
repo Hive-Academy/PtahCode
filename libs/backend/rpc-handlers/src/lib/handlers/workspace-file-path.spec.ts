@@ -37,6 +37,68 @@ describe('resolveWorkspaceFilePath', () => {
     });
   });
 
+  describe('with real path containment', () => {
+    const link = path.resolve(root, 'src/link.ts');
+    const realRoot = path.resolve('workspace-file-path-real-root');
+    const resolveLink = (realpath: (value: string) => Promise<string>) =>
+      resolveWorkspaceFilePath(
+        { workspaceRoot: root, path: 'src/link.ts' },
+        [root],
+        { stat, realpath } as never,
+        { realPathContainment: true },
+      );
+
+    it('rejects a link in the root that points out of the root', async () => {
+      await expect(
+        resolveLink(async (value) => (value === link ? outside : value)),
+      ).resolves.toEqual({
+        success: false,
+        error: 'Path is outside the workspace',
+      });
+    });
+
+    it('accepts a target in the real path of a root that is a link itself', async () => {
+      await expect(
+        resolveLink(async (value) =>
+          value === root ? realRoot : path.resolve(realRoot, 'src/file.ts'),
+        ),
+      ).resolves.toEqual({ success: true, path: link });
+    });
+
+    it('rejects when the real path of the target or of the root is not available', async () => {
+      await expect(
+        resolveLink(async (value) => {
+          if (value === link) throw new Error('ELOOP');
+          return value;
+        }),
+      ).resolves.toEqual({
+        success: false,
+        error: 'File does not exist or is unreadable',
+      });
+      await expect(
+        resolveLink(async (value) => {
+          if (value === root) throw new Error('ENOENT');
+          return value;
+        }),
+      ).resolves.toEqual({
+        success: false,
+        error: 'Path is outside the workspace',
+      });
+    });
+
+    it('stays lexical without the option', async () => {
+      const realpath = jest.fn();
+      await expect(
+        resolveWorkspaceFilePath(
+          { workspaceRoot: root, path: 'src/link.ts' },
+          [root],
+          { stat, realpath } as never,
+        ),
+      ).resolves.toEqual({ success: true, path: link });
+      expect(realpath).not.toHaveBeenCalled();
+    });
+  });
+
   it('rejects an unregistered explicit root', async () => {
     const result = await resolveWorkspaceFilePath(
       { workspaceRoot: path.resolve('other-root'), path: 'file.ts' },

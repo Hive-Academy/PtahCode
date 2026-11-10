@@ -105,11 +105,12 @@ describe('Electron RPC surface', () => {
     );
   });
 
-  it('serves all fourteen review methods', () => {
+  it('serves all fifteen review methods', () => {
     const methods =
       RPC_HANDLER_MANIFEST.find((entry) => entry.key === 'review')?.methods ??
       [];
-    expect(methods).toHaveLength(14);
+    expect(methods).toHaveLength(15);
+    expect(methods).toContain('review:respondToFinding');
     expect(surface.registered).toEqual(expect.arrayContaining(methods));
     expect(surface.excluded).toEqual(expect.not.arrayContaining(methods));
   });

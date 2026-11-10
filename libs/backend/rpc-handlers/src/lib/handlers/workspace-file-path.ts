@@ -23,11 +23,18 @@ function registeredRoot(
   return roots.find((root) => normalize(root) === target);
 }
 
-/** Resolve and verify a launch path against the registered workspace set. */
+/**
+ * Resolve and verify a launch path against the registered workspace set.
+ *
+ * The check is lexical unless `options.realPathContainment` is set. With that option the real path of the target
+ * must also be in the real path of an authorized root, so a symbolic link or a junction in the root cannot point
+ * out of it.
+ */
 export async function resolveWorkspaceFilePath(
   request: { path: string; workspaceRoot?: string },
   roots: readonly string[],
   fileSystem: IFileSystemProvider,
+  options: { realPathContainment?: boolean } = {},
 ): Promise<
   { success: true; path: string } | { success: false; error: string }
 > {
@@ -55,6 +62,27 @@ export async function resolveWorkspaceFilePath(
     }
   } catch {
     return { success: false, error: 'File does not exist or is unreadable' };
+  }
+  if (options.realPathContainment) {
+    const realRoots: string[] = [];
+    for (const root of authorizedRoots) {
+      try {
+        realRoots.push(await fileSystem.realpath(root));
+      } catch {
+        // degradation-audit: optional-capability - a root without a real path is dropped. It can only make
+        // the authorized set smaller.
+      }
+    }
+    let realTarget: string;
+    try {
+      realTarget = await fileSystem.realpath(resolved);
+    } catch {
+      // degradation-audit: reported - the caller gets a typed failure and the file does not open.
+      return { success: false, error: 'File does not exist or is unreadable' };
+    }
+    if (!isPathWithinRoots(realTarget, realRoots)) {
+      return { success: false, error: 'Path is outside the workspace' };
+    }
   }
   return { success: true, path: resolved };
 }

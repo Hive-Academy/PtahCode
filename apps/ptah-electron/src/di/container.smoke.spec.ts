@@ -220,6 +220,7 @@ function buildMinimalContainer(): DependencyContainer {
     REVIEW_CORE_TOKENS.QUEUE_SERVICE, REVIEW_CORE_TOKENS.ORCHESTRATOR,
     REVIEW_CORE_TOKENS.GITHUB,
     REVIEW_CORE_TOKENS.ENVIRONMENT, REVIEW_GITHUB_TOKENS.FETCH,
+    REVIEW_GITHUB_TOKENS.PUBLICATION_PORT, REVIEW_GITHUB_TOKENS.REVIEW_PORT,
   ]) c.register(token, { useValue: {} });
   c.register(ReviewPolicyService, { useValue: new ReviewPolicyService() });
 
