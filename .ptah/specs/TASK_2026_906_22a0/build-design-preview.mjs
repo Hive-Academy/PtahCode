@@ -16,16 +16,26 @@ const data = JSON.parse(
 const esc = (s) =>
   String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
-// [group heading, [[file stem, caption, note?], ...]]
+// Captures of the PR head before the defect fixes (8bdc25d29).
+const before = resolve(
+  process.argv[3] ?? 'dist/apps/ptah-electron-e2e/git-dock-preview-before',
+);
+
+// [group heading, [[file stem, caption, flag?, before?], ...]]
+// before = { stem, modes, note }: frames of the old head, shown above the new frames.
 const groups = [
   ['1. Git dock docked, with changes', [
     ['01-docked', 'Main window. The Git dock is in its default position. The new Detach button is at the right end of the dock header.'],
-    ['01b-docked-header', 'Close-up of the dock header with the Detach button.'],
+    ['01b-docked-header', 'Close-up of the dock header with the Detach button.', null,
+      { stem: '01b-docked-header', modes: ['dark', 'light'], note: 'Defect 5: Detach had no icon and no divider.' }],
     ['01c-detach-focus', 'Keyboard focus on the Detach button.'],
   ]],
   ['2. Git dock detached into its own window', [
-    ['02-detached-window', 'The Git window (a second BrowserWindow), opened in each theme. It reads Git data through the real RPC handlers.'],
-    ['02x-detached-theme-not-followed', 'Theme not followed: the Git window opened in the dark theme, then the main window changed to Ptah Glass Light. The Git window stays dark.'],
+    ['02-detached-window', 'The Git window (a second BrowserWindow) at its default width of 920 px, opened in each theme. It reads Git data through the real RPC handlers.', null,
+      { stem: '02-detached-window', modes: ['dark'], note: 'Defects 1, 5 and 6: no surface, Attach with no icon, and a default width of 620 px that cut the hunk header.' }],
+    ['02m-detached-min-width', 'The Git window at its minimum width of 720 px.'],
+    ['02x-detached-theme-followed', 'Theme followed at run time: the Git window opened in the dark theme, then the main window changed to Ptah Glass Light. The open Git window changed with it.', null,
+      { stem: '02x-detached-theme-not-followed', modes: ['light'], note: 'Defect 2: the open Git window stayed dark.' }],
   ]],
   ['3. Main window while the dock is detached (the detached rail)', [
     ['03-main-detached-rail', 'Main window. A separate 96 px rail replaces the dock.', 'deviation'],
@@ -38,16 +48,17 @@ const groups = [
   ]],
   ['5. Empty, loading and error states', [
     ['05a-docked-no-changes', 'Repository with no changes, docked.'],
-    ['05a-detached-no-changes', 'Repository with no changes, detached.'],
-    ['06-docked-no-repository', 'Folder that is not a repository, docked.'],
-    ['06b-detached-no-repository', 'Folder that is not a repository, detached.'],
+    ['05a-detached-no-changes', 'Repository with no changes, detached.', null,
+      { stem: '05a-detached-no-changes', modes: ['dark', 'light'], note: 'Defect 1: the wallpaper showed through most of the window.' }],
+    ['06-docked-no-repository', 'Folder that is not a repository, docked. The dock shows no Detach button in this state.', null,
+      { stem: '06-docked-no-repository', modes: ['dark'], note: 'Defect 4: Detach was alone in an empty row.' }],
     ['05b-child-first-paint', 'First paint of the Git window, before the review shell loads (dark only).'],
     ['05c-detached-pull-error', 'Git window after a failed Pull in a repository with no remote (error state).'],
   ]],
 ];
 
-const uri = (stem) => {
-  const file = join(shots, `${stem}.jpg`);
+const uri = (stem, dir = shots) => {
+  const file = join(dir, `${stem}.jpg`);
   return existsSync(file)
     ? `data:image/jpeg;base64,${readFileSync(file).toString('base64')}`
     : null;
@@ -56,7 +67,16 @@ const skip = new Set(data.omit ?? []);
 const figures = groups
   .map(([heading, frames]) => {
     const body = frames
-      .map(([stem, caption, flag]) => {
+      .map(([stem, caption, flag, old]) => {
+        const name = (mode) => (mode === 'dark' ? 'Dark (default)' : 'Ptah Glass Light');
+        const oldCells = (old?.modes ?? [])
+          .map((mode) => {
+            const src = uri(`${mode}-${old.stem}`, before);
+            return src
+              ? `<figure class="old"><img loading="lazy" src="${src}" alt="Before the fix. ${esc(old.note)} ${name(mode)}"><figcaption>Before · ${name(mode)}</figcaption></figure>`
+              : '';
+          })
+          .join('');
         const cells = ['dark', 'light']
           .filter((mode) => !skip.has(`${mode}-${stem}`))
           .map((mode) => {
@@ -71,7 +91,10 @@ const figures = groups
         const note = flag === 'deviation'
           ? `<aside class="deviation"><strong>Decision 16 deviation — your decision.</strong> ${esc(data.deviation)}</aside>`
           : '';
-        return `<div class="frame"><h3>${esc(caption)}</h3>${note}<div class="pair">${cells}</div></div>`;
+        const was = oldCells
+          ? `<p class="was"><strong>Before (head ${esc(data.beforeHead)}).</strong> ${esc(old.note)}</p><div class="pair">${oldCells}</div><p class="was"><strong>After (head ${esc(data.head)}).</strong></p>`
+          : '';
+        return `<div class="frame"><h3>${esc(caption)}</h3>${note}${was}<div class="pair">${cells}</div></div>`;
       })
       .join('');
     return body ? `<section><h2>${esc(heading)}</h2>${body}</section>` : '';
@@ -80,7 +103,7 @@ const figures = groups
 
 const list = (items, empty) =>
   items?.length
-    ? items.map((d) => `<li><strong>${esc(d.title)}</strong> — ${esc(d.detail)} <em>${esc(d.where ?? '')}</em></li>`).join('')
+    ? items.map((d) => `<li>${d.status ? `<span class="tag ${d.status.startsWith('Fixed') ? 'ok' : 'open'}">${esc(d.status)}</span> ` : ''}<strong>${esc(d.title)}</strong> — ${esc(d.detail)} <em>${esc(d.where ?? '')}</em></li>`).join('')
     : `<li>${esc(empty)}</li>`;
 
 const title = 'Design preview — detachable Git dock (PR #1038)';
@@ -105,6 +128,10 @@ figure{margin:0;background:var(--b2);border:1px solid var(--b3);border-radius:10
 img{display:block;max-width:100%;height:auto;border-radius:6px;margin:0 auto}
 figcaption{margin-top:8px;font-size:12px;color:var(--bcm);letter-spacing:.06em;text-transform:uppercase}
 .deviation{margin:0 0 12px;padding:12px 14px;border:1px solid var(--ptah-gold);border-left-width:4px;border-radius:8px;background:var(--b2);max-width:90ch}
+figure.old{border-style:dashed}
+.was{margin:10px 0 8px;font-size:13px;color:var(--bcm)}
+.tag{display:inline-block;padding:1px 8px;border-radius:999px;border:1px solid currentColor;font-size:12px;font-weight:600;color:var(--bcm)}
+.tag.ok{color:var(--state-ink-done,var(--ptah-gold))}
 .notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
 .notes>div{background:var(--b2);border:1px solid var(--b3);border-radius:10px;padding:16px}
 .notes h2{font-size:15px;margin-bottom:8px}
@@ -113,10 +140,10 @@ a{color:var(--ptah-link)}
 </style></head><body><main>
 <header><p class="kicker">TASK_2026_906 · Electron</p>
 <h1>${title}</h1>
-<p>Real captures from the Electron app (Playwright, real RPC handlers, scratch repository). No mock-ups. Themes: the default dark theme and Ptah Glass Light. Captured at PR head ${esc(data.head)}. <a href="https://github.com/Hive-Academy/PtahCode/pull/1038">Open PR #1038</a></p></header>
+<p>Real captures from the Electron app (Playwright, real RPC handlers, scratch repository). No mock-ups. Themes: the default dark theme and Ptah Glass Light. Captured at PR head ${esc(data.head)}. Frames with a dashed border show the head before the defect fixes (${esc(data.beforeHead)}). <a href="https://github.com/Hive-Academy/PtahCode/pull/1038">Open PR #1038</a></p></header>
 ${figures}
 <section class="notes">
-<div><h2>Visual defects seen in the captures</h2><ul>${list(data.defects, 'No defect recorded.')}</ul></div>
+<div><h2>Visual defects: status</h2><ul>${list(data.defects, 'No defect recorded.')}</ul></div>
 <div><h2>States with no capture</h2><ul>${list(data.notCaptured, 'All planned states have a capture.')}</ul></div>
 </section>
 </main>

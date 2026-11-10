@@ -31,18 +31,30 @@ checkout; not committed).
 
 ## Next exact step
 
-State on 2026-11-10: capture run 3 passed (2 tests, no "NOT captured" line). The page is
-1.53 MiB and is published as artifact `2c0f6a9e-c83a-4682-b171-fae5ec0cbbc0`
-("Design preview — detachable Git dock (PR #1038)"). No product code changed.
+State on 2026-11-10, phase 2 (defect fixes). All fix commits are on the PR branch:
+
+| Defect | Commit | Result |
+| ------ | ------ | ------ |
+| 1 Git window surface | 1a300aa39 | fixed |
+| 2 Theme follow at run time | 517794125 | fixed (theme name only) |
+| 6 Default and minimum width | f328838d2 | fixed (920 / 720 px) |
+| 5 Detach and Attach icons, divider | 489c8ca05 | fixed |
+| 4 Detach alone, no repository | 9531759ac | fixed (Detach hidden) |
+| 3 The 96 px rail | - | open, user decision |
+| 7 Focus ring tokens | - | tokens match the docked dock, no change |
+| 8 Raw Git error text | - | open, not from this PR |
+
+The captures of the old head (8bdc25d29) are in
+`dist/apps/ptah-electron-e2e/git-dock-preview-before/` (not committed). The page generator
+reads them as the "before" frames (second argument).
 
 Steps that remain, in sequence:
 
-1. Commit the capture, the generator, the defects file, the page and these notes.
-2. `git push origin HEAD:feat/detachable-git-dock-p2b` (fast-forward only, no force).
-3. `gh pr edit 1038`: add the "Design preview" line and the defect list. Correct the test-plan
-   line about CI lint (the `checks` job passed on 3a64dd228).
-4. Report to the parent session with `ptah_agent_report`.
+1. Build the renderer and capture again (steps 1 and 2 above).
+2. Examine the frames: surface, theme follow (02x), minimum width (02m, hunk header not cut).
+3. Build the page and publish it with the same title.
+4. Commit the capture file, the generator, the defects file, the page and these notes. Push.
+5. Read the lane review (`fix-diff-review.md`), then update the PR body and report to the parent.
 
 Open decision for the user: decision 16 deviation (the 96 px detached rail). See frames
-`03-main-detached-rail` and `03b-rail-close-up`, and the defect list in
-`design-preview-defects.json`.
+`03-main-detached-rail` and `03b-rail-close-up`.

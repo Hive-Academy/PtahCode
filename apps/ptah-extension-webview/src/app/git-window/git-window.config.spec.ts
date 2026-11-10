@@ -48,6 +48,17 @@ describe('Git child bootstrap', () => {
     expect(component).toContain('Resolving Git scope');
   });
 
+  it('gives the Git window the surface of the docked dock at full height', () => {
+    const component = readFileSync(join(__dirname, 'git-window.component.ts'), 'utf8');
+    expect(component).toContain("class: 'electron-git-dock flex h-screen min-h-0 flex-col overflow-hidden'");
+    expect(component).toContain("'data-glass-surface': 'chrome'");
+    // The states with no shell are in the center of the surface.
+    expect(component).toContain('[class]="shell() ? stripClass : centerClass"');
+    expect(component).toContain('items-center justify-center');
+    // The Attach icon is decorative: the accessible name stays "Attach".
+    expect(component).toMatch(/<lucide-angular \[img\]="AttachIcon"[^>]*aria-hidden="true" \/>Attach<\/button>/);
+  });
+
   it('mounts its own host', () => {
     document.body.innerHTML = '<ptah-root></ptah-root>';
     mountGitWindowHost(document);

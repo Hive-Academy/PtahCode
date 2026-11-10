@@ -14,9 +14,9 @@ import { createScratchRepo } from '../../support/git-scratch-repo';
  * handlers. Nothing is mocked. Output: JPEG files in PTAH_PREVIEW_OUT
  * (default: dist/apps/ptah-electron-e2e/git-dock-preview-shots).
  *
- * The Git window takes the theme when it opens and does not follow a later
- * theme change of the main window. Thus each detached state opens a new Git
- * window for each theme.
+ * The Git window follows a theme change of the main window at run time (frame
+ * 02x). Each detached state still opens a new Git window for each theme, so
+ * that each frame starts from the same state.
  *
  * Each optional state runs in `attempt()`: a state that cannot be reached is
  * written to the log and the capture continues with the next state.
@@ -155,6 +155,21 @@ async function detach(app: ElectronApplication, main: Page): Promise<Page> {
   return child;
 }
 
+/** Sets the Git window (the window with the 720 px minimum) to a content width. */
+async function sizeGitWindow(
+  app: ElectronApplication,
+  width: number,
+): Promise<void> {
+  await app.evaluate(({ BrowserWindow }, w) => {
+    const win = BrowserWindow.getAllWindows().find(
+      (candidate) => candidate.getMinimumSize()[0] === 720,
+    );
+    if (!win) throw new Error("no Git window");
+    const [, height] = win.getSize();
+    win.setSize(w, height);
+  }, width);
+}
+
 async function ready(child: Page): Promise<void> {
   await expect(child.locator('ptah-review-shell').first()).toBeVisible({
     timeout: 60_000,
@@ -222,6 +237,12 @@ test.describe('design preview: detachable Git dock', () => {
         }),
       );
       await shoot(child, `${mode}-02-detached-window`);
+      await attempt(`${mode} 02m minimum width`, async () => {
+        // A width below the minimum: the host keeps the window at 720 px.
+        await sizeGitWindow(electronApp, 400);
+        await child.waitForTimeout(1_000);
+        await shoot(child, `${mode}-02m-detached-min-width`);
+      });
       await shoot(main, `${mode}-03-main-detached-rail`);
       await shoot(main, `${mode}-03b-rail-close-up`, rail(main));
       await attempt(`${mode} 03c rail keyboard focus`, async () => {
@@ -242,13 +263,17 @@ test.describe('design preview: detachable Git dock', () => {
     }
 
     // 2x. The Git window opened in dark, then the main window changed to light.
-    await attempt('02x theme not followed', async () => {
+    await attempt('02x theme followed at run time', async () => {
       await setTheme(main, 'dark');
       const child = await detach(electronApp, main);
       await ready(child);
       await setTheme(main, 'light');
+      await expect(child.locator('html')).toHaveAttribute(
+        'data-theme',
+        'ptah-glass-light',
+      );
       await child.waitForTimeout(1_500);
-      await shoot(child, 'light-02x-detached-theme-not-followed');
+      await shoot(child, 'light-02x-detached-theme-followed');
       // 4b. Re-dock when the user closes the Git window.
       await child.close();
       await expect(rail(main)).toHaveCount(0, { timeout: 30_000 });
@@ -301,13 +326,12 @@ noRepoTest.describe('design preview: detachable Git dock, no repository', () => 
       await main.waitForTimeout(3_000);
       for (const mode of MODES) {
         await setTheme(main, mode);
+        // With no repository the dock shows no Detach button, so there is no
+        // detached frame of this state.
+        await expect(
+          main.locator('[data-testid="git-dock-detach"]'),
+        ).toHaveCount(0);
         await shootDock(main, `${mode}-06-docked-no-repository`);
-        await attempt(`${mode} 06b no repository, detached`, async () => {
-          const child = await detach(electronApp, main);
-          await ready(child);
-          await shoot(child, `${mode}-06b-detached-no-repository`);
-          await attach(main, child);
-        });
       }
     },
   );
