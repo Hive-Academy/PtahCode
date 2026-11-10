@@ -966,6 +966,8 @@ export class SessionSpawnerService implements ISessionSpawner {
     const child = this.registry.get(childSessionId);
     if (!child || child.terminalStatus) return;
     if (this.activeIdOf(child)) {
+      // The end was harmless: its cause must not route a later, different end.
+      if (runtime) runtime.endCause = undefined;
       this.log(
         `${childSessionId} is live again after its session end; grace expired harmlessly`,
       );
