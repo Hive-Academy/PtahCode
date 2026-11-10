@@ -30,4 +30,5 @@ export {
   type GitDockScope,
   type GitDockScopeMode,
 } from './lib/services/git-dock-scope.store';
+export { GIT_WINDOW_CONTEXT, type GitWindowContext } from './lib/git-window-context.token';
 export { GitRootWatchLeaseService } from './lib/services/git-root-watch-lease.service';

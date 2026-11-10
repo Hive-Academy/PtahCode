@@ -34,8 +34,16 @@ async function bootstrapRenderer(): Promise<void> {
     const { getRpcClient } = await import('./app/rpc-ready');
     getRpcClient().markReady();
     const { bootstrapApplication } = await import('@angular/platform-browser');
-    if (new URLSearchParams(window.location.search).get('ptahWindow') === 'display') {
+    const childWindow = new URLSearchParams(window.location.search).get('ptahWindow');
+    if (childWindow === 'display') {
       await bootstrapDisplayWindow(bootstrapApplication);
+    } else if (childWindow === 'git') {
+      const [{ GitWindowComponent }, { gitWindowConfig, mountGitWindowHost }] = await Promise.all([
+        import('./app/git-window/git-window.component'),
+        import('./app/git-window/git-window.config'),
+      ]);
+      mountGitWindowHost(document);
+      await bootstrapApplication(GitWindowComponent, gitWindowConfig);
     } else {
       const [{ App }, { appConfig }] = await Promise.all([import('./app/app'), import('./app/app.config')]);
       await bootstrapApplication(App, appConfig);
