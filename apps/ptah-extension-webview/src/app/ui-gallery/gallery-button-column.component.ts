@@ -7,7 +7,8 @@ import {
 } from '@ptah-extension/ui';
 
 interface ButtonStateSample {
-  readonly id: 'default' | 'hover' | 'focus' | 'active' | 'disabled' | 'loading';
+  readonly id:
+    'default' | 'hover' | 'focus' | 'active' | 'disabled' | 'loading';
   readonly caption: string;
   readonly forcedState?: 'hover' | 'focus' | 'active';
   readonly disabled?: boolean;
@@ -188,11 +189,8 @@ export class GalleryButtonColumnComponent {
     'danger',
     'link',
   ];
-  public readonly iconVariants: readonly PtahButtonVariant[] = [
-    'ghost',
-    'secondary',
-    'primary',
-  ];
+  public readonly iconVariants: readonly Exclude<PtahButtonVariant, 'link'>[] =
+    ['ghost', 'secondary', 'primary'];
   public readonly sizes: readonly PtahButtonSize[] = ['xs', 'sm', 'md'];
   public readonly states: readonly ButtonStateSample[] = [
     { id: 'default', caption: 'default' },
