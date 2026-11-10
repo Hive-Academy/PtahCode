@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
-import { PtahButtonDirective } from '../surfaces/button.directive';
+import { PtahButtonDirective } from '../button/button.directive';
 
 @Component({
   selector: 'ptah-page-header', standalone: true, imports: [PtahButtonDirective],
