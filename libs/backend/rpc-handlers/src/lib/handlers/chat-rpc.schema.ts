@@ -137,6 +137,8 @@ export const ChatQueuedListParamsSchema = z
   .object({
     sessionId: uuidString('sessionId'),
     tabId: uuidString('tabId'),
+    clientMessageId: uuidString('clientMessageId').optional(),
+    abandonPending: z.boolean().optional(),
   })
   .strict();
 

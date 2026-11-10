@@ -124,6 +124,61 @@ function build(
 }
 
 describe('ChatFollowUpQueueService', () => {
+  it('keeps committed admissions pending until native resume accepts or rejects', () => {
+    const h = build();
+    h.service.beginAdmission(SESSION, TAB_A, ID_1);
+    h.service.commitAdmission(SESSION, ID_1);
+    h.service.abandonPending(SESSION, TAB_A, ID_1);
+    expect(h.service.receipt(SESSION, TAB_A, ID_1)).toBe('pending');
+    expect(h.service.isCommitted(SESSION, ID_1)).toBe(true);
+    h.service.acceptResumed(SESSION, TAB_A, ID_1);
+    expect(h.service.receipt(SESSION, TAB_A, ID_1)).toBe('delivered');
+    h.service.endAdmission(SESSION, ID_1);
+    h.service.beginAdmission(SESSION, TAB_A, ID_2);
+    h.service.commitAdmission(SESSION, ID_2);
+    h.service.abandonPending(SESSION, TAB_A, ID_2);
+    expect(h.service.receipt(SESSION, TAB_A, ID_2)).toBe('pending');
+    h.service.rejectAdmission(SESSION, TAB_A, ID_2, 'SESSION_CHANGED');
+    expect(h.service.receipt(SESSION, TAB_A, ID_2)).toBe('rejected');
+  });
+
+  it('removes empty per-session receipt maps after many sessions expire', () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const h = build();
+    for (let index = 0; index < 100; index++) {
+      h.service.rejectAdmission(`session-${index}`, TAB_A, ID_1, 'SESSION_CHANGED');
+    }
+    expect(h.service.receiptSessionCount()).toBe(100);
+    jest.advanceTimersByTime(10 * 60 * 1000 + 1);
+    for (let index = 0; index < 100; index++) {
+      expect(h.service.receipt(`session-${index}`, TAB_A, ID_1)).toBeUndefined();
+    }
+    expect(h.service.receiptSessionCount()).toBe(0);
+    jest.useRealTimers();
+  });
+  it('caps terminal receipts and expires them after ten minutes', () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const h = build();
+    const ids = Array.from({ length: 250 }, (_, index) =>
+      `33333333-4444-4555-8666-${String(index).padStart(12, '0')}`);
+    for (const id of ids) h.service.rejectAdmission(SESSION, TAB_A, id, 'SESSION_CHANGED');
+    expect(h.service.receipt(SESSION, TAB_A, ids[0])).toBeUndefined();
+    expect(h.service.receipt(SESSION, TAB_A, ids[49])).toBeUndefined();
+    expect(h.service.receipt(SESSION, TAB_A, ids[50])).toBe('rejected');
+    jest.advanceTimersByTime(10 * 60 * 1000 + 1);
+    expect(h.service.receipt(SESSION, TAB_A, ids[249])).toBeUndefined();
+    jest.useRealTimers();
+  });
+
+  it('keeps the original tab receipt after ownership transfers inside retention', () => {
+    const h = build();
+    h.service.rejectAdmission(SESSION, TAB_A, ID_1, 'SESSION_CHANGED');
+    h.service.beginAdmission(SESSION, TAB_B, ID_2);
+    expect(h.service.receipt(SESSION, TAB_A, ID_1)).toBe('rejected');
+    expect(h.service.receipt(SESSION, TAB_B, ID_1)).toBeUndefined();
+  });
   it('rejects another tab for an idle Codex session with no held items', () => {
     const h = build({ codexOwner: TAB_A });
     expect(() => h.service.assertTabOwnsSession(SESSION, TAB_B)).toThrow(RpcUserError);
