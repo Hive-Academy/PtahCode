@@ -5,14 +5,24 @@
 import { injectable } from 'tsyringe';
 import type { IFileDialog } from '@ptah-extension/platform-core';
 
+interface DialogOwner {
+  resolve: (paths: readonly string[]) => void;
+  reject: (reason: unknown) => void;
+}
+
+interface OpenDialogEntry {
+  dialog: Promise<readonly string[]>;
+  owner: DialogOwner;
+}
+
 @injectable()
 export class ElectronFileDialog implements IFileDialog {
-  /** Open dialogs by request shape, so a repeated request joins the dialog on screen. */
-  private readonly open = new Map<string, Promise<readonly string[]>>();
+  /** One native dialog per request shape; only its newest caller owns the result. */
+  private readonly open = new Map<string, OpenDialogEntry>();
 
   /**
-   * The dialog is not modal, so the same request can arrive again while it is
-   * open. That request gets the result of the open dialog, not a second dialog.
+   * A repeated request cancels the previous owner's result immediately and takes
+   * ownership of the dialog already on screen.
    */
   openFiles(options: {
     multiple: boolean;
@@ -24,13 +34,35 @@ export class ElectronFileDialog implements IFileDialog {
       options.title,
       options.filters ?? null,
     ]);
+    let resolve!: DialogOwner['resolve'];
+    let reject!: DialogOwner['reject'];
+    const result = new Promise<readonly string[]>(
+      (resolveResult, rejectResult) => {
+        resolve = resolveResult;
+        reject = rejectResult;
+      },
+    );
     const pending = this.open.get(key);
-    if (pending) return pending;
-    const shown = this.show(options).finally(() => {
-      this.open.delete(key);
-    });
-    this.open.set(key, shown);
-    return shown;
+    if (pending) {
+      pending.owner.resolve([]);
+      pending.owner = { resolve, reject };
+      return result;
+    }
+
+    const dialog = this.show(options);
+    const entry: OpenDialogEntry = { dialog, owner: { resolve, reject } };
+    this.open.set(key, entry);
+    void entry.dialog.then(
+      (paths) => {
+        this.open.delete(key);
+        entry.owner.resolve(paths);
+      },
+      (reason: unknown) => {
+        this.open.delete(key);
+        entry.owner.reject(reason);
+      },
+    );
+    return result;
   }
 
   private async show(options: {
