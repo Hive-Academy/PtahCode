@@ -90,7 +90,8 @@ export class ReviewStatusCoordinatorService {
   private async serialize(repo: ReviewStatusTarget['repo'], headSha: string, work: () => Promise<void>): Promise<void> {
     const key = `${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}/${headSha}`;
     const prior = this.writes.get(key) ?? Promise.resolve();
-    const current = prior.catch(() => undefined).then(work);
+    // The work starts after the prior write settles. The caller of the prior write owns its error.
+    const current = prior.then(work, work);
     this.writes.set(key, current);
     try { await current; }
     finally { if (this.writes.get(key) === current) this.writes.delete(key); }
