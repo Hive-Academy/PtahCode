@@ -17,10 +17,14 @@ import { isOnScreen } from './window-guards';
 
 const INSTANCE = 'default';
 const BOUNDS_KEY = 'gitWindow.bounds';
-const MIN_WIDTH = 420;
+// The file tree and the diff are side by side. Below the minimum width the
+// hunk header of the diff is cut, so the window cannot be made narrower.
+export const GIT_WINDOW_MIN_WIDTH = 720;
 const MIN_HEIGHT = 400;
-const DEFAULT_WIDTH = 620;
+export const GIT_WINDOW_DEFAULT_WIDTH = 920;
 const DEFAULT_HEIGHT = 760;
+const MIN_WIDTH = GIT_WINDOW_MIN_WIDTH;
+const DEFAULT_WIDTH = GIT_WINDOW_DEFAULT_WIDTH;
 const ERR_ABORTED = -3;
 
 export const GIT_WINDOW_ALLOWED_METHODS: ReadonlySet<string> = new Set([
@@ -47,16 +51,17 @@ export interface ElectronGitWindowHostOptions {
   readonly createWindow?: (placement: Rectangle | { width: number; height: number }) => DisplayChildWindow;
 }
 
-function placement(main: Rectangle, saved: unknown): Rectangle | { width: number; height: number } {
+/** A saved size is kept. A saved width below the minimum (an older build) is raised to it. */
+export function gitWindowPlacement(main: Rectangle, saved: unknown): Rectangle | { width: number; height: number } {
   if (typeof saved === 'object' && saved !== null &&
     'x' in saved && 'y' in saved && 'width' in saved && 'height' in saved &&
     typeof saved.x === 'number' && typeof saved.y === 'number' &&
     typeof saved.width === 'number' && typeof saved.height === 'number' &&
     Number.isFinite(saved.x) && Number.isFinite(saved.y) &&
     Number.isFinite(saved.width) && Number.isFinite(saved.height) &&
-    saved.width >= MIN_WIDTH && saved.height >= MIN_HEIGHT &&
-    isOnScreen({ x: saved.x, y: saved.y, width: saved.width, height: saved.height })) {
-    return { x: saved.x, y: saved.y, width: saved.width, height: saved.height };
+    saved.width > 0 && saved.height >= MIN_HEIGHT &&
+    isOnScreen({ x: saved.x, y: saved.y, width: Math.max(saved.width, MIN_WIDTH), height: saved.height })) {
+    return { x: saved.x, y: saved.y, width: Math.max(saved.width, MIN_WIDTH), height: saved.height };
   }
   const right = { x: main.x + main.width + 8, y: main.y, width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT };
   const left = { ...right, x: main.x - DEFAULT_WIDTH - 8 };
@@ -85,7 +90,7 @@ export class ElectronGitWindowHost implements GitWindowHost {
     let child: DisplayChildWindow;
     try {
       const saved = this.options.resolveStateStorage()?.get<unknown>(BOUNDS_KEY);
-      const bounds = placement(main.getBounds(), saved);
+      const bounds = gitWindowPlacement(main.getBounds(), saved);
       child = this.options.createWindow?.(bounds) ?? createChildWindow({
         appDir: this.options.appDir, placement: bounds,
         minWidth: MIN_WIDTH, minHeight: MIN_HEIGHT,

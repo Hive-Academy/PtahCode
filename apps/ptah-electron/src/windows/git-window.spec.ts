@@ -9,7 +9,7 @@ import * as path from 'path';
 import type { IStateStorage } from '@ptah-extension/platform-core';
 import type { GitWindowScope } from '@ptah-extension/shared';
 import { ChildWindowRegistry } from './child-window-registry';
-import { ElectronGitWindowHost } from './git-window';
+import { ElectronGitWindowHost, GIT_WINDOW_DEFAULT_WIDTH, GIT_WINDOW_MIN_WIDTH, gitWindowPlacement } from './git-window';
 import type { DisplayChildWindow, DisplayMainWindow } from './display-window';
 
 const scope: GitWindowScope = {
@@ -79,6 +79,16 @@ function child(id: number) {
 }
 
 describe('ElectronGitWindowHost', () => {
+  it('opens at the default width and keeps a saved user size', () => {
+    const main: Rectangle = { x: 100, y: 50, width: 900, height: 700 };
+    expect(gitWindowPlacement(main, undefined)).toMatchObject({ width: GIT_WINDOW_DEFAULT_WIDTH, height: 760 });
+    expect(GIT_WINDOW_DEFAULT_WIDTH).toBeGreaterThanOrEqual(GIT_WINDOW_MIN_WIDTH);
+    expect(gitWindowPlacement(main, { x: 5, y: 6, width: 1100, height: 640 })).toEqual({ x: 5, y: 6, width: 1100, height: 640 });
+    // A size saved by a build with a smaller minimum keeps its position and height.
+    expect(gitWindowPlacement(main, { x: 5, y: 6, width: 620, height: 640 })).toEqual({ x: 5, y: 6, width: GIT_WINDOW_MIN_WIDTH, height: 640 });
+    expect(gitWindowPlacement(main, { x: 5, y: 6, width: 620, height: 100 })).toMatchObject({ width: GIT_WINDOW_DEFAULT_WIDTH });
+  });
+
   it('loads the Git renderer once and focuses the singleton', async () => {
     const f = fixture();
     expect(await f.host.open()).toEqual({ ok: true });
