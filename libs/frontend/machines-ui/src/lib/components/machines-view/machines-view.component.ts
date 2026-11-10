@@ -176,7 +176,7 @@ const CLOCK_TICK_MS = 1000;
                   "
                   (openReadiness)="paneMode.set('readiness')"
                   (askRemove)="askRemove()"
-                  (cancelRemove)="confirmingRemove.set(false)"
+                  (cancelRemove)="cancelRemove()"
                   (removeMachine)="remove(machine)"
                   (retry)="retry(machine)"
                   (repair)="paneMode.set('repair')"
@@ -221,7 +221,13 @@ export class MachinesViewComponent implements OnInit {
   private readonly selectedId = signal<string | null>(null);
   /** Narrow (< 768 px) only: the user opened the detail pane. */
   protected readonly narrowDetailOpen = signal(false);
-  protected readonly confirmingRemove = signal(false);
+  /** The machine whose removal waits for confirmation. */
+  private readonly removeTargetId = signal<string | null>(null);
+  /** True only while the confirmed machine is still the selected machine. */
+  protected readonly confirmingRemove = computed(() => {
+    const target = this.removeTargetId();
+    return target !== null && target === this.selected()?.machineId;
+  });
   protected readonly busy = signal(false);
   protected readonly actionError = signal<MachinesActionError | null>(null);
   protected readonly now = signal(Date.now());
@@ -274,7 +280,7 @@ export class MachinesViewComponent implements OnInit {
 
   protected select(machineId: string): void {
     if (machineId !== this.selected()?.machineId) {
-      this.confirmingRemove.set(false);
+      this.removeTargetId.set(null);
       this.actionError.set(null);
     }
     this.selectedId.set(machineId);
@@ -294,7 +300,7 @@ export class MachinesViewComponent implements OnInit {
   }
 
   protected openAdd(): void {
-    this.confirmingRemove.set(false);
+    this.removeTargetId.set(null);
     this.paneMode.set('add');
   }
 
@@ -315,13 +321,22 @@ export class MachinesViewComponent implements OnInit {
   }
 
   protected askRemove(): void {
-    this.confirmingRemove.set(true);
+    this.removeTargetId.set(this.selected()?.machineId ?? null);
+  }
+
+  protected cancelRemove(): void {
+    this.removeTargetId.set(null);
   }
 
   protected async remove(machine: RemoteMachine): Promise<void> {
+    // The confirmation belongs to one machine. Reject a removal of another one.
+    if (this.removeTargetId() !== machine.machineId) {
+      this.removeTargetId.set(null);
+      return;
+    }
     await this.act('Remove failed', () => this.store.remove(machine.machineId));
     if (this.actionError() === null) {
-      this.confirmingRemove.set(false);
+      this.removeTargetId.set(null);
       this.selectedId.set(null);
     }
   }

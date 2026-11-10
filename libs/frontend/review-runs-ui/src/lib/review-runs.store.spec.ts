@@ -166,6 +166,31 @@ describe('ReviewRunsStore', () => {
     expect(listCalls).toHaveLength(2);
   });
 
+  it('drops a page that settles after a refresh and skips duplicates inside one page', async () => {
+    const second = { ...run, attemptId: 'rvw-429-01', prNumber: 429 };
+    const poll = { status: null, error: null, lastSuccessAt: null, lastErrorAt: null };
+    let releasePage: (value: unknown) => void = () => undefined;
+    let hold = true;
+    call.mockImplementation((method: string, params: { cursor?: string }) => {
+      if (method === 'review:listRepositories') return Promise.resolve({ isSuccess: () => true, data: [] });
+      const page = { isSuccess: () => true, data: { runs: [second, second], nextCursor: null, poll } };
+      if (params?.cursor && hold) return new Promise((resolve) => { releasePage = () => resolve(page); });
+      if (params?.cursor) return Promise.resolve(page);
+      return Promise.resolve({ isSuccess: () => true, data: { runs: [run], nextCursor: 'cursor-1', poll } });
+    });
+    await store.load();
+    const stale = store.loadMore();
+    await store.load();
+    releasePage(undefined);
+    await stale;
+    // The old page belongs to the list before the refresh.
+    expect(store.runs()).toHaveLength(1);
+    expect(store.nextCursor()).toBe('cursor-1');
+    hold = false;
+    await store.loadMore();
+    expect(store.runs().map((item) => item.attemptId)).toEqual(['rvw-428-01', 'rvw-429-01']);
+  });
+
   it('keeps the loaded list when the next page fails, and retries on the next press', async () => {
     const second = { ...run, attemptId: 'rvw-429-01', prNumber: 429 };
     call.mockImplementation((method: string) =>

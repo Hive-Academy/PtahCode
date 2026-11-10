@@ -42,7 +42,7 @@ const RUN_STATUS_INK: Readonly<Record<ReviewRun['status'], string>> = {
           (keydown.arrowdown)="moveFocus($event, 1)"
           (keydown.arrowup)="moveFocus($event, -1)"
         >
-          <span class="block truncate text-sm font-medium">PR #{{ run.prNumber }}</span>
+          <span class="block truncate text-sm font-medium">PR #{{ run.prNumber }}@if (run.prTitle) { <span class="font-normal">{{ run.prTitle }}</span> }</span>
           <span class="block truncate text-xs text-base-content-muted">
             {{ run.repo.owner }}/{{ run.repo.name }} · <span class="font-mono">{{ run.headSha.slice(0, 10) }}</span> · {{ run.trigger }}
           </span>

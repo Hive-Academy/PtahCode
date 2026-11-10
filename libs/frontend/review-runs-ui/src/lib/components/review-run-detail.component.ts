@@ -8,9 +8,8 @@ import { ReviewFindingsTableComponent, reviewFindingRows } from './review-findin
   selector: 'ptah-review-run-detail', standalone: true, imports: [ReviewFindingsTableComponent, ReviewConfirmDialogComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="fixed inset-0 z-50 bg-black/60">
-      <aside class="surface-1 absolute inset-y-0 right-0 w-full max-w-2xl overflow-y-auto border-l border-base-300 p-5 shadow-xl"
-        role="dialog" aria-modal="true" aria-labelledby="review-detail-title" (keydown)="onKeydown($event)">
+    <div>
+      <aside role="region" aria-labelledby="review-detail-title" (keydown)="onKeydown($event)">
         <header class="flex items-start justify-between gap-4"><div>
           <h2 id="review-detail-title" class="text-xl font-semibold" tabindex="-1">PR #{{ run().prNumber }} review</h2>
           <p class="text-sm text-base-content-muted">{{ run().repo.owner }}/{{ run().repo.name }} · {{ run().headSha.slice(0, 10) }}</p>
@@ -80,18 +79,13 @@ export class ReviewRunDetailComponent implements AfterViewInit, OnDestroy {
   readonly closed = output<void>();
   readonly retry = output<void>();
   readonly retryFindings = output<void>();
-  ngAfterViewInit(): void { const doc = this.element.nativeElement.ownerDocument; this.returnFocus = doc.activeElement instanceof HTMLElement ? doc.activeElement : null; this.element.nativeElement.querySelector<HTMLElement>('#review-detail-title')?.focus(); }
+  ngAfterViewInit(): void { const doc = this.element.nativeElement.ownerDocument; this.returnFocus = doc.activeElement instanceof HTMLElement ? doc.activeElement : null; }
   ngOnDestroy(): void { this.returnFocus?.focus(); }
   startLiveRerun(): void { this.confirmLive.set(false); void this.store.rerun(this.run().attemptId, false); }
   stageLabel(stage: StageRecord): string { return stage.name === 'lenses' && stage.scope ? stage.scope : ({ discovery: 'Discovery', context: 'Context', checks: 'Checks', triage: 'Triage', lenses: 'Lenses', verification: 'Verification', identity: 'Identity', publication: 'Publication' })[stage.name]; }
   family(name: StageRecord['name']): string | null { return this.run().stages.find(stage => stage.name === name)?.family ?? null; }
   onKeydown(event: Event): void {
     if (!(event instanceof KeyboardEvent)) return;
-    if (event.key === 'Escape') { event.preventDefault(); this.closed.emit(); return; }
-    if (event.key !== 'Tab') return;
-    const items = Array.from(this.element.nativeElement.querySelectorAll<HTMLElement>('button:not([disabled]), select:not([disabled]), [tabindex="-1"]'));
-    const first = items[0], last = items[items.length - 1];
-    if (event.shiftKey && this.element.nativeElement.ownerDocument.activeElement === first) { event.preventDefault(); last?.focus(); }
-    else if (!event.shiftKey && this.element.nativeElement.ownerDocument.activeElement === last) { event.preventDefault(); first?.focus(); }
+    if (event.key === 'Escape') { event.preventDefault(); this.closed.emit(); }
   }
 }

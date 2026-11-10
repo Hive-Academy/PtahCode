@@ -34,7 +34,7 @@ describe('ReviewRunDetailComponent', () => {
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Coverage limited');
     expect(fixture.nativeElement.textContent).toContain('Weaker evidence');
-    fixture.nativeElement.querySelector('[role="dialog"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    fixture.nativeElement.querySelector('[role="region"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(close).toHaveBeenCalledTimes(1);
   });
   it('shows each lens outcome and sanitized reason', () => {

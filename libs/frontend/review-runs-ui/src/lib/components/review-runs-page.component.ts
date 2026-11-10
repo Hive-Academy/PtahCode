@@ -19,8 +19,8 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
  * Reviews page shell (approved option A): header, banners and the shared
  * three-pane `ptah-inbox-layout` — repositories 240 px, runs 340 px, fluid
  * detail. Below 768 px exactly one pane shows; closing the detail returns to
- * the list. The run detail stays the untouched modal component of PR #1040:
- * this host only cancels its drawer chrome with descendant utility classes.
+ * the list. The run detail is a plain pane (a labelled region,
+ * no drawer chrome, no focus trap); PR #1040 owns its findings content.
  */
 @Component({
   selector: 'ptah-review-runs-page',
@@ -182,21 +182,6 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
                 [selectedAttemptId]="store.selectedAttemptId()"
                 (open)="store.selectRun($event)"
               />
-              @if (store.nextCursor() !== null) {
-                <button
-                  type="button"
-                  class="btn btn-ghost btn-sm mt-4 w-full"
-                  [disabled]="store.loadingMore()"
-                  (click)="loadMore()"
-                >
-                  Load more
-                </button>
-                @if (store.loadMoreError()) {
-                  <p class="mt-2 text-xs text-base-content-muted" role="alert">
-                    More runs could not be loaded.
-                  </p>
-                }
-              }
             } @else if (store.runs().length) {
               <div class="py-8 text-center">
                 <p class="font-semibold">No matching runs</p>
@@ -221,12 +206,31 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
                 </button>
               </div>
             }
+            @if (
+              store.runs().length &&
+              store.nextCursor() !== null &&
+              store.state() !== 'no-lanes'
+            ) {
+              <!-- Also shown with "No matching runs": a later page can hold a match. -->
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm mt-4 w-full"
+                data-testid="review-runs-load-more"
+                [disabled]="store.loadingMore()"
+                (click)="loadMore()"
+              >
+                Load more
+              </button>
+              @if (store.loadMoreError()) {
+                <p class="mt-2 text-xs text-base-content-muted" role="alert">
+                  More runs could not be loaded.
+                </p>
+              }
+            }
           </section>
         </ng-container>
         @if (store.selectedRun(); as run) {
-          <div
-            class="[&_ptah-review-run-detail>div]:static [&_ptah-review-run-detail>div]:bg-transparent [&_ptah-review-run-detail>div>aside]:static [&_ptah-review-run-detail>div>aside]:max-w-none [&_ptah-review-run-detail>div>aside]:border-0 [&_ptah-review-run-detail>div>aside]:p-0 [&_ptah-review-run-detail>div>aside]:shadow-none [&_ptah-review-run-detail>div>aside]:bg-transparent"
-          >
+          <div>
             <ptah-review-run-detail
               [run]="run"
               [loadState]="store.detailState()"

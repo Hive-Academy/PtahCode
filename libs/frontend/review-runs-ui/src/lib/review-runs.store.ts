@@ -104,6 +104,7 @@ export class ReviewRunsStore {
   );
 
   async load(): Promise<void> {
+    const generation = ++this.listGeneration;
     this.isRefreshing.set(true);
     if (!this.hasCache()) this.state.set('loading');
     try {
@@ -119,6 +120,8 @@ export class ReviewRunsStore {
           ReviewRpcSchemas['review:listRuns'].result,
         ),
       ]);
+      // A newer first-page load owns the list; drop this stale result.
+      if (generation !== this.listGeneration) return;
       this.repositories.set(repositories);
       this.runs.set(runs.runs);
       this.nextCursor.set(runs.nextCursor);
@@ -127,16 +130,20 @@ export class ReviewRunsStore {
       this.lastRefreshedAt.set(new Date());
       this.state.set('ready');
     } catch {
+      if (generation !== this.listGeneration) return;
       this.state.set(this.hasCache() ? 'offline' : 'error');
     } finally {
-      this.isRefreshing.set(false);
+      if (generation === this.listGeneration) this.isRefreshing.set(false);
     }
   }
+
+  private listGeneration = 0;
 
   /** Appends the next run page through the `review:listRuns` cursor. */
   async loadMore(): Promise<void> {
     const cursor = this.nextCursor();
     if (cursor === null || this.loadingMore()) return;
+    const generation = this.listGeneration;
     this.loadingMore.set(true);
     this.loadMoreError.set(false);
     try {
@@ -145,17 +152,22 @@ export class ReviewRunsStore {
         ReviewRpcSchemas['review:listRuns'].params.parse({ limit: 100, cursor }),
         ReviewRpcSchemas['review:listRuns'].result,
       );
+      // A refresh replaced the list while this page loaded: the page and its
+      // cursor belong to the old list.
+      if (generation !== this.listGeneration) return;
       this.runs.update((current) => {
         const known = new Set(current.map((run) => run.attemptId));
-        return [
-          ...current,
-          ...result.runs.filter((run) => !known.has(run.attemptId)),
-        ];
+        const fresh = result.runs.filter((run) => {
+          if (known.has(run.attemptId)) return false;
+          known.add(run.attemptId);
+          return true;
+        });
+        return [...current, ...fresh];
       });
       this.nextCursor.set(result.nextCursor);
     } catch {
       // The current list stays usable; the next press of the button retries.
-      this.loadMoreError.set(true);
+      if (generation === this.listGeneration) this.loadMoreError.set(true);
     } finally {
       this.loadingMore.set(false);
     }
