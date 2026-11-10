@@ -533,6 +533,8 @@ export interface MonitoredAgent {
   permissionQueue: AgentPermissionRequest[];
   /** Ptah CLI agent registry ID (only set when cli === 'ptah-cli'). Needed for resume. */
   readonly ptahCliId?: string;
+  /** Provider a Ptah CLI lane runs through; drives the lane's provider mark. */
+  readonly providerId?: string;
   /** Human-readable display name for the CLI agent (e.g., 'Codex', 'Copilot'). */
   readonly displayName?: string;
   /** Model identifier used by the CLI agent (e.g., 'gpt-5-codex', 'gpt-4o'). */
@@ -1512,6 +1514,7 @@ export class AgentMonitorStore implements OnDestroy {
           // A card restored without a name learns it from the respawn.
           displayName:
             info.displayName || info.ptahCliName || existing.displayName,
+          providerId: info.providerId ?? existing.providerId,
           // Prefer-known, never downgrade: a respawn that arrives before the
           // session UUID resolves must not erase an owner we already captured.
           parentSessionId: parentSessionId ?? existing.parentSessionId,
@@ -1575,6 +1578,7 @@ export class AgentMonitorStore implements OnDestroy {
           parentSessionId: parentSessionId ?? oldCard.parentSessionId,
           cliSessionId: info.cliSessionId,
           ptahCliId: info.ptahCliId,
+          providerId: info.providerId,
           permissionQueue: [],
           displayName: info.displayName || info.ptahCliName,
           model: info.model,
@@ -1615,6 +1619,7 @@ export class AgentMonitorStore implements OnDestroy {
         parentSessionId,
         cliSessionId: info.cliSessionId,
         ptahCliId: info.ptahCliId,
+        providerId: info.providerId,
         permissionQueue: [],
         displayName: info.displayName || info.ptahCliName,
         model: info.model,
@@ -2145,6 +2150,7 @@ export class AgentMonitorStore implements OnDestroy {
           cliSessionId: ref.cliSessionId,
           parentSessionId,
           ptahCliId: ref.ptahCliId,
+          ...(ref.providerId ? { providerId: ref.providerId } : {}),
           ...(displayName ? { displayName } : {}),
           permissionQueue: [],
           // Restored tokens and cost are unknown, not 0 (Req 8.4); persisted

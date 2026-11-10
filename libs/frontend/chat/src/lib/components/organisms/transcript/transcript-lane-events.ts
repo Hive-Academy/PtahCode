@@ -9,11 +9,13 @@ export interface LaneMonitorSnapshot extends LaneEventMetrics {
   readonly completedAt?: number;
   /** ISO time a host restart cut the lane's output at. */
   readonly outputLostAfter?: string;
+  /** Provider of a Ptah CLI lane; picks the lane's provider mark. */
+  readonly providerId?: string;
 }
 
 export function sameLaneMonitorSnapshot(a: LaneMonitorSnapshot, b: LaneMonitorSnapshot): boolean {
   return a.agentId === b.agentId && a.status === b.status && a.startedAt === b.startedAt && a.completedAt === b.completedAt &&
-    a.outputLostAfter === b.outputLostAfter &&
+    a.outputLostAfter === b.outputLostAfter && a.providerId === b.providerId &&
     a.model === b.model && a.usageTotals?.model === b.usageTotals?.model &&
     a.usageTotals?.totalTokens === b.usageTotals?.totalTokens &&
     a.usageTotals?.inputTokens === b.usageTotals?.inputTokens &&

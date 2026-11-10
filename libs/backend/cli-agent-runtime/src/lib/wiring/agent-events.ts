@@ -766,6 +766,8 @@ export function persistCliSessionReference(
       // The agent's configured name, so a card rebuilt from this reference
       // keeps "Glm" instead of falling back to "Ptah CLI" (TASK_2026_905).
       ...(info.ptahCliName ? { ptahCliName: info.ptahCliName } : {}),
+      // The lane's provider, so a restored Ptah CLI lane keeps its provider mark.
+      ...(info.providerId ? { providerId: info.providerId } : {}),
       ...(info.potentialCapabilities !== undefined
         ? { potentialCapabilities: info.potentialCapabilities }
         : {}),

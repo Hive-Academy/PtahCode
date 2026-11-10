@@ -39,6 +39,7 @@ import { agentStatusInk } from './dock-overflow';
           [status]="agent().status"
           [size]="32"
           [cliId]="agent().cliId"
+          [providerId]="agent().providerId ?? null"
           [agentType]="agent().agentType"
         />
         <div class="min-w-0">

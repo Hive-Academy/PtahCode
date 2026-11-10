@@ -17,7 +17,7 @@
       } @else {
         <span class="w-3.5 shrink-0" aria-hidden="true"></span>
       }
-      <ptah-agent-avatar kind="cli" [cliId]="row().cli" [status]="avatarStatus()" [size]="24" />
+      <ptah-agent-avatar kind="cli" [cliId]="row().cli" [providerId]="providerId()" [status]="avatarStatus()" [size]="24" />
       <span class="min-w-0 truncate font-semibold" [title]="row().agent">{{ row().agent }}</span>
       <span data-testid="lane-event-chip"
         class="lane-chip inline-flex shrink-0 items-center gap-1 rounded-full px-2 text-[11px] font-medium leading-5"

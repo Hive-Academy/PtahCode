@@ -18,6 +18,7 @@ describe('AgentAvatarComponent', () => {
     status?: AgentStatusWord | null;
     size?: AgentAvatarSize;
     cliId?: string | null;
+    providerId?: string | null;
     agentType?: string | null;
   }): void {
     fixture.componentRef.setInput('kind', inputs.kind ?? 'orchestrator');
@@ -29,6 +30,9 @@ describe('AgentAvatarComponent', () => {
     }
     if (inputs.cliId !== undefined) {
       fixture.componentRef.setInput('cliId', inputs.cliId);
+    }
+    if (inputs.providerId !== undefined) {
+      fixture.componentRef.setInput('providerId', inputs.providerId);
     }
     if (inputs.agentType !== undefined) {
       fixture.componentRef.setInput('agentType', inputs.agentType);
@@ -130,6 +134,21 @@ describe('AgentAvatarComponent', () => {
 
     expect(host.querySelector('ptah-provider-mark')).not.toBeNull();
     expect(query('agent-avatar-monogram')).toBeNull();
+  });
+
+  it('draws the provider mark and a Ptah CLI title for a ptah-cli lane', () => {
+    render({ kind: 'cli', cliId: 'ptah-cli', providerId: 'ollama' });
+
+    const markPath = (): string | null | undefined =>
+      host.querySelector('ptah-provider-mark path')?.getAttribute('d');
+    const ollamaPath = markPath();
+    expect(ollamaPath).toBeTruthy();
+
+    render({ kind: 'cli', cliId: 'ptah-cli', providerId: 'unknown-provider' });
+    expect(markPath()).not.toBe(ollamaPath);
+
+    render({ kind: 'cli', cliId: 'ptah-cli', providerId: 'ollama' });
+    expect(query('agent-avatar-tile')?.getAttribute('title')).toBe('Ptah CLI');
   });
 
   it('draws a monogram for a CLI lane without a provider mark', () => {

@@ -193,6 +193,7 @@ interface DockLayout {
                 [status]="chip.agent.status"
                 [size]="28"
                 [cliId]="chip.agent.cliId"
+                [providerId]="chip.agent.providerId ?? null"
                 [agentType]="chip.agent.agentType"
               />
               <span class="min-w-0 truncate" data-testid="dock-chip-name">{{ chip.agent.name }}</span>
@@ -230,6 +231,7 @@ interface DockLayout {
                 [status]="chip.agent.status"
                 [size]="28"
                 [cliId]="chip.agent.cliId"
+                [providerId]="chip.agent.providerId ?? null"
                 [agentType]="chip.agent.agentType"
               />
               @if (view.named) {

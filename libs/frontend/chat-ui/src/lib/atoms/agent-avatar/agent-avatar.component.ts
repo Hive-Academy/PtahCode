@@ -136,8 +136,12 @@ const BADGE_BY_STATUS: Readonly<Record<AgentStatusWord, StatusBadge | null>> = {
     '[attr.data-status]': 'status()',
   },
   template: `
-    <span [class]="tileClass()" data-testid="agent-avatar-tile">
-      @if (providerId(); as id) {
+    <span
+      [class]="tileClass()"
+      [attr.title]="ptahCliTitle()"
+      data-testid="agent-avatar-tile"
+    >
+      @if (markProviderId(); as id) {
         <ptah-provider-mark [providerId]="id" [size]="providerMarkSize()" />
       } @else if (monogramLabel() !== null) {
         <span [class]="monogramClass()" data-testid="agent-avatar-monogram">{{
@@ -267,6 +271,9 @@ export class AgentAvatarComponent {
   /** CLI id of a `cli` lane; ignored for other kinds. */
   readonly cliId = input<string | null>(null);
 
+  /** Provider of a `ptah-cli` lane; picks the provider mark over the `P`. */
+  readonly providerId = input<string | null>(null);
+
   /** Agent type of a `subagent` / `background` agent; ignored otherwise. */
   readonly agentType = input<string | null>(null);
 
@@ -275,13 +282,18 @@ export class AgentAvatarComponent {
   protected readonly sizes = computed(() => SIZE_CLASSES[this.size()]);
 
   private readonly cliMark = computed(() =>
-    this.kind() === 'cli' ? cliMarkFor(this.cliId()) : null,
+    this.kind() === 'cli' ? cliMarkFor(this.cliId(), this.providerId()) : null,
   );
 
-  protected readonly providerId = computed(() => {
+  protected readonly markProviderId = computed(() => {
     const mark = this.cliMark();
     return mark?.kind === 'provider' ? mark.providerId : null;
   });
+
+  /** Keeps a Ptah CLI lane recognizable when its mark is the provider's. */
+  protected readonly ptahCliTitle = computed<string | null>(() =>
+    this.kind() === 'cli' && this.cliId() === 'ptah-cli' ? 'Ptah CLI' : null,
+  );
 
   protected readonly monogramLabel = computed(() => {
     const mark = this.cliMark();

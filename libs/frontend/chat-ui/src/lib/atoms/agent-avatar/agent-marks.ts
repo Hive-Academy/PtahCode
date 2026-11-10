@@ -44,6 +44,46 @@ export const CLI_PROVIDER_MARK_IDS: Readonly<
   claude: 'claude-cli',
 };
 
+/**
+ * THE `providerId -> mark id` table for Ptah CLI lanes. A Ptah CLI lane always
+ * runs through one provider, so its mark is that provider's mark. Every value
+ * resolves in `ptah-provider-mark`. A provider that is absent here (for example
+ * `requesty`, `sakana` and user-defined providers) has no freely licensed mark
+ * and keeps the `ptah-cli` mark (the `P`).
+ */
+export const PTAH_CLI_PROVIDER_MARK_IDS: Readonly<Record<string, string>> = {
+  // Anthropic family: the lane-only Claude API entry and the API provider.
+  'anthropic-api': 'anthropic',
+  anthropic: 'anthropic',
+  'claude-cli': 'claude-cli',
+  ollama: 'ollama',
+  'ollama-cloud': 'ollama',
+  openrouter: 'openrouter',
+  'kimi-code': 'kimi-code',
+  'z-ai': 'z-ai',
+  'lm-studio': 'lm-studio',
+  opencode: 'opencode',
+  'opencode-zen': 'opencode-zen',
+  'opencode-go': 'opencode-go',
+  'openai-codex': 'openai-codex',
+  'github-copilot': 'github-copilot',
+  openai: 'openai',
+  xai: 'xai',
+};
+
+/**
+ * The mark id of a Ptah CLI lane's provider, or `null` when the provider is
+ * unknown, missing or has no mark (the caller then keeps the `P`).
+ */
+export function ptahCliProviderMarkId(
+  providerId: string | null | undefined,
+): string | null {
+  const id = providerId?.trim() ?? '';
+  return Object.hasOwn(PTAH_CLI_PROVIDER_MARK_IDS, id)
+    ? PTAH_CLI_PROVIDER_MARK_IDS[id]
+    : null;
+}
+
 /** The mark of a CLI lane: a provider mark, or a lettered monogram. */
 export type CliMark =
   | { readonly kind: 'provider'; readonly providerId: string }
@@ -57,9 +97,16 @@ const NO_CLI_ID_LABEL = 'CLI lane';
  * mark; any other id is drawn as its own monogram (never `Bot`, never a
  * terminal glyph), and a missing id as the `CLI lane` monogram.
  */
-export function cliMarkFor(cliId: string | null | undefined): CliMark {
+export function cliMarkFor(
+  cliId: string | null | undefined,
+  providerId?: string | null,
+): CliMark {
   const id = cliId?.trim() ?? '';
   if (id.length === 0) return { kind: 'monogram', label: NO_CLI_ID_LABEL };
+  if (id === 'ptah-cli') {
+    const providerMark = ptahCliProviderMarkId(providerId);
+    if (providerMark) return { kind: 'provider', providerId: providerMark };
+  }
   if (Object.hasOwn(CLI_PROVIDER_MARK_IDS, id)) {
     return {
       kind: 'provider',

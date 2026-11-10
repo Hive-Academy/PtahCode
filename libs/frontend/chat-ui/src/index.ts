@@ -245,7 +245,9 @@ export {
 } from './lib/atoms/agent-avatar/agent-duration';
 export {
   CLI_PROVIDER_MARK_IDS,
+  PTAH_CLI_PROVIDER_MARK_IDS,
   cliMarkFor,
+  ptahCliProviderMarkId,
   roleIconFor,
   type CliMark,
 } from './lib/atoms/agent-avatar/agent-marks';
