@@ -20,7 +20,7 @@ import {
   type Logger,
 } from '@ptah-extension/vscode-core';
 import {
-  getAnthropicProvider,
+  getPtahCliLaneProvider,
   type AgentModelEntry,
   type AgentModelProvider,
   type CliDetectionResult,
@@ -296,7 +296,7 @@ export class LaneModelListingAdapter {
 
   /** Same guard as `provider:listModels`: no key and no static catalog. */
   private isPurelyDynamic(providerId: string): boolean {
-    const provider = getAnthropicProvider(providerId);
+    const provider = getPtahCliLaneProvider(providerId);
     return Boolean(
       provider?.modelsEndpoint &&
       (!provider.staticModels || provider.staticModels.length === 0),

@@ -38,6 +38,7 @@ import {
 } from '@ptah-extension/agent-sdk';
 import {
   getAnthropicProvider,
+  getPtahCliLaneProvider,
   getStaticModelCapabilities,
   isOpenCodeProviderId,
   getOpenCodeModelProtocol,
@@ -393,12 +394,12 @@ export class ProviderModelsService {
           },
         );
       }
-      if (!getAnthropicProvider(providerId)) {
+      if (!getPtahCliLaneProvider(providerId)) {
         return { models: [], totalCount: 0, isStatic: false };
       }
     }
 
-    const provider = getAnthropicProvider(providerId);
+    const provider = getPtahCliLaneProvider(providerId);
     if (!provider) {
       throw new SdkError(`Unknown provider: ${providerId}`);
     }
@@ -810,7 +811,7 @@ export class ProviderModelsService {
     providerId: string,
     userTiers: Partial<Record<ProviderModelTier, string | null | undefined>>,
   ): Partial<Record<ProviderModelTier, string>> {
-    const defaults = getAnthropicProvider(providerId)?.defaultTiers;
+    const defaults = getPtahCliLaneProvider(providerId)?.defaultTiers;
     let knownIds: string[] | null = null;
     let catalogRead = false;
     const knownCatalog = (): string[] | null => {
@@ -965,7 +966,7 @@ export class ProviderModelsService {
       await Promise.resolve();
       const hasRoute =
         this.dynamicFetchers.has(providerId) ||
-        !!getAnthropicProvider(providerId)?.modelsEndpoint;
+        !!getPtahCliLaneProvider(providerId)?.modelsEndpoint;
       if (!hasRoute) return;
 
       this.logger.debug(
