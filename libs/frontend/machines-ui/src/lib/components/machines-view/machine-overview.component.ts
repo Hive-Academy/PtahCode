@@ -18,7 +18,10 @@ import type { MachineBanner } from '../../utils/machine-banners';
 import { DisplayTextPipe, displayText } from '../../utils/display-text';
 import { MachineApprovalsComponent } from './machine-approvals.component';
 import { MachineStatusComponent } from '../machine-status/machine-status.component';
-import { ReadinessPanelComponent } from '../readiness-panel/readiness-panel.component';
+import {
+  ReadinessPanelComponent,
+  type ReadinessCounts,
+} from '../readiness-panel/readiness-panel.component';
 import {
   RemoteSessionListComponent,
   type RemoteSessionOpenRequest,
@@ -233,12 +236,28 @@ export interface MachinesActionError {
         class="cursor-pointer text-sm font-semibold text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
       >
         Readiness
-        <span class="ml-1 text-xs font-normal text-base-content-muted"
-          >Checks this machine before sessions run</span
-        >
+        @if (readinessCounts(); as counts) {
+          <span
+            class="ml-1 text-xs font-normal"
+            [class.text-base-content-muted]="counts.failed === 0"
+            [class.text-state-need]="counts.failed > 0"
+            data-testid="machine-readiness-result"
+            >{{ counts.passed }} of {{ counts.total }} passed{{
+              counts.failed > 0 ? ' · ' + counts.failed + ' failed' : ''
+            }}</span
+          >
+        } @else {
+          <span class="ml-1 text-xs font-normal text-base-content-muted"
+            >Checks this machine before sessions run</span
+          >
+        }
       </summary>
       @if (readinessOpen()) {
-        <ptah-readiness-panel [machine]="machine()" class="mt-3" />
+        <ptah-readiness-panel
+          [machine]="machine()"
+          class="mt-3"
+          (counted)="onReadinessCounted($event)"
+        />
       }
     </details>
 
@@ -270,6 +289,18 @@ export class MachineOverviewComponent {
   /** The readiness tile mounts the panel only once it was expanded. */
   protected readonly readinessOpen = signal(false);
 
+  /** The last check result, kept for the machine that it belongs to. */
+  private readonly lastCounts = signal<{
+    readonly machineId: string;
+    readonly counts: ReadinessCounts;
+  } | null>(null);
+  protected readonly readinessCounts = computed(() => {
+    const last = this.lastCounts();
+    return last !== null && last.machineId === this.machine().machineId
+      ? last.counts
+      : null;
+  });
+
   private readonly injector = inject(Injector);
   private readonly removeCancel =
     viewChild<ElementRef<HTMLButtonElement>>('removeCancel');
@@ -287,6 +318,10 @@ export class MachineOverviewComponent {
         injector: this.injector,
       });
     });
+  }
+
+  protected onReadinessCounted(counts: ReadinessCounts): void {
+    this.lastCounts.set({ machineId: this.machine().machineId, counts });
   }
 
   protected onReadinessToggle(event: Event): void {

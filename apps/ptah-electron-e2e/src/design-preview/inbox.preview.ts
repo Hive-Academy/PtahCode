@@ -112,6 +112,8 @@ test('machines inbox', async ({ app, ui, page }) => {
 
   // Readiness after a check: the sample machine has no backend, so the result is sample data.
   await page.getByTestId('machine-readiness-tile').locator('summary').click();
+  await page.waitForTimeout(300);
+  for (const theme of THEMES) await shot(page, 'machines-readiness-closed', theme);
   await expect(page.locator('ptah-readiness-panel')).toBeVisible();
   await page.waitForTimeout(1500);
   await page.evaluate(() => {
