@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_914_2e97
-status: backlog
+status: in_review
 type: BUGFIX
 title: Fix handoff ack predecessor tab close failure
 depends_on: []
