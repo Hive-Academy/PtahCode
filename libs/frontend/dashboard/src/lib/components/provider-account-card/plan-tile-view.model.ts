@@ -98,6 +98,10 @@ export const PLAN_LIMIT_REASON_LABELS: Readonly<
   'cli-not-signed-in': 'Sign in to the Antigravity CLI (run agy once)',
   'cli-exit-error': 'Antigravity CLI exited with an error',
   'cli-parse-failed': 'Antigravity CLI usage output not recognized',
+  'cli-backoff': 'Antigravity CLI usage read paused after a failure',
+  'usage-budget-exhausted': 'Usage read did not finish in time',
+  'account-unverified':
+    'Antigravity CLI account could not be matched to this account',
   'api-key-no-subscription-quota':
     'No subscription quota for API-key login; local usage only',
   'balance-unavailable':
