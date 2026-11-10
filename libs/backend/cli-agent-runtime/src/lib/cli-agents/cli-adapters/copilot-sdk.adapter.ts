@@ -59,7 +59,7 @@ import {
   stripAnsiCodes,
   buildArgvTaskPrompt,
   assertCommandLineWithinLimit,
-  probeCliVersion,
+  probeCliVersionDetailed,
   resolveCliPath,
   resolveDirectSpawn,
   spawnCli,
@@ -210,12 +210,17 @@ export class CopilotSdkAdapter implements CliAdapter {
           messagingMode: bestMessagingCapability(this.capabilities()),
         };
       }
-      const version = await probeCliVersion(
+      const { version, exitCode } = await probeCliVersionDetailed(
         binaryPath,
         undefined,
         undefined,
         this.spawner,
       );
+
+      if (exitCode === 127) {
+        return { cli: 'copilot', installed: false,
+          messagingMode: bestMessagingCapability(this.capabilities()) };
+      }
 
       return {
         cli: 'copilot',

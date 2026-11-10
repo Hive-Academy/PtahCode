@@ -66,6 +66,7 @@ import {
   CliCommandLineTooLongError,
   fullPromptPreambles,
   probeCliVersion,
+  probeCliVersionDetailed,
   renderRoleBlock,
   PTAH_LANE_POLICY,
   resolveDirectSpawn,
@@ -1012,6 +1013,14 @@ describe('spawnCli', () => {
 describe('probeCliVersion', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  it('returns the exit code alongside the first output line', async () => {
+    const { spawner, handles } = createFakeSpawner();
+    const probe = probeCliVersionDetailed('copilot', ['--version'], 5000, spawner);
+    handles[0].stdout.emit('data', 'GitHub Copilot CLI was not found\n');
+    handles[0].emit('close', 127);
+    await expect(probe).resolves.toEqual({ version: 'GitHub Copilot CLI was not found', exitCode: 127 });
   });
 
   it('reads the first stdout line through an injected spawner', async () => {

@@ -63,7 +63,7 @@ let currentChild: FakeChildControls | null = null;
 
 const mockSpawnCli = jest.fn();
 const mockResolveCliPath = jest.fn();
-const mockProbeCliVersion = jest.fn();
+const mockProbeCliVersionDetailed = jest.fn();
 const mockKillProcessTree = jest.fn();
 
 jest.mock('./cli-adapter.utils', () => {
@@ -74,7 +74,7 @@ jest.mock('./cli-adapter.utils', () => {
     ...actual,
     spawnCli: (...args: unknown[]) => mockSpawnCli(...args),
     resolveCliPath: (...args: unknown[]) => mockResolveCliPath(...args),
-    probeCliVersion: (...args: unknown[]) => mockProbeCliVersion(...args),
+    probeCliVersionDetailed: (...args: unknown[]) => mockProbeCliVersionDetailed(...args),
   };
 });
 
@@ -126,7 +126,7 @@ describe('CopilotSdkAdapter', () => {
   describe('detect()', () => {
     it('reports installed when resolveCliPath finds the binary', async () => {
       mockResolveCliPath.mockResolvedValue('/usr/local/bin/copilot');
-      mockProbeCliVersion.mockResolvedValue('copilot 1.0.26');
+      mockProbeCliVersionDetailed.mockResolvedValue({ version: 'copilot 1.0.26', exitCode: 0 });
 
       const result = await adapter.detect();
 
@@ -140,13 +140,13 @@ describe('CopilotSdkAdapter', () => {
     it('forwards the resolved binary path to probeCliVersion', async () => {
       const cmdPath = 'C:\\Users\\dev\\AppData\\Roaming\\npm\\copilot.cmd';
       mockResolveCliPath.mockResolvedValue(cmdPath);
-      mockProbeCliVersion.mockResolvedValue('copilot 1.0.26');
+      mockProbeCliVersionDetailed.mockResolvedValue({ version: 'copilot 1.0.26', exitCode: 0 });
 
       const result = await adapter.detect();
 
       // Trailing args are the probe's own defaults plus the injected spawner
       // (undefined here — this adapter was constructed without one).
-      expect(mockProbeCliVersion).toHaveBeenCalledWith(
+      expect(mockProbeCliVersionDetailed).toHaveBeenCalledWith(
         cmdPath,
         undefined,
         undefined,
@@ -164,17 +164,25 @@ describe('CopilotSdkAdapter', () => {
       expect(result.cli).toBe('copilot');
       expect(result.installed).toBe(false);
       expect(result.messagingMode).toBe('queue');
-      expect(mockProbeCliVersion).not.toHaveBeenCalled();
+      expect(mockProbeCliVersionDetailed).not.toHaveBeenCalled();
     });
 
     it('still reports installed when version probe returns undefined', async () => {
       mockResolveCliPath.mockResolvedValue('/usr/local/bin/copilot');
-      mockProbeCliVersion.mockResolvedValue(undefined);
+      mockProbeCliVersionDetailed.mockResolvedValue({ version: undefined, exitCode: null });
 
       const result = await adapter.detect();
 
       expect(result.installed).toBe(true);
       expect(result.version).toBeUndefined();
+    });
+
+    it('rejects a shim whose version command exits 127', async () => {
+      mockResolveCliPath.mockResolvedValue('/usr/bin/copilot');
+      mockProbeCliVersionDetailed.mockResolvedValue({ version: 'GitHub Copilot CLI was not found', exitCode: 127 });
+      const result = await adapter.detect();
+      expect(result.installed).toBe(false);
+      expect(result.path).toBeUndefined();
     });
   });
 
