@@ -27,6 +27,12 @@ Interactive review findings in the Electron renderer (`libs/frontend/review-runs
 - [x] Fix commit: the `cli-engine` list order is corrected. Targeted run of `review-markdown`, `review-rpc` and `rpc-surface` specs in `review-core`, `rpc-handlers`, `cli-engine`: 3 suites, 8 + 48 + 18 tests passed. `npm run verify -- -t lint,typecheck -p review-core,rpc-handlers,cli-engine`: 6 tasks succeeded.
 - [x] Independent code-logic review (Claude subagent; code by Codex lanes): REVISE with 2 Serious defects, fixed in this branch (`.ptah/specs/TASK_2026_902_c4d8/code-logic-review.md`).
 - [x] Re-review of the fix round (second Claude subagent, `code-logic-rereview.md`): REVISE. The title compare used the raw title against the escaped published heading, so a title with markdown characters never matched. Fixed: the handler compares `escapeText(title)` with the full heading, exact. This last correction has spec coverage but no third review.
+- [x] Review fixes of the 4 `PtahCode` threads (`07c24dafc`, `a81c6693b`, `70ddebddd`): `npm run verify -- -p review-core,rpc-handlers,review-github`: lint, typecheck and test passed (6 + 3 tasks).
+- [x] Full run on the 7 changed projects (`review-core`, `review-github`, `review-contracts`, `rpc-handlers`, `review-runs-ui`, `cli-engine`, `ptah-electron`): lint + typecheck passed (14 tasks); 15 of 17 test tasks passed. `ptah-electron` failed in `container.smoke.spec.ts` (the new `PUBLICATION_PORT` token was not registered in the minimal container), fixed in `70ddebddd`. `rpc-handlers` failed one time on a file that changed during the run.
+- [x] `npm run verify -- -p ptah-electron,rpc-handlers` at `70ddebddd`: lint + typecheck (4 tasks) and test (12 tasks) passed.
+- [x] `tools/degradation-audit/check-degradation.ts`: exit 0, no baseline raised.
+- [x] Independent review of the fix diff (Codex lane, `review-fixes-lane-review.md`): CHANGES REQUIRED with 3 findings. The wrong-thread risk and the redaction of operator text are fixed. The symlink check in the shared `resolveWorkspaceFilePath` is not changed (follow-up, decision 20).
 - [ ] Visual review in Electron (dark + light).
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
+

@@ -1,12 +1,16 @@
-# Next exact step (PR #1040 review fixes)
+# Next exact step
 
-State: the fixes for the 4 review threads are in the worktree
-`.claude-worktrees/feat-review-findings-interactive-2-56b1620c572f` (branch `feat/review-findings-interactive-2`).
+State at 2026-11-10:
 
-1. `npm run verify -- -p review-github,review-core,review-contracts,rpc-handlers,review-runs-ui`, then `-p ptah-electron,cli-engine`.
-2. Read `review-fixes-lane-review.md` (Glm lane) and fix confirmed defects.
-3. `npx ts-node --transpile-only tools/degradation-audit/check-degradation.ts`.
-4. Commit in the foreground, then `git push origin HEAD:feat/review-findings-interactive` (fast-forward only).
-5. Reply on the 4 threads with the fix commit and resolve them:
-   PRRT_kwDOPngTds61mQkZ (1), PRRT_kwDOPngTds61mQkc (2), PRRT_kwDOPngTds61mQkh (3), PRRT_kwDOPngTds61mQkk (4).
-6. Update the PR body test plan with the real results. Watch CI. Send the final `ptah_agent_report`.
+- The 4 review threads of PR #1040 are fixed, pushed to `feat/review-findings-interactive`,
+  answered and resolved. Fix commits: `07c24dafc`, `a81c6693b`, `e1711378d`, `70ddebddd`.
+- Scoped verify passed at `70ddebddd` (`npm run verify -- -p ptah-electron,rpc-handlers`).
+- The PR body test plan has the real results.
+
+Next step:
+
+1. Watch the CI jobs of the PR head with `gh pr checks 1040`.
+2. Read new review comments. Fix confirmed defects with new commits.
+3. Open follow-up (decision 20): add a real-path check for symlinks and junctions to
+   `libs/backend/rpc-handlers/src/lib/handlers/workspace-file-path.ts`, with a spec.
+4. Open item: the visual review in Electron (dark and light) did not run.
