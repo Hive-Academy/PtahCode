@@ -238,6 +238,8 @@ export class AuthRpcHandlers {
       sentryService,
       configManager,
       authSecretsService,
+      sdkAdapter,
+      scopeResolver,
       providerModels,
       connectionChecks,
       invalidateAuthStatusCache,

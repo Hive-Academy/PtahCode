@@ -438,13 +438,9 @@ export class PtahCliRegistry {
       configs.push(newConfig);
       await this.configPersistence.saveConfigs(configs);
     } catch (err) {
-      // degradation-audit: optional-capability - best-effort rollback of the
-      // API key written above after the config save failed; the original error
-      // is rethrown below regardless, so the failure is never hidden from the
-      // caller — only a failed cleanup attempt is swallowed.
       if (source === 'instance' && apiKey !== undefined) {
         await this.authSecrets.deleteProviderKey(`${PTAH_CLI_KEY_PREFIX}.${id}`).catch(() => {
-          /* rollback best-effort */
+          this.logger.error('[PtahCliRegistry] Could not remove instance credential after configuration save failed', new Error('Credential cleanup failed'));
         });
       }
       throw err;
@@ -505,7 +501,7 @@ export class PtahCliRegistry {
       existing.providerId,
       updates.credentialSource ?? existing.credentialSource,
     );
-    if (source === 'instance' && updates.credentialSource === 'instance' && !apiKey?.trim()) {
+    if (source === 'instance' && existing.credentialSource === 'shared-connection' && !apiKey?.trim()) {
       throw new SdkError('An API key is required for an instance credential');
     }
     if (source === 'shared-connection' && apiKey !== undefined) {

@@ -337,12 +337,31 @@ describe('ProvidersConnectionSetupService', () => {
     });
     it('refreshes the active Claude API route when a connect-only draft replaces its key', async () => {
       persistedAuthMethod.set('apiKey');
+      if (route.data) route = { ...route, data: { ...route.data, driverProviderId: 'anthropic' } };
       await service.verifyDraft({ probeId: 'p1', providerId: 'anthropic', authMode: 'apiKey' });
       call.mockClear();
       await service.connectProvider(draft({ providerId: 'anthropic', activation: 'connect-only' }), context, hooks);
-      expect(methods()).toContain('auth:saveSettings');
-      expect(methods()).not.toContain('auth:setDirectAnthropicApiKey');
-      expect(call).toHaveBeenCalledWith('auth:saveSettings', expect.objectContaining({ authMethod: 'apiKey' }), undefined);
+      expect(methods()).toContain('auth:setDirectAnthropicApiKey');
+      expect(methods()).not.toContain('auth:saveSettings');
+    });
+
+    it('blocks connect-only replacement when the effective route is unavailable', async () => {
+      route = { status: 'error', data: null, error: 'Could not load this section. Retry.' };
+      persistedAuthMethod.set('apiKey');
+      await service.verifyDraft({ probeId: 'p1', providerId: 'anthropic', authMode: 'apiKey' });
+      call.mockClear();
+      await service.connectProvider(draft({ providerId: 'anthropic' }), context, hooks);
+      expect(methods()).toEqual([]);
+      expect(commits.commit().status).toBe('blocked');
+    });
+
+    it('blocks connect-only replacement when the route is unresolved', async () => {
+      if (route.data) route = { ...route, data: { ...route.data, route: 'unresolved', driverProviderId: null } };
+      await service.verifyDraft({ probeId: 'p1', providerId: 'anthropic', authMode: 'apiKey' });
+      call.mockClear();
+      await service.connectProvider(draft({ providerId: 'anthropic' }), context, hooks);
+      expect(methods()).toEqual([]);
+      expect(commits.commit().status).toBe('blocked');
     });
 
     it('blocks an unverified draft without writing', async () => {
@@ -410,9 +429,17 @@ describe('ProvidersConnectionSetupService', () => {
   describe('Claude API key deletion', () => {
     it('blocks deletion while Claude API is the active route without RPCs', async () => {
       persistedAuthMethod.set('apiKey');
+      if (route.data) route = { ...route, data: { ...route.data, driverProviderId: 'anthropic' } };
       await service.deleteStoredKey('anthropic', context, hooks);
       expect(methods()).toEqual([]);
       expect(commits.commit()).toMatchObject({ status: 'blocked', message: 'Claude API is the main-agent route. Select another main-agent route before you delete this key.' });
+    });
+
+    it('blocks deletion when the effective route is unavailable', async () => {
+      route = { status: 'error', data: null, error: 'Could not load this section. Retry.' };
+      await service.deleteStoredKey('anthropic', context, hooks);
+      expect(methods()).toEqual([]);
+      expect(commits.commit().status).toBe('blocked');
     });
 
     it('deletes through the secret-only RPC on the subscription route', async () => {

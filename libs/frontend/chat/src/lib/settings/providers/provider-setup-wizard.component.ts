@@ -2361,7 +2361,7 @@ export class ProviderSetupWizardComponent implements OnDestroy {
       ? 'app'
       : (targets[0] ?? 'app');
     this._saveTo.set(defaultTarget);
-    this._activation.set(this.mainRouteExists() ? 'connect-only' : 'use-main-agent');
+    this._activation.set(this.verifyProviderId() === 'anthropic' || this.mainRouteExists() ? 'connect-only' : 'use-main-agent');
   }
 
   protected onCommit(): void {

@@ -1335,6 +1335,19 @@ describe('AuthRpcHandlers', () => {
       expect(status.hasApiKey).toBe(true);
     });
 
+    it('refreshes an active workspace Claude API adapter without changing auth scopes', async () => {
+      const h = makeHarness({
+        configSeed: { authMethod: 'claudeCli' },
+        workspaceOverrides: { authMethod: 'apiKey' },
+      });
+      h.handlers.register();
+      expect(await call(h, 'auth:setDirectAnthropicApiKey', { apiKey: 'new-secret' })).toEqual({ success: true });
+      expect(h.sdkAdapter.reset).toHaveBeenCalledTimes(1);
+      expect(h.scopeResolver.write).not.toHaveBeenCalled();
+      expect(h.scopeResolver.clearMoreSpecific).not.toHaveBeenCalled();
+      expect(diagnosticText(h)).not.toContain('new-secret');
+    });
+
     it('deletes only the direct secret for null', async () => {
       const h = makeHarness({ credentialsSeed: { apiKey: 'old-secret' } });
       h.handlers.register();

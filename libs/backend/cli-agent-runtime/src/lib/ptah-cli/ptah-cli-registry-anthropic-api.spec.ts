@@ -113,4 +113,23 @@ describe('Ptah CLI direct Claude API credentials', () => {
     expect(h.logger.error).toHaveBeenCalledWith(expect.any(String), expect.any(Error));
     expect(JSON.stringify(h.logger.error.mock.calls)).not.toContain('instance-key');
   });
+
+  it('accepts an unchanged instance source without replacing its existing key', async () => {
+    const h = harness();
+    const created = await h.registry.createAgent('Claude', 'anthropic-api', 'instance-key', 'instance');
+    h.secrets.setProviderKey.mockClear();
+    await h.registry.updateAgent(created.id, { credentialSource: 'instance', name: 'Renamed' });
+    expect(h.configs[0]).toMatchObject({ name: 'Renamed', credentialSource: 'instance' });
+    expect(h.secrets.setProviderKey).not.toHaveBeenCalled();
+  });
+
+  it('reports failed cleanup without logging a secret or masking the save error', async () => {
+    const h = harness();
+    h.persistence.saveConfigs.mockRejectedValueOnce(new Error('configuration failed'));
+    h.secrets.deleteProviderKey.mockRejectedValueOnce(new Error('secret value must not appear'));
+    await expect(h.registry.createAgent('Claude', 'anthropic-api', 'instance-key', 'instance')).rejects.toThrow('configuration failed');
+    expect(h.logger.error).toHaveBeenCalledWith(expect.any(String), expect.any(Error));
+    expect(JSON.stringify(h.logger.error.mock.calls)).not.toContain('secret value must not appear');
+    expect(JSON.stringify(h.logger.error.mock.calls)).not.toContain('instance-key');
+  });
 });

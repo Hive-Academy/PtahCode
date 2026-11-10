@@ -1210,6 +1210,20 @@ describe('ProviderSetupWizardComponent', () => {
       expect(checked?.getAttribute('data-testid')).toBe('wizard-activation-connect-only');
     });
 
+    it('defaults Claude API to connect-only even before a main route is reported', async () => {
+      const fixture = createComponent({ mainRouteExists: false }, verifyEcho());
+      selectProvider(fixture, 'anthropic');
+      click(fixture, 'wizard-continue');
+      typeInto(fixture, 'wizard-api-key', 'sk-ant-test');
+      click(fixture, 'wizard-continue');
+      click(fixture, 'wizard-verify-start');
+      await Promise.resolve(); await Promise.resolve(); fixture.detectChanges();
+      click(fixture, 'wizard-continue');
+      click(fixture, 'wizard-continue');
+      const checked = fixture.nativeElement.querySelector<HTMLInputElement>('input[name="wizard-activation"]:checked');
+      expect(checked?.getAttribute('data-testid')).toBe('wizard-activation-connect-only');
+    });
+
     it('allows Claude API connect only, preserves an explicit choice, and emits that choice', async () => {
       const fixture = createComponent({ mainRouteExists: true }, verifyEcho());
       selectProvider(fixture, 'anthropic');

@@ -546,12 +546,14 @@ export class ProvidersConnectionSetupService implements MessageHandler {
         },
       });
     }
-    // A key replacement while Claude API is ALREADY the main-agent route must refresh the adapter, so it
-    // goes through auth:saveSettings (same route) even when the wizard draft says connect-only.
-    const activation: typeof draft.activation =
-      draft.providerId === 'anthropic' && !!draft.credential?.value.trim() && this.authState.persistedAuthMethod() === 'apiKey'
-        ? 'use-main-agent'
-        : draft.activation;
+    const activation = draft.activation;
+    const currentRoute = hooks.route();
+    if (draft.providerId === 'anthropic' && activation === 'connect-only' &&
+        draft.credential?.value.trim() &&
+        (currentRoute.status !== 'ready' || !currentRoute.data || currentRoute.data.route === 'unresolved' || !currentRoute.data.driverProviderId)) {
+      this.commits.block(['Connection credential'], 'Load the main-agent route before saving the Claude API key.');
+      return true;
+    }
     if (draft.providerId === 'anthropic' && draft.credential?.value.trim() && activation === 'connect-only') {
       operations.push({
         fields: ['Connection credential'],
@@ -840,9 +842,16 @@ export class ProvidersConnectionSetupService implements MessageHandler {
     hooks: ProvidersConnectionSetupHooks,
   ): Promise<boolean> {
     if (this.commits.commit().status === 'saving') return Promise.resolve(false);
-    if (providerId === 'anthropic' && this.authState.persistedAuthMethod() === 'apiKey') {
-      this.commits.block(['Stored key'], CLAUDE_API_DELETE_BLOCKED);
-      return Promise.resolve(true);
+    if (providerId === 'anthropic') {
+      const route = hooks.route();
+      if (route.status !== 'ready' || !route.data || route.data.route === 'unresolved' || !route.data.driverProviderId) {
+        this.commits.block(['Stored key'], 'Load the main-agent route before deleting the Claude API key.');
+        return Promise.resolve(true);
+      }
+      if (route.data.driverProviderId === 'anthropic') {
+        this.commits.block(['Stored key'], CLAUDE_API_DELETE_BLOCKED);
+        return Promise.resolve(true);
+      }
     }
     return this.commits.run(
       [

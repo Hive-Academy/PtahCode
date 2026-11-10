@@ -9,6 +9,8 @@ import {
   DEFAULT_PROVIDER_ID,
   getAllAnthropicProviders,
 } from '@ptah-extension/agent-sdk';
+import type { SdkAgentAdapter } from '@ptah-extension/agent-sdk';
+import type { WorkspaceScopeResolver } from '@ptah-extension/settings-core';
 import type { ProviderModelsService } from '@ptah-extension/auth-providers';
 import type {
   AuthApiKeyStatusEntry,
@@ -31,6 +33,8 @@ export interface ApiKeyMethodsDeps {
   readonly sentryService: SentryService;
   readonly configManager: ConfigManager;
   readonly authSecretsService: IAuthSecretsService;
+  readonly sdkAdapter: SdkAgentAdapter;
+  readonly scopeResolver: WorkspaceScopeResolver;
   readonly providerModels: ProviderModelsService;
   readonly connectionChecks: ConnectionCheckRecorder;
   readonly invalidateAuthStatusCache: () => void;
@@ -60,6 +64,10 @@ export class ApiKeyMethods {
           await authSecretsService.deleteCredential('apiKey');
         } else {
           await authSecretsService.setCredential('apiKey', parsed.data.apiKey);
+          // Refresh only an active Claude API route; preserve all auth settings and scope overrides.
+          if (this.deps.scopeResolver.read<string>('authMethod', true) === 'apiKey') {
+            await this.deps.sdkAdapter.reset();
+          }
         }
         return { success: true };
       } catch (error: unknown) {
