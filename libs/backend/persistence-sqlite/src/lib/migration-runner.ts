@@ -48,6 +48,8 @@ export class SqliteMigrationRunner {
     private readonly logger: Logger,
     private readonly backupService?: IBackupService,
     private readonly archiveRoot?: string,
+    /** Monotonic clock in ms. Injectable so specs are deterministic. */
+    private readonly now: () => number = () => performance.now(),
   ) {}
 
   /**
@@ -75,6 +77,7 @@ export class SqliteMigrationRunner {
     if (migrations.length === 0) {
       return { appliedVersions: [], skippedVersions: [], finalVersion: 0 };
     }
+    const bookkeepingStart = this.now();
     this.ensureBookkeepingTable();
     const sorted = [...migrations].sort((a, b) => a.version - b.version);
     const bundledMaxVersion = sorted[sorted.length - 1].version;
@@ -90,22 +93,12 @@ export class SqliteMigrationRunner {
     }
 
     const pending = sorted.filter((m) => !applied.has(m.version));
+    this.logger.info('[persistence-sqlite] migration bookkeeping', {
+      durationMs: roundMs(this.now() - bookkeepingStart),
+      pendingVersions: pending.map((m) => m.version),
+    });
     if (pending.length > 0 && this.backupService) {
-      let backupDest: string | null = null;
-      try {
-        backupDest = await this.backupService.backup('pre-migration');
-      } catch (err: unknown) {
-        this.logger.warn(
-          '[persistence-sqlite] pre-migration backup failed (non-fatal)',
-          { error: err instanceof Error ? err.message : String(err) },
-        );
-      }
-      if (backupDest !== null) {
-        await this.backupService.rotate(
-          'pre-migration',
-          KEEP_BY_KIND['pre-migration'],
-        );
-      }
+      await this.backupBeforeMigration(this.backupService, pending.length);
     }
 
     const appliedNow: number[] = [];
@@ -143,8 +136,13 @@ export class SqliteMigrationRunner {
         skippedNow.push(migration.version);
         continue;
       }
+      const migrationStart = this.now();
       this.applyOne(migration, vecLoaded);
       appliedNow.push(migration.version);
+      this.logger.info('[persistence-sqlite] migration applied', {
+        version: migration.version,
+        durationMs: roundMs(this.now() - migrationStart),
+      });
     }
 
     if (vecLoaded) {
@@ -177,6 +175,49 @@ export class SqliteMigrationRunner {
       skippedVersions: skippedNow,
       finalVersion,
     };
+  }
+
+  /**
+   * Take the pre-migration backup, then rotate. Logs start/settle lines so a
+   * blocked main loop is visible: `mainWaitExcessMs` is the wall time main
+   * waited beyond the worker-reported duration.
+   */
+  private async backupBeforeMigration(
+    backupService: IBackupService,
+    pendingCount: number,
+  ): Promise<void> {
+    this.logger.info('[persistence-sqlite] pre-migration backup requested', {
+      pendingCount,
+    });
+    const start = this.now();
+    let backupDest: string | null = null;
+    try {
+      backupDest = await backupService.backup('pre-migration');
+    } catch (err: unknown) {
+      this.logger.warn(
+        '[persistence-sqlite] pre-migration backup failed (non-fatal)',
+        { error: err instanceof Error ? err.message : String(err) },
+      );
+    }
+    const mainWaitMs = roundMs(this.now() - start);
+    const workerDurationMs =
+      backupDest === null ? null : (backupService.lastWorkerDurationMs ?? null);
+    this.logger.info('[persistence-sqlite] pre-migration backup settled', {
+      succeeded: backupDest !== null,
+      mainWaitMs,
+      workerDurationMs,
+      mainWaitExcessMs:
+        workerDurationMs === null
+          ? null
+          : roundMs(mainWaitMs - workerDurationMs),
+    });
+    if (backupDest === null) return;
+    const rotateStart = this.now();
+    this.logger.info('[persistence-sqlite] pre-migration rotation started');
+    await backupService.rotate('pre-migration', KEEP_BY_KIND['pre-migration']);
+    this.logger.info('[persistence-sqlite] pre-migration rotation finished', {
+      durationMs: roundMs(this.now() - rotateStart),
+    });
   }
 
   /** Returns the set of versions already recorded in `schema_migrations`. */
@@ -352,8 +393,10 @@ export class SqliteMigrationRunner {
       .get('skill_candidates_vec') !== undefined) {
       throw new Error('SqliteMigrationRunner: skill_candidates_vec exists but sqlite-vec is unavailable; archive preflight failed');
     }
+    const archiveStart = this.now();
     const receipt = archiveSkillPipeline(this.db, this.archiveRoot);
     this.logger.info('[persistence-sqlite] verified skill pipeline archive', {
+      durationMs: roundMs(this.now() - archiveStart),
       archivePath: receipt.archivePath,
       reused: receipt.maintenance?.reused ?? false,
       pruned: receipt.maintenance?.pruned ?? 0,
@@ -379,6 +422,7 @@ export class SqliteMigrationRunner {
       const isPureVec =
         migration.requiresVec === true && migration.sql === undefined;
       const needsApplyRecord = isPureVec && !recordedApplied.has(version);
+      const vecStart = this.now();
       this.db.exec('BEGIN IMMEDIATE');
       try {
         this.db.exec(migration.vecSql);
@@ -411,6 +455,7 @@ export class SqliteMigrationRunner {
       }
       this.logger.info(
         `[persistence-sqlite] applied deferred vec index for migration ${version} (${migration.name})`,
+        { durationMs: roundMs(this.now() - vecStart) },
       );
     }
     const finalApplied = this.readAppliedVersions();
@@ -423,6 +468,10 @@ export class SqliteMigrationRunner {
       .prepare('DELETE FROM schema_migrations_vec_pending WHERE version = ?')
       .run(version);
   }
+}
+
+function roundMs(value: number): number {
+  return Math.round(value * 100) / 100;
 }
 
 function stringifyError(err: unknown): string {

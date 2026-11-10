@@ -70,6 +70,7 @@ import type {
   BackupRequest,
   BackupResponse,
 } from './integrity/integrity-worker-protocol';
+import { selectBackupsToDelete, selectOwnStagingRoots } from './backup-retention';
 import { DailyBackupPendingMarker } from './daily-backup-pending-marker';
 
 /** Discriminated kind for backup filenames and rotation policy. */
@@ -146,7 +147,6 @@ export const BACKUP_WORKER_BUDGET_MS = 20 * 60 * 1000;
  */
 const DEGRADE_NO_WORKER = 'database.backup.no-worker-factory';
 const DEGRADE_NOT_TAKEN = 'database.backup.not-taken';
-const STAGING_SUFFIX = /\.[0-9a-f]{8}\.tmp(?:-wal|-shm)?$/;
 
 /** Collision-resistant compact timestamp safe as a filename on Windows/macOS. */
 function compactIso(): string {
@@ -160,7 +160,7 @@ function compactIso(): string {
  *
  * - `pre-migration: 1` — each copy is a full image of the database (1.28 GB on
  *   a real install), and only the newest one is a useful rollback point.
- * - `daily: 7` — one week of daily copies.
+ * - `daily: 3` — three days of daily copies.
  * - `reset: 2` — bounded since TASK_2026_440; it used to be unbounded, so every
  *   user-initiated reset left one more full copy behind forever.
  *
@@ -168,7 +168,7 @@ function compactIso(): string {
  */
 const KEEP_BY_KIND: Readonly<Record<BackupKind, number>> = {
   'pre-migration': 1,
-  daily: 7,
+  daily: 3,
   reset: 2,
 };
 
@@ -221,6 +221,12 @@ export interface IBackupService {
   backup(kind: BackupKind): Promise<string | null>;
 
   /**
+   * Worker-reported duration (ms) of the most recent completed backup, or
+   * `null`/absent when none completed. Diagnostic only.
+   */
+  readonly lastWorkerDurationMs?: number | null;
+
+  /**
    * Run the daily backup an earlier process started but never finished (it
    * quit while the backup was deferred, or died mid-copy), then rotate daily
    * backups. A no-op returning `null` when none is owed. Hosts call it once at
@@ -242,6 +248,9 @@ export interface IBackupService {
 
 @injectable()
 export class SqliteBackupService implements IBackupService {
+  /** Worker-reported duration of the last completed backup (diagnostics). */
+  lastWorkerDurationMs: number | null = null;
+
   constructor(
     @inject(PERSISTENCE_TOKENS.SQLITE_DB_PATH) private readonly dbPath: string,
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
@@ -600,6 +609,7 @@ export class SqliteBackupService implements IBackupService {
         return null;
       }
 
+      this.lastWorkerDurationMs = response.durationMs;
       this.logger.info('[persistence-sqlite] backup completed', {
         kind,
         dest,
@@ -659,23 +669,64 @@ export class SqliteBackupService implements IBackupService {
   private async discardArtifact(staging: string, kind: BackupKind): Promise<void> {
     for (const target of [staging, `${staging}-wal`, `${staging}-shm`]) {
       try {
+        const { size } = await fs.promises.lstat(target);
         await fs.promises.unlink(target);
-        this.logger.debug('[persistence-sqlite] backup artifact discarded', {
+        this.logger.info('[persistence-sqlite] backup artifact discarded', {
           kind,
-          staging: target,
+          file: path.basename(target),
+          sizeBytes: size,
         });
       } catch (error: unknown) {
         if (this.isMissingFile(error)) continue;
         this.logger.warn(
           '[persistence-sqlite] backup artifact cleanup failed (non-fatal) — a stale file may take a rotation slot',
-          { kind, staging: target, error: error instanceof Error ? error.message : String(error) },
+          { kind, file: path.basename(target), errorClass: error instanceof Error ? 'Error' : 'UnknownError' },
         );
       }
     }
   }
 
+  /** A bounded code for logs. An fs error message can hold an absolute path. */
+  private errorCodeOf(error: unknown): string {
+    if (typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string') {
+      return error.code;
+    }
+    return error instanceof Error ? 'Error' : 'UnknownError';
+  }
+
   private isMissingFile(error: unknown): boolean {
-    return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+    return (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') ||
+      (error instanceof Error && /^ENOENT[: ]/.test(error.message));
+  }
+
+  /**
+   * Delete one rotated backup. Logs base name and size only. A failed stat or
+   * unlink logs a warning and lets rotation continue.
+   */
+  private async deleteRotatedBackup(
+    dir: string,
+    file: string,
+    kind: BackupKind,
+  ): Promise<void> {
+    const target = path.join(dir, file);
+    try {
+      const { size } = await fs.promises.stat(target);
+      await fs.promises.unlink(target);
+      this.logger.info('[persistence-sqlite] backup rotated (deleted)', {
+        file,
+        sizeBytes: size,
+        kind,
+      });
+    } catch (error: unknown) {
+      this.logger.warn(
+        '[persistence-sqlite] backup rotation delete failed (non-fatal)',
+        {
+          file,
+          kind,
+          errorCode: this.errorCodeOf(error),
+        },
+      );
+    }
   }
 
   /**
@@ -692,9 +743,9 @@ export class SqliteBackupService implements IBackupService {
    * sidecar is `<file>.sqlite-wal` / `-shm`, which fails `endsWith('.sqlite')`
    * and so can never take a rotation slot from a real backup, whoever left it
    * behind. Mixed old and new names remain chronological across different
-   * seconds. For the same second only, the old `...SSZ.sqlite` form sorts newer
-   * than the new `...SSmmmZ-<hex>.sqlite` form; this compatibility quirk is
-   * documented and intentionally does not add parsing to rotation.
+   * seconds and inside the same second: `selectBackupsToDelete` normalizes
+   * the old `...SSZ.sqlite` stamp and the new `...SSmmmZ-<hex>.sqlite` stamp
+   * to one comparable form before it sorts.
    *
    * The daily-backup callers invoke `rotate()` unconditionally, so the stale
    * staging sweep also runs after a failed attempt.
@@ -710,58 +761,44 @@ export class SqliteBackupService implements IBackupService {
         if (this.isMissingFile(error)) return;
         throw error;
       }
-      const stagingRoots = new Set(
-        entries
-          .filter((file) => file.startsWith(prefix) && STAGING_SUFFIX.test(file))
-          .map((file) =>
-            path.join(dir, file.replace(/(?:-wal|-shm)$/, '')),
-          ),
-      );
+      const stagingRoots = selectOwnStagingRoots({
+        entries, dir, prefix, kind, liveDbPath: this.dbPath,
+      }).map((file) => path.join(dir, file));
+      const entryNames = new Set(entries);
       const staleBefore = Date.now() - 2 * BACKUP_WORKER_BUDGET_MS;
       for (const staging of stagingRoots) {
         const group = await Promise.all(
-          [staging, `${staging}-wal`, `${staging}-shm`].map(async (target) => {
+          [staging, `${staging}-wal`, `${staging}-shm`]
+            .filter((target) => entryNames.has(path.basename(target)))
+            .map(async (target) => {
             try {
               return { target, stat: await fs.promises.stat(target) };
             } catch (error: unknown) {
               if (this.isMissingFile(error)) return null;
               throw error;
             }
-          }),
+            }),
         );
         const existing = group.filter((entry) => entry !== null);
         if (existing.length > 0 && existing.every((entry) => entry.stat.mtimeMs < staleBefore)) {
           await this.discardArtifact(staging, kind);
           this.logger.debug('[persistence-sqlite] stale staging swept', {
             kind,
-            staging,
+            file: path.basename(staging),
           });
         }
       }
 
-      if (keep <= 0) return;
-      const files = entries
-        .filter((f) => f.startsWith(prefix) && f.endsWith('.sqlite'))
-        .sort() // lexicographic = ISO timestamp order, ascending
-        .reverse(); // newest first
-      const toDelete = files.slice(keep);
+      const toDelete = selectBackupsToDelete({
+        entries,
+        dir,
+        prefix,
+        kind,
+        keep,
+        liveDbPath: this.dbPath,
+      });
       for (const file of toDelete) {
-        try {
-          await fs.promises.unlink(path.join(dir, file));
-          this.logger.debug('[persistence-sqlite] backup rotated (deleted)', {
-            file,
-            kind,
-          });
-        } catch (error: unknown) {
-          this.logger.warn(
-            '[persistence-sqlite] backup rotation delete failed (non-fatal)',
-            {
-              file,
-              kind,
-              error: error instanceof Error ? error.message : String(error),
-            },
-          );
-        }
+        await this.deleteRotatedBackup(dir, file, kind);
       }
     } catch (error: unknown) {
       this.logger.warn(

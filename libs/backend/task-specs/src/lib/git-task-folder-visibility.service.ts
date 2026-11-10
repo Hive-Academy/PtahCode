@@ -182,6 +182,7 @@ export class GitTaskFolderVisibility implements ITaskFolderVisibility {
   async listBeyondWorkspace(
     workspaceRoot: string,
   ): Promise<readonly string[]> {
+    const started = performance.now();
     const root = normalizeWorkspaceRoot(workspaceRoot);
 
     const cached = this.cache.get(root);
@@ -191,6 +192,11 @@ export class GitTaskFolderVisibility implements ITaskFolderVisibility {
 
     const names = new Set<string>();
     const specDirs = await this.worktreeSpecDirs(root);
+    const discoveryMs = performance.now() - started;
+    const siblingStarted = performance.now();
+    let siblingScanMs = 0;
+    let fetchMs = 0;
+    let lsTreeMs = 0;
 
     // `null` means the directory is not a git worktree at all, so both the
     // per-worktree scan and the `origin/main` read below are unreachable.
@@ -203,16 +209,31 @@ export class GitTaskFolderVisibility implements ITaskFolderVisibility {
         for (const name of await this.scanSpecsDir(dir)) names.add(name);
       }
 
+      siblingScanMs = performance.now() - siblingStarted;
+
       // Best effort, and deliberately unchecked: a failed fetch still leaves a
       // usable (if stale) `origin/main` for `ls-tree` to read.
-      await this.fetchOriginMain(root);
+      const fetchStarted = performance.now();
+      try { await this.fetchOriginMain(root); }
+      finally { fetchMs = performance.now() - fetchStarted; }
+      const treeStarted = performance.now();
       for (const name of await this.remoteSpecFolderNames(root)) {
         names.add(name);
       }
+      lsTreeMs = performance.now() - treeStarted;
     }
 
     const result = [...names];
     this.cache.set(root, { at: Date.now(), names: result });
+    const totalMs = performance.now() - started;
+    const metrics = {
+      gitDiscoveryMs: Math.round(discoveryMs), siblingScanMs: Math.round(siblingScanMs),
+      fetchMs: Math.round(fetchMs), lsTreeMs: Math.round(lsTreeMs),
+      totalMs: Math.round(totalMs), siblings: specDirs?.length ?? 0, folders: names.size,
+    };
+    if (totalMs >= 2000) this.logger.warn('[task-specs] visibility timing', metrics);
+    else if (totalMs >= 250) this.logger.info('[task-specs] visibility timing', metrics);
+    else this.logger.debug('[task-specs] visibility timing', metrics);
     return result;
   }
 

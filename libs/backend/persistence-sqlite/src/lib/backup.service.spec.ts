@@ -1142,9 +1142,9 @@ describe('SqliteBackupService.backup — background-work governor', () => {
 // ── rotation ────────────────────────────────────────────────────────────────
 
 describe('KEEP_BY_KIND', () => {
-  it('is the one keep policy: pre-migration 1, daily 7, reset bounded', () => {
+  it('is the one keep policy: pre-migration 1, daily 3, reset bounded', () => {
     expect(KEEP_BY_KIND['pre-migration']).toBe(1);
-    expect(KEEP_BY_KIND.daily).toBe(7);
+    expect(KEEP_BY_KIND.daily).toBe(3);
     expect(KEEP_BY_KIND.reset).toBe(2);
     // No kind is unbounded.
     for (const keep of Object.values(KEEP_BY_KIND)) {
@@ -1254,6 +1254,22 @@ describe('SqliteBackupService.rotate', () => {
     for (const target of paths) expect(fs.existsSync(target)).toBe(false);
   });
 
+  it('sweeps only own stale staging names and logs each deletion by name and size', async () => {
+    const h = makeHarness();
+    const own = 'ptah.pre-migration-20250101T120000Z.sqlite.22222222.tmp';
+    const foreign = 'ptah.pre-migration-garbage.12345678.tmp';
+    seed(h.tmpDir, [own, foreign]);
+    const old = new Date(Date.now() - 2 * BACKUP_WORKER_BUDGET_MS - 60_000);
+    for (const name of [own, foreign]) fs.utimesSync(path.join(h.tmpDir, name), old, old);
+    await h.service.rotate('pre-migration', 1);
+    expect(fs.existsSync(path.join(h.tmpDir, own))).toBe(false);
+    expect(fs.existsSync(path.join(h.tmpDir, foreign))).toBe(true);
+    const removed = h.logger.entries.filter((entry) => entry.message.includes('backup artifact discarded'));
+    expect(removed).toHaveLength(1);
+    expect(removed[0].context).toMatchObject({ file: own, sizeBytes: expect.any(Number) });
+    expect(JSON.stringify(removed)).not.toContain(h.tmpDir);
+  });
+
   it('is a no-op when keep=0', async () => {
     // No kind maps to 0 in KEEP_BY_KIND any more; this pins the guard itself
     // so a caller passing a non-positive keep can never delete every backup.
@@ -1307,6 +1323,42 @@ describe('SqliteBackupService.rotate', () => {
     for (const name of names) {
       expect(fs.existsSync(path.join(h.tmpDir, name))).toBe(true);
     }
+  });
+
+  it('daily rotation keeps newest 3, spares foreign files and the live DB, logs name+size', async () => {
+    const h = makeHarness();
+    const dir = path.join(h.tmpDir, 'backups');
+    fs.mkdirSync(dir, { recursive: true });
+    const daily = [1, 2, 3, 4, 5].map((d) => `ptah-2025-01-0${d}.sqlite`);
+    const foreign = ['ptah-notes.sqlite', 'ptah-2025-01-01.sqlite-wal', 'other.txt'];
+    for (const name of [...daily, ...foreign]) {
+      fs.writeFileSync(path.join(dir, name), 'twelve bytes');
+    }
+
+    await h.service.rotate('daily', KEEP_BY_KIND.daily);
+
+    expect(fs.readdirSync(dir).sort()).toEqual(
+      [...daily.slice(2), ...foreign].sort(),
+    );
+    expect(fs.existsSync(path.join(h.tmpDir, 'ptah.sqlite'))).toBe(true);
+    const logged = h.logger.entries.filter((e) =>
+      e.message.includes('backup rotated (deleted)'),
+    );
+    expect(logged.map((e) => e.context)).toEqual([
+      { file: 'ptah-2025-01-02.sqlite', sizeBytes: 12, kind: 'daily' },
+      { file: 'ptah-2025-01-01.sqlite', sizeBytes: 12, kind: 'daily' },
+    ]);
+    expect(JSON.stringify(logged)).not.toContain(h.tmpDir);
+  });
+
+  it('rotation never deletes the live database even with a look-alike prefix', async () => {
+    const h = makeHarness();
+    fs.writeFileSync(path.join(h.tmpDir, 'ptah.reset-20250101T120000Z.sqlite'), 'x');
+    await h.service.rotate('reset', 1);
+    await h.service.rotate('pre-migration', 1);
+    expect(fs.readFileSync(path.join(h.tmpDir, 'ptah.sqlite'), 'utf8')).toBe(
+      'source-database-placeholder',
+    );
   });
 
   it('is non-fatal when the backup directory does not exist', async () => {

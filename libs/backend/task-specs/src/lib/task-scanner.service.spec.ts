@@ -28,6 +28,28 @@ function validTask(id: string): string {
 }
 
 describe('TaskScannerService', () => {
+  it('yields to the event loop during a many-carrier scan without changing result order', async () => {
+    const fs = createMockFileSystemProvider();
+    for (let index = 0; index < 120; index++) {
+      const id = `TASK_2026_${String(index).padStart(3, '0')}`;
+      await fs.writeFile(carrier(id), validTask(id));
+    }
+    const scanner = new TaskScannerService(fs, makeLogger());
+    let completed = false;
+    let timerBeforeCompletion = false;
+    // An immediate, not a timer: a 0 ms timer needs 1 ms of wall time and is
+    // not sure to be due when the scan first releases the loop.
+    setImmediate(() => {
+      timerBeforeCompletion = !completed;
+    });
+    const result = await scanner.scan(ROOT);
+    completed = true;
+    expect(timerBeforeCompletion).toBe(true);
+    expect(result.tasks.map((task) => task.id)).toEqual(
+      Array.from({ length: 120 }, (_, index) => `TASK_2026_${String(index).padStart(3, '0')}`),
+    );
+  });
+
   it('returns a clean no-op when .ptah/specs is missing', async () => {
     const fs = createMockFileSystemProvider();
     const scanner = new TaskScannerService(fs, makeLogger());
