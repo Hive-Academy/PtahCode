@@ -26,7 +26,7 @@ import {
   SqliteTaskIndexStore,
   InMemoryTaskIndexStore,
 } from '../task-index.store';
-import { TaskIndexService } from '../task-index.service';
+import { TASK_INDEX_CLOCK, TaskIndexService } from '../task-index.service';
 import { TASK_INDEX_NOTIFIER_TOKEN } from '../task-index.port';
 import { TASK_FOLDER_VISIBILITY_TOKEN } from '../task-folder-visibility.port';
 import {
@@ -83,6 +83,13 @@ export function registerTaskSpecsServices(
         ? c.resolve(SqliteTaskIndexStore)
         : c.resolve(InMemoryTaskIndexStore),
     ),
+  });
+
+  // Monotonic clock for the rebuild phase timings. Registered explicitly so
+  // every constructor token has one composition-root binding; tests may
+  // replace it with a fake clock.
+  container.register<() => number>(TASK_INDEX_CLOCK, {
+    useValue: () => performance.now(),
   });
 
   // Index service — lazy start + watcher + debounce + onDidChangeIndex.
