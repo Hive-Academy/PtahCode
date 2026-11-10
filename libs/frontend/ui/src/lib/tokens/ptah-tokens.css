@@ -1,0 +1,126 @@
+/* Ptah design tokens. Custom properties only, no Tailwind directives.
+   Rules and value table: .ptah/specs/TASK_2026_926_6b1f/foundation-tokens.md
+   Values come from the DaisyUI theme variables and the --surface-* / --elev-*
+   tokens in apps/ptah-extension-webview/src/styles.css, so each theme works.
+   The selector list matches the --surface-* block so a token that reads one
+   of them resolves on the same element. */
+
+:root,
+[data-theme] {
+  /* Spacing scale (4 px base) */
+  --ptah-space-1: 0.25rem;
+  --ptah-space-2: 0.5rem;
+  --ptah-space-3: 0.75rem;
+  --ptah-space-4: 1rem;
+  --ptah-space-6: 1.5rem;
+  --ptah-space-8: 2rem;
+  --ptah-space-12: 3rem;
+
+  /* White-space rules */
+  --ptah-gap-inline: var(--ptah-space-2);
+  --ptah-gap-label: var(--ptah-space-1);
+  --ptah-gap-controls: var(--ptah-space-2);
+  --ptah-gap-field: var(--ptah-space-4);
+  --ptah-gap-group: var(--ptah-space-6);
+  --ptah-gap-section: var(--ptah-space-8);
+  --ptah-gap-heading: var(--ptah-space-3);
+  --ptah-page-gutter: var(--ptah-space-6);
+  --ptah-surface-pad: var(--ptah-space-4);
+  --ptah-dialog-pad: var(--ptah-space-6);
+
+  /* Control dimensions */
+  --ptah-control-h-xs: 1.5rem;
+  --ptah-control-h-sm: 2rem;
+  --ptah-control-h-md: 2.5rem;
+  --ptah-control-h-field: 3.25rem;
+  --ptah-control-px-xs: var(--ptah-space-2);
+  --ptah-control-px: var(--ptah-space-3);
+  --ptah-control-px-md: var(--ptah-space-4);
+
+  /* Icon sizes: one for each control height */
+  --ptah-icon-xs: 0.75rem;
+  --ptah-icon-sm: 0.875rem;
+  --ptah-icon-md: 1rem;
+
+  /* Type roles: size, leading, weight */
+  --ptah-text-page-title-size: 1.25rem;
+  --ptah-text-page-title-leading: 1.75rem;
+  --ptah-text-page-title-weight: 600;
+  --ptah-text-section-title-size: 1rem;
+  --ptah-text-section-title-leading: 1.5rem;
+  --ptah-text-section-title-weight: 600;
+  --ptah-text-group-title-size: 0.875rem;
+  --ptah-text-group-title-leading: 1.25rem;
+  --ptah-text-group-title-weight: 600;
+  --ptah-text-body-size: 0.875rem;
+  --ptah-text-body-leading: 1.25rem;
+  --ptah-text-body-weight: 400;
+  --ptah-text-label-size: 0.75rem;
+  --ptah-text-label-leading: 1rem;
+  --ptah-text-label-weight: 500;
+  --ptah-text-hint-size: 0.75rem;
+  --ptah-text-hint-leading: 1rem;
+  --ptah-text-hint-weight: 400;
+  --ptah-text-caption-size: 0.6875rem;
+  --ptah-text-caption-leading: 1rem;
+  --ptah-text-caption-weight: 500;
+  --ptah-text-code-size: 0.8125rem;
+  --ptah-text-code-leading: 1.25rem;
+  --ptah-text-code-weight: 400;
+
+  /* Shape and border (from the theme) */
+  --ptah-radius-control: var(--rounded-btn);
+  --ptah-radius-surface: var(--rounded-box);
+  --ptah-radius-chip: var(--rounded-badge);
+  --ptah-border-width: 1px;
+  --ptah-border-color: var(--surface-border);
+  --ptah-border-color-strong: var(--surface-border-strong);
+
+  /* Focus ring: an outline with an outline offset (the offset is transparent).
+     The shared glass focus color when glass is on, else the theme primary. */
+  --ptah-focus-ring-width: 2px;
+  --ptah-focus-ring-offset: 2px;
+  --ptah-focus-ring-color: var(--glass-focus, oklch(var(--p)));
+
+  /* Elevation: the current surface shadows. Level 3 uses the glass overlay
+     shadow when glass is on. */
+  --ptah-elevation-0: none;
+  --ptah-elevation-1: var(--elev-shadow);
+  --ptah-elevation-2: var(--elev-shadow-raised);
+  --ptah-elevation-3: var(--glass-shadow-overlay, var(--elev-shadow-raised));
+
+  /* Motion */
+  --ptah-duration-fast: 120ms;
+  --ptah-duration-base: var(--ptah-motion-out);
+  --ptah-duration-slow: var(--ptah-motion-in);
+  --ptah-ease-standard: var(--ptah-ease-gentle-in);
+  --ptah-ease-emphasis: var(--ptah-ease-soft);
+
+  /* State ink (text and icons) */
+  --ptah-state-ok: var(--state-ink-done, oklch(var(--su)));
+  --ptah-state-warn: var(--state-ink-need, oklch(var(--wa)));
+  --ptah-state-err: var(--state-ink-err, oklch(var(--er)));
+  --ptah-state-info: var(--state-ink-run, oklch(var(--in)));
+
+  /* Layers: the values overlays use today. Nothing above the CDK overlay. */
+  --ptah-z-raised: 30;
+  --ptah-z-menu: 50;
+  --ptah-z-dialog: 60;
+  --ptah-z-overlay: 1000;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root,
+  [data-theme] {
+    --ptah-duration-fast: 0.01ms;
+    --ptah-duration-base: 0.01ms;
+    --ptah-duration-slow: 0.01ms;
+  }
+}
+
+@media (max-width: 639.98px) {
+  :root,
+  [data-theme] {
+    --ptah-page-gutter: var(--ptah-space-4);
+  }
+}
