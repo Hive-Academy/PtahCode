@@ -45,7 +45,7 @@ interface GallerySectionLink {
       backLabel="Back to chat"
       (back)="goToChat()"
     >
-      <ptah-ui-status-badge status status="online" label="Electron preview" />
+      <ptah-ui-status-badge status="online" label="Electron preview" />
       <div
         actions
         role="group"
