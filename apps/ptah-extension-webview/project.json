@@ -156,6 +156,24 @@
       "options": {
         "command": "tsc --noEmit --project apps/ptah-extension-webview/tsconfig.app.json"
       }
+    },
+    "typecheck-templates": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": [
+        "default",
+        "^production",
+        {
+          "externalDependencies": [
+            "typescript",
+            "@angular/compiler-cli",
+            "@angular/core"
+          ]
+        }
+      ],
+      "options": {
+        "command": "ngc --noEmit --project apps/ptah-extension-webview/tsconfig.app.json"
+      }
     }
   }
 }

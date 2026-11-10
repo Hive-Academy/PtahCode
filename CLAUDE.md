@@ -8,6 +8,10 @@ agent, every subagent and every CLI lane. Repeat them in any task prompt you han
 - Verify with `npm run verify`. It runs `nx affected -t lint test typecheck --base=main`.
   - Only some projects or targets: `npm run verify -- -p A,B` / `npm run verify -- -t test -p A`.
   - Extra Nx or Jest flags go after a second `--`: `npm run verify -- -p A -- --testPathPatterns=foo`.
+  - `typecheck` does not compile Angular templates. After a template change run
+    `npm run verify -- -t typecheck-templates -p ptah-extension-webview` (`ngc --noEmit`, about
+    90 s and 2 GB). It also checks the templates of each lib that the renderer imports. It is not in
+    the default target list.
 - `npm run verify` takes a slot of a machine-wide FIFO counting lock first, so at most 3 heavy
   checks run at a time across all sessions, lanes and worktrees. Another check starts only while
   at least 5 GB of memory is free and the newest check has run for 30 s. A check on an empty lock
