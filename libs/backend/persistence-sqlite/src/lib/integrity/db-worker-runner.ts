@@ -99,6 +99,10 @@ export class DbWorkerRunner {
     options: DbWorkerRunOptions<TResponse>,
   ): DbWorkerRun<TResponse> {
     const { label, request, budgetMs, narrow, signal } = options;
+    const errorContext = (error: unknown): Record<string, string> =>
+      label === 'table-size'
+        ? { errorClass: error instanceof Error ? 'Error' : 'UnknownError' }
+        : { error: error instanceof Error ? error.message : String(error) };
 
     // Assigned synchronously inside the executor below — the Promise
     // constructor runs it before `new Promise` returns — so the handle this
@@ -123,9 +127,7 @@ export class DbWorkerRunner {
         } catch (error: unknown) {
           this.logger.debug(
             `[persistence-sqlite] ${label} worker kill failed`,
-            {
-              error: error instanceof Error ? error.message : String(error),
-            },
+            errorContext(error),
           );
         }
         resolve({ aborted, response });
@@ -143,9 +145,7 @@ export class DbWorkerRunner {
       try {
         worker = factory.spawn();
       } catch (error: unknown) {
-        this.logger.warn(`[persistence-sqlite] ${label} worker spawn failed`, {
-          error: error instanceof Error ? error.message : String(error),
-        });
+        this.logger.warn(`[persistence-sqlite] ${label} worker spawn failed`, errorContext(error));
         settle(null);
         return;
       }
@@ -172,9 +172,7 @@ export class DbWorkerRunner {
       try {
         worker.postMessage(request);
       } catch (error: unknown) {
-        this.logger.warn(`[persistence-sqlite] ${label} request post failed`, {
-          error: error instanceof Error ? error.message : String(error),
-        });
+        this.logger.warn(`[persistence-sqlite] ${label} request post failed`, errorContext(error));
         settle(null);
       }
     });

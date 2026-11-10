@@ -22,6 +22,12 @@ import 'reflect-metadata';
 
 const mockCallOrder: string[] = [];
 
+jest.mock('./table-size-report-start', () => ({
+  startTableSizeReportAfterMigrations: jest.fn(() => {
+    mockCallOrder.push('tableSizeReport.start');
+  }),
+}));
+
 jest.mock('./plugin-activation', () => ({
   initPluginLoader: jest.fn(() => {
     mockCallOrder.push('initPluginLoader');
@@ -47,7 +53,9 @@ jest.mock('@ptah-extension/thoth-runtime', () => ({
       cronScheduler: null,
     };
   }),
-  startThothCron: jest.fn(async () => undefined),
+  startThothCron: jest.fn(async () => {
+    mockCallOrder.push('startThothCron');
+  }),
   createActivityEmitter: jest.fn(() => jest.fn()),
 }));
 
@@ -140,6 +148,16 @@ afterEach(() => {
 });
 
 describe('Electron heavy boot — install-scope migration trigger', () => {
+  it('starts table size reporting after the final heavy boot phase', async () => {
+    const { container } = makeHarness(null);
+    await driveBoot(container);
+    expect(mockCallOrder.indexOf('tableSizeReport.start')).toBeGreaterThan(
+      mockCallOrder.indexOf('startThothCron'),
+    );
+    expect(mockCallOrder.indexOf('tableSizeReport.start')).toBeGreaterThan(
+      mockCallOrder.indexOf('reconcileHarness'),
+    );
+  });
   it('starts the migration after the window and before refreshUserLayer', async () => {
     const run = jest.fn(async () => {
       mockCallOrder.push('migration.run');

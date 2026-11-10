@@ -319,7 +319,7 @@ describe('activateThoth — runtime tier', () => {
     await (backupCall?.[1] as () => Promise<unknown>)();
 
     expect(doubles.backupService.backup).toHaveBeenCalledWith('daily');
-    expect(doubles.backupService.rotate).toHaveBeenCalledWith('daily', 7);
+    expect(doubles.backupService.rotate).toHaveBeenCalledWith('daily', 3);
   });
 
   it('resumes a daily backup the previous run did not finish, once at start', async () => {

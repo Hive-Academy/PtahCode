@@ -26,6 +26,7 @@ import type {
   UsageSummaryParams,
 } from '@ptah-extension/shared';
 import { isAuthorizedWorkspace } from '../utils/workspace-authorization';
+import { InFlightCoalescer } from './in-flight-coalescer';
 
 const METHOD = 'analytics:spendSummary';
 
@@ -37,6 +38,9 @@ export class AnalyticsRpcHandlers {
   static readonly METHODS = [
     METHOD,
   ] as const satisfies readonly RpcMethodName[];
+
+  /** One scan per (range, workspace) at a time; no caching after settle. */
+  private readonly inFlight = new InFlightCoalescer<UsageSummary>();
 
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
@@ -81,6 +85,16 @@ export class AnalyticsRpcHandlers {
       );
     }
 
+    const key = JSON.stringify([request.range, workspace]);
+    // A caller that joins gets the time window of the first caller. The join
+    // window is 5 s, so the windows differ only at a UTC day boundary.
+    return this.inFlight.run(key, () => this.runSummary(request, workspace));
+  }
+
+  private async runSummary(
+    request: UsageSummaryParams,
+    workspace: string,
+  ): Promise<UsageSummary> {
     const budget = new AbortController();
     const timer = setTimeout(() => budget.abort(), USAGE_SUMMARY_BUDGET_MS);
     timer.unref?.();

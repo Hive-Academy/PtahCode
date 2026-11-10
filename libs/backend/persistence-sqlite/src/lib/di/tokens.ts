@@ -48,6 +48,8 @@ export const PERSISTENCE_TOKENS = {
    * Electron wires it to the main-loop watchdog's hang breadcrumbs.
    */
   SQLITE_SLOW_STATEMENT_SINK: Symbol.for('PtahSqliteSlowStatementSink'),
+  /** SqliteTableSizeReportService — one-shot read-only `dbstat` size report. */
+  SQLITE_TABLE_SIZE_REPORT: Symbol.for('PtahSqliteTableSizeReport'),
   /** SqliteIntegrityService — owns the due-decision and the worker dispatch. */
   SQLITE_INTEGRITY_SERVICE: Symbol.for('PtahSqliteIntegrityService'),
   /**

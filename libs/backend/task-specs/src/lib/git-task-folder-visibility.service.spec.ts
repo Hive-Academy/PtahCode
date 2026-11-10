@@ -133,14 +133,15 @@ function makeService(
 
   const { exec, calls, subcommands } = fakeExec(outcomes);
   const degradation = { report: jest.fn() };
+  const logger = makeLogger();
   const service = new GitTaskFolderVisibility(
     fs,
-    makeLogger(),
+    logger,
     options.spawner ?? null,
     degradation as unknown as DegradationReporter,
     exec,
   );
-  return { service, fs, calls, subcommands, degradation, siblingSpecs };
+  return { service, fs, calls, subcommands, degradation, siblingSpecs, logger };
 }
 
 // ---------------------------------------------------------------------------
@@ -206,6 +207,34 @@ describe('specDirsFromWorktreeList', () => {
 // ---------------------------------------------------------------------------
 
 describe('GitTaskFolderVisibility — all three steps succeed', () => {
+  it('logs one timing line after fetch and ls-tree', async () => {
+    const { service, logger } = makeService({
+      worktree: { stdout: WORKTREE_LIST }, fetch: {}, 'ls-tree': { stdout: LS_TREE },
+    });
+    await service.listBeyondWorkspace(ROOT);
+    const calls = [
+      ...jest.mocked(logger.debug).mock.calls,
+      ...jest.mocked(logger.info).mock.calls,
+      ...jest.mocked(logger.warn).mock.calls,
+    ];
+    const timings = calls.filter(([message]) => message === '[task-specs] visibility timing');
+    expect(timings).toHaveLength(1);
+    expect(timings[0][1]).toEqual(expect.objectContaining({
+      gitDiscoveryMs: expect.any(Number), siblingScanMs: expect.any(Number),
+      fetchMs: expect.any(Number), lsTreeMs: expect.any(Number),
+      totalMs: expect.any(Number), siblings: 2, folders: 3,
+    }));
+  });
+  it('still returns the folders when the timing log throws', async () => {
+    const { service, logger } = makeService({
+      worktree: { stdout: WORKTREE_LIST }, fetch: {}, 'ls-tree': { stdout: LS_TREE },
+    });
+    const fail = (): never => { throw new Error('output channel closed'); };
+    jest.mocked(logger.debug).mockImplementation(fail);
+    jest.mocked(logger.info).mockImplementation(fail);
+    jest.mocked(logger.warn).mockImplementation(fail);
+    await expect(service.listBeyondWorkspace(ROOT)).resolves.toHaveLength(3);
+  });
   it('unions the sibling worktree and origin/main, and never returns its own specs dir twice', async () => {
     const { service, subcommands } = makeService({
       worktree: { stdout: WORKTREE_LIST },
