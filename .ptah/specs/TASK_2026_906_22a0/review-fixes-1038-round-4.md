@@ -99,3 +99,39 @@ in `b3da01f39`. No conflict. The merge changed no file in
   `review-fixes-1038.md`) did not change.
 - CodeRabbit is not mandatory while its limit is active. No
   `@coderabbitai review` comment was posted.
+
+## Round 5: CodeRabbit thread `PRRT_kwDOPngTds61q_gS` (Minor)
+
+- Claim: with more than 100 open sessions `GitWindowScopeSchema.safeParse`
+  fails in `git-window-sync.service.ts`, the scope is null, and a detached
+  child keeps an old scope with no message. The claim was checked against the
+  code and it is valid: `open` was not bounded and the effect skipped a null
+  scope.
+- Choice: both parts.
+  - Bounded payload (`4dd63f219`): `boundedOpenSessions` keeps at most 100
+    sessions. The active tab and the pinned tab come first, then the sessions
+    of the resolved root or the workspace root, then the others. The limit of
+    100 stays the IPC bound.
+  - No silent failure (`4dd63f219`): a rejected scope while detached is logged
+    with the injected `LoggingService` (issue paths and codes only), the main
+    window shows `Git scope is unavailable`, and the child gets the
+    unavailable scope (`unresolved: true`, null roots), not the old one.
+- Codex review of `4dd63f219`: CHANGES_REQUIRED. Major: a failed publication
+  of the unavailable scope was not sent again. Minor: Focus cleared the
+  error.
+- Correction (`8ba4199a5`): the retry timer and Focus publish the desired
+  scope, which is the unavailable scope while the parse is rejected. The
+  error stays shown after an accepted unavailable scope.
+- Tests (`git-window-sync.service.spec.ts`): two "(round 5)" tests (150
+  sessions keep `P`, `A`, `SAME` first with length 100. A rejected scope is
+  logged, sent as unavailable, and recovers). Two "(round 6)" tests (retry
+  of a failed unavailable publication with no other scope change. Focus keeps
+  the error and sends the unavailable scope).
+- Verification (head `8ba4199a5`): `npm run verify -- -p chat` exit code 0.
+  Lint and typecheck: 0 errors (199 warnings that were there before). Tests:
+  355 suites passed, 6324 tests passed, 2 skipped. Only `chat` files changed.
+- Codex review of `8ba4199a510dd85fc2756869042ea2aeaf0c73df`: APPROVED, no
+  finding (`code-review-head.md`, Round 4). The commits after it change only
+  files in `.ptah/specs`.
+- Known limit: the 101st and later sessions of the same root are not in
+  `open`. They get no lease and no push, and they get no added authority.
