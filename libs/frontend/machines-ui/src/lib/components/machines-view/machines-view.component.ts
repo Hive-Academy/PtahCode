@@ -178,7 +178,7 @@ const CLOCK_TICK_MS = 1000;
                   (opened)="showSession($event)"
                   (backToList)="narrowDetailOpen.set(false)"
                 />
-              } @else if (!store.loading() && store.machines().length === 0) {
+              } @else if (!store.loading() && store.machines().length === 0 && !store.error()) {
                 <ptah-machines-intro (add)="openAdd()" />
               } @else if (store.loading()) {
                 <div

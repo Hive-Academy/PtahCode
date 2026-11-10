@@ -84,7 +84,7 @@ test('machines inbox', async ({ app, ui, page }) => {
     const list = document.querySelector('ptah-remote-session-list');
     if (list) ng.getComponent(list).error?.set(null);
     const now = Date.now();
-    const versions = { local: { ptah: '1.42.0', protocol: { min: 7, max: 7 } }, remote: { ptah: '1.42.0', protocol: { min: 7, max: 7 } } };
+    const versions = { local: { ptahVersion: '1.42.0', protocol: { min: 7, max: 7 } }, remote: { ptahVersion: '1.42.0', protocol: { min: 7, max: 7 } } };
     store['_machines'].set([
       { machineId: 'm-build', alias: 'build', displayName: 'build-01', state: 'connected', lastSeenAt: now, versions },
       { machineId: 'm-laptop', alias: 'laptop', displayName: 'laptop', state: 'reconnecting', lastSeenAt: now - 20_000 },
