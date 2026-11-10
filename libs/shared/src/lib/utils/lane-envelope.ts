@@ -14,6 +14,8 @@
  * sender and must never be used as an identity or to authorize anything.
  */
 
+import { LANE_STOP_REASONS, type LaneStopReason } from '../types/agent-process.types';
+
 export type LaneEnvelopeKind = 'report' | 'completed';
 
 export interface LaneEnvelope {
@@ -28,6 +30,7 @@ export interface LaneEnvelope {
   readonly status?: string;
   /** `verdict` attribute of a completion envelope. */
   readonly verdict?: string;
+  readonly stopReason?: LaneStopReason;
   /** The text between the opening and the closing tag, trimmed. */
   readonly body: string;
   /** Set for a `<cross-session-message>` from another Claude Code session. */
@@ -126,6 +129,7 @@ export function parseLaneEnvelope(text: string): LaneEnvelope | null {
   if (!agentId || !agent || !cli) return null;
   const status = attributes.get('status');
   const verdict = attributes.get('verdict');
+  const stopReason = LANE_STOP_REASONS.find(reason => reason === attributes.get('stop-reason'));
   return {
     kind: TAG_KIND[match[1]],
     agentId,
@@ -133,6 +137,7 @@ export function parseLaneEnvelope(text: string): LaneEnvelope | null {
     cli,
     ...(status ? { status } : {}),
     ...(verdict ? { verdict } : {}),
+    ...(stopReason ? { stopReason } : {}),
     body: match[3].trim(),
   };
 }

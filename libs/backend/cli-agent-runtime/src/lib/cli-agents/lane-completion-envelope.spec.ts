@@ -29,6 +29,7 @@ describe('lane completion envelope budget stops', () => {
     'explains %s and provides a bounded progress pointer', (stopReason) => {
       const text = buildLaneCompletionEnvelope({ ...base, stopReason,
         budgetLimit: '100 weighted tokens', progressPointer: 'ptah_agent_read agent_id=agent-1 tail=200' });
+      expect(text).toContain(`stop-reason="${stopReason}"`);
       expect(text).toContain('Stopped by Ptah (agent budget), not by the user');
       expect(text).toContain('limit: 100 weighted tokens');
       expect(text).toContain('CLI Session ID: real-cli-session');

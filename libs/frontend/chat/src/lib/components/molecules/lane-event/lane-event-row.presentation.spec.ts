@@ -72,6 +72,26 @@ describe('parseLaneCompletion', () => {
 });
 
 describe('deriveLaneEventPresentation', () => {
+  it.each([
+    ['budget', 'delivered', 'Budget stop', 'need', 'Stopped by budget after 26s'],
+    ['duration', 'no-deliverable', 'Budget stop', 'need', 'Stopped by budget after 26s'],
+    ['telemetry-unavailable', 'unverified', 'Budget stop', 'need', 'Stopped by budget after 26s'],
+    ['repeat-call', 'delivered', 'Stopped', 'neutral', 'Stopped after 26s'],
+    [undefined, 'delivered', 'Stopped', 'neutral', 'Stopped after 26s'],
+    ['usage-limit', 'failed', 'Failed', 'err', 'Failed after 26s'],
+  ] as const)('labels stopped lane (%s, %s)', (stopReason, verdict, label, tone, summary) => {
+    const result = deriveLaneEventPresentation(row({ events: [{ kind: 'completed', status: 'stopped',
+      stopReason, verdict, body: row().events[1].body
+        .replace('finished: completed', 'finished: stopped')
+        .replace('44 bytes', verdict === 'no-deliverable' ? 'MISSING' : '44 bytes'),
+      timestamp: 2, messageId: 'c' }] }));
+    expect(result.chip).toMatchObject({ label, tone });
+    expect(result.summary).toBe(summary);
+    expect(result.stats.map(stat => stat.compact)).toContain(verdict === 'no-deliverable' ? '0/1 files' : '1/1 files');
+    if (verdict === 'no-deliverable') expect(result.stats.map(stat => stat.compact)).toContain('No deliverable');
+    if (verdict === 'unverified') expect(result.stats.map(stat => stat.compact)).toContain('Unverified');
+  });
+
   it('shows Running only for a live report row without a later completion', () => {
     const report = row({ liveLane: true, events: [{ kind: 'report', body: 'Still working', timestamp: 1, messageId: 'r' }] });
     expect(deriveLaneEventPresentation(report, null, false, 'running').chip.label).toBe('Running');

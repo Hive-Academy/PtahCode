@@ -1,9 +1,10 @@
-import type { LaneEnvelopeKind } from '@ptah-extension/shared';
+import type { LaneEnvelopeKind, LaneStopReason } from '@ptah-extension/shared';
 
 export interface LaneEventItem {
   readonly kind: LaneEnvelopeKind;
   readonly status?: string;
   readonly verdict?: string;
+  readonly stopReason?: LaneStopReason;
   readonly body: string;
   readonly timestamp: number;
   readonly messageId: string;

@@ -1018,8 +1018,8 @@ export class LaneCompletionNotifier {
     const resetDate = info.stopResetAt === undefined ? undefined : new Date(info.stopResetAt);
     const reset = resetDate && Number.isFinite(resetDate.getTime())
       ? ` reset-at="${resetDate.toISOString()}"` : '';
-    return body.replace('<agent-lane-completed ',
-      `<agent-lane-completed stop-reason="${info.stopReason}"${reset} `);
+    return reset ? body.replace('<agent-lane-completed ',
+      `<agent-lane-completed${reset} `) : body;
   }
 
   /**

@@ -55,6 +55,7 @@ export function groupLaneEvents(
       kind: envelope.kind,
       status: envelope.status,
       verdict: envelope.verdict,
+      stopReason: envelope.stopReason,
       body: envelope.body,
       timestamp: message.timestamp,
       messageId: message.id,
