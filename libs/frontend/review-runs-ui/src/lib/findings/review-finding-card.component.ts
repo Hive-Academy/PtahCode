@@ -8,7 +8,7 @@ import type { FindingTriage, ReviewFindingView } from './review-finding-view';
   template: `
     <article class="surface-1 rounded-lg border border-base-300 p-4 space-y-3" [attr.aria-label]="view().title">
       <div class="flex flex-wrap items-center gap-2 text-xs">
-        @if (view().severity === 'Critical' || view().severity === 'Major') { <ptah-status-badge [status]="view().severity === 'Critical' ? 'failed' : 'needs-review'" [label]="view().severity" /> }
+        @if (view().severity === 'Critical' || view().severity === 'Major') { <ptah-ui-status-badge [status]="view().severity === 'Critical' ? 'failed' : 'needs-review'" [label]="view().severity" /> }
         @else { <span class="badge badge-sm" [class.badge-outline]="view().severity === 'Minor'" [class.badge-ghost]="view().severity === 'Nitpick'">{{ view().severity }}</span> }
         <span class="badge badge-ghost badge-xs">{{ view().lens }}</span>
         <span>{{ (view().confidence * 100).toFixed(0) }}% confidence</span>

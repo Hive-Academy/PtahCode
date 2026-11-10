@@ -52,6 +52,53 @@ function addChild(
 }
 
 describe('SessionChildRegistry', () => {
+  describe('succession', () => {
+    it('replaces a live child without consuming another slot and preserves links', () => {
+      const registry = new SessionChildRegistry();
+      addChild(registry, 'a', { sdkSessionId: 'sdk-a' });
+      const pair = registry.succeed('a', record('b', { sdkSessionId: 'sdk-b' }), 'continued', 't1');
+      expect(registry.liveCount()).toBe(1);
+      expect(registry.reserveSlot(1)).toBeNull();
+      expect(pair.predecessor).toMatchObject({ terminalStatus: 'handed-off', succeededBy: 'b', endReason: 'continued', endedAt: 't1' });
+      expect(pair.successor).toMatchObject({ succeeds: 'a', successionCount: 1 });
+      expect(registry.get('sdk-b')?.childSessionId).toBe('b');
+      expect(registry.markEnded('a', 'stopped', 'late')).toBe(pair.predecessor);
+    });
+
+    it('rejects unknown or ended predecessors and a duplicate successor id', () => {
+      const registry = new SessionChildRegistry();
+      addChild(registry, 'a');
+      expect(() => registry.succeed('missing', record('b'), 'x')).toThrow();
+      expect(() => registry.succeed('a', record('a'), 'x')).toThrow();
+      registry.markEnded('a', 'stopped', 'x');
+      expect(() => registry.succeed('a', record('b'), 'x')).toThrow();
+    });
+
+    it('reverts the pair and cleans the successor SDK index', () => {
+      const registry = new SessionChildRegistry();
+      addChild(registry, 'a');
+      registry.succeed('a', record('b', { sdkSessionId: 'sdk-b' }), 'x');
+      expect(registry.revertSuccession('a', 'wrong')).toBeUndefined();
+      expect(registry.revertSuccession('a', 'b')).toMatchObject({ childSessionId: 'a' });
+      expect(registry.get('a')?.terminalStatus).toBeUndefined();
+      expect(registry.get('a')?.succeededBy).toBeUndefined();
+      expect(registry.get('b')).toBeUndefined();
+      expect(registry.get('sdk-b')).toBeUndefined();
+      expect(registry.liveCount()).toBe(1);
+      expect(registry.resolveLatest('a')?.childSessionId).toBe('a');
+    });
+
+    it('resolves a three-child chain from tab and SDK ids', () => {
+      const registry = new SessionChildRegistry();
+      addChild(registry, 'a', { sdkSessionId: 'sdk-a' });
+      registry.succeed('a', record('b'), 'x');
+      registry.succeed('b', record('c'), 'x');
+      expect(registry.resolveLatest('a')?.childSessionId).toBe('c');
+      expect(registry.resolveLatest('sdk-a')?.childSessionId).toBe('c');
+      expect(registry.get('c')?.successionCount).toBe(2);
+      expect(registry.resolveLatest('missing')).toBeUndefined();
+    });
+  });
   describe('slot reservation', () => {
     it('refuses the second of two racing reservations when the cap is 1', () => {
       const registry = new SessionChildRegistry();

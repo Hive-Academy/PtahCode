@@ -13,8 +13,9 @@ const CHECKED_ITEMS: readonly string[] = [
 ];
 
 /**
- * The Machines surface with no machine yet (design 4.1): what remote
- * machines are, Add machine, and the list of checks a machine must pass.
+ * The Machines page's detail pane with no machine yet (design 4.1): the
+ * empty-state copy of the approved option A, "Add machine", and the list of
+ * checks a machine must pass.
  */
 @Component({
   selector: 'ptah-machines-intro',
@@ -26,12 +27,13 @@ const CHECKED_ITEMS: readonly string[] = [
       class="mx-auto flex max-w-[52ch] flex-col items-center gap-3 p-8 text-center"
       data-testid="machines-empty"
     >
-      <h2 class="text-base font-semibold text-base-content">
-        Control Ptah on your other machines
+      <h2 class="text-lg font-semibold tracking-tight text-base-content">
+        No machines yet
       </h2>
       <p class="text-sm text-base-content-muted">
-        Ptah reaches each machine through your own SSH login, so
-        nothing is opened on your network.
+        Add a machine to run sessions on a remote workspace. Ptah reaches each
+        machine through your own SSH login, so nothing is opened on your
+        network.
       </p>
       <button
         type="button"
@@ -39,11 +41,7 @@ const CHECKED_ITEMS: readonly string[] = [
         data-testid="machines-empty-add"
         (click)="add.emit()"
       >
-        <lucide-angular
-          [img]="PlusIcon"
-          class="h-4 w-4"
-          aria-hidden="true"
-        />
+        <lucide-angular [img]="PlusIcon" class="h-4 w-4" aria-hidden="true" />
         Add machine
       </button>
       <details class="text-left text-xs text-base-content-muted">
@@ -52,10 +50,7 @@ const CHECKED_ITEMS: readonly string[] = [
         >
           What is checked?
         </summary>
-        <ol
-          class="mt-2 list-decimal pl-5"
-          data-testid="machines-checked"
-        >
+        <ol class="mt-2 list-decimal pl-5" data-testid="machines-checked">
           @for (item of checkedItems; track item) {
             <li>{{ item }}</li>
           }

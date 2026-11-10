@@ -409,6 +409,7 @@ describe('ChatStreamBroadcaster.streamEventsToWebview — session teardown', () 
     expect(h.sdkAdapter.endSessionIfTokenMatches).toHaveBeenCalledWith(
       SESSION_ID,
       'T1',
+      'provider-error',
     );
     expect(h.webviewManager.broadcastMessage).toHaveBeenCalledWith(
       MESSAGE_TYPES.CHAT_SESSION_ENDED, { tabId: TAB_ID, sessionId: SESSION_ID },
@@ -432,6 +433,7 @@ describe('ChatStreamBroadcaster.streamEventsToWebview — session teardown', () 
     expect(h.sdkAdapter.endSessionIfTokenMatches).toHaveBeenCalledWith(
       SESSION_ID,
       'T1',
+      'user-stop',
     );
   });
 
@@ -478,6 +480,7 @@ describe('ChatStreamBroadcaster.streamEventsToWebview — session teardown', () 
     expect(h.sdkAdapter.endSessionIfTokenMatches).toHaveBeenCalledWith(
       SESSION_ID,
       'T1',
+      'stream-exit',
     );
   });
 
@@ -539,6 +542,7 @@ describe('ChatStreamBroadcaster.streamEventsToWebview — session teardown', () 
     expect(h.sdkAdapter.endSessionIfTokenMatches).toHaveBeenCalledWith(
       SESSION_ID,
       'T1',
+      'user-stop',
     );
     expect(h.sdkAdapter.endSession).not.toHaveBeenCalled();
     expect(
@@ -606,7 +610,7 @@ describe('ChatStreamBroadcaster zero-event failures', () => {
     expect(h.logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('failed to start (0 events)'),
     );
-    expect(h.sdkAdapter.endSession).toHaveBeenCalledWith(SESSION_ID);
+    expect(h.sdkAdapter.endSession).toHaveBeenCalledWith(SESSION_ID, 'provider-error');
   });
 
   it('keeps the resume message for a different session id', async () => {

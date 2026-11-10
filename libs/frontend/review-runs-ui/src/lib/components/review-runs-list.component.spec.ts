@@ -12,19 +12,49 @@ function makeRun(attemptId: string, status: ReviewRun['status']): ReviewRun {
 }
 
 describe('ReviewRunsListComponent', () => {
-  it('labels contract statuses and moves keyboard focus between rows', () => {
+  it('labels and inks contract statuses, marks the open run and moves keyboard focus between rows', () => {
     TestBed.configureTestingModule({ imports: [ReviewRunsListComponent] });
     const fixture = TestBed.createComponent(ReviewRunsListComponent);
-    fixture.componentRef.setInput('runs', [makeRun('a', 'queued'), makeRun('b', 'partial'), makeRun('c', 'succeeded')]);
+    fixture.componentRef.setInput('runs', [
+      makeRun('a', 'queued'),
+      makeRun('b', 'partial'),
+      makeRun('c', 'succeeded'),
+      makeRun('d', 'failed'),
+    ]);
+    fixture.componentRef.setInput('selectedAttemptId', 'a');
     fixture.detectChanges();
-    const rows = fixture.nativeElement.querySelectorAll('[role="listitem"] button') as NodeListOf<HTMLButtonElement>;
-    expect(rows).toHaveLength(3);
-    expect(rows[1].textContent).toContain('Partial / coverage limited');
+    const rows = fixture.nativeElement.querySelectorAll('button[role="option"]') as NodeListOf<HTMLButtonElement>;
+    expect(rows).toHaveLength(4);
+    expect(rows[0].textContent).toContain('PR #428');
+    expect(rows[1].textContent).toContain('Partial coverage');
     expect(rows[2].textContent).toContain('Completed');
+    expect(rows[3].textContent).toContain('Failed · Poll');
+    expect(rows[0].querySelector('.text-state-idle')).not.toBeNull();
+    expect(rows[1].querySelector('.text-state-need')).not.toBeNull();
+    expect(rows[2].querySelector('.text-state-done')).not.toBeNull();
+    expect(rows[3].querySelector('.text-state-err')).not.toBeNull();
+    // The accessible name replaces the row text: it carries the visible status and trigger, not the raw status.
+    expect(rows[2].getAttribute('aria-label')).toBe('PR 428, Completed, Poll, Hive-Academy/PtahCode, Waiting');
+    expect(rows[0].getAttribute('aria-selected')).toBe('true');
+    expect(rows[1].getAttribute('aria-selected')).toBe('false');
     rows[0].focus();
     rows[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
     expect(document.activeElement).toBe(rows[1]);
     rows[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
     expect(document.activeElement).toBe(rows[0]);
+  });
+
+  it('keeps the failure and head-retry lines of a run', () => {
+    TestBed.configureTestingModule({ imports: [ReviewRunsListComponent] });
+    const fixture = TestBed.createComponent(ReviewRunsListComponent);
+    const failed = { ...makeRun('e', 'failed'), failure: { stage: 'checks' as const, code: 'unknown' as const, message: 'lane crashed' } };
+    const stopped = { ...makeRun('f', 'succeeded'), headRetry: { failureCount: 3, nextEligibleAt: null, automaticRetriesStopped: true } };
+    const scheduled = { ...makeRun('g', 'succeeded'), headRetry: { failureCount: 1, nextEligibleAt: '2026-11-03T12:34:00.000Z', automaticRetriesStopped: false } };
+    fixture.componentRef.setInput('runs', [failed, stopped, scheduled]);
+    fixture.detectChanges();
+    const rows = fixture.nativeElement.querySelectorAll('button[role="option"]') as NodeListOf<HTMLButtonElement>;
+    expect(rows[0].textContent).toContain('checks: lane crashed');
+    expect(rows[1].textContent).toContain('Automatic retries stopped');
+    expect(rows[2].textContent).toContain('Retry after ');
   });
 });

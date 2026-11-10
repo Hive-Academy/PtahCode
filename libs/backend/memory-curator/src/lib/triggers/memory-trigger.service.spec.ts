@@ -788,7 +788,7 @@ describe('MemoryTriggerService', () => {
       timestamp: 1,
     });
     expect(jest.getTimerCount()).toBe(1);
-    sessionEnd.endActive.current?.({ sessionId: 's1', workspaceRoot: '/ws' });
+    sessionEnd.endActive.current?.({ sessionId: 's1', workspaceRoot: '/ws', cause: 'user-stop' });
     expect(jest.getTimerCount()).toBe(0);
     jest.advanceTimersByTime(200);
     expect(curator.curate).not.toHaveBeenCalled();
@@ -1646,7 +1646,7 @@ describe('MemoryTriggerService — episode / failure / session-end', () => {
     });
     service.start();
     stop.fire(stopPayload());
-    sessionEnd.endActive.current?.({ sessionId: 's1', workspaceRoot: '/ws' });
+    sessionEnd.endActive.current?.({ sessionId: 's1', workspaceRoot: '/ws', cause: 'user-stop' });
     for (let i = 0; i < 8; i++) await Promise.resolve();
     expect(curator.pushEvent).toHaveBeenCalledWith(
       expect.objectContaining({ kind: 'session-end-trigger' }),
@@ -2614,6 +2614,7 @@ describe('MemoryTriggerService — rekeySession (TASK_2026_296)', () => {
     h.sessionEnd.endActive.current?.({
       sessionId: REAL_ID,
       workspaceRoot: '/ws',
+      cause: 'user-stop',
     });
     for (let i = 0; i < 8; i++) await Promise.resolve();
     (h.curator.curate as jest.Mock).mockClear();
@@ -2632,6 +2633,7 @@ describe('MemoryTriggerService — rekeySession (TASK_2026_296)', () => {
     h.sessionEnd.endActive.current?.({
       sessionId: TAB_ID,
       workspaceRoot: '/ws',
+      cause: 'user-stop',
     });
     for (let i = 0; i < 8; i++) await Promise.resolve();
     expect(h.curator.curate).not.toHaveBeenCalled();
@@ -2759,6 +2761,7 @@ describe('MemoryTriggerService — rekeySession (TASK_2026_296)', () => {
     h.sessionEnd.endActive.current?.({
       sessionId: TAB_ID,
       workspaceRoot: '/ws',
+      cause: 'user-stop',
     });
     for (let i = 0; i < 8; i++) await Promise.resolve();
 

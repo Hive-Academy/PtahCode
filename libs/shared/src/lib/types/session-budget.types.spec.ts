@@ -53,6 +53,7 @@ describe('SESSION_BUDGET_SETTINGS', () => {
     expect(SESSION_BUDGET_SETTINGS.tightenWindowTokens.default).toBeNull();
     expect(SESSION_BUDGET_SETTINGS.unit.default).toBe('tokens');
     expect(SESSION_BUDGET_SETTINGS.enabled.default).toBe(true);
+    expect(SESSION_BUDGET_SETTINGS.autoHandoffAtLimit.default).toBe(true);
   });
 
   it.each(entries)('%s: the default lies inside its own bounds', (_, s) => {

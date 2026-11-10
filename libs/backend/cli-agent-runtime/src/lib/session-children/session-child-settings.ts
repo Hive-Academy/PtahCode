@@ -1,5 +1,5 @@
 /**
- * The four `ptah.agentSessions.*` settings that bound child sessions
+ * The seven `ptah.agentSessions.*` settings that bound child sessions
  * (TASK_2026_584), read fresh on every `ptah_session_start`.
  *
  * The extension manifest protects only the VS Code settings UI; Electron, the
@@ -18,6 +18,9 @@ export interface SessionChildSettings {
   readonly maxConcurrent: number;
   /** Wall-clock cap per child, in minutes. */
   readonly maxRuntimeMinutes: number;
+  readonly runtimeWarnLeadMinutes: number;
+  readonly handoffGraceMinutes: number;
+  readonly maxSuccessions: number;
   /** How long a prompt outside the policy waits in the child's tab before it is denied. */
   readonly permissionDenyWindowMs: number;
   /** Bash command prefixes a child may run without asking. */
@@ -43,6 +46,18 @@ export const SESSION_CHILD_MAX_RUNTIME_MINUTES: IntegerSetting = {
   fallback: 120,
   min: 5,
   max: 720,
+};
+
+export const SESSION_CHILD_RUNTIME_WARN_LEAD_MINUTES: IntegerSetting = {
+  key: 'agentSessions.runtimeWarnLeadMinutes', fallback: 10, min: 1, max: 60,
+};
+
+export const SESSION_CHILD_HANDOFF_GRACE_MINUTES: IntegerSetting = {
+  key: 'agentSessions.handoffGraceMinutes', fallback: 15, min: 1, max: 120,
+};
+
+export const SESSION_CHILD_MAX_SUCCESSIONS: IntegerSetting = {
+  key: 'agentSessions.maxSuccessions', fallback: 8, min: 0, max: 50,
 };
 
 export const SESSION_CHILD_PERMISSION_DENY_WINDOW_MS: IntegerSetting = {
@@ -77,12 +92,14 @@ export const DEFAULT_SESSION_CHILD_BASH_ALLOWLIST: readonly string[] =
 export function readSessionChildSettings(
   workspace: Pick<IWorkspaceProvider, 'getConfiguration'>,
 ): SessionChildSettings {
+  const maxRuntimeMinutes = readInteger(workspace, SESSION_CHILD_MAX_RUNTIME_MINUTES);
   return {
     maxConcurrent: readInteger(workspace, SESSION_CHILD_MAX_CONCURRENT),
-    maxRuntimeMinutes: readInteger(
-      workspace,
-      SESSION_CHILD_MAX_RUNTIME_MINUTES,
-    ),
+    maxRuntimeMinutes,
+    runtimeWarnLeadMinutes: Math.max(1, Math.min(maxRuntimeMinutes - 1,
+      readInteger(workspace, SESSION_CHILD_RUNTIME_WARN_LEAD_MINUTES))),
+    handoffGraceMinutes: readInteger(workspace, SESSION_CHILD_HANDOFF_GRACE_MINUTES),
+    maxSuccessions: readInteger(workspace, SESSION_CHILD_MAX_SUCCESSIONS),
     permissionDenyWindowMs: readInteger(
       workspace,
       SESSION_CHILD_PERMISSION_DENY_WINDOW_MS,

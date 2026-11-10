@@ -95,6 +95,10 @@ export {
 export { redactMcpUrl, redactMcpOverrideMap } from './redact-mcp-url';
 export {
   SessionEndCallbackRegistry,
+  SESSION_END_CAUSES,
+  SessionEndCauseSchema,
+  parseSessionEndCause,
+  type SessionEndCause,
   type SessionEndCallback,
   type SessionEndPayload,
 } from './session-end-callback-registry';

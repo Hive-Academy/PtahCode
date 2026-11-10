@@ -10,6 +10,7 @@ import {
   ClaudeRpcService,
   LoggingService,
   RpcResult,
+  UnavailableGitRootsStore,
 } from '@ptah-extension/core';
 import {
   SessionId,
@@ -264,6 +265,24 @@ describe('SessionOrganizationCache', () => {
 
     expect(call).toHaveBeenCalledTimes(2);
     expect(view()?.worktreePath).toBe('/wt/b');
+  });
+
+  it('keeps a missing cached worktree excluded on a change push', async () => {
+    jest.useFakeTimers();
+    try {
+      sessions.set([row(B, organization({ worktreePath: '/wt/b' }))]);
+      cache.organizationFor(B);
+      TestBed.tick();
+      await settle();
+      const roots = TestBed.inject(UnavailableGitRootsStore);
+      roots.mark('/wt/b');
+      const until = roots.roots()[0]?.until;
+      cache.onOrganizationChanged([B]);
+      expect(roots.roots()).toEqual([{ path: '/wt/b', until }]);
+      expect(until).toBe(Date.now() + 60_000);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('ignores a change push for an id it does not cache', async () => {

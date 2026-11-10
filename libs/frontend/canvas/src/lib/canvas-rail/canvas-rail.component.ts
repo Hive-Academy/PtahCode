@@ -17,6 +17,7 @@ import { History, LucideAngularModule } from 'lucide-angular';
 import { ATTENTION_ACTION_DISPATCHER, NotificationService, type AttentionItem } from '@ptah-extension/core';
 import { DOCUMENT } from '@angular/common';
 import { TabManagerService } from '@ptah-extension/chat';
+import { RailIconActionDirective } from '@ptah-extension/ui';
 import type {
   CompactRailDensity,
   CompactRailState,
@@ -55,7 +56,7 @@ const CHIP_STATES = [
 @Component({
   selector: 'ptah-canvas-rail',
   standalone: true,
-  imports: [CanvasRailCardComponent, LucideAngularModule],
+  imports: [CanvasRailCardComponent, LucideAngularModule, RailIconActionDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block h-full min-h-0' },
   styles: [
@@ -150,10 +151,10 @@ const CHIP_STATES = [
               {{ sort() === 'recent' ? 'Recent' : 'Manual' }}
             </button>
             <button
+              ptahRailIconAction
               type="button"
-              class="btn btn-ghost btn-xs"
-              [attr.aria-pressed]="density() === 'dense'"
-              aria-label="Dense cards"
+              [active]="density() === 'dense'"
+              label="Dense cards"
               title="Dense cards"
               [attr.aria-describedby]="
                 showDensityHint() ? 'rail-density-hint' : null
@@ -164,11 +165,12 @@ const CHIP_STATES = [
             </button>
           }
           <button
+            ptahRailIconAction
             type="button"
-            class="btn btn-ghost btn-xs min-h-6 min-w-6"
+            class="min-h-6 min-w-6"
             data-testid="rail-collapse-toggle"
             [class.opacity-60]="autoCollapsed()"
-            [attr.aria-label]="collapsed() ? 'Expand rail' : 'Collapse rail'"
+            [label]="collapsed() ? 'Expand rail' : 'Collapse rail'"
             [attr.aria-expanded]="!collapsed()"
             [attr.aria-disabled]="autoCollapsed() ? 'true' : null"
             [attr.aria-describedby]="

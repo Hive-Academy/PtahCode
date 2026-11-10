@@ -93,7 +93,7 @@ export interface SessionBudgetState {
   readonly window?: SessionBudgetWindow;
   /** Present while the session-rotation advisory is in force. */
   readonly rotation?: SessionBudgetRotation;
-  /** True when `sessionBudget.autoHandoffAtLimit` is on (opt-in). */
+  /** True when `sessionBudget.autoHandoffAtLimit` is on. */
   readonly autoHandoff: boolean;
 }
 
@@ -228,7 +228,7 @@ export const SESSION_BUDGET_SETTINGS = {
   autoHandoffAtLimit: {
     key: 'sessionBudget.autoHandoffAtLimit',
     kind: 'boolean',
-    default: false,
+    default: true,
   },
 } as const satisfies {
   readonly [

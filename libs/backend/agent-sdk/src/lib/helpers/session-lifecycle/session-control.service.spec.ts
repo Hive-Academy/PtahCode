@@ -147,6 +147,31 @@ function makeCredentialBuilder() {
   return { live, builder, issueFor };
 }
 
+describe('SessionControl end causes', () => {
+  it.each([
+    [undefined, 'unknown'],
+    ['user-stop', 'user-stop'],
+  ] as const)('endSession(%s) notifies %s', async (cause, expected) => {
+    const h = makeHarness();
+    h.registry.register(KEY, makeConfig(), new AbortController());
+    await h.control.endSession(KEY_ID, cause);
+    expect(h.notifyAll).toHaveBeenCalledWith({
+      sessionId: KEY,
+      workspaceRoot: '/tmp/test',
+      cause: expected,
+    });
+  });
+
+  it('disposeAllSessions passes config-reinit to each session', async () => {
+    const h = makeHarness();
+    h.registry.register(KEY, makeConfig(), new AbortController());
+    h.registry.register('other', makeConfig(), new AbortController());
+    await h.control.disposeAllSessions('config-reinit');
+    expect(h.notifyAll).toHaveBeenCalledTimes(2);
+    expect(h.notifyAll).toHaveBeenCalledWith(expect.objectContaining({ cause: 'config-reinit' }));
+  });
+});
+
 describe('SessionControl MCP credential teardown', () => {
   it('revokes the routing tab on endSession', async () => {
     const revoke = jest.fn();
@@ -459,6 +484,7 @@ describe('SessionControl.endSessionIfTokenMatches', () => {
     expect(h.notifyAll).toHaveBeenCalledWith({
       sessionId: KEY,
       workspaceRoot: '/tmp/test',
+      cause: 'unknown',
     });
   });
 

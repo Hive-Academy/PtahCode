@@ -7,10 +7,12 @@ import {
 } from '@angular/core';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import { ModelStateService } from '@ptah-extension/core';
+import { SetupFieldDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-generation-model-picker',
   standalone: true,
+  imports: [SetupFieldDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-1">
@@ -18,7 +20,7 @@ import { ModelStateService } from '@ptah-extension/core';
         >Model for this tab</label
       >
       <select
-        class="select select-bordered select-sm w-full"
+        [ptahSetupField]="undefined"
         [id]="'generation-model-' + tabId()"
         [value]="selectedModel()"
         [disabled]="locked()"

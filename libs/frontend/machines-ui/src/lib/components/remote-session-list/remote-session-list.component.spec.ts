@@ -30,7 +30,7 @@ const SESSIONS: readonly RemoteMachineSessionSummary[] = [
     sessionId: 's1',
     title: 'Refactor RPC registry',
     state: 'running',
-    updatedAt: 1,
+    updatedAt: Date.now() - 120_000,
     provider: 'claude',
     logged: true,
   },
@@ -38,7 +38,7 @@ const SESSIONS: readonly RemoteMachineSessionSummary[] = [
     sessionId: 's2',
     title: 'Migrate settings',
     state: 'interrupted',
-    updatedAt: 2,
+    updatedAt: Date.now() - 14 * 60_000,
     provider: 'claude',
     logged: true,
     driver: { kind: 'desktop', label: 'Horus keyboard' },
@@ -99,9 +99,18 @@ describe('RemoteSessionListComponent', () => {
     const { fixture, store } = await setup();
     expect(store.loadWorkspaces).toHaveBeenCalledWith('m1');
     expect(store.loadSessions).toHaveBeenCalledWith('m1', 'w1');
-    expect(q(fixture, 'remote-session-workspace')?.textContent).toContain(
-      '~/work/ptah-extension',
-    );
+    // The approved section title has no machine name.
+    expect(
+      (fixture.nativeElement as HTMLElement)
+        .querySelector('#ptah-remote-sessions-title')
+        ?.textContent?.trim(),
+    ).toBe('Sessions');
+    // The approved row is flat: no workspace heading above the rows.
+    expect(q(fixture, 'remote-session-workspace')).toBeNull();
+    const [first] = all(fixture, 'remote-session-row');
+    expect(first?.textContent).toContain('Refactor RPC registry');
+    expect(first?.textContent).toContain('claude');
+    expect(first?.textContent).toMatch(/\b\d+ min\b/);
     expect(all(fixture, 'remote-session-row')).toHaveLength(2);
     expect(all(fixture, 'remote-session-state').map((e) => e.textContent?.trim())).toEqual([
       'Running',
@@ -112,10 +121,22 @@ describe('RemoteSessionListComponent', () => {
   it('Open buttons are named per session; a driven one says watch only', async () => {
     const { fixture, opened } = await setup();
     const buttons = all(fixture, 'remote-session-open');
-    expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual([
-      'Open session: Refactor RPC registry',
-      'Open session: Migrate settings, driven by Horus keyboard, watch only',
-    ]);
+    // The accessible name replaces the row text, so it carries the visible
+    // provider, age and state too.
+    const names = buttons.map((b) => b.getAttribute('aria-label') ?? '');
+    expect(names[0]).toMatch(
+      /^Open session: Refactor RPC registry, claude, \d+ min, Running$/,
+    );
+    expect(names[1]).toMatch(
+      /^Open session: Migrate settings, \S+, .+, Interrupted, driven by Horus keyboard, watch only$/,
+    );
+    for (const [index, button] of buttons.entries()) {
+      const state = button
+        .querySelector('[data-testid="remote-session-state"]')
+        ?.textContent?.trim();
+      expect(state).toBeTruthy();
+      expect(names[index]).toContain(state);
+    }
     expect(q(fixture, 'remote-session-driver')?.textContent?.trim()).toBe(
       'Driver: Horus keyboard',
     );

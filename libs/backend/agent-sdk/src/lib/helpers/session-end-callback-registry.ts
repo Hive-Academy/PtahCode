@@ -17,11 +17,28 @@
  */
 import { injectable, inject } from 'tsyringe';
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
+import { z } from 'zod';
+
+export const SESSION_END_CAUSES = [
+  'user-stop', 'parent-stop', 'stream-exit', 'provider-error',
+  'config-reinit', 'workspace-close', 'compaction-abort',
+  'host-shutdown', 'unknown',
+] as const;
+export const SessionEndCauseSchema = z.enum(SESSION_END_CAUSES);
+export type SessionEndCause = z.infer<typeof SessionEndCauseSchema>;
+
+/** Any value to a cause; invalid and missing values become `unknown`. */
+export function parseSessionEndCause(value: unknown): SessionEndCause {
+  const result = SessionEndCauseSchema.safeParse(value);
+  return result.success ? result.data : 'unknown';
+}
 
 /** Payload delivered to every registered session-end subscriber. */
 export interface SessionEndPayload {
   sessionId: string;
   workspaceRoot: string;
+  /** Why the session ended. `unknown` when the ending path gave none. */
+  cause: SessionEndCause;
 }
 
 /** Callback type accepted by `SessionEndCallbackRegistry.register()`. */
@@ -56,10 +73,15 @@ export class SessionEndCallbackRegistry {
    * started but NOT awaited — fire-and-forget with per-callback `.catch()`
    * so a single failure does not affect the others or the SDK.
    */
-  notifyAll(data: SessionEndPayload): void {
+  notifyAll(data: { sessionId: string; workspaceRoot: string; cause?: unknown }): void {
+    const payload: SessionEndPayload = {
+      sessionId: data.sessionId,
+      workspaceRoot: data.workspaceRoot,
+      cause: parseSessionEndCause(data.cause),
+    };
     for (const cb of this.callbacks) {
       try {
-        const result = cb(data);
+        const result = cb(payload);
         if (result instanceof Promise) {
           result.catch((err: unknown) => {
             this.logger.error(

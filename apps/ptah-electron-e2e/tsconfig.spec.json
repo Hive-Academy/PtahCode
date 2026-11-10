@@ -11,7 +11,9 @@
     "src/support/**/*.ts",
     "src/docs-screenshots/**/*.ts",
     "src/docs-videos/**/*.ts",
+    "src/visual-parity/**/*.ts",
     "playwright.config.ts",
+    "visual-parity.config.ts",
     "docs-screenshots.config.ts",
     "docs-videos.config.ts"
   ]

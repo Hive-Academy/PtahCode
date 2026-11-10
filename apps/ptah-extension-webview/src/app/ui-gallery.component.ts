@@ -7,7 +7,31 @@ import {
   PtahListRowComponent, PtahStatusBadgeComponent, PtahStatus,
   PtahStatePanelComponent, PtahPanelState, PtahToolbarComponent,
   PtahMeterComponent, SurfaceSectionComponent, SurfaceCardComponent, SurfaceTileComponent,
+  InboxLayoutComponent, InboxRowDirective,
 } from '@ptah-extension/ui';
+
+/**
+ * Demo of the shared inbox shell (TASK_2026_913). Kept in its own component
+ * scope: this file also demos the foundation `ptah-list-detail` above, and two
+ * components with the same tag cannot share one template scope (Angular throws
+ * "Multiple components match node with tagname").
+ */
+@Component({
+  selector: 'ptah-inbox-layout-demo', standalone: true,
+  imports: [InboxLayoutComponent, InboxRowDirective],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `<ptah-inbox-layout listLabel="Sample machines" detailLabel="Machine detail" [listWidth]="280">
+    <div inboxList role="listbox" aria-label="Sample machines" class="grid content-start gap-2">
+      @for (row of rows; track row) { <button ptahInboxRow [selected]="selected() === row" (click)="selected.set(row)">{{ row }}</button> }
+    </div>
+    <h3 class="text-sm font-semibold">{{ selected() }}</h3>
+    <p class="mt-2 text-xs text-base-content-muted">Sessions, approvals and the machine clock appear here. Pick another machine in the list.</p>
+  </ptah-inbox-layout>`,
+})
+class InboxLayoutDemoComponent {
+  public readonly rows = ['Atlas', 'Nimbus', 'Zephyr'];
+  public readonly selected = signal('Atlas');
+}
 
 /** Electron dev gallery: navigate the Angular router directly to `/ui-gallery`. */
 
@@ -16,11 +40,11 @@ import {
   imports: [Listbox, Option, PtahButtonDirective, PtahFieldComponent,
     PtahFieldControlDirective, PtahStatCardComponent, PtahPageHeaderComponent,
     PtahListDetailComponent, PtahListRowComponent, PtahStatusBadgeComponent,
-    PtahStatePanelComponent, PtahToolbarComponent, PtahMeterComponent, SurfaceSectionComponent, SurfaceCardComponent, SurfaceTileComponent],
+    PtahStatePanelComponent, PtahToolbarComponent, PtahMeterComponent, SurfaceSectionComponent, SurfaceCardComponent, SurfaceTileComponent, InboxLayoutDemoComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<main class="surface-0 mx-auto max-w-[1600px] p-4 md:p-6">
     <ptah-page-header title="UI foundation gallery" description="Reviews and Machines sample states" backLabel="Back to chat" (back)="goToChat()">
-      <ptah-status-badge status="online" label="Electron preview" />
+      <ptah-ui-status-badge status="online" label="Electron preview" />
       <button ptahButton actions variant="ghost" type="button">Refresh preview</button>
     </ptah-page-header>
     <div class="mt-4 grid gap-4">
@@ -50,7 +74,10 @@ import {
           <div meta class="p-5 text-xs"><h3 class="font-semibold">Run context</h3><p class="mt-2">Repository: org/api</p></div>
         </ptah-list-detail>
       </ptah-surface-section>
-      <ptah-surface-section><h2 section-header class="text-sm font-semibold">Statuses</h2><div class="flex flex-wrap gap-2">@for (status of statuses; track status) { <ptah-status-badge [status]="status" /> }</div></ptah-surface-section>
+      <ptah-surface-section><h2 section-header class="text-sm font-semibold">Inbox layout</h2>
+        <ptah-inbox-layout-demo />
+      </ptah-surface-section>
+      <ptah-surface-section><h2 section-header class="text-sm font-semibold">Statuses</h2><div class="flex flex-wrap gap-2">@for (status of statuses; track status) { <ptah-ui-status-badge [status]="status" /> }</div></ptah-surface-section>
       <ptah-surface-section><h2 section-header class="text-sm font-semibold">States</h2><div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">@for (state of states; track state) { <ptah-state-panel [state]="state" [title]="state" body="Sample review state" actionLabel="Try again" /> }</div></ptah-surface-section>
       <ptah-surface-section><h2 section-header class="text-sm font-semibold">Meters</h2><div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">@for (sample of meterSamples; track sample.label) { <ptah-meter [label]="sample.label" [value]="sample.value" [max]="sample.max" unit="%" /> }</div></ptah-surface-section>
       <ptah-surface-section><h2 section-header class="text-sm font-semibold">Surfaces</h2><div class="grid gap-4 sm:grid-cols-2"><ptah-surface-card><h3 class="text-sm font-semibold">Surface card</h3><p class="mt-2 text-xs">Review overview</p></ptah-surface-card><ptah-surface-tile [selected]="true"><h3 class="text-sm font-semibold">Selected tile</h3><p class="mt-2 text-xs">Machine summary</p></ptah-surface-tile></div></ptah-surface-section>

@@ -2407,7 +2407,7 @@ export class ChatSessionService {
       // to the composer, FIFO.
       withdrawn =
         (await this.followUpQueue?.withdrawAllForStop(sessionId)) ?? [];
-      await this.sdkAdapter.interruptSession(sessionId);
+      await this.sdkAdapter.interruptSession(sessionId, 'user-stop');
       // A user interrupt skips the Stop hook, so end the turn here (D9).
       this.turnAttribution?.onTurnAborted(sessionId);
 
@@ -2692,7 +2692,7 @@ export class ChatSessionService {
         { sessionId, tabId },
       );
       try {
-        await this.sdkAdapter.interruptSession(sessionId);
+        await this.sdkAdapter.interruptSession(sessionId, 'stream-exit');
       } catch (cleanupError) {
         this.logger.warn(
           '[RPC] Failed to end dead session record before resume',
@@ -3006,7 +3006,7 @@ export class ChatSessionService {
       { sessionId, tabId },
     );
     try {
-      await this.sdkAdapter.interruptSession(sessionId);
+      await this.sdkAdapter.interruptSession(sessionId, 'stream-exit');
     } catch (cleanupError: unknown) {
       // Non-fatal by design: the slash query re-registers under this id anyway,
       // and its own `endSession` is a second chance at the teardown. Failing the

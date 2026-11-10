@@ -350,7 +350,7 @@ describe('ChatSessionService.abortSession — durable resumable-subagent list', 
 
     await h.service.abortSession({ sessionId: SESSION });
 
-    expect(h.interruptSession).toHaveBeenCalledWith(SESSION);
+    expect(h.interruptSession).toHaveBeenCalledWith(SESSION, 'user-stop');
     expect(await durableList(h.store)).toEqual([]);
   });
 

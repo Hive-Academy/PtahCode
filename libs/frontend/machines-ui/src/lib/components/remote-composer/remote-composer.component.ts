@@ -34,7 +34,7 @@ const COMPOSER_REASON_ID = 'ptah-remote-session-reason-composer';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <form
-      class="flex flex-col gap-2 border-t border-surface-border px-5 py-3"
+      class="flex flex-col gap-2 border-t border-surface-border py-3"
       aria-label="Message"
       data-testid="remote-composer"
       (submit)="onSubmit($event)"
@@ -64,12 +64,20 @@ const COMPOSER_REASON_ID = 'ptah-remote-session-reason-composer';
         </button>
       </div>
       @if (reason(); as text) {
-        <p [id]="reasonId" class="text-xs text-base-content-muted" data-testid="remote-composer-reason">
+        <p
+          [id]="reasonId"
+          class="text-xs text-base-content-muted"
+          data-testid="remote-composer-reason"
+        >
           {{ text }}
         </p>
       }
       @if (error(); as text) {
-        <p class="text-sm text-base-content" role="alert" data-testid="remote-send-error">
+        <p
+          class="text-sm text-base-content"
+          role="alert"
+          data-testid="remote-send-error"
+        >
           {{ text }}
         </p>
       }
@@ -157,7 +165,10 @@ export class RemoteComposerComponent {
   }
 
   protected onEnter(event: Event): void {
-    if (event instanceof KeyboardEvent && (event.shiftKey || event.isComposing)) {
+    if (
+      event instanceof KeyboardEvent &&
+      (event.shiftKey || event.isComposing)
+    ) {
       return;
     }
     event.preventDefault();
