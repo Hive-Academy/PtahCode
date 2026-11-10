@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_911_21b3
-status: backlog
+status: in_review
 type: BUGFIX
 title: Replace child session hard stop at runtime cap with automatic handoff
 depends_on: []
