@@ -1,3 +1,13 @@
+import type { EffortLevel } from '../ai-provider.types';
+
+/**
+ * How a child session got its model or effort: `pin` is an explicit value from
+ * the parent call, `model` is a valid answer of the decision model, `ranking`
+ * is the deterministic rule, and `default` is the host default.
+ */
+export const CHILD_SETTING_SOURCES = ['pin', 'model', 'ranking', 'default'] as const;
+export type ChildSettingSource = (typeof CHILD_SETTING_SOURCES)[number];
+
 /**
  * Payload describing a child chat session started by a parent session with
  * `ptah_session_start` (TASK_2026_584).
@@ -27,4 +37,10 @@ export interface AgentSessionOpenedPayload {
   readonly displayPrompt: string;
   /** Epoch milliseconds the child was started at. */
   readonly startedAt: number;
+  /** Resolved model id. Absent when the host default applies and its id is unknown. */
+  readonly model?: string;
+  /** Resolved effort. Absent when the host default applies. */
+  readonly effort?: EffortLevel;
+  readonly modelSource?: ChildSettingSource;
+  readonly effortSource?: ChildSettingSource;
 }

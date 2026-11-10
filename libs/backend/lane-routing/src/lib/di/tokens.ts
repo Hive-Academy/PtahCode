@@ -9,6 +9,7 @@
 export const LANE_ROUTING_TOKENS = {
   /** Lib-owned route service. */
   ROUTE_DECIDE_SERVICE: Symbol.for('LaneRoutingRouteDecideService'),
+  CHILD_SETTING_ROUTER: Symbol.for('LaneRoutingChildSettingRouter'),
   /** Lib-owned decision-model configuration. */
   DECISION_MODEL_CONFIG: Symbol.for('LaneRoutingDecisionModelConfig'),
   /** Lib-owned decision-model catalog (picker listing only). */

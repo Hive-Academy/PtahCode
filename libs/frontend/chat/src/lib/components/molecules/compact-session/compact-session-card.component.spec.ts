@@ -1258,6 +1258,118 @@ describe(CompactSessionCardComponent.name, () => {
     ).toContain('25%');
   });
 
+  describe('child session route display (TASK_2026_930_4e06)', () => {
+    it('shows nothing for a tab that is not a child', () => {
+      const fixture = render(tab());
+      expect(
+        fixture.nativeElement.querySelector(
+          '[data-testid="compact-session-child-route"]',
+        ),
+      ).toBeNull();
+    });
+
+    it('renders resolved model and effort with truncating model title and source tooltips/aria-labels', () => {
+      const longModel =
+        'claude-sonnet-5-5-20261022-extended-routing-identifier';
+      const fixture = render(
+        tab({
+          agentOrigin: {
+            parentTabId: 'parent',
+            parentSessionId: null,
+            label: 'Child',
+            branch: 'feat/child',
+            worktreePath: 'C:\\work\\child',
+            startedAt: 1_000,
+            model: longModel,
+            effort: 'high',
+            modelSource: 'pin',
+            effortSource: 'model',
+          },
+        }),
+      );
+      const route = fixture.nativeElement.querySelector(
+        '[data-testid="compact-session-child-route"]',
+      ) as HTMLElement;
+      const modelEl = fixture.nativeElement.querySelector(
+        '[data-testid="compact-session-child-model"]',
+      ) as HTMLElement;
+      const effortEl = fixture.nativeElement.querySelector(
+        '[data-testid="compact-session-child-effort"]',
+      ) as HTMLElement;
+
+      expect(route).not.toBeNull();
+      expect(route.textContent).toContain(`${longModel} · high`);
+      expect(modelEl.className).toContain('truncate');
+      expect(modelEl.getAttribute('title')).toBe(
+        `${longModel} (set by parent)`,
+      );
+      expect(modelEl.getAttribute('aria-label')).toBe(
+        `${longModel} (set by parent)`,
+      );
+      expect(effortEl.getAttribute('title')).toBe('high (decision model)');
+      expect(effortEl.getAttribute('aria-label')).toBe('high (decision model)');
+    });
+
+    it('shows default model and default effort with ranking rule and host default sources when omitted', () => {
+      const fixture = render(
+        tab({
+          agentOrigin: {
+            parentTabId: 'parent',
+            parentSessionId: null,
+            label: 'Child',
+            branch: 'feat/child',
+            worktreePath: 'C:\\work\\child',
+            startedAt: 1_000,
+            effort: 'low',
+            effortSource: 'ranking',
+          },
+        }),
+      );
+      const route = fixture.nativeElement.querySelector(
+        '[data-testid="compact-session-child-route"]',
+      ) as HTMLElement;
+      const modelEl = fixture.nativeElement.querySelector(
+        '[data-testid="compact-session-child-model"]',
+      ) as HTMLElement;
+      const effortEl = fixture.nativeElement.querySelector(
+        '[data-testid="compact-session-child-effort"]',
+      ) as HTMLElement;
+
+      expect(route.textContent).toContain('default model · low');
+      expect(modelEl.getAttribute('title')).toBe(
+        'default model (host default)',
+      );
+      expect(modelEl.getAttribute('aria-label')).toBe(
+        'default model (host default)',
+      );
+      expect(effortEl.getAttribute('title')).toBe('low (ranking rule)');
+      expect(effortEl.getAttribute('aria-label')).toBe('low (ranking rule)');
+
+      fixture.componentRef.setInput(
+        'tab',
+        tab({
+          agentOrigin: {
+            parentTabId: 'parent',
+            parentSessionId: null,
+            label: 'Child',
+            branch: 'feat/child',
+            worktreePath: 'C:\\work\\child',
+            startedAt: 1_000,
+          },
+        }),
+      );
+      fixture.detectChanges();
+
+      expect(route.textContent).toContain('default model · default effort');
+      expect(effortEl.getAttribute('title')).toBe(
+        'default effort (host default)',
+      );
+      expect(effortEl.getAttribute('aria-label')).toBe(
+        'default effort (host default)',
+      );
+    });
+  });
+
   it('shows F2 as 65% from a trusted 200,000-token context window', () => {
     const fixture = render(
       tab({

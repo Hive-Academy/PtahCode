@@ -1405,6 +1405,10 @@ export class TabManagerService {
         worktreePath: payload.worktreePath,
         ...(payload.taskId ? { taskId: payload.taskId } : {}),
         startedAt: payload.startedAt,
+        ...(payload.model ? { model: payload.model } : {}),
+        ...(payload.effort ? { effort: payload.effort } : {}),
+        ...(payload.modelSource ? { modelSource: payload.modelSource } : {}),
+        ...(payload.effortSource ? { effortSource: payload.effortSource } : {}),
       },
     };
   }

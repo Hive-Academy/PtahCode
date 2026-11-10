@@ -80,6 +80,10 @@ export class ChildChatSessionHostAdapter implements IChildChatSessionHost {
     private readonly lifecycle: SessionLifecycleManager | null = null,
   ) {}
 
+  listChildModels(input: { readonly workspaceRoot: string; readonly parentSessionId: string }) {
+    return this.session.listAgentChildModels(input);
+  }
+
   resolveChildModel(input: {
     readonly model: string;
     readonly workspaceRoot: string;

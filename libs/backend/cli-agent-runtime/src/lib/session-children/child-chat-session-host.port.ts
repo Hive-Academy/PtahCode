@@ -65,6 +65,10 @@ export type ChildChatSessionStartOutcome =
   | { readonly started: false; readonly error: string };
 
 export interface IChildChatSessionHost {
+  listChildModels(input: {
+    readonly workspaceRoot: string;
+    readonly parentSessionId: string;
+  }): Promise<readonly string[]>;
   resolveChildModel(input: {
     readonly model: string;
     readonly workspaceRoot: string;

@@ -298,6 +298,99 @@ describe('restored tabs — one sanitize, both readers', () => {
       expect(tabs.every((tab) => tab.queuedContent === null)).toBe(true);
       expect(tabs.every((tab) => tab.attachedBinding === null)).toBe(true);
     });
+
+    it('keeps valid child model, effort and sources on agentOrigin (TASK_2026_930_4e06)', () => {
+      const maxLenModel = 'm'.repeat(200);
+      const [tab] = restore([
+        storedTab('tab-child', 'loaded', {
+          agentOrigin: {
+            parentTabId: 'parent-1',
+            parentSessionId: 'sess-parent-1',
+            label: 'Child session',
+            branch: 'feat/child',
+            worktreePath: '/ws/child',
+            startedAt: 1_700_000_000_000,
+            model: maxLenModel,
+            effort: 'xhigh',
+            modelSource: 'pin',
+            effortSource: 'model',
+          },
+        }),
+      ]);
+
+      expect(tab.agentOrigin).toEqual({
+        parentTabId: 'parent-1',
+        parentSessionId: 'sess-parent-1',
+        label: 'Child session',
+        branch: 'feat/child',
+        worktreePath: '/ws/child',
+        startedAt: 1_700_000_000_000,
+        model: maxLenModel,
+        effort: 'xhigh',
+        modelSource: 'pin',
+        effortSource: 'model',
+      });
+    });
+
+    it('drops invalid child model, effort and sources without dropping agentOrigin or the tab (TASK_2026_930_4e06)', () => {
+      const tabs = restore([
+        storedTab('tab-too-long-model', 'loaded', {
+          agentOrigin: {
+            parentTabId: 'parent-1',
+            parentSessionId: null,
+            label: 'Child 1',
+            branch: 'feat/child-1',
+            worktreePath: '/ws/child-1',
+            startedAt: 1_700_000_000_000,
+            model: 'm'.repeat(201),
+            effort: 'turbo',
+            modelSource: 'bogus',
+            effortSource: 42,
+          },
+        }),
+        storedTab('tab-empty-model', 'loaded', {
+          agentOrigin: {
+            parentTabId: 'parent-1',
+            parentSessionId: null,
+            label: 'Child 2',
+            branch: 'feat/child-2',
+            worktreePath: '/ws/child-2',
+            startedAt: 1_700_000_000_000,
+            model: '',
+            effort: 'low',
+            modelSource: 'ranking',
+            effortSource: 'default',
+          },
+        }),
+      ]);
+
+      expect(tabs).toHaveLength(2);
+      expect(tabs[0].agentOrigin).toEqual({
+        parentTabId: 'parent-1',
+        parentSessionId: null,
+        label: 'Child 1',
+        branch: 'feat/child-1',
+        worktreePath: '/ws/child-1',
+        startedAt: 1_700_000_000_000,
+      });
+      expect('model' in (tabs[0].agentOrigin ?? {})).toBe(false);
+      expect('effort' in (tabs[0].agentOrigin ?? {})).toBe(false);
+      expect('modelSource' in (tabs[0].agentOrigin ?? {})).toBe(false);
+      expect('effortSource' in (tabs[0].agentOrigin ?? {})).toBe(false);
+
+      expect(tabs[1].agentOrigin).toEqual({
+        parentTabId: 'parent-1',
+        parentSessionId: null,
+        label: 'Child 2',
+        branch: 'feat/child-2',
+        worktreePath: '/ws/child-2',
+        startedAt: 1_700_000_000_000,
+        effort: 'low',
+        modelSource: 'ranking',
+        effortSource: 'default',
+      });
+      expect('model' in (tabs[1].agentOrigin ?? {})).toBe(false);
+    });
   });
 
   // TASK_2026_627 Task 15.4: a live budget stage belongs to a turn that ended
