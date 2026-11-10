@@ -1,24 +1,41 @@
-import { DestroyRef, ElementRef, inject } from '@angular/core';
+import {
+  computed,
+  DestroyRef,
+  ElementRef,
+  inject,
+  Signal,
+} from '@angular/core';
 export const BUTTON_HOST = {
-    class: 'btn',
-    '[class.btn-primary]': "variant() === 'primary'",
-    '[class.btn-secondary]': "variant() === 'secondary'",
-    '[class.btn-ghost]': "variant() === 'ghost'",
-    '[class.btn-error]': "variant() === 'danger'",
-    '[class.btn-link]': "variant() === 'link'",
-    '[class.btn-xs]': "size() === 'xs'",
-    '[class.btn-sm]': "size() === 'sm'",
-    '[class.btn-md]': "size() === 'md'",
-    '[class.opacity-60]': 'busy()',
-    '[class.cursor-wait]': 'busy()',
-    '[attr.aria-disabled]': "busy() ? 'true' : null",
-    '[attr.aria-busy]': "busy() ? 'true' : null",
+  class: 'btn',
+  '[class.btn-primary]': "variant() === 'primary'",
+  '[class.btn-secondary]': "variant() === 'secondary'",
+  '[class.btn-ghost]': "variant() === 'ghost'",
+  '[class.btn-error]': "variant() === 'danger'",
+  '[class.btn-link]': "variant() === 'link'",
+  '[class.btn-xs]': "size() === 'xs'",
+  '[class.btn-sm]': "size() === 'sm'",
+  '[class.btn-md]': "size() === 'md'",
+  '[class.opacity-60]': 'busy()',
+  '[class.cursor-wait]': 'busy()',
+  '[attr.aria-disabled]': "busy() ? 'true' : null",
+  '[attr.aria-busy]': "busy() ? 'true' : null",
+  '[attr.type]': 'hostType()',
 };
-export function defaultButtonType(): void {
+/**
+ * Value of the host `type` attribute. A `button` element with no explicit type
+ * gets `button`, thus it never submits a form by accident. The directive owns
+ * the attribute through its `type` input: when a bound `[type]` becomes empty,
+ * the value goes back to `button`, not to the `submit` default of the browser.
+ * Set the type with `type="..."` or `[type]`. Do not use `[attr.type]` on the
+ * host: that binding does not go through the input.
+ * An anchor gets no `type` unless the consumer sets one.
+ */
+export function buttonHostType(
+  type: () => string | undefined,
+): Signal<string | null> {
   const element = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
-  if (element instanceof HTMLButtonElement && !element.hasAttribute('type')) {
-    element.setAttribute('type', 'button');
-  }
+  const fallback = element instanceof HTMLButtonElement ? 'button' : null;
+  return computed(() => type() || fallback);
 }
 export function blockBusyActivation(busy: () => boolean): void {
   const element =

@@ -60,6 +60,62 @@ describe('RecentSessionsStore', () => {
 
   afterEach(() => TestBed.resetTestingModule());
 
+  it.each(['', '   '])('does not call RPC for an empty workspace path: %s', async (path) => {
+    await store.load(path);
+    expect(call).not.toHaveBeenCalled();
+    expect(store.workspacePath()).toBe(path);
+    expect(store.sessions()).toEqual([]);
+    expect(store.total()).toBeNull();
+    expect(store.loading()).toBe(false);
+    expect(store.confirmed()).toBe(false);
+    expect(store.error()).toBeNull();
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('discards a pending real workspace result after an empty path', async () => {
+    const pending = deferred<Reply>();
+    call.mockImplementation(() => pending.promise);
+    const oldLoad = store.load('/workspace');
+    await store.load(' ');
+    pending.resolve(ok([row('stale', 1)]));
+    await oldLoad;
+    expect(call).toHaveBeenCalledTimes(2);
+    expect(store.workspacePath()).toBe(' ');
+    expect(store.sessions()).toEqual([]);
+    expect(store.confirmed()).toBe(false);
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('keeps an empty path after pending A resolves, then accepts a later A load', async () => {
+    const pending = deferred<Reply>();
+    call.mockImplementation(() => pending.promise);
+    const first = store.load('A');
+    await store.load('');
+    pending.resolve(ok([row('stale', 1)]));
+    await first;
+    expect(store.workspacePath()).toBe('');
+    expect(store.sessions()).toEqual([]);
+    expect(store.loading()).toBe(false);
+    expect(store.error()).toBeNull();
+
+    const fresh = row('fresh', 2);
+    call.mockResolvedValue(ok([fresh]));
+    await store.load('A');
+    expect(store.workspacePath()).toBe('A');
+    expect(store.sessions()).toEqual([fresh]);
+    expect(store.confirmed()).toBe(true);
+  });
+
+  it('accepts A after an initial empty-path load', async () => {
+    await store.load('');
+    const item = row('A session', 3);
+    call.mockResolvedValue(ok([item]));
+    await store.load('A');
+    expect(store.workspacePath()).toBe('A');
+    expect(store.sessions()).toEqual([item]);
+    expect(store.loading()).toBe(false);
+  });
+
   it('combines pinned and unpinned rows into the true newest three', async () => {
     const olderPinned = row('older pinned', 1);
     const latestPinned = row('latest pinned', 6);
@@ -250,5 +306,9 @@ describe('RecentSessionsStore', () => {
     expect(store.confirmed()).toBe(false);
     expect(store.error()).toBe('Unable to load recent sessions.');
     expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledWith(
+      'RecentSessionsStore', 'Session list RPC failed',
+      expect.objectContaining({ pinnedError: 'host failure', unpinnedError: 'host failure' }),
+    );
   });
 });

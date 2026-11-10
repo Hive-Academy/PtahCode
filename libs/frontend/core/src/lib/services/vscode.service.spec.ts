@@ -9,6 +9,7 @@
 
 import { TestBed } from '@angular/core/testing';
 import { MESSAGE_TYPES } from '@ptah-extension/shared';
+import { LoggingService } from './logging.service';
 import {
   VSCodeService,
   WebviewConfig,
@@ -65,6 +66,7 @@ describe('VSCodeService', () => {
 
   afterEach(() => {
     jest.useRealTimers();
+    jest.restoreAllMocks();
     TestBed.resetTestingModule();
     uninstallVsCodeApi();
   });
@@ -309,6 +311,77 @@ describe('VSCodeService', () => {
   // ── getState ──────────────────────────────────────────────────────────────
 
   describe('getState()', () => {
+    it('reads Electron state once before writes, then merges and returns writes', () => {
+      const { getState, setState } = installVsCodeApi({ isElectron: true });
+      getState.mockReturnValue({ first: 1, second: 2 });
+      service = TestBed.inject(VSCodeService);
+      expect(service.getState('first')).toBe(1);
+      expect(service.getState('second')).toBe(2);
+      expect(service.getState('missing')).toBeUndefined();
+      expect(getState).toHaveBeenCalledTimes(1);
+      service.setState('third', 3);
+      expect(getState).toHaveBeenCalledTimes(1);
+      expect(setState).toHaveBeenCalledWith({ first: 1, second: 2, third: 3 });
+      expect(service.getState('third')).toBe(3);
+    });
+
+    it.each([undefined, null, 42])('caches an invalid Electron host state: %s', (value) => {
+      const { getState } = installVsCodeApi({ isElectron: true });
+      getState.mockReturnValue(value);
+      service = TestBed.inject(VSCodeService);
+      expect(service.getState('missing')).toBeUndefined();
+      expect(service.getState('missing')).toBeUndefined();
+      expect(getState).toHaveBeenCalledTimes(1);
+    });
+
+    it('reads once for a new Electron root and not for the same root', () => {
+      const { getState } = installVsCodeApi({ isElectron: true });
+      service = TestBed.inject(VSCodeService);
+      service.getState('a');
+      service.updateWorkspaceRoot('/my/workspace');
+      service.getState('b');
+      expect(getState).toHaveBeenCalledTimes(1);
+      service.updateWorkspaceRoot('/other');
+      service.getState('c');
+      service.getState('d');
+      expect(getState).toHaveBeenCalledTimes(2);
+    });
+
+    it('drops root A keys after switching to root B following a read and write', () => {
+      const { getState, setState } = installVsCodeApi({ isElectron: true });
+      getState.mockReturnValue({ fromA: 'original' });
+      service = TestBed.inject(VSCodeService);
+      expect(service.getState('fromA')).toBe('original');
+      service.setState('k1', 'A value');
+      service.updateWorkspaceRoot('/root-b');
+      getState.mockReturnValue({ fromB: 'next' });
+      expect(service.getState('k1')).toBeUndefined();
+      expect(service.getState('fromB')).toBe('next');
+      service.setState('k2', 'B value');
+      expect(getState).toHaveBeenCalledTimes(2);
+      expect(setState).toHaveBeenLastCalledWith({ fromB: 'next', k2: 'B value' });
+    });
+
+    it('warns once for a slow Electron read without state content', () => {
+      const { getState } = installVsCodeApi({ isElectron: true });
+      getState.mockReturnValue({ secret: 'private-value' });
+      const warn = jest.spyOn(TestBed.inject(LoggingService), 'warn').mockImplementation();
+      jest.spyOn(performance, 'now').mockReturnValueOnce(10).mockReturnValueOnce(8122);
+      service = TestBed.inject(VSCodeService);
+      service.getState('secret');
+      service.getState('secret');
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith('VSCodeService', 'slow sync state read {"durationMs":8112}');
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('private-value');
+    });
+
+    it('calls the host for every non-Electron read', () => {
+      const { getState } = installVsCodeApi();
+      service = TestBed.inject(VSCodeService);
+      service.getState('a');
+      service.getState('b');
+      expect(getState).toHaveBeenCalledTimes(2);
+    });
     it('returns undefined when no vscode api', () => {
       uninstallVsCodeApi();
       TestBed.configureTestingModule({ providers: [VSCodeService] });
