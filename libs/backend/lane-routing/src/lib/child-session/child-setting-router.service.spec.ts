@@ -41,15 +41,13 @@ describe('ChildSettingRouterService', () => {
     jest
       .spyOn(DecisionCaller.prototype, 'openCaller')
       .mockResolvedValue({ kind: 'structured', providerId: 'p', model: 'm' });
-    jest
-      .spyOn(DecisionCaller.prototype, 'dispatchFor')
-      .mockReturnValue({
-        kind: 'structured',
-        providerId: 'p',
-        model: 'm',
-        signal: AbortSignal.timeout(3000),
-        completer: { isReady: jest.fn(), complete: jest.fn() },
-      });
+    jest.spyOn(DecisionCaller.prototype, 'dispatchFor').mockReturnValue({
+      kind: 'structured',
+      providerId: 'p',
+      model: 'm',
+      signal: AbortSignal.timeout(3000),
+      completer: { isReady: jest.fn(), complete: jest.fn() },
+    });
     jest.spyOn(DecisionCaller.prototype, 'noteLive').mockResolvedValue();
   });
   afterEach(() => {
@@ -84,6 +82,47 @@ describe('ChildSettingRouterService', () => {
       effortSource: 'ranking',
     });
     expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('starts no decision request when openCaller resolves after the deadline', async () => {
+    jest.useFakeTimers();
+    let release: (value: {
+      kind: 'structured';
+      providerId: string;
+      model: string;
+    }) => void = () => undefined;
+    jest.spyOn(DecisionCaller.prototype, 'openCaller').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve as typeof release;
+        }),
+    );
+    const pending = router().route(input);
+    await jest.advanceTimersByTimeAsync(3000);
+    await expect(pending).resolves.toMatchObject({ modelSource: 'ranking' });
+    release({ kind: 'structured', providerId: 'p', model: 'm' });
+    await jest.advanceTimersByTimeAsync(0);
+    expect(DecisionCaller.prototype.dispatchFor).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+    expect(DecisionCaller.prototype.noteLive).not.toHaveBeenCalled();
+  });
+
+  it('does not note live state when the deadline passes during the request', async () => {
+    jest.useFakeTimers();
+    let finish: (value: never) => void = () => undefined;
+    run.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve as typeof finish;
+        }),
+    );
+    const pending = router().route(input);
+    await jest.advanceTimersByTimeAsync(3000);
+    await expect(pending).resolves.toMatchObject({ modelSource: 'ranking' });
+    finish(outcome('o2', 'o3') as never);
+    await jest.advanceTimersByTimeAsync(0);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(DecisionCaller.prototype.noteLive).not.toHaveBeenCalled();
   });
 
   it('keeps the ranking result when the decision call throws', async () => {

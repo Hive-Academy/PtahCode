@@ -83,14 +83,16 @@ export class ChildSettingRouterService {
     ];
     if (!questions.length) return result;
     let deadline: ReturnType<typeof setTimeout> | undefined;
+    let expired = false;
     const timedOut = new Promise<never>((_, reject) => {
-      deadline = setTimeout(
-        () => reject(new Error('child setting decision timeout')),
-        DECISION_REQUEST_TIMEOUT_MS,
-      );
+      deadline = setTimeout(() => {
+        expired = true;
+        reject(new Error('child setting decision timeout'));
+      }, DECISION_REQUEST_TIMEOUT_MS);
     });
     const request = async () => {
       const opened = await this.caller.openCaller();
+      if (expired) return result;
       if (opened.kind === 'unset') return result;
       if (opened.kind === 'blocked') {
         this.logger.warn('[child-setting-router] decision model unavailable', {
@@ -105,6 +107,7 @@ export class ChildSettingRouterService {
         dispatch: this.caller.dispatchFor(opened),
         logger: this.logger,
       });
+      if (expired) return result;
       await this.caller.noteLive(opened, outcome);
       if (!outcome.succeeded)
         this.logger.warn('[child-setting-router] decision failed', {

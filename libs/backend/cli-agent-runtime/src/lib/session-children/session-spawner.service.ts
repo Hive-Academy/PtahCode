@@ -257,6 +257,11 @@ export class SessionSpawnerService implements ISessionSpawner {
     > | null = null,
     @inject(TOKENS.LOGGER, { isOptional: true })
     private readonly logger: Logger | null = null,
+    /**
+     * Override of the child setting router (direct unit tests). The real
+     * lookup is lazy at start() time, because the token is bound after this
+     * singleton can resolve.
+     */
     @inject(CLI_AGENT_RUNTIME_TOKENS.CHILD_SETTING_ROUTER, { isOptional: true })
     private readonly childSettingRouter: IChildSettingRouter | null = null,
   ) {
@@ -406,7 +411,8 @@ export class SessionSpawnerService implements ISessionSpawner {
       }
     }
 
-    if (this.childSettingRouter && (!request.model || !request.effort)) {
+    const router = this.lookupChildSettingRouter();
+    if (router && (!request.model || !request.effort)) {
       try {
         const models = request.model
           ? []
@@ -414,7 +420,7 @@ export class SessionSpawnerService implements ISessionSpawner {
               workspaceRoot: root,
               parentSessionId: guard.caller,
             });
-        const routed = await this.childSettingRouter.route({
+        const routed = await router.route({
           brief: `${request.label ?? branch}\n${task}`,
           models,
           ...(resolvedModel ? { model: resolvedModel } : {}),
@@ -1992,6 +1998,29 @@ export class SessionSpawnerService implements ISessionSpawner {
       // degradation-audit: reported - logged below; the start is refused as
       // `chat-runtime-unavailable`, which the parent reads as a closed reason.
       this.log(`chat host could not be resolved: ${errorMessage(error)}`);
+      return null;
+    }
+  }
+
+  /**
+   * The child setting router as available NOW. The constructor parameter is
+   * an override (direct unit tests). The token is bound in a later phase than
+   * this singleton resolves, so the real lookup is lazy at start() time.
+   * `null` when there is no router or its resolution throws.
+   */
+  private lookupChildSettingRouter(): IChildSettingRouter | null {
+    if (this.childSettingRouter !== null) return this.childSettingRouter;
+    const token = CLI_AGENT_RUNTIME_TOKENS.CHILD_SETTING_ROUTER;
+    if (this.container === null || !this.container.isRegistered(token, true)) {
+      return null;
+    }
+    try {
+      return this.container.resolve<IChildSettingRouter | null>(token);
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged below; routing is skipped and the child starts with the default model.
+      this.log(
+        `child setting router could not be resolved: ${errorMessage(error)}`,
+      );
       return null;
     }
   }

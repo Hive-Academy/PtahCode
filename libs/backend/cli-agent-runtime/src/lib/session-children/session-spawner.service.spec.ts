@@ -591,14 +591,12 @@ describe('SessionSpawnerService.start — success', () => {
   it('uses the routed model and effort and stores their sources on the snapshot', async () => {
     const h = makeHarness();
     const router = {
-      route: jest
-        .fn()
-        .mockResolvedValue({
-          model: 'claude-opus-4',
-          effort: 'high',
-          modelSource: 'model',
-          effortSource: 'ranking',
-        }),
+      route: jest.fn().mockResolvedValue({
+        model: 'claude-opus-4',
+        effort: 'high',
+        modelSource: 'model',
+        effortSource: 'ranking',
+      }),
     };
     const result = await h.build({ router }).start(h.request());
     expect(result).toMatchObject({
@@ -621,14 +619,12 @@ describe('SessionSpawnerService.start — success', () => {
       message: 'not admitted',
     });
     const router = {
-      route: jest
-        .fn()
-        .mockResolvedValue({
-          model: 'claude-opus-4',
-          effort: 'low',
-          modelSource: 'ranking',
-          effortSource: 'ranking',
-        }),
+      route: jest.fn().mockResolvedValue({
+        model: 'claude-opus-4',
+        effort: 'low',
+        modelSource: 'ranking',
+        effortSource: 'ranking',
+      }),
     };
     await expect(h.build({ router }).start(h.request())).resolves.toMatchObject(
       {
@@ -658,6 +654,46 @@ describe('SessionSpawnerService.start — success', () => {
     expect(router.route).not.toHaveBeenCalled();
   });
 
+  it('uses a router bound in the container after construction', async () => {
+    const h = makeHarness();
+    const scope = h.containerWith(h.host);
+    const spawner = h.build({ container: scope });
+    const router = {
+      route: jest.fn().mockResolvedValue({
+        model: 'claude-opus-4',
+        effort: 'high',
+        modelSource: 'model',
+        effortSource: 'ranking',
+      }),
+    };
+    scope.register(CLI_AGENT_RUNTIME_TOKENS.CHILD_SETTING_ROUTER, {
+      useValue: router,
+    });
+    const result = await spawner.start(h.request());
+    expect(result).toMatchObject({
+      ok: true,
+      child: { model: 'claude-opus-4' },
+    });
+    expect(router.route).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts without routing when the router cannot be resolved', async () => {
+    const h = makeHarness();
+    const scope = h.containerWith(h.host);
+    scope.register(CLI_AGENT_RUNTIME_TOKENS.CHILD_SETTING_ROUTER, {
+      useFactory: () => {
+        throw new Error('router boom');
+      },
+    });
+    const result = await h.build({ container: scope }).start(h.request());
+    expect(result).toMatchObject({ ok: true });
+    expect(
+      h.lines.some((line: string) =>
+        line.includes('child setting router could not be resolved'),
+      ),
+    ).toBe(true);
+  });
+
   it('starts with the old behavior when no router is bound', async () => {
     const h = makeHarness();
     const child = await h.startChild();
@@ -684,14 +720,12 @@ describe('SessionSpawnerService.start — success', () => {
   it('opened payload carries model, effort, modelSource and effortSource', async () => {
     const h = makeHarness();
     const router = {
-      route: jest
-        .fn()
-        .mockResolvedValue({
-          model: 'claude-opus-4',
-          effort: 'high',
-          modelSource: 'model',
-          effortSource: 'model',
-        }),
+      route: jest.fn().mockResolvedValue({
+        model: 'claude-opus-4',
+        effort: 'high',
+        modelSource: 'model',
+        effortSource: 'model',
+      }),
     };
     const spawner = h.build({ router });
     await spawner.start(h.request());
