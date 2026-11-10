@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_892_7d2e
-status: in_progress
+status: done
 type: FEATURE
 title: Refresh the docs screenshots and videos from the current Electron app
 description: >-

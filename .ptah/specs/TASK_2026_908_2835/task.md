@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_908_2835
-status: in_review
+status: done
 type: BUGFIX
 title: Refresh the saved Claude model catalog and group pinned model rows
 depends_on: []

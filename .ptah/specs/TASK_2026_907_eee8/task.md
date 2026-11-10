@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_907_eee8
-status: in_review
+status: done
 type: BUGFIX
 title: Accept the Claude Ultra plan word for named lanes
 depends_on: []

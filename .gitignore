@@ -237,3 +237,9 @@ tmp-scratch-*
 tools/perf/out/
 
 .ptah/tmp/
+
+# Local-only notes and external skill
+.ptah/specs/TASK_2026_AGENT_BUDGET/usage-burn-investigation.md
+.ptah/specs/TASK_2026_AGENT_BUDGET/usage-burn-named-account.md
+.ptah/specs/TASK_2026_AGENT_BUDGET/usage-scripts/
+.claude/skills/stitch-loop/

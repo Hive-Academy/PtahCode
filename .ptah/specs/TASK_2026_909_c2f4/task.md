@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_909_c2f4
-status: in_review
+status: done
 type: BUGFIX
 title: "Fix renderer lag, RPC timeouts and repeated Git reads on a removed worktree"
 depends_on: []

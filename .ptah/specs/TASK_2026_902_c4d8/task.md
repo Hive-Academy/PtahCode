@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_902_c4d8
-status: in_review
+status: done
 type: FEATURE
 title: Interactive review findings in the app
 created: "2026-11-09T18:05:45.000Z"

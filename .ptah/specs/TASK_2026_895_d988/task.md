@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_895_d988
-status: in_review
+status: done
 type: REFACTORING
 title: Context-weighted batching and dynamic model routing
 depends_on: []

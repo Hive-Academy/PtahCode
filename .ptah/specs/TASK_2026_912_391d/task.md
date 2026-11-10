@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_912_391d
-status: in_review
+status: done
 type: DOCUMENTATION
 title: Correct the agent spawn accountSelection description
 depends_on: []

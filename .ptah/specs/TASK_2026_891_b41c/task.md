@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_891_b41c
-status: in_progress
+status: done
 type: REFACTORING
 title: Remove the dead VS Code change-set card branch from the transcript
 description: >-
