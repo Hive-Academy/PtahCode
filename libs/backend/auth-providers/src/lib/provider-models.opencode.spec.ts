@@ -1,5 +1,4 @@
 import 'reflect-metadata';
-import axios from 'axios';
 import { createMockConfigManager } from '@ptah-extension/vscode-core/testing';
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import type { ConfigManager, Logger } from '@ptah-extension/vscode-core';
@@ -10,6 +9,7 @@ import {
 } from '@ptah-extension/shared';
 import { ActiveProviderResolver } from './auth/active-provider-resolver';
 import { ProviderModelsService } from './provider-models.service';
+import { openCodeLiveRoutes, type OpenCodeLiveModel } from './providers/opencode/opencode-live-routes';
 
 describe('ProviderModelsService OpenCode catalog', () => {
   afterEach(() => jest.restoreAllMocks());
@@ -43,9 +43,7 @@ describe('ProviderModelsService OpenCode catalog', () => {
       );
       const dynamic = jest.fn(async () => [unknown]);
       service.registerDynamicFetcher(id, dynamic);
-      const network = jest
-        .spyOn(axios, 'get')
-        .mockRejectedValue(new Error('offline'));
+      jest.spyOn(openCodeLiveRoutes, 'list').mockResolvedValue(null);
       for (const key of [null, 'configured-key']) {
         const result = await service.fetchModels(id, key);
         expect(result.isStatic).toBe(true);
@@ -64,11 +62,7 @@ describe('ProviderModelsService OpenCode catalog', () => {
         expect(await service.fetchModels(id, key, true)).toEqual(result);
       }
       expect(dynamic).not.toHaveBeenCalled();
-      // Only the public list, never with the user's key.
-      for (const [url, options] of network.mock.calls) {
-        expect(url).toBe(`${getAnthropicProvider(id)?.baseUrl}/models`);
-        expect(JSON.stringify(options)).not.toContain('configured-key');
-      }
+      expect(openCodeLiveRoutes.list).toHaveBeenCalledWith(id);
       expect(config.get).not.toHaveBeenCalledWith(
         `provider.${id}.modelCatalog`,
       );
@@ -84,11 +78,15 @@ describe('ProviderModelsService OpenCode catalog', () => {
     async (id) => {
       const routed = Object.keys(OPENCODE_MODEL_ROUTES[id]);
       const stillLive = routed.slice(0, 3);
-      jest.spyOn(axios, 'get').mockResolvedValue({
-        data: {
-          data: [...stillLive, 'no-route-model'].map((m) => ({ id: m })),
-        },
-      });
+      const live = new Map<string, OpenCodeLiveModel>(
+        [...stillLive, 'no-route-model'].map((modelId) => [modelId, {
+          id: modelId,
+          name: modelId,
+          contextLength: 0,
+          protocol: modelId === 'no-route-model' ? undefined : 'messages',
+        }]),
+      );
+      jest.spyOn(openCodeLiveRoutes, 'list').mockResolvedValue(live);
       const service = new ProviderModelsService(
         createMockLogger() as unknown as Logger,
         createMockConfigManager({ values: {} }) as unknown as ConfigManager,

@@ -40,9 +40,11 @@ import {
   getAnthropicProvider,
   getStaticModelCapabilities,
   isOpenCodeProviderId,
+  getOpenCodeModelProtocol,
   type AnthropicProvider,
 } from '@ptah-extension/shared';
 import { AUTH_PROVIDERS_TOKENS } from './di/tokens';
+import { openCodeLiveRoutes } from './providers/opencode/opencode-live-routes';
 import { ActiveProviderResolver } from './auth/active-provider-resolver';
 import {
   deriveTiersFromCatalog,
@@ -92,15 +94,19 @@ interface ProviderCache {
 /** Callback type for dynamic model fetchers (e.g., Copilot SDK listModels) */
 export type DynamicModelFetcher = () => Promise<ProviderModelInfo[]>;
 
+/** These catalogues hide models for reasons other than availability. */
+const FILTERED_TIER_CATALOG_PROVIDERS = new Set([
+  'openai-codex',
+  'github-copilot',
+  'opencode-zen',
+  'opencode-go',
+]);
+
 @injectable()
 export class ProviderModelsService {
+  private static readonly loggedTierReplacements = new Set<string>();
   private readonly modelCache = new Map<string, ProviderCache>();
   private readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-  /** OpenCode's public live ID lists, per subscription. */
-  private readonly openCodeLiveIds = new Map<
-    string,
-    { readonly ids: ReadonlySet<string>; readonly timestamp: number }
-  >();
   /**
    * A persisted catalog older than this is not used: vendors retire models
    * within weeks, so an old saved answer would offer IDs that now fail. The
@@ -287,10 +293,8 @@ export class ProviderModelsService {
     totalCount: number;
     isStatic: boolean;
   }> {
-    // Only the reviewed route table decides which IDs Ptah can call (each
-    // needs a known protocol), but OpenCode's public list decides which of
-    // them still exist: a retired ID drops out without a release. When the
-    // public list cannot be read, the whole route table is offered.
+    // The public gateway decides which IDs still exist. The reviewed static
+    // rows retain their metadata; newly routed live IDs join the list.
     if (isOpenCodeProviderId(providerId)) {
       const openCode = getAnthropicProvider(providerId);
       const routed: ProviderModelInfo[] = (openCode?.staticModels ?? []).map(
@@ -302,15 +306,37 @@ export class ProviderModelsService {
           supportsToolUse: m.supportsToolUse,
         }),
       );
-      const liveIds = await this.fetchOpenCodeLiveIds(
-        providerId,
-        openCode?.baseUrl,
-      );
-      const models = liveIds ? routed.filter((m) => liveIds.has(m.id)) : routed;
+      const liveModels = await openCodeLiveRoutes.list(providerId);
+      const models = liveModels
+        ? routed.filter((m) => liveModels.has(m.id))
+        : routed;
+      if (liveModels) {
+        const staticIds = new Set(routed.map((m) => m.id));
+        for (const live of liveModels.values()) {
+          if (!live.protocol || staticIds.has(live.id)) continue;
+          const siblings = routed.filter(
+            (row) =>
+              getOpenCodeModelProtocol(providerId, row.id) === live.protocol,
+          );
+          models.push({
+            id: live.id,
+            name: live.name,
+            description: `${live.name} via ${openCode?.name ?? 'OpenCode'}`,
+            contextLength: live.contextLength,
+            ...(live.contextLength > 0 && {
+              contextLengthSource: 'provider' as const,
+            }),
+            supportsToolUse:
+              live.supportsToolUse ??
+              (siblings.length > 0 &&
+                siblings.every((row) => row.supportsToolUse)),
+          });
+        }
+      }
       return {
         models: toolUseOnly ? models.filter((m) => m.supportsToolUse) : models,
         totalCount: models.length,
-        isStatic: liveIds === null,
+        isStatic: liveModels === null,
       };
     }
     const dynamicFetcher = this.dynamicFetchers.get(providerId);
@@ -450,51 +476,6 @@ export class ProviderModelsService {
   /**
    * Fetch models from a provider's /v1/models API endpoint
    */
-  /**
-   * The model IDs OpenCode currently serves for one subscription, from its
-   * public `/models` list (no key needed), cached like other live lists.
-   * `null` when the list cannot be read or is empty.
-   */
-  private async fetchOpenCodeLiveIds(
-    providerId: string,
-    baseUrl: string | undefined,
-  ): Promise<ReadonlySet<string> | null> {
-    const cached = this.openCodeLiveIds.get(providerId);
-    if (cached && Date.now() - cached.timestamp < this.CACHE_TTL_MS) {
-      return cached.ids;
-    }
-    if (!baseUrl) return null;
-    let base = baseUrl;
-    while (base.endsWith('/')) base = base.slice(0, -1);
-    try {
-      const { data } = await axios.get<ModelsApiResponse>(`${base}/models`, {
-        headers: { 'User-Agent': 'Ptah-Extension/1.0' },
-        timeout: 10_000,
-      });
-      const ids = new Set(
-        (Array.isArray(data?.data) ? data.data : [])
-          .map((m) => m?.id)
-          .filter(
-            (id): id is string => typeof id === 'string' && id.length > 0,
-          ),
-      );
-      if (ids.size === 0) return null;
-      this.openCodeLiveIds.set(providerId, { ids, timestamp: Date.now() });
-      return ids;
-    } catch (error: unknown) {
-      // degradation-audit: reported - logged; the caller offers the whole
-      // reviewed route table, which is the list Ptah shipped with.
-      this.logger.debug(
-        '[ProviderModelsService] OpenCode public model list unavailable; offering the full route table',
-        {
-          providerId,
-          error: error instanceof Error ? error.message : String(error),
-        },
-      );
-      return null;
-    }
-  }
-
   private async fetchDynamicModels(
     providerId: string,
     provider: AnthropicProvider,
@@ -740,11 +721,10 @@ export class ProviderModelsService {
       providerId === this.resolveActiveProviderId()
     ) {
       // Both env stores feed the next SDK launch (`process.env` is spread
-      // first), so fall back to the same default applyPersistedTiers would
-      // pick, or remove the tier and its metadata from both when none exists.
-      const fallback =
-        getAnthropicProvider(providerId)?.defaultTiers?.[tier] ??
-        this.getLiveDerivedTiers(providerId)[tier];
+      // first), so fall back to the tier that `resolveEffectiveTiers` selects
+      // with no user tier (the rule applyPersistedTiers uses), or remove the
+      // tier and its metadata from both when none exists.
+      const fallback = this.resolveEffectiveTiers(providerId, {})[tier];
       if (fallback) {
         this.authEnv[envVar as keyof AuthEnv] = fallback;
         process.env[envVar] = fallback;
@@ -825,6 +805,69 @@ export class ProviderModelsService {
     return deriveTiersFromCatalog(this.readLiveCatalog(providerId));
   }
 
+  /** Resolve user, static and live tiers consistently for every runtime path. */
+  resolveEffectiveTiers(
+    providerId: string,
+    userTiers: Partial<Record<ProviderModelTier, string | null | undefined>>,
+  ): Partial<Record<ProviderModelTier, string>> {
+    const defaults = getAnthropicProvider(providerId)?.defaultTiers;
+    let knownIds: string[] | null = null;
+    let catalogRead = false;
+    const knownCatalog = (): string[] | null => {
+      if (!catalogRead) {
+        knownIds = FILTERED_TIER_CATALOG_PROVIDERS.has(providerId)
+          ? null
+          : this.getCachedModelIds(providerId);
+        catalogRead = true;
+      }
+      return knownIds;
+    };
+    let derived: DerivedTierMap | undefined;
+    const derivedFor = (tier: ProviderModelTier): string | undefined => {
+      derived ??= this.getLiveDerivedTiers(providerId);
+      return derived[tier];
+    };
+    const effective: Partial<Record<ProviderModelTier, string>> = {};
+    for (const tier of ['sonnet', 'opus', 'haiku'] as const) {
+      const override = userTiers[tier];
+      if (override) {
+        effective[tier] = override;
+        continue;
+      }
+      const fallback = defaults?.[tier];
+      if (!fallback) {
+        effective[tier] = derivedFor(tier);
+        continue;
+      }
+      const ids = knownCatalog();
+      const normalized = fallback.replace(/\[[^\]]*\]$/, '');
+      if (
+        !ids ||
+        ids.some((id) => id.replace(/\[[^\]]*\]$/, '') === normalized)
+      ) {
+        effective[tier] = fallback;
+        continue;
+      }
+      const live = derivedFor(tier);
+      if (!live) {
+        effective[tier] = fallback;
+        continue;
+      }
+      const key = `${providerId}:${tier}`;
+      if (!ProviderModelsService.loggedTierReplacements.has(key)) {
+        ProviderModelsService.loggedTierReplacements.add(key);
+        this.logger.info('[provider-auth] replaced static tier default', {
+          providerId,
+          tier,
+          staticId: fallback,
+          liveId: live,
+        });
+      }
+      effective[tier] = live;
+    }
+    return effective;
+  }
+
   /**
    * Apply persisted tier mappings to environment for a specific provider.
    * Call this during authentication setup when a provider is active.
@@ -832,7 +875,7 @@ export class ProviderModelsService {
    * Always reads from the `mainAgent` scope — this method's job is to
    * populate the main agent's runtime env vars, not CLI sub-agent configs.
    *
-   * ## Precedence: user tier → registry `defaultTiers` → live catalogue
+   * ## Tier selection
    *
    * The third link is TASK_2026_262. `openrouter`, `lm-studio` and `requesty`
    * declare no `defaultTiers`, so before it this method ran and legitimately
@@ -843,10 +886,9 @@ export class ProviderModelsService {
    * lane-alias path and the pinned-id path at once, because all three read
    * these same three env vars.
    *
-   * The order is deliberate and load-bearing: a tier the user picked, and a
-   * tier map the registry actually verified, both outrank a heuristic over a
-   * live list. The derivation is consulted only where the two of them left a
-   * hole.
+   * A non-empty user tier wins. A static default wins while no live catalogue
+   * is known or when that catalogue contains it. Otherwise a live-derived
+   * tier replaces the static default when available.
    *
    * @param providerId provider whose tiers should populate the runtime env
    * @param options.apiKey the provider's API key, when the caller has it in
@@ -859,26 +901,10 @@ export class ProviderModelsService {
     options: { apiKey?: string | null } = {},
   ): void {
     const userTiers = this.getModelTiers(providerId, 'mainAgent');
-    const providerDefaults =
-      getAnthropicProvider(providerId)?.defaultTiers ?? {};
-
-    let liveDerived: DerivedTierMap | undefined;
-    const derivedFor = (tier: ProviderModelTier): string | undefined => {
-      liveDerived ??= this.getLiveDerivedTiers(providerId);
-      return liveDerived[tier];
-    };
-
-    const effectiveTiers: Record<string, string | undefined> = {};
-    for (const tier of Object.keys(TIER_ENV_VAR_MAP)) {
-      const key = tier as keyof typeof TIER_ENV_VAR_MAP;
-      effectiveTiers[tier] =
-        userTiers[key as keyof typeof userTiers] ??
-        providerDefaults[key as keyof typeof providerDefaults] ??
-        derivedFor(key);
-    }
+    const effectiveTiers = this.resolveEffectiveTiers(providerId, userTiers);
 
     for (const [tier, envKey] of Object.entries(TIER_ENV_VAR_MAP)) {
-      const value = effectiveTiers[tier];
+      const value = effectiveTiers[tier as ProviderModelTier];
       if (value) {
         this.authEnv[envKey as keyof AuthEnv] = value;
         process.env[envKey] = value;
@@ -888,11 +914,11 @@ export class ProviderModelsService {
 
     this.logger.debug(
       '[ProviderModelsService] Applied persisted tier mappings',
-      { providerId, userTiers, providerDefaults, liveDerived, effectiveTiers },
+      { providerId, userTiers, effectiveTiers },
     );
 
     const unresolved = Object.keys(TIER_ENV_VAR_MAP).filter(
-      (tier) => !effectiveTiers[tier],
+      (tier) => !effectiveTiers[tier as ProviderModelTier],
     );
     if (unresolved.length > 0) {
       void this.refreshTiersFromLiveCatalog(

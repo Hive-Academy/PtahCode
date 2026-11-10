@@ -2,7 +2,8 @@
  * OpenCode translation proxy.
  *
  * One immutable subscription selects the endpoint and credential source. Each
- * request resolves its own protocol from the reviewed shared catalog. The base
+ * request resolves its protocol from the reviewed table, then the live gateway
+ * catalog for newly published IDs. The base
  * owns transport, native relay, translation, quota, cancellation and teardown.
  */
 import type { Logger } from '@ptah-extension/vscode-core';
@@ -16,6 +17,7 @@ import {
 } from '@ptah-extension/shared';
 import { TranslationProxyBase } from '../../translation';
 import type { IOpenCodeAuthService } from './opencode-provider.types';
+import { openCodeLiveRoutes } from './opencode-live-routes';
 
 export class OpenCodeTranslationProxy extends TranslationProxyBase {
   private readonly entry: Readonly<AnthropicProvider>;
@@ -69,6 +71,12 @@ export class OpenCodeTranslationProxy extends TranslationProxyBase {
     modelId: string,
   ): OpenCodeProtocol | undefined {
     return getOpenCodeModelProtocol(this.providerId, modelId);
+  }
+
+  protected override async resolveUpstreamProtocolForRequest(
+    modelId: string,
+  ): Promise<OpenCodeProtocol | undefined> {
+    return openCodeLiveRoutes.resolve(this.providerId, modelId);
   }
 
   protected getStaticModels(): Array<{ id: string }> {

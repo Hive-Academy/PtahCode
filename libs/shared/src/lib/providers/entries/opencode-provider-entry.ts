@@ -76,6 +76,8 @@ export const OPENCODE_GO_DEFAULT_TIERS = {
  * as "window unknown" instead of "window zero". Populating it needs the full
  * 97-model table, which is follow-up work.
  *
+ * These rows are the reviewed fallback and metadata source; the public gateway
+ * catalog can add newly routed IDs at runtime.
  * Cost fields are intentionally omitted so `seedStaticModelPricing` never
  * seeds unverified prices.
  */
