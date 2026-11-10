@@ -98,6 +98,9 @@ test('machines inbox', async ({ app, ui, page }) => {
       { sessionId: 's2', title: 'api-contracts', state: 'idle', updatedAt: now - 840_000, provider: 'Codex', logged: true },
       { sessionId: 's3', title: 'release-check', state: 'interrupted', updatedAt: now - 3_600_000, provider: 'Gemini', logged: true },
     ]]])]]));
+    // One waiting tool approval in the opened sample session "fix-auth".
+    const request = { id: 'p1', toolName: 'Bash', toolInput: { command: 'npm run db:migrate -- --env staging' }, toolUseId: 'tu1', timestamp: now, description: 'Run a command', timeoutAt: now + 42_000 };
+    store['_views'].set(new Map([['m-build\u0000s1', { machineId: 'm-build', reducer: { pendingPermissions: [request], timedOutPermissions: [] }, lockUnavailable: false, error: null }]]));
   };
   await page.evaluate(seed);
   await page.getByRole('option', { name: /build-01/ }).first().click();
@@ -107,10 +110,41 @@ test('machines inbox', async ({ app, ui, page }) => {
   await page.waitForTimeout(300);
   for (const theme of THEMES) await shot(page, 'machines-main', theme);
 
+  // Readiness after a check: the sample machine has no backend, so the result is sample data.
+  await page.getByTestId('machine-readiness-tile').locator('summary').click();
+  await expect(page.locator('ptah-readiness-panel')).toBeVisible();
+  await page.waitForTimeout(1500);
+  await page.evaluate(() => {
+    interface Panel { loading: { set(v: unknown): void }; error: { set(v: unknown): void }; result: { set(v: unknown): void } }
+    const ng = (window as unknown as { ng: { getComponent(el: Element | null): Panel } }).ng;
+    const panel = ng.getComponent(document.querySelector('ptah-readiness-panel'));
+    const pass = (id: string, label: string, detail: string) => ({ id, label, status: 'pass', detail });
+    panel.loading.set(false);
+    panel.error.set(null);
+    panel.result.set({ machineId: 'm-build', local: { ready: true, checks: [pass('lock', 'Driver lock', 'Free')] }, remote: { ready: true, checks: [
+      pass('os', 'Operating system', 'Ubuntu 24.04'), pass('node', 'Node and SQLite', 'Node 24.1'), pass('versions', 'Versions', 'ptah 1.42.0, protocol 7'),
+      pass('listener', 'Listener', 'Port open'), pass('workspaces', 'Workspaces', '1 workspace'), pass('provider', 'Provider', 'Claude signed in'),
+    ] } });
+  });
+  await page.waitForTimeout(300);
+  for (const theme of THEMES) await shot(page, 'machines-readiness', theme);
+  await page.getByTestId('machine-readiness-tile').locator('summary').click();
+
   await size(app, 720, 1000);
   await page.waitForTimeout(400);
   await shot(page, 'machines-narrow', 'dark');
   await size(app, 1600, 1000);
+
+  // Error state: the machine list failed to load.
+  await page.evaluate(() => {
+    interface Debug { getComponent(el: Element | null): { store: Record<string, { set(v: unknown): void }> } }
+    const store = (window as unknown as { ng: Debug }).ng.getComponent(document.querySelector('ptah-machines-view')).store;
+    store['_views'].set(new Map());
+    store['_machines'].set([]);
+    store['_error'].set({ message: 'The machine service did not answer.' });
+  });
+  await page.waitForTimeout(400);
+  for (const theme of THEMES) await shot(page, 'machines-error', theme);
 
   for (const theme of THEMES) await prototypeShot(app, 'machines-a.html', 'machines-prototype', theme);
 });
@@ -144,7 +178,8 @@ test('reviews inbox', async ({ app, ui, page }) => {
       run(461, 'Avoid duplicate posts', 'web', 'a6b7c8d9e0', 'superseded', 'poll', 180),
       run(458, 'Fix parser bounds', 'cli', 'b7c8d9e0f1', 'succeeded', 'poll', 240),
     ];
-    store['repositories'].set(['api', 'web', 'cli', 'docs'].map((name) => ({ owner: 'org', name, enabled: true, dryRun: name !== 'api', publicationPaused: false })));
+    store['repositories'].set(['api', 'web', 'cli', 'docs'].map((name) => ({ owner: 'org', name, enabled: name !== 'docs', dryRun: name === 'web', publicationPaused: name === 'cli' })));
+    store['nextCursor'].set('cursor-2');
     store['runs'].set(runs);
     store['lastRefreshedAt'].set(new Date());
     store['state'].set('ready');
@@ -161,6 +196,19 @@ test('reviews inbox', async ({ app, ui, page }) => {
   await page.waitForTimeout(400);
   await shot(page, 'reviews-medium', 'dark');
   await size(app, 1600, 1000);
+
+  // Error state: the run list failed to load and no cached runs exist.
+  await page.evaluate(() => {
+    interface Debug { getComponent(el: Element | null): { store: Record<string, { set(v: unknown): void }> } }
+    const store = (window as unknown as { ng: Debug }).ng.getComponent(document.querySelector('ptah-review-runs-page')).store;
+    store['selectedAttemptId'].set(null);
+    store['selectedRun'].set(null);
+    store['runs'].set([]);
+    store['nextCursor'].set(null);
+    store['state'].set('error');
+  });
+  await page.waitForTimeout(400);
+  for (const theme of THEMES) await shot(page, 'reviews-error', theme);
 
   for (const theme of THEMES) await prototypeShot(app, 'reviews-a.html', 'reviews-prototype', theme);
 });
