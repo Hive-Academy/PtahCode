@@ -133,6 +133,12 @@ describe('ChatVitalsStore', () => {
     expect(store.spend7()).toEqual(VITALS_LOADING);
   });
 
+  it.each(['', '  '])('does not load recent sessions for an empty path: %s', (value) => {
+    path.set(value);
+    create();
+    expect(recent.load).not.toHaveBeenCalled();
+  });
+
   it('maps the 7-day spend over one window', () => {
     const store = create();
     usage.entry('/work/ptah', 7).set(vitalsReady(summary([])));
