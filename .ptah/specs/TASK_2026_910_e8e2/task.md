@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_910_e8e2
-status: backlog
+status: in_review
 type: BUGFIX
 title: Fix lane budget stops and the automatic session handoff
 depends_on: []
