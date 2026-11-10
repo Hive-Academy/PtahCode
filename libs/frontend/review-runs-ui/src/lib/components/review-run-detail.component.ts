@@ -5,6 +5,9 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
 import { RUN_STATUS_INK, reviewStatusLabel } from './review-runs-list.component';
 import { ReviewFindingsTableComponent, reviewFindingRows } from './review-findings-table.component';
 
+/** The run contract and the query return 16 stage records at most. */
+const STAGE_LIMIT = 16;
+
 @Component({
   selector: 'ptah-review-run-detail', standalone: true, imports: [ReviewFindingsTableComponent, ReviewConfirmDialogComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -32,27 +35,34 @@ import { ReviewFindingsTableComponent, reviewFindingRows } from './review-findin
         @else if (loadState() === 'error') { <div class="alert alert-error mt-5" role="alert">Run details are unavailable. <button type="button" class="btn btn-ghost btn-sm" (click)="retry.emit()">Retry</button></div> }
         @else {
           <section class="surface-2 mt-4 rounded-box p-4" aria-label="Coverage" data-testid="review-detail-coverage">
-            <div class="flex items-center justify-between gap-2 text-sm"><span class="font-semibold">Coverage</span><span>{{ run().coverage.length }} of {{ lensTotal() }} lenses</span></div>
-            <progress class="progress progress-primary mt-2 h-1 w-full" [value]="run().coverage.length" [max]="lensTotal() || 1" aria-label="Lens coverage"></progress>
+            <div class="flex items-center justify-between gap-2 text-sm"><span class="font-semibold">Coverage</span>
+              @if (lensCount(); as count) { <span data-testid="review-detail-lens-count">{{ count.completed }} of {{ count.total }} lenses completed</span> }
+              @else { <span class="text-base-content-muted" data-testid="review-detail-lens-count-unavailable">Lens count unavailable</span> }
+            </div>
+            @if (lensCount(); as count) { <progress class="progress progress-primary mt-2 h-1 w-full" [value]="count.completed" [max]="count.total" aria-label="Completed lenses"></progress> }
             @if (run().status === 'partial') { <p class="mt-2 text-sm text-state-need">Coverage limited. Unchecked paths are not claimed clean.</p> }
+            @if (run().coverage.length) { <h3 class="mt-3 text-xs font-semibold">Coverage notes</h3>
+              <ul class="mt-1 flex flex-wrap gap-x-3 gap-y-1" data-testid="review-detail-coverage-notes">@for (note of run().coverage; track $index) { <li class="break-all font-mono text-xs text-base-content-muted">{{ note }}</li> }</ul> }
           </section>
           <section class="mt-5"><h3 class="font-semibold">Stages</h3>
-            @if (run().stages.length === 0) { <p class="text-sm text-base-content-muted">Stage history unavailable.</p> }
+            @if (pipelineStages().length === 0) { <p class="text-sm text-base-content-muted">Stage history unavailable.</p> }
             @else { <ol class="mt-2 grid grid-cols-1 gap-2 min-[768px]:grid-cols-2 min-[1400px]:grid-cols-4" data-testid="review-detail-stages">
-              @for (stage of run().stages; track stage.name + ':' + (stage.scope ?? '')) { <li class="surface-2 rounded-box px-3 py-2">
+              @for (stage of pipelineStages(); track stage.name + ':' + (stage.scope ?? '')) { <li class="surface-2 rounded-box px-3 py-2">
                 <p class="flex items-center gap-1.5 truncate text-sm" [class]="ink(stage.status)"><span class="h-2 w-2 shrink-0 rounded-full bg-current" aria-hidden="true"></span>{{ stageLabel(stage) }}</p>
                 <p class="text-xs text-base-content-muted">{{ label(stage.status) }}{{ stage.durationMs === null ? '' : ' · ' + seconds(stage.durationMs) }}</p>
                 @if (stage.error) { <p class="text-xs" role="status">{{ stage.error }}</p> }
               </li> }
             </ol> }
           </section>
-          <section class="mt-5"><h3 class="font-semibold">Coverage per lens</h3>
-            @if (run().coverage.length) { <ul class="mt-2 grid grid-cols-1 gap-2 min-[1100px]:grid-cols-2" data-testid="review-detail-lenses">@for (item of run().coverage; track item) { <li class="surface-2 rounded-box px-3 py-2">
-              <p class="truncate text-sm font-semibold">{{ item }}</p>
-              <p class="text-xs text-base-content-muted">Family: {{ family('lenses') ?? 'Unavailable' }} · Verifier family: {{ family('verification') ?? 'Unavailable' }}</p>
+          <section class="mt-5"><h3 class="font-semibold">Lenses</h3>
+            @if (lensStages().length) { <ul class="mt-2 grid grid-cols-1 gap-2 min-[1100px]:grid-cols-2" data-testid="review-detail-lenses">@for (lens of lensStages(); track lens.scope) { <li class="surface-2 rounded-box px-3 py-2">
+              <p class="flex items-center gap-1.5 truncate text-sm font-semibold" [class]="ink(lens.status)"><span class="h-2 w-2 shrink-0 rounded-full bg-current" aria-hidden="true"></span>{{ lens.scope }}</p>
+              <p class="text-xs text-base-content-muted">{{ label(lens.status) }}{{ lens.durationMs === null ? '' : ' · ' + seconds(lens.durationMs) }}</p>
+              <p class="text-xs text-base-content-muted">Family: {{ lens.family ?? 'Unavailable' }} · Verifier family: {{ family('verification') ?? 'Unavailable' }}</p>
+              @if (lens.error) { <p class="text-xs" role="status">{{ lens.error }}</p> }
             </li> }</ul> }
-            @else { <p class="text-sm text-base-content-muted">Lane coverage unavailable.</p> }
-            @if (family('lenses') && family('lenses') === family('verification')) { <span class="badge badge-warning mt-2">Weaker evidence · same-family verification</span> }
+            @else { <p class="text-sm text-base-content-muted">Lens records unavailable.</p> }
+            @if (sameFamilyVerification()) { <span class="badge badge-warning mt-2">Weaker evidence · same-family verification</span> }
           </section>
           <section class="mt-6">
           <h3 class="font-semibold">Findings</h3>
@@ -91,8 +101,23 @@ export class ReviewRunDetailComponent implements AfterViewInit, OnDestroy {
   ink(status: ReviewRun['status']): string { return RUN_STATUS_INK[status]; }
   label(status: ReviewRun['status']): string { return reviewStatusLabel(status); }
   seconds(ms: number): string { return Math.round(ms / 1000) + 's'; }
-  /** Lenses of the run: the covered lenses, or more when the run has more lens stages. */
-  lensTotal(): number { return Math.max(this.run().coverage.length, this.run().stages.filter(stage => stage.name === 'lenses' && stage.scope).length); }
+  /** One record for each lens that ran: the contract gives a lens as a `lenses` stage with the lens name in `scope`. */
+  lensStages(): StageRecord[] { return this.run().stages.filter(stage => stage.name === 'lenses' && !!stage.scope); }
+  /** The stages without the lens records, which have their own section. */
+  pipelineStages(): StageRecord[] { return this.run().stages.filter(stage => !(stage.name === 'lenses' && !!stage.scope)); }
+  /**
+   * Completed lenses of the lenses that ran. `coverage` holds scope notes (diff, dependencies, checks), not lenses.
+   * No count when there is no lens record, or when the stage list is at its limit and can be cut.
+   */
+  lensCount(): { completed: number; total: number } | null {
+    const lenses = this.lensStages();
+    if (lenses.length === 0 || this.run().stages.length >= STAGE_LIMIT) return null;
+    return { completed: lenses.filter(lens => lens.status === 'succeeded').length, total: lenses.length };
+  }
+  sameFamilyVerification(): boolean {
+    const verifier = this.family('verification');
+    return verifier !== null && this.run().stages.some(stage => stage.name === 'lenses' && stage.family === verifier);
+  }
   startLiveRerun(): void { this.confirmLive.set(false); void this.store.rerun(this.run().attemptId, false); }
   stageLabel(stage: StageRecord): string { return stage.name === 'lenses' && stage.scope ? stage.scope : ({ discovery: 'Discovery', context: 'Context', checks: 'Checks', triage: 'Triage', lenses: 'Lenses', verification: 'Verification', identity: 'Identity', publication: 'Publication' })[stage.name]; }
   family(name: StageRecord['name']): string | null { return this.run().stages.find(stage => stage.name === name)?.family ?? null; }

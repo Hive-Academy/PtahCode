@@ -163,12 +163,17 @@ test('reviews inbox', async ({ app, ui, page }) => {
     const ng = (window as unknown as { ng: Debug }).ng;
     const store = ng.getComponent(document.querySelector('ptah-review-runs-page')).store;
     const at = (minutes: number): string => new Date(Date.now() - minutes * 60_000).toISOString();
-    const stage = (name: string, status: string, durationMs: number) => ({ name, status, family: name === 'lenses' ? 'codex' : null, scope: null, durationMs, error: null, artifactPath: null });
-    const stages = (status: string) => ['discovery', 'context', 'checks', 'triage', 'lenses', 'verification', 'identity', 'publication'].map((name, i) => stage(name, status, 1200 + i * 900));
+    const stage = (name: string, status: string, durationMs: number, family: string | null = null, scope: string | null = null) => ({ name, status, family, scope, durationMs, error: null, artifactPath: null });
+    // As the query returns a run: one `lenses` record for each lens (name in `scope`), and a verifier of another family.
+    const lenses = (status: string) => [['correctness-lifecycle', 'codex'], ['security-privacy', 'claude'], ['tests-contracts', 'codex'], ['maintainability', 'claude']].map(([scope, family], i) => stage('lenses', status, 8200 + i * 2100, family, scope));
+    const stages = (status: string) => [
+      ...['discovery', 'context', 'checks', 'triage'].map((name, i) => stage(name, status, 1200 + i * 900)), ...lenses(status),
+      stage('verification', status, 4800, 'gemini'), ...['identity', 'publication'].map((name, i) => stage(name, status, 900 + i * 600)),
+    ];
     const run = (prNumber: number, prTitle: string, name: string, sha: string, status: string, trigger: string, age: number) => ({
       repo: { owner: 'org', name }, prNumber, prTitle, headSha: sha.padEnd(40, '0'), attemptId: `attempt-${prNumber}`, trigger, configHash: null, status,
       createdAt: at(age + 6), startedAt: status === 'queued' ? null : at(age + 5), completedAt: ['queued', 'running'].includes(status) ? null : at(age), deadlineAt: null,
-      coverage: ['correctness', 'security', 'tests', 'style'], postedCount: 2, suppressedCount: 1, stages: stages(status === 'queued' ? 'queued' : status === 'running' ? 'running' : 'succeeded'),
+      coverage: ['diff-complete', 'dependencies:passed', 'lint:passed', 'typecheck:passed'], postedCount: 2, suppressedCount: 1, stages: stages(status === 'queued' ? 'queued' : status === 'running' ? 'running' : 'succeeded'),
     });
     const runs = [
       run(482, 'Fix cache key collision', 'api', 'a1b2c3d4e5', 'succeeded', 'poll', 4),
