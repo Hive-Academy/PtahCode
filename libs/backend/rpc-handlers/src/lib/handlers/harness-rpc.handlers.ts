@@ -875,6 +875,7 @@ export class HarnessRpcHandlers {
       }
       return true;
     } catch (error: unknown) {
+      // degradation-audit: reported - logged; the seed prompt then omits the skills it cannot deliver.
       this.logger.warn(
         '[harness:start-new-project] Skill allowlist write threw; seed prompt will omit Stage A skills',
         {
