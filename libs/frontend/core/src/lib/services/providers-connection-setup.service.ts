@@ -548,8 +548,13 @@ export class ProvidersConnectionSetupService implements MessageHandler {
     }
     const activation = draft.activation;
     const currentRoute = hooks.route();
+    const routeIsKnownUnset = currentRoute.status === 'ready' &&
+      currentRoute.data?.route === 'unresolved' &&
+      currentRoute.data.driverProviderId === null &&
+      currentRoute.data.authMethodIsUnset;
     if (draft.providerId === 'anthropic' && activation === 'connect-only' &&
         draft.credential?.value.trim() &&
+        !routeIsKnownUnset &&
         (currentRoute.status !== 'ready' || !currentRoute.data || currentRoute.data.route === 'unresolved' || !currentRoute.data.driverProviderId)) {
       this.commits.block(['Connection credential'], 'Load the main-agent route before saving the Claude API key.');
       return true;

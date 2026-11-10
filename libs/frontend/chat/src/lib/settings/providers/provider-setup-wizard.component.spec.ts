@@ -1222,6 +1222,7 @@ describe('ProviderSetupWizardComponent', () => {
       click(fixture, 'wizard-continue');
       const checked = fixture.nativeElement.querySelector<HTMLInputElement>('input[name="wizard-activation"]:checked');
       expect(checked?.getAttribute('data-testid')).toBe('wizard-activation-connect-only');
+      expect(fixture.nativeElement.textContent).toContain('The main agent remains unconfigured until you choose a provider.');
     });
 
     it('allows Claude API connect only, preserves an explicit choice, and emits that choice', async () => {

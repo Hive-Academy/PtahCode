@@ -1348,6 +1348,20 @@ describe('AuthRpcHandlers', () => {
       expect(diagnosticText(h)).not.toContain('new-secret');
     });
 
+    it('reports a saved key when active adapter refresh fails', async () => {
+      const h = makeHarness({ workspaceOverrides: { authMethod: 'apiKey' } });
+      h.sdkAdapter.reset.mockRejectedValueOnce(new Error('sensitive refresh failure'));
+      h.handlers.register();
+      expect(await call(h, 'auth:setDirectAnthropicApiKey', { apiKey: 'new-secret' })).toEqual({
+        success: true,
+        error: 'API key saved, but the active agent could not refresh.',
+      });
+      expect(h.authSecrets.setCredential).toHaveBeenCalledWith('apiKey', 'new-secret');
+      expect(h.logger.error).toHaveBeenCalledWith('RPC: auth:setDirectAnthropicApiKey adapter refresh failed', expect.any(Error));
+      expect(diagnosticText(h)).not.toContain('new-secret');
+      expect(diagnosticText(h)).not.toContain('sensitive refresh failure');
+    });
+
     it('deletes only the direct secret for null', async () => {
       const h = makeHarness({ credentialsSeed: { apiKey: 'old-secret' } });
       h.handlers.register();

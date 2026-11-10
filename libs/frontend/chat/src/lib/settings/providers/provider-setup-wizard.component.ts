@@ -1271,6 +1271,9 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                       >The connection is available, but the main agent keeps its current
                       provider.</span
                     >
+                    @if (verifyProviderId() === 'anthropic' && !mainRouteExists()) {
+                      <span class="block text-xs text-base-content-muted">The main agent remains unconfigured until you choose a provider.</span>
+                    }
                   </span>
                 </label>
                 <label class="flex items-start gap-2 rounded-md bg-base-100 p-2">

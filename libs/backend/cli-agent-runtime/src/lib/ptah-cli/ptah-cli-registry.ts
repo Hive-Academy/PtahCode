@@ -513,6 +513,9 @@ export class PtahCliRegistry {
       credentialSource: source,
       updatedAt: Date.now(),
     };
+    if (apiKey !== undefined && source === 'instance') {
+      await this.authSecrets.setProviderKey(`${PTAH_CLI_KEY_PREFIX}.${id}`, apiKey);
+    }
     configs[index] = updated;
 
     await this.configPersistence.saveConfigs(configs);
@@ -531,13 +534,6 @@ export class PtahCliRegistry {
         throw new SdkError('Could not switch agent credential source');
       }
     }
-    if (apiKey !== undefined && source === 'instance') {
-      await this.authSecrets.setProviderKey(
-        `${PTAH_CLI_KEY_PREFIX}.${id}`,
-        apiKey,
-      );
-    }
-
     this.logger.info(
       `[PtahCliRegistry] Updated agent "${updated.name}" (${id})`,
     );

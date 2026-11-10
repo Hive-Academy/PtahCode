@@ -66,7 +66,12 @@ export class ApiKeyMethods {
           await authSecretsService.setCredential('apiKey', parsed.data.apiKey);
           // Refresh only an active Claude API route; preserve all auth settings and scope overrides.
           if (this.deps.scopeResolver.read<string>('authMethod', true) === 'apiKey') {
-            await this.deps.sdkAdapter.reset();
+            try {
+              await this.deps.sdkAdapter.reset();
+            } catch {
+              logger.error('RPC: auth:setDirectAnthropicApiKey adapter refresh failed', new Error('Adapter refresh failed'));
+              return { success: true, error: 'API key saved, but the active agent could not refresh.' };
+            }
           }
         }
         return { success: true };

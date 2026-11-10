@@ -123,6 +123,16 @@ describe('Ptah CLI direct Claude API credentials', () => {
     expect(h.secrets.setProviderKey).not.toHaveBeenCalled();
   });
 
+  it('keeps the shared source when writing an instance key fails', async () => {
+    const h = harness();
+    const created = await h.registry.createAgent('Claude', 'anthropic-api', undefined, 'shared-connection');
+    h.secrets.setProviderKey.mockRejectedValueOnce(new Error('secret write failed'));
+    await expect(h.registry.updateAgent(created.id, { credentialSource: 'instance' }, 'new-secret')).rejects.toThrow('secret write failed');
+    expect(h.configs[0].credentialSource).toBe('shared-connection');
+    expect(h.persistence.saveConfigs).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(h.configs)).not.toContain('new-secret');
+  });
+
   it('reports failed cleanup without logging a secret or masking the save error', async () => {
     const h = harness();
     h.persistence.saveConfigs.mockRejectedValueOnce(new Error('configuration failed'));

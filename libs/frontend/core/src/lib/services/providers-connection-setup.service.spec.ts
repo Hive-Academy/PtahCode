@@ -355,6 +355,16 @@ describe('ProvidersConnectionSetupService', () => {
       expect(commits.commit().status).toBe('blocked');
     });
 
+    it('saves a first Claude API key when the loaded main route is genuinely unset', async () => {
+      if (route.data) route = { ...route, data: { ...route.data, route: 'unresolved', driverProviderId: null, authMethodIsUnset: true } };
+      await service.verifyDraft({ probeId: 'p1', providerId: 'anthropic', authMode: 'apiKey' });
+      call.mockClear();
+      await service.connectProvider(draft({ providerId: 'anthropic' }), context, hooks);
+      expect(methods()).toEqual(['auth:setDirectAnthropicApiKey']);
+      expect(methods()).not.toContain('auth:saveSettings');
+      expect(commits.commit().status).toBe('saved');
+    });
+
     it('blocks connect-only replacement when the route is unresolved', async () => {
       if (route.data) route = { ...route, data: { ...route.data, route: 'unresolved', driverProviderId: null } };
       await service.verifyDraft({ probeId: 'p1', providerId: 'anthropic', authMode: 'apiKey' });

@@ -255,6 +255,8 @@ export class ProvidersSettingsStateService {
         resolvedAuthModality: result.resolvedAuthModality,
         resolvedModel: result.resolvedModel,
         storedAuthMethodScope: result.storedAuthMethodScope,
+        authMethodIsUnset: result.storedAuthMethodDiagnostic === null ||
+          result.storedAuthMethodDiagnostic.trim() === '',
         providers: result.providers,
         lastSuccessfulProbeAt: result.lastSuccessfulProbeAt,
         lastFailedProbeAt: result.lastFailedProbeAt,

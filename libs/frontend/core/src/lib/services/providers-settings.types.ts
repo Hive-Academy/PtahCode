@@ -26,7 +26,7 @@ export interface ProvidersSettingsSection<T> {
 export type ProvidersEffectiveRoute = Omit<
   AuthGetEffectiveRouteResult,
   'storedAuthMethodDiagnostic'
->;
+> & { readonly authMethodIsUnset: boolean };
 export const PROVIDERS_ENHANCEMENT_KEYS = {
   provider: 'skills.enhancement.provider',
   model: 'skills.enhancement.model',
