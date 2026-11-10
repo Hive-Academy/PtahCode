@@ -26,6 +26,7 @@ import type {
   GitStatusUnavailableReason,
 } from '@ptah-extension/shared';
 import type { OpenInRequest } from '../open-in/open-in-button.component';
+import { GIT_WINDOW_CONTEXT, type GitWindowContext } from '../git-window-context.token';
 import { EditorLauncherService } from '../services/editor-launcher.service';
 import { FileContentChangesService } from '../services/file-content-changes.service';
 import { GitBranchesService } from '../services/git-branches.service';
@@ -219,9 +220,13 @@ describe('ReviewShellComponent', () => {
     scope: ReturnType<typeof signal<GitDockScope>>;
     pin: jest.Mock;
     unpin: jest.Mock;
+      requestWindowMode: jest.Mock;
   };
 
+  let windowContext: GitWindowContext | null = null;
+
   beforeEach(() => {
+    windowContext = null;
     worktreeStatus = makeWorktreeStatus();
     scopeStore = {
       followsSessions: signal(true),
@@ -234,6 +239,7 @@ describe('ReviewShellComponent', () => {
       }),
       pin: jest.fn(),
       unpin: jest.fn(),
+        requestWindowMode: jest.fn(async () => undefined),
     };
     layout = { addFolderByPath: jest.fn(async () => undefined), editorPanelVisible: signal(true) };
     FakeResizeObserver.instances = [];
@@ -263,6 +269,7 @@ describe('ReviewShellComponent', () => {
         { provide: ReviewWorktreeStatusService, useValue: worktreeStatus },
         { provide: ElectronLayoutService, useValue: layout },
         { provide: GitDockScopeStore, useValue: scopeStore },
+        { provide: GIT_WINDOW_CONTEXT, useFactory: () => windowContext },
       ],
     });
     navigation = TestBed.inject(ReviewNavigationService);
@@ -1158,6 +1165,39 @@ describe('ReviewShellComponent', () => {
       const fixture = await render();
 
       expect(header(fixture)).toBeNull();
+    });
+
+    it('shows Detach in the main header when available', async () => {
+      const detach = jest.fn();
+      windowContext = { role: 'main', detach };
+      const fixture = await render();
+      const button = query(fixture, '[data-testid="git-dock-detach"]') as HTMLButtonElement;
+      expect(button).not.toBeNull();
+      // The icon is decorative: the accessible name stays 'Detach'.
+      expect(button.textContent?.trim()).toBe('Detach');
+      expect(button.querySelector('lucide-angular')?.getAttribute('aria-hidden')).toBe('true');
+      expect(query(fixture, '[data-testid="git-dock-detach-divider"]')).not.toBeNull();
+      button.click();
+      expect(detach).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not leave Detach alone in the row when the folder is not a repository', async () => {
+      windowContext = { role: 'main', detach: jest.fn() };
+      gitStatus.isGitRepo.set(false);
+      const fixture = await render();
+      expect(query(fixture, '[data-testid="git-dock-detach"]')).toBeNull();
+      expect(query(fixture, '[data-testid="git-dock-detach-divider"]')).toBeNull();
+      const row = query(fixture, '[data-testid="git-dock-main-header"]') as HTMLElement;
+      expect(row.textContent?.trim()).toBe('');
+    });
+
+    it('hides Detach and delegates pin requests in the child', async () => {
+      windowContext = { role: 'child', applyCandidates: jest.fn(), setMode: jest.fn() };
+      const fixture = await render();
+      expect(query(fixture, '[data-testid="git-dock-detach"]')).toBeNull();
+      (query(fixture, '[data-testid="git-dock-scope-pin"]') as HTMLButtonElement).click();
+      expect(scopeStore.requestWindowMode).toHaveBeenCalledWith(true);
+      expect(scopeStore.pin).not.toHaveBeenCalled();
     });
   });
 });

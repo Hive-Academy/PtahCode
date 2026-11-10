@@ -28,6 +28,7 @@ import type {
   RemoteInfo,
 } from '@ptah-extension/shared';
 import { OpenInButtonComponent } from '../open-in/open-in-button.component';
+import { GIT_WINDOW_CONTEXT } from '../git-window-context.token';
 import { EditorLauncherService } from '../services/editor-launcher.service';
 import { GitBranchesService } from '../services/git-branches.service';
 import { GitStatusService } from '../services/git-status.service';
@@ -1022,5 +1023,16 @@ describe('TaskWorktreeViewComponent', () => {
         nodes: violation.nodes.map((node) => node.html),
       })),
     ).toEqual([]);
+  });
+
+  it('disables workspace switching in the child while leaving worktree rows visible', async () => {
+    TestBed.overrideProvider(GIT_WINDOW_CONTEXT, {
+      useValue: { role: 'child', applyCandidates: jest.fn(), setMode: jest.fn() },
+    });
+    await render();
+    const button = switchButtonFor(FEATURE.path);
+    expect(button.disabled).toBe(true);
+    button.click();
+    expect(addFolderByPath).not.toHaveBeenCalled();
   });
 });

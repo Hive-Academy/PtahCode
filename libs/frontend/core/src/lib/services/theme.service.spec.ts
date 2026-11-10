@@ -532,6 +532,34 @@ describe('ThemeService', () => {
     });
   });
 
+  describe('followTheme()', () => {
+    it('shows the theme of another window and persists nothing', () => {
+      const mock = createMockVscode();
+      const service = configure(mock);
+      mock.setState.mockClear();
+      localStorage.removeItem('ptah-theme-v2');
+
+      service.followTheme('ptah-glass-light');
+      TestBed.tick();
+
+      expect(service.currentTheme()).toBe('ptah-glass-light');
+      expect(document.documentElement.getAttribute('data-theme')).toBe('ptah-glass-light');
+      expect(document.documentElement.getAttribute('data-theme-mode')).toBe('light');
+      expect(document.documentElement.getAttribute('data-glass-mode')).toBe('light');
+      expect(mock.setState).not.toHaveBeenCalled();
+      expect(localStorage.getItem('ptah-theme-v2')).toBeNull();
+    });
+
+    it('ignores an unknown theme name', () => {
+      const service = configure(createMockVscode());
+      const before = service.currentTheme();
+
+      service.followTheme('not-a-theme');
+
+      expect(service.currentTheme()).toBe(before);
+    });
+  });
+
   describe('setTheme()', () => {
     it('updates the signal and persists via VSCodeService.setState', () => {
       const mock = createMockVscode();

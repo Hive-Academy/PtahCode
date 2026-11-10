@@ -105,11 +105,12 @@ describe('Electron RPC surface', () => {
     );
   });
 
-  it('serves all fourteen review methods', () => {
+  it('serves all fifteen review methods', () => {
     const methods =
       RPC_HANDLER_MANIFEST.find((entry) => entry.key === 'review')?.methods ??
       [];
-    expect(methods).toHaveLength(14);
+    expect(methods).toHaveLength(15);
+    expect(methods).toContain('review:respondToFinding');
     expect(surface.registered).toEqual(expect.arrayContaining(methods));
     expect(surface.excluded).toEqual(expect.not.arrayContaining(methods));
   });
@@ -159,6 +160,19 @@ describe('Electron RPC surface', () => {
         'displayWindow:action',
       ]),
     );
+  });
+
+  it('serves exactly the six Git window methods', () => {
+    const methods = [
+      'gitWindow:open',
+      'gitWindow:close',
+      'gitWindow:status',
+      'gitWindow:publishScope',
+      'gitWindow:getScope',
+      'gitWindow:setMode',
+    ];
+    expect(surface.registered.filter((method) => method.startsWith('gitWindow:')).sort()).toEqual([...methods].sort());
+    expect(surface.excluded.some((method) => method.startsWith('gitWindow:'))).toBe(false);
   });
 });
 

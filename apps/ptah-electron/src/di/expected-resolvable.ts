@@ -18,6 +18,7 @@ import {
   GitWatchRpcHandlers,
   RecentWorkspacesService,
   DisplayWindowRpcHandlers,
+  GitWindowRpcHandlers,
   ReviewRpcHandlers,
 } from '@ptah-extension/rpc-handlers';
 import { CHAT_TOKENS } from '@ptah-extension/rpc-handlers';
@@ -49,6 +50,7 @@ export const EXPECTED_RESOLVABLE = [
   GitWatchRpcHandlers,
   RecentWorkspacesService,
   DisplayWindowRpcHandlers,
+  GitWindowRpcHandlers,
   ReviewRpcHandlers,
 ] as const;
 
@@ -77,6 +79,7 @@ export const EXPECTED_RESOLVABLE_TOKENS = [
   ['REVIEW_GITHUB', REVIEW_CORE_TOKENS.GITHUB],
   ['REVIEW_ENVIRONMENT', REVIEW_CORE_TOKENS.ENVIRONMENT],
   ['REVIEW_PUBLICATION_GUARD', REVIEW_GITHUB_TOKENS.PUBLICATION_GUARD],
+  ['REVIEW_GITHUB_PORT', REVIEW_GITHUB_TOKENS.REVIEW_PORT],
   ['REVIEW_PUBLICATION_PORT', REVIEW_GITHUB_TOKENS.PUBLICATION_PORT],
   ['REVIEW_CONTEXT_FILES', REVIEW_CONTEXT_TOKENS.FILES],
   ['REVIEW_COMMAND_RUNNER', REVIEW_CONTEXT_TOKENS.COMMAND_RUNNER],

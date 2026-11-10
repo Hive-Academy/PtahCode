@@ -237,6 +237,38 @@ describe('displayWindow methods (TASK_2026_853_3401)', () => {
   });
 });
 
+describe('gitWindow methods', () => {
+  const gitWindowMethods = [
+    'gitWindow:open',
+    'gitWindow:close',
+    'gitWindow:status',
+    'gitWindow:publishScope',
+    'gitWindow:getScope',
+    'gitWindow:setMode',
+  ] as const;
+
+  it('has exactly six distinct methods in the shared RPC registry', () => {
+    expect(new Set(gitWindowMethods).size).toBe(6);
+    for (const method of gitWindowMethods) expect(RPC_METHOD_NAMES).toContain(method);
+  });
+
+  it('is ungated and owns exactly these methods', () => {
+    const entry = RPC_HANDLER_MANIFEST.find((candidate) => candidate.key === 'gitWindow');
+    expect(entry?.requires).toEqual([]);
+    expect([...(entry?.methods ?? [])].sort()).toEqual([...gitWindowMethods].sort());
+    for (const method of gitWindowMethods) {
+      const owners = RPC_HANDLER_MANIFEST.filter((candidate) =>
+        (candidate.methods as readonly string[]).includes(method),
+      ).map((candidate) => candidate.key);
+      expect(owners).toEqual(['gitWindow']);
+    }
+  });
+
+  it('is accepted by the runtime prefix', () => {
+    expect(ALLOWED_METHOD_PREFIXES).toContain('gitWindow:');
+  });
+});
+
 describe('provider account methods (TASK_2026_712 Batch 35)', () => {
   const accountMethods: readonly string[] = PROVIDER_ACCOUNT_RPC_METHOD_NAMES;
 

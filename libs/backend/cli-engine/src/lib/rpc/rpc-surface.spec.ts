@@ -94,6 +94,7 @@ const EXPECTED_ABSENT_METHOD_NAMES: readonly string[] = [
   'review:listRuns',
   'review:refresh',
   'review:rerun',
+  'review:respondToFinding',
   'review:retryHead',
   'review:setBotToken',
   'review:setPublicationPause',
@@ -139,6 +140,19 @@ describe('CLI RPC surface', () => {
     expect(surface.excluded.some((m) => m.startsWith('displayWindow:'))).toBe(
       false,
     );
+  });
+
+  it('serves the gitWindow namespace with an unbound host', () => {
+    const methods = [
+      'gitWindow:open',
+      'gitWindow:close',
+      'gitWindow:status',
+      'gitWindow:publishScope',
+      'gitWindow:getScope',
+      'gitWindow:setMode',
+    ];
+    expect(surface.registered.filter((method) => method.startsWith('gitWindow:')).sort()).toEqual([...methods].sort());
+    expect(surface.excluded.some((method) => method.startsWith('gitWindow:'))).toBe(false);
   });
 
   it('serves bound guidance and generation recovery methods', () => {

@@ -3,6 +3,7 @@ import { ReviewRunsStore } from '../review-runs.store';
 import { TestBed } from '@angular/core/testing';
 import type { ReviewFinding, ReviewRun } from '@ptah-extension/review-contracts';
 import { ReviewRunDetailComponent } from './review-run-detail.component';
+import { ReviewFindingsStore } from '../findings/review-findings.store';
 
 const run: ReviewRun = {
   repo: { owner: 'Hive-Academy', name: 'PtahCode' }, prNumber: 428, headSha: 'a'.repeat(40),
@@ -26,6 +27,10 @@ const finding: ReviewFinding = {
 };
 
 describe('ReviewRunDetailComponent', () => {
+  beforeEach(() => TestBed.configureTestingModule({ providers: [{ provide: ReviewFindingsStore, useValue: {
+    triage: signal({}), openError: signal(null), copyError: signal(null), copied: signal(false),
+    openEvidence: jest.fn(), respond: jest.fn(), sendToLane: jest.fn(),
+  } }] }));
   it('labels partial coverage and same-family verification, and closes on Escape', () => {
     TestBed.configureTestingModule({ imports: [ReviewRunDetailComponent], providers: [{ provide: ReviewRunsStore, useValue: { rerunState: signal('idle'), hasToken: signal(false), settings: signal(null), rerun: jest.fn() } }] });
     const fixture = TestBed.createComponent(ReviewRunDetailComponent);
@@ -133,6 +138,7 @@ describe('ReviewRunDetailComponent', () => {
     expect(rendered).toContain(finding.title);
     expect(rendered).toContain(finding.failureMode);
     expect(rendered).toContain('90%');
+    expect(fixture.nativeElement.querySelector('ptah-review-findings-panel')).not.toBeNull();
   });
   it('shows findings loading and error states without raw errors', () => {
     TestBed.configureTestingModule({ imports: [ReviewRunDetailComponent], providers: [{ provide: ReviewRunsStore, useValue: {

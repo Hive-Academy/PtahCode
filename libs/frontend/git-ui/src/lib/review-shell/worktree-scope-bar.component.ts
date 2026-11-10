@@ -52,6 +52,7 @@ export function worktreeFolderName(path: string): string {
       >
         Back to {{ activeLabel() }}
       </button>
+      @if (!hideOpenAsWorkspace()) {
       <button
         type="button"
         class="btn btn-ghost btn-xs {{ focusRing }}"
@@ -61,10 +62,12 @@ export function worktreeFolderName(path: string): string {
       >
         Open as workspace
       </button>
+      }
     </div>
   `,
 })
 export class WorktreeScopeBarComponent {
+  readonly hideOpenAsWorkspace = input(false);
   /** The viewed worktree's root. */
   readonly root = input.required<string>();
   /** Its checked-out branch, once read; the folder name stands in until then. */

@@ -1,0 +1,137 @@
+# PR #1038 review fixes, round 4
+
+Base head: `4a0d5b7db` (verdict CHANGES_REQUIRED in `code-review-head-4a0d5b7db.md`).
+Code head after this round: `d455fdd146cdbe5df3847cceed621445370290dc`.
+Review record: `code-review-head.md` (verdict APPROVED on `d455fdd14`).
+
+## Finding 1 (Major): the Git child could write any setting
+
+- Cause: `git-window-scope-guard.ts` had `settings:get` and `settings:set` in
+  `UNSCOPED_METHODS`. The guard authorized them with no check of key or value.
+- Correction (`9e192a5e3`): the two methods left `UNSCOPED_METHODS`. The guard
+  parses the params with Zod:
+  - `settings:get`: key is `diff.renderSideBySide` or `editorLauncher.lastTarget`.
+  - `settings:set`: `diff.renderSideBySide` with a boolean value, or
+    `editorLauncher.lastTarget` with a string of 1 to 128 characters.
+  - Each other key, a wrong value type and missing params are refused before
+    the RPC handler runs. The main window is not restricted.
+- Source of the key set: the Git window root
+  (`apps/ptah-extension-webview/src/app/git-window/git-window.component.ts`)
+  mounts only the review shell of `libs/frontend/git-ui`. Its settings calls
+  are in `comparison-bar.component.ts` (`diff.renderSideBySide`) and
+  `open-in/open-in-button.component.ts` (`editorLauncher.lastTarget`). The
+  review lane found no other settings call.
+- `settings:set` stays in `GIT_WINDOW_ALLOWED_METHODS`: the child needs it
+  for these two preferences.
+
+## Finding 2 (Major, found by the round-4 review of `b3da01f39`)
+
+- Cause: the guard authorized `gitWindow:setMode` with no check of params. The
+  child could send `{ mode: 'pinned', tabId }` for an open tab of another
+  repository. The main renderer then published that repository as the scope.
+- Correction (`d455fdd14`): the guard parses the params with
+  `GitWindowSetModeParamsSchema` (strict object). `pinned` is accepted only
+  when `tabId` is the active tab of the acknowledged scope, which is the tab
+  that `requestWindowMode` sends. `follow-session` is accepted only with
+  `tabId: null`.
+
+## Audit of the other non-Git methods in the allowlist
+
+| Method | Result |
+| --- | --- |
+| `gitWindow:getScope` | Returns the acknowledged scope. No params. Kept. |
+| `gitWindow:close` | Closes the child itself. Kept. |
+| `gitWindow:setMode` | Was not bound. Corrected (finding 2). |
+| `settings:get`, `settings:set` | Were not bound. Corrected (finding 1). |
+| `editor:detectTargets` | Lists the installed editors. No scope data. Kept. |
+| `editor:openWorkspace` | Root must be a read root of the scope. Kept. |
+| `editor:openFile`, `editor:openMerge`, `file:viewContent` | Path is checked against the read roots after links are resolved. Kept. |
+| `file:saveContent` | Path is checked against the write root (`repoRoot`). Kept. |
+
+No other `settings:*` method is in the allowlist.
+
+## Tests
+
+- `git-window-scope-guard.spec.ts`: allowed settings keys pass. Nine negative
+  cases for settings (unrelated writable key, wrong value type, missing key,
+  missing value, missing params, unrelated read). One spec for `setMode`
+  (active tab passes, another open tab, a null pin, an extra property and
+  missing params are refused).
+- `ipc-bridge.git-window-scope.spec.ts`: an unrelated writable key
+  (`agentOrchestration.codexWebSearch`) and an unrelated read from the child
+  do not reach `handleMessage` and get the out-of-scope error. The four
+  allowed calls reach the handler. The main window can write the unrelated
+  key. A pin of another open tab is refused, and the pin of the active tab
+  and `follow-session` reach the handler.
+
+## Merge of main
+
+`origin/main` (`2cde6accc`, with PR #1039, #1041, #1043 and #1044) was merged
+in `b3da01f39`. No conflict. The merge changed no file in
+`apps/ptah-electron/src/windows` or `apps/ptah-electron/src/ipc`.
+`content-manifest.json` was not generated again.
+
+## Verification (head `d455fdd14`)
+
+- `npm run verify -- -p ptah-electron`: exit code 0. Lint and typecheck: 0
+  errors (35 lint warnings that were there before). Tests: 113 suites passed,
+  1 skipped. 1931 tests passed, 3 skipped.
+- `npx ts-node --transpile-only tools/degradation-audit/check-degradation.ts`:
+  passed. Each directory is at or below its baseline. No baseline changed.
+- Only `ptah-electron` files changed, so no other project was checked.
+- Note: the worktree had no `node_modules`. After the merge, the `marked`
+  mapper of `jest.preset.js` needs `<worktree>/node_modules`. A junction to
+  the `node_modules` of the main checkout was added, as in the other
+  worktrees. It is git-ignored.
+
+## Independent review
+
+- Round 1, codex lane, head `b3da01f39`: CHANGES_REQUIRED (finding 2). The
+  settings correction was confirmed complete.
+- Round 2, codex lane, head `d455fdd14`: APPROVED, no finding.
+- The commits after `d455fdd14` change only files in `.ptah/specs`.
+
+## Open limits
+
+- `follow-session` from the child moves the scope to the active session of
+  the main window. This is the designed default mode, not a defect.
+- The accepted limits of the earlier rounds (`decisions.md` rows 19 to 24,
+  `review-fixes-1038.md`) did not change.
+- CodeRabbit is not mandatory while its limit is active. No
+  `@coderabbitai review` comment was posted.
+
+## Round 5: CodeRabbit thread `PRRT_kwDOPngTds61q_gS` (Minor)
+
+- Claim: with more than 100 open sessions `GitWindowScopeSchema.safeParse`
+  fails in `git-window-sync.service.ts`, the scope is null, and a detached
+  child keeps an old scope with no message. The claim was checked against the
+  code and it is valid: `open` was not bounded and the effect skipped a null
+  scope.
+- Choice: both parts.
+  - Bounded payload (`4dd63f219`): `boundedOpenSessions` keeps at most 100
+    sessions. The active tab and the pinned tab come first, then the sessions
+    of the resolved root or the workspace root, then the others. The limit of
+    100 stays the IPC bound.
+  - No silent failure (`4dd63f219`): a rejected scope while detached is logged
+    with the injected `LoggingService` (issue paths and codes only), the main
+    window shows `Git scope is unavailable`, and the child gets the
+    unavailable scope (`unresolved: true`, null roots), not the old one.
+- Codex review of `4dd63f219`: CHANGES_REQUIRED. Major: a failed publication
+  of the unavailable scope was not sent again. Minor: Focus cleared the
+  error.
+- Correction (`8ba4199a5`): the retry timer and Focus publish the desired
+  scope, which is the unavailable scope while the parse is rejected. The
+  error stays shown after an accepted unavailable scope.
+- Tests (`git-window-sync.service.spec.ts`): two "(round 5)" tests (150
+  sessions keep `P`, `A`, `SAME` first with length 100. A rejected scope is
+  logged, sent as unavailable, and recovers). Two "(round 6)" tests (retry
+  of a failed unavailable publication with no other scope change. Focus keeps
+  the error and sends the unavailable scope).
+- Verification (head `8ba4199a5`): `npm run verify -- -p chat` exit code 0.
+  Lint and typecheck: 0 errors (199 warnings that were there before). Tests:
+  355 suites passed, 6324 tests passed, 2 skipped. Only `chat` files changed.
+- Codex review of `8ba4199a510dd85fc2756869042ea2aeaf0c73df`: APPROVED, no
+  finding (`code-review-head.md`, Round 4). The commits after it change only
+  files in `.ptah/specs`.
+- Known limit: the 101st and later sessions of the same root are not in
+  `open`. They get no lease and no push, and they get no added authority.

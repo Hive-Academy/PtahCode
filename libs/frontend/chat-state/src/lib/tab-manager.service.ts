@@ -1638,7 +1638,7 @@ export class TabManagerService {
    * Await the same close path used by the UI, without a programmatic confirmation.
    * Only AutoHandoffSourceCloserService may call this after checking all close blockers.
    */
-  async closeHandoffPredecessor(tabId: string, expectedSessionId: string | null): Promise<boolean> {
+  async closeHandoffPredecessor(tabId: string, expectedSessionId: string | null, predecessorStopped = false): Promise<boolean> {
     const lookup = this.findTabByIdAcrossWorkspaces(tabId);
     if (!lookup || (expectedSessionId === null
       ? lookup.tab.claudeSessionId != null
@@ -1651,6 +1651,7 @@ export class TabManagerService {
     return closeBackgroundTab({
       tab: lookup.tab,
       workspacePath: lookup.workspacePath,
+      predecessorStopped,
       partition: this.workspacePartition,
       abortStreaming: (id) => this.abortStreamingForTab(id),
       emitClosed: (event) => this.emitTabClosed(event),

@@ -15,6 +15,8 @@ import {
 import {
   isSameWorkingRoot,
   resolveSessionWorkingRoot,
+  GitWindowScopeSchema,
+  type GitWindowScope,
   type SessionWorkingRoot,
   type SessionWorkingRootSource,
 } from '@ptah-extension/shared';
@@ -28,6 +30,7 @@ import { GitRootWatchLeaseService } from './git-root-watch-lease.service';
 import { GitStatusService } from './git-status.service';
 import { ReviewDiffService } from './review-diff.service';
 import { ReviewNavigationService } from './review-navigation.service';
+import { GIT_WINDOW_CONTEXT } from '../git-window-context.token';
 
 export type GitDockScopeMode = 'follow-session' | 'pinned';
 
@@ -68,8 +71,12 @@ const UNRESOLVED_ROOT: CandidateRoot = {
   unresolved: true,
 };
 
+function sameWindowRoot(expected: string | null, actual: string | null): boolean {
+  return (expected === null && actual === null) || isSameWorkingRoot(expected, actual);
+}
+
 /** A pin: the tab, the workspace it was made in, and its last resolution. */
-interface PinnedScope {
+export interface PinnedScope {
   readonly tabId: string;
   readonly workspacePath: string | null;
   readonly name: string;
@@ -269,6 +276,9 @@ function sameScope(a: GitDockScope, b: GitDockScope): boolean {
  */
 @Injectable({ providedIn: 'root' })
 export class GitDockScopeStore {
+  private readonly windowContext = inject(GIT_WINDOW_CONTEXT, { optional: true });
+  private readonly acknowledgedScope = signal<GitWindowScope | null>(null);
+  private applyingWindowScope = false;
   private readonly source = inject(GIT_SESSION_SCOPE_SOURCE, {
     optional: true,
   });
@@ -303,13 +313,23 @@ export class GitDockScopeStore {
     () => this.source !== null && this.vscode.config().isElectron === true,
   );
 
-  readonly scope = computed<GitDockScope>(() => scopeFrom(this.readInputs()), {
+  readonly scope = computed<GitDockScope>(() => {
+    const resolved = scopeFrom(this.readInputs());
+    if (this.windowContext?.role !== 'child') return resolved;
+    const accepted = this.acknowledgedScope();
+    const unresolved = accepted === null || accepted.unresolved ||
+      !sameWindowRoot(accepted.repoRoot, resolved.root);
+    return unresolved ? { ...resolved, unresolved: true } : resolved;
+  }, {
     equal: sameScope,
   });
 
   readonly mode = computed<GitDockScopeMode>(() => this.scope().mode);
 
   constructor() {
+    if (this.windowContext?.role === 'child') {
+      this.gate.setBlockedReason(UNRESOLVED_SCOPE_MESSAGE);
+    }
     effect(() => {
       if (this.status.statusUnavailable() !== 'root-unavailable') return;
       const scope = this.scope();
@@ -319,8 +339,86 @@ export class GitDockScopeStore {
     });
     effect(() => {
       const inputs = this.readInputs();
+      this.acknowledgedScope();
+      if (this.applyingWindowScope) return;
       untracked(() => this.reconcile(inputs));
     });
+  }
+
+  /** Validate and apply one host-assigned snapshot; stale or invalid pushes are ignored. */
+  applyWindowScope(payload: unknown): boolean {
+    if (this.windowContext?.role !== 'child') return false;
+    const parsed = GitWindowScopeSchema.safeParse(payload);
+    if (!parsed.success) {
+      const previous = this.acknowledgedScope();
+      if (previous !== null) this.applyAcknowledgedScope(previous);
+      return false;
+    }
+    const next: GitWindowScope = parsed.data;
+    if ((next.mode === 'pinned') !== (next.pinnedTabId !== null)) {
+      const previous = this.acknowledgedScope();
+      if (previous !== null) this.applyAcknowledgedScope(previous);
+      return false;
+    }
+    const previous = this.acknowledgedScope();
+    if (previous !== null && next.sequence <= previous.sequence) return false;
+    this.applyAcknowledgedScope(next);
+    return true;
+  }
+
+  /** Ask the main renderer for a mode change without changing local pin state. */
+  async requestWindowMode(pin: boolean): Promise<void> {
+    if (this.windowContext?.role !== 'child') return;
+    const acknowledged = this.acknowledgedScope();
+    if (acknowledged === null) return;
+    const tabId = pin ? acknowledged.active?.tabId ?? null : null;
+    try {
+      const accepted = await this.windowContext.setMode(pin ? 'pinned' : 'follow-session', tabId);
+      if (!accepted && this.acknowledgedScope() === acknowledged) this.applyAcknowledgedScope(acknowledged);
+    } catch {
+      if (this.acknowledgedScope() === acknowledged) this.applyAcknowledgedScope(acknowledged);
+    }
+  }
+
+  private applyAcknowledgedScope(next: GitWindowScope): void {
+    if (this.windowContext?.role !== 'child') return;
+    this.applyingWindowScope = true;
+    try {
+      const oldWorkspace = untracked(this._workspacePath);
+      if (next.workspaceRoot === null) {
+        if (oldWorkspace !== null) this.removeWorkspace(oldWorkspace);
+      } else {
+        this.setWorkspace(next.workspaceRoot);
+      }
+      this.windowContext.applyCandidates(next);
+      if (next.mode === 'follow-session') this.unpin();
+      else if (next.pinnedTabId !== null && next.pinnedTabId === next.active?.tabId) this.pin();
+      else if (next.pinnedTabId !== null) {
+        if ((this.source?.candidateForTab(next.pinnedTabId) ?? null) !== null) {
+          this.showSession(next.pinnedTabId);
+        } else {
+          const previous = untracked(this._pinned);
+          const retained = previous?.tabId === next.pinnedTabId &&
+            sameWindowRoot(previous.last.root, next.repoRoot) ? previous : null;
+          this._pinned.set({
+            tabId: next.pinnedTabId,
+            workspacePath: next.workspaceRoot,
+            name: retained?.name ?? next.pinnedTabId,
+            last: {
+              root: next.repoRoot,
+              source: retained?.last.source ??
+                (next.repoRoot === null ? null :
+                  sameWindowRoot(next.workspaceRoot, next.repoRoot) ? 'workspace-root' : 'session-cwd'),
+              unresolved: next.unresolved,
+            },
+          });
+        }
+      }
+      this.acknowledgedScope.set(next);
+    } finally {
+      this.applyingWindowScope = false;
+    }
+    this.reconcileNow();
   }
 
   /** The workspace folder became active (WorkspaceCoordinatorService). */
@@ -360,7 +458,7 @@ export class GitDockScopeStore {
 
   /** Pin the current session scope: tab switches no longer move the dock. */
   pin(): void {
-    const scope = untracked(this.scope);
+    const scope = untracked(() => scopeFrom(this.readInputs()));
     if (!untracked(this.followsSessions) || scope.session === null) return;
     this._pinned.set({
       tabId: scope.session.tabId,
@@ -379,6 +477,22 @@ export class GitDockScopeStore {
   unpin(): void {
     if (untracked(this._pinned) === null) return;
     this._pinned.set(null);
+    this.reconcileNow();
+  }
+
+  /** The current pin, or `null` in follow mode. Pair it with {@link restorePin}. */
+  pinSnapshot(): PinnedScope | null {
+    return untracked(this._pinned);
+  }
+
+  /**
+   * Put back a pin that {@link pinSnapshot} returned. It also restores a pin
+   * to a closed tab with its retained root, which `showSession` cannot do
+   * because a closed tab has no candidate (PR #1038 review, finding 4).
+   */
+  restorePin(snapshot: PinnedScope | null): void {
+    if (!untracked(this.followsSessions)) return;
+    this._pinned.set(snapshot);
     this.reconcileNow();
   }
 
@@ -435,6 +549,7 @@ export class GitDockScopeStore {
   }
 
   private reconcileNow(): void {
+    if (this.applyingWindowScope) return;
     const inputs = untracked(() => this.readInputs());
     this.reconcile(inputs);
   }
@@ -443,9 +558,11 @@ export class GitDockScopeStore {
   private reconcile(inputs: ScopeInputs): void {
     const scope = scopeFrom(inputs);
     this.rememberPinnedRoot(inputs, scope);
-    this.gate.setBlockedReason(
-      scope.unresolved ? UNRESOLVED_SCOPE_MESSAGE : null,
-    );
+    const accepted = untracked(this.acknowledgedScope);
+    const childUnresolved = this.windowContext?.role === 'child' &&
+      (accepted === null || accepted.unresolved ||
+        !sameWindowRoot(accepted.repoRoot, scope.root));
+    this.gate.setBlockedReason(scope.unresolved || childUnresolved ? UNRESOLVED_SCOPE_MESSAGE : null);
 
     const root = scope.root;
     if (root !== null && !isSameWorkingRoot(root, this.appliedRoot)) {

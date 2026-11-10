@@ -17,6 +17,7 @@ const BUSY_STATUSES: ReadonlySet<SessionStatus> = new Set([
 
 /** What `closeBackgroundTab` needs from its caller. */
 export interface BackgroundTabClose {
+  readonly predecessorStopped?: boolean;
   /** The background tab to close. */
   readonly tab: TabState;
   /** The workspace partition that holds it. */
@@ -46,7 +47,7 @@ export interface BackgroundTabClose {
  */
 export function closeBackgroundTab(close: BackgroundTabClose): boolean {
   const { tab, workspacePath } = close;
-  if (BUSY_STATUSES.has(tab.status)) return false;
+  if (BUSY_STATUSES.has(tab.status) && !(close.predecessorStopped && (tab.status === 'awaiting-background' || tab.status === 'sleeping'))) return false;
   if (tab.isDirty) return false;
 
   // Abort the in-flight streaming RPC BEFORE the removal so the registered

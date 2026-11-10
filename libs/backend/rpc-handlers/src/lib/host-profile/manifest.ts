@@ -94,6 +94,7 @@ import {
 import { DiagnosticsConsentRpcHandlers } from '../handlers/diagnostics-consent-rpc.handlers';
 import { ArtifactRpcHandlers } from '../handlers/artifact-rpc.handlers';
 import { DisplayWindowRpcHandlers } from '../handlers/display-window-rpc.handlers';
+import { GitWindowRpcHandlers } from '../handlers/git-window-rpc.handlers';
 import { ProviderAccountRpcHandlers } from '../handlers/provider-account-rpc.handlers';
 import { InstallScopeNoticeRpcHandlers } from '../install-scope/install-scope-notice-rpc.handlers';
 
@@ -135,6 +136,12 @@ export const RPC_HANDLER_MANIFEST = [
     methods: DisplayWindowRpcHandlers.METHODS,
     requires: [],
     handler: DisplayWindowRpcHandlers,
+  },
+  {
+    key: 'gitWindow',
+    methods: GitWindowRpcHandlers.METHODS,
+    requires: [],
+    handler: GitWindowRpcHandlers,
   },
   {
     key: 'configScope',
@@ -664,3 +671,5 @@ function assertHandlersNotSharedAcrossCapabilities(): void {
     if (!previous) seen.set(entry.handler, { key: entry.key, requires });
   }
 }
+
+

@@ -79,6 +79,7 @@ import {
 import { ChatFailedTurnAttentionService } from '../../services/chat-failed-turn-attention.service';
 import { NotificationFocusCoordinator } from '../../services/notification-focus-coordinator.service';
 import { ClosedTabSessionEnderService } from '../../services/closed-tab-session-ender.service';
+import { GitWindowSync } from '../../services/git-window/git-window-sync.service';
 
 @Component({
   selector: 'ptah-electron-shell',
@@ -525,7 +526,7 @@ import { ClosedTabSessionEnderService } from '../../services/closed-tab-session-
           </div>
 
           <!-- Git dock: git-ui's review shell, lazy-loaded to keep git-ui out of the initial Electron renderer bundle -->
-          @if (layout.editorPanelVisible()) {
+          @if (layout.editorPanelVisible() && !gitWindowSync.detached()) {
             <!-- Resize handle: chat ↔ editor -->
             <ptah-electron-resize-handle
               [direction]="'right'"
@@ -539,8 +540,11 @@ import { ClosedTabSessionEnderService } from '../../services/closed-tab-session-
               data-glass-surface="chrome"
               [style.width.px]="layout.editorPanelWidth()"
             >
+              @if (gitWindowSync.error()) {
+                <div class="text-xs text-error p-2" role="status">{{ gitWindowSync.error() }}</div>
+              }
               @if (dockComponent()) {
-                <ng-container *ngComponentOutlet="dockComponent()!" />
+                <ng-container *ngComponentOutlet="dockComponent()!; injector: dockInjector()" />
               } @else if (dockLoadFailed()) {
                 <div
                   class="flex flex-col items-center justify-center gap-2 h-full p-4 text-center"
@@ -564,13 +568,22 @@ import { ClosedTabSessionEnderService } from '../../services/closed-tab-session-
             </div>
           }
 
+          @if (gitWindowSync.detached()) {
+            <div class="electron-git-dock flex w-24 shrink-0 flex-col items-center gap-2 border-l border-surface-border p-2" data-glass-surface="chrome" data-testid="detached-git-rail">
+              <span class="text-xs text-base-content-muted">Git window</span>
+              <button type="button" class="btn btn-xs btn-ghost" (click)="gitWindowSync.focus()">Focus</button>
+              <button type="button" class="btn btn-xs btn-ghost" (click)="gitWindowSync.attach()">Attach</button>
+              @if (gitWindowSync.error()) { <span class="text-xs text-error" role="status">{{ gitWindowSync.error() }}</span> }
+            </div>
+          }
+
           <!-- Git vertical tab (always visible when folders exist) -->
           <ptah-sidebar-tab
             data-glass-surface="chrome"
             label="Git"
             side="right"
-            [isOpen]="layout.editorPanelVisible()"
-            (toggled)="layout.toggleEditorPanel()"
+            [isOpen]="layout.editorPanelVisible() || gitWindowSync.detached()"
+            (toggled)="toggleGitTab()"
           />
         </div>
       }
@@ -595,6 +608,7 @@ export class ElectronShellComponent {
   }
 
   protected readonly layout = inject(ElectronLayoutService);
+  protected readonly gitWindowSync = inject(GitWindowSync);
   private readonly vscodeService = inject(VSCodeService);
   protected readonly appState = inject(AppStateManager);
   private readonly surfaceRouter = inject(SurfaceRouterService);
@@ -611,6 +625,7 @@ export class ElectronShellComponent {
 
   /** Lazily loaded ReviewShellComponent — keeps git-ui out of the initial bundle. */
   readonly dockComponent = signal<Type<unknown> | null>(null);
+  readonly dockInjector = signal<Injector | undefined>(undefined);
 
   /**
    * Set when the `@ptah-extension/git-ui` chunk fails to load (network blip,
@@ -680,7 +695,15 @@ export class ElectronShellComponent {
         !this.dockLoadFailed()
       ) {
         import('@ptah-extension/git-ui')
-          .then((m) => this.dockComponent.set(m.ReviewShellComponent))
+          .then((m) => {
+            if (m.GIT_WINDOW_CONTEXT) {
+              this.dockInjector.set(Injector.create({
+                parent: this.injector,
+                providers: [{ provide: m.GIT_WINDOW_CONTEXT, useValue: { role: 'main', detach: () => void this.gitWindowSync.detach() } }],
+              }));
+            }
+            this.dockComponent.set(m.ReviewShellComponent);
+          })
           .catch((error: unknown) => {
             console.error(
               '[ElectronShellComponent] failed to load the git dock chunk:',
@@ -695,6 +718,10 @@ export class ElectronShellComponent {
   /** Manual retry for a failed git-dock chunk load (see {@link dockLoadFailed}). */
   protected retryDockLoad(): void {
     this.dockLoadFailed.set(false);
+  }
+  protected toggleGitTab(): void {
+    if (this.gitWindowSync.detached()) { void this.gitWindowSync.focus(); return; }
+    this.layout.toggleEditorPanel();
   }
   readonly BarChart3Icon = BarChart3;
   readonly ArrowLeftIcon = ArrowLeft;

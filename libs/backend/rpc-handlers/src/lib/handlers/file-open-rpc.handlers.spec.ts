@@ -27,6 +27,7 @@ describe('ElectronFileOpenRpcHandlers - file:open through IEditorLauncher', () =
       remembered?: string;
       workspaceFolders?: string[];
       openFile?: jest.Mock;
+      realpath?: (value: string) => Promise<string>;
     } = {},
   ) {
     const methods = new Map<string, RpcMethod>();
@@ -55,6 +56,7 @@ describe('ElectronFileOpenRpcHandlers - file:open through IEditorLauncher', () =
           mtime: 0,
           size: 1,
         }),
+        realpath: options.realpath ?? (async (value: string) => value),
       } as never,
     ).register();
     const method = methods.get('file:open');
@@ -118,6 +120,21 @@ describe('ElectronFileOpenRpcHandlers - file:open through IEditorLauncher', () =
     const { method, openFile } = build({ targets: [cursor] });
     await method({ path: WORKSPACE_FILE });
     expect(openFile).toHaveBeenCalledWith(cursor, WORKSPACE_FILE, undefined);
+  });
+
+  it('refuses a workspace path whose real path is outside the workspace and never launches', async () => {
+    // src/link.ts is a symbolic link in the workspace that points to a file out of it.
+    const link = path.join(WORKSPACE, 'src', 'link.ts');
+    const { method, openFile } = build({
+      realpath: async (value) => (value === link ? OUTSIDE_FILE : value),
+    });
+    await expect(
+      method({ path: 'src/link.ts', workspaceRoot: WORKSPACE }),
+    ).resolves.toEqual({
+      success: false,
+      error: 'Path is outside the workspace',
+    });
+    expect(openFile).not.toHaveBeenCalled();
   });
 
   it('refuses an outside path and never launches', async () => {

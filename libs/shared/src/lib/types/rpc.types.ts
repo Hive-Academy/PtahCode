@@ -57,6 +57,7 @@ export * from './rpc/rpc-peer-session.types';
 export * from './rpc/rpc-surface.types';
 
 export * from './rpc/rpc-display-window.types';
+export * from './rpc/rpc-git-window.types';
 
 export * from './rpc/rpc-capability.types';
 
@@ -881,6 +882,20 @@ import type {
   DisplayWindowStatusParams,
   DisplayWindowStatusResult,
 } from './rpc/rpc-display-window.types';
+import type {
+  GitWindowCloseParams,
+  GitWindowCloseResult,
+  GitWindowGetScopeParams,
+  GitWindowGetScopeResult,
+  GitWindowOpenParams,
+  GitWindowOpenResult,
+  GitWindowPublishScopeParams,
+  GitWindowPublishScopeResult,
+  GitWindowSetModeParams,
+  GitWindowSetModeResult,
+  GitWindowStatusParams,
+  GitWindowStatusResult,
+} from './rpc/rpc-git-window.types';
 
 // ---------------------------------------------------------------------------
 // Install scope (TASK_2026_853 Phase D)
@@ -1106,6 +1121,12 @@ export interface RpcMethodRegistry
     params: DisplayWindowActionParams;
     result: DisplayWindowActionResult;
   };
+  'gitWindow:open': { params: GitWindowOpenParams; result: GitWindowOpenResult };
+  'gitWindow:close': { params: GitWindowCloseParams; result: GitWindowCloseResult };
+  'gitWindow:status': { params: GitWindowStatusParams; result: GitWindowStatusResult };
+  'gitWindow:publishScope': { params: GitWindowPublishScopeParams; result: GitWindowPublishScopeResult };
+  'gitWindow:getScope': { params: GitWindowGetScopeParams; result: GitWindowGetScopeResult };
+  'gitWindow:setMode': { params: GitWindowSetModeParams; result: GitWindowSetModeResult };
   'analytics:spendSummary': {
     params: UsageSummaryParams;
     result: UsageSummary;
@@ -1215,7 +1236,7 @@ export interface RpcMethodRegistry
     result: SessionHandoffChainResult;
   };
   'session:handoffCloseResult': {
-    params: { requestId: string; outcome: 'closed' | 'absent' | 'blocked' };
+    params: { requestId: string; outcome: 'closed' | 'absent' | 'blocked'; blockerCode?: import('./messages/session-handoff').HandoffCloseBlockerCode };
     result: { accepted: boolean };
   };
   'session:linkTask': {
@@ -3584,6 +3605,12 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'displayWindow:publishState': true,
   'displayWindow:getState': true,
   'displayWindow:action': true,
+  'gitWindow:open': true,
+  'gitWindow:close': true,
+  'gitWindow:status': true,
+  'gitWindow:publishScope': true,
+  'gitWindow:getScope': true,
+  'gitWindow:setMode': true,
   'analytics:spendSummary': true,
   'attention:getSnapshot': true,
   'chat:start': true,
@@ -3980,6 +4007,7 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'review:retryHead': true,
   'review:refresh': true,
   'review:exportRun': true,
+  'review:respondToFinding': true,
   'review:getBotIdentity': true,
   'review:setBotToken': true,
   'review:clearBotToken': true,

@@ -46,7 +46,7 @@ describe('AutoHandoffSourceCloserService', () => {
     let finish: (closed: boolean) => void = () => undefined;
     close.mockReturnValue(new Promise<boolean>((resolve) => { finish = resolve; }));
     const pending = service.closePredecessor(request);
-    expect(close).toHaveBeenCalledWith('tab-1', 'sdk-1');
+    expect(close).toHaveBeenCalledWith('tab-1', 'sdk-1', false);
     expect(call).not.toHaveBeenCalled();
     finish(true);
     await pending;
@@ -57,7 +57,7 @@ describe('AutoHandoffSourceCloserService', () => {
     currentTab = tab({ claudeSessionId: 'other' as TabState['claudeSessionId'] });
     await service.closePredecessor(request);
     expect(close).not.toHaveBeenCalled();
-    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked' });
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked', blockerCode: 'sdk-mismatch' });
   });
 
   it('missing tab replies absent', async () => {
@@ -70,26 +70,26 @@ describe('AutoHandoffSourceCloserService', () => {
   it.each([null, undefined])('null SDK id matches an unset tab session (%s)', async (sdkId) => {
     currentTab = tab({ claudeSessionId: sdkId as TabState['claudeSessionId'] });
     await service.closePredecessor({ ...request, predecessorSdkId: null });
-    expect(close).toHaveBeenCalledWith('tab-1', null);
+    expect(close).toHaveBeenCalledWith('tab-1', null, false);
     expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'closed' });
   });
 
   it('null SDK id does not match a bound tab', async () => {
     await service.closePredecessor({ ...request, predecessorSdkId: null });
     expect(close).not.toHaveBeenCalled();
-    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked' });
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked', blockerCode: 'sdk-mismatch' });
   });
 
   it('replies false when closeHandoffPredecessor leaves the tab present', async () => {
     close.mockResolvedValue(false);
     await service.closePredecessor(request);
-    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked' });
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked', blockerCode: 'close-rejected' });
   });
 
   it('a thrown close replies false', async () => {
     close.mockRejectedValue(new Error('close failed'));
     await service.closePredecessor(request);
-    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked' });
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked', blockerCode: 'close-error' });
   });
 
   it('duplicate request ID replies only once', async () => {
@@ -142,25 +142,45 @@ describe('AutoHandoffSourceCloserService', () => {
   it('invalid payload with a usable request ID replies false', async () => {
     await service.closePredecessor({ requestId: 'r1', predecessorTabId: 123 });
     expect(close).not.toHaveBeenCalled();
-    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked' });
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked', blockerCode: 'invalid-request' });
   });
 
   it.each([
-    ['streaming', () => { currentTab = tab({ status: 'streaming' }); }],
-    ['resuming', () => { currentTab = tab({ status: 'resuming' }); }],
-    ['switching', () => { currentTab = tab({ status: 'switching' }); }],
-    ['sleeping', () => { currentTab = tab({ status: 'sleeping' }); }],
-    ['dirty input', () => { currentTab = tab({ isDirty: true }); }],
-    ['queued follow-up', () => { queued = true; }],
-    ['background work', () => { currentTab = tab({ pendingBackgroundTasks: [{ id: 'task', type: 'tool', status: 'running', description: 'work' }] as TabState['pendingBackgroundTasks'] }); }],
-    ['permission prompt', () => { permission = true; }],
-    ['Command Center', () => { currentTab = tab({ commandCenterOrigin: { workspaceId: '/ws' } as TabState['commandCenterOrigin'] }); }],
-  ] as const)('%s blocks close and replies false', async (_name, block) => {
+    ['streaming', 'streaming', () => { currentTab = tab({ status: 'streaming' }); }],
+    ['resuming', 'resuming', () => { currentTab = tab({ status: 'resuming' }); }],
+    ['switching', 'switching', () => { currentTab = tab({ status: 'switching' }); }],
+    ['sleeping', 'sleeping', () => { currentTab = tab({ status: 'sleeping' }); }],
+    ['dirty input', 'unsent-input', () => { currentTab = tab({ isDirty: true }); }],
+    ['queued follow-up', 'queued-message', () => { queued = true; }],
+    ['background work', 'pending-background-tasks', () => { currentTab = tab({ pendingBackgroundTasks: [{ id: 'task', type: 'tool', status: 'running', description: 'work' }] as TabState['pendingBackgroundTasks'] }); }],
+    ['permission prompt', 'permission-prompt', () => { permission = true; }],
+    ['Command Center', 'command-center', () => { currentTab = tab({ commandCenterOrigin: { workspaceId: '/ws' } as TabState['commandCenterOrigin'] }); }],
+  ] as const)('%s blocks close and replies with its code', async (_name, code, block) => {
     block();
     await service.closePredecessor(request);
     expect(close).not.toHaveBeenCalled();
     expect(currentTab).not.toBeNull();
     expect(info).toHaveBeenCalled();
-    expect(call.mock.calls).toEqual([['session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked' }]]);
+    expect(call.mock.calls).toEqual([['session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked', blockerCode: code }]]);
+  });
+  it('closes a stopped predecessor with adopted background work', async () => {
+    currentTab = tab({ status: 'sleeping', pendingBackgroundTasks: [{ id: 'task', type: 'tool', status: 'running', description: 'work' }] as TabState['pendingBackgroundTasks'] });
+    await service.closePredecessor({ ...request, predecessorStopped: true });
+    expect(close).toHaveBeenCalledWith('tab-1', 'sdk-1', true);
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', { requestId: 'r1', outcome: 'closed' });
+  });
+
+  it.each([
+    ['streaming', 'streaming', () => { currentTab = tab({ status: 'streaming' }); }],
+    ['dirty input', 'unsent-input', () => { currentTab = tab({ status: 'sleeping', isDirty: true }); }],
+    ['queued follow-up', 'queued-message', () => { queued = true; }],
+    ['permission prompt', 'permission-prompt', () => { permission = true; }],
+    ['Command Center', 'command-center', () => { currentTab = tab({ commandCenterOrigin: { workspaceId: '/ws' } as TabState['commandCenterOrigin'] }); }],
+  ] as const)('%s still blocks a stopped predecessor', async (_name, code, block) => {
+    block();
+    await service.closePredecessor({ ...request, predecessorStopped: true });
+    expect(close).not.toHaveBeenCalled();
+    expect(currentTab).not.toBeNull();
+    expect(call.mock.calls).toEqual([['session:handoffCloseResult', { requestId: 'r1', outcome: 'blocked', blockerCode: code }]]);
   });
 });

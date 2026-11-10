@@ -30,7 +30,12 @@ export interface SessionHandoffClosePredecessorPayload {
   readonly requestId: string;
   readonly predecessorTabId: string;
   readonly predecessorSdkId: string | null;
+  readonly predecessorStopped?: boolean;
 }
+
+export type HandoffCloseBlockerCode = 'streaming' | 'resuming' | 'switching' | 'background' | 'sleeping' | 'other-status' | 'unsent-input' | 'queued-message' | 'pending-background-tasks' | 'permission-prompt' | 'command-center' | 'sdk-mismatch' | 'close-rejected' | 'close-error' | 'invalid-request';
+
+export const HANDOFF_CLOSE_BLOCKER_CODES = ['streaming', 'resuming', 'switching', 'background', 'sleeping', 'other-status', 'unsent-input', 'queued-message', 'pending-background-tasks', 'permission-prompt', 'command-center', 'sdk-mismatch', 'close-rejected', 'close-error', 'invalid-request'] as const;
 
 /**
  * Payload for `sessionHandoff:linked` (TASK_2026_876).

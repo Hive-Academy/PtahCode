@@ -7,17 +7,10 @@ import type { VerificationResult } from '../stages/verification-stage.runner';
 import type { IncrementalScope } from '../context/incremental-scope.service';
 import { PublicationOutboxRepository } from './publication-outbox.repository';
 import { PublicationOutboxService } from './publication-outbox.service';
+import { safeText } from './publication-text';
 import { escapeText, renderInline, renderSummary, type ReviewRunRow } from './review-markdown.renderer';
 
 const severityRank = { Critical: 4, Major: 3, Minor: 2, Nitpick: 1 } as const;
-const unsafeText = /(?:[A-Za-z]:\\[^\s]+|\/(?:Users|home|tmp|var|private)\/[^\s]+|(?:ghp_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|(?:ignore previous instructions|system prompt|developer message))/gi;
-
-function safeText(value: string, secrets: readonly string[]): string {
-  let text = value.replace(unsafeText, '[redacted]');
-  for (const secret of secrets) if (secret.length >= 4) text = text.split(secret).join('[redacted]');
-  return text.replace(/<!--\s*ptah-review:finding:/gi, '&lt;!-- ptah-review:finding:');
-}
-
 /** Parses RIGHT-side added lines from a unified diff. */
 export function rightAnchors(diff: string): ReadonlySet<string> {
   const anchors = new Set<string>();

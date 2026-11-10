@@ -70,8 +70,9 @@ describe('main.ts boots the Display window from a lazy chunk', () => {
 
   it('branches on ?ptahWindow=display', () => {
     expect(main).toMatch(
-      /new URLSearchParams\(window\.location\.search\)\.get\('ptahWindow'\) === 'display'/,
+      /new URLSearchParams\(window\.location\.search\)\.get\(\s*'ptahWindow',?\s*\)/,
     );
+    expect(main).toContain("childWindow === 'display'");
   });
 
   it('imports the child config dynamically only', () => {

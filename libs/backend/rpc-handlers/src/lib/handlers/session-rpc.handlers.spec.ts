@@ -534,6 +534,10 @@ describe('SessionRpcHandlers', () => {
     const invalid = await callRaw(h, 'session:handoffCloseResult', { requestId: 'bad', outcome: 'closed' });
     expect(invalid.success).toBe(false);
     expect(invalid.errorCode).toBe('INVALID_PARAMS');
+    const invalidCode = await callRaw(h, 'session:handoffCloseResult', {
+      requestId: 'f6154596-2e31-4a32-96e3-287635c042e7', outcome: 'blocked', blockerCode: 'renderer-provided-text',
+    });
+    expect(invalidCode.errorCode).toBe('INVALID_PARAMS');
   });
   describe('anchor hint sanitization', () => {
     const sanitize = (value: unknown) => {

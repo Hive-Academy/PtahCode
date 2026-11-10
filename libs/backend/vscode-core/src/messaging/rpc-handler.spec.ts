@@ -206,6 +206,12 @@ describe('RpcHandler.handleMessage — RpcUserError handling', () => {
     }).not.toThrow();
   });
 
+  it("accepts 'gitWindow:' prefixed methods", () => {
+    expect(() => {
+      handler.registerMethod('gitWindow:open', async () => ({ ok: true }));
+    }).not.toThrow();
+  });
+
   it("handles 'db:' prefixed methods (TASK_2026_THOTH_PERSISTENCE_HARDENING)", async () => {
     handler.registerMethod('db:health', async () => ({
       isOpen: false,

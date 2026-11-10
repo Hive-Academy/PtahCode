@@ -5,3 +5,7 @@ export * from './lib/components/review-runs-list.component';
 export * from './lib/components/review-run-detail.component';
 export * from './lib/components/review-settings-drawer.component';
 export * from './lib/components/review-findings-table.component';
+export * from './lib/findings/review-finding-view';
+export * from './lib/findings/review-findings.store';
+export * from './lib/findings/review-finding-card.component';
+export * from './lib/findings/review-findings-panel.component';
