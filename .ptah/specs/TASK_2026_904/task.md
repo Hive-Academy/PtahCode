@@ -1,6 +1,6 @@
 # TASK_2026_904 — Unified composable UI system with liquid-glass refinements
 
-- status: approved (user approved top-down component-system-plan.md + polish-map.md on 2026-11-09); next: Wave 1 implementation
+- status: in_progress (Wave 1 implementation on feat/component-system-wave-1; see wave1/decisions.md)
 - type: CREATIVE
 - branch: feat/liquid-glass-design-system
 - worktree: .claude-worktrees/feat-liquid-glass-design-system-222de99f5343

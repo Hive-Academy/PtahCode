@@ -1,0 +1,15 @@
+# TASK_2026_904 Wave 1 — decisions
+
+Orchestrator: child session "TASK_2026_904 Wave 1" (Claude Opus 5.5), 2026-11-10.
+Authority: `../component-system-plan.md` "Top-down plan (current)", `../polish-map.md`,
+`../foundation-1028-assessment.md` "#1028 is merged". Top-down approved by the user 2026-11-10.
+
+| # | Decision | Evidence | Reversible |
+| - | -------- | -------- | ---------- |
+| D1 | Type REFACTORING-of-UI (extract, no redesign), depth Partial. No PM, no designer, no Gate 1.7: no surface is added or redesigned; the plan is already user-approved, so it stands in for Gates 1/2. | Brief; plan "Contract and order". | yes |
+| D2 | Wave 1 PR scope = the three rows that have a machines/reviews consumer: setup action skin, canvas compact icon button, setup labeled field shell. Chat send/stop, composer layout, suggestions frame and glass menu are deferred to Wave 1b: the plan lists no forced machines/reviews consumer for them ("No forced machines or reviews adoption", "No poor-page consumer established", menu "where present"). | Plan Wave 1 table, First consumers column. Brief item 2 "apply to machines and reviews first". | yes |
+| D3 | Follow-ups A and B done in the main session (trivial edits). A: `replacementHint` and the failure summary now say "move this markup into an extracted component in @ptah-extension/ui"; ratchet and baselines untouched. B: foundation selector `ptah-status-badge` -> `ptah-ui-status-badge` (component, gallery template, gallery spec). Chat-ui `ptah-status-badge` unchanged. | Plan "#1028 (merged)" last paragraph. | yes |
+| D4 | Extractions live in a new `libs/frontend/ui/src/lib/extracted/<name>/` folder with a star-only barrel, so the polished-source origin is visible and the generic #1028 parts stay separate. | Plan allows existing or fitting placements; ui `index.ts` star-only rule. | yes |
+| D5 | Zero-pixel gate uses a Playwright-Electron spec built on the existing `apps/ptah-electron-e2e/src/docs-screenshots/_harness`. Baseline is captured before any source edit in this worktree; heavy build/e2e runs go through `node scripts/verify.mjs --exec`. The brief demands Electron zero-pixel evidence, which is the explicit request to run the Electron build/e2e needed for screenshots. | CLAUDE.md "unless the user asks"; brief item 1. | yes |
+| D7 | Session master (2026-11-10) accepted D2: Wave 1b (chat send/stop, composer layout, suggestions frame, glass menu) is listed as deferred in the PR body. Electron capture is allowed under the verify lock, building only `ptah-electron` and its renderer, capturing only chat, canvas, voice, setup, machines and reviews. The gate is not added to CI or to a default `e2e` target. Baseline PNGs stay out of git unless small and needed. | Session master message. | yes |
+| D6 | Executors: codex lanes (only lane with capacity per brief). Code-logic review by the Glm lane (ollama-cloud family, differs from codex) on the phase diff. | `ptah_agent_list` 2026-11-10: codex room, Glm room, grok/kimi at limit. | yes |

@@ -39,3 +39,4 @@ export * from './lib/native';
 export * from './lib/surfaces';
 export * from './lib/motion';
 export * from './lib/foundation';
+export * from './lib/extracted';
