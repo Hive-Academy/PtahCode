@@ -1,5 +1,6 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { MESSAGE_TYPES } from '@ptah-extension/shared';
+import { LoggingService } from './logging.service';
 import type { MessageHandler } from './message-router.types';
 
 /**
@@ -72,13 +73,13 @@ function getPtahWindow(): PtahWindow {
 })
 export class VSCodeService implements MessageHandler {
   private vscode: VsCodeApi | null = null;
-  // Electron's setState crosses async IPC while getState reads the last
-  // committed main-process value. Keep writes for the current workspace merged
-  // until reload, so a later theme/layout write cannot erase a pending route.
+  // Electron getState is synchronous IPC. Read once per workspace and merge
+  // pending async writes into this cache so later writes preserve every key.
   private pendingElectronState: {
     root: string;
     state: Record<string, unknown>;
   } | null = null;
+  private readonly logger = inject(LoggingService);
   private readonly _config = signal<WebviewConfig>({
     isVSCode: false,
     theme: 'dark',
@@ -228,11 +229,8 @@ export class VSCodeService implements MessageHandler {
       return undefined;
     }
 
-    if (
-      this.config().isElectron &&
-      this.pendingElectronState?.root === this.config().workspaceRoot
-    ) {
-      return this.pendingElectronState.state[key] as T | undefined;
+    if (this.config().isElectron) {
+      return this.electronState()[key] as T | undefined;
     }
     const state = this.vscode.getState() as Record<string, unknown> | undefined;
     if (!state) {
@@ -240,6 +238,28 @@ export class VSCodeService implements MessageHandler {
     }
 
     return state[key] as T | undefined;
+  }
+
+  private electronState(): Record<string, unknown> {
+    if (!this.vscode) return {};
+    const root = this.config().workspaceRoot;
+    if (this.pendingElectronState?.root === root) {
+      return this.pendingElectronState.state;
+    }
+    const start = performance.now();
+    const value = this.vscode.getState();
+    const duration = performance.now() - start;
+    if (duration > 200) {
+      // The Electron console bridge forwards text only, so the value is in the message.
+      this.logger.warn(
+        'VSCodeService',
+        `slow sync state read ${JSON.stringify({ durationMs: Math.round(duration) })}`,
+      );
+    }
+    const state = value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, unknown> : {};
+    this.pendingElectronState = { root, state };
+    return state;
   }
 
   /**
@@ -260,12 +280,9 @@ export class VSCodeService implements MessageHandler {
       return;
     }
     const config = this.config();
-    const currentState =
-      (config.isElectron &&
-        this.pendingElectronState?.root === config.workspaceRoot &&
-        this.pendingElectronState.state) ||
-      (this.vscode.getState() as Record<string, unknown>) ||
-      {};
+    const currentState = config.isElectron
+      ? this.electronState()
+      : (this.vscode.getState() as Record<string, unknown>) || {};
     const newState = { ...currentState, [key]: value };
     this.vscode.setState(newState);
     if (config.isElectron) {

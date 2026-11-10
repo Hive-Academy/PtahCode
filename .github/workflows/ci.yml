@@ -86,6 +86,18 @@ jobs:
           node_modules/.bin/nx run degradation-audit:self-test
           node_modules/.bin/nx run degradation-audit:lint
 
+      # UI-class-audit ratchet (TASK_2026_926 step 0c): per-file count of raw
+      # DaisyUI control classes (btn, badge, input, alert, ...) in the
+      # renderer. A count above `tools/ui-class-audit/baseline.json` fails, so
+      # the total may only go down while the shared `@ptah-extension/ui`
+      # components replace the recipes. `nx affected -t lint` skips this
+      # project when Nx does not see it as affected, so run it on every PR,
+      # with its own spec first: a broken detector must not silently pass.
+      - name: ui-class-audit (raw control-class ratchet + self-test)
+        run: |
+          node_modules/.bin/nx run ui-class-audit:test
+          node_modules/.bin/nx run ui-class-audit:lint
+
       # `scripts/` is not an Nx project, so affected Nx tasks cannot see it and
       # the root `jest.config.ts` (`getJestProjectsAsync()`) cannot either. Run
       # its standalone config explicitly — `scripts/drain-observation-queue.spec.ts`

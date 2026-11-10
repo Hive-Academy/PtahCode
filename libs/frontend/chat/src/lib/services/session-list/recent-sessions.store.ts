@@ -44,6 +44,13 @@ export class RecentSessionsStore {
 
   async load(workspacePath: string): Promise<void> {
     const request = ++this.requestSequence;
+    if (workspacePath.trim() === '') {
+      this.state.set({
+        workspacePath, sessions: [], total: null, loading: false,
+        confirmed: false, error: null,
+      });
+      return;
+    }
     const previous = this.state();
     const sameWorkspace = previous.workspacePath === workspacePath;
     this.state.set({
@@ -79,6 +86,8 @@ export class RecentSessionsStore {
           workspacePath,
           pinnedErrorCode: pinned.errorCode,
           unpinnedErrorCode: unpinned.errorCode,
+          pinnedError: pinned.error?.slice(0, 200),
+          unpinnedError: unpinned.error?.slice(0, 200),
         });
         this.state.set({
           workspacePath,
