@@ -54,7 +54,6 @@ import {
   SDK_TOKENS,
   DEFAULT_PROVIDER_ID,
   ANTHROPIC_DIRECT_PROVIDER_ID,
-  getAnthropicProvider,
 } from '@ptah-extension/agent-sdk';
 import {
   AUTH_PROVIDERS_TOKENS,
@@ -64,6 +63,7 @@ import {
   OllamaModelDiscoveryService,
   CopilotAuthService,
   CodexAuthService,
+  type IKimiCodeAuthService,
   type ICodexAccountUsageService,
 } from '@ptah-extension/auth-providers';
 import { CliDetectionService } from '@ptah-extension/cli-agent-runtime';
@@ -94,6 +94,9 @@ import {
   getModelPricingDescription,
   getModelContextWindow,
   isDirectAnthropic,
+  isKimiCodeModelsPayload,
+  mergeKimiCodeModels,
+  getAnthropicProvider,
 } from '@ptah-extension/shared';
 import type { AuthEnv } from '@ptah-extension/shared';
 import type { RpcMethodName } from '@ptah-extension/shared';
@@ -166,6 +169,8 @@ export class ProviderRpcHandlers {
     private readonly lmStudioProxy: {
       listModels(): Promise<ProviderModelInfo[]>;
     },
+    @inject(AUTH_PROVIDERS_TOKENS.SDK_KIMI_CODE_AUTH, { isOptional: true })
+    private readonly kimiAuth?: IKimiCodeAuthService,
   ) {}
 
   /**
@@ -174,6 +179,7 @@ export class ProviderRpcHandlers {
   register(): void {
     this.registerCopilotDynamicFetcher();
     this.registerCodexDynamicFetcher();
+    this.registerKimiCodeDynamicFetcher();
     this.registerAnthropicDirectFetcher();
     this.registerOllamaDynamicFetchers();
     this.registerListModels();
@@ -377,7 +383,9 @@ export class ProviderRpcHandlers {
     this.providerModels.registerDynamicFetcher('openai-codex', async () => {
       try {
         const adapter = this.cliDetection.getAdapter('codex');
-        const catalog = adapter?.listModels ? await adapter.listModels() : undefined;
+        const catalog = adapter?.listModels
+          ? await adapter.listModels()
+          : undefined;
         if (catalog && catalog.length > 0) {
           this.logger.info(
             `[ProviderRpc] Fetched ${catalog.length} Codex models from the selected app-server catalog`,
@@ -414,6 +422,72 @@ export class ProviderRpcHandlers {
       }
       this.logger.info('[ProviderRpc] No dynamic Codex model source available');
       return [];
+    });
+  }
+
+  private registerKimiCodeDynamicFetcher(): void {
+    this.providerModels.registerDynamicFetcher('kimi-code', async () => {
+      // Every failure path returns [] — never the static list. The consumer
+      // (`ProviderModelsService.fetchModels`) caches and persists any
+      // non-empty result as a LIVE catalog for the full cache TTL, so a
+      // transient 401 or timeout reported as a list would poison the cache
+      // and the persisted store with static data. An empty result falls
+      // through to the persisted catalog and then the static models.
+      try {
+        if (!this.kimiAuth) return [];
+        const baseUrl = getAnthropicProvider('kimi-code')?.baseUrl;
+        if (!baseUrl) return [];
+        const credential = await this.kimiAuth.resolveRequestCredential();
+        const headers: Record<string, string> =
+          credential.kind === 'oauth'
+            ? {
+                Authorization: `Bearer ${credential.accessToken}`,
+                'x-api-key': credential.accessToken,
+              }
+            : { 'x-api-key': credential.apiKey };
+        const response = await fetch(
+          `${baseUrl.replace(/\/+$/, '')}/v1/models`,
+          {
+            headers,
+            signal: AbortSignal.timeout(10_000),
+          },
+        );
+        if (!response.ok) {
+          this.logger.debug(
+            '[ProviderRpc] Kimi Code model catalog unavailable',
+            {
+              status: response.status,
+            },
+          );
+          return [];
+        }
+        const payload: unknown = await response.json();
+        if (!isKimiCodeModelsPayload(payload)) {
+          // The live payload shape is not confirmed. Record the shape (never
+          // the content) so that a wrong schema is visible in the log. An
+          // unknown shape is a failed live fetch, not a live catalog.
+          this.logger.debug(
+            '[ProviderRpc] Kimi Code model catalog has an unknown shape',
+            {
+              payloadType: Array.isArray(payload) ? 'array' : typeof payload,
+              keys:
+                payload !== null &&
+                typeof payload === 'object' &&
+                !Array.isArray(payload)
+                  ? Object.keys(payload).slice(0, 10)
+                  : [],
+            },
+          );
+          return [];
+        }
+        return mergeKimiCodeModels(payload);
+      } catch (error) {
+        // degradation-audit: optional-capability - the live Kimi list is optional; an auth or catalog error keeps the static models.
+        this.logger.debug('[ProviderRpc] Kimi Code model catalog unavailable', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return [];
+      }
     });
   }
 

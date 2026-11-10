@@ -185,12 +185,11 @@ describe('CopilotSdkAdapter', () => {
       expect(models.some((m) => m.id === 'claude-sonnet-5.5')).toBe(true);
     });
 
-    it('keeps the lane list in sync with the provider fallback list', () => {
-      // The drift check (model-lists.live.spec.ts) verifies the provider list
-      // against Copilot's published models; this keeps the lane on the same IDs.
-      expect(COPILOT_MODELS.map((m) => m.id)).toEqual(
-        (COPILOT_PROVIDER_ENTRY.staticModels ?? []).map((m) => m.id),
-      );
+    it('derives the lane fallback from the provider list in the same order', async () => {
+      const providerModels = COPILOT_PROVIDER_ENTRY.staticModels ?? [];
+      const models = await adapter.listModels();
+      expect(models.map((m) => m.id)).toEqual(providerModels.map((m) => m.id));
+      expect(models).toEqual(providerModels.map(({ id, name }) => ({ id, name })));
     });
 
     it('reports continuation only', () => {

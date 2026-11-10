@@ -947,6 +947,24 @@ describe('ConfigRpcHandlers', () => {
   // -------------------------------------------------------------------------
 
   describe('config:models-list', () => {
+    it('groups direct SDK aliases and leaves API rows ungrouped', async () => {
+      const h = makeHarness({ modelSelected: 'default' });
+      h.sdkAdapter.getSupportedModels.mockResolvedValue([
+        { value: 'default', resolvedModel: 'claude-fable-5-2', displayName: 'Default', description: '' },
+        { value: 'fable', resolvedModel: 'claude-fable-5-2', displayName: 'Fable', description: '' },
+        { value: 'claude-fable-5-1', resolvedModel: 'claude-fable-5-1', displayName: 'Fable 5.1', description: '' },
+      ]);
+      h.sdkAdapter.getApiModels.mockResolvedValue([
+        { value: 'claude-haiku-4-5', displayName: 'Haiku', description: '' },
+      ]);
+      h.handlers.register();
+      const result = await call<{ models: Array<{ id: string; group?: string }> }>(h, 'config:models-list');
+      expect(result.models.map((model) => model.group)).toEqual([
+        'primary', 'primary', 'other', undefined,
+      ]);
+      expect(result.models[0]).not.toHaveProperty('isRecommended');
+    });
+
     it('merges SDK models + API models and dedupes by id', async () => {
       const h = makeHarness({ modelSelected: 'claude-opus-4-7' });
       h.sdkAdapter.getSupportedModels.mockResolvedValue([

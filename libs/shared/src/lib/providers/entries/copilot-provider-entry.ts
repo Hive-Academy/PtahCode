@@ -31,7 +31,7 @@ function copilotModel(
  * All models available through GitHub Copilot (Claude, GPT, Gemini).
  * Pricing is 0 since Copilot subscription covers usage.
  *
- * Model list kept in sync with COPILOT_MODELS in copilot-sdk.adapter.ts.
+ * Source for the CLI adapter fallback model list.
  * Synced with models.dev `github-copilot` on 2026-10-07; the model-list drift
  * check (model-lists.live.spec.ts) fails when an ID here stops being listed.
  */

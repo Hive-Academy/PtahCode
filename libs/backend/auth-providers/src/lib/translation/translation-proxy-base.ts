@@ -536,7 +536,7 @@ export abstract class TranslationProxyBase implements ITranslationProxy {
       requestParsedAt: this.timing.now(),
     };
 
-    const protocol = this.resolveUpstreamProtocol(envelope.model);
+    const protocol = await this.resolveUpstreamProtocolForRequest(envelope.model);
     if (protocol === undefined) {
       sendErrorResponse(
         res,
@@ -701,6 +701,12 @@ export abstract class TranslationProxyBase implements ITranslationProxy {
     _modelId: string,
   ): 'messages' | 'chat/completions' | 'responses' | undefined {
     return 'chat/completions';
+  }
+
+  protected async resolveUpstreamProtocolForRequest(
+    modelId: string,
+  ): Promise<'messages' | 'chat/completions' | 'responses' | undefined> {
+    return this.resolveUpstreamProtocol(modelId);
   }
 
   protected getAuthFailureMessage(): string {

@@ -28,7 +28,7 @@ import {
   PROVIDER_QUOTA_DEFAULT_COOLDOWN_MS,
 } from './provider-quota.store';
 import type { CuratorProxyManager } from './curator-proxy-manager';
-import type { ProviderModelsService } from '../provider-models.service';
+import { ProviderModelsService } from '../provider-models.service';
 import type { ICopilotAuthService } from '../providers/copilot/copilot-provider.types';
 import type { IOpenRouterAuthService } from '../providers/openrouter/openrouter-provider.types';
 import type { IKimiCodeAuthService } from '../providers/kimi-code/kimi-code-provider.types';
@@ -43,7 +43,11 @@ function asConfig(mock: MockConfigManager): ConfigManager {
 
 type ProviderModelsSurface = Pick<
   ProviderModelsService,
-  'resolveActiveProviderId' | 'getModelTiers' | 'getLiveDerivedTiers'
+  | 'resolveActiveProviderId'
+  | 'getModelTiers'
+  | 'getLiveDerivedTiers'
+  | 'getCachedModelIds'
+  | 'resolveEffectiveTiers'
 >;
 
 type TierMap = Partial<Record<'sonnet' | 'opus' | 'haiku', string>>;
@@ -65,6 +69,7 @@ interface Harness {
   getModelTiers: jest.Mock;
   /** Records which providers the resolver asked for a live-catalogue derivation. */
   getLiveDerivedTiers: jest.Mock;
+  logger: MockLogger;
 }
 
 function createHarness(opts: {
@@ -89,6 +94,7 @@ function createHarness(opts: {
    * written before TASK_2026_262 assumed.
    */
   derivedTiers?: Record<string, TierMap>;
+  knownModelIds?: Record<string, string[]>;
   /**
    * Providers already cooling down from a 429 when the case starts, keyed by
    * registry id. The value is the raw `retry-after` header the upstream sent,
@@ -116,11 +122,17 @@ function createHarness(opts: {
   const getLiveDerivedTiers = jest.fn(
     (providerId: string) => opts.derivedTiers?.[providerId] ?? {},
   );
-  const providerModels: ProviderModelsSurface = {
+  const providerModels = {
     resolveActiveProviderId: jest.fn(() => opts.activeProviderId),
     getModelTiers,
     getLiveDerivedTiers,
-  };
+    resolveEffectiveTiers:
+      ProviderModelsService.prototype.resolveEffectiveTiers,
+    logger: asLogger(logger),
+    getCachedModelIds: jest.fn(
+      (providerId: string) => opts.knownModelIds?.[providerId] ?? null,
+    ),
+  } satisfies ProviderModelsSurface & { logger: Logger };
 
   const ensureProxy = jest.fn(async () => ({
     url: opts.proxyUrl ?? 'http://127.0.0.1:51234',
@@ -146,9 +158,10 @@ function createHarness(opts: {
       loggedIn: opts.kimiCodeAuthed ?? true,
       stale: false,
       hasApiKey: false,
-      credentialSource: (opts.kimiCodeAuthed ?? true)
-        ? ('cli-login' as const)
-        : ('none' as const),
+      credentialSource:
+        (opts.kimiCodeAuthed ?? true)
+          ? ('cli-login' as const)
+          : ('none' as const),
     })),
     resolveRequestCredential: jest.fn(async () => ({
       kind: 'oauth' as const,
@@ -193,6 +206,7 @@ function createHarness(opts: {
     copilotRestore,
     getModelTiers,
     getLiveDerivedTiers,
+    logger,
   };
 }
 
@@ -818,6 +832,87 @@ describe('ProviderAuthResolver — live-catalogue tiers for a lane (TASK_2026_26
     process.env = ORIGINAL_ENV;
   });
 
+  it('keeps overrides in every catalog state', async () => {
+    for (const knownModelIds of [undefined, [], ['catalogue-new']]) {
+      const { resolver } = createHarness({
+        activeProviderId: 'anthropic',
+        providerKeys: { 'kimi-code': 'kimi-key' },
+        tierOverrides: { 'kimi-code': { lane: { sonnet: 'user-choice' } } },
+        knownModelIds: knownModelIds && { 'kimi-code': knownModelIds },
+        derivedTiers: { 'kimi-code': { sonnet: 'catalogue-new' } },
+      });
+      const result = await resolver.resolve('kimi-code', 'lane');
+      expect(result?.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('user-choice');
+    }
+  });
+
+  it('keeps a static default without a known live catalog or with static fallback only', async () => {
+    const fallback = getAnthropicProvider('kimi-code')?.defaultTiers?.sonnet;
+    const { resolver } = createHarness({
+      activeProviderId: 'anthropic',
+      providerKeys: { 'kimi-code': 'kimi-key' },
+      derivedTiers: { 'kimi-code': { sonnet: 'catalogue-new' } },
+    });
+    expect(
+      (await resolver.resolve('kimi-code', 'lane'))?.env
+        .ANTHROPIC_DEFAULT_SONNET_MODEL,
+    ).toBe(fallback);
+  });
+
+  it('keeps a static default when the catalog contains its id with a trailing context suffix', async () => {
+    const fallback = getAnthropicProvider('kimi-code')?.defaultTiers?.sonnet;
+    if (!fallback) throw new Error('Kimi Code fixture needs sonnet');
+    const { resolver } = createHarness({
+      activeProviderId: 'anthropic',
+      providerKeys: { 'kimi-code': 'kimi-key' },
+      knownModelIds: { 'kimi-code': [`${fallback}[1m]`] },
+      derivedTiers: { 'kimi-code': { sonnet: 'catalogue-new' } },
+    });
+    expect(
+      (await resolver.resolve('kimi-code', 'lane'))?.env
+        .ANTHROPIC_DEFAULT_SONNET_MODEL,
+    ).toBe(fallback);
+  });
+
+  it('uses a live tier when the static id disappears, logs once, and passes final ids to capability mapping', async () => {
+    const fallback = getAnthropicProvider('kimi-code')?.defaultTiers?.sonnet;
+    const { resolver, logger } = createHarness({
+      activeProviderId: 'anthropic',
+      providerKeys: { 'kimi-code': 'kimi-key' },
+      knownModelIds: { 'kimi-code': ['catalogue-new'] },
+      derivedTiers: { 'kimi-code': { sonnet: 'catalogue-new' } },
+    });
+    const first = await resolver.resolve('kimi-code', 'lane');
+    expect(first?.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('catalogue-new');
+    expect(
+      first?.env.ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES,
+    ).toBeUndefined();
+    expect(logger.info).toHaveBeenCalledWith(
+      '[provider-auth] replaced static tier default',
+      {
+        providerId: 'kimi-code',
+        tier: 'sonnet',
+        staticId: fallback,
+        liveId: 'catalogue-new',
+      },
+    );
+    await resolver.resolve('kimi-code', 'lane');
+    expect(logger.info).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a static default when no live tier can replace it', async () => {
+    const fallback = getAnthropicProvider('kimi-code')?.defaultTiers?.sonnet;
+    const { resolver } = createHarness({
+      activeProviderId: 'anthropic',
+      providerKeys: { 'kimi-code': 'kimi-key' },
+      knownModelIds: { 'kimi-code': ['other-model'] },
+    });
+    expect(
+      (await resolver.resolve('kimi-code', 'lane'))?.env
+        .ANTHROPIC_DEFAULT_SONNET_MODEL,
+    ).toBe(fallback);
+  });
+
   /** The case lanes exist for: background work moved off the paid quota. */
   it('gives a lane on a no-defaultTiers provider a tier mapping from that provider’s own catalogue', async () => {
     expect(getAnthropicProvider('lm-studio')?.defaultTiers).toBeUndefined();
@@ -920,7 +1015,7 @@ describe('ProviderAuthResolver.resolve — the quota gate', () => {
     // check placed below the early returns, the check is not being reached.
     const { resolver } = createHarness({
       activeProviderId: 'openrouter',
-      rateLimited: { 'openrouter': undefined },
+      rateLimited: { openrouter: undefined },
     });
 
     await expect(resolver.resolve('')).rejects.toBeInstanceOf(
@@ -933,7 +1028,7 @@ describe('ProviderAuthResolver.resolve — the quota gate', () => {
     // an answer when "it" is rate-limited.
     const { resolver } = createHarness({
       activeProviderId: 'openrouter',
-      rateLimited: { 'openrouter': undefined },
+      rateLimited: { openrouter: undefined },
     });
 
     await expect(resolver.resolve('openrouter')).rejects.toBeInstanceOf(
@@ -957,7 +1052,7 @@ describe('ProviderAuthResolver.resolve — the quota gate', () => {
     // inherit", and inheriting an exhausted provider is the failure.
     const { resolver } = createHarness({
       activeProviderId: 'openrouter',
-      rateLimited: { 'openrouter': undefined },
+      rateLimited: { openrouter: undefined },
     });
 
     const error = await resolver.resolve('').catch((e: unknown) => e);
@@ -973,7 +1068,7 @@ describe('ProviderAuthResolver.resolve — the quota gate', () => {
   it('carries the upstream retry-after when one arrived, not the default', async () => {
     const { resolver } = createHarness({
       activeProviderId: 'openrouter',
-      rateLimited: { 'openrouter': '90' },
+      rateLimited: { openrouter: '90' },
     });
 
     const error = (await resolver
@@ -989,7 +1084,7 @@ describe('ProviderAuthResolver.resolve — the quota gate', () => {
     // out" — that is the misclassification this whole task removes.
     const { resolver } = createHarness({
       activeProviderId: 'openrouter',
-      rateLimited: { 'openrouter': undefined },
+      rateLimited: { openrouter: undefined },
     });
 
     const error = (await resolver
@@ -1015,7 +1110,7 @@ describe('ProviderAuthResolver.resolve — the quota gate', () => {
   it('re-opens once the cooldown expires', async () => {
     const { resolver, quota } = createHarness({
       activeProviderId: 'openrouter',
-      rateLimited: { 'openrouter': undefined },
+      rateLimited: { openrouter: undefined },
     });
     await expect(resolver.resolve('')).rejects.toBeInstanceOf(
       ProviderQuotaError,
@@ -1035,7 +1130,7 @@ describe('ProviderAuthResolver.resolve — the quota gate', () => {
   it('re-opens immediately once the provider answers again', async () => {
     const { resolver, quota } = createHarness({
       activeProviderId: 'openrouter',
-      rateLimited: { 'openrouter': undefined },
+      rateLimited: { openrouter: undefined },
     });
     await expect(resolver.resolve('')).rejects.toBeInstanceOf(
       ProviderQuotaError,
@@ -1082,7 +1177,10 @@ describe('ProviderAuthResolver Codex refusal', () => {
       activeProviderId: 'anthropic',
     });
     await expect(
-      resolver.buildDraftOverride({ providerId: 'openai-codex', authMode: 'oauth' }),
+      resolver.buildDraftOverride({
+        providerId: 'openai-codex',
+        authMode: 'oauth',
+      }),
     ).rejects.toMatchObject({
       name: 'AuthRequiredError',
       providerId: 'openai-codex',

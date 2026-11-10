@@ -11,11 +11,7 @@ import {
 } from '@ptah-extension/agent-sdk';
 import type { OneShotAuthOverride } from '@ptah-extension/agent-sdk';
 import type { IProviderAuthResolver } from '@ptah-extension/agent-sdk';
-import type {
-  AuthEnv,
-  ProviderModelTier,
-  ProviderTierScope,
-} from '@ptah-extension/shared';
+import type { AuthEnv, ProviderTierScope } from '@ptah-extension/shared';
 import {
   ANTHROPIC_DIRECT_PROVIDER_ID,
   getAnthropicProvider,
@@ -26,7 +22,6 @@ import {
 } from '@ptah-extension/shared';
 import { AUTH_PROVIDERS_TOKENS } from '../di/tokens';
 import type { ProviderModelsService } from '../provider-models.service';
-import type { DerivedTierMap } from '../model-tier-derivation';
 import { CuratorProxyManager } from './curator-proxy-manager';
 import {
   ProviderAuthError,
@@ -424,21 +419,14 @@ export class ProviderAuthResolver implements IProviderAuthResolver {
     providerId: string,
     scope: ProviderTierScope,
   ): AuthEnv {
-    const defaults = getAnthropicProvider(providerId)?.defaultTiers;
     const overrides = this.providerModels.getModelTiers(providerId, scope);
-
-    // Lazy: a provider whose static data covers all three tiers never reads a
-    // catalogue at all.
-    let derived: DerivedTierMap | undefined;
-    const derivedFor = (tier: ProviderModelTier): string | undefined => {
-      derived ??= this.providerModels.getLiveDerivedTiers(providerId);
-      return derived[tier];
-    };
+    const effective = this.providerModels.resolveEffectiveTiers(
+      providerId,
+      overrides,
+    );
 
     const tiers: AuthEnv = {};
-    const sonnet = overrides.sonnet ?? defaults?.sonnet ?? derivedFor('sonnet');
-    const opus = overrides.opus ?? defaults?.opus ?? derivedFor('opus');
-    const haiku = overrides.haiku ?? defaults?.haiku ?? derivedFor('haiku');
+    const { sonnet, opus, haiku } = effective;
     if (sonnet) tiers.ANTHROPIC_DEFAULT_SONNET_MODEL = sonnet;
     if (opus) tiers.ANTHROPIC_DEFAULT_OPUS_MODEL = opus;
     if (haiku) tiers.ANTHROPIC_DEFAULT_HAIKU_MODEL = haiku;
