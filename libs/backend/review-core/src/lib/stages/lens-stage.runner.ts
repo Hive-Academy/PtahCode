@@ -25,9 +25,11 @@ const ResultSchema = z.discriminatedUnion('status', [
 
 @injectable()
 export class LensStageRunner {
+  readonly selectedLensCount = lenses.length;
   constructor(@inject(ReviewLaneRunner) private readonly lanes: ReviewLaneRunner,
     @inject(REVIEW_CORE_TOKENS.REVIEW_REPOSITORY) private readonly repository: IReviewRepository) {}
-  async run(claim: ReviewQueueClaim, context: ContextStageResult, deadline: number, signal?: AbortSignal): Promise<LensStageResult> {
+  async run(claim: ReviewQueueClaim, context: ContextStageResult, deadline: number, signal?: AbortSignal,
+    onCompleted?: (completed: number, total: number) => Promise<void>): Promise<LensStageResult> {
     const results: LensStageResult = [];
     for (const [lens, prompt] of lenses) {
       if (signal?.aborted) break;
@@ -35,6 +37,7 @@ export class LensStageRunner {
       const prior = (await this.repository.getStages(claim.attemptId)).find((row) => row.stage === name && row.ordinal === 0);
       if (prior?.state === 'completed') {
         results.push({ lens, result: ResultSchema.parse(await this.repository.getCheckpoint(claim.attemptId, name, 0)) });
+        await onCompleted?.(results.length, lenses.length);
         continue;
       }
       const row: ReviewStageRecord = { attemptId: claim.attemptId, stage: name, ordinal: 0, state: 'running',
@@ -54,6 +57,7 @@ export class LensStageRunner {
             `${result.limitCheck === 'unavailable' ? 'Ran without a limit check; ' : ''}${result.reason}`) :
             result.limitCheck === 'unavailable' ? 'Ran without a limit check' : null });
         results.push({ lens, result });
+        await onCompleted?.(results.length, lenses.length);
       } catch (error: unknown) {
         await this.repository.saveStage({ ...row, state: 'failed', endedAt: new Date().toISOString(),
           errorSummary: sanitizeReviewFailureMessage(error instanceof Error ? error.message : 'Lens failed') });

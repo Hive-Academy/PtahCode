@@ -201,6 +201,17 @@ describe('Electron DI search worker registration', () => {
   });
 });
 
+describe('Electron DI review sync schedule registration (TASK_2026_901)', () => {
+  it('lists the schedule and its hooks in the census and builds one cached schedule', () => {
+    for (const name of ['REVIEW_SYNC_SCHEDULE', 'REVIEW_SYNC_HOOKS']) {
+      expect(EXPECTED_RESOLVABLE_TOKENS.some(([entry]) => entry === name)).toBe(true);
+    }
+    const phase = fs.readFileSync(path.join(__dirname, 'phase-2-libraries.ts'), 'utf8');
+    expect(phase).toContain('useFactory: instanceCachingFactory((provider) => new ReviewSyncScheduleService({');
+    expect(phase).toContain('container.register<ReviewSyncHooks>(REVIEW_SYNC_TOKENS.HOOKS,');
+  });
+});
+
 function buildMinimalContainer(): DependencyContainer {
   const c = rootContainer.createChildContainer();
   for (const token of [

@@ -9,6 +9,7 @@ export const REVIEW_CORE_TOKENS = {
   POLICY_SERVICE: Symbol.for('ReviewPolicyService'),
   QUEUE_SERVICE: Symbol.for('ReviewQueueService'),
   GITHUB: Symbol.for('ReviewGithubPort'),
+  STATUS_PORT: Symbol.for('ReviewStatusPort'),
   ENVIRONMENT: Symbol.for('ReviewStageEnvironment'),
   ORCHESTRATOR: Symbol.for('ReviewOrchestratorService'),
   ARTIFACT_FILES: Symbol.for('ReviewArtifactFileSystem'),

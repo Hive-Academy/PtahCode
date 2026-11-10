@@ -68,6 +68,7 @@ function bodyWithFindings(base: string, findings: readonly PublicationInlineComm
   return { body, ids };
 }
 export interface IGitHubReviewPublicationPort {
+  updateProgress?(target: PublicationTarget, summary: string): Promise<GitHubIssueComment>;
   publish(target: PublicationTarget, walkthrough: string, overview: string,
     candidates: PublicationInlineComment[], validRightAnchors: ReadonlySet<string>): Promise<PublicationResult>;
 }
@@ -170,6 +171,23 @@ export class GithubReviewPublicationAdapter implements IGitHubReviewPublicationP
       page = result.nextPage;
     }
     return reviews;
+  }
+
+  /** Upsert the same walkthrough comment used by final publication. */
+  async updateProgress(targetInput: PublicationTarget, summary: string): Promise<GitHubIssueComment> {
+    const target = targetSchema.parse(targetInput);
+    const existing = await this.ownWalkthrough(target);
+    const progressMarker = '<!-- ptah-review:progress -->';
+    const prior = existing?.body.replace(/^<!-- ptah-review:progress -->[^\n]*\n\n/, '') ?? '';
+    const progress = `${progressMarker}${summary.replace(/[\r\n]/g, ' ')}`;
+    const body = prior
+      ? prior.length + progress.length + 2 <= MAX_BODY_CHARS ? `${progress}\n\n${prior}` : prior
+      : boundedBody(progress, [walkthroughMarker]);
+    const suffix = existing ? `/issues/comments/${existing.id}` : `/issues/${target.number}/comments`;
+    const response = await this.request(target, existing ? 'PATCH' : 'POST', suffix, { body });
+    if (!response.ok) throw new GitHubReviewError('http', `GitHub returned HTTP ${response.status}`);
+    const raw = await this.json(response, issueResponse);
+    return { id: raw.id, body: raw.body, authorLogin: raw.user.login, createdAt: raw.created_at };
   }
 
   async publish(targetInput: PublicationTarget, walkthrough: string, overview: string,

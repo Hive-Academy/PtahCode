@@ -15,6 +15,8 @@ import { LensStageRunner } from './stages/lens-stage.runner';
 import { VerificationStageRunner } from './stages/verification-stage.runner';
 import { PublicationStageRunner } from './stages/publication-stage.runner';
 import { classifyReviewFailure, sanitizeReviewFailureMessage, type ReviewFailureStage } from './review-failure';
+import { ReviewStatusCoordinatorService } from './status/review-status-coordinator.service';
+import type { ReviewSeverity } from './status/review-status-conclusion';
 
 const ContextSchema = z.object({ attemptRoot: z.string().min(1), baseSha: z.string().regex(/^[a-f0-9]{40}$/).optional(),
   incrementalScope: z.object({ headSha: z.string(), previousReviewedHeadSha: z.string().nullable(), changedPaths: z.array(z.string()),
@@ -55,6 +57,7 @@ export class ReviewOrchestratorService {
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
     @inject(REVIEW_CORE_TOKENS.SETTINGS_STORE) private readonly settingsStore: IReviewSettingsStore,
     @inject(ReviewWorktreeService) private readonly worktree: ReviewWorktreeService,
+    @inject(ReviewStatusCoordinatorService) private readonly statuses?: ReviewStatusCoordinatorService,
   ) {}
 
   async lastPollAt(repo: RepoIdentity): Promise<number | null> { return this.repository.getLastPollAt(repo); }
@@ -82,13 +85,50 @@ export class ReviewOrchestratorService {
     return { summary: `Enqueued ${count} review heads` };
   }
 
+  /** Reconcile only findings identified by Ptah's own inline marker. */
+  async syncThreads(selectedRepo?: RepoIdentity, signal?: AbortSignal): Promise<number> {
+    let changed = 0;
+    const settings = await this.settingsStore.getSettings();
+    for (const repo of settings?.repositories.filter((entry) => entry.enabled &&
+      (!selectedRepo || entry.owner === selectedRepo.owner && entry.name === selectedRepo.name)) ?? []) {
+      if (signal?.aborted) break;
+      try {
+        let pullPage = 1;
+        while (pullPage <= 100) {
+          const pulls = await this.github.listOpenPulls(repo, undefined, pullPage);
+          for (const pull of pulls.items) {
+            if (signal?.aborted) break;
+            let reviewPage = 1;
+            while (reviewPage <= 100) {
+              const reviews = await this.github.listOwnReviewsAndThreads(repo, pull.number, reviewPage);
+              for (const review of reviews.items) for (const thread of review.threads) {
+                const match = /<!-- ptah-review:finding:([0-9A-HJKMNP-TV-Z]{26}) -->/.exec(thread.body);
+                if (match && await this.repository.syncFindingResolution(repo, pull.number, match[1], thread.resolved)) changed++;
+              }
+              if (reviews.nextPage === null) break;
+              reviewPage = reviews.nextPage;
+            }
+          }
+          if (pulls.nextPage === null) break;
+          pullPage = pulls.nextPage;
+        }
+      } catch (error: unknown) {
+        this.logger.error('Review thread sync failed', error instanceof Error ? error : new Error('Review thread sync failed'));
+      }
+    }
+    return changed;
+  }
+
   async startupPoll(lastDiscoveryAt: number | null, repo?: RepoIdentity): Promise<number> {
     if (lastDiscoveryAt !== null && Date.now() - lastDiscoveryAt < 48 * 60 * 60 * 1000) return 0;
     return repo ? this.pollAndRecord(repo) : this.pollEnabledRepositories();
   }
 
   async reconcileStartup(): Promise<number> {
-    return this.queue.reconcileStartup([]);
+    const count = await this.queue.reconcileStartup([]);
+    await this.statuses?.recoverOwnPending();
+    await this.statuses?.retryDue();
+    return count;
   }
 
   /**
@@ -168,6 +208,8 @@ export class ReviewOrchestratorService {
 
   private async process(claim: ReviewQueueClaim, signal?: AbortSignal): Promise<void> {
     let status: 'succeeded' | 'partial' | 'failed' | 'superseded' = 'succeeded';
+    let acceptedSeverities: ReviewSeverity[] = [];
+    let publicationBlocked = false;
     let failureStage: ReviewFailureStage = 'discovery';
     let attemptDeadline = Date.now() + REVIEW_ATTEMPT_WINDOW_MS;
     const pendingHeartbeats = new Set<Promise<void>>();
@@ -183,6 +225,7 @@ export class ReviewOrchestratorService {
     }, 20_000);
     heartbeat.unref();
     try {
+      await this.statuses?.claimed(claim, this.lenses.selectedLensCount);
       if (signal?.aborted) { status = 'partial'; return; }
       if (!await this.guard(claim, signal)) { status = signal?.aborted ? 'partial' : 'superseded'; return; }
       failureStage = 'context';
@@ -198,7 +241,8 @@ export class ReviewOrchestratorService {
       if (!triage || (typeof triage === 'object' && triage !== null && 'status' in triage && triage.status === 'partial')) status = 'partial';
       if (signal?.aborted) { status = 'partial'; return; }
       if (!await this.guard(claim, signal)) { status = signal?.aborted ? 'partial' : 'superseded'; return; }
-      const lensResults = await this.lenses.run(claim, context, attemptDeadline, signal);
+      const lensResults = await this.lenses.run(claim, context, attemptDeadline, signal,
+        (completed, total) => this.statuses?.lensCompleted(claim, completed, total) ?? Promise.resolve());
       if (context.coverage.some((entry) => entry.startsWith('prompt:truncated:'))) status = 'partial';
       if (lensResults.some((entry) => entry.result.status === 'partial')) status = 'partial';
       if (lensResults.length > 0 && lensResults.every((entry) => entry.result.status === 'partial' && entry.result.reason === 'deadline')) return;
@@ -208,9 +252,13 @@ export class ReviewOrchestratorService {
       const verdicts = await this.stage(claim, 'verification', 3, VerificationSchema, () => this.verification.run(claim, context, lensResults, attemptDeadline, signal), signal);
       if (!verdicts) { status = 'partial'; return; }
       if (verdicts.some((entry) => entry.verification === 'unavailable')) status = 'partial';
+      acceptedSeverities = verdicts.filter((entry) => entry.result.status === 'completed' &&
+        'verdict' in entry.result.output && entry.result.output.verdict === 'accepted').map((entry) => entry.finding.severity);
       if (signal?.aborted) { status = 'partial'; return; }
       if (!await this.guard(claim, signal)) { status = signal?.aborted ? 'partial' : 'superseded'; return; }
       failureStage = 'publication';
+      publicationBlocked = !this.policy.publication(await this.environment.settings(),
+        await this.environment.baseConfig(claim.repo, context.baseSha), claim.repo).allowed;
       const publication = await this.stage(claim, 'publication', 4, z.object({ artifactPath: z.string(), exportPath: z.string(),
         acceptedCount: z.number(), suppressedCount: z.number() }), () => this.publication.run(claim, context, lensResults, verdicts, signal,
           typeof triage === 'object' && triage !== null && 'status' in triage && triage.status === 'completed'), signal);
@@ -233,7 +281,10 @@ export class ReviewOrchestratorService {
       await Promise.allSettled(pendingHeartbeats);
       // Only a released attempt has ended. An aborted one keeps src/ because it is requeued and resumes.
       if (!signal?.aborted && await this.queue.release(claim.attemptId, claim.lease.owner, status)) {
-        await this.releaseAttemptSource(claim);
+        try {
+          await this.statuses?.finished(claim, status === 'failed' ? 'failed' : status === 'partial' ? 'partial' :
+            status === 'superseded' ? 'cancelled' : publicationBlocked ? 'publication-blocked' : 'complete', acceptedSeverities);
+        } finally { await this.releaseAttemptSource(claim); }
       }
     }
   }

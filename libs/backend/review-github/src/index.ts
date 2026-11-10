@@ -1,4 +1,5 @@
 export { GithubReviewAdapter } from './lib/github-review.adapter';
+export { GithubReviewStatusAdapter } from './lib/github-review-status.adapter';
 export { GithubReviewPublicationAdapter, rightAnchorKey, type IGitHubReviewPublicationPort,
   type ReviewPublicationGuard, type PublicationTarget, type PublicationInlineComment,
   type PublicationResult } from './lib/github-review-publication.adapter';

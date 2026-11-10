@@ -99,6 +99,7 @@ import { sql as sql0070IndexingLastRun } from './0070_indexing_last_run';
 import { sql as sql0071SkillInvEventsTaskUnreconciled } from './0071_skill_inv_events_task_unreconciled';
 import { sql as sql0072TaskEndHook } from './0072_task_end_hook';
 import { sql as sql0073TaskCloseOut } from './0073_task_close_out';
+import { sql as sql0074ReviewStatusSync } from './0074_review_status_sync';
 import type { SqliteDatabase } from '../sqlite-connection.service';
 
 export interface Migration {
@@ -506,4 +507,5 @@ export const MIGRATIONS: readonly Migration[] = [
     name: '0073_task_close_out',
     sql: sql0073TaskCloseOut,
   },
+  { version: 74, name: '0074_review_status_sync', sql: sql0074ReviewStatusSync },
 ];

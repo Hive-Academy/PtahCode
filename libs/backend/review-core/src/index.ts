@@ -6,6 +6,8 @@ export { ReviewPublicationService } from './lib/publication/review-publication.s
 export { ReviewPolicyService } from './lib/review-policy.service';
 export type { EligibilityInput, EligibilityDecision, EligibilityReason, PublicationDecision, EffectiveReviewSettings } from './lib/review-policy.service';
 export { ReviewQueueService } from './lib/review-queue.service';
+export { ReviewStatusCoordinatorService } from './lib/status/review-status-coordinator.service';
+export { reviewStatusConclusion } from './lib/status/review-status-conclusion';
 export type { IReviewQueueRepository, IReviewClock, ReviewQueueHead, ReviewQueueAttempt, ReviewQueueClaim, ReviewQueueLease } from './lib/review-queue.service';
 export { SqliteReviewRepository } from './lib/persistence/sqlite-review.repository';
 export type { IReviewRepository, ReviewAttemptRecord, ReviewStageRecord } from './lib/persistence/review-repository.interface';
