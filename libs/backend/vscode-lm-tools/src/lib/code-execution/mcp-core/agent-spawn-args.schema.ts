@@ -35,7 +35,9 @@ export interface AgentSpawnAccountInput {
  *   resume gate against that stored binding, which refuses a bound session.
  *
  * An accepted selection is forwarded on `SpawnAgentRequest.accountSelection`.
- * Ambient and omitted keep the existing Claude login. A named selection on a
+ * Ambient keeps the existing Claude login. Omitted follows the workspace's
+ * stored lane account when one is set, otherwise the existing Claude login
+ * (`AgentProcessManager.laneAccountAdmission`). A named selection on a
  * fresh `claude` spawn is admitted by the runtime (`AgentProcessManager`),
  * which refuses the spawn when that account cannot be proved.
  */
