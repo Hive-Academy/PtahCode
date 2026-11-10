@@ -113,11 +113,63 @@ describe('ComposerAttachmentsService', () => {
     call.mockResolvedValueOnce({ success: true, data: { images: [{ name: 'image.png', mediaType: 'image/png', data: png }] } });
     await service.pickFiles();
     await service.pickImages();
-    expect(call).toHaveBeenNthCalledWith(1, 'file:pick', { multiple: true });
-    expect(call).toHaveBeenNthCalledWith(2, 'file:pick-images', { multiple: true });
+    const options = { timeout: 10 * 60_000, signal: expect.any(AbortSignal) };
+    expect(call).toHaveBeenNthCalledWith(1, 'file:pick', { multiple: true }, options);
+    expect(call).toHaveBeenNthCalledWith(2, 'file:pick-images', { multiple: true }, options);
     expect(service.files()).toHaveLength(1);
     expect(service.toSendOptions()).toEqual({ files: ['/ws/brief.md'], images: [{ data: png, mediaType: 'image/png' }] });
     service.remove('/ws/brief.md');
     expect(service.files()).toHaveLength(0);
+  });
+
+  describe('pending picks', () => {
+    type Reply = { success: boolean; data?: { files: { path: string; size: number }[] } };
+    const picked: Reply = { success: true, data: { files: [{ path: '/ws/late.md', size: 1 }] } };
+    const deferred = (): { promise: Promise<Reply>; resolve: (reply: Reply) => void } => {
+      let resolve: (reply: Reply) => void = () => undefined;
+      const promise = new Promise<Reply>((done) => { resolve = done; });
+      return { promise, resolve };
+    };
+    const signalOf = (index: number): AbortSignal => call.mock.calls[index][2].signal;
+
+    it('drops a late reply after the draft changes or the composer is destroyed', async () => {
+      const first = deferred();
+      call.mockReturnValueOnce(first.promise);
+      const switched = service.pickFiles();
+      service.restore([], []);
+      expect(signalOf(0).aborted).toBe(true);
+      first.resolve(picked);
+      await switched;
+
+      const second = deferred();
+      call.mockReturnValueOnce(second.promise);
+      const destroyed = service.pickFiles();
+      service.ngOnDestroy();
+      expect(signalOf(1).aborted).toBe(true);
+      second.resolve(picked);
+      await destroyed;
+
+      expect(service.files()).toEqual([]);
+      expect(service.error()).toBeNull();
+    });
+
+    it('blocks a second pick at first, then replaces a pick the host never answered', async () => {
+      const now = jest.spyOn(Date, 'now').mockReturnValue(1_000);
+      const stalled = deferred();
+      call.mockReturnValueOnce(stalled.promise);
+      const first = service.pickFiles();
+      await service.pickFiles();
+      expect(call).toHaveBeenCalledTimes(1);
+
+      now.mockReturnValue(1_000 + 30_000);
+      call.mockResolvedValueOnce({ success: true, data: { files: [{ path: '/ws/retry.md', size: 1 }] } });
+      await service.pickFiles();
+      expect(signalOf(0).aborted).toBe(true);
+      stalled.resolve(picked);
+      await first;
+
+      expect(service.files().map((file) => file.path)).toEqual(['/ws/retry.md']);
+      now.mockRestore();
+    });
   });
 });

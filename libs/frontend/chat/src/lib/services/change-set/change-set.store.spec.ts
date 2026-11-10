@@ -403,6 +403,84 @@ describe('ChangeSetStore', () => {
       expect(rpcCallsFor('git:info')).toHaveLength(callsBefore);
     });
 
+    it('keeps the snapshot identity when a status push changes nothing', async () => {
+      gitInfo = status([{ path: 'src/a.ts' }]);
+      const store = createStore();
+      await openSession('s1');
+      await passDebounce();
+      const [set] = store.changeSetsFor('s1');
+      const marksBefore = store.marksFor(set);
+
+      store.handleMessage({
+        type: MESSAGE_TYPES.GIT_STATUS_UPDATE,
+        payload: { ...status([{ path: 'src/a.ts' }]), workspaceRoot: ROOT },
+      });
+      await passDebounce();
+
+      expect(store.marksFor(set)).toBe(marksBefore);
+    });
+
+    it('refreshes freshness for equal status without replacing marks', async () => {
+      gitInfo = status([{ path: 'src/a.ts' }]);
+      const store = createStore();
+      await openSession('s1');
+      await passDebounce();
+      const [set] = store.changeSetsFor('s1');
+      const marksBefore = store.marksFor(set);
+      await jest.advanceTimersByTimeAsync(RECONCILE_FRESHNESS_MS + 1);
+      store.handleMessage({
+        type: MESSAGE_TYPES.GIT_STATUS_UPDATE,
+        payload: { ...status([{ path: 'src/a.ts' }]), workspaceRoot: ROOT },
+      });
+      await passDebounce();
+      const callsBefore = rpcCallsFor('git:info').length;
+      await openSession('s2');
+      await openSession('s1');
+      await passDebounce();
+      expect(rpcCallsFor('git:info')).toHaveLength(callsBefore);
+      expect(store.marksFor(set)).toBe(marksBefore);
+    });
+
+    it('keeps marks identity when untracked directories reorder', async () => {
+      const dirs = [
+        { path: 'one/', status: '??', isDirectory: true },
+        { path: 'two/', status: '??', isDirectory: true },
+      ];
+      gitInfo = status(dirs);
+      const store = createStore();
+      await openSession('s1');
+      await passDebounce();
+      const [set] = store.changeSetsFor('s1');
+      const marksBefore = store.marksFor(set);
+      store.handleMessage({
+        type: MESSAGE_TYPES.GIT_STATUS_UPDATE,
+        payload: { ...status([...dirs].reverse()), workspaceRoot: ROOT },
+      });
+      await passDebounce();
+      expect(store.marksFor(set)).toBe(marksBefore);
+    });
+
+    it('replaces the snapshot when a status push changes the tree', async () => {
+      gitInfo = status([{ path: 'src/a.ts' }]);
+      const store = createStore();
+      await openSession('s1');
+      await passDebounce();
+      const [set] = store.changeSetsFor('s1');
+      const marksBefore = store.marksFor(set);
+
+      store.handleMessage({
+        type: MESSAGE_TYPES.GIT_STATUS_UPDATE,
+        payload: { ...status([]), workspaceRoot: ROOT },
+      });
+      await passDebounce();
+
+      expect(store.marksFor(set)).not.toBe(marksBefore);
+      expect([...store.marksFor(set).reconciled]).toEqual([
+        'src/a.ts',
+        'src/b.ts',
+      ]);
+    });
+
     it('keeps a file inside a collapsed untracked directory changed', async () => {
       persisted = [
         changeSet({
