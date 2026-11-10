@@ -89,6 +89,7 @@ export class ElectronGitWindowHost implements GitWindowHost {
       authorize: (method, params) => this.guard.authorize(method, params),
       observeResult: (method, params, data) => this.guard.observeResult(method, params, data),
       pushTypes: GIT_WINDOW_PUSH_FORWARD_TYPES,
+      filterPush: (message) => this.guard.filterPush(message),
     });
   }
 

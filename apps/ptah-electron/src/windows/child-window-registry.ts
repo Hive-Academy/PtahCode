@@ -34,6 +34,8 @@ export interface ChildViewPolicy {
   readonly observeResult?: (method: string, params: unknown, data: unknown) => void;
   /** Host push types that the child gets together with the main window. */
   readonly pushTypes?: ReadonlySet<string>;
+  /** Reduce a listed push to what the view may see. `null` drops it. Without it the push is sent as it is. */
+  readonly filterPush?: (message: { readonly type: string }) => unknown;
 }
 /** Why a child call is refused: the method is not allowed, or its params are out of scope. */
 export type ChildRefusal = 'method' | 'scope';
@@ -142,11 +144,14 @@ export class ChildWindowRegistry {
     const type = message.type;
     if (typeof type !== 'string') return;
     for (const [viewKind, instances] of this.children) {
-      if (!this.policies.get(viewKind)?.pushTypes?.has(type)) continue;
+      const policy = this.policies.get(viewKind);
+      if (!policy?.pushTypes?.has(type)) continue;
+      const visible = policy.filterPush === undefined ? message : policy.filterPush({ ...message, type });
+      if (visible === null || visible === undefined) continue;
       for (const window of instances.values()) {
         if (window.isDestroyed() || window.webContents.isDestroyed?.() === true) continue;
         try {
-          window.webContents.send?.('to-renderer', message);
+          window.webContents.send?.('to-renderer', visible);
         } catch {
           // degradation-audit: optional-capability - the child closed between the
           // check and the send; the main window still gets the push, and the

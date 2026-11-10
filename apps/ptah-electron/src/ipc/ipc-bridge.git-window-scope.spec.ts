@@ -298,20 +298,79 @@ describe('IpcBridge — detached Git window scope and pushes', () => {
     );
   });
 
-  it.each([
-    MESSAGE_TYPES.GIT_STATUS_UPDATE,
-    MESSAGE_TYPES.FILE_CONTENT_CHANGED,
-    MESSAGE_TYPES.GIT_OPERATION_OUTPUT,
-    'git:worktreeChanged',
-  ])(
-    'delivers the %s push to the main window and to the Git child',
-    (type) => {
-      const message = { type, payload: { workspaceRoot: REPO_A } };
-      expect(bridge.sendToRenderer(message)).toBe(true);
-      expect(main.sent).toEqual([message]);
-      expect(git.sent).toEqual([message]);
-    },
-  );
+  it('delivers the Git pushes of the scope to the main window and to the Git child', async () => {
+    await rpc(git, 'git:commit', {
+      workspaceRoot: REPO_A,
+      message: 'm',
+      operationId: 'op-child',
+    });
+    git.sent.length = 0;
+    const file = path.join(REPO_A, 'a.ts');
+    const pushes = [
+      { type: MESSAGE_TYPES.GIT_STATUS_UPDATE, payload: { workspaceRoot: REPO_A } },
+      { type: MESSAGE_TYPES.FILE_CONTENT_CHANGED, payload: { filePaths: [file], truncated: false } },
+      { type: MESSAGE_TYPES.GIT_OPERATION_OUTPUT, payload: { operationId: 'op-child', chunk: 'x' } },
+      { type: 'git:worktreeChanged', payload: { action: 'created', path: path.join(REPO_A, '.wt', 'x') } },
+    ];
+    for (const push of pushes) expect(bridge.sendToRenderer(push)).toBe(true);
+    expect(main.sent).toEqual(pushes);
+    expect(git.sent).toEqual(pushes);
+  });
+
+  it('keeps the pushes of another repository and of another window away from the child', () => {
+    const other = path.join(REPO_B, 'secret.ts');
+    const pushes = [
+      { type: MESSAGE_TYPES.GIT_STATUS_UPDATE, payload: { workspaceRoot: REPO_B } },
+      { type: MESSAGE_TYPES.GIT_STATUS_UPDATE, payload: {} },
+      { type: MESSAGE_TYPES.FILE_CONTENT_CHANGED, payload: { filePaths: [other], truncated: false } },
+      { type: MESSAGE_TYPES.GIT_OPERATION_OUTPUT, payload: { operationId: 'op-main', chunk: 'x' } },
+      { type: 'git:worktreeChanged', payload: { action: 'created', operationId: 'op-main' } },
+      { type: 'git:worktreeChanged', payload: { action: 'removed', path: path.join(REPO_B, '.wt', 'x') } },
+    ];
+    for (const push of pushes) bridge.sendToRenderer(push);
+    expect(main.sent).toEqual(pushes);
+    expect(git.sent).toEqual([]);
+
+    const mixed = {
+      type: MESSAGE_TYPES.FILE_CONTENT_CHANGED,
+      payload: { filePaths: [other, path.join(REPO_A, 'a.ts')], truncated: false },
+    };
+    bridge.sendToRenderer(mixed);
+    expect(git.sent).toEqual([
+      {
+        type: MESSAGE_TYPES.FILE_CONTENT_CHANGED,
+        payload: { filePaths: [path.join(REPO_A, 'a.ts')], truncated: false },
+      },
+    ]);
+  });
+
+  it('lets the child cancel only an operation that it started', async () => {
+    await rpc(git, 'git:cancelOperation', { operationId: 'op-main' });
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(git.sent).toEqual([outOfScope('git:cancelOperation')]);
+    await rpc(git, 'git:push', { workspaceRoot: REPO_B, operationId: 'op-refused' });
+    await rpc(git, 'git:cancelOperation', { operationId: 'op-refused' });
+    expect(handleMessage).not.toHaveBeenCalled();
+    await rpc(git, 'git:push', { workspaceRoot: REPO_A, operationId: 'op-child' });
+    await rpc(git, 'git:cancelOperation', { operationId: 'op-child' });
+    expect(handleMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses a worktree target outside the acknowledged repository', async () => {
+    await rpc(git, 'git:addWorktree', {
+      workspaceRoot: REPO_A,
+      branch: 'f',
+      path: path.join(REPO_B, 'new-worktree'),
+    });
+    expect(handleMessage).not.toHaveBeenCalled();
+    await rpc(git, 'git:addWorktree', { workspaceRoot: REPO_A, branch: 'f' });
+    await rpc(git, 'git:addWorktree', {
+      workspaceRoot: REPO_A,
+      branch: 'g',
+      path: path.join(REPO_A, '.wt', 'g'),
+    });
+    expect(handleMessage).toHaveBeenCalledTimes(2);
+  });
 
   it('keeps unrelated pushes main-only and stops the Git pushes when the child closes', () => {
     const unrelated = { type: 'session:unrelated-push', payload: {} };
@@ -321,7 +380,10 @@ describe('IpcBridge — detached Git window scope and pushes', () => {
 
     closeChild();
     main.sent.length = 0;
-    const status = { type: MESSAGE_TYPES.GIT_STATUS_UPDATE, payload: {} };
+    const status = {
+      type: MESSAGE_TYPES.GIT_STATUS_UPDATE,
+      payload: { workspaceRoot: REPO_A },
+    };
     expect(bridge.sendToRenderer(status)).toBe(true);
     expect(git.sent).toEqual([]);
     expect(main.sent).toEqual(expect.arrayContaining([status]));

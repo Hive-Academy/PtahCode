@@ -32,8 +32,11 @@ Verification (all in the task worktree, under the verify lock):
   no root is refused, the acknowledged root routes, a new scope moves the limit, a listed worktree is
   read-only, file and editor calls outside the scope are refused, a closed child is refused, the main window
   is not restricted.
-- Known limits: a worktree read works only after the host listed the worktree. `settings:set` and
-  `git:cancelOperation` are not scope-bound (they have no root).
+- Independent review (codex lane, `scope-guard-security-review.md`): REVISE with 4 findings. All 4 are
+  corrected in the follow-up commit (see the last section).
+- Known limits: a worktree read works only after the host listed the worktree. `settings:set` is not
+  scope-bound (it has no root). The symbolic link check runs at the IPC boundary, so a link that changes
+  between the check and the file read is not covered. The file policy of the host is the second barrier.
 
 ## Finding 2 — Functional: Git pushes go only to the main window
 
@@ -46,7 +49,7 @@ Verification (all in the task worktree, under the verify lock):
   message types stay main-only. A destroyed child gets nothing.
 - Tests: same spec. Each of the four push types reaches the main window and the detached child. An unrelated
   push reaches only the main window. After the child closes, the child gets no push.
-- Known limit: the mirror does not filter by root. The Git services of the child filter by their active root.
+- Follow-up: the mirror now filters by scope (`ChildViewPolicy.filterPush`, see the last section).
 
 ## Finding 3 — Functional: a failed publish drops a scope change
 
@@ -84,6 +87,21 @@ Verification (all in the task worktree, under the verify lock):
   because the host can open a new child there.
 - Tests: closed push during an in-flight detach, closed push during the reload restore, stale closed push
   with an open child, Focus publishes again.
+
+## Follow-up — independent security review of finding 1 (codex lane)
+
+Report: `scope-guard-security-review.md`. Verdict REVISE, 4 findings, all confirmed and corrected in the
+follow-up commit `fix(electron): close the gaps of the Git window scope guard`.
+
+| # | Finding of the lane | Correction |
+|---|---------------------|------------|
+| 1 | High: `git:cancelOperation` was unscoped. The child could cancel an operation of another repository. | The guard records the `operationId` of each authorized child call. Cancel works only for these. |
+| 2 | High: mirrored pushes were not filtered by repository. | `filterPush`: a status push needs a root of the scope, a file push is reduced to paths in the scope, operation output needs an operation of the child, a worktree push needs an operation of the child or a path in the scope. Other pushes are dropped. |
+| 3 | High: a symbolic link in the repository could name a file of another registered repository. | File and editor paths are checked again after `realpath` of the path and of the roots. |
+| 4 | Medium: `git:addWorktree` accepted an absolute `path` outside the scope. | An absolute target must be inside a scope root. The main window keeps the free path. |
+
+Tests: `ipc-bridge.git-window-scope.spec.ts` (push filter, cancel, worktree target) and the new
+`git-window-scope-guard.spec.ts` (real directories with a link). `npm run verify -- -p ptah-electron` exit 0.
 
 ## Environment note
 
