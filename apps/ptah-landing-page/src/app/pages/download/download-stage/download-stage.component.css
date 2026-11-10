@@ -11,7 +11,9 @@
   overflow: clip;
   display: flex;
   min-height: 100svh;
-  padding: calc(4rem + clamp(0.75rem, 4vh, 3rem)) 1.5rem clamp(0.75rem, 3vh, 2rem);
+  --dl-stage-pad-top: calc(4rem + clamp(0.75rem, 4vh, 3rem));
+  --dl-stage-pad-bottom: clamp(0.75rem, 3vh, 2rem);
+  padding: var(--dl-stage-pad-top) 1.5rem var(--dl-stage-pad-bottom);
   background: #08090c;
 }
 

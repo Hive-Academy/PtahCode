@@ -3,6 +3,7 @@ import { PLATFORM_ID } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import gsap from 'gsap';
+import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { LightningRenderer } from '../../shared/lightning/lightning-renderer';
 import { HeroComponent } from './hero.component';
 import { HeroLightning } from './hero-lightning';
@@ -120,7 +121,7 @@ describe('HeroComponent', () => {
     destroy();
   });
 
-  it('pins the layer fade, holds the copy until the hero ends and runs the arcs with the symbols', () => {
+  it('pins the stage for the whole hero, fades the layers then the copy, and runs the arcs with the symbols', () => {
     jest.useFakeTimers();
     installBrowserMocks(false, true);
     const media = gsap.matchMedia();
@@ -140,6 +141,9 @@ describe('HeroComponent', () => {
       return realTimeline({ paused: true });
     });
     const to = jest.spyOn(gsap, 'to').mockReturnValue(gsap.to({}, { paused: true }));
+    const killPin = jest.fn();
+    const createTrigger = jest.spyOn(ScrollTrigger, 'create')
+      .mockReturnValue({ kill: killPin } as unknown as ScrollTrigger);
     const start = jest.spyOn(HeroLightning.prototype, 'start');
     const stop = jest.spyOn(HeroLightning.prototype, 'stop');
     const destroyLightning = jest.spyOn(HeroLightning.prototype, 'destroy');
@@ -161,16 +165,24 @@ describe('HeroComponent', () => {
       expect(start).toHaveBeenCalledTimes(1);
 
       const scrollTrigger = timelineVars.find((vars) => vars.scrollTrigger)?.scrollTrigger as ScrollTrigger.Vars;
-      expect(scrollTrigger).toMatchObject({ start: 'top top', pin: true, scrub: 1 });
+      expect(scrollTrigger).toMatchObject({ start: 'top top', scrub: 1 });
+      expect(scrollTrigger.pin).toBeUndefined();
       expect(scrollTrigger.snap).toBeUndefined();
+      // One pin holds the stage until the hero section has left the viewport; it adds no spacing.
+      const stage = root.querySelector<HTMLElement>('[data-story-stage]')!;
+      const section = root.querySelector<HTMLElement>('section')!;
+      expect(createTrigger).toHaveBeenCalledTimes(1);
+      expect(createTrigger.mock.calls[0][0]).toMatchObject({
+        trigger: stage, start: 'top top', endTrigger: section, end: 'bottom top', pin: true, pinSpacing: false,
+      });
+      // The section's padding is the scroll room of the layer fade.
+      expect(section.style.paddingBottom).toBe('90vh');
       const onUpdate = scrollTrigger.onUpdate as unknown as ScrollUpdate;
       const content = root.querySelector<HTMLElement>('[data-title-content]')!;
 
-      // The copy is tweened only by its own two triggers: held in place, then faded.
+      // The pin holds the copy in place; its only tween is the fade (no scrubbed counter-move).
       const copyTweens = to.mock.calls.filter(([target]) => target === content);
-      expect(copyTweens).toHaveLength(2);
-      const hold = copyTweens.find(([, vars]) => vars.y !== undefined)?.[1].scrollTrigger as ScrollTrigger.Vars;
-      expect(hold).toMatchObject({ end: 'bottom top', scrub: true });
+      expect(copyTweens).toHaveLength(1);
       const fade = copyTweens.find(([, vars]) => vars.opacity === 0)?.[1].scrollTrigger as ScrollTrigger.Vars;
       expect(fade).toMatchObject({ scrub: true });
       const onCopy = fade.onUpdate as unknown as ScrollUpdate;
@@ -204,6 +216,8 @@ describe('HeroComponent', () => {
       expect(renderer.dispose).toHaveBeenCalled();
       expect(component['lightning']).toBeUndefined();
       expect(root.classList.contains('is-cinematic')).toBe(false);
+      expect(killPin).toHaveBeenCalledTimes(1);
+      expect(root.querySelector<HTMLElement>('section')!.style.paddingBottom).toBe('');
     } finally {
       if (hiddenDescriptor) Object.defineProperty(document, 'hidden', hiddenDescriptor);
       else Reflect.deleteProperty(document, 'hidden');

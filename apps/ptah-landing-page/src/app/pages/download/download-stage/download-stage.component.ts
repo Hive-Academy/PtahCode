@@ -5,9 +5,9 @@ import { LightfallOptions } from '../lightfall/lightfall-options';
 import { PlatformCardsComponent } from '../platform-cards/platform-cards.component';
 import { DesktopOs, formatReleaseDate } from '../platforms';
 
-/** The beam pours down through the copy and lands on the top edge of the platform cards. */
+/** The beam pours down the whole stage box and lands on its bottom edge, behind the platform cards. */
 const LIGHT: Partial<LightfallOptions> = {
-  verticalBeamOffset: 0.035,
+  verticalBeamOffset: 0.03,
   horizontalSizing: 0.5,
   verticalSizing: 2.4,
   fogIntensity: 0.5,
@@ -18,8 +18,8 @@ const LIGHT: Partial<LightfallOptions> = {
 
 /**
  * The one-screen download stage: the temple scene and gold symbols, the
- * centred copy, and the Lightfall beam falling straight through it onto the
- * top edge of the platform cards (the detected card glows brightest).
+ * centred copy, and the Lightfall beam falling through the whole stage, behind
+ * the platform cards, onto the floor at the bottom edge of the section.
  */
 @Component({
   selector: 'ptah-download-stage',
@@ -37,6 +37,8 @@ const LIGHT: Partial<LightfallOptions> = {
       </div>
 
       <div class="dl-stack">
+        <ptah-lightfall class="dl-light" [options]="light" />
+
         <div class="dl-copy">
           <p class="dl-eyebrow">
             <img class="dl-mark" src="/assets/icons/ptah-icon.webp" alt="" width="28" height="28" />
@@ -44,26 +46,23 @@ const LIGHT: Partial<LightfallOptions> = {
           </p>
           <h1 id="download-title">Download PtahCode</h1>
           <p class="dl-lead">
-            Download the PtahCode Desktop app for Windows, macOS, or Linux. Auto-updates keep you on
-            the latest version.
+            Desktop app for Windows, macOS, or Linux. Auto-updates keep you on the latest version.
           </p>
         </div>
 
         <div class="dl-landing">
-          <ptah-lightfall class="dl-light" [options]="light" />
+          <p class="dl-meta">
+            @if (latest(); as release) {
+              <span class="dl-version">Latest {{ release.version }}</span>
+              <span aria-hidden="true">·</span>
+              <span>{{ formatDate(release.publishedAt) }}</span>
+            } @else {
+              <span>No account, no license key, no credit card</span>
+            }
+            <a class="dl-notes" href="#releases"><span aria-hidden="true">↘</span> Release notes</a>
+          </p>
           <ptah-platform-cards class="dl-cards" [os]="os()" [latest]="latest()" />
         </div>
-
-        <p class="dl-meta">
-          @if (latest(); as release) {
-            <span class="dl-version">Latest {{ release.version }}</span>
-            <span aria-hidden="true">·</span>
-            <span>{{ formatDate(release.publishedAt) }}</span>
-          } @else {
-            <span>No account, no license key, no credit card</span>
-          }
-          <a class="dl-notes" href="#releases"><span aria-hidden="true">↘</span> Release notes</a>
-        </p>
       </div>
     </section>
   `,

@@ -1,6 +1,7 @@
 import gsap from 'gsap';
+import { ScrollTrigger } from 'gsap/ScrollTrigger';
 
-/** The pin spans 0.9 viewports of scroll, as on main. */
+/** The layer fade spans 0.9 viewports of scroll, as on main. */
 export const PIN_VIEWPORTS = 0.9;
 
 export interface HeroScrollHooks {
@@ -13,14 +14,18 @@ export interface HeroScrollHooks {
 /**
  * Desktop scroll choreography of the hero.
  *
- * - Pinned for `PIN_VIEWPORTS`: the still, grain, symbols (with their lightning
- *   canvas), footnote and the frame's vignette fade and lift, as before.
- * - The centred copy (eyebrow, title, lead, CTAs) is not part of that fade. It
- *   stays fully visible and in place for the whole hero: during the pin it is
- *   pinned with the stage, after it a scrubbed counter-move cancels the
- *   stage's scroll.
- * - It fades only as the bottom of the hero (where the next section begins)
- *   passes over it: from the copy's bottom edge to its top edge.
+ * - One pin holds the stage for the whole hero: from the top of the page until
+ *   the bottom of the hero section reaches the top of the viewport. The copy
+ *   (eyebrow, title, lead, CTAs) therefore never moves: the browser keeps it
+ *   in place, and no scrubbed counter-move runs behind the scroll (that
+ *   counter-move lagged the compositor by a frame and made the title shake).
+ * - The pin adds no spacing. The section's bottom padding gives the first
+ *   `PIN_VIEWPORTS` of scroll; after it the next section slides over the
+ *   pinned stage.
+ * - During that first distance the still, grain, symbols (with their
+ *   lightning canvas), footnote and the frame's vignette fade and lift.
+ * - The copy fades only as the bottom of the hero (where the next section
+ *   begins) passes over it: from the copy's bottom edge to its top edge.
  *
  * Returns the cleanup that kills every tween and trigger it made; the
  * gsap.matchMedia context that runs it reverts their inline styles.
@@ -28,69 +33,65 @@ export interface HeroScrollHooks {
 export function createHeroScroll(view: Window, stage: HTMLElement, hooks: HeroScrollHooks): () => void {
   const frame = stage.querySelector<HTMLElement>('[data-title-frame]');
   const copy = stage.querySelector<HTMLElement>('[data-title-content]');
-  // The section wraps the pin spacer, so its height includes the pinned scroll.
   const section = stage.closest<HTMLElement>('section') ?? stage;
   const layers = frame
     ? Array.from(frame.children).filter((child) => child !== copy)
     : [];
   const pinDistance = (): number => Math.round(view.innerHeight * PIN_VIEWPORTS);
 
-  const pinned = gsap.timeline({
+  // The scroll room of the layer fade; the stage's own height is the copy's hold.
+  if (section !== stage) section.style.paddingBottom = `${PIN_VIEWPORTS * 100}vh`;
+
+  const pin = ScrollTrigger.create({
+    trigger: stage,
+    start: 'top top',
+    endTrigger: section,
+    end: 'bottom top',
+    pin: true,
+    pinSpacing: false,
+    anticipatePin: 1,
+    invalidateOnRefresh: true,
+  });
+
+  const fadeLayers = gsap.timeline({
     defaults: { ease: 'none' },
     scrollTrigger: {
-      trigger: stage,
+      trigger: section,
       start: 'top top',
       end: () => '+=' + pinDistance(),
-      pin: true,
       scrub: 1,
-      anticipatePin: 1,
       invalidateOnRefresh: true,
       onUpdate: (self) => hooks.onLayers(self.progress),
     },
   });
   if (frame) {
     // The same lift the whole frame had (8% of its height), now without the copy.
-    pinned.to(layers, { opacity: 0, y: () => -0.08 * frame.offsetHeight, duration: 1 }, 0);
-    pinned.to(frame, { '--frame-fade': 0, duration: 1 }, 0);
+    fadeLayers.to(layers, { opacity: 0, y: () => -0.08 * frame.offsetHeight, duration: 1 }, 0);
+    fadeLayers.to(frame, { '--frame-fade': 0, duration: 1 }, 0);
   }
-  if (!copy) return () => killTimeline(pinned);
 
-  // Created after the pin, so ScrollTrigger measures them with its spacing in place.
-  const hold = gsap.to(copy, {
-    y: () => stage.offsetHeight,
-    ease: 'none',
-    scrollTrigger: {
-      trigger: section,
-      start: () => `top -${pinDistance()}px`,
-      end: 'bottom top',
-      scrub: true,
-      invalidateOnRefresh: true,
-    },
-  });
   // offsetTop ignores transforms: the copy's resting place in the pinned stage.
-  const fade = gsap.to(copy, {
-    opacity: 0,
-    ease: 'none',
-    scrollTrigger: {
-      trigger: section,
-      start: () => `bottom ${copy.offsetTop + copy.offsetHeight}px`,
-      end: () => `bottom ${copy.offsetTop}px`,
-      scrub: true,
-      invalidateOnRefresh: true,
-      onUpdate: (self) => hooks.onCopy(self.progress),
-    },
-  });
+  const fade = copy
+    ? gsap.to(copy, {
+        opacity: 0,
+        ease: 'none',
+        scrollTrigger: {
+          trigger: section,
+          start: () => `bottom ${copy.offsetTop + copy.offsetHeight}px`,
+          end: () => `bottom ${copy.offsetTop}px`,
+          scrub: true,
+          invalidateOnRefresh: true,
+          onUpdate: (self) => hooks.onCopy(self.progress),
+        },
+      })
+    : undefined;
 
   return () => {
-    killTimeline(pinned);
-    for (const tween of [hold, fade]) {
-      tween.scrollTrigger?.kill();
-      tween.kill();
-    }
+    fadeLayers.scrollTrigger?.kill();
+    fadeLayers.kill();
+    fade?.scrollTrigger?.kill();
+    fade?.kill();
+    pin.kill();
+    if (section !== stage) section.style.removeProperty('padding-bottom');
   };
-}
-
-function killTimeline(timeline: gsap.core.Timeline): void {
-  timeline.scrollTrigger?.kill();
-  timeline.kill();
 }

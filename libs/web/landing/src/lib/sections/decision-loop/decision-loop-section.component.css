@@ -154,11 +154,29 @@
    * section's ratio, and also leaves 4rem of the viewport for the step row,
    * so header, clip and steps fit the pinned screen together.
    */
+  /* The whole section is pinned: short padding, so header, clip and steps share one screen. */
+  .decision-loop-section {
+    padding-block: clamp(1.25rem, 3.5vh, 2.5rem);
+  }
+
+  .loop-header {
+    margin-bottom: clamp(1.25rem, 3vh, 2.25rem);
+  }
+
+  .loop-title {
+    font-size: clamp(1.75rem, min(3.8vw, 6vh), 3.25rem);
+  }
+
+  .loop-subline {
+    margin-top: clamp(0.75rem, 2vh, 1.4rem);
+  }
+
+  /* 24rem: the section padding, the header and the step row around the clip. */
   .loop-shell {
     --loop-clip-w: min(
       100%,
       var(--sec-media-w-stacked),
-      calc((100vh - 22rem) * var(--sec-media-ratio))
+      calc((var(--sec-fit-h) - 24rem) * var(--sec-media-ratio))
     );
   }
 

@@ -9,8 +9,14 @@
 :host {
   /* Clip ratio of the console clips (8 / 5). */
   --sec-media-ratio: 1.6;
+  /*
+   * The height a pinned section or stage can use: the viewport without the
+   * fixed 4rem navigation and 1rem of air above and below. Pins centre on
+   * this area (PIN_CENTER in section-scroll.ts).
+   */
+  --sec-fit-h: calc(100svh - 6rem);
   /* The clip never grows taller than this share of the viewport. */
-  --sec-media-max-h: 80vh;
+  --sec-media-max-h: min(80vh, var(--sec-fit-h));
   /* Header column that sits over (or beside) the clip. */
   --sec-head-w: min(34rem, 40vw);
   /* Gap between a clip and a text column set beside it. */

@@ -13,6 +13,13 @@ export const REVEAL = {
   visual: 0.16,
 } as const;
 
+/**
+ * Where a pinned section or stage sits: its centre on the centre of the
+ * viewport area under the fixed 4rem navigation (32px lower than the viewport
+ * centre), so the navigation does not cover its top edge.
+ */
+export const PIN_CENTER = 'center center+=32';
+
 const DESKTOP = '(min-width: 1024px) and (prefers-reduced-motion: no-preference)';
 const COMPACT = '(max-width: 1023px) and (prefers-reduced-motion: no-preference)';
 
@@ -40,7 +47,7 @@ export function bindSectionScroll(
     onProgress(0);
     const pin = ScrollTrigger.create({
       trigger: section,
-      start: 'center center',
+      start: PIN_CENTER,
       end: '+=110%',
       pin: true,
     });

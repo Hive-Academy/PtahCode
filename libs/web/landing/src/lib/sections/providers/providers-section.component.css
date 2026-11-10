@@ -91,10 +91,13 @@
 @media (min-width: 1024px) {
   .pv-stage {
     grid-template-columns: min(27rem, 32vw) minmax(0, 1fr);
-    grid-template-rows: auto auto;
+    /* The header row stays as tall as the header; the clip's extra height goes to the deck row. */
+    grid-template-rows: auto 1fr;
     column-gap: 0;
     row-gap: clamp(1.5rem, 3vh, 2.5rem);
     padding: 0 clamp(3rem, 5vw, 5rem) 0 clamp(0rem, 3vw, 3rem);
+    /* How far the clip sits under the top of the header. */
+    --pv-raise: clamp(12rem, 28vh, 18rem);
   }
 
   .pv-head {
@@ -116,18 +119,22 @@
     grid-row: 1 / span 2;
     align-self: end;
     justify-self: start;
-    width: min(100%, var(--sec-media-w-stacked));
-    margin-top: clamp(12rem, 28vh, 18rem);
+    /* The raise and the clip fit the pinned screen together. */
+    width: min(
+      100%,
+      var(--sec-media-w-stacked),
+      calc((var(--sec-fit-h) - var(--pv-raise)) * var(--sec-media-ratio))
+    );
+    margin-top: var(--pv-raise);
   }
 
-  /* The deck steps onto the clip's frame edge. */
+  /* The deck starts directly below the header and steps onto the clip's frame edge. */
   .pv-deck {
     order: 0;
     grid-column: 1;
     grid-row: 2;
-    align-self: end;
+    align-self: start;
     width: calc(100% + 0.75rem);
-    margin-bottom: clamp(1.5rem, 4vh, 3rem);
   }
 
   /* A short step, so the deck keeps its width (the cards no longer narrow into a wrap). */
