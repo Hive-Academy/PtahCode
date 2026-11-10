@@ -4,6 +4,7 @@ import { LoggingService } from '@ptah-extension/core';
 import { QueuedFollowUpStore, TabManagerService, TabWorkspacePartitionService } from '@ptah-extension/chat-state';
 import type { TabState } from '@ptah-extension/chat-types';
 import { SessionId, type SessionBudgetState } from '@ptah-extension/shared';
+import { FollowUpQueueService } from './chat-store/follow-up-queue.service';
 import { MessageDispatchService } from './chat-store/message-dispatch.service';
 import { SessionAutoHandoffService } from './session-auto-handoff.service';
 import { SessionAutoHandoffCoordinatorService } from './session-auto-handoff-coordinator.service';
@@ -36,6 +37,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
   let handoff: SessionAutoHandoffService;
   let send: jest.Mock;
   let probe: jest.Mock;
+  let withdraw: jest.Mock;
   let info: jest.Mock;
   let now: number;
   let probeGate: Promise<void> | null;
@@ -80,6 +82,10 @@ describe('SessionAutoHandoffCoordinatorService', () => {
       });
       return { success: true, queued: { clientMessageId, tabId: options.tabId, sessionId: SESSION } };
     });
+    withdraw = jest.fn(async (ref: { clientMessageId: string }) => {
+      store.settle(ref.clientMessageId, 'withdrawn');
+      return true;
+    });
     TestBed.configureTestingModule({ providers: [
       SessionAutoHandoffCoordinatorService, SessionAutoHandoffService, QueuedFollowUpStore,
       { provide: TabManagerService, useValue: {
@@ -97,6 +103,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
         sendOrQueueMessage: send, hasPendingPermissionForTab: () => permission(),
       } },
       { provide: SessionHandoffSkillService, useValue: { probe: () => probe() } },
+      { provide: FollowUpQueueService, useValue: { withdraw } },
       { provide: LoggingService, useValue: { info, warn: jest.fn() } },
     ] });
     store = TestBed.inject(QueuedFollowUpStore);
@@ -135,6 +142,24 @@ describe('SessionAutoHandoffCoordinatorService', () => {
     await run();
     expect(handoff.entry(SESSION)?.state).toBe('fired');
     expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('withdraws a hand-off queued on the live estimate when the confirmed stage stays below the limit', async () => {
+    start([makeTab(TAB, {
+      status: 'streaming',
+      sessionBudget: { ...BUDGET, stage: 'handoff', percent: 82 },
+      liveBudgetStage: 'limit',
+    })]);
+    await run();
+    expect(queued()?.content).toBe(COMMAND);
+    patch(TAB, { liveBudgetStage: null, sessionBudget: { ...BUDGET, stage: 'handoff', percent: 91, revision: 13 } });
+    await run();
+    expect(withdraw).toHaveBeenCalledTimes(1);
+    expect(queued()).toBeUndefined();
+    expect(handoff.entry(SESSION)).toBeNull();
+    patch(TAB, { status: 'loaded', sessionBudget: { ...BUDGET, revision: 14 } });
+    await run();
+    expect(send).toHaveBeenCalledTimes(2);
   });
 
   it.each(['withdrawn', 'failed'] as const)(

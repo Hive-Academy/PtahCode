@@ -170,7 +170,7 @@ export const ADVANCED_SETTINGS: readonly AdvancedSetting[] = [
   {
     key: 'agentBudget.stopWeightedTokens', group: 'context-budgets', kind: 'number',
     label: 'Agent token limit',
-    help: 'Stop an agent when its lifetime weighted token total reaches this limit. Verified cached input reads count at 10% in the floor.',
+    help: 'Stop an agent when its lifetime weighted token total reaches this limit. For CLI lanes, verified cached input reads count at 10% of their size.',
     unit: 'weighted tokens', min: 1_000, max: 100_000_000, integer: true,
     default: 3_000_000, apply: 'live',
   },

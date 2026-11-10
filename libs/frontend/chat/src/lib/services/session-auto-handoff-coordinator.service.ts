@@ -1,6 +1,7 @@
 import {
   DestroyRef,
   Injectable,
+  Injector,
   effect,
   inject,
   signal,
@@ -16,6 +17,7 @@ import {
 import type { TabState } from '@ptah-extension/chat-types';
 import type { SessionBudgetState } from '@ptah-extension/shared';
 import { displayBudgetStage } from '../components/molecules/notifications/session-budget-format';
+import { FollowUpQueueService } from './chat-store/follow-up-queue.service';
 import { MessageDispatchService } from './chat-store/message-dispatch.service';
 import { SessionAutoHandoffService } from './session-auto-handoff.service';
 import { SessionHandoffSkillService } from './session-handoff-skill.service';
@@ -26,6 +28,12 @@ interface HandoffCandidate {
   readonly tabId: string;
   readonly sessionId: string;
   readonly budget: SessionBudgetState;
+}
+
+/** A queued hand-off whose session is no longer at its limit. */
+interface StaleHandoff {
+  readonly sessionId: string;
+  readonly queued: QueuedFollowUpRef;
 }
 
 /**
@@ -73,6 +81,8 @@ export class SessionAutoHandoffCoordinatorService {
   private readonly partition = inject(TabWorkspacePartitionService);
   private readonly messageDispatch = inject(MessageDispatchService);
   private readonly followUpStore = inject(QueuedFollowUpStore);
+  /** Resolved on first use: the queue service has its own construction-time wiring. */
+  private readonly injector = inject(Injector);
   private readonly autoHandoff = inject(SessionAutoHandoffService);
   private readonly skill = inject(SessionHandoffSkillService);
   private readonly logger = inject(LoggingService);
@@ -91,6 +101,8 @@ export class SessionAutoHandoffCoordinatorService {
   /** Sessions that exhausted {@link MAX_FAILED_ATTEMPTS}; left alone for this page's lifetime. */
   private readonly givenUp = new Set<string>();
   private readonly loggedSkips = new Set<string>();
+  /** Sessions whose queued hand-off is being withdrawn because the confirmed stage is below `limit`. */
+  private readonly withdrawing = new Set<string>();
 
   constructor() {
     this.destroyRef.onDestroy(() => {
@@ -100,8 +112,10 @@ export class SessionAutoHandoffCoordinatorService {
     effect(() => {
       this.retryRevision();
       const candidates = this.candidates();
-      if (candidates.length === 0) return;
+      const stale = this.staleQueued();
+      if (candidates.length === 0 && stale.length === 0) return;
       untracked(() => {
+        for (const item of stale) void this.withdrawStale(item);
         for (const candidate of candidates) void this.fire(candidate);
       });
     });
@@ -116,15 +130,10 @@ export class SessionAutoHandoffCoordinatorService {
    * re-runs the effect when it changes.
    */
   private candidates(): readonly HandoffCandidate[] {
-    const activeTabs = this.tabManager.tabs();
-    const backgroundRevision = this.tabManager.backgroundTabsRevision();
-    const backgroundTabs = this.partition.findBackgroundTabs(
-      (tab) => tab.sessionBudget !== null && tab.sessionBudget !== undefined,
-    );
     const now = Date.now();
     const found: HandoffCandidate[] = [];
     const sessions = new Set<string>();
-    for (const tab of [...activeTabs, ...backgroundTabs]) {
+    for (const tab of this.budgetTabs()) {
       const budget = tab.sessionBudget;
       if (!budget || budgetStage(tab) !== 'limit') continue;
       const sessionId = tab.claudeSessionId;
@@ -172,6 +181,56 @@ export class SessionAutoHandoffCoordinatorService {
       found.push({ tabId: tab.id, sessionId, budget });
     }
     return found;
+  }
+
+  /** Tabs in both partitions; the tracked reads re-run the effect when either changes. */
+  private budgetTabs(): readonly TabState[] {
+    const activeTabs = this.tabManager.tabs();
+    this.tabManager.backgroundTabsRevision();
+    return [
+      ...activeTabs,
+      ...this.partition.findBackgroundTabs(
+        (tab) => tab.sessionBudget !== null && tab.sessionBudget !== undefined,
+      ),
+    ];
+  }
+
+  /**
+   * Hand-offs queued on the live estimate of a running turn (D25) whose stage
+   * is no longer `limit`: the turn's result cleared the estimate and the
+   * confirmed stage stayed below the limit. They must not run.
+   */
+  private staleQueued(): readonly StaleHandoff[] {
+    const found: StaleHandoff[] = [];
+    for (const tab of this.budgetTabs()) {
+      const sessionId = tab.claudeSessionId;
+      if (typeof sessionId !== 'string' || tab.sessionBudget?.sessionId !== sessionId) continue;
+      if (budgetStage(tab) === 'limit') continue;
+      const entry = this.autoHandoff.entry(sessionId);
+      if (entry?.state !== 'fired' || !entry.queued || entry.queued.tabId !== tab.id) continue;
+      if (this.withdrawing.has(sessionId) || !this.followUpStore.isPending(entry.queued.clientMessageId)) continue;
+      found.push({ sessionId, queued: entry.queued });
+    }
+    return found;
+  }
+
+  /** Withdraw one stale queued hand-off; a later confirmed `limit` fires a new one. */
+  private async withdrawStale({ sessionId, queued }: StaleHandoff): Promise<void> {
+    this.withdrawing.add(sessionId);
+    try {
+      const withdrawn = await this.injector.get(FollowUpQueueService).withdraw(queued, { restore: false });
+      this.logger.info(
+        LOG_CONTEXT,
+        withdrawn
+          ? 'queued automatic hand-off withdrawn: the confirmed stage is below the limit'
+          : 'queued automatic hand-off not withdrawn: a turn already took it',
+        { sessionId, tabId: queued.tabId },
+      );
+    } catch (error: unknown) {
+      this.logger.warn(LOG_CONTEXT, 'withdrawing the queued automatic hand-off failed', { sessionId, error });
+    } finally {
+      this.withdrawing.delete(sessionId);
+    }
   }
 
   private logSkip(sessionId: string, reason: string, tabId: string): void {
@@ -269,6 +328,8 @@ export class SessionAutoHandoffCoordinatorService {
       }
       if (this.autoHandoff.entry(sessionId)?.state === 'cancelled') return;
       this.autoHandoff.release(sessionId);
+      // Withdrawn here because the stage fell below the limit: not a failure.
+      if (this.withdrawing.has(sessionId)) return;
       this.deferAttempt(
         sessionId,
         outcome === 'failed'

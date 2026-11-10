@@ -97,7 +97,8 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
           >
             This guard stops a lane when it repeats the same call this many times.
             Lanes also have a weighted token budget and a duration limit.
-            The first token-limit crossing warns the lane, and the next turn stops it.
+            A lane gets an early warning when it reaches the budget warning ratio, or when one more turn of its largest size would cross the limit.
+            The first turn that crosses the token limit is a grace turn: the lane is warned again, and its next turn stops it.
             A lane stopped by its budget does not resume; start a fresh lane for the remaining work.
           </p>
           <div class="grid max-w-sm gap-y-5">
