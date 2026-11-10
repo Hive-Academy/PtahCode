@@ -26,6 +26,7 @@ import {
   getStaticModelCapabilities,
   getAllAnthropicProviders,
   isDirectAnthropic,
+  type ProviderProfile,
 } from '@ptah-extension/shared';
 import { SDK_TOKENS } from '../di/tokens';
 import { AUTH_PROVIDERS_TOKENS } from '@ptah-extension/auth-providers-tokens';
@@ -709,6 +710,20 @@ export class SdkModelService {
     return this.startFetch(key, () => this.fetchSupportedModelsInternal(key));
   }
 
+  /** Probe the same isolated auth environment used to launch a workspace session. */
+  async getModelsForProviderProfile(profile: ProviderProfile): Promise<ModelInfo[]> {
+    const env = profile.authEnv;
+    if (isDirectAnthropic(env) && !env.ANTHROPIC_API_KEY) {
+      return this.getNativeClaudeModels();
+    }
+    if (isDirectAnthropic(env) && env.ANTHROPIC_API_KEY) {
+      const apiModels = await this.fetchModelsViaApi(env);
+      return apiModels.length > 0 ? apiModels : this.fetchModelsViaSdk(env);
+    }
+    const models = await this.fetchModelsViaSdk(env);
+    return isDirectAnthropic(env) ? models : this.applyTierMapping(models, env);
+  }
+
   /**
    * Register an in-flight fetch under `key` and clean it up when it settles.
    *
@@ -1069,7 +1084,7 @@ export class SdkModelService {
    *
    * Only called for authMethod === 'thirdParty'. Never called for claudeCli or apiKey.
    */
-  private applyTierMapping(models: ModelInfo[]): ModelInfo[] {
+  private applyTierMapping(models: ModelInfo[], env: AuthEnv = this.authEnv): ModelInfo[] {
     this.logger.info('[SdkModelService] applyTierMapping (third-party)', {
       count: models.length,
       rawValues: models.map((m) => ({
@@ -1090,8 +1105,8 @@ export class SdkModelService {
       }
       isDefault = raw === 'default';
       const resolvedValue = isDefault
-        ? this.resolveModelId('opus')
-        : this.resolveModelId(m.value);
+        ? this.resolveModelId('opus', env)
+        : this.resolveModelId(m.value, env);
       if (!isDefault) {
         if (seen.has(resolvedValue)) continue;
         seen.add(resolvedValue);
@@ -1304,9 +1319,9 @@ export class SdkModelService {
    *
    * @returns ModelInfo[] converted from API models, empty array on failure
    */
-  private async fetchModelsViaApi(): Promise<ModelInfo[]> {
+  private async fetchModelsViaApi(envOverride?: AuthEnv): Promise<ModelInfo[]> {
     try {
-      const apiModels = await this.fetchApiModels();
+      const apiModels = await this.fetchApiModels(envOverride);
       if (apiModels.length === 0) return [];
       const models: ModelInfo[] = apiModels.map((m) => ({
         value: m.id,
@@ -1346,22 +1361,24 @@ export class SdkModelService {
    *
    * @returns Array of ApiModelEntry, or empty array on failure/skip
    */
-  async fetchApiModels(): Promise<ApiModelEntry[]> {
+  async fetchApiModels(envOverride?: AuthEnv): Promise<ApiModelEntry[]> {
     if (
+      !envOverride &&
       this.cachedApiModels &&
       Date.now() - this.apiModelsCacheTime < API_MODELS_CACHE_TTL
     ) {
       return this.cachedApiModels;
     }
-    const baseUrl = this.authEnv.ANTHROPIC_BASE_URL;
+    const env = envOverride ?? this.authEnv;
+    const baseUrl = env.ANTHROPIC_BASE_URL;
     if (baseUrl && baseUrl.includes('127.0.0.1')) {
       this.logger.debug(
         '[SdkModelService] Skipping /v1/models for local proxy',
       );
       return [];
     }
-    const apiKey = this.authEnv.ANTHROPIC_API_KEY;
-    const authToken = this.authEnv.ANTHROPIC_AUTH_TOKEN;
+    const apiKey = env.ANTHROPIC_API_KEY;
+    const authToken = env.ANTHROPIC_AUTH_TOKEN;
     if (!apiKey && !authToken) {
       this.logger.debug('[SdkModelService] No auth credentials for /v1/models');
       return [];
@@ -1414,8 +1431,10 @@ export class SdkModelService {
           createdAt: m.created_at || '',
         }));
 
-      this.cachedApiModels = models;
-      this.apiModelsCacheTime = Date.now();
+      if (!envOverride) {
+        this.cachedApiModels = models;
+        this.apiModelsCacheTime = Date.now();
+      }
 
       this.logger.info('[SdkModelService] Fetched models from /v1/models API', {
         total: body.data.length,

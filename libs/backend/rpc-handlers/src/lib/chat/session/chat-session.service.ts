@@ -1338,7 +1338,9 @@ export class ChatSessionService {
         !profile.authEnv.ANTHROPIC_API_KEY && !profile.authEnv.ANTHROPIC_AUTH_TOKEN;
       const models = native
         ? await this.childModelCatalog.getNativeClaudeModels()
-        : await this.childModelCatalog.getSupportedModels();
+        : profile
+          ? await this.childModelCatalog.getModelsForProviderProfile(profile)
+          : await this.childModelCatalog.getSupportedModels();
       if (models.length === 0) {
         this.logger.warn('[ChatSessionService] Provider returned an empty model catalog');
         return { accepted: false, code: 'model-catalog-unavailable', message: 'the provider returned an empty model catalog' };
