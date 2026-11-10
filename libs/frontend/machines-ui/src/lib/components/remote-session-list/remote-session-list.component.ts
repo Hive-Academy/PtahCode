@@ -222,7 +222,7 @@ interface RemoteSessionRow {
                   type="button"
                   class="block w-full min-w-0 rounded border border-base-300 px-3 py-2.5 text-left hover:bg-base-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
                   data-testid="remote-session-open"
-                  [attr.aria-label]="openLabel(row.session)"
+                  [attr.aria-label]="openLabel(row)"
                   (click)="open(row.session, row.workspacePath)"
                 >
                   <span class="flex min-w-0 items-baseline gap-1">
@@ -354,8 +354,20 @@ export class RemoteSessionListComponent {
     return displayText(session.title) || 'Untitled session';
   }
 
-  protected openLabel(session: RemoteMachineSessionSummary): string {
-    const name = `Open session: ${this.title(session)}`;
+  /**
+   * The accessible name replaces the visible text of the row, so it carries
+   * the same facts: title, provider, age and state.
+   */
+  protected openLabel(row: RemoteSessionRow): string {
+    const session = row.session;
+    const name = [
+      `Open session: ${this.title(session)}`,
+      displayText(session.provider, 24),
+      row.age,
+      this.stateLabel(session),
+    ]
+      .filter((part) => part !== '')
+      .join(', ');
     return session.driver
       ? `${name}, driven by ${displayText(session.driver.label)}, watch only`
       : name;

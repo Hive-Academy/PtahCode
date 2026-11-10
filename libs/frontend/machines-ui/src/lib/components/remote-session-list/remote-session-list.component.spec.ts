@@ -115,10 +115,22 @@ describe('RemoteSessionListComponent', () => {
   it('Open buttons are named per session; a driven one says watch only', async () => {
     const { fixture, opened } = await setup();
     const buttons = all(fixture, 'remote-session-open');
-    expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual([
-      'Open session: Refactor RPC registry',
-      'Open session: Migrate settings, driven by Horus keyboard, watch only',
-    ]);
+    // The accessible name replaces the row text, so it carries the visible
+    // provider, age and state too.
+    const names = buttons.map((b) => b.getAttribute('aria-label') ?? '');
+    expect(names[0]).toMatch(
+      /^Open session: Refactor RPC registry, claude, \d+ min, Running$/,
+    );
+    expect(names[1]).toMatch(
+      /^Open session: Migrate settings, \S+, .+, Interrupted, driven by Horus keyboard, watch only$/,
+    );
+    for (const [index, button] of buttons.entries()) {
+      const state = button
+        .querySelector('[data-testid="remote-session-state"]')
+        ?.textContent?.trim();
+      expect(state).toBeTruthy();
+      expect(names[index]).toContain(state);
+    }
     expect(q(fixture, 'remote-session-driver')?.textContent?.trim()).toBe(
       'Driver: Horus keyboard',
     );

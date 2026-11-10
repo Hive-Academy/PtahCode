@@ -171,7 +171,7 @@ describe('MachinesViewComponent', () => {
       pendingApprovalsByMachine: signal(new Map([['m1', 1]])),
       pendingApprovalCount: signal(1),
       pendingApprovalRequestsByMachine: signal(
-        new Map([['m1', [{ sessionId: 's1', request }]]]),
+        new Map([['m1', [{ sessionId: 's1', request, mode: 'answerable' }]]]),
       ),
     });
     expect(q(fixture, 'machines-approvals-badge')?.textContent).toContain(
@@ -188,6 +188,64 @@ describe('MachinesViewComponent', () => {
       'p1',
       'allow',
     );
+  });
+
+  it('overview approval cards give no answer for watch-only and cached sessions', async () => {
+    const request = (id: string) => ({
+      id,
+      toolName: 'Bash',
+      toolInput: { command: 'npm run migrate' },
+      toolUseId: `tu-${id}`,
+      timestamp: Date.now(),
+      description: 'Run a command',
+    });
+    const { fixture, store } = await setup([HORUS], {
+      pendingApprovalRequestsByMachine: signal(
+        new Map([
+          [
+            'm1',
+            [
+              { sessionId: 's1', request: request('p1'), mode: 'watch-only' },
+              { sessionId: 's2', request: request('p2'), mode: 'cached' },
+            ],
+          ],
+        ]),
+      ),
+    });
+    const card = q(fixture, 'machine-approvals-waiting');
+    expect(card?.textContent).toContain('Waiting at Horus');
+    expect(card?.textContent).toContain('Saved request');
+    const enabled = Array.from(
+      card?.querySelectorAll<HTMLButtonElement>(
+        '[data-testid="approval-allow"], [data-testid="approval-deny"]',
+      ) ?? [],
+    ).filter((button) => !button.disabled);
+    expect(enabled).toHaveLength(0);
+    expect(store.respondPermission).not.toHaveBeenCalled();
+  });
+
+  it('overview approval cards are disabled while the machine is not connected', async () => {
+    const request = {
+      id: 'p1',
+      toolName: 'Bash',
+      toolInput: { command: 'npm run migrate' },
+      toolUseId: 'tu1',
+      timestamp: Date.now(),
+      description: 'Run a command',
+    };
+    const { fixture, store } = await setup([{ ...HORUS, state: 'offline' }], {
+      pendingApprovalRequestsByMachine: signal(
+        new Map([['m1', [{ sessionId: 's1', request, mode: 'answerable' }]]]),
+      ),
+    });
+    const card = q(fixture, 'machine-approvals-waiting');
+    expect(card?.textContent).toContain('Horus is not connected.');
+    const allow = q<HTMLButtonElement>(fixture, 'approval-allow');
+    expect(allow?.disabled).toBe(true);
+    allow?.click();
+    // An offline machine keeps a timer, so the fixture never becomes stable.
+    await flush();
+    expect(store.respondPermission).not.toHaveBeenCalled();
   });
 
   it('narrow: selecting a machine opens the detail pane; "All machines" returns to the list', async () => {

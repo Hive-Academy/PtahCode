@@ -24,7 +24,9 @@ const ANSWER_REJECTED_SENTENCE =
  * Approval cards at the top of the machine overview (machines-ux.md M11): one
  * card per tool approval that waits in an opened session of this machine. The
  * card is the same block as in the session view, so the tool, the arguments
- * with Copy, the countdown and Allow once / Deny stay in one place.
+ * with Copy, the countdown and Allow once / Deny stay in one place. A request
+ * of a watch-only or cached session, or of a machine that is not connected,
+ * shows without enabled answers, as in the session view.
  */
 @Component({
   selector: 'ptah-machine-approvals',
@@ -43,6 +45,8 @@ const ANSWER_REJECTED_SENTENCE =
           <ptah-remote-approval-block
             [request]="entry.request"
             [machineName]="machineName()"
+            [mode]="entry.mode"
+            [unavailableReason]="answerUnavailable()"
             [busy]="answering().has(entry.request.id)"
             [error]="errors().get(entry.request.id) ?? null"
             (answered)="answer(entry, $event)"
@@ -63,6 +67,14 @@ export class MachineApprovalsComponent {
     () =>
       this.store.pendingApprovalRequestsByMachine().get(this.machineId()) ?? [],
   );
+  /** Same rule as the session view: no answer while the machine is offline. */
+  protected readonly answerUnavailable = computed(() => {
+    const id = this.machineId();
+    const machine = this.store.machines().find((m) => m.machineId === id);
+    return machine?.state === 'connected'
+      ? null
+      : `${this.machineName()} is not connected.`;
+  });
   protected readonly answering = signal<ReadonlySet<string>>(new Set());
   protected readonly errors = signal<ReadonlyMap<string, MachinesError>>(
     new Map(),

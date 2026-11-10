@@ -82,6 +82,23 @@ export type MachinesOutcome<T = void> =
 export interface MachinePendingApproval {
   readonly sessionId: string;
   readonly request: PermissionRequest;
+  /**
+   * Whether the session of the request accepts an answer, by the rules of the
+   * session view: `cached` when the lock check failed or the session is not
+   * open, `watch-only` for a saved snapshot, `answerable` otherwise. The
+   * connection of the machine is not part of it.
+   */
+  readonly mode: MachineApprovalMode;
+}
+
+/** Same values as the `mode` input of the approval block. */
+export type MachineApprovalMode = 'answerable' | 'watch-only' | 'cached';
+
+function approvalMode(entry: SessionEntry): MachineApprovalMode {
+  if (entry.lockUnavailable || entry.reducer.mode === 'detached') {
+    return 'cached';
+  }
+  return entry.reducer.mode === 'snapshot' ? 'watch-only' : 'answerable';
 }
 
 interface SessionEntry {
@@ -176,7 +193,8 @@ export class MachinesStore {
       if (pending.length === 0) continue;
       const sessionId = key.slice(key.indexOf('\u0000') + 1);
       const list = byMachine.get(entry.machineId) ?? [];
-      for (const request of pending) list.push({ sessionId, request });
+      const mode = approvalMode(entry);
+      for (const request of pending) list.push({ sessionId, request, mode });
       byMachine.set(entry.machineId, list);
     }
     return byMachine as ReadonlyMap<string, readonly MachinePendingApproval[]>;
