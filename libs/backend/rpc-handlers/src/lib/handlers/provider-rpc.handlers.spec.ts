@@ -100,6 +100,7 @@ import type {
 import {
   LIMIT_LOOKUP_DEADLINE_MS,
   SLOW_LIMIT_LOOKUP_DEADLINE_MS,
+  mergeKimiCodeModels,
 } from '@ptah-extension/shared';
 import {
   createMockLogger,
@@ -293,6 +294,7 @@ function createMockCodexAuthService(): MockCodexAuthService {
 
 interface Harness {
   handlers: ProviderRpcHandlers;
+  kimiAuth: { resolveRequestCredential: jest.Mock };
   lmStudioProxy: { listModels: jest.Mock };
   logger: MockLogger;
   rpcHandler: MockRpcHandler;
@@ -370,6 +372,12 @@ function makeHarness(
   const ollamaDiscovery = createMockOllamaDiscovery();
   const copilotAuthService = createMockCopilotAuthService();
   const codexAuthService = createMockCodexAuthService();
+  const kimiAuth = {
+    resolveRequestCredential: jest.fn(async () => ({
+      kind: 'oauth' as const,
+      accessToken: 'fake-access-token',
+    })),
+  };
   const codexAccountUsage = {
     getAccountUsage: jest.fn().mockResolvedValue({
       status: 'available',
@@ -438,12 +446,14 @@ function makeHarness(
     new ConnectionCheckRecorder(),
     planLimitsService,
     lmStudioProxy,
+    kimiAuth as never,
   );
 
   return {
     planLimits,
     lmStudioProxy,
     handlers,
+    kimiAuth,
     logger,
     rpcHandler,
     configManager,
@@ -968,6 +978,101 @@ describe('ProviderRpcHandlers', () => {
           'ollama-cloud',
         ]),
       );
+    });
+
+    it('uses the Kimi auth service and merges a successful catalog', async () => {
+      const h = makeHarness();
+      h.handlers.register();
+      const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
+        ([id]) => id === 'kimi-code',
+      );
+      if (!entry) throw new Error('Missing Kimi fetcher');
+      const originalFetch = global.fetch;
+      const fetchMock = jest.fn(
+        async () =>
+          new Response(JSON.stringify({ data: [{ id: 'future-kimi' }] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+      );
+      global.fetch = fetchMock;
+      try {
+        const result = await entry[1]();
+        expect(result.map((model) => model.id)).toEqual([
+          ...mergeKimiCodeModels(undefined).map((model) => model.id),
+          'future-kimi',
+        ]);
+        expect(fetchMock).toHaveBeenCalledWith(
+          'https://api.kimi.ai/coding/v1/models',
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        );
+        expect(h.kimiAuth.resolveRequestCredential).toHaveBeenCalledTimes(1);
+      } finally {
+        global.fetch = originalFetch;
+      }
+    });
+
+    it.each([
+      { status: 500, payload: {} },
+      { status: 200, payload: { data: [{ bad: true }] } },
+    ])(
+      'falls back to static Kimi models on HTTP failure or malformed payload',
+      async ({ status, payload }) => {
+        const h = makeHarness();
+        h.handlers.register();
+        const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
+          ([id]) => id === 'kimi-code',
+        );
+        if (!entry) throw new Error('Missing Kimi fetcher');
+        const originalFetch = global.fetch;
+        global.fetch = jest.fn(
+          async () => new Response(JSON.stringify(payload), { status }),
+        );
+        try {
+          expect(await entry[1]()).toEqual(mergeKimiCodeModels(undefined));
+          if (status === 500) {
+            expect(h.logger.debug).toHaveBeenCalledWith(
+              '[ProviderRpc] Kimi Code model catalog unavailable',
+              { status: 500 },
+            );
+            expect(JSON.stringify(h.logger.debug.mock.calls)).not.toContain(
+              'fake-access-token',
+            );
+          } else {
+            expect(h.logger.debug).toHaveBeenCalledWith(
+              '[ProviderRpc] Kimi Code model catalog has an unknown shape',
+              { payloadType: 'object', keys: ['data'] },
+            );
+          }
+        } finally {
+          global.fetch = originalFetch;
+        }
+      },
+    );
+
+    it('logs a thrown Kimi fetch error without the credential and returns static models', async () => {
+      const h = makeHarness();
+      h.handlers.register();
+      const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
+        ([id]) => id === 'kimi-code',
+      );
+      if (!entry) throw new Error('Missing Kimi fetcher');
+      const originalFetch = global.fetch;
+      global.fetch = jest.fn(async () => {
+        throw new Error('network unavailable');
+      });
+      try {
+        expect(await entry[1]()).toEqual(mergeKimiCodeModels(undefined));
+        expect(h.logger.debug).toHaveBeenCalledWith(
+          '[ProviderRpc] Kimi Code model catalog unavailable',
+          { error: 'network unavailable' },
+        );
+        expect(JSON.stringify(h.logger.debug.mock.calls)).not.toContain(
+          'fake-access-token',
+        );
+      } finally {
+        global.fetch = originalFetch;
+      }
     });
 
     it('eagerly registers the LM Studio fetcher, which lists through the proxy', async () => {
