@@ -81,6 +81,7 @@ describe('Git child providers and scopes', () => {
       { provide: VSCodeService, useValue: {
         config: signal({ isElectron: true }), isElectron: true,
         handleMessage: jest.fn(), handledMessageTypes: [],
+        getState: jest.fn().mockReturnValue(null), setState: jest.fn(), postMessage: jest.fn(),
       } },
     ] });
   });
