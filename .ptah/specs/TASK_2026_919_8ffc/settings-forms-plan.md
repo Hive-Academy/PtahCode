@@ -1,12 +1,77 @@
 # Settings form controls: plan
 
 Task: TASK_2026_919_8ffc. Related task: TASK_2026_904 (component system, top-down plan).
-Date: 2026-11-10. Phase: design and plan only. This file does not change production code.
+Date: 2026-11-10. Phase: see section 0 (three phases; phase 2 started).
 
 Companion files:
 
 - `settings-forms-inventory.md`: the 114 controls of the Settings page.
 - `prototype/settings-forms.html`: the proposed controls in each state, dark and light.
+
+## 0. Direction update (2026-11-10, approved by the user)
+
+This section replaces sections 4, 6 and 8 where they disagree with it. The HTML prototype is
+a record only. No more pure-HTML prototypes.
+
+### 0.1 Sequence: three phases (the TASK_2026_904 method)
+
+1. **Review Settings.** The inventory is the review. Table 0.3 names the extraction source of
+   each control family and the Settings rows that duplicate it.
+2. **Extract shared components.** Move each family from its real source into
+   `libs/frontend/ui/src/lib/extracted/`. Make the Settings rows use the shared component,
+   family by family, tab by tab (order of D9). No intended visual change. The proof in each
+   batch is a DOM-equality test of the adopted rows. Each batch is small and has the scoped
+   command `npm run verify -- -p <changed projects>`.
+3. **Build the shared language.** When Settings uses the shared components, upgrade the
+   components to the agreed look and capabilities. Each upgrade lands one time and all
+   adopters get it. The gallery view (a route next to the Electron-only `/ui-gallery`) is the
+   review surface of this phase. It uses the shared components and real Settings data shapes.
+
+Do not design a control alone and adopt it later.
+
+### 0.2 Final decisions
+
+| # | Decision |
+|---|---|
+| D1 (reversed) | No native `<select>` in Settings at the end of phase 3. Each list uses `ptah-select`, or `ptah-combobox` when the user can search. |
+| Select options | Leading icon, provider mark or avatar. Title and description. Trailing meta or badge. Groups with headers. Disabled option with a reason. Check mark on the selected option. Loading, empty and error-with-retry states. Optional footer action row. Typeahead and full keyboard support. The trigger shows the selected option with its icon. |
+| Field shell | One floating-label shell for text, secret, number and textarea. Prefix and suffix slots, hint, error, saved and pending states. |
+| D4 (replaced) | Proposed height: 3.25 rem (52 px) for the floating-label field and the select trigger. Compact variant: 2.25 rem (36 px) with no floating label, only for the CLI matrix. |
+| Behavior | `@angular/aria` 22.2.6 and `@angular/cdk` 22.2 (overlay, listbox and combobox patterns, a11y focus, virtual scroll for long model lists). Signals, OnPush, `input()` and `model()`. Controls satisfy `FormValueControl`. |
+| Styling | Tailwind 3.4 and DaisyUI 4.12 semantic tokens and the ptah-glass tokens only. HyperUI and Preline are a visual reference only. No new dependency. |
+| D2, D3, D5 to D10 | Stand as recommended in section 8. |
+
+### 0.3 Extraction source of each control family
+
+Row ids refer to `settings-forms-inventory.md`. "Polished" means a chat or setup surface.
+
+| Family | Extraction source (phase 2) | Settings rows that duplicate it | Phase 2 note |
+|---|---|---|---|
+| Field shell (label, hint, error) | The best Settings row of the first tab: the numeric rows of `session-budget-settings.component.ts`. Compare with the label and hint markup of `provider-model-picker.component.ts`. | 44 rows (duplication item 1). | First batch. The generic `ptah-field` of #1028 is not the source. |
+| Text input | Input frame of `provider-model-picker.component.ts`. | 26 rows. | Class skin and shell. Sizes stay through a look default. |
+| Secret input | No polished source. Candidate (confirm in its batch): the API key row of the provider setup wizard. | 12 rows. | Extract show/hide and the mask as they are. |
+| Number input | No polished source. Candidate (confirm in its batch): `mcp-port-config.component.ts`. | 8 rows (5 number, 3 text). | D10 (type change) waits for phase 3. |
+| Textarea | One row only. | 1 row. | No extraction until a second user exists. |
+| Select | Class skin `extracted/setup-field` (from setup). | 17 native selects. | Phase 2 can only share the class skin. A native select has no faithful rich equivalent. The rich `ptah-select` is phase 3. |
+| Combobox | `provider-model-search-field.component.ts` and `native-autocomplete.component.ts`. | 7 comboboxes, 3 "model ID plus suggestions" places. | Already shared for 7 rows. D6 and D8 are phase 3. |
+| Popover as select, custom menu | Panel of `native-autocomplete`, row of `native-option`, top layer of `native-dropdown`. | 5 popovers, 1 custom menu. | Phase 2: share the option row. Phase 3: replace with `ptah-select` (D5). |
+| Toggle | `plugin-catalog-panel.component.ts` (`toggle toggle-primary toggle-sm`). | 7 toggles. | Phase 2 keeps each color and size through a look default. D3 lands in phase 3. |
+| Checkbox | `plugin-catalog-panel.component.ts` (`checkbox checkbox-xs checkbox-primary`). | 12 checkboxes. | Same rule as the toggle. |
+| Radio and option cards | `install-scope-field.component.ts` (`radio radio-xs radio-primary`). | 14 radios in 3 markups. | Extract the card markup that has the most rows. |
+| Segmented | Not confirmed. Candidate: the chat effort selector. | 3 rows, plus the effort control in 4 places. | Confirm the source before the batch. |
+| Slider | One row only. | 1 row. | No extraction. |
+
+### 0.4 Phase 2 batch order
+
+1. Field shell in Context Management (rows B17, B18). Record: `phase2/batch-01-field-shell.md`.
+2. Field shell in Search and Voice, then Advanced, then Providers.
+3. Toggle and checkbox, same tab order.
+4. Text, number and secret input skins.
+5. Radio cards, segmented control, option row of the popovers.
+6. Select class skin. Then phase 3 starts with `ptah-select` and the floating-label shell.
+
+Early contract files for phase 3 exist in `libs/frontend/ui/src/lib/forms/shared/` in the
+worktree. They are not exported and not committed until phase 3.
 
 ## 1. Problem
 

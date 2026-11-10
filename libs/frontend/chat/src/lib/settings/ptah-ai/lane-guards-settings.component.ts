@@ -10,6 +10,7 @@ import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
 import type { AgentOrchestrationConfig } from '@ptah-extension/shared';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
+import { SettingsFieldComponent } from '@ptah-extension/ui';
 import {
   LANE_GUARD_DEFAULTS,
   LANE_GUARD_FIELDS,
@@ -46,7 +47,7 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
 @Component({
   selector: 'ptah-lane-guards-settings',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective],
+  imports: [SettingsBusyDisabledDirective, SettingsFieldComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -103,11 +104,14 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
           </p>
           <div class="grid max-w-sm gap-y-5">
             @for (field of fields; track field.key) {
-              <div class="flex min-w-0 flex-col gap-1">
-                <label [for]="field.testId" class="text-sm font-medium text-base-content">{{
-                  field.label
-                }}</label>
-                <div class="join flex w-full">
+              <div ptahSettingsField class="flex min-w-0 flex-col gap-1"
+                [fieldId]="field.testId"
+                [label]="field.label"
+                [hint]="field.help + ' Range: ' + field.min + ' or greater.'"
+                [error]="fieldMessage(field.key)"
+                [errorRole]="'alert'"
+                [errorTestId]="field.testId + '-error'">
+                <ng-container ngProjectAs="[settingsFieldControl]"><div class="join flex w-full">
                   <input
                     type="text"
                     inputmode="numeric"
@@ -132,22 +136,7 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
                     aria-hidden="true"
                     >calls</span
                   >
-                </div>
-                <p
-                  [id]="field.testId + '-help'"
-                  class="text-xs text-base-content-muted"
-                >
-                  {{ field.help }} Range: {{ field.min }} or greater.
-                </p>
-                @if (fieldMessage(field.key); as message) {
-                  <p
-                    [id]="field.testId + '-error'"
-                    role="alert"
-                    [attr.data-testid]="field.testId + '-error'"
-                  >
-                    {{ message }}
-                  </p>
-                }
+                </div></ng-container>
               </div>
             }
           </div>
