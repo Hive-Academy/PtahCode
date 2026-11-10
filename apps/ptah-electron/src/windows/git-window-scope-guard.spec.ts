@@ -91,6 +91,25 @@ describe('GitWindowScopeGuard — symbolic links', () => {
     expect(guard.filterPush({ type: 'git:operationOutput', payload: { operationId: 'op-old' } } as { type: string })).toBeNull();
   });
 
+  it('lets the child pin only the active tab of the acknowledged scope', () => {
+    const candidate = {
+      tabId: 't1', sessionId: 's-a', sessionName: 'a', organizationWorktreePath: null,
+      organizationResolved: true, agentOriginWorktreePath: null, sessionCwd: repoA,
+    };
+    const setMode = (params: unknown) => guard.authorize('gitWindow:setMode', params);
+    // No active tab in the scope: nothing can be pinned.
+    expect(setMode({ mode: 'pinned', tabId: 't1' })).toBe(false);
+    scope = { ...scope, active: candidate, open: [candidate, { ...candidate, tabId: 't2', sessionId: 's-b', sessionCwd: repoB }] };
+    expect(setMode({ mode: 'pinned', tabId: 't1' })).toBe(true);
+    expect(setMode({ mode: 'follow-session', tabId: null })).toBe(true);
+    // An open tab of another repository would move the scope to that repository.
+    expect(setMode({ mode: 'pinned', tabId: 't2' })).toBe(false);
+    expect(setMode({ mode: 'pinned', tabId: null })).toBe(false);
+    expect(setMode({ mode: 'follow-session', tabId: 't2' })).toBe(false);
+    expect(setMode({ mode: 'pinned', tabId: 't1', extra: true })).toBe(false);
+    expect(setMode(undefined)).toBe(false);
+  });
+
   it('lets the child read and write only the settings of the Git views', () => {
     expect(guard.authorize('settings:get', { key: 'diff.renderSideBySide' })).toBe(true);
     expect(guard.authorize('settings:get', { key: 'editorLauncher.lastTarget' })).toBe(true);

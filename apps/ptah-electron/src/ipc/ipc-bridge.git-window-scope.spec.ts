@@ -318,6 +318,22 @@ describe('IpcBridge — detached Git window scope and pushes', () => {
     );
   });
 
+  it('lets the child pin only the active tab of its scope, not another open tab', async () => {
+    const candidate = {
+      tabId: 't1', sessionId: 's-a', sessionName: 'a', organizationWorktreePath: null,
+      organizationResolved: true, agentOriginWorktreePath: null, sessionCwd: REPO_A,
+    };
+    const other = { ...candidate, tabId: 't2', sessionId: 's-b', sessionCwd: REPO_B };
+    expect(host.publishScope({ ...scopeFor(REPO_A), active: candidate, open: [candidate, other] }).accepted).toBe(true);
+    git.sent.length = 0;
+    await rpc(git, 'gitWindow:setMode', { mode: 'pinned', tabId: 't2' });
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(git.sent).toEqual([outOfScope('gitWindow:setMode')]);
+    await rpc(git, 'gitWindow:setMode', { mode: 'pinned', tabId: 't1' });
+    await rpc(git, 'gitWindow:setMode', { mode: 'follow-session', tabId: null });
+    expect(handleMessage).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps the main window free to write an unrelated setting', async () => {
     const params = { key: 'agentOrchestration.codexWebSearch', value: true };
     await rpc(main, 'settings:set', params);

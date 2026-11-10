@@ -1,6 +1,6 @@
 import { isAbsolute, join } from 'node:path';
 import { z } from 'zod';
-import { AGENT_WORKTREE_DIR } from '@ptah-extension/shared';
+import { AGENT_WORKTREE_DIR, GitWindowSetModeParamsSchema } from '@ptah-extension/shared';
 import type { GitWindowCandidate, GitWindowScope } from '@ptah-extension/shared';
 import { absoluteTarget, isInside, isPhysicallyInside, keys, rootKey } from './git-window-scope-paths';
 
@@ -26,6 +26,9 @@ import { absoluteTarget, isInside, isPhysicallyInside, keys, rootKey } from './g
  *   that the child started itself in the current scope roots. Only a method
  *   that starts an operation records one. A change of the roots, a closed
  *   child and the end of the operation remove the record.
+ * - `gitWindow:setMode` can pin only the active tab of the acknowledged scope,
+ *   or go back to the active session. A pin of another open tab would move
+ *   the scope to the repository of that tab.
  * - `settings:get` and `settings:set` work only for the UI preferences of the
  *   Git views ({@link SettingsSetParamsSchema}). Each other setting is refused.
  * - A mirrored push is reduced to the roots of the scope ({@link filterPush}).
@@ -34,8 +37,7 @@ import { absoluteTarget, isInside, isPhysicallyInside, keys, rootKey } from './g
  */
 
 const UNSCOPED_METHODS: ReadonlySet<string> = new Set([
-  'gitWindow:getScope', 'gitWindow:close', 'gitWindow:setMode',
-  'editor:detectTargets',
+  'gitWindow:getScope', 'gitWindow:close', 'editor:detectTargets',
 ]);
 const READ_METHODS: ReadonlySet<string> = new Set([
   'git:info', 'git:reviewChanges', 'git:reviewFile', 'git:diffFile', 'git:log',
@@ -105,6 +107,12 @@ export class GitWindowScopeGuard {
   authorize(method: string, params: unknown): boolean {
     const scope = this.current();
     if (UNSCOPED_METHODS.has(method)) return true;
+    if (method === 'gitWindow:setMode') {
+      const mode = GitWindowSetModeParamsSchema.safeParse(params);
+      if (!mode.success) return false;
+      if (mode.data.mode === 'follow-session') return mode.data.tabId === null;
+      return scope !== null && scope.active !== null && mode.data.tabId === scope.active.tabId;
+    }
     if (method === 'settings:get') return SettingsGetParamsSchema.safeParse(params).success;
     if (method === 'settings:set') return SettingsSetParamsSchema.safeParse(params).success;
     const operation = OperationParamsSchema.safeParse(params);
