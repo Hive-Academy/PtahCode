@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_896_9339
-status: in_progress
+status: in_review
 type: FEATURE
 title: Routed per-call model for system CLI lanes from live catalogs
 depends_on:
