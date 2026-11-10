@@ -126,7 +126,7 @@ describe('RendererFrameMonitorService', () => {
     expect(warn).toHaveBeenCalledWith('RendererFrame', expected);
   });
 
-  it('logs only the file name from a backslash source URL', () => {
+  it('logs only the file name from a local path in the source URL or the invoker', () => {
     let report: PerformanceObserverCallback | undefined;
     class FakeObserver {
       static supportedEntryTypes = ['long-animation-frame'];
@@ -145,13 +145,21 @@ describe('RendererFrameMonitorService', () => {
     const entry = {
       name: 'long-animation-frame', entryType: 'long-animation-frame',
       startTime: 18_000, duration: 300,
-      scripts: [{ duration: 90, sourceURL: 'C:\\Users\\name\\repo\\app.js?query#fragment' }],
+      scripts: [{
+        duration: 90,
+        invoker: 'file:///C:/Users/name/repo/app.js?query',
+        sourceURL: 'C:\\Users\\name\\repo\\app.js?query#fragment',
+      }],
     };
     report?.({
       getEntries: () => [entry],
       getEntriesByName: (): PerformanceEntryList => [],
       getEntriesByType: (): PerformanceEntryList => [],
     } as PerformanceObserverEntryList, {} as PerformanceObserver);
-    expect(warn).toHaveBeenCalledWith('RendererFrame', expect.stringContaining('"src":"app.js"'));
+    expect(warn).toHaveBeenCalledWith(
+      'RendererFrame',
+      expect.stringContaining('"invoker":"app.js","fn":"","src":"app.js"'),
+    );
+    expect(warn.mock.calls[0][1]).not.toContain('Users');
   });
 });

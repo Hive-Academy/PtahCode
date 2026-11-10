@@ -10,6 +10,16 @@ export type ComposerImage = ComposerDraftImage;
 /** The picker waits on a person in a native dialog, so it outlasts the default RPC timeout. */
 const FILE_PICK_TIMEOUT_MS = 10 * 60_000;
 
+/** A pending pick blocks a new one for this long; after it, a new pick replaces a host that may never answer. */
+const PICK_RETRY_AFTER_MS = 30_000;
+
+type PickKind = 'files' | 'images';
+
+interface PendingPick {
+  readonly controller: AbortController;
+  readonly startedAt: number;
+}
+
 /** Ephemeral attachment state, provided by each owning composer. */
 @Injectable()
 export class ComposerAttachmentsService implements OnDestroy {
@@ -20,11 +30,35 @@ export class ComposerAttachmentsService implements OnDestroy {
   readonly error = signal<string | null>(null);
   readonly pendingReads = signal(0);
   private errorTimeout: ReturnType<typeof setTimeout> | null = null;
-  private pickingFiles = false;
-  private pickingImages = false;
+  private readonly pendingPicks = new Map<PickKind, PendingPick>();
 
   ngOnDestroy(): void {
     if (this.errorTimeout) clearTimeout(this.errorTimeout);
+    this.abortPendingPicks();
+  }
+
+  /** The signal of a new pick, or null while a recent pick of this kind is pending. */
+  private beginPick(kind: PickKind): AbortSignal | null {
+    const pending = this.pendingPicks.get(kind);
+    if (pending) {
+      if (Date.now() - pending.startedAt < PICK_RETRY_AFTER_MS) return null;
+      pending.controller.abort();
+    }
+    const controller = new AbortController();
+    this.pendingPicks.set(kind, { controller, startedAt: Date.now() });
+    return controller.signal;
+  }
+
+  private endPick(kind: PickKind, signal: AbortSignal): void {
+    if (this.pendingPicks.get(kind)?.controller.signal === signal) {
+      this.pendingPicks.delete(kind);
+    }
+  }
+
+  /** Drops every pending pick, so a late reply cannot write to another draft. */
+  private abortPendingPicks(): void {
+    for (const pending of this.pendingPicks.values()) pending.controller.abort();
+    this.pendingPicks.clear();
   }
 
   showError(message: string): void {
@@ -106,12 +140,14 @@ export class ComposerAttachmentsService implements OnDestroy {
   }
 
   async pickFiles(): Promise<void> {
-    if (this.pickingFiles) return;
-    this.pickingFiles = true;
+    const signal = this.beginPick('files');
+    if (!signal) return;
     try {
       const result = await this.rpc.call('file:pick', { multiple: true }, {
         timeout: FILE_PICK_TIMEOUT_MS,
+        signal,
       });
+      if (signal.aborted) return;
       if (!result.success) {
         this.showError('Could not attach files. Try again.');
         return;
@@ -133,15 +169,19 @@ export class ComposerAttachmentsService implements OnDestroy {
       console.error('[ComposerAttachments] Failed to pick files:', cause);
       this.showError('Could not attach files. Try again.');
     } finally {
-      this.pickingFiles = false;
+      this.endPick('files', signal);
     }
   }
 
   async pickImages(): Promise<void> {
-    if (this.pickingImages) return;
-    this.pickingImages = true;
+    const signal = this.beginPick('images');
+    if (!signal) return;
     try {
-      const result = await this.rpc.call('file:pick-images', { multiple: true });
+      const result = await this.rpc.call('file:pick-images', { multiple: true }, {
+        timeout: FILE_PICK_TIMEOUT_MS,
+        signal,
+      });
+      if (signal.aborted) return;
       if (!result.success) {
         this.showError('Could not attach images. Try again.');
         return;
@@ -167,7 +207,7 @@ export class ComposerAttachmentsService implements OnDestroy {
       console.error('[ComposerAttachments] Failed to pick images:', cause);
       this.showError('Could not attach images. Try again.');
     } finally {
-      this.pickingImages = false;
+      this.endPick('images', signal);
     }
   }
 
@@ -209,6 +249,7 @@ export class ComposerAttachmentsService implements OnDestroy {
   }
 
   restore(files: ChatFile[], images: ComposerImage[]): void {
+    this.abortPendingPicks();
     this.files.set(files);
     this.images.set(images);
   }

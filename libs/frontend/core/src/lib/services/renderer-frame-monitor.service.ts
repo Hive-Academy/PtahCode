@@ -29,12 +29,21 @@ function sourceSegment(value: unknown): string {
   return cutText(lastSegment ?? '');
 }
 
+/**
+ * The invoker of a script. A classic script reports its full URL here, and in
+ * this app that is a local path, so a URL or path keeps only its last segment.
+ */
+function invokerText(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  return /[/\\]/.test(value) ? sourceSegment(value) : cutText(value);
+}
+
 function toAttribution(script: unknown): ScriptAttribution {
   const record = isRecord(script) ? script : {};
   const duration = record['duration'];
   return {
     ms: typeof duration === 'number' ? duration : 0,
-    invoker: cutText(record['invoker']),
+    invoker: invokerText(record['invoker']),
     fn: cutText(record['sourceFunctionName']),
     src: sourceSegment(record['sourceURL']),
   };

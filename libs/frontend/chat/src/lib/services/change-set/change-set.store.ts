@@ -192,9 +192,9 @@ function sameStringSet(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean 
  */
 function sameSnapshotContent(a: StatusSnapshot, b: StatusSnapshot): boolean {
   if (!sameWorkspaceRoot(a.workspaceRoot, b.workspaceRoot)) return false;
-  if (a.untrackedDirs.length !== b.untrackedDirs.length) return false;
-  const dirs = new Set(b.untrackedDirs);
-  if (!a.untrackedDirs.every((dir) => dirs.has(dir))) return false;
+  if (!sameStringSet(new Set(a.untrackedDirs), new Set(b.untrackedDirs))) {
+    return false;
+  }
   return sameStringSet(a.present, b.present) &&
     sameStringSet(a.conflicted, b.conflicted);
 }
