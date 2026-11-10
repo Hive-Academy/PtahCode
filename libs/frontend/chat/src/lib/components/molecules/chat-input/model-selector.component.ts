@@ -2,13 +2,17 @@
  * ModelSelectorComponent - Elegant AI Model Selection Dropdown
  *
  * A standalone dropdown component for selecting Claude AI models.
- * Features rich model metadata display with title, description, and recommended badge.
+ * Features rich model metadata display with title and description. Pinned
+ * older versions (group `other`) fold into a closed "Other versions" section
+ * behind a toggle row.
  *
  * Pattern: Signal-based state from ModelStateService
  * UI: NativeDropdownComponent from @ptah-extension/ui with Floating UI positioning
  * Keyboard Navigation: Parent manages activeIndex signal for NativeOptionComponent
+ * Refresh: The dropdown's `opened` event triggers a fire-and-forget refreshModels()
  */
 
+import { NgTemplateOutlet } from '@angular/common';
 import {
   Component,
   inject,
@@ -28,9 +32,12 @@ import { TabManagerService } from '@ptah-extension/chat-state';
 import { SESSION_CONTEXT } from '../../../tokens/session-context.token';
 import { SessionId } from '@ptah-extension/shared';
 
+let nextModelSelectorId = 0;
+
 @Component({
   selector: 'ptah-model-selector',
   imports: [
+    NgTemplateOutlet,
     LucideAngularModule,
     NativeDropdownComponent,
     NativeOptionComponent,
@@ -43,6 +50,7 @@ import { SessionId } from '@ptah-extension/shared';
       [closeOnBackdropClick]="true"
       (closed)="closeDropdown()"
       (backdropClicked)="closeDropdown()"
+      (opened)="onDropdownOpened()"
     >
       <!-- Composer toolbar pill (h-7). Shares its shape with the effort
            selector and the attach button in chat-input. -->
@@ -118,17 +126,14 @@ import { SessionId } from '@ptah-extension/shared';
               No models available. Check your provider connection.
             </div>
           }
-          @for (
-            model of effectiveAvailableModels();
-            track model.id;
-            let i = $index
-          ) {
+          <!-- One row markup shared by the primary and "Other versions" rows. -->
+          <ng-template #modelRow let-model let-rowIndex="rowIndex">
             <ptah-native-option
-              [optionId]="'model-' + i"
+              [optionId]="'model-' + instanceId + '-' + rowIndex"
               [value]="model"
-              [isActive]="i === activeIndex()"
+              [isActive]="rowIndex === activeIndex()"
               (selected)="selectModel($event.id)"
-              (hovered)="onHover(i)"
+              (hovered)="onHover(rowIndex)"
             >
               <div class="flex items-start gap-3 py-0.5">
                 <!-- Checkmark for selected -->
@@ -140,14 +145,7 @@ import { SessionId } from '@ptah-extension/shared';
 
                 <!-- Model Info -->
                 <div class="flex flex-col items-start flex-1 min-w-0">
-                  <div class="flex items-center gap-2">
-                    <span class="font-medium text-xs">{{ model.name }}</span>
-                    @if (model.isRecommended) {
-                      <span class="badge badge-xs badge-primary">
-                        Recommended
-                      </span>
-                    }
-                  </div>
+                  <span class="font-medium text-xs">{{ model.name }}</span>
                   @if (model.providerModelId) {
                     <span
                       class="text-[11px] mt-0.5 font-mono text-accent truncate max-w-full"
@@ -161,6 +159,58 @@ import { SessionId } from '@ptah-extension/shared';
                 </div>
               </div>
             </ptah-native-option>
+          </ng-template>
+
+          @for (model of primaryModels(); track model.id; let i = $index) {
+            <ng-container
+              [ngTemplateOutlet]="modelRow"
+              [ngTemplateOutletContext]="{ $implicit: model, rowIndex: i }"
+            />
+          }
+
+          @if (otherModels().length > 0) {
+            <!-- Toggle row for the pinned older versions. Opens the section
+                 without selecting a model or closing the dropdown. -->
+            <button
+              [attr.id]="otherVersionsToggleId"
+              type="button"
+              class="block w-full text-left rounded-md px-3 py-2 transition-colors cursor-pointer hover:bg-surface-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))]"
+              [attr.aria-expanded]="isOtherSectionOpen()"
+              [attr.aria-controls]="otherVersionsSectionId"
+              (click)="toggleOtherVersions()"
+            >
+              <div class="flex items-center gap-3 py-0.5">
+                <div
+                  class="w-4 h-4 flex-shrink-0 flex items-center justify-center"
+                >
+                  <lucide-angular
+                    [img]="ChevronDownIcon"
+                    class="w-3 h-3 transition-transform duration-200"
+                    [class.rotate-180]="isOtherSectionOpen()"
+                    aria-hidden="true"
+                  />
+                </div>
+                <span class="font-medium text-xs">Other versions</span>
+                <span class="text-[11px] text-base-content-muted">
+                  ({{ otherModels().length }})
+                </span>
+              </div>
+            </button>
+            <!-- The container stays mounted so aria-controls always resolves;
+                 the rows render only while the section is open. -->
+            <div [attr.id]="otherVersionsSectionId">
+              @if (isOtherSectionOpen()) {
+                @for (model of otherModels(); track model.id; let i = $index) {
+                  <ng-container
+                    [ngTemplateOutlet]="modelRow"
+                    [ngTemplateOutletContext]="{
+                      $implicit: model,
+                      rowIndex: primaryModels().length + i,
+                    }"
+                  />
+                }
+              }
+            </div>
           }
         </div>
       </div>
@@ -184,6 +234,9 @@ import { SessionId } from '@ptah-extension/shared';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ModelSelectorComponent {
+  readonly instanceId = nextModelSelectorId++;
+  readonly otherVersionsToggleId = `model-other-versions-toggle-${this.instanceId}`;
+  readonly otherVersionsSectionId = `model-other-versions-${this.instanceId}`;
   readonly modelState = inject(ModelStateService);
   private readonly chatStore = inject(ChatStore);
   private readonly keyboardNav = inject(KeyboardNavigationService);
@@ -264,8 +317,47 @@ export class ModelSelectorComponent {
     }));
   });
 
+  /**
+   * Rows shown directly: `group` absent or `'primary'`, in list order.
+   */
+  readonly primaryModels = computed(() =>
+    this.effectiveAvailableModels().filter((model) => model.group !== 'other'),
+  );
+
+  /**
+   * Pinned older versions (`group === 'other'`), in list order. Rendered
+   * behind the "Other versions" toggle.
+   */
+  readonly otherModels = computed(() =>
+    this.effectiveAvailableModels().filter((model) => model.group === 'other'),
+  );
+
+  /**
+   * Explicit user choice for the "Other versions" section. `null` follows
+   * the default, so a reopened dropdown starts from it again.
+   */
+  private readonly _otherSectionOpen = signal<boolean | null>(null);
+
+  /**
+   * Whether the "Other versions" rows render. Default: open only when the
+   * effective selected model sits in that group, so the selected row is
+   * visible without a toggle click.
+   */
+  readonly isOtherSectionOpen = computed(() => {
+    const explicit = this._otherSectionOpen();
+    if (explicit !== null) {
+      return explicit;
+    }
+    return this.otherModels().some((model) => model.isSelected);
+  });
+
   toggleDropdown(): void {
-    this._isOpen.set(!this._isOpen());
+    const opening = !this._isOpen();
+    this._isOpen.set(opening);
+    if (opening) {
+      // Every open starts from the default section state.
+      this._otherSectionOpen.set(null);
+    }
   }
 
   closeDropdown(): void {
@@ -291,6 +383,28 @@ export class ModelSelectorComponent {
     const sessionId = this.chatStore.currentSessionId() as SessionId | null;
     this.modelState.switchModel(model, sessionId).catch((error) => {
       console.error('[ModelSelectorComponent] Failed to switch model:', error);
+    });
+  }
+
+  /**
+   * Toggle the "Other versions" section. Never selects a model and never
+   * closes the dropdown.
+   */
+  toggleOtherVersions(): void {
+    this._otherSectionOpen.set(!this.isOtherSectionOpen());
+  }
+
+  /**
+   * Fire-and-forget catalog refresh each time the dropdown opens. The service
+   * merges concurrent calls and keeps the current list while the read runs;
+   * failures only log, like `switchModel` above.
+   */
+  onDropdownOpened(): void {
+    this.modelState.refreshModels().catch((error) => {
+      console.error(
+        '[ModelSelectorComponent] Failed to refresh models:',
+        error,
+      );
     });
   }
 

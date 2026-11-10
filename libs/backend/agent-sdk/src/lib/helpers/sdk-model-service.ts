@@ -12,6 +12,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { injectable, inject } from 'tsyringe';
 import { z } from 'zod';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
@@ -23,6 +24,7 @@ import {
   AuthEnv,
   CODEX_PROXY_TOKEN_PLACEHOLDER,
   getStaticModelCapabilities,
+  getAllAnthropicProviders,
   isDirectAnthropic,
 } from '@ptah-extension/shared';
 import { SDK_TOKENS } from '../di/tokens';
@@ -229,6 +231,7 @@ const SDK_MODELS_TIMEOUT_MS = 15_000;
  * changes it, and that arrives through {@link SdkModelService.clearCache}.
  */
 const NATIVE_MODELS_CACHE_KEY = 'native';
+const CATALOG_REVALIDATE_DELAY_MS = 10_000;
 
 /**
  * `IStateStorage` key holding the cross-boot copy of {@link
@@ -264,6 +267,7 @@ const persistedCatalogSchema = z
   .array(
     z.object({
       value: z.string().min(1),
+      resolvedModel: z.string().optional(),
       displayName: z.string(),
       description: z.string(),
       supportsEffort: z.boolean().optional(),
@@ -286,6 +290,37 @@ const persistedCatalogSchema = z
  * that were never involved.
  */
 const persistedStoreSchema = z.record(z.string(), z.unknown());
+
+/** Ephemeral proxy ports change each boot, making their saved catalogs unreachable. */
+function isPersistableCatalogKey(key: string): boolean {
+  const baseUrl = key
+    .split('|')
+    .find((part) => part.startsWith('ANTHROPIC_BASE_URL='))
+    ?.slice('ANTHROPIC_BASE_URL='.length);
+  if (!baseUrl) return true;
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    return true;
+  }
+  const loopback = ['localhost', '127.0.0.1', '[::1]'];
+  if (!loopback.includes(url.hostname.toLowerCase())) return true;
+  return getAllAnthropicProviders().some((provider) => {
+    try {
+      const registered = new URL(provider.baseUrl);
+      return (
+        loopback.includes(registered.hostname.toLowerCase()) &&
+        url.protocol === registered.protocol &&
+        url.port === registered.port &&
+        url.pathname.replace(/\/$/, '') ===
+          registered.pathname.replace(/\/$/, '')
+      );
+    } catch {
+      return false;
+    }
+  });
+}
 
 /**
  * The AuthEnv keys that change which catalog the SDK reports.
@@ -323,6 +358,8 @@ function hashSecret(value: string): string {
  */
 @injectable()
 export class SdkModelService {
+  private readonly revalidationTimers = new Map<string, NodeJS.Timeout>();
+  private readonly revalidatedKeys = new Set<string>();
   private readonly accountModels = new Map<string, ModelInfo[]>();
   private readonly accountEpochs = new Map<string, number>();
   private readonly activeAccountReads = new Map<string, number>();
@@ -536,7 +573,9 @@ export class SdkModelService {
       // catch below turns that into the unknown catalog before any spawn.
       const env = certifiedNamedEnv(route, launch);
       if (env['ANTHROPIC_AUTH_TOKEN'] === CODEX_PROXY_TOKEN_PLACEHOLDER) {
-        this.logger.warn('[SdkModelService] Skipping a stale Codex proxy model probe');
+        this.logger.warn(
+          '[SdkModelService] Skipping a stale Codex proxy model probe',
+        );
         return [];
       }
       const cancelled = new Promise<null>((resolve) => {
@@ -731,10 +770,69 @@ export class SdkModelService {
       '[SdkModelService] Restored model catalog from persisted store',
       { models: entry.length },
     );
+    // Each restore path (`getSupportedModels`, `getNativeClaudeModels`,
+    // `hasCachedModels`) must start the one revalidation of this key.
+    this.scheduleCatalogRevalidation(key);
     return entry;
   }
 
+  private scheduleCatalogRevalidation(key: string): void {
+    if (this.revalidatedKeys.has(key)) return;
+    this.revalidatedKeys.add(key);
+    const timer = setTimeout(() => {
+      this.revalidationTimers.delete(key);
+      void this.revalidateCatalog(key);
+    }, CATALOG_REVALIDATE_DELAY_MS);
+    timer.unref();
+    this.revalidationTimers.set(key, timer);
+  }
+
+  private async revalidateCatalog(key: string): Promise<void> {
+    if (key !== NATIVE_MODELS_CACHE_KEY && this.authFingerprint() !== key)
+      return;
+    const generation = this.cacheGeneration;
+    try {
+      const models =
+        key === NATIVE_MODELS_CACHE_KEY
+          ? await this.fetchModelsViaSdk(NATIVE_CLAUDE_AUTH_ENV)
+          : await this.fetchSupportedModelsInternal(key, false);
+      if (
+        generation !== this.cacheGeneration ||
+        (key !== NATIVE_MODELS_CACHE_KEY && this.authFingerprint() !== key) ||
+        models.length === 0
+      )
+        return;
+      const previous = this.modelsCache.get(key);
+      const savedPrevious = persistedCatalogSchema.safeParse(previous);
+      const savedLive = persistedCatalogSchema.safeParse(models);
+      if (
+        savedPrevious.success &&
+        savedLive.success &&
+        isDeepStrictEqual(savedPrevious.data, savedLive.data)
+      ) {
+        this.logger.debug(
+          '[SdkModelService] Revalidated model catalog unchanged',
+        );
+        return;
+      }
+      this.modelsCache.set(key, models);
+      this.persistCatalog(key, models);
+      const pairs = (rows: ModelInfo[] | undefined) =>
+        rows?.map(({ value, displayName }) => ({ value, displayName })) ?? [];
+      this.logger.info('[SdkModelService] Revalidated model catalog changed', {
+        old: pairs(previous),
+        new: pairs(models),
+      });
+    } catch (error: unknown) {
+      // degradation-audit: optional-capability - saved catalog remains usable when refresh fails.
+      this.logger.warn('[SdkModelService] Model catalog revalidation failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   private readPersistedEntry(key: string): ModelInfo[] | null {
+    if (!isPersistableCatalogKey(key)) return null;
     if (!this.stateStorage) return null;
     const store = this.readPersistedStore();
     if (!store || !(key in store)) return null;
@@ -781,9 +879,13 @@ export class SdkModelService {
    */
   private persistCatalog(key: string, models: ModelInfo[]): void {
     const storage = this.stateStorage;
-    if (!storage || models.length === 0) return;
+    if (!storage || models.length === 0 || !isPersistableCatalogKey(key))
+      return;
 
     const next = this.readPersistedStore() ?? {};
+    for (const storedKey of Object.keys(next)) {
+      if (!isPersistableCatalogKey(storedKey)) delete next[storedKey];
+    }
     delete next[key];
     next[key] = models;
 
@@ -876,6 +978,7 @@ export class SdkModelService {
 
   private async fetchSupportedModelsInternal(
     cacheKey: string,
+    persist = true,
   ): Promise<ModelInfo[]> {
     const generation = this.cacheGeneration;
     const { authMethod } = this.authProvider.resolveActiveAuth();
@@ -901,7 +1004,7 @@ export class SdkModelService {
       const isDegradedApiKeyFallback =
         authMethod === 'apiKey' &&
         models.every((m) => !m.value.startsWith('claude-'));
-      if (!isDegradedApiKeyFallback) {
+      if (persist && !isDegradedApiKeyFallback) {
         this.cacheModels(cacheKey, generation, models);
       }
       this.logger.info('[SdkModelService] Models resolved', {
@@ -1041,7 +1144,9 @@ export class SdkModelService {
     authEnv: AuthEnv = this.authEnv,
   ): Promise<ModelInfo[]> {
     if (authEnv.ANTHROPIC_AUTH_TOKEN === CODEX_PROXY_TOKEN_PLACEHOLDER) {
-      this.logger.warn('[SdkModelService] Skipping a stale Codex proxy model probe');
+      this.logger.warn(
+        '[SdkModelService] Skipping a stale Codex proxy model probe',
+      );
       return [];
     }
     const cliJsPath = await this.moduleLoader.getCliJsPath();
@@ -1374,6 +1479,9 @@ export class SdkModelService {
    */
   clearCache(): void {
     this.cacheGeneration++;
+    for (const timer of this.revalidationTimers.values()) clearTimeout(timer);
+    this.revalidationTimers.clear();
+    this.revalidatedKeys.clear();
     this.accountModels.clear();
     this.accountEpochs.clear();
     for (const probe of this.accountProbes.values()) probe.controller.abort();
