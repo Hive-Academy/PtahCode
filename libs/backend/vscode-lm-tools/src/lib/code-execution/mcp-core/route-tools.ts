@@ -119,8 +119,13 @@ export function buildRouteDecideTool(): MCPToolDefinition {
       'may include "shape" (mechanical, logic, contract, test, docs, review) ' +
       'and "weight" (estimated source tokens in its batch read and write sets, ' +
       'plus 10% framing). ' +
-      'Each roster row includes "tier" and "effort". For subagents, "tier" ' +
-      'is the model alias to pass; for CLI lanes, both are advisory. Invalid ' +
+      'Each roster row includes "model", "tier" and "effort". For subagents, ' +
+      '"tier" is the model alias to pass. For system CLI rows other than "claude", ' +
+      'pass a chosen live-list "model" (source "model"), else omit "lane-default" ' +
+      '(the ranked default: per-CLI setting then native default); "effort" overrides ' +
+      'the per-CLI setting when present, and pins win. For ptah-cli and "claude" rows, ' +
+      'pass "tier" as ' +
+      '"modelTier", not row "model". Invalid ' +
       'arguments are an error that names the field. The call updates rotation ' +
       `state. Results are capped at 64,000 characters and 25,600 tokens; a larger result is returned as a tool error. When routing is not registered in this host, the error is: ${ROUTING_UNAVAILABLE_MESSAGE}.`,
     inputSchema: inputSchemaOf(RouteDecideArgsSchema),

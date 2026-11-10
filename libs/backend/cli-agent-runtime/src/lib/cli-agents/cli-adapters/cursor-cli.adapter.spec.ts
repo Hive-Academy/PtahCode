@@ -243,12 +243,14 @@ describe('CursorCliAdapter', () => {
         { id: 'composer-2.5', name: 'Composer 2.5' },
         { id: 'composer-2', name: 'composer-2' },
       ]);
+      expect(models.every((model) => model.isFallback !== true)).toBe(true);
     });
 
     it('falls back to the curated list when the API throws', async () => {
       mockModelsList.mockRejectedValue(new Error('network'));
       const models = await adapter.listModels();
       expect(models.some((m) => m.id === 'composer-2.5')).toBe(true);
+      expect(models.every((model) => model.isFallback === true)).toBe(true);
     });
   });
 

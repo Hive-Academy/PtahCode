@@ -27,7 +27,7 @@ const lanes = ['codex', 'grok', 'opencode', 'fourth'].map((laneId) => ({
 }));
 
 const phases: LaneQuestion[] = [
-  { phaseId: 'build', taskKind: 'implement', instructions: 'Choose', options: lanes },
+  { phaseId: 'build', taskKind: 'implement', instructions: 'Choose', primaryCount: lanes.length, options: lanes },
 ];
 
 function capture() {
@@ -51,6 +51,32 @@ const outcomes = (laneId: string, taskKind: LaneQuestion['taskKind']) => ({
 });
 
 describe('runLaneRequest outcome figures', () => {
+  it('drops alternates across phases before pruning primary lanes and omits unsendable phases', async () => {
+    const primary = [
+      { ...phases[0], phaseId: 'first', primaryCount: 2, options: [lanes[0], lanes[1]] },
+      { ...phases[0], phaseId: 'second' },
+    ];
+    const baseline = capture();
+    await runLaneRequest({ provider: 'ollama', request: 'ship', phases: primary,
+      outcomes: () => null, maxRequestBytes: 100_000, dispatch: baseline.dispatch, logger });
+    const cap = requestBytes('nimble', baseline.payloads[0]);
+    const withAlternates: LaneQuestion[] = [
+      { ...primary[0], options: [...primary[0].options, { ...lanes[0], model: 'alternate' }] },
+      primary[1],
+      { ...phases[0], phaseId: 'third', primaryCount: 1,
+        options: [lanes[0], { ...lanes[0], model: 'alternate' }] },
+    ];
+    const captured = capture();
+    const result = await runLaneRequest({ provider: 'ollama', request: 'ship',
+      phases: withAlternates, outcomes: () => null, maxRequestBytes: cap,
+      dispatch: captured.dispatch, logger });
+    expect(result.sent).toBe(true);
+    expect(Object.keys(captured.payloads[0].questions)).toEqual(['first', 'second']);
+    expect(result.offered.get('first')).toEqual(primary[0].options);
+    expect(result.offered.get('second')).toEqual(primary[1].options);
+    expect(result.offered.has('third')).toBe(false);
+    expect(Object.keys(captured.payloads[0].questions['first'].criteria)).toEqual(['o1', 'o2']);
+  });
   it('sends only offered pairs and deduplicates repeated phase/kind pairs', async () => {
     const captured = capture();
     const result = await runLaneRequest({

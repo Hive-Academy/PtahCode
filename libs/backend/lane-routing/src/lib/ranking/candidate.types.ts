@@ -39,6 +39,20 @@ export interface SubagentCandidate {
 
 export type RoutingCandidate = LaneCandidate | SubagentCandidate;
 
+/**
+ * A system CLI lane has one default model and takes a per-call model id.
+ * Ptah CLI providers and the `claude` lane select a model by tier instead.
+ */
+export function isSystemCliLane(
+  candidate: RoutingCandidate,
+): candidate is LaneCandidate {
+  return (
+    candidate.kind === 'lane' &&
+    candidate.cli !== 'ptah-cli' &&
+    candidate.cli !== 'claude'
+  );
+}
+
 export function laneCandidateId(
   row: Pick<CliDetectionResult, 'cli' | 'ptahCliId'>,
 ): string {

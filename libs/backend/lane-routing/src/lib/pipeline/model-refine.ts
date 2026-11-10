@@ -55,6 +55,7 @@ export interface LaneQuestion {
   readonly phaseId: string;
   readonly taskKind: OutcomeTaskKind;
   readonly instructions: string;
+  readonly primaryCount: number;
   /** Ranked options, rotation pick first. The fit slices this list. */
   readonly options: readonly DecisionOption[];
 }
@@ -266,11 +267,14 @@ function fitLane(input: {
     PROVIDER_OPTION_LIMIT[input.provider],
   );
   for (let width = cap; width >= MIN_OPTIONS_PER_PHASE; width -= 1) {
-    const offered = sliceOptions(input.phases, width);
-    const figures = offeredFigures(input.phases, offered, input.outcomes);
+    for (const primariesOnly of [false, true]) {
+    const offered = sliceOptions(input.phases, width, primariesOnly);
+    const sent = input.phases.filter((phase) => offered.has(phase.phaseId));
+    if (sent.length === 0) continue;
+    const figures = offeredFigures(sent, offered, input.outcomes);
     const payload = buildDecisionPayload({
       request: input.request,
-      questions: input.phases.map((phase) => ({
+      questions: sent.map((phase) => ({
         kind: 'lane-choice' as const,
         phaseId: phase.phaseId,
         instructions: phase.instructions,
@@ -278,7 +282,7 @@ function fitLane(input: {
       })),
       outcomeFigures: figures,
     });
-    const questions = laneQuestions(input.phases, offered);
+    const questions = laneQuestions(sent, offered);
     const prompt = renderLanePrompt(input.request, questions, figures);
     const schema = choiceSchema(questions);
     const bytes =
@@ -287,6 +291,7 @@ function fitLane(input: {
         : textBytes(JSON.stringify({ prompt, jsonSchema: schema }));
     if (bytes <= input.maxRequestBytes) {
       return { payload, prompt, schema, offered, figureCount: figures.length };
+    }
     }
   }
   return null;
@@ -315,10 +320,12 @@ function offeredFigures(
 function sliceOptions(
   phases: readonly LaneQuestion[],
   width: number,
+  primariesOnly: boolean,
 ): Map<string, readonly DecisionOption[]> {
   const offered = new Map<string, readonly DecisionOption[]>();
   for (const phase of phases) {
-    offered.set(phase.phaseId, phase.options.slice(0, width));
+    const options = phase.options.slice(0, primariesOnly ? Math.min(width, phase.primaryCount) : width);
+    if (options.length >= MIN_OPTIONS_PER_PHASE) offered.set(phase.phaseId, options);
   }
   return offered;
 }

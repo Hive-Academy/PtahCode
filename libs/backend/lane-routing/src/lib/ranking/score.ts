@@ -25,7 +25,7 @@ import {
 } from '../routing-constants';
 import { AUTOMATIC_MATRIX_MODEL } from '../matrix/local-derivation';
 import type { MatrixCell } from '../matrix/matrix.types';
-import type { RoutingCandidate } from './candidate.types';
+import { isSystemCliLane, type RoutingCandidate } from './candidate.types';
 
 export type ModelProvenance = (typeof PROVENANCE)[number];
 
@@ -98,13 +98,10 @@ export function score(
   const family = input.candidate.family;
   const baseline = readCell(matrix, family, LANE_DEFAULT_MODEL, taskKind);
   const chosen =
-    promotedModel(
-      input.models ?? [],
-      family,
-      taskKind,
-      matrix,
-      baseline.score,
-    ) ?? fallbackModel(input, family, taskKind, matrix, baseline);
+    (isSystemCliLane(input.candidate)
+      ? null
+      : promotedModel(input.models ?? [], family, taskKind, matrix, baseline.score))
+    ?? fallbackModel(input, family, taskKind, matrix, baseline);
   return {
     candidate: input.candidate,
     model: chosen.model,

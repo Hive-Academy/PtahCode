@@ -84,7 +84,9 @@ describe('buildRouteDecideTool', () => {
       expect(description).toContain(term);
     }
     expect(description).toContain('"tier" is the model alias to pass');
-    expect(description).toContain('for CLI lanes, both are advisory');
+    expect(description).toContain('For system CLI rows other than "claude"');
+    expect(description).toContain('For ptah-cli and "claude" rows, pass "tier" as');
+    expect(description).toContain('"modelTier", not row "model"');
     expect(description).toContain('read and write sets, plus 10% framing');
   });
 

@@ -131,6 +131,7 @@ import { findBlockedLaneModel } from './lane-spawn-policy';
 import { CLI_AGENT_RUNTIME_TOKENS } from '../di/tokens';
 import { MCP_ATTACHMENT_TIMEOUT_MS } from './mcp-attachment-probe.port';
 import type { TrackedAgent } from './tracked-agent';
+import { observedModelFrom, requestedModelForLog, takeOutcomeLog, type LaneModelLogState } from './lane-model-log';
 import {
   classifyLaneLimit,
   laneLimitEvidence,
@@ -1005,6 +1006,10 @@ export class AgentProcessManager {
     const lanePolicy = {
       agentId,
       cli,
+      requestedModel: requestedModelForLog(request.model),
+      requestedTier: request.modelTier ?? 'none',
+      requestedEffort: request.effort ?? 'none',
+      routingSource: request.routingSource ?? 'none',
       model: resolvedModel ?? 'cli-default',
       modelSource: laneModel.source,
       effort: laneEffort.effort ?? 'cli-default',
@@ -1136,6 +1141,12 @@ export class AgentProcessManager {
       request.timeout,
       () => sdkHandle.getSessionId?.(),
       { mcpPort, expectsMcp },
+      {
+        requestedModel: requestedModelForLog(request.model),
+        selectedModel: resolvedModel ?? 'cli-default',
+        modelSource: laneModel.source,
+        selectedEffort: laneEffort.effort ?? 'none',
+      },
     );
     return resumeDecision ? { ...spawned, resumeDecision } : spawned;
   }
@@ -1259,6 +1270,7 @@ export class AgentProcessManager {
         ptahCliId: meta.ptahCliId,
       });
 
+      // No model log: Ptah CLI lanes resolve the model in the provider tier mapping.
       const spawned = this.trackSdkHandle(
         sdkHandle,
         infoWithSession,
@@ -1294,6 +1306,7 @@ export class AgentProcessManager {
     requestedTimeout: number | undefined,
     captureSessionId?: () => string | undefined,
     mcp?: { readonly mcpPort?: number; readonly expectsMcp?: boolean },
+    modelLog?: LaneModelLogState,
   ): SpawnAgentResult {
     const agentId = info.agentId;
     const handleReference = snapshotLaneAccountReference(
@@ -1351,6 +1364,7 @@ export class AgentProcessManager {
     };
     this.rememberLaneOwner(trackedInfo);
     const tracked: TrackedAgent = {
+      modelLog,
       info: trackedInfo,
       process: null,
       sdkHandle,
@@ -1484,6 +1498,8 @@ export class AgentProcessManager {
           tracked.outcomeUsage = segment.usage;
         }
         if (segment.turnTelemetry) {
+          const observed = observedModelFrom(info.cli, segment.turnTelemetry);
+          if (observed && tracked.modelLog) tracked.modelLog.actualModel = observed;
           this.budgetTelemetry.accept(agentId, tracked, segment.turnTelemetry);
         }
         this.outputBuffer.appendSegment(
@@ -3605,6 +3621,14 @@ export class AgentProcessManager {
    * ending as the new event it is.
    */
   private signalLaneCompletion(tracked: TrackedAgent): void {
+    const modelLog = tracked.modelLog;
+    const completedAt = tracked.info.completedAt;
+    const outcome = modelLog && completedAt
+      ? takeOutcomeLog(modelLog, tracked.info.agentId, tracked.info.cli, completedAt)
+      : undefined;
+    if (outcome) {
+      this.logger.info('[AgentProcessManager] Lane model outcome', outcome);
+    }
     const pending = this.pendingAdoptions.get(tracked.info.agentId);
     if (pending) {
       // A handoff is still deciding this lane's parent; settleLaneAdoption

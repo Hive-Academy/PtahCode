@@ -44,8 +44,9 @@ export class CliModelListService {
       claude: [],
       codex: codexReported ? models.codex : fallback(models.codex),
       copilot: copilotReported ? models.copilot : fallback(models.copilot),
-      cursor: fallback(models.cursor),
-      opencode: fallback(models.opencode),
+      cursor: models.cursor,
+      opencode: models.opencode.map((entry) =>
+        /^[^\s/]+\/\S+$/.test(entry.id) ? entry : { ...entry, isFallback: true }),
     };
   }
 

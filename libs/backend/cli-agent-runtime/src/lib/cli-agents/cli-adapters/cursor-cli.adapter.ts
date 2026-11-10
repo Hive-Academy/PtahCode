@@ -308,8 +308,8 @@ export class CursorCliAdapter implements CliAdapter {
 
   /** Fallback model list when the Cursor models API is unreachable. */
   private static readonly FALLBACK_MODELS: CliModelInfo[] = [
-    { id: 'composer-2.5', name: 'Composer 2.5' },
-    { id: 'composer-2', name: 'Composer 2' },
+    { id: 'composer-2.5', name: 'Composer 2.5', isFallback: true },
+    { id: 'composer-2', name: 'Composer 2', isFallback: true },
   ];
 
   /**

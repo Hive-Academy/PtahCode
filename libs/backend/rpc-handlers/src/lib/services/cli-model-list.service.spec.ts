@@ -139,17 +139,20 @@ describe('CliModelListService', () => {
       },
     );
 
-    it('marks Cursor and OpenCode entries as fallback and leaves Claude empty', async () => {
+    it('keeps Cursor row provenance, reports OpenCode rows, and leaves Claude empty', async () => {
       const h = makeHarness();
+      h.modelMap.cursor.push({ id: 'cursor-fallback', name: 'Cursor fallback', isFallback: true });
       const result = await h.service.listForClassification();
 
       expect(result.cursor).toEqual([
-        { id: 'cursor-model', name: 'Cursor model', isFallback: true },
+        { id: 'cursor-model', name: 'Cursor model' },
+        { id: 'cursor-fallback', name: 'Cursor fallback', isFallback: true },
       ]);
-      expect(providerReported(result.cursor)).toEqual([]);
+      expect(providerReported(result.cursor)).toEqual([h.modelMap.cursor[0]]);
       expect(result.opencode).toEqual([
-        { id: 'provider/model', name: 'OpenCode model', isFallback: true },
+        { id: 'provider/model', name: 'OpenCode model' },
       ]);
+      expect(providerReported(result.opencode)).toEqual(h.modelMap.opencode);
       expect(result.claude).toEqual([]);
       expect(Object.keys(result)).toEqual([
         'claude',
@@ -159,6 +162,21 @@ describe('CliModelListService', () => {
         'opencode',
       ]);
       expect(h.cliDetection.listModelsForAll).toHaveBeenCalledTimes(1);
+    });
+
+    it('marks OpenCode notice lines and ids without a provider as fallback', async () => {
+      const h = makeHarness();
+      h.modelMap.opencode.push(
+        { id: 'Notice: models updated', name: 'Notice' },
+        { id: 'unqualified', name: 'Unqualified' },
+      );
+      const result = await h.service.listForClassification();
+      expect(result.opencode).toEqual([
+        { id: 'provider/model', name: 'OpenCode model' },
+        { id: 'Notice: models updated', name: 'Notice', isFallback: true },
+        { id: 'unqualified', name: 'Unqualified', isFallback: true },
+      ]);
+      expect(providerReported(result.opencode)).toEqual([h.modelMap.opencode[0]]);
     });
 
     it('returns empty classification lists when the detector and live lists are empty', async () => {

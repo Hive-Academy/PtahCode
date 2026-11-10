@@ -104,7 +104,7 @@ describe('score', () => {
   it('promotes a listed model that beats the family cell by more than B', () => {
     const result = score(
       {
-        candidate: lane('codex'),
+        candidate: { ...lane('codex'), cli: 'ptah-cli' },
         models: [listed('gpt-5.4')],
         configuredModel: { id: 'configured-id', provenance: 'configured' },
       },
@@ -155,7 +155,7 @@ describe('score', () => {
     expect(result.profileModel).toBe(FAMILY_PROFILE_MODEL);
   });
 
-  it('keeps the highest listed model that clears the band', () => {
+  it('keeps the system CLI family cell despite a strong reported model', () => {
     const result = score(
       {
         candidate: lane('codex'),
@@ -168,16 +168,32 @@ describe('score', () => {
       }),
     );
 
+    expect(result.model).toBe(LANE_DEFAULT_MODEL);
+    expect(result.provenance).toBe('lane-default');
+    expect(result.score).toBe(FAMILY);
+  });
+
+  it('keeps Ptah CLI fallback promotion behavior', () => {
+    const candidate = { ...lane('codex'), cli: 'ptah-cli' as const };
+    const result = score({ candidate, models: [listed('higher', 'fallback')] },
+      'implement', codexMatrix({ higher: FAMILY + CLOSENESS_BAND + 10 }));
     expect(result.model).toBe('higher');
     expect(result.provenance).toBe('fallback');
-    expect(result.score).toBe(FAMILY + CLOSENESS_BAND + 10);
+  });
+
+  it('keeps Claude lane fallback promotion behavior', () => {
+    const candidate = { ...lane('codex'), cli: 'claude' as const };
+    const result = score({ candidate, models: [listed('higher', 'fallback')] },
+      'implement', codexMatrix({ higher: FAMILY + CLOSENESS_BAND + 10 }));
+    expect(result.model).toBe('higher');
+    expect(result.provenance).toBe('fallback');
   });
 
   it('keeps the earlier listed model when promoted scores tie', () => {
     const tied = FAMILY + CLOSENESS_BAND + 1;
     const result = score(
       {
-        candidate: lane('codex'),
+        candidate: { ...lane('codex'), cli: 'ptah-cli' },
         models: [listed('z-model'), listed('a-model')],
       },
       'implement',

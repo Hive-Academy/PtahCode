@@ -79,6 +79,7 @@ import { gateSummary, preflightSummary, type DecisionSummaryFacts } from './reas
 import type { PreflightReuseCache } from './scope/preflight-reuse-cache';
 import {
   MODEL_LISTING_BUDGET_MS,
+  MIN_OPTIONS_PER_PHASE,
   QUESTIONS_PER_REQUEST,
   REQUEST_SIZE_LIMIT_BYTES,
 } from './routing-constants';
@@ -343,6 +344,10 @@ export class RouteDecideService implements RotationStateReader {
     readonly context: PassContext;
   }> {
     const sendable = mode === 'ranking' ? [] : plans.filter(isSendable);
+    sendable.sort((a, b) =>
+      Number(laneQuestion(b).primaryCount >= MIN_OPTIONS_PER_PHASE) -
+      Number(laneQuestion(a).primaryCount >= MIN_OPTIONS_PER_PHASE),
+    );
     const send = sendable.slice(0, QUESTIONS_PER_REQUEST);
     const limited = new Set(
       sendable.slice(QUESTIONS_PER_REQUEST).map((plan) => plan.phaseId),
