@@ -752,6 +752,7 @@ export class ChatTranscriptComponent {
         } : null,
         status: agent.status, startedAt: agent.startedAt, completedAt: agent.completedAt,
         ...(agent.outputLostAfter ? { outputLostAfter: agent.outputLostAfter } : {}),
+        ...(agent.providerId ? { providerId: agent.providerId } : {}),
       };
       const old = previous.get(agent.agentId);
       next.set(agent.agentId, old && sameLaneMonitorSnapshot(old, snapshot) ? old : snapshot);

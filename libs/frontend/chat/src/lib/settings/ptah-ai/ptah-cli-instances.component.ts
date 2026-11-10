@@ -5,6 +5,7 @@ import {
   output,
   signal,
 } from '@angular/core';
+import { cliMarkFor } from '@ptah-extension/chat-ui';
 import { ChevronDown, Ellipsis, LucideAngularModule, Plus } from 'lucide-angular';
 import {
   NativePopoverComponent,
@@ -152,7 +153,7 @@ const LABEL = 'text-xs font-semibold uppercase tracking-wide text-base-content-m
                       >{{ row.name }}</span
                     >
                     <span class="inline-flex min-w-0 items-center gap-1 text-xs text-base-content-muted">
-                      <ptah-provider-mark [providerId]="row.providerId" fallback="Terminal" size="sm" />
+                      <ptah-provider-mark [providerId]="markId(row.providerId)" fallback="Terminal" size="sm" />
                       <span class="truncate">{{ row.provider }}</span>
                     </span>
                   </div>
@@ -457,6 +458,11 @@ export class PtahCliInstancesComponent {
   protected readonly capabilitiesOpen = signal<string | null>(null);
   protected capabilityView(row: InstanceCliMatrixRow) { return cliCapabilityView(row.manifest); }
   protected capabilityBadges(row: InstanceCliMatrixRow) { return this.capabilityView(row).badges.slice(0, 3); }
+  /** Provider mark of a Ptah CLI instance; the Ptah `P` when the provider has none. */
+  protected markId(providerId: string): string {
+    const mark = cliMarkFor('ptah-cli', providerId);
+    return mark.kind === 'provider' ? mark.providerId : 'ptah-cli';
+  }
   protected readonly PlusIcon = Plus;
   protected readonly MoreIcon = Ellipsis;
   protected readonly ChevronIcon = ChevronDown;

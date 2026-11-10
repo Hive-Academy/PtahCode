@@ -56,6 +56,7 @@ let nextMenuId = 0;
                 [status]="agent.status"
                 [size]="24"
                 [cliId]="agent.cliId"
+                [providerId]="agent.providerId ?? null"
                 [agentType]="agent.agentType"
               />
             }
@@ -106,6 +107,7 @@ let nextMenuId = 0;
                 [status]="agent.status"
                 [size]="24"
                 [cliId]="agent.cliId"
+                [providerId]="agent.providerId ?? null"
                 [agentType]="agent.agentType"
               />
               <span class="min-w-0 flex-1 truncate">{{ agent.name }}</span>

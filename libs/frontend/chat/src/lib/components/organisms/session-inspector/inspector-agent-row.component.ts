@@ -43,6 +43,7 @@ export const AGENT_ROW_COLUMNS =
           [kind]="r.agent.kind"
           [status]="r.agent.status"
           [cliId]="r.agent.cliId"
+          [providerId]="r.agent.providerId ?? null"
           [agentType]="r.agent.agentType"
           [size]="24"
         />

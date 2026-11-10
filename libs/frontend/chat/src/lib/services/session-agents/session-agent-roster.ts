@@ -28,6 +28,8 @@ export interface SessionAgent {
   readonly name: string;
   /** The CLI type of a CLI lane; `null` for every other kind. */
   readonly cliId: string | null;
+  /** Provider of a Ptah CLI lane (drives its mark); `null` otherwise. */
+  readonly providerId?: string | null;
   /** The SDK agent type (role-icon key), when the source carries one. */
   readonly agentType: string | null;
   readonly status: AgentStatusWord | null;
@@ -161,6 +163,7 @@ export function buildSessionAgentRoster(
         kind: 'cli',
         name: a.displayName || a.cli,
         cliId: a.cli,
+        providerId: a.providerId ?? null,
         agentType: null,
         status: cliLaneStatusWord(a.status, openRequestIds.length),
         startedAt: a.startedAt,

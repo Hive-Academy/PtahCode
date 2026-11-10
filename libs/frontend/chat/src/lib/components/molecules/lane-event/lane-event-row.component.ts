@@ -56,6 +56,8 @@ export class LaneEventRowComponent {
   readonly isSessionActive = input(false);
   /** ISO time after which the lane's output was lost in a host restart (`AgentProcessInfo.outputLostAfter`). */
   readonly outputLostAfter = input<string | null>(null);
+  /** Provider of a Ptah CLI lane, from the lane monitor; picks the lane mark. */
+  readonly providerId = input<string | null>(null);
   readonly branchRequested = output<string>();
   readonly rewindRequested = output<string>();
   protected readonly surfaceActive = inject(SURFACE_ACTIVE);
