@@ -113,3 +113,4 @@ See `decisions.md` and the last section of this file (updated after each batch).
 
 - CI on `a6171ec22`: all jobs passed. CodeRabbit gave 5 minor findings on that head. All 5 are fixed (decision 29); `npm run verify -- -p machines-ui,review-runs-ui` exit 0.
 - Next exact step: watch CI and CodeRabbit for the new head (REST only), then Job 3 as written above. Do not post `@coderabbitai review`.
+- Rule from the session master: do not push to PR #1044 between 09:40 UTC and 10:00 UTC (the free CodeRabbit review of that hour is for PR #1042). Check `date -u` before each push.
