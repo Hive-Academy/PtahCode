@@ -12,6 +12,9 @@ Egyptian-Inspired Theme with DaisyUI v4 + Tailwind CSS v3.4
 /* Gridstack drag-and-resize grid styles - required for Orchestra Canvas */
 @import 'gridstack/dist/gridstack.min.css';
 
+/* Ptah design tokens (custom properties only) */
+@import '../../../libs/frontend/ui/src/lib/tokens/ptah-tokens.css';
+
 /* Tailwind CSS v3.4.x directives */
 @tailwind base;
 @tailwind components;
