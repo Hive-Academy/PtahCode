@@ -153,7 +153,6 @@ const CHIP_STATES = [
             <button
               ptahRailIconAction
               type="button"
-              class="btn btn-ghost btn-xs"
               [active]="density() === 'dense'"
               label="Dense cards"
               title="Dense cards"
@@ -168,7 +167,7 @@ const CHIP_STATES = [
           <button
             ptahRailIconAction
             type="button"
-            class="btn btn-ghost btn-xs min-h-6 min-w-6"
+            class="min-h-6 min-w-6"
             data-testid="rail-collapse-toggle"
             [class.opacity-60]="autoCollapsed()"
             [label]="collapsed() ? 'Expand rail' : 'Collapse rail'"

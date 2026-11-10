@@ -7,7 +7,7 @@ test.use({ workspace: path.resolve(__dirname, '../../../../.ptah/specs/TASK_2026
 
 type Theme = 'dark' | 'light';
 
-async function settle(page: Page, theme: Theme, glass: boolean, parkPointer: boolean): Promise<void> {
+async function settle(page: Page, theme: Theme, glass: boolean, park: { x: number; y: number } | null): Promise<void> {
   await page.evaluate(({ theme, glass }) => {
     const root = document.documentElement;
     root.setAttribute('data-theme', glass ? (theme === 'dark' ? 'ptah-glass' : 'ptah-glass-light') : (theme === 'dark' ? 'anubis' : 'anubis-light'));
@@ -23,12 +23,14 @@ async function settle(page: Page, theme: Theme, glass: boolean, parkPointer: boo
   }, { theme, glass });
   await page.addStyleTag({ content: '*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important;caret-color:transparent!important}' });
   await page.evaluate(() => document.fonts.ready);
-  if (parkPointer) await page.mouse.move(1590, 990);
+  if (park) await page.mouse.move(park.x, park.y);
   await page.waitForTimeout(500);
 }
 
 async function shot(page: Page, name: string, theme: Theme, glass = true, parkPointer = true): Promise<void> {
-  await settle(page, theme, glass, parkPointer);
+  // The review drawer covers the right edge: park on the backdrop so no drawer scrollbar gets a hover state.
+  const park = name === 'review-settings-before' ? { x: 300, y: 990 } : { x: 1590, y: 990 };
+  await settle(page, theme, glass, parkPointer ? park : null);
   const target = name === 'ready-workspace' ? page.getByTestId('workspace-header')
     : name.startsWith('chat-rail-') ? page.locator('ptah-canvas-rail aside > header')
     : name === 'review-settings-before' ? page.getByRole('dialog', { name: 'Review settings' })

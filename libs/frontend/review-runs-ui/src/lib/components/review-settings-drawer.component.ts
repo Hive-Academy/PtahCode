@@ -14,6 +14,7 @@ import type {
   RepositorySettings,
   Severity,
 } from '@ptah-extension/review-contracts';
+import { SetupActionDirective } from '@ptah-extension/ui';
 import { ReviewRunsStore } from '../review-runs.store';
 import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component';
 import { ReviewRepositoriesEditorComponent } from './review-repositories-editor.component';
@@ -22,7 +23,12 @@ import { ReviewBotIdentityComponent } from './review-bot-identity.component';
 @Component({
   selector: 'ptah-review-settings-drawer',
   standalone: true,
-  imports: [ReviewConfirmDialogComponent, ReviewRepositoriesEditorComponent, ReviewBotIdentityComponent],
+  imports: [
+    ReviewConfirmDialogComponent,
+    ReviewRepositoriesEditorComponent,
+    ReviewBotIdentityComponent,
+    SetupActionDirective,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './review-settings-drawer.component.html',
 })
