@@ -10,11 +10,11 @@ import { ReviewFindingsTableComponent, reviewFindingRows } from './review-findin
   template: `
     <div>
       <aside role="region" aria-labelledby="review-detail-title" (keydown)="onKeydown($event)">
-        <header class="flex items-start justify-between gap-4"><div>
-          <h2 id="review-detail-title" class="text-xl font-semibold" tabindex="-1">PR #{{ run().prNumber }} review</h2>
-          <p class="text-sm text-base-content-muted">{{ run().repo.owner }}/{{ run().repo.name }} · {{ run().headSha.slice(0, 10) }}</p>
-          <p class="text-xs text-base-content-muted">Attempt {{ run().attemptId }}</p>
-        </div><button type="button" class="btn btn-ghost btn-sm" aria-label="Close run details" (click)="closed.emit()">Close</button></header>
+        <header class="flex items-start justify-between gap-4"><div class="min-w-0">
+          <button type="button" class="btn btn-ghost btn-sm mb-2 min-[768px]:hidden" aria-label="Close run details" (click)="closed.emit()">All runs</button>
+          <h2 id="review-detail-title" class="truncate text-xl font-semibold" tabindex="-1"><span class="sr-only">PR </span>#{{ run().prNumber }} {{ run().prTitle || 'review' }}</h2>
+          <p class="text-sm text-base-content-muted">{{ run().repo.owner }}/{{ run().repo.name }} · <span class="font-mono">{{ run().headSha.slice(0, 10) }}</span> · Attempt {{ run().attemptId }} · {{ run().trigger }}</p>
+        </div></header>
         <div class="mt-4 flex flex-wrap gap-2"><span class="badge badge-outline" [class.badge-warning]="run().status === 'partial'" [class.badge-error]="run().status === 'failed'">{{ run().status }}</span>
           @if (run().status === 'partial') { <span class="badge badge-warning">Partial coverage</span> }
         </div>
@@ -79,7 +79,11 @@ export class ReviewRunDetailComponent implements AfterViewInit, OnDestroy {
   readonly closed = output<void>();
   readonly retry = output<void>();
   readonly retryFindings = output<void>();
-  ngAfterViewInit(): void { const doc = this.element.nativeElement.ownerDocument; this.returnFocus = doc.activeElement instanceof HTMLElement ? doc.activeElement : null; }
+  ngAfterViewInit(): void { const doc = this.element.nativeElement.ownerDocument; this.returnFocus = doc.activeElement instanceof HTMLElement ? doc.activeElement : null;
+    // Below 768 px the inbox shows one pane, so the run row is hidden now: move focus into the detail.
+    const view = doc.defaultView;
+    if (typeof view?.matchMedia === 'function' && view.matchMedia('(max-width: 767.98px)').matches) this.element.nativeElement.querySelector<HTMLElement>('#review-detail-title')?.focus();
+  }
   ngOnDestroy(): void { this.returnFocus?.focus(); }
   startLiveRerun(): void { this.confirmLive.set(false); void this.store.rerun(this.run().attemptId, false); }
   stageLabel(stage: StageRecord): string { return stage.name === 'lenses' && stage.scope ? stage.scope : ({ discovery: 'Discovery', context: 'Context', checks: 'Checks', triage: 'Triage', lenses: 'Lenses', verification: 'Verification', identity: 'Identity', publication: 'Publication' })[stage.name]; }

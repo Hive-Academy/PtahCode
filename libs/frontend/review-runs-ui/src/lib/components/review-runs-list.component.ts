@@ -37,21 +37,18 @@ const RUN_STATUS_INK: Readonly<Record<ReviewRun['status'], string>> = {
           type="button"
           ptahInboxRow
           [selected]="run.attemptId === selectedAttemptId()"
-          [attr.aria-label]="'PR ' + run.prNumber + ', ' + run.status + ', ' + run.repo.owner + '/' + run.repo.name"
+          [attr.aria-label]="'PR ' + run.prNumber + ', ' + run.status + ', ' + run.repo.owner + '/' + run.repo.name + ', ' + progressLabel(run)"
           (click)="open.emit(run.attemptId)"
           (keydown.arrowdown)="moveFocus($event, 1)"
           (keydown.arrowup)="moveFocus($event, -1)"
         >
-          <span class="block truncate text-sm font-medium">PR #{{ run.prNumber }}@if (run.prTitle) { <span class="font-normal">{{ run.prTitle }}</span> }</span>
+          <span class="block truncate text-sm font-semibold"><span class="sr-only">PR </span>#{{ run.prNumber }}@if (run.prTitle) { <span class="ml-1">{{ run.prTitle }}</span> }</span>
           <span class="block truncate text-xs text-base-content-muted">
-            {{ run.repo.owner }}/{{ run.repo.name }} · <span class="font-mono">{{ run.headSha.slice(0, 10) }}</span> · {{ run.trigger }}
+            {{ run.repo.owner }}/{{ run.repo.name }} · <span class="font-mono">{{ run.headSha.slice(0, 10) }}</span>
           </span>
-          <span class="mt-1 flex items-center gap-2 text-xs">
-            <span class="flex items-center gap-2" [class]="ink(run.status)">
-              <span class="inline-block h-2 w-2 shrink-0 rounded-full bg-current" aria-hidden="true"></span>
-              {{ statusLabel(run.status) }}
-            </span>
-            <span class="text-base-content-muted">{{ run.completedAt ? 'Finished' : run.startedAt ? 'In progress' : 'Waiting' }}</span>
+          <span class="mt-1 flex items-center gap-2 text-xs" [class]="ink(run.status)" [title]="progressLabel(run)">
+            <span class="inline-block h-2 w-2 shrink-0 rounded-full bg-current" aria-hidden="true"></span>
+            <span class="truncate">{{ statusLabel(run.status) }} · {{ titleCase(run.trigger) }}</span>
           </span>
           @if (run.status === 'failed') {
             @if (run.failure; as failure) {
@@ -80,9 +77,17 @@ export class ReviewRunsListComponent {
 
   protected statusLabel(status: ReviewRun['status']): string {
     if (status === 'succeeded') return 'Completed';
-    if (status === 'partial') return 'Partial / coverage limited';
-    if (status === 'skipped') return 'Skipped';
-    return status;
+    if (status === 'partial') return 'Partial coverage';
+    return this.titleCase(status);
+  }
+
+  protected titleCase(value: string): string {
+    return value.charAt(0).toUpperCase() + value.slice(1);
+  }
+
+  /** Progress of the run; the row gives it to assistive technology and as a tooltip. */
+  protected progressLabel(run: ReviewRun): string {
+    return run.completedAt ? 'Finished' : run.startedAt ? 'In progress' : 'Waiting';
   }
 
   protected retryTime(value: string): string {

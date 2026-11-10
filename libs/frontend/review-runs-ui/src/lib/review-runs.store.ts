@@ -130,8 +130,8 @@ export class ReviewRunsStore {
       this.lastRefreshedAt.set(new Date());
       this.state.set('ready');
     } catch {
-      if (generation !== this.listGeneration) return;
-      this.state.set(this.hasCache() ? 'offline' : 'error');
+      if (generation === this.listGeneration)
+        this.state.set(this.hasCache() ? 'offline' : 'error');
     } finally {
       if (generation === this.listGeneration) this.isRefreshing.set(false);
     }

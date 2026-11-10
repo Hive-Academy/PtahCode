@@ -26,9 +26,9 @@ describe('ReviewRunsListComponent', () => {
     const rows = fixture.nativeElement.querySelectorAll('button[role="option"]') as NodeListOf<HTMLButtonElement>;
     expect(rows).toHaveLength(4);
     expect(rows[0].textContent).toContain('PR #428');
-    expect(rows[1].textContent).toContain('Partial / coverage limited');
+    expect(rows[1].textContent).toContain('Partial coverage');
     expect(rows[2].textContent).toContain('Completed');
-    expect(rows[3].textContent).toContain('failed');
+    expect(rows[3].textContent).toContain('Failed · Poll');
     expect(rows[0].querySelector('.text-state-idle')).not.toBeNull();
     expect(rows[1].querySelector('.text-state-need')).not.toBeNull();
     expect(rows[2].querySelector('.text-state-done')).not.toBeNull();

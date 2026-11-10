@@ -43,8 +43,6 @@ describe('ReviewRepositoriesComponent', () => {
     expect(badges[2].classList).toContain('text-state-need');
     expect(badges[3].textContent?.trim()).toBe('Disabled');
     expect(badges[3].classList).toContain('text-state-idle');
-    expect(rows[3].textContent).toContain('Review enabled');
-    expect(rows[4].textContent).toContain('Review disabled');
     rows[0].click();
     rows[1].click();
     expect(chosen).toEqual(['all', 'Hive-Academy/api']);

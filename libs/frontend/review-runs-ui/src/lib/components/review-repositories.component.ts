@@ -27,10 +27,7 @@ const REPOSITORY_BADGE_INK = {
   imports: [InboxRowDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="mb-4 flex items-center justify-between gap-2">
-      <h2 class="text-sm font-semibold">Repositories</h2>
-      <span class="text-xs text-base-content-muted">{{ repositories().length }}</span>
-    </div>
+    <h2 class="mb-4 text-sm font-semibold">Repositories</h2>
     @if (repositories().length) {
       <div role="listbox" aria-label="Repositories" class="space-y-1">
         <button
@@ -39,8 +36,8 @@ const REPOSITORY_BADGE_INK = {
           [selected]="selected() === 'all'"
           (click)="choose.emit('all')"
         >
-          <span class="flex w-full items-center justify-between gap-2">
-            <span class="truncate text-sm font-medium">All repositories</span>
+          <span class="flex w-full items-center gap-2">
+            <span class="truncate text-sm font-semibold">All repositories</span>
             <span class="shrink-0 text-xs text-base-content-muted">{{ runCount() }}</span>
           </span>
         </button>
@@ -51,11 +48,8 @@ const REPOSITORY_BADGE_INK = {
             [selected]="selected() === repo.owner + '/' + repo.name"
             (click)="choose.emit(repo.owner + '/' + repo.name)"
           >
-            <span class="flex w-full items-center justify-between gap-2">
-              <span class="min-w-0">
-                <span class="block truncate text-sm font-medium">{{ repo.owner }}/{{ repo.name }}</span>
-                <span class="block text-xs text-base-content-muted">{{ repo.enabled ? 'Review enabled' : 'Review disabled' }}</span>
-              </span>
+            <span class="flex w-full items-center gap-2">
+              <span class="truncate text-sm font-semibold">{{ repo.owner }}/{{ repo.name }}</span>
               <span class="badge badge-outline shrink-0 text-xs" [class]="ink(repo)">
                 {{ badgeLabel(repo) }}
               </span>
