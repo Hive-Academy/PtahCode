@@ -1021,12 +1021,17 @@ export class ProviderModelsService {
    *    carrier is about. A second writer on the fetch path used to have exactly
    *    this hazard and was deleted for it (TASK_2026_265); do not reintroduce a
    *    tier write that runs off a fetch without this guard.
-   * 2. **Only fill a hole.** Returns when every tier env var already has a
-   *    value. This is what makes the method incapable of disturbing a working
-   *    configuration; combined with `applyPersistedTiers`' own
-   *    `userTiers ?? providerDefaults ?? liveDerived` order, a user's explicit
-   *    pick is safe twice over — it is never reached, and it would win if it
-   *    were.
+   * 2. **Nothing stale to write.** Returns when every tier env var already
+   *    holds exactly what `resolveEffectiveTiers` would select now. A user's
+   *    explicit pick is safe twice over — the comparison does not count it
+   *    (the pick IS what the derivation selects), and `applyPersistedTiers`'
+   *    own `userTiers ?? providerDefaults ?? liveDerived` order would rank it
+   *    above the derivation anyway. Comparing against the derivation is what
+   *    lets a warmed catalogue retire a static default that activation wrote
+   *    while no catalogue was known. Tiers the derivation still cannot
+   *    resolve are excluded from the comparison: `applyPersistedTiers`
+   *    writes only resolved tiers, so re-applying for them could neither fix
+   *    nor finish anything.
    * 3. **Something new to derive from.** Returns when the catalogue on hand
    *    still implies no tiers. Without it, a picker open against a provider
    *    with no catalogue would reach `applyPersistedTiers`, find the same hole
@@ -1045,17 +1050,22 @@ export class ProviderModelsService {
     try {
       if (providerId !== this.resolveActiveProviderId()) return;
 
-      const unresolved = Object.values(TIER_ENV_VAR_MAP).filter(
-        (envKey) => !this.authEnv[envKey as keyof AuthEnv],
+      const userTiers = this.getModelTiers(providerId, 'mainAgent');
+      const effectiveTiers = this.resolveEffectiveTiers(providerId, userTiers);
+      const stale = Object.entries(TIER_ENV_VAR_MAP).filter(
+        ([tier, envKey]) =>
+          effectiveTiers[tier as ProviderModelTier] !== undefined &&
+          this.authEnv[envKey as keyof AuthEnv] !==
+            effectiveTiers[tier as ProviderModelTier],
       );
-      if (unresolved.length === 0) return;
+      if (stale.length === 0) return;
 
       if (Object.keys(this.getLiveDerivedTiers(providerId)).length === 0)
         return;
 
       this.logger.debug(
         '[ProviderModelsService] Catalog warmed out of band — re-applying tiers',
-        { providerId, unresolved },
+        { providerId, effectiveTiers },
       );
       this.applyPersistedTiers(providerId);
     } catch (error: unknown) {

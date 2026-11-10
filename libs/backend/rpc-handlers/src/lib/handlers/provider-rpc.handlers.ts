@@ -427,10 +427,16 @@ export class ProviderRpcHandlers {
 
   private registerKimiCodeDynamicFetcher(): void {
     this.providerModels.registerDynamicFetcher('kimi-code', async () => {
+      // Every failure path returns [] — never the static list. The consumer
+      // (`ProviderModelsService.fetchModels`) caches and persists any
+      // non-empty result as a LIVE catalog for the full cache TTL, so a
+      // transient 401 or timeout reported as a list would poison the cache
+      // and the persisted store with static data. An empty result falls
+      // through to the persisted catalog and then the static models.
       try {
-        if (!this.kimiAuth) return mergeKimiCodeModels(undefined);
+        if (!this.kimiAuth) return [];
         const baseUrl = getAnthropicProvider('kimi-code')?.baseUrl;
-        if (!baseUrl) return mergeKimiCodeModels(undefined);
+        if (!baseUrl) return [];
         const credential = await this.kimiAuth.resolveRequestCredential();
         const headers: Record<string, string> =
           credential.kind === 'oauth'
@@ -453,12 +459,13 @@ export class ProviderRpcHandlers {
               status: response.status,
             },
           );
-          return mergeKimiCodeModels(undefined);
+          return [];
         }
         const payload: unknown = await response.json();
         if (!isKimiCodeModelsPayload(payload)) {
           // The live payload shape is not confirmed. Record the shape (never
-          // the content) so that a wrong schema is visible in the log.
+          // the content) so that a wrong schema is visible in the log. An
+          // unknown shape is a failed live fetch, not a live catalog.
           this.logger.debug(
             '[ProviderRpc] Kimi Code model catalog has an unknown shape',
             {
@@ -471,6 +478,7 @@ export class ProviderRpcHandlers {
                   : [],
             },
           );
+          return [];
         }
         return mergeKimiCodeModels(payload);
       } catch (error) {
@@ -478,7 +486,7 @@ export class ProviderRpcHandlers {
         this.logger.debug('[ProviderRpc] Kimi Code model catalog unavailable', {
           error: error instanceof Error ? error.message : String(error),
         });
-        return mergeKimiCodeModels(undefined);
+        return [];
       }
     });
   }

@@ -790,10 +790,13 @@ export class SdkModelService {
   }
 
   private async revalidateCatalog(key: string): Promise<void> {
-    if (key !== NATIVE_MODELS_CACHE_KEY && this.authFingerprint() !== key)
-      return;
-    const generation = this.cacheGeneration;
     try {
+      // Inside the try on purpose: the timer call site drops the returned
+      // promise (`void this.revalidateCatalog(key)`), so a throw from
+      // `authFingerprint()` outside the try would reject with no handler.
+      if (key !== NATIVE_MODELS_CACHE_KEY && this.authFingerprint() !== key)
+        return;
+      const generation = this.cacheGeneration;
       const models =
         key === NATIVE_MODELS_CACHE_KEY
           ? await this.fetchModelsViaSdk(NATIVE_CLAUDE_AUTH_ENV)
@@ -1006,6 +1009,18 @@ export class SdkModelService {
       const isDegradedApiKeyFallback =
         authMethod === 'apiKey' &&
         models.every((m) => !m.value.startsWith('claude-'));
+      if (!persist && isDegradedApiKeyFallback) {
+        // The only persist=false caller is `revalidateCatalog`, which writes
+        // any non-empty result into the cache AND the persisted store. The
+        // persist guard above exists so this degraded list is never saved;
+        // handing it to the revalidation would replace a good restored
+        // catalog with the tier slots. An empty result is ignored there.
+        this.logger.warn(
+          '[SdkModelService] Discarding the degraded API-key fallback on the revalidation path',
+          { authMethod },
+        );
+        return [];
+      }
       if (persist && !isDegradedApiKeyFallback) {
         this.cacheModels(cacheKey, generation, models);
       }

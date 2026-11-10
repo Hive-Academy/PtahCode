@@ -20,8 +20,25 @@ const NPM_PROTOCOL: Readonly<Record<string, OpenCodeProtocol>> = {
   '@ai-sdk/openai': 'responses',
   '@ai-sdk/openai-compatible': 'chat/completions',
 };
+
+/**
+ * Own-property lookup for keys that arrive from the remote gateway payload.
+ * A plain `table[key]` returns an inherited `Object.prototype` member for a
+ * key such as `constructor`, `toString` or `__proto__` — truthy, and then
+ * used as the model's protocol. The same guard `getOpenCodeModelProtocol`
+ * already applies to its static route table.
+ */
+function ownProtocol(
+  table: Readonly<Record<string, OpenCodeProtocol>>,
+  key: string,
+): OpenCodeProtocol | undefined {
+  return Object.prototype.hasOwnProperty.call(table, key)
+    ? table[key]
+    : undefined;
+}
+
 export function protocolFromNpm(npm: string): OpenCodeProtocol | undefined {
-  return NPM_PROTOCOL[npm];
+  return ownProtocol(NPM_PROTOCOL, npm);
 }
 
 const modelSchema = z.object({
@@ -33,7 +50,11 @@ const modelSchema = z.object({
     .optional(),
   api: z.record(z.string(), z.unknown()).optional(),
 });
-const gatewaySchema = z.object({ data: z.array(modelSchema).min(1).max(1000) });
+/**
+ * Envelope only: entries are validated one by one during the refresh, so one
+ * malformed row from the third-party gateway cannot reject the whole payload.
+ */
+const gatewaySchema = z.object({ data: z.array(z.unknown()).min(1).max(1000) });
 const apiEntrySchema = z.object({
   sdk: z.object({ aisdk: z.string() }).optional(),
 });
@@ -53,7 +74,8 @@ export function protocolFromGatewayApi(
   const keys = Object.keys(api);
   if (keys.length !== 1) return undefined;
   const key = keys[0];
-  if (API_PROTOCOL[key]) return API_PROTOCOL[key];
+  const direct = ownProtocol(API_PROTOCOL, key);
+  if (direct) return direct;
   const entry = apiEntrySchema.safeParse(api[key]);
   return entry.success && entry.data.sdk
     ? protocolFromNpm(entry.data.sdk.aisdk)
@@ -104,7 +126,14 @@ export class OpenCodeLiveRoutes {
       try {
         const parsed = gatewaySchema.parse(await this.getJson(endpoint));
         const models = new Map<string, OpenCodeLiveModel>();
-        for (const model of parsed.data) {
+        let skipped = 0;
+        for (const raw of parsed.data) {
+          const entry = modelSchema.safeParse(raw);
+          if (!entry.success) {
+            skipped++;
+            continue;
+          }
+          const model = entry.data;
           models.set(model.id, {
             id: model.id,
             name: model.name ?? model.id,
@@ -112,6 +141,13 @@ export class OpenCodeLiveRoutes {
             supportsToolUse: model.capabilities?.tools?.supported,
             protocol: protocolFromGatewayApi(model.api),
           });
+        }
+        if (models.size === 0) throw new Error('No valid models in catalog');
+        if (skipped > 0 && this.options.logger) {
+          this.options.logger.debug(
+            'OpenCode live model refresh skipped invalid catalog entries',
+            { providerId, kept: models.size, skipped },
+          );
         }
         this.caches.set(providerId, {
           models,

@@ -1014,6 +1014,29 @@ describe('ProviderModelsService.registerDynamicFetcher', () => {
     expect(result.models).toHaveLength(1);
     expect(result.models[0].id).toBe('dyn-model');
   });
+
+  it('does not cache or persist an empty dynamic result, and reports the static list', async () => {
+    // The Kimi Code fetcher returns [] on every failure path (transient 401,
+    // timeout, unknown payload shape) precisely because this consumer caches
+    // and persists any NON-EMPTY result as a live catalog for the full cache
+    // TTL. An empty result must fall through to the static models, reported
+    // as static, and leave the cache cold so the next call retries live.
+    const { service, config } = makeService({});
+    const fetcher = jest.fn().mockResolvedValue([]);
+    service.registerDynamicFetcher('kimi-code', fetcher);
+
+    const result = await service.fetchModels('kimi-code', null);
+    await Promise.resolve();
+
+    expect(result.isStatic).toBe(true);
+    expect(result.models.map((m) => m.id)).toContain('kimi-for-coding');
+    expect(config.set).not.toHaveBeenCalled();
+
+    // No cache entry was written for the failure: the second call goes back
+    // to the live fetcher instead of serving the failure for the TTL.
+    await service.fetchModels('kimi-code', null);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1547,8 +1570,9 @@ describe('ProviderModelsService live-catalog tier derivation', () => {
  *   - it never writes for a provider that is not the active one, because
  *     `applyPersistedTiers` writes process-global env and the picker is the one
  *     place a user routinely inspects a provider they are not using;
- *   - it only ever fills a hole, and a user's explicit pick outranks the
- *     derivation even inside that hole;
+ *   - it writes nothing while the env vars already hold what the derivation
+ *     selects, and a user's explicit pick outranks the derivation even when
+ *     it does write;
  *   - it does not turn a picker open into a second network round trip.
  */
 describe('ProviderModelsService.reapplyTiersForWarmedCatalog', () => {
@@ -1605,6 +1629,9 @@ describe('ProviderModelsService.reapplyTiersForWarmedCatalog', () => {
     for (const tier of ['OPUS', 'SONNET', 'HAIKU']) {
       delete process.env[`ANTHROPIC_DEFAULT_${tier}_MODEL_NAME`];
       delete process.env[`ANTHROPIC_DEFAULT_${tier}_MODEL_DESCRIPTION`];
+      delete process.env[
+        `ANTHROPIC_DEFAULT_${tier}_MODEL_SUPPORTED_CAPABILITIES`
+      ];
     }
   });
 
@@ -1797,6 +1824,59 @@ describe('ProviderModelsService.reapplyTiersForWarmedCatalog', () => {
       service.reapplyTiersForWarmedCatalog('openrouter'),
     ).not.toThrow();
     expect(authEnv.ANTHROPIC_DEFAULT_OPUS_MODEL).toBeUndefined();
+  });
+
+  it('replaces a static default the warmed catalog retired', async () => {
+    // The hole the old guard left: on a cold start `resolveEffectiveTiers`
+    // keeps the static default (no catalogue is known), so activation wrote
+    // it into all three tier env vars — and the old guard then returned early
+    // for exactly that state, so the default survived the pick that proved it
+    // absent. Kimi Code's opus default (`k3.1-pro`) is retired from the
+    // warmed catalogue; the derivation names a replacement from that same
+    // catalogue, and the re-apply must write it.
+    const { service, authEnv } = makeService({
+      configValues: {
+        authMethod: 'thirdParty',
+        anthropicProviderId: 'kimi-code',
+      },
+    });
+    service.switchActiveProvider('kimi-code');
+    expect(authEnv.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe('k3.1-pro');
+    expect(authEnv.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('k3');
+    expect(authEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('kimi-for-coding');
+
+    service.registerDynamicFetcher('kimi-code', async () => [
+      {
+        id: 'k3',
+        name: 'K3',
+        description: '',
+        contextLength: 262144,
+        supportsToolUse: true,
+      },
+      {
+        id: 'kimi-for-coding',
+        name: 'Kimi for Coding',
+        description: '',
+        contextLength: 1048576,
+        supportsToolUse: true,
+      },
+      {
+        id: 'k-opus-next',
+        name: 'K Opus Next',
+        description: '',
+        contextLength: 524288,
+        supportsToolUse: true,
+      },
+    ]);
+    await service.fetchModels('kimi-code', null);
+    service.reapplyTiersForWarmedCatalog('kimi-code');
+
+    expect(authEnv.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe('k-opus-next');
+    // Defaults the catalog still contains are left exactly as they were.
+    expect(authEnv.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('k3');
+    expect(authEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('kimi-for-coding');
+    expect(process.env[ENV_OPUS]).toBe('k-opus-next');
+    await settle();
   });
 });
 

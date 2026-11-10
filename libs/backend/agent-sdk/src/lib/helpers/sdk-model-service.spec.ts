@@ -48,12 +48,15 @@ interface Harness {
   setAuthMethod: (method: AuthMethod) => void;
   /** Swap the active provider the way a workspace switch would. */
   setProviderId: (providerId: string) => void;
+  /** Make `resolveActiveAuth()` throw, the way a failing settings store does. */
+  setAuthResolverError: (error: Error | undefined) => void;
   /** Records every call the service routes through `OffThreadProcessSpawner`. */
   offThreadSpawns: SpawnOptions[];
   /** The backing map of the in-memory `IStateStorage` this harness supplies. */
   state: Map<string, unknown>;
   logInfo: jest.Mock;
   logDebug: jest.Mock;
+  logWarn: jest.Mock;
 }
 
 function makeHarness(opts: {
@@ -96,8 +99,12 @@ function makeHarness(opts: {
 
   let authMethod = opts.authMethod;
   let providerId = 'anthropic';
+  let authResolverError: Error | undefined;
   const authProvider = {
-    resolveActiveAuth: () => ({ authMethod, providerId }),
+    resolveActiveAuth: () => {
+      if (authResolverError) throw authResolverError;
+      return { authMethod, providerId };
+    },
   } as unknown as IAuthEnvProvider;
 
   const offThreadSpawns: SpawnOptions[] = [];
@@ -143,10 +150,14 @@ function makeHarness(opts: {
     setProviderId: (id: string) => {
       providerId = id;
     },
+    setAuthResolverError: (error: Error | undefined) => {
+      authResolverError = error;
+    },
     offThreadSpawns,
     state,
     logInfo: logger.info as jest.Mock,
     logDebug: logger.debug as jest.Mock,
+    logWarn: logger.warn as jest.Mock,
   };
 }
 
@@ -908,6 +919,79 @@ describe('SdkModelService — background catalog revalidation', () => {
     expect(h.spawnEnvs).toHaveLength(0);
     expect(JSON.stringify(h.state.get('ptah.sdk.modelCatalog'))).not.toContain(
       'fable',
+    );
+  });
+
+  it('logs a revalidation failure instead of rejecting when the auth resolver throws', async () => {
+    // The timer call site drops the returned promise
+    // (`void this.revalidateCatalog(key)`), so a throw from the
+    // auth-fingerprint guard OUTSIDE the try would be an unhandled rejection.
+    // Inside the try it is just a failed refresh: one warn line, and the
+    // saved rows stay where the restore left them.
+    const h = await boot(fresh);
+    await h.service.getSupportedModels();
+    h.setAuthResolverError(new Error('settings store unreadable'));
+    await jest.advanceTimersByTimeAsync(10_000);
+    expect(h.logWarn).toHaveBeenCalledWith(
+      '[SdkModelService] Model catalog revalidation failed',
+      expect.objectContaining({ error: 'settings store unreadable' }),
+    );
+    h.setAuthResolverError(undefined);
+    expect(await h.service.getSupportedModels()).toEqual(saved);
+  });
+
+  it('keeps the saved catalog when the probe degrades to API-key tier slots', async () => {
+    // The revalidation runs `fetchSupportedModelsInternal(key, false)`, whose
+    // persist guard exists so a degraded API-key fallback (the SDK tier
+    // slots, whose values do not start with `claude-`) is never cached. With
+    // `persist === false` that guard is bypassed, and a non-empty result would
+    // replace a good restored catalog in memory AND in the persisted store.
+    // The degraded result must be discarded on that path: an empty result is
+    // ignored by `revalidateCatalog`.
+    const state = new Map<string, unknown>();
+    const restored: ModelInfo[] = [
+      {
+        value: 'claude-sonnet-4-5',
+        displayName: 'Sonnet 4.5',
+        description: '',
+      },
+    ];
+    // Boot with a good API-key catalog: no credentials in the env, so
+    // `/v1/models` yields nothing and the SDK list (claude- ids) is kept.
+    await makeHarness({
+      authMethod: 'apiKey',
+      sdkModels: restored,
+      state,
+    }).service.getSupportedModels();
+
+    // Second boot: the same identity now sees the SDK degrade to bare tier
+    // slots. The restored catalog must survive the revalidation probe.
+    const h = makeHarness({
+      authMethod: 'apiKey',
+      sdkModels: [
+        { value: 'opus', displayName: 'Opus', description: '' },
+        { value: 'sonnet', displayName: 'Sonnet', description: '' },
+      ],
+      state,
+    });
+    expect(await h.service.getSupportedModels()).toEqual(restored);
+
+    await jest.advanceTimersByTimeAsync(10_000);
+
+    expect(await h.service.getSupportedModels()).toEqual(restored);
+    expect(JSON.stringify(h.state.get('ptah.sdk.modelCatalog'))).toContain(
+      'claude-sonnet-4-5',
+    );
+    expect(JSON.stringify(h.state.get('ptah.sdk.modelCatalog'))).not.toContain(
+      '"value":"opus"',
+    );
+    expect(h.logInfo).not.toHaveBeenCalledWith(
+      '[SdkModelService] Revalidated model catalog changed',
+      expect.anything(),
+    );
+    expect(h.logWarn).toHaveBeenCalledWith(
+      '[SdkModelService] Discarding the degraded API-key fallback on the revalidation path',
+      { authMethod: 'apiKey' },
     );
   });
 });

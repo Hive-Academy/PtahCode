@@ -233,3 +233,24 @@ method that round 2 examined.
   `rpc-handlers: 1 ok (baseline 1)`, `auth-providers: 23 ok (baseline 24)`, TOTAL 214.
 - The local `codex-account-usage.service.spec.ts` failure did not occur in CI (test shards
   1-4 passed). It is specific to the local Windows machine.
+
+## CodeRabbit review on head 51136f8bf
+
+- CI on head `51136f8bf`: all jobs passed (`checks` with `degradation-audit` included).
+- CodeRabbit posted 5 inline findings and 2 minor findings. Full text:
+  `coderabbit-findings.md`. Lane report: `coderabbit-fix-report.md` (Glm lane).
+- F1 to F6: all confirmed against the code and corrected, each with a regression spec.
+  - F1: the auth guard of `revalidateCatalog` is now inside the `try`.
+  - F2: the revalidation path discards a degraded API-key fallback list.
+  - F3: `reapplyTiersForWarmedCatalog` re-applies when a resolved tier differs from the env.
+  - F4: own-property lookups for gateway keys in `opencode-live-routes.ts`.
+  - F5: gateway entries are parsed one by one; a refresh fails only with no valid entry.
+  - F6: the Kimi Code fetcher returns `[]` on each failure path, so the consumer does not
+    cache or persist the static list as live data.
+- Not changed: the `baseUrl` host check finding. The built-in `kimi-code` entry has a fixed
+  URL and `getAnthropicProvider` resolves built-in entries before custom entries.
+- Coordinator checks: source diff examined; Prettier passed; full `degradation-audit` exit
+  code 0 (no baseline changed); `npm run verify -p agent-sdk,auth-providers,rpc-handlers`:
+  lint and typecheck 6 of 6 passed; tests passed for `agent-sdk` and `rpc-handlers`;
+  `auth-providers` 2682 passed, 2 failed. The 2 failures are the known local Windows
+  failures in `codex-account-usage.service.spec.ts`, which pass in CI.

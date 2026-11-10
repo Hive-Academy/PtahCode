@@ -1016,8 +1016,14 @@ describe('ProviderRpcHandlers', () => {
       { status: 500, payload: {} },
       { status: 200, payload: { data: [{ bad: true }] } },
     ])(
-      'falls back to static Kimi models on HTTP failure or malformed payload',
+      'reports no live Kimi catalog on HTTP failure or malformed payload',
       async ({ status, payload }) => {
+        // A failure must return [] — never the static list. The consumer
+        // (`ProviderModelsService.fetchModels`) caches and persists any
+        // non-empty result as a LIVE catalog for the full cache TTL, so a
+        // transient failure reported as a list would poison the cache with
+        // static data. The static models still reach the caller, through the
+        // consumer's static fallback.
         const h = makeHarness();
         h.handlers.register();
         const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
@@ -1029,7 +1035,7 @@ describe('ProviderRpcHandlers', () => {
           async () => new Response(JSON.stringify(payload), { status }),
         );
         try {
-          expect(await entry[1]()).toEqual(mergeKimiCodeModels(undefined));
+          expect(await entry[1]()).toEqual([]);
           if (status === 500) {
             expect(h.logger.debug).toHaveBeenCalledWith(
               '[ProviderRpc] Kimi Code model catalog unavailable',
@@ -1050,7 +1056,7 @@ describe('ProviderRpcHandlers', () => {
       },
     );
 
-    it('logs a thrown Kimi fetch error without the credential and returns static models', async () => {
+    it('logs a thrown Kimi fetch error without the credential and reports no live catalog', async () => {
       const h = makeHarness();
       h.handlers.register();
       const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
@@ -1062,7 +1068,7 @@ describe('ProviderRpcHandlers', () => {
         throw new Error('network unavailable');
       });
       try {
-        expect(await entry[1]()).toEqual(mergeKimiCodeModels(undefined));
+        expect(await entry[1]()).toEqual([]);
         expect(h.logger.debug).toHaveBeenCalledWith(
           '[ProviderRpc] Kimi Code model catalog unavailable',
           { error: 'network unavailable' },

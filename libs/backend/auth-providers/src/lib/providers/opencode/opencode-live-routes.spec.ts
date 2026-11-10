@@ -148,6 +148,57 @@ describe('OpenCode live routes', () => {
     expect(protocolFromNpm('@ai-sdk/google')).toBeUndefined();
   });
 
+  it('treats Object.prototype keys from the gateway as unmapped', () => {
+    // A plain `table[key]` returns an inherited member for these keys —
+    // truthy, and then used as the model's protocol. The lookups must see
+    // own properties only, the same guard `getOpenCodeModelProtocol` uses.
+    expect(protocolFromNpm('constructor')).toBeUndefined();
+    expect(protocolFromNpm('toString')).toBeUndefined();
+    expect(protocolFromNpm('__proto__')).toBeUndefined();
+    expect(protocolFromGatewayApi({ constructor: {} })).toBeUndefined();
+    expect(protocolFromGatewayApi({ toString: {} })).toBeUndefined();
+    // A JSON body can carry `__proto__` as an own key; it must not resolve to
+    // `Object.prototype` through the inherited lookup.
+    expect(
+      protocolFromGatewayApi(
+        JSON.parse('{"__proto__":{}}') as Record<string, unknown>,
+      ),
+    ).toBeUndefined();
+    // Keys the tables actually define keep their mapping.
+    expect(protocolFromGatewayApi({ messages: {} })).toBe('messages');
+    expect(protocolFromNpm('@ai-sdk/anthropic')).toBe('messages');
+  });
+
+  it('skips invalid entries and keeps the valid ones', async () => {
+    // One malformed row used to reject the whole payload, so a single bad
+    // entry hid every valid model behind a failed refresh.
+    const logger = { debug: jest.fn() };
+    const routes = new OpenCodeLiveRoutes(
+      async () => ({
+        data: [
+          model('good-id', 'messages'),
+          { id: 'bad-context', limit: { context: null } },
+          'not-an-object',
+        ],
+      }),
+      { logger },
+    );
+    const catalog = await routes.list('opencode-zen');
+    expect(catalog?.has('good-id')).toBe(true);
+    expect(catalog?.has('bad-context')).toBe(false);
+    expect(logger.debug).toHaveBeenCalledWith(
+      'OpenCode live model refresh skipped invalid catalog entries',
+      { providerId: 'opencode-zen', kept: 1, skipped: 2 },
+    );
+  });
+
+  it('treats a payload whose entries are all invalid as a failed refresh', async () => {
+    const routes = new OpenCodeLiveRoutes(async () => ({
+      data: [{ id: 'bad-context', limit: { context: null } }],
+    }));
+    expect(await routes.list('opencode-zen')).toBeNull();
+  });
+
   it('keeps static priority and resolves a new ID after one refresh', async () => {
     const getJson = jest.fn(async () => ({
       data: [
