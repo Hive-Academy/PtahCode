@@ -100,7 +100,12 @@
 @media (min-width: 1024px) {
   /* Uneven grid: the shared split clip width, the shared gap, the copy takes the rest. */
   .va-stage {
-    grid-template-columns: minmax(0, var(--sec-media-w-split)) minmax(0, 1fr);
+    /* How far the clip sits under the headline. */
+    --va-drop: clamp(4rem, 9vh, 7rem);
+    /* The clip and its drop fit the pinned screen together. */
+    grid-template-columns:
+      minmax(0, min(var(--sec-media-w-split), calc((var(--sec-fit-h) - var(--va-drop)) * var(--sec-media-ratio))))
+      minmax(0, 1fr);
     align-items: start;
     column-gap: var(--sec-gap);
   }
@@ -110,7 +115,7 @@
     order: 0;
     grid-column: 1;
     grid-row: 1;
-    margin-top: clamp(4rem, 9vh, 7rem);
+    margin-top: var(--va-drop);
   }
 
   .va-text {

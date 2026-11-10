@@ -95,6 +95,8 @@
     column-gap: 0;
     row-gap: clamp(1.5rem, 3vh, 2.5rem);
     padding: 0 clamp(3rem, 5vw, 5rem) 0 clamp(0rem, 3vw, 3rem);
+    /* How far the clip sits under the top of the header. */
+    --pv-raise: clamp(12rem, 28vh, 18rem);
   }
 
   .pv-head {
@@ -116,8 +118,13 @@
     grid-row: 1 / span 2;
     align-self: end;
     justify-self: start;
-    width: min(100%, var(--sec-media-w-stacked));
-    margin-top: clamp(12rem, 28vh, 18rem);
+    /* The raise and the clip fit the pinned screen together. */
+    width: min(
+      100%,
+      var(--sec-media-w-stacked),
+      calc((var(--sec-fit-h) - var(--pv-raise)) * var(--sec-media-ratio))
+    );
+    margin-top: var(--pv-raise);
   }
 
   /* The deck steps onto the clip's frame edge. */

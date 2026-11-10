@@ -44,7 +44,7 @@ describe('bindSectionScroll', () => {
 
     expect(onProgress).toHaveBeenLastCalledWith(0);
     expect(create).toHaveBeenCalledTimes(2);
-    expect(create.mock.calls[0][0]).toMatchObject({ pin: true, start: 'center center' });
+    expect(create.mock.calls[0][0]).toMatchObject({ pin: true, start: 'center center+=32' });
     expect(create.mock.calls[1][0]).toMatchObject({ scrub: 0.4, start: 'top 70%' });
 
     release();

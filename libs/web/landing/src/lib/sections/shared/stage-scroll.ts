@@ -10,6 +10,7 @@ import {
 } from '@angular/core';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
+import { PIN_CENTER } from './section-scroll';
 
 /** Three scroll phases of a clip section, each 0 to 1; 1 is settled. */
 export interface StageProgress {
@@ -75,13 +76,13 @@ export function bindStageScroll(
       ScrollTrigger.create({
         trigger: stage,
         start: 'top bottom',
-        end: pinned ? 'center center' : 'top 35%',
+        end: pinned ? PIN_CENTER : 'top 35%',
         scrub: 0.4,
         onUpdate: scrubTo(progress.enter),
       }),
       ScrollTrigger.create({
         trigger: stage,
-        start: pinned ? 'center center' : 'top 60%',
+        start: pinned ? PIN_CENTER : 'top 60%',
         end: pinned ? '+=120%' : 'bottom 70%',
         pin: pinned,
         scrub: 0.4,

@@ -52,7 +52,7 @@ describe('bindStageScroll', () => {
     expect(create).toHaveBeenCalledTimes(3);
     const pinned = create.mock.calls.map((call) => call[0]).filter((vars) => vars.pin === true);
     expect(pinned).toHaveLength(1);
-    expect(pinned[0]).toMatchObject({ trigger: stage, start: 'center center' });
+    expect(pinned[0]).toMatchObject({ trigger: stage, start: 'center center+=32' });
 
     release();
     expect(kill).toHaveBeenCalledTimes(3);

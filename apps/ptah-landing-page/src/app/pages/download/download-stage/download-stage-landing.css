@@ -1,24 +1,21 @@
 /*
- * Where the light lands: the Lightfall layer rises from the top edge of the
- * platform cards to the top of the stage, centred, so the beam falls straight
- * through the copy and its flare spreads along the cards.
+ * Where the light lands: the Lightfall layer spans the whole stage, from its
+ * top edge down to its bottom edge, centred on the stack, so the beam falls
+ * through the copy and behind the platform cards onto the section floor.
  */
-/* No z-index here: a stacking context would stop the light screening onto the temple scene. */
-.dl-landing {
-  position: relative;
-  width: 100%;
-  margin-top: auto;
-  --lf-h: 100svh;
-  --lf-origin: 0.035;
-}
-
+/* No z-index on .dl-stack: a stacking context would stop the light screening onto the temple scene. */
 .dl-light {
   position: absolute;
   z-index: 0;
-  bottom: calc(100% - var(--lf-origin) * var(--lf-h));
+  top: calc(-1 * var(--dl-stage-pad-top));
+  bottom: calc(-1 * var(--dl-stage-pad-bottom));
   left: -15%;
   right: -15%;
-  height: var(--lf-h);
+}
+
+.dl-landing {
+  width: 100%;
+  margin-top: auto;
 }
 
 .dl-cards {

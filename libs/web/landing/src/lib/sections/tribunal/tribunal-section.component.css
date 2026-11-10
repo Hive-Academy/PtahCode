@@ -159,7 +159,11 @@
 
   /* The clip box adds the bench room on top; its width is the shared clip width. */
   .tb-clip {
-    width: var(--sec-media-w);
+    /* The bench room and the clip fit the pinned screen together. */
+    width: min(
+      var(--sec-media-w),
+      calc((var(--sec-fit-h) - clamp(3.5rem, 7vw, 5.5rem)) * var(--sec-media-ratio))
+    );
     margin-left: auto;
   }
 }
