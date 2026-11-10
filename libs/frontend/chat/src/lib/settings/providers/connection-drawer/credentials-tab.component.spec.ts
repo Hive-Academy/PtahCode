@@ -69,6 +69,7 @@ describe('replaceKeyDraft', () => {
 
   it('the Claude API key replacement keeps the current route', () => {
     expect(replaceKeyDraft(connection({ id: 'anthropic', name: 'Claude API' }), request, null).activation).toBe('connect-only');
+    expect(replaceKeyDraft(connection({ id: 'anthropic', name: 'Claude API' }), { ...request, activeMainAgent: true }, null).activation).toBe('use-main-agent');
   });
 });
 
@@ -221,7 +222,7 @@ describe('CredentialsTabComponent', () => {
       expect(announced()).toEqual(['status: Key verified (92ms). Save it to replace the stored key.']);
       expect(query('credentials-probe')?.textContent?.trim()).toBe('Key verified (92ms). Save it to replace the stored key.');
       query('credentials-save')?.click();
-      expect(replace).toHaveBeenCalledWith({ key: 'sk-new', probeId: probe.calls[0].probeId });
+      expect(replace).toHaveBeenCalledWith({ key: 'sk-new', probeId: probe.calls[0].probeId, activeMainAgent: false });
     });
 
     it('a failed check leaves Save disabled, shows the reason and latency, and asks for nothing to be saved', async () => {
@@ -317,10 +318,38 @@ describe('CredentialsTabComponent', () => {
       render({ connection: claude, isActiveDriver: false });
       expect(query('credentials-replace')).not.toBeNull();
       expect(query('credentials-anthropic-guidance')).toBeNull();
-      render({ isActiveDriver: true });
-      expect(query('credentials-anthropic-guidance')).toBeNull();
       query('credentials-replace')?.click(); fixture.detectChanges();
       expect(query('credentials-replace-form')?.textContent).toContain('main-agent route stays the same');
+      render({ isActiveDriver: true });
+      expect(query('credentials-anthropic-guidance')).toBeNull();
+      expect(query('credentials-replace-form')?.textContent).toContain('restarts running chat sessions');
+    });
+
+    it('emits the active route for an active Claude API replacement', async () => {
+      const replace = jest.fn();
+      fixture.componentInstance.replaceKeyRequested.subscribe(replace);
+      render({ connection: claude, isActiveDriver: true, setup: null });
+      query('credentials-replace')?.click(); fixture.detectChanges();
+      typeKey('new-key');
+      query('credentials-verify')?.click(); fixture.detectChanges();
+      probe.settle(); await flush();
+      query('credentials-save')?.click();
+      expect(replace).toHaveBeenCalledWith(expect.objectContaining({ activeMainAgent: true }));
+    });
+
+    it('blocks deleting the active Claude API key and explains the required route change', () => {
+      const deleted = jest.fn();
+      fixture.componentInstance.deleteKeyRequested.subscribe(deleted);
+      render({ connection: claude, isActiveDriver: true });
+      expect(isDisabledControl(query<HTMLButtonElement>('credentials-delete'))).toBe(true);
+      expect(query('credentials-delete-blocked')?.textContent).toContain('Select another main-agent route before you delete this key.');
+      query('credentials-delete')?.click(); fixture.detectChanges();
+      expect(deleted).not.toHaveBeenCalled();
+      render({ isActiveDriver: false });
+      expect(isDisabledControl(query<HTMLButtonElement>('credentials-delete'))).toBe(false);
+      query('credentials-delete')?.click(); fixture.detectChanges();
+      query('credentials-delete-confirm-button')?.click(); fixture.detectChanges();
+      expect(deleted).toHaveBeenCalledTimes(1);
     });
   });
 

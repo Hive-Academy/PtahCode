@@ -84,9 +84,6 @@ import type { AgentProcessManager } from '../cli-agents/agent-process-manager.se
 import { createPromptMailbox } from './helpers/ptah-cli-prompt-mailbox';
 import { parsePtahCliCredentialSource } from './helpers/ptah-cli-credential-source';
 
-function resolveLaneProvider(id: string): AnthropicProvider | undefined {
-  return id === 'anthropic-api' ? getPtahCliLaneProvider(id) : getAnthropicProvider(id);
-}
 import { AgentSpawnEnvironment } from '../cli-agents/agent-spawn-environment.service';
 import { CLI_AGENT_RUNTIME_TOKENS } from '../di/tokens';
 import {
@@ -94,6 +91,16 @@ import {
   generateAgentId,
   sanitizeErrorMessage,
 } from './helpers/ptah-cli-registry.utils';
+
+/**
+ * Resolves the provider definition for a Ptah CLI lane. The direct Anthropic
+ * lane is lane-only and lives outside the main-agent provider registry.
+ */
+function resolveLaneProvider(id: string): AnthropicProvider | undefined {
+  return id === 'anthropic-api'
+    ? getPtahCliLaneProvider(id)
+    : getAnthropicProvider(id);
+}
 
 /**
  * Discriminated union result for spawnAgent() failure cases.
@@ -515,7 +522,18 @@ export class PtahCliRegistry {
     await this.configPersistence.saveConfigs(configs);
 
     if (source === 'shared-connection' && existing.credentialSource !== 'shared-connection') {
-      await this.authSecrets.deleteProviderKey(`${PTAH_CLI_KEY_PREFIX}.${id}`);
+      try {
+        await this.authSecrets.deleteProviderKey(`${PTAH_CLI_KEY_PREFIX}.${id}`);
+      } catch {
+        configs[index] = existing;
+        try {
+          await this.configPersistence.saveConfigs(configs);
+        } catch {
+          this.logger.error('[PtahCliRegistry] Could not restore agent configuration after credential cleanup failed', new Error('Configuration restore failed'));
+        }
+        this.logger.error('[PtahCliRegistry] Could not remove the instance credential', new Error('Credential deletion failed'));
+        throw new SdkError('Could not switch agent credential source');
+      }
     }
     if (apiKey !== undefined && source === 'instance') {
       await this.authSecrets.setProviderKey(

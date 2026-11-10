@@ -69,6 +69,7 @@ const NATIVE_ANTHROPIC_IDS: ReadonlySet<string> = new Set([
 const CHECK_TIMEOUT_MS = 35000;
 /** Removing the main agent's own connection is refused, by the route snapshot or by the host (`CONNECTION_IN_USE`). */
 const SWITCH_MAIN_AGENT_FIRST = 'Switch the main agent first.';
+const CLAUDE_API_DELETE_BLOCKED = 'Claude API is the main-agent route. Select another main-agent route before you delete this key.';
 const SIGN_IN_DETECTED = 'Sign-in detected. Verify the connection before using it.';
 const KIMI_NOT_CONFIRMED =
   'Kimi Code sign-in has not been confirmed. Sign in again, or run kimi login in a terminal, then choose Check again.';
@@ -832,6 +833,11 @@ export class ProvidersConnectionSetupService implements MessageHandler {
     context: ProvidersEditContext,
     hooks: ProvidersConnectionSetupHooks,
   ): Promise<boolean> {
+    if (this.commits.commit().status === 'saving') return Promise.resolve(false);
+    if (providerId === 'anthropic' && this.authState.persistedAuthMethod() === 'apiKey') {
+      this.commits.block(['Stored key'], CLAUDE_API_DELETE_BLOCKED);
+      return Promise.resolve(true);
+    }
     return this.commits.run(
       [
         {

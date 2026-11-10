@@ -78,6 +78,7 @@ describe('ProvidersConnectionSetupService', () => {
   let hooks: ProvidersConnectionSetupHooks;
   let route: ProvidersSettingsSection<ProvidersEffectiveRoute>;
   let refreshSharedAuth: jest.Mock<Promise<void>, []>;
+  const persistedAuthMethod = signal<'apiKey' | 'claudeCli'>('claudeCli');
   const codexStart = jest.fn<Promise<void>, []>(async () => undefined);
   const codexCancel = jest.fn<Promise<void>, []>(async () => undefined);
   const codexState = signal<CodexLoginState | null>(null);
@@ -103,6 +104,7 @@ describe('ProvidersConnectionSetupService', () => {
   });
 
   beforeEach(() => {
+    persistedAuthMethod.set('claudeCli');
     events = [];
     targets = ['global', 'app'];
     handlers = new Map<
@@ -138,7 +140,7 @@ describe('ProvidersConnectionSetupService', () => {
         { provide: CodexSignInService, useValue: { start: codexStart, cancel: codexCancel, state: codexState.asReadonly() } },
         {
           provide: AuthStateService,
-          useValue: { refreshAuthStatus: refreshSharedAuth },
+          useValue: { refreshAuthStatus: refreshSharedAuth, persistedAuthMethod: persistedAuthMethod.asReadonly() },
         },
         {
           provide: ModelStateService,
@@ -326,10 +328,12 @@ describe('ProvidersConnectionSetupService', () => {
     });
 
     it('activates Claude API only after explicit use for main agent', async () => {
+      persistedAuthMethod.set('apiKey');
       await service.verifyDraft({ probeId: 'p1', providerId: 'anthropic', authMode: 'apiKey' });
       call.mockClear();
       await service.connectProvider(draft({ providerId: 'anthropic', activation: 'use-main-agent' }), context, hooks);
       expect(methods()).toEqual(['auth:saveSettings']);
+      expect(call).toHaveBeenCalledWith('auth:saveSettings', expect.objectContaining({ authMethod: 'apiKey' }), undefined);
     });
     it('blocks an unverified draft without writing', async () => {
       await expect(
@@ -390,6 +394,22 @@ describe('ProvidersConnectionSetupService', () => {
       );
       expect(commits.commit()).toMatchObject({ status: 'blocked' });
       expect(methods()).toEqual([]);
+    });
+  });
+
+  describe('Claude API key deletion', () => {
+    it('blocks deletion while Claude API is the active route without RPCs', async () => {
+      persistedAuthMethod.set('apiKey');
+      await service.deleteStoredKey('anthropic', context, hooks);
+      expect(methods()).toEqual([]);
+      expect(commits.commit()).toMatchObject({ status: 'blocked', message: 'Claude API is the main-agent route. Select another main-agent route before you delete this key.' });
+    });
+
+    it('deletes through the secret-only RPC on the subscription route', async () => {
+      handlers.set('auth:getAuthStatus', async () => success({ hasApiKey: false }));
+      await service.deleteStoredKey('anthropic', context, hooks);
+      expect(call).toHaveBeenCalledWith('auth:setDirectAnthropicApiKey', { apiKey: null }, undefined);
+      expect(methods()).not.toContain('auth:saveSettings');
     });
   });
 

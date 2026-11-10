@@ -13,7 +13,7 @@ function harness() {
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
   const secrets = {
     getCredential: jest.fn(async () => sharedKey),
-    getProviderKey: jest.fn(async () => undefined),
+    getProviderKey: jest.fn(async (): Promise<string | undefined> => undefined),
     hasProviderKey: jest.fn(async () => false),
     setProviderKey: jest.fn(async () => undefined),
     deleteProviderKey: jest.fn(async () => undefined),
@@ -23,7 +23,7 @@ function harness() {
     loadConfigs: jest.fn(() => configs),
     saveConfigs: jest.fn(async () => undefined),
   };
-  const query = jest.fn(() => emptyStream());
+  const query = jest.fn((_input: { options: { env?: Record<string, string | undefined> } }) => emptyStream());
   const registry = new PtahCliRegistry(
     logger as never, secrets as never,
     { getCliJsPath: jest.fn(async () => undefined), getQueryFunction: jest.fn(async () => query) } as never,
@@ -39,7 +39,7 @@ function harness() {
     })) } as never,
     null as never, { get: jest.fn(() => undefined) } as never, createFakeSdkProcessSpawner(),
   );
-  return { registry, configs, secrets, logger, query, setSharedKey: (key?: string) => { sharedKey = key; } };
+  return { registry, configs, secrets, persistence, logger, query, setSharedKey: (key?: string) => { sharedKey = key; } };
 }
 
 describe('Ptah CLI direct Claude API credentials', () => {
@@ -85,9 +85,32 @@ describe('Ptah CLI direct Claude API credentials', () => {
 
   it('keeps subscription lane auth environment free of API keys', async () => {
     const h = harness();
-    const created = await h.registry.createAgent('Subscription', 'claude-cli', '', 'instance');
+    h.setSharedKey('shared-direct-key');
+    h.secrets.getProviderKey.mockResolvedValue('subscription-instance-key');
+    const created = await h.registry.createAgent('Subscription', 'claude-cli', 'subscription-instance-key', 'instance');
     const profile = await h.registry.getProfile(created.id);
+    expect(profile).toBeDefined();
+    expect(h.secrets.getCredential).not.toHaveBeenCalled();
     expect(profile?.authEnv.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(profile?.authEnv.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
     expect(profile?.authEnv.ANTHROPIC_BASE_URL).toBeUndefined();
+    await h.registry.spawnAgent(created.id, 'hello');
+    const env = h.query.mock.calls.at(-1)?.[0].options.env;
+    expect(env).toBeDefined();
+    expect(env?.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env?.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+    expect(env?.ANTHROPIC_BASE_URL).toBeUndefined();
+    expect(JSON.stringify(env)).not.toContain('shared-direct-key');
+  });
+
+  it('restores the instance source when deleting its secret fails', async () => {
+    const h = harness();
+    const created = await h.registry.createAgent('Claude', 'anthropic-api', 'instance-key', 'instance');
+    h.secrets.deleteProviderKey.mockRejectedValue(new Error('secret deletion failed'));
+    await expect(h.registry.updateAgent(created.id, { credentialSource: 'shared-connection' })).rejects.toThrow('Could not switch agent credential source');
+    expect(h.configs[0].credentialSource).toBe('instance');
+    expect(h.persistence.saveConfigs).toHaveBeenCalledTimes(3);
+    expect(h.logger.error).toHaveBeenCalledWith(expect.any(String), expect.any(Error));
+    expect(JSON.stringify(h.logger.error.mock.calls)).not.toContain('instance-key');
   });
 });

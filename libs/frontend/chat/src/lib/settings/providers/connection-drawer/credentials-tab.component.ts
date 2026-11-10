@@ -33,6 +33,7 @@ export type CancelDraftFn = (params: AuthCancelDraftVerificationParams) => Promi
 export interface ReplaceKeyRequest {
   readonly key: string;
   readonly probeId: string;
+  readonly activeMainAgent?: boolean;
 }
 
 /** The outcome of this tab's own last write (see `runDrawerWrite`): an earlier save never shows here. */
@@ -78,7 +79,7 @@ export function replaceKeyDraft(connection: ProvidersConnection, request: Replac
     baseUrl: null, verified: { probeId: request.probeId },
     tiers, tierSnapshot: { everyday: setup?.tiers.sonnet ?? null, complex: setup?.tiers.opus ?? null, fast: setup?.tiers.haiku ?? null },
     editedTiers: [], saveTo: 'global',
-    activation: 'connect-only',
+    activation: connection.id === 'anthropic' && request.activeMainAgent ? 'use-main-agent' : 'connect-only',
   };
 }
 
@@ -317,8 +318,11 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
             }
             @if (connection().hasKey || connection().keyUnreadable) {
               <!-- An unreadable key can be deleted too: the delete does not need to read it. -->
-              <button type="button" class="btn btn-outline btn-sm border-error text-base-content" [disabled]="busy()"
+              <button type="button" class="btn btn-outline btn-sm border-error text-base-content" [disabled]="busy() || (connection().id === 'anthropic' && isActiveDriver())"
                 (click)="confirming.set('delete')" data-testid="credentials-delete">Delete key</button>
+              @if (connection().id === 'anthropic' && isActiveDriver()) {
+                <p class="text-xs text-base-content-muted" data-testid="credentials-delete-blocked">Claude API is the main-agent route. Select another main-agent route before you delete this key.</p>
+              }
             }
           </div>
           @if (optionalKey()) {
@@ -346,7 +350,7 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
               </button>
             </div>
             @if (connection().id === 'anthropic') {
-              <p class="text-xs text-base-content-muted">Saving updates the Claude API connection key. The main-agent route stays the same.</p>
+              <p class="text-xs text-base-content-muted">{{ isActiveDriver() ? "Saving updates the main agent's Claude API key and restarts running chat sessions." : 'Saving updates the Claude API connection key. The main-agent route stays the same.' }}</p>
             }
             @if (setupMissing(); as missing) {
               <p class="text-xs text-base-content-muted" data-testid="credentials-setup-missing">{{ missing }}</p>
@@ -590,10 +594,11 @@ export class CredentialsTabComponent {
     const probeId = this.probeId;
     if (!this.canSave() || !probeId) return;
     this.pendingWrite.set('replace');
-    this.replaceKeyRequested.emit({ key: this.keyDraft().trim(), probeId });
+    this.replaceKeyRequested.emit({ key: this.keyDraft().trim(), probeId, activeMainAgent: this.connection().id === 'anthropic' && this.isActiveDriver() });
   }
 
   protected confirmDelete(): void {
+    if (this.connection().id === 'anthropic' && this.isActiveDriver()) return;
     this.confirming.set(null);
     this.pendingWrite.set('delete');
     this.deleteKeyRequested.emit();
