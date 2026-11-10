@@ -1,5 +1,5 @@
 import { afterRenderEffect, ChangeDetectionStrategy, Component, computed, DestroyRef, ElementRef, inject, input, output, viewChild } from '@angular/core';
-import { PtahButtonDirective } from '../surfaces/button.directive';
+import { PtahButtonDirective } from '../button/button.directive';
 
 /** Consumers using ngListbox must set selectionMode="explicit" so arrow keys do not hide the narrow list. */
 @Component({

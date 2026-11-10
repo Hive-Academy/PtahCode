@@ -4,6 +4,5 @@ export * from './surface-tile.component';
 export * from './stat-card.component';
 export * from './field-control.directive';
 export * from './field.component';
-export * from './button.directive';
 export * from './inbox-layout.component';
 export * from './inbox-row.directive';

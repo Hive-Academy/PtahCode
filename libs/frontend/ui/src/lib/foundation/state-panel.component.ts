@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
-import { PtahButtonDirective } from '../surfaces/button.directive';
+import { PtahButtonDirective } from '../button/button.directive';
 
 export type PtahPanelState = 'loading' | 'empty' | 'error' | 'partial' | 'no-permission';
 
