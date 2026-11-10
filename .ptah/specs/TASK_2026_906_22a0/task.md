@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_906_22a0
-status: backlog
+status: in_review
 type: FEATURE
 title: Detach the Git dock into its own Electron window (P2)
 depends_on: []
