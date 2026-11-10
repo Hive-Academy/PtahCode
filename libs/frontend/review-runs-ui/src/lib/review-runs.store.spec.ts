@@ -191,6 +191,36 @@ describe('ReviewRunsStore', () => {
     expect(store.runs().map((item) => item.attemptId)).toEqual(['rvw-428-01', 'rvw-429-01']);
   });
 
+  it('drops a page that starts while a refresh is in flight and settles after it', async () => {
+    const second = { ...run, attemptId: 'rvw-429-01', prNumber: 429 };
+    const poll = { status: null, error: null, lastSuccessAt: null, lastErrorAt: null };
+    const first = { isSuccess: () => true, data: { runs: [run], nextCursor: 'cursor-1', poll } };
+    const releaseFirst: Array<() => void> = [];
+    let releasePage: () => void = () => undefined;
+    let holdFirst = false;
+    call.mockImplementation((method: string, params: { cursor?: string }) => {
+      if (method === 'review:listRepositories') return Promise.resolve({ isSuccess: () => true, data: [] });
+      if (params?.cursor)
+        return new Promise((resolve) => {
+          releasePage = () => resolve({ isSuccess: () => true, data: { runs: [second], nextCursor: 'old-cursor', poll } });
+        });
+      if (holdFirst) return new Promise((resolve) => { releaseFirst.push(() => resolve(first)); });
+      return Promise.resolve(first);
+    });
+    await store.load();
+    holdFirst = true;
+    const refresh = store.load();
+    const stale = store.loadMore();
+    expect(releaseFirst).toHaveLength(1);
+    releaseFirst[0]();
+    await refresh;
+    releasePage();
+    await stale;
+    expect(store.runs()).toHaveLength(1);
+    expect(store.nextCursor()).toBe('cursor-1');
+    expect(store.loadMoreError()).toBe(false);
+  });
+
   it('keeps the loaded list when the next page fails, and retries on the next press', async () => {
     const second = { ...run, attemptId: 'rvw-429-01', prNumber: 429 };
     call.mockImplementation((method: string) =>

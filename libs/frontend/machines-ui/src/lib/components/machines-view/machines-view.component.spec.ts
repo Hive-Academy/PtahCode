@@ -224,6 +224,28 @@ describe('MachinesViewComponent', () => {
     expect(store.respondPermission).not.toHaveBeenCalled();
   });
 
+  it('overview approval cards name a machine without a display name by its alias', async () => {
+    const request = {
+      id: 'p1',
+      toolName: 'Bash',
+      toolInput: { command: 'npm run migrate' },
+      toolUseId: 'tu1',
+      timestamp: Date.now(),
+      description: 'Run a command',
+    };
+    const { fixture } = await setup(
+      [{ ...HORUS, displayName: '', state: 'offline' }],
+      {
+        pendingApprovalRequestsByMachine: signal(
+          new Map([['m1', [{ sessionId: 's1', request, mode: 'answerable' }]]]),
+        ),
+      },
+    );
+    expect(q(fixture, 'machine-approvals-waiting')?.textContent).toContain(
+      'horus is not connected.',
+    );
+  });
+
   it('overview approval cards are disabled while the machine is not connected', async () => {
     const request = {
       id: 'p1',

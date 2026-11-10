@@ -122,6 +122,7 @@ export class ReviewRunsStore {
       ]);
       // A newer first-page load owns the list; drop this stale result.
       if (generation !== this.listGeneration) return;
+      this.listEpoch++;
       this.repositories.set(repositories);
       this.runs.set(runs.runs);
       this.nextCursor.set(runs.nextCursor);
@@ -138,12 +139,15 @@ export class ReviewRunsStore {
   }
 
   private listGeneration = 0;
+  /** Counts the first pages that replaced the list. `listGeneration` counts the loads that started. */
+  private listEpoch = 0;
 
   /** Appends the next run page through the `review:listRuns` cursor. */
   async loadMore(): Promise<void> {
     const cursor = this.nextCursor();
     if (cursor === null || this.loadingMore()) return;
     const generation = this.listGeneration;
+    const epoch = this.listEpoch;
     this.loadingMore.set(true);
     this.loadMoreError.set(false);
     try {
@@ -153,8 +157,9 @@ export class ReviewRunsStore {
         ReviewRpcSchemas['review:listRuns'].result,
       );
       // A refresh replaced the list while this page loaded: the page and its
-      // cursor belong to the old list.
-      if (generation !== this.listGeneration) return;
+      // cursor belong to the old list. The epoch finds a refresh that started
+      // before this page and replaced the list during it.
+      if (generation !== this.listGeneration || epoch !== this.listEpoch) return;
       this.runs.update((current) => {
         const known = new Set(current.map((run) => run.attemptId));
         const fresh = result.runs.filter((run) => {
@@ -167,7 +172,7 @@ export class ReviewRunsStore {
       this.nextCursor.set(result.nextCursor);
     } catch {
       // The current list stays usable; the next press of the button retries.
-      if (generation === this.listGeneration) this.loadMoreError.set(true);
+      if (generation === this.listGeneration && epoch === this.listEpoch) this.loadMoreError.set(true);
     } finally {
       this.loadingMore.set(false);
     }

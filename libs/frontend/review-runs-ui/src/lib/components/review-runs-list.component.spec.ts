@@ -33,6 +33,8 @@ describe('ReviewRunsListComponent', () => {
     expect(rows[1].querySelector('.text-state-need')).not.toBeNull();
     expect(rows[2].querySelector('.text-state-done')).not.toBeNull();
     expect(rows[3].querySelector('.text-state-err')).not.toBeNull();
+    // The accessible name replaces the row text: it carries the visible status and trigger, not the raw status.
+    expect(rows[2].getAttribute('aria-label')).toBe('PR 428, Completed, Poll, Hive-Academy/PtahCode, Waiting');
     expect(rows[0].getAttribute('aria-selected')).toBe('true');
     expect(rows[1].getAttribute('aria-selected')).toBe('false');
     rows[0].focus();

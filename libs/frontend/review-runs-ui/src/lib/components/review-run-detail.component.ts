@@ -95,9 +95,11 @@ export class ReviewRunDetailComponent implements AfterViewInit, OnDestroy {
   ngAfterViewInit(): void { const doc = this.element.nativeElement.ownerDocument; this.returnFocus = doc.activeElement instanceof HTMLElement ? doc.activeElement : null;
     // Below 768 px the inbox shows one pane, so the run row is hidden now: move focus into the detail.
     const view = doc.defaultView;
-    if (typeof view?.matchMedia === 'function' && view.matchMedia('(max-width: 767.98px)').matches) this.element.nativeElement.querySelector<HTMLElement>('#review-detail-title')?.focus();
+    // The inbox layout shows the detail pane after this hook, so the focus call waits for it.
+    if (typeof view?.matchMedia === 'function' && view.matchMedia('(max-width: 767.98px)').matches) queueMicrotask(() => this.element.nativeElement.querySelector<HTMLElement>('#review-detail-title')?.focus());
   }
-  ngOnDestroy(): void { this.returnFocus?.focus(); }
+  // The inbox layout shows the list pane again after this hook: a hidden row cannot take focus.
+  ngOnDestroy(): void { const target = this.returnFocus; queueMicrotask(() => target?.focus()); }
   ink(status: ReviewRun['status']): string { return RUN_STATUS_INK[status]; }
   label(status: ReviewRun['status']): string { return reviewStatusLabel(status); }
   seconds(ms: number): string { return Math.round(ms / 1000) + 's'; }

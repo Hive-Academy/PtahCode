@@ -37,6 +37,24 @@ describe('ReviewRunDetailComponent', () => {
     fixture.nativeElement.querySelector('[role="region"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(close).toHaveBeenCalledTimes(1);
   });
+  it('returns focus to the run row after the layout update that follows its removal', async () => {
+    TestBed.configureTestingModule({ imports: [ReviewRunDetailComponent], providers: [{ provide: ReviewRunsStore, useValue: { rerunState: signal('idle'), hasToken: signal(false), settings: signal(null), rerun: jest.fn() } }] });
+    const row = document.createElement('button');
+    document.body.append(row);
+    row.focus();
+    const fixture = TestBed.createComponent(ReviewRunDetailComponent);
+    fixture.componentRef.setInput('run', run);
+    fixture.detectChanges();
+    // Below 768 px the list pane is hidden while the detail is open.
+    row.hidden = true;
+    row.blur();
+    fixture.destroy();
+    expect(document.activeElement).not.toBe(row);
+    row.hidden = false;
+    await Promise.resolve();
+    expect(document.activeElement).toBe(row);
+    row.remove();
+  });
   it('shows each lens outcome and sanitized reason', () => {
     TestBed.configureTestingModule({ imports: [ReviewRunDetailComponent], providers: [{ provide: ReviewRunsStore, useValue: {
       rerunState: signal('idle'), hasToken: signal(false), settings: signal(null), rerun: jest.fn(),

@@ -136,7 +136,7 @@ export interface MachinesActionError {
 
     <ptah-machine-approvals
       [machineId]="machine().machineId"
-      [machineName]="machine().displayName | displayText"
+      [machineName]="machineName()"
     />
 
     @if (confirmingRemove()) {

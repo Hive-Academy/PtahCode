@@ -108,3 +108,8 @@ See `decisions.md` and the last section of this file (updated after each batch).
 - Both previews were built again from the Electron build of this worktree and published with the same titles (Reviews artifact `7c692598-9b9b-424e-a992-7c941769bd8b`, Machines artifact `6228148f-716d-4d5a-a546-5eb214770244`). A new worktree needs `npx nx build-dev ptah-electron` before `copy-renderer-dev` (both under the verify lock).
 - Next exact step: Job 3 only. Wait for the parent. After PR #1042 merges and the parent says so: `git fetch origin`, `git merge origin/main` (no rebase), `npm run verify -- -p machines-ui,review-runs-ui` (add the projects that the merge touches), degradation audit, push with `git push origin HEAD:feat/reviews-machines-inbox-layout`.
 - CI: read `gh api repos/Hive-Academy/PtahCode/commits/<sha>/check-runs` (REST), at intervals of 3 minutes or more.
+
+## State at 09:25 UTC (2026-11-10)
+
+- CI on `a6171ec22`: all jobs passed. CodeRabbit gave 5 minor findings on that head. All 5 are fixed (decision 29); `npm run verify -- -p machines-ui,review-runs-ui` exit 0.
+- Next exact step: watch CI and CodeRabbit for the new head (REST only), then Job 3 as written above. Do not post `@coderabbitai review`.

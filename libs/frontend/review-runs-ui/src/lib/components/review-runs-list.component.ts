@@ -44,7 +44,7 @@ export function reviewStatusLabel(status: ReviewRun['status']): string {
           type="button"
           ptahInboxRow
           [selected]="run.attemptId === selectedAttemptId()"
-          [attr.aria-label]="'PR ' + run.prNumber + ', ' + run.status + ', ' + run.repo.owner + '/' + run.repo.name + ', ' + progressLabel(run)"
+          [attr.aria-label]="rowLabel(run)"
           (click)="open.emit(run.attemptId)"
           (keydown.arrowdown)="moveFocus($event, 1)"
           (keydown.arrowup)="moveFocus($event, -1)"
@@ -88,6 +88,12 @@ export class ReviewRunsListComponent {
 
   protected titleCase(value: string): string {
     return value.charAt(0).toUpperCase() + value.slice(1);
+  }
+
+  /** The accessible name replaces the row text, so it carries the visible title, status and trigger. */
+  protected rowLabel(run: ReviewRun): string {
+    const title = run.prTitle ? ` ${run.prTitle}` : '';
+    return `PR ${run.prNumber}${title}, ${this.statusLabel(run.status)}, ${this.titleCase(run.trigger)}, ${run.repo.owner}/${run.repo.name}, ${this.progressLabel(run)}`;
   }
 
   /** Progress of the run; the row gives it to assistive technology and as a tooltip. */
