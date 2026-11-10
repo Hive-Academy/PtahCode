@@ -99,6 +99,12 @@ describe('RemoteSessionListComponent', () => {
     const { fixture, store } = await setup();
     expect(store.loadWorkspaces).toHaveBeenCalledWith('m1');
     expect(store.loadSessions).toHaveBeenCalledWith('m1', 'w1');
+    // The approved section title has no machine name.
+    expect(
+      (fixture.nativeElement as HTMLElement)
+        .querySelector('#ptah-remote-sessions-title')
+        ?.textContent?.trim(),
+    ).toBe('Sessions');
     // The approved row is flat: no workspace heading above the rows.
     expect(q(fixture, 'remote-session-workspace')).toBeNull();
     const [first] = all(fixture, 'remote-session-row');

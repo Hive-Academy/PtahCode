@@ -65,7 +65,7 @@ interface RemoteSessionRow {
           id="ptah-remote-sessions-title"
           class="text-sm font-semibold text-base-content"
         >
-          Sessions on {{ machineName() }}
+          Sessions
         </h3>
         <div class="flex gap-2">
           <button
