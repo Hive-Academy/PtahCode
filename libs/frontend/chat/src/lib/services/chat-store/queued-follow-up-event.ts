@@ -1,18 +1,19 @@
 import type {
   ChatQueuedMessageStateEvent,
   QueuedFollowUpSnapshot,
-  QueuedFollowUpState,
 } from '@ptah-extension/shared';
-
-const STATES: ReadonlySet<QueuedFollowUpState> = new Set([
-  'queued',
-  'delivered',
-  'withdrawn',
-  'failed',
-  'steered',
-]);
+import { rpcUserErrorCodeSchema } from '@ptah-extension/shared';
+import { z } from 'zod';
 
 const MAX_REASON_LENGTH = 300;
+const queuedStateSchema = z.object({
+  sessionId: z.string().min(1),
+  tabId: z.string().min(1),
+  clientMessageId: z.string().min(1),
+  state: z.enum(['queued', 'delivered', 'withdrawn', 'failed', 'steered']),
+  reason: z.string().optional(),
+  errorCode: rpcUserErrorCodeSchema.optional(),
+});
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
@@ -25,22 +26,16 @@ function isNonEmptyString(value: unknown): value is string {
 export function parseQueuedMessageStateEvent(
   payload: unknown,
 ): ChatQueuedMessageStateEvent | null {
-  if (!payload || typeof payload !== 'object') return null;
-  const raw = payload as Record<string, unknown>;
-  if (
-    !isNonEmptyString(raw['sessionId']) ||
-    !isNonEmptyString(raw['tabId']) ||
-    !isNonEmptyString(raw['clientMessageId']) ||
-    !STATES.has(raw['state'] as QueuedFollowUpState)
-  ) {
-    return null;
-  }
-  const reason = raw['reason'];
+  const parsed = queuedStateSchema.safeParse(payload);
+  if (!parsed.success) return null;
+  const raw = parsed.data;
+  const reason = raw.reason;
   return {
-    sessionId: raw['sessionId'] as ChatQueuedMessageStateEvent['sessionId'],
-    tabId: raw['tabId'],
-    clientMessageId: raw['clientMessageId'],
-    state: raw['state'] as QueuedFollowUpState,
+    sessionId: raw.sessionId as ChatQueuedMessageStateEvent['sessionId'],
+    tabId: raw.tabId,
+    clientMessageId: raw.clientMessageId,
+    state: raw.state,
+    ...(raw.errorCode ? { errorCode: raw.errorCode } : {}),
     ...(typeof reason === 'string' && reason.trim()
       ? { reason: reason.trim().slice(0, MAX_REASON_LENGTH) }
       : {}),

@@ -16,8 +16,8 @@
  * - `authEnvVar: 'ANTHROPIC_API_KEY'` (sent as `x-api-key`) is used by the
  *   direct key paths: draft verification, connection check and Ptah CLI
  *   agents.
- * - No `modelsEndpoint`: the dynamic fetch sends `Authorization: Bearer`, and a
- *   live list would replace the static `capabilities` below.
+ * - The RPC model fetcher reads `/coding/v1/models` with the credential from
+ *   Kimi auth. Known live ids retain static metadata; failures use this list.
  * - `keyPrefix` is empty: Kimi Code keys have no documented stable prefix.
  *
  * Model availability depends on the subscription plan; each model description

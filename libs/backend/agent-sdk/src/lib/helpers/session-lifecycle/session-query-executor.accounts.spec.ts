@@ -498,11 +498,18 @@ describe('named SDK bootstrap and final admission', () => {
     expect(f.admission.retainUnresolvedReservation).toHaveBeenCalledTimes(1);
   });
 
+  it('accepts a personal Claude Ultra subscription word', async () => {
+    const f = fixture({ identityPatch: { subscriptionType: 'Claude Ultra' } });
+    await f.run();
+    await f.flow.dispose();
+    expect(f.admission.releaseReservation).toHaveBeenCalledTimes(1);
+  });
+
   it.each<[string, Partial<AccountInfo>]>([
     ['console token', { tokenSource: 'none' }],
     ['api key helper', { apiKeySource: 'apiKeyHelper' }],
     ['team subscription', { subscriptionType: 'team' }],
-    ['unknown subscription word', { subscriptionType: 'ultra' }],
+    ['team-qualified ultra subscription', { subscriptionType: 'Ultra Team' }],
     ['no subscription', { subscriptionType: undefined }],
     ['bedrock provider', { apiProvider: 'bedrock' }],
   ])('tripwire refuses %s before the gate opens', async (_name, identityPatch) => {

@@ -139,6 +139,26 @@ afterEach(() => {
 // Discovered context windows (no pricing required)
 // ---------------------------------------------------------------------------
 
+describe('ProviderModelsService.getCachedModelIds', () => {
+  it('distinguishes static fallback from a persisted live catalog', async () => {
+    const { service } = makeService({});
+    expect((await service.fetchModels('z-ai', null)).isStatic).toBe(true);
+    expect(service.getCachedModelIds('z-ai')).toBeNull();
+
+    const reloaded = makeService({
+      configValues: {
+        'provider.z-ai.modelCatalog': {
+          models: [{ id: 'provider-live-id', name: 'Provider live id' }],
+          timestamp: Date.now(),
+        },
+      },
+    });
+    expect(reloaded.service.getCachedModelIds('z-ai')).toEqual([
+      'provider-live-id',
+    ]);
+  });
+});
+
 describe('ProviderModelsService — discovered context windows', () => {
   it.each([undefined, 'static', 'Provider', null])(
     'does not certify a dynamic fetcher capacity without declared provider evidence (%s)',
@@ -652,6 +672,20 @@ describe('ProviderModelsService.clearModelTier', () => {
     expect(process.env[ENV_HAIKU]).toBe(fallback);
   });
 
+  it('mainAgent scope falls back to the live tier when the known catalogue lacks the registry default', async () => {
+    const { service, authEnv } = makeService({
+      authEnv: { [ENV_HAIKU]: 'old-override' } as Partial<AuthEnv>,
+    });
+    jest.spyOn(service, 'getCachedModelIds').mockReturnValue(['live-haiku']);
+    jest.spyOn(service, 'getLiveDerivedTiers').mockReturnValue({
+      haiku: 'live-haiku',
+    });
+    process.env[ENV_HAIKU] = 'old-override';
+    await service.clearModelTier(PROVIDER, 'haiku', 'mainAgent');
+    expect(authEnv[ENV_HAIKU as keyof AuthEnv]).toBe('live-haiku');
+    expect(process.env[ENV_HAIKU]).toBe('live-haiku');
+  });
+
   it('mainAgent scope on an active provider with no default removes the tier from both env stores', async () => {
     const provider = 'openrouter';
     expect(getAnthropicProvider(provider)?.defaultTiers?.haiku).toBeUndefined();
@@ -889,6 +923,59 @@ describe('ProviderModelsService.resolveActiveProviderId', () => {
 // clearCache
 // ---------------------------------------------------------------------------
 
+describe('OpenCode settings catalog', () => {
+  it('keeps served static rows and adds only routed live IDs', async () => {
+    const { openCodeLiveRoutes } =
+      await import('./providers/opencode/opencode-live-routes');
+    const live = new Map<
+      string,
+      import('./providers/opencode/opencode-live-routes').OpenCodeLiveModel
+    >([
+      [
+        'claude-fable-5-1',
+        {
+          id: 'claude-fable-5-1',
+          name: 'Static',
+          contextLength: 0,
+          protocol: 'messages' as const,
+        },
+      ],
+      [
+        'new-id',
+        {
+          id: 'new-id',
+          name: 'New',
+          contextLength: 128000,
+          supportsToolUse: true,
+          protocol: 'responses' as const,
+        },
+      ],
+      ['google-id', { id: 'google-id', name: 'Google', contextLength: 128000 }],
+    ]);
+    const list = jest
+      .spyOn(openCodeLiveRoutes, 'list')
+      .mockResolvedValueOnce(live);
+    try {
+      const result = await makeService({}).service.fetchModels(
+        'opencode-zen',
+        null,
+      );
+      expect(result.isStatic).toBe(false);
+      expect(result.models.map((m) => m.id)).toEqual([
+        'claude-fable-5-1',
+        'new-id',
+      ]);
+      expect(result.models[1]).toMatchObject({
+        name: 'New',
+        contextLength: 128000,
+        supportsToolUse: true,
+      });
+    } finally {
+      list.mockRestore();
+    }
+  });
+});
+
 describe('ProviderModelsService.clearCache', () => {
   it('clears cache for a specific provider when an id is passed', () => {
     const { service } = makeService({});
@@ -926,6 +1013,29 @@ describe('ProviderModelsService.registerDynamicFetcher', () => {
     expect(result.isStatic).toBe(false);
     expect(result.models).toHaveLength(1);
     expect(result.models[0].id).toBe('dyn-model');
+  });
+
+  it('does not cache or persist an empty dynamic result, and reports the static list', async () => {
+    // The Kimi Code fetcher returns [] on every failure path (transient 401,
+    // timeout, unknown payload shape) precisely because this consumer caches
+    // and persists any NON-EMPTY result as a live catalog for the full cache
+    // TTL. An empty result must fall through to the static models, reported
+    // as static, and leave the cache cold so the next call retries live.
+    const { service, config } = makeService({});
+    const fetcher = jest.fn().mockResolvedValue([]);
+    service.registerDynamicFetcher('kimi-code', fetcher);
+
+    const result = await service.fetchModels('kimi-code', null);
+    await Promise.resolve();
+
+    expect(result.isStatic).toBe(true);
+    expect(result.models.map((m) => m.id)).toContain('kimi-for-coding');
+    expect(config.set).not.toHaveBeenCalled();
+
+    // No cache entry was written for the failure: the second call goes back
+    // to the live fetcher instead of serving the failure for the TTL.
+    await service.fetchModels('kimi-code', null);
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -1079,6 +1189,72 @@ describe('ProviderModelsService persisted model catalog', () => {
  *     server, no key — is silent, non-throwing and leaves the previous state.
  */
 describe('ProviderModelsService live-catalog tier derivation', () => {
+  describe('resolveEffectiveTiers', () => {
+    const staticOpus = getAnthropicProvider('z-ai')?.defaultTiers?.opus;
+
+    it('keeps a static default when no catalogue is known', () => {
+      const { service } = makeService({});
+      expect(service.resolveEffectiveTiers('z-ai', {}).opus).toBe(staticOpus);
+    });
+
+    it('keeps a static default present in the known catalogue', () => {
+      const { service } = makeService({});
+      jest.spyOn(service, 'getCachedModelIds').mockReturnValue([staticOpus!]);
+      expect(service.resolveEffectiveTiers('z-ai', {}).opus).toBe(staticOpus);
+    });
+
+    it('ignores one trailing context suffix on either side', () => {
+      const { service } = makeService({});
+      jest
+        .spyOn(service, 'getCachedModelIds')
+        .mockReturnValue([`${staticOpus}[1m]`]);
+      expect(service.resolveEffectiveTiers('z-ai', {}).opus).toBe(staticOpus);
+    });
+
+    it('uses the live tier when the known catalogue lacks the static default', () => {
+      const { service } = makeService({});
+      jest.spyOn(service, 'getCachedModelIds').mockReturnValue(['live-opus']);
+      jest.spyOn(service, 'getLiveDerivedTiers').mockReturnValue({
+        opus: 'live-opus',
+      });
+      expect(service.resolveEffectiveTiers('z-ai', {}).opus).toBe('live-opus');
+    });
+
+    it('keeps a static default when no live tier can replace it', () => {
+      const { service } = makeService({});
+      jest.spyOn(service, 'getCachedModelIds').mockReturnValue(['other']);
+      jest.spyOn(service, 'getLiveDerivedTiers').mockReturnValue({});
+      expect(service.resolveEffectiveTiers('z-ai', {}).opus).toBe(staticOpus);
+    });
+
+    it('keeps static defaults for providers with filtered catalogues', () => {
+      const { service } = makeService({});
+      const read = jest.spyOn(service, 'getCachedModelIds');
+      const expected = getAnthropicProvider('opencode-go')?.defaultTiers?.opus;
+      expect(service.resolveEffectiveTiers('opencode-go', {}).opus).toBe(
+        expected,
+      );
+      expect(read).not.toHaveBeenCalled();
+    });
+
+    it('lets a non-empty user tier win', () => {
+      const { service } = makeService({});
+      expect(
+        service.resolveEffectiveTiers('z-ai', { opus: 'user-opus' }).opus,
+      ).toBe('user-opus');
+    });
+
+    it('logs a replacement once across repeated calls', () => {
+      const { service, logger } = makeService({});
+      jest.spyOn(service, 'getCachedModelIds').mockReturnValue(['live-sonnet']);
+      jest.spyOn(service, 'getLiveDerivedTiers').mockReturnValue({
+        sonnet: 'live-sonnet',
+      });
+      service.resolveEffectiveTiers('z-ai', {});
+      service.resolveEffectiveTiers('z-ai', {});
+      expect(logger.info).toHaveBeenCalledTimes(1);
+    });
+  });
   /** Catalogue shape a router returns: it names the tiers itself. */
   const ROUTER_MODELS = [
     {
@@ -1202,9 +1378,7 @@ describe('ProviderModelsService live-catalog tier derivation', () => {
     await settle();
   });
 
-  it('lets a registry defaultTiers map outrank the live catalogue', async () => {
-    // A verified tier map is a statement by whoever added the entry; the
-    // derivation is a heuristic over a list. The statement wins.
+  it('replaces a static default absent from the known live catalogue', async () => {
     const expected = getAnthropicProvider(PROVIDER)?.defaultTiers?.opus;
     expect(expected).toBeTruthy();
 
@@ -1219,7 +1393,9 @@ describe('ProviderModelsService live-catalog tier derivation', () => {
 
     service.applyPersistedTiers(PROVIDER);
 
-    expect(authEnv.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe(expected);
+    expect(authEnv.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe(
+      'anthropic/claude-opus-4.5',
+    );
     await settle();
   });
 
@@ -1394,8 +1570,9 @@ describe('ProviderModelsService live-catalog tier derivation', () => {
  *   - it never writes for a provider that is not the active one, because
  *     `applyPersistedTiers` writes process-global env and the picker is the one
  *     place a user routinely inspects a provider they are not using;
- *   - it only ever fills a hole, and a user's explicit pick outranks the
- *     derivation even inside that hole;
+ *   - it writes nothing while the env vars already hold what the derivation
+ *     selects, and a user's explicit pick outranks the derivation even when
+ *     it does write;
  *   - it does not turn a picker open into a second network round trip.
  */
 describe('ProviderModelsService.reapplyTiersForWarmedCatalog', () => {
@@ -1452,6 +1629,9 @@ describe('ProviderModelsService.reapplyTiersForWarmedCatalog', () => {
     for (const tier of ['OPUS', 'SONNET', 'HAIKU']) {
       delete process.env[`ANTHROPIC_DEFAULT_${tier}_MODEL_NAME`];
       delete process.env[`ANTHROPIC_DEFAULT_${tier}_MODEL_DESCRIPTION`];
+      delete process.env[
+        `ANTHROPIC_DEFAULT_${tier}_MODEL_SUPPORTED_CAPABILITIES`
+      ];
     }
   });
 
@@ -1644,6 +1824,59 @@ describe('ProviderModelsService.reapplyTiersForWarmedCatalog', () => {
       service.reapplyTiersForWarmedCatalog('openrouter'),
     ).not.toThrow();
     expect(authEnv.ANTHROPIC_DEFAULT_OPUS_MODEL).toBeUndefined();
+  });
+
+  it('replaces a static default the warmed catalog retired', async () => {
+    // The hole the old guard left: on a cold start `resolveEffectiveTiers`
+    // keeps the static default (no catalogue is known), so activation wrote
+    // it into all three tier env vars — and the old guard then returned early
+    // for exactly that state, so the default survived the pick that proved it
+    // absent. Kimi Code's opus default (`k3.1-pro`) is retired from the
+    // warmed catalogue; the derivation names a replacement from that same
+    // catalogue, and the re-apply must write it.
+    const { service, authEnv } = makeService({
+      configValues: {
+        authMethod: 'thirdParty',
+        anthropicProviderId: 'kimi-code',
+      },
+    });
+    service.switchActiveProvider('kimi-code');
+    expect(authEnv.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe('k3.1-pro');
+    expect(authEnv.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('k3');
+    expect(authEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('kimi-for-coding');
+
+    service.registerDynamicFetcher('kimi-code', async () => [
+      {
+        id: 'k3',
+        name: 'K3',
+        description: '',
+        contextLength: 262144,
+        supportsToolUse: true,
+      },
+      {
+        id: 'kimi-for-coding',
+        name: 'Kimi for Coding',
+        description: '',
+        contextLength: 1048576,
+        supportsToolUse: true,
+      },
+      {
+        id: 'k-opus-next',
+        name: 'K Opus Next',
+        description: '',
+        contextLength: 524288,
+        supportsToolUse: true,
+      },
+    ]);
+    await service.fetchModels('kimi-code', null);
+    service.reapplyTiersForWarmedCatalog('kimi-code');
+
+    expect(authEnv.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe('k-opus-next');
+    // Defaults the catalog still contains are left exactly as they were.
+    expect(authEnv.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('k3');
+    expect(authEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('kimi-for-coding');
+    expect(process.env[ENV_OPUS]).toBe('k-opus-next');
+    await settle();
   });
 });
 

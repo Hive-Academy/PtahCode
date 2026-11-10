@@ -57,7 +57,16 @@ type Mocked<T> = jest.Mocked<T>;
 
 /** The coordinator surface `ChatRpcHandlers` delegates `chat:queued-*` to. */
 type FollowUpQueueStub = Mocked<
-  Pick<ChatFollowUpQueueService, 'list' | 'withdraw' | 'steer'>
+  Pick<
+    ChatFollowUpQueueService,
+    | 'list'
+    | 'withdraw'
+    | 'steer'
+    | 'abandonPending'
+    | 'isCommitted'
+    | 'receiptErrorCode'
+    | 'receipt'
+  >
 >;
 
 interface Suite {
@@ -872,6 +881,10 @@ describe('ChatRpcHandlers (Wave C7e thin facade)', () => {
         list: jest.fn().mockReturnValue([{ clientMessageId: ITEM_UUID, content: 'next' }]),
         withdraw: jest.fn().mockResolvedValue(true),
         steer: jest.fn().mockResolvedValue({ ok: true }),
+        abandonPending: jest.fn().mockReturnValue(undefined),
+        isCommitted: jest.fn().mockReturnValue(false),
+        receiptErrorCode: jest.fn().mockReturnValue(undefined),
+        receipt: jest.fn().mockReturnValue(undefined),
       } as FollowUpQueueStub;
     }
 

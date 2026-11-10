@@ -108,7 +108,12 @@ export interface SdkModelInfo {
   name: string; // Display name (e.g., 'Claude Sonnet 4')
   description: string; // Model description
   isSelected: boolean; // Whether this model is currently selected
-  isRecommended?: boolean; // Whether this model is recommended
+  /**
+   * Picker group. `primary` rows show directly. `other` rows are pinned
+   * versions that the picker shows in a closed "Other versions" section.
+   * Absent means `primary`.
+   */
+  group?: 'primary' | 'other';
   providerModelId: string | null; // Actual provider model (e.g., 'openai/gpt-5.1-codex-max' when using OpenRouter tier overrides)
   tier?: 'opus' | 'sonnet' | 'haiku'; // Detected model tier for provider override mapping
 }

@@ -24,7 +24,9 @@ export type OpenCodeModelRoutes = Readonly<
 >;
 
 /**
- * Reviewed, immutable routing table for OpenCode Zen and OpenCode Go.
+ * Reviewed, immutable first-priority routing table for OpenCode Zen and Go.
+ * New IDs may be routed from the public gateway catalog at runtime; this
+ * table always wins when both sources contain an ID.
  *
  * Excludes the Google generateContent models and the Jev systemone models.
  *
@@ -36,7 +38,7 @@ export type OpenCodeModelRoutes = Readonly<
  * gateway itself: unauthenticated requests are refused with "not supported
  * for format" on every protocol but chat/completions. Zen `claude-haiku-5-5`
  * follows every other Zen Claude model (messages). Live IDs whose protocol no
- * source settles (several Go models) stay out rather than guess.
+ * source settled at review time (several Go models) stayed out of this table.
  */
 export const OPENCODE_MODEL_ROUTES: OpenCodeModelRoutes = Object.freeze({
   'opencode-zen': Object.freeze({

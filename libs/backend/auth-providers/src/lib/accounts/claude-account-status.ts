@@ -1,7 +1,7 @@
 import { claudeSubscriptionFamily, claudeIdentityReference } from '@ptah-extension/agent-sdk';
 
 /**
- * Account class (decisions.md D13). `P`: a personal Pro/Max claude.ai login
+ * Account class (decisions.md D13). `P`: a personal Pro/Max/Ultra claude.ai login
  * with no policy or foreign key source. `O`: every other signed-in result.
  * Class O is never certified for a named run.
  */
@@ -56,7 +56,7 @@ function isPersonalClass(status: Record<string, unknown>): boolean {
   if (status['authMethod'] !== 'claude.ai' || status['apiProvider'] !== 'firstParty') return false;
   const subscription = status['subscriptionType'];
   const family = claudeSubscriptionFamily(typeof subscription === 'string' ? subscription : undefined);
-  if (family !== 'pro' && family !== 'max') return false;
+  if (family !== 'pro' && family !== 'max' && family !== 'ultra') return false;
   if (status['forcedLoginMethod'] != null && status['forcedLoginMethod'] !== 'claudeai') return false;
   if (status['allowedProviders'] != null) return false;
   if (has(status, 'apiKeySource') && status['apiKeySource'] !== 'none') return false;

@@ -38,7 +38,7 @@ import {
 import type { AuthVerifyDraftConnectionParams } from '@ptah-extension/shared';
 import { getProviderBaseUrl } from '@ptah-extension/shared';
 import type { CuratorProxyManager } from './curator-proxy-manager';
-import type { ProviderModelsService } from '../provider-models.service';
+import { ProviderModelsService } from '../provider-models.service';
 import type { ICopilotAuthService } from '../providers/copilot/copilot-provider.types';
 import type { IOpenRouterAuthService } from '../providers/openrouter/openrouter-provider.types';
 import type { IKimiCodeAuthService } from '../providers/kimi-code/kimi-code-provider.types';
@@ -472,6 +472,10 @@ function createServiceHarness(
   const getLiveDerivedTiers = jest.fn(() => ({}) as Record<string, never>);
   const providerModels = {
     getLiveDerivedTiers,
+    resolveEffectiveTiers:
+      ProviderModelsService.prototype.resolveEffectiveTiers,
+    // No live catalog is known, so each static tier default stays.
+    getCachedModelIds: jest.fn(() => null),
     // Third-party draft envs layer the provider's main-agent tiers (read-only).
     getModelTiers: jest.fn(() => ({ sonnet: null, opus: null, haiku: null })),
   } as unknown as ProviderModelsService;

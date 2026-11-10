@@ -183,7 +183,7 @@ export class ChatRpcHandlers {
     @inject(CHAT_TOKENS.FOLLOW_UP_QUEUE, { isOptional: true })
     private readonly followUpQueue: Pick<
       ChatFollowUpQueueService,
-      'list' | 'withdraw' | 'steer'
+      'list' | 'receipt' | 'receiptErrorCode' | 'isCommitted' | 'abandonPending' | 'withdraw' | 'steer'
     > | null = null,
   ) {}
 
@@ -495,8 +495,14 @@ export class ChatRpcHandlers {
       async (params) => {
         ChatQueuedListParamsSchema.parse(params);
         if (!this.followUpQueue) return { items: [] };
+          if (params.abandonPending && params.clientMessageId) {
+            this.followUpQueue.abandonPending(params.sessionId, params.tabId, params.clientMessageId);
+          }
         return {
-          items: this.followUpQueue.list(params.sessionId, params.tabId),
+          items: params.clientMessageId ? [] : this.followUpQueue.list(params.sessionId, params.tabId),
+          ...(params.clientMessageId ? { receipt: this.followUpQueue.receipt(params.sessionId, params.tabId, params.clientMessageId) } : {}),
+          ...(params.clientMessageId ? { receiptErrorCode: this.followUpQueue.receiptErrorCode(params.sessionId, params.tabId, params.clientMessageId) } : {}),
+          ...(params.clientMessageId ? { receiptCommitted: this.followUpQueue.receipt(params.sessionId, params.tabId, params.clientMessageId) === 'pending' && this.followUpQueue.isCommitted(params.sessionId, params.clientMessageId) } : {}),
         };
       },
     );
