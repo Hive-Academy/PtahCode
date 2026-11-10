@@ -570,7 +570,21 @@ export class ThemeService {
   setTheme(theme: ThemeName): void {
     this.vscode.setState(THEME_STATE_KEY, theme);
     this.writeThemeHint(theme);
+    this.applyTheme(theme);
+  }
 
+  /**
+   * Show a theme that another window picked (a child window follows the main
+   * window). Nothing is persisted: the window that picked the theme owns the
+   * stored value. An unknown name is ignored.
+   */
+  followTheme(name: string): void {
+    const info = DAISYUI_THEMES.find((item) => item.name === name);
+    if (info === undefined || info.name === this._currentTheme()) return;
+    this.applyTheme(info.name);
+  }
+
+  private applyTheme(theme: ThemeName): void {
     if (EAGER_THEMES.has(theme) || this.deferredSheetReady) {
       this._currentTheme.set(theme);
       return;

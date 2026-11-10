@@ -1,10 +1,10 @@
 import {
-  Injectable, inject, signal, type ApplicationConfig, type Signal,
+  Injectable, Injector, inject, signal, type ApplicationConfig, type Signal,
   provideBrowserGlobalErrorListeners, provideZonelessChangeDetection, provideZoneChangeDetection,
 } from '@angular/core';
 import {
   ClaudeRpcService, ElectronLayoutService, GIT_SESSION_SCOPE_SOURCE,
-  MESSAGE_HANDLERS, provideMessageRouter, provideVSCodeService,
+  MESSAGE_HANDLERS, ThemeService, provideMessageRouter, provideVSCodeService,
   type GitSessionScopeCandidate, type GitSessionScopeSource, type MessageHandler,
 } from '@ptah-extension/core';
 import {
@@ -46,6 +46,7 @@ export class ChildGitSessionScopeSource implements GitSessionScopeSource {
 export class GitWindowScopeHandler implements MessageHandler {
   public readonly handledMessageTypes = [GIT_WINDOW_PUSH_TYPES.scope] as const;
   private readonly store = inject(GitDockScopeStore);
+  private readonly injector = inject(Injector);
   private readonly current = signal<GitWindowScope | null>(null);
   public readonly scope = this.current.asReadonly();
 
@@ -56,6 +57,8 @@ export class GitWindowScopeHandler implements MessageHandler {
   public apply(payload: unknown): boolean {
     const parsed = GitWindowScopeSchema.safeParse(payload);
     if (!parsed.success || (this.current()?.sequence ?? -1) >= parsed.data.sequence) return false;
+    // The theme does not depend on the Git scope: follow it also when the store rejects the scope.
+    if (parsed.data.themeName !== undefined) this.injector.get(ThemeService).followTheme(parsed.data.themeName);
     if (!this.store.applyWindowScope(parsed.data)) return false;
     this.current.set(parsed.data);
     return true;

@@ -1,5 +1,5 @@
 import { DestroyRef, Injectable, Injector, NgZone, computed, effect, inject, signal, untracked, type Signal } from '@angular/core';
-import { ClaudeRpcService, ElectronLayoutService, VSCodeService, type MessageHandler } from '@ptah-extension/core';
+import { ClaudeRpcService, ElectronLayoutService, ThemeService, VSCodeService, type MessageHandler } from '@ptah-extension/core';
 import { GIT_WINDOW_PUSH_TYPES, GitWindowEmptyParamsSchema, GitWindowScopeSchema, GitWindowSetModeParamsSchema, type GitWindowMode, type GitWindowScope } from '@ptah-extension/shared';
 import { ChatGitSessionScopeSource } from '../session-git-scope/chat-git-session-scope.source';
 
@@ -51,6 +51,7 @@ export class GitWindowSync implements MessageHandler {
       pinnedTabId: resolved.mode === 'pinned' ? resolved.session?.tabId ?? null : null,
       open,
       unresolved: resolved.unresolved,
+      themeName: this.injector.get(ThemeService).currentTheme(),
     });
     return parsed.success ? parsed.data : null;
   });

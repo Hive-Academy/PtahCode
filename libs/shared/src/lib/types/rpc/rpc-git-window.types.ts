@@ -24,6 +24,8 @@ export const GitWindowScopeSchema = z.strictObject({
   pinnedTabId: z.string().min(1).max(256).nullable(),
   open: z.array(GitWindowCandidateSchema).max(100),
   unresolved: z.boolean(),
+  /** Theme of the main window. The Git window follows it, as the Display window does. */
+  themeName: z.string().min(1).max(64).optional(),
 });
 export type GitWindowScope = Omit<z.infer<typeof GitWindowScopeSchema>, 'open'> & {
   readonly open: readonly GitWindowCandidate[];

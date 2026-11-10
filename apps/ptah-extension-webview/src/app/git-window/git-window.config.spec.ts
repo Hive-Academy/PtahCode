@@ -109,6 +109,20 @@ describe('Git child providers and scopes', () => {
     expect(store.applyWindowScope).toHaveBeenCalledTimes(1);
   });
 
+  it('follows the theme of the main window at run time and persists nothing', () => {
+    const handler = TestBed.inject(GitWindowScopeHandler);
+    const vscode = TestBed.inject(VSCodeService);
+    handler.handleMessage({ type: GIT_WINDOW_PUSH_TYPES.scope, payload: { ...scope, themeName: 'ptah-glass-light' } });
+    TestBed.tick();
+    expect(document.documentElement.getAttribute('data-theme')).toBe('ptah-glass-light');
+    expect(document.documentElement.getAttribute('data-theme-mode')).toBe('light');
+    handler.handleMessage({ type: GIT_WINDOW_PUSH_TYPES.scope, payload: { ...scope, sequence: 9, themeName: 'ptah-glass' } });
+    TestBed.tick();
+    expect(document.documentElement.getAttribute('data-theme')).toBe('ptah-glass');
+    expect(document.documentElement.getAttribute('data-theme-mode')).toBe('dark');
+    expect(vscode.setState).not.toHaveBeenCalledWith('theme-v2', expect.anything());
+  });
+
   it('keeps mode changes host-owned and reports a rejected request', async () => {
     rpc.call.mockResolvedValue({ success: true, data: { accepted: false } });
     const context = TestBed.inject(GIT_WINDOW_CONTEXT);

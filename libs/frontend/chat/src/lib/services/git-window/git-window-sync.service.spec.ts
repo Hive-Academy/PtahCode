@@ -1,6 +1,6 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { ClaudeRpcService, ElectronLayoutService, VSCodeService } from '@ptah-extension/core';
+import { ClaudeRpcService, ElectronLayoutService, ThemeService, VSCodeService } from '@ptah-extension/core';
 import { ChatGitSessionScopeSource } from '../session-git-scope/chat-git-session-scope.source';
 import { GitWindowSync } from './git-window-sync.service';
 
@@ -14,6 +14,7 @@ const candidate = (tabId: string) => ({
 });
 
 describe('GitWindowSync', () => {
+  const themeName = signal('ptah-glass');
   const active = signal(candidate('A'));
   const open = signal([candidate('A')]);
   const scope = signal({ mode: 'follow-session' as 'follow-session' | 'pinned', root: 'C:/repo', unresolved: false, session: { tabId: 'A' } });
@@ -26,6 +27,7 @@ describe('GitWindowSync', () => {
   let sync: GitWindowSync;
 
   beforeEach(async () => {
+    themeName.set('ptah-glass');
     const { GitDockScopeStore } = await import('@ptah-extension/git-ui/services');
     active.set(candidate('A'));
     open.set([candidate('A')]);
@@ -48,12 +50,24 @@ describe('GitWindowSync', () => {
       }) } },
       { provide: ElectronLayoutService, useValue: { activeWorkspace: signal({ path: 'C:/repo' }), editorPanelVisible: panelVisible, setEditorPanelVisible: layoutVisible } },
       { provide: VSCodeService, useValue: { isElectron: true } },
+      { provide: ThemeService, useValue: { currentTheme: themeName } },
       { provide: ChatGitSessionScopeSource, useValue: { activeSession: active, openSessions: open, candidateForTab: (id: string) => open().find(c => c.tabId === id) ?? null } },
       { provide: GitDockScopeStore, useValue: { scope, pin: jest.fn(() => scope.set({ ...scope(), mode: 'pinned' })), unpin: jest.fn(() => scope.set({ ...scope(), mode: 'follow-session' })), showSession: jest.fn((tabId: string) => scope.set({ ...scope(), mode: 'pinned', session: { tabId } })) } },
     ] });
   });
 
   afterEach(() => TestBed.resetTestingModule());
+
+  it('publishes the theme of the main window and publishes again when it changes', async () => {
+    sync = TestBed.inject(GitWindowSync);
+    await sync.detach();
+    expect(calls.filter(c => c.method === 'gitWindow:publishScope').at(-1)?.params).toMatchObject({ scope: { themeName: 'ptah-glass' } });
+    themeName.set('ptah-glass-light');
+    TestBed.flushEffects();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(calls.filter(c => c.method === 'gitWindow:publishScope')).toHaveLength(2);
+    expect(calls.filter(c => c.method === 'gitWindow:publishScope').at(-1)?.params).toMatchObject({ scope: { themeName: 'ptah-glass-light' } });
+  });
 
   it('opens and publishes before hiding, then focuses an existing window', async () => {
     sync = TestBed.inject(GitWindowSync);
