@@ -280,6 +280,18 @@ The Electron app was not launched for this review. Capture the following screens
 
 ---
 
+### Coordinator decisions on the open questions (2026-11-10)
+
+1. **Question 1: Option A accepted.** The proposed `secondary` button does not use the stock `secondary` pair. A later theme task must correct the `4.42:1` pair of `ptah-glass-light`. No theme change in this batch.
+2. **Question 2: Option A accepted. Usage rule for destructive actions:**
+   - The family has 5 variants. No quiet destructive variant is added.
+   - A destructive trigger in a dense row or list (remove, delete) uses `ghost`, as `ptahIconButton` or `ptahButton`.
+   - `danger` is only for the confirmation of a destructive action, or for the destructive action of a single resource card.
+3. **Question 3: Option A accepted.** `ptahSetupAction` folds into `ptahButton` in the adoption batch. `ptahRailIconAction` stays for the navigation family.
+4. The removal of the deprecated `iconOnly` input is accepted.
+
+---
+
 ## 13. Approval Record
 
 - **Status**:

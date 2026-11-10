@@ -14,12 +14,18 @@ interface ButtonLookColumn {
   standalone: true,
   imports: [GallerySectionComponent, GalleryButtonColumnComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `<ptah-gallery-section
-    id="family-button"
-    title="Button family"
-  >
+  template: `<ptah-gallery-section id="family-button" title="Button family">
     <p class="text-ptah-hint text-base-content-muted">
-      Side-by-side comparison of the current button styling and the proposed token-based look.
+      Side-by-side comparison of the current button styling and the proposed
+      token-based look.
+    </p>
+    <p
+      class="text-ptah-hint text-base-content-muted"
+      data-testid="button-family-danger-rule"
+    >
+      Destructive actions: use ghost for a remove or delete trigger in a row or
+      list. Use danger only for the confirmation, or for the destructive action
+      of a single resource card.
     </p>
     <div class="grid gap-ptah-group lg:grid-cols-2">
       @for (column of columns(); track column.id) {
