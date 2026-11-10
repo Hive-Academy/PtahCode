@@ -17,6 +17,7 @@ import {
   type RemoteMachine,
 } from '../../services/machines-store';
 import { DisplayTextPipe, displayText } from '../../utils/display-text';
+import { durationText } from '../../utils/machine-copy';
 import { remoteSessionStateLabel } from '../../utils/remote-session-copy';
 
 /** What "Open" hands the container: enough to title the opened view. */
@@ -26,15 +27,27 @@ export interface RemoteSessionOpenRequest {
   readonly workspacePath: string;
 }
 
+/** One row of the approved flat session list. */
+interface RemoteSessionRow {
+  readonly session: RemoteMachineSessionSummary;
+  readonly workspacePath: string;
+  /** Short relative age of the session's `updatedAt`, e.g. "2 min". */
+  readonly age: string;
+}
+
 /**
- * The sessions a machine reports, grouped by workspace (design 4.5 screen 5,
- * 4.10), with "New session". State comes from the worker's own list; while
- * the machine is not connected every state reads "Unknown", never failed
- * (3.4). A driven session shows its holder label (`driver?`, plan W6) and its
- * Open button's name ends "driven by <label>, watch only" (4.9).
+ * The sessions a machine reports as the approved flat list of bordered rows
+ * (prototype screen 5): the whole row is one button that opens the session —
+ * line 1 the title with provider and age, line 2 the state dot with its
+ * label (Running run, Interrupted need, Idle muted; "Unknown", never failed,
+ * while the machine is not connected, 3.4). A driven session shows its holder
+ * label (`driver?`, plan W6) and the row's name ends "driven by <label>,
+ * watch only" (4.9).
  *
- * Loads workspaces and their sessions when the machine connects and on
- * "Refresh"; there is no timer.
+ * "New session" picks the workspace in its form; the rows themselves are not
+ * grouped by workspace. Loads workspaces and their sessions when the machine
+ * connects and on "Refresh"; there is no timer, so an age is fixed at the
+ * render that produced it.
  */
 @Component({
   selector: 'ptah-remote-session-list',
@@ -194,78 +207,70 @@ export interface RemoteSessionOpenRequest {
           }
         </p>
       } @else {
-        @for (group of groups(); track group.workspace.workspaceId) {
-          <div class="flex flex-col" data-testid="remote-session-workspace">
-            <h4
-              class="truncate px-1 pb-1 font-mono text-xs text-base-content-muted"
-            >
-              {{ group.workspace.path | displayText: 200 }}
-            </h4>
-            @if (group.sessions.length === 0) {
-              <p class="px-1 text-xs text-base-content-muted">
-                No sessions yet.
-              </p>
-            } @else {
-              <ul
-                class="flex flex-col"
-                [attr.aria-label]="
-                  'Sessions in ' + (group.workspace.name | displayText)
-                "
-              >
-                @for (session of group.sessions; track session.sessionId) {
-                  <li
-                    class="flex min-w-0 items-center gap-3 rounded-md px-3 py-2 hover:bg-base-200"
-                    data-testid="remote-session-row"
+        @if (flatRows().length === 0) {
+          <p
+            class="text-sm text-base-content-muted"
+            data-testid="remote-sessions-empty-list"
+          >
+            No sessions yet.
+          </p>
+        } @else {
+          <ul class="flex flex-col gap-2" aria-label="Sessions">
+            @for (row of flatRows(); track row.session.sessionId) {
+              <li class="min-w-0" data-testid="remote-session-row">
+                <button
+                  type="button"
+                  class="block w-full min-w-0 rounded border border-base-300 px-3 py-2.5 text-left hover:bg-base-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                  data-testid="remote-session-open"
+                  [attr.aria-label]="openLabel(row.session)"
+                  (click)="open(row.session, row.workspacePath)"
+                >
+                  <span class="flex min-w-0 items-baseline gap-1">
+                    <span
+                      class="min-w-0 truncate text-sm font-medium text-base-content"
+                      >{{ title(row.session) }}</span
+                    >
+                    <span class="shrink-0 text-xs text-base-content-muted"
+                      >· {{ row.session.provider | displayText: 24 }} ·
+                      {{ row.age }}</span
+                    >
+                  </span>
+                  <span
+                    class="mt-1 flex items-center gap-2 text-xs"
+                    [class.text-state-run]="
+                      connected() && row.session.state === 'running'
+                    "
+                    [class.text-state-need]="
+                      connected() && row.session.state === 'interrupted'
+                    "
+                    [class.text-base-content-muted]="
+                      !connected() || row.session.state === 'idle'
+                    "
+                    data-testid="remote-session-state"
                   >
                     <span
-                      class="w-24 shrink-0 text-xs"
-                      [class.text-state-run]="
-                        connected() && session.state === 'running'
-                      "
-                      [class.text-state-need]="
-                        connected() && session.state === 'interrupted'
-                      "
-                      [class.text-base-content-muted]="
-                        !connected() || session.state === 'idle'
-                      "
-                      data-testid="remote-session-state"
-                      >{{ stateLabel(session) }}</span
-                    >
+                      class="h-2 w-2 shrink-0 rounded-full bg-current"
+                      aria-hidden="true"
+                    ></span>
+                    {{ stateLabel(row.session) }}
+                  </span>
+                  @if (row.session.driver; as driver) {
                     <span
-                      class="min-w-0 flex-1 truncate text-sm text-base-content"
-                      >{{ title(session) }}</span
+                      class="badge badge-outline badge-sm mt-1 max-w-[16rem] gap-1 truncate text-base-content"
+                      data-testid="remote-session-driver"
                     >
-                    @if (session.driver; as driver) {
-                      <span
-                        class="badge badge-outline badge-sm max-w-[16rem] gap-1 truncate text-base-content"
-                        data-testid="remote-session-driver"
-                      >
-                        <lucide-angular
-                          [img]="LockIcon"
-                          class="h-3 w-3 shrink-0"
-                          aria-hidden="true"
-                        />
-                        Driver: {{ driver.label | displayText }}
-                      </span>
-                    }
-                    <span
-                      class="shrink-0 font-mono text-xs text-base-content-muted max-[759px]:hidden"
-                      >{{ session.provider | displayText: 24 }}</span
-                    >
-                    <button
-                      type="button"
-                      class="btn btn-ghost btn-xs shrink-0 border border-surface-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                      data-testid="remote-session-open"
-                      [attr.aria-label]="openLabel(session)"
-                      (click)="open(session, group.workspace.path)"
-                    >
-                      Open
-                    </button>
-                  </li>
-                }
-              </ul>
+                      <lucide-angular
+                        [img]="LockIcon"
+                        class="h-3 w-3 shrink-0"
+                        aria-hidden="true"
+                      />
+                      Driver: {{ driver.label | displayText }}
+                    </span>
+                  }
+                </button>
+              </li>
             }
-          </div>
+          </ul>
         }
       }
     </section>
@@ -306,6 +311,22 @@ export class RemoteSessionListComponent {
   protected readonly groups = computed(() =>
     this.store.sessionsByWorkspace(this.machineId())(),
   );
+
+  /** The approved flat list: every session of every workspace, in order. */
+  protected readonly flatRows = computed<readonly RemoteSessionRow[]>(() => {
+    const now = Date.now();
+    const rows: RemoteSessionRow[] = [];
+    for (const group of this.groups()) {
+      for (const session of group.sessions) {
+        rows.push({
+          session,
+          workspacePath: group.workspace.path,
+          age: durationText(session.updatedAt, now),
+        });
+      }
+    }
+    return rows;
+  });
 
   /** Reloads exclude each other; a newer one wins. */
   private loadToken = 0;

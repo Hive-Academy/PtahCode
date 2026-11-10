@@ -30,7 +30,7 @@ const SESSIONS: readonly RemoteMachineSessionSummary[] = [
     sessionId: 's1',
     title: 'Refactor RPC registry',
     state: 'running',
-    updatedAt: 1,
+    updatedAt: Date.now() - 120_000,
     provider: 'claude',
     logged: true,
   },
@@ -38,7 +38,7 @@ const SESSIONS: readonly RemoteMachineSessionSummary[] = [
     sessionId: 's2',
     title: 'Migrate settings',
     state: 'interrupted',
-    updatedAt: 2,
+    updatedAt: Date.now() - 14 * 60_000,
     provider: 'claude',
     logged: true,
     driver: { kind: 'desktop', label: 'Horus keyboard' },
@@ -99,9 +99,12 @@ describe('RemoteSessionListComponent', () => {
     const { fixture, store } = await setup();
     expect(store.loadWorkspaces).toHaveBeenCalledWith('m1');
     expect(store.loadSessions).toHaveBeenCalledWith('m1', 'w1');
-    expect(q(fixture, 'remote-session-workspace')?.textContent).toContain(
-      '~/work/ptah-extension',
-    );
+    // The approved row is flat: no workspace heading above the rows.
+    expect(q(fixture, 'remote-session-workspace')).toBeNull();
+    const [first] = all(fixture, 'remote-session-row');
+    expect(first?.textContent).toContain('Refactor RPC registry');
+    expect(first?.textContent).toContain('claude');
+    expect(first?.textContent).toMatch(/\b\d+ min\b/);
     expect(all(fixture, 'remote-session-row')).toHaveLength(2);
     expect(all(fixture, 'remote-session-state').map((e) => e.textContent?.trim())).toEqual([
       'Running',

@@ -68,6 +68,8 @@ async function setup(
     // Approval counts the header badge and the overview notice read (B1).
     pendingApprovalsByMachine: signal(new Map<string, number>()),
     pendingApprovalCount: signal(0),
+    pendingApprovalRequestsByMachine: signal(new Map()),
+    respondPermission: jest.fn().mockResolvedValue(ok(undefined)),
     // The detail's session list (Batch 25).
     workspaces: () => signal([]),
     sessionsByWorkspace: () => signal([]),
@@ -125,7 +127,7 @@ describe('MachinesViewComponent', () => {
     expect(store.loadMachines).toHaveBeenCalledTimes(1);
   });
 
-  it('empty (4.1): one primary Add machine in the pane, a ghost one in the list, and what is checked', async () => {
+  it('empty (4.1): one primary Add machine in the pane, none in the list, and what is checked', async () => {
     const { fixture } = await setup([]);
     const empty = q(fixture, 'machines-empty');
     expect(empty?.textContent).toContain('No machines yet');
@@ -133,7 +135,7 @@ describe('MachinesViewComponent', () => {
     expect(q(fixture, 'machines-empty-add')?.classList).toContain(
       'btn-primary',
     );
-    expect(q(fixture, 'machine-list-add')?.classList).toContain('btn-ghost');
+    expect(q(fixture, 'machine-list-add')).toBeNull();
     expect(
       host(fixture).querySelectorAll('[data-testid="machines-checked"] li'),
     ).toHaveLength(7);
@@ -156,16 +158,35 @@ describe('MachinesViewComponent', () => {
     expect(q(fixture, 'machine-approvals-waiting')).toBeNull();
   });
 
-  it('shows the approval badge in the page header and the notice in the overview', async () => {
-    const { fixture } = await setup([HORUS], {
+  it('shows the approval badge in the page header and an answerable card in the overview', async () => {
+    const request = {
+      id: 'p1',
+      toolName: 'Bash',
+      toolInput: { command: 'npm run migrate' },
+      toolUseId: 'tu1',
+      timestamp: Date.now(),
+      description: 'Run a command',
+    };
+    const { fixture, store } = await setup([HORUS], {
       pendingApprovalsByMachine: signal(new Map([['m1', 1]])),
       pendingApprovalCount: signal(1),
+      pendingApprovalRequestsByMachine: signal(
+        new Map([['m1', [{ sessionId: 's1', request }]]]),
+      ),
     });
     expect(q(fixture, 'machines-approvals-badge')?.textContent).toContain(
       '1 approval waiting',
     );
-    expect(q(fixture, 'machine-approvals-waiting')?.textContent).toContain(
-      '1 approval is waiting on this machine',
+    const card = q(fixture, 'machine-approvals-waiting');
+    expect(card?.textContent).toContain('Bash');
+    expect(card?.textContent).toContain('npm run migrate');
+    q(fixture, 'approval-allow')?.click();
+    await fixture.whenStable();
+    expect(store.respondPermission).toHaveBeenCalledWith(
+      'm1',
+      's1',
+      'p1',
+      'allow',
     );
   });
 
@@ -381,9 +402,9 @@ describe('MachinesViewComponent', () => {
     expect(q(fixture, 'machine-detail')).not.toBeNull();
   });
 
-  it('add machine from the list opens the form; cancel closes it', async () => {
+  it('add machine from the header opens the form; cancel closes it', async () => {
     const { fixture } = await setup([HORUS]);
-    await click(fixture, 'machine-list-add');
+    await click(fixture, 'machines-add');
     expect(q(fixture, 'add-machine-form')).not.toBeNull();
     await click(fixture, 'add-machine-cancel');
     expect(q(fixture, 'machine-detail')).not.toBeNull();

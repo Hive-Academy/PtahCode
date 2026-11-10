@@ -94,7 +94,6 @@ const CLOCK_TICK_MS = 1000;
           [error]="store.error()"
           [now]="now()"
           (selected)="select($event)"
-          (add)="openAdd()"
           (retryLoad)="reload()"
         />
 
@@ -170,10 +169,6 @@ const CLOCK_TICK_MS = 1000;
                   [busy]="busy()"
                   [confirmingRemove]="confirmingRemove()"
                   [actionError]="actionError()"
-                  [pendingApprovals]="
-                    store.pendingApprovalsByMachine().get(machine.machineId) ??
-                    0
-                  "
                   (openReadiness)="paneMode.set('readiness')"
                   (askRemove)="askRemove()"
                   (cancelRemove)="cancelRemove()"

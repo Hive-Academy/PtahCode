@@ -71,13 +71,15 @@ const type = (
 };
 
 describe('MachineListComponent', () => {
-  it('empty: says so, keeps the add control ghost, and names the local machine footer', () => {
+  it('empty: says so, and the pane has no add control or footer', () => {
     const fixture = render();
     expect(el(fixture).textContent).toContain('No machines yet.');
-    expect(el(fixture).textContent).toContain('This machine stays in Chat.');
-    const add = el(fixture).querySelector('[data-testid="machine-list-add"]');
-    expect(add?.classList).toContain('btn-ghost');
-    expect(add?.classList).not.toContain('btn-primary');
+    expect(el(fixture).textContent).not.toContain(
+      'This machine stays in Chat.',
+    );
+    expect(
+      el(fixture).querySelector('[data-testid="machine-list-add"]'),
+    ).toBeNull();
   });
 
   it('loading: announces a busy status with three skeleton rows', () => {
@@ -108,7 +110,7 @@ describe('MachineListComponent', () => {
     expect(retries).toHaveLength(1);
   });
 
-  it('lists machines as listbox options with name, alias, state and meta line', () => {
+  it('lists machines as listbox options with a name line and a state · last-seen line', () => {
     const fixture = render({
       machines: [HORUS, ANUBIS, CHAPPIE],
       selectedId: 'm1',
@@ -118,15 +120,19 @@ describe('MachineListComponent', () => {
     expect(listbox?.getAttribute('aria-label')).toBe('Machine list');
     const [horus, anubis, chappie] = rows(fixture);
     expect(horus.textContent).toContain('Horus');
-    expect(horus.textContent).toContain('horus');
+    // The prototype row shows the name only; the alias stays in the detail.
+    expect(horus.textContent).not.toContain('horus');
     expect(horus.textContent).toContain('Connected');
-    expect(horus.textContent).toContain('ptah 0.1.70');
+    expect(horus.textContent).not.toContain('ptah 0.1.70');
     expect(anubis.textContent).toContain('Reconnecting');
-    expect(anubis.textContent).toContain('Last seen 12 s ago');
+    expect(
+      anubis.querySelector('[data-testid="machine-row-meta"]')?.textContent,
+    ).toContain('12 s ago');
     expect(chappie.textContent).toContain('Version mismatch');
-    expect(chappie.textContent).toContain('Not connected');
-    const add = el(fixture).querySelector('[data-testid="machine-list-add"]');
-    expect(add?.classList).toContain('btn-primary');
+    expect(chappie.textContent).not.toContain('Not connected');
+    expect(
+      el(fixture).querySelector('[data-testid="machine-list-add"]'),
+    ).toBeNull();
   });
 
   it('marks the selected row and keeps one Tab stop', () => {
@@ -199,13 +205,4 @@ describe('MachineListComponent', () => {
     expect(Array.from(name?.textContent ?? '').length).toBeLessThanOrEqual(80);
   });
 
-  it('emits add', () => {
-    const fixture = render();
-    const adds: void[] = [];
-    fixture.componentInstance.add.subscribe(() => adds.push(undefined));
-    el(fixture)
-      .querySelector<HTMLButtonElement>('[data-testid="machine-list-add"]')
-      ?.click();
-    expect(adds).toHaveLength(1);
-  });
 });

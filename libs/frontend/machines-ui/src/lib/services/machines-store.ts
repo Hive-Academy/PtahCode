@@ -14,6 +14,7 @@ import type {
   MachinesReadinessResult,
   MachinesSessionAttachResult,
   MachinesStatePayload,
+  PermissionRequest,
   RemoteMachineSessionSummary,
   RemoteMachineWorkspace,
   RpcUserErrorCode,
@@ -76,6 +77,12 @@ export type MachinesOutcome<T = void> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly error: MachinesError }
   | { readonly ok: false; readonly refused: MachinesRefusal };
+
+/** One tool approval that waits in an opened session of a machine. */
+export interface MachinePendingApproval {
+  readonly sessionId: string;
+  readonly request: PermissionRequest;
+}
 
 interface SessionEntry {
   readonly machineId: string;
@@ -159,6 +166,20 @@ export class MachinesStore {
       counts.set(entry.machineId, (counts.get(entry.machineId) ?? 0) + pending);
     }
     return counts as ReadonlyMap<string, number>;
+  });
+
+  /** The waiting approval requests of opened sessions, per machine. */
+  public readonly pendingApprovalRequestsByMachine = computed(() => {
+    const byMachine = new Map<string, MachinePendingApproval[]>();
+    for (const [key, entry] of this._views()) {
+      const pending = entry.reducer.pendingPermissions;
+      if (pending.length === 0) continue;
+      const sessionId = key.slice(key.indexOf('\u0000') + 1);
+      const list = byMachine.get(entry.machineId) ?? [];
+      for (const request of pending) list.push({ sessionId, request });
+      byMachine.set(entry.machineId, list);
+    }
+    return byMachine as ReadonlyMap<string, readonly MachinePendingApproval[]>;
   });
 
   public readonly pendingApprovalCount = computed(() => {

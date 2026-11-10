@@ -8,8 +8,7 @@ import {
   viewChildren,
   type ElementRef,
 } from '@angular/core';
-import { LucideAngularModule, Plus } from 'lucide-angular';
-import { InboxRowDirective, SetupActionDirective } from '@ptah-extension/ui';
+import { InboxRowDirective } from '@ptah-extension/ui';
 import type {
   MachinesError,
   RemoteMachine,
@@ -28,15 +27,18 @@ interface MachineRow {
 }
 
 /**
- * The list pane of the Machines page (approved option A): the pane heading
- * with "Add machine", the client-side search, and the machine rows inside a
- * `role="listbox"`. The `ptah-inbox-layout` shell owns the pane surface,
- * padding and scroll; this component only fills the `[inboxList]` slot.
+ * The list pane of the Machines page (approved option A): the pane heading,
+ * the client-side search, and the machine rows inside a `role="listbox"`.
+ * The `ptah-inbox-layout` shell owns the pane surface, padding and scroll;
+ * this component only fills the `[inboxList]` slot. "Add machine" lives in
+ * the page header only, not in this pane, and the footer line is gone
+ * (machines-ux.md: the static footer carried no action).
  *
- * Each row (design 4.5, D5) is a `ptahInboxRow` option: the machine name with
- * its alias in mono, then a second line in the state's ink that carries the
- * state marker with its label and a meta line (last seen or the machine's
- * Ptah version). State is never shown by colour alone.
+ * Each row follows the prototype: the machine name alone on the first line
+ * (the SSH alias stays in the detail pane, and the search still matches it),
+ * then one line in the state's ink with the state marker, its label and the
+ * last-seen text ("now", "12 s ago"). The state label is never truncated, and
+ * state is never shown by colour alone.
  *
  * Keyboard (design 5): the list is one Tab stop. Up/Down/Home/End move focus
  * between the rows that match the search (roving `tabindex`); Enter or click
@@ -46,31 +48,11 @@ interface MachineRow {
 @Component({
   selector: 'ptah-machine-list',
   standalone: true,
-  imports: [
-    LucideAngularModule,
-    MachineStatusComponent,
-    DisplayTextPipe,
-    InboxRowDirective,
-    SetupActionDirective,
-  ],
+  imports: [MachineStatusComponent, DisplayTextPipe, InboxRowDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'flex flex-col gap-4' },
   template: `
-    <div class="flex items-center justify-between gap-2">
-      <h2 class="text-sm font-semibold text-base-content">Machines</h2>
-      <button
-        type="button"
-        [ptahSetupAction]="'ghost'"
-        class="gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-        [class.btn-primary]="rows().length > 0"
-        [class.btn-ghost]="rows().length === 0"
-        data-testid="machine-list-add"
-        (click)="add.emit()"
-      >
-        <lucide-angular [img]="PlusIcon" class="h-4 w-4" aria-hidden="true" />
-        Add machine
-      </button>
-    </div>
+    <h2 class="text-sm font-semibold text-base-content">Machines</h2>
 
     <input
       type="search"
@@ -146,37 +128,25 @@ interface MachineRow {
             (keydown)="onKeydown($event)"
             (click)="selected.emit(row.machineId)"
           >
-            <span class="flex min-w-0 items-baseline justify-between gap-2">
-              <span
-                class="block truncate text-sm font-medium text-base-content"
-                >{{ row.name }}</span
-              >
-              <span
-                class="truncate font-mono text-xs text-base-content-muted"
-                >{{ row.machine.alias | displayText }}</span
-              >
-            </span>
+            <span class="block truncate text-sm font-medium text-base-content"
+              >{{ row.name }}</span
+            >
             <span
-              class="flex min-w-0 items-center gap-2 text-xs"
+              class="flex items-center gap-2 text-xs"
               [class]="stateInk[row.machine.state]"
             >
-              <ptah-machine-status [state]="row.machine.state" />
+              <ptah-machine-status
+                [state]="row.machine.state"
+                class="shrink-0"
+              />
               @if (row.meta) {
-                <span class="truncate" data-testid="machine-row-meta"
-                  >· {{ row.meta }}</span
-                >
+                <span data-testid="machine-row-meta">· {{ row.meta }}</span>
               }
             </span>
           </button>
         }
       </div>
     }
-
-    <p
-      class="border-t border-surface-border pt-2 text-xs text-base-content-muted"
-    >
-      This machine stays in Chat.
-    </p>
   `,
 })
 export class MachineListComponent {
@@ -188,10 +158,8 @@ export class MachineListComponent {
   public readonly now = input(0);
 
   public readonly selected = output<string>();
-  public readonly add = output<void>();
   public readonly retryLoad = output<void>();
 
-  protected readonly PlusIcon = Plus;
   protected readonly stateInk = MACHINE_STATE_INK;
   protected readonly activeIndex = signal<number | null>(null);
 
@@ -264,27 +232,28 @@ export class MachineListComponent {
     this.rowButtons()[next]?.nativeElement.focus();
   }
 
+  /** The prototype's second line: last seen, or the state's own hint. */
   private metaLine(machine: RemoteMachine): string {
-    const version = machine.versions?.remote?.ptahVersion;
-    const versionText = version ? `ptah ${displayText(version, 24)}` : '';
-    let status = '';
     switch (machine.state) {
+      case 'connected':
       case 'offline':
       case 'reconnecting':
-        status =
-          machine.lastSeenAt !== undefined && this.now() > 0
-            ? `Last seen ${durationText(machine.lastSeenAt, this.now())} ago`
-            : 'Not connected';
-        break;
-      case 'version-mismatch':
-        status = 'Not connected';
-        break;
+        return this.lastSeenText(machine);
       case 'unpaired':
-        status = 'Pair to connect';
-        break;
-      case 'connected':
-        break;
+        return 'Pair to connect';
+      case 'version-mismatch':
+        return '';
     }
-    return [status, versionText].filter(Boolean).join(' · ');
+  }
+
+  /** "now" or "12 s ago"; machines without a last-seen time say so. */
+  private lastSeenText(machine: RemoteMachine): string {
+    const seen = machine.lastSeenAt;
+    const now = this.now();
+    if (seen === undefined || now === 0) {
+      return machine.state === 'connected' ? '' : 'Not connected';
+    }
+    if (now - seen < 10_000) return 'now';
+    return `${durationText(seen, now)} ago`;
   }
 }

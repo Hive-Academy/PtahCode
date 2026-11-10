@@ -16,6 +16,7 @@ import { ArrowLeft, LucideAngularModule, MoreHorizontal } from 'lucide-angular';
 import type { RemoteMachine } from '../../services/machines-store';
 import type { MachineBanner } from '../../utils/machine-banners';
 import { DisplayTextPipe, displayText } from '../../utils/display-text';
+import { MachineApprovalsComponent } from './machine-approvals.component';
 import { MachineStatusComponent } from '../machine-status/machine-status.component';
 import { ReadinessPanelComponent } from '../readiness-panel/readiness-panel.component';
 import {
@@ -45,6 +46,7 @@ export interface MachinesActionError {
   imports: [
     LucideAngularModule,
     DisplayTextPipe,
+    MachineApprovalsComponent,
     MachineStatusComponent,
     ReadinessPanelComponent,
     RemoteSessionListComponent,
@@ -129,18 +131,10 @@ export interface MachinesActionError {
       </div>
     </header>
 
-    @if (pendingApprovals() > 0) {
-      <div
-        class="surface-2 rounded-box border border-state-need p-4 text-sm"
-        role="status"
-        data-testid="machine-approvals-waiting"
-      >
-        <h3 class="font-semibold text-base-content">Approval waiting</h3>
-        <p class="mt-1 text-xs text-base-content-muted">
-          {{ approvalsText() }}
-        </p>
-      </div>
-    }
+    <ptah-machine-approvals
+      [machineId]="machine().machineId"
+      [machineName]="machine().displayName | displayText"
+    />
 
     @if (confirmingRemove()) {
       <div
@@ -260,7 +254,6 @@ export class MachineOverviewComponent {
   public readonly busy = input(false);
   public readonly confirmingRemove = input(false);
   public readonly actionError = input<MachinesActionError | null>(null);
-  public readonly pendingApprovals = input(0);
 
   public readonly openReadiness = output<void>();
   public readonly askRemove = output<void>();
@@ -301,12 +294,5 @@ export class MachineOverviewComponent {
     if (target instanceof HTMLDetailsElement) {
       this.readinessOpen.set(target.open);
     }
-  }
-
-  protected approvalsText(): string {
-    const count = this.pendingApprovals();
-    return count === 1
-      ? '1 approval is waiting on this machine. Open the session to allow or deny it.'
-      : `${count} approvals are waiting on this machine. Open the session to allow or deny them.`;
   }
 }
