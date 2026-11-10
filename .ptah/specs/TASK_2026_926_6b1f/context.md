@@ -22,7 +22,7 @@ Umbrella task: TASK_2026_924_8ac1 (owner of `libs/frontend/ui`). Plan:
 | Batch | Content | Branch | State |
 |---|---|---|---|
 | 0a | Tokens (`foundation-tokens.md`), Tailwind names, guard specs | `feat/ui-foundation-tokens` | In review |
-| 0b | Gallery split into sections, token specimens, theme switch | stacked on 0a | Not started |
+| 0b | Gallery split into sections, token specimens, theme switch | stacked on 0a | In review |
 | 0c | `ui-class-audit` step in CI, baseline seeded again | `ci/ui-class-audit-ratchet` | In review |
 | 0d | `look-approval-checklist.md` | `feat/ui-foundation-tokens` | Written |
 

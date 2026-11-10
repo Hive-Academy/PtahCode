@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_926_6b1f
-status: backlog
+status: in_review
 type: FEATURE
 title: "Build UI foundation tokens, gallery, ratchet and look gate"
 depends_on: []
