@@ -84,7 +84,7 @@ describe('LaneGuardsSettingsComponent', () => {
     expect(input('lane-guards-repeat').className).toContain('flex-1');
     expect(input('lane-guards-repeat').className).toContain('join-item');
     const intro = byTestId('lane-guards-intro')?.textContent ?? '';
-    expect(intro).toContain('Lanes have no tool-call limit.');
+    expect(intro).toContain('Lanes also have a weighted token budget and a duration limit.');
     expect(intro).not.toContain('Steer at');
     expect(host().textContent).toContain('Range: 2 or greater.');
   });

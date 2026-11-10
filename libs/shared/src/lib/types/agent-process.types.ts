@@ -332,6 +332,7 @@ export interface AgentBudgetRecord {
   readonly weightedTokens: number;
   readonly rawTokens: number;
   readonly largestTurnTokens?: number;
+  readonly unavailableTurns?: number;
   readonly turnIds: readonly string[];
   readonly turnCount?: number;
   readonly startedAtMs: number;
@@ -736,6 +737,8 @@ export type LaneCompletionVerdict =
 
 /** The payload pushed to the session that spawned the lane. */
 export interface LaneCompletionSignal {
+  /** A budget warning was held after the turn and has not reached the lane. */
+  readonly heldBudgetWarning?: boolean;
   readonly mcpAttachmentWarning?: string;
   readonly agentId: string;
   readonly cli: CliType;

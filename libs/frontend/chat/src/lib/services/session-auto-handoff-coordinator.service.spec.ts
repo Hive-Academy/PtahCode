@@ -36,6 +36,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
   let handoff: SessionAutoHandoffService;
   let send: jest.Mock;
   let probe: jest.Mock;
+  let info: jest.Mock;
   let now: number;
   let probeGate: Promise<void> | null;
   let nextId: number;
@@ -64,6 +65,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
     now = 1_000_000;
     nextId = 0;
     probeGate = null;
+    info = jest.fn();
     jest.spyOn(Date, 'now').mockImplementation(() => now);
     probe = jest.fn(async (): Promise<HandoffSkillProbe> => {
       if (probeGate) await probeGate;
@@ -95,7 +97,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
         sendOrQueueMessage: send, hasPendingPermissionForTab: () => permission(),
       } },
       { provide: SessionHandoffSkillService, useValue: { probe: () => probe() } },
-      { provide: LoggingService, useValue: { info: jest.fn(), warn: jest.fn() } },
+      { provide: LoggingService, useValue: { info, warn: jest.fn() } },
     ] });
     store = TestBed.inject(QueuedFollowUpStore);
     handoff = TestBed.inject(SessionAutoHandoffService);
@@ -107,6 +109,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
     start([makeTab('shown', { claudeSessionId: OTHER_SESSION, sessionBudget: null }), makeTab(TAB)]);
     await run();
     expect(send).toHaveBeenCalledWith(COMMAND, { tabId: TAB });
+    expect(info).toHaveBeenCalledWith('[SessionAutoHandoff]', 'automatic hand-off fired', { sessionId: SESSION, tabId: TAB, delivery: 'sent' });
     patch(TAB, { sessionBudget: { ...BUDGET, revision: 13 } });
     await run();
     expect(send).toHaveBeenCalledTimes(1);
@@ -180,6 +183,21 @@ describe('SessionAutoHandoffCoordinatorService', () => {
     start([makeTab(TAB, { sessionBudget: budget })]);
     await run();
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('logs each limit skip reason once per session across evaluations', async () => {
+    start([makeTab(TAB, { sessionBudget: { ...BUDGET, autoHandoff: false } })]);
+    await run();
+    patch(TAB, { sessionBudget: { ...BUDGET, autoHandoff: false, revision: 13 } });
+    await run();
+    expect(info).toHaveBeenCalledTimes(1);
+    expect(info).toHaveBeenCalledWith('[SessionAutoHandoff]', 'automatic hand-off skipped: auto handoff off', { sessionId: SESSION, tabId: TAB });
+    patch(TAB, { status: 'resuming', sessionBudget: { ...BUDGET } });
+    await run();
+    patch(TAB, { sessionBudget: { ...BUDGET, revision: 14 } });
+    await run();
+    expect(info).toHaveBeenCalledTimes(2);
+    expect(info).toHaveBeenCalledWith('[SessionAutoHandoff]', 'automatic hand-off skipped: pending resume', { sessionId: SESSION, tabId: TAB });
   });
 
   it('does not retry a confirmed missing skill', async () => {

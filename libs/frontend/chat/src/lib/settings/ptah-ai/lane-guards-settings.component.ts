@@ -37,8 +37,8 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
 
 /**
  * Lane guards (`agentOrchestration.laneRepeatCallStopAt`). Loads and saves
- * through `agent:getConfig` / `agent:setConfig`. Lanes have no tool-call
- * budget; only the repeat-call loop stop is configurable. An invalid value is
+ * through `agent:getConfig` / `agent:setConfig`. Lanes also have a weighted
+ * token budget and duration limit; the repeat-call loop stop is configurable here. An invalid value is
  * never written. A host rejection is shown
  * next to its field as the backend returned it; every save outcome (with Undo)
  * is reported in the page toast (`SettingsSaveFeedbackService.saveGeneric`).
@@ -95,9 +95,10 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
             class="text-xs text-base-content-muted"
             data-testid="lane-guards-intro"
           >
-            Lanes have no tool-call limit. Ptah stops a lane only when it
-            repeats the same call this many times, which means it is stuck in a
-            loop. A stopped lane is still judged by the files it delivered.
+            This guard stops a lane when it repeats the same call this many times.
+            Lanes also have a weighted token budget and a duration limit.
+            The first token-limit crossing warns the lane, and the next turn stops it.
+            A lane stopped by its budget does not resume; start a fresh lane for the remaining work.
           </p>
           <div class="grid max-w-sm gap-y-5">
             @for (field of fields; track field.key) {
