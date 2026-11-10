@@ -65,8 +65,8 @@ export class SqliteTableSizeReportService {
       await this.governor.whenClear({ lane: GOVERNOR_LANE, signal });
       return true;
     } catch (error: unknown) {
-      if (error instanceof Error && error.name === 'AbortError') return false;
       // degradation-audit: reported - logged at warn; the report runs anyway (fail open).
+      if (error instanceof Error && error.name === 'AbortError') return false;
       this.logger.warn(
         '[persistence-sqlite] table size report: background-work wait failed',
         { errorClass: error instanceof Error ? 'Error' : 'UnknownError' },
