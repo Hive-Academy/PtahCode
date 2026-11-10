@@ -31,4 +31,18 @@ checkout; not committed).
 
 ## Next exact step
 
-See the end of this file (updated after each run).
+State on 2026-11-10: capture run 3 passed (2 tests, no "NOT captured" line). The page is
+1.53 MiB and is published as artifact `2c0f6a9e-c83a-4682-b171-fae5ec0cbbc0`
+("Design preview — detachable Git dock (PR #1038)"). No product code changed.
+
+Steps that remain, in sequence:
+
+1. Commit the capture, the generator, the defects file, the page and these notes.
+2. `git push origin HEAD:feat/detachable-git-dock-p2b` (fast-forward only, no force).
+3. `gh pr edit 1038`: add the "Design preview" line and the defect list. Correct the test-plan
+   line about CI lint (the `checks` job passed on 3a64dd228).
+4. Report to the parent session with `ptah_agent_report`.
+
+Open decision for the user: decision 16 deviation (the 96 px detached rail). See frames
+`03-main-detached-rail` and `03b-rail-close-up`, and the defect list in
+`design-preview-defects.json`.

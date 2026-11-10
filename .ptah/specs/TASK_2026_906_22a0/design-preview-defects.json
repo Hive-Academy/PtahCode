@@ -1,0 +1,64 @@
+{
+  "head": "3a64dd228",
+  "deviation": "The plan put Focus and Attach in a rail inside the dock container, with the resize handle. The code shows a separate rail with a fixed width of 96 px (w-24) in place of the dock. The rail has the label \"Git window\" and two text buttons, Focus and Attach, at the top. The remaining height of the rail is empty. The Git tab at the right edge stays and focuses the Git window. No second dock mounts. Effect for the user: the main window gets back the dock width minus 96 px, the rail cannot be resized or collapsed, and it uses 96 px for two small buttons. Decide: accept the 96 px rail as it is, or ask for a narrower rail (or for the two actions in the Git tab strip) as a follow-up.",
+  "omit": [],
+  "defects": [
+    {
+      "title": "Git window has no surface of its own (translucent)",
+      "detail": "The Git window shows the bare wallpaper behind the header row (\"Git\" / Attach), below the file tree, and in most of the window in the no-changes, no-repository and loading states. The docked dock sits in a glass panel (electron-git-dock, data-glass-surface=\"chrome\"); the child component has no such container and the shell does not fill the window height. Not a one-line fix: give ptah-git-window a full-height flex host with the dock surface role, then capture again.",
+      "where": "Frames 2, 5 (all detached captures). File: apps/ptah-extension-webview/src/app/git-window/git-window.component.ts"
+    },
+    {
+      "title": "Git window does not follow a theme change",
+      "detail": "The Git window takes the theme when it opens. When the user changes the theme in the main window, the open Git window keeps the old theme until it is closed and opened again. The capture shows a dark Git window while the main window is in Ptah Glass Light.",
+      "where": "Frame \"theme not followed\" in group 2."
+    },
+    {
+      "title": "Detached rail: 96 px column with two text buttons",
+      "detail": "Focus and Attach are ghost buttons with no icon and no border, so they look like labels. The rail is empty below them for the full height. This is the decision 16 deviation.",
+      "where": "Frames in group 3."
+    },
+    {
+      "title": "Detach button stands alone in the no-repository state",
+      "detail": "With no repository the dock header is empty, and the Detach button is alone at the right end of an empty row below the scope bar. It is not aligned with the scope bar controls.",
+      "where": "Frame \"Folder that is not a repository, docked\"."
+    },
+    {
+      "title": "Detach and Attach have no icon",
+      "detail": "In the dock header, Detach is a text-only button after Pull and Push, which have icons. In the Git window header, Attach is a text-only button. A user can read Detach as a Git action of the same group.",
+      "where": "Frames 1 and 2."
+    },
+    {
+      "title": "Content is clipped at the default width of the Git window",
+      "detail": "At the default window width (about 600 px) the hunk header text is cut (\"@@ -7…\") and the right end of the diff lines is outside the window. The window can be resized.",
+      "where": "Frame 2."
+    },
+    {
+      "title": "Focus ring color is different in the two themes",
+      "detail": "The keyboard focus ring on Detach, Focus and Attach is white in the dark theme and gold in Ptah Glass Light. The ring is visible and not clipped in the two themes. Listed for a check against the design tokens.",
+      "where": "Frames \"Keyboard focus\" in groups 1 and 3."
+    },
+    {
+      "title": "Raw Git error text in the error state (not from this PR)",
+      "detail": "A failed Pull shows the full Git message in four lines of red text, with the branch name on a line of its own. The dock shows the same text when it is docked.",
+      "where": "Frame \"error state\" in group 5."
+    }
+  ],
+  "notCaptured": [
+    {
+      "title": "Session switch (follow session)",
+      "detail": "The Git window follows the active session. The capture runs on a new, empty home folder with one workspace and no session, so no second session scope exists to switch to.",
+      "where": ""
+    },
+    {
+      "title": "Error states of the window life cycle",
+      "detail": "The rail error text (failed open, focus or attach) and the Git window \"Could not load the Git scope.\" alert with Retry need a failed RPC. The capture uses real RPC handlers only, and these calls did not fail.",
+      "where": ""
+    },
+    {
+      "title": "Light first paint of the Git window",
+      "detail": "The \"Resolving Git scope…\" frame is captured in the dark theme only.",
+      "where": ""
+    }
+  ]
+}

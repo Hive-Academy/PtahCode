@@ -14,6 +14,10 @@ import { createScratchRepo } from '../../support/git-scratch-repo';
  * handlers. Nothing is mocked. Output: JPEG files in PTAH_PREVIEW_OUT
  * (default: dist/apps/ptah-electron-e2e/git-dock-preview-shots).
  *
+ * The Git window takes the theme when it opens and does not follow a later
+ * theme change of the main window. Thus each detached state opens a new Git
+ * window for each theme.
+ *
  * Each optional state runs in `attempt()`: a state that cannot be reached is
  * written to the log and the capture continues with the next state.
  */
@@ -54,6 +58,7 @@ async function setTheme(page: Page, mode: Mode): Promise<void> {
     await expect(panel).toBeHidden();
   }
   await page.waitForTimeout(600);
+  await page.mouse.move(520, 520);
 }
 
 async function shoot(
@@ -63,7 +68,12 @@ async function shoot(
 ): Promise<void> {
   mkdirSync(OUT, { recursive: true });
   const path = join(OUT, `${name}.jpg`);
-  const base = { path, type: 'jpeg', quality: 78, animations: 'disabled' } as const;
+  const base = {
+    path,
+    type: 'jpeg',
+    quality: 60,
+    animations: 'disabled',
+  } as const;
   if (!target) {
     await page.screenshot(base);
     return;
@@ -104,19 +114,38 @@ async function sizeMainWindow(app: ElectronApplication): Promise<void> {
   });
 }
 
-/** Captures one state in the two themes. The theme menu is in the main window. */
+/** Main window capture, cropped to the dock column (nav bar included). */
+async function shootDock(main: Page, name: string): Promise<void> {
+  const box = await main.locator('.electron-git-dock').first().boundingBox();
+  if (!box) throw new Error(`no dock box for ${name}`);
+  const size = await main.evaluate(() => ({
+    w: window.innerWidth,
+    h: window.innerHeight,
+  }));
+  const x = Math.max(0, box.x - 24);
+  mkdirSync(OUT, { recursive: true });
+  await main.screenshot({
+    path: join(OUT, `${name}.jpg`),
+    type: 'jpeg',
+    quality: 60,
+    animations: 'disabled',
+    clip: { x, y: 0, width: size.w - x, height: size.h },
+  });
+}
+
+/** Captures one state of the main window in the two themes. */
 async function both(
   main: Page,
-  name: string,
   capture: (mode: Mode) => Promise<void>,
 ): Promise<void> {
   for (const mode of MODES) {
     await setTheme(main, mode);
-    await main.mouse.move(520, 520);
     await capture(mode);
   }
-  console.log(`[git-dock-preview] captured: ${name}`);
 }
+
+const rail = (main: Page): Locator =>
+  main.locator('[data-testid="detached-git-rail"]');
 
 async function detach(app: ElectronApplication, main: Page): Promise<Page> {
   const opened = app.waitForEvent('window', { timeout: 30_000 });
@@ -124,6 +153,22 @@ async function detach(app: ElectronApplication, main: Page): Promise<Page> {
   const child = await opened;
   await child.waitForLoadState('domcontentloaded');
   return child;
+}
+
+async function ready(child: Page): Promise<void> {
+  await expect(child.locator('ptah-review-shell').first()).toBeVisible({
+    timeout: 60_000,
+  });
+  await child.waitForTimeout(1_500);
+}
+
+/** Re-dock with the Attach button of the rail in the main window. */
+async function attach(main: Page, child: Page): Promise<void> {
+  const closed = child.waitForEvent('close', { timeout: 30_000 });
+  await rail(main).getByRole('button', { name: 'Attach' }).click();
+  await closed;
+  await expect(rail(main)).toHaveCount(0);
+  await expect(main.locator('ptah-review-shell').first()).toBeVisible();
 }
 
 test.describe('design preview: detachable Git dock', () => {
@@ -146,15 +191,12 @@ test.describe('design preview: detachable Git dock', () => {
       timeout: 60_000,
     });
     const header = main.locator('[data-testid="git-dock-main-header"]');
-    const rail = main.locator('[data-testid="detached-git-rail"]');
 
     // 1. Docked, with changes.
-    await both(main, '01-docked', async (mode) => {
+    await both(main, async (mode) => {
       await shoot(main, `${mode}-01-docked`);
       await shoot(main, `${mode}-01b-docked-header`, header);
-    });
-    await attempt('01c detach button keyboard focus', async () => {
-      await both(main, '01c-detach-focus', async (mode) => {
+      await attempt(`${mode} 01c detach button keyboard focus`, async () => {
         await main.locator('[data-testid="git-dock-detach"]').focus();
         await main.keyboard.press('Shift+Tab');
         await main.keyboard.press('Tab');
@@ -162,69 +204,57 @@ test.describe('design preview: detachable Git dock', () => {
       });
     });
 
-    // 5b. Loading state of the child, then 2. the detached window.
-    await setTheme(main, 'dark');
-    let child = await detach(electronApp, main);
-    await attempt('05b child first paint', () =>
-      shoot(child, 'dark-05b-child-first-paint'),
-    );
-    await expect(child.locator('ptah-review-shell').first()).toBeVisible({
-      timeout: 60_000,
-    });
-    await expect(rail).toBeVisible();
-    await attempt('child diff sections', () =>
-      expect(child.locator('ptah-file-diff-section').first()).toBeVisible({
-        timeout: 30_000,
-      }),
-    );
-
-    await both(main, '02-03-detached', async (mode) => {
-      await child.waitForTimeout(800);
-      await shoot(child, `${mode}-02-detached-window`);
-      // 3. The main window while the dock is detached.
-      await shoot(main, `${mode}-03-main-detached-rail`);
-      await shoot(main, `${mode}-03b-rail-close-up`, rail);
-    });
-    await attempt('03c rail keyboard focus', async () => {
-      await both(main, '03c-rail-focus', async (mode) => {
-        await rail.getByRole('button', { name: 'Focus' }).focus();
-        await main.keyboard.press('Tab');
-        await shoot(main, `${mode}-03c-rail-focus-ring`, rail);
-      });
-    });
-
-    // 5c. Error state in the detached window: Fetch with no remote.
-    await attempt('05c child fetch error', async () => {
-      await child.locator('[data-testid="git-fetch-button"]').click();
-      await child.waitForTimeout(2_500);
-      for (const mode of MODES) {
-        await setTheme(main, mode);
-        await child.waitForTimeout(500);
-        await shoot(child, `${mode}-05c-detached-fetch-error`);
+    // 2 and 3. Detached window and the main window with the rail, then
+    // 5c. an error state in the Git window, then 4. re-dock with Attach.
+    for (const mode of MODES) {
+      await setTheme(main, mode);
+      const child = await detach(electronApp, main);
+      if (mode === 'dark') {
+        await attempt('05b child first paint', () =>
+          shoot(child, 'dark-05b-child-first-paint'),
+        );
       }
-    });
-
-    // 4. Re-dock with the Attach button of the rail.
-    const closed = child.waitForEvent('close', { timeout: 30_000 });
-    await rail.getByRole('button', { name: 'Attach' }).click();
-    await closed;
-    await expect(dock).toBeVisible();
-    await expect(rail).toHaveCount(0);
-    await both(main, '04-redocked-attach', (mode) =>
-      shoot(main, `${mode}-04-redocked-after-attach`),
-    );
-
-    // 4b. Re-dock when the user closes the Git window.
-    await attempt('04b re-dock after window close', async () => {
-      child = await detach(electronApp, main);
-      await expect(child.locator('ptah-review-shell').first()).toBeVisible({
-        timeout: 60_000,
+      await ready(child);
+      await expect(rail(main)).toBeVisible();
+      await attempt(`${mode} child diff sections`, () =>
+        expect(child.locator('ptah-file-diff-section').first()).toBeVisible({
+          timeout: 30_000,
+        }),
+      );
+      await shoot(child, `${mode}-02-detached-window`);
+      await shoot(main, `${mode}-03-main-detached-rail`);
+      await shoot(main, `${mode}-03b-rail-close-up`, rail(main));
+      await attempt(`${mode} 03c rail keyboard focus`, async () => {
+        await rail(main).getByRole('button', { name: 'Focus' }).focus();
+        await main.keyboard.press('Tab');
+        await shoot(main, `${mode}-03c-rail-focus-ring`, rail(main));
+        await main.mouse.click(520, 520);
       });
+      await attempt(`${mode} 05c child pull error`, async () => {
+        // The scratch repository has no remote: Pull fails.
+        await child.locator('[data-testid="git-pull-button"]').click();
+        await child.waitForTimeout(4_000);
+        await shoot(child, `${mode}-05c-detached-pull-error`);
+      });
+      await attach(main, child);
+      await main.mouse.move(520, 520);
+      await shootDock(main, `${mode}-04-redocked-after-attach`);
+    }
+
+    // 2x. The Git window opened in dark, then the main window changed to light.
+    await attempt('02x theme not followed', async () => {
+      await setTheme(main, 'dark');
+      const child = await detach(electronApp, main);
+      await ready(child);
+      await setTheme(main, 'light');
+      await child.waitForTimeout(1_500);
+      await shoot(child, 'light-02x-detached-theme-not-followed');
+      // 4b. Re-dock when the user closes the Git window.
       await child.close();
-      await expect(rail).toHaveCount(0, { timeout: 30_000 });
+      await expect(rail(main)).toHaveCount(0, { timeout: 30_000 });
       await expect(dock).toBeVisible();
-      await both(main, '04b-redocked-close', (mode) =>
-        shoot(main, `${mode}-04b-redocked-after-window-close`),
+      await both(main, (m) =>
+        shootDock(main, `${m}-04b-redocked-after-window-close`),
       );
     });
 
@@ -235,17 +265,14 @@ test.describe('design preview: detachable Git dock', () => {
       await expect(main.locator('ptah-file-diff-section')).toHaveCount(0, {
         timeout: 45_000,
       });
-      await both(main, '05a-no-changes', (mode) =>
-        shoot(main, `${mode}-05a-docked-no-changes`),
-      );
-      child = await detach(electronApp, main);
-      await expect(child.locator('ptah-review-shell').first()).toBeVisible({
-        timeout: 60_000,
-      });
-      await both(main, '05a-no-changes-detached', async (mode) => {
-        await child.waitForTimeout(800);
+      for (const mode of MODES) {
+        await setTheme(main, mode);
+        await shootDock(main, `${mode}-05a-docked-no-changes`);
+        const child = await detach(electronApp, main);
+        await ready(child);
         await shoot(child, `${mode}-05a-detached-no-changes`);
-      });
+        await attach(main, child);
+      }
     });
   });
 });
@@ -272,18 +299,16 @@ noRepoTest.describe('design preview: detachable Git dock, no repository', () => 
       await ui.goto('git');
       await expect(main.locator('ptah-review-shell').first()).toBeVisible();
       await main.waitForTimeout(3_000);
-      await both(main, '06-no-repository', (mode) =>
-        shoot(main, `${mode}-06-docked-no-repository`),
-      );
-      await attempt('06b no repository, detached', async () => {
-        const child = await detach(electronApp, main);
-        await child.waitForTimeout(4_000);
-        await both(main, '06b-no-repository-detached', async (mode) => {
-          await child.waitForTimeout(800);
+      for (const mode of MODES) {
+        await setTheme(main, mode);
+        await shootDock(main, `${mode}-06-docked-no-repository`);
+        await attempt(`${mode} 06b no repository, detached`, async () => {
+          const child = await detach(electronApp, main);
+          await ready(child);
           await shoot(child, `${mode}-06b-detached-no-repository`);
-          await shoot(main, `${mode}-06c-main-no-repository-rail`);
+          await attach(main, child);
         });
-      });
+      }
     },
   );
 });

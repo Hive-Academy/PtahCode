@@ -24,7 +24,8 @@ const groups = [
     ['01c-detach-focus', 'Keyboard focus on the Detach button.'],
   ]],
   ['2. Git dock detached into its own window', [
-    ['02-detached-window', 'The Git window (a second BrowserWindow). It reads Git data through the real RPC handlers.'],
+    ['02-detached-window', 'The Git window (a second BrowserWindow), opened in each theme. It reads Git data through the real RPC handlers.'],
+    ['02x-detached-theme-not-followed', 'Theme not followed: the Git window opened in the dark theme, then the main window changed to Ptah Glass Light. The Git window stays dark.'],
   ]],
   ['3. Main window while the dock is detached (the detached rail)', [
     ['03-main-detached-rail', 'Main window. A separate 96 px rail replaces the dock.', 'deviation'],
@@ -40,9 +41,8 @@ const groups = [
     ['05a-detached-no-changes', 'Repository with no changes, detached.'],
     ['06-docked-no-repository', 'Folder that is not a repository, docked.'],
     ['06b-detached-no-repository', 'Folder that is not a repository, detached.'],
-    ['06c-main-no-repository-rail', 'Folder that is not a repository: main window with the rail.'],
     ['05b-child-first-paint', 'First paint of the Git window, before the review shell loads (dark only).'],
-    ['05c-detached-fetch-error', 'Git window after Fetch in a repository with no remote (error state).'],
+    ['05c-detached-pull-error', 'Git window after a failed Pull in a repository with no remote (error state).'],
   ]],
 ];
 
