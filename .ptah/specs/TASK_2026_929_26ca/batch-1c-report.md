@@ -1,4 +1,4 @@
-﻿# Batch 1c Execution Report â€” Proposed Button Family Look & Gallery (`TASK_2026_929_26ca`)
+﻿# Batch 1c Execution Report — Proposed Button Family Look & Gallery (`TASK_2026_929_26ca`)
 
 ## 1. Summary of Changes
 
@@ -16,12 +16,12 @@ Implemented the proposed opt-in token-based look for Family 1 (`ptahButton`, `pt
 | `libs/frontend/ui/src/lib/button/button.directive.ts` | Modified | 25 | Removed deprecated `iconOnly` input and `[class.btn-square]` host binding after confirming zero remaining callers across `libs/` and `apps/`. |
 | `apps/ptah-extension-webview/src/styles.css` | Modified | 4117 | Added single `@import '../../../libs/frontend/ui/src/lib/button/ptah-button.css';` at line 17 immediately after `ptah-tokens.css`. |
 | `apps/ptah-extension-webview/src/app/ui-gallery/gallery-button-family.component.ts` | Created | 54 | Standalone `OnPush` gallery section (`id="family-button"`, title `"Button family"`) rendering side-by-side `Current` (unscoped) and `Proposed` (`data-ptah-look="next"`) columns that stack below `1024 px`. |
-| `apps/ptah-extension-webview/src/app/ui-gallery/gallery-button-column.component.ts` | Created | 220 | Standalone `OnPush` column renderer with 5 variants Ã— 3 sizes matrix (15 specimens), 5 variants Ã— 6 states at `sm` (30 specimens), 3 variants Ã— 3 sizes `ptahIconButton` matrix (9 specimens), leading icon + label button, and long-text button, each with a caption. |
+| `apps/ptah-extension-webview/src/app/ui-gallery/gallery-button-column.component.ts` | Created | 220 | Standalone `OnPush` column renderer with 5 variants × 3 sizes matrix (15 specimens), 5 variants × 6 states at `sm` (30 specimens), 3 variants × 3 sizes `ptahIconButton` matrix (9 specimens), leading icon + label button, and long-text button, each with a caption. |
 | `apps/ptah-extension-webview/src/app/ui-gallery/gallery-components.component.ts` | Modified | 268 | Migrated `<button ptahButton [iconOnly]="true" aria-label="More actions">` to `<button ptahIconButton label="More actions" type="button">`. |
 | `apps/ptah-extension-webview/src/app/ui-gallery.component.ts` | Modified | 149 | Registered `GalleryButtonFamilyComponent` and added `{ id: 'family-button', label: 'Button family' }` to `sections`. |
 | `apps/ptah-extension-webview/src/app/ui-gallery.component.spec.ts` | Modified | 222 | Added spec verifying `#family-button`, identical specimen counts across `Current` and `Proposed` columns, forced state attributes, `ptahIconButton` specimens, and exclusive `data-ptah-look="next"` scoping on the proposed column. |
 | `apps/ptah-extension-webview/src/app/app.routes.spec.ts` | Modified | 177 | Added whitespace-tolerant source assertions for `<ptah-gallery-button-family`, `ptahIconButton`, and absence of `iconOnly` in the gallery. |
-| `apps/ptah-extension-webview/src/app/design-tokens.spec.ts` | Modified | 167 | Added `ptah-button.css` import order assertion, outer theme token declarations, and WCAG contrast assertions for `base-content-muted` (â‰¥ 4.5:1 across all 7 surface levels), button variant text/fill (â‰¥ 4.5:1), and control edge / focus ring (â‰¥ 3.0:1) in `ptah-glass` and `ptah-glass-light`. |
+| `apps/ptah-extension-webview/src/app/design-tokens.spec.ts` | Modified | 167 | Added `ptah-button.css` import order assertion, outer theme token declarations, and WCAG contrast assertions for `base-content-muted` (≥ 4.5:1 across all 7 surface levels), button variant text/fill (≥ 4.5:1), and control edge / focus ring (≥ 3.0:1) in `ptah-glass` and `ptah-glass-light`. |
 | `.ptah/specs/TASK_2026_929_26ca/family-1-look.md` | Created | 296 | Deliverable 1: Complete Family 1 look sheet following `look-approval-checklist.md`. |
 | `.ptah/specs/TASK_2026_929_26ca/batch-1c-report.md` | Created | 108 | Deliverable 2: Batch 1c execution report. |
 
@@ -42,11 +42,11 @@ Implemented the proposed opt-in token-based look for Family 1 (`ptahButton`, `pt
 ## 4. Checks, Evidence & Tool Availability
 
 - **Skills loaded**: Read and applied `.claude/skills/angular-frontend-patterns/SKILL.md`, `.claude/skills/ui-ux-designer/SKILL.md`, and `.claude/skills/frontend-design/SKILL.md`.
-- **Browser MCP tools**: screenshot tools were available to the independent reviewer, who inspected a static dark-theme button-state artifact. The Electron app was not launched; screenshot capture paths and instructions are recorded in `family-1-look.md` Â§10 (`## Screenshots needed`).
+- **Browser MCP tools**: screenshot tools were available to the independent reviewer, who inspected a static dark-theme button-state artifact. The Electron app was not launched; screenshot capture paths and instructions are recorded in `family-1-look.md` §10 (`## Screenshots needed`).
 - **`iconOnly` workspace audit**: Searched all `.ts` and `.html` files across `libs/` and `apps/`; confirmed `gallery-components.component.ts` was the sole template using `iconOnly`, migrated it to `ptahIconButton`, and removed `iconOnly` from `PtahButtonDirective`.
 - **Contrast verification**: Computed and guarded via `culori` (`wcagContrast`) in `apps/ptah-extension-webview/src/app/design-tokens.spec.ts`:
-  - `base-content-muted` (`--bcm`) clears `10.13:1â€“13.07:1` in `ptah-glass` and `5.25:1â€“6.49:1` (`6.86:1â€“8.49:1` with glass mode active) in `ptah-glass-light` across `base-100`, `base-200`, `base-300`, `surface-0`, `surface-1`, `surface-2`, and `surface-3`.
-  - All 5 proposed button variants clear `â‰¥ 4.5:1` label-to-fill contrast in both themes, and `--ptah-control-edge` (`3.82â€“4.93:1` dark, `3.39â€“4.19:1` light) and `--ptah-focus-ring-color` (`8.91â€“11.50:1` dark, `5.88â€“7.26:1` light) clear `â‰¥ 3.0:1` on `base-100`, `base-200`, and `base-300`.
+  - `base-content-muted` (`--bcm`) clears `10.13:1–13.07:1` in `ptah-glass` and `5.25:1–6.49:1` (`6.86:1–8.49:1` with glass mode active) in `ptah-glass-light` across `base-100`, `base-200`, `base-300`, `surface-0`, `surface-1`, `surface-2`, and `surface-3`.
+  - All 5 proposed button variants clear `≥ 4.5:1` label-to-fill contrast in both themes, and `--ptah-control-edge` (`3.82–4.93:1` dark, `3.39–4.19:1` light) and `--ptah-focus-ring-color` (`8.91–11.50:1` dark, `5.88–7.26:1` light) clear `≥ 3.0:1` on `base-100`, `base-200`, and `base-300`.
 
 ---
 
@@ -81,8 +81,8 @@ Output of 4 successful tasks were not shown. Run with --verbose or --output-styl
 - ptah-extension-webview
 
 
-âˆš  nx run @ptah-extension/ui:test  [local cache]
-âˆš  nx run ptah-extension-webview:test
+√  nx run @ptah-extension/ui:test  [local cache]
+√  nx run ptah-extension-webview:test
 
 
 

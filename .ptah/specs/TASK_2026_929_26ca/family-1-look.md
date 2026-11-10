@@ -1,4 +1,4 @@
-﻿# Family 1 Look Sheet â€” Button, Icon Button & Tooltip (`TASK_2026_929_26ca` Batch 1c)
+﻿# Family 1 Look Sheet — Button, Icon Button & Tooltip (`TASK_2026_929_26ca` Batch 1c)
 
 - **Owner library**: `libs/frontend/ui/src/lib/button/` (`ptahButton`, `ptahIconButton`, `ptahTooltip`)
 - **Opt-in look stylesheet**: `libs/frontend/ui/src/lib/button/ptah-button.css` (scoped to `[data-ptah-look='next']`)
@@ -30,9 +30,9 @@ Every rule in `libs/frontend/ui/src/lib/button/ptah-button.css` uses `--ptah-*` 
 
 | Token | Contract expression | Resolved (`ptah-glass` dark) | Resolved (`ptah-glass-light` light) | Role in Button Family |
 | --- | --- | --- | --- | --- |
-| `--ptah-control-h-xs` | `1.5rem` | `24 px` | `24 px` | Compact control height (`size="xs"`), square icon button `24 Ã— 24 px` |
-| `--ptah-control-h-sm` | `2rem` | `32 px` | `32 px` | Default control height (`size="sm"`), square icon button `32 Ã— 32 px` |
-| `--ptah-control-h-md` | `2.5rem` | `40 px` | `40 px` | Hero/CTA control height (`size="md"`), square icon button `40 Ã— 40 px` |
+| `--ptah-control-h-xs` | `1.5rem` | `24 px` | `24 px` | Compact control height (`size="xs"`), square icon button `24 × 24 px` |
+| `--ptah-control-h-sm` | `2rem` | `32 px` | `32 px` | Default control height (`size="sm"`), square icon button `32 × 32 px` |
+| `--ptah-control-h-md` | `2.5rem` | `40 px` | `40 px` | Hero/CTA control height (`size="md"`), square icon button `40 × 40 px` |
 | `--ptah-control-px-xs` | `var(--ptah-space-2)` | `8 px` (`0.5rem`) | `8 px` (`0.5rem`) | Horizontal padding for `size="xs"` |
 | `--ptah-control-px` | `var(--ptah-space-3)` | `12 px` (`0.75rem`) | `12 px` (`0.75rem`) | Horizontal padding for `size="sm"` |
 | `--ptah-control-px-md` | `var(--ptah-space-4)` | `16 px` (`1rem`) | `16 px` (`1rem`) | Horizontal padding for `size="md"` |
@@ -92,63 +92,63 @@ Every rule in `libs/frontend/ui/src/lib/button/ptah-button.css` uses `--ptah-*` 
 
 ---
 
-## 3. White Space & Layout Contract (`foundation-tokens.md` Â§3 & Â§5)
+## 3. White Space & Layout Contract (`foundation-tokens.md` §3 & §5)
 
 1. **Three discrete heights only**:
    - `xs`: `24 px` (`--ptah-control-h-xs`), horizontal padding `8 px` (`--ptah-control-px-xs`), icon `12 px` (`--ptah-icon-xs`).
    - `sm` (default): `32 px` (`--ptah-control-h-sm`), horizontal padding `12 px` (`--ptah-control-px`), icon `16 px` (`--ptah-icon-sm`).
    - `md`: `40 px` (`--ptah-control-h-md`), horizontal padding `16 px` (`--ptah-control-px-md`), icon `20 px` (`--ptah-icon-md`).
-   - `ptahIconButton` (`.btn-square`): width and height both equal the control height (`24 Ã— 24 px`, `32 Ã— 32 px`, `40 Ã— 40 px`) with zero horizontal padding (`padding-inline: 0`).
+   - `ptahIconButton` (`.btn-square`): width and height both equal the control height (`24 × 24 px`, `32 × 32 px`, `40 × 40 px`) with zero horizontal padding (`padding-inline: 0`).
 2. **Internal icon-to-label gap**: `8 px` (`--ptah-gap-inline`).
 3. **Zero-width-jump busy state (`[aria-busy='true']`)**:
    - On icon buttons (`.btn-square`) and buttons with a leading `<svg>`, the leading SVG is visually hidden but keeps its layout space; the `12 px` CSS `::before` spinner is centered over the button.
    - On text-only buttons, the spinner is absolutely positioned over the visually hidden label. Padding and layout remain unchanged, keeping total button width constant without inserting a DOM node.
-4. **Group & surface white-space rules (`foundation-tokens.md` Â§3)**:
+4. **Group & surface white-space rules (`foundation-tokens.md` §3)**:
    - Sibling buttons in a group use `--ptah-gap-controls` (`8 px`).
    - The one `primary` action on a surface is separated from adjacent `secondary`/`ghost` actions by `--ptah-space-3` (`12 px`) to `--ptah-gap-field` (`16 px`), or aligned to the opposite edge of the toolbar/footer.
    - Distance inside a control group (`8 px`) is always smaller than distance between groups (`24 px` `--ptah-gap-group` or `32 px` `--ptah-gap-section`), and at least 25% of any viewport remains open `surface-0`/`surface-1`.
 
 ---
 
-## 4. Visual Hierarchy & Typography (`foundation-tokens.md` Â§4)
+## 4. Visual Hierarchy & Typography (`foundation-tokens.md` §4)
 
 - **Type roles**:
   - `size="xs"` and `size="sm"` use the **Label** role (`--ptah-text-label-size: 12 px`, `--ptah-text-label-leading: 16 px`, `--ptah-text-label-weight: 500`).
   - `size="md"` uses the **Group Title** size (`--ptah-text-group-title-size: 14 px`, `--ptah-text-group-title-leading: 20 px`, `--ptah-text-group-title-weight: 600`).
   - **Hard floor**: Button labels never use the `11 px` caption role (`--ptah-text-caption-size` is forbidden on actions) and never apply `text-transform: uppercase` (`text-transform: none` is enforced on `.btn`).
 - **Emphasis order at a glance**:
-  1. `primary` â€” solid brand gold/amber fill (`#e4b94a` dark / `#7c5700` light), highest luminance/chromatic contrast against the surface.
-  2. `danger` â€” solid semantic crimson/coral fill (`#ff6b6b` dark / `#cf3a3a` light), unmistakable for destructive actions.
-  3. `secondary` â€” quiet `--surface-2` fill with a crisp â‰¥ 3:1 border (`--ptah-control-edge`), clearly interactive without competing with `primary`.
-  4. `ghost` â€” borderless and transparent at rest, surfacing its `--surface-3` fill only on hover/active.
-  5. `link` â€” inline accent text (`--ptah-accent-ink`) with zero box chrome at rest and underline on hover/focus.
+  1. `primary` — solid brand gold/amber fill (`#e4b94a` dark / `#7c5700` light), highest luminance/chromatic contrast against the surface.
+  2. `danger` — solid semantic crimson/coral fill (`#ff6b6b` dark / `#cf3a3a` light), unmistakable for destructive actions.
+  3. `secondary` — quiet `--surface-2` fill with a crisp ≥ 3:1 border (`--ptah-control-edge`), clearly interactive without competing with `primary`.
+  4. `ghost` — borderless and transparent at rest, surfacing its `--surface-3` fill only on hover/active.
+  5. `link` — inline accent text (`--ptah-accent-ink`) with zero box chrome at rest and underline on hover/focus.
 
 ---
 
-## 5. Five Reference Pages (`button-research.md`) â€” Variant & Size Mapping
+## 5. Five Reference Pages (`button-research.md`) — Variant & Size Mapping
 
 1. **`libs/frontend/chat/src/lib/settings/providers/connection-drawer/credentials-tab.component.ts` (`CredentialsTabComponent`)**
-   - `Verify` / `Save` primary submission CTA â†’ `ptahButton variant="primary" size="sm" [busy]="saving()"`
-   - `Browse` file-picker action â†’ `ptahButton variant="secondary" size="sm"`
-   - `Use another account` / `Switch mode` inline action â†’ `ptahButton variant="secondary" size="xs"`
-   - `Disconnect` / `Remove credentials` destructive action â†’ `ptahButton variant="danger" size="sm"`
+   - `Verify` / `Save` primary submission CTA → `ptahButton variant="primary" size="sm" [busy]="saving()"`
+   - `Browse` file-picker action → `ptahButton variant="secondary" size="sm"`
+   - `Use another account` / `Switch mode` inline action → `ptahButton variant="secondary" size="xs"`
+   - `Disconnect` / `Remove credentials` destructive action → `ptahButton variant="danger" size="sm"`
 2. **`libs/frontend/marketplace/src/lib/pages/connectors/connectors-page.component.html` (`ConnectorsPageComponent`)**
-   - Error banner `Retry` action â†’ `ptahButton variant="secondary" size="xs"`
-   - Search input clear (`Ã—`) button â†’ `ptahIconButton variant="ghost" size="xs" label="Clear search"`
-   - Category filter pills (`All`, category chips) â†’ `ptahButton variant="ghost" size="xs"` with `[attr.aria-pressed]`
+   - Error banner `Retry` action → `ptahButton variant="secondary" size="xs"`
+   - Search input clear (`×`) button → `ptahIconButton variant="ghost" size="xs" label="Clear search"`
+   - Category filter pills (`All`, category chips) → `ptahButton variant="ghost" size="xs"` with `[attr.aria-pressed]`
 3. **`libs/frontend/cron-scheduler-ui/src/lib/components/cron-scheduler-tab.component.ts` (`CronSchedulerTabComponent`)**
-   - Toolbar `Refresh` button â†’ `ptahIconButton variant="ghost" size="sm" label="Refresh schedules" [busy]="loading()"`
-   - Toolbar `New Schedule` button â†’ `ptahButton variant="primary" size="sm"`
-   - Empty state `Create First Schedule` CTA â†’ `ptahButton variant="primary" size="sm"`
-   - Error banner `Dismiss` action â†’ `ptahButton variant="ghost" size="xs"`
+   - Toolbar `Refresh` button → `ptahIconButton variant="ghost" size="sm" label="Refresh schedules" [busy]="loading()"`
+   - Toolbar `New Schedule` button → `ptahButton variant="primary" size="sm"`
+   - Empty state `Create First Schedule` CTA → `ptahButton variant="primary" size="sm"`
+   - Error banner `Dismiss` action → `ptahButton variant="ghost" size="xs"`
 4. **`libs/frontend/chat/src/lib/settings/license/license-status-card.component.ts` (`LicenseStatusCardComponent`)**
-   - `Refresh` license status button â†’ `ptahButton variant="ghost" size="xs" [busy]="refreshing()"`
-   - `Deactivate` license button â†’ `ptahButton variant="secondary" size="xs"`
-   - `Activate` license submit button â†’ `ptahButton variant="primary" size="sm" [busy]="activating()"`
+   - `Refresh` license status button → `ptahButton variant="ghost" size="xs" [busy]="refreshing()"`
+   - `Deactivate` license button → `ptahButton variant="secondary" size="xs"`
+   - `Activate` license submit button → `ptahButton variant="primary" size="sm" [busy]="activating()"`
 5. **`libs/frontend/marketplace/src/lib/external-marketplaces.component.ts` (`ExternalMarketplacesComponent`)**
-   - `Add` marketplace submit button â†’ `ptahButton variant="primary" size="sm" [busy]="adding()"`
-   - Card `Update` button â†’ `ptahButton variant="ghost" size="xs" [busy]="updating()"`
-   - Card `Remove` button â†’ `ptahIconButton variant="ghost" size="xs" label="Remove marketplace"` (or `ptahButton variant="danger" size="xs"` on confirmation)
+   - `Add` marketplace submit button → `ptahButton variant="primary" size="sm" [busy]="adding()"`
+   - Card `Update` button → `ptahButton variant="ghost" size="xs" [busy]="updating()"`
+   - Card `Remove` button → `ptahIconButton variant="ghost" size="xs" label="Remove marketplace"` (or `ptahButton variant="danger" size="xs"` on confirmation)
 
 ---
 
@@ -157,40 +157,40 @@ Every rule in `libs/frontend/ui/src/lib/button/ptah-button.css` uses `--ptah-*` 
 No product page is modified in Batch 1c. The before/after outcomes below are predictions to confirm on Electron screenshots with equal viewport and data. When the migration batch runs and the `[data-ptah-look='next']` scope is lifted, these five pages will experience the largest visible improvements:
 
 1. **`credentials-tab.component.ts` (Provider Connection Drawer)**
-   - **Before**: Hand-rolled `<button class="rounded-lg border border-base-300 bg-base-200 px-3 py-1.5 text-xs ...">` and raw primary buttons with custom hover opacity, inconsistent heights (`26â€“34 px`), and no shared focus ring.
-   - **After**: `ptahButton` `primary` (`32 px`), `secondary` (`32 px` / `24 px`), and `danger` (`32 px`) with uniform `10 px` radius, â‰¥ 3:1 control edge on `secondary`, zero-width-jump busy spinner, and `--ptah-focus-ring-color` `2 px` outline.
+   - **Before**: Hand-rolled `<button class="rounded-lg border border-base-300 bg-base-200 px-3 py-1.5 text-xs ...">` and raw primary buttons with custom hover opacity, inconsistent heights (`26–34 px`), and no shared focus ring.
+   - **After**: `ptahButton` `primary` (`32 px`), `secondary` (`32 px` / `24 px`), and `danger` (`32 px`) with uniform `10 px` radius, ≥ 3:1 control edge on `secondary`, zero-width-jump busy spinner, and `--ptah-focus-ring-color` `2 px` outline.
 2. **`connectors-page.component.html` (Marketplace Connectors)**
    - **Before**: Raw `<button class="px-2.5 py-1 text-xs rounded-md ...">` filter pills, ad-hoc clear search button without tooltip, and `btn btn-xs btn-outline` retry button using `11 px` text.
-   - **After**: `ptahButton` (`ghost` `xs` `24 px` filter buttons with `12 px` label typography) and `ptahIconButton` (`ghost` `xs` `24 Ã— 24 px` with `ptahTooltip` on hover/keyboard focus).
+   - **After**: `ptahButton` (`ghost` `xs` `24 px` filter buttons with `12 px` label typography) and `ptahIconButton` (`ghost` `xs` `24 × 24 px` with `ptahTooltip` on hover/keyboard focus).
 3. **`cron-scheduler-tab.component.ts` (Cron Scheduler)**
    - **Before**: Mix of DaisyUI `btn btn-sm btn-ghost btn-square`, `btn btn-primary btn-sm`, and raw `<span class="loading loading-spinner loading-xs">` DOM nodes that shift button width when toggling busy state.
-   - **After**: `ptahIconButton` (`ghost` `sm` `32 Ã— 32 px` with accessible tooltip) and `ptahButton` (`primary` `sm` `32 px`) using `[busy]` with the CSS `::before` spinner and zero width shift.
+   - **After**: `ptahIconButton` (`ghost` `sm` `32 × 32 px` with accessible tooltip) and `ptahButton` (`primary` `sm` `32 px`) using `[busy]` with the CSS `::before` spinner and zero width shift.
 4. **`license-status-card.component.ts` (Settings License Card)**
    - **Before**: Raw Tailwind `<button class="inline-flex items-center gap-1.5 rounded-lg border ... px-2.5 py-1 text-xs">` buttons whose borders drop below 1.5:1 contrast in `ptah-glass` and whose disabled state uses raw `disabled:opacity-40`.
-   - **After**: `ptahButton` (`ghost` `xs`, `secondary` `xs`, `primary` `sm`) with a 3.82â€“4.93:1 control edge in dark and 3.39â€“4.19:1 in light, plus consistent `--ptah-btn-disabled-opacity` (`0.48`).
+   - **After**: `ptahButton` (`ghost` `xs`, `secondary` `xs`, `primary` `sm`) with a 3.82–4.93:1 control edge in dark and 3.39–4.19:1 in light, plus consistent `--ptah-btn-disabled-opacity` (`0.48`).
 5. **`external-marketplaces.component.ts` (External Marketplaces Settings)**
    - **Before**: Raw `<button class="btn btn-primary btn-sm">` beside unstyled/raw icon buttons with custom hover text colors (`hover:text-error`) and inconsistent hit targets (`< 24 px`).
-   - **After**: `ptahButton` (`primary` `sm`, `ghost` `xs`) and `ptahIconButton` (`ghost` `xs` `24 Ã— 24 px` minimum target size) with keyboard-accessible `ptahTooltip` labels.
+   - **After**: `ptahButton` (`primary` `sm`, `ghost` `xs`) and `ptahIconButton` (`ghost` `xs` `24 × 24 px` minimum target size) with keyboard-accessible `ptahTooltip` labels.
 
 ---
 
 ## 7. Exceptions & Boundaries
 
 1. **Chat Composer (`libs/frontend/chat/src/lib/components/molecules/chat-input.component.ts`)**:
-   - The round send/stop orb (`28 Ã— 28 px` circular pill integrated into the glass composer pill) and compact model/mode selector triggers inside the composer bar are specialized composer chrome governed by the chat composer design spec, not standard `ptahButton` rectangular controls.
+   - The round send/stop orb (`28 × 28 px` circular pill integrated into the glass composer pill) and compact model/mode selector triggers inside the composer bar are specialized composer chrome governed by the chat composer design spec, not standard `ptahButton` rectangular controls.
 2. **Workspace Canvas Rail (`libs/frontend/chat/src/lib/components/organisms/workspace-canvas-panel.component.ts`)**:
    - Canvas zoom/pan HUD pills and dock tab handles are specialized canvas chrome and remain outside Family 1.
 3. **`ptahSetupAction` & `ptahRailIconAction` (`libs/frontend/ui/src/lib/action/ui-action.directive.ts`)**:
-   - `ui-action.directive.ts` currently serves onboarding/setup cards (`ptahSetupAction`) and the left navigation rail (`ptahRailIconAction` with active indicator bar). They remain untouched in Batch 1c so no product surface changes look prematurely (see Â§8 for consolidation plan).
+   - `ui-action.directive.ts` currently serves onboarding/setup cards (`ptahSetupAction`) and the left navigation rail (`ptahRailIconAction` with active indicator bar). They remain untouched in Batch 1c so no product surface changes look prematurely (see §8 for consolidation plan).
 
 ---
 
 ## Proposed Removals
 
-1. **Removed in Batch 1c â€” `PtahButtonDirective.iconOnly`**:
+1. **Removed in Batch 1c — `PtahButtonDirective.iconOnly`**:
    - **Evidence**: Full workspace search across `libs/` and `apps/` confirmed only a single template (`apps/ptah-extension-webview/src/app/ui-gallery/gallery-components.component.ts`) bound `[iconOnly]="true"`.
-   - **Action taken**: Migrated `gallery-components.component.ts` to `<button ptahIconButton label="More actions" type="button">â‹¯</button>` and removed the deprecated `iconOnly` input and `[class.btn-square]` binding from `libs/frontend/ui/src/lib/button/button.directive.ts`. All icon-only buttons now go through `ptahIconButton` (which enforces a required `label` for `aria-label` + `ptahTooltip`).
-2. **Candidate for Later Batch â€” `PtahSetupActionDirective` (`libs/frontend/ui/src/lib/action/ui-action.directive.ts`)**:
+   - **Action taken**: Migrated `gallery-components.component.ts` to `<button ptahIconButton label="More actions" type="button">⋯</button>` and removed the deprecated `iconOnly` input and `[class.btn-square]` binding from `libs/frontend/ui/src/lib/button/button.directive.ts`. All icon-only buttons now go through `ptahIconButton` (which enforces a required `label` for `aria-label` + `ptahTooltip`).
+2. **Candidate for Later Batch — `PtahSetupActionDirective` (`libs/frontend/ui/src/lib/action/ui-action.directive.ts`)**:
    - `ptahSetupAction` (`primary` / `secondary` / `ghost` / `danger`) duplicates `ptahButton` (`size="sm"`). Once the proposed button look is approved and unscoped in Batch 1d/1e, `ptahSetupAction` callers in `libs/frontend/onboarding` can migrate to `ptahButton` and `PtahSetupActionDirective` can be deleted. `ptahRailIconAction` should remain a navigation-rail primitive (Family 4 Navigation) because it represents a persistent rail destination rather than an action button.
 
 ---
@@ -199,63 +199,63 @@ No product page is modified in Batch 1c. The before/after outcomes below are pre
 
 All ratios below are computed from the committed theme definitions in `apps/ptah-extension-webview/tailwind.config.js` and `apps/ptah-extension-webview/src/styles.css` using `culori` (`wcagContrast`) and guarded by Jest assertions in `apps/ptah-extension-webview/src/app/design-tokens.spec.ts`.
 
-### 9.1 `base-content-muted` (`--bcm`) Across Every Surface Level (Requirement: â‰¥ 4.5:1)
+### 9.1 `base-content-muted` (`--bcm`) Across Every Surface Level (Requirement: ≥ 4.5:1)
 
 | Surface token | `ptah-glass` surface hex | `ptah-glass` `--bcm` (`#dcdee3`) ratio | `ptah-glass-light` surface hex | `ptah-glass-light` `--bcm` (`#5b5379` / glass `#484065`) ratio | Status |
 | --- | --- | --- | --- | --- | --- |
-| `base-100` | `#17191d` | **13.07 : 1** | `#f7f3fd` | **6.49 : 1** (glass **8.49 : 1**) | Pass (â‰¥ 4.5:1) |
-| `surface-0` | `#17191d` | **13.07 : 1** | `#f7f3fd` | **6.49 : 1** (glass **8.49 : 1**) | Pass (â‰¥ 4.5:1) |
-| `surface-1` | `#1f2228` | **11.87 : 1** | `#efe9f9` | **5.99 : 1** (glass **7.83 : 1**) | Pass (â‰¥ 4.5:1) |
-| `base-200` / `surface-2` | `#202329` | **11.70 : 1** | `#eee8f8` | **5.93 : 1** (glass **7.76 : 1**) | Pass (â‰¥ 4.5:1) |
-| `surface-3` | `#292c33` | **10.35 : 1** | `#e4dcf2` | **5.34 : 1** (glass **6.99 : 1**) | Pass (â‰¥ 4.5:1) |
-| `base-300` | `#2a2e35` | **10.13 : 1** | `#e2daf1` | **5.25 : 1** (glass **6.86 : 1**) | Pass (â‰¥ 4.5:1) |
+| `base-100` | `#17191d` | **13.07 : 1** | `#f7f3fd` | **6.49 : 1** (glass **8.49 : 1**) | Pass (≥ 4.5:1) |
+| `surface-0` | `#17191d` | **13.07 : 1** | `#f7f3fd` | **6.49 : 1** (glass **8.49 : 1**) | Pass (≥ 4.5:1) |
+| `surface-1` | `#1f2228` | **11.87 : 1** | `#efe9f9` | **5.99 : 1** (glass **7.83 : 1**) | Pass (≥ 4.5:1) |
+| `base-200` / `surface-2` | `#202329` | **11.70 : 1** | `#eee8f8` | **5.93 : 1** (glass **7.76 : 1**) | Pass (≥ 4.5:1) |
+| `surface-3` | `#292c33` | **10.35 : 1** | `#e4dcf2` | **5.34 : 1** (glass **6.99 : 1**) | Pass (≥ 4.5:1) |
+| `base-300` | `#2a2e35` | **10.13 : 1** | `#e2daf1` | **5.25 : 1** (glass **6.86 : 1**) | Pass (≥ 4.5:1) |
 
-### 9.2 Button Variants â€” Label Text vs Fill (Requirement: â‰¥ 4.5:1)
+### 9.2 Button Variants — Label Text vs Fill (Requirement: ≥ 4.5:1)
 
 | Variant & State | `ptah-glass` (dark) fg on bg | `ptah-glass` ratio | `ptah-glass-light` (light) fg on bg | `ptah-glass-light` ratio | Status |
 | --- | --- | --- | --- | --- | --- |
-| `primary` (default) | `#1b1403` on `#e4b94a` | **9.88 : 1** | `#fff8e6` on `#7c5700` | **6.16 : 1** | Pass (â‰¥ 4.5:1) |
-| `primary` (hover) | `#1b1403` on `#e3c164` | **10.56 : 1** | `#fff8e6` on `#7b4913` | **7.10 : 1** | Pass (â‰¥ 4.5:1) |
-| `primary` (active) | `#1b1403` on `#e3c876` | **11.15 : 1** | `#fff8e6` on `#773e20` | **7.96 : 1** | Pass (â‰¥ 4.5:1) |
-| `danger` (default) | `#2a0505` on `#ff6b6b` | **6.74 : 1** | `#ffffff` on `#cf3a3a` | **4.86 : 1** | Pass (â‰¥ 4.5:1) |
-| `danger` (hover) | `#2a0505` on `#ff7d67` | **7.50 : 1** | `#ffffff` on `#bd344b` | **5.59 : 1** | Pass (â‰¥ 4.5:1) |
-| `danger` (active) | `#2a0505` on `#ff8b68` | **8.15 : 1** | `#ffffff` on `#ae3154` | **6.25 : 1** | Pass (â‰¥ 4.5:1) |
-| `secondary` (default) | `#f2f2f1` on `#202329` | **14.05 : 1** | `#1e1936` on `#eee8f8` | **14.05 : 1** | Pass (â‰¥ 4.5:1) |
-| `secondary` (hover) | `#f2f2f1` on `#2a2e35` | **12.17 : 1** | `#1e1936` on `#e2daf1` | **12.45 : 1** | Pass (â‰¥ 4.5:1) |
-| `secondary` (active) | `#f2f2f1` on `#363c42` | **9.96 : 1** | `#1e1936` on `#d0c9e1` | **10.50 : 1** | Pass (â‰¥ 4.5:1) |
-| `ghost` (default on `b1`/`b2`/`b3`) | `#f2f2f1` on `b1`/`b2`/`b3` | **15.71 / 14.05 / 12.17 : 1** | `#1e1936` on `b1`/`b2`/`b3` | **15.39 / 14.05 / 12.45 : 1** | Pass (â‰¥ 4.5:1) |
-| `link` (default on `b1`/`b2`/`b3`) | `#f0cf7a` on `b1`/`b2`/`b3` | **11.66 / 10.43 / 9.03 : 1** | `#6e4a00` on `b1`/`b2`/`b3` | **7.26 / 6.64 / 5.88 : 1** | Pass (â‰¥ 4.5:1) |
+| `primary` (default) | `#1b1403` on `#e4b94a` | **9.88 : 1** | `#fff8e6` on `#7c5700` | **6.16 : 1** | Pass (≥ 4.5:1) |
+| `primary` (hover) | `#1b1403` on `#e3c164` | **10.56 : 1** | `#fff8e6` on `#7b4913` | **7.10 : 1** | Pass (≥ 4.5:1) |
+| `primary` (active) | `#1b1403` on `#e3c876` | **11.15 : 1** | `#fff8e6` on `#773e20` | **7.96 : 1** | Pass (≥ 4.5:1) |
+| `danger` (default) | `#2a0505` on `#ff6b6b` | **6.74 : 1** | `#ffffff` on `#cf3a3a` | **4.86 : 1** | Pass (≥ 4.5:1) |
+| `danger` (hover) | `#2a0505` on `#ff7d67` | **7.50 : 1** | `#ffffff` on `#bd344b` | **5.59 : 1** | Pass (≥ 4.5:1) |
+| `danger` (active) | `#2a0505` on `#ff8b68` | **8.15 : 1** | `#ffffff` on `#ae3154` | **6.25 : 1** | Pass (≥ 4.5:1) |
+| `secondary` (default) | `#f2f2f1` on `#202329` | **14.05 : 1** | `#1e1936` on `#eee8f8` | **14.05 : 1** | Pass (≥ 4.5:1) |
+| `secondary` (hover) | `#f2f2f1` on `#2a2e35` | **12.17 : 1** | `#1e1936` on `#e2daf1` | **12.45 : 1** | Pass (≥ 4.5:1) |
+| `secondary` (active) | `#f2f2f1` on `#363c42` | **9.96 : 1** | `#1e1936` on `#d0c9e1` | **10.50 : 1** | Pass (≥ 4.5:1) |
+| `ghost` (default on `b1`/`b2`/`b3`) | `#f2f2f1` on `b1`/`b2`/`b3` | **15.71 / 14.05 / 12.17 : 1** | `#1e1936` on `b1`/`b2`/`b3` | **15.39 / 14.05 / 12.45 : 1** | Pass (≥ 4.5:1) |
+| `link` (default on `b1`/`b2`/`b3`) | `#f0cf7a` on `b1`/`b2`/`b3` | **11.66 / 10.43 / 9.03 : 1** | `#6e4a00` on `b1`/`b2`/`b3` | **7.26 / 6.64 / 5.88 : 1** | Pass (≥ 4.5:1) |
 
-### 9.3 Control Edges & Focus Ring vs Surfaces (Requirement: â‰¥ 3.0:1 Non-Text Contrast)
+### 9.3 Control Edges & Focus Ring vs Surfaces (Requirement: ≥ 3.0:1 Non-Text Contrast)
 
 | Non-text boundary | `ptah-glass` vs `base-100` / `base-200` / `base-300` | `ptah-glass-light` vs `base-100` / `base-200` / `base-300` | Status |
 | --- | --- | --- | --- |
-| `--ptah-control-edge` (`secondary` border) | **4.93 : 1** / **4.41 : 1** / **3.82 : 1** | **4.19 : 1** / **3.83 : 1** / **3.39 : 1** | Pass (â‰¥ 3.0:1) |
-| `--ptah-control-edge-strong` (`secondary` hover border) | **7.15 : 1** / **6.39 : 1** / **5.53 : 1** | **6.30 : 1** / **5.76 : 1** / **5.10 : 1** | Pass (â‰¥ 3.0:1) |
-| `--ptah-focus-ring-color` (`--ptah-focus-ring`) | **11.50 : 1** / **10.29 : 1** / **8.91 : 1** | **7.26 : 1** / **6.64 : 1** / **5.88 : 1** | Pass (â‰¥ 3.0:1) |
-| `--ptah-focus-ring-color` fallback (`oklch(var(--p))`) | **9.50 : 1** / **8.50 : 1** / **7.36 : 1** | **5.96 : 1** / **5.44 : 1** / **4.82 : 1** | Pass (â‰¥ 3.0:1) |
-| `primary` button fill edge vs surface | **9.50 : 1** / **8.50 : 1** / **7.36 : 1** | **5.96 : 1** / **5.44 : 1** / **4.82 : 1** | Pass (â‰¥ 3.0:1) |
-| `danger` button fill edge vs surface | **6.34 : 1** / **5.67 : 1** / **4.91 : 1** | **4.44 : 1** / **4.06 : 1** / **3.60 : 1** | Pass (â‰¥ 3.0:1) |
+| `--ptah-control-edge` (`secondary` border) | **4.93 : 1** / **4.41 : 1** / **3.82 : 1** | **4.19 : 1** / **3.83 : 1** / **3.39 : 1** | Pass (≥ 3.0:1) |
+| `--ptah-control-edge-strong` (`secondary` hover border) | **7.15 : 1** / **6.39 : 1** / **5.53 : 1** | **6.30 : 1** / **5.76 : 1** / **5.10 : 1** | Pass (≥ 3.0:1) |
+| `--ptah-focus-ring-color` (`--ptah-focus-ring`) | **11.50 : 1** / **10.29 : 1** / **8.91 : 1** | **7.26 : 1** / **6.64 : 1** / **5.88 : 1** | Pass (≥ 3.0:1) |
+| `--ptah-focus-ring-color` fallback (`oklch(var(--p))`) | **9.50 : 1** / **8.50 : 1** / **7.36 : 1** | **5.96 : 1** / **5.44 : 1** / **4.82 : 1** | Pass (≥ 3.0:1) |
+| `primary` button fill edge vs surface | **9.50 : 1** / **8.50 : 1** / **7.36 : 1** | **5.96 : 1** / **5.44 : 1** / **4.82 : 1** | Pass (≥ 3.0:1) |
+| `danger` button fill edge vs surface | **6.34 : 1** / **5.67 : 1** / **4.91 : 1** | **4.44 : 1** / **4.06 : 1** / **3.60 : 1** | Pass (≥ 3.0:1) |
 
 ---
 
-## 10. Screenshots Needed (Checklist Â§C)
+## 10. Screenshots Needed (Checklist §C)
 
 The Electron app was not launched for this review. Capture the following screenshots from the Electron `/ui-gallery` route (`#family-button`) before signing off on the Approval Record below:
 
-1. `.ptah/specs/TASK_2026_929_26ca/screenshots/family-1-gallery-dark-matrix.png` â€” `#family-button` Variants Ã— sizes matrix (`Current` left, `Proposed` right) in `ptah-glass` (dark) at `1440 px` width.
-2. `.ptah/specs/TASK_2026_929_26ca/screenshots/family-1-gallery-light-matrix.png` â€” `#family-button` Variants Ã— sizes matrix (`Current` left, `Proposed` right) in `ptah-glass-light` (light) at `1440 px` width.
-3. `.ptah/specs/TASK_2026_929_26ca/screenshots/family-1-gallery-dark-states.png` â€” `#family-button` States by variant (`default`, `hover`, `focus-visible`, `active`, `disabled`, `loading`) in `ptah-glass` (dark).
-4. `.ptah/specs/TASK_2026_929_26ca/screenshots/family-1-gallery-light-states.png` â€” `#family-button` States by variant (`default`, `hover`, `focus-visible`, `active`, `disabled`, `loading`) in `ptah-glass-light` (light).
-5. `.ptah/specs/TASK_2026_929_26ca/screenshots/family-1-gallery-icons-and-tooltip.png` â€” `#family-button` Icon buttons (`xs`/`sm`/`md` Ã— `ghost`/`secondary`/`primary`), leading icon + label, long-text specimen, and an open `ptah-tooltip-panel` on keyboard focus.
-6. `.ptah/specs/TASK_2026_929_26ca/screenshots/family-1-gallery-narrow-stack.png` â€” `#family-button` below `1024 px` viewport width showing the `Current` and `Proposed` columns stacked vertically without horizontal overflow.
+1. `.ptah/specs/TASK_2026_929_26ca/screenshots/family-1-gallery-dark-matrix.png` — `#family-button` Variants × sizes matrix (`Current` left, `Proposed` right) in `ptah-glass` (dark) at `1440 px` width.
+2. `.ptah/specs/TASK_2026_929_26ca/screenshots/family-1-gallery-light-matrix.png` — `#family-button` Variants × sizes matrix (`Current` left, `Proposed` right) in `ptah-glass-light` (light) at `1440 px` width.
+3. `.ptah/specs/TASK_2026_929_26ca/screenshots/family-1-gallery-dark-states.png` — `#family-button` States by variant (`default`, `hover`, `focus-visible`, `active`, `disabled`, `loading`) in `ptah-glass` (dark).
+4. `.ptah/specs/TASK_2026_929_26ca/screenshots/family-1-gallery-light-states.png` — `#family-button` States by variant (`default`, `hover`, `focus-visible`, `active`, `disabled`, `loading`) in `ptah-glass-light` (light).
+5. `.ptah/specs/TASK_2026_929_26ca/screenshots/family-1-gallery-icons-and-tooltip.png` — `#family-button` Icon buttons (`xs`/`sm`/`md` × `ghost`/`secondary`/`primary`), leading icon + label, long-text specimen, and an open `ptah-tooltip-panel` on keyboard focus.
+6. `.ptah/specs/TASK_2026_929_26ca/screenshots/family-1-gallery-narrow-stack.png` — `#family-button` below `1024 px` viewport width showing the `Current` and `Proposed` columns stacked vertically without horizontal overflow.
 
 ---
 
 ## 11. Open Questions
 
 1. **Stock DaisyUI `secondary` token in `ptah-glass-light` (`#9a6b12` on `#fff8e6` = `4.42:1`, below 4.5:1)**
-   - *Context*: In `apps/ptah-extension-webview/tailwind.config.js`, the raw DaisyUI `secondary` / `secondary-content` pair in `ptah-glass-light` measures `4.42:1` (just under WCAG AA `4.5:1`) and produces an amber fill visually too close to `primary` (`#7c5700`). Our proposed `secondary` button (`--ptah-btn-secondary-*`) already avoids `--s`/`--sc` entirely and uses `--surface-2` (`#eee8f8`) + `--bc` (`#1e1936`, `14.05:1`) + `--ptah-control-edge` (`#78728a`, `3.39â€“4.19:1`). However, any legacy unscoped `.badge-secondary` or `.btn-secondary` outside `[data-ptah-look='next']` still inherits `#9a6b12`.
+   - *Context*: In `apps/ptah-extension-webview/tailwind.config.js`, the raw DaisyUI `secondary` / `secondary-content` pair in `ptah-glass-light` measures `4.42:1` (just under WCAG AA `4.5:1`) and produces an amber fill visually too close to `primary` (`#7c5700`). Our proposed `secondary` button (`--ptah-btn-secondary-*`) already avoids `--s`/`--sc` entirely and uses `--surface-2` (`#eee8f8`) + `--bc` (`#1e1936`, `14.05:1`) + `--ptah-control-edge` (`#78728a`, `3.39–4.19:1`). However, any legacy unscoped `.badge-secondary` or `.btn-secondary` outside `[data-ptah-look='next']` still inherits `#9a6b12`.
    - *Options*:
      - **Option A (Recommended)**: Keep `ptah-button.css` mapped to `--surface-2` / `--bc` / `--ptah-control-edge` for `secondary` buttons, and in a future theme-hygiene task darken `ptah-glass-light.secondary` from `#9a6b12` to `#8f620e` (`4.85:1` against `#fff8e6`).
      - **Option B**: Leave `ptah-glass-light.secondary` untouched since `ptahButton` `secondary` no longer reads `--s`.
