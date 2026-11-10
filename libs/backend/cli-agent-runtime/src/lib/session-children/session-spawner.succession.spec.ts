@@ -241,4 +241,38 @@ describe('SessionSpawnerService succession', () => {
     expect(h.provisioner.rollback).not.toHaveBeenCalled();
     expect(h.agents.settleLaneAdoption).toHaveBeenCalledWith([], 'reverted');
   });
+
+  const endDuringFailedHandoff = async (cause: 'provider-error' | 'user-stop') => {
+    const h = makeHarness();
+    const child = await h.startChild();
+    let settleStart: (outcome: { started: false; error: string }) => void = () => undefined;
+    (h.host.startChildSession as jest.Mock).mockImplementationOnce(
+      () => new Promise((resolve) => { settleStart = resolve; }));
+    const handoff = h.spawner.succeed({ callerSessionId: child.childSessionId,
+      handoffPath: `${child.worktreePath}/HANDOFF.md`, prompt: 'continue' });
+    await flush();
+    h.active.delete(child.childSessionId);
+    h.sessionEnd.notifyAll({ sessionId: child.childSessionId, workspaceRoot: child.worktreePath, cause });
+    settleStart({ started: false, error: 'unavailable' });
+    expect(await handoff).toMatchObject({ ok: false, refusal: 'session-start-failed' });
+    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBeUndefined();
+    jest.advanceTimersByTime(30_000);
+    await flush();
+    return { h, child };
+  };
+
+  it('recovers a child whose session ended during a failed handoff', async () => {
+    const { h, child } = await endDuringFailedHandoff('provider-error');
+    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe('handed-off');
+    expect(h.host.startChildSession).toHaveBeenCalledTimes(3);
+    expect(h.host.startChildSession.mock.calls[2][0].prompt)
+      .toContain('previous session ended unexpectedly (provider-error)');
+  });
+
+  it('keeps a user stop during a failed handoff as a stop', async () => {
+    const { h, child } = await endDuringFailedHandoff('user-stop');
+    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe('ended');
+    expect(h.host.startChildSession).toHaveBeenCalledTimes(2);
+    expect(h.agents.adoptLanes).toHaveBeenLastCalledWith(expect.any(Array), PARENT);
+  });
 });

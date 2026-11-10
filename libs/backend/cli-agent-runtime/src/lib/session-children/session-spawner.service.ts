@@ -943,9 +943,15 @@ export class SessionSpawnerService implements ISessionSpawner {
 
   private onSessionEnd(payload: SessionEndPayload): void {
     const child = this.registry.get(payload.sessionId);
-    if (!child || child.terminalStatus) return;
+    if (!child) return;
     const runtime = this.runtimes.get(child.childSessionId);
     if (!runtime || runtime.stopping) return;
+    if (child.terminalStatus) {
+      // A succession in flight marks the record handed-off before its start
+      // settles. Keep the cause: a failed start routes this end afterwards.
+      if (runtime.succeeding) runtime.endCause = parseSessionEndCause(payload.cause);
+      return;
+    }
     runtime.endCause = parseSessionEndCause(payload.cause);
     const wasWorking = this.phaseOf(child) === 'generating';
     this.armGrace(runtime, child.childSessionId, wasWorking);
@@ -1528,7 +1534,25 @@ export class SessionSpawnerService implements ISessionSpawner {
     if (!child || child.terminalStatus) {
       return { ok: false, refusal: 'not-a-live-child', detail: 'caller is not a live child' };
     }
-    return this.succeedChild(child, 'child-handoff', request.prompt, request.label, undefined, request.handoffPath);
+    const result = await this.succeedChild(child, 'child-handoff', request.prompt, request.label, undefined, request.handoffPath);
+    if (!result.ok && result.refusal === 'session-start-failed') this.recoverDeadCaller(child.childSessionId);
+    return result;
+  }
+
+  /**
+   * A failed tool-driven succession returns its refusal to the child. A child
+   * whose session ended while that succession ran cannot act on the refusal,
+   * and its session end was not routed. Route it now through the end-grace.
+   */
+  private recoverDeadCaller(childSessionId: string): void {
+    const child = this.registry.get(childSessionId);
+    const runtime = this.runtimes.get(childSessionId);
+    if (!child || child.terminalStatus || !runtime || runtime.stopping) return;
+    if (this.activeIdOf(child)) return;
+    this.armGrace(runtime, childSessionId, false);
+    this.log(
+      `${childSessionId} session ended during a failed handoff (${runtime.endCause ?? 'unknown'}); ${SESSION_CHILD_GRACE_MS / 1000}s grace armed`,
+    );
   }
 
   private async succeedChild(
