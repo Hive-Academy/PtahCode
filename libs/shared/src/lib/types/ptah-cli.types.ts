@@ -17,6 +17,8 @@ export interface PtahCliConfig {
   readonly name: string;
   /** Provider ID from the Anthropic-compatible registry (e.g., 'openrouter', 'kimi-code', 'z-ai') */
   readonly providerId: string;
+  /** Omitted on legacy instances, which continue to use their instance key. */
+  readonly credentialSource?: 'instance' | 'shared-connection';
   /** Whether this agent is enabled (appears in agent selector) */
   readonly enabled: boolean;
   /** Model tier mappings */
@@ -50,6 +52,8 @@ export interface PtahCliSummary {
   readonly name: string;
   readonly providerName: string;
   readonly providerId: string;
+  /** Which secret slot this instance reads; absent on older hosts. */
+  readonly credentialSource?: PtahCliConfig['credentialSource'];
   /** True when the agent can run: stored key, OR a provider needing none
    * (local Ollama/LM Studio, or ollama-cloud via `ollama signin`). Gates Test/run. */
   readonly hasApiKey: boolean;

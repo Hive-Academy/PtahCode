@@ -1263,7 +1263,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                     name="wizard-activation"
                     [checked]="activation() === 'connect-only'"
                     (change)="onActivationChange('connect-only')"
-                    [disabled]="selectionId() === 'anthropic'" data-testid="wizard-activation-connect-only"
+                    data-testid="wizard-activation-connect-only"
                   />
                   <span class="min-w-0">
                     <span class="block text-sm text-base-content">Connect only</span>
@@ -1271,6 +1271,9 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                       >The connection is available, but the main agent keeps its current
                       provider.</span
                     >
+                    @if (verifyProviderId() === 'anthropic' && !mainRouteExists()) {
+                      <span class="block text-xs text-base-content-muted">The main agent remains unconfigured until you choose a provider.</span>
+                    }
                   </span>
                 </label>
                 <label class="flex items-start gap-2 rounded-md bg-base-100 p-2">
@@ -1341,7 +1344,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                   Done
                 </button>
               }
-              @if (selectionId() === 'anthropic') { <p>Claude API setup also selects it for the main agent. Connect only is unavailable on this host.</p> }
+              @if (selectionId() === 'anthropic') { <p>Claude API can be saved as a connection. Using it for the main agent switches main-agent requests to API billing.</p> }
               @if (contextChanged()) { <p role="alert">The workspace changed. Review the destination before saving.</p><button type="button" class="btn min-h-9" (click)="reviewContextRequested.emit()">Review current workspace</button> }
               @if (commitDetail()) { <p role="status" class="break-words">{{ commitDetail() }}</p> }
               @if (commitState() === 'failed') {
@@ -1649,7 +1652,7 @@ export class ProviderSetupWizardComponent implements OnDestroy {
       summary: authSummaryFor(entry),
       fallback: markFallbackFor(entry),
     }));
-    if (!query || 'claude api anthropic'.includes(query)) options.unshift({ id: 'anthropic', name: 'Claude API', summary: 'API key - activates the main agent', fallback: 'Bot' });
+    if (!query || 'claude api anthropic'.includes(query)) options.unshift({ id: 'anthropic', name: 'Claude API', summary: 'Connect an API key; optionally use it for the main agent', fallback: 'Bot' });
     return options;
   });
 
@@ -2361,7 +2364,7 @@ export class ProviderSetupWizardComponent implements OnDestroy {
       ? 'app'
       : (targets[0] ?? 'app');
     this._saveTo.set(defaultTarget);
-    this._activation.set(this.selectionId() !== 'anthropic' && this.mainRouteExists() ? 'connect-only' : 'use-main-agent');
+    this._activation.set(this.verifyProviderId() === 'anthropic' || this.mainRouteExists() ? 'connect-only' : 'use-main-agent');
   }
 
   protected onCommit(): void {

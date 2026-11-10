@@ -31,6 +31,7 @@ import {
   LM_STUDIO_PROVIDER_ENTRY,
 } from './entries/local-provider-entry';
 import { CLAUDE_CLI_PROVIDER_ENTRY } from './entries/claude-cli-provider-entry';
+import { ANTHROPIC_API_LANE_ENTRY } from './entries/anthropic-api-lane-entry';
 import { SAKANA_PROVIDER_ENTRY } from './entries/sakana-provider-entry';
 import { REQUESTY_PROVIDER_ENTRY } from './entries/requesty-provider-entry';
 import { KIMI_CODE_PROVIDER_ENTRY } from './entries/kimi-code-provider-entry';
@@ -471,7 +472,7 @@ export const CUSTOM_PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
  * is not in `ANTHROPIC_PROVIDERS` but is just as reserved.
  */
 export function isBuiltInProviderId(id: string): boolean {
-  if (id === ANTHROPIC_DIRECT_PROVIDER_ID) return true;
+  if (id === ANTHROPIC_DIRECT_PROVIDER_ID || id === ANTHROPIC_API_LANE_ENTRY.id) return true;
   return ANTHROPIC_PROVIDERS.some((provider) => provider.id === id);
 }
 
@@ -769,6 +770,13 @@ export function getAnthropicProvider(
   const builtIn = ANTHROPIC_PROVIDERS.find((p) => p.id === id);
   if (builtIn) return builtIn;
   return customProviders.find((p) => p.id === id);
+}
+
+/** Resolve a CLI lane without exposing lane-only entries to main-agent routes. */
+export function getPtahCliLaneProvider(id: string): AnthropicProvider | undefined {
+  return id === ANTHROPIC_API_LANE_ENTRY.id
+    ? ANTHROPIC_API_LANE_ENTRY
+    : getAnthropicProvider(id);
 }
 
 /**

@@ -78,6 +78,7 @@ describe('ProvidersConnectionSetupService', () => {
   let hooks: ProvidersConnectionSetupHooks;
   let route: ProvidersSettingsSection<ProvidersEffectiveRoute>;
   let refreshSharedAuth: jest.Mock<Promise<void>, []>;
+  const persistedAuthMethod = signal<'apiKey' | 'claudeCli'>('claudeCli');
   const codexStart = jest.fn<Promise<void>, []>(async () => undefined);
   const codexCancel = jest.fn<Promise<void>, []>(async () => undefined);
   const codexState = signal<CodexLoginState | null>(null);
@@ -103,6 +104,7 @@ describe('ProvidersConnectionSetupService', () => {
   });
 
   beforeEach(() => {
+    persistedAuthMethod.set('claudeCli');
     events = [];
     targets = ['global', 'app'];
     handlers = new Map<
@@ -119,6 +121,7 @@ describe('ProvidersConnectionSetupService', () => {
         async () => success({ cancelled: true }),
       ],
       ['auth:setApiKey', async () => success({ success: true })],
+      ['auth:setDirectAnthropicApiKey', async () => success({ success: true })],
       ['auth:saveSettings', async () => success({ success: true })],
     ]);
     call = jest.fn(async (method, params) => {
@@ -137,7 +140,7 @@ describe('ProvidersConnectionSetupService', () => {
         { provide: CodexSignInService, useValue: { start: codexStart, cancel: codexCancel, state: codexState.asReadonly() } },
         {
           provide: AuthStateService,
-          useValue: { refreshAuthStatus: refreshSharedAuth },
+          useValue: { refreshAuthStatus: refreshSharedAuth, persistedAuthMethod: persistedAuthMethod.asReadonly() },
         },
         {
           provide: ModelStateService,
@@ -297,6 +300,80 @@ describe('ProvidersConnectionSetupService', () => {
   });
 
   describe('connectProvider', () => {
+    it('stores a Claude API connection without changing the main route', async () => {
+      await service.verifyDraft({ probeId: 'p1', providerId: 'anthropic', authMode: 'apiKey' });
+      call.mockClear();
+      await service.connectProvider(draft({ providerId: 'anthropic' }), context, hooks);
+      expect(methods()).toEqual(['auth:setDirectAnthropicApiKey']);
+      expect(call).toHaveBeenCalledWith('auth:setDirectAnthropicApiKey', { apiKey: 'private-key' }, undefined);
+      expect(JSON.stringify(call.mock.calls)).not.toContain('authMethod');
+    });
+
+    it('reuses the stored Claude API key without writing it', async () => {
+      await service.verifyDraft({ probeId: 'p1', providerId: 'anthropic', authMode: 'apiKey' });
+      call.mockClear();
+      await service.connectProvider(draft({ providerId: 'anthropic', credential: null }), context, hooks);
+      expect(methods()).not.toContain('auth:setDirectAnthropicApiKey');
+      expect(methods()).not.toContain('auth:saveSettings');
+    });
+
+    it('surfaces a Claude API key write failure without the key', async () => {
+      handlers.set('auth:setDirectAnthropicApiKey', async () => success({ success: false, error: 'private-key' }));
+      await service.verifyDraft({ probeId: 'p1', providerId: 'anthropic', authMode: 'apiKey' });
+      call.mockClear();
+      await service.connectProvider(draft({ providerId: 'anthropic' }), context, hooks);
+      expect(commits.commit().status).not.toBe('saved');
+      expect(JSON.stringify(commits.commit())).not.toContain('private-key');
+      expect(methods()).not.toContain('auth:saveSettings');
+    });
+
+    it('activates Claude API only after explicit use for main agent', async () => {
+      persistedAuthMethod.set('apiKey');
+      await service.verifyDraft({ probeId: 'p1', providerId: 'anthropic', authMode: 'apiKey' });
+      call.mockClear();
+      await service.connectProvider(draft({ providerId: 'anthropic', activation: 'use-main-agent' }), context, hooks);
+      expect(methods()).toEqual(['auth:saveSettings']);
+      expect(call).toHaveBeenCalledWith('auth:saveSettings', expect.objectContaining({ authMethod: 'apiKey' }), undefined);
+    });
+    it('refreshes the active Claude API route when a connect-only draft replaces its key', async () => {
+      persistedAuthMethod.set('apiKey');
+      if (route.data) route = { ...route, data: { ...route.data, driverProviderId: 'anthropic' } };
+      await service.verifyDraft({ probeId: 'p1', providerId: 'anthropic', authMode: 'apiKey' });
+      call.mockClear();
+      await service.connectProvider(draft({ providerId: 'anthropic', activation: 'connect-only' }), context, hooks);
+      expect(methods()).toContain('auth:setDirectAnthropicApiKey');
+      expect(methods()).not.toContain('auth:saveSettings');
+    });
+
+    it('blocks connect-only replacement when the effective route is unavailable', async () => {
+      route = { status: 'error', data: null, error: 'Could not load this section. Retry.' };
+      persistedAuthMethod.set('apiKey');
+      await service.verifyDraft({ probeId: 'p1', providerId: 'anthropic', authMode: 'apiKey' });
+      call.mockClear();
+      await service.connectProvider(draft({ providerId: 'anthropic' }), context, hooks);
+      expect(methods()).toEqual([]);
+      expect(commits.commit().status).toBe('blocked');
+    });
+
+    it('saves a first Claude API key when the loaded main route is genuinely unset', async () => {
+      if (route.data) route = { ...route, data: { ...route.data, route: 'unresolved', driverProviderId: null, authMethodIsUnset: true } };
+      await service.verifyDraft({ probeId: 'p1', providerId: 'anthropic', authMode: 'apiKey' });
+      call.mockClear();
+      await service.connectProvider(draft({ providerId: 'anthropic' }), context, hooks);
+      expect(methods()).toEqual(['auth:setDirectAnthropicApiKey']);
+      expect(methods()).not.toContain('auth:saveSettings');
+      expect(commits.commit().status).toBe('saved');
+    });
+
+    it('blocks connect-only replacement when the route is unresolved', async () => {
+      if (route.data) route = { ...route, data: { ...route.data, route: 'unresolved', driverProviderId: null } };
+      await service.verifyDraft({ probeId: 'p1', providerId: 'anthropic', authMode: 'apiKey' });
+      call.mockClear();
+      await service.connectProvider(draft({ providerId: 'anthropic' }), context, hooks);
+      expect(methods()).toEqual([]);
+      expect(commits.commit().status).toBe('blocked');
+    });
+
     it('blocks an unverified draft without writing', async () => {
       await expect(
         service.connectProvider(draft(), context, hooks),
@@ -356,6 +433,30 @@ describe('ProvidersConnectionSetupService', () => {
       );
       expect(commits.commit()).toMatchObject({ status: 'blocked' });
       expect(methods()).toEqual([]);
+    });
+  });
+
+  describe('Claude API key deletion', () => {
+    it('blocks deletion while Claude API is the active route without RPCs', async () => {
+      persistedAuthMethod.set('apiKey');
+      if (route.data) route = { ...route, data: { ...route.data, driverProviderId: 'anthropic' } };
+      await service.deleteStoredKey('anthropic', context, hooks);
+      expect(methods()).toEqual([]);
+      expect(commits.commit()).toMatchObject({ status: 'blocked', message: 'Claude API is the main-agent route. Select another main-agent route before you delete this key.' });
+    });
+
+    it('blocks deletion when the effective route is unavailable', async () => {
+      route = { status: 'error', data: null, error: 'Could not load this section. Retry.' };
+      await service.deleteStoredKey('anthropic', context, hooks);
+      expect(methods()).toEqual([]);
+      expect(commits.commit().status).toBe('blocked');
+    });
+
+    it('deletes through the secret-only RPC on the subscription route', async () => {
+      handlers.set('auth:getAuthStatus', async () => success({ hasApiKey: false }));
+      await service.deleteStoredKey('anthropic', context, hooks);
+      expect(call).toHaveBeenCalledWith('auth:setDirectAnthropicApiKey', { apiKey: null }, undefined);
+      expect(methods()).not.toContain('auth:saveSettings');
     });
   });
 
@@ -830,7 +931,7 @@ describe('ProvidersConnectionSetupService', () => {
       {
         name: 'deleteStoredKey (Anthropic slot)',
         run: () => service.deleteStoredKey('anthropic', context, hooks),
-        write: 'auth:deleteStoredKey',
+        write: 'auth:setDirectAnthropicApiKey',
         ok: { success: true },
         rejected: { success: false },
         readBack: 'auth:getAuthStatus',

@@ -33,6 +33,7 @@ export type CancelDraftFn = (params: AuthCancelDraftVerificationParams) => Promi
 export interface ReplaceKeyRequest {
   readonly key: string;
   readonly probeId: string;
+  readonly activeMainAgent?: boolean;
 }
 
 /** The outcome of this tab's own last write (see `runDrawerWrite`): an earlier save never shows here. */
@@ -65,8 +66,7 @@ function keyAuthMode(connection: ProvidersConnection): ProvidersConnectionDraft[
  * The `connectProvider` draft for a verified Replace (plan :645-652). It writes the credential only:
  * - no tier edits (`editedTiers: []`, the stored tiers go in as-is so the models check passes);
  * - a custom entry goes in as a key write, so its metadata is not rewritten (Advanced owns it);
- * - `anthropic` is stored through `auth:saveSettings`, so it activates, and the tab offers it only
- *   while Claude API already drives the main agent.
+ * - `anthropic` uses the direct secret slot without changing the main-agent route.
  */
 export function replaceKeyDraft(connection: ProvidersConnection, request: ReplaceKeyRequest,
   setup: CredentialsSetup | null): ProvidersConnectionDraft {
@@ -79,7 +79,7 @@ export function replaceKeyDraft(connection: ProvidersConnection, request: Replac
     baseUrl: null, verified: { probeId: request.probeId },
     tiers, tierSnapshot: { everyday: setup?.tiers.sonnet ?? null, complex: setup?.tiers.opus ?? null, fast: setup?.tiers.haiku ?? null },
     editedTiers: [], saveTo: 'global',
-    activation: connection.id === 'anthropic' ? 'use-main-agent' : 'connect-only',
+    activation: connection.id === 'anthropic' && request.activeMainAgent ? 'use-main-agent' : 'connect-only',
   };
 }
 
@@ -318,15 +318,13 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
             }
             @if (connection().hasKey || connection().keyUnreadable) {
               <!-- An unreadable key can be deleted too: the delete does not need to read it. -->
-              <button type="button" class="btn btn-outline btn-sm border-error text-base-content" [disabled]="busy()"
+              <button type="button" class="btn btn-outline btn-sm border-error text-base-content" [disabled]="busy() || (connection().id === 'anthropic' && isActiveDriver())"
                 (click)="confirming.set('delete')" data-testid="credentials-delete">Delete key</button>
+              @if (connection().id === 'anthropic' && isActiveDriver()) {
+                <p class="text-xs text-base-content-muted" data-testid="credentials-delete-blocked">Claude API is the main-agent route. Select another main-agent route before you delete this key.</p>
+              }
             }
           </div>
-          @if (anthropicGuidance()) {
-            <p class="text-xs text-base-content-muted" data-testid="credentials-anthropic-guidance">
-              A new Claude API key is saved together with choosing Claude API for the main agent. Use Connect provider → Claude API to replace it.
-            </p>
-          }
           @if (optionalKey()) {
             <p class="text-xs text-base-content-muted" data-testid="credentials-optional-key">
               The key is optional. Without it, requests go through your signed-in local Ollama; with an ollama.com key, Ptah connects directly and can list models and prices.
@@ -352,7 +350,7 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
               </button>
             </div>
             @if (connection().id === 'anthropic') {
-              <p class="text-xs text-base-content-muted">Saving updates the main agent's Claude API key and restarts running chat sessions.</p>
+              <p class="text-xs text-base-content-muted">{{ isActiveDriver() ? "Saving updates the main agent's Claude API key and restarts running chat sessions." : 'Saving updates the Claude API connection key. The main-agent route stays the same.' }}</p>
             }
             @if (setupMissing(); as missing) {
               <p class="text-xs text-base-content-muted" data-testid="credentials-setup-missing">{{ missing }}</p>
@@ -497,10 +495,8 @@ export class CredentialsTabComponent {
     const prefix = this.registryEntry()?.keyPrefix ?? '';
     return prefix ? `Starts with ${prefix}` : 'Paste the new key';
   });
-  /** `anthropic` is replaced only while it drives the main agent (plan :649-652). */
-  protected readonly anthropicGuidance = computed(() => this.connection().id === 'anthropic' && !this.isActiveDriver());
   protected readonly canReplace = computed(() =>
-    !this.anthropicGuidance() && (this.kind() !== 'custom' || !!this.setup()?.baseUrl));
+    this.kind() !== 'custom' || !!this.setup()?.baseUrl);
   protected readonly busy = computed(() => this.saving() || this.commit()?.status === 'saving');
   /** A sign-in RPC for this connection is running: its triggers wait (one login at a time). */
   protected readonly externalBusy = computed(() => this.externalAuth().status === 'loading');
@@ -598,10 +594,11 @@ export class CredentialsTabComponent {
     const probeId = this.probeId;
     if (!this.canSave() || !probeId) return;
     this.pendingWrite.set('replace');
-    this.replaceKeyRequested.emit({ key: this.keyDraft().trim(), probeId });
+    this.replaceKeyRequested.emit({ key: this.keyDraft().trim(), probeId, activeMainAgent: this.connection().id === 'anthropic' && this.isActiveDriver() });
   }
 
   protected confirmDelete(): void {
+    if (this.connection().id === 'anthropic' && this.isActiveDriver()) return;
     this.confirming.set(null);
     this.pendingWrite.set('delete');
     this.deleteKeyRequested.emit();

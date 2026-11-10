@@ -747,7 +747,8 @@ export interface PtahCliListResult {
 export interface PtahCliCreateParams {
   name: string;
   providerId: string;
-  apiKey: string;
+  apiKey?: string;
+  credentialSource?: 'instance' | 'shared-connection';
 }
 
 /** Response from ptahCli:create RPC method */
@@ -763,6 +764,7 @@ export interface PtahCliUpdateParams {
   name?: string;
   enabled?: boolean;
   apiKey?: string;
+  credentialSource?: 'instance' | 'shared-connection';
   tierMappings?: {
     sonnet?: string;
     opus?: string;

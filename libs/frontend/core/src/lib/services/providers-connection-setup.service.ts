@@ -69,6 +69,7 @@ const NATIVE_ANTHROPIC_IDS: ReadonlySet<string> = new Set([
 const CHECK_TIMEOUT_MS = 35000;
 /** Removing the main agent's own connection is refused, by the route snapshot or by the host (`CONNECTION_IN_USE`). */
 const SWITCH_MAIN_AGENT_FIRST = 'Switch the main agent first.';
+const CLAUDE_API_DELETE_BLOCKED = 'Claude API is the main-agent route. Select another main-agent route before you delete this key.';
 const SIGN_IN_DETECTED = 'Sign-in detected. Verify the connection before using it.';
 const KIMI_NOT_CONFIRMED =
   'Kimi Code sign-in has not been confirmed. Sign in again, or run kimi login in a terminal, then choose Check again.';
@@ -493,8 +494,6 @@ export class ProvidersConnectionSetupService implements MessageHandler {
     // A blocked result below would overwrite the in-flight save's feedback.
     if (this.commits.commit().status === 'saving') return false;
     const invalid =
-      (draft.providerId === 'anthropic' &&
-        draft.activation === 'connect-only') ||
       draft.saveTo !== 'global' ||
       hooks.connections().status !== 'ready' ||
       !this.verifiedFor(draft.providerId, draft.verified?.probeId);
@@ -543,6 +542,30 @@ export class ProvidersConnectionSetupService implements MessageHandler {
             await this.require('provider:addCustomEntry', {
               entry: parsed.data,
             });
+          return true;
+        },
+      });
+    }
+    const activation = draft.activation;
+    const currentRoute = hooks.route();
+    const routeIsKnownUnset = currentRoute.status === 'ready' &&
+      currentRoute.data?.route === 'unresolved' &&
+      currentRoute.data.driverProviderId === null &&
+      currentRoute.data.authMethodIsUnset;
+    if (draft.providerId === 'anthropic' && activation === 'connect-only' &&
+        draft.credential?.value.trim() &&
+        !routeIsKnownUnset &&
+        (currentRoute.status !== 'ready' || !currentRoute.data || currentRoute.data.route === 'unresolved' || !currentRoute.data.driverProviderId)) {
+      this.commits.block(['Connection credential'], 'Load the main-agent route before saving the Claude API key.');
+      return true;
+    }
+    if (draft.providerId === 'anthropic' && draft.credential?.value.trim() && activation === 'connect-only') {
+      operations.push({
+        fields: ['Connection credential'],
+        stage: 'setup',
+        write: async () => {
+          const result = await this.require('auth:setDirectAnthropicApiKey', { apiKey: draft.credential?.value ?? '' });
+          if (!result.success) throw new Error('Could not save the Claude API key. Retry.');
           return true;
         },
       });
@@ -650,7 +673,7 @@ export class ProvidersConnectionSetupService implements MessageHandler {
     // wizard snapshot saw as empty and turn the user's own edit into a false conflict. Writing the edits
     // first is safe (an inactive provider's tiers never touch the running env), and a failed or
     // conflicting tier write stops activation through the activation stage.
-    if (draft.activation === 'use-main-agent') {
+    if (activation === 'use-main-agent') {
       operations.push(
         ...this.commits
           .operations({
@@ -674,10 +697,10 @@ export class ProvidersConnectionSetupService implements MessageHandler {
       context,
       hooks.commit,
       () =>
-        draft.activation !== 'use-main-agent' ||
+        activation !== 'use-main-agent' ||
         this.authWritable(hooks, draft.saveTo, !nativeAnthropic),
     );
-    if (committed && draft.activation === 'use-main-agent' && this.commits.commit().status === 'saved') {
+    if (committed && activation === 'use-main-agent' && this.commits.commit().status === 'saved') {
       await hooks.refreshAuthStatus();
     }
     return committed;
@@ -823,12 +846,26 @@ export class ProvidersConnectionSetupService implements MessageHandler {
     context: ProvidersEditContext,
     hooks: ProvidersConnectionSetupHooks,
   ): Promise<boolean> {
+    if (this.commits.commit().status === 'saving') return Promise.resolve(false);
+    if (providerId === 'anthropic') {
+      const route = hooks.route();
+      if (route.status !== 'ready' || !route.data || route.data.route === 'unresolved' || !route.data.driverProviderId) {
+        this.commits.block(['Stored key'], 'Load the main-agent route before deleting the Claude API key.');
+        return Promise.resolve(true);
+      }
+      if (route.data.driverProviderId === 'anthropic') {
+        this.commits.block(['Stored key'], CLAUDE_API_DELETE_BLOCKED);
+        return Promise.resolve(true);
+      }
+    }
     return this.commits.run(
       [
         {
           fields: ['Stored key'],
           write: async () =>
-            (await this.require('auth:deleteStoredKey', { providerId }))
+            (await (providerId === 'anthropic'
+              ? this.require('auth:setDirectAnthropicApiKey', { apiKey: null })
+              : this.require('auth:deleteStoredKey', { providerId })))
               .success,
           readBack: async () => {
             if (providerId === 'anthropic')

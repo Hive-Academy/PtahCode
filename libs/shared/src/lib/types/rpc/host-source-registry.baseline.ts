@@ -31,6 +31,7 @@ export const BASELINE_RPC_METHOD_NAMES: readonly string[] = [
   'auth:getStatus',
   'auth:saveSettings',
   'auth:setApiKey',
+  'auth:setDirectAnthropicApiKey',
   'auth:testConnection',
   'auth:verifyDraftConnection',
   'autocomplete:agents',

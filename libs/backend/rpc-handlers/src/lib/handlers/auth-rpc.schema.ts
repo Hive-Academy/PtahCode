@@ -25,6 +25,11 @@
 import { z } from 'zod';
 import { getAnthropicProvider } from '@ptah-extension/agent-sdk';
 
+/** Secret-only direct Anthropic credential write. Never include input in errors. */
+export const AuthSetDirectAnthropicApiKeySchema = z
+  .object({ apiKey: z.string().max(512).trim().min(1).nullable() })
+  .strict();
+
 /**
  * Validated shape for the `auth:saveSettings` RPC method.
  *

@@ -9,6 +9,7 @@
  */
 
 export * from './provider-registry';
+export { ANTHROPIC_API_LANE_ENTRY } from './entries/anthropic-api-lane-entry';
 export * from './provider-base-url';
 export * from './proxy-token-placeholders';
 export { isCloudTag, toCloudId } from './ollama-cloud-model-id';

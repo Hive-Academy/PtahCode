@@ -2169,6 +2169,10 @@ export interface RpcMethodRegistry
     params: { provider: string; apiKey: string };
     result: { success: boolean; error?: string };
   };
+  'auth:setDirectAnthropicApiKey': {
+    params: { apiKey: string | null };
+    result: { success: boolean; error?: string };
+  };
   'auth:deleteStoredKey': {
     params: AuthDeleteStoredKeyParams;
     result: AuthDeleteStoredKeyResult;
@@ -3860,6 +3864,7 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'file:save-dialog': true,
   'config:model-set': true,
   'auth:setApiKey': true,
+  'auth:setDirectAnthropicApiKey': true,
   'auth:deleteStoredKey': true,
   'auth:getStatus': true,
   'auth:getApiKeyStatus': true,

@@ -127,10 +127,40 @@ describe('AddCliInstanceModalComponent', () => {
       expect(el().querySelectorAll('ptah-settings-toast').length).toBe(0);
     });
 
-    it('offers every connection except Claude API and OpenAI Codex, with its modality', () => {
+    it('offers Claude API and excludes OpenAI Codex, with each modality', () => {
       const options = Array.from(q<HTMLSelectElement>('add-cli-instance-provider')?.options ?? []).map((option) => option.textContent?.trim());
-      expect(options).toEqual(['Choose a provider connection…', 'Claude (Subscription) · CLI login', 'Kimi Code · OAuth',
+      expect(options).toEqual(['Choose a provider connection…', 'Claude API · API key', 'Claude (Subscription) · CLI login', 'Kimi Code · OAuth',
         'Requesty · API key', 'Ollama Cloud · Local server', 'Ollama · Local server', 'GitHub Copilot · OAuth']);
+    });
+
+    it('creates Claude API with the saved connection key and no key payload', async () => {
+      state.connections.set(ready(CONNECTIONS.map((row) => row.id === 'anthropic' ? { ...row, hasKey: true } : row)));
+      type('add-cli-instance-name', 'Claude-lane');
+      choose('anthropic');
+      expect(q('add-cli-instance-key')).toBeNull();
+      expect(submit()?.disabled).toBe(false);
+      submit()?.click();
+      await flush();
+      expect(state.saveSettings).toHaveBeenCalledWith({ cli: [{ action: 'create', params: {
+        name: 'Claude-lane', providerId: 'anthropic-api', credentialSource: 'shared-connection',
+      } }] }, CONTEXT);
+    });
+
+    it('requires a separate Claude API key when the saved key is unavailable', async () => {
+      type('add-cli-instance-name', 'Claude-lane');
+      choose('anthropic');
+      expect(submit()?.disabled).toBe(true);
+      expect(q('add-cli-instance-claude-source')?.textContent).toContain('Connect Claude API first');
+      const separate = el().querySelectorAll<HTMLInputElement>('input[name="claude-source"]')[1];
+      separate.click();
+      fixture.detectChanges();
+      expect(submit()?.disabled).toBe(true);
+      type('add-cli-instance-key', KEY);
+      submit()?.click();
+      await flush();
+      expect(state.saveSettings).toHaveBeenCalledWith({ cli: [{ action: 'create', params: {
+        name: 'Claude-lane', providerId: 'anthropic-api', credentialSource: 'instance', apiKey: KEY,
+      } }] }, CONTEXT);
     });
 
     it('requires a key for an API-key provider, masked with show/hide (#49)', () => {
@@ -405,6 +435,18 @@ describe('AddCliInstanceModalComponent', () => {
       expect(feedback.toast()).toEqual({ tone: 'status', message: 'Saved Glm instance. Key stored, not verified.', canUndo: false });
       // M8: the last Test described the old key.
       expect(state.clearCliTest).toHaveBeenCalledWith('glm-1');
+    });
+
+    it('moves a Claude API instance to its own key when a replacement key is entered', async () => {
+      create({ id: 'ca-1', name: 'Claude', providerId: 'anthropic-api', providerName: 'Claude API' });
+      expect(q('add-cli-instance-key-help')?.textContent).toContain('separate key for this instance');
+      type('add-cli-instance-key', KEY);
+      submit()?.click();
+      await flush();
+      expect(state.saveSettings).toHaveBeenCalledWith(
+        { cli: [{ action: 'update', params: { id: 'ca-1', apiKey: KEY, credentialSource: 'instance' } }] },
+        CONTEXT,
+      );
     });
 
     it('M7: name and key are two writes; a saved rename with a failed key says exactly that', async () => {

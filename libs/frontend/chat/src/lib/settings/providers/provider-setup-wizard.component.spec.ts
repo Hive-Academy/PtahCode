@@ -1210,6 +1210,49 @@ describe('ProviderSetupWizardComponent', () => {
       expect(checked?.getAttribute('data-testid')).toBe('wizard-activation-connect-only');
     });
 
+    it('defaults Claude API to connect-only even before a main route is reported', async () => {
+      const fixture = createComponent({ mainRouteExists: false }, verifyEcho());
+      selectProvider(fixture, 'anthropic');
+      click(fixture, 'wizard-continue');
+      typeInto(fixture, 'wizard-api-key', 'sk-ant-test');
+      click(fixture, 'wizard-continue');
+      click(fixture, 'wizard-verify-start');
+      await Promise.resolve(); await Promise.resolve(); fixture.detectChanges();
+      click(fixture, 'wizard-continue');
+      click(fixture, 'wizard-continue');
+      const checked = fixture.nativeElement.querySelector<HTMLInputElement>('input[name="wizard-activation"]:checked');
+      expect(checked?.getAttribute('data-testid')).toBe('wizard-activation-connect-only');
+      expect(fixture.nativeElement.textContent).toContain('The main agent remains unconfigured until you choose a provider.');
+    });
+
+    it('allows Claude API connect only, preserves an explicit choice, and emits that choice', async () => {
+      const fixture = createComponent({ mainRouteExists: true }, verifyEcho());
+      selectProvider(fixture, 'anthropic');
+      click(fixture, 'wizard-continue');
+      typeInto(fixture, 'wizard-api-key', 'sk-ant-test');
+      click(fixture, 'wizard-continue');
+      click(fixture, 'wizard-verify-start');
+      await Promise.resolve(); await Promise.resolve(); fixture.detectChanges();
+      click(fixture, 'wizard-continue');
+      click(fixture, 'wizard-continue');
+      const root = fixture.nativeElement as HTMLElement;
+      const connectOnly = root.querySelector<HTMLInputElement>('[data-testid="wizard-activation-connect-only"]');
+      if (!connectOnly) throw new Error('missing connect-only option');
+      expect(connectOnly.disabled).toBe(false);
+      expect(connectOnly.checked).toBe(true);
+      expect(fixture.nativeElement.textContent).not.toContain('Connect only is unavailable on this host');
+      const main = root.querySelector<HTMLInputElement>('[data-testid="wizard-activation-use-main-agent"]');
+      if (!main) throw new Error('missing main-agent option');
+      main.click(); fixture.detectChanges();
+      expect(main.checked).toBe(true);
+      connectOnly.click(); fixture.detectChanges();
+      expect(connectOnly.checked).toBe(true);
+      const commits: ProviderWizardCommit[] = [];
+      fixture.componentInstance.commitRequested.subscribe((commit) => commits.push(commit));
+      click(fixture, 'wizard-commit');
+      expect(commits[0].activation).toBe('connect-only');
+    });
+
     it('disables the workspace target with its reason when unsupported', async () => {
       const verify = verifyEcho();
       const fixture = createComponent(

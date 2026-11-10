@@ -1309,6 +1309,99 @@ describe('AuthRpcHandlers', () => {
   // auth:saveSettings
   // -------------------------------------------------------------------------
 
+  describe('auth:setDirectAnthropicApiKey', () => {
+    it('stores a trimmed key without changing settings, route, environment, or logs', async () => {
+      const h = makeHarness({ configSeed: { authMethod: 'claudeCli' } });
+      h.handlers.register();
+      const key = 'sk-ant-secret-direct-123';
+      const beforeEnv = process.env['ANTHROPIC_API_KEY'];
+
+      const result = await call<{ success: boolean; error?: string }>(
+        h,
+        'auth:setDirectAnthropicApiKey',
+        { apiKey: `  ${key}  ` },
+      );
+
+      expect(result).toEqual({ success: true });
+      expect(h.authSecrets.setCredential).toHaveBeenCalledWith('apiKey', key);
+      expect(h.authSecrets.setProviderKey).not.toHaveBeenCalled();
+      expect(h.scopeResolver.write).not.toHaveBeenCalled();
+      expect(h.scopeResolver.clearMoreSpecific).not.toHaveBeenCalled();
+      expect(h.configManager.set).not.toHaveBeenCalled();
+      expect(h.sdkAdapter.reset).not.toHaveBeenCalled();
+      expect(process.env['ANTHROPIC_API_KEY']).toBe(beforeEnv);
+      expect(diagnosticText(h)).not.toContain(key);
+      const status = await call<{ hasApiKey: boolean }>(h, 'auth:getAuthStatus');
+      expect(status.hasApiKey).toBe(true);
+    });
+
+    it('refreshes an active workspace Claude API adapter without changing auth scopes', async () => {
+      const h = makeHarness({
+        configSeed: { authMethod: 'claudeCli' },
+        workspaceOverrides: { authMethod: 'apiKey' },
+      });
+      h.handlers.register();
+      expect(await call(h, 'auth:setDirectAnthropicApiKey', { apiKey: 'new-secret' })).toEqual({ success: true });
+      expect(h.sdkAdapter.reset).toHaveBeenCalledTimes(1);
+      expect(h.scopeResolver.write).not.toHaveBeenCalled();
+      expect(h.scopeResolver.clearMoreSpecific).not.toHaveBeenCalled();
+      expect(diagnosticText(h)).not.toContain('new-secret');
+    });
+
+    it('reports a saved key when active adapter refresh fails', async () => {
+      const h = makeHarness({ workspaceOverrides: { authMethod: 'apiKey' } });
+      h.sdkAdapter.reset.mockRejectedValueOnce(new Error('sensitive refresh failure'));
+      h.handlers.register();
+      expect(await call(h, 'auth:setDirectAnthropicApiKey', { apiKey: 'new-secret' })).toEqual({
+        success: true,
+        error: 'API key saved, but the active agent could not refresh.',
+      });
+      expect(h.authSecrets.setCredential).toHaveBeenCalledWith('apiKey', 'new-secret');
+      expect(h.logger.error).toHaveBeenCalledWith('RPC: auth:setDirectAnthropicApiKey adapter refresh failed', expect.any(Error));
+      expect(diagnosticText(h)).not.toContain('new-secret');
+      expect(diagnosticText(h)).not.toContain('sensitive refresh failure');
+    });
+
+    it('deletes only the direct secret for null', async () => {
+      const h = makeHarness({ credentialsSeed: { apiKey: 'old-secret' } });
+      h.handlers.register();
+      expect((await call<{ hasApiKey: boolean }>(h, 'auth:getAuthStatus')).hasApiKey).toBe(true);
+
+      expect(await call(h, 'auth:setDirectAnthropicApiKey', { apiKey: null })).toEqual({ success: true });
+      expect(h.authSecrets.deleteCredential).toHaveBeenCalledWith('apiKey');
+      expect(h.authSecrets.setCredential).not.toHaveBeenCalled();
+      expect(h.scopeResolver.write).not.toHaveBeenCalled();
+      expect(h.sdkAdapter.reset).not.toHaveBeenCalled();
+      expect((await call<{ hasApiKey: boolean }>(h, 'auth:getAuthStatus')).hasApiKey).toBe(false);
+    });
+
+    it.each([
+      { apiKey: '' },
+      { apiKey: '   ' },
+      { apiKey: 7 },
+      {},
+      { apiKey: 'sk-ant-secret-invalid', extra: true },
+      { apiKey: 'x'.repeat(513) },
+      { apiKey: `  ${'x'.repeat(511)}` },
+    ])('rejects malformed input without echoing it: %j', async (params) => {
+      const h = makeHarness();
+      h.handlers.register();
+      const result = await call<{ success: boolean; error?: string }>(
+        h,
+        'auth:setDirectAnthropicApiKey',
+        params,
+      );
+      expect(result).toEqual({ success: false, error: 'Invalid API key request.' });
+      expect(result.error).not.toContain('sk-ant-secret-invalid');
+      expect(h.authSecrets.setCredential).not.toHaveBeenCalled();
+      expect(h.authSecrets.deleteCredential).not.toHaveBeenCalled();
+      expect(h.scopeResolver.write).not.toHaveBeenCalled();
+      expect(h.configManager.set).not.toHaveBeenCalled();
+      expect(h.sdkAdapter.reset).not.toHaveBeenCalled();
+      expect(diagnosticText(h)).not.toContain('sk-ant-secret-invalid');
+    });
+  });
+
   describe('auth:saveSettings', () => {
     it('rejects an unknown authMethod via the Zod schema', async () => {
       const h = makeHarness();

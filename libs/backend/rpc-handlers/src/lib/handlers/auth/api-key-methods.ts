@@ -9,6 +9,8 @@ import {
   DEFAULT_PROVIDER_ID,
   getAllAnthropicProviders,
 } from '@ptah-extension/agent-sdk';
+import type { SdkAgentAdapter } from '@ptah-extension/agent-sdk';
+import type { WorkspaceScopeResolver } from '@ptah-extension/settings-core';
 import type { ProviderModelsService } from '@ptah-extension/auth-providers';
 import type {
   AuthApiKeyStatusEntry,
@@ -16,9 +18,13 @@ import type {
   AuthDeleteStoredKeyResult,
   AuthGetApiKeyStatusResult,
 } from '@ptah-extension/shared';
+import { ANTHROPIC_DIRECT_PROVIDER_ID } from '@ptah-extension/shared';
 import { maskKeyHint } from '../../utils/mask-key-hint';
 import type { ConnectionCheckRecorder } from '../../utils/connection-check-recorder';
-import { AuthDeleteStoredKeySchema } from '../auth-rpc.schema';
+import {
+  AuthDeleteStoredKeySchema,
+  AuthSetDirectAnthropicApiKeySchema,
+} from '../auth-rpc.schema';
 import { keyStoreReadFailure } from './key-store-read-failure';
 
 export interface ApiKeyMethodsDeps {
@@ -27,6 +33,8 @@ export interface ApiKeyMethodsDeps {
   readonly sentryService: SentryService;
   readonly configManager: ConfigManager;
   readonly authSecretsService: IAuthSecretsService;
+  readonly sdkAdapter: SdkAgentAdapter;
+  readonly scopeResolver: WorkspaceScopeResolver;
   readonly providerModels: ProviderModelsService;
   readonly connectionChecks: ConnectionCheckRecorder;
   readonly invalidateAuthStatusCache: () => void;
@@ -38,6 +46,54 @@ export interface ApiKeyMethodsDeps {
  */
 export class ApiKeyMethods {
   constructor(private readonly deps: ApiKeyMethodsDeps) {}
+
+  /** Store or delete the direct Anthropic secret without changing the route. */
+  registerSetDirectAnthropicApiKey(): void {
+    const { authSecretsService, connectionChecks, logger, sentryService } =
+      this.deps;
+    this.deps.rpcHandler.registerMethod<
+      unknown,
+      { success: boolean; error?: string }
+    >('auth:setDirectAnthropicApiKey', async (raw: unknown) => {
+      const parsed = AuthSetDirectAnthropicApiKeySchema.safeParse(raw);
+      if (!parsed.success) {
+        return { success: false, error: 'Invalid API key request.' };
+      }
+      try {
+        if (parsed.data.apiKey === null) {
+          await authSecretsService.deleteCredential('apiKey');
+        } else {
+          await authSecretsService.setCredential('apiKey', parsed.data.apiKey);
+          // Refresh only an active Claude API route; preserve all auth settings and scope overrides.
+          if (this.deps.scopeResolver.read<string>('authMethod', true) === 'apiKey') {
+            try {
+              await this.deps.sdkAdapter.reset();
+            } catch {
+              logger.error('RPC: auth:setDirectAnthropicApiKey adapter refresh failed', new Error('Adapter refresh failed'));
+              return { success: true, error: 'API key saved, but the active agent could not refresh.' };
+            }
+          }
+        }
+        return { success: true };
+      } catch (error: unknown) {
+        const errorType = error instanceof Error ? error.name : 'unknown';
+        logger.error('RPC: auth:setDirectAnthropicApiKey failed', { errorType });
+        sentryService.captureException(
+          new Error(`auth:setDirectAnthropicApiKey failed (${errorType})`),
+          { errorSource: 'AuthRpcHandlers.registerSetDirectAnthropicApiKey' },
+        );
+        return {
+          success: false,
+          error: parsed.data.apiKey === null
+            ? 'Could not delete the stored key.'
+            : 'Could not save the API key.',
+        };
+      } finally {
+        connectionChecks.clear(ANTHROPIC_DIRECT_PROVIDER_ID);
+        this.deps.invalidateAuthStatusCache();
+      }
+    });
+  }
 
   /**
    * auth:getStatus - Compact auth status for the active Anthropic provider.
