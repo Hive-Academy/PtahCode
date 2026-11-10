@@ -103,6 +103,7 @@ export class ElectronGitWindowHost implements GitWindowHost {
     } catch (error: unknown) {
       this.window = null;
       this.report('could not be registered', error);
+      // degradation-audit: reported — BrowserWindow.close() is synchronous (not the host's async close); nothing to await.
       if (!child.isDestroyed()) child.close();
       this.notifyClosed();
       return { ok: false, reason: 'not-ready' };
@@ -110,6 +111,7 @@ export class ElectronGitWindowHost implements GitWindowHost {
 
     const closeWithMain = (): void => {
       this.options.bridge.childWindows.unregister('git', INSTANCE, child);
+      // degradation-audit: reported — BrowserWindow.close() is synchronous (not the host's async close); nothing to await.
       if (!child.isDestroyed()) child.close();
     };
     main.once('closed', closeWithMain);
@@ -125,6 +127,7 @@ export class ElectronGitWindowHost implements GitWindowHost {
     const broken = (reason: string, error: unknown): void => {
       this.report(reason, error);
       this.options.bridge.childWindows.unregister('git', INSTANCE, child);
+      // degradation-audit: reported — BrowserWindow.close() is synchronous (not the host's async close); nothing to await.
       if (!child.isDestroyed()) child.close();
     };
     child.webContents.on('did-fail-load', (_event, code, description, _url, mainFrame) => {
@@ -140,6 +143,7 @@ export class ElectronGitWindowHost implements GitWindowHost {
     const child = this.liveWindow();
     if (!child) return false;
     this.options.bridge.childWindows.unregister('git', INSTANCE, child);
+    // degradation-audit: reported — BrowserWindow.close() is synchronous (not the host's async close); nothing to await.
     if (!child.isDestroyed()) child.close();
     return true;
   }
@@ -157,6 +161,7 @@ export class ElectronGitWindowHost implements GitWindowHost {
     } catch (error: unknown) {
       this.report('scope could not be sent', error);
       this.options.bridge.childWindows.unregister('git', INSTANCE, child);
+      // degradation-audit: reported — BrowserWindow.close() is synchronous (not the host's async close); nothing to await.
       if (!child.isDestroyed()) child.close();
       return { accepted: false, scope: null };
     }
