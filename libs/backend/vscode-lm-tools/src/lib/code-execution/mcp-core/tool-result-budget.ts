@@ -59,16 +59,17 @@ const BROWSER_CONTENT_CHARS = 32 * 1024 + 1024;
  * The value is restated here, not imported: the cli-agent-runtime barrel
  * pulls tsyringe into every light consumer of this module, and
  * `session-tools.spec.ts` fails if the two drift apart. The default budget on
- * top holds the reply's header line and the held-completion block (one
- * `<agent-lane-completed>` envelope per child, at most
- * `agentSessions.maxConcurrent` live children), exactly the room any other
- * tool's whole answer gets. The held block comes before the transcript, so a
+ * top holds the reply's header line and a fixed allowance for held
+ * completions. The child count is unlimited by default, so this budget cannot
+ * be derived from `agentSessions.maxConcurrent`. The held block comes before
+ * the transcript, so a
  * larger `tailKiB` (up to 256 KiB) is cut from the transcript's end and
  * spooled, never the held completions.
  */
 const SESSION_READ_DEFAULT_TAIL_CHARS = 32 * 1024;
+const SESSION_READ_HELD_COMPLETIONS_CHARS = DEFAULT_TOOL_RESULT_BUDGET_CHARS;
 const SESSION_READ_CHARS =
-  SESSION_READ_DEFAULT_TAIL_CHARS + DEFAULT_TOOL_RESULT_BUDGET_CHARS;
+  SESSION_READ_DEFAULT_TAIL_CHARS + SESSION_READ_HELD_COMPLETIONS_CHARS;
 
 function charBudget(chars: number): TextBudget {
   return Object.freeze({ tokens: Math.ceil(chars / CHARS_PER_TOKEN), chars });

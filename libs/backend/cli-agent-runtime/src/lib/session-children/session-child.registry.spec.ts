@@ -100,6 +100,15 @@ describe('SessionChildRegistry', () => {
     });
   });
   describe('slot reservation', () => {
+    it('allows more than five live children when max is 0', () => {
+      const registry = new SessionChildRegistry();
+      for (let index = 0; index < 6; index++) {
+        addChild(registry, `child-${index}`);
+      }
+      expect(registry.liveCount()).toBe(6);
+      expect(registry.reserveSlot(0)).not.toBeNull();
+    });
+
     it('refuses the second of two racing reservations when the cap is 1', () => {
       const registry = new SessionChildRegistry();
 

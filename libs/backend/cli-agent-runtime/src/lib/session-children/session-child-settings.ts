@@ -14,7 +14,7 @@ import type { IWorkspaceProvider } from '@ptah-extension/platform-core';
 export const SESSION_CHILD_SETTINGS_SECTION = 'ptah';
 
 export interface SessionChildSettings {
-  /** Live children across the whole host. */
+  /** Live children across the whole host; 0 means no limit. */
   readonly maxConcurrent: number;
   /** Wall-clock cap per child, in minutes. */
   readonly maxRuntimeMinutes: number;
@@ -36,9 +36,9 @@ interface IntegerSetting {
 
 export const SESSION_CHILD_MAX_CONCURRENT: IntegerSetting = {
   key: 'agentSessions.maxConcurrent',
-  fallback: 3,
-  min: 1,
-  max: 5,
+  fallback: 0,
+  min: 0,
+  max: 50,
 };
 
 export const SESSION_CHILD_MAX_RUNTIME_MINUTES: IntegerSetting = {

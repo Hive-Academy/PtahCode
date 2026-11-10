@@ -20,7 +20,7 @@ function workspaceWith(
 describe('readSessionChildSettings', () => {
   it('returns the documented defaults when nothing is configured', () => {
     expect(readSessionChildSettings(workspaceWith({}))).toEqual({
-      maxConcurrent: 3,
+      maxConcurrent: 0,
       maxRuntimeMinutes: 120,
       runtimeWarnLeadMinutes: 10,
       handoffGraceMinutes: 15,
@@ -38,15 +38,17 @@ describe('readSessionChildSettings', () => {
 
   describe.each([
     // key, value, expected
-    ['agentSessions.maxConcurrent', 'maxConcurrent', 0, 1],
+    ['agentSessions.maxConcurrent', 'maxConcurrent', 0, 0],
+    ['agentSessions.maxConcurrent', 'maxConcurrent', -1, 0],
     ['agentSessions.maxConcurrent', 'maxConcurrent', 1, 1],
     ['agentSessions.maxConcurrent', 'maxConcurrent', 4, 4],
     ['agentSessions.maxConcurrent', 'maxConcurrent', 5, 5],
-    ['agentSessions.maxConcurrent', 'maxConcurrent', 99, 5],
+    ['agentSessions.maxConcurrent', 'maxConcurrent', 50, 50],
+    ['agentSessions.maxConcurrent', 'maxConcurrent', 99, 50],
     ['agentSessions.maxConcurrent', 'maxConcurrent', 2.9, 2],
-    ['agentSessions.maxConcurrent', 'maxConcurrent', Number.NaN, 3],
-    ['agentSessions.maxConcurrent', 'maxConcurrent', '4', 3],
-    ['agentSessions.maxConcurrent', 'maxConcurrent', null, 3],
+    ['agentSessions.maxConcurrent', 'maxConcurrent', Number.NaN, 0],
+    ['agentSessions.maxConcurrent', 'maxConcurrent', '4', 0],
+    ['agentSessions.maxConcurrent', 'maxConcurrent', null, 0],
     ['agentSessions.maxRuntimeMinutes', 'maxRuntimeMinutes', 1, 5],
     ['agentSessions.runtimeWarnLeadMinutes', 'runtimeWarnLeadMinutes', 0, 1],
     ['agentSessions.runtimeWarnLeadMinutes', 'runtimeWarnLeadMinutes', 100, 60],

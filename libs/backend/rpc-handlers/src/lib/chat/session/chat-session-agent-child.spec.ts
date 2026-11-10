@@ -328,6 +328,16 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
       h.modelCatalog.getSupportedModels.mockRejectedValueOnce(new Error('catalog offline'));
       await expect(h.service.resolveAgentChildModel(input)).resolves.toMatchObject({ accepted: false, code: 'model-catalog-unavailable', message: 'catalog offline' });
     });
+
+    it('refuses an explicit model on a named account without reading the ambient catalog', async () => {
+      const h = makeHarness();
+      Object.defineProperty(h.service, 'gateAccount', { value: jest.fn().mockResolvedValue({}) });
+      const result = await h.service.resolveAgentChildModel(input);
+      expect(result).toMatchObject({ accepted: false, code: 'model-catalog-unavailable' });
+      expect(result.accepted ? '' : result.message).toContain('omit model');
+      expect(result.accepted ? '' : result.message).toContain('effort is still accepted');
+      expect(h.modelCatalog.getSupportedModels).not.toHaveBeenCalled();
+    });
   });
   describe('startSession (chat:start) — unchanged for existing callers', () => {
     it('returns classified native runtime start failures as RPC result data', async () => {

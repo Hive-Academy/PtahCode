@@ -100,12 +100,13 @@ export class SessionChildRegistry {
 
   /**
    * Claim one slot synchronously, or `null` when `max` is already taken by
-   * live children plus outstanding reservations. Synchronous on purpose: two
+   * live children plus outstanding reservations. Zero means no limit.
+   * Synchronous on purpose: two
    * concurrent starts both run their guard before either awaits, so the
    * second one sees the first one's reservation.
    */
   reserveSlot(max: number): SessionChildReservation | null {
-    if (this.liveCount() + this.reservations.size >= max) return null;
+    if (max > 0 && this.liveCount() + this.reservations.size >= max) return null;
     const id = this.nextReservationId++;
     this.reservations.add(id);
     return { id };

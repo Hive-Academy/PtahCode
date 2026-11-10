@@ -88,7 +88,7 @@ Seven settings bound child sessions. They are read each time a session is starte
 
 | Setting                                     | Default   | Range           | Meaning                                                                                                                                   |
 | ------------------------------------------- | --------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `ptah.agentSessions.maxConcurrent`          | `3`       | 1 to 5          | Live children across the whole host. An idle child still counts until it is stopped. A start beyond the limit is refused (`cap-reached`). |
+| `ptah.agentSessions.maxConcurrent`          | `0`       | 0 to 50         | Live children across the whole host. `0` means no limit. An idle child still counts until it is stopped. A start beyond a positive limit is refused (`cap-reached`). Heavy checks are already bounded by the machine-wide verify lock, so this setting bounds only the number of live sessions. |
 | `ptah.agentSessions.maxRuntimeMinutes`      | `120`     | 5 to 720        | Wall-clock cap per child, in minutes; starts an automatic handoff.                                                                        |
 | `ptah.agentSessions.runtimeWarnLeadMinutes` | `10`      | 1 to 60         | Minutes before the cap to warn the child; always below the cap.                                                                           |
 | `ptah.agentSessions.handoffGraceMinutes`    | `15`      | 1 to 120        | Minutes after the cap before a busy child is interrupted for recovery.                                                                    |

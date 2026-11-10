@@ -492,6 +492,15 @@ describe('SessionSpawnerService.start — guards in order', () => {
     expect(h.provisioner.create).toHaveBeenCalledTimes(1);
   });
 
+  it('starts more than five live children with the default unlimited setting', async () => {
+    const h = makeHarness();
+    for (let index = 0; index < 6; index++) {
+      await h.startChild({ branch: `feat/child-${index}` });
+    }
+    expect(h.registry.liveCount()).toBe(6);
+    expect(h.provisioner.create).toHaveBeenCalledTimes(6);
+  });
+
   it('names the caller own live children in the cap-reached detail', async () => {
     const h = makeHarness({ config: { 'agentSessions.maxConcurrent': 1 } });
     const child = await h.startChild();

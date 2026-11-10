@@ -1325,7 +1325,7 @@ export class ChatSessionService {
       });
       if (account) {
         this.logger.warn('[ChatSessionService] Named account model catalog unavailable before admission');
-        return { accepted: false, code: 'model-catalog-unavailable', message: 'the named account model catalog cannot be read before admission' };
+        return { accepted: false, code: 'model-catalog-unavailable', message: 'the model catalog of a named account cannot be read without a launch; omit model to start the child with the account default (effort is still accepted)' };
       }
       if (!this.childModelCatalog) {
         this.logger.warn('[ChatSessionService] Model catalog service unavailable');

@@ -5,7 +5,7 @@ import { SectionHeaderComponent } from '../shared/section-header.component';
 import { STEP_THRESHOLDS, stageScrollProgress, stepsReached } from '../shared/stage-scroll';
 
 export const MULTI_VENDOR_POINTS: readonly string[] = [
-  'Up to three child chats, each in a worktree.',
+  'Start as many child chats as you need, each in a worktree.',
   'A new chat can adopt work still running.',
   'Past 150,000 tokens or 10 idle minutes: fresh brief.',
 ];
