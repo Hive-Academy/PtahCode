@@ -30,6 +30,7 @@ import { startReviewWorker } from './review-worker.activation';
 import { startTaskEndHook } from './task-end-hook.activation';
 import { startSearchWorkerAfterMigrations } from './search-worker-prestart';
 import { startWalCheckpointsAfterMigrations } from './wal-checkpoint-start';
+import { startTableSizeReportAfterMigrations } from './table-size-report-start';
 import { REVIEW_CORE_TOKENS } from '@ptah-extension/review-core';
 import { TASK_END_TOKENS } from '@ptah-extension/task-end-hook';
 
@@ -562,6 +563,10 @@ export function createHeavyServicesBooter(
           PERSISTENCE_TOKENS.SQLITE_INTEGRITY_SERVICE,
         )
       : null;
+    // All heavy boot phases have settled; governor admission follows in the service.
+    if (!signal.aborted && thoth.sqliteConnection?.isOpen) {
+      startTableSizeReportAfterMigrations(container, signal);
+    }
   };
 
   return {
