@@ -109,16 +109,17 @@ export function deriveLaneEventPresentation(row: LaneEventRow, metrics: LaneEven
   const status = (completed?.status ?? completion?.status ?? '').toLowerCase();
   const verdict = (completed?.verdict ?? '').toLowerCase();
   const timedOut = status === 'timeout' || status === 'timed out';
-  const failed = verdict === 'failed' || ['failed', 'error', 'killed'].includes(status);
   const stopped = status === 'stopped' || status === 'cancelled';
-  const budgetStop = stopped && !failed && isAgentBudgetStopReason(completed?.stopReason);
+  const budgetStop = stopped && isAgentBudgetStopReason(completed?.stopReason);
+  const failed = ['failed', 'error', 'killed'].includes(status)
+    || (verdict === 'failed' && (!stopped || Boolean(completed?.stopReason) && !budgetStop));
   const unverified = verdict === 'unverified';
   // The producer says a no-deliverable lane is NOT done (lane-completion-envelope.ts).
   const noDeliverable = verdict === 'no-deliverable';
   const chip: LaneEventChip = timedOut
     ? { label: 'Timed out', tone: 'err', icon: TriangleAlert }
-    : failed ? { label: 'Failed', tone: 'err', icon: X }
     : budgetStop ? { label: 'Budget stop', tone: 'need', icon: TriangleAlert }
+    : failed ? { label: 'Failed', tone: 'err', icon: X }
     : stopped ? { label: 'Stopped', tone: 'neutral', icon: FileText }
     : completed && noDeliverable ? { label: 'Incomplete · no deliverable', tone: 'need', icon: TriangleAlert }
     : completed ? { label: 'Completed', tone: 'done', icon: Check,
@@ -161,9 +162,9 @@ export function deriveLaneEventPresentation(row: LaneEventRow, metrics: LaneEven
   const reportLine = report?.body.split(/\r?\n/).find(line => line.trim())?.trim();
   const elapsed = completion?.duration ? ` ${failed || timedOut || stopped ? 'after' : 'in'} ${completion.duration}` : '';
   const exit = failed && completion?.exitCode !== undefined && completion.exitCode !== 0 ? ` (exit ${completion.exitCode})` : '';
-  const summary = budgetStop ? `Stopped by budget${elapsed}` : failed ? `Failed${elapsed}${exit}`
-    : timedOut ? `Timed out${elapsed}` : stopped ? `Stopped${elapsed}`
-    : reportLine ?? (completed ? `Finished${elapsed}` : chip.label);
+  const summary = budgetStop ? `Stopped by budget${elapsed}`
+    : reportLine ?? (timedOut ? `Timed out${elapsed}` : failed ? `Failed${elapsed}${exit}`
+      : stopped ? `Stopped${elapsed}` : completed ? `Finished${elapsed}` : chip.label);
   const peer = row.peerLabel.trim();
   const names = new Set([row.agent.trim().toLowerCase(), row.cli.trim().toLowerCase()]);
   const peerTitle = peer && !peer.toLowerCase().split(/\s*[·•]\s*/).every(part => names.has(part)) ? peer : null;
