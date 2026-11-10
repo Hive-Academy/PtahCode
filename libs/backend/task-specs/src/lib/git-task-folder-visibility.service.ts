@@ -231,10 +231,20 @@ export class GitTaskFolderVisibility implements ITaskFolderVisibility {
       fetchMs: Math.round(fetchMs), lsTreeMs: Math.round(lsTreeMs),
       totalMs: Math.round(totalMs), siblings: specDirs?.length ?? 0, folders: names.size,
     };
-    if (totalMs >= 2000) this.logger.warn('[task-specs] visibility timing', metrics);
-    else if (totalMs >= 250) this.logger.info('[task-specs] visibility timing', metrics);
-    else this.logger.debug('[task-specs] visibility timing', metrics);
+    this.logTiming(totalMs, metrics);
     return result;
+  }
+
+  /** Diagnostic only: a log failure must not reject a task create. */
+  private logTiming(totalMs: number, metrics: Record<string, number>): void {
+    try {
+      if (totalMs >= 2000) this.logger.warn('[task-specs] visibility timing', metrics);
+      else if (totalMs >= 250) this.logger.info('[task-specs] visibility timing', metrics);
+      else this.logger.debug('[task-specs] visibility timing', metrics);
+    } catch (_error: unknown) {
+      // degradation-audit: optional-capability — the timing line is diagnostic;
+      // the logger itself failed, so there is no channel to report it on.
+    }
   }
 
   /**

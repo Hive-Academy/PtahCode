@@ -86,6 +86,8 @@ export class AnalyticsRpcHandlers {
     }
 
     const key = JSON.stringify([request.range, workspace]);
+    // A caller that joins gets the time window of the first caller. The join
+    // window is 5 s, so the windows differ only at a UTC day boundary.
     return this.inFlight.run(key, () => this.runSummary(request, workspace));
   }
 

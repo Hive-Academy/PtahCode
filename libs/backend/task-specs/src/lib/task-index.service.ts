@@ -156,9 +156,26 @@ export class TaskIndexService implements ITaskIndexNotifier {
     now?: () => number,
   ) {
     const [event, fire] = createEvent<TaskIndexChangeEvent>();
-    this._onDidChangeIndex = event;
+    // Each listener is guarded: a listener that throws must not stop the
+    // listeners after it (the RPC broadcast is one of them).
+    this._onDidChangeIndex = (listener) =>
+      event((e) => this.callListener(listener, e));
     this.fireChange = fire;
     this.now = now ?? (() => performance.now());
+  }
+
+  private callListener(
+    listener: (e: TaskIndexChangeEvent) => void,
+    e: TaskIndexChangeEvent,
+  ): void {
+    try { listener(e); }
+    catch (error: unknown) {
+      // degradation-audit: reported — logged at warn; the other listeners still run.
+      this.logger.warn('[task-specs] index change listener failed', {
+        error: new Error('Index change listener failed'),
+        errorClass: error instanceof Error ? error.name : 'UnknownError',
+      });
+    }
   }
 
   /** Subscribe to derived-index changes (the RPC handler broadcasts these). */
@@ -619,7 +636,15 @@ export class TaskIndexService implements ITaskIndexNotifier {
     this.armFlush(root, state, DEBOUNCE_MS);
   }
 
-  private armFlush(root: string, state: WorkspaceState, delayMs: number): void {
+  private armFlush(
+    root: string,
+    state: WorkspaceState,
+    delayMs: number,
+    isRetry = false,
+  ): void {
+    // A timer armed by a newer watcher event during the failed flush stays:
+    // its flush reads `state.pending`, which holds the retried folders too.
+    if (isRetry && state.timer) return;
     if (state.timer) clearTimeout(state.timer);
     state.timer = setTimeout(() => {
       void this.flush(root);
@@ -692,10 +717,12 @@ export class TaskIndexService implements ITaskIndexNotifier {
       if (dropped > 0) this.logger.warn('[task-specs] watcher flush retries exhausted', {
         folders: dropped, error: new Error('Watcher rebuild failed'),
       });
-      if (state.pending.size > 0 && Number.isFinite(nextDelay)) this.armFlush(root, state, nextDelay);
-      else this.logger.debug('[task-specs] watcher flush failed', {
+      const retry = state.pending.size > 0 && Number.isFinite(nextDelay);
+      this.logger.debug('[task-specs] watcher flush failed', {
         error: error instanceof Error ? error.name : 'Unknown error',
+        retryInMs: retry ? nextDelay : null,
       });
+      if (retry) this.armFlush(root, state, nextDelay, true);
     }
   }
 
@@ -837,11 +864,6 @@ export class TaskIndexService implements ITaskIndexNotifier {
     if (emit) {
       const listenerStarted = this.now();
       try { this.fireChange({ workspaceRoot: root, folderNames, reason }); }
-      catch (_error: unknown) {
-        this.logger.warn('[task-specs] index change listener failed', {
-          error: new Error('Index change listener failed'),
-        });
-      }
       finally { listenerMs = this.now() - listenerStarted; }
     }
     failed = !indexWritten && this.store.isReady();

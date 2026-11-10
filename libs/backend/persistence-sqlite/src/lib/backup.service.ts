@@ -238,8 +238,8 @@ export interface IBackupService {
   /**
    * Deletes old backup files of the given kind, keeping only the `keep` newest.
    * A `keep` of `0` means unlimited — no files are deleted.
-   * Filenames sort newest-first by compact ISO timestamp. Across mixed formats,
-   * an old-format file sorts newer than a new-format file from the same second.
+   * Filenames sort newest-first by compact ISO timestamp. Both stamp formats
+   * are normalized to one comparable form; the filename breaks a tie.
    * New code publishes only validated finals. An old-version daily partial on
    * the upgrade day is the documented compatibility exception.
    */

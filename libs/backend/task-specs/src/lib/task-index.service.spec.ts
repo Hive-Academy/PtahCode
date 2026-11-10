@@ -776,6 +776,38 @@ describe('TaskIndexService write-order (applyFolderChange)', () => {
     } finally { jest.useRealTimers(); }
   });
 
+  it('keeps the debounce timer of a newer event when a failed flush arms its retry', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+    try {
+      const fs = new FakeFs();
+      seedTwoValidOneExcluded(fs);
+      const { service, scanner } = buildServiceWithParts(fs);
+      await service.ensureStarted(ROOT);
+      const original = scanner.scan.bind(scanner);
+      let failFirstScan: (error: Error) => void = () => undefined;
+      const scan = jest.spyOn(scanner, 'scan')
+        .mockImplementationOnce(() => new Promise((_resolve, reject) => { failFirstScan = reject; }))
+        .mockImplementation(original);
+      fs.setFile(carrier('TASK_2026_007'), validTask('TASK_2026_007'));
+      fs.fireCreate(carrier('TASK_2026_007'));
+      jest.advanceTimersByTime(300);
+      await flush(); await flush();
+      expect(scan).toHaveBeenCalledTimes(1);
+      // A newer event arrives while the first flush is in progress.
+      fs.setFile(carrier('TASK_2026_008'), validTask('TASK_2026_008'));
+      fs.fireCreate(carrier('TASK_2026_008'));
+      failFirstScan(new Error('transient scan failure'));
+      await flush(); await flush();
+      // The 300 ms debounce of the newer event is not replaced by the 1 s retry.
+      jest.advanceTimersByTime(300);
+      await flush(); await flush();
+      expect(scan).toHaveBeenCalledTimes(2);
+      const ids = (await service.list(ROOT)).tasks.map((task) => task.id);
+      expect(ids).toEqual(expect.arrayContaining(['TASK_2026_007', 'TASK_2026_008']));
+      service.dispose();
+    } finally { jest.useRealTimers(); }
+  });
+
   it('stops watcher retries after 1s, 5s and 30s backoff', async () => {
     jest.useFakeTimers({ doNotFake: ['setImmediate'] });
     try {
@@ -810,6 +842,8 @@ describe('TaskIndexService write-order (applyFolderChange)', () => {
       await service.ensureStarted(ROOT);
       replace.mockClear();
       service.onDidChangeIndex(() => { throw new Error('listener failure'); });
+      const later = jest.fn();
+      service.onDidChangeIndex(later);
       fs.setFile(carrier('TASK_2026_007'), validTask('TASK_2026_007'));
       fs.fireCreate(carrier('TASK_2026_007'));
       jest.advanceTimersByTime(300);
@@ -817,7 +851,10 @@ describe('TaskIndexService write-order (applyFolderChange)', () => {
       expect(replace).toHaveBeenCalledTimes(1);
       expect(logger.warn).toHaveBeenCalledWith('[task-specs] index change listener failed', {
         error: expect.any(Error),
+        errorClass: 'Error',
       });
+      // A listener that throws does not stop the listeners after it.
+      expect(later).toHaveBeenCalledTimes(1);
       jest.advanceTimersByTime(60000);
       await flush();
       expect(replace).toHaveBeenCalledTimes(1);

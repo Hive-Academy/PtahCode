@@ -225,6 +225,16 @@ describe('GitTaskFolderVisibility — all three steps succeed', () => {
       totalMs: expect.any(Number), siblings: 2, folders: 3,
     }));
   });
+  it('still returns the folders when the timing log throws', async () => {
+    const { service, logger } = makeService({
+      worktree: { stdout: WORKTREE_LIST }, fetch: {}, 'ls-tree': { stdout: LS_TREE },
+    });
+    const fail = (): never => { throw new Error('output channel closed'); };
+    jest.mocked(logger.debug).mockImplementation(fail);
+    jest.mocked(logger.info).mockImplementation(fail);
+    jest.mocked(logger.warn).mockImplementation(fail);
+    await expect(service.listBeyondWorkspace(ROOT)).resolves.toHaveLength(3);
+  });
   it('unions the sibling worktree and origin/main, and never returns its own specs dir twice', async () => {
     const { service, subcommands } = makeService({
       worktree: { stdout: WORKTREE_LIST },

@@ -96,7 +96,7 @@ export class SqliteTableSizeReportService {
     const response = outcome.response;
     if (response === null) {
       this.logger.warn(
-        '[persistence-sqlite] table size report abandoned — no reply within the budget',
+        '[persistence-sqlite] table size report abandoned — no reply (early exit, spawn failure or budget expiry)',
         { budgetMs: TABLE_SIZE_BUDGET_MS },
       );
       return;
