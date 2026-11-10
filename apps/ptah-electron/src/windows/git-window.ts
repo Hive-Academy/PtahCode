@@ -2,6 +2,7 @@ import type { Rectangle } from 'electron';
 import type { GitWindowHost, IStateStorage } from '@ptah-extension/platform-core';
 import {
   GIT_WINDOW_PUSH_TYPES,
+  MESSAGE_TYPES,
   GitWindowScopeSchema,
   GitWindowSetModeParamsSchema,
   type GitWindowOpenResult,
@@ -13,6 +14,7 @@ import type { Logger } from '@ptah-extension/vscode-core';
 import { PRODUCT_DISPLAY_NAME } from '../config/product-identity';
 import type { DisplayChildWindow, DisplayMainWindow, DisplayWindowIpcBridge } from './display-window';
 import { createChildWindow } from './create-child-window';
+import { GitWindowScopeGuard } from './git-window-scope-guard';
 import { isOnScreen } from './window-guards';
 
 const INSTANCE = 'default';
@@ -40,6 +42,12 @@ export const GIT_WINDOW_ALLOWED_METHODS: ReadonlySet<string> = new Set([
   'file:viewContent', 'file:saveContent',
   'editor:detectTargets', 'editor:openWorkspace', 'editor:openFile', 'editor:openMerge',
   'settings:get', 'settings:set',
+]);
+
+/** Host pushes that the Git services of the child handle; the main window gets them also. */
+export const GIT_WINDOW_PUSH_FORWARD_TYPES: ReadonlySet<string> = new Set([
+  MESSAGE_TYPES.GIT_STATUS_UPDATE, MESSAGE_TYPES.FILE_CONTENT_CHANGED,
+  MESSAGE_TYPES.GIT_OPERATION_OUTPUT, 'git:worktreeChanged',
 ]);
 
 export interface ElectronGitWindowHostOptions {
@@ -73,9 +81,14 @@ export class ElectronGitWindowHost implements GitWindowHost {
   private scope: GitWindowScope | null = null;
   private sequence = 0;
 
+  private readonly guard = new GitWindowScopeGuard(() => (this.isOpen() ? this.scope : null));
+
   constructor(private readonly options: ElectronGitWindowHostOptions) {
     options.bridge.childWindows.registerView('git', {
       singleton: true, allowedMethods: GIT_WINDOW_ALLOWED_METHODS,
+      authorize: (method, params) => this.guard.authorize(method, params),
+      observeResult: (method, params, data) => this.guard.observeResult(method, params, data),
+      pushTypes: GIT_WINDOW_PUSH_FORWARD_TYPES,
     });
   }
 

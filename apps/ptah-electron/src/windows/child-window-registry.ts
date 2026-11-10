@@ -8,7 +8,12 @@ export interface ChildContext {
   readonly context?: unknown;
 }
 export interface ChildWindowHandle {
-  readonly webContents: { readonly id: number; once?(event: 'destroyed', listener: () => void): unknown };
+  readonly webContents: {
+    readonly id: number;
+    once?(event: 'destroyed', listener: () => void): unknown;
+    send?(channel: string, message: unknown): void;
+    isDestroyed?(): boolean;
+  };
   isDestroyed(): boolean;
   isMinimized(): boolean;
   restore(): void;
@@ -20,7 +25,18 @@ export interface ChildWindowHandle {
 export interface ChildViewPolicy {
   readonly singleton: boolean;
   readonly allowedMethods: ReadonlySet<string>;
+  /**
+   * The scope check of an allowed method. `false` refuses the call before
+   * dispatch: the method name alone does not authorize the params.
+   */
+  readonly authorize?: (method: string, params: unknown) => boolean;
+  /** Reads the result of a call that was dispatched for the child. */
+  readonly observeResult?: (method: string, params: unknown, data: unknown) => void;
+  /** Host push types that the child gets together with the main window. */
+  readonly pushTypes?: ReadonlySet<string>;
 }
+/** Why a child call is refused: the method is not allowed, or its params are out of scope. */
+export type ChildRefusal = 'method' | 'scope';
 export interface ChildWindowOptions {
   readonly appDir: string;
   readonly placement: Partial<Rectangle> & { width: number; height: number };
@@ -105,6 +121,39 @@ export class ChildWindowRegistry {
   allows(webContentsId: number, method: string): boolean {
     const context = this.sender(webContentsId);
     return context !== null && (this.policies.get(context.viewKind)?.allowedMethods.has(method) ?? false);
+  }
+
+  /** The refusal of one child call, or `null` when it may be dispatched. */
+  refusal(webContentsId: number, method: string, params: unknown): ChildRefusal | null {
+    const context = this.sender(webContentsId);
+    const policy = context === null ? undefined : this.policies.get(context.viewKind);
+    if (!policy?.allowedMethods.has(method)) return 'method';
+    return policy.authorize?.(method, params) === false ? 'scope' : null;
+  }
+
+  observeResult(webContentsId: number, method: string, params: unknown, data: unknown): void {
+    const context = this.sender(webContentsId);
+    if (context !== null) this.policies.get(context.viewKind)?.observeResult?.(method, params, data);
+  }
+
+  /** Send one host push to each live child whose view lists its type. */
+  mirrorPush(message: unknown): void {
+    if (typeof message !== 'object' || message === null || !('type' in message)) return;
+    const type = message.type;
+    if (typeof type !== 'string') return;
+    for (const [viewKind, instances] of this.children) {
+      if (!this.policies.get(viewKind)?.pushTypes?.has(type)) continue;
+      for (const window of instances.values()) {
+        if (window.isDestroyed() || window.webContents.isDestroyed?.() === true) continue;
+        try {
+          window.webContents.send?.('to-renderer', message);
+        } catch {
+          // degradation-audit: optional-capability - the child closed between the
+          // check and the send; the main window still gets the push, and the
+          // child reads the state again when it opens.
+        }
+      }
+    }
   }
 
   allowsSender(webContentsId: number, mainWindowId: number | undefined, method: string): boolean {

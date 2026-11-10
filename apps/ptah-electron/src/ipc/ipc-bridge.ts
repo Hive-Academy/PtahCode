@@ -250,6 +250,7 @@ export class IpcBridge {
    *   call sites ignore it.
    */
   sendToRenderer(message: unknown): boolean {
+    this.childWindows.mirrorPush(message);
     const streamEvent = this.extractStreamEvent(message);
     if (streamEvent) {
       this.enqueueStreamEvent(streamEvent);
@@ -564,14 +565,17 @@ export class IpcBridge {
           }
           return;
         }
-        if (role !== 'main' && !this.childWindows.allows(event.sender.id, method)) {
+        const refusal = role === 'main' ? null : this.childWindows.refusal(event.sender.id, method, params);
+        if (role !== 'main' && refusal !== null) {
           this.refuseChildWindow(`rpc ${method}`, role);
           if (correlationId && !event.sender.isDestroyed()) {
             event.sender.send('to-renderer', {
               type: MESSAGE_TYPES.RPC_RESPONSE,
               correlationId,
               success: false,
-              error: `Method '${method}' is not available in the ${role === 'display' ? 'Display' : 'Git'} window`,
+              error: refusal === 'scope'
+                ? `Method '${method}' is outside the scope of the ${role === 'display' ? 'Display' : 'Git'} window`
+                : `Method '${method}' is not available in the ${role === 'display' ? 'Display' : 'Git'} window`,
             });
           }
           return;
@@ -586,6 +590,9 @@ export class IpcBridge {
           params,
           correlationId,
         });
+        if (role !== 'main' && response.success) {
+          this.childWindows.observeResult(event.sender.id, method, params, response.data);
+        }
         this.flushStreamQueue();
         // The renderer can be torn down (app quitting / window closed) while an
         // async RPC is in flight; sending to a destroyed sender throws
