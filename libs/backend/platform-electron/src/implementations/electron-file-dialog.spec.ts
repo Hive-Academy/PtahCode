@@ -86,4 +86,29 @@ describe('ElectronFileDialog', () => {
       provider.openFiles({ multiple: true, title: 'Pick files' }),
     ).resolves.toEqual([]);
   });
+
+  it('joins the open dialog for a repeated request, then opens a new one after it closes', async () => {
+    let close: (value: { canceled: boolean; filePaths: string[] }) => void =
+      () => undefined;
+    showOpenDialog.mockReturnValueOnce(
+      new Promise((resolve) => {
+        close = resolve;
+      }),
+    );
+    const request = { multiple: true, title: 'Attach files' };
+
+    const first = provider.openFiles(request);
+    const second = provider.openFiles({ ...request });
+    await Promise.resolve();
+    await Promise.resolve();
+    close({ canceled: false, filePaths: ['/tmp/one.ts'] });
+
+    await expect(first).resolves.toEqual(['/tmp/one.ts']);
+    await expect(second).resolves.toEqual(['/tmp/one.ts']);
+    expect(showOpenDialog).toHaveBeenCalledTimes(1);
+
+    showOpenDialog.mockResolvedValueOnce({ canceled: true, filePaths: [] });
+    await expect(provider.openFiles(request)).resolves.toEqual([]);
+    expect(showOpenDialog).toHaveBeenCalledTimes(2);
+  });
 });
