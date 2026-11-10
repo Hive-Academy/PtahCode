@@ -9,7 +9,12 @@ import {
   SystemOneClient,
 } from '../decision-model/system-one.client';
 import { SYSTEM_ONE_KEEP_ALIVE } from '../decision-model/system-one.residency';
-import { runFixedRequest, runLaneRequest, type LaneQuestion } from './model-refine';
+import {
+  fitPasses,
+  runFixedRequest,
+  runLaneRequest,
+  type LaneQuestion,
+} from './model-refine';
 
 const logger: LaneRoutingLogger = {
   debug: () => undefined,
@@ -149,6 +154,41 @@ describe('runLaneRequest outcome figures', () => {
     expect(Object.keys(narrow.payloads[0].state.pastOutcomes)).toEqual(
       lanes.slice(0, 3).map((lane) => `${lane.laneId}/implement`),
     );
+  });
+
+  it('runs one pass for each width when no phase has an alternate in the width', () => {
+    expect(fitPasses(phases, 4)).toEqual([true]);
+    expect(fitPasses(phases, 3)).toEqual([true]);
+    const alternate = { ...lanes[0], model: 'alternate' };
+    const beyond = [{ primaryCount: 2, options: [lanes[0], lanes[1], alternate] }];
+    expect(fitPasses(beyond, 2)).toEqual([true]);
+    expect(fitPasses(beyond, 3)).toEqual([false, true]);
+  });
+
+  it('offers primaries only when the width is below a primary count', async () => {
+    const alternate = { ...lanes[0], model: 'alternate' };
+    const second = { ...phases[0], phaseId: 'second', primaryCount: 2 };
+    const primary: LaneQuestion[] = [
+      { ...phases[0], phaseId: 'first' },
+      { ...second, options: [lanes[0], lanes[1]] },
+    ];
+    const withAlternates: LaneQuestion[] = [
+      primary[0],
+      { ...second, options: [lanes[0], lanes[1], alternate, alternate] },
+    ];
+    expect(fitPasses(withAlternates, 4)).toEqual([false, true]);
+    expect(fitPasses(withAlternates, 3)).toEqual([true]);
+    const baseline = capture();
+    await runLaneRequest({ provider: 'ollama', request: 'ship', phases: primary,
+      outcomes: () => null, maxRequestBytes: 100_000, dispatch: baseline.dispatch, logger });
+    const captured = capture();
+    const result = await runLaneRequest({ provider: 'ollama', request: 'ship',
+      phases: withAlternates, outcomes: () => null,
+      maxRequestBytes: requestBytes('nimble', baseline.payloads[0]) - 1,
+      dispatch: captured.dispatch, logger });
+    expect(result.sent).toBe(true);
+    expect(result.offered.get('first')).toEqual(lanes.slice(0, 3));
+    expect(result.offered.get('second')).toEqual([lanes[0], lanes[1]]);
   });
 
   it('includes the same figures in a structured prompt', async () => {

@@ -267,7 +267,7 @@ function fitLane(input: {
     PROVIDER_OPTION_LIMIT[input.provider],
   );
   for (let width = cap; width >= MIN_OPTIONS_PER_PHASE; width -= 1) {
-    for (const primariesOnly of [false, true]) {
+    for (const primariesOnly of fitPasses(input.phases, width)) {
     const offered = sliceOptions(input.phases, width, primariesOnly);
     const sent = input.phases.filter((phase) => offered.has(phase.phaseId));
     if (sent.length === 0) continue;
@@ -295,6 +295,23 @@ function fitLane(input: {
     }
   }
   return null;
+}
+
+/**
+ * The `primariesOnly` passes for one width. The pass with alternates runs only
+ * when no phase loses a primary at this width and a phase has an alternate
+ * in the width. Thus an alternate never replaces a primary, and a width
+ * without alternates gets one pass.
+ */
+export function fitPasses(
+  phases: readonly Pick<LaneQuestion, 'primaryCount' | 'options'>[],
+  width: number,
+): readonly boolean[] {
+  const keepsPrimaries = phases.every((phase) => phase.primaryCount <= width);
+  const hasAlternate = phases.some(
+    (phase) => Math.min(width, phase.options.length) > phase.primaryCount,
+  );
+  return keepsPrimaries && hasAlternate ? [false, true] : [true];
 }
 
 function offeredFigures(
