@@ -106,6 +106,7 @@ interface Harness {
   sendMessage: jest.Mock;
   getActiveWebviews: jest.Mock;
   startAgentChildSession: jest.Mock;
+  resolveAgentChildModel: jest.Mock;
   startHandoffSession: jest.Mock;
   logger: ReturnType<typeof createMockLogger>;
   order: string[];
@@ -128,6 +129,7 @@ function makeHarness(lifecycle: { find: jest.Mock } | null = null): Harness {
     order.push('start');
     return { success: true };
   });
+  const resolveAgentChildModel = jest.fn(async ({ model }: { model: string }) => ({ accepted: true, resolvedModel: model }));
   const startHandoffSession = jest.fn(async () => {
     order.push('start-handoff');
     return { success: true };
@@ -138,6 +140,7 @@ function makeHarness(lifecycle: { find: jest.Mock } | null = null): Harness {
     { broadcastMessage, sendMessage, getActiveWebviews },
     {
       startAgentChildSession,
+      resolveAgentChildModel,
       startHandoffSession,
     } as unknown as ChatSessionService,
     lifecycle as unknown as SessionLifecycleManager | null,
@@ -148,6 +151,7 @@ function makeHarness(lifecycle: { find: jest.Mock } | null = null): Harness {
     sendMessage,
     getActiveWebviews,
     startAgentChildSession,
+    resolveAgentChildModel,
     startHandoffSession,
     logger,
     order,
@@ -161,6 +165,17 @@ function chatErrorCalls(h: Harness): unknown[][] {
 }
 
 describe('ChildChatSessionHostAdapter', () => {
+  it('passes effort to the chat session start', async () => {
+    const h = makeHarness();
+    await h.adapter.startChildSession({ ...input, effort: 'high' });
+    expect(h.startAgentChildSession).toHaveBeenCalledWith(expect.objectContaining({ effort: 'high' }));
+  });
+  it('validates the explicit model through the chat session before launch', async () => {
+    const h = makeHarness();
+    await expect(h.adapter.resolveChildModel({ model: 'opus', workspaceRoot: '/repo', parentSessionId: 'parent' })).resolves.toMatchObject({ accepted: true, resolvedModel: 'opus' });
+    expect(h.resolveAgentChildModel).toHaveBeenCalledWith({ model: 'opus', workspaceRoot: '/repo', parentSessionId: 'parent' });
+    expect(h.startAgentChildSession).not.toHaveBeenCalled();
+  });
   it('announces the tab with the descriptor, then starts the session', async () => {
     const h = makeHarness();
 

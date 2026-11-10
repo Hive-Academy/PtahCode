@@ -14,6 +14,7 @@
 import type { ProviderAccountPortRefusal } from '@ptah-extension/auth-providers-tokens';
 import type {
   AgentSessionOpenedPayload,
+  EffortLevel,
   LaneCompletionRefusalReason,
   LaneCompletionVerdict,
 } from '@ptah-extension/shared';
@@ -61,6 +62,8 @@ export interface SessionChildSnapshot {
   readonly parentSessionId: string;
   readonly parentSdkSessionId?: string;
   readonly label: string;
+  readonly model?: string;
+  readonly effort?: EffortLevel;
   readonly taskId?: string;
   readonly branch: string;
   /** Resolved commit sha the branch was created from. */
@@ -112,6 +115,7 @@ export interface SessionChildStartRequest {
   readonly taskFolder?: string;
   readonly deliverables?: readonly string[];
   readonly model?: string;
+  readonly effort?: SessionChildSnapshot['effort'];
 }
 
 export type SessionSpawnRefusalCode =
@@ -122,6 +126,9 @@ export type SessionSpawnRefusalCode =
   | 'chat-runtime-unavailable'
   | 'no-workspace'
   | 'invalid-arguments'
+  | 'invalid-effort'
+  | 'invalid-model'
+  | 'model-catalog-unavailable'
   | 'branch-exists'
   | 'worktree-failed'
   | 'worktree-outside-workspace'

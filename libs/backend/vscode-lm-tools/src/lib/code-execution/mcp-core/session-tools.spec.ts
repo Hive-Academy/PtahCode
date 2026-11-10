@@ -104,6 +104,14 @@ describe('session tool definitions', () => {
 });
 
 describe('session tool schemas', () => {
+  it('accepts chat effort values and rejects unsupported effort', () => {
+    for (const effort of ['low', 'medium', 'high', 'xhigh', 'max']) {
+      expect(SessionStartArgsSchema.safeParse({ task: 't', branch: 'b', effort }).success).toBe(true);
+    }
+    for (const effort of ['minimal', 'turbo']) {
+      expect(SessionStartArgsSchema.safeParse({ task: 't', branch: 'b', effort }).success).toBe(false);
+    }
+  });
   it('rejects every caller, parent or permission key', () => {
     for (const key of [
       'callerSessionId',
@@ -365,6 +373,13 @@ const call = (
 ) => handleSessionToolCall(name, args, session, log);
 
 describe('handleSessionToolCall', () => {
+  it.each(['minimal', 'turbo'])('refuses unsupported effort %s with the accepted list', async (effort) => {
+    const session = fakeSession();
+    const reply = await call('ptah_session_start', { task: 't', branch: 'b', effort }, session);
+    expect(reply.text).toContain('refused (invalid-effort)');
+    expect(reply.text).toContain('low, medium, high, xhigh, max');
+    expect(session.start).not.toHaveBeenCalled();
+  });
   it('a zod failure is isError naming the field, and the namespace is not called', async () => {
     const session = fakeSession();
     const reply = await call('ptah_session_start', { task: 't' }, session);
@@ -401,6 +416,7 @@ describe('handleSessionToolCall', () => {
     expect(reply.text).toMatch(/sessionId c-1/);
     expect(reply.text).toMatch(/feat\/x/);
     expect(reply.text).toMatch(/\/repo\/\.worktrees\/feat-x/);
+    expect(reply.text).toContain('model default; effort default');
   });
 
   it('a plain refusal is a plain-text answer with code and detail', async () => {
@@ -510,6 +526,13 @@ describe('handleSessionToolCall', () => {
     });
     const reply = await call('ptah_session_status', {}, session);
     expect(reply.text).toContain('handed-off; succeededBy successor-1');
+  });
+
+  it('shows model and effort in status', async () => {
+    const session = fakeSession({ status: jest.fn().mockResolvedValue({ ok: true, children: [{ ...CHILD, model: 'opus', effort: 'low' }, CHILD] }) });
+    const reply = await call('ptah_session_status', {}, session);
+    expect(reply.text).toContain('model opus; effort low');
+    expect(reply.text).toContain('model default; effort default');
   });
 
   it('stop states that tab, transcript, worktree and branch remain', async () => {

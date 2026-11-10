@@ -80,6 +80,14 @@ export class ChildChatSessionHostAdapter implements IChildChatSessionHost {
     private readonly lifecycle: SessionLifecycleManager | null = null,
   ) {}
 
+  resolveChildModel(input: {
+    readonly model: string;
+    readonly workspaceRoot: string;
+    readonly parentSessionId: string;
+  }) {
+    return this.session.resolveAgentChildModel(input);
+  }
+
   async startChildSession(
     input: ChildChatSessionStartInput,
   ): Promise<ChildChatSessionStartOutcome & { readonly accountRefusal?: ProviderAccountPortRefusal }> {
@@ -104,6 +112,7 @@ export class ChildChatSessionHostAdapter implements IChildChatSessionHost {
         prompt: input.prompt,
         sessionName: input.sessionName,
         model: input.model,
+        effort: input.effort,
         ...(permissionLevel ? { permissionLevel } : {}),
       });
       if (result.success) {

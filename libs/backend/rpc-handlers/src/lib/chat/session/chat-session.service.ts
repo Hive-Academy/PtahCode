@@ -56,6 +56,7 @@ import { CodeExecutionMCP } from '@ptah-extension/vscode-lm-tools';
 import {
   SessionMetadataStore,
   SDK_TOKENS,
+  type SdkModelService,
   SlashCommandInterceptor,
   AuthRequiredError,
   isCodexChatAdapterError,
@@ -195,6 +196,7 @@ export interface AgentChildSessionStartParams extends MainSessionAccountSelectio
   readonly prompt: string;
   readonly sessionName: string;
   readonly model?: string;
+  readonly effort?: ChatContinueParams['effort'];
   /**
    * The parent session's live permission level, read when the child starts.
    * Absent (the parent's level is unknown) → `ask` (TASK_2026_660).
@@ -458,6 +460,8 @@ export class ChatSessionService {
      */
     @inject(CHAT_TOKENS.FOLLOW_UP_QUEUE, { isOptional: true })
     private readonly followUpQueue: ChatFollowUpQueue | null = null,
+    @inject(SDK_TOKENS.SDK_MODEL_SERVICE, { isOptional: true })
+    private readonly childModelCatalog: SdkModelService | undefined = undefined,
   ) {
     this.subscribeToMcpStatus();
     this.subscribeToSessionEnd();
@@ -1304,6 +1308,53 @@ export class ChatSessionService {
     }
   }
 
+  /** Resolve an explicit child model before its branch or registry record exists. */
+  async resolveAgentChildModel(input: {
+    readonly model: string;
+    readonly workspaceRoot: string;
+    readonly parentSessionId: string;
+  }): Promise<
+    | { readonly accepted: true; readonly resolvedModel: string }
+    | { readonly accepted: false; readonly code: 'invalid-model' | 'model-catalog-unavailable'; readonly message: string; readonly acceptedModels?: readonly string[] }
+  > {
+    try {
+      const account = await this.gateAccount({
+        workspacePath: input.workspaceRoot,
+        sessionId: input.parentSessionId,
+        inheritedSource: true,
+      });
+      if (account) {
+        this.logger.warn('[ChatSessionService] Named account model catalog unavailable before admission');
+        return { accepted: false, code: 'model-catalog-unavailable', message: 'the named account model catalog cannot be read before admission' };
+      }
+      if (!this.childModelCatalog) {
+        this.logger.warn('[ChatSessionService] Model catalog service unavailable');
+        return { accepted: false, code: 'model-catalog-unavailable', message: 'the host has no model catalog service' };
+      }
+      const profile = await this.workspaceProviderProfileResolver.resolveProviderProfileForWorkspace(
+        input.workspaceRoot, input.model,
+      );
+      const native = profile && !profile.authEnv.ANTHROPIC_BASE_URL &&
+        !profile.authEnv.ANTHROPIC_API_KEY && !profile.authEnv.ANTHROPIC_AUTH_TOKEN;
+      const models = native
+        ? await this.childModelCatalog.getNativeClaudeModels()
+        : await this.childModelCatalog.getSupportedModels();
+      if (models.length === 0) {
+        this.logger.warn('[ChatSessionService] Provider returned an empty model catalog');
+        return { accepted: false, code: 'model-catalog-unavailable', message: 'the provider returned an empty model catalog' };
+      }
+      const acceptedModels = models.map((item) => item.value);
+      const resolvedModel = this.childModelCatalog.resolveModelId(input.model, profile?.authEnv);
+      if (!acceptedModels.includes(resolvedModel)) {
+        return { accepted: false, code: 'invalid-model', message: `model "${input.model}" is unavailable for this provider.`, acceptedModels };
+      }
+      return { accepted: true, resolvedModel };
+    } catch (error: unknown) {
+      this.logger.error('[ChatSessionService] Child model catalog unavailable', error instanceof Error ? error : new Error(String(error)));
+      return { accepted: false, code: 'model-catalog-unavailable', message: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
   /**
    * Start a child chat session for a parent session's `ptah_session_start`
    * (TASK_2026_584). Called only by `ChildChatSessionHostAdapter`.
@@ -1325,7 +1376,7 @@ export class ChatSessionService {
   ): Promise<
     ChatStartResult | NonNullable<ReturnType<typeof mainSessionAccountFailure>>
   > {
-    const { tabId, workspaceRoot, worktreePath, prompt, sessionName, model } =
+    const { tabId, workspaceRoot, worktreePath, prompt, sessionName, model, effort } =
       params;
     try {
       const refused = this.authorizeAgentSessionPaths(
@@ -1365,7 +1416,7 @@ export class ChatSessionService {
         pluginConfigAncestorRoots,
         prompt,
         name: sessionName,
-        options: model ? { model } : undefined,
+        options: model || effort ? { ...(model ? { model } : {}), ...(effort ? { effort } : {}) } : undefined,
         mcpServerRunning,
         mcpServersOverride: undefined,
         permissionLevel,
