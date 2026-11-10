@@ -64,7 +64,11 @@ function suite() {
     ReviewOrchestratorService,
     'pollAndRecord'
   >;
-  const github = { getPull: jest.fn() } as Pick<IGitHubReviewPort, 'getPull'>;
+  const github = {
+    getPull: jest.fn(),
+    listOwnReviewsAndThreads: jest.fn(),
+    replyToFinding: jest.fn(),
+  } as Pick<IGitHubReviewPort, 'getPull' | 'listOwnReviewsAndThreads' | 'replyToFinding'>;
   const tokenStorage = {
     get: jest.fn().mockResolvedValue(undefined),
     store: jest.fn(),
@@ -115,6 +119,109 @@ function suite() {
 }
 
 describe('ReviewRpcHandlers', () => {
+  const finding = { attemptId: 'attempt-1', path: 'src/save.ts', line: 3, title: 'Lost update' };
+  const run = { repo: { owner: 'Hive-Academy', name: 'PtahCode' }, prNumber: 42 };
+  const thread = { id: 'thread-1', path: finding.path, line: finding.line, resolved: false, body: '### Lost update' };
+
+  it.each([
+    ['accept', undefined, '<!-- ptah-review-triage:accepted -->\nAccepted by the operator.'],
+    ['dismiss', 'reason', '<!-- ptah-review-triage:dismissed -->\nDismissed by the operator.\n\nreason'],
+    ['reply', 'a reply', 'a reply'],
+  ])('posts %s to the matching thread', async (action, body, expected) => {
+    const { invoke, query, github } = suite();
+    (query.getRun as jest.Mock).mockResolvedValue(run);
+    (github.listOwnReviewsAndThreads as jest.Mock).mockResolvedValue({
+      items: [{ id: 1, body: '', submittedAt: '', threads: [thread] }],
+      nextPage: null, etag: null, notModified: false,
+    });
+    expect(await invoke('review:respondToFinding', { ...finding, action, body })).toEqual({ ok: true, threadId: 'thread-1' });
+    expect(github.replyToFinding).toHaveBeenCalledWith(run.repo, 42, 'thread-1', expected);
+  });
+
+  it('narrows multiple matching threads by title across pages', async () => {
+    const { invoke, query, github } = suite();
+    (query.getRun as jest.Mock).mockResolvedValue(run);
+    (github.listOwnReviewsAndThreads as jest.Mock)
+      .mockResolvedValueOnce({ items: [{ threads: [{ ...thread, id: 'old', body: '### Other finding', resolved: true }] }], nextPage: 2 })
+      .mockResolvedValueOnce({ items: [{ threads: [thread] }], nextPage: null });
+    expect(await invoke('review:respondToFinding', { ...finding, action: 'accept' })).toEqual({ ok: true, threadId: 'thread-1' });
+    expect(github.listOwnReviewsAndThreads).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not guess when multiple threads remain ambiguous', async () => {
+    const { invoke, query, github } = suite();
+    (query.getRun as jest.Mock).mockResolvedValue(run);
+    (github.listOwnReviewsAndThreads as jest.Mock).mockResolvedValue({
+      items: [{ threads: [thread, { ...thread, id: 'thread-2' }] }], nextPage: null,
+    });
+    expect(await invoke('review:respondToFinding', { ...finding, action: 'accept' })).toEqual({
+      ok: false, code: 'ambiguous-thread', error: 'Multiple GitHub threads match this finding',
+    });
+    expect(github.replyToFinding).not.toHaveBeenCalled();
+  });
+
+  it('does not post to a path and line match that lacks the finding title', async () => {
+    const { invoke, query, github } = suite();
+    (query.getRun as jest.Mock).mockResolvedValue(run);
+    (github.listOwnReviewsAndThreads as jest.Mock).mockResolvedValue({
+      items: [{ threads: [{ ...thread, body: '### Other finding' }, { ...thread, id: 'thread-2', body: 'human note', resolved: true }] }],
+      nextPage: null,
+    });
+    expect(await invoke('review:respondToFinding', { ...finding, action: 'accept' })).toEqual({ ok: false, code: 'no-thread', error: 'No published GitHub thread for this finding' });
+    expect(github.replyToFinding).not.toHaveBeenCalled();
+  });
+
+  it('prefers the one unresolved thread among titled matches', async () => {
+    const { invoke, query, github } = suite();
+    (query.getRun as jest.Mock).mockResolvedValue(run);
+    (github.listOwnReviewsAndThreads as jest.Mock).mockResolvedValue({
+      items: [{ threads: [{ ...thread, id: 'old', resolved: true }, thread] }], nextPage: null,
+    });
+    expect(await invoke('review:respondToFinding', { ...finding, action: 'accept' })).toEqual({ ok: true, threadId: 'thread-1' });
+  });
+
+  it('does not post when the review scan is truncated', async () => {
+    const { invoke, query, github } = suite();
+    (query.getRun as jest.Mock).mockResolvedValue(run);
+    (github.listOwnReviewsAndThreads as jest.Mock).mockResolvedValue({ items: [{ threads: [thread] }], nextPage: 2 });
+    expect(await invoke('review:respondToFinding', { ...finding, action: 'accept' })).toEqual({
+      ok: false, code: 'ambiguous-thread', error: 'Too many GitHub reviews to identify the thread',
+    });
+    expect(github.listOwnReviewsAndThreads).toHaveBeenCalledTimes(5);
+    expect(github.replyToFinding).not.toHaveBeenCalled();
+  });
+
+  it('reports an unpublished finding without posting', async () => {
+    const { invoke, query, github } = suite();
+    (query.getRun as jest.Mock).mockResolvedValue(run);
+    (github.listOwnReviewsAndThreads as jest.Mock).mockResolvedValue({ items: [], nextPage: null });
+    expect(await invoke('review:respondToFinding', { ...finding, action: 'accept' })).toEqual({ ok: false, code: 'no-thread', error: 'No published GitHub thread for this finding' });
+    expect(github.replyToFinding).not.toHaveBeenCalled();
+  });
+
+  it('reports a missing run without calling GitHub', async () => {
+    const { invoke, github } = suite();
+    expect(await invoke('review:respondToFinding', { ...finding, action: 'accept' })).toEqual({ ok: false, code: 'run-not-found', error: 'Review run not found' });
+    expect(github.listOwnReviewsAndThreads).not.toHaveBeenCalled();
+  });
+
+  it('rejects a reply without a body', async () => {
+    const { invoke, github } = suite();
+    await expect(invoke('review:respondToFinding', { ...finding, action: 'reply' })).rejects.toThrow('Invalid review request');
+    expect(github.listOwnReviewsAndThreads).not.toHaveBeenCalled();
+  });
+
+  it('sanitizes GitHub failures and logs an Error', async () => {
+    const { invoke, query, github, logger } = suite();
+    (query.getRun as jest.Mock).mockResolvedValue(run);
+    (github.listOwnReviewsAndThreads as jest.Mock).mockResolvedValue({ items: [{ threads: [thread] }], nextPage: null });
+    (github.replyToFinding as jest.Mock).mockRejectedValue(new Error('ghp_secret'));
+    expect(await invoke('review:respondToFinding', { ...finding, action: 'reply', body: 'hello' })).toEqual({ ok: false, code: 'github-error', error: 'GitHub rejected the reply' });
+    const calls = (logger.info as jest.Mock).mock.calls;
+    const logged = calls[calls.length - 1];
+    expect(logged?.[1]).toBeInstanceOf(Error);
+    expect(JSON.stringify(logged)).not.toContain('ghp_secret');
+  });
   it('verifies a bot on a fresh install without adding a repository', async () => {
     const { invoke, store, tokenStorage, fetcher } = suite();
     (store.getSettings as jest.Mock).mockResolvedValue(null);

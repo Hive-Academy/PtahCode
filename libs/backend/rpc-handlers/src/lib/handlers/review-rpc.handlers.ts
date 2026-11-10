@@ -3,6 +3,8 @@ import { ulid } from 'ulid';
 import { z, ZodError } from 'zod';
 import {
   ReviewRpcSchemas,
+  REVIEW_TRIAGE_ACCEPTED_MARKER,
+  REVIEW_TRIAGE_DISMISSED_MARKER,
   type IGitHubReviewPort,
 } from '@ptah-extension/review-contracts';
 import {
@@ -69,6 +71,7 @@ export class ReviewRpcHandlers {
     'review:retryHead',
     'review:refresh',
     'review:exportRun',
+    'review:respondToFinding',
   ] as const satisfies readonly RpcMethodName[];
 
   constructor(
@@ -91,7 +94,7 @@ export class ReviewRpcHandlers {
       'pollAndRecord'
     >,
     @inject(REVIEW_CORE_TOKENS.GITHUB)
-    private readonly github: Pick<IGitHubReviewPort, 'getPull'>,
+    private readonly github: Pick<IGitHubReviewPort, 'getPull' | 'listOwnReviewsAndThreads' | 'replyToFinding'>,
     @inject(PLATFORM_TOKENS.SECRET_STORAGE)
     private readonly tokenStorage: ISecretStorage,
     @inject(REVIEW_GITHUB_TOKENS.FETCH) private readonly fetcher: typeof fetch,
@@ -448,6 +451,49 @@ export class ReviewRpcHandlers {
         return ReviewRpcSchemas['review:exportRun'].result.parse(
           await this.artifacts.exportRun(attemptId),
         );
+      }),
+    );
+    this.rpc.registerMethod('review:respondToFinding', (raw) =>
+      this.safe(async () => {
+        const params = ReviewRpcSchemas['review:respondToFinding'].params.parse(raw);
+        const run = await this.query.getRun(params.attemptId);
+        const response = ReviewRpcSchemas['review:respondToFinding'].result;
+        if (!run) return response.parse({ ok: false, code: 'run-not-found', error: 'Review run not found' });
+
+        try {
+          let page: number | null = 1;
+          const matches: { id: string; resolved: boolean; body: string }[] = [];
+          for (let count = 0; count < 5 && page !== null; count++) {
+            const reviews = await this.github.listOwnReviewsAndThreads(run.repo, run.prNumber, page);
+            for (const review of reviews.items) {
+              for (const thread of review.threads) {
+                if (thread.path === params.path && thread.line === params.line) matches.push(thread);
+              }
+            }
+            page = reviews.nextPage;
+          }
+          // A truncated scan can hide a second matching thread: never treat it as complete.
+          if (page !== null) return response.parse({ ok: false, code: 'ambiguous-thread', error: 'Too many GitHub reviews to identify the thread' });
+          // Only a thread whose published body carries the finding title belongs to this finding.
+          const titled = matches.filter((thread) => thread.body.includes(params.title));
+          if (titled.length === 0) return response.parse({ ok: false, code: 'no-thread', error: 'No published GitHub thread for this finding' });
+          const unresolved = titled.filter((thread) => !thread.resolved);
+          const narrowed = titled.length === 1 ? titled : unresolved;
+          const match = narrowed.length === 1 ? narrowed[0] : undefined;
+          if (!match) return response.parse({ ok: false, code: 'ambiguous-thread', error: 'Multiple GitHub threads match this finding' });
+
+          const note = params.body ? `\n\n${params.body}` : '';
+          const body = params.action === 'accept' ? `${REVIEW_TRIAGE_ACCEPTED_MARKER}\nAccepted by the operator.${note}`
+            : params.action === 'dismiss' ? `${REVIEW_TRIAGE_DISMISSED_MARKER}\nDismissed by the operator.${note}`
+            : (params.body ?? '');
+          await this.github.replyToFinding(run.repo, run.prNumber, match.id, body);
+          return response.parse({ ok: true, threadId: match.id });
+        } catch (_error: unknown) {
+          // degradation-audit: reported — the typed `github-error` result reaches the operator.
+          // GitHub adapter errors may contain credentials. Log only a sanitized Error.
+          this.logger.info('[review] GitHub finding lookup or reply failed', new Error('GitHub request failed'));
+          return response.parse({ ok: false, code: 'github-error', error: 'GitHub rejected the reply' });
+        }
       }),
     );
     this.logger.info('[review] RPC handlers registered');

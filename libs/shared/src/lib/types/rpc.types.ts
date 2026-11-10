@@ -3980,6 +3980,7 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'review:retryHead': true,
   'review:refresh': true,
   'review:exportRun': true,
+  'review:respondToFinding': true,
   'review:getBotIdentity': true,
   'review:setBotToken': true,
   'review:clearBotToken': true,

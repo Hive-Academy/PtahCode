@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ReviewFindingSchema } from './review-finding.schema';
+import { ReviewFindingSchema, ReviewPathSchema } from './review-finding.schema';
 import {
   OperatorSettingsSchema,
   RepositorySettingsSchema,
@@ -11,6 +11,8 @@ import {
 } from './review-run.schema';
 
 const noParams = z.object({}).strict();
+export const REVIEW_TRIAGE_ACCEPTED_MARKER = '<!-- ptah-review-triage:accepted -->';
+export const REVIEW_TRIAGE_DISMISSED_MARKER = '<!-- ptah-review-triage:dismissed -->';
 const attempt = z
   .object({ attemptId: z.string().trim().min(1).max(64) })
   .strict();
@@ -121,6 +123,22 @@ export const ReviewRpcSchemas = {
         fileName: z.string().trim().min(1).max(128),
       })
       .strict(),
+  },
+  'review:respondToFinding': {
+    params: z.object({
+      attemptId: z.string().trim().min(1).max(64),
+      path: ReviewPathSchema,
+      title: z.string().trim().min(1).max(256),
+      line: z.number().int().min(1).max(10000000).nullable(),
+      action: z.enum(['accept', 'dismiss', 'reply']),
+      body: z.string().trim().min(1).max(4000).optional(),
+    }).strict().refine(v => v.action !== 'reply' || v.body !== undefined, 'Reply needs a body'),
+    result: z.object({
+      ok: z.boolean(),
+      code: z.enum(['run-not-found', 'no-thread', 'ambiguous-thread', 'github-error']).optional(),
+      error: z.string().max(500).optional(),
+      threadId: z.string().max(128).optional(),
+    }).strict().refine(v => v.ok || v.code !== undefined, 'Failure needs a code'),
   },
 } as const;
 export type ReviewRpcMethod = keyof typeof ReviewRpcSchemas;
