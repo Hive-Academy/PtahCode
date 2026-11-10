@@ -27,12 +27,12 @@ export class ReviewStatusCoordinatorService {
 
   async claimed(attempt: ReviewQueueAttempt, totalLenses: number): Promise<void> {
     if (attempt.dryRun) return;
-    await this.update(attempt, 'pending', `Reviewing… 0/${totalLenses} lenses`, 0, totalLenses);
+    await this.update(attempt, 'pending', `Reviewing… 0/${totalLenses} lenses`);
   }
 
   async lensCompleted(attempt: ReviewQueueAttempt, completed: number, total: number): Promise<void> {
     if (attempt.dryRun) return;
-    await this.update(attempt, 'pending', `Reviewing… ${completed}/${total} lenses`, completed, total);
+    await this.update(attempt, 'pending', `Reviewing… ${completed}/${total} lenses`);
   }
 
   async finished(attempt: ReviewQueueAttempt, outcome: ReviewOutcome, severities: readonly ReviewSeverity[]): Promise<void> {
@@ -42,14 +42,21 @@ export class ReviewStatusCoordinatorService {
   }
 
   async retryDue(): Promise<void> {
-    for (const record of await this.repository.getPendingStatusSync(new Date().toISOString())) {
-      if (record.machineId !== this.machineId) continue;
-      const attempt = await this.repository.getAttempt(record.attemptId);
+    for (const due of await this.repository.getPendingStatusSync(new Date().toISOString())) {
+      if (due.machineId !== this.machineId) continue;
+      const attempt = await this.repository.getAttempt(due.attemptId);
       if (!attempt) continue;
       const [owner, name] = attempt.repoId.split('/');
       if (!owner || !name) continue;
-      await this.write(record, { repo: { owner, name }, prNumber: attempt.prNumber, headSha: attempt.headSha,
-        attemptId: attempt.attemptId, machineId: record.machineId });
+      const repo = { owner, name };
+      // The due row is a snapshot. Read the row again in the serialized section, so that a
+      // stale snapshot cannot publish an older state after a newer state of the same attempt.
+      await this.serialize(repo, attempt.headSha, async () => {
+        const latest = await this.repository.getStatusSync(due.attemptId);
+        if (!latest?.syncPending) return;
+        await this.publish(latest, { repo, prNumber: attempt.prNumber, headSha: attempt.headSha,
+          attemptId: attempt.attemptId, machineId: latest.machineId });
+      });
     }
   }
 
@@ -66,43 +73,42 @@ export class ReviewStatusCoordinatorService {
     }
   }
 
-  private async update(attempt: ReviewQueueAttempt, state: ReviewStatusSyncRecord['state'], description: string,
-    completed = 0, total = 0): Promise<void> {
-    const previous = await this.repository.getStatusSync(attempt.attemptId);
-    if (previous?.state === state && previous.description === description && !previous.syncPending) return;
-    const record: ReviewStatusSyncRecord = { attemptId: attempt.attemptId, machineId: previous?.machineId ?? this.machineId,
-      state, description, externalId: previous?.externalId ?? null, syncPending: true, retryAt: null,
-      errorSummary: null, syncedState: previous?.syncedState ?? null, syncedDescription: previous?.syncedDescription ?? null };
-    await this.repository.saveStatusSync(record);
-    await this.write(record, { repo: attempt.repo, prNumber: attempt.prNumber, headSha: attempt.headSha,
-      attemptId: attempt.attemptId, machineId: record.machineId }, completed, total);
+  /** Reads, saves and publishes in one serialized section, so that writes of one attempt cannot interleave. */
+  private async update(attempt: ReviewQueueAttempt, state: ReviewStatusSyncRecord['state'], description: string): Promise<void> {
+    await this.serialize(attempt.repo, attempt.headSha, async () => {
+      const previous = await this.repository.getStatusSync(attempt.attemptId);
+      if (previous?.state === state && previous.description === description && !previous.syncPending) return;
+      const record: ReviewStatusSyncRecord = { attemptId: attempt.attemptId, machineId: previous?.machineId ?? this.machineId,
+        state, description, externalId: previous?.externalId ?? null, syncPending: true, retryAt: null,
+        errorSummary: null, syncedState: previous?.syncedState ?? null, syncedDescription: previous?.syncedDescription ?? null };
+      await this.repository.saveStatusSync(record);
+      await this.publish(record, { repo: attempt.repo, prNumber: attempt.prNumber, headSha: attempt.headSha,
+        attemptId: attempt.attemptId, machineId: record.machineId });
+    });
   }
 
-  private async write(record: ReviewStatusSyncRecord, target: ReviewStatusTarget, completed = 0, total = 0): Promise<void> {
-    const key = `${target.repo.owner.toLowerCase()}/${target.repo.name.toLowerCase()}/${target.headSha}`;
+  private async serialize(repo: ReviewStatusTarget['repo'], headSha: string, work: () => Promise<void>): Promise<void> {
+    const key = `${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}/${headSha}`;
     const prior = this.writes.get(key) ?? Promise.resolve();
-    const current = prior.catch(() => undefined).then(() => this.writeOrdered(record, target, completed, total));
+    const current = prior.catch(() => undefined).then(work);
     this.writes.set(key, current);
     try { await current; }
     finally { if (this.writes.get(key) === current) this.writes.delete(key); }
   }
 
-  private async writeOrdered(record: ReviewStatusSyncRecord, target: ReviewStatusTarget, completed: number, total: number): Promise<void> {
+  /** Publishes one status row. Call it only from a serialized section. */
+  private async publish(record: ReviewStatusSyncRecord, target: ReviewStatusTarget): Promise<void> {
     if (await this.repository.getCurrentAttemptId(target.repo, target.prNumber, target.headSha) !== target.attemptId) {
       try { await this.repository.saveStatusSync({ ...record, syncPending: false, retryAt: null, errorSummary: 'Superseded attempt' }); }
       catch (_error: unknown) { this.logger.error('Review status supersession persistence failed', new Error('Review status supersession persistence failed')); }
       return;
     }
-    const persistedProgress = /^Reviewing… (\d+)\/(\d+) lenses$/.exec(record.description);
-    if (persistedProgress) {
-      completed = Number(persistedProgress[1]);
-      total = Number(persistedProgress[2]);
-    }
+    const progress = /^Reviewing… (\d+)\/(\d+) lenses$/.exec(record.description);
     const update: ReviewStatusUpdate = record.state === 'pending'
       ? record.description === 'Review queued'
         ? { target, state: 'queued', description: record.description, summary: record.description }
         : { target, state: 'in_progress', description: record.description, summary: record.description,
-          progress: { completedLenses: completed, totalLenses: total, stage: 'lenses' } }
+          progress: { completedLenses: Number(progress?.[1] ?? 0), totalLenses: Number(progress?.[2] ?? 0), stage: 'lenses' } }
       : { target, state: 'completed', description: record.description, summary: record.description,
         conclusion: record.state === 'success' ? 'success' : record.state === 'failure' ? 'failure' : 'cancelled' };
     try {

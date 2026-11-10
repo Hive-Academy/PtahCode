@@ -37,6 +37,53 @@ describe('ReviewStatusCoordinatorService', () => {
     expect(f.records.get('old')?.syncPending).toBe(false);
   });
 
+  it('publishes the latest row when a retry holds a stale snapshot of the same attempt', async () => {
+    const f = fixture();
+    const stale: ReviewStatusSyncRecord = { attemptId: 'new', machineId: f.service.machineId, state: 'pending',
+      description: 'Reviewing… 1/3 lenses', externalId: 'remote', syncPending: true, retryAt: null,
+      errorSummary: 'prior failure', syncedState: null, syncedDescription: null };
+    f.records.set('new', { ...stale, state: 'success', description: 'No blocking findings' });
+    f.repository.getPendingStatusSync.mockResolvedValueOnce([stale]);
+    await f.service.retryDue();
+    expect(f.port.upsertStatus).toHaveBeenCalledTimes(1);
+    expect(f.port.upsertStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ state: 'completed', conclusion: 'success' }), expect.anything());
+    expect(f.records.get('new')).toMatchObject({ state: 'success', syncPending: false, syncedState: 'success' });
+  });
+
+  it('drops a retry whose row a newer write already synced', async () => {
+    const f = fixture();
+    await f.service.finished(attempt, 'complete', []);
+    const synced = f.records.get('new');
+    f.repository.getPendingStatusSync.mockResolvedValueOnce([{ ...synced, state: 'pending',
+      description: 'Review queued', syncPending: true } as ReviewStatusSyncRecord]);
+    await f.service.retryDue();
+    expect(f.port.upsertStatus).toHaveBeenCalledTimes(1);
+    expect(f.records.get('new')).toEqual(synced);
+  });
+
+  it('keeps a newer state when an older write of the same attempt is still in flight', async () => {
+    const f = fixture();
+    let release: () => void = () => undefined;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    f.port.upsertStatus.mockImplementationOnce(async (update: { target: object }) => {
+      await held;
+      return { target: update.target, provider: 'commit_status' as const, externalId: 'remote' };
+    });
+    const older = f.service.lensCompleted(attempt, 2, 3);
+    const newer = f.service.finished(attempt, 'complete', []);
+    await new Promise<void>(resolve => { setImmediate(resolve); });
+    expect(f.port.upsertStatus).toHaveBeenCalledTimes(1);
+    expect(f.records.get('new')?.state).toBe('pending');
+    release();
+    await Promise.all([older, newer]);
+    expect(f.port.upsertStatus).toHaveBeenCalledTimes(2);
+    expect(f.port.upsertStatus.mock.calls[0]?.[0]).toMatchObject({ state: 'in_progress',
+      progress: { completedLenses: 2, totalLenses: 3 } });
+    expect(f.port.upsertStatus.mock.calls[1]?.[0]).toMatchObject({ state: 'completed' });
+    expect(f.records.get('new')).toMatchObject({ state: 'success', syncPending: false, externalId: 'remote' });
+  });
+
   it('logs retry persistence failure at the coordinator boundary', async () => {
     const f = fixture();
     f.port.upsertStatus.mockRejectedValueOnce(new Error('remote unavailable'));
