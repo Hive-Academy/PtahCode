@@ -1,8 +1,8 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { ClaudeRpcService, ElectronLayoutService, ThemeService, VSCodeService } from '@ptah-extension/core';
+import { ClaudeRpcService, ElectronLayoutService, LoggingService, ThemeService, VSCodeService } from '@ptah-extension/core';
 import { ChatGitSessionScopeSource } from '../session-git-scope/chat-git-session-scope.source';
-import { GitWindowSync } from './git-window-sync.service';
+import { GitWindowSync, boundedOpenSessions } from './git-window-sync.service';
 
 jest.mock('@pierre/diffs', () => ({}));
 jest.mock('@pierre/diffs/worker', () => ({}));
@@ -180,6 +180,43 @@ describe('GitWindowSync', () => {
       TestBed.flushEffects();
       await wait(0);
     };
+
+    it('keeps the active, pinned and same-root sessions when more than 100 are open (round 5)', async () => {
+      const other = (tabId: string) => ({ ...candidate(tabId), sessionCwd: 'C:/other' });
+      const many = Array.from({ length: 150 }, (_, index) => other(`T${index}`));
+      // The needed sessions are after the bound in the source order.
+      active.set(candidate('A'));
+      open.set([...many, candidate('SAME'), other('P'), candidate('A')]);
+      scope.set({ mode: 'pinned', root: 'C:/repo', unresolved: false, session: { tabId: 'P' } });
+      sync = TestBed.inject(GitWindowSync);
+      await sync.detach();
+      expect(sync.detached()).toBe(true);
+      expect(sync.error()).toBeNull();
+      const sent = (publishes().at(-1)?.params as { scope: { open: Array<{ tabId: string }> } }).scope.open;
+      expect(sent).toHaveLength(100);
+      expect(sent.slice(0, 3).map(c => c.tabId)).toEqual(['P', 'A', 'SAME']);
+      expect(sent[3].tabId).toBe('T0');
+      expect(boundedOpenSessions(many.slice(0, 100), ['x'], ['C:/repo'])).toHaveLength(100);
+    });
+
+    it('logs a rejected scope update and sends the unavailable scope to the child (round 5)', async () => {
+      const logged = jest.spyOn(TestBed.inject(LoggingService), 'error').mockImplementation(() => undefined);
+      sync = TestBed.inject(GitWindowSync);
+      await sync.detach();
+      const before = publishes().length;
+      // A session name over the IPC bound makes the scope not valid.
+      active.set({ ...candidate('A'), sessionName: 'n'.repeat(600) });
+      TestBed.flushEffects();
+      await wait(0);
+      expect(logged).toHaveBeenCalledWith('GitWindowSync', 'Git window scope update rejected', { issues: ['active.sessionName: too_big'] });
+      expect(publishes()).toHaveLength(before + 1);
+      expect(publishes().at(-1)?.params).toEqual({ scope: expect.objectContaining({ repoRoot: null, workspaceRoot: null, open: [], unresolved: true }) });
+      expect(sync.error()).toBe('Git scope is unavailable');
+
+      await retarget('B');
+      expect(publishes().at(-1)?.params).toMatchObject({ scope: { repoRoot: 'C:/repo', active: { tabId: 'B' } } });
+      expect(sync.error()).toBeNull();
+    });
 
     it('retries a failed scope publish with the newest scope while detached (finding 3)', async () => {
       sync = TestBed.inject(GitWindowSync);

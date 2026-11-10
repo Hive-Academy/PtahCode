@@ -1,6 +1,6 @@
 import { DestroyRef, Injectable, Injector, NgZone, computed, effect, inject, signal, untracked, type Signal } from '@angular/core';
-import { ClaudeRpcService, ElectronLayoutService, ThemeService, VSCodeService, type MessageHandler } from '@ptah-extension/core';
-import { GIT_WINDOW_PUSH_TYPES, GitWindowEmptyParamsSchema, GitWindowScopeSchema, GitWindowSetModeParamsSchema, type GitWindowMode, type GitWindowScope } from '@ptah-extension/shared';
+import { ClaudeRpcService, ElectronLayoutService, LoggingService, ThemeService, VSCodeService, type MessageHandler } from '@ptah-extension/core';
+import { GIT_WINDOW_PUSH_TYPES, GitWindowEmptyParamsSchema, GitWindowScopeSchema, GitWindowSetModeParamsSchema, type GitWindowCandidate, type GitWindowMode, type GitWindowScope } from '@ptah-extension/shared';
 import { ChatGitSessionScopeSource } from '../session-git-scope/chat-git-session-scope.source';
 
 interface ScopeStore {
@@ -18,6 +18,32 @@ const PUBLISH_RETRY_BASE_MS = 500;
 const PUBLISH_RETRY_MAX_MS = 8_000;
 const PUBLISH_RETRY_LIMIT = 6;
 
+/** The IPC bound of `open` in `GitWindowScopeSchema`. */
+const MAX_OPEN_CANDIDATES = 100;
+const SCOPE_UNAVAILABLE = 'Git scope is unavailable';
+/** Sent when the scope of the main window is not valid: the child shows no repository, not an old one. */
+const UNAVAILABLE_SCOPE: GitWindowScope = {
+  version: 1, sequence: 0, workspaceRoot: null, repoRoot: null, mode: 'follow-session',
+  active: null, pinnedTabId: null, open: [], unresolved: true,
+};
+
+/**
+ * At most {@link MAX_OPEN_CANDIDATES} open sessions. With more, the tabs the child
+ * needs stay: first `tabIds` (active, pinned), then the sessions of `roots`.
+ */
+export function boundedOpenSessions(
+  open: readonly GitWindowCandidate[], tabIds: readonly (string | null)[], roots: readonly (string | null)[],
+): readonly GitWindowCandidate[] {
+  if (open.length <= MAX_OPEN_CANDIDATES) return open;
+  const rank = (c: GitWindowCandidate): number => {
+    if (tabIds.includes(c.tabId)) return 0;
+    const own = [c.organizationWorktreePath, c.agentOriginWorktreePath, c.sessionCwd];
+    return own.some((root) => root !== null && roots.includes(root)) ? 1 : 2;
+  };
+  // Array.prototype.sort is stable: the order of the source stays in each rank.
+  return [...open].sort((a, b) => rank(a) - rank(b)).slice(0, MAX_OPEN_CANDIDATES);
+}
+
 /** Main renderer owner of the detachable Git dock and its host assigned scope. */
 @Injectable({ providedIn: 'root' })
 export class GitWindowSync implements MessageHandler {
@@ -25,6 +51,7 @@ export class GitWindowSync implements MessageHandler {
   private readonly rpc = inject(ClaudeRpcService);
   private readonly layout = inject(ElectronLayoutService);
   private readonly vscode = inject(VSCodeService);
+  private readonly logger = inject(LoggingService);
   private readonly injector = inject(Injector);
   private readonly zone = inject(NgZone);
   private readonly destroyRef = inject(DestroyRef);
@@ -47,26 +74,34 @@ export class GitWindowSync implements MessageHandler {
     return this.injector.get(ChatGitSessionScopeSource);
   }
 
-  private readonly scope = computed((): GitWindowScope | null => {
+  /** The parse result of the scope to publish. `null`: the Git store is not active. */
+  private readonly parsedScope = computed(() => {
     const store = this.store();
     if (store === null) return null;
     const resolved = store.scope();
     const workspaceRoot = this.layout.activeWorkspace()?.path ?? null;
     const active = this.source.activeSession();
-    const open = this.source.openSessions();
-    const parsed = GitWindowScopeSchema.safeParse({
+    const pinnedTabId = resolved.mode === 'pinned' ? resolved.session?.tabId ?? null : null;
+    const open = boundedOpenSessions(
+      this.source.openSessions(), [active?.tabId ?? null, pinnedTabId], [resolved.root, workspaceRoot],
+    );
+    return GitWindowScopeSchema.safeParse({
       version: 1,
       sequence: 0,
       workspaceRoot,
       repoRoot: resolved.root,
       mode: resolved.mode,
       active,
-      pinnedTabId: resolved.mode === 'pinned' ? resolved.session?.tabId ?? null : null,
+      pinnedTabId,
       open,
       unresolved: resolved.unresolved,
       themeName: this.injector.get(ThemeService).currentTheme(),
     });
-    return parsed.success ? parsed.data : null;
+  });
+
+  private readonly scope = computed((): GitWindowScope | null => {
+    const parsed = this.parsedScope();
+    return parsed?.success ? parsed.data : null;
   });
 
   constructor() {
@@ -74,6 +109,7 @@ export class GitWindowSync implements MessageHandler {
       if (!this._detached()) return;
       const scope = this.scope();
       if (scope !== null) untracked(() => void this.publish(scope));
+      else if (this.parsedScope() !== null) untracked(() => this.scopeRejected());
     });
     effect(() => {
       if (!this._detached() || !this.layout.editorPanelVisible()) return;
@@ -107,7 +143,7 @@ export class GitWindowSync implements MessageHandler {
       }
       await this.ensureStore();
       const scope = this.scope();
-      if (scope === null) throw new Error('Git scope is unavailable');
+      if (scope === null) throw new Error(SCOPE_UNAVAILABLE);
       const token = this.generation;
       const opened = await this.rpc.call('gitWindow:open', {}, { timeout: 10_000 });
       if (!opened.success || !opened.data?.ok) throw new Error('Could not open the Git window');
@@ -196,6 +232,22 @@ export class GitWindowSync implements MessageHandler {
       this.publishFailed(key, error instanceof Error ? error.message : 'Could not publish the Git scope');
     });
     return this.pending.then(() => accepted);
+  }
+
+  /**
+   * The scope of a detached child is not valid for the IPC contract. The update is
+   * not dropped in silence: it is logged, the main window shows the error, and the
+   * child gets the unavailable scope, so it does not keep the previous repository.
+   */
+  private scopeRejected(): void {
+    const parsed = this.parsedScope();
+    if (parsed === null || parsed.success) return;
+    this.logger.error('GitWindowSync', 'Git window scope update rejected', {
+      issues: parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.code}`),
+    });
+    void this.publish(UNAVAILABLE_SCOPE).then(() => {
+      if (this._detached() && this.scope() === null) this._error.set(SCOPE_UNAVAILABLE);
+    });
   }
 
   /** Keep the newest scope pending: while detached, publish it again after a bounded backoff. */
