@@ -879,6 +879,9 @@ describe('SessionSpawnerService.start — success', () => {
       taskId: 'TASK_2026_001',
       displayPrompt: 'Fix the parser',
       startedAt: PROVISIONED_AT,
+      model: 'claude-x',
+      modelSource: 'pin',
+      effortSource: 'default',
     });
   });
 
