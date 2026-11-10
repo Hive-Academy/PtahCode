@@ -2,13 +2,14 @@ import { inject, injectable } from 'tsyringe';
 import { basename } from 'node:path';
 import { z } from 'zod';
 import { PERSISTENCE_TOKENS, SqliteConnectionService } from '@ptah-extension/persistence-sqlite';
-import { publishedFindingTitle } from '../publication/publication-text';
+import { publishedFindingTitle, redactSecrets } from '../publication/publication-text';
 import { RepoIdentitySchema, ReviewFindingSchema, ReviewRunSchema, ReviewRpcSchemas, type ReviewFinding, type ReviewRun } from '@ptah-extension/review-contracts';
 
 export interface IReviewQueryRepository {
   listRuns(input: z.input<typeof ReviewRpcSchemas['review:listRuns']['params']>): Promise<z.output<typeof ReviewRpcSchemas['review:listRuns']['result']>>;
   getRun(attemptId: string): Promise<ReviewRun | null>;
-  listFindings(attemptId: string): Promise<ReviewFinding[]>;
+  /** Each string field gets the pattern redaction and loses each configured secret before it leaves the host. */
+  listFindings(attemptId: string, secrets?: readonly string[]): Promise<ReviewFinding[]>;
   /** Each finding of the attempt with its wire identity and the title text that publication writes to GitHub. */
   listPublishedTitles(attemptId: string, secrets: readonly string[]): Promise<ReviewPublishedTitle[]>;
 }
@@ -122,16 +123,16 @@ export class ReviewQueryRepository implements IReviewQueryRepository {
     });
   }
 
-  async listFindings(attemptId: string): Promise<ReviewFinding[]> {
+  async listFindings(attemptId: string, secrets: readonly string[] = []): Promise<ReviewFinding[]> {
     return this.payloads(attemptId).map(({ payload }) => ReviewFindingSchema.parse(JSON.parse(payload, (_key, value: unknown) =>
-      typeof value === 'string' ? redact(value) : value)));
+      typeof value === 'string' ? redactSecrets(redact(value), secrets) : value)));
   }
 
   async listPublishedTitles(attemptId: string, secrets: readonly string[]): Promise<ReviewPublishedTitle[]> {
     return this.payloads(attemptId).map(({ findingId, payload }) => {
       const raw = titleSchema.parse(JSON.parse(payload));
       // path and title use the listFindings redaction: they are the identity that the renderer sends back.
-      return { findingId, path: redact(raw.path), line: raw.line, title: redact(raw.title),
+      return { findingId, path: redactSecrets(redact(raw.path), secrets), line: raw.line, title: redactSecrets(redact(raw.title), secrets),
         publishedTitle: publishedFindingTitle(raw.title, secrets) };
     });
   }

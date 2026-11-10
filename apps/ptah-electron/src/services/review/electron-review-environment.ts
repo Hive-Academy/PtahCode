@@ -72,6 +72,25 @@ export class ElectronReviewEnvironment implements ReviewStageEnvironment {
     const cached = this.rootsCache.get(key);
     if (cached && cached.expiresAt > Date.now()) return cached.roots;
     this.rootsCache.delete(key);
+    const checkout = await this.locate(identity);
+    const attemptsRoot = resolve(this.userDataRoot(), 'review', 'attempts', identity.owner, identity.name);
+    await mkdir(attemptsRoot, { recursive: true });
+    const roots = { repoRoot: checkout, attemptsRoot };
+    this.rootsCache.set(key, { roots, expiresAt: Date.now() + ROOTS_TTL_MS });
+    return roots;
+  }
+
+  /** The open checkout of the repository. The review settings are not examined: a disabled repository resolves. */
+  async checkoutRoot(repo: RepoIdentity): Promise<string> {
+    const parsed = RepoIdentitySchema.safeParse(repo);
+    if (!parsed.success) throw new ReviewRepositoryUnavailableError();
+    const cached = this.rootsCache.get(`${parsed.data.owner.toLowerCase()}/${parsed.data.name.toLowerCase()}`);
+    if (cached && cached.expiresAt > Date.now()) return cached.roots.repoRoot;
+    return this.locate(parsed.data);
+  }
+
+  /** Finds the open workspace folder that is a checkout with the origin of the repository. */
+  private async locate(identity: RepoIdentity): Promise<string> {
     const folders = this.workspace.getWorkspaceFolders();
     const active = this.workspace.getWorkspaceRoot?.();
     const ordered = active && folders.includes(active) ? [active, ...folders.filter(folder => folder !== active)] : folders;
@@ -99,11 +118,7 @@ export class ElectronReviewEnvironment implements ReviewStageEnvironment {
         timedOut ||= isProbeTimeout(error);
         continue;
       }
-      const attemptsRoot = resolve(this.userDataRoot(), 'review', 'attempts', identity.owner, identity.name);
-      await mkdir(attemptsRoot, { recursive: true });
-      const roots = { repoRoot: checkout, attemptsRoot };
-      this.rootsCache.set(key, { roots, expiresAt: Date.now() + ROOTS_TTL_MS });
-      return roots;
+      return checkout;
     }
     if (timedOut) throw new ReviewGitTimeoutError();
     if (failed) throw new ReviewGitProbeError();

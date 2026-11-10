@@ -30,6 +30,11 @@ export interface ReviewStageEnvironment {
   baseConfig(repo: RepoIdentity, baseSha?: string): Promise<unknown | null>;
   pullText?(prNumber: number): Promise<{ title?: string; body?: string }>;
   redactionSecrets?(): Promise<string[]>;
+  /**
+   * The open checkout of the repository. It does not examine the review settings, so a repository that is
+   * disabled or removed from the settings still resolves. Only for read navigation: a review run uses resolve().
+   */
+  checkoutRoot?(repo: RepoIdentity): Promise<string>;
 }
 export async function resolveReviewRoots(environment: ReviewStageEnvironment, repo: RepoIdentity): Promise<ReviewRoots> {
   const identity = RepoIdentitySchema.safeParse(repo);

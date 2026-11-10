@@ -53,6 +53,9 @@ export class ElectronFileOpenRpcHandlers {
       parsed.data,
       this.workspace.getWorkspaceFolders(),
       this.fileSystem,
+      // The path can come from model output (review evidence): a link in the workspace must not open a file
+      // out of it in the external editor.
+      { realPathContainment: true },
     );
     if (!resolved.success) return resolved;
 

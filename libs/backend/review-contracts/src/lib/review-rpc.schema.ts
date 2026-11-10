@@ -142,6 +142,8 @@ export const ReviewRpcSchemas = {
       code: z.enum(['run-not-found', 'no-thread', 'ambiguous-thread', 'publication-unavailable', 'github-error']).optional(),
       error: z.string().max(500).optional(),
       threadId: z.string().max(128).optional(),
+      // Set when an accept or dismiss found a triage reply that an earlier call posted. No new reply was posted.
+      triage: z.enum(['accepted', 'dismissed']).optional(),
     }).strict().refine(v => v.ok || v.code !== undefined, 'Failure needs a code'),
   },
 } as const;

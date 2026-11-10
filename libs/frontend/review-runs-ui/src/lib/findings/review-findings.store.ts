@@ -60,9 +60,16 @@ export class ReviewFindingsStore {
         this.update(view.key, { error: result.code ? errors[result.code] : 'The action failed.' });
         return;
       }
-      this.update(view.key, action === 'reply' ? { replied: true } : { state: action === 'accept' ? 'accepted' : 'dismissed' });
+      // result.triage is set when the thread already had a triage reply of an earlier call: show that state.
+      this.update(view.key, action === 'reply' ? { replied: true }
+        : { state: result.triage ?? (action === 'accept' ? 'accepted' : 'dismissed') });
     } catch {
-      if (this.runs.selectedAttemptId() === attemptId) this.update(view.key, { error: 'The action failed.' });
+      // A timeout or a lost response does not show that the write failed: GitHub can have the reply.
+      // A second accept or dismiss is safe, because the host does not post a second triage reply.
+      const unknown = action === 'reply'
+        ? 'The result is unknown. Examine the thread on GitHub before you send the reply again.'
+        : 'The result is unknown. Select the action again. Ptah posts only one triage reply.';
+      if (this.runs.selectedAttemptId() === attemptId) this.update(view.key, { error: unknown });
     } finally {
       if (this.runs.selectedAttemptId() === attemptId) this.update(view.key, { pending: false });
     }

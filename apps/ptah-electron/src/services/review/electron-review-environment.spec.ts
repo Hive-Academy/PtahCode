@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OperatorSettingsSchema } from '@ptah-extension/review-contracts';
@@ -108,6 +108,26 @@ describe('ElectronReviewEnvironment', () => {
     } finally { await rm(data, { recursive: true, force: true }); }
   });
 
+  it('finds the open checkout of a disabled repository for read navigation, but does not resolve it for a run', async () => {
+    const data = await mkdtemp(join(tmpdir(), 'ptah-review-environment-'));
+    try {
+      const settings = OperatorSettingsSchema.parse({
+        repositories: [{ ...repo, enabled: false, dryRun: true, publicationPaused: false }],
+        maintainerLogins: ['maintainer'], pollMinutes: 10,
+        globalPublicationPaused: false, fallbackFamilies: [],
+      });
+      const userData = join(data, 'not-created-for-review');
+      const environment = new ElectronReviewEnvironment(
+        { getSettings: async () => settings }, { getWorkspaceFolders: () => [data]}, () => userData,
+        async () => ({ topLevel: data, origin: 'git@github.com:Hive-Academy/PtahCode.git' }),
+      );
+      await expect(environment.resolve(repo)).rejects.toBeInstanceOf(ReviewRepositoryUnavailableError);
+      await expect(environment.checkoutRoot(repo)).resolves.toBe(data);
+      await expect(environment.checkoutRoot({ owner: 'Other', name: 'Repo' })).rejects.toBeInstanceOf(ReviewRepositoryUnavailableError);
+      // Read navigation does not create the attempts folder.
+      await expect(stat(userData)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally { await rm(data, { recursive: true, force: true }); }
+  });
   it('rejects an unconfigured repository before creating an attempt root', async () => {
     const settings = OperatorSettingsSchema.parse({
       repositories: [], maintainerLogins: ['maintainer'], pollMinutes: 10,

@@ -33,6 +33,26 @@ describe('ReviewFindingsStore', () => {
     expect(call).toHaveBeenCalledWith('review:respondToFinding', expect.objectContaining({ title: 'Broken call', action: 'accept' }), { timeout: 30_000 });
     expect(store.triage()[view.key].state).toBe('accepted');
   });
+  it('shows the triage that the host found after a lost response, and does not report a failed write', async () => {
+    // The first call timed out in the renderer, but the host posted the reply.
+    call.mockRejectedValueOnce(new Error('RPC timeout'));
+    await store.respond(view, 'accept');
+    expect(store.triage()[view.key]).toMatchObject({ state: 'open', pending: false,
+      error: 'The result is unknown. Select the action again. Ptah posts only one triage reply.' });
+    // The operator selects Dismiss. The host finds the accepted reply and does not post again.
+    call.mockResolvedValueOnce({ isSuccess: () => true, data: { ok: true, threadId: '1', triage: 'accepted' } });
+    await store.respond(view, 'dismiss');
+    expect(store.triage()[view.key]).toMatchObject({ state: 'accepted', pending: false, error: null });
+    // The triage is recorded: no third call.
+    await store.respond(view, 'dismiss');
+    expect(call).toHaveBeenCalledTimes(2);
+  });
+  it('tells the operator to examine GitHub when the result of a text reply is unknown', async () => {
+    call.mockResolvedValue({ isSuccess: () => false });
+    await store.respond(view, 'reply', 'Hello');
+    expect(store.triage()[view.key]).toMatchObject({ replied: false, pending: false,
+      error: 'The result is unknown. Examine the thread on GitHub before you send the reply again.' });
+  });
   it('blocks a second post while pending', async () => {
     let finish: ((result: object) => void) | undefined;
     call.mockImplementation(() => new Promise(resolve => { finish = resolve; }));

@@ -5,3 +5,4 @@ export { GithubReviewPublicationAdapter, rightAnchorKey, type IGitHubReviewPubli
 export { GitHubReviewError, type GitHubReviewErrorCode } from './lib/github-review.error';
 export { REVIEW_GITHUB_TOKENS, REVIEW_GITHUB_TOKEN_KEY } from './di/tokens';
 export { registerReviewGithubServices } from './di/registration';
+export type { GitHubFindingThread, GitHubFindingThreads, IGitHubFindingThreadPort } from './lib/github-finding-thread.port';

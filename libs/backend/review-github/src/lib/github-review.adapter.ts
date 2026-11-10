@@ -9,6 +9,7 @@ import { PLATFORM_TOKENS, type ISecretStorage } from '@ptah-extension/platform-c
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import { REVIEW_GITHUB_TOKEN_KEY, REVIEW_GITHUB_TOKENS } from '../di/tokens';
 import { GitHubReviewError } from './github-review.error';
+import type { GitHubFindingThreads, IGitHubFindingThreadPort } from './github-finding-thread.port';
 
 const identity = z.object({ id: z.number().int().positive() });
 const pullSchema = z.object({
@@ -34,6 +35,8 @@ const reviewCommentSchema = z.object({
   id: z.number().int().positive(), pull_request_review_id: z.number().int().positive().nullable(),
   path: z.string(), line: z.number().int().positive().nullable(),
   original_line: z.number().int().positive().nullable(), body: z.string(),
+  // GitHub sets this field only on a reply. It is the id of the top-level comment of the thread.
+  in_reply_to_id: z.number().int().positive().nullish(),
   user: z.object({ login: z.string().min(1) }),
 });
 const filesSchema = z.array(z.object({
@@ -43,6 +46,8 @@ const filesSchema = z.array(z.object({
 }));
 const MAX_BYTES = 10 * 1024 * 1024;
 const MAX_PAGES = 100;
+/** Comment pages (100 comments each) that one finding thread lookup reads. */
+const FINDING_THREAD_PAGES = 10;
 const API = 'https://api.github.com';
 
 function parse<T>(schema: z.ZodType<T>, value: unknown): T {
@@ -74,7 +79,7 @@ function mapPull(raw: z.infer<typeof pullSchema>): GitHubPull {
 }
 
 @injectable()
-export class GithubReviewAdapter implements IGitHubReviewPort {
+export class GithubReviewAdapter implements IGitHubReviewPort, IGitHubFindingThreadPort {
   constructor(
     @inject(PLATFORM_TOKENS.SECRET_STORAGE) private readonly secrets: ISecretStorage,
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
@@ -225,6 +230,24 @@ export class GithubReviewAdapter implements IGitHubReviewPort {
     }));
     return { items: own, nextPage: nextPage(reviewsResponse.headers.get('link')),
       etag: reviewsResponse.headers.get('etag'), notModified: false };
+  }
+
+  /** The top-level review comments of the bot with its replies. Reads each comment page one time. */
+  async listFindingThreads(repo: RepoIdentity, number: number): Promise<GitHubFindingThreads> {
+    const base = this.path(repo, `/pulls/${this.number(number)}`);
+    const login = await this.ownLogin();
+    const own: z.infer<typeof reviewCommentSchema>[] = [];
+    let page: number | null = 1;
+    for (let count = 0; count < FINDING_THREAD_PAGES && page !== null; count++) {
+      const response = await this.request(`${base}/comments?per_page=100&page=${page}`);
+      own.push(...(await this.json(response, z.array(reviewCommentSchema))).filter(c => c.user.login === login));
+      page = nextPage(response.headers.get('link'));
+    }
+    const threads = own.filter(c => c.in_reply_to_id == null).map(c => ({
+      id: String(c.id), path: c.path, line: c.line ?? c.original_line, body: c.body, resolved: false,
+      replies: own.filter(reply => reply.in_reply_to_id === c.id).map(reply => reply.body),
+    }));
+    return { threads, complete: page === null };
   }
 
   async upsertWalkthrough(_repo: RepoIdentity, _number: number, _body: string, _existingCommentId?: number): Promise<GitHubIssueComment> {
