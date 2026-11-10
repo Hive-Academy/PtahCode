@@ -34,7 +34,7 @@ export interface RemoteSessionOpenRequest {
  * Open button's name ends "driven by <label>, watch only" (4.9).
  *
  * Loads workspaces and their sessions when the machine connects and on
- * "Reload"; there is no timer.
+ * "Refresh"; there is no timer.
  */
 @Component({
   selector: 'ptah-remote-session-list',
@@ -67,7 +67,7 @@ export interface RemoteSessionOpenRequest {
               class="h-3.5 w-3.5"
               aria-hidden="true"
             />
-            Reload
+            Refresh
           </button>
           @if (connected() && groups().length > 0 && !composing()) {
             <button
@@ -139,7 +139,9 @@ export interface RemoteSessionOpenRequest {
               type="submit"
               class="btn btn-primary btn-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
               data-testid="remote-session-new-start"
-              [disabled]="starting() || prompt().trim() === '' || !workspaceId()"
+              [disabled]="
+                starting() || prompt().trim() === '' || !workspaceId()
+              "
             >
               Start
             </button>
@@ -200,9 +202,16 @@ export interface RemoteSessionOpenRequest {
               {{ group.workspace.path | displayText: 200 }}
             </h4>
             @if (group.sessions.length === 0) {
-              <p class="px-1 text-xs text-base-content-muted">No sessions yet.</p>
+              <p class="px-1 text-xs text-base-content-muted">
+                No sessions yet.
+              </p>
             } @else {
-              <ul class="flex flex-col" [attr.aria-label]="'Sessions in ' + (group.workspace.name | displayText)">
+              <ul
+                class="flex flex-col"
+                [attr.aria-label]="
+                  'Sessions in ' + (group.workspace.name | displayText)
+                "
+              >
                 @for (session of group.sessions; track session.sessionId) {
                   <li
                     class="flex min-w-0 items-center gap-3 rounded-md px-3 py-2 hover:bg-base-200"
@@ -210,9 +219,15 @@ export interface RemoteSessionOpenRequest {
                   >
                     <span
                       class="w-24 shrink-0 text-xs"
-                      [class.text-state-run]="connected() && session.state === 'running'"
-                      [class.text-state-need]="connected() && session.state === 'interrupted'"
-                      [class.text-base-content-muted]="!connected() || session.state === 'idle'"
+                      [class.text-state-run]="
+                        connected() && session.state === 'running'
+                      "
+                      [class.text-state-need]="
+                        connected() && session.state === 'interrupted'
+                      "
+                      [class.text-base-content-muted]="
+                        !connected() || session.state === 'idle'
+                      "
                       data-testid="remote-session-state"
                       >{{ stateLabel(session) }}</span
                     >
@@ -336,7 +351,9 @@ export class RemoteSessionListComponent {
   protected startComposing(): void {
     this.startError.set(null);
     this.prompt.set('');
-    if (!this.groups().some((g) => g.workspace.workspaceId === this.workspaceId())) {
+    if (
+      !this.groups().some((g) => g.workspace.workspaceId === this.workspaceId())
+    ) {
       this.workspaceId.set(this.groups()[0]?.workspace.workspaceId ?? '');
     }
     this.composing.set(true);
@@ -363,7 +380,11 @@ export class RemoteSessionListComponent {
     this.startError.set(null);
     try {
       const machineId = this.machine().machineId;
-      const outcome = await this.store.startSession(machineId, workspaceId, prompt);
+      const outcome = await this.store.startSession(
+        machineId,
+        workspaceId,
+        prompt,
+      );
       if (!outcome.ok) {
         this.startError.set(
           'error' in outcome

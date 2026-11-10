@@ -2,6 +2,7 @@ import { computed, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { SURFACE_ACTIVE } from '@ptah-extension/core';
 import { provideMarkdownRendering } from '@ptah-extension/markdown';
+import { InboxLayoutComponent } from '@ptah-extension/ui';
 import { initialSessionEventState } from '../../services/session-event-reducer';
 import {
   MachinesStore,
@@ -64,6 +65,9 @@ async function setup(
     add: jest.fn(),
     pair: jest.fn().mockResolvedValue(ok(HORUS)),
     pairViaSsh: jest.fn(),
+    // Approval counts the header badge and the overview notice read (B1).
+    pendingApprovalsByMachine: signal(new Map<string, number>()),
+    pendingApprovalCount: signal(0),
     // The detail's session list (Batch 25).
     workspaces: () => signal([]),
     sessionsByWorkspace: () => signal([]),
@@ -124,7 +128,7 @@ describe('MachinesViewComponent', () => {
   it('empty (4.1): one primary Add machine in the pane, a ghost one in the list, and what is checked', async () => {
     const { fixture } = await setup([]);
     const empty = q(fixture, 'machines-empty');
-    expect(empty?.textContent).toContain('Control Ptah on your other machines');
+    expect(empty?.textContent).toContain('No machines yet');
     expect(empty?.textContent).toContain('nothing is opened on your network');
     expect(q(fixture, 'machines-empty-add')?.classList).toContain(
       'btn-primary',
@@ -147,6 +151,45 @@ describe('MachinesViewComponent', () => {
       q(fixture, 'machine-detail-meta')?.textContent?.replace(/\s+/g, ' '),
     ).toContain('via SSH alias horus · ptah 0.1.70 · protocol 3');
     expect(banners(fixture)).toHaveLength(0);
+    expect(q(fixture, 'machines-add')).not.toBeNull();
+    expect(q(fixture, 'machines-approvals-badge')).toBeNull();
+    expect(q(fixture, 'machine-approvals-waiting')).toBeNull();
+  });
+
+  it('shows the approval badge in the page header and the notice in the overview', async () => {
+    const { fixture } = await setup([HORUS], {
+      pendingApprovalsByMachine: signal(new Map([['m1', 1]])),
+      pendingApprovalCount: signal(1),
+    });
+    expect(q(fixture, 'machines-approvals-badge')?.textContent).toContain(
+      '1 approval waiting',
+    );
+    expect(q(fixture, 'machine-approvals-waiting')?.textContent).toContain(
+      '1 approval is waiting on this machine',
+    );
+  });
+
+  it('narrow: selecting a machine opens the detail pane; "All machines" returns to the list', async () => {
+    const { fixture } = await setup([HORUS, ANUBIS]);
+    const shell = fixture.debugElement.query(
+      (node) => node.name === 'ptah-inbox-layout',
+    );
+    const detailOpen = () =>
+      (shell?.componentInstance as InboxLayoutComponent).detailOpen();
+    expect(detailOpen()).toBe(false);
+
+    host(fixture)
+      .querySelectorAll<HTMLButtonElement>('[data-testid="machine-row"]')[1]
+      .click();
+    fixture.detectChanges();
+    expect(detailOpen()).toBe(true);
+
+    await click(fixture, 'machines-narrow-back');
+    expect(detailOpen()).toBe(false);
+    // Only the narrow flag cleared; the machine stays selected.
+    expect(
+      q(fixture, 'machine-detail')?.querySelector('h2')?.textContent,
+    ).toContain('Anubis');
   });
 
   it('selecting a row shows that machine', async () => {
@@ -349,7 +392,11 @@ describe('MachinesViewComponent', () => {
 
 describe('MachinesViewComponent remote sessions', () => {
   it('opens a listed session in the pane and goes back to the machine', async () => {
-    const workspace = { workspaceId: 'w1', name: 'notes', path: '~/work/notes' };
+    const workspace = {
+      workspaceId: 'w1',
+      name: 'notes',
+      path: '~/work/notes',
+    };
     const session = {
       sessionId: 's1',
       title: 'Summarise sprint log',
@@ -388,7 +435,9 @@ describe('MachinesViewComponent remote sessions', () => {
     fixture.detectChanges();
     expect(openSession).toHaveBeenCalledWith('m1', 's1');
     expect(
-      element.querySelector('[data-testid="remote-session-title"]')?.textContent?.trim(),
+      element
+        .querySelector('[data-testid="remote-session-title"]')
+        ?.textContent?.trim(),
     ).toBe('Summarise sprint log');
 
     element
@@ -396,6 +445,8 @@ describe('MachinesViewComponent remote sessions', () => {
       ?.click();
     fixture.detectChanges();
     expect(closeSession).toHaveBeenCalledWith('m1', 's1');
-    expect(element.querySelector('[data-testid="remote-session-list"]')).not.toBeNull();
+    expect(
+      element.querySelector('[data-testid="remote-session-list"]'),
+    ).not.toBeNull();
   });
 });

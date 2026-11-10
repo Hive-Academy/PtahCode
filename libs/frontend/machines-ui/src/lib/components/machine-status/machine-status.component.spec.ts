@@ -15,9 +15,9 @@ describe('MachineStatusComponent', () => {
   it.each<[MachineConnectionState, string, string, string]>([
     ['connected', 'Connected', 'text-state-done', 'circle'],
     ['offline', 'Offline', 'text-state-idle', 'circle'],
-    ['reconnecting', 'Reconnecting', 'text-state-need', 'path'],
-    ['version-mismatch', 'Version mismatch', 'text-state-err', 'path'],
-    ['unpaired', 'Not paired', 'text-state-idle', 'circle'],
+    ['reconnecting', 'Reconnecting', 'text-state-run', 'path'],
+    ['version-mismatch', 'Version mismatch', 'text-state-need', 'path'],
+    ['unpaired', 'Not paired', 'text-state-err', 'circle'],
   ])(
     '%s shows a shape, the label "%s" and its ink',
     (state, label, ink, shape) => {

@@ -72,7 +72,7 @@ interface CheckRow {
   host: { class: 'block' },
   template: `
     <section
-      class="flex max-w-[720px] flex-col gap-3 p-5"
+      class="flex max-w-[720px] flex-col gap-3"
       [attr.aria-busy]="loading() ? 'true' : null"
       aria-labelledby="ptah-readiness-heading"
     >
