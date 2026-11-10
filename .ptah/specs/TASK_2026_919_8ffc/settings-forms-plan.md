@@ -70,6 +70,21 @@ Row ids refer to `settings-forms-inventory.md`. "Polished" means a chat or setup
 5. Radio cards, segmented control, option row of the popovers.
 6. Select class skin. Then phase 3 starts with `ptah-select` and the floating-label shell.
 
+**Finding of batch 2 (2026-11-10, coordinator decision).** The field shell has no more
+zero-DOM adopters. The audit of the Search and Voice tab (rows B21 to B35) found no row with
+the DOM of `div[ptahSettingsField]`: most rows are table rows (`<th scope="row">` and a
+control with an `aria-label` in a `<td>`, no `<id>-help` paragraph), and the other rows are
+horizontal or in a popover. A search in the Advanced, Providers and License folders found
+label and hint markup with other classes, ids and structure. Thus the count "44 rows" in 0.3
+is not possible in phase 2. Decisions:
+
+- Field shell batches stop in phase 2. Step 2 of the list above is cancelled.
+- The zero-pixel rule stays. The remaining rows move to the shell in phase 3, together with
+  the new look.
+- The order of the next families comes from the unified renderer-wide plan (session
+  "Renderer component inventory"), not from steps 3 to 6 above.
+- Record: `.ptah/specs/TASK_2026_922_d4ad/batch-02-field-shell.md` and `batch-02-review.md`.
+
 Early contract files for phase 3 exist in `libs/frontend/ui/src/lib/forms/shared/` in the
 worktree. They are not exported and not committed until phase 3.
 
