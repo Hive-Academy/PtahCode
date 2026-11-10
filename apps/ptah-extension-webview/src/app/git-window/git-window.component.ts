@@ -12,21 +12,28 @@ import { GitWindowScopeHandler } from './git-window.config';
   standalone: true,
   imports: [NgComponentOutlet],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  // Same pane as the docked Git dock: the dock class and the chrome glass role.
+  host: {
+    class: 'electron-git-dock flex h-screen min-h-0 flex-col overflow-hidden',
+    'data-glass-surface': 'chrome',
+  },
   template: `
-    <header class="flex items-center justify-between border-b border-base-300 px-4 py-2">
+    <header class="flex shrink-0 items-center justify-between border-b border-surface-border px-4 py-2">
       <h1 class="text-sm font-semibold">Git</h1>
       <button type="button" class="btn btn-ghost btn-sm" (click)="attach()">Attach</button>
     </header>
     @if (error()) {
-      <div role="alert" class="p-4">
+      <div role="alert" [class]="shell() ? stripClass : centerClass" data-testid="git-window-error">
         <p>{{ error() }}</p>
         <button type="button" class="btn btn-sm" (click)="retry()">Retry</button>
       </div>
     } @else if (!scopeHandler.scope()) {
-      <p role="status" class="p-4">Resolving Git scope…</p>
+      <p role="status" [class]="shell() ? stripClass : centerClass" data-testid="git-window-status">Resolving Git scope…</p>
     }
     @if (shell()) {
-      <ng-container *ngComponentOutlet="shell()" />
+      <div class="min-h-0 flex-1" data-testid="git-window-body">
+        <ng-container *ngComponentOutlet="shell()" />
+      </div>
     }
   `,
 })
@@ -37,6 +44,9 @@ export class GitWindowComponent {
   public readonly scopeHandler = inject(GitWindowScopeHandler);
   public readonly error = signal<string | null>(null);
   public readonly shell = signal<Type<unknown> | null>(null);
+  /** A state with no Git view fills the pane. With a Git view it is a strip above it. */
+  protected readonly centerClass = 'flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-4 text-center text-sm text-base-content-muted';
+  protected readonly stripClass = 'flex shrink-0 items-center gap-2 px-4 py-2 text-xs';
   private destroyed = false;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private abort = new AbortController();
