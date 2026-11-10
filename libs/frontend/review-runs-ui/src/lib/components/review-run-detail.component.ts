@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, ElementRef, AfterViewInit, OnDestro
 import type { ReviewFinding, ReviewRun, StageRecord } from '@ptah-extension/review-contracts';
 import { ReviewRunsStore } from '../review-runs.store';
 import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component';
+import { RUN_STATUS_INK, reviewStatusLabel } from './review-runs-list.component';
 import { ReviewFindingsTableComponent, reviewFindingRows } from './review-findings-table.component';
 
 @Component({
@@ -13,11 +14,15 @@ import { ReviewFindingsTableComponent, reviewFindingRows } from './review-findin
         <header class="flex items-start justify-between gap-4"><div class="min-w-0">
           <button type="button" class="btn btn-ghost btn-sm mb-2 min-[768px]:hidden" aria-label="Close run details" (click)="closed.emit()">All runs</button>
           <h2 id="review-detail-title" class="truncate text-xl font-semibold" tabindex="-1"><span class="sr-only">PR </span>#{{ run().prNumber }} {{ run().prTitle || 'review' }}</h2>
-          <p class="text-sm text-base-content-muted">{{ run().repo.owner }}/{{ run().repo.name }} · <span class="font-mono">{{ run().headSha.slice(0, 10) }}</span> · Attempt {{ run().attemptId }} · {{ run().trigger }}</p>
-        </div></header>
-        <div class="mt-4 flex flex-wrap gap-2"><span class="badge badge-outline" [class.badge-warning]="run().status === 'partial'" [class.badge-error]="run().status === 'failed'">{{ run().status }}</span>
-          @if (run().status === 'partial') { <span class="badge badge-warning">Partial coverage</span> }
+          <p class="text-sm text-base-content-muted" [title]="'Attempt ' + run().attemptId">{{ run().repo.owner }}/{{ run().repo.name }} · <span class="font-mono">{{ run().headSha.slice(0, 10) }}</span> · {{ run().trigger === 'poll' ? 'Poll' : 'Manual' }}</p>
         </div>
+          <span class="badge badge-outline shrink-0 gap-1.5" [class]="ink(run().status)" data-testid="review-detail-state"><span class="h-2 w-2 rounded-full bg-current" aria-hidden="true"></span>{{ label(run().status) }}</span>
+        </header>
+        <div class="mt-3 flex flex-wrap gap-2" data-testid="review-detail-rerun">
+          <button type="button" class="btn btn-primary btn-sm" title="A dry run creates a local preview. CodeRabbit stays enabled." [disabled]="store.rerunState() === 'running'" (click)="store.rerun(run().attemptId, true)">Rerun dry run</button>
+          <button type="button" class="btn btn-ghost btn-sm" title="A live rerun can publish comments. CodeRabbit stays enabled." [disabled]="store.rerunState() === 'running' || !store.hasToken() || store.settings()?.globalPublicationPaused" (click)="confirmLive.set(true)">Rerun live</button>
+        </div>
+        @if (store.rerunState() === 'error') { <p role="alert" class="mt-2 text-sm text-error">Rerun could not be started.</p> }
         @if (run().failure; as failure) {
           <p class="alert alert-error mt-4 text-sm" role="alert">Failed in {{ failure.stage }}: {{ failure.message }} ({{ failure.code }})</p>
         }
@@ -26,33 +31,31 @@ import { ReviewFindingsTableComponent, reviewFindingRows } from './review-findin
         @if (loadState() === 'loading') { <p class="mt-5" role="status">Loading run details…</p> }
         @else if (loadState() === 'error') { <div class="alert alert-error mt-5" role="alert">Run details are unavailable. <button type="button" class="btn btn-ghost btn-sm" (click)="retry.emit()">Retry</button></div> }
         @else {
-          <section class="mt-6"><h3 class="font-semibold">Stage timeline</h3>
+          <section class="surface-2 mt-4 rounded-box p-4" aria-label="Coverage" data-testid="review-detail-coverage">
+            <div class="flex items-center justify-between gap-2 text-sm"><span class="font-semibold">Coverage</span><span>{{ run().coverage.length }} of {{ lensTotal() }} lenses</span></div>
+            <progress class="progress progress-primary mt-2 h-1 w-full" [value]="run().coverage.length" [max]="lensTotal() || 1" aria-label="Lens coverage"></progress>
+            @if (run().status === 'partial') { <p class="mt-2 text-sm text-state-need">Coverage limited. Unchecked paths are not claimed clean.</p> }
+          </section>
+          <section class="mt-5"><h3 class="font-semibold">Stages</h3>
             @if (run().stages.length === 0) { <p class="text-sm text-base-content-muted">Stage history unavailable.</p> }
-            @else { <ol class="mt-2 space-y-2 border-l border-base-300 pl-4">
-              @for (stage of run().stages; track stage.name + ':' + (stage.scope ?? '')) { <li class="rounded-lg bg-base-200 p-3">
-                <div class="flex flex-wrap items-center justify-between gap-2"><strong>{{ stageLabel(stage) }}</strong><span class="badge badge-outline" [class.badge-warning]="stage.status === 'partial'" [class.badge-error]="stage.status === 'failed'">{{ stage.status }}</span></div>
-                <p class="text-xs text-base-content-muted">{{ stage.durationMs === null ? 'Duration unavailable' : (stage.durationMs / 1000).toFixed(1) + ' s' }}</p>
-                @if (stage.family) { <p class="text-sm">{{ stage.family }} family</p> }
-                @if (stage.scope) { <p class="text-sm">{{ stage.scope }}</p> }
-                @if (stage.error) { <p class="text-sm" role="status">{{ stage.error }}</p> }
+            @else { <ol class="mt-2 grid grid-cols-1 gap-2 min-[768px]:grid-cols-2 min-[1400px]:grid-cols-4" data-testid="review-detail-stages">
+              @for (stage of run().stages; track stage.name + ':' + (stage.scope ?? '')) { <li class="surface-2 rounded-box px-3 py-2">
+                <p class="flex items-center gap-1.5 truncate text-sm" [class]="ink(stage.status)"><span class="h-2 w-2 shrink-0 rounded-full bg-current" aria-hidden="true"></span>{{ stageLabel(stage) }}</p>
+                <p class="text-xs text-base-content-muted">{{ label(stage.status) }}{{ stage.durationMs === null ? '' : ' · ' + seconds(stage.durationMs) }}</p>
+                @if (stage.error) { <p class="text-xs" role="status">{{ stage.error }}</p> }
               </li> }
             </ol> }
           </section>
-          <section class="mt-6 space-y-2"><h3 class="font-semibold">Coverage and lanes</h3>
-            @if (run().status === 'partial') { <div class="alert alert-warning">Coverage limited. Unchecked paths are not claimed clean.</div> }
-            @if (run().coverage.length) { <ul class="list-disc pl-5 text-sm">@for (item of run().coverage; track item) { <li>{{ item }}</li> }</ul> }
+          <section class="mt-5"><h3 class="font-semibold">Coverage per lens</h3>
+            @if (run().coverage.length) { <ul class="mt-2 grid grid-cols-1 gap-2 min-[1100px]:grid-cols-2" data-testid="review-detail-lenses">@for (item of run().coverage; track item) { <li class="surface-2 rounded-box px-3 py-2">
+              <p class="truncate text-sm font-semibold">{{ item }}</p>
+              <p class="text-xs text-base-content-muted">Family: {{ family('lenses') ?? 'Unavailable' }} · Verifier family: {{ family('verification') ?? 'Unavailable' }}</p>
+            </li> }</ul> }
             @else { <p class="text-sm text-base-content-muted">Lane coverage unavailable.</p> }
-            <p class="text-sm">Lens family: {{ family('lenses') ?? 'Unavailable' }}</p>
-            <p class="text-sm">Verifier family: {{ family('verification') ?? 'Unavailable' }}</p>
-            @if (family('lenses') && family('lenses') === family('verification')) { <span class="badge badge-warning">Weaker evidence · same-family verification</span> }
+            @if (family('lenses') && family('lenses') === family('verification')) { <span class="badge badge-warning mt-2">Weaker evidence · same-family verification</span> }
           </section>
-          <section class="mt-6 space-y-2"><h3 class="font-semibold">Rerun this PR</h3>
-            <p class="text-sm text-base-content-muted">CodeRabbit remains enabled. A dry-run creates a local preview; a live rerun may publish comments.</p>
-            <div class="flex gap-2"><button type="button" class="btn btn-ghost btn-sm" [disabled]="store.rerunState() === 'running'" (click)="store.rerun(run().attemptId, true)">Rerun as dry-run</button>
-              <button type="button" class="btn btn-primary btn-sm" [disabled]="store.rerunState() === 'running' || !store.hasToken() || store.settings()?.globalPublicationPaused" (click)="confirmLive.set(true)">Rerun live</button></div>
-            @if (store.rerunState() === 'error') { <p role="alert" class="text-sm text-error">Rerun could not be started.</p> }
-          </section>
-          <section class="mt-6"><h3 class="font-semibold">Findings</h3>
+          <section class="mt-6">
+          <h3 class="font-semibold">Findings</h3>
             @if (findingsState() === 'loading') { <p class="mt-1 text-sm text-base-content-muted" role="status">Loading findings…</p> }
             @else if (findingsState() === 'error') { <p class="mt-1 text-sm text-base-content-muted" role="alert">Findings are unavailable. <button type="button" class="btn btn-ghost btn-sm" (click)="retryFindings.emit()">Retry</button></p> }
             @else { <ptah-review-findings-table [rows]="findingRows()" /> }
@@ -85,6 +88,11 @@ export class ReviewRunDetailComponent implements AfterViewInit, OnDestroy {
     if (typeof view?.matchMedia === 'function' && view.matchMedia('(max-width: 767.98px)').matches) this.element.nativeElement.querySelector<HTMLElement>('#review-detail-title')?.focus();
   }
   ngOnDestroy(): void { this.returnFocus?.focus(); }
+  ink(status: ReviewRun['status']): string { return RUN_STATUS_INK[status]; }
+  label(status: ReviewRun['status']): string { return reviewStatusLabel(status); }
+  seconds(ms: number): string { return Math.round(ms / 1000) + 's'; }
+  /** Lenses of the run: the covered lenses, or more when the run has more lens stages. */
+  lensTotal(): number { return Math.max(this.run().coverage.length, this.run().stages.filter(stage => stage.name === 'lenses' && stage.scope).length); }
   startLiveRerun(): void { this.confirmLive.set(false); void this.store.rerun(this.run().attemptId, false); }
   stageLabel(stage: StageRecord): string { return stage.name === 'lenses' && stage.scope ? stage.scope : ({ discovery: 'Discovery', context: 'Context', checks: 'Checks', triage: 'Triage', lenses: 'Lenses', verification: 'Verification', identity: 'Identity', publication: 'Publication' })[stage.name]; }
   family(name: StageRecord['name']): string | null { return this.run().stages.find(stage => stage.name === name)?.family ?? null; }

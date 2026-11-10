@@ -8,7 +8,7 @@ import type { ReviewRun } from '@ptah-extension/review-contracts';
  * has no standalone `state-*` classes, so the status takes its ink from the
  * `text-state-*` Tailwind color utilities and the dot from `bg-current`.
  */
-const RUN_STATUS_INK: Readonly<Record<ReviewRun['status'], string>> = {
+export const RUN_STATUS_INK: Readonly<Record<ReviewRun['status'], string>> = {
   queued: 'text-state-idle',
   running: 'text-state-run',
   succeeded: 'text-state-done',
@@ -18,6 +18,13 @@ const RUN_STATUS_INK: Readonly<Record<ReviewRun['status'], string>> = {
   skipped: 'text-state-idle',
   interrupted: 'text-state-need',
 };
+
+/** Label of a run or stage state, as the run rows show it. */
+export function reviewStatusLabel(status: ReviewRun['status']): string {
+  if (status === 'succeeded') return 'Completed';
+  if (status === 'partial') return 'Partial coverage';
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
 
 /**
  * Run list of the Reviews page list pane (approved option A). The rows are
@@ -76,9 +83,7 @@ export class ReviewRunsListComponent {
   }
 
   protected statusLabel(status: ReviewRun['status']): string {
-    if (status === 'succeeded') return 'Completed';
-    if (status === 'partial') return 'Partial coverage';
-    return this.titleCase(status);
+    return reviewStatusLabel(status);
   }
 
   protected titleCase(value: string): string {
