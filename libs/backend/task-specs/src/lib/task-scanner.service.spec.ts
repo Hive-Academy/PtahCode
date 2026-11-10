@@ -37,12 +37,24 @@ describe('TaskScannerService', () => {
     const scanner = new TaskScannerService(fs, makeLogger());
     let completed = false;
     let timerBeforeCompletion = false;
+    // A fake clock that moves 5 ms on each read. The scan yields after 8 ms of
+    // work; on a fast machine the real clock can stay below that for all 120
+    // in-memory carriers, and then the scan correctly never yields.
+    let fakeNow = 0;
+    const nowSpy = jest
+      .spyOn(performance, 'now')
+      .mockImplementation(() => (fakeNow += 5));
     // An immediate, not a timer: a 0 ms timer needs 1 ms of wall time and is
     // not sure to be due when the scan first releases the loop.
     setImmediate(() => {
       timerBeforeCompletion = !completed;
     });
-    const result = await scanner.scan(ROOT);
+    let result: Awaited<ReturnType<TaskScannerService['scan']>>;
+    try {
+      result = await scanner.scan(ROOT);
+    } finally {
+      nowSpy.mockRestore();
+    }
     completed = true;
     expect(timerBeforeCompletion).toBe(true);
     expect(result.tasks.map((task) => task.id)).toEqual(
