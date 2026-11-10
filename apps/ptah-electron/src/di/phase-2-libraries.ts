@@ -30,7 +30,7 @@ import {
   type IWorkspaceProvider,
   type ISecretStorage,
 } from '@ptah-extension/platform-core';
-import { registerReviewCore, REVIEW_CORE_TOKENS, REVIEW_CONTEXT_TOKENS, REVIEW_LANE_TOKENS, ReviewWorktreeService, ReviewPolicyService, type IReviewSettingsStore, type ReviewStageEnvironment } from '@ptah-extension/review-core';
+import { registerReviewCore, REVIEW_CORE_TOKENS, REVIEW_CONTEXT_TOKENS, REVIEW_LANE_TOKENS, ReviewWorktreeService, ReviewPolicyService, ReviewStatusCoordinatorService, type IReviewSettingsStore, type ReviewOrchestratorService, type ReviewStageEnvironment } from '@ptah-extension/review-core';
 import { registerReviewGithubServices, REVIEW_GITHUB_TOKENS, REVIEW_GITHUB_TOKEN_KEY, type ReviewPublicationGuard } from '@ptah-extension/review-github';
 import type { IGitHubReviewPort } from '@ptah-extension/review-contracts';
 import { ReviewSecretPresence } from '../services/review/review-secret-presence';
@@ -39,6 +39,7 @@ import { ReviewCommandRunner } from '../services/review/review-command-runner';
 import { ReviewLaneGateway } from '../services/review/review-lane-gateway';
 import { ReviewFiles } from '../services/review/review-files';
 import { ReviewLaneFiles } from '../services/review/review-lane-files';
+import { REVIEW_SYNC_TOKENS, ReviewSyncScheduleService, type ReviewSyncHooks } from '../services/review/review-sync-schedule.service';
 import {
   ElectronEditorLauncher,
   createAgentModelSettingsGetter,
@@ -129,7 +130,7 @@ import {
 } from '@ptah-extension/session-organization';
 import { registerOutputStyleServices } from '@ptah-extension/output-styles';
 import { registerPluginMarketplaceServices } from '@ptah-extension/plugin-marketplace';
-import { registerCronSchedulerServices } from '@ptah-extension/cron-scheduler';
+import { CRON_TOKENS, registerCronSchedulerServices, type IHandlerRegistry, type IJobStore } from '@ptah-extension/cron-scheduler';
 import {
   registerMessagingGatewayServices,
   GATEWAY_TOKENS,
@@ -472,6 +473,7 @@ export function registerPhase2Libraries(
       } }),
     });
     container.register(REVIEW_CORE_TOKENS.GITHUB, { useToken: REVIEW_GITHUB_TOKENS.REVIEW_PORT });
+    container.register(REVIEW_CORE_TOKENS.STATUS_PORT, { useToken: REVIEW_GITHUB_TOKENS.STATUS_PORT });
     container.register(REVIEW_CORE_TOKENS.SECRET_PRESENCE, {
       useFactory: (provider) => new ReviewSecretPresence(
         provider.resolve<ISecretStorage>(PLATFORM_TOKENS.SECRET_STORAGE),
@@ -515,6 +517,30 @@ export function registerPhase2Libraries(
           (path) => resolveReviewRootsForPath(
             path, environment, provider.resolve<IReviewSettingsStore>(REVIEW_CORE_TOKENS.SETTINGS_STORE)));
       },
+    });
+    container.register<ReviewSyncHooks>(REVIEW_SYNC_TOKENS.HOOKS, { useFactory: (provider) => ({
+      syncThreads: (repo, signal) => provider.resolve<ReviewOrchestratorService>(REVIEW_CORE_TOKENS.ORCHESTRATOR)
+        .syncThreads(repo, signal),
+      recoverStatuses: async () => {
+        const statuses = provider.resolve(ReviewStatusCoordinatorService);
+        await statuses.recoverOwnPending();
+        await statuses.retryDue();
+        return 0;
+      },
+    }) });
+    // Cron registers later in this phase and may fail (non-fatal); the factory runs at boot, so a
+    // missing scheduler gives a schedule that reports itself unavailable instead of a boot error.
+    container.register(REVIEW_SYNC_TOKENS.SCHEDULE, {
+      useFactory: instanceCachingFactory((provider) => new ReviewSyncScheduleService({
+        orchestrator: provider.resolve<ReviewOrchestratorService>(REVIEW_CORE_TOKENS.ORCHESTRATOR),
+        settings: provider.resolve<IReviewSettingsStore>(REVIEW_CORE_TOKENS.SETTINGS_STORE),
+        jobs: provider.isRegistered(CRON_TOKENS.CRON_JOB_STORE, true)
+          ? provider.resolve<IJobStore>(CRON_TOKENS.CRON_JOB_STORE) : null,
+        registry: provider.isRegistered(CRON_TOKENS.CRON_HANDLER_REGISTRY, true)
+          ? provider.resolve<IHandlerRegistry>(CRON_TOKENS.CRON_HANDLER_REGISTRY) : null,
+        hooks: provider.resolve<ReviewSyncHooks>(REVIEW_SYNC_TOKENS.HOOKS),
+        logger: provider.resolve<Logger>(TOKENS.LOGGER),
+      })),
     });
     try {
       const sqliteConnection = container.resolve<SqliteConnectionService>(

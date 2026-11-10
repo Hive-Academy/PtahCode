@@ -5,7 +5,7 @@ import { RepoIdentitySchema, ShaSchema, type RepoIdentity } from '@ptah-extensio
 import { PERSISTENCE_TOKENS, SqliteConnectionService } from '@ptah-extension/persistence-sqlite';
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import type { ReviewQueueAttempt, ReviewQueueClaim, ReviewQueueHead } from '../review-queue.service';
-import type { IReviewRepository, ReviewAttemptRecord, ReviewStageRecord } from './review-repository.interface';
+import type { IReviewRepository, ReviewAttemptRecord, ReviewStageRecord, ReviewStatusSyncRecord } from './review-repository.interface';
 
 const attemptRow = z.object({ attempt_id: z.string(), repo_id: z.string(), pr_number: z.number(), head_sha: z.string(),
   attempt_number: z.number(), trigger: z.enum(['automatic', 'manual']), state: z.enum(['queued', 'running', 'completed', 'failed', 'cancelled', 'interrupted']),
@@ -20,6 +20,15 @@ const iso = (value: number | null): string | null => value === null ? null : new
 const ms = (value: string): number => { const result = Date.parse(value); if (!Number.isFinite(result)) throw new Error('Invalid review timestamp'); return result; };
 const repoId = (head: ReviewQueueHead): string => `${head.repo.owner.toLowerCase()}/${head.repo.name.toLowerCase()}`;
 const SELECT_ATTEMPT = `SELECT a.*, r.owner, r.name FROM review_attempts a JOIN review_repositories r ON r.repo_id = a.repo_id`;
+const statusRow = z.object({ attempt_id: z.string(), machine_id: z.string(), state: z.enum(['pending', 'success', 'failure', 'error']),
+  description: z.string(), external_id: z.string().nullable(), sync_pending: z.number(), retry_at: z.number().nullable(), error_summary: z.string().nullable(),
+  synced_state: z.string().nullable(), synced_description: z.string().nullable() });
+function mapStatus(row: unknown): ReviewStatusSyncRecord {
+  const s = statusRow.parse(row);
+  return { attemptId: s.attempt_id, machineId: s.machine_id, state: s.state, description: s.description, externalId: s.external_id,
+    syncPending: s.sync_pending === 1, retryAt: iso(s.retry_at), errorSummary: s.error_summary,
+    syncedState: s.synced_state, syncedDescription: s.synced_description };
+}
 
 @injectable()
 export class SqliteReviewRepository implements IReviewRepository {
@@ -27,6 +36,57 @@ export class SqliteReviewRepository implements IReviewRepository {
     @inject(PERSISTENCE_TOKENS.SQLITE_CONNECTION) private readonly sqlite: SqliteConnectionService,
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
   ) {}
+
+  async getStatusSync(attemptId: string): Promise<ReviewStatusSyncRecord | null> {
+    const row = this.sqlite.db.prepare('SELECT * FROM review_status_sync WHERE attempt_id = ?').get(attemptId);
+    return row ? mapStatus(row) : null;
+  }
+
+  async getCurrentAttemptId(repo: RepoIdentity, prNumber: number, headSha: string): Promise<string | null> {
+    const valid = RepoIdentitySchema.parse(repo);
+    if (!Number.isSafeInteger(prNumber) || prNumber < 1) throw new Error('Invalid PR number');
+    const sha = ShaSchema.parse(headSha);
+    const row = this.sqlite.db.prepare(`SELECT attempt_id FROM review_attempts
+      WHERE repo_id = ? AND pr_number = ? AND head_sha = ?
+      ORDER BY attempt_number DESC LIMIT 1`).get(`${valid.owner.toLowerCase()}/${valid.name.toLowerCase()}`, prNumber, sha);
+    return row ? z.object({ attempt_id: z.string() }).parse(row).attempt_id : null;
+  }
+
+  async saveStatusSync(record: ReviewStatusSyncRecord): Promise<void> {
+    this.sqlite.db.prepare(`INSERT INTO review_status_sync (attempt_id, machine_id, state, description, external_id, sync_pending, retry_at,
+      error_summary, synced_state, synced_description, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(attempt_id) DO UPDATE SET state = excluded.state, description = excluded.description,
+      external_id = excluded.external_id,
+      sync_pending = excluded.sync_pending, retry_at = excluded.retry_at, error_summary = excluded.error_summary,
+      synced_state = excluded.synced_state, synced_description = excluded.synced_description, updated_at = excluded.updated_at`)
+      .run(record.attemptId, record.machineId, record.state, record.description, record.externalId, Number(record.syncPending),
+        record.retryAt ? ms(record.retryAt) : null, record.errorSummary, record.syncedState, record.syncedDescription, Date.now());
+  }
+
+  async getPendingStatusSync(now: string): Promise<ReviewStatusSyncRecord[]> {
+    return this.sqlite.db.prepare(`SELECT * FROM review_status_sync WHERE sync_pending = 1 AND (retry_at IS NULL OR retry_at <= ?)
+      ORDER BY updated_at LIMIT 100`).all(ms(now)).map(mapStatus);
+  }
+
+  async getMachineStatusSync(machineId: string): Promise<ReviewStatusSyncRecord[]> {
+    return this.sqlite.db.prepare(`SELECT s.* FROM review_status_sync s JOIN review_attempts a ON a.attempt_id = s.attempt_id
+      WHERE s.machine_id = ? AND s.state = 'pending'`).all(machineId).map(mapStatus);
+  }
+
+  async syncFindingResolution(repo: RepoIdentity, prNumber: number, findingId: string, resolved: boolean): Promise<boolean> {
+    RepoIdentitySchema.parse(repo);
+    if (!Number.isSafeInteger(prNumber) || prNumber < 1) throw new Error('Invalid PR number');
+    const now = Date.now();
+    const repoId = `${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}`;
+    if (resolved) return this.sqlite.db.prepare(`UPDATE review_findings
+      SET status = 'addressed', updated_at = ?, addressed_at = ?
+      WHERE finding_id = ? AND repo_id = ? AND pr_number = ? AND status IN ('open', 'reopened')`)
+      .run(now, now, findingId, repoId, prNumber).changes === 1;
+    return this.sqlite.db.prepare(`UPDATE review_findings
+      SET status = 'reopened', updated_at = ?, reopened_at = ?
+      WHERE finding_id = ? AND repo_id = ? AND pr_number = ? AND status = 'addressed'`)
+      .run(now, now, findingId, repoId, prNumber).changes === 1;
+  }
 
   async getLastReviewedHead(repo: RepoIdentity, prNumber: number): Promise<string | null> {
     RepoIdentitySchema.parse(repo);

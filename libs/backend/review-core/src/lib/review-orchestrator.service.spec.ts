@@ -12,6 +12,7 @@ import { LensStageRunner } from './stages/lens-stage.runner';
 import { VerificationStageRunner } from './stages/verification-stage.runner';
 import { PublicationStageRunner } from './stages/publication-stage.runner';
 import { ReviewWorktreeService } from './context/review-worktree.service';
+import { ReviewStatusCoordinatorService } from './status/review-status-coordinator.service';
 
 const sha = 'a'.repeat(40);
 const claim: ReviewQueueClaim = { repo: { owner: 'Hive-Academy', name: 'PtahCode' }, prNumber: 1,
@@ -23,7 +24,7 @@ const contextValue: ContextStageResult = { attemptRoot: '/attempt', coverage: []
 const settings = { repositories: [{ owner: 'Hive-Academy', name: 'PtahCode', enabled: true, dryRun: true, publicationPaused: false }],
   maintainerLogins: ['maintainer'], pollMinutes: 10, globalPublicationPaused: false, fallbackFamilies: [] };
 
-function fixture() {
+function fixture(withStatuses = false) {
   const stages = new Map<string, ReviewStageRecord>();
   const checkpoints = new Map<string, unknown>();
   const key = (name: string, ordinal: number) => `${name}:${ordinal}`;
@@ -33,10 +34,13 @@ function fixture() {
     enqueueDiscovered: jest.fn(), enqueueManual: jest.fn(), recordDraft: jest.fn(),
     claimNext: jest.fn().mockResolvedValueOnce(claim).mockResolvedValue(null),
     heartbeat: jest.fn(), release: jest.fn().mockResolvedValue(true), reconcileExpiredLeases: jest.fn().mockResolvedValue(0),
-    getAttempt: jest.fn(), getStages: async () => [...stages.values()],
+    getAttempt: jest.fn(), getCurrentAttemptId: jest.fn().mockResolvedValue(claim.attemptId), getStages: async () => [...stages.values()],
     saveStage: async (row) => { stages.set(key(row.stage, row.ordinal), row); },
     saveCheckpoint: async (_id, name, ordinal, data) => { checkpoints.set(key(name, ordinal), data); },
     getCheckpoint: async (_id, name, ordinal) => checkpoints.get(key(name, ordinal)) ?? null,
+    getStatusSync: jest.fn().mockResolvedValue(null), saveStatusSync: jest.fn(),
+    getPendingStatusSync: jest.fn().mockResolvedValue([]), getMachineStatusSync: jest.fn().mockResolvedValue([]),
+    syncFindingResolution: jest.fn().mockResolvedValue(false),
   };
   const queue = Object.create(ReviewQueueService.prototype) as ReviewQueueService;
   const claimMock = jest.spyOn(queue, 'claim').mockImplementation(async () => repository.claimNext('worker', '', ''));
@@ -68,15 +72,26 @@ function fixture() {
   const prune = jest.spyOn(worktree, 'prune').mockResolvedValue(undefined);
   const settingsStore = { getSettings: jest.fn().mockResolvedValue(settings), updateSettings: jest.fn(), listRepositories: jest.fn(),
     setPublicationPause: jest.fn(), getLiveGate: jest.fn(), setLiveGate: jest.fn() } as jest.Mocked<IReviewSettingsStore>;
+  const statuses = Object.create(ReviewStatusCoordinatorService.prototype) as ReviewStatusCoordinatorService;
+  jest.spyOn(statuses, 'claimed').mockResolvedValue(undefined);
+  jest.spyOn(statuses, 'lensCompleted').mockResolvedValue(undefined);
+  const finished = jest.spyOn(statuses, 'finished').mockResolvedValue(undefined);
   const coordinator = new ReviewOrchestratorService(discovery, context, triage, lenses, verification, publication, queue,
     new ReviewPolicyService(), repository, github,
     { resolve: async () => ({ repoRoot: '/repo', attemptsRoot: '/attempts' }), settings: async () => settings, baseConfig: async () => null }, logger,
-    settingsStore, worktree);
-  return { releaseSource, listAttemptSources, prune, settingsStore, coordinator, stages, checkpoints, repository, logger, claimMock, release, discover, contextRun, triageRun, lensRun,
+    settingsStore, worktree, withStatuses ? statuses : undefined);
+  return { releaseSource, listAttemptSources, prune, settingsStore, coordinator, finished, stages, checkpoints, repository, logger, claimMock, release, discover, contextRun, triageRun, lensRun,
     verificationRun, publicationRun, github };
 }
 
 describe('ReviewOrchestratorService', () => {
+  it('releases the source after lease release even when status completion throws', async () => {
+    const f = fixture(true);
+    f.finished.mockRejectedValueOnce(new Error('status unavailable'));
+    await expect(f.coordinator.drain('worker', Date.now() + 500)).rejects.toThrow('status unavailable');
+    expect(f.release).toHaveBeenCalled();
+    expect(f.releaseSource).toHaveBeenCalledWith(claim.repo, '/repo', '/attempts', claim.attemptId);
+  });
   it('does not save a failure when shutdown aborts an in-flight attempt', async () => {
     const f = fixture();
     const controller = new AbortController();

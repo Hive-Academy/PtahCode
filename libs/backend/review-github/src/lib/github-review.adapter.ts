@@ -44,6 +44,23 @@ const filesSchema = z.array(z.object({
   status: z.string(), additions: z.number().int().nonnegative(),
   deletions: z.number().int().nonnegative(), changes: z.number().int().nonnegative(),
 }));
+const threadPageSchema = z.object({
+  data: z.object({ repository: z.object({ pullRequest: z.object({ reviewThreads: z.object({
+    nodes: z.array(z.object({ id: z.string(), isResolved: z.boolean(), comments: z.object({
+      nodes: z.array(z.object({ databaseId: z.number().int().positive().nullable() })),
+      pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
+    }) })),
+    pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
+  }) }).nullable() }).nullable() }),
+  errors: z.array(z.object({ message: z.string() })).optional(),
+});
+const commentPageSchema = z.object({
+  data: z.object({ node: z.object({ comments: z.object({
+    nodes: z.array(z.object({ databaseId: z.number().int().positive().nullable() })),
+    pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
+  }) }).nullable() }),
+  errors: z.array(z.object({ message: z.string() })).optional(),
+});
 const MAX_BYTES = 10 * 1024 * 1024;
 const MAX_PAGES = 100;
 /** Comment pages (100 comments each) that one finding thread lookup reads. */
@@ -205,6 +222,69 @@ export class GithubReviewAdapter implements IGitHubReviewPort, IGitHubFindingThr
     return (await this.json(response, z.object({ login: z.string().min(1) }))).login;
   }
 
+  private async graphql(query: string, variables: object): Promise<unknown> {
+    const token = await this.secrets.get(REVIEW_GITHUB_TOKEN_KEY);
+    if (!token) throw new GitHubReviewError('missing-token', 'GitHub bot token is unavailable');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15_000);
+    let response: Response;
+    try {
+      response = await this.fetcher(`${API}/graphql`, { method: 'POST', signal: controller.signal,
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json',
+          'Content-Type': 'application/json', 'User-Agent': 'PtahReview/1.0' },
+        body: JSON.stringify({ query, variables }),
+      });
+      const text = await response.text();
+      if (text.length > MAX_BYTES) throw new GitHubReviewError('malformed-response', 'GitHub response is too large');
+      response = new Response(text, { status: response.status, headers: response.headers });
+    } catch (error) {
+      if (controller.signal.aborted) throw new GitHubReviewError('timeout', 'GitHub GraphQL request timed out');
+      if (error instanceof GitHubReviewError) throw error;
+      throw new GitHubReviewError('http', 'GitHub GraphQL request failed');
+    } finally { clearTimeout(timer); }
+    if (response.status === 401) throw new GitHubReviewError('authentication', 'GitHub bot authentication failed');
+    if (response.status === 403) throw new GitHubReviewError('permission', 'GitHub bot lacks permission');
+    if (!response.ok) throw new GitHubReviewError('http', `GitHub returned HTTP ${response.status}`);
+    return response.json();
+  }
+
+  private async threadResolutions(repo: RepoIdentity, number: number): Promise<Map<number, boolean>> {
+    const valid = RepoIdentitySchema.parse(repo);
+    const resolved = new Map<number, boolean>();
+    let cursor: string | null = null;
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const raw = threadPageSchema.parse(await this.graphql(
+        `query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$cursor){nodes{id isResolved comments(first:100){nodes{databaseId} pageInfo{hasNextPage endCursor}}} pageInfo{hasNextPage endCursor}}}}}`,
+        { owner: valid.owner, name: valid.name, number: this.number(number), cursor }));
+      if (raw.errors?.length || !raw.data.repository?.pullRequest) throw new GitHubReviewError('malformed-response', 'GitHub returned an invalid review thread query');
+      const threads = raw.data.repository.pullRequest.reviewThreads;
+      for (const thread of threads.nodes) {
+        let comments = thread.comments;
+        const seen = new Set<string>();
+        for (let commentPage = 0; commentPage < MAX_PAGES; commentPage++) {
+          for (const comment of comments.nodes)
+            if (comment.databaseId !== null) resolved.set(comment.databaseId, thread.isResolved);
+          if (!comments.pageInfo.hasNextPage) break;
+          const next = comments.pageInfo.endCursor;
+          if (!next || seen.has(next) || commentPage === MAX_PAGES - 1)
+            throw new GitHubReviewError('malformed-response', 'GitHub review comments exceeded pagination limit');
+          seen.add(next);
+          const more = commentPageSchema.parse(await this.graphql(
+            `query($id:ID!,$cursor:String){node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$cursor){nodes{databaseId} pageInfo{hasNextPage endCursor}}}}}`,
+            { id: thread.id, cursor: next }));
+          if (more.errors?.length || !more.data.node)
+            throw new GitHubReviewError('malformed-response', 'GitHub returned an invalid review comment query');
+          comments = more.data.node.comments;
+        }
+      }
+      if (!threads.pageInfo.hasNextPage) return resolved;
+      if (!threads.pageInfo.endCursor || threads.pageInfo.endCursor === cursor)
+        throw new GitHubReviewError('malformed-response', 'GitHub returned an invalid review thread cursor');
+      cursor = threads.pageInfo.endCursor;
+    }
+    throw new GitHubReviewError('malformed-response', 'GitHub review threads exceeded pagination limit');
+  }
+
   async listOwnReviewsAndThreads(repo: RepoIdentity, number: number, page = 1): Promise<GitHubPage<GitHubReview>> {
     const base = this.path(repo, `/pulls/${this.number(number)}`);
     const [reviewsResponse, login] = await Promise.all([
@@ -222,10 +302,11 @@ export class GithubReviewAdapter implements IGitHubReviewPort, IGitHubFindingThr
       comments.push(...await this.json(response, z.array(reviewCommentSchema)));
       commentPage = nextPage(response.headers.get('link'));
     }
+    const resolutions = comments.length ? await this.threadResolutions(repo, number) : new Map<number, boolean>();
     const own = reviews.filter(x => x.user.login === login).map(x => ({
       id: x.id, body: x.body ?? '', submittedAt: x.submitted_at ?? '',
-      threads: comments.filter(c => c.user.login === login && c.pull_request_review_id === x.id).map(c => ({
-        id: String(c.id), path: c.path, line: c.line ?? c.original_line, body: c.body, resolved: false,
+      threads: comments.filter(c => c.user.login === login && c.pull_request_review_id === x.id && resolutions.has(c.id)).map(c => ({
+        id: String(c.id), path: c.path, line: c.line ?? c.original_line, body: c.body, resolved: resolutions.get(c.id) === true,
       } satisfies GitHubReviewThread)),
     }));
     return { items: own, nextPage: nextPage(reviewsResponse.headers.get('link')),

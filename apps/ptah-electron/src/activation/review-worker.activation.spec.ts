@@ -3,6 +3,20 @@ import { container } from 'tsyringe';
 import { CRON_TOKENS } from '@ptah-extension/cron-scheduler';
 import { REVIEW_CORE_TOKENS } from '@ptah-extension/review-core';
 import { startReviewWorker } from './review-worker.activation';
+import { REVIEW_SYNC_TOKENS, ReviewSyncScheduleService } from '../services/review/review-sync-schedule.service';
+import type { DependencyContainer } from 'tsyringe';
+
+/** Binds the real schedule over whatever doubles the test registered, as phase 2 does. */
+function bindSchedule(scope: DependencyContainer, logger: { error: jest.Mock }): void {
+  scope.register(REVIEW_SYNC_TOKENS.SCHEDULE, { useFactory: (provider) => new ReviewSyncScheduleService({
+    orchestrator: provider.resolve(REVIEW_CORE_TOKENS.ORCHESTRATOR),
+    settings: provider.resolve(REVIEW_CORE_TOKENS.SETTINGS_STORE),
+    jobs: provider.resolve(CRON_TOKENS.CRON_JOB_STORE),
+    registry: provider.resolve(CRON_TOKENS.CRON_HANDLER_REGISTRY),
+    hooks: {},
+    logger,
+  }) });
+}
 
 describe('review worker activation', () => {
   afterEach(() => jest.useRealTimers());
@@ -25,7 +39,7 @@ describe('review worker activation', () => {
     });
     scope.register(REVIEW_CORE_TOKENS.ENVIRONMENT, { useValue: { resolve } });
     scope.register(REVIEW_CORE_TOKENS.SETTINGS_STORE, { useValue: { getSettings: async () => null } });
-    scope.register(CRON_TOKENS.CRON_JOB_STORE, { useValue: { upsert } });
+    scope.register(CRON_TOKENS.CRON_JOB_STORE, { useValue: { upsert, get: () => null, delete: () => false } });
     scope.register(CRON_TOKENS.CRON_HANDLER_REGISTRY, {
       useValue: {
         has: (name: string) => handlers.has(name),
@@ -33,10 +47,12 @@ describe('review worker activation', () => {
         unregister: (name: string) => { handlers.delete(name); },
       },
     });
-    const handle = await startReviewWorker(scope, controller.signal, { error: jest.fn() });
+    const logger = { error: jest.fn() };
+    bindSchedule(scope, logger);
+    const handle = await startReviewWorker(scope, controller.signal, logger);
     expect(handle).not.toBeNull();
-    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'handler:review:discover' }));
-    expect(handlers.has('review:discover')).toBe(true);
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'handler:review:sync' }));
+    expect(handlers.has('review:sync')).toBe(true);
     expect(drain).toHaveBeenCalledTimes(1);
     expect(reconcileStartup).toHaveBeenCalledTimes(1);
     expect(releaseEndedSources).toHaveBeenCalledTimes(1);
@@ -46,7 +62,7 @@ describe('review worker activation', () => {
     expect(drain.mock.calls[0][2].aborted).toBe(true);
     jest.advanceTimersByTime(60_000);
     expect(drain).toHaveBeenCalledTimes(1);
-    expect(handlers.has('review:discover')).toBe(false);
+    expect(handlers.has('review:sync')).toBe(false);
     let stopped = false;
     const waiting = handle?.awaitStopped().then(() => { stopped = true; });
     await Promise.resolve();
@@ -72,16 +88,18 @@ describe('review worker activation', () => {
       drain: async () => 0, startupPoll: async () => 0, reconcileStartup: async () => 0, releaseEndedSources: async () => 0, lastPollAt: async () => null, pollAndRecord,
     } });
     scope.register(REVIEW_CORE_TOKENS.SETTINGS_STORE, { useValue: { getSettings: async () => ({ repositories: repos, pollMinutes: 10 }) } });
-    scope.register(CRON_TOKENS.CRON_JOB_STORE, { useValue: { upsert: jest.fn() } });
+    scope.register(CRON_TOKENS.CRON_JOB_STORE, { useValue: { upsert: jest.fn(), get: () => null, delete: () => false } });
     scope.register(CRON_TOKENS.CRON_HANDLER_REGISTRY, { useValue: {
       has: () => false, register: (name: string, fn: (context: { signal: AbortSignal }) => Promise<unknown>) => { handlers.set(name, fn); },
       unregister: jest.fn(),
     } });
     const logger = { error: jest.fn() };
+    bindSchedule(scope, logger);
     const handle = await startReviewWorker(scope, new AbortController().signal, logger);
-    const handler = handlers.get('review:discover');
+    const handler = handlers.get('review:sync');
     expect(handler).toBeDefined();
     await handler?.({ signal: new AbortController().signal });
+    await new Promise((resolve) => setImmediate(resolve));
     // The worker passes strict identities, never the full settings entry.
     expect(pollAndRecord).toHaveBeenCalledWith({ owner: 'One', name: 'Alpha' });
     expect(pollAndRecord).toHaveBeenCalledWith({ owner: 'Two', name: 'Beta' });
@@ -98,10 +116,11 @@ describe('review worker activation', () => {
         drain: async () => 0, startupPoll, reconcileStartup: async () => 0, releaseEndedSources: async () => 0, lastPollAt: async () => null, pollAndRecord: async () => 0,
       } });
       scope.register(REVIEW_CORE_TOKENS.SETTINGS_STORE, { useValue: { getSettings: async () => ({ repositories: [repo] }) } });
-      scope.register(CRON_TOKENS.CRON_JOB_STORE, { useValue: { upsert: jest.fn() } });
+      scope.register(CRON_TOKENS.CRON_JOB_STORE, { useValue: { upsert: jest.fn(), get: () => null, delete: () => false } });
       scope.register(CRON_TOKENS.CRON_HANDLER_REGISTRY, { useValue: {
         has: () => false, register: jest.fn(), unregister: jest.fn(),
       } });
+      bindSchedule(scope, logger);
       const handle = await startReviewWorker(scope, new AbortController().signal, logger);
       handle?.dispose();
       await handle?.awaitStopped();

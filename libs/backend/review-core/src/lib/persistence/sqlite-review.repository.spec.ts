@@ -29,6 +29,27 @@ function setup() {
 }
 
 describe('SqliteReviewRepository', () => {
+  it('syncs only changed GitHub thread resolution into supported finding states', async () => {
+    const { db, repository } = setup();
+    const target = head(1, 'a');
+    const findingId = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+    try {
+      await repository.enqueueDiscovered(target, at(0));
+      const now = Date.UTC(2026, 0, 1);
+      db.prepare(`INSERT INTO review_findings (finding_id, repo_id, pr_number, path, category, status, severity,
+        confidence, payload_json, first_head_sha, last_head_sha, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(findingId,
+        'hive-academy/ptahcode', 1, 'src/a.ts', 'functional', 'open', 'Major', 0.9, '{}',
+        target.headSha, target.headSha, now, now);
+      expect(await repository.syncFindingResolution(target.repo, 1, findingId, false)).toBe(false);
+      expect(await repository.syncFindingResolution(target.repo, 1, findingId, true)).toBe(true);
+      expect(await repository.syncFindingResolution(target.repo, 1, findingId, true)).toBe(false);
+      expect(db.prepare('SELECT status FROM review_findings WHERE finding_id = ?').get(findingId)).toEqual({ status: 'addressed' });
+      expect(await repository.syncFindingResolution(target.repo, 1, findingId, false)).toBe(true);
+      expect(await repository.syncFindingResolution(target.repo, 1, findingId, false)).toBe(false);
+      expect(db.prepare('SELECT status FROM review_findings WHERE finding_id = ?').get(findingId)).toEqual({ status: 'reopened' });
+    } finally { db.close(); }
+  });
   it.each([[true, 1], [false, 0]])('persists automatic dry-run mode %s as %i', async (dryRun, stored) => {
     const { db, repository } = setup();
     try {
