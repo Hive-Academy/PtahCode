@@ -90,3 +90,14 @@ See `decisions.md` and the last section of this file (updated after each batch).
   3. Lower priority (session master): section title "Sessions" in place of "Sessions on build-01" (`remote-session-list.component.ts`).
   4. When PR #1042 and PR #1040 merge: `git merge origin/main` (no rebase). In `review-run-detail.component.ts`, take the findings panel of #1040 and remove the `findingRows` line. This task uses no `computed` there.
   5. To build the previews again: `node scripts/verify.mjs --exec --task inbox-preview -- npx nx copy-renderer-dev ptah-electron`, then the same with `npx playwright test --config=apps/ptah-electron-e2e/design-preview.config.ts`, then `git checkout -- .claude/commands .ptah/specs/TASK_2026_904/wave1/visual/sample-repo/.mcp.json`, then `node .ptah/specs/TASK_2026_913_865e/build-inbox-preview.mjs "$(pwd -W)" <machines|reviews>` and `ptah_artifact_publish` with the same title.
+
+## State at 08:50 UTC (2026-11-10), successor session (review 3 fixes)
+
+- Branch of this session: `feat/reviews-machines-inbox-layout-2` (worktree `feat-reviews-machines-inbox-layout-2-88c129eba45b`). Push with `git push origin HEAD:feat/reviews-machines-inbox-layout` (fast-forward only). No second pull request.
+- This worktree had no `node_modules`. A junction `node_modules` -> `D:\projects\ptah-extension\node_modules` was added (Jest maps `marked` to `<rootDir>/node_modules`). The previous worktree had the same link.
+- Job 1 done: the 3 findings of `code-review-3.md` are fixed (decisions 23 to 28).
+- Next exact step for a successor:
+  1. Job 2 (low priority): section title "Sessions" in `remote-session-list.component.ts:68` (now "Sessions on {{ machineName() }}"), spec, scoped verify, push.
+  2. Job 2: the Reviews detail changed visibly (coverage notes, lens cards). Build the Reviews preview again with step 5 of "State at 08:40 UTC" and publish it with the same title.
+  3. Job 3: wait for the parent. After PR #1042 merges and the parent says so: `git merge origin/main` (no rebase), scoped verify, push. `review-run-detail.component.ts` still uses no `computed` (PR #1040 removes that import).
+  4. Do not post `@coderabbitai review`. Poll CI with the REST API at intervals of 3 minutes or more.
