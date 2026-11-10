@@ -73,6 +73,7 @@ import {
   ChatMessageHandler,
   ArtifactMessageHandler,
   DisplayWindowSync,
+  GitWindowSync,
   ChatAttentionSourceService,
   ChatAttentionActionDispatcherService,
   ChatAttentionHostMessageHandler,
@@ -285,6 +286,7 @@ export const appConfig: ApplicationConfig = {
     // Detached Display window (TASK_2026_853_3401): `displayWindow:closed`
     // and child actions. It asks `displayWindow:status` on Electron at boot.
     { provide: MESSAGE_HANDLERS, useExisting: DisplayWindowSync, multi: true },
+    { provide: MESSAGE_HANDLERS, useExisting: GitWindowSync, multi: true },
     {
       provide: MESSAGE_HANDLERS,
       useExisting: ChatAttentionHostMessageHandler,

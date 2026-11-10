@@ -99,6 +99,7 @@ import {
   AuthRpcHandlers,
   DecisionModelCatalogRpcHandlers,
   GitWatchRpcHandlers,
+  GitWindowRpcHandlers,
   LanePlanLimitsRpcHandlers,
   PluginRpcHandlers,
   ProviderAccountRpcHandlers,
@@ -440,6 +441,15 @@ describe('Electron DI — shared RPC handler resolution', () => {
       instance = c.resolve(token);
     }).not.toThrow();
     expect(instance).toBeDefined();
+  });
+
+  it('registers exactly the Git window RPC family from a resolved handler', () => {
+    const handlers = c.resolve(GitWindowRpcHandlers);
+    const rpcHandler = c.resolve<{ registerMethod: jest.Mock }>(TOKENS.RPC_HANDLER);
+    rpcHandler.registerMethod.mockClear();
+    handlers.register();
+    const registered = rpcHandler.registerMethod.mock.calls.map(([method]) => method as string);
+    expect(registered.sort()).toEqual([...GitWindowRpcHandlers.METHODS].sort());
   });
 });
 

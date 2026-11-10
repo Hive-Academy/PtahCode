@@ -183,6 +183,7 @@ export type {
 } from './interfaces/artifact-store.interface';
 export { ArtifactStoreError } from './interfaces/artifact-store.interface';
 export type { IDisplayWindowHost } from './interfaces/display-window-host.interface';
+export type { GitWindowHost } from './interfaces/git-window-host.interface';
 export { DesktopOnlyDisplayWindowHost } from './display-window/desktop-only-display-window-host';
 export type { ITracer } from './interfaces/tracer.interface';
 export type {

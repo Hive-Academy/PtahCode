@@ -250,6 +250,7 @@ export class IpcBridge {
    *   call sites ignore it.
    */
   sendToRenderer(message: unknown): boolean {
+    this.childWindows.mirrorPush(message);
     const streamEvent = this.extractStreamEvent(message);
     if (streamEvent) {
       this.enqueueStreamEvent(streamEvent);
@@ -514,9 +515,9 @@ export class IpcBridge {
    * Refuse a channel the detached Display window may not use. Logged without
    * the payload; the window has no legitimate caller for these.
    */
-  private refuseDisplayWindow(channel: string): void {
+  private refuseChildWindow(channel: string, role: Exclude<IpcSenderRole, 'main'>): void {
     console.warn(
-      `[IpcBridge] Refused '${channel}' from the Display window: not in its IPC allowlist.`,
+      `[IpcBridge] Refused '${channel}' from the ${role} window: not in its IPC allowlist.`,
     );
   }
 
@@ -554,8 +555,8 @@ export class IpcBridge {
         if (!method) {
           // Fire-and-forget messages answer permission prompts and drive the
           // wizard; the Display window has no such caller.
-          if (role === 'display') {
-            this.refuseDisplayWindow('rpc (fire-and-forget)');
+          if (role !== 'main') {
+            this.refuseChildWindow('rpc (fire-and-forget)', role);
             return;
           }
           const messageType = msg['type'] as string | undefined;
@@ -564,14 +565,17 @@ export class IpcBridge {
           }
           return;
         }
-        if (role !== 'main' && !this.childWindows.allows(event.sender.id, method)) {
-          this.refuseDisplayWindow(`rpc ${method}`);
+        const refusal = role === 'main' ? null : this.childWindows.refusal(event.sender.id, method, params);
+        if (role !== 'main' && refusal !== null) {
+          this.refuseChildWindow(`rpc ${method}`, role);
           if (correlationId && !event.sender.isDestroyed()) {
             event.sender.send('to-renderer', {
               type: MESSAGE_TYPES.RPC_RESPONSE,
               correlationId,
               success: false,
-              error: `Method '${method}' is not available in the Display window`,
+              error: refusal === 'scope'
+                ? `Method '${method}' is outside the scope of the ${role === 'display' ? 'Display' : 'Git'} window`
+                : `Method '${method}' is not available in the ${role === 'display' ? 'Display' : 'Git'} window`,
             });
           }
           return;
@@ -586,6 +590,11 @@ export class IpcBridge {
           params,
           correlationId,
         });
+        if (role !== 'main') {
+          // A failed call is observed too (with no data): it is the end of its operation.
+          const data: unknown = response.success ? response.data : undefined;
+          this.childWindows.observeResult(event.sender.id, method, params, data);
+        }
         this.flushStreamQueue();
         // The renderer can be torn down (app quitting / window closed) while an
         // async RPC is in flight; sending to a destroyed sender throws
@@ -851,8 +860,8 @@ export class IpcBridge {
       if (role === null) return;
       // One shared blob belongs to the main renderer; the Display window
       // writing it would overwrite the main window's routes and layout.
-      if (role === 'display') {
-        this.refuseDisplayWindow('set-state');
+      if (role !== 'main') {
+        this.refuseChildWindow('set-state', role);
         return;
       }
       const workspacePath = this.activeStateWorkspace();
@@ -905,9 +914,9 @@ export class IpcBridge {
         if (role === null) {
           throw new Error('diag:cpu-profile refused: untrusted sender');
         }
-        if (role === 'display') {
-          this.refuseDisplayWindow('diag:cpu-profile');
-          throw new Error('diag:cpu-profile refused: Display window');
+        if (role !== 'main') {
+          this.refuseChildWindow('diag:cpu-profile', role);
+          throw new Error(`diag:cpu-profile refused: ${role === 'display' ? 'Display' : 'Git'} window`);
         }
         const capture = this.container.resolve<{
           captureFor(durationMs?: number): Promise<string>;
@@ -940,3 +949,9 @@ export class IpcBridge {
     console.log('[IpcBridge] IPC listeners disposed');
   }
 }
+
+
+
+
+
+

@@ -1,0 +1,507 @@
+/**
+ * PR #1038 review — the detached Git window at the host boundary.
+ *
+ * Finding 1: an allowed method name does not authorize a root. The child is
+ * bound to the scope the host acknowledged for it. Finding 2: the Git pushes
+ * of the host reach the registered Git child and the main window.
+ *
+ * The bridge and the Git window host are the real ones; only Electron is fake.
+ */
+
+import 'reflect-metadata';
+
+const listeners = new Map<string, (...args: unknown[]) => unknown>();
+
+jest.mock('electron', () => ({
+  ipcMain: {
+    on: (channel: string, listener: (...args: unknown[]) => unknown) => {
+      listeners.set(channel, listener);
+    },
+    removeAllListeners: (channel: string) => listeners.delete(channel),
+    handle: () => undefined,
+    removeHandler: () => undefined,
+  },
+}));
+jest.mock('../windows/window-guards', () => ({
+  installNavigationGuard: jest.fn(),
+  isOnScreen: () => true,
+}));
+
+import * as path from 'path';
+import { pathToFileURL } from 'url';
+import { container as rootContainer } from 'tsyringe';
+import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
+import { TOKENS } from '@ptah-extension/vscode-core';
+import { MESSAGE_TYPES, type GitWindowScope } from '@ptah-extension/shared';
+import { IpcBridge } from './ipc-bridge';
+import { ElectronGitWindowHost } from '../windows/git-window';
+import type {
+  DisplayChildWindow,
+  DisplayMainWindow,
+} from '../windows/display-window';
+
+const TRUSTED_DOCUMENT = path.resolve('/app/renderer/index.html');
+const MAIN_ID = 1;
+const GIT_ID = 5;
+const REPO_A = path.resolve('/work/repo-a');
+const REPO_B = path.resolve('/work/repo-b');
+const WORKTREE_A = path.resolve('/work/repo-a-wt');
+
+interface FakeSender {
+  readonly id: number;
+  readonly mainFrame: { readonly url: string };
+  readonly sent: unknown[];
+  send(channel: string, message: unknown): void;
+  isDestroyed(): boolean;
+}
+
+function makeSender(id: number, query = ''): FakeSender {
+  const sent: unknown[] = [];
+  return {
+    id,
+    mainFrame: { url: `${pathToFileURL(TRUSTED_DOCUMENT).href}${query}` },
+    sent,
+    send: (_channel: string, message: unknown) => {
+      sent.push(message);
+    },
+    isDestroyed: () => false,
+  };
+}
+
+function scopeFor(repoRoot: string, workspaceRoot = repoRoot): GitWindowScope {
+  return {
+    version: 1,
+    sequence: 0,
+    workspaceRoot,
+    repoRoot,
+    mode: 'follow-session',
+    active: null,
+    pinnedTabId: null,
+    open: [],
+    unresolved: false,
+  };
+}
+
+describe('IpcBridge — detached Git window scope and pushes', () => {
+  let bridge: IpcBridge;
+  let host: ElectronGitWindowHost;
+  let handleMessage: jest.Mock;
+  let main: FakeSender;
+  let git: FakeSender;
+  let closeChild: () => void;
+
+  beforeEach(async () => {
+    listeners.clear();
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    handleMessage = jest.fn(async (request: { method: string }) => ({
+      success: true,
+      data:
+        request.method === 'git:worktrees'
+          ? { worktrees: [{ path: REPO_A }, { path: WORKTREE_A }] }
+          : request.method === 'git:addWorktree'
+            ? { success: true, pending: true }
+            : { method: request.method },
+    }));
+    const container = rootContainer.createChildContainer();
+    container.register(TOKENS.RPC_HANDLER, { useValue: { handleMessage } });
+    container.register(PLATFORM_TOKENS.WORKSPACE_STATE_STORAGE, {
+      useValue: { get: () => ({}), update: async () => undefined },
+    });
+    main = makeSender(MAIN_ID);
+    git = makeSender(GIT_ID, '?ptahWindow=git');
+    bridge = new IpcBridge(
+      container,
+      () => ({
+        webContents: {
+          id: MAIN_ID,
+          send: main.send,
+          isDestroyed: () => false,
+        },
+      }),
+      [TRUSTED_DOCUMENT],
+    );
+    bridge.initialize();
+
+    let destroyed = false;
+    const windowListeners = new Map<string, Array<() => void>>();
+    const listen = (event: string, listener: () => void): void => {
+      windowListeners.set(event, [
+        ...(windowListeners.get(event) ?? []),
+        listener,
+      ]);
+    };
+    const emit = (event: string): void => {
+      for (const listener of windowListeners.get(event) ?? []) listener();
+    };
+    const child = {
+      webContents: {
+        id: GIT_ID,
+        send: git.send,
+        isDestroyed: () => destroyed,
+        on: () => undefined,
+      },
+      isDestroyed: () => destroyed,
+      isMinimized: () => false,
+      restore: () => undefined,
+      focus: () => undefined,
+      close: () => {
+        if (destroyed) return;
+        emit('close');
+        destroyed = true;
+        emit('closed');
+      },
+      getBounds: () => ({ x: 0, y: 0, width: 900, height: 700 }),
+      on: listen,
+      once: listen,
+      loadFile: async () => undefined,
+    };
+    closeChild = child.close;
+    const mainWindow: DisplayMainWindow = {
+      isDestroyed: () => false,
+      getBounds: () => ({ x: 0, y: 0, width: 900, height: 700 }),
+      once: () => undefined,
+      removeListener: () => undefined,
+    };
+    host = new ElectronGitWindowHost({
+      getMainWindow: () => mainWindow,
+      bridge,
+      resolveStateStorage: () => undefined,
+      appDir: '/app',
+      logger: { error: jest.fn() },
+      createWindow: () => child as DisplayChildWindow,
+    });
+    expect(await host.open()).toEqual({ ok: true });
+    expect(host.publishScope(scopeFor(REPO_A)).accepted).toBe(true);
+    git.sent.length = 0;
+    main.sent.length = 0;
+  });
+
+  afterEach(() => {
+    bridge.dispose();
+    jest.restoreAllMocks();
+  });
+
+  async function rpc(
+    sender: FakeSender,
+    method: string,
+    params: unknown,
+  ): Promise<void> {
+    await listeners.get('rpc')?.(
+      { sender, senderFrame: sender.mainFrame },
+      {
+        type: 'rpc:call',
+        payload: { method, params, correlationId: `c-${method}` },
+      },
+    );
+  }
+
+  const outOfScope = (method: string) => ({
+    type: MESSAGE_TYPES.RPC_RESPONSE,
+    correlationId: `c-${method}`,
+    success: false,
+    error: `Method '${method}' is outside the scope of the Git window`,
+  });
+
+  it.each([
+    'git:discard',
+    'git:reviewFile',
+    'git:commit',
+    'git:stage',
+    'git:push',
+    'git:info',
+  ])(
+    'refuses %s from the child for a different registered repository',
+    async (method) => {
+      await rpc(git, method, { workspaceRoot: REPO_B, paths: ['a.ts'] });
+      expect(handleMessage).not.toHaveBeenCalled();
+      expect(git.sent).toEqual([outOfScope(method)]);
+    },
+  );
+
+  it('refuses a child call that names no root (the host would use the active folder)', async () => {
+    await rpc(git, 'git:discard', { paths: ['a.ts'] });
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(git.sent).toEqual([outOfScope('git:discard')]);
+  });
+
+  it('routes a child call for the acknowledged repository', async () => {
+    await rpc(git, 'git:discard', { workspaceRoot: REPO_A, paths: ['a.ts'] });
+    expect(handleMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ method: 'git:discard' }),
+    );
+    expect(git.sent).toEqual([
+      expect.objectContaining({
+        correlationId: 'c-git:discard',
+        success: true,
+      }),
+    ]);
+  });
+
+  it('follows a new acknowledged scope and refuses the previous repository', async () => {
+    expect(host.publishScope(scopeFor(REPO_B)).accepted).toBe(true);
+    git.sent.length = 0;
+    await rpc(git, 'git:discard', { workspaceRoot: REPO_A, paths: ['a.ts'] });
+    expect(handleMessage).not.toHaveBeenCalled();
+    await rpc(git, 'git:discard', { workspaceRoot: REPO_B, paths: ['a.ts'] });
+    expect(handleMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets the child read, but not change, a worktree the host listed for its repository', async () => {
+    await rpc(git, 'git:info', { workspaceRoot: WORKTREE_A });
+    expect(handleMessage).not.toHaveBeenCalled();
+    await rpc(git, 'git:worktrees', { workspaceRoot: REPO_A });
+    handleMessage.mockClear();
+    await rpc(git, 'git:info', { workspaceRoot: WORKTREE_A });
+    expect(handleMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ method: 'git:info' }),
+    );
+    handleMessage.mockClear();
+    await rpc(git, 'git:discard', {
+      workspaceRoot: WORKTREE_A,
+      paths: ['a.ts'],
+    });
+    expect(handleMessage).not.toHaveBeenCalled();
+  });
+
+  it('refuses file and editor calls outside the acknowledged repository', async () => {
+    await rpc(git, 'file:saveContent', {
+      path: path.join(REPO_B, 'a.ts'),
+      content: '',
+      expectedSha256: 'x',
+    });
+    await rpc(git, 'file:viewContent', { path: 'a.ts', workspaceRoot: REPO_B });
+    await rpc(git, 'file:viewContent', {
+      path: path.join(REPO_A, '..', 'repo-b', 'a.ts'),
+      workspaceRoot: REPO_A,
+    });
+    await rpc(git, 'editor:openWorkspace', { target: 'vscode', root: REPO_B });
+    await rpc(git, 'git:watchRoots', { leaseId: 'l', roots: [REPO_A, REPO_B] });
+    expect(handleMessage).not.toHaveBeenCalled();
+    await rpc(git, 'file:saveContent', {
+      path: path.join(REPO_A, 'a.ts'),
+      content: '',
+      expectedSha256: 'x',
+    });
+    await rpc(git, 'git:watchRoots', { leaseId: 'l', roots: [REPO_A] });
+    expect(handleMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses every scoped call after the child closed', async () => {
+    closeChild();
+    await rpc(git, 'git:discard', { workspaceRoot: REPO_A, paths: ['a.ts'] });
+    expect(handleMessage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['settings:set', { key: 'agentOrchestration.codexWebSearch', value: true }],
+    ['settings:set', { key: 'diff.renderSideBySide', value: 'yes' }],
+    ['settings:get', { key: 'agentOrchestration.codexWebSearch' }],
+  ])(
+    'refuses %s from the child for a setting that is not a Git view preference',
+    async (method, params) => {
+      await rpc(git, method, params);
+      expect(handleMessage).not.toHaveBeenCalled();
+      expect(git.sent).toEqual([outOfScope(method)]);
+    },
+  );
+
+  it.each([
+    ['settings:get', { key: 'diff.renderSideBySide' }],
+    ['settings:set', { key: 'diff.renderSideBySide', value: false }],
+    ['settings:get', { key: 'editorLauncher.lastTarget' }],
+    ['settings:set', { key: 'editorLauncher.lastTarget', value: 'cursor' }],
+  ])('routes %s from the child for a Git view preference', async (method, params) => {
+    await rpc(git, method, params);
+    expect(handleMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ method, params }),
+    );
+  });
+
+  it('lets the child pin only the active tab of its scope, not another open tab', async () => {
+    const candidate = {
+      tabId: 't1', sessionId: 's-a', sessionName: 'a', organizationWorktreePath: null,
+      organizationResolved: true, agentOriginWorktreePath: null, sessionCwd: REPO_A,
+    };
+    const other = { ...candidate, tabId: 't2', sessionId: 's-b', sessionCwd: REPO_B };
+    expect(host.publishScope({ ...scopeFor(REPO_A), active: candidate, open: [candidate, other] }).accepted).toBe(true);
+    git.sent.length = 0;
+    await rpc(git, 'gitWindow:setMode', { mode: 'pinned', tabId: 't2' });
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(git.sent).toEqual([outOfScope('gitWindow:setMode')]);
+    await rpc(git, 'gitWindow:setMode', { mode: 'pinned', tabId: 't1' });
+    await rpc(git, 'gitWindow:setMode', { mode: 'follow-session', tabId: null });
+    expect(handleMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the main window free to write an unrelated setting', async () => {
+    const params = { key: 'agentOrchestration.codexWebSearch', value: true };
+    await rpc(main, 'settings:set', params);
+    expect(handleMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ method: 'settings:set', params }),
+    );
+  });
+
+  it('keeps the main window free to use another registered repository', async () => {
+    await rpc(main, 'git:discard', { workspaceRoot: REPO_B, paths: ['a.ts'] });
+    expect(handleMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ method: 'git:discard' }),
+    );
+  });
+
+  it('delivers the Git pushes of the scope to the main window and to the Git child', async () => {
+    await rpc(git, 'git:addWorktree', {
+      workspaceRoot: REPO_A,
+      branch: 'f',
+      operationId: 'op-child',
+    });
+    git.sent.length = 0;
+    const file = path.join(REPO_A, 'a.ts');
+    const pushes = [
+      { type: MESSAGE_TYPES.GIT_STATUS_UPDATE, payload: { workspaceRoot: REPO_A } },
+      { type: MESSAGE_TYPES.FILE_CONTENT_CHANGED, payload: { filePaths: [file], truncated: false } },
+      { type: MESSAGE_TYPES.GIT_OPERATION_OUTPUT, payload: { operationId: 'op-child', chunk: 'x' } },
+      { type: 'git:worktreeChanged', payload: { action: 'created', path: path.join(REPO_A, '.wt', 'x') } },
+    ];
+    for (const push of pushes) expect(bridge.sendToRenderer(push)).toBe(true);
+    expect(main.sent).toEqual(pushes);
+    expect(git.sent).toEqual(pushes);
+  });
+
+  it('keeps the pushes of another repository and of another window away from the child', () => {
+    const other = path.join(REPO_B, 'secret.ts');
+    const pushes = [
+      { type: MESSAGE_TYPES.GIT_STATUS_UPDATE, payload: { workspaceRoot: REPO_B } },
+      { type: MESSAGE_TYPES.GIT_STATUS_UPDATE, payload: {} },
+      { type: MESSAGE_TYPES.FILE_CONTENT_CHANGED, payload: { filePaths: [other], truncated: false } },
+      { type: MESSAGE_TYPES.GIT_OPERATION_OUTPUT, payload: { operationId: 'op-main', chunk: 'x' } },
+      { type: 'git:worktreeChanged', payload: { action: 'created', operationId: 'op-main' } },
+      { type: 'git:worktreeChanged', payload: { action: 'removed', path: path.join(REPO_B, '.wt', 'x') } },
+    ];
+    for (const push of pushes) bridge.sendToRenderer(push);
+    expect(main.sent).toEqual(pushes);
+    expect(git.sent).toEqual([]);
+
+    const mixed = {
+      type: MESSAGE_TYPES.FILE_CONTENT_CHANGED,
+      payload: { filePaths: [other, path.join(REPO_A, 'a.ts')], truncated: false },
+    };
+    bridge.sendToRenderer(mixed);
+    expect(git.sent).toEqual([
+      {
+        type: MESSAGE_TYPES.FILE_CONTENT_CHANGED,
+        payload: { filePaths: [path.join(REPO_A, 'a.ts')], truncated: false },
+      },
+    ]);
+  });
+
+  it('lets the child cancel only an operation that it started', async () => {
+    await rpc(git, 'git:cancelOperation', { operationId: 'op-main' });
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(git.sent).toEqual([outOfScope('git:cancelOperation')]);
+    await rpc(git, 'git:addWorktree', { workspaceRoot: REPO_B, branch: 'f', operationId: 'op-refused' });
+    await rpc(git, 'git:cancelOperation', { operationId: 'op-refused' });
+    expect(handleMessage).not.toHaveBeenCalled();
+    await rpc(git, 'git:addWorktree', { workspaceRoot: REPO_A, branch: 'f', operationId: 'op-child' });
+    await rpc(git, 'git:cancelOperation', { operationId: 'op-child' });
+    expect(handleMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not let a read claim the operation of another window', async () => {
+    await rpc(git, 'git:info', { workspaceRoot: REPO_A, operationId: 'op-main' });
+    await rpc(git, 'git:push', { workspaceRoot: REPO_A, operationId: 'op-main' });
+    handleMessage.mockClear();
+    git.sent.length = 0;
+    await rpc(git, 'git:cancelOperation', { operationId: 'op-main' });
+    expect(handleMessage).not.toHaveBeenCalled();
+    bridge.sendToRenderer({
+      type: MESSAGE_TYPES.GIT_OPERATION_OUTPUT,
+      payload: { operationId: 'op-main', chunk: 'x' },
+    });
+    expect(git.sent).toEqual([outOfScope('git:cancelOperation')]);
+  });
+
+  it('drops the operation of the child when the operation ends', async () => {
+    // The commit result is not `pending`: the operation ended with the response.
+    await rpc(git, 'git:commit', { workspaceRoot: REPO_A, message: 'm', operationId: 'op-done' });
+    await rpc(git, 'git:addWorktree', { workspaceRoot: REPO_A, branch: 'f', operationId: 'op-wt' });
+    // A refused or failed call (for example an ID that runs in another window) keeps no record.
+    handleMessage.mockResolvedValueOnce({ success: false, error: 'refused' });
+    await rpc(git, 'git:addWorktree', { workspaceRoot: REPO_A, branch: 'g', operationId: 'op-failed' });
+    handleMessage.mockClear();
+    await rpc(git, 'git:cancelOperation', { operationId: 'op-failed' });
+    expect(handleMessage).not.toHaveBeenCalled();
+    const ended = { type: 'git:worktreeChanged', payload: { action: 'created', operationId: 'op-wt' } };
+    git.sent.length = 0;
+    bridge.sendToRenderer(ended);
+    bridge.sendToRenderer(ended);
+    expect(git.sent).toEqual([ended]);
+    handleMessage.mockClear();
+    await rpc(git, 'git:cancelOperation', { operationId: 'op-done' });
+    await rpc(git, 'git:cancelOperation', { operationId: 'op-wt' });
+    expect(handleMessage).not.toHaveBeenCalled();
+  });
+
+  it('revokes the operations of the child when the scope moves to another repository', async () => {
+    await rpc(git, 'git:addWorktree', { workspaceRoot: REPO_A, branch: 'f', operationId: 'op-a' });
+    expect(host.publishScope(scopeFor(REPO_B)).accepted).toBe(true);
+    handleMessage.mockClear();
+    git.sent.length = 0;
+    bridge.sendToRenderer({
+      type: MESSAGE_TYPES.GIT_OPERATION_OUTPUT,
+      payload: { operationId: 'op-a', chunk: 'x' },
+    });
+    bridge.sendToRenderer({ type: 'git:worktreeChanged', payload: { action: 'created', operationId: 'op-a' } });
+    expect(git.sent).toEqual([]);
+    await rpc(git, 'git:cancelOperation', { operationId: 'op-a' });
+    expect(handleMessage).not.toHaveBeenCalled();
+    // The record does not come back with the first scope.
+    expect(host.publishScope(scopeFor(REPO_A)).accepted).toBe(true);
+    await rpc(git, 'git:cancelOperation', { operationId: 'op-a' });
+    expect(handleMessage).not.toHaveBeenCalled();
+  });
+
+  it('refuses the removal of a worktree that is not in the scope and not listed', async () => {
+    await rpc(git, 'git:removeWorktree', { workspaceRoot: REPO_A, path: WORKTREE_A });
+    await rpc(git, 'git:removeWorktree', { workspaceRoot: REPO_A, path: path.join(REPO_B, '.wt', 'x') });
+    await rpc(git, 'git:removeWorktree', { workspaceRoot: REPO_A });
+    expect(handleMessage).not.toHaveBeenCalled();
+    await rpc(git, 'git:worktrees', { workspaceRoot: REPO_A });
+    await rpc(git, 'git:removeWorktree', { workspaceRoot: REPO_A, path: WORKTREE_A });
+    await rpc(git, 'git:removeWorktree', { workspaceRoot: REPO_A, path: path.join(REPO_A, '.wt', 'x') });
+    expect(handleMessage).toHaveBeenCalledTimes(3);
+  });
+
+  it('refuses a worktree target outside the acknowledged repository', async () => {
+    await rpc(git, 'git:addWorktree', {
+      workspaceRoot: REPO_A,
+      branch: 'f',
+      path: path.join(REPO_B, 'new-worktree'),
+    });
+    expect(handleMessage).not.toHaveBeenCalled();
+    await rpc(git, 'git:addWorktree', { workspaceRoot: REPO_A, branch: 'f' });
+    await rpc(git, 'git:addWorktree', {
+      workspaceRoot: REPO_A,
+      branch: 'g',
+      path: path.join(REPO_A, '.wt', 'g'),
+    });
+    expect(handleMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps unrelated pushes main-only and stops the Git pushes when the child closes', () => {
+    const unrelated = { type: 'session:unrelated-push', payload: {} };
+    bridge.sendToRenderer(unrelated);
+    expect(main.sent).toEqual([unrelated]);
+    expect(git.sent).toEqual([]);
+
+    closeChild();
+    main.sent.length = 0;
+    const status = {
+      type: MESSAGE_TYPES.GIT_STATUS_UPDATE,
+      payload: { workspaceRoot: REPO_A },
+    };
+    expect(bridge.sendToRenderer(status)).toBe(true);
+    expect(git.sent).toEqual([]);
+    expect(main.sent).toEqual(expect.arrayContaining([status]));
+  });
+});

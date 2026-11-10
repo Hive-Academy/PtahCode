@@ -161,6 +161,19 @@ describe('Electron RPC surface', () => {
       ]),
     );
   });
+
+  it('serves exactly the six Git window methods', () => {
+    const methods = [
+      'gitWindow:open',
+      'gitWindow:close',
+      'gitWindow:status',
+      'gitWindow:publishScope',
+      'gitWindow:getScope',
+      'gitWindow:setMode',
+    ];
+    expect(surface.registered.filter((method) => method.startsWith('gitWindow:')).sort()).toEqual([...methods].sort());
+    expect(surface.excluded.some((method) => method.startsWith('gitWindow:'))).toBe(false);
+  });
 });
 
 it('includes the complete Electron runtime binding in the DI census', () => {

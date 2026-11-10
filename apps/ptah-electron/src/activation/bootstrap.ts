@@ -52,6 +52,7 @@ import { runSessionStoreMigration } from './session-store-migration';
 import { IpcBridge } from '../ipc/ipc-bridge';
 import { ElectronWebviewManagerAdapter } from '../ipc/webview-manager-adapter';
 import { ElectronDisplayWindowHost } from '../windows/display-window';
+import { ElectronGitWindowHost } from '../windows/git-window';
 import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
 import type { IHostAttentionIngress } from '@ptah-extension/platform-core';
 import { MESSAGE_TYPES } from '@ptah-extension/shared';
@@ -637,6 +638,18 @@ async function runBootstrap(
           ? container.resolve<IStateStorage>(PLATFORM_TOKENS.STATE_STORAGE)
           : undefined,
       appDir: __dirname,
+    }),
+  });
+  container.register(PLATFORM_TOKENS.GIT_WINDOW_HOST, {
+    useValue: new ElectronGitWindowHost({
+      getMainWindow,
+      bridge: ipcBridge,
+      resolveStateStorage: () =>
+        container.isRegistered(PLATFORM_TOKENS.STATE_STORAGE)
+          ? container.resolve<IStateStorage>(PLATFORM_TOKENS.STATE_STORAGE)
+          : undefined,
+      appDir: __dirname,
+      logger: container.resolve<Logger>(TOKENS.LOGGER),
     }),
   });
   attachElectronHostAttention(

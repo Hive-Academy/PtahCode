@@ -32,6 +32,7 @@ import {
   SessionHandoffCloser,
   ArtifactRpcHandlers,
   DisplayWindowRpcHandlers,
+  GitWindowRpcHandlers,
   ChatRpcHandlers,
   ConfigRpcHandlers,
   ConfigScopeRpcHandlers,
@@ -111,6 +112,7 @@ export function registerPhase4Handlers(
   container.registerSingleton(SessionRpcHandlers);
   container.registerSingleton(ArtifactRpcHandlers);
   container.registerSingleton(DisplayWindowRpcHandlers);
+  container.registerSingleton(GitWindowRpcHandlers);
   container.registerSingleton(ChatRpcHandlers);
   container.registerSingleton(ConfigRpcHandlers);
   container.registerSingleton(AuthRpcHandlers);
@@ -165,6 +167,7 @@ export function registerPhase4Handlers(
       'SessionRpcHandlers',
       'ArtifactRpcHandlers',
       'DisplayWindowRpcHandlers',
+      'GitWindowRpcHandlers',
       'ChatRpcHandlers',
       'ConfigRpcHandlers',
       'AuthRpcHandlers',

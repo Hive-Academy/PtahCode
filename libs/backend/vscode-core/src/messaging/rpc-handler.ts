@@ -47,6 +47,7 @@ export const ALLOWED_METHOD_PREFIXES = [
   'artifacts:',
   'attention:',
   'displayWindow:',
+  'gitWindow:',
   'session:',
   'chat:',
   'file:',

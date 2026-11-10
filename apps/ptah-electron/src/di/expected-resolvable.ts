@@ -18,6 +18,7 @@ import {
   GitWatchRpcHandlers,
   RecentWorkspacesService,
   DisplayWindowRpcHandlers,
+  GitWindowRpcHandlers,
   ReviewRpcHandlers,
 } from '@ptah-extension/rpc-handlers';
 import { CHAT_TOKENS } from '@ptah-extension/rpc-handlers';
@@ -49,6 +50,7 @@ export const EXPECTED_RESOLVABLE = [
   GitWatchRpcHandlers,
   RecentWorkspacesService,
   DisplayWindowRpcHandlers,
+  GitWindowRpcHandlers,
   ReviewRpcHandlers,
 ] as const;
 

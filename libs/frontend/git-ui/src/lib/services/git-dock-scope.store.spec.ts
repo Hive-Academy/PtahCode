@@ -5,6 +5,8 @@
  * the five git services.
  */
 import { computed, signal } from '@angular/core';
+import { GIT_WINDOW_CONTEXT, type GitWindowContext } from '../git-window-context.token';
+import type { GitWindowScope } from '@ptah-extension/shared';
 import { TestBed } from '@angular/core/testing';
 import {
   GIT_SESSION_SCOPE_SOURCE,
@@ -78,11 +80,12 @@ describe('GitDockScopeStore', () => {
     };
   }
 
-  function setup(withSource = true): GitDockScopeStore {
+  function setup(withSource = true, windowContext?: GitWindowContext): GitDockScopeStore {
     calls = [];
     leaseUpdates = [];
     TestBed.configureTestingModule({
       providers: [
+        ...(windowContext ? [{ provide: GIT_WINDOW_CONTEXT, useValue: windowContext }] : []),
         {
           provide: VSCodeService,
           useValue: {
@@ -330,6 +333,40 @@ describe('GitDockScopeStore', () => {
     expect(switches()).toEqual([]);
   });
 
+  it('restores a pin to a closed tab with its retained root from a snapshot', () => {
+    const store = setup();
+    store.setWorkspace(WS);
+    activeTabId.set('c');
+    TestBed.tick();
+    store.showSession('a');
+    TestBed.tick();
+    tabs.update((all) => {
+      const next = { ...all };
+      delete next['a'];
+      return next;
+    });
+    TestBed.tick();
+    const snapshot = store.pinSnapshot();
+
+    store.unpin();
+    TestBed.tick();
+    expect(store.mode()).toBe('follow-session');
+    // The tab is closed: showSession has no candidate and cannot restore the pin.
+    store.showSession('a');
+    expect(store.mode()).toBe('follow-session');
+
+    store.restorePin(snapshot);
+    TestBed.tick();
+    expect(store.scope()).toMatchObject({
+      mode: 'pinned',
+      root: '/wt/a',
+      session: { tabId: 'a', name: 'Session a', closed: true },
+    });
+
+    store.restorePin(null);
+    expect(store.mode()).toBe('follow-session');
+  });
+
   it('tears the closed folder down in every service, clears its pin and releases the session root', () => {
     const store = setup();
     store.setWorkspace(WS);
@@ -406,5 +443,85 @@ describe('GitDockScopeStore', () => {
 
     expect(store.scope().root).toBe('/wt/a');
     expect(leaseUpdates.at(-1)).toEqual(['/wt/a', '/wt/a', '/wt/b']);
+  });
+
+  it('applies validated child snapshots in sequence and keeps mode changes authoritative', async () => {
+    const setMode = jest.fn(async () => false);
+    const context: GitWindowContext = {
+      role: 'child',
+      applyCandidates: (scope) => {
+        tabs.set(Object.fromEntries(scope.open.map((item) => [item.tabId, item])));
+        activeTabId.set(scope.active?.tabId ?? null);
+      },
+      setMode,
+    };
+    const store = setup(true, context);
+    const gate = TestBed.inject(GitDockMutationGate);
+    expect(store.scope().unresolved).toBe(true);
+    expect(gate.blockedReason()).not.toBeNull();
+    const a: GitWindowScope = {
+      version: 1, sequence: 1, workspaceRoot: WS, repoRoot: '/wt/a',
+      mode: 'follow-session', active: candidate('a', { organizationWorktreePath: '/wt/a' }),
+      pinnedTabId: null, open: [candidate('a', { organizationWorktreePath: '/wt/a' })], unresolved: false,
+    };
+    expect(store.applyWindowScope(a)).toBe(true);
+    expect(store.scope().root).toBe('/wt/a');
+    expect(store.scope().unresolved).toBe(false);
+    expect(gate.blockedReason()).toBeNull();
+    const b: GitWindowScope = {
+      ...a, sequence: 2, repoRoot: '/wt/b', active: candidate('b', { agentOriginWorktreePath: '/wt/b' }),
+      open: [candidate('b', { agentOriginWorktreePath: '/wt/b' }), ...a.open],
+    };
+    expect(store.applyWindowScope(b)).toBe(true);
+    expect(store.scope().root).toBe('/wt/b');
+    expect(store.applyWindowScope(a)).toBe(false);
+    expect(store.scope().root).toBe('/wt/b');
+    expect(store.applyWindowScope({ ...b, sequence: 3, mode: 'pinned', pinnedTabId: null })).toBe(false);
+    expect(store.scope().root).toBe('/wt/b');
+    const request = store.requestWindowMode(true);
+    expect(setMode).toHaveBeenCalledWith('pinned', 'b');
+    expect(store.mode()).toBe('follow-session');
+    await request;
+    expect(store.mode()).toBe('follow-session');
+    expect(store.applyWindowScope({ ...b, sequence: 3, mode: 'pinned', pinnedTabId: 'b' })).toBe(true);
+    expect(store.scope().session?.tabId).toBe('b');
+    expect(store.mode()).toBe('pinned');
+    expect(store.applyWindowScope({ ...b, sequence: 4 })).toBe(true);
+    expect(store.mode()).toBe('follow-session');
+    expect(store.applyWindowScope({ ...b, sequence: 5, mode: 'pinned', pinnedTabId: 'a', repoRoot: '/wt/a' })).toBe(true);
+    expect(store.scope().session?.tabId).toBe('a');
+    expect(store.mode()).toBe('pinned');
+    expect(store.applyWindowScope({ ...b, sequence: 6, unresolved: true })).toBe(true);
+    expect(gate.blockedReason()).not.toBeNull();
+    expect(store.applyWindowScope({ ...b, sequence: 7, repoRoot: '/wrong' })).toBe(true);
+    expect(gate.blockedReason()).not.toBeNull();
+  });
+
+  it('restores a closed pinned tab from the host root in a fresh child', () => {
+    const context: GitWindowContext = {
+      role: 'child',
+      applyCandidates: (scope) => {
+        tabs.set(Object.fromEntries(scope.open.map((item) => [item.tabId, item])));
+        activeTabId.set(scope.active?.tabId ?? null);
+      },
+      setMode: jest.fn(async () => true),
+    };
+    const store = setup(true, context);
+    const gate = TestBed.inject(GitDockMutationGate);
+    const b = candidate('b', { agentOriginWorktreePath: '/wt/b' });
+    const closed: GitWindowScope = {
+      version: 1, sequence: 1, workspaceRoot: WS, repoRoot: '/wt/a',
+      mode: 'pinned', active: b, pinnedTabId: 'a', open: [b], unresolved: false,
+    };
+
+    expect(store.applyWindowScope(closed)).toBe(true);
+    expect(store.scope()).toMatchObject({
+      mode: 'pinned', root: '/wt/a', unresolved: false,
+      session: { tabId: 'a', closed: true },
+    });
+    expect(gate.blockedReason()).toBeNull();
+    expect(switches()).toContain('status.switch:/wt/a');
+    expect(store.applyWindowScope({ ...closed, sequence: 2, repoRoot: '/wt/a' })).toBe(true);
+    expect(store.scope().root).toBe('/wt/a');
   });
 });

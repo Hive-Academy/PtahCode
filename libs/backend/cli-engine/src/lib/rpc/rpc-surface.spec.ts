@@ -142,6 +142,19 @@ describe('CLI RPC surface', () => {
     );
   });
 
+  it('serves the gitWindow namespace with an unbound host', () => {
+    const methods = [
+      'gitWindow:open',
+      'gitWindow:close',
+      'gitWindow:status',
+      'gitWindow:publishScope',
+      'gitWindow:getScope',
+      'gitWindow:setMode',
+    ];
+    expect(surface.registered.filter((method) => method.startsWith('gitWindow:')).sort()).toEqual([...methods].sort());
+    expect(surface.excluded.some((method) => method.startsWith('gitWindow:'))).toBe(false);
+  });
+
   it('serves bound guidance and generation recovery methods', () => {
     expect(surface.registered).toEqual(
       expect.arrayContaining([
