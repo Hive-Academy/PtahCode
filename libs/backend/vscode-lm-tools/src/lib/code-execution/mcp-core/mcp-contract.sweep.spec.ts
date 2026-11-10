@@ -2544,8 +2544,8 @@ describe('MCP dispatcher contract sweep (TASK_2026_559 Batch 21, Task 21.1)', ()
       ptah_session_stop: 313,
       // TASK_2026_655, measured 2026-10-14: 685 chars; ceil(685 * 1.1) + 10.
       ptah_session_handoff: 764,
-      // TASK_2026_898, measured 2026-11-09: 149 chars; ceil(149 * 1.1) + 10.
-      ptah_session_handoff_ack: 174,
+      // TASK_2026_914, measured 2026-11-10: 211 chars; ceil(211 * 1.1) + 10.
+      ptah_session_handoff_ack: 243,
       ptah_task_close_out: 201,
       ptah_task_close_out_status: 125,
       ptah_task_cleanup_completed: 209,

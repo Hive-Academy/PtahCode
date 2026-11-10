@@ -69,6 +69,10 @@ your turn: the host ends this child and starts its successor in the same worktre
 
 Do no further work here.
 
+## Successor: accept the handoff
+
+Read the supplied HANDOFF.md and continue its Next steps. A successor child needs no acknowledgement. A top-level successor calls `ptah_session_handoff_ack` with the recorded predecessorSessionId and handoffPath. A `retryable-failure` includes a transient cause: retry at most twice more, a few seconds apart. A `refused` includes a cause requiring user action: do not retry; tell the user the reason and ask them to resolve it or close the old tab manually. On `closed` or `already-closed`, continue normally.
+
 ## Fallback
 
 If `ptah_session_handoff` is not available, or the call is refused (any code) or fails: do not

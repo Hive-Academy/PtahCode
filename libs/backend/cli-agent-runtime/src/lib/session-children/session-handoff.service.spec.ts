@@ -179,7 +179,7 @@ function makeHarness() {
       },
     ),
   };
-  const closer = { close: jest.fn(async () => true) };
+  const closer = { close: jest.fn(async () => ({ kind: 'closed' as const })) };
 
   const containerWith = (hostValue: unknown): DependencyContainer => {
     const scope = rootContainer.createChildContainer();

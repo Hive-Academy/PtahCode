@@ -49,6 +49,7 @@ export type {
   SessionHandoffAckRequest,
   SessionHandoffAckResult,
   HandoffPredecessorCloser,
+  HandoffCloseResult,
 } from './session-handoff.port';
 export { SessionHandoffAckStore, HANDOFF_ACK_STORAGE_KEY } from './session-handoff-ack.store';
 export type {

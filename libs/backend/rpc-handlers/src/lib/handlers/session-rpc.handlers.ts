@@ -9,7 +9,7 @@
 
 import { injectable, inject } from 'tsyringe';
 import { SessionHandoffCloser } from './session-handoff-closer';
-import { claudeProjectDir, normalizeWorkspaceRoot } from '@ptah-extension/shared';
+import { claudeProjectDir, normalizeWorkspaceRoot, HANDOFF_CLOSE_BLOCKER_CODES, type HandoffCloseBlockerCode } from '@ptah-extension/shared';
 import { SYSTEM_PROMPT_MAX_LENGTH } from './chat-rpc.schema';
 import {
   Logger,
@@ -476,11 +476,11 @@ export class SessionRpcHandlers {
     this.registerForkSession();
     this.registerRewindFiles();
     this.registerSessionStatus();
-    this.rpcHandler.registerMethod<{ requestId: string; outcome: 'closed' | 'absent' | 'blocked' }, { accepted: boolean }>(
+    this.rpcHandler.registerMethod<{ requestId: string; outcome: 'closed' | 'absent' | 'blocked'; blockerCode?: HandoffCloseBlockerCode }, { accepted: boolean }>(
       'session:handoffCloseResult', async (params) => {
-        const parsed = z.object({ requestId: z.string().uuid(), outcome: z.enum(['closed', 'absent', 'blocked']) }).strict().safeParse(params);
+        const parsed = z.object({ requestId: z.string().uuid(), outcome: z.enum(['closed', 'absent', 'blocked']), blockerCode: z.enum(HANDOFF_CLOSE_BLOCKER_CODES).optional() }).strict().safeParse(params);
         if (!parsed.success) throw new RpcUserError('Invalid session:handoffCloseResult params', 'INVALID_PARAMS');
-        return { accepted: this.handoffCloser?.complete(parsed.data.requestId, parsed.data.outcome) ?? false };
+        return { accepted: this.handoffCloser?.complete(parsed.data.requestId, parsed.data.outcome, parsed.data.blockerCode) ?? false };
       },
     );
 
