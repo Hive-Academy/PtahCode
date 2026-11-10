@@ -1348,6 +1348,37 @@ describe('ProviderRpcHandlers', () => {
   // -------------------------------------------------------------------------
 
   describe('provider:listModels', () => {
+    it('returns the Anthropic API lane static catalog without a key', async () => {
+      const h = makeHarness();
+      const models = [
+        {
+          id: 'claude-sonnet-test',
+          name: 'Sonnet test',
+          description: 'Test',
+          contextLength: 200000,
+          supportsToolUse: true,
+        },
+      ];
+      h.providerModels.fetchModels.mockResolvedValue({
+        models,
+        totalCount: 1,
+        isStatic: true,
+      });
+      h.handlers.register();
+
+      const result = await call<{
+        models: typeof models;
+        totalCount: number;
+        isStatic: boolean;
+      }>(h, 'provider:listModels', { providerId: 'anthropic-api' });
+      expect(h.providerModels.fetchModels).toHaveBeenCalledWith(
+        'anthropic-api',
+        null,
+        false,
+      );
+      expect(result).toMatchObject({ models, totalCount: 1, isStatic: true });
+    });
+
     it('resolves providerId from params override', async () => {
       const h = makeHarness({ providerKeysSeed: { 'kimi-code': 'key-m' } });
       h.providerModels.fetchModels.mockResolvedValue({

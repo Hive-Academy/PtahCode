@@ -97,6 +97,7 @@ import {
   isKimiCodeModelsPayload,
   mergeKimiCodeModels,
   getAnthropicProvider,
+  getPtahCliLaneProvider,
 } from '@ptah-extension/shared';
 import type { AuthEnv } from '@ptah-extension/shared';
 import type { RpcMethodName } from '@ptah-extension/shared';
@@ -674,7 +675,7 @@ export class ProviderRpcHandlers {
         });
         const apiKey = await this.authSecretsService.getProviderKey(providerId);
         if (!apiKey) {
-          const provider = getAnthropicProvider(providerId);
+          const provider = getPtahCliLaneProvider(providerId);
           const isPurelyDynamic =
             provider?.modelsEndpoint &&
             (!provider.staticModels || provider.staticModels.length === 0);
@@ -720,7 +721,7 @@ export class ProviderRpcHandlers {
           errorMsg.includes('Forbidden') ||
           errorMsg.includes('invalid or expired')
         ) {
-          const provider = getAnthropicProvider(providerId);
+          const provider = getPtahCliLaneProvider(providerId);
           const providerName = provider?.name ?? providerId;
           this.logger.warn(
             'RPC: provider:listModels - auth failed, returning empty result',

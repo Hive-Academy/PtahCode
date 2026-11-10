@@ -42,6 +42,7 @@ import {
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import {
   getAnthropicProvider,
+  getPtahCliLaneProvider,
   getDiscoveredContextWindow,
   type AuthEnv,
 } from '@ptah-extension/shared';
@@ -66,6 +67,55 @@ function makeActiveProviderResolver(
 // ---------------------------------------------------------------------------
 
 const PROVIDER = 'z-ai';
+
+describe('Anthropic API lane catalog and tiers', () => {
+  it('returns its static models without a key', async () => {
+    const { service } = makeService({});
+    const entry = getPtahCliLaneProvider('anthropic-api');
+    const result = await service.fetchModels('anthropic-api', null);
+    expect(result.isStatic).toBe(true);
+    expect(result.totalCount).toBe(entry?.staticModels?.length);
+    expect(result.models.map((model) => model.id)).toEqual(
+      entry?.staticModels?.map((model) => model.id),
+    );
+    expect(getAnthropicProvider('anthropic-api')).toBeUndefined();
+  });
+
+  it('persists scoped CLI tiers and uses lane defaults', async () => {
+    const { service, config } = makeService({});
+    const defaults = getPtahCliLaneProvider('anthropic-api')?.defaultTiers;
+    expect(service.resolveEffectiveTiers('anthropic-api', {})).toMatchObject(
+      defaults ?? {},
+    );
+    await service.setModelTier(
+      'anthropic-api',
+      'sonnet',
+      'claude-sonnet-test',
+      'cliAgent',
+    );
+    expect(config.set).toHaveBeenCalledWith(
+      'provider.anthropic-api.cliAgent.modelTier.sonnet',
+      'claude-sonnet-test',
+    );
+    expect(service.getModelTiers('anthropic-api', 'cliAgent').sonnet).toBe(
+      'claude-sonnet-test',
+    );
+    await service.clearModelTier('anthropic-api', 'sonnet', 'cliAgent');
+    expect(config.set).toHaveBeenCalledWith(
+      'provider.anthropic-api.cliAgent.modelTier.sonnet',
+      undefined,
+    );
+  });
+
+  it('leaves the main-agent tier env untouched after a lane catalog load', async () => {
+    const { service, authEnv } = makeService({ activeProvider: PROVIDER });
+    await service.fetchModels('anthropic-api', null);
+    service.reapplyTiersForWarmedCatalog('anthropic-api');
+    expect(authEnv.ANTHROPIC_DEFAULT_SONNET_MODEL).toBeUndefined();
+    expect(authEnv.ANTHROPIC_DEFAULT_OPUS_MODEL).toBeUndefined();
+    expect(authEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBeUndefined();
+  });
+});
 
 function makeService(opts: {
   configValues?: Record<string, unknown>;
