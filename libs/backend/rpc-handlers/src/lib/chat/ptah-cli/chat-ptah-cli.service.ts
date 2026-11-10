@@ -293,7 +293,7 @@ export class ChatPtahCliService {
       ptahCliAgentId: entry.agentId,
     });
 
-    this.agentAdapter.endSession(sessionId);
+    this.agentAdapter.endSession(sessionId, 'user-stop');
 
     this.ptahCliSessions.delete(sessionId as string);
     await this.ptahCliRegistry.releaseProfile(entry.leaseKey);

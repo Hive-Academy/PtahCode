@@ -161,7 +161,7 @@ export class KnowledgeAgentService implements IKnowledgeAgent {
     }
     for (const sid of rec.primedSessionIds) {
       try {
-        await this.sessions.endSession(toSessionId(sid));
+        await this.sessions.endSession(toSessionId(sid), 'parent-stop');
       } catch (err: unknown) {
         this.logger.warn('[knowledge-agent] reprime endSession failed', {
           sessionId: sid,

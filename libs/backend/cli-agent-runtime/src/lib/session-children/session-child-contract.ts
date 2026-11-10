@@ -46,6 +46,10 @@ export function renderSessionChildContract(
       'parent reads it later.',
     'You cannot start sessions of your own (ptah_session_start is refused for ' +
       'child sessions).',
+    'This session has a runtime cap and a usage budget. When the host warns ' +
+      'about either, or when /session-handoff runs, finish the current step, ' +
+      'write HANDOFF.md and call ptah_session_handoff. A successor session ' +
+      'then continues the task in the same worktree. Do not ignore the warning.',
     `Bash commands that start with one of ${allowlist} run without asking. ` +
       'Any other command waits for approval in your tab and is denied after ' +
       `${formatWindow(input.denyWindowMs)}; prefer the allowed commands.`,

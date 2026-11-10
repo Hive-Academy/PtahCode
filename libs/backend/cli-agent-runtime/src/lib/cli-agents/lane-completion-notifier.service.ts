@@ -193,6 +193,7 @@ export function sessionChildVerdictOf(
   status: SessionChildSettle['status'],
   deliverables: readonly LaneDeliverableCheck[],
 ): LaneCompletionVerdict {
+  if (status === 'handed-off') return 'unverified';
   if (status !== 'completed') return 'failed';
   if (deliverables.length === 0) return 'unverified';
   const allWritten = deliverables.every(
@@ -274,6 +275,9 @@ export function buildSessionChildCompletionEnvelope(
     `Branch: ${subject.branch}`,
     `Worktree: ${subject.worktreePath}`,
   ];
+  if (settle.status === 'handed-off' && subject.succeededBy) {
+    lines.push(`Work continues in successor child session ${subject.succeededBy}.`);
+  }
   if (subject.taskFolder) lines.push(`Task folder: ${subject.taskFolder}`);
   if (deliverables.length === 0) {
     lines.push('Deliverables: none were declared, so nothing was checked.');

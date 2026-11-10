@@ -57,7 +57,7 @@ function memoryAckStorage() {
   };
 }
 
-const PARENT = '11111111-2222-4333-8444-555555555555';
+export const PARENT = '11111111-2222-4333-8444-555555555555';
 const PARENT_SDK = '22222222-3333-4444-8555-666666666666';
 const PARENT_NEW_TAB = '33333333-4444-4555-8666-777777777777';
 const OTHER = '44444444-5555-4666-8777-888888888888';
@@ -77,7 +77,7 @@ function envelope(turn: number): SessionChildCompletionEnvelope {
   };
 }
 
-function makeHarness(
+export function makeHarness(
   options: {
     config?: Record<string, unknown>;
     /** `null` builds the spawner with no recorder bound (VS Code). */
@@ -146,7 +146,11 @@ function makeHarness(
     scopedWorkspaceRoot: jest.fn(() => ROOT as string | undefined),
   };
   const lanes: AgentProcessInfo[] = [];
-  const agents = { listTrackedAgents: jest.fn(() => lanes) };
+  const agents = {
+    listTrackedAgents: jest.fn(() => lanes),
+    adoptLanes: jest.fn((_fromIds: readonly string[], _toSessionId: string) => [] as string[]),
+    settleLaneAdoption: jest.fn(),
+  };
   const lifecycleIds = new Map<string, string>([[PARENT, PARENT_SDK]]);
   /** The parent record's live level; what the autopilot toggle rewrites. */
   const parentLevel: { value: PermissionLevel } = { value: 'yolo' };
@@ -231,6 +235,7 @@ function makeHarness(
       registrar,
       recorder as never,
       sessionBudget,
+      logger,
     );
 
   const spawner = build();
@@ -301,6 +306,7 @@ function makeHarness(
     registrar,
     recorder,
     sessionBudget,
+    logger,
     request,
     startChild,
     turnEnded,
@@ -892,7 +898,7 @@ describe('SessionSpawnerService — parent not live: held completions', () => {
     const child = await h.startChild();
 
     h.active.delete(PARENT);
-    h.sessionEnd.notifyAll({ sessionId: PARENT, workspaceRoot: ROOT });
+    h.sessionEnd.notifyAll({ sessionId: PARENT, workspaceRoot: ROOT, cause: 'user-stop' });
     jest.advanceTimersByTime(SESSION_CHILD_GRACE_MS * 10);
 
     expect(
@@ -1182,6 +1188,7 @@ describe('SessionSpawnerService.stop', () => {
     });
     expect(h.adapter.interruptSession).toHaveBeenCalledWith(
       child.childSessionId,
+      'parent-stop',
     );
     expect(h.policies.get(child.childSessionId)).toBeUndefined();
     expect(h.registrar.releaseRoot).toHaveBeenCalledWith(WORKTREE);
@@ -1279,6 +1286,7 @@ describe('SessionSpawnerService — child session end grace', () => {
     h.sessionEnd.notifyAll({
       sessionId: child.childSessionId,
       workspaceRoot: WORKTREE,
+      cause: 'user-stop',
     });
     jest.advanceTimersByTime(SESSION_CHILD_GRACE_MS - 1);
     expect(
@@ -1288,7 +1296,7 @@ describe('SessionSpawnerService — child session end grace', () => {
 
     expect(h.registry.get(child.childSessionId)).toMatchObject({
       terminalStatus: 'ended',
-      endReason: 'ended outside the spawner: stop button, error or teardown',
+      endReason: `ended outside the spawner (user-stop); uncommitted work is kept in ${WORKTREE}`,
     });
     expect(h.policies.get(child.childSessionId)).toBeUndefined();
     expect(h.registrar.releaseRoot).toHaveBeenCalledWith(WORKTREE);
@@ -1303,13 +1311,14 @@ describe('SessionSpawnerService — child session end grace', () => {
     h.sessionEnd.notifyAll({
       sessionId: child.childSessionId,
       workspaceRoot: WORKTREE,
+      cause: 'user-stop',
     });
     jest.advanceTimersByTime(SESSION_CHILD_GRACE_MS);
 
     expect(h.sessionBudget.release).not.toHaveBeenCalled();
   });
 
-  it('pushes failed when the session ended mid-turn', async () => {
+  it('ends a user-stopped session without starting a successor', async () => {
     const h = makeHarness();
     const child = await h.startChild();
     h.phases.set(child.childSessionId, 'generating');
@@ -1318,13 +1327,13 @@ describe('SessionSpawnerService — child session end grace', () => {
     h.sessionEnd.notifyAll({
       sessionId: child.childSessionId,
       workspaceRoot: WORKTREE,
+      cause: 'user-stop',
     });
     jest.advanceTimersByTime(SESSION_CHILD_GRACE_MS);
     await flush();
 
-    expect(h.notifier.signalSessionChild.mock.calls[0][1]).toMatchObject({
-      status: 'failed',
-    });
+    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe('ended');
+    expect(h.host.startChildSession).toHaveBeenCalledTimes(1);
   });
 
   it('a re-registration within the grace cancels it', async () => {
@@ -1334,6 +1343,7 @@ describe('SessionSpawnerService — child session end grace', () => {
     h.sessionEnd.notifyAll({
       sessionId: child.childSessionId,
       workspaceRoot: WORKTREE,
+      cause: 'user-stop',
     });
     h.idResolved.notifyAll({
       tabId: child.childSessionId,
@@ -1355,6 +1365,7 @@ describe('SessionSpawnerService — child session end grace', () => {
     h.sessionEnd.notifyAll({
       sessionId: child.childSessionId,
       workspaceRoot: WORKTREE,
+      cause: 'user-stop',
     });
     jest.advanceTimersByTime(SESSION_CHILD_GRACE_MS);
 
@@ -1365,7 +1376,7 @@ describe('SessionSpawnerService — child session end grace', () => {
 });
 
 describe('SessionSpawnerService — runtime cap', () => {
-  it('times the child out after maxRuntimeMinutes and interrupts it', async () => {
+  it('keeps a busy child running at the cap', async () => {
     const h = makeHarness({ config: { 'agentSessions.maxRuntimeMinutes': 5 } });
     const child = await h.startChild();
     h.phases.set(child.childSessionId, 'generating');
@@ -1373,19 +1384,12 @@ describe('SessionSpawnerService — runtime cap', () => {
     jest.advanceTimersByTime(5 * 60_000);
     await flush();
 
-    expect(h.registry.get(child.childSessionId)).toMatchObject({
-      terminalStatus: 'timed-out',
-    });
-    expect(h.notifier.signalSessionChild.mock.calls[0][1]).toMatchObject({
-      status: 'timeout',
-    });
-    expect(h.adapter.interruptSession).toHaveBeenCalledWith(
-      child.childSessionId,
-    );
+    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBeUndefined();
+    expect(h.adapter.interruptSession).not.toHaveBeenCalled();
   });
 
-  it('F.1 M7: releases the budget only once the background interrupt settled', async () => {
-    const h = makeHarness({ config: { 'agentSessions.maxRuntimeMinutes': 5 } });
+  it('releases the budget only after safety-net interruption settles', async () => {
+    const h = makeHarness({ config: { 'agentSessions.maxRuntimeMinutes': 5, 'agentSessions.maxSuccessions': 0 } });
     const child = await h.startChild();
     let settle: () => void = () => undefined;
     h.adapter.interruptSession.mockImplementationOnce(

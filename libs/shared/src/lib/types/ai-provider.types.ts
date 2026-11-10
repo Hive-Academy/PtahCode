@@ -6,6 +6,12 @@
 import { SessionId, CorrelationId } from './branded.types';
 import type { FlatStreamEventUnion } from './execution';
 
+/** Causes passed through host-neutral adapter methods. */
+export type SessionEndCause =
+  | 'user-stop' | 'parent-stop' | 'stream-exit' | 'provider-error'
+  | 'config-reinit' | 'workspace-close' | 'compaction-abort'
+  | 'host-shutdown' | 'unknown';
+
 /**
  * Supported AI Provider IDs
  *
@@ -364,7 +370,7 @@ export interface IAIProvider {
       images?: ReadonlyArray<{ data: string; mediaType: string }>;
     },
   ): Promise<AsyncIterable<FlatStreamEventUnion>>;
-  endSession(sessionId: SessionId): void;
+  endSession(sessionId: SessionId, cause?: SessionEndCause): void;
   sendMessageToSession(
     sessionId: SessionId,
     content: string,

@@ -59,6 +59,11 @@ const PARITY = [
 ] as const;
 
 describe('session tool definitions', () => {
+  it('describes child succession and its status', () => {
+    expect(buildSessionHandoffTool().description).toContain('same worktree and branch');
+    expect(buildSessionStatusTool().description).toContain('succeededBy');
+    expect(buildSessionStartTool().description).toContain('handed-off');
+  });
   it.each(PARITY)(
     '%p advertises exactly the keys its schema accepts, closed, with the right required set',
     (build, schema, required) => {
@@ -497,6 +502,14 @@ describe('handleSessionToolCall', () => {
       isError: false,
       text: 'ptah_session_status refused (not-a-child-of-caller): c-9 belongs to another session',
     });
+  });
+
+  it('names the successor of a handed-off child', async () => {
+    const session = fakeSession({
+      status: jest.fn().mockResolvedValue({ ok: true, children: [{ ...CHILD, status: 'handed-off', succeededBy: 'successor-1' }] }),
+    });
+    const reply = await call('ptah_session_status', {}, session);
+    expect(reply.text).toContain('handed-off; succeededBy successor-1');
   });
 
   it('stop states that tab, transcript, worktree and branch remain', async () => {

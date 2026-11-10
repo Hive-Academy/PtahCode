@@ -36,6 +36,7 @@ import {
   LEVEL_FROM_SDK_MODE,
 } from './permission-mode-map';
 import type { SessionEndCallbackRegistry } from '../session-end-callback-registry';
+import type { SessionEndCause } from '../session-end-callback-registry';
 import type { CompactionConfig } from '../compaction-config-provider';
 import {
   autoCompactModelClass,
@@ -252,7 +253,7 @@ export class SessionControl {
    * This method is the ONLY reliable way to detect interrupted subagents. All running
    * subagents for this session are marked as 'interrupted' to enable resumption.
    */
-  async endSession(sessionId: SessionId): Promise<EndSessionOutcome> {
+  async endSession(sessionId: SessionId, cause: SessionEndCause = 'unknown'): Promise<EndSessionOutcome> {
     const rec = this.registry.find(sessionId as string);
     if (!rec) {
       this.logger.info(
@@ -261,7 +262,7 @@ export class SessionControl {
       return 'already-ended';
     }
 
-    await this.endRecord(rec, sessionId);
+    await this.endRecord(rec, sessionId, cause);
     return 'ended';
   }
 
@@ -282,13 +283,14 @@ export class SessionControl {
   async endSessionIfTokenMatches(
     sessionId: SessionId,
     token: string,
+    cause: SessionEndCause = 'unknown',
   ): Promise<boolean> {
     const rec = this.registry.find(sessionId as string);
     if (!rec || rec.token !== token) {
       return false;
     }
 
-    await this.endRecord(rec, sessionId);
+    await this.endRecord(rec, sessionId, cause);
     return true;
   }
 
@@ -306,6 +308,7 @@ export class SessionControl {
   private async endRecord(
     rec: SessionRecord,
     sessionId: SessionId,
+    cause: SessionEndCause = 'unknown',
   ): Promise<void> {
     this.logger.info(`[SessionLifecycle] Ending session: ${sessionId}`);
     const registrySessionId = rec.realSessionId ?? rec.tabId;
@@ -390,6 +393,7 @@ export class SessionControl {
       this.sessionEndRegistry.notifyAll({
         sessionId: registrySessionId,
         workspaceRoot,
+        cause,
       });
     } else {
       this.logger.debug(
@@ -401,7 +405,7 @@ export class SessionControl {
   /**
    * Cleanup all active sessions
    */
-  async disposeAllSessions(): Promise<void> {
+  async disposeAllSessions(cause: SessionEndCause = 'unknown'): Promise<void> {
     this.logger.info('[SessionLifecycle] Disposing all active sessions...');
 
     const records = Array.from(this.registry.entries()).map(([, rec]) => rec);
@@ -486,7 +490,7 @@ export class SessionControl {
     }
     this.logger.info('[SessionLifecycle] All sessions disposed');
     for (const ended of endedSessions) {
-      this.sessionEndRegistry.notifyAll(ended);
+      this.sessionEndRegistry.notifyAll({ ...ended, cause });
     }
   }
 
@@ -513,13 +517,13 @@ export class SessionControl {
    * (permissions, subagents, interrupt, abort, deregister, SessionEnd
    * notification). A failed teardown is logged and does not stop the others.
    */
-  async disposeSessionsForWorkspace(workspacePath: string): Promise<void> {
+  async disposeSessionsForWorkspace(workspacePath: string, cause: SessionEndCause = 'unknown'): Promise<void> {
     const records = this.recordsForWorkspace(workspacePath);
     this.logger.info(
       `[SessionLifecycle] Disposing ${records.length} session(s) of one workspace...`,
     );
     const results = await Promise.allSettled(
-      records.map((rec) => this.endRecord(rec, rec.tabId as SessionId)),
+      records.map((rec) => this.endRecord(rec, rec.tabId as SessionId, cause)),
     );
     for (const result of results) {
       if (result.status === 'rejected') {

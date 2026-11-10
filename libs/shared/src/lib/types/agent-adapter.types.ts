@@ -8,6 +8,7 @@ import type { ContextCapacity } from '../utils/pricing.utils';
  */
 import type {
   IAIProvider,
+  SessionEndCause,
   AISessionConfig,
   EffortLevel,
 } from './ai-provider.types';
@@ -365,6 +366,7 @@ export interface IAgentAdapter extends IAIProvider, FollowUpQueueOperations {
   endSessionIfTokenMatches(
     sessionId: SessionId,
     token: string,
+    cause?: SessionEndCause,
   ): Promise<boolean>;
 
   /** Execute a slash command in an existing session. */
@@ -378,7 +380,7 @@ export interface IAgentAdapter extends IAIProvider, FollowUpQueueOperations {
   interruptCurrentTurn(sessionId: SessionId): Promise<boolean>;
 
   /** Interrupt and clean up the session entirely. */
-  interruptSession(sessionId: SessionId): Promise<void>;
+  interruptSession(sessionId: SessionId, cause?: SessionEndCause): Promise<void>;
 
   /** Change the permission level mid-session. */
   setSessionPermissionLevel(
