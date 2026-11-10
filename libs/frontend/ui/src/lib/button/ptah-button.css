@@ -1,0 +1,297 @@
+/* Ptah button family proposed look (TASK_2026_929_26ca Batch 1c).
+   Opt-in scope: every rule lives under [data-ptah-look='next'] so no product
+   page changes its appearance before Look approval. Uses --ptah-* tokens only.
+   Imported before @tailwind components in styles.css; :is(.btn, #ptah-next)
+   out-specifies the (0,6,0) glass button rules in styles.css without !important. */
+
+[data-ptah-look='next'] .btn:is(.btn, #ptah-next) {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ptah-gap-inline);
+  height: var(--ptah-control-h-sm);
+  min-height: var(--ptah-control-h-sm);
+  max-width: 100%;
+  padding-inline: var(--ptah-control-px);
+  padding-block: 0;
+  border-radius: var(--ptah-radius-control);
+  border-width: var(--ptah-border-width);
+  border-style: solid;
+  border-color: var(--ptah-btn-secondary-border);
+  background-color: var(--ptah-btn-secondary-bg);
+  background-image: none;
+  color: var(--ptah-btn-secondary-fg);
+  font-size: var(--ptah-text-label-size);
+  line-height: var(--ptah-text-label-leading);
+  font-weight: var(--ptah-text-label-weight);
+  text-transform: none;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: var(--ptah-elevation-0);
+  outline: none;
+  filter: none;
+  transform: none;
+  transition-property: background-color, border-color, color, opacity, box-shadow;
+  transition-duration: var(--ptah-duration-fast);
+  transition-timing-function: var(--ptah-ease-standard);
+}
+
+/* Sizes: xs (24 px), sm (32 px), md (40 px) */
+[data-ptah-look='next'] .btn.btn-xs:is(.btn, #ptah-next) {
+  height: var(--ptah-control-h-xs);
+  min-height: var(--ptah-control-h-xs);
+  padding-inline: var(--ptah-control-px-xs);
+  font-size: var(--ptah-text-label-size);
+  line-height: var(--ptah-text-label-leading);
+  font-weight: var(--ptah-text-label-weight);
+}
+
+[data-ptah-look='next'] .btn.btn-sm:is(.btn, #ptah-next) {
+  height: var(--ptah-control-h-sm);
+  min-height: var(--ptah-control-h-sm);
+  padding-inline: var(--ptah-control-px);
+  font-size: var(--ptah-text-label-size);
+  line-height: var(--ptah-text-label-leading);
+  font-weight: var(--ptah-text-label-weight);
+}
+
+[data-ptah-look='next'] .btn.btn-md:is(.btn, #ptah-next) {
+  height: var(--ptah-control-h-md);
+  min-height: var(--ptah-control-h-md);
+  padding-inline: var(--ptah-control-px-md);
+  font-size: var(--ptah-text-group-title-size);
+  line-height: var(--ptah-text-group-title-leading);
+  font-weight: var(--ptah-text-group-title-weight);
+}
+
+/* Icon sizing inside buttons */
+[data-ptah-look='next'] .btn:is(.btn, #ptah-next) :where(svg) {
+  width: var(--ptah-icon-sm);
+  height: var(--ptah-icon-sm);
+  flex-shrink: 0;
+}
+
+[data-ptah-look='next'] .btn.btn-xs:is(.btn, #ptah-next) :where(svg) {
+  width: var(--ptah-icon-xs);
+  height: var(--ptah-icon-xs);
+}
+
+[data-ptah-look='next'] .btn.btn-sm:is(.btn, #ptah-next) :where(svg) {
+  width: var(--ptah-icon-sm);
+  height: var(--ptah-icon-sm);
+}
+
+[data-ptah-look='next'] .btn.btn-md:is(.btn, #ptah-next) :where(svg) {
+  width: var(--ptah-icon-md);
+  height: var(--ptah-icon-md);
+}
+
+/* Square icon buttons: width equals control height */
+[data-ptah-look='next'] .btn.btn-square:is(.btn, #ptah-next) {
+  width: var(--ptah-control-h-sm);
+  min-width: var(--ptah-control-h-sm);
+  padding-inline: 0;
+}
+
+[data-ptah-look='next'] .btn.btn-xs.btn-square:is(.btn, #ptah-next) {
+  width: var(--ptah-control-h-xs);
+  min-width: var(--ptah-control-h-xs);
+  padding-inline: 0;
+}
+
+[data-ptah-look='next'] .btn.btn-sm.btn-square:is(.btn, #ptah-next) {
+  width: var(--ptah-control-h-sm);
+  min-width: var(--ptah-control-h-sm);
+  padding-inline: 0;
+}
+
+[data-ptah-look='next'] .btn.btn-md.btn-square:is(.btn, #ptah-next) {
+  width: var(--ptah-control-h-md);
+  min-width: var(--ptah-control-h-md);
+  padding-inline: 0;
+}
+
+/* Variant 1: primary (the one main action of a surface) */
+[data-ptah-look='next'] .btn.btn-primary:is(.btn, #ptah-next) {
+  background-color: var(--ptah-btn-primary-bg);
+  border-color: var(--ptah-btn-primary-bg);
+  color: var(--ptah-btn-primary-fg);
+  box-shadow: var(--ptah-elevation-1);
+}
+
+[data-ptah-look='next'] .btn.btn-primary:is(:hover, [data-state='hover']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-next) {
+  background-color: var(--ptah-btn-primary-bg-hover);
+  border-color: var(--ptah-btn-primary-bg-hover);
+  color: var(--ptah-btn-primary-fg);
+}
+
+[data-ptah-look='next'] .btn.btn-primary:is(:active, [data-state='active']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-next) {
+  background-color: var(--ptah-btn-primary-bg-active);
+  border-color: var(--ptah-btn-primary-bg-active);
+  color: var(--ptah-btn-primary-fg);
+  box-shadow: var(--ptah-elevation-0);
+}
+
+/* Variant 2: secondary (neutral peer: visible edge, quiet fill) */
+[data-ptah-look='next'] .btn.btn-secondary:is(.btn, #ptah-next) {
+  background-color: var(--ptah-btn-secondary-bg);
+  border-color: var(--ptah-btn-secondary-border);
+  color: var(--ptah-btn-secondary-fg);
+  box-shadow: var(--ptah-elevation-0);
+}
+
+[data-ptah-look='next'] .btn.btn-secondary:is(:hover, [data-state='hover']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-next) {
+  background-color: var(--ptah-btn-secondary-bg-hover);
+  border-color: var(--ptah-btn-secondary-border-hover);
+  color: var(--ptah-btn-secondary-fg);
+}
+
+[data-ptah-look='next'] .btn.btn-secondary:is(:active, [data-state='active']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-next) {
+  background-color: var(--ptah-btn-secondary-bg-active);
+  border-color: var(--ptah-btn-secondary-border-hover);
+  color: var(--ptah-btn-secondary-fg);
+}
+
+/* Variant 3: ghost (toolbar and row actions: no edge at rest) */
+[data-ptah-look='next'] .btn.btn-ghost:is(.btn, #ptah-next) {
+  background-color: transparent;
+  border-color: transparent;
+  color: var(--ptah-btn-ghost-fg);
+  box-shadow: var(--ptah-elevation-0);
+}
+
+[data-ptah-look='next'] .btn.btn-ghost:is(:hover, [data-state='hover']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-next) {
+  background-color: var(--ptah-btn-ghost-bg-hover);
+  border-color: var(--ptah-border-color);
+  color: var(--ptah-btn-ghost-fg);
+}
+
+[data-ptah-look='next'] .btn.btn-ghost:is(:active, [data-state='active']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-next) {
+  background-color: var(--ptah-btn-ghost-bg-active);
+  border-color: var(--ptah-border-color-strong);
+  color: var(--ptah-btn-ghost-fg);
+}
+
+/* Variant 4: danger (destructive action, maps to .btn-error) */
+[data-ptah-look='next'] .btn.btn-error:is(.btn, #ptah-next) {
+  background-color: var(--ptah-btn-danger-bg);
+  border-color: var(--ptah-btn-danger-bg);
+  color: var(--ptah-btn-danger-fg);
+  box-shadow: var(--ptah-elevation-0);
+}
+
+[data-ptah-look='next'] .btn.btn-error:is(:hover, [data-state='hover']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-next) {
+  background-color: var(--ptah-btn-danger-bg-hover);
+  border-color: var(--ptah-btn-danger-bg-hover);
+  color: var(--ptah-btn-danger-fg);
+}
+
+[data-ptah-look='next'] .btn.btn-error:is(:active, [data-state='active']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-next) {
+  background-color: var(--ptah-btn-danger-bg-active);
+  border-color: var(--ptah-btn-danger-bg-active);
+  color: var(--ptah-btn-danger-fg);
+}
+
+/* Variant 5: link (inline text action) */
+[data-ptah-look='next'] .btn.btn-link:is(.btn, #ptah-next) {
+  background-color: transparent;
+  border-color: transparent;
+  color: var(--ptah-btn-link-fg);
+  text-decoration: underline;
+  text-underline-offset: var(--ptah-space-1);
+  box-shadow: var(--ptah-elevation-0);
+}
+
+[data-ptah-look='next'] .btn.btn-link:is(:hover, [data-state='hover']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-next) {
+  background-color: transparent;
+  border-color: transparent;
+  color: var(--ptah-btn-link-fg-hover);
+  text-decoration: underline;
+}
+
+[data-ptah-look='next'] .btn.btn-link:is(:active, [data-state='active']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-next) {
+  background-color: transparent;
+  border-color: transparent;
+  color: var(--ptah-btn-link-fg-active);
+  text-decoration: underline;
+}
+
+/* Keyboard focus ring: shared outline, never a box shadow */
+[data-ptah-look='next'] .btn:is(:focus-visible, [data-state='focus']):is(.btn, #ptah-next) {
+  outline-style: solid;
+  outline-width: var(--ptah-focus-ring-width);
+  outline-offset: var(--ptah-focus-ring-offset);
+  outline-color: var(--ptah-focus-ring-color);
+  box-shadow: var(--ptah-elevation-0);
+}
+
+/* Disabled state (native disabled and aria-disabled when not busy) */
+[data-ptah-look='next'] .btn:is(:disabled, [disabled], [aria-disabled='true']):not([aria-busy='true']):is(.btn, #ptah-next) {
+  background-color: var(--ptah-btn-disabled-bg);
+  border-color: var(--ptah-btn-disabled-border);
+  color: var(--ptah-btn-disabled-fg);
+  opacity: var(--ptah-btn-disabled-opacity);
+  box-shadow: var(--ptah-elevation-0);
+  cursor: not-allowed;
+  pointer-events: auto;
+}
+
+[data-ptah-look='next'] .btn:is(.btn-ghost, .btn-link):is(:disabled, [disabled], [aria-disabled='true']):not([aria-busy='true']):is(.btn, #ptah-next) {
+  background-color: transparent;
+  border-color: transparent;
+}
+
+/* Loading / busy state: leave layout unchanged and overlay the spinner. */
+[data-ptah-look='next'] .btn[aria-busy='true']:is(.btn, #ptah-next) {
+  opacity: var(--ptah-btn-busy-opacity);
+  cursor: wait;
+  -webkit-text-fill-color: transparent;
+}
+
+[data-ptah-look='next'] .btn[aria-busy='true']:is(.btn, #ptah-next) > :where(svg:first-child) {
+  visibility: hidden;
+}
+
+[data-ptah-look='next'] .btn[aria-busy='true']:is(.btn, #ptah-next)::before {
+  content: '';
+  position: absolute;
+  inset-block-start: calc(50% - var(--ptah-icon-xs) / 2);
+  inset-inline-start: calc(50% - var(--ptah-icon-xs) / 2);
+  width: var(--ptah-icon-xs);
+  height: var(--ptah-icon-xs);
+  border-radius: var(--ptah-radius-chip);
+  border-width: var(--ptah-focus-ring-width);
+  border-style: solid;
+  border-color: var(--ptah-btn-secondary-fg);
+  border-inline-end-color: transparent;
+  animation: ptah-button-spin var(--ptah-btn-spinner-duration) linear infinite;
+}
+
+[data-ptah-look='next'] .btn.btn-primary[aria-busy='true']:is(.btn, #ptah-next)::before {
+  border-color: var(--ptah-btn-primary-fg);
+  border-inline-end-color: transparent;
+}
+
+[data-ptah-look='next'] .btn.btn-error[aria-busy='true']:is(.btn, #ptah-next)::before {
+  border-color: var(--ptah-btn-danger-fg);
+  border-inline-end-color: transparent;
+}
+
+[data-ptah-look='next'] .btn.btn-link[aria-busy='true']:is(.btn, #ptah-next)::before {
+  border-color: var(--ptah-btn-link-fg);
+  border-inline-end-color: transparent;
+}
+
+@keyframes ptah-button-spin {
+  to { transform: rotate(1turn); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-ptah-look='next'] .btn[aria-busy='true']:is(.btn, #ptah-next)::before {
+    animation: none;
+  }
+}
+

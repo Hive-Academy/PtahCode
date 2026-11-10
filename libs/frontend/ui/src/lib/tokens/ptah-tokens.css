@@ -75,6 +75,36 @@
   --ptah-border-width: 1px;
   --ptah-border-color: var(--surface-border);
   --ptah-border-color-strong: var(--surface-border-strong);
+  --ptah-control-edge: color-mix(in oklch, oklch(var(--bc)) 55%, oklch(var(--b1)));
+  --ptah-control-edge-strong: color-mix(in oklch, oklch(var(--bc)) 68%, oklch(var(--b1)));
+
+  /* Button family (TASK_2026_929_26ca Batch 1c) */
+  --ptah-btn-primary-bg: oklch(var(--p));
+  --ptah-btn-primary-bg-hover: color-mix(in oklch, oklch(var(--p)) 88%, oklch(var(--bc)));
+  --ptah-btn-primary-bg-active: color-mix(in oklch, oklch(var(--p)) 78%, oklch(var(--bc)));
+  --ptah-btn-primary-fg: oklch(var(--pc));
+  --ptah-btn-secondary-bg: var(--surface-2);
+  --ptah-btn-secondary-bg-hover: oklch(var(--b3));
+  --ptah-btn-secondary-bg-active: color-mix(in oklch, oklch(var(--b3)) 92%, oklch(var(--bc)));
+  --ptah-btn-secondary-fg: oklch(var(--bc));
+  --ptah-btn-secondary-border: var(--ptah-control-edge);
+  --ptah-btn-secondary-border-hover: var(--ptah-control-edge-strong);
+  --ptah-btn-ghost-bg-hover: oklch(var(--b3));
+  --ptah-btn-ghost-bg-active: color-mix(in oklch, oklch(var(--b3)) 92%, oklch(var(--bc)));
+  --ptah-btn-ghost-fg: oklch(var(--bc));
+  --ptah-btn-danger-bg: oklch(var(--er));
+  --ptah-btn-danger-bg-hover: color-mix(in oklch, oklch(var(--er)) 90%, oklch(var(--bc)));
+  --ptah-btn-danger-bg-active: color-mix(in oklch, oklch(var(--er)) 82%, oklch(var(--bc)));
+  --ptah-btn-danger-fg: oklch(var(--erc));
+  --ptah-btn-link-fg: var(--ptah-link, oklch(var(--p)));
+  --ptah-btn-link-fg-hover: color-mix(in oklch, var(--ptah-link, oklch(var(--p))) 75%, oklch(var(--bc)));
+  --ptah-btn-link-fg-active: color-mix(in oklch, var(--ptah-link, oklch(var(--p))) 60%, oklch(var(--bc)));
+  --ptah-btn-disabled-bg: var(--surface-2);
+  --ptah-btn-disabled-fg: oklch(var(--bcm, var(--bc)));
+  --ptah-btn-disabled-border: var(--ptah-border-color);
+  --ptah-btn-disabled-opacity: 0.48;
+  --ptah-btn-busy-opacity: 0.8;
+  --ptah-btn-spinner-duration: 720ms;
 
   /* Focus ring: an outline with an outline offset (the offset is transparent).
      The shared glass focus color when glass is on, else the theme primary. */
@@ -115,6 +145,7 @@
     --ptah-duration-fast: 0.01ms;
     --ptah-duration-base: 0.01ms;
     --ptah-duration-slow: 0.01ms;
+    --ptah-btn-spinner-duration: 0.01ms;
   }
 }
 

@@ -4,6 +4,7 @@ import {
   PtahButtonDirective,
   PtahFieldComponent,
   PtahFieldControlDirective,
+  PtahIconButtonDirective,
   PtahListDetailComponent,
   PtahListRowComponent,
   PtahMeterComponent,
@@ -26,6 +27,7 @@ import { InboxLayoutDemoComponent } from './inbox-layout-demo.component';
     Listbox,
     Option,
     PtahButtonDirective,
+    PtahIconButtonDirective,
     PtahFieldComponent,
     PtahFieldControlDirective,
     PtahStatCardComponent,
@@ -51,14 +53,7 @@ import { InboxLayoutDemoComponent } from './inbox-layout-demo.component';
             </button>
           }
         }
-        <button
-          ptahButton
-          [iconOnly]="true"
-          aria-label="More actions"
-          type="button"
-        >
-          ⋯
-        </button>
+        <button ptahIconButton label="More actions" type="button">⋯</button>
         <button ptahButton [busy]="true" type="button">Saving</button>
         <button ptahButton type="button" disabled>Disabled</button>
       </div>

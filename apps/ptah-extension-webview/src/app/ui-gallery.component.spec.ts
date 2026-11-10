@@ -165,3 +165,58 @@ it('pairs each contract value with the utility that applies it', () => {
   expect(root.textContent).toContain('11 px');
   expect(root.querySelector('.text-ptah-caption')).not.toBeNull();
 });
+
+it('renders the button family side by side and scopes data-ptah-look="next" only to the proposed column', () => {
+  TestBed.configureTestingModule({
+    providers: [
+      { provide: Router, useValue: { navigateByUrl: jest.fn() } },
+      { provide: ThemeService, useValue: createThemeServiceStub() },
+    ],
+  });
+  const fixture = TestBed.createComponent(UiGalleryComponent);
+  fixture.detectChanges();
+  const root = fixture.nativeElement as HTMLElement;
+
+  const section = root.querySelector('section#family-button');
+  expect(section).not.toBeNull();
+
+  const scopedNodes = Array.from(root.querySelectorAll('[data-ptah-look]'));
+  const currentCol = root.querySelector(
+    '[data-testid="button-family-col-current"]',
+  ) as HTMLElement;
+  const proposedCol = root.querySelector(
+    '[data-testid="button-family-col-proposed"]',
+  ) as HTMLElement;
+
+  expect(currentCol).not.toBeNull();
+  expect(proposedCol).not.toBeNull();
+  expect(currentCol.getAttribute('data-ptah-look')).toBeNull();
+  expect(proposedCol.getAttribute('data-ptah-look')).toBe('next');
+  expect(scopedNodes).toEqual([proposedCol]);
+
+  for (const col of [currentCol, proposedCol]) {
+    expect(
+      col.querySelectorAll('[data-testid="button-matrix-specimen"]'),
+    ).toHaveLength(15);
+    expect(
+      col.querySelectorAll('[data-testid="button-state-row"]'),
+    ).toHaveLength(5);
+    expect(
+      col.querySelectorAll('[data-testid="button-state-specimen"]'),
+    ).toHaveLength(30);
+    expect(col.querySelectorAll('button[data-state="hover"]')).toHaveLength(5);
+    expect(col.querySelectorAll('button[data-state="focus"]')).toHaveLength(5);
+    expect(col.querySelectorAll('button[data-state="active"]')).toHaveLength(5);
+    expect(col.querySelectorAll('button:disabled')).toHaveLength(5);
+    expect(col.querySelectorAll('button[aria-busy="true"]')).toHaveLength(5);
+    expect(
+      col.querySelectorAll('[data-testid="icon-button-specimen"] [ptahIconButton]'),
+    ).toHaveLength(9);
+    expect(
+      col.querySelectorAll('[data-testid="leading-icon-specimen"] button'),
+    ).toHaveLength(1);
+    expect(
+      col.querySelectorAll('[data-testid="long-text-specimen"] button'),
+    ).toHaveLength(1);
+  }
+});
