@@ -8,14 +8,14 @@ import {
   viewChildren,
   type ElementRef,
 } from '@angular/core';
-import { LucideAngularModule, Plus } from 'lucide-angular';
-import { SetupActionDirective } from '@ptah-extension/ui';
+import { InboxRowDirective } from '@ptah-extension/ui';
 import type {
   MachinesError,
   RemoteMachine,
 } from '../../services/machines-store';
 import { DisplayTextPipe, displayText } from '../../utils/display-text';
 import { durationText } from '../../utils/machine-copy';
+import { MACHINE_STATE_INK } from '../machine-status/machine-status.component';
 import { MachineStatusComponent } from '../machine-status/machine-status.component';
 
 interface MachineRow {
@@ -27,137 +27,126 @@ interface MachineRow {
 }
 
 /**
- * Left list of the Machines view (design 4.1, 4.5): a `<ul>` of rows with a
- * name, the alias in mono, the state marker, and a meta line (last seen or
- * the machine's Ptah version).
+ * The list pane of the Machines page (approved option A): the pane heading,
+ * the client-side search, and the machine rows inside a `role="listbox"`.
+ * The `ptah-inbox-layout` shell owns the pane surface, padding and scroll;
+ * this component only fills the `[inboxList]` slot. "Add machine" lives in
+ * the page header only, not in this pane, and the footer line is gone
+ * (machines-ux.md: the static footer carried no action).
+ *
+ * Each row follows the prototype: the machine name alone on the first line
+ * (the SSH alias stays in the detail pane, and the search still matches it),
+ * then one line in the state's ink with the state marker, its label and the
+ * last-seen text ("now", "12 s ago"). The state label is never truncated, and
+ * state is never shown by colour alone.
  *
  * Keyboard (design 5): the list is one Tab stop. Up/Down/Home/End move focus
- * between rows (roving `tabindex`); Enter or click selects. The selected row
- * carries `aria-current="true"` and a background step.
+ * between the rows that match the search (roving `tabindex`); Enter or click
+ * selects. The selected row carries `aria-selected` (from the row directive)
+ * and `aria-current="true"`.
  */
 @Component({
   selector: 'ptah-machine-list',
   standalone: true,
-  imports: [LucideAngularModule, MachineStatusComponent, DisplayTextPipe, SetupActionDirective],
+  imports: [MachineStatusComponent, DisplayTextPipe, InboxRowDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { class: 'flex min-h-0 flex-col bg-base-100' },
+  host: { class: 'flex flex-col gap-4' },
   template: `
-    <div
-      class="flex items-center justify-between gap-2 border-b border-surface-border px-3 py-2"
-    >
-      <h2 class="text-sm font-semibold text-base-content">Machines</h2>
-      <button
-        type="button"
-        [ptahSetupAction]="'ghost'"
-        class="gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-        [class.btn-primary]="rows().length > 0"
-        [class.btn-ghost]="rows().length === 0"
-        data-testid="machine-list-add"
-        (click)="add.emit()"
+    <h2 class="text-sm font-semibold text-base-content">Machines</h2>
+
+    <input
+      type="search"
+      class="input input-bordered input-sm w-full rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+      aria-label="Search machines"
+      placeholder="Search machines"
+      data-testid="machine-list-search"
+      [value]="query()"
+      (input)="onSearch($event)"
+    />
+
+    @if (loading() && rows().length === 0) {
+      <p
+        class="flex flex-col gap-2"
+        role="status"
+        aria-busy="true"
+        data-testid="machine-list-loading"
       >
-        <lucide-angular [img]="PlusIcon" class="h-4 w-4" aria-hidden="true" />
-        Add machine
-      </button>
-    </div>
-
-    <div class="min-h-0 flex-1 overflow-y-auto">
-      @if (loading() && rows().length === 0) {
-        <p
-          class="flex items-center gap-2 px-3 py-3 text-xs text-base-content-muted"
-          role="status"
-          aria-busy="true"
-          data-testid="machine-list-loading"
-        >
-          <span
-            class="loading loading-spinner loading-xs motion-reduce:animate-none"
-            aria-hidden="true"
-          ></span>
-          Loading machines…
+        <span class="sr-only">Loading machines…</span>
+        <span class="skeleton h-10 rounded-xl" aria-hidden="true"></span>
+        <span class="skeleton h-10 rounded-xl" aria-hidden="true"></span>
+        <span class="skeleton h-10 rounded-xl" aria-hidden="true"></span>
+      </p>
+    } @else if (error(); as failure) {
+      <div
+        class="rounded-box border border-state-err p-3 text-xs"
+        role="alert"
+        data-testid="machine-list-error"
+      >
+        <p class="text-sm font-semibold text-state-err">
+          Machines could not be loaded
         </p>
-      } @else if (error(); as failure) {
-        <div
-          class="m-3 rounded-box border border-state-err p-3 text-xs"
-          role="alert"
-          data-testid="machine-list-error"
+        <p class="mt-1 text-base-content-muted">
+          {{ failure.message | displayText }}
+        </p>
+        <button
+          type="button"
+          class="btn btn-primary btn-sm mt-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+          data-testid="machine-list-retry"
+          (click)="retryLoad.emit()"
         >
-          <p class="font-semibold text-base-content">
-            Machines could not be loaded
-          </p>
-          <p class="mt-1 text-base-content-muted">
-            {{ failure.message | displayText }}
-          </p>
+          Try again
+        </button>
+      </div>
+    } @else if (rows().length === 0) {
+      <p
+        class="text-xs text-base-content-muted"
+        data-testid="machine-list-empty"
+      >
+        No machines yet.
+      </p>
+    } @else if (visibleRows().length === 0) {
+      <p
+        class="text-xs text-base-content-muted"
+        data-testid="machine-list-no-match"
+      >
+        No machine matches "{{ query() }}".
+      </p>
+    }
+
+    @if (visibleRows().length > 0) {
+      <div class="flex flex-col gap-1" role="listbox" aria-label="Machine list">
+        @for (row of visibleRows(); track row.machineId; let i = $index) {
           <button
-            type="button"
-            class="btn btn-ghost btn-xs mt-2 border border-surface-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-            data-testid="machine-list-retry"
-            (click)="retryLoad.emit()"
+            #rowButton
+            ptahInboxRow
+            [selected]="row.machineId === selectedId()"
+            [attr.aria-current]="row.machineId === selectedId() ? 'true' : null"
+            [attr.tabindex]="i === focusIndex() ? 0 : -1"
+            [attr.data-machine-id]="row.machineId"
+            data-testid="machine-row"
+            (focus)="activeIndex.set(i)"
+            (keydown)="onKeydown($event)"
+            (click)="selected.emit(row.machineId)"
           >
-            Try again
+            <span class="block truncate text-sm font-medium text-base-content"
+              >{{ row.name }}</span
+            >
+            <span
+              class="flex items-center gap-2 text-xs"
+              [class]="stateInk[row.machine.state]"
+            >
+              <ptah-machine-status
+                [state]="row.machine.state"
+                class="shrink-0"
+              />
+              @if (row.meta) {
+                <span data-testid="machine-row-meta">· {{ row.meta }}</span>
+              }
+            </span>
           </button>
-        </div>
-      } @else if (rows().length === 0) {
-        <p
-          class="px-3 py-3 text-xs text-base-content-muted"
-          data-testid="machine-list-empty"
-        >
-          No machines yet.
-        </p>
-      }
-
-      @if (rows().length > 0) {
-        <ul class="flex flex-col gap-0.5 p-1.5" aria-label="Machines">
-          @for (row of rows(); track row.machineId; let i = $index) {
-            <li>
-              <button
-                #rowButton
-                type="button"
-                class="flex w-full flex-col gap-0.5 rounded-md px-3 py-2 text-left hover:bg-base-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                [class.bg-base-300]="row.machineId === selectedId()"
-                [class.ring-1]="row.machineId === selectedId()"
-                [class.ring-inset]="row.machineId === selectedId()"
-                [class.ring-base-content/60]="row.machineId === selectedId()"
-                [attr.aria-current]="
-                  row.machineId === selectedId() ? 'true' : null
-                "
-                [attr.tabindex]="i === focusIndex() ? 0 : -1"
-                [attr.data-machine-id]="row.machineId"
-                data-testid="machine-row"
-                (focus)="activeIndex.set(i)"
-                (keydown)="onKeydown($event)"
-                (click)="selected.emit(row.machineId)"
-              >
-                <span class="flex min-w-0 items-center justify-between gap-2">
-                  <span class="flex min-w-0 items-baseline gap-1.5">
-                    <span
-                      class="truncate text-sm font-semibold text-base-content"
-                      >{{ row.name }}</span
-                    >
-                    <span
-                      class="truncate font-mono text-xs text-base-content-muted"
-                      >{{ row.machine.alias | displayText }}</span
-                    >
-                  </span>
-                  <ptah-machine-status [state]="row.machine.state" />
-                </span>
-                @if (row.meta) {
-                  <span
-                    class="truncate text-xs text-base-content-muted"
-                    data-testid="machine-row-meta"
-                    >{{ row.meta }}</span
-                  >
-                }
-              </button>
-            </li>
-          }
-        </ul>
-      }
-    </div>
-
-    <p
-      class="border-t border-surface-border px-3 py-2 text-xs text-base-content-muted"
-    >
-      This machine stays in Chat.
-    </p>
+        }
+      </div>
+    }
   `,
 })
 export class MachineListComponent {
@@ -169,11 +158,13 @@ export class MachineListComponent {
   public readonly now = input(0);
 
   public readonly selected = output<string>();
-  public readonly add = output<void>();
   public readonly retryLoad = output<void>();
 
-  protected readonly PlusIcon = Plus;
+  protected readonly stateInk = MACHINE_STATE_INK;
   protected readonly activeIndex = signal<number | null>(null);
+
+  /** The client-side filter text over name and SSH alias. */
+  protected readonly query = signal('');
 
   private readonly rowButtons =
     viewChildren<ElementRef<HTMLButtonElement>>('rowButton');
@@ -187,20 +178,37 @@ export class MachineListComponent {
     })),
   );
 
+  protected readonly visibleRows = computed<readonly MachineRow[]>(() => {
+    const needle = this.query().trim().toLowerCase();
+    if (needle === '') return this.rows();
+    return this.rows().filter(
+      (row) =>
+        row.name.toLowerCase().includes(needle) ||
+        displayText(row.machine.alias).toLowerCase().includes(needle),
+    );
+  });
+
   /** The row holding the list's single Tab stop. */
   protected readonly focusIndex = computed(() => {
-    const count = this.rows().length;
+    const count = this.visibleRows().length;
     if (count === 0) return -1;
     const active = this.activeIndex();
     if (active !== null && active < count) return active;
-    const selected = this.rows().findIndex(
+    const selected = this.visibleRows().findIndex(
       (row) => row.machineId === this.selectedId(),
     );
     return selected === -1 ? 0 : selected;
   });
 
+  protected onSearch(event: Event): void {
+    const target = event.target;
+    if (target instanceof HTMLInputElement) {
+      this.query.set(target.value);
+    }
+  }
+
   protected onKeydown(event: KeyboardEvent): void {
-    const count = this.rows().length;
+    const count = this.visibleRows().length;
     const current = this.focusIndex();
     let next: number;
     switch (event.key) {
@@ -224,27 +232,28 @@ export class MachineListComponent {
     this.rowButtons()[next]?.nativeElement.focus();
   }
 
+  /** The prototype's second line: last seen, or the state's own hint. */
   private metaLine(machine: RemoteMachine): string {
-    const version = machine.versions?.remote?.ptahVersion;
-    const versionText = version ? `ptah ${displayText(version, 24)}` : '';
-    let status = '';
     switch (machine.state) {
+      case 'connected':
       case 'offline':
       case 'reconnecting':
-        status =
-          machine.lastSeenAt !== undefined && this.now() > 0
-            ? `Last seen ${durationText(machine.lastSeenAt, this.now())} ago`
-            : 'Not connected';
-        break;
-      case 'version-mismatch':
-        status = 'Not connected';
-        break;
+        return this.lastSeenText(machine);
       case 'unpaired':
-        status = 'Pair to connect';
-        break;
-      case 'connected':
-        break;
+        return 'Pair to connect';
+      case 'version-mismatch':
+        return '';
     }
-    return [status, versionText].filter(Boolean).join(' · ');
+  }
+
+  /** "now" or "12 s ago"; machines without a last-seen time say so. */
+  private lastSeenText(machine: RemoteMachine): string {
+    const seen = machine.lastSeenAt;
+    const now = this.now();
+    if (seen === undefined || now === 0) {
+      return machine.state === 'connected' ? '' : 'Not connected';
+    }
+    if (now - seen < 10_000) return 'now';
+    return `${durationText(seen, now)} ago`;
   }
 }

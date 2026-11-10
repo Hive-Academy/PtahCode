@@ -34,8 +34,26 @@ describe('ReviewRunDetailComponent', () => {
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Coverage limited');
     expect(fixture.nativeElement.textContent).toContain('Weaker evidence');
-    fixture.nativeElement.querySelector('[role="dialog"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    fixture.nativeElement.querySelector('[role="region"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(close).toHaveBeenCalledTimes(1);
+  });
+  it('returns focus to the run row after the layout update that follows its removal', async () => {
+    TestBed.configureTestingModule({ imports: [ReviewRunDetailComponent], providers: [{ provide: ReviewRunsStore, useValue: { rerunState: signal('idle'), hasToken: signal(false), settings: signal(null), rerun: jest.fn() } }] });
+    const row = document.createElement('button');
+    document.body.append(row);
+    row.focus();
+    const fixture = TestBed.createComponent(ReviewRunDetailComponent);
+    fixture.componentRef.setInput('run', run);
+    fixture.detectChanges();
+    // Below 768 px the list pane is hidden while the detail is open.
+    row.hidden = true;
+    row.blur();
+    fixture.destroy();
+    expect(document.activeElement).not.toBe(row);
+    row.hidden = false;
+    await Promise.resolve();
+    expect(document.activeElement).toBe(row);
+    row.remove();
   });
   it('shows each lens outcome and sanitized reason', () => {
     TestBed.configureTestingModule({ imports: [ReviewRunDetailComponent], providers: [{ provide: ReviewRunsStore, useValue: {
@@ -53,6 +71,53 @@ describe('ReviewRunDetailComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('lane-failed: codex; exit 1');
     expect(fixture.nativeElement.textContent).toContain('security-privacy');
     expect(fixture.nativeElement.textContent).toContain('Ran without a limit check');
+  });
+  it('counts lenses from the lens records and shows coverage as notes', () => {
+    TestBed.configureTestingModule({ imports: [ReviewRunDetailComponent], providers: [{ provide: ReviewRunsStore, useValue: {
+      rerunState: signal('idle'), hasToken: signal(false), settings: signal(null), rerun: jest.fn(),
+    } }] });
+    const fixture = TestBed.createComponent(ReviewRunDetailComponent);
+    const host: HTMLElement = fixture.nativeElement;
+    const text = (id: string): string => host.querySelector(`[data-testid="${id}"]`)?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+    // A normal run: three scope notes from the context stage, two lens records.
+    fixture.componentRef.setInput('run', { ...run, coverage: ['diff-complete', 'dependencies:passed', 'lint:passed'], stages: [
+      { name: 'context', status: 'succeeded', family: null, scope: null, durationMs: 500, error: null, artifactPath: null },
+      { name: 'lenses', status: 'succeeded', family: 'codex', scope: 'security-privacy', durationMs: 2000, error: null, artifactPath: null },
+      { name: 'lenses', status: 'failed', family: 'claude', scope: 'correctness-lifecycle', durationMs: 1000, error: 'lane-failed', artifactPath: null },
+      { name: 'verification', status: 'succeeded', family: 'gemini', scope: null, durationMs: 300, error: null, artifactPath: null },
+    ] });
+    fixture.detectChanges();
+    expect(text('review-detail-lens-count')).toBe('1 of 2 lenses completed');
+    expect(host.querySelector('progress')?.getAttribute('max')).toBe('2');
+    const notes = Array.from(host.querySelectorAll('[data-testid="review-detail-coverage-notes"] li')).map(item => item.textContent?.trim());
+    expect(notes).toEqual(['diff-complete', 'dependencies:passed', 'lint:passed']);
+    expect(text('review-detail-coverage')).toContain('Coverage notes');
+    const cards = Array.from(host.querySelectorAll('[data-testid="review-detail-lenses"] li')).map(item => item.textContent?.replace(/\s+/g, ' ').trim() ?? '');
+    expect(cards).toHaveLength(2);
+    expect(cards[0]).toContain('security-privacy');
+    expect(cards[0]).toContain('Family: codex · Verifier family: gemini');
+    expect(cards[1]).toContain('correctness-lifecycle');
+    expect(cards[1]).toContain('Family: claude');
+    expect(cards.join(' ')).not.toContain('diff-complete');
+    // The lens records are not repeated in the stage grid.
+    expect(host.querySelectorAll('[data-testid="review-detail-stages"] li')).toHaveLength(2);
+    expect(host.textContent).not.toContain('Weaker evidence');
+  });
+  it('shows no lens count when the run has no lens record', () => {
+    TestBed.configureTestingModule({ imports: [ReviewRunDetailComponent], providers: [{ provide: ReviewRunsStore, useValue: {
+      rerunState: signal('idle'), hasToken: signal(false), settings: signal(null), rerun: jest.fn(),
+    } }] });
+    const fixture = TestBed.createComponent(ReviewRunDetailComponent);
+    const host: HTMLElement = fixture.nativeElement;
+    fixture.componentRef.setInput('run', { ...run, coverage: ['diff-truncated', 'dependencies:failed'], stages: [] });
+    fixture.detectChanges();
+    expect(host.querySelector('[data-testid="review-detail-lens-count"]')).toBeNull();
+    expect(host.querySelector('progress')).toBeNull();
+    expect(host.querySelector('[data-testid="review-detail-lenses"]')).toBeNull();
+    expect(host.textContent).toContain('Lens count unavailable');
+    expect(host.textContent).toContain('Lens records unavailable.');
+    expect(host.textContent).not.toMatch(/\d+ of \d+ lenses/);
+    expect(host.querySelectorAll('[data-testid="review-detail-coverage-notes"] li')).toHaveLength(2);
   });
   it('renders the findings loaded for the selected run', () => {
     TestBed.configureTestingModule({ imports: [ReviewRunDetailComponent], providers: [{ provide: ReviewRunsStore, useValue: {

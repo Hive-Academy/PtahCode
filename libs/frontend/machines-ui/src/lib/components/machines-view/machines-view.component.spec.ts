@@ -2,6 +2,7 @@ import { computed, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { SURFACE_ACTIVE } from '@ptah-extension/core';
 import { provideMarkdownRendering } from '@ptah-extension/markdown';
+import { InboxLayoutComponent } from '@ptah-extension/ui';
 import { initialSessionEventState } from '../../services/session-event-reducer';
 import {
   MachinesStore,
@@ -64,6 +65,11 @@ async function setup(
     add: jest.fn(),
     pair: jest.fn().mockResolvedValue(ok(HORUS)),
     pairViaSsh: jest.fn(),
+    // Approval counts the header badge and the overview notice read (B1).
+    pendingApprovalsByMachine: signal(new Map<string, number>()),
+    pendingApprovalCount: signal(0),
+    pendingApprovalRequestsByMachine: signal(new Map()),
+    respondPermission: jest.fn().mockResolvedValue(ok(undefined)),
     // The detail's session list (Batch 25).
     workspaces: () => signal([]),
     sessionsByWorkspace: () => signal([]),
@@ -121,15 +127,15 @@ describe('MachinesViewComponent', () => {
     expect(store.loadMachines).toHaveBeenCalledTimes(1);
   });
 
-  it('empty (4.1): one primary Add machine in the pane, a ghost one in the list, and what is checked', async () => {
+  it('empty (4.1): one primary Add machine in the pane, none in the list, and what is checked', async () => {
     const { fixture } = await setup([]);
     const empty = q(fixture, 'machines-empty');
-    expect(empty?.textContent).toContain('Control Ptah on your other machines');
+    expect(empty?.textContent).toContain('No machines yet');
     expect(empty?.textContent).toContain('nothing is opened on your network');
     expect(q(fixture, 'machines-empty-add')?.classList).toContain(
       'btn-primary',
     );
-    expect(q(fixture, 'machine-list-add')?.classList).toContain('btn-ghost');
+    expect(q(fixture, 'machine-list-add')).toBeNull();
     expect(
       host(fixture).querySelectorAll('[data-testid="machines-checked"] li'),
     ).toHaveLength(7);
@@ -147,6 +153,144 @@ describe('MachinesViewComponent', () => {
       q(fixture, 'machine-detail-meta')?.textContent?.replace(/\s+/g, ' '),
     ).toContain('via SSH alias horus · ptah 0.1.70 · protocol 3');
     expect(banners(fixture)).toHaveLength(0);
+    expect(q(fixture, 'machines-add')).not.toBeNull();
+    expect(q(fixture, 'machines-approvals-badge')).toBeNull();
+    expect(q(fixture, 'machine-approvals-waiting')).toBeNull();
+  });
+
+  it('shows the approval badge in the page header and an answerable card in the overview', async () => {
+    const request = {
+      id: 'p1',
+      toolName: 'Bash',
+      toolInput: { command: 'npm run migrate' },
+      toolUseId: 'tu1',
+      timestamp: Date.now(),
+      description: 'Run a command',
+    };
+    const { fixture, store } = await setup([HORUS], {
+      pendingApprovalsByMachine: signal(new Map([['m1', 1]])),
+      pendingApprovalCount: signal(1),
+      pendingApprovalRequestsByMachine: signal(
+        new Map([['m1', [{ sessionId: 's1', request, mode: 'answerable' }]]]),
+      ),
+    });
+    expect(q(fixture, 'machines-approvals-badge')?.textContent).toContain(
+      '1 approval waiting',
+    );
+    const card = q(fixture, 'machine-approvals-waiting');
+    expect(card?.textContent).toContain('Bash');
+    expect(card?.textContent).toContain('npm run migrate');
+    q(fixture, 'approval-allow')?.click();
+    await fixture.whenStable();
+    expect(store.respondPermission).toHaveBeenCalledWith(
+      'm1',
+      's1',
+      'p1',
+      'allow',
+    );
+  });
+
+  it('overview approval cards give no answer for watch-only and cached sessions', async () => {
+    const request = (id: string) => ({
+      id,
+      toolName: 'Bash',
+      toolInput: { command: 'npm run migrate' },
+      toolUseId: `tu-${id}`,
+      timestamp: Date.now(),
+      description: 'Run a command',
+    });
+    const { fixture, store } = await setup([HORUS], {
+      pendingApprovalRequestsByMachine: signal(
+        new Map([
+          [
+            'm1',
+            [
+              { sessionId: 's1', request: request('p1'), mode: 'watch-only' },
+              { sessionId: 's2', request: request('p2'), mode: 'cached' },
+            ],
+          ],
+        ]),
+      ),
+    });
+    const card = q(fixture, 'machine-approvals-waiting');
+    expect(card?.textContent).toContain('Waiting at Horus');
+    expect(card?.textContent).toContain('Saved request');
+    const enabled = Array.from(
+      card?.querySelectorAll<HTMLButtonElement>(
+        '[data-testid="approval-allow"], [data-testid="approval-deny"]',
+      ) ?? [],
+    ).filter((button) => !button.disabled);
+    expect(enabled).toHaveLength(0);
+    expect(store.respondPermission).not.toHaveBeenCalled();
+  });
+
+  it('overview approval cards name a machine without a display name by its alias', async () => {
+    const request = {
+      id: 'p1',
+      toolName: 'Bash',
+      toolInput: { command: 'npm run migrate' },
+      toolUseId: 'tu1',
+      timestamp: Date.now(),
+      description: 'Run a command',
+    };
+    const { fixture } = await setup(
+      [{ ...HORUS, displayName: '', state: 'offline' }],
+      {
+        pendingApprovalRequestsByMachine: signal(
+          new Map([['m1', [{ sessionId: 's1', request, mode: 'answerable' }]]]),
+        ),
+      },
+    );
+    expect(q(fixture, 'machine-approvals-waiting')?.textContent).toContain(
+      'horus is not connected.',
+    );
+  });
+
+  it('overview approval cards are disabled while the machine is not connected', async () => {
+    const request = {
+      id: 'p1',
+      toolName: 'Bash',
+      toolInput: { command: 'npm run migrate' },
+      toolUseId: 'tu1',
+      timestamp: Date.now(),
+      description: 'Run a command',
+    };
+    const { fixture, store } = await setup([{ ...HORUS, state: 'offline' }], {
+      pendingApprovalRequestsByMachine: signal(
+        new Map([['m1', [{ sessionId: 's1', request, mode: 'answerable' }]]]),
+      ),
+    });
+    const card = q(fixture, 'machine-approvals-waiting');
+    expect(card?.textContent).toContain('Horus is not connected.');
+    const allow = q<HTMLButtonElement>(fixture, 'approval-allow');
+    expect(allow?.disabled).toBe(true);
+    allow?.click();
+    // An offline machine keeps a timer, so the fixture never becomes stable.
+    await flush();
+    expect(store.respondPermission).not.toHaveBeenCalled();
+  });
+
+  it('narrow: selecting a machine opens the detail pane; "All machines" returns to the list', async () => {
+    const { fixture } = await setup([HORUS, ANUBIS]);
+    const shell = fixture.debugElement.query(
+      (node) => node.name === 'ptah-inbox-layout',
+    );
+    const detailOpen = () =>
+      (shell?.componentInstance as InboxLayoutComponent).detailOpen();
+    expect(detailOpen()).toBe(false);
+
+    host(fixture)
+      .querySelectorAll<HTMLButtonElement>('[data-testid="machine-row"]')[1]
+      .click();
+    fixture.detectChanges();
+    expect(detailOpen()).toBe(true);
+
+    await click(fixture, 'machines-narrow-back');
+    expect(detailOpen()).toBe(false);
+    // Only the narrow flag cleared; the machine stays selected.
+    expect(
+      q(fixture, 'machine-detail')?.querySelector('h2')?.textContent,
+    ).toContain('Anubis');
   });
 
   it('selecting a row shows that machine', async () => {
@@ -338,9 +482,9 @@ describe('MachinesViewComponent', () => {
     expect(q(fixture, 'machine-detail')).not.toBeNull();
   });
 
-  it('add machine from the list opens the form; cancel closes it', async () => {
+  it('add machine from the header opens the form; cancel closes it', async () => {
     const { fixture } = await setup([HORUS]);
-    await click(fixture, 'machine-list-add');
+    await click(fixture, 'machines-add');
     expect(q(fixture, 'add-machine-form')).not.toBeNull();
     await click(fixture, 'add-machine-cancel');
     expect(q(fixture, 'machine-detail')).not.toBeNull();
@@ -349,7 +493,11 @@ describe('MachinesViewComponent', () => {
 
 describe('MachinesViewComponent remote sessions', () => {
   it('opens a listed session in the pane and goes back to the machine', async () => {
-    const workspace = { workspaceId: 'w1', name: 'notes', path: '~/work/notes' };
+    const workspace = {
+      workspaceId: 'w1',
+      name: 'notes',
+      path: '~/work/notes',
+    };
     const session = {
       sessionId: 's1',
       title: 'Summarise sprint log',
@@ -388,7 +536,9 @@ describe('MachinesViewComponent remote sessions', () => {
     fixture.detectChanges();
     expect(openSession).toHaveBeenCalledWith('m1', 's1');
     expect(
-      element.querySelector('[data-testid="remote-session-title"]')?.textContent?.trim(),
+      element
+        .querySelector('[data-testid="remote-session-title"]')
+        ?.textContent?.trim(),
     ).toBe('Summarise sprint log');
 
     element
@@ -396,6 +546,8 @@ describe('MachinesViewComponent remote sessions', () => {
       ?.click();
     fixture.detectChanges();
     expect(closeSession).toHaveBeenCalledWith('m1', 's1');
-    expect(element.querySelector('[data-testid="remote-session-list"]')).not.toBeNull();
+    expect(
+      element.querySelector('[data-testid="remote-session-list"]'),
+    ).not.toBeNull();
   });
 });

@@ -7,6 +7,7 @@ import {
   effect,
   inject,
   input,
+  output,
   signal,
   untracked,
 } from '@angular/core';
@@ -43,6 +44,13 @@ const STATUS_INK: Readonly<Record<MachineReadinessCheck['status'], string>> = {
 const DETAIL_MAX = 200;
 const COPIED_FEEDBACK_MS = 2000;
 
+/** Counts of one finished readiness check, for the closed readiness tile. */
+export interface ReadinessCounts {
+  readonly passed: number;
+  readonly total: number;
+  readonly failed: number;
+}
+
 interface CheckRow {
   readonly key: string;
   readonly status: MachineReadinessCheck['status'];
@@ -72,7 +80,7 @@ interface CheckRow {
   host: { class: 'block' },
   template: `
     <section
-      class="flex max-w-[720px] flex-col gap-3 p-5"
+      class="flex max-w-[720px] flex-col gap-3"
       [attr.aria-busy]="loading() ? 'true' : null"
       aria-labelledby="ptah-readiness-heading"
     >
@@ -192,6 +200,9 @@ export class ReadinessPanelComponent {
 
   public readonly machine = input.required<RemoteMachine>();
 
+  /** Emits the counts of each finished check. */
+  public readonly counted = output<ReadinessCounts>();
+
   protected readonly readinessCommand = READINESS_COMMAND;
   protected readonly loading = signal(false);
   protected readonly error = signal<MachinesError | null>(null);
@@ -261,6 +272,15 @@ export class ReadinessPanelComponent {
     effect(() => {
       const machineId = this.machineId();
       untracked(() => void this.run(machineId));
+    });
+    effect(() => {
+      if (this.result() === null) return;
+      const rows = this.rows();
+      this.counted.emit({
+        total: rows.length,
+        passed: rows.filter((row) => row.status === 'pass').length,
+        failed: rows.filter((row) => row.status === 'fail').length,
+      });
     });
     inject(DestroyRef).onDestroy(() => {
       this.destroyed = true;

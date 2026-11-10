@@ -2,24 +2,21 @@ import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
-  Injector,
-  afterNextRender,
   computed,
   effect,
   inject,
   signal,
   untracked,
-  viewChild,
-  type ElementRef,
   type OnInit,
 } from '@angular/core';
 import { ArrowLeft, LucideAngularModule } from 'lucide-angular';
+import { InboxLayoutComponent } from '@ptah-extension/ui';
 import {
   MachinesStore,
   type MachinesOutcome,
   type RemoteMachine,
 } from '../../services/machines-store';
-import { DisplayTextPipe, displayText } from '../../utils/display-text';
+import { displayText } from '../../utils/display-text';
 import {
   machineBanners,
   type MachineBanner,
@@ -27,51 +24,46 @@ import {
 import { errorSentence } from '../../utils/remote-session-copy';
 import { AddMachinePaneComponent } from '../add-machine-pane/add-machine-pane.component';
 import { MachineListComponent } from '../machine-list/machine-list.component';
-import { MachineStatusComponent } from '../machine-status/machine-status.component';
 import { ReadinessPanelComponent } from '../readiness-panel/readiness-panel.component';
-import {
-  RemoteSessionListComponent,
-  type RemoteSessionOpenRequest,
-} from '../remote-session-list/remote-session-list.component';
+import type { RemoteSessionOpenRequest } from '../remote-session-list/remote-session-list.component';
 import { RemoteSessionViewComponent } from '../remote-session-view/remote-session-view.component';
+import {
+  MachineOverviewComponent,
+  type MachinesActionError,
+} from './machine-overview.component';
 import { MachinesIntroComponent } from './machines-intro.component';
+import { MachinesPageHeaderComponent } from './machines-page-header.component';
 
-/** What the right pane shows. */
+/** What the detail pane shows. */
 export type MachinesPaneMode =
-  | 'detail'
-  | 'add'
-  | 'repair'
-  | 'readiness'
-  | 'session';
-
+  'detail' | 'add' | 'repair' | 'readiness' | 'session';
 
 const CLOCK_TICK_MS = 1000;
 
-
 /**
- * The Machines surface (design 3, 4.1-4.5): the machine list on the left and,
- * on the right, the empty introduction, the add/pair form, the readiness
- * check, or the selected machine's header with its state banner.
+ * The Machines page (approved option A): the page header, then the shared
+ * `ptah-inbox-layout` inbox — the machine list with its search on the left,
+ * the selected machine's overview (or the add/pair, readiness or session
+ * pane) on the right. The shell owns the pane surfaces and the below-768 px
+ * single-pane switch; `detailOpen` opens the detail pane on narrow screens
+ * while a machine is selected or a pane other than the plain list is open.
  *
  * Machine state is read only from {@link MachinesStore} (`machines:state`),
  * never from session state (3.4). One clock ticks per second only while the
  * selected machine is offline or reconnecting, for "Lost contact" and "Next
  * attempt"; it stops otherwise and on destroy.
- *
- * The detail lists the machine's remote sessions; "Open" shows one session
- * in the pane, with a way back to the machine.
  */
 @Component({
   selector: 'ptah-machines-view',
   standalone: true,
   imports: [
     LucideAngularModule,
-    DisplayTextPipe,
+    InboxLayoutComponent,
+    MachinesPageHeaderComponent,
     MachineListComponent,
-    MachineStatusComponent,
+    MachineOverviewComponent,
     AddMachinePaneComponent,
     ReadinessPanelComponent,
-    RemoteSessionListComponent,
     RemoteSessionViewComponent,
     MachinesIntroComponent,
   ],
@@ -79,48 +71,58 @@ const CLOCK_TICK_MS = 1000;
   host: { class: 'flex h-full min-h-0 min-w-0 flex-1 bg-base-100' },
   template: `
     <div
-      class="flex min-h-0 min-w-0 flex-1 flex-col min-[760px]:flex-row"
+      class="mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 flex-col gap-4 p-4 md:p-6"
       data-testid="machines-view"
     >
-      <ptah-machine-list
-        class="max-h-[45%] shrink-0 border-b border-surface-border min-[760px]:max-h-none min-[760px]:w-[300px] min-[760px]:border-b-0 min-[760px]:border-r"
-        [machines]="store.machines()"
-        [selectedId]="selected()?.machineId ?? null"
-        [loading]="store.loading()"
-        [error]="store.error()"
-        [now]="now()"
-        (selected)="select($event)"
+      <ptah-machines-page-header
+        [pendingApprovals]="store.pendingApprovalCount()"
         (add)="openAdd()"
-        (retryLoad)="reload()"
       />
 
-      <section
-        class="min-h-0 min-w-0 flex-1 overflow-y-auto"
-        aria-label="Machine details"
-        data-testid="machines-pane"
+      <ptah-inbox-layout
+        class="min-h-0 flex-1"
+        listLabel="Machines"
+        detailLabel="Machine details"
+        [listWidth]="280"
+        [detailOpen]="detailOpen()"
       >
-        @switch (paneMode()) {
-          @case ('add') {
-            <ptah-add-machine-pane
-              (paired)="onPaired($event)"
-              (cancelled)="closePane()"
-            />
-          }
-          @case ('repair') {
-            @if (selected(); as machine) {
+        <ptah-machine-list
+          inboxList
+          [machines]="store.machines()"
+          [selectedId]="selected()?.machineId ?? null"
+          [loading]="store.loading()"
+          [error]="store.error()"
+          [now]="now()"
+          (selected)="select($event)"
+          (retryLoad)="reload()"
+        />
+
+        <div
+          class="flex min-h-0 flex-col gap-3"
+          [class.h-full]="paneMode() === 'session'"
+          data-testid="machines-pane"
+        >
+          @switch (paneMode()) {
+            @case ('add') {
               <ptah-add-machine-pane
-                [machine]="machine"
                 (paired)="onPaired($event)"
                 (cancelled)="closePane()"
               />
             }
-          }
-          @case ('readiness') {
-            @if (selected(); as machine) {
-              <div class="px-5 pt-4">
+            @case ('repair') {
+              @if (selected(); as machine) {
+                <ptah-add-machine-pane
+                  [machine]="machine"
+                  (paired)="onPaired($event)"
+                  (cancelled)="closePane()"
+                />
+              }
+            }
+            @case ('readiness') {
+              @if (selected(); as machine) {
                 <button
                   type="button"
-                  class="btn btn-ghost btn-xs gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                  class="btn btn-ghost btn-xs self-start gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
                   data-testid="machines-back"
                   (click)="closePane()"
                 >
@@ -131,220 +133,104 @@ const CLOCK_TICK_MS = 1000;
                   />
                   Back to {{ machineName(machine) }}
                 </button>
-              </div>
-              <ptah-readiness-panel [machine]="machine" />
+                <ptah-readiness-panel [machine]="machine" />
+              }
             }
-          }
-          @case ('session') {
-            @if (selected(); as machine) {
-              @if (openSession(); as session) {
-                <div class="flex h-full min-h-0 flex-col">
-                  <div class="px-5 pt-3">
-                    <button
-                      type="button"
-                      class="btn btn-ghost btn-xs gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                      data-testid="machines-session-back"
-                      (click)="closeSession()"
-                    >
-                      <lucide-angular
-                        [img]="ArrowLeftIcon"
-                        class="h-3.5 w-3.5"
-                        aria-hidden="true"
-                      />
-                      Back to {{ machineName(machine) }}
-                    </button>
-                  </div>
+            @case ('session') {
+              @if (selected(); as machine) {
+                @if (openSession(); as session) {
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-xs self-start gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                    data-testid="machines-session-back"
+                    (click)="closeSession()"
+                  >
+                    <lucide-angular
+                      [img]="ArrowLeftIcon"
+                      class="h-3.5 w-3.5"
+                      aria-hidden="true"
+                    />
+                    Back to {{ machineName(machine) }}
+                  </button>
                   <ptah-remote-session-view
                     [machineId]="machine.machineId"
                     [sessionId]="session.sessionId"
                     [title]="session.title"
                     [workspacePath]="session.workspacePath"
                   />
+                }
+              }
+            }
+            @default {
+              @if (selected(); as machine) {
+                <ptah-machine-overview
+                  [machine]="machine"
+                  [banners]="banners()"
+                  [busy]="busy()"
+                  [confirmingRemove]="confirmingRemove()"
+                  [actionError]="actionError()"
+                  (openReadiness)="paneMode.set('readiness')"
+                  (askRemove)="askRemove()"
+                  (cancelRemove)="cancelRemove()"
+                  (removeMachine)="remove(machine)"
+                  (retry)="retry(machine)"
+                  (repair)="paneMode.set('repair')"
+                  (opened)="showSession($event)"
+                  (backToList)="narrowDetailOpen.set(false)"
+                />
+              } @else if (!store.loading() && store.machines().length === 0 && !store.error()) {
+                <ptah-machines-intro (add)="openAdd()" />
+              } @else if (store.loading()) {
+                <div
+                  class="flex flex-col gap-2"
+                  role="status"
+                  aria-busy="true"
+                  data-testid="machines-detail-loading"
+                >
+                  <span class="sr-only">Loading machines…</span>
+                  <span
+                    class="skeleton h-10 rounded-xl"
+                    aria-hidden="true"
+                  ></span>
+                  <span
+                    class="skeleton h-10 rounded-xl"
+                    aria-hidden="true"
+                  ></span>
+                  <span
+                    class="skeleton h-10 rounded-xl"
+                    aria-hidden="true"
+                  ></span>
                 </div>
               }
             }
           }
-          @default {
-            @if (selected(); as machine) {
-              <div class="flex flex-col gap-4 p-5" data-testid="machine-detail">
-                <header
-                  class="flex flex-wrap items-start justify-between gap-3"
-                >
-                  <div class="flex min-w-0 flex-col gap-1">
-                    <div class="flex min-w-0 items-center gap-2">
-                      <h2
-                        class="truncate text-base font-semibold text-base-content"
-                      >
-                        {{ machineName(machine) }}
-                      </h2>
-                      <ptah-machine-status [state]="machine.state" />
-                    </div>
-                    <p
-                      class="text-xs text-base-content-muted"
-                      data-testid="machine-detail-meta"
-                    >
-                      via SSH alias
-                      <span class="font-mono">{{
-                        machine.alias | displayText
-                      }}</span>
-                      @if (machine.versions?.remote; as remote) {
-                        · ptah {{ remote.ptahVersion | displayText: 24 }} ·
-                        protocol {{ remote.protocol.max }}
-                      }
-                    </p>
-                  </div>
-                  <div class="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      class="btn btn-ghost btn-sm border border-surface-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                      data-testid="machine-readiness"
-                      (click)="paneMode.set('readiness')"
-                    >
-                      Readiness check
-                    </button>
-                    <button
-                      type="button"
-                      class="btn btn-ghost btn-sm text-state-err focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                      data-testid="machine-remove"
-                      [disabled]="busy()"
-                      (click)="askRemove()"
-                    >
-                      Remove machine
-                    </button>
-                  </div>
-                </header>
-
-                @if (confirmingRemove()) {
-                  <div
-                    class="flex flex-col gap-2 rounded-box border border-state-err bg-base-200 px-4 py-3"
-                    role="alertdialog"
-                    aria-labelledby="ptah-remove-title"
-                    aria-describedby="ptah-remove-text"
-                    data-testid="machine-remove-confirm"
-                    (keydown.escape)="confirmingRemove.set(false)"
-                  >
-                    <span
-                      id="ptah-remove-title"
-                      class="text-sm font-bold text-base-content"
-                      >Remove {{ machineName(machine) }}?</span
-                    >
-                    <span
-                      id="ptah-remove-text"
-                      class="text-sm text-base-content"
-                      >Deletes the stored token and stops the tunnel. Sessions
-                      on {{ machineName(machine) }} keep running there.</span
-                    >
-                    <div class="flex gap-2">
-                      <button
-                        type="button"
-                        class="btn btn-ghost btn-sm text-state-err border border-state-err focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                        data-testid="machine-remove-confirm-yes"
-                        [disabled]="busy()"
-                        (click)="remove(machine)"
-                      >
-                        Remove machine
-                      </button>
-                      <button
-                        #removeCancel
-                        type="button"
-                        class="btn btn-ghost btn-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                        data-testid="machine-remove-confirm-no"
-                        (click)="confirmingRemove.set(false)"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                }
-
-                @if (actionError(); as failure) {
-                  <div
-                    class="flex flex-col gap-1 rounded-box border border-state-err px-4 py-3 text-sm"
-                    role="alert"
-                    data-testid="machine-action-error"
-                  >
-                    <span class="font-bold text-base-content">{{
-                      failure.label
-                    }}</span>
-                    <span class="text-base-content">{{ failure.text }}</span>
-                  </div>
-                }
-
-                @for (banner of banners(); track banner.label) {
-                  <div
-                    class="flex flex-wrap items-start justify-between gap-3 rounded-box border px-4 py-3 text-sm"
-                    [class.border-state-err]="banner.tone === 'err'"
-                    [class.border-state-need]="banner.tone === 'need'"
-                    [attr.role]="banner.role"
-                    data-testid="machine-banner"
-                  >
-                    <span class="flex min-w-0 flex-1 flex-col gap-1">
-                      <span class="font-bold text-base-content">{{
-                        banner.label
-                      }}</span>
-                      <span class="text-base-content">{{ banner.text }}</span>
-                    </span>
-                    @switch (banner.action) {
-                      @case ('repair') {
-                        <button
-                          type="button"
-                          class="btn btn-primary btn-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                          data-testid="machine-repair"
-                          (click)="paneMode.set('repair')"
-                        >
-                          {{ machine.reason ? 'Re-pair' : 'Pair' }}
-                        </button>
-                      }
-                      @case ('retry') {
-                        <button
-                          type="button"
-                          class="btn btn-ghost btn-sm border border-surface-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                          data-testid="machine-retry"
-                          [disabled]="busy()"
-                          (click)="retry(machine)"
-                        >
-                          Retry now
-                        </button>
-                      }
-                    }
-                  </div>
-                }
-
-                <ptah-remote-session-list
-                  [machine]="machine"
-                  (opened)="showSession($event)"
-                />
-              </div>
-            } @else if (!store.loading() && store.machines().length === 0) {
-              <ptah-machines-intro (add)="openAdd()" />
-            }
-          }
-        }
-      </section>
+        </div>
+      </ptah-inbox-layout>
     </div>
   `,
 })
 export class MachinesViewComponent implements OnInit {
   protected readonly store = inject(MachinesStore);
-  private readonly injector = inject(Injector);
 
   protected readonly paneMode = signal<MachinesPaneMode>('detail');
   private readonly selectedId = signal<string | null>(null);
-  protected readonly confirmingRemove = signal(false);
+  /** Narrow (< 768 px) only: the user opened the detail pane. */
+  protected readonly narrowDetailOpen = signal(false);
+  /** The machine whose removal waits for confirmation. */
+  private readonly removeTargetId = signal<string | null>(null);
+  /** True only while the confirmed machine is still the selected machine. */
+  protected readonly confirmingRemove = computed(() => {
+    const target = this.removeTargetId();
+    return target !== null && target === this.selected()?.machineId;
+  });
   protected readonly busy = signal(false);
-  protected readonly actionError = signal<{
-    readonly label: string;
-    readonly text: string;
-  } | null>(null);
+  protected readonly actionError = signal<MachinesActionError | null>(null);
   protected readonly now = signal(Date.now());
   protected readonly openSession = signal<RemoteSessionOpenRequest | null>(
     null,
   );
 
   protected readonly ArrowLeftIcon = ArrowLeft;
-
-  private readonly removeCancel =
-    viewChild<ElementRef<HTMLButtonElement>>('removeCancel');
   private clock: ReturnType<typeof setInterval> | undefined;
 
   /** The selected machine; the first one when none (or a removed one) is selected. */
@@ -359,6 +245,11 @@ export class MachinesViewComponent implements OnInit {
     if (machine === null) return [];
     return machineBanners(machine, this.now());
   });
+
+  /** Below 768 px the shell shows one pane: the detail while this is true. */
+  protected readonly detailOpen = computed(
+    () => this.paneMode() !== 'detail' || this.narrowDetailOpen(),
+  );
 
   public constructor() {
     effect(() => {
@@ -384,12 +275,13 @@ export class MachinesViewComponent implements OnInit {
 
   protected select(machineId: string): void {
     if (machineId !== this.selected()?.machineId) {
-      this.confirmingRemove.set(false);
+      this.removeTargetId.set(null);
       this.actionError.set(null);
     }
     this.selectedId.set(machineId);
     this.openSession.set(null);
     this.paneMode.set('detail');
+    this.narrowDetailOpen.set(true);
   }
 
   protected showSession(session: RemoteSessionOpenRequest): void {
@@ -403,7 +295,7 @@ export class MachinesViewComponent implements OnInit {
   }
 
   protected openAdd(): void {
-    this.confirmingRemove.set(false);
+    this.removeTargetId.set(null);
     this.paneMode.set('add');
   }
 
@@ -418,21 +310,28 @@ export class MachinesViewComponent implements OnInit {
   protected onPaired(machine: RemoteMachine): void {
     this.selectedId.set(machine.machineId);
     this.actionError.set(null);
+    this.narrowDetailOpen.set(true);
     // Design 4.2: a successful pairing goes straight to the readiness check.
     this.paneMode.set('readiness');
   }
 
   protected askRemove(): void {
-    this.confirmingRemove.set(true);
-    afterNextRender(() => this.removeCancel()?.nativeElement.focus(), {
-      injector: this.injector,
-    });
+    this.removeTargetId.set(this.selected()?.machineId ?? null);
+  }
+
+  protected cancelRemove(): void {
+    this.removeTargetId.set(null);
   }
 
   protected async remove(machine: RemoteMachine): Promise<void> {
+    // The confirmation belongs to one machine. Reject a removal of another one.
+    if (this.removeTargetId() !== machine.machineId) {
+      this.removeTargetId.set(null);
+      return;
+    }
     await this.act('Remove failed', () => this.store.remove(machine.machineId));
     if (this.actionError() === null) {
-      this.confirmingRemove.set(false);
+      this.removeTargetId.set(null);
       this.selectedId.set(null);
     }
   }

@@ -109,6 +109,160 @@ describe('ReviewRunsStore', () => {
     expect(store.poll()?.error).toBe('github-poll-failed');
   });
 
+  it('searches loaded runs by pull request number and repository', async () => {
+    const otherRepo = { ...run, attemptId: 'rvw-429-01', prNumber: 429, repo: { owner: 'Hive-Academy', name: 'api' } };
+    call.mockImplementation((method: string) =>
+      Promise.resolve({
+        isSuccess: () => true,
+        data:
+          method === 'review:listRepositories'
+            ? []
+            : {
+                runs: [run, otherRepo],
+                nextCursor: null,
+                poll: { status: null, error: null, lastSuccessAt: null, lastErrorAt: null },
+              },
+      }),
+    );
+    await store.load();
+    expect(store.filteredRuns()).toHaveLength(2);
+    store.setSearch('428');
+    expect(store.filteredRuns()).toHaveLength(1);
+    expect(store.filteredRuns()[0].attemptId).toBe('rvw-428-01');
+    store.setSearch('hive-academy/api');
+    expect(store.filteredRuns()).toHaveLength(1);
+    expect(store.filteredRuns()[0].prNumber).toBe(429);
+    store.setSearch('999');
+    expect(store.filteredRuns()).toHaveLength(0);
+    store.clearFilters();
+    expect(store.filteredRuns()).toHaveLength(2);
+    expect(store.searchQuery()).toBe('');
+  });
+
+  it('appends the next run page through the list cursor and skips known attempts', async () => {
+    const second = { ...run, attemptId: 'rvw-429-01', prNumber: 429 };
+    call.mockImplementation((method: string, params: { cursor?: string }) =>
+      Promise.resolve({
+        isSuccess: () => true,
+        data:
+          method === 'review:listRepositories'
+            ? []
+            : {
+                runs: params?.cursor ? [second, run] : [run],
+                nextCursor: params?.cursor ? null : 'cursor-1',
+                poll: { status: null, error: null, lastSuccessAt: null, lastErrorAt: null },
+              },
+      }),
+    );
+    await store.load();
+    expect(store.nextCursor()).toBe('cursor-1');
+    await store.loadMore();
+    expect(call).toHaveBeenCalledWith('review:listRuns', { limit: 100, cursor: 'cursor-1' }, { timeout: 5_000 });
+    // The second page repeats rvw-428-01, which must not appear twice.
+    expect(store.runs()).toHaveLength(2);
+    expect(store.nextCursor()).toBeNull();
+    await store.loadMore();
+    const listCalls = call.mock.calls.filter(([method]) => method === 'review:listRuns');
+    expect(listCalls).toHaveLength(2);
+  });
+
+  it('drops a page that settles after a refresh and skips duplicates inside one page', async () => {
+    const second = { ...run, attemptId: 'rvw-429-01', prNumber: 429 };
+    const poll = { status: null, error: null, lastSuccessAt: null, lastErrorAt: null };
+    let releasePage: (value: unknown) => void = () => undefined;
+    let hold = true;
+    call.mockImplementation((method: string, params: { cursor?: string }) => {
+      if (method === 'review:listRepositories') return Promise.resolve({ isSuccess: () => true, data: [] });
+      const page = { isSuccess: () => true, data: { runs: [second, second], nextCursor: null, poll } };
+      if (params?.cursor && hold) return new Promise((resolve) => { releasePage = () => resolve(page); });
+      if (params?.cursor) return Promise.resolve(page);
+      return Promise.resolve({ isSuccess: () => true, data: { runs: [run], nextCursor: 'cursor-1', poll } });
+    });
+    await store.load();
+    const stale = store.loadMore();
+    await store.load();
+    releasePage(undefined);
+    await stale;
+    // The old page belongs to the list before the refresh.
+    expect(store.runs()).toHaveLength(1);
+    expect(store.nextCursor()).toBe('cursor-1');
+    hold = false;
+    await store.loadMore();
+    expect(store.runs().map((item) => item.attemptId)).toEqual(['rvw-428-01', 'rvw-429-01']);
+  });
+
+  it('drops a page that starts while a refresh is in flight and settles after it', async () => {
+    const second = { ...run, attemptId: 'rvw-429-01', prNumber: 429 };
+    const poll = { status: null, error: null, lastSuccessAt: null, lastErrorAt: null };
+    const first = { isSuccess: () => true, data: { runs: [run], nextCursor: 'cursor-1', poll } };
+    const releaseFirst: Array<() => void> = [];
+    let releasePage: () => void = () => undefined;
+    let holdFirst = false;
+    call.mockImplementation((method: string, params: { cursor?: string }) => {
+      if (method === 'review:listRepositories') return Promise.resolve({ isSuccess: () => true, data: [] });
+      if (params?.cursor)
+        return new Promise((resolve) => {
+          releasePage = () => resolve({ isSuccess: () => true, data: { runs: [second], nextCursor: 'old-cursor', poll } });
+        });
+      if (holdFirst) return new Promise((resolve) => { releaseFirst.push(() => resolve(first)); });
+      return Promise.resolve(first);
+    });
+    await store.load();
+    holdFirst = true;
+    const refresh = store.load();
+    const stale = store.loadMore();
+    expect(releaseFirst).toHaveLength(1);
+    releaseFirst[0]();
+    await refresh;
+    releasePage();
+    await stale;
+    expect(store.runs()).toHaveLength(1);
+    expect(store.nextCursor()).toBe('cursor-1');
+    expect(store.loadMoreError()).toBe(false);
+  });
+
+  it('keeps the loaded list when the next page fails, and retries on the next press', async () => {
+    const second = { ...run, attemptId: 'rvw-429-01', prNumber: 429 };
+    call.mockImplementation((method: string) =>
+      Promise.resolve({
+        isSuccess: () => true,
+        data:
+          method === 'review:listRepositories'
+            ? []
+            : {
+                runs: [run],
+                nextCursor: 'cursor-1',
+                poll: { status: null, error: null, lastSuccessAt: null, lastErrorAt: null },
+              },
+      }),
+    );
+    await store.load();
+    call.mockReset();
+    call.mockRejectedValue(new Error('offline'));
+    await store.loadMore();
+    expect(store.loadMoreError()).toBe(true);
+    expect(store.loadingMore()).toBe(false);
+    expect(store.runs()).toEqual([run]);
+    expect(store.nextCursor()).toBe('cursor-1');
+    call.mockReset();
+    call.mockImplementation((method: string) =>
+      Promise.resolve({
+        isSuccess: () => true,
+        data:
+          method === 'review:listRepositories'
+            ? []
+            : {
+                runs: [second],
+                nextCursor: null,
+                poll: { status: null, error: null, lastSuccessAt: null, lastErrorAt: null },
+              },
+      }),
+    );
+    await store.loadMore();
+    expect(store.loadMoreError()).toBe(false);
+    expect(store.runs()).toHaveLength(2);
+  });
+
   it('shows initial failure and explicit no-lanes state without a clean result', async () => {
     call.mockRejectedValue(new Error('unavailable'));
     await store.load();

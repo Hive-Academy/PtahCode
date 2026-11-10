@@ -65,7 +65,7 @@ let nextId = 0;
   host: { class: 'block' },
   template: `
     <form
-      class="flex max-w-[640px] flex-col gap-4 p-5"
+      class="flex max-w-[640px] flex-col gap-4"
       novalidate
       [attr.aria-busy]="busy() !== null ? 'true' : null"
       data-testid="add-machine-form"

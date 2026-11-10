@@ -56,28 +56,43 @@ const rows = (fixture: ComponentFixture<MachineListComponent>) =>
       '[data-testid="machine-row"]',
     ),
   );
+const search = (fixture: ComponentFixture<MachineListComponent>) =>
+  el(fixture).querySelector<HTMLInputElement>(
+    '[data-testid="machine-list-search"]',
+  )!;
+const type = (
+  fixture: ComponentFixture<MachineListComponent>,
+  text: string,
+) => {
+  const input = search(fixture);
+  input.value = text;
+  input.dispatchEvent(new Event('input'));
+  fixture.detectChanges();
+};
 
 describe('MachineListComponent', () => {
-  it('empty: says so, keeps the add control ghost, and names the local machine footer', () => {
+  it('empty: says so, and the pane has no add control or footer', () => {
     const fixture = render();
     expect(el(fixture).textContent).toContain('No machines yet.');
-    expect(el(fixture).textContent).toContain('This machine stays in Chat.');
-    const add = el(fixture).querySelector('[data-testid="machine-list-add"]');
-    expect(add?.classList).toContain('btn-ghost');
-    expect(add?.classList).not.toContain('btn-primary');
+    expect(el(fixture).textContent).not.toContain(
+      'This machine stays in Chat.',
+    );
+    expect(
+      el(fixture).querySelector('[data-testid="machine-list-add"]'),
+    ).toBeNull();
   });
 
-  it('loading: announces a busy status', () => {
-    const status = el(render({ loading: true })).querySelector(
-      '[data-testid="machine-list-loading"]',
-    );
+  it('loading: announces a busy status with three skeleton rows', () => {
+    const host = el(render({ loading: true }));
+    const status = host.querySelector('[data-testid="machine-list-loading"]');
     expect(status?.getAttribute('role')).toBe('status');
     expect(status?.getAttribute('aria-busy')).toBe('true');
+    expect(status?.querySelectorAll('.skeleton')).toHaveLength(3);
   });
 
   it('error: shows the sanitised message and a retry', () => {
     const fixture = render({
-      error: { message: 'boom\u202E', code: 'MACHINE_UNREACHABLE' },
+      error: { message: 'boom‮', code: 'MACHINE_UNREACHABLE' },
     });
     const retries: void[] = [];
     fixture.componentInstance.retryLoad.subscribe(() =>
@@ -88,31 +103,36 @@ describe('MachineListComponent', () => {
     );
     expect(alert?.getAttribute('role')).toBe('alert');
     expect(alert?.textContent).toContain('boom');
-    expect(alert?.textContent).not.toContain('\u202E');
+    expect(alert?.textContent).not.toContain('‮');
     el(fixture)
       .querySelector<HTMLButtonElement>('[data-testid="machine-list-retry"]')
       ?.click();
     expect(retries).toHaveLength(1);
   });
 
-  it('lists machines in a ul with name, alias, state and meta line', () => {
+  it('lists machines as listbox options with a name line and a state · last-seen line', () => {
     const fixture = render({
       machines: [HORUS, ANUBIS, CHAPPIE],
       selectedId: 'm1',
       now: 100_000,
     });
-    expect(el(fixture).querySelector('ul li')).not.toBeNull();
+    const listbox = el(fixture).querySelector('[role="listbox"]');
+    expect(listbox?.getAttribute('aria-label')).toBe('Machine list');
     const [horus, anubis, chappie] = rows(fixture);
     expect(horus.textContent).toContain('Horus');
-    expect(horus.textContent).toContain('horus');
+    // The prototype row shows the name only; the alias stays in the detail.
+    expect(horus.textContent).not.toContain('horus');
     expect(horus.textContent).toContain('Connected');
-    expect(horus.textContent).toContain('ptah 0.1.70');
+    expect(horus.textContent).not.toContain('ptah 0.1.70');
     expect(anubis.textContent).toContain('Reconnecting');
-    expect(anubis.textContent).toContain('Last seen 12 s ago');
+    expect(
+      anubis.querySelector('[data-testid="machine-row-meta"]')?.textContent,
+    ).toContain('12 s ago');
     expect(chappie.textContent).toContain('Version mismatch');
-    expect(chappie.textContent).toContain('Not connected');
-    const add = el(fixture).querySelector('[data-testid="machine-list-add"]');
-    expect(add?.classList).toContain('btn-primary');
+    expect(chappie.textContent).not.toContain('Not connected');
+    expect(
+      el(fixture).querySelector('[data-testid="machine-list-add"]'),
+    ).toBeNull();
   });
 
   it('marks the selected row and keeps one Tab stop', () => {
@@ -120,6 +140,8 @@ describe('MachineListComponent', () => {
     const [horus, anubis] = rows(fixture);
     expect(anubis.getAttribute('aria-current')).toBe('true');
     expect(horus.getAttribute('aria-current')).toBeNull();
+    expect(anubis.getAttribute('aria-selected')).toBe('true');
+    expect(horus.getAttribute('aria-selected')).toBe('false');
     expect(anubis.getAttribute('tabindex')).toBe('0');
     expect(horus.getAttribute('tabindex')).toBe('-1');
   });
@@ -152,22 +174,35 @@ describe('MachineListComponent', () => {
     el(fixture).remove();
   });
 
+  it('search filters rows by name and alias, and says so when nothing matches', () => {
+    const fixture = render({ machines: [HORUS, ANUBIS, CHAPPIE] });
+
+    type(fixture, 'anu');
+    expect(rows(fixture)).toHaveLength(1);
+    expect(rows(fixture)[0].textContent).toContain('Anubis');
+
+    type(fixture, 'HOR');
+    expect(rows(fixture)).toHaveLength(1);
+    expect(rows(fixture)[0].textContent).toContain('Horus');
+
+    type(fixture, 'zzz');
+    expect(rows(fixture)).toHaveLength(0);
+    const noMatch = el(fixture).querySelector(
+      '[data-testid="machine-list-no-match"]',
+    );
+    expect(noMatch?.textContent).toContain('No machine matches "zzz".');
+
+    type(fixture, '');
+    expect(rows(fixture)).toHaveLength(3);
+  });
+
   it('sanitises worker-supplied names', () => {
     const fixture = render({
-      machines: [{ ...HORUS, displayName: 'Ho\u202Erus\n' + 'x'.repeat(120) }],
+      machines: [{ ...HORUS, displayName: 'Ho‮rus\n' + 'x'.repeat(120) }],
     });
-    const name = rows(fixture)[0].querySelector('.font-semibold');
-    expect(name?.textContent).not.toContain('\u202E');
+    const name = rows(fixture)[0].querySelector('.font-medium');
+    expect(name?.textContent).not.toContain('‮');
     expect(Array.from(name?.textContent ?? '').length).toBeLessThanOrEqual(80);
   });
 
-  it('emits add', () => {
-    const fixture = render();
-    const adds: void[] = [];
-    fixture.componentInstance.add.subscribe(() => adds.push(undefined));
-    el(fixture)
-      .querySelector<HTMLButtonElement>('[data-testid="machine-list-add"]')
-      ?.click();
-    expect(adds).toHaveLength(1);
-  });
 });
