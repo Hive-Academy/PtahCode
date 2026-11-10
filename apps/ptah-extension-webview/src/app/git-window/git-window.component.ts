@@ -5,12 +5,13 @@ import {
 import { ClaudeRpcService } from '@ptah-extension/core';
 import { GitDockScopeStore, loadReviewShell } from '@ptah-extension/git-ui/services';
 import { GitWindowScopeSchema } from '@ptah-extension/shared';
+import { LucideAngularModule, PanelRight } from 'lucide-angular';
 import { GitWindowScopeHandler } from './git-window.config';
 
 @Component({
   selector: 'ptah-git-window',
   standalone: true,
-  imports: [NgComponentOutlet],
+  imports: [NgComponentOutlet, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Same pane as the docked Git dock: the dock class and the chrome glass role.
   host: {
@@ -20,7 +21,7 @@ import { GitWindowScopeHandler } from './git-window.config';
   template: `
     <header class="flex shrink-0 items-center justify-between border-b border-surface-border px-4 py-2">
       <h1 class="text-sm font-semibold">Git</h1>
-      <button type="button" class="btn btn-ghost btn-sm" (click)="attach()">Attach</button>
+      <button type="button" class="btn btn-ghost btn-sm gap-1" data-testid="git-window-attach" (click)="attach()"><lucide-angular [img]="AttachIcon" class="h-3.5 w-3.5" aria-hidden="true" />Attach</button>
     </header>
     @if (error()) {
       <div role="alert" [class]="shell() ? stripClass : centerClass" data-testid="git-window-error">
@@ -45,6 +46,7 @@ export class GitWindowComponent {
   public readonly error = signal<string | null>(null);
   public readonly shell = signal<Type<unknown> | null>(null);
   /** A state with no Git view fills the pane. With a Git view it is a strip above it. */
+  protected readonly AttachIcon = PanelRight;
   protected readonly centerClass = 'flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-4 text-center text-sm text-base-content-muted';
   protected readonly stripClass = 'flex shrink-0 items-center gap-2 px-4 py-2 text-xs';
   private destroyed = false;

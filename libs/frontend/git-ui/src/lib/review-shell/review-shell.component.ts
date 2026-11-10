@@ -12,6 +12,7 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
+import { LucideAngularModule, PictureInPicture2 } from 'lucide-angular';
 import { attentionConditionKey, ElectronLayoutService } from '@ptah-extension/core';
 import { NativeTabGroupComponent, type NativeTab } from '@ptah-extension/ui';
 import { CommitComposerComponent } from '../commit/commit-composer.component';
@@ -124,6 +125,7 @@ type BodyNotice = 'loading' | 'unavailable' | 'not-a-repo';
   selector: 'ptah-review-shell',
   standalone: true,
   imports: [
+    LucideAngularModule,
     CommitComposerComponent,
     ConflictBannerComponent,
     GitDockHeaderComponent,
@@ -178,7 +180,8 @@ type BodyNotice = 'loading' | 'unavailable' | 'not-a-repo';
       <div class="flex items-center" data-testid="git-dock-main-header">
         <ptah-git-dock-header class="min-w-0 flex-1" [compact]="compact()" />
         @if (canDetach()) {
-          <button type="button" class="btn btn-ghost btn-xs mr-2" data-testid="git-dock-detach" (click)="onDetach()">Detach</button>
+          <span class="mx-1 h-4 w-px shrink-0 bg-base-content/20" aria-hidden="true" data-testid="git-dock-detach-divider"></span>
+          <button type="button" class="btn btn-ghost btn-xs mr-2 gap-1" data-testid="git-dock-detach" (click)="onDetach()"><lucide-angular [img]="DetachIcon" class="h-3 w-3" aria-hidden="true" />Detach</button>
         }
       </div>
 
@@ -582,6 +585,8 @@ export class ReviewShellComponent {
   }
 
   /** The scope header's toggle: pin the current scope, or follow again. */
+  protected readonly DetachIcon = PictureInPicture2;
+
   protected canDetach(): boolean {
     return this.windowContext?.role === 'main' && this.windowContext.detach !== undefined;
   }

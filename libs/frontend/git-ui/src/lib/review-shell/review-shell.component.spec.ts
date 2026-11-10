@@ -1173,6 +1173,10 @@ describe('ReviewShellComponent', () => {
       const fixture = await render();
       const button = query(fixture, '[data-testid="git-dock-detach"]') as HTMLButtonElement;
       expect(button).not.toBeNull();
+      // The icon is decorative: the accessible name stays 'Detach'.
+      expect(button.textContent?.trim()).toBe('Detach');
+      expect(button.querySelector('lucide-angular')?.getAttribute('aria-hidden')).toBe('true');
+      expect(query(fixture, '[data-testid="git-dock-detach-divider"]')).not.toBeNull();
       button.click();
       expect(detach).toHaveBeenCalledTimes(1);
     });
