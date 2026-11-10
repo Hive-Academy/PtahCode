@@ -56,6 +56,7 @@ import {
   getModelPricingDescription,
   getPricingMap,
   normalizeAuthMethod,
+  isDirectAnthropic,
   type AuthEnv,
   type SessionId,
   type SessionRuntimeControls,
@@ -69,6 +70,7 @@ import {
 } from './config-rpc.schema';
 import { configRuntimeControls } from './config-runtime-controls';
 import { isTierAlias, savedModelOption } from './config-saved-model-option';
+import { modelPickerGroups } from './model-picker-groups';
 
 /**
  * Copy of an auth env taken for one `config:models-list` request.
@@ -566,8 +568,11 @@ export class ConfigRpcHandlers {
               this.modelResolver.resolve(value, resolutionEnv) ===
                 resolvedSavedModel);
           const models: SdkModelInfo[] = [];
+          const groups = isDirectAnthropic(resolutionEnv)
+            ? modelPickerGroups(sdkModels)
+            : null;
 
-          for (const m of sdkModels) {
+          for (const [index, m] of sdkModels.entries()) {
             let tier = this.modelResolver.detectTier(m.value);
             if (!tier && tierOverrides) {
               const match = Object.entries(tierOverrides).find(
@@ -588,7 +593,7 @@ export class ConfigRpcHandlers {
                 ? getModelPricingDescription(providerModelId, pricingOptions)
                 : m.description,
               isSelected: matchesSaved(m.value),
-              isRecommended: m.value.toLowerCase().includes('sonnet'),
+              ...(groups ? { group: groups[index] } : {}),
               providerModelId,
               tier,
             });
@@ -609,7 +614,6 @@ export class ConfigRpcHandlers {
                 ? getModelPricingDescription(providerModelId, pricingOptions)
                 : getModelPricingDescription(m.value, pricingOptions),
               isSelected: matchesSaved(m.value),
-              isRecommended: false,
               providerModelId,
               tier,
             });
@@ -781,7 +785,6 @@ export class ConfigRpcHandlers {
         option.description ||
         getModelPricingDescription(option.id, pricingOptions),
       isSelected: true,
-      isRecommended: false,
       providerModelId: null,
       tier: undefined,
     });

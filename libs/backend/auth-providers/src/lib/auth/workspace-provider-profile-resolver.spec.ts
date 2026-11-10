@@ -315,9 +315,7 @@ describe('WorkspaceProviderProfileResolver — live-catalogue tiers', () => {
     );
   });
 
-  it('lets a registry defaultTiers map outrank the catalogue', async () => {
-    // A verified tier map is a statement by whoever added the entry; the
-    // derivation is a heuristic over a list. The statement wins.
+  it('replaces a static default absent from the known catalogue', async () => {
     const expected = getAnthropicProvider('kimi-code')?.defaultTiers?.opus;
     expect(expected).toBeTruthy();
 
@@ -340,7 +338,7 @@ describe('WorkspaceProviderProfileResolver — live-catalogue tiers', () => {
       'default',
     );
 
-    expect(profile?.model).toBe(expected);
+    expect(profile?.model).toBe('anthropic/claude-opus-4.5');
   });
 });
 
@@ -644,23 +642,29 @@ describe('WorkspaceProviderProfileResolver — no snapshot', () => {
   it.each([
     'resolveProviderProfileForWorkspace',
     'buildProfileForPath',
-  ] as const)('%s rejects Codex before a legacy SDK profile or shared env can be used', async (method) => {
-    const h = createHarness({
-      workspaceSettings: {
-        authMethod: 'thirdParty',
-        anthropicProviderId: 'openai-codex',
-      },
-      sharedAuth: { authMethod: 'thirdParty', providerId: 'openai-codex' },
-    });
+  ] as const)(
+    '%s rejects Codex before a legacy SDK profile or shared env can be used',
+    async (method) => {
+      const h = createHarness({
+        workspaceSettings: {
+          authMethod: 'thirdParty',
+          anthropicProviderId: 'openai-codex',
+        },
+        sharedAuth: { authMethod: 'thirdParty', providerId: 'openai-codex' },
+      });
 
-    await expect(h.resolver[method](WORKSPACE, 'default')).rejects.toMatchObject({
-      name: 'AuthRequiredError',
-      providerId: 'openai-codex',
-      message: 'Codex chat requires a host with the native Codex runtime.',
-      recoveryHint: 'Use the Ptah desktop app (Electron) with native Codex enabled.',
-    });
-    expect(h.acquire).not.toHaveBeenCalled();
-  });
+      await expect(
+        h.resolver[method](WORKSPACE, 'default'),
+      ).rejects.toMatchObject({
+        name: 'AuthRequiredError',
+        providerId: 'openai-codex',
+        message: 'Codex chat requires a host with the native Codex runtime.',
+        recoveryHint:
+          'Use the Ptah desktop app (Electron) with native Codex enabled.',
+      });
+      expect(h.acquire).not.toHaveBeenCalled();
+    },
+  );
 
   it('fails closed when the shared auth env serves a different provider', async () => {
     // Z.AI resolved, but no key is stored: no snapshot can be built.
@@ -906,7 +910,7 @@ describe('resolveExecutionProfile', () => {
       name: 'AuthRequiredError',
       providerId: 'anthropic',
       message: expect.stringContaining(
-        'differs from the workspace\'s active provider',
+        "differs from the workspace's active provider",
       ),
     });
     expect(h.acquire).not.toHaveBeenCalled();
@@ -981,30 +985,27 @@ describe('resolveExecutionProfile', () => {
     },
   );
 
-  it(
-    'selects native Codex for a gateway turn with the gateway capability and Codex provider',
-    async () => {
-      const { resolver } = nativeHarness();
-      await expect(
-        resolver.resolveExecutionProfile({
-          ...input,
-          consumer: 'gateway',
-          hostCapabilities: { nativeCodex: false, nativeCodexGateway: true },
-        }),
-      ).resolves.toEqual({
-        runtime: 'codex-app-server',
-        seed: {
-          providerId: 'openai-codex',
-          consumer: 'gateway',
-          workspacePath: WORKSPACE,
-          home,
-          normalizedHome: identity.codex?.normalizedHome,
-          model: input.requestedModel,
-          existingIdentity: undefined,
-        },
-      });
-    },
-  );
+  it('selects native Codex for a gateway turn with the gateway capability and Codex provider', async () => {
+    const { resolver } = nativeHarness();
+    await expect(
+      resolver.resolveExecutionProfile({
+        ...input,
+        consumer: 'gateway',
+        hostCapabilities: { nativeCodex: false, nativeCodexGateway: true },
+      }),
+    ).resolves.toEqual({
+      runtime: 'codex-app-server',
+      seed: {
+        providerId: 'openai-codex',
+        consumer: 'gateway',
+        workspacePath: WORKSPACE,
+        home,
+        normalizedHome: identity.codex?.normalizedHome,
+        model: input.requestedModel,
+        existingIdentity: undefined,
+      },
+    });
+  });
 
   it.each([
     {
@@ -1037,31 +1038,30 @@ describe('resolveExecutionProfile', () => {
       hostCapabilities: { nativeCodex: true, nativeCodexGateway: true },
       allowed: false,
     },
-  ] as const)('resumes native Codex for $name only when allowed', async ({
-    consumer,
-    hostCapabilities,
-    allowed,
-  }) => {
-    const h = nativeHarness();
-    const request = {
-      ...input,
-      consumer,
-      hostCapabilities,
-      existingIdentity: identity,
-    };
-    const profile = h.resolver.resolveExecutionProfile(request);
-    if (allowed) {
-      await expect(profile).resolves.toMatchObject({
-        runtime: 'codex-app-server',
-        seed: { consumer, existingIdentity: identity },
-      });
-    } else {
-      await expect(profile).rejects.toBeInstanceOf(AuthRequiredError);
-      await expect(profile).rejects.toThrow(
-        'This session requires a host with native Codex support.',
-      );
-    }
-  });
+  ] as const)(
+    'resumes native Codex for $name only when allowed',
+    async ({ consumer, hostCapabilities, allowed }) => {
+      const h = nativeHarness();
+      const request = {
+        ...input,
+        consumer,
+        hostCapabilities,
+        existingIdentity: identity,
+      };
+      const profile = h.resolver.resolveExecutionProfile(request);
+      if (allowed) {
+        await expect(profile).resolves.toMatchObject({
+          runtime: 'codex-app-server',
+          seed: { consumer, existingIdentity: identity },
+        });
+      } else {
+        await expect(profile).rejects.toBeInstanceOf(AuthRequiredError);
+        await expect(profile).rejects.toThrow(
+          'This session requires a host with native Codex support.',
+        );
+      }
+    },
+  );
 
   it.each([
     {
@@ -1341,26 +1341,21 @@ describe('resolveExecutionProfile', () => {
         workspaceId: WORKSPACE,
       } as SessionRuntimeIdentity,
     },
-  ])(
-    'rejects Codex when native selection is disabled',
-    async (overrides) => {
-      const h = nativeHarness();
-      const legacy = jest.spyOn(
-        h.resolver,
-        'resolveProviderProfileForWorkspace',
-      );
-      await expect(
-        h.resolver.resolveExecutionProfile({ ...input, ...overrides }),
-      ).rejects.toMatchObject({
-        name: 'AuthRequiredError',
-        message: 'Codex chat requires a host with the native Codex runtime.',
-        providerId: 'openai-codex',
-        recoveryHint: 'Use the Ptah desktop app (Electron) with native Codex enabled.',
-      });
-      expect(legacy).not.toHaveBeenCalled();
-      expect(h.acquire).not.toHaveBeenCalled();
-    },
-  );
+  ])('rejects Codex when native selection is disabled', async (overrides) => {
+    const h = nativeHarness();
+    const legacy = jest.spyOn(h.resolver, 'resolveProviderProfileForWorkspace');
+    await expect(
+      h.resolver.resolveExecutionProfile({ ...input, ...overrides }),
+    ).rejects.toMatchObject({
+      name: 'AuthRequiredError',
+      message: 'Codex chat requires a host with the native Codex runtime.',
+      providerId: 'openai-codex',
+      recoveryHint:
+        'Use the Ptah desktop app (Electron) with native Codex enabled.',
+    });
+    expect(legacy).not.toHaveBeenCalled();
+    expect(h.acquire).not.toHaveBeenCalled();
+  });
 
   it('checks a stored model only on the Claude branch', async () => {
     const { resolver } = nativeHarness('kimi-code');
@@ -1525,7 +1520,9 @@ describe('WorkspaceProviderProfileResolver — resolveStoredModel', () => {
     expect(resolver.resolveStoredModel(WORKSPACE, 'gpt-7-nova')).toBe(
       'gpt-7-nova',
     );
-    expect(resolver.resolveStoredModel(WORKSPACE, 'gpt-6-luna')).toBe('default');
+    expect(resolver.resolveStoredModel(WORKSPACE, 'gpt-6-luna')).toBe(
+      'default',
+    );
   });
 
   it.each([

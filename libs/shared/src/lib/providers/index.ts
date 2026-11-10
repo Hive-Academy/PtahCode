@@ -37,6 +37,10 @@ export {
   KIMI_CODE_MODEL_CAPABILITIES,
 } from './entries/kimi-code-provider-entry';
 export {
+  isKimiCodeModelsPayload,
+  mergeKimiCodeModels,
+} from './entries/kimi-code-model-merge';
+export {
   OPENCODE_ZEN_PROVIDER_ENTRY,
   OPENCODE_GO_PROVIDER_ENTRY,
   OPENCODE_ZEN_DEFAULT_TIERS,

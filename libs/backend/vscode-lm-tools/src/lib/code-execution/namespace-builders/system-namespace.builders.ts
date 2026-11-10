@@ -483,7 +483,9 @@ LIFECYCLE:
   cli 'claude' is the system Claude lane (Claude Agent SDK session, Ptah tools
   over MCP; resumeSessionId continues its SDK session). modelTier applies only
   to ptahCliId lanes; system lanes ignore it. accountSelection is accepted only
-  with cli 'claude': ambient or omitted uses the existing Claude login; a named
+  with cli 'claude': ambient uses the existing Claude login; omitted uses the
+  lane account stored for the workspace when one is set, otherwise the existing
+  Claude login; a named
   account runs a fresh claude lane on that account (refused when the account
   cannot be proved), and a resume keeps the account stored with its session.
 
