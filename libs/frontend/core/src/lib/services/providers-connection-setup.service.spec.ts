@@ -335,6 +335,16 @@ describe('ProvidersConnectionSetupService', () => {
       expect(methods()).toEqual(['auth:saveSettings']);
       expect(call).toHaveBeenCalledWith('auth:saveSettings', expect.objectContaining({ authMethod: 'apiKey' }), undefined);
     });
+    it('refreshes the active Claude API route when a connect-only draft replaces its key', async () => {
+      persistedAuthMethod.set('apiKey');
+      await service.verifyDraft({ probeId: 'p1', providerId: 'anthropic', authMode: 'apiKey' });
+      call.mockClear();
+      await service.connectProvider(draft({ providerId: 'anthropic', activation: 'connect-only' }), context, hooks);
+      expect(methods()).toContain('auth:saveSettings');
+      expect(methods()).not.toContain('auth:setDirectAnthropicApiKey');
+      expect(call).toHaveBeenCalledWith('auth:saveSettings', expect.objectContaining({ authMethod: 'apiKey' }), undefined);
+    });
+
     it('blocks an unverified draft without writing', async () => {
       await expect(
         service.connectProvider(draft(), context, hooks),

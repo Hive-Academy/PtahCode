@@ -546,7 +546,13 @@ export class ProvidersConnectionSetupService implements MessageHandler {
         },
       });
     }
-    if (draft.providerId === 'anthropic' && draft.credential?.value.trim() && draft.activation === 'connect-only') {
+    // A key replacement while Claude API is ALREADY the main-agent route must refresh the adapter, so it
+    // goes through auth:saveSettings (same route) even when the wizard draft says connect-only.
+    const activation: typeof draft.activation =
+      draft.providerId === 'anthropic' && !!draft.credential?.value.trim() && this.authState.persistedAuthMethod() === 'apiKey'
+        ? 'use-main-agent'
+        : draft.activation;
+    if (draft.providerId === 'anthropic' && draft.credential?.value.trim() && activation === 'connect-only') {
       operations.push({
         fields: ['Connection credential'],
         stage: 'setup',
@@ -660,7 +666,7 @@ export class ProvidersConnectionSetupService implements MessageHandler {
     // wizard snapshot saw as empty and turn the user's own edit into a false conflict. Writing the edits
     // first is safe (an inactive provider's tiers never touch the running env), and a failed or
     // conflicting tier write stops activation through the activation stage.
-    if (draft.activation === 'use-main-agent') {
+    if (activation === 'use-main-agent') {
       operations.push(
         ...this.commits
           .operations({
@@ -684,10 +690,10 @@ export class ProvidersConnectionSetupService implements MessageHandler {
       context,
       hooks.commit,
       () =>
-        draft.activation !== 'use-main-agent' ||
+        activation !== 'use-main-agent' ||
         this.authWritable(hooks, draft.saveTo, !nativeAnthropic),
     );
-    if (committed && draft.activation === 'use-main-agent' && this.commits.commit().status === 'saved') {
+    if (committed && activation === 'use-main-agent' && this.commits.commit().status === 'saved') {
       await hooks.refreshAuthStatus();
     }
     return committed;

@@ -437,6 +437,18 @@ describe('AddCliInstanceModalComponent', () => {
       expect(state.clearCliTest).toHaveBeenCalledWith('glm-1');
     });
 
+    it('moves a Claude API instance to its own key when a replacement key is entered', async () => {
+      create({ id: 'ca-1', name: 'Claude', providerId: 'anthropic-api', providerName: 'Claude API' });
+      expect(q('add-cli-instance-key-help')?.textContent).toContain('separate key for this instance');
+      type('add-cli-instance-key', KEY);
+      submit()?.click();
+      await flush();
+      expect(state.saveSettings).toHaveBeenCalledWith(
+        { cli: [{ action: 'update', params: { id: 'ca-1', apiKey: KEY, credentialSource: 'instance' } }] },
+        CONTEXT,
+      );
+    });
+
     it('M7: name and key are two writes; a saved rename with a failed key says exactly that', async () => {
       create(GLM);
       state.saveSettings.mockImplementationOnce(async () => {

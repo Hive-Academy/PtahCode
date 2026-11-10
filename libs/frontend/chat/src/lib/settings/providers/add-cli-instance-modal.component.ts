@@ -451,6 +451,7 @@ export class AddCliInstanceModalComponent {
   protected readonly keyHint = computed(() => {
     const provider = this.provider();
     if (provider?.id === 'anthropic' && !this.editing()) return this.claudeSource() === 'shared-connection' ? null : 'Enter a separate Claude API key for this instance.';
+    if (this.editing()?.providerId === ANTHROPIC_API_LANE_ENTRY.id) return 'A key entered here becomes a separate key for this instance. Leave empty to keep the current credential source.';
     switch (this.keyMode()) {
       case 'none':
         return provider?.authMode === 'cli'
@@ -672,7 +673,11 @@ export class AddCliInstanceModalComponent {
                 ? [
                     {
                       action: 'update' as const,
-                      params: { id: target.id, apiKey: params.apiKey },
+                      // A key entered for a Claude API instance is a per-instance key: the source moves to
+                      // 'instance' in the same write (the registry rejects a key for the shared source).
+                      params: target.providerId === ANTHROPIC_API_LANE_ENTRY.id
+                        ? { id: target.id, apiKey: params.apiKey, credentialSource: 'instance' as const }
+                        : { id: target.id, apiKey: params.apiKey },
                     },
                   ]
                 : []),

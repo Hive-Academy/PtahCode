@@ -208,7 +208,7 @@ describe('ProvidersSettingsStateService', () => {
           provide: ModelStateService,
           useValue: { refreshModels: jest.fn(async () => undefined) },
         },
-        { provide: AuthStateService, useValue: { refreshAuthStatus } },
+        { provide: AuthStateService, useValue: { refreshAuthStatus, persistedAuthMethod: () => 'claudeCli' } },
       ],
     });
     workspace = TestBed.inject(WorkspaceScopeService);
@@ -1440,7 +1440,7 @@ describe('ProvidersSettingsStateService', () => {
             provide: ModelStateService,
             useValue: { refreshModels: jest.fn(async () => undefined) },
           },
-          { provide: AuthStateService, useValue: { refreshAuthStatus } },
+          { provide: AuthStateService, useValue: { refreshAuthStatus, persistedAuthMethod: () => 'claudeCli' } },
           { provide: VSCodeService, useValue: { isElectron } },
         ],
       });
