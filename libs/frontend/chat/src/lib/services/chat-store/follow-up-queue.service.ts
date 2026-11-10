@@ -14,6 +14,7 @@ import {
 import {
   createExecutionChatMessage,
   SessionId,
+  parseRpcUserErrorCode,
   type QueuedFollowUpSnapshot,
 } from '@ptah-extension/shared';
 import {
@@ -41,6 +42,41 @@ import { isTabBusyGenerating } from './tab-busy';
 const SLASH_COMMAND = /^\/[a-zA-Z]/;
 const CODEX_PROVIDER_ID = 'openai-codex';
 const LOG = 'FollowUpQueueService';
+const RECEIPT_RECHECK_DELAYS_MS = [2000, 4000, 8000, 16000, 30000] as const;
+const COMMITTED_RECEIPT_DEADLINE_MS = 10 * 60 * 1000;
+/** Shown when the outcome is unknown: the backend may still deliver the message. */
+const UNCONFIRMED_SEND_MESSAGE =
+  'Could not confirm whether the queued message was sent. It is back in the composer.';
+const COMMITTED_MISSING_RECEIPT_LIMIT = 3;
+
+type ReceiptCheck = {
+  timer?: ReturnType<typeof setTimeout>;
+  deadlineTimer?: ReturnType<typeof setTimeout>;
+  cancelled: boolean;
+  attempt: number;
+  committed?: boolean;
+  missingReceipts?: number;
+};
+
+const FAILURE_REASON = {
+  SESSION_CHANGED: 'the session changed',
+  SESSION_NOT_FOUND: 'the session changed',
+  SESSION_ENDED: 'the session ended',
+  AUTH_REQUIRED: 'sign-in is needed',
+  SEND_TIMEOUT: 'the request timed out',
+  CODEX_UNAVAILABLE: 'the provider is not connected',
+  SESSION_DRIVEN_ELSEWHERE: 'the session is connected elsewhere',
+} as const;
+const UNKNOWN_FAILURE = 'the request could not be completed';
+
+function safeFailureReason(code: unknown, cancelled: boolean, timedOut: boolean): string {
+  if (cancelled) return 'the request was stopped';
+  if (timedOut) return 'the request timed out';
+  const parsed = parseRpcUserErrorCode(code);
+  return parsed && parsed in FAILURE_REASON
+    ? FAILURE_REASON[parsed as keyof typeof FAILURE_REASON]
+    : UNKNOWN_FAILURE;
+}
 
 const NOTE = {
   turnChanged: 'The turn changed. It stays queued for the next turn.',
@@ -74,6 +110,8 @@ const NOTE = {
 @Injectable({ providedIn: 'root' })
 export class FollowUpQueueService {
   private readonly stopWithdrawals = new Map<string, (QueuedFollowUpSnapshot & { tabId: string })[]>();
+  private readonly uncertainRetries = new Map<string, { sessionId: SessionId; content: string; clientMessageId: string }>();
+  private readonly receiptChecks = new Map<string, ReceiptCheck>();
   private readonly store = inject(QueuedFollowUpStore);
   private readonly tabManager = inject(TabManagerService);
   private readonly rpc = inject(ClaudeRpcService);
@@ -95,6 +133,10 @@ export class FollowUpQueueService {
     destroyRef.onDestroy(
       this.tabManager.onTabClosed((event) => this.onTabClosed(event)),
     );
+    destroyRef.onDestroy(() => {
+      for (const id of this.receiptChecks.keys()) this.cancelReceiptCheck(id);
+      this.uncertainRetries.clear();
+    });
     // Wakes only while something is held: with no held item the effect reads
     // nothing else, so it costs nothing per tab update.
     effect(() => {
@@ -144,8 +186,11 @@ export class FollowUpQueueService {
     };
     const ownerToken = options?.ownerToken;
     const tab = this.findTab(tabId);
+    const retry = this.uncertainRetries.get(tabId);
+    this.uncertainRetries.delete(tabId);
     const entry: QueuedFollowUpEntry = {
-      clientMessageId: uuidv4(),
+      clientMessageId: retry && retry.sessionId === tab?.claudeSessionId && retry.content === sanitized
+        ? retry.clientMessageId : uuidv4(),
       tabId,
       sessionId: tab?.claudeSessionId ?? null,
       content: sanitized,
@@ -172,6 +217,7 @@ export class FollowUpQueueService {
     if (entry.sessionId !== null && entry.sessionId !== event.sessionId) return;
     switch (event.state) {
       case 'queued':
+        this.cancelReceiptCheck(entry.clientMessageId);
         if (entry.phase === 'submitting') {
           this.store.update(entry.clientMessageId, { phase: 'queued' });
         }
@@ -181,6 +227,7 @@ export class FollowUpQueueService {
         this.deliver(entry.clientMessageId, event.state);
         return;
       case 'withdrawn':
+        this.cancelReceiptCheck(entry.clientMessageId);
         if (this.stopWithdrawals.has(event.sessionId)) {
           this.stopWithdrawals.get(event.sessionId)?.push({
             clientMessageId: entry.clientMessageId,
@@ -193,7 +240,8 @@ export class FollowUpQueueService {
         this.store.settle(entry.clientMessageId, 'withdrawn');
         return;
       case 'failed':
-        this.fail(entry.clientMessageId, event.reason);
+        this.logger.warn(LOG, 'queued follow-up failed push', { reason: event.reason, errorCode: event.errorCode, tabId: event.tabId, sessionId: event.sessionId, clientMessageId: event.clientMessageId });
+        this.fail(entry.clientMessageId, safeFailureReason(event.errorCode, false, false));
         return;
     }
   }
@@ -404,6 +452,8 @@ export class FollowUpQueueService {
     this.store.update(clientMessageId, { phase: 'submitting', sessionId });
     let outcome: 'queued' | 'admitted' | 'failed' = 'failed';
     let startedTurn = false;
+    let reason = UNKNOWN_FAILURE;
+    let uncertain = false;
     try {
       const result = await this.sender.submitQueuedFollowUp({
         content: entry.content,
@@ -416,11 +466,32 @@ export class FollowUpQueueService {
       if (result.success && data?.success !== false && data?.cancelled !== true) {
         outcome = data?.queueState === 'queued' ? 'queued' : 'admitted';
         startedTurn = data?.enqueued === true && data.settled !== true;
+      } else {
+        const rawError = data?.error ?? result.error;
+        const errorCode = data?.errorCode ?? result.errorCode;
+        const timedOut = errorCode === 'SEND_TIMEOUT' ||
+          (typeof rawError === 'string' && rawError.startsWith('RPC timeout:'));
+        uncertain = timedOut;
+        reason = safeFailureReason(errorCode, data?.cancelled === true, timedOut);
+        this.logger.warn(LOG, 'queued chat:continue refused', {
+          error: rawError, errorCode, tabId, sessionId, clientMessageId,
+        });
       }
     } catch (error: unknown) {
-      this.logger.warn(LOG, 'queued chat:continue failed', error);
-    } finally {
-      this.sending.delete(tabId);
+      uncertain = true;
+      reason = safeFailureReason(undefined, false, error instanceof Error && /timeout/i.test(error.message));
+      this.logger.warn(LOG, 'queued chat:continue failed', {
+        error, errorCode: undefined, tabId, sessionId, clientMessageId,
+      });
+    }
+    if (outcome === 'failed' && uncertain && this.store.get(clientMessageId)) {
+      const receipt = await this.lookupReceipt(sessionId, tabId, clientMessageId);
+      if (receipt?.state === 'queued') outcome = 'queued';
+      if (receipt?.state === 'delivered' || receipt?.state === 'steered') outcome = 'admitted';
+      if (receipt?.state === 'rejected') {
+        uncertain = false;
+        reason = safeFailureReason(receipt.errorCode, false, false);
+      }
     }
     // A push may have settled it while the RPC was in flight.
     const current = this.store.get(clientMessageId);
@@ -436,11 +507,120 @@ export class FollowUpQueueService {
           this.tabManager.markStreaming(tabId);
         }
         this.deliver(clientMessageId, 'delivered');
-      } else {
-        this.fail(clientMessageId);
+      } else if (current.phase === 'submitting') {
+        if (uncertain) {
+          this.scheduleReceiptRecheck(entry, sessionId);
+        } else {
+          this.fail(clientMessageId, reason);
+        }
       }
     }
+    this.sending.delete(tabId);
     this.pump(tabId);
+  }
+
+  private scheduleReceiptRecheck(entry: QueuedFollowUpEntry, sessionId: SessionId): void {
+    const id = entry.clientMessageId;
+    const check = this.receiptChecks.get(id) ?? { cancelled: false, attempt: 0 };
+    if (check.cancelled || check.timer) return;
+    const delay = RECEIPT_RECHECK_DELAYS_MS[check.attempt];
+    if (delay === undefined) {
+      void this.abandonUncertain(entry, sessionId, check);
+      return;
+    }
+    this.receiptChecks.set(id, check);
+    check.timer = setTimeout(() => {
+      check.timer = undefined;
+      check.attempt++;
+      void this.recheckUncertain(entry, sessionId, check);
+    }, delay);
+  }
+
+  private async abandonUncertain(entry: QueuedFollowUpEntry, sessionId: SessionId, check: ReceiptCheck): Promise<void> {
+    const { clientMessageId, tabId } = entry;
+    const receipt = await this.lookupReceipt(sessionId, tabId, clientMessageId, true);
+    if (check.cancelled || this.store.get(clientMessageId)?.phase !== 'submitting') return;
+    if (receipt?.state !== undefined) check.missingReceipts = 0;
+    else if (check.committed) check.missingReceipts = (check.missingReceipts ?? 0) + 1;
+    if (receipt?.state === 'queued') {
+      this.cancelReceiptCheck(clientMessageId);
+      this.store.update(clientMessageId, { phase: 'queued' });
+    } else if (receipt?.state === 'delivered' || receipt?.state === 'steered') {
+      this.deliver(clientMessageId, receipt.state);
+    } else if (receipt?.state === 'rejected') {
+      this.fail(clientMessageId, 'it could not be confirmed');
+    } else if (receipt?.state === 'pending' && receipt.committed) {
+      if (!check.committed) {
+        check.committed = true;
+        check.deadlineTimer = setTimeout(() => {
+          check.deadlineTimer = undefined;
+          if (!check.cancelled && this.store.get(clientMessageId)?.phase === 'submitting') {
+            this.settleUnconfirmed(entry, sessionId);
+          }
+        }, COMMITTED_RECEIPT_DEADLINE_MS);
+      }
+      check.timer = setTimeout(() => {
+        check.timer = undefined;
+        void this.abandonUncertain(entry, sessionId, check);
+      }, 30000);
+    } else if (check.committed && (check.missingReceipts ?? 0) >= COMMITTED_MISSING_RECEIPT_LIMIT) {
+      this.settleUnconfirmed(entry, sessionId);
+    } else if (check.committed || check.attempt <= RECEIPT_RECHECK_DELAYS_MS.length) {
+      check.attempt++;
+      check.timer = setTimeout(() => {
+        check.timer = undefined;
+        void this.abandonUncertain(entry, sessionId, check);
+      }, 30000);
+    } else {
+      this.settleUnconfirmed(entry, sessionId);
+    }
+  }
+
+  private settleUnconfirmed(entry: QueuedFollowUpEntry, sessionId: SessionId): void {
+    const { tabId, clientMessageId } = entry;
+    this.logger.warn(LOG, 'queued receipt could not be confirmed', { tabId, clientMessageId });
+    this.uncertainRetries.set(tabId, { sessionId, content: entry.content, clientMessageId });
+    this.fail(clientMessageId, undefined, UNCONFIRMED_SEND_MESSAGE);
+  }
+
+  private async recheckUncertain(entry: QueuedFollowUpEntry, sessionId: SessionId, check: { cancelled: boolean; attempt: number }): Promise<void> {
+    const { clientMessageId, tabId } = entry;
+    if (check.cancelled || this.store.get(clientMessageId)?.phase !== 'submitting') return;
+    const receipt = await this.lookupReceipt(sessionId, tabId, clientMessageId);
+    if (check.cancelled || this.store.get(clientMessageId)?.phase !== 'submitting') return;
+    if (receipt?.state === 'queued') {
+      this.cancelReceiptCheck(clientMessageId);
+      this.store.update(clientMessageId, { phase: 'queued' });
+    } else if (receipt?.state === 'delivered' || receipt?.state === 'steered') this.deliver(clientMessageId, receipt.state);
+    else if (receipt?.state === 'rejected') {
+      this.fail(clientMessageId, safeFailureReason(receipt.errorCode, false, false));
+    } else this.scheduleReceiptRecheck(entry, sessionId);
+  }
+
+  private async lookupReceipt(sessionId: SessionId, tabId: string, clientMessageId: string, abandonPending = false): Promise<{ state: 'queued' | 'delivered' | 'steered' | 'pending' | 'rejected' | undefined; errorCode?: unknown; committed?: boolean } | null> {
+    try {
+      const result = await this.rpc.call('chat:queued-list', { sessionId, tabId, clientMessageId, ...(abandonPending ? { abandonPending: true } : {}) });
+      if (!result.success || !result.data) return null;
+      if (result.data.items.some((item) => item.clientMessageId === clientMessageId)) return { state: 'queued' };
+      return { state: result.data.receipt, errorCode: result.data.receiptErrorCode, committed: result.data.receiptCommitted };
+    } catch (error: unknown) {
+      this.logger.warn(LOG, 'queued receipt lookup failed', { error, tabId, sessionId, clientMessageId });
+      return null;
+    }
+  }
+
+  private cancelReceiptCheck(clientMessageId: string): void {
+    const check = this.receiptChecks.get(clientMessageId);
+    if (!check) return;
+    check.cancelled = true;
+    if (check.timer) clearTimeout(check.timer);
+    if (check.deadlineTimer) clearTimeout(check.deadlineTimer);
+    this.receiptChecks.delete(clientMessageId);
+  }
+
+  private cancelTabReceiptChecks(tabId: string): void {
+    for (const entry of this.store.forTab(tabId)) this.cancelReceiptCheck(entry.clientMessageId);
+    this.uncertainRetries.delete(tabId);
   }
 
   private async sendCommand(entry: QueuedFollowUpEntry, sessionId: SessionId): Promise<void> {
@@ -474,18 +654,21 @@ export class FollowUpQueueService {
   }
 
   private deliver(clientMessageId: string, outcome: 'delivered' | 'steered'): void {
+    this.cancelReceiptCheck(clientMessageId);
     const entry = this.store.settle(clientMessageId, outcome);
     if (entry) this.appendDeliveredBubble(entry);
   }
 
-  private fail(clientMessageId: string, reason?: string): void {
+  private fail(clientMessageId: string, reason?: string, message?: string): void {
+    this.cancelReceiptCheck(clientMessageId);
     const entry = this.store.settle(clientMessageId, 'failed');
     if (!entry) return;
     this.toComposer(entry.tabId, [entry.content]);
     this.actionBanner.showError(
-      reason
-        ? `A queued message was not sent (${reason}). It is back in the composer.`
-        : 'A queued message was not sent. It is back in the composer.',
+      message ??
+        (reason
+          ? `A queued message was not sent (${reason}). It is back in the composer.`
+          : 'A queued message was not sent. It is back in the composer.'),
       entry.tabId,
     );
   }
@@ -509,6 +692,7 @@ export class FollowUpQueueService {
   }
 
   private onTabClosed(event: ClosedTabEvent): void {
+    this.cancelTabReceiptChecks(event.tabId);
     if (event.kind === 'reset') {
       // The tab survives as a fresh conversation: what it still held goes
       // back to its composer; items already in the backend stay with the old
@@ -524,6 +708,7 @@ export class FollowUpQueueService {
     const tabIds = new Set(this.store.entries().map((entry) => entry.tabId));
     for (const tabId of tabIds) {
       if (this.findTab(tabId)) continue;
+      this.cancelTabReceiptChecks(tabId);
       this.store.removeTab(tabId);
       this.composerRestore.discard(tabId);
     }

@@ -76,6 +76,7 @@ interface HarnessOptions {
   busy?: boolean;
   /** Tab of the live Claude registration of SESSION_ID, if any. */
   registeredTab?: string;
+  streamAttached?: boolean;
   /** Autopilot at `yolo`, so a stop-intent prompt would interrupt. */
   autopilot?: boolean;
   sendMessageToSession?: jest.Mock;
@@ -84,6 +85,8 @@ interface HarnessOptions {
 
 function makeHarness(opts: HarnessOptions = {}) {
   const logger = createMockLogger();
+  let registration = opts.registeredTab !== undefined
+    ? { tabId: opts.registeredTab, realSessionId: SESSION_ID } : undefined;
   const held: QueuedFollowUpSnapshot[] = [];
   let listener: ((change: QueuedFollowUpStateChange) => void) | null = null;
   const broadcastMessage = jest.fn().mockResolvedValue(undefined);
@@ -135,10 +138,7 @@ function makeHarness(opts: HarnessOptions = {}) {
     { sendMessage: jest.fn(), broadcastMessage },
     adapter as never,
     {
-      find: (id: string) =>
-        opts.registeredTab !== undefined && id === SESSION_ID
-          ? { tabId: opts.registeredTab, realSessionId: SESSION_ID }
-          : undefined,
+      find: (id: string) => id === SESSION_ID ? registration : undefined,
     } as never,
   );
   const driverLock = createFakeDriverLockCoordinator();
@@ -185,7 +185,7 @@ function makeHarness(opts: HarnessOptions = {}) {
     {
       streamEventsToWebview: jest.fn(),
       // A live broadcast loop: the session is mid-turn or idle-but-attached.
-      isStreaming: jest.fn().mockReturnValue(true),
+      isStreaming: jest.fn().mockReturnValue(opts.streamAttached !== false),
     } as never,
     {
       injectInterruptedAgentsContext: jest
@@ -235,6 +235,8 @@ function makeHarness(opts: HarnessOptions = {}) {
     driverLock,
     bind,
     withdrawAll,
+    replaceRegistration: (tabId: string) => { registration = { tabId, realSessionId: SESSION_ID }; },
+    emitState: (change: QueuedFollowUpStateChange) => listener?.(change),
   };
 }
 
@@ -261,6 +263,110 @@ describe('ChatSessionService — backend-owned follow-up queue', () => {
     releaseDrive?.('drive');
     await expect(send).resolves.toMatchObject({ success: false, cancelled: true });
     expect(h.sendMessageToSession).not.toHaveBeenCalled();
+  });
+  it('refuses a replaced registration during admission before SDK send', async () => {
+    const h = makeHarness({ busy: true, registeredTab: TAB_ID });
+    let releaseDrive: ((value: string) => void) | undefined;
+    jest.spyOn(h.driverLock, 'beginDrive').mockImplementationOnce(
+      () => new Promise<string>((resolve) => { releaseDrive = resolve; }),
+    );
+    const send = h.service.continueSession(queued('next'));
+    await Promise.resolve();
+    h.replaceRegistration(TAB_ID);
+    releaseDrive?.('drive');
+    await expect(send).resolves.toMatchObject({ success: false, errorCode: 'SESSION_CHANGED' });
+    expect(h.sendMessageToSession).not.toHaveBeenCalled();
+  });
+  it('refuses an absent-to-present same-tab registration during admission', async () => {
+    const h = makeHarness({ busy: true });
+    let releaseDrive: ((value: string) => void) | undefined;
+    jest.spyOn(h.driverLock, 'beginDrive').mockImplementationOnce(
+      () => new Promise<string>((resolve) => { releaseDrive = resolve; }),
+    );
+    const send = h.service.continueSession(queued('next'));
+    await Promise.resolve();
+    h.replaceRegistration(TAB_ID);
+    releaseDrive?.('drive');
+    await expect(send).resolves.toMatchObject({ success: false, errorCode: 'SESSION_CHANGED' });
+    expect(h.sendMessageToSession).not.toHaveBeenCalled();
+  });
+  it('accepts a same-tab registration created by its own successful resume', async () => {
+    const h = makeHarness({ busy: true, registeredTab: TAB_ID, streamAttached: false });
+    Object.defineProperty(h.service, 'autoResumeIfInactive', {
+      value: async () => {
+        h.replaceRegistration(TAB_ID);
+        return { justResumed: true };
+      },
+    });
+    await expect(h.service.continueSession(queued('next'))).resolves.toMatchObject({ success: true });
+    expect(h.sendMessageToSession).toHaveBeenCalledTimes(1);
+  });
+  it('keeps a delivered receipt after native resume admission ends for a timed-out renderer', async () => {
+    const h = makeHarness({ busy: false, registeredTab: TAB_ID, streamAttached: false });
+    Object.defineProperty(h.service, 'autoResumeIfInactive', {
+      value: async () => ({ justResumed: true, promptDelivered: true }),
+    });
+    await expect(h.service.continueSession(queued('next'))).resolves.toMatchObject({
+      success: true, queueState: 'admitted',
+    });
+    expect(h.sendMessageToSession).not.toHaveBeenCalled();
+    expect(h.followUpQueue.receipt(SESSION_ID, TAB_ID, ID_1)).toBe('delivered');
+    expect(h.followUpQueue.receipt(SESSION_ID, OTHER_TAB, ID_1)).toBeUndefined();
+  });
+  it('refuses SDK send after atomic abandonment of a pending admission', async () => {
+    const h = makeHarness({ busy: true, registeredTab: TAB_ID });
+    let releaseDrive: ((value: string) => void) | undefined;
+    jest.spyOn(h.driverLock, 'beginDrive').mockImplementationOnce(
+      () => new Promise<string>((resolve) => { releaseDrive = resolve; }),
+    );
+    const send = h.service.continueSession(queued('next'));
+    await Promise.resolve();
+    expect(h.followUpQueue.receipt(SESSION_ID, TAB_ID, ID_1)).toBe('pending');
+    h.followUpQueue.abandonPending(SESSION_ID, TAB_ID, ID_1);
+    expect(h.followUpQueue.receipt(SESSION_ID, TAB_ID, ID_1)).toBe('rejected');
+    releaseDrive?.('drive');
+    await expect(send).resolves.toMatchObject({ success: false, errorCode: 'SESSION_CHANGED' });
+    expect(h.sendMessageToSession).not.toHaveBeenCalled();
+  });
+
+  it('returns accepted receipt when abandonment arrives after admission', async () => {
+    const h = makeHarness({ busy: false, registeredTab: TAB_ID, streamAttached: false });
+    Object.defineProperty(h.service, 'autoResumeIfInactive', {
+      value: async () => ({ justResumed: true, promptDelivered: true }),
+    });
+    await h.service.continueSession(queued('next'));
+    h.followUpQueue.abandonPending(SESSION_ID, TAB_ID, ID_1);
+    expect(h.followUpQueue.receipt(SESSION_ID, TAB_ID, ID_1)).toBe('delivered');
+  });
+  it('keeps a typed rejected receipt after refused admission ends', async () => {
+    const h = makeHarness({ busy: true, registeredTab: OTHER_TAB });
+    await expect(h.service.continueSession(queued('next'))).resolves.toMatchObject({
+      success: false, errorCode: 'SESSION_NOT_FOUND',
+    });
+    expect(h.followUpQueue.receipt(SESSION_ID, TAB_ID, ID_1)).toBe('rejected');
+    expect(h.followUpQueue.receiptErrorCode(SESSION_ID, TAB_ID, ID_1)).toBe('SESSION_NOT_FOUND');
+  });
+  it('keeps receipts scoped to the submitting tab after ownership transfers', async () => {
+    const h = makeHarness({ busy: true, registeredTab: TAB_ID });
+    await h.service.continueSession(queued('first', ID_1));
+    h.replaceRegistration(OTHER_TAB);
+    expect(h.followUpQueue.receipt(SESSION_ID, TAB_ID, ID_1)).toBe('queued');
+    expect(h.followUpQueue.receipt(SESSION_ID, OTHER_TAB, ID_1)).toBeUndefined();
+    h.followUpQueue.bind(SESSION_ID, OTHER_TAB, ID_2);
+    h.emitState({ sessionId: SESSION_ID, clientMessageId: ID_2, state: 'delivered' });
+    expect(h.followUpQueue.receipt(SESSION_ID, OTHER_TAB, ID_2)).toBe('delivered');
+    expect(h.followUpQueue.receipt(SESSION_ID, TAB_ID, ID_2)).toBeUndefined();
+  });
+  it('reports an unfinished admission as pending to its submitting tab only', () => {
+    const h = makeHarness();
+    h.followUpQueue.beginAdmission(SESSION_ID, TAB_ID, ID_1);
+    h.followUpQueue.beginAdmission(SESSION_ID, TAB_ID, ID_1);
+    expect(h.followUpQueue.receipt(SESSION_ID, TAB_ID, ID_1)).toBe('pending');
+    expect(h.followUpQueue.receipt(SESSION_ID, OTHER_TAB, ID_1)).toBeUndefined();
+    h.followUpQueue.endAdmission(SESSION_ID, ID_1);
+    expect(h.followUpQueue.receipt(SESSION_ID, TAB_ID, ID_1)).toBe('pending');
+    h.followUpQueue.endAdmission(SESSION_ID, ID_1);
+    expect(h.followUpQueue.receipt(SESSION_ID, TAB_ID, ID_1)).toBeUndefined();
   });
   it('accepts a queued follow-up while a turn runs and reports it held', async () => {
     const h = makeHarness({ busy: true });

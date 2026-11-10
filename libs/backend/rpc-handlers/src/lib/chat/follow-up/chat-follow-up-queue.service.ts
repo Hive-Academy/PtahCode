@@ -32,6 +32,7 @@ import type {
   IAgentAdapter,
   QueuedFollowUpSnapshot,
   QueuedFollowUpStateChange,
+  RpcUserErrorCode,
   SessionId,
   SteerQueuedFollowUpResult,
 } from '@ptah-extension/shared';
@@ -47,13 +48,22 @@ type SessionRegistrations = Pick<SessionLifecycleManager, 'find'>;
 
 /** Refusal text shared by every ownership check; it names no id. */
 const NOT_THIS_TAB_MESSAGE = 'This conversation is not open in this tab.';
+const RECEIPT_RETENTION_MS = 10 * 60 * 1000;
+const MAX_TERMINAL_RECEIPTS = 200;
 
 @injectable()
 export class ChatFollowUpQueueService {
   /** sessionId → (clientMessageId → tabId) for items still held. */
   private readonly bindings = new Map<string, Map<string, string>>();
   private readonly states = new Map<string, Map<string, QueuedFollowUpStateChange['state']>>();
+  private readonly receiptOwners = new Map<string, Map<string, string>>();
+  private readonly rejections = new Map<string, Map<string, RpcUserErrorCode | undefined>>();
+  private readonly terminalAt = new Map<string, Map<string, number>>();
+  private readonly abandoned = new Map<string, Set<string>>();
+  private readonly committed = new Map<string, Set<string>>();
+  private readonly admissions = new Map<string, Map<string, { tabId: string; count: number }>>();
   private readonly stopGenerations = new Map<string, number>();
+  private readonly stopAt = new Map<string, number>();
   private readonly submissions = new Map<string, Set<Promise<void>>>();
   private readonly unsubscribe: (() => void) | null;
 
@@ -83,7 +93,14 @@ export class ChatFollowUpQueueService {
     this.unsubscribe?.();
     this.bindings.clear();
     this.states.clear();
+    this.receiptOwners.clear();
+    this.rejections.clear();
+    this.terminalAt.clear();
+    this.abandoned.clear();
+    this.committed.clear();
+    this.admissions.clear();
     this.stopGenerations.clear();
+    this.stopAt.clear();
     this.submissions.clear();
   }
 
@@ -99,11 +116,108 @@ export class ChatFollowUpQueueService {
   }
 
   stopGeneration(sessionId: string): number {
+    this.pruneStopGenerations();
     return this.stopGenerations.get(sessionId) ?? 0;
   }
 
   advanceStopGeneration(sessionId: string): void {
     this.stopGenerations.set(sessionId, this.stopGeneration(sessionId) + 1);
+    this.stopAt.delete(sessionId);
+    this.stopAt.set(sessionId, this.now());
+    this.pruneStopGenerations();
+  }
+
+  private pruneStopGenerations(): void {
+    for (const [sessionId, at] of this.stopAt) {
+      if ((this.now() - at >= RECEIPT_RETENTION_MS || this.stopAt.size > MAX_TERMINAL_RECEIPTS) &&
+          !this.admissions.get(sessionId)?.size && !this.submissions.get(sessionId)?.size) {
+        this.stopAt.delete(sessionId);
+        this.stopGenerations.delete(sessionId);
+      }
+    }
+  }
+
+  /** Remove all session-local receipt state when the owner retires it. */
+  retireSession(sessionId: string): void {
+    this.bindings.delete(sessionId);
+    this.states.delete(sessionId);
+    this.receiptOwners.delete(sessionId);
+    this.rejections.delete(sessionId);
+    this.terminalAt.delete(sessionId);
+    this.abandoned.delete(sessionId);
+    this.committed.delete(sessionId);
+    this.admissions.delete(sessionId);
+    this.stopGenerations.delete(sessionId);
+    this.stopAt.delete(sessionId);
+    this.submissions.delete(sessionId);
+  }
+
+  private evictReceipt(sessionId: string, id: string): void {
+    if (this.admissions.get(sessionId)?.size) return;
+    this.states.get(sessionId)?.delete(id);
+    this.receiptOwners.get(sessionId)?.delete(id);
+    this.rejections.get(sessionId)?.delete(id);
+    this.terminalAt.get(sessionId)?.delete(id);
+    this.abandoned.get(sessionId)?.delete(id);
+    this.bindings.get(sessionId)?.delete(id);
+    this.committed.get(sessionId)?.delete(id);
+    for (const map of [this.states, this.receiptOwners, this.rejections, this.terminalAt, this.bindings]) {
+      if (map.get(sessionId)?.size === 0) map.delete(sessionId);
+    }
+    if (this.abandoned.get(sessionId)?.size === 0) this.abandoned.delete(sessionId);
+    if (this.committed.get(sessionId)?.size === 0) this.committed.delete(sessionId);
+  }
+
+  private pruneReceipts(sessionId: string): void {
+    const times = this.terminalAt.get(sessionId);
+    if (!times) return;
+    for (const [id, at] of times) {
+      if (this.now() - at >= RECEIPT_RETENTION_MS || times.size > MAX_TERMINAL_RECEIPTS) {
+        if (!this.admissions.get(sessionId)?.size) this.evictReceipt(sessionId, id);
+      }
+    }
+  }
+
+  private markTerminal(sessionId: string, id: string): void {
+    const times = this.terminalAt.get(sessionId) ?? new Map<string, number>();
+    if (!times.has(id)) times.set(id, this.now());
+    this.terminalAt.set(sessionId, times);
+    for (const recordedSession of this.terminalAt.keys()) this.pruneReceipts(recordedSession);
+  }
+
+  /** Overridable clock for retention tests. */
+  protected now(): number { return Date.now(); }
+
+  abandonPending(sessionId: string, tabId: string, id: string): void {
+    if (this.receipt(sessionId, tabId, id) !== 'pending') return;
+    if (this.isCommitted(sessionId, id)) return;
+    const abandoned = this.abandoned.get(sessionId) ?? new Set<string>();
+    abandoned.add(id);
+    this.abandoned.set(sessionId, abandoned);
+    this.rejectAdmission(sessionId, tabId, id, 'SESSION_CHANGED');
+  }
+
+  commitAdmission(sessionId: string, id: string): void {
+    const committed = this.committed.get(sessionId) ?? new Set<string>();
+    committed.add(id);
+    this.committed.set(sessionId, committed);
+  }
+
+  isCommitted(sessionId: string, id: string): boolean {
+    return this.committed.get(sessionId)?.has(id) === true;
+  }
+
+  /** Number of retained session receipt maps, for retention diagnostics. */
+  receiptSessionCount(): number {
+    return new Set([
+      ...this.states.keys(), ...this.receiptOwners.keys(), ...this.rejections.keys(),
+      ...this.terminalAt.keys(), ...this.abandoned.keys(), ...this.bindings.keys(),
+      ...this.committed.keys(),
+    ]).size;
+  }
+
+  isAbandoned(sessionId: string, id: string): boolean {
+    return this.abandoned.get(sessionId)?.has(id) === true;
   }
 
   /**
@@ -118,8 +232,88 @@ export class ChatFollowUpQueueService {
     }
   }
 
+  /** Capture the actual registration object so replacement under the same id is visible. */
+  liveIdentity(sessionId: string): object | undefined {
+    const record = this.registrations?.find(sessionId);
+    return record?.realSessionId === sessionId ? record : undefined;
+  }
+
+  ownerIdentity(sessionId: string): string | undefined {
+    return this.ownerTab(sessionId);
+  }
+
+  beginAdmission(sessionId: string, tabId: string, clientMessageId: string): void {
+    const admissions = this.admissions.get(sessionId) ?? new Map<string, { tabId: string; count: number }>();
+    const previousOwner = admissions.get(clientMessageId)?.tabId ??
+      this.receiptOwners.get(sessionId)?.get(clientMessageId);
+    if (previousOwner !== undefined && previousOwner !== tabId) {
+      throw new RpcUserError(NOT_THIS_TAB_MESSAGE, 'FOLLOW_UP_ID_CONFLICT');
+    }
+    admissions.set(clientMessageId, { tabId, count: (admissions.get(clientMessageId)?.count ?? 0) + 1 });
+    this.admissions.set(sessionId, admissions);
+  }
+
+  endAdmission(sessionId: string, clientMessageId: string): void {
+    const admissions = this.admissions.get(sessionId);
+    const admission = admissions?.get(clientMessageId);
+    if (!admission) return;
+    if (admission.count > 1) admissions?.set(clientMessageId, { ...admission, count: admission.count - 1 });
+    else admissions?.delete(clientMessageId);
+    if (admissions?.size === 0) this.admissions.delete(sessionId);
+    this.pruneReceipts(sessionId);
+  }
+
+  /** A native resume already started the turn; keep its receipt after admission ends. */
+  acceptResumed(sessionId: string, tabId: string, clientMessageId: string): void {
+    this.committed.get(sessionId)?.delete(clientMessageId);
+    if (this.committed.get(sessionId)?.size === 0) this.committed.delete(sessionId);
+    this.bind(sessionId, tabId, clientMessageId);
+    const states = this.states.get(sessionId) ?? new Map<string, QueuedFollowUpStateChange['state']>();
+    if (!states.has(clientMessageId)) states.set(clientMessageId, 'delivered');
+    this.states.set(sessionId, states);
+    this.unbind(sessionId, clientMessageId);
+    this.markTerminal(sessionId, clientMessageId);
+  }
+
+  rejectAdmission(sessionId: string, tabId: string, clientMessageId: string, errorCode?: RpcUserErrorCode): void {
+    this.committed.get(sessionId)?.delete(clientMessageId);
+    if (this.committed.get(sessionId)?.size === 0) this.committed.delete(sessionId);
+    const receipt = this.receipt(sessionId, tabId, clientMessageId);
+    if (receipt === 'delivered' || receipt === 'steered' || receipt === 'queued') return;
+    const owners = this.receiptOwners.get(sessionId) ?? new Map<string, string>();
+    owners.set(clientMessageId, tabId);
+    this.receiptOwners.set(sessionId, owners);
+    const rejected = this.rejections.get(sessionId) ?? new Map<string, RpcUserErrorCode | undefined>();
+    if (!rejected.has(clientMessageId)) rejected.set(clientMessageId, errorCode);
+    this.rejections.set(sessionId, rejected);
+    this.markTerminal(sessionId, clientMessageId);
+  }
+
+  receiptErrorCode(sessionId: string, tabId: string, clientMessageId: string): RpcUserErrorCode | undefined {
+    return this.receipt(sessionId, tabId, clientMessageId) === 'rejected'
+      ? this.rejections.get(sessionId)?.get(clientMessageId) : undefined;
+  }
+
+  receipt(sessionId: string, tabId: string, clientMessageId: string): 'queued' | 'delivered' | 'steered' | 'pending' | 'rejected' | undefined {
+    this.pruneReceipts(sessionId);
+    const owner = this.receiptOwners.get(sessionId)?.get(clientMessageId) ??
+      this.admissions.get(sessionId)?.get(clientMessageId)?.tabId;
+    if (owner !== tabId) return undefined;
+    const state = this.states.get(sessionId)?.get(clientMessageId);
+    if (state === 'queued' || state === 'delivered' || state === 'steered') return state;
+    if (this.rejections.get(sessionId)?.has(clientMessageId)) return 'rejected';
+    return this.admissions.get(sessionId)?.has(clientMessageId) ? 'pending' : undefined;
+  }
+
   /** Record the queuing tab BEFORE the adapter sees the item. */
   bind(sessionId: string, tabId: string, clientMessageId: string): void {
+    const owners = this.receiptOwners.get(sessionId) ?? new Map<string, string>();
+    const previousOwner = owners.get(clientMessageId);
+    if (previousOwner !== undefined && previousOwner !== tabId) {
+      throw new RpcUserError(NOT_THIS_TAB_MESSAGE, 'FOLLOW_UP_ID_CONFLICT');
+    }
+    owners.set(clientMessageId, tabId);
+    this.receiptOwners.set(sessionId, owners);
     let items = this.bindings.get(sessionId);
     if (!items) {
       items = new Map();
@@ -237,11 +431,19 @@ export class ChatFollowUpQueueService {
     const states = this.states.get(sessionId) ?? new Map<string, QueuedFollowUpStateChange['state']>();
     states.set(change.clientMessageId, change.state);
     this.states.set(sessionId, states);
-    const tabId =
-      this.boundTab(sessionId, change.clientMessageId) ??
-      this.registeredTab(sessionId);
+    const tabId = this.receiptOwners.get(sessionId)?.get(change.clientMessageId) ??
+      this.boundTab(sessionId, change.clientMessageId);
+    if (tabId !== undefined) {
+      const owners = this.receiptOwners.get(sessionId) ?? new Map<string, string>();
+      if (!owners.has(change.clientMessageId)) owners.set(change.clientMessageId, tabId);
+      this.receiptOwners.set(sessionId, owners);
+    }
     if (change.state !== 'queued') this.unbind(sessionId, change.clientMessageId);
-    if (tabId === undefined) {
+    if (change.state !== 'queued') this.markTerminal(sessionId, change.clientMessageId);
+    // An unbound change still reaches the live registration tab, but that
+    // tab never becomes the receipt owner: ownership follows the submitter.
+    const pushTabId = tabId ?? this.registeredTab(sessionId);
+    if (pushTabId === undefined) {
       this.logger.debug('[RPC] queued follow-up state has no tab', {
         sessionId,
         state: change.state,
@@ -250,9 +452,10 @@ export class ChatFollowUpQueueService {
     }
     const payload: ChatQueuedMessageStateEvent = {
       sessionId: change.sessionId,
-      tabId,
+      tabId: pushTabId,
       clientMessageId: change.clientMessageId,
       state: change.state,
+      ...(change.state === 'failed' && change.reason === 'Session ended' ? { errorCode: 'SESSION_ENDED' as const } : {}),
       ...(change.reason !== undefined ? { reason: change.reason } : {}),
     };
     this.webviewManager

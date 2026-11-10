@@ -86,6 +86,7 @@ import type {
   ChatStartResult,
   ChatContinueParams,
   ChatContinueResult,
+  RpcUserErrorCode,
   ChatAbortParams,
   ChatAbortResult,
   ChatRunningAgentsParams,
@@ -162,6 +163,7 @@ import type {
  * path uses the separate `prompt` positional arg, not this field).
  */
 interface AutoResumePreflight extends MainSessionAccountSelection {
+  clientMessageId?: ChatContinueParams['clientMessageId'];
   systemPrompt?: ChatContinueParams['systemPrompt'];
   sessionId: SessionId;
   tabId: string;
@@ -318,9 +320,17 @@ type ChatHostRouting = Pick<HostRoutingCoordinator, 'admitUserTurn'>;
 type ChatFollowUpQueue = Pick<
   ChatFollowUpQueueService,
   | 'assertTabOwnsSession'
+  | 'beginAdmission'
+  | 'endAdmission'
+  | 'liveIdentity'
+  | 'ownerIdentity'
   | 'bind'
   | 'unbind'
   | 'settleAccepted'
+  | 'acceptResumed'
+  | 'commitAdmission'
+  | 'isAbandoned'
+  | 'rejectAdmission'
   | 'stopGeneration'
   | 'advanceStopGeneration'
   | 'trackSubmission'
@@ -1709,7 +1719,14 @@ export class ChatSessionService {
     const stopGeneration = params.queueIntent === 'next-turn'
       ? this.followUpQueue?.stopGeneration(params.sessionId) : undefined;
     let driveAttempt: string | undefined;
+    let followUpAdmissionStarted = false;
+    let followUpAccepted = false;
+    let followUpRefusalCode: RpcUserErrorCode | undefined;
     try {
+      if (params.queueIntent === 'next-turn' && params.clientMessageId) {
+        this.followUpQueue?.beginAdmission(params.sessionId, params.tabId, params.clientMessageId);
+        followUpAdmissionStarted = this.followUpQueue !== undefined;
+      }
       const { prompt, sessionId, tabId, name } = params;
       this.logger.debug('RPC: chat:continue called', {
         sessionId,
@@ -1732,6 +1749,7 @@ export class ChatSessionService {
         // A slash command may end or replace the session, so it is never held
         // behind a turn; the renderer keeps it as its own ordered item.
         if (SlashCommandInterceptor.isSlashCommand(prompt)) {
+          followUpRefusalCode = 'INVALID_PARAMS';
           return {
             success: false,
             sessionId,
@@ -1741,6 +1759,8 @@ export class ChatSessionService {
         }
         followUp.queue.assertTabOwnsSession(sessionId, tabId);
       }
+      let followUpIdentity = followUp?.queue.liveIdentity(sessionId);
+      let followUpOwner = followUp?.queue.ownerIdentity(sessionId);
       driveAttempt = await this.driverLock.beginDrive(sessionId, tabId);
       await this.gateAccount({
         sessionId,
@@ -1825,6 +1845,11 @@ export class ChatSessionService {
         }
         justResumed = resumeOutcome.justResumed;
         promptDelivered = resumeOutcome.promptDelivered === true;
+        if (followUp && justResumed) {
+          followUp.queue.assertTabOwnsSession(sessionId, tabId);
+          followUpIdentity = followUp.queue.liveIdentity(sessionId);
+          followUpOwner = followUp.queue.ownerIdentity(sessionId);
+        }
       }
 
       const files = params.files ?? [];
@@ -1865,6 +1890,14 @@ export class ChatSessionService {
       // Native Codex thread resume starts the turn (prompt and attachments).
       // Claude resume ignores them, so only that Codex turn skips the second send.
       if (promptDelivered) {
+        if (followUp) {
+          if (followUp.queue.isAbandoned(sessionId, followUp.clientMessageId)) {
+            followUpRefusalCode = 'SESSION_CHANGED';
+            return { success: false, sessionId, errorCode: 'SESSION_CHANGED', error: 'The follow-up could not be confirmed.' };
+          }
+          followUp.queue.acceptResumed(sessionId, tabId, followUp.clientMessageId);
+          followUpAccepted = true;
+        }
         // The resumed turn carried the user's prompt without the injected
         // context, so the interrupted agents stay resumable.
         injection.release();
@@ -1929,7 +1962,20 @@ export class ChatSessionService {
         // Bound before the send: the adapter may report `queued` from inside
         // `sendMessageToSession`, and that push must already find its tab.
         if (followUp && stopGeneration !== followUp.queue.stopGeneration(sessionId)) {
+          followUpRefusalCode = 'SESSION_CHANGED';
           return { success: false, sessionId, cancelled: true, error: 'Follow-up withdrawn by Stop.' };
+        }
+        if (followUp) {
+          if (followUp.queue.liveIdentity(sessionId) !== followUpIdentity ||
+              followUp.queue.ownerIdentity(sessionId) !== followUpOwner) {
+            followUpRefusalCode = 'SESSION_CHANGED';
+            return { success: false, sessionId, errorCode: 'SESSION_CHANGED', error: 'The session changed during follow-up admission.' };
+          }
+          followUp.queue.assertTabOwnsSession(sessionId, tabId);
+        }
+        if (followUp?.queue.isAbandoned(sessionId, followUp.clientMessageId)) {
+          followUpRefusalCode = 'SESSION_CHANGED';
+          return { success: false, sessionId, errorCode: 'SESSION_CHANGED', error: 'The follow-up could not be confirmed.' };
         }
         followUp?.queue.bind(sessionId, tabId, followUp.clientMessageId);
         const submission = this.sdkAdapter.sendMessageToSession(sessionId, enhancedPrompt, {
@@ -1946,6 +1992,7 @@ export class ChatSessionService {
           sessionId,
           followUp.clientMessageId,
         );
+        if (followUp) followUpAccepted = true;
       } finally {
         if (!sent) {
           injection.release();
@@ -1982,12 +2029,21 @@ export class ChatSessionService {
       return { success: true, sessionId, enqueued: true, ...admittedQueueState };
     } catch (error) {
       await this.driverLock.abandonDrive(params.sessionId, driveAttempt);
-      if (error instanceof Error && error.message.includes('FOLLOW_UP_ID_CONFLICT'))
+      if (error instanceof RpcUserError) followUpRefusalCode = error.errorCode;
+      if (error instanceof Error && error.message.includes('FOLLOW_UP_ID_CONFLICT')) {
+        followUpRefusalCode = 'FOLLOW_UP_ID_CONFLICT';
         return { success: false, error: 'clientMessageId conflicts with an earlier follow-up.', errorCode: 'FOLLOW_UP_ID_CONFLICT' };
+      }
       const codexFailure = this.codexFailure(error);
-      if (codexFailure) return codexFailure;
+      if (codexFailure) {
+        followUpRefusalCode = codexFailure.errorCode;
+        return codexFailure;
+      }
       const refusal = mainSessionAccountFailure(error);
-      if (refusal) return refusal;
+      if (refusal) {
+        followUpRefusalCode = 'AUTH_REQUIRED';
+        return refusal;
+      }
       if (error instanceof RpcUserError) {
         this.logger.warn(
           `RPC: chat:continue returned user error (${error.errorCode}): ${error.message}`,
@@ -2004,12 +2060,20 @@ export class ChatSessionService {
         error instanceof Error ? error : new Error(String(error)),
       );
       this.captureSentry(error, 'ChatRpcHandlers.registerChatContinue');
+      const authFields = this.authErrorFields(error);
+      followUpRefusalCode = authFields.errorCode;
       return {
         success: false,
         error: error instanceof Error ? error.message : String(error),
-        ...this.authErrorFields(error),
+        ...authFields,
       };
     } finally {
+      if (followUpAdmissionStarted && params.clientMessageId) {
+        if (!followUpAccepted) this.followUpQueue?.rejectAdmission(
+          params.sessionId, params.tabId, params.clientMessageId, followUpRefusalCode,
+        );
+        this.followUpQueue?.endAdmission(params.sessionId, params.clientMessageId);
+      }
       await this.driverLock.settleDrive(params.sessionId, driveAttempt);
     }
   }
@@ -2772,12 +2836,29 @@ export class ChatSessionService {
             }),
       };
       await this.driverLock.assertDriveHeld(sessionId, tabId);
-      const stream = await this.sdkAdapter.resumeSession(
-        sessionId,
-        execution.runtime === 'codex-app-server'
-          ? { ...resumeConfig, pluginConfigAncestorRoots: undefined }
-          : resumeConfig,
-      );
+      if (options.deliversFollowUp && params.clientMessageId &&
+          this.followUpQueue?.isAbandoned(sessionId, params.clientMessageId)) {
+        return { error: { success: false, sessionId, errorCode: 'SESSION_CHANGED', error: 'The follow-up could not be confirmed.' } };
+      }
+      const nativeId = options.deliversFollowUp && execution.runtime === 'codex-app-server'
+        ? params.clientMessageId : undefined;
+      if (nativeId) this.followUpQueue?.commitAdmission(sessionId, nativeId);
+      let nativeSucceeded = false;
+      let stream: Awaited<ReturnType<IAgentAdapter['resumeSession']>>;
+      try {
+        stream = await this.sdkAdapter.resumeSession(
+          sessionId,
+          execution.runtime === 'codex-app-server'
+            ? { ...resumeConfig, pluginConfigAncestorRoots: undefined }
+            : resumeConfig,
+        );
+        nativeSucceeded = true;
+      } finally {
+        if (nativeId) {
+          if (nativeSucceeded) this.followUpQueue?.acceptResumed(sessionId, tabId, nativeId);
+          else this.followUpQueue?.rejectAdmission(sessionId, tabId, nativeId, 'SESSION_CHANGED');
+        }
+      }
       if (execution.runtime === 'codex-app-server') {
         try {
           await this.runtimeProfile?.publishRuntimeNotices(execution, {
