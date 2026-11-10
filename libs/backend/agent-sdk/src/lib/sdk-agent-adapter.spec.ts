@@ -1222,7 +1222,7 @@ describe('SdkAgentAdapter', () => {
       expect(write).toHaveBeenCalledTimes(1);
       expect(
         h.sessionLifecycle.disposeSessionsForWorkspace,
-      ).toHaveBeenCalledWith('/ws/a');
+      ).toHaveBeenCalledWith('/ws/a', 'config-reinit');
       expect(h.sessionLifecycle.disposeAllSessions).not.toHaveBeenCalled();
       expect(disposed).not.toHaveBeenCalled();
       expect(h.authManager.clearAuthentication).not.toHaveBeenCalled();
@@ -1257,6 +1257,7 @@ describe('SdkAgentAdapter', () => {
       await new Promise<void>((resolve) => setImmediate(resolve));
 
       expect(h.sessionLifecycle.disposeAllSessions).toHaveBeenCalledTimes(1);
+      expect(h.sessionLifecycle.disposeAllSessions).toHaveBeenCalledWith('config-reinit');
     });
   });
 
@@ -1344,7 +1345,7 @@ describe('SdkAgentAdapter', () => {
       ).toHaveBeenCalledTimes(1);
       expect(
         h.sessionLifecycle.disposeSessionsForWorkspace,
-      ).toHaveBeenCalledWith('/ws/b');
+      ).toHaveBeenCalledWith('/ws/b', 'config-reinit');
     });
 
     it('a burst during a queued pass joins it; one during a running pass adds one', async () => {

@@ -25,6 +25,10 @@ export type {
   SessionChildStartRequest,
   SessionChildStartResult,
   SessionChildStatus,
+  SessionChildSuccessionCause,
+  SessionChildSuccessionRequest,
+  SessionChildSuccessionRefusalCode,
+  SessionChildSuccessionResult,
   SessionChildTerminalStatus,
   SessionSendMode,
   SessionSpawnRefusalCode,
@@ -88,5 +92,16 @@ export {
 export {
   readSessionChildSettings,
   DEFAULT_SESSION_CHILD_BASH_ALLOWLIST,
+  SESSION_CHILD_RUNTIME_WARN_LEAD_MINUTES,
+  SESSION_CHILD_HANDOFF_GRACE_MINUTES,
+  SESSION_CHILD_MAX_SUCCESSIONS,
   type SessionChildSettings,
 } from './session-child-settings';
+export {
+  SESSION_CHILD_HANDOFF_FILE,
+  sessionChildHandoffPath,
+  runtimeWarnDelayMs,
+  renderRuntimeCapWarning,
+  renderSuccessorTask,
+  successionEndReason,
+} from './session-child-succession';

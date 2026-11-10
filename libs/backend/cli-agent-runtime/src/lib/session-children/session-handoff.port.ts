@@ -28,7 +28,7 @@ export interface SessionHandoffRequest {
 export type SessionHandoffRefusalCode =
   /** No live chat session is behind the caller id. */
   | 'unattributed-caller'
-  /** A child session cannot hand off; its parent supervises its work. */
+  /** Child succession is unavailable or its configured limit was reached. */
   | 'child-session'
   /** This caller already started a handoff session. */
   | 'already-handed-off'

@@ -969,6 +969,16 @@ describe('LaneCompletionNotifier.signalSessionChild', () => {
   }
 
   describe('deliverable timing against the child startedAt', () => {
+    it('reports a handoff as unverified and names the successor', async () => {
+      const h = createHarness();
+      const result = await h.notifier.signalSessionChild(
+        subject({ succeededBy: 'successor-tab' }), settle({ status: 'handed-off' }),
+      );
+      expect(result.delivered).toBe(true);
+      if (!result.delivered) return;
+      expect(result.envelope.verdict).toBe('unverified');
+      expect(result.envelope.text).toContain('successor-tab');
+    });
     it('reports no-deliverable for a file older than startedAt (a checkout file), while a lane calls it delivered', async () => {
       const before = Date.parse(CHILD_STARTED) - 1;
       const session = createHarness({

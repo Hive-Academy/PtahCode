@@ -46,6 +46,7 @@ import { SDK_TOKENS } from './di/tokens';
 import { AUTH_PROVIDERS_TOKENS } from '@ptah-extension/auth-providers-tokens';
 import { AuthRequiredError, SdkError } from './errors';
 import { getActiveProviderId } from './helpers';
+import type { SessionEndCause } from './helpers/session-end-callback-registry';
 import {
   SessionMetadataStore,
   isSessionPluginConfigAncestorRoots,
@@ -420,7 +421,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
         '[SdkAgentAdapter] Config change detected, re-initializing...',
       );
       this.flushAllPendingUserActivity();
-      await this.sessionLifecycle.disposeAllSessions();
+      await this.sessionLifecycle.disposeAllSessions('config-reinit');
       this.cliDetector.clearCache();
       this.modelService.clearCache();
       this.cliInstallation = null;
@@ -816,7 +817,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
     }
   }
 
-  dispose(): Promise<void> {
+  dispose(cause: SessionEndCause = 'host-shutdown'): Promise<void> {
     this.logger.info('[SdkAgentAdapter] Disposing adapter...');
     this.events.emitDisposed({ timestamp: Date.now() });
     this.flushAllPendingUserActivity();
@@ -825,7 +826,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
       .flatMap((id) => this.sessionKeys(id as SessionId));
     for (const id of endedIds) this.statsOwner.requestFinalization(id);
     const sessionDisposal = this.sessionLifecycle
-      .disposeAllSessions()
+      .disposeAllSessions(cause)
       .catch((err) => {
         this.logger.warn(
           '[SdkAgentAdapter] Error during session disposal',
@@ -918,7 +919,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
       // owned by its own caller and dispose + initialize follow regardless.
       await running.catch(() => false);
     }
-    this.dispose();
+    this.dispose('config-reinit');
     await this.initialize();
   }
 
@@ -971,7 +972,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
       leases.push(...this.captureStatsLeases(id as SessionId));
       budgetKeys.push(...this.sessionKeys(id as SessionId));
     }
-    await this.sessionLifecycle.disposeSessionsForWorkspace(workspacePath);
+    await this.sessionLifecycle.disposeSessionsForWorkspace(workspacePath, 'config-reinit');
     const liveIds = new Set(
       this.sessionLifecycle
         .getLiveSessionIds()
@@ -1164,12 +1165,12 @@ export class SdkAgentAdapter implements IAgentAdapter {
     });
   }
 
-  endSession(sessionId: SessionId): void {
+  endSession(sessionId: SessionId, cause: SessionEndCause = 'unknown'): void {
     this.flushPendingUserActivityFor(sessionId);
     const statsLeases = this.captureStatsLeases(sessionId);
     const budgetKeys = this.sessionKeys(sessionId);
     this.sessionLifecycle
-      .endSession(sessionId)
+      .endSession(sessionId, cause)
       .then(() => {
         for (const id of budgetKeys) this.statsOwner.requestFinalization(id);
         this.releaseStatsOwners(statsLeases);
@@ -1620,6 +1621,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
   async endSessionIfTokenMatches(
     sessionId: SessionId,
     token: string,
+    cause: SessionEndCause = 'unknown',
   ): Promise<boolean> {
     // Same pre-teardown flush `endSession` does, gated on the same token so a
     // losing caller does not publish activity for a session that stays alive.
@@ -1634,6 +1636,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
     const ended = await this.sessionLifecycle.endSessionIfTokenMatches(
       sessionId,
       token,
+      cause,
     );
     if (ended) {
       for (const id of budgetKeys) this.statsOwner.requestFinalization(id);
@@ -2057,11 +2060,11 @@ export class SdkAgentAdapter implements IAgentAdapter {
    * stage and compactions must survive a Stop. Only a real end releases it (`endSession`,
    * a token-matched stream-exit end, dispose).
    */
-  async interruptSession(sessionId: SessionId): Promise<void> {
+  async interruptSession(sessionId: SessionId, cause: SessionEndCause = 'unknown'): Promise<void> {
     this.logger.info(`[SdkAgentAdapter] Interrupting session: ${sessionId}`);
     this.flushPendingUserActivityFor(sessionId);
     const statsLeases = this.captureStatsLeases(sessionId);
-    await this.sessionLifecycle.endSession(sessionId);
+    await this.sessionLifecycle.endSession(sessionId, cause);
     this.releaseStatsOwners(statsLeases);
   }
 

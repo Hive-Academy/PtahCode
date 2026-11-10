@@ -27,12 +27,13 @@ export type SessionChildStatus =
   | 'failed'
   | 'stopped'
   | 'timed-out'
+  | 'handed-off'
   | 'ended';
 
 /** The statuses a child can end in; once recorded, a child never leaves them. */
 export type SessionChildTerminalStatus = Extract<
   SessionChildStatus,
-  'failed' | 'stopped' | 'timed-out' | 'ended'
+  'failed' | 'stopped' | 'timed-out' | 'handed-off' | 'ended'
 >;
 
 /** A permission prompt the child is waiting on, denied at `deniesAt` unless answered. */
@@ -69,6 +70,12 @@ export interface SessionChildSnapshot {
   /** The child's cwd and its metadata `workingDirectory`. */
   readonly worktreePath: string;
   readonly taskFolder?: string;
+  /** Child id of the predecessor this child continues. */
+  readonly succeeds?: string;
+  /** Child id of the successor that continues this child. */
+  readonly succeededBy?: string;
+  /** Successions before this child in its chain; absent means zero. */
+  readonly successionCount?: number;
   /** Absolute deliverable paths, resolved at start. */
   readonly deliverables: readonly string[];
   readonly status: SessionChildStatus;
@@ -145,6 +152,43 @@ export type SessionChildStartResult =
       readonly accountRefusal?: ProviderAccountPortRefusal;
     };
 
+/** Why a succession runs. */
+export type SessionChildSuccessionCause =
+  | 'child-handoff'
+  | 'runtime-cap'
+  | 'runtime-cap-interrupted'
+  | 'session-ended';
+
+export interface SessionChildSuccessionRequest {
+  /** The child's MCP routing id (tab id or SDK id), from the transport. */
+  readonly callerSessionId: string | undefined;
+  /** Absolute path of the handoff file the child wrote. */
+  readonly handoffPath: string;
+  /** The continuation prompt the child composed. */
+  readonly prompt: string;
+  readonly label?: string;
+}
+
+export type SessionChildSuccessionRefusalCode =
+  | 'not-a-live-child'
+  | 'succession-in-progress'
+  | 'max-successions-reached'
+  | 'chat-runtime-unavailable'
+  | 'session-start-failed';
+
+export type SessionChildSuccessionResult =
+  | {
+      readonly ok: true;
+      readonly successor: SessionChildSnapshot;
+      readonly adoptedLanes: readonly string[];
+      readonly tabOpened: boolean;
+    }
+  | {
+      readonly ok: false;
+      readonly refusal: SessionChildSuccessionRefusalCode;
+      readonly detail: string;
+    };
+
 export type SessionSendMode = 'queue' | 'steer' | 'if-idle';
 
 export interface SessionChildSendRequest {
@@ -199,6 +243,7 @@ export interface SessionChildReadResult {
 /** The child as the completion notifier needs to see it. */
 export interface SessionChildCompletionSubject {
   readonly childSessionId: string;
+  readonly succeededBy?: string;
   readonly label: string;
   /**
    * Parent ids to deliver into, in order of preference: the recorded parent
@@ -224,7 +269,7 @@ export interface SessionChildCompletionSubject {
 export interface SessionChildSettle {
   /** 1-based count of settled turns; part of the dedupe key. */
   readonly turn: number;
-  readonly status: 'completed' | 'failed' | 'timeout';
+  readonly status: 'completed' | 'failed' | 'timeout' | 'handed-off';
   /** ISO timestamp the turn settled at. */
   readonly completedAt: string;
 }
@@ -261,6 +306,8 @@ export type SessionChildCompletionDelivery =
 
 export interface ISessionSpawner {
   start(request: SessionChildStartRequest): Promise<SessionChildStartResult>;
+  /** Replace a live child with a successor in its existing worktree. */
+  succeed(request: SessionChildSuccessionRequest): Promise<SessionChildSuccessionResult>;
   send(request: SessionChildSendRequest): Promise<SessionChildSendResult>;
   status(
     query: SessionChildQuery,

@@ -527,7 +527,7 @@ describe('chat:continue — dead record (registered, not streaming)', () => {
 
     expect(result).toEqual({ success: true, sessionId: SESSION_ID });
     expect(h.interruptSession).toHaveBeenCalledTimes(1);
-    expect(h.interruptSession).toHaveBeenCalledWith(SESSION_ID);
+    expect(h.interruptSession).toHaveBeenCalledWith(SESSION_ID, 'stream-exit');
     // The void, fire-and-forget teardown must NOT be the one used here.
     expect(h.endSession).not.toHaveBeenCalled();
     expect(h.resumeSession).not.toHaveBeenCalled();
@@ -565,7 +565,7 @@ describe('chat:continue — dead record (registered, not streaming)', () => {
 
     await h.service.continueSession(params('keep going'));
 
-    expect(h.interruptSession).toHaveBeenCalledWith(SESSION_ID);
+    expect(h.interruptSession).toHaveBeenCalledWith(SESSION_ID, 'stream-exit');
     // The void, fire-and-forget teardown is not used on either corpse path.
     expect(h.endSession).not.toHaveBeenCalled();
     expect(h.resumeSession).toHaveBeenCalledTimes(1);

@@ -29,6 +29,7 @@ describe('renderSessionChildContract', () => {
       The host attaches an MCP server named \`ptah\` with the tools \`ptah_agent_report\`, \`ptah_agent_list\`, \`ptah_agent_spawn\` and \`ptah_agent_message\`. Call the exact tool identifier your tool list shows for that server. It can be bare, server-prefixed, or reachable only through an MCP search or call tool; in that case use server \`ptah\` and the identifier the search returns. Do not invent prefixes. If no connected server is named \`ptah\`, put your report in your final message instead and continue the task.
       Report progress, decisions and blockers to the parent with ptah_agent_report. If a report is refused because the parent is not live, repeat its content in your final message of the turn so the parent reads it later.
       You cannot start sessions of your own (ptah_session_start is refused for child sessions).
+      This session has a runtime cap and a usage budget. When the host warns about either, or when /session-handoff runs, finish the current step, write HANDOFF.md and call ptah_session_handoff. A successor session then continues the task in the same worktree. Do not ignore the warning.
       Bash commands that start with one of \`git status\`, \`npx nx\` run without asking. Any other command waits for approval in your tab and is denied after 1 minute; prefer the allowed commands.
       Commit your work on this branch only. Never merge, rebase onto, or push another branch, and never remove the worktree: the user owns merge, PR and worktree cleanup.
       Task folder: /repo/.claude-worktrees/feat-parser-fix-0123456789ab/.ptah/specs/TASK_2026_001
@@ -42,6 +43,12 @@ describe('renderSessionChildContract', () => {
     expect(renderSessionChildContract(BASE)).toMatch(
       /refused because the parent is not live, repeat its content in your final message/,
     );
+  });
+
+  it('requires a handoff after a runtime or usage warning', () => {
+    const text = renderSessionChildContract(BASE);
+    expect(text).toContain('write HANDOFF.md and call ptah_session_handoff');
+    expect(text).toContain('Do not ignore the warning.');
   });
 
   it('renders an empty allowlist, a zero window and no deliverables honestly', () => {

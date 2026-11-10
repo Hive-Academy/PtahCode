@@ -160,6 +160,7 @@ export class ChatStreamBroadcaster {
     let childMetadataSaved = false;
     const isPtahCliSession = this.ptahCli.hasSession(tabId);
     let streamExitedNormally = false;
+    let endCause: 'stream-exit' | 'provider-error' | 'user-stop' | 'compaction-abort' = 'stream-exit';
     let recordReplaced = false;
     let sessionConfirmedEnded = false;
     // The id the turn state is keyed under. `sessionId` is the tabId for a
@@ -358,6 +359,13 @@ export class ChatStreamBroadcaster {
         lowerMessage.includes('abort') ||
         lowerMessage.includes('cancelled') ||
         lowerMessage.includes('canceled');
+      endCause = lowerMessage.includes('compaction did not finish')
+        ? 'compaction-abort'
+        : lowerMessage.includes('no stream activity')
+          ? 'stream-exit'
+          : isUserAbort
+            ? 'user-stop'
+            : 'provider-error';
 
       if (isUserAbort) {
         this.logger.info(
@@ -393,7 +401,7 @@ export class ChatStreamBroadcaster {
             : `[RPC] Session ${sessionId} failed during resume (0 events), cleaning up dead session. Original error: ${errorMessage}`,
         );
         try {
-          await this.sdkAdapter.endSession(sessionId);
+          this.sdkAdapter.endSession(sessionId, 'provider-error');
         } catch (cleanupErr) {
           this.logger.warn(
             `[RPC] Failed to clean up failed session ${sessionId}`,
@@ -451,6 +459,7 @@ export class ChatStreamBroadcaster {
           const ended = await this.sdkAdapter.endSessionIfTokenMatches(
             sessionId,
             recordToken,
+            endCause,
           );
           if (ended) {
             sessionConfirmedEnded = true;

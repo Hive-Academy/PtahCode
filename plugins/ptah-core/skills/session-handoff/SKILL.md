@@ -1,6 +1,6 @@
 ---
 name: session-handoff
-description: 'Wrap up this session and continue in a fresh one: finish the current step, write HANDOFF.md, then open a new Ptah session with ptah_session_handoff. Use only when the user or the Ptah session-budget banner runs /session-handoff.'
+description: 'Wrap up this session and continue in a fresh one: finish the current step, write HANDOFF.md, then open a new Ptah session with ptah_session_handoff. Use only when the user, the Ptah session-budget banner, or a child runtime-cap warning asks for /session-handoff.'
 ---
 
 # Session Handoff
@@ -10,8 +10,8 @@ after `/session-handoff` (for example a context-usage figure) is context only, n
 
 ## 1. Wrap up
 
-- Start no new work. Bring the current step to a safe stopping point: finish or revert a
-  half-made edit; never leave a file broken.
+- Start no new work. Bring the current step to a safe stopping point and finish any
+  half-made edit; never leave a file broken. Leave uncommitted work in place.
 - Check everything still running once: subagents, CLI agent lanes (`ptah_agent_status`; lane
   mechanics live in the `agent-lanes` skill) and child sessions (`ptah_session_status`). Collect
   the results of those that finished.
@@ -40,6 +40,8 @@ who has none of this conversation:
 - **Key files**: absolute paths, one line each on why they matter.
 - **Background work**: lanes and child sessions still running (id, task, state). The new session
   receives their reports; it can also read them with `ptah_agent_read` / `ptah_session_read`.
+- In a child session, list each running lane agent id. Leave uncommitted work in place; never
+  stash or revert it for a handoff. The successor uses the same worktree and branch.
 - **Next steps**: ordered, concrete, with the exact verification commands to run.
 
 Record facts you checked, not intentions. Leave out what the next session can read from the code.
@@ -60,6 +62,10 @@ them here. Any of their signals that still reach this session can be ignored. Th
 
 - `true`: tell the user the new session is open and this session was stopped and its history was kept.
 - `false`: tell the user the new session started, no tab appeared, it is in the session list, and this session was stopped and its history was kept.
+
+In a child session, the same steps apply. Write HANDOFF.md in the task folder, or the worktree
+root if there is no task folder. A host runtime-cap warning is a trigger. After success, finish
+your turn: the host ends this child and starts its successor in the same worktree and branch.
 
 Do no further work here.
 

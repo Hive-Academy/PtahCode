@@ -50,6 +50,9 @@ type MutableRecordFields = Omit<
   | 'terminalStatus'
   | 'endedAt'
   | 'endReason'
+  | 'succeeds'
+  | 'succeededBy'
+  | 'successionCount'
 >;
 
 /**
@@ -318,6 +321,77 @@ export class SessionChildRegistry {
     this.endedOrder.push(childSessionId);
     this.pruneEnded();
     return ended;
+  }
+
+  /** Replace a live child with a successor in one synchronous step, keeping its slot. */
+  succeed(
+    predecessorId: string,
+    successor: SessionChildRecord,
+    reason: string,
+    endedAt: string = new Date().toISOString(),
+  ): { readonly predecessor: SessionChildRecord; readonly successor: SessionChildRecord } {
+    const prior = this.records.get(predecessorId);
+    if (!prior || prior.terminalStatus) {
+      throw new Error(`SessionChildRegistry.succeed: predecessor ${predecessorId} is not live`);
+    }
+    if (this.records.has(successor.childSessionId)) {
+      throw new Error(`SessionChildRegistry.succeed: successor ${successor.childSessionId} already exists`);
+    }
+    const predecessor: SessionChildRecord = {
+      ...prior,
+      terminalStatus: 'handed-off',
+      endedAt,
+      endReason: reason,
+      succeededBy: successor.childSessionId,
+    };
+    const next: SessionChildRecord = {
+      ...successor,
+      succeeds: predecessorId,
+      successionCount: (prior.successionCount ?? 0) + 1,
+    };
+    delete (predecessor as { pendingPermission?: unknown }).pendingPermission;
+    this.replace(predecessor);
+    this.replace(next);
+    if (next.sdkSessionId) this.bySdkId.set(next.sdkSessionId, next.childSessionId);
+    this.endedOrder.push(predecessorId);
+    this.pruneEnded();
+    return { predecessor, successor: next };
+  }
+
+  /** Undo a recorded succession after successor start fails. */
+  revertSuccession(
+    predecessorId: string,
+    successorId: string,
+  ): SessionChildRecord | undefined {
+    const predecessor = this.records.get(predecessorId);
+    const successor = this.records.get(successorId);
+    if (!predecessor || !successor || predecessor.terminalStatus !== 'handed-off' ||
+      predecessor.succeededBy !== successorId || successor.succeeds !== predecessorId) {
+      return undefined;
+    }
+    this.remove(successorId);
+    const restored: SessionChildRecord = { ...predecessor };
+    delete (restored as { terminalStatus?: SessionChildTerminalStatus }).terminalStatus;
+    delete (restored as { endedAt?: string }).endedAt;
+    delete (restored as { endReason?: string }).endReason;
+    delete (restored as { succeededBy?: string }).succeededBy;
+    const index = this.endedOrder.indexOf(predecessorId);
+    if (index >= 0) this.endedOrder.splice(index, 1);
+    return this.replace(restored);
+  }
+
+  /** Follow successor links from a tab or SDK id, for at most 64 hops. */
+  resolveLatest(id: string | undefined): SessionChildRecord | undefined {
+    let current = this.get(id);
+    const seen = new Set<string>();
+    for (let hops = 0; current?.succeededBy && hops < 64; hops++) {
+      if (seen.has(current.childSessionId)) break;
+      seen.add(current.childSessionId);
+      const next = this.records.get(current.succeededBy);
+      if (!next) break;
+      current = next;
+    }
+    return current;
   }
 
   /**

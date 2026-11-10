@@ -1006,7 +1006,7 @@ describe('SessionLifecycleManager', () => {
       expect(ctrlB.signal.aborted).toBe(false);
       expect(ctrlC.signal.aborted).toBe(false);
 
-      await ih.manager.disposeAllSessions();
+      await ih.manager.disposeAllSessions('config-reinit');
 
       // (a) All 3 abort controllers must be signaled
       expect(ctrlA.signal.aborted).toBe(true);
@@ -1027,6 +1027,9 @@ describe('SessionLifecycleManager', () => {
       expect(notifyArgs).toContain('/ws/a');
       expect(notifyArgs).toContain('/ws/b');
       expect(notifyArgs).toContain('/ws/c');
+      expect(ih.notifyAll.mock.calls.map((call) => call[0].cause)).toEqual([
+        'config-reinit', 'config-reinit', 'config-reinit',
+      ]);
 
       // (d) After dispose, ALL lookups return undefined — registry is cleared
       expect(ih.manager.find('tab_a')).toBeUndefined();

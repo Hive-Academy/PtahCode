@@ -133,7 +133,8 @@ function readStatusSuffix(available: boolean, truncated: boolean): string {
 
 function formatChild(child: SessionChildSnapshot): string {
   const lines = [
-    `- ${child.label} (${child.childSessionId}): ${child.status}`,
+    `- ${child.label} (${child.childSessionId}): ${child.status}` +
+      (child.succeededBy ? `; succeededBy ${child.succeededBy}` : ''),
     `  branch ${child.branch} from ${child.baseRef}; worktree ${child.worktreePath}`,
     `  started ${child.startedAt}${endedSuffix(child)}`,
     `  turns settled ${child.turnsSettled}; reports delivered ` +

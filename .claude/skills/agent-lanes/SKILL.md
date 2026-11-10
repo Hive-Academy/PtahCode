@@ -304,6 +304,14 @@ CLI; use a child session when the work needs the full chat runtime, slash comman
 | `ptah_session_read({ sessionId, tailKiB? })`       | Tail of the child's transcript (default 32 KiB, max 256)                                                 |
 | `ptah_session_stop({ sessionId })`                 | Stop it; tab, transcript, worktree and branch remain                                                     |
 
+A child can hand off to a successor in the same worktree and branch. The host warns before its
+runtime cap; an idle child succeeds at the cap, while a busy child finishes its turn first.
+After the grace period, the host interrupts a busy turn and starts a recovery successor. An
+unexpected session end that does not recover in 30 seconds also starts a recovery successor.
+The parent receives one `handed-off` signal with verdict `unverified` and `succeededBy`; use
+either the old child id or the successor id with `ptah_session_*`. User or parent stops, workspace
+close, and host shutdown end the child instead; its running lanes move to the parent.
+
 - **Messaging first.** Steer with `ptah_session_send`; use `ptah_session_read` to inspect. Do not poll
   `ptah_session_status` while a completion turn is due: one is pushed into your session each time a
   child settles, as `<agent-lane-completed … cli="ptah-session" …>`, with a `verdict` of `delivered`,

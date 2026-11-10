@@ -506,7 +506,7 @@ describe('ChatPtahCliService', () => {
         sessionId: SESSION_UUID as SessionId,
       } as ChatAbortParams);
 
-      expect(s.agentAdapter.endSession).toHaveBeenCalledWith(SESSION_UUID);
+      expect(s.agentAdapter.endSession).toHaveBeenCalledWith(SESSION_UUID, 'user-stop');
       expect(out).toEqual({ success: true });
       expect(s.service.hasSession(SESSION_UUID)).toBe(false);
       // The lease was taken under the tab id at start; abort arrives under

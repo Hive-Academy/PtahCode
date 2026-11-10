@@ -34,7 +34,7 @@ function createRegistry(): {
   return {
     registry,
     fire: (sessionId) =>
-      callbacks.forEach((cb) => cb({ sessionId, workspaceRoot: '/ws' })),
+      callbacks.forEach((cb) => cb({ sessionId, workspaceRoot: '/ws', cause: 'user-stop' })),
   };
 }
 

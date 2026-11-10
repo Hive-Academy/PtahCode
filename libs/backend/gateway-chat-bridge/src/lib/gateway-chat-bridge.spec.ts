@@ -768,7 +768,7 @@ describe('GatewayChatBridge', () => {
     );
     await flushUntil(() => h.adapter.endSession.mock.calls.length > 0);
 
-    expect(h.adapter.endSession).toHaveBeenCalledWith(SDK_UUID);
+    expect(h.adapter.endSession).toHaveBeenCalledWith(SDK_UUID, 'stream-exit');
   });
 
   it('seeds the safe default permission level (ask) at start, not a post-hoc bypass flip (TASK_2026_192)', async () => {
