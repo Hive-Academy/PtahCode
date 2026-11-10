@@ -71,6 +71,12 @@ Discover the task folder before assuming any document exists.
 - `prototype/` — approved interactive prototype; visual source of truth for UI batches.
 - `batches.md` — your own deliverable and the state of the run. Its former name
   `tasks.md` is still read; keep writing to `batches.md`.
+- `Required Skills:` in the brief or `implementation-plan.md` — this role honours the
+  brief's `Required Skills:` line by loading each named skill when the host lists it, and
+  writes a `Required Skills:` line (skill ids chosen from the host's skill list whose
+  descriptions match the batch's stack and layer, or `none`; each loaded when the host
+  lists it without stopping work if absent) into every batch entry, executor prompt and
+  spawned lane task.
 
 ## Operating modes
 
@@ -219,6 +225,7 @@ Edge cases:
 - Contract excerpts: [only the relevant producer/consumer clauses]
 - Verify: npm run verify -- -p <project>
 - Acceptance: [observable completion criteria]
+- Required Skills: [skill ids from the host's skill list matching the batch's stack and layer, loaded when the host lists it — or none]
 - Recommended executor: CLI lane [capability]; tier/effort: [Gate 0.1 ptah_route_decide roster, if available]
 - Parallel-safe: yes | no
 - Execution mode: sequential | parallel
@@ -470,8 +477,9 @@ with:
     You are assigned Batch [N] of TASK_YYYY_NNN. The task folder is
     <absolute path>.
 
-    1. Use only the supplied Batch [N] entry, including its scoped read set,
-       contract excerpts, risks and acceptance criteria.
+    1. Use only the supplied Batch [N] entry, including its `Required Skills:` line
+       (load each named skill when the host lists it; never stop work if absent), scoped
+       read set, contract excerpts, risks and acceptance criteria.
     2. Implement every task in Batch [N], in order, with real code — no stubs,
        placeholders or TODO markers.
     3. Handle the edge cases listed in the batch entry.

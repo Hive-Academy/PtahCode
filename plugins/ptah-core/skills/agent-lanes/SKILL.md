@@ -103,7 +103,7 @@ A lane shares none of your context and cannot ask the user anything. Every `task
    can do today (or pass `parity-inventory.md` in `files`). Every item stays, moves, or is listed
    under `## Proposed Removals` for user approval — never removed silently.
 10. **UI deliverables** (HTML, components, styles): the lane loads the matching design skill
-    (for example `impeccable`, `ui-ux-designer`, `angular-frontend-patterns`) with its own skill
+    (for example `ui-ux-designer`, `angular-frontend-patterns`) with its own skill
     mechanism, renders the output, and checks it with `ptah_browser_navigate` (a `file://` URL
     inside the workspace is allowed) and `ptah_browser_screenshot`. The report states what it
     checked. If those browser tools are absent from the lane's tool list, say so.

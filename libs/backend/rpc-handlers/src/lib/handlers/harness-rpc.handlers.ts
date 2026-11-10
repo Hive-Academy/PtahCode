@@ -36,6 +36,7 @@ import { SDK_TOKENS, PluginLoaderService } from '@ptah-extension/agent-sdk';
 import {
   HARNESS_SYNC_TOKENS,
   type HarnessPropagationService,
+  type SkillSyncGate,
 } from '@ptah-extension/harness-sync';
 import {
   PLATFORM_TOKENS,
@@ -157,6 +158,12 @@ const WIZARD_WEBVIEW_LIFECYCLE_TOKEN = Symbol.for(
  */
 const RUNTIME_PROVIDED_PROFILE_IDS: readonly StackProfileId[] = ['node-ts'];
 
+/**
+ * Default bundled plugin that owns `ddd-architecture` and ships enabled by
+ * default before a workspace plugin config is saved.
+ */
+const DEFAULT_BUNDLED_PLUGIN_ID = 'ptah-core';
+
 /** Type of the RPC handler callback used by every `rpcHandler.registerMethod`. */
 type RpcHandlerFn<TParams, TResp> = (params: TParams) => Promise<TResp>;
 
@@ -248,6 +255,8 @@ export class HarnessRpcHandlers {
     private readonly healthService: HarnessHealthRpcService,
     @inject(HARNESS_TOKENS.SKILL_SELECTION)
     private readonly skillSelection: HarnessSkillSelectionRpcService,
+    @inject(HARNESS_SYNC_TOKENS.SKILL_SYNC_GATE)
+    private readonly skillSyncGate: SkillSyncGate,
   ) {}
 
   /**
@@ -807,12 +816,21 @@ export class HarnessRpcHandlers {
    * {@link partitionRequiredPlugins}. A generic Stage A contract is a duller
    * prompt; a named skill that does not exist is a broken one.
    */
-  private resolveAvailableSkillIds(): string[] {
+  private resolveAvailableSkillIds(workspaceRoot?: string): string[] {
     try {
-      return this.workspaceContext
+      const discovered = this.workspaceContext
         .discoverAvailableSkills()
         .filter((skill) => skill.isActive)
         .map((skill) => skill.id);
+      if (!workspaceRoot) {
+        return discovered;
+      }
+      const decision = this.skillSyncGate.resolve(workspaceRoot);
+      if (decision.mode === 'all') {
+        return discovered;
+      }
+      const allowed = new Set(decision.slugs);
+      return discovered.filter((id) => allowed.has(id));
     } catch (error: unknown) {
       // degradation-audit: optional-capability - skill discovery is an
       // optional prompt input; an empty list makes the seed prompt fall back
@@ -822,6 +840,50 @@ export class HarnessRpcHandlers {
         { error: error instanceof Error ? error.message : String(error) },
       );
       return [];
+    }
+  }
+
+  private collectProfileSkillSlugs(profile: StackProfile | null): string[] {
+    if (!profile) return [];
+    return [
+      profile.skills.initializer,
+      profile.skills.architect,
+      profile.skills.domain,
+    ].filter((slug): slug is string => Boolean(slug));
+  }
+
+  private allowlistProfileSkills(
+    workspaceRoot: string | undefined,
+    slugs: readonly string[],
+  ): boolean {
+    if (slugs.length === 0) return true;
+    if (!workspaceRoot) {
+      this.logger.warn(
+        '[harness:start-new-project] No workspace root open; skipping skill allowlist update',
+        { slugs },
+      );
+      return false;
+    }
+    try {
+      const kept = this.skillSyncGate.keepSelected(workspaceRoot, slugs);
+      if (!kept) {
+        this.logger.warn(
+          '[harness:start-new-project] Skill allowlist write failed; seed prompt will omit Stage A skills',
+          { workspaceRoot, slugs },
+        );
+        return false;
+      }
+      return true;
+    } catch (error: unknown) {
+      this.logger.warn(
+        '[harness:start-new-project] Skill allowlist write threw; seed prompt will omit Stage A skills',
+        {
+          workspaceRoot,
+          slugs,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+      return false;
     }
   }
 
@@ -854,10 +916,18 @@ export class HarnessRpcHandlers {
         const profile = resolveStackProfileForPlatform(intake.platform);
         const { bundled, missingExternal } =
           this.partitionRequiredPlugins(profile);
+        const profileSkillSlugs = this.collectProfileSkillSlugs(profile);
 
         const config = this.pluginLoader.getWorkspacePluginConfig();
+        const disabledPlugins = new Set(config.disabledPluginIds ?? []);
+        const requiredBundled =
+          profile &&
+          !disabledPlugins.has(DEFAULT_BUNDLED_PLUGIN_ID) &&
+          !bundled.includes(DEFAULT_BUNDLED_PLUGIN_ID)
+            ? [...bundled, DEFAULT_BUNDLED_PLUGIN_ID]
+            : bundled;
         const enabled = new Set(config.enabledPluginIds);
-        const newlyEnabled = bundled.filter((id) => !enabled.has(id));
+        const newlyEnabled = requiredBundled.filter((id) => !enabled.has(id));
         let pluginConfigChanged = false;
         if (newlyEnabled.length > 0) {
           for (const id of newlyEnabled) {
@@ -873,11 +943,27 @@ export class HarnessRpcHandlers {
             { pluginIds: newlyEnabled },
           );
         }
-        if (pluginConfigChanged) {
-          await this.reconcileHarness('harness:start-new-project');
+
+        const workspaceRoot = this.workspaceProvider.getWorkspaceRoot();
+        const allowlistReady = this.allowlistProfileSkills(
+          workspaceRoot,
+          profileSkillSlugs,
+        );
+        let reconcileSucceeded = true;
+        if (
+          pluginConfigChanged ||
+          (allowlistReady && profileSkillSlugs.length > 0)
+        ) {
+          const reconcileFailure = await this.reconcileHarness(
+            'harness:start-new-project',
+          );
+          reconcileSucceeded = reconcileFailure === null;
         }
         const toolchain = await this.probeProfileToolchain(profile);
-        const availableSkillIds = this.resolveAvailableSkillIds();
+        const availableSkillIds =
+          allowlistReady && reconcileSucceeded
+            ? this.resolveAvailableSkillIds(workspaceRoot)
+            : [];
         const seedPrompt = buildNewProjectSeedPrompt(intake, {
           toolchain,
           missingExternalPlugins: missingExternal,

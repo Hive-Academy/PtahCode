@@ -39,7 +39,10 @@ import {
   type MockRpcHandler,
 } from '@ptah-extension/vscode-core/testing';
 import type { PluginLoaderService } from '@ptah-extension/agent-sdk';
-import type { HarnessPropagationService } from '@ptah-extension/harness-sync';
+import type {
+  HarnessPropagationService,
+  SkillSyncGate,
+} from '@ptah-extension/harness-sync';
 import type { HarnessHealth, SkillSummary } from '@ptah-extension/shared';
 import { summarizeHarnessHealth } from '@ptah-extension/shared';
 import type {
@@ -151,6 +154,7 @@ interface Suite {
   fsService: Mocked<HarnessFsService>;
   mcpInstall: Mocked<HarnessMcpInstallService>;
   skillInstall: Mocked<HarnessSkillInstallService>;
+  skillSyncGate: jest.Mocked<Pick<SkillSyncGate, 'keepSelected' | 'resolve'>>;
 }
 
 /**
@@ -337,6 +341,21 @@ function buildSuite(folders: string[] = ['/ws']): Suite {
     }),
   } as unknown as HarnessSkillSelectionRpcService;
 
+  const allowedSlugs = new Set<string>();
+  const skillSyncGate = {
+    keepSelected: jest.fn((_cwd: string, slugs: readonly string[]) => {
+      for (const slug of slugs) {
+        allowedSlugs.add(slug);
+      }
+      return true;
+    }),
+    resolve: jest.fn(() => ({
+      mode: 'selected' as const,
+      slugs: Array.from(allowedSlugs),
+      derived: false,
+    })),
+  } as unknown as Suite['skillSyncGate'];
+
   const handlers = new HarnessRpcHandlers(
     logger as unknown as Logger,
     rpc as unknown as RpcHandler,
@@ -360,6 +379,7 @@ function buildSuite(folders: string[] = ['/ws']): Suite {
     skillInstall,
     healthService,
     skillSelection,
+    skillSyncGate as unknown as SkillSyncGate,
   );
 
   return {
@@ -383,6 +403,7 @@ function buildSuite(folders: string[] = ['/ws']): Suite {
     fsService,
     mcpInstall,
     skillInstall,
+    skillSyncGate,
   };
 }
 
@@ -785,9 +806,13 @@ describe('HarnessRpcHandlers (thin facade)', () => {
       );
       expect(suite.pluginLoader.saveWorkspacePluginConfig).toHaveBeenCalledWith(
         {
-          enabledPluginIds: ['ptah-nx-saas'],
+          enabledPluginIds: ['ptah-nx-saas', 'ptah-core'],
           disabledSkillIds: [],
         },
+      );
+      expect(suite.skillSyncGate.keepSelected).toHaveBeenCalledWith(
+        '/ws',
+        NODE_TS_SKILLS,
       );
       // Enabling a plugin changes the desired state, so the copies in
       // {ws}/.claude have to be rebuilt before the agent's first turn. The
@@ -797,6 +822,11 @@ describe('HarnessRpcHandlers (thin facade)', () => {
         '/ws',
         'harness:start-new-project',
       );
+      expect(
+        suite.skillSyncGate.keepSelected.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        suite.harnessPropagation.propagate.mock.invocationCallOrder[0],
+      );
       expect(suite.platformCommands.focusChat).toHaveBeenCalled();
       expect(broadcastMessage).not.toHaveBeenCalled();
       expect(disposeWebview).toHaveBeenCalledWith('ptah.setupWizard');
@@ -805,10 +835,10 @@ describe('HarnessRpcHandlers (thin facade)', () => {
       ).toBeLessThan(disposeWebview.mock.invocationCallOrder[0]);
     });
 
-    it('skips plugin enablement + harness reconcile when ptah-nx-saas is already enabled', async () => {
+    it('skips plugin enablement when ptah-nx-saas and ptah-core are already enabled, while still allowlisting skills and reconciling', async () => {
       const suite = buildSuite();
       suite.pluginLoader.getWorkspacePluginConfig.mockReturnValue({
-        enabledPluginIds: ['ptah-nx-saas'],
+        enabledPluginIds: ['ptah-nx-saas', 'ptah-core'],
         disabledSkillIds: [],
       });
       suite.container.__register(WEBVIEW_MANAGER, {
@@ -828,7 +858,14 @@ describe('HarnessRpcHandlers (thin facade)', () => {
       expect(
         suite.pluginLoader.saveWorkspacePluginConfig,
       ).not.toHaveBeenCalled();
-      expect(suite.harnessPropagation.propagate).not.toHaveBeenCalled();
+      expect(suite.skillSyncGate.keepSelected).toHaveBeenCalledWith(
+        '/ws',
+        NODE_TS_SKILLS,
+      );
+      expect(suite.harnessPropagation.propagate).toHaveBeenCalledWith(
+        '/ws',
+        'harness:start-new-project',
+      );
     });
 
     it('returns success when the wizard disposal service is missing', async () => {
@@ -932,7 +969,7 @@ describe('HarnessRpcHandlers (thin facade)', () => {
       return broadcastMessage;
     }
 
-    it('enables the profile’s BUNDLED plugin, not the hardcoded SaaS one', async () => {
+    it('enables the profile’s BUNDLED plugin and ptah-core, not the hardcoded SaaS one', async () => {
       const suite = buildSuite();
       withBroadcast(suite);
       suite.handlers.register();
@@ -943,7 +980,7 @@ describe('HarnessRpcHandlers (thin facade)', () => {
       )({ intake: DOTNET_INTAKE });
 
       expect(suite.pluginLoader.saveWorkspacePluginConfig).toHaveBeenCalledWith(
-        { enabledPluginIds: ['ptah-dotnet'], disabledSkillIds: [] },
+        { enabledPluginIds: ['ptah-dotnet', 'ptah-core'], disabledSkillIds: [] },
       );
     });
 
@@ -1194,6 +1231,64 @@ describe('HarnessRpcHandlers (thin facade)', () => {
         'No preset Stage A skill is installed',
       );
       expect(payload.seedPrompt).not.toContain('saas-workspace-initializer');
+    });
+
+    it('logs a warning and omits Stage A and domain skills when keepSelected fails', async () => {
+      const suite = buildSuite();
+      const broadcastMessage = withBroadcast(suite);
+      suite.workspaceContext.discoverAvailableSkills.mockReturnValue(
+        installedSkills(...NODE_TS_SKILLS),
+      );
+      suite.skillSyncGate.keepSelected.mockReturnValue(false);
+      suite.handlers.register();
+
+      const result = await getHandler(
+        suite.rpc,
+        'harness:start-new-project',
+      )({ intake: VALID_INTAKE });
+
+      const payload = result as Extract<
+        HarnessStartNewProjectResult,
+        { success: true }
+      >;
+      expect(broadcastMessage).not.toHaveBeenCalled();
+      expect(suite.logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Skill allowlist write failed'),
+        expect.objectContaining({
+          workspaceRoot: '/ws',
+          slugs: NODE_TS_SKILLS,
+        }),
+      );
+      expect(payload.plugins.availableSkillIds).toEqual([]);
+      expect(payload.seedPrompt).not.toContain('saas-workspace-initializer');
+      expect(payload.seedPrompt).not.toContain('nx-workspace-architect');
+      expect(payload.seedPrompt).not.toContain('ddd-architecture');
+      expect(payload.seedPrompt).toContain(
+        'name the bounded contexts directly from the domain model',
+      );
+    });
+
+    it('filters discovered skills against the SkillSyncGate allowlist in selected mode', async () => {
+      const suite = buildSuite();
+      withBroadcast(suite);
+      suite.workspaceContext.discoverAvailableSkills.mockReturnValue(
+        installedSkills(...NODE_TS_SKILLS, 'unrelated-extra-skill'),
+      );
+      suite.handlers.register();
+
+      const result = await getHandler(
+        suite.rpc,
+        'harness:start-new-project',
+      )({ intake: VALID_INTAKE });
+
+      const payload = result as Extract<
+        HarnessStartNewProjectResult,
+        { success: true }
+      >;
+      expect(payload.plugins.availableSkillIds).toEqual(NODE_TS_SKILLS);
+      expect(payload.plugins.availableSkillIds).not.toContain(
+        'unrelated-extra-skill',
+      );
     });
 
     it('rejects an intake with no brief without touching plugin config', async () => {
