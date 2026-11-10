@@ -1329,6 +1329,7 @@ export class ChatSessionService {
           : await this.childModelCatalog.getSupportedModels();
       return models.map((item) => item.value);
     } catch (error: unknown) {
+      // degradation-audit: reported - routing is optional; an empty catalog keeps the host default model.
       this.logger.warn('[ChatSessionService] Child model catalog unavailable for routing', {
         name: error instanceof Error ? error.name : typeof error,
       });

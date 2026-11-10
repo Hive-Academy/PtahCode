@@ -1298,7 +1298,7 @@ describe(CompactSessionCardComponent.name, () => {
       ) as HTMLElement;
 
       expect(route).not.toBeNull();
-      expect(route.textContent).toContain(`${longModel} · high`);
+      expect(route.textContent?.replace(/\s*·\s*/g, ' · ')).toContain(`${longModel} · high`);
       expect(modelEl.className).toContain('truncate');
       expect(modelEl.getAttribute('title')).toBe(
         `${longModel} (set by parent)`,
@@ -1335,7 +1335,7 @@ describe(CompactSessionCardComponent.name, () => {
         '[data-testid="compact-session-child-effort"]',
       ) as HTMLElement;
 
-      expect(route.textContent).toContain('default model · low');
+      expect(route.textContent?.replace(/\s*·\s*/g, ' · ')).toContain('default model · low');
       expect(modelEl.getAttribute('title')).toBe(
         'default model (host default)',
       );
@@ -1360,7 +1360,7 @@ describe(CompactSessionCardComponent.name, () => {
       );
       fixture.detectChanges();
 
-      expect(route.textContent).toContain('default model · default effort');
+      expect(route.textContent?.replace(/\s*·\s*/g, ' · ')).toContain('default model · default effort');
       expect(effortEl.getAttribute('title')).toBe(
         'default effort (host default)',
       );
