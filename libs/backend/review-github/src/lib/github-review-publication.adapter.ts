@@ -21,6 +21,8 @@ const issueResponse = z.object({
 const reviewResponse = z.object({
   id: positiveId, body: z.string().nullable(), submitted_at: z.string().datetime().nullable(),
 });
+const replyThreadId = z.string().regex(/^[1-9][0-9]{0,18}$/);
+const replyBody = z.string().trim().min(1).max(MAX_BODY_CHARS);
 const targetSchema = z.object({ repo: RepoIdentitySchema, number: positiveId, headSha: ShaSchema });
 
 /** The composition root supplies live policy; false blocks every write. */
@@ -72,11 +74,16 @@ export interface IGitHubReviewPublicationPort {
     candidates: PublicationInlineComment[], validRightAnchors: ReadonlySet<string>): Promise<PublicationResult>;
 }
 
+/** Posts an operator reply under a published finding comment. Every write passes the publication guard. */
+export interface IGitHubFindingReplyPort {
+  replyToFinding(target: PublicationTarget, threadId: string, body: string): Promise<GitHubIssueComment>;
+}
+
 /** Stable key supplied by the diff validator for a RIGHT-side changed line. */
 export { rightAnchorKey } from '@ptah-extension/review-contracts';
 
 @injectable()
-export class GithubReviewPublicationAdapter implements IGitHubReviewPublicationPort {
+export class GithubReviewPublicationAdapter implements IGitHubReviewPublicationPort, IGitHubFindingReplyPort {
   constructor(
     @inject(PLATFORM_TOKENS.SECRET_STORAGE) private readonly secrets: ISecretStorage,
     @inject(REVIEW_GITHUB_TOKENS.FETCH) private readonly fetcher: typeof fetch,
@@ -269,5 +276,23 @@ export class GithubReviewPublicationAdapter implements IGitHubReviewPublicationP
     return { walkthrough: publishedWalkthrough,
       review: { id: raw.id, body: raw.body ?? '', submittedAt: raw.submitted_at ?? '', threads: [] }, deferred,
       publishedFindingIds: publishedIds };
+  }
+
+  /** Replies to the top-level review comment `threadId`. The guard and the current-head check apply. */
+  async replyToFinding(targetInput: PublicationTarget, threadId: string, body: string): Promise<GitHubIssueComment> {
+    const target = targetSchema.parse(targetInput);
+    const commentId = replyThreadId.safeParse(threadId);
+    const text = replyBody.safeParse(body);
+    if (!commentId.success || !text.success)
+      throw new GitHubReviewError('malformed-response', 'Finding reply is invalid');
+    const token = await this.secrets.get(REVIEW_GITHUB_TOKEN_KEY);
+    if (!token) throw new GitHubReviewError('missing-token', 'GitHub bot token is unavailable');
+    if (text.data.includes(token))
+      throw new GitHubReviewError('publication-unavailable', 'Publication contains a secret');
+    const response = await this.request(target, 'POST',
+      `/pulls/${target.number}/comments/${commentId.data}/replies`, { body: text.data });
+    if (!response.ok) throw new GitHubReviewError('http', `GitHub returned HTTP ${response.status}`);
+    const raw = await this.json(response, issueResponse);
+    return { id: raw.id, body: raw.body, authorLogin: raw.user.login, createdAt: raw.created_at };
   }
 }

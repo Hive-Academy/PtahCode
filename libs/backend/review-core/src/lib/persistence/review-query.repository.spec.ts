@@ -92,6 +92,8 @@ describe('ReviewQueryRepository', () => {
       const findings = await query.listFindings('a3');
       expect(findings).toHaveLength(1);
       expect(JSON.stringify(findings)).not.toContain(secret);
+      expect(await query.listPublishedTitles('a3', [])).toEqual([{ findingId, path: 'src/review.ts', line: 3,
+        title: 'Credential exposure', publishedTitle: 'Credential exposure' }]);
       const first = await query.listRuns({ state: 'partial', limit: 1 });
       expect(first.poll).toEqual({ status: 'failed', error: 'github-poll-failed', lastSuccessAt: null,
         lastErrorAt: new Date(now + 5).toISOString() });

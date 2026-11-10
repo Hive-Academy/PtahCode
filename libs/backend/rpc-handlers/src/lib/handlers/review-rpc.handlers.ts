@@ -1,3 +1,5 @@
+import { realpath } from 'node:fs/promises';
+import { relative } from 'node:path';
 import { inject, injectable } from 'tsyringe';
 import { ulid } from 'ulid';
 import { z, ZodError } from 'zod';
@@ -6,11 +8,13 @@ import {
   REVIEW_TRIAGE_ACCEPTED_MARKER,
   REVIEW_TRIAGE_DISMISSED_MARKER,
   type IGitHubReviewPort,
+  type RepoIdentity,
 } from '@ptah-extension/review-contracts';
 import {
   REVIEW_CORE_TOKENS,
   ReviewPollDisabledError,
-  escapeText,
+  findingMarker,
+  safeText,
   type IReviewArtifactReader,
   type IReviewQueryRepository,
   type IReviewSecretPresence,
@@ -23,10 +27,13 @@ import {
 import {
   PLATFORM_TOKENS,
   type ISecretStorage,
+  type IWorkspaceProvider,
 } from '@ptah-extension/platform-core';
 import {
+  GitHubReviewError,
   REVIEW_GITHUB_TOKEN_KEY,
   REVIEW_GITHUB_TOKENS,
+  type IGitHubFindingReplyPort,
 } from '@ptah-extension/review-github';
 import {
   RpcUserError,
@@ -95,14 +102,34 @@ export class ReviewRpcHandlers {
       'pollAndRecord'
     >,
     @inject(REVIEW_CORE_TOKENS.GITHUB)
-    private readonly github: Pick<IGitHubReviewPort, 'getPull' | 'listOwnReviewsAndThreads' | 'replyToFinding'>,
+    private readonly github: Pick<IGitHubReviewPort, 'getPull' | 'listOwnReviewsAndThreads'>,
     @inject(PLATFORM_TOKENS.SECRET_STORAGE)
     private readonly tokenStorage: ISecretStorage,
     @inject(REVIEW_GITHUB_TOKENS.FETCH) private readonly fetcher: typeof fetch,
     @inject(ReviewPolicyService) private readonly policy: ReviewPolicyService,
     @inject(REVIEW_CORE_TOKENS.ENVIRONMENT)
     private readonly environment: ReviewStageEnvironment,
+    @inject(REVIEW_GITHUB_TOKENS.PUBLICATION_PORT)
+    private readonly replies: IGitHubFindingReplyPort,
+    @inject(PLATFORM_TOKENS.WORKSPACE_PROVIDER)
+    private readonly workspace: Pick<IWorkspaceProvider, 'getWorkspaceFolders'>,
   ) {}
+
+  /** The registered workspace folder that is the checkout of the repository, or null when that checkout is not open. */
+  private async repositoryRoot(repo: RepoIdentity): Promise<string | null> {
+    let checkout: string;
+    try {
+      checkout = (await this.environment.resolve(repo)).repoRoot;
+    } catch (_error: unknown) {
+      // degradation-audit: reported — a null root makes the renderer tell the operator that the repository is not open.
+      return null;
+    }
+    const folders = this.workspace.getWorkspaceFolders();
+    const real = await Promise.allSettled(folders.map((folder) => realpath(folder)));
+    // path.relative compares without case on Windows, as the file system does.
+    const index = real.findIndex((item) => item.status === 'fulfilled' && relative(item.value, checkout) === '');
+    return index === -1 ? null : folders[index];
+  }
 
   private async safe<T>(run: () => Promise<T>): Promise<T> {
     try {
@@ -307,9 +334,11 @@ export class ReviewRpcHandlers {
       this.safe(async () => {
         const { attemptId } =
           ReviewRpcSchemas['review:listFindings'].params.parse(raw);
-        if (!(await this.query.getRun(attemptId))) return { findings: [] };
+        const run = await this.query.getRun(attemptId);
+        if (!run) return { findings: [] };
         return ReviewRpcSchemas['review:listFindings'].result.parse({
           findings: await this.query.listFindings(attemptId),
+          repositoryRoot: await this.repositoryRoot(run.repo),
         });
       }),
     );
@@ -461,6 +490,16 @@ export class ReviewRpcHandlers {
         const response = ReviewRpcSchemas['review:respondToFinding'].result;
         if (!run) return response.parse({ ok: false, code: 'run-not-found', error: 'Review run not found' });
 
+        // Publication writes publishedFindingTitle(stored title) to the heading. The caller sends the listFindings
+        // form of the title, so find the stored finding first and compare with the same published form.
+        const secrets = (await this.environment.redactionSecrets?.()) ?? [];
+        // A thread is a target only when it has the heading and the hidden marker of that stored finding. Thus an
+        // older comment of a different finding with the same path, line and title is not a target.
+        const wanted = (await this.query.listPublishedTitles(params.attemptId, secrets))
+          .filter((item) => item.path === params.path && item.line === params.line && item.title.trim() === params.title)
+          .map((item) => ({ heading: item.publishedTitle, marker: findingMarker(item.findingId) }));
+        if (wanted.length === 0) return response.parse({ ok: false, code: 'no-thread', error: 'No published GitHub thread for this finding' });
+
         try {
           let page: number | null = 1;
           const matches: { id: string; resolved: boolean; body: string }[] = [];
@@ -476,12 +515,12 @@ export class ReviewRpcHandlers {
           // A truncated scan can hide a second matching thread: never treat it as complete.
           if (page !== null) return response.parse({ ok: false, code: 'ambiguous-thread', error: 'Too many GitHub reviews to identify the thread' });
           // Only a thread whose published body carries the finding title belongs to this finding.
-          // The publisher writes the heading `### <badge> · <escaped title>`: compare the full escaped title.
-          const heading = escapeText(params.title);
+          // The publisher writes the heading `### <badge> · <published title>`: compare the full published title.
           const titled = matches.filter((thread) => {
             const first = thread.body.split(/\r?\n/, 1)[0] ?? '';
             const separator = first.indexOf(' · ');
-            return first.startsWith('### ') && separator !== -1 && first.slice(separator + 3) === heading;
+            return first.startsWith('### ') && separator !== -1
+              && wanted.some((item) => item.heading === first.slice(separator + 3) && thread.body.includes(item.marker));
           });
           if (titled.length === 0) return response.parse({ ok: false, code: 'no-thread', error: 'No published GitHub thread for this finding' });
           const unresolved = titled.filter((thread) => !thread.resolved);
@@ -489,14 +528,21 @@ export class ReviewRpcHandlers {
           const match = narrowed.length === 1 ? narrowed[0] : undefined;
           if (!match) return response.parse({ ok: false, code: 'ambiguous-thread', error: 'Multiple GitHub threads match this finding' });
 
-          const note = params.body ? `\n\n${params.body}` : '';
+          // The operator text goes to GitHub: apply the redaction that publication applies to finding text.
+          const text = params.body ? safeText(params.body, secrets) : '';
+          const note = text ? `\n\n${text}` : '';
           const body = params.action === 'accept' ? `${REVIEW_TRIAGE_ACCEPTED_MARKER}\nAccepted by the operator.${note}`
             : params.action === 'dismiss' ? `${REVIEW_TRIAGE_DISMISSED_MARKER}\nDismissed by the operator.${note}`
-            : (params.body ?? '');
-          await this.github.replyToFinding(run.repo, run.prNumber, match.id, body);
+            : text;
+          await this.replies.replyToFinding({ repo: run.repo, number: run.prNumber, headSha: run.headSha }, match.id, body);
           return response.parse({ ok: true, threadId: match.id });
-        } catch (_error: unknown) {
-          // degradation-audit: reported — the typed `github-error` result reaches the operator.
+        } catch (error: unknown) {
+          // degradation-audit: reported — a typed `publication-unavailable` or `github-error` result reaches the operator.
+          if (error instanceof GitHubReviewError && error.code === 'publication-unavailable') {
+            this.logger.info('[review] the publication guard refused a finding reply');
+            return response.parse({ ok: false, code: 'publication-unavailable',
+              error: 'GitHub publication is paused or the pull request head changed. The reply was not posted.' });
+          }
           // GitHub adapter errors may contain credentials. Log only a sanitized Error.
           this.logger.info('[review] GitHub finding lookup or reply failed', new Error('GitHub request failed'));
           return response.parse({ ok: false, code: 'github-error', error: 'GitHub rejected the reply' });

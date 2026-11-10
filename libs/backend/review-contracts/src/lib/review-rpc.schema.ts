@@ -72,7 +72,11 @@ export const ReviewRpcSchemas = {
   'review:listFindings': {
     params: attempt,
     result: z
-      .object({ findings: z.array(ReviewFindingSchema).max(100) })
+      .object({
+        findings: z.array(ReviewFindingSchema).max(100),
+        /** The registered workspace folder that is the checkout of the run's repository; null when it is not open. */
+        repositoryRoot: z.string().min(1).max(4096).nullable().optional(),
+      })
       .strict(),
   },
   'review:listRepositories': {
@@ -135,7 +139,7 @@ export const ReviewRpcSchemas = {
     }).strict().refine(v => v.action !== 'reply' || v.body !== undefined, 'Reply needs a body'),
     result: z.object({
       ok: z.boolean(),
-      code: z.enum(['run-not-found', 'no-thread', 'ambiguous-thread', 'github-error']).optional(),
+      code: z.enum(['run-not-found', 'no-thread', 'ambiguous-thread', 'publication-unavailable', 'github-error']).optional(),
       error: z.string().max(500).optional(),
       threadId: z.string().max(128).optional(),
     }).strict().refine(v => v.ok || v.code !== undefined, 'Failure needs a code'),

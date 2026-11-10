@@ -2,13 +2,19 @@ import { inject, injectable } from 'tsyringe';
 import { basename } from 'node:path';
 import { z } from 'zod';
 import { PERSISTENCE_TOKENS, SqliteConnectionService } from '@ptah-extension/persistence-sqlite';
+import { publishedFindingTitle } from '../publication/publication-text';
 import { RepoIdentitySchema, ReviewFindingSchema, ReviewRunSchema, ReviewRpcSchemas, type ReviewFinding, type ReviewRun } from '@ptah-extension/review-contracts';
 
 export interface IReviewQueryRepository {
   listRuns(input: z.input<typeof ReviewRpcSchemas['review:listRuns']['params']>): Promise<z.output<typeof ReviewRpcSchemas['review:listRuns']['result']>>;
   getRun(attemptId: string): Promise<ReviewRun | null>;
   listFindings(attemptId: string): Promise<ReviewFinding[]>;
+  /** Each finding of the attempt with its wire identity and the title text that publication writes to GitHub. */
+  listPublishedTitles(attemptId: string, secrets: readonly string[]): Promise<ReviewPublishedTitle[]>;
 }
+export interface ReviewPublishedTitle { findingId: string; path: string; line: number | null; title: string; publishedTitle: string }
+const findingRowSchema = z.object({ finding_id: z.string().min(1), payload_json: z.string().min(1) });
+const titleSchema = z.object({ path: z.string(), line: z.number().nullable(), title: z.string() });
 
 const rowSchema = z.object({ attempt_id: z.string(), owner: z.string(), name: z.string(), pr_number: z.number(),
   head_sha: z.string(), trigger: z.enum(['automatic', 'manual']), state: z.string(), queued_at: z.number(),
@@ -18,7 +24,6 @@ const rowSchema = z.object({ attempt_id: z.string(), owner: z.string(), name: z.
   failure_count: z.number().nullable().optional(), next_eligible_at: z.number().nullable().optional() });
 const stageSchema = z.object({ stage: z.string(), state: z.string(), outcome: z.string().nullable(), family: z.string().nullable(), scope: z.string().nullable(),
   started_at: z.number().nullable(), ended_at: z.number().nullable(), error_summary: z.string().nullable(), artifact_path: z.string().nullable() });
-const findingSchema = z.object({ payload_json: z.string() });
 const coverageSchema = z.object({ coverage: z.array(z.string().min(1).max(256)).max(100) });
 const checkpointSchema = z.object({ outcome: z.string().nullable() });
 const pollRowSchema = z.object({ poll_status: z.enum(['succeeded', 'failed']).nullable(), poll_error: z.string().nullable(),
@@ -105,16 +110,29 @@ export class ReviewQueryRepository implements IReviewQueryRepository {
     return row ? this.mapRun(row) : null;
   }
 
-  async listFindings(attemptId: string): Promise<ReviewFinding[]> {
+  private payloads(attemptId: string): { findingId: string; payload: string }[] {
     const id = ReviewRpcSchemas['review:listFindings'].params.parse({ attemptId }).attemptId;
-    const rows = this.sqlite.db.prepare(`SELECT f.payload_json FROM review_findings f JOIN review_finding_events e ON e.finding_id = f.finding_id
+    const rows = this.sqlite.db.prepare(`SELECT f.finding_id, f.payload_json FROM review_findings f JOIN review_finding_events e ON e.finding_id = f.finding_id
       WHERE e.attempt_id = ? AND e.kind = 'accepted' ORDER BY f.created_at, f.finding_id LIMIT 101`).all(id);
     if (rows.length > 100) throw new Error('Review finding limit exceeded');
     return rows.map((raw) => {
-      const payload = findingSchema.parse(raw).payload_json;
-      if (!payload) throw new Error('Review finding payload unavailable');
-      return ReviewFindingSchema.parse(JSON.parse(payload, (_key, value: unknown) =>
-        typeof value === 'string' ? redact(value) : value));
+      const row = findingRowSchema.safeParse(raw);
+      if (!row.success) throw new Error('Review finding payload unavailable');
+      return { findingId: row.data.finding_id, payload: row.data.payload_json };
+    });
+  }
+
+  async listFindings(attemptId: string): Promise<ReviewFinding[]> {
+    return this.payloads(attemptId).map(({ payload }) => ReviewFindingSchema.parse(JSON.parse(payload, (_key, value: unknown) =>
+      typeof value === 'string' ? redact(value) : value)));
+  }
+
+  async listPublishedTitles(attemptId: string, secrets: readonly string[]): Promise<ReviewPublishedTitle[]> {
+    return this.payloads(attemptId).map(({ findingId, payload }) => {
+      const raw = titleSchema.parse(JSON.parse(payload));
+      // path and title use the listFindings redaction: they are the identity that the renderer sends back.
+      return { findingId, path: redact(raw.path), line: raw.line, title: redact(raw.title),
+        publishedTitle: publishedFindingTitle(raw.title, secrets) };
     });
   }
 }

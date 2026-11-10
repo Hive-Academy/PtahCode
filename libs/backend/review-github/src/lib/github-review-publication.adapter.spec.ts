@@ -307,6 +307,40 @@ describe('GithubReviewPublicationAdapter', () => {
     expect(env.fetcher).not.toHaveBeenCalled();
   });
 
+  it('posts a finding reply to the review comment after the guard check', async () => {
+    const env = setup();
+    env.fetcher.mockResolvedValueOnce(reply({ id: 11, body: 'Accepted', user: { login: 'ptah-bot' }, created_at: stamp }));
+    expect(await env.adapter.replyToFinding(target, '123', ' Accepted ')).toEqual({
+      id: 11, body: 'Accepted', authorLogin: 'ptah-bot', createdAt: stamp,
+    });
+    expect(env.guard.mayPublish).toHaveBeenCalled();
+    const [url, init] = env.fetcher.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/repos/Hive-Academy/PtahCode/pulls/4/comments/123/replies');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(String(init.body))).toEqual({ body: 'Accepted' });
+  });
+
+  it('does not post a finding reply when publication is paused or the head changed', async () => {
+    const env = setup();
+    env.guard.mayPublish.mockResolvedValue(false);
+    await expect(env.adapter.replyToFinding(target, '123', 'Accepted')).rejects.toMatchObject({ code: 'publication-unavailable' });
+    env.guard.mayPublish.mockResolvedValue(true);
+    (env.reader.getPull as jest.Mock).mockResolvedValue({ state: 'open', headSha: 'b'.repeat(40) });
+    await expect(env.adapter.replyToFinding(target, '123', 'Accepted')).rejects.toMatchObject({ code: 'publication-unavailable' });
+    expect(env.fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['thread-1', 'Accepted'],
+    ['12/../../issues/1', 'Accepted'],
+    ['123', '   '],
+    ['123', 'has secret-canary inside'],
+  ])('rejects the finding reply %p / %p before a request', async (threadId, body) => {
+    const env = setup();
+    await expect(env.adapter.replyToFinding(target, threadId, body)).rejects.toBeInstanceOf(Error);
+    expect(env.fetcher).not.toHaveBeenCalled();
+  });
+
   it.each([
     [401, 'authentication'],
     [403, 'permission'],
