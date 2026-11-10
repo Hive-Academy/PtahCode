@@ -22,6 +22,9 @@ describe('GitWindowSync', () => {
   let allowOpen = true;
   let allowPublish = true;
   let statusOpen = false;
+  /** Runs at the start of the named RPC, to interleave a host push with awaited work. */
+  let hooks: Record<string, (() => void) | undefined> = {};
+  let restorePin: jest.Mock;
   let layoutVisible: ReturnType<typeof jest.fn>;
   const panelVisible = signal(true);
   let sync: GitWindowSync;
@@ -36,12 +39,15 @@ describe('GitWindowSync', () => {
     allowOpen = true;
     allowPublish = true;
     statusOpen = false;
+    hooks = {};
+    restorePin = jest.fn((snapshot: ReturnType<typeof scope>) => scope.set(snapshot));
     panelVisible.set(true);
     layoutVisible = jest.fn((visible: boolean) => panelVisible.set(visible));
     TestBed.configureTestingModule({ providers: [
       GitWindowSync,
       { provide: ClaudeRpcService, useValue: { call: jest.fn(async (method: string, params: unknown) => {
         calls.push({ method, params });
+        hooks[method]?.();
         if (method === 'gitWindow:status') return { success: true, data: { open: statusOpen } };
         if (method === 'gitWindow:open') return { success: true, data: { ok: allowOpen } };
         if (method === 'gitWindow:close') return { success: true, data: { closed: true } };
@@ -52,7 +58,7 @@ describe('GitWindowSync', () => {
       { provide: VSCodeService, useValue: { isElectron: true } },
       { provide: ThemeService, useValue: { currentTheme: themeName } },
       { provide: ChatGitSessionScopeSource, useValue: { activeSession: active, openSessions: open, candidateForTab: (id: string) => open().find(c => c.tabId === id) ?? null } },
-      { provide: GitDockScopeStore, useValue: { scope, pin: jest.fn(() => scope.set({ ...scope(), mode: 'pinned' })), unpin: jest.fn(() => scope.set({ ...scope(), mode: 'follow-session' })), showSession: jest.fn((tabId: string) => scope.set({ ...scope(), mode: 'pinned', session: { tabId } })) } },
+      { provide: GitDockScopeStore, useValue: { scope, pin: jest.fn(() => scope.set({ ...scope(), mode: 'pinned' })), unpin: jest.fn(() => scope.set({ ...scope(), mode: 'follow-session' })), showSession: jest.fn((tabId: string) => scope.set({ ...scope(), mode: 'pinned', session: { tabId } })), pinSnapshot: jest.fn(() => scope()), restorePin } },
     ] });
   });
 
@@ -163,5 +169,118 @@ describe('GitWindowSync', () => {
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(sync.detached()).toBe(true);
     expect(calls.map(c => c.method)).toContain('gitWindow:publishScope');
+  });
+
+  describe('PR #1038 review', () => {
+    const publishes = () => calls.filter(c => c.method === 'gitWindow:publishScope');
+    const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+    const retarget = async (tabId: string) => {
+      active.set(candidate(tabId));
+      open.set([candidate(tabId), candidate('A')]);
+      TestBed.flushEffects();
+      await wait(0);
+    };
+
+    it('retries a failed scope publish with the newest scope while detached (finding 3)', async () => {
+      sync = TestBed.inject(GitWindowSync);
+      await sync.detach();
+      allowPublish = false;
+      await retarget('B');
+      expect(sync.error()).toMatch(/Could not publish/);
+      const failed = publishes().length;
+
+      allowPublish = true;
+      await retarget('C');
+      await wait(650);
+      expect(publishes().length).toBeGreaterThan(failed);
+      expect(publishes().at(-1)?.params).toMatchObject({ scope: { active: { tabId: 'C' } } });
+      expect(sync.error()).toBeNull();
+    });
+
+    it('cancels the retry when the child closes (finding 3)', async () => {
+      sync = TestBed.inject(GitWindowSync);
+      await sync.detach();
+      allowPublish = false;
+      await retarget('B');
+      const failed = publishes().length;
+      sync.handleMessage({ type: 'gitWindow:closed' });
+      allowPublish = true;
+      await wait(650);
+      expect(publishes()).toHaveLength(failed);
+      expect(sync.detached()).toBe(false);
+    });
+
+    it('republishes the unsent scope on Focus (finding 3)', async () => {
+      sync = TestBed.inject(GitWindowSync);
+      await sync.detach();
+      allowPublish = false;
+      await retarget('B');
+      allowPublish = true;
+      await sync.focus();
+      expect(publishes().at(-1)?.params).toMatchObject({ scope: { active: { tabId: 'B' } } });
+      expect(sync.error()).toBeNull();
+    });
+
+    it('restores a pin to a closed tab when the follow-mode publish fails (finding 4)', async () => {
+      sync = TestBed.inject(GitWindowSync);
+      await sync.detach();
+      // Tab Z is pinned and closed: it is not in the open sessions, so showSession cannot restore it.
+      const pinned = { mode: 'pinned' as const, root: 'C:/wt/z', unresolved: false, session: { tabId: 'Z' } };
+      scope.set(pinned);
+      TestBed.flushEffects();
+      await wait(0);
+      allowPublish = false;
+
+      sync.handleMessage({ type: 'gitWindow:setMode', payload: { mode: 'follow-session', tabId: null } });
+      await wait(0);
+
+      expect(restorePin).toHaveBeenCalledWith(pinned);
+      expect(scope()).toEqual(pinned);
+      expect(sync.error()).toMatch(/Could not publish/);
+    });
+
+    it('stays docked when the child closes during an in-flight detach (finding 5)', async () => {
+      sync = TestBed.inject(GitWindowSync);
+      await wait(0);
+      hooks['gitWindow:publishScope'] = () => sync.handleMessage({ type: 'gitWindow:closed' });
+      await sync.detach();
+      expect(sync.detached()).toBe(false);
+      expect(layoutVisible).not.toHaveBeenCalledWith(false);
+      expect(calls.map(c => c.method)).toContain('gitWindow:status');
+    });
+
+    it('stays docked when the child closes during the reload restore (finding 5)', async () => {
+      statusOpen = true;
+      hooks['gitWindow:publishScope'] = () => {
+        hooks = {};
+        statusOpen = false;
+        sync.handleMessage({ type: 'gitWindow:closed' });
+      };
+      sync = TestBed.inject(GitWindowSync);
+      await wait(20);
+      expect(sync.detached()).toBe(false);
+      expect(layoutVisible).not.toHaveBeenCalledWith(false);
+    });
+
+    it('detaches and republishes when a stale closed push arrives but a child is open (finding 5)', async () => {
+      sync = TestBed.inject(GitWindowSync);
+      await wait(0);
+      statusOpen = true;
+      hooks['gitWindow:publishScope'] = () => {
+        hooks = {};
+        sync.handleMessage({ type: 'gitWindow:closed' });
+      };
+      await sync.detach();
+      expect(sync.detached()).toBe(true);
+      expect(publishes()).toHaveLength(2);
+    });
+
+    it('publishes the scope again when Focus opens a child from a stale detached state (finding 5)', async () => {
+      sync = TestBed.inject(GitWindowSync);
+      await sync.detach();
+      const before = publishes().length;
+      await sync.focus();
+      expect(publishes()).toHaveLength(before + 1);
+    });
   });
 });

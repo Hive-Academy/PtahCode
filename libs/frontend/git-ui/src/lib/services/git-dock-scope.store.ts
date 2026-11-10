@@ -76,7 +76,7 @@ function sameWindowRoot(expected: string | null, actual: string | null): boolean
 }
 
 /** A pin: the tab, the workspace it was made in, and its last resolution. */
-interface PinnedScope {
+export interface PinnedScope {
   readonly tabId: string;
   readonly workspacePath: string | null;
   readonly name: string;
@@ -477,6 +477,22 @@ export class GitDockScopeStore {
   unpin(): void {
     if (untracked(this._pinned) === null) return;
     this._pinned.set(null);
+    this.reconcileNow();
+  }
+
+  /** The current pin, or `null` in follow mode. Pair it with {@link restorePin}. */
+  pinSnapshot(): PinnedScope | null {
+    return untracked(this._pinned);
+  }
+
+  /**
+   * Put back a pin that {@link pinSnapshot} returned. It also restores a pin
+   * to a closed tab with its retained root, which `showSession` cannot do
+   * because a closed tab has no candidate (PR #1038 review, finding 4).
+   */
+  restorePin(snapshot: PinnedScope | null): void {
+    if (!untracked(this.followsSessions)) return;
+    this._pinned.set(snapshot);
     this.reconcileNow();
   }
 

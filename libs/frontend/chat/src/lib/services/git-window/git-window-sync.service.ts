@@ -8,7 +8,15 @@ interface ScopeStore {
   pin(): void;
   unpin(): void;
   showSession(tabId: string): void;
+  /** The pin before a mode change. `restorePin` puts it back, also for a closed tab. */
+  pinSnapshot(): unknown;
+  restorePin(snapshot: unknown): void;
 }
+
+/** Retry of a failed scope publish: 0.5 s, 1 s, 2 s, 4 s, 8 s, 8 s, then Focus must republish. */
+const PUBLISH_RETRY_BASE_MS = 500;
+const PUBLISH_RETRY_MAX_MS = 8_000;
+const PUBLISH_RETRY_LIMIT = 6;
 
 /** Main renderer owner of the detachable Git dock and its host assigned scope. */
 @Injectable({ providedIn: 'root' })
@@ -28,6 +36,11 @@ export class GitWindowSync implements MessageHandler {
   private lastPublished: string | null = null;
   private pending: Promise<void> = Promise.resolve();
   private destroyed = false;
+  /** Incremented when the child closes. An operation that started before it must not set `detached`. */
+  private generation = 0;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private retryKey: string | null = null;
+  private retryAttempt = 0;
 
   /** Resolve chat scope only when the Git store is active. */
   private get source(): ChatGitSessionScopeSource {
@@ -69,7 +82,7 @@ export class GitWindowSync implements MessageHandler {
         void this.focus();
       });
     });
-    this.destroyRef.onDestroy(() => { this.destroyed = true; });
+    this.destroyRef.onDestroy(() => { this.destroyed = true; this.cancelRetry(); });
     if (this.vscode.isElectron) this.zone.runOutsideAngular(() => void this.restoreStatus());
   }
 
@@ -84,18 +97,25 @@ export class GitWindowSync implements MessageHandler {
       if (this._detached()) {
         const focused = await this.rpc.call('gitWindow:open', {}, { timeout: 10_000 });
         if (!focused.success || !focused.data?.ok) throw new Error('Could not focus the Git window');
+        // The host can open a new child here (a missed closed push), and a failed publish can be unsent.
+        const current = this.scope();
+        if (current !== null && this._detached() && !(await this.publish(current, true))) {
+          throw new Error('Could not publish the Git scope');
+        }
         this._error.set(null);
         return;
       }
       await this.ensureStore();
       const scope = this.scope();
       if (scope === null) throw new Error('Git scope is unavailable');
+      const token = this.generation;
       const opened = await this.rpc.call('gitWindow:open', {}, { timeout: 10_000 });
       if (!opened.success || !opened.data?.ok) throw new Error('Could not open the Git window');
       if (!(await this.publish(scope, true))) {
         await this.rpc.call('gitWindow:close', {}, { timeout: 10_000 });
         throw new Error('Could not publish the Git scope');
       }
+      if (!(await this.childStillOpen(token, scope))) return;
       this.layout.setEditorPanelVisible(false);
       this._detached.set(true);
       this._error.set(null);
@@ -141,16 +161,14 @@ export class GitWindowSync implements MessageHandler {
       await this.ensureStore();
       const store = this.store();
       if (store === null) return;
-      const previous = store.scope();
+      const previous = store.pinSnapshot();
       if (mode === 'follow-session') store.unpin();
       else if (tabId === this.source.activeSession()?.tabId) store.pin();
       else if (tabId !== null) store.showSession(tabId);
       const scope = this.scope();
       if (scope !== null && await this.publish(scope)) return;
       if (!this._detached()) return;
-      if (previous.mode === 'follow-session') store.unpin();
-      else if (previous.session?.tabId === this.source.activeSession()?.tabId) store.pin();
-      else if (previous.session !== null) store.showSession(previous.session.tabId);
+      store.restorePin(previous);
       this._error.set('Could not publish the Git window mode');
     } catch (error: unknown) {
       this._error.set(error instanceof Error ? error.message : 'Could not change Git window mode');
@@ -167,16 +185,58 @@ export class GitWindowSync implements MessageHandler {
       const result = await this.rpc.call('gitWindow:publishScope', { scope }, { timeout: 10_000 });
       if (!result.success || !result.data?.accepted || !result.data.scope ||
           !GitWindowScopeSchema.safeParse(result.data.scope).success) {
-        this._error.set('Could not publish the Git scope');
+        this.publishFailed(key, 'Could not publish the Git scope');
         return;
       }
       this.lastPublished = key;
       this._error.set(null);
+      this.cancelRetry();
       accepted = true;
     }).catch((error: unknown) => {
-      this._error.set(error instanceof Error ? error.message : 'Could not publish the Git scope');
+      this.publishFailed(key, error instanceof Error ? error.message : 'Could not publish the Git scope');
     });
     return this.pending.then(() => accepted);
+  }
+
+  /** Keep the newest scope pending: while detached, publish it again after a bounded backoff. */
+  private publishFailed(key: string, message: string): void {
+    this._error.set(message);
+    if (this.destroyed || !this._detached()) return;
+    if (key !== this.retryKey) {
+      this.retryKey = key;
+      this.retryAttempt = 0;
+    }
+    if (this.retryTimer !== null || this.retryAttempt >= PUBLISH_RETRY_LIMIT) return;
+    const delay = Math.min(PUBLISH_RETRY_BASE_MS * 2 ** this.retryAttempt, PUBLISH_RETRY_MAX_MS);
+    this.retryAttempt += 1;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      if (this.destroyed || !this._detached()) return;
+      // The scope is read now, so the retry sends the newest desired scope.
+      const scope = this.scope();
+      if (scope !== null) void this.publish(scope);
+    }, delay);
+  }
+
+  private cancelRetry(): void {
+    if (this.retryTimer !== null) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+    this.retryKey = null;
+    this.retryAttempt = 0;
+  }
+
+  /**
+   * `true` when the child of this operation is open. A closed push during the
+   * awaited work changes `generation`. Then the host is the authority: if a
+   * child is open it gets the scope again, and a second close stops the operation.
+   */
+  private async childStillOpen(token: number, scope: GitWindowScope): Promise<boolean> {
+    if (this.destroyed) return false;
+    if (token === this.generation) return true;
+    const current = this.generation;
+    const status = await this.rpc.call('gitWindow:status', {}, { timeout: 5_000 });
+    if (!status.success || status.data?.open !== true) return false;
+    return (await this.publish(scope, true)) && current === this.generation && !this.destroyed;
   }
 
   private async restoreStatus(): Promise<void> {
@@ -187,12 +247,14 @@ export class GitWindowSync implements MessageHandler {
         return;
       }
       if (result.data?.open !== true || this.destroyed) return;
+      const token = this.generation;
       await this.ensureStore();
       const scope = this.scope();
       if (scope === null || !(await this.publish(scope, true))) {
         await this.rpc.call('gitWindow:close', {}, { timeout: 10_000 });
         return;
       }
+      if (!(await this.childStillOpen(token, scope))) return;
       this.layout.setEditorPanelVisible(false);
       this._detached.set(true);
     } catch (error: unknown) {
@@ -201,6 +263,8 @@ export class GitWindowSync implements MessageHandler {
   }
 
   private restoreDock(): void {
+    this.generation += 1;
+    this.cancelRetry();
     this._detached.set(false);
     this.lastPublished = null;
     this.layout.setEditorPanelVisible(true);

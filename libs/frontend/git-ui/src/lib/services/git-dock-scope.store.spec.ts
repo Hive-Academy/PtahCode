@@ -333,6 +333,40 @@ describe('GitDockScopeStore', () => {
     expect(switches()).toEqual([]);
   });
 
+  it('restores a pin to a closed tab with its retained root from a snapshot', () => {
+    const store = setup();
+    store.setWorkspace(WS);
+    activeTabId.set('c');
+    TestBed.tick();
+    store.showSession('a');
+    TestBed.tick();
+    tabs.update((all) => {
+      const next = { ...all };
+      delete next['a'];
+      return next;
+    });
+    TestBed.tick();
+    const snapshot = store.pinSnapshot();
+
+    store.unpin();
+    TestBed.tick();
+    expect(store.mode()).toBe('follow-session');
+    // The tab is closed: showSession has no candidate and cannot restore the pin.
+    store.showSession('a');
+    expect(store.mode()).toBe('follow-session');
+
+    store.restorePin(snapshot);
+    TestBed.tick();
+    expect(store.scope()).toMatchObject({
+      mode: 'pinned',
+      root: '/wt/a',
+      session: { tabId: 'a', name: 'Session a', closed: true },
+    });
+
+    store.restorePin(null);
+    expect(store.mode()).toBe('follow-session');
+  });
+
   it('tears the closed folder down in every service, clears its pin and releases the session root', () => {
     const store = setup();
     store.setWorkspace(WS);
