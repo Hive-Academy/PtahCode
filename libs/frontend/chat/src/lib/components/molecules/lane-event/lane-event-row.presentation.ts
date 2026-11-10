@@ -1,4 +1,5 @@
 import { Check, FileText, LoaderCircle, TriangleAlert, X } from 'lucide-angular';
+import { isAgentBudgetStopReason } from '@ptah-extension/shared';
 import type { LaneEventRow } from './lane-event-row.types';
 
 export type LaneEventTone = 'run' | 'done' | 'need' | 'err' | 'neutral';
@@ -108,13 +109,18 @@ export function deriveLaneEventPresentation(row: LaneEventRow, metrics: LaneEven
   const status = (completed?.status ?? completion?.status ?? '').toLowerCase();
   const verdict = (completed?.verdict ?? '').toLowerCase();
   const timedOut = status === 'timeout' || status === 'timed out';
-  const failed = verdict === 'failed' || ['failed', 'error', 'stopped', 'killed', 'cancelled'].includes(status);
+  const stopped = status === 'stopped' || status === 'cancelled';
+  const budgetStop = stopped && isAgentBudgetStopReason(completed?.stopReason);
+  const failed = ['failed', 'error', 'killed'].includes(status)
+    || (verdict === 'failed' && (!stopped || Boolean(completed?.stopReason) && !budgetStop));
   const unverified = verdict === 'unverified';
   // The producer says a no-deliverable lane is NOT done (lane-completion-envelope.ts).
   const noDeliverable = verdict === 'no-deliverable';
   const chip: LaneEventChip = timedOut
     ? { label: 'Timed out', tone: 'err', icon: TriangleAlert }
+    : budgetStop ? { label: 'Budget stop', tone: 'need', icon: TriangleAlert }
     : failed ? { label: 'Failed', tone: 'err', icon: X }
+    : stopped ? { label: 'Stopped', tone: 'neutral', icon: FileText }
     : completed && noDeliverable ? { label: 'Incomplete · no deliverable', tone: 'need', icon: TriangleAlert }
     : completed ? { label: 'Completed', tone: 'done', icon: Check,
       ...(unverified ? { title: 'deliverables not checked' } : {}) }
@@ -136,6 +142,10 @@ export function deriveLaneEventPresentation(row: LaneEventRow, metrics: LaneEven
     const count = completion.deliverables.length;
     stats.push({ label: 'Deliverables', value: `${written}/${count} files`, compact: `${written}/${count} files` });
   }
+  if (budgetStop && (noDeliverable || unverified)) {
+    const label = noDeliverable ? 'No deliverable' : 'Unverified';
+    stats.push({ label: 'Verdict', value: label, compact: label });
+  }
   const model = metrics?.usageTotals?.model ?? metrics?.model;
   if (model) stats.push({ label: 'Lane total model', value: model, compact: `lane total ${model}` });
   const usage = metrics?.usageTotals;
@@ -150,9 +160,11 @@ export function deriveLaneEventPresentation(row: LaneEventRow, metrics: LaneEven
 
   const report = row.events.filter(event => event.kind === 'report').at(-1);
   const reportLine = report?.body.split(/\r?\n/).find(line => line.trim())?.trim();
-  const elapsed = completion?.duration ? ` ${failed || timedOut ? 'after' : 'in'} ${completion.duration}` : '';
+  const elapsed = completion?.duration ? ` ${failed || timedOut || stopped ? 'after' : 'in'} ${completion.duration}` : '';
   const exit = failed && completion?.exitCode !== undefined && completion.exitCode !== 0 ? ` (exit ${completion.exitCode})` : '';
-  const summary = reportLine ?? (timedOut ? `Timed out${elapsed}` : failed ? `Failed${elapsed}${exit}` : completed ? `Finished${elapsed}` : chip.label);
+  const summary = budgetStop ? `Stopped by budget${elapsed}`
+    : reportLine ?? (timedOut ? `Timed out${elapsed}` : failed ? `Failed${elapsed}${exit}`
+      : stopped ? `Stopped${elapsed}` : completed ? `Finished${elapsed}` : chip.label);
   const peer = row.peerLabel.trim();
   const names = new Set([row.agent.trim().toLowerCase(), row.cli.trim().toLowerCase()]);
   const peerTitle = peer && !peer.toLowerCase().split(/\s*[·•]\s*/).every(part => names.has(part)) ? peer : null;

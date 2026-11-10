@@ -1,6 +1,11 @@
 import { laneEnvelopePeerLabel, parseLaneEnvelope } from './lane-envelope';
 
 describe('parseLaneEnvelope', () => {
+  it('reads a typed stop reason from a completion envelope', () => {
+    const text = '<agent-lane-completed agent-id="a" agent="worker" cli="claude" status="stopped" verdict="delivered" stop-reason="budget">\nDone\n</agent-lane-completed>';
+    expect(parseLaneEnvelope(text)).toMatchObject({ status: 'stopped', verdict: 'delivered', stopReason: 'budget' });
+    expect(parseLaneEnvelope(text.replace('stop-reason="budget"', 'stop-reason="unknown"'))?.stopReason).toBeUndefined();
+  });
   it('parses a lane report', () => {
     const envelope = parseLaneEnvelope(
       '<agent-report agent-id="a-1" agent="Glm" cli="ptah-cli">\nReview done: 6/10\n\nDetails\n</agent-report>',

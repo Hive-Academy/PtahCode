@@ -72,6 +72,29 @@ describe('parseLaneCompletion', () => {
 });
 
 describe('deriveLaneEventPresentation', () => {
+  it.each([
+    ['budget', 'delivered', 'Budget stop', 'need', 'Stopped by budget after 26s'],
+    ['budget', 'failed', 'Budget stop', 'need', 'Stopped by budget after 26s'],
+    ['duration', 'no-deliverable', 'Budget stop', 'need', 'Stopped by budget after 26s'],
+    ['telemetry-unavailable', 'unverified', 'Budget stop', 'need', 'Stopped by budget after 26s'],
+    ['repeat-call', 'delivered', 'Stopped', 'neutral', 'Stopped after 26s'],
+    [undefined, 'delivered', 'Stopped', 'neutral', 'Stopped after 26s'],
+    [undefined, 'failed', 'Stopped', 'neutral', 'Stopped after 26s'],
+    ['usage-limit', 'failed', 'Failed', 'err', 'Failed after 26s'],
+    ['auth', 'failed', 'Failed', 'err', 'Failed after 26s'],
+  ] as const)('labels stopped lane (%s, %s)', (stopReason, verdict, label, tone, summary) => {
+    const result = deriveLaneEventPresentation(row({ events: [{ kind: 'completed', status: 'stopped',
+      stopReason, verdict, body: row().events[1].body
+        .replace('finished: completed', 'finished: stopped')
+        .replace('44 bytes', verdict === 'no-deliverable' ? 'MISSING' : '44 bytes'),
+      timestamp: 2, messageId: 'c' }] }));
+    expect(result.chip).toMatchObject({ label, tone });
+    expect(result.summary).toBe(summary);
+    expect(result.stats.map(stat => stat.compact)).toContain(verdict === 'no-deliverable' ? '0/1 files' : '1/1 files');
+    if (verdict === 'no-deliverable') expect(result.stats.map(stat => stat.compact)).toContain('No deliverable');
+    if (verdict === 'unverified') expect(result.stats.map(stat => stat.compact)).toContain('Unverified');
+  });
+
   it('shows Running only for a live report row without a later completion', () => {
     const report = row({ liveLane: true, events: [{ kind: 'report', body: 'Still working', timestamp: 1, messageId: 'r' }] });
     expect(deriveLaneEventPresentation(report, null, false, 'running').chip.label).toBe('Running');
@@ -107,8 +130,31 @@ describe('deriveLaneEventPresentation', () => {
     expect(failure.chip.label).toBe('Failed');
     expect(failure.summary).toBe('Failed after 3s (exit 1)');
     expect(failure.stats.map(stat => stat.compact)).toContain('exit 1');
-    const timeout = deriveLaneEventPresentation(row({ events: [{ kind: 'completed', status: 'timeout', body: 'Lane Claude finished: timeout (exit code 124) after 2m 3s.', timestamp: 2, messageId: 'c' }] }));
-    expect(timeout.chip.label).toBe('Timed out');
+    const timeout = deriveLaneEventPresentation(row({ events: [{ kind: 'completed', status: 'timeout', verdict: 'failed', body: 'Lane Claude finished: timeout (exit code 124) after 2m 3s.', timestamp: 2, messageId: 'c' }] }));
+    expect(timeout.chip).toMatchObject({ label: 'Timed out', tone: 'err' });
+    expect(timeout.summary).toBe('Timed out after 2m 3s');
+  });
+
+  it.each([
+    ['failed', 'failed'],
+    ['timeout', 'failed'],
+    ['stopped', 'failed'],
+  ])('uses the latest report line for %s rows', (status, verdict) => {
+    const result = deriveLaneEventPresentation(row({ events: [
+      { kind: 'report', body: 'Earlier result', timestamp: 1, messageId: 'r1' },
+      { kind: 'report', body: 'Final result\nMore detail', timestamp: 2, messageId: 'r2' },
+      { kind: 'completed', status, verdict, body: `Lane Claude finished: ${status} after 26s.`, timestamp: 3, messageId: 'c' },
+    ] }));
+    expect(result.summary).toBe('Final result');
+  });
+
+  it('keeps the budget summary when the lane also reported progress', () => {
+    const result = deriveLaneEventPresentation(row({ events: [
+      { kind: 'report', body: 'Partial result', timestamp: 1, messageId: 'r' },
+      { kind: 'completed', status: 'stopped', stopReason: 'budget', verdict: 'failed',
+        body: 'Lane Claude finished: stopped after 26s.', timestamp: 2, messageId: 'c' },
+    ] }));
+    expect(result.summary).toBe('Stopped by budget after 26s');
   });
 
   it('ignores exit text in the task and keeps completion stats after a later report', () => {

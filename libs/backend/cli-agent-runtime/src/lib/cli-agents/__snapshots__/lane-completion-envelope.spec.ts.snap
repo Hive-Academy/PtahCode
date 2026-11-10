@@ -1,7 +1,7 @@
 // Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
 
 exports[`lane completion envelope budget stops keeps the previous repeat-call envelope unchanged 1`] = `
-"<agent-lane-completed agent-id="agent-1" agent="worker" cli="claude" status="stopped" verdict="unverified">
+"<agent-lane-completed agent-id="agent-1" agent="worker" cli="claude" status="stopped" verdict="unverified" stop-reason="repeat-call">
 Lane worker finished: stopped after 1s.
 Task: do work
 Stopped by Ptah: repeated the same call 3 times. The caller did not stop it.

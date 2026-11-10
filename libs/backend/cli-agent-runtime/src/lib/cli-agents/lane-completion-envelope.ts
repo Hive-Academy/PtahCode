@@ -72,6 +72,7 @@ export function buildLaneCompletionEnvelope(
     `cli="${escape(signal.cli)}"`,
     `status="${escape(signal.status)}"`,
     `verdict="${escape(signal.verdict)}"`,
+    ...(signal.stopReason ? [`stop-reason="${escape(signal.stopReason)}"`] : []),
   ].join(' ');
   const lines: string[] = [
     `Lane ${signal.agentLabel} finished: ${signal.status}` +
