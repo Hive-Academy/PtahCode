@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_890_e3a7
-status: in_review
+status: done
 type: DOCUMENTATION
 title: Fill the feature gaps between the Electron app and the docs app
 description: >-

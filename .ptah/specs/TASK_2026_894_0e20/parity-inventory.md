@@ -1,0 +1,42 @@
+﻿# Settings parity inventory
+
+Scope: presentation redesign only. Paths are relative to `libs/frontend/chat/src/lib/settings/`. “P” names a future parity assertion; tests were not run. `decisions.md` #3 approves two key removals; #4 approves Codex moves.
+
+| Capability | Where today (file:line) | Backing key/RPC | Decision | New location | Test that proves it |
+|---|---|---|---|---|---|
+| Card test state, reset and unavailable reasons | `ptah-ai/cli-lane-default-cell.component.ts:15-48`; CLI matrix test output | Existing test and lane-default outputs | keep | Fixed aria-live status line; defaults Info/Reset popover; Cursor-only Credentials | P: running, failed, unsupported and unavailable states retain equal card dimensions and `scrollHeight <= clientHeight` |
+| Shared Ptah CLI inherited label, permission/network selects, reset, warnings and confirmation | `ptah-ai/cli-lane-default-cell.component.ts:15-46` | `CliLaneDefaultsStore` | keep | Full-width defaults card | P: select, reset, warnings persist |
+| Instance add, enable, provider, install/key status | `ptah-ai/ptah-cli-instances.component.ts:65-178` | Instance outputs and matrix rows | keep | Instance card header | P: create and toggle work |
+| Instance capability categories and detail | `ptah-ai/ptah-cli-instances.component.ts:178` | `CliCapabilityCellsComponent`, manifest | keep | Compact strip and top-layer popover | P: every capability available |
+| Instance model, effort, tier models, last test | `ptah-ai/ptah-cli-instances.component.ts:180-270` | Instance model/effort/tier/test outputs | keep | Card detail grid | P: values and editing preserved |
+| Instance Tiers, Test, More/Edit/Delete | `ptah-ai/ptah-cli-instances.component.ts:200-270` | Component outputs | keep | Outlined action buttons and More | P: each existing flow opens |
+| Matrix concurrency, order edit, CLI redetect | `ptah-ai/agent-orchestration-config.component.ts:340-626` | agent config/detection RPC | keep | Provider-card grid toolbar | P: save/order/redetect work |
+| Matrix On, name/version, status/provider, model, effort | `ptah-ai/cli-orchestration-matrix.component.ts:225-406` | Matrix row store, agent config | keep | Equal-height provider cards in 1/2/3/4-column container grid | P: every row edits same setting |
+| Matrix capabilities and Show capabilities | `ptah-ai/cli-orchestration-matrix.component.ts:299-369` | `CliCapabilityCellsComponent`, `CliCapabilityDetailComponent` | keep | Two-badge summary plus top-layer capabilities popover | P: six categories intact |
+| Matrix permissions/safety, lane defaults, reset/confirm | `ptah-ai/cli-orchestration-matrix.component.ts:406-520`; `ptah-ai/cli-lane-default-cell.component.ts:15-46` | Manifest, `CliLaneDefaultsStore` | keep | Fixed card defaults region; Permission and Network inline | P: selections and confirm work |
+| Matrix row actions, uninstalled disclosure/guide | `ptah-ai/cli-orchestration-matrix.component.ts:240-830` | Matrix handlers | keep | Fixed card footer and external confirmation overlay | P: all actions reachable |
+| Permission info affordance and editor popovers | `ptah-ai/cli-orchestration-matrix.component.ts:539-603` | Manifest and permission handler | keep | Card safety row with ⓘ and native popover | P: explanation and edits reachable |
+| Credentials, Install guide and uninstalled CLI rows | `ptah-ai/cli-orchestration-matrix.component.ts:257,615-690` | Cursor credentials, install guide, detection | keep | More actions and separate equal-height uninstalled card grid | P: needs-key and install flows open |
+| Model/effort inline reassignment hint and editors | `ptah-ai/cli-orchestration-matrix.component.ts:200-203,406-539` | Existing model/effort handlers | keep | Toolbar hint and card popovers | P: reassignment opens and saves |
+| Instance empty state and delete confirmation | `ptah-ai/ptah-cli-instances.component.ts:200-270` | Existing instance handlers | keep | Instance card states | P: empty and destructive confirm visible |
+| Routing suggestions | `ptah-ai/orchestration-settings.component.ts:76-81` | routing setting | keep | Routing card | P: switch persists |
+| Rotation switch and last picks | `ptah-ai/lane-rotation-setting.component.ts:20,42-88,160-175` | `agentOrchestration.laneRotation`, `agent:getCapabilityMatrix` | keep | Rotation card with friendly pick list | P: switch and each pick retained |
+| Last-picks unavailable and empty states | `ptah-ai/lane-rotation-setting.component.ts:79-88` | `agent:getCapabilityMatrix` | keep | Rotation card feedback | P: unavailable and empty text, Retry |
+| Capability family/model/task, score/source/samples/stale, loading/empty/error/retry | `ptah-ai/capability-matrix-setting.component.ts:34,44-130,153-201` | `agent:getCapabilityMatrix` | keep | Grouped model × task grid | P: all values and states shown |
+| Codex auto-compact size | Before screenshot 4; absent from current advanced-settings.types.ts:213-222 after removal | agentOrchestration.codexAutoCompactTokens | remove-proposed **approved by decisions.md #3** | No UI; global budget derived from agentBudget.warnRatio x agentBudget.handoffContextTokens (decisions.md #7) | P: old key absent and lane reads derived global value |
+| Codex tool output limit | Before screenshot 4; absent from current advanced-settings.types.ts:213-222 after removal | agentOrchestration.codexToolOutputTokenLimit | remove-proposed **approved by decisions.md #3** | No UI; global compaction.toolOutputBudgetTokens applies (decisions.md #6) | P: old key absent and lane reads global value |
+| Codex web search | libs/shared/src/lib/types/advanced-settings.types.ts:213-222; ptah-ai/orchestration-settings.component.ts:85-89 | agentOrchestration.codexWebSearch via settings:get/set | move | Providers > openai-codex drawer > Credentials > Agent behavior | P: same key toggles on signed-in and signed-out Codex |
+| Codex sandbox four radio choices, effective state, confirmation and help | advanced/codex-sandbox-setting.component.ts:97-305,340-491; ptah-ai/orchestration-settings.component.ts:88-89 | agentOrchestration.codexSandboxMode via agent:getConfig/setConfig | move | Providers > openai-codex drawer > Credentials > Agent behavior | P: four choices, confirmation and effective mode preserved |
+| Codex lane-default cross reference | ptah-ai/cli-lane-default-cell.component.ts:17 | UI navigation output; ProvidersSettingsDrawerRequest | move | Link to Providers > openai-codex drawer > Credentials | P: click opens exact drawer tab or Connect Codex fallback |
+| Session budget and lane guards | ptah-ai/session-budget-settings.component.ts:69-106,175-330; ptah-ai/lane-guards-settings.component.ts:47-125 | sessionBudget.*; agentOrchestration.laneRepeatCallStopAt | keep | Context management | P: production layout, labels, unit, toggles and fields remain unchanged |
+| Global context budget fields and idle compaction | libs/shared/src/lib/types/advanced-settings.types.ts:136-212 | compaction.toolOutputBudgetTokens; compaction.rotationSuggestTokens; agentBudget.*; compaction.idleCompaction* | keep | Context management | P: eight existing global controls retain their production layout and behavior |
+| Background query limits | libs/shared/src/lib/types/advanced-settings.types.ts:223-261 | internalQuery.maxConcurrent; maxConcurrentPerLane; queueTimeoutMs | keep | Context management | P: all three controls retain their production layout and behavior |
+| Friendly executor, route and model labels | ptah-ai/cli-matrix-rows.ts:222-253,307-322,417-430; ptah-ai/agent-orchestration-config.component.ts:350,366 | ProvidersSettingsStateService cliAgents()/cliModels(); capability RPC identifiers | keep | Rotation tiles and evidence grid display layer | P: configured name, slug fallback, built-in label and unknown ID shown correctly |
+| Codex drawer request and absent/signed-out fallbacks | providers/providers-settings.component.ts:79-85,1032-1050,1212-1219; settings.component.ts:271-295 | typed ProvidersSettingsDrawerRequest; connection id openai-codex | move | Credentials drawer or Connect Codex action | P: deep link, signed-out and no-connection cases; request consumed |
+Global `context-budgets` and `background-queries` stay in the unchanged Context management design (`ptah-ai/orchestration-settings.component.ts:83-90`).
+
+## Proposed Removals
+
+None beyond the two user-approved keys. No chip, matrix field, action, or status is silently removed.
+
+
