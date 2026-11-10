@@ -37,7 +37,7 @@
  * - session.error             -> error
  * - result                    -> info (final stats); resolves done promise
  */
-import { completedTurnTelemetry, turnIdentity } from '@ptah-extension/shared';
+import { completedTurnTelemetry, COPILOT_PROVIDER_ENTRY, turnIdentity } from '@ptah-extension/shared';
 import type {
   CliAdapterManifest,
   CliDetectionResult,
@@ -116,44 +116,9 @@ interface CopilotCliEvent {
   };
 }
 
-/** Copilot CLI model list (kept in sync with `copilot --help`).
- *  This list is shared with the provider-registry entry. */
-export const COPILOT_MODELS: CliModelInfo[] = [
-  { id: 'claude-opus-5.5', name: 'Claude Opus 5.5' },
-  { id: 'claude-sonnet-5.5', name: 'Claude Sonnet 5.5' },
-  { id: 'claude-fable-5.1', name: 'Claude Fable 5.1' },
-  { id: 'claude-opus-5', name: 'Claude Opus 5' },
-  { id: 'claude-sonnet-5', name: 'Claude Sonnet 5' },
-  { id: 'claude-fable-5', name: 'Claude Fable 5' },
-  { id: 'claude-opus-4.8', name: 'Claude Opus 4.8' },
-  { id: 'claude-opus-4.7', name: 'Claude Opus 4.7' },
-  { id: 'claude-sonnet-4.6', name: 'Claude Sonnet 4.6' },
-  { id: 'claude-haiku-4.5', name: 'Claude Haiku 4.5' },
-  { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' },
-  { id: 'gpt-6-sol', name: 'GPT-6 Sol' },
-  { id: 'gpt-6-astra', name: 'GPT-6 Astra' },
-  { id: 'gpt-6-luna', name: 'GPT-6 Luna' },
-  { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol' },
-  { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' },
-  { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna' },
-  { id: 'gpt-5.5', name: 'GPT-5.5' },
-  { id: 'gpt-5.4', name: 'GPT-5.4' },
-  { id: 'gpt-5.4-mini', name: 'GPT-5.4 mini' },
-  { id: 'gpt-5.4-nano', name: 'GPT-5.4 nano' },
-  { id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex' },
-  { id: 'gpt-5-mini', name: 'GPT-5 Mini' },
-  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' },
-  { id: 'gemini-3.7-flash', name: 'Gemini 3.7 Flash' },
-  { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash' },
-  { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash' },
-  { id: 'grok-4.7', name: 'Grok 4.7' },
-  { id: 'grok-4.6', name: 'Grok 4.6' },
-  { id: 'grok-4.5', name: 'Grok 4.5' },
-  { id: 'kimi-k3', name: 'Kimi K3' },
-  { id: 'kimi-k2.7-code', name: 'Kimi K2.7 Code' },
-  { id: 'mai-code-1.1-flash', name: 'MAI-Code-1.1-Flash' },
-  { id: 'mai-code-1-flash-picker', name: 'MAI-Code-1-Flash' },
-];
+/** CLI picker fields projected from the drift-checked provider fallback. */
+export const COPILOT_MODELS: CliModelInfo[] =
+  (COPILOT_PROVIDER_ENTRY.staticModels ?? []).map(({ id, name }) => ({ id, name }));
 
 /**
  * Actionable error message used when the `copilot` binary cannot be found.
