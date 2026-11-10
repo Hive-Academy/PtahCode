@@ -474,7 +474,7 @@ export class ProviderRpcHandlers {
         }
         return mergeKimiCodeModels(payload);
       } catch (error) {
-        // degradation-audit: fallback - auth or catalog errors retain the known Kimi models.
+        // degradation-audit: optional-capability - the live Kimi list is optional; an auth or catalog error keeps the static models.
         this.logger.debug('[ProviderRpc] Kimi Code model catalog unavailable', {
           error: error instanceof Error ? error.message : String(error),
         });

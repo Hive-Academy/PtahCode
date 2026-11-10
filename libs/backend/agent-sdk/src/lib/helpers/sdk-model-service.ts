@@ -302,6 +302,7 @@ function isPersistableCatalogKey(key: string): boolean {
   try {
     url = new URL(baseUrl);
   } catch {
+    // degradation-audit: optional-capability - a base URL that does not parse cannot be a dead loopback proxy key, so the key stays persistable.
     return true;
   }
   const loopback = ['localhost', '127.0.0.1', '[::1]'];
@@ -317,6 +318,7 @@ function isPersistableCatalogKey(key: string): boolean {
           registered.pathname.replace(/\/$/, '')
       );
     } catch {
+      // degradation-audit: optional-capability - a registered provider URL that does not parse cannot match the key, so the compare skips it.
       return false;
     }
   });
