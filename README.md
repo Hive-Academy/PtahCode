@@ -80,7 +80,7 @@ flowchart LR
 In a session, the Orchestrator, its sub-agents, CLI lanes and background agents appear as lane tabs. A completed turn can expand a **Worked** row to show its tool calls.
 
 - **CLI lanes.** Supervised processes include `claude`, `codex`, `copilot`, `cursor`, `antigravity`, `opencode`, `grok`, and `pi`, plus API providers such as Kimi, GLM, MiniMax, Qwen, DeepSeek, OpenRouter, and Ollama. Adapter manifests show potential messaging support in list rows; a live lane resolves what its current handle can actually do. Send queues during a running turn. Send now steers when supported, or offers interrupt and resume with explicit consent to lose partial work. Each accepted message has a receipt that tracks delivery through settlement.
-- **Child chats.** A parent can open up to three child sessions. Each child gets its own git worktree and branch and its own tab. That cap is separate from the rail’s nine running sessions.
+- **Child chats.** A parent can open as many child sessions as it needs; `ptah.agentSessions.maxConcurrent` (0 to 50, default 0 = no limit) sets a host-wide limit. Each child gets its own git worktree and branch and its own tab. That limit is separate from the rail’s nine running sessions.
 - **Handoff.** When context fills, a new top-level chat can adopt in-flight lanes and child sessions. After an automatic handoff, the previous tab closes when the successor acknowledges the handoff and the source tab passes the safety checks.
 - **Named Claude accounts.** A personal account is certified before launch or resume (binary fingerprint, managed-policy scan, stripped environment, per-account config). The first init message is checked so the live subscription is the one that was supposed to run.
 

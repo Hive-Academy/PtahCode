@@ -114,6 +114,7 @@ const CHILD_TAB = '0f1e2d3c-4b5a-4968-8776-655443322110';
 
 interface Harness {
   service: ChatSessionService;
+  modelCatalog: { getSupportedModels: jest.Mock; getNativeClaudeModels: jest.Mock; resolveModelId: jest.Mock };
   startChatSession: jest.Mock;
   streamEventsToWebview: jest.Mock;
   intercept: jest.Mock;
@@ -171,6 +172,11 @@ function makeHarness(
   }) as unknown as IWorkspaceProvider;
 
   const logger = createMockLogger();
+  const modelCatalog = {
+    getSupportedModels: jest.fn().mockResolvedValue([{ value: 'claude-opus-4' }, { value: 'claude-sonnet-4' }]),
+    getNativeClaudeModels: jest.fn().mockResolvedValue([{ value: 'claude-opus-4' }]),
+    resolveModelId: jest.fn((model: string) => model === 'opus' ? 'claude-opus-4' : model),
+  };
   const metadataGet = jest.fn().mockResolvedValue(opts.metadata ?? null);
   const service = new ChatSessionService(
     logger as unknown as Logger,
@@ -229,6 +235,9 @@ function makeHarness(
     undefined,
     undefined,
     createFakeDriverLockCoordinator(),
+    undefined,
+    undefined,
+    modelCatalog as never,
   );
 
   // The Smithery / OAuth override resolvers read installed manifests from
@@ -244,6 +253,7 @@ function makeHarness(
 
   return {
     service,
+    modelCatalog,
     startChatSession,
     streamEventsToWebview,
     intercept,
@@ -299,6 +309,36 @@ function startConfig(h: Harness): Record<string, unknown> {
 }
 
 describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
+  describe('resolveAgentChildModel', () => {
+    const input = { workspaceRoot: ROOT, parentSessionId: '', model: 'opus' };
+
+    it('accepts a concrete ID or a tier alias resolved into the catalog', async () => {
+      const h = makeHarness();
+      await expect(h.service.resolveAgentChildModel(input)).resolves.toEqual({ accepted: true, resolvedModel: 'claude-opus-4' });
+      await expect(h.service.resolveAgentChildModel({ ...input, model: 'claude-sonnet-4' })).resolves.toEqual({ accepted: true, resolvedModel: 'claude-sonnet-4' });
+    });
+
+    it('refuses an unknown ID with the account catalog', async () => {
+      const h = makeHarness();
+      await expect(h.service.resolveAgentChildModel({ ...input, model: 'unknown' })).resolves.toMatchObject({ accepted: false, code: 'invalid-model', acceptedModels: ['claude-opus-4', 'claude-sonnet-4'] });
+    });
+
+    it('refuses an unavailable catalog', async () => {
+      const h = makeHarness();
+      h.modelCatalog.getSupportedModels.mockRejectedValueOnce(new Error('catalog offline'));
+      await expect(h.service.resolveAgentChildModel(input)).resolves.toMatchObject({ accepted: false, code: 'model-catalog-unavailable', message: 'catalog offline' });
+    });
+
+    it('refuses an explicit model on a named account without reading the ambient catalog', async () => {
+      const h = makeHarness();
+      Object.defineProperty(h.service, 'gateAccount', { value: jest.fn().mockResolvedValue({}) });
+      const result = await h.service.resolveAgentChildModel(input);
+      expect(result).toMatchObject({ accepted: false, code: 'model-catalog-unavailable' });
+      expect(result.accepted ? '' : result.message).toContain('omit model');
+      expect(result.accepted ? '' : result.message).toContain('effort is still accepted');
+      expect(h.modelCatalog.getSupportedModels).not.toHaveBeenCalled();
+    });
+  });
   describe('startSession (chat:start) — unchanged for existing callers', () => {
     it('returns classified native runtime start failures as RPC result data', async () => {
       const h = makeHarness();
@@ -398,6 +438,11 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
   });
 
   describe('startAgentChildSession', () => {
+    it('puts explicit effort into SDK launch options', async () => {
+      const h = makeHarness();
+      await h.service.startAgentChildSession(childParams({ effort: 'high' }));
+      expect(startConfig(h)['effort']).toBe('high');
+    });
     it('deduplicates an ancestor by physical identity', async () => {
       const alias = join(ROOT, 'parent-alias');
       symlinkSync(join(ROOT, 'parent'), alias, process.platform === 'win32' ? 'junction' : 'dir');

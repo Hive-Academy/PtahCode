@@ -40,7 +40,7 @@ import type {
   SessionChildCompletionEnvelope,
   SessionChildStartRequest,
 } from './session-spawner.port';
-import type { ChildChatSessionStartInput } from './child-chat-session-host.port';
+import type { ChildChatSessionStartInput, IChildChatSessionHost } from './child-chat-session-host.port';
 import { CLI_AGENT_RUNTIME_TOKENS } from '../di/tokens';
 import { SessionHandoffService } from './session-handoff.service';
 import { SessionHandoffAckStore } from './session-handoff-ack.store';
@@ -105,6 +105,7 @@ export function makeHarness(
     interruptSession: jest.fn().mockResolvedValue(undefined),
   };
   const host = {
+    resolveChildModel: jest.fn(async ({ model }: { model: string }): ReturnType<IChildChatSessionHost['resolveChildModel']> => ({ accepted: true, resolvedModel: model })),
     startChildSession: jest.fn(async (input: ChildChatSessionStartInput) => {
       active.add(input.tabId);
       return { started: true as const, uiAnnounced: true };
@@ -491,6 +492,15 @@ describe('SessionSpawnerService.start — guards in order', () => {
     expect(h.provisioner.create).toHaveBeenCalledTimes(1);
   });
 
+  it('starts more than five live children with the default unlimited setting', async () => {
+    const h = makeHarness();
+    for (let index = 0; index < 6; index++) {
+      await h.startChild({ branch: `feat/child-${index}` });
+    }
+    expect(h.registry.liveCount()).toBe(6);
+    expect(h.provisioner.create).toHaveBeenCalledTimes(6);
+  });
+
   it('names the caller own live children in the cap-reached detail', async () => {
     const h = makeHarness({ config: { 'agentSessions.maxConcurrent': 1 } });
     const child = await h.startChild();
@@ -561,6 +571,58 @@ describe('SessionSpawnerService.start — guards in order', () => {
 });
 
 describe('SessionSpawnerService.start — success', () => {
+  it('refuses an unknown model before provisioning and lists accepted values', async () => {
+    const h = makeHarness();
+    h.host.resolveChildModel.mockResolvedValueOnce({ accepted: false, code: 'invalid-model', message: 'unavailable', acceptedModels: ['opus', 'sonnet'] });
+    const result = await h.spawner.start({ callerSessionId: PARENT, task: 'fix', branch: BRANCH, model: 'unknown' });
+    expect(result).toMatchObject({ ok: false, refusal: 'invalid-model' });
+    expect(result.ok ? '' : result.detail).toContain('opus, sonnet');
+    expect(h.provisioner.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses an unavailable catalog before provisioning', async () => {
+    const h = makeHarness();
+    h.host.resolveChildModel.mockResolvedValueOnce({ accepted: false, code: 'model-catalog-unavailable', message: 'catalog offline' });
+    const result = await h.spawner.start({ callerSessionId: PARENT, task: 'fix', branch: BRANCH, model: 'opus' });
+    expect(result).toMatchObject({ ok: false, refusal: 'model-catalog-unavailable', detail: 'catalog offline' });
+    expect(h.provisioner.create).not.toHaveBeenCalled();
+  });
+
+  it('releases the slot after a model refusal and after a thrown catalog error', async () => {
+    const h = makeHarness({ config: { 'agentSessions.maxConcurrent': 1 } });
+    h.host.resolveChildModel.mockResolvedValueOnce({ accepted: false, code: 'invalid-model', message: 'unavailable' });
+    const refused = await h.spawner.start({ callerSessionId: PARENT, task: 'fix', branch: BRANCH, model: 'unknown' });
+    expect(refused).toMatchObject({ ok: false, refusal: 'invalid-model' });
+    h.host.resolveChildModel.mockRejectedValueOnce(new Error('catalog exploded'));
+    const thrown = await h.spawner.start({ callerSessionId: PARENT, task: 'fix', branch: BRANCH, model: 'opus' });
+    expect(thrown).toMatchObject({ ok: false, refusal: 'model-catalog-unavailable' });
+    expect(thrown.ok ? '' : thrown.detail).toContain('catalog exploded');
+    expect(h.provisioner.create).not.toHaveBeenCalled();
+    expect(h.registry.reserveSlot(1)).not.toBeNull();
+  });
+
+  it('reports an empty task before it reads the model catalog', async () => {
+    const h = makeHarness();
+    const result = await h.spawner.start({ callerSessionId: PARENT, task: ' ', branch: BRANCH, model: 'unknown' });
+    expect(result).toMatchObject({ ok: false, refusal: 'invalid-arguments' });
+    expect(h.host.resolveChildModel).not.toHaveBeenCalled();
+  });
+
+  it('makes no catalog call and passes no model when model is omitted', async () => {
+    const h = makeHarness();
+    const child = await h.startChild({});
+    expect(h.host.resolveChildModel).not.toHaveBeenCalled();
+    expect(child.model).toBeUndefined();
+    expect(child.effort).toBeUndefined();
+  });
+
+  it('passes resolved model and effort into the child record and host launch', async () => {
+    const h = makeHarness();
+    h.host.resolveChildModel.mockResolvedValueOnce({ accepted: true, resolvedModel: 'claude-opus-4' });
+    const child = await h.startChild({ model: 'opus', effort: 'high' });
+    expect(child).toMatchObject({ model: 'claude-opus-4', effort: 'high' });
+    expect(h.host.startChildSession).toHaveBeenCalledWith(expect.objectContaining({ model: 'claude-opus-4', effort: 'high' }));
+  });
   it('links, registers policy and MCP root, then starts on the host', async () => {
     const h = makeHarness({
       config: {

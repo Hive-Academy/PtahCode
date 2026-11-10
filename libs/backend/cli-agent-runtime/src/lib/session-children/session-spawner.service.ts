@@ -127,6 +127,7 @@ interface ChildRuntime {
   readonly settings: SessionChildSettings;
   readonly permissionLevel?: PermissionLevel;
   readonly model?: string;
+  readonly effort?: SessionChildStartRequest['effort'];
   releasePolicy?: () => void;
   /** The exact string given to `retainRoot`; `releaseRoot` must get the same one. */
   mcpRoot?: string;
@@ -352,6 +353,29 @@ export class SessionSpawnerService implements ISessionSpawner {
     const paths = resolveChildPaths(plannedPath, request);
     if (!paths.ok) return this.refuseStart('invalid-arguments', paths.detail);
 
+    // After the cheap argument checks, still before any git work: a refused
+    // model leaves no worktree, branch or registry record behind.
+    let resolvedModel: string | undefined;
+    if (request.model) {
+      try {
+        const validation = await guard.host.resolveChildModel({
+          model: request.model,
+          workspaceRoot: root,
+          parentSessionId: guard.caller,
+        });
+        if (!validation.accepted) {
+          return this.refuseStart(validation.code,
+            validation.acceptedModels?.length
+              ? `${validation.message} Accepted models: ${validation.acceptedModels.slice(0, 30).join(', ')}${validation.acceptedModels.length > 30 ? ` (+${validation.acceptedModels.length - 30} more)` : ''}`
+              : validation.message);
+        }
+        resolvedModel = validation.resolvedModel;
+      } catch (error: unknown) {
+        this.logger?.error('[SessionSpawner] Model catalog validation failed', error instanceof Error ? error : new Error(String(error)));
+        return this.refuseStart('model-catalog-unavailable', errorMessage(error));
+      }
+    }
+
     const provisioned = await this.provisioner.create(
       root,
       branch,
@@ -379,6 +403,8 @@ export class SessionSpawnerService implements ISessionSpawner {
       parentSessionId: guard.caller,
       ...(parentSdkSessionId ? { parentSdkSessionId } : {}),
       label,
+      ...(resolvedModel ? { model: resolvedModel } : {}),
+      ...(request.effort ? { effort: request.effort } : {}),
       ...(request.taskId ? { taskId: request.taskId } : {}),
       branch,
       baseRef: worktree.baseSha,
@@ -399,7 +425,8 @@ export class SessionSpawnerService implements ISessionSpawner {
       policy: this.policyFor(guard.settings, label, worktree.worktreePath),
       settings: guard.settings,
       permissionLevel: guard.permissionLevel,
-      model: request.model,
+      model: resolvedModel,
+      effort: request.effort,
       capReached: false,
       succeeding: false,
       stopping: false,
@@ -429,7 +456,8 @@ export class SessionSpawnerService implements ISessionSpawner {
         descriptor: this.descriptorOf(stored),
         sessionName: label,
         ...(guard.permissionLevel ? { permissionLevel: guard.permissionLevel } : {}),
-        ...(request.model ? { model: request.model } : {}),
+        ...(resolvedModel ? { model: resolvedModel } : {}),
+        ...(request.effort ? { effort: request.effort } : {}),
       });
       if (!outcome.started) {
         return await this.failStart(childTabId, runtime, outcome.error, outcome.accountRefusal);
@@ -1578,6 +1606,8 @@ export class SessionSpawnerService implements ISessionSpawner {
       childSessionId: successorId, parentSessionId: child.parentSessionId,
       ...(child.parentSdkSessionId ? { parentSdkSessionId: child.parentSdkSessionId } : {}),
       label: label?.trim() || child.label,
+      ...(child.model ? { model: child.model } : {}),
+      ...(child.effort ? { effort: child.effort } : {}),
       ...(child.taskId ? { taskId: child.taskId } : {}),
       branch: child.branch, baseRef: child.baseRef, workspaceRoot: child.workspaceRoot,
       worktreePath: child.worktreePath,
@@ -1588,7 +1618,7 @@ export class SessionSpawnerService implements ISessionSpawner {
     };
     const nextRuntime: ChildRuntime = {
       worktree: runtime.worktree, settings, permissionLevel: runtime.permissionLevel,
-      model: runtime.model, policy: this.policyFor(settings, successor.label, successor.worktreePath),
+      model: runtime.model, effort: runtime.effort, policy: this.policyFor(settings, successor.label, successor.worktreePath),
       stopping: false, capReached: false, succeeding: false,
     };
     runtime.succeeding = true;
@@ -1621,6 +1651,7 @@ export class SessionSpawnerService implements ISessionSpawner {
         })), descriptor: this.descriptorOf(successor), sessionName: successor.label,
         ...(runtime.permissionLevel ? { permissionLevel: runtime.permissionLevel } : {}),
         ...(runtime.model ? { model: runtime.model } : {}),
+        ...(runtime.effort ? { effort: runtime.effort } : {}),
       });
       if (!outcome.started) throw new Error(outcome.error);
       this.agents.settleLaneAdoption(adopted, 'kept');

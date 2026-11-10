@@ -14,6 +14,7 @@
  */
 import type {
   AgentSessionOpenedPayload,
+  EffortLevel,
   PermissionLevel,
   SessionHandoffOpenedPayload,
 } from '@ptah-extension/shared';
@@ -31,6 +32,7 @@ export interface ChildChatSessionStartInput {
   readonly descriptor: AgentSessionOpenedPayload;
   readonly sessionName: string;
   readonly model?: string;
+  readonly effort?: EffortLevel;
   /** Parent permission level captured while the parent was active. */
   readonly permissionLevel?: PermissionLevel;
 }
@@ -63,6 +65,14 @@ export type ChildChatSessionStartOutcome =
   | { readonly started: false; readonly error: string };
 
 export interface IChildChatSessionHost {
+  resolveChildModel(input: {
+    readonly model: string;
+    readonly workspaceRoot: string;
+    readonly parentSessionId: string;
+  }): Promise<
+    | { readonly accepted: true; readonly resolvedModel: string }
+    | { readonly accepted: false; readonly code: 'invalid-model' | 'model-catalog-unavailable'; readonly message: string; readonly acceptedModels?: readonly string[] }
+  >;
   startChildSession(
     input: ChildChatSessionStartInput,
   ): Promise<ChildChatSessionStartOutcome>;

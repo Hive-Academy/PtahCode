@@ -329,7 +329,7 @@ close, and host shutdown end the child instead; its running lanes move to the pa
   commands run without asking; anything else waits in the child's tab for the user, then is
   denied (`ptah_session_status` shows `awaiting-permission` with the denial time). Plan mode is
   not inherited: a planning parent's child starts at Ask.
-- **Limits.** At most 3 live children per host by default, depth 1 (a child cannot start sessions).
+- **Limits.** No live-child limit by default; `agentSessions.maxConcurrent` sets a host-wide limit. Depth 1 (a child cannot start sessions).
   An idle child still holds its slot until `ptah_session_stop`. A refusal is returned as text with a
   code (`cap-reached`, `depth-exceeded`, `branch-exists`, …); act on it, do not retry blindly.
 - **The user owns the result.** The worktree and the branch remain after the child ends. Never merge,

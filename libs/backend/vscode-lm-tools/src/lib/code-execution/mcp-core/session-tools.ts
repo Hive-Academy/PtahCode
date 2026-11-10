@@ -62,18 +62,19 @@ export function buildSessionStartTool(): MCPToolDefinition {
   return {
     name: SESSION_START_TOOL_NAME,
     description:
-      'Start a child chat session on a NEW git branch in its own worktree. It ' +
-      "opens as a tab in the user's window and runs unattended: file edits " +
-      'inside its worktree and allowlisted Bash commands run without asking; ' +
-      'other actions wait a bounded time for the user in that tab, then are ' +
-      'denied. Steer it with ptah_session_send. It reports with ' +
-      'ptah_agent_report, and a completion turn is pushed into this session ' +
-      'each time it settles. A task starting with "/" (e.g. /orchestrate ...) ' +
-      'runs as that slash command. The child cannot start sessions itself. ' +
-      'After succession its status is handed-off with a succeededBy id. ' +
-      'The user owns merge, PR and cleanup: the worktree and the branch remain ' +
-      'after it ends. There is no permission, path or parent argument; you are ' +
-      'the parent. Refusals are returned as text with a code. ' +
+      'Start a child chat session on a new branch and worktree. It opens in ' +
+      "the user's tab and runs unattended: file edits and allowlisted Bash " +
+      'run without asking; other actions wait briefly in that tab, then are ' +
+      'denied. ' +
+      'Steer with ptah_session_send. The child reports with ptah_agent_report; ' +
+      'completion is pushed here after each turn. A task starting with "/" ' +
+      'runs as a slash command. Children cannot start sessions. Succession ' +
+      'sets handed-off status with succeededBy. The user owns merge, PR and ' +
+      'cleanup; branch and worktree remain. No permission, path or parent ' +
+      'argument: ' +
+      'you are the parent. Refusals include a code. Use a smaller model or ' +
+      'lower effort for coordination, Git or CI; use a strong model for unknown ' +
+      'causes, security or architecture. Omit both for defaults. ' +
       HELD_NOTE,
     inputSchema: inputSchemaOf(SessionStartArgsSchema),
   };

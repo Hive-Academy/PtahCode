@@ -123,6 +123,13 @@ describe('budget tables', () => {
     expect(getToolResultBudget('ptah_workspace_analyze')).toEqual(DEFAULT);
   });
 
+  it('keeps a fixed finite session-read budget when child sessions have no limit', () => {
+    expect(getToolResultBudget('ptah_session_read')).toEqual({
+      chars: 32 * 1024 + 8000,
+      tokens: (32 * 1024 + 8000) / 4,
+    });
+  });
+
   it('overrides only the tools whose description documents a bound', () => {
     expect(Object.keys(TOOL_RESULT_BUDGET_OVERRIDES).sort()).toEqual([
       'ptah_browser_content',

@@ -153,7 +153,8 @@ export type ThinkingConfig =
  *
  * When undefined, SDK defaults to 'high'.
  */
-export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+export type EffortLevel = (typeof EFFORT_LEVELS)[number];
 
 /**
  * Effort levels accepted by the SDK flag-settings layer (`Settings.effortLevel`),

@@ -20,6 +20,7 @@
  */
 import type { z } from 'zod';
 import type { Logger } from '@ptah-extension/vscode-core';
+import { EFFORT_LEVELS } from '@ptah-extension/shared';
 import {
   safeErrorKind,
   type SessionChildCompletionEnvelope,
@@ -136,6 +137,7 @@ function formatChild(child: SessionChildSnapshot): string {
     `- ${child.label} (${child.childSessionId}): ${child.status}` +
       (child.succeededBy ? `; succeededBy ${child.succeededBy}` : ''),
     `  branch ${child.branch} from ${child.baseRef}; worktree ${child.worktreePath}`,
+    `  model ${child.model ?? 'default'}; effort ${child.effort ?? 'default'}`,
     `  started ${child.startedAt}${endedSuffix(child)}`,
     `  turns settled ${child.turnsSettled}; reports delivered ` +
       `${child.reportsDelivered}, refused ${child.reportsRefused}`,
@@ -402,6 +404,16 @@ async function runTool(
   const input = argsObject(args);
   switch (name) {
     case SESSION_START_TOOL_NAME: {
+      if (typeof input === 'object' && input !== null && 'effort' in input && !EFFORT_LEVELS.some((value) => value === input.effort)) {
+        return {
+          kind: 'reply',
+          reply: sessionStartReply({
+            ok: false,
+            refusal: 'invalid-effort',
+            detail: `accepted effort values: ${EFFORT_LEVELS.join(', ')}`,
+          }),
+        };
+      }
       const parsed = SessionStartArgsSchema.safeParse(input);
       if (!parsed.success) return invalid(name, parsed.error);
       return {

@@ -34,7 +34,8 @@ The parent's agent calls these. Each child is addressed by the `sessionId` that 
 | `taskId`       | No       | A task id such as `TASK_2026_584` or `TASK_2026_584_5e7a`.                                            |
 | `taskFolder`   | No       | A path relative to the worktree, without `..`.                                                        |
 | `deliverables` | No       | Up to 20 paths the child must write. They are checked when the child settles.                         |
-| `model`        | No       | A model for the child.                                                                                |
+| `model`        | No       | A model for the child: a model ID of the runtime catalog, or `opus` / `sonnet` / `haiku` where the provider maps them. An unknown value is refused (`invalid-model`) with the accepted IDs. Omit it for the default model. |
+| `effort`       | No       | Reasoning effort for the child: `low`, `medium`, `high`, `xhigh` or `max`. Any other value is refused (`invalid-effort`). Omit it for the default effort. |
 
 There is deliberately no permission, path or parent argument. The caller is whichever session made the call, and any extra argument is rejected rather than ignored.
 
@@ -88,7 +89,7 @@ Seven settings bound child sessions. They are read each time a session is starte
 
 | Setting                                     | Default   | Range           | Meaning                                                                                                                                   |
 | ------------------------------------------- | --------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `ptah.agentSessions.maxConcurrent`          | `3`       | 1 to 5          | Live children across the whole host. An idle child still counts until it is stopped. A start beyond the limit is refused (`cap-reached`). |
+| `ptah.agentSessions.maxConcurrent`          | `0`       | 0 to 50         | Live children across the whole host. `0` means no limit. An idle child still counts until it is stopped. A start beyond a positive limit is refused (`cap-reached`). Heavy checks are already bounded by the machine-wide verify lock, so this setting bounds only the number of live sessions. |
 | `ptah.agentSessions.maxRuntimeMinutes`      | `120`     | 5 to 720        | Wall-clock cap per child, in minutes; starts an automatic handoff.                                                                        |
 | `ptah.agentSessions.runtimeWarnLeadMinutes` | `10`      | 1 to 60         | Minutes before the cap to warn the child; always below the cap.                                                                           |
 | `ptah.agentSessions.handoffGraceMinutes`    | `15`      | 1 to 120        | Minutes after the cap before a busy child is interrupted for recovery.                                                                    |
@@ -114,7 +115,7 @@ Default `bashAllowlist`:
 
 ## Refusals
 
-A refused call is returned to the agent as text with a code, so it can act on it. The start refusals are `unattributed-caller`, `depth-exceeded`, `cap-reached`, `mcp-unavailable`, `chat-runtime-unavailable`, `no-workspace`, `invalid-arguments`, `branch-exists`, `worktree-failed`, `worktree-outside-workspace` and `session-start-failed`. When a start fails after creating something, the result lists the rollback steps it ran.
+A refused call is returned to the agent as text with a code, so it can act on it. The start refusals are `unattributed-caller`, `depth-exceeded`, `cap-reached`, `mcp-unavailable`, `chat-runtime-unavailable`, `no-workspace`, `invalid-arguments`, `invalid-effort`, `invalid-model`, `model-catalog-unavailable`, `branch-exists`, `worktree-failed`, `worktree-outside-workspace` and `session-start-failed`. When a start fails after creating something, the result lists the rollback steps it ran.
 
 Child sessions need the chat runtime and the Ptah MCP server. A host without the session spawner returns an error saying so.
 
