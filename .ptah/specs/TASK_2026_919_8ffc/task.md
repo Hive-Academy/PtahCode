@@ -1,12 +1,14 @@
 ---
 id: TASK_2026_919_8ffc
-status: backlog
+status: in_review
 type: CREATIVE
 title: Unify Settings form controls and dropdowns
 depends_on: []
-created: "2026-11-10T16:20:48.209Z"
-updated: "2026-11-10T16:20:48.209Z"
-description: Design and plan a unified form control set for the Settings page (Electron renderer). Design phase only.
+created: '2026-11-10T16:20:48.209Z'
+updated: '2026-11-10T16:39:04.572Z'
+description: >-
+  Design and plan a unified form control set for the Settings page (Electron
+  renderer). Design phase only.
 estimate: L
 relates_to:
   - TASK_2026_904
