@@ -101,3 +101,10 @@ See `decisions.md` and the last section of this file (updated after each batch).
   2. Job 2: the Reviews detail changed visibly (coverage notes, lens cards). Build the Reviews preview again with step 5 of "State at 08:40 UTC" and publish it with the same title.
   3. Job 3: wait for the parent. After PR #1042 merges and the parent says so: `git merge origin/main` (no rebase), scoped verify, push. `review-run-detail.component.ts` still uses no `computed` (PR #1040 removes that import).
   4. Do not post `@coderabbitai review`. Poll CI with the REST API at intervals of 3 minutes or more.
+
+## State at 09:00 UTC (2026-11-10), Job 2 done
+
+- Section title "Sessions": commit `b05796ede`, pushed. Decision 19 is closed for that text.
+- Both previews were built again from the Electron build of this worktree and published with the same titles (Reviews artifact `7c692598-9b9b-424e-a992-7c941769bd8b`, Machines artifact `6228148f-716d-4d5a-a546-5eb214770244`). A new worktree needs `npx nx build-dev ptah-electron` before `copy-renderer-dev` (both under the verify lock).
+- Next exact step: Job 3 only. Wait for the parent. After PR #1042 merges and the parent says so: `git fetch origin`, `git merge origin/main` (no rebase), `npm run verify -- -p machines-ui,review-runs-ui` (add the projects that the merge touches), degradation audit, push with `git push origin HEAD:feat/reviews-machines-inbox-layout`.
+- CI: read `gh api repos/Hive-Academy/PtahCode/commits/<sha>/check-runs` (REST), at intervals of 3 minutes or more.
