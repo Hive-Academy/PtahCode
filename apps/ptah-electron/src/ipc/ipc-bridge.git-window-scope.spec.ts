@@ -293,6 +293,39 @@ describe('IpcBridge — detached Git window scope and pushes', () => {
     expect(handleMessage).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['settings:set', { key: 'agentOrchestration.codexWebSearch', value: true }],
+    ['settings:set', { key: 'diff.renderSideBySide', value: 'yes' }],
+    ['settings:get', { key: 'agentOrchestration.codexWebSearch' }],
+  ])(
+    'refuses %s from the child for a setting that is not a Git view preference',
+    async (method, params) => {
+      await rpc(git, method, params);
+      expect(handleMessage).not.toHaveBeenCalled();
+      expect(git.sent).toEqual([outOfScope(method)]);
+    },
+  );
+
+  it.each([
+    ['settings:get', { key: 'diff.renderSideBySide' }],
+    ['settings:set', { key: 'diff.renderSideBySide', value: false }],
+    ['settings:get', { key: 'editorLauncher.lastTarget' }],
+    ['settings:set', { key: 'editorLauncher.lastTarget', value: 'cursor' }],
+  ])('routes %s from the child for a Git view preference', async (method, params) => {
+    await rpc(git, method, params);
+    expect(handleMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ method, params }),
+    );
+  });
+
+  it('keeps the main window free to write an unrelated setting', async () => {
+    const params = { key: 'agentOrchestration.codexWebSearch', value: true };
+    await rpc(main, 'settings:set', params);
+    expect(handleMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ method: 'settings:set', params }),
+    );
+  });
+
   it('keeps the main window free to use another registered repository', async () => {
     await rpc(main, 'git:discard', { workspaceRoot: REPO_B, paths: ['a.ts'] });
     expect(handleMessage).toHaveBeenCalledWith(

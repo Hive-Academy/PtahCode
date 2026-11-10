@@ -91,6 +91,27 @@ describe('GitWindowScopeGuard — symbolic links', () => {
     expect(guard.filterPush({ type: 'git:operationOutput', payload: { operationId: 'op-old' } } as { type: string })).toBeNull();
   });
 
+  it('lets the child read and write only the settings of the Git views', () => {
+    expect(guard.authorize('settings:get', { key: 'diff.renderSideBySide' })).toBe(true);
+    expect(guard.authorize('settings:get', { key: 'editorLauncher.lastTarget' })).toBe(true);
+    expect(guard.authorize('settings:set', { key: 'diff.renderSideBySide', value: false })).toBe(true);
+    expect(guard.authorize('settings:set', { key: 'editorLauncher.lastTarget', value: 'cursor' })).toBe(true);
+  });
+
+  it.each([
+    ['settings:set', { key: 'agentOrchestration.codexWebSearch', value: true }],
+    ['settings:set', { key: 'diff.renderSideBySide', value: 'yes' }],
+    ['settings:set', { key: 'editorLauncher.lastTarget', value: { id: 'cursor' } }],
+    ['settings:set', { key: 'diff.renderSideBySide' }],
+    ['settings:set', { value: true }],
+    ['settings:set', undefined],
+    ['settings:get', { key: 'agentOrchestration.codexWebSearch' }],
+    ['settings:get', { key: 'ptahCliAgents' }],
+    ['settings:get', {}],
+  ])('refuses %s with %j', (method, params) => {
+    expect(guard.authorize(method, params)).toBe(false);
+  });
+
   it('forwards the worktree push of a session of the scope for an adjacent worktree', () => {
     const candidate = {
       tabId: 't1', sessionId: 's-a', sessionName: 'a', organizationWorktreePath: null,

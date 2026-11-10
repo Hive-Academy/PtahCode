@@ -26,6 +26,8 @@ import { absoluteTarget, isInside, isPhysicallyInside, keys, rootKey } from './g
  *   that the child started itself in the current scope roots. Only a method
  *   that starts an operation records one. A change of the roots, a closed
  *   child and the end of the operation remove the record.
+ * - `settings:get` and `settings:set` work only for the UI preferences of the
+ *   Git views ({@link SettingsSetParamsSchema}). Each other setting is refused.
  * - A mirrored push is reduced to the roots of the scope ({@link filterPush}).
  *
  * The main window is not restricted: it never passes through this guard.
@@ -33,7 +35,7 @@ import { absoluteTarget, isInside, isPhysicallyInside, keys, rootKey } from './g
 
 const UNSCOPED_METHODS: ReadonlySet<string> = new Set([
   'gitWindow:getScope', 'gitWindow:close', 'gitWindow:setMode',
-  'editor:detectTargets', 'settings:get', 'settings:set',
+  'editor:detectTargets',
 ]);
 const READ_METHODS: ReadonlySet<string> = new Set([
   'git:info', 'git:reviewChanges', 'git:reviewFile', 'git:diffFile', 'git:log',
@@ -47,6 +49,14 @@ const OPERATION_METHODS: ReadonlySet<string> = new Set(['git:commit', 'git:addWo
 const MAX_LISTED_WORKTREES = 256;
 const MAX_OWN_OPERATIONS = 256;
 
+/** The settings of the Git views: the diff layout and the last "Open in" editor. */
+const SettingsGetParamsSchema = z.object({
+  key: z.enum(['diff.renderSideBySide', 'editorLauncher.lastTarget']),
+});
+const SettingsSetParamsSchema = z.discriminatedUnion('key', [
+  z.object({ key: z.literal('diff.renderSideBySide'), value: z.boolean() }),
+  z.object({ key: z.literal('editorLauncher.lastTarget'), value: z.string().min(1).max(128) }),
+]);
 const RootParamsSchema = z.object({ workspaceRoot: z.string().min(1) });
 const WatchRootsParamsSchema = z.object({ roots: z.array(z.string().min(1)).max(64) });
 const OpenWorkspaceParamsSchema = z.object({ root: z.string().min(1) });
@@ -95,6 +105,8 @@ export class GitWindowScopeGuard {
   authorize(method: string, params: unknown): boolean {
     const scope = this.current();
     if (UNSCOPED_METHODS.has(method)) return true;
+    if (method === 'settings:get') return SettingsGetParamsSchema.safeParse(params).success;
+    if (method === 'settings:set') return SettingsSetParamsSchema.safeParse(params).success;
     const operation = OperationParamsSchema.safeParse(params);
     if (method === 'git:cancelOperation') {
       return operation.success && this.operations.has(operation.data.operationId);
