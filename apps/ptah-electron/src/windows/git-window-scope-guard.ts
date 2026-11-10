@@ -1,7 +1,7 @@
-import { realpathSync } from 'node:fs';
-import * as path from 'node:path';
+import { isAbsolute } from 'node:path';
 import { z } from 'zod';
 import type { GitWindowCandidate, GitWindowScope } from '@ptah-extension/shared';
+import { absoluteTarget, isInside, isPhysicallyInside, keys, rootKey } from './git-window-scope-paths';
 
 /**
  * Host-side scope check of the detached Git window (PR #1038 review, finding 1).
@@ -19,9 +19,12 @@ import type { GitWindowCandidate, GitWindowScope } from '@ptah-extension/shared'
  * - A method that is not in a list below is a write.
  * - A file or editor path is checked again after symbolic links are resolved,
  *   so a link in the repository cannot name a file of another repository.
- * - A worktree is created only inside a scope root.
+ * - A worktree is created only inside a scope root, and removed only there or
+ *   when the host listed it. Both targets are checked after links are resolved.
  * - `git:cancelOperation` and the operation pushes work only for an operation
- *   that the child started itself.
+ *   that the child started itself in the current scope roots. Only a method
+ *   that starts an operation records one. A change of the roots, a closed
+ *   child and the end of the operation remove the record.
  * - A mirrored push is reduced to the roots of the scope ({@link filterPush}).
  *
  * The main window is not restricted: it never passes through this guard.
@@ -38,6 +41,8 @@ const READ_METHODS: ReadonlySet<string> = new Set([
 ]);
 const WORKTREE_WRITE_METHODS: ReadonlySet<string> = new Set(['git:addWorktree', 'git:removeWorktree']);
 const PATH_READ_METHODS: ReadonlySet<string> = new Set(['file:viewContent', 'editor:openFile', 'editor:openMerge']);
+/** The methods that start an operation with the `operationId` of the caller. */
+const OPERATION_METHODS: ReadonlySet<string> = new Set(['git:commit', 'git:addWorktree', 'git:removeWorktree']);
 const MAX_LISTED_WORKTREES = 256;
 const MAX_OWN_OPERATIONS = 256;
 
@@ -51,64 +56,23 @@ const PathParamsSchema = z.object({
 });
 const OperationParamsSchema = z.object({ operationId: z.string().min(1).max(256) });
 const AddWorktreeParamsSchema = z.object({ path: z.string().min(1).optional() });
+const RemoveWorktreeParamsSchema = z.object({ path: z.string().min(1) });
+const PendingResultSchema = z.object({ pending: z.literal(true) });
 const StatusPushSchema = z.object({ payload: z.object({ workspaceRoot: z.string().min(1) }) });
 const FilePushSchema = z.object({
   payload: z.object({ filePaths: z.array(z.string()), truncated: z.boolean() }),
 });
 const OperationPushSchema = z.object({ payload: OperationParamsSchema });
 const WorktreePushSchema = z.object({
-  payload: z.object({ operationId: z.string().optional(), path: z.string().min(1).optional() }),
+  payload: z.object({
+    operationId: z.string().optional(),
+    path: z.string().min(1).optional(),
+    sessionId: z.string().min(1).optional(),
+  }),
 });
 const WorktreesResultSchema = z.object({
   worktrees: z.array(z.object({ path: z.string().min(1) })),
 });
-
-function rootKey(root: string): string {
-  const resolved = path.resolve(root);
-  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
-}
-
-/**
- * `target` with its symbolic links resolved. A part that does not exist yet
- * (a new file) stays as it is under its resolved parent.
- */
-function physicalPath(target: string): string {
-  let existing = path.resolve(target);
-  const rest: string[] = [];
-  for (;;) {
-    try {
-      return path.join(realpathSync.native(existing), ...rest);
-    } catch {
-      // degradation-audit: optional-capability - this part does not exist (or
-      // cannot be read); its parent decides, and the lexical check ran before.
-      const parent = path.dirname(existing);
-      if (parent === existing) return path.resolve(target);
-      rest.unshift(path.basename(existing));
-      existing = parent;
-    }
-  }
-}
-
-/** Inside `roots` by name, and also after symbolic links are resolved. */
-function isPhysicallyInside(target: string, roots: ReadonlySet<string>): boolean {
-  if (!isInside(target, roots)) return false;
-  const physicalRoots = new Set([...roots].map((root) => rootKey(physicalPath(root))));
-  return isInside(physicalPath(target), physicalRoots);
-}
-
-function isInside(target: string, roots: ReadonlySet<string>): boolean {
-  const key = rootKey(target);
-  for (const root of roots) {
-    if (key === root) return true;
-    const relative = path.relative(root, key);
-    if (relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative)) return true;
-  }
-  return false;
-}
-
-function keys(roots: readonly (string | null)[]): Set<string> {
-  return new Set(roots.filter((root): root is string => root !== null).map(rootKey));
-}
 
 function candidateRoots(candidate: GitWindowCandidate | null): (string | null)[] {
   return candidate === null ? [] : [
@@ -117,24 +81,38 @@ function candidateRoots(candidate: GitWindowCandidate | null): (string | null)[]
 }
 
 export class GitWindowScopeGuard {
+  /** The scope roots that own `listed` and `operations`. `null`: no open child. */
+  private owner: string | null = null;
   /** Worktrees the host listed for a scope root, by root key. */
   private listed = new Set<string>();
-  private listedFor: string | null = null;
-  /** Operations the child started with an authorized call. */
-  private readonly ownOperations = new Set<string>();
+  /** Operations the child started in the roots of `owner`, and that did not end. */
+  private readonly operations = new Set<string>();
 
   constructor(private readonly scope: () => GitWindowScope | null) {}
 
   /** `true` when the Git child may run `method` with `params` in its acknowledged scope. */
   authorize(method: string, params: unknown): boolean {
+    const scope = this.current();
     if (UNSCOPED_METHODS.has(method)) return true;
     const operation = OperationParamsSchema.safeParse(params);
     if (method === 'git:cancelOperation') {
-      return operation.success && this.ownOperations.has(operation.data.operationId);
+      return operation.success && this.operations.has(operation.data.operationId);
     }
-    if (!this.authorizeScoped(method, params)) return false;
-    if (operation.success) this.rememberOperation(operation.data.operationId);
+    if (scope === null || !this.authorizeScoped(scope, method, params)) return false;
+    if (operation.success && OPERATION_METHODS.has(method)) this.rememberOperation(operation.data.operationId);
     return true;
+  }
+
+  /** The current scope. A change of its roots drops the listed worktrees and the operations. */
+  private current(): GitWindowScope | null {
+    const scope = this.scope();
+    const owner = scope === null ? null : [...keys([scope.repoRoot, scope.workspaceRoot])].sort().join('\n');
+    if (owner !== this.owner) {
+      this.owner = owner;
+      this.listed = new Set<string>();
+      this.operations.clear();
+    }
+    return scope;
   }
 
   /**
@@ -143,9 +121,9 @@ export class GitWindowScopeGuard {
    * window, is dropped.
    */
   filterPush(message: { readonly type: string }): unknown {
-    const scope = this.scope();
+    const scope = this.current();
     if (scope === null) return null;
-    const readRoots = new Set([...keys([scope.repoRoot, scope.workspaceRoot]), ...this.listedWorktrees(scope)]);
+    const readRoots = new Set([...keys([scope.repoRoot, scope.workspaceRoot]), ...this.listed]);
     if (message.type === 'git:status-update') {
       const parsed = StatusPushSchema.safeParse(message);
       const leaseRoots = new Set([
@@ -163,34 +141,46 @@ export class GitWindowScopeGuard {
     }
     if (message.type === 'git:operationOutput') {
       const parsed = OperationPushSchema.safeParse(message);
-      return parsed.success && this.ownOperations.has(parsed.data.payload.operationId) ? message : null;
+      return parsed.success && this.operations.has(parsed.data.payload.operationId) ? message : null;
     }
     if (message.type === 'git:worktreeChanged') {
       const parsed = WorktreePushSchema.safeParse(message);
       if (!parsed.success) return null;
-      const { operationId, path: worktree } = parsed.data.payload;
-      if (operationId !== undefined) return this.ownOperations.has(operationId) ? message : null;
-      return worktree !== undefined && isInside(worktree, readRoots) ? message : null;
+      const { operationId, path: worktree, sessionId } = parsed.data.payload;
+      // This push is the end of a worktree operation: the record is removed.
+      if (operationId !== undefined) return this.operations.delete(operationId) ? message : null;
+      if (worktree !== undefined && isInside(worktree, readRoots)) return message;
+      // A new worktree is usually adjacent to the repository and not listed yet: its session decides.
+      return sessionId !== undefined && this.scopeSessions(scope, readRoots).has(sessionId) ? message : null;
     }
     return null;
   }
 
+  /** The sessions of the published scope that run in a root the child can read. */
+  private scopeSessions(scope: GitWindowScope, readRoots: ReadonlySet<string>): ReadonlySet<string> {
+    const sessions = new Set<string>();
+    for (const candidate of [scope.active, ...scope.open]) {
+      if (candidate === null || candidate.sessionId === null) continue;
+      const roots = candidateRoots(candidate).filter((root): root is string => root !== null);
+      if (roots.some((root) => isInside(root, readRoots))) sessions.add(candidate.sessionId);
+    }
+    return sessions;
+  }
+
   private rememberOperation(operationId: string): void {
-    if (this.ownOperations.size >= MAX_OWN_OPERATIONS) {
-      for (const oldest of this.ownOperations) {
-        this.ownOperations.delete(oldest);
+    if (this.operations.size >= MAX_OWN_OPERATIONS) {
+      for (const oldest of this.operations) {
+        this.operations.delete(oldest);
         break;
       }
     }
-    this.ownOperations.add(operationId);
+    this.operations.add(operationId);
   }
 
-  private authorizeScoped(method: string, params: unknown): boolean {
-    const scope = this.scope();
-    if (scope === null) return false;
+  private authorizeScoped(scope: GitWindowScope, method: string, params: unknown): boolean {
     const writeRoots = keys([scope.repoRoot]);
     const scopeRoots = keys([scope.repoRoot, scope.workspaceRoot]);
-    const readRoots = new Set([...scopeRoots, ...this.listedWorktrees(scope)]);
+    const readRoots = new Set([...scopeRoots, ...this.listed]);
 
     if (method === 'git:watchRoots') {
       const parsed = WatchRootsParamsSchema.safeParse(params);
@@ -213,40 +203,43 @@ export class GitWindowScopeGuard {
     const root = rootKey(parsed.data.workspaceRoot);
     if (READ_METHODS.has(method)) return readRoots.has(root);
     if (method === 'git:addWorktree') {
-      // A relative target stays in the named root (the host checks it); an absolute one must be in the scope.
+      // With no target the host makes the worktree in its own folder of the named root.
       const target = AddWorktreeParamsSchema.safeParse(params);
       if (!target.success) return false;
       const requested = target.data.path;
-      if (requested !== undefined && (path.isAbsolute(requested) || path.win32.isAbsolute(requested)) &&
-          !isInside(requested, scopeRoots)) return false;
+      if (requested !== undefined &&
+          !isPhysicallyInside(absoluteTarget(parsed.data.workspaceRoot, requested), scopeRoots)) return false;
+    }
+    if (method === 'git:removeWorktree') {
+      const target = RemoveWorktreeParamsSchema.safeParse(params);
+      if (!target.success) return false;
+      const requested = absoluteTarget(parsed.data.workspaceRoot, target.data.path);
+      if (!this.listed.has(rootKey(requested)) && !isPhysicallyInside(requested, scopeRoots)) return false;
     }
     if (WORKTREE_WRITE_METHODS.has(method)) return scopeRoots.has(root);
     return writeRoots.has(root);
   }
 
-  /** Remember the worktrees the host listed for a scope root. */
+  /** Remember the worktrees the host listed for a scope root, and the end of an operation. */
   observeResult(method: string, params: unknown, data: unknown): void {
+    const scope = this.current();
+    if (OPERATION_METHODS.has(method)) {
+      // A result that is not `pending` is the end of the operation.
+      const operation = OperationParamsSchema.safeParse(params);
+      if (operation.success && !PendingResultSchema.safeParse(data).success) {
+        this.operations.delete(operation.data.operationId);
+      }
+      return;
+    }
     if (method !== 'git:worktrees') return;
-    const scope = this.scope();
     const request = RootParamsSchema.safeParse(params);
     const result = WorktreesResultSchema.safeParse(data);
     if (scope === null || !request.success || !result.success) return;
     if (!keys([scope.repoRoot, scope.workspaceRoot]).has(rootKey(request.data.workspaceRoot))) return;
-    this.listedWorktrees(scope);
     for (const worktree of result.data.worktrees.slice(0, MAX_LISTED_WORKTREES)) {
       if (this.listed.size >= MAX_LISTED_WORKTREES) break;
       this.listed.add(rootKey(worktree.path));
     }
-  }
-
-  /** The listed worktrees of the current scope roots; a change of the roots drops them. */
-  private listedWorktrees(scope: GitWindowScope): ReadonlySet<string> {
-    const owner = [...keys([scope.repoRoot, scope.workspaceRoot])].sort().join('\n');
-    if (owner !== this.listedFor) {
-      this.listedFor = owner;
-      this.listed = new Set<string>();
-    }
-    return this.listed;
   }
 
   private authorizePath(params: unknown, roots: ReadonlySet<string>): boolean {
@@ -255,8 +248,8 @@ export class GitWindowScopeGuard {
     const { workspaceRoot, documentPath } = parsed.data;
     if (workspaceRoot !== undefined && !roots.has(rootKey(workspaceRoot))) return false;
     if (documentPath !== undefined && !isPhysicallyInside(documentPath, roots)) return false;
-    if (path.isAbsolute(parsed.data.path)) return isPhysicallyInside(parsed.data.path, roots);
     // A relative path resolves against the named root; with no root the host uses the active folder.
-    return workspaceRoot !== undefined && isPhysicallyInside(path.resolve(workspaceRoot, parsed.data.path), roots);
+    if (workspaceRoot === undefined && !isAbsolute(parsed.data.path)) return false;
+    return isPhysicallyInside(absoluteTarget(workspaceRoot ?? '', parsed.data.path), roots);
   }
 }

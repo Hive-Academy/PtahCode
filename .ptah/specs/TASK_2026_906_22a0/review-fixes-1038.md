@@ -103,6 +103,32 @@ follow-up commit `fix(electron): close the gaps of the Git window scope guard`.
 Tests: `ipc-bridge.git-window-scope.spec.ts` (push filter, cancel, worktree target) and the new
 `git-window-scope-guard.spec.ts` (real directories with a link). `npm run verify -- -p ptah-electron` exit 0.
 
+## Second review of the guard (review 5839749608, head `f4bf7f6e8`)
+
+The `PtahCode` review bot gave 7 findings on `git-window-scope-guard.ts`. All 7 are confirmed and corrected
+in the commit `fix(electron): bind Git window operations and worktree paths to the scope`.
+
+| Thread | Finding | Verdict | Correction |
+|--------|---------|---------|------------|
+| 4523319377 | A scoped read can claim the operation ID of another window. | Confirmed | Only `git:commit`, `git:addWorktree` and `git:removeWorktree` record an `operationId`. A read records nothing. |
+| 4523319390, 4523319427 | The operations stay after a scope change (output and cancel). | Confirmed | The record belongs to the scope roots. A change of the roots and a closed child remove all records. The end of an operation (a result that is not `pending`, or the `git:worktreeChanged` push of the operation) removes its record. |
+| 4523319431 | `git:addWorktree` target through a symbolic link. | Confirmed | An absolute or relative target is checked with the real-path helper against the scope roots. |
+| 4523319440 | `git:removeWorktree` does not check `path`. | Confirmed | `path` is necessary. It must be a worktree that the host listed for the scope, or physically inside a scope root. |
+| 4523319369 | The push for a new adjacent worktree is dropped. | Confirmed | An uncorrelated push is forwarded when its `sessionId` is a session of the published scope that runs in a root of the scope. |
+| 4523319452 | A file name that starts with two dots is refused. | Confirmed | The containment check compares path segments (`..` or `..` + separator). |
+
+- Design: the path helpers moved to the new `git-window-scope-paths.ts`. One helper (`isPhysicallyInside`)
+  checks the file, editor, worktree add and worktree remove paths. The guard file is smaller than before.
+- Tests: `git-window-scope-guard.spec.ts` (two-dot name, add and remove through a link, listed worktree,
+  session push) and `ipc-bridge.git-window-scope.spec.ts` (read does not claim, end of an operation, scope
+  change revokes, removal outside the scope).
+- Verification: `npm run verify -- -p ptah-electron` exit 0. Degradation audit exit 0. No baseline raised.
+- Known limits: the record is made at authorization, because the output arrives before the result. A child
+  that knows the operation ID of another window could send it with its own `git:commit`; the IDs are random
+  and the push filter does not show them to the child. An uncorrelated push of a worktree operation of the
+  main window (it has the `operationId` of the main window) is not forwarded; the child lists the worktrees
+  again with its next `git:worktrees` call.
+
 ## Environment note
 
 The worktree had no `node_modules`. I made a directory junction `node_modules` to

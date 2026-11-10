@@ -99,7 +99,9 @@ describe('IpcBridge — detached Git window scope and pushes', () => {
       data:
         request.method === 'git:worktrees'
           ? { worktrees: [{ path: REPO_A }, { path: WORKTREE_A }] }
-          : { method: request.method },
+          : request.method === 'git:addWorktree'
+            ? { success: true, pending: true }
+            : { method: request.method },
     }));
     const container = rootContainer.createChildContainer();
     container.register(TOKENS.RPC_HANDLER, { useValue: { handleMessage } });
@@ -299,9 +301,9 @@ describe('IpcBridge — detached Git window scope and pushes', () => {
   });
 
   it('delivers the Git pushes of the scope to the main window and to the Git child', async () => {
-    await rpc(git, 'git:commit', {
+    await rpc(git, 'git:addWorktree', {
       workspaceRoot: REPO_A,
-      message: 'm',
+      branch: 'f',
       operationId: 'op-child',
     });
     git.sent.length = 0;
@@ -348,12 +350,71 @@ describe('IpcBridge — detached Git window scope and pushes', () => {
     await rpc(git, 'git:cancelOperation', { operationId: 'op-main' });
     expect(handleMessage).not.toHaveBeenCalled();
     expect(git.sent).toEqual([outOfScope('git:cancelOperation')]);
-    await rpc(git, 'git:push', { workspaceRoot: REPO_B, operationId: 'op-refused' });
+    await rpc(git, 'git:addWorktree', { workspaceRoot: REPO_B, branch: 'f', operationId: 'op-refused' });
     await rpc(git, 'git:cancelOperation', { operationId: 'op-refused' });
     expect(handleMessage).not.toHaveBeenCalled();
-    await rpc(git, 'git:push', { workspaceRoot: REPO_A, operationId: 'op-child' });
+    await rpc(git, 'git:addWorktree', { workspaceRoot: REPO_A, branch: 'f', operationId: 'op-child' });
     await rpc(git, 'git:cancelOperation', { operationId: 'op-child' });
     expect(handleMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not let a read claim the operation of another window', async () => {
+    await rpc(git, 'git:info', { workspaceRoot: REPO_A, operationId: 'op-main' });
+    await rpc(git, 'git:push', { workspaceRoot: REPO_A, operationId: 'op-main' });
+    handleMessage.mockClear();
+    git.sent.length = 0;
+    await rpc(git, 'git:cancelOperation', { operationId: 'op-main' });
+    expect(handleMessage).not.toHaveBeenCalled();
+    bridge.sendToRenderer({
+      type: MESSAGE_TYPES.GIT_OPERATION_OUTPUT,
+      payload: { operationId: 'op-main', chunk: 'x' },
+    });
+    expect(git.sent).toEqual([outOfScope('git:cancelOperation')]);
+  });
+
+  it('drops the operation of the child when the operation ends', async () => {
+    // The commit result is not `pending`: the operation ended with the response.
+    await rpc(git, 'git:commit', { workspaceRoot: REPO_A, message: 'm', operationId: 'op-done' });
+    await rpc(git, 'git:addWorktree', { workspaceRoot: REPO_A, branch: 'f', operationId: 'op-wt' });
+    const ended = { type: 'git:worktreeChanged', payload: { action: 'created', operationId: 'op-wt' } };
+    git.sent.length = 0;
+    bridge.sendToRenderer(ended);
+    bridge.sendToRenderer(ended);
+    expect(git.sent).toEqual([ended]);
+    handleMessage.mockClear();
+    await rpc(git, 'git:cancelOperation', { operationId: 'op-done' });
+    await rpc(git, 'git:cancelOperation', { operationId: 'op-wt' });
+    expect(handleMessage).not.toHaveBeenCalled();
+  });
+
+  it('revokes the operations of the child when the scope moves to another repository', async () => {
+    await rpc(git, 'git:addWorktree', { workspaceRoot: REPO_A, branch: 'f', operationId: 'op-a' });
+    expect(host.publishScope(scopeFor(REPO_B)).accepted).toBe(true);
+    handleMessage.mockClear();
+    git.sent.length = 0;
+    bridge.sendToRenderer({
+      type: MESSAGE_TYPES.GIT_OPERATION_OUTPUT,
+      payload: { operationId: 'op-a', chunk: 'x' },
+    });
+    bridge.sendToRenderer({ type: 'git:worktreeChanged', payload: { action: 'created', operationId: 'op-a' } });
+    expect(git.sent).toEqual([]);
+    await rpc(git, 'git:cancelOperation', { operationId: 'op-a' });
+    expect(handleMessage).not.toHaveBeenCalled();
+    // The record does not come back with the first scope.
+    expect(host.publishScope(scopeFor(REPO_A)).accepted).toBe(true);
+    await rpc(git, 'git:cancelOperation', { operationId: 'op-a' });
+    expect(handleMessage).not.toHaveBeenCalled();
+  });
+
+  it('refuses the removal of a worktree that is not in the scope and not listed', async () => {
+    await rpc(git, 'git:removeWorktree', { workspaceRoot: REPO_A, path: WORKTREE_A });
+    await rpc(git, 'git:removeWorktree', { workspaceRoot: REPO_A, path: path.join(REPO_B, '.wt', 'x') });
+    await rpc(git, 'git:removeWorktree', { workspaceRoot: REPO_A });
+    expect(handleMessage).not.toHaveBeenCalled();
+    await rpc(git, 'git:worktrees', { workspaceRoot: REPO_A });
+    await rpc(git, 'git:removeWorktree', { workspaceRoot: REPO_A, path: WORKTREE_A });
+    await rpc(git, 'git:removeWorktree', { workspaceRoot: REPO_A, path: path.join(REPO_A, '.wt', 'x') });
+    expect(handleMessage).toHaveBeenCalledTimes(3);
   });
 
   it('refuses a worktree target outside the acknowledged repository', async () => {
