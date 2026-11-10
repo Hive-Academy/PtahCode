@@ -727,7 +727,7 @@ export class SdkModelService {
       return apiModels.length > 0 ? apiModels : this.fetchModelsViaSdk(env, true);
     }
     const models = await this.fetchModelsViaSdk(env, true);
-    return isDirectAnthropic(env) ? models : this.applyTierMapping(models, env);
+    return isDirectAnthropic(env) ? models : this.applyTierMapping(models, env, true);
   }
 
   /**
@@ -1090,13 +1090,13 @@ export class SdkModelService {
    *
    * Only called for authMethod === 'thirdParty'. Never called for claudeCli or apiKey.
    */
-  private applyTierMapping(models: ModelInfo[], env: AuthEnv = this.authEnv): ModelInfo[] {
+  private applyTierMapping(models: ModelInfo[], env: AuthEnv = this.authEnv, profileProbe = false): ModelInfo[] {
     this.logger.info('[SdkModelService] applyTierMapping (third-party)', {
       count: models.length,
-      rawValues: models.map((m) => ({
+      ...(!profileProbe && { rawValues: models.map((m) => ({
         value: m.value,
         displayName: m.displayName,
-      })),
+      })) }),
     });
     const seen = new Set<string>();
     const normalized: ModelInfo[] = [];
@@ -1111,8 +1111,8 @@ export class SdkModelService {
       }
       isDefault = raw === 'default';
       const resolvedValue = isDefault
-        ? this.resolveModelId('opus', env)
-        : this.resolveModelId(m.value, env);
+        ? this.resolveModelId('opus', env, profileProbe)
+        : this.resolveModelId(m.value, env, profileProbe);
       if (!isDefault) {
         if (seen.has(resolvedValue)) continue;
         seen.add(resolvedValue);
@@ -1127,7 +1127,7 @@ export class SdkModelService {
     if (dropped.length > 0) {
       this.logger.info(
         '[SdkModelService] applyTierMapping: dropped Anthropic-only models the provider cannot serve',
-        { dropped },
+        profileProbe ? { droppedCount: dropped.length } : { dropped },
       );
     }
 
@@ -1301,7 +1301,7 @@ export class SdkModelService {
 
       this.logger.info('[SdkModelService] Fetched supported models from SDK', {
         count: models.length,
-        models: models.map((m) => `${m.value}: ${m.displayName}`),
+        ...(!profileProbe && { models: models.map((m) => `${m.value}: ${m.displayName}`) }),
       });
 
       return models;
@@ -1450,7 +1450,7 @@ export class SdkModelService {
       this.logger.info('[SdkModelService] Fetched models from /v1/models API', {
         total: body.data.length,
         claudeModels: models.length,
-        ids: models.map((m) => m.id),
+        ...(!envOverride && { ids: models.map((m) => m.id) }),
       });
 
       return models;
@@ -1489,11 +1489,13 @@ export class SdkModelService {
    * that the global provider remaps) would be resolved against the wrong
    * provider's tier env vars. Omitted callers keep the global behavior.
    */
-  resolveModelId(model: string, envOverride?: AuthEnv): string {
+  resolveModelId(model: string, envOverride?: AuthEnv, profileProbe = false): string {
     const resolved = this.modelResolver.resolve(model, envOverride);
     if (resolved !== model) {
       this.logger.debug(
-        `[SdkModelService] Resolved '${model}' → '${resolved}' via ModelResolver`,
+        profileProbe
+          ? '[SdkModelService] Resolved profile model via ModelResolver'
+          : `[SdkModelService] Resolved '${model}' → '${resolved}' via ModelResolver`,
       );
     }
     return resolved;

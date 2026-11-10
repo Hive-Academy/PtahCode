@@ -226,6 +226,45 @@ describe('SdkModelService', () => {
       expect(h.logError).toHaveBeenCalledWith(expect.any(String), expect.any(Error));
     });
 
+    it('never logs credentials echoed in successful SDK model metadata or tier mapping', async () => {
+      const sentinel = 'sentinel-successful-catalog-credential';
+      const h = makeHarness({
+        authMethod: 'thirdParty',
+        sdkModels: [
+          { value: 'opus', displayName: `Opus ${sentinel}`, description: '' },
+          { value: `claude-${sentinel}`, displayName: `Dropped ${sentinel}`, description: '' },
+        ],
+      });
+      const models = await h.service.getModelsForProviderProfile(profile({
+        ANTHROPIC_BASE_URL: 'http://127.0.0.1:4455',
+        ANTHROPIC_AUTH_TOKEN: sentinel,
+        ANTHROPIC_DEFAULT_OPUS_MODEL: `mapped-${sentinel}`,
+      }));
+      expect(models.map((model) => model.value)).toEqual([`mapped-${sentinel}`]);
+      for (const log of [h.logDebug, h.logInfo, h.logWarn, h.logError]) {
+        expect(JSON.stringify(log.mock.calls)).not.toContain(sentinel);
+      }
+    });
+
+    it('never logs credentials echoed in a successful direct API catalog', async () => {
+      const sentinel = 'sentinel-direct-api-credential';
+      const fetchSpy = jest.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+        data: [{ id: `claude-${sentinel}`, display_name: `Display ${sentinel}` }],
+      }), { status: 200 }));
+      try {
+        const h = makeHarness({ authMethod: 'apiKey', sdkModels: [] });
+        const models = await h.service.getModelsForProviderProfile(profile({
+          ANTHROPIC_API_KEY: sentinel,
+        }, 'anthropic'));
+        expect(models.map((model) => model.value)).toEqual([`claude-${sentinel}`]);
+        for (const log of [h.logDebug, h.logInfo, h.logWarn, h.logError]) {
+          expect(JSON.stringify(log.mock.calls)).not.toContain(sentinel);
+        }
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
     it('deduplicates concurrent probes and caches by profile identity until invalidation', async () => {
       const h = makeHarness({ authMethod: 'thirdParty', sdkModels: [{ value: 'opus', displayName: 'Opus', description: '' }] });
       const first = profile({ ANTHROPIC_BASE_URL: 'http://127.0.0.1:4455', ANTHROPIC_AUTH_TOKEN: 'first', ANTHROPIC_DEFAULT_OPUS_MODEL: 'one' });
