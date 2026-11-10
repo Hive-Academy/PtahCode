@@ -43,7 +43,11 @@ it('keeps a busy button focusable and blocks button and anchor activation', () =
       new MouseEvent('click', { bubbles: true, cancelable: true }),
     ),
   ).toBe(false);
-  expect(anchor.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, cancelable: true }))).toBe(false);
+  expect(
+    anchor.dispatchEvent(
+      new MouseEvent('auxclick', { bubbles: true, cancelable: true }),
+    ),
+  ).toBe(false);
   expect(anchor.getAttribute('aria-disabled')).toBe('true');
   expect(anchor.getAttribute('aria-busy')).toBe('true');
   expect(anchor.hasAttribute('type')).toBe(false);
@@ -52,7 +56,11 @@ it('keeps a busy button focusable and blocks button and anchor activation', () =
   fixture.detectChanges();
   button.click();
   expect(fixture.componentInstance.count).toBe(1);
-  expect(anchor.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))).toBe(true);
+  expect(
+    anchor.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true }),
+    ),
+  ).toBe(true);
 });
 it('defaults type only when absent and preserves explicit submit', () => {
   const fixture = TestBed.createComponent(Host);
@@ -101,5 +109,28 @@ it('maps every variant and size to its DaisyUI class', () => {
     ['btn', 'btn-secondary', 'btn-sm'],
     ['btn', 'btn-secondary', 'btn-md'],
   ];
-  buttons.forEach((button, i) => expect([...button.classList].sort()).toEqual(expected[i].sort()));
+  buttons.forEach((button, i) =>
+    expect([...button.classList].sort()).toEqual(expected[i].sort()),
+  );
+});
+@Component({
+  standalone: true,
+  imports: [PtahButtonDirective],
+  template: `<form>
+    <button ptahButton [type]="inputType()">Input</button>
+  </form>`,
+})
+class TypeHost {
+  readonly inputType = signal<string | undefined>('submit');
+}
+it('keeps the button type default when a binding removes the type', () => {
+  const fixture = TestBed.createComponent(TypeHost);
+  fixture.detectChanges();
+  const input = fixture.nativeElement.querySelector(
+    'button',
+  ) as HTMLButtonElement;
+  expect(input.getAttribute('type')).toBe('submit');
+  fixture.componentInstance.inputType.set(undefined);
+  fixture.detectChanges();
+  expect(input.getAttribute('type')).toBe('button');
 });
