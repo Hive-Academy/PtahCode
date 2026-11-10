@@ -19,6 +19,15 @@ Dark is the default theme of the app. Light is "Ptah Glass Light", selected with
 
 See `design-preview-defects.json` (the page shows the same list).
 
+## State (session master decision)
+
+- Defect 3 (Accept button stays gold) is fixed in commit bc076ba8a: a neutral state badge replaces
+  Accept and Dismiss after triage. No new capture was made.
+- Defects 1 and 2 (drawer) are owned by the Inbox layout task (branch
+  feat/reviews-machines-inbox-layout). Do not fix them here. Steps 0 and 1 below are for that task.
+- The findings panel and card have no fixed width, no fixed position and no scroll container of
+  their own. They do not depend on the drawer.
+
 ## Open next steps
 
 0. Translucent drawer (`review-run-detail.component.ts`, `<aside class="surface-1 ...">`): give the
