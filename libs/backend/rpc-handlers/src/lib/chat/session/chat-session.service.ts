@@ -1317,6 +1317,9 @@ export class ChatSessionService {
     | { readonly accepted: true; readonly resolvedModel: string }
     | { readonly accepted: false; readonly code: 'invalid-model' | 'model-catalog-unavailable'; readonly message: string; readonly acceptedModels?: readonly string[] }
   > {
+    // Set once a workspace provider profile is in use: from then on, logs and
+    // child-facing errors must not carry provider-supplied text.
+    let profileProbe = false;
     try {
       const account = await this.gateAccount({
         workspacePath: input.workspaceRoot,
@@ -1336,6 +1339,7 @@ export class ChatSessionService {
       );
       const native = profile && !profile.authEnv.ANTHROPIC_BASE_URL &&
         !profile.authEnv.ANTHROPIC_API_KEY && !profile.authEnv.ANTHROPIC_AUTH_TOKEN;
+      profileProbe = Boolean(profile) && !native;
       const models = native
         ? await this.childModelCatalog.getNativeClaudeModels()
         : profile
@@ -1346,12 +1350,16 @@ export class ChatSessionService {
         return { accepted: false, code: 'model-catalog-unavailable', message: 'the provider returned an empty model catalog' };
       }
       const acceptedModels = models.map((item) => item.value);
-      const resolvedModel = this.childModelCatalog.resolveModelId(input.model, profile?.authEnv);
+      const resolvedModel = this.childModelCatalog.resolveModelId(input.model, profile?.authEnv, profileProbe);
       if (!acceptedModels.includes(resolvedModel)) {
         return { accepted: false, code: 'invalid-model', message: `model "${input.model}" is unavailable for this provider.`, acceptedModels };
       }
       return { accepted: true, resolvedModel };
     } catch (error: unknown) {
+      if (profileProbe) {
+        this.logger.error('[ChatSessionService] Child model catalog unavailable', new Error('workspace provider profile model catalog failed'));
+        return { accepted: false, code: 'model-catalog-unavailable', message: 'the model catalog of the workspace provider is unavailable' };
+      }
       this.logger.error('[ChatSessionService] Child model catalog unavailable', error instanceof Error ? error : new Error(String(error)));
       return { accepted: false, code: 'model-catalog-unavailable', message: error instanceof Error ? error.message : String(error) };
     }

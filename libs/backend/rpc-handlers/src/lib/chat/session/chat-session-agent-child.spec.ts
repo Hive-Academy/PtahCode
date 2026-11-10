@@ -342,6 +342,29 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
       expect(h.modelCatalog.getSupportedModels).not.toHaveBeenCalled();
     });
 
+    it('keeps provider text out of logs and errors for a workspace profile', async () => {
+      const h = makeHarness();
+      const sentinel = 'sk-sentinel-credential';
+      const profile = {
+        providerId: 'workspace-provider',
+        authEnv: { ANTHROPIC_BASE_URL: 'https://workspace.example.test', ANTHROPIC_AUTH_TOKEN: 'workspace-token' },
+        model: 'workspace-model',
+      };
+      h.resolveProviderProfileForWorkspace.mockResolvedValue(profile);
+
+      await h.service.resolveAgentChildModel({ ...input, model: 'workspace-model' });
+      expect(h.modelCatalog.resolveModelId).toHaveBeenCalledWith('workspace-model', profile.authEnv, true);
+
+      h.modelCatalog.getModelsForProviderProfile.mockRejectedValue(new Error(`provider echoed ${sentinel}`));
+      const refused = await h.service.resolveAgentChildModel({ ...input, model: 'workspace-model' });
+      expect(refused).toMatchObject({ accepted: false, code: 'model-catalog-unavailable' });
+      expect(JSON.stringify(refused)).not.toContain(sentinel);
+      const logged = [h.logger.debug, h.logger.info, h.logger.warn, h.logger.error]
+        .flatMap((log) => log.mock.calls.flat())
+        .map((arg: unknown) => arg instanceof Error ? `${arg.message} ${arg.stack ?? ''}` : JSON.stringify(arg));
+      expect(logged.join(' ')).not.toContain(sentinel);
+    });
+
     it('refuses an unavailable catalog', async () => {
       const h = makeHarness();
       h.modelCatalog.getSupportedModels.mockRejectedValueOnce(new Error('catalog offline'));
