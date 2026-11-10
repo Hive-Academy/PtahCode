@@ -121,7 +121,7 @@ export class SessionOrganizationCache {
       const entry = this.entries.get(id);
       if (!entry) continue;
       const path = entry.view()?.worktreePath;
-      if (path) this.unavailableRoots.clear(path);
+      if (path) this.unavailableRoots.release(path);
       if (entry.state === 'loading') {
         entry.stale = true;
       } else {

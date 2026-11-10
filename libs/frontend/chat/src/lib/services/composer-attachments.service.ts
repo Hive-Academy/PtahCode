@@ -7,6 +7,9 @@ import type { ComposerDraftImage } from './composer-draft.store';
 
 export type ComposerImage = ComposerDraftImage;
 
+/** The picker waits on a person in a native dialog, so it outlasts the default RPC timeout. */
+const FILE_PICK_TIMEOUT_MS = 10 * 60_000;
+
 /** Ephemeral attachment state, provided by each owning composer. */
 @Injectable()
 export class ComposerAttachmentsService implements OnDestroy {
@@ -106,7 +109,9 @@ export class ComposerAttachmentsService implements OnDestroy {
     if (this.pickingFiles) return;
     this.pickingFiles = true;
     try {
-      const result = await this.rpc.call('file:pick', { multiple: true });
+      const result = await this.rpc.call('file:pick', { multiple: true }, {
+        timeout: FILE_PICK_TIMEOUT_MS,
+      });
       if (!result.success) {
         this.showError('Could not attach files. Try again.');
         return;

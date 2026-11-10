@@ -113,7 +113,9 @@ describe('ComposerAttachmentsService', () => {
     call.mockResolvedValueOnce({ success: true, data: { images: [{ name: 'image.png', mediaType: 'image/png', data: png }] } });
     await service.pickFiles();
     await service.pickImages();
-    expect(call).toHaveBeenNthCalledWith(1, 'file:pick', { multiple: true });
+    expect(call).toHaveBeenNthCalledWith(1, 'file:pick', { multiple: true }, {
+      timeout: 10 * 60_000,
+    });
     expect(call).toHaveBeenNthCalledWith(2, 'file:pick-images', { multiple: true });
     expect(service.files()).toHaveLength(1);
     expect(service.toSendOptions()).toEqual({ files: ['/ws/brief.md'], images: [{ data: png, mediaType: 'image/png' }] });

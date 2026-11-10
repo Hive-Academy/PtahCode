@@ -177,6 +177,28 @@ function toSnapshot(
   };
 }
 
+function sameStringSet(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const value of a) {
+    if (!b.has(value)) return false;
+  }
+  return true;
+}
+
+/**
+ * Equal when both snapshots describe the same tree. `readAt` says when the
+ * store looked, not what it saw, so it stays out: an unchanged tree keeps the
+ * stored object and with it the identity of the `marks` computed.
+ */
+function sameSnapshotContent(a: StatusSnapshot, b: StatusSnapshot): boolean {
+  if (!sameWorkspaceRoot(a.workspaceRoot, b.workspaceRoot)) return false;
+  if (a.untrackedDirs.length !== b.untrackedDirs.length) return false;
+  const dirs = new Set(b.untrackedDirs);
+  if (!a.untrackedDirs.every((dir) => dirs.has(dir))) return false;
+  return sameStringSet(a.present, b.present) &&
+    sameStringSet(a.conflicted, b.conflicted);
+}
+
 function marksOf(
   changeSet: TurnChangeSet,
   snapshot: StatusSnapshot,
@@ -270,9 +292,19 @@ export class ChangeSetStore implements MessageHandler {
   private readonly _snapshots = signal<ReadonlyMap<string, StatusSnapshot>>(
     new Map(),
   );
+  private readonly lastSnapshotReadAt = new Map<string, number>();
   private readonly _settledThrough = signal<ReadonlyMap<string, number>>(
     new Map(),
   );
+
+  /**
+   * The marks last built for a change set and the snapshot they came from, so
+   * a change in another session does not replace this set's marks object.
+   */
+  private readonly marksMemo = new WeakMap<
+    TurnChangeSet,
+    { readonly snapshot: StatusSnapshot; readonly marks: ChangeSetMarks }
+  >();
 
   /** Marks per change set, rebuilt only when sets or snapshots change. */
   private readonly marks = computed(() => {
@@ -285,7 +317,12 @@ export class ChangeSetStore implements MessageHandler {
         ) {
           continue;
         }
-        result.set(changeSet, marksOf(changeSet, snapshot));
+        let memo = this.marksMemo.get(changeSet);
+        if (memo?.snapshot !== snapshot) {
+          memo = { snapshot, marks: marksOf(changeSet, snapshot) };
+          this.marksMemo.set(changeSet, memo);
+        }
+        result.set(changeSet, memo.marks);
       }
     }
     return result;
@@ -640,7 +677,7 @@ export class ChangeSetStore implements MessageHandler {
       !force &&
       current &&
       sameWorkspaceRoot(current.workspaceRoot, root) &&
-      Date.now() - current.readAt < RECONCILE_FRESHNESS_MS
+      Date.now() - (this.lastSnapshotReadAt.get(sessionId) ?? current.readAt) < RECONCILE_FRESHNESS_MS
     ) {
       return;
     }
@@ -701,6 +738,14 @@ export class ChangeSetStore implements MessageHandler {
     sessionId: string,
     snapshot: StatusSnapshot | null,
   ): void {
+    if (snapshot) this.lastSnapshotReadAt.set(sessionId, snapshot.readAt);
+    else this.lastSnapshotReadAt.delete(sessionId);
+    const stored = this._snapshots().get(sessionId);
+    if (snapshot && stored && sameSnapshotContent(snapshot, stored)) {
+      // An unchanged tree keeps the stored object, so the `marks` computed
+      // and every summary that reads it keep their identity.
+      return;
+    }
     this.bumpGeneration(sessionId);
     this._snapshots.update((current) => {
       if (!snapshot && !current.has(sessionId)) return current;
