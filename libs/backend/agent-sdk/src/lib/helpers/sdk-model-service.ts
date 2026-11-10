@@ -713,21 +713,35 @@ export class SdkModelService {
   }
 
   /** Probe the same isolated auth environment used to launch a workspace session. */
-  async getModelsForProviderProfile(profile: ProviderProfile): Promise<ModelInfo[]> {
-    return this.profileModels.get(profile, () => this.probeProviderProfile(profile));
+  async getModelsForProviderProfile(
+    profile: ProviderProfile,
+  ): Promise<ModelInfo[]> {
+    return this.profileModels.get(profile, () =>
+      this.probeProviderProfile(profile),
+    );
   }
 
-  private async probeProviderProfile(profile: ProviderProfile): Promise<ModelInfo[]> {
+  private async probeProviderProfile(
+    profile: ProviderProfile,
+  ): Promise<ModelInfo[]> {
     const env = profile.authEnv;
-    if (isDirectAnthropic(env) && !env.ANTHROPIC_API_KEY) {
+    if (
+      isDirectAnthropic(env) &&
+      !env.ANTHROPIC_API_KEY &&
+      !env.ANTHROPIC_AUTH_TOKEN
+    ) {
       return this.getNativeClaudeModels();
     }
     if (isDirectAnthropic(env) && env.ANTHROPIC_API_KEY) {
       const apiModels = await this.fetchModelsViaApi(env);
-      return apiModels.length > 0 ? apiModels : this.fetchModelsViaSdk(env, true);
+      return apiModels.length > 0
+        ? apiModels
+        : this.fetchModelsViaSdk(env, true);
     }
     const models = await this.fetchModelsViaSdk(env, true);
-    return isDirectAnthropic(env) ? models : this.applyTierMapping(models, env, true);
+    return isDirectAnthropic(env)
+      ? models
+      : this.applyTierMapping(models, env, true);
   }
 
   /**
@@ -1090,13 +1104,19 @@ export class SdkModelService {
    *
    * Only called for authMethod === 'thirdParty'. Never called for claudeCli or apiKey.
    */
-  private applyTierMapping(models: ModelInfo[], env: AuthEnv = this.authEnv, profileProbe = false): ModelInfo[] {
+  private applyTierMapping(
+    models: ModelInfo[],
+    env: AuthEnv = this.authEnv,
+    profileProbe = false,
+  ): ModelInfo[] {
     this.logger.info('[SdkModelService] applyTierMapping (third-party)', {
       count: models.length,
-      ...(!profileProbe && { rawValues: models.map((m) => ({
-        value: m.value,
-        displayName: m.displayName,
-      })) }),
+      ...(!profileProbe && {
+        rawValues: models.map((m) => ({
+          value: m.value,
+          displayName: m.displayName,
+        })),
+      }),
     });
     const seen = new Set<string>();
     const normalized: ModelInfo[] = [];
@@ -1243,9 +1263,14 @@ export class SdkModelService {
         stderrLines.push(data);
         if (data.includes('[ERROR]')) {
           if (profileProbe) {
-            this.logger.error('[SdkModelService] Profile bridge stderr', new Error('SDK bridge reported an error'));
+            this.logger.error(
+              '[SdkModelService] Profile bridge stderr',
+              new Error('SDK bridge reported an error'),
+            );
           } else {
-            this.logger.error(`[SdkModelService] Bridge stderr: ${data.trim()}`);
+            this.logger.error(
+              `[SdkModelService] Bridge stderr: ${data.trim()}`,
+            );
           }
         }
       };
@@ -1293,7 +1318,11 @@ export class SdkModelService {
         this.logger.warn(
           '[SdkModelService] SDK returned empty models',
           stderrLines.length > 0
-            ? { stderr: profileProbe ? '[redacted]' : stderrLines.slice(-5).join('\n') }
+            ? {
+                stderr: profileProbe
+                  ? '[redacted]'
+                  : stderrLines.slice(-5).join('\n'),
+              }
             : undefined,
         );
         return [];
@@ -1301,7 +1330,9 @@ export class SdkModelService {
 
       this.logger.info('[SdkModelService] Fetched supported models from SDK', {
         count: models.length,
-        ...(!profileProbe && { models: models.map((m) => `${m.value}: ${m.displayName}`) }),
+        ...(!profileProbe && {
+          models: models.map((m) => `${m.value}: ${m.displayName}`),
+        }),
       });
 
       return models;
@@ -1312,7 +1343,11 @@ export class SdkModelService {
 
       this.logger.error(
         '[SdkModelService] SDK supportedModels() failed (will try /v1/models API next)',
-        profileProbe ? new Error('Profile model probe failed') : error instanceof Error ? error : new Error(String(error)),
+        profileProbe
+          ? new Error('Profile model probe failed')
+          : error instanceof Error
+            ? error
+            : new Error(String(error)),
       );
       return [];
     } finally {
@@ -1354,7 +1389,11 @@ export class SdkModelService {
       // (SDK tier slots), and the exhausted chain warns for itself.
       this.logger.warn(
         '[SdkModelService] /v1/models API fallback also failed',
-        envOverride ? new Error('Profile API model probe failed') : error instanceof Error ? error : new Error(String(error)),
+        envOverride
+          ? new Error('Profile API model probe failed')
+          : error instanceof Error
+            ? error
+            : new Error(String(error)),
       );
       return [];
     }
@@ -1460,7 +1499,11 @@ export class SdkModelService {
       // response with no data and sends the caller to the SDK source.
       this.logger.warn(
         '[SdkModelService] Failed to fetch /v1/models',
-        envOverride ? new Error('Profile API model probe failed') : error instanceof Error ? error : new Error(String(error)),
+        envOverride
+          ? new Error('Profile API model probe failed')
+          : error instanceof Error
+            ? error
+            : new Error(String(error)),
       );
       return [];
     }
@@ -1489,7 +1532,11 @@ export class SdkModelService {
    * that the global provider remaps) would be resolved against the wrong
    * provider's tier env vars. Omitted callers keep the global behavior.
    */
-  resolveModelId(model: string, envOverride?: AuthEnv, profileProbe = false): string {
+  resolveModelId(
+    model: string,
+    envOverride?: AuthEnv,
+    profileProbe = false,
+  ): string {
     const resolved = this.modelResolver.resolve(model, envOverride);
     if (resolved !== model) {
       this.logger.debug(
