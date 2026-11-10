@@ -32,6 +32,7 @@ import { REVIEW_GITHUB_TOKENS } from '@ptah-extension/review-github';
 import { TASK_END_TOKENS } from '@ptah-extension/task-end-hook';
 import { PERSISTENCE_TOKENS } from '@ptah-extension/persistence-sqlite';
 import { CODEX_SIGN_IN_QUIT_HANDLE } from './codex-login-composition';
+import { REVIEW_SYNC_TOKENS } from '../services/review/review-sync-schedule.service';
 
 export const EXPECTED_RESOLVABLE = [
   AnalyticsRpcHandlers,
@@ -82,6 +83,9 @@ export const EXPECTED_RESOLVABLE_TOKENS = [
   ['REVIEW_LANE_GATEWAY', REVIEW_LANE_TOKENS.GATEWAY],
   ['REVIEW_LANE_FILES', REVIEW_LANE_TOKENS.FILES],
   ['REVIEW_ARTIFACT_FILES', REVIEW_CORE_TOKENS.ARTIFACT_FILES],
+  // Review sync job and its optional status/thread hooks (TASK_2026_901), bound in phase 2.
+  ['REVIEW_SYNC_HOOKS', REVIEW_SYNC_TOKENS.HOOKS],
+  ['REVIEW_SYNC_SCHEDULE', REVIEW_SYNC_TOKENS.SCHEDULE],
   ['CODEX_SIGN_IN_QUIT_HANDLE', CODEX_SIGN_IN_QUIT_HANDLE],
   ['SDK_CODEX_LOGIN', AUTH_PROVIDERS_TOKENS.SDK_CODEX_LOGIN],
   ['SDK_CODEX_READINESS', AUTH_PROVIDERS_TOKENS.SDK_CODEX_READINESS],

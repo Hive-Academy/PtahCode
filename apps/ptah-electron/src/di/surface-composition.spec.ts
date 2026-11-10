@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { ELECTRON_CODEX_BOUND_TOKENS } from './expected-resolvable';
+import { ELECTRON_CODEX_BOUND_TOKENS, EXPECTED_RESOLVABLE_TOKENS } from './expected-resolvable';
 import { REVIEW_CORE_TOKENS, REVIEW_CONTEXT_TOKENS, REVIEW_LANE_TOKENS } from '@ptah-extension/review-core';
 import { REVIEW_GITHUB_TOKENS } from '@ptah-extension/review-github';
 /**
@@ -514,6 +514,28 @@ describe('Electron review composition', () => {
     expect(boot.indexOf('startReviewWorker(container, signal, logger)')).toBeLessThan(
       boot.indexOf('await startThothCron(container, thoth,'),
     );
+  });
+});
+
+describe('Electron review sync schedule composition (TASK_2026_901)', () => {
+  it('binds the schedule after the review ports, with a default hook set and a guarded cron lookup', () => {
+    const phase = readFileSync(join(__dirname, 'phase-2-libraries.ts'), 'utf8');
+    const hooks = phase.indexOf('container.register<ReviewSyncHooks>(REVIEW_SYNC_TOKENS.HOOKS,');
+    const schedule = phase.indexOf('container.register(REVIEW_SYNC_TOKENS.SCHEDULE,');
+    expect(hooks).toBeGreaterThan(phase.indexOf('container.register(REVIEW_CORE_TOKENS.GITHUB'));
+    expect(schedule).toBeGreaterThan(hooks);
+    // A failed cron registration must give an unavailable schedule, not a boot error.
+    expect(phase).toContain('provider.isRegistered(CRON_TOKENS.CRON_JOB_STORE, true)');
+    expect(phase).toContain('provider.isRegistered(CRON_TOKENS.CRON_HANDLER_REGISTRY, true)');
+    expect(EXPECTED_RESOLVABLE_TOKENS.some(([name]) => name === 'REVIEW_SYNC_SCHEDULE')).toBe(true);
+    expect(EXPECTED_RESOLVABLE_TOKENS.some(([name]) => name === 'REVIEW_SYNC_HOOKS')).toBe(true);
+  });
+  it('starts the worker through the schedule and recovers before it binds the job', () => {
+    const worker = readFileSync(join(__dirname, '../activation/review-worker.activation.ts'), 'utf8');
+    expect(worker).toContain('container.resolve<ReviewSyncScheduleService>(REVIEW_SYNC_TOKENS.SCHEDULE)');
+    expect(worker.indexOf('await schedule.recoverStartup(signal)')).toBeGreaterThan(-1);
+    expect(worker.indexOf('await schedule.recoverStartup(signal)')).toBeLessThan(worker.indexOf('schedule.register()'));
+    expect(worker).not.toContain('CRON_TOKENS');
   });
 });
 

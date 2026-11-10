@@ -2,6 +2,7 @@ import { inject, injectable } from 'tsyringe';
 import { RepoIdentitySchema, ShaSchema, type RepoIdentity } from '@ptah-extension/review-contracts';
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import { REVIEW_CORE_TOKENS } from '../di/tokens';
+import { ReviewStatusCoordinatorService } from './status/review-status-coordinator.service';
 
 export interface IReviewClock { now(): Date }
 export interface ReviewQueueHead {
@@ -48,12 +49,15 @@ export class ReviewQueueService {
     @inject(REVIEW_CORE_TOKENS.QUEUE_REPOSITORY) private readonly repository: IReviewQueueRepository,
     @inject(REVIEW_CORE_TOKENS.CLOCK) private readonly clock: IReviewClock,
     @inject(TOKENS.LOGGER) private readonly logger: Pick<Logger, 'info'>,
+    @inject(ReviewStatusCoordinatorService) private readonly statuses?: ReviewStatusCoordinatorService,
   ) {}
 
   /** Called by polling; repository supersedes older active heads transactionally. */
-  discover(head: ReviewQueueHead, dryRun = true): Promise<ReviewQueueAttempt> {
+  async discover(head: ReviewQueueHead, dryRun = true): Promise<ReviewQueueAttempt> {
     this.validateHead(head);
-    return this.repository.enqueueDiscovered(head, this.clock.now().toISOString(), dryRun);
+    const attempt = await this.repository.enqueueDiscovered(head, this.clock.now().toISOString(), dryRun);
+    if (!attempt.skipped) await this.statuses?.enqueued(attempt);
+    return attempt;
   }
 
   recordDraft(head: ReviewQueueHead): Promise<void> {
@@ -62,10 +66,12 @@ export class ReviewQueueService {
   }
 
   /** Caller supplies a unique ID; repository must enforce uniqueness atomically. */
-  retry(head: ReviewQueueHead, attemptId: string, dryRun = true): Promise<ReviewQueueAttempt> {
+  async retry(head: ReviewQueueHead, attemptId: string, dryRun = true): Promise<ReviewQueueAttempt> {
     this.validateHead(head);
     if (!attemptId.trim() || attemptId.length > 64) throw new Error('Invalid review attempt ID');
-    return this.repository.enqueueManual(head, attemptId, this.clock.now().toISOString(), dryRun);
+    const attempt = await this.repository.enqueueManual(head, attemptId, this.clock.now().toISOString(), dryRun);
+    await this.statuses?.enqueued(attempt);
+    return attempt;
   }
 
   claim(owner: string, leaseMs: number): Promise<ReviewQueueClaim | null> {

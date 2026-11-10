@@ -104,6 +104,25 @@ function setup() {
 }
 
 describe('GithubReviewPublicationAdapter', () => {
+  it('updates the live progress in the same walkthrough comment', async () => {
+    const env = setup();
+    const first = await env.adapter.updateProgress(target, 'Reviewing... 1/4 lenses');
+    const second = await env.adapter.updateProgress(target, 'Reviewing... 2/4 lenses');
+    expect(first.id).toBe(second.id);
+    expect(env.writes.map(write => write.method)).toEqual(['POST', 'PATCH']);
+    expect(second.body).toContain('2/4 lenses');
+    expect(second.body).toContain('<!-- ptah-review:walkthrough -->');
+  });
+  it('preserves a published walkthrough and markers when a later attempt reports progress', async () => {
+    const env = setup();
+    const markers = `<!-- ptah-review:finding:prior -->\n<!-- ptah-review:head:${headSha} -->`;
+    env.comments.push(issue(7, `Final walkthrough\n\n${markers}\n<!-- ptah-review:walkthrough -->`));
+    const updated = await env.adapter.updateProgress(target, 'Reviewing... 1/4 lenses');
+    expect(updated.body).toContain('Final walkthrough');
+    expect(updated.body).toContain(markers);
+    expect(updated.body).toContain('<!-- ptah-review:walkthrough -->');
+    expect(updated.body.length).toBeLessThanOrEqual(65_536);
+  });
   it('defers an inline comment whose marker cannot fit and publishes later findings', async () => {
     const env = setup();
     const hugeId = 'x'.repeat(65_600);

@@ -1,14 +1,11 @@
-import { CRON_TOKENS, type IHandlerRegistry, type IJobStore } from '@ptah-extension/cron-scheduler';
-import { REVIEW_CORE_TOKENS, type IReviewSettingsStore, type ReviewOrchestratorService } from '@ptah-extension/review-core';
+import { REVIEW_CORE_TOKENS, type ReviewOrchestratorService } from '@ptah-extension/review-core';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { DependencyContainer } from 'tsyringe';
-
-const HANDLER = 'review:discover';
-const JOB_ID = '@ptah/review-discovery';
+import { REVIEW_SYNC_TOKENS, type ReviewSyncScheduleService } from '../services/review/review-sync-schedule.service';
 
 export interface ReviewWorkerHandle { dispose(): void; awaitStopped(): Promise<void> }
 
-/** Registers discovery with cron, then drains the durable queue independently. */
+/** Recovers startup state, binds the review sync job, then drains the durable queue independently. */
 export async function startReviewWorker(
   container: DependencyContainer,
   signal: AbortSignal,
@@ -16,39 +13,12 @@ export async function startReviewWorker(
 ): Promise<ReviewWorkerHandle | null> {
   if (signal.aborted || !container.isRegistered(REVIEW_CORE_TOKENS.ORCHESTRATOR)) return null;
   const orchestrator = container.resolve<ReviewOrchestratorService>(REVIEW_CORE_TOKENS.ORCHESTRATOR);
-  const settingsStore = container.resolve<IReviewSettingsStore>(REVIEW_CORE_TOKENS.SETTINGS_STORE);
-  const jobs = container.resolve<IJobStore>(CRON_TOKENS.CRON_JOB_STORE);
-  const registry = container.resolve<IHandlerRegistry>(CRON_TOKENS.CRON_HANDLER_REGISTRY);
-  if (!registry.has(HANDLER)) registry.register(HANDLER, async ({ signal: tickSignal }) => {
-    if (signal.aborted || tickSignal.aborted) return { outcome: 'skipped', reason: 'aborted' };
-    const settings = await settingsStore.getSettings();
-    const repos = (settings?.repositories.filter((entry) => entry.enabled) ?? [])
-      .map((entry) => ({ owner: entry.owner, name: entry.name }));
-    if (!settings || repos.length === 0) return { outcome: 'skipped', reason: 'review-disabled' };
-    let count = 0;
-    for (const repo of repos) {
-      try {
-        const last = await orchestrator.lastPollAt(repo);
-        if (last === null || Date.now() - last >= settings.pollMinutes * 60_000) count += await orchestrator.pollAndRecord(repo);
-      } catch (_error: unknown) { logger.error('Review poll failed', new Error('Review poll failed')); }
-    }
-    return { summary: `Enqueued ${count} review heads` };
-  });
-  jobs.upsert({ id: JOB_ID, name: 'Review pull requests', cronExpr: '* * * * *',
-    timezone: 'UTC', prompt: `handler:${HANDLER}`, enabled: true });
-
-  try {
-    await orchestrator.reconcileStartup();
-    const settings = await settingsStore.getSettings();
-    const enabled = (settings?.repositories.filter((entry) => entry.enabled) ?? [])
-      .map((entry) => ({ owner: entry.owner, name: entry.name }));
-    for (const repo of enabled) {
-      try { await orchestrator.startupPoll(await orchestrator.lastPollAt(repo), repo); }
-      catch (_error: unknown) { logger.error('Review startup poll failed', new Error('Review startup poll failed')); }
-    }
-  } catch (_error: unknown) {
-    logger.error('Review startup poll failed', new Error('Review startup poll failed'));
-  }
+  const schedule = container.resolve<ReviewSyncScheduleService>(REVIEW_SYNC_TOKENS.SCHEDULE);
+  // Recovery runs before the schedule binds, so a tick cannot sync rows that recovery still owns.
+  await schedule.recoverStartup(signal);
+  // An abort during recovery already fired; a listener added now would never run dispose.
+  if (signal.aborted) return null;
+  const registration = schedule.register();
   let disposed = false;
   let draining = false;
   let activeDrain: Promise<void> | null = null;
@@ -69,7 +39,7 @@ export async function startReviewWorker(
     drainController.abort();
     clearInterval(timer);
     signal.removeEventListener('abort', dispose);
-    registry.unregister(HANDLER);
+    registration.dispose();
   };
   signal.addEventListener('abort', dispose, { once: true });
   drain();
