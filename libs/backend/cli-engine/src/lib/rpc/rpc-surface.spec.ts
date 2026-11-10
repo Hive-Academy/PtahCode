@@ -86,7 +86,6 @@ const EXPECTED_ABSENT_METHOD_NAMES: readonly string[] = [
   // ptah-review is Electron-only in P1; the CLI serves no review methods.
   'review:clearBotToken',
   'review:exportRun',
-  'review:respondToFinding',
   'review:getBotIdentity',
   'review:getRun',
   'review:getSettings',
@@ -95,6 +94,7 @@ const EXPECTED_ABSENT_METHOD_NAMES: readonly string[] = [
   'review:listRuns',
   'review:refresh',
   'review:rerun',
+  'review:respondToFinding',
   'review:retryHead',
   'review:setBotToken',
   'review:setPublicationPause',

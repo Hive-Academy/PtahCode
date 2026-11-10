@@ -119,9 +119,9 @@ function suite() {
 }
 
 describe('ReviewRpcHandlers', () => {
-  const finding = { attemptId: 'attempt-1', path: 'src/save.ts', line: 3, title: 'Lost update' };
+  const finding = { attemptId: 'attempt-1', path: 'src/save.ts', line: 3, title: 'Lost update in save.ts (retry-path)' };
   const run = { repo: { owner: 'Hive-Academy', name: 'PtahCode' }, prNumber: 42 };
-  const thread = { id: 'thread-1', path: finding.path, line: finding.line, resolved: false, body: '### Lost update' };
+  const thread = { id: 'thread-1', path: finding.path, line: finding.line, resolved: false, body: '### 🟠 Major · Lost update in save\\.ts \\(retry\\-path\\)\n**Impact:** Data loss' };
 
   it.each([
     ['accept', undefined, '<!-- ptah-review-triage:accepted -->\nAccepted by the operator.'],
@@ -164,7 +164,7 @@ describe('ReviewRpcHandlers', () => {
     const { invoke, query, github } = suite();
     (query.getRun as jest.Mock).mockResolvedValue(run);
     (github.listOwnReviewsAndThreads as jest.Mock).mockResolvedValue({
-      items: [{ threads: [{ ...thread, body: '### Other finding' }, { ...thread, id: 'thread-2', body: 'human note', resolved: true }] }],
+      items: [{ threads: [{ ...thread, body: `${thread.body.split('\n')[0]} again` }, { ...thread, id: 'thread-2', body: 'human note', resolved: true }] }],
       nextPage: null,
     });
     expect(await invoke('review:respondToFinding', { ...finding, action: 'accept' })).toEqual({ ok: false, code: 'no-thread', error: 'No published GitHub thread for this finding' });

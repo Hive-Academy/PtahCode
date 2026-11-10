@@ -10,6 +10,7 @@ import {
 import {
   REVIEW_CORE_TOKENS,
   ReviewPollDisabledError,
+  escapeText,
   type IReviewArtifactReader,
   type IReviewQueryRepository,
   type IReviewSecretPresence,
@@ -475,7 +476,13 @@ export class ReviewRpcHandlers {
           // A truncated scan can hide a second matching thread: never treat it as complete.
           if (page !== null) return response.parse({ ok: false, code: 'ambiguous-thread', error: 'Too many GitHub reviews to identify the thread' });
           // Only a thread whose published body carries the finding title belongs to this finding.
-          const titled = matches.filter((thread) => thread.body.includes(params.title));
+          // The publisher writes the heading `### <badge> · <escaped title>`: compare the full escaped title.
+          const heading = escapeText(params.title);
+          const titled = matches.filter((thread) => {
+            const first = thread.body.split(/\r?\n/, 1)[0] ?? '';
+            const separator = first.indexOf(' · ');
+            return first.startsWith('### ') && separator !== -1 && first.slice(separator + 3) === heading;
+          });
           if (titled.length === 0) return response.parse({ ok: false, code: 'no-thread', error: 'No published GitHub thread for this finding' });
           const unresolved = titled.filter((thread) => !thread.resolved);
           const narrowed = titled.length === 1 ? titled : unresolved;

@@ -3,6 +3,7 @@ export { registerReviewCore } from './di/registration';
 export { PublicationOutboxRepository } from './lib/publication/publication-outbox.repository';
 export { PublicationOutboxService } from './lib/publication/publication-outbox.service';
 export { ReviewPublicationService } from './lib/publication/review-publication.service';
+export { escapeText } from './lib/publication/review-markdown.renderer';
 export { ReviewPolicyService } from './lib/review-policy.service';
 export type { EligibilityInput, EligibilityDecision, EligibilityReason, PublicationDecision, EffectiveReviewSettings } from './lib/review-policy.service';
 export { ReviewQueueService } from './lib/review-queue.service';
