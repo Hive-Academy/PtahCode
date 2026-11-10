@@ -46,6 +46,10 @@ export class ReviewRunsStore {
   /** Monotonic findings-request generation; replies from superseded loads are ignored. */
   private findingsGeneration = 0;
   readonly runs = signal<ReviewRun[]>([]);
+  /** Cursor of the next run page; null when the backend has no more runs. */
+  readonly nextCursor = signal<string | null>(null);
+  readonly loadingMore = signal(false);
+  readonly loadMoreError = signal(false);
   readonly poll = signal<{
     status: 'succeeded' | 'failed' | null;
     error: string | null;
@@ -56,6 +60,8 @@ export class ReviewRunsStore {
   readonly state = signal<ReviewListState>('loading');
   readonly repoFilter = signal<string>('all');
   readonly stateFilter = signal<ReviewStateFilter>('all');
+  /** Local search over PR number and repository ("owner/name"), applied with the filters. */
+  readonly searchQuery = signal('');
   readonly lastRefreshedAt = signal<Date | null>(null);
   readonly selectedAttemptId = signal<string | null>(null);
   readonly selectedRun = signal<ReviewRun | null>(null);
@@ -81,14 +87,18 @@ export class ReviewRunsStore {
   readonly refreshErrorMessage = signal<string | null>(null);
   readonly isRefreshing = signal(false);
   readonly hasCache = computed(() => this.lastRefreshedAt() !== null);
-  readonly filteredRuns = computed(() =>
-    this.runs().filter(
+  readonly filteredRuns = computed(() => {
+    const query = this.searchQuery().trim().toLowerCase();
+    return this.runs().filter(
       (run) =>
         (this.repoFilter() === 'all' ||
           `${run.repo.owner}/${run.repo.name}` === this.repoFilter()) &&
-        (this.stateFilter() === 'all' || run.status === this.stateFilter()),
-    ),
-  );
+        (this.stateFilter() === 'all' || run.status === this.stateFilter()) &&
+        (query === '' ||
+          String(run.prNumber).includes(query) ||
+          `${run.repo.owner}/${run.repo.name}`.toLowerCase().includes(query)),
+    );
+  });
   readonly queuedCount = computed(
     () => this.runs().filter((run) => run.status === 'queued').length,
   );
@@ -111,6 +121,8 @@ export class ReviewRunsStore {
       ]);
       this.repositories.set(repositories);
       this.runs.set(runs.runs);
+      this.nextCursor.set(runs.nextCursor);
+      this.loadMoreError.set(false);
       this.poll.set(runs.poll);
       this.lastRefreshedAt.set(new Date());
       this.state.set('ready');
@@ -118,6 +130,34 @@ export class ReviewRunsStore {
       this.state.set(this.hasCache() ? 'offline' : 'error');
     } finally {
       this.isRefreshing.set(false);
+    }
+  }
+
+  /** Appends the next run page through the `review:listRuns` cursor. */
+  async loadMore(): Promise<void> {
+    const cursor = this.nextCursor();
+    if (cursor === null || this.loadingMore()) return;
+    this.loadingMore.set(true);
+    this.loadMoreError.set(false);
+    try {
+      const result = await this.request(
+        'review:listRuns',
+        ReviewRpcSchemas['review:listRuns'].params.parse({ limit: 100, cursor }),
+        ReviewRpcSchemas['review:listRuns'].result,
+      );
+      this.runs.update((current) => {
+        const known = new Set(current.map((run) => run.attemptId));
+        return [
+          ...current,
+          ...result.runs.filter((run) => !known.has(run.attemptId)),
+        ];
+      });
+      this.nextCursor.set(result.nextCursor);
+    } catch {
+      // The current list stays usable; the next press of the button retries.
+      this.loadMoreError.set(true);
+    } finally {
+      this.loadingMore.set(false);
     }
   }
 
@@ -195,9 +235,13 @@ export class ReviewRunsStore {
   setStateFilter(state: ReviewStateFilter): void {
     this.stateFilter.set(state);
   }
+  setSearch(query: string): void {
+    this.searchQuery.set(query);
+  }
   clearFilters(): void {
     this.repoFilter.set('all');
     this.stateFilter.set('all');
+    this.searchQuery.set('');
   }
   selectRun(attemptId: string): void {
     this.selectedAttemptId.set(attemptId);
