@@ -48,10 +48,15 @@ interface Harness {
   setAuthMethod: (method: AuthMethod) => void;
   /** Swap the active provider the way a workspace switch would. */
   setProviderId: (providerId: string) => void;
+  /** Make `resolveActiveAuth()` throw, the way a failing settings store does. */
+  setAuthResolverError: (error: Error | undefined) => void;
   /** Records every call the service routes through `OffThreadProcessSpawner`. */
   offThreadSpawns: SpawnOptions[];
   /** The backing map of the in-memory `IStateStorage` this harness supplies. */
   state: Map<string, unknown>;
+  logInfo: jest.Mock;
+  logDebug: jest.Mock;
+  logWarn: jest.Mock;
 }
 
 function makeHarness(opts: {
@@ -94,8 +99,12 @@ function makeHarness(opts: {
 
   let authMethod = opts.authMethod;
   let providerId = 'anthropic';
+  let authResolverError: Error | undefined;
   const authProvider = {
-    resolveActiveAuth: () => ({ authMethod, providerId }),
+    resolveActiveAuth: () => {
+      if (authResolverError) throw authResolverError;
+      return { authMethod, providerId };
+    },
   } as unknown as IAuthEnvProvider;
 
   const offThreadSpawns: SpawnOptions[] = [];
@@ -141,8 +150,14 @@ function makeHarness(opts: {
     setProviderId: (id: string) => {
       providerId = id;
     },
+    setAuthResolverError: (error: Error | undefined) => {
+      authResolverError = error;
+    },
     offThreadSpawns,
     state,
+    logInfo: logger.info as jest.Mock,
+    logDebug: logger.debug as jest.Mock,
+    logWarn: logger.warn as jest.Mock,
   };
 }
 
@@ -605,6 +620,99 @@ describe('SdkModelService — persisted catalog', () => {
     expect(models.map((m) => m.value)).toEqual(['opus', 'sonnet']);
   });
 
+  it('restores resolvedModel from a saved catalog', async () => {
+    const state = new Map<string, unknown>();
+    const rows = [{ ...MODELS[0], resolvedModel: 'claude-opus-5' }];
+    await makeHarness({
+      authMethod: 'claudeCli',
+      sdkModels: rows,
+      state,
+    }).service.getSupportedModels();
+    const second = makeHarness({
+      authMethod: 'claudeCli',
+      sdkModels: rows,
+      state,
+    });
+    expect((await second.service.getSupportedModels())[0].resolvedModel).toBe(
+      'claude-opus-5',
+    );
+    expect(second.spawnEnvs).toHaveLength(0);
+  });
+
+  it('keeps an ephemeral loopback catalog in memory without saving it', async () => {
+    const h = makeHarness({
+      authMethod: 'claudeCli',
+      authEnv: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:49152' },
+      sdkModels: MODELS,
+    });
+    expect(await h.service.getSupportedModels()).toEqual(MODELS);
+    expect(await h.service.getSupportedModels()).toEqual(MODELS);
+    expect(h.spawnEnvs).toHaveLength(1);
+    expect(h.state.has('ptah.sdk.modelCatalog')).toBe(false);
+  });
+
+  it.each(['http://127.0.0.1:11434', 'http://localhost:11434'])(
+    'persists and restores the fixed Ollama endpoint %s',
+    async (baseUrl) => {
+      const state = new Map<string, unknown>();
+      const authEnv = { ANTHROPIC_BASE_URL: baseUrl };
+      await makeHarness({
+        authMethod: 'claudeCli',
+        authEnv,
+        sdkModels: MODELS,
+        state,
+      }).service.getSupportedModels();
+      const second = makeHarness({
+        authMethod: 'claudeCli',
+        authEnv,
+        sdkModels: MODELS,
+        state,
+      });
+      expect(await second.service.getSupportedModels()).toEqual(MODELS);
+      expect(second.spawnEnvs).toHaveLength(0);
+    },
+  );
+
+  it('removes old dead keys on the next good persist and keeps good keys', async () => {
+    const state = new Map<string, unknown>();
+    state.set('ptah.sdk.modelCatalog', {
+      'method=claudeCli|provider=old|ANTHROPIC_BASE_URL=http://127.0.0.1:49152':
+        MODELS,
+      'method=claudeCli|provider=ollama|ANTHROPIC_BASE_URL=http://127.0.0.1:11434':
+        MODELS,
+    });
+    await makeHarness({
+      authMethod: 'claudeCli',
+      sdkModels: MODELS,
+      state,
+    }).service.getSupportedModels();
+    const keys = Object.keys(
+      state.get('ptah.sdk.modelCatalog') as Record<string, unknown>,
+    );
+    expect(keys).toHaveLength(2);
+    expect(keys.some((key) => key.includes(':49152'))).toBe(false);
+    expect(keys.some((key) => key.includes(':11434'))).toBe(true);
+  });
+
+  it('persists and restores a non-loopback provider endpoint', async () => {
+    const state = new Map<string, unknown>();
+    const authEnv = { ANTHROPIC_BASE_URL: 'https://api.example.com' };
+    await makeHarness({
+      authMethod: 'claudeCli',
+      authEnv,
+      sdkModels: MODELS,
+      state,
+    }).service.getSupportedModels();
+    const second = makeHarness({
+      authMethod: 'claudeCli',
+      authEnv,
+      sdkModels: MODELS,
+      state,
+    });
+    expect(await second.service.getSupportedModels()).toEqual(MODELS);
+    expect(second.spawnEnvs).toHaveLength(0);
+  });
+
   it('does not let one auth identity answer for another', async () => {
     const state = new Map<string, unknown>();
 
@@ -684,5 +792,206 @@ describe('SdkModelService — persisted catalog', () => {
     h.service.invalidateForAuthChange();
 
     expect(state.has('ptah.sdk.modelCatalog')).toBe(true);
+  });
+});
+
+describe('SdkModelService — background catalog revalidation', () => {
+  const saved: ModelInfo[] = [
+    { value: 'opus', displayName: 'Opus', description: '' },
+  ];
+  const fresh: ModelInfo[] = [
+    { value: 'fable', displayName: 'Fable', description: '' },
+  ];
+
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  async function boot(models: ModelInfo[] = saved) {
+    const state = new Map<string, unknown>();
+    await makeHarness({
+      authMethod: 'claudeCli',
+      sdkModels: saved,
+      state,
+    }).service.getSupportedModels();
+    const h = makeHarness({
+      authMethod: 'claudeCli',
+      sdkModels: models,
+      state,
+    });
+    return h;
+  }
+
+  it('returns persisted rows immediately and schedules one probe', async () => {
+    const h = await boot(fresh);
+    expect(await h.service.getSupportedModels()).toEqual(saved);
+    expect(await h.service.getSupportedModels()).toEqual(saved);
+    expect(h.spawnEnvs).toHaveLength(0);
+    await jest.advanceTimersByTimeAsync(10_000);
+    expect(h.spawnEnvs).toHaveLength(1);
+    await jest.advanceTimersByTimeAsync(10_000);
+    expect(h.spawnEnvs).toHaveLength(1);
+  });
+
+  it('schedules the probe when hasCachedModels() restores the rows', async () => {
+    const h = await boot(fresh);
+    expect(h.service.hasCachedModels()).toBe(true);
+    expect(await h.service.getSupportedModels()).toEqual(saved);
+    expect(h.spawnEnvs).toHaveLength(0);
+    await jest.advanceTimersByTimeAsync(10_000);
+    expect(h.spawnEnvs).toHaveLength(1);
+    expect(await h.service.getSupportedModels()).toEqual(fresh);
+  });
+
+  it('replaces the memory and persisted catalog when rows change', async () => {
+    const h = await boot(fresh);
+    await h.service.getSupportedModels();
+    await jest.advanceTimersByTimeAsync(10_000);
+    expect(await h.service.getSupportedModels()).toEqual(fresh);
+    expect(JSON.stringify(h.state.get('ptah.sdk.modelCatalog'))).toContain(
+      'fable',
+    );
+  });
+
+  it('does not rewrite an equal catalog', async () => {
+    const h = await boot();
+    const before = h.state.get('ptah.sdk.modelCatalog');
+    await h.service.getSupportedModels();
+    await jest.advanceTimersByTimeAsync(10_000);
+    expect(h.state.get('ptah.sdk.modelCatalog')).toBe(before);
+  });
+
+  it('treats live-only SDK fields as unchanged without a write', async () => {
+    const live = [{ ...saved[0], futureSdkField: 'extra' }];
+    const h = await boot(live);
+    const write = jest.spyOn(h.state, 'set');
+    await h.service.getSupportedModels();
+    await jest.advanceTimersByTimeAsync(10_000);
+    expect(write).not.toHaveBeenCalled();
+    expect(h.logDebug).toHaveBeenCalledWith(
+      '[SdkModelService] Revalidated model catalog unchanged',
+    );
+    expect(h.logInfo).not.toHaveBeenCalledWith(
+      '[SdkModelService] Revalidated model catalog changed',
+      expect.anything(),
+    );
+  });
+
+  it.each([
+    { live: [{ ...saved[0], resolvedModel: 'claude-opus-5' }] },
+    { live: [{ ...saved[0], displayName: 'Opus Updated' }] },
+  ])('replaces and persists a changed persisted field', async ({ live }) => {
+    const h = await boot(live);
+    const write = jest.spyOn(h.state, 'set');
+    await h.service.getSupportedModels();
+    await jest.advanceTimersByTimeAsync(10_000);
+    expect(await h.service.getSupportedModels()).toEqual(live);
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(h.logInfo).toHaveBeenCalledWith(
+      '[SdkModelService] Revalidated model catalog changed',
+      expect.anything(),
+    );
+  });
+
+  it('retains saved rows after an empty or failed probe', async () => {
+    for (const models of [[], saved]) {
+      const h = await boot(models);
+      await h.service.getSupportedModels();
+      if (models.length)
+        h.getQueryFunction.mockRejectedValueOnce(new Error('offline'));
+      await jest.advanceTimersByTimeAsync(10_000);
+      expect(await h.service.getSupportedModels()).toEqual(saved);
+    }
+  });
+
+  it('cancels a queued probe when cleared', async () => {
+    const h = await boot(fresh);
+    await h.service.getSupportedModels();
+    h.service.clearCache();
+    await jest.advanceTimersByTimeAsync(10_000);
+    expect(h.spawnEnvs).toHaveLength(0);
+  });
+
+  it('skips a probe when auth changes before it runs', async () => {
+    const h = await boot(fresh);
+    await h.service.getSupportedModels();
+    h.setProviderId('other-provider');
+    await jest.advanceTimersByTimeAsync(10_000);
+    expect(h.spawnEnvs).toHaveLength(0);
+    expect(JSON.stringify(h.state.get('ptah.sdk.modelCatalog'))).not.toContain(
+      'fable',
+    );
+  });
+
+  it('logs a revalidation failure instead of rejecting when the auth resolver throws', async () => {
+    // The timer call site drops the returned promise
+    // (`void this.revalidateCatalog(key)`), so a throw from the
+    // auth-fingerprint guard OUTSIDE the try would be an unhandled rejection.
+    // Inside the try it is just a failed refresh: one warn line, and the
+    // saved rows stay where the restore left them.
+    const h = await boot(fresh);
+    await h.service.getSupportedModels();
+    h.setAuthResolverError(new Error('settings store unreadable'));
+    await jest.advanceTimersByTimeAsync(10_000);
+    expect(h.logWarn).toHaveBeenCalledWith(
+      '[SdkModelService] Model catalog revalidation failed',
+      expect.objectContaining({ error: 'settings store unreadable' }),
+    );
+    h.setAuthResolverError(undefined);
+    expect(await h.service.getSupportedModels()).toEqual(saved);
+  });
+
+  it('keeps the saved catalog when the probe degrades to API-key tier slots', async () => {
+    // The revalidation runs `fetchSupportedModelsInternal(key, false)`, whose
+    // persist guard exists so a degraded API-key fallback (the SDK tier
+    // slots, whose values do not start with `claude-`) is never cached. With
+    // `persist === false` that guard is bypassed, and a non-empty result would
+    // replace a good restored catalog in memory AND in the persisted store.
+    // The degraded result must be discarded on that path: an empty result is
+    // ignored by `revalidateCatalog`.
+    const state = new Map<string, unknown>();
+    const restored: ModelInfo[] = [
+      {
+        value: 'claude-sonnet-4-5',
+        displayName: 'Sonnet 4.5',
+        description: '',
+      },
+    ];
+    // Boot with a good API-key catalog: no credentials in the env, so
+    // `/v1/models` yields nothing and the SDK list (claude- ids) is kept.
+    await makeHarness({
+      authMethod: 'apiKey',
+      sdkModels: restored,
+      state,
+    }).service.getSupportedModels();
+
+    // Second boot: the same identity now sees the SDK degrade to bare tier
+    // slots. The restored catalog must survive the revalidation probe.
+    const h = makeHarness({
+      authMethod: 'apiKey',
+      sdkModels: [
+        { value: 'opus', displayName: 'Opus', description: '' },
+        { value: 'sonnet', displayName: 'Sonnet', description: '' },
+      ],
+      state,
+    });
+    expect(await h.service.getSupportedModels()).toEqual(restored);
+
+    await jest.advanceTimersByTimeAsync(10_000);
+
+    expect(await h.service.getSupportedModels()).toEqual(restored);
+    expect(JSON.stringify(h.state.get('ptah.sdk.modelCatalog'))).toContain(
+      'claude-sonnet-4-5',
+    );
+    expect(JSON.stringify(h.state.get('ptah.sdk.modelCatalog'))).not.toContain(
+      '"value":"opus"',
+    );
+    expect(h.logInfo).not.toHaveBeenCalledWith(
+      '[SdkModelService] Revalidated model catalog changed',
+      expect.anything(),
+    );
+    expect(h.logWarn).toHaveBeenCalledWith(
+      '[SdkModelService] Discarding the degraded API-key fallback on the revalidation path',
+      { authMethod: 'apiKey' },
+    );
   });
 });

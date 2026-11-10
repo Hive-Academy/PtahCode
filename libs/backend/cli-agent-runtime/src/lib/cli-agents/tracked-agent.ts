@@ -12,6 +12,8 @@ export interface TrackedAgent {
   budget?: AgentBudgetCoordinator;
   budgetTimer?: NodeJS.Timeout;
   budgetCostWarned?: boolean;
+  /** Warning withheld at a turn boundary; attached to the next parent message once. */
+  heldBudgetWarning?: string;
   info: AgentProcessInfo;
   /** Child process for CLI-based agents, null for SDK-based agents */
   process: ChildProcess | null;

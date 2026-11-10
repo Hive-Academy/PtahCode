@@ -276,10 +276,9 @@ whole thread, so a lane's bill grows with its call count times its accumulated c
 over 7 days of Codex lanes: 68 requests per session at an average 115k-token context, 29% of
 them polling, and 1.23 billion input tokens in total.
 
-- There is **no tool-call ceiling**. The vendor CLIs manage their own context, and a call count
-  says little about cost (most of the input is cheap cache reads). Ptah stops a lane only when it
-  repeats one identical call in a loop (`laneRepeatCallStopAt`, default 20). Do not state a call
-  budget in `task`.
+- CLI lanes have a lifetime weighted-token budget (`agentBudget.stopWeightedTokens`, default 3,000,000); verified cached reads count at 10% in the floor.
+- A warning fires for CLI lanes at `agentBudget.warnRatio` (default 0.85), with one grace turn after the first token-limit crossing.
+- The duration limit also stops a lane. Resume after a budget stop starts a fresh lane with a handoff brief.
 - Size each batch by context weight: `ptah_count_tokens` for its read set plus write set, then
   add 10% for framing. Target 4,000–12,000 tokens; hard ceiling 16,000. Keep at most six write
   files and two Nx projects as secondary limits. A coherent batch may fall below 4,000 tokens;

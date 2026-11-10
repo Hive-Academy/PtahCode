@@ -744,8 +744,10 @@ export function buildAgentSpawnTool({
           type: 'object',
           description:
             'Optional account route, accepted only with cli "claude" and no ' +
-            'ptahCliId. {"kind":"ambient"} or {"kind":"omitted"} uses the ' +
-            'existing Claude login, the same as leaving this out. ' +
+            'ptahCliId. {"kind":"ambient"} uses the existing Claude login. ' +
+            '{"kind":"omitted"}, the same as leaving this out, uses the lane ' +
+            'account stored for the workspace when one is set, otherwise the ' +
+            'existing Claude login. ' +
             '{"kind":"named","profileId":"<id>"} runs a fresh claude lane on ' +
             'that named Claude account; the spawn is refused when the account ' +
             'cannot be proved. A resume never takes a named account: it keeps ' +

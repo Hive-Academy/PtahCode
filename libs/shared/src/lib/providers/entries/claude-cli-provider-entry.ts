@@ -40,8 +40,7 @@ export const CLAUDE_CLI_PROVIDER_ENTRY: AnthropicProvider = {
     haiku: 'claude-haiku-5-5',
   },
   // Fallback for when the native login cannot list models. Prices and
-  // windows from models.dev; Haiku 5.5 has neither published there yet, so it
-  // carries the "unknown" window (0) and no price rather than a guess.
+  // windows from models.dev where published; unpublished prices are omitted.
   staticModels: [
     {
       id: 'claude-opus-5-5',
@@ -70,6 +69,13 @@ export const CLAUDE_CLI_PROVIDER_ENTRY: AnthropicProvider = {
       name: 'Claude Haiku 5.5',
       description: 'Fastest current model',
       contextLength: 0,
+      supportsToolUse: true,
+    },
+    {
+      id: 'claude-fable-5-2',
+      name: 'Claude Fable 5.2',
+      description: 'Largest model (1M context)',
+      contextLength: 1000000,
       supportsToolUse: true,
     },
     {

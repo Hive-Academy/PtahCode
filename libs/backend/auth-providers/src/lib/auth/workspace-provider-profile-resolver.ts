@@ -47,7 +47,6 @@ import {
   type CodexProfileSeed,
   sessionRuntimeIdentityMismatch,
   type AnthropicProvider,
-  type ProviderModelTier,
   createEmptyAuthEnv,
   getAnthropicProvider,
   getProviderAuthEnvVar,
@@ -66,7 +65,6 @@ import {
 } from '@ptah-extension/codex-runtime';
 import type { CodexHomeResolver } from '../providers/codex/codex-home-resolver';
 import type { ProviderModelsService } from '../provider-models.service';
-import type { DerivedTierMap } from '../model-tier-derivation';
 import {
   ActiveProviderResolver,
   createAuthCredentialProbe,
@@ -182,11 +180,7 @@ export class WorkspaceProviderProfileResolver {
   async resolveExecutionProfile(
     input: ExecutionProfileRequest,
   ): Promise<ResolvedExecutionProfile> {
-    const {
-      workspacePath,
-      requestedModel,
-      existingIdentity,
-    } = input;
+    const { workspacePath, requestedModel, existingIdentity } = input;
     const resumeNative = existingIdentity?.runtime === 'codex-app-server';
     if (resumeNative && !this.hasNativeCodexCapability(input)) {
       throw new AuthRequiredError(
@@ -636,7 +630,7 @@ export class WorkspaceProviderProfileResolver {
         snapshot.ANTHROPIC_AUTH_TOKEN = OLLAMA_AUTH_TOKEN_PLACEHOLDER;
       }
       snapshot.ANTHROPIC_API_KEY = '';
-      this.applyProviderTiers(snapshot, providerId, provider);
+      this.applyProviderTiers(snapshot, providerId);
       const model = this.resolveModel(requestedModel, snapshot, provider);
       return {
         providerId,
@@ -667,7 +661,7 @@ export class WorkspaceProviderProfileResolver {
     snapshot.ANTHROPIC_AUTH_TOKEN = '';
     snapshot.ANTHROPIC_BASE_URL = baseUrl;
     snapshot[authEnvVar as keyof AuthEnv] = providerKey;
-    this.applyProviderTiers(snapshot, providerId, provider);
+    this.applyProviderTiers(snapshot, providerId);
     const model = this.resolveModel(requestedModel, snapshot, provider);
     return { providerId, authEnv: snapshot, model, baseUrl };
   }
@@ -711,7 +705,7 @@ export class WorkspaceProviderProfileResolver {
     snapshot.ANTHROPIC_BASE_URL = acquired.baseUrl;
     snapshot.ANTHROPIC_AUTH_TOKEN = acquired.authToken;
     snapshot.ANTHROPIC_API_KEY = '';
-    this.applyProviderTiers(snapshot, providerId, provider);
+    this.applyProviderTiers(snapshot, providerId);
     const model = this.resolveModel(requestedModel, snapshot, provider);
 
     this.logger.info(
@@ -731,12 +725,11 @@ export class WorkspaceProviderProfileResolver {
    * `ANTHROPIC_DEFAULT_*_MODEL` vars — without touching the global AuthEnv or
    * `process.env`.
    *
-   * ## Precedence: user tier → registry `defaultTiers` → live catalogue
+   * ## Tier selection: user tier, then available static default, then live tier
    *
-   * Exactly the chain `ProviderModelsService.applyPersistedTiers` applies to
-   * the global env, and deliberately the same ORDER: a tier the user picked and
-   * a tier map the registry actually verified both outrank a heuristic over a
-   * live model list, which is consulted only for a hole the two of them left.
+   * Uses `ProviderModelsService.resolveEffectiveTiers`, the same rule as the
+   * global env and background lanes. A missing static id yields to a live tier
+   * when the known catalogue contains a replacement.
    *
    * The third link is TASK_2026_262. This method had its own copy of the first
    * two links, so the fix that closed the foreground chat path did not reach
@@ -814,28 +807,15 @@ export class WorkspaceProviderProfileResolver {
    * `ANTHROPIC_SMALL_FAST_MODEL` anywhere. The three writes below are the whole
    * of the tier env surface.)
    */
-  private applyProviderTiers(
-    snapshot: AuthEnv,
-    providerId: string,
-    provider: AnthropicProvider,
-  ): void {
+  private applyProviderTiers(snapshot: AuthEnv, providerId: string): void {
     const persisted = this.providerModels.getModelTiers(
       providerId,
       'mainAgent',
     );
-    const defaults = provider.defaultTiers;
-
-    // Lazy: a provider whose static data covers all three tiers never reads a
-    // catalogue at all.
-    let derived: DerivedTierMap | undefined;
-    const derivedFor = (tier: ProviderModelTier): string | undefined => {
-      derived ??= this.providerModels.getLiveDerivedTiers(providerId);
-      return derived[tier];
-    };
-
-    const sonnet = persisted.sonnet ?? defaults?.sonnet ?? derivedFor('sonnet');
-    const opus = persisted.opus ?? defaults?.opus ?? derivedFor('opus');
-    const haiku = persisted.haiku ?? defaults?.haiku ?? derivedFor('haiku');
+    const { sonnet, opus, haiku } = this.providerModels.resolveEffectiveTiers(
+      providerId,
+      persisted,
+    );
     if (sonnet) snapshot.ANTHROPIC_DEFAULT_SONNET_MODEL = sonnet;
     if (opus) snapshot.ANTHROPIC_DEFAULT_OPUS_MODEL = opus;
     if (haiku) snapshot.ANTHROPIC_DEFAULT_HAIKU_MODEL = haiku;

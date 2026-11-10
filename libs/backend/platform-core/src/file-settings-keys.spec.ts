@@ -836,7 +836,7 @@ describe('isFileBasedSettingKey', () => {
      */
     const budgetDefaults: Record<string, unknown> = {
       'sessionBudget.enabled': true,
-      'sessionBudget.autoHandoffAtLimit': false,
+      'sessionBudget.autoHandoffAtLimit': true,
       'sessionBudget.unit': 'tokens',
       'sessionBudget.tokens': 50_000_000,
       'sessionBudget.usd': 30,

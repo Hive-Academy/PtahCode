@@ -115,7 +115,7 @@ const BOOLEAN_LABELS: Readonly<Record<BooleanKey, string>> = {
 const BOOLEAN_HELP: Readonly<Record<BooleanKey, string>> = {
   enabled: 'Enable this limit for the current chat.',
   autoHandoffAtLimit:
-    'Queues /session-handoff after the current turn, once per session; cancel it from the banner.',
+    'On by default. Queues /session-handoff after the current turn, once per session; cancel it from the banner.',
 };
 
 const LABELS: Readonly<Record<BudgetKey, string>> = {

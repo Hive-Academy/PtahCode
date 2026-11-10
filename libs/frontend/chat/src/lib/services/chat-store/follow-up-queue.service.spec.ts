@@ -31,6 +31,7 @@ import { ComposerRestoreService } from '../composer-restore.service';
 import { MessageSenderService } from '../message-sender.service';
 import { StreamViewportController } from '../stream-viewport-controller.service';
 import { FollowUpQueueService } from './follow-up-queue.service';
+import { SessionAutoHandoffService } from '../session-auto-handoff.service';
 
 const S1 = '11111111-1111-4111-8111-111111111111';
 const S2 = '22222222-2222-4222-8222-222222222222';
@@ -75,6 +76,8 @@ describe('FollowUpQueueService', () => {
   let rpcCall: jest.Mock;
   let recordBoundary: jest.Mock;
   let showError: jest.Mock;
+  let showInfo: jest.Mock;
+  let logWarn: jest.Mock;
   let activeProviderId: ReturnType<typeof signal<string>>;
 
   const patchTab = (tabId: string, patch: Partial<TabState>): void =>
@@ -99,6 +102,8 @@ describe('FollowUpQueueService', () => {
     rpcCall = jest.fn();
     recordBoundary = jest.fn();
     showError = jest.fn();
+    showInfo = jest.fn();
+    logWarn = jest.fn();
     activeProviderId = signal('anthropic');
 
     TestBed.configureTestingModule({
@@ -137,11 +142,11 @@ describe('FollowUpQueueService', () => {
           provide: StreamViewportController,
           useValue: { tierFor: (id: string) => tiers.get(id) ?? 'focused' },
         },
-        { provide: ActionBannerService, useValue: { showError } },
+        { provide: ActionBannerService, useValue: { showError, showInfo } },
         { provide: AuthStateService, useValue: { activeProviderId } },
         {
           provide: LoggingService,
-          useValue: { warn: jest.fn(), error: jest.fn(), info: jest.fn() },
+          useValue: { warn: logWarn, error: jest.fn(), info: jest.fn() },
         },
       ],
     });
@@ -278,6 +283,327 @@ describe('FollowUpQueueService', () => {
   });
 
   describe('failures become drafts', () => {
+    it('maps a typed refusal without logging raw details', async () => {
+      submit.mockResolvedValueOnce({ success: true, data: { success: false, errorCode: 'SESSION_CHANGED', error: 'private backend detail' } });
+      const ref = service.enqueue('tab-1', 'next')!;
+      await flush();
+      expect(showError).toHaveBeenCalledWith(expect.stringContaining('(the session changed)'), 'tab-1');
+      expect(logWarn).toHaveBeenCalledWith(expect.any(String), expect.any(String), expect.objectContaining({
+        errorCode: 'SESSION_CHANGED', tabId: 'tab-1', sessionId: S1, clientMessageId: ref.clientMessageId,
+      }));
+      expect(JSON.stringify(logWarn.mock.calls)).not.toContain('private backend detail');
+      expect(restore.pendingFor('tab-1')).toBe('next');
+    });
+
+    it('uses a generic reason for an unknown code without displaying raw text', async () => {
+      submit.mockResolvedValueOnce({ success: false, errorCode: 'ALIEN_CODE', error: 'secret detail' });
+      service.enqueue('tab-1', 'next');
+      await flush();
+      expect(showError).toHaveBeenCalledWith(expect.stringContaining('(the request could not be completed)'), 'tab-1');
+      expect(showError.mock.calls[0][0]).not.toContain('secret detail');
+      expect(JSON.stringify(logWarn.mock.calls)).not.toContain('secret detail');
+    });
+
+    it('omits transport and receipt exception text from exportable logs', async () => {
+      submit.mockRejectedValueOnce(new Error('token=private-transport-secret'));
+      rpcCall.mockRejectedValueOnce(new Error('token=private-receipt-secret'));
+      service.enqueue('tab-1', 'next');
+      await flush();
+      expect(JSON.stringify(logWarn.mock.calls)).not.toContain('private-transport-secret');
+      expect(JSON.stringify(logWarn.mock.calls)).not.toContain('private-receipt-secret');
+      expect(JSON.stringify(showError.mock.calls)).not.toContain('private-transport-secret');
+    });
+
+    it('keeps a timed-out item when the backend has already queued it', async () => {
+      submit.mockResolvedValueOnce({ success: false, error: 'RPC timeout: chat:continue' });
+      rpcCall.mockResolvedValueOnce({ success: true, data: { items: [], receipt: 'queued' } });
+      const ref = service.enqueue('tab-1', 'next')!;
+      await flush();
+      expect(store.get(ref.clientMessageId)?.phase).toBe('queued');
+      expect(restore.pendingFor('tab-1')).toBeNull();
+    });
+
+    it('settles a timed-out native resume from its durable delivered receipt', async () => {
+      submit.mockResolvedValueOnce({ success: false, error: 'RPC timeout: chat:continue' });
+      rpcCall.mockResolvedValueOnce({ success: true, data: { items: [], receipt: 'delivered' } });
+      const ref = service.enqueue('tab-1', 'next')!;
+      await flush();
+      expect(store.get(ref.clientMessageId)).toBeNull();
+      expect(restore.pendingFor('tab-1')).toBeNull();
+      expect(tab().messages.some((message) => message.id === ref.clientMessageId)).toBe(true);
+      expect(showError).not.toHaveBeenCalled();
+    });
+
+    it('settles a pending admission as sent when atomic abandon returns accepted', async () => {
+      jest.useFakeTimers();
+      submit.mockResolvedValueOnce({ success: false, error: 'RPC timeout: chat:continue' });
+      rpcCall.mockImplementation((_method: string, params: { abandonPending?: boolean }) =>
+        Promise.resolve({ success: true, data: { items: [], receipt: params.abandonPending ? 'delivered' : 'pending' } }));
+      const ref = service.enqueue('tab-1', 'next')!;
+      await flush();
+      expect(restore.pendingFor('tab-1')).toBeNull();
+      for (const delay of [2000, 4000, 8000, 16000, 30000]) {
+        jest.advanceTimersByTime(delay);
+        await flush();
+      }
+      expect(restore.pendingFor('tab-1')).toBeNull();
+      expect(tab().messages.filter((message) => message.id === ref.clientMessageId)).toHaveLength(1);
+      expect(rpcCall).toHaveBeenCalledWith('chat:queued-list', expect.objectContaining({ abandonPending: true }));
+      jest.useRealTimers();
+    });
+
+    it('restores once when atomic abandon rejects a pending admission', async () => {
+      jest.useFakeTimers();
+      submit.mockResolvedValueOnce({ success: false, error: 'RPC timeout: chat:continue' });
+      rpcCall.mockImplementation((_method: string, params: { abandonPending?: boolean }) =>
+        Promise.resolve({ success: true, data: { items: [], receipt: params.abandonPending ? 'rejected' : 'pending' } }));
+      const ref = service.enqueue('tab-1', 'next')!;
+      await flush();
+      for (const delay of [2000, 4000, 8000, 16000, 30000]) {
+        jest.advanceTimersByTime(delay);
+        await flush();
+      }
+      expect(store.get(ref.clientMessageId)).toBeNull();
+      expect(restore.pendingFor('tab-1')).toBe('next');
+      expect(tab().messages.filter((message) => message.id === ref.clientMessageId)).toHaveLength(0);
+      expect(showError).toHaveBeenCalledTimes(1);
+      jest.useRealTimers();
+    });
+
+    it('allocates a new client id after authoritative rejection', async () => {
+      jest.useFakeTimers();
+      submit.mockResolvedValueOnce({ success: false, error: 'RPC timeout: chat:continue' });
+      rpcCall.mockImplementation((_method: string, params: { abandonPending?: boolean }) =>
+        Promise.resolve({ success: true, data: { items: [], receipt: params.abandonPending ? 'rejected' : 'pending' } }));
+      const first = service.enqueue('tab-1', 'next')!;
+      await flush();
+      for (const delay of [2000, 4000, 8000, 16000, 30000]) {
+        jest.advanceTimersByTime(delay);
+        await flush();
+      }
+      const retry = service.enqueue('tab-1', 'next')!;
+      expect(retry.clientMessageId).not.toBe(first.clientMessageId);
+      jest.useRealTimers();
+    });
+    it('keeps a committed native resume pending until a later accepted receipt', async () => {
+      jest.useFakeTimers();
+      submit.mockResolvedValueOnce({ success: false, error: 'RPC timeout: chat:continue' });
+      let terminal = false;
+      rpcCall.mockImplementation(() => Promise.resolve({ success: true, data: {
+        items: [], receipt: terminal ? 'delivered' : 'pending', receiptCommitted: !terminal,
+      } }));
+      const ref = service.enqueue('tab-1', 'next')!;
+      await flush();
+      for (const delay of [2000, 4000, 8000, 16000, 30000]) {
+        jest.advanceTimersByTime(delay);
+        await flush();
+      }
+      expect(store.get(ref.clientMessageId)?.phase).toBe('submitting');
+      expect(restore.pendingFor('tab-1')).toBeNull();
+      terminal = true;
+      jest.advanceTimersByTime(30000);
+      await flush();
+      expect(tab().messages.filter((message) => message.id === ref.clientMessageId)).toHaveLength(1);
+      expect(restore.pendingFor('tab-1')).toBeNull();
+      jest.useRealTimers();
+    });
+    it('settles a committed admission as unconfirmed only after three missing receipts', async () => {
+      jest.useFakeTimers();
+      submit.mockResolvedValueOnce({ success: false, error: 'RPC timeout: chat:continue' });
+      let abandonCalls = 0;
+      rpcCall.mockImplementation((_method: string, params: { abandonPending?: boolean }) => Promise.resolve({
+        success: true,
+        data: { items: [], receipt: params.abandonPending && ++abandonCalls > 1 ? undefined : 'pending', receiptCommitted: true },
+      }));
+      const ref = service.enqueue('tab-1', 'next')!;
+      await flush();
+      const delays = [2000, 4000, 8000, 16000];
+      for (let step = 0; step < 30 && store.get(ref.clientMessageId)?.phase === 'submitting'; step++) {
+        if (abandonCalls === 3) {
+          expect(restore.pendingFor('tab-1')).toBeNull();
+          expect(showError).not.toHaveBeenCalled();
+        }
+        jest.advanceTimersByTime(delays[step] ?? 30000);
+        await flush();
+      }
+      // One committed pending reply, then three consecutive missing receipts.
+      expect(abandonCalls).toBe(4);
+      expect(restore.pendingFor('tab-1')).not.toBeNull();
+      expect(showError).toHaveBeenCalledWith(
+        'Could not confirm whether the queued message was sent. It is back in the composer.',
+        'tab-1',
+      );
+      jest.useRealTimers();
+    });
+    it('keeps a committed admission after ten minutes and accepts a late delivery', async () => {
+      jest.useFakeTimers();
+      submit.mockResolvedValueOnce({ success: false, error: 'RPC timeout: chat:continue' });
+      rpcCall.mockResolvedValue({ success: true, data: { items: [], receipt: 'pending', receiptCommitted: true } });
+      const ref = service.enqueue('tab-1', 'next')!;
+      await flush();
+      for (const delay of [2000, 4000, 8000, 16000, 30000]) {
+        jest.advanceTimersByTime(delay);
+        await flush();
+      }
+      expect(store.get(ref.clientMessageId)?.phase).toBe('submitting');
+      for (let elapsed = 0; elapsed < 10 * 60 * 1000; elapsed += 30000) {
+        jest.advanceTimersByTime(30000);
+        await flush();
+      }
+      expect(store.get(ref.clientMessageId)?.phase).toBe('submitting');
+      expect(restore.pendingFor('tab-1')).toBeNull();
+      expect(showInfo).toHaveBeenCalledWith('Still confirming whether the queued message was sent.', 'tab-1');
+      service.handleStateEvent({ sessionId: S1, tabId: 'tab-1', clientMessageId: ref.clientMessageId, state: 'delivered' });
+      expect(tab().messages.filter((message) => message.id === ref.clientMessageId)).toHaveLength(1);
+      expect(restore.pendingFor('tab-1')).toBeNull();
+      jest.useRealTimers();
+    });
+    it('delivers once after a missing committed receipt without restoring text', async () => {
+      jest.useFakeTimers();
+      submit.mockResolvedValueOnce({ success: false, error: 'RPC timeout: chat:continue' });
+      let abandonCalls = 0;
+      rpcCall.mockImplementation((_method: string, params: { abandonPending?: boolean }) => Promise.resolve({
+        success: true,
+        data: {
+          items: [],
+          receipt: !params.abandonPending ? 'pending' : ['pending', undefined, 'delivered'][abandonCalls++],
+          receiptCommitted: true,
+        },
+      }));
+      const ref = service.enqueue('tab-1', 'next')!;
+      await flush();
+      for (const delay of [2000, 4000, 8000, 16000, 30000, 30000, 30000]) {
+        jest.advanceTimersByTime(delay);
+        await flush();
+      }
+      expect(tab().messages.filter((message) => message.id === ref.clientMessageId)).toHaveLength(1);
+      expect(restore.pendingFor('tab-1')).toBeNull();
+      expect(showError).not.toHaveBeenCalled();
+      jest.useRealTimers();
+    });
+    it('keeps a failed receipt lookup pending', async () => {
+      jest.useFakeTimers();
+      submit.mockResolvedValueOnce({ success: false, error: 'RPC timeout: chat:continue' });
+      rpcCall.mockRejectedValue(new Error('receipt offline'));
+      const ref = service.enqueue('tab-1', 'next')!;
+      await flush();
+      jest.advanceTimersByTime(2000);
+      await flush();
+      expect(store.get(ref.clientMessageId)?.phase).toBe('submitting');
+      expect(restore.pendingFor('tab-1')).toBeNull();
+      jest.useRealTimers();
+    });
+    it('reuses the client id after both atomic abandon attempts fail', async () => {
+      jest.useFakeTimers();
+      submit.mockResolvedValueOnce({ success: false, error: 'RPC timeout: chat:continue' });
+      rpcCall.mockRejectedValue(new Error('receipt offline'));
+      const ref = service.enqueue('tab-1', 'next')!;
+      await flush();
+      for (const delay of [2000, 4000, 8000, 16000, 30000]) {
+        jest.advanceTimersByTime(delay);
+        await flush();
+      }
+      expect(restore.pendingFor('tab-1')).toBeNull();
+      jest.advanceTimersByTime(30000);
+      await flush();
+      expect(store.get(ref.clientMessageId)).toBeNull();
+      expect(restore.pendingFor('tab-1')).toBe('next');
+      const retry = service.enqueue('tab-1', 'next')!;
+      expect(retry.clientMessageId).toBe(ref.clientMessageId);
+      expect(logWarn).toHaveBeenCalledWith(expect.anything(), 'queued receipt could not be confirmed', expect.anything());
+      jest.useRealTimers();
+    });
+    it('settles pending then rejected with the typed safe reason', async () => {
+      jest.useFakeTimers();
+      submit.mockResolvedValueOnce({ success: false, error: 'RPC timeout: chat:continue' });
+      rpcCall.mockResolvedValueOnce({ success: true, data: { items: [], receipt: 'pending' } })
+        .mockResolvedValueOnce({ success: true, data: { items: [], receipt: 'pending' } })
+        .mockResolvedValueOnce({ success: true, data: { items: [], receipt: 'rejected', receiptErrorCode: 'SESSION_CHANGED' } });
+      const ref = service.enqueue('tab-1', 'next')!;
+      await flush();
+      jest.advanceTimersByTime(2000);
+      await flush();
+      expect(store.get(ref.clientMessageId)?.phase).toBe('submitting');
+      jest.advanceTimersByTime(4000);
+      await flush();
+      expect(restore.pendingFor('tab-1')).toBe('next');
+      expect(showError).toHaveBeenCalledWith(expect.stringContaining('(the session changed)'), 'tab-1');
+      jest.useRealTimers();
+    });
+    it('tab close cancels receipt timer', async () => {
+      jest.useFakeTimers();
+      submit.mockResolvedValueOnce({ success: false, error: 'RPC timeout: chat:continue' });
+      rpcCall.mockResolvedValue({ success: true, data: { items: [], receipt: 'pending' } });
+      service.enqueue('tab-1', 'next');
+      await flush();
+      closedListeners.forEach((listener) => listener({ tabId: 'tab-1', sessionId: S1, kind: 'close' }));
+      jest.advanceTimersByTime(60000);
+      await flush();
+      expect(rpcCall).toHaveBeenCalledTimes(1);
+      expect(restore.pendingFor('tab-1')).toBeNull();
+      jest.useRealTimers();
+    });
+    it('a delivered push during an in-flight recheck settles once', async () => {
+      jest.useFakeTimers();
+      const lookup = deferred<{ success: boolean; data: { items: []; receipt: 'rejected' } }>();
+      submit.mockResolvedValueOnce({ success: false, error: 'RPC timeout: chat:continue' });
+      rpcCall.mockResolvedValueOnce({ success: true, data: { items: [], receipt: 'pending' } })
+        .mockReturnValueOnce(lookup.promise);
+      const ref = service.enqueue('tab-1', 'next')!;
+      await flush();
+      jest.advanceTimersByTime(2000);
+      await flush();
+      service.handleStateEvent({ sessionId: S1, tabId: 'tab-1', clientMessageId: ref.clientMessageId, state: 'delivered' });
+      lookup.resolve({ success: true, data: { items: [], receipt: 'rejected' } });
+      await flush();
+      expect(tab().messages.filter((message) => message.id === ref.clientMessageId)).toHaveLength(1);
+      expect(restore.pendingFor('tab-1')).toBeNull();
+      expect(showError).not.toHaveBeenCalled();
+      jest.useRealTimers();
+    });
+    it('keeps an admission pending when the backend says the original request is still running', async () => {
+      jest.useFakeTimers();
+      submit.mockResolvedValueOnce({ success: false, error: 'RPC timeout: chat:continue' });
+      rpcCall.mockResolvedValue({ success: true, data: { items: [], receipt: 'pending' } });
+      const ref = service.enqueue('tab-1', 'next')!;
+      await flush();
+      jest.advanceTimersByTime(2000);
+      await flush();
+      expect(store.get(ref.clientMessageId)?.phase).toBe('submitting');
+      expect(restore.pendingFor('tab-1')).toBeNull();
+      jest.useRealTimers();
+    });
+    it('accepts delayed original admission after timeout and negative lookup', async () => {
+      jest.useFakeTimers();
+      submit.mockResolvedValueOnce({ success: false, error: 'RPC timeout: chat:continue' });
+      rpcCall.mockResolvedValueOnce({ success: true, data: { items: [] } });
+      const ref = service.enqueue('tab-1', 'next')!;
+      await flush();
+      service.handleStateEvent({ sessionId: S1, tabId: 'tab-1', clientMessageId: ref.clientMessageId, state: 'queued' });
+      jest.advanceTimersByTime(2000);
+      await flush();
+      expect(store.get(ref.clientMessageId)?.phase).toBe('queued');
+      expect(restore.pendingFor('tab-1')).toBeNull();
+      expect(showError).not.toHaveBeenCalled();
+      jest.useRealTimers();
+    });
+    it('honors a queued push during receipt reconciliation', async () => {
+      jest.useFakeTimers();
+      const lookup = deferred<{ success: boolean; data: { items: [] } }>();
+      submit.mockResolvedValueOnce({ success: false, error: 'RPC timeout: chat:continue' });
+      rpcCall.mockReturnValueOnce(lookup.promise);
+      const ref = service.enqueue('tab-1', 'next')!;
+      await flush();
+      service.handleStateEvent({ sessionId: S1, tabId: 'tab-1', clientMessageId: ref.clientMessageId, state: 'queued' });
+      lookup.resolve({ success: true, data: { items: [] } });
+      await flush();
+      jest.advanceTimersByTime(2000);
+      await flush();
+      expect(store.get(ref.clientMessageId)?.phase).toBe('queued');
+      expect(restore.pendingFor('tab-1')).toBeNull();
+      expect(showError).not.toHaveBeenCalled();
+      jest.useRealTimers();
+    });
     it('a failed push puts the text back in the composer with a notice', async () => {
       const ref = service.enqueue('tab-1', 'please keep me')!;
       await flush();
@@ -286,7 +612,8 @@ describe('FollowUpQueueService', () => {
         tabId: 'tab-1',
         clientMessageId: ref.clientMessageId,
         state: 'failed',
-        reason: 'the session ended',
+        reason: 'private password and backend trace',
+        errorCode: 'SESSION_ENDED',
       });
 
       expect(store.isPending(ref.clientMessageId)).toBe(false);
@@ -295,18 +622,28 @@ describe('FollowUpQueueService', () => {
         'A queued message was not sent (the session ended). It is back in the composer.',
         'tab-1',
       );
+      expect(showError.mock.calls[0][0]).not.toContain('private password');
+      expect(JSON.stringify(logWarn.mock.calls)).not.toContain('private password');
     });
 
-    it('a rejected or thrown chat:continue drafts the text', async () => {
+    it('a definite rejected chat:continue drafts the text', async () => {
       submit.mockResolvedValueOnce({ success: false, error: 'boom' });
-      submit.mockRejectedValueOnce(new Error('transport'));
       service.enqueue('tab-1', 'first');
       await flush();
-      service.enqueue('tab-1', 'second');
-      await flush();
-
-      expect(restore.pendingFor('tab-1')).toBe('first\nsecond');
+      expect(restore.pendingFor('tab-1')).toBe('first');
       expect(store.entries()).toEqual([]);
+    });
+    it('a transport failure remains pending without a receipt', async () => {
+      jest.useFakeTimers();
+      submit.mockRejectedValueOnce(new Error('transport'));
+      rpcCall.mockRejectedValue(new Error('receipt offline'));
+      const ref = service.enqueue('tab-1', 'second')!;
+      await flush();
+      jest.advanceTimersByTime(2000);
+      await flush();
+      expect(store.get(ref.clientMessageId)?.phase).toBe('submitting');
+      expect(restore.pendingFor('tab-1')).toBeNull();
+      jest.useRealTimers();
     });
 
     it('an admitted reply (idle session) is delivered at once', async () => {
@@ -398,6 +735,31 @@ describe('FollowUpQueueService', () => {
       await flush();
       expect(submit).toHaveBeenCalledTimes(2);
       expect(submit.mock.calls[1][0].content).toBe('after the command');
+    });
+
+    it('does not send an automatic hand-off whose confirmed stage is below the limit when the turn ends', async () => {
+      const handoff = TestBed.inject(SessionAutoHandoffService);
+      const queued = service.enqueue('tab-1', '/session-handoff')!;
+      handoff.claim(S1);
+      handoff.recordQueued(S1, queued);
+      const settled = jest.fn();
+      store.onSettled(queued.clientMessageId, settled);
+      // The turn ends and the queue reaches the command before any withdrawal.
+      patchTab('tab-1', { status: 'loaded', sessionBudget: { sessionId: S1, stage: 'handoff' } as TabState['sessionBudget'] });
+      await flush();
+      expect(send).not.toHaveBeenCalled();
+      expect(settled).toHaveBeenCalledWith('withdrawn');
+      expect(store.forTab('tab-1')).toHaveLength(0);
+    });
+
+    it('sends an automatic hand-off whose confirmed stage is the limit', async () => {
+      const handoff = TestBed.inject(SessionAutoHandoffService);
+      const queued = service.enqueue('tab-1', '/session-handoff')!;
+      handoff.claim(S1);
+      handoff.recordQueued(S1, queued);
+      patchTab('tab-1', { status: 'loaded', sessionBudget: { sessionId: S1, stage: 'limit' } as TabState['sessionBudget'] });
+      await flush();
+      expect(send).toHaveBeenCalledWith('/session-handoff', { tabId: 'tab-1' });
     });
 
     it('fires for a HIDDEN tab from the status-only terminal copy', async () => {
