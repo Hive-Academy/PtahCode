@@ -69,7 +69,7 @@ describe('Git child bootstrap', () => {
 
 describe('Git child providers and scopes', () => {
   const store = { applyWindowScope: jest.fn().mockReturnValue(true) };
-  const rpc = { call: jest.fn() };
+  const rpc = { call: jest.fn(), handleMessage: jest.fn(), handledMessageTypes: [] as string[] };
 
   beforeEach(() => {
     store.applyWindowScope.mockClear();
