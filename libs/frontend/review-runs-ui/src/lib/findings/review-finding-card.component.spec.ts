@@ -32,14 +32,16 @@ describe('ReviewFindingCardComponent', () => {
     expect(buttons.find(button => button.textContent?.trim() === 'Accept')?.disabled).toBe(true);
     expect(buttons.find(button => button.textContent?.trim() === 'Dismiss')?.disabled).toBe(true);
   });
-  it('disables accept and dismiss after a triage reply and keeps reply active', () => {
+  it('replaces accept and dismiss with the resolved state after triage and keeps reply active', () => {
     TestBed.configureTestingModule({ imports: [ReviewFindingCardComponent] });
     const fixture = TestBed.createComponent(ReviewFindingCardComponent);
     fixture.componentRef.setInput('view', view); fixture.componentRef.setInput('triage', { ...openTriage, state: 'accepted' });
     fixture.detectChanges();
     const buttons = Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>);
-    expect(buttons.find(button => button.textContent?.trim() === 'Accept')?.disabled).toBe(true);
-    expect(buttons.find(button => button.textContent?.trim() === 'Dismiss')?.disabled).toBe(true);
+    expect(buttons.some(button => button.textContent?.trim() === 'Accept')).toBe(false);
+    expect(buttons.some(button => button.textContent?.trim() === 'Dismiss')).toBe(false);
+    expect(fixture.nativeElement.querySelector('[data-triage-state]')?.textContent?.trim()).toBe('Accepted');
+    expect(fixture.nativeElement.querySelector('.btn-primary')).toBeNull();
     expect(buttons.find(button => button.textContent?.trim() === 'Reply')?.disabled).toBe(false);
   });
   it('keeps the reply draft until the reply succeeds', () => {

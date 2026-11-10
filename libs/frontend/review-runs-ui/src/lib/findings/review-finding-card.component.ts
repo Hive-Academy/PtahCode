@@ -35,8 +35,12 @@ import type { FindingTriage, ReviewFindingView } from './review-finding-view';
         </dl>
       </details>
       <div class="flex flex-wrap gap-2">
-        <button ptahButton variant="primary" size="xs" type="button" [disabled]="triage().pending || triage().state !== 'open'" (click)="respond.emit({action: 'accept'})">Accept</button>
-        <button ptahButton variant="ghost" size="xs" type="button" [disabled]="triage().pending || triage().state !== 'open'" (click)="reasonOpen.set(!reasonOpen())">Dismiss</button>
+        @if (triage().state === 'open') {
+          <button ptahButton variant="primary" size="xs" type="button" [disabled]="triage().pending || triage().state !== 'open'" (click)="respond.emit({action: 'accept'})">Accept</button>
+          <button ptahButton variant="ghost" size="xs" type="button" [disabled]="triage().pending || triage().state !== 'open'" (click)="reasonOpen.set(!reasonOpen())">Dismiss</button>
+        } @else {
+          <span class="badge badge-outline badge-sm self-center" data-triage-state>{{ triage().state === 'accepted' ? 'Accepted' : 'Dismissed' }}</span>
+        }
         <button ptahButton variant="ghost" size="xs" type="button" [disabled]="triage().pending" (click)="replyOpen.set(!replyOpen())">Reply</button>
         <button ptahButton variant="secondary" size="xs" type="button" (click)="sendToLane.emit()">Copy fix prompt</button>
       </div>
