@@ -103,7 +103,7 @@ export class ChatVitalsStore {
   constructor() {
     effect(() => {
       const path = this.workspacePath();
-      if (path === null) return;
+      if (path === null || path.trim() === '') return;
       untracked(() => {
         // The store is shared: when another surface (the canvas board) has
         // already read or is reading this workspace, reuse that read.
