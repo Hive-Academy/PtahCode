@@ -72,6 +72,7 @@ import type { IContextUsagePort } from './compaction/context-usage.port';
 import { SessionControl } from './session-lifecycle/session-control.service';
 import { SessionBudgetService } from './session-budget/session-budget.service';
 import type { SessionEndCallbackRegistry } from './session-end-callback-registry';
+import type { SessionEndCause } from './session-end-callback-registry';
 import type { SdkQueryRunner } from './sdk-query-runner.service';
 import type { NoActivityWatchdog } from './no-activity-watchdog';
 import type { UsageCostSource } from '../session-stats/session-stats-owner.service';
@@ -755,8 +756,8 @@ export class SessionLifecycleManager {
    * This method is the ONLY reliable way to detect interrupted subagents. All running
    * subagents for this session are marked as 'interrupted' to enable resumption.
    */
-  async endSession(sessionId: SessionId): Promise<void> {
-    await this._control.endSession(sessionId);
+  async endSession(sessionId: SessionId, cause: SessionEndCause = 'unknown'): Promise<void> {
+    await this._control.endSession(sessionId, cause);
   }
 
   /**
@@ -774,8 +775,9 @@ export class SessionLifecycleManager {
   async endSessionIfTokenMatches(
     sessionId: SessionId,
     token: string,
+    cause: SessionEndCause = 'unknown',
   ): Promise<boolean> {
-    return this._control.endSessionIfTokenMatches(sessionId, token);
+    return this._control.endSessionIfTokenMatches(sessionId, token, cause);
   }
 
   /**
@@ -783,8 +785,8 @@ export class SessionLifecycleManager {
    * Calls cleanupPendingPermissions to prevent unhandled promise rejections,
    * and marks all running subagents as interrupted for each session.
    */
-  async disposeAllSessions(): Promise<void> {
-    return this._control.disposeAllSessions();
+  async disposeAllSessions(cause: SessionEndCause = 'unknown'): Promise<void> {
+    return this._control.disposeAllSessions(cause);
   }
 
   /**
@@ -804,7 +806,7 @@ export class SessionLifecycleManager {
   async disposeAllSessionsForShutdown(): Promise<void> {
     const settled = this._queryExecutor.settleNamedAccountReservations();
     const [ended] = await Promise.allSettled([
-      this._control.disposeAllSessions(),
+      this._control.disposeAllSessions('host-shutdown'),
       settled,
     ]);
     if (ended.status === 'rejected') {
@@ -823,8 +825,8 @@ export class SessionLifecycleManager {
   }
 
   /** End only the sessions of one workspace; other workspaces keep running. */
-  async disposeSessionsForWorkspace(workspacePath: string): Promise<void> {
-    return this._control.disposeSessionsForWorkspace(workspacePath);
+  async disposeSessionsForWorkspace(workspacePath: string, cause: SessionEndCause = 'unknown'): Promise<void> {
+    return this._control.disposeSessionsForWorkspace(workspacePath, cause);
   }
 
   /**
@@ -961,7 +963,7 @@ export class SessionLifecycleManager {
     );
     const rec = this._registry.find(sessionId as string);
     const realSessionId = rec?.realSessionId ?? (sessionId as string);
-    await this._control.endSession(sessionId);
+    await this._control.endSession(sessionId, 'parent-stop');
     await config.beforeRelaunch?.();
     return this._queryExecutor.executeQuery({
       sessionId,

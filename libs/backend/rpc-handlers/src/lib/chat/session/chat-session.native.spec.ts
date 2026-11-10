@@ -1040,7 +1040,7 @@ describe('chat:continue after a completed native turn', () => {
       tabId: 'tab',
       prompt: 'next',
     });
-    expect(h.interruptSession).toHaveBeenCalledWith(sessionId);
+    expect(h.interruptSession).toHaveBeenCalledWith(sessionId, 'stream-exit');
     expect(h.resumeSession).toHaveBeenCalledTimes(1);
   });
 

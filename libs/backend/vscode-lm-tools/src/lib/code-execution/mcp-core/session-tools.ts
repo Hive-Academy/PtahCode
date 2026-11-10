@@ -70,6 +70,7 @@ export function buildSessionStartTool(): MCPToolDefinition {
       'ptah_agent_report, and a completion turn is pushed into this session ' +
       'each time it settles. A task starting with "/" (e.g. /orchestrate ...) ' +
       'runs as that slash command. The child cannot start sessions itself. ' +
+      'After succession its status is handed-off with a succeededBy id. ' +
       'The user owns merge, PR and cleanup: the worktree and the branch remain ' +
       'after it ends. There is no permission, path or parent argument; you are ' +
       'the parent. Refusals are returned as text with a code. ' +
@@ -100,7 +101,7 @@ export function buildSessionStatusTool(): MCPToolDefinition {
     name: SESSION_STATUS_TOOL_NAME,
     description:
       'Status of your child sessions: working, waiting, awaiting-permission ' +
-      '(with the denial time), idle, or how it ended; branch, worktree, turns ' +
+      '(with the denial time), idle, handed-off (with succeededBy), or how it ended; branch, worktree, turns ' +
       'settled, reports and the last completion. Omit sessionId for all of ' +
       'your children. Prefer waiting for the pushed completion turn over ' +
       'polling. ' +
@@ -145,13 +146,12 @@ export function buildSessionHandoffTool(): MCPToolDefinition {
   return {
     name: SESSION_HANDOFF_TOOL_NAME,
     description:
-      'Hand this session off to a NEW top-level chat session in the same ' +
-      'workspace and working directory (same branch, no worktree). It opens ' +
-      "as a new tab in the user's window and receives prompt as its first " +
-      'message; it is not your child and can hand off again. Write the ' +
+      'Hand this session off to a new chat session. A child starts its successor ' +
+      'in the same worktree and branch, passes on running lanes, and notifies ' +
+      'its parent. The successor receives prompt as its first message. Write the ' +
       'handoff document first: handoffPath must be an existing absolute file ' +
-      'path, and prompt must name it. Call once. A child session cannot hand ' +
-      'off. The result states tabOpened (false: no window took the tab; it is ' +
+      'path, and prompt must name it. Call once. The result states tabOpened ' +
+      '(false: no window took the tab; it is ' +
       'in the session list). Refusals are returned as text with a code. ' +
       HELD_NOTE,
     inputSchema: inputSchemaOf(SessionHandoffArgsSchema),

@@ -759,7 +759,7 @@ export class GatewayChatBridge {
     try {
       const id = SessionId.from(sessionId);
       if (this.agentAdapter.isSessionActive(id)) {
-        this.agentAdapter.endSession(id);
+        this.agentAdapter.endSession(id, 'stream-exit');
       }
     } catch (error: unknown) {
       this.logger.warn('[gateway-chat-bridge] failed to end session', {

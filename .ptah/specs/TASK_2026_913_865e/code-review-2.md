@@ -1,0 +1,5 @@
+﻿REVISE
+
+1. **Moderate — Focus stays in the hidden run list on narrow screens.** Selecting a run leaves focus on its row button (`libs/frontend/review-runs-ui/src/lib/components/review-runs-list.component.ts:36-44`). The page then sets `detailOpen` from `selectedRun` (`review-runs-page.component.ts:103`), and the inbox shell hides the list below 768 px (`libs/frontend/ui/src/lib/surfaces/inbox-layout.component.ts:46-58`). The new inline detail explicitly no longer focuses its heading on creation (`review-run-detail.component.ts:82`), so keyboard and screen-reader focus remains on an invisible control after the pane switch. Minimal fix: when opening a run in the narrow layout, focus the detail heading or first action after render; keep focus in the row on wide layouts. Closing can return focus to the row.
+
+Findings 1, 2, 3, 4, 7, and 8 are otherwise addressed in `bf45050f0` and the working-tree store catch change. The detail retains retry, retryFindings, Close/Escape, and the nested live-rerun confirmation. No build or test command was run.

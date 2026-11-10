@@ -22,6 +22,9 @@ describe('readSessionChildSettings', () => {
     expect(readSessionChildSettings(workspaceWith({}))).toEqual({
       maxConcurrent: 3,
       maxRuntimeMinutes: 120,
+      runtimeWarnLeadMinutes: 10,
+      handoffGraceMinutes: 15,
+      maxSuccessions: 8,
       permissionDenyWindowMs: 60_000,
       bashAllowlist: DEFAULT_SESSION_CHILD_BASH_ALLOWLIST,
     });
@@ -45,6 +48,15 @@ describe('readSessionChildSettings', () => {
     ['agentSessions.maxConcurrent', 'maxConcurrent', '4', 3],
     ['agentSessions.maxConcurrent', 'maxConcurrent', null, 3],
     ['agentSessions.maxRuntimeMinutes', 'maxRuntimeMinutes', 1, 5],
+    ['agentSessions.runtimeWarnLeadMinutes', 'runtimeWarnLeadMinutes', 0, 1],
+    ['agentSessions.runtimeWarnLeadMinutes', 'runtimeWarnLeadMinutes', 100, 60],
+    ['agentSessions.runtimeWarnLeadMinutes', 'runtimeWarnLeadMinutes', '5', 10],
+    ['agentSessions.handoffGraceMinutes', 'handoffGraceMinutes', 0, 1],
+    ['agentSessions.handoffGraceMinutes', 'handoffGraceMinutes', 200, 120],
+    ['agentSessions.handoffGraceMinutes', 'handoffGraceMinutes', null, 15],
+    ['agentSessions.maxSuccessions', 'maxSuccessions', -1, 0],
+    ['agentSessions.maxSuccessions', 'maxSuccessions', 100, 50],
+    ['agentSessions.maxSuccessions', 'maxSuccessions', false, 8],
     ['agentSessions.maxRuntimeMinutes', 'maxRuntimeMinutes', 60, 60],
     ['agentSessions.maxRuntimeMinutes', 'maxRuntimeMinutes', 10_000, 720],
     [
@@ -80,6 +92,14 @@ describe('readSessionChildSettings', () => {
       );
       expect(settings[field]).toBe(expected);
     });
+  });
+
+  it('warns before a short runtime cap', () => {
+    const settings = readSessionChildSettings(workspaceWith({
+      'agentSessions.maxRuntimeMinutes': 5,
+      'agentSessions.runtimeWarnLeadMinutes': 10,
+    }));
+    expect(settings.runtimeWarnLeadMinutes).toBe(4);
   });
 
   describe('bashAllowlist', () => {

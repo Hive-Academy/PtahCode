@@ -19,11 +19,14 @@ describe('LensStageRunner checkpoints', () => {
       getLastReviewedHead: jest.fn().mockResolvedValue(null), getOpenFailures: jest.fn().mockResolvedValue([]),
       getLastPollAt: jest.fn().mockResolvedValue(null), recordPoll: jest.fn(), saveFailure: jest.fn(),
       enqueueDiscovered: jest.fn(), enqueueManual: jest.fn(), recordDraft: jest.fn(), claimNext: jest.fn(), heartbeat: jest.fn(), release: jest.fn(),
-      reconcileExpiredLeases: jest.fn(), getAttempt: jest.fn(),
+      reconcileExpiredLeases: jest.fn(), getAttempt: jest.fn(), getCurrentAttemptId: jest.fn().mockResolvedValue(claim.attemptId),
       getStages: async () => [...stages.values()],
       saveStage: async (stage) => { stages.set(stage.stage, stage); },
       saveCheckpoint: async (_id, stage, _ordinal, data) => { checkpoints.set(stage, data); },
       getCheckpoint: async (_id, stage) => checkpoints.get(stage) ?? null,
+      getStatusSync: jest.fn().mockResolvedValue(null), saveStatusSync: jest.fn(),
+      getPendingStatusSync: jest.fn().mockResolvedValue([]), getMachineStatusSync: jest.fn().mockResolvedValue([]),
+      syncFindingResolution: jest.fn().mockResolvedValue(false),
     };
     const prior = 'lens:correctness-lifecycle';
     stages.set(prior, { attemptId: claim.attemptId, stage: prior, ordinal: 0, state: 'completed',

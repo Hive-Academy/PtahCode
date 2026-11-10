@@ -28,6 +28,19 @@ export interface ReviewAttemptRecord {
   endedAt: string | null;
 }
 
+export interface ReviewStatusSyncRecord {
+  attemptId: string;
+  machineId: string;
+  state: 'pending' | 'success' | 'failure' | 'error';
+  description: string;
+  externalId: string | null;
+  syncPending: boolean;
+  retryAt: string | null;
+  errorSummary: string | null;
+  syncedState: string | null;
+  syncedDescription: string | null;
+}
+
 /** A checkpoint is stored as a stage with a JSON outcome, keyed by attempt/stage/ordinal. */
 export interface IReviewRepository extends IReviewQueueRepository {
   getLastReviewedHead(repo: RepoIdentity, prNumber: number): Promise<string | null>;
@@ -36,8 +49,14 @@ export interface IReviewRepository extends IReviewQueueRepository {
   recordPoll(repo: RepoIdentity, ok: boolean): Promise<void>;
   saveFailure(attemptId: string, failure: ReviewFailure): Promise<void>;
   getAttempt(attemptId: string): Promise<ReviewAttemptRecord | null>;
+  getCurrentAttemptId(repo: RepoIdentity, prNumber: number, headSha: string): Promise<string | null>;
   getStages(attemptId: string): Promise<ReviewStageRecord[]>;
   saveStage(stage: ReviewStageRecord): Promise<void>;
   saveCheckpoint(attemptId: string, stage: string, ordinal: number, data: unknown): Promise<void>;
   getCheckpoint(attemptId: string, stage: string, ordinal: number): Promise<unknown | null>;
+  getStatusSync(attemptId: string): Promise<ReviewStatusSyncRecord | null>;
+  saveStatusSync(record: ReviewStatusSyncRecord): Promise<void>;
+  getPendingStatusSync(now: string): Promise<ReviewStatusSyncRecord[]>;
+  getMachineStatusSync(machineId: string): Promise<ReviewStatusSyncRecord[]>;
+  syncFindingResolution(repo: RepoIdentity, prNumber: number, findingId: string, resolved: boolean): Promise<boolean>;
 }

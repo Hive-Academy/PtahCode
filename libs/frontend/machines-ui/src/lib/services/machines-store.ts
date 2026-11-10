@@ -14,6 +14,7 @@ import type {
   MachinesReadinessResult,
   MachinesSessionAttachResult,
   MachinesStatePayload,
+  PermissionRequest,
   RemoteMachineSessionSummary,
   RemoteMachineWorkspace,
   RpcUserErrorCode,
@@ -76,6 +77,29 @@ export type MachinesOutcome<T = void> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly error: MachinesError }
   | { readonly ok: false; readonly refused: MachinesRefusal };
+
+/** One tool approval that waits in an opened session of a machine. */
+export interface MachinePendingApproval {
+  readonly sessionId: string;
+  readonly request: PermissionRequest;
+  /**
+   * Whether the session of the request accepts an answer, by the rules of the
+   * session view: `cached` when the lock check failed or the session is not
+   * open, `watch-only` for a saved snapshot, `answerable` otherwise. The
+   * connection of the machine is not part of it.
+   */
+  readonly mode: MachineApprovalMode;
+}
+
+/** Same values as the `mode` input of the approval block. */
+export type MachineApprovalMode = 'answerable' | 'watch-only' | 'cached';
+
+function approvalMode(entry: SessionEntry): MachineApprovalMode {
+  if (entry.lockUnavailable || entry.reducer.mode === 'detached') {
+    return 'cached';
+  }
+  return entry.reducer.mode === 'snapshot' ? 'watch-only' : 'answerable';
+}
 
 interface SessionEntry {
   readonly machineId: string;
@@ -159,6 +183,21 @@ export class MachinesStore {
       counts.set(entry.machineId, (counts.get(entry.machineId) ?? 0) + pending);
     }
     return counts as ReadonlyMap<string, number>;
+  });
+
+  /** The waiting approval requests of opened sessions, per machine. */
+  public readonly pendingApprovalRequestsByMachine = computed(() => {
+    const byMachine = new Map<string, MachinePendingApproval[]>();
+    for (const [key, entry] of this._views()) {
+      const pending = entry.reducer.pendingPermissions;
+      if (pending.length === 0) continue;
+      const sessionId = key.slice(key.indexOf('\u0000') + 1);
+      const list = byMachine.get(entry.machineId) ?? [];
+      const mode = approvalMode(entry);
+      for (const request of pending) list.push({ sessionId, request, mode });
+      byMachine.set(entry.machineId, list);
+    }
+    return byMachine as ReadonlyMap<string, readonly MachinePendingApproval[]>;
   });
 
   public readonly pendingApprovalCount = computed(() => {

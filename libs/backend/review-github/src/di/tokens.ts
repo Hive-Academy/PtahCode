@@ -3,6 +3,7 @@ export const REVIEW_GITHUB_TOKENS = {
   FETCH: Symbol.for('ReviewGitHubFetch'),
   PUBLICATION_PORT: Symbol.for('ReviewGitHubPublicationPort'),
   PUBLICATION_GUARD: Symbol.for('ReviewGitHubPublicationGuard'),
+  STATUS_PORT: Symbol.for('ReviewGitHubStatusPort'),
 } as const;
 
 /** Host settings store the bot credential under this secret-storage key. */

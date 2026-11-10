@@ -59,3 +59,19 @@ it('restores budget counters and start time from a previous record', () => {
   expect(budget.turnCount).toBe(3);
   expect(budget.counters.rawTokens).toBe(18);
 });
+
+describe('createLaneBudget on resume', () => {
+  it('restores the unavailable-turn and largest-turn counters of the previous record', () => {
+    const budget = createLaneBudget({
+      warnRatio: 0.8, stopWeightedTokens: 1_000,
+      handoffContextTokens: 500, maxDurationMin: 60,
+    }, '2026-11-08T00:00:00.000Z', {
+      weightedTokens: 100, rawTokens: 120, largestTurnTokens: 70, unavailableTurns: 2,
+      turnIds: ['t1', 't2'], turnCount: 2, startedAtMs: Date.now(),
+      stopWeightedTokens: 1_000, maxDurationMin: 60,
+    });
+    expect(budget.counters.largestTurnTokens).toBe(70);
+    expect(budget.counters.unavailableTurns).toBe(2);
+    expect(budget.record()).toMatchObject({ largestTurnTokens: 70, unavailableTurns: 2 });
+  });
+});

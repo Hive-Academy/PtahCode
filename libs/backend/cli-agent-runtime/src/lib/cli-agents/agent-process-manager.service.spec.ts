@@ -3607,6 +3607,27 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(controls.continueMessages).toEqual(['a brand new turn']);
     });
 
+    it('prepends a held budget warning to one later parent message', async () => {
+      const controls = createMockSdkHandle({ supportsContinuation: true });
+      const agentId = await spawnWithHandle(controls.handle);
+      controls.resolve(0);
+      await settle();
+      const tracked = manager.getMessageRoutableAgent(agentId);
+      if (!tracked) throw new Error('Expected tracked lane');
+      Object.assign(tracked, { heldBudgetWarning: 'Budget warning: finish work.' });
+
+      await manager.sendToAgent(agentId, 'first message');
+      expect(controls.continueMessages).toEqual(['Budget warning: finish work.\n\nfirst message']);
+      expect(logger.info).toHaveBeenCalledWith(
+        '[LaneBudgetTelemetry] Held budget warning delivered with parent message',
+        { agentId, mode: 'start-turn' },
+      );
+      controls.resolveContinue(0);
+      await settle();
+      await manager.sendToAgent(agentId, 'second message');
+      expect(controls.continueMessages[1]).toBe('second message');
+    });
+
     it('refuses with unsupported when the handle offers no mechanism at all', async () => {
       const capabilities = sdkAdapter.capabilities();
       sdkAdapter.capabilities.mockReturnValue({

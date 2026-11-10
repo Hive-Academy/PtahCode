@@ -123,7 +123,7 @@ describe('native slash runtime routing', () => {
     h.closeSession.mockReturnValue(closing);
     const route = h.route();
     await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(h.interruptSession).toHaveBeenCalledWith(sessionId);
+    expect(h.interruptSession).toHaveBeenCalledWith(sessionId, 'user-stop');
     expect(h.closeSession).toHaveBeenCalledWith(sessionId);
     expect(h.broadcastMessage).not.toHaveBeenCalled();
     finishClose?.();
@@ -149,7 +149,7 @@ describe('native slash runtime routing', () => {
     const h = harness(native, 'clear');
     Object.assign(h.service, { nativeAdapter: { owns: () => false, closeSession: h.closeSession } });
     await expect(h.route()).resolves.toEqual({ success: true, sessionId });
-    expect(h.interruptSession).toHaveBeenCalledWith(sessionId);
+    expect(h.interruptSession).toHaveBeenCalledWith(sessionId, 'user-stop');
     expect(h.closeSession).not.toHaveBeenCalled();
     expect(h.broadcastMessage).toHaveBeenCalledTimes(1);
   });

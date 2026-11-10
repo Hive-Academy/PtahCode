@@ -201,6 +201,7 @@ function makeHarness() {
       logger?: unknown;
       idResolved?: unknown;
       chain?: unknown;
+      spawner?: unknown;
     } = {},
   ) =>
     new SessionHandoffService(
@@ -219,6 +220,7 @@ function makeHarness() {
       ('idResolved' in overrides ? overrides.idResolved : idResolved) as never,
       ('chain' in overrides ? overrides.chain : chain) as never,
       ackStore,
+      ('spawner' in overrides ? overrides.spawner : null) as never,
     );
 
   const request = (
@@ -383,6 +385,50 @@ describe('SessionHandoffService', () => {
   });
 
   describe('refusals', () => {
+    it('succeeds a child in its worktree without starting a top-level session', async () => {
+      const h = makeHarness();
+      h.children.add(CALLER);
+      const successor = { childSessionId: CALLER_NEW_TAB, label: 'Next child', workspaceRoot: root, worktreePath: root };
+      const spawner = { succeed: jest.fn().mockResolvedValue({ ok: true, successor, adoptedLanes: ['lane-1'], tabOpened: true }) };
+      const request = h.request({ label: 'Next child' });
+      await expect(h.build({ spawner }).handoff(request)).resolves.toEqual({
+        ok: true, tabId: CALLER_NEW_TAB, label: 'Next child', workspaceRoot: root,
+        cwd: root, tabOpened: true, adoptedLanes: ['lane-1'], adoptedChildSessions: [],
+      });
+      expect(spawner.succeed).toHaveBeenCalledTimes(1);
+      expect(spawner.succeed).toHaveBeenCalledWith({ callerSessionId: CALLER, handoffPath, prompt: PROMPT, label: 'Next child' });
+      expect(h.host.startHandoffSession).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['not-a-live-child', 'unattributed-caller'],
+      ['succession-in-progress', 'already-handed-off'],
+      ['max-successions-reached', 'child-session'],
+      ['chat-runtime-unavailable', 'chat-runtime-unavailable'],
+      ['session-start-failed', 'session-start-failed'],
+    ])('maps child succession refusal %s', async (refusal, mapped) => {
+      const h = makeHarness();
+      h.children.add(CALLER);
+      const spawner = { succeed: jest.fn().mockResolvedValue({ ok: false, refusal, detail: 'specific detail' }) };
+      await expect(h.build({ spawner }).handoff(h.request())).resolves.toEqual({ ok: false, refusal: mapped, detail: 'specific detail' });
+    });
+
+    it('checks the child handoff file before calling the spawner', async () => {
+      const h = makeHarness();
+      h.children.add(CALLER);
+      const spawner = { succeed: jest.fn() };
+      await expect(h.build({ spawner }).handoff(h.request({ handoffPath: join(root, 'missing.md') }))).resolves.toMatchObject({ ok: false, refusal: 'handoff-file-missing' });
+      expect(spawner.succeed).not.toHaveBeenCalled();
+    });
+
+    it('treats a successor child acknowledgement as unnecessary', async () => {
+      const h = makeHarness();
+      h.children.add(CALLER);
+      await expect(h.service.acknowledge({ callerSessionId: CALLER, predecessorSessionId: CALLER_SDK, handoffPath })).resolves.toEqual({
+        status: 'already-closed',
+        reason: 'A successor child needs no acknowledgement; the host retires its predecessor.',
+      });
+    });
     it('chat-runtime-unavailable: no host registered', async () => {
       const h = makeHarness();
       const service = h.build({ container: null });
@@ -1014,7 +1060,7 @@ describe('SessionHandoffService', () => {
       expect(await h.service.acknowledge({ callerSessionId: result.tabId, predecessorSessionId: CALLER, handoffPath })).toMatchObject({ status: 'closed' });
 
       expect(h.lifecycle.endSession).toHaveBeenCalledTimes(1);
-      expect(h.lifecycle.endSession).toHaveBeenCalledWith(CALLER);
+      expect(h.lifecycle.endSession).toHaveBeenCalledWith(CALLER, 'parent-stop');
       expect(h.lifecycle.endSession).not.toHaveBeenCalledWith(CALLER_SDK);
       expect(h.lifecycle.endSession).not.toHaveBeenCalledWith('lane-a');
       expect(h.lifecycle.endSession).not.toHaveBeenCalledWith('child-live');
@@ -1097,7 +1143,7 @@ describe('SessionHandoffService', () => {
         sessionId: CALLER_SDK,
       });
       await tick();
-      expect(h.lifecycle.endSession).toHaveBeenCalledWith(CALLER);
+      expect(h.lifecycle.endSession).toHaveBeenCalledWith(CALLER, 'parent-stop');
     });
 
     it('does not arm on refusal', async () => {
@@ -1128,7 +1174,7 @@ describe('SessionHandoffService', () => {
       h.service.onCallerTurnFlushed({ tabId: CALLER, sessionId: CALLER });
       await tick();
       expect(h.chain.append).not.toHaveBeenCalled();
-      expect(h.lifecycle.endSession).toHaveBeenCalledWith(CALLER);
+      expect(h.lifecycle.endSession).toHaveBeenCalledWith(CALLER, 'parent-stop');
       expect(h.turnState.forceIdle.mock.calls.map((call) => call[0])).toEqual([
         CALLER,
       ]);
@@ -1188,7 +1234,7 @@ describe('SessionHandoffService', () => {
       expect(await h.service.acknowledge({ callerSessionId: started.tabId, predecessorSessionId: CALLER, handoffPath })).toMatchObject({ status: 'retryable-failure' });
       h.service.onCallerTurnFlushed({ tabId: CALLER, sessionId: CALLER });
       await tick();
-      expect(h.lifecycle.endSession).toHaveBeenCalledWith(CALLER);
+      expect(h.lifecycle.endSession).toHaveBeenCalledWith(CALLER, 'parent-stop');
       expect(h.stopLogger.error).toHaveBeenCalledWith(
         expect.stringContaining('forceIdle'),
         expect.any(Error),

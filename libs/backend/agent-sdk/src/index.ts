@@ -269,6 +269,10 @@ export {
 } from './lib/helpers';
 export {
   SessionEndCallbackRegistry,
+  SESSION_END_CAUSES,
+  SessionEndCauseSchema,
+  parseSessionEndCause,
+  type SessionEndCause,
   type SessionEndCallback,
   type SessionEndPayload,
   SessionActivityRegistry,

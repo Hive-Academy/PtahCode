@@ -273,10 +273,9 @@ whole thread, so a lane's bill grows with its call count times its accumulated c
 over 7 days of Codex lanes: 68 requests per session at an average 115k-token context, 29% of
 them polling, and 1.23 billion input tokens in total.
 
-- There is **no tool-call ceiling**. The vendor CLIs manage their own context, and a call count
-  says little about cost (most of the input is cheap cache reads). Ptah stops a lane only when it
-  repeats one identical call in a loop (`laneRepeatCallStopAt`, default 20). Do not state a call
-  budget in `task`.
+- CLI lanes have a lifetime weighted-token budget (`agentBudget.stopWeightedTokens`, default 3,000,000); verified cached reads count at 10% in the floor.
+- A warning fires for CLI lanes at `agentBudget.warnRatio` (default 0.85), with one grace turn after the first token-limit crossing.
+- The duration limit also stops a lane. Resume after a budget stop starts a fresh lane with a handoff brief.
 - Size each batch by context weight: `ptah_count_tokens` for its read set plus write set, then
   add 10% for framing. Target 4,000–12,000 tokens; hard ceiling 16,000. Keep at most six write
   files and two Nx projects as secondary limits. A coherent batch may fall below 4,000 tokens;
@@ -303,6 +302,14 @@ CLI; use a child session when the work needs the full chat runtime, slash comman
 | `ptah_session_status({ sessionId? })`              | State of one or all of your children                                                                     |
 | `ptah_session_read({ sessionId, tailKiB? })`       | Tail of the child's transcript (default 32 KiB, max 256)                                                 |
 | `ptah_session_stop({ sessionId })`                 | Stop it; tab, transcript, worktree and branch remain                                                     |
+
+A child can hand off to a successor in the same worktree and branch. The host warns before its
+runtime cap; an idle child succeeds at the cap, while a busy child finishes its turn first.
+After the grace period, the host interrupts a busy turn and starts a recovery successor. An
+unexpected session end that does not recover in 30 seconds also starts a recovery successor.
+The parent receives one `handed-off` signal with verdict `unverified` and `succeededBy`; use
+either the old child id or the successor id with `ptah_session_*`. User or parent stops, workspace
+close, and host shutdown end the child instead; its running lanes move to the parent.
 
 - **Messaging first.** Steer with `ptah_session_send`; use `ptah_session_read` to inspect. Do not poll
   `ptah_session_status` while a completion turn is due: one is pushed into your session each time a

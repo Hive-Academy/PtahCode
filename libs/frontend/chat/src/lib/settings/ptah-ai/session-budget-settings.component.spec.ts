@@ -494,23 +494,23 @@ describe('SessionBudgetSettingsComponent', () => {
       expect(box.checked).toBe(true);
     });
 
-    it('writes "Hand off automatically at 100%" (off by default) and keeps the banners', async () => {
+    it('writes "Hand off automatically at 100%" (on by default) and keeps the banners', async () => {
       await create();
       const box = field('autoHandoffAtLimit');
-      expect(box.checked).toBe(false);
+      expect(box.checked).toBe(true);
       expect(box.getAttribute('aria-label')).toBe(
         'Hand off automatically at 100%',
       );
       expect(
         byTestId('settings-section-session-budget')?.textContent,
       ).toContain('once per session');
-      box.checked = true;
+      box.checked = false;
       box.dispatchEvent(new Event('change'));
       await settle();
       expect(writes()).toEqual([
-        { key: 'sessionBudget.autoHandoffAtLimit', value: true },
+        { key: 'sessionBudget.autoHandoffAtLimit', value: false },
       ]);
-      expect(box.checked).toBe(true);
+      expect(box.checked).toBe(false);
       expect(tabManager.clearSessionBudgets).not.toHaveBeenCalled();
     });
 

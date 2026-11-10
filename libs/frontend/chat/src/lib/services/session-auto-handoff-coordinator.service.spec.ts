@@ -4,6 +4,7 @@ import { LoggingService } from '@ptah-extension/core';
 import { QueuedFollowUpStore, TabManagerService, TabWorkspacePartitionService } from '@ptah-extension/chat-state';
 import type { TabState } from '@ptah-extension/chat-types';
 import { SessionId, type SessionBudgetState } from '@ptah-extension/shared';
+import { FollowUpQueueService } from './chat-store/follow-up-queue.service';
 import { MessageDispatchService } from './chat-store/message-dispatch.service';
 import { SessionAutoHandoffService } from './session-auto-handoff.service';
 import { SessionAutoHandoffCoordinatorService } from './session-auto-handoff-coordinator.service';
@@ -36,6 +37,8 @@ describe('SessionAutoHandoffCoordinatorService', () => {
   let handoff: SessionAutoHandoffService;
   let send: jest.Mock;
   let probe: jest.Mock;
+  let withdraw: jest.Mock;
+  let info: jest.Mock;
   let now: number;
   let probeGate: Promise<void> | null;
   let nextId: number;
@@ -64,6 +67,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
     now = 1_000_000;
     nextId = 0;
     probeGate = null;
+    info = jest.fn();
     jest.spyOn(Date, 'now').mockImplementation(() => now);
     probe = jest.fn(async (): Promise<HandoffSkillProbe> => {
       if (probeGate) await probeGate;
@@ -77,6 +81,10 @@ describe('SessionAutoHandoffCoordinatorService', () => {
         content, isCommand: true, phase: 'held',
       });
       return { success: true, queued: { clientMessageId, tabId: options.tabId, sessionId: SESSION } };
+    });
+    withdraw = jest.fn(async (ref: { clientMessageId: string }) => {
+      store.settle(ref.clientMessageId, 'withdrawn');
+      return true;
     });
     TestBed.configureTestingModule({ providers: [
       SessionAutoHandoffCoordinatorService, SessionAutoHandoffService, QueuedFollowUpStore,
@@ -95,7 +103,8 @@ describe('SessionAutoHandoffCoordinatorService', () => {
         sendOrQueueMessage: send, hasPendingPermissionForTab: () => permission(),
       } },
       { provide: SessionHandoffSkillService, useValue: { probe: () => probe() } },
-      { provide: LoggingService, useValue: { info: jest.fn(), warn: jest.fn() } },
+      { provide: FollowUpQueueService, useValue: { withdraw } },
+      { provide: LoggingService, useValue: { info, warn: jest.fn() } },
     ] });
     store = TestBed.inject(QueuedFollowUpStore);
     handoff = TestBed.inject(SessionAutoHandoffService);
@@ -107,6 +116,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
     start([makeTab('shown', { claudeSessionId: OTHER_SESSION, sessionBudget: null }), makeTab(TAB)]);
     await run();
     expect(send).toHaveBeenCalledWith(COMMAND, { tabId: TAB });
+    expect(info).toHaveBeenCalledWith('[SessionAutoHandoff]', 'automatic hand-off fired', { sessionId: SESSION, tabId: TAB, delivery: 'sent' });
     patch(TAB, { sessionBudget: { ...BUDGET, revision: 13 } });
     await run();
     expect(send).toHaveBeenCalledTimes(1);
@@ -132,6 +142,24 @@ describe('SessionAutoHandoffCoordinatorService', () => {
     await run();
     expect(handoff.entry(SESSION)?.state).toBe('fired');
     expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('withdraws a hand-off queued on the live estimate when the confirmed stage stays below the limit', async () => {
+    start([makeTab(TAB, {
+      status: 'streaming',
+      sessionBudget: { ...BUDGET, stage: 'handoff', percent: 82 },
+      liveBudgetStage: 'limit',
+    })]);
+    await run();
+    expect(queued()?.content).toBe(COMMAND);
+    patch(TAB, { liveBudgetStage: null, sessionBudget: { ...BUDGET, stage: 'handoff', percent: 91, revision: 13 } });
+    await run();
+    expect(withdraw).toHaveBeenCalledTimes(1);
+    expect(queued()).toBeUndefined();
+    expect(handoff.entry(SESSION)).toBeNull();
+    patch(TAB, { status: 'loaded', sessionBudget: { ...BUDGET, revision: 14 } });
+    await run();
+    expect(send).toHaveBeenCalledTimes(2);
   });
 
   it.each(['withdrawn', 'failed'] as const)(
@@ -180,6 +208,21 @@ describe('SessionAutoHandoffCoordinatorService', () => {
     start([makeTab(TAB, { sessionBudget: budget })]);
     await run();
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('logs each limit skip reason once per session across evaluations', async () => {
+    start([makeTab(TAB, { sessionBudget: { ...BUDGET, autoHandoff: false } })]);
+    await run();
+    patch(TAB, { sessionBudget: { ...BUDGET, autoHandoff: false, revision: 13 } });
+    await run();
+    expect(info).toHaveBeenCalledTimes(1);
+    expect(info).toHaveBeenCalledWith('[SessionAutoHandoff]', 'automatic hand-off skipped: auto handoff off', { sessionId: SESSION, tabId: TAB });
+    patch(TAB, { status: 'resuming', sessionBudget: { ...BUDGET } });
+    await run();
+    patch(TAB, { sessionBudget: { ...BUDGET, revision: 14 } });
+    await run();
+    expect(info).toHaveBeenCalledTimes(2);
+    expect(info).toHaveBeenCalledWith('[SessionAutoHandoff]', 'automatic hand-off skipped: pending resume', { sessionId: SESSION, tabId: TAB });
   });
 
   it('does not retry a confirmed missing skill', async () => {

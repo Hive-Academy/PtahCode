@@ -5,8 +5,8 @@
  *
  * The service only guards and asks the chat host port to start an ordinary
  * session; the new session is not a child (it is never in
- * `SessionChildRegistry`), so it can hand off again later. A child session is
- * refused: its parent supervises its work.
+ * `SessionChildRegistry`), so it can hand off again later. A child session
+ * starts a successor in its existing worktree through the spawner.
  *
  * The new session adopts the caller's background work: the caller's running
  * CLI lanes and its child sessions are re-parented to its tab before the
@@ -50,6 +50,7 @@ import { CLI_AGENT_RUNTIME_TOKENS } from '../di/tokens';
 import type { AgentProcessManager } from '../cli-agents/agent-process-manager.service';
 import type { IChildChatSessionHost } from './child-chat-session-host.port';
 import { SessionChildRegistry } from './session-child.registry';
+import type { ISessionSpawner, SessionChildSuccessionRefusalCode } from './session-spawner.port';
 import { safeErrorKind } from './safe-error-kind';
 import { SessionHandoffAckStore } from './session-handoff-ack.store';
 import type { ISessionHandoffChain } from './session-handoff-chain.port';
@@ -183,6 +184,8 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
     private readonly chain: ISessionHandoffChain | null = null,
     @inject(CLI_AGENT_RUNTIME_TOKENS.SESSION_HANDOFF_ACK_STORE, { isOptional: true })
     private readonly ackStore: SessionHandoffAckStore | null = null,
+    @inject(CLI_AGENT_RUNTIME_TOKENS.SESSION_SPAWNER, { isOptional: true })
+    private readonly spawner: ISessionSpawner | null = null,
   ) {
     this.releaseIdResolved = this.idResolved
       ? this.idResolved.register((payload) => {
@@ -211,6 +214,9 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
   private async acknowledgeOnce(request: SessionHandoffAckRequest): Promise<SessionHandoffAckResult> {
     const refused = (reason: string): SessionHandoffAckResult => ({ status: 'refused', reason });
     const retry = (reason: string): SessionHandoffAckResult => ({ status: 'retryable-failure', reason });
+    if (this.registry.isChild(request.callerSessionId)) {
+      return { status: 'already-closed', reason: 'A successor child needs no acknowledgement; the host retires its predecessor.' };
+    }
     if (!this.ackStore || !request.callerSessionId?.trim() || !request.predecessorSessionId.trim()) {
       return refused('handoff identity or storage unavailable');
     }
@@ -280,16 +286,46 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
     }
   }
 
+  private async succeedChild(request: SessionHandoffRequest): Promise<SessionHandoffResult> {
+    if (!this.spawner) {
+      return this.refuse('child-session', 'a child session cannot hand off; its parent session supervises its work');
+    }
+    if ((this.mcpStatus?.getPort() ?? null) === null) {
+      return this.refuse('mcp-unavailable', 'the Ptah MCP server is not running in this host, so the new session could not hand off again');
+    }
+    const handoffFile = await this.checkHandoffFile(request.handoffPath);
+    if (handoffFile) return handoffFile;
+    const result = await this.spawner.succeed({
+      callerSessionId: request.callerSessionId,
+      handoffPath: resolve(request.handoffPath),
+      prompt: request.prompt,
+      label: request.label,
+    });
+    if (!result.ok) {
+      const refusals: Record<SessionChildSuccessionRefusalCode, SessionHandoffRefusalCode> = {
+        'not-a-live-child': 'unattributed-caller',
+        'succession-in-progress': 'already-handed-off',
+        'max-successions-reached': 'child-session',
+        'chat-runtime-unavailable': 'chat-runtime-unavailable',
+        'session-start-failed': 'session-start-failed',
+      };
+      return this.refuse(refusals[result.refusal], result.detail);
+    }
+    return {
+      ok: true,
+      tabId: result.successor.childSessionId,
+      label: result.successor.label,
+      workspaceRoot: result.successor.workspaceRoot,
+      cwd: result.successor.worktreePath,
+      tabOpened: result.tabOpened,
+      adoptedLanes: result.adoptedLanes,
+      adoptedChildSessions: [],
+    };
+  }
+
   private async guardAndStart(
     request: SessionHandoffRequest,
   ): Promise<SessionHandoffResult> {
-    const host = this.lookupHost();
-    if (!host || !this.adapter) {
-      return this.refuse(
-        'chat-runtime-unavailable',
-        'this host has no chat runtime to open a new session in',
-      );
-    }
     const caller = SessionId.safeParse(request.callerSessionId?.trim());
     const record = caller ? this.lifecycle.find(caller) : undefined;
     if (!caller || !record) {
@@ -303,9 +339,13 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
       this.registry.isChild(caller) ||
       this.registry.isChild(record.realSessionId ?? undefined)
     ) {
+      return this.succeedChild(request);
+    }
+    const host = this.lookupHost();
+    if (!host || !this.adapter) {
       return this.refuse(
-        'child-session',
-        'a child session cannot hand off; its parent session supervises its work',
+        'chat-runtime-unavailable',
+        'this host has no chat runtime to open a new session in',
       );
     }
     if ((this.mcpStatus?.getPort() ?? null) === null) {
@@ -713,7 +753,7 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
 
   private async stopCaller(arm: ArmedCallerStop): Promise<void> {
     try {
-      await this.lifecycle.endSession(SessionId.from(arm.callerTabId));
+      await this.lifecycle.endSession(SessionId.from(arm.callerTabId), 'parent-stop');
     } catch (error: unknown) {
       // degradation-audit: reported - reportError logs the stop failure; the caller is re-armed so the next flush retries.
       this.reportError('handoff caller stop failed', error);

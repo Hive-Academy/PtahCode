@@ -1,11 +1,12 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
 import { LucideAngularModule, Play } from 'lucide-angular';
+import { SetupActionDirective } from '@ptah-extension/ui';
 import { RunStatusChipComponent } from '../shared/run-status-chip.component';
 
 @Component({
   selector: 'ptah-resume-banner',
   standalone: true,
-  imports: [LucideAngularModule, RunStatusChipComponent],
+  imports: [LucideAngularModule, RunStatusChipComponent, SetupActionDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -15,7 +16,7 @@ import { RunStatusChipComponent } from '../shared/run-status-chip.component';
       <div class="min-w-0 flex-1"><p class="font-medium">{{ title() }}</p>
         @if (detail(); as fact) {<p class="text-sm text-base-content-muted">{{ fact }}</p>}
       </div>
-      <button type="button" class="btn btn-primary btn-sm min-h-8" (click)="resumeRequested.emit()">
+      <button type="button" [ptahSetupAction]="'glass'" (click)="resumeRequested.emit()">
         <lucide-angular [img]="icons.play" class="size-4" aria-hidden="true" />Resume
       </button>
     </section>

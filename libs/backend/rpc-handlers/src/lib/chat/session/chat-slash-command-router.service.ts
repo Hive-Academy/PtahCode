@@ -236,12 +236,12 @@ export class ChatSlashCommandRouterService {
         const nativeAdapter = this.nativeAdapter;
         if (nativeAdapter?.owns(sessionId)) {
           try {
-            await this.sdkAdapter.interruptSession(sessionId);
+            await this.sdkAdapter.interruptSession(sessionId, 'user-stop');
           } finally {
             await nativeAdapter.closeSession(sessionId);
           }
         } else {
-          await this.sdkAdapter.interruptSession(sessionId);
+          await this.sdkAdapter.interruptSession(sessionId, 'user-stop');
         }
 
         await this.webviewManager.broadcastMessage(

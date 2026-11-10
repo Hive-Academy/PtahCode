@@ -1,6 +1,6 @@
 ---
 title: Agent Sessions
-description: Let a chat session start child chat sessions in their own git worktrees, steer them, and read their results, with the ptah_session_* tools and four settings.
+description: Let a chat session start child chat sessions in their own git worktrees, steer them, and read their results with the ptah_session_* tools.
 ---
 
 # Agent Sessions
@@ -50,7 +50,7 @@ The result states the effect (`started-turn`, `held-until-turn-end` or `interrup
 
 ### `ptah_session_status`
 
-Takes an optional `sessionId`; without it, every child of the caller is listed. For each child it shows the status (`starting`, `working`, `awaiting-permission`, `waiting`, `idle`, `failed`, `stopped`, `timed-out` or `ended`), branch, base ref, worktree path, turns settled, reports delivered and refused, the last completion, any held completion, and the permission prompt it is waiting on with the time it will be denied.
+Takes an optional `sessionId`; without it, every child of the caller is listed. For each child it shows the status (`starting`, `working`, `awaiting-permission`, `waiting`, `idle`, `handed-off`, `failed`, `stopped`, `timed-out` or `ended`), branch, base ref, worktree path, turns settled, reports delivered and refused, the last completion, any held completion, and the permission prompt it is waiting on with the time it will be denied. A `handed-off` child shows its `succeededBy` id. The old id still works with send, status, read, and stop; those tools forward to the successor.
 
 ### `ptah_session_read`
 
@@ -84,16 +84,27 @@ A child cannot start sessions of its own (depth is limited to 1).
 
 ## Settings
 
-Four settings bound child sessions. They are read each time a session is started, so a change applies to the next `ptah_session_start`. All four live under `ptah.agentSessions.`.
+Seven settings bound child sessions. They are read each time a session is started, so a change applies to the next `ptah_session_start`. All seven live under `ptah.agentSessions.`.
 
 | Setting                                     | Default   | Range           | Meaning                                                                                                                                   |
 | ------------------------------------------- | --------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `ptah.agentSessions.maxConcurrent`          | `3`       | 1 to 5          | Live children across the whole host. An idle child still counts until it is stopped. A start beyond the limit is refused (`cap-reached`). |
-| `ptah.agentSessions.maxRuntimeMinutes`      | `120`     | 5 to 720        | Wall-clock cap per child, in minutes.                                                                                                     |
+| `ptah.agentSessions.maxRuntimeMinutes`      | `120`     | 5 to 720        | Wall-clock cap per child, in minutes; starts an automatic handoff.                                                                        |
+| `ptah.agentSessions.runtimeWarnLeadMinutes` | `10`      | 1 to 60         | Minutes before the cap to warn the child; always below the cap.                                                                           |
+| `ptah.agentSessions.handoffGraceMinutes`    | `15`      | 1 to 120        | Minutes after the cap before a busy child is interrupted for recovery.                                                                    |
+| `ptah.agentSessions.maxSuccessions`         | `8`       | 0 to 50         | Maximum automatic successors; `0` ends the child at the cap.                                                                             |
 | `ptah.agentSessions.permissionDenyWindowMs` | `60000`   | 0 to 600000     | How long a prompt outside the policy waits in the child's tab before it is denied. `0` denies at once.                                    |
 | `ptah.agentSessions.bashAllowlist`          | see below | list of strings | Bash command prefixes a child may run without asking.                                                                                     |
 
 A number outside its range is clamped, and a value of the wrong type falls back to the default. For the allowlist, any entry that is not a string makes the whole list fall back to the default; blank entries are dropped, and an explicit empty list means every Bash command needs approval.
+
+## Runtime cap and automatic handoff
+
+At the cap minus `runtimeWarnLeadMinutes`, the host asks the child to finish its step, write `HANDOFF.md`, and call `ptah_session_handoff`. At the cap, the host starts a successor at once if the child is idle. A busy child finishes its turn first. If it is still busy at the cap plus `handoffGraceMinutes`, the host interrupts the turn and starts a successor with a recovery prompt. The successor keeps the same worktree, branch, and parent, adopts running CLI lanes, and receives a fresh runtime cap.
+
+If a child's session ends unexpectedly and does not return in 30 seconds, the host also starts a recovery successor. Unexpected ends include stream exit, provider error, settings re-initialization, and compaction abort. The parent receives one `handed-off` signal with verdict `unverified` and the successor id.
+
+If the successor cannot start or `maxSuccessions` is reached, the child ends `timed-out`. Its running lanes move to the parent; uncommitted work stays in the worktree. A user stop, parent stop, workspace close, or host shutdown ends the child with status `ended` and moves its running lanes to the parent.
 
 Default `bashAllowlist`:
 

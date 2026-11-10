@@ -9,6 +9,8 @@ export function createLaneBudget(settings: AgentBudgetSettings, startedAt: strin
     previous ? {
       weightedTokens: previous.weightedTokens,
       rawTokens: previous.rawTokens,
+      ...(previous.largestTurnTokens === undefined ? {} : { largestTurnTokens: previous.largestTurnTokens }),
+      ...(previous.unavailableTurns === undefined ? {} : { unavailableTurns: previous.unavailableTurns }),
       turnIds: previous.turnIds,
       elapsedMs: 0, warned: false, stopped: false,
     } : undefined,

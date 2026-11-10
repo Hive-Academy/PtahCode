@@ -1,6 +1,7 @@
 import {
   DestroyRef,
   Injectable,
+  Injector,
   effect,
   inject,
   signal,
@@ -16,6 +17,7 @@ import {
 import type { TabState } from '@ptah-extension/chat-types';
 import type { SessionBudgetState } from '@ptah-extension/shared';
 import { displayBudgetStage } from '../components/molecules/notifications/session-budget-format';
+import { FollowUpQueueService } from './chat-store/follow-up-queue.service';
 import { MessageDispatchService } from './chat-store/message-dispatch.service';
 import { SessionAutoHandoffService } from './session-auto-handoff.service';
 import { SessionHandoffSkillService } from './session-handoff-skill.service';
@@ -26,6 +28,12 @@ interface HandoffCandidate {
   readonly tabId: string;
   readonly sessionId: string;
   readonly budget: SessionBudgetState;
+}
+
+/** A queued hand-off whose session is no longer at its limit. */
+interface StaleHandoff {
+  readonly sessionId: string;
+  readonly queued: QueuedFollowUpRef;
 }
 
 /**
@@ -73,6 +81,8 @@ export class SessionAutoHandoffCoordinatorService {
   private readonly partition = inject(TabWorkspacePartitionService);
   private readonly messageDispatch = inject(MessageDispatchService);
   private readonly followUpStore = inject(QueuedFollowUpStore);
+  /** Resolved on first use: the queue service has its own construction-time wiring. */
+  private readonly injector = inject(Injector);
   private readonly autoHandoff = inject(SessionAutoHandoffService);
   private readonly skill = inject(SessionHandoffSkillService);
   private readonly logger = inject(LoggingService);
@@ -90,16 +100,22 @@ export class SessionAutoHandoffCoordinatorService {
   private readonly failedAttempts = new Map<string, number>();
   /** Sessions that exhausted {@link MAX_FAILED_ATTEMPTS}; left alone for this page's lifetime. */
   private readonly givenUp = new Set<string>();
+  private readonly loggedSkips = new Set<string>();
+  /** Sessions whose queued hand-off is being withdrawn because the confirmed stage is below `limit`. */
+  private readonly withdrawing = new Set<string>();
 
   constructor() {
     this.destroyRef.onDestroy(() => {
       if (this.retryTimer !== null) clearTimeout(this.retryTimer);
+      this.loggedSkips.clear();
     });
     effect(() => {
       this.retryRevision();
       const candidates = this.candidates();
-      if (candidates.length === 0) return;
+      const stale = this.staleQueued();
+      if (candidates.length === 0 && stale.length === 0) return;
       untracked(() => {
+        for (const item of stale) void this.withdrawStale(item);
         for (const candidate of candidates) void this.fire(candidate);
       });
     });
@@ -114,36 +130,119 @@ export class SessionAutoHandoffCoordinatorService {
    * re-runs the effect when it changes.
    */
   private candidates(): readonly HandoffCandidate[] {
-    const activeTabs = this.tabManager.tabs();
-    const backgroundRevision = this.tabManager.backgroundTabsRevision();
-    const backgroundTabs = this.partition.findBackgroundTabs(
-      (tab) => tab.sessionBudget !== null && tab.sessionBudget !== undefined,
-    );
     const now = Date.now();
     const found: HandoffCandidate[] = [];
     const sessions = new Set<string>();
-    for (const tab of [...activeTabs, ...backgroundTabs]) {
-      if (!handoffStageReached(tab)) continue;
+    for (const tab of this.budgetTabs()) {
+      const budget = tab.sessionBudget;
+      if (!budget || budgetStage(tab) !== 'limit') continue;
       const sessionId = tab.claudeSessionId;
       if (typeof sessionId !== 'string') continue;
+      if (budget.sessionId !== sessionId) {
+        this.logSkip(sessionId, 'session id mismatch', tab.id);
+        continue;
+      }
+      if (budget.autoHandoff !== true) {
+        this.logSkip(sessionId, 'auto handoff off', tab.id);
+        continue;
+      }
       if (sessions.has(sessionId)) continue; // the first tab per session sends
       sessions.add(sessionId);
-      if (this.autoHandoff.entry(sessionId) !== null) continue;
-      if (this.autoHandoff.isManuallyWrappedUp(sessionId)) continue;
-      if (this.skillMissing.has(sessionId)) continue;
-      if (this.givenUp.has(sessionId)) continue;
+      const entry = this.autoHandoff.entry(sessionId);
+      if (entry !== null) {
+        this.logSkip(sessionId, entry.state === 'cancelled' ? 'cancelled' : 'already claimed', tab.id);
+        continue;
+      }
+      if (this.autoHandoff.isManuallyWrappedUp(sessionId)) {
+        this.logSkip(sessionId, 'manual wrap-up', tab.id);
+        continue;
+      }
+      if (this.skillMissing.has(sessionId)) {
+        this.logSkip(sessionId, 'skill unavailable', tab.id);
+        continue;
+      }
+      if (this.givenUp.has(sessionId)) {
+        this.logSkip(sessionId, 'retry limit reached', tab.id);
+        continue;
+      }
       if (this.inFlight.has(sessionId)) continue;
       const gatedAt = this.nextAttemptAt.get(sessionId);
       if (gatedAt !== undefined && now < gatedAt) continue;
-      if (tab.status === 'resuming') continue; // wait for the resume to settle
+      if (tab.status === 'resuming') {
+        this.logSkip(sessionId, 'pending resume', tab.id);
+        continue;
+      }
       // A queued message would deny the prompt; this tracked read re-runs the
       // effect once the prompt is answered.
-      if (this.messageDispatch.hasPendingPermissionForTab(tab.id)) continue;
-      const budget = tab.sessionBudget;
-      if (!budget) continue;
+      if (this.messageDispatch.hasPendingPermissionForTab(tab.id)) {
+        this.logSkip(sessionId, 'pending permission', tab.id);
+        continue;
+      }
       found.push({ tabId: tab.id, sessionId, budget });
     }
     return found;
+  }
+
+  private atLimit(tabId: string): boolean {
+    const tab = this.tabManager.findTabByIdAcrossWorkspaces(tabId)?.tab ?? null;
+    return tab !== null && budgetStage(tab) === 'limit';
+  }
+
+  /** Tabs in both partitions; the tracked reads re-run the effect when either changes. */
+  private budgetTabs(): readonly TabState[] {
+    const activeTabs = this.tabManager.tabs();
+    this.tabManager.backgroundTabsRevision();
+    return [
+      ...activeTabs,
+      ...this.partition.findBackgroundTabs(
+        (tab) => tab.sessionBudget !== null && tab.sessionBudget !== undefined,
+      ),
+    ];
+  }
+
+  /**
+   * Hand-offs queued on the live estimate of a running turn (D25) whose stage
+   * is no longer `limit`: the turn's result cleared the estimate and the
+   * confirmed stage stayed below the limit. They must not run.
+   */
+  private staleQueued(): readonly StaleHandoff[] {
+    const found: StaleHandoff[] = [];
+    for (const tab of this.budgetTabs()) {
+      const sessionId = tab.claudeSessionId;
+      if (typeof sessionId !== 'string' || tab.sessionBudget?.sessionId !== sessionId) continue;
+      if (budgetStage(tab) === 'limit') continue;
+      const entry = this.autoHandoff.entry(sessionId);
+      if (entry?.state !== 'fired' || !entry.queued || entry.queued.tabId !== tab.id) continue;
+      if (this.withdrawing.has(sessionId) || !this.followUpStore.isPending(entry.queued.clientMessageId)) continue;
+      found.push({ sessionId, queued: entry.queued });
+    }
+    return found;
+  }
+
+  /** Withdraw one stale queued hand-off; a later confirmed `limit` fires a new one. */
+  private async withdrawStale({ sessionId, queued }: StaleHandoff): Promise<void> {
+    this.withdrawing.add(sessionId);
+    try {
+      const withdrawn = await this.injector.get(FollowUpQueueService).withdraw(queued, { restore: false });
+      this.logger.info(
+        LOG_CONTEXT,
+        withdrawn
+          ? 'queued automatic hand-off withdrawn: the confirmed stage is below the limit'
+          : 'queued automatic hand-off not withdrawn: a turn already took it',
+        { sessionId, tabId: queued.tabId },
+      );
+    } catch (error: unknown) {
+      this.logger.warn(LOG_CONTEXT, 'withdrawing the queued automatic hand-off failed', { sessionId, error });
+    } finally {
+      this.withdrawing.delete(sessionId);
+    }
+  }
+
+  private logSkip(sessionId: string, reason: string, tabId: string): void {
+    const key = `${sessionId}:${reason}`;
+    if (this.loggedSkips.has(key)) return;
+    this.loggedSkips.add(key);
+    this.logger.info(LOG_CONTEXT, `automatic hand-off skipped: ${reason}`, { sessionId, tabId });
   }
 
   /**
@@ -161,6 +260,7 @@ export class SessionAutoHandoffCoordinatorService {
         // automatic hand-off never falls back to the inline prompt (it would
         // repeat on every reload); the button keeps its manual fallback.
         this.skillMissing.add(sessionId);
+        this.logSkip(sessionId, 'skill unavailable', tabId);
         this.logger.info(
           LOG_CONTEXT,
           'the session-handoff skill is not installed; the automatic hand-off stays off for the session',
@@ -175,14 +275,21 @@ export class SessionAutoHandoffCoordinatorService {
       // The probe was asynchronous: re-read the tab, not the view. A tab
       // switch does not abort it — the hand-off belongs to the session.
       const target = this.stillQualifies(tabId, sessionId);
-      if (!target) return;
+      if (!target) {
+        this.logSkip(sessionId, 'tab no longer qualifies or is not mounted', tabId);
+        return;
+      }
       if (
         this.autoHandoff.isManuallyWrappedUp(sessionId) ||
         this.messageDispatch.hasPendingPermissionForTab(tabId)
       ) {
+        this.logSkip(sessionId, this.autoHandoff.isManuallyWrappedUp(sessionId) ? 'manual wrap-up' : 'pending permission', tabId);
         return; // the effect re-fires once the blocker clears
       }
-      if (!this.autoHandoff.claim(sessionId)) return;
+      if (!this.autoHandoff.claim(sessionId)) {
+        this.logSkip(sessionId, 'already claimed', tabId);
+        return;
+      }
       const outcome = await this.messageDispatch.sendOrQueueMessage(
         buildHandoffCommand(target.budget),
         { tabId },
@@ -196,6 +303,7 @@ export class SessionAutoHandoffCoordinatorService {
       // Queued (the turn runs): delivery is reported by the follow-up store.
       const queued = outcome.queued ?? null;
       this.autoHandoff.recordQueued(sessionId, queued);
+      this.logger.info(LOG_CONTEXT, 'automatic hand-off fired', { sessionId, tabId, delivery: queued ? 'queued' : 'sent' });
       if (queued) this.watchQueued(sessionId, queued);
     } catch (error: unknown) {
       this.autoHandoff.release(sessionId);
@@ -225,6 +333,9 @@ export class SessionAutoHandoffCoordinatorService {
       }
       if (this.autoHandoff.entry(sessionId)?.state === 'cancelled') return;
       this.autoHandoff.release(sessionId);
+      // Withdrawn because the confirmed stage is below the limit (here, or by
+      // the queue at its send): not a failure. A later limit fires again.
+      if (outcome === 'withdrawn' && !this.atLimit(queued.tabId)) return;
       this.deferAttempt(
         sessionId,
         outcome === 'failed'
@@ -312,9 +423,15 @@ function handoffStageReached(tab: TabState): boolean {
   if (budget.autoHandoff !== true) return false;
   if (typeof tab.claudeSessionId !== 'string') return false;
   if (budget.sessionId !== tab.claudeSessionId) return false;
-  const stage =
+  return budgetStage(tab) === 'limit';
+}
+
+function budgetStage(tab: TabState): string | undefined {
+  const budget = tab.sessionBudget;
+  if (!budget) return undefined;
+  return (
     tab.status === 'streaming'
       ? displayBudgetStage(budget.stage, tab.liveBudgetStage ?? null)
-      : budget.stage;
-  return stage === 'limit';
+      : budget.stage
+  );
 }

@@ -248,6 +248,36 @@ describe('MachinesStore', () => {
     ).resolves.toEqual({ ok: false, refused: 'not-connected' });
   });
 
+  it('a waiting approval carries the answer mode of its session', async () => {
+    const { api, store, pushAll } = await openedSession();
+    pushAll(referenceLog().slice(0, 7)); // mid-turn, permission pending
+    const waiting = () =>
+      store.pendingApprovalRequestsByMachine().get(MACHINE_ID) ?? [];
+
+    expect(waiting()).toHaveLength(1);
+    expect(waiting()[0]).toMatchObject({
+      sessionId: SESSION_ID,
+      mode: 'answerable',
+    });
+
+    // The lock check failed: the request is from a cached view now.
+    api.continue.mockResolvedValue(
+      fail('Lock unavailable', 'SESSION_DRIVER_LOCK_UNAVAILABLE'),
+    );
+    await store.sendPrompt(MACHINE_ID, SESSION_ID, 'hi');
+    expect(waiting()).toHaveLength(1);
+    expect(waiting()[0].mode).toBe('cached');
+    await expect(
+      store.respondPermission(
+        MACHINE_ID,
+        SESSION_ID,
+        waiting()[0].request.id,
+        'allow',
+      ),
+    ).resolves.toEqual({ ok: false, refused: 'watch-only' });
+    expect(api.respondPermission).not.toHaveBeenCalled();
+  });
+
   it('keeps the machine state reason from the push', async () => {
     const { store, pushState } = setup();
     await store.loadMachines();

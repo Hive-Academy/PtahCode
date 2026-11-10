@@ -95,7 +95,7 @@ const REASON_ID = 'ptah-remote-session-reason';
     </div>
 
     <header
-      class="flex flex-wrap items-start justify-between gap-3 border-b border-surface-border px-5 py-3"
+      class="flex flex-wrap items-start justify-between gap-3 border-b border-surface-border py-3"
     >
       <div class="flex min-w-0 flex-col gap-1">
         <h2
@@ -177,7 +177,7 @@ const REASON_ID = 'ptah-remote-session-reason';
       </div>
     </header>
 
-    <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-5 py-4">
+    <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto py-4">
       @if (banner(); as b) {
         <div
           class="flex flex-col gap-1 rounded-box border px-4 py-3 text-sm"

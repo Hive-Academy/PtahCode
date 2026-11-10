@@ -1,9 +1,11 @@
 import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core';
+import { SetupFieldDirective } from '@ptah-extension/ui';
 import { OnboardingWorkspaceStore } from './onboarding-workspace.store';
 
 @Component({
   selector: 'ptah-workspace-header',
   standalone: true,
+  imports: [SetupFieldDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="rounded-xl border border-base-300 bg-base-200 p-3 text-sm" aria-label="Workspace folder" data-testid="workspace-header">
@@ -12,7 +14,7 @@ import { OnboardingWorkspaceStore } from './onboarding-workspace.store';
         @if (canSwitch()) {
           <div class="mt-2 flex flex-wrap items-center gap-2">
             <label for="onboarding-workspace-select" class="sr-only">Switch open folder</label>
-            <select id="onboarding-workspace-select" class="select select-bordered select-sm" [disabled]="!store.canSwitch()" (change)="switchTo($event)">
+            <select id="onboarding-workspace-select" [ptahSetupField]="'workspace'" [disabled]="!store.canSwitch()" (change)="switchTo($event)">
               @for (folder of store.folders(); track folder.path; let index = $index) {
                 <option [value]="index" [selected]="index === store.activeIndex()">{{ folder.name }}</option>
               }

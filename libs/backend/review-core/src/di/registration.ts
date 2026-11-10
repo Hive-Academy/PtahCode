@@ -25,6 +25,7 @@ import { PublicationOutboxService } from '../lib/publication/publication-outbox.
 import { PublicationOutboxRepository } from '../lib/publication/publication-outbox.repository';
 import { PERSISTENCE_TOKENS, type SqliteConnectionService } from '@ptah-extension/persistence-sqlite';
 import { ReviewPublicationService } from '../lib/publication/review-publication.service';
+import { ReviewStatusCoordinatorService } from '../lib/status/review-status-coordinator.service';
 
 /**
  * The host registers REVIEW_LANE_TOKENS.GATEWAY, REVIEW_LANE_TOKENS.FILES,
@@ -45,6 +46,7 @@ export function registerReviewCore(container: DependencyContainer): void {
   container.registerSingleton(ReviewPolicyService);
   container.register(REVIEW_CORE_TOKENS.POLICY_SERVICE, { useToken: ReviewPolicyService });
   container.registerSingleton(ReviewQueueService);
+  container.registerSingleton(ReviewStatusCoordinatorService);
   container.register(REVIEW_CORE_TOKENS.QUEUE_SERVICE, { useToken: ReviewQueueService });
   container.register(REVIEW_LANE_TOKENS.CLOCK, {
     useValue: {

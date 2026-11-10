@@ -1,34 +1,43 @@
-import type { AgentBudgetStopReason, AgentMessageOutcome, AgentTurnTelemetry } from '@ptah-extension/shared';
+import type { AgentBudgetStopReason, AgentTurnTelemetry } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { TrackedAgent } from './tracked-agent';
 import { armLaneBudgetDeadline } from './lane-budget-deadline';
 import type { SdkHandle } from './cli-adapters/cli-adapter.interface';
 
-/** Queue-capable adapters receive the warning without a failed steer probe. */
+export const LANE_BUDGET_WARNING = 'Budget warning: finish your current work, report progress, and prepare a short handoff.';
+type LaneBudgetWarningOutcome = { readonly mode: 'steer' | 'queue-next-turn' | 'held' };
+
+/** Claim the warning before routing, so concurrent sends cannot both attach it. */
+export function takeHeldBudgetWarning(tracked: TrackedAgent, message: string): string {
+  const warning = tracked.heldBudgetWarning;
+  if (!warning) return message;
+  tracked.heldBudgetWarning = undefined;
+  return `${warning}\n\n${message}`;
+}
+
+/** Attach a warning only to work that already has a turn scheduled. */
 export async function deliverLaneBudgetWarning(
-  agentId: string,
+  _agentId: string,
   handle: Pick<SdkHandle, 'steer' | 'queueForNextTurn'> | undefined,
-  send: (agentId: string, message: string, delivery: 'queue') => Promise<AgentMessageOutcome>,
-): Promise<AgentMessageOutcome> {
-  const message = 'Budget warning: finish your current work, report progress, and prepare a short handoff.';
-  if (!handle?.steer) {
-    if (handle?.queueForNextTurn) {
-      handle.queueForNextTurn(message);
-      return { mode: 'queue-next-turn' };
+  turnActive: boolean,
+  attachToPending?: (message: string) => boolean,
+): Promise<LaneBudgetWarningOutcome> {
+  if (turnActive && handle?.steer) {
+    try {
+      await handle.steer(LANE_BUDGET_WARNING);
+      return { mode: 'steer' };
+    } catch {
+      // degradation-audit: reported - caller logs the held or attached outcome
     }
-    return send(agentId, message, 'queue');
   }
   try {
-    await handle.steer(message);
-    return { mode: 'steer' };
+    if (attachToPending?.(LANE_BUDGET_WARNING)) {
+      return { mode: 'queue-next-turn' };
+    }
   } catch {
-    // degradation-audit: reported - caller logs the final queue delivery or failure
+    // degradation-audit: reported - caller logs the held warning for parent delivery
   }
-  if (handle?.queueForNextTurn) {
-    handle.queueForNextTurn(message);
-    return { mode: 'queue-next-turn' };
-  }
-  return send(agentId, message, 'queue');
+  return { mode: 'held' };
 }
 
 export interface LaneBudgetDecision {
@@ -41,7 +50,7 @@ export interface LaneBudgetDecision {
 export class LaneBudgetTelemetry {
   constructor(
     private readonly logger: Logger,
-    private readonly warn: (agentId: string) => Promise<AgentMessageOutcome>,
+    private readonly warn: (agentId: string) => Promise<LaneBudgetWarningOutcome>,
     private readonly stop: (agentId: string, reason: AgentBudgetStopReason) => void,
   ) {}
 
@@ -63,7 +72,7 @@ export class LaneBudgetTelemetry {
         cacheReadTokens: usage.cacheReadTokens.status === 'reported' ? usage.cacheReadTokens.value : null,
         cacheWriteTokens: usage.cacheWriteTokens.status === 'reported' ? usage.cacheWriteTokens.value : null,
         weightedTotal: budget.counters.weightedTokens,
-        ratio: Math.max(budget.counters.rawTokens, budget.counters.weightedTokens) /
+        ratio: budget.counters.weightedTokens /
           budget.settings.stopWeightedTokens,
         costAuthority: decision.costAuthority,
       });
@@ -81,12 +90,13 @@ export class LaneBudgetTelemetry {
       tracked.budgetCostWarned = true;
       this.logger.warn('[LaneBudgetTelemetry] Lane turn cost unavailable', { agentId });
     }
-    // A completed turn can cross both thresholds; the completion envelope carries the warning.
+    // A first token-limit crossing warns; the next accounted turn stops the lane.
     if (decision.warning && !decision.stopReason) {
       void this.warn(agentId).then((outcome) => {
-        if (outcome.mode === 'unsupported')
-          this.logger.info('[LaneBudgetTelemetry] Budget warning unavailable; stop message will carry warning', { agentId, reason: outcome.reasonCode ?? outcome.detail });
-        else this.logger.info('[LaneBudgetTelemetry] Budget warning delivered', { agentId, mode: outcome.mode });
+        if (outcome.mode === 'held') tracked.heldBudgetWarning = LANE_BUDGET_WARNING;
+        this.logger.info(outcome.mode === 'held'
+          ? '[LaneBudgetTelemetry] Budget warning held'
+          : '[LaneBudgetTelemetry] Budget warning delivered', { agentId, mode: outcome.mode });
       }).catch((error: unknown) => {
         this.logger.error('[LaneBudgetTelemetry] Budget warning failed', error instanceof Error ? error : new Error(String(error)));
       });

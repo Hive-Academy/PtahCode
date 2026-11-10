@@ -7,12 +7,19 @@ import {
 import type { MachineConnectionState } from '@ptah-extension/shared';
 import { MACHINE_STATE_LABELS } from '../../utils/machine-copy';
 
-const INK: Readonly<Record<MachineConnectionState, string>> = {
+/**
+ * Ink of each machine state (approved state map, machines-ux.md): Connected
+ * done, Reconnecting run, Offline idle, Version mismatch need, Not paired err.
+ * One map serves the list rows and the detail header.
+ */
+export const MACHINE_STATE_INK: Readonly<
+  Record<MachineConnectionState, string>
+> = {
   connected: 'text-state-done',
   offline: 'text-state-idle',
-  reconnecting: 'text-state-need',
-  'version-mismatch': 'text-state-err',
-  unpaired: 'text-state-idle',
+  reconnecting: 'text-state-run',
+  'version-mismatch': 'text-state-need',
+  unpaired: 'text-state-err',
 };
 
 /**
@@ -90,7 +97,7 @@ export class MachineStatusComponent {
   /** Overrides the default label, e.g. "Running (last known)". */
   public readonly label = input<string | null>(null);
 
-  protected readonly ink = computed(() => INK[this.state()]);
+  protected readonly ink = computed(() => MACHINE_STATE_INK[this.state()]);
   protected readonly text = computed(
     () => this.label() ?? MACHINE_STATE_LABELS[this.state()],
   );

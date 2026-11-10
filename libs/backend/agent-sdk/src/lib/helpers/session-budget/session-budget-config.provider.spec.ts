@@ -62,7 +62,7 @@ describe('SessionBudgetConfigProvider.getConfig', () => {
     const { provider, warn } = makeProvider({});
     expect(provider.getConfig()).toEqual({
       enabled: true,
-      autoHandoffAtLimit: false,
+      autoHandoffAtLimit: true,
       unit: 'tokens',
       tokens: 50_000_000,
       usd: 30,
@@ -185,12 +185,12 @@ describe('SessionBudgetConfigProvider.getConfig', () => {
     });
 
     it.each(['true', 'false', 1, 0, null, {}, []].map((value) => [value]))(
-      'defaults a non-boolean %j to false',
+      'defaults a non-boolean %j to true',
       (value) => {
         const { provider, warn } = makeProvider({
           'sessionBudget.autoHandoffAtLimit': value,
         });
-        expect(provider.getConfig().autoHandoffAtLimit).toBe(false);
+        expect(provider.getConfig().autoHandoffAtLimit).toBe(true);
         expect(warn).toHaveBeenCalledTimes(1);
       },
     );

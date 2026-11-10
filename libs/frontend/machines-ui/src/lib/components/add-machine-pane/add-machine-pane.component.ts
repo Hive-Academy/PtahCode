@@ -12,6 +12,7 @@ import {
   type OnInit,
 } from '@angular/core';
 import { MACHINE_SSH_ALIAS_PATTERN } from '@ptah-extension/shared';
+import { SetupActionDirective } from '@ptah-extension/ui';
 import {
   PAIRING_CODE_LENGTH,
   PAIRING_TTL_DEFAULT_SEC,
@@ -59,12 +60,12 @@ let nextId = 0;
 @Component({
   selector: 'ptah-add-machine-pane',
   standalone: true,
-  imports: [CopyCommandComponent],
+  imports: [CopyCommandComponent, SetupActionDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
     <form
-      class="flex max-w-[640px] flex-col gap-4 p-5"
+      class="flex max-w-[640px] flex-col gap-4"
       novalidate
       [attr.aria-busy]="busy() !== null ? 'true' : null"
       data-testid="add-machine-form"
@@ -225,7 +226,8 @@ let nextId = 0;
       <div class="flex gap-2">
         <button
           type="submit"
-          class="btn btn-primary btn-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+          [ptahSetupAction]="'primaryCompact'"
+          class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
           [disabled]="busy() !== null"
           data-testid="add-machine-submit"
         >
@@ -233,7 +235,8 @@ let nextId = 0;
         </button>
         <button
           type="button"
-          class="btn btn-ghost btn-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+          [ptahSetupAction]="'ghost'"
+          class="btn-ghost focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
           data-testid="add-machine-cancel"
           (click)="cancel()"
         >

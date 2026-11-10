@@ -21,6 +21,44 @@ function setup(fetcher: typeof fetch) {
 }
 
 describe('GithubReviewAdapter', () => {
+  it('reads resolved review threads from GraphQL and matches REST comment IDs', async () => {
+    const review = { id: 9, body: 'review', submitted_at: '2026-01-01T00:00:00Z', user: { login: 'bot' } };
+    const comment = { id: 12, pull_request_review_id: 9, path: 'a.ts', line: 3,
+      original_line: 3, body: 'finding', user: { login: 'bot' } };
+    const fetcher = jest.fn().mockResolvedValueOnce(response([review]))
+      .mockResolvedValueOnce(response({ login: 'bot' }))
+      .mockResolvedValueOnce(response([comment]))
+      .mockResolvedValueOnce(response({ data: { repository: { pullRequest: { reviewThreads: {
+        nodes: [{ id: 'thread-1', isResolved: true, comments: { nodes: [{ databaseId: 12 }],
+          pageInfo: { hasNextPage: false, endCursor: null } } }],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      } } } } }));
+    const { adapter } = setup(fetcher);
+    const result = await adapter.listOwnReviewsAndThreads(repo, 4);
+    expect(result.items[0].threads[0]).toMatchObject({ id: '12', resolved: true });
+    expect(fetcher.mock.calls[3][0]).toBe('https://api.github.com/graphql');
+  });
+  it('paginates comments within a thread before reconciling its resolution', async () => {
+    const review = { id: 9, body: 'review', submitted_at: '2026-01-01T00:00:00Z', user: { login: 'bot' } };
+    const comment = { id: 112, pull_request_review_id: 9, path: 'a.ts', line: 3,
+      original_line: 3, body: 'finding', user: { login: 'bot' } };
+    const fetcher = jest.fn().mockResolvedValueOnce(response([review]))
+      .mockResolvedValueOnce(response({ login: 'bot' }))
+      .mockResolvedValueOnce(response([comment]))
+      .mockResolvedValueOnce(response({ data: { repository: { pullRequest: { reviewThreads: {
+        nodes: [{ id: 'thread-1', isResolved: true, comments: {
+          nodes: Array.from({ length: 100 }, (_, index) => ({ databaseId: index + 1 })),
+          pageInfo: { hasNextPage: true, endCursor: 'after-100' },
+        } }], pageInfo: { hasNextPage: false, endCursor: null },
+      } } } } }))
+      .mockResolvedValueOnce(response({ data: { node: { comments: {
+        nodes: [{ databaseId: 112 }], pageInfo: { hasNextPage: false, endCursor: null },
+      } } } }));
+    const { adapter } = setup(fetcher);
+    const result = await adapter.listOwnReviewsAndThreads(repo, 4);
+    expect(result.items[0].threads).toEqual([expect.objectContaining({ id: '112', resolved: true })]);
+    expect(JSON.parse(String(fetcher.mock.calls[4][1].body)).variables).toEqual({ id: 'thread-1', cursor: 'after-100' });
+  });
   it('paginates and maps fork, draft, author, and token headers', async () => {
     const fetcher = jest.fn().mockResolvedValueOnce(response([pull], 200, {
       etag: '"one"', link: '<https://api.github.com/repos/Hive-Academy/PtahCode/pulls?page=2>; rel="next"',
