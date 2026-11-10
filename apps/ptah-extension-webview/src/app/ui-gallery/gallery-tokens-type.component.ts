@@ -29,7 +29,25 @@ interface TypeRoleSpecimen {
             class="flex flex-col gap-ptah-label border-b border-surface-border pb-ptah-field last:border-b-0 last:pb-0"
             data-testid="type-role-row"
           >
-            <p [class]="item.utilityClass">{{ item.sample }}</p>
+            <p
+              [class]="{
+                'text-ptah-page-title': item.role === 'Page title',
+                'text-ptah-section-title': item.role === 'Section title',
+                'text-ptah-group-title': item.role === 'Group title',
+                'text-ptah-body': item.role === 'Body',
+                'text-ptah-label': item.role === 'Field label',
+                'text-ptah-hint': item.role === 'Hint',
+                'text-ptah-caption': item.role === 'Caption',
+                'text-ptah-code': item.role === 'Code',
+                'font-mono': item.role === 'Code',
+                'text-base-content':
+                  item.role !== 'Hint' && item.role !== 'Caption',
+                'text-base-content-muted':
+                  item.role === 'Hint' || item.role === 'Caption',
+              }"
+            >
+              {{ item.sample }}
+            </p>
             <p class="text-ptah-caption text-base-content-muted">
               {{ item.role }} ·
               <code class="font-mono text-ptah-code text-base-content">{{

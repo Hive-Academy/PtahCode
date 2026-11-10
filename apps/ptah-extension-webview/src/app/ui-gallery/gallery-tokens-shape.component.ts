@@ -1,11 +1,16 @@
 import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { PtahButtonDirective } from '@ptah-extension/ui';
 import { GallerySectionComponent } from './gallery-section.component';
+import { GalleryTokensShapeControlsComponent } from './gallery-tokens-shape-controls.component';
 
 @Component({
   selector: 'ptah-gallery-tokens-shape',
   standalone: true,
-  imports: [GallerySectionComponent, PtahButtonDirective],
+  imports: [
+    GallerySectionComponent,
+    GalleryTokensShapeControlsComponent,
+    PtahButtonDirective,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<ptah-gallery-section
     id="tokens-shape"
@@ -18,7 +23,11 @@ import { GallerySectionComponent } from './gallery-section.component';
           @for (item of radii; track item.token) {
             <div
               class="flex flex-col gap-ptah-label border border-surface-border bg-base-100 p-ptah-surface"
-              [class]="item.radiusClass"
+              [class]="{
+                'rounded-ptah-control': item.token === '--ptah-radius-control',
+                'rounded-ptah-surface': item.token === '--ptah-radius-surface',
+                'rounded-ptah-chip': item.token === '--ptah-radius-chip',
+              }"
               data-testid="radius-specimen"
             >
               <span class="text-ptah-label text-base-content">{{
@@ -61,7 +70,12 @@ import { GallerySectionComponent } from './gallery-section.component';
         @for (item of elevations; track item.token) {
           <div
             class="flex flex-col gap-ptah-label rounded-ptah-surface border border-surface-border bg-base-100 p-ptah-surface"
-            [class]="item.shadowClass"
+            [class]="{
+              'shadow-none': item.token === '--ptah-elevation-0',
+              'shadow-ptah-1': item.token === '--ptah-elevation-1',
+              'shadow-ptah-2': item.token === '--ptah-elevation-2',
+              'shadow-ptah-3': item.token === '--ptah-elevation-3',
+            }"
             data-testid="elevation-specimen"
           >
             <span class="text-ptah-label text-base-content">{{
@@ -120,7 +134,11 @@ import { GallerySectionComponent } from './gallery-section.component';
             >
               <div
                 class="flex h-ptah-control-xs items-center rounded-ptah-control bg-primary px-ptah-control-x-xs text-ptah-caption text-primary-content transition-transform ease-ptah-standard hover:translate-x-2"
-                [class]="item.durationClass"
+                [class]="{
+                  'duration-ptah-fast': item.token === '--ptah-duration-fast',
+                  'duration-ptah-base': item.token === '--ptah-duration-base',
+                  'duration-ptah-slow': item.token === '--ptah-duration-slow',
+                }"
                 [class.translate-x-2]="motionActive()"
               >
                 {{ item.label }}
@@ -134,80 +152,7 @@ import { GallerySectionComponent } from './gallery-section.component';
       </div>
     </div>
 
-    <div class="grid gap-ptah-group md:grid-cols-3">
-      <div class="flex flex-col gap-ptah-heading">
-        <h3 class="text-ptah-group-title text-base-content">Control heights</h3>
-        <div
-          class="flex flex-col gap-ptah-controls rounded-ptah-surface border border-surface-border bg-base-100 p-ptah-surface"
-        >
-          @for (item of controlHeights; track item.token) {
-            <div
-              class="flex flex-col gap-ptah-label"
-              data-testid="control-height-specimen"
-            >
-              <div
-                class="inline-flex items-center rounded-ptah-control border border-surface-border bg-base-200 text-ptah-label text-base-content"
-                [class]="item.classes"
-              >
-                {{ item.label }}
-              </div>
-              <span class="text-ptah-caption text-base-content-muted"
-                >{{ item.token }} · {{ item.px }}</span
-              >
-            </div>
-          }
-        </div>
-      </div>
-      <div class="flex flex-col gap-ptah-heading">
-        <h3 class="text-ptah-group-title text-base-content">Icon sizes</h3>
-        <div
-          class="flex flex-col gap-ptah-field rounded-ptah-surface border border-surface-border bg-base-100 p-ptah-surface"
-        >
-          @for (item of iconSizes; track item.token) {
-            <div
-              class="flex items-center gap-ptah-inline"
-              data-testid="icon-size-specimen"
-            >
-              <svg
-                aria-hidden="true"
-                [class]="item.sizeClass + ' text-base-content'"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <path d="M12 2v20M2 12h20" />
-              </svg>
-              <span class="text-ptah-caption text-base-content-muted"
-                >{{ item.token }} · {{ item.sizeClass }} ({{ item.px }})</span
-              >
-            </div>
-          }
-        </div>
-      </div>
-      <div class="flex flex-col gap-ptah-heading">
-        <h3 class="text-ptah-group-title text-base-content">State inks</h3>
-        <div
-          class="flex flex-col gap-ptah-field rounded-ptah-surface border border-surface-border bg-base-100 p-ptah-surface"
-        >
-          @for (item of stateInks; track item.token) {
-            <div
-              class="flex flex-col gap-ptah-label"
-              data-testid="state-ink-specimen"
-            >
-              <span
-                class="text-ptah-label"
-                [style.color]="'var(' + item.token + ')'"
-                >{{ item.label }}</span
-              >
-              <span class="text-ptah-caption text-base-content-muted">{{
-                item.token
-              }}</span>
-            </div>
-          }
-        </div>
-      </div>
-    </div>
+    <ptah-gallery-tokens-shape-controls />
   </ptah-gallery-section>`,
 })
 export class GalleryTokensShapeComponent {
@@ -278,42 +223,5 @@ export class GalleryTokensShapeComponent {
       token: '--ptah-duration-slow',
       durationClass: 'duration-ptah-slow',
     },
-  ] as const;
-  public readonly controlHeights = [
-    {
-      label: 'xs control',
-      token: '--ptah-control-h-xs',
-      px: '24 px',
-      classes: 'h-ptah-control-xs px-ptah-control-x-xs',
-    },
-    {
-      label: 'sm control',
-      token: '--ptah-control-h-sm',
-      px: '32 px',
-      classes: 'h-ptah-control-sm px-ptah-control-x',
-    },
-    {
-      label: 'md control',
-      token: '--ptah-control-h-md',
-      px: '40 px',
-      classes: 'h-ptah-control-md px-ptah-control-x-md',
-    },
-    {
-      label: 'field control',
-      token: '--ptah-control-h-field',
-      px: '52 px',
-      classes: 'h-ptah-control-field px-ptah-control-x-md',
-    },
-  ] as const;
-  public readonly iconSizes = [
-    { token: '--ptah-icon-xs', sizeClass: 'size-ptah-icon-xs', px: '12 px' },
-    { token: '--ptah-icon-sm', sizeClass: 'size-ptah-icon-sm', px: '14 px' },
-    { token: '--ptah-icon-md', sizeClass: 'size-ptah-icon-md', px: '16 px' },
-  ] as const;
-  public readonly stateInks = [
-    { label: 'State ok · Completed', token: '--ptah-state-ok' },
-    { label: 'State warn · Needs review', token: '--ptah-state-warn' },
-    { label: 'State err · Failed', token: '--ptah-state-err' },
-    { label: 'State info · Running', token: '--ptah-state-info' },
   ] as const;
 }
