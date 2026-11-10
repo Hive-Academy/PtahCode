@@ -588,6 +588,34 @@ describe('SessionSpawnerService.start — success', () => {
     expect(h.provisioner.create).not.toHaveBeenCalled();
   });
 
+  it('releases the slot after a model refusal and after a thrown catalog error', async () => {
+    const h = makeHarness({ config: { 'agentSessions.maxConcurrent': 1 } });
+    h.host.resolveChildModel.mockResolvedValueOnce({ accepted: false, code: 'invalid-model', message: 'unavailable' });
+    const refused = await h.spawner.start({ callerSessionId: PARENT, task: 'fix', branch: BRANCH, model: 'unknown' });
+    expect(refused).toMatchObject({ ok: false, refusal: 'invalid-model' });
+    h.host.resolveChildModel.mockRejectedValueOnce(new Error('catalog exploded'));
+    const thrown = await h.spawner.start({ callerSessionId: PARENT, task: 'fix', branch: BRANCH, model: 'opus' });
+    expect(thrown).toMatchObject({ ok: false, refusal: 'model-catalog-unavailable' });
+    expect(thrown.ok ? '' : thrown.detail).toContain('catalog exploded');
+    expect(h.provisioner.create).not.toHaveBeenCalled();
+    expect(h.registry.reserveSlot(1)).not.toBeNull();
+  });
+
+  it('reports an empty task before it reads the model catalog', async () => {
+    const h = makeHarness();
+    const result = await h.spawner.start({ callerSessionId: PARENT, task: ' ', branch: BRANCH, model: 'unknown' });
+    expect(result).toMatchObject({ ok: false, refusal: 'invalid-arguments' });
+    expect(h.host.resolveChildModel).not.toHaveBeenCalled();
+  });
+
+  it('makes no catalog call and passes no model when model is omitted', async () => {
+    const h = makeHarness();
+    const child = await h.startChild({});
+    expect(h.host.resolveChildModel).not.toHaveBeenCalled();
+    expect(child.model).toBeUndefined();
+    expect(child.effort).toBeUndefined();
+  });
+
   it('passes resolved model and effort into the child record and host launch', async () => {
     const h = makeHarness();
     h.host.resolveChildModel.mockResolvedValueOnce({ accepted: true, resolvedModel: 'claude-opus-4' });

@@ -34,7 +34,8 @@ The parent's agent calls these. Each child is addressed by the `sessionId` that 
 | `taskId`       | No       | A task id such as `TASK_2026_584` or `TASK_2026_584_5e7a`.                                            |
 | `taskFolder`   | No       | A path relative to the worktree, without `..`.                                                        |
 | `deliverables` | No       | Up to 20 paths the child must write. They are checked when the child settles.                         |
-| `model`        | No       | A model for the child.                                                                                |
+| `model`        | No       | A model for the child: a model ID of the runtime catalog, or `opus` / `sonnet` / `haiku` where the provider maps them. An unknown value is refused (`invalid-model`) with the accepted IDs. Omit it for the default model. |
+| `effort`       | No       | Reasoning effort for the child: `low`, `medium`, `high`, `xhigh` or `max`. Any other value is refused (`invalid-effort`). Omit it for the default effort. |
 
 There is deliberately no permission, path or parent argument. The caller is whichever session made the call, and any extra argument is rejected rather than ignored.
 
@@ -114,7 +115,7 @@ Default `bashAllowlist`:
 
 ## Refusals
 
-A refused call is returned to the agent as text with a code, so it can act on it. The start refusals are `unattributed-caller`, `depth-exceeded`, `cap-reached`, `mcp-unavailable`, `chat-runtime-unavailable`, `no-workspace`, `invalid-arguments`, `branch-exists`, `worktree-failed`, `worktree-outside-workspace` and `session-start-failed`. When a start fails after creating something, the result lists the rollback steps it ran.
+A refused call is returned to the agent as text with a code, so it can act on it. The start refusals are `unattributed-caller`, `depth-exceeded`, `cap-reached`, `mcp-unavailable`, `chat-runtime-unavailable`, `no-workspace`, `invalid-arguments`, `invalid-effort`, `invalid-model`, `model-catalog-unavailable`, `branch-exists`, `worktree-failed`, `worktree-outside-workspace` and `session-start-failed`. When a start fails after creating something, the result lists the rollback steps it ran.
 
 Child sessions need the chat runtime and the Ptah MCP server. A host without the session spawner returns an error saying so.
 

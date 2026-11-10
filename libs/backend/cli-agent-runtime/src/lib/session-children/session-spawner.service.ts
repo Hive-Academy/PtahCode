@@ -341,6 +341,20 @@ export class SessionSpawnerService implements ISessionSpawner {
     const root = this.resolveRoot();
     if (typeof root !== 'string') return root;
 
+    const branch = request.branch?.trim() ?? '';
+    const task = request.task?.trim() ?? '';
+    if (!task) return this.refuseStart('invalid-arguments', 'task is empty');
+    if (!branch)
+      return this.refuseStart('invalid-arguments', 'branch is empty');
+
+    // The path the provisioner will create: the same deterministic function,
+    // so task folder and deliverables are checked before any git work.
+    const plannedPath = resolveWorktreePath(root, branch);
+    const paths = resolveChildPaths(plannedPath, request);
+    if (!paths.ok) return this.refuseStart('invalid-arguments', paths.detail);
+
+    // After the cheap argument checks, still before any git work: a refused
+    // model leaves no worktree, branch or registry record behind.
     let resolvedModel: string | undefined;
     if (request.model) {
       try {
@@ -361,18 +375,6 @@ export class SessionSpawnerService implements ISessionSpawner {
         return this.refuseStart('model-catalog-unavailable', errorMessage(error));
       }
     }
-
-    const branch = request.branch?.trim() ?? '';
-    const task = request.task?.trim() ?? '';
-    if (!task) return this.refuseStart('invalid-arguments', 'task is empty');
-    if (!branch)
-      return this.refuseStart('invalid-arguments', 'branch is empty');
-
-    // The path the provisioner will create: the same deterministic function,
-    // so task folder and deliverables are checked before any git work.
-    const plannedPath = resolveWorktreePath(root, branch);
-    const paths = resolveChildPaths(plannedPath, request);
-    if (!paths.ok) return this.refuseStart('invalid-arguments', paths.detail);
 
     const provisioned = await this.provisioner.create(
       root,

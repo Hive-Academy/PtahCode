@@ -64,12 +64,14 @@ export function buildSessionStartTool(): MCPToolDefinition {
     description:
       'Start a child chat session on a new branch and worktree. It opens in ' +
       "the user's tab and runs unattended: file edits and allowlisted Bash " +
-      'run without asking; other actions wait briefly, then are denied. ' +
+      'run without asking; other actions wait briefly in that tab, then are ' +
+      'denied. ' +
       'Steer with ptah_session_send. The child reports with ptah_agent_report; ' +
       'completion is pushed here after each turn. A task starting with "/" ' +
       'runs as a slash command. Children cannot start sessions. Succession ' +
       'sets handed-off status with succeededBy. The user owns merge, PR and ' +
-      'cleanup; branch and worktree remain. No parent or permission argument: ' +
+      'cleanup; branch and worktree remain. No permission, path or parent ' +
+      'argument: ' +
       'you are the parent. Refusals include a code. Use a smaller model or ' +
       'lower effort for coordination, Git or CI; use a strong model for unknown ' +
       'causes, security or architecture. Omit both for defaults. ' +
