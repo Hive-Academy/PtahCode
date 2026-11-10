@@ -13,6 +13,7 @@ import {
 } from '@angular/core';
 import { Router } from '@angular/router';
 import { LucideAngularModule, Play, ScanSearch } from 'lucide-angular';
+import { SetupActionDirective } from '@ptah-extension/ui';
 import {
   ConfirmationModalComponent,
   SetupWizardStateService,
@@ -41,6 +42,7 @@ import { PhaseListComponent } from './phase-list.component';
     RunPanelComponent,
     PhaseListComponent,
     LucideAngularModule,
+    SetupActionDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
@@ -168,12 +170,12 @@ import { PhaseListComponent } from './phase-list.component';
           <div class="mt-4 flex flex-wrap gap-2">
             <button
               type="button"
-              class="btn btn-primary btn-sm"
+              [ptahSetupAction]="'primaryCompact'"
               (click)="continuePrevious()"
             >
               Continue previous run
             </button>
-            <button type="button" class="btn btn-sm" (click)="startFresh()">
+            <button type="button" [ptahSetupAction]="'ghost'" (click)="startFresh()">
               Start fresh
             </button>
           </div>
@@ -189,7 +191,7 @@ import { PhaseListComponent } from './phase-list.component';
           </p>
           <button
             type="button"
-            class="btn btn-primary mt-4"
+            [ptahSetupAction]="'primaryFull'"
             (click)="startFresh()"
           >
             <lucide-angular
@@ -211,7 +213,7 @@ import { PhaseListComponent } from './phase-list.component';
             <p class="text-sm text-state-err" role="alert">
               Saved analyses could not be loaded. Try again.
             </p>
-            <button type="button" class="btn btn-sm" (click)="loadSaved()">
+            <button type="button" [ptahSetupAction]="'ghost'" (click)="loadSaved()">
               Retry
             </button>
           }
@@ -230,14 +232,14 @@ import { PhaseListComponent } from './phase-list.component';
                 </div>
                 <button
                   type="button"
-                  class="btn btn-primary btn-sm"
+                  [ptahSetupAction]="'primaryCompact'"
                   (click)="useSaved(item.filename)"
                 >
                   Use
                 </button>
                 <button
                   type="button"
-                  class="btn btn-sm"
+                  [ptahSetupAction]="'ghost'"
                   (click)="store.hideAnalysis(item.filename)"
                 >
                   Hide from list

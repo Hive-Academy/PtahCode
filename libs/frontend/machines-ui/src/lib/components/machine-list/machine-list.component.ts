@@ -9,6 +9,7 @@ import {
   type ElementRef,
 } from '@angular/core';
 import { LucideAngularModule, Plus } from 'lucide-angular';
+import { SetupActionDirective } from '@ptah-extension/ui';
 import type {
   MachinesError,
   RemoteMachine,
@@ -37,7 +38,7 @@ interface MachineRow {
 @Component({
   selector: 'ptah-machine-list',
   standalone: true,
-  imports: [LucideAngularModule, MachineStatusComponent, DisplayTextPipe],
+  imports: [LucideAngularModule, MachineStatusComponent, DisplayTextPipe, SetupActionDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'flex min-h-0 flex-col bg-base-100' },
   template: `
@@ -47,7 +48,8 @@ interface MachineRow {
       <h2 class="text-sm font-semibold text-base-content">Machines</h2>
       <button
         type="button"
-        class="btn btn-sm gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+        [ptahSetupAction]="'ghost'"
+        class="gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
         [class.btn-primary]="rows().length > 0"
         [class.btn-ghost]="rows().length === 0"
         data-testid="machine-list-add"

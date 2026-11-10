@@ -21,7 +21,8 @@
           </div>
           <button
             type="button"
-            class="btn btn-ghost btn-sm"
+            [ptahSetupAction]="'ghost'"
+            class="btn-ghost"
             aria-label="Close review settings"
             (click)="closed.emit()"
           >
@@ -35,7 +36,8 @@
             Review settings are unavailable.
             <button
               type="button"
-              class="btn btn-ghost btn-sm"
+              [ptahSetupAction]="'ghost'"
+              class="btn-ghost"
               (click)="retry.emit()"
             >
               Retry

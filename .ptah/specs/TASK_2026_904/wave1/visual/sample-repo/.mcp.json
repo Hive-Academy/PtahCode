@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ptah": {
+      "type": "http",
+      "url": "http://localhost:51821/auth/V9eGiZP2vhMu59w1EzQbDu9lzXdMY0KBaLojYHMKZKE/workspace/D%3A%5Cprojects%5Cptah-extension%5C.claude-worktrees%5Cfeat-component-system-wave-1-97c827715c7e%5C.ptah%5Cspecs%5CTASK_2026_904%5Cwave1%5Cvisual%5Csample-repo"
+    }
+  }
+}

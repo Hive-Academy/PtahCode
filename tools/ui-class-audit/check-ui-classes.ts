@@ -107,32 +107,19 @@ function rootOfToken(token: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Remediation is top-down (TASK_2026_904): the fix for a raw DaisyUI class is
+ * to move the markup into a component extracted from a polished page into
+ * `@ptah-extension/ui`, not to swap in a generic foundation primitive.
+ */
+const EXTRACT_HINT = 'move this markup into an extracted component in @ptah-extension/ui';
+
 function replacementHint(token: string): string {
   if (token === DYNAMIC_TOKEN) {
-    return (
-      'dynamic class expression cannot be proven safe; bind explicit classes ' +
-      'from @ptah-extension/ui instead (ptahButton, ptah-field with ' +
-      'ptahFieldControl, ptah-surface-card/section/tile, ptah-status-badge, ' +
-      'ptah-state-panel, ptah-toolbar)'
-    );
+    return `dynamic class expression cannot be proven safe; ${EXTRACT_HINT}`;
   }
-  switch (rootOfToken(token)) {
-    case 'btn':
-      return 'use the ptahButton directive from @ptah-extension/ui';
-    case 'input':
-    case 'select':
-    case 'textarea':
-      return 'use ptah-field with the ptahFieldControl directive from @ptah-extension/ui';
-    case 'card':
-      return 'use ptah-surface-card / ptah-surface-section / ptah-surface-tile from @ptah-extension/ui';
-    case 'badge':
-      return 'use ptah-status-badge from @ptah-extension/ui';
-    case 'alert':
-    case 'skeleton':
-      return 'use ptah-state-panel from @ptah-extension/ui (alerts, loading skeletons)';
-    default:
-      return 'replace this raw DaisyUI class with a @ptah-extension/ui component';
-  }
+  const root = rootOfToken(token);
+  return root === undefined ? EXTRACT_HINT : `${EXTRACT_HINT} (raw ${root} class)`;
 }
 
 // --- template scanning --------------------------------------------------------
@@ -717,14 +704,12 @@ export async function runAudit(options: AuditOptions): Promise<AuditRunResult> {
   if (comparison.failures.length > 0) {
     console.log(
       '\nRaw DaisyUI component classes are blocked outside libs/frontend/ui. ' +
-        'Use @ptah-extension/ui instead:',
+        'Move this markup into an extracted component in @ptah-extension/ui.',
     );
-    console.log('  buttons -> ptahButton directive');
-    console.log('  inputs / selects / textareas -> ptah-field with ptahFieldControl');
-    console.log('  cards -> ptah-surface-card / ptah-surface-section / ptah-surface-tile');
-    console.log('  badges -> ptah-status-badge');
-    console.log('  alerts / skeletons -> ptah-state-panel');
-    console.log('  search / filter bars -> ptah-toolbar');
+    console.log(
+      '  Extract the matching polished-page component (chat, canvas, voice, setup) ' +
+        'into @ptah-extension/ui and import it here; do not substitute a generic primitive.',
+    );
     console.log(
       `After a real removal, record it with \`${UPDATE_HINT}\` ` +
         '(the flag never raises a count).',
