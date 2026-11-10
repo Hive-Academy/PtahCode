@@ -26,6 +26,7 @@ import {
   getStaticModelCapabilities,
   getAllAnthropicProviders,
   isDirectAnthropic,
+  type ProviderProfile,
 } from '@ptah-extension/shared';
 import { SDK_TOKENS } from '../di/tokens';
 import { AUTH_PROVIDERS_TOKENS } from '@ptah-extension/auth-providers-tokens';
@@ -39,6 +40,7 @@ import { ModelInfo } from '../types/sdk-types/claude-sdk.types';
 import { PTAH_DISABLE_SDK_AUTO_MEMORY } from '../constants';
 import { SdkModuleLoader } from './sdk-module-loader';
 import { OffThreadProcessSpawner } from './off-thread-process-spawner';
+import { ProfileModelCache } from './profile-model-cache';
 import type { IModelResolver, IAuthEnvProvider } from '../auth-env.port';
 
 /**
@@ -360,6 +362,7 @@ function hashSecret(value: string): string {
  */
 @injectable()
 export class SdkModelService {
+  private readonly profileModels = new ProfileModelCache();
   private readonly revalidationTimers = new Map<string, NodeJS.Timeout>();
   private readonly revalidatedKeys = new Set<string>();
   private readonly accountModels = new Map<string, ModelInfo[]>();
@@ -707,6 +710,38 @@ export class SdkModelService {
     }
 
     return this.startFetch(key, () => this.fetchSupportedModelsInternal(key));
+  }
+
+  /** Probe the same isolated auth environment used to launch a workspace session. */
+  async getModelsForProviderProfile(
+    profile: ProviderProfile,
+  ): Promise<ModelInfo[]> {
+    return this.profileModels.get(profile, () =>
+      this.probeProviderProfile(profile),
+    );
+  }
+
+  private async probeProviderProfile(
+    profile: ProviderProfile,
+  ): Promise<ModelInfo[]> {
+    const env = profile.authEnv;
+    if (
+      isDirectAnthropic(env) &&
+      !env.ANTHROPIC_API_KEY &&
+      !env.ANTHROPIC_AUTH_TOKEN
+    ) {
+      return this.getNativeClaudeModels();
+    }
+    if (isDirectAnthropic(env) && env.ANTHROPIC_API_KEY) {
+      const apiModels = await this.fetchModelsViaApi(env);
+      return apiModels.length > 0
+        ? apiModels
+        : this.fetchModelsViaSdk(env, true);
+    }
+    const models = await this.fetchModelsViaSdk(env, true);
+    return isDirectAnthropic(env)
+      ? models
+      : this.applyTierMapping(models, env, true);
   }
 
   /**
@@ -1069,13 +1104,19 @@ export class SdkModelService {
    *
    * Only called for authMethod === 'thirdParty'. Never called for claudeCli or apiKey.
    */
-  private applyTierMapping(models: ModelInfo[]): ModelInfo[] {
+  private applyTierMapping(
+    models: ModelInfo[],
+    env: AuthEnv = this.authEnv,
+    profileProbe = false,
+  ): ModelInfo[] {
     this.logger.info('[SdkModelService] applyTierMapping (third-party)', {
       count: models.length,
-      rawValues: models.map((m) => ({
-        value: m.value,
-        displayName: m.displayName,
-      })),
+      ...(!profileProbe && {
+        rawValues: models.map((m) => ({
+          value: m.value,
+          displayName: m.displayName,
+        })),
+      }),
     });
     const seen = new Set<string>();
     const normalized: ModelInfo[] = [];
@@ -1090,8 +1131,8 @@ export class SdkModelService {
       }
       isDefault = raw === 'default';
       const resolvedValue = isDefault
-        ? this.resolveModelId('opus')
-        : this.resolveModelId(m.value);
+        ? this.resolveModelId('opus', env, profileProbe)
+        : this.resolveModelId(m.value, env, profileProbe);
       if (!isDefault) {
         if (seen.has(resolvedValue)) continue;
         seen.add(resolvedValue);
@@ -1106,7 +1147,7 @@ export class SdkModelService {
     if (dropped.length > 0) {
       this.logger.info(
         '[SdkModelService] applyTierMapping: dropped Anthropic-only models the provider cannot serve',
-        { dropped },
+        profileProbe ? { droppedCount: dropped.length } : { dropped },
       );
     }
 
@@ -1159,6 +1200,7 @@ export class SdkModelService {
    */
   private async fetchModelsViaSdk(
     authEnv: AuthEnv = this.authEnv,
+    profileProbe = false,
   ): Promise<ModelInfo[]> {
     if (authEnv.ANTHROPIC_AUTH_TOKEN === CODEX_PROXY_TOKEN_PLACEHOLDER) {
       this.logger.warn(
@@ -1220,7 +1262,16 @@ export class SdkModelService {
       const onStderr = (data: string): void => {
         stderrLines.push(data);
         if (data.includes('[ERROR]')) {
-          this.logger.error(`[SdkModelService] Bridge stderr: ${data.trim()}`);
+          if (profileProbe) {
+            this.logger.error(
+              '[SdkModelService] Profile bridge stderr',
+              new Error('SDK bridge reported an error'),
+            );
+          } else {
+            this.logger.error(
+              `[SdkModelService] Bridge stderr: ${data.trim()}`,
+            );
+          }
         }
       };
 
@@ -1267,7 +1318,11 @@ export class SdkModelService {
         this.logger.warn(
           '[SdkModelService] SDK returned empty models',
           stderrLines.length > 0
-            ? { stderr: stderrLines.slice(-5).join('\n') }
+            ? {
+                stderr: profileProbe
+                  ? '[redacted]'
+                  : stderrLines.slice(-5).join('\n'),
+              }
             : undefined,
         );
         return [];
@@ -1275,7 +1330,9 @@ export class SdkModelService {
 
       this.logger.info('[SdkModelService] Fetched supported models from SDK', {
         count: models.length,
-        models: models.map((m) => `${m.value}: ${m.displayName}`),
+        ...(!profileProbe && {
+          models: models.map((m) => `${m.value}: ${m.displayName}`),
+        }),
       });
 
       return models;
@@ -1286,7 +1343,11 @@ export class SdkModelService {
 
       this.logger.error(
         '[SdkModelService] SDK supportedModels() failed (will try /v1/models API next)',
-        error instanceof Error ? error : new Error(String(error)),
+        profileProbe
+          ? new Error('Profile model probe failed')
+          : error instanceof Error
+            ? error
+            : new Error(String(error)),
       );
       return [];
     } finally {
@@ -1304,9 +1365,9 @@ export class SdkModelService {
    *
    * @returns ModelInfo[] converted from API models, empty array on failure
    */
-  private async fetchModelsViaApi(): Promise<ModelInfo[]> {
+  private async fetchModelsViaApi(envOverride?: AuthEnv): Promise<ModelInfo[]> {
     try {
-      const apiModels = await this.fetchApiModels();
+      const apiModels = await this.fetchApiModels(envOverride);
       if (apiModels.length === 0) return [];
       const models: ModelInfo[] = apiModels.map((m) => ({
         value: m.id,
@@ -1328,7 +1389,11 @@ export class SdkModelService {
       // (SDK tier slots), and the exhausted chain warns for itself.
       this.logger.warn(
         '[SdkModelService] /v1/models API fallback also failed',
-        error instanceof Error ? error : new Error(String(error)),
+        envOverride
+          ? new Error('Profile API model probe failed')
+          : error instanceof Error
+            ? error
+            : new Error(String(error)),
       );
       return [];
     }
@@ -1346,22 +1411,24 @@ export class SdkModelService {
    *
    * @returns Array of ApiModelEntry, or empty array on failure/skip
    */
-  async fetchApiModels(): Promise<ApiModelEntry[]> {
+  async fetchApiModels(envOverride?: AuthEnv): Promise<ApiModelEntry[]> {
     if (
+      !envOverride &&
       this.cachedApiModels &&
       Date.now() - this.apiModelsCacheTime < API_MODELS_CACHE_TTL
     ) {
       return this.cachedApiModels;
     }
-    const baseUrl = this.authEnv.ANTHROPIC_BASE_URL;
+    const env = envOverride ?? this.authEnv;
+    const baseUrl = env.ANTHROPIC_BASE_URL;
     if (baseUrl && baseUrl.includes('127.0.0.1')) {
       this.logger.debug(
         '[SdkModelService] Skipping /v1/models for local proxy',
       );
       return [];
     }
-    const apiKey = this.authEnv.ANTHROPIC_API_KEY;
-    const authToken = this.authEnv.ANTHROPIC_AUTH_TOKEN;
+    const apiKey = env.ANTHROPIC_API_KEY;
+    const authToken = env.ANTHROPIC_AUTH_TOKEN;
     if (!apiKey && !authToken) {
       this.logger.debug('[SdkModelService] No auth credentials for /v1/models');
       return [];
@@ -1414,13 +1481,15 @@ export class SdkModelService {
           createdAt: m.created_at || '',
         }));
 
-      this.cachedApiModels = models;
-      this.apiModelsCacheTime = Date.now();
+      if (!envOverride) {
+        this.cachedApiModels = models;
+        this.apiModelsCacheTime = Date.now();
+      }
 
       this.logger.info('[SdkModelService] Fetched models from /v1/models API', {
         total: body.data.length,
         claudeModels: models.length,
-        ids: models.map((m) => m.id),
+        ...(!envOverride && { ids: models.map((m) => m.id) }),
       });
 
       return models;
@@ -1430,7 +1499,11 @@ export class SdkModelService {
       // response with no data and sends the caller to the SDK source.
       this.logger.warn(
         '[SdkModelService] Failed to fetch /v1/models',
-        error instanceof Error ? error : new Error(String(error)),
+        envOverride
+          ? new Error('Profile API model probe failed')
+          : error instanceof Error
+            ? error
+            : new Error(String(error)),
       );
       return [];
     }
@@ -1459,11 +1532,17 @@ export class SdkModelService {
    * that the global provider remaps) would be resolved against the wrong
    * provider's tier env vars. Omitted callers keep the global behavior.
    */
-  resolveModelId(model: string, envOverride?: AuthEnv): string {
+  resolveModelId(
+    model: string,
+    envOverride?: AuthEnv,
+    profileProbe = false,
+  ): string {
     const resolved = this.modelResolver.resolve(model, envOverride);
     if (resolved !== model) {
       this.logger.debug(
-        `[SdkModelService] Resolved '${model}' → '${resolved}' via ModelResolver`,
+        profileProbe
+          ? '[SdkModelService] Resolved profile model via ModelResolver'
+          : `[SdkModelService] Resolved '${model}' → '${resolved}' via ModelResolver`,
       );
     }
     return resolved;
@@ -1495,6 +1574,7 @@ export class SdkModelService {
    * {@link invalidateForAuthChange}.
    */
   clearCache(): void {
+    this.profileModels.clear();
     this.cacheGeneration++;
     for (const timer of this.revalidationTimers.values()) clearTimeout(timer);
     this.revalidationTimers.clear();
@@ -1547,6 +1627,7 @@ export class SdkModelService {
    * the commonest thing a user does between two boots (TASK_2026_383 11.1).
    */
   invalidateForAuthChange(): void {
+    this.profileModels.clear();
     this.clearApiModelsCache();
     this.logger.debug(
       '[SdkModelService] Auth-scoped model caches invalidated (per-identity catalogs kept)',

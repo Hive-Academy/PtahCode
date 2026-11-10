@@ -12,6 +12,7 @@ import type { Logger } from '@ptah-extension/vscode-core';
 import {
   CODEX_PROXY_TOKEN_PLACEHOLDER,
   type AuthEnv,
+  type ProviderProfile,
 } from '@ptah-extension/shared';
 import { SdkModelService } from './sdk-model-service';
 import type {
@@ -29,6 +30,7 @@ type AuthMethod = 'claudeCli' | 'apiKey' | 'thirdParty';
 /** The subset of the SDK query options these specs assert on. */
 interface CapturedQueryOptions {
   env: Record<string, string | undefined>;
+  stderr?: (data: string) => void;
   strictMcpConfig?: boolean;
   mcpServers?: Record<string, unknown>;
   skills?: string[] | 'all';
@@ -57,6 +59,7 @@ interface Harness {
   logInfo: jest.Mock;
   logDebug: jest.Mock;
   logWarn: jest.Mock;
+  logError: jest.Mock;
 }
 
 function makeHarness(opts: {
@@ -94,7 +97,17 @@ function makeHarness(opts: {
 
   const tiers = opts.tiers ?? {};
   const modelResolver: IModelResolver = {
-    resolve: (model: string) => tiers[model] ?? model,
+    resolve: (model: string, envOverride?: AuthEnv) => {
+      const tierKey =
+        model === 'opus'
+          ? 'ANTHROPIC_DEFAULT_OPUS_MODEL'
+          : model === 'sonnet'
+            ? 'ANTHROPIC_DEFAULT_SONNET_MODEL'
+            : model === 'haiku'
+              ? 'ANTHROPIC_DEFAULT_HAIKU_MODEL'
+              : undefined;
+      return (tierKey && envOverride?.[tierKey]) || tiers[model] || model;
+    },
   } as unknown as IModelResolver;
 
   let authMethod = opts.authMethod;
@@ -158,6 +171,7 @@ function makeHarness(opts: {
     logInfo: logger.info as jest.Mock,
     logDebug: logger.debug as jest.Mock,
     logWarn: logger.warn as jest.Mock,
+    logError: logger.error as jest.Mock,
   };
 }
 
@@ -172,6 +186,223 @@ const SDK_LIST_VIA_PROXY: ModelInfo[] = [
 ];
 
 describe('SdkModelService', () => {
+  describe('workspace profile catalog', () => {
+    const profile = (
+      authEnv: AuthEnv,
+      providerId = 'proxy',
+    ): ProviderProfile => ({
+      providerId,
+      authEnv,
+      model: 'opus',
+    });
+
+    it('probes a direct Anthropic token profile with its own env', async () => {
+      const h = makeHarness({
+        authMethod: 'claudeCli',
+        authEnv: { ANTHROPIC_AUTH_TOKEN: 'ambient-token' },
+        sdkModels: [
+          { value: 'profile-model', displayName: 'Profile', description: '' },
+        ],
+      });
+      const nativeSpy = jest.spyOn(h.service, 'getNativeClaudeModels');
+
+      const models = await h.service.getModelsForProviderProfile(
+        profile(
+          {
+            ANTHROPIC_AUTH_TOKEN: 'profile-token',
+          },
+          'anthropic',
+        ),
+      );
+
+      expect(models.map((model) => model.value)).toEqual(['profile-model']);
+      expect(h.spawnEnvs).toHaveLength(1);
+      expect(h.spawnEnvs[0]['ANTHROPIC_AUTH_TOKEN']).toBe('profile-token');
+      expect(nativeSpy).not.toHaveBeenCalled();
+    });
+
+    it('uses the native catalog for a direct Anthropic profile without credentials', async () => {
+      const h = makeHarness({
+        authMethod: 'claudeCli',
+        sdkModels: [
+          { value: 'sdk-model', displayName: 'SDK', description: '' },
+        ],
+      });
+      const nativeModels: ModelInfo[] = [
+        { value: 'native-model', displayName: 'Native', description: '' },
+      ];
+      const nativeSpy = jest
+        .spyOn(h.service, 'getNativeClaudeModels')
+        .mockResolvedValue(nativeModels);
+
+      const models = await h.service.getModelsForProviderProfile(
+        profile({}, 'anthropic'),
+      );
+
+      expect(models).toEqual(nativeModels);
+      expect(nativeSpy).toHaveBeenCalledTimes(1);
+      expect(h.getQueryFunction).not.toHaveBeenCalled();
+    });
+
+    it('uses the isolated env and tier mapping without populating ambient caches', async () => {
+      const h = makeHarness({
+        authMethod: 'thirdParty',
+        authEnv: {
+          ANTHROPIC_BASE_URL: 'http://ambient.invalid',
+          ANTHROPIC_AUTH_TOKEN: 'ambient-token',
+          ANTHROPIC_DEFAULT_OPUS_MODEL: 'ambient-model',
+        },
+        sdkModels: [{ value: 'opus', displayName: 'Opus', description: '' }],
+      });
+      const models = await h.service.getModelsForProviderProfile(
+        profile({
+          ANTHROPIC_BASE_URL: 'http://127.0.0.1:4455',
+          ANTHROPIC_AUTH_TOKEN: 'profile-token',
+          ANTHROPIC_DEFAULT_OPUS_MODEL: 'profile-model',
+        }),
+      );
+      expect(h.spawnEnvs[0]['ANTHROPIC_AUTH_TOKEN']).toBe('profile-token');
+      expect(h.spawnEnvs[0]['ANTHROPIC_BASE_URL']).toBe(
+        'http://127.0.0.1:4455',
+      );
+      expect(models.map((model) => model.value)).toEqual(['profile-model']);
+      expect(h.service.hasCachedModels()).toBe(false);
+      expect(h.state.size).toBe(0);
+    });
+
+    it('never logs a profile credential echoed by stderr and a thrown error', async () => {
+      const sentinel = 'sentinel-secret-credential';
+      const h = makeHarness({ authMethod: 'thirdParty', sdkModels: [] });
+      h.getQueryFunction.mockResolvedValue(
+        (args: { options: CapturedQueryOptions }) => {
+          args.options.stderr?.(`[ERROR] ${sentinel}`);
+          return {
+            supportedModels: async () => {
+              throw new Error(`Failed with ${sentinel}`);
+            },
+            close: () => undefined,
+          };
+        },
+      );
+      await expect(
+        h.service.getModelsForProviderProfile(
+          profile({
+            ANTHROPIC_BASE_URL: 'http://127.0.0.1:4455',
+            ANTHROPIC_AUTH_TOKEN: sentinel,
+          }),
+        ),
+      ).resolves.toEqual([]);
+      for (const log of [h.logInfo, h.logDebug, h.logWarn, h.logError]) {
+        expect(
+          log.mock.calls
+            .map((call: unknown[]) =>
+              call
+                .map((value) =>
+                  value instanceof Error
+                    ? value.message
+                    : JSON.stringify(value),
+                )
+                .join(' '),
+            )
+            .join(' '),
+        ).not.toContain(sentinel);
+      }
+      expect(h.logError).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(Error),
+      );
+    });
+
+    it('never logs credentials echoed in successful SDK model metadata or tier mapping', async () => {
+      const sentinel = 'sentinel-successful-catalog-credential';
+      const h = makeHarness({
+        authMethod: 'thirdParty',
+        sdkModels: [
+          { value: 'opus', displayName: `Opus ${sentinel}`, description: '' },
+          {
+            value: `claude-${sentinel}`,
+            displayName: `Dropped ${sentinel}`,
+            description: '',
+          },
+        ],
+      });
+      const models = await h.service.getModelsForProviderProfile(
+        profile({
+          ANTHROPIC_BASE_URL: 'http://127.0.0.1:4455',
+          ANTHROPIC_AUTH_TOKEN: sentinel,
+          ANTHROPIC_DEFAULT_OPUS_MODEL: `mapped-${sentinel}`,
+        }),
+      );
+      expect(models.map((model) => model.value)).toEqual([
+        `mapped-${sentinel}`,
+      ]);
+      for (const log of [h.logDebug, h.logInfo, h.logWarn, h.logError]) {
+        expect(JSON.stringify(log.mock.calls)).not.toContain(sentinel);
+      }
+    });
+
+    it('never logs credentials echoed in a successful direct API catalog', async () => {
+      const sentinel = 'sentinel-direct-api-credential';
+      const fetchSpy = jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: [
+              { id: `claude-${sentinel}`, display_name: `Display ${sentinel}` },
+            ],
+          }),
+          { status: 200 },
+        ),
+      );
+      try {
+        const h = makeHarness({ authMethod: 'apiKey', sdkModels: [] });
+        const models = await h.service.getModelsForProviderProfile(
+          profile(
+            {
+              ANTHROPIC_API_KEY: sentinel,
+            },
+            'anthropic',
+          ),
+        );
+        expect(models.map((model) => model.value)).toEqual([
+          `claude-${sentinel}`,
+        ]);
+        for (const log of [h.logDebug, h.logInfo, h.logWarn, h.logError]) {
+          expect(JSON.stringify(log.mock.calls)).not.toContain(sentinel);
+        }
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it('deduplicates concurrent probes and caches by profile identity until invalidation', async () => {
+      const h = makeHarness({
+        authMethod: 'thirdParty',
+        sdkModels: [{ value: 'opus', displayName: 'Opus', description: '' }],
+      });
+      const first = profile({
+        ANTHROPIC_BASE_URL: 'http://127.0.0.1:4455',
+        ANTHROPIC_AUTH_TOKEN: 'first',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'one',
+      });
+      const second = profile({
+        ...first.authEnv,
+        ANTHROPIC_AUTH_TOKEN: 'second',
+      });
+      await Promise.all([
+        h.service.getModelsForProviderProfile(first),
+        h.service.getModelsForProviderProfile(first),
+      ]);
+      expect(h.getQueryFunction).toHaveBeenCalledTimes(1);
+      await h.service.getModelsForProviderProfile(first);
+      expect(h.getQueryFunction).toHaveBeenCalledTimes(1);
+      await h.service.getModelsForProviderProfile(second);
+      expect(h.getQueryFunction).toHaveBeenCalledTimes(2);
+      h.service.invalidateForAuthChange();
+      await h.service.getModelsForProviderProfile(first);
+      expect(h.getQueryFunction).toHaveBeenCalledTimes(3);
+    });
+  });
+
   it('skips a stale Codex proxy model probe before loading the SDK query', async () => {
     const h = makeHarness({
       authMethod: 'thirdParty',
