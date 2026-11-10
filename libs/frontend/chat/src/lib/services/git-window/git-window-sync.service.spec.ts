@@ -94,6 +94,25 @@ describe('GitWindowSync', () => {
     expect(calls.filter(c => c.method === 'gitWindow:publishScope').at(-1)?.params).toMatchObject({ scope: { mode: 'pinned' } });
   });
 
+  it('restores the previous pinned mode when the child mode publish fails', async () => {
+    sync = TestBed.inject(GitWindowSync);
+    await sync.detach();
+    scope.set({ ...scope(), mode: 'pinned', session: { tabId: 'A' } });
+    TestBed.flushEffects();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    allowPublish = false;
+
+    sync.handleMessage({ type: 'gitWindow:setMode', payload: { mode: 'follow-session', tabId: null } });
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(sync.detached()).toBe(true);
+    expect(scope().mode).toBe('pinned');
+    expect(scope().session.tabId).toBe('A');
+    expect(sync.error()).toMatch(/Could not publish/);
+    expect(calls.filter(c => c.method === 'gitWindow:publishScope').at(-1)?.params)
+      .toMatchObject({ scope: { mode: 'follow-session' } });
+  });
+
   it('focuses the child when the session dock opener requests the panel', async () => {
     sync = TestBed.inject(GitWindowSync);
     await sync.detach();

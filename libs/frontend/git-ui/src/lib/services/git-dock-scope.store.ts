@@ -393,7 +393,27 @@ export class GitDockScopeStore {
       this.windowContext.applyCandidates(next);
       if (next.mode === 'follow-session') this.unpin();
       else if (next.pinnedTabId !== null && next.pinnedTabId === next.active?.tabId) this.pin();
-      else if (next.pinnedTabId !== null) this.showSession(next.pinnedTabId);
+      else if (next.pinnedTabId !== null) {
+        if ((this.source?.candidateForTab(next.pinnedTabId) ?? null) !== null) {
+          this.showSession(next.pinnedTabId);
+        } else {
+          const previous = untracked(this._pinned);
+          const retained = previous?.tabId === next.pinnedTabId &&
+            sameWindowRoot(previous.last.root, next.repoRoot) ? previous : null;
+          this._pinned.set({
+            tabId: next.pinnedTabId,
+            workspacePath: next.workspaceRoot,
+            name: retained?.name ?? next.pinnedTabId,
+            last: {
+              root: next.repoRoot,
+              source: retained?.last.source ??
+                (next.repoRoot === null ? null :
+                  sameWindowRoot(next.workspaceRoot, next.repoRoot) ? 'workspace-root' : 'session-cwd'),
+              unresolved: next.unresolved,
+            },
+          });
+        }
+      }
       this.acknowledgedScope.set(next);
     } finally {
       this.applyingWindowScope = false;

@@ -140,11 +140,17 @@ export class GitWindowSync implements MessageHandler {
       await this.ensureStore();
       const store = this.store();
       if (store === null) return;
+      const previous = store.scope();
       if (mode === 'follow-session') store.unpin();
       else if (tabId === this.source.activeSession()?.tabId) store.pin();
       else if (tabId !== null) store.showSession(tabId);
       const scope = this.scope();
-      if (scope !== null) await this.publish(scope);
+      if (scope !== null && await this.publish(scope)) return;
+      if (!this._detached()) return;
+      if (previous.mode === 'follow-session') store.unpin();
+      else if (previous.session?.tabId === this.source.activeSession()?.tabId) store.pin();
+      else if (previous.session !== null) store.showSession(previous.session.tabId);
+      this._error.set('Could not publish the Git window mode');
     } catch (error: unknown) {
       this._error.set(error instanceof Error ? error.message : 'Could not change Git window mode');
     }

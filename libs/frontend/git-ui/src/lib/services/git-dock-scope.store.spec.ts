@@ -462,4 +462,32 @@ describe('GitDockScopeStore', () => {
     expect(store.applyWindowScope({ ...b, sequence: 7, repoRoot: '/wrong' })).toBe(true);
     expect(gate.blockedReason()).not.toBeNull();
   });
+
+  it('restores a closed pinned tab from the host root in a fresh child', () => {
+    const context: GitWindowContext = {
+      role: 'child',
+      applyCandidates: (scope) => {
+        tabs.set(Object.fromEntries(scope.open.map((item) => [item.tabId, item])));
+        activeTabId.set(scope.active?.tabId ?? null);
+      },
+      setMode: jest.fn(async () => true),
+    };
+    const store = setup(true, context);
+    const gate = TestBed.inject(GitDockMutationGate);
+    const b = candidate('b', { agentOriginWorktreePath: '/wt/b' });
+    const closed: GitWindowScope = {
+      version: 1, sequence: 1, workspaceRoot: WS, repoRoot: '/wt/a',
+      mode: 'pinned', active: b, pinnedTabId: 'a', open: [b], unresolved: false,
+    };
+
+    expect(store.applyWindowScope(closed)).toBe(true);
+    expect(store.scope()).toMatchObject({
+      mode: 'pinned', root: '/wt/a', unresolved: false,
+      session: { tabId: 'a', closed: true },
+    });
+    expect(gate.blockedReason()).toBeNull();
+    expect(switches()).toContain('status.switch:/wt/a');
+    expect(store.applyWindowScope({ ...closed, sequence: 2, repoRoot: '/wt/a' })).toBe(true);
+    expect(store.scope().root).toBe('/wt/a');
+  });
 });
