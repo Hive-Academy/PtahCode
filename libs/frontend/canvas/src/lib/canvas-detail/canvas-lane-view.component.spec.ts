@@ -302,7 +302,9 @@ describe('CanvasLaneViewComponent', () => {
     expect(input?.classList.contains('w-[calc(100cqw-1.5rem)]')).toBe(true);
     expect(input?.classList.contains('sticky')).toBe(true);
     expect(input?.classList.contains('bottom-0')).toBe(true);
-    expect(input?.classList.contains('bg-base-100')).toBe(true);
+    // No opaque strip behind the composer card: it would show as a hard box.
+    expect(input?.classList.contains('bg-transparent')).toBe(true);
+    expect(input?.classList.contains('bg-base-100')).toBe(false);
     fixture.componentRef.setInput('laneKey', 'sub:task-tool');
     fixture.detectChanges();
     expect(
