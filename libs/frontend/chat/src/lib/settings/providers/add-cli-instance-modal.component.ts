@@ -20,7 +20,7 @@ import {
   NativeModalComponent,
   ProviderMarkComponent,
 } from '@ptah-extension/ui';
-import { getAnthropicProvider } from '@ptah-extension/shared';
+import { ANTHROPIC_API_LANE_ENTRY, getAnthropicProvider } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { SettingsToastComponent } from '../feedback/settings-toast.component';
 
@@ -34,7 +34,6 @@ export interface CliInstanceEditTarget {
 
 /** Connections a Ptah CLI instance cannot use (the rule of the instance manager retired in Batch 34). */
 const EXCLUDED_PROVIDERS: ReadonlySet<string> = new Set([
-  'anthropic',
   'openai-codex',
 ]);
 const COPILOT = 'github-copilot';
@@ -277,6 +276,14 @@ type KeyMode = 'required' | 'optional' | 'none' | 'sign-in';
           </div>
         }
 
+        @if (!editing() && providerId() === 'anthropic') {
+          <fieldset class="space-y-2" data-testid="add-cli-instance-claude-source">
+            <legend class="text-sm font-semibold">Claude API key for this instance</legend>
+            <label class="flex items-center gap-2"><input type="radio" name="claude-source" [checked]="claudeSource() === 'shared-connection'" [disabled]="!provider()?.hasKey" (change)="selectClaudeSource('shared-connection')" />Use the saved Claude API connection key</label>
+            <label class="flex items-center gap-2"><input type="radio" name="claude-source" [checked]="claudeSource() === 'instance'" (change)="selectClaudeSource('instance')" />Use a separate key for this instance</label>
+            @if (!provider()?.hasKey) { <p class="text-xs text-base-content-muted">Connect Claude API first to use its saved key, or enter a separate key.</p> }
+          </fieldset>
+        }
         @if (showKey()) {
           <div class="space-y-1">
             <label
@@ -389,6 +396,7 @@ export class AddCliInstanceModalComponent {
   /** The typed key: held only here, never in service state. */
   protected readonly key = signal('');
   protected readonly keyVisible = signal(false);
+  protected readonly claudeSource = signal<'shared-connection' | 'instance'>('shared-connection');
   private context: ProvidersEditContext | null = null;
   private session = 0;
 
@@ -398,10 +406,10 @@ export class AddCliInstanceModalComponent {
       .filter((connection) => !EXCLUDED_PROVIDERS.has(connection.id))
       .map((connection) => ({
         id: connection.id,
-        label: `${connection.name} · ${MODALITY[connection.authMode] ?? connection.authMode}`,
+        label: connection.id === 'anthropic' ? 'Claude API · API key' : `${connection.name} · ${MODALITY[connection.authMode] ?? connection.authMode}`,
       })),
   );
-  private readonly provider = computed<ProvidersConnection | null>(() => {
+  protected readonly provider = computed<ProvidersConnection | null>(() => {
     const id = this.editing()?.providerId ?? this.providerId();
     return (
       (this.state.connections().data ?? []).find(
@@ -412,6 +420,7 @@ export class AddCliInstanceModalComponent {
   protected readonly keyMode = computed<KeyMode | null>(() => {
     const provider = this.provider();
     if (!provider) return this.editing() ? 'optional' : null;
+    if (provider.id === 'anthropic' && !this.editing() && this.claudeSource() === 'shared-connection') return 'none';
     if (provider.id === COPILOT) return 'sign-in';
     if (provider.authMode === 'cli') return 'none';
     if (
@@ -441,6 +450,7 @@ export class AddCliInstanceModalComponent {
   /** #48 hints (the old wording of the pre-#581 instance manager at `7ecdefa45^1`, where it existed). */
   protected readonly keyHint = computed(() => {
     const provider = this.provider();
+    if (provider?.id === 'anthropic' && !this.editing()) return this.claudeSource() === 'shared-connection' ? null : 'Enter a separate Claude API key for this instance.';
     switch (this.keyMode()) {
       case 'none':
         return provider?.authMode === 'cli'
@@ -536,6 +546,7 @@ export class AddCliInstanceModalComponent {
       return this.name().trim() !== target.name || !!this.key().trim();
     const provider = this.provider();
     if (!provider || EXCLUDED_PROVIDERS.has(provider.id)) return false;
+    if (provider.id === 'anthropic' && this.claudeSource() === 'shared-connection') return provider.hasKey;
     if (this.keyMode() === 'sign-in') return this.signedIn();
     return this.keyMode() !== 'required' || !!this.key().trim();
   });
@@ -550,6 +561,7 @@ export class AddCliInstanceModalComponent {
         this.context = this.state.reviewContext();
         this.name.set(target?.name ?? '');
         this.providerId.set('');
+        this.claudeSource.set('shared-connection');
         this.signInAction.set(null);
         this.clearKey();
       });
@@ -561,8 +573,14 @@ export class AddCliInstanceModalComponent {
   }
 
   /** S2: a provider change drops the typed key (it was for the other vendor); Copilot re-reads its sign-in (M6). */
+  protected selectClaudeSource(source: 'shared-connection' | 'instance'): void {
+    this.clearKey();
+    this.claudeSource.set(source);
+  }
+
   protected selectProvider(id: string): void {
     this.providerId.set(id);
+    this.claudeSource.set('shared-connection');
     this.clearKey();
     this.signInAction.set(null);
     if (id === COPILOT) {
@@ -612,7 +630,9 @@ export class AddCliInstanceModalComponent {
         this.state.saveSettings(
           {
             cli: [
-              { action: 'create', params: { name, providerId, apiKey: key } },
+              { action: 'create', params: providerId === 'anthropic'
+                ? { name, providerId: ANTHROPIC_API_LANE_ENTRY.id, credentialSource: this.claudeSource(), ...(this.claudeSource() === 'instance' ? { apiKey: key } : {}) }
+                : { name, providerId, apiKey: key } },
             ],
           },
           context,

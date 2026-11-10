@@ -119,6 +119,7 @@ describe('ProvidersConnectionSetupService', () => {
         async () => success({ cancelled: true }),
       ],
       ['auth:setApiKey', async () => success({ success: true })],
+      ['auth:setDirectAnthropicApiKey', async () => success({ success: true })],
       ['auth:saveSettings', async () => success({ success: true })],
     ]);
     call = jest.fn(async (method, params) => {
@@ -297,6 +298,39 @@ describe('ProvidersConnectionSetupService', () => {
   });
 
   describe('connectProvider', () => {
+    it('stores a Claude API connection without changing the main route', async () => {
+      await service.verifyDraft({ probeId: 'p1', providerId: 'anthropic', authMode: 'apiKey' });
+      call.mockClear();
+      await service.connectProvider(draft({ providerId: 'anthropic' }), context, hooks);
+      expect(methods()).toEqual(['auth:setDirectAnthropicApiKey']);
+      expect(call).toHaveBeenCalledWith('auth:setDirectAnthropicApiKey', { apiKey: 'private-key' }, undefined);
+      expect(JSON.stringify(call.mock.calls)).not.toContain('authMethod');
+    });
+
+    it('reuses the stored Claude API key without writing it', async () => {
+      await service.verifyDraft({ probeId: 'p1', providerId: 'anthropic', authMode: 'apiKey' });
+      call.mockClear();
+      await service.connectProvider(draft({ providerId: 'anthropic', credential: null }), context, hooks);
+      expect(methods()).not.toContain('auth:setDirectAnthropicApiKey');
+      expect(methods()).not.toContain('auth:saveSettings');
+    });
+
+    it('surfaces a Claude API key write failure without the key', async () => {
+      handlers.set('auth:setDirectAnthropicApiKey', async () => success({ success: false, error: 'private-key' }));
+      await service.verifyDraft({ probeId: 'p1', providerId: 'anthropic', authMode: 'apiKey' });
+      call.mockClear();
+      await service.connectProvider(draft({ providerId: 'anthropic' }), context, hooks);
+      expect(commits.commit().status).not.toBe('saved');
+      expect(JSON.stringify(commits.commit())).not.toContain('private-key');
+      expect(methods()).not.toContain('auth:saveSettings');
+    });
+
+    it('activates Claude API only after explicit use for main agent', async () => {
+      await service.verifyDraft({ probeId: 'p1', providerId: 'anthropic', authMode: 'apiKey' });
+      call.mockClear();
+      await service.connectProvider(draft({ providerId: 'anthropic', activation: 'use-main-agent' }), context, hooks);
+      expect(methods()).toEqual(['auth:saveSettings']);
+    });
     it('blocks an unverified draft without writing', async () => {
       await expect(
         service.connectProvider(draft(), context, hooks),
@@ -830,7 +864,7 @@ describe('ProvidersConnectionSetupService', () => {
       {
         name: 'deleteStoredKey (Anthropic slot)',
         run: () => service.deleteStoredKey('anthropic', context, hooks),
-        write: 'auth:deleteStoredKey',
+        write: 'auth:setDirectAnthropicApiKey',
         ok: { success: true },
         rejected: { success: false },
         readBack: 'auth:getAuthStatus',

@@ -67,8 +67,8 @@ describe('replaceKeyDraft', () => {
     expect(draft.baseUrl).toBeNull();
   });
 
-  it('the Claude API key is stored through activation (plan :649-652)', () => {
-    expect(replaceKeyDraft(connection({ id: 'anthropic', name: 'Claude API' }), request, null).activation).toBe('use-main-agent');
+  it('the Claude API key replacement keeps the current route', () => {
+    expect(replaceKeyDraft(connection({ id: 'anthropic', name: 'Claude API' }), request, null).activation).toBe('connect-only');
   });
 });
 
@@ -313,14 +313,14 @@ describe('CredentialsTabComponent', () => {
   describe('Claude API (plan :649-652, RUX-4)', () => {
     const claude = connection({ id: 'anthropic', name: 'Claude API' });
 
-    it('offers Replace only while Claude API drives the main agent, and says saving restarts sessions', () => {
+    it('offers Replace even while another route drives the main agent', () => {
       render({ connection: claude, isActiveDriver: false });
-      expect(query('credentials-replace')).toBeNull();
-      expect(query('credentials-anthropic-guidance')?.textContent).toContain('Connect provider');
+      expect(query('credentials-replace')).not.toBeNull();
+      expect(query('credentials-anthropic-guidance')).toBeNull();
       render({ isActiveDriver: true });
       expect(query('credentials-anthropic-guidance')).toBeNull();
       query('credentials-replace')?.click(); fixture.detectChanges();
-      expect(query('credentials-replace-form')?.textContent).toContain('restarts running chat sessions');
+      expect(query('credentials-replace-form')?.textContent).toContain('main-agent route stays the same');
     });
   });
 

@@ -480,7 +480,7 @@ describe('ProvidersSettingsStateService', () => {
     return context();
   }
 
-  it('stores direct Anthropic credentials only with explicit activation and never in a provider slot', async () => {
+  it('stores direct Anthropic credentials without activating until explicitly chosen', async () => {
     const reviewed = await verifiedConnection();
     await service.verifyDraft({
       probeId: 'draft-check',
@@ -489,12 +489,14 @@ describe('ProvidersSettingsStateService', () => {
       credential: { kind: 'apiKey', value: 'private-key' },
     });
     call.mockClear();
+    handlers.set('auth:setDirectAnthropicApiKey', async () => success({ success: true }));
     await service.connectProvider(
       connectionDraft({ providerId: 'anthropic' }),
       reviewed,
     );
-    expect(service.commit().status).toBe('blocked');
-    expect(call).not.toHaveBeenCalled();
+    expect(call).toHaveBeenCalledWith('auth:setDirectAnthropicApiKey', { apiKey: 'private-key' }, undefined);
+    expect(call.mock.calls.some(([method]) => method === 'auth:saveSettings')).toBe(false);
+    call.mockClear();
     handlers.set('auth:saveSettings', async () => success({ success: true }));
     await service.connectProvider(
       connectionDraft({

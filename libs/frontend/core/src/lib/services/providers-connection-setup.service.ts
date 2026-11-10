@@ -493,8 +493,6 @@ export class ProvidersConnectionSetupService implements MessageHandler {
     // A blocked result below would overwrite the in-flight save's feedback.
     if (this.commits.commit().status === 'saving') return false;
     const invalid =
-      (draft.providerId === 'anthropic' &&
-        draft.activation === 'connect-only') ||
       draft.saveTo !== 'global' ||
       hooks.connections().status !== 'ready' ||
       !this.verifiedFor(draft.providerId, draft.verified?.probeId);
@@ -543,6 +541,17 @@ export class ProvidersConnectionSetupService implements MessageHandler {
             await this.require('provider:addCustomEntry', {
               entry: parsed.data,
             });
+          return true;
+        },
+      });
+    }
+    if (draft.providerId === 'anthropic' && draft.credential?.value.trim() && draft.activation === 'connect-only') {
+      operations.push({
+        fields: ['Connection credential'],
+        stage: 'setup',
+        write: async () => {
+          const result = await this.require('auth:setDirectAnthropicApiKey', { apiKey: draft.credential?.value ?? '' });
+          if (!result.success) throw new Error('Could not save the Claude API key. Retry.');
           return true;
         },
       });
@@ -828,7 +837,9 @@ export class ProvidersConnectionSetupService implements MessageHandler {
         {
           fields: ['Stored key'],
           write: async () =>
-            (await this.require('auth:deleteStoredKey', { providerId }))
+            (await (providerId === 'anthropic'
+              ? this.require('auth:setDirectAnthropicApiKey', { apiKey: null })
+              : this.require('auth:deleteStoredKey', { providerId })))
               .success,
           readBack: async () => {
             if (providerId === 'anthropic')
