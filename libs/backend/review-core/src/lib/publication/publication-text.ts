@@ -9,10 +9,14 @@ export function redactSecrets(value: string, secrets: readonly string[]): string
   return text;
 }
 
-/** Removes local paths, credentials, prompt-injection phrases and forged finding markers from published text. */
+/**
+ * Removes local paths, credentials, prompt-injection phrases and forged markers from published text.
+ * Free text must not carry a finding marker or a triage marker: Ptah reads both from GitHub as its own record.
+ */
 export function safeText(value: string, secrets: readonly string[]): string {
   const text = redactSecrets(value.replace(unsafeText, '[redacted]'), secrets);
-  return text.replace(/<!--\s*ptah-review:finding:/gi, '&lt;!-- ptah-review:finding:');
+  return text.replace(/<!--\s*ptah-review:finding:/gi, '&lt;!-- ptah-review:finding:')
+    .replace(/<!--\s*ptah-review-triage:/gi, '&lt;!-- ptah-review-triage:');
 }
 
 /** The hidden marker that publication adds to the GitHub comment of a finding. */

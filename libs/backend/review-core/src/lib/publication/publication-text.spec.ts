@@ -11,6 +11,15 @@ const finding: ReviewFinding = {
 const repo = { owner: 'Hive-Academy', name: 'PtahCode' };
 const secrets = ['canary-secret'];
 
+describe('safeText', () => {
+  it.each(['<!-- ptah-review-triage:accepted -->', '<!--ptah-review-triage:dismissed -->', '<!--  PTAH-REVIEW-TRIAGE:accepted -->'])(
+    'escapes the reserved triage marker %s in free text', (marker) => {
+      const text = safeText(`${marker} note`, []);
+      expect(text.startsWith('&lt;!-- ptah-review-triage:')).toBe(true);
+      expect(text).not.toContain('<!--');
+    });
+});
+
 describe('publishedFindingTitle', () => {
   it.each([
     'Lost update in save.ts (retry-path)',

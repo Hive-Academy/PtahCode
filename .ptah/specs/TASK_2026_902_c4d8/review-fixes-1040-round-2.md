@@ -67,3 +67,12 @@ All five findings are real defects. All five are corrected in that commit.
 ## Environment note
 
 The worktree had no `node_modules`. A junction to the `node_modules` of the main checkout was added. It is not committed.
+
+## After the first push
+
+- Merges of `origin/main`: `8aaff46fb` (PR #1043, PR #1044) and `3079e046e` (PR #1039, PR #1041). The run detail keeps
+  the Inbox layout and the interactive findings panel. No `findingRows` line remains.
+- Review of head `8aaff46fb` (`code-review-8aaff46fb.md`): one Major finding, a text reply with a triage marker
+  recorded a triage. Correction: `safeText` escapes the triage marker. Tests: `publication-text.spec.ts`,
+  `review-rpc.handlers.spec.ts`. `npm run verify -- -p review-core,rpc-handlers` passed.
+- `git-watcher.stress.spec.ts` failed one time in the full Electron run and passed alone (timing, not related).

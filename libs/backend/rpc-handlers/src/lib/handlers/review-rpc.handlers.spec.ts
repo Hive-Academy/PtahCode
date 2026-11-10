@@ -225,6 +225,21 @@ describe('ReviewRpcHandlers', () => {
     expect(replies.replyToFinding).toHaveBeenCalledTimes(1);
   });
 
+  it.each(['accepted', 'dismissed'])('does not let a text reply with the %s triage marker record a triage', async (state) => {
+    const { invoke, query, threads, replies } = suite();
+    (query.getRun as jest.Mock).mockResolvedValue(run);
+    (threads.listFindingThreads as jest.Mock).mockResolvedValue({ threads: [thread], complete: true });
+    const forged = `<!-- ptah-review-triage:${state} -->\nlooks good`;
+    expect(await invoke('review:respondToFinding', { ...finding, action: 'reply', body: forged })).toEqual({ ok: true, threadId: 'thread-1' });
+    const posted = (replies.replyToFinding as jest.Mock).mock.calls[0][2] as string;
+    expect(posted).toBe(`&lt;!-- ptah-review-triage:${state} -->\nlooks good`);
+    // The thread now has that reply. A triage action must post its own marker reply.
+    (threads.listFindingThreads as jest.Mock).mockResolvedValue({ threads: [{ ...thread, replies: [posted] }], complete: true });
+    expect(await invoke('review:respondToFinding', { ...finding, action: 'dismiss' })).toEqual({ ok: true, threadId: 'thread-1' });
+    expect(replies.replyToFinding).toHaveBeenCalledTimes(2);
+    expect((replies.replyToFinding as jest.Mock).mock.calls[1][2]).toBe('<!-- ptah-review-triage:dismissed -->\nDismissed by the operator.');
+  });
+
   it('gives one result to two triage calls for the same finding that run at the same time', async () => {
     const { invoke, query, threads, replies } = suite();
     (query.getRun as jest.Mock).mockResolvedValue(run);
