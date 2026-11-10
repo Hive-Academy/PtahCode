@@ -1181,6 +1181,16 @@ describe('ReviewShellComponent', () => {
       expect(detach).toHaveBeenCalledTimes(1);
     });
 
+    it('does not leave Detach alone in the row when the folder is not a repository', async () => {
+      windowContext = { role: 'main', detach: jest.fn() };
+      gitStatus.isGitRepo.set(false);
+      const fixture = await render();
+      expect(query(fixture, '[data-testid="git-dock-detach"]')).toBeNull();
+      expect(query(fixture, '[data-testid="git-dock-detach-divider"]')).toBeNull();
+      const row = query(fixture, '[data-testid="git-dock-main-header"]') as HTMLElement;
+      expect(row.textContent?.trim()).toBe('');
+    });
+
     it('hides Detach and delegates pin requests in the child', async () => {
       windowContext = { role: 'child', applyCandidates: jest.fn(), setMode: jest.fn() };
       const fixture = await render();
