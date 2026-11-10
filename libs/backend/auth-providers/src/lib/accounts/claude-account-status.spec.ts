@@ -84,8 +84,8 @@ describe('parseClaudeAccountStatus', () => {
     });
   });
 
-  describe('class P (personal pro/max)', () => {
-    it.each(['max', 'pro', 'Max', 'max_20x', 'Claude Max', 'Claude Max 20x', 'Claude Pro'])('classifies %s with a non-null orgId as P', (subscriptionType) => {
+  describe('class P (personal pro/max/ultra)', () => {
+    it.each(['max', 'pro', 'ultra', 'Max', 'max_20x', 'Claude Max', 'Claude Max 20x', 'Claude Pro', 'Claude Ultra'])('classifies %s with a non-null orgId as P', (subscriptionType) => {
       expect(parse(signedIn({ subscriptionType }))).toMatchObject({ loggedIn: true, accountClass: 'P' });
     });
 
@@ -132,6 +132,7 @@ describe('parseClaudeAccountStatus', () => {
       ['promax', signedIn({ subscriptionType: 'promax' })],
       ['empty subscription', signedIn({ subscriptionType: '' })],
       ['team-qualified max', signedIn({ subscriptionType: 'Max Team' })],
+      ['team-qualified ultra', signedIn({ subscriptionType: 'Ultra Team' })],
       ['enterprise-qualified max', signedIn({ subscriptionType: 'max-enterprise' })],
       ['enterprise_max', signedIn({ subscriptionType: 'enterprise_max' })],
       ['max + forcedLoginMethod console', signedIn({ forcedLoginMethod: 'console' })],
