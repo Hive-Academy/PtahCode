@@ -9,4 +9,9 @@
 | 5 | Triage state (accepted / dismissed) is session-local in the renderer. | Persistent state needs a migration that conflicts with TASK_2026_901 (0074). Follow-up task. |
 | 6 | Thread resolve is not done here. | TASK_2026_901 owns thread resolved state. |
 | 7 | `review-findings-table.component.ts` stays in the library and in `index.ts`. | Removals are user-reserved. The new panel keeps the lens filter and all sort fields. |
+| 9 | Parent approved the plan (2026-11-10) with four requirements, steered into both live lanes. | Parent message. |
+| 10 | RPC gains `title` param and a typed `code` (`run-not-found`, `no-thread`, `ambiguous-thread`, `github-error`). Several path+line matches: title filter, then unresolved filter; only one remaining thread is a match. | Parent requirement 1. |
+| 11 | Accept / dismiss replies carry a hidden marker (`<!-- ptah-review-triage:accepted|dismissed -->`). Triage state stays session-local, with an honest note in the UI. | Parent requirement 2. `GitHubReviewThread` has no reply list; reading replies needs an adapter change in review-github, which TASK_2026_901 edits. Follow-up. |
+| 12 | B2 moved from antigravity to a second codex lane. | Antigravity quota reached (reset in 133 h); no other vendor has room. Review will use a different family (Claude subagent). |
+| 13 | Review fix round (Claude subagent, `code-logic-review.md`, REVISE): a thread must carry the finding title, else `no-thread`; a scan truncated at 5 pages returns `ambiguous-thread`; accept / dismiss post one time for each finding; a reply draft stays until success. Not changed: `logger.info` (the handler logger type is `Pick<Logger, 'info'>`), result schema union (Minor). | Review defects 1–6. Review family: Claude (code by Codex). |
 | 8 | "Send to lane" uses an existing renderer path if one exists; else "Copy fix prompt" + follow-up. | No renderer RPC spawns a lane with a prompt; a new spawn RPC is too large for the cap. |
