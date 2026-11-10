@@ -36,7 +36,7 @@ import type { IGitHubReviewPort } from '@ptah-extension/review-contracts';
 import { ReviewSecretPresence } from '../services/review/review-secret-presence';
 import { ElectronReviewEnvironment } from '../services/review/electron-review-environment';
 import { ReviewCommandRunner } from '../services/review/review-command-runner';
-import { ReviewLaneGateway } from '../services/review/review-lane-gateway';
+import { ReviewLaneGateway, type ReviewPtahCliRegistry } from '../services/review/review-lane-gateway';
 import { ReviewFiles } from '../services/review/review-files';
 import { ReviewLaneFiles } from '../services/review/review-lane-files';
 import { REVIEW_SYNC_TOKENS, ReviewSyncScheduleService, type ReviewSyncHooks } from '../services/review/review-sync-schedule.service';
@@ -499,6 +499,27 @@ export function registerPhase2Libraries(
         provider.resolve(CliDetectionService),
         provider.resolve<LaneLimitLookupService>(CLI_AGENT_RUNTIME_TOKENS.LANE_LIMIT_LOOKUP),
         provider.resolve(AgentSpawnEnvironment),
+        () => {
+          try {
+            return provider.resolve<ReviewPtahCliRegistry>(CLI_AGENT_RUNTIME_TOKENS.SDK_PTAH_CLI_REGISTRY);
+          } catch (error) {
+            logger.warn('[Electron DI] Review lanes cannot resolve the Ptah CLI registry', {
+              error: error instanceof Error ? error.message : String(error),
+            });
+            return undefined;
+          }
+        },
+        () => {
+          try {
+            return provider.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER);
+          } catch (error) {
+            logger.warn('[Electron DI] Review lanes cannot resolve the workspace provider', {
+              error: error instanceof Error ? error.message : String(error),
+            });
+            return undefined;
+          }
+        },
+        logger,
       ),
     });
     container.register(ReviewFiles, {

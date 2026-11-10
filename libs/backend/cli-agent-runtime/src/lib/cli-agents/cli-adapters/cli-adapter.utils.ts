@@ -372,6 +372,15 @@ export function probeCliVersion(
   timeoutMs = 5000,
   spawner?: IProcessSpawner,
 ): Promise<string | undefined> {
+  return probeCliVersionDetailed(binary, args, timeoutMs, spawner).then(({ version }) => version);
+}
+
+export function probeCliVersionDetailed(
+  binary: string,
+  args: string[] = ['--version'],
+  timeoutMs = 5000,
+  spawner?: IProcessSpawner,
+): Promise<{ version: string | undefined; exitCode: number | null }> {
   return new Promise((resolve) => {
     let stdout = '';
     const child = spawnCli(binary, args, { spawner, detached: true });
@@ -382,21 +391,21 @@ export function probeCliVersion(
           void killProcessTree(pid);
         }
       });
-      resolve(undefined);
+      resolve({ version: undefined, exitCode: null });
     }, timeoutMs);
 
     child.stdout?.setEncoding('utf8');
     child.stdout?.on('data', (data: string) => {
       stdout += data;
     });
-    child.on('close', () => {
+    child.on('close', (exitCode: number | null) => {
       clearTimeout(timer);
       const trimmed = stdout.trim().split(/\r?\n/)[0];
-      resolve(trimmed || undefined);
+      resolve({ version: trimmed || undefined, exitCode });
     });
     child.on('error', () => {
       clearTimeout(timer);
-      resolve(undefined);
+      resolve({ version: undefined, exitCode: null });
     });
   });
 }
