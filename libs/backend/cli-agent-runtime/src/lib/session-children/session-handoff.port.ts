@@ -89,8 +89,12 @@ export type SessionHandoffAckResult = {
 
 /** Host bridge must close only the exact predecessor binding supplied here. */
 export interface HandoffPredecessorCloser {
-  close(predecessorTabId: string, predecessorSdkId: string | null): Promise<boolean>;
+  close(predecessorTabId: string, predecessorSdkId: string | null): Promise<HandoffCloseResult>;
 }
+
+export type HandoffCloseResult =
+  | { readonly kind: 'closed' | 'absent' | 'timeout' | 'broadcast-failed' }
+  | { readonly kind: 'blocked'; readonly code: import('@ptah-extension/shared').HandoffCloseBlockerCode | 'unknown' };
 
 /**
  * Notice from the chat stream broadcaster after a turn's terminal flush.

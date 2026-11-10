@@ -7,6 +7,7 @@ import type { IStateStorage } from '@ptah-extension/platform-core';
 import { CLI_AGENT_RUNTIME_TOKENS } from '../di/tokens';
 import { SessionHandoffAckStore } from './session-handoff-ack.store';
 import { SessionHandoffService } from './session-handoff.service';
+import type { HandoffCloseResult } from './session-handoff.port';
 
 describe('SessionHandoffService acknowledgement recovery', () => {
   const predecessorSessionId = '11111111-2222-4333-8444-555555555555';
@@ -30,7 +31,7 @@ describe('SessionHandoffService acknowledgement recovery', () => {
       keys: () => [...values.keys()],
     };
     const lifecycle = { find: jest.fn(), endSession: jest.fn(async () => undefined) };
-    const closer = { close: jest.fn(async () => true) };
+    const closer = { close: jest.fn<Promise<HandoffCloseResult>, []>(async () => ({ kind: 'closed' })) };
     const request = { predecessorSessionId, callerSessionId: successorSessionId, handoffPath };
     const makeStore = () => new SessionHandoffAckStore(storage);
     const makeService = (store: SessionHandoffAckStore) => {
@@ -80,7 +81,7 @@ describe('SessionHandoffService acknowledgement recovery', () => {
     await record(store);
     const service = h.makeService(store);
     await armAndFlush(service, h.request);
-    h.closer.close.mockResolvedValueOnce(false);
+    h.closer.close.mockResolvedValueOnce({ kind: 'timeout' });
 
     expect(await service.acknowledge(h.request)).toMatchObject({ status: 'retryable-failure' });
     expect(await store.findByPredecessor(predecessorSessionId)).toMatchObject({ state: 'closePending' });
@@ -98,7 +99,7 @@ describe('SessionHandoffService acknowledgement recovery', () => {
     await record(firstStore);
     const first = h.makeService(firstStore);
     await armAndFlush(first, h.request);
-    h.closer.close.mockResolvedValueOnce(false);
+    h.closer.close.mockResolvedValueOnce({ kind: 'timeout' });
     expect(await first.acknowledge(h.request)).toMatchObject({ status: 'retryable-failure' });
 
     const resumedStore = h.makeStore();
@@ -155,5 +156,23 @@ describe('SessionHandoffService acknowledgement recovery', () => {
     const service = h.makeService(store);
     rmSync(handoffPath);
     expect(await service.acknowledge(h.request)).toMatchObject({ status: 'retryable-failure' });
+  });
+  it.each([
+    [{ kind: 'blocked', code: 'unsent-input' }, 'refused', 'unsent input'],
+    [{ kind: 'blocked', code: 'queued-message' }, 'refused', 'queued message'],
+    [{ kind: 'blocked', code: 'streaming' }, 'retryable-failure', 'streaming'],
+    [{ kind: 'absent' }, 'refused', 'not found'],
+    [{ kind: 'timeout' }, 'retryable-failure', 'timeout'],
+  ] as const)('returns the actual close cause %j', async (closeResult, status, phrase) => {
+    const h = harness();
+    const store = h.makeStore();
+    await record(store);
+    const service = h.makeService(store);
+    await armAndFlush(service, h.request);
+    h.closer.close.mockResolvedValueOnce(closeResult);
+    const result = await service.acknowledge(h.request);
+    expect(result.status).toBe(status);
+    expect(result.reason).toContain(phrase);
+    expect(result.reason).not.toContain('predecessor tab close failed; retry later');
   });
 });

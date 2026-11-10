@@ -53,6 +53,7 @@ import { SessionChildRegistry } from './session-child.registry';
 import type { ISessionSpawner, SessionChildSuccessionRefusalCode } from './session-spawner.port';
 import { safeErrorKind } from './safe-error-kind';
 import { SessionHandoffAckStore } from './session-handoff-ack.store';
+import { handoffCloseAckResult } from './session-handoff-close-result';
 import type { ISessionHandoffChain } from './session-handoff-chain.port';
 import type {
   HandoffTurnFlushNotice,
@@ -275,9 +276,8 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
           return retry('waiting for predecessor turn to flush; retry later');
         }
       }
-      if (!await closer.close(record.predecessorTabId, record.predecessorSdkId)) {
-        return retry('predecessor tab close failed; retry later');
-      }
+      const closeResult = handoffCloseAckResult(await closer.close(record.predecessorTabId, record.predecessorSdkId));
+      if (closeResult.status !== 'closed') return closeResult;
       await this.ackStore!.compareAndSet(record.predecessorTabId, 'closePending', { state: 'closeCompleted' });
       return { status: 'closed', reason: 'predecessor closed' };
     } catch (error: unknown) {

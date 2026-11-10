@@ -10,7 +10,7 @@ export const SessionHandoffAckArgsSchema = z.object({
 
 export const sessionHandoffAckTool: MCPToolDefinition = {
   name: SESSION_HANDOFF_ACK_TOOL_NAME,
-  description: 'After reading HANDOFF.md and adopting the work, acknowledge the handoff to close the predecessor session. Retry when the result is retryable-failure.',
+  description: 'After reading HANDOFF.md and adopting the work, acknowledge the handoff to close the predecessor session. Retry when the result is retryable-failure. Do not retry a refused result; report its reason to the user.',
   inputSchema: { type: 'object', properties: {
     predecessorSessionId: { type: 'string' },
     handoffPath: { type: 'string' },
