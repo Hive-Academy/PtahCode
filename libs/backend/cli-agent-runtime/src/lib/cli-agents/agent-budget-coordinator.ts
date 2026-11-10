@@ -27,7 +27,7 @@ export class AgentBudgetCoordinator {
     snapshot: AgentBudgetSnapshot = initialAgentBudgetSnapshot,
     turnCount = snapshot.turnIds.length,
   ) {
-    this.policy = new AgentBudgetPolicy(settings);
+    this.policy = new AgentBudgetPolicy(settings, { laneAccounting: true });
     this._startedAtMs = startedAtMs;
     this.snapshot = { ...snapshot, turnIds: snapshot.turnIds.slice(-256) };
     this._turnCount = turnCount;
@@ -40,7 +40,7 @@ export class AgentBudgetCoordinator {
 
   updateSettings(settings: AgentBudgetSettings, nowMs = Date.now()): { warning: boolean; stopReason?: AgentBudgetStopReason } {
     this.settings = settings;
-    this.policy = new AgentBudgetPolicy(settings);
+    this.policy = new AgentBudgetPolicy(settings, { laneAccounting: true });
     const decision = this.policy.assess(this.snapshot, Math.max(0, nowMs - this.startedAtMs));
     this.snapshot = { ...this.snapshot, warned: this.snapshot.warned || decision.warning,
       stopped: this.snapshot.stopped || decision.stopReason !== undefined };
@@ -53,6 +53,7 @@ export class AgentBudgetCoordinator {
       weightedTokens: this.snapshot.weightedTokens,
       rawTokens: this.snapshot.rawTokens,
       largestTurnTokens: this.snapshot.largestTurnTokens,
+      unavailableTurns: this.snapshot.unavailableTurns,
       turnIds: this.snapshot.turnIds,
       turnCount: this.turnCount,
       startedAtMs: this.startedAtMs,
@@ -72,6 +73,9 @@ export class AgentBudgetCoordinator {
       weightedTokens: record.weightedTokens + (sameLedger ? 0 : current.weightedTokens),
       rawTokens: record.rawTokens + (sameLedger ? 0 : current.rawTokens),
       largestTurnTokens: Math.max(record.largestTurnTokens ?? 0, current.largestTurnTokens ?? 0),
+      unavailableTurns: sameLedger ? current.unavailableTurns ?? record.unavailableTurns
+        : current.rawTokens > 0 ? current.unavailableTurns ?? 0
+        : (record.unavailableTurns ?? 0) + (current.unavailableTurns ?? 0),
       turnIds: [...record.turnIds, ...novelIds],
       elapsedMs: 0, warned: current.warned, stopped: current.stopped,
     }, turnCountOf(record) + (sameLedger ? 0 : this.turnCount));
@@ -101,7 +105,8 @@ export class AgentBudgetCoordinator {
     const result = this.policy.evaluate(
       this.snapshot, telemetry, Math.max(0, nowMs - this.startedAtMs), pricing,
     );
-    if (telemetry.status === 'reported' && !this.snapshot.turnIds.includes(telemetry.usage.turnId)) this._turnCount++;
+    const turnId = telemetry.status === 'reported' ? telemetry.usage.turnId : telemetry.turnId;
+    if (!this.snapshot.turnIds.includes(turnId)) this._turnCount++;
     // Bound metadata and long-lived memory; an ancient duplicate is charged
     // again conservatively rather than allowing unbounded turn IDs.
     this.snapshot = { ...result.snapshot, turnIds: result.snapshot.turnIds.slice(-256) };

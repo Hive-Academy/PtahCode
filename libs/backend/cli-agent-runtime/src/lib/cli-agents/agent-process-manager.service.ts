@@ -110,7 +110,7 @@ import {
 import { LaneBudgetGuard } from './lane-budget-guard';
 import { AgentBudgetCoordinator } from './agent-budget-coordinator';
 import { createLaneBudget } from './lane-budget-deadline';
-import { deliverLaneBudgetWarning, LaneBudgetTelemetry } from './lane-budget-telemetry';
+import { deliverLaneBudgetWarning, LaneBudgetTelemetry, takeHeldBudgetWarning } from './lane-budget-telemetry';
 import { bindLaneSessionId } from './lane-session-binding';
 import type { AgentOutputJournal } from './agent-output-journal.service';
 import {
@@ -453,8 +453,16 @@ export class AgentProcessManager {
   ) {
     this.budgetTelemetry = new LaneBudgetTelemetry(this.logger,
       async (agentId) => {
-        return deliverLaneBudgetWarning(agentId, this.agents.get(agentId)?.sdkHandle,
-          (id, message, delivery) => this.sendToAgent(id, message, delivery));
+        const tracked = this.agents.get(agentId);
+        return deliverLaneBudgetWarning(agentId, tracked?.sdkHandle,
+          tracked?.info.status === 'running' && !tracked.hasExited,
+          tracked ? (warning) => {
+            const pending = tracked.pendingMessages[0];
+            if (!pending) return false;
+            if (tracked.sdkHandle?.queueForNextTurn) tracked.sdkHandle.queueForNextTurn(warning);
+            else tracked.pendingMessages[0] = { ...pending, text: `${warning}\n\n${pending.text}` };
+            return true;
+          } : undefined);
       },
       (agentId, reason) => { void this.stopLaneForGuard(agentId, reason, 0, 0); });
     this.budgetSettingsSubscription = this.spawnEnvironment.onAgentBudgetSettingsChanged?.(() => {
@@ -2463,15 +2471,22 @@ export class AgentProcessManager {
       );
     }
 
-    return this.messageRouter.route(
-      agentId,
-      tracked,
-      message,
-      this,
-      delivery,
-      messageId,
-      allowPartialTurnLoss,
-    );
+    const warning = tracked.heldBudgetWarning;
+    const routedMessage = takeHeldBudgetWarning(tracked, message);
+    try {
+      const outcome = await this.messageRouter.route(
+        agentId, tracked, routedMessage, this, delivery, messageId,
+        allowPartialTurnLoss,
+      );
+      if (warning && outcome.mode === 'unsupported') tracked.heldBudgetWarning = warning;
+      else if (warning) this.logger.info('[LaneBudgetTelemetry] Held budget warning delivered with parent message', {
+        agentId, mode: outcome.mode,
+      });
+      return outcome;
+    } catch (error: unknown) {
+      if (warning) tracked.heldBudgetWarning = warning;
+      throw error;
+    }
   }
 
   getAgentMessageStatus(agentId: string, messageId: string) {
@@ -3622,6 +3637,7 @@ export class AgentProcessManager {
     void Promise.resolve(
       this.laneCompletion.signal(info, {
         reportsDelivered,
+        ...(tracked.heldBudgetWarning ? { heldBudgetWarning: true } : {}),
         ...(reportClaimsCompletion ? { reportClaimsCompletion: true } : {}),
         ...(tracked.outcomeUsage ? { usage: tracked.outcomeUsage } : {}),
         authMatched: tracked.authMatched ?? false,

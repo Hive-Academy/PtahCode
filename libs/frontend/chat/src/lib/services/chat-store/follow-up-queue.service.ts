@@ -31,6 +31,7 @@ import { ActionBannerService } from '../action-banner.service';
 import { ComposerRestoreService } from '../composer-restore.service';
 import { MessageSenderService } from '../message-sender.service';
 import { MessageValidationService } from '../message-validation.service';
+import { SessionAutoHandoffService } from '../session-auto-handoff.service';
 import { StreamViewportController } from '../stream-viewport-controller.service';
 import {
   parseQueuedMessageStateEvent,
@@ -126,6 +127,7 @@ export class FollowUpQueueService {
   private readonly actionBanner = inject(ActionBannerService);
   private readonly authState = inject(AuthStateService);
   private readonly validator = inject(MessageValidationService);
+  private readonly autoHandoff = inject(SessionAutoHandoffService);
   private readonly logger = inject(LoggingService);
 
   /** Tabs with one send in flight: one at a time per tab keeps FIFO order. */
@@ -431,11 +433,29 @@ export class FollowUpQueueService {
       // Every older item must be settled and the turn over: the backend
       // runs a slash command only as a normal turn.
       if (index > 0 || !this.isIdle(tab)) return;
+      if (this.isStaleAutoHandoff(entry, tab, bound)) {
+        this.logger.info(LOG, 'automatic hand-off not sent: the confirmed stage is below the limit', { tabId });
+        this.store.settle(entry.clientMessageId, 'withdrawn');
+        this.pump(tabId);
+        return;
+      }
       void this.sendCommand(entry, bound);
       return;
     }
     if (entries.slice(0, index).some((e) => e.phase === 'submitting')) return;
     void this.submit(entry, bound);
+  }
+
+  /**
+   * The automatic hand-off was queued on the live estimate of a running turn.
+   * The turn is over here, so only the confirmed stage counts: below `limit`
+   * the command must not run. Checked at the send itself, so no withdrawal
+   * can lose a race with it.
+   */
+  private isStaleAutoHandoff(entry: QueuedFollowUpEntry, tab: TabState, bound: string): boolean {
+    const handoff = this.autoHandoff.entry(bound);
+    if (handoff?.state !== 'fired' || handoff.queued?.clientMessageId !== entry.clientMessageId) return false;
+    return tab.sessionBudget?.stage !== 'limit';
   }
 
   /** Held items captured for an earlier session of the tab are never sent there. */

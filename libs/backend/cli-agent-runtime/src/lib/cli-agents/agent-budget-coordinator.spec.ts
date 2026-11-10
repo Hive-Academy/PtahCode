@@ -38,15 +38,56 @@ describe('AgentBudgetCoordinator', () => {
     expect(coordinator.accept({ status: 'reported', usage }, 11).warning).toBe(false);
     expect(coordinator.turnCount).toBe(1);
     expect(coordinator.counters.rawTokens).toBe(80);
-    expect(coordinator.accept({ status: 'reported', usage: { ...usage, turnId: 'turn-2' } }, 12).stopReason).toBe('budget');
+    const crossing = coordinator.accept({ status: 'reported', usage: { ...usage, turnId: 'turn-2' } }, 12);
+    expect(crossing.warning).toBe(true);
+    expect(crossing.stopReason).toBeUndefined();
     expect(coordinator.turnCount).toBe(2);
+    expect(coordinator.accept({ status: 'reported', usage: { ...usage, turnId: 'turn-3' } }, 13).stopReason).toBe('budget');
+    expect(coordinator.turnCount).toBe(3);
   });
 
-  it('fails closed for missing totals and expires at the original deadline', () => {
+  it('allows one missing total and expires at the original deadline', () => {
     const coordinator = new AgentBudgetCoordinator(settings, 1_000);
-    expect(coordinator.accept({ status: 'unavailable', turnId: 'missing', modelId: 'unknown', source: 'stream', reason: 'missing' }, 2_000).stopReason).toBe('telemetry-unavailable');
+    expect(coordinator.accept({ status: 'unavailable', turnId: 'missing', modelId: 'unknown', source: 'stream', reason: 'missing' }, 2_000).stopReason).toBeUndefined();
+    expect(coordinator.record().unavailableTurns).toBe(1);
     expect(coordinator.expired(120_999)).toBe(false);
     expect(coordinator.expired(121_000)).toBe(true);
+  });
+
+  it('persists the unavailable streak and carries the newer count across a ledger rebind', () => {
+    const first = new AgentBudgetCoordinator({ ...settings, stopWeightedTokens: 200 }, 1_000);
+    const missingTurn = (turnId: string) => ({ status: 'unavailable' as const, turnId,
+      modelId: 'unknown', source: 'stream' as const, reason: 'missing' });
+    first.accept(missingTurn('old'), 1_100);
+    const record = first.record();
+    expect(record.unavailableTurns).toBe(1);
+    const resumed = new AgentBudgetCoordinator({ ...settings, stopWeightedTokens: 200 }, 2_000);
+    resumed.accept(missingTurn('new'), 2_100);
+    resumed.rebindRecord(record, 2_200);
+    expect(resumed.counters.unavailableTurns).toBe(2);
+    expect(resumed.record().turnIds).toEqual(['old', 'new']);
+    expect(resumed.turnCount).toBe(2);
+    expect(resumed.accept(missingTurn('last'), 2_300).stopReason).toBe('telemetry-unavailable');
+    expect(resumed.counters.unavailableTurns).toBe(3);
+  });
+
+  it('adds unavailable streaks across distinct ledgers without a reported reset', () => {
+    const coordinator = new AgentBudgetCoordinator({ ...settings, stopWeightedTokens: 200 }, 2_000);
+    coordinator.accept({ status: 'unavailable', turnId: 'current', modelId: 'unknown',
+      source: 'stream', reason: 'missing' }, 2_100);
+    coordinator.rebindRecord({ weightedTokens: 0, rawTokens: 0, unavailableTurns: 2,
+      turnIds: ['prior-1', 'prior-2'], turnCount: 2, startedAtMs: 1_000 }, 2_200);
+    expect(coordinator.counters.unavailableTurns).toBe(3);
+  });
+
+  it('uses the current streak after a reported turn resets the prior ledger', () => {
+    const coordinator = new AgentBudgetCoordinator({ ...settings, stopWeightedTokens: 200 }, 2_000);
+    coordinator.accept({ status: 'reported', usage: { ...usage, inputTokens: 10, outputTokens: 0 } }, 2_100);
+    coordinator.accept({ status: 'unavailable', turnId: 'current', modelId: 'unknown',
+      source: 'stream', reason: 'missing' }, 2_200);
+    coordinator.rebindRecord({ weightedTokens: 0, rawTokens: 0, unavailableTurns: 2,
+      turnIds: ['prior-1', 'prior-2'], turnCount: 2, startedAtMs: 1_000 }, 2_300);
+    expect(coordinator.counters.unavailableTurns).toBe(1);
   });
 
   it('merges a prior ledger after its provisional first charge', () => {
