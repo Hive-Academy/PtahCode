@@ -321,6 +321,7 @@ type ChatFollowUpQueue = Pick<
   ChatFollowUpQueueService,
   | 'assertTabOwnsSession'
   | 'beginAdmission'
+  | 'acceptedRetry'
   | 'endAdmission'
   | 'liveIdentity'
   | 'ownerIdentity'
@@ -1724,7 +1725,9 @@ export class ChatSessionService {
     let followUpRefusalCode: RpcUserErrorCode | undefined;
     try {
       if (params.queueIntent === 'next-turn' && params.clientMessageId) {
-        this.followUpQueue?.beginAdmission(params.sessionId, params.tabId, params.clientMessageId);
+        const previous = this.followUpQueue?.acceptedRetry(params.sessionId, params.tabId, params.clientMessageId, params.prompt);
+        if (previous) return { success: true, sessionId: params.sessionId, queueState: previous };
+        this.followUpQueue?.beginAdmission(params.sessionId, params.tabId, params.clientMessageId, params.prompt);
         followUpAdmissionStarted = this.followUpQueue !== undefined;
       }
       const { prompt, sessionId, tabId, name } = params;
@@ -1733,8 +1736,16 @@ export class ChatSessionService {
         tabId,
         sessionName: name,
       });
+      if (followUpAdmissionStarted && params.clientMessageId &&
+          (this.ptahCli.hasSession(params.sessionId) || this.ptahCli.hasSession(params.tabId))) {
+        this.followUpQueue?.commitAdmission(params.sessionId, params.clientMessageId);
+      }
       const ptahCliResult = await this.ptahCli.handleContinue(params);
       if (ptahCliResult.error !== '__NOT_PTAH_CLI__') {
+        if (ptahCliResult.success && followUpAdmissionStarted && params.clientMessageId) {
+          this.followUpQueue?.acceptResumed(sessionId, tabId, params.clientMessageId);
+          followUpAccepted = true;
+        }
         return ptahCliResult;
       }
       // Backend-owned follow-up (TASK_2026_884): sent while a turn may run, so
@@ -1978,6 +1989,8 @@ export class ChatSessionService {
           return { success: false, sessionId, errorCode: 'SESSION_CHANGED', error: 'The follow-up could not be confirmed.' };
         }
         followUp?.queue.bind(sessionId, tabId, followUp.clientMessageId);
+        // The adapter can retain the item as soon as this call begins.
+        followUp?.queue.commitAdmission(sessionId, followUp.clientMessageId);
         const submission = this.sdkAdapter.sendMessageToSession(sessionId, enhancedPrompt, {
           files,
           images,

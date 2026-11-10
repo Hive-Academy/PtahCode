@@ -75,6 +75,7 @@ describe('FollowUpQueueService', () => {
   let rpcCall: jest.Mock;
   let recordBoundary: jest.Mock;
   let showError: jest.Mock;
+  let showInfo: jest.Mock;
   let logWarn: jest.Mock;
   let activeProviderId: ReturnType<typeof signal<string>>;
 
@@ -100,6 +101,7 @@ describe('FollowUpQueueService', () => {
     rpcCall = jest.fn();
     recordBoundary = jest.fn();
     showError = jest.fn();
+    showInfo = jest.fn();
     logWarn = jest.fn();
     activeProviderId = signal('anthropic');
 
@@ -139,7 +141,7 @@ describe('FollowUpQueueService', () => {
           provide: StreamViewportController,
           useValue: { tierFor: (id: string) => tiers.get(id) ?? 'focused' },
         },
-        { provide: ActionBannerService, useValue: { showError } },
+        { provide: ActionBannerService, useValue: { showError, showInfo } },
         { provide: AuthStateService, useValue: { activeProviderId } },
         {
           provide: LoggingService,
@@ -280,14 +282,15 @@ describe('FollowUpQueueService', () => {
   });
 
   describe('failures become drafts', () => {
-    it('maps a typed refusal and logs its raw details', async () => {
+    it('maps a typed refusal without logging raw details', async () => {
       submit.mockResolvedValueOnce({ success: true, data: { success: false, errorCode: 'SESSION_CHANGED', error: 'private backend detail' } });
       const ref = service.enqueue('tab-1', 'next')!;
       await flush();
       expect(showError).toHaveBeenCalledWith(expect.stringContaining('(the session changed)'), 'tab-1');
       expect(logWarn).toHaveBeenCalledWith(expect.any(String), expect.any(String), expect.objectContaining({
-        error: 'private backend detail', errorCode: 'SESSION_CHANGED', tabId: 'tab-1', sessionId: S1, clientMessageId: ref.clientMessageId,
+        errorCode: 'SESSION_CHANGED', tabId: 'tab-1', sessionId: S1, clientMessageId: ref.clientMessageId,
       }));
+      expect(JSON.stringify(logWarn.mock.calls)).not.toContain('private backend detail');
       expect(restore.pendingFor('tab-1')).toBe('next');
     });
 
@@ -297,6 +300,17 @@ describe('FollowUpQueueService', () => {
       await flush();
       expect(showError).toHaveBeenCalledWith(expect.stringContaining('(the request could not be completed)'), 'tab-1');
       expect(showError.mock.calls[0][0]).not.toContain('secret detail');
+      expect(JSON.stringify(logWarn.mock.calls)).not.toContain('secret detail');
+    });
+
+    it('omits transport and receipt exception text from exportable logs', async () => {
+      submit.mockRejectedValueOnce(new Error('token=private-transport-secret'));
+      rpcCall.mockRejectedValueOnce(new Error('token=private-receipt-secret'));
+      service.enqueue('tab-1', 'next');
+      await flush();
+      expect(JSON.stringify(logWarn.mock.calls)).not.toContain('private-transport-secret');
+      expect(JSON.stringify(logWarn.mock.calls)).not.toContain('private-receipt-secret');
+      expect(JSON.stringify(showError.mock.calls)).not.toContain('private-transport-secret');
     });
 
     it('keeps a timed-out item when the backend has already queued it', async () => {
@@ -392,7 +406,7 @@ describe('FollowUpQueueService', () => {
       expect(restore.pendingFor('tab-1')).toBeNull();
       jest.useRealTimers();
     });
-    it('restores a committed admission after three missing receipts and reuses its client id', async () => {
+    it('settles a committed admission as unconfirmed only after three missing receipts', async () => {
       jest.useFakeTimers();
       submit.mockResolvedValueOnce({ success: false, error: 'RPC timeout: chat:continue' });
       let abandonCalls = 0;
@@ -402,18 +416,25 @@ describe('FollowUpQueueService', () => {
       }));
       const ref = service.enqueue('tab-1', 'next')!;
       await flush();
-      for (const delay of [2000, 4000, 8000, 16000, 30000, 30000, 30000, 30000]) {
-        jest.advanceTimersByTime(delay);
+      const delays = [2000, 4000, 8000, 16000];
+      for (let step = 0; step < 30 && store.get(ref.clientMessageId)?.phase === 'submitting'; step++) {
+        if (abandonCalls === 3) {
+          expect(restore.pendingFor('tab-1')).toBeNull();
+          expect(showError).not.toHaveBeenCalled();
+        }
+        jest.advanceTimersByTime(delays[step] ?? 30000);
         await flush();
       }
-      expect(store.get(ref.clientMessageId)).toBeNull();
-      expect(restore.pendingFor('tab-1')).toBe('next');
-      expect(showError).toHaveBeenCalledTimes(1);
-      expect(showError).toHaveBeenCalledWith('Could not confirm whether the queued message was sent. It is back in the composer.', 'tab-1');
-      expect(service.enqueue('tab-1', 'next')?.clientMessageId).toBe(ref.clientMessageId);
+      // One committed pending reply, then three consecutive missing receipts.
+      expect(abandonCalls).toBe(4);
+      expect(restore.pendingFor('tab-1')).not.toBeNull();
+      expect(showError).toHaveBeenCalledWith(
+        'Could not confirm whether the queued message was sent. It is back in the composer.',
+        'tab-1',
+      );
       jest.useRealTimers();
     });
-    it('restores a committed admission after ten minutes of pending receipts', async () => {
+    it('keeps a committed admission after ten minutes and accepts a late delivery', async () => {
       jest.useFakeTimers();
       submit.mockResolvedValueOnce({ success: false, error: 'RPC timeout: chat:continue' });
       rpcCall.mockResolvedValue({ success: true, data: { items: [], receipt: 'pending', receiptCommitted: true } });
@@ -428,11 +449,12 @@ describe('FollowUpQueueService', () => {
         jest.advanceTimersByTime(30000);
         await flush();
       }
-      expect(store.get(ref.clientMessageId)).toBeNull();
-      expect(restore.pendingFor('tab-1')).toBe('next');
-      expect(showError).toHaveBeenCalledTimes(1);
-      expect(showError).toHaveBeenCalledWith('Could not confirm whether the queued message was sent. It is back in the composer.', 'tab-1');
-      expect(service.enqueue('tab-1', 'next')?.clientMessageId).toBe(ref.clientMessageId);
+      expect(store.get(ref.clientMessageId)?.phase).toBe('submitting');
+      expect(restore.pendingFor('tab-1')).toBeNull();
+      expect(showInfo).toHaveBeenCalledWith('Still confirming whether the queued message was sent.', 'tab-1');
+      service.handleStateEvent({ sessionId: S1, tabId: 'tab-1', clientMessageId: ref.clientMessageId, state: 'delivered' });
+      expect(tab().messages.filter((message) => message.id === ref.clientMessageId)).toHaveLength(1);
+      expect(restore.pendingFor('tab-1')).toBeNull();
       jest.useRealTimers();
     });
     it('delivers once after a missing committed receipt without restoring text', async () => {
@@ -600,7 +622,7 @@ describe('FollowUpQueueService', () => {
         'tab-1',
       );
       expect(showError.mock.calls[0][0]).not.toContain('private password');
-      expect(logWarn).toHaveBeenCalledWith(expect.any(String), expect.any(String), expect.objectContaining({ reason: 'private password and backend trace' }));
+      expect(JSON.stringify(logWarn.mock.calls)).not.toContain('private password');
     });
 
     it('a definite rejected chat:continue drafts the text', async () => {

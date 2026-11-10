@@ -81,6 +81,7 @@ interface HarnessOptions {
   autopilot?: boolean;
   sendMessageToSession?: jest.Mock;
   interruptSession?: jest.Mock;
+  ptahCli?: boolean;
 }
 
 function makeHarness(opts: HarnessOptions = {}) {
@@ -179,7 +180,8 @@ function makeHarness(opts: HarnessOptions = {}) {
     } as never,
     { isMcpServerRunning: jest.fn().mockReturnValue(false) } as never,
     {
-      handleContinue: jest.fn().mockResolvedValue({ error: '__NOT_PTAH_CLI__' }),
+      handleContinue: jest.fn().mockResolvedValue(opts.ptahCli ? { success: true, sessionId: SESSION_ID } : { error: '__NOT_PTAH_CLI__' }),
+      hasSession: jest.fn().mockReturnValue(opts.ptahCli === true),
       handleAbort: jest.fn().mockResolvedValue({ error: '__NOT_PTAH_CLI__' }),
     } as never,
     {
@@ -251,6 +253,36 @@ function queued(prompt: string, clientMessageId = ID_1): ChatContinueParams {
 }
 
 describe('ChatSessionService — backend-owned follow-up queue', () => {
+  it('records a successful Ptah CLI next-turn admission', async () => {
+    const h = makeHarness({ ptahCli: true });
+    await expect(h.service.continueSession(queued('next'))).resolves.toMatchObject({ success: true });
+    expect(h.followUpQueue.receipt(SESSION_ID, TAB_ID, ID_1)).toBe('delivered');
+  });
+  it('keeps an adapter-held send committed while abandonment races its reply', async () => {
+    let resolveSend: (() => void) | undefined;
+    const sendMessageToSession = jest.fn(() => new Promise<void>((resolve) => { resolveSend = resolve; }));
+    const h = makeHarness({ busy: true, registeredTab: TAB_ID, sendMessageToSession });
+    const pending = h.service.continueSession(queued('next'));
+    for (let i = 0; i < 20 && !resolveSend; i++) await Promise.resolve();
+    expect(resolveSend).toBeDefined();
+    h.followUpQueue.abandonPending(SESSION_ID, TAB_ID, ID_1);
+    expect(h.followUpQueue.receipt(SESSION_ID, TAB_ID, ID_1)).toBe('pending');
+    expect(h.followUpQueue.isCommitted(SESSION_ID, ID_1)).toBe(true);
+    h.followUpQueue.acceptResumed(SESSION_ID, TAB_ID, ID_1);
+    resolveSend?.();
+    await pending;
+  });
+
+  it('reuses a delivered native resume receipt without sending a second turn', async () => {
+    const h = makeHarness({ busy: false, registeredTab: TAB_ID, streamAttached: false });
+    Object.defineProperty(h.service, 'autoResumeIfInactive', {
+      value: async () => ({ justResumed: true, promptDelivered: true }),
+    });
+    await h.service.continueSession(queued('next'));
+    await expect(h.service.continueSession(queued('next'))).resolves.toMatchObject({ success: true, queueState: 'admitted' });
+    expect(h.sendMessageToSession).not.toHaveBeenCalled();
+    await expect(h.service.continueSession(queued('changed'))).resolves.toMatchObject({ success: false, errorCode: 'FOLLOW_UP_ID_CONFLICT' });
+  });
   it('refuses a follow-up whose preparation crosses Stop', async () => {
     const h = makeHarness({ busy: true });
     let releaseDrive: ((value: string) => void) | undefined;

@@ -57,6 +57,7 @@ export class ChatFollowUpQueueService {
   private readonly bindings = new Map<string, Map<string, string>>();
   private readonly states = new Map<string, Map<string, QueuedFollowUpStateChange['state']>>();
   private readonly receiptOwners = new Map<string, Map<string, string>>();
+  private readonly receiptContent = new Map<string, Map<string, string>>();
   private readonly rejections = new Map<string, Map<string, RpcUserErrorCode | undefined>>();
   private readonly terminalAt = new Map<string, Map<string, number>>();
   private readonly abandoned = new Map<string, Set<string>>();
@@ -94,6 +95,7 @@ export class ChatFollowUpQueueService {
     this.bindings.clear();
     this.states.clear();
     this.receiptOwners.clear();
+    this.receiptContent.clear();
     this.rejections.clear();
     this.terminalAt.clear();
     this.abandoned.clear();
@@ -142,6 +144,7 @@ export class ChatFollowUpQueueService {
     this.bindings.delete(sessionId);
     this.states.delete(sessionId);
     this.receiptOwners.delete(sessionId);
+    this.receiptContent.delete(sessionId);
     this.rejections.delete(sessionId);
     this.terminalAt.delete(sessionId);
     this.abandoned.delete(sessionId);
@@ -156,12 +159,13 @@ export class ChatFollowUpQueueService {
     if (this.admissions.get(sessionId)?.size) return;
     this.states.get(sessionId)?.delete(id);
     this.receiptOwners.get(sessionId)?.delete(id);
+    this.receiptContent.get(sessionId)?.delete(id);
     this.rejections.get(sessionId)?.delete(id);
     this.terminalAt.get(sessionId)?.delete(id);
     this.abandoned.get(sessionId)?.delete(id);
     this.bindings.get(sessionId)?.delete(id);
     this.committed.get(sessionId)?.delete(id);
-    for (const map of [this.states, this.receiptOwners, this.rejections, this.terminalAt, this.bindings]) {
+    for (const map of [this.states, this.receiptOwners, this.receiptContent, this.rejections, this.terminalAt, this.bindings]) {
       if (map.get(sessionId)?.size === 0) map.delete(sessionId);
     }
     if (this.abandoned.get(sessionId)?.size === 0) this.abandoned.delete(sessionId);
@@ -242,12 +246,32 @@ export class ChatFollowUpQueueService {
     return this.ownerTab(sessionId);
   }
 
-  beginAdmission(sessionId: string, tabId: string, clientMessageId: string): void {
+  acceptedRetry(sessionId: string, tabId: string, clientMessageId: string, content: string): FollowUpAcceptance | undefined {
+    const receipt = this.receipt(sessionId, tabId, clientMessageId);
+    if (receipt === 'delivered' || receipt === 'steered' || receipt === 'queued') {
+      if (this.receiptContent.get(sessionId)?.get(clientMessageId) !== content) {
+        throw new RpcUserError('Follow-up ID has different content.', 'FOLLOW_UP_ID_CONFLICT');
+      }
+      return receipt === 'queued' ? 'queued' : 'admitted';
+    }
+    return undefined;
+  }
+
+  beginAdmission(sessionId: string, tabId: string, clientMessageId: string, content?: string): void {
     const admissions = this.admissions.get(sessionId) ?? new Map<string, { tabId: string; count: number }>();
     const previousOwner = admissions.get(clientMessageId)?.tabId ??
       this.receiptOwners.get(sessionId)?.get(clientMessageId);
     if (previousOwner !== undefined && previousOwner !== tabId) {
       throw new RpcUserError(NOT_THIS_TAB_MESSAGE, 'FOLLOW_UP_ID_CONFLICT');
+    }
+    const previousContent = this.receiptContent.get(sessionId)?.get(clientMessageId);
+    if (content !== undefined && previousContent !== undefined && previousContent !== content) {
+      throw new RpcUserError('Follow-up ID has different content.', 'FOLLOW_UP_ID_CONFLICT');
+    }
+    if (content !== undefined) {
+      const contents = this.receiptContent.get(sessionId) ?? new Map<string, string>();
+      contents.set(clientMessageId, content);
+      this.receiptContent.set(sessionId, contents);
     }
     admissions.set(clientMessageId, { tabId, count: (admissions.get(clientMessageId)?.count ?? 0) + 1 });
     this.admissions.set(sessionId, admissions);

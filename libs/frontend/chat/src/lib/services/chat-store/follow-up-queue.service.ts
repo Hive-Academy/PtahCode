@@ -47,7 +47,6 @@ const COMMITTED_RECEIPT_DEADLINE_MS = 10 * 60 * 1000;
 /** Shown when the outcome is unknown: the backend may still deliver the message. */
 const UNCONFIRMED_SEND_MESSAGE =
   'Could not confirm whether the queued message was sent. It is back in the composer.';
-const COMMITTED_MISSING_RECEIPT_LIMIT = 3;
 
 type ReceiptCheck = {
   timer?: ReturnType<typeof setTimeout>;
@@ -55,8 +54,12 @@ type ReceiptCheck = {
   cancelled: boolean;
   attempt: number;
   committed?: boolean;
-  missingReceipts?: number;
+  /** Consecutive lookups that found no receipt after the backend committed. */
+  committedMisses?: number;
 };
+
+/** A committed receipt missing this many times in a row is gone from the backend. */
+const COMMITTED_MISS_LIMIT = 3;
 
 const FAILURE_REASON = {
   SESSION_CHANGED: 'the session changed',
@@ -240,7 +243,7 @@ export class FollowUpQueueService {
         this.store.settle(entry.clientMessageId, 'withdrawn');
         return;
       case 'failed':
-        this.logger.warn(LOG, 'queued follow-up failed push', { reason: event.reason, errorCode: event.errorCode, tabId: event.tabId, sessionId: event.sessionId, clientMessageId: event.clientMessageId });
+        this.logger.warn(LOG, 'queued follow-up failed push', { errorCode: parseRpcUserErrorCode(event.errorCode), tabId: event.tabId, sessionId: event.sessionId, clientMessageId: event.clientMessageId });
         this.fail(entry.clientMessageId, safeFailureReason(event.errorCode, false, false));
         return;
     }
@@ -261,7 +264,7 @@ export class FollowUpQueueService {
       if (!this.findTab(tabId)) return;
       this.store.reconcile(tabId, sessionId, validSnapshots(result.data.items));
     } catch (error: unknown) {
-      this.logger.warn(LOG, 'chat:queued-list failed', error);
+      this.logger.warn(LOG, 'chat:queued-list failed', { errorName: error instanceof Error ? error.name : typeof error, tabId, sessionId });
     }
   }
 
@@ -296,7 +299,7 @@ export class FollowUpQueueService {
       this.pump(entry.tabId);
       return true;
     } catch (error: unknown) {
-      this.logger.warn(LOG, 'chat:queued-withdraw failed', error);
+      this.logger.warn(LOG, 'chat:queued-withdraw failed', { errorName: error instanceof Error ? error.name : typeof error });
       return false;
     }
   }
@@ -352,7 +355,7 @@ export class FollowUpQueueService {
           return; // already claimed or withdrawn; its push settles it
       }
     } catch (error: unknown) {
-      this.logger.warn(LOG, 'chat:queued-steer failed', error);
+      this.logger.warn(LOG, 'chat:queued-steer failed', { errorName: error instanceof Error ? error.name : typeof error });
       this.noteFor(entry, NOTE.steerFailed);
     }
   }
@@ -474,14 +477,14 @@ export class FollowUpQueueService {
         uncertain = timedOut;
         reason = safeFailureReason(errorCode, data?.cancelled === true, timedOut);
         this.logger.warn(LOG, 'queued chat:continue refused', {
-          error: rawError, errorCode, tabId, sessionId, clientMessageId,
+          errorCode: parseRpcUserErrorCode(errorCode), tabId, sessionId, clientMessageId,
         });
       }
     } catch (error: unknown) {
       uncertain = true;
       reason = safeFailureReason(undefined, false, error instanceof Error && /timeout/i.test(error.message));
       this.logger.warn(LOG, 'queued chat:continue failed', {
-        error, errorCode: undefined, tabId, sessionId, clientMessageId,
+        errorName: error instanceof Error ? error.name : typeof error, tabId, sessionId, clientMessageId,
       });
     }
     if (outcome === 'failed' && uncertain && this.store.get(clientMessageId)) {
@@ -540,8 +543,6 @@ export class FollowUpQueueService {
     const { clientMessageId, tabId } = entry;
     const receipt = await this.lookupReceipt(sessionId, tabId, clientMessageId, true);
     if (check.cancelled || this.store.get(clientMessageId)?.phase !== 'submitting') return;
-    if (receipt?.state !== undefined) check.missingReceipts = 0;
-    else if (check.committed) check.missingReceipts = (check.missingReceipts ?? 0) + 1;
     if (receipt?.state === 'queued') {
       this.cancelReceiptCheck(clientMessageId);
       this.store.update(clientMessageId, { phase: 'queued' });
@@ -550,12 +551,13 @@ export class FollowUpQueueService {
     } else if (receipt?.state === 'rejected') {
       this.fail(clientMessageId, 'it could not be confirmed');
     } else if (receipt?.state === 'pending' && receipt.committed) {
+      check.committedMisses = 0;
       if (!check.committed) {
         check.committed = true;
         check.deadlineTimer = setTimeout(() => {
           check.deadlineTimer = undefined;
           if (!check.cancelled && this.store.get(clientMessageId)?.phase === 'submitting') {
-            this.settleUnconfirmed(entry, sessionId);
+            this.actionBanner.showInfo('Still confirming whether the queued message was sent.', tabId);
           }
         }, COMMITTED_RECEIPT_DEADLINE_MS);
       }
@@ -563,7 +565,8 @@ export class FollowUpQueueService {
         check.timer = undefined;
         void this.abandonUncertain(entry, sessionId, check);
       }, 30000);
-    } else if (check.committed && (check.missingReceipts ?? 0) >= COMMITTED_MISSING_RECEIPT_LIMIT) {
+    } else if (check.committed && receipt !== null && receipt.state === undefined && this.countCommittedMiss(check)) {
+      // The backend no longer holds the committed receipt (expired or restarted), so stop polling.
       this.settleUnconfirmed(entry, sessionId);
     } else if (check.committed || check.attempt <= RECEIPT_RECHECK_DELAYS_MS.length) {
       check.attempt++;
@@ -574,6 +577,12 @@ export class FollowUpQueueService {
     } else {
       this.settleUnconfirmed(entry, sessionId);
     }
+  }
+
+  /** Counts one missing committed receipt; true once the miss limit is reached. */
+  private countCommittedMiss(check: ReceiptCheck): boolean {
+    check.committedMisses = (check.committedMisses ?? 0) + 1;
+    return check.committedMisses >= COMMITTED_MISS_LIMIT;
   }
 
   private settleUnconfirmed(entry: QueuedFollowUpEntry, sessionId: SessionId): void {
@@ -604,7 +613,8 @@ export class FollowUpQueueService {
       if (result.data.items.some((item) => item.clientMessageId === clientMessageId)) return { state: 'queued' };
       return { state: result.data.receipt, errorCode: result.data.receiptErrorCode, committed: result.data.receiptCommitted };
     } catch (error: unknown) {
-      this.logger.warn(LOG, 'queued receipt lookup failed', { error, tabId, sessionId, clientMessageId });
+      // degradation-audit: reported — the lookup failure is logged and the caller treats null as an unknown receipt.
+      this.logger.warn(LOG, 'queued receipt lookup failed', { errorName: error instanceof Error ? error.name : typeof error, tabId, sessionId, clientMessageId });
       return null;
     }
   }
@@ -636,7 +646,7 @@ export class FollowUpQueueService {
       });
       delivered = outcome?.success === true;
     } catch (error: unknown) {
-      this.logger.warn(LOG, 'held slash command send failed', error);
+      this.logger.warn(LOG, 'held slash command send failed', { errorName: error instanceof Error ? error.name : typeof error });
     } finally {
       this.sending.delete(tabId);
     }
