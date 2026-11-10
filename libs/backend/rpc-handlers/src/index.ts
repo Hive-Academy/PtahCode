@@ -94,6 +94,7 @@ export {
 } from './lib/handlers/workspace-file-path';
 export { ArtifactRpcHandlers } from './lib/handlers/artifact-rpc.handlers';
 export { DisplayWindowRpcHandlers } from './lib/handlers/display-window-rpc.handlers';
+export { GitWindowRpcHandlers } from './lib/handlers/git-window-rpc.handlers';
 export type {
   DbHealthResult,
   DbHealthParams,
@@ -192,3 +193,4 @@ export {
   createLegacyCodexSessionSettings,
   type LegacyCodexSessionSettingsDeps,
 } from './lib/chat/codex-host/codex-legacy-session-settings';
+

@@ -26,6 +26,7 @@ import type {
   GitStatusUnavailableReason,
 } from '@ptah-extension/shared';
 import type { OpenInRequest } from '../open-in/open-in-button.component';
+import { GIT_WINDOW_CONTEXT } from '../git-window-context.token';
 import { EditorLauncherService } from '../services/editor-launcher.service';
 import { FileContentChangesService } from '../services/file-content-changes.service';
 import { GitBranchesService } from '../services/git-branches.service';
@@ -219,6 +220,7 @@ describe('ReviewShellComponent', () => {
     scope: ReturnType<typeof signal<GitDockScope>>;
     pin: jest.Mock;
     unpin: jest.Mock;
+      requestWindowMode: jest.Mock;
   };
 
   beforeEach(() => {
@@ -234,6 +236,7 @@ describe('ReviewShellComponent', () => {
       }),
       pin: jest.fn(),
       unpin: jest.fn(),
+        requestWindowMode: jest.fn(async () => undefined),
     };
     layout = { addFolderByPath: jest.fn(async () => undefined), editorPanelVisible: signal(true) };
     FakeResizeObserver.instances = [];
@@ -1158,6 +1161,27 @@ describe('ReviewShellComponent', () => {
       const fixture = await render();
 
       expect(header(fixture)).toBeNull();
+    });
+
+    it('shows Detach in the main header when available', async () => {
+      const detach = jest.fn();
+      TestBed.overrideProvider(GIT_WINDOW_CONTEXT, { useValue: { role: 'main', detach } });
+      const fixture = await render();
+      const button = query(fixture, '[data-testid="git-dock-detach"]') as HTMLButtonElement;
+      expect(button).not.toBeNull();
+      button.click();
+      expect(detach).toHaveBeenCalledTimes(1);
+    });
+
+    it('hides Detach and delegates pin requests in the child', async () => {
+      TestBed.overrideProvider(GIT_WINDOW_CONTEXT, {
+        useValue: { role: 'child', applyCandidates: jest.fn(), setMode: jest.fn() },
+      });
+      const fixture = await render();
+      expect(query(fixture, '[data-testid="git-dock-detach"]')).toBeNull();
+      (query(fixture, '[data-testid="git-dock-scope-pin"]') as HTMLButtonElement).click();
+      expect(scopeStore.requestWindowMode).toHaveBeenCalledWith(true);
+      expect(scopeStore.pin).not.toHaveBeenCalled();
     });
   });
 });

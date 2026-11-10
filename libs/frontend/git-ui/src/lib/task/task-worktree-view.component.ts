@@ -33,6 +33,7 @@ import {
   type OpenInRequest,
 } from '../open-in/open-in-button.component';
 import { EditorLauncherService } from '../services/editor-launcher.service';
+import { GIT_WINDOW_CONTEXT } from '../git-window-context.token';
 import { GitBranchesService } from '../services/git-branches.service';
 import { GitStatusService } from '../services/git-status.service';
 import { WorktreeService } from '../services/worktree.service';
@@ -364,6 +365,7 @@ let instanceCount = 0;
                   type="button"
                   class="flex min-w-0 flex-1 items-center gap-2 rounded px-2 py-1 text-left hover:bg-base-300"
                   data-testid="task-worktree-switch"
+                    [disabled]="windowContext?.role === 'child'"
                   [attr.aria-current]="isActiveWorktree(wt) ? 'true' : null"
                   [attr.aria-label]="rowLabel(wt)"
                   [title]="'Switch to ' + wt.path"
@@ -468,6 +470,7 @@ let instanceCount = 0;
   `,
 })
 export class TaskWorktreeViewComponent {
+  protected readonly windowContext = inject(GIT_WINDOW_CONTEXT, { optional: true });
   /** Whether the Task tab is the one showing; the PR timer runs only then. */
   readonly shown = input(false);
 
@@ -619,6 +622,7 @@ export class TaskWorktreeViewComponent {
   }
 
   protected onWorktreeSelect(wt: GitWorktreeInfo): void {
+    if (this.windowContext?.role === 'child') return;
     void this.layout.addFolderByPath(wt.path);
   }
 

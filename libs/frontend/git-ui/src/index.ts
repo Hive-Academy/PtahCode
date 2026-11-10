@@ -16,3 +16,4 @@ export { ReviewNavigationService } from './lib/services/review-navigation.servic
 
 // Components
 export { ReviewShellComponent } from './lib/review-shell/review-shell.component';
+export { GIT_WINDOW_CONTEXT, type GitWindowContext } from './lib/git-window-context.token';

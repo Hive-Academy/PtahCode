@@ -34,6 +34,7 @@ import { ReviewWorktreeStatusService } from '../services/review-worktree-status.
 import { statusUnavailableLabel } from '../services/git-status-unavailable-label';
 import { SpotEditorComponent } from '../spot-editor/spot-editor.component';
 import { TaskWorktreeViewComponent } from '../task/task-worktree-view.component';
+import { GIT_WINDOW_CONTEXT } from '../git-window-context.token';
 import {
   WorktreeScopeBarComponent,
   worktreeFolderName,
@@ -174,7 +175,12 @@ type BodyNotice = 'loading' | 'unavailable' | 'not-a-repo';
           (pinToggled)="onPinToggled($event)"
         />
       }
-      <ptah-git-dock-header [compact]="compact()" />
+      <div class="flex items-center" data-testid="git-dock-main-header">
+        <ptah-git-dock-header class="min-w-0 flex-1" [compact]="compact()" />
+        @if (canDetach()) {
+          <button type="button" class="btn btn-ghost btn-xs mr-2" data-testid="git-dock-detach" (click)="onDetach()">Detach</button>
+        }
+      </div>
 
       <!-- Cross-cutting notices sit above the tabs (design-spec §3.2). -->
       @if (staleLabel(); as label) {
@@ -244,6 +250,7 @@ type BodyNotice = 'loading' | 'unavailable' | 'not-a-repo';
             @if (viewedRoot(); as root) {
               <ptah-worktree-scope-bar
                 [root]="root"
+                [hideOpenAsWorkspace]="windowContext?.role === 'child'"
                 [branch]="viewedBranch()"
                 [activeLabel]="activeLabel()"
                 (back)="onBackToActive()"
@@ -399,6 +406,7 @@ type BodyNotice = 'loading' | 'unavailable' | 'not-a-repo';
   `,
 })
 export class ReviewShellComponent {
+  protected readonly windowContext = inject(GIT_WINDOW_CONTEXT, { optional: true });
   protected readonly gitStatus = inject(GitStatusService);
   private readonly gitBranches = inject(GitBranchesService);
   private readonly navigation = inject(ReviewNavigationService);
@@ -574,7 +582,19 @@ export class ReviewShellComponent {
   }
 
   /** The scope header's toggle: pin the current scope, or follow again. */
+  protected canDetach(): boolean {
+    return this.windowContext?.role === 'main' && this.windowContext.detach !== undefined;
+  }
+
+  protected onDetach(): void {
+    if (this.windowContext?.role === 'main') this.windowContext.detach?.();
+  }
+
   protected onPinToggled(pin: boolean): void {
+    if (this.windowContext?.role === 'child') {
+      void this.scopeStore.requestWindowMode(pin);
+      return;
+    }
     if (pin) this.scopeStore.pin();
     else this.scopeStore.unpin();
   }
@@ -589,6 +609,7 @@ export class ReviewShellComponent {
    * the folder is added and becomes active, and that switch resets the scope.
    */
   protected onOpenAsWorkspace(root: string): void {
+    if (this.windowContext?.role === 'child') return;
     void this.layout.addFolderByPath(root);
   }
 

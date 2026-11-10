@@ -1,0 +1,17 @@
+# Decisions
+
+| # | Decision | Evidence | Source |
+|---|----------|----------|--------|
+| 1 | Type FEATURE, depth Partial: requirements fixed by the user ("Follow session", reuse P1). No PM / Gate 1. | Request | orchestrator |
+| 2 | No designer / Gate 1.7: the dock surface exists; the Detach/Attach control follows the P1 pattern. | P1 decision 4 | orchestrator |
+| 3 | Architect + implementer: codex lane. Plan review (Gate 2) and code review: Glm (ollama-cloud family, differs from codex and from claude). | ptah_agent_list | orchestrator |
+| 3a | Session-master override: before any Glm spawn, re-check ptah_agent_list. If Glm is AT LIMIT or unknown, use a fresh codex lane (not the author lane) for the plan review and the code review, with a same-family weaker-evidence label. Never force-spawn. | session-master message 2026-11-10 | session master |
+| 5 | Gate 2 round 0: Glm plan review REVISE 6/10 (Glm had confirmed room at spawn). The lane was stopped by the Ptah agent budget after it wrote the full review. Revision round 1 goes to the codex author lane (resume). Revise cap: 2 rounds. | implementation-plan-review.md | orchestrator |
+| 6 | Gate 2 passed: Glm re-review APPROVED 9/10. Author (codex lane) and reviewer (Glm lane) are both CLI lanes (same execution side, different family). Disclosed reason: the user's standing rule says to keep Claude usage low and delegate to non-Claude lanes, and this unattended child session cannot ask the user. | implementation-plan-re-review.md, CLAUDE.md (user) | orchestrator |
+| 7 | Execution phases: P1 = batches 1+1b (one codex lane). P2 = batches 2+3+4 (Electron/rpc-handlers lane) in parallel with 5+5b+5c (git-ui lane). P3 = batch 6 (chat) in parallel with batch 7 (webview). The orchestrator runs the scoped verify and commits after each phase. | plan dependency order | orchestrator |
+| 8 | Phase 1 committed (9753e5171). platform-core test target failed on two `session-driver-lock` Windows socket tests in files this task does not touch (lane evidence: "This handle type cannot be sent"). The re-run could not get a verify slot (3 busy, 9 queued, 1 GB free). The full scoped verify reruns before push. | batch-1-report.md, verify --status | orchestrator |
+| 9 | Glm went AT LIMIT (session 100%, reset 2026-11-10 02:00 UTC) at the Phase 2 spawn. Per decision 3a, the code review goes to a fresh codex lane (weaker-evidence: same family as the implementer). | ptah_agent_list | orchestrator |
+| 10 | Plan gap found by the batch-3 lane: `ALLOWED_METHOD_PREFIXES` in libs/backend/vscode-core/src/messaging/rpc-handler.ts lacks `gitWindow:`. Added to the batch-4 write set with a guard test. Host owns `registerView('git')` (batch 2); the bridge does not register it again. | lane reports a4d4e6fb, d7bbbdaa | orchestrator |
+| 11 | Worktree had no `node_modules`; 42 ptah-electron suites failed on missing `marked` / `electron/package.json`. Created a junction to the main checkout `node_modules` (git-ignored), as in P1 decision 5. | batch-2 lane report | orchestrator |
+| 12 | `MessageRouterService` reads root `MESSAGE_HANDLERS` when it is constructed, so `GitWindowSync` needs a root multi-provider in `apps/ptah-extension-webview/src/app/app.config.ts`. That file is in the batch 7 write set, but batch 7 has not started. The batch 6 lane adds only this provider, beside DisplayWindowSync. The batch 7 lane edits the file after batch 6, not at the same time. | lane report 328a2ffb | orchestrator |
+| 4 | Merged main into the branch with `git merge main` (no rebase). | request | orchestrator |

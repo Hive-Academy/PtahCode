@@ -1,7 +1,7 @@
 import type { Rectangle } from 'electron';
 import * as path from 'path';
 
-export type ChildViewKind = 'display';
+export type ChildViewKind = 'display' | 'git';
 export interface ChildContext {
   readonly viewKind: ChildViewKind;
   readonly instanceId: string;
@@ -31,6 +31,7 @@ export interface ChildWindowOptions {
 
 /** The registry owns trusted sender identity and each view's RPC policy. */
 export class ChildWindowRegistry {
+  private closingAll = false;
   private readonly policies = new Map<ChildViewKind, ChildViewPolicy>();
   private readonly children = new Map<ChildViewKind, Map<string, ChildWindowHandle>>();
   private readonly senders = new Map<number, ChildContext>();
@@ -99,6 +100,8 @@ export class ChildWindowRegistry {
 
   senderIds(): number[] { return [...this.senders.keys()]; }
 
+  get isClosingAll(): boolean { return this.closingAll; }
+
   allows(webContentsId: number, method: string): boolean {
     const context = this.sender(webContentsId);
     return context !== null && (this.policies.get(context.viewKind)?.allowedMethods.has(method) ?? false);
@@ -109,8 +112,12 @@ export class ChildWindowRegistry {
   }
 
   closeAll(): void {
-    for (const instances of this.children.values()) {
-      for (const window of instances.values()) if (!window.isDestroyed()) window.close();
+    this.closingAll = true;
+    for (const [viewKind, instances] of [...this.children]) {
+      for (const [instanceId, window] of [...instances]) {
+        this.unregister(viewKind, instanceId, window);
+        if (!window.isDestroyed()) window.close();
+      }
     }
   }
 }

@@ -69,4 +69,17 @@ describe('ChildWindowRegistry', () => {
     expect(registry.sender(11)).toBeNull();
     expect(registry.get('display', 'one')).toBeNull();
   });
+
+  it('keeps Git singleton and sender policy separate from Display', async () => {
+    registry.registerView('git', { singleton: true, allowedMethods: new Set(['gitWindow:getScope']) });
+    const git = fakeWindow(30);
+    registry.register('git', 'default', git);
+    expect(() => registry.register('git', 'another', fakeWindow(31))).toThrow('already open');
+    expect(registry.allows(30, 'gitWindow:getScope')).toBe(true);
+    expect(registry.allows(30, 'displayWindow:getState')).toBe(false);
+    await registry.loadRenderer('git', git, '/app');
+    expect(git.loadFile).toHaveBeenCalledWith(expect.stringContaining('index.html'), { query: { ptahWindow: 'git' } });
+    registry.unregister('git', 'default', git);
+    expect(registry.sender(30)).toBeNull();
+  });
 });
