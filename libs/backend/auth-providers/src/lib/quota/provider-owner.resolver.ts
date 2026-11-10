@@ -179,15 +179,39 @@ export function readActiveGeminiAccount(
   stat: FileStat = statSync,
   now: () => number = Date.now,
 ): string | null {
+  return readGeminiAccount(root, read, stat, now, 'cached');
+}
+
+export function readActiveGeminiAccountUncached(
+  root: string,
+  read: FileReader = readFileSync,
+  stat: FileStat = statSync,
+  now: () => number = Date.now,
+): string | null {
+  return readGeminiAccount(root, read, stat, now, 'uncached');
+}
+
+function readGeminiAccount(
+  root: string,
+  read: FileReader,
+  stat: FileStat,
+  now: () => number,
+  mode: 'cached' | 'uncached',
+): string | null {
   const path = join(root, 'google_accounts.json');
   const checkedAt = now();
   const cached = geminiAccountCache.get(path);
-  if (cached && checkedAt - cached.checkedAt < GEMINI_ACCOUNT_CACHE_TTL_MS) {
+  if (
+    mode === 'cached' &&
+    cached &&
+    checkedAt - cached.checkedAt < GEMINI_ACCOUNT_CACHE_TTL_MS
+  ) {
     return cached.active;
   }
   try {
     const metadata = stat(path);
     if (
+      mode === 'cached' &&
       cached &&
       cached.mtimeMs === metadata.mtimeMs &&
       cached.size === metadata.size
@@ -220,6 +244,26 @@ export function readActiveGeminiAccount(
     });
     return null;
   }
+}
+
+/** Compare an account owner with the account currently named by the CLI store. */
+export function matchesAntigravityStoreAccount(
+  owner: QuotaOwnerRef,
+  storeOwner: QuotaOwnerRef,
+): boolean {
+  return (
+    owner.identityKind === 'account' &&
+    storeOwner.identityKind === 'account' &&
+    owner.key === storeOwner.key
+  );
+}
+
+export function currentAntigravityStoreOwner(): QuotaOwnerRef {
+  const root = cliStorePath('antigravity');
+  const active = readActiveGeminiAccountUncached(root);
+  return active
+    ? quotaOwnerRefFromKey(antigravityAccountOwnerKey(active))
+    : quotaOwnerRefFromKey(cliStoreOwnerKey('antigravity', root));
 }
 
 /**
@@ -489,16 +533,22 @@ export class ProviderOwnerResolver {
     try {
       const status = await this.kimiAuth?.getStatus();
       if (status?.credentialSource === 'cli-login') {
-        return quotaOwnerRefFromKey(cliStoreOwnerKey('kimi-code', this.kimiHome.path));
+        return quotaOwnerRefFromKey(
+          cliStoreOwnerKey('kimi-code', this.kimiHome.path),
+        );
       }
       if (status?.credentialSource === 'api-key') {
         return this.ownerForProviderKey('kimi-code');
       }
     } catch {
       // degradation-audit: reported - status failure yields an unknown owner.
-      this.logger.warn('[ProviderOwnerResolver] Kimi auth status failed', { providerId: 'kimi-code' });
+      this.logger.warn('[ProviderOwnerResolver] Kimi auth status failed', {
+        providerId: 'kimi-code',
+      });
     }
-    return quotaOwnerRefFromKey(unknownOwnerKey('kimi-code', 'shared-connection'));
+    return quotaOwnerRefFromKey(
+      unknownOwnerKey('kimi-code', 'shared-connection'),
+    );
   }
 
   /**

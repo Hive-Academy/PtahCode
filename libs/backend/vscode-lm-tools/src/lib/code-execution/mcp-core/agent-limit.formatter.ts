@@ -23,6 +23,7 @@ import {
   type LaneStateReason,
   type OwnerLimitEvidence,
   type PlanLimitCooldown,
+  type PlanLimitStatusReason,
   type PlanWindowBlockingState,
   type PlanWindowState,
 } from '@ptah-extension/shared';
@@ -259,6 +260,19 @@ const UNKNOWN_STATUS_CAUSE: Readonly<
   'cli-version-unsupported': 'cli version unsupported',
 };
 
+const UNAVAILABLE_REASON_CAUSE: Partial<Record<PlanLimitStatusReason, string>> =
+  {
+    'account-unverified': 'account could not be verified',
+    'cli-unavailable': 'usage reader unavailable',
+    'cli-not-found': 'usage reader unavailable',
+    'cli-timeout': 'usage reader timed out',
+    'cli-not-signed-in': 'sign in required',
+    'cli-exit-error': 'usage reader failed',
+    'cli-parse-failed': 'usage response unreadable',
+    'cli-backoff': 'usage read paused after a failure',
+    'usage-budget-exhausted': 'usage read timed out',
+  };
+
 /**
  * The one short cause of an unknown lane state: why the limit could not be
  * read. It wins over the first engine reason for the column and the
@@ -277,8 +291,10 @@ export function unknownCause(limit: AgentLimit): string {
   }
   const snapshot = limit.snapshot;
   if (snapshot?.status === 'service-unavailable') {
-    return snapshot.unavailableReason === 'no-open-session'
-      ? 'no open session'
+    if (snapshot.unavailableReason === 'no-open-session')
+      return 'no open session';
+    return snapshot.statusReason
+      ? (UNAVAILABLE_REASON_CAUSE[snapshot.statusReason] ?? 'reader failed')
       : 'reader failed';
   }
   const statusCause = snapshot && UNKNOWN_STATUS_CAUSE[snapshot.status];
@@ -330,14 +346,15 @@ export function formatLimitColumn(limit: AgentLimit, now = Date.now()): string {
 }
 
 function table(headers: readonly string[], rows: readonly string[][]): string {
-  const cell = (value: string): string => value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('\\', '\\\\')
-    .replaceAll('|', '\\|')
-    .replaceAll('`', '\\`')
-    .replace(/[\r\n]+/g, ' ');
+  const cell = (value: string): string =>
+    value
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('\\', '\\\\')
+      .replaceAll('|', '\\|')
+      .replaceAll('`', '\\`')
+      .replace(/[\r\n]+/g, ' ');
   return [
     `| ${headers.map(cell).join(' | ')} |`,
     `| ${headers.map(() => '---').join(' | ')} |`,
@@ -362,10 +379,18 @@ function planLimitRows(limit: AgentLimit, now: number): string[][] {
       rows.push([
         name,
         `${allowance.label} credits`,
-        credits.unlimited ? 'unlimited' : credits.balance === undefined
-          ? credits.hasCredits ? 'available' : 'no credits'
-          : `${credits.balance} remaining`,
-        credits.unlimited ? 'unlimited' : credits.hasCredits ? 'available' : 'none',
+        credits.unlimited
+          ? 'unlimited'
+          : credits.balance === undefined
+            ? credits.hasCredits
+              ? 'available'
+              : 'no credits'
+            : `${credits.balance} remaining`,
+        credits.unlimited
+          ? 'unlimited'
+          : credits.hasCredits
+            ? 'available'
+            : 'none',
         '-',
         '-',
       ]);
@@ -377,23 +402,28 @@ function planLimitRows(limit: AgentLimit, now: number): string[][] {
         `${allowance.label} allowance`,
         `${individual.used} of ${individual.limit} used`,
         `${Math.min(100, Math.max(0, individual.remainingPercent))}% remaining`,
-        individual.resetsAt === undefined ? 'reset unknown' : `resets ${formatToolUtc(individual.resetsAt)}`,
+        individual.resetsAt === undefined
+          ? 'reset unknown'
+          : `resets ${formatToolUtc(individual.resetsAt)}`,
         '-',
       ]);
     }
     return rows;
   });
   if (windows.length > 0) {
-    return [...windows.map(({ window, state }) => [
-      name,
-      window.label,
-      window.used === undefined || state === 'reset-usage-unknown'
-        ? 'unknown'
-        : formatUsed(window.used),
-      WINDOW_STATE_CELL[state],
-      formatToolResetText(window, now),
-      formatToolSourceText(window),
-    ]), ...allowanceRows];
+    return [
+      ...windows.map(({ window, state }) => [
+        name,
+        window.label,
+        window.used === undefined || state === 'reset-usage-unknown'
+          ? 'unknown'
+          : formatUsed(window.used),
+        WINDOW_STATE_CELL[state],
+        formatToolResetText(window, now),
+        formatToolSourceText(window),
+      ]),
+      ...allowanceRows,
+    ];
   }
   const evidence = ownerLimitEvidence(limit);
   const noSource = hasNoUsageSource(limit);
