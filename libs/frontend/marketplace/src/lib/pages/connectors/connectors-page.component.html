@@ -73,7 +73,7 @@
         </span>
         <button
           type="button"
-          class="btn btn-ghost btn-xs"
+          ptahButton variant="ghost" size="xs"
           data-testid="connectors-page-error-dismiss"
           (click)="tracker.dismissError(error.connectorId)"
         >
@@ -126,7 +126,7 @@
           >Connectors managed by Smithery need a Smithery API key.</span
         >
         <a
-          class="btn btn-sm btn-primary"
+          ptahButton variant="primary" size="sm"
           [routerLink]="smitheryKeyLink"
           data-testid="connectors-smithery-key-link"
           >Add a Smithery key</a
@@ -240,7 +240,7 @@
           <span class="min-w-0 flex-1">No connectors match your search.</span>
           <button
             type="button"
-            class="btn btn-ghost btn-sm"
+            ptahButton variant="ghost" size="sm"
             data-testid="connectors-empty-reset"
             (click)="clearFilters()"
           >

@@ -30,6 +30,7 @@ import {
   CatalogGridComponent,
   MonogramTileComponent,
   StorefrontPanelComponent,
+  PtahButtonDirective,
 } from '@ptah-extension/ui';
 import type {
   ExternalConsentReason,
@@ -110,6 +111,7 @@ const SOURCE_PATTERN = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
   selector: 'ptah-external-marketplaces',
   standalone: true,
   imports: [
+    PtahButtonDirective,
     LucideAngularModule,
     CatalogCardComponent,
     CatalogCardSkeletonComponent,
@@ -142,7 +144,7 @@ const SOURCE_PATTERN = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
           <div class="alert alert-error alert-sm py-1 px-2 mb-2" role="alert">
             <span class="text-xs">{{ addError() }}</span>
             <button
-              class="btn btn-ghost btn-xs"
+              ptahButton variant="ghost" size="xs"
               type="button"
               (click)="addError.set(null)"
             >
@@ -240,7 +242,7 @@ const SOURCE_PATTERN = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
           <div class="alert alert-error alert-sm py-1 px-2" role="alert">
             <span class="text-xs">{{ loadError() }}</span>
             <button
-              class="btn btn-ghost btn-xs"
+              ptahButton variant="ghost" size="xs"
               type="button"
               (click)="reload()"
             >
@@ -285,14 +287,14 @@ const SOURCE_PATTERN = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
                     </p>
                     <div class="flex gap-1 justify-end">
                       <button
-                        class="btn btn-ghost btn-xs"
+                        ptahButton variant="ghost" size="xs"
                         type="button"
                         (click)="pendingRemoveSource.set(null)"
                       >
                         Keep
                       </button>
                       <button
-                        class="btn btn-error btn-xs"
+                        ptahButton variant="danger" size="xs"
                         type="button"
                         (click)="removeMarketplace(marketplace)"
                       >
@@ -361,7 +363,7 @@ const SOURCE_PATTERN = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
                       >
                         <span class="text-xs">{{ browseError() }}</span>
                         <button
-                          class="btn btn-ghost btn-xs"
+                          ptahButton variant="ghost" size="xs"
                           type="button"
                           (click)="
                             refreshBrowse(marketplace.source, { refresh: true })
@@ -443,7 +445,7 @@ const SOURCE_PATTERN = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
 
       <div class="flex justify-end">
         <button
-          class="btn btn-ghost btn-xs"
+          ptahButton variant="ghost" size="xs"
           type="button"
           [disabled]="isLoading()"
           (click)="reload()"

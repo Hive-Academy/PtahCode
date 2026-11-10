@@ -10,6 +10,7 @@ import {
   output,
   viewChild,
 } from '@angular/core';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import {
   LucideAngularModule,
   ShieldAlert,
@@ -152,6 +153,7 @@ function localItemCopy(item: ExternalLocalItem): LocalItemCopy {
   selector: 'ptah-external-consent-dialog',
   standalone: true,
   imports: [
+    PtahButtonDirective,
     LucideAngularModule,
     MarketplaceKeepReplaceComponent,
     InstallScopeFieldComponent,
@@ -437,7 +439,7 @@ function localItemCopy(item: ExternalLocalItem): LocalItemCopy {
                   </span>
                   <button
                     type="button"
-                    class="btn btn-ghost btn-xs"
+                    ptahButton variant="ghost" size="xs"
                     [disabled]="busy()"
                     (click)="setAll('keep')"
                   >
@@ -445,7 +447,7 @@ function localItemCopy(item: ExternalLocalItem): LocalItemCopy {
                   </button>
                   <button
                     type="button"
-                    class="btn btn-ghost btn-xs"
+                    ptahButton variant="ghost" size="xs"
                     [disabled]="busy()"
                     (click)="setAll('replace')"
                   >
@@ -512,7 +514,7 @@ function localItemCopy(item: ExternalLocalItem): LocalItemCopy {
 
         <div class="modal-action mt-3">
           <button
-            class="btn btn-ghost btn-sm"
+            ptahButton variant="ghost" size="sm"
             type="button"
             [disabled]="busy()"
             (click)="cancelled.emit()"
@@ -520,7 +522,7 @@ function localItemCopy(item: ExternalLocalItem): LocalItemCopy {
             Cancel
           </button>
           <button
-            class="btn btn-primary btn-sm"
+            ptahButton variant="primary" size="sm"
             type="button"
             data-testid="external-consent-confirm"
             [disabled]="busy()"

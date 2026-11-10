@@ -31,6 +31,7 @@ import {
   NativeDrawerComponent,
   MotionRouteStageDirective,
   detailParamKey,
+  PtahButtonDirective,
 } from '@ptah-extension/ui';
 import { MarketplaceInventoryStore } from '../../data/marketplace-inventory.store';
 import {
@@ -120,6 +121,7 @@ const ROW_LINK_SELECTOR = '[data-testid="installed-skill-open"]';
   selector: 'ptah-installed-skills-page',
   standalone: true,
   imports: [
+    PtahButtonDirective,
     RouterLink,
     RouterOutlet,
     LucideAngularModule,
@@ -271,7 +273,7 @@ const ROW_LINK_SELECTOR = '[data-testid="installed-skill-open"]';
                     Nothing installed yet.
                   </p>
                   <a
-                    class="btn btn-primary btn-xs"
+                    ptahButton variant="primary" size="xs"
                     [routerLink]="sourceLink(group.browse.source)"
                     >{{ group.browse.label }}</a
                   >

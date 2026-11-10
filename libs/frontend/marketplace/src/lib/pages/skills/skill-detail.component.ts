@@ -8,6 +8,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import {
@@ -55,7 +56,10 @@ interface SkillFact {
 /** One named list of the "Show names" disclosure. */
 interface SkillNameGroup {
   readonly label: string;
-  readonly names: readonly { readonly name: string; readonly shadowed: boolean }[];
+  readonly names: readonly {
+    readonly name: string;
+    readonly shadowed: boolean;
+  }[];
 }
 
 /** One detected CLI in the harness summary. */
@@ -81,7 +85,9 @@ function provenanceFact(match: InstalledSkillMatch): SkillFact {
 
 function contentsFact(match: InstalledSkillMatch): SkillFact[] {
   const contents = match.row.contents;
-  return contents === null ? [] : [{ label: 'Contents', value: contents.summary }];
+  return contents === null
+    ? []
+    : [{ label: 'Contents', value: contents.summary }];
 }
 
 /**
@@ -187,7 +193,12 @@ export function skillNameGroups(
 @Component({
   selector: 'ptah-skill-detail',
   standalone: true,
-  imports: [RouterLink, LucideAngularModule, TargetMarksComponent],
+  imports: [
+    PtahButtonDirective,
+    RouterLink,
+    LucideAngularModule,
+    TargetMarksComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     class: 'block ptah-motion-panel',
@@ -198,7 +209,11 @@ export function skillNameGroups(
   template: `
     @switch (view()) {
       @case ('loading') {
-        <div class="space-y-3" aria-busy="true" data-testid="skill-detail-loading">
+        <div
+          class="space-y-3"
+          aria-busy="true"
+          data-testid="skill-detail-loading"
+        >
           <span class="sr-only">Loading…</span>
           <div class="skeleton h-4 w-3/5" aria-hidden="true"></div>
           <div class="skeleton h-3 w-full" aria-hidden="true"></div>
@@ -216,7 +231,11 @@ export function skillNameGroups(
             data-testid="skill-detail-retry"
             (click)="retry()"
           >
-            <lucide-angular [img]="RefreshIcon" class="h-3.5 w-3.5" aria-hidden="true" />
+            <lucide-angular
+              [img]="RefreshIcon"
+              class="h-3.5 w-3.5"
+              aria-hidden="true"
+            />
             Retry
           </button>
         </div>
@@ -225,10 +244,10 @@ export function skillNameGroups(
         <div class="space-y-3" data-testid="skill-detail-not-found">
           <h3 class="text-sm font-semibold text-base-content">Not found</h3>
           <p class="text-sm text-base-content-muted">
-            This skill is not installed in this workspace, or the link is out
-            of date.
+            This skill is not installed in this workspace, or the link is out of
+            date.
           </p>
-          <a class="btn btn-ghost btn-sm" [routerLink]="skillsLink"
+          <a ptahButton variant="ghost" size="sm" [routerLink]="skillsLink"
             >Back to installed skills</a
           >
         </div>
@@ -241,7 +260,10 @@ export function skillNameGroups(
                 class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-base-300 bg-base-200"
                 aria-hidden="true"
               >
-                <lucide-angular [img]="kindIcon()" class="h-5 w-5 text-base-content-muted" />
+                <lucide-angular
+                  [img]="kindIcon()"
+                  class="h-5 w-5 text-base-content-muted"
+                />
               </span>
               <div class="min-w-0 flex-1">
                 <p class="text-xs text-base-content-muted">
@@ -262,8 +284,14 @@ export function skillNameGroups(
                 role="status"
                 data-testid="skill-detail-broken"
               >
-                <p class="flex items-center gap-1.5 text-xs font-medium text-warning">
-                  <lucide-angular [img]="WarningIcon" class="h-3.5 w-3.5" aria-hidden="true" />
+                <p
+                  class="flex items-center gap-1.5 text-xs font-medium text-warning"
+                >
+                  <lucide-angular
+                    [img]="WarningIcon"
+                    class="h-3.5 w-3.5"
+                    aria-hidden="true"
+                  />
                   Ptah could not read part of this plugin.
                 </p>
                 <ul class="mt-2 space-y-1 text-xs text-base-content-muted">
@@ -277,16 +305,26 @@ export function skillNameGroups(
               </div>
             }
 
-            <dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm" data-testid="skill-detail-facts">
+            <dl
+              class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm"
+              data-testid="skill-detail-facts"
+            >
               @for (fact of facts(); track fact.label) {
                 <dt class="text-base-content-muted">{{ fact.label }}</dt>
-                <dd class="min-w-0 text-base-content" [attr.data-fact]="fact.label">
+                <dd
+                  class="min-w-0 text-base-content"
+                  [attr.data-fact]="fact.label"
+                >
                   @if (fact.code) {
                     <code class="break-all text-xs">{{ fact.value }}</code>
                   } @else if (fact.badge) {
                     <span
                       class="badge badge-sm h-auto border bg-base-300 text-base-content [overflow-wrap:anywhere]"
-                      [class]="fact.badge === 'plugin' ? 'border-primary' : 'border-[color:var(--surface-border-strong)]'"
+                      [class]="
+                        fact.badge === 'plugin'
+                          ? 'border-primary'
+                          : 'border-[color:var(--surface-border-strong)]'
+                      "
                       data-testid="skill-detail-provenance"
                       >{{ fact.value }}</span
                     >
@@ -298,7 +336,10 @@ export function skillNameGroups(
             </dl>
 
             @if (item.row.shadowedAgents.length > 0) {
-              <p class="text-xs text-base-content-muted" data-testid="skill-detail-shadowed">
+              <p
+                class="text-xs text-base-content-muted"
+                data-testid="skill-detail-shadowed"
+              >
                 <span class="badge badge-warning badge-sm">Shadowed</span>
                 A Library agent with the same name and another origin is used
                 instead: {{ item.row.shadowedAgents.join(', ') }}.
@@ -315,13 +356,19 @@ export function skillNameGroups(
                 <div class="mt-2 space-y-2">
                   @for (group of nameGroups(); track group.label) {
                     <div [attr.data-names]="group.label">
-                      <h4 class="text-xs text-base-content-muted">{{ group.label }}</h4>
+                      <h4 class="text-xs text-base-content-muted">
+                        {{ group.label }}
+                      </h4>
                       <ul class="mt-1 flex flex-wrap gap-1.5" role="list">
                         @for (entry of group.names; track entry.name) {
-                          <li class="flex items-center gap-1 text-xs [overflow-wrap:anywhere]">
+                          <li
+                            class="flex items-center gap-1 text-xs [overflow-wrap:anywhere]"
+                          >
                             <code>{{ entry.name }}</code>
                             @if (entry.shadowed) {
-                              <span class="badge badge-warning badge-xs" data-testid="skill-detail-name-shadowed"
+                              <span
+                                class="badge badge-warning badge-xs"
+                                data-testid="skill-detail-name-shadowed"
                                 >Shadowed</span
                               >
                             }
@@ -334,7 +381,10 @@ export function skillNameGroups(
               </details>
             }
 
-            <section aria-labelledby="skill-detail-harness-heading" data-testid="skill-detail-harness">
+            <section
+              aria-labelledby="skill-detail-harness-heading"
+              data-testid="skill-detail-harness"
+            >
               <h3
                 id="skill-detail-harness-heading"
                 class="text-xs font-semibold uppercase tracking-wider text-base-content-muted"
@@ -346,28 +396,54 @@ export function skillNameGroups(
                 this workspace.
               </p>
               @if (!harnessChecked()) {
-                <p class="mt-2 text-sm text-base-content-muted" data-testid="skill-detail-harness-unknown">
+                <p
+                  class="mt-2 text-sm text-base-content-muted"
+                  data-testid="skill-detail-harness-unknown"
+                >
                   No harness pass has run for this workspace yet.
                 </p>
               } @else if (harnessTargets().length === 0) {
-                <p class="mt-2 text-sm text-base-content-muted" data-testid="skill-detail-harness-none">
+                <p
+                  class="mt-2 text-sm text-base-content-muted"
+                  data-testid="skill-detail-harness-none"
+                >
                   No CLI tools detected in this workspace.
                 </p>
               } @else {
                 <div class="mt-2 flex flex-wrap items-center gap-3">
-                  <ptah-target-marks [targets]="harnessTargets()" [maxVisible]="8" />
-                  <p class="text-sm text-base-content" data-testid="skill-detail-harness-summary">
-                    In sync on {{ inSyncCount() }} of {{ harnessTargets().length }} detected CLIs
+                  <ptah-target-marks
+                    [targets]="harnessTargets()"
+                    [maxVisible]="8"
+                  />
+                  <p
+                    class="text-sm text-base-content"
+                    data-testid="skill-detail-harness-summary"
+                  >
+                    In sync on {{ inSyncCount() }} of
+                    {{ harnessTargets().length }} detected CLIs
                   </p>
                 </div>
                 @if (attentionTargets().length > 0) {
-                  <p class="mt-2 flex items-center gap-1.5 text-xs text-warning" data-testid="skill-detail-harness-attention">
-                    <lucide-angular [img]="WarningIcon" class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <p
+                    class="mt-2 flex items-center gap-1.5 text-xs text-warning"
+                    data-testid="skill-detail-harness-attention"
+                  >
+                    <lucide-angular
+                      [img]="WarningIcon"
+                      class="h-3.5 w-3.5 shrink-0"
+                      aria-hidden="true"
+                    />
                     Needs attention: {{ attentionTargets().join(', ') }}
                   </p>
                 } @else {
-                  <p class="mt-2 flex items-center gap-1.5 text-xs text-success">
-                    <lucide-angular [img]="CheckIcon" class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <p
+                    class="mt-2 flex items-center gap-1.5 text-xs text-success"
+                  >
+                    <lucide-angular
+                      [img]="CheckIcon"
+                      class="h-3.5 w-3.5 shrink-0"
+                      aria-hidden="true"
+                    />
                     Every detected CLI is in sync.
                   </p>
                 }
@@ -375,7 +451,11 @@ export function skillNameGroups(
             </section>
 
             @if (removalError(); as message) {
-              <p class="text-xs text-error" role="alert" data-testid="skill-detail-removal-error">
+              <p
+                class="text-xs text-error"
+                role="alert"
+                data-testid="skill-detail-removal-error"
+              >
                 {{ message }}
               </p>
             }
@@ -383,7 +463,9 @@ export function skillNameGroups(
             <div class="flex flex-wrap gap-2 border-t border-base-300 pt-4">
               @if (item.row.action === 'manage') {
                 <a
-                  class="btn btn-primary btn-sm"
+                  ptahButton
+                  variant="primary"
+                  size="sm"
                   data-testid="skill-detail-manage"
                   [routerLink]="pluginsLink"
                   >Manage in Ptah Plugins</a

@@ -17,6 +17,7 @@ import {
   CatalogCardComponent,
   CatalogCardSkeletonComponent,
   CatalogGridComponent,
+  PtahButtonDirective,
 } from '@ptah-extension/ui';
 
 import type {
@@ -113,6 +114,7 @@ let instanceCounter = 0;
   selector: 'ptah-featured-connectors',
   standalone: true,
   imports: [
+    PtahButtonDirective,
     LucideAngularModule,
     BrandMarkComponent,
     CatalogCardComponent,
@@ -202,7 +204,7 @@ let instanceCounter = 0;
               </span>
               <button
                 type="button"
-                class="btn btn-sm btn-primary"
+                ptahButton variant="primary" size="sm"
                 data-testid="featured-connectors-empty-browse"
                 (click)="browseAll.emit()"
               >

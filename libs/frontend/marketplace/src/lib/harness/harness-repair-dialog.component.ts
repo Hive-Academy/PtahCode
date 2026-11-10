@@ -7,6 +7,7 @@ import {
   output,
   signal,
 } from '@angular/core';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import { LucideAngularModule, FolderInput, X } from 'lucide-angular';
 import type {
   HarnessRepairBlockedPath,
@@ -115,7 +116,7 @@ const OUTCOME_TEXT: Readonly<Record<HarnessRepairOutcome, string>> = {
 @Component({
   selector: 'ptah-harness-repair-dialog',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dialog
@@ -209,7 +210,9 @@ const OUTCOME_TEXT: Readonly<Record<HarnessRepairOutcome, string>> = {
                   {{ selected().length }} of {{ candidates().length }} selected
                 </span>
                 <button
-                  class="btn btn-ghost btn-xs"
+                  ptahButton
+                  variant="ghost"
+                  size="xs"
                   type="button"
                   data-testid="harness-repair-select-all"
                   [disabled]="busy()"
@@ -298,7 +301,9 @@ const OUTCOME_TEXT: Readonly<Record<HarnessRepairOutcome, string>> = {
 
         <div class="modal-action mt-3">
           <button
-            class="btn btn-ghost btn-sm"
+            ptahButton
+            variant="ghost"
+            size="sm"
             type="button"
             data-testid="harness-repair-cancel"
             [disabled]="busy()"
