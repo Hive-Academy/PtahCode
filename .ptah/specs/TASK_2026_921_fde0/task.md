@@ -1,12 +1,14 @@
 ---
 id: TASK_2026_921_fde0
-status: backlog
+status: in_review
 type: BUGFIX
 title: Fix renderer startup freeze and RPC timeout burst
 depends_on: []
-created: "2026-11-10T17:40:33.478Z"
-updated: "2026-11-10T17:40:33.478Z"
-description: "Find the root cause of a 34 s renderer long frame at Electron startup that makes all startup RPCs time out, and fix it."
+created: '2026-11-10T17:40:33.478Z'
+updated: '2026-11-10T18:58:27.099Z'
+description: >-
+  Find the root cause of a 34 s renderer long frame at Electron startup that
+  makes all startup RPCs time out, and fix it.
 estimate: M
 ---
 
