@@ -93,26 +93,27 @@ export const CLAUDE_SETTINGS_SAFE_ENV_KEYS = [
 export type ClaudeLoginSubscriptionClass =
   | 'pro'
   | 'max'
+  | 'ultra'
   | 'team'
   | 'enterprise'
   | 'api'
   | 'other'
   | 'absent';
 
-/** `pro` or `max`, alone or with a size suffix such as `_20x` or ` 20x`. */
-const PERSONAL_PLAN = /^(pro|max)(?:[\s_-]*\d+x)?$/;
+/** `pro`, `max`, or `ultra`, alone or with a size suffix such as `_20x` or ` 20x`. */
+const PERSONAL_PLAN = /^(pro|max|ultra)(?:[\s_-]*\d+x)?$/;
 
 /**
- * Classify a raw (`max_20x`) or display (`Claude Max 20x`) subscription.
+ * Classify a raw (`ultra_20x`) or display (`Claude Ultra 20x`) subscription.
  * A personal family needs the whole word to be the plan plus an optional size
- * suffix: any other qualifier (`Max Team`, `max-enterprise`) is `other`.
+ * suffix: any other qualifier (`Ultra Team`, `max-enterprise`) is `other`.
  * A non-personal family is read from the first word only.
  */
 export function claudeSubscriptionFamily(word: string | undefined): ClaudeLoginSubscriptionClass {
   if (word === undefined) return 'absent';
   const plan = word.trim().replace(/^Claude\s+/i, '').toLowerCase();
   const personal = PERSONAL_PLAN.exec(plan);
-  if (personal) return personal[1] === 'pro' ? 'pro' : 'max';
+  if (personal) return personal[1] === 'pro' ? 'pro' : personal[1] === 'max' ? 'max' : 'ultra';
   const first = plan.split(/[\s_-]/, 1)[0];
   return first === 'team' || first === 'enterprise' || first === 'api' ? first : 'other';
 }
@@ -182,7 +183,7 @@ export interface ClaudePersonalLoginCheck {
  * Post-init tripwire: classify a running child's login. A personal claude.ai
  * login reports no token source or `claude.ai` (the bundled CLI omits it for a
  * claude.ai subscriber), no API key source or `none`, no provider or
- * `firstParty`, and a personal subscription in either vocabulary. Any other
+ * `firstParty`, and a personal Pro, Max, or Ultra subscription in either vocabulary. Any other
  * defined token source (`CLAUDE_CODE_OAUTH_TOKEN`, ...), key source, provider
  * or subscription word, an absent subscription included, fails its check.
  */
@@ -198,7 +199,7 @@ export function claudePersonalLoginCheck(
     apiProvider:
       info.apiProvider === undefined || info.apiProvider === 'firstParty',
     subscription,
-    personalSubscription: subscription === 'pro' || subscription === 'max',
+    personalSubscription: subscription === 'pro' || subscription === 'max' || subscription === 'ultra',
   });
 }
 

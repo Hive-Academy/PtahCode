@@ -247,11 +247,17 @@ export interface ChatQueuedListParams {
   readonly sessionId: SessionId;
   /** The tab that queued the items; another tab's items are never listed. */
   readonly tabId: string;
+  readonly clientMessageId?: string;
+  readonly abandonPending?: boolean;
 }
 
 /** Response from chat:queued-list: held follow-ups of this tab, FIFO order. */
 export interface ChatQueuedListResult {
   readonly items: QueuedFollowUpSnapshot[];
+  /** Receipt for the requested client id, including a turn already delivered. */
+  readonly receipt?: 'queued' | 'delivered' | 'steered' | 'pending' | 'rejected';
+  readonly receiptErrorCode?: RpcUserErrorCode;
+  readonly receiptCommitted?: boolean;
 }
 
 /** Parameters for chat:queued-withdraw RPC method (TASK_2026_884). */
@@ -289,6 +295,7 @@ export interface ChatQueuedMessageStateEvent {
   readonly tabId: string;
   readonly clientMessageId: string;
   readonly state: QueuedFollowUpState;
+  readonly errorCode?: RpcUserErrorCode;
   /** Safe, user-presentable reason for `failed`. */
   readonly reason?: string;
 }

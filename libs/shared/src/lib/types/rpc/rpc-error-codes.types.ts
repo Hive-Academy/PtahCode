@@ -16,6 +16,8 @@ export const RPC_USER_ERROR_CODES = [
   'PERSISTENCE_UNAVAILABLE',
   'REVIEW_DISABLED',
   'SESSION_NOT_FOUND',
+  /** The live session registration changed during follow-up admission. */
+  'SESSION_CHANGED',
   /** The session exists but none of its saved folders is open, safe and present. */
   'SESSION_FOLDER_UNAVAILABLE',
   /**
