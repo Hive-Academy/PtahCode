@@ -21,3 +21,16 @@
 | 17 | Webview verify failed: the child component's `import('@ptah-extension/git-ui')` made every static `@ptah-extension/git-ui/services` import in the app a module-boundary lint error. Fix: `loadReviewShell()` in the git-ui services entry does the lazy import inside the lib. Also added accessibility modifiers and adjusted the Display spec pattern for the shared `childWindow` variable in `main.ts`. | verify-webview.log | orchestrator |
 | 18 | Verify after decision 17: lint and typecheck passed (webview, git-ui, chat). Test failures were test-setup defects and one template defect: the scope bar `@if` hid the Back button together with "Open as workspace"; the review shell spec overrode `GIT_WINDOW_CONTEXT` after the injector started; the Git window spec stub lacked `getState`. Fixed in 1115183ca and 74369b674. Because of the 120-minute cap and a verify queue of about 20 minutes, the push started while the scoped test rerun (webview, git-ui) was still in the queue; the PR text states this. | verify-webview2.log, verify-test3.log | orchestrator |
 | 4 | Merged main into the branch with `git merge main` (no rebase). | request | orchestrator |
+
+## PR #1038 review fixes (review 5839053700)
+
+Details and evidence: `review-fixes-1038.md`.
+
+| # | Decision |
+|---|----------|
+| 19 | The fix worktree had no `node_modules`. A directory junction to the `node_modules` of the main checkout was made (git-ignored). Remove the junction, not the target, with the worktree. |
+| 20 | Finding 1: the child scope is enforced in the registry policy (`authorize`) that `IpcBridge` calls, with the rules in `git-window-scope-guard.ts`. `ipc-bridge.ts` got 4 small edits only. A write needs `repoRoot` by name. A read can also use `workspaceRoot` or a worktree the host listed. An omitted root is refused. An unlisted method is a write. The main window is not restricted. Limits: a worktree read needs a `git:worktrees` call first; `settings:set` and `git:cancelOperation` have no root and are not scope-bound. Commit d879c5178. |
+| 21 | Finding 2: the bridge mirrors four push types to a child whose view policy lists them (`pushTypes`). The mirror is in `sendToRenderer`, because the webview manager adapter sends all pushes through it. No filter by root: the child services filter by their active root. Commit d879c5178. |
+| 22 | Finding 3: retry with backoff 0.5 s to 8 s, maximum 6 tries for one scope, only while detached. The retry reads the newest scope. Focus always publishes the scope (forced), which also repairs a child that the host opened from a stale detached state. Commit 36dc16ee6. |
+| 23 | Finding 4: store API `pinSnapshot()` / `restorePin()` was preferred to a delayed store mutation, because the published scope is computed from the store. Commit 36dc16ee6. |
+| 24 | Finding 5: a `generation` token, incremented in `restoreDock()`. If it changed during awaited work, the host status is the authority. Commit 36dc16ee6. |
