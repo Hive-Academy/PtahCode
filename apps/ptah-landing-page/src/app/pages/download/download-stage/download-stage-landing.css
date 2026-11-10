@@ -16,6 +16,8 @@
 .dl-landing {
   width: 100%;
   margin-top: auto;
+  /* Lifted off the floor, so the pool of light where the beam lands shows below the cards. */
+  margin-bottom: clamp(1.5rem, 6vh, 4rem);
 }
 
 .dl-cards {
@@ -31,7 +33,7 @@
   align-items: center;
   justify-content: center;
   gap: 0 0.6rem;
-  margin: clamp(0.25rem, 1.2vh, 0.75rem) 0 0;
+  margin: 0 0 clamp(0.25rem, 1.2vh, 0.75rem);
   color: #c5cad3;
   font-family: 'JetBrains Mono', 'Fira Code', Menlo, monospace;
   font-size: 0.8125rem;

@@ -51,19 +51,18 @@ const LIGHT: Partial<LightfallOptions> = {
         </div>
 
         <div class="dl-landing">
+          <p class="dl-meta">
+            @if (latest(); as release) {
+              <span class="dl-version">Latest {{ release.version }}</span>
+              <span aria-hidden="true">·</span>
+              <span>{{ formatDate(release.publishedAt) }}</span>
+            } @else {
+              <span>No account, no license key, no credit card</span>
+            }
+            <a class="dl-notes" href="#releases"><span aria-hidden="true">↘</span> Release notes</a>
+          </p>
           <ptah-platform-cards class="dl-cards" [os]="os()" [latest]="latest()" />
         </div>
-
-        <p class="dl-meta">
-          @if (latest(); as release) {
-            <span class="dl-version">Latest {{ release.version }}</span>
-            <span aria-hidden="true">·</span>
-            <span>{{ formatDate(release.publishedAt) }}</span>
-          } @else {
-            <span>No account, no license key, no credit card</span>
-          }
-          <a class="dl-notes" href="#releases"><span aria-hidden="true">↘</span> Release notes</a>
-        </p>
       </div>
     </section>
   `,
