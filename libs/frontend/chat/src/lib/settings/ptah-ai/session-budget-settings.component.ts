@@ -8,6 +8,7 @@ import {
 } from '@angular/core';
 import { VSCodeService, rpcCall } from '@ptah-extension/core';
 import { TabManagerService } from '@ptah-extension/chat-state';
+import { SettingsFieldComponent } from '@ptah-extension/ui';
 import {
   SESSION_BUDGET_SETTINGS,
   isSessionBudgetPercentOrderValid,
@@ -170,7 +171,7 @@ function storedNumberIsValid(
 @Component({
   selector: 'ptah-session-budget-settings',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective],
+  imports: [SettingsBusyDisabledDirective, SettingsFieldComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -285,13 +286,13 @@ function storedNumberIsValid(
             </div>
 
             @for (field of numberFields; track field.key) {
-              <div class="flex min-w-0 flex-col gap-1">
-                <label
-                  [for]="'session-budget-' + field.key"
-                  class="text-sm font-medium text-base-content"
-                  >{{ field.label }}</label
-                >
-                <div class="join flex w-full">
+              <div ptahSettingsField class="flex min-w-0 flex-col gap-1"
+                [fieldId]="'session-budget-' + field.key"
+                [label]="field.label"
+                [hint]="field.help + ' Range: ' + range(field.key) + '.'"
+                [error]="errors()[field.key] ?? null"
+                [errorTestId]="'session-budget-' + field.key + '-error'">
+                <ng-container ngProjectAs="[settingsFieldControl]"><div class="join flex w-full">
                   <input
                     type="text"
                     [id]="'session-budget-' + field.key"
@@ -331,31 +332,15 @@ function storedNumberIsValid(
                     aria-hidden="true"
                     >{{ unitSuffix(field.key) }}</span
                   >
-                </div>
+                </div></ng-container>
                 @if (humanReadable(field.key); as readable) {
-                  <span
+                  <ng-container ngProjectAs="[settingsFieldBeforeHint]"><span
                     class="whitespace-nowrap text-xs text-base-content-muted"
                     >{{ readable }}</span
-                  >
-                }
-                <p
-                  [id]="'session-budget-' + field.key + '-help'"
-                  class="text-xs text-base-content-muted"
-                >
-                  {{ field.help }} Range: {{ range(field.key) }}.
-                </p>
-                @if (errors()[field.key]; as message) {
-                  <p
-                    [id]="'session-budget-' + field.key + '-error'"
-                    [attr.data-testid]="
-                      'session-budget-' + field.key + '-error'
-                    "
-                  >
-                    {{ message }}
-                  </p>
+                  ></ng-container>
                 }
                 @if (storedNotice(field.key); as notice) {
-                  <p
+                  <ng-container ngProjectAs="[settingsFieldAfterError]"><p
                     [id]="'session-budget-' + field.key + '-stored'"
                     class="rounded-md border border-info/30 bg-info/10 px-2 py-1"
                     [attr.data-testid]="
@@ -363,7 +348,7 @@ function storedNumberIsValid(
                     "
                   >
                     {{ notice }}
-                  </p>
+                  </p></ng-container>
                 }
               </div>
             }

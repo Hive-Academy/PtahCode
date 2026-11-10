@@ -14,6 +14,12 @@ const CONFIG = {
 } as AgentOrchestrationConfig;
 
 describe('LaneGuardsSettingsComponent', () => {
+  const normalizeRow = (row: Element): string =>
+    row.outerHTML
+      .replace(/\s+_ng(?:content|host)-[^=]+="[^"]*"/g, '')
+      .replace(/<!--[^]*?-->/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
   let fixture: ComponentFixture<LaneGuardsSettingsComponent>;
   let call: jest.Mock;
   let feedback: SettingsSaveFeedbackService;
@@ -68,10 +74,35 @@ describe('LaneGuardsSettingsComponent', () => {
     fixture?.destroy();
   });
 
+  it('preserves threshold row DOM', async () => {
+    await create();
+    const row = input('lane-guards-repeat').closest(
+      '.flex.min-w-0.flex-col.gap-1',
+    );
+    expect(row).not.toBeNull();
+    expect(normalizeRow(row as Element)).toMatchInlineSnapshot(
+      `"<div class="flex min-w-0 flex-col gap-1"><label class="text-sm font-medium text-base-content" for="lane-guards-repeat">Repeat-call stop at</label><div class="join flex w-full"><input type="text" inputmode="numeric" class="flex-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-base-content focus-visible:outline-offset-2 input input-bordered input-sm join-item min-w-0 tabular-nums text-base-content text-right text-sm" id="lane-guards-repeat" aria-describedby="lane-guards-repeat-help" data-testid="lane-guards-repeat"><span aria-hidden="true" class="btn btn-sm join-item shrink-0 cursor-default whitespace-nowrap border-base-content/10 px-3 text-xs font-normal text-base-content-muted">calls</span></div><p class="text-xs text-base-content-muted" id="lane-guards-repeat-help"> Stops a lane that repeats the same tool call this many times. Range: 2 or greater. </p></div>"`,
+    );
+  });
+
+  it('preserves invalid threshold row DOM', async () => {
+    await create();
+    await enter('lane-guards-repeat', '1');
+    const row = input('lane-guards-repeat').closest(
+      '.flex.min-w-0.flex-col.gap-1',
+    );
+    expect(row).not.toBeNull();
+    expect(normalizeRow(row as Element)).toMatchInlineSnapshot(
+      `"<div class="flex min-w-0 flex-col gap-1"><label class="text-sm font-medium text-base-content" for="lane-guards-repeat">Repeat-call stop at</label><div class="join flex w-full"><input type="text" inputmode="numeric" class="flex-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-base-content focus-visible:outline-offset-2 input input-bordered input-sm join-item min-w-0 tabular-nums text-base-content text-right text-sm input-error" id="lane-guards-repeat" aria-describedby="lane-guards-repeat-help lane-guards-repeat-error" data-testid="lane-guards-repeat" aria-invalid="true"><span aria-hidden="true" class="btn btn-sm join-item shrink-0 cursor-default whitespace-nowrap border-base-content/10 px-3 text-xs font-normal text-base-content-muted">calls</span></div><p class="text-xs text-base-content-muted" id="lane-guards-repeat-help"> Stops a lane that repeats the same tool call this many times. Range: 2 or greater. </p><p role="alert" id="lane-guards-repeat-error" data-testid="lane-guards-repeat-error"> Enter a whole number from 2. </p></div>"`,
+    );
+  });
+
   it('loads only the repeat-call field from agent:getConfig', async () => {
     await create();
     expect(
-      (fixture.nativeElement as HTMLElement).querySelector('section')?.getAttribute('data-glass-surface'),
+      (fixture.nativeElement as HTMLElement)
+        .querySelector('section')
+        ?.getAttribute('data-glass-surface'),
     ).toBe('content');
     expect(call).toHaveBeenCalledWith('agent:getConfig', undefined, {
       timeout: 5_000,
@@ -84,7 +115,9 @@ describe('LaneGuardsSettingsComponent', () => {
     expect(input('lane-guards-repeat').className).toContain('flex-1');
     expect(input('lane-guards-repeat').className).toContain('join-item');
     const intro = byTestId('lane-guards-intro')?.textContent ?? '';
-    expect(intro).toContain('Lanes also have a weighted token budget and a duration limit.');
+    expect(intro).toContain(
+      'Lanes also have a weighted token budget and a duration limit.',
+    );
     expect(intro).not.toContain('Steer at');
     expect(host().textContent).toContain('Range: 2 or greater.');
   });
