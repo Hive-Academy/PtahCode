@@ -134,11 +134,11 @@ export class GitWindowSync implements MessageHandler {
         const focused = await this.rpc.call('gitWindow:open', {}, { timeout: 10_000 });
         if (!focused.success || !focused.data?.ok) throw new Error('Could not focus the Git window');
         // The host can open a new child here (a missed closed push), and a failed publish can be unsent.
-        const current = this.scope();
-        if (current !== null && this._detached() && !(await this.publish(current, true))) {
+        if (this._detached() && !(await this.publishDesired(true))) {
           throw new Error('Could not publish the Git scope');
         }
-        this._error.set(null);
+        // A rejected scope stays an error: Focus sent the unavailable scope, not a repository.
+        this._error.set(this.desiredScope() === UNAVAILABLE_SCOPE ? SCOPE_UNAVAILABLE : null);
         return;
       }
       await this.ensureStore();
@@ -245,9 +245,23 @@ export class GitWindowSync implements MessageHandler {
     this.logger.error('GitWindowSync', 'Git window scope update rejected', {
       issues: parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.code}`),
     });
-    void this.publish(UNAVAILABLE_SCOPE).then(() => {
-      if (this._detached() && this.scope() === null) this._error.set(SCOPE_UNAVAILABLE);
-    });
+    void this.publishDesired();
+  }
+
+  /** The scope to send now: the valid scope, or the unavailable scope while the parse is rejected. */
+  private desiredScope(): GitWindowScope | null {
+    const parsed = this.parsedScope();
+    if (parsed === null) return null;
+    return parsed.success ? parsed.data : UNAVAILABLE_SCOPE;
+  }
+
+  /** Publish the desired scope. An accepted unavailable scope keeps its error in the main window. */
+  private async publishDesired(force = false): Promise<boolean> {
+    const scope = this.desiredScope();
+    if (scope === null) return true;
+    const accepted = await this.publish(scope, force);
+    if (accepted && this._detached() && this.desiredScope() === UNAVAILABLE_SCOPE) this._error.set(SCOPE_UNAVAILABLE);
+    return accepted;
   }
 
   /** Keep the newest scope pending: while detached, publish it again after a bounded backoff. */
@@ -264,9 +278,8 @@ export class GitWindowSync implements MessageHandler {
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null;
       if (this.destroyed || !this._detached()) return;
-      // The scope is read now, so the retry sends the newest desired scope.
-      const scope = this.scope();
-      if (scope !== null) void this.publish(scope);
+      // The scope is read now, so the retry sends the newest desired scope (also the unavailable scope).
+      void this.publishDesired();
     }, delay);
   }
 

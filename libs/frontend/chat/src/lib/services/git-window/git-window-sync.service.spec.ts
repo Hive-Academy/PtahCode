@@ -218,6 +218,39 @@ describe('GitWindowSync', () => {
       expect(sync.error()).toBeNull();
     });
 
+    it('retries a failed publish of the unavailable scope with no other scope change (round 6)', async () => {
+      jest.spyOn(TestBed.inject(LoggingService), 'error').mockImplementation(() => undefined);
+      sync = TestBed.inject(GitWindowSync);
+      await sync.detach();
+      allowPublish = false;
+      active.set({ ...candidate('A'), sessionName: 'n'.repeat(600) });
+      TestBed.flushEffects();
+      await wait(0);
+      expect(sync.error()).toMatch(/Could not publish/);
+      const failed = publishes().length;
+
+      allowPublish = true;
+      await wait(650);
+      expect(publishes()).toHaveLength(failed + 1);
+      expect(publishes().at(-1)?.params).toEqual({ scope: expect.objectContaining({ repoRoot: null, open: [], unresolved: true }) });
+      expect(sync.error()).toBe('Git scope is unavailable');
+    });
+
+    it('keeps the rejected-scope error and sends the unavailable scope on Focus (round 6)', async () => {
+      jest.spyOn(TestBed.inject(LoggingService), 'error').mockImplementation(() => undefined);
+      sync = TestBed.inject(GitWindowSync);
+      await sync.detach();
+      active.set({ ...candidate('A'), sessionName: 'n'.repeat(600) });
+      TestBed.flushEffects();
+      await wait(0);
+      const before = publishes().length;
+
+      await sync.focus();
+      expect(publishes()).toHaveLength(before + 1);
+      expect(publishes().at(-1)?.params).toEqual({ scope: expect.objectContaining({ repoRoot: null, unresolved: true }) });
+      expect(sync.error()).toBe('Git scope is unavailable');
+    });
+
     it('retries a failed scope publish with the newest scope while detached (finding 3)', async () => {
       sync = TestBed.inject(GitWindowSync);
       await sync.detach();
