@@ -47,6 +47,7 @@ export class PtahIconButtonDirective {
     blockBusyActivation(this.busy);
     // Same pattern as ptah-native-modal: report the missing accessible name in
     // dev mode. A thrown error would stop change detection of the parent view.
+    // The directive must not hide its host or invent a name from title or text.
     effect(() => {
       if (!this.accessibleName() && isDevMode()) {
         console.error(

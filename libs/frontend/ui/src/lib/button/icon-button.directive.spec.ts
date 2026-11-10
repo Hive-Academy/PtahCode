@@ -4,16 +4,20 @@ import { PtahIconButtonDirective } from './icon-button.directive';
 @Component({
   standalone: true,
   imports: [PtahIconButtonDirective],
-  template: `<button ptahIconButton [label]="label()" [busy]="busy()">?</button>
-    <button ptahIconButton label="Submit" type="submit">!</button>
+  template: `<button ptahIconButton [label]="label()" [busy]="busy()">
+      <svg aria-hidden="true"></svg>
+    </button>
+    <button ptahIconButton label="Submit" type="submit">
+      <svg aria-hidden="true"></svg>
+    </button>
     <a
       ptahIconButton
       label="Link"
       href="/next"
       [busy]="busy()"
       (click)="count = count + 1"
-      >+</a
-    >`,
+      ><svg aria-hidden="true"></svg
+    ></a>`,
 })
 class Host {
   readonly label = signal('More actions');
@@ -73,7 +77,16 @@ describe('icon button label', () => {
     const fixture = TestBed.createComponent(Host);
     fixture.componentInstance.label.set(label);
     fixture.detectChanges();
-    return fixture.nativeElement.querySelector('button') as HTMLButtonElement;
+    const button = fixture.nativeElement.querySelector(
+      'button',
+    ) as HTMLButtonElement;
+    // The host is icon only: no text and no `title` can give it a name.
+    expect(button.textContent?.trim()).toBe('');
+    expect(button.hasAttribute('title')).toBe(false);
+    expect(button.querySelector('svg')?.getAttribute('aria-hidden')).toBe(
+      'true',
+    );
+    return button;
   }
   it.each([
     ['empty', ''],
@@ -82,6 +95,8 @@ describe('icon button label', () => {
     const button = render(label);
     expect(button.hasAttribute('aria-label')).toBe(false);
     expect(button.hasAttribute('title')).toBe(false);
+    expect(button.hasAttribute('aria-labelledby')).toBe(false);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringContaining('ptahIconButton requires a non-empty label'),
     );
