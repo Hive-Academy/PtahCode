@@ -497,6 +497,22 @@ export class SessionLoaderService {
   /** The fresh read queued behind {@link loadSessionsInFlight}, or `null`. */
   private loadSessionsTrailing: Promise<void> | null = null;
 
+  /** Start order of the full-list reads (`loadSessions` and workspace switch). */
+  private listReadSequence = 0;
+  /** Start order of the newest full-list reply already shown. */
+  private listAppliedSequence = 0;
+
+  /**
+   * Whether a full-list reply may replace the rows. A workspace-switch read
+   * runs beside the single-flighted reads, so the two can answer out of order;
+   * a reply that started before the one already shown is older and is dropped.
+   */
+  private claimListReply(readSequence: number): boolean {
+    if (readSequence < this.listAppliedSequence) return false;
+    this.listAppliedSequence = readSequence;
+    return true;
+  }
+
   /**
    * Start a fresh read and make it the one later callers join. Used directly
    * (never joining) after a query change, because a read already in flight
@@ -571,6 +587,7 @@ export class SessionLoaderService {
       );
 
       const generation = this.listQueryGeneration;
+      const readSequence = ++this.listReadSequence;
       const result = await this.claudeRpcService.call('session:list', {
         workspacePath,
         limit,
@@ -591,6 +608,7 @@ export class SessionLoaderService {
       }
 
       if (result.success && result.data) {
+        if (!this.claimListReply(readSequence)) return;
         const page = readSessionListPage(result.data);
         this._organizationAvailable.set(page.organizationAvailable);
         this._sessions.set(page.sessions);
@@ -754,6 +772,8 @@ export class SessionLoaderService {
     }
 
     this.currentWorkspacePath = normalizedNew;
+    // Reply order is compared inside one workspace only.
+    this.listAppliedSequence = 0;
     // Rows cached under another query would show filters the list does not
     // honour; treat them as a miss and read again.
     const cached = this.sessionCache.get(normalizedNew);
@@ -833,6 +853,7 @@ export class SessionLoaderService {
         SessionLoaderService.normalizeCacheKey(workspacePath);
 
       const generation = this.listQueryGeneration;
+      const readSequence = ++this.listReadSequence;
       const result = await this.claudeRpcService.call('session:list', {
         workspacePath,
         limit: SessionLoaderService.SESSIONS_PAGE_SIZE,
@@ -843,6 +864,7 @@ export class SessionLoaderService {
       if (generation !== this.listQueryGeneration) return;
 
       if (result.success && result.data) {
+        if (!this.claimListReply(readSequence)) return;
         const page = readSessionListPage(result.data);
         this._organizationAvailable.set(page.organizationAvailable);
         this._sessions.set(page.sessions);
