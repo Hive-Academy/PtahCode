@@ -19,7 +19,7 @@ Branch `fix/lane-restore-and-main-exceptions`. Detailed lane notes:
 - The inactivity watchdog stamps `timeout` (~2729-2763), and an explicit
   `stop()` stamps `completedAt`. Neither matches the observed record.
 - Host logs: no Electron lifecycle log for the incident was found under
-  `C:\Users\abdal\.ptah`. The host restart is inferred from code and the
+  `C:\Users\dev\.ptah`. The host restart is inferred from code and the
   observed state, not proven by a log.
 
 ### Changes

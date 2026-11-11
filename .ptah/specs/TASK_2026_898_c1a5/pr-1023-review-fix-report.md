@@ -22,7 +22,7 @@ Files: `libs/backend/vscode-core/src/services/git/github-pr-status.reader.ts`, `
 
 ## Verification
 
-`npm run verify -- -p chat,rpc-handlers,cli-agent-runtime,task-end-hook,vscode-core,ptah-electron`: lint and typecheck passed, 12/12 scoped tasks. Test phase: 15/16 Nx tasks succeeded. The sole failed target was `@ptah-extension/task-end-hook:test`, with 14/21 suites and 577/618 tests passing; its 7 failed suites and 41 failed tests match the stated Windows symlink/temporary-path baseline. No other target failed. The command exited 1 because of that target. Its terminal output is in `C:\Users\abdal\.nx\d60e02896ae18ad9\cache\terminalOutputs\31029859624614406`.
+`npm run verify -- -p chat,rpc-handlers,cli-agent-runtime,task-end-hook,vscode-core,ptah-electron`: lint and typecheck passed, 12/12 scoped tasks. Test phase: 15/16 Nx tasks succeeded. The sole failed target was `@ptah-extension/task-end-hook:test`, with 14/21 suites and 577/618 tests passing; its 7 failed suites and 41 failed tests match the stated Windows symlink/temporary-path baseline. No other target failed. The command exited 1 because of that target. Its terminal output is in `C:\Users\dev\.nx\d60e02896ae18ad9\cache\terminalOutputs\31029859624614406`.
 
 Focused `task-pr-reconciler.service.spec.ts` run with `--coverage=false --maxWorkers=2`: 1/1 suite and 6/6 tests passed, including the new retry case.
 

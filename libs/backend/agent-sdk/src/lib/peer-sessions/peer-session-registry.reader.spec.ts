@@ -25,7 +25,7 @@ const LIVE_2_1_268 = {
   peerFeatures: ['notify_idle', 'artifact_yield'],
   kind: 'interactive',
   entrypoint: 'sdk-ts',
-  pidDomain: 'win32:abdo',
+  pidDomain: 'win32:dev',
   messagingSocketPath: '\\\\.\\pipe\\LOCAL\\cc-msg-307e851ab448c4f4988c41e4e0c2ccf8',
   name: 'ptah-extension-1c',
   nameSource: 'derived',
@@ -87,7 +87,7 @@ describe('scanPeerSessionRegistry', () => {
       sessionId: LIVE_2_1_268.sessionId,
       cwd: LIVE_2_1_268.cwd,
       procStart: LIVE_2_1_268.procStart,
-      pidDomain: 'win32:abdo',
+      pidDomain: 'win32:dev',
       messagingSocketPath: LIVE_2_1_268.messagingSocketPath,
       name: 'ptah-extension-1c',
       nameSource: 'derived',
@@ -182,7 +182,7 @@ describe('recordStartFingerprint', () => {
 
 describe('currentPidDomain', () => {
   it('matches the shape a live record carries, case-insensitively', () => {
-    // The live record says `win32:abdo` on a host whose hostname is `Abdo`.
-    expect(currentPidDomain('win32', 'Abdo')).toBe('win32:abdo');
+    // The live record says `win32:dev` on a host whose hostname is `Dev`.
+    expect(currentPidDomain('win32', 'Dev')).toBe('win32:dev');
   });
 });

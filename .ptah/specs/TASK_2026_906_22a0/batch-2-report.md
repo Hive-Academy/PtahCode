@@ -14,7 +14,7 @@ Git child uses the shared child factory and renderer loader, with only `ptahWind
 
 ## Verification
 
-`npm run verify -- -p ptah-electron` ran once. Its header confirmed **one project**, `ptah-electron`. Lint and typecheck passed (2/2 tasks). The test target failed after 6m46s: 42 suites failed, 68 passed, 1 skipped; 9 tests failed, 1312 passed, 3 skipped. The saved Nx log is `C:\Users\abdal\.nx\d60e02896ae18ad9\cache\terminalOutputs\17234217241242295169`.
+`npm run verify -- -p ptah-electron` ran once. Its header confirmed **one project**, `ptah-electron`. Lint and typecheck passed (2/2 tasks). The test target failed after 6m46s: 42 suites failed, 68 passed, 1 skipped; 9 tests failed, 1312 passed, 3 skipped. The saved Nx log is `C:\Users\dev\.nx\d60e02896ae18ad9\cache\terminalOutputs\17234217241242295169`.
 
 The new `git-window.spec.ts` initially had two TS2352 fake-type errors; I fixed these after the run by implementing the complete `IStateStorage` fake and narrowing the host's logger option to its used `error` method. This fix has **not** been rerun because the instruction specified one verify run. Many unrelated suites could not load `marked` from this worktree's missing `node_modules/marked/lib/marked.umd.js`; a packaging spec could not find `node_modules/electron/package.json`. Scoped `ptah_get_diagnostics` after the fix remained unavailable after 45 seconds, so the final spec has not been independently typechecked.
 

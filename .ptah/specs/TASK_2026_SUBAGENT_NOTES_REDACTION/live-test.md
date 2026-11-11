@@ -1,6 +1,6 @@
 # Ptah Dev Electron live test — subagent notes redaction
 
-Date: 2026-11-08 local (Africa/Cairo). Built from this worktree. Log references below are one-based lines in `C:\Users\abdal\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-08.log`; log timestamps are UTC. The fake marker was assembled from parts in the chat prompt and is not printed here.
+Date: 2026-11-08 local (Africa/Cairo). Built from this worktree. Log references below are one-based lines in `C:\Users\dev\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-08.log`; log timestamps are UTC. The fake marker was assembled from parts in the chat prompt and is not printed here.
 
 ## Isolation gate
 
@@ -9,7 +9,7 @@ Date: 2026-11-08 local (Africa/Cairo). Built from this worktree. Log references 
 | Required ancestor | PASS | `git merge-base --is-ancestor 5a88ce09d HEAD` exited 0. |
 | Production raw SHA-256 | PASS | Start, after the Dev settings edit, after launch, and end: `780f1063cb844f461dac8fa5c11d14c565af2afe02c805253824527ab4b1c01a`. No raw-only reserialization occurred. Production settings were read for hashes only. |
 | Production canonical SHA-256 | PASS | Recursive key sort, JSON stringify, SHA-256 at the same four checkpoints: `321e5a3bccff6840ed43c6d7e85f35f193ccf575b7fd71db5e09ec80c1e44abb`. No canonical change. |
-| Dev settings backup and restore | PASS | Backup and byte-for-byte restored `C:\Users\abdal\.ptah-dev\settings.json` SHA-256: `3B727D826F40043DCC6E879B9023DB60A075C4FBD67ED945BA5AC738D694FAD6`. Temporary backup was removed after verification. |
+| Dev settings backup and restore | PASS | Backup and byte-for-byte restored `C:\Users\dev\.ptah-dev\settings.json` SHA-256: `3B727D826F40043DCC6E879B9023DB60A075C4FBD67ED945BA5AC738D694FAD6`. Temporary backup was removed after verification. |
 | Dev process ownership | PASS | Prelaunch query found zero Ptah Dev processes. Owned node launcher PID 37660 spawned Electron root PID 34156 from this worktree on port 9347; only those roots were stopped. Final Ptah Dev Electron count was zero. |
 
 ## Setup

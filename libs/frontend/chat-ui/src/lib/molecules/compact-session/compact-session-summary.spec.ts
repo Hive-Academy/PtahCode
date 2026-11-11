@@ -1009,7 +1009,7 @@ describe('summarizeLive cost per publish', () => {
     streamBlock(state, 'split-msg', 0, 'see C:\\Users\\a', [1]);
     summarizeLive(state, context());
 
-    streamBlock(state, 'split-msg', 0, 'see C:\\Users\\abd\\x.ts', [2]);
+    streamBlock(state, 'split-msg', 0, 'see C:\\Users\\dev\\x.ts', [2]);
     const text = summarizeLive(state, context()).marks[0].text ?? '';
 
     expect(text).toBe('see x.ts');

@@ -176,11 +176,11 @@ describe('SmitheryConnectionResolver.resolveNamespace (TASK_2026_375 B2.4)', () 
       noRegistry,
     );
 
-    const config = await resolver.resolveNamespace('abdallah');
+    const config = await resolver.resolveNamespace('acme');
 
     expect(config).toEqual({
       type: 'http',
-      url: 'https://mcp.smithery.run/abdallah',
+      url: 'https://mcp.smithery.run/acme',
       headers: { Authorization: 'Bearer sk-secret' },
     });
     expect(config.url).not.toContain('sk-secret');

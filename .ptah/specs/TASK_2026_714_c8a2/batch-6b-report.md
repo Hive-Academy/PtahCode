@@ -31,10 +31,10 @@ Global model/installation/provider metadata delegates to legacy. Shared resolved
 - Ran scoped ptah_get_diagnostics after the final edits against all four absolute source/spec paths: TypeScript compiler, Errors: 0, Warnings: 0, coverage clean. Earlier diagnostics identified a required legacy preTokens field and mock signatures; those issues were fixed before the final clean run.
 - Formatted all four files with the repository's Prettier.
 - Started exactly once: `npm run verify -- -t test -p @ptah-extension/agent-sdk -- --testPathPatterns=codex-app-server`.
-  - Log: `C:/Users/abdal/AppData/Local/Temp/ptah-6b-tests.log`.
+  - Log: `C:/Users/dev/AppData/Local/Temp/ptah-6b-tests.log`.
   - Pending FIFO lock; no Nx execution header or test count available. 21 new cases authored; no claim they have run.
 - Started exactly once: `npm run verify -- -p @ptah-extension/agent-sdk`.
-  - Log: `C:/Users/abdal/AppData/Local/Temp/ptah-6b-verify.log`.
+  - Log: `C:/Users/dev/AppData/Local/Temp/ptah-6b-verify.log`.
   - Pending FIFO lock; no Nx execution header, lint result, typecheck-target result or full test count available.
 - Both commands request exactly one project. The requested “Running target X for N projects” header cannot yet be confirmed because Nx has not started.
 - Last observed lock holder: pid 5748, wizard-library-alignment worktree, verify lint/test/typecheck for eight projects, acquired 2026-10-25T18:21:21.125Z. This lane's focused run queued at 18:24:24.863Z and full verification at 18:26:47.084Z. One completion check per launched command was made; neither had completed. Runs were left queued for the coordinator to collect, not cancelled/restarted or bypassed.

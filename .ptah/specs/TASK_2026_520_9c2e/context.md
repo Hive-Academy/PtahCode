@@ -7,7 +7,7 @@
 A scan of `.ptah/specs/` on `origin/main` at `702c41413` on 2026-09-21:
 
 ```text
-grep -rniEl "D:[/\\]projects|C:[/\\]Users|abdal" .ptah/specs/ | wc -l
+grep -rniEl "D:[/\\]projects|C:[/\\]Users|dev" .ptah/specs/ | wc -l
   → 325
 ```
 
