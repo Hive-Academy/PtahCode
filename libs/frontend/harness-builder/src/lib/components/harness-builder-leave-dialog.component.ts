@@ -11,6 +11,7 @@ import {
   computed,
 } from '@angular/core';
 import { CdkTrapFocus } from '@angular/cdk/a11y';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import type { HarnessBuilderMode } from '../services/harness-builder-records.service';
 
 export type HarnessLeaveContext =
@@ -20,7 +21,7 @@ export type HarnessLeaveChoice = 'cancel' | 'discard' | 'save';
 @Component({
   selector: 'ptah-harness-builder-leave-dialog',
   standalone: true,
-  imports: [CdkTrapFocus],
+  imports: [CdkTrapFocus, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -84,14 +85,15 @@ export type HarnessLeaveChoice = 'cancel' | 'discard' | 'save';
             <button
               #cancelButton
               type="button"
-              class="btn btn-outline btn-sm"
+              ptahButton
               (click)="stopChoice.emit('keep-current')"
             >
               Keep current
             </button>
             <button
               type="button"
-              class="btn btn-primary btn-sm"
+              ptahButton
+              variant="primary"
               (click)="stopChoice.emit('retry-stop')"
             >
               Retry stop
@@ -104,7 +106,7 @@ export type HarnessLeaveChoice = 'cancel' | 'discard' | 'save';
             <button
               #cancelButton
               type="button"
-              class="btn btn-outline btn-sm border-base-content/50 min-h-10 min-[460px]:min-h-8"
+              ptahButton
               [disabled]="saving()"
               (click)="choose('cancel')"
             >
@@ -112,7 +114,7 @@ export type HarnessLeaveChoice = 'cancel' | 'discard' | 'save';
             </button>
             <button
               type="button"
-              class="btn btn-outline btn-sm border-base-content/50 min-h-10 min-[460px]:min-h-8"
+              ptahButton
               [disabled]="saving()"
               (click)="choose('discard')"
             >
@@ -120,7 +122,8 @@ export type HarnessLeaveChoice = 'cancel' | 'discard' | 'save';
             </button>
             <button
               type="button"
-              class="btn btn-primary btn-sm min-h-10 min-[460px]:min-h-8"
+              ptahButton
+              variant="primary"
               [disabled]="saving()"
               [attr.aria-disabled]="!sessionStarted() ? true : null"
               [attr.aria-describedby]="

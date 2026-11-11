@@ -13,6 +13,7 @@ import {
   Send,
 } from 'lucide-angular';
 import { FILE_LINK_OPENER } from '@ptah-extension/core';
+import { PtahIconButtonDirective } from '@ptah-extension/ui';
 import type {
   LaneResult,
   LaneVerdictTone,
@@ -47,7 +48,7 @@ const PILL_CLASSES: Record<LaneVerdictTone, string> = {
 @Component({
   selector: 'ptah-lane-result-card',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahIconButtonDirective],
   template: `
     <section
       class="my-2 rounded-lg border border-base-content/10 bg-base-200 overflow-hidden text-sm"
@@ -126,10 +127,11 @@ const PILL_CLASSES: Record<LaneVerdictTone, string> = {
             }
             <button
               type="button"
-              class="btn btn-ghost btn-square btn-xs h-7 w-7 min-h-0 flex-shrink-0 text-info/80 hover:text-info"
+              ptahIconButton
+              size="xs"
+              class="flex-shrink-0"
               [class.ml-auto]="!file.verdict"
-              [attr.aria-label]="'Open ' + file.name"
-              [title]="file.path"
+              [label]="'Open ' + file.name"
               (click)="openFile(file.path)"
             >
               <lucide-angular

@@ -8,6 +8,7 @@ import {
   signal,
 } from '@angular/core';
 import { AppStateManager, LoggingService } from '@ptah-extension/core';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import { HarnessBuilderRecordsService } from '../../services/harness-builder-records.service';
 import { HarnessProposalHydrationService } from '../../services/harness-proposal-hydration.service';
 import {
@@ -25,7 +26,7 @@ import {
 @Component({
   selector: 'ptah-builder-ai-helpers-section',
   standalone: true,
-  imports: [],
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (initialized()) {
@@ -48,7 +49,9 @@ import {
           @if (i === 5) {
             <button
               type="button"
-              class="btn btn-ghost btn-sm mt-3"
+              ptahButton
+              variant="ghost"
+              class="mt-3"
               [attr.aria-expanded]="showMoreHelpers()"
               aria-controls="builder-more-helpers"
               (click)="showMoreHelpers.set(!showMoreHelpers())"
@@ -111,13 +114,14 @@ import {
                   ></textarea
                   ><button
                     type="button"
-                    class="btn btn-outline btn-sm border-base-content/50"
+                    ptahButton
                     (click)="runHelper(row.kind)"
                   >
                     Analyze</button
                   ><button
                     type="button"
-                    class="btn btn-ghost btn-sm"
+                    ptahButton
+                    variant="ghost"
                     (click)="activeInput.set(null)"
                   >
                     Cancel
@@ -144,7 +148,9 @@ import {
                       ></div>
                       <button
                         type="button"
-                        class="btn btn-ghost btn-xs min-h-6"
+                        ptahButton
+                        variant="ghost"
+                        size="xs"
                         (click)="copyHelperText()"
                       >
                         Copy
@@ -158,7 +164,8 @@ import {
                     ) {
                       <button
                         type="button"
-                        class="btn btn-outline btn-xs border-base-content/50"
+                        ptahButton
+                        size="xs"
                         (click)="addHelperResult()"
                       >
                         {{
@@ -170,7 +177,9 @@ import {
                     }
                     <button
                       type="button"
-                      class="btn btn-ghost btn-xs"
+                      ptahButton
+                      variant="ghost"
+                      size="xs"
                       (click)="helper.dismiss()"
                     >
                       Dismiss
@@ -184,13 +193,16 @@ import {
                     <p>{{ row.title }} failed. {{ helperError.message }}</p>
                     <button
                       type="button"
-                      class="btn btn-outline btn-xs border-base-content/50"
+                      ptahButton
+                      size="xs"
                       (click)="runHelper(row.kind)"
                     >
                       Try again</button
                     ><button
                       type="button"
-                      class="btn btn-ghost btn-xs"
+                      ptahButton
+                      variant="ghost"
+                      size="xs"
                       (click)="helper.dismiss()"
                     >
                       Dismiss

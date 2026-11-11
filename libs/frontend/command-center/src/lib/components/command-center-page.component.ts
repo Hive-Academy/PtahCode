@@ -40,6 +40,7 @@ import {
   type CommandChildStats,
 } from './command-node-detail.component';
 import { CommandSessionStatsComponent } from './command-session-stats.component';
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 import { CommandCaptionStripComponent } from './command-caption-strip.component';
 import {
   CommandRailTabsComponent,
@@ -84,6 +85,8 @@ const CAPTION_RESERVE_PX = 72;
     CommandRailDisplayComponent,
     SessionStatsSummaryComponent,
     ResizeHandleComponent,
+    PtahButtonDirective,
+    PtahIconButtonDirective,
   ],
   providers: [
     CommandCenterStore,

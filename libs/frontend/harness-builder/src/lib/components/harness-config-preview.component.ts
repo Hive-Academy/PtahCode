@@ -8,6 +8,7 @@ import {
   signal,
 } from '@angular/core';
 import type { HarnessConfig } from '@ptah-extension/shared';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import {
   LucideAngularModule,
   User,
@@ -21,7 +22,7 @@ import { HarnessBuilderStateService } from '../services/harness-builder-state.se
 @Component({
   selector: 'ptah-harness-config-preview',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
@@ -54,7 +55,9 @@ import { HarnessBuilderStateService } from '../services/harness-builder-state.se
           </p>
           <button
             type="button"
-            class="btn btn-outline btn-xs mt-2"
+            ptahButton
+            size="xs"
+            class="mt-2"
             (click)="proposeAgain.emit()"
           >
             Ask the agent to propose it again
@@ -72,7 +75,9 @@ import { HarnessBuilderStateService } from '../services/harness-builder-state.se
           </p>
           <button
             type="button"
-            class="btn btn-outline btn-xs mt-2"
+            ptahButton
+            size="xs"
+            class="mt-2"
             (click)="retry.emit()"
           >
             Retry
@@ -254,7 +259,9 @@ import { HarnessBuilderStateService } from '../services/harness-builder-state.se
               ></div>
               <button
                 type="button"
-                class="btn btn-outline btn-xs mt-2"
+                ptahButton
+                size="xs"
+                class="mt-2"
                 (click)="copyDocument()"
               >
                 {{ copiedDocument() === documentContent() ? 'Copied' : 'Copy' }}

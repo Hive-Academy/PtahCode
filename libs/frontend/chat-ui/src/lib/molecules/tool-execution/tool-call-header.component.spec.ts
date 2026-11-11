@@ -285,8 +285,8 @@ describe.each([true, false])(
       expect(
         host
           .querySelector('button[aria-label="Open main.ts"]')
-          ?.getAttribute('title'),
-      ).toBe('Open /repo/src/app/main.ts');
+          ?.hasAttribute('data-ptah-button'),
+      ).toBe(true);
       expect(chips(host)).toEqual(['lines 1-60']);
     });
 
@@ -306,7 +306,7 @@ describe.each([true, false])(
       expect(open).not.toBeNull();
       expect(toggle(host).contains(open)).toBe(false);
       expect(toggle(host).querySelector('button')).toBeNull();
-      expect(open.getAttribute('title')).toBe('Open C:\\repo\\lib\\util.py');
+      expect(open.hasAttribute('data-ptah-button')).toBe(true);
 
       open.click();
       expect(openMock).toHaveBeenCalledWith({

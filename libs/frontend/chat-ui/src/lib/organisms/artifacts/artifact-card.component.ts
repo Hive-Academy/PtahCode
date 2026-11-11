@@ -12,6 +12,7 @@ import {
   Maximize2,
 } from 'lucide-angular';
 import type { ArtifactRecord } from '@ptah-extension/shared';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /**
  * ArtifactCardComponent — the transcript card for one published artifact
@@ -26,7 +27,7 @@ import type { ArtifactRecord } from '@ptah-extension/shared';
 @Component({
   selector: 'ptah-artifact-card',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <article
@@ -55,7 +56,9 @@ import type { ArtifactRecord } from '@ptah-extension/shared';
       <footer class="flex items-center gap-2">
         <button
           type="button"
-          class="btn btn-primary btn-xs gap-1"
+          ptahButton
+          variant="primary"
+          size="xs"
           (click)="open.emit(artifact().id)"
           data-testid="artifact-card-open"
         >
@@ -64,7 +67,9 @@ import type { ArtifactRecord } from '@ptah-extension/shared';
         </button>
         <button
           type="button"
-          class="btn btn-ghost btn-xs gap-1"
+          ptahButton
+          variant="ghost"
+          size="xs"
           (click)="fullscreen.emit(artifact().id)"
           data-testid="artifact-card-fullscreen"
         >

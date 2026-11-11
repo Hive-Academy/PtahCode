@@ -79,7 +79,7 @@ describe('LaneResultCardComponent', () => {
       'button[aria-label="Open parity-inventory.md"]',
     ) as HTMLButtonElement;
 
-    expect(button.getAttribute('title')).toBe(`${DIR}\\parity-inventory.md`);
+    expect(button.hasAttribute('data-ptah-button')).toBe(true);
     button.click();
     expect(openMock).toHaveBeenCalledWith({
       path: `${DIR}\\parity-inventory.md`,

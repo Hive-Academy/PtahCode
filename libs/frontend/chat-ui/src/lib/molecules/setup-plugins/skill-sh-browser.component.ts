@@ -19,6 +19,7 @@ import {
   CatalogCardSkeletonComponent,
   CatalogGridComponent,
   MonogramTileComponent,
+  PtahButtonDirective,
   StorefrontPanelComponent,
   type CatalogCardBadge,
 } from '@ptah-extension/ui';
@@ -126,6 +127,7 @@ const SCOPE_BADGE_LABELS: Readonly<Record<InstalledSkill['scope'], string>> = {
     CatalogGridComponent,
     MonogramTileComponent,
     StorefrontPanelComponent,
+    PtahButtonDirective,
     InstallScopeFieldComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -283,7 +285,8 @@ const SCOPE_BADGE_LABELS: Readonly<Record<InstalledSkill['scope'], string>> = {
             </button>
           } @else {
             <button
-              class="btn btn-primary btn-sm"
+              ptahButton
+              variant="primary"
               [disabled]="installingSkillIds().has(skill.key)"
               (click)="toggleInstallPanel(grid, skill)"
               type="button"
@@ -317,7 +320,8 @@ const SCOPE_BADGE_LABELS: Readonly<Record<InstalledSkill['scope'], string>> = {
                 [(scope)]="scopeChoice"
               />
               <button
-                class="btn btn-primary btn-sm"
+                ptahButton
+                variant="primary"
                 type="button"
                 data-testid="skill-install-confirm"
                 [disabled]="

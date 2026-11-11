@@ -19,6 +19,7 @@ import {
   ProviderMarkComponent,
   PROVIDER_BRAND_SLUGS,
   PROVIDER_MARKS,
+  PtahButtonDirective,
 } from '@ptah-extension/ui';
 import { relativeTime } from './command-relative-time';
 import { History, Plus, Play, LucideAngularModule } from 'lucide-angular';
@@ -26,7 +27,7 @@ import { History, Plus, Play, LucideAngularModule } from 'lucide-angular';
 @Component({
   selector: 'ptah-command-center-start',
   standalone: true,
-  imports: [MonogramTileComponent, ProviderMarkComponent, LucideAngularModule],
+  imports: [MonogramTileComponent, ProviderMarkComponent, LucideAngularModule, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: `
     :host-context([data-glass='on']) section[data-glass-surface='content'] {
@@ -49,7 +50,9 @@ import { History, Plus, Play, LucideAngularModule } from 'lucide-angular';
       <div class="mb-8 flex flex-wrap gap-2">
         <button
           type="button"
-          class="btn btn-primary min-h-11 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+          ptahButton
+          variant="primary"
+          size="md"
           [disabled]="choosing()"
           (click)="newSession.emit()"
         >
@@ -58,7 +61,8 @@ import { History, Plus, Play, LucideAngularModule } from 'lucide-angular';
         </button>
         <button
           type="button"
-          class="btn btn-outline min-h-11 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+          ptahButton
+          size="md"
           [disabled]="choosing()"
           (click)="allSessions.emit()"
         >
@@ -76,7 +80,8 @@ import { History, Plus, Play, LucideAngularModule } from 'lucide-angular';
           <p class="mb-3">Could not load sessions.</p>
           <button
             type="button"
-            class="btn btn-outline min-h-11 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+            ptahButton
+            size="md"
             (click)="retry.emit()"
           >
             Retry

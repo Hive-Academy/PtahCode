@@ -12,12 +12,13 @@ import {
   ChangeDetectionStrategy,
 } from '@angular/core';
 import { LucideAngularModule, Archive, X } from 'lucide-angular';
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 import { MarkdownBlockComponent } from '@ptah-extension/markdown';
 
 @Component({
   selector: 'ptah-compaction-marker',
   standalone: true,
-  imports: [LucideAngularModule, MarkdownBlockComponent],
+  imports: [LucideAngularModule, MarkdownBlockComponent, PtahButtonDirective, PtahIconButtonDirective],
   template: `
     <!-- Compact inline chip -->
     <div
@@ -41,7 +42,9 @@ import { MarkdownBlockComponent } from '@ptah-extension/markdown';
       @if (summary()) {
         <button
           type="button"
-          class="btn btn-ghost btn-xs h-4 min-h-4 px-1 text-primary"
+          ptahButton
+          variant="ghost"
+          size="xs"
           (click)="open()"
         >
           View
@@ -63,9 +66,9 @@ import { MarkdownBlockComponent } from '@ptah-extension/markdown';
               <span class="font-bold text-base">Context compacted</span>
             </div>
             <button
-              class="btn btn-sm btn-circle btn-ghost"
+              ptahIconButton
+              label="Close compaction summary"
               type="button"
-              aria-label="Close compaction summary"
               (click)="close()"
             >
               <lucide-angular

@@ -9,6 +9,7 @@ import {
   ChangeDetectionStrategy,
 } from '@angular/core';
 import { injectWallClock, WallClockService } from '@ptah-extension/core';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import {
   LucideAngularModule,
   ShieldAlert,
@@ -52,7 +53,7 @@ import {
  */
 @Component({
   selector: 'ptah-permission-request-card',
-  imports: [LucideAngularModule, DenyMessagePopoverComponent],
+  imports: [LucideAngularModule, DenyMessagePopoverComponent, PtahButtonDirective],
   template: `
     <div
       class="relative bg-base-300/30 rounded border-l-2"
@@ -128,7 +129,9 @@ import {
         </button>
         }
         <button
-          class="btn btn-xs btn-error btn-outline gap-0.5 px-2"
+          ptahButton
+          variant="danger"
+          size="xs"
           (click)="respond('deny')"
           type="button"
           aria-label="Deny this request and stop execution"
