@@ -66,6 +66,8 @@ export class ChatFollowUpQueueService {
   private readonly stopGenerations = new Map<string, number>();
   private readonly stopAt = new Map<string, number>();
   private readonly submissions = new Map<string, Set<Promise<void>>>();
+  /** sessionId → tab that reopened the live session, with the registration it adopted. */
+  private readonly adopted = new Map<string, { tabId: string; record: object }>();
   private readonly unsubscribe: (() => void) | null;
 
   constructor(
@@ -104,6 +106,7 @@ export class ChatFollowUpQueueService {
     this.stopGenerations.clear();
     this.stopAt.clear();
     this.submissions.clear();
+    this.adopted.clear();
   }
 
   trackSubmission(sessionId: string, submission: Promise<void>): void {
@@ -153,6 +156,7 @@ export class ChatFollowUpQueueService {
     this.stopGenerations.delete(sessionId);
     this.stopAt.delete(sessionId);
     this.submissions.delete(sessionId);
+    this.adopted.delete(sessionId);
   }
 
   private evictReceipt(sessionId: string, id: string): void {
@@ -464,9 +468,10 @@ export class ChatFollowUpQueueService {
     }
     if (change.state !== 'queued') this.unbind(sessionId, change.clientMessageId);
     if (change.state !== 'queued') this.markTerminal(sessionId, change.clientMessageId);
-    // An unbound change still reaches the live registration tab, but that
-    // tab never becomes the receipt owner: ownership follows the submitter.
-    const pushTabId = tabId ?? this.registeredTab(sessionId);
+    // An unbound change still reaches the tab that owns the live session,
+    // but that tab never becomes the receipt owner: ownership follows the
+    // submitter.
+    const pushTabId = tabId ?? this.ownerTab(sessionId);
     if (pushTabId === undefined) {
       this.logger.debug('[RPC] queued follow-up state has no tab', {
         sessionId,
@@ -508,9 +513,45 @@ export class ChatFollowUpQueueService {
     return record?.realSessionId === sessionId ? record.tabId : undefined;
   }
 
+  /**
+   * `chat:resume` from a tab the user opened: when the session is live under a
+   * different tab id, that tab now owns its follow-ups. The adoption holds
+   * only for the registration it was made on.
+   */
+  adoptTab(sessionId: string, tabId: string): void {
+    const record = this.liveIdentity(sessionId);
+    if (!record || this.registeredTab(sessionId) === tabId) {
+      this.adopted.delete(sessionId);
+      return;
+    }
+    const previous = this.ownerTab(sessionId);
+    this.adopted.set(sessionId, { tabId, record });
+    if (previous === undefined || previous === tabId) return;
+    // Items the earlier tab queued stay visible and addressable in this tab.
+    for (const owners of [this.bindings.get(sessionId), this.receiptOwners.get(sessionId)]) {
+      if (!owners) continue;
+      for (const [id, owner] of owners) if (owner === previous) owners.set(id, tabId);
+    }
+    this.logger.info('[RPC] follow-up queue adopted by reopened tab', {
+      sessionId,
+      previousTabId: previous,
+      tabId,
+    });
+  }
+
+  private adoptedTab(sessionId: string): string | undefined {
+    const adoption = this.adopted.get(sessionId);
+    if (!adoption) return undefined;
+    if (adoption.record === this.liveIdentity(sessionId)) return adoption.tabId;
+    this.adopted.delete(sessionId);
+    return undefined;
+  }
+
   private ownerTab(sessionId: string): string | undefined {
     const codexOwner = this.codexOwner?.(sessionId);
     if (codexOwner !== undefined) return codexOwner;
+    const adopted = this.adoptedTab(sessionId);
+    if (adopted !== undefined) return adopted;
     const registered = this.registeredTab(sessionId);
     if (registered !== undefined) return registered;
     const items = this.bindings.get(sessionId);

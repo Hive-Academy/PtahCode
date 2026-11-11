@@ -323,6 +323,7 @@ type ChatHostRouting = Pick<HostRoutingCoordinator, 'admitUserTurn'>;
 type ChatFollowUpQueue = Pick<
   ChatFollowUpQueueService,
   | 'assertTabOwnsSession'
+  | 'adoptTab'
   | 'beginAdmission'
   | 'acceptedRetry'
   | 'endAdmission'
@@ -2347,6 +2348,11 @@ export class ChatSessionService {
           this.subagentRegistry.getResumableBySession(sessionId).length,
         cliSessionCount: cliSessions?.length ?? 0,
       });
+      // The session may be live under an earlier tab id (its tab was closed
+      // and the user opened it again). This tab now queues its follow-ups.
+      if (params.adoptFollowUps === true && params.tabId) {
+        this.followUpQueue?.adoptTab(sessionId, params.tabId);
+      }
       let activated = false;
       let activationError: string | undefined;
       let activationErrorCode: ChatResumeResult['activationErrorCode'];
