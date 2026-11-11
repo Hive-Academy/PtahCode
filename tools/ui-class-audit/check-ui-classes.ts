@@ -437,19 +437,37 @@ export function scanTsFile(content: string, relFile: string): ClassOccurrence[] 
             });
             staticText += span.literal.text;
           }
-          for (const hit of findTemplateHits(staticText)) {
+          const lineAt = (offset: number): number => {
             let piece = pieces[0];
             for (const candidate of pieces) {
-              if (candidate.start <= hit.offset) piece = candidate;
+              if (candidate.start <= offset) piece = candidate;
             }
+            return (
+              sourceFile.getLineAndCharacterOfPosition(
+                piece.src + (offset - piece.start),
+              ).line + 1
+            );
+          };
+          for (const hit of findTemplateHits(staticText)) {
             occurrences.push({
               file: relFile,
-              line:
-                sourceFile.getLineAndCharacterOfPosition(
-                  piece.src + (hit.offset - piece.start),
-                ).line + 1,
+              line: lineAt(hit.offset),
               token: hit.token,
             });
+          }
+          // A plain class attribute that holds a substitution cannot be proven safe
+          // (`[class]` and `[ngClass]` bindings already give their own token):
+          // one dynamic occurrence per such binding.
+          const classBinding =
+            /(?<![\w.-])class\s*=\s*("[^"]*"|'[^']*')/g;
+          for (const match of staticText.matchAll(classBinding)) {
+            if (match[1].includes(placeholder)) {
+              occurrences.push({
+                file: relFile,
+                line: lineAt(match.index ?? 0),
+                token: DYNAMIC_TOKEN,
+              });
+            }
           }
         }
         // `template: someExpression` — cannot be proven safe.

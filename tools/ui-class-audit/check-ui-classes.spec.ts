@@ -348,6 +348,24 @@ describe('scanTsFile', () => {
     });
   });
 
+  it('reports one dynamic occurrence per class binding with a substitution', () => {
+    const source = [
+      '@Component({',
+      '  template: `',
+      '    <div class="${RAW}">A</div>',
+      '    <div class="p-2">B</div>',
+      '    <div [ngClass]="${EXPR}">C</div>',
+      '  `,',
+      '})',
+      'export class DemoWComponent {}',
+    ].join('\n');
+    const dynamic = scanTsFile(source, FILE).filter(
+      (o) => o.token === DYNAMIC_TOKEN,
+    );
+    // two bindings plus the template-level occurrence
+    expect(dynamic.map((o) => o.line).sort()).toEqual([2, 3, 5]);
+  });
+
   it('ignores blocked-root words outside template properties', () => {
     const source = [
       "const label = 'btn';",

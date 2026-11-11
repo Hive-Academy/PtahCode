@@ -384,7 +384,7 @@
     "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/components/atoms/session-organization-chips/session-organization-chips.component.ts": {
-    "<dynamic>": 3
+    "<dynamic>": 6
   },
   "libs/frontend/chat/src/lib/components/atoms/workflow-badge.component.ts": {
     "badge": 1,
@@ -483,7 +483,7 @@
     "textarea-bordered": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/previous-sessions-toolbar/previous-sessions-toolbar.component.ts": {
-    "<dynamic>": 1,
+    "<dynamic>": 4,
     "btn": 3,
     "btn-circle": 1,
     "btn-ghost": 3,
@@ -499,7 +499,7 @@
     "btn-sm": 2
   },
   "libs/frontend/chat/src/lib/components/molecules/session-filter-bar/session-filter-bar.component.ts": {
-    "<dynamic>": 1,
+    "<dynamic>": 5,
     "badge": 1,
     "badge-neutral": 1,
     "badge-xs": 1,
@@ -518,7 +518,7 @@
     "toggle-xs": 2
   },
   "libs/frontend/chat/src/lib/components/molecules/session-list-row/session-list-row.component.ts": {
-    "<dynamic>": 2,
+    "<dynamic>": 6,
     "input": 1,
     "input-bordered": 1,
     "input-xs": 1
