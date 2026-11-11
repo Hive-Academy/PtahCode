@@ -8,7 +8,7 @@ import {
   viewChildren,
   type ElementRef,
 } from '@angular/core';
-import { InboxRowDirective } from '@ptah-extension/ui';
+import { InboxRowDirective, PtahButtonDirective } from '@ptah-extension/ui';
 import type {
   MachinesError,
   RemoteMachine,
@@ -48,7 +48,12 @@ interface MachineRow {
 @Component({
   selector: 'ptah-machine-list',
   standalone: true,
-  imports: [MachineStatusComponent, DisplayTextPipe, InboxRowDirective],
+  imports: [
+    PtahButtonDirective,
+    MachineStatusComponent,
+    DisplayTextPipe,
+    InboxRowDirective,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'flex flex-col gap-4' },
   template: `
@@ -90,7 +95,9 @@ interface MachineRow {
         </p>
         <button
           type="button"
-          class="btn btn-primary btn-sm mt-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+          ptahButton
+          variant="primary"
+          class="mt-2"
           data-testid="machine-list-retry"
           (click)="retryLoad.emit()"
         >
@@ -128,7 +135,8 @@ interface MachineRow {
             (keydown)="onKeydown($event)"
             (click)="selected.emit(row.machineId)"
           >
-            <span class="block truncate text-sm font-medium text-base-content"
+            <span
+              class="block truncate text-sm font-medium text-base-content"
               >{{ row.name }}</span
             >
             <span

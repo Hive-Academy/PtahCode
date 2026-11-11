@@ -67,6 +67,7 @@ import {
   type AgentModelSettingsScope,
   type AgentModelSettingsValue,
 } from '@ptah-extension/shared';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 import { SkillSynthesisRpcService } from '../../services/skill-synthesis-rpc.service';
 import { AgentModelsStore, type AgentModelsTicket } from './agent-models.store';
@@ -159,6 +160,7 @@ let nextEditorId = 0;
 @Component({
   selector: 'ptah-agent-model-editor',
   standalone: true,
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -205,7 +207,10 @@ let nextEditorId = 0;
                   @if (edit()?.provider !== row.provider) {
                     <button
                       type="button"
-                      class="btn btn-ghost btn-xs ml-auto"
+                      ptahButton
+                      variant="ghost"
+                      size="xs"
+                      class="ml-auto"
                       data-testid="agent-model-edit-btn"
                       [disabled]="
                         locked() || row.unsupported || edit() !== null
@@ -246,7 +251,9 @@ let nextEditorId = 0;
                       @if (n.kind === 'sync-failed') {
                         <button
                           type="button"
-                          class="btn btn-ghost btn-xs"
+                          ptahButton
+                          variant="ghost"
+                          size="xs"
                           data-testid="agent-model-sync-btn"
                           [disabled]="locked() || harness.busy()"
                           (click)="syncAgain()"
@@ -327,7 +334,9 @@ let nextEditorId = 0;
                         </datalist>
                         <button
                           type="button"
-                          class="btn btn-primary btn-xs"
+                          ptahButton
+                          variant="primary"
+                          size="xs"
                           data-testid="agent-model-save-btn"
                           [disabled]="!canSave()"
                           (click)="onSave()"
@@ -336,7 +345,9 @@ let nextEditorId = 0;
                         </button>
                         <button
                           type="button"
-                          class="btn btn-ghost btn-xs"
+                          ptahButton
+                          variant="ghost"
+                          size="xs"
                           data-testid="agent-model-cancel-btn"
                           [disabled]="e.phase === 'saving'"
                           (click)="cancelEdit()"
@@ -387,7 +398,9 @@ let nextEditorId = 0;
                               </button>
                               <button
                                 type="button"
-                                class="btn btn-ghost btn-xs"
+                                ptahButton
+                                variant="ghost"
+                                size="xs"
                                 data-testid="agent-model-confirm-unlisted-back"
                                 (click)="backToEditing()"
                               >
@@ -405,7 +418,9 @@ let nextEditorId = 0;
                             <span>{{ guardFailedCopy }}</span>
                             <button
                               type="button"
-                              class="btn btn-ghost btn-xs"
+                              ptahButton
+                              variant="ghost"
+                              size="xs"
                               data-testid="agent-model-retry-btn"
                               [disabled]="locked()"
                               (click)="retry()"
@@ -439,7 +454,9 @@ let nextEditorId = 0;
           <span class="text-error">Models unavailable: {{ loadError }}</span>
           <button
             type="button"
-            class="btn btn-ghost btn-xs"
+            ptahButton
+            variant="ghost"
+            size="xs"
             [disabled]="store.loading()"
             (click)="reload()"
           >

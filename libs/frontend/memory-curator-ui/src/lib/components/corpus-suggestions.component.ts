@@ -5,6 +5,10 @@ import {
   output,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import {
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 import type { CorpusSuggestion } from '@ptah-extension/shared';
 
 /**
@@ -26,7 +30,7 @@ import type { CorpusSuggestion } from '@ptah-extension/shared';
   selector: 'ptah-corpus-suggestions',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule],
+  imports: [PtahIconButtonDirective, PtahButtonDirective, CommonModule],
   template: `
     @if (loading()) {
       <section
@@ -71,11 +75,10 @@ import type { CorpusSuggestion } from '@ptah-extension/shared';
                 </div>
                 <button
                   type="button"
-                  class="btn btn-ghost btn-xs btn-circle"
+                  ptahIconButton
+                  size="xs"
                   (click)="dismiss.emit(suggestion)"
-                  [attr.aria-label]="
-                    'Dismiss suggestion ' + suggestion.suggestedName
-                  "
+                  [label]="'Dismiss suggestion ' + suggestion.suggestedName"
                 >
                   ×
                 </button>
@@ -97,7 +100,9 @@ import type { CorpusSuggestion } from '@ptah-extension/shared';
 
               <button
                 type="button"
-                class="btn btn-primary btn-sm mt-1"
+                ptahButton
+                variant="primary"
+                class="mt-1"
                 [disabled]="busyName() === suggestion.suggestedName"
                 (click)="create.emit(suggestion)"
                 [attr.aria-label]="'Create board ' + suggestion.suggestedName"

@@ -18,6 +18,7 @@ import {
 } from '../../services/machines-store';
 import { DisplayTextPipe, displayText } from '../../utils/display-text';
 import { durationText } from '../../utils/machine-copy';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import { remoteSessionStateLabel } from '../../utils/remote-session-copy';
 
 /** What "Open" hands the container: enough to title the opened view. */
@@ -52,7 +53,7 @@ interface RemoteSessionRow {
 @Component({
   selector: 'ptah-remote-session-list',
   standalone: true,
-  imports: [LucideAngularModule, DisplayTextPipe],
+  imports: [PtahButtonDirective, LucideAngularModule, DisplayTextPipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -70,7 +71,9 @@ interface RemoteSessionRow {
         <div class="flex gap-2">
           <button
             type="button"
-            class="btn btn-ghost btn-xs gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+            ptahButton
+            variant="ghost"
+            size="xs"
             data-testid="remote-sessions-reload"
             [disabled]="loading() || !connected()"
             (click)="reload()"
@@ -85,7 +88,9 @@ interface RemoteSessionRow {
           @if (connected() && groups().length > 0 && !composing()) {
             <button
               type="button"
-              class="btn btn-primary btn-xs gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+              ptahButton
+              variant="primary"
+              size="xs"
               data-testid="remote-session-new"
               (click)="startComposing()"
             >
@@ -150,7 +155,8 @@ interface RemoteSessionRow {
           <div class="flex gap-2">
             <button
               type="submit"
-              class="btn btn-primary btn-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+              ptahButton
+              variant="primary"
               data-testid="remote-session-new-start"
               [disabled]="
                 starting() || prompt().trim() === '' || !workspaceId()
@@ -160,7 +166,8 @@ interface RemoteSessionRow {
             </button>
             <button
               type="button"
-              class="btn btn-ghost btn-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+              ptahButton
+              variant="ghost"
               data-testid="remote-session-new-cancel"
               (click)="composing.set(false)"
             >
@@ -188,7 +195,8 @@ interface RemoteSessionRow {
           <span class="text-base-content">{{ failure }}</span>
           <button
             type="button"
-            class="btn btn-ghost btn-xs border border-surface-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+            ptahButton
+            size="xs"
             [disabled]="!connected()"
             (click)="reload()"
           >

@@ -33,7 +33,11 @@ import {
   input,
   output,
 } from '@angular/core';
-import { NativeCardComponent, NativeCardTone } from '@ptah-extension/ui';
+import {
+  NativeCardComponent,
+  NativeCardTone,
+  PtahButtonDirective,
+} from '@ptah-extension/ui';
 import {
   orphanedText,
   provenanceLabel,
@@ -156,6 +160,7 @@ function cloneStatusHint(clone: CloneSummary): string {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    PtahButtonDirective,
     NativeCardComponent,
     ScorecardBadgeComponent,
     AgentModelEditorComponent,
@@ -197,9 +202,7 @@ function cloneStatusHint(clone: CloneSummary): string {
       [clickable]="true"
       [disabled]="busy()"
       density="compact"
-      [ariaLabel]="
-        'Open details for ' + clone().slug + ', ' + provenanceText()
-      "
+      [ariaLabel]="'Open details for ' + clone().slug + ', ' + provenanceText()"
       data-testid="clone-card"
       (activated)="opened.emit(clone())"
     >
@@ -376,7 +379,9 @@ function cloneStatusHint(clone: CloneSummary): string {
       <div card-footer class="flex flex-wrap items-center gap-1.5 pt-1">
         <button
           type="button"
-          class="btn btn-ghost btn-xs transition-colors duration-150"
+          ptahButton
+          variant="ghost"
+          size="xs"
           data-testid="clones-enhance-btn"
           [disabled]="enhanceDisabled()"
           [title]="
@@ -392,7 +397,9 @@ function cloneStatusHint(clone: CloneSummary): string {
 
         <button
           type="button"
-          class="btn btn-ghost btn-xs transition-colors duration-150"
+          ptahButton
+          variant="ghost"
+          size="xs"
           data-testid="clones-revert-btn"
           [disabled]="!actions().revert.enabled || busy()"
           [title]="actions().revert.reason ?? 'Restore an earlier snapshot.'"
@@ -516,9 +523,7 @@ export class CloneCardComponent {
 
   protected readonly dotClass = computed(() => STATUS_DOT[this.statusLabel()]);
 
-  protected readonly statusHint = computed(() =>
-    cloneStatusHint(this.clone()),
-  );
+  protected readonly statusHint = computed(() => cloneStatusHint(this.clone()));
 
   /** Origin label, also part of the card's accessible name. */
   protected readonly provenanceText = computed(() =>

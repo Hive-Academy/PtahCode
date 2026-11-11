@@ -14,6 +14,7 @@ import {
   type RemoteSessionView,
 } from '../../services/machines-store';
 import { outcomeSentence } from '../../utils/remote-session-copy';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** `aria-describedby` target of the reason line; pinned by the session view spec. */
 const COMPOSER_REASON_ID = 'ptah-remote-session-reason-composer';
@@ -31,6 +32,7 @@ const COMPOSER_REASON_ID = 'ptah-remote-session-reason-composer';
 @Component({
   selector: 'ptah-remote-composer',
   standalone: true,
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <form
@@ -55,7 +57,8 @@ const COMPOSER_REASON_ID = 'ptah-remote-session-reason-composer';
         ></textarea>
         <button
           type="submit"
-          class="btn btn-primary btn-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content disabled:cursor-not-allowed disabled:border-dashed disabled:border-surface-border disabled:bg-transparent disabled:text-base-content-muted"
+          ptahButton
+          variant="primary"
           data-testid="remote-send"
           [disabled]="!canSend()"
           [attr.aria-describedby]="reason() ? reasonId : null"

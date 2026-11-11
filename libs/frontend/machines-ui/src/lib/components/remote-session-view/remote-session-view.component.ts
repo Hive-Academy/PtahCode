@@ -39,6 +39,7 @@ import {
   type ReplaySummary,
 } from '../reconnect-banner/session-sync';
 import { RemoteSessionPaneComponent } from './remote-session-pane.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import type { RemoteLinkActivation } from './remote-transcript.component';
 
 const REASON_ID = 'ptah-remote-session-reason';
@@ -70,6 +71,7 @@ const REASON_ID = 'ptah-remote-session-reason';
   selector: 'ptah-remote-session-view',
   standalone: true,
   imports: [
+    PtahButtonDirective,
     LucideAngularModule,
     RemoteSessionPaneComponent,
     RemoteComposerComponent,
@@ -146,7 +148,7 @@ const REASON_ID = 'ptah-remote-session-reason';
         @if (view()?.watchOnly) {
           <button
             type="button"
-            class="btn btn-ghost btn-sm gap-1 border border-surface-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+            ptahButton
             data-testid="remote-refresh"
             [disabled]="!connected()"
             (click)="refresh()"
@@ -161,7 +163,7 @@ const REASON_ID = 'ptah-remote-session-reason';
         }
         <button
           type="button"
-          class="btn btn-ghost btn-sm gap-1 border border-surface-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content disabled:cursor-not-allowed disabled:border-dashed disabled:bg-transparent disabled:text-base-content-muted"
+          ptahButton
           data-testid="remote-stop"
           [disabled]="!canStop()"
           [attr.aria-describedby]="view()?.watchOnly ? reasonId : null"
@@ -195,7 +197,9 @@ const REASON_ID = 'ptah-remote-session-reason';
             @if (b.tone === 'done') {
               <button
                 type="button"
-                class="btn btn-ghost btn-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                ptahButton
+                variant="ghost"
+                size="xs"
                 data-testid="remote-freed-close"
                 (click)="freed.set(null)"
               >

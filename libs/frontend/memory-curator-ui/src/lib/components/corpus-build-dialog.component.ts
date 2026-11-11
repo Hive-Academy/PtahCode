@@ -8,6 +8,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { AppStateManager } from '@ptah-extension/core';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import type { CorpusBuildParams, MemoryTypeWire } from '@ptah-extension/shared';
 
 interface TypeChip {
@@ -37,7 +38,7 @@ const TYPE_CHIPS: readonly TypeChip[] = [
   selector: 'ptah-corpus-build-dialog',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule],
+  imports: [PtahButtonDirective, CommonModule],
   template: `
     <div
       role="dialog"
@@ -147,7 +148,8 @@ const TYPE_CHIPS: readonly TypeChip[] = [
         <div class="modal-action mt-4 flex justify-end gap-2">
           <button
             type="button"
-            class="btn btn-sm btn-ghost"
+            ptahButton
+            variant="ghost"
             (click)="onCancel()"
             aria-label="Cancel build"
           >
@@ -155,7 +157,8 @@ const TYPE_CHIPS: readonly TypeChip[] = [
           </button>
           <button
             type="button"
-            class="btn btn-sm btn-primary"
+            ptahButton
+            variant="primary"
             [disabled]="!canSubmit()"
             (click)="onSubmit()"
             aria-label="Submit corpus build"
