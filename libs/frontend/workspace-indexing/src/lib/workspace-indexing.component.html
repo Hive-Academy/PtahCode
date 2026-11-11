@@ -85,22 +85,18 @@
           <div class="flex flex-wrap gap-2 mb-3">
             <button
               type="button"
-              class="btn btn-primary btn-xs gap-1"
+              ptahButton variant="primary" size="xs"
               (click)="onStart(false)"
               aria-label="Index now"
               [disabled]="isBusy()"
-              [attr.aria-busy]="isBusy()"
+              [busy]="isBusy()"
             >
-              @if (isBusy()) {
-                <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
-              } @else {
-                <lucide-angular [img]="PlayIcon" class="w-3 h-3" />
-              }
+              <lucide-angular [img]="PlayIcon" class="w-3 h-3" />
               <span>Index now</span>
             </button>
             <button
               type="button"
-              class="btn btn-ghost btn-xs"
+              ptahButton variant="ghost" size="xs"
               (click)="onAcknowledgeDisclosure()"
             >
               Learn what gets indexed
@@ -164,7 +160,7 @@
             @if (backgroundOnly()) {
               <button
                 type="button"
-                class="btn btn-primary btn-xs gap-1"
+                ptahButton variant="primary" size="xs"
                 (click)="onStart(true)"
                 aria-label="Re-index workspace"
                 data-testid="indexing-join-background"
@@ -175,7 +171,7 @@
             }
             <button
               type="button"
-              class="btn btn-primary btn-xs gap-1"
+              ptahButton variant="primary" size="xs"
               (click)="onPause()"
               aria-label="Pause indexing"
             >
@@ -184,7 +180,7 @@
             </button>
             <button
               type="button"
-              class="btn btn-ghost btn-xs gap-1"
+              ptahButton variant="ghost" size="xs"
               (click)="onCancel()"
               aria-label="Cancel indexing"
             >
@@ -214,7 +210,7 @@
           <div class="flex flex-wrap gap-2 mb-2">
             <button
               type="button"
-              class="btn btn-primary btn-xs gap-1"
+              ptahButton variant="primary" size="xs"
               (click)="onResume()"
               aria-label="Resume indexing"
             >
@@ -223,7 +219,7 @@
             </button>
             <button
               type="button"
-              class="btn btn-ghost btn-xs gap-1"
+              ptahButton variant="ghost" size="xs"
               (click)="onCancel()"
               aria-label="Cancel indexing"
             >
@@ -265,17 +261,13 @@
           <div class="flex flex-wrap gap-2 mb-2">
             <button
               type="button"
-              class="btn btn-primary btn-xs gap-1"
+              ptahButton variant="primary" size="xs"
               (click)="onStart(true)"
               aria-label="Re-index workspace"
               [disabled]="isBusy()"
-              [attr.aria-busy]="isBusy()"
+              [busy]="isBusy()"
             >
-              @if (isBusy()) {
-                <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
-              } @else {
-                <lucide-angular [img]="RefreshCwIcon" class="w-3 h-3" />
-              }
+              <lucide-angular [img]="RefreshCwIcon" class="w-3 h-3" />
               <span>Re-index</span>
             </button>
           </div>
@@ -320,22 +312,18 @@
           <div class="flex flex-wrap gap-2 mb-2">
             <button
               type="button"
-              class="btn btn-primary btn-xs gap-1"
+              ptahButton variant="primary" size="xs"
               (click)="onStart(true)"
               aria-label="Re-index workspace"
               [disabled]="isBusy()"
-              [attr.aria-busy]="isBusy()"
+              [busy]="isBusy()"
             >
-              @if (isBusy()) {
-                <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
-              } @else {
-                <lucide-angular [img]="RefreshCwIcon" class="w-3 h-3" />
-              }
+              <lucide-angular [img]="RefreshCwIcon" class="w-3 h-3" />
               <span>Re-index</span>
             </button>
             <button
               type="button"
-              class="btn btn-ghost btn-xs gap-1"
+              ptahButton variant="ghost" size="xs"
               (click)="onDismissStale()"
               aria-label="Dismiss stale notice"
             >
@@ -377,22 +365,18 @@
           <div class="flex flex-wrap gap-2 mb-2">
             <button
               type="button"
-              class="btn btn-primary btn-xs gap-1"
+              ptahButton variant="primary" size="xs"
               (click)="onStart(true)"
               aria-label="Try indexing again"
               [disabled]="isBusy()"
-              [attr.aria-busy]="isBusy()"
+              [busy]="isBusy()"
             >
-              @if (isBusy()) {
-                <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
-              } @else {
-                <lucide-angular [img]="RefreshCwIcon" class="w-3 h-3" />
-              }
+              <lucide-angular [img]="RefreshCwIcon" class="w-3 h-3" />
               <span>Try again</span>
             </button>
             <button
               type="button"
-              class="btn btn-ghost btn-xs gap-1"
+              ptahButton variant="ghost" size="xs"
               (click)="onCopyErrorDetails(state.message)"
               aria-label="Copy error details"
             >

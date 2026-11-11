@@ -122,7 +122,7 @@ let nextPromptId = 0;
             >
             <button
               type="button"
-              class="btn btn-ghost btn-xs"
+              ptahButton variant="ghost" size="xs"
               data-testid="plan-retry"
               (click)="retryPlan()"
             >

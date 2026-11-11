@@ -4,10 +4,7 @@
     "alert-error": 1
   },
   "apps/ptah-extension-webview/src/app/git-window/git-window.component.ts": {
-    "<dynamic>": 2,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-sm": 2
+    "<dynamic>": 2
   },
   "libs/frontend/canvas/src/lib/canvas-detail/agent-dock-card.component.ts": {
     "<dynamic>": 1
@@ -1677,11 +1674,6 @@
     "skeleton": 2
   },
   "libs/frontend/mcp-apps-page/src/lib/components/apps-page.component.ts": {
-    "btn": 5,
-    "btn-ghost": 4,
-    "btn-primary": 1,
-    "btn-square": 2,
-    "btn-xs": 5,
     "textarea": 1,
     "textarea-bordered": 1
   },
@@ -1729,9 +1721,6 @@
   "libs/frontend/memory-curator-ui/src/lib/components/diagnostics/memory-diagnostics-accordion.component.ts": {
     "alert": 2,
     "alert-error": 2,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1,
     "textarea": 1,
     "textarea-bordered": 1,
     "textarea-xs": 1
@@ -1838,27 +1827,23 @@
     "input-sm": 2
   },
   "libs/frontend/notification-center/src/lib/notification-center.component.ts": {
-    "btn": 6,
-    "btn-ghost": 6,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-square": 3,
-    "btn-xs": 3
-  },
-  "libs/frontend/notification-center/src/lib/notification-snackbar.component.ts": {
     "btn": 3,
     "btn-ghost": 3,
     "btn-primary": 1,
-    "btn-sm": 1,
-    "btn-square": 1,
-    "btn-xs": 1
+    "btn-sm": 2,
+    "btn-square": 1
+  },
+  "libs/frontend/notification-center/src/lib/notification-snackbar.component.ts": {
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-primary": 1,
+    "btn-sm": 1
   },
   "libs/frontend/onboarding/src/lib/home/path-tile.component.ts": {
     "<dynamic>": 2
   },
   "libs/frontend/onboarding/src/lib/proposal/answer-dock.component.ts": {
-    "btn": 2,
-    "btn-primary": 1,
+    "btn": 1,
     "btn-sm": 1,
     "textarea": 1,
     "textarea-bordered": 1
@@ -2049,10 +2034,7 @@
   "libs/frontend/setup-wizard/src/lib/components/pack-install-prompt.component.ts": {
     "alert": 2,
     "alert-error": 1,
-    "alert-info": 1,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
+    "alert-info": 1
   },
   "libs/frontend/setup-wizard/src/lib/components/preview-decisions/file-decision-row.component.ts": {
     "badge": 1,
@@ -2305,20 +2287,12 @@
     "<dynamic>": 2,
     "badge": 1,
     "badge-sm": 1,
-    "badge-warning": 1,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
+    "badge-warning": 1
   },
   "libs/frontend/workspace-indexing/src/lib/workspace-indexing.component.html": {
     "alert": 7,
     "alert-error": 2,
     "alert-info": 1,
-    "alert-warning": 2,
-    "btn": 12,
-    "btn-ghost": 5,
-    "btn-primary": 7,
-    "btn-xs": 12
+    "alert-warning": 2
   }
 }

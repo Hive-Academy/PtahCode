@@ -93,7 +93,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
           </p>
           <button
             type="button"
-            class="btn btn-primary mt-3 disabled:!bg-base-200 disabled:!text-base-content-muted disabled:!opacity-100"
+            ptahButton variant="primary" size="md" class="mt-3"
             [disabled]="!draft.canSend()"
             (click)="send()"
           >
