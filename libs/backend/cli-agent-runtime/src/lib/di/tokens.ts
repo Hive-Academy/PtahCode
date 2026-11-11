@@ -49,6 +49,7 @@ export const CLI_AGENT_RUNTIME_TOKENS = {
    * without a chat runtime.
    */
   CHILD_CHAT_SESSION_HOST: Symbol.for('ChildChatSessionHost'),
+  CHILD_SETTING_ROUTER: Symbol.for('ChildSettingRouter'),
   /**
    * `ISessionHandoff` (TASK_2026_655): a session hands its work to a new
    * top-level session with `ptah_session_handoff`. Registered by this lib's

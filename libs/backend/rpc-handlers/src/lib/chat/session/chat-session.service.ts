@@ -1308,6 +1308,35 @@ export class ChatSessionService {
     }
   }
 
+  async listAgentChildModels(input: {
+    readonly workspaceRoot: string;
+    readonly parentSessionId: string;
+  }): Promise<readonly string[]> {
+    try {
+      const account = await this.gateAccount({
+        workspacePath: input.workspaceRoot,
+        sessionId: input.parentSessionId,
+        inheritedSource: true,
+      });
+      if (account || !this.childModelCatalog) return [];
+      const profile = await this.workspaceProviderProfileResolver.resolveProviderProfileForWorkspace(input.workspaceRoot, '');
+      const native = profile && !profile.authEnv.ANTHROPIC_BASE_URL &&
+        !profile.authEnv.ANTHROPIC_API_KEY && !profile.authEnv.ANTHROPIC_AUTH_TOKEN;
+      const models = native
+        ? await this.childModelCatalog.getNativeClaudeModels()
+        : profile
+          ? await this.childModelCatalog.getModelsForProviderProfile(profile)
+          : await this.childModelCatalog.getSupportedModels();
+      return models.map((item) => item.value);
+    } catch (error: unknown) {
+      // degradation-audit: reported - routing is optional; an empty catalog keeps the host default model.
+      this.logger.warn('[ChatSessionService] Child model catalog unavailable for routing', {
+        name: error instanceof Error ? error.name : typeof error,
+      });
+      return [];
+    }
+  }
+
   /** Resolve an explicit child model before its branch or registry record exists. */
   async resolveAgentChildModel(input: {
     readonly model: string;

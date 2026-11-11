@@ -47,6 +47,7 @@ import {
   isAgentTaskType,
   trustedContextWindow,
   type AskUserQuestionRequest,
+  type ChildSettingSource,
   type PermissionRequest,
 } from '@ptah-extension/shared';
 import { AgentPermissionResponder } from '../../../services/agent-permission-responder';
@@ -64,6 +65,46 @@ import {
   SESSION_FORCED_CARD,
 } from '../../../tokens/session-context.token';
 import { buildLaneSummary, laneKey } from './compact-lane-rows';
+
+const CHILD_SETTING_SOURCE_LABELS: Readonly<
+  Record<ChildSettingSource, string>
+> = {
+  pin: 'set by parent',
+  model: 'decision model',
+  ranking: 'ranking rule',
+  default: 'host default',
+};
+
+interface ChildRouteView {
+  readonly modelLabel: string;
+  readonly modelTooltip: string;
+  readonly effortLabel: string;
+  readonly effortTooltip: string;
+  readonly summaryTooltip: string;
+}
+
+function formatChildSettingTooltip(
+  label: string,
+  source: ChildSettingSource | undefined,
+): string {
+  return source ? `${label} (${CHILD_SETTING_SOURCE_LABELS[source]})` : label;
+}
+
+function sameChildRoute(
+  a: ChildRouteView | null,
+  b: ChildRouteView | null,
+): boolean {
+  return (
+    a === b ||
+    (a !== null &&
+      b !== null &&
+      a.modelLabel === b.modelLabel &&
+      a.modelTooltip === b.modelTooltip &&
+      a.effortLabel === b.effortLabel &&
+      a.effortTooltip === b.effortTooltip &&
+      a.summaryTooltip === b.summaryTooltip)
+  );
+}
 
 function sameItems<T>(a: readonly T[], b: readonly T[]): boolean {
   return a.length === b.length && a.every((item, index) => item === b[index]);
@@ -186,6 +227,30 @@ function sameLaneSummary(
             }
           </div>
         }
+        @if (childRoute(); as route) {
+          <div
+            class="flex min-w-0 shrink-0 items-center gap-1.5 border-b border-base-content/10 px-3 py-1 font-mono text-[11px] text-base-content-muted"
+            data-testid="compact-session-child-route"
+            [title]="route.summaryTooltip"
+            [attr.aria-label]="route.summaryTooltip"
+          >
+            <span
+              class="min-w-0 truncate"
+              data-testid="compact-session-child-model"
+              [title]="route.modelTooltip"
+              [attr.aria-label]="route.modelTooltip"
+              >{{ route.modelLabel }}</span
+            >
+            <span class="shrink-0" aria-hidden="true">·</span>
+            <span
+              class="shrink-0"
+              data-testid="compact-session-child-effort"
+              [title]="route.effortTooltip"
+              [attr.aria-label]="route.effortTooltip"
+              >{{ route.effortLabel }}</span
+            >
+          </div>
+        }
         @if (
           tab().viewMode === 'compact' &&
           activityLanes() === null &&
@@ -283,6 +348,31 @@ export class CompactSessionCardComponent {
     () => this.tab().claudeSessionId ?? this.tab().id,
   );
   readonly branch = computed(() => this.tab().agentOrigin?.branch ?? null);
+  readonly childRoute = computed<ChildRouteView | null>(
+    () => {
+      const origin = this.tab().agentOrigin;
+      if (!origin) return null;
+      const modelLabel = origin.model ?? 'default model';
+      const modelSource =
+        origin.modelSource ?? (origin.model ? undefined : 'default');
+      const modelTooltip = formatChildSettingTooltip(modelLabel, modelSource);
+      const effortLabel = origin.effort ?? 'default effort';
+      const effortSource =
+        origin.effortSource ?? (origin.effort ? undefined : 'default');
+      const effortTooltip = formatChildSettingTooltip(
+        effortLabel,
+        effortSource,
+      );
+      return {
+        modelLabel,
+        modelTooltip,
+        effortLabel,
+        effortTooltip,
+        summaryTooltip: `${modelTooltip} · ${effortTooltip}`,
+      };
+    },
+    { equal: sameChildRoute },
+  );
   readonly now = injectWallClock(
     'second',
     () => this.streaming() || this.laneSummary().counts.running > 0,

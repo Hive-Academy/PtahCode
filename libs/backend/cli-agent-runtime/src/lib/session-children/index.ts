@@ -33,12 +33,17 @@ export type {
   SessionSendMode,
   SessionSpawnRefusalCode,
 } from './session-spawner.port';
+export { childSettingSources } from './session-spawner.port';
 export type {
   ChildChatSessionStartInput,
   ChildChatSessionStartOutcome,
   HandoffChatSessionStartInput,
   IChildChatSessionHost,
 } from './child-chat-session-host.port';
+export type {
+  ChildSettingRoute,
+  IChildSettingRouter,
+} from './child-setting-router.port';
 export type {
   HandoffTurnFlushNotice,
   IHandoffTurnFlush,
@@ -51,7 +56,10 @@ export type {
   HandoffPredecessorCloser,
   HandoffCloseResult,
 } from './session-handoff.port';
-export { SessionHandoffAckStore, HANDOFF_ACK_STORAGE_KEY } from './session-handoff-ack.store';
+export {
+  SessionHandoffAckStore,
+  HANDOFF_ACK_STORAGE_KEY,
+} from './session-handoff-ack.store';
 export type {
   ISessionHandoffChain,
   SessionHandoffLinkWritten,

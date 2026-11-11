@@ -36,6 +36,7 @@ import { PreflightReuseCache } from '../scope/preflight-reuse-cache';
 import { ScopeCheckService } from '../scope/scope-check.service';
 import { DecisionModelTaskKindClassifier } from '../task-kind/decision-model-task-kind-classifier';
 import { LANE_ROUTING_TOKENS } from './tokens';
+import { ChildSettingRouterService } from '../child-session/child-setting-router.service';
 
 /**
  * `platform-core` joins `homedir()` with `.ptah` privately and exports no
@@ -59,6 +60,13 @@ export function registerLaneRoutingServices(
   logger: LaneRoutingLogger,
 ): void {
   container.registerInstance(LANE_ROUTING_TOKENS.LOGGER, logger);
+  container.register(LANE_ROUTING_TOKENS.CHILD_SETTING_ROUTER, {
+    useFactory: instanceCachingFactory((c) => new ChildSettingRouterService(
+      c.resolve<DecisionModelConfig>(LANE_ROUTING_TOKENS.DECISION_MODEL_CONFIG),
+      c.resolve<LaneRoutingLogger>(LANE_ROUTING_TOKENS.LOGGER),
+      optional<StructuredDecisionCompleter>(c, LANE_ROUTING_TOKENS.STRUCTURED_DECISION),
+    )),
+  });
 
   container.register(LANE_ROUTING_TOKENS.ROTATION_STORE, {
     useFactory: instanceCachingFactory(
