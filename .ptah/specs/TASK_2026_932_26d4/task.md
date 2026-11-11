@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_932_26d4
-status: in_review
+status: done
 type: BUGFIX
 title: "Fix session handoff lineage, stop-follow, status model and cleanup"
 depends_on: []

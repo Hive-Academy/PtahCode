@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_936_817a
-status: in_review
+status: done
 type: FEATURE
 title: Redesign PtahCode review summary comment format
 depends_on: []

@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_949_699b
-status: in_review
+status: done
 type: REFACTORING
 title: 'UI button adoption 4c-2: chat settings (providers and others)'
 depends_on: []

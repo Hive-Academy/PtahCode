@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_950_ed73
-status: in_review
+status: done
 type: FEATURE
 title: 'Form controls family: owners, gallery and look sheet'
 depends_on: []

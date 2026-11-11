@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_923_481f
-status: in_review
+status: done
 type: BUGFIX
 title: Fix Electron main event-loop stall at startup
 depends_on: []

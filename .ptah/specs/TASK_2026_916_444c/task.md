@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_916_444c
-status: in_review
+status: done
 type: BUGFIX
 title: 'Fix landing hero pin stutter, section viewport fit and download hero'
 depends_on: []

@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_927_144e
-status: in_review
+status: done
 type: BUGFIX
 title: Deliver and route domain skills in new projects and orchestration
 depends_on: []

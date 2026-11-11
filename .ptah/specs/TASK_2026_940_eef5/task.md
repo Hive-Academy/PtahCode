@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_940_eef5
-status: in_review
+status: done
 type: DOCUMENTATION
 title: Design system epic plan and level 1 and 2 research
 depends_on: []

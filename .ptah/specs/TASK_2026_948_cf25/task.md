@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_948_cf25
-status: in_review
+status: done
 type: REFACTORING
 title: 'UI button adoption 4c-1: chat components'
 depends_on: []

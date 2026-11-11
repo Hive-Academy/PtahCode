@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_924_8ac1
-status: in_review
+status: done
 type: RESEARCH
 title: Inventory renderer UI control families and plan one design system
 depends_on: []

@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_921_fde0
-status: in_review
+status: done
 type: BUGFIX
 title: Fix renderer startup freeze and RPC timeout burst
 depends_on: []

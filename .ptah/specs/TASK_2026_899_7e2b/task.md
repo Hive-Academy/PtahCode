@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_899_7e2b
-status: in_review
+status: done
 type: REFACTORING
 title: Remove the unused closeSourceAfterAutoHandoff setting
 depends_on: []

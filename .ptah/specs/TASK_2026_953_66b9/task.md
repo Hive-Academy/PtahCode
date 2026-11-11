@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_953_66b9
-status: in_review
+status: done
 type: REFACTORING
 title: ui-button-adopt 4c-3 chat settings/ptah-ai
 depends_on: []

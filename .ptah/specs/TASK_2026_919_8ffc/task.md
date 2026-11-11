@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_919_8ffc
-status: in_review
+status: done
 type: CREATIVE
 title: Unify Settings form controls and dropdowns
 depends_on: []

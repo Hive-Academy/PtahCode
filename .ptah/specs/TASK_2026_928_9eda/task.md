@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_928_9eda
-status: in_review
+status: done
 type: BUGFIX
 title: Fix CLI lane plan-limit usage readers
 depends_on: []

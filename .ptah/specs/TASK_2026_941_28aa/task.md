@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_941_28aa
-status: in_review
+status: done
 type: REFACTORING
 title: 'Family 1 button: adopt directives in marketplace (batch 1b-2)'
 depends_on: []

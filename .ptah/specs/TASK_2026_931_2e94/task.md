@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_931_2e94
-status: in_review
+status: done
 type: BUGFIX
 title: Fix failing Windows tests on main
 depends_on: []

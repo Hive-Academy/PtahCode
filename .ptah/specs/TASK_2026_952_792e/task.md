@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_952_792e
-status: in_review
+status: done
 type: REFACTORING
 title: 'UI button adoption 4c-2b: chat settings focusRing dynamic-class buttons'
 depends_on: []

@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_935_5a17
-status: in_review
+status: done
 type: BUGFIX
 title: Fix phantom sub-agent cards from background commands
 depends_on: []

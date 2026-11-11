@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_930_4e06
-status: in_review
+status: done
 type: FEATURE
 title: Route model and effort for child sessions
 depends_on: []

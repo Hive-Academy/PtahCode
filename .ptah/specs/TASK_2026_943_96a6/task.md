@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_943_96a6
-status: in_review
+status: done
 type: REFACTORING
 title: >-
   Family 1 button: adopt directives in memory-curator, skill-synthesis, machines

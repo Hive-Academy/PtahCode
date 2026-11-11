@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_901_b7c2
-status: in_review
+status: done
 type: FEATURE
 title: Sync review status to GitHub checks
 depends_on:
