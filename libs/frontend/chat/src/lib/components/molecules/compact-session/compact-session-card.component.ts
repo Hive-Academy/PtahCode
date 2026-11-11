@@ -65,6 +65,14 @@ import {
   SESSION_FORCED_CARD,
 } from '../../../tokens/session-context.token';
 import { buildLaneSummary, laneKey } from './compact-lane-rows';
+import { ChatStore } from '../../../services/chat.store';
+import { isTabBusyGenerating } from '../../../services/chat-store/tab-busy';
+import {
+  SessionRelationFocus,
+  describeSessionRelation,
+  isRelatedSession,
+  type SessionRelationRow,
+} from '../../../services/session-organization/session-relation';
 
 const CHILD_SETTING_SOURCE_LABELS: Readonly<
   Record<ChildSettingSource, string>
@@ -181,6 +189,14 @@ function sameLaneSummary(
         [state]="railStateValue()"
         [density]="density()"
         [focused]="focused()"
+        [childOf]="relation().childOf"
+        [childCount]="relation().childCount"
+        [childRunning]="relation().childRunning"
+        [related]="relatedHighlight()"
+        (pointerenter)="onRelationEnter()"
+        (pointerleave)="onRelationLeave($event)"
+        (focusin)="onRelationEnter()"
+        (focusout)="onRelationLeave($event)"
         [tabStop]="tabStop()"
         [innerTabbable]="tabStop()"
         [reserveActionCorner]="reserveActionCorner()"
@@ -701,6 +717,81 @@ export class CompactSessionCardComponent {
       .tasksForSession(this.tab().claudeSessionId ?? null)
       .some((task) => task.status === 'running' && !isAgentTaskType(task.taskType)),
   );
+
+  private readonly relationFocus = inject(SessionRelationFocus);
+  private readonly chatStore = inject(ChatStore);
+  private readonly ownParentId = computed(
+    () => this.organization()?.parentSessionId ?? null,
+  );
+  /** Known sessions: the loaded list plus the open tabs. */
+  private readonly relationRows = computed<SessionRelationRow[]>(() => {
+    const byId = new Map<string, SessionRelationRow>();
+    for (const s of this.chatStore.sessions()) {
+      byId.set(s.id, {
+        sessionId: s.id,
+        label: s.name,
+        parentSessionId: s.organization?.parentSessionId ?? null,
+        running: false,
+      });
+    }
+    for (const t of this.tabManager.tabs()) {
+      const id = t.claudeSessionId;
+      if (!id) continue;
+      const known = byId.get(id);
+      byId.set(id, {
+        sessionId: id,
+        label: t.title || known?.label || null,
+        parentSessionId:
+          this.organizationCache.organizationFor(id)()?.parentSessionId ??
+          known?.parentSessionId ??
+          null,
+        running: isTabBusyGenerating({
+          status: t.status,
+          streamingState: t.streamingState,
+          isStreamingTab: false,
+        }),
+      });
+    }
+    return [...byId.values()];
+  });
+  readonly relation = computed(
+    () =>
+      describeSessionRelation(
+        this.tab().claudeSessionId ?? '',
+        this.ownParentId(),
+        this.relationRows(),
+      ),
+    { equal: (a, b) => a.childOf === b.childOf && a.childCount === b.childCount && a.childRunning === b.childRunning },
+  );
+  readonly relatedHighlight = computed(() => {
+    const focus = this.relationFocus.focused();
+    return (
+      focus !== null &&
+      isRelatedSession(
+        focus.id,
+        focus.parentId,
+        this.tab().claudeSessionId ?? '',
+        this.ownParentId(),
+      )
+    );
+  });
+
+  onRelationEnter(): void {
+    const id = this.tab().claudeSessionId;
+    if (id) this.relationFocus.set(id, this.ownParentId());
+  }
+
+  /** Keep the highlight while the other modality (pointer or focus) still holds. */
+  onRelationLeave(event?: Event): void {
+    const el = event?.currentTarget;
+    if (
+      el instanceof HTMLElement &&
+      (el.matches(':hover') || el.matches(':focus-within'))
+    )
+      return;
+    const id = this.tab().claudeSessionId;
+    if (id) this.relationFocus.clear(id);
+  }
 
   constructor() {
     effect((onCleanup) => {
