@@ -440,6 +440,7 @@ describe('buildStatsLimitViewModel', () => {
         'lanesCount',
         'planTiles',
         'providerLimits',
+        'sessionProviderLabel',
         'subtotal',
       ]);
       expect(vm.inspectorRuns).toHaveLength(1);
