@@ -4177,41 +4177,65 @@ describe('SessionLoaderService', () => {
   });
 
   describe('loadSessions single-flight (TASK_2026_383 Batch 10.3)', () => {
-    it('shares one session:list with a caller whose debounce fires while the read is in flight', async () => {
+    it('re-reads once for callers whose debounce fires while a read is in flight', async () => {
+      // A child session started by ptah_session_start is persisted while an
+      // earlier session:list is in flight. A caller that only joined that
+      // read got the old list, so the child stayed out of the sidebar.
       jest.useFakeTimers();
       let release: (() => void) | null = null;
       const gate = new Promise<void>((resolve) => {
         release = resolve;
       });
+      const child = {
+        id: 'child-session',
+        name: 'child',
+        createdAt: 1,
+        lastActivityAt: 2,
+        messageCount: 0,
+      };
+      let listCount = 0;
 
       rpcCall.mockClear();
       rpcCall.mockImplementation(async (method: string) => {
         if (method === 'session:list') {
-          await gate;
+          listCount++;
+          if (listCount === 1) {
+            await gate;
+            return {
+              success: true,
+              data: { sessions: [], total: 0, hasMore: false },
+            };
+          }
+          return {
+            success: true,
+            data: { sessions: [child], total: 1, hasMore: false },
+          };
         }
-        return {
-          success: true,
-          data: { sessions: [], total: 0, hasMore: false },
-        };
+        return { success: true, data: { sessions: [], total: 0, hasMore: false } };
       });
 
       const first = service.loadSessions();
       // Debounce elapses -> the RPC starts and is now in flight.
       jest.advanceTimersByTime(300);
 
-      // A second, independent caller arrives mid-flight. Before the
-      // single-flight it scheduled a second identical session:list.
+      // Two independent callers arrive mid-flight; they share ONE fresh read.
       const second = service.loadSessions();
       jest.advanceTimersByTime(300);
+      const third = service.loadSessions();
+      jest.advanceTimersByTime(300);
+
+      // The fresh read waits for the read in flight; reads never overlap.
+      expect(listCount).toBe(1);
 
       jest.useRealTimers();
       release?.();
-      await Promise.all([first, second]);
+      await Promise.all([first, second, third]);
 
       const loadCalls = rpcCall.mock.calls.filter(
         (c) => c[0] === 'session:list',
       );
-      expect(loadCalls.length).toBe(1);
+      expect(loadCalls.length).toBe(2);
+      expect(service.sessions().map((s) => s.id)).toEqual(['child-session']);
     }, 10000);
 
     it('issues a fresh read for a caller that arrives after the previous one settled', async () => {
