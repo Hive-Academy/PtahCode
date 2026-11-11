@@ -1,11 +1,11 @@
 ---
 id: TASK_2026_932_26d4
-status: backlog
+status: in_review
 type: BUGFIX
 title: "Fix session handoff lineage, stop-follow, status model and cleanup"
 depends_on: []
 created: "2026-11-11T02:05:42.767Z"
-updated: "2026-11-11T02:05:42.767Z"
+updated: "2026-11-11T06:40:00.000Z"
 description: "Child session handoff lineage refusal, stop of handed-off id, one terminal status model, archive finished sessions"
 estimate: L
 ---
