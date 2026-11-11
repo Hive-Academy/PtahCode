@@ -79,7 +79,13 @@ export class ComposerRestoreService {
   /** Take the tab's waiting text (the composer calls this once it shows it). */
   consume(tabId: string): string | null {
     const content = this.pending().get(tabId) ?? null;
-    if (content !== null) this.discard(tabId);
+    if (content !== null) {
+      this.pending.update((current) => {
+        const next = new Map(current);
+        next.delete(tabId);
+        return next;
+      });
+    }
     return content;
   }
 

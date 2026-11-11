@@ -46,3 +46,15 @@ Degradation audit: `npx ts-node --transpile-only tools/degradation-audit/check-d
 - C was real: failed first sends restored text alone. The failure path now restores captured files and images (`harness-chat-launcher.service.ts:219-233`), while the chat composer consumes and merges those attachments with later edits (`chat-input.component.ts:1777-1789`, `composer-restore.service.ts:16-57`).
 
 No Round 4 finding remains open. `git diff --check` exited 0.
+
+## Round 5
+
+The defect was confirmed: `ComposerRestoreService.consume()` called `discard()` (`composer-restore.service.ts:80-83` before the fix), which cleared both the text and attachment queues. The composer has separate text and attachment effects (`chat-input.component.ts:1768-1790`), so consuming text first could lose a file and image.
+
+| Finding | Verdict | Files changed | Test added |
+| --- | --- | --- | --- |
+| Text consumption clears pending attachments | Fixed | `libs/frontend/chat/src/lib/services/composer-restore.service.ts`, `composer-restore.service.spec.ts` | `keeps a queued file and image when text is consumed before attachments` |
+
+`consume(tabId)` now removes only pending text (`composer-restore.service.ts:80-91`). `consumeAttachments` and `mergeAttachments` still take attachments separately (`composer-restore.service.ts:38-58`). `discard(tabId)` remains the full clear for closed and removed tabs (`follow-up-queue.service.ts:725-744`), so those paths still release pending attachments.
+
+Verification: `npm run verify -- -p chat` exited **0** on the final code state. Nx reported **2/2** lint/typecheck tasks and **1/1** test target succeeded. The filtered Nx output did not expose Jest's suite/test summary; the previous recorded chat result was 358 suites and 6,389 tests, so this one added test implies **358 suites and 6,390 tests** if the rest of the suite was unchanged. No template changed, so no template typecheck was required.

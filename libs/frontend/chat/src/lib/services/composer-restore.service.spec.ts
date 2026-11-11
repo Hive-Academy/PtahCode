@@ -22,3 +22,21 @@ it('merges restored attachments into later composer edits without replacing them
   });
   expect(service.pendingAttachmentsFor('tab')).toBeNull();
 });
+
+it('keeps a queued file and image when text is consumed before attachments', () => {
+  const service = new ComposerRestoreService();
+  const file: ChatFile = {
+    path: '/ws/queued.md', name: 'queued.md', size: 1, type: 'text', isLarge: false, tokenEstimate: 1,
+  };
+  const image: ComposerDraftImage = {
+    id: 'queued', data: 'queued', mediaType: 'image/png',
+    dataUrl: 'data:image/png;base64,queued', name: 'queued',
+  };
+  service.restore('tab', ['queued text']);
+  service.restoreAttachments('tab', [file], [image]);
+
+  expect(service.consume('tab')).toBe('queued text');
+  expect(service.pendingFor('tab')).toBeNull();
+  expect(service.mergeAttachments('tab', [], [])).toEqual({ files: [file], images: [image] });
+  expect(service.mergeAttachments('tab', [], [])).toBeNull();
+});
