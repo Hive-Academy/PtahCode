@@ -15,6 +15,7 @@ import {
   PROVIDER_ACCOUNT_LABEL_MAX_LENGTH,
   type ProviderAccountSummary,
 } from '@ptah-extension/shared';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import { SettingsBusyDisabledDirective } from '../../feedback/busy-disabled.directive';
 import { SettingsSaveFeedbackService } from '../../feedback/settings-save-feedback.service';
 import { ACCOUNT_COPY, validateAccountName } from './account-presentation';
@@ -34,7 +35,7 @@ const FOCUS =
 @Component({
   selector: 'ptah-add-account-form',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective],
+  imports: [PtahButtonDirective, SettingsBusyDisabledDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <form
@@ -63,8 +64,8 @@ const FOCUS =
       <div class="flex flex-wrap justify-end gap-2">
         <button
           type="button"
-          [class]="'btn btn-outline btn-sm min-h-8 ' + focusRing"
-          [ptahBusyDisabled]="pending()"
+          ptahButton
+          [busy]="pending()"
           (click)="cancel()"
           data-testid="add-account-cancel"
         >

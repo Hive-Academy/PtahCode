@@ -634,20 +634,18 @@
     "btn-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/advanced/advanced-settings-group.component.ts": {
-    "<dynamic>": 5,
-    "btn": 2,
-    "btn-outline": 1,
-    "btn-sm": 2,
+    "<dynamic>": 4,
+    "btn": 1,
+    "btn-sm": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/advanced/codex-sandbox-setting.component.ts": {
-    "<dynamic>": 5,
-    "btn": 4,
-    "btn-ghost": 1,
-    "btn-outline": 3,
-    "btn-sm": 4
+    "<dynamic>": 2,
+    "btn": 1,
+    "btn-outline": 1,
+    "btn-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/feedback/settings-toast.component.ts": {
     "btn": 1,
@@ -746,58 +744,44 @@
     "select-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/accounts/account-detail-view.component.ts": {
-    "<dynamic>": 14,
+    "<dynamic>": 5,
     "badge": 2,
     "badge-ghost": 2,
     "badge-sm": 2,
-    "btn": 11,
-    "btn-error": 3,
-    "btn-ghost": 4,
-    "btn-outline": 3,
-    "btn-primary": 2,
-    "btn-sm": 11,
+    "btn": 2,
+    "btn-error": 2,
+    "btn-outline": 2,
+    "btn-sm": 2,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/accounts/accounts-tab.component.ts": {
-    "<dynamic>": 8,
+    "<dynamic>": 4,
     "badge": 1,
     "badge-sm": 1,
     "badge-warning": 1,
-    "btn": 5,
-    "btn-ghost": 2,
-    "btn-outline": 2,
-    "btn-primary": 1,
-    "btn-sm": 5,
-    "btn-square": 1
-  },
-  "libs/frontend/chat/src/lib/settings/providers/accounts/add-account-form.component.ts": {
-    "<dynamic>": 3,
-    "btn": 2,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 2
-  },
-  "libs/frontend/chat/src/lib/settings/providers/accounts/ambient-account-row.component.ts": {
-    "<dynamic>": 2,
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-sm": 1,
     "btn": 1,
     "btn-outline": 1,
     "btn-sm": 1
   },
+  "libs/frontend/chat/src/lib/settings/providers/accounts/add-account-form.component.ts": {
+    "<dynamic>": 2,
+    "btn": 1,
+    "btn-primary": 1,
+    "btn-sm": 1
+  },
+  "libs/frontend/chat/src/lib/settings/providers/accounts/ambient-account-row.component.ts": {
+    "<dynamic>": 1,
+    "badge": 1,
+    "badge-ghost": 1,
+    "badge-sm": 1
+  },
   "libs/frontend/chat/src/lib/settings/providers/add-cli-instance-modal.component.ts": {
-    "<dynamic>": 8,
+    "<dynamic>": 3,
     "badge": 1,
     "badge-outline": 1,
     "badge-xs": 1,
-    "btn": 5,
-    "btn-ghost": 3,
-    "btn-primary": 2,
-    "btn-sm": 5,
-    "btn-square": 1,
     "select": 1,
     "select-bordered": 1,
     "select-sm": 1
@@ -809,14 +793,7 @@
     "badge-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/cli-tier-mapping-modal.component.ts": {
-    "<dynamic>": 8,
-    "btn": 7,
-    "btn-ghost": 2,
-    "btn-link": 3,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 7,
-    "btn-square": 1,
+    "<dynamic>": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
@@ -868,27 +845,15 @@
     "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/decision-model-row.component.ts": {
-    "<dynamic>": 12,
+    "<dynamic>": 10,
     "badge": 1,
-    "badge-xs": 1,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-square": 1
+    "badge-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/decision-model-row.timeout-field.component.ts": {
     "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/main-agent-reassign-popover.component.ts": {
-    "<dynamic>": 23,
-    "btn": 12,
-    "btn-ghost": 5,
-    "btn-link": 4,
-    "btn-outline": 1,
-    "btn-primary": 2,
-    "btn-sm": 12,
-    "btn-square": 1,
+    "<dynamic>": 11,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
@@ -897,20 +862,13 @@
     "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/main-agent-section.component.ts": {
-    "<dynamic>": 5,
+    "<dynamic>": 4,
     "badge": 1,
     "badge-sm": 1,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1,
     "skeleton": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/provider-catalog-modal.component.ts": {
-    "<dynamic>": 7,
-    "btn": 5,
-    "btn-ghost": 2,
-    "btn-outline": 3,
-    "btn-sm": 5,
+    "<dynamic>": 2,
     "input": 1,
     "input-sm": 1,
     "skeleton": 2
@@ -923,15 +881,10 @@
     "badge-sm": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/provider-consumer-assignments.component.ts": {
-    "<dynamic>": 11,
+    "<dynamic>": 9,
     "badge": 2,
     "badge-outline": 1,
     "badge-sm": 2,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-square": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
@@ -942,13 +895,9 @@
     "input-sm": 9
   },
   "libs/frontend/chat/src/lib/settings/providers/providers-settings.component.ts": {
-    "<dynamic>": 11,
+    "<dynamic>": 9,
     "badge": 1,
     "badge-sm": 1,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 2,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1

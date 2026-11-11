@@ -11,11 +11,8 @@ import {
   viewChild,
 } from '@angular/core';
 import { injectWallClock, type ClaudeAmbientStatusView } from '@ptah-extension/core';
-import { SettingsBusyDisabledDirective } from '../../feedback/busy-disabled.directive';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import { ambientStatusModel, type AmbientTone } from './account-presentation';
-
-const FOCUS =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
 
 const DOT: Readonly<Record<AmbientTone, string>> = {
   done: 'bg-state-done',
@@ -40,7 +37,7 @@ const SIGNED_IN_WORD = 'Signed in';
 @Component({
   selector: 'ptah-ambient-account-row',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective],
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -94,9 +91,10 @@ const SIGNED_IN_WORD = 'Signed in';
         <button
           #check
           type="button"
-          [class]="'btn btn-outline btn-sm min-h-8 shrink-0 ' + focusRing"
+          ptahButton
+          class="shrink-0"
           aria-label="Check the existing Claude login"
-          [ptahBusyDisabled]="model().checking"
+          [busy]="model().checking"
           (focus)="checkHadFocus = true"
           (blur)="checkBlurred($event)"
           (click)="requestCheck()"
@@ -118,7 +116,6 @@ export class AmbientAccountRowComponent {
   /** The user asked for a fresh read. The parent owns the read and announces its result. */
   readonly checkRequested = output<void>();
 
-  protected readonly focusRing = FOCUS;
   private readonly now = injectWallClock('coarse');
   protected readonly model = computed(() => ambientStatusModel(this.ambient(), this.now()));
   protected readonly dot = computed(() => DOT[this.model().tone]);

@@ -17,6 +17,8 @@ import {
   NativePopoverComponent,
   PROVIDER_MODELS_LOADER,
   ProviderMarkComponent,
+  PtahButtonDirective,
+  PtahIconButtonDirective,
   type ProviderIdentityOption,
 } from '@ptah-extension/ui';
 import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
@@ -98,6 +100,8 @@ type WriteResult = { ok: true } | { ok: false; message: string };
   standalone: true,
   imports: [
     LucideAngularModule,
+    PtahButtonDirective,
+    PtahIconButtonDirective,
     NativePopoverComponent,
     ProviderMarkComponent,
     DecisionModelKeyFieldComponent,
@@ -200,8 +204,9 @@ type WriteResult = { ok: true } | { ok: false; message: string };
                   >
                   <button
                     type="button"
-                    [class]="'btn btn-ghost btn-sm btn-square shrink-0 ' + focusRing"
-                    aria-label="Close"
+                    ptahIconButton
+                    class="shrink-0"
+                    label="Close"
                     (click)="close()"
                     data-testid="consumer-close-decision"
                   >
@@ -357,10 +362,9 @@ type WriteResult = { ok: true } | { ok: false; message: string };
                 @if (draft().kind !== 'unset') {
                   <button
                     type="button"
-                    [class]="
-                      'btn btn-primary btn-sm min-h-8 self-start disabled:border-base-content-muted disabled:bg-base-200 disabled:text-base-content-muted ' +
-                      focusRing
-                    "
+                    ptahButton
+                    variant="primary"
+                    class="self-start"
                     [disabled]="!canSave()"
                     (click)="save()"
                     data-testid="decision-save"
@@ -452,7 +456,6 @@ export class DecisionModelRowComponent implements OnInit {
 
   protected readonly ChevronIcon = ChevronDown;
   protected readonly CloseIcon = X;
-  protected readonly focusRing = DECISION_FOCUS;
   protected readonly action = DECISION_ACTION;
   protected readonly cellClass = CELL;
   protected readonly selectClass = DECISION_SELECT;

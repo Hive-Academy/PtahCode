@@ -3,6 +3,7 @@ import { ChevronDown, LucideAngularModule } from 'lucide-angular';
 import {
   ProvidersSettingsStateService, type ProvidersEffectiveRoute, type ProvidersSettingsSection,
 } from '@ptah-extension/core';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 type MainAgentTone = 'success' | 'warning' | 'neutral';
 
@@ -40,7 +41,7 @@ const REASSIGN = `btn btn-primary btn-sm shrink-0 gap-1.5 after:absolute after:i
 @Component({
   selector: 'ptah-main-agent-section',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- The block only: the page puts it and Connections on one card. It lifts while it holds a popover (role="dialog"),
@@ -85,7 +86,7 @@ const REASSIGN = `btn btn-primary btn-sm shrink-0 gap-1.5 after:absolute after:i
               @case ('error') {
                 <div class="relative z-10 flex flex-wrap items-center gap-2 text-xs text-base-content" role="alert" data-testid="routing-node-error">
                   <span>Main-agent route unavailable.</span>
-                  <button type="button" [class]="'btn btn-ghost btn-sm px-2 text-base-content underline ' + focusRing"
+                  <button type="button" ptahButton variant="ghost"
                     (click)="state.refreshRoute()" data-testid="routing-node-retry">Retry</button>
                 </div>
               }
@@ -126,7 +127,6 @@ const REASSIGN = `btn btn-primary btn-sm shrink-0 gap-1.5 after:absolute after:i
 })
 export class MainAgentSectionComponent {
   protected readonly ChevronDownIcon = ChevronDown;
-  protected readonly focusRing = FOCUS;
   protected readonly reassignClass = REASSIGN;
   protected readonly state = inject(ProvidersSettingsStateService);
 

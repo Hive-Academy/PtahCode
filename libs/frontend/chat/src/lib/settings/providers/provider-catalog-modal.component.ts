@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, effect, input, output, signal, untracked } from '@angular/core';
 import { LucideAngularModule, Search, Waypoints } from 'lucide-angular';
 import type { ProvidersConnection } from '@ptah-extension/core';
-import { NativeModalComponent } from '@ptah-extension/ui';
+import { NativeModalComponent, PtahButtonDirective } from '@ptah-extension/ui';
 import { getAnthropicProvider } from '@ptah-extension/shared';
 import { connectionAvatarTone, connectionInitials } from './provider-connection-card.state';
 
@@ -23,7 +23,7 @@ const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outli
 @Component({
   selector: 'ptah-provider-catalog-modal',
   standalone: true,
-  imports: [LucideAngularModule, NativeModalComponent],
+  imports: [LucideAngularModule, NativeModalComponent, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <ptah-native-modal [isOpen]="open()" ariaLabelledby="provider-catalog-title" size="md" (closed)="closed.emit()">
@@ -42,7 +42,7 @@ const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outli
           @case ('error') {
             <div role="alert" class="space-y-2 px-2" data-testid="provider-catalog-error">
               <p class="text-base-content">Custom providers could not be loaded. Your saved settings have not changed.</p>
-              <button type="button" [class]="'btn btn-outline btn-sm text-base-content ' + focusRing" (click)="retryRequested.emit()">Retry</button>
+              <button type="button" ptahButton (click)="retryRequested.emit()">Retry</button>
             </div>
           }
           @case ('loading') {
@@ -68,10 +68,10 @@ const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outli
                     </div>
                     <div class="flex shrink-0 items-center gap-1.5">
                       @if (row.signIn) {
-                        <button type="button" [class]="'btn btn-ghost btn-sm text-base-content underline ' + focusRing"
+                        <button type="button" ptahButton variant="ghost"
                           [attr.aria-label]="'Sign in to ' + row.name" (click)="signInRequested.emit(row.id)">Sign in</button>
                       }
-                      <button type="button" [class]="'btn btn-outline btn-sm border-primary text-base-content ' + focusRing" [disabled]="!canSetUp()"
+                      <button type="button" ptahButton [disabled]="!canSetUp()"
                         [attr.aria-label]="'Connect ' + row.name" (click)="providerChosen.emit(row.id)">Connect</button>
                     </div>
                   </li>
@@ -80,7 +80,7 @@ const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outli
             } @else {
               <div class="space-y-2 px-2" data-testid="provider-catalog-empty">
                 <p class="text-base-content">No matching providers.</p>
-                <button type="button" [class]="'btn btn-ghost btn-sm text-base-content underline ' + focusRing" (click)="query.set('')">Clear search</button>
+                <button type="button" ptahButton variant="ghost" (click)="query.set('')">Clear search</button>
               </div>
             }
           }
@@ -95,7 +95,7 @@ const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outli
                 <span class="block text-xs text-base-content-muted">OpenAI- or Anthropic-compatible self-hosted endpoint</span>
               </div>
             </div>
-            <button type="button" [class]="'btn btn-outline btn-sm text-base-content ' + focusRing" [disabled]="!canSetUp()"
+            <button type="button" ptahButton [disabled]="!canSetUp()"
               aria-label="Configure a custom endpoint" (click)="customChosen.emit()">Configure</button>
           </div>
         </div>
