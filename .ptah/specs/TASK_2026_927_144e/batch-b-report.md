@@ -45,7 +45,7 @@ Failed tasks:
 
   ● UserLayerOrphanReaper — path results and retired skills.sh clones › reports a command clone with both removed paths, and keeps one whose sidecar is a symlink
 
-    EPERM: operation not permitted, symlink 'C:\Users\abdal\AppData\Local\Temp\ptah-reap-retired-s9AcUB\linked-sidecar.json' -> 'C:\Users\abdal\AppData\Local\Temp\ptah-reap-retired-s9AcUB\home\.ptah\user\commands\audit.ptah-origin.json'
+    EPERM: operation not permitted, symlink 'C:\Users\<user>\AppData\Local\Temp\ptah-reap-retired-s9AcUB\linked-sidecar.json' -> 'C:\Users\<user>\AppData\Local\Temp\ptah-reap-retired-s9AcUB\home\.ptah\user\commands\audit.ptah-origin.json'
 
       825 |     );
       826 |     await rm(linked.sidecar);
