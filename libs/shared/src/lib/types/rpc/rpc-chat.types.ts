@@ -424,6 +424,12 @@ export interface ChatResumeParams {
   historyPage?: { readonly maxEvents: number };
   /** Opt in only for a webview load with an early claim that filters the reply. */
   historyBlockOwners?: true;
+  /**
+   * The user opened the session in this tab. When the session is live under a
+   * different tab, this tab becomes the one whose queued follow-ups it accepts.
+   * Omitted by reloads that the user did not start (compaction, resync).
+   */
+  adoptFollowUps?: true;
   /** Account route for the resumed run; same contract as `ChatStartParams.accountSelection`. */
   accountSelection?: ProviderAccountSelection;
 }
