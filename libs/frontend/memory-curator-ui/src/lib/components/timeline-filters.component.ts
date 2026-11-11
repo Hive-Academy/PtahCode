@@ -8,6 +8,7 @@ import { CommonModule } from '@angular/common';
 import type { MemoryTypeWire } from '@ptah-extension/shared';
 
 import { TimelineStateService } from '../services/timeline-state.service';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 interface TypeChip {
   readonly id: MemoryTypeWire;
@@ -35,7 +36,7 @@ const TYPE_CHIPS: readonly TypeChip[] = [
   selector: 'ptah-timeline-filters',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule],
+  imports: [PtahButtonDirective, CommonModule],
   template: `
     <div class="flex flex-col gap-2">
       <div class="flex flex-wrap items-center gap-2">
@@ -49,7 +50,8 @@ const TYPE_CHIPS: readonly TypeChip[] = [
         />
         <button
           type="button"
-          class="btn btn-sm btn-primary"
+          ptahButton
+          variant="primary"
           [disabled]="state.loading()"
           (click)="onApply()"
           aria-label="Apply timeline filters"
@@ -61,7 +63,8 @@ const TYPE_CHIPS: readonly TypeChip[] = [
         </button>
         <button
           type="button"
-          class="btn btn-sm btn-ghost"
+          ptahButton
+          variant="ghost"
           (click)="onReset()"
           [disabled]="state.loading()"
           aria-label="Reset timeline filters"

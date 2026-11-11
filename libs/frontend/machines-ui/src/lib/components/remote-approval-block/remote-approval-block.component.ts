@@ -16,6 +16,7 @@ import { Check, Copy, LucideAngularModule } from 'lucide-angular';
 import { CountdownClock } from '../../services/countdown-clock';
 import type { MachinesError } from '../../services/machines-store';
 import { displayBlockText, displayText } from '../../utils/display-text';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import {
   PERMISSION_TIMED_OUT_COPY,
   permissionCountdownCopy,
@@ -51,7 +52,7 @@ let nextBlockId = 0;
 @Component({
   selector: 'ptah-remote-approval-block',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -87,7 +88,10 @@ let nextBlockId = 0;
           <dd class="min-w-0 text-base-content">{{ sessionTitle() }}</dd>
         }
         <dt class="text-base-content-muted">Tool</dt>
-        <dd class="min-w-0 font-mono text-base-content" data-testid="approval-tool">
+        <dd
+          class="min-w-0 font-mono text-base-content"
+          data-testid="approval-tool"
+        >
           {{ toolName() }}
         </dd>
         <dt class="text-base-content-muted">Arguments</dt>
@@ -100,7 +104,9 @@ let nextBlockId = 0;
           ><code>{{ argsText() }}</code></pre>
           <button
             type="button"
-            class="btn btn-ghost btn-xs gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+            ptahButton
+            variant="ghost"
+            size="xs"
             aria-label="Copy arguments"
             data-testid="approval-copy"
             (click)="copyArgs()"
@@ -156,7 +162,8 @@ let nextBlockId = 0;
           <div class="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              class="btn btn-primary btn-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+              ptahButton
+              variant="primary"
               data-testid="approval-allow"
               [disabled]="!canAnswer()"
               [attr.aria-describedby]="reasonId"
@@ -166,7 +173,7 @@ let nextBlockId = 0;
             </button>
             <button
               type="button"
-              class="btn btn-ghost btn-sm border border-surface-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+              ptahButton
               data-testid="approval-deny"
               [disabled]="!canAnswer()"
               [attr.aria-describedby]="reasonId"
@@ -294,7 +301,8 @@ export class RemoteApprovalBlockComponent {
   protected readonly errorText = computed(() => {
     const error = this.error();
     if (error === null) return null;
-    if (this.notPermitted()) return permissionNotPermittedCopy(this.machineName());
+    if (this.notPermitted())
+      return permissionNotPermittedCopy(this.machineName());
     const text = displayText(error.message, 200);
     return text === '' ? 'The answer could not be sent.' : text;
   });

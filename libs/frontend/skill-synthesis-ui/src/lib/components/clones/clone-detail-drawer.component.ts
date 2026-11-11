@@ -35,7 +35,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { MarkdownBlockComponent } from '@ptah-extension/markdown';
-import { NativeDrawerComponent } from '@ptah-extension/ui';
+import { NativeDrawerComponent, PtahButtonDirective } from '@ptah-extension/ui';
 import {
   divergedReasonText,
   orphanedText,
@@ -123,6 +123,7 @@ const STATUS_DOT: Record<SkillCloneStatus, string> = {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    PtahButtonDirective,
     NativeDrawerComponent,
     MarkdownBlockComponent,
     ScorecardBadgeComponent,
@@ -183,7 +184,9 @@ const STATUS_DOT: Record<SkillCloneStatus, string> = {
                   </dt>
                   <dd
                     class="truncate tabular-nums"
-                    [class.text-base-content-muted]="metric.value === 'No grade'"
+                    [class.text-base-content-muted]="
+                      metric.value === 'No grade'
+                    "
                     [attr.data-testid]="metric.testId"
                   >
                     {{ metric.value }}
@@ -243,7 +246,9 @@ const STATUS_DOT: Record<SkillCloneStatus, string> = {
             <div class="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                class="btn btn-primary btn-xs"
+                ptahButton
+                variant="primary"
+                size="xs"
                 data-testid="drawer-enhance-btn"
                 [disabled]="
                   !m.actions.enhance.enabled ||
@@ -289,9 +294,7 @@ const STATUS_DOT: Record<SkillCloneStatus, string> = {
                   @if (m.hasDivergedReason) {
                     <dt class="text-base-content-muted">Reason</dt>
                     <dd data-testid="drawer-reason">
-                      <ptah-diverged-reason
-                        [reason]="m.clone.divergedReason"
-                      />
+                      <ptah-diverged-reason [reason]="m.clone.divergedReason" />
                     </dd>
                   }
                 </dl>
@@ -355,7 +358,9 @@ const STATUS_DOT: Record<SkillCloneStatus, string> = {
                 <button
                   #editBodyButton
                   type="button"
-                  class="btn btn-ghost btn-xs"
+                  ptahButton
+                  variant="ghost"
+                  size="xs"
                   data-testid="drawer-body-edit-btn"
                   [attr.aria-label]="'Edit the body of ' + m.clone.slug"
                   [disabled]="busy()"
@@ -441,7 +446,9 @@ const STATUS_DOT: Record<SkillCloneStatus, string> = {
                     <span class="flex items-center gap-1">
                       <button
                         type="button"
-                        class="btn btn-ghost btn-xs"
+                        ptahButton
+                        variant="ghost"
+                        size="xs"
                         data-testid="drawer-history-diff-btn"
                         [disabled]="!h.hasBody || historyDiffLoading() === h.ts"
                         (click)="
@@ -457,7 +464,9 @@ const STATUS_DOT: Record<SkillCloneStatus, string> = {
                       </button>
                       <button
                         type="button"
-                        class="btn btn-ghost btn-xs"
+                        ptahButton
+                        variant="ghost"
+                        size="xs"
                         data-testid="clones-history-revert-btn"
                         [disabled]="!h.hasBody || busy()"
                         (click)="revertTo.emit({ clone: m.clone, ts: h.ts })"
@@ -478,7 +487,9 @@ const STATUS_DOT: Record<SkillCloneStatus, string> = {
                   </p>
                   <button
                     type="button"
-                    class="btn btn-ghost btn-xs"
+                    ptahButton
+                    variant="ghost"
+                    size="xs"
                     data-testid="drawer-history-diff-close"
                     (click)="historyDiffCleared.emit()"
                   >

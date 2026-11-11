@@ -35,6 +35,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { ThemeService } from '@ptah-extension/core';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** Load state of the dynamically-imported renderer chunk. */
 type DiffLoadState = 'idle' | 'loading' | 'ready' | 'error';
@@ -54,6 +55,7 @@ interface TextDiffInputs {
 @Component({
   selector: 'ptah-lazy-diff-view',
   standalone: true,
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="relative h-full w-full" data-testid="lazy-diff-root">
@@ -85,7 +87,8 @@ interface TextDiffInputs {
           }}</span>
           <button
             type="button"
-            class="btn btn-outline btn-xs"
+            ptahButton
+            size="xs"
             data-testid="lazy-diff-retry"
             (click)="reload()"
           >

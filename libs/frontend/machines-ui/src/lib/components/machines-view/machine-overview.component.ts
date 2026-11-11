@@ -13,6 +13,10 @@ import {
   type ElementRef,
 } from '@angular/core';
 import { ArrowLeft, LucideAngularModule, MoreHorizontal } from 'lucide-angular';
+import {
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 import type { RemoteMachine } from '../../services/machines-store';
 import type { MachineBanner } from '../../utils/machine-banners';
 import { DisplayTextPipe, displayText } from '../../utils/display-text';
@@ -47,6 +51,8 @@ export interface MachinesActionError {
   selector: 'ptah-machine-overview',
   standalone: true,
   imports: [
+    PtahButtonDirective,
+    PtahIconButtonDirective,
     LucideAngularModule,
     DisplayTextPipe,
     MachineApprovalsComponent,
@@ -59,7 +65,9 @@ export interface MachinesActionError {
   template: `
     <button
       type="button"
-      class="btn btn-ghost btn-sm hidden gap-1 self-start focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content max-[767px]:inline-flex"
+      ptahButton
+      variant="ghost"
+      class="hidden self-start max-[767px]:inline-flex"
       data-testid="machines-narrow-back"
       (click)="backToList.emit()"
     >
@@ -96,7 +104,7 @@ export interface MachinesActionError {
       <div class="flex shrink-0 gap-2">
         <button
           type="button"
-          class="btn btn-ghost btn-sm border border-surface-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+          ptahButton
           data-testid="machine-readiness"
           (click)="openReadiness.emit()"
         >
@@ -105,8 +113,9 @@ export interface MachinesActionError {
         <div class="dropdown dropdown-end">
           <button
             type="button"
-            class="btn btn-ghost btn-sm border border-surface-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-            aria-label="More machine actions"
+            ptahIconButton
+            variant="secondary"
+            label="More machine actions"
             data-testid="machine-actions"
           >
             <lucide-angular
@@ -168,7 +177,8 @@ export interface MachinesActionError {
           <button
             #removeCancel
             type="button"
-            class="btn btn-ghost btn-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+            ptahButton
+            variant="ghost"
             data-testid="machine-remove-confirm-no"
             (click)="cancelRemove.emit()"
           >
@@ -205,7 +215,8 @@ export interface MachinesActionError {
           @case ('repair') {
             <button
               type="button"
-              class="btn btn-primary btn-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+              ptahButton
+              variant="primary"
               data-testid="machine-repair"
               (click)="repair.emit()"
             >
@@ -215,7 +226,7 @@ export interface MachinesActionError {
           @case ('retry') {
             <button
               type="button"
-              class="btn btn-ghost btn-sm border border-surface-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+              ptahButton
               data-testid="machine-retry"
               [disabled]="busy()"
               (click)="retry.emit()"

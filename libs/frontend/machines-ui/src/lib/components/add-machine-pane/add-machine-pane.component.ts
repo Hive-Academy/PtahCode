@@ -12,7 +12,7 @@ import {
   type OnInit,
 } from '@angular/core';
 import { MACHINE_SSH_ALIAS_PATTERN } from '@ptah-extension/shared';
-import { SetupActionDirective } from '@ptah-extension/ui';
+import { SetupActionDirective, PtahButtonDirective } from '@ptah-extension/ui';
 import {
   PAIRING_CODE_LENGTH,
   PAIRING_TTL_DEFAULT_SEC,
@@ -60,7 +60,7 @@ let nextId = 0;
 @Component({
   selector: 'ptah-add-machine-pane',
   standalone: true,
-  imports: [CopyCommandComponent, SetupActionDirective],
+  imports: [PtahButtonDirective, CopyCommandComponent, SetupActionDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -209,7 +209,8 @@ let nextId = 0;
           Over SSH, Ptah can read the code for you:
           <button
             type="button"
-            class="btn btn-ghost btn-xs border border-surface-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+            ptahButton
+            size="xs"
             [disabled]="busy() !== null"
             data-testid="add-machine-ssh"
             (click)="pair('ssh')"

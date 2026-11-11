@@ -7,6 +7,7 @@ import {
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 export type MemoryPurgeMode = 'substring' | 'like';
 
@@ -19,7 +20,7 @@ export interface MemoryPurgeRequest {
   selector: 'ptah-memory-danger-zone',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule],
+  imports: [PtahButtonDirective, CommonModule],
   template: `
     <div class="rounded-xl border border-error/40 p-4">
       <h2 class="text-sm font-semibold text-error">Danger zone</h2>
@@ -73,7 +74,9 @@ export interface MemoryPurgeRequest {
         </div>
         <button
           type="button"
-          class="btn btn-sm btn-error md:self-end"
+          ptahButton
+          variant="danger"
+          class="md:self-end"
           [disabled]="purgeDisabled()"
           [attr.title]="
             !hasWorkspace() ? 'Open a workspace to purge memory.' : null
@@ -97,7 +100,9 @@ export interface MemoryPurgeRequest {
           Switch to 'This workspace' to purge.
           <button
             type="button"
-            class="btn btn-xs btn-link p-0"
+            ptahButton
+            variant="link"
+            size="xs"
             (click)="switchScope.emit()"
           >
             Switch

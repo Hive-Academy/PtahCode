@@ -17,7 +17,7 @@ import {
   ProvidersSettingsStateService,
   injectWallClock,
 } from '@ptah-extension/core';
-import { SurfaceCardComponent } from '@ptah-extension/ui';
+import { SurfaceCardComponent, PtahButtonDirective } from '@ptah-extension/ui';
 
 import {
   MEMORY_PAUSED_REASON,
@@ -39,6 +39,7 @@ import { EventFeedComponent } from './event-feed.component';
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    PtahButtonDirective,
     MemoryTriggerToggleComponent,
     DbHealthPanelComponent,
     StorageHealthPanelComponent,
@@ -184,7 +185,8 @@ import { EventFeedComponent } from './event-feed.component';
           @if (ce.showSettings) {
             <button
               type="button"
-              class="btn btn-xs"
+              ptahButton
+              size="xs"
               (click)="manageCurator()"
               data-testid="curator-error-open-settings"
             >
@@ -219,9 +221,10 @@ import { EventFeedComponent } from './event-feed.component';
       <div class="flex flex-wrap items-center gap-2">
         <button
           type="button"
-          class="btn btn-sm btn-primary"
+          ptahButton
+          variant="primary"
           [disabled]="curatorRunning() || !hasActiveSession() || paused()"
-          [attr.aria-busy]="curatorRunning()"
+          [busy]="curatorRunning()"
           [title]="runNowTitle()"
           (click)="onRunCuratorNow()"
           data-testid="run-curator-now"
@@ -251,7 +254,8 @@ import { EventFeedComponent } from './event-feed.component';
         }
         <button
           type="button"
-          class="btn btn-sm btn-ghost"
+          ptahButton
+          variant="ghost"
           [disabled]="loading()"
           (click)="onRefresh()"
           data-testid="refresh-diagnostics"
@@ -291,8 +295,8 @@ import { EventFeedComponent } from './event-feed.component';
           facts, and merges them with similar memories. It runs on the triggers
           below, at most the hourly limit; Run curator now curates the active
           session once. If the provider is rate-limited, unreachable or
-          unsupported, the pass is skipped and its observations are kept for
-          the next pass.
+          unsupported, the pass is skipped and its observations are kept for the
+          next pass.
         </p>
       </details>
     </div>

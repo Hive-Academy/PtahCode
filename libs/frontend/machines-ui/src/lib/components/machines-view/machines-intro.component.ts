@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, output } from '@angular/core';
 import { LucideAngularModule, Plus } from 'lucide-angular';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** The worker's Phase 1 checks, named for the empty state's "What is checked?". */
 const CHECKED_ITEMS: readonly string[] = [
@@ -20,7 +21,7 @@ const CHECKED_ITEMS: readonly string[] = [
 @Component({
   selector: 'ptah-machines-intro',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -37,7 +38,8 @@ const CHECKED_ITEMS: readonly string[] = [
       </p>
       <button
         type="button"
-        class="btn btn-primary btn-sm gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+        ptahButton
+        variant="primary"
         data-testid="machines-empty-add"
         (click)="add.emit()"
       >

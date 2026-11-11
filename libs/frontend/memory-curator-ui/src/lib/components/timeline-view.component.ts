@@ -10,6 +10,7 @@ import type { MemoryIndexRow } from '@ptah-extension/shared';
 import { TimelineStateService } from '../services/timeline-state.service';
 
 import { TimelineFiltersComponent } from './timeline-filters.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /**
  * TimelineViewComponent
@@ -27,7 +28,7 @@ import { TimelineFiltersComponent } from './timeline-filters.component';
   selector: 'ptah-timeline-view',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, TimelineFiltersComponent],
+  imports: [PtahButtonDirective, CommonModule, TimelineFiltersComponent],
   template: `
     <div class="flex h-full w-full flex-col gap-3">
       <ptah-timeline-filters />
@@ -46,7 +47,9 @@ import { TimelineFiltersComponent } from './timeline-filters.component';
           </span>
           <button
             type="button"
-            class="btn btn-xs btn-ghost"
+            ptahButton
+            variant="ghost"
+            size="xs"
             (click)="onClearAnchor()"
             aria-label="Clear timeline anchor"
           >
@@ -97,7 +100,10 @@ import { TimelineFiltersComponent } from './timeline-filters.component';
                   </span>
                   <button
                     type="button"
-                    class="btn btn-ghost btn-xs ml-auto text-base-content-muted opacity-60 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+                    ptahButton
+                    variant="ghost"
+                    size="xs"
+                    class="ml-auto text-base-content-muted opacity-60 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
                     (click)="onDrill(row.id)"
                     [attr.aria-label]="'Drill into timeline for ' + row.id"
                   >
@@ -131,7 +137,7 @@ import { TimelineFiltersComponent } from './timeline-filters.component';
         <div class="flex justify-center pb-2">
           <button
             type="button"
-            class="btn btn-sm btn-outline"
+            ptahButton
             [disabled]="state.loading()"
             (click)="onLoadMore()"
             aria-label="Load more timeline rows"
