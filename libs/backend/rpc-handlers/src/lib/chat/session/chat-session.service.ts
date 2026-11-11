@@ -141,6 +141,7 @@ import {
   type OutputStyleSessionActivationService,
 } from '@ptah-extension/output-styles';
 import { hasStopIntent } from './chat-stop-intent';
+import { applyLiveTurnSettings } from './live-turn-settings';
 import type {
   SessionMcpStatusRecord,
   SessionMcpStatusRegistry,
@@ -2081,6 +2082,14 @@ export class ChatSessionService {
         followUp?.queue.bind(sessionId, tabId, followUp.clientMessageId);
         // The adapter can retain the item as soon as this call begins.
         followUp?.queue.commitAdmission(sessionId, followUp.clientMessageId);
+        // A live session ignores the model and effort of the request, so apply
+        // them here. A resumed session already started with them.
+        if (!justResumed && !followUp) {
+          await applyLiveTurnSettings(this.sdkAdapter, this.logger, sessionId, {
+            model: params.model,
+            effort: params.effort,
+          });
+        }
         const submission = this.sdkAdapter.sendMessageToSession(sessionId, enhancedPrompt, {
           files,
           images,
