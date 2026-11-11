@@ -15,7 +15,7 @@ import {
   Sparkles,
 } from 'lucide-angular';
 import { ClaudeRpcService, EffortStateService, WorkspaceScopeService } from '@ptah-extension/core';
-import { NativePopoverComponent } from '@ptah-extension/ui';
+import { NativePopoverComponent, PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 import type {
   EffortLevel,
   EnhancedPromptsGetStatusResponse,
@@ -87,7 +87,7 @@ interface LoadError {
 @Component({
   selector: 'ptah-agent-behaviour-section',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NativePopoverComponent, SystemPromptDrawerComponent],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NativePopoverComponent, SystemPromptDrawerComponent, PtahButtonDirective, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -109,7 +109,7 @@ interface LoadError {
           data-testid="agent-behaviour-load-error">
           <lucide-angular [img]="AlertCircleIcon" class="w-3.5 h-3.5 text-error shrink-0" aria-hidden="true" />
           <span class="flex-1">{{ failure.message }}</span>
-          <button type="button" class="btn btn-ghost btn-xs text-base-content" (click)="failure.retry()"
+          <button type="button" ptahButton variant="ghost" size="xs" (click)="failure.retry()"
             data-testid="agent-behaviour-load-retry">
             Retry
           </button>
@@ -157,8 +157,7 @@ interface LoadError {
                 </div>
               </td>
               <td class="align-top text-right">
-                <button type="button" class="btn btn-ghost btn-xs btn-square" (click)="drawerOpen.set(true)"
-                  aria-label="System prompt details"
+                <button type="button" ptahIconButton label="System prompt details" size="xs" (click)="drawerOpen.set(true)"
                   data-testid="agent-behaviour-prompt-details">
                   <lucide-angular [img]="ChevronRightIcon" class="w-3.5 h-3.5 text-base-content" aria-hidden="true" />
                 </button>
@@ -177,7 +176,7 @@ interface LoadError {
               <td class="align-top">
                 <ptah-native-popover [isOpen]="effortPopoverOpen()" placement="bottom-start"
                   backdropClass="transparent" (closed)="effortPopoverOpen.set(false)">
-                  <button type="button" trigger class="btn btn-ghost btn-xs gap-1 px-1.5 font-normal text-base-content"
+                  <button type="button" trigger ptahButton variant="ghost" size="xs"
                     [disabled]="saving() || ultracode.enabled()" (click)="effortPopoverOpen.set(true)"
                     [attr.aria-label]="'Chat reasoning effort: ' + effortLabel() + '. Change effort'"
                     aria-describedby="agent-behaviour-effort-note"

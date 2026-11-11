@@ -24,11 +24,11 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
             <div class="w-16 h-16 rounded-lg border border-base-300 bg-cover bg-center"
                  [style.background-image]="'url(' + image.dataUrl + ')'"
                  [attr.aria-label]="image.name" role="img"></div>
-            <button ptahIconButton variant="danger" size="xs" [label]="'Remove ' + image.name" class="absolute -top-1.5 -right-1.5 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+            <span class="absolute -top-1.5 -right-1.5"><button ptahIconButton variant="danger" size="xs" [label]="'Remove ' + image.name" class="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                     type="button"
                     (click)="attachments.remove(image.id)">
               <lucide-angular [img]="XIcon" class="w-3 h-3" />
-            </button>
+            </button></span>
             <div class="absolute bottom-0 left-0 right-0 bg-neutral/70 rounded-b-lg px-1 py-0.5">
               <span class="text-[9px] text-neutral-content truncate block">{{ image.name }}</span>
             </div>

@@ -24,6 +24,7 @@ import { LucideAngularModule, Check, Star, Cpu } from 'lucide-angular';
 import { LlmProviderStateService } from '@ptah-extension/core';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 export const COULD_NOT_SAVE_LM_MODEL = 'Could not save the VS Code language model.';
 export const COULD_NOT_SET_DEFAULT_PROVIDER = 'Could not set the default provider.';
@@ -31,7 +32,7 @@ export const COULD_NOT_SET_DEFAULT_PROVIDER = 'Could not set the default provide
 @Component({
   selector: 'ptah-vscode-lm-config',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -70,9 +71,9 @@ export const COULD_NOT_SET_DEFAULT_PROVIDER = 'Could not set the default provide
           @if (provider.provider !== llmState.defaultProvider()) {
             <button
               type="button"
-              class="btn btn-outline btn-xs text-base-content"
+              ptahButton size="xs"
               (click)="onSetDefault()"
-              [ptahBusyDisabled]="saving()"
+              [busy]="saving()"
               aria-label="Set VS Code LM as default provider"
               data-testid="vscode-lm-set-default"
             >

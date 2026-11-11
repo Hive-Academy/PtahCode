@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, signal } from '@angular/core';
 import { CodexSignInService } from '@ptah-extension/core';
 import type { CodexLoginState } from '@ptah-extension/shared';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 const isRunning = (state: CodexLoginState | null): boolean =>
   state?.status === 'starting' || state?.status === 'running' || state?.status === 'awaiting-user';
@@ -10,6 +11,7 @@ const isRunning = (state: CodexLoginState | null): boolean =>
   selector: 'ptah-codex-sign-in-block',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PtahButtonDirective],
   template: `
     @if (phase() !== 'ready' || layout() === 'panel' || copyMessage()) {
     <div class="rounded-xl border p-3 text-sm" [class.border-error]="failure() && connectionRole() === 'chosen'"
@@ -20,12 +22,12 @@ const isRunning = (state: CodexLoginState | null): boolean =>
       @switch (phase()) {
         @case ('ready') {
           @if (layout() === 'panel') {
-            <button type="button" class="btn btn-primary btn-sm" (click)="start()">Sign in with Codex</button>
+            <button type="button" ptahButton variant="primary" (click)="start()">Sign in with Codex</button>
             <p class="mt-2 text-xs text-base-content-muted">Opens your browser. Ptah never sees your password.</p>
             @if (terminalCommand(); as command) {
               <div class="mt-2 flex items-center gap-2 rounded border border-base-300 p-2">
                 <code class="min-w-0 break-all">{{ command }}</code>
-                <button type="button" class="btn btn-outline btn-xs" (click)="copy(command, 'command')">Copy command</button>
+                <button type="button" ptahButton size="xs" (click)="copy(command, 'command')">Copy command</button>
               </div>
               @if (bundledNote()) {
                 <p class="mt-1 text-xs text-base-content-muted">Ptah's bundled copy is used. A plain codex login command needs Codex installed.</p>
@@ -49,8 +51,8 @@ const isRunning = (state: CodexLoginState | null): boolean =>
           <p class="font-semibold">Codex has not shown a sign-in page yet.</p>
           <p class="text-base-content-muted">Ptah cannot tell whether a browser opened. Try again, use a device code instead, or cancel.</p>
           <div class="mt-2 flex flex-wrap gap-2">
-            <button type="button" class="btn btn-outline btn-sm" (click)="restart()">Try again</button>
-            <button type="button" class="btn btn-outline btn-sm" (click)="restartDevice()">Use a device code</button>
+            <button type="button" ptahButton (click)="restart()">Try again</button>
+            <button type="button" ptahButton (click)="restartDevice()">Use a device code</button>
           </div>
         }
         @case ('waiting') {
@@ -65,13 +67,13 @@ const isRunning = (state: CodexLoginState | null): boolean =>
             <div class="mt-2 rounded border border-base-300 p-2">
               <p class="text-xs text-base-content-muted">Enter this code on the page</p>
               <code class="select-text text-2xl font-semibold tracking-[0.12em]" [attr.aria-label]="spelledCode()">{{ userCode }}</code>
-              <button type="button" class="btn btn-outline btn-xs ml-2" (click)="copy(userCode, 'code')">Copy code</button>
+              <button type="button" ptahButton size="xs" class="ml-2" (click)="copy(userCode, 'code')">Copy code</button>
             </div>
           }
           @if (url(); as link) {
             <div class="mt-2 flex flex-wrap gap-2">
-              <a class="btn btn-outline btn-sm" [href]="link" target="_blank" rel="noopener noreferrer">Open sign-in page</a>
-              <button type="button" class="btn btn-outline btn-sm" (click)="copy(link, 'link')">Copy link</button>
+              <a ptahButton [href]="link" target="_blank" rel="noopener noreferrer">Open sign-in page</a>
+              <button type="button" ptahButton (click)="copy(link, 'link')">Copy link</button>
             </div>
           }
         }
@@ -83,7 +85,7 @@ const isRunning = (state: CodexLoginState | null): boolean =>
         @case ('confirmation-failed') {
           <p class="font-semibold">Signed in to Codex.</p>
           <p class="text-base-content-muted">Signed in, but Ptah could not confirm it.</p>
-          <button type="button" class="btn btn-outline btn-sm mt-2" (click)="checkAgain()">Check again</button>
+          <button type="button" ptahButton class="mt-2" (click)="checkAgain()">Check again</button>
         }
         @case ('failed') {
           <p class="font-semibold">Codex sign-in did not finish.</p>
@@ -98,11 +100,11 @@ const isRunning = (state: CodexLoginState | null): boolean =>
         @case ('cancelled') {
           <p class="font-semibold">Sign-in cancelled.</p>
           <p class="text-base-content-muted">You are still not signed in. Nothing was changed.</p>
-          <button type="button" class="btn btn-outline btn-sm mt-2" (click)="start()">Sign in again</button>
+          <button type="button" ptahButton class="mt-2" (click)="start()">Sign in again</button>
         }
       }
       @if (running() && layout() === 'panel') {
-        <button type="button" class="btn btn-ghost btn-sm mt-2" (click)="cancel()">Cancel sign-in</button>
+        <button type="button" ptahButton variant="ghost" class="mt-2" (click)="cancel()">Cancel sign-in</button>
       }
       @if (running() && layout() === 'panel') {
         <p class="mt-2 text-xs text-base-content-muted">Ptah stops waiting after 10 minutes.</p>

@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
 import { Copy, LucideAngularModule } from 'lucide-angular';
 import type { KimiCodeLoginErrorCode, KimiCodeLoginState } from '@ptah-extension/shared';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /**
  * Fixed copy per failure. The host's `error` text is never shown, even when present: this view
@@ -36,7 +37,7 @@ interface ProgressView {
   selector: 'ptah-kimi-code-login-progress',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective],
   template: `
     @if (view(); as current) {
       <div class="space-y-2" data-testid="kimi-login-progress">
@@ -50,7 +51,7 @@ interface ProgressView {
             <div class="flex items-center justify-between gap-2 rounded border border-base-300 bg-base-100 px-2 py-1">
               <a [href]="link" target="_blank" rel="noopener noreferrer" [attr.aria-labelledby]="uid + '-url'"
                 class="link link-hover min-w-0 break-all font-mono text-xs text-base-content" data-testid="kimi-login-url">{{ link }}</a>
-              <button type="button" class="btn btn-ghost btn-xs shrink-0 gap-1" (click)="copy(link, 'link')"
+              <button type="button" ptahButton variant="ghost" size="xs" class="shrink-0" (click)="copy(link, 'link')"
                 aria-label="Copy sign-in link" data-testid="kimi-login-copy-url">
                 <lucide-angular [img]="CopyIcon" class="h-3 w-3" aria-hidden="true" /> Copy
               </button>
@@ -63,7 +64,7 @@ interface ProgressView {
             <div class="flex items-center justify-between gap-2 rounded border border-base-300 bg-base-100 px-2 py-1">
               <code class="font-mono text-sm font-semibold tracking-wider text-base-content"
                 data-testid="kimi-login-code">{{ userCode }}</code>
-              <button type="button" class="btn btn-ghost btn-xs shrink-0 gap-1" (click)="copy(userCode, 'code')"
+              <button type="button" ptahButton variant="ghost" size="xs" class="shrink-0" (click)="copy(userCode, 'code')"
                 aria-label="Copy sign-in code" data-testid="kimi-login-copy-code">
                 <lucide-angular [img]="CopyIcon" class="h-3 w-3" aria-hidden="true" /> Copy
               </button>

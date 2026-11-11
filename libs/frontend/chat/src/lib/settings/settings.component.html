@@ -27,10 +27,8 @@
         <div class="flex items-center gap-2.5">
           <button
             type="button"
-            class="btn btn-sm btn-ghost btn-square text-base-content-muted hover:text-base-content"
+            ptahIconButton label="Back to Chat" class="text-base-content-muted hover:text-base-content"
             (click)="backToChat()"
-            aria-label="Back to Chat"
-            title="Back to Chat"
             data-testid="settings-back"
           >
             <lucide-angular
@@ -198,7 +196,7 @@
           </p>
           <button
             type="button"
-            class="btn btn-sm btn-primary gap-1.5"
+            ptahButton variant="primary"
             data-testid="providers-settings-reload"
             (click)="reloadWindow()"
           >
@@ -252,7 +250,7 @@
         <div class="flex flex-wrap gap-2">
           <button
             type="button"
-            class="btn btn-sm btn-outline"
+            ptahButton
             data-testid="settings-run-onboarding-again"
             (click)="runOnboardingAgain()"
           >
@@ -261,7 +259,7 @@
           @if (isElectron) {
             <button
               type="button"
-              class="btn btn-sm btn-outline"
+              ptahButton
               data-testid="settings-check-claude-code"
               (click)="checkClaudeCode()"
             >

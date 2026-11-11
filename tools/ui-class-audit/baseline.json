@@ -629,10 +629,9 @@
   },
   "libs/frontend/chat/src/lib/settings/advanced-settings.component.ts": {
     "<dynamic>": 1,
-    "btn": 4,
-    "btn-ghost": 1,
-    "btn-outline": 3,
-    "btn-sm": 4
+    "btn": 1,
+    "btn-outline": 1,
+    "btn-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/advanced/advanced-settings-group.component.ts": {
     "<dynamic>": 5,
@@ -651,38 +650,25 @@
     "btn-sm": 4
   },
   "libs/frontend/chat/src/lib/settings/feedback/settings-toast.component.ts": {
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-sm": 2,
-    "btn-square": 1,
+    "btn": 1,
+    "btn-sm": 1,
     "btn-warning": 1
   },
   "libs/frontend/chat/src/lib/settings/license/license-status-card.component.ts": {
     "badge": 4,
     "badge-outline": 4,
     "badge-sm": 4,
-    "btn": 11,
-    "btn-ghost": 6,
-    "btn-outline": 2,
-    "btn-primary": 3,
-    "btn-sm": 11,
-    "btn-square": 1,
+    "btn": 1,
+    "btn-outline": 1,
+    "btn-sm": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
   },
-  "libs/frontend/chat/src/lib/settings/output-style/output-style-config.component.ts": {
-    "btn": 1,
-    "btn-primary": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/chat/src/lib/settings/output-style/output-style-editor.component.ts": {
-    "btn": 12,
-    "btn-ghost": 6,
-    "btn-outline": 5,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-xs": 10,
+    "btn": 4,
+    "btn-outline": 4,
+    "btn-xs": 4,
     "input": 2,
     "input-bordered": 2,
     "input-error": 2,
@@ -696,23 +682,21 @@
     "badge": 4,
     "badge-outline": 4,
     "badge-xs": 4,
-    "btn": 5,
-    "btn-ghost": 4,
-    "btn-outline": 1,
-    "btn-square": 2,
-    "btn-xs": 5
-  },
-  "libs/frontend/chat/src/lib/settings/output-style/output-style-notices.component.ts": {
-    "btn": 5,
-    "btn-ghost": 4,
-    "btn-outline": 1,
-    "btn-xs": 5
-  },
-  "libs/frontend/chat/src/lib/settings/output-style/output-style-parity-section.component.ts": {
     "btn": 3,
     "btn-ghost": 2,
     "btn-outline": 1,
-    "btn-xs": 3,
+    "btn-square": 2,
+    "btn-xs": 3
+  },
+  "libs/frontend/chat/src/lib/settings/output-style/output-style-notices.component.ts": {
+    "btn": 1,
+    "btn-outline": 1,
+    "btn-xs": 1
+  },
+  "libs/frontend/chat/src/lib/settings/output-style/output-style-parity-section.component.ts": {
+    "btn": 1,
+    "btn-outline": 1,
+    "btn-xs": 1,
     "select": 1,
     "select-bordered": 1,
     "select-xs": 1
@@ -721,21 +705,16 @@
     "badge": 1,
     "badge-outline": 1,
     "badge-sm": 1,
-    "btn": 4,
-    "btn-ghost": 3,
+    "btn": 1,
     "btn-outline": 1,
     "btn-primary": 1,
-    "btn-square": 1,
-    "btn-xs": 4
+    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/pro-features/claude-builtins-config.component.ts": {
     "badge": 4,
     "badge-outline": 4,
     "badge-warning": 1,
     "badge-xs": 4,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1,
     "card": 1,
     "skeleton": 3
   },
@@ -743,11 +722,9 @@
     "badge": 1,
     "badge-outline": 1,
     "badge-xs": 1,
-    "btn": 4,
-    "btn-ghost": 2,
+    "btn": 1,
     "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-xs": 4,
+    "btn-xs": 1,
     "input": 1,
     "input-bordered": 1,
     "input-xs": 1,
@@ -756,19 +733,14 @@
     "select-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/pro-features/system-prompt-drawer.component.ts": {
-    "btn": 8,
-    "btn-ghost": 6,
-    "btn-outline": 2,
-    "btn-sm": 1,
-    "btn-xs": 7
+    "btn": 1,
+    "btn-outline": 1,
+    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/pro-features/vscode-lm-config.component.ts": {
     "badge": 3,
     "badge-outline": 3,
     "badge-xs": 3,
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-xs": 1,
     "select": 1,
     "select-bordered": 1,
     "select-xs": 1
@@ -850,66 +822,43 @@
     "input-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/connection-detail-drawer.component.ts": {
-    "<dynamic>": 1,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 2
+    "<dynamic>": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/connection-drawer/advanced-tab.component.ts": {
     "<dynamic>": 1,
-    "btn": 7,
-    "btn-ghost": 1,
-    "btn-outline": 5,
-    "btn-primary": 1,
-    "btn-sm": 7,
+    "btn": 2,
+    "btn-outline": 2,
+    "btn-sm": 2,
     "input": 6,
     "input-bordered": 6,
     "input-sm": 6,
     "skeleton": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/connection-drawer/codex-sign-in-block.component.ts": {
-    "btn": 14,
-    "btn-ghost": 1,
-    "btn-outline": 10,
-    "btn-primary": 3,
-    "btn-sm": 12,
-    "btn-xs": 2
+    "btn": 4,
+    "btn-outline": 2,
+    "btn-primary": 2,
+    "btn-sm": 4
   },
   "libs/frontend/chat/src/lib/settings/providers/connection-drawer/credentials-tab.component.ts": {
     "<dynamic>": 2,
-    "btn": 22,
-    "btn-ghost": 7,
-    "btn-link": 2,
-    "btn-outline": 12,
-    "btn-primary": 1,
-    "btn-sm": 17,
-    "btn-xs": 5,
+    "btn": 4,
+    "btn-outline": 4,
+    "btn-sm": 4,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/connection-drawer/kimi-code-login-progress.component.ts": {
-    "<dynamic>": 1,
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
+    "<dynamic>": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/connection-drawer/models-tiers-tab.component.ts": {
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-outline": 1,
-    "btn-xs": 2,
     "skeleton": 3
   },
   "libs/frontend/chat/src/lib/settings/providers/connection-drawer/overview-tab.component.ts": {
     "<dynamic>": 1,
     "badge": 1,
     "badge-sm": 1,
-    "btn": 2,
-    "btn-outline": 2,
-    "btn-sm": 1,
-    "btn-xs": 1,
     "skeleton": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/decision-model-key-field.component.ts": {
@@ -988,12 +937,6 @@
     "input-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/provider-setup-wizard.component.ts": {
-    "btn": 28,
-    "btn-ghost": 11,
-    "btn-link": 2,
-    "btn-outline": 10,
-    "btn-primary": 4,
-    "btn-sm": 27,
     "input": 9,
     "input-bordered": 9,
     "input-sm": 9
@@ -1002,11 +945,10 @@
     "<dynamic>": 11,
     "badge": 1,
     "badge-sm": 1,
-    "btn": 4,
+    "btn": 2,
     "btn-ghost": 1,
-    "btn-outline": 1,
-    "btn-primary": 2,
-    "btn-sm": 4,
+    "btn-primary": 1,
+    "btn-sm": 2,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
@@ -1251,19 +1193,6 @@
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
-  },
-  "libs/frontend/chat/src/lib/settings/settings.component.html": {
-    "btn": 4,
-    "btn-ghost": 1,
-    "btn-outline": 2,
-    "btn-primary": 1,
-    "btn-sm": 4,
-    "btn-square": 1
-  },
-  "libs/frontend/chat/src/lib/update-dialog/update-dialog.component.ts": {
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-primary": 1
   },
   "libs/frontend/command-center/src/lib/components/command-center-header.component.ts": {
     "badge": 3,
