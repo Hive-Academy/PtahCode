@@ -59,7 +59,8 @@ export const TriageOutputSchema = z.object({
   risks: list(RiskSchema, 8),
   apiChanges: list(ApiChangeSchema, 10),
   tests: z.object({ summary: text(240), gaps: list(text(160), 5) }),
-  diagram: DiagramSchema.optional().catch(undefined),
+  /** A bad diagram is dropped, not fatal: the diagram is optional. */
+  diagram: z.unknown().transform((value) => { const parsed = DiagramSchema.safeParse(value); return parsed.success ? parsed.data : undefined; }).optional(),
 });
 export type TriageOutput = z.infer<typeof TriageOutputSchema>;
 export type TriageDiagram = z.infer<typeof DiagramSchema>;
