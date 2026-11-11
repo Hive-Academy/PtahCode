@@ -70,3 +70,31 @@ normal chat (F4). `investigation.md` covers that.
 ## Lane limits (2026-11-11)
 
 - `antigravity` (cli, family antigravity): usage quota reached at about 06:00 UTC during the review fix round (HTTP 429 RESOURCE_EXHAUSTED). Reset at about 07:30 UTC. Fallback: Claude Api ptah-cli lane (family anthropic-api).
+
+## Electron trial on the new flow (2026-11-11)
+
+Setup: Electron dev app, window 1456 x 940 (viewport 1440 x 875), empty folder, Codex with
+`gpt-6.1-terra`, "New project" form.
+
+Results:
+
+- The form opened a normal chat tab ("New Project"). The session showed in the Sessions list.
+- Round 1 (3 questions) and round 2 (5 stack questions) stayed on screen after the Codex turn
+  ended, and the answers reached Codex. The Codex async question fix is confirmed.
+- Defect found: `ptah_harness_propose_config` failed on the Codex session with "no SDK session is
+  resolved", so no banner showed. Cause and fix: `codex-proposal-session-fix-report.md`
+  (commit `2846d0e5e`).
+- After the fix (dev app built again, same session): Codex submitted the proposal, the banner
+  showed "Team Task Tracker, 3 subagents, 5 skills", and "Apply to Workspace" ended with
+  "Applied · 7 files written". Host log: `harness:apply` success, 7 of 7 files, 43.6 s.
+
+Observations, not fixed in this task:
+
+- `harness:apply` took 43.6 s (slow handler warning). The banner showed "Applying…" all that time.
+- After the app restart, the session details panel showed model `gpt-6.1-sol` for the resumed
+  session that started on `gpt-6.1-terra`. Not examined.
+- `ptah-electron:test` fails locally in `review-lane-gateway.spec.ts` (`EPERM` on a symlink). The
+  branch does not change that file. `main` has a later fix (`79f594676`).
+
+Evidence (local, in the temporary trial folder, not in the repository): screenshots `t3-*.png` and
+`t4-*.png`, videos `setup-hub-trial-3-codex-8x.mp4` and `setup-hub-trial-4-codex-banner-apply.mp4`.
