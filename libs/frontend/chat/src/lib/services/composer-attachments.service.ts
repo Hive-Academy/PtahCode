@@ -230,12 +230,14 @@ export class ComposerAttachmentsService implements OnDestroy {
 
   snapshotForSend(): {
     options: Pick<SendMessageOptions, 'files' | 'images'>;
+    attachments: { files: ChatFile[]; images: ComposerImage[] };
     removeSent: () => void;
   } {
     const files = this.files();
     const images = this.images();
     return {
       options: this.toSendOptions(),
+      attachments: { files, images },
       removeSent: () => this.removeSent(files, images),
     };
   }

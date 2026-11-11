@@ -209,12 +209,6 @@
       "@ptah-extension/rpc-handlers": [
         "./libs/backend/rpc-handlers/src/index.ts"
       ],
-      "@ptah-extension/harness-builder": [
-        "./libs/frontend/harness-builder/src/index.ts"
-      ],
-      "@ptah-extension/harness-builder/services": [
-        "./libs/frontend/harness-builder/src/services.ts"
-      ],
       "@ptah-extension/onboarding": ["./libs/frontend/onboarding/src/index.ts"],
       "@ptah-extension/onboarding/services": [
         "./libs/frontend/onboarding/src/services.ts"

@@ -1319,6 +1319,26 @@ describe('Codex chat host ports', () => {
     expect(h.streamEventsToWebview).toHaveBeenCalledWith(id, stream, chatTab);
   });
 
+  it('delivers a standalone notice as chunks without attaching a broadcaster loop', async () => {
+    const h = harness();
+    const event: FlatStreamEventUnion = {
+      id: 'notice-complete',
+      messageId: 'notice',
+      sessionId: id,
+      timestamp: 1,
+      eventType: 'message_complete',
+    };
+
+    await h.ports.publishNotice?.(id, [event]);
+
+    expect(h.broadcastMessage).toHaveBeenCalledWith(MESSAGE_TYPES.CHAT_CHUNK, {
+      tabId: chatTab,
+      sessionId: id,
+      event,
+    });
+    expect(h.streamEventsToWebview).not.toHaveBeenCalled();
+  });
+
   it('defaults the execution-profile consumer to chat', async () => {
     const { profile } = await harness().ports.profile(config());
     expect(profile.consumer).toBe('chat');

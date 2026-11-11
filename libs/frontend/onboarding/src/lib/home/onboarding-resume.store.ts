@@ -3,13 +3,8 @@ import { TabManagerService } from '@ptah-extension/chat-state';
 import {
   VSCodeService,
   onboardingGenerationTarget,
-  onboardingHarnessTarget,
   type OnboardingTarget,
 } from '@ptah-extension/core';
-import {
-  HarnessBuilderRecordsService,
-  canonicalHarnessRoot,
-} from '@ptah-extension/harness-builder';
 import { WizardRpcService } from '@ptah-extension/setup-wizard';
 import type { SetupGenerationWorkflow } from '@ptah-extension/shared';
 
@@ -25,7 +20,6 @@ export interface OnboardingResumeItem {
 export class OnboardingResumeStore {
   private readonly rpc = inject(WizardRpcService);
   private readonly tabs = inject(TabManagerService);
-  private readonly records = inject(HarnessBuilderRecordsService);
   private readonly vscode = inject(VSCodeService);
   private readonly _items = signal<readonly OnboardingResumeItem[]>([]);
   private refreshSequence = 0;
@@ -53,7 +47,7 @@ export class OnboardingResumeStore {
     try {
       latest = await this.rpc.getResumableRun();
     } catch {
-      // Bound tab and harness records can still be resumed.
+      // degradation-audit: optional-capability - bound generation tabs can still be resumed when resumable-run lookup fails
     }
     if (
       latest?.analysis &&
@@ -94,7 +88,7 @@ export class OnboardingResumeStore {
           });
         }
       } catch {
-        // A failed lookup does not hide the independently discovered work.
+        // degradation-audit: optional-capability - a failed bound-run lookup does not hide independently discovered work
       }
     }
     if (
@@ -114,39 +108,6 @@ export class OnboardingResumeStore {
             ...onboardingGenerationTarget('setup-agent-generation', tab.id),
             queryParams: { tab: tab.id, run: latest.generation.runId },
           },
-        });
-      }
-    }
-    const canonicalRoot = canonicalHarnessRoot(root);
-    if (canonicalRoot) {
-      for (const mode of ['new-project', 'configure-harness'] as const) {
-        const workflow =
-          mode === 'new-project' ? 'harness-new-project' : 'harness-configure';
-        const tab = tabs.find((candidate) => candidate.workflow === workflow);
-        const draft = this.records.readDraft(canonicalRoot, mode);
-        const tabId = tab?.id ?? draft?.tabId;
-        if (
-          !tabId ||
-          !tabs.some(
-            (candidate) =>
-              candidate.id === tabId && candidate.workflow === workflow,
-          )
-        )
-          continue;
-        const session = this.records.readSession(canonicalRoot, tabId);
-        if (!session && !draft) continue;
-        found.push({
-          id: `harness:${mode}`,
-          title:
-            mode === 'new-project'
-              ? 'Continue new project'
-              : 'Continue AI team builder',
-          detail: session?.lastRevisionId ? 'Proposal ready to review' : null,
-          target: onboardingHarnessTarget(
-            mode,
-            tabId,
-            session ? 'workspace' : undefined,
-          ),
         });
       }
     }

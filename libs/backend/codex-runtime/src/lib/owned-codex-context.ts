@@ -17,5 +17,8 @@ export function ownCodexContext(
     updateNextTurn: (patch) => context.updateNextTurn(patch),
     compact: () => context.compact(),
     close: () => (closing ??= dispose()),
+    setUserInputAnswerHandler: (handler) =>
+      context.setUserInputAnswerHandler?.(handler),
+    cancelPendingUserInput: () => context.cancelPendingUserInput?.(),
   };
 }

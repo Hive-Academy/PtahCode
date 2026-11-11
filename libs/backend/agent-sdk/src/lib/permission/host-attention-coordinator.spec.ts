@@ -219,6 +219,56 @@ describe('HostAttentionCoordinator', () => {
     expect(coordinator.pendingNotices()).toEqual([]);
   });
 
+  it('does not resurrect a question resolved while metadata lookup returns a valid session record', async () => {
+    const { coordinator, metadata, presented, host } = setup();
+    const validRecord = await metadata.get('session-1');
+    let finish: ((value: Awaited<ReturnType<SessionMetadataStore['get']>>) => void) | undefined;
+    jest.mocked(metadata.get).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    coordinator.observe(MESSAGE_TYPES.ASK_USER_QUESTION_REQUEST, {
+      ...request,
+      id: 'question-1',
+      timestamp: 15,
+    });
+    coordinator.resolve('question:question-1', 15);
+    finish?.(validRecord);
+    await settle();
+    expect(presented).toEqual([]);
+    expect(coordinator.pendingNotices()).toEqual([]);
+    expect(host.resolve).toHaveBeenCalledWith('question:question-1', 15);
+  });
+
+  it('ignores an observed question whose generation was resolved before observe arrived and preserves newer generations on stale drop', async () => {
+    const { coordinator, metadata, presented } = setup();
+    coordinator.resolve('question:question-pre', 20);
+    coordinator.observe(MESSAGE_TYPES.ASK_USER_QUESTION_REQUEST, {
+      ...request,
+      id: 'question-pre',
+      timestamp: 20,
+    });
+    await settle();
+    expect(presented).toEqual([]);
+    expect(coordinator.pendingNotices()).toEqual([]);
+
+    let finishStale: ((value: Awaited<ReturnType<SessionMetadataStore['get']>>) => void) | undefined;
+    jest.mocked(metadata.get).mockImplementationOnce(() => new Promise((resolve) => { finishStale = resolve; }));
+    coordinator.observe(MESSAGE_TYPES.ASK_USER_QUESTION_REQUEST, {
+      ...request,
+      id: 'question-race',
+      timestamp: 30,
+    });
+    coordinator.observe(MESSAGE_TYPES.ASK_USER_QUESTION_REQUEST, {
+      ...request,
+      id: 'question-race',
+      timestamp: 31,
+    });
+    await settle();
+    finishStale?.(null);
+    await settle();
+    expect(coordinator.pendingNotices()).toEqual([
+      expect.objectContaining({ key: 'question:question-race', generation: 31 }),
+    ]);
+  });
+
   it('releases session failures on a new turn', async () => {
     const { coordinator, settings, host, presented } = setup();
     settings.set('notifications.failureHostEnabled', true);

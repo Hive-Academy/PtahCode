@@ -91,6 +91,7 @@ import {
   ChangeSetStore,
   SessionGitStatsStore,
   ChatAgentFeedbackSender,
+  provideHarnessChatProposalStore,
   provideModelRefreshControl,
 } from '@ptah-extension/chat';
 import { WorkspaceIndexingService } from '@ptah-extension/workspace-indexing';
@@ -130,7 +131,6 @@ import { GatewayStateService } from '@ptah-extension/messaging-gateway-ui/servic
 // (`ptah.openDashboard`) so it is deliberately NOT deferred. Dead scaffolding
 // dropped per TASK_2026_187 R6.
 import { ThothStatusService } from '@ptah-extension/dashboard';
-import { HarnessWorkflowMessageHandler } from '@ptah-extension/harness-builder/services';
 // NARROW barrel on purpose. `MARKETPLACE_COMPONENT` below is deferred, so
 // importing `HarnessHealthStore` from the wide barrel would pull the whole
 // marketplace hub back into the eager graph just to register one push handler.
@@ -431,11 +431,7 @@ export const appConfig: ApplicationConfig = {
       useExisting: VecEmbedderRecoveryService,
       multi: true,
     },
-    {
-      provide: MESSAGE_HANDLERS,
-      useExisting: HarnessWorkflowMessageHandler,
-      multi: true,
-    },
+    ...provideHarnessChatProposalStore(),
     {
       provide: MESSAGE_HANDLERS,
       useExisting: SetupWizardStateService,

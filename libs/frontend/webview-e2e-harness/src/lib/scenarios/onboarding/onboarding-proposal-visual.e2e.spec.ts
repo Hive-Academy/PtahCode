@@ -1,6 +1,7 @@
 /**
- * B4b Electron proposal captures. The coordinator runs these after building the webview.
- * Each state is captured in four themes at 1280 and 464 px, except the narrow-only sheet.
+ * Electron onboarding launcher captures and chat-handoff verification.
+ * Each launcher state is captured in four themes at 1280 and 464 px, and
+ * submitting either form transitions out of onboarding into chat.
  */
 import { resolve } from 'node:path';
 import type { Page } from '@playwright/test';
@@ -15,8 +16,6 @@ import {
   type OnboardingTheme,
 } from './onboarding-ready.fixtures';
 import {
-  FIRST_REVISION,
-  SECOND_REVISION,
   TAB,
   bootOnboardingProposal,
   type ProposalScene,
@@ -34,9 +33,7 @@ const SIZES: readonly { viewport: Size; prefix: string }[] = [
 const CAPTURE_DIR = resolve(ONBOARDING_ANALYZE_CAPTURE_DIR, '../proposal');
 const INTAKE_ROUTE = '/onboarding/new-project';
 const TEAM_ROUTE = '/onboarding/team-builder';
-const WORKSPACE_ROUTE = `/onboarding/new-project/workspace?tab=${TAB}`;
-const reviewRoute = (revision: string) =>
-  `/onboarding/new-project/review?tab=${TAB}&rev=${revision}`;
+const LEGACY_WORKSPACE_ROUTE = `/onboarding/new-project/workspace?tab=${TAB}`;
 
 async function shoot(
   page: Page,
@@ -83,6 +80,9 @@ for (const theme of ONBOARDING_CAPTURE_THEMES) {
         await expect(
           page.getByRole('textbox', { name: 'What are you building?' }),
         ).toBeVisible();
+        await expect(
+          page.locator('[aria-label="Progress"]'),
+        ).toHaveCount(0);
         await shoot(page, { view: `${size.prefix}new-project-intake`, theme });
       });
 
@@ -127,10 +127,13 @@ for (const theme of ONBOARDING_CAPTURE_THEMES) {
         await expect(
           page.getByRole('button', { name: 'Start team builder' }),
         ).toBeVisible();
+        await expect(
+          page.locator('[aria-label="Progress"]'),
+        ).toHaveCount(0);
         await shoot(page, { view: `${size.prefix}team-builder-start`, theme });
       });
 
-      test(`${size.prefix}workspace-first-revision`, async ({
+      test(`${size.prefix}new-project-launches-chat`, async ({
         page,
         fixtureServer,
       }) => {
@@ -139,25 +142,23 @@ for (const theme of ONBOARDING_CAPTURE_THEMES) {
           fixtureServer.url,
           theme,
           size.viewport,
-          WORKSPACE_ROUTE,
-          'first',
+          INTAKE_ROUTE,
+          'empty',
         );
-        await expect(page.getByTestId('proposal-panel')).toBeVisible();
+        await page
+          .getByRole('textbox', { name: 'What are you building?' })
+          .fill('Build an internal incident response workspace.');
+        await page
+          .getByRole('button', { name: 'Continue', exact: true })
+          .click();
+
+        await expect(page.getByTestId('onboarding-shell')).toHaveCount(0);
         await expect(
-          page.getByTestId('proposal-panel').getByText('Revision 1', { exact: true }),
+          page.getByText('Build an internal incident response workspace.'),
         ).toBeVisible();
-        await expect(
-          page.getByRole('heading', { name: 'From your intake' }),
-        ).toBeVisible();
-        await expect(page.getByTestId('proposal-panel').getByText('ptah-nx-saas')).toBeVisible();
-        await shoot(page, {
-          view: `${size.prefix}workspace-first-revision`,
-          theme,
-          busyExempt: '[data-testid="details-log-body"]',
-        });
       });
 
-      test(`${size.prefix}workspace-second-revision`, async ({
+      test(`${size.prefix}team-builder-launches-chat`, async ({
         page,
         fixtureServer,
       }) => {
@@ -166,158 +167,36 @@ for (const theme of ONBOARDING_CAPTURE_THEMES) {
           fixtureServer.url,
           theme,
           size.viewport,
-          WORKSPACE_ROUTE,
-          'second',
-        );
-        await expect(page.getByTestId('proposal-panel')).toBeVisible();
-        await expect(
-          page.getByTestId('proposal-panel').getByText('Revision 2', { exact: true }),
-        ).toBeVisible();
-        await expect(page.getByTestId('proposal-panel').getByText('New', { exact: true })).toBeVisible();
-        await expect(page.getByTestId('proposal-panel').getByText('Changed', { exact: true })).toBeVisible();
-        await page.getByText('Revision history', { exact: true }).click();
-        await expect(
-          page.locator('ptah-revision-history li').filter({ hasText: 'Rev 1' }),
-        ).toContainText('Config incomplete');
-        await shoot(page, {
-          view: `${size.prefix}workspace-second-revision`,
-          theme,
-          busyExempt: '[data-testid="details-log-body"]',
-        });
-      });
-
-      test(`${size.prefix}workspace-unavailable`, async ({
-        page,
-        fixtureServer,
-      }) => {
-        await boot(
-          page,
-          fixtureServer.url,
-          theme,
-          size.viewport,
-          WORKSPACE_ROUTE,
-          'unavailable',
-        );
-        await expect(
-          page.getByRole('heading', { name: 'Proposal unavailable' }),
-        ).toBeVisible();
-        await expect(
-          page.getByRole('button', { name: 'Start over' }),
-        ).toBeVisible();
-        await shoot(page, {
-          view: `${size.prefix}workspace-unavailable`,
-          theme,
-          busyExempt: '[data-testid="details-log-body"]',
-        });
-      });
-
-      test(`${size.prefix}review-pinned`, async ({ page, fixtureServer }) => {
-        await boot(
-          page,
-          fixtureServer.url,
-          theme,
-          size.viewport,
-          reviewRoute(FIRST_REVISION),
-          'second',
-        );
-        await expect(page.getByTestId('review-apply')).toBeVisible();
-        await expect(page.getByTestId('newer-revision-banner')).toBeVisible();
-        await expect(page.getByTestId('newer-revision-banner')).toContainText(
-          'Revision 2 is available',
+          TEAM_ROUTE,
+          'empty',
         );
         await page
-          .getByTestId('newer-revision-banner')
-          .scrollIntoViewIfNeeded();
-        await shoot(page, { view: `${size.prefix}review-pinned`, theme });
-      });
+          .getByRole('textbox', { name: 'What should the team do?' })
+          .fill('Create a backend TypeScript review and release team.');
+        await page
+          .getByRole('button', { name: 'Start team builder' })
+          .click();
 
-      test(`${size.prefix}review-current`, async ({ page, fixtureServer }) => {
-        await boot(
-          page,
-          fixtureServer.url,
-          theme,
-          size.viewport,
-          reviewRoute(SECOND_REVISION),
-          'second',
-        );
-        await expect(page.getByTestId('review-apply')).toBeVisible();
+        await expect(page.getByTestId('onboarding-shell')).toHaveCount(0);
         await expect(
-          page.getByRole('button', { name: 'Apply to Workspace' }),
+          page.getByText('Create a backend TypeScript review and release team.'),
         ).toBeVisible();
-        await expect(
-          page.getByRole('button', { name: 'Apply to Workspace' }),
-        ).toBeEnabled();
-        await page
-          .getByRole('button', { name: 'Apply to Workspace' })
-          .scrollIntoViewIfNeeded();
-        await shoot(page, { view: `${size.prefix}review-current`, theme });
-      });
-
-      test(`${size.prefix}apply-result`, async ({ page, fixtureServer }) => {
-        await boot(
-          page,
-          fixtureServer.url,
-          theme,
-          size.viewport,
-          reviewRoute(SECOND_REVISION),
-          'second',
-        );
-        await expect(
-          page.getByRole('button', { name: 'Apply to Workspace' }),
-        ).toBeEnabled();
-        await page.getByRole('button', { name: 'Apply to Workspace' }).click();
-        await expect(
-          page.getByRole('heading', { name: 'Next steps' }),
-        ).toBeVisible();
-        // Re-enter review: the receipt is persisted, and the result opens with full details.
-        await page.getByRole('button', { name: 'Back to proposal' }).click();
-        await expect(page.getByTestId('proposal-panel')).toBeVisible();
-        await page.getByRole('region', { name: 'Proposal ready' })
-          .getByRole('button', { name: 'Review', exact: true }).click();
-        await expect(
-          page.getByRole('heading', { name: 'Applied revision' }),
-        ).toBeVisible();
-        await expect(
-          page.getByRole('list', { name: 'Applied paths' }),
-        ).toContainText('CLAUDE.md');
-        await expect(
-          page.getByRole('heading', { name: 'Warnings' }),
-        ).toBeVisible();
-        await expect(
-          page.getByRole('button', { name: 'Done', exact: true }),
-        ).toBeVisible();
-        await page
-          .getByRole('heading', { name: 'Applied revision' })
-          .scrollIntoViewIfNeeded();
-        await page
-          .getByRole('button', { name: 'Done', exact: true })
-          .scrollIntoViewIfNeeded();
-        await shoot(page, { view: `${size.prefix}apply-result`, theme });
       });
     }
 
-    test('narrow-workspace-answer-sheet', async ({ page, fixtureServer }) => {
+    test('legacy-workspace-route-redirects-home', async ({
+      page,
+      fixtureServer,
+    }) => {
       await boot(
         page,
         fixtureServer.url,
         theme,
-        NARROW,
-        WORKSPACE_ROUTE,
-        'second',
+        WIDE,
+        LEGACY_WORKSPACE_ROUTE,
+        'empty',
       );
-      await expect(page.getByTestId('proposal-panel')).toBeVisible();
-      await page.locator('button[aria-controls="answer-dock-sheet"]').click();
-      const sheet = page.getByRole('dialog', { name: 'Reply to the agent' });
-      await expect(sheet).toBeVisible();
-      await expect(sheet).toHaveAttribute('aria-modal', 'true');
-      await expect(
-        sheet.getByRole('textbox', { name: 'Reply to the agent' }),
-      ).toBeFocused();
-      await shoot(page, {
-        view: 'narrow-workspace-answer-sheet',
-        theme,
-        busyExempt: '[data-testid="details-log-body"]',
-      });
+      await expect(page.getByTestId('onboarding-home')).toBeVisible();
     });
   });
 }

@@ -26,7 +26,6 @@
     "@ptah-extension/declarative-dashboard": 12.279,
     "@ptah-extension/gateway-chat-bridge": 79.14,
     "@ptah-extension/git-ui": 41.087,
-    "@ptah-extension/harness-builder": 51.295,
     "@ptah-extension/harness-sync": 32.359,
     "@ptah-extension/lane-outcomes": 95.712,
     "@ptah-extension/lane-routing": 9.064,

@@ -1775,6 +1775,20 @@ export class ChatInputComponent implements OnInit, OnDestroy {
       });
     });
     effect(() => {
+      const tabId = this._sessionContext?.() ?? this.tabManager.activeTabId();
+      if (!tabId || this.composerRestore.pendingAttachmentsFor(tabId) === null) return;
+      untracked(() => {
+        if (tabId !== this.draftTabId) return;
+        const restored = this.composerRestore.mergeAttachments(
+          tabId,
+          this.attachments.files(),
+          this.attachments.images(),
+        );
+        if (!restored) return;
+        this.attachments.restore(restored.files, restored.images);
+      });
+    });
+    effect(() => {
       const currentTabId = this.tabManager.activeTabId();
       if (currentTabId !== this._lastSessionId) {
         if (this._lastSessionId !== null && currentTabId !== null) {

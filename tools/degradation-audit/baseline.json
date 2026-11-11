@@ -36,7 +36,6 @@
   "libs/frontend/chat-streaming": 2,
   "libs/frontend/chat-ui": 14,
   "libs/frontend/cron-scheduler-ui": 6,
-  "libs/frontend/harness-builder": 3,
   "libs/frontend/marketplace": 28,
   "libs/frontend/memory-curator-ui": 15,
   "libs/frontend/setup-wizard": 1,

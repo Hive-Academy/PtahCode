@@ -12,22 +12,17 @@ import {
   AttachmentTrayComponent,
   ComposerAttachmentsService,
 } from '@ptah-extension/chat';
-import { HarnessBuilderLeaveDialogComponent } from '@ptah-extension/harness-builder';
-import { onboardingStepLink } from '../shell/onboarding-step-link';
-import { WorkspaceHeaderComponent } from '../shell/workspace-header.component';
 import {
-  OnboardingStepperComponent,
-  type OnboardingStep,
-} from '../shared/onboarding-stepper.component';
-import { ProposalFlowStore } from './proposal-flow.store';
+  HarnessChatLaunchCancelledError,
+  HarnessChatLauncherService,
+} from '../launcher/harness-chat-launcher.service';
+import { WorkspaceHeaderComponent } from '../shell/workspace-header.component';
 import { PtahButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-team-builder-start-page',
   standalone: true,
   imports: [
-    HarnessBuilderLeaveDialogComponent,
-    OnboardingStepperComponent,
     FormsModule,
     AttachmentTrayComponent,
     WorkspaceHeaderComponent,
@@ -62,12 +57,12 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
             AI team builder
           </h1>
           <p class="text-sm text-base-content-muted">
-            Describe the team you want. The agent proposes it.
+            For a team that Ptah runs for you, not a product you ship. Describe
+            the work and the agent proposes its agents, skills and tools.
           </p>
         </div>
       </header>
       <ptah-workspace-header [canSwitch]="true" />
-      <ptah-onboarding-stepper [steps]="steps" />
       <form
         class="space-y-4 rounded-[22px] border border-base-300 p-4"
         data-glass-surface="content"
@@ -77,7 +72,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
         <p class="text-xs text-base-content-muted">
           Workspace
           <span class="font-mono">{{
-            store.workspaceRoot() || 'Open a workspace'
+            launcher.workspaceRoot() || 'Open a workspace'
           }}</span>
         </p>
         <div>
@@ -87,6 +82,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
             id="team-intent"
             name="intent"
             class="textarea textarea-bordered mt-2 min-h-[140px] w-full"
+            placeholder="Example: a social media team that plans a weekly content calendar, drafts posts for each channel and reviews them before I publish."
             [ngModel]="intent()"
             (ngModelChange)="intent.set($event)"
             (blur)="touched.set(true)"
@@ -124,25 +120,13 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
             The session uses your current provider and model.
           </p>
         </details>
-        @if (store.actionError(); as error) {
+        @if (actionError(); as error) {
           <p role="alert" class="text-sm text-state-err">{{ error }}</p>
         }
         <div class="flex flex-wrap items-center justify-between gap-2">
-          <div class="flex flex-wrap gap-2">
-            @if (draftTab()) {
-              <button
-                ptahButton
-                variant="ghost"
-                type="button"
-                (click)="continueDraft()"
-              >
-                Load saved draft
-              </button>
-            }
-            <button ptahButton variant="ghost" type="button" (click)="back()">
-              Back
-            </button>
-          </div>
+          <button ptahButton variant="ghost" type="button" (click)="back()">
+            Back
+          </button>
           <button
             ptahButton
             variant="primary"
@@ -159,45 +143,29 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
           </button>
         </div>
       </form>
-      @if (store.leaveOpen()) {
-        <ptah-harness-builder-leave-dialog
-          [context]="store.conflictMode() ? 'switch' : 'start-over'"
-          [mode]="store.conflictMode() ?? store.mode"
-          [saving]="store.leaveSaving()"
-          [saveFailed]="store.leaveFailed()"
-          [stopUncertain]="store.stopUncertain()"
-          (choice)="resolve($event)"
-          (stopChoice)="stopChoice($event)"
-        />
-      }
     </section>
   `,
 })
 export class TeamBuilderStartPage {
   protected readonly icons = { users: Users, next: ArrowRight };
   readonly attachments = inject(ComposerAttachmentsService);
-  protected readonly store = inject(ProposalFlowStore);
-  protected readonly steps: readonly OnboardingStep[] = [
-    { id: 'brief', label: 'Brief', state: 'current' },
-    { id: 'proposal', label: 'Proposal', state: 'upcoming' },
-    { id: 'review', label: 'Review', state: 'upcoming' },
-  ];
+  protected readonly launcher = inject(HarnessChatLauncherService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
-  private pendingAttachments: ReturnType<
-    ComposerAttachmentsService['snapshotForSend']
-  > | null = null;
+  /** Cancels a pending launch when the user leaves this page. */
+  private launch: AbortController | null = null;
   readonly intent = signal('');
   readonly touched = signal(false);
   readonly submitted = signal(false);
   readonly starting = signal(false);
-  readonly draftTab = () =>
-    this.store.records.readDraft(
-      this.store.workspaceRoot(),
-      'configure-harness',
-    )?.tabId ?? null;
+  readonly actionError = signal<string | null>(null);
   readonly invalid = () =>
     (this.submitted() || this.touched()) && !this.intent().trim();
+
+  constructor() {
+    this.destroyRef.onDestroy(() => this.launch?.abort());
+  }
+
   async submit(event: Event): Promise<void> {
     event.preventDefault();
     this.submitted.set(true);
@@ -205,63 +173,39 @@ export class TeamBuilderStartPage {
       this.invalid() ||
       this.starting() ||
       this.attachments.pendingReads() > 0
-    )
+    ) {
       return;
+    }
+    this.actionError.set(null);
     this.starting.set(true);
     const snapshot = this.attachments.snapshotForSend();
-    this.pendingAttachments = snapshot;
+    const launch = new AbortController();
+    this.launch = launch;
     try {
-      const tab = await this.store.start({
-        mode: 'configure-harness',
-        workspaceRoot: this.store.workspaceRoot(),
-        intent: this.intent().trim(),
-        attachments: snapshot.options,
+      await this.launcher.launchTeamBuilder(this.intent().trim(), snapshot, {
+        signal: launch.signal,
       });
-      if (tab && this.store.lastStartCreated()) {
-        snapshot.removeSent();
-        this.pendingAttachments = null;
+    } catch (cause: unknown) {
+      // degradation-audit: reported - a cancelled launch is the user's own Back or
+      // page exit, so there is no failure to show. Every other error is shown below.
+      if (cause instanceof HarnessChatLaunchCancelledError) return;
+      const message =
+        cause instanceof Error && cause.message
+          ? cause.message
+          : 'Could not start the team builder. Try again.';
+      if (!this.destroyRef.destroyed) {
+        this.actionError.set(message);
       }
-      if (!this.destroyRef.destroyed && tab)
-        await this.open(tab, this.store.lastStartCreated());
     } finally {
-      if (!this.destroyRef.destroyed) this.starting.set(false);
+      if (this.launch === launch) this.launch = null;
+      if (!this.destroyRef.destroyed) {
+        this.starting.set(false);
+      }
     }
   }
-  async open(tab: string, freshlyStarted = false): Promise<void> {
-    const link = onboardingStepLink('team-builder', 'team-builder-workspace', {
-      tab,
-    });
-    let navigated = false;
-    try {
-      navigated = await this.router.navigate([...link.commands], {
-        queryParams: link.queryParams,
-      });
-    } catch {
-      if (!this.destroyRef.destroyed)
-        this.store.actionError.set('Could not open the proposal. Try again.');
-    } finally {
-      if (!navigated && freshlyStarted)
-        await this.store.discardCancelledStart();
-    }
-  }
-  async continueDraft(): Promise<void> {
-    const tab = this.draftTab();
-    if (tab) await this.open(tab);
-  }
-  async resolve(choice: 'save' | 'discard' | 'cancel'): Promise<void> {
-    const tab = await this.store.resolveConflict(choice);
-    if (tab && this.store.lastStartCreated()) {
-      this.pendingAttachments?.removeSent();
-      this.pendingAttachments = null;
-    }
-    if (!this.destroyRef.destroyed && tab)
-      await this.open(tab, this.store.lastStartCreated());
-  }
-  async stopChoice(choice: 'retry-stop' | 'keep-current'): Promise<void> {
-    if (choice === 'keep-current') await this.store.resolveConflict('cancel');
-    else await this.resolve(this.store.lastStopChoice());
-  }
+
   async back(): Promise<void> {
+    this.launch?.abort();
     await this.router.navigate(['/onboarding']);
   }
 }

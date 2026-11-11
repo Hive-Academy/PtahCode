@@ -177,6 +177,15 @@ const SDK_SESSION_LIFECYCLE_MANAGER = Symbol.for('SdkSessionLifecycleManager');
 /** Canonical token is SDK_TOKENS.CODEX_CHAT_ADAPTER; kept local to avoid a cycle. */
 const CODEX_CHAT_ADAPTER = Symbol.for('CodexChatAdapter');
 
+/** The part of the native Codex chat adapter this builder reads. */
+interface CodexChatSessionReader {
+  getPermissionLevel(
+    sessionId: string,
+  ): 'ask' | 'auto-edit' | 'yolo' | 'plan' | undefined;
+  /** Live native session id for an MCP caller id (tab id or session id). */
+  resolveLiveSessionId?(callerId: string): string | undefined;
+}
+
 /**
  * Duplicated from AGENT_GENERATION_TOKENS.ENHANCED_PROMPTS_SERVICE to avoid taking
  * a hard dependency from vscode-lm-tools onto agent-generation. Must match the
@@ -569,12 +578,14 @@ export class PtahAPIBuilder {
     @inject(TASK_END_RUN_READER_TOKEN, { isOptional: true })
     private readonly taskEndRunReader?: TaskEndRunReaderLike,
 
+    /**
+     * Native Codex chat adapter, read through a narrow port: the live
+     * permission level of a session, and the live session id of an MCP
+     * caller. Optional (and `null` when the host has no Codex chat), so
+     * hosts without it keep SDK-only behavior.
+     */
     @inject(CODEX_CHAT_ADAPTER, { isOptional: true })
-    private readonly codexChatPermissionReader?: {
-      getPermissionLevel(
-        sessionId: string,
-      ): 'ask' | 'auto-edit' | 'yolo' | 'plan' | undefined;
-    },
+    private readonly codexChatSessions?: CodexChatSessionReader | null,
 
     @inject(TASK_END_DETECTOR_TOKEN, { isOptional: true })
     private readonly taskEndDetector?: {
@@ -769,7 +780,7 @@ export class PtahAPIBuilder {
             parentLanePermission(
               tabIdOrSessionId,
               this.sdkSessionLifecycleManager,
-              this.codexChatPermissionReader,
+              this.codexChatSessions ?? undefined,
             ),
           getProjectGuidance: async () => {
             if (!this.enhancedPromptsService) return undefined;
@@ -1182,12 +1193,15 @@ export class PtahAPIBuilder {
   }
 
   /**
-   * SDK session id of the session that issued the current MCP call. The
-   * request context carries the caller's tab id; only the lifecycle manager's
-   * `realSessionId` is returned, so a tab id never reaches the recorder. A
-   * caller that does not resolve (unknown tab, SDK id not assigned yet, no
-   * lifecycle manager, a lookup that throws) yields `undefined` and is logged.
-   * Never throws: callers treat an unresolved caller as unattributed.
+   * Session id of the session that issued the current MCP call. The request
+   * context carries the caller's tab id (or its session id). Only a proved
+   * session id is returned, so a tab id never reaches a recorder: the
+   * lifecycle manager's SDK `realSessionId` first, else the id of a live
+   * native Codex chat session that owns the caller (Codex sessions are not
+   * in the SDK lifecycle manager). A caller that does not resolve (unknown
+   * tab, SDK id not assigned yet, no lifecycle manager and no Codex adapter,
+   * a lookup that throws) yields `undefined` and is logged. Never throws:
+   * callers treat an unresolved caller as unattributed.
    */
   private resolveCallerSdkSessionId(): string | undefined {
     const callerId = getCallerSessionId();
@@ -1198,6 +1212,7 @@ export class PtahAPIBuilder {
     try {
       realSessionId =
         this.sdkSessionLifecycleManager?.find(callerId)?.realSessionId ??
+        this.codexChatSessions?.resolveLiveSessionId?.(callerId) ??
         undefined;
     } catch (error: unknown) {
       // degradation-audit: reported - the lookup error is debug-logged below,

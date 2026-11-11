@@ -145,6 +145,8 @@ export interface CodexChatAdapterPorts {
     sessionId: SessionId,
     stream: AsyncIterable<FlatStreamEventUnion>,
   ): Promise<void>;
+  /** Deliver standalone UI chunks without ending the native turn or session. */
+  publishNotice?(sessionId: SessionId, events: readonly FlatStreamEventUnion[]): Promise<void>;
 }
 
 export interface CodexChatSessionLifecycle {
@@ -185,6 +187,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
   private stats?: Parameters<IAgentAdapter['setResultStatsCallback']>[0];
   private readonly controls: CodexChatSessionControls;
   private readonly peerQueue: CodexChatPeerQueue;
+  private readonly answerCancellation = new WeakMap<Session, AbortController>();
   private readonly followUpListeners = new Set<(change: QueuedFollowUpStateChange) => void>();
   private missingUsageStoreReported = false;
   private readonly usagePersistenceDisabled =
@@ -195,6 +198,26 @@ export class CodexChatAdapter implements NativeChatAdapter {
     return SessionId.validate(sessionId)
       ? this.sessions.get(sessionId)?.context.turnPermissionLevel
       : undefined;
+  }
+
+  /**
+   * Live native session id for a Ptah MCP caller id. The Codex MCP URL
+   * carries the chat tab id when one exists, else the session id
+   * (`ptahMcpSessionUrl`). Returns an id only for a session this adapter
+   * holds now; an unknown, closed, or ambiguous caller yields `undefined`.
+   */
+  resolveLiveSessionId(callerId: string): SessionId | undefined {
+    if (callerId.trim() === '') return undefined;
+    if (SessionId.validate(callerId) && this.sessions.has(callerId)) {
+      return callerId;
+    }
+    let match: SessionId | undefined;
+    for (const session of this.sessions.values()) {
+      if (session.tabId !== callerId) continue;
+      if (match !== undefined) return undefined;
+      match = session.id;
+    }
+    return match;
   }
 
   constructor(
@@ -428,7 +451,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
       if (this.sessions.has(id))
         throw new CodexChatAdapterError('busy', 'open');
       if (!lease) throw new CodexChatAdapterError('unavailable', 'open');
-      session = this.publishSession(
+      const published = this.publishSession(
         id,
         context,
         sink,
@@ -438,6 +461,11 @@ export class CodexChatAdapter implements NativeChatAdapter {
         prepared.billingMode ?? 'unknown',
         savedUsage?.messageCount ?? 0,
         lease,
+        config.tabId,
+      );
+      session = published;
+      context.setUserInputAnswerHandler?.((answer) =>
+        this.deliverUserInputAnswerWithNotice(published, answer.text),
       );
       this.resolved?.(config.tabId, id);
       return this.turn(
@@ -544,8 +572,10 @@ export class CodexChatAdapter implements NativeChatAdapter {
     billingMode: 'subscription' | 'api-key' | 'unknown',
     messageCount: number,
     lease: CodexChatDriverLease,
+    tabId: string | undefined,
   ): TrackedSession {
     const session: TrackedSession = {
+      ...(tabId === undefined || tabId.trim() === '' ? {} : { tabId }),
       settings: {
         model: profile.model,
         effort: profile.effort,
@@ -574,6 +604,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
     context?: CodexContext,
     scope?: CodexChatScope,
   ): Promise<void> {
+    context?.setUserInputAnswerHandler?.(undefined);
     try {
       await context?.close();
     } catch (error) {
@@ -659,6 +690,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
     clientMessageId?: string,
     admission?: CodexChatAdmission,
     inboundPeer?: { readonly label: string },
+    answerCancellation?: AbortSignal,
   ): Promise<void> {
     const iterator = this.turn(
       session,
@@ -666,6 +698,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
       clientMessageId,
       admission,
       inboundPeer,
+      answerCancellation,
     )[Symbol.asyncIterator]();
     try {
       await this.safe('publish', () =>
@@ -679,6 +712,135 @@ export class CodexChatAdapter implements NativeChatAdapter {
     } finally {
       await iterator.return?.();
     }
+  }
+
+  /** Delivers an async answer. On failure the user gets a visible notice through the session stream. */
+  private async deliverUserInputAnswerWithNotice(
+    session: TrackedSession,
+    text: string,
+  ): Promise<void> {
+    try {
+      await this.deliverUserInputAnswer(session, text);
+    } catch (error: unknown) {
+      await this.publishAnswerFailureNotice(session);
+      throw error;
+    }
+  }
+
+  private async publishAnswerFailureNotice(
+    session: TrackedSession,
+  ): Promise<void> {
+    if (session.consumer === 'gateway' || this.sessions.get(session.id) !== session) {
+      return;
+    }
+    const messageId = `codex-answer-failed:${session.id}:${randomUUID()}`;
+    const base = {
+      timestamp: Date.now(),
+      sessionId: session.id,
+      source: 'complete' as const,
+      messageId,
+    };
+    const events: FlatStreamEventUnion[] = [
+      { ...base, id: `${messageId}:start`, eventType: 'message_start', role: 'assistant' },
+      {
+        ...base,
+        id: `${messageId}:text`,
+        eventType: 'text_delta',
+        delta:
+          'Your answer could not be delivered to Codex. Send it again as a message.',
+        blockIndex: 0,
+      },
+      // No turn follows this notice, so the message must be closed here.
+      { ...base, id: `${messageId}:complete`, eventType: 'message_complete' },
+    ];
+    try {
+      if (!this.ports.publishNotice) {
+        this.ports.logger.warn('Codex answer failure notice host port unavailable.', {
+          code: 'codex-answer-notice-unavailable',
+        });
+        return;
+      }
+      await this.ports.publishNotice(session.id, events);
+    } catch (publishError: unknown) {
+      // degradation-audit: reported - the notice is best effort; the delivery failure is logged by the caller.
+      this.warnNoticeFailed(publishError);
+    }
+  }
+
+  private warnNoticeFailed(error: unknown): void {
+    this.ports.logger.warn('Codex answer failure notice could not be published.', {
+      code: 'codex-answer-notice-failed',
+      error: error instanceof Error ? error.message : 'unknown',
+    });
+  }
+
+  /** Stop aborts this signal so an answer still waiting in the peer queue is discarded. */
+  private answerSignal(session: Session): AbortSignal {
+    let controller = this.answerCancellation.get(session);
+    if (!controller) {
+      controller = new AbortController();
+      this.answerCancellation.set(session, controller);
+    }
+    return controller.signal;
+  }
+
+  private cancelQueuedAnswers(id: SessionId): void {
+    const session = this.sessions.get(id);
+    if (!session) return;
+    this.answerCancellation.get(session)?.abort();
+    this.answerCancellation.delete(session);
+  }
+
+  private async deliverUserInputAnswer(
+    session: TrackedSession,
+    text: string,
+  ): Promise<void> {
+    const cancelled = this.answerSignal(session);
+    if (
+      this.sessions.get(session.id) !== session ||
+      session.blocked ||
+      session.closing ||
+      session.abort.signal.aborted
+    ) {
+      throw new CodexChatAdapterError('unavailable', 'followUp');
+    }
+    const activeTurnId = session.turnId;
+    if (session.busy && activeTurnId !== undefined) {
+      try {
+        await session.context.steer({ text }, activeTurnId);
+        return;
+      } catch (error: unknown) {
+        // Only a finished turn moves the answer to a new turn. Other refusals
+        // reach the caller, which shows the failure notice.
+        if (
+          !(error instanceof CodexRequestRejectedError) ||
+          error.code !== 'codexTurnNoLongerActive'
+        ) {
+          throw this.failure(error, 'steer');
+        }
+      }
+    }
+    await this.peerQueue.send(session, () => {
+      if (cancelled.aborted) {
+        // Stop withdrew the answer before delivery; this is the intended outcome.
+        this.ports.logger.warn('Codex answer was discarded because the user stopped the turn.', {
+          code: 'codex-user-input-cancelled',
+        });
+        return Promise.resolve();
+      }
+      return publishUntilAdmitted(
+        (admission) =>
+          this.publish(
+            session,
+            { text, preservePendingUserInput: true },
+            undefined,
+            admission,
+            undefined,
+            cancelled,
+          ),
+        this.ports.logger,
+      );
+    });
   }
 
   async listSessionModels(
@@ -711,6 +873,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
     clientMessageId?: string,
     admission?: CodexChatAdmission,
     inboundPeer?: { readonly label: string },
+    answerCancellation?: AbortSignal,
   ): AsyncIterable<FlatStreamEventUnion> {
     if (session.busy) throw new CodexChatAdapterError('busy', 'turn');
     if (session.blocked || session.closing)
@@ -755,6 +918,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
         failure: (error, operation) => this.failure(error, operation),
         onIdle: (active) => this.peerQueue.onIdle(active),
         admission,
+        answerCancellation,
       },
       clientMessageId,
       inboundPeer,
@@ -982,6 +1146,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
     return this.controls.interruptCurrentTurn(id);
   }
   interruptSession(id: SessionId): Promise<void> {
+    this.cancelQueuedAnswers(id);
     return this.controls.interruptSession(id);
   }
   executeSlashCommand(

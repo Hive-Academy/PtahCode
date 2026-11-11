@@ -188,122 +188,118 @@ describe('StreamRouter — prompt routing across every Setup Hub workflow', () =
   }
 
   /**
-   * What `HarnessWorkflowService.startWorkflow` does: mint a correlation id
-   * that is NOT a tab, claim it against an interactive surface, bind the
-   * surface. Shared verbatim by New Project and AI Team Builder — they differ
-   * only by the `mode` string and the seed prompt.
+   * What `HarnessChatLauncherService` does for New Project and AI Team Builder:
+   * mint a standard chat tab (`TabId`) and bind it in `StreamRouter` with NO
+   * `StreamingSurfaceRegistry` adapter or `WorkflowSessionClaimService` claim.
    */
-  function startHarnessWorkflow(): {
-    correlationId: string;
-    surfaceId: SurfaceId;
-  } {
-    const correlationId = TabId.create() as string;
-    const surfaceId = registerSurface(true);
-    claims.claim(correlationId, surfaceId);
-    router.onSurfaceCreated(surfaceId);
-    return { correlationId, surfaceId };
+  function startHarnessChatTab(): { tabId: TabId } {
+    const tabId = TabId.create();
+    router.onTabCreated(tabId);
+    return { tabId };
   }
 
-  // ── the two interactive workflows ────────────────────────────────────────
+  // ── the two interactive harness chat workflows ───────────────────────────
 
-  describe.each(['New Project', 'AI Team Builder'] as const)(
-    '%s (harness workflow surface)',
+  describe.each([
+    ['New Project', 'harness-new-project'],
+    ['AI Team Builder', 'harness-configure'],
+  ] as const)(
+    '%s (%s standard chat tab)',
     (card) => {
-      it('routes a question raised BEFORE the SDK session id exists', () => {
-        const { correlationId, surfaceId } = startHarnessWorkflow();
+      it('routes a question raised BEFORE the SDK session id exists directly to the chat tab', () => {
+        const { tabId } = startHarnessChatTab();
 
-        // Pre-`init`: the backend has nothing but the correlation id, so it
-        // stamps it on both fields.
-        router.routeQuestionPrompt(
+        // Pre-`init`: the backend stamps the originating tabId on both fields.
+        const resolved = router.routeQuestionPrompt(
           makeQuestion({
             id: `q-${card}-pre`,
-            tabId: correlationId,
-            sessionId: correlationId,
+            tabId: tabId as string,
+            sessionId: tabId as string,
           }),
         );
 
+        expect(resolved).toEqual([tabId]);
         expect(permissionHandler._questionTargets.get(`q-${card}-pre`)).toEqual(
-          [surfaceId],
+          [tabId],
         );
+        expect(router.interactiveSurfaceOwning({ tabId: tabId as string })).toBeNull();
         expect(permissionHandler.handleQuestionResponse).not.toHaveBeenCalled();
       });
 
-      it('routes a question raised AFTER session:id-resolved', () => {
-        const { correlationId, surfaceId } = startHarnessWorkflow();
-        // `ChatMessageHandler.handleSessionIdResolved` re-binds the surface.
-        router.onSurfaceCreated(surfaceId, REAL_SESSION);
+      it('routes a question raised AFTER session:id-resolved to the chat tab', () => {
+        const { tabId } = startHarnessChatTab();
+        // `ChatMessageHandler.handleSessionIdResolved` appends the real session id.
+        router.onTabCreated(tabId, REAL_SESSION);
 
-        router.routeQuestionPrompt(
+        const resolved = router.routeQuestionPrompt(
           makeQuestion({
             id: `q-${card}-post`,
-            tabId: correlationId,
+            tabId: tabId as string,
             sessionId: REAL_SESSION as unknown as string,
           }),
         );
 
+        expect(resolved).toEqual([tabId]);
         expect(
           permissionHandler._questionTargets.get(`q-${card}-post`),
-        ).toEqual([surfaceId]);
+        ).toEqual([tabId]);
       });
 
-      it('routes a permission prompt the same way', () => {
-        const { correlationId, surfaceId } = startHarnessWorkflow();
+      it('routes a permission prompt directly to the chat tab', () => {
+        const { tabId } = startHarnessChatTab();
 
-        router.routePermissionPrompt(
+        const resolved = router.routePermissionPrompt(
           makePermission({
             id: `p-${card}`,
-            tabId: correlationId,
-            sessionId: correlationId,
+            tabId: tabId as string,
+            sessionId: tabId as string,
           }),
         );
 
+        expect(resolved).toEqual([tabId]);
         expect(permissionHandler._promptTargets.get(`p-${card}`)).toEqual([
-          surfaceId,
+          tabId,
         ]);
         expect(
           permissionHandler.handlePermissionResponse,
         ).not.toHaveBeenCalled();
       });
 
-      it('survives the reload path — new correlation id, question still carrying the old one', () => {
-        // `rehydrate()` mints a FRESH correlation id and binds the surface to
-        // the persisted session; the backend's outstanding question still
-        // carries the id from before the reload. The session lookup is what
-        // has to carry it, which is why the real id on the prompt matters.
-        const staleCorrelationId = TabId.create() as string;
-        const surfaceId = registerSurface(true);
-        claims.claim(TabId.create() as string, surfaceId); // fresh id
-        router.onSurfaceCreated(surfaceId, REAL_SESSION);
+      it('survives tab rehydration — reopened tab bound to persisted session receives question carrying stale tabId', () => {
+        const staleTabId = TabId.create() as string;
+        const rehydratedTab = TabId.create();
+        router.onTabCreated(rehydratedTab, REAL_SESSION);
 
-        router.routeQuestionPrompt(
+        const resolved = router.routeQuestionPrompt(
           makeQuestion({
             id: `q-${card}-reload`,
-            tabId: staleCorrelationId,
+            tabId: staleTabId,
             sessionId: REAL_SESSION as unknown as string,
           }),
         );
 
+        expect(resolved).toEqual([rehydratedTab]);
         expect(
           permissionHandler._questionTargets.get(`q-${card}-reload`),
-        ).toEqual([surfaceId]);
+        ).toEqual([rehydratedTab]);
       });
 
-      it('does not leak onto a chat tab bound to a different session', () => {
-        const { correlationId, surfaceId } = startHarnessWorkflow();
+      it('does not leak onto another chat tab bound to a different session', () => {
+        const { tabId } = startHarnessChatTab();
         const strangerTab = TabId.create();
         router.onTabCreated(strangerTab, OTHER_SESSION);
 
         router.routeQuestionPrompt(
           makeQuestion({
             id: `q-${card}-isolation`,
-            tabId: correlationId,
-            sessionId: correlationId,
+            tabId: tabId as string,
+            sessionId: tabId as string,
           }),
         );
 
         expect(
           permissionHandler._questionTargets.get(`q-${card}-isolation`),
-        ).toEqual([surfaceId]);
+        ).toEqual([tabId]);
         expect(
           permissionHandler._questionTargets.get(`q-${card}-isolation`),
         ).not.toContain(strangerTab as string);
@@ -376,17 +372,18 @@ describe('StreamRouter — prompt routing across every Setup Hub workflow', () =
   });
 
   describe('two workflows live at once', () => {
-    it('a harness question and a chat tab question each reach their own owner', () => {
-      const { correlationId, surfaceId } = startHarnessWorkflow();
+    it('a harness chat tab question, another chat tab question, and a background analysis surface stay isolated', () => {
+      const { tabId: harnessTab } = startHarnessChatTab();
       const chatTab = TabId.create();
-      claims.claim(chatTab as string, SurfaceId.create());
       router.onTabCreated(chatTab, OTHER_SESSION);
+      const analysisSurface = registerSurface(false);
+      router.onSurfaceCreated(analysisSurface, REAL_SESSION);
 
       router.routeQuestionPrompt(
         makeQuestion({
           id: 'q-harness',
-          tabId: correlationId,
-          sessionId: correlationId,
+          tabId: harnessTab as string,
+          sessionId: harnessTab as string,
         }),
       );
       router.routeQuestionPrompt(
@@ -396,31 +393,40 @@ describe('StreamRouter — prompt routing across every Setup Hub workflow', () =
           sessionId: OTHER_SESSION as unknown as string,
         }),
       );
+      router.routeQuestionPrompt(
+        makeQuestion({
+          id: 'q-analysis',
+          sessionId: REAL_SESSION as unknown as string,
+        }),
+      );
 
       expect(permissionHandler._questionTargets.get('q-harness')).toEqual([
-        surfaceId,
+        harnessTab,
       ]);
       expect(permissionHandler._questionTargets.get('q-chat-tab')).toEqual([
         chatTab,
       ]);
+      expect(permissionHandler._questionTargets.has('q-analysis')).toBe(false);
+      expect(permissionHandler.handleQuestionResponse).toHaveBeenCalledWith({
+        id: 'q-analysis',
+        answers: {},
+      });
     });
 
-    it('a released claim stops routing to the dead surface', () => {
-      const { correlationId, surfaceId } = startHarnessWorkflow();
-      // `dispose()` releases the claim and closes the surface.
-      claims.release(correlationId);
-      router.onSurfaceClosed(surfaceId);
+    it('closing a harness chat tab unbinds its conversation and stops routing pre-session prompts to it', () => {
+      const { tabId } = startHarnessChatTab();
+      router.onTabClosed(tabId);
 
       router.routeQuestionPrompt(
         makeQuestion({
-          id: 'q-after-dispose',
-          tabId: correlationId,
-          sessionId: correlationId,
+          id: 'q-after-close',
+          tabId: tabId as string,
+          sessionId: tabId as string,
         }),
       );
 
       expect(permissionHandler.attachQuestionTargets).not.toHaveBeenCalled();
-      expect(binding.conversationForSurface(surfaceId)).toBeNull();
+      expect(binding.conversationFor(tabId)).toBeNull();
     });
   });
 });

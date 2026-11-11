@@ -1,0 +1,139 @@
+# Context: setup hub on Codex stops at the first question
+
+## Source
+
+Second setup hub trial on the Electron dev app (2026-11-10), recorded in
+`.ptah/specs/TASK_2026_927_144e/trial-2-findings.md` on branch `fix/skill-delivery-and-routing`
+(PR #1067). Provider: OpenAI Codex, model `gpt-6.1-terra`. Workspace: an empty folder.
+
+## Observed
+
+The flow `/onboarding/new-project` → RPC `harness:start-new-project` started a Codex session. The
+skills were delivered and Codex read `saas-workspace-initializer`. Then the run stopped.
+
+### F4: the Codex question is aborted at turn end
+
+- Codex has no `AskUserQuestion`. It asked the first discovery question through
+  `request_user_input_async`. That tool returns `{"accepted":true}` at once, and the turn ends.
+- Ptah `SdkPermissionHandler` aborts the pending question when the turn ends. Log marker:
+  `codex-user-input-undelivered`, cause `turn-ended`.
+- The banner "Question needs an answer" stays on screen. The bell shows "All clear". Nothing can be
+  clicked. The user cannot answer.
+
+### F2: the Codex session is not reachable
+
+- After "Continue", the home page shows "1 sessions". The Sessions panel shows "No sessions yet".
+- No tab and no chat input exist for the session started by `harness:start-new-project`.
+- `session:list` reads `~/.claude/projects` through `JsonlReader`. A Codex session lives in
+  `~/.codex/sessions/**/rollout-*.jsonl` and is not listed.
+
+## Result of the trial
+
+The workspace holds only the files Ptah wrote (`.agents`, `.claude`, `.ptah`, `.github`,
+`.gitignore`, `.mcp.json`). No discovery answers, no roadmap, no scaffold.
+
+## Goal
+
+A setup hub run on Codex must get past the first question:
+
+1. A question asked with `request_user_input_async` stays answerable after the turn ends, and the
+   answer reaches Codex (as the tool expects for the asynchronous form).
+2. The user can see and open the session that `harness:start-new-project` started, for a Codex
+   session as for a Claude session.
+
+## Acceptance
+
+- Unit tests cover both corrections.
+- A repeat of the recorded trial on Electron gets past the first discovery question.
+
+## Direction change (user decision, 2026-11-11)
+
+The user decided to route two setup hub flows to the normal chat:
+
+- "New project" (`/onboarding/new-project`, mode `new-project`)
+- "AI team builder" (`/onboarding/team-builder`, mode `configure-harness`)
+
+Both flows share `ProposalFlowStore`, `ProposalWorkspacePage` and `ReviewApplyPage` in
+`libs/frontend/onboarding/src/lib/proposal/`. The workspace page is a private copy of a chat (run
+log, reply composer, answer dock, session status). It is the reason the session is not visible and
+the Codex question has no answer path.
+
+Target: each flow keeps its brief form as a thin launcher. On submit, Ptah prepares the workspace
+(plugins, skill allowlist, seed prompt) and opens an ordinary chat tab on that session. The agent
+proposes and applies the harness from the chat. The custom proposal and review pages go away.
+
+Out of scope: the "Analyze workspace" flow (`/onboarding/analyze/**`) stays in the setup hub.
+
+Still needed in any design: the Codex `request_user_input_async` question must be answerable in the
+normal chat (F4). `investigation.md` covers that.
+
+## Lane limits (2026-11-11)
+
+- `antigravity` (cli, family antigravity): usage quota reached at about 06:00 UTC during the review fix round (HTTP 429 RESOURCE_EXHAUSTED). Reset at about 07:30 UTC. Fallback: Claude Api ptah-cli lane (family anthropic-api).
+
+## Electron trial on the new flow (2026-11-11)
+
+Setup: Electron dev app, window 1456 x 940 (viewport 1440 x 875), empty folder, Codex with
+`gpt-6.1-terra`, "New project" form.
+
+Results:
+
+- The form opened a normal chat tab ("New Project"). The session showed in the Sessions list.
+- Round 1 (3 questions) and round 2 (5 stack questions) stayed on screen after the Codex turn
+  ended, and the answers reached Codex. The Codex async question fix is confirmed.
+- Defect found: `ptah_harness_propose_config` failed on the Codex session with "no SDK session is
+  resolved", so no banner showed. Cause and fix: `codex-proposal-session-fix-report.md`
+  (commit `2846d0e5e`).
+- After the fix (dev app built again, same session): Codex submitted the proposal, the banner
+  showed "Team Task Tracker, 3 subagents, 5 skills", and "Apply to Workspace" ended with
+  "Applied · 7 files written". Host log: `harness:apply` success, 7 of 7 files, 43.6 s.
+
+Observations, not fixed in this task:
+
+- `harness:apply` took 43.6 s (slow handler warning). The banner showed "Applying…" all that time.
+- After the app restart, the session details panel showed model `gpt-6.1-sol` for the resumed
+  session that started on `gpt-6.1-terra`. Not examined.
+- `ptah-electron:test` fails locally in `review-lane-gateway.spec.ts` (`EPERM` on a symlink). The
+  branch does not change that file. `main` has a later fix (`79f594676`).
+
+Evidence (local, in the temporary trial folder, not in the repository): screenshots `t3-*.png` and
+`t4-*.png`, videos `setup-hub-trial-3-codex-8x.mp4` and `setup-hub-trial-4-codex-banner-apply.mp4`.
+
+## Electron trial of "AI team builder" (2026-11-11, head `af83146a7`)
+
+Setup: Electron dev app built from `af83146a7`, window 1456 x 940 (viewport 1440 x 875), an
+existing small project (Fastify + SQLite API, 7 files), Codex with `gpt-6.1-terra`.
+
+Results:
+
+- The form opened a normal chat tab ("AI Team Builder", workflow "Configure Harness"). The session
+  showed in the Sessions list with the brief as the first user message.
+- Codex read the workspace, searched skills and the MCP registry, created two workspace skills and
+  submitted the proposal in one turn (1 min 02 s, 13 tools, no questions asked).
+- The banner showed "Fastify SQLite API team, 2 agents, 3 subagents, 4 skills, CLAUDE.md, System
+  prompt". "Apply to Workspace" ended with "Applied · 8 files written". Host log: `harness:apply`
+  success, 7 of 7 targets, 25.3 s (slow handler warning again).
+- Files on disk after Apply: three agents in `.claude/agents/`, `.claude/CLAUDE.md`, two skills
+  under `.ptah/plugins/ptah-harness-*/skills/`, `.mcp.json`, `.agents/mcp_config.json`. The two
+  catalog skills (`fastify-best-practices`, `vitest`) were installed from skills.sh.
+- A second launch from the same form opened a second chat tab and ended with its own banner
+  ("Bookshelf API Documentation Writer, 1 subagent, 2 skills"). It was not applied.
+
+Not covered:
+
+- Cancel on Back during a launch: the launch finished before a scripted click on Back could land
+  (under one second), so this path has unit test evidence only.
+- The canvas adoption failure path and the workspace change path: no way to cause them by hand.
+- Codex asked no question in this flow, so the async question path was not used here (it was used
+  in the "New project" trial).
+
+Observations, not fixed in this task:
+
+- The plan limits card in the stats panel is titled "Claude" while its account line reads "Codex
+  account" and Codex is the main provider. A separate session works on this
+  (branch `fix/codex-limit-state-and-plan-limits-provider`).
+- In the collapsed stats rail the cost note is cut off ("covered by subscriptio").
+
+Evidence (local, in the temporary trial folder): screenshots `t5-*.png`, videos
+`setup-hub-trial-5-codex-team-builder.mp4` (11 min 47 s, real time) and
+`setup-hub-trial-5-codex-team-builder-4x.mp4`.

@@ -26,13 +26,15 @@ describe('OnboardingFocusRouter', () => {
           ? 'setup-agent-generation'
           : id === 'guidance'
             ? 'setup-project-prompt'
-            : id === 'harness'
-              ? 'harness-configure'
-              : null;
+            : id === 'harness-new'
+              ? 'harness-new-project'
+              : id === 'harness-config'
+                ? 'harness-configure'
+                : null;
       return workflow
         ? {
             tab: { id: `tab-${id}`, workflow },
-            workspacePath: id === 'harness' ? '/elsewhere' : '/work',
+            workspacePath: id === 'guidance' ? '/elsewhere' : '/work',
           }
         : null;
     });
@@ -50,7 +52,6 @@ describe('OnboardingFocusRouter', () => {
   it.each([
     ['generation', ['analyze', 'agents']],
     ['guidance', ['guidance']],
-    ['harness', ['team-builder', 'workspace']],
   ] as const)(
     'focuses %s on its owning step with tab identity',
     async (sessionId, path) => {
@@ -67,8 +68,20 @@ describe('OnboardingFocusRouter', () => {
         },
       );
       expect(tabs.switchTab).toHaveBeenCalledWith(`tab-${sessionId}`);
-      if (sessionId === 'harness')
+      if (sessionId === 'guidance')
         expect(workspace.switchWorkspace).toHaveBeenCalledWith('/elsewhere');
+    },
+  );
+
+  it.each(['harness-new', 'harness-config'] as const)(
+    'delegates %s chat tabs to normal chat tab focus instead of onboarding',
+    async (sessionId) => {
+      expect(router.canFocus(sessionId)).toBe(false);
+      await expect(router.focus(sessionId)).resolves.toEqual({
+        success: false,
+        outcome: 'missing',
+      });
+      expect(surface.navigateToSurface).not.toHaveBeenCalled();
     },
   );
 

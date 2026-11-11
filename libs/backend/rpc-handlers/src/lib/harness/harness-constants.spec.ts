@@ -127,13 +127,21 @@ describe('buildNewProjectSeedPrompt', () => {
     expect(prompt).not.toContain('Must-haves / constraints');
   });
 
-  it('mandates AskUserQuestion discovery and forbids self-answering', () => {
+  it('mandates question-tool discovery and forbids self-answering', () => {
     const prompt = buildNewProjectSeedPrompt(BASE_INTAKE);
-    expect(prompt).toContain('AskUserQuestion');
+    expect(prompt).toContain('your question tool');
     expect(prompt).toContain('never answer a discovery question on my behalf');
     expect(prompt).toContain(
       'Skip any question the intake above already answers',
     );
+  });
+
+  it('names no Claude-only tool, so it reads correctly on Codex too', () => {
+    const prompt = buildNewProjectSeedPrompt(BASE_INTAKE);
+    expect(prompt).not.toMatch(
+      /AskUserQuestion|TodoWrite|WebFetch|\bGlob\b|\bGrep\b/,
+    );
+    expect(prompt).not.toMatch(/\bSkill tool\b|`Skill`/);
   });
 
   it('omits the platform line entirely when the intake did not answer it', () => {

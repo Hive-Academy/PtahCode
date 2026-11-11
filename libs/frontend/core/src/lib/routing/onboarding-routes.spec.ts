@@ -50,18 +50,29 @@ describe('onboarding routes', () => {
 
   describe('onboardingHarnessTarget', () => {
     it.each([
-      ['new-project', undefined, ['new-project']],
-      ['new-project', 'workspace', ['new-project', 'workspace']],
-      ['new-project', 'review', ['new-project', 'review']],
-      ['configure-harness', undefined, ['team-builder']],
-      ['configure-harness', 'workspace', ['team-builder', 'workspace']],
-      ['configure-harness', 'review', ['team-builder', 'review']],
-    ] as const)('maps %s / %s to %j', (mode, step, subPath) => {
-      expect(onboardingHarnessTarget(mode, 'tab-9', step)).toEqual({
+      ['new-project', ['new-project']],
+      ['configure-harness', ['team-builder']],
+    ] as const)('maps %s to flat launcher route %j', (mode, subPath) => {
+      expect(onboardingHarnessTarget(mode)).toEqual({
         subPath,
-        queryParams: { tab: 'tab-9' },
+        queryParams: {},
       });
     });
+
+    it.each([
+      ['new-project', 'workspace', ['new-project']],
+      ['new-project', 'review', ['new-project']],
+      ['configure-harness', 'workspace', ['team-builder']],
+      ['configure-harness', 'review', ['team-builder']],
+    ] as const)(
+      'never appends removed child route %s / %s, returning %j',
+      (mode, step, subPath) => {
+        expect(onboardingHarnessTarget(mode, 'tab-9', step)).toEqual({
+          subPath,
+          queryParams: {},
+        });
+      },
+    );
   });
 
   describe('onboardingGenerationBinding', () => {

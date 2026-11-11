@@ -13,10 +13,10 @@ import {
   type SessionStopHandler,
 } from '@ptah-extension/chat';
 import type { LiveModelStats } from '@ptah-extension/chat-ui';
-import { BuilderSessionSectionComponent } from '@ptah-extension/harness-builder';
 import { AnalysisTranscriptComponent } from '@ptah-extension/setup-wizard';
 import type { SessionStatsEntry } from '@ptah-extension/shared';
 import { ChevronDown, CircleDashed, LucideAngularModule, Terminal } from 'lucide-angular';
+import { BuilderSessionSectionComponent } from './builder-session-section.component';
 
 export type DetailsLogMode = 'analysis' | 'tab';
 

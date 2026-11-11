@@ -29,6 +29,7 @@ import { ConfirmationDialogService, ConversationRegistry, TabManagerService, Tab
 import { AgentMonitorStore, ExecutionTreeBuilderService } from '@ptah-extension/chat-streaming';
 import { ChatViewComponent } from './chat-view.component';
 import { ChatStore } from '../../services/chat.store';
+import { HarnessChatProposalStore } from '../../services/harness-chat-proposal.store';
 import { ActionBannerService } from '../../services/action-banner.service';
 import { SessionHistoryReplayer } from '../../services/chat-store/session-history-replayer.service';
 import { HistoryPagingService } from '../../services/chat-store/history-paging.service';
@@ -63,7 +64,7 @@ class TranscriptStubComponent {
 function mount(): {
   fixture: ComponentFixture<ChatViewComponent>;
   activeTabId: ReturnType<typeof signal<string | null>>;
-  activeTab: ReturnType<typeof signal<{ id: string; messages: unknown[]; status: string } | null>>;
+  activeTab: ReturnType<typeof signal<{ id: string; messages: unknown[]; status: string; workflow?: 'harness-configure' | 'setup-project-prompt' } | null>>;
   sessionId: ReturnType<typeof signal<string | null>>;
   viewMode: ReturnType<typeof signal<string>>;
   messages: ReturnType<typeof signal<unknown[]>>;
@@ -73,7 +74,7 @@ function mount(): {
   const viewMode = signal('full');
   const messages = signal<unknown[]>([]);
   const tabs = signal([{ id: 'A' }, { id: 'B' }]);
-  const activeTab = signal<{ id: string; messages: unknown[]; status: string } | null>(null);
+  const activeTab = signal<{ id: string; messages: unknown[]; status: string; workflow?: 'harness-configure' | 'setup-project-prompt' } | null>(null);
   const tabManager = {
     activeTabId: activeTabId.asReadonly(),
     activeTab: activeTab.asReadonly(),
@@ -181,6 +182,20 @@ describe('ChatView session entrance', () => {
     return fixture!.debugElement.queryAll(By.directive(TranscriptStubComponent))
       .map((element) => element.componentInstance as TranscriptStubComponent);
   }
+
+  it('hydrates without a workflow marker and retries after leaving the workflow tab', () => {
+    const h = mount(); fixture = h.fixture;
+    const hydrate = jest.spyOn(TestBed.inject(HarnessChatProposalStore), 'hydrateForSession')
+      .mockResolvedValue(undefined);
+    h.activeTab.set({ id: 'A', messages: [], status: 'idle' });
+    h.sessionId.set('session-A'); fixture.detectChanges();
+    expect(hydrate).toHaveBeenCalledTimes(1);
+    h.activeTab.set({ id: 'B', messages: [], status: 'idle', workflow: 'setup-project-prompt' });
+    fixture.detectChanges();
+    h.activeTab.set({ id: 'A', messages: [], status: 'idle', workflow: 'harness-configure' });
+    fixture.detectChanges();
+    expect(hydrate).toHaveBeenCalledTimes(2);
+  });
 
   it('binds entrance to B only after A to B', () => {
     const h = mount(); fixture = h.fixture;

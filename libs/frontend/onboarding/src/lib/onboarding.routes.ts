@@ -1,4 +1,5 @@
-import type { Routes } from '@angular/router';
+import { inject } from '@angular/core';
+import { Router, type RedirectFunction, type Routes } from '@angular/router';
 import { AnalyzeWorkspacePage } from './analyze/analyze-workspace.page';
 import { ChooseAgentsPage } from './analyze/choose-agents.page';
 import { GenerateAgentsPage } from './analyze/generate-agents.page';
@@ -12,14 +13,16 @@ import {
   ReadySettingsStepPage,
 } from './ready/ready-settings-step.page';
 import { OnboardingShellComponent } from './shell/onboarding-shell.component';
-import {
-  HARNESS_FLOW_MODE,
-  ProposalFlowStore,
-} from './proposal/proposal-flow.store';
 import { NewProjectIntakePage } from './proposal/new-project-intake.page';
 import { TeamBuilderStartPage } from './proposal/team-builder-start.page';
-import { ProposalWorkspacePage } from './proposal/proposal-workspace.page';
-import { ReviewApplyPage } from './proposal/review-apply.page';
+
+/**
+ * Unknown sub-paths (including removed `/workspace` and `/review` proposal
+ * routes) redirect to bare `/onboarding`, dropping any stale query string or
+ * fragment so old bookmarks and restored URLs land on a clean Home URL.
+ */
+const onboardingHomeRedirect: RedirectFunction = () =>
+  inject(Router).createUrlTree(['/onboarding']);
 
 /**
  * The onboarding surface's route tree, loaded by the webview's `onboarding`
@@ -80,31 +83,15 @@ export const ONBOARDING_ROUTES: Routes = [
       },
       {
         path: 'new-project',
+        component: NewProjectIntakePage,
         data: { crumb: 'New project' },
-        providers: [
-          ProposalFlowStore,
-          { provide: HARNESS_FLOW_MODE, useValue: 'new-project' },
-        ],
-        children: [
-          { path: '', pathMatch: 'full', component: NewProjectIntakePage },
-          { path: 'workspace', component: ProposalWorkspacePage },
-          { path: 'review', component: ReviewApplyPage },
-        ],
       },
       {
         path: 'team-builder',
+        component: TeamBuilderStartPage,
         data: { crumb: 'AI team builder' },
-        providers: [
-          ProposalFlowStore,
-          { provide: HARNESS_FLOW_MODE, useValue: 'configure-harness' },
-        ],
-        children: [
-          { path: '', pathMatch: 'full', component: TeamBuilderStartPage },
-          { path: 'workspace', component: ProposalWorkspacePage },
-          { path: 'review', component: ReviewApplyPage },
-        ],
       },
-      { path: '**', redirectTo: '' },
+      { path: '**', redirectTo: onboardingHomeRedirect },
     ],
   },
 ];

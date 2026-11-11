@@ -14,12 +14,6 @@ import {
   ComposerAttachmentsService,
 } from '@ptah-extension/chat';
 import {
-  HarnessBuilderLeaveDialogComponent,
-  HarnessRpcService,
-  NEW_PROJECT_AUDIENCE_OPTIONS,
-  NEW_PROJECT_PLATFORM_OPTIONS,
-} from '@ptah-extension/harness-builder';
-import {
   isNewProjectStack,
   stackOptionsForPlatform,
   type NewProjectAudience,
@@ -27,21 +21,21 @@ import {
   type NewProjectPlatform,
   type NewProjectStack,
 } from '@ptah-extension/shared';
-import { onboardingStepLink } from '../shell/onboarding-step-link';
-import { WorkspaceHeaderComponent } from '../shell/workspace-header.component';
 import {
-  OnboardingStepperComponent,
-  type OnboardingStep,
-} from '../shared/onboarding-stepper.component';
-import { ProposalFlowStore } from './proposal-flow.store';
+  HarnessChatLaunchCancelledError,
+  HarnessChatLauncherService,
+} from '../launcher/harness-chat-launcher.service';
+import { WorkspaceHeaderComponent } from '../shell/workspace-header.component';
 import { PtahButtonDirective } from '@ptah-extension/ui';
+import {
+  NEW_PROJECT_AUDIENCE_OPTIONS,
+  NEW_PROJECT_PLATFORM_OPTIONS,
+} from './new-project-intake.model';
 
 @Component({
   selector: 'ptah-new-project-intake-page',
   standalone: true,
   imports: [
-    HarnessBuilderLeaveDialogComponent,
-    OnboardingStepperComponent,
     FormsModule,
     AttachmentTrayComponent,
     WorkspaceHeaderComponent,
@@ -76,12 +70,12 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
             New project
           </h1>
           <p class="text-sm text-base-content-muted">
-            Tell the agent what you want to build.
+            For a product you build and ship to your own users. Tell the agent
+            what you want to build.
           </p>
         </div>
       </header>
       <ptah-workspace-header [canSwitch]="true" />
-      <ptah-onboarding-stepper [steps]="steps" />
       @if (workspaceEmpty() === null) {
         <div
           class="rounded-xl border border-base-300 p-3 text-sm"
@@ -114,22 +108,6 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
             (click)="confirmedNonEmpty.set(true)"
           >
             Continue in this folder
-          </button>
-        </div>
-      }
-      @if (draftTab()) {
-        <div
-          class="rounded-[14px] border border-base-300 p-4"
-          data-glass-surface="tile"
-        >
-          <p>Continue your draft</p>
-          <button
-            ptahButton
-            class="mt-2"
-            type="button"
-            (click)="continueDraft()"
-          >
-            Continue
           </button>
         </div>
       }
@@ -283,7 +261,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
             them in the session settings.
           </p>
         </details>
-        @if (store.actionError(); as error) {
+        @if (actionError(); as error) {
           <p role="alert" class="text-sm text-state-err">{{ error }}</p>
         }
         <div class="flex flex-wrap items-center justify-between gap-2">
@@ -311,37 +289,17 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
           </button>
         </div>
       </form>
-      @if (store.leaveOpen()) {
-        <ptah-harness-builder-leave-dialog
-          [context]="store.conflictMode() ? 'new-project' : 'start-over'"
-          [mode]="store.conflictMode() ?? store.mode"
-          [saving]="store.leaveSaving()"
-          [saveFailed]="store.leaveFailed()"
-          [stopUncertain]="store.stopUncertain()"
-          (choice)="resolve($event)"
-          (stopChoice)="stopChoice($event)"
-        />
-      }
     </section>
   `,
 })
 export class NewProjectIntakePage {
   protected readonly icons = { folder: FolderPlus, next: ArrowRight };
   readonly attachments = inject(ComposerAttachmentsService);
-  private readonly harnessRpc = inject(HarnessRpcService);
-  protected readonly store = inject(ProposalFlowStore);
+  protected readonly launcher = inject(HarnessChatLauncherService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
-  private pendingAttachments: ReturnType<
-    ComposerAttachmentsService['snapshotForSend']
-  > | null = null;
   protected readonly audienceOptions = NEW_PROJECT_AUDIENCE_OPTIONS;
   protected readonly platformOptions = NEW_PROJECT_PLATFORM_OPTIONS;
-  protected readonly steps: readonly OnboardingStep[] = [
-    { id: 'brief', label: 'Brief', state: 'current' },
-    { id: 'proposal', label: 'Proposal', state: 'upcoming' },
-    { id: 'review', label: 'Review', state: 'upcoming' },
-  ];
   readonly what = signal('');
   readonly audience = signal<NewProjectAudience>('unsure');
   readonly platform = signal<NewProjectPlatform>('node-ts');
@@ -352,45 +310,52 @@ export class NewProjectIntakePage {
   readonly whatTouched = signal(false);
   readonly otherTouched = signal(false);
   readonly starting = signal(false);
+  readonly actionError = signal<string | null>(null);
   readonly workspaceEmpty = signal<boolean | null>(null);
   readonly workspaceCheckError = signal<string | null>(null);
   readonly confirmedNonEmpty = signal(false);
   private workspaceCheck = 0;
-  private lastRoot = this.store.workspaceRoot();
+  private lastRoot = this.launcher.workspaceRoot();
+  /** Cancels a pending launch when the user leaves this page. */
+  private launch: AbortController | null = null;
+
   constructor() {
+    this.destroyRef.onDestroy(() => this.launch?.abort());
     void this.checkWorkspace(this.lastRoot);
     effect(() => {
-      const root = this.store.workspaceRoot();
+      const root = this.launcher.workspaceRoot();
       if (root !== this.lastRoot) {
         this.lastRoot = root;
         this.workspaceEmpty.set(null);
         this.workspaceCheckError.set(null);
         this.confirmedNonEmpty.set(false);
+        this.actionError.set(null);
         void this.checkWorkspace(root);
       }
     });
   }
+
   private async checkWorkspace(root: string): Promise<void> {
     const check = ++this.workspaceCheck;
     this.workspaceCheckError.set(null);
     try {
-      const response = await this.harnessRpc.initialize(root);
-      if (!this.destroyRef.destroyed && check === this.workspaceCheck)
-        this.workspaceEmpty.set(response.workspaceEffectivelyEmpty);
+      const empty = await this.launcher.checkFolderEmpty(root);
+      if (!this.destroyRef.destroyed && check === this.workspaceCheck) {
+        this.workspaceEmpty.set(empty);
+      }
     } catch {
-      // degradation-audit: reported — intake offers a retry when the folder check fails.
+      // degradation-audit: reported - intake offers a retry when the folder check fails.
       if (!this.destroyRef.destroyed && check === this.workspaceCheck) {
         this.workspaceEmpty.set(null);
         this.workspaceCheckError.set('Could not check this folder. Try again.');
       }
     }
   }
+
   retryWorkspaceCheck(): Promise<void> {
-    return this.checkWorkspace(this.store.workspaceRoot());
+    return this.checkWorkspace(this.launcher.workspaceRoot());
   }
-  readonly draftTab = () =>
-    this.store.records.readDraft(this.store.workspaceRoot(), 'new-project')
-      ?.tabId ?? null;
+
   readonly stackOptions = () => stackOptionsForPlatform(this.platform());
   readonly whatInvalid = () =>
     (this.submitted() || this.whatTouched()) && !this.what().trim();
@@ -405,6 +370,7 @@ export class NewProjectIntakePage {
         ? 'Enter your stack.'
         : null,
     ].filter((value): value is string => !!value);
+
   setPlatform(value: NewProjectPlatform): void {
     if (value !== this.platform()) {
       this.platform.set(value);
@@ -413,24 +379,28 @@ export class NewProjectIntakePage {
       this.otherTouched.set(false);
     }
   }
+
   setStack(value: string): void {
     if (isNewProjectStack(value)) this.stack.set(value);
   }
+
   async submit(event: Event): Promise<void> {
     event.preventDefault();
-    if (this.store.workspaceRoot() !== this.lastRoot) return;
+    if (this.launcher.workspaceRoot() !== this.lastRoot) return;
     if (
       this.workspaceEmpty() === null ||
       (this.workspaceEmpty() === false && !this.confirmedNonEmpty())
-    )
+    ) {
       return;
+    }
     this.submitted.set(true);
     if (
       this.errors().length ||
       this.starting() ||
       this.attachments.pendingReads() > 0
-    )
+    ) {
       return;
+    }
     const intake: NewProjectIntake = {
       what: this.what().trim(),
       audience: this.audience(),
@@ -443,61 +413,36 @@ export class NewProjectIntakePage {
         ? { constraints: this.constraints().trim() }
         : {}),
     };
+    this.actionError.set(null);
     this.starting.set(true);
     const snapshot = this.attachments.snapshotForSend();
-    this.pendingAttachments = snapshot;
+    const launch = new AbortController();
+    this.launch = launch;
     try {
-      const tab = await this.store.start({
-        mode: 'new-project',
-        workspaceRoot: this.store.workspaceRoot(),
-        intake,
-        attachments: snapshot.options,
+      await this.launcher.launchNewProject(intake, snapshot, {
+        signal: launch.signal,
       });
-      if (tab && this.store.lastStartCreated()) {
-        snapshot.removeSent();
-        this.pendingAttachments = null;
+    } catch (cause: unknown) {
+      // degradation-audit: reported - a cancelled launch is the user's own Back or
+      // page exit, so there is no failure to show. Every other error is shown below.
+      if (cause instanceof HarnessChatLaunchCancelledError) return;
+      const message =
+        cause instanceof Error && cause.message
+          ? cause.message
+          : 'Could not start New Project. Try again.';
+      if (!this.destroyRef.destroyed) {
+        this.actionError.set(message);
       }
-      if (!this.destroyRef.destroyed && tab)
-        await this.open(tab, this.store.lastStartCreated());
     } finally {
-      if (!this.destroyRef.destroyed) this.starting.set(false);
+      if (this.launch === launch) this.launch = null;
+      if (!this.destroyRef.destroyed) {
+        this.starting.set(false);
+      }
     }
   }
-  async open(tab: string, freshlyStarted = false): Promise<void> {
-    const link = onboardingStepLink('new-project', 'new-project-workspace', {
-      tab,
-    });
-    let navigated = false;
-    try {
-      navigated = await this.router.navigate([...link.commands], {
-        queryParams: link.queryParams,
-      });
-    } catch {
-      if (!this.destroyRef.destroyed)
-        this.store.actionError.set('Could not open the proposal. Try again.');
-    } finally {
-      if (!navigated && freshlyStarted)
-        await this.store.discardCancelledStart();
-    }
-  }
-  async continueDraft(): Promise<void> {
-    const tab = this.draftTab();
-    if (tab) await this.open(tab);
-  }
-  async resolve(choice: 'save' | 'discard' | 'cancel'): Promise<void> {
-    const tab = await this.store.resolveConflict(choice);
-    if (tab && this.store.lastStartCreated()) {
-      this.pendingAttachments?.removeSent();
-      this.pendingAttachments = null;
-    }
-    if (!this.destroyRef.destroyed && tab)
-      await this.open(tab, this.store.lastStartCreated());
-  }
-  async stopChoice(choice: 'retry-stop' | 'keep-current'): Promise<void> {
-    if (choice === 'keep-current') await this.store.resolveConflict('cancel');
-    else await this.resolve(this.store.lastStopChoice());
-  }
+
   async back(): Promise<void> {
+    this.launch?.abort();
     await this.router.navigate(['/onboarding']);
   }
 }

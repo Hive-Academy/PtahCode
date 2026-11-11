@@ -10,8 +10,8 @@
  * declares.
  *
  * They live in `core`, not in the onboarding library, because eager message
- * handlers in `setup-wizard` and `harness-builder` build these URLs too, and
- * those libraries must never depend on onboarding.
+ * handlers in `setup-wizard` build these URLs too, and that library must never
+ * depend on onboarding.
  *
  * Pure functions only: no Angular, no Router. A target is handed to
  * `SurfaceRouterService.navigateToSurface('onboarding', subPath, { queryParams })`,
@@ -20,7 +20,7 @@
 
 import type { SetupGenerationWorkflow } from '@ptah-extension/shared';
 
-/** Same values as `HarnessBuilderMode` in the harness-builder library. */
+/** Harness onboarding launcher modes. */
 export type OnboardingHarnessMode = 'new-project' | 'configure-harness';
 
 /** The query keys onboarding uses for hidden session identity. */
@@ -117,18 +117,23 @@ export function onboardingGenerationTarget(
 }
 
 /**
- * Where a harness proposal session is shown: the mode's flow root, or one of
- * its steps when `step` is given.
+ * Where a harness launcher entry page is shown (`/onboarding/new-project` or
+ * `/onboarding/team-builder`).
+ *
+ * Harness sessions run in standard chat tabs rather than `/workspace` or
+ * `/review` child routes, so only the flat launcher root is ever returned.
+ * Optional legacy arguments are ignored so callers never construct removed
+ * child routes.
  */
 export function onboardingHarnessTarget(
   mode: OnboardingHarnessMode,
-  tabId: string,
-  step?: 'workspace' | 'review',
+  _tabId?: string,
+  _step?: 'workspace' | 'review',
 ): OnboardingTarget {
   const flow = mode === 'new-project' ? 'new-project' : 'team-builder';
   return {
-    subPath: step ? [flow, step] : [flow],
-    queryParams: { [ONBOARDING_QUERY.tab]: tabId },
+    subPath: [flow],
+    queryParams: {},
   };
 }
 

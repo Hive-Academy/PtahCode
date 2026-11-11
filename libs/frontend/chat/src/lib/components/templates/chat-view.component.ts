@@ -54,6 +54,8 @@ import {
 } from '../molecules/notifications/install-scope-migration-notice.component';
 import { CompactSessionCardComponent } from '../molecules/compact-session/compact-session-card.component';
 import { AgentOriginBannerComponent } from '../molecules/agent-origin-banner/agent-origin-banner.component';
+import { HarnessProposalBannerComponent } from '../molecules/harness-proposal-banner/harness-proposal-banner.component';
+import { HarnessChatProposalStore } from '../../services/harness-chat-proposal.store';
 import { SessionInspectorStore } from '../../services/session-inspector';
 import { injectSessionStatsSource } from '../../services/session-stats/session-stats-source';
 import { ChatStore } from '../../services/chat.store';
@@ -215,6 +217,7 @@ const VIEW_PANEL_KEY = '';
     SidebarTabComponent,
     CompactSessionCardComponent,
     AgentOriginBannerComponent,
+    HarnessProposalBannerComponent,
     QueuedFollowUpsComponent,
     PtahButtonDirective,
   ],
@@ -1156,6 +1159,37 @@ export class ChatViewComponent implements OnDestroy {
     this._tabManager.switchTab(parentTabId);
   }
 
+  private readonly _harnessProposals = inject(HarnessChatProposalStore);
+
+  /** Staged harness proposal scoped to this view's resolved session. */
+  protected readonly resolvedHarnessProposal = computed(() =>
+    this._harnessProposals.proposalFor(this.resolvedSessionId()),
+  );
+
+  /** Apply lifecycle status for this view's resolved session. */
+  protected readonly resolvedHarnessApplyState = computed(() =>
+    this._harnessProposals.applyStateFor(this.resolvedSessionId()),
+  );
+
+  protected onApplyHarnessProposal(): void {
+    const sessionId = this.resolvedSessionId();
+    if (!sessionId || this.readOnly) return;
+    void this._harnessProposals.applyProposal(
+      sessionId,
+      this.resolveTabWorkspaceRoot(),
+    );
+  }
+
+  private resolveTabWorkspaceRoot(): string | undefined {
+    const tabId = this.resolvedTabId();
+    const partitionedRoot = tabId
+      ? this._tabManager.findTabByIdAcrossWorkspaces(tabId)?.workspacePath
+      : undefined;
+    return (
+      partitionedRoot ?? this._tabManager.activeWorkspacePath ?? undefined
+    );
+  }
+
   private readonly _planLimits = inject(PlanLimitsStore);
   /** This surface's share of the plan-limits request; released on destroy. */
   private readonly _planLimitsScope = this._planLimits.registerScope(
@@ -1508,6 +1542,28 @@ export class ChatViewComponent implements OnDestroy {
               err,
             );
           });
+      });
+    });
+
+    // Hydrate any persisted harness proposal when a harness workflow tab binds
+    // its session (or re-opens after restart).
+    let lastHydratedProposalKey: string | null = null;
+    effect(() => {
+      const workflow = this.resolvedActiveTab()?.workflow;
+      const sessionId = this.resolvedSessionId();
+      if (
+        !sessionId ||
+        (workflow !== undefined && workflow !== 'harness-new-project' && workflow !== 'harness-configure')
+      ) {
+        lastHydratedProposalKey = null;
+        return;
+      }
+      const workspaceRoot = this.resolveTabWorkspaceRoot();
+      const key = `${sessionId}::${workspaceRoot ?? ''}`;
+      if (key === lastHydratedProposalKey) return;
+      lastHydratedProposalKey = key;
+      untracked(() => {
+        void this._harnessProposals.hydrateForSession(sessionId, workspaceRoot);
       });
     });
 

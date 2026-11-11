@@ -115,6 +115,7 @@ interface CodexChatTurnDependencies {
   failure(error: unknown, operation: string): CodexChatAdapterError;
   onIdle(session: CodexChatSession): void;
   readonly admission?: CodexChatAdmission;
+  readonly answerCancellation?: AbortSignal;
 }
 
 /** Record a native turn's price once; a failed write remains retryable. */
@@ -180,6 +181,10 @@ export async function* streamCodexChatTurn(
     readonly observeUsage: (event: CodexRuntimeEvent) => void;
   } | undefined;
   try {
+    if (deps.answerCancellation?.aborted) {
+      deps.admission?.ended();
+      return;
+    }
     if (session.abort.signal.aborted) throw deps.error('cancelled', 'turn');
     const eventStream = session.context.events(subscription.signal);
     events = eventStream[Symbol.asyncIterator]();

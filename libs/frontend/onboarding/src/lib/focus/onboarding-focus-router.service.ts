@@ -4,9 +4,9 @@ import {
   SurfaceRouterService,
   WORKSPACE_COORDINATOR,
   onboardingGenerationTarget,
-  onboardingHarnessTarget,
   surfaceNavigationLanded,
   type NotificationFocusResult,
+  type OnboardingTarget,
   type SurfaceFocusRouter,
 } from '@ptah-extension/core';
 
@@ -47,24 +47,15 @@ export class OnboardingFocusRouter implements SurfaceFocusRouter {
     return { success: true, outcome: 'focused' };
   }
 
-  private targetFor(workflow: string | undefined, tabId: string) {
+  private targetFor(
+    workflow: string | undefined,
+    tabId: string,
+  ): OnboardingTarget | null {
     if (
       workflow === 'setup-agent-generation' ||
       workflow === 'setup-project-prompt'
     ) {
       return onboardingGenerationTarget(workflow, tabId);
-    }
-    if (
-      workflow === 'harness-new-project' ||
-      workflow === 'harness-configure'
-    ) {
-      return onboardingHarnessTarget(
-        workflow === 'harness-new-project'
-          ? 'new-project'
-          : 'configure-harness',
-        tabId,
-        'workspace',
-      );
     }
     return null;
   }

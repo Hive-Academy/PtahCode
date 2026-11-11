@@ -1345,39 +1345,6 @@
     "input-bordered": 2,
     "input-xs": 2
   },
-  "libs/frontend/harness-builder/src/lib/components/harness-config-preview.component.ts": {
-    "badge": 5,
-    "badge-accent": 1,
-    "badge-outline": 3,
-    "badge-secondary": 1,
-    "badge-xs": 5,
-    "skeleton": 3
-  },
-  "libs/frontend/harness-builder/src/lib/components/sidebar/builder-ai-helpers-section.component.ts": {
-    "textarea": 1,
-    "textarea-bordered": 1
-  },
-  "libs/frontend/harness-builder/src/lib/components/sidebar/builder-apply-section.component.ts": {
-    "<dynamic>": 1,
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-xs": 1
-  },
-  "libs/frontend/harness-builder/src/lib/components/sidebar/builder-presets-section.component.ts": {
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1,
-    "select": 1,
-    "select-bordered": 1,
-    "select-sm": 1,
-    "textarea": 1,
-    "textarea-bordered": 1
-  },
-  "libs/frontend/harness-builder/src/lib/components/sidebar/builder-stack-profile-section.component.ts": {
-    "badge": 3,
-    "badge-outline": 3,
-    "badge-sm": 3
-  },
   "libs/frontend/machines-ui/src/lib/components/add-machine-pane/add-machine-pane.component.ts": {
     "btn-ghost": 1,
     "input": 2,
@@ -1842,12 +1809,6 @@
   "libs/frontend/onboarding/src/lib/home/path-tile.component.ts": {
     "<dynamic>": 2
   },
-  "libs/frontend/onboarding/src/lib/proposal/answer-dock.component.ts": {
-    "btn": 1,
-    "btn-sm": 1,
-    "textarea": 1,
-    "textarea-bordered": 1
-  },
   "libs/frontend/onboarding/src/lib/proposal/new-project-intake.page.ts": {
     "btn": 4,
     "btn-sm": 4,
@@ -1856,30 +1817,6 @@
     "input-bordered": 1,
     "textarea": 2,
     "textarea-bordered": 2
-  },
-  "libs/frontend/onboarding/src/lib/proposal/proposal-item.component.ts": {
-    "badge": 2,
-    "badge-outline": 2,
-    "badge-sm": 2
-  },
-  "libs/frontend/onboarding/src/lib/proposal/proposal-panel.component.ts": {
-    "badge": 1,
-    "badge-outline": 1,
-    "badge-sm": 1
-  },
-  "libs/frontend/onboarding/src/lib/proposal/proposal-status-card.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 1
-  },
-  "libs/frontend/onboarding/src/lib/proposal/reply-composer.component.ts": {
-    "<dynamic>": 4
-  },
-  "libs/frontend/onboarding/src/lib/proposal/revision-history.component.ts": {
-    "badge": 1,
-    "badge-outline": 1,
-    "badge-sm": 1
   },
   "libs/frontend/onboarding/src/lib/proposal/team-builder-start.page.ts": {
     "textarea": 1,
