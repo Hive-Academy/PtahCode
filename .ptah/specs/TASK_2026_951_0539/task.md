@@ -1,11 +1,11 @@
 ---
 id: TASK_2026_951_0539
-status: in_progress
+status: in_review
 type: BUGFIX
 title: Fix stale Codex AT LIMIT state and plan limits main provider
 depends_on: []
 created: '2026-11-11T15:57:44.387Z'
-updated: '2026-11-11T16:18:07.292Z'
+updated: '2026-11-11T16:28:42.515Z'
 description: >-
   Codex stays AT LIMIT after reset; stats sidebar plan limits name Claude when
   Codex is main provider
