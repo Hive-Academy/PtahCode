@@ -338,7 +338,8 @@ export class SessionLoaderService {
    * (`ChatLifecycleService` x3, `SessionStatsAggregatorService`,
    * `ChatMessageHandlerService`) driven by independent broadcasts, so a caller
    * landing while the RPC is in flight scheduled a second identical read —
-   * measured at ~200 ms each. Callers that arrive during a read now share it.
+   * measured at ~200 ms each. Callers that arrive during a read now share
+   * ONE trailing read that starts when it settles (see `runLoadSessions`).
    *
    * A plain field, not a signal: nothing renders from it, and it is written
    * inside the async body its readers already await.
@@ -439,8 +440,8 @@ export class SessionLoaderService {
   /**
    * Load sessions from backend via RPC (with pagination)
    * Debounced (300ms) to coalesce rapid calls (e.g. SESSION_ID_RESOLVED + SESSION_STATS),
-   * then single-flighted so a caller whose timer fires while an earlier read is
-   * still in flight joins that read instead of issuing a second identical one
+   * then single-flighted so callers whose timer fires while an earlier read is
+   * still in flight share one trailing read after it instead of one read each
    * (see {@link loadSessionsInFlight}).
    * Preserves pagination: reloads all pages up to the current offset instead of resetting to page 1.
    */
@@ -464,12 +465,37 @@ export class SessionLoaderService {
 
   /**
    * Single-flight wrapper around {@link _loadSessionsImmediate}. Callers that
-   * arrive while a read is in flight share it; the next caller after it settles
-   * gets a fresh read.
+   * arrive while a read is in flight do not join it (its answer can be older
+   * than their trigger); they share one trailing read that starts when it
+   * settles. So at most one read runs at a time and no trigger is lost.
    */
   private runLoadSessions(): Promise<void> {
-    return this.loadSessionsInFlight ?? this.startSessionsRead();
+    const inFlight = this.loadSessionsInFlight;
+    if (!inFlight) return this.startSessionsRead();
+    // The read in flight started before this caller's trigger (for example a
+    // child session whose metadata was created just now), so its answer can
+    // be stale. Queue ONE trailing read that every late caller shares.
+    if (!this.loadSessionsTrailing) {
+      const trailing = inFlight
+        .catch((error: unknown) => {
+          console.error(
+            '[SessionLoaderService] Session list read failed before a queued read:',
+            error,
+          );
+        })
+        .then(() => {
+          if (this.loadSessionsTrailing === trailing) {
+            this.loadSessionsTrailing = null;
+          }
+          return this.loadSessionsInFlight ?? this.startSessionsRead();
+        });
+      this.loadSessionsTrailing = trailing;
+    }
+    return this.loadSessionsTrailing;
   }
+
+  /** The fresh read queued behind {@link loadSessionsInFlight}, or `null`. */
+  private loadSessionsTrailing: Promise<void> | null = null;
 
   /**
    * Start a fresh read and make it the one later callers join. Used directly
