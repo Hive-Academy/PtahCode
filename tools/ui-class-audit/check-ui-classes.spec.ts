@@ -330,6 +330,24 @@ describe('scanTsFile', () => {
     expect(result.some((o) => o.token === DYNAMIC_TOKEN)).toBe(true);
   });
 
+  it('keeps source lines when a substitution spans several lines', () => {
+    const source = [
+      '@Component({',
+      '  template: `',
+      '    <p>${a ?',
+      "      b : c}</p>",
+      '    <div class="btn">Go</div>',
+      '  `,',
+      '})',
+      'export class DemoZComponent {}',
+    ].join('\n');
+    expect(scanTsFile(source, FILE)).toContainEqual({
+      file: FILE,
+      line: 5,
+      token: 'btn',
+    });
+  });
+
   it('ignores blocked-root words outside template properties', () => {
     const source = [
       "const label = 'btn';",

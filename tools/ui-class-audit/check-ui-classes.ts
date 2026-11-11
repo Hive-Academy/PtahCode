@@ -422,19 +422,32 @@ export function scanTsFile(content: string, relFile: string): ClassOccurrence[] 
       } else {
         if (ts.isTemplateExpression(initializer)) {
           // Scan the static text; each `${...}` becomes a neutral placeholder.
-          const staticText =
-            initializer.head.text +
-            initializer.templateSpans
-              .map((span) => `__expr__${span.literal.text}`)
-              .join('');
-          const startLine = sourceFile.getLineAndCharacterOfPosition(
-            initializer.getStart(),
-          ).line;
+          // `pieces` maps an offset in the joined text back to a source position,
+          // so a substitution that spans lines cannot shift later hits.
+          const placeholder = '__expr__';
+          const pieces: Array<{ start: number; src: number }> = [
+            { start: 0, src: initializer.head.getStart() + 1 },
+          ];
+          let staticText = initializer.head.text;
+          for (const span of initializer.templateSpans) {
+            staticText += placeholder;
+            pieces.push({
+              start: staticText.length,
+              src: span.literal.getStart() + 1,
+            });
+            staticText += span.literal.text;
+          }
           for (const hit of findTemplateHits(staticText)) {
-            const before = staticText.slice(0, hit.offset);
+            let piece = pieces[0];
+            for (const candidate of pieces) {
+              if (candidate.start <= hit.offset) piece = candidate;
+            }
             occurrences.push({
               file: relFile,
-              line: startLine + 1 + (before.match(/\n/g)?.length ?? 0),
+              line:
+                sourceFile.getLineAndCharacterOfPosition(
+                  piece.src + (hit.offset - piece.start),
+                ).line + 1,
               token: hit.token,
             });
           }
