@@ -25,6 +25,7 @@ import { ClaudeBuiltinsConfigComponent } from './pro-features/claude-builtins-co
 import { AgentBehaviourSectionComponent } from './pro-features/agent-behaviour-section.component';
 import { OutputStyleConfigComponent } from './output-style/output-style-config.component';
 import { SettingsSaveFeedbackService } from './feedback/settings-save-feedback.service';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /**
  * A per-key import failure is reported as `<key>: <reason>`, the key being a `ptah.*` secret
@@ -69,6 +70,7 @@ const FOCUS =
     ClaudeBuiltinsConfigComponent,
     VscodeLmConfigComponent,
     AdvancedSettingsGroupComponent,
+    PtahButtonDirective,
   ],
   template: `
     <div class="space-y-8 py-3">
@@ -106,7 +108,7 @@ const FOCUS =
               <button
                 #importCancel
                 type="button"
-                class="btn btn-ghost btn-sm text-base-content"
+                ptahButton variant="ghost"
                 [disabled]="isImporting()"
                 (click)="cancelImport()"
               >
@@ -116,7 +118,7 @@ const FOCUS =
           } @else {
             <button
               type="button"
-              class="btn btn-outline btn-sm gap-1 text-base-content"
+              ptahButton
               [disabled]="isExporting()"
               (click)="exportSettings()"
               aria-label="Export settings"
@@ -138,7 +140,7 @@ const FOCUS =
             <button
               #importButton
               type="button"
-              class="btn btn-outline btn-sm gap-1 text-base-content"
+              ptahButton
               [disabled]="isImporting()"
               (click)="requestImport()"
               aria-label="Import settings"

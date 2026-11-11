@@ -17,6 +17,7 @@ import { LucideAngularModule, AlertCircle, AlertTriangle, RotateCcw } from 'luci
 import type { OutputStyleEntry } from '@ptah-extension/shared';
 import type { OutputStyleFailedOperation } from './output-style.store';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** Moderate 4: the banner is the fixed sentence for the failed list read, never host text. */
 const LIST_READ_FAILED = 'Could not read the output styles.';
@@ -24,7 +25,7 @@ const LIST_READ_FAILED = 'Could not read the output styles.';
 @Component({
   selector: 'ptah-output-style-notices',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- List read failure (a load state; write outcomes are toasts) -->
@@ -42,7 +43,7 @@ const LIST_READ_FAILED = 'Could not read the output styles.';
         <span class="flex-1">{{ message }}</span>
         <button
           type="button"
-          class="btn btn-ghost btn-xs text-base-content"
+          ptahButton variant="ghost" size="xs"
           (click)="dismissError.emit()"
         >
           Dismiss
@@ -70,9 +71,9 @@ const LIST_READ_FAILED = 'Could not read the output styles.';
           </p>
           <button
             type="button"
-            class="btn btn-ghost btn-xs mt-1 gap-1 text-base-content"
+            ptahButton variant="ghost" size="xs" class="mt-1"
             (click)="clearSelection.emit()"
-            [ptahBusyDisabled]="saving()"
+            [busy]="saving()"
             data-testid="output-style-clear-selection"
           >
             <lucide-angular
@@ -121,9 +122,9 @@ const LIST_READ_FAILED = 'Could not read the output styles.';
           <button
             #copyButton
             type="button"
-            class="btn btn-ghost btn-xs mt-1 text-base-content"
+            ptahButton variant="ghost" size="xs" class="mt-1"
             (click)="requestCopy(name)"
-            [ptahBusyDisabled]="saving()"
+            [busy]="saving()"
             data-testid="output-style-copy-to-project"
           >
             Copy to this project
@@ -147,7 +148,7 @@ const LIST_READ_FAILED = 'Could not read the output styles.';
               >
                 Replace it
               </button>
-              <button #copyCancel type="button" class="btn btn-ghost btn-xs text-base-content" (click)="cancelCopy(copyButton)">
+              <button #copyCancel type="button" ptahButton variant="ghost" size="xs" (click)="cancelCopy(copyButton)">
                 Cancel
               </button>
             </div>

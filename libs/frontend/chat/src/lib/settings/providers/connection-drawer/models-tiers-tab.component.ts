@@ -1,9 +1,8 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, untracked } from '@angular/core';
 import { ProvidersSettingsStateService, type ProvidersConnection } from '@ptah-extension/core';
-import { ProviderModelPickerComponent, type ProviderModelSelection } from '@ptah-extension/ui';
+import { ProviderModelPickerComponent, type ProviderModelSelection, PtahButtonDirective } from '@ptah-extension/ui';
 import type { ProviderModelTier } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../../feedback/settings-save-feedback.service';
-import { SettingsBusyDisabledDirective } from '../../feedback/busy-disabled.directive';
 import { SettingsToastComponent } from '../../feedback/settings-toast.component';
 
 interface TierRow {
@@ -40,7 +39,7 @@ export function tiersApply(connection: Pick<ProvidersConnection, 'id' | 'authMod
   selector: 'ptah-connection-models-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SettingsBusyDisabledDirective, ProviderModelPickerComponent, SettingsToastComponent],
+  imports: [ProviderModelPickerComponent, SettingsToastComponent, PtahButtonDirective],
   template: `
     <div class="space-y-4 text-sm" data-testid="connection-models">
       @if (!applies()) {
@@ -57,7 +56,7 @@ export function tiersApply(connection: Pick<ProvidersConnection, 'id' | 'authMod
           @case ('error') {
             <div role="alert" class="space-y-2 rounded border border-base-300 p-3 text-xs" data-testid="models-error">
               <p class="text-base-content">Could not load the tier mapping for this connection.</p>
-              <button type="button" class="btn btn-outline btn-xs" (click)="load()">Retry</button>
+              <button type="button" ptahButton size="xs" (click)="load()">Retry</button>
             </div>
           }
           @default {
@@ -79,7 +78,7 @@ export function tiersApply(connection: Pick<ProvidersConnection, 'id' | 'authMod
                         </p>
                       </div>
                       @if (current(row.tier)) {
-                        <button type="button" class="btn btn-ghost btn-xs shrink-0" [ptahBusyDisabled]="busy()"
+                        <button type="button" ptahButton variant="ghost" size="xs" class="shrink-0" [busy]="busy()"
                           [attr.aria-label]="'Reset ' + row.label + ' to the provider default'" (click)="save(row, '')"
                           [attr.data-testid]="'models-default-' + row.tier">Default</button>
                       }

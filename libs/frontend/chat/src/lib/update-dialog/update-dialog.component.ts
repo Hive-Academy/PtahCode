@@ -37,12 +37,13 @@ import {
 import { VSCodeService } from '@ptah-extension/core';
 import { MarkdownBlockComponent } from '@ptah-extension/markdown';
 import { UpdateDialogService } from './update-dialog.service';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-update-dialog',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [MarkdownBlockComponent],
+  imports: [MarkdownBlockComponent, PtahButtonDirective],
   template: `
     @if (isElectron() && dialogOpen()) {
       <dialog class="modal modal-open" data-testid="update-dialog">
@@ -69,14 +70,14 @@ import { UpdateDialogService } from './update-dialog.service';
           <div class="modal-action">
             <button
               type="button"
-              class="btn btn-ghost"
+              ptahButton variant="ghost" size="md"
               (click)="dialogService.dismiss()"
             >
               Later
             </button>
             <a
               data-testid="update-download"
-              class="btn btn-primary"
+              ptahButton variant="primary" size="md"
               [href]="downloadHref()"
               target="_blank"
               rel="noopener"

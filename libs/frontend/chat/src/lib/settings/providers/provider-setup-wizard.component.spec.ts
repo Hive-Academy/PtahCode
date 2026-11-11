@@ -1392,7 +1392,7 @@ describe('ProviderSetupWizardComponent', () => {
   });
 
   describe('accessibility', () => {
-    it('gives every wizard button the 36 px height and the 2 px focus outline', async () => {
+    it('gives every wizard button the family look and the 2 px focus outline', async () => {
       const fixture = createComponent();
       selectProvider(fixture, 'requesty');
       click(fixture, 'wizard-continue');
@@ -1407,7 +1407,13 @@ describe('ProviderSetupWizardComponent', () => {
       );
       expect(wizardButtons.length).toBeGreaterThan(3);
       for (const element of wizardButtons) {
-        expect(element.className).toContain('min-h-9');
+        // Converted buttons are ptahButton hosts (the family owns the height). Only the two custom
+        // text-link buttons (not DaisyUI `btn`) stay raw and keep `min-h-9`.
+        const isHost = element.hasAttribute('data-ptah-button');
+        if (!isHost) {
+          expect(element.className).not.toContain('btn');
+          expect(element.className).toContain('min-h-9');
+        }
         expect(element.className).toContain('focus-visible:outline-2');
         expect(element.className).toContain('focus-visible:outline-base-content');
       }

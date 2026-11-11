@@ -18,7 +18,12 @@ import {
   AudioLines,
   RotateCw,
 } from 'lucide-angular';
-import { MotionStageDirective, PROVIDER_MODELS_LOADER } from '@ptah-extension/ui';
+import {
+  MotionStageDirective,
+  PROVIDER_MODELS_LOADER,
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 // Two declarations on purpose: each component import must hold only the `@defer`-only class, or
 // Angular keeps the whole tab (Providers with its named-accounts UI and agents routing, Context Management) in the eager chunk.
 import { ProvidersSettingsComponent } from './providers/providers-settings.component';
@@ -112,6 +117,8 @@ const isAgentsRoutingSection = (
     SettingsToastComponent,
     LucideAngularModule,
     MotionStageDirective,
+    PtahButtonDirective,
+    PtahIconButtonDirective,
   ],
   // Page-scoped: the toast timer dies with the page; one models loader for every tab.
   providers: [

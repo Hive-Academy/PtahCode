@@ -35,7 +35,7 @@ import {
   AlertTriangle,
   Palette,
 } from 'lucide-angular';
-import { NativeDrawerComponent } from '@ptah-extension/ui';
+import { NativeDrawerComponent, PtahButtonDirective } from '@ptah-extension/ui';
 import type {
   InvalidOutputStyle,
   OutputStyleDetail,
@@ -88,6 +88,7 @@ interface StaleConflict {
     LucideAngularModule,
     NativeDrawerComponent,
     OutputStyleInstructionsFieldComponent,
+    PtahButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -145,7 +146,7 @@ interface StaleConflict {
             <div class="flex gap-1 mt-1">
               <button type="button" class="btn btn-outline btn-xs border-error text-base-content" (click)="discard()"
                 data-testid="output-style-discard-button">Discard changes</button>
-              <button #safeChoice type="button" class="btn btn-ghost btn-xs text-base-content"
+              <button #safeChoice type="button" ptahButton variant="ghost" size="xs"
                 (click)="keepEditing()">Keep editing</button>
             </div>
           </div>
@@ -157,7 +158,7 @@ interface StaleConflict {
             <div class="flex gap-1 mt-1">
               <button type="button" class="btn btn-outline btn-xs border-error text-base-content" [ptahBusyDisabled]="saving()"
                 (click)="confirmOverwrite()">Replace it</button>
-              <button #safeChoice type="button" class="btn btn-ghost btn-xs text-base-content"
+              <button #safeChoice type="button" ptahButton variant="ghost" size="xs"
                 (click)="dismissConflict()">Keep both — I'll rename</button>
             </div>
           </div>
@@ -171,7 +172,7 @@ interface StaleConflict {
                 read the current file. Nothing was written.
               </p>
               <div class="flex gap-1 mt-1">
-                <button #safeChoice type="button" class="btn btn-ghost btn-xs text-base-content"
+                <button #safeChoice type="button" ptahButton variant="ghost" size="xs"
                   (click)="dismissConflict()">Close</button>
               </div>
             } @else if (changed.confirmingReload) {
@@ -181,7 +182,7 @@ interface StaleConflict {
                   (click)="reloadFile(changed.fresh)" data-testid="output-style-stale-discard-reload">
                   Discard and reload
                 </button>
-                <button #safeChoice type="button" class="btn btn-ghost btn-xs text-base-content"
+                <button #safeChoice type="button" ptahButton variant="ghost" size="xs"
                   (click)="stale.set({ fresh: changed.fresh, confirmingReload: false })">Back</button>
               </div>
             } @else {
@@ -193,10 +194,10 @@ interface StaleConflict {
               <div class="flex gap-1 mt-1">
                 <button type="button" class="btn btn-outline btn-xs border-error text-base-content" [ptahBusyDisabled]="saving()"
                   (click)="overwriteStale(changed.fresh)" data-testid="output-style-stale-overwrite">Overwrite</button>
-                <button type="button" class="btn btn-outline btn-xs text-base-content"
+                <button type="button" ptahButton size="xs"
                   (click)="stale.set({ fresh: changed.fresh, confirmingReload: true })"
                   data-testid="output-style-stale-reload">Reload</button>
-                <button #safeChoice type="button" class="btn btn-ghost btn-xs text-base-content"
+                <button #safeChoice type="button" ptahButton variant="ghost" size="xs"
                   (click)="dismissConflict()">Cancel</button>
               </div>
             }
@@ -343,8 +344,8 @@ interface StaleConflict {
           <button
             type="submit"
             form="output-style-editor-form"
-            class="btn btn-primary btn-sm"
-            [ptahBusyDisabled]="saving()"
+            ptahButton variant="primary"
+            [busy]="saving()"
             (click)="submit($event)"
             data-testid="output-style-save-button"
           >
@@ -357,7 +358,7 @@ interface StaleConflict {
           </button>
           <button
             type="button"
-            class="btn btn-ghost btn-sm text-base-content"
+            ptahButton variant="ghost"
             (click)="requestClose()"
             data-testid="output-style-cancel-button"
           >

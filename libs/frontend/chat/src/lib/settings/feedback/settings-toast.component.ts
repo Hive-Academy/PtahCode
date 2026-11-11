@@ -13,6 +13,7 @@ import { DOCUMENT, NgTemplateOutlet } from '@angular/common';
 import { LucideAngularModule, X } from 'lucide-angular';
 import { SettingsSaveFeedbackService } from './settings-save-feedback.service';
 import { SettingsBusyDisabledDirective } from './busy-disabled.directive';
+import { PtahIconButtonDirective } from '@ptah-extension/ui';
 
 /** Delay between clearing the live regions and writing the new message, so a repeated message is re-announced. */
 const ANNOUNCE_DELAY_MS = 50;
@@ -43,7 +44,7 @@ const ANNOUNCE_DELAY_MS = 50;
 @Component({
   selector: 'ptah-settings-toast',
   standalone: true,
-  imports: [NgTemplateOutlet, LucideAngularModule, SettingsBusyDisabledDirective],
+  imports: [NgTemplateOutlet, LucideAngularModule, SettingsBusyDisabledDirective, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -98,9 +99,8 @@ const ANNOUNCE_DELAY_MS = 50;
         }
         <button
           type="button"
-          class="btn btn-ghost btn-sm btn-square"
+          ptahIconButton label="Dismiss notification"
           (click)="feedback.dismiss()"
-          aria-label="Dismiss notification"
           [attr.data-testid]="testId('settings-toast-dismiss')"
         >
           <lucide-angular [img]="XIcon" class="w-3 h-3 opacity-60" aria-hidden="true" />

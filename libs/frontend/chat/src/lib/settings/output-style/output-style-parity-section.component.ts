@@ -27,6 +27,7 @@ import {
 } from 'lucide-angular';
 import type { SettingsTier } from '@ptah-extension/shared';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 export interface ParityTierOption {
   readonly tier: SettingsTier;
@@ -55,7 +56,7 @@ export const PARITY_TIERS: readonly ParityTierOption[] = [
 @Component({
   selector: 'ptah-output-style-parity-section',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <details
@@ -153,7 +154,7 @@ export const PARITY_TIERS: readonly ParityTierOption[] = [
           <button
             #parityCancel
             type="button"
-            class="btn btn-ghost btn-xs text-base-content"
+            ptahButton variant="ghost" size="xs"
             (click)="cancel()"
             data-testid="parity-cancel-button"
           >
@@ -182,7 +183,7 @@ export const PARITY_TIERS: readonly ParityTierOption[] = [
           </div>
           <button
             type="button"
-            class="btn btn-ghost btn-xs text-base-content"
+            ptahButton variant="ghost" size="xs"
             (click)="dismissParity.emit()"
           >
             Dismiss

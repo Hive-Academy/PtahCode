@@ -24,8 +24,7 @@ import {
 import { ClaudeRpcService, WorkspaceScopeService, WALL_CLOCK_COARSE_MS, injectWallClock } from '@ptah-extension/core';
 import { MarkdownBlockComponent } from '@ptah-extension/markdown';
 import type { EnhancedPromptsGetStatusResponse } from '@ptah-extension/shared';
-import { NativeDrawerComponent } from '@ptah-extension/ui';
-import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
+import { NativeDrawerComponent, PtahButtonDirective } from '@ptah-extension/ui';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 
 const PROMPT_STATUS_LOAD_FAILED = 'Could not load the system prompt status.';
@@ -68,10 +67,11 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
 @Component({
   selector: 'ptah-system-prompt-drawer',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, 
+  imports: [
     LucideAngularModule,
     NativeDrawerComponent,
     MarkdownBlockComponent,
+    PtahButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -107,7 +107,7 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
             @if (statusLoadFailed() && !isLoading()) {
               <button
                 type="button"
-                class="btn btn-ghost btn-xs text-base-content"
+                ptahButton variant="ghost" size="xs"
                 (click)="loadStatus()"
                 data-testid="system-prompt-status-retry"
               >
@@ -130,7 +130,7 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
             </span>
             <button
               type="button"
-              class="btn btn-ghost btn-xs text-base-content"
+              ptahButton variant="ghost" size="xs"
               [disabled]="isLoading()"
               (click)="checkRegenerate()"
               data-testid="regenerate-check-again"
@@ -188,7 +188,7 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
                 <button
                   #regenerateCancel
                   type="button"
-                  class="btn btn-ghost btn-xs text-base-content"
+                  ptahButton variant="ghost" size="xs"
                   [disabled]="isRegenerating()"
                   (click)="cancelRegenerate()"
                   data-testid="regenerate-cancel-button"
@@ -214,7 +214,7 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
           <div class="space-y-2">
             <button
               type="button"
-              class="btn btn-ghost btn-xs gap-1.5 w-full justify-start text-base-content"
+              ptahButton variant="ghost" size="xs" class="w-full justify-start"
               (click)="togglePromptPreview()"
               aria-label="Toggle Prompt Preview"
               data-testid="system-prompt-preview-toggle"
@@ -256,8 +256,9 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
             <button
               #regenerateButton
               type="button"
-              class="btn btn-outline btn-xs gap-1 text-base-content"
-              [ptahBusyDisabled]="isRegenerating() || isDownloading() || !hasGeneratedPrompt() || regenerationStartedAt() !== null"
+              ptahButton size="xs"
+              [busy]="isRegenerating() || isDownloading() || regenerationStartedAt() !== null"
+              [disabled]="!hasGeneratedPrompt()"
               (click)="requestRegenerate()"
               aria-label="Regenerate Enhanced Prompt"
               data-testid="system-prompt-regenerate-button"
@@ -272,8 +273,9 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
             </button>
             <button
               type="button"
-              class="btn btn-ghost btn-xs gap-1 text-base-content"
-              [ptahBusyDisabled]="isRegenerating() || isDownloading() || !hasGeneratedPrompt()"
+              ptahButton variant="ghost" size="xs"
+              [busy]="isRegenerating() || isDownloading()"
+              [disabled]="!hasGeneratedPrompt()"
               (click)="downloadEnhancedPrompt()"
               aria-label="Download Enhanced Prompt"
               data-testid="system-prompt-download-button"
@@ -290,7 +292,7 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
 
           <button
             type="button"
-            class="btn btn-ghost btn-sm"
+            ptahButton variant="ghost"
             (click)="closed.emit()"
             data-testid="system-prompt-drawer-close"
           >

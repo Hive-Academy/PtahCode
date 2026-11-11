@@ -25,6 +25,7 @@ import { KEY_UNREADABLE_TEXT } from '../provider-connection-card.state';
 import { SettingsBusyDisabledDirective } from '../../feedback/busy-disabled.directive';
 import { SettingsSaveFeedbackService } from '../../feedback/settings-save-feedback.service';
 import { commitToast } from '../../feedback/settings-commit-toast';
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 
 export type VerifyDraftFn = (params: AuthVerifyDraftConnectionParams) => Promise<AuthVerifyDraftConnectionResult>;
 export type CancelDraftFn = (params: AuthCancelDraftVerificationParams) => Promise<AuthCancelDraftVerificationResult>;
@@ -125,7 +126,7 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
   selector: 'ptah-connection-credentials-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NgTemplateOutlet, KimiCodeLoginProgressComponent, CodexSignInBlockComponent, CodexAgentBehaviorComponent],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NgTemplateOutlet, KimiCodeLoginProgressComponent, CodexSignInBlockComponent, CodexAgentBehaviorComponent, PtahButtonDirective, PtahIconButtonDirective],
   template: `
     <div class="space-y-4 text-sm" data-testid="connection-credentials">
       @switch (view()) {
@@ -140,14 +141,14 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
             @for (command of commands; track command.text) {
               <div class="flex items-center justify-between gap-2 rounded border border-base-300 bg-base-100 px-2 py-1">
                 <code class="font-mono text-xs text-base-content">{{ command.text }}</code>
-                <button type="button" class="btn btn-ghost btn-xs gap-1" (click)="copy(command.text)"
+                <button type="button" ptahButton variant="ghost" size="xs" (click)="copy(command.text)"
                   [attr.aria-label]="'Copy ' + command.label" [attr.data-testid]="'credentials-copy-' + command.id">
                   <lucide-angular [img]="CopyIcon" class="h-3 w-3" aria-hidden="true" /> Copy
                 </button>
               </div>
             }
             <p class="text-xs text-base-content-muted">Run <code class="font-mono">{{ signInCommand }}</code> in your terminal and follow the browser prompts; if the CLI is missing, install it first.</p>
-            <button type="button" class="btn btn-outline btn-sm" [ptahBusyDisabled]="busy() || externalBusy()" (click)="externalActionRequested.emit('cli-check')"
+            <button type="button" ptahButton [busy]="busy() || externalBusy()" (click)="externalActionRequested.emit('cli-check')"
               data-testid="credentials-cli-check">{{ externalBusy() ? 'Checking…' : 'Check again' }}</button>
           </div>
         }
@@ -174,7 +175,7 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
               <div class="flex gap-2">
                 <button type="button" class="btn btn-outline btn-sm border-error text-base-content" [ptahBusyDisabled]="busy()"
                   (click)="confirmSignOut()" data-testid="credentials-sign-out-confirm-button">Sign out</button>
-                <button type="button" class="btn btn-ghost btn-sm" (click)="confirming.set(null)">Cancel</button>
+                <button type="button" ptahButton variant="ghost" (click)="confirming.set(null)">Cancel</button>
               </div>
             </div>
           }
@@ -192,10 +193,10 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
             </p>
             <ptah-codex-sign-in-block layout="compact" connectionRole="chosen" />
             @if (codexRunning()) {
-              <button type="button" class="btn btn-outline btn-sm" (click)="externalActionRequested.emit('sign-in-cancel')"
+              <button type="button" ptahButton (click)="externalActionRequested.emit('sign-in-cancel')"
                 data-testid="credentials-codex-cancel">Cancel sign-in</button>
             } @else {
-              <button type="button" class="btn btn-outline btn-sm" [ptahBusyDisabled]="busy() || externalBusy()" (click)="externalActionRequested.emit('sign-in')"
+              <button type="button" ptahButton [busy]="busy() || externalBusy()" (click)="externalActionRequested.emit('sign-in')"
                 data-testid="credentials-open-login">Sign in with Codex</button>
             }
           </div>
@@ -217,19 +218,19 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
             <ptah-kimi-code-login-progress [state]="kimiLogin()" [installUrl]="helpUrl()" />
             <div class="flex flex-wrap gap-2">
               @if (kimiRunning()) {
-                <button type="button" class="btn btn-outline btn-sm" (click)="externalActionRequested.emit('sign-in-cancel')"
+                <button type="button" ptahButton (click)="externalActionRequested.emit('sign-in-cancel')"
                   data-testid="credentials-kimi-cancel">Cancel sign-in</button>
               } @else {
-                <button type="button" class="btn btn-outline btn-sm" [ptahBusyDisabled]="busy() || externalBusy()"
+                <button type="button" ptahButton [busy]="busy() || externalBusy()"
                   (click)="externalActionRequested.emit('sign-in')" data-testid="credentials-kimi-sign-in">Sign in with Kimi Code</button>
               }
-              <button type="button" class="btn btn-ghost btn-sm" [ptahBusyDisabled]="busy() || externalBusy() || kimiRunning()"
+              <button type="button" ptahButton variant="ghost" [busy]="busy() || externalBusy() || kimiRunning()"
                 (click)="externalActionRequested.emit('cli-check')" data-testid="credentials-kimi-check">{{ externalBusy() ? 'Checking…' : 'Check again' }}</button>
             </div>
             <p class="text-xs text-base-content-muted">Or sign in from a terminal:</p>
             <div class="flex items-center justify-between gap-2 rounded border border-base-300 bg-base-100 px-2 py-1">
               <code class="font-mono text-xs text-base-content">{{ kimiLoginCommand }}</code>
-              <button type="button" class="btn btn-ghost btn-xs gap-1" (click)="copy(kimiLoginCommand)"
+              <button type="button" ptahButton variant="ghost" size="xs" (click)="copy(kimiLoginCommand)"
                 aria-label="Copy kimi login" data-testid="credentials-copy-kimi-login">
                 <lucide-angular [img]="CopyIcon" class="h-3 w-3" aria-hidden="true" /> Copy
               </button>
@@ -240,7 +241,7 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
         @case ('oauth') {
           <div class="space-y-2 rounded border border-base-300 bg-base-200 p-3" data-testid="credentials-oauth">
             <p class="text-xs text-base-content">Signed in with your provider account. Open login to switch or refresh it.</p>
-            <button type="button" class="btn btn-outline btn-sm" [ptahBusyDisabled]="busy() || externalBusy()" (click)="externalActionRequested.emit('sign-in')"
+            <button type="button" ptahButton [busy]="busy() || externalBusy()" (click)="externalActionRequested.emit('sign-in')"
               data-testid="credentials-open-login">{{ externalBusy() ? 'Waiting for sign-in…' : 'Open login' }}</button>
           </div>
         }
@@ -256,7 +257,7 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
                 {{ keyUnreadableText }}
               </span>
               <button type="button"
-                class="btn btn-link btn-xs h-6 min-h-6 !px-0 text-xs text-base-content underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                ptahButton variant="link" size="xs" class="!px-0 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
                 aria-label="Retry reading the stored key" (click)="keyRetryRequested.emit()" data-testid="credentials-local-key-unreadable-retry">Retry</button>
             </div>
           }
@@ -301,7 +302,7 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
                 {{ keyUnreadableText }}
               </span>
               <button type="button"
-                class="btn btn-link btn-xs h-6 min-h-6 !px-0 text-xs text-base-content underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                ptahButton variant="link" size="xs" class="!px-0 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
                 aria-label="Retry reading the stored key" (click)="keyRetryRequested.emit()" data-testid="credentials-key-unreadable-retry">Retry</button>
             } @else {
               <!-- The host's masked hint (bullets + last 4) when it sent one, else a fixed mask. Display only:
@@ -313,7 +314,7 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
             }
             @if (canReplace()) {
               <!-- An unreadable key can still be overwritten, so it reads Replace, not Add key. -->
-              <button type="button" class="btn btn-outline btn-sm" [disabled]="busy() || replacing()"
+              <button type="button" ptahButton [disabled]="busy() || replacing()"
                 (click)="startReplace()" data-testid="credentials-replace">{{ connection().hasKey || connection().keyUnreadable ? 'Replace' : 'Add key' }}</button>
             }
             @if (connection().hasKey || connection().keyUnreadable) {
@@ -343,8 +344,7 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
               <input id="credentials-new-key" [type]="keyVisible() ? 'text' : 'password'" autocomplete="off" spellcheck="false"
                 class="input input-bordered input-sm w-full pr-9 font-mono text-xs" [value]="keyDraft()" (input)="onKeyInput($event)"
                 [attr.placeholder]="keyPlaceholder()" data-testid="credentials-new-key" />
-              <button type="button" class="btn btn-ghost btn-xs absolute right-1 top-1" (click)="keyVisible.set(!keyVisible())"
-                [attr.aria-label]="keyVisible() ? 'Hide API key' : 'Show API key'" [attr.aria-pressed]="keyVisible()"
+              <button type="button" ptahIconButton [label]="keyVisible() ? 'Hide API key' : 'Show API key'" size="xs" class="absolute right-1 top-1" (click)="keyVisible.set(!keyVisible())" [attr.aria-pressed]="keyVisible()"
                 data-testid="credentials-toggle-visibility">
                 <lucide-angular [img]="keyVisible() ? EyeOffIcon : EyeIcon" class="h-3.5 w-3.5" aria-hidden="true" />
               </button>
@@ -361,11 +361,11 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
               {{ probeText() }}
             </p>
             <div class="flex flex-wrap gap-2">
-              <button type="button" class="btn btn-outline btn-sm" [ptahBusyDisabled]="!keyDraft().trim() || probeState() === 'checking' || busy()"
+              <button type="button" ptahButton [busy]="probeState() === 'checking' || busy()" [disabled]="!keyDraft().trim()"
                 (click)="verify()" data-testid="credentials-verify">{{ probeState() === 'checking' ? 'Checking…' : 'Check key' }}</button>
-              <button type="button" class="btn btn-primary btn-sm" [ptahBusyDisabled]="!canSave()" (click)="save()"
+              <button type="button" ptahButton variant="primary" [disabled]="!canSave()" (click)="save()"
                 data-testid="credentials-save">Save key</button>
-              <button type="button" class="btn btn-ghost btn-sm" (click)="cancelReplace()" data-testid="credentials-cancel-replace">Cancel</button>
+              <button type="button" ptahButton variant="ghost" (click)="cancelReplace()" data-testid="credentials-cancel-replace">Cancel</button>
             </div>
           </div>
         }
@@ -382,7 +382,7 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
             <div class="flex gap-2">
               <button type="button" class="btn btn-outline btn-sm border-error text-base-content" [ptahBusyDisabled]="busy()"
                 (click)="confirmDelete()" data-testid="credentials-delete-confirm-button">Delete key</button>
-              <button type="button" class="btn btn-ghost btn-sm" (click)="confirming.set(null)">Cancel</button>
+              <button type="button" ptahButton variant="ghost" (click)="confirming.set(null)">Cancel</button>
             </div>
           </div>
         }
