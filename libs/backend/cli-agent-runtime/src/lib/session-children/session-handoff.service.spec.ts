@@ -64,7 +64,9 @@ function makeHarness() {
   const stored = new Map<string, unknown>();
   const ackStore = new SessionHandoffAckStore({
     get: <T>(key: string) => stored.get(key) as T | undefined,
-    update: async (key: string, value: unknown) => { stored.set(key, value); },
+    update: async (key: string, value: unknown) => {
+      stored.set(key, value);
+    },
     keys: () => [...stored.keys()],
   });
   const records = new Map<string, FakeRecord>();
@@ -188,7 +190,9 @@ function makeHarness() {
         useValue: hostValue,
       });
     }
-    scope.register(CLI_AGENT_RUNTIME_TOKENS.HANDOFF_PREDECESSOR_CLOSER, { useValue: closer });
+    scope.register(CLI_AGENT_RUNTIME_TOKENS.HANDOFF_PREDECESSOR_CLOSER, {
+      useValue: closer,
+    });
     return scope;
   };
 
@@ -294,15 +298,32 @@ describe('SessionHandoffService', () => {
     if (!started.ok) throw new Error('handoff should start');
     h.service.onCallerTurnFlushed({ tabId: CALLER, sessionId: CALLER_SDK });
     expect(h.lifecycle.endSession).not.toHaveBeenCalled();
-    const request = { callerSessionId: started.tabId, predecessorSessionId: CALLER, handoffPath };
-    expect((await h.service.acknowledge({ ...request, callerSessionId: CALLER })).status).toBe('refused');
-    expect((await h.service.acknowledge({ ...request, handoffPath: join(outside, 'HANDOFF.md') })).status).toBe('refused');
+    const request = {
+      callerSessionId: started.tabId,
+      predecessorSessionId: CALLER,
+      handoffPath,
+    };
+    expect(
+      (await h.service.acknowledge({ ...request, callerSessionId: CALLER }))
+        .status,
+    ).toBe('refused');
+    expect(
+      (
+        await h.service.acknowledge({
+          ...request,
+          handoffPath: join(outside, 'HANDOFF.md'),
+        })
+      ).status,
+    ).toBe('refused');
     expect(h.closer.close).not.toHaveBeenCalled();
     const first = await h.service.acknowledge(request);
     expect(first.status).toBe('closed');
-    expect(await h.service.acknowledge(request)).toMatchObject({ status: 'already-closed' });
+    expect(await h.service.acknowledge(request)).toMatchObject({
+      status: 'already-closed',
+    });
     expect(h.lifecycle.endSession).toHaveBeenCalledTimes(1);
     expect(h.closer.close).toHaveBeenCalledTimes(1);
+    expect(h.closer.close).toHaveBeenCalledWith(CALLER, CALLER_SDK);
   });
   it('starts a top-level session in the caller cwd with its permission, model and descriptor', async () => {
     const h = makeHarness();
@@ -388,15 +409,40 @@ describe('SessionHandoffService', () => {
     it('succeeds a child in its worktree without starting a top-level session', async () => {
       const h = makeHarness();
       h.children.add(CALLER);
-      const successor = { childSessionId: CALLER_NEW_TAB, label: 'Next child', workspaceRoot: root, worktreePath: root };
-      const spawner = { succeed: jest.fn().mockResolvedValue({ ok: true, successor, adoptedLanes: ['lane-1'], tabOpened: true }) };
+      const successor = {
+        childSessionId: CALLER_NEW_TAB,
+        label: 'Next child',
+        workspaceRoot: root,
+        worktreePath: root,
+      };
+      const spawner = {
+        succeed: jest
+          .fn()
+          .mockResolvedValue({
+            ok: true,
+            successor,
+            adoptedLanes: ['lane-1'],
+            tabOpened: true,
+          }),
+      };
       const request = h.request({ label: 'Next child' });
       await expect(h.build({ spawner }).handoff(request)).resolves.toEqual({
-        ok: true, tabId: CALLER_NEW_TAB, label: 'Next child', workspaceRoot: root,
-        cwd: root, tabOpened: true, adoptedLanes: ['lane-1'], adoptedChildSessions: [],
+        ok: true,
+        tabId: CALLER_NEW_TAB,
+        label: 'Next child',
+        workspaceRoot: root,
+        cwd: root,
+        tabOpened: true,
+        adoptedLanes: ['lane-1'],
+        adoptedChildSessions: [],
       });
       expect(spawner.succeed).toHaveBeenCalledTimes(1);
-      expect(spawner.succeed).toHaveBeenCalledWith({ callerSessionId: CALLER, handoffPath, prompt: PROMPT, label: 'Next child' });
+      expect(spawner.succeed).toHaveBeenCalledWith({
+        callerSessionId: CALLER,
+        handoffPath,
+        prompt: PROMPT,
+        label: 'Next child',
+      });
       expect(h.host.startHandoffSession).not.toHaveBeenCalled();
     });
 
@@ -409,24 +455,43 @@ describe('SessionHandoffService', () => {
     ])('maps child succession refusal %s', async (refusal, mapped) => {
       const h = makeHarness();
       h.children.add(CALLER);
-      const spawner = { succeed: jest.fn().mockResolvedValue({ ok: false, refusal, detail: 'specific detail' }) };
-      await expect(h.build({ spawner }).handoff(h.request())).resolves.toEqual({ ok: false, refusal: mapped, detail: 'specific detail' });
+      const spawner = {
+        succeed: jest
+          .fn()
+          .mockResolvedValue({ ok: false, refusal, detail: 'specific detail' }),
+      };
+      await expect(h.build({ spawner }).handoff(h.request())).resolves.toEqual({
+        ok: false,
+        refusal: mapped,
+        detail: 'specific detail',
+      });
     });
 
     it('checks the child handoff file before calling the spawner', async () => {
       const h = makeHarness();
       h.children.add(CALLER);
       const spawner = { succeed: jest.fn() };
-      await expect(h.build({ spawner }).handoff(h.request({ handoffPath: join(root, 'missing.md') }))).resolves.toMatchObject({ ok: false, refusal: 'handoff-file-missing' });
+      await expect(
+        h
+          .build({ spawner })
+          .handoff(h.request({ handoffPath: join(root, 'missing.md') })),
+      ).resolves.toMatchObject({ ok: false, refusal: 'handoff-file-missing' });
       expect(spawner.succeed).not.toHaveBeenCalled();
     });
 
     it('treats a successor child acknowledgement as unnecessary', async () => {
       const h = makeHarness();
       h.children.add(CALLER);
-      await expect(h.service.acknowledge({ callerSessionId: CALLER, predecessorSessionId: CALLER_SDK, handoffPath })).resolves.toEqual({
+      await expect(
+        h.service.acknowledge({
+          callerSessionId: CALLER,
+          predecessorSessionId: CALLER_SDK,
+          handoffPath,
+        }),
+      ).resolves.toEqual({
         status: 'already-closed',
-        reason: 'A successor child needs no acknowledgement; the host retires its predecessor.',
+        reason:
+          'A successor child needs no acknowledgement; the host retires its predecessor.',
       });
     });
     it('chat-runtime-unavailable: no host registered', async () => {
@@ -1057,10 +1122,19 @@ describe('SessionHandoffService', () => {
       await tick();
       expect(h.lifecycle.endSession).not.toHaveBeenCalled();
 
-      expect(await h.service.acknowledge({ callerSessionId: result.tabId, predecessorSessionId: CALLER, handoffPath })).toMatchObject({ status: 'closed' });
+      expect(
+        await h.service.acknowledge({
+          callerSessionId: result.tabId,
+          predecessorSessionId: CALLER,
+          handoffPath,
+        }),
+      ).toMatchObject({ status: 'closed' });
 
       expect(h.lifecycle.endSession).toHaveBeenCalledTimes(1);
-      expect(h.lifecycle.endSession).toHaveBeenCalledWith(CALLER, 'parent-stop');
+      expect(h.lifecycle.endSession).toHaveBeenCalledWith(
+        CALLER,
+        'parent-stop',
+      );
       expect(h.lifecycle.endSession).not.toHaveBeenCalledWith(CALLER_SDK);
       expect(h.lifecycle.endSession).not.toHaveBeenCalledWith('lane-a');
       expect(h.lifecycle.endSession).not.toHaveBeenCalledWith('child-live');
@@ -1081,15 +1155,24 @@ describe('SessionHandoffService', () => {
 
     it('commits an SDK id resolved during the awaited start', async () => {
       const h = makeHarness();
-      h.host.startHandoffSession.mockImplementationOnce(async (input: HandoffChatSessionStartInput) => {
-        h.notifyResolved({ tabId: input.tabId, realSessionId: SUCCESSOR_SDK });
-        expect(h.chain.append).not.toHaveBeenCalled();
-        return { started: true, uiAnnounced: true };
-      });
+      h.host.startHandoffSession.mockImplementationOnce(
+        async (input: HandoffChatSessionStartInput) => {
+          h.notifyResolved({
+            tabId: input.tabId,
+            realSessionId: SUCCESSOR_SDK,
+          });
+          expect(h.chain.append).not.toHaveBeenCalled();
+          return { started: true, uiAnnounced: true };
+        },
+      );
       const result = await h.service.handoff(h.request());
       expect(result.ok).toBe(true);
       await tick();
-      expect(h.chain.append).toHaveBeenCalledWith(CALLER_SDK, SUCCESSOR_SDK, root);
+      expect(h.chain.append).toHaveBeenCalledWith(
+        CALLER_SDK,
+        SUCCESSOR_SDK,
+        root,
+      );
     });
 
     it('keeps caller live until acknowledged stop resolves and retries a rejected stop', async () => {
@@ -1103,8 +1186,14 @@ describe('SessionHandoffService', () => {
       );
       const started = await h.service.handoff(h.request());
       if (!started.ok) throw new Error('handoff should start');
-      const ack = { callerSessionId: started.tabId, predecessorSessionId: CALLER, handoffPath };
-      expect(await h.service.acknowledge(ack)).toMatchObject({ status: 'retryable-failure' });
+      const ack = {
+        callerSessionId: started.tabId,
+        predecessorSessionId: CALLER,
+        handoffPath,
+      };
+      expect(await h.service.acknowledge(ack)).toMatchObject({
+        status: 'retryable-failure',
+      });
       h.service.onCallerTurnFlushed({ tabId: CALLER, sessionId: CALLER_SDK });
       await tick();
       expect(h.turnState.forceIdle).not.toHaveBeenCalled();
@@ -1115,35 +1204,61 @@ describe('SessionHandoffService', () => {
       expect(h.turnState.forceIdle).toHaveBeenCalled();
 
       const retry = makeHarness();
-      retry.lifecycle.endSession.mockRejectedValueOnce(new Error('stop failed'));
+      retry.lifecycle.endSession.mockRejectedValueOnce(
+        new Error('stop failed'),
+      );
       const retryStarted = await retry.service.handoff(retry.request());
       if (!retryStarted.ok) throw new Error('handoff should start');
-      const retryAck = { callerSessionId: retryStarted.tabId, predecessorSessionId: CALLER, handoffPath };
-      expect(await retry.service.acknowledge(retryAck)).toMatchObject({ status: 'retryable-failure' });
-      retry.service.onCallerTurnFlushed({ tabId: CALLER, sessionId: CALLER_SDK });
+      const retryAck = {
+        callerSessionId: retryStarted.tabId,
+        predecessorSessionId: CALLER,
+        handoffPath,
+      };
+      expect(await retry.service.acknowledge(retryAck)).toMatchObject({
+        status: 'retryable-failure',
+      });
+      retry.service.onCallerTurnFlushed({
+        tabId: CALLER,
+        sessionId: CALLER_SDK,
+      });
       await tick();
       expect(retry.turnState.forceIdle).not.toHaveBeenCalled();
       expect(retry.stopLogger.error).toHaveBeenCalledWith(
-        expect.stringContaining('caller stop failed'), expect.any(Error),
+        expect.stringContaining('caller stop failed'),
+        expect.any(Error),
       );
-      retry.service.onCallerTurnFlushed({ tabId: CALLER, sessionId: CALLER_SDK });
+      retry.service.onCallerTurnFlushed({
+        tabId: CALLER,
+        sessionId: CALLER_SDK,
+      });
       await tick();
       expect(retry.lifecycle.endSession).toHaveBeenCalledTimes(2);
       expect(retry.turnState.forceIdle).toHaveBeenCalled();
-      expect(await retry.service.acknowledge(retryAck)).toMatchObject({ status: 'closed' });
+      expect(await retry.service.acknowledge(retryAck)).toMatchObject({
+        status: 'closed',
+      });
     });
 
     it('matches a flush that names only the caller SDK id', async () => {
       const h = makeHarness();
       const started = await h.service.handoff(h.request());
       if (!started.ok) throw new Error('handoff should start');
-      expect(await h.service.acknowledge({ callerSessionId: started.tabId, predecessorSessionId: CALLER, handoffPath })).toMatchObject({ status: 'retryable-failure' });
+      expect(
+        await h.service.acknowledge({
+          callerSessionId: started.tabId,
+          predecessorSessionId: CALLER,
+          handoffPath,
+        }),
+      ).toMatchObject({ status: 'retryable-failure' });
       h.service.onCallerTurnFlushed({
         tabId: 'not-the-caller',
         sessionId: CALLER_SDK,
       });
       await tick();
-      expect(h.lifecycle.endSession).toHaveBeenCalledWith(CALLER, 'parent-stop');
+      expect(h.lifecycle.endSession).toHaveBeenCalledWith(
+        CALLER,
+        'parent-stop',
+      );
     });
 
     it('does not arm on refusal', async () => {
@@ -1170,11 +1285,20 @@ describe('SessionHandoffService', () => {
       if (!result.ok) throw new Error('handoff should start');
       h.notifyResolved({ tabId: result.tabId, realSessionId: SUCCESSOR_SDK });
       await tick();
-      expect(await h.service.acknowledge({ callerSessionId: result.tabId, predecessorSessionId: CALLER, handoffPath })).toMatchObject({ status: 'retryable-failure' });
+      expect(
+        await h.service.acknowledge({
+          callerSessionId: result.tabId,
+          predecessorSessionId: CALLER,
+          handoffPath,
+        }),
+      ).toMatchObject({ status: 'retryable-failure' });
       h.service.onCallerTurnFlushed({ tabId: CALLER, sessionId: CALLER });
       await tick();
       expect(h.chain.append).not.toHaveBeenCalled();
-      expect(h.lifecycle.endSession).toHaveBeenCalledWith(CALLER, 'parent-stop');
+      expect(h.lifecycle.endSession).toHaveBeenCalledWith(
+        CALLER,
+        'parent-stop',
+      );
       expect(h.turnState.forceIdle.mock.calls.map((call) => call[0])).toEqual([
         CALLER,
       ]);
@@ -1231,20 +1355,39 @@ describe('SessionHandoffService', () => {
       });
       const started = await h.service.handoff(h.request());
       if (!started.ok) throw new Error('handoff should start');
-      expect(await h.service.acknowledge({ callerSessionId: started.tabId, predecessorSessionId: CALLER, handoffPath })).toMatchObject({ status: 'retryable-failure' });
+      expect(
+        await h.service.acknowledge({
+          callerSessionId: started.tabId,
+          predecessorSessionId: CALLER,
+          handoffPath,
+        }),
+      ).toMatchObject({ status: 'retryable-failure' });
       h.service.onCallerTurnFlushed({ tabId: CALLER, sessionId: CALLER });
       await tick();
-      expect(h.lifecycle.endSession).toHaveBeenCalledWith(CALLER, 'parent-stop');
+      expect(h.lifecycle.endSession).toHaveBeenCalledWith(
+        CALLER,
+        'parent-stop',
+      );
       expect(h.stopLogger.error).toHaveBeenCalledWith(
         expect.stringContaining('forceIdle'),
         expect.any(Error),
       );
 
       const rejected = makeHarness();
-      rejected.lifecycle.endSession.mockRejectedValueOnce(new Error('abort failed'));
-      const rejectedStarted = await rejected.service.handoff(rejected.request());
+      rejected.lifecycle.endSession.mockRejectedValueOnce(
+        new Error('abort failed'),
+      );
+      const rejectedStarted = await rejected.service.handoff(
+        rejected.request(),
+      );
       if (!rejectedStarted.ok) throw new Error('handoff should start');
-      expect(await rejected.service.acknowledge({ callerSessionId: rejectedStarted.tabId, predecessorSessionId: CALLER, handoffPath })).toMatchObject({ status: 'retryable-failure' });
+      expect(
+        await rejected.service.acknowledge({
+          callerSessionId: rejectedStarted.tabId,
+          predecessorSessionId: CALLER,
+          handoffPath,
+        }),
+      ).toMatchObject({ status: 'retryable-failure' });
       expect(() =>
         rejected.service.onCallerTurnFlushed({
           tabId: CALLER,
@@ -1261,11 +1404,16 @@ describe('SessionHandoffService', () => {
 
   it('returns success when acknowledgement record persistence fails after start', async () => {
     const h = makeHarness();
-    jest.spyOn(h.ackStore, 'record').mockRejectedValueOnce(new Error('storage down'));
+    jest
+      .spyOn(h.ackStore, 'record')
+      .mockRejectedValueOnce(new Error('storage down'));
     const result = await h.service.handoff(h.request());
     expect(result.ok).toBe(true);
     expect(h.host.startHandoffSession).toHaveBeenCalledTimes(1);
     expect(h.stopLogger.error).toHaveBeenCalled();
-    expect(await h.service.handoff(h.request())).toMatchObject({ ok: false, refusal: 'already-handed-off' });
+    expect(await h.service.handoff(h.request())).toMatchObject({
+      ok: false,
+      refusal: 'already-handed-off',
+    });
   });
 });
