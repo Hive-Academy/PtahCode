@@ -12,7 +12,10 @@ import {
   AttachmentTrayComponent,
   ComposerAttachmentsService,
 } from '@ptah-extension/chat';
-import { HarnessChatLauncherService } from '../launcher/harness-chat-launcher.service';
+import {
+  HarnessChatLaunchCancelledError,
+  HarnessChatLauncherService,
+} from '../launcher/harness-chat-launcher.service';
 import { WorkspaceHeaderComponent } from '../shell/workspace-header.component';
 
 @Component({
@@ -143,6 +146,8 @@ export class TeamBuilderStartPage {
   protected readonly launcher = inject(HarnessChatLauncherService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
+  /** Cancels a pending launch when the user leaves this page. */
+  private launch: AbortController | null = null;
   readonly intent = signal('');
   readonly touched = signal(false);
   readonly submitted = signal(false);
@@ -150,6 +155,10 @@ export class TeamBuilderStartPage {
   readonly actionError = signal<string | null>(null);
   readonly invalid = () =>
     (this.submitted() || this.touched()) && !this.intent().trim();
+
+  constructor() {
+    this.destroyRef.onDestroy(() => this.launch?.abort());
+  }
 
   async submit(event: Event): Promise<void> {
     event.preventDefault();
@@ -164,9 +173,15 @@ export class TeamBuilderStartPage {
     this.actionError.set(null);
     this.starting.set(true);
     const snapshot = this.attachments.snapshotForSend();
+    const launch = new AbortController();
+    this.launch = launch;
     try {
-      await this.launcher.launchTeamBuilder(this.intent().trim(), snapshot);
+      await this.launcher.launchTeamBuilder(this.intent().trim(), snapshot, {
+        signal: launch.signal,
+      });
     } catch (cause: unknown) {
+      // The user left the page on purpose. There is no failure to show.
+      if (cause instanceof HarnessChatLaunchCancelledError) return;
       const message =
         cause instanceof Error && cause.message
           ? cause.message
@@ -175,6 +190,7 @@ export class TeamBuilderStartPage {
         this.actionError.set(message);
       }
     } finally {
+      if (this.launch === launch) this.launch = null;
       if (!this.destroyRef.destroyed) {
         this.starting.set(false);
       }
@@ -182,6 +198,7 @@ export class TeamBuilderStartPage {
   }
 
   async back(): Promise<void> {
+    this.launch?.abort();
     await this.router.navigate(['/onboarding']);
   }
 }

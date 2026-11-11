@@ -200,10 +200,9 @@ export function mergeParsedHarnessUpdates(
     merged.prompt = {
       systemPrompt:
         update.prompt.systemPrompt ?? base.prompt?.systemPrompt ?? '',
-      enhancedSections: {
-        ...(base.prompt?.enhancedSections ?? {}),
-        ...(update.prompt.enhancedSections ?? {}),
-      },
+      // A supplied map replaces the previous one, as the backend store does.
+      enhancedSections:
+        update.prompt.enhancedSections ?? base.prompt?.enhancedSections ?? {},
     };
   }
   if (update.mcp !== undefined) {
@@ -221,10 +220,8 @@ export function mergeParsedHarnessUpdates(
         update.claudeMd.generateProjectClaudeMd ??
         base.claudeMd?.generateProjectClaudeMd ??
         true,
-      customSections: {
-        ...(base.claudeMd?.customSections ?? {}),
-        ...(update.claudeMd?.customSections ?? {}),
-      },
+      customSections:
+        update.claudeMd.customSections ?? base.claudeMd?.customSections ?? {},
       previewContent:
         update.claudeMd.previewContent ?? base.claudeMd?.previewContent ?? '',
     };

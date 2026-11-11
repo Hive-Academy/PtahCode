@@ -185,6 +185,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
   private stats?: Parameters<IAgentAdapter['setResultStatsCallback']>[0];
   private readonly controls: CodexChatSessionControls;
   private readonly peerQueue: CodexChatPeerQueue;
+  private readonly answerCancellation = new WeakMap<Session, AbortController>();
   private readonly followUpListeners = new Set<(change: QueuedFollowUpStateChange) => void>();
   private missingUsageStoreReported = false;
   private readonly usagePersistenceDisabled =
@@ -728,6 +729,14 @@ export class CodexChatAdapter implements NativeChatAdapter {
     if (session.consumer === 'gateway' || this.sessions.get(session.id) !== session) {
       return;
     }
+    if (session.busy) {
+      // The notice stream's teardown settles the session's turn state. Wait
+      // for the live turn to release the session so it is not forced idle.
+      void this.peerQueue
+        .send(session, () => this.publishAnswerFailureNotice(session))
+        .catch((error: unknown) => this.warnNoticeFailed(error));
+      return;
+    }
     const messageId = `codex-answer-failed:${session.id}:${randomUUID()}`;
     const base = {
       timestamp: Date.now(),
@@ -755,18 +764,40 @@ export class CodexChatAdapter implements NativeChatAdapter {
         },
       });
     } catch (publishError: unknown) {
-      // degradation-audit: reported - the notice is best effort; the delivery failure is logged by the caller.
-      this.ports.logger.warn('Codex answer failure notice could not be published.', {
-        code: 'codex-answer-notice-failed',
-        error: publishError instanceof Error ? publishError.message : 'unknown',
-      });
+      this.warnNoticeFailed(publishError);
     }
+  }
+
+  private warnNoticeFailed(error: unknown): void {
+    // degradation-audit: reported - the notice is best effort; the delivery failure is logged by the caller.
+    this.ports.logger.warn('Codex answer failure notice could not be published.', {
+      code: 'codex-answer-notice-failed',
+      error: error instanceof Error ? error.message : 'unknown',
+    });
+  }
+
+  /** Stop aborts this signal so an answer still waiting in the peer queue is discarded. */
+  private answerSignal(session: Session): AbortSignal {
+    let controller = this.answerCancellation.get(session);
+    if (!controller) {
+      controller = new AbortController();
+      this.answerCancellation.set(session, controller);
+    }
+    return controller.signal;
+  }
+
+  private cancelQueuedAnswers(id: SessionId): void {
+    const session = this.sessions.get(id);
+    if (!session) return;
+    this.answerCancellation.get(session)?.abort();
+    this.answerCancellation.delete(session);
   }
 
   private async deliverUserInputAnswer(
     session: TrackedSession,
     text: string,
   ): Promise<void> {
+    const cancelled = this.answerSignal(session);
     if (
       this.sessions.get(session.id) !== session ||
       session.blocked ||
@@ -781,13 +812,25 @@ export class CodexChatAdapter implements NativeChatAdapter {
         await session.context.steer({ text }, activeTurnId);
         return;
       } catch (error: unknown) {
-        if (!(error instanceof CodexRequestRejectedError)) {
+        // Only a finished turn moves the answer to a new turn. Other refusals
+        // reach the caller, which shows the failure notice.
+        if (
+          !(error instanceof CodexRequestRejectedError) ||
+          error.code !== 'codexTurnNoLongerActive'
+        ) {
           throw this.failure(error, 'steer');
         }
       }
     }
-    await this.peerQueue.send(session, () =>
-      publishUntilAdmitted(
+    await this.peerQueue.send(session, () => {
+      if (cancelled.aborted) {
+        // degradation-audit: reported - Stop withdrew the answer before delivery; this is the intended outcome.
+        this.ports.logger.warn('Codex answer was discarded because the user stopped the turn.', {
+          code: 'codex-user-input-cancelled',
+        });
+        return Promise.resolve();
+      }
+      return publishUntilAdmitted(
         (admission) =>
           this.publish(
             session,
@@ -796,8 +839,8 @@ export class CodexChatAdapter implements NativeChatAdapter {
             admission,
           ),
         this.ports.logger,
-      ),
-    );
+      );
+    });
   }
 
   async listSessionModels(
@@ -1101,6 +1144,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
     return this.controls.interruptCurrentTurn(id);
   }
   interruptSession(id: SessionId): Promise<void> {
+    this.cancelQueuedAnswers(id);
     return this.controls.interruptSession(id);
   }
   executeSlashCommand(

@@ -3178,16 +3178,139 @@ it('publishes a visible notice when delivery of an async answer fails', async ()
       text: 'lost answer',
     }),
   ).rejects.toBeDefined();
+  // The notice stream must not settle the live turn, so it waits for idle.
+  expect(ports.publish).not.toHaveBeenCalled();
+
+  finishTurn.resolve();
+  while (!(await iterator.next()).done) {
+    /* Drain terminal. */
+  }
+  await waitFor(() => published.length > 0);
   expect(published).toContainEqual(
     expect.objectContaining({
       eventType: 'text_delta',
       delta: expect.stringContaining('could not be delivered'),
     }),
   );
+  await adapter.closeSession(id);
+});
+
+it('shows the failure notice and starts no new turn when Codex refuses a steer for a live turn', async () => {
+  const { adapter, context, ports, setUserInputAnswerHandler } = setup();
+  let answerHandler:
+    | ((answer: CodexUserInputAnswer) => Promise<void>)
+    | undefined;
+  setUserInputAnswerHandler.mockImplementation((handler) => {
+    answerHandler = handler;
+  });
+  const finishTurn = deferred<void>();
+  context.events.mockImplementationOnce(() =>
+    (async function* () {
+      yield {
+        ...identity,
+        turnId: 'turn',
+        sequence: 1,
+        type: 'textDelta' as const,
+        itemId: 'item',
+        delta: 'waiting',
+      };
+      await finishTurn.promise;
+      yield terminal;
+    })(),
+  );
+  context.steer.mockRejectedValueOnce(
+    new CodexRequestRejectedError('turn/steer', -32600, 'codexRequestRejected'),
+  );
+  const published: FlatStreamEventUnion[] = [];
+  ports.publish = jest.fn(async (_sessionId, stream) => {
+    for await (const event of stream) published.push(event);
+  });
+
+  const stream = await adapter.startChatSession({ tabId });
+  const iterator = stream[Symbol.asyncIterator]();
+  await iterator.next();
+
+  await expect(
+    answerHandler?.({
+      threadId: id,
+      turnId: 'turn',
+      itemId: 'q-refused',
+      text: 'refused answer',
+    }),
+  ).rejects.toBeDefined();
 
   finishTurn.resolve();
   while (!(await iterator.next()).done) {
     /* Drain terminal. */
   }
+  await waitFor(() => published.length > 0);
+  expect(published).toContainEqual(
+    expect.objectContaining({
+      eventType: 'text_delta',
+      delta: expect.stringContaining('could not be delivered'),
+    }),
+  );
+  expect(context.startTurn).toHaveBeenCalledTimes(1);
+  await adapter.closeSession(id);
+});
+
+it('discards a queued async answer when the user stops the turn before delivery', async () => {
+  const { adapter, context, ports, setUserInputAnswerHandler } = setup();
+  let answerHandler:
+    | ((answer: CodexUserInputAnswer) => Promise<void>)
+    | undefined;
+  setUserInputAnswerHandler.mockImplementation((handler) => {
+    answerHandler = handler;
+  });
+  const finishTurn = deferred<void>();
+  context.events.mockImplementationOnce(() =>
+    (async function* () {
+      yield {
+        ...identity,
+        turnId: 'turn',
+        sequence: 1,
+        type: 'textDelta' as const,
+        itemId: 'item',
+        delta: 'waiting',
+      };
+      await finishTurn.promise;
+      yield terminal;
+    })(),
+  );
+  // The turn ended on the server side, so the answer waits for a new turn.
+  context.steer.mockRejectedValueOnce(
+    new CodexRequestRejectedError('turn/steer', -32600, 'codexTurnNoLongerActive'),
+  );
+
+  const stream = await adapter.startChatSession({ tabId });
+  const iterator = stream[Symbol.asyncIterator]();
+  await iterator.next();
+
+  const delivery = answerHandler?.({
+    threadId: id,
+    turnId: 'turn',
+    itemId: 'q-stopped',
+    text: 'answer before Stop',
+  });
+  await waitFor(() => context.steer.mock.calls.length === 1);
+  await adapter.interruptSession(id);
+
+  finishTurn.resolve();
+  // The stopped turn ends its stream as cancelled.
+  await expect(
+    (async () => {
+      while (!(await iterator.next()).done) {
+        /* Drain terminal. */
+      }
+    })(),
+  ).rejects.toThrow('cancelled');
+  await delivery;
+
+  expect(context.startTurn).toHaveBeenCalledTimes(1);
+  expect(ports.publish).not.toHaveBeenCalled();
+  expect(ports.logger.warn).toHaveBeenCalledWith(
+    'Codex answer was discarded because the user stopped the turn.',
+    { code: 'codex-user-input-cancelled' },
+  );
   await adapter.closeSession(id);
 });

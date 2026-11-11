@@ -266,6 +266,73 @@ describe('HarnessChatProposalStore', () => {
     expect(merged?.isConfigComplete).toBe(true);
   });
 
+  it('keeps completeness from the newer live revision when hydration returns an older proposal', async () => {
+    await store.handleMessage({
+      type: MESSAGE_TYPES.HARNESS_CONFIG_PROPOSED,
+      payload: {
+        sessionId: 'session-older',
+        configUpdates: { name: 'Live Complete' },
+        isConfigComplete: true,
+      },
+    });
+    rpcCallMock.mockResolvedValueOnce(
+      rpcOk<HarnessGetProposalResult>({
+        proposal: {
+          version: 1,
+          workspaceRoot: '/workspaces/older',
+          sessionId: 'session-older',
+          configUpdates: { name: 'Old Draft' },
+          isConfigComplete: false,
+          updatedAt: '2020-01-01T00:00:00.000Z',
+        },
+      }),
+    );
+
+    await store.hydrateForSession('session-older', '/workspaces/older');
+
+    const record = store.proposalFor('session-older');
+    expect(record?.configUpdates.name).toBe('Live Complete');
+    expect(record?.isConfigComplete).toBe(true);
+  });
+
+  it('replaces supplied prompt and CLAUDE.md section maps instead of merging their keys', async () => {
+    await store.handleMessage({
+      type: MESSAGE_TYPES.HARNESS_CONFIG_PROPOSED,
+      payload: {
+        sessionId: 'session-sections',
+        configUpdates: {
+          prompt: { enhancedSections: { keep: 'a', drop: 'b' } },
+          claudeMd: { customSections: { keep: 'a', drop: 'b' } },
+        },
+        isConfigComplete: false,
+      },
+    });
+    await store.handleMessage({
+      type: MESSAGE_TYPES.HARNESS_CONFIG_PROPOSED,
+      payload: {
+        sessionId: 'session-sections',
+        configUpdates: {
+          prompt: { enhancedSections: { keep: 'a2' } },
+          claudeMd: { customSections: { keep: 'a2' } },
+        },
+        isConfigComplete: false,
+      },
+    });
+    await store.handleMessage({
+      type: MESSAGE_TYPES.HARNESS_CONFIG_PROPOSED,
+      payload: {
+        sessionId: 'session-sections',
+        configUpdates: { prompt: { systemPrompt: 'Be brief.' } },
+        isConfigComplete: false,
+      },
+    });
+
+    const updates = store.proposalFor('session-sections')?.configUpdates;
+    expect(updates?.prompt?.enhancedSections).toEqual({ keep: 'a2' });
+    expect(updates?.prompt?.systemPrompt).toBe('Be brief.');
+    expect(updates?.claudeMd?.customSections).toEqual({ keep: 'a2' });
+  });
+
   it('applies a proposal via harness:apply, records appliedCount/warnings, and refreshes HarnessHealthStore', async () => {
     await store.handleMessage({
       type: MESSAGE_TYPES.HARNESS_CONFIG_PROPOSED,

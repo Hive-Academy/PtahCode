@@ -21,7 +21,10 @@ import {
   type NewProjectPlatform,
   type NewProjectStack,
 } from '@ptah-extension/shared';
-import { HarnessChatLauncherService } from '../launcher/harness-chat-launcher.service';
+import {
+  HarnessChatLaunchCancelledError,
+  HarnessChatLauncherService,
+} from '../launcher/harness-chat-launcher.service';
 import { WorkspaceHeaderComponent } from '../shell/workspace-header.component';
 import {
   NEW_PROJECT_AUDIENCE_OPTIONS,
@@ -307,8 +310,11 @@ export class NewProjectIntakePage {
   readonly confirmedNonEmpty = signal(false);
   private workspaceCheck = 0;
   private lastRoot = this.launcher.workspaceRoot();
+  /** Cancels a pending launch when the user leaves this page. */
+  private launch: AbortController | null = null;
 
   constructor() {
+    this.destroyRef.onDestroy(() => this.launch?.abort());
     void this.checkWorkspace(this.lastRoot);
     effect(() => {
       const root = this.launcher.workspaceRoot();
@@ -404,9 +410,15 @@ export class NewProjectIntakePage {
     this.actionError.set(null);
     this.starting.set(true);
     const snapshot = this.attachments.snapshotForSend();
+    const launch = new AbortController();
+    this.launch = launch;
     try {
-      await this.launcher.launchNewProject(intake, snapshot);
+      await this.launcher.launchNewProject(intake, snapshot, {
+        signal: launch.signal,
+      });
     } catch (cause: unknown) {
+      // The user left the page on purpose. There is no failure to show.
+      if (cause instanceof HarnessChatLaunchCancelledError) return;
       const message =
         cause instanceof Error && cause.message
           ? cause.message
@@ -415,6 +427,7 @@ export class NewProjectIntakePage {
         this.actionError.set(message);
       }
     } finally {
+      if (this.launch === launch) this.launch = null;
       if (!this.destroyRef.destroyed) {
         this.starting.set(false);
       }
@@ -422,6 +435,7 @@ export class NewProjectIntakePage {
   }
 
   async back(): Promise<void> {
+    this.launch?.abort();
     await this.router.navigate(['/onboarding']);
   }
 }

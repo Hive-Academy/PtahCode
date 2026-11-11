@@ -26,7 +26,23 @@ export interface HarnessChatLaunchResult {
   readonly tabId: string;
 }
 
+export interface HarnessChatLaunchOptions {
+  /** Aborted when the start page is left; a pending launch then stops before it opens chat. */
+  readonly signal?: AbortSignal;
+}
+
+/** The user left the start page before preparation finished. Not a failure to show. */
+export class HarnessChatLaunchCancelledError extends Error {
+  constructor() {
+    super('The chat launch was cancelled.');
+    this.name = 'HarnessChatLaunchCancelledError';
+  }
+}
+
 type HarnessWorkflowKind = 'harness-new-project' | 'harness-configure';
+
+/** Bounds the wait for the canvas to adopt the new tab. */
+const CANVAS_ADOPT_TIMEOUT_MS = 10_000;
 
 /**
  * Thin launcher for Setup Hub's "New project" and "AI team builder" flows.
@@ -67,6 +83,7 @@ export class HarnessChatLauncherService {
   async launchNewProject(
     intake: NewProjectIntake,
     attachmentSnapshot: LauncherAttachmentSnapshot,
+    options: HarnessChatLaunchOptions = {},
   ): Promise<HarnessChatLaunchResult> {
     const root = this.workspaceRoot();
     if (!root) {
@@ -98,8 +115,10 @@ export class HarnessChatLauncherService {
       );
       throw error;
     }
+    this.assertLaunchCurrent(root, options.signal);
 
     return this.openChatTab({
+      workspacePath: root,
       title: 'New Project',
       workflow: 'harness-new-project',
       preamble: result.data.seedPrompt,
@@ -111,6 +130,7 @@ export class HarnessChatLauncherService {
   async launchTeamBuilder(
     intent: string,
     attachmentSnapshot: LauncherAttachmentSnapshot,
+    options: HarnessChatLaunchOptions = {},
   ): Promise<HarnessChatLaunchResult> {
     const root = this.workspaceRoot();
     if (!root) {
@@ -135,8 +155,10 @@ export class HarnessChatLauncherService {
       );
       throw error;
     }
+    this.assertLaunchCurrent(root, options.signal);
 
     return this.openChatTab({
+      workspacePath: root,
       title: 'AI Team Builder',
       workflow: 'harness-configure',
       preamble: result.data.prompt,
@@ -145,24 +167,38 @@ export class HarnessChatLauncherService {
     });
   }
 
+  /** Rejects a preparation result that no longer belongs to the start page or workspace. */
+  private assertLaunchCurrent(root: string, signal?: AbortSignal): void {
+    if (signal?.aborted) throw new HarnessChatLaunchCancelledError();
+    if (this.workspaceRoot() !== root) {
+      throw new Error(
+        'The workspace changed while the chat was being prepared. Start again.',
+      );
+    }
+  }
+
   private async openChatTab(params: {
+    readonly workspacePath: string;
     readonly title: string;
     readonly workflow: HarnessWorkflowKind;
     readonly preamble: string;
     readonly visibleMessage: string;
     readonly attachmentSnapshot: LauncherAttachmentSnapshot;
   }): Promise<HarnessChatLaunchResult> {
-    const workspacePath = this.workspaceRoot() || null;
     const tabId = this.tabs.createTab(params.title);
     this.tabs.setWorkflow(tabId, params.workflow);
     this.tabs.setFirstMessagePreamble(tabId, params.preamble);
-    void this.appState.requestCanvasTab(
+    const adoption = this.appState.requestCanvasTab(
       tabId,
-      workspacePath,
+      params.workspacePath,
       params.title,
       true,
+      { timeoutMs: CANVAS_ADOPT_TIMEOUT_MS },
     );
     this.appState.setCurrentView('chat');
+    if (!(await adoption)) {
+      await this.discardUnadoptedTab(tabId, params.workflow);
+    }
 
     try {
       const outcome = await this.chatStore.sendOrQueueMessage(
@@ -194,5 +230,34 @@ export class HarnessChatLauncherService {
 
     params.attachmentSnapshot.removeSent();
     return { tabId };
+  }
+
+  /**
+   * The canvas refused, dropped or did not drain the tab. Nothing is sent and
+   * the attachments stay with the start page. Always throws.
+   */
+  private async discardUnadoptedTab(
+    tabId: string,
+    workflow: HarnessWorkflowKind,
+  ): Promise<never> {
+    const error = new Error(
+      'Could not show the new chat on the canvas. Try again.',
+    );
+    this.logger.error(
+      'HarnessChatLauncherService',
+      `Canvas did not adopt the chat tab for ${workflow}`,
+      error,
+    );
+    try {
+      await this.tabs.closeTab(tabId, true);
+    } catch (cause: unknown) {
+      this.logger.error(
+        'HarnessChatLauncherService',
+        'Could not close the chat tab that the canvas did not adopt',
+        cause instanceof Error ? cause : new Error(String(cause)),
+      );
+    }
+    this.actionBanner.showError(error.message);
+    throw error;
   }
 }

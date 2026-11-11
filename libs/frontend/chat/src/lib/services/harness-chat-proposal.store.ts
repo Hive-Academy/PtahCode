@@ -334,12 +334,13 @@ export class HarnessChatProposalStore implements MessageHandler {
       const liveRecord = this._proposals().get(sessionId);
       const pushArrivedWhileHydrating = versionAfter !== versionBefore;
 
-      if (liveRecord && pushArrivedWhileHydrating) {
-        hydratedUpdates = mergeHarnessConfigUpdates(
-          hydratedUpdates,
-          liveRecord.configUpdates,
-        );
-      } else if (liveRecord && liveRecord.updatedAt > proposal.updatedAt) {
+      // The live record wins when it is newer; completeness follows the
+      // same revision as the configuration.
+      const liveWins =
+        liveRecord !== undefined &&
+        (pushArrivedWhileHydrating ||
+          liveRecord.updatedAt > proposal.updatedAt);
+      if (liveRecord && liveWins) {
         hydratedUpdates = mergeHarnessConfigUpdates(
           hydratedUpdates,
           liveRecord.configUpdates,
@@ -350,9 +351,10 @@ export class HarnessChatProposalStore implements MessageHandler {
         sessionId,
         workspaceRoot: workspaceRoot ?? proposal.workspaceRoot,
         configUpdates: hydratedUpdates,
-        isConfigComplete: pushArrivedWhileHydrating
-          ? (liveRecord?.isConfigComplete ?? proposal.isConfigComplete)
-          : proposal.isConfigComplete,
+        isConfigComplete:
+          liveRecord && liveWins
+            ? liveRecord.isConfigComplete
+            : proposal.isConfigComplete,
         updatedAt:
           liveRecord && liveRecord.updatedAt > proposal.updatedAt
             ? liveRecord.updatedAt

@@ -9,6 +9,7 @@ import { ClaudeRpcService } from '@ptah-extension/core';
 import type { NewProjectIntake } from '@ptah-extension/shared';
 import {
   HarnessChatLauncherService,
+  type HarnessChatLaunchOptions,
   type LauncherAttachmentSnapshot,
 } from '../launcher/harness-chat-launcher.service';
 import { OnboardingWorkspaceStore } from '../shell/onboarding-workspace.store';
@@ -32,7 +33,7 @@ describe('NewProjectIntakePage', () => {
   let checkFolderEmpty: jest.Mock<Promise<boolean>, [string?]>;
   let launchNewProject: jest.Mock<
     Promise<{ tabId: string }>,
-    [NewProjectIntake, LauncherAttachmentSnapshot]
+    [NewProjectIntake, LauncherAttachmentSnapshot, HarnessChatLaunchOptions?]
   >;
   let navigate: jest.Mock<Promise<boolean>, [readonly string[]]>;
 
@@ -192,6 +193,7 @@ describe('NewProjectIntakePage', () => {
       expect.objectContaining({
         options: { files: ['/ws/brief.md'], images: undefined },
       }),
+      { signal: expect.any(AbortSignal) },
     );
     expect(navigate).not.toHaveBeenCalled();
     expect(page.attachments.files()).toHaveLength(0);
@@ -247,6 +249,7 @@ describe('NewProjectIntakePage', () => {
       expect.objectContaining({
         options: { files: ['/ws/first.md'], images: undefined },
       }),
+      { signal: expect.any(AbortSignal) },
     );
     expect(page.attachments.files().map((file) => file.path)).toEqual([
       '/ws/later.md',

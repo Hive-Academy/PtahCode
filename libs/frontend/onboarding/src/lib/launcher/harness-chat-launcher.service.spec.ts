@@ -15,6 +15,7 @@ import {
 import type { NewProjectIntake } from '@ptah-extension/shared';
 import { formatIntakeSummary } from '../proposal/new-project-intake.model';
 import {
+  HarnessChatLaunchCancelledError,
   HarnessChatLauncherService,
   type LauncherAttachmentSnapshot,
 } from './harness-chat-launcher.service';
@@ -54,11 +55,13 @@ describe('HarnessChatLauncherService', () => {
     createTab: jest.Mock<string, [string?]>;
     setWorkflow: jest.Mock<void, [string, string]>;
     setFirstMessagePreamble: jest.Mock<void, [string, string]>;
+    closeTab: jest.Mock<Promise<void>, [string, boolean?]>;
   };
+  let config: ReturnType<typeof signal<{ workspaceRoot: string }>>;
   let appState: {
     requestCanvasTab: jest.Mock<
       Promise<boolean>,
-      [string, string | null, string?, boolean?]
+      [string, string | null, string?, boolean?, { timeoutMs?: number }?]
     >;
     setCurrentView: jest.Mock<void, [string]>;
   };
@@ -98,7 +101,11 @@ describe('HarnessChatLauncherService', () => {
       setFirstMessagePreamble: jest.fn((tabId: string, preamble: string) => {
         callOrder.push(`setFirstMessagePreamble:${tabId}:${preamble}`);
       }),
+      closeTab: jest.fn(async (tabId: string) => {
+        callOrder.push(`closeTab:${tabId}`);
+      }),
     };
+    config = signal({ workspaceRoot: '/ws' });
     appState = {
       requestCanvasTab: jest.fn(
         (
@@ -136,10 +143,7 @@ describe('HarnessChatLauncherService', () => {
         { provide: ChatStore, useValue: chatStore },
         { provide: ActionBannerService, useValue: { showError } },
         { provide: ComposerRestoreService, useValue: { restore } },
-        {
-          provide: VSCodeService,
-          useValue: { config: signal({ workspaceRoot: '/ws' }) },
-        },
+        { provide: VSCodeService, useValue: { config } },
         { provide: LoggingService, useValue: { error: loggerError } },
       ],
     });
@@ -314,7 +318,87 @@ describe('HarnessChatLauncherService', () => {
         '/ws',
         'AI Team Builder',
         true,
+        { timeoutMs: 10_000 },
       );
+    });
+
+    it('stops before it opens chat when the start page was left during preparation', async () => {
+      const controller = new AbortController();
+      rpcCall.mockImplementationOnce(async () => {
+        controller.abort();
+        return rpcSuccess({
+          success: true,
+          seedPrompt: 'SYSTEM_SEED_PROMPT',
+          intake: VALID_INTAKE,
+          plugins: { enabledBundled: [], missingExternal: [], availableSkillIds: [] },
+        });
+      });
+      const snapshot = makeSnapshot();
+
+      await expect(
+        service.launchNewProject(VALID_INTAKE, snapshot, {
+          signal: controller.signal,
+        }),
+      ).rejects.toBeInstanceOf(HarnessChatLaunchCancelledError);
+
+      expect(tabs.createTab).not.toHaveBeenCalled();
+      expect(appState.setCurrentView).not.toHaveBeenCalled();
+      expect(chatStore.sendOrQueueMessage).not.toHaveBeenCalled();
+      expect(showError).not.toHaveBeenCalled();
+      expect(snapshot.removeSent).not.toHaveBeenCalled();
+    });
+
+    it('rejects a preparation result when the workspace changed during the RPC', async () => {
+      tabs.activeWorkspacePath = null;
+      rpcCall.mockImplementationOnce(async () => {
+        config.set({ workspaceRoot: '/other' });
+        return rpcSuccess({
+          success: true,
+          seedPrompt: 'SYSTEM_SEED_PROMPT',
+          intake: VALID_INTAKE,
+          plugins: { enabledBundled: [], missingExternal: [], availableSkillIds: [] },
+        });
+      });
+      const snapshot = makeSnapshot();
+
+      await expect(
+        service.launchNewProject(VALID_INTAKE, snapshot),
+      ).rejects.toThrow('The workspace changed while the chat was being prepared.');
+
+      expect(tabs.createTab).not.toHaveBeenCalled();
+      expect(appState.requestCanvasTab).not.toHaveBeenCalled();
+      expect(chatStore.sendOrQueueMessage).not.toHaveBeenCalled();
+      expect(snapshot.removeSent).not.toHaveBeenCalled();
+    });
+
+    it('closes the tab and sends nothing when the canvas does not adopt it', async () => {
+      appState.requestCanvasTab.mockImplementationOnce(async () => {
+        callOrder.push('requestCanvasTab');
+        return false;
+      });
+      rpcCall.mockResolvedValueOnce(
+        rpcSuccess({ prompt: 'CONFIGURE_HARNESS_PREAMBLE' }),
+      );
+      const snapshot = makeSnapshot();
+
+      await expect(
+        service.launchTeamBuilder('Build a QA team', snapshot),
+      ).rejects.toThrow('Could not show the new chat on the canvas. Try again.');
+
+      expect(callOrder).toEqual([
+        'createTab:AI Team Builder',
+        'setWorkflow:tab-42:harness-configure',
+        'setFirstMessagePreamble:tab-42:CONFIGURE_HARNESS_PREAMBLE',
+        'requestCanvasTab',
+        'setCurrentView:chat',
+        'closeTab:tab-42',
+      ]);
+      expect(tabs.closeTab).toHaveBeenCalledWith('tab-42', true);
+      expect(showError).toHaveBeenCalledWith(
+        'Could not show the new chat on the canvas. Try again.',
+      );
+      expect(chatStore.sendOrQueueMessage).not.toHaveBeenCalled();
+      expect(snapshot.removeSent).not.toHaveBeenCalled();
     });
   });
 

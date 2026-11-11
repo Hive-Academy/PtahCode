@@ -7,7 +7,9 @@ import {
 } from '@ptah-extension/chat';
 import { ClaudeRpcService } from '@ptah-extension/core';
 import {
+  HarnessChatLaunchCancelledError,
   HarnessChatLauncherService,
+  type HarnessChatLaunchOptions,
   type LauncherAttachmentSnapshot,
 } from '../launcher/harness-chat-launcher.service';
 import { OnboardingWorkspaceStore } from '../shell/onboarding-workspace.store';
@@ -29,7 +31,7 @@ function submitEvent(): Event {
 describe('TeamBuilderStartPage', () => {
   let launchTeamBuilder: jest.Mock<
     Promise<{ tabId: string }>,
-    [string, LauncherAttachmentSnapshot]
+    [string, LauncherAttachmentSnapshot, HarnessChatLaunchOptions?]
   >;
   let navigate: jest.Mock<Promise<boolean>, [readonly string[]]>;
 
@@ -92,6 +94,7 @@ describe('TeamBuilderStartPage', () => {
       expect.objectContaining({
         options: { files: ['/ws/team.md'], images: undefined },
       }),
+      { signal: expect.any(AbortSignal) },
     );
     expect(navigate).not.toHaveBeenCalled();
     expect(page.attachments.files()).toHaveLength(0);
@@ -114,6 +117,38 @@ describe('TeamBuilderStartPage', () => {
     expect(page.actionError()).toBe(
       'Could not prepare the team builder prompt. Try again.',
     );
+    expect(page.starting()).toBe(false);
+    expect(page.attachments.files()).toHaveLength(1);
+  });
+
+  it('cancels a pending launch on Back and shows no error', async () => {
+    let launchSignal: AbortSignal | undefined;
+    launchTeamBuilder.mockImplementationOnce(
+      (
+        _intent: string,
+        _snapshot: LauncherAttachmentSnapshot,
+        options?: HarnessChatLaunchOptions,
+      ) =>
+        new Promise<{ tabId: string }>((_resolve, reject) => {
+          launchSignal = options?.signal;
+          options?.signal?.addEventListener('abort', () =>
+            reject(new HarnessChatLaunchCancelledError()),
+          );
+        }),
+    );
+    const page = TestBed.runInInjectionContext(
+      () => new TeamBuilderStartPage(),
+    );
+
+    page.intent.set('A research team');
+    page.attachments.addFile(attachment('/ws/team.md'));
+    const pending = page.submit(submitEvent());
+    await page.back();
+    await pending;
+
+    expect(launchSignal?.aborted).toBe(true);
+    expect(navigate).toHaveBeenCalledWith(['/onboarding']);
+    expect(page.actionError()).toBeNull();
     expect(page.starting()).toBe(false);
     expect(page.attachments.files()).toHaveLength(1);
   });
@@ -150,6 +185,7 @@ describe('TeamBuilderStartPage', () => {
       expect.objectContaining({
         options: { files: ['/ws/first.md'], images: undefined },
       }),
+      { signal: expect.any(AbortSignal) },
     );
     expect(page.attachments.files().map((file) => file.path)).toEqual([
       '/ws/later.md',
