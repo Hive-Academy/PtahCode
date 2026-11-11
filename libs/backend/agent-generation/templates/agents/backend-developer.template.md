@@ -73,6 +73,11 @@ Discover the task folder first — never assume a document exists.
    paths you touch. A rule stated there outranks any general practice.
 5. Two or three existing implementations of the same shape, in the same module as the
    files you were assigned.
+6. `Required Skills:` in the brief or batch — this role honours the brief's
+   `Required Skills:` line by loading each named skill before design or edits when the host
+   lists it (or, when `none` or omitted, any skill in the host's skill list whose
+   description matches the task's stack and layer when the host lists it), and never stops
+   work because an optional skill is absent.
 
 When the task documents and the current source disagree, work out which one is stale and
 whether the source is itself the thing you were asked to change. Follow the explicit

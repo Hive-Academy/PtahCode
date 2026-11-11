@@ -410,7 +410,7 @@ OUTPUT FORMAT
         sdkConfig?.pluginPaths,
       );
       if (pluginSkills.length > 0) {
-        systemPrompt += `\n\n## Available Plugin Skills\nReference only skills relevant to this agent's role; every skill listed here is one this agent may invoke.\n${formatSkillsForPrompt(
+        systemPrompt += `\n\n## Available Plugin Skills\nReference only skills relevant to this agent's role; every skill listed here is one this agent may invoke. When an available skill's description matches this role's work, the generated role instructions must name that skill by its exact id and say to load it before that work; never name a skill that is not in the list.\n${formatSkillsForPrompt(
           pluginSkills,
         )}`;
       }
@@ -644,6 +644,7 @@ ${sectionDescriptions}
 4. No counts, no version numbers, no percentages, no dates, no directory inventories. A section containing any of them is discarded and the generic blueprint text ships instead.
 5. 8 to 15 lines per section. Prefer bullets over paragraphs.
 6. If a section's evidence supports fewer than about six distinct path-backed claims, return an empty string for that section. The authored blueprint text ships in its place, which is better than a padded section.
+7. When an available skill's description under Available Plugin Skills matches this role's work, the generated role instructions must name that skill by its exact id and say to load it before that work; never name a skill that is not in the list.
 
 Return a JSON object: { "sections": { "<sectionId>": "<markdown or empty string>", ... } }`;
   }

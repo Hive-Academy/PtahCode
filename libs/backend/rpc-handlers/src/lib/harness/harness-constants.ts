@@ -189,6 +189,8 @@ function buildProcedureSteps(
     profile && availableSkillIds.has(profile.skills.architect)
       ? profile.skills.architect
       : null;
+  const domainSkillId = profile?.skills.domain ?? 'ddd-architecture';
+  const domain = availableSkillIds.has(domainSkillId) ? domainSkillId : null;
 
   if (initializer) {
     steps.push(`Use the \`${initializer}\` skill and run its Stage A.`);
@@ -239,13 +241,14 @@ function buildProcedureSteps(
     );
   }
 
+  const domainClause = domain
+    ? `invoke the \`${domain}\` skill to name the bounded contexts`
+    : 'name the bounded contexts directly from the domain model';
+  const architectVerb = domain ? 'then the' : 'then invoke the';
   const architectClause = architect
-    ? `then the \`${architect}\` skill to derive the library layout from them`
+    ? `${architectVerb} \`${architect}\` skill to derive the library layout from them`
     : 'then derive the library layout from them using the conventions of the platform we settled on';
-  steps.push(
-    `Once discovery is settled, invoke the \`${profile?.skills.domain ?? 'ddd-architecture'}\` ` +
-      `skill to name the bounded contexts, ${architectClause}.`,
-  );
+  steps.push(`Once discovery is settled, ${domainClause}, ${architectClause}.`);
 
   steps.push('Write the phased plan to `.ptah/roadmap.md`.');
   steps.push(
