@@ -255,7 +255,9 @@ function buildProcedureSteps(
   steps.push(
     "Finally, design this project's AI team with the ptah.harness tools " +
       '(searchSkills, searchMcpRegistry, createSkill, proposeConfig): choose ' +
-      'the agents, skills, and MCP servers that fit what we settled on, then ' +
+      'the agents, skills, and MCP servers that fit what we settled on. This ' +
+      'is the development team that builds, tests and reviews the product, ' +
+      'not a feature of the product. Then ' +
       'call proposeConfig with isConfigComplete=true so I can review and apply ' +
       'it — applying is my call, not yours.',
   );
@@ -291,7 +293,8 @@ export function buildNewProjectSeedPrompt(
   ).map((step, index) => `${index + 1}. ${step}`);
 
   return [
-    "I'm starting a new project. Here is what I already know about it.",
+    "I'm starting a new software product that I will build and ship to my own " +
+      'users. Here is what I already know about it.',
     '',
     renderIntakeBlock(intake, profile),
     ...renderEnvironmentBlock(profile, context),

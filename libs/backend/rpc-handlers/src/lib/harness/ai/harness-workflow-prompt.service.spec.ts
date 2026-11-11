@@ -56,7 +56,7 @@ describe('HarnessWorkflowPromptService', () => {
       expect(prompt).toContain('acme-app');
       expect(prompt).toContain('proposeConfig');
       expect(prompt).toContain('What Apply Writes');
-      expect(prompt.includes('Project Planning')).toBe(isEmpty);
+      expect(prompt.includes('## Empty Workspace')).toBe(isEmpty);
       expect(prompt).not.toContain("## User's Intent");
       expect(prompt).not.toContain('undefined');
     },
@@ -92,26 +92,40 @@ describe('HarnessWorkflowPromptService', () => {
     expect(prompt).toContain('(none discovered)');
   });
 
-  it('leads with project planning instructions for an empty workspace', async () => {
+  it('frames the session as a team Ptah runs, not a product build', async () => {
+    const { service } = buildService();
+
+    const { prompt } = await service.composePrompt({
+      mode: 'configure-harness',
+      intent: 'a social media team',
+    });
+
+    expect(prompt).toContain('a team that Ptah itself runs');
+    expect(prompt).toMatch(/not an application/i);
+    expect(prompt).toContain('Setup > New project');
+    expect(prompt).not.toMatch(/coding assistant configuration/i);
+    expect(prompt).toContain('drive the configuration to completion');
+  });
+
+  it('interviews about the work in an empty workspace and plans no project', async () => {
     const { service, workspaceContext } = buildService();
     workspaceContext.isWorkspaceEffectivelyEmpty.mockResolvedValue(true);
 
     const { prompt } = await service.composePrompt({
       mode: 'configure-harness',
-      intent: 'build something new',
+      intent: 'a social media team',
     });
 
-    expect(prompt).toContain('Project Planning');
-    expect(prompt).toContain('README');
-    expect(prompt).toMatch(/interview the user/i);
-    expect(prompt).toMatch(/propose an architecture/i);
-    const planningIndex = prompt.indexOf('Project Planning');
-    const teamIndex = prompt.indexOf('design the AI team');
-    expect(planningIndex).toBeGreaterThan(-1);
-    expect(planningIndex).toBeLessThan(teamIndex);
+    expect(prompt).toContain('## Empty Workspace');
+    expect(prompt).toMatch(/interview the user about the work/i);
+    expect(prompt).not.toContain('Project Planning');
+    expect(prompt).not.toMatch(/propose an architecture/i);
+    expect(prompt.indexOf('## Empty Workspace')).toBeLessThan(
+      prompt.indexOf('## Available Agents'),
+    );
   });
 
-  it('keeps the existing-workspace flow when the workspace is not empty', async () => {
+  it('leaves the empty workspace block out when the workspace has files', async () => {
     const { service } = buildService();
 
     const { prompt } = await service.composePrompt({
@@ -119,8 +133,7 @@ describe('HarnessWorkflowPromptService', () => {
       intent: 'anything',
     });
 
-    expect(prompt).not.toContain('Project Planning');
-    expect(prompt).toContain('drive the configuration to completion');
+    expect(prompt).not.toContain('## Empty Workspace');
   });
 
   it('names no Claude-only tool in either variant', async () => {

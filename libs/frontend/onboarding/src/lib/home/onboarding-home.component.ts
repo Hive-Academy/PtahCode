@@ -203,7 +203,13 @@ interface StatusChip {
               Project guidance
             </li>
           </ol>
-          <button type="button" class="relative z-10 mt-2 w-fit text-sm link" (click)="analyzeAnotherProject()">Analyze another project</button>
+          <button
+            type="button"
+            class="relative z-10 mt-2 w-fit text-sm link"
+            (click)="analyzeAnotherProject()"
+          >
+            Analyze another project
+          </button>
 
           @if (statusUnavailable()) {
             <div
@@ -271,7 +277,7 @@ interface StatusChip {
         <ptah-onboarding-path-tile
           testId="new-project"
           title="New project"
-          description="Answer five short questions to start a guided project setup session in chat."
+          description="Build a product you ship to your own users, such as a SaaS, a web app or an API. Answer five short questions and plan it in chat."
           callToAction="Start a project"
           [icon]="icons.folderPlus"
           [link]="newProjectLink"
@@ -282,7 +288,7 @@ interface StatusChip {
         <ptah-onboarding-path-tile
           testId="team-builder"
           title="AI team builder"
-          description="Describe the team you want to configure agents, skills and MCP servers in chat."
+          description="Set up a team that Ptah runs for you, such as social media, research or support. Describe the work and shape its agents, skills and tools in chat."
           callToAction="Build a team"
           [icon]="icons.users"
           [link]="teamBuilderLink"

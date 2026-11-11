@@ -9,7 +9,11 @@ import {
   type OnboardingFlag,
 } from '../first-run/onboarding-flag.service';
 import { ProviderReadinessStore } from '../ready/provider-readiness.store';
-import { deriveChosen, type ProviderReadinessState, type ProviderReadinessView } from '../ready/provider-readiness.derive';
+import {
+  deriveChosen,
+  type ProviderReadinessState,
+  type ProviderReadinessView,
+} from '../ready/provider-readiness.derive';
 import { OnboardingHomeComponent } from './onboarding-home.component';
 import { OnboardingWorkspaceStore } from '../shell/onboarding-workspace.store';
 import { WizardRpcService } from '@ptah-extension/setup-wizard';
@@ -62,16 +66,38 @@ describe('OnboardingHomeComponent', () => {
   function createReadinessStore(available: boolean) {
     return {
       available,
-      chosen: signal(deriveChosen({ kind: 'claude-cli' }, providerView('claude-cli', 'checking'), providerView('openai-codex', 'checking'))),
+      chosen: signal(
+        deriveChosen(
+          { kind: 'claude-cli' },
+          providerView('claude-cli', 'checking'),
+          providerView('openai-codex', 'checking'),
+        ),
+      ),
       refresh: jest.fn().mockResolvedValue(undefined),
     };
   }
-  function providerView(provider: ProviderReadinessView['provider'], state: ProviderReadinessState): ProviderReadinessView {
-    return { provider, state, errorCause: state === 'slow' ? 'timeout' : null,
-      failedFact: null, path: null, version: null, source: null };
+  function providerView(
+    provider: ProviderReadinessView['provider'],
+    state: ProviderReadinessState,
+  ): ProviderReadinessView {
+    return {
+      provider,
+      state,
+      errorCause: state === 'slow' ? 'timeout' : null,
+      failedFact: null,
+      path: null,
+      version: null,
+      source: null,
+    };
   }
   function setReadiness(state: ProviderReadinessState): void {
-    readiness.chosen.set(deriveChosen({ kind: 'claude-cli' }, providerView('claude-cli', state), providerView('openai-codex', 'checking')));
+    readiness.chosen.set(
+      deriveChosen(
+        { kind: 'claude-cli' },
+        providerView('claude-cli', state),
+        providerView('openai-codex', 'checking'),
+      ),
+    );
     fixture.detectChanges();
   }
   function useReadiness(available: boolean): void {
@@ -111,8 +137,25 @@ describe('OnboardingHomeComponent', () => {
         { provide: AppStateManager, useValue: { setCurrentView } },
         { provide: LoggingService, useValue: { warn: jest.fn() } },
         { provide: OnboardingResumeStore, useValue: resume },
-        { provide: OnboardingWorkspaceStore, useValue: { isElectron: false, active: signal(null), activePath: workspacePath, readyForActivePath: workspaceReady, folders: signal([]), activeIndex: signal(-1) } },
-        { provide: WizardRpcService, useValue: { getAnalysisStatus: jest.fn().mockResolvedValue({ state: 'missing' }) } },
+        {
+          provide: OnboardingWorkspaceStore,
+          useValue: {
+            isElectron: false,
+            active: signal(null),
+            activePath: workspacePath,
+            readyForActivePath: workspaceReady,
+            folders: signal([]),
+            activeIndex: signal(-1),
+          },
+        },
+        {
+          provide: WizardRpcService,
+          useValue: {
+            getAnalysisStatus: jest
+              .fn()
+              .mockResolvedValue({ state: 'missing' }),
+          },
+        },
         { provide: AnalysisStepStore, useValue: { useAnalysis: jest.fn() } },
       ],
     });
@@ -201,10 +244,10 @@ describe('OnboardingHomeComponent', () => {
     );
     expect(descriptions[0]).toBeTruthy();
     expect(descriptions[1]).toBe(
-      'Answer five short questions to start a guided project setup session in chat.',
+      'Build a product you ship to your own users, such as a SaaS, a web app or an API. Answer five short questions and plan it in chat.',
     );
     expect(descriptions[2]).toBe(
-      'Describe the team you want to configure agents, skills and MCP servers in chat.',
+      'Set up a team that Ptah runs for you, such as social media, research or support. Describe the work and shape its agents, skills and tools in chat.',
     );
   });
 
@@ -374,14 +417,18 @@ describe('OnboardingHomeComponent', () => {
     it('shows Taking longer in the strip without a banner after a mount timeout', () => {
       render();
       setReadiness('slow');
-      expect(el().querySelector('li[data-step="1"]')?.textContent).toContain('Taking longer');
+      expect(el().querySelector('li[data-step="1"]')?.textContent).toContain(
+        'Taking longer',
+      );
       expect(byTestId('connection-readiness-banner')).toBeNull();
     });
 
     it('links "Review your connection and settings" to stage 1 in the footer', () => {
       render();
       const link = byTestId<HTMLAnchorElement>('onboarding-review-ready');
-      expect(link?.textContent?.trim()).toBe('Review your connection and settings');
+      expect(link?.textContent?.trim()).toBe(
+        'Review your connection and settings',
+      );
       expect(link?.getAttribute('href')).toBe('/onboarding/ready');
     });
   });
@@ -391,7 +438,13 @@ describe('OnboardingHomeComponent', () => {
 
     it('renders no strip, banner or link and reads nothing', () => {
       render();
-      readiness.chosen.set(deriveChosen({ kind: 'openai-codex' }, providerView('claude-cli', 'checking'), providerView('openai-codex', 'missing')));
+      readiness.chosen.set(
+        deriveChosen(
+          { kind: 'openai-codex' },
+          providerView('claude-cli', 'checking'),
+          providerView('openai-codex', 'missing'),
+        ),
+      );
       fixture.detectChanges();
       expect(el().querySelector('ptah-ready-strip')).toBeNull();
       expect(el().querySelector('ptah-connection-readiness-banner')).toBeNull();

@@ -55,7 +55,8 @@ import { WorkspaceHeaderComponent } from '../shell/workspace-header.component';
             AI team builder
           </h1>
           <p class="text-sm text-base-content-muted">
-            Describe the team you want. The agent proposes it.
+            For a team that Ptah runs for you, not a product you ship. Describe
+            the work and the agent proposes its agents, skills and tools.
           </p>
         </div>
       </header>
@@ -79,6 +80,7 @@ import { WorkspaceHeaderComponent } from '../shell/workspace-header.component';
             id="team-intent"
             name="intent"
             class="textarea textarea-bordered mt-2 min-h-[140px] w-full"
+            placeholder="Example: a social media team that plans a weekly content calendar, drafts posts for each channel and reviews them before I publish."
             [ngModel]="intent()"
             (ngModelChange)="intent.set($event)"
             (blur)="touched.set(true)"

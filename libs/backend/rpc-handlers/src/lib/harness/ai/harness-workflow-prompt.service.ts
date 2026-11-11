@@ -57,7 +57,7 @@ READ THE STATUS FIELD. Both searches return \`status\` ('ok' | 'degraded') and a
 
     const applyExpectations = `## What Apply Writes
 When the user clicks Apply, Ptah materializes the configuration:
-- \`.claude/CLAUDE.md\` — the project system prompt / guidance.
+- \`.claude/CLAUDE.md\` — the team's system prompt / guidance.
 - \`.claude/agents/*.md\` — one file per designed subagent.
 - \`~/.ptah/plugins/ptah-harness-*/skills/*/SKILL.md\` — one per entry in skills.createdSkills, written at apply time if you did not already author it with createSkill.
 - \`.claude/skills/\` — junctions for skills that exist on disk under an enabled plugin or a ptah-harness-* plugin, PLUS every skills.sh skill installed from \`skills.selectedSkillRefs\`.
@@ -75,42 +75,40 @@ for a local server, or \`config: { type: 'http', url: 'https://…/mcp' }\` for 
 An entry without a \`config\` is still described in CLAUDE.md but is NOT installed, and the user is warned to add it by hand — so only omit the config when you genuinely cannot determine the transport.
 Set the user's expectations accordingly as the design firms up.`;
 
-    const planningBlock = `## Project Planning (do this first — the workspace is empty)
-This workspace has no project yet. Before designing any AI team, plan the project with the user:
-1. Scan the workspace for any seed documents the user dropped in — use your file reading and searching tools to find and read README files, PRDs, specs, and anything under docs/.
-2. Interview the user about what they want to build: goals, target users, stack preferences, and constraints.
-3. Propose an architecture and a plan, and confirm it with the user.
-4. Only then design the AI team (agents, skills, MCP servers) that fits the planned project — leverage the available skills and subagent setup below, and call proposeConfig as decisions firm up.`;
+    const scopeBlock = `## What You Are Building
+The user wants a team that Ptah itself runs for them: its own agents, skills, plugins and MCP servers, working inside this workspace. The team can do any kind of work the user names, for example social media management, research, customer support, operations, content, or software work on an existing codebase.
+- The deliverable is the team configuration, not an application. Do not plan, architect or scaffold a software product here.
+- Design around the work: who does what, which recurring tasks each agent owns, what each agent hands to the next, which skills hold the team's own methods, and which MCP servers reach the outside tools the work needs (for example publishing, calendars, analytics, ticketing).
+- Write the system prompt and the agent descriptions in the language of the team's domain. Do not assume the work is coding unless the user says so or the workspace clearly is a codebase.
+- If the user actually wants to build a product to ship to their own users (a SaaS, an app, an API), tell them once that Setup > New project is the guided path for that, then continue only with a team they want Ptah to run.`;
+
+    const emptyWorkspaceBlock = `## Empty Workspace
+This workspace has no files yet. That is normal for a team that does not work on code: the folder becomes the team's working directory.
+1. Read any seed documents the user dropped in or attached (briefs, brand guides, process notes).
+2. Interview the user about the work: the goal, the recurring tasks, the tools and accounts involved, what needs their approval, and what a good result looks like.
+3. Then design the team and call proposeConfig as decisions firm up.`;
 
     const intentBlock =
       'contextOnly' in params && params.contextOnly
         ? ''
         : `\n\n## User's Intent\n${params.intent}`;
 
-    const empty = `You are a harness architect collaborating with a user to plan a brand-new project and build the AI coding assistant configuration that will drive it. Work conversationally.
+    const opening =
+      'You are a team architect collaborating with a user to design a team that Ptah runs for them. Work conversationally and drive the configuration to completion.';
+
+    const prompt = `${opening}
 
 ## Workspace
 ${contextBlock}
 
-${planningBlock}
-
-## Available Agents
-${agentList}
-
-## Available Skills
-${skillList}
-
-${toolsBlock}
-
-${applyExpectations}
-
-Ask clarifying questions when intent is unclear, and call proposeConfig once the project plan and the AI team that supports it are firm.${intentBlock}`;
-
-    const existing = `You are a harness architect collaborating with a user to build their AI coding assistant configuration. Work conversationally and drive the configuration to completion.
-
-## Workspace
-${contextBlock}
-
+${scopeBlock}
+${
+  isEmptyWorkspace
+    ? `
+${emptyWorkspaceBlock}
+`
+    : ''
+}
 ## Available Agents
 ${agentList}
 
@@ -123,6 +121,6 @@ Actively search for and recommend relevant skills and MCP servers beyond what th
 
 ${applyExpectations}${intentBlock}`;
 
-    return { prompt: isEmptyWorkspace ? empty : existing };
+    return { prompt };
   }
 }

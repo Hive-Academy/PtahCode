@@ -68,7 +68,8 @@ import {
             New project
           </h1>
           <p class="text-sm text-base-content-muted">
-            Tell the agent what you want to build.
+            For a product you build and ship to your own users. Tell the agent
+            what you want to build.
           </p>
         </div>
       </header>
