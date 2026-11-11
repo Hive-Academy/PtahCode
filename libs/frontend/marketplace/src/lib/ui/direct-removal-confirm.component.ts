@@ -5,6 +5,7 @@ import {
   input,
   output,
 } from '@angular/core';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** A server Ptah did not write, and the config files removing it edits. */
 export interface DirectRemovalTarget {
@@ -36,6 +37,7 @@ export interface DirectRemovalTarget {
  * ```
  */
 @Component({
+  imports: [PtahButtonDirective],
   selector: 'ptah-direct-removal-confirm',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -78,7 +80,7 @@ export interface DirectRemovalTarget {
       <div class="flex gap-2">
         <button
           type="button"
-          class="btn btn-error btn-xs"
+          ptahButton variant="danger" size="xs"
           data-testid="direct-removal-confirm-button"
           (click)="confirmed.emit()"
         >
@@ -86,7 +88,7 @@ export interface DirectRemovalTarget {
         </button>
         <button
           type="button"
-          class="btn btn-ghost btn-xs"
+          ptahButton variant="ghost" size="xs"
           data-testid="direct-removal-cancel"
           (click)="cancelled.emit()"
         >

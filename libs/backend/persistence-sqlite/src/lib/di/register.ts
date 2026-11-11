@@ -15,6 +15,7 @@ import type { Logger } from '@ptah-extension/vscode-core';
 import { PERSISTENCE_TOKENS } from './tokens';
 import { SqliteConnectionService } from '../sqlite-connection.service';
 import { SqliteBackupService } from '../backup.service';
+import { SqliteTableSizeReportService } from '../table-size-report.service';
 import { VecStatusService } from '../vec-status.service';
 import { SqliteIntegrityService } from '../integrity/integrity-check.service';
 import { DbWorkerRunner } from '../integrity/db-worker-runner';
@@ -50,6 +51,12 @@ export function registerPersistenceSqliteServices(
   container.registerSingleton(
     PERSISTENCE_TOKENS.BACKUP_SERVICE,
     SqliteBackupService,
+  );
+  // Singleton: it logs its report once per process. Resolves the worker
+  // factory optionally, so a host without a worker is a silent no-op.
+  container.registerSingleton(
+    PERSISTENCE_TOKENS.SQLITE_TABLE_SIZE_REPORT,
+    SqliteTableSizeReportService,
   );
   container.registerSingleton(PERSISTENCE_TOKENS.VEC_STATUS, VecStatusService);
   // Stateless over the shared connection; a singleton so every consumer gets

@@ -75,6 +75,11 @@ import {
   type IntegrityCheckRequest,
   type IntegrityWorkerOutbound,
 } from './integrity-worker-protocol';
+import {
+  isTableSizeRequest,
+  performTableSizeReport,
+  type TableSizeEnvironment,
+} from './table-size-protocol';
 
 /**
  * Electron utilityProcess `process.parentPort` (a `MessagePortMain`): its
@@ -133,6 +138,7 @@ if (electronParentPort) {
  */
 interface ReadOnlyDatabase extends BackupSourceDatabase {
   pragma(source: string, options?: { simple?: boolean }): unknown;
+  prepare(sql: string): { all(...params: unknown[]): unknown[] };
 }
 
 /**
@@ -312,7 +318,17 @@ const backupEnvironment: BackupEnvironment = {
   inFlight: new Set<string>(),
 };
 
+/** `table-size` command environment: read-only opener plus a wall clock. */
+const tableSizeEnvironment: TableSizeEnvironment = {
+  openReadOnly,
+  now: () => Date.now(),
+};
+
 subscribe((msg: unknown) => {
+  if (isTableSizeRequest(msg)) {
+    post(performTableSizeReport(tableSizeEnvironment, msg));
+    return;
+  }
   if (isIntegrityCheckRequest(msg)) {
     post(runCheck(msg));
     return;

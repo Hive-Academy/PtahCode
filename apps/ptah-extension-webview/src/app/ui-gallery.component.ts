@@ -130,11 +130,12 @@ export class UiGalleryComponent {
   ];
 
   public constructor() {
-    // The theme switch is a preview. Restore the theme of the user on exit.
+    // The theme switch is a preview. followTheme does not persist, so the saved
+    // theme of the user is never changed. Restore the shown theme on exit.
     const themeOnEntry = this.currentTheme();
     inject(DestroyRef).onDestroy(() => {
       if (this.currentTheme() !== themeOnEntry) {
-        this.themeService.setTheme(themeOnEntry);
+        this.themeService.followTheme(themeOnEntry);
       }
     });
   }
@@ -144,6 +145,6 @@ export class UiGalleryComponent {
   }
 
   public setTheme(theme: 'ptah-glass' | 'ptah-glass-light'): void {
-    this.themeService.setTheme(theme);
+    this.themeService.followTheme(theme);
   }
 }

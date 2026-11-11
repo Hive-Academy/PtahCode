@@ -13,7 +13,7 @@ import {
   RefreshCw,
   TriangleAlert,
 } from 'lucide-angular';
-import { NativePopoverComponent } from '@ptah-extension/ui';
+import { NativePopoverComponent, PtahButtonDirective } from '@ptah-extension/ui';
 import { AppStateManager, VSCodeService } from '@ptah-extension/core';
 import { HARNESS_BLOCKED_RECONCILE_STEPS } from '@ptah-extension/shared';
 import { HarnessHealthStore } from './harness-health.store';
@@ -59,6 +59,7 @@ const TONE_CLASSES: Readonly<Record<HarnessBadgeTone, string>> = {
   selector: 'ptah-harness-health-badge',
   standalone: true,
   imports: [
+    PtahButtonDirective,
     LucideAngularModule,
     NativePopoverComponent,
     HarnessTargetRowComponent,
@@ -195,7 +196,7 @@ const TONE_CLASSES: Readonly<Record<HarnessBadgeTone, string>> = {
             }
             <button
               type="button"
-              class="btn btn-primary btn-xs"
+              ptahButton variant="primary" size="xs"
               data-testid="harness-reconcile"
               [disabled]="store.busy()"
               (click)="reconcile()"

@@ -29,6 +29,7 @@ import {
   StorefrontPanelComponent,
   resolveInstalledBrandSlug,
   resolveListingBrandSlug,
+  PtahButtonDirective,
 } from '@ptah-extension/ui';
 import type {
   McpOAuthConnectedRecord,
@@ -134,6 +135,7 @@ function isProbableServerUrl(value: string): boolean {
   selector: 'ptah-oauth-surface',
   standalone: true,
   imports: [
+    PtahButtonDirective,
     LucideAngularModule,
     BrandMarkComponent,
     CatalogCardComponent,
@@ -161,7 +163,7 @@ function isProbableServerUrl(value: string): boolean {
           <div class="alert alert-error alert-sm py-1 px-2 mb-3">
             <span class="text-xs">{{ connectError() }}</span>
             <button
-              class="btn btn-ghost btn-xs"
+              ptahButton variant="ghost" size="xs"
               (click)="connectError.set(null)"
               type="button"
             >
@@ -341,7 +343,7 @@ function isProbableServerUrl(value: string): boolean {
           <div class="alert alert-error alert-sm py-1 px-2">
             <span class="text-xs">{{ loadError() }}</span>
             <button
-              class="btn btn-ghost btn-xs"
+              ptahButton variant="ghost" size="xs"
               (click)="reload()"
               type="button"
             >
@@ -373,7 +375,7 @@ function isProbableServerUrl(value: string): boolean {
                 <div card-actions class="flex items-center gap-2">
                   @if (card.status !== 'connected') {
                     <button
-                      class="btn btn-ghost btn-sm"
+                      ptahButton variant="ghost" size="sm"
                       [disabled]="reconnectingKeys().has(card.server.serverKey)"
                       (click)="reconnect(card.server)"
                       type="button"

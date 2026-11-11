@@ -29,7 +29,11 @@ const SUMMARY: UsageSummary = {
   pricing: { source: 'bundled', asOf: null },
 };
 
-function setup(options?: { result?: unknown; reject?: unknown }) {
+function setup(options?: {
+  result?: unknown;
+  reject?: unknown;
+  gate?: Promise<void>;
+}) {
   const logger = {
     debug: jest.fn(),
     info: jest.fn(),
@@ -43,6 +47,7 @@ function setup(options?: { result?: unknown; reject?: unknown }) {
     },
   };
   const summarize = jest.fn(async () => {
+    if (options?.gate) await options.gate;
     if (options && 'reject' in options) throw options.reject;
     return options && 'result' in options ? options.result : SUMMARY;
   });
@@ -114,5 +119,50 @@ describe('AnalyticsRpcHandlers', () => {
     const { call, logger } = setup({ result: { version: 2 } });
     expect(await codeOf(call({ range: 7 }))).toBe('PERSISTENCE_UNAVAILABLE');
     expect(logger.error).toHaveBeenCalledTimes(1);
+  });
+  describe('in-flight coalescing', () => {
+    function gate(): { promise: Promise<void>; open: () => void } {
+      let open: () => void = () => undefined;
+      const promise = new Promise<void>((resolve) => {
+        open = resolve;
+      });
+      return { promise, open };
+    }
+
+    it('shares one run between identical concurrent calls', async () => {
+      const g = gate();
+      const { call, summarize } = setup({ gate: g.promise });
+      const first = call({ range: 7 });
+      const second = call({ range: 7 });
+      g.open();
+      const [a, b] = await Promise.all([first, second]);
+      expect(summarize).toHaveBeenCalledTimes(1);
+      expect(a).toEqual(SUMMARY);
+      expect(b).toBe(a);
+    });
+
+    it('runs separately for different params', async () => {
+      const g = gate();
+      const { call, summarize } = setup({ gate: g.promise });
+      const first = call({ range: 7 });
+      const second = call({ range: 30 });
+      g.open();
+      await Promise.all([first, second]);
+      expect(summarize).toHaveBeenCalledTimes(2);
+    });
+
+    it('clears the entry after a rejected run', async () => {
+      const { call, summarize } = setup({ reject: new Error('boom') });
+      expect(await codeOf(call({ range: 7 }))).toBe('PERSISTENCE_UNAVAILABLE');
+      expect(await codeOf(call({ range: 7 }))).toBe('PERSISTENCE_UNAVAILABLE');
+      expect(summarize).toHaveBeenCalledTimes(2);
+    });
+
+    it('runs again after the previous run settled', async () => {
+      const { call, summarize } = setup();
+      await call({ range: 7 });
+      await call({ range: 7 });
+      expect(summarize).toHaveBeenCalledTimes(2);
+    });
   });
 });

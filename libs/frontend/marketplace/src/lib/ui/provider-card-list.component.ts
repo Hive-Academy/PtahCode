@@ -10,7 +10,7 @@ import {
   LucideAngularModule,
   RefreshCw,
 } from 'lucide-angular';
-import { BrandMarkComponent } from '@ptah-extension/ui';
+import { BrandMarkComponent, PtahButtonDirective } from '@ptah-extension/ui';
 
 import { PTAH_SESSIONS_LABEL } from '../data/coverage';
 import type { ProviderRow } from '../data/provider-row';
@@ -66,6 +66,7 @@ const SKELETON_CARDS = [0, 1, 2] as const;
   selector: 'ptah-provider-card-list',
   standalone: true,
   imports: [
+    PtahButtonDirective,
     LucideAngularModule,
     BrandMarkComponent,
     RemovalLockBadgeComponent,
@@ -150,7 +151,7 @@ const SKELETON_CARDS = [0, 1, 2] as const;
             @if (emptyActionLabel(); as actionLabel) {
               <button
                 type="button"
-                class="btn btn-primary btn-sm"
+                ptahButton variant="primary" size="sm"
                 data-testid="provider-cards-empty-action"
                 (click)="emptyActionRequested.emit()"
               >

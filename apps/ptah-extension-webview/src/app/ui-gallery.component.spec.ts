@@ -6,10 +6,11 @@ import { UiGalleryComponent } from './ui-gallery.component';
 
 function createThemeServiceStub(initial: ThemeName = 'ptah-glass') {
   const currentTheme = signal<ThemeName>(initial);
-  const setTheme = jest.fn<void, [ThemeName]>((theme) => {
-    currentTheme.set(theme);
+  const setTheme = jest.fn<void, [ThemeName]>();
+  const followTheme = jest.fn<void, [string]>((theme) => {
+    currentTheme.set(theme as ThemeName);
   });
-  return { currentTheme: currentTheme.asReadonly(), setTheme };
+  return { currentTheme: currentTheme.asReadonly(), setTheme, followTheme };
 }
 
 it('renders the foundation samples without host data', () => {
@@ -92,12 +93,13 @@ it('switches between ptah-glass and ptah-glass-light via ThemeService', () => {
 
   lightButton?.click();
   fixture.detectChanges();
-  expect(themeStub.setTheme).toHaveBeenCalledWith('ptah-glass-light');
+  expect(themeStub.followTheme).toHaveBeenCalledWith('ptah-glass-light');
   expect(lightButton?.getAttribute('aria-pressed')).toBe('true');
 
   darkButton?.click();
   fixture.detectChanges();
-  expect(themeStub.setTheme).toHaveBeenCalledWith('ptah-glass');
+  expect(themeStub.followTheme).toHaveBeenCalledWith('ptah-glass');
+  expect(themeStub.setTheme).not.toHaveBeenCalled();
   expect(darkButton?.getAttribute('aria-pressed')).toBe('true');
 });
 
@@ -137,9 +139,10 @@ it('restores the theme of the user when the gallery closes', () => {
   const fixture = TestBed.createComponent(UiGalleryComponent);
   fixture.detectChanges();
   fixture.componentInstance.setTheme('ptah-glass-light');
-  themeStub.setTheme.mockClear();
+  themeStub.followTheme.mockClear();
   fixture.destroy();
-  expect(themeStub.setTheme).toHaveBeenCalledWith('ptah-glass');
+  expect(themeStub.followTheme).toHaveBeenCalledWith('ptah-glass');
+  expect(themeStub.setTheme).not.toHaveBeenCalled();
 });
 
 it('pairs each contract value with the utility that applies it', () => {

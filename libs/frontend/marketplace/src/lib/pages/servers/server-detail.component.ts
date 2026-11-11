@@ -27,6 +27,7 @@ import {
   BrandMarkComponent,
   NativeTabGroupComponent,
   type NativeTab,
+  PtahButtonDirective,
 } from '@ptah-extension/ui';
 import type { CapabilityEntry, CapabilityScope } from '@ptah-extension/shared';
 
@@ -143,6 +144,7 @@ export function formatDetailDate(value: string): string {
   selector: 'ptah-server-detail',
   standalone: true,
   imports: [
+    PtahButtonDirective,
     RouterLink,
     LucideAngularModule,
     BrandMarkComponent,

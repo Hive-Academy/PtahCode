@@ -17,7 +17,7 @@ import {
   Unplug,
   type LucideIconData,
 } from 'lucide-angular';
-import { BrandMarkComponent } from '@ptah-extension/ui';
+import { BrandMarkComponent, PtahButtonDirective } from '@ptah-extension/ui';
 
 import { PTAH_SESSIONS_LABEL } from '../data/coverage';
 import type { ProviderSort, ProviderSortKey } from '../data/provider-filtering';
@@ -196,6 +196,7 @@ export function nextProviderSort(
   selector: 'ptah-provider-table',
   standalone: true,
   imports: [
+    PtahButtonDirective,
     LucideAngularModule,
     BrandMarkComponent,
     RemovalLockBadgeComponent,
@@ -276,7 +277,7 @@ export function nextProviderSort(
             @if (emptyActionLabel(); as actionLabel) {
               <button
                 type="button"
-                class="btn btn-primary btn-sm"
+                ptahButton variant="primary" size="sm"
                 data-testid="provider-table-empty-action"
                 (click)="emptyActionRequested.emit()"
               >

@@ -42,6 +42,7 @@
 
 import * as path from 'node:path';
 import { z } from 'zod';
+import type { TableSizeRequest, TableSizeResponse } from './table-size-protocol';
 import {
   copyFromSnapshot,
   type BackupPacing,
@@ -107,7 +108,10 @@ export interface BackupRequest {
   readonly pacing?: BackupPacing;
 }
 
-export type IntegrityWorkerInbound = IntegrityCheckRequest | BackupRequest;
+export type IntegrityWorkerInbound =
+  | IntegrityCheckRequest
+  | BackupRequest
+  | TableSizeRequest;
 
 /**
  * `'ok'`          — `quick_check` returned exactly `ok`.
@@ -191,7 +195,10 @@ export type IntegrityCheckOutbound =
   | IntegrityErrorResponse;
 
 /** Every message the worker can post, across both commands. */
-export type IntegrityWorkerOutbound = IntegrityCheckOutbound | BackupResponse;
+export type IntegrityWorkerOutbound =
+  | IntegrityCheckOutbound
+  | BackupResponse
+  | TableSizeResponse;
 
 /**
  * Classify a completed `quick_check` result. PURE, and unit-tested as such.

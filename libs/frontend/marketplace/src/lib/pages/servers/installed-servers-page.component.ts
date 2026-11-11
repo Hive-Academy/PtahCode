@@ -9,6 +9,7 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import { RouterLink } from '@angular/router';
 import { CircleAlert, LucideAngularModule, Plus } from 'lucide-angular';
 import {
@@ -303,6 +304,7 @@ interface ConversionError {
   selector: 'ptah-installed-servers-page',
   standalone: true,
   imports: [
+    PtahButtonDirective,
     RouterLink,
     LucideAngularModule,
     ProviderListViewComponent,
@@ -511,7 +513,7 @@ interface ConversionError {
                         <div class="flex gap-1.5">
                           <button
                             type="button"
-                            class="btn btn-primary btn-sm"
+                            ptahButton variant="primary" size="sm"
                             data-testid="server-convert-confirm"
                             (click)="confirmMakeGlobal(line.group)"
                           >

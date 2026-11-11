@@ -1,17 +1,20 @@
 import {
+  ANTIGRAVITY_CLI_PARSE_BACKOFF_MS,
+  ANTIGRAVITY_CLI_SHORT_BACKOFF_MS,
   ANTIGRAVITY_CLI_MAX_OUTPUT_BYTES,
   antigravityCliCandidates,
   parseAntigravityCliUsage,
   readAntigravityCliUsage,
   type AntigravityCliExec,
 } from './antigravity-cli-usage.adapter';
+import { ANTIGRAVITY_USAGE_FIXTURE } from './antigravity-usage.fixture';
 
 const SAMPLE = [
-  'Gemini Models\tWeekly Limit Remaining\t100%\t2026-10-27T00:08:58Z',
-  'Gemini Models\tFive Hour Limit Remaining\t100%\t2026-10-20T05:08:58Z',
-  'Claude and GPT models\tWeekly Limit Remaining\t60%\t2026-10-27T00:08:58Z',
-  'Claude and GPT models\tFive Hour Limit Remaining\t25.5%\t2026-10-20T05:08:58Z',
-  'Gemini 4 Argon\tGemini 4 Argon Weekly Limit\t100%\t2026-10-27T00:08:44Z',
+  'Gemini Models\tWeekly Limit Remaining\t100%\t2030-10-27T00:08:58Z',
+  'Gemini Models\tFive Hour Limit Remaining\t100%\t2030-10-20T05:08:58Z',
+  'Claude and GPT models\tWeekly Limit Remaining\t60%\t2030-10-27T00:08:58Z',
+  'Claude and GPT models\tFive Hour Limit Remaining\t25.5%\t2030-10-20T05:08:58Z',
+  'Gemini 4 Argon\tGemini 4 Argon Weekly Limit\t100%\t2030-10-27T00:08:44Z',
 ].join('\n');
 
 const errno = (code: string) =>
@@ -27,7 +30,7 @@ describe('Antigravity CLI usage adapter', () => {
         kind: 'weekly',
         modelScope: 'Gemini Models',
         used: { kind: 'percent', percent: 0 },
-        resetsAt: Date.parse('2026-10-27T00:08:58Z'),
+        resetsAt: Date.parse('2030-10-27T00:08:58Z'),
         usedSource: 'provider-unofficial',
       });
       expect(windows?.[1]).toMatchObject({ kind: 'five_hour' });
@@ -49,20 +52,28 @@ describe('Antigravity CLI usage adapter', () => {
       ['empty output', ''],
       ['free text', 'Please sign in first'],
       ['three fields', 'G\tWeekly\t10%'],
-      ['five fields', 'G\tWeekly\t10%\t2026-10-27T00:08:58Z\textra'],
-      ['percent above 100', 'G\tWeekly\t101%\t2026-10-27T00:08:58Z'],
-      ['no percent sign', 'G\tWeekly\t10\t2026-10-27T00:08:58Z'],
-      ['negative percent', 'G\tWeekly\t-5%\t2026-10-27T00:08:58Z'],
+      ['five fields', 'G\tWeekly\t10%\t2030-10-27T00:08:58Z\textra'],
+      ['percent above 100', 'G\tWeekly\t101%\t2030-10-27T00:08:58Z'],
+      ['no percent sign', 'G\tWeekly\t10\t2030-10-27T00:08:58Z'],
+      ['negative percent', 'G\tWeekly\t-5%\t2030-10-27T00:08:58Z'],
+      ['reset too far in the past', 'G\tWeekly\t10%\t2030-10-27T00:08:58Z'],
       ['non-ISO date', 'G\tWeekly\t10%\ttomorrow'],
       ['impossible date', 'G\tWeekly\t10%\t2026-13-45T99:99:99Z'],
-      ['empty group', '\tWeekly\t10%\t2026-10-27T00:08:58Z'],
+      ['empty group', '\tWeekly\t10%\t2030-10-27T00:08:58Z'],
       ['one bad line among good ones', SAMPLE + '\nGarbage line without tabs'],
       [
         'duplicate windows',
-        'G\tWeekly Limit\t10%\t2026-10-27T00:08:58Z\nG\tWeekly Limit\t20%\t2026-10-27T00:08:58Z',
+        'G\tWeekly Limit\t10%\t2030-10-27T00:08:58Z\nG\tWeekly Limit\t20%\t2030-10-27T00:08:58Z',
       ],
-    ])('rejects %s (fail closed)', (_, output) => {
-      expect(parseAntigravityCliUsage(output, 1)).toBeUndefined();
+    ])('rejects %s (fail closed)', (name, output) => {
+      expect(
+        parseAntigravityCliUsage(
+          output,
+          name === 'reset too far in the past'
+            ? Date.parse('2030-10-29T00:08:58Z')
+            : 1,
+        ),
+      ).toBeUndefined();
     });
 
     it('rejects oversized output', () => {
@@ -76,6 +87,141 @@ describe('Antigravity CLI usage adapter', () => {
   });
 
   describe('readAntigravityCliUsage', () => {
+    it('starts a short back-off after timeout', async () => {
+      jest.useFakeTimers();
+      try {
+        const exec = jest.fn<
+          ReturnType<AntigravityCliExec>,
+          Parameters<AntigravityCliExec>
+        >(
+          async (_executable, _args, signal) =>
+            new Promise<string>((_, reject) =>
+              signal.addEventListener(
+                'abort',
+                () =>
+                  reject(
+                    Object.assign(new Error('aborted'), { code: 'ABORT_ERR' }),
+                  ),
+                { once: true },
+              ),
+            ),
+        );
+        const options = { exec, executables: ['agy'], now: Date.now };
+        const pending = readAntigravityCliUsage(undefined, options);
+        await jest.advanceTimersByTimeAsync(8_000);
+        await expect(pending).resolves.toEqual({
+          ok: false,
+          reason: 'cli-timeout',
+        });
+        await expect(
+          readAntigravityCliUsage(undefined, options),
+        ).resolves.toEqual({ ok: false, reason: 'cli-backoff' });
+        expect(exec).toHaveBeenCalledTimes(1);
+        await jest.advanceTimersByTimeAsync(ANTIGRAVITY_CLI_SHORT_BACKOFF_MS);
+        const next = readAntigravityCliUsage(undefined, options);
+        await jest.advanceTimersByTimeAsync(8_000);
+        await expect(next).resolves.toEqual({
+          ok: false,
+          reason: 'cli-timeout',
+        });
+        expect(exec).toHaveBeenCalledTimes(2);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('does not back off when the caller aborts during CLI execution', async () => {
+      const controller = new AbortController();
+      const exec = jest
+        .fn<ReturnType<AntigravityCliExec>, Parameters<AntigravityCliExec>>()
+        .mockImplementationOnce(
+          async (_executable, _args, signal) =>
+            new Promise<string>((_, reject) =>
+              signal.addEventListener(
+                'abort',
+                () =>
+                  reject(
+                    Object.assign(new Error('aborted'), { code: 'ABORT_ERR' }),
+                  ),
+                { once: true },
+              ),
+            ),
+        )
+        .mockResolvedValueOnce(SAMPLE);
+      const options = { exec, executables: ['agy'] };
+      const pending = readAntigravityCliUsage(controller.signal, options);
+      controller.abort();
+      await expect(pending).resolves.toEqual({
+        ok: false,
+        reason: 'cli-unavailable',
+      });
+      expect((await readAntigravityCliUsage(undefined, options)).ok).toBe(true);
+      expect(exec).toHaveBeenCalledTimes(2);
+    });
+
+    it('shares one timer across two failing candidates', async () => {
+      jest.useFakeTimers();
+      try {
+        const exec: AntigravityCliExec = async (_executable, _args, signal) =>
+          new Promise<string>((_, reject) => {
+            const timer = setTimeout(
+              () => reject(Object.assign(new Error('exit'), { code: 1 })),
+              5_000,
+            );
+            signal.addEventListener(
+              'abort',
+              () => {
+                clearTimeout(timer);
+                reject(
+                  Object.assign(new Error('aborted'), { code: 'ABORT_ERR' }),
+                );
+              },
+              { once: true },
+            );
+          });
+        const started = Date.now();
+        const pending = readAntigravityCliUsage(undefined, {
+          exec,
+          executables: ['first', 'second'],
+          now: Date.now,
+        });
+        await jest.advanceTimersByTimeAsync(8_000);
+        await expect(pending).resolves.toEqual({
+          ok: false,
+          reason: 'cli-timeout',
+        });
+        expect(Date.now() - started).toBe(8_000);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+    it('backs off after unrecognized output and clears it after a later success', async () => {
+      let clock = 1;
+      const exec = jest.fn(async () => ANTIGRAVITY_USAGE_FIXTURE);
+      exec.mockResolvedValueOnce('unrecognized command');
+      const options = { exec, executables: ['agy'], now: () => clock };
+      await expect(
+        readAntigravityCliUsage(undefined, options),
+      ).resolves.toEqual({ ok: false, reason: 'cli-parse-failed' });
+      await expect(
+        readAntigravityCliUsage(undefined, options),
+      ).resolves.toEqual({ ok: false, reason: 'cli-backoff' });
+      expect(exec).toHaveBeenCalledTimes(1);
+      clock += ANTIGRAVITY_CLI_PARSE_BACKOFF_MS;
+      const success = await readAntigravityCliUsage(undefined, options);
+      expect(success.ok).toBe(true);
+      if (success.ok)
+        expect(
+          success.windows.map(({ modelScope, kind }) => [modelScope, kind]),
+        ).toEqual([
+          ['Gemini Models', 'weekly'],
+          ['Gemini Models', 'five_hour'],
+          ['Claude and GPT models', 'weekly'],
+          ['Claude and GPT models', 'five_hour'],
+        ]);
+      await readAntigravityCliUsage(undefined, options);
+      expect(exec).toHaveBeenCalledTimes(3);
+    });
     it('runs agy with an argument array and parses the result', async () => {
       const exec = jest.fn<
         ReturnType<AntigravityCliExec>,
