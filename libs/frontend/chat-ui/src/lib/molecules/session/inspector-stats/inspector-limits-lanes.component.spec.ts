@@ -46,6 +46,7 @@ describe('InspectorLimitsLanesComponent', () => {
     TestBed.configureTestingModule({ imports: [InspectorLimitsLanesComponent] });
     const fixture = TestBed.createComponent(InspectorLimitsLanesComponent);
     fixture.componentRef.setInput('limits', { ...base,
+      sessionProviderLabel: 'Claude',
       planTiles: [tile('claude', 'Claude account · 227d')],
       providerLimits: [{ id: 'provider:codex', label: 'Codex CLI', ownerState: 'single',
         windows: [tile('codex', 'Codex account · 58b5')], message: '', ownerDetails: [] }],
@@ -60,5 +61,39 @@ describe('InspectorLimitsLanesComponent', () => {
     expect(providers[1].textContent).toContain('Codex');
     expect(providers.map(row => row.querySelector('.badge-ghost')?.textContent?.trim()))
       .toEqual(['Provider API', 'Provider API']);
+  });
+
+  // Regression: the session row was always labelled "Claude", also when the
+  // session's owner was the Codex account of a Codex main provider.
+  it('labels the session row with the provider of the session owner', () => {
+    const render = (sessionOwnerKey: string | null) => {
+      TestBed.resetTestingModule();
+      TestBed.configureTestingModule({ imports: [InspectorLimitsLanesComponent] });
+      const fixture = TestBed.createComponent(InspectorLimitsLanesComponent);
+      fixture.componentRef.setInput('limits', buildStatsLimitViewModel({
+        sessionId: 's', sessionOwnerKey, sessionModelScope: null,
+        owners: [{
+          owner: { key: 'codex-owner', providerId: 'openai-codex', identityKind: 'account', label: 'Codex account' },
+          status: 'available', windowSetEstablished: true, ownerEvidence: [],
+          windows: [{
+            key: 'weekly', kind: 'weekly', label: 'Weekly', observedAt: now - 1000,
+            used: { kind: 'percent', percent: 12 }, usedSource: 'provider-api',
+            resetsAt: now + 86_400_000, resetSource: 'provider-api',
+          }],
+        }],
+        laneRuns: [], now, time: { timeZone: 'UTC', zoneNameLocale: 'en-GB' },
+      }));
+      fixture.detectChanges();
+      const row = (fixture.nativeElement as HTMLElement).querySelector('ptah-provider-lane-limit-tile');
+      return row?.textContent ?? '';
+    };
+    const codex = render('codex-owner');
+    expect(codex).toContain('Codex');
+    expect(codex).toContain('12%');
+    expect(codex).not.toContain('Claude');
+    // An unresolved session names no provider.
+    const unresolved = render(null);
+    expect(unresolved).toContain('Session');
+    expect(unresolved).not.toContain('Claude');
   });
 });

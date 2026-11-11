@@ -22,12 +22,17 @@ import { PlanLimitsStore } from '@ptah-extension/core';
 import type {
   CliType,
   LocalTimeOptions,
+  PlanLimitOwnerSnapshot,
   PlanLimitsSnapshot,
   SessionBudgetState,
 } from '@ptah-extension/shared';
 import { parseSessionStatsCache } from '@ptah-extension/shared';
 import { usageTotalsFromSegments } from '../../components/molecules/agent-card/stats-bar.utils';
 import { ChatStore } from '../chat.store';
+import {
+  injectMainProviderId,
+  type MainProviderId,
+} from '../vitals/usage-vitals.view';
 
 /** What a stats host resolves; every getter is read reactively. */
 export interface SessionStatsHost {
@@ -113,6 +118,38 @@ function sameStrings(a: readonly string[], b: readonly string[]): boolean {
 }
 
 /**
+ * The owner a view shows for a session the host has not resolved yet.
+ *
+ * With a known main provider: the owner this view last showed while it is
+ * still listed and belongs to the main provider, else the first listed owner
+ * of the main provider (the same account the plan ring draws), else `null`.
+ * An account of another provider is never kept: with Codex as the main
+ * provider, a view that last showed a Claude session must not keep the Claude
+ * limits for a Codex session.
+ *
+ * With an unknown main provider (`undefined` or `null`): the last shown owner
+ * while it is still listed, else `null`.
+ */
+export function unresolvedSessionOwnerKey(
+  last: string | null,
+  owners: readonly PlanLimitOwnerSnapshot[],
+  mainProviderId: MainProviderId,
+): string | null {
+  const lastOwner =
+    last === null
+      ? undefined
+      : owners.find((entry) => entry.owner.key === last)?.owner;
+  if (mainProviderId === undefined || mainProviderId === null) {
+    return lastOwner?.key ?? null;
+  }
+  if (lastOwner?.providerId === mainProviderId) return lastOwner.key;
+  return (
+    owners.find((entry) => entry.owner.providerId === mainProviderId)?.owner
+      .key ?? null
+  );
+}
+
+/**
  * The one source of a session view's stats (SESSION, PLAN LIMITS, LANES).
  * A scoped view reads its tab's values; the main panel (no tab) reads the
  * ChatStore, so it shows the active session's figures. Registers no
@@ -176,16 +213,23 @@ export function injectSessionStatsSource(
     { equal: sameStrings },
   );
 
+  /** The provider that serves the main agent (`undefined`/`null` = unknown). */
+  const mainProviderId = injectMainProviderId();
+
   /**
    * The plan-limit owner this view shows. Plan limits are account-wide, and
    * the host resolves a session's owner only after that session's first turn
-   * in this run. Switching to a session it has not resolved yet keeps the
-   * owner this view last showed (named in the tile caption) while that owner
-   * is still listed, instead of blanking the section to "Account not
-   * resolved". A session the host resolves always shows its own owner.
+   * in this run. A session the host resolves always shows its own owner. A
+   * session it has not resolved yet shows an owner of the main provider only
+   * (see {@link unresolvedSessionOwnerKey}), never the account of another
+   * provider that this view showed before.
    */
   const sessionOwnerKey = linkedSignal<
-    { resolved: string | null; snapshot: PlanLimitsSnapshot | null },
+    {
+      resolved: string | null;
+      snapshot: PlanLimitsSnapshot | null;
+      mainProviderId: MainProviderId;
+    },
     string | null
   >({
     source: () => {
@@ -195,16 +239,16 @@ export function injectSessionStatsSource(
           ? (planLimits.sessionOwner(sessionId)?.ownerKey ?? null)
           : null,
         snapshot: planLimits.snapshot(),
+        mainProviderId: mainProviderId(),
       };
     },
-    computation: ({ resolved, snapshot: limitsSnapshot }, previous) => {
-      if (resolved !== null) return resolved;
-      const last = previous?.value ?? null;
-      return last !== null &&
-        limitsSnapshot?.owners.some((entry) => entry.owner.key === last)
-        ? last
-        : null;
-    },
+    computation: (source, previous) =>
+      source.resolved ??
+      unresolvedSessionOwnerKey(
+        previous?.value ?? null,
+        source.snapshot?.owners ?? [],
+        source.mainProviderId,
+      ),
   });
 
   /**
