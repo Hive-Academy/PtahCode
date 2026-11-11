@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { runFallbackUsage, type FallbackProcess } from './readers/fallback-usage.runner';
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { IStateStorage } from '@ptah-extension/platform-core';
@@ -199,6 +200,7 @@ describe('PlanUsageService', () => {
         ownerEvidence: [],
       });
       expect(snapshot.staleSince).toBeUndefined();
+      expect(snapshot).toMatchObject({ source: 'session-sdk', readAt: T0 });
       expect(snapshot.windows).toHaveLength(1);
       expect(snapshot.windows[0]).toMatchObject({
         key: 'five_hour',
@@ -817,6 +819,8 @@ describe('PlanUsageService', () => {
       const cached = await h.service.getOwnerSnapshot(claudeTarget('s-2'));
       expect(h.readPlanUsage).toHaveBeenCalledTimes(1);
       expect(cached.status).toBe('available');
+      expect(cached.readAt).toBe(T0);
+      expect(cached.source).toBe('session-sdk');
 
       await h.service.getOwnerSnapshot(claudeTarget(), { refresh: true });
       expect(h.readPlanUsage).toHaveBeenCalledTimes(2);
@@ -941,6 +945,8 @@ describe('PlanUsageService', () => {
         account: { planType: 'plus' },
       });
       expect(second.staleSince).toBe(failedAt);
+      expect(first).toMatchObject({ source: 'provider-api', readAt: T0 });
+      expect(second.readAt).toBe(T0);
       expect(first.windows[0].observedAt).toBe(T0);
       expect(record).toHaveBeenCalledWith(
         CODEX_A,
@@ -973,6 +979,7 @@ describe('PlanUsageService', () => {
 
       expect(snapshot.status).toBe('service-unavailable');
       expect(snapshot.windows).toEqual([]);
+      expect(snapshot.readAt).toBeUndefined();
       expect(snapshot.staleSince).toBeUndefined();
     });
 
@@ -1072,5 +1079,55 @@ describe('PlanUsageService', () => {
       const again = await h.service.getOwnerSnapshot(claudeTarget());
       expect(again.staleSince).toBe(failedAt);
     });
+  });
+});
+
+describe('CLI fallback service opt-in', () => {
+  it('passes the list flag to the reader and retries a cached failure', async () => {
+    const h = harness();
+    const reader = jest.fn(async () => ({ status: 'service-unavailable' as const,
+      windowSetEstablished: false, windows: [] }));
+    (h.service as unknown as { readers: Record<string, unknown> }).readers.antigravity = reader;
+    const target = { providerId: 'antigravity', ownerRef: quotaOwnerRefFromKey(
+      cliStoreOwnerKey('antigravity', 'synthetic')) };
+    await h.service.getOwnerSnapshot(target);
+    await h.service.getOwnerSnapshot(target, { allowCliFallback: true });
+    expect(reader).toHaveBeenNthCalledWith(1, expect.objectContaining({ allowCliFallback: false }));
+    expect(reader).toHaveBeenNthCalledWith(2, expect.objectContaining({ allowCliFallback: true }));
+  });
+});
+
+describe('service disposal of fallback runs', () => {
+  it('reaps a running child', async () => {
+    const h = harness();
+    let started!: () => void;
+    const start = new Promise<void>((resolve) => { started = resolve; });
+    const kill = jest.fn();
+    let reject!: (error: Error) => void;
+    const result = new Promise<string>((_, no) => { reject = no; });
+    const killTree = jest.fn(async () => { reject(new Error('disposed')); });
+    const child: FallbackProcess = { pid: 44, result,
+      closed: Promise.resolve(), kill, killTree };
+    const pending = runFallbackUsage({ sourceId: 'dispose-synthetic', ownerKey: '<user>',
+      executable: 'fake', version: 'v1', accountFingerprint: '<account>', args: [],
+      executor: { start: () => { started(); return child; } }, parse: (value) => value,
+      runSignal: new AbortController().signal, deadline: Date.now() + 8_000 });
+    await start;
+    h.service.dispose();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(killTree).toHaveBeenCalled();
+    expect(kill).toHaveBeenCalled();
+    await pending;
+  });
+});
+
+describe('stale reading provenance', () => {
+  it('keeps source and read time on a reader stale answer', async () => {
+    const h = harness();
+    (h.service as unknown as { readers: Record<string, unknown> }).readers.antigravity =
+      async () => ({ status: 'stale', windowSetEstablished: false, windows: [], fetchedAt: T0 - 1000 });
+    const snapshot = await h.service.getOwnerSnapshot({ providerId: 'antigravity',
+      ownerRef: quotaOwnerRefFromKey(cliStoreOwnerKey('antigravity', 'stale-synthetic')) });
+    expect(snapshot).toMatchObject({ source: 'local-rpc', readAt: T0 - 1000 });
   });
 });

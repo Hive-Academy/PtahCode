@@ -60,6 +60,7 @@ export interface TaskScanResult {
   excluded: ExcludedTaskFolder[];
   /** false when `.ptah/specs/` does not exist (friendly no-op, R3.6). */
   specsDirExists: boolean;
+  timing?: { enumerateMs: number; readMs: number; parseValidateMs: number; carriers: number };
 }
 
 type FolderScanResult =
@@ -97,6 +98,8 @@ export class TaskScannerService {
   ) {}
 
   async scan(workspaceRoot: string): Promise<TaskScanResult> {
+    const started = performance.now();
+    let parseValidateMs = 0;
     const root = normalizeWorkspaceRoot(workspaceRoot);
     const specsDir = path.join(root, '.ptah', 'specs');
 
@@ -132,11 +135,14 @@ export class TaskScannerService {
       .filter((e) => e.type === FileType.Directory && !e.name.startsWith('.'))
       .map((e) => e.name);
     const knownFolders = new Set(folderNames);
+    const enumerateMs = performance.now() - started;
 
     // Workers claim monotonically increasing indexes. Storing by index keeps
     // the observable result deterministic even when later reads finish first.
     const results = new Array<FolderScanResult>(folderNames.length);
     let nextIndex = 0;
+    let lastYield = performance.now();
+    const readsStarted = performance.now();
     const worker = async (): Promise<void> => {
       while (nextIndex < folderNames.length) {
         const index = nextIndex++;
@@ -144,7 +150,12 @@ export class TaskScannerService {
           specsDir,
           folderNames[index],
           knownFolders,
+          (duration) => { parseValidateMs += duration; },
         );
+        if (performance.now() - lastYield >= 8) {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          lastYield = performance.now();
+        }
       }
     };
     await Promise.all(
@@ -153,6 +164,8 @@ export class TaskScannerService {
         () => worker(),
       ),
     );
+    // Wall time outside synchronous parse: carrier I/O, residue checks and yields.
+    const readMs = Math.max(0, performance.now() - readsStarted - parseValidateMs);
 
     const tasks: ScannedTask[] = [];
     const excluded: ExcludedTaskFolder[] = [];
@@ -161,9 +174,19 @@ export class TaskScannerService {
       else if (result.excluded) excluded.push(result.excluded);
     }
 
+    const validationStart = performance.now();
     this.mergeCrossFileIssues(tasks);
+    parseValidateMs += performance.now() - validationStart;
 
-    return { tasks, excluded, specsDirExists: true };
+    return {
+      tasks, excluded, specsDirExists: true,
+      timing: {
+        enumerateMs,
+        readMs,
+        parseValidateMs,
+        carriers: folderNames.length,
+      },
+    };
   }
 
   /**
@@ -212,6 +235,7 @@ export class TaskScannerService {
     specsDir: string,
     folderName: string,
     knownFolders: ReadonlySet<string>,
+    recordParse: (duration: number) => void,
   ): Promise<FolderScanResult> {
     const carrier = path.join(specsDir, folderName, CARRIER_FILE);
     let raw: string;
@@ -229,7 +253,9 @@ export class TaskScannerService {
       return { excluded: { folderName, reason: 'unreadable' } };
     }
 
+    const parseStart = performance.now();
     const result = parseTaskFile(folderName, raw, { knownFolders });
+    recordParse(performance.now() - parseStart);
     if (result.kind === 'excluded') {
       return { excluded: result.excluded };
     }

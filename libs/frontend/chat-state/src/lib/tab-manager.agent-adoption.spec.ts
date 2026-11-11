@@ -380,4 +380,36 @@ describe('TabManagerService — agent session adoption (TASK_2026_584)', () => {
     // In-flight status never survives a reload.
     expect(child?.status).toBe('loaded');
   });
+
+  it('copies resolved model, effort, modelSource and effortSource into agentOrigin', () => {
+    service.switchWorkspace(WS_A);
+    const parent = service.createTab('parent');
+
+    expect(
+      service.adoptAgentSessionTab(
+        payload(parent, {
+          model: 'claude-sonnet-5-5',
+          effort: 'high',
+          modelSource: 'model',
+          effortSource: 'ranking',
+        }),
+        'live',
+      ),
+    ).toBe('adopted');
+
+    const child = service.tabs().find((t) => t.id === CHILD_TAB);
+    expect(child?.agentOrigin).toEqual({
+      parentTabId: parent,
+      parentSessionId: null,
+      label: 'Child: plan the API',
+      branch: 'feat/child',
+      worktreePath: '/ws/a/.worktrees/child',
+      taskId: 'TASK_1',
+      startedAt: 1_700_000_000_000,
+      model: 'claude-sonnet-5-5',
+      effort: 'high',
+      modelSource: 'model',
+      effortSource: 'ranking',
+    });
+  });
 });

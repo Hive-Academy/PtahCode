@@ -107,6 +107,11 @@ export const EXPECTED_RESOLVABLE_TOKENS = [
     PERSISTENCE_TOKENS.WAL_CHECKPOINT_WORKER_FACTORY,
   ],
   ['WAL_CHECKPOINT_SCHEDULER', PERSISTENCE_TOKENS.WAL_CHECKPOINT_SCHEDULER],
+  // One-shot read-only `dbstat` size report (U4), registered with persistence.
+  [
+    'SQLITE_TABLE_SIZE_REPORT',
+    PERSISTENCE_TOKENS.SQLITE_TABLE_SIZE_REPORT,
+  ],
   // `db:reset` pauses the checkpoint worker through this port (review-11).
   ['SQLITE_EXCLUSIVE_ACCESS', PERSISTENCE_TOKENS.SQLITE_EXCLUSIVE_ACCESS],
 ] as const;

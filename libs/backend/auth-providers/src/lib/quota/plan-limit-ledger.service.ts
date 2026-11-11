@@ -27,7 +27,9 @@
  *   keeps the instant it was observed at its source; the ledger never
  *   re-stamps, so stale data cannot pose as new.
  * - Known-reset exhaustion expires at its reset (the engine checks at read
- *   time; no timer). Unknown-reset exhaustion clears only on a newer
+ *   time; no timer), or clears on a newer below-limit full-table read when
+ *   that table reported the hit or the read belongs to a later window
+ *   (`readingClears`). Unknown-reset exhaustion clears only on a newer
  *   below-limit full-table read of the same allowance, a `billing:'plan'`
  *   success on the same owner and scope, the provider's longest window
  *   elapsing, or a host restart (it is never persisted).
@@ -195,7 +197,7 @@ export class PlanLimitLedgerService {
 
   /**
    * Record what a source says about one window. Replaces the held entry only
-   * when `supersedes` allows it. A held unknown-reset exhaustion survives the
+   * when `supersedes` allows it. A held exhaustion survives the
    * replacement unless the new reading clears it (a fresh, non-estimated
    * reading below the limit, observed after the exhaustion).
    */

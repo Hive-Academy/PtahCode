@@ -32,6 +32,7 @@ import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
 import { CLI_AGENT_RUNTIME_TOKENS } from '@ptah-extension/cli-agent-runtime';
 import { AUTH_PROVIDERS_TOKENS } from '@ptah-extension/auth-providers';
 import { SETTINGS_TOKENS } from '@ptah-extension/settings-core';
+import { LANE_ROUTING_TOKENS } from '@ptah-extension/lane-routing';
 
 import { registerChatServices, CHAT_TOKENS } from './di';
 import { ChatCarryOverService } from './session/chat-carry-over.service';
@@ -39,6 +40,28 @@ import { ChildChatSessionHostAdapter } from './session/child-chat-session-host.a
 import { SessionMcpStatusRegistry } from './session/session-mcp-status.registry';
 import { SurfaceSubmitTurnService } from './session/surface-submit-turn.service';
 import { ChatFollowUpQueueService } from './follow-up/chat-follow-up-queue.service';
+
+describe('registerChatServices child setting router', () => {
+  it('binds CHILD_SETTING_ROUTER to the lane-routing router when it is registered', () => {
+    const c = rootContainer.createChildContainer();
+    const router = { route: jest.fn() };
+    c.register(OUTPUT_STYLE_TOKENS.SESSION_ACTIVATION, { useValue: {} });
+    c.register(LANE_ROUTING_TOKENS.CHILD_SETTING_ROUTER, { useValue: router });
+    registerChatServices(c);
+    expect(c.resolve(CLI_AGENT_RUNTIME_TOKENS.CHILD_SETTING_ROUTER)).toBe(
+      router,
+    );
+  });
+
+  it('leaves CHILD_SETTING_ROUTER unbound when lane-routing is not registered', () => {
+    const c = rootContainer.createChildContainer();
+    c.register(OUTPUT_STYLE_TOKENS.SESSION_ACTIVATION, { useValue: {} });
+    registerChatServices(c);
+    expect(c.isRegistered(CLI_AGENT_RUNTIME_TOKENS.CHILD_SETTING_ROUTER)).toBe(
+      false,
+    );
+  });
+});
 
 describe('registerChatServices — output-style precondition', () => {
   it('throws when registerOutputStyleServices has not run', () => {
@@ -311,10 +334,9 @@ describe('registerChatServices — ChatCarryOverService', () => {
     c.register(CHAT_TOKENS.RUNTIME_PROFILE, { useValue: {} });
     c.register(SDK_TOKENS.SDK_SESSION_METADATA_STORE, { useValue: {} });
     c.register(SDK_TOKENS.SESSION_HISTORY_ROUTER, { useValue: {} });
-    c.register(
-      AUTH_PROVIDERS_TOKENS.SDK_WORKSPACE_PROVIDER_PROFILE_RESOLVER,
-      { useValue: {} },
-    );
+    c.register(AUTH_PROVIDERS_TOKENS.SDK_WORKSPACE_PROVIDER_PROFILE_RESOLVER, {
+      useValue: {},
+    });
     c.register(SETTINGS_TOKENS.MODEL_SETTINGS, { useValue: {} });
 
     expect(c.isRegistered(CHAT_TOKENS.CARRY_OVER)).toBe(true);

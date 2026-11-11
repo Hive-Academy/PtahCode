@@ -44,6 +44,7 @@ import {
   MotionRouteStageDirective,
   MotionStageDirective,
   detailParamKey,
+  PtahButtonDirective,
 } from '@ptah-extension/ui';
 
 import {
@@ -152,6 +153,7 @@ interface PageActionError extends TrackedActionError {
   selector: 'ptah-connectors-page',
   standalone: true,
   imports: [
+    PtahButtonDirective,
     RouterOutlet,
     RouterLink,
     LucideAngularModule,

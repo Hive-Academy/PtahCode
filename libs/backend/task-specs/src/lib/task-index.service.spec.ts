@@ -9,14 +9,17 @@
  */
 import 'reflect-metadata';
 import * as path from 'path';
+import { container } from 'tsyringe';
 import {
   FileType,
+  PLATFORM_TOKENS,
   createEvent,
   type IFileSystemProvider,
   type IFileWatcher,
   type DirectoryEntry,
 } from '@ptah-extension/platform-core';
-import type { Logger } from '@ptah-extension/vscode-core';
+import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
+import { createMockFileSystemProvider } from '@ptah-extension/platform-core/testing';
 import {
   SPECS_README_FILE,
   renderSpecsReadme,
@@ -24,6 +27,7 @@ import {
 } from '@ptah-extension/shared';
 import { normalizeWorkspaceRoot } from './normalize-workspace-root';
 import { TaskScannerService } from './task-scanner.service';
+import { TASK_SPECS_TOKENS } from './di/tokens';
 import {
   InMemoryTaskIndexStore,
   type ITaskIndexStore,
@@ -417,7 +421,13 @@ describe('TaskIndexService rebuild — offline-store guard', () => {
     await service.ensureStarted(ROOT);
 
     expect(replace).toHaveBeenCalledTimes(1);
-    expect(logger.debug).not.toHaveBeenCalled();
+    expect([
+      ...jest.mocked(logger.debug).mock.calls,
+      ...jest.mocked(logger.info).mock.calls,
+    ]).toContainEqual([
+      '[task-specs] index rebuild timing',
+      expect.objectContaining({ trigger: 'activation', rows: 2 }),
+    ]);
     expect(logger.warn).not.toHaveBeenCalled();
     expect((await service.list(ROOT)).tasks).toHaveLength(2);
     service.dispose();
@@ -576,6 +586,354 @@ describe('TaskIndexService watcher debounce', () => {
 });
 
 describe('TaskIndexService write-order (applyFolderChange)', () => {
+  it('commits and pushes once for a writer notification plus its watcher echo', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+    try {
+      const fs = new FakeFs();
+      seedTwoValidOneExcluded(fs);
+      const logger = makeLogger();
+      const store = new InMemoryTaskIndexStore(logger);
+      const replace = jest.spyOn(store, 'replaceWorkspace');
+      const service = buildServiceWith(fs, logger, store);
+      const events: TaskIndexChangeEvent[] = [];
+      service.onDidChangeIndex((event) => events.push(event));
+      await service.ensureStarted(ROOT);
+      replace.mockClear();
+      fs.setFile(carrier('TASK_2026_007'), validTask('TASK_2026_007'));
+      await service.applyFolderChange(ROOT, 'TASK_2026_007');
+      fs.fireCreate(carrier('TASK_2026_007'));
+      jest.advanceTimersByTime(300);
+      await flush();
+      await flush();
+      expect(replace).toHaveBeenCalledTimes(1);
+      expect(events).toHaveLength(1);
+      expect((await service.list(ROOT)).tasks.map((task) => task.id)).toContain('TASK_2026_007');
+      service.dispose();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('runs one trailing rebuild when another request arrives during a scan', async () => {
+    const fs = new FakeFs();
+    seedTwoValidOneExcluded(fs);
+    const { service, scanner } = buildServiceWithParts(fs);
+    await service.ensureStarted(ROOT);
+    const original = scanner.scan.bind(scanner);
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const scan = jest.spyOn(scanner, 'scan').mockImplementationOnce(async (root) => {
+      await gate;
+      return original(root);
+    });
+    fs.setFile(carrier('TASK_2026_007'), validTask('TASK_2026_007'));
+    const first = service.applyFolderChange(ROOT, 'TASK_2026_007');
+    await flush();
+    const second = service.applyFolderChange(ROOT, 'TASK_2026_007');
+    const third = service.applyFolderChange(ROOT, 'TASK_2026_007');
+    await flush();
+    release?.();
+    await Promise.all([first, second, third]);
+    expect(scan).toHaveBeenCalledTimes(2);
+    service.dispose();
+  });
+
+  it('merges every overlapping folder and settles callers after their run', async () => {
+    const fs = new FakeFs();
+    seedTwoValidOneExcluded(fs);
+    const { service, scanner } = buildServiceWithParts(fs);
+    await service.ensureStarted(ROOT);
+    const events: TaskIndexChangeEvent[] = [];
+    service.onDidChangeIndex((event) => events.push(event));
+    const original = scanner.scan.bind(scanner);
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const scan = jest.spyOn(scanner, 'scan').mockImplementationOnce(async (root) => {
+      await gate;
+      return original(root);
+    });
+    for (const name of ['TASK_2026_007', 'TASK_2026_008', 'TASK_2026_009']) {
+      fs.setFile(carrier(name), validTask(name));
+    }
+    const settled: string[] = [];
+    const first = service.applyFolderChange(ROOT, 'TASK_2026_007').then(() => { settled.push('first'); });
+    await flush();
+    const second = service.applyFolderChange(ROOT, 'TASK_2026_008').then(() => { settled.push('second'); });
+    const third = service.applyFolderChange(ROOT, 'TASK_2026_009').then(() => { settled.push('third'); });
+    await flush();
+    release?.();
+    await Promise.all([first, second, third]);
+    expect(scan).toHaveBeenCalledTimes(2);
+    expect(events[1].folderNames).toEqual(['TASK_2026_008', 'TASK_2026_009']);
+    expect(settled).toEqual(expect.arrayContaining(['first', 'second', 'third']));
+    service.dispose();
+  });
+
+  it('runs the trailing rebuild after a rejected first run and accepts later requests', async () => {
+    const fs = new FakeFs();
+    seedTwoValidOneExcluded(fs);
+    const { service, scanner } = buildServiceWithParts(fs);
+    await service.ensureStarted(ROOT);
+    let rejectScan: ((error: Error) => void) | undefined;
+    const gate = new Promise<never>((_resolve, reject) => { rejectScan = reject; });
+    const original = scanner.scan.bind(scanner);
+    const scan = jest.spyOn(scanner, 'scan').mockImplementationOnce(() => gate);
+    fs.setFile(carrier('TASK_2026_007'), validTask('TASK_2026_007'));
+    const first = service.applyFolderChange(ROOT, 'TASK_2026_007');
+    await flush();
+    fs.setFile(carrier('TASK_2026_008'), validTask('TASK_2026_008'));
+    const second = service.applyFolderChange(ROOT, 'TASK_2026_008');
+    await flush();
+    rejectScan?.(new Error('scan failed'));
+    await expect(first).rejects.toThrow('scan failed');
+    await second;
+    fs.setFile(carrier('TASK_2026_009'), validTask('TASK_2026_009'));
+    await service.applyFolderChange(ROOT, 'TASK_2026_009');
+    expect(scan).toHaveBeenCalledTimes(3);
+    expect((await original(ROOT)).tasks).toHaveLength(5);
+    service.dispose();
+  });
+
+  it('runs one later trailing rebuild when two callers overlap after a rejected run', async () => {
+    const fs = new FakeFs();
+    seedTwoValidOneExcluded(fs);
+    const { service, scanner } = buildServiceWithParts(fs);
+    await service.ensureStarted(ROOT);
+    const original = scanner.scan.bind(scanner);
+    let rejectFirst: ((error: Error) => void) | undefined;
+    let releaseSecond: (() => void) | undefined;
+    const firstGate = new Promise<never>((_resolve, reject) => { rejectFirst = reject; });
+    const secondGate = new Promise<void>((resolve) => { releaseSecond = resolve; });
+    const scan = jest.spyOn(scanner, 'scan')
+      .mockImplementationOnce(() => firstGate)
+      .mockImplementationOnce(async (root) => { await secondGate; return original(root); });
+    for (const name of ['TASK_2026_007', 'TASK_2026_008', 'TASK_2026_009', 'TASK_2026_010']) {
+      fs.setFile(carrier(name), validTask(name));
+    }
+    const first = service.applyFolderChange(ROOT, 'TASK_2026_007');
+    await flush();
+    const second = service.applyFolderChange(ROOT, 'TASK_2026_008');
+    await flush();
+    rejectFirst?.(new Error('first run failed'));
+    await expect(first).rejects.toThrow('first run failed');
+    await flush();
+    expect(scan).toHaveBeenCalledTimes(2);
+    const third = service.applyFolderChange(ROOT, 'TASK_2026_009');
+    const fourth = service.applyFolderChange(ROOT, 'TASK_2026_010');
+    await flush();
+    releaseSecond?.();
+    await Promise.all([second, third, fourth]);
+    expect(scan).toHaveBeenCalledTimes(3);
+    service.dispose();
+  });
+
+  it('rebuilds for a real edit and a delete after writer notifications', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+    try {
+      const fs = new FakeFs();
+      seedTwoValidOneExcluded(fs);
+      const { service, scanner } = buildServiceWithParts(fs);
+      await service.ensureStarted(ROOT);
+      const scan = jest.spyOn(scanner, 'scan');
+      fs.setFile(carrier('TASK_2026_007'), validTask('TASK_2026_007'));
+      await service.applyFolderChange(ROOT, 'TASK_2026_007');
+      fs.setFile(carrier('TASK_2026_007'), validTask('TASK_2026_007').replace('backlog', 'active'));
+      fs.fireChange(carrier('TASK_2026_007'));
+      jest.advanceTimersByTime(300);
+      await flush(); await flush();
+      expect(scan).toHaveBeenCalledTimes(2);
+      fs.deleteFile(carrier('TASK_2026_007'));
+      fs.fireDelete(carrier('TASK_2026_007'));
+      jest.advanceTimersByTime(300);
+      await flush(); await flush();
+      expect(scan).toHaveBeenCalledTimes(3);
+      expect((await service.list(ROOT)).tasks.map((task) => task.id)).not.toContain('TASK_2026_007');
+      service.dispose();
+    } finally { jest.useRealTimers(); }
+  });
+
+  it('requeues a watcher change when its rebuild fails', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+    try {
+      const fs = new FakeFs();
+      seedTwoValidOneExcluded(fs);
+      const { service, scanner } = buildServiceWithParts(fs);
+      await service.ensureStarted(ROOT);
+      const original = scanner.scan.bind(scanner);
+      const scan = jest.spyOn(scanner, 'scan')
+        .mockRejectedValueOnce(new Error('transient scan failure'))
+        .mockImplementation(original);
+      fs.setFile(carrier('TASK_2026_007'), validTask('TASK_2026_007'));
+      fs.fireCreate(carrier('TASK_2026_007'));
+      jest.advanceTimersByTime(300);
+      await flush(); await flush();
+      expect(scan).toHaveBeenCalledTimes(1);
+      jest.advanceTimersByTime(1000);
+      await flush(); await flush();
+      expect(scan).toHaveBeenCalledTimes(2);
+      expect((await service.list(ROOT)).tasks.map((task) => task.id)).toContain('TASK_2026_007');
+      service.dispose();
+    } finally { jest.useRealTimers(); }
+  });
+
+  it('keeps the debounce timer of a newer event when a failed flush arms its retry', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+    try {
+      const fs = new FakeFs();
+      seedTwoValidOneExcluded(fs);
+      const { service, scanner } = buildServiceWithParts(fs);
+      await service.ensureStarted(ROOT);
+      const original = scanner.scan.bind(scanner);
+      let failFirstScan: (error: Error) => void = () => undefined;
+      const scan = jest.spyOn(scanner, 'scan')
+        .mockImplementationOnce(() => new Promise((_resolve, reject) => { failFirstScan = reject; }))
+        .mockImplementation(original);
+      fs.setFile(carrier('TASK_2026_007'), validTask('TASK_2026_007'));
+      fs.fireCreate(carrier('TASK_2026_007'));
+      jest.advanceTimersByTime(300);
+      await flush(); await flush();
+      expect(scan).toHaveBeenCalledTimes(1);
+      // A newer event arrives while the first flush is in progress.
+      fs.setFile(carrier('TASK_2026_008'), validTask('TASK_2026_008'));
+      fs.fireCreate(carrier('TASK_2026_008'));
+      failFirstScan(new Error('transient scan failure'));
+      await flush(); await flush();
+      // The 300 ms debounce of the newer event is not replaced by the 1 s retry.
+      jest.advanceTimersByTime(300);
+      await flush(); await flush();
+      expect(scan).toHaveBeenCalledTimes(2);
+      const ids = (await service.list(ROOT)).tasks.map((task) => task.id);
+      expect(ids).toEqual(expect.arrayContaining(['TASK_2026_007', 'TASK_2026_008']));
+      service.dispose();
+    } finally { jest.useRealTimers(); }
+  });
+
+  it('stops watcher retries after 1s, 5s and 30s backoff', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+    try {
+      const fs = new FakeFs();
+      seedTwoValidOneExcluded(fs);
+      const { service, scanner } = buildServiceWithParts(fs);
+      await service.ensureStarted(ROOT);
+      const scan = jest.spyOn(scanner, 'scan').mockRejectedValue(new Error('permanent failure'));
+      fs.setFile(carrier('TASK_2026_007'), validTask('TASK_2026_007'));
+      fs.fireCreate(carrier('TASK_2026_007'));
+      for (const [index, delay] of [300, 1000, 5000, 30000].entries()) {
+        jest.advanceTimersByTime(delay);
+        await flush(); await flush();
+        expect(scan).toHaveBeenCalledTimes(index + 1);
+      }
+      jest.advanceTimersByTime(60000);
+      await flush();
+      expect(scan).toHaveBeenCalledTimes(4);
+      service.dispose();
+    } finally { jest.useRealTimers(); }
+  });
+
+  it('does not retry a watcher rebuild when a change listener throws', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+    try {
+      const fs = new FakeFs();
+      seedTwoValidOneExcluded(fs);
+      const logger = makeLogger();
+      const store = new InMemoryTaskIndexStore(logger);
+      const replace = jest.spyOn(store, 'replaceWorkspace');
+      const service = buildServiceWith(fs, logger, store);
+      await service.ensureStarted(ROOT);
+      replace.mockClear();
+      service.onDidChangeIndex(() => { throw new Error('listener failure'); });
+      const later = jest.fn();
+      service.onDidChangeIndex(later);
+      fs.setFile(carrier('TASK_2026_007'), validTask('TASK_2026_007'));
+      fs.fireCreate(carrier('TASK_2026_007'));
+      jest.advanceTimersByTime(300);
+      await flush(); await flush();
+      expect(replace).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith('[task-specs] index change listener failed', {
+        error: expect.any(Error),
+        errorClass: 'Error',
+      });
+      // A listener that throws does not stop the listeners after it.
+      expect(later).toHaveBeenCalledTimes(1);
+      jest.advanceTimersByTime(60000);
+      await flush();
+      expect(replace).toHaveBeenCalledTimes(1);
+      service.dispose();
+    } finally { jest.useRealTimers(); }
+  });
+
+  it('does not suppress the watcher echo after a writer rebuild skips its write', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+    try {
+      const fs = new FakeFs();
+      seedTwoValidOneExcluded(fs);
+      const logger = makeLogger();
+      const store = new InMemoryTaskIndexStore(logger);
+      const service = buildServiceWith(fs, logger, store);
+      await service.ensureStarted(ROOT);
+      const original = store.replaceWorkspace.bind(store);
+      const replace = jest.spyOn(store, 'replaceWorkspace')
+        .mockImplementationOnce(() => { throw new Error('transient SQLite failure'); })
+        .mockImplementation(original);
+      fs.setFile(carrier('TASK_2026_007'), validTask('TASK_2026_007'));
+      await service.applyFolderChange(ROOT, 'TASK_2026_007');
+      expect(replace).toHaveBeenCalledTimes(1);
+      fs.fireCreate(carrier('TASK_2026_007'));
+      jest.advanceTimersByTime(300);
+      await flush(); await flush();
+      expect(replace).toHaveBeenCalledTimes(2);
+      expect((await service.list(ROOT)).tasks.map((task) => task.id)).toContain('TASK_2026_007');
+      service.dispose();
+    } finally { jest.useRealTimers(); }
+  });
+
+  it('suppresses one watcher flush after two writer updates to the same carrier', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+    try {
+      const fs = new FakeFs();
+      seedTwoValidOneExcluded(fs);
+      const { service, scanner } = buildServiceWithParts(fs);
+      await service.ensureStarted(ROOT);
+      const scan = jest.spyOn(scanner, 'scan');
+      fs.setFile(carrier('TASK_2026_007'), validTask('TASK_2026_007'));
+      await service.applyFolderChange(ROOT, 'TASK_2026_007');
+      fs.fireCreate(carrier('TASK_2026_007'));
+      fs.setFile(carrier('TASK_2026_007'), validTask('TASK_2026_007').replace('backlog', 'active'));
+      await service.applyFolderChange(ROOT, 'TASK_2026_007');
+      fs.fireChange(carrier('TASK_2026_007'));
+      jest.advanceTimersByTime(300);
+      await flush(); await flush();
+      expect(scan).toHaveBeenCalledTimes(2);
+      service.dispose();
+    } finally { jest.useRealTimers(); }
+  });
+
+  it('logs separate private phase durations without carrier content or paths', async () => {
+    const fs = new FakeFs();
+    seedTwoValidOneExcluded(fs);
+    const logger = makeLogger();
+    const service = buildServiceWith(fs, logger, new InMemoryTaskIndexStore(logger));
+    await service.ensureStarted(ROOT);
+    const calls = [
+      ...jest.mocked(logger.debug).mock.calls,
+      ...jest.mocked(logger.info).mock.calls,
+    ];
+    const timing = calls.find(([message]) => message === '[task-specs] index rebuild timing');
+    expect(timing?.[1]).toEqual(expect.objectContaining({
+      trigger: 'activation', carriers: 3, rows: 2,
+      enumerateMs: expect.any(Number),
+      readMs: expect.any(Number),
+      parseValidateMs: expect.any(Number),
+      sqliteReplaceMs: expect.any(Number),
+      listenerMs: expect.any(Number),
+      waitedMs: expect.any(Number),
+      totalMs: expect.any(Number),
+    }));
+    expect(JSON.stringify(timing)).not.toContain(ROOT);
+    expect(JSON.stringify(timing)).not.toContain('body of');
+    service.dispose();
+  });
+
   it('reparses the changed folder and emits a write event', async () => {
     const fs = new FakeFs();
     seedTwoValidOneExcluded(fs);
@@ -597,6 +955,33 @@ describe('TaskIndexService write-order (applyFolderChange)', () => {
 });
 
 describe('TaskIndexService.reindex', () => {
+  it('serializes reindex behind a scheduled write and keeps the latest rows', async () => {
+    const fs = new FakeFs();
+    seedTwoValidOneExcluded(fs);
+    const { service, scanner } = buildServiceWithParts(fs);
+    await service.ensureStarted(ROOT);
+    const original = scanner.scan.bind(scanner);
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const scan = jest.spyOn(scanner, 'scan').mockImplementationOnce(async (root) => {
+      await gate;
+      return original(root);
+    });
+    fs.setFile(carrier('TASK_2026_007'), validTask('TASK_2026_007'));
+    const write = service.applyFolderChange(ROOT, 'TASK_2026_007');
+    await flush();
+    fs.setFile(carrier('TASK_2026_008'), validTask('TASK_2026_008'));
+    const reindex = service.reindex(ROOT);
+    await flush();
+    expect(scan).toHaveBeenCalledTimes(1);
+    release?.();
+    await Promise.all([write, reindex]);
+    expect(scan).toHaveBeenCalledTimes(2);
+    expect((await service.list(ROOT)).tasks.map((task) => task.id)).toEqual(
+      expect.arrayContaining(['TASK_2026_007', 'TASK_2026_008']),
+    );
+    service.dispose();
+  });
   it('reuses a successful first-start rebuild and still emits reindex', async () => {
     const fs = new FakeFs();
     seedTwoValidOneExcluded(fs);
@@ -637,6 +1022,24 @@ describe('TaskIndexService.reindex', () => {
     expect(res.excludedCount).toBe(1);
     expect(afterReindex).toEqual(afterWatch);
     service.dispose();
+  });
+});
+
+describe('TaskIndexService DI', () => {
+  it('resolves without a clock registration', () => {
+    const child = container.createChildContainer();
+    const logger = makeLogger();
+    const fs = createMockFileSystemProvider();
+    const scanner = new TaskScannerService(fs, logger);
+    const store = new InMemoryTaskIndexStore(logger);
+    child.registerInstance(TOKENS.LOGGER, logger);
+    child.registerInstance(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER, fs);
+    child.registerInstance(TASK_SPECS_TOKENS.TASK_SCANNER, scanner);
+    child.registerInstance(TASK_SPECS_TOKENS.TASK_INDEX_STORE, store);
+    const service = child.resolve(TaskIndexService);
+    expect(service).toBeInstanceOf(TaskIndexService);
+    service.dispose();
+    child.clearInstances();
   });
 });
 

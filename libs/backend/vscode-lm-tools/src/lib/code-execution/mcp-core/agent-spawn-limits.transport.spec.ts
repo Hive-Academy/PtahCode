@@ -581,6 +581,12 @@ describe('ptah_agent_list when the limit lookup throws', () => {
     );
   }
 
+  it('opts in only the list path to the CLI fallback', async () => {
+    const limits = jest.fn(async () => [CODEX_COOLDOWN, GLM_TIMED_OUT]);
+    await listOverHttp(listHarness(limits));
+    expect(limits).toHaveBeenCalledWith([CODEX_ROW, GLM_ROW], { allowCliFallback: true });
+  });
+
   async function listOverStdio(ptahAPI: PtahAPI) {
     const dispatcher = new AgentToolDispatcher(ptahAPI, quietLogger());
     return resultText(

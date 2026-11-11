@@ -12,6 +12,7 @@ import {
   GatewayPlatformId,
   SessionStatsEntry,
   SessionBudgetState,
+  type ChildSettingSource,
   type ContextCapacity,
 } from '@ptah-extension/shared';
 
@@ -558,6 +559,12 @@ export interface TabAgentOrigin {
   readonly taskId?: string;
   /** Epoch milliseconds the child was started at. */
   readonly startedAt: number;
+  /** Resolved model id. Absent when the host default applies and its id is unknown. */
+  readonly model?: string;
+  /** Resolved effort. Absent when the host default applies. */
+  readonly effort?: EffortLevel;
+  readonly modelSource?: ChildSettingSource;
+  readonly effortSource?: ChildSettingSource;
 }
 
 /**

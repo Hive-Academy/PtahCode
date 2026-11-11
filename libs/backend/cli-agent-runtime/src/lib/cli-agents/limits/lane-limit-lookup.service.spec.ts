@@ -99,6 +99,24 @@ function createHarness(
   return { service, rules, snapshots, ledger };
 }
 
+describe('list-only CLI fallback and no-source CLIs', () => {
+  it('forwards the flag only on explicit lookup opt-in', async () => {
+    const h = createHarness(async (target) => snapshot(target.ownerRef));
+    await h.service.lookup([{ cli: 'antigravity' }]);
+    expect(h.snapshots.getOwnerSnapshot).toHaveBeenLastCalledWith(expect.anything(),
+      expect.objectContaining({ allowCliFallback: false }));
+    await h.service.lookup([{ cli: 'antigravity' }], { allowCliFallback: true });
+    expect(h.snapshots.getOwnerSnapshot).toHaveBeenLastCalledWith(
+      expect.anything(), expect.objectContaining({ allowCliFallback: true }));
+  });
+  it.each(['copilot', 'cursor', 'pi'] as const)('%s has a typed status without a read', async (cli) => {
+    const h = createHarness(async (target) => snapshot(target.ownerRef));
+    const [result] = await h.service.lookup([{ cli }]);
+    expect(result.snapshot?.status).toBe('no-usage-source');
+    expect(result.state.state).toBe('unknown');
+    expect(h.snapshots.getOwnerSnapshot).not.toHaveBeenCalled();
+  });
+});
 describe('LaneLimitLookupService', () => {
   it('reads Kimi lane limits before a remembered run', async () => {
     const h = createHarness(async (target) => snapshot(target.ownerRef));
@@ -234,7 +252,7 @@ describe('LaneLimitLookupService', () => {
     expect(result.lookup).toBe('failed');
   });
 
-  it('a lane with no owner rule reads nothing and is unknown with no snapshot', async () => {
+  it('a no-source lane reads nothing and is unknown with a typed snapshot', async () => {
     const { service, snapshots } = createHarness(async (target) =>
       snapshot(target.ownerRef),
     );
@@ -242,8 +260,8 @@ describe('LaneLimitLookupService', () => {
     const [result] = await service.lookup([{ cli: 'copilot' as const }]);
 
     expect(snapshots.getOwnerSnapshot).not.toHaveBeenCalled();
-    expect(result.lookup).toBe('no-owner');
-    expect(result.state.reasons).toEqual([{ kind: 'no-snapshot' }]);
+    expect(result.lookup).toBe('ok');
+    expect(result.snapshot?.status).toBe('no-usage-source');
   });
 
   it('reads a Ptah CLI Ollama Cloud lane through its agent key or sign-in', async () => {
@@ -442,13 +460,14 @@ describe('LaneLimitLookupService', () => {
       'ok',
       'ok',
       'ok',
-      'no-owner',
+      'ok',
     ]);
     expect(snapshots.getOwnerSnapshot).toHaveBeenCalledTimes(4);
     for (const [target, options] of snapshots.getOwnerSnapshot.mock.calls) {
       // Exactly the cancellation signal: no `refresh` key at all, so the
       // reader's 30 s cache is honoured and no forced re-read happens.
-      expect(Object.keys(options)).toEqual(['signal']);
+      expect(Object.keys(options)).toEqual(['signal', 'allowCliFallback']);
+      expect(options.allowCliFallback).toBe(false);
       expect(options).not.toHaveProperty('refresh');
       expect(target).not.toHaveProperty('refresh');
     }

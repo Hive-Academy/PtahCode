@@ -40,6 +40,7 @@ export {
   DB_INTEGRITY_CHECK_INTERVAL_MS,
   INTEGRITY_WORKER_BUDGET_MS,
 } from './lib/integrity/integrity-check.service';
+export { SqliteTableSizeReportService } from './lib/table-size-report.service';
 export { DbWorkerRunner } from './lib/integrity/db-worker-runner';
 export type {
   DbWorkerRun,

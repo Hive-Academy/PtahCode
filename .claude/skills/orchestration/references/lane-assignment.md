@@ -31,17 +31,21 @@ in `decisions.md` with stage, source, confidence, reasons, fallback cause and an
 low-confidence model proposal. If the tool is not listed, skip it silently and use
 the live-list rules below.
 
-Each chosen roster row returns `executor`, `model` (null when unavailable), `tier`
+Each chosen roster row returns `executor`, `model`, `tier`
 (`haiku|sonnet|opus`), `effort` (`low|medium|high|xhigh|max`) and a `reason` ending
 `policy Rn; tier ..., effort ..., shape ..., weight ...`. For subagent Agent/Task calls,
 pass `tier` as per-call `model` alias and `effort` where host and model support it.
 Keep frontmatter `model:` as the per-role default; record requested vs observed model
 when observable. In supported Claude Code versions, model precedence is call ->
 frontmatter -> `CLAUDE_CODE_SUBAGENT_MODEL` -> parent; `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1`
-and `CLAUDE_CODE_EFFORT_LEVEL` can override. For CLI lanes, `tier`/`effort` are advisory:
-model resolution stays request `model` (raw ID from that lane's list) ->
-`agentOrchestration.<cli>Model` -> native CLI default. `modelTier` maps only for
-ptah-cli providers and `cli: "claude"`; a per-CLI tier map is future work.
+and `CLAUDE_CODE_EFFORT_LEVEL` can override. For system CLI rows other than `claude`,
+`model` is `lane-default` unless the decision chose an exact ID from that CLI's live
+model list (`source: model`); unavailable rows have null. Deterministic ranking uses
+`lane-default`. Pass a concrete row `model` as spawn `model`; omit it for `lane-default`.
+For ptah-cli and `cli: "claude"` rows, pass `tier` as `modelTier`, not row `model`.
+Pass row `effort` as spawn `effort` when present; it overrides the per-CLI effort setting.
+A user-pinned lane/model wins. Never invent a model id. System CLI resolution is request
+`model` -> `agentOrchestration.<cli>Model` setting -> native CLI default.
 
 Record it in `context.md` under `## CLI Lanes`: the preference source, mode (`enabled` / `auto` / `disabled`), the
 approval mode (`Approval: lane-review` / `Approval: user`, per

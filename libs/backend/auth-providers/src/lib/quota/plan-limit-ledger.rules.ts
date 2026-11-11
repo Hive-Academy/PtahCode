@@ -149,19 +149,37 @@ export function carryUsage(
 }
 
 /**
- * Decision 4: a full-table reading clears unknown-reset exhaustion of the
- * same allowance when it is fresh, not estimated, below the limit, and
- * observed after the exhaustion.
+ * Decision 4: a full-table reading clears held exhaustion of the same
+ * allowance when it is fresh, not estimated, below the limit, and observed
+ * after the exhaustion. Unknown-reset exhaustion needs nothing more. A
+ * known reset clears only when the usage table itself reported the hit and
+ * its newer reading names no gate: that reset is borrowed from the window
+ * that was current at the hit (`heldExhaustion`). Without this, a provider
+ * that restarts a window early left "7% used, limit reached" until the old
+ * reset. A hit from a stream or an error keeps its own reset.
  */
 function readingClears(next: WindowEntry, held: OwnerLimitEvidence): boolean {
-  if (held.resetsAt !== undefined || next.stale) return false;
-  if (next.window.usedSource === 'estimated') return false;
+  if (next.stale || next.window.usedSource === 'estimated') return false;
   const percent = usedPercent(next.window.used);
-  return (
-    percent !== undefined &&
-    percent < 100 &&
-    windowObservedAt(next.window) > held.observedAt
-  );
+  if (
+    percent === undefined ||
+    percent >= 100 ||
+    windowObservedAt(next.window) <= held.observedAt
+  ) {
+    return false;
+  }
+  if (held.resetsAt === undefined) return true;
+  return reportedByTable(held) && !namesGate(next.window);
+}
+
+/** The usage table itself reported the hit, so its newer reading replaces it. */
+function reportedByTable(held: OwnerLimitEvidence): boolean {
+  return held.source === 'provider-api' || held.source === 'provider-unofficial';
+}
+
+/** The provider still reports a cause that gates use, whatever the percent. */
+function namesGate(window: PlanLimitWindow): boolean {
+  return window.reachedType !== undefined || window.spendControlReached === true;
 }
 
 function isPlanClearedWindow(

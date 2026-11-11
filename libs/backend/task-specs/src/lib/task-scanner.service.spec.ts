@@ -28,6 +28,40 @@ function validTask(id: string): string {
 }
 
 describe('TaskScannerService', () => {
+  it('yields to the event loop during a many-carrier scan without changing result order', async () => {
+    const fs = createMockFileSystemProvider();
+    for (let index = 0; index < 120; index++) {
+      const id = `TASK_2026_${String(index).padStart(3, '0')}`;
+      await fs.writeFile(carrier(id), validTask(id));
+    }
+    const scanner = new TaskScannerService(fs, makeLogger());
+    let completed = false;
+    let timerBeforeCompletion = false;
+    // A fake clock that moves 5 ms on each read. The scan yields after 8 ms of
+    // work; on a fast machine the real clock can stay below that for all 120
+    // in-memory carriers, and then the scan correctly never yields.
+    let fakeNow = 0;
+    const nowSpy = jest
+      .spyOn(performance, 'now')
+      .mockImplementation(() => (fakeNow += 5));
+    // An immediate, not a timer: a 0 ms timer needs 1 ms of wall time and is
+    // not sure to be due when the scan first releases the loop.
+    setImmediate(() => {
+      timerBeforeCompletion = !completed;
+    });
+    let result: Awaited<ReturnType<TaskScannerService['scan']>>;
+    try {
+      result = await scanner.scan(ROOT);
+    } finally {
+      nowSpy.mockRestore();
+    }
+    completed = true;
+    expect(timerBeforeCompletion).toBe(true);
+    expect(result.tasks.map((task) => task.id)).toEqual(
+      Array.from({ length: 120 }, (_, index) => `TASK_2026_${String(index).padStart(3, '0')}`),
+    );
+  });
+
   it('returns a clean no-op when .ptah/specs is missing', async () => {
     const fs = createMockFileSystemProvider();
     const scanner = new TaskScannerService(fs, makeLogger());

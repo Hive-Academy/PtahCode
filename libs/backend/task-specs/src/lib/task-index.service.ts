@@ -47,6 +47,7 @@ import {
 import { normalizeWorkspaceRoot } from './normalize-workspace-root';
 import { parseTaskFile } from './task-frontmatter';
 import { TaskScannerService } from './task-scanner.service';
+import { logRebuildTiming } from './rebuild-timing';
 import { TASK_SPECS_TOKENS } from './di/tokens';
 import type { ITaskIndexStore } from './task-index.store';
 import type { ITaskIndexNotifier } from './task-index.port';
@@ -95,9 +96,18 @@ interface WorkspaceState {
   specsDirExists: boolean;
   pending: Set<string>;
   timer: ReturnType<typeof setTimeout> | null;
+  running: Promise<RebuildResult> | null;
+  trailing: Promise<RebuildResult> | null;
+  trailingFolders: Set<string>;
+  trailingReason: TaskIndexChangeEvent['reason'];
+  trailingCount: number;
+  writtenCarriers: Map<string, string>;
+  flushRetries: Map<string, number>;
 }
 
 const DEBOUNCE_MS = 300;
+const FLUSH_RETRY_MS = [1000, 5000, 30000] as const;
+export const TASK_INDEX_CLOCK = Symbol('task-index.clock');
 const REGISTRY_FILE = 'registry.md';
 /**
  * Watched RELATIVE to the workspace root (see `startWatcher`), which is what
@@ -132,6 +142,7 @@ export class TaskIndexService implements ITaskIndexNotifier {
   private readonly states = new Map<string, WorkspaceState>();
   private readonly _onDidChangeIndex: IEvent<TaskIndexChangeEvent>;
   private readonly fireChange: (e: TaskIndexChangeEvent) => void;
+  private readonly now: () => number;
 
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
@@ -141,10 +152,30 @@ export class TaskIndexService implements ITaskIndexNotifier {
     private readonly scanner: TaskScannerService,
     @inject(TASK_SPECS_TOKENS.TASK_INDEX_STORE)
     private readonly store: ITaskIndexStore,
+    @inject(TASK_INDEX_CLOCK, { isOptional: true })
+    now?: () => number,
   ) {
     const [event, fire] = createEvent<TaskIndexChangeEvent>();
-    this._onDidChangeIndex = event;
+    // Each listener is guarded: a listener that throws must not stop the
+    // listeners after it (the RPC broadcast is one of them).
+    this._onDidChangeIndex = (listener) =>
+      event((e) => this.callListener(listener, e));
     this.fireChange = fire;
+    this.now = now ?? (() => performance.now());
+  }
+
+  private callListener(
+    listener: (e: TaskIndexChangeEvent) => void,
+    e: TaskIndexChangeEvent,
+  ): void {
+    try { listener(e); }
+    catch (error: unknown) {
+      // degradation-audit: reported — logged at warn; the other listeners still run.
+      this.logger.warn('[task-specs] index change listener failed', {
+        error: new Error('Index change listener failed'),
+        errorClass: error instanceof Error ? error.name : 'UnknownError',
+      });
+    }
   }
 
   /** Subscribe to derived-index changes (the RPC handler broadcasts these). */
@@ -179,6 +210,13 @@ export class TaskIndexService implements ITaskIndexNotifier {
       specsDirExists: false,
       pending: new Set<string>(),
       timer: null,
+      running: null,
+      trailing: null,
+      trailingFolders: new Set<string>(),
+      trailingReason: 'watcher',
+      trailingCount: 0,
+      writtenCarriers: new Map(),
+      flushRetries: new Map(),
     };
     state.started = true;
     this.states.set(root, state);
@@ -221,7 +259,7 @@ export class TaskIndexService implements ITaskIndexNotifier {
     this.startWatcher(root, state);
     // Initial index is silent — the caller (RPC handler) returns the data
     // itself, so an extra push would be redundant noise.
-    const result = await this.rebuild(root, [], 'reindex', false);
+    const result = await this.scheduleRebuild(root, [], 'reindex', false);
     await this.ensureSpecsReadme(root, state);
     return result;
   }
@@ -275,6 +313,7 @@ export class TaskIndexService implements ITaskIndexNotifier {
     const root = normalizeWorkspaceRoot(workspaceRoot);
     const t0 = Date.now();
     const started = await this.ensureStarted(root);
+    this.states.get(root)?.writtenCarriers.clear();
     let indexedCount: number;
     let excludedCount: number;
     if (started?.indexWritten) {
@@ -285,7 +324,7 @@ export class TaskIndexService implements ITaskIndexNotifier {
         reason: 'reindex',
       });
     } else {
-      ({ indexedCount, excludedCount } = await this.rebuild(
+      ({ indexedCount, excludedCount } = await this.scheduleRebuild(
         root,
         [],
         'reindex',
@@ -306,7 +345,30 @@ export class TaskIndexService implements ITaskIndexNotifier {
   ): Promise<void> {
     const root = normalizeWorkspaceRoot(workspaceRoot);
     await this.ensureStarted(root);
-    await this.rebuild(root, [folderName], 'write', true);
+    const state = this.states.get(root);
+    const carrier = path.join(root, '.ptah', 'specs', folderName, CARRIER_FILE);
+    let snapshot: string | undefined;
+    try {
+      const content = await this.fs.readFile(carrier);
+      snapshot = content;
+      state?.writtenCarriers.set(folderName, content);
+    } catch (error: unknown) {
+      state?.writtenCarriers.delete(folderName);
+      this.logger.debug('[task-specs] writer carrier snapshot unavailable', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    try {
+      const result = await this.scheduleRebuild(root, [folderName], 'write');
+      if (!result.indexWritten && state?.writtenCarriers.get(folderName) === snapshot) {
+        state?.writtenCarriers.delete(folderName);
+      }
+    } catch (error: unknown) {
+      if (state?.writtenCarriers.get(folderName) === snapshot) {
+        state?.writtenCarriers.delete(folderName);
+      }
+      throw error;
+    }
   }
 
   /** Read the derived index for a workspace (list/board RPCs). */
@@ -530,6 +592,8 @@ export class TaskIndexService implements ITaskIndexNotifier {
   /** Tear down all watchers + pending timers (container disposal). */
   dispose(): void {
     for (const state of this.states.values()) {
+      state.writtenCarriers.clear();
+      state.flushRetries.clear();
       if (state.timer) clearTimeout(state.timer);
       for (const sub of state.subscriptions) sub.dispose();
       state.watcher?.dispose();
@@ -569,10 +633,22 @@ export class TaskIndexService implements ITaskIndexNotifier {
     const state = this.states.get(root);
     if (!state) return;
     state.pending.add(folderName);
+    this.armFlush(root, state, DEBOUNCE_MS);
+  }
+
+  private armFlush(
+    root: string,
+    state: WorkspaceState,
+    delayMs: number,
+    isRetry = false,
+  ): void {
+    // A timer armed by a newer watcher event during the failed flush stays:
+    // its flush reads `state.pending`, which holds the retried folders too.
+    if (isRetry && state.timer) return;
     if (state.timer) clearTimeout(state.timer);
     state.timer = setTimeout(() => {
       void this.flush(root);
-    }, DEBOUNCE_MS);
+    }, delayMs);
   }
 
   /**
@@ -600,7 +676,103 @@ export class TaskIndexService implements ITaskIndexNotifier {
     state.timer = null;
     const folderNames = [...state.pending];
     state.pending.clear();
-    await this.rebuild(root, folderNames, 'watcher', true);
+    try {
+      if (state.running) await state.running.catch(() => undefined);
+    const changed: string[] = [];
+    for (const name of folderNames) {
+      const written = state.writtenCarriers.get(name);
+      state.writtenCarriers.delete(name);
+      if (written === undefined) {
+        changed.push(name);
+        continue;
+      }
+      try {
+        const current = await this.fs.readFile(path.join(root, '.ptah', 'specs', name, CARRIER_FILE));
+        if (current !== written) changed.push(name);
+      } catch (error: unknown) {
+        this.logger.debug('[task-specs] watcher carrier comparison unavailable', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        changed.push(name);
+      }
+    }
+      if (changed.length > 0) await this.scheduleRebuild(root, changed, 'watcher');
+      const suppressed = folderNames.length - changed.length;
+      if (suppressed > 0) this.logger.info('[task-specs] watcher echoes suppressed', { suppressed });
+      for (const name of folderNames) state.flushRetries.delete(name);
+    } catch (error: unknown) {
+      let nextDelay = Number.POSITIVE_INFINITY;
+      let dropped = 0;
+      for (const name of folderNames) {
+        const attempts = state.flushRetries.get(name) ?? 0;
+        if (attempts >= FLUSH_RETRY_MS.length) {
+          state.flushRetries.delete(name);
+          dropped++;
+        } else {
+          state.flushRetries.set(name, attempts + 1);
+          state.pending.add(name);
+          nextDelay = Math.min(nextDelay, FLUSH_RETRY_MS[attempts]);
+        }
+      }
+      if (dropped > 0) this.logger.warn('[task-specs] watcher flush retries exhausted', {
+        folders: dropped, error: new Error('Watcher rebuild failed'),
+      });
+      const retry = state.pending.size > 0 && Number.isFinite(nextDelay);
+      this.logger.debug('[task-specs] watcher flush failed', {
+        error: error instanceof Error ? error.name : 'Unknown error',
+        retryInMs: retry ? nextDelay : null,
+      });
+      if (retry) this.armFlush(root, state, nextDelay, true);
+    }
+  }
+
+  private scheduleRebuild(
+    root: string,
+    folders: string[],
+    reason: TaskIndexChangeEvent['reason'],
+    emit = true,
+  ): Promise<RebuildResult> {
+    const state = this.states.get(root);
+    if (!state) return this.rebuild(root, folders, reason, emit, 0, 1);
+    if (state.running) {
+      for (const folder of folders) state.trailingFolders.add(folder);
+      if (reason === 'reindex' || (reason === 'write' && state.trailingReason === 'watcher')) {
+        state.trailingReason = reason;
+      }
+      state.trailingCount++;
+      if (!state.trailing) {
+        const running = state.running;
+        const queuedAt = this.now();
+        const trailing = running.catch(() => undefined).then(() => {
+          const nextFolders = [...state.trailingFolders];
+          const nextReason = state.trailingReason;
+          const count = state.trailingCount;
+          state.trailingFolders.clear();
+          state.trailingCount = 0;
+          state.trailingReason = 'watcher';
+          const next = this.rebuild(root, nextFolders, nextReason, true, this.now() - queuedAt, count);
+          state.running = next;
+          state.trailing = null;
+          void next.then(() => { if (state.running === next && !state.trailing) state.running = null; },
+            () => { if (state.running === next && !state.trailing) state.running = null; });
+          return next;
+        });
+        state.trailing = trailing;
+        void trailing.finally(() => {
+          if (state.trailing === trailing) state.trailing = null;
+        }).catch((error: unknown) => {
+          this.logger.warn('[task-specs] trailing rebuild failed', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
+      return state.trailing;
+    }
+    const run = this.rebuild(root, folders, reason, emit, 0, 1);
+    state.running = run;
+    void run.then(() => { if (state.running === run && !state.trailing) state.running = null; },
+      () => { if (state.running === run && !state.trailing) state.running = null; });
+    return run;
   }
 
   /**
@@ -617,8 +789,24 @@ export class TaskIndexService implements ITaskIndexNotifier {
     folderNames: string[],
     reason: TaskIndexChangeEvent['reason'],
     emit: boolean,
+    waitedMs: number,
+    coalesced: number,
   ): Promise<RebuildResult> {
+    const started = this.now();
+    let enumerateMs = 0;
+    let readMs = 0;
+    let parseValidateMs = 0;
+    let replaceMs = 0;
+    let listenerMs = 0;
+    let carriers = 0;
+    let rows = 0;
+    let failed = true;
+    try {
     const scan = await this.scanner.scan(root);
+    enumerateMs = scan.timing?.enumerateMs ?? 0;
+    readMs = scan.timing?.readMs ?? 0;
+    parseValidateMs = scan.timing?.parseValidateMs ?? 0;
+    carriers = scan.timing?.carriers ?? 0;
     // Keep unsafe names visible in the board's excluded list instead of
     // silently dropping them from the scanner's directory candidates.
     const excluded = [...scan.excluded];
@@ -630,6 +818,7 @@ export class TaskIndexService implements ITaskIndexNotifier {
     const summaries: TaskSpecSummary[] = readableTasks.map(
       ({ body: _body, ...summary }) => summary,
     );
+    rows = summaries.length;
     let indexWritten = true;
     if (!this.store.isReady()) {
       // The one PREDICTABLE offline case, and the whole reason `isReady()`
@@ -653,7 +842,9 @@ export class TaskIndexService implements ITaskIndexNotifier {
       );
     } else {
       try {
-        this.store.replaceWorkspace(root, summaries, excluded);
+        const replaceStarted = this.now();
+        try { this.store.replaceWorkspace(root, summaries, excluded); }
+        finally { replaceMs = this.now() - replaceStarted; }
       } catch (error: unknown) {
         indexWritten = false;
         // WARN, not ERROR: this is recoverable, not a defect. `ensureStarted`
@@ -671,13 +862,24 @@ export class TaskIndexService implements ITaskIndexNotifier {
     const state = this.states.get(root);
     if (state) state.specsDirExists = scan.specsDirExists;
     if (emit) {
-      this.fireChange({ workspaceRoot: root, folderNames, reason });
+      const listenerStarted = this.now();
+      try { this.fireChange({ workspaceRoot: root, folderNames, reason }); }
+      finally { listenerMs = this.now() - listenerStarted; }
     }
+    failed = !indexWritten && this.store.isReady();
     return {
       indexedCount: summaries.length,
       excludedCount: excluded.length,
       indexWritten,
     };
+    } finally {
+      logRebuildTiming(this.logger, {
+        trigger: reason === 'write' ? 'writer' : reason === 'reindex' && !emit ? 'activation' : reason,
+        enumerateMs, readMs, parseValidateMs, sqliteReplaceMs: replaceMs,
+        listenerMs, waitedMs, totalMs: this.now() - started + waitedMs,
+        carriers, rows, coalesced, failed,
+      });
+    }
   }
 
   private safeGetMeta(root: string): ReturnType<ITaskIndexStore['getMeta']> {

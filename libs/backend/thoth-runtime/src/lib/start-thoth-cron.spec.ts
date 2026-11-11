@@ -182,7 +182,7 @@ describe('startThothCron', () => {
     const result = await (handler as () => Promise<{ summary: string }>)();
 
     expect(backupService.backup).toHaveBeenCalledWith('daily');
-    expect(backupService.rotate).toHaveBeenCalledWith('daily', 7);
+    expect(backupService.rotate).toHaveBeenCalledWith('daily', 3);
     const pragma = refs.sqliteConnection?.db.pragma as jest.Mock;
     // TASK_2026_440: free pages are reclaimed by the retention job in bounded
     // steps; the backup handler no longer runs an unbounded vacuum.
@@ -234,7 +234,7 @@ describe('startThothCron', () => {
         'backup written to /backups/daily.db; pragmas skipped: no sqlite connection',
     });
     expect(backupService.backup).toHaveBeenCalledWith('daily');
-    expect(backupService.rotate).toHaveBeenCalledWith('daily', 7);
+    expect(backupService.rotate).toHaveBeenCalledWith('daily', 3);
     expect(pragma).not.toHaveBeenCalled();
   });
 

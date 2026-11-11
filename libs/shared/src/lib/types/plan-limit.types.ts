@@ -215,10 +215,21 @@ export type PlanLimitStatusReason =
   | 'cli-not-signed-in'
   | 'cli-exit-error'
   | 'cli-parse-failed'
+  | 'cli-backoff'
+  | 'usage-budget-exhausted'
+  | 'account-unverified'
   | 'api-key-no-subscription-quota'
   | 'balance-unavailable'
   | 'balance-auth-rejected'
   | 'usage-auth-rejected';
+
+/** Origin of an owner's plan reading, distinct from per-window evidence. */
+export type UsageSourceLabel =
+  | 'provider-api'
+  | 'cli-command'
+  | 'local-state'
+  | 'session-sdk'
+  | 'local-rpc';
 
 /** Everything known about one owner's limits. */
 export interface PlanLimitOwnerSnapshot {
@@ -232,6 +243,10 @@ export interface PlanLimitOwnerSnapshot {
     | 'unresolved-route';
   readonly status: ProviderAccountUsageStatus;
   readonly fetchedAt?: number;
+  /** Source of the winning plan reading. */
+  readonly source?: UsageSourceLabel;
+  /** Epoch milliseconds when that source observed the reading. */
+  readonly readAt?: number;
   readonly staleSince?: number;
   /** True once a full-table source declared this owner's window set. */
   readonly windowSetEstablished: boolean;

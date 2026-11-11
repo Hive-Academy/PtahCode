@@ -114,7 +114,12 @@ const CHILD_TAB = '0f1e2d3c-4b5a-4968-8776-655443322110';
 
 interface Harness {
   service: ChatSessionService;
-  modelCatalog: { getSupportedModels: jest.Mock; getNativeClaudeModels: jest.Mock; getModelsForProviderProfile: jest.Mock; resolveModelId: jest.Mock };
+  modelCatalog: {
+    getSupportedModels: jest.Mock;
+    getNativeClaudeModels: jest.Mock;
+    getModelsForProviderProfile: jest.Mock;
+    resolveModelId: jest.Mock;
+  };
   startChatSession: jest.Mock;
   streamEventsToWebview: jest.Mock;
   intercept: jest.Mock;
@@ -173,10 +178,21 @@ function makeHarness(
 
   const logger = createMockLogger();
   const modelCatalog = {
-    getSupportedModels: jest.fn().mockResolvedValue([{ value: 'claude-opus-4' }, { value: 'claude-sonnet-4' }]),
-    getNativeClaudeModels: jest.fn().mockResolvedValue([{ value: 'claude-opus-4' }]),
-    getModelsForProviderProfile: jest.fn().mockResolvedValue([{ value: 'workspace-model' }]),
-    resolveModelId: jest.fn((model: string) => model === 'opus' ? 'claude-opus-4' : model),
+    getSupportedModels: jest
+      .fn()
+      .mockResolvedValue([
+        { value: 'claude-opus-4' },
+        { value: 'claude-sonnet-4' },
+      ]),
+    getNativeClaudeModels: jest
+      .fn()
+      .mockResolvedValue([{ value: 'claude-opus-4' }]),
+    getModelsForProviderProfile: jest
+      .fn()
+      .mockResolvedValue([{ value: 'workspace-model' }]),
+    resolveModelId: jest.fn((model: string) =>
+      model === 'opus' ? 'claude-opus-4' : model,
+    ),
   };
   const metadataGet = jest.fn().mockResolvedValue(opts.metadata ?? null);
   const service = new ChatSessionService(
@@ -313,32 +329,82 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
   describe('resolveAgentChildModel', () => {
     const input = { workspaceRoot: ROOT, parentSessionId: '', model: 'opus' };
 
+    it('returns an empty list for a named account', async () => {
+      const h = makeHarness();
+      Object.defineProperty(h.service, 'gateAccount', {
+        value: jest.fn().mockResolvedValue({}),
+      });
+      await expect(h.service.listAgentChildModels(input)).resolves.toEqual([]);
+      expect(h.modelCatalog.getSupportedModels).not.toHaveBeenCalled();
+    });
+
+    it('returns an empty list when the catalog throws', async () => {
+      const h = makeHarness();
+      h.modelCatalog.getSupportedModels.mockRejectedValueOnce(
+        new Error('catalog offline'),
+      );
+      await expect(h.service.listAgentChildModels(input)).resolves.toEqual([]);
+    });
+
     it('accepts a concrete ID or a tier alias resolved into the catalog', async () => {
       const h = makeHarness();
-      await expect(h.service.resolveAgentChildModel(input)).resolves.toEqual({ accepted: true, resolvedModel: 'claude-opus-4' });
-      await expect(h.service.resolveAgentChildModel({ ...input, model: 'claude-sonnet-4' })).resolves.toEqual({ accepted: true, resolvedModel: 'claude-sonnet-4' });
+      await expect(h.service.resolveAgentChildModel(input)).resolves.toEqual({
+        accepted: true,
+        resolvedModel: 'claude-opus-4',
+      });
+      await expect(
+        h.service.resolveAgentChildModel({
+          ...input,
+          model: 'claude-sonnet-4',
+        }),
+      ).resolves.toEqual({ accepted: true, resolvedModel: 'claude-sonnet-4' });
     });
 
     it('refuses an unknown ID with the account catalog', async () => {
       const h = makeHarness();
-      await expect(h.service.resolveAgentChildModel({ ...input, model: 'unknown' })).resolves.toMatchObject({ accepted: false, code: 'invalid-model', acceptedModels: ['claude-opus-4', 'claude-sonnet-4'] });
+      await expect(
+        h.service.resolveAgentChildModel({ ...input, model: 'unknown' }),
+      ).resolves.toMatchObject({
+        accepted: false,
+        code: 'invalid-model',
+        acceptedModels: ['claude-opus-4', 'claude-sonnet-4'],
+      });
     });
 
     it('admits only workspace provider models when the ambient provider differs', async () => {
       const h = makeHarness();
       const profile = {
         providerId: 'workspace-provider',
-        authEnv: { ANTHROPIC_BASE_URL: 'https://workspace.example.test', ANTHROPIC_AUTH_TOKEN: 'workspace-token' },
+        authEnv: {
+          ANTHROPIC_BASE_URL: 'https://workspace.example.test',
+          ANTHROPIC_AUTH_TOKEN: 'workspace-token',
+        },
         model: 'workspace-model',
       };
       h.resolveProviderProfileForWorkspace.mockResolvedValue(profile);
-      h.modelCatalog.getSupportedModels.mockResolvedValue([{ value: 'ambient-only-model' }]);
+      h.modelCatalog.getSupportedModels.mockResolvedValue([
+        { value: 'ambient-only-model' },
+      ]);
 
-      await expect(h.service.resolveAgentChildModel({ ...input, model: 'workspace-model' }))
-        .resolves.toEqual({ accepted: true, resolvedModel: 'workspace-model' });
-      await expect(h.service.resolveAgentChildModel({ ...input, model: 'ambient-only-model' }))
-        .resolves.toMatchObject({ accepted: false, code: 'invalid-model', acceptedModels: ['workspace-model'] });
-      expect(h.modelCatalog.getModelsForProviderProfile).toHaveBeenCalledWith(profile);
+      await expect(
+        h.service.resolveAgentChildModel({
+          ...input,
+          model: 'workspace-model',
+        }),
+      ).resolves.toEqual({ accepted: true, resolvedModel: 'workspace-model' });
+      await expect(
+        h.service.resolveAgentChildModel({
+          ...input,
+          model: 'ambient-only-model',
+        }),
+      ).resolves.toMatchObject({
+        accepted: false,
+        code: 'invalid-model',
+        acceptedModels: ['workspace-model'],
+      });
+      expect(h.modelCatalog.getModelsForProviderProfile).toHaveBeenCalledWith(
+        profile,
+      );
       expect(h.modelCatalog.getSupportedModels).not.toHaveBeenCalled();
     });
 
@@ -347,37 +413,79 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
       const sentinel = 'sk-sentinel-credential';
       const profile = {
         providerId: 'workspace-provider',
-        authEnv: { ANTHROPIC_BASE_URL: 'https://workspace.example.test', ANTHROPIC_AUTH_TOKEN: 'workspace-token' },
+        authEnv: {
+          ANTHROPIC_BASE_URL: 'https://workspace.example.test',
+          ANTHROPIC_AUTH_TOKEN: 'workspace-token',
+        },
         model: 'workspace-model',
       };
       h.resolveProviderProfileForWorkspace.mockResolvedValue(profile);
 
-      await h.service.resolveAgentChildModel({ ...input, model: 'workspace-model' });
-      expect(h.modelCatalog.resolveModelId).toHaveBeenCalledWith('workspace-model', profile.authEnv, true);
+      await h.service.resolveAgentChildModel({
+        ...input,
+        model: 'workspace-model',
+      });
+      expect(h.modelCatalog.resolveModelId).toHaveBeenCalledWith(
+        'workspace-model',
+        profile.authEnv,
+        true,
+      );
 
-      h.modelCatalog.getModelsForProviderProfile.mockRejectedValue(new Error(`provider echoed ${sentinel}`));
-      const refused = await h.service.resolveAgentChildModel({ ...input, model: 'workspace-model' });
-      expect(refused).toMatchObject({ accepted: false, code: 'model-catalog-unavailable' });
+      h.modelCatalog.getModelsForProviderProfile.mockRejectedValue(
+        new Error(`provider echoed ${sentinel}`),
+      );
+      const refused = await h.service.resolveAgentChildModel({
+        ...input,
+        model: 'workspace-model',
+      });
+      expect(refused).toMatchObject({
+        accepted: false,
+        code: 'model-catalog-unavailable',
+      });
       expect(JSON.stringify(refused)).not.toContain(sentinel);
-      const logged = [h.logger.debug, h.logger.info, h.logger.warn, h.logger.error]
+      const logged = [
+        h.logger.debug,
+        h.logger.info,
+        h.logger.warn,
+        h.logger.error,
+      ]
         .flatMap((log) => log.mock.calls.flat())
-        .map((arg: unknown) => arg instanceof Error ? `${arg.message} ${arg.stack ?? ''}` : JSON.stringify(arg));
+        .map((arg: unknown) =>
+          arg instanceof Error
+            ? `${arg.message} ${arg.stack ?? ''}`
+            : JSON.stringify(arg),
+        );
       expect(logged.join(' ')).not.toContain(sentinel);
     });
 
     it('refuses an unavailable catalog', async () => {
       const h = makeHarness();
-      h.modelCatalog.getSupportedModels.mockRejectedValueOnce(new Error('catalog offline'));
-      await expect(h.service.resolveAgentChildModel(input)).resolves.toMatchObject({ accepted: false, code: 'model-catalog-unavailable', message: 'catalog offline' });
+      h.modelCatalog.getSupportedModels.mockRejectedValueOnce(
+        new Error('catalog offline'),
+      );
+      await expect(
+        h.service.resolveAgentChildModel(input),
+      ).resolves.toMatchObject({
+        accepted: false,
+        code: 'model-catalog-unavailable',
+        message: 'catalog offline',
+      });
     });
 
     it('refuses an explicit model on a named account without reading the ambient catalog', async () => {
       const h = makeHarness();
-      Object.defineProperty(h.service, 'gateAccount', { value: jest.fn().mockResolvedValue({}) });
+      Object.defineProperty(h.service, 'gateAccount', {
+        value: jest.fn().mockResolvedValue({}),
+      });
       const result = await h.service.resolveAgentChildModel(input);
-      expect(result).toMatchObject({ accepted: false, code: 'model-catalog-unavailable' });
+      expect(result).toMatchObject({
+        accepted: false,
+        code: 'model-catalog-unavailable',
+      });
       expect(result.accepted ? '' : result.message).toContain('omit model');
-      expect(result.accepted ? '' : result.message).toContain('effort is still accepted');
+      expect(result.accepted ? '' : result.message).toContain(
+        'effort is still accepted',
+      );
       expect(h.modelCatalog.getSupportedModels).not.toHaveBeenCalled();
     });
   });
@@ -487,7 +595,11 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
     });
     it('deduplicates an ancestor by physical identity', async () => {
       const alias = join(ROOT, 'parent-alias');
-      symlinkSync(join(ROOT, 'parent'), alias, process.platform === 'win32' ? 'junction' : 'dir');
+      symlinkSync(
+        join(ROOT, 'parent'),
+        alias,
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
       const h = makeHarness({
         metadata: {
           workspaceId: ROOT,

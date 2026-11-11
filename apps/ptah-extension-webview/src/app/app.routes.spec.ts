@@ -1,10 +1,14 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { CanMatchFn, Route } from '@angular/router';
 import { TestBed } from '@angular/core/testing';
-import { VSCodeService } from '@ptah-extension/core';
-import { SURFACE_ACTIVE } from '@ptah-extension/core';
+import {
+  ACCEPTED_INITIAL_VIEWS,
+  SURFACE_ACTIVE,
+  SURFACE_ROUTE_IDS,
+  VSCodeService,
+} from '@ptah-extension/core';
 
 import { onboardingFirstRunGuard } from '@ptah-extension/onboarding/services';
 
@@ -40,9 +44,15 @@ function routeFor(path: string): Route {
 
 describe('UI gallery route', () => {
   it('keeps listbox selection explicit and shows the shared surfaces', () => {
-    const source = readFileSync(join(__dirname, 'ui-gallery.component.ts'), 'utf-8');
-    expect(source).toContain('ngListbox selectionMode="explicit"');
-    expect(source).toContain('<ptah-surface-card>');
+    const galleryDir = join(__dirname, 'ui-gallery');
+    const source = [
+      readFileSync(join(__dirname, 'ui-gallery.component.ts'), 'utf-8'),
+      ...readdirSync(galleryDir)
+        .filter((file) => file.endsWith('.ts') || file.endsWith('.html'))
+        .map((file) => readFileSync(join(galleryDir, file), 'utf-8')),
+    ].join('\n');
+    expect(source).toMatch(/ngListbox\s+selectionMode="explicit"/);
+    expect(source).toMatch(/<ptah-surface-card\s*>/);
     expect(source).toContain('<ptah-surface-tile');
   });
 
@@ -54,9 +64,39 @@ describe('UI gallery route', () => {
     expect(route.component).toBeUndefined();
     expect(typeof route.loadComponent).toBe('function');
     expect(route.providers).toBeUndefined();
-    expect(appRoutes.findIndex((entry) => entry.path === 'ui-gallery')).toBeLessThan(appRoutes.findIndex((entry) => entry.path === '**'));
+    expect(
+      appRoutes.findIndex((entry) => entry.path === 'ui-gallery'),
+    ).toBeLessThan(appRoutes.findIndex((entry) => entry.path === '**'));
     const { UiGalleryComponent } = await import('./ui-gallery.component');
     expect(await route.loadComponent?.()).toBe(UiGalleryComponent);
+  });
+
+  it('has no navigation definition or non-gallery app file pointing to ui-gallery', () => {
+    expect(SURFACE_ROUTE_IDS).not.toContain('ui-gallery');
+    expect(ACCEPTED_INITIAL_VIEWS).not.toContain('ui-gallery');
+
+    function collectNonGalleryAppSources(dir: string): string[] {
+      return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name === 'ui-gallery') return [];
+          return collectNonGalleryAppSources(full);
+        }
+        if (
+          entry.name.endsWith('.spec.ts') ||
+          entry.name === 'app.routes.ts' ||
+          entry.name === 'ui-gallery.component.ts'
+        ) {
+          return [];
+        }
+        return /\.(ts|html)$/.test(entry.name) ? [full] : [];
+      });
+    }
+
+    const referencingFiles = collectNonGalleryAppSources(__dirname).filter(
+      (file) => readFileSync(file, 'utf-8').includes('ui-gallery'),
+    );
+    expect(referencingFiles).toEqual([]);
   });
 });
 
@@ -67,8 +107,13 @@ describe('review runs route', () => {
       providers: [{ provide: VSCodeService, useValue: { isElectron: true } }],
     });
     expect(route.canMatch).toEqual([reviewOnlySurface]);
-    expect(TestBed.runInInjectionContext(() => reviewOnlySurface(route, [], {} as Parameters<CanMatchFn>[2]))).toBe(true);
-    const { ReviewRunsPageComponent } = await import('@ptah-extension/review-runs-ui');
+    expect(
+      TestBed.runInInjectionContext(() =>
+        reviewOnlySurface(route, [], {} as Parameters<CanMatchFn>[2]),
+      ),
+    ).toBe(true);
+    const { ReviewRunsPageComponent } =
+      await import('@ptah-extension/review-runs-ui');
     expect(await route.loadComponent?.()).toBe(ReviewRunsPageComponent);
   });
 
@@ -77,7 +122,11 @@ describe('review runs route', () => {
     TestBed.configureTestingModule({
       providers: [{ provide: VSCodeService, useValue: { isElectron: false } }],
     });
-    expect(TestBed.runInInjectionContext(() => reviewOnlySurface(route, [], {} as Parameters<CanMatchFn>[2]))).toBe(false);
+    expect(
+      TestBed.runInInjectionContext(() =>
+        reviewOnlySurface(route, [], {} as Parameters<CanMatchFn>[2]),
+      ),
+    ).toBe(false);
     expect(appRoutes.at(-1)?.path).toBe('**');
   });
 });

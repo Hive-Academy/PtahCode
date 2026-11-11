@@ -13,7 +13,11 @@ import {
   type PlanLimitWindow,
   type QuotaOwnerRef,
 } from '@ptah-extension/shared';
-import { observeAntigravityAccount } from '../provider-owner.resolver';
+import {
+  currentAntigravityStoreOwner,
+  matchesAntigravityStoreAccount,
+  observeAntigravityAccount,
+} from '../provider-owner.resolver';
 import {
   ANTIGRAVITY_CONNECT_PROTOCOL_VERSION,
   ANTIGRAVITY_CSRF_ARGUMENT,
@@ -33,13 +37,24 @@ import type {
   PlanUsageReader,
   PlanUsageReading,
 } from './plan-usage-reader.types';
-import { readAntigravityCliUsage } from './antigravity-cli-usage.adapter';
+import {
+  ANTIGRAVITY_CLI_TIMEOUT_MS,
+  readAntigravityCliUsage,
+} from './antigravity-cli-usage.adapter';
 import { readAntigravityOAuthQuota } from './antigravity-oauth-plan-usage.reader';
+import { readUsageSourceChain } from './usage-source-chain';
+import type { UsageSource, UsageSourceResult, UsageFailureReason, UsageSourceLabel } from './plan-usage-reader.types';
 
 export const ANTIGRAVITY_USAGE_TIMEOUT_MS = 3_000;
+export const ANTIGRAVITY_CHAIN_TIMEOUT_MS = 11_000;
+const ANTIGRAVITY_OAUTH_STAGE_TIMEOUT_MS = 3_000;
+const MIN_STAGE_MS = 1_000;
 export const ANTIGRAVITY_MAX_BODY_BYTES = 1_048_576;
 export const ANTIGRAVITY_MAX_MODEL_LENGTH = 64;
 const MAX_ATTEMPTS = 8;
+function sourceFailure(source: UsageSourceLabel, reason: UsageFailureReason): UsageSourceResult {
+  return { ok: false, source, reason };
+}
 type Scheme = 'http' | 'https';
 type StatusRequest = (
   scheme: Scheme,
@@ -68,49 +83,74 @@ export function createAntigravityPlanUsageReader(
   observeAccount: (email: string | null) => string = observeAntigravityAccount,
   readOAuth: typeof readAntigravityOAuthQuota = readAntigravityOAuthQuota,
   readCli: typeof readAntigravityCliUsage = readAntigravityCliUsage,
+  readStoreOwner: typeof currentAntigravityStoreOwner = currentAntigravityStoreOwner,
 ): PlanUsageReader {
-  return async ({ signal, target }) => {
-    const local = await probeLocal(signal, target);
-    if (local === 'account-changed') return unavailable();
-    if (local.status === 'available') return local;
-    if (signal?.aborted) return unavailable();
-    // CLI usage has no email, so it cannot verify an account owner's identity.
-    if (
-      target.ownerRef.identityKind !== 'cli-store' &&
-      target.ownerRef.identityKind !== 'unknown'
-    ) {
-      return local;
-    }
-    // Third fallback: the headless CLI, with its own fixed timeout.
-    const cli = await readCli(signal);
-    if (!cli.ok) return { ...unavailable(), statusReason: cli.reason };
-    const observedAt = now();
-    return {
-      status: 'available',
-      fetchedAt: observedAt,
-      windowSetEstablished: true,
-      windows: cli.windows,
-    };
+  return async (request) => {
+    const { signal, target } = request;
+    const chainDeadline = now() + ANTIGRAVITY_CHAIN_TIMEOUT_MS;
+    const sources: UsageSource[] = [
+      { id: 'antigravity-oauth', label: 'provider-api', read: async (stage) => {
+        if (target.ownerRef.identityKind !== 'cli-store' && target.ownerRef.identityKind !== 'unknown')
+          return sourceFailure('provider-api', 'source-not-applicable');
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        stage.signal?.addEventListener('abort', abort, { once: true });
+        const timer = setTimeout(abort, ANTIGRAVITY_OAUTH_STAGE_TIMEOUT_MS);
+        try {
+          const reading = await untilAborted(readOAuth(controller.signal, now), controller.signal);
+          return reading?.status === 'available'
+            ? { ok: true, source: 'provider-api', readAt: now(), reading }
+            : sourceFailure('provider-api', 'no-oauth');
+        } catch (_error: unknown) {
+          // degradation-audit: optional-capability - local RPC remains eligible.
+          return sourceFailure('provider-api', 'no-oauth');
+        } finally { clearTimeout(timer); stage.signal?.removeEventListener('abort', abort); }
+      } },
+      { id: 'antigravity-local', label: 'local-rpc', read: async (stage) => {
+        const reading = await probeLocal(stage.signal, target, () => ANTIGRAVITY_USAGE_TIMEOUT_MS);
+        if (reading === 'account-changed') return sourceFailure('local-rpc', 'account-unverified');
+        return reading.status === 'available'
+          ? { ok: true, source: 'local-rpc', readAt: reading.fetchedAt ?? now(), reading }
+          : sourceFailure('local-rpc', 'no-local-server');
+      } },
+      { id: 'antigravity-cli', label: 'cli-command', read: async (stage) => {
+        if (!stage.allowCliFallback) return sourceFailure('cli-command', 'source-not-applicable');
+        if (!['cli-store', 'unknown', 'account'].includes(target.ownerRef.identityKind))
+          return sourceFailure('cli-command', 'source-not-applicable');
+        const storeOwner = readStoreOwner();
+        if (target.ownerRef.identityKind === 'account' &&
+          !matchesAntigravityStoreAccount(target.ownerRef, storeOwner))
+          return sourceFailure('cli-command', 'account-unverified');
+        const remaining = chainDeadline - now();
+        if (remaining < MIN_STAGE_MS) return sourceFailure('cli-command', 'cli-timeout');
+        const cli = await readCli(stage.signal, { now, logger, timeoutMs: Math.min(ANTIGRAVITY_CLI_TIMEOUT_MS, remaining),
+          ownerKey: target.ownerRef.key, accountFingerprint: storeOwner.key });
+        if (!cli.ok) return sourceFailure('cli-command', cli.reason === 'cli-busy' ? 'cli-unavailable' : cli.reason);
+        if (target.ownerRef.identityKind === 'account' &&
+          !matchesAntigravityStoreAccount(target.ownerRef, readStoreOwner()))
+          return sourceFailure('cli-command', 'account-unverified');
+        const observedAt = cli.readAt;
+        return { ok: true, source: 'cli-command', readAt: observedAt,
+          reading: { status: 'available', fetchedAt: observedAt, windowSetEstablished: true,
+            windows: cli.windows } };
+      } },
+    ];
+    return readUsageSourceChain(sources, request, now, ANTIGRAVITY_CHAIN_TIMEOUT_MS);
   };
-
   async function probeLocal(
     signal: AbortSignal | undefined,
     target: PlanOwnerTarget,
+    timeLeft: () => number,
   ): Promise<PlanUsageReading | 'account-changed'> {
     if (signal?.aborted) return unavailable();
     // An account owner observed through the language server has verified email;
     // the ACP token file contains no email to prove it is the same account.
-    if (
-      target.ownerRef.identityKind === 'cli-store' ||
-      target.ownerRef.identityKind === 'unknown'
-    ) {
-      const oauth = await readOAuth(signal, now);
-      if (oauth?.status === 'available') return oauth;
-    }
+    const probeBudget = Math.min(ANTIGRAVITY_USAGE_TIMEOUT_MS, timeLeft());
+    if (probeBudget < MIN_STAGE_MS) return budgetUnavailable();
     const controller = new AbortController();
     const abort = () => controller.abort();
     signal?.addEventListener('abort', abort, { once: true });
-    const timeout = setTimeout(abort, ANTIGRAVITY_USAGE_TIMEOUT_MS);
+    const timeout = setTimeout(abort, probeBudget);
     try {
       const server = await discoverServer(run, controller.signal);
       if (!server) {
@@ -376,6 +416,10 @@ function unavailable(): PlanUsageReading {
     windows: [],
   };
 }
+
+function budgetUnavailable(): PlanUsageReading {
+  return { ...unavailable(), statusReason: 'usage-budget-exhausted' };
+}
 function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) return Promise.reject(new Error('aborted'));
   return new Promise<T>((resolve, reject) => {
@@ -475,3 +519,4 @@ export function readJsonResponse(
     request.end();
   });
 }
+

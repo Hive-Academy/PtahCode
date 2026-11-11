@@ -14,6 +14,7 @@
 import type { ProviderAccountPortRefusal } from '@ptah-extension/auth-providers-tokens';
 import type {
   AgentSessionOpenedPayload,
+  ChildSettingSource,
   EffortLevel,
   LaneCompletionRefusalReason,
   LaneCompletionVerdict,
@@ -64,6 +65,8 @@ export interface SessionChildSnapshot {
   readonly label: string;
   readonly model?: string;
   readonly effort?: EffortLevel;
+  readonly modelSource?: ChildSettingSource;
+  readonly effortSource?: ChildSettingSource;
   readonly taskId?: string;
   readonly branch: string;
   /** Resolved commit sha the branch was created from. */
@@ -102,6 +105,22 @@ export interface SessionChildSnapshot {
   };
   readonly lastRecap?: string;
   readonly lastCompletion?: SessionChildLastCompletion;
+}
+
+/** Sources for records restored from before child setting routing existed. */
+export function childSettingSources(
+  child: Pick<
+    SessionChildSnapshot,
+    'model' | 'effort' | 'modelSource' | 'effortSource'
+  >,
+): {
+  readonly modelSource: ChildSettingSource;
+  readonly effortSource: ChildSettingSource;
+} {
+  return {
+    modelSource: child.modelSource ?? (child.model ? 'pin' : 'default'),
+    effortSource: child.effortSource ?? (child.effort ? 'pin' : 'default'),
+  };
 }
 
 export interface SessionChildStartRequest {
@@ -161,10 +180,7 @@ export type SessionChildStartResult =
 
 /** Why a succession runs. */
 export type SessionChildSuccessionCause =
-  | 'child-handoff'
-  | 'runtime-cap'
-  | 'runtime-cap-interrupted'
-  | 'session-ended';
+  'child-handoff' | 'runtime-cap' | 'runtime-cap-interrupted' | 'session-ended';
 
 export interface SessionChildSuccessionRequest {
   /** The child's MCP routing id (tab id or SDK id), from the transport. */
@@ -314,7 +330,9 @@ export type SessionChildCompletionDelivery =
 export interface ISessionSpawner {
   start(request: SessionChildStartRequest): Promise<SessionChildStartResult>;
   /** Replace a live child with a successor in its existing worktree. */
-  succeed(request: SessionChildSuccessionRequest): Promise<SessionChildSuccessionResult>;
+  succeed(
+    request: SessionChildSuccessionRequest,
+  ): Promise<SessionChildSuccessionResult>;
   send(request: SessionChildSendRequest): Promise<SessionChildSendResult>;
   status(
     query: SessionChildQuery,

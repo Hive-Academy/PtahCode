@@ -8,6 +8,7 @@ import {
   type OwnerLimitEvidence,
   type PlanLimitOwnerSnapshot,
   type PlanLimitWindow,
+  type UsageSourceLabel,
 } from '@ptah-extension/shared';
 import {
   findAgentLimit,
@@ -206,6 +207,31 @@ const ROSTER = [
 ];
 
 describe('agent limit formatter (TASK_2026_596 Batch 14)', () => {
+  it.each(['copilot', 'cursor', 'pi'] as const)('shows no usage source for %s', (cli) => {
+    expect(formatLimitColumn(lane(cliRow(cli), snapshot({ status: 'no-usage-source' })), NOW))
+      .toBe('no usage source');
+  });
+  it.each<[UsageSourceLabel, string]>([
+    ['provider-api', 'provider API'],
+    ['cli-command', 'CLI command'],
+    ['local-state', 'local state'],
+    ['session-sdk', 'session SDK'],
+    ['local-rpc', 'local RPC'],
+  ])('shows %s and the reading age in the limit text', (source, label) => {
+    const limit = lane(cliRow('codex'), snapshot({
+      status: 'no-usage-source',
+      source,
+      readAt: NOW - 12_000,
+    }));
+    expect(formatLimitColumn(limit, NOW)).toBe(`no usage source [${label}, 12s ago]`);
+    expect(formatLimitColumn(limit, NOW + 48_000)).toBe(`no usage source [${label}, 1m ago]`);
+  });
+
+  it('keeps legacy limit text when the source is absent', () => {
+    const limit = lane(cliRow('codex'), snapshot({ status: 'no-usage-source' }));
+    expect(formatLimitColumn(limit, NOW)).toBe('no usage source');
+  });
+
   it('F42 snapshots the near-limit list state verbatim', () => {
     expect(formatLimitColumn(nearLane, NOW)).toBe(
       'near limit (5-hour session 94%)',
@@ -306,50 +332,86 @@ describe('agent limit formatter (TASK_2026_596 Batch 14)', () => {
   });
 
   it('lists credits and individual allowance without changing the owner/window row shape', () => {
-    const limited = lane(cliRow('codex'), snapshot({
-      windows: [FIVE_HOUR_ROOM],
-      allowances: [{
-        bucketId: 'active', label: 'Plan',
-        credits: { hasCredits: true, unlimited: true },
-        individual: { limit: '100', used: '25', remainingPercent: 75, resetsAt: NOW + HOUR },
-      }],
-    }));
+    const limited = lane(
+      cliRow('codex'),
+      snapshot({
+        windows: [FIVE_HOUR_ROOM],
+        allowances: [
+          {
+            bucketId: 'active',
+            label: 'Plan',
+            credits: { hasCredits: true, unlimited: true },
+            individual: {
+              limit: '100',
+              used: '25',
+              remainingPercent: 75,
+              resetsAt: NOW + HOUR,
+            },
+          },
+        ],
+      }),
+    );
     const rows = formatPlanLimitRows([limited], NOW);
     expect(rows).toHaveLength(3);
     expect(rows[0]).toHaveLength(6);
     expect(rows[0][1]).toBe('5-hour session');
-    expect(rows[1]).toEqual(['codex', 'Plan credits', 'unlimited', 'unlimited', '-', '-']);
+    expect(rows[1]).toEqual([
+      'codex',
+      'Plan credits',
+      'unlimited',
+      'unlimited',
+      '-',
+      '-',
+    ]);
     expect(rows[2]).toEqual([
-      'codex', 'Plan allowance', '25 of 100 used', '75% remaining',
-      'resets 2026-10-03 13:00 UTC', '-',
+      'codex',
+      'Plan allowance',
+      '25 of 100 used',
+      '75% remaining',
+      'resets 2026-10-03 13:00 UTC',
+      '-',
     ]);
     const text = formatPlanLimitsSection([limited], NOW);
     expect(text).toContain('| codex | Plan credits | unlimited |');
-    expect(text).toContain('| codex | Plan allowance | 25 of 100 used | 75% remaining |');
+    expect(text).toContain(
+      '| codex | Plan allowance | 25 of 100 used | 75% remaining |',
+    );
   });
 
   it('escapes provider cells in the rendered plan table and clamps allowance percentages', () => {
-    const limited = lane(cliRow('codex'), snapshot({
-      windows: [],
-      allowances: [{
-        bucketId: 'active', label: 'Plan | `name`\nnext',
-        credits: { balance: '12|50', hasCredits: true, unlimited: false },
-        individual: { limit: '100', used: '25', remainingPercent: 140 },
-      }],
-    }));
+    const limited = lane(
+      cliRow('codex'),
+      snapshot({
+        windows: [],
+        allowances: [
+          {
+            bucketId: 'active',
+            label: 'Plan | `name`\nnext',
+            credits: { balance: '12|50', hasCredits: true, unlimited: false },
+            individual: { limit: '100', used: '25', remainingPercent: 140 },
+          },
+        ],
+      }),
+    );
     const rows = formatPlanLimitRows([limited], NOW);
     expect(rows[1]?.[3]).toBe('100% remaining');
     const text = formatPlanLimitsSection([limited], NOW);
     expect(text).toContain('Plan \\| \\`name\\` next credits');
     expect(text).toContain('12\\|50 remaining');
     expect(text).not.toContain('name`\nnext');
-    const negative = lane(cliRow('codex'), snapshot({
-      windows: [],
-      allowances: [{
-        bucketId: 'negative', label: 'Plan',
-        individual: { limit: '100', used: '25', remainingPercent: -20 },
-      }],
-    }));
+    const negative = lane(
+      cliRow('codex'),
+      snapshot({
+        windows: [],
+        allowances: [
+          {
+            bucketId: 'negative',
+            label: 'Plan',
+            individual: { limit: '100', used: '25', remainingPercent: -20 },
+          },
+        ],
+      }),
+    );
     expect(formatPlanLimitRows([negative], NOW)[0]?.[3]).toBe('0% remaining');
   });
 
@@ -756,7 +818,9 @@ describe('formatPlanLimitRows: one implementation for the list and $limits (TASK
 });
 
 describe('unknown causes and the gate-aware spawn block (cli-lane-limits)', () => {
-  function withSnapshot(overrides: Partial<PlanLimitOwnerSnapshot>): AgentLimit {
+  function withSnapshot(
+    overrides: Partial<PlanLimitOwnerSnapshot>,
+  ): AgentLimit {
     return lane(cliRow('codex'), snapshot({ windows: [], ...overrides }));
   }
 
@@ -770,6 +834,69 @@ describe('unknown causes and the gate-aware spawn block (cli-lane-limits)', () =
       'no open session',
     ],
     [{ status: 'service-unavailable' as const }, 'reader failed'],
+    [
+      {
+        status: 'service-unavailable' as const,
+        statusReason: 'account-unverified' as const,
+      },
+      'account could not be verified',
+    ],
+    [
+      {
+        status: 'service-unavailable' as const,
+        statusReason: 'cli-parse-failed' as const,
+      },
+      'usage response unreadable',
+    ],
+    [
+      {
+        status: 'service-unavailable' as const,
+        statusReason: 'cli-backoff' as const,
+      },
+      'usage read paused after a failure',
+    ],
+    [
+      {
+        status: 'service-unavailable' as const,
+        statusReason: 'usage-budget-exhausted' as const,
+      },
+      'usage read timed out',
+    ],
+    [
+      {
+        status: 'service-unavailable' as const,
+        statusReason: 'cli-unavailable' as const,
+      },
+      'usage reader unavailable',
+    ],
+    [
+      {
+        status: 'service-unavailable' as const,
+        statusReason: 'cli-not-found' as const,
+      },
+      'usage reader unavailable',
+    ],
+    [
+      {
+        status: 'service-unavailable' as const,
+        statusReason: 'cli-timeout' as const,
+      },
+      'usage reader timed out',
+    ],
+    [
+      {
+        status: 'service-unavailable' as const,
+        statusReason: 'cli-not-signed-in' as const,
+      },
+      'sign in required',
+    ],
+    [
+      {
+        status: 'service-unavailable' as const,
+        statusReason: 'cli-exit-error' as const,
+      },
+      'usage reader failed',
+    ],
     [{ status: 'stale' as const }, 'reader failed, aged value'],
     [{ status: 'provider-unsupported' as const }, 'no reader for provider'],
     [{ status: 'unsupported-config' as const }, 'credential missing'],
@@ -779,7 +906,7 @@ describe('unknown causes and the gate-aware spawn block (cli-lane-limits)', () =
     const limit = withSnapshot(overrides);
     expect(limit.state.state).toBe('unknown');
     expect(unknownCause(limit)).toBe(cause);
-    expect(formatLimitColumn(limit, NOW)).toBe(`unknown (${cause})`);
+    expect(formatLimitColumn(limit, NOW)).toBe(cause === 'no usage source' ? cause : `unknown (${cause})`);
   });
 
   it('says limits are not tracked for a lane with no owner', () => {

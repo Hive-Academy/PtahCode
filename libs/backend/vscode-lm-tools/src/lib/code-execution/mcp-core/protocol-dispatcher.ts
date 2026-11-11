@@ -294,13 +294,15 @@ async function lookupAgentLimits(
   ptahAPI: PtahAPI,
   rows?: readonly CliDetectionResult[],
   spawn?: { readonly target: AgentLimitTarget; readonly model?: string },
+  allowCliFallback = false,
 ) {
   try {
     if (!ptahAPI.agent.limits) return undefined;
     const listed = rows ?? (await ptahAPI.agent.list());
-    return await ptahAPI.agent.limits(
-      spawn ? rowsWithSpawnModel(listed, spawn.target, spawn.model) : listed,
-    );
+    const targetRows = spawn ? rowsWithSpawnModel(listed, spawn.target, spawn.model) : listed;
+    return await (allowCliFallback
+      ? ptahAPI.agent.limits(targetRows, { allowCliFallback: true })
+      : ptahAPI.agent.limits(targetRows));
   } catch {
     // degradation-audit: optional-capability - limit fields only enrich the
     // tool result; LaneLimitLookupService logs its own lane failures, and the
@@ -1664,7 +1666,7 @@ async function handleIndividualTool(
       case 'ptah_agent_list': {
         logger.info('[MCP] ptah_agent_list called', 'CodeExecutionMCP');
         const agents = await ptahAPI.agent.list();
-        const limits = await lookupAgentLimits(ptahAPI, agents);
+        const limits = await lookupAgentLimits(ptahAPI, agents, undefined, true);
         let roles: string[] = [];
         try {
           roles = await ptahAPI.agent.listRoles();

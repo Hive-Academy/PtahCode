@@ -43,6 +43,7 @@ import {
   type SessionIdResolvedCallbackRegistry,
 } from '@ptah-extension/agent-sdk';
 import { CLI_AGENT_RUNTIME_TOKENS } from '@ptah-extension/cli-agent-runtime';
+import { LANE_ROUTING_TOKENS } from '@ptah-extension/lane-routing';
 
 import { ChatRuntimeProfileService } from './session/chat-runtime-profile.service';
 import { TOKENS } from '@ptah-extension/vscode-core';
@@ -138,6 +139,11 @@ export function registerChatServices(container: DependencyContainer): void {
     CLI_AGENT_RUNTIME_TOKENS.CHILD_CHAT_SESSION_HOST,
     ChildChatSessionHostAdapter,
   );
+  if (container.isRegistered(LANE_ROUTING_TOKENS.CHILD_SETTING_ROUTER, true)) {
+    container.register(CLI_AGENT_RUNTIME_TOKENS.CHILD_SETTING_ROUTER, {
+      useToken: LANE_ROUTING_TOKENS.CHILD_SETTING_ROUTER,
+    });
+  }
 
   // A fresh session streams under its tabId until the SDK reports the real
   // UUID. Same wiring `SessionTurnStateRegistry` gets in

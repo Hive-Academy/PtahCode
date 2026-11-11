@@ -49,6 +49,12 @@
  */
 
 import { z } from 'zod';
+import {
+  CHILD_SETTING_SOURCES,
+  EFFORT_LEVELS,
+  type ChildSettingSource,
+  type EffortLevel,
+} from '@ptah-extension/shared';
 import { isWorkflowKind } from '@ptah-extension/chat-types';
 import type {
   SessionStatus,
@@ -180,8 +186,22 @@ function restoredViewMode(tab: TabState): TabViewMode | undefined {
     : tab.viewMode;
 }
 
+const MAX_CHILD_MODEL_LENGTH = 200;
+
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
+}
+
+function isValidChildModel(value: unknown): value is string {
+  return isNonEmptyString(value) && value.length <= MAX_CHILD_MODEL_LENGTH;
+}
+
+function isEffortLevel(value: unknown): value is EffortLevel {
+  return EFFORT_LEVELS.some((level) => level === value);
+}
+
+function isChildSettingSource(value: unknown): value is ChildSettingSource {
+  return CHILD_SETTING_SOURCES.some((source) => source === value);
 }
 
 /**
@@ -208,6 +228,10 @@ function restoredAgentOrigin(tab: TabState): TabAgentOrigin | undefined {
   }
   const parentSessionId = origin['parentSessionId'];
   const taskId = origin['taskId'];
+  const model = origin['model'];
+  const effort = origin['effort'];
+  const modelSource = origin['modelSource'];
+  const effortSource = origin['effortSource'];
   return {
     parentTabId: origin['parentTabId'],
     parentSessionId: isNonEmptyString(parentSessionId) ? parentSessionId : null,
@@ -216,6 +240,10 @@ function restoredAgentOrigin(tab: TabState): TabAgentOrigin | undefined {
     worktreePath: origin['worktreePath'],
     ...(isNonEmptyString(taskId) ? { taskId } : {}),
     startedAt: origin['startedAt'],
+    ...(isValidChildModel(model) ? { model } : {}),
+    ...(isEffortLevel(effort) ? { effort } : {}),
+    ...(isChildSettingSource(modelSource) ? { modelSource } : {}),
+    ...(isChildSettingSource(effortSource) ? { effortSource } : {}),
   };
 }
 

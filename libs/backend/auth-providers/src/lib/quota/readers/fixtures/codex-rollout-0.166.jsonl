@@ -1,0 +1,2 @@
+﻿{"timestamp":"2026-11-11T12:00:00.000Z","type":"session_meta","payload":{"id":"<account>"}}
+{"timestamp":"2026-11-11T12:00:00.000Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"<account>","primary":{"used_percent":37,"window_minutes":300,"resets_at":1794402000},"secondary":{"used_percent":12,"window_minutes":10080,"resets_at":1795000000},"plan_type":"plus"}}}

@@ -1,7 +1,10 @@
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import type { Logger } from '@ptah-extension/vscode-core';
 import { createServer } from 'node:http';
-import { accountOwnerKey } from '../provider-owner.resolver';
+import {
+  accountOwnerKey,
+  quotaOwnerRefFromKey,
+} from '../provider-owner.resolver';
 import {
   ANTIGRAVITY_CSRF_HEADER,
   ANTIGRAVITY_REQUEST_BODY,
@@ -13,15 +16,20 @@ import {
 } from './antigravity-plan-usage.reader';
 
 import { readAntigravityCliUsage } from './antigravity-cli-usage.adapter';
+import { ANTIGRAVITY_USAGE_FIXTURE } from './antigravity-usage.fixture';
 
 // Never spawn the real gy binary from unit tests; individual tests override.
 jest.mock('./antigravity-cli-usage.adapter', () => ({
+  ANTIGRAVITY_CLI_TIMEOUT_MS: 8_000,
   readAntigravityCliUsage: jest.fn(async () => ({
     ok: false,
     reason: 'cli-unavailable',
   })),
 }));
 const mockedCli = jest.mocked(readAntigravityCliUsage);
+const { parseAntigravityCliUsage } = jest.requireActual<
+  typeof import('./antigravity-cli-usage.adapter')
+>('./antigravity-cli-usage.adapter');
 
 const TOKEN = 'csrf-token';
 const EMAIL = 'fixture-user@example.test';
@@ -71,7 +79,190 @@ function reader(
     observe,
   );
 }
+describe('Antigravity CLI opt-in', () => {
+  it('skips CLI without the list flag and calls it with the flag', async () => {
+    const target = { providerId: 'antigravity', ownerRef: quotaOwnerRefFromKey('antigravity#cli-store:synthetic') };
+    const instance = createAntigravityPlanUsageReader(
+      createMockLogger() as unknown as Logger, () => 1,
+      async () => '', async () => null, () => 'synthetic-store',
+      async () => undefined, mockedCli,
+    );
+    mockedCli.mockClear();
+    await instance({ target, refresh: true });
+    expect(mockedCli).not.toHaveBeenCalled();
+    await instance({ target, refresh: true, allowCliFallback: true });
+    expect(mockedCli).toHaveBeenCalled();
+  });
+});
 describe('Antigravity plan-usage reader', () => {
+  const accountRef = quotaOwnerRefFromKey('antigravity#account:fixture');
+  const otherAccountRef = quotaOwnerRefFromKey(
+    'antigravity#account:other-fixture',
+  );
+  const storeRef = quotaOwnerRefFromKey('antigravity#cli-store:fixture');
+  const accountTarget = { providerId: 'antigravity', ownerRef: accountRef };
+  const storeTarget = { providerId: 'antigravity', ownerRef: storeRef };
+  it('uses CLI windows for an account matching the active store', async () => {
+    const cli = jest.fn(async () => ({
+      ok: true as const,
+      readAt: 1,
+      windows: parseAntigravityCliUsage(ANTIGRAVITY_USAGE_FIXTURE, 1) ?? [],
+    }));
+    const instance = createAntigravityPlanUsageReader(
+      createMockLogger() as Partial<Logger> as Logger,
+      () => 1,
+      async () => '',
+      async () => null,
+      () => 'account:key',
+      async () => undefined,
+      cli,
+      () => accountRef,
+    );
+    const result = await instance({ target: accountTarget, refresh: true, allowCliFallback: true });
+    expect(cli).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe('available');
+    expect(result.source).toBe('cli-command');
+    expect(
+      result.windows.map(({ modelScope, kind }) => [modelScope, kind]),
+    ).toEqual([
+      ['Gemini Models', 'weekly'],
+      ['Gemini Models', 'five_hour'],
+      ['Claude and GPT models', 'weekly'],
+      ['Claude and GPT models', 'five_hour'],
+    ]);
+  });
+
+  it('refuses CLI output when the store account differs', async () => {
+    const cli = jest.fn(async () => ({ ok: true as const, windows: [], readAt: 1 }));
+    const instance = createAntigravityPlanUsageReader(
+      createMockLogger() as Partial<Logger> as Logger,
+      () => 1,
+      async () => '',
+      async () => null,
+      () => 'account:key',
+      async () => undefined,
+      cli,
+      () => otherAccountRef,
+    );
+    const result = await instance({ target: accountTarget, refresh: true, allowCliFallback: true });
+    expect(cli).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      status: 'service-unavailable',
+      statusReason: 'account-unverified',
+    });
+  });
+
+  it('leaves eight seconds for CLI when no language server is found', async () => {
+    jest.useFakeTimers();
+    try {
+      const cli = jest.fn(async () => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 7_000));
+        return { ok: false as const, reason: 'cli-timeout' as const };
+      });
+      const instance = createAntigravityPlanUsageReader(
+        createMockLogger() as Partial<Logger> as Logger,
+        Date.now,
+        async () => '',
+        async () => null,
+        () => 'store:key',
+        async () => undefined,
+        cli,
+      );
+      const reading = instance({ target: storeTarget, refresh: true, allowCliFallback: true });
+      await jest.advanceTimersByTimeAsync(7_000);
+      expect((await reading).statusReason).toBe('cli-timeout');
+      expect(cli).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('drops CLI rows if the active store account changes during the read', async () => {
+    const readStoreOwner = jest
+      .fn()
+      .mockReturnValueOnce(accountRef)
+      .mockReturnValueOnce(otherAccountRef);
+    const instance = createAntigravityPlanUsageReader(
+      createMockLogger() as Partial<Logger> as Logger,
+      () => 1,
+      async () => '',
+      async () => null,
+      () => accountRef.key,
+      async () => undefined,
+      async () => ({
+        ok: true,
+        readAt: 1,
+        windows: parseAntigravityCliUsage(ANTIGRAVITY_USAGE_FIXTURE, 1) ?? [],
+      }),
+      readStoreOwner,
+    );
+    const result = await instance({ target: accountTarget, refresh: true, allowCliFallback: true });
+    expect(result).toMatchObject({
+      status: 'service-unavailable',
+      statusReason: 'account-unverified',
+      windows: [],
+    });
+    expect(readStoreOwner).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['account', accountTarget],
+    ['cli-store with slow OAuth', storeTarget],
+  ] as const)(
+    'keeps the full chain under eleven seconds for %s',
+    async (_, target) => {
+      jest.useFakeTimers();
+      try {
+        const started = Date.now();
+        const readOAuth = jest.fn(async () => {
+          await new Promise<void>((resolve) => setTimeout(resolve, 10_000));
+          return undefined;
+        });
+        const run = jest.fn(
+          async (
+            _command: string,
+            _args: readonly string[],
+            signal: AbortSignal,
+          ) =>
+            new Promise<string>((_, reject) =>
+              signal.addEventListener(
+                'abort',
+                () => reject(new Error('aborted')),
+                { once: true },
+              ),
+            ),
+        );
+        const cli = jest.fn(
+          async (signal?: AbortSignal) =>
+            new Promise<never>((_, reject) =>
+              signal?.addEventListener(
+                'abort',
+                () => reject(new Error('aborted')),
+                { once: true },
+              ),
+            ),
+        );
+        const instance = createAntigravityPlanUsageReader(
+          createMockLogger() as Partial<Logger> as Logger,
+          Date.now,
+          run,
+          async () => null,
+          () => accountRef.key,
+          readOAuth,
+          cli,
+          () => accountRef,
+        );
+        const reading = instance({ target, refresh: true, allowCliFallback: true });
+        await jest.advanceTimersByTimeAsync(11_000);
+        expect((await reading).statusReason).toBe('no-local-server');
+        expect(Date.now() - started).toBeLessThanOrEqual(11_000);
+        expect(cli).toHaveBeenCalledTimes(1);
+        expect(readOAuth).toHaveBeenCalledTimes(target === storeTarget ? 1 : 0);
+      } finally {
+        jest.useRealTimers();
+      }
+    },
+  );
   it('uses the local probe when OAuth is unavailable', async () => {
     const request = jest.fn(async () => response);
     const readOAuth = jest.fn(async () => ({
@@ -89,7 +280,7 @@ describe('Antigravity plan-usage reader', () => {
     );
     const result = await instance({
       target: { ownerRef: { key: owner, identityKind: 'cli-store' } } as never,
-      refresh: true,
+      refresh: true, allowCliFallback: true,
     });
     expect(readOAuth).toHaveBeenCalled();
     expect(request).toHaveBeenCalled();
@@ -103,7 +294,7 @@ describe('Antigravity plan-usage reader', () => {
     const result = await reader(
       request,
       observe,
-    )({ target: { ownerRef: { key: owner } } as never, refresh: true });
+    )({ target: { ownerRef: { key: owner } } as never, refresh: true, allowCliFallback: true });
     expect(request.mock.calls.map((call) => call[0])).toEqual([
       'https',
       'http',
@@ -127,7 +318,7 @@ describe('Antigravity plan-usage reader', () => {
     );
     await instance({
       target: { ownerRef: { key: owner } } as never,
-      refresh: true,
+      refresh: true, allowCliFallback: true,
     });
     expect(request).toHaveBeenCalledWith(
       'http',
@@ -150,7 +341,7 @@ describe('Antigravity plan-usage reader', () => {
     );
     await padded({
       target: { ownerRef: { key: owner } } as never,
-      refresh: true,
+      refresh: true, allowCliFallback: true,
     });
     expect(request).toHaveBeenCalled();
     const unavailable = createAntigravityPlanUsageReader(
@@ -164,7 +355,7 @@ describe('Antigravity plan-usage reader', () => {
     await expect(
       unavailable({
         target: { ownerRef: { key: owner } } as never,
-        refresh: true,
+        refresh: true, allowCliFallback: true,
       }),
     ).resolves.toMatchObject({ status: 'service-unavailable' });
     const noPorts = createAntigravityPlanUsageReader(
@@ -175,7 +366,7 @@ describe('Antigravity plan-usage reader', () => {
       () => owner,
     );
     await expect(
-      noPorts({ target: { ownerRef: { key: owner } } as never, refresh: true }),
+      noPorts({ target: { ownerRef: { key: owner } } as never, refresh: true, allowCliFallback: true }),
     ).resolves.toMatchObject({ status: 'service-unavailable' });
   });
   it('caps long model names, parses reset time, and keeps logger output private', async () => {
@@ -205,7 +396,7 @@ describe('Antigravity plan-usage reader', () => {
     );
     const result = await instance({
       target: { ownerRef: { key: owner } } as never,
-      refresh: true,
+      refresh: true, allowCliFallback: true,
     });
     expect(result.windows[0]).toMatchObject({
       modelScope: long.slice(0, 64),
@@ -252,7 +443,7 @@ describe('Antigravity plan-usage reader', () => {
     const remove = jest.spyOn(controller.signal, 'removeEventListener');
     await reader(async () => response)({
       target: { ownerRef: { key: owner } } as never,
-      refresh: true,
+      refresh: true, allowCliFallback: true,
       signal: controller.signal,
     });
     expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
@@ -272,7 +463,7 @@ describe('Antigravity plan-usage reader', () => {
     );
     await quotedReader({
       target: { ownerRef: { key: owner } } as never,
-      refresh: true,
+      refresh: true, allowCliFallback: true,
     });
     expect(request).toHaveBeenCalledWith(
       'http',
@@ -288,12 +479,12 @@ describe('Antigravity plan-usage reader', () => {
       request,
     )({
       target: { ownerRef: { key: owner } } as never,
-      refresh: true,
+      refresh: true, allowCliFallback: true,
       signal: controller.signal,
     });
     controller.abort();
     await expect(pending).resolves.toMatchObject({
-      status: 'service-unavailable',
+      status: 'no-usage-source',
     });
     const port = await new Promise<number>((resolve) => {
       const server = createServer();
@@ -315,7 +506,7 @@ describe('Antigravity plan-usage reader', () => {
         createMockLogger() as unknown as Logger,
         () => 1,
         async () => new Promise<string>(() => undefined),
-      )({ target: { ownerRef: { key: owner } } as never, refresh: true });
+      )({ target: { ownerRef: { key: owner } } as never, refresh: true, allowCliFallback: true });
       await jest.advanceTimersByTimeAsync(3_000);
       await expect(pending).resolves.toMatchObject({
         status: 'service-unavailable',
@@ -328,7 +519,7 @@ describe('Antigravity plan-usage reader', () => {
     const result = await reader(
       async () => response,
       () => 'antigravity#account:different',
-    )({ target: { ownerRef: { key: owner } } as never, refresh: true });
+    )({ target: { ownerRef: { key: owner } } as never, refresh: true, allowCliFallback: true });
     expect(result.status).toBe('service-unavailable');
   });
   it('clears a stale observation when the server disappears', async () => {
@@ -342,7 +533,7 @@ describe('Antigravity plan-usage reader', () => {
     );
     await gone({
       target: { ownerRef: { key: owner } } as never,
-      refresh: true,
+      refresh: true, allowCliFallback: true,
     });
     expect(observe).toHaveBeenCalledWith(null);
   });
@@ -354,7 +545,7 @@ describe('Antigravity plan-usage reader', () => {
           clientModelConfigs: [{ label: 'unknown', quotaInfo: {} }],
         },
       },
-    }))({ target: { ownerRef: { key: owner } } as never, refresh: true });
+    }))({ target: { ownerRef: { key: owner } } as never, refresh: true, allowCliFallback: true });
     expect(result).toMatchObject({
       status: 'service-unavailable',
       windows: [],
@@ -401,14 +592,14 @@ describe('Antigravity plan-usage reader', () => {
       );
     const request = {
       target: { ownerRef: { key: owner, identityKind: 'cli-store' } } as never,
-      refresh: true,
+      refresh: true, allowCliFallback: true,
     };
 
     it('is tried third, after OAuth and the local server both fail', async () => {
       const order: string[] = [];
       mockedCli.mockImplementationOnce(async () => {
         order.push('cli');
-        return { ok: true, windows: [cliWindow] };
+        return { ok: true, windows: [cliWindow], readAt: 1 };
       });
       const instance = createAntigravityPlanUsageReader(
         createMockLogger() as unknown as Logger,
@@ -428,18 +619,56 @@ describe('Antigravity plan-usage reader', () => {
       expect(order).toEqual(['oauth', 'local', 'cli']);
       expect(result).toMatchObject({
         status: 'available',
+        source: 'cli-command',
         windowSetEstablished: true,
         windows: [cliWindow],
       });
+    });
+
+    it('reports the CLI observation time of a cached reading, not the current time', async () => {
+      mockedCli.mockResolvedValueOnce({ ok: true, windows: [cliWindow], readAt: 1 });
+      const instance = createAntigravityPlanUsageReader(
+        createMockLogger() as unknown as Logger,
+        () => 20_000,
+        async () => '',
+        jest.fn(async () => response),
+        () => owner,
+        async () => undefined,
+      );
+      const result = await instance(request);
+      expect(result).toMatchObject({ source: 'cli-command', fetchedAt: 1 });
+    });
+
+    it('reports no local server, not account-unverified, when CLI fallback is not allowed', async () => {
+      mockedCli.mockClear();
+      const result = await failingLocal()({
+        target: { ownerRef: { key: owner, identityKind: 'account' } } as never,
+        refresh: true, allowCliFallback: false,
+      });
+      expect(result.statusReason).not.toBe('account-unverified');
+      expect(mockedCli).not.toHaveBeenCalled();
+    });
+
+    it('does not use CLI after a cli-store owner changes at the local server', async () => {
+      mockedCli.mockClear();
+      const instance = createAntigravityPlanUsageReader(
+        createMockLogger() as unknown as Logger, () => 1,
+        async (command) => command === 'lsof' ? 'n127.0.0.1:5555' : PROCESS,
+        async () => response, () => 'different-owner', async () => undefined,
+      );
+      const result = await instance(request);
+      expect(result.statusReason).toBe('account-unverified');
+      expect(mockedCli).not.toHaveBeenCalled();
     });
 
     it('is skipped when the local server answers', async () => {
       mockedCli.mockClear();
       const result = await reader(async () => response)({
         target: { ownerRef: { key: owner } } as never,
-        refresh: true,
+        refresh: true, allowCliFallback: true,
       });
       expect(result.status).toBe('available');
+      expect(result.source).toBe('local-rpc');
       expect(mockedCli).not.toHaveBeenCalled();
     });
 
@@ -447,14 +676,17 @@ describe('Antigravity plan-usage reader', () => {
       mockedCli.mockClear();
       const result = await failingLocal()({
         target: { ownerRef: { key: owner, identityKind: 'account' } } as never,
-        refresh: true,
+        refresh: true, allowCliFallback: true,
       });
-      expect(result).toMatchObject({ status: 'service-unavailable', windows: [] });
+      expect(result).toMatchObject({
+        status: 'service-unavailable',
+        windows: [],
+      });
       expect(mockedCli).not.toHaveBeenCalled();
     });
 
     it.each(['cli-unavailable', 'cli-parse-failed'] as const)(
-      'carries the typed reason %s when the CLI fails',
+      'reports the CLI failure when CLI reports %s',
       async (reason) => {
         mockedCli.mockResolvedValueOnce({ ok: false, reason });
         await expect(failingLocal()(request)).resolves.toEqual({
