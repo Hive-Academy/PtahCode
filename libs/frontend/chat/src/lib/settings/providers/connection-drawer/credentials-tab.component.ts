@@ -224,7 +224,7 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
                 <button type="button" ptahButton [busy]="busy() || externalBusy()"
                   (click)="externalActionRequested.emit('sign-in')" data-testid="credentials-kimi-sign-in">Sign in with Kimi Code</button>
               }
-              <button type="button" ptahButton variant="ghost" [busy]="busy() || externalBusy() || kimiRunning()"
+              <button type="button" ptahButton variant="ghost" [busy]="busy() || externalBusy()" [disabled]="kimiRunning()"
                 (click)="externalActionRequested.emit('cli-check')" data-testid="credentials-kimi-check">{{ externalBusy() ? 'Checking…' : 'Check again' }}</button>
             </div>
             <p class="text-xs text-base-content-muted">Or sign in from a terminal:</p>
@@ -344,10 +344,10 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
               <input id="credentials-new-key" [type]="keyVisible() ? 'text' : 'password'" autocomplete="off" spellcheck="false"
                 class="input input-bordered input-sm w-full pr-9 font-mono text-xs" [value]="keyDraft()" (input)="onKeyInput($event)"
                 [attr.placeholder]="keyPlaceholder()" data-testid="credentials-new-key" />
-              <button type="button" ptahIconButton [label]="keyVisible() ? 'Hide API key' : 'Show API key'" size="xs" class="absolute right-1 top-1" (click)="keyVisible.set(!keyVisible())" [attr.aria-pressed]="keyVisible()"
+              <span class="absolute right-1 top-1"><button type="button" ptahIconButton [label]="keyVisible() ? 'Hide API key' : 'Show API key'" size="xs" (click)="keyVisible.set(!keyVisible())" [attr.aria-pressed]="keyVisible()"
                 data-testid="credentials-toggle-visibility">
                 <lucide-angular [img]="keyVisible() ? EyeOffIcon : EyeIcon" class="h-3.5 w-3.5" aria-hidden="true" />
-              </button>
+              </button></span>
             </div>
             @if (connection().id === 'anthropic') {
               <p class="text-xs text-base-content-muted">{{ isActiveDriver() ? "Saving updates the main agent's Claude API key and restarts running chat sessions." : 'Saving updates the Claude API connection key. The main-agent route stays the same.' }}</p>

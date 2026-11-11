@@ -78,7 +78,7 @@ export function tiersApply(connection: Pick<ProvidersConnection, 'id' | 'authMod
                         </p>
                       </div>
                       @if (current(row.tier)) {
-                        <button type="button" ptahButton variant="ghost" size="xs" class="shrink-0" [busy]="busy()"
+                        <button type="button" ptahButton variant="ghost" size="xs" class="shrink-0" [busy]="feedback.saving()" [disabled]="contextUnavailable()"
                           [attr.aria-label]="'Reset ' + row.label + ' to the provider default'" (click)="save(row, '')"
                           [attr.data-testid]="'models-default-' + row.tier">Default</button>
                       }
@@ -107,6 +107,7 @@ export class ModelsTiersTabComponent {
   protected readonly tiers = this.state.tiers;
   /** A save runs (D3), or the settings sources a save is reviewed against are not loaded yet. */
   protected readonly busy = computed(() => this.feedback.saving() || this.state.reviewContext() === null);
+  protected readonly contextUnavailable = computed(() => this.state.reviewContext() === null);
   private readonly connectionId = computed(() => this.connection().id);
 
   constructor() {

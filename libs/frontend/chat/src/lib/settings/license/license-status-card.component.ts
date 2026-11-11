@@ -174,9 +174,10 @@ const LOGOUT_FAILED = 'Could not log out.';
                       [disabled]="isSubmittingKey()"
                       data-testid="membership-key-input"
                     />
+                    <span class="absolute right-1 top-1">
                     <button
                       type="button"
-                      ptahIconButton [label]="keyVisible() ? 'Hide membership key' : 'Show membership key'" class="absolute right-1 top-1"
+                      ptahIconButton [label]="keyVisible() ? 'Hide membership key' : 'Show membership key'"
                       (click)="keyVisible.set(!keyVisible())"
                       [attr.aria-pressed]="keyVisible()"
                       data-testid="membership-key-visibility"
@@ -187,6 +188,7 @@ const LOGOUT_FAILED = 'Could not log out.';
                         aria-hidden="true"
                       />
                     </button>
+                    </span>
                   </div>
                   <p
                     id="membership-key-help"
