@@ -95,7 +95,7 @@ Namespace spec: existing "lifecycle already has a run" test plus the `isIndexing
 Jest was spawned from Node so `--moduleNameMapper` kept its quotes (PowerShell stripped them on a direct invocation; that attempt exited before any test ran).
 
 ```
-node C:\Users\abdal\AppData\Local\Temp\jest-619-b13b.js workspace-intelligence libs/backend/workspace-intelligence/src/services/code-symbol-indexer.service.spec.ts
+node C:\Users\dev\AppData\Local\Temp\jest-619-b13b.js workspace-intelligence libs/backend/workspace-intelligence/src/services/code-symbol-indexer.service.spec.ts
 ```
 
 Indexer mapper: `^marked$` → marked UMD, `^vscode$` → worktree vscode mock. No wasm mapper (this project has the real `wasm-bundle-dir`).

@@ -6041,7 +6041,7 @@
         "scenario": "worktree-spool-path",
         "tool": "ptah_memory_search",
         "pass": false,
-        "detail": "spooled to C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-mcp-bench-corpus-Cpxt5B\\.ptah\\tmp\\mcp-out\\19-1791363463234-cb83.txt; under the caller's root (C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-mcp-bench-run-oqdDHC\\memory-A-worktree): false"
+        "detail": "spooled to C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-mcp-bench-corpus-Cpxt5B\\.ptah\\tmp\\mcp-out\\19-1791363463234-cb83.txt; under the caller's root (C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-mcp-bench-run-oqdDHC\\memory-A-worktree): false"
       },
       {
         "scenario": "two-workspaces-symbol-scope",

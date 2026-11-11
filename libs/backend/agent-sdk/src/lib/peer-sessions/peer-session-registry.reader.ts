@@ -47,7 +47,7 @@ export const PeerSessionRecordSchema = z
     procStart: z.string().min(1).optional(),
     /** Current schema's name for the same value. Neither is guaranteed. */
     procStartFt: z.string().min(1).optional(),
-    /** e.g. `win32:abdo` — platform plus host, qualifying the pid. */
+    /** e.g. `win32:dev` — platform plus host, qualifying the pid. */
     pidDomain: z.string().min(1).optional(),
     version: z.string().min(1).optional(),
     /** Absent on builds older than the peer channel; its absence is a state. */
@@ -159,8 +159,8 @@ export function recordStartFingerprint(
 /**
  * This host's `pidDomain`, in the CLI's own shape.
  *
- * Read off a live record on 2026-09-12: `win32:abdo` on a machine whose
- * `os.hostname()` is `Abdo`. Compared case-insensitively, because the CLI
+ * Read off a live record on 2026-09-12: `win32:dev` on a machine whose
+ * `os.hostname()` is `Dev`. Compared case-insensitively, because the CLI
  * lower-cases and we have no promise it always will.
  */
 export function currentPidDomain(

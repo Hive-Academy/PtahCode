@@ -2,8 +2,8 @@ import { expectNormalizedPath, toPosixPath } from './expect-normalized-path';
 
 describe('toPosixPath', () => {
   it('converts Windows backslashes to forward slashes', () => {
-    expect(toPosixPath('C:\\Users\\abdal\\.ptah\\plugins\\foo.json')).toBe(
-      'C:/Users/abdal/.ptah/plugins/foo.json',
+    expect(toPosixPath('C:\\Users\\dev\\.ptah\\plugins\\foo.json')).toBe(
+      'C:/Users/dev/.ptah/plugins/foo.json',
     );
   });
 

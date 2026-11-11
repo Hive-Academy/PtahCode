@@ -1,6 +1,6 @@
 # Ptah Dev Electron live regression test
 
-2026-11-08 local, branch `fix/subagent-budget-minors`, HEAD `fd1335541`. Log references use one-based lines in `C:\Users\abdal\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-08.log`.
+2026-11-08 local, branch `fix/subagent-budget-minors`, HEAD `fd1335541`. Log references use one-based lines in `C:\Users\dev\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-08.log`.
 
 ## Isolation gate
 
@@ -9,7 +9,7 @@
 | Required ancestry | PASS | `git merge-base --is-ancestor 5a88ce09d HEAD` exited 0. |
 | Production settings initial raw hash | PASS | `780f1063cb844f461dac8fa5c11d14c565af2afe02c805253824527ab4b1c01a`. |
 | Production settings initial canonical hash | PASS | `321e5a3bccff6840ed43c6d7e85f35b193ccf575b7fd71db5e09ec80c1e44abb`. |
-| Dev settings initial backup | PASS | SHA-256 `3b727d826f40043dcc6e879b9023db60a075c4fbd67ed945ba5ac738d694fad6`; backup at `C:\Users\abdal\.ptah-dev\settings.json.bak-budget-minors`. |
+| Dev settings initial backup | PASS | SHA-256 `3b727d826f40043dcc6e879b9023db60a075c4fbd67ed945ba5ac738d694fad6`; backup at `C:\Users\dev\.ptah-dev\settings.json.bak-budget-minors`. |
 | No Dev instance before launch | PASS | Win32_Process command-line query returned no Ptah Dev Electron or Node process. |
 | Production hashes after Dev edit | PASS | Raw and canonical matched initial hashes. |
 | Production hashes after launch and at end | PASS | Raw `780f1063cb844f461dac8fa5c11d14c565af2afe02c805253824527ab4b1c01a` and canonical `321e5a3bccff6840ed43c6d7e85f35f193ccf575b7fd71db5e09ec80c1e44abb` at both checkpoints; no raw-only reserialization or canonical change. |
@@ -38,4 +38,4 @@ The requested commands completed in order, each exiting 0: `node scripts/verify.
 
 ## Cleanup
 
-Stopped the owned Dev launcher and Electron process tree. Restored Dev settings byte-for-byte, and final production raw/canonical hashes matched the gate. Removed all temporary watcher, hash, edit and CDP evaluation scripts. The backup at `C:\Users\abdal\.ptah-dev\settings.json.bak-budget-minors` remains: a native removal command was rejected by the execution policy. `git status --short` showed only this untracked report. No source edit, commit, push, PR, test, serve, or e2e command was run.
+Stopped the owned Dev launcher and Electron process tree. Restored Dev settings byte-for-byte, and final production raw/canonical hashes matched the gate. Removed all temporary watcher, hash, edit and CDP evaluation scripts. The backup at `C:\Users\dev\.ptah-dev\settings.json.bak-budget-minors` remains: a native removal command was rejected by the execution policy. `git status --short` showed only this untracked report. No source edit, commit, push, PR, test, serve, or e2e command was run.

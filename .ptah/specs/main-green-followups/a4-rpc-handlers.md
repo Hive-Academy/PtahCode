@@ -2,7 +2,7 @@
 
 ## Baseline
 
-Scoped command: `PTAH_VERIFY_SLOTS=1 PTAH_VERIFY_MIN_FREE_GB=8 npm run verify -- -p rpc-handlers` (PowerShell environment form). Nx lint and typecheck: **2/2 passed**. Jest: **13 suites failed, 225 passed; 36 tests failed, 8 skipped, 6252 passed**. Full Jest output: `C:\Users\abdal\.nx\d60e02896ae18ad9\cache\terminalOutputs\812797723107355318`.
+Scoped command: `PTAH_VERIFY_SLOTS=1 PTAH_VERIFY_MIN_FREE_GB=8 npm run verify -- -p rpc-handlers` (PowerShell environment form). Nx lint and typecheck: **2/2 passed**. Jest: **13 suites failed, 225 passed; 36 tests failed, 8 skipped, 6252 passed**. Full Jest output: `C:\Users\dev\.nx\d60e02896ae18ad9\cache\terminalOutputs\812797723107355318`.
 
 ## Failure analysis
 
@@ -42,14 +42,14 @@ Scoped command: `PTAH_VERIFY_SLOTS=1 PTAH_VERIFY_MIN_FREE_GB=8 npm run verify --
 
 - Product path normalization is retained; test expectations now use the host path API.
 - `.ptah` fixture markers make the intended workspace root explicit under an ambient temp `.ptah` marker. The shared resolver's marker precedence is outside this lane's scope.
-- The ambient ancestor marker is `C:\Users\abdal\AppData\Local\Temp\.ptah`, which contains harness manifests and MCP output written by Ptah; it was left intact, and fixture roots declare their own `.ptah` marker for hermetic resolution.
+- The ambient ancestor marker is `C:\Users\dev\AppData\Local\Temp\.ptah`, which contains harness manifests and MCP output written by Ptah; it was left intact, and fixture roots declare their own `.ptah` marker for hermetic resolution.
 - Windows directory aliases use junctions. File-link and permission tests inject the filesystem result at the product boundary on Windows while POSIX continues to use real symlinks and chmod.
 - Did not weaken assertions, skip tests, alter timeouts or baselines, or touch indexing files owned by another lane.
 - No installed local Jest skill matched this work; skill discovery was available and checked.
 
 ## Final suite outcome
 
-The plain scoped verify completed with exit code 0. Its Jest output is `C:\Users\abdal\.nx\d60e02896ae18ad9\cache\terminalOutputs\2139676226739650689`.
+The plain scoped verify completed with exit code 0. Its Jest output is `C:\Users\dev\.nx\d60e02896ae18ad9\cache\terminalOutputs\2139676226739650689`.
 
 | Initially failing suite | Status | Post-change evidence |
 |---|---|---|
@@ -98,7 +98,7 @@ Finding 7 review: Windows filesystem injections now identify the exact path that
 
 ### Revision 1 verify
 
-- Focused command: `PTAH_VERIFY_SLOTS=1 PTAH_VERIFY_MIN_FREE_GB=8 npm run verify -- -t test -p rpc-handlers -- --testPathPatterns=(session-folder|file-view-rpc.handlers|skills-sh-source-root.service|install-scope-migration.service)\.spec\.ts$` — exit 0; **5 suites passed, 174 tests passed, 0 failed**. Nx terminal output: `C:\Users\abdal\.nx\d60e02896ae18ad9\cache\terminalOutputs\9526244486484505759`.
-- Scoped command: `PTAH_VERIFY_SLOTS=1 PTAH_VERIFY_MIN_FREE_GB=8 npm run verify -- -t lint,typecheck -p rpc-handlers` — lint succeeded; typecheck failed on `libs/backend/rpc-handlers/src/lib/handlers/indexing-rpc.handlers.ts:80`, TS2367 (`IndexingPipeline` compared with `"both"`). This file is owned by another lane and was not edited here. Typecheck output: `C:\Users\abdal\.nx\d60e02896ae18ad9\cache\terminalOutputs\10226832133523771469`.
+- Focused command: `PTAH_VERIFY_SLOTS=1 PTAH_VERIFY_MIN_FREE_GB=8 npm run verify -- -t test -p rpc-handlers -- --testPathPatterns=(session-folder|file-view-rpc.handlers|skills-sh-source-root.service|install-scope-migration.service)\.spec\.ts$` ï¿½ exit 0; **5 suites passed, 174 tests passed, 0 failed**. Nx terminal output: `C:\Users\dev\.nx\d60e02896ae18ad9\cache\terminalOutputs\9526244486484505759`.
+- Scoped command: `PTAH_VERIFY_SLOTS=1 PTAH_VERIFY_MIN_FREE_GB=8 npm run verify -- -t lint,typecheck -p rpc-handlers` ï¿½ lint succeeded; typecheck failed on `libs/backend/rpc-handlers/src/lib/handlers/indexing-rpc.handlers.ts:80`, TS2367 (`IndexingPipeline` compared with `"both"`). This file is owned by another lane and was not edited here. Typecheck output: `C:\Users\dev\.nx\d60e02896ae18ad9\cache\terminalOutputs\10226832133523771469`.
 - The Windows Dirent proxies still demonstrate only the verifier's `not-regular-file` branch. A real file-symlink path is demonstrated on POSIX, where creation is permitted; Windows file-link privilege is absent on this machine.
 

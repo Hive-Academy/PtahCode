@@ -61,7 +61,7 @@ assertIsolatedEnvironment(env = process.env, probe?: { homedir?; platform? }): I
   - Real-DB guard: `stop()` did not throw, so the guard passed. Report: `{"mode":"process-watch","writerEvidence":["Ptah.exe 6872 holds …ptah.sqlite", "…-wal", "…-shm"],"samples":2,"maxTreeProcesses":2,"maxOpenPaths":4736,"unprobed":0}`. The shape is the same as in Batch 4.
 - Refusal smoke on the built `bench-host.mjs`:
   - With no isolation env: `{"benchHost":"fatal","error":"refusing to boot: PTAH_BENCH_ISOLATED_HOME, PTAH_CONFIG_PATH and PTAH_DB_PATH must all be set by the launcher"}`, exit 1.
-  - With isolation env but the real home: `…os.homedir() is C:\Users\abdal, not the isolated home …`, exit 1.
+  - With isolation env but the real home: `…os.homedir() is C:\Users\dev, not the isolated home …`, exit 1.
 
 ## Plan deviations
 

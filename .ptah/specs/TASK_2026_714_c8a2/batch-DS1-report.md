@@ -81,9 +81,9 @@ The header confirms exactly the two requested projects. Auth-providers lint was 
 
 Full command logs are temporary verification output, outside the repository:
 
-- `C:/Users/abdal/AppData/Local/Temp/ptah-DS1-codex-runtime-verify.log`
-- `C:/Users/abdal/AppData/Local/Temp/ptah-DS1-codex-runtime-verify-final.log`
-- `C:/Users/abdal/AppData/Local/Temp/ptah-DS1-dependents-verify.log`
+- `C:/Users/dev/AppData/Local/Temp/ptah-DS1-codex-runtime-verify.log`
+- `C:/Users/dev/AppData/Local/Temp/ptah-DS1-codex-runtime-verify-final.log`
+- `C:/Users/dev/AppData/Local/Temp/ptah-DS1-dependents-verify.log`
 
 ## Files created or modified
 

@@ -58,8 +58,8 @@ Checks run: jest on metrics, scorecard and baselines passed (5 suites, 32 tests)
 - Mitigated if callers only call these with non-empty input; I did not verify every call site (outside my scope). Returning `undefined` would match the percentile functions.
 
 ### M6. Corpus sweep can miss stale worktrees when `tmpdir()` is an 8.3 short path (environment-dependent, not reproduced here)
-- File: `corpus/corpus.ts:247-257`. `isTemporaryCorpusWorktree` folds case only. `git worktree list` can report the long form (`C:/Users/Abdallah/...`) while `os.tmpdir()` returns `C:\Users\ABDALL~1\...`. Then `relative()` starts with `..`, the worktree is never recognised, and a crashed run's full checkout is never reclaimed.
-- Consequence is disk leak only, not deletion. This machine's temp path (`abdal`) is not affected.
+- File: `corpus/corpus.ts:247-257`. `isTemporaryCorpusWorktree` folds case only. `git worktree list` can report the long form (`C:/Users/Acme/...`) while `os.tmpdir()` returns `C:\Users\DEVL~1\...`. Then `relative()` starts with `..`, the worktree is never recognised, and a crashed run's full checkout is never reclaimed.
+- Consequence is disk leak only, not deletion. This machine's temp path (`dev`) is not affected.
 - Fix: compare `realpathSync.native` of both sides.
 
 ### M7. Orphan temp dirs and PID reuse in the corpus cleanup

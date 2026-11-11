@@ -52,7 +52,7 @@ Not existing anywhere: a chart component, a tool-to-component registry, a chat m
 
 ## Transcript excerpts
 
-All from `C:\Users\abdal\.claude\projects\D--projects-ptah-extension\`.
+All from `C:\Users\dev\.claude\projects\D--projects-ptah-extension\`.
 
 - `9bb9f34b-04f7-44ac-a0aa-90fee7b35ba8.jsonl` (2026-09-20 20:43) — the session that created TASK_2026_490. Records the origin: "An earlier conversation about CopilotKit ended without a decision. The user then found [CopilotKit/openbot] and saw that it shares ideas with Ptah."
 - `0c6bcb52-2f88-4f88-af02-30b11f2d1885.jsonl` (2026-09-21 22:04) — contains the 490 revision text: "**Charts in the coding chat** come last, through one narrow mount point, after the page proves the host."

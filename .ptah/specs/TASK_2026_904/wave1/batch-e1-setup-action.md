@@ -79,7 +79,7 @@ Actual tail from the first run:
 
 ```text
 ✖ nx run @ptah-extension/ui:lint
-  full log: C:\Users\abdal\.nx\d60e02896ae18ad9\cache\terminalOutputs\10539239718128884817
+  full log: C:\Users\dev\.nx\d60e02896ae18ad9\cache\terminalOutputs\10539239718128884817
 Re-run with --output-style=static to inline logs.
 Run duration:      1m 50s
 Cache:             0/3 hit (0%)

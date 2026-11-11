@@ -15,7 +15,7 @@ are in `context.md`; do not re-ask them.
   The task folder `.ptah/specs/TASK_2026_ONBOARDING/` is staged (`git add`) but NOT committed:
   `git commit` failed with "Author identity unknown" (this machine has no git user.name/email and no
   GIT_AUTHOR_* env). Do not change git config yourself. The user has been asked to either configure
-  it, or authorize a one-off `git -c user.name="Abdallah khalil" -c user.email="abdallah.khalil.nada@gmail.com" commit ...`.
+  it, or authorize a one-off `git -c user.name="Example Dev" -c user.email="dev@example.com" commit ...`.
   Note: recent main commits carry an odd author `Test <test@test.com>`; the user was told to check
   this. Do not copy that identity.
   The staged commit message prepared for it: `docs(setup-wizard): plan the onboarding module (TASK_2026_ONBOARDING)`.

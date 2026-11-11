@@ -594,7 +594,7 @@ describe('McpDirectoryRpcHandlers — Smithery Connections API', () => {
   /** Requests the fake API saw, newest last. */
   let requests: Array<{ url: string; method: string; body?: unknown }>;
 
-  const NAMESPACE = 'abdallah';
+  const NAMESPACE = 'acme';
 
   const connectionBody = (
     over: Record<string, unknown> = {},
@@ -924,7 +924,7 @@ describe('McpDirectoryRpcHandlers — Smithery Connections API', () => {
   it('smitheryAccount reports the namespaces and picks the first as active', async () => {
     mockApi((url) =>
       url.endsWith('/namespaces')
-        ? { body: { namespaces: [{ name: 'abdallah' }, { name: 'team' }] } }
+        ? { body: { namespaces: [{ name: 'acme' }, { name: 'team' }] } }
         : undefined,
     );
     build();
@@ -932,8 +932,8 @@ describe('McpDirectoryRpcHandlers — Smithery Connections API', () => {
     const res = await call('mcpDirectory:smitheryAccount', {});
     expect(res.data).toEqual({
       configured: true,
-      namespaces: ['abdallah', 'team'],
-      activeNamespace: 'abdallah',
+      namespaces: ['acme', 'team'],
+      activeNamespace: 'acme',
     });
   });
 

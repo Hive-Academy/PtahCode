@@ -39,14 +39,14 @@ Scope: existing host repository/workspace storage scope, no new storage key or d
 Nx's initial compact renderer omitted `Running target ... for N projects` and successful task detail logs; the actual task summaries above are quoted rather than inventing header lines or a shared test count. The final static rerun will provide that missing evidence once admitted by the lock.
 
 Logs available to the coordinator:
-- `C:/Users/abdal/AppData/Local/Temp/ptah-batch-6d-verify.log` (completed initial run)
-- `C:/Users/abdal/AppData/Local/Temp/ptah-batch-6d-electron.log` (completed Electron run)
-- `C:/Users/abdal/AppData/Local/Temp/ptah-batch-6d-final-verify.log` (interrupted queued attempt; no result)
-- `C:/Users/abdal/.nx/8b7110c7390b9603/cache/terminalOutputs/6156590098480980384` (initial agent-sdk test detail)
-- `C:/Users/abdal/.nx/8b7110c7390b9603/cache/terminalOutputs/3956532596692800484` (initial lint detail)
+- `C:/Users/dev/AppData/Local/Temp/ptah-batch-6d-verify.log` (completed initial run)
+- `C:/Users/dev/AppData/Local/Temp/ptah-batch-6d-electron.log` (completed Electron run)
+- `C:/Users/dev/AppData/Local/Temp/ptah-batch-6d-final-verify.log` (interrupted queued attempt; no result)
+- `C:/Users/dev/.nx/8b7110c7390b9603/cache/terminalOutputs/6156590098480980384` (initial agent-sdk test detail)
+- `C:/Users/dev/.nx/8b7110c7390b9603/cache/terminalOutputs/3956532596692800484` (initial lint detail)
 
-- `C:/Users/abdal/AppData/Local/Temp/ptah-batch-6d-port-verify.log` (post-port two-project verification, pending)
-- `C:/Users/abdal/AppData/Local/Temp/ptah-batch-6d-auth-providers.log` (auth-providers typecheck, pending)
+- `C:/Users/dev/AppData/Local/Temp/ptah-batch-6d-port-verify.log` (post-port two-project verification, pending)
+- `C:/Users/dev/AppData/Local/Temp/ptah-batch-6d-auth-providers.log` (auth-providers typecheck, pending)
 
 ## Not done / boundaries
 

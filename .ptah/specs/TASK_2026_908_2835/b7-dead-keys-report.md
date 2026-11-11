@@ -23,7 +23,7 @@
 
 - `node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts` `ModelInfo` declaration.
 - `libs/shared/src/index.ts`, providers index, provider registry accessor, provider base URL helper, and fixed local provider entries. The Ptah symbol search returned zero hits, so native free-text search was used.
-- Verifier-named Jest terminal output under `C:\Users\abdal\.nx\d60e02896ae18ad9\cache\terminalOutputs\2132221905034870188` to identify the failure.
+- Verifier-named Jest terminal output under `C:\Users\dev\.nx\d60e02896ae18ad9\cache\terminalOutputs\2132221905034870188` to identify the failure.
 
 ## Open items
 

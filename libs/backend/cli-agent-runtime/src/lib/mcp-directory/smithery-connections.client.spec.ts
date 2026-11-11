@@ -81,7 +81,7 @@ describe('SmitheryConnectionsClient — namespaces', () => {
   it('reads the documented { namespaces: [{ name }], pagination } shape', async () => {
     const { client, calls } = build(() => ({
       body: {
-        namespaces: [{ name: 'abdallah' }, { name: 'team-ptah' }],
+        namespaces: [{ name: 'acme' }, { name: 'team-ptah' }],
         pagination: {
           currentPage: 1,
           pageSize: 50,
@@ -92,7 +92,7 @@ describe('SmitheryConnectionsClient — namespaces', () => {
     }));
 
     await expect(client.listNamespaces()).resolves.toEqual([
-      'abdallah',
+      'acme',
       'team-ptah',
     ]);
     expect(calls[0].url).toBe('https://api.smithery.ai/namespaces');
@@ -147,9 +147,9 @@ describe('SmitheryConnectionsClient — listConnections', () => {
       },
     }));
 
-    const connections = await client.listConnections('abdallah');
+    const connections = await client.listConnections('acme');
 
-    expect(calls[0].url).toBe('https://api.smithery.ai/connect/abdallah');
+    expect(calls[0].url).toBe('https://api.smithery.ai/connect/acme');
     expect(connections).toHaveLength(2);
     expect(connections[0]).toMatchObject({
       connectionId: 'hubspot',
@@ -200,10 +200,10 @@ describe('SmitheryConnectionsClient — getConnection', () => {
   it('reads the documented single-connection shape', async () => {
     const { client, calls } = build(() => ({ body: HUBSPOT_CONNECTION }));
 
-    const connection = await client.getConnection('abdallah', 'hubspot');
+    const connection = await client.getConnection('acme', 'hubspot');
 
     expect(calls[0].url).toBe(
-      'https://api.smithery.ai/connect/abdallah/hubspot',
+      'https://api.smithery.ai/connect/acme/hubspot',
     );
     expect(connection?.status).toBe('auth_required');
     expect(connection?.setupUrl).toBe(
@@ -241,7 +241,7 @@ describe('SmitheryConnectionsClient — upsertConnection', () => {
       body: HUBSPOT_CONNECTION,
     }));
 
-    const connection = await client.upsertConnection('abdallah', 'hubspot', {
+    const connection = await client.upsertConnection('acme', 'hubspot', {
       server: 'hubspot',
       name: 'HubSpot',
       metadata: buildPtahConnectionMetadata('hubspot'),
@@ -249,7 +249,7 @@ describe('SmitheryConnectionsClient — upsertConnection', () => {
 
     expect(calls[0].method).toBe('PUT');
     expect(calls[0].url).toBe(
-      'https://api.smithery.ai/connect/abdallah/hubspot',
+      'https://api.smithery.ai/connect/acme/hubspot',
     );
     expect(calls[0].headers?.['Content-Type']).toBe('application/json');
     expect(JSON.parse(calls[0].body ?? '{}')).toEqual({
@@ -301,10 +301,10 @@ describe('SmitheryConnectionsClient — upsertConnection', () => {
 describe('SmitheryConnectionsClient — deleteConnection', () => {
   it('DELETEs the connection path', async () => {
     const { client, calls } = build(() => ({ body: { success: true } }));
-    await client.deleteConnection('abdallah', 'hubspot');
+    await client.deleteConnection('acme', 'hubspot');
     expect(calls[0].method).toBe('DELETE');
     expect(calls[0].url).toBe(
-      'https://api.smithery.ai/connect/abdallah/hubspot',
+      'https://api.smithery.ai/connect/acme/hubspot',
     );
   });
 

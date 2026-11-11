@@ -477,7 +477,7 @@ export function probeExclusiveAccess(dbPath: string): LivenessFinding[] {
  *
  * `path.resolve` alone is LEXICAL: it does not follow a symlink, does not
  * traverse an NTFS junction and does not expand an 8.3 short name, so
- * `C:\Users\ABDAL~1\.ptah\state\ptah.sqlite` compared unequal to the very file
+ * `C:\Users\DEV~1\.ptah\state\ptah.sqlite` compared unequal to the very file
  * it names. Both sides therefore go through `fs.realpathSync.native` first.
  *
  * A path that cannot be resolved (it does not exist, or a directory on the way

@@ -466,7 +466,7 @@ describe('SdkQueryRunner', () => {
     }
 
     it('rewrites the app install dir to the user home so it never reaches the SDK', async () => {
-      const installDir = '/home/abdo/.local/programs/ptah';
+      const installDir = '/home/dev/.local/programs/ptah';
       const cwd = await capturedCwd(installDir);
       expect(cwd).toBe(os.homedir());
       expect(cwd).not.toBe(installDir);
@@ -504,9 +504,9 @@ describe('SdkQueryRunner', () => {
 
     it('warns once per unsafe cwd while keeping every rewrite', async () => {
       const h = makeRunner({
-        extensionPath: '/home/abdo/.local/programs/ptah/resources/app.asar',
+        extensionPath: '/home/dev/.local/programs/ptah/resources/app.asar',
       });
-      for (const cwd of ['', '', '/home/abdo/.local/programs/ptah']) {
+      for (const cwd of ['', '', '/home/dev/.local/programs/ptah']) {
         await h.runner.runOneShot({
           mode: 'oneShot',
           cwd,

@@ -3,7 +3,7 @@
 Attempt 1 stopped at the former raw-hash gate before any Dev launch.
 This attempt uses the coordinator's updated raw baseline and a canonical-content gate.
 
-Date: 2026-11-07 UTC. Worktree HEAD 3564d5978e53e180065688bbb560d98872c54231. Log references are one-based lines in C:\Users\abdal\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-07.log (UTC).
+Date: 2026-11-07 UTC. Worktree HEAD 3564d5978e53e180065688bbb560d98872c54231. Log references are one-based lines in C:\Users\dev\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-07.log (UTC).
 
 ## Isolation gate
 
@@ -19,7 +19,7 @@ Date: 2026-11-07 UTC. Worktree HEAD 3564d5978e53e180065688bbb560d98872c54231. Lo
 
 Required commands completed in order: build-dev (exit 0, 21:48:44Z), copy-wasm (exit 0), copy-renderer-dev (exit 0, 21:50:49Z). Each launch used CLAUDE_CODE_SUBAGENT_MODEL=haiku, PTAH_NO_DEVTOOLS=1 and remote debugging port 9345. UI showed Haiku 5.5 for each new chat. Scratch workspace contained 40 notes of about 4 KB; note-01 first line held the designated fake marker. Dev settings were changed with Node JSON only. Measurement and C used handoff 2,000,000; A/B used H=60,000; weighted stop stayed 3,000,000.
 
-A measurement subagent read five notes and completed normally. Its usage log at line 28455 recorded model claude-haiku-5-5 and lastTurnContextTokens=42,976. A's SDK transcript at C:\Users\abdal\.claude\projects\D--projects-ptah-extension--claude-worktrees-subagent-budget-stop-path--ptah-live-test-ws\5cc393c2-4084-4d37-b1ed-8c36cc771a44\subagents\agent-a0608c1d1f88e5585.jsonl gives per-step context: 23,684, 32,701, 34,673, 36,374, 37,944, 39,514, 40,100, 41,670, 43,240, 44,810, 46,380, 47,950, 48,625, 50,195, 51,765, 53,575, 55,178, 56,748, 58,343, 59,035, 60,650 (transcript lines 16–135). Typical file-read increments were 1,570–1,810, clearly below 15% of H (9,000); the first setup jump was 9,017. The agent crossed both 85% (51,000) and H.
+A measurement subagent read five notes and completed normally. Its usage log at line 28455 recorded model claude-haiku-5-5 and lastTurnContextTokens=42,976. A's SDK transcript at C:\Users\dev\.claude\projects\D--projects-ptah-extension--claude-worktrees-subagent-budget-stop-path--ptah-live-test-ws\5cc393c2-4084-4d37-b1ed-8c36cc771a44\subagents\agent-a0608c1d1f88e5585.jsonl gives per-step context: 23,684, 32,701, 34,673, 36,374, 37,944, 39,514, 40,100, 41,670, 43,240, 44,810, 46,380, 47,950, 48,625, 50,195, 51,765, 53,575, 55,178, 56,748, 58,343, 59,035, 60,650 (transcript lines 16–135). Typical file-read increments were 1,570–1,810, clearly below 15% of H (9,000); the first setup jump was 9,017. The agent crossed both 85% (51,000) and H.
 
 ## A — 85% notice and handoff
 

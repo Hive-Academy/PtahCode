@@ -31,7 +31,7 @@ Legacy stop fixtures previously used a 100% context crossing. They now cross the
 ## Verification
 
 - Focused monitor suite: `npm run verify -- -t test -p agent-sdk -- --testPathPatterns=subagent-budget-monitor`, exit 0, 209/209 passed. After the final temporary-file assertion update, that case passed with `--testNamePattern="a record write that completes after its timeout"`, exit 0.
-- `npm run verify -- -t lint,typecheck,test -p agent-sdk`: lint and typecheck passed. Full test target exit 1: 5,621 passed, 5 skipped, exactly two failures in `plugin-loader.service.capabilities.spec.ts` and `plugin-loader.service.session-notice.spec.ts`, both known Windows `fs.symlinkSync` EPERM. Nx log: `C:\Users\abdal\.nx\d60e02896ae18ad9\cache\terminalOutputs\7680382611535308973`.
+- `npm run verify -- -t lint,typecheck,test -p agent-sdk`: lint and typecheck passed. Full test target exit 1: 5,621 passed, 5 skipped, exactly two failures in `plugin-loader.service.capabilities.spec.ts` and `plugin-loader.service.session-notice.spec.ts`, both known Windows `fs.symlinkSync` EPERM. Nx log: `C:\Users\dev\.nx\d60e02896ae18ad9\cache\terminalOutputs\7680382611535308973`.
 - `npm run verify -- -t typecheck -p ptah-electron`: exit 0.
 - Scoped `ptah_get_diagnostics` on all four edited TypeScript files after the final edit: 0 errors and 0 warnings.
 
