@@ -28,6 +28,7 @@
  *   belongs to the primary watcher alone.
  */
 
+import * as fs from 'node:fs';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type {
   GitRootWatchLeaseOutcome,
@@ -95,10 +96,12 @@ export class GitRootWatcherPool implements IGitRootWatchRegistry {
   private disposed = false;
   /** Next lease rank; see {@link Lease.rank}. */
   private nextRank = 0;
+  private readonly missingRoots = new Set<string>();
 
   constructor(
     private readonly logger: Logger,
     private readonly now: () => number = Date.now,
+    private readonly rootExists: (root: string) => boolean = fs.existsSync,
   ) {}
 
   /** Hand the pool what it needs to run watchers, and arm recorded leases. */
@@ -215,6 +218,14 @@ export class GitRootWatcherPool implements IGitRootWatchRegistry {
         if (desired.size >= MAX_SECONDARY_ROOT_WATCHERS) return desired;
         const key = normalizeWorkspaceRoot(root);
         if (key === primaryKey || desired.has(key)) continue;
+        if (!this.rootExists(root)) {
+          if (!this.missingRoots.has(key)) {
+            this.missingRoots.add(key);
+            this.logger.warn('[GitRootWatcherPool] Worktree folder is missing', { root });
+          }
+          continue;
+        }
+        this.missingRoots.delete(key);
         desired.set(key, root);
       }
     }

@@ -10,6 +10,7 @@ import type { TabState } from '@ptah-extension/chat-types';
 import { sameGitState, type CompactGitState } from '@ptah-extension/chat-ui';
 import {
   VSCodeService,
+  LoggingService,
   UnavailableGitRootsStore,
   rpcCall,
   type MessageHandler,
@@ -30,6 +31,7 @@ const DEBOUNCE_MS = 1_000;
 const FRESHNESS_MS = 5_000;
 const RPC_TIMEOUT_MS = 75_000;
 const TIMEOUT_BACKOFF_MS = 30_000;
+const MISSING_REPROBE_MS = 180_000;
 
 /**
  * The store's git state: the card-facing `CompactGitState` whose `known`
@@ -172,7 +174,12 @@ export class SessionGitStatsStore implements MessageHandler {
   private readonly vscode = inject(VSCodeService);
   private readonly unavailableRoots = inject(UnavailableGitRootsStore);
   private readonly tabManager = inject(TabManagerService);
+  private readonly logger = inject(LoggingService);
   private readonly entries = new Map<string, RootEntry>();
+  /** Missing roots remain quiet across a release/re-track of the same session. */
+  private readonly missingSessions = new Map<string, { sessionId: string | null; retryAfter: number }>();
+  private readonly loggedMissingRoots = new Set<string>();
+  private readonly pendingRoots = new Set<string>();
   private readonly queue: RootEntry[] = [];
   private readonly states = signal<ReadonlyMap<string, SessionGitState>>(
     new Map(),
@@ -193,6 +200,9 @@ export class SessionGitStatsStore implements MessageHandler {
         if (entry.timer !== null) clearTimeout(entry.timer);
       }
       this.entries.clear();
+      this.missingSessions.clear();
+      this.loggedMissingRoots.clear();
+      this.pendingRoots.clear();
       this.queue.length = 0;
       this.states.set(new Map());
     });
@@ -202,6 +212,9 @@ export class SessionGitStatsStore implements MessageHandler {
     const key = normalizeWorkspaceRoot(root);
     let entry = this.entries.get(key);
     if (!entry) {
+      const sessionId = this.tabManager.findTabByIdAcrossWorkspaces(tabId)?.tab.claudeSessionId ?? null;
+      const missingFor = this.missingSessions.get(key);
+      if (missingFor && (missingFor.sessionId !== sessionId || Date.now() >= missingFor.retryAfter)) this.missingSessions.delete(key);
       entry = {
         root,
         tabs: new Map(),
@@ -211,12 +224,18 @@ export class SessionGitStatsStore implements MessageHandler {
         queued: false,
         inFlight: false,
         rerun: false,
-        unavailable: false,
+        unavailable: this.missingSessions.has(key),
       };
       this.entries.set(key, entry);
-      this.request(entry, false);
+      if (!entry.unavailable && !this.pendingRoots.has(key)) this.request(entry, false);
     }
     entry.tabs.set(tabId, (entry.tabs.get(tabId) ?? 0) + 1);
+    const trackedSession = this.tabManager.findTabByIdAcrossWorkspaces(tabId)?.tab.claudeSessionId ?? null;
+    if (entry.unavailable && this.missingSessions.get(key)?.sessionId !== trackedSession) {
+      this.missingSessions.delete(key);
+      entry.unavailable = false;
+      this.request(entry, true);
+    }
     const captured = entry;
     return () => {
       if (this.entries.get(key) !== captured) return;
@@ -250,6 +269,8 @@ export class SessionGitStatsStore implements MessageHandler {
       const entry = this.entries.get(normalizeWorkspaceRoot(root ?? ''));
       if (!entry) return;
       entry.unavailable = false;
+      this.missingSessions.delete(normalizeWorkspaceRoot(entry.root));
+      this.loggedMissingRoots.delete(normalizeWorkspaceRoot(entry.root));
       entry.backoffUntil = undefined;
       entry.generation++;
       entry.rerun = false;
@@ -289,6 +310,7 @@ export class SessionGitStatsStore implements MessageHandler {
 
   private request(entry: RootEntry, forced: boolean): void {
     if (entry.unavailable) return;
+    if (this.pendingRoots.has(normalizeWorkspaceRoot(entry.root)) && !entry.inFlight) return;
     if ((entry.backoffUntil ?? 0) > Date.now()) return;
     if (!forced && Date.now() - entry.readAt < FRESHNESS_MS) return;
     if (entry.inFlight) {
@@ -334,6 +356,7 @@ export class SessionGitStatsStore implements MessageHandler {
 
   private async read(entry: RootEntry): Promise<void> {
     entry.inFlight = true;
+    this.pendingRoots.add(normalizeWorkspaceRoot(entry.root));
     this.activeReads++;
     const generation = entry.generation;
     try {
@@ -348,12 +371,22 @@ export class SessionGitStatsStore implements MessageHandler {
         entry.generation === generation
       ) {
         if (result.success && isGitInfo(result.data)) {
+          this.loggedMissingRoots.delete(normalizeWorkspaceRoot(entry.root));
           this.unavailableRoots.clear(entry.root);
           entry.backoffUntil = undefined;
           this.setState(entry, toState(result.data));
         } else {
           if (result.error === GIT_ROOT_MISSING_MESSAGE) {
-            if (!entry.unavailable) console.warn(`${LOG_PREFIX} Git read failed.`, result.error);
+            const key = normalizeWorkspaceRoot(entry.root);
+            if (!this.loggedMissingRoots.has(key)) {
+              this.loggedMissingRoots.add(key);
+              this.logger.warn(LOG_PREFIX, 'Git read failed.', result.error);
+            }
+            const tabId = [...entry.tabs.keys()].at(-1);
+            this.missingSessions.set(key, {
+              sessionId: tabId === undefined ? null : this.tabManager.findTabByIdAcrossWorkspaces(tabId)?.tab.claudeSessionId ?? null,
+              retryAfter: Date.now() + MISSING_REPROBE_MS,
+            });
             entry.unavailable = true;
             this.unavailableRoots.mark(entry.root);
             this.setState(entry, { kind: 'unknown', reason: 'unavailable' });
@@ -390,7 +423,13 @@ export class SessionGitStatsStore implements MessageHandler {
       }
     } finally {
       entry.inFlight = false;
+      const key = normalizeWorkspaceRoot(entry.root);
+      this.pendingRoots.delete(key);
       this.activeReads--;
+      const replacement = this.entries.get(key);
+      if (replacement && replacement !== entry && !replacement.unavailable) {
+        this.request(replacement, true);
+      }
       if (
         this.entries.get(normalizeWorkspaceRoot(entry.root)) === entry &&
         entry.rerun

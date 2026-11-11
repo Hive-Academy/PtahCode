@@ -23,6 +23,7 @@ import {
   MAX_CONSECUTIVE_PROBE_FAILURES,
   READ_PROBE_NEGATIVE_TTL_MS,
   READ_PROBE_TTL_MS,
+  REGISTERED_FOLDER_TTL_MS,
   createWorktreeRootProbe,
 } from './git-root-resolver';
 import type { WorktreeRootProbe } from './git-workspace-root';
@@ -110,6 +111,32 @@ describe('GitRootResolver', () => {
     await expect(
       resolver.resolve(WORKTREE, 'git:removeWorktree', 'folder'),
     ).rejects.toMatchObject(unavailable);
+  });
+
+  it('reuses a settled registered folder for reads briefly and probes writes', async () => {
+    let now = 0;
+    const { resolver, probe } = build([FOLDER], () => now);
+    await resolver.resolve(FOLDER, 'git:info', 'folder-or-worktree');
+    await resolver.resolve(FOLDER, 'git:branches', 'folder-or-worktree');
+    expect(probe.directory).toHaveBeenCalledTimes(1);
+    await resolver.resolve(FOLDER, 'git:stage', 'folder-or-worktree');
+    expect(probe.directory).toHaveBeenCalledTimes(2);
+    now = REGISTERED_FOLDER_TTL_MS;
+    await resolver.resolve(FOLDER, 'git:info', 'folder-or-worktree');
+    expect(probe.directory).toHaveBeenCalledTimes(3);
+  });
+
+  it('refuses a registered folder that vanished and warns once until it returns', async () => {
+    const { resolver, probe, warn } = build();
+    probe.directory.mockResolvedValue({ kind: 'absent' });
+    await expect(resolver.resolve(FOLDER, 'git:watchRoots', 'folder-or-worktree'))
+      .rejects.toMatchObject({ message: GIT_ROOT_MISSING_MESSAGE });
+    await expect(resolver.resolve(FOLDER, 'git:info', 'folder-or-worktree'))
+      .rejects.toMatchObject({ message: GIT_ROOT_MISSING_MESSAGE });
+    expect(warn).toHaveBeenCalledTimes(1);
+    probe.directory.mockResolvedValue({ kind: 'exists' });
+    await expect(resolver.resolve(FOLDER, 'git:info', 'folder-or-worktree'))
+      .resolves.toBe(FOLDER);
   });
 
   it('uses the missing error only when the requested folder is absent', async () => {
@@ -466,7 +493,7 @@ describe('GitRootResolver', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('warns once per removed root per interval, then with the suppressed count (fix-13)', async () => {
+  it('warns once per removed root while it remains missing', async () => {
     let now = 0;
     const { resolver, probe, warn } = build([FOLDER], () => now);
     const GONE = '/workspace/.claude-worktrees/gone';
@@ -490,20 +517,12 @@ describe('GitRootResolver', () => {
 
     expect(warn.mock.calls).toEqual([
       [
-        '[GitRoot] git:info refused workspaceRoot',
-        {
-          method: 'git:info',
-          workspaceRoot: GONE,
-          policy: 'folder-or-worktree',
-        },
+        '[GitRoot] worktree folder is missing',
+        { workspaceRoot: GONE },
       ],
       [
-        '[GitRoot] git:info refused workspaceRoot',
-        {
-          method: 'git:info',
-          workspaceRoot: OTHER,
-          policy: 'folder-or-worktree',
-        },
+        '[GitRoot] worktree folder is missing',
+        { workspaceRoot: OTHER },
       ],
     ]);
     // A missing directory is refused on a stat alone; git is never asked.
@@ -516,15 +535,7 @@ describe('GitRootResolver', () => {
       errorCode: 'GIT_ROOT_UNAVAILABLE',
       message: GIT_ROOT_MISSING_MESSAGE,
     });
-    expect(warn).toHaveBeenLastCalledWith(
-      '[GitRoot] git:lastCommit refused workspaceRoot',
-      {
-        method: 'git:lastCommit',
-        workspaceRoot: GONE,
-        policy: 'folder-or-worktree',
-        suppressedRepeats: 2,
-      },
-    );
+    expect(warn).toHaveBeenCalledTimes(2);
   });
 });
 

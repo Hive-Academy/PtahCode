@@ -40,6 +40,7 @@ describe('GitRootWatcherPool', () => {
   let failStartFor: Set<string>;
   let pool: GitRootWatcherPool;
   let logger: ReturnType<typeof makeLogger>;
+  let missing: Set<string>;
   const broadcast = jest.fn();
 
   function createWatcher(): FakeWatcher {
@@ -77,7 +78,8 @@ describe('GitRootWatcherPool', () => {
     primary = '/repo';
     failStartFor = new Set();
     logger = makeLogger();
-    pool = new GitRootWatcherPool(logger as unknown as Logger);
+    missing = new Set();
+    pool = new GitRootWatcherPool(logger as unknown as Logger, Date.now, (root) => !missing.has(root));
   });
 
   afterEach(() => {
@@ -94,6 +96,31 @@ describe('GitRootWatcherPool', () => {
     expect(created[0].start).toHaveBeenCalledWith('/repo/.wt/one', broadcast, {
       agentWorktreeAudit: false,
     });
+  });
+
+  it('stops a vanished worktree once and waits for it to reappear', () => {
+    const root = '/repo/.wt/one';
+    pool.attach(attachment());
+    pool.setLease('a', [root]);
+    missing.add(root);
+    pool.setLease('a', [root]);
+    expect(running()).toEqual([]);
+    pool.setLease('a', [root]);
+    expect(created).toHaveLength(1);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    missing.delete(root);
+    pool.setLease('a', [root]);
+    expect(running()).toEqual([root]);
+  });
+
+  it('fills the watcher cap with healthy roots when a higher priority root is missing', () => {
+    const roots = Array.from({ length: MAX_SECONDARY_ROOT_WATCHERS + 1 }, (_, i) => `/repo/.wt/${i}`);
+    missing.add(roots[0]);
+    pool.attach(attachment());
+    const outcome = pool.setLease('a', roots);
+    expect(running()).toEqual(roots.slice(1).sort());
+    expect(outcome.watched).toEqual(roots.slice(1));
+    expect(logger.warn).toHaveBeenCalledTimes(1);
   });
 
   it('keeps a lease alive while its renewal resolves', () => {

@@ -233,6 +233,7 @@ function buildSuite(wsRoot: string | null = '/workspace'): Suite {
   const gitInfo = createMockGitInfo();
   const webviewManager = createMockWebviewManager();
   const fileSystem = createMockFileSystemProvider();
+  fileSystem.stat.mockResolvedValue({ type: FileType.Directory, ctime: 0, mtime: 0, size: 0 });
 
   const handlers = new GitRpcHandlers(
     logger as unknown as Logger,
