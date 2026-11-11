@@ -562,13 +562,26 @@ export class HarnessReconcilerService {
     const detected = new Set(
       targetHealth.filter((health) => health.detected).map((h) => h.target),
     );
-    const dirs = selected
-      .filter((target) => detected.has(target.id))
-      .flatMap((target) => target.managedDirs?.() ?? []);
+    const detectedTargets = selected.filter((target) =>
+      detected.has(target.id),
+    );
+    const dirs = detectedTargets.flatMap(
+      (target) => target.managedDirs?.() ?? [],
+    );
     if (dirs.length === 0) return;
 
     try {
-      const result = this.gitignore.apply(workspaceRoot, dirs);
+      // Skills this workspace syncs (manifest-owned), read AFTER this pass
+      // saved its manifests. The writer gives each one an exact rule when the
+      // project re-includes the skills directory for its own skills.
+      const skillPaths = detectedTargets.flatMap((target) =>
+        Object.entries(
+          this.manifestStore.load(workspaceRoot, target.id).entries,
+        )
+          .filter(([, entry]) => entry.kind === 'skill')
+          .map(([relPath]) => relPath),
+      );
+      const result = this.gitignore.apply(workspaceRoot, dirs, skillPaths);
       if (result.outcome === 'failed') {
         this.logger.warn('[harness-sync] Could not update .gitignore', {
           workspaceRoot,

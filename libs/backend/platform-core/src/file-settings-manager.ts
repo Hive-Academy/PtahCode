@@ -78,6 +78,17 @@ export function resolvePtahSettingsDir(dirPathOverride?: string): string {
   return path.join(homedir(), '.ptah');
 }
 
+/**
+ * The Ptah home directory that holds the machine-wide skill store
+ * (`plugins/`, `user/`, `templates/`). It follows the same rule as the
+ * settings directory: the dev Electron instance sets `PTAH_SETTINGS_DIR` to
+ * `~/.ptah-dev`, so its skill store is isolated from the release instance.
+ * Unset (release Electron, VS Code, CLI) it is `~/.ptah`, as before.
+ */
+export function resolvePtahHomeDir(): string {
+  return resolvePtahSettingsDir();
+}
+
 /** Seed an isolated settings file once, leaving other Ptah data in place. */
 export function seedPtahSettingsFile(sourceDir: string, targetDir: string): void {
   const source = path.join(sourceDir, 'settings.json');

@@ -33,8 +33,9 @@
  * derived copy. Only whole directories of skill/command/agent copies are listed.
  */
 
+import { execFileSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { join, posix } from 'path';
 import type { Logger } from '@ptah-extension/vscode-core';
 import { atomicWriteWithRetry } from '../fs/atomic-write';
 import { HarnessStateStore } from './harness-state-store';
@@ -76,6 +77,17 @@ export interface HarnessGitignoreDeps {
    */
   readManageGitignore?: () => boolean | undefined;
   stateStore?: HarnessStateStore;
+  /**
+   * Which of `relPaths` (workspace-relative POSIX directories) hold at least
+   * one file tracked by git. `null` means "unknown" (no git, not a repository,
+   * a timeout), and then NO per-skill rule is written: hiding a skill the
+   * project owns is worse than one untracked folder in `git status`.
+   * Defaults to one `git ls-files` call.
+   */
+  listTrackedPaths?: (
+    workspaceRoot: string,
+    relPaths: readonly string[],
+  ) => ReadonlySet<string> | null;
 }
 
 /** Unset means on. An ignore block is the behaviour a user expects by default. */
@@ -100,8 +112,18 @@ export class HarnessGitignoreWriter {
    *   targets this pass. An undetected CLI contributes nothing — ignoring
    *   `.cursor/skills/` in a workspace with no Cursor is noise about a
    *   directory that does not exist.
+   * @param skillPaths Workspace-relative POSIX directories of the skills this
+   *   workspace syncs (manifest-owned, `<skills dir>/<slug>`). When a
+   *   re-inclusion (`!.claude/skills/**`) stops the whole-directory rule, each
+   *   one that git does not track gets its own exact `<dir>/<slug>/` rule. The
+   *   block is rebuilt every pass, so a skill that is no longer synced loses
+   *   its rule.
    */
-  apply(workspaceRoot: string, dirs: readonly string[]): GitignoreResult {
+  apply(
+    workspaceRoot: string,
+    dirs: readonly string[],
+    skillPaths: readonly string[] = [],
+  ): GitignoreResult {
     const enabled = this.readSetting();
     const state = this.stateStore.load(workspaceRoot);
 
@@ -169,14 +191,22 @@ export class HarnessGitignoreWriter {
       existing.kind === 'found'
         ? text.slice(0, existing.start) + text.slice(existing.end)
         : text;
-    const patterns = selectPatterns(dirs, outside);
+    const dirPatterns = selectPatterns(dirs, outside);
+    const skillPatterns = this.selectSkillPatterns(
+      workspaceRoot,
+      dirs,
+      dirPatterns,
+      skillPaths,
+      outside,
+    );
+    const patterns = [...dirPatterns, ...skillPatterns].sort();
 
-    if (patterns.length === 0) {
+    if (patterns.length === 0 && existing.kind !== 'found') {
       // Either nothing is detected yet or the user ignores these paths their
       // own way. Writing an empty block would be a diff that says nothing.
       this.stateStore.save(workspaceRoot, state);
       return {
-        outcome: existing.kind === 'found' ? 'unchanged' : 'nothing-to-ignore',
+        outcome: 'nothing-to-ignore',
         patterns: [],
       };
     }
@@ -191,10 +221,24 @@ export class HarnessGitignoreWriter {
       return { outcome: 'unchanged', patterns };
     }
 
+    // An exact skill rule must come after any project negation, because the
+    // last matching gitignore rule wins. Move an existing block to the end
+    // when a negation follows it. An empty block keeps its markers, so the
+    // next pass does not read the removal of the last rule as a user opt-out.
+    const negationAfterBlock =
+      existing.kind === 'found' &&
+      /^[ \t]*!/m.test(text.slice(existing.end));
     const next =
-      existing.kind === 'found'
-        ? text.slice(0, existing.start) + block + text.slice(existing.end)
-        : appendBlock(text, block, eol);
+      existing.kind !== 'found'
+        ? appendBlock(text, block, eol)
+        : skillPatterns.length > 0 && negationAfterBlock
+          ? appendBlock(
+              (text.slice(0, existing.start) + text.slice(existing.end))
+                .replace(/(\r?\n)+$/, ''),
+              block,
+              eol,
+            )
+          : text.slice(0, existing.start) + block + text.slice(existing.end);
 
     try {
       // Atomic + retried: `.gitignore` is a file the user's editor and every
@@ -212,6 +256,70 @@ export class HarnessGitignoreWriter {
       patterns: patterns.length,
     });
     return { outcome: 'written', patterns };
+  }
+
+  /**
+   * Exact rules for synced skills that would otherwise show in `git status`.
+   * The whole-directory rule is skipped when the project re-includes the
+   * directory for its own skills (see `isCovered`), so each synced skill gets
+   * `<dir>/<slug>/` instead, but only when no outside rule already names or
+   * ignores it and git tracks none of its files. A project-owned skill is
+   * never hidden.
+   */
+  private selectSkillPatterns(
+    workspaceRoot: string,
+    dirs: readonly string[],
+    dirPatterns: readonly string[],
+    skillPaths: readonly string[],
+    outsideText: string,
+  ): string[] {
+    if (skillPaths.length === 0) return [];
+    const managed = new Set(
+      dirs.map(toPattern).filter((p): p is string => p !== null),
+    );
+    const rules = parseRules(outsideText);
+
+    const candidates = new Set<string>();
+    for (const skillPath of skillPaths) {
+      const pattern = toPattern(skillPath);
+      if (pattern === null) continue;
+      const rel = pattern.slice(0, -1);
+      const parent = `${posix.dirname(rel)}/`;
+      // Only skills inside a managed directory, and only when that directory
+      // has no whole-directory rule in the block already.
+      if (!managed.has(parent) || dirPatterns.includes(parent)) continue;
+      const named = rules.some(
+        (rule) => rule.path === rel || rule.path.startsWith(`${rel}/`),
+      );
+      if (named || isIgnoredByRules(rel, rules)) continue;
+      candidates.add(rel);
+    }
+    if (candidates.size === 0) return [];
+
+    const list = [...candidates];
+    const tracked = this.listTracked(workspaceRoot, list);
+    if (tracked === null) return [];
+    return list
+      .filter((rel) => !tracked.has(rel))
+      .map((rel) => `${rel}/`);
+  }
+
+  private listTracked(
+    workspaceRoot: string,
+    relPaths: readonly string[],
+  ): ReadonlySet<string> | null {
+    try {
+      return (this.deps.listTrackedPaths ?? gitTrackedPaths)(
+        workspaceRoot,
+        relPaths,
+      );
+    } catch (error: unknown) {
+      this.logger.debug('[harness-sync] git tracked-path check failed', {
+        workspaceRoot,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
   }
 
   private readSetting(): boolean {
@@ -268,12 +376,7 @@ function selectPatterns(
   dirs: readonly string[],
   outsideText: string,
 ): string[] {
-  const existingPaths = outsideText
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line !== '' && !line.startsWith('#'))
-    .map(rulePath)
-    .filter((path): path is string => path !== null);
+  const existingPaths = parseRules(outsideText).map((rule) => rule.path);
 
   const selected = new Set<string>();
   for (const dir of dirs) {
@@ -283,6 +386,102 @@ function selectPatterns(
     selected.add(pattern);
   }
   return [...selected].sort();
+}
+
+interface ParsedRule {
+  /** Path the rule talks about, as {@link rulePath} reduces it. */
+  path: string;
+  negated: boolean;
+  /** The rule without `!` and a leading `/` or `**` + `/`. */
+  body: string;
+}
+
+function parseRules(text: string): ParsedRule[] {
+  const rules: ParsedRule[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line === '' || line.startsWith('#')) continue;
+    const path = rulePath(line);
+    if (path === null) continue;
+    const body = line.replace(/^!/, '').replace(/^\*\*\//, '').replace(/^\//, '');
+    rules.push({ path, negated: line.startsWith('!'), body });
+  }
+  return rules;
+}
+
+/**
+ * Whether git would ignore the directory `rel`, from the outside rules only.
+ * A small model of git's rules: the last matching rule wins; `x/**` and
+ * `x/*` match what is inside `x`; a plain `x` or `x/` matches `x` and what is
+ * inside it; a name with no inner slash matches at any depth. A rule with
+ * other wildcards is skipped, so the answer can only err towards "not
+ * ignored", which costs one redundant line, never a hidden skill.
+ */
+function isIgnoredByRules(rel: string, rules: readonly ParsedRule[]): boolean {
+  let ignored = false;
+  for (const rule of rules) {
+    if (ruleMatches(rule.body, rel)) ignored = !rule.negated;
+  }
+  return ignored;
+}
+
+function ruleMatches(body: string, rel: string): boolean {
+  let base = body;
+  let insideOnly = false;
+  if (base.endsWith('/**')) {
+    base = base.slice(0, -3);
+    insideOnly = true;
+  } else if (base.endsWith('/*')) {
+    base = base.slice(0, -2);
+    insideOnly = true;
+  }
+  base = base.replace(/\/+$/, '');
+  if (base === '' || /[*?[\]]/.test(base)) return false;
+
+  if (!base.includes('/')) {
+    // A bare name matches that name at any depth.
+    const segments = rel.split('/');
+    const last = insideOnly ? segments.length - 1 : segments.length;
+    return segments.slice(0, last).includes(base);
+  }
+  if (rel.startsWith(`${base}/`)) return true;
+  return !insideOnly && rel === base;
+}
+
+/**
+ * The subset of `relPaths` that hold a git-tracked file, from one
+ * `git ls-files` call. `null` when git cannot answer.
+ */
+function gitTrackedPaths(
+  workspaceRoot: string,
+  relPaths: readonly string[],
+): ReadonlySet<string> | null {
+  let output: string;
+  try {
+    output = execFileSync(
+      'git',
+      ['ls-files', '-z', '--', ...relPaths.map((rel) => `${rel}/`)],
+      {
+        cwd: workspaceRoot,
+        encoding: 'utf-8',
+        timeout: 10_000,
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      },
+    );
+  } catch {
+    // degradation-audit: optional-capability - no repository, no git binary or
+    // a timeout reads as "unknown", and the caller writes no per-skill rule.
+    return null;
+  }
+  const tracked = new Set<string>();
+  for (const file of output.split('\0')) {
+    if (file === '') continue;
+    for (const rel of relPaths) {
+      if (file.startsWith(`${rel}/`)) tracked.add(rel);
+    }
+  }
+  return tracked;
 }
 
 /**

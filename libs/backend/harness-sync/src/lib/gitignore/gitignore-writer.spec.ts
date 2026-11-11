@@ -398,4 +398,156 @@ describe('HarnessGitignoreWriter (E23)', () => {
       expect(writer().apply(ws, DIRS).outcome).toBe('written');
     });
   });
+  describe('synced skills inside a re-included skills directory', () => {
+    /**
+     * THIS repository's shape: a broad `skills/` rule, then the project
+     * re-includes `.claude/skills/**` for the skills it tracks. The whole
+     * directory rule is (correctly) skipped, so before the fix every synced
+     * user skill showed as untracked in `git status`.
+     */
+    const REINCLUDED = [
+      'skills/',
+      '!.claude/skills/',
+      '!.claude/skills/**',
+      '',
+    ].join('\n');
+
+    const SYNCED = ['.claude/skills/vitest', '.claude/skills/angular-developer'];
+
+    const skillWriter = (
+      tracked: ReadonlySet<string> | null = new Set(),
+    ): { writer: HarnessGitignoreWriter; calls: string[][] } => {
+      const calls: string[][] = [];
+      const instance = new HarnessGitignoreWriter(fakeLogger(), {
+        listTrackedPaths: (_root, rels) => {
+          calls.push([...rels]);
+          return tracked;
+        },
+      });
+      return { writer: instance, calls };
+    };
+
+    it('adds an exact rule per untracked synced skill, after the re-inclusion', () => {
+      writeFileSync(join(ws, '.gitignore'), REINCLUDED);
+      const { writer: w } = skillWriter();
+
+      const result = w.apply(ws, DIRS, SYNCED);
+
+      expect(result.outcome).toBe('written');
+      expect(result.patterns).toEqual(
+        expect.arrayContaining([
+          '.claude/skills/angular-developer/',
+          '.claude/skills/vitest/',
+        ]),
+      );
+      // Never the blanket rule: it would hide the project's own skills.
+      expect(result.patterns).not.toContain('.claude/skills/');
+      const text = gitignore();
+      expect(text.indexOf('.claude/skills/vitest/')).toBeGreaterThan(
+        text.indexOf('!.claude/skills/**'),
+      );
+    });
+
+    it('never adds a rule for a skill git tracks (project-owned)', () => {
+      writeFileSync(join(ws, '.gitignore'), REINCLUDED);
+      const { writer: w } = skillWriter(new Set(['.claude/skills/vitest']));
+
+      const result = w.apply(ws, DIRS, SYNCED);
+
+      expect(result.patterns).toContain('.claude/skills/angular-developer/');
+      expect(result.patterns).not.toContain('.claude/skills/vitest/');
+    });
+
+    it('adds no per-skill rule when git cannot answer', () => {
+      writeFileSync(join(ws, '.gitignore'), REINCLUDED);
+      const { writer: w } = skillWriter(null);
+
+      const result = w.apply(ws, DIRS, SYNCED);
+
+      expect(
+        result.patterns.filter((p) => p.startsWith('.claude/skills/')),
+      ).toEqual([]);
+    });
+
+    it('removes the rule when the skill is no longer synced', () => {
+      writeFileSync(join(ws, '.gitignore'), REINCLUDED);
+      const { writer: w } = skillWriter();
+
+      w.apply(ws, DIRS, SYNCED);
+      const result = w.apply(ws, DIRS, ['.claude/skills/vitest']);
+
+      expect(result.patterns).toContain('.claude/skills/vitest/');
+      expect(gitignore()).not.toContain('.claude/skills/angular-developer/');
+    });
+
+    it('removes the last rule when no skill is synced, and keeps the markers', () => {
+      writeFileSync(join(ws, '.gitignore'), REINCLUDED);
+      const { writer: w } = skillWriter();
+
+      w.apply(ws, DIRS, ['.claude/skills/vitest']);
+      w.apply(ws, DIRS, []);
+      expect(gitignore()).not.toContain('.claude/skills/vitest/');
+      expect(gitignore()).toContain('# ptah:harness:begin');
+      const again = w.apply(ws, DIRS, ['.claude/skills/vitest']);
+
+      expect(again.outcome).toBe('written');
+      expect(gitignore()).toContain('.claude/skills/vitest/');
+    });
+
+    it('moves the block after a negation the project added below it', () => {
+      writeFileSync(join(ws, '.gitignore'), 'skills/\n');
+      const { writer: w } = skillWriter();
+      w.apply(ws, DIRS, SYNCED);
+      writeFileSync(
+        join(ws, '.gitignore'),
+        `${gitignore()}!.claude/skills/\n!.claude/skills/**\n`,
+      );
+
+      w.apply(ws, DIRS, SYNCED);
+
+      const text = gitignore();
+      expect(text.indexOf('.claude/skills/vitest/')).toBeGreaterThan(
+        text.indexOf('!.claude/skills/**'),
+      );
+    });
+
+    it('skips a skill an outside rule already names or ignores', () => {
+      // The negation ladder ignores every skill except `example-skill`, which
+      // the project tracks by name: neither needs a rule.
+      writeFileSync(join(ws, '.gitignore'), NEGATION_LADDER);
+      const { writer: w, calls } = skillWriter();
+
+      const result = w.apply(ws, DIRS, [
+        '.claude/skills/vitest',
+        '.claude/skills/example-skill',
+      ]);
+
+      expect(
+        result.patterns.filter((p) => p.startsWith('.claude/skills/')),
+      ).toEqual([]);
+      expect(calls).toEqual([]);
+    });
+
+    it('needs no rule where the skills directory is ignored as a whole', () => {
+      const { writer: w, calls } = skillWriter();
+
+      const result = w.apply(ws, DIRS, SYNCED);
+
+      expect(result.patterns).toContain('.claude/skills/');
+      expect(result.patterns).not.toContain('.claude/skills/vitest/');
+      expect(calls).toEqual([]);
+    });
+
+    it('respects a block the user removed', () => {
+      writeFileSync(join(ws, '.gitignore'), REINCLUDED);
+      const { writer: w } = skillWriter();
+      w.apply(ws, DIRS, SYNCED);
+      writeFileSync(join(ws, '.gitignore'), REINCLUDED);
+
+      const result = w.apply(ws, DIRS, SYNCED);
+
+      expect(result.outcome).toBe('removed-by-user');
+      expect(gitignore()).toBe(REINCLUDED);
+    });
+  });
 });

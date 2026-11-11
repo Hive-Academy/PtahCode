@@ -48,6 +48,7 @@ import { TOKENS } from '@ptah-extension/vscode-core';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
   PLATFORM_TOKENS,
+  resolvePtahHomeDir,
   type IWorkspaceProvider,
 } from '@ptah-extension/platform-core';
 import {
@@ -300,6 +301,8 @@ export interface InstallScopeRetiredMcpSource {
 @injectable()
 export class InstallScopeMigrationService {
   private readonly homeDir: string;
+  /** Skill store home: `~/.ptah`, or `~/.ptah-dev` in dev Electron. */
+  private readonly storeDir: string;
   private readonly reaper: InstallScopeCloneReaper;
   private readonly mcpIntents: InstallScopeRetiredMcpSource;
 
@@ -333,6 +336,8 @@ export class InstallScopeMigrationService {
     mcpIntents: InstallScopeRetiredMcpSource | null = null,
   ) {
     this.homeDir = homeDir ?? os.homedir();
+    this.storeDir =
+      homeDir === null ? resolvePtahHomeDir() : path.join(homeDir, '.ptah');
     this.reaper = reaper ?? createCloneReaper(logger);
     this.mcpIntents =
       mcpIntents ?? createMcpIntentSource(defaultMcpIntentPath(this.homeDir));
@@ -344,11 +349,11 @@ export class InstallScopeMigrationService {
   }
 
   private get pluginsBasePath(): string {
-    return path.join(this.homeDir, '.ptah', 'plugins');
+    return path.join(this.storeDir, 'plugins');
   }
 
   private get userLayerBase(): string {
-    return path.join(this.homeDir, '.ptah', 'user');
+    return path.join(this.storeDir, 'user');
   }
 
   private rootDirOf(rootId: string): string {

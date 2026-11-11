@@ -1,9 +1,11 @@
 import { injectable, inject } from 'tsyringe';
-import { homedir } from 'os';
 import { join, basename, isAbsolute } from 'path';
 import { lstat, mkdir, readdir, readFile, stat } from 'fs/promises';
 import { TOKENS, Logger } from '@ptah-extension/vscode-core';
-import { formatSourceHash } from '@ptah-extension/platform-core';
+import {
+  formatSourceHash,
+  resolvePtahHomeDir,
+} from '@ptah-extension/platform-core';
 import {
   USER_LAYER_AGENTS_DIR_NAME,
   userLayerAgentDirName,
@@ -387,7 +389,7 @@ export class UserLayerMirrorService {
    * in the unscoped base rather than in another project's directory.
    */
   getUserLayerRoots(workspaceRoot?: string): UserLayerRoots {
-    const base = join(homedir(), '.ptah', 'user');
+    const base = join(resolvePtahHomeDir(), 'user');
     const agentsBase = join(base, USER_LAYER_AGENTS_DIR_NAME);
     return {
       skills: join(base, 'skills'),
@@ -401,7 +403,7 @@ export class UserLayerMirrorService {
 
   /** The unscoped `~/.ptah/user/agents`, which holds the pre-key clones. */
   private legacyAgentsRoot(): string {
-    return join(homedir(), '.ptah', 'user', USER_LAYER_AGENTS_DIR_NAME);
+    return join(resolvePtahHomeDir(), 'user', USER_LAYER_AGENTS_DIR_NAME);
   }
 
   async mirrorAll(sources: MirrorSources): Promise<MirrorResult> {

@@ -10,7 +10,7 @@
 
 import { readFileSync } from 'fs';
 import * as os from 'os';
-import { basename, join } from 'path';
+import { basename, isAbsolute, join } from 'path';
 import {
   type AgentModelLayers,
   isCapabilityPolicyUnknownError,
@@ -103,9 +103,9 @@ export type AgentModelsFactory = () => {
  * `PluginConfigSourceResolver.resolve` is the one caller that does so.
  */
 export function defaultHarnessSourceLayout(
-  homeDir: string = os.homedir(),
+  homeDir?: string,
 ): HarnessSourceLayout {
-  const ptahRoot = join(homeDir, '.ptah');
+  const ptahRoot = homeDir === undefined ? defaultPtahRoot() : join(homeDir, '.ptah');
   const userRoot = join(ptahRoot, 'user');
   return {
     skillsRoot: join(userRoot, 'skills'),
@@ -119,10 +119,22 @@ export function defaultHarnessSourceLayout(
  * `~/.ptah/plugins` — where skills.sh roots are installed, and where the
  * retired-root registry (`SKILLS_SH_RETIRED_FILE`) sits beside them.
  */
-export function defaultSkillsShPluginsRoot(
-  homeDir: string = os.homedir(),
-): string {
-  return join(homeDir, '.ptah', 'plugins');
+export function defaultSkillsShPluginsRoot(homeDir?: string): string {
+  const ptahRoot = homeDir === undefined ? defaultPtahRoot() : join(homeDir, '.ptah');
+  return join(ptahRoot, 'plugins');
+}
+
+/**
+ * The Ptah home directory when no home override is given. The SAME rule as
+ * `resolvePtahHomeDir` in `@ptah-extension/platform-core` (this lib does not
+ * depend on platform-core): an absolute `PTAH_SETTINGS_DIR` wins, so the dev
+ * Electron instance reads `~/.ptah-dev`, and otherwise `~/.ptah`. Change both
+ * together.
+ */
+export function defaultPtahRoot(): string {
+  const fromEnv = process.env['PTAH_SETTINGS_DIR'];
+  if (fromEnv?.trim() && isAbsolute(fromEnv)) return fromEnv;
+  return join(os.homedir(), '.ptah');
 }
 
 /**

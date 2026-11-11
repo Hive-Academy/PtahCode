@@ -404,6 +404,7 @@ export {
 export type { TerminalLaunch } from './utils/terminal-launch';
 export {
   PtahFileSettingsManager,
+  resolvePtahHomeDir,
   resolvePtahSettingsDir,
   seedPtahSettingsFile,
 } from './file-settings-manager';
