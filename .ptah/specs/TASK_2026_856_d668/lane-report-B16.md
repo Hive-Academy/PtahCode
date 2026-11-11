@@ -22,7 +22,7 @@ The check exited 1. Terminal tail:
 ```text
 NX   1 task: 0 succeeded, 1 failed
 ✖ nx run @ptah-extension/chat:test
-  full log: C:\Users\abdal\.nx\8b7110c7390b9603\cache\terminalOutputs\2779051641209755292
+  full log: C:\Users\dev\.nx\8b7110c7390b9603\cache\terminalOutputs\2779051641209755292
 [verify 2026-10-30T20:12:09.385Z] lock slot 0 acquired after 110s: verify test (@ptah-extension/chat)
   Run duration:      12.4s
   Critical path:     12.3s (1 task)

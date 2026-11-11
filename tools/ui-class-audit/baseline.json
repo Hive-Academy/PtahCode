@@ -105,11 +105,6 @@
     "badge-ghost": 1,
     "badge-sm": 1
   },
-  "libs/frontend/chat-ui/src/lib/atoms/expandable-content.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/chat-ui/src/lib/atoms/report-response-button.component.ts": {
     "btn": 1,
     "btn-ghost": 1,
@@ -131,11 +126,6 @@
     "badge-sm": 1,
     "badge-success": 1,
     "badge-warning": 1
-  },
-  "libs/frontend/chat-ui/src/lib/atoms/theme-toggle.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
   },
   "libs/frontend/chat-ui/src/lib/atoms/token-badge.component.ts": {
     "badge": 1,
@@ -177,12 +167,6 @@
     "badge-ghost": 1,
     "badge-xs": 1
   },
-  "libs/frontend/chat-ui/src/lib/molecules/background-agent-strip.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/chat-ui/src/lib/molecules/boot-progress/boot-progress.component.ts": {
     "<dynamic>": 1
   },
@@ -205,10 +189,7 @@
     "badge-xs": 3
   },
   "libs/frontend/chat-ui/src/lib/molecules/compact-session/compact-session-activity.component.ts": {
-    "<dynamic>": 2,
-    "btn": 1,
-    "btn-primary": 1,
-    "btn-xs": 1
+    "<dynamic>": 2
   },
   "libs/frontend/chat-ui/src/lib/molecules/compact-session/compact-session-callout.component.ts": {
     "btn": 4,
@@ -233,18 +214,7 @@
     "btn-xs": 2
   },
   "libs/frontend/chat-ui/src/lib/molecules/lane-result/lane-result-card.component.ts": {
-    "<dynamic>": 1,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
-  },
-  "libs/frontend/chat-ui/src/lib/molecules/notifications/compaction-marker.component.ts": {
-    "btn": 2,
-    "btn-circle": 1,
-    "btn-ghost": 2,
-    "btn-sm": 1,
-    "btn-xs": 1
+    "<dynamic>": 1
   },
   "libs/frontend/chat-ui/src/lib/molecules/permissions/deny-message-popover.component.ts": {
     "btn": 2,
@@ -261,23 +231,20 @@
     "badge-error": 1,
     "badge-warning": 1,
     "badge-xs": 2,
-    "btn": 3,
-    "btn-error": 1,
+    "btn": 2,
     "btn-info": 1,
-    "btn-outline": 1,
     "btn-success": 1,
-    "btn-xs": 3
+    "btn-xs": 2
   },
   "libs/frontend/chat-ui/src/lib/molecules/question-card.component.ts": {
     "badge": 1,
     "badge-error": 1,
     "badge-warning": 1,
     "badge-xs": 1,
-    "btn": 4,
-    "btn-ghost": 1,
+    "btn": 3,
     "btn-info": 3,
     "btn-outline": 2,
-    "btn-xs": 4,
+    "btn-xs": 3,
     "input": 1,
     "input-bordered": 1,
     "input-info": 1,
@@ -304,11 +271,7 @@
     "badge-xs": 1
   },
   "libs/frontend/chat-ui/src/lib/molecules/session/session-stats-summary.component.html": {
-    "<dynamic>": 1,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
+    "<dynamic>": 1
   },
   "libs/frontend/chat-ui/src/lib/molecules/setup-plugins/install-scope-field.component.ts": {
     "btn": 1,
@@ -327,11 +290,9 @@
     "badge-sm": 2,
     "badge-warning": 1,
     "badge-xs": 1,
-    "btn": 4,
-    "btn-ghost": 2,
-    "btn-primary": 2,
-    "btn-sm": 2,
-    "btn-xs": 2,
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-xs": 1,
     "input": 2,
     "input-bordered": 2,
     "input-sm": 2,
@@ -344,11 +305,10 @@
     "badge": 1,
     "badge-ghost": 1,
     "badge-xs": 1,
-    "btn": 5,
-    "btn-ghost": 4,
-    "btn-primary": 3,
-    "btn-sm": 2,
-    "btn-xs": 3,
+    "btn": 2,
+    "btn-ghost": 2,
+    "btn-primary": 2,
+    "btn-xs": 2,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
@@ -361,10 +321,9 @@
     "badge": 1,
     "badge-outline": 1,
     "badge-sm": 1,
-    "btn": 4,
+    "btn": 2,
     "btn-ghost": 2,
-    "btn-primary": 2,
-    "btn-sm": 3,
+    "btn-sm": 1,
     "btn-xs": 1,
     "input": 1,
     "input-bordered": 1,
@@ -375,29 +334,12 @@
     "card-body": 1,
     "card-border": 1
   },
-  "libs/frontend/chat-ui/src/lib/molecules/tool-execution/code-output.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
-  },
-  "libs/frontend/chat-ui/src/lib/molecules/tool-execution/file-change-diff.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/chat-ui/src/lib/molecules/tool-execution/tool-call-header.component.ts": {
     "badge": 3,
     "badge-ghost": 2,
-    "badge-sm": 3,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
+    "badge-sm": 3
   },
   "libs/frontend/chat-ui/src/lib/molecules/tool-execution/tool-input-display.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1,
     "input-preview-block": 1
   },
   "libs/frontend/chat-ui/src/lib/molecules/turn-recap/turn-summary-chip.component.ts": {
@@ -407,10 +349,10 @@
     "badge": 1,
     "badge-ghost": 1,
     "badge-sm": 1,
-    "btn": 4,
-    "btn-ghost": 3,
+    "btn": 2,
+    "btn-ghost": 1,
     "btn-primary": 1,
-    "btn-xs": 4
+    "btn-xs": 2
   },
   "libs/frontend/chat-ui/src/lib/molecules/turn-recap/turn-summary-tests.component.ts": {
     "<dynamic>": 5
@@ -421,33 +363,13 @@
   "libs/frontend/chat-ui/src/lib/molecules/vitals/staged-steps.component.ts": {
     "<dynamic>": 1
   },
-  "libs/frontend/chat-ui/src/lib/organisms/artifacts/artifact-card.component.ts": {
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-xs": 2
-  },
   "libs/frontend/chat-ui/src/lib/organisms/artifacts/artifact-viewer.component.ts": {
-    "<dynamic>": 1,
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
-  },
-  "libs/frontend/chat-ui/src/lib/organisms/display-panel/display-file-viewer.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
-  },
-  "libs/frontend/chat-ui/src/lib/organisms/display-panel/display-panel.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
+    "<dynamic>": 1
   },
   "libs/frontend/chat-ui/src/lib/organisms/mermaid/mermaid-diagram.component.ts": {
-    "btn": 3,
+    "btn": 2,
     "btn-active": 2,
-    "btn-ghost": 1,
-    "btn-xs": 3
+    "btn-xs": 2
   },
   "libs/frontend/chat-ui/src/lib/organisms/ptah-ui/ptah-ui-display-chip.component.ts": {
     "btn": 1,
@@ -464,11 +386,7 @@
   },
   "libs/frontend/chat/src/lib/components/file-suggestions/file-tag.component.ts": {
     "badge": 1,
-    "badge-lg": 1,
-    "btn": 1,
-    "btn-circle": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
+    "badge-lg": 1
   },
   "libs/frontend/chat/src/lib/components/file-suggestions/suggestion-option.component.ts": {
     "badge": 3,
@@ -486,32 +404,13 @@
     "badge-sm": 4,
     "badge-success": 1,
     "badge-warning": 1,
-    "badge-xs": 5,
-    "btn": 4,
-    "btn-error": 1,
-    "btn-ghost": 3,
-    "btn-outline": 1,
-    "btn-square": 2,
-    "btn-xs": 4
+    "badge-xs": 5
   },
   "libs/frontend/chat/src/lib/components/molecules/agent-card/cli-agent-output.component.ts": {
     "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/components/molecules/agent-continue-input/agent-continue-input.component.ts": {
     "<dynamic>": 2
-  },
-  "libs/frontend/chat/src/lib/components/molecules/agent-origin-banner/agent-origin-banner.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
-  },
-  "libs/frontend/chat/src/lib/components/molecules/attachment-tray/attachment-tray.component.ts": {
-    "btn": 3,
-    "btn-circle": 1,
-    "btn-error": 1,
-    "btn-ghost": 2,
-    "btn-sm": 2,
-    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/chat-input/chat-input.component.ts": {
     "<dynamic>": 1
@@ -520,17 +419,15 @@
     "<dynamic>": 4
   },
   "libs/frontend/chat/src/lib/components/molecules/confirmation-dialog.component.ts": {
-    "btn": 2,
+    "btn": 1,
     "btn-error": 1,
-    "btn-ghost": 1,
     "btn-primary": 1,
     "btn-warning": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/delivery-status/delivery-status.component.ts": {
-    "btn": 3,
-    "btn-ghost": 2,
+    "btn": 1,
     "btn-warning": 1,
-    "btn-xs": 3
+    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/execution-header/execution-header.component.ts": {
     "<dynamic>": 1,
@@ -538,19 +435,10 @@
     "badge-ghost": 1,
     "badge-sm": 1
   },
-  "libs/frontend/chat/src/lib/components/molecules/global-config-actions.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1,
-    "btn-square": 1
-  },
   "libs/frontend/chat/src/lib/components/molecules/lane-event/lane-event-row.component.html": {
     "badge": 2,
     "badge-ghost": 2,
-    "badge-sm": 2,
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
+    "badge-sm": 2
   },
   "libs/frontend/chat/src/lib/components/molecules/mcp-server-list.component.ts": {
     "<dynamic>": 1
@@ -558,36 +446,17 @@
   "libs/frontend/chat/src/lib/components/molecules/mcp-status-chip.component.ts": {
     "<dynamic>": 2
   },
-  "libs/frontend/chat/src/lib/components/molecules/notifications/auth-required-banner.component.ts": {
-    "btn": 3,
-    "btn-ghost": 1,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-xs": 3
-  },
   "libs/frontend/chat/src/lib/components/molecules/notifications/install-scope-migration-notice.component.ts": {
-    "btn": 2,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 2,
     "card": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/notifications/resume-notification-banner.component.ts": {
     "badge": 2,
     "badge-outline": 1,
     "badge-warning": 2,
-    "badge-xs": 2,
-    "btn": 3,
-    "btn-ghost": 1,
-    "btn-primary": 2,
-    "btn-square": 1,
-    "btn-xs": 3
+    "badge-xs": 2
   },
   "libs/frontend/chat/src/lib/components/molecules/notifications/session-budget-banner.component.ts": {
-    "<dynamic>": 6,
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-xs": 3
+    "<dynamic>": 6
   },
   "libs/frontend/chat/src/lib/components/molecules/peer-session-send/peer-session-send-dialog.component.ts": {
     "alert": 2,
@@ -599,28 +468,11 @@
     "badge-sm": 2,
     "badge-success": 1,
     "badge-xs": 1,
-    "btn": 5,
-    "btn-circle": 1,
-    "btn-ghost": 3,
-    "btn-primary": 2,
-    "btn-sm": 4,
-    "btn-xs": 1,
     "textarea": 1,
     "textarea-bordered": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/previous-sessions-toolbar/previous-sessions-toolbar.component.ts": {
     "<dynamic>": 1
-  },
-  "libs/frontend/chat/src/lib/components/molecules/queued-follow-ups/queued-follow-ups.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
-  },
-  "libs/frontend/chat/src/lib/components/molecules/send-to-messaging/handoff-binding-picker.component.ts": {
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-xs": 3
   },
   "libs/frontend/chat/src/lib/components/molecules/send-to-messaging/send-to-messaging.component.ts": {
     "<dynamic>": 1,
@@ -635,11 +487,6 @@
     "<dynamic>": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/session-organization-editor/session-organization-editor.component.ts": {
-    "btn": 7,
-    "btn-circle": 1,
-    "btn-ghost": 4,
-    "btn-sm": 5,
-    "btn-xs": 2,
     "input": 2,
     "input-bordered": 2,
     "input-sm": 2,
@@ -656,18 +503,11 @@
     "badge-sm": 1,
     "badge-warning": 3,
     "badge-xs": 4,
-    "btn": 6,
+    "btn": 2,
     "btn-error": 1,
-    "btn-ghost": 4,
     "btn-outline": 1,
-    "btn-square": 3,
     "btn-success": 1,
-    "btn-xs": 6
-  },
-  "libs/frontend/chat/src/lib/components/organisms/display-sheet/display-sheet.component.ts": {
-    "btn": 4,
-    "btn-ghost": 4,
-    "btn-xs": 4
+    "btn-xs": 2
   },
   "libs/frontend/chat/src/lib/components/organisms/execution/execution-node.component.ts": {
     "alert": 1,
@@ -683,11 +523,9 @@
     "badge-success": 2,
     "badge-warning": 2,
     "badge-xs": 10,
-    "btn": 7,
-    "btn-ghost": 4,
-    "btn-link": 2,
-    "btn-primary": 1,
-    "btn-xs": 7,
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-xs": 1,
     "textarea": 1,
     "textarea-bordered": 1,
     "textarea-disabled": 1,
@@ -716,29 +554,9 @@
     "badge": 1,
     "badge-xs": 1
   },
-  "libs/frontend/chat/src/lib/components/organisms/execution/workflow-card.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/chat/src/lib/components/organisms/message-bubble.component.html": {
     "badge": 2,
-    "badge-sm": 2,
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
-  },
-  "libs/frontend/chat/src/lib/components/organisms/previous-sessions/previous-sessions-load-state.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1,
-    "btn-square": 1
-  },
-  "libs/frontend/chat/src/lib/components/organisms/previous-sessions/previous-sessions-modal.component.html": {
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-sm": 3,
-    "btn-square": 1
+    "badge-sm": 2
   },
   "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-agent-row.component.ts": {
     "<dynamic>": 2
@@ -747,12 +565,11 @@
     "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-session-actions.component.html": {
-    "btn": 9,
-    "btn-ghost": 8,
-    "btn-primary": 1,
-    "btn-sm": 5,
-    "btn-square": 4,
-    "btn-xs": 4,
+    "btn": 4,
+    "btn-ghost": 4,
+    "btn-sm": 3,
+    "btn-square": 1,
+    "btn-xs": 1,
     "input": 1,
     "input-bordered": 1
   },
@@ -764,38 +581,19 @@
     "badge": 3,
     "badge-ghost": 2,
     "badge-sm": 3,
-    "btn": 8,
+    "btn": 1,
     "btn-active": 1,
-    "btn-ghost": 8,
-    "btn-square": 1,
-    "btn-xs": 8,
+    "btn-ghost": 1,
+    "btn-xs": 1,
     "skeleton": 3
   },
-  "libs/frontend/chat/src/lib/components/organisms/session-inspector/session-inspector.component.html": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/chat/src/lib/components/organisms/subagent-lane/subagent-lane-composer.component.ts": {
-    "<dynamic>": 2,
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-square": 2,
-    "btn-xs": 2
+    "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/components/organisms/subagent-lane/subagent-lane.component.ts": {
-    "<dynamic>": 4,
-    "btn": 5,
-    "btn-ghost": 2,
-    "btn-link": 3,
-    "btn-square": 2,
-    "btn-xs": 5
+    "<dynamic>": 4
   },
   "libs/frontend/chat/src/lib/components/organisms/transcript/chat-transcript.component.html": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1,
     "skeleton": 3
   },
   "libs/frontend/chat/src/lib/components/organisms/transcript/lane-thread-row.component.ts": {
@@ -806,122 +604,69 @@
     "badge-warning": 1,
     "badge-xs": 1
   },
-  "libs/frontend/chat/src/lib/components/organisms/transcript/single-chat-subagent-view.component.ts": {
+  "libs/frontend/chat/src/lib/components/organisms/workspace-sidebar.component.ts": {
     "btn": 1,
     "btn-ghost": 1,
-    "btn-xs": 1
-  },
-  "libs/frontend/chat/src/lib/components/organisms/workspace-sidebar.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-sm": 1,
     "btn-square": 1,
     "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/components/templates/app-shell.component.html": {
-    "btn": 10,
+    "btn": 6,
     "btn-active": 3,
-    "btn-circle": 1,
-    "btn-ghost": 7,
+    "btn-ghost": 4,
     "btn-gold": 2,
-    "btn-primary": 2,
-    "btn-sm": 2,
+    "btn-primary": 1,
     "btn-square": 1,
-    "btn-xs": 8,
+    "btn-xs": 6,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
   },
-  "libs/frontend/chat/src/lib/components/templates/chat-view.component.html": {
-    "btn": 4,
-    "btn-ghost": 3,
-    "btn-outline": 1,
-    "btn-sm": 2,
-    "btn-xs": 2
-  },
-  "libs/frontend/chat/src/lib/components/templates/display-window/display-window.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
-  },
   "libs/frontend/chat/src/lib/components/templates/electron-shell.component.ts": {
     "badge": 1,
     "badge-warning": 1,
-    "badge-xs": 1,
-    "btn": 5,
-    "btn-ghost": 3,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-square": 1,
-    "btn-xs": 3
-  },
-  "libs/frontend/chat/src/lib/components/templates/electron-welcome.component.ts": {
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-xs": 1
-  },
-  "libs/frontend/chat/src/lib/components/templates/workspace-loading-state.component.ts": {
-    "btn": 1,
-    "btn-primary": 1
+    "badge-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/advanced-settings.component.ts": {
     "<dynamic>": 1,
-    "btn": 4,
-    "btn-ghost": 1,
-    "btn-outline": 3,
-    "btn-sm": 4
+    "btn": 1,
+    "btn-outline": 1,
+    "btn-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/advanced/advanced-settings-group.component.ts": {
-    "<dynamic>": 5,
-    "btn": 2,
-    "btn-outline": 1,
-    "btn-sm": 2,
+    "<dynamic>": 4,
+    "btn": 1,
+    "btn-sm": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/advanced/codex-sandbox-setting.component.ts": {
-    "<dynamic>": 5,
-    "btn": 4,
-    "btn-ghost": 1,
-    "btn-outline": 3,
-    "btn-sm": 4
+    "<dynamic>": 2,
+    "btn": 1,
+    "btn-outline": 1,
+    "btn-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/feedback/settings-toast.component.ts": {
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-sm": 2,
-    "btn-square": 1,
+    "btn": 1,
+    "btn-sm": 1,
     "btn-warning": 1
   },
   "libs/frontend/chat/src/lib/settings/license/license-status-card.component.ts": {
     "badge": 4,
     "badge-outline": 4,
     "badge-sm": 4,
-    "btn": 11,
-    "btn-ghost": 6,
-    "btn-outline": 2,
-    "btn-primary": 3,
-    "btn-sm": 11,
-    "btn-square": 1,
+    "btn": 1,
+    "btn-outline": 1,
+    "btn-sm": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
   },
-  "libs/frontend/chat/src/lib/settings/output-style/output-style-config.component.ts": {
-    "btn": 1,
-    "btn-primary": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/chat/src/lib/settings/output-style/output-style-editor.component.ts": {
-    "btn": 12,
-    "btn-ghost": 6,
-    "btn-outline": 5,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-xs": 10,
+    "btn": 4,
+    "btn-outline": 4,
+    "btn-xs": 4,
     "input": 2,
     "input-bordered": 2,
     "input-error": 2,
@@ -935,23 +680,21 @@
     "badge": 4,
     "badge-outline": 4,
     "badge-xs": 4,
-    "btn": 5,
-    "btn-ghost": 4,
-    "btn-outline": 1,
-    "btn-square": 2,
-    "btn-xs": 5
-  },
-  "libs/frontend/chat/src/lib/settings/output-style/output-style-notices.component.ts": {
-    "btn": 5,
-    "btn-ghost": 4,
-    "btn-outline": 1,
-    "btn-xs": 5
-  },
-  "libs/frontend/chat/src/lib/settings/output-style/output-style-parity-section.component.ts": {
     "btn": 3,
     "btn-ghost": 2,
     "btn-outline": 1,
-    "btn-xs": 3,
+    "btn-square": 2,
+    "btn-xs": 3
+  },
+  "libs/frontend/chat/src/lib/settings/output-style/output-style-notices.component.ts": {
+    "btn": 1,
+    "btn-outline": 1,
+    "btn-xs": 1
+  },
+  "libs/frontend/chat/src/lib/settings/output-style/output-style-parity-section.component.ts": {
+    "btn": 1,
+    "btn-outline": 1,
+    "btn-xs": 1,
     "select": 1,
     "select-bordered": 1,
     "select-xs": 1
@@ -960,21 +703,16 @@
     "badge": 1,
     "badge-outline": 1,
     "badge-sm": 1,
-    "btn": 4,
-    "btn-ghost": 3,
+    "btn": 1,
     "btn-outline": 1,
     "btn-primary": 1,
-    "btn-square": 1,
-    "btn-xs": 4
+    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/pro-features/claude-builtins-config.component.ts": {
     "badge": 4,
     "badge-outline": 4,
     "badge-warning": 1,
     "badge-xs": 4,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1,
     "card": 1,
     "skeleton": 3
   },
@@ -982,11 +720,9 @@
     "badge": 1,
     "badge-outline": 1,
     "badge-xs": 1,
-    "btn": 4,
-    "btn-ghost": 2,
+    "btn": 1,
     "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-xs": 4,
+    "btn-xs": 1,
     "input": 1,
     "input-bordered": 1,
     "input-xs": 1,
@@ -995,76 +731,57 @@
     "select-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/pro-features/system-prompt-drawer.component.ts": {
-    "btn": 8,
-    "btn-ghost": 6,
-    "btn-outline": 2,
-    "btn-sm": 1,
-    "btn-xs": 7
+    "btn": 1,
+    "btn-outline": 1,
+    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/pro-features/vscode-lm-config.component.ts": {
     "badge": 3,
     "badge-outline": 3,
     "badge-xs": 3,
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-xs": 1,
     "select": 1,
     "select-bordered": 1,
     "select-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/accounts/account-detail-view.component.ts": {
-    "<dynamic>": 14,
+    "<dynamic>": 5,
     "badge": 2,
     "badge-ghost": 2,
     "badge-sm": 2,
-    "btn": 11,
-    "btn-error": 3,
-    "btn-ghost": 4,
-    "btn-outline": 3,
-    "btn-primary": 2,
-    "btn-sm": 11,
+    "btn": 2,
+    "btn-error": 2,
+    "btn-outline": 2,
+    "btn-sm": 2,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/accounts/accounts-tab.component.ts": {
-    "<dynamic>": 8,
+    "<dynamic>": 4,
     "badge": 1,
     "badge-sm": 1,
     "badge-warning": 1,
-    "btn": 5,
-    "btn-ghost": 2,
-    "btn-outline": 2,
-    "btn-primary": 1,
-    "btn-sm": 5,
-    "btn-square": 1
-  },
-  "libs/frontend/chat/src/lib/settings/providers/accounts/add-account-form.component.ts": {
-    "<dynamic>": 3,
-    "btn": 2,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 2
-  },
-  "libs/frontend/chat/src/lib/settings/providers/accounts/ambient-account-row.component.ts": {
-    "<dynamic>": 2,
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-sm": 1,
     "btn": 1,
     "btn-outline": 1,
     "btn-sm": 1
   },
+  "libs/frontend/chat/src/lib/settings/providers/accounts/add-account-form.component.ts": {
+    "<dynamic>": 2,
+    "btn": 1,
+    "btn-primary": 1,
+    "btn-sm": 1
+  },
+  "libs/frontend/chat/src/lib/settings/providers/accounts/ambient-account-row.component.ts": {
+    "<dynamic>": 1,
+    "badge": 1,
+    "badge-ghost": 1,
+    "badge-sm": 1
+  },
   "libs/frontend/chat/src/lib/settings/providers/add-cli-instance-modal.component.ts": {
-    "<dynamic>": 8,
+    "<dynamic>": 3,
     "badge": 1,
     "badge-outline": 1,
     "badge-xs": 1,
-    "btn": 5,
-    "btn-ghost": 3,
-    "btn-primary": 2,
-    "btn-sm": 5,
-    "btn-square": 1,
     "select": 1,
     "select-bordered": 1,
     "select-sm": 1
@@ -1076,79 +793,49 @@
     "badge-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/cli-tier-mapping-modal.component.ts": {
-    "<dynamic>": 8,
-    "btn": 7,
-    "btn-ghost": 2,
-    "btn-link": 3,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 7,
-    "btn-square": 1,
+    "<dynamic>": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/connection-detail-drawer.component.ts": {
-    "<dynamic>": 1,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 2
+    "<dynamic>": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/connection-drawer/advanced-tab.component.ts": {
     "<dynamic>": 1,
-    "btn": 7,
-    "btn-ghost": 1,
-    "btn-outline": 5,
-    "btn-primary": 1,
-    "btn-sm": 7,
+    "btn": 2,
+    "btn-outline": 2,
+    "btn-sm": 2,
     "input": 6,
     "input-bordered": 6,
     "input-sm": 6,
     "skeleton": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/connection-drawer/codex-sign-in-block.component.ts": {
-    "btn": 14,
-    "btn-ghost": 1,
-    "btn-outline": 10,
-    "btn-primary": 3,
-    "btn-sm": 12,
-    "btn-xs": 2
+    "btn": 4,
+    "btn-outline": 2,
+    "btn-primary": 2,
+    "btn-sm": 4
   },
   "libs/frontend/chat/src/lib/settings/providers/connection-drawer/credentials-tab.component.ts": {
     "<dynamic>": 2,
-    "btn": 22,
-    "btn-ghost": 7,
-    "btn-link": 2,
-    "btn-outline": 12,
-    "btn-primary": 1,
-    "btn-sm": 17,
-    "btn-xs": 5,
+    "btn": 4,
+    "btn-outline": 4,
+    "btn-sm": 4,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/connection-drawer/kimi-code-login-progress.component.ts": {
-    "<dynamic>": 1,
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
+    "<dynamic>": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/connection-drawer/models-tiers-tab.component.ts": {
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-outline": 1,
-    "btn-xs": 2,
     "skeleton": 3
   },
   "libs/frontend/chat/src/lib/settings/providers/connection-drawer/overview-tab.component.ts": {
     "<dynamic>": 1,
     "badge": 1,
     "badge-sm": 1,
-    "btn": 2,
-    "btn-outline": 2,
-    "btn-sm": 1,
-    "btn-xs": 1,
     "skeleton": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/decision-model-key-field.component.ts": {
@@ -1158,27 +845,15 @@
     "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/decision-model-row.component.ts": {
-    "<dynamic>": 12,
+    "<dynamic>": 10,
     "badge": 1,
-    "badge-xs": 1,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-square": 1
+    "badge-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/decision-model-row.timeout-field.component.ts": {
     "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/main-agent-reassign-popover.component.ts": {
-    "<dynamic>": 23,
-    "btn": 12,
-    "btn-ghost": 5,
-    "btn-link": 4,
-    "btn-outline": 1,
-    "btn-primary": 2,
-    "btn-sm": 12,
-    "btn-square": 1,
+    "<dynamic>": 11,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
@@ -1187,20 +862,13 @@
     "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/main-agent-section.component.ts": {
-    "<dynamic>": 5,
+    "<dynamic>": 4,
     "badge": 1,
     "badge-sm": 1,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1,
     "skeleton": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/provider-catalog-modal.component.ts": {
-    "<dynamic>": 7,
-    "btn": 5,
-    "btn-ghost": 2,
-    "btn-outline": 3,
-    "btn-sm": 5,
+    "<dynamic>": 2,
     "input": 1,
     "input-sm": 1,
     "skeleton": 2
@@ -1213,39 +881,23 @@
     "badge-sm": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/provider-consumer-assignments.component.ts": {
-    "<dynamic>": 11,
+    "<dynamic>": 9,
     "badge": 2,
     "badge-outline": 1,
     "badge-sm": 2,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-square": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/provider-setup-wizard.component.ts": {
-    "btn": 28,
-    "btn-ghost": 11,
-    "btn-link": 2,
-    "btn-outline": 10,
-    "btn-primary": 4,
-    "btn-sm": 27,
     "input": 9,
     "input-bordered": 9,
     "input-sm": 9
   },
   "libs/frontend/chat/src/lib/settings/providers/providers-settings.component.ts": {
-    "<dynamic>": 11,
+    "<dynamic>": 9,
     "badge": 1,
     "badge-sm": 1,
-    "btn": 4,
-    "btn-ghost": 1,
-    "btn-outline": 1,
-    "btn-primary": 2,
-    "btn-sm": 4,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
@@ -1491,40 +1143,18 @@
     "input-bordered": 1,
     "input-sm": 1
   },
-  "libs/frontend/chat/src/lib/settings/settings.component.html": {
-    "btn": 4,
-    "btn-ghost": 1,
-    "btn-outline": 2,
-    "btn-primary": 1,
-    "btn-sm": 4,
-    "btn-square": 1
-  },
-  "libs/frontend/chat/src/lib/update-dialog/update-dialog.component.ts": {
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-primary": 1
-  },
   "libs/frontend/command-center/src/lib/components/command-center-header.component.ts": {
     "badge": 3,
     "badge-outline": 3,
-    "badge-sm": 3,
-    "btn": 4,
-    "btn-ghost": 4,
-    "btn-sm": 4
+    "badge-sm": 3
   },
   "libs/frontend/command-center/src/lib/components/command-center-page.component.html": {
-    "alert": 1,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-sm": 2
+    "alert": 1
   },
   "libs/frontend/command-center/src/lib/components/command-center-start.component.ts": {
     "badge": 3,
     "badge-outline": 2,
-    "badge-primary": 1,
-    "btn": 3,
-    "btn-outline": 2,
-    "btn-primary": 1
+    "badge-primary": 1
   },
   "libs/frontend/command-center/src/lib/components/command-live-panel.component.ts": {
     "<dynamic>": 1
@@ -1536,31 +1166,16 @@
     "<dynamic>": 3
   },
   "libs/frontend/command-center/src/lib/components/command-pending-input.component.ts": {
-    "btn": 4,
-    "btn-outline": 2,
+    "btn": 2,
     "btn-warning": 2,
     "input": 1
-  },
-  "libs/frontend/command-center/src/lib/components/command-rail-display.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
   },
   "libs/frontend/command-center/src/lib/components/command-rail-tabs.component.ts": {
     "badge": 1,
     "badge-sm": 1
   },
   "libs/frontend/command-center/src/lib/components/command-session-controls.component.ts": {
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-sm": 3,
     "input-sm": 1
-  },
-  "libs/frontend/command-center/src/lib/components/command-voice-hud.component.ts": {
-    "btn": 6,
-    "btn-ghost": 4,
-    "btn-outline": 2,
-    "btn-sm": 6
   },
   "libs/frontend/command-center/src/lib/components/command-work-list.component.ts": {
     "<dynamic>": 2
@@ -1758,11 +1373,9 @@
     "textarea-bordered": 1
   },
   "libs/frontend/git-ui/src/lib/branch-picker/branch-picker-dropdown.component.ts": {
-    "btn": 10,
-    "btn-ghost": 6,
+    "btn": 2,
     "btn-outline": 2,
-    "btn-primary": 2,
-    "btn-xs": 10,
+    "btn-xs": 2,
     "input": 2,
     "input-xs": 2
   },
@@ -1770,44 +1383,17 @@
     "badge": 1,
     "badge-sm": 1,
     "badge-success": 1,
-    "btn": 3,
-    "btn-ghost": 1,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-xs": 1,
     "textarea": 1,
     "textarea-bordered": 1
   },
   "libs/frontend/git-ui/src/lib/conflict/conflict-banner.component.ts": {
     "<dynamic>": 1,
-    "btn": 3,
-    "btn-error": 1,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-xs": 3
-  },
-  "libs/frontend/git-ui/src/lib/git-dock/git-dock-header.component.ts": {
-    "btn": 8,
-    "btn-ghost": 8,
-    "btn-square": 1,
-    "btn-xs": 8
-  },
-  "libs/frontend/git-ui/src/lib/git-dock/git-dock-scope-header.component.ts": {
-    "<dynamic>": 1,
     "btn": 1,
-    "btn-ghost": 1,
+    "btn-error": 1,
     "btn-xs": 1
   },
-  "libs/frontend/git-ui/src/lib/history/history-stash-section.component.ts": {
-    "btn": 4,
-    "btn-ghost": 4,
-    "btn-xs": 4
-  },
-  "libs/frontend/git-ui/src/lib/history/history-timeline.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
+  "libs/frontend/git-ui/src/lib/git-dock/git-dock-scope-header.component.ts": {
+    "<dynamic>": 1
   },
   "libs/frontend/git-ui/src/lib/open-in/open-in-button.component.ts": {
     "btn": 2,
@@ -1822,18 +1408,14 @@
     "<dynamic>": 2
   },
   "libs/frontend/git-ui/src/lib/review-canvas/changed-file-tree.component.ts": {
-    "<dynamic>": 3,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
+    "<dynamic>": 3
   },
   "libs/frontend/git-ui/src/lib/review-canvas/comparison-bar.component.ts": {
     "<dynamic>": 6,
-    "btn": 6,
+    "btn": 4,
     "btn-active": 4,
-    "btn-ghost": 6,
-    "btn-xs": 6,
+    "btn-ghost": 4,
+    "btn-xs": 4,
     "input": 1,
     "input-bordered": 1,
     "input-xs": 1,
@@ -1841,18 +1423,8 @@
     "select-bordered": 2,
     "select-xs": 2
   },
-  "libs/frontend/git-ui/src/lib/review-canvas/draft-comments-bar.component.ts": {
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-xs": 3
-  },
   "libs/frontend/git-ui/src/lib/review-canvas/file-diff-section.component.ts": {
     "<dynamic>": 5,
-    "btn": 4,
-    "btn-ghost": 3,
-    "btn-primary": 1,
-    "btn-xs": 4,
     "input": 2,
     "input-bordered": 2,
     "input-xs": 2,
@@ -1870,31 +1442,18 @@
     "badge-ghost": 2,
     "badge-outline": 1,
     "badge-xs": 3,
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-xs": 3
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-xs": 1
   },
   "libs/frontend/git-ui/src/lib/review-canvas/hunk-toolbar.component.ts": {
-    "<dynamic>": 2,
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-xs": 3
-  },
-  "libs/frontend/git-ui/src/lib/review-shell/review-shell.component.ts": {
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-xs": 3
+    "<dynamic>": 2
   },
   "libs/frontend/git-ui/src/lib/review-shell/worktree-scope-bar.component.ts": {
-    "<dynamic>": 2,
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
+    "<dynamic>": 2
   },
   "libs/frontend/git-ui/src/lib/shared/git-confirm-dialog.component.ts": {
-    "<dynamic>": 1,
-    "btn": 2,
-    "btn-sm": 2
+    "<dynamic>": 1
   },
   "libs/frontend/git-ui/src/lib/spot-editor/spot-editor.component.ts": {
     "alert": 2,
@@ -1903,22 +1462,17 @@
     "badge": 1,
     "badge-ghost": 1,
     "badge-xs": 1,
-    "btn": 7,
-    "btn-ghost": 6,
-    "btn-primary": 1,
-    "btn-xs": 7
+    "btn": 2,
+    "btn-ghost": 2,
+    "btn-xs": 2
   },
   "libs/frontend/git-ui/src/lib/stash/stash-popover.component.ts": {
-    "btn": 7,
-    "btn-error": 1,
-    "btn-ghost": 6,
-    "btn-xs": 7
+    "btn": 2,
+    "btn-ghost": 2,
+    "btn-xs": 2
   },
   "libs/frontend/git-ui/src/lib/task/task-pr-panel.component.ts": {
     "<dynamic>": 1,
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-xs": 1,
     "skeleton": 2
   },
   "libs/frontend/git-ui/src/lib/task/task-worktree-view.component.ts": {
@@ -1926,20 +1480,9 @@
     "badge-ghost": 3,
     "badge-warning": 1,
     "badge-xs": 4,
-    "btn": 6,
-    "btn-ghost": 4,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-xs": 6,
     "input": 2,
     "input-bordered": 2,
     "input-xs": 2
-  },
-  "libs/frontend/harness-builder/src/lib/components/harness-builder-leave-dialog.component.ts": {
-    "btn": 5,
-    "btn-outline": 3,
-    "btn-primary": 2,
-    "btn-sm": 5
   },
   "libs/frontend/harness-builder/src/lib/components/harness-config-preview.component.ts": {
     "badge": 5,
@@ -1947,35 +1490,19 @@
     "badge-outline": 3,
     "badge-secondary": 1,
     "badge-xs": 5,
-    "btn": 3,
-    "btn-outline": 3,
-    "btn-xs": 3,
     "skeleton": 3
   },
   "libs/frontend/harness-builder/src/lib/components/sidebar/builder-ai-helpers-section.component.ts": {
-    "btn": 8,
-    "btn-ghost": 5,
-    "btn-outline": 3,
-    "btn-sm": 3,
-    "btn-xs": 5,
     "textarea": 1,
     "textarea-bordered": 1
   },
   "libs/frontend/harness-builder/src/lib/components/sidebar/builder-apply-section.component.ts": {
     "<dynamic>": 1,
-    "btn": 6,
-    "btn-ghost": 4,
+    "btn": 1,
     "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 1,
-    "btn-xs": 5
+    "btn-xs": 1
   },
   "libs/frontend/harness-builder/src/lib/components/sidebar/builder-presets-section.component.ts": {
-    "btn": 4,
-    "btn-ghost": 1,
-    "btn-outline": 3,
-    "btn-sm": 3,
-    "btn-xs": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1,
@@ -1988,29 +1515,16 @@
   "libs/frontend/harness-builder/src/lib/components/sidebar/builder-stack-profile-section.component.ts": {
     "badge": 3,
     "badge-outline": 3,
-    "badge-sm": 3,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
+    "badge-sm": 3
   },
   "libs/frontend/machines-ui/src/lib/components/add-machine-pane/add-machine-pane.component.ts": {
-    "btn": 1,
-    "btn-ghost": 2,
-    "btn-xs": 1,
+    "btn-ghost": 1,
     "input": 2,
     "input-bordered": 2,
     "input-sm": 2
   },
-  "libs/frontend/machines-ui/src/lib/components/copy-command/copy-command.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/machines-ui/src/lib/components/machine-list/machine-list.component.ts": {
     "<dynamic>": 1,
-    "btn": 1,
-    "btn-primary": 1,
-    "btn-sm": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1,
@@ -2023,14 +1537,8 @@
     "badge": 1,
     "badge-outline": 1,
     "badge-sm": 1,
-    "btn": 7,
-    "btn-ghost": 6,
-    "btn-primary": 1,
-    "btn-sm": 7
-  },
-  "libs/frontend/machines-ui/src/lib/components/machines-view/machines-intro.component.ts": {
     "btn": 1,
-    "btn-primary": 1,
+    "btn-ghost": 1,
     "btn-sm": 1
   },
   "libs/frontend/machines-ui/src/lib/components/machines-view/machines-page-header.component.ts": {
@@ -2039,23 +1547,10 @@
     "badge-sm": 1
   },
   "libs/frontend/machines-ui/src/lib/components/machines-view/machines-view.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2,
     "skeleton": 3
   },
   "libs/frontend/machines-ui/src/lib/components/readiness-panel/readiness-panel.component.ts": {
-    "<dynamic>": 1,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 2
-  },
-  "libs/frontend/machines-ui/src/lib/components/reconnect-banner/reconnect-banner.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
+    "<dynamic>": 1
   },
   "libs/frontend/machines-ui/src/lib/components/reconnect-banner/session-sync-chip.component.ts": {
     "badge": 1,
@@ -2065,17 +1560,9 @@
   "libs/frontend/machines-ui/src/lib/components/remote-approval-block/remote-approval-block.component.ts": {
     "badge": 1,
     "badge-outline": 1,
-    "badge-sm": 1,
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-xs": 1
+    "badge-sm": 1
   },
   "libs/frontend/machines-ui/src/lib/components/remote-composer/remote-composer.component.ts": {
-    "btn": 1,
-    "btn-primary": 1,
-    "btn-sm": 1,
     "textarea": 1,
     "textarea-bordered": 1,
     "textarea-sm": 1
@@ -2084,11 +1571,6 @@
     "badge": 1,
     "badge-outline": 1,
     "badge-sm": 1,
-    "btn": 5,
-    "btn-ghost": 3,
-    "btn-primary": 2,
-    "btn-sm": 2,
-    "btn-xs": 3,
     "select": 1,
     "select-bordered": 1,
     "select-sm": 1,
@@ -2099,11 +1581,7 @@
   "libs/frontend/machines-ui/src/lib/components/remote-session-view/remote-session-view.component.ts": {
     "badge": 3,
     "badge-outline": 3,
-    "badge-sm": 3,
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-sm": 2,
-    "btn-xs": 1
+    "badge-sm": 3
   },
   "libs/frontend/markdown/src/lib/markdown-block.component.ts": {
     "<dynamic>": 1
@@ -2116,24 +1594,14 @@
     "badge-ghost": 2,
     "badge-sm": 1,
     "badge-warning": 1,
-    "badge-xs": 2,
-    "btn": 5,
-    "btn-circle": 1,
-    "btn-ghost": 4,
-    "btn-primary": 1,
-    "btn-sm": 3,
-    "btn-xs": 2
+    "badge-xs": 2
   },
   "libs/frontend/marketplace/src/lib/external-install-report.component.ts": {
     "alert": 1,
     "alert-warning": 1,
     "badge": 1,
     "badge-ghost": 1,
-    "badge-sm": 1,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-outline": 1,
-    "btn-xs": 2
+    "badge-sm": 1
   },
   "libs/frontend/marketplace/src/lib/external-installed-row.component.ts": {
     "btn": 1,
@@ -2145,12 +1613,10 @@
     "alert": 3,
     "alert-error": 3,
     "alert-sm": 3,
-    "btn": 10,
-    "btn-error": 1,
-    "btn-ghost": 8,
-    "btn-primary": 1,
-    "btn-sm": 3,
-    "btn-xs": 7,
+    "btn": 2,
+    "btn-ghost": 2,
+    "btn-sm": 1,
+    "btn-xs": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
@@ -2166,23 +1632,18 @@
     "alert": 1,
     "alert-error": 1,
     "alert-sm": 1,
-    "btn": 3,
-    "btn-ghost": 1,
+    "btn": 1,
     "btn-outline": 1,
-    "btn-primary": 1,
     "btn-warning": 1,
-    "btn-xs": 3
+    "btn-xs": 1
   },
   "libs/frontend/marketplace/src/lib/harness/harness-repair-dialog.component.ts": {
     "alert": 1,
     "alert-error": 1,
     "alert-sm": 1,
-    "btn": 4,
-    "btn-circle": 1,
-    "btn-ghost": 3,
-    "btn-sm": 3,
-    "btn-warning": 1,
-    "btn-xs": 1
+    "btn": 1,
+    "btn-sm": 1,
+    "btn-warning": 1
   },
   "libs/frontend/marketplace/src/lib/harness/harness-target-row.component.ts": {
     "<dynamic>": 1
@@ -2195,39 +1656,25 @@
     "badge-error": 1,
     "badge-ghost": 2,
     "badge-sm": 2,
-    "badge-success": 1,
-    "btn": 5,
-    "btn-ghost": 3,
-    "btn-primary": 2,
-    "btn-sm": 3,
-    "btn-xs": 2
+    "badge-success": 1
   },
   "libs/frontend/marketplace/src/lib/oauth-surface.component.ts": {
     "<dynamic>": 3,
     "alert": 2,
     "alert-error": 2,
     "alert-sm": 2,
-    "btn": 6,
-    "btn-ghost": 5,
-    "btn-primary": 1,
-    "btn-sm": 3,
-    "btn-xs": 3,
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-sm": 1,
     "input": 5,
     "input-bordered": 5,
     "input-sm": 5
   },
-  "libs/frontend/marketplace/src/lib/pages/connectors/connector-detail.component.html": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1
-  },
   "libs/frontend/marketplace/src/lib/pages/connectors/connectors-page.component.html": {
-    "btn": 8,
-    "btn-ghost": 6,
-    "btn-outline": 1,
-    "btn-primary": 3,
-    "btn-sm": 5,
-    "btn-xs": 3,
+    "btn": 2,
+    "btn-ghost": 2,
+    "btn-primary": 2,
+    "btn-xs": 2,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
@@ -2236,45 +1683,24 @@
     "<dynamic>": 1,
     "badge": 1,
     "badge-ghost": 1,
-    "badge-sm": 1,
-    "btn": 3,
-    "btn-outline": 2,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-xs": 1
+    "badge-sm": 1
   },
   "libs/frontend/marketplace/src/lib/pages/servers/installed-servers-page.component.ts": {
     "badge": 2,
     "badge-ghost": 1,
     "badge-outline": 1,
     "badge-sm": 2,
-    "btn": 7,
-    "btn-outline": 5,
-    "btn-primary": 2,
-    "btn-sm": 3,
-    "btn-xs": 4,
     "skeleton": 2
   },
   "libs/frontend/marketplace/src/lib/pages/servers/provider-list-view.component.html": {
     "badge": 1,
     "badge-ghost": 1,
-    "badge-sm": 1,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
+    "badge-sm": 1
   },
   "libs/frontend/marketplace/src/lib/pages/servers/server-detail.component.html": {
     "badge": 1,
     "badge-ghost": 1,
     "badge-sm": 1,
-    "btn": 5,
-    "btn-error": 1,
-    "btn-ghost": 1,
-    "btn-outline": 3,
-    "btn-primary": 1,
-    "btn-sm": 4,
-    "btn-xs": 1,
     "skeleton": 4
   },
   "libs/frontend/marketplace/src/lib/pages/skills/installed-library-stale-notice.component.ts": {
@@ -2287,11 +1713,9 @@
     "badge-outline": 1,
     "badge-sm": 4,
     "badge-warning": 1,
-    "btn": 6,
-    "btn-ghost": 4,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-xs": 6,
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-xs": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1,
@@ -2308,24 +1732,12 @@
     "badge-sm": 2,
     "badge-warning": 2,
     "badge-xs": 1,
-    "btn": 4,
-    "btn-error": 1,
-    "btn-ghost": 2,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 4,
     "skeleton": 3
   },
   "libs/frontend/marketplace/src/lib/shell/marketplace-nav.component.ts": {
     "badge": 1,
     "badge-ghost": 1,
     "badge-sm": 1
-  },
-  "libs/frontend/marketplace/src/lib/shell/marketplace-shell.component.html": {
-    "btn": 1,
-    "btn-circle": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1
   },
   "libs/frontend/marketplace/src/lib/smithery-surface.component.ts": {
     "<dynamic>": 2,
@@ -2336,22 +1748,15 @@
     "badge": 1,
     "badge-neutral": 1,
     "badge-xs": 1,
-    "btn": 10,
-    "btn-ghost": 8,
-    "btn-primary": 4,
-    "btn-sm": 5,
-    "btn-xs": 5,
+    "btn": 3,
+    "btn-ghost": 3,
+    "btn-primary": 2,
+    "btn-sm": 1,
+    "btn-xs": 2,
     "input": 2,
     "input-bordered": 2,
     "input-sm": 2,
     "skeleton": 2
-  },
-  "libs/frontend/marketplace/src/lib/ui/bulk-action-bar.component.ts": {
-    "btn": 3,
-    "btn-error": 1,
-    "btn-ghost": 2,
-    "btn-sm": 2,
-    "btn-xs": 1
   },
   "libs/frontend/marketplace/src/lib/ui/capability-toggle.component.ts": {
     "<dynamic>": 1
@@ -2359,60 +1764,18 @@
   "libs/frontend/marketplace/src/lib/ui/connector-card-actions.component.ts": {
     "<dynamic>": 6
   },
-  "libs/frontend/marketplace/src/lib/ui/connector-card-status.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
-  },
-  "libs/frontend/marketplace/src/lib/ui/copy-command-button.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/marketplace/src/lib/ui/coverage-matrix.component.ts": {
     "<dynamic>": 3,
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-xs": 1,
     "skeleton": 1
-  },
-  "libs/frontend/marketplace/src/lib/ui/direct-removal-confirm.component.ts": {
-    "btn": 2,
-    "btn-error": 1,
-    "btn-ghost": 1,
-    "btn-xs": 2
-  },
-  "libs/frontend/marketplace/src/lib/ui/docked-inspector.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1,
-    "btn-square": 1
-  },
-  "libs/frontend/marketplace/src/lib/ui/featured-connectors.component.ts": {
-    "btn": 3,
-    "btn-ghost": 1,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 3
   },
   "libs/frontend/marketplace/src/lib/ui/needs-attention.component.ts": {
     "badge": 1,
     "badge-ghost": 1,
     "badge-sm": 1,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-outline": 1,
-    "btn-xs": 2,
     "skeleton": 2
   },
   "libs/frontend/marketplace/src/lib/ui/provider-card-list.component.ts": {
     "<dynamic>": 1,
-    "btn": 3,
-    "btn-ghost": 1,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-xs": 1,
     "skeleton": 3
   },
   "libs/frontend/marketplace/src/lib/ui/provider-filter-select.component.ts": {
@@ -2421,10 +1784,9 @@
     "btn-sm": 1
   },
   "libs/frontend/marketplace/src/lib/ui/provider-filters.component.ts": {
-    "btn": 2,
+    "btn": 1,
     "btn-active": 1,
-    "btn-ghost": 1,
-    "btn-sm": 2,
+    "btn-sm": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
@@ -2434,12 +1796,6 @@
     "badge": 1,
     "badge-ghost": 1,
     "badge-sm": 1,
-    "btn": 3,
-    "btn-ghost": 1,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-xs": 1,
     "skeleton": 4
   },
   "libs/frontend/marketplace/src/lib/ui/source-band.component.ts": {
@@ -2447,9 +1803,6 @@
   },
   "libs/frontend/marketplace/src/lib/ui/stat-card.component.ts": {
     "<dynamic>": 1,
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-xs": 1,
     "skeleton": 2
   },
   "libs/frontend/marketplace/src/lib/ui/status-pill.component.ts": {
@@ -2457,9 +1810,6 @@
   },
   "libs/frontend/marketplace/src/lib/ui/storefront-hero.component.ts": {
     "<dynamic>": 5,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1,
     "skeleton": 2
   },
   "libs/frontend/mcp-apps-page/src/lib/components/apps-page.component.ts": {
@@ -2472,33 +1822,24 @@
     "textarea-bordered": 1
   },
   "libs/frontend/memory-curator-ui/src/lib/components/corpus-build-dialog.component.ts": {
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 2,
-    "btn-sm": 2,
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-primary": 1,
     "btn-xs": 1,
     "input": 5,
     "input-bordered": 5,
     "input-sm": 5
   },
   "libs/frontend/memory-curator-ui/src/lib/components/corpus-list.component.ts": {
-    "btn": 6,
-    "btn-ghost": 5,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-xs": 4,
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-xs": 1,
     "skeleton": 2
   },
   "libs/frontend/memory-curator-ui/src/lib/components/corpus-suggestions.component.ts": {
     "badge": 1,
     "badge-ghost": 1,
     "badge-sm": 1,
-    "btn": 2,
-    "btn-circle": 1,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 1,
-    "btn-xs": 1,
     "skeleton": 3
   },
   "libs/frontend/memory-curator-ui/src/lib/components/diagnostics/db-health-panel.component.ts": {
@@ -2511,11 +1852,7 @@
     "badge-ghost": 1,
     "badge-sm": 5,
     "badge-success": 3,
-    "badge-warning": 1,
-    "btn": 5,
-    "btn-ghost": 3,
-    "btn-primary": 2,
-    "btn-xs": 5
+    "badge-warning": 1
   },
   "libs/frontend/memory-curator-ui/src/lib/components/diagnostics/event-feed.component.ts": {
     "badge": 1,
@@ -2528,11 +1865,9 @@
   "libs/frontend/memory-curator-ui/src/lib/components/diagnostics/memory-diagnostics-accordion.component.ts": {
     "alert": 2,
     "alert-error": 2,
-    "btn": 4,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-xs": 2,
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-xs": 1,
     "textarea": 1,
     "textarea-bordered": 1,
     "textarea-xs": 1
@@ -2550,18 +1885,7 @@
     "badge-success": 2,
     "badge-warning": 1
   },
-  "libs/frontend/memory-curator-ui/src/lib/components/memory-curator-tab.component.ts": {
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-sm": 3
-  },
   "libs/frontend/memory-curator-ui/src/lib/components/memory-danger-zone.component.ts": {
-    "btn": 2,
-    "btn-error": 1,
-    "btn-link": 1,
-    "btn-sm": 1,
-    "btn-xs": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1,
@@ -2570,26 +1894,15 @@
     "select-sm": 1
   },
   "libs/frontend/memory-curator-ui/src/lib/components/memory-entry-list.component.ts": {
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-square": 3,
-    "btn-xs": 3,
     "skeleton": 3
   },
   "libs/frontend/memory-curator-ui/src/lib/components/memory-indexed-code.component.ts": {
-    "btn": 3,
-    "btn-ghost": 1,
-    "btn-xs": 3,
+    "btn": 2,
+    "btn-xs": 2,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1,
     "skeleton": 2
-  },
-  "libs/frontend/memory-curator-ui/src/lib/components/memory-indexing-banner.component.ts": {
-    "btn": 6,
-    "btn-ghost": 2,
-    "btn-primary": 4,
-    "btn-sm": 6
   },
   "libs/frontend/memory-curator-ui/src/lib/components/memory-pause-switch.component.ts": {
     "badge": 1,
@@ -2608,10 +1921,9 @@
     "badge": 1,
     "badge-sm": 1,
     "badge-warning": 1,
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 2,
-    "btn-sm": 2,
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-primary": 1,
     "btn-xs": 1,
     "input": 5,
     "input-bordered": 5,
@@ -2621,11 +1933,6 @@
   "libs/frontend/memory-curator-ui/src/lib/components/timeline-view.component.ts": {
     "alert": 1,
     "alert-error": 1,
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-outline": 1,
-    "btn-sm": 1,
-    "btn-xs": 2,
     "skeleton": 2
   },
   "libs/frontend/messaging-gateway-ui/src/lib/components/allow-list-editor.component.ts": {
@@ -2702,67 +2009,19 @@
     "btn-square": 1,
     "btn-xs": 1
   },
-  "libs/frontend/onboarding/src/lib/analyze/agent-recommendation-list.component.ts": {
-    "btn": 3,
-    "btn-ghost": 1,
-    "btn-outline": 2,
-    "btn-sm": 3
-  },
-  "libs/frontend/onboarding/src/lib/analyze/analyze-done.page.ts": {
-    "btn": 4,
-    "btn-ghost": 1,
-    "btn-primary": 1
-  },
-  "libs/frontend/onboarding/src/lib/analyze/choose-agents.page.ts": {
-    "btn": 3,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 2
-  },
-  "libs/frontend/onboarding/src/lib/analyze/generate-agents.page.ts": {
-    "btn": 7,
-    "btn-primary": 2,
-    "btn-sm": 5
-  },
-  "libs/frontend/onboarding/src/lib/analyze/project-guidance.page.ts": {
-    "btn": 7,
-    "btn-ghost": 1,
-    "btn-primary": 3,
-    "btn-sm": 5
-  },
-  "libs/frontend/onboarding/src/lib/home/analysis-found-card.component.ts": {
-    "btn": 3,
-    "btn-outline": 2,
-    "btn-primary": 1,
-    "btn-sm": 3
-  },
-  "libs/frontend/onboarding/src/lib/home/onboarding-home.component.ts": {
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-outline": 1,
-    "btn-sm": 2,
-    "btn-xs": 1
-  },
   "libs/frontend/onboarding/src/lib/home/path-tile.component.ts": {
     "<dynamic>": 2
   },
   "libs/frontend/onboarding/src/lib/proposal/answer-dock.component.ts": {
-    "btn": 3,
+    "btn": 2,
     "btn-primary": 1,
-    "btn-sm": 2,
+    "btn-sm": 1,
     "textarea": 1,
     "textarea-bordered": 1
   },
-  "libs/frontend/onboarding/src/lib/proposal/apply-result.component.ts": {
-    "btn": 4,
-    "btn-primary": 1,
-    "btn-sm": 4
-  },
   "libs/frontend/onboarding/src/lib/proposal/new-project-intake.page.ts": {
-    "btn": 8,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 6,
+    "btn": 4,
+    "btn-sm": 4,
     "btn-warning": 1,
     "input": 1,
     "input-bordered": 1,
@@ -2777,113 +2036,49 @@
   "libs/frontend/onboarding/src/lib/proposal/proposal-panel.component.ts": {
     "badge": 1,
     "badge-outline": 1,
-    "badge-sm": 1,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
+    "badge-sm": 1
   },
   "libs/frontend/onboarding/src/lib/proposal/proposal-status-card.component.ts": {
-    "btn": 4,
-    "btn-ghost": 3,
-    "btn-primary": 2,
-    "btn-sm": 4
-  },
-  "libs/frontend/onboarding/src/lib/proposal/proposal-workspace.page.ts": {
-    "btn": 6,
+    "btn": 1,
     "btn-ghost": 1,
-    "btn-outline": 1,
     "btn-primary": 1,
-    "btn-sm": 6
+    "btn-sm": 1
   },
   "libs/frontend/onboarding/src/lib/proposal/reply-composer.component.ts": {
     "<dynamic>": 4
   },
-  "libs/frontend/onboarding/src/lib/proposal/review-apply.page.ts": {
-    "btn": 4,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 4
-  },
   "libs/frontend/onboarding/src/lib/proposal/revision-history.component.ts": {
     "badge": 1,
     "badge-outline": 1,
-    "badge-sm": 1,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
+    "badge-sm": 1
   },
   "libs/frontend/onboarding/src/lib/proposal/team-builder-start.page.ts": {
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 1,
     "textarea": 1,
     "textarea-bordered": 1
   },
-  "libs/frontend/onboarding/src/lib/ready/command-copy-row.component.ts": {
-    "btn": 1,
-    "btn-sm": 1
-  },
-  "libs/frontend/onboarding/src/lib/ready/connection-choice.component.ts": {
-    "btn": 5,
-    "btn-ghost": 1,
-    "btn-outline": 3,
-    "btn-primary": 1,
-    "btn-sm": 5
-  },
-  "libs/frontend/onboarding/src/lib/ready/connection-readiness-banner.component.ts": {
-    "btn": 1,
-    "btn-sm": 1
-  },
   "libs/frontend/onboarding/src/lib/ready/provider-panel.component.ts": {
     "<dynamic>": 1,
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-sm": 3,
     "skeleton": 2
   },
   "libs/frontend/onboarding/src/lib/ready/ready-connection-step.page.ts": {
-    "btn": 3,
-    "btn-ghost": 3,
+    "btn": 2,
+    "btn-ghost": 2,
     "btn-outline": 1,
     "btn-primary": 1
-  },
-  "libs/frontend/onboarding/src/lib/ready/ready-settings-step.page.ts": {
-    "btn": 5,
-    "btn-ghost": 2,
-    "btn-primary": 3,
-    "btn-sm": 2
   },
   "libs/frontend/onboarding/src/lib/ready/ready-strip.component.ts": {
     "<dynamic>": 2
   },
   "libs/frontend/onboarding/src/lib/shared/item-status-card.component.ts": {
-    "<dynamic>": 2,
-    "btn": 1,
-    "btn-sm": 1
-  },
-  "libs/frontend/onboarding/src/lib/shared/owner-conflict-banner.component.ts": {
-    "btn": 2,
-    "btn-sm": 2
-  },
-  "libs/frontend/onboarding/src/lib/shared/recovery-screen.component.ts": {
-    "btn": 2,
-    "btn-primary": 1,
-    "btn-sm": 2
+    "<dynamic>": 2
   },
   "libs/frontend/onboarding/src/lib/shared/run-panel.component.ts": {
-    "btn": 5,
-    "btn-ghost": 1,
+    "btn": 1,
     "btn-outline": 1,
-    "btn-primary": 3,
-    "btn-sm": 5
+    "btn-sm": 1
   },
   "libs/frontend/onboarding/src/lib/shared/run-status-chip.component.ts": {
     "<dynamic>": 1
-  },
-  "libs/frontend/onboarding/src/lib/shell/workspace-header.component.ts": {
-    "btn": 2,
-    "btn-outline": 2,
-    "btn-sm": 2
   },
   "libs/frontend/review-runs-ui/src/lib/components/review-bot-identity.component.ts": {
     "alert": 1,
@@ -2973,24 +2168,12 @@
     "textarea": 2,
     "textarea-bordered": 2
   },
-  "libs/frontend/setup-wizard/src/lib/components/agent-next-steps.component.ts": {
-    "btn": 4,
-    "btn-ghost": 2,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 4
-  },
   "libs/frontend/setup-wizard/src/lib/components/agent-preview-dialog.component.ts": {
     "alert": 4,
     "alert-info": 1,
     "alert-warning": 3,
     "badge": 2,
-    "badge-sm": 2,
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-xs": 1
+    "badge-sm": 2
   },
   "libs/frontend/setup-wizard/src/lib/components/analysis-transcript.component.ts": {
     "badge": 1,
@@ -3008,12 +2191,7 @@
     "badge": 2,
     "badge-ghost": 1,
     "badge-sm": 2,
-    "badge-success": 1,
-    "btn": 6,
-    "btn-ghost": 1,
-    "btn-outline": 5,
-    "btn-sm": 2,
-    "btn-xs": 4
+    "badge-success": 1
   },
   "libs/frontend/setup-wizard/src/lib/components/completion/grade-expectation.component.ts": {
     "alert": 1,
@@ -3032,47 +2210,24 @@
     "badge-error": 1,
     "badge-ghost": 1,
     "badge-outline": 1,
-    "badge-sm": 1,
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-xs": 1
+    "badge-sm": 1
   },
   "libs/frontend/setup-wizard/src/lib/components/confirmation-modal.component.ts": {
     "<dynamic>": 1,
-    "btn": 2,
-    "btn-ghost": 1,
+    "btn": 1,
     "btn-primary": 1
   },
   "libs/frontend/setup-wizard/src/lib/components/generation-errors.component.ts": {
     "alert": 1,
     "alert-error": 1
   },
-  "libs/frontend/setup-wizard/src/lib/components/generation-stop-control.component.ts": {
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-sm": 1
-  },
-  "libs/frontend/setup-wizard/src/lib/components/guidance-result-panel.component.ts": {
-    "btn": 5,
-    "btn-ghost": 1,
-    "btn-outline": 3,
-    "btn-primary": 1,
-    "btn-sm": 5
-  },
   "libs/frontend/setup-wizard/src/lib/components/pack-install-prompt.component.ts": {
     "alert": 2,
     "alert-error": 1,
     "alert-info": 1,
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-sm": 2,
+    "btn": 1,
+    "btn-ghost": 1,
     "btn-xs": 1
-  },
-  "libs/frontend/setup-wizard/src/lib/components/preview-decisions/bulk-decision-bar.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
   },
   "libs/frontend/setup-wizard/src/lib/components/preview-decisions/file-decision-row.component.ts": {
     "badge": 1,
@@ -3088,25 +2243,19 @@
     "<dynamic>": 1,
     "badge": 1,
     "badge-xs": 1,
-    "btn": 8,
-    "btn-ghost": 6,
-    "btn-primary": 1,
+    "btn": 1,
     "btn-warning": 1,
-    "btn-xs": 8,
+    "btn-xs": 1,
     "input": 1,
     "input-bordered": 1,
     "input-xs": 1
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/bulk-rebase-confirm.component.ts": {
-    "btn": 2,
-    "btn-sm": 2,
+    "btn": 1,
+    "btn-sm": 1,
     "btn-warning": 1
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/clone-body-editor.component.ts": {
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-xs": 2,
     "textarea": 1,
     "textarea-bordered": 1
   },
@@ -3121,18 +2270,16 @@
     "<dynamic>": 2,
     "badge": 1,
     "badge-sm": 1,
-    "btn": 4,
-    "btn-ghost": 4,
-    "btn-xs": 4
+    "btn": 2,
+    "btn-ghost": 2,
+    "btn-xs": 2
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/clone-detail-drawer.component.ts": {
     "<dynamic>": 1,
-    "btn": 7,
-    "btn-ghost": 4,
+    "btn": 2,
     "btn-outline": 2,
-    "btn-primary": 1,
     "btn-warning": 2,
-    "btn-xs": 7
+    "btn-xs": 2
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/enhance-preview-drawer.component.ts": {
     "alert": 2,
@@ -3141,16 +2288,7 @@
     "badge-ghost": 1,
     "badge-outline": 1,
     "badge-sm": 3,
-    "badge-success": 1,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 2
-  },
-  "libs/frontend/skill-synthesis-ui/src/lib/components/clones/lazy-diff-view.component.ts": {
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-xs": 1
+    "badge-success": 1
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/provenance-badge.component.ts": {
     "<dynamic>": 2,
@@ -3162,20 +2300,14 @@
     "alert-error": 1,
     "badge": 1,
     "badge-ghost": 1,
-    "badge-sm": 1,
-    "btn": 5,
-    "btn-ghost": 4,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-xs": 3
+    "badge-sm": 1
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/reconcile-guard.ts": {
     "badge": 2,
     "badge-ghost": 2,
     "badge-sm": 2,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-sm": 2,
+    "btn": 1,
+    "btn-sm": 1,
     "btn-warning": 1
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/scorecard-badge.component.ts": {
@@ -3198,18 +2330,9 @@
     "alert-info": 2,
     "alert-success": 1,
     "alert-warning": 1,
-    "btn": 5,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-warning": 1,
-    "btn-xs": 3
-  },
-  "libs/frontend/skill-synthesis-ui/src/lib/components/skill-specs-control.component.ts": {
-    "btn": 2,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-xs": 2
+    "btn": 1,
+    "btn-sm": 1,
+    "btn-warning": 1
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/skills-pause-switch.component.ts": {
     "badge": 1,
@@ -3222,13 +2345,10 @@
     "badge-ghost": 4,
     "badge-outline": 1,
     "badge-xs": 8,
-    "btn": 4,
-    "btn-ghost": 1,
-    "btn-outline": 1,
+    "btn": 2,
     "btn-primary": 2,
-    "btn-sm": 1,
-    "btn-square": 2,
-    "btn-xs": 3
+    "btn-square": 1,
+    "btn-xs": 2
   },
   "libs/frontend/tasks-ui/src/lib/components/board/task-column.component.ts": {
     "<dynamic>": 2
@@ -3239,18 +2359,9 @@
     "badge-ghost": 1,
     "badge-outline": 1,
     "badge-sm": 1,
-    "badge-xs": 5,
-    "btn": 5,
-    "btn-ghost": 5,
-    "btn-square": 2,
-    "btn-xs": 5
+    "badge-xs": 5
   },
   "libs/frontend/tasks-ui/src/lib/components/bulk/task-bulk-bar.component.ts": {
-    "btn": 7,
-    "btn-ghost": 6,
-    "btn-primary": 1,
-    "btn-sm": 7,
-    "btn-square": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1,
@@ -3258,29 +2369,17 @@
     "select-bordered": 1,
     "select-sm": 1
   },
-  "libs/frontend/tasks-ui/src/lib/components/bulk/task-bulk-summary.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-sm": 2,
-    "btn-square": 1
-  },
   "libs/frontend/tasks-ui/src/lib/components/detail/task-activity.component.ts": {
     "<dynamic>": 1,
     "badge": 1,
     "badge-ghost": 1,
-    "badge-sm": 1,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1
+    "badge-sm": 1
   },
   "libs/frontend/tasks-ui/src/lib/components/detail/task-detail-header.component.ts": {
     "<dynamic>": 1,
     "badge": 3,
     "badge-ghost": 3,
-    "badge-sm": 3,
-    "btn": 3,
-    "btn-outline": 3,
-    "btn-sm": 3
+    "badge-sm": 3
   },
   "libs/frontend/tasks-ui/src/lib/components/detail/task-detail.component.ts": {
     "<dynamic>": 1,
@@ -3291,11 +2390,6 @@
     "badge": 1,
     "badge-ghost": 1,
     "badge-sm": 1,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-square": 1,
     "skeleton": 4
   },
   "libs/frontend/tasks-ui/src/lib/components/detail/task-folder-files.component.ts": {
@@ -3306,18 +2400,12 @@
     "alert-warning": 1,
     "badge": 1,
     "badge-ghost": 1,
-    "badge-sm": 1,
-    "btn": 1,
-    "btn-primary": 1,
-    "btn-sm": 1
+    "badge-sm": 1
   },
   "libs/frontend/tasks-ui/src/lib/components/detail/task-metadata-editor.component.ts": {
     "<dynamic>": 1,
     "badge": 1,
     "badge-sm": 1,
-    "btn": 3,
-    "btn-ghost": 1,
-    "btn-xs": 3,
     "input": 2,
     "input-bordered": 2,
     "input-xs": 2,
@@ -3330,10 +2418,6 @@
     "badge-ghost": 1,
     "badge-outline": 1,
     "badge-sm": 1,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 2,
     "input": 1,
     "input-bordered": 1,
     "input-xs": 1,
@@ -3348,11 +2432,10 @@
   },
   "libs/frontend/tasks-ui/src/lib/components/filter/task-filter-bar.component.ts": {
     "<dynamic>": 1,
-    "btn": 4,
+    "btn": 2,
     "btn-active": 2,
-    "btn-ghost": 3,
-    "btn-sm": 4,
-    "btn-square": 1,
+    "btn-ghost": 1,
+    "btn-sm": 2,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1,
@@ -3364,34 +2447,21 @@
     "badge": 1,
     "badge-outline": 1,
     "badge-xs": 1,
-    "btn": 7,
+    "btn": 1,
     "btn-active": 1,
-    "btn-error": 1,
-    "btn-ghost": 5,
-    "btn-primary": 1,
-    "btn-sm": 7,
+    "btn-ghost": 1,
+    "btn-sm": 1,
     "input": 2,
     "input-bordered": 2,
     "input-sm": 2
   },
   "libs/frontend/tasks-ui/src/lib/components/task-board-header.component.ts": {
     "<dynamic>": 1,
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-sm": 3
-  },
-  "libs/frontend/tasks-ui/src/lib/components/task-board-states.component.ts": {
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-sm": 3
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-sm": 1
   },
   "libs/frontend/tasks-ui/src/lib/components/task-create-dialog.component.ts": {
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 2,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1,
@@ -3404,17 +2474,7 @@
   },
   "libs/frontend/tasks-ui/src/lib/components/task-maintenance-dialog.component.ts": {
     "badge": 2,
-    "badge-ghost": 2,
-    "btn": 2,
-    "btn-error": 1,
-    "btn-ghost": 1,
-    "btn-sm": 2
-  },
-  "libs/frontend/tasks-ui/src/lib/components/tasks-view.component.ts": {
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-sm": 3,
-    "btn-square": 2
+    "badge-ghost": 2
   },
   "libs/frontend/thoth-shell/src/lib/components/thoth-shell.component.ts": {
     "<dynamic>": 2,

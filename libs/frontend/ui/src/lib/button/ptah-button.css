@@ -1,0 +1,305 @@
+/* Ptah button family look (approved; TASK_2026_929_26ca, TASK_2026_937_7e2e).
+   Scope: only elements that use ptahButton or ptahIconButton. Both directives
+   set the data-ptah-button host attribute (button-host.ts). A raw .btn keeps the
+   DaisyUI and glass rules of styles.css until it moves to a directive.
+   Uses --ptah-* tokens only.
+   Imported before @tailwind components in styles.css. The glass button rules in
+   styles.css have a specificity of (0,6,0). The :is(.btn, #ptah-button) tail
+   counts as one id, so each rule here wins without !important. The id never
+   matches an element: it only raises the specificity. */
+
+.btn[data-ptah-button]:is(.btn, #ptah-button) {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ptah-gap-inline);
+  height: var(--ptah-control-h-sm);
+  min-height: var(--ptah-control-h-sm);
+  max-width: 100%;
+  padding-inline: var(--ptah-control-px);
+  padding-block: 0;
+  border-radius: var(--ptah-radius-control);
+  border-width: var(--ptah-border-width);
+  border-style: solid;
+  border-color: var(--ptah-btn-secondary-border);
+  background-color: var(--ptah-btn-secondary-bg);
+  background-image: none;
+  color: var(--ptah-btn-secondary-fg);
+  font-size: var(--ptah-text-label-size);
+  line-height: var(--ptah-text-label-leading);
+  font-weight: var(--ptah-text-label-weight);
+  text-transform: none;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: var(--ptah-elevation-0);
+  outline: none;
+  filter: none;
+  transform: none;
+  transition-property: background-color, border-color, color, opacity, box-shadow;
+  transition-duration: var(--ptah-duration-fast);
+  transition-timing-function: var(--ptah-ease-standard);
+}
+
+/* Sizes: xs (24 px), sm (32 px), md (40 px) */
+.btn[data-ptah-button].btn-xs:is(.btn, #ptah-button) {
+  height: var(--ptah-control-h-xs);
+  min-height: var(--ptah-control-h-xs);
+  padding-inline: var(--ptah-control-px-xs);
+  font-size: var(--ptah-text-label-size);
+  line-height: var(--ptah-text-label-leading);
+  font-weight: var(--ptah-text-label-weight);
+}
+
+.btn[data-ptah-button].btn-sm:is(.btn, #ptah-button) {
+  height: var(--ptah-control-h-sm);
+  min-height: var(--ptah-control-h-sm);
+  padding-inline: var(--ptah-control-px);
+  font-size: var(--ptah-text-label-size);
+  line-height: var(--ptah-text-label-leading);
+  font-weight: var(--ptah-text-label-weight);
+}
+
+.btn[data-ptah-button].btn-md:is(.btn, #ptah-button) {
+  height: var(--ptah-control-h-md);
+  min-height: var(--ptah-control-h-md);
+  padding-inline: var(--ptah-control-px-md);
+  font-size: var(--ptah-text-group-title-size);
+  line-height: var(--ptah-text-group-title-leading);
+  font-weight: var(--ptah-text-group-title-weight);
+}
+
+/* Icon sizing inside buttons */
+.btn[data-ptah-button]:is(.btn, #ptah-button) :where(svg) {
+  width: var(--ptah-icon-sm);
+  height: var(--ptah-icon-sm);
+  flex-shrink: 0;
+}
+
+.btn[data-ptah-button].btn-xs:is(.btn, #ptah-button) :where(svg) {
+  width: var(--ptah-icon-xs);
+  height: var(--ptah-icon-xs);
+}
+
+.btn[data-ptah-button].btn-sm:is(.btn, #ptah-button) :where(svg) {
+  width: var(--ptah-icon-sm);
+  height: var(--ptah-icon-sm);
+}
+
+.btn[data-ptah-button].btn-md:is(.btn, #ptah-button) :where(svg) {
+  width: var(--ptah-icon-md);
+  height: var(--ptah-icon-md);
+}
+
+/* Square icon buttons: width equals control height */
+.btn[data-ptah-button].btn-square:is(.btn, #ptah-button) {
+  width: var(--ptah-control-h-sm);
+  min-width: var(--ptah-control-h-sm);
+  padding-inline: 0;
+}
+
+.btn[data-ptah-button].btn-xs.btn-square:is(.btn, #ptah-button) {
+  width: var(--ptah-control-h-xs);
+  min-width: var(--ptah-control-h-xs);
+  padding-inline: 0;
+}
+
+.btn[data-ptah-button].btn-sm.btn-square:is(.btn, #ptah-button) {
+  width: var(--ptah-control-h-sm);
+  min-width: var(--ptah-control-h-sm);
+  padding-inline: 0;
+}
+
+.btn[data-ptah-button].btn-md.btn-square:is(.btn, #ptah-button) {
+  width: var(--ptah-control-h-md);
+  min-width: var(--ptah-control-h-md);
+  padding-inline: 0;
+}
+
+/* Variant 1: primary (the one main action of a surface) */
+.btn[data-ptah-button].btn-primary:is(.btn, #ptah-button) {
+  background-color: var(--ptah-btn-primary-bg);
+  border-color: var(--ptah-btn-primary-bg);
+  color: var(--ptah-btn-primary-fg);
+  box-shadow: var(--ptah-elevation-1);
+}
+
+.btn[data-ptah-button].btn-primary:is(:hover, [data-state='hover']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-button) {
+  background-color: var(--ptah-btn-primary-bg-hover);
+  border-color: var(--ptah-btn-primary-bg-hover);
+  color: var(--ptah-btn-primary-fg);
+}
+
+.btn[data-ptah-button].btn-primary:is(:active, [data-state='active']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-button) {
+  background-color: var(--ptah-btn-primary-bg-active);
+  border-color: var(--ptah-btn-primary-bg-active);
+  color: var(--ptah-btn-primary-fg);
+  box-shadow: var(--ptah-elevation-0);
+}
+
+/* Variant 2: secondary (neutral peer: visible edge, quiet fill) */
+.btn[data-ptah-button].btn-secondary:is(.btn, #ptah-button) {
+  background-color: var(--ptah-btn-secondary-bg);
+  border-color: var(--ptah-btn-secondary-border);
+  color: var(--ptah-btn-secondary-fg);
+  box-shadow: var(--ptah-elevation-0);
+}
+
+.btn[data-ptah-button].btn-secondary:is(:hover, [data-state='hover']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-button) {
+  background-color: var(--ptah-btn-secondary-bg-hover);
+  border-color: var(--ptah-btn-secondary-border-hover);
+  color: var(--ptah-btn-secondary-fg);
+}
+
+.btn[data-ptah-button].btn-secondary:is(:active, [data-state='active']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-button) {
+  background-color: var(--ptah-btn-secondary-bg-active);
+  border-color: var(--ptah-btn-secondary-border-hover);
+  color: var(--ptah-btn-secondary-fg);
+}
+
+/* Variant 3: ghost (toolbar and row actions: no edge at rest) */
+.btn[data-ptah-button].btn-ghost:is(.btn, #ptah-button) {
+  background-color: transparent;
+  border-color: transparent;
+  color: var(--ptah-btn-ghost-fg);
+  box-shadow: var(--ptah-elevation-0);
+}
+
+.btn[data-ptah-button].btn-ghost:is(:hover, [data-state='hover']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-button) {
+  background-color: var(--ptah-btn-ghost-bg-hover);
+  border-color: var(--ptah-border-color);
+  color: var(--ptah-btn-ghost-fg);
+}
+
+.btn[data-ptah-button].btn-ghost:is(:active, [data-state='active']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-button) {
+  background-color: var(--ptah-btn-ghost-bg-active);
+  border-color: var(--ptah-border-color-strong);
+  color: var(--ptah-btn-ghost-fg);
+}
+
+/* Variant 4: danger (destructive action, maps to .btn-error) */
+.btn[data-ptah-button].btn-error:is(.btn, #ptah-button) {
+  background-color: var(--ptah-btn-danger-bg);
+  border-color: var(--ptah-btn-danger-bg);
+  color: var(--ptah-btn-danger-fg);
+  box-shadow: var(--ptah-elevation-0);
+}
+
+.btn[data-ptah-button].btn-error:is(:hover, [data-state='hover']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-button) {
+  background-color: var(--ptah-btn-danger-bg-hover);
+  border-color: var(--ptah-btn-danger-bg-hover);
+  color: var(--ptah-btn-danger-fg);
+}
+
+.btn[data-ptah-button].btn-error:is(:active, [data-state='active']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-button) {
+  background-color: var(--ptah-btn-danger-bg-active);
+  border-color: var(--ptah-btn-danger-bg-active);
+  color: var(--ptah-btn-danger-fg);
+}
+
+/* Variant 5: link (inline text action) */
+.btn[data-ptah-button].btn-link:is(.btn, #ptah-button) {
+  background-color: transparent;
+  border-color: transparent;
+  color: var(--ptah-btn-link-fg);
+  text-decoration: underline;
+  text-underline-offset: var(--ptah-space-1);
+  box-shadow: var(--ptah-elevation-0);
+}
+
+.btn[data-ptah-button].btn-link:is(:hover, [data-state='hover']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-button) {
+  background-color: transparent;
+  border-color: transparent;
+  color: var(--ptah-btn-link-fg-hover);
+  text-decoration: underline;
+}
+
+.btn[data-ptah-button].btn-link:is(:active, [data-state='active']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-button) {
+  background-color: transparent;
+  border-color: transparent;
+  color: var(--ptah-btn-link-fg-active);
+  text-decoration: underline;
+}
+
+/* Keyboard focus ring: shared outline, never a box shadow */
+.btn[data-ptah-button]:is(:focus-visible, [data-state='focus']):is(.btn, #ptah-button) {
+  outline-style: solid;
+  outline-width: var(--ptah-focus-ring-width);
+  outline-offset: var(--ptah-focus-ring-offset);
+  outline-color: var(--ptah-focus-ring-color);
+  box-shadow: var(--ptah-elevation-0);
+}
+
+/* Disabled state (native disabled and aria-disabled when not busy) */
+.btn[data-ptah-button]:is(:disabled, [disabled], [aria-disabled='true']):not([aria-busy='true']):is(.btn, #ptah-button) {
+  background-color: var(--ptah-btn-disabled-bg);
+  border-color: var(--ptah-btn-disabled-border);
+  color: var(--ptah-btn-disabled-fg);
+  opacity: var(--ptah-btn-disabled-opacity);
+  box-shadow: var(--ptah-elevation-0);
+  cursor: not-allowed;
+  pointer-events: auto;
+}
+
+.btn[data-ptah-button]:is(.btn-ghost, .btn-link):is(:disabled, [disabled], [aria-disabled='true']):not([aria-busy='true']):is(.btn, #ptah-button) {
+  background-color: transparent;
+  border-color: transparent;
+}
+
+/* Loading / busy state: leave layout unchanged and overlay the spinner. */
+.btn[data-ptah-button][aria-busy='true']:is(.btn, #ptah-button) {
+  opacity: var(--ptah-btn-busy-opacity);
+  cursor: wait;
+  -webkit-text-fill-color: transparent;
+}
+
+.btn[data-ptah-button][aria-busy='true']:is(.btn, #ptah-button) > :where(svg) {
+  visibility: hidden;
+}
+
+.btn[data-ptah-button][aria-busy='true']:is(.btn, #ptah-button)::before {
+  content: '';
+  position: absolute;
+  inset-block-start: calc(50% - var(--ptah-icon-xs) / 2);
+  inset-inline-start: calc(50% - var(--ptah-icon-xs) / 2);
+  width: var(--ptah-icon-xs);
+  height: var(--ptah-icon-xs);
+  border-radius: var(--ptah-radius-chip);
+  border-width: var(--ptah-focus-ring-width);
+  border-style: solid;
+  border-color: var(--ptah-btn-secondary-fg);
+  border-inline-end-color: transparent;
+  animation: ptah-button-spin var(--ptah-btn-spinner-duration) linear infinite;
+}
+
+.btn[data-ptah-button].btn-primary[aria-busy='true']:is(.btn, #ptah-button)::before {
+  border-color: var(--ptah-btn-primary-fg);
+  border-inline-end-color: transparent;
+}
+
+.btn[data-ptah-button].btn-error[aria-busy='true']:is(.btn, #ptah-button)::before {
+  border-color: var(--ptah-btn-danger-fg);
+  border-inline-end-color: transparent;
+}
+
+.btn[data-ptah-button].btn-link[aria-busy='true']:is(.btn, #ptah-button) {
+  text-decoration-color: transparent;
+}
+
+.btn[data-ptah-button].btn-link[aria-busy='true']:is(.btn, #ptah-button)::before {
+  border-color: var(--ptah-btn-link-fg);
+  border-inline-end-color: transparent;
+}
+
+@keyframes ptah-button-spin {
+  to { transform: rotate(1turn); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn[data-ptah-button][aria-busy='true']:is(.btn, #ptah-button)::before {
+    animation: none;
+  }
+}
+

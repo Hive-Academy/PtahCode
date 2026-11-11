@@ -35,6 +35,7 @@ import { RecoveryScreenComponent } from '../shared/recovery-screen.component';
 import { onboardingStepLink } from '../shell/onboarding-step-link';
 import { AgentRecommendationListComponent } from './agent-recommendation-list.component';
 import { AnalysisStepStore } from './analysis-step.store';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** A2 owns its preview session; the tab and selected analysis remain in the URL. */
 @Component({
@@ -50,6 +51,7 @@ import { AnalysisStepStore } from './analysis-step.store';
     OnboardingStepperComponent,
     RecoveryScreenComponent,
     LucideAngularModule,
+    PtahButtonDirective,
   ],
   providers: [GenerationPreviewStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -95,15 +97,21 @@ import { AnalysisStepStore } from './analysis-step.store';
             No analysis is used; recommendations come from the workspace
             catalog.
             <button
+              ptahButton
+              variant="ghost"
               type="button"
-              class="btn btn-ghost btn-sm min-h-8 text-base-content underline"
+              class="underline"
               (click)="analyzeFirst()"
             >
               Analyze first
             </button>
           </section>
         }
-        <div class="rounded-[14px] border border-base-300 p-4" data-glass-surface="tile" data-testid="context-source">
+        <div
+          class="rounded-[14px] border border-base-300 p-4"
+          data-glass-surface="tile"
+          data-testid="context-source"
+        >
           @if (generation.run(); as activeRun) {
             <ptah-generation-source-status
               [source]="activeRun.source"
@@ -127,14 +135,18 @@ import { AnalysisStepStore } from './analysis-step.store';
             role="alert"
           >
             <p>{{ loadError() }}</p>
-            <button type="button" class="btn btn-sm mt-2" (click)="retryLoad()">
+            <button ptahButton type="button" class="mt-2" (click)="retryLoad()">
               Retry
             </button>
           </section>
         } @else if (loading()) {
           <p role="status">Loading recommendations…</p>
         } @else {
-          <div class="rounded-[22px] border border-base-300 p-4" data-glass-surface="content" data-testid="choose-agents-list">
+          <div
+            class="rounded-[22px] border border-base-300 p-4"
+            data-glass-surface="content"
+            data-testid="choose-agents-list"
+          >
             <div data-testid="choose-agents-toolbar">
               <ptah-agent-recommendation-list
                 [recommendations]="store.recommendations()"
@@ -188,8 +200,9 @@ import { AnalysisStepStore } from './analysis-step.store';
               data-testid="choose-agents-actions"
             >
               <button
+                ptahButton
+                variant="primary"
                 type="button"
-                class="btn btn-primary min-h-8"
                 data-testid="choose-agents-preview-trigger"
                 [disabled]="store.selection().size === 0 || submitting()"
                 (click)="openPreview()"

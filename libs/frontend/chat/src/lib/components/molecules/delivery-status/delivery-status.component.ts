@@ -5,6 +5,7 @@ import {
   type ParentDeliveryItem,
 } from '@ptah-extension/chat-streaming';
 import type { AgentDeliveryReceipt } from '@ptah-extension/shared';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /**
  * Delivery status of one lane message or one parent delivery, with the
@@ -14,6 +15,7 @@ import type { AgentDeliveryReceipt } from '@ptah-extension/shared';
 @Component({
   selector: 'ptah-delivery-status',
   standalone: true,
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block min-w-0' },
   template: `
@@ -23,7 +25,7 @@ import type { AgentDeliveryReceipt } from '@ptah-extension/shared';
           {{ current.label }}@if (current.resetAt !== undefined) { · <time [attr.datetime]="iso(current.resetAt)" [title]="absolute(current.resetAt)">{{ current.resetTime }}</time>} @else if (current.since !== undefined) { · <time [attr.datetime]="iso(current.since)" [title]="absolute(current.since)">{{ current.age }}</time>}
         </span>
         @for (action of current.actions; track action.kind) {
-          <button type="button" class="btn btn-ghost btn-xs" [disabled]="busy()"
+          <button type="button" ptahButton variant="ghost" size="xs" [disabled]="busy()"
             [attr.aria-label]="actionName(action)" (click)="request(action)">{{ action.label }}</button>
         }
       </div>
@@ -33,7 +35,7 @@ import type { AgentDeliveryReceipt } from '@ptah-extension/shared';
           <p class="text-warning">This may already have reached {{ receipt() ? 'the lane' : 'the parent chat' }}. Retrying can run it twice.</p>
           <div class="mt-1 flex gap-2">
             <button type="button" class="btn btn-warning btn-xs" (click)="confirm()">Retry anyway</button>
-            <button type="button" class="btn btn-ghost btn-xs" (click)="confirming.set(null)">Keep waiting</button>
+            <button type="button" ptahButton variant="ghost" size="xs" (click)="confirming.set(null)">Keep waiting</button>
           </div>
         </div>
       }

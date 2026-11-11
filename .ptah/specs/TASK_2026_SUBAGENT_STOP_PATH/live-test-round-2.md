@@ -5,9 +5,9 @@
 - Worktree: `D:\projects\ptah-extension\.claude-worktrees\subagent-budget-stop-path`. Scratch workspace: `.ptah/live-test-ws` (15 note files, about 64 KB). No source file was edited during this live test. Screenshots are under [live-test-2](live-test-2/).
 - Production Ptah PID 26500 was already running and was not stopped. No Ptah Dev instance was running before launch. Dev Electron PID 44684 was launched on CDP port 9342 with `CLAUDE_CODE_SUBAGENT_MODEL=haiku` and `PTAH_NO_DEVTOOLS=1`. Renderer was driven over CDP.
 - Build completed with `node scripts/verify.mjs --exec --task build-dev -- npx nx build-dev ptah-electron`; then `node scripts/copy-wasm.js dist/apps/ptah-electron` and `node scripts/verify.mjs --exec --task copy-renderer-dev -- npx nx copy-renderer-dev ptah-electron` completed. No test, serve, e2e, or workspace-wide target was run.
-- Backed up `C:\Users\abdal\.ptah-dev\settings.json` to `settings.json.bak-livetest2` before changing budgets. Backup SHA-256: `3B727D826F40043DCC6E879B9023DB60A075C4FBD67ED945BA5AC738D694FAD6`. The dev provider settings selected Claude `haiku`; the `openai-codex` Haiku tier was `gpt-5.6-luna`. Codex readiness RPC reported signed in, and the app model list exposed `gpt-5.6-luna`.
+- Backed up `C:\Users\dev\.ptah-dev\settings.json` to `settings.json.bak-livetest2` before changing budgets. Backup SHA-256: `3B727D826F40043DCC6E879B9023DB60A075C4FBD67ED945BA5AC738D694FAD6`. The dev provider settings selected Claude `haiku`; the `openai-codex` Haiku tier was `gpt-5.6-luna`. Codex readiness RPC reported signed in, and the app model list exposed `gpt-5.6-luna`.
 - Budget settings per scenario: (1) handoff 25,000, weighted stop 100,000,000; (2) handoff 2,000,000, weighted stop 100,000,000; (3) handoff 2,000,000, weighted stop 60,000; (4) handoff 25,000, weighted stop 100,000,000. Claude sessions explicitly selected Haiku 5.5 in the UI because new chats displayed Opus 5.5 by default. Scenario 4 explicitly selected the displayed `gpt-5.6-luna` option. No secret values are included here.
-- Log evidence below refers to `C:\Users\abdal\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-07.log`. Line numbers are from that file after this run. A `SubagentStop` **hook** means the SDK agent finished; it is distinct from `[SubagentBudgetMonitor] Subagent stopped`.
+- Log evidence below refers to `C:\Users\dev\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-07.log`. Line numbers are from that file after this run. A `SubagentStop` **hook** means the SDK agent finished; it is distinct from `[SubagentBudgetMonitor] Subagent stopped`.
 
 ## Scenario 1 — handoff stop, Claude/Haiku
 
@@ -67,7 +67,7 @@ This is a model-routing defect and a cost-control failure for this test. The sel
 
 | Check | SHA-256 / observation |
 | --- | --- |
-| Before live test, `C:\Users\abdal\.ptah\settings.json` | `2E2857A646F5613AA7E2FC82D1282EE249D6B1B39BEBBEA8F2D7C5454CA99DC4` |
+| Before live test, `C:\Users\dev\.ptah\settings.json` | `2E2857A646F5613AA7E2FC82D1282EE249D6B1B39BEBBEA8F2D7C5454CA99DC4` |
 | After Dev shutdown and settings restoration | `39BEFBBE2FB6D45F25E5B7D0B174FD4732AED3BBB1E4362612F24EB75099E519` |
 | Result | **FAIL: hashes differ.** Production file `LastWriteTimeUtc` was 2026-11-07 19:04:53Z. Dev log 9025-9028 (19:04:53.771-19:04:53.779Z) shows a workspace-scoped Codex provider switch and an auto-map of the Codex Opus tier in the same second. The production file now contains that Opus tier mapping, while the dev settings backup did not. This timing makes a Dev-to-production settings leak plausible, but the before-file contents were not captured, so causation is not proven. Production Ptah PID 26500 remained running; the file was left untouched. |
 

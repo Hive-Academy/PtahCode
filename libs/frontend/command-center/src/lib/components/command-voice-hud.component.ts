@@ -1,12 +1,13 @@
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
 import { LucideAngularModule, Mic } from 'lucide-angular';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import type { CommandProviderReadiness, CommandVoiceError, CommandVoiceState } from '../model/command-center.store';
 
 /** Controls for the page-owned voice loop; all actions are explicit user intents. */
 @Component({
   selector: 'ptah-command-voice-hud',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="voice-hud text-base-content" aria-label="Voice controls">
@@ -50,12 +51,12 @@ import type { CommandProviderReadiness, CommandVoiceError, CommandVoiceState } f
             }
           </div>
         }
-        <button type="button" class="btn btn-sm btn-outline min-h-10 disabled:border-base-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+        <button type="button" ptahButton size="md"
           [disabled]="!canMute()" (click)="toggleMute.emit()">{{ muted() ? 'Unmute' : 'Mute' }}</button>
-        <button type="button" class="btn btn-sm btn-outline min-h-10 disabled:border-base-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+        <button type="button" ptahButton size="md"
           [disabled]="!canStopTurn()" (click)="stop.emit()">Stop</button>
         @if (voiceState() === 'speaking') {
-          <button type="button" class="btn btn-ghost btn-sm min-h-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+          <button type="button" ptahButton variant="ghost" size="md"
             (click)="interrupt.emit()">Interrupt speech</button>
         }
       </div>
@@ -63,15 +64,15 @@ import type { CommandProviderReadiness, CommandVoiceError, CommandVoiceState } f
         <div class="voice-recovery mt-1 flex flex-wrap items-center gap-2 text-xs" role="status">
           <span>{{ error.message }}</span>
           @if (error.kind === 'mic-denied') {
-            <button type="button" class="btn btn-ghost btn-sm min-h-10 text-base-content underline" (click)="openVoiceSettings.emit()">Open Voice settings</button>
+            <button type="button" ptahButton variant="ghost" size="md" class="underline" (click)="openVoiceSettings.emit()">Open Voice settings</button>
           } @else if (error.kind === 'mic-unavailable' || error.kind === 'worklet') {
-            <button type="button" class="btn btn-ghost btn-sm min-h-10 border border-base-content text-base-content underline" (click)="start.emit()">Retry microphone</button>
+            <button type="button" ptahButton size="md" class="underline" (click)="start.emit()">Retry microphone</button>
           }
         </div>
       } @else if (!provider().transcription || !provider().synthesis) {
         <div class="voice-recovery mt-1 flex flex-wrap items-center gap-2 text-xs" role="status">
           <span>A voice provider is missing.</span>
-          <button type="button" class="btn btn-ghost btn-sm min-h-10 text-base-content underline" (click)="openVoiceSettings.emit()">Open Voice settings</button>
+          <button type="button" ptahButton variant="ghost" size="md" class="underline" (click)="openVoiceSettings.emit()">Open Voice settings</button>
         </div>
       }
     </section>

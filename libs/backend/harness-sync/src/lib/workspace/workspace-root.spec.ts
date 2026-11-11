@@ -104,7 +104,7 @@ describe('resolveHarnessWorkspaceRoot (E14)', () => {
  * The home boundary is case-INSENSITIVE on Windows, and this is the case that
  * used to slip through it.
  *
- * `os.homedir()` answers `C:\Users\Abdallah`, while a cwd inherited from a
+ * `os.homedir()` answers `C:\Users\Acme`, while a cwd inherited from a
  * spawned rival CLI, a terminal or a `cd` routinely arrives lower-cased. A
  * byte-exact `===` calls those two different directories, the ascent walks
  * straight past home, finds the `.ptah` marker Ptah put in the home directory

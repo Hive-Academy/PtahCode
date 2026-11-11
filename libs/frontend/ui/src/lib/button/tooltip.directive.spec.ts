@@ -90,3 +90,48 @@ it('updates open text, hides for empty text, and cancels pending hover', () => {
   expect(document.querySelector('[role="tooltip"]')).toBeNull();
   fixture.destroy();
 });
+it('keeps a focus-opened tooltip on blur while the pointer is over the host or panel', () => {
+  jest.useFakeTimers();
+  const fixture = TestBed.createComponent(Host);
+  fixture.detectChanges();
+  const button = fixture.nativeElement.querySelector('button') as HTMLButtonElement;
+  button.focus();
+  fixture.detectChanges();
+  expect(document.querySelector('[role="tooltip"]')).not.toBeNull();
+  button.dispatchEvent(new Event('pointerenter'));
+  button.blur();
+  expect(document.querySelector('[role="tooltip"]')).not.toBeNull();
+  button.dispatchEvent(new Event('pointerleave'));
+  jest.advanceTimersByTime(99);
+  expect(document.querySelector('[role="tooltip"]')).not.toBeNull();
+  jest.advanceTimersByTime(1);
+  expect(document.querySelector('[role="tooltip"]')).toBeNull();
+  button.focus();
+  fixture.detectChanges();
+  document.querySelector('.cdk-overlay-pane')?.dispatchEvent(new Event('pointerenter'));
+  button.blur();
+  expect(document.querySelector('[role="tooltip"]')).not.toBeNull();
+  document.querySelector('.cdk-overlay-pane')?.dispatchEvent(new Event('pointerleave'));
+  jest.advanceTimersByTime(100);
+  expect(document.querySelector('[role="tooltip"]')).toBeNull();
+  fixture.destroy();
+});
+
+it('resets the panel pointer state when the tooltip is hidden over the panel', () => {
+  jest.useFakeTimers();
+  const fixture = TestBed.createComponent(Host);
+  fixture.detectChanges();
+  const button = fixture.nativeElement.querySelector('button') as HTMLButtonElement;
+  button.focus();
+  fixture.detectChanges();
+  document.querySelector('.cdk-overlay-pane')?.dispatchEvent(new Event('pointerenter'));
+  document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  expect(document.querySelector('[role="tooltip"]')).toBeNull();
+  button.blur();
+  button.focus();
+  fixture.detectChanges();
+  expect(document.querySelector('[role="tooltip"]')).not.toBeNull();
+  button.blur();
+  expect(document.querySelector('[role="tooltip"]')).toBeNull();
+  fixture.destroy();
+});

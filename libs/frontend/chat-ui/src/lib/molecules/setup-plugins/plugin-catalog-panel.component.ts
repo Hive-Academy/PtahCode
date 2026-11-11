@@ -24,6 +24,7 @@ import {
   CatalogCardSkeletonComponent,
   CatalogGridComponent,
   MonogramTileComponent,
+  PtahButtonDirective,
   type CatalogCardBadge,
 } from '@ptah-extension/ui';
 import {
@@ -199,6 +200,7 @@ function skillSelectionKey(
     CatalogCardSkeletonComponent,
     CatalogGridComponent,
     MonogramTileComponent,
+    PtahButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -433,7 +435,8 @@ function skillSelectionKey(
         <div class="flex flex-col items-center gap-3 py-8">
           <span class="text-error text-sm text-center">{{ error() }}</span>
           <button
-            class="btn btn-sm btn-ghost"
+            ptahButton
+            variant="ghost"
             (click)="loadPlugins()"
             type="button"
           >
@@ -495,7 +498,9 @@ function skillSelectionKey(
                         pluginSkills().get(card.plugin.id)?.length
                       ) {
                         <button
-                          class="btn btn-ghost btn-xs gap-1"
+                          ptahButton
+                          variant="ghost"
+                          size="xs"
                           (click)="toggleExpand(card.plugin.id, $event)"
                           type="button"
                           [attr.aria-label]="
@@ -612,7 +617,8 @@ function skillSelectionKey(
             </span>
           }
           <button
-            class="btn btn-primary btn-sm"
+            ptahButton
+            variant="primary"
             data-testid="plugin-catalog-save"
             [disabled]="isSaving()"
             (click)="saveConfiguration()"

@@ -40,6 +40,13 @@ export type { LiveModelStatsPayload } from './lib/tab-state.types';
 export { isValidSessionStatsSnapshot } from './lib/session-stats-snapshot';
 export { contextFillStats } from './lib/live-context-stats';
 export {
+  resolveTabModel,
+  resolveTabEffort,
+  type ResolvedTabModel,
+  type ResolvedTabEffort,
+  type TabSettingOrigin,
+} from './lib/tab-session-settings';
+export {
   TabId,
   ConversationId,
   BackgroundAgentId,

@@ -122,7 +122,7 @@ test.describe('plan limits > session inspector', () => {
         // Restored and live runs auto-open the agent panel, which overlays
         // the whole tile at these widths. Close it as a user would.
         const agentPanel = tile.locator('ptah-agent-monitor-panel');
-        await agentPanel.locator('button[title="Close panel"]').click();
+        await agentPanel.locator('button[aria-label="Close panel"]').click();
         // ChatView keeps the panel host mounted so its sidebar tab can reopen it;
         // closing collapses the panel's inner surface instead of hiding the host.
         await expect(agentPanel.locator('aside')).toHaveClass(/\bw-0\b/);

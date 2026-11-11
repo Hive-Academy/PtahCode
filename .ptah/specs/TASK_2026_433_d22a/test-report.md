@@ -4,8 +4,8 @@
 
 - OS: Windows 11 Home 10.0.26200 (MINGW64_NT-10.0-26200, x86_64)
 - Node: v24.15.0
-- codex: codex-cli 0.153.4 (`C:\Users\abdal\AppData\Roaming\npm\codex.CMD`)
-- agy (Antigravity): 1.2.2 (`C:\Users\abdal\AppData\Local\agy\bin\agy.EXE`)
+- codex: codex-cli 0.153.4 (`C:\Users\dev\AppData\Roaming\npm\codex.CMD`)
+- agy (Antigravity): 1.2.2 (`C:\Users\dev\AppData\Local\agy\bin\agy.EXE`)
 - Branch: `feat/task-433-role-lanes`, HEAD `6db3a356f`
 - Worktree: `D:\projects\ptah-extension\.claude-worktrees\task-433-role-lanes`
 
@@ -45,7 +45,7 @@ key was invented or entered). This sandbox is scratchpad-only and orthogonal to
 the CODEX_HOME sandbox used for A2 (see E2 below).
 
 All driver scripts are throwaway, under
-`C:\Users\abdal\AppData\Local\Temp\claude\D--projects-ptah-extension\5452702d-5918-4e3d-923c-121db4e9e0a1\scratchpad\e2e-433\`
+`C:\Users\dev\AppData\Local\Temp\claude\D--projects-ptah-extension\5452702d-5918-4e3d-923c-121db4e9e0a1\scratchpad\e2e-433\`
 (`mcp-driver.js`, `generic-spawn-driver.js`, `e1-antigravity-driver.js`,
 `probe-entry.ts`, `d10-probe.js`, `d10-guard-verdict.ts`, `e5-http-inprocess.ts`,
 plus the `spawn-*.json` / `env-*.json` inputs and captured `*-run.log` /

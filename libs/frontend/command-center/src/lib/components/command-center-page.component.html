@@ -35,7 +35,7 @@
         @if (toast.action === 'retry-speech') {
           <button
             type="button"
-            class="btn btn-sm text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+            ptahButton
             (click)="page.retrySpeech()"
           >
             Retry speech
@@ -43,8 +43,8 @@
         }
         <button
           type="button"
-          class="btn btn-ghost btn-sm text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-          aria-label="Dismiss notification"
+          ptahIconButton
+          label="Dismiss notification"
           (click)="dismissToast()"
         >
           ×

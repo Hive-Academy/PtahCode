@@ -143,7 +143,8 @@ let instanceCounter = 0;
         </div>
         <button
           type="button"
-          class="btn btn-ghost btn-sm gap-1"
+          ptahButton
+          variant="ghost"
           data-testid="featured-connectors-browse"
           (click)="browseAll.emit()"
         >
@@ -180,7 +181,7 @@ let instanceCounter = 0;
             }}</span>
             <button
               type="button"
-              class="btn btn-sm btn-outline gap-1"
+              ptahButton
               data-testid="featured-connectors-retry"
               (click)="retry.emit()"
             >
@@ -204,7 +205,9 @@ let instanceCounter = 0;
               </span>
               <button
                 type="button"
-                ptahButton variant="primary" size="sm"
+                ptahButton
+                variant="primary"
+                size="sm"
                 data-testid="featured-connectors-empty-browse"
                 (click)="browseAll.emit()"
               >

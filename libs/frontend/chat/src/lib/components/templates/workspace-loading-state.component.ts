@@ -45,6 +45,7 @@ import {
 } from '@ptah-extension/chat-ui';
 import { localDayKey } from '../../services/vitals/usage-vitals.model';
 
+import { PtahButtonDirective } from '@ptah-extension/ui';
 /** After this long without a resolved workspace, a calm hint shows. */
 export const SLOW_HINT_MS = 10_000;
 
@@ -58,7 +59,7 @@ const PENDING_STEPS: readonly StagedStep[] = [
 @Component({
   selector: 'ptah-workspace-loading-state',
   standalone: true,
-  imports: [LucideAngularModule, ActivityGridComponent, StagedStepsComponent],
+  imports: [LucideAngularModule, ActivityGridComponent, StagedStepsComponent, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     role: 'status',
@@ -222,8 +223,8 @@ const PENDING_STEPS: readonly StagedStep[] = [
           </div>
           <button
             type="button"
-            class="btn btn-primary gap-2 rounded-full px-6 cursor-not-allowed"
-            aria-disabled="true"
+            ptahButton variant="primary" size="md" class="cursor-not-allowed"
+            [busy]="true"
             data-testid="workspace-loading-new-session"
           >
             <lucide-angular

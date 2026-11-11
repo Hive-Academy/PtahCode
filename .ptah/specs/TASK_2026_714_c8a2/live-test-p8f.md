@@ -2,7 +2,7 @@
 
 Date: 2026-10-28. User-approved run; test and report only, no product source touched, nothing committed.
 
-- Evidence folder: `C:\Users\abdal\AppData\Local\Temp\ptah-live-p8f-20261028-173047\`
+- Evidence folder: `C:\Users\dev\AppData\Local\Temp\ptah-live-p8f-20261028-173047\`
   (`app.log`, `build.log`, `build2.log`, `wasm.log`, `shots\`, `settings.json.bak`, `scan.js`, Playwright scripts, `mark-*.txt` log offsets)
 - Single-instance check: only the foreign Playwright e2e electron (`wizard-library-alignment`, own `--user-data-dir`) ran; never touched.
   The launch worked; my root electron.exe (PID 40208) was stopped with `taskkill /T /F /PID 40208`.

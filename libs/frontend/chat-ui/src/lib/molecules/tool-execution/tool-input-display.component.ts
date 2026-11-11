@@ -34,6 +34,7 @@ import {
   isWriteToolInput,
   isFileChangeToolInput,
 } from '@ptah-extension/shared';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** Argument values longer than this are cut, with "more" to show the rest. */
 const ARG_PREVIEW_CHARS = 120;
@@ -88,7 +89,7 @@ interface InputArg {
 @Component({
   selector: 'ptah-tool-input-display',
   standalone: true,
-  imports: [SurfaceMarkdownPipe, MarkdownModule, CopyTextButtonComponent],
+  imports: [SurfaceMarkdownPipe, MarkdownModule, CopyTextButtonComponent, PtahButtonDirective],
   template: `
     @if (hasInput()) {
       <div class="space-y-1.5">
@@ -122,7 +123,9 @@ interface InputArg {
                 <button
                   #previewToggle
                   type="button"
-                  class="btn btn-ghost btn-xs h-7 min-h-0 px-2 text-[11px] font-normal"
+                  ptahButton
+                  variant="ghost"
+                  size="xs"
                   [attr.aria-expanded]="isPreviewExpanded()"
                   [attr.aria-controls]="previewId"
                   (click)="togglePreviewExpanded()"

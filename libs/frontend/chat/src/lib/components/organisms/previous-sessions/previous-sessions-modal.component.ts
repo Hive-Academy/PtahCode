@@ -67,6 +67,7 @@ import {
 } from '../../molecules/session-list-row/session-list-row.component';
 import { groupSessionRows } from './session-row-groups';
 
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 type SessionId = ChatSessionSummary['id'];
 /** The `data-action` buttons of a session row. */
 type RowAction = 'open' | 'organize' | 'rename' | 'delete';
@@ -173,6 +174,8 @@ function sessionCount(count: number): string {
     SkeletonBlockComponent,
     PreviousSessionsToolbarComponent,
     SessionListRowComponent,
+    PtahButtonDirective,
+    PtahIconButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './previous-sessions-modal.component.html',

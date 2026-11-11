@@ -7,6 +7,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { NgClass } from '@angular/common';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /**
  * ConfirmationModalComponent - Reusable DaisyUI modal for confirmations and alerts
@@ -88,7 +89,7 @@ import { NgClass } from '@angular/common';
 @Component({
   selector: 'ptah-confirmation-modal',
   standalone: true,
-  imports: [NgClass],
+  imports: [NgClass, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dialog #modal class="modal">
@@ -97,9 +98,9 @@ import { NgClass } from '@angular/common';
         <p class="py-4">{{ message() }}</p>
         <div class="modal-action">
           @if (mode() !== 'alert') {
-          <button class="btn btn-ghost" (click)="onCancel()">
-            {{ cancelText() }}
-          </button>
+            <button ptahButton variant="ghost" (click)="onCancel()">
+              {{ cancelText() }}
+            </button>
           }
           <button
             class="btn"

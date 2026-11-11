@@ -58,6 +58,7 @@ import {
 import type { OutputStyleFailedOperation } from './output-style.store';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import { OutputStyleNoticesComponent } from './output-style-notices.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 export { PARITY_TIERS, type ParityTierOption };
 
@@ -101,7 +102,7 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
 @Component({
   selector: 'ptah-output-style-list',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, OutputStyleNoticesComponent, OutputStyleParitySectionComponent],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, OutputStyleNoticesComponent, OutputStyleParitySectionComponent, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <ptah-output-style-notices
@@ -288,7 +289,7 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
                       <button
                         #deleteCancel
                         type="button"
-                        class="btn btn-ghost btn-xs text-base-content"
+                        ptahButton variant="ghost" size="xs"
                         (click)="cancelDelete(deleteBtn)"
                       >
                         Cancel
@@ -339,7 +340,7 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
                 @if (entry.openable) {
                   <button
                     type="button"
-                    class="btn btn-ghost btn-xs mt-1 text-base-content"
+                    ptahButton variant="ghost" size="xs" class="mt-1"
                     (click)="openInvalid.emit(entry)"
                     data-testid="output-style-rewrite-button"
                   >

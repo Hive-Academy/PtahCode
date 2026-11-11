@@ -1,3 +1,4 @@
+import { PtahIconButtonDirective } from '@ptah-extension/ui';
 import { NgTemplateOutlet } from '@angular/common';
 import { encapsulateStyle } from '@angular/compiler';
 import { Component, NO_ERRORS_SCHEMA, signal } from '@angular/core';
@@ -111,7 +112,7 @@ describe('SessionInspectorComponent presentation', () => {
         { provide: SessionRowActionsService, useValue: { openSession: jest.fn() } },
       ],
     }).overrideComponent(SessionInspectorComponent, {
-      set: { imports: [NgTemplateOutlet], schemas: [NO_ERRORS_SCHEMA] },
+      set: { imports: [NgTemplateOutlet, PtahIconButtonDirective], schemas: [NO_ERRORS_SCHEMA] },
     });
   });
   afterEach(() => TestBed.resetTestingModule());

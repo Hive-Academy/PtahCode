@@ -19,6 +19,7 @@ import {
   type FilterSelectOption,
 } from './provider-filter-select.component';
 import { statusPresentation } from './status-pill.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** One origin radio. `value: null` is "All". */
 interface OriginChoice {
@@ -55,7 +56,11 @@ interface OriginChoice {
 @Component({
   selector: 'ptah-provider-filters',
   standalone: true,
-  imports: [LucideAngularModule, ProviderFilterSelectComponent],
+  imports: [
+    PtahButtonDirective,
+    LucideAngularModule,
+    ProviderFilterSelectComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -130,7 +135,8 @@ interface OriginChoice {
       @if (active()) {
         <button
           type="button"
-          class="btn btn-ghost btn-sm gap-1"
+          ptahButton
+          variant="ghost"
           data-testid="provider-filter-clear"
           (click)="clear()"
         >

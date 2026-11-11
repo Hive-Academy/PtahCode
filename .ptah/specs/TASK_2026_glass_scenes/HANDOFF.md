@@ -43,7 +43,7 @@ Codex lane implementing `.ptah/specs/TASK_2026_glass_scenes/design-spec-glass-po
 - Settings Providers grey: root cause unconfirmed (design spec open question 1). Check batch-report-4.md; if still a guess, verify visually in Electron.
 - M1 accepted risk: text contrast not re-measured at 0px blur / final values; user reviews visually.
 - Lane availability: Antigravity quota out (~104h), Kimi 429 rate-limited, Grok balance exhausted (402), OpenCode/Glm at limit. Codex works (~92% weekly; user OK'd using it). For an independent (non-Codex) review, try Kimi again; else use a Claude code-logic-reviewer subagent (user allowed subagents).
-- No before/after screenshots captured by us; user's screenshots are in C:\Users\abdal\AppData\Local\Temp\claude\D--projects-ptah-extension\132a7def-abf0-4762-815b-bbd1be5d28db\images\5.png..10.png (before).
+- No before/after screenshots captured by us; user's screenshots are in C:\Users\dev\AppData\Local\Temp\claude\D--projects-ptah-extension\132a7def-abf0-4762-815b-bbd1be5d28db\images\5.png..10.png (before).
 
 ## Key files
 

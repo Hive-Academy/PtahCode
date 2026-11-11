@@ -16,7 +16,7 @@
 
 - Scoped TypeScript diagnostics: no errors or warnings.
 - `npm run verify -- -t test -p cli-agent-runtime -- --testPathPatterns=lane-budget-telemetry`: passed.
-- `npm run verify -- -p shared,agent-sdk,cli-agent-runtime,codex-runtime,platform-core,ptah-electron,cli-engine,platform-cli`: final rerun completed. Lint and typecheck: 16/16 passed. Tests: 17/18 tasks passed; only `platform-core:test` failed, with the two known Windows socket/lock failures in `control-endpoint.spec.ts` and `kernel-session-driver-lock.spec.ts` (full output `C:\Users\abdal\.nx\d60e02896ae18ad9\cache\terminalOutputs\8636651624797266161`). All changed project tests passed.
+- `npm run verify -- -p shared,agent-sdk,cli-agent-runtime,codex-runtime,platform-core,ptah-electron,cli-engine,platform-cli`: final rerun completed. Lint and typecheck: 16/16 passed. Tests: 17/18 tasks passed; only `platform-core:test` failed, with the two known Windows socket/lock failures in `control-endpoint.spec.ts` and `kernel-session-driver-lock.spec.ts` (full output `C:\Users\dev\.nx\d60e02896ae18ad9\cache\terminalOutputs\8636651624797266161`). All changed project tests passed.
 - `npx ts-node --transpile-only tools/degradation-audit/check-degradation.ts`: exit 0, no FAIL or baseline increase.
 - `agent-process-manager.service.ts`: 3,671 nonblank lines (limit 3,675).
 

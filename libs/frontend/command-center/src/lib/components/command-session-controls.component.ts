@@ -1,18 +1,19 @@
 import { ChangeDetectionStrategy, Component, input, output, signal } from '@angular/core';
 import { LucideAngularModule, Send } from 'lucide-angular';
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 import type { CommandSessionStatus } from '../model/command-center.store';
 
 @Component({
   selector: 'ptah-command-session-controls',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="session-controls text-base-content" aria-label="Command Center session">
       <div class="session-actions flex items-center gap-2">
-        <button type="button" class="btn btn-ghost btn-sm min-h-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+        <button type="button" ptahButton variant="ghost" size="md"
           (click)="requestStatus.emit()">Status</button>
-        <button type="button" class="session-new btn btn-ghost btn-sm min-h-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+        <button type="button" class="session-new" ptahButton variant="ghost" size="md"
           (click)="newSession.emit()">Start new</button>
       </div>
       <div class="command-entry min-w-0">
@@ -23,8 +24,8 @@ import type { CommandSessionStatus } from '../model/command-center.store';
             class="input-sm min-h-10 min-w-0 flex-1 rounded-lg bg-transparent px-2 text-xs text-base-content placeholder:text-base-content-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
             type="text" [value]="draft()" (input)="onInput($event)"
             placeholder="Or type a command for Ptah..." />
-          <button type="submit" class="btn btn-ghost btn-sm min-h-10 min-w-10 disabled:border-base-300 disabled:text-base-content-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-            [disabled]="!draft().trim()" aria-label="Send command" title="Send command">
+          <button type="submit" ptahIconButton label="Send command" size="md"
+            [disabled]="!draft().trim()">
             <lucide-angular [img]="Send" class="h-4 w-4" aria-hidden="true" />
           </button>
         </form>

@@ -45,8 +45,7 @@
         </h2>
         <button
           type="button"
-          class="btn btn-ghost btn-sm btn-square text-base-content-muted hover:text-base-content"
-          aria-label="Close previous sessions"
+          ptahIconButton label="Close previous sessions"
           (click)="close()"
           data-testid="previous-sessions-close"
         >
@@ -216,7 +215,7 @@
           >
           <button
             type="button"
-            class="btn btn-ghost btn-sm mt-2 h-8 min-h-8 border border-[color:var(--surface-border-strong)] text-xs font-medium text-base-content"
+            ptahButton class="mt-2"
             (click)="onClearFilters()"
             data-testid="previous-sessions-clear-filters"
           >
@@ -245,9 +244,8 @@
           <button
             #loadMoreButton
             type="button"
-            class="btn btn-ghost btn-sm h-8 min-h-8 w-full gap-1 text-xs font-medium text-base-content-muted hover:text-base-content hover:bg-surface-2 transition-colors duration-200"
+            ptahButton variant="ghost" [busy]="chatStore.isLoadingMoreSessions()" class="w-full"
             [disabled]="chatStore.isLoadingMoreSessions()"
-            [attr.aria-busy]="chatStore.isLoadingMoreSessions() ? 'true' : null"
             (click)="onLoadMore()"
             data-testid="session-load-more"
           >

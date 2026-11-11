@@ -61,7 +61,7 @@ import {
 } from '@angular/core';
 import { HarnessHealthStore } from '@ptah-extension/marketplace/services';
 import type { HarnessHealth, HarnessTargetId } from '@ptah-extension/shared';
-import { NativeModalComponent } from '@ptah-extension/ui';
+import { NativeModalComponent, PtahButtonDirective } from '@ptah-extension/ui';
 
 /** Verbatim from implementation-plan.md C4 step 3. */
 export const RECONCILE_WHOLE_WORKSPACE_NOTICE =
@@ -159,7 +159,7 @@ let nextTitleId = 0;
   selector: 'ptah-reconcile-guard',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NativeModalComponent],
+  imports: [PtahButtonDirective, NativeModalComponent],
   template: `
     <ptah-native-modal
       [isOpen]="view() !== null"
@@ -252,7 +252,8 @@ let nextTitleId = 0;
       <div modal-footer class="modal-action">
         <button
           type="button"
-          class="btn btn-sm btn-ghost"
+          ptahButton
+          variant="ghost"
           data-testid="reconcile-guard-cancel"
           (click)="dismiss()"
         >

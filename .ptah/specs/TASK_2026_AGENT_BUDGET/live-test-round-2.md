@@ -1,6 +1,6 @@
 ﻿# Ptah Dev live test round 2 — TASK_2026_AGENT_BUDGET
 
-Date: 2026-11-08 (Africa/Cairo). Worktree head `dcf9e5c8818d432c96b10e0e088ee55e55260797`. Log references are one-based lines in `C:\Users\abdal\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-08.log`; selected lines appear in [sanitized-log.txt](live-test-round-2/sanitized-log.txt). No prompt text, MCP URL, credential, or secret is included in the excerpt.
+Date: 2026-11-08 (Africa/Cairo). Worktree head `dcf9e5c8818d432c96b10e0e088ee55e55260797`. Log references are one-based lines in `C:\Users\dev\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-08.log`; selected lines appear in [sanitized-log.txt](live-test-round-2/sanitized-log.txt). No prompt text, MCP URL, credential, or secret is included in the excerpt.
 
 ## Isolation gate
 

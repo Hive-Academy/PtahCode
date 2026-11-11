@@ -35,6 +35,7 @@ import {
   type OutputStyleSelectionRequest,
 } from './output-style-list.component';
 import { OutputStyleEditorComponent } from './output-style-editor.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 const OUTPUT_STYLE_ACTIVATE_FAILED = 'Could not change the active output style.';
 const OUTPUT_STYLE_DELETE_FAILED = 'Could not delete the output style.';
@@ -51,6 +52,7 @@ const OUTPUT_STYLE_PARITY_FAILED =
     LucideAngularModule,
     OutputStyleListComponent,
     OutputStyleEditorComponent,
+    PtahButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
@@ -82,7 +84,7 @@ const OUTPUT_STYLE_PARITY_FAILED =
           <button
             #newStyleButton
             type="button"
-            class="btn btn-primary btn-xs gap-1"
+            ptahButton variant="primary" size="xs"
             (click)="onCreate()"
             [disabled]="store.saving()"
             data-testid="output-style-new-button"

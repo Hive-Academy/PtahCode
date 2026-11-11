@@ -9,7 +9,7 @@ No model call, no auth.json, no real CODEX_HOME. Both runs used an empty temp CO
 | --- | --- |
 | Export command (from `libs/backend/codex-runtime/tools/generate-protocol-manifest.mjs:122`) | `codex app-server generate-json-schema --out <dir>` |
 | 0.155.1 binary | `D:/projects/ptah-extension/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe` |
-| 0.163.0 binary | `C:\Users\abdal\AppData\Roaming\npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe` |
+| 0.163.0 binary | `C:\Users\dev\AppData\Roaming\npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe` |
 | Compared files | pinned `libs/backend/codex-runtime/src/lib/protocol/codex-app-server-protocol.schema.json` vs 0.163.0 `codex_app_server_protocol.schemas.json` (same aggregate file; top-level plus `definitions.v2.*` flattened) |
 | Definitions | 710 (0.155.1) vs 736 (0.163.0) |
 

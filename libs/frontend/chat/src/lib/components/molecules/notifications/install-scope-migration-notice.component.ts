@@ -13,6 +13,7 @@ import type {
   InstallMigrationOnDiskEntry,
 } from '@ptah-extension/shared';
 
+import { PtahButtonDirective } from '@ptah-extension/ui';
 /** Which button dismissed the notice. */
 export type InstallScopeMigrationNoticeAction = 'open-marketplace' | 'got-it';
 
@@ -54,7 +55,7 @@ function plural(count: number, one: string, many: string): string {
 @Component({
   selector: 'ptah-install-scope-migration-notice',
   standalone: true,
-  imports: [],
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (visibleNotice(); as notice) {
@@ -162,8 +163,8 @@ function plural(count: number, one: string, many: string): string {
           <div class="flex flex-none gap-1.5">
             <button
               type="button"
-              class="btn btn-primary btn-sm"
-              [attr.aria-disabled]="busy() ? 'true' : null"
+              ptahButton variant="primary"
+              [busy]="busy()"
               (click)="dismiss('open-marketplace')"
               data-testid="install-migration-open-marketplace"
             >
@@ -171,8 +172,8 @@ function plural(count: number, one: string, many: string): string {
             </button>
             <button
               type="button"
-              class="btn btn-outline btn-sm"
-              [attr.aria-disabled]="busy() ? 'true' : null"
+              ptahButton
+              [busy]="busy()"
               (click)="dismiss('got-it')"
               data-testid="install-migration-got-it"
             >

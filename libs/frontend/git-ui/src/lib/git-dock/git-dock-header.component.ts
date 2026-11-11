@@ -38,6 +38,10 @@ import { GitBranchesService } from '../services/git-branches.service';
 import { GitStatusService } from '../services/git-status.service';
 import { GitReviewService } from '../services/git-review.service';
 import { StashPopoverComponent } from '../stash/stash-popover.component';
+import {
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 
 type SyncAction = 'fetch' | 'pull' | 'push';
 
@@ -51,6 +55,8 @@ const SYNC_COPY: Record<SyncAction, { done: string; failed: string }> = {
   selector: 'ptah-git-dock-header',
   standalone: true,
   imports: [
+    PtahButtonDirective,
+    PtahIconButtonDirective,
     LucideAngularModule,
     BranchPickerDropdownComponent,
     BranchDetailsPopoverComponent,
@@ -74,20 +80,16 @@ const SYNC_COPY: Record<SyncAction, { done: string; failed: string }> = {
         @if (review.mode() === 'working-tree') {
           <button
             type="button"
-            class="btn btn-ghost btn-xs px-1"
+            ptahIconButton
+            [label]="
+              layout.gitRailCollapsed()
+                ? 'Show source control'
+                : 'Hide source control'
+            "
+            size="xs"
             data-testid="git-rail-toggle"
             aria-controls="git-source-control-rail"
             [attr.aria-expanded]="!layout.gitRailCollapsed()"
-            [attr.aria-label]="
-              layout.gitRailCollapsed()
-                ? 'Show source control'
-                : 'Hide source control'
-            "
-            [title]="
-              layout.gitRailCollapsed()
-                ? 'Show source control'
-                : 'Hide source control'
-            "
             (click)="layout.toggleGitRail()"
           >
             <lucide-angular
@@ -102,7 +104,10 @@ const SYNC_COPY: Record<SyncAction, { done: string; failed: string }> = {
           <button
             #branchTrigger
             type="button"
-            class="btn btn-ghost btn-xs min-w-0 max-w-[14rem] shrink flex-nowrap gap-1"
+            ptahButton
+            variant="ghost"
+            size="xs"
+            class="min-w-0 max-w-[14rem] shrink flex-nowrap"
             data-testid="current-branch-button"
             aria-haspopup="dialog"
             [attr.aria-expanded]="pickerOpen()"
@@ -118,8 +123,9 @@ const SYNC_COPY: Record<SyncAction, { done: string; failed: string }> = {
           <button
             #detailsTrigger
             type="button"
-            class="btn btn-ghost btn-xs px-1"
-            aria-label="Branch details"
+            ptahIconButton
+            label="Branch details"
+            size="xs"
             (click)="detailsOpen.set(!detailsOpen())"
           >
             <lucide-angular [img]="InfoIcon" class="h-3 w-3" />
@@ -140,7 +146,9 @@ const SYNC_COPY: Record<SyncAction, { done: string; failed: string }> = {
           <button
             #stashTrigger
             type="button"
-            class="btn btn-ghost btn-xs gap-1 px-1"
+            ptahButton
+            variant="ghost"
+            size="xs"
             data-testid="git-stash-button"
             aria-haspopup="dialog"
             [attr.aria-expanded]="stashOpen()"
@@ -170,9 +178,9 @@ const SYNC_COPY: Record<SyncAction, { done: string; failed: string }> = {
         <button
           type="button"
           data-testid="git-fetch-button"
-          class="btn btn-ghost btn-xs px-1"
-          aria-label="Fetch"
-          title="Fetch"
+          ptahIconButton
+          label="Fetch"
+          size="xs"
           [disabled]="syncing() !== null"
           (click)="sync('fetch')"
         >
@@ -186,7 +194,9 @@ const SYNC_COPY: Record<SyncAction, { done: string; failed: string }> = {
         <button
           type="button"
           data-testid="git-pull-button"
-          class="btn btn-ghost btn-xs gap-1"
+          ptahButton
+          variant="ghost"
+          size="xs"
           [attr.aria-label]="
             gitStatus.branch().behind
               ? 'Pull (' + gitStatus.branch().behind + ' behind)'
@@ -210,7 +220,9 @@ const SYNC_COPY: Record<SyncAction, { done: string; failed: string }> = {
         <button
           type="button"
           data-testid="git-push-button"
-          class="btn btn-ghost btn-xs gap-1"
+          ptahButton
+          variant="ghost"
+          size="xs"
           [attr.aria-label]="
             gitStatus.branch().ahead
               ? 'Push (' + gitStatus.branch().ahead + ' ahead)'
@@ -247,9 +259,10 @@ const SYNC_COPY: Record<SyncAction, { done: string; failed: string }> = {
         @if (line.status.kind === 'error') {
           <button
             type="button"
-            class="btn btn-ghost btn-xs btn-square h-6 min-h-6 w-6 shrink-0 p-0"
-            aria-label="Dismiss message"
-            title="Dismiss"
+            ptahIconButton
+            label="Dismiss message"
+            size="xs"
+            class="shrink-0"
             data-testid="git-dock-status-dismiss"
             (click)="dismissStatus(line.source)"
           >

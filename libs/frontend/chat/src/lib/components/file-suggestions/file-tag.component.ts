@@ -6,6 +6,7 @@ import {
 } from '@angular/core';
 import { ChatFile } from '../../services';
 
+import { PtahIconButtonDirective } from '@ptah-extension/ui';
 /**
  * File Tag Component - Compact Chip for Selected Files
  * - Displays included file as a small removable chip
@@ -16,7 +17,7 @@ import { ChatFile } from '../../services';
 @Component({
   selector: 'ptah-file-tag',
   standalone: true,
-  imports: [],
+  imports: [PtahIconButtonDirective],
 
   template: `
     <div
@@ -32,9 +33,8 @@ import { ChatFile } from '../../services';
 
       <!-- Remove Button -->
       <button
-        class="btn btn-circle btn-ghost btn-xs h-4 w-4 min-h-0"
+        ptahIconButton size="xs" [label]="'Remove ' + file().name"
         (click)="removeFile.emit(); $event.stopPropagation()"
-        [attr.aria-label]="'Remove ' + file().name"
         type="button"
       >
         ✕

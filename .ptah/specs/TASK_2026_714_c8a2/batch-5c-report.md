@@ -36,8 +36,8 @@ Verification finished with exit code **1**. Nx reported three tasks: typecheck p
 - Batch 5b failure, outside ownership: codex-account-usage.service.spec.ts:378, "refuses an explicit home instead of returning default-home usage", passes /other/codex-home on Windows and rejects with "Absolute Codex home required" instead of resolving service-unavailable. Left unchanged for its owner.
 - Known Windows integration noise: six translation-proxy.sdk.integration.spec.ts tests fail during cleanup with EPERM/ENOTEMPTY.
 - Lint reports exactly three known errors: unused persistence-sqlite dependency (package.json:9), unexpected multiline call (provider-account.store.spec.ts:132), control-character regex (provider-account.store.ts:16). All 14 warnings are outside changed files; no new lint errors or warnings in batch-owned files.
-- Cached test log: C:/Users/abdal/.nx/8b7110c7390b9603/cache/terminalOutputs/14165712987154004191
-- Cached lint log: C:/Users/abdal/.nx/8b7110c7390b9603/cache/terminalOutputs/1728955970238562491
+- Cached test log: C:/Users/dev/.nx/8b7110c7390b9603/cache/terminalOutputs/14165712987154004191
+- Cached lint log: C:/Users/dev/.nx/8b7110c7390b9603/cache/terminalOutputs/1728955970238562491
 
 Actual output tail:
 
@@ -62,10 +62,10 @@ At line:1 char:1
 
 
 ✖ nx run @ptah-extension/auth-providers:test
-  full log: C:\Users\abdal\.nx\8b7110c7390b9603\cache\terminalOutputs\14165712987154004191
+  full log: C:\Users\dev\.nx\8b7110c7390b9603\cache\terminalOutputs\14165712987154004191
 
 ✖ nx run @ptah-extension/auth-providers:lint
-  full log: C:\Users\abdal\.nx\8b7110c7390b9603\cache\terminalOutputs\1728955970238562491
+  full log: C:\Users\dev\.nx\8b7110c7390b9603\cache\terminalOutputs\1728955970238562491
 
 Re-run with --output-style=static to inline logs.
 

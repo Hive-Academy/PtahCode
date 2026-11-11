@@ -25,6 +25,7 @@ import {
   toolOutputPlainText,
 } from '../../utils/tool-text.utils';
 import { TOOL_OUTPUT_MARKDOWN_STYLES } from './tool-output-markdown.styles';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** Languages read as plain text: short output in them gets no label row. */
 const TEXT_LANGUAGES: ReadonlySet<string> = new Set(['text', 'markdown']);
@@ -66,7 +67,7 @@ let nextBlockId = 0;
 @Component({
   selector: 'ptah-code-output',
   standalone: true,
-  imports: [SurfaceMarkdownPipe, MarkdownModule, CopyTextButtonComponent],
+  imports: [SurfaceMarkdownPipe, MarkdownModule, CopyTextButtonComponent, PtahButtonDirective],
   host: { '(keydown.escape)': 'collapseOnEscape($event)' },
   template: `
     <div class="relative group/output">
@@ -97,7 +98,10 @@ let nextBlockId = 0;
               <button
                 #expandToggle
                 type="button"
-                class="btn btn-ghost btn-xs h-7 min-h-0 px-2 text-[11px] font-normal shrink-0"
+                ptahButton
+                variant="ghost"
+                size="xs"
+                class="shrink-0"
                 [attr.aria-expanded]="expanded()"
                 [attr.aria-controls]="blockId"
                 (click)="toggleExpanded()"

@@ -1,10 +1,11 @@
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 import { AudioLines, CircleGauge, LucideAngularModule, Moon, Settings, Sparkles, Sun } from 'lucide-angular';
 
 @Component({
   selector: 'ptah-command-center-header',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <header class="flex min-h-[60px] flex-wrap items-center justify-between gap-2 border-b border-base-300 bg-base-100 px-4 py-1 text-base-content" data-glass-surface="bar">
@@ -18,9 +19,9 @@ import { AudioLines, CircleGauge, LucideAngularModule, Moon, Settings, Sparkles,
       <div class="flex min-w-0 flex-wrap items-center gap-1">
         @if (micError()) {
           <span role="alert" class="text-xs text-error">Microphone access blocked</span>
-          <button type="button" class="btn btn-ghost btn-sm underline" (click)="voiceSettings.emit()">Open Voice settings</button>
+          <button type="button" ptahButton variant="ghost" class="underline" (click)="voiceSettings.emit()">Open Voice settings</button>
         }
-        <button type="button" class="btn btn-ghost btn-sm max-w-full gap-1 border border-base-300 bg-base-200 font-mono text-xs" [attr.aria-label]="voiceAriaStatus()" [title]="voiceAriaStatus()" (click)="voiceSettings.emit()">
+        <button type="button" ptahButton class="max-w-full" [attr.aria-label]="voiceAriaStatus()" [title]="voiceAriaStatus()" (click)="voiceSettings.emit()">
           <lucide-angular [img]="audioIcon" class="size-4" aria-hidden="true" />
           <span class="size-2 rounded-full" [class.bg-success]="voiceReady()" [class.bg-warning]="!voiceReady()" aria-hidden="true"></span>
           <span class="truncate">{{ voiceProviderText() }}</span>
@@ -33,8 +34,8 @@ import { AudioLines, CircleGauge, LucideAngularModule, Moon, Settings, Sparkles,
             @if (contextWarning()) { <span>· Warning</span> }
           </span>
         }
-        <button type="button" class="btn btn-ghost btn-sm border border-base-300" (click)="voiceSettings.emit()"><lucide-angular [img]="settingsIcon" class="mr-1 size-4" aria-hidden="true" />Voice settings</button>
-        <button type="button" class="btn btn-ghost btn-sm border border-base-300" [attr.aria-label]="darkMode() ? 'Switch to light theme' : 'Switch to dark theme'" (click)="themeToggle.emit()"><lucide-angular [img]="darkMode() ? sunIcon : moonIcon" class="size-4" aria-hidden="true" /></button>
+        <button type="button" ptahButton (click)="voiceSettings.emit()"><lucide-angular [img]="settingsIcon" class="mr-1 size-4" aria-hidden="true" />Voice settings</button>
+        <button type="button" ptahIconButton variant="secondary" [label]="darkMode() ? 'Switch to light theme' : 'Switch to dark theme'" (click)="themeToggle.emit()"><lucide-angular [img]="darkMode() ? sunIcon : moonIcon" class="size-4" aria-hidden="true" /></button>
       </div>
     </header>
   `,

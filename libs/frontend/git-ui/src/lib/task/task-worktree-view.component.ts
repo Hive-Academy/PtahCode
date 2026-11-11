@@ -39,6 +39,10 @@ import { GitStatusService } from '../services/git-status.service';
 import { WorktreeService } from '../services/worktree.service';
 import { GitConfirmDialogComponent } from '../shared/git-confirm-dialog.component';
 import { TaskPrPanelComponent } from './task-pr-panel.component';
+import {
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 
 /**
  * While the Task tab shows, PR status is re-read at most this often by the
@@ -84,6 +88,8 @@ let instanceCount = 0;
   selector: 'ptah-task-worktree-view',
   standalone: true,
   imports: [
+    PtahButtonDirective,
+    PtahIconButtonDirective,
     GitConfirmDialogComponent,
     LucideAngularModule,
     OpenInButtonComponent,
@@ -106,10 +112,10 @@ let instanceCount = 0;
           <h3 class="m-0 text-xs font-semibold">Branch</h3>
           <button
             type="button"
-            class="btn btn-ghost btn-xs px-1"
+            ptahIconButton
+            label="Refresh task view"
+            size="xs"
             data-testid="task-refresh"
-            aria-label="Refresh task view"
-            title="Refresh"
             (click)="onRefresh()"
           >
             <lucide-angular
@@ -212,7 +218,8 @@ let instanceCount = 0;
           <button
             #addToggle
             type="button"
-            class="btn btn-outline btn-xs gap-1"
+            ptahButton
+            size="xs"
             data-testid="task-worktree-add-toggle"
             [attr.aria-expanded]="showAddForm()"
             [attr.aria-controls]="addFormId"
@@ -283,7 +290,10 @@ let instanceCount = 0;
             <div class="flex gap-1">
               <button
                 type="button"
-                class="btn btn-primary btn-xs flex-1"
+                ptahButton
+                variant="primary"
+                size="xs"
+                class="flex-1"
                 data-testid="task-worktree-create"
                 [disabled]="
                   !newBranch().trim() || isAdding() || operationOpen()
@@ -302,7 +312,9 @@ let instanceCount = 0;
               </button>
               <button
                 type="button"
-                class="btn btn-ghost btn-xs"
+                ptahButton
+                variant="ghost"
+                size="xs"
                 (click)="closeAddForm()"
               >
                 Cancel
@@ -325,7 +337,9 @@ let instanceCount = 0;
             <span class="flex-1">{{ loadError }}</span>
             <button
               type="button"
-              class="btn btn-ghost btn-xs"
+              ptahButton
+              variant="ghost"
+              size="xs"
               data-testid="task-worktrees-retry"
               [disabled]="worktrees.isLoading()"
               (click)="retryWorktrees()"
@@ -365,7 +379,7 @@ let instanceCount = 0;
                   type="button"
                   class="flex min-w-0 flex-1 items-center gap-2 rounded px-2 py-1 text-left hover:bg-base-300"
                   data-testid="task-worktree-switch"
-                    [disabled]="windowContext?.role === 'child'"
+                  [disabled]="windowContext?.role === 'child'"
                   [attr.aria-current]="isActiveWorktree(wt) ? 'true' : null"
                   [attr.aria-label]="rowLabel(wt)"
                   [title]="'Switch to ' + wt.path"
@@ -421,10 +435,11 @@ let instanceCount = 0;
                 @if (!wt.isMain) {
                   <button
                     type="button"
-                    class="btn btn-ghost btn-xs flex-shrink-0 px-1"
+                    ptahIconButton
+                    [label]="'Remove worktree ' + branchLabel(wt)"
+                    size="xs"
+                    class="flex-shrink-0"
                     data-testid="task-worktree-remove"
-                    [attr.aria-label]="'Remove worktree ' + branchLabel(wt)"
-                    title="Remove worktree"
                     [disabled]="isRemoving()"
                     (click)="onRemoveClick($event, wt)"
                   >
@@ -470,7 +485,9 @@ let instanceCount = 0;
   `,
 })
 export class TaskWorktreeViewComponent {
-  protected readonly windowContext = inject(GIT_WINDOW_CONTEXT, { optional: true });
+  protected readonly windowContext = inject(GIT_WINDOW_CONTEXT, {
+    optional: true,
+  });
   /** Whether the Task tab is the one showing; the PR timer runs only then. */
   readonly shown = input(false);
 

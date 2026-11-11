@@ -13,6 +13,7 @@ import {
   type ContextCapacity,
 } from '@ptah-extension/shared';
 import { ModelStateService } from '@ptah-extension/core';
+import { PtahIconButtonDirective } from '@ptah-extension/ui';
 import { CostBadgeComponent } from '../../atoms/cost-badge.component';
 import { LaneSubtotalTileComponent } from './plan-limits/lane-subtotal-tile.component';
 import { LaneUsageTileComponent } from './plan-limits/lane-usage-tile.component';
@@ -84,6 +85,7 @@ export interface LiveModelStats {
     LaneUsageTileComponent,
     LaneSubtotalTileComponent,
     SessionModelBreakdownComponent,
+    PtahIconButtonDirective,
   ],
   templateUrl: './session-stats-summary.component.html',
   styleUrl: './session-stats-summary.component.css',

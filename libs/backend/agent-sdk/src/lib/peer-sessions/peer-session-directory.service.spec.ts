@@ -6,7 +6,7 @@ import {
 } from './peer-session-directory.service';
 import type { PeerSessionRecord } from './peer-session-registry.reader';
 
-const HOST = 'win32:abdo';
+const HOST = 'win32:dev';
 const NOW = 1789205500000;
 
 /** The live 2.1.268 record, reachable: pid 16288 started at 1789204846174. */

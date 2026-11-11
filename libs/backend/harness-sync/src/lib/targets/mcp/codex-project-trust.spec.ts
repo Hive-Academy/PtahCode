@@ -181,7 +181,7 @@ describe('codexProjectTrusted', () => {
     seed(
       [
         'notify = [ "C:\\\\tools\\\\notify.exe", "turn-ended" ]',
-        "[projects.'c:\\users\\abdal']",
+        "[projects.'c:\\users\\dev']",
         'trust_level = "trusted"',
         '',
         "[projects.'d:\\projects\\ptah-extension']",
@@ -200,20 +200,20 @@ describe('codexProjectTrusted', () => {
     );
 
     expect(trusted()).toBe(true);
-    expect(trusted('C:\\Users\\abdal')).toBe(true);
+    expect(trusted('C:\\Users\\dev')).toBe(true);
     expect(trusted('D:\\projects\\other')).toBe(false);
   });
 
   it("does not treat a parent project's trust as inherited", () => {
-    // Measured: a temp repo under `C:\Users\abdal\AppData\...` was IGNORED by
-    // Codex even though `c:\users\abdal` is trusted. Trust is per exact path.
+    // Measured: a temp repo under `C:\Users\dev\AppData\...` was IGNORED by
+    // Codex even though `c:\users\dev` is trusted. Trust is per exact path.
     seed(
-      ["[projects.'c:\\users\\abdal']", 'trust_level = "trusted"', ''].join(
+      ["[projects.'c:\\users\\dev']", 'trust_level = "trusted"', ''].join(
         '\n',
       ),
     );
 
-    expect(trusted('C:\\Users\\abdal\\AppData\\Local\\Temp\\repo')).toBe(false);
+    expect(trusted('C:\\Users\\dev\\AppData\\Local\\Temp\\repo')).toBe(false);
   });
 
   it('never writes anything', () => {
@@ -247,19 +247,19 @@ describe('case sensitivity is per filesystem, not unconditional', () => {
     });
 
     it('is what makes Windows work at all — Codex stores paths lowercased', () => {
-      // `C:\Users\abdal` is recorded as `c:\users\abdal`. Exact comparison
+      // `C:\Users\dev` is recorded as `c:\users\dev`. Exact comparison
       // would report every Windows project untrusted.
       const win = [
-        "[projects.'c:\\users\\abdal\\proj']",
+        "[projects.'c:\\users\\dev\\proj']",
         'trust_level = "trusted"',
         '',
       ].join('\n');
 
       expect(
-        trustLevelFor(win, 'C:\\Users\\abdal\\proj', { caseInsensitive: true }),
+        trustLevelFor(win, 'C:\\Users\\dev\\proj', { caseInsensitive: true }),
       ).toBe('trusted');
       expect(
-        trustLevelFor(win, 'C:\\Users\\abdal\\proj', {
+        trustLevelFor(win, 'C:\\Users\\dev\\proj', {
           caseInsensitive: false,
         }),
       ).toBeNull();

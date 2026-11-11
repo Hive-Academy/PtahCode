@@ -29,6 +29,7 @@ import {
   CatalogCardSkeletonComponent,
   CatalogGridComponent,
   MonogramTileComponent,
+  PtahButtonDirective,
   StorefrontPanelComponent,
   resolveListingBrandSlug,
   type CatalogCardBadge,
@@ -136,6 +137,7 @@ interface RegistryCardView {
     MonogramTileComponent,
     StorefrontPanelComponent,
     InstallScopeFieldComponent,
+    PtahButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -144,7 +146,9 @@ interface RegistryCardView {
         <div class="alert alert-info alert-sm py-1 px-2" role="status">
           <span class="text-xs" data-testid="mcp-notice">{{ notice() }}</span>
           <button
-            class="btn btn-ghost btn-xs"
+            ptahButton
+            variant="ghost"
+            size="xs"
             (click)="notice.set(null)"
             type="button"
           >
@@ -247,7 +251,8 @@ interface RegistryCardView {
                 }
                 <div card-actions>
                   <button
-                    class="btn btn-primary btn-sm"
+                    ptahButton
+                    variant="primary"
                     [disabled]="installingServerNames().has(card.server.name)"
                     (click)="toggleInstallPanel(card.server)"
                     type="button"
@@ -431,7 +436,8 @@ interface RegistryCardView {
                     @if (!isLoadingDetails() && suggestedConfig()) {
                       <div panel-footer>
                         <button
-                          class="btn btn-primary btn-sm"
+                          ptahButton
+                          variant="primary"
                           [disabled]="
                             !installable() ||
                             !canInstall() ||

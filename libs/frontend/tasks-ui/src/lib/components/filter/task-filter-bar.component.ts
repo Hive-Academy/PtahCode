@@ -30,6 +30,10 @@ import {
   TASK_STATUS_LABELS,
   labelChipClass,
 } from '../../task-presentation';
+import {
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 
 /**
  * One entry in a facet menu.
@@ -241,7 +245,12 @@ export class TaskFacetMenuComponent {
 @Component({
   selector: 'ptah-task-filter-bar',
   standalone: true,
-  imports: [LucideAngularModule, TaskFacetMenuComponent],
+  imports: [
+    PtahButtonDirective,
+    PtahIconButtonDirective,
+    LucideAngularModule,
+    TaskFacetMenuComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -381,10 +390,10 @@ export class TaskFacetMenuComponent {
         </label>
         <button
           type="button"
-          class="btn btn-ghost btn-sm btn-square border border-surface-border font-mono"
+          ptahIconButton
+          variant="secondary"
+          [label]="sortDirectionLabel()"
           data-testid="task-sort-direction"
-          [attr.aria-label]="sortDirectionLabel()"
-          [title]="sortDirectionLabel()"
           (click)="onSortDirection()"
         >
           {{ sort().direction === 'asc' ? '↑' : '↓' }}
@@ -407,7 +416,8 @@ export class TaskFacetMenuComponent {
 
         <button
           type="button"
-          class="btn btn-ghost btn-sm"
+          ptahButton
+          variant="ghost"
           data-testid="task-filter-clear"
           [disabled]="!active()"
           [title]="

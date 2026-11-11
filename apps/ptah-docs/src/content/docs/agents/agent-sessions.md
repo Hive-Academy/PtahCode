@@ -11,17 +11,18 @@ A child session is not a [CLI agent](/agents/cli-agents/). A CLI agent is a vend
 
 You own the outcome. The worktree and the branch remain after a child ends, and nothing is merged, pushed or removed for you.
 
-## The five tools
+## The six tools
 
 The parent's agent calls these. Each child is addressed by the `sessionId` that `ptah_session_start` returns.
 
-| Tool                  | What it does                                                      |
-| --------------------- | ----------------------------------------------------------------- |
-| `ptah_session_start`  | Creates a worktree and branch, opens the child tab, runs the task |
-| `ptah_session_send`   | Sends the child a message (the main way to steer it)              |
-| `ptah_session_status` | Reports the state of one child, or all children of the caller     |
-| `ptah_session_read`   | Returns the tail of a child's transcript                          |
-| `ptah_session_stop`   | Stops a child                                                     |
+| Tool                          | What it does                                                                   |
+| ----------------------------- | ------------------------------------------------------------------------------ |
+| `ptah_session_start`          | Creates a worktree and branch, opens the child tab, runs the task              |
+| `ptah_session_send`           | Sends the child a message (the main way to steer it)                           |
+| `ptah_session_status`         | Reports the state of one child, or all children of the caller                  |
+| `ptah_session_read`           | Returns the tail of a child's transcript                                       |
+| `ptah_session_stop`           | Stops a child (or its successor when `followHandoff: true`)                    |
+| `ptah_session_clear_finished` | Removes finished (terminal) child sessions of the caller from the session list |
 
 ### `ptah_session_start`
 
@@ -37,6 +38,8 @@ The parent's agent calls these. Each child is addressed by the `sessionId` that 
 | `model`        | No       | A model for the child: a model ID of the runtime catalog, or `opus` / `sonnet` / `haiku` where the provider maps them. An unknown value is refused (`invalid-model`) with the accepted IDs. Omit it for the default model. |
 | `effort`       | No       | Reasoning effort for the child: `low`, `medium`, `high`, `xhigh` or `max`. Any other value is refused (`invalid-effort`). Omit it for the default effort. |
 
+If the `ptah_session_start` call returns a timeout, the host can still be starting the child. Call `ptah_session_status` first: a `starting` child on your branch is your start, so do not start again.
+
 There is deliberately no permission, path or parent argument. The caller is whichever session made the call, and any extra argument is rejected rather than ignored.
 
 ### `ptah_session_send`
@@ -51,7 +54,7 @@ The result states the effect (`started-turn`, `held-until-turn-end` or `interrup
 
 ### `ptah_session_status`
 
-Takes an optional `sessionId`; without it, every child of the caller is listed. For each child it shows the status (`starting`, `working`, `awaiting-permission`, `waiting`, `idle`, `handed-off`, `failed`, `stopped`, `timed-out` or `ended`), branch, base ref, worktree path, turns settled, reports delivered and refused, the last completion, any held completion, and the permission prompt it is waiting on with the time it will be denied. A `handed-off` child shows its `succeededBy` id. The old id still works with send, status, read, and stop; those tools forward to the successor.
+Takes an optional `sessionId` and an optional `includeFinished` boolean. Without `sessionId`, it lists live children (`starting`, `working`, `awaiting-permission`, `waiting`, `idle`) in full and finished (terminal) children as counts per outcome kind plus one short line each; pass `includeFinished: true` (or a specific `sessionId`) for full records. Each finished child includes its `outcome` (`completed`, `handed-off`, `stopped`, `interrupted`, `failed`, `timed-out` or `unknown`) along with its end reason in plain words that name who ended it, the machine `cause` when one was recorded, the `endedAt` timestamp, and `successorId` (`succeededBy`) when handed off. `unknown` means the record has no end cause (it was recorded before outcome tracking); the kind is never guessed. The finished counts include every kind. An `idle` child with 0 settled turns is shown as `starting (first turn not started)`. A start that is still in progress is listed as `starting` with its id, branch and start time. Send, status, and read on a handed-off id forward to the successor; `ptah_session_stop` requires `followHandoff: true` to stop the successor.
 
 ### `ptah_session_read`
 
@@ -64,7 +67,20 @@ If the transcript is longer, the tail is shown and the head says earlier turns a
 
 ### `ptah_session_stop`
 
-Takes a `sessionId`. The child's tab, transcript, worktree and branch remain.
+| Argument        | Required | Description                                                                                                          |
+| --------------- | -------- | -------------------------------------------------------------------------------------------------------------------- |
+| `sessionId`     | Yes      | The child to stop.                                                                                                   |
+| `followHandoff` | No       | When `true`, follows a handoff chain and stops the latest successor; otherwise a handed-off id is refused (`handed-off`) naming the successor. |
+
+The reply names the session that was stopped (or notes that it had already ended). The child's tab, transcript, worktree and branch remain.
+
+### `ptah_session_clear_finished`
+
+| Argument     | Required | Description                                                                                             |
+| ------------ | -------- | ------------------------------------------------------------------------------------------------------- |
+| `sessionIds` | No       | Up to 50 child session ids to clear. Omit to clear every finished (terminal) child session of the caller. |
+
+Removes finished (terminal) child sessions of the caller from the session list. Live children are never removed, and worktrees, branches, transcripts and tabs are never deleted. Returns the count and ids cleared, plus any skipped ids with their reason (`live`, `held-completion`, `unknown-child` or `not-a-child-of-caller`). A child whose completion was not delivered yet is skipped; that completion comes in the same reply, so the next call clears the child.
 
 ## How a child reports back
 

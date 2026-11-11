@@ -21,6 +21,7 @@ import type {
   GitCheckoutResult,
 } from '@ptah-extension/shared';
 import { GitBranchesService } from '../services/git-branches.service';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** A switch git refused because local changes would be overwritten. */
 interface BlockedSwitch {
@@ -49,7 +50,7 @@ type SwitchMode = Pick<GitCheckoutParams, 'stash' | 'force'>;
 @Component({
   selector: 'ptah-branch-picker-dropdown',
   standalone: true,
-  imports: [FormsModule, LucideAngularModule],
+  imports: [PtahButtonDirective, FormsModule, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     class: 'relative',
@@ -152,7 +153,9 @@ type SwitchMode = Pick<GitCheckoutParams, 'stash' | 'force'>;
                 </button>
                 <button
                   type="button"
-                  class="btn btn-ghost btn-xs"
+                  ptahButton
+                  variant="ghost"
+                  size="xs"
                   [disabled]="busy()"
                   (click)="confirmingDiscard.set(false)"
                 >
@@ -164,9 +167,10 @@ type SwitchMode = Pick<GitCheckoutParams, 'stash' | 'force'>;
                 <button
                   #stashSwitchButton
                   type="button"
-                  class="btn btn-primary btn-xs
-                         focus:!outline focus:!outline-2 focus:!outline-offset-2
-                         focus:!outline-[oklch(var(--s))]"
+                  ptahButton
+                  variant="primary"
+                  size="xs"
+                  class="focus:!outline focus:!outline-2 focus:!outline-offset-2 focus:!outline-[oklch(var(--s))]"
                   data-testid="stash-switch"
                   [disabled]="busy()"
                   (click)="retryBlocked({ stash: true })"
@@ -175,7 +179,9 @@ type SwitchMode = Pick<GitCheckoutParams, 'stash' | 'force'>;
                 </button>
                 <button
                   type="button"
-                  class="btn btn-ghost btn-xs"
+                  ptahButton
+                  variant="ghost"
+                  size="xs"
                   [disabled]="busy()"
                   (click)="cancelBlocked()"
                 >
@@ -234,9 +240,10 @@ type SwitchMode = Pick<GitCheckoutParams, 'stash' | 'force'>;
             <button
               #stashNoticeDismiss
               type="button"
-              class="btn btn-ghost btn-xs
-                     focus:!outline focus:!outline-2 focus:!outline-offset-2
-                     focus:!outline-[oklch(var(--s))]"
+              ptahButton
+              variant="ghost"
+              size="xs"
+              class="focus:!outline focus:!outline-2 focus:!outline-offset-2 focus:!outline-[oklch(var(--s))]"
               data-testid="dismiss-stash-notice"
               (click)="close()"
             >
@@ -250,7 +257,10 @@ type SwitchMode = Pick<GitCheckoutParams, 'stash' | 'force'>;
           }
           @for (name of recent(); track name) {
             <button
-              class="btn btn-ghost btn-xs w-full justify-start"
+              ptahButton
+              variant="ghost"
+              size="xs"
+              class="w-full justify-start"
               [disabled]="busy()"
               (click)="switchTo(name)"
             >
@@ -260,7 +270,10 @@ type SwitchMode = Pick<GitCheckoutParams, 'stash' | 'force'>;
           <p class="px-2 text-[10px] uppercase opacity-50">Local</p>
           @for (branch of local(); track branch.name) {
             <button
-              class="btn btn-ghost btn-xs w-full justify-start"
+              ptahButton
+              variant="ghost"
+              size="xs"
+              class="w-full justify-start"
               [disabled]="branch.isCurrent || busy()"
               (click)="switchTo(branch.name)"
             >
@@ -276,7 +289,10 @@ type SwitchMode = Pick<GitCheckoutParams, 'stash' | 'force'>;
           <p class="px-2 text-[10px] uppercase opacity-50">Remote</p>
           @for (branch of remote(); track branch.name) {
             <button
-              class="btn btn-ghost btn-xs w-full justify-start"
+              ptahButton
+              variant="ghost"
+              size="xs"
+              class="w-full justify-start"
               [disabled]="busy()"
               (click)="switchTo(branch.name, true)"
             >
@@ -294,7 +310,9 @@ type SwitchMode = Pick<GitCheckoutParams, 'stash' | 'force'>;
             (keydown.enter)="create()"
           />
           <button
-            class="btn btn-primary btn-xs"
+            ptahButton
+            variant="primary"
+            size="xs"
             [disabled]="!newBranch().trim() || busy()"
             (click)="create()"
           >

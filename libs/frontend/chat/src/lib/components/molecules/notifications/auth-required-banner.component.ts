@@ -7,6 +7,7 @@ import {
 } from '@angular/core';
 import { LucideAngularModule, KeyRound, X } from 'lucide-angular';
 
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 let nextId = 0;
 
 /**
@@ -28,7 +29,7 @@ let nextId = 0;
  */
 @Component({
   selector: 'ptah-auth-required-banner',
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (message()) {
@@ -50,9 +51,8 @@ let nextId = 0;
           @if (carryOverProvider(); as provider) {
             <button
               type="button"
-              class="btn btn-xs btn-outline text-base-content-muted gap-0.5 px-2"
+              ptahButton size="xs" [busy]="carryOverBusy()"
               [disabled]="carryOverBusy()"
-              [attr.aria-busy]="carryOverBusy()"
               [attr.aria-describedby]="disclosureId"
               (click)="carryOver.emit()"
             >
@@ -73,7 +73,7 @@ let nextId = 0;
           }
           <button
             type="button"
-            class="btn btn-xs btn-primary gap-0.5 px-2"
+            ptahButton variant="primary" size="xs"
             (click)="reauth.emit()"
             [attr.aria-label]="reauthLabel()"
           >
@@ -81,9 +81,8 @@ let nextId = 0;
           </button>
           <button
             type="button"
-            class="btn btn-xs btn-ghost px-1"
+            ptahIconButton size="xs" label="Dismiss"
             (click)="dismiss.emit()"
-            aria-label="Dismiss"
           >
             <lucide-angular [img]="XIcon" class="w-3 h-3" aria-hidden="true" />
           </button>

@@ -21,6 +21,7 @@ import {
 } from '@ptah-extension/chat-state';
 import { wrapTabWithin } from '../../utils/focus-wrap.utils';
 
+import { PtahButtonDirective } from '@ptah-extension/ui';
 let nextId = 0;
 
 /**
@@ -33,7 +34,7 @@ let nextId = 0;
 @Component({
   selector: 'ptah-confirmation-dialog',
   standalone: true,
-  imports: [],
+  imports: [PtahButtonDirective],
   template: `
     <dialog
       #dialog
@@ -67,7 +68,7 @@ let nextId = 0;
             </div>
           }
           <div class="modal-action">
-            <button #cancelButton class="btn btn-ghost" (click)="onCancel()">
+            <button #cancelButton ptahButton variant="ghost" size="md" (click)="onCancel()">
               {{ options.cancelLabel }}
             </button>
             <button

@@ -18,6 +18,7 @@ import {
   Wrench,
 } from 'lucide-angular';
 
+import { PtahIconButtonDirective } from '@ptah-extension/ui';
 /**
  * Global configuration actions for the Electron navbar: Thoth, Marketplace
  * and Settings as icon buttons, next to the theme toggle. With a workspace,
@@ -30,16 +31,14 @@ import {
 @Component({
   selector: 'ptah-global-config-actions',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @for (item of items(); track item.id) {
       <button
         type="button"
-        class="btn btn-ghost btn-sm btn-square focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        ptahIconButton [label]="item.label"
         [attr.data-test]="'config-menu-item-' + (item.testId ?? item.id)"
-        [attr.aria-label]="item.label"
-        [title]="item.title ?? item.label"
         [attr.aria-current]="
           openConfigurationSurface() === item.id ? 'true' : null
         "

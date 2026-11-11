@@ -227,7 +227,8 @@ export function skillNameGroups(
           </p>
           <button
             type="button"
-            class="btn btn-ghost btn-sm gap-1"
+            ptahButton
+            variant="ghost"
             data-testid="skill-detail-retry"
             (click)="retry()"
           >
@@ -473,7 +474,8 @@ export function skillNameGroups(
               } @else {
                 <button
                   type="button"
-                  class="btn btn-outline btn-error btn-sm"
+                  ptahButton
+                  variant="danger"
                   data-testid="skill-detail-uninstall"
                   [disabled]="pending()"
                   (click)="uninstall()"

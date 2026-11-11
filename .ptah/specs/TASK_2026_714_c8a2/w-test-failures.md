@@ -73,7 +73,7 @@ A worker process has failed to exit gracefully and has been force exited. This i
 ## log 3274654003095684710
   ● PluginLoaderService — capability layers › explicit ancestor policy › deduplicates canonical and same-root aliases for policy and fingerprint
 
-    EPERM: operation not permitted, symlink 'C:\Users\abdal\AppData\Local\Temp\ptah-policy-a-cDTqK3' -> 'C:\Users\abdal\AppData\Local\Temp\ptah-policy-b-G0JVhy\alias'
+    EPERM: operation not permitted, symlink 'C:\Users\dev\AppData\Local\Temp\ptah-policy-a-cDTqK3' -> 'C:\Users\dev\AppData\Local\Temp\ptah-policy-b-G0JVhy\alias'
 
       322 |       const a = tempDir('ptah-policy-a-');
       323 |       const alias = path.join(b, 'alias');
@@ -87,7 +87,7 @@ A worker process has failed to exit gracefully and has been force exited. This i
  FAIL   agent-sdk  src/lib/helpers/plugin-loader.service.session-notice.spec.ts (34.53 s)
   ● PluginLoaderService.getSessionPluginNotice › recognizes a symlinked alias of the project root in the lineage
 
-    EPERM: operation not permitted, symlink 'C:\Users\abdal\AppData\Local\Temp\ptah-session-notice-uTAuIo\project' -> 'C:\Users\abdal\AppData\Local\Temp\ptah-session-notice-uTAuIo\project-alias'
+    EPERM: operation not permitted, symlink 'C:\Users\dev\AppData\Local\Temp\ptah-session-notice-uTAuIo\project' -> 'C:\Users\dev\AppData\Local\Temp\ptah-session-notice-uTAuIo\project-alias'
 
       218 |     const h = setup();
       219 |     const alias = path.join(h.base, 'project-alias');
@@ -213,7 +213,7 @@ A worker process has failed to exit gracefully and has been force exited. This i
 ## log 1680660326656726010
   ● TASK_2026_408 Batch 9 — SDK/CLI/proxy integration (mocked upstream only) › S1 Skill: real SDK/CLI calls the Skill tool with args forwarded, real CodexTranslationProxy relays to the (mocked) upstream, final result is success
 
-    EPERM, Permission denied: \\?\C:\Users\abdal\AppData\Local\Temp\ptah-sdk-int-r06mpb\scenario-RvEL8A '\\?\C:\Users\abdal\AppData\Local\Temp\ptah-sdk-int-r06mpb\scenario-RvEL8A'
+    EPERM, Permission denied: \\?\C:\Users\dev\AppData\Local\Temp\ptah-sdk-int-r06mpb\scenario-RvEL8A '\\?\C:\Users\dev\AppData\Local\Temp\ptah-sdk-int-r06mpb\scenario-RvEL8A'
 
       175 | function removeTree(dir: string): void {
       176 |   // Windows can briefly hold handles of a just-exited process tree.
@@ -226,7 +226,7 @@ A worker process has failed to exit gracefully and has been force exited. This i
 
   ● TASK_2026_408 Batch 9 — SDK/CLI/proxy integration (mocked upstream only) › S2 slash command: /fixture-cmd hello world is expanded by the real CLI before it reaches the (mocked) upstream
 
-    EPERM, Permission denied: \\?\C:\Users\abdal\AppData\Local\Temp\ptah-sdk-int-r06mpb\scenario-DYFzMd '\\?\C:\Users\abdal\AppData\Local\Temp\ptah-sdk-int-r06mpb\scenario-DYFzMd'
+    EPERM, Permission denied: \\?\C:\Users\dev\AppData\Local\Temp\ptah-sdk-int-r06mpb\scenario-DYFzMd '\\?\C:\Users\dev\AppData\Local\Temp\ptah-sdk-int-r06mpb\scenario-DYFzMd'
 
       175 | function removeTree(dir: string): void {
       176 |   // Windows can briefly hold handles of a just-exited process tree.
@@ -239,7 +239,7 @@ A worker process has failed to exit gracefully and has been force exited. This i
 
   ● TASK_2026_408 Batch 9 — SDK/CLI/proxy integration (mocked upstream only) › S3 unknown slash command: /no-such-cmd x — pins the OBSERVED behaviour (Assumption A3), never a silent expansion
 
-    EPERM, Permission denied: \\?\C:\Users\abdal\AppData\Local\Temp\ptah-sdk-int-r06mpb\scenario-xKPTkQ '\\?\C:\Users\abdal\AppData\Local\Temp\ptah-sdk-int-r06mpb\scenario-xKPTkQ'
+    EPERM, Permission denied: \\?\C:\Users\dev\AppData\Local\Temp\ptah-sdk-int-r06mpb\scenario-xKPTkQ '\\?\C:\Users\dev\AppData\Local\Temp\ptah-sdk-int-r06mpb\scenario-xKPTkQ'
 
       175 | function removeTree(dir: string): void {
       176 |   // Windows can briefly hold handles of a just-exited process tree.
@@ -252,7 +252,7 @@ A worker process has failed to exit gracefully and has been force exited. This i
 
   ● TASK_2026_408 Batch 9 — SDK/CLI/proxy integration (mocked upstream only) › S4 unknown tool: a hallucinated tool call is rejected by the real CLI with "No such tool available", disclosed to the (mocked) upstream
 
-    EPERM, Permission denied: \\?\C:\Users\abdal\AppData\Local\Temp\ptah-sdk-int-r06mpb\scenario-vFeC9Q '\\?\C:\Users\abdal\AppData\Local\Temp\ptah-sdk-int-r06mpb\scenario-vFeC9Q'
+    EPERM, Permission denied: \\?\C:\Users\dev\AppData\Local\Temp\ptah-sdk-int-r06mpb\scenario-vFeC9Q '\\?\C:\Users\dev\AppData\Local\Temp\ptah-sdk-int-r06mpb\scenario-vFeC9Q'
 
       175 | function removeTree(dir: string): void {
       176 |   // Windows can briefly hold handles of a just-exited process tree.
@@ -265,7 +265,7 @@ A worker process has failed to exit gracefully and has been force exited. This i
 
   ● TASK_2026_408 Batch 9 — SDK/CLI/proxy integration (mocked upstream only) › S5 long MCP name round-trips: upstream sees only the alias, handler receives the args, replay reuses the alias, image tool result becomes input_image for Codex
 
-    EPERM, Permission denied: \\?\C:\Users\abdal\AppData\Local\Temp\ptah-sdk-int-r06mpb\scenario-F8GEV3 '\\?\C:\Users\abdal\AppData\Local\Temp\ptah-sdk-int-r06mpb\scenario-F8GEV3'
+    EPERM, Permission denied: \\?\C:\Users\dev\AppData\Local\Temp\ptah-sdk-int-r06mpb\scenario-F8GEV3 '\\?\C:\Users\dev\AppData\Local\Temp\ptah-sdk-int-r06mpb\scenario-F8GEV3'
 
       175 | function removeTree(dir: string): void {
       176 |   // Windows can briefly hold handles of a just-exited process tree.
@@ -282,8 +282,8 @@ A worker process has failed to exit gracefully and has been force exited. This i
 
     expect(jest.fn()).toHaveBeenCalledWith(...expected)
 
-    Expected: "11111111-1111-4111-8111-111111111111", ObjectContaining {"pluginConfigAncestorRoots": ["C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-N7b9UV/b"], "projectPath": "C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-N7b9UV/b/child"}
-    Received: "11111111-1111-4111-8111-111111111111", {"effort": undefined, "enhancedPromptsContent": undefined, "mcpServerRunning": false, "model": "default", "pluginConfigAncestorRoots": ["C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-N7b9UV\\b"], "projectPath": "C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-N7b9UV/b/child", "prompt": "continue", "providerProfile": undefined, "tabId": "22222222-2222-4222-8222-222222222222", "thinking": undefined, "workflowsDisabled": false}
+    Expected: "11111111-1111-4111-8111-111111111111", ObjectContaining {"pluginConfigAncestorRoots": ["C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-N7b9UV/b"], "projectPath": "C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-N7b9UV/b/child"}
+    Received: "11111111-1111-4111-8111-111111111111", {"effort": undefined, "enhancedPromptsContent": undefined, "mcpServerRunning": false, "model": "default", "pluginConfigAncestorRoots": ["C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-N7b9UV\\b"], "projectPath": "C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-N7b9UV/b/child", "prompt": "continue", "providerProfile": undefined, "tabId": "22222222-2222-4222-8222-222222222222", "thinking": undefined, "workflowsDisabled": false}
 
     Number of calls: 1
 
@@ -299,7 +299,7 @@ A worker process has failed to exit gracefully and has been force exited. This i
  FAIL   rpc-handlers  src/lib/chat/session/chat-session-agent-child.spec.ts
   ● ChatSessionService — SDK launch identity (TASK_2026_584) › startAgentChildSession › deduplicates an ancestor by physical identity
 
-    EPERM: operation not permitted, symlink 'C:\Users\abdal\AppData\Local\Temp\ptah-session-policy-JiHGtX\my-repo\parent' -> 'C:\Users\abdal\AppData\Local\Temp\ptah-session-policy-JiHGtX\my-repo\parent-alias'
+    EPERM: operation not permitted, symlink 'C:\Users\dev\AppData\Local\Temp\ptah-session-policy-JiHGtX\my-repo\parent' -> 'C:\Users\dev\AppData\Local\Temp\ptah-session-policy-JiHGtX\my-repo\parent-alias'
 
       382 |     it('deduplicates an ancestor by physical identity', async () => {
       383 |       const alias = join(ROOT, 'parent-alias');
@@ -318,10 +318,10 @@ A worker process has failed to exit gracefully and has been force exited. This i
     + Received  + 2
 
       Array [
-    -   "C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-JiHGtX/my-repo",
-    -   "C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-JiHGtX/my-repo/parent",
-    +   "C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-JiHGtX\\my-repo",
-    +   "C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-JiHGtX\\my-repo\\parent",
+    -   "C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-JiHGtX/my-repo",
+    -   "C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-JiHGtX/my-repo/parent",
+    +   "C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-JiHGtX\\my-repo",
+    +   "C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-JiHGtX\\my-repo\\parent",
       ]
 
       428 |       );
@@ -341,8 +341,8 @@ A worker process has failed to exit gracefully and has been force exited. This i
     + Received  + 1
 
       Array [
-    -   "C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-JiHGtX/my-repo",
-    +   "C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-JiHGtX\\my-repo",
+    -   "C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-JiHGtX/my-repo",
+    +   "C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-JiHGtX\\my-repo",
       ]
 
       471 |       const h = makeHarness();
@@ -362,10 +362,10 @@ A worker process has failed to exit gracefully and has been force exited. This i
     + Received  + 2
 
       Array [
-    -   "C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-JiHGtX/my-repo/.ptah/worktrees/child-1",
-    -   "C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-JiHGtX/my-repo",
-    +   "C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-JiHGtX\\my-repo\\.ptah\\worktrees\\child-1",
-    +   "C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-JiHGtX\\my-repo",
+    -   "C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-JiHGtX/my-repo/.ptah/worktrees/child-1",
+    -   "C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-JiHGtX/my-repo",
+    +   "C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-JiHGtX\\my-repo\\.ptah\\worktrees\\child-1",
+    +   "C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-JiHGtX\\my-repo",
       ]
 
       487 |       expect(
@@ -385,8 +385,8 @@ A worker process has failed to exit gracefully and has been force exited. This i
     + Received  + 1
 
       Array [
-    -   "C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-JiHGtX/my-repo",
-    +   "C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-JiHGtX\\my-repo",
+    -   "C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-JiHGtX/my-repo",
+    +   "C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-JiHGtX\\my-repo",
       ]
 
       694 |     );
@@ -401,7 +401,7 @@ A worker process has failed to exit gracefully and has been force exited. This i
  FAIL   rpc-handlers  src/lib/chat/session/session-folder.spec.ts
   ● resolveSessionFolder › rejects symlink escape from a registered folder
 
-    EPERM: operation not permitted, symlink 'C:\Users\abdal\AppData\Local\Temp\ptah-folder-xcNydv\outside' -> 'C:\Users\abdal\AppData\Local\Temp\ptah-folder-xcNydv\project\escape'
+    EPERM: operation not permitted, symlink 'C:\Users\dev\AppData\Local\Temp\ptah-folder-xcNydv\outside' -> 'C:\Users\dev\AppData\Local\Temp\ptah-folder-xcNydv\project\escape'
 
       86 |   it('rejects symlink escape from a registered folder', async () => {
       87 |     const link = join(project, 'escape');
@@ -414,7 +414,7 @@ A worker process has failed to exit gracefully and has been force exited. This i
 
   ● resolveSessionFolder › resolves physical aliases for identity checks
 
-    EPERM: operation not permitted, symlink 'C:\Users\abdal\AppData\Local\Temp\ptah-folder-o8F1h1\project\child' -> 'C:\Users\abdal\AppData\Local\Temp\ptah-folder-o8F1h1\project\alias'
+    EPERM: operation not permitted, symlink 'C:\Users\dev\AppData\Local\Temp\ptah-folder-o8F1h1\project\child' -> 'C:\Users\dev\AppData\Local\Temp\ptah-folder-o8F1h1\project\alias'
 
       93 |   it('resolves physical aliases for identity checks', async () => {
       94 |     const alias = join(project, 'alias');
@@ -430,7 +430,7 @@ A worker process has failed to exit gracefully and has been force exited. This i
     expect(received).rejects.toMatchObject()
 
     Received promise resolved instead of rejected
-    Resolved to value: "C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-folder-VFV569\\project\\child"
+    Resolved to value: "C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-folder-VFV569\\project\\child"
 
       122 |     await chmod(child, 0o000);
       123 |     try {
@@ -443,7 +443,7 @@ A worker process has failed to exit gracefully and has been force exited. This i
 
   ● resolveSessionFolder › rejects a dangling symlink filesystem error
 
-    EPERM: operation not permitted, symlink 'C:\Users\abdal\AppData\Local\Temp\ptah-folder-jNKkhf\missing' -> 'C:\Users\abdal\AppData\Local\Temp\ptah-folder-jNKkhf\project\broken'
+    EPERM: operation not permitted, symlink 'C:\Users\dev\AppData\Local\Temp\ptah-folder-jNKkhf\missing' -> 'C:\Users\dev\AppData\Local\Temp\ptah-folder-jNKkhf\project\broken'
 
       131 |   it('rejects a dangling symlink filesystem error', async () => {
       132 |     const broken = join(project, 'broken');
@@ -479,12 +479,12 @@ A worker process has failed to exit gracefully and has been force exited. This i
 
 
  FAIL   rpc-handlers  src/lib/chat/session/chat-session-resume-activate.spec.ts
-  ● ChatSessionService — resumeSession activate:true (TS-04) › passes stored lineage ["C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-fLrxSd/my-repo/ancestor"] to activation
+  ● ChatSessionService — resumeSession activate:true (TS-04) › passes stored lineage ["C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-fLrxSd/my-repo/ancestor"] to activation
 
     expect(jest.fn()).toHaveBeenCalledWith(...expected)
 
-    Expected: "11111111-1111-4111-8111-111111111111", ObjectContaining {"pluginConfigAncestorRoots": ["C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-fLrxSd/my-repo/ancestor"]}
-    Received: "11111111-1111-4111-8111-111111111111", {"effort": undefined, "enhancedPromptsContent": undefined, "mcpServerRunning": false, "model": "default", "pluginConfigAncestorRoots": ["C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-fLrxSd\\my-repo\\ancestor"], "projectPath": "C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-fLrxSd/my-repo", "prompt": "", "providerProfile": undefined, "tabId": "22222222-2222-4222-8222-222222222222", "thinking": undefined, "workflowsDisabled": false}
+    Expected: "11111111-1111-4111-8111-111111111111", ObjectContaining {"pluginConfigAncestorRoots": ["C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-fLrxSd/my-repo/ancestor"]}
+    Received: "11111111-1111-4111-8111-111111111111", {"effort": undefined, "enhancedPromptsContent": undefined, "mcpServerRunning": false, "model": "default", "pluginConfigAncestorRoots": ["C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-fLrxSd\\my-repo\\ancestor"], "projectPath": "C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-fLrxSd/my-repo", "prompt": "", "providerProfile": undefined, "tabId": "22222222-2222-4222-8222-222222222222", "thinking": undefined, "workflowsDisabled": false}
 
     Number of calls: 1
 
@@ -501,8 +501,8 @@ A worker process has failed to exit gracefully and has been force exited. This i
 
     expect(jest.fn()).toHaveBeenCalledWith(...expected)
 
-    Expected: "11111111-1111-4111-8111-111111111111", ObjectContaining {"pluginConfigAncestorRoots": ["C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-fLrxSd/my-repo"]}
-    Received: "11111111-1111-4111-8111-111111111111", {"effort": undefined, "enhancedPromptsContent": undefined, "mcpServerRunning": false, "model": "default", "pluginConfigAncestorRoots": ["C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-fLrxSd\\my-repo"], "projectPath": "C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-fLrxSd/my-repo/child", "prompt": "", "providerProfile": undefined, "tabId": "22222222-2222-4222-8222-222222222222", "thinking": undefined, "workflowsDisabled": false}
+    Expected: "11111111-1111-4111-8111-111111111111", ObjectContaining {"pluginConfigAncestorRoots": ["C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-fLrxSd/my-repo"]}
+    Received: "11111111-1111-4111-8111-111111111111", {"effort": undefined, "enhancedPromptsContent": undefined, "mcpServerRunning": false, "model": "default", "pluginConfigAncestorRoots": ["C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-fLrxSd\\my-repo"], "projectPath": "C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-fLrxSd/my-repo/child", "prompt": "", "providerProfile": undefined, "tabId": "22222222-2222-4222-8222-222222222222", "thinking": undefined, "workflowsDisabled": false}
 
     Number of calls: 1
 
@@ -525,6 +525,6 @@ A worker process has failed to exit gracefully and has been force exited. This i
 
       Object {
         "ancestorRoots": Array [
-    -     "C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-X3whC2/b",
-    +     "C:\\Users\\abdal\\AppData\\Local\\Temp\\ptah-session-policy-X3whC2\\b",
+    -     "C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-X3whC2/b",
+    +     "C:\\Users\\dev\\AppData\\Local\\Temp\\ptah-session-policy-X3whC2\\b",
         ],

@@ -1,6 +1,6 @@
 ﻿# Ptah Dev Electron live test — TASK_2026_AGENT_BUDGET
 
-Date: 2026-11-08 (Africa/Cairo). Worktree head `5a8411a147189b2738ecf8c158af9071947f10f9`. Log references are one-based lines in `C:\Users\abdal\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-08.log`. The selected, sanitized lines are in [sanitized-budget-log.txt](live-test/sanitized-budget-log.txt).
+Date: 2026-11-08 (Africa/Cairo). Worktree head `5a8411a147189b2738ecf8c158af9071947f10f9`. Log references are one-based lines in `C:\Users\dev\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-08.log`. The selected, sanitized lines are in [sanitized-budget-log.txt](live-test/sanitized-budget-log.txt).
 
 ## Isolation gate
 
@@ -9,7 +9,7 @@ Date: 2026-11-08 (Africa/Cairo). Worktree head `5a8411a147189b2738ecf8c158af9071
 | PR #978 ancestor | PASS | `git merge-base --is-ancestor 8aaa227e7 HEAD` exited 0. |
 | Production settings raw SHA-256 | PASS | Start, after Dev edit, after launch, end: `780f1063cb844f461dac8fa5c11d14c565af2afe02c805253824527ab4b1c01a`. Production settings were read only for hashes. |
 | Production settings canonical SHA-256 | PASS | Recursive key sort and `JSON.stringify`, same four checkpoints: `321e5a3bccff6840ed43c6d7e85f35f193ccf575b7fd71db5e09ec80c1e44abb`. |
-| Dev settings restoration | PASS | Backed up `C:\Users\abdal\.ptah-dev\settings.json` before editing. Backup and restored bytes both hash to `3B727D826F40043DCC6E879B9023DB60A075C4FBD67ED945BA5AC738D694FAD6`; backup removed. |
+| Dev settings restoration | PASS | Backed up `C:\Users\dev\.ptah-dev\settings.json` before editing. Backup and restored bytes both hash to `3B727D826F40043DCC6E879B9023DB60A075C4FBD67ED945BA5AC738D694FAD6`; backup removed. |
 | Process ownership | PASS | Prelaunch Ptah Dev process query returned zero. Owned Node launcher PID 47032 and Electron root PID 46056 were launched on port 9348 and stopped. Final query found neither PID nor an Electron process on 9348. |
 
 ## Setup

@@ -37,7 +37,7 @@ Required scoped command executed once, using PowerShell Select-Object -Last 30 a
 
 Exit 0. Nx reports all 3 targets successful, 0/3 cache hits, duration 49.6 seconds.
 
-- Tests: 275 passed, 275 total; 3 suites passed, 3 total; 0 snapshots. The shared project includes parallel-lane additions alongside the existing 175 tools tests. Counts recovered from the saved run output at C:/Users/abdal/.nx/8b7110c7390b9603/cache/terminalOutputs/3584245307479115065 without rerunning tests.
+- Tests: 275 passed, 275 total; 3 suites passed, 3 total; 0 snapshots. The shared project includes parallel-lane additions alongside the existing 175 tools tests. Counts recovered from the saved run output at C:/Users/dev/.nx/8b7110c7390b9603/cache/terminalOutputs/3584245307479115065 without rerunning tests.
 - Typecheck: passed.
 - Lint/module boundaries: passed, 0 errors. Three existing evidence-harness.ts warnings: max-lines (:739), preserve-caught-error (:1737), no-useless-assignment (:2232). Platform-core edge accepted.
 - Scoped ptah_get_diagnostics before Nx: 0 errors, 0 warnings, clean coverage.

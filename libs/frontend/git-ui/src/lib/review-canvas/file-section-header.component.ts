@@ -20,6 +20,7 @@ import {
 import type { EditorTarget, GitConflictKind } from '@ptah-extension/shared';
 import {
   FileStatusBadgeComponent,
+  PtahButtonDirective,
   type FileStatusCode,
 } from '@ptah-extension/ui';
 import {
@@ -72,6 +73,7 @@ const FOCUS_RING =
   selector: 'ptah-file-section-header',
   standalone: true,
   imports: [
+    PtahButtonDirective,
     LucideAngularModule,
     FileStatusBadgeComponent,
     OpenInButtonComponent,
@@ -258,7 +260,10 @@ const FOCUS_RING =
           <button
             #commentButton
             type="button"
-            class="btn btn-ghost btn-xs {{ focusRing }}"
+            ptahButton
+            variant="ghost"
+            size="xs"
+            class="{{ focusRing }}"
             [attr.aria-expanded]="composerOpen()"
             [attr.aria-label]="'Comment on lines of ' + file().path"
             data-testid="file-section-comment"
@@ -275,7 +280,10 @@ const FOCUS_RING =
         @if (canEdit()) {
           <button
             type="button"
-            class="btn btn-ghost btn-xs {{ focusRing }}"
+            ptahButton
+            variant="ghost"
+            size="xs"
+            class="{{ focusRing }}"
             [attr.aria-label]="'Edit ' + file().path"
             data-testid="file-section-edit"
             (click)="edit.emit()"

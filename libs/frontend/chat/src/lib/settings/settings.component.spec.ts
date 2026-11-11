@@ -58,7 +58,11 @@ import {
 } from '@ptah-extension/core';
 import type { ConfigGetScopesResult } from '@ptah-extension/shared';
 import { provideSurfaceRouterTesting } from '@ptah-extension/core/testing';
-import { MotionStageDirective } from '@ptah-extension/ui';
+import {
+  MotionStageDirective,
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 import { SettingsComponent } from './settings.component';
 import { OrchestrationSettingsComponent } from './ptah-ai/orchestration-settings.component';
 import { AgentsRoutingSettingsComponent } from './providers/agents-routing-settings.component';
@@ -371,7 +375,12 @@ describe('SettingsComponent agents-routing landing', () => {
     });
     TestBed.overrideComponent(SettingsComponent, {
       set: {
-        imports: [AgentsRoutingSettingsComponent, MotionStageDirective],
+        imports: [
+          AgentsRoutingSettingsComponent,
+          MotionStageDirective,
+          PtahButtonDirective,
+          PtahIconButtonDirective,
+        ],
         schemas: [CUSTOM_ELEMENTS_SCHEMA],
       },
     });
@@ -430,7 +439,12 @@ describe('SettingsComponent agents-routing landing', () => {
     });
     TestBed.overrideComponent(SettingsComponent, {
       set: {
-        imports: [AgentsRoutingSettingsComponent, MotionStageDirective],
+        imports: [
+          AgentsRoutingSettingsComponent,
+          MotionStageDirective,
+          PtahButtonDirective,
+          PtahIconButtonDirective,
+        ],
         schemas: [CUSTOM_ELEMENTS_SCHEMA],
       },
     });
@@ -561,7 +575,10 @@ describe('SettingsComponent agents-routing landing', () => {
       },
     });
     TestBed.overrideComponent(OrchestrationSettingsComponent, {
-      set: { imports: [MotionStageDirective], schemas: [CUSTOM_ELEMENTS_SCHEMA] },
+      set: {
+        imports: [MotionStageDirective, PtahButtonDirective, PtahIconButtonDirective],
+        schemas: [CUSTOM_ELEMENTS_SCHEMA],
+      },
     });
     TestBed.inject(AppStateManager).requestSettingsTab({
       tab: 'orchestration',
@@ -605,7 +622,10 @@ describe('SettingsComponent header', () => {
       ],
     });
     TestBed.overrideComponent(SettingsComponent, {
-      set: { imports: [MotionStageDirective], schemas: [CUSTOM_ELEMENTS_SCHEMA] },
+      set: {
+        imports: [MotionStageDirective, PtahButtonDirective, PtahIconButtonDirective],
+        schemas: [CUSTOM_ELEMENTS_SCHEMA],
+      },
     });
     renderedFixture = TestBed.createComponent(SettingsComponent);
     renderedFixture.detectChanges();
@@ -734,7 +754,10 @@ describe('SettingsComponent security copy', () => {
       ],
     });
     TestBed.overrideComponent(SettingsComponent, {
-      set: { imports: [MotionStageDirective], schemas: [CUSTOM_ELEMENTS_SCHEMA] },
+      set: {
+        imports: [MotionStageDirective, PtahButtonDirective, PtahIconButtonDirective],
+        schemas: [CUSTOM_ELEMENTS_SCHEMA],
+      },
     });
     const fixture = TestBed.createComponent(SettingsComponent);
     fixture.detectChanges();

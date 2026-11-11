@@ -105,6 +105,7 @@ import { groupLaneEvents, laneMetricsForRow, laneRowsBeforeCompletion, newestLan
 import type { LaneSlot } from '../../molecules/lane-event/lane-event-row.types';
 import { LaneEventRowComponent } from '../../molecules/lane-event/lane-event-row.component';
 
+import { PtahButtonDirective } from '@ptah-extension/ui';
 const EMPTY_STRING_SET: ReadonlySet<string> = new Set<string>();
 const EMPTY_MESSAGES: readonly ExecutionChatMessage[] = [];
 const EMPTY_TREES: readonly ExecutionNode[] = [];
@@ -258,6 +259,7 @@ function findAgentNode(
     // From the eager chat-ui barrel; rendered inside `@defer` per reply card.
     ArtifactCardComponent,
     SingleChatSubagentViewComponent,
+    PtahButtonDirective,
   ],
   providers: [
     TranscriptRenderWindow,

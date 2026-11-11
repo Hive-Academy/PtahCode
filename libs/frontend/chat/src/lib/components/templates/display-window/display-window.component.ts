@@ -21,6 +21,7 @@ import {
 } from '../../../services/display-window/display-window-wire';
 import { DisplayWindowStateHandler } from './display-window-state.handler';
 
+import { PtahButtonDirective } from '@ptah-extension/ui';
 const LINK_ERROR_TEXT = 'Could not open the link.';
 const ACTION_ERROR_TEXT = 'The main window did not receive that action.';
 const LINK_ERROR_MS = 5000;
@@ -39,7 +40,7 @@ const LINK_ERROR_MS = 5000;
 @Component({
   selector: 'ptah-display-window',
   standalone: true,
-  imports: [DisplayPanelComponent],
+  imports: [DisplayPanelComponent, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'flex h-dvh min-h-0 flex-col bg-base-100 text-base-content' },
   template: `
@@ -57,7 +58,7 @@ const LINK_ERROR_MS = 5000;
       </h1>
       <button
         type="button"
-        class="btn btn-ghost btn-xs"
+        ptahButton variant="ghost" size="xs"
         (click)="reattach()"
         data-testid="display-window-reattach"
       >
@@ -79,7 +80,7 @@ const LINK_ERROR_MS = 5000;
         data-testid="display-window-error"
       >
         {{ error }}
-        <button type="button" class="btn btn-ghost btn-xs" (click)="reload()">
+        <button type="button" ptahButton variant="ghost" size="xs" (click)="reload()">
           Retry
         </button>
       </p>

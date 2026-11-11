@@ -22,7 +22,10 @@ import {
   VSCodeService,
   type MarketplaceRoute,
 } from '@ptah-extension/core';
-import { MotionRouteStageDirective } from '@ptah-extension/ui';
+import {
+  MotionRouteStageDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 import { MarketplaceInventoryStore } from '../data/marketplace-inventory.store';
 import { ConnectorLinksStore } from '../data/connector-links.store';
 import { CapabilityTogglesStore } from '../data/capability-toggles.store';
@@ -36,7 +39,11 @@ import {
   marketplaceRouteOfUrl,
 } from './marketplace-route-url';
 import { MarketplaceStatusBarComponent } from './marketplace-status-bar.component';
-import { MARKETPLACE_LEAVE_CLONE, MARKETPLACE_LEAVE_CLONE_DEFAULT, marketplacePageKey } from './marketplace-motion-key';
+import {
+  MARKETPLACE_LEAVE_CLONE,
+  MARKETPLACE_LEAVE_CLONE_DEFAULT,
+  marketplacePageKey,
+} from './marketplace-motion-key';
 
 /**
  * The element `/` focuses: the first search field of the active page.
@@ -108,6 +115,7 @@ export function isEditableTarget(target: EventTarget | null): boolean {
   selector: 'ptah-marketplace-shell',
   standalone: true,
   imports: [
+    PtahIconButtonDirective,
     RouterOutlet,
     RouterLink,
     LucideAngularModule,
@@ -117,7 +125,10 @@ export function isEditableTarget(target: EventTarget | null): boolean {
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   providers: [
-    { provide: MARKETPLACE_LEAVE_CLONE, useValue: MARKETPLACE_LEAVE_CLONE_DEFAULT },
+    {
+      provide: MARKETPLACE_LEAVE_CLONE,
+      useValue: MARKETPLACE_LEAVE_CLONE_DEFAULT,
+    },
     MarketplaceInventoryStore,
     ConnectorLinksStore,
     CapabilityTogglesStore,
@@ -204,10 +215,17 @@ export class MarketplaceShellComponent {
           event.urlAfterRedirects,
         );
         const previous = this._route();
-        if (route && previous &&
-            (route.page !== previous.page ||
-              (route.page === 'servers' && previous.page === 'servers' && route.source !== previous.source) ||
-              (route.page === 'skills' && previous.page === 'skills' && route.source !== previous.source))) {
+        if (
+          route &&
+          previous &&
+          (route.page !== previous.page ||
+            (route.page === 'servers' &&
+              previous.page === 'servers' &&
+              route.source !== previous.source) ||
+            (route.page === 'skills' &&
+              previous.page === 'skills' &&
+              route.source !== previous.source))
+        ) {
           this.resetPageScroll();
         }
         this._route.set(route);

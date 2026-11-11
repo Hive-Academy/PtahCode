@@ -52,7 +52,7 @@ The supplied second copy is shorter than the first; do not assume two identical 
 - Check whether background workflow completion notifications or session resume replay a prior assistant message. Timing is a hypothesis, not an established cause.
 - Verify active host/provider from evidence rather than assuming the research workers’ Ollama Cloud provider is also the parent conversation’s provider.
 - Relevant starting areas: `libs/frontend/chat-streaming`, `chat-routing`, `chat-state`, `chat`, `chat-ui`, and backend `agent-sdk` / provider translation. Read relevant CLAUDE.md and discover actual symbols before proposing edits.
-- Logs reside under `C:\Users\abdal\AppData\Roaming\Ptah\logs`; preserve them. Do not publish raw logs, credentials or unrelated conversation content.
+- Logs reside under `C:\Users\dev\AppData\Roaming\Ptah\logs`; preserve them. Do not publish raw logs, credentials or unrelated conversation content.
 
 ## Expected outcome
 

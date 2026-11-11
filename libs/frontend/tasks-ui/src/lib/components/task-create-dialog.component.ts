@@ -20,6 +20,7 @@ import {
   type TaskType,
 } from '@ptah-extension/shared';
 import { TASK_STATUS_LABELS } from '../task-presentation';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** What the dialog hands back; the parent turns it into `tasks:create`. */
 export interface TaskCreateDraft {
@@ -50,7 +51,7 @@ const FOCUSABLE =
 @Component({
   selector: 'ptah-task-create-dialog',
   standalone: true,
-  imports: [FormsModule],
+  imports: [PtahButtonDirective, FormsModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(keydown)': 'onKeyDown($event)' },
   template: `
@@ -149,7 +150,8 @@ const FOCUSABLE =
           <div class="mt-2 flex justify-end gap-2">
             <button
               type="button"
-              class="btn btn-ghost btn-sm"
+              ptahButton
+              variant="ghost"
               data-testid="tasks-create-cancel"
               [disabled]="creating()"
               (click)="cancelled.emit()"
@@ -158,7 +160,8 @@ const FOCUSABLE =
             </button>
             <button
               type="submit"
-              class="btn btn-primary btn-sm h-9 min-h-9"
+              ptahButton
+              variant="primary"
               data-testid="tasks-create-submit"
               [disabled]="!canCreate() || creating()"
             >

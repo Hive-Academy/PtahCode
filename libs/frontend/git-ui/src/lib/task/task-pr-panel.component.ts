@@ -11,6 +11,7 @@ import {
   ExternalLink,
   LucideAngularModule,
 } from 'lucide-angular';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import type {
   GitPrChecksSummary,
   GitPrInfo,
@@ -116,7 +117,7 @@ interface PrUnavailableView {
 @Component({
   selector: 'ptah-task-pr-panel',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'flex flex-col gap-1' },
   template: `
@@ -167,7 +168,9 @@ interface PrUnavailableView {
         }
         @if (view.url; as url) {
           <a
-            class="btn btn-outline btn-xs ml-auto gap-1"
+            ptahButton
+            size="xs"
+            class="ml-auto"
             data-testid="task-pr-open"
             target="_blank"
             rel="noopener noreferrer"

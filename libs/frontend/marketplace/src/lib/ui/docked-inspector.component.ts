@@ -5,6 +5,7 @@ import {
   output,
 } from '@angular/core';
 import { LucideAngularModule, X } from 'lucide-angular';
+import { PtahIconButtonDirective } from '@ptah-extension/ui';
 
 /** Per-instance suffix for the heading id. */
 let nextInspectorId = 0;
@@ -30,7 +31,7 @@ let nextInspectorId = 0;
 @Component({
   selector: 'ptah-docked-inspector',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahIconButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block h-full min-h-0' },
   template: `
@@ -54,8 +55,9 @@ let nextInspectorId = 0;
         </h2>
         <button
           type="button"
-          class="btn btn-ghost btn-sm btn-square -mr-1 flex-shrink-0"
-          [attr.aria-label]="closeLabel()"
+          ptahIconButton
+          [label]="closeLabel()"
+          class="-mr-1 flex-shrink-0"
           data-testid="docked-inspector-close"
           (click)="closed.emit()"
         >

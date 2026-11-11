@@ -6,7 +6,11 @@ import {
   input,
   signal,
 } from '@angular/core';
-import { NativePopoverComponent } from '@ptah-extension/ui';
+import {
+  NativePopoverComponent,
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 import {
   ReviewCommentDraftStore,
   reviewDraftOwnerKey,
@@ -35,7 +39,11 @@ interface OwnerMessage {
 @Component({
   selector: 'ptah-draft-comments-bar',
   standalone: true,
-  imports: [NativePopoverComponent],
+  imports: [
+    PtahButtonDirective,
+    PtahIconButtonDirective,
+    NativePopoverComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (drafts().length > 0) {
@@ -53,7 +61,9 @@ interface OwnerMessage {
           <button
             trigger
             type="button"
-            class="btn btn-ghost btn-xs"
+            ptahButton
+            variant="ghost"
+            size="xs"
             aria-haspopup="true"
             [attr.aria-expanded]="listOpen()"
             data-testid="draft-comments-toggle"
@@ -77,8 +87,9 @@ interface OwnerMessage {
                   </span>
                   <button
                     type="button"
-                    class="btn btn-ghost btn-xs"
-                    [attr.aria-label]="'Remove draft comment on ' + location(draft)"
+                    ptahIconButton
+                    size="xs"
+                    [label]="'Remove draft comment on ' + location(draft)"
                     data-testid="draft-comment-remove"
                     (click)="remove(draft)"
                   >
@@ -101,9 +112,10 @@ interface OwnerMessage {
 
         <button
           type="button"
-          class="btn btn-primary btn-xs"
-          [attr.aria-disabled]="sending() || null"
-          [attr.aria-busy]="sending() || null"
+          ptahButton
+          variant="primary"
+          size="xs"
+          [busy]="sending()"
           data-testid="draft-comments-send"
           (click)="send()"
         >

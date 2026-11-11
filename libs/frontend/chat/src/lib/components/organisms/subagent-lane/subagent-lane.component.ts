@@ -37,6 +37,7 @@ import { subagentLaneStats } from '../../../utils/lane-stats.adapters';
 import { SubagentLaneComposerComponent } from './subagent-lane-composer.component';
 import { findScrollingAncestor } from '../../../utils/scroll-parent.utils';
 
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 /**
  * Each refresh re-reads the whole sidechain transcript over paged RPC, so the
  * interval trades freshness against reparsing a long transcript.
@@ -52,6 +53,8 @@ const LIVE_HISTORY_REFRESH_MS = 5000;
     ExecutionHeaderComponent,
     LaneTranscriptComponent,
     SubagentLaneComposerComponent,
+    PtahButtonDirective,
+    PtahIconButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Card mode keeps a bounded transcript; flat mode flows through its host scroller.
@@ -82,8 +85,7 @@ const LIVE_HISTORY_REFRESH_MS = 5000;
           @if (ctx.entry.canBackground) {
             <button
               type="button"
-              class="btn btn-ghost btn-xs btn-square"
-              [attr.aria-label]="'Send ' + name() + ' to background'"
+              ptahIconButton size="xs" [label]="'Send ' + name() + ' to background'"
               [disabled]="backgroundPending()"
               (click)="onBackground(ctx)"
             >
@@ -97,8 +99,7 @@ const LIVE_HISTORY_REFRESH_MS = 5000;
           @if (ctx.entry.stoppable) {
             <button
               type="button"
-              class="btn btn-ghost btn-xs btn-square"
-              [attr.aria-label]="'Stop ' + name()"
+              ptahIconButton size="xs" [label]="'Stop ' + name()"
               [disabled]="stopPending()"
               (click)="onStop(ctx)"
             >
@@ -140,7 +141,7 @@ const LIVE_HISTORY_REFRESH_MS = 5000;
               —
               <button
                 type="button"
-                class="btn btn-link btn-xs p-0"
+                ptahButton variant="link" size="xs"
                 (click)="loadFullOutput()"
               >
                 Load full output
@@ -160,7 +161,7 @@ const LIVE_HISTORY_REFRESH_MS = 5000;
             Could not load saved output.
             <button
               type="button"
-              class="btn btn-link btn-xs p-0"
+              ptahButton variant="link" size="xs"
               (click)="retryHistory()"
             >
               Retry
@@ -171,7 +172,7 @@ const LIVE_HISTORY_REFRESH_MS = 5000;
             Saved output for this agent could not be linked.
             <button
               type="button"
-              class="btn btn-link btn-xs p-0"
+              ptahButton variant="link" size="xs"
               (click)="retryHistory()"
             >
               Retry

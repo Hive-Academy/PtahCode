@@ -21,6 +21,7 @@ import { ExecutionNodeComponent } from '../execution/execution-node.component';
 import { LaneTranscriptComponent } from './lane-transcript.component';
 import { SubagentLaneComponent } from '../subagent-lane/subagent-lane.component';
 
+import { PtahButtonDirective } from '@ptah-extension/ui';
 /**
  * Single chat view: one sub-agent opened in place over its transcript.
  *
@@ -40,6 +41,7 @@ import { SubagentLaneComponent } from '../subagent-lane/subagent-lane.component'
     ExecutionNodeComponent,
     LaneTranscriptComponent,
     SubagentLaneComponent,
+    PtahButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
@@ -58,7 +60,7 @@ import { SubagentLaneComponent } from '../subagent-lane/subagent-lane.component'
         <button
           #backButton
           type="button"
-          class="btn btn-ghost btn-xs gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          ptahButton variant="ghost" size="xs"
           aria-label="Back to the conversation"
           data-testid="subagent-view-back"
           (click)="back.emit()"

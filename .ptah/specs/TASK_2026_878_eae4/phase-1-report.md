@@ -91,7 +91,7 @@ Each folder under `.ptah/specs/TASK_2026_878_eae4/phase-1-shots/` (`command-cent
 - `desktop-seam.png`: the seam thread from the section above.
 - `mobile-mid.png` and `mobile-final.png`: at 375x812.
 
-The capture script is `C:/Users/abdal/AppData/Local/Temp/p1cap/cap2.mjs`. It is a variant of the supplied `cap.mjs` that takes viewport shots at computed pin positions, because the sections are pinned.
+The capture script is `C:/Users/dev/AppData/Local/Temp/p1cap/cap2.mjs`. It is a variant of the supplied `cap.mjs` that takes viewport shots at computed pin positions, because the sections are pinned.
 
 What the shots show:
 

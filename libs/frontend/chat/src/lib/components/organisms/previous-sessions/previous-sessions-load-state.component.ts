@@ -32,6 +32,7 @@ import { History, LucideAngularModule, X } from 'lucide-angular';
 import { PreviousSessionsDialogService } from '../../../services/session-list/previous-sessions-dialog.service';
 import { wrapTabWithin } from '../../../utils/focus-wrap.utils';
 
+import { PtahIconButtonDirective } from '@ptah-extension/ui';
 const SKELETON_ROWS: readonly {
   readonly id: number;
   readonly width: string;
@@ -46,7 +47,7 @@ const SKELETON_ROWS: readonly {
 @Component({
   selector: 'ptah-previous-sessions-load-state',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
@@ -108,8 +109,7 @@ const SKELETON_ROWS: readonly {
           <button
             #closeButton
             type="button"
-            class="btn btn-ghost btn-sm btn-square text-base-content-muted hover:text-base-content"
-            aria-label="Close previous sessions"
+            ptahIconButton label="Close previous sessions"
             data-testid="previous-sessions-load-close"
             (click)="close()"
           >

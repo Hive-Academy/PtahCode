@@ -21,6 +21,10 @@ import {
   type TaskRelationOrigin,
 } from '../../task-presentation';
 import type { TaskMetadataWrite } from './task-metadata-write';
+import {
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 
 /**
  * The frontmatter array each authored relation group replaces.
@@ -195,7 +199,7 @@ export interface TaskRelationGroupView {
 @Component({
   selector: 'ptah-task-relations',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahButtonDirective, PtahIconButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (groups().length > 0 || editable()) {
@@ -241,11 +245,12 @@ export interface TaskRelationGroupView {
                   @if (editable() && group.removableField) {
                     <button
                       type="button"
-                      class="btn btn-ghost btn-xs btn-square opacity-60 hover:opacity-100"
+                      ptahIconButton
+                      [label]="removeTitle(group, entry)"
+                      size="xs"
+                      class="opacity-60 hover:opacity-100"
                       data-testid="task-relation-remove"
                       [disabled]="busy()"
-                      [title]="removeTitle(group, entry)"
-                      [attr.aria-label]="removeTitle(group, entry)"
                       (click)="onRemove(group, entry.id)"
                     >
                       <lucide-angular [img]="XIcon" class="w-3 h-3" />
@@ -301,7 +306,8 @@ export interface TaskRelationGroupView {
               </datalist>
               <button
                 type="button"
-                class="btn btn-xs"
+                ptahButton
+                size="xs"
                 data-testid="task-relations-add-submit"
                 [disabled]="busy() || !canAdd()"
                 (click)="onAdd()"

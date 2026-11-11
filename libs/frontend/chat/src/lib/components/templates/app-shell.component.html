@@ -163,10 +163,8 @@
                 </span>
                 <button
                   type="button"
-                  class="btn btn-ghost btn-xs btn-circle w-5 h-5 min-h-0 p-0 text-base-content-muted hover:text-base-content"
+                  ptahIconButton size="xs" label="Dismiss Thoth hint"
                   (click)="dismissThothFirstRun()"
-                  aria-label="Dismiss Thoth hint"
-                  title="Dismiss"
                 >
                   <lucide-angular [img]="XIcon" class="w-3 h-3" />
                 </button>
@@ -284,14 +282,14 @@
             <!-- Action buttons -->
             <div class="flex gap-2">
               <button
-                class="btn btn-sm btn-ghost flex-1 gap-1.5 text-base-content-muted"
+                ptahButton variant="ghost" class="flex-1"
                 (click)="handleCancelSession()"
               >
                 <lucide-angular [img]="XIcon" class="w-3 h-3" />
                 Cancel
               </button>
               <button
-                class="btn btn-sm btn-primary flex-1 gap-1.5"
+                ptahButton variant="primary" class="flex-1"
                 (click)="handleCreateSession()"
               >
                 <lucide-angular [img]="CheckIcon" class="w-3 h-3" />
@@ -312,7 +310,7 @@
           <ptah-notification-center #notificationCenter />
 
           <button
-            class="btn btn-ghost btn-xs gap-1"
+            ptahButton variant="ghost" size="xs"
             aria-label="Settings"
             title="Settings"
             (click)="openSettings()"

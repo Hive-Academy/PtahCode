@@ -117,7 +117,8 @@ describe('ProviderCatalogModalComponent', () => {
     expect(controls.length).toBeGreaterThan(0);
     for (const node of controls) {
       expect(node.classList.contains('btn-sm')).toBe(true);
-      expect(node.classList.contains('focus-visible:outline-2')).toBe(true);
+      // `ptahButton` hosts get the shared focus ring from ptah-button.css.
+      expect(node.hasAttribute('data-ptah-button')).toBe(true);
     }
     expect(query('provider-catalog-search')?.classList.contains('focus-visible:outline-2')).toBe(true);
   });

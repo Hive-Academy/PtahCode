@@ -68,6 +68,7 @@ import { WorkflowPermissionPresenterService } from './agent-monitor/workflow-per
 import { SESSION_CONTEXT } from '../../tokens/session-context.token';
 import { AgentPermissionResponder } from '../../services/agent-permission-responder';
 
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 // Re-export the pure grouping API alongside the component for consumers that
 // import from the component barrel. The implementation lives in
 // `agent-monitor-panel.grouping.ts` so it stays unit-testable without the
@@ -183,6 +184,8 @@ function subagentToTile(r: SubagentRecord): WorkflowTileVM {
     LucideAngularModule,
     AgentCardComponent,
     SubagentLaneComponent,
+    PtahButtonDirective,
+    PtahIconButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: `
@@ -238,13 +241,7 @@ function subagentToTile(r: SubagentRecord): WorkflowTileVM {
           @if (laneCapacity() >= 2 || forceSingle()) {
             <button
               type="button"
-              class="btn btn-ghost btn-xs btn-square"
-              [title]="
-                forceSingle() ? 'Show agents side by side' : 'Show one agent'
-              "
-              [attr.aria-label]="
-                forceSingle() ? 'Show agents side by side' : 'Show one agent'
-              "
+              ptahIconButton size="xs" [label]="forceSingle() ? 'Show agents side by side' : 'Show one agent'"
               [attr.aria-pressed]="forceSingle()"
               (click)="forceSingle.set(!forceSingle())"
             >
@@ -257,8 +254,7 @@ function subagentToTile(r: SubagentRecord): WorkflowTileVM {
           }
           @if (effectiveAgents().length > 0 && !effectiveHasRunning()) {
             <button
-              class="btn btn-ghost btn-xs btn-square"
-              title="Clear completed"
+              ptahIconButton size="xs" label="Clear completed"
               (click)="onClearCompleted()"
             >
               <lucide-angular
@@ -272,8 +268,7 @@ function subagentToTile(r: SubagentRecord): WorkflowTileVM {
           @if (!docked()) {
             <button
               #closeButton
-              class="btn btn-ghost btn-xs btn-square"
-              title="Close panel"
+              ptahIconButton size="xs" label="Close panel"
               (click)="onClose()"
             >
               <lucide-angular
@@ -574,7 +569,7 @@ function subagentToTile(r: SubagentRecord): WorkflowTileVM {
                 <div class="p-1.5">
                   <button
                     type="button"
-                    class="btn btn-ghost btn-xs mb-1"
+                    ptahButton variant="ghost" size="xs" class="mb-1"
                     (click)="deselect()"
                   >
                     Back to agents

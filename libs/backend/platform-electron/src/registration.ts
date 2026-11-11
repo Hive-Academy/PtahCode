@@ -129,7 +129,12 @@ export function registerPlatformElectronServices(
     useValue: createSessionDriverLock(),
   });
   container.register(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER, {
-    useValue: new ElectronFileSystemProvider(),
+    useValue: new ElectronFileSystemProvider({
+      getLogger: () =>
+        container.isRegistered(LOGGER_TOKEN)
+          ? container.resolve<Logger>(LOGGER_TOKEN)
+          : undefined,
+    }),
   });
   container.register(PLATFORM_TOKENS.FILE_DIALOG, {
     useValue: new ElectronFileDialog(),

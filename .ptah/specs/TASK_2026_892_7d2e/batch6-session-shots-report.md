@@ -147,7 +147,7 @@ Only the six named target images were published in attempt 2; no other `public/s
 
 ### Settings hash
 
-Real `C:\Users\abdal\.ptah\settings.json` SHA-256 before: `2E2857A646F5613AA7E2FC82D1282EE249D6B1B39BEBBEA8F2D7C5454CA99DC4`; after: `2E2857A646F5613AA7E2FC82D1282EE249D6B1B39BEBBEA8F2D7C5454CA99DC4`. The real settings file was read for hashing only. The app ran with isolated `HOME` and `USERPROFILE`; no real `.ptah` database was copied in this mode.
+Real `C:\Users\dev\.ptah\settings.json` SHA-256 before: `2E2857A646F5613AA7E2FC82D1282EE249D6B1B39BEBBEA8F2D7C5454CA99DC4`; after: `2E2857A646F5613AA7E2FC82D1282EE249D6B1B39BEBBEA8F2D7C5454CA99DC4`. The real settings file was read for hashing only. The app ran with isolated `HOME` and `USERPROFILE`; no real `.ptah` database was copied in this mode.
 
 ### Privacy check
 

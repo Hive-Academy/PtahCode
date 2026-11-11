@@ -135,12 +135,12 @@ describe('SmitheryInstalledManifestStore', () => {
         qualifiedName: 'hubspot',
         serverKey: 'smithery_hubspot',
         config: {},
-        namespace: 'abdallah',
+        namespace: 'acme',
         connectionId: 'hubspot',
       });
 
       expect(manifest.get('smithery_hubspot')).toMatchObject({
-        namespace: 'abdallah',
+        namespace: 'acme',
         connectionId: 'hubspot',
       });
     });
@@ -175,11 +175,11 @@ describe('SmitheryInstalledManifestStore', () => {
         qualifiedName: 'hubspot',
         serverKey: 'smithery_hubspot',
         config: {},
-        namespace: 'abdallah',
+        namespace: 'acme',
         connectionId: 'hubspot',
       });
 
-      expect(reader.get('smithery_hubspot')?.namespace).toBe('abdallah');
+      expect(reader.get('smithery_hubspot')?.namespace).toBe('acme');
     });
   });
 

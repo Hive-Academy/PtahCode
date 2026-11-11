@@ -10,6 +10,7 @@ import type { SessionWorkingRootSource } from '@ptah-extension/shared';
 import { UNRESOLVED_SCOPE_MESSAGE } from '../services/git-dock-mutation-gate';
 import type { GitDockScope } from '../services/git-dock-scope.store';
 import { worktreeFolderName } from '../review-shell/worktree-scope-bar.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 const FOCUS_RING =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[oklch(var(--s))]';
@@ -32,7 +33,7 @@ const SOURCE_HINTS: Record<SessionWorkingRootSource, string> = {
 @Component({
   selector: 'ptah-git-dock-scope-header',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block flex-shrink-0' },
   template: `
@@ -89,7 +90,10 @@ const SOURCE_HINTS: Record<SessionWorkingRootSource, string> = {
       </span>
       <button
         type="button"
-        class="btn btn-ghost btn-xs shrink-0 gap-1 {{ focusRing }}"
+        ptahButton
+        variant="ghost"
+        size="xs"
+        class="shrink-0 {{ focusRing }}"
         [attr.aria-pressed]="pinned()"
         [attr.aria-label]="toggleTitle()"
         [title]="toggleTitle()"

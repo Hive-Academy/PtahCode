@@ -8,7 +8,10 @@ import {
 import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { ArrowRight, LucideAngularModule, Users } from 'lucide-angular';
-import { AttachmentTrayComponent, ComposerAttachmentsService } from '@ptah-extension/chat';
+import {
+  AttachmentTrayComponent,
+  ComposerAttachmentsService,
+} from '@ptah-extension/chat';
 import { HarnessBuilderLeaveDialogComponent } from '@ptah-extension/harness-builder';
 import { onboardingStepLink } from '../shell/onboarding-step-link';
 import { WorkspaceHeaderComponent } from '../shell/workspace-header.component';
@@ -17,6 +20,7 @@ import {
   type OnboardingStep,
 } from '../shared/onboarding-stepper.component';
 import { ProposalFlowStore } from './proposal-flow.store';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-team-builder-start-page',
@@ -28,6 +32,7 @@ import { ProposalFlowStore } from './proposal-flow.store';
     AttachmentTrayComponent,
     WorkspaceHeaderComponent,
     LucideAngularModule,
+    PtahButtonDirective,
   ],
   providers: [ComposerAttachmentsService],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -38,12 +43,27 @@ import { ProposalFlowStore } from './proposal-flow.store';
       data-testid="team-builder-start"
     >
       <header class="flex items-center gap-3">
-        <span class="flex size-11 shrink-0 items-center justify-center rounded-xl border border-base-300 text-state-need" data-glass-surface="tile">
-          <lucide-angular [img]="icons.users" class="size-5" aria-hidden="true" />
+        <span
+          class="flex size-11 shrink-0 items-center justify-center rounded-xl border border-base-300 text-state-need"
+          data-glass-surface="tile"
+        >
+          <lucide-angular
+            [img]="icons.users"
+            class="size-5"
+            aria-hidden="true"
+          />
         </span>
         <div>
-          <h1 id="team-builder-start-title" class="text-2xl font-semibold" tabindex="-1">AI team builder</h1>
-          <p class="text-sm text-base-content-muted">Describe the team you want. The agent proposes it.</p>
+          <h1
+            id="team-builder-start-title"
+            class="text-2xl font-semibold"
+            tabindex="-1"
+          >
+            AI team builder
+          </h1>
+          <p class="text-sm text-base-content-muted">
+            Describe the team you want. The agent proposes it.
+          </p>
         </div>
       </header>
       <ptah-workspace-header [canSwitch]="true" />
@@ -55,7 +75,10 @@ import { ProposalFlowStore } from './proposal-flow.store';
         novalidate
       >
         <p class="text-xs text-base-content-muted">
-          Workspace <span class="font-mono">{{ store.workspaceRoot() || 'Open a workspace' }}</span>
+          Workspace
+          <span class="font-mono">{{
+            store.workspaceRoot() || 'Open a workspace'
+          }}</span>
         </p>
         <div>
           <label for="team-intent" class="block text-sm font-semibold"
@@ -71,17 +94,29 @@ import { ProposalFlowStore } from './proposal-flow.store';
             (dragover)="$event.preventDefault()"
             (drop)="attachments.onDrop($event)"
             [attr.aria-invalid]="invalid() ? true : null"
-            [attr.aria-describedby]="invalid() ? 'team-attachment-hint team-intent-error' : 'team-attachment-hint'"
+            [attr.aria-describedby]="
+              invalid()
+                ? 'team-attachment-hint team-intent-error'
+                : 'team-attachment-hint'
+            "
           ></textarea>
           <ptah-attachment-tray />
-          <p id="team-attachment-hint" class="mt-1 text-xs text-base-content-muted">Required. Attachments are not saved if you leave this page.</p>
+          <p
+            id="team-attachment-hint"
+            class="mt-1 text-xs text-base-content-muted"
+          >
+            Required. Attachments are not saved if you leave this page.
+          </p>
           @if (invalid()) {
             <p id="team-intent-error" class="text-sm text-state-err">
               Describe the team you want.
             </p>
           }
         </div>
-        <details class="rounded-[14px] border border-base-300 p-3" data-glass-surface="tile">
+        <details
+          class="rounded-[14px] border border-base-300 p-3"
+          data-glass-surface="tile"
+        >
           <summary class="cursor-pointer text-sm font-semibold">
             Advanced · provider and model
           </summary>
@@ -95,13 +130,32 @@ import { ProposalFlowStore } from './proposal-flow.store';
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="flex flex-wrap gap-2">
             @if (draftTab()) {
-              <button type="button" class="btn btn-ghost" (click)="continueDraft()">Load saved draft</button>
+              <button
+                ptahButton
+                variant="ghost"
+                type="button"
+                (click)="continueDraft()"
+              >
+                Load saved draft
+              </button>
             }
-            <button type="button" class="btn btn-ghost" (click)="back()">Back</button>
+            <button ptahButton variant="ghost" type="button" (click)="back()">
+              Back
+            </button>
           </div>
-          <button type="submit" class="btn btn-primary grow sm:grow-0" [disabled]="starting() || attachments.pendingReads() > 0">
+          <button
+            ptahButton
+            variant="primary"
+            type="submit"
+            class="grow sm:grow-0"
+            [disabled]="starting() || attachments.pendingReads() > 0"
+          >
             {{ starting() ? 'Starting…' : 'Start team builder' }}
-            <lucide-angular [img]="icons.next" class="size-4" aria-hidden="true" />
+            <lucide-angular
+              [img]="icons.next"
+              class="size-4"
+              aria-hidden="true"
+            />
           </button>
         </div>
       </form>
@@ -130,7 +184,9 @@ export class TeamBuilderStartPage {
   ];
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
-  private pendingAttachments: ReturnType<ComposerAttachmentsService['snapshotForSend']> | null = null;
+  private pendingAttachments: ReturnType<
+    ComposerAttachmentsService['snapshotForSend']
+  > | null = null;
   readonly intent = signal('');
   readonly touched = signal(false);
   readonly submitted = signal(false);
@@ -145,7 +201,12 @@ export class TeamBuilderStartPage {
   async submit(event: Event): Promise<void> {
     event.preventDefault();
     this.submitted.set(true);
-    if (this.invalid() || this.starting() || this.attachments.pendingReads() > 0) return;
+    if (
+      this.invalid() ||
+      this.starting() ||
+      this.attachments.pendingReads() > 0
+    )
+      return;
     this.starting.set(true);
     const snapshot = this.attachments.snapshotForSend();
     this.pendingAttachments = snapshot;

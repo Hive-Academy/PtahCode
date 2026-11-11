@@ -27,6 +27,7 @@ import {
 } from '@ptah-extension/shared';
 import { NativeModalComponent } from '@ptah-extension/ui';
 import { AlertTriangle, Copy, Lock, LucideAngularModule } from 'lucide-angular';
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 import { SettingsBusyDisabledDirective } from '../../feedback/busy-disabled.directive';
 import { SettingsSaveFeedbackService } from '../../feedback/settings-save-feedback.service';
 import {
@@ -76,14 +77,15 @@ const LOCK_REASON_ID = 'account-detail-lock-reason';
 @Component({
   selector: 'ptah-account-detail-view',
   standalone: true,
-  imports: [NativeModalComponent, LucideAngularModule, SettingsBusyDisabledDirective],
+  imports: [NativeModalComponent, LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective, SettingsBusyDisabledDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-6 text-sm text-base-content" data-testid="account-detail" (focusin)="noteFocus($event)">
       <div class="space-y-3">
         <button
           type="button"
-          [class]="'btn btn-ghost btn-sm min-h-8 px-2 ' + focusRing"
+          ptahButton
+          variant="ghost"
           (click)="back.emit()"
           data-testid="account-detail-back"
         >
@@ -145,17 +147,18 @@ const LOCK_REASON_ID = 'account-detail-lock-reason';
               <button type="button" [class]="'btn btn-outline btn-error btn-sm min-h-8 ' + focusRing" [ptahBusyDisabled]="busyNow()" (click)="act('sign-out')" data-testid="account-detail-sign-out">Sign out</button>
             }
             @case ('pending') {
-              <button type="button" [class]="'btn btn-outline btn-sm min-h-8 ' + focusRing" [ptahBusyDisabled]="busyNow()" (click)="act('cancel-sign-in')" data-pending-control data-testid="account-detail-cancel-sign-in">Cancel sign-in</button>
+              <button type="button" ptahButton [busy]="busyNow()" (click)="act('cancel-sign-in')" data-pending-control data-testid="account-detail-cancel-sign-in">Cancel sign-in</button>
             }
             @default {
-              <button type="button" [class]="'btn btn-primary btn-sm min-h-8 ' + focusRing" [ptahBusyDisabled]="busyNow()" (click)="act('sign-in')" data-testid="account-detail-sign-in">{{ account().state === 'failed' ? 'Try again' : 'Sign in' }}</button>
+              <button type="button" ptahButton variant="primary" [busy]="busyNow()" (click)="act('sign-in')" data-testid="account-detail-sign-in">{{ account().state === 'failed' ? 'Try again' : 'Sign in' }}</button>
             }
           }
-          <button type="button" [class]="'btn btn-ghost btn-sm min-h-8 ' + focusRing" [ptahBusyDisabled]="busyNow()" (click)="act('check-status')" data-testid="account-detail-check-status">Check status</button>
+          <button type="button" ptahButton variant="ghost" [busy]="busyNow()" (click)="act('check-status')" data-testid="account-detail-check-status">Check status</button>
           @if (fallbackShown()) {
             <button
               type="button"
-              [class]="'btn btn-ghost btn-sm min-h-8 ' + focusRing"
+              ptahButton
+              variant="ghost"
               [attr.aria-expanded]="terminalOpen()"
               aria-controls="account-detail-terminal"
               (click)="terminalOpen.set(!terminalOpen())"
@@ -176,9 +179,9 @@ const LOCK_REASON_ID = 'account-detail-lock-reason';
               >{{ f.script }}</pre>
               <button
                 type="button"
-                [class]="'btn btn-ghost btn-sm h-8 min-h-8 w-8 shrink-0 p-0 ' + focusRing"
-                aria-label="Copy script"
-                title="Copy script"
+                ptahIconButton
+                label="Copy script"
+                class="shrink-0"
                 (click)="copyScript(f.script)"
                 data-pending-control
                 data-testid="account-detail-copy-script"
@@ -214,7 +217,7 @@ const LOCK_REASON_ID = 'account-detail-lock-reason';
             data-testid="account-detail-rename-input"
           />
           @if (edited()) {
-            <button type="submit" [class]="'btn btn-primary btn-sm min-h-8 ' + focusRing" [ptahBusyDisabled]="locked()" data-testid="account-detail-rename-submit">Save</button>
+            <button type="submit" ptahButton variant="primary" [busy]="busyNow()" [disabled]="pending()" data-testid="account-detail-rename-submit">Save</button>
           }
         </div>
       </form>
@@ -243,8 +246,8 @@ const LOCK_REASON_ID = 'account-detail-lock-reason';
       >
         <h3 modal-header id="account-detail-remove-title" class="text-sm font-bold text-base-content">Remove {{ account().label }}?</h3>
         <div modal-footer class="mt-4 flex justify-end gap-2">
-          <button #removeCancel type="button" [class]="'btn btn-sm min-h-8 ' + focusRing" (click)="cancelRemove()" data-testid="account-detail-remove-cancel">Cancel</button>
-          <button type="button" [class]="'btn btn-error btn-sm min-h-8 ' + focusRing" [ptahBusyDisabled]="locked()" (click)="confirmRemove()" data-testid="account-detail-remove-confirm">Remove</button>
+          <button #removeCancel type="button" ptahButton (click)="cancelRemove()" data-testid="account-detail-remove-cancel">Cancel</button>
+          <button type="button" ptahButton variant="danger" [busy]="busyNow()" [disabled]="pending()" (click)="confirmRemove()" data-testid="account-detail-remove-confirm">Remove</button>
         </div>
       </ptah-native-modal>
     </div>

@@ -19,6 +19,7 @@ import {
 } from 'lucide-angular';
 import type { ResumableGenerationAgent } from '@ptah-extension/shared';
 import { safeFailureCopy } from '@ptah-extension/setup-wizard';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** C-B2: a `Record` over `ResumableGenerationAgent['status']` so a new member fails typecheck. */
 export const ITEM_STATUS_LABELS: Record<
@@ -98,7 +99,7 @@ const STATUS_PRESENTATION: Record<
 @Component({
   selector: 'ptah-item-status-card',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -148,15 +149,18 @@ const STATUS_PRESENTATION: Record<
         </p>
       }
       @if (showAttempt()) {
-        <p class="text-xs text-base-content-muted" data-testid="item-status-attempt">
+        <p
+          class="text-xs text-base-content-muted"
+          data-testid="item-status-attempt"
+        >
           Attempt {{ attempt() }} of {{ budget() }}
         </p>
       }
       @if (agent().status === 'failed') {
         <div>
           <button
+            ptahButton
             type="button"
-            class="btn btn-sm min-h-8"
             data-testid="item-status-retry"
             [disabled]="retrying()"
             (click)="retry.emit(agent().agentId)"
@@ -194,7 +198,11 @@ export class ItemStatusCardComponent {
 
   protected readonly failureCopy = computed(() => {
     const agent = this.agent();
-    if (agent.status !== 'failed' || agent.error == null || agent.error === '') {
+    if (
+      agent.status !== 'failed' ||
+      agent.error == null ||
+      agent.error === ''
+    ) {
       return null;
     }
     return safeFailureCopy(agent.error, WRITE_FAILED_FALLBACK);

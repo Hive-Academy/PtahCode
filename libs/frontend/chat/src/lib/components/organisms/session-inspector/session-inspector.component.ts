@@ -37,6 +37,7 @@ import { InspectorSessionActionsComponent } from './inspector-session-actions.co
 import { InspectorRequestLinesComponent } from './inspector-request-panel.component';
 import { InspectorTaskSectionComponent } from './inspector-task-section.component';
 
+import { PtahIconButtonDirective } from '@ptah-extension/ui';
 /** Where the inspector body is shown; `sheet` is the modal overlay band. */
 export type SessionInspectorPresentation =
   'docked' | 'sheet' | 'embedded' | 'rail';
@@ -77,6 +78,7 @@ function statsSwitchWindowMs(element: HTMLElement): number {
     InspectorTaskSectionComponent,
     InspectorGitSectionComponent,
     InspectorSessionActionsComponent,
+    PtahIconButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './session-inspector.component.html',

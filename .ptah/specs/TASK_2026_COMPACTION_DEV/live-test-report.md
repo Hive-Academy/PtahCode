@@ -19,7 +19,7 @@
 | Handoff stop at 25,000 context tokens | `reason=handoff` at 31,079 context, 64,554 weighted; crossing occurred between measurements. |
 | Record and usable follow-up | Record created `pending`, later `consumed`. Follow-up read it and summarized all 15 files in the main chat. No crash, stuck spinner, or error toast. |
 
-- Log `C:\Users\abdal\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-07.log:2198`, time 16:53:18.217Z: `[SubagentBudgetMonitor] Subagent stopped`, `reason=handoff`, `contextTokens=31079`, `weightedUsed=64554`.
+- Log `C:\Users\dev\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-07.log:2198`, time 16:53:18.217Z: `[SubagentBudgetMonitor] Subagent stopped`, `reason=handoff`, `contextTokens=31079`, `weightedUsed=64554`.
 - Record `.ptah/live-test-ws/.ptah/subagent-handoffs/20261107T165318190Z-5ad515209d19bc15-toolu_017urhepmx6NnVX7nr2K8NqY-3a9c5e1f.handoff.md`. It says the stopped agent cannot resume and its progress notes file was missing. Trace `~/.claude/projects/D--projects-ptah-extension--claude-worktrees-compaction-dev-defaults--ptah-live-test-ws/0f1b158a-6ceb-4c39-8006-37260514f3d2/subagents/agent-a533f3c84e1f60492.jsonl`; last usage context 2 input + 7,567 cache creation + 23,510 cache read = 31,079.
 - Screenshots: [Haiku model](live-test/scenario1-model.png), [stop](live-test/scenario1-stop.png), [follow-up](live-test/scenario1-followup.png). No near-notice screenshot because none was observed.
 - Initial main-thread response said handoff-file reads were declined and asked for guidance. The explicit follow-up `Continue the task from the handoff notes.` succeeded and marked the record consumed.
