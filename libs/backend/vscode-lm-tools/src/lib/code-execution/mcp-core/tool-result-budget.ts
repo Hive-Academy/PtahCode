@@ -136,6 +136,7 @@ export const TOOL_CONTENT_HINTS: Readonly<Record<string, ContentKind>> =
     ptah_session_status: 'preformatted',
     ptah_session_read: 'preformatted',
     ptah_session_stop: 'preformatted',
+    ptah_session_clear_finished: 'preformatted',
     // Session handoff (TASK_2026_655): a short reply naming the new tab.
     ptah_session_handoff: 'preformatted',
     // Route decide (TASK_2026_646): one JSON roster. Outcome report: one JSON

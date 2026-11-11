@@ -15,6 +15,7 @@ import {
 } from '@ptah-extension/cli-agent-runtime';
 import type { MCPToolDefinition } from '../types';
 import {
+  SessionClearFinishedArgsSchema,
   SessionHandoffArgsSchema,
   SessionReadArgsSchema,
   SessionSendArgsSchema,
@@ -28,6 +29,7 @@ export const SESSION_SEND_TOOL_NAME = 'ptah_session_send';
 export const SESSION_STATUS_TOOL_NAME = 'ptah_session_status';
 export const SESSION_READ_TOOL_NAME = 'ptah_session_read';
 export const SESSION_STOP_TOOL_NAME = 'ptah_session_stop';
+export const SESSION_CLEAR_FINISHED_TOOL_NAME = 'ptah_session_clear_finished';
 export const SESSION_HANDOFF_TOOL_NAME = 'ptah_session_handoff';
 
 export const SESSION_TOOL_NAMES = [
@@ -36,6 +38,7 @@ export const SESSION_TOOL_NAMES = [
   SESSION_STATUS_TOOL_NAME,
   SESSION_READ_TOOL_NAME,
   SESSION_STOP_TOOL_NAME,
+  SESSION_CLEAR_FINISHED_TOOL_NAME,
   SESSION_HANDOFF_TOOL_NAME,
 ] as const;
 
@@ -57,6 +60,14 @@ const HELD_NOTE =
   'Every ptah_session_* result ends with any completion a child produced ' +
   'while this session was not live ("Held while this session was not live").';
 
+/**
+ * A start can outlive the caller's MCP client deadline (TASK_2026_932 E2):
+ * the host keeps starting the child, so a retry would start a second one.
+ */
+export const SESSION_START_TIMEOUT_NOTE =
+  'On a timeout, call ptah_session_status first: a starting child on your ' +
+  'branch is your start; do not start again.';
+
 /** Build the `ptah_session_start` tool definition. */
 export function buildSessionStartTool(): MCPToolDefinition {
   return {
@@ -75,6 +86,8 @@ export function buildSessionStartTool(): MCPToolDefinition {
       'you are the parent. Refusals include a code. Use a smaller model or ' +
       'lower effort for coordination, Git or CI; use a strong model for unknown ' +
       'causes, security or architecture. Omit both for defaults. ' +
+      SESSION_START_TIMEOUT_NOTE +
+      ' ' +
       HELD_NOTE,
     inputSchema: inputSchemaOf(SessionStartArgsSchema),
   };
@@ -102,10 +115,12 @@ export function buildSessionStatusTool(): MCPToolDefinition {
     name: SESSION_STATUS_TOOL_NAME,
     description:
       'Status of your child sessions: working, waiting, awaiting-permission ' +
-      '(with the denial time), idle, handed-off (with succeededBy), or how it ended; branch, worktree, turns ' +
-      'settled, reports and the last completion. Omit sessionId for all of ' +
-      'your children. Prefer waiting for the pushed completion turn over ' +
-      'polling. ' +
+      '(with the denial time), idle, or finished with its outcome (kind, ' +
+      'reason, time, successor / succeededBy); branch, worktree, turns ' +
+      'settled, reports and the last completion. Without sessionId, lists ' +
+      'live children in full and finished children as counts per outcome ' +
+      'plus one short line each; includeFinished: true gives full records. ' +
+      'Prefer waiting for the pushed completion turn over polling. ' +
       HELD_NOTE,
     inputSchema: inputSchemaOf(SessionStatusArgsSchema),
     annotations: { readOnlyHint: true },
@@ -131,10 +146,26 @@ export function buildSessionStopTool(): MCPToolDefinition {
   return {
     name: SESSION_STOP_TOOL_NAME,
     description:
-      'Stop one of your child sessions. Its tab, its transcript, its worktree ' +
-      'and its branch remain; nothing is merged, pushed or removed. ' +
+      'Stop one of your child sessions. On an id that already handed off it ' +
+      'refuses and names the successor unless followHandoff: true; the reply ' +
+      'names the session that was stopped. Its tab, its transcript, its ' +
+      'worktree and its branch remain; nothing is merged, pushed or removed. ' +
       HELD_NOTE,
     inputSchema: inputSchemaOf(SessionStopArgsSchema),
+  };
+}
+
+/** Build the `ptah_session_clear_finished` tool definition. */
+export function buildSessionClearFinishedTool(): MCPToolDefinition {
+  return {
+    name: SESSION_CLEAR_FINISHED_TOOL_NAME,
+    description:
+      'Removes finished (terminal) child sessions of the caller from the ' +
+      'session list; never live ones; never deletes worktrees, branches, ' +
+      'transcripts or tabs; returns the count and the ids cleared and ' +
+      'skipped. ' +
+      HELD_NOTE,
+    inputSchema: inputSchemaOf(SessionClearFinishedArgsSchema),
   };
 }
 

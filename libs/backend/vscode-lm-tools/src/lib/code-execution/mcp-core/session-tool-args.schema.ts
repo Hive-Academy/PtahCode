@@ -70,7 +70,10 @@ export const SessionSendArgsSchema = z
   .strict();
 
 export const SessionStatusArgsSchema = z
-  .object({ sessionId: sessionId.optional() })
+  .object({
+    sessionId: sessionId.optional(),
+    includeFinished: z.boolean().optional(),
+  })
   .strict();
 
 export const SessionReadArgsSchema = z
@@ -80,7 +83,18 @@ export const SessionReadArgsSchema = z
   })
   .strict();
 
-export const SessionStopArgsSchema = z.object({ sessionId }).strict();
+export const SessionStopArgsSchema = z
+  .object({
+    sessionId,
+    followHandoff: z.boolean().optional(),
+  })
+  .strict();
+
+export const SessionClearFinishedArgsSchema = z
+  .object({
+    sessionIds: z.array(sessionId).min(1).max(50).optional(),
+  })
+  .strict();
 
 /**
  * `ptah_session_handoff` (TASK_2026_655). The prompt is required and
@@ -105,4 +119,7 @@ export type SessionSendArgs = z.infer<typeof SessionSendArgsSchema>;
 export type SessionStatusArgs = z.infer<typeof SessionStatusArgsSchema>;
 export type SessionReadArgs = z.infer<typeof SessionReadArgsSchema>;
 export type SessionStopArgs = z.infer<typeof SessionStopArgsSchema>;
+export type SessionClearFinishedArgs = z.infer<
+  typeof SessionClearFinishedArgsSchema
+>;
 export type SessionHandoffArgs = z.infer<typeof SessionHandoffArgsSchema>;

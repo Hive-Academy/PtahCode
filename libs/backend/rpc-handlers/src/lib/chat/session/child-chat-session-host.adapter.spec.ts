@@ -213,6 +213,39 @@ describe('ChildChatSessionHostAdapter', () => {
     );
   });
 
+  it('resolves sourceSessionId from lifecycle when descriptor.parentSessionId is null (Defect A)', async () => {
+    const liveParentSdk = '77777777-8888-4999-8aaa-bbbbbbbbbbbb';
+    const find = jest.fn().mockReturnValue({
+      realSessionId: liveParentSdk,
+      permissionLevel: 'ask',
+    });
+    const h = makeHarness({ find });
+
+    await h.adapter.startChildSession({
+      ...input,
+      descriptor: { ...descriptor, parentSessionId: null },
+    });
+
+    expect(find).toHaveBeenCalledWith(descriptor.parentTabId);
+    expect(h.startAgentChildSession).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceSessionId: liveParentSdk }),
+    );
+  });
+
+  it('falls back to descriptor.parentTabId when neither descriptor.parentSessionId nor lifecycle has an SDK id', async () => {
+    const find = jest.fn().mockReturnValue({ realSessionId: null });
+    const h = makeHarness({ find });
+
+    await h.adapter.startChildSession({
+      ...input,
+      descriptor: { ...descriptor, parentSessionId: null },
+    });
+
+    expect(h.startAgentChildSession).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceSessionId: descriptor.parentTabId }),
+    );
+  });
+
   it('still starts when the announcement fails, reporting uiAnnounced: false', async () => {
     const h = makeHarness();
     h.getActiveWebviews.mockReturnValueOnce([]);
@@ -391,6 +424,25 @@ describe('ChildChatSessionHostAdapter.startHandoffSession (TASK_2026_655)', () =
     expect(find).toHaveBeenCalledWith(handoffDescriptor.fromTabId);
     expect(h.startHandoffSession).toHaveBeenCalledWith(
       expect.objectContaining({ permissionLevel: 'yolo' }),
+    );
+  });
+
+  it('resolves sourceSessionId from lifecycle when descriptor.fromSessionId is null (Defect A)', async () => {
+    const liveFromSdk = '77777777-8888-4999-8aaa-bbbbbbbbbbbb';
+    const find = jest.fn().mockReturnValue({
+      realSessionId: liveFromSdk,
+      permissionLevel: 'yolo',
+    });
+    const h = makeHarness({ find });
+
+    await h.adapter.startHandoffSession({
+      ...handoffInput,
+      descriptor: { ...handoffDescriptor, fromSessionId: null },
+    });
+
+    expect(find).toHaveBeenCalledWith(handoffDescriptor.fromTabId);
+    expect(h.startHandoffSession).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceSessionId: liveFromSdk }),
     );
   });
 

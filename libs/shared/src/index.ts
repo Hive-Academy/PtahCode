@@ -48,6 +48,7 @@ export * from './lib/types/mcp-registry-config.mapper';
 export * from './lib/types/task-spec.types';
 export * from './lib/types/task-end-hook.types';
 export * from './lib/types/session-organization.types';
+export * from './lib/types/session-child-outcome.types';
 export * from './lib/types/task-spec.contract';
 export * from './lib/types/task-folder-markdown-eligibility';
 export * from './lib/types/task-graph';

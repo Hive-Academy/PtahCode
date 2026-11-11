@@ -8363,7 +8363,8 @@ describe('MCP tool profile listing, eager loading and dispatch', () => {
       // +3: agent_wait, run_check and HTTP-only run_check_wait. +1:
       // ptah_session_handoff, always-on (TASK_2026_655). +1:
       // ptah_agent_message_control (P1-E). +1: ptah_agent_message_ack (P2-G).
-      expect(coding).toHaveLength(hasIDECapabilities ? 73 : 70);
+      // +1: ptah_session_clear_finished (TASK_2026_932).
+      expect(coding).toHaveLength(hasIDECapabilities ? 74 : 71);
       expect(coding.map((tool) => tool.name)).toContain(
         'ptah_artifact_publish',
       );
@@ -8499,6 +8500,7 @@ const SESSION_TOOLS = [
   'ptah_session_status',
   'ptah_session_read',
   'ptah_session_stop',
+  'ptah_session_clear_finished',
 ];
 
 /** A real session namespace over a fake spawner: the caller comes from the request context. */
@@ -8519,7 +8521,7 @@ function sessionDeps(spawner: Partial<ISessionSpawner>) {
 }
 
 describe('protocol-handlers › session tools', () => {
-  it('lists the five tools in the agent group, right after ptah_agent_list', async () => {
+  it('lists the six tools in the agent group, right after ptah_agent_list', async () => {
     const names = listedToolNames(
       await handleMCPRequest(
         makeRequest({ id: 's-list', method: 'tools/list' }),
@@ -8527,7 +8529,7 @@ describe('protocol-handlers › session tools', () => {
       ),
     );
     const at = names.indexOf('ptah_agent_list');
-    expect(names.slice(at + 1, at + 6)).toEqual(SESSION_TOOLS);
+    expect(names.slice(at + 1, at + 7)).toEqual(SESSION_TOOLS);
   });
 
   it('drops them with the agent namespace toggle', async () => {
@@ -8635,7 +8637,16 @@ describe('protocol-handlers › session tools', () => {
           available: true,
         },
       }),
-      stop: jest.fn().mockResolvedValue({ ok: true, child }),
+      stop: jest.fn().mockResolvedValue({
+        ok: true,
+        child,
+        requestedSessionId: 'c-1',
+        followed: false,
+        alreadyEnded: false,
+      }),
+      clearFinished: jest
+        .fn()
+        .mockReturnValue({ ok: true, cleared: ['c-1'], skipped: [] }),
     };
     const deps = sessionDeps(spawner);
     const run = (name: string, args: Record<string, unknown>) =>
@@ -8667,6 +8678,11 @@ describe('protocol-handlers › session tools', () => {
       agentToolResult(await run('ptah_session_stop', { sessionId: 'c-1' }))
         .text,
     ).toMatch(/remain/);
+    expect(
+      agentToolResult(
+        await run('ptah_session_clear_finished', { sessionIds: ['c-1'] }),
+      ).text,
+    ).toMatch(/Cleared 1 finished session\(s\): c-1/);
     expect(spawner.send).toHaveBeenCalledWith(
       expect.objectContaining({ callerSessionId: 'tab-parent', mode: 'queue' }),
     );
