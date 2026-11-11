@@ -20,6 +20,7 @@ import type {
   NeedsAttentionTarget,
 } from '../data/attention';
 import { marketplaceRouteLink } from '../shell/marketplace-route-url';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /**
  * Router commands for an item's "Review" link.
@@ -73,7 +74,7 @@ let nextNeedsAttentionId = 0;
 @Component({
   selector: 'ptah-needs-attention',
   standalone: true,
-  imports: [LucideAngularModule, RouterLink],
+  imports: [PtahButtonDirective, LucideAngularModule, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -135,7 +136,8 @@ let nextNeedsAttentionId = 0;
             </p>
             <button
               type="button"
-              class="btn btn-outline btn-xs gap-1"
+              ptahButton
+              size="xs"
               data-testid="needs-attention-retry"
               (click)="retryRequested.emit()"
             >
@@ -206,7 +208,10 @@ let nextNeedsAttentionId = 0;
                     }
                   </div>
                   <a
-                    class="btn btn-ghost btn-xs shrink-0"
+                    ptahButton
+                    variant="ghost"
+                    size="xs"
+                    class="shrink-0"
                     [routerLink]="entry.link"
                     [attr.aria-label]="'Review ' + entry.item.title"
                     data-testid="needs-attention-review"

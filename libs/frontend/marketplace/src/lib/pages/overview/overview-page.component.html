@@ -14,7 +14,7 @@
     <div class="flex flex-wrap items-center gap-2">
       <button
         type="button"
-        class="btn btn-outline btn-sm gap-1"
+        ptahButton
         data-testid="overview-refresh"
         (click)="refresh()"
       >
@@ -26,7 +26,8 @@
         Refresh
       </button>
       <a
-        class="btn btn-primary btn-sm gap-1"
+        ptahButton
+        variant="primary"
         [routerLink]="connectorsLink"
         data-testid="overview-add-connection"
       >
@@ -144,7 +145,8 @@
           >
           <button
             type="button"
-            class="btn btn-outline btn-xs gap-1"
+            ptahButton
+            size="xs"
             aria-label="Retry Harness health"
             data-testid="harness-stale-retry"
             (click)="retryHarness()"

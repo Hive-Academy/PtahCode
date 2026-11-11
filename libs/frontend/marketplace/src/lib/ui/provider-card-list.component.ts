@@ -118,7 +118,7 @@ const SKELETON_CARDS = [0, 1, 2] as const;
           }
           <button
             type="button"
-            class="btn btn-outline btn-sm gap-1"
+            ptahButton
             data-testid="provider-cards-retry"
             (click)="retryRequested.emit()"
           >
@@ -151,7 +151,9 @@ const SKELETON_CARDS = [0, 1, 2] as const;
             @if (emptyActionLabel(); as actionLabel) {
               <button
                 type="button"
-                ptahButton variant="primary" size="sm"
+                ptahButton
+                variant="primary"
+                size="sm"
                 data-testid="provider-cards-empty-action"
                 (click)="emptyActionRequested.emit()"
               >
@@ -230,11 +232,13 @@ const SKELETON_CARDS = [0, 1, 2] as const;
                     @if (removalAction(row); as action) {
                       <button
                         type="button"
-                        class="btn btn-ghost btn-xs gap-1"
+                        ptahButton
+                        variant="ghost"
+                        size="xs"
                         data-testid="provider-card-remove"
                         [attr.aria-label]="action.ariaLabel"
                         [disabled]="busyRefs().has(row.ref)"
-                        [attr.aria-busy]="busyRefs().has(row.ref)"
+                        [busy]="busyRefs().has(row.ref)"
                         (click)="removeRequested.emit(row)"
                       >
                         @if (busyRefs().has(row.ref)) {

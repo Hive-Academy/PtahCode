@@ -11,6 +11,7 @@ import {
   RefreshCw,
   type LucideIconData,
 } from 'lucide-angular';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** Colour of the card's icon. The value itself stays in the body colour. */
 export type StatCardTone =
@@ -64,7 +65,7 @@ let nextStatCardId = 0;
 @Component({
   selector: 'ptah-stat-card',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -122,7 +123,8 @@ let nextStatCardId = 0;
             </p>
             <button
               type="button"
-              class="btn btn-outline btn-xs gap-1"
+              ptahButton
+              size="xs"
               [attr.aria-label]="'Retry ' + label()"
               data-testid="stat-card-retry"
               (click)="retryRequested.emit()"

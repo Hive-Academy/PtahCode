@@ -12,6 +12,7 @@ import {
   Trash2,
   X,
 } from 'lucide-angular';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** One item a bulk action could not complete, with the reason. */
 export interface BulkActionFailure {
@@ -64,7 +65,7 @@ export function bulkResultSummary(result: BulkActionResult): string {
 @Component({
   selector: 'ptah-bulk-action-bar',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -93,7 +94,8 @@ export function bulkResultSummary(result: BulkActionResult): string {
           <div class="ml-auto flex items-center gap-2">
             <button
               type="button"
-              class="btn btn-ghost btn-sm gap-1"
+              ptahButton
+              variant="ghost"
               data-testid="bulk-clear"
               [disabled]="busy()"
               (click)="clearRequested.emit()"
@@ -107,10 +109,11 @@ export function bulkResultSummary(result: BulkActionResult): string {
             </button>
             <button
               type="button"
-              class="btn btn-error btn-sm gap-1"
+              ptahButton
+              variant="danger"
               data-testid="bulk-action"
               [disabled]="busy()"
-              [attr.aria-busy]="busy()"
+              [busy]="busy()"
               (click)="actionRequested.emit()"
             >
               @if (busy()) {
@@ -165,7 +168,10 @@ export function bulkResultSummary(result: BulkActionResult): string {
               </p>
               <button
                 type="button"
-                class="btn btn-ghost btn-xs ml-auto"
+                ptahButton
+                variant="ghost"
+                size="xs"
+                class="ml-auto"
                 data-testid="bulk-result-dismiss"
                 (click)="resultDismissed.emit()"
               >
