@@ -417,7 +417,8 @@ export class NewProjectIntakePage {
         signal: launch.signal,
       });
     } catch (cause: unknown) {
-      // The user left the page on purpose. There is no failure to show.
+      // degradation-audit: reported - a cancelled launch is the user's own Back or
+      // page exit, so there is no failure to show. Every other error is shown below.
       if (cause instanceof HarnessChatLaunchCancelledError) return;
       const message =
         cause instanceof Error && cause.message

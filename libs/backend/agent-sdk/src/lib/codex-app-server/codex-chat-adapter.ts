@@ -764,12 +764,12 @@ export class CodexChatAdapter implements NativeChatAdapter {
         },
       });
     } catch (publishError: unknown) {
+      // degradation-audit: reported - the notice is best effort; the delivery failure is logged by the caller.
       this.warnNoticeFailed(publishError);
     }
   }
 
   private warnNoticeFailed(error: unknown): void {
-    // degradation-audit: reported - the notice is best effort; the delivery failure is logged by the caller.
     this.ports.logger.warn('Codex answer failure notice could not be published.', {
       code: 'codex-answer-notice-failed',
       error: error instanceof Error ? error.message : 'unknown',
@@ -824,7 +824,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
     }
     await this.peerQueue.send(session, () => {
       if (cancelled.aborted) {
-        // degradation-audit: reported - Stop withdrew the answer before delivery; this is the intended outcome.
+        // Stop withdrew the answer before delivery; this is the intended outcome.
         this.ports.logger.warn('Codex answer was discarded because the user stopped the turn.', {
           code: 'codex-user-input-cancelled',
         });
