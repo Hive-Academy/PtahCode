@@ -6,7 +6,7 @@ import {
   input,
   signal,
 } from '@angular/core';
-import { PtahFieldControlDirective } from './field-control.directive';
+import { PtahFieldControlRef } from './field-control-ref';
 
 let fieldId = 0;
 @Component({
@@ -18,7 +18,7 @@ let fieldId = 0;
       label()
     }}</label
     ><ng-content
-      select="input[ptahFieldControl], select[ptahFieldControl], textarea[ptahFieldControl]"
+      select="input[ptahFieldControl], select[ptahFieldControl], textarea[ptahFieldControl], input[ptahInput], textarea[ptahTextarea], select[ptahSelect]"
     />
     @if (hint() || error()) {
       <p
@@ -35,7 +35,7 @@ export class PtahFieldComponent {
   readonly label = input.required<string>();
   readonly hint = input<string | null>(null);
   readonly error = input<string | null>(null);
-  readonly control = contentChild(PtahFieldControlDirective);
+  readonly control = contentChild(PtahFieldControlRef);
   readonly controlId = `ptah-field-control-${++fieldId}`;
   readonly labelFor = signal(this.controlId);
   readonly descriptionId = `ptah-field-description-${fieldId}`;
@@ -54,8 +54,7 @@ export class PtahFieldComponent {
       if (ids.size)
         control.setAttribute('aria-describedby', [...ids].join(' '));
       else control.removeAttribute('aria-describedby');
-      if (this.error()) control.setAttribute('aria-invalid', 'true');
-      else control.removeAttribute('aria-invalid');
+      marked.setFieldInvalid(!!this.error());
     });
   }
 }

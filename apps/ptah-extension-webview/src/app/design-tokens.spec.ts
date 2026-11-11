@@ -17,6 +17,8 @@ const config = require('../../tailwind.config.js') as {
 
 const TOKEN_FILE = 'libs/frontend/ui/src/lib/tokens/ptah-tokens.css';
 const BUTTON_CSS_FILE = 'libs/frontend/ui/src/lib/button/ptah-button.css';
+const FORM_CONTROLS_CSS_FILE =
+  'libs/frontend/ui/src/lib/form-controls/ptah-form-controls.css';
 const WORKSPACE_ROOT = join(__dirname, '..', '..', '..', '..');
 const tokenCss = readFileSync(join(WORKSPACE_ROOT, TOKEN_FILE), 'utf8');
 const stylesCss = readFileSync(join(__dirname, '..', 'styles.css'), 'utf8');
@@ -61,6 +63,39 @@ describe('Ptah design tokens in the application', () => {
       .map((selector) => selector.trim())
       .filter((selector) => !selector.startsWith('.btn[data-ptah-button]'));
     expect(unscoped).toEqual([]);
+  });
+
+  it('imports the form controls look after the button look and before Tailwind', () => {
+    const buttonImportAt = stylesCss.indexOf(
+      `@import '../../../${BUTTON_CSS_FILE}';`,
+    );
+    const formImportAt = stylesCss.indexOf(
+      `@import '../../../${FORM_CONTROLS_CSS_FILE}';`,
+    );
+    expect(formImportAt).toBeGreaterThan(buttonImportAt);
+    expect(formImportAt).toBeLessThan(stylesCss.indexOf('@tailwind base'));
+  });
+
+  it('scopes every rule of the form controls look to directive hosts', () => {
+    const css = readFileSync(
+      join(WORKSPACE_ROOT, FORM_CONTROLS_CSS_FILE),
+      'utf8',
+    ).replace(/\/\*[\s\S]*?\*\//g, '');
+    const selectors = [...css.matchAll(/([^{}]+)\{/g)]
+      .map((m) => m[1].trim())
+      .filter((prelude) => prelude && !prelude.startsWith('@'))
+      .flatMap((prelude) => prelude.split(/,(?![^(]*\))/))
+      .map((selector) => selector.trim());
+    expect(selectors.length).toBeGreaterThan(20);
+    expect(css).not.toContain('data-ptah-look');
+    expect(css).not.toContain('!important');
+    expect(
+      selectors.filter((selector) => !selector.includes('[data-ptah-control]')),
+    ).toEqual([]);
+    // Layout stays with the consumer.
+    expect(css).not.toMatch(
+      /(^|[;{\s])(position|inset|(min-|max-)?width|margin[a-z-]*|padding-inline[a-z-]*)\s*:/m,
+    );
   });
 
   it('has a Tailwind name for each token group', () => {
@@ -167,6 +202,20 @@ describe('Ptah reference theme contrast (ptah-glass and ptah-glass-light)', () =
       expect(
         wcagContrast(theme['primary'], surfaces['base-300']),
       ).toBeGreaterThanOrEqual(4.5);
+    });
+
+    it('keeps form field text >= 4.5:1 and the theme error color (error edge fallback) >= 3:1 on each panel', () => {
+      for (const surface of ['base-100', 'base-200', 'base-300'] as const) {
+        expect(
+          wcagContrast(theme['base-content'], surfaces[surface]),
+        ).toBeGreaterThanOrEqual(4.5);
+        expect(wcagContrast(muted, surfaces[surface])).toBeGreaterThanOrEqual(
+          4.5,
+        );
+        expect(
+          wcagContrast(theme['error'], surfaces[surface]),
+        ).toBeGreaterThanOrEqual(3);
+      }
     });
 
     it('keeps control edge and focus ring >= 3:1 against base-100, base-200 and base-300', () => {

@@ -15,6 +15,7 @@ Egyptian-Inspired Theme with DaisyUI v4 + Tailwind CSS v3.4
 /* Ptah design tokens (custom properties only) */
 @import '../../../libs/frontend/ui/src/lib/tokens/ptah-tokens.css';
 @import '../../../libs/frontend/ui/src/lib/button/ptah-button.css';
+@import '../../../libs/frontend/ui/src/lib/form-controls/ptah-form-controls.css';
 
 /* Tailwind CSS v3.4.x directives */
 @tailwind base;

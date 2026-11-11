@@ -55,6 +55,7 @@ describe('UI gallery route', () => {
     expect(source).toMatch(/<ptah-surface-card\s*>/);
     expect(source).toContain('<ptah-surface-tile');
     expect(source).toMatch(/<ptah-gallery-button-family[\s/>]/);
+    expect(source).toMatch(/<ptah-gallery-form-controls-family[\s/>]/);
     expect(source).toMatch(/\bptahIconButton\b/);
     expect(source).not.toMatch(/\biconOnly\b/);
   });
