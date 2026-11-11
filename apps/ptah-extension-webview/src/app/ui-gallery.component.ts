@@ -2,8 +2,10 @@ import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
+  ElementRef,
   computed,
   inject,
+  viewChild,
 } from '@angular/core';
 import { Router } from '@angular/router';
 import { ThemeService } from '@ptah-extension/core';
@@ -42,8 +44,12 @@ interface GallerySectionLink {
     GalleryComponentsComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { class: 'block h-full min-h-0' },
   template: `<main
-    class="surface-0 flex flex-col gap-ptah-section px-ptah-gutter py-ptah-group text-left"
+    #scroller
+    tabindex="0"
+    data-testid="ui-gallery-scroller"
+    class="surface-0 flex h-full min-h-0 flex-col gap-ptah-section overflow-y-auto px-ptah-gutter py-ptah-group text-left focus:outline-none"
   >
     <ptah-page-header
       title="UI foundation gallery"
@@ -89,6 +95,7 @@ interface GallerySectionLink {
       @for (section of sections; track section.id) {
         <a
           [attr.href]="'#' + section.id"
+          (click)="scrollToSection($event, section.id)"
           class="inline-flex h-ptah-control-xs items-center rounded-ptah-control px-ptah-control-x-xs text-ptah-label text-base-content transition-colors duration-ptah-fast ease-ptah-standard hover:bg-base-200 focus-visible:outline focus-visible:outline-ptah-focus-width focus-visible:outline-ptah-focus focus-visible:outline-offset-ptah-focus"
         >
           {{ section.label }}
@@ -111,7 +118,17 @@ export class UiGalleryComponent {
   private readonly router = inject(Router);
   private readonly themeService = inject(ThemeService);
 
+  private readonly scroller = viewChild.required<ElementRef<HTMLElement>>('scroller');
+
   public readonly currentTheme = this.themeService.currentTheme;
+
+  /** The app shell does not scroll, and a fragment URL must not reach the router. */
+  public scrollToSection(event: Event, id: string): void {
+    event.preventDefault();
+    const root = this.scroller().nativeElement;
+    const target = root.querySelector<HTMLElement>(`section[id="${id}"]`);
+    target?.scrollIntoView({ block: 'start' });
+  }
   public readonly isDarkTheme = computed(
     () => this.currentTheme() === 'ptah-glass',
   );

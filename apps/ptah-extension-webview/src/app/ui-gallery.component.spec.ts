@@ -298,3 +298,29 @@ it('renders the badge family with an owner on every badge and a name on every do
     expect(dot.getAttribute('aria-label')).toBeTruthy();
   }
 });
+
+it('scrolls inside its own container and scrolls a section link to its section', () => {
+  TestBed.configureTestingModule({
+    providers: [
+      { provide: Router, useValue: { navigateByUrl: jest.fn() } },
+      { provide: ThemeService, useValue: createThemeServiceStub() },
+    ],
+  });
+  const fixture = TestBed.createComponent(UiGalleryComponent);
+  fixture.detectChanges();
+  const host = fixture.nativeElement as HTMLElement;
+  const scroller = host.querySelector<HTMLElement>('[data-testid="ui-gallery-scroller"]');
+  expect(host.classList).toContain('h-full');
+  expect(scroller?.classList).toContain('overflow-y-auto');
+  expect(scroller?.classList).toContain('min-h-0');
+  expect(scroller?.getAttribute('tabindex')).toBe('0');
+
+  const target = host.querySelector<HTMLElement>('section#family-badge');
+  const scrollIntoView = jest.fn();
+  if (target) target.scrollIntoView = scrollIntoView;
+  const link = host.querySelector<HTMLAnchorElement>('nav[aria-label="Gallery sections"] a[href="#family-badge"]');
+  const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+  link?.dispatchEvent(click);
+  expect(click.defaultPrevented).toBe(true);
+  expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
+});
