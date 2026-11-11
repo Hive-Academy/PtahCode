@@ -15,8 +15,8 @@
  * stripping one leading Tailwind `!` (important) and every Tailwind variant
  * prefix (`foo:` segments before the utility), the remaining utility:
  *   1. equals one of the DaisyUI component roots
- *      `btn`, `input`, `select`, `textarea`, `card`, `badge`, `alert`,
- *      `skeleton`; or
+ *      `btn`, `input`, `select`, `textarea`, `checkbox`, `toggle`,
+ *      `form-control`, `label`, `card`, `badge`, `alert`, `skeleton`; or
  *   2. starts with `<root>-` (a DaisyUI modifier: `btn-primary`, `input-sm`,
  *      `card-body`, `badge-ghost`, `alert-warning`, ...),
  *      EXCEPT `select-none`, `select-text`, `select-all`, `select-auto`,
@@ -71,10 +71,14 @@ export const BLOCKED_ROOTS = [
   'badge',
   'btn',
   'card',
+  'checkbox',
+  'form-control',
   'input',
+  'label',
   'select',
   'skeleton',
   'textarea',
+  'toggle',
 ] as const;
 
 /** Tailwind user-select utilities that collide with the `select` root. */
