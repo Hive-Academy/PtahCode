@@ -53,7 +53,11 @@ import {
   VSCodeService,
 } from '@ptah-extension/core';
 import { HarnessHealthStore } from '@ptah-extension/marketplace/services';
-import { NativeTab, NativeTabGroupComponent } from '@ptah-extension/ui';
+import {
+  NativeTab,
+  NativeTabGroupComponent,
+  PtahButtonDirective,
+} from '@ptah-extension/ui';
 import type {
   AgentOutcomeSignals,
   AgentScorecard,
@@ -155,6 +159,7 @@ export const PLUGIN_SETTINGS_POINTER_COPY =
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    PtahButtonDirective,
     NativeTabGroupComponent,
     CloneCardComponent,
     CloneDetailDrawerComponent,
@@ -187,7 +192,10 @@ export const PLUGIN_SETTINGS_POINTER_COPY =
           </p>
           <button
             type="button"
-            class="btn btn-ghost btn-xs shrink-0 transition-colors duration-150"
+            ptahButton
+            variant="ghost"
+            size="xs"
+            class="shrink-0"
             data-testid="clones-refresh"
             [disabled]="actionsLocked()"
             (click)="onRefresh()"
@@ -328,7 +336,10 @@ export const PLUGIN_SETTINGS_POINTER_COPY =
                 </p>
                 <button
                   type="button"
-                  class="btn btn-ghost btn-xs shrink-0 transition-colors duration-150"
+                  ptahButton
+                  variant="ghost"
+                  size="xs"
+                  class="shrink-0"
                   data-testid="clones-agent-sync-btn"
                   [disabled]="actionsLocked()"
                   (click)="onSync()"
@@ -357,7 +368,9 @@ export const PLUGIN_SETTINGS_POINTER_COPY =
                 @if (showOpenWizard()) {
                   <button
                     type="button"
-                    class="btn btn-primary btn-xs"
+                    ptahButton
+                    variant="primary"
+                    size="xs"
                     data-testid="clones-open-wizard"
                     (click)="onOpenSetupWizard()"
                   >
@@ -488,7 +501,7 @@ export const PLUGIN_SETTINGS_POINTER_COPY =
             <div class="modal-action">
               <button
                 type="button"
-                class="btn btn-sm"
+                ptahButton
                 data-testid="clones-reconcile-cancel"
                 (click)="reconcile.set(null)"
               >

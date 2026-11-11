@@ -36,6 +36,7 @@ import { AnswerDockComponent } from './answer-dock.component';
 import { ProposalFlowStore } from './proposal-flow.store';
 import { ProposalPanelComponent } from './proposal-panel.component';
 import { RevisionHistoryComponent } from './revision-history.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-proposal-workspace-page',
@@ -52,89 +53,220 @@ import { RevisionHistoryComponent } from './revision-history.component';
     ReplyComposerComponent,
     ProposalStatusCardComponent,
     OnboardingStepperComponent,
+    PtahButtonDirective,
   ],
   providers: [ComposerAttachmentsService, ReplyDraftStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section class="mx-auto max-w-[1120px] space-y-5 pb-24 min-[721px]:pb-4"
-      aria-labelledby="proposal-workspace-title" data-testid="proposal-workspace">
-      <header #pageHeader class="flex flex-wrap items-center justify-between gap-3">
+    <section
+      class="mx-auto max-w-[1120px] space-y-5 pb-24 min-[721px]:pb-4"
+      aria-labelledby="proposal-workspace-title"
+      data-testid="proposal-workspace"
+    >
+      <header
+        #pageHeader
+        class="flex flex-wrap items-center justify-between gap-3"
+      >
         <div>
-          <h1 id="proposal-workspace-title" class="text-2xl font-semibold" tabindex="-1">{{ store.mode === 'new-project' ? 'New project proposal' : 'AI team proposal' }}</h1>
-          <p class="text-sm text-base-content-muted">Review the agent's configuration as it develops.</p>
+          <h1
+            id="proposal-workspace-title"
+            class="text-2xl font-semibold"
+            tabindex="-1"
+          >
+            {{
+              store.mode === 'new-project'
+                ? 'New project proposal'
+                : 'AI team proposal'
+            }}
+          </h1>
+          <p class="text-sm text-base-content-muted">
+            Review the agent's configuration as it develops.
+          </p>
         </div>
-        <button type="button" class="btn btn-sm btn-ghost btn-outline" (click)="beginLeave()">Leave</button>
+        <button ptahButton type="button" (click)="beginLeave()">Leave</button>
       </header>
       <div #stepperRegion><ptah-onboarding-stepper [steps]="steps" /></div>
       <ptah-live-run-layout #layout [composer]="composerShown()">
-        <ptah-details-log runLog #sessionLog variant="pane" mode="tab"
+        <ptah-details-log
+          runLog
+          #sessionLog
+          variant="pane"
+          mode="tab"
           [tabId]="store.session.record()?.tabId ?? null"
           [sessionInitialized]="!!store.session.record()?.sessionId"
           [statsSnapshot]="tab()?.sessionStats ?? null"
           [liveModelStats]="tab()?.liveModelStats ?? null"
-          [liveState]="logState()" [composer]="composerShown()"
-          [footerNote]="composerShown() ? '' : store.restoreState() === 'loading' ? 'Restoring session…' : 'No live session is bound to this proposal.'">
+          [liveState]="logState()"
+          [composer]="composerShown()"
+          [footerNote]="
+            composerShown()
+              ? ''
+              : store.restoreState() === 'loading'
+                ? 'Restoring session…'
+                : 'No live session is bound to this proposal.'
+          "
+        >
           @if (composerShown()) {
-            <ptah-reply-composer logComposer #replyComposer [status]="store.sessionStatus()" />
+            <ptah-reply-composer
+              logComposer
+              #replyComposer
+              [status]="store.sessionStatus()"
+            />
           }
         </ptah-details-log>
-        @if (store.restoreState() === 'loading' || store.restoreState() === 'ready') {
-          @if (store.actionError(); as error) { <p role="alert" class="text-sm text-state-err">{{ error }}</p> }
-          <ptah-proposal-status-card [status]="store.sessionStatus()"
-            [error]="store.session.error()" [reviewEligible]="store.reviewEligible()"
-            [canRetryBrief]="!!store.session.record() && !store.session.record()?.sendAttempt?.ackedAt && store.session.phase() === 'failed'"
-            [meta]="store.current() ? 'Revision ' + store.current()?.ordinal : ''"
-            (review)="review()" (saveDraft)="saveDraft()" (saveAsPreset)="openPresets()" (retryBrief)="retryBrief()" />
+        @if (
+          store.restoreState() === 'loading' || store.restoreState() === 'ready'
+        ) {
+          @if (store.actionError(); as error) {
+            <p role="alert" class="text-sm text-state-err">{{ error }}</p>
+          }
+          <ptah-proposal-status-card
+            [status]="store.sessionStatus()"
+            [error]="store.session.error()"
+            [reviewEligible]="store.reviewEligible()"
+            [canRetryBrief]="
+              !!store.session.record() &&
+              !store.session.record()?.sendAttempt?.ackedAt &&
+              store.session.phase() === 'failed'
+            "
+            [meta]="
+              store.current() ? 'Revision ' + store.current()?.ordinal : ''
+            "
+            (review)="review()"
+            (saveDraft)="saveDraft()"
+            (saveAsPreset)="openPresets()"
+            (retryBrief)="retryBrief()"
+          />
         }
         @if (store.restoreState() === 'loading') {
           <p role="status">Loading proposal…</p>
         } @else if (store.restoreState() !== 'ready') {
-          <section class="rounded-[22px] border border-base-300 p-5" data-glass-surface="content">
+          <section
+            class="rounded-[22px] border border-base-300 p-5"
+            data-glass-surface="content"
+          >
             <h2 class="font-semibold">Proposal unavailable</h2>
             <p class="mt-2 text-sm">{{ recoveryCopy() }}</p>
             <div class="mt-3 flex gap-2">
-              @if (store.restoreState() === 'restore-draft') { <button type="button" class="btn btn-sm" (click)="restoreDraft()">Restore from draft</button> }
-              @if (store.restoreState() === 'proposal-unavailable' && store.session.record()) { <button type="button" class="btn btn-sm" (click)="proposeAgain()">Propose again</button> }
-              <button type="button" class="btn btn-sm" (click)="startOver()">Start over</button>
+              @if (store.restoreState() === 'restore-draft') {
+                <button ptahButton type="button" (click)="restoreDraft()">
+                  Restore from draft
+                </button>
+              }
+              @if (
+                store.restoreState() === 'proposal-unavailable' &&
+                store.session.record()
+              ) {
+                <button ptahButton type="button" (click)="proposeAgain()">
+                  Propose again
+                </button>
+              }
+              <button ptahButton type="button" (click)="startOver()">
+                Start over
+              </button>
             </div>
           </section>
         } @else {
-          <ptah-proposal-panel [config]="store.hydration.config()" [tags]="store.changeTags()"
-            [ordinal]="store.current()?.ordinal ?? 0" [complete]="store.hydration.isConfigComplete()"
-            [mode]="store.mode" [tabId]="store.session.record()?.tabId ?? ''" [workspaceRoot]="store.workspaceRoot()"
-            [showIntakeFacts]="showIntakeFacts()" [document]="store.generatedDocument()" (copyDocument)="copy($event)" />
-          <ptah-revision-history [revisions]="store.revisions()" [currentRevisionId]="store.current()?.id ?? null" (restore)="askRestore($event)" />
+          <ptah-proposal-panel
+            [config]="store.hydration.config()"
+            [tags]="store.changeTags()"
+            [ordinal]="store.current()?.ordinal ?? 0"
+            [complete]="store.hydration.isConfigComplete()"
+            [mode]="store.mode"
+            [tabId]="store.session.record()?.tabId ?? ''"
+            [workspaceRoot]="store.workspaceRoot()"
+            [showIntakeFacts]="showIntakeFacts()"
+            [document]="store.generatedDocument()"
+            (copyDocument)="copy($event)"
+          />
+          <ptah-revision-history
+            [revisions]="store.revisions()"
+            [currentRevisionId]="store.current()?.id ?? null"
+            (restore)="askRestore($event)"
+          />
           @if (restoreId()) {
-            <div role="group" aria-label="Confirm revision restore" class="rounded-[14px] border border-state-need p-4">
+            <div
+              role="group"
+              aria-label="Confirm revision restore"
+              class="rounded-[14px] border border-state-need p-4"
+            >
               <p>Restore this revision as your choices?</p>
-              <div class="mt-2 flex gap-2"><button type="button" class="btn btn-primary btn-sm" (click)="confirmRestore()">Restore</button><button type="button" class="btn btn-sm" (click)="restoreId.set(null)">Cancel</button></div>
+              <div class="mt-2 flex gap-2">
+                <button
+                  ptahButton
+                  variant="primary"
+                  type="button"
+                  (click)="confirmRestore()"
+                >
+                  Restore</button
+                ><button ptahButton type="button" (click)="restoreId.set(null)">
+                  Cancel
+                </button>
+              </div>
             </div>
           }
-          <details class="rounded-[14px] border border-base-300 p-4" data-glass-surface="content">
-            <summary class="min-h-11 cursor-pointer font-medium">Ask the agent to…</summary>
-            <ptah-builder-ai-helpers-section [initialized]="true" [tabId]="store.session.record()?.tabId ?? ''"
-              [workspaceRoot]="store.workspaceRoot()" [document]="store.generatedDocument()" (documentAdded)="store.generatedDocument.set($event)" />
+          <details
+            class="rounded-[14px] border border-base-300 p-4"
+            data-glass-surface="content"
+          >
+            <summary class="min-h-11 cursor-pointer font-medium">
+              Ask the agent to…
+            </summary>
+            <ptah-builder-ai-helpers-section
+              [initialized]="true"
+              [tabId]="store.session.record()?.tabId ?? ''"
+              [workspaceRoot]="store.workspaceRoot()"
+              [document]="store.generatedDocument()"
+              (documentAdded)="store.generatedDocument.set($event)"
+            />
           </details>
-          <details #presetsDetails class="rounded-[14px] border border-base-300 p-4" data-glass-surface="content">
-            <summary class="min-h-11 cursor-pointer font-medium">Presets</summary>
-            <ptah-builder-presets-section [initialized]="true" [tabId]="store.session.record()?.tabId ?? ''"
-              [workspaceRoot]="store.workspaceRoot()" [document]="store.generatedDocument()" />
+          <details
+            #presetsDetails
+            class="rounded-[14px] border border-base-300 p-4"
+            data-glass-surface="content"
+          >
+            <summary class="min-h-11 cursor-pointer font-medium">
+              Presets
+            </summary>
+            <ptah-builder-presets-section
+              [initialized]="true"
+              [tabId]="store.session.record()?.tabId ?? ''"
+              [workspaceRoot]="store.workspaceRoot()"
+              [document]="store.generatedDocument()"
+            />
           </details>
-          <details class="rounded-[14px] border border-base-300 p-4" data-glass-surface="content">
-            <summary class="min-h-11 cursor-pointer font-medium">Your brief</summary>
+          <details
+            class="rounded-[14px] border border-base-300 p-4"
+            data-glass-surface="content"
+          >
+            <summary class="min-h-11 cursor-pointer font-medium">
+              Your brief
+            </summary>
             <pre class="mt-2 whitespace-pre-wrap text-sm">{{ brief() }}</pre>
           </details>
         }
       </ptah-live-run-layout>
-      @if (composerShown()) { <ptah-answer-dock #answerDock [background]="backgroundElements()" /> }
+      @if (composerShown()) {
+        <ptah-answer-dock #answerDock [background]="backgroundElements()" />
+      }
       @if (store.session.record()) {
-        <span class="sr-only" role="status" aria-live="polite">{{ replyDraft.announcement() }}</span>
+        <span class="sr-only" role="status" aria-live="polite">{{
+          replyDraft.announcement()
+        }}</span>
       }
       @if (leaveOpen()) {
-        <ptah-harness-builder-leave-dialog [mode]="store.mode"
-          [agentRunning]="store.session.phase() === 'busy' || store.session.phase() === 'sending'"
-          [saving]="leaving()" [saveFailed]="leaveFailed()" [stopUncertain]="stopUncertain()"
-          (choice)="chooseLeave($event)" (stopChoice)="stopChoice($event)" />
+        <ptah-harness-builder-leave-dialog
+          [mode]="store.mode"
+          [agentRunning]="
+            store.session.phase() === 'busy' ||
+            store.session.phase() === 'sending'
+          "
+          [saving]="leaving()"
+          [saveFailed]="leaveFailed()"
+          [stopUncertain]="stopUncertain()"
+          (choice)="chooseLeave($event)"
+          (stopChoice)="stopChoice($event)"
+        />
       }
     </section>
   `,
@@ -151,11 +283,15 @@ export class ProposalWorkspacePage implements OnInit {
     { id: 'proposal', label: 'Proposal', state: 'current' },
     { id: 'review', label: 'Review', state: 'upcoming' },
   ];
-  private readonly layout = viewChild<unknown, ElementRef<HTMLElement>>('layout', {
-    read: ElementRef,
-  });
+  private readonly layout = viewChild<unknown, ElementRef<HTMLElement>>(
+    'layout',
+    {
+      read: ElementRef,
+    },
+  );
   private readonly sessionLog = viewChild<DetailsLogComponent>('sessionLog');
-  private readonly replyComposer = viewChild<ReplyComposerComponent>('replyComposer');
+  private readonly replyComposer =
+    viewChild<ReplyComposerComponent>('replyComposer');
   protected readonly replyDraft = inject(ReplyDraftStore);
   private readonly pageHeader =
     viewChild<ElementRef<HTMLElement>>('pageHeader');
@@ -176,28 +312,48 @@ export class ProposalWorkspacePage implements OnInit {
   readonly leaving = signal(false);
   readonly leaveFailed = signal(false);
   readonly stopUncertain = signal(false);
-  readonly composerShown = computed(() => !!this.store.session.record() &&
-    (this.store.restoreState() === 'ready' || this.store.restoreState() === 'proposal-unavailable'));
-  readonly logState = computed<'live' | 'idle' | 'stopped' | 'loading' | 'unavailable'>(() => {
+  readonly composerShown = computed(
+    () =>
+      !!this.store.session.record() &&
+      (this.store.restoreState() === 'ready' ||
+        this.store.restoreState() === 'proposal-unavailable'),
+  );
+  readonly logState = computed<
+    'live' | 'idle' | 'stopped' | 'loading' | 'unavailable'
+  >(() => {
     const status = this.store.sessionStatus();
-    return status === 'working' ? 'live' : status === 'stopping' ? 'stopped' :
-      status === 'loading' ? 'loading' : status === 'not-connected' ? 'unavailable' : 'idle';
+    return status === 'working'
+      ? 'live'
+      : status === 'stopping'
+        ? 'stopped'
+        : status === 'loading'
+          ? 'loading'
+          : status === 'not-connected'
+            ? 'unavailable'
+            : 'idle';
   });
   readonly tab = computed(() => {
     this.tabs.backgroundTabsRevision();
     const tabId = this.store.session.record()?.tabId;
-    return tabId ? this.tabs.findTabByIdAcrossWorkspaces(tabId)?.tab ?? null : null;
+    return tabId
+      ? (this.tabs.findTabByIdAcrossWorkspaces(tabId)?.tab ?? null)
+      : null;
   });
   private focusedLog = false;
   constructor() {
     effect(() => {
       if (this.store.restoreState() === 'loading' || this.focusedLog) return;
       this.focusedLog = true;
-      afterNextRender(() => {
-        const active = typeof document === 'undefined' ? null : document.activeElement;
-        const heading = this.pageHeader()?.nativeElement.querySelector('h1');
-        if (active === heading || active === document.body || active === null) this.sessionLog()?.focus();
-      }, { injector: this.injector });
+      afterNextRender(
+        () => {
+          const active =
+            typeof document === 'undefined' ? null : document.activeElement;
+          const heading = this.pageHeader()?.nativeElement.querySelector('h1');
+          if (active === heading || active === document.body || active === null)
+            this.sessionLog()?.focus();
+        },
+        { injector: this.injector },
+      );
     });
   }
   private releaseView: (() => void) | null = null;
@@ -285,8 +441,14 @@ export class ProposalWorkspacePage implements OnInit {
     });
   }
   proposeAgain(): void {
-    this.replyDraft.setReply('Please propose the configuration again for my brief.');
-    if (typeof window !== 'undefined' && window.matchMedia('(min-width: 721px)').matches === false) this.answerDock()?.openSheet();
+    this.replyDraft.setReply(
+      'Please propose the configuration again for my brief.',
+    );
+    if (
+      typeof window !== 'undefined' &&
+      window.matchMedia('(min-width: 721px)').matches === false
+    )
+      this.answerDock()?.openSheet();
     else this.replyComposer()?.focus();
   }
   private startPath(): string {

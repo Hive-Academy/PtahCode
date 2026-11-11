@@ -13,6 +13,7 @@ import {
   type DecisionKind,
   type DecisionRow,
 } from './preview-decisions.state';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /**
  * C4 BulkDecisionBar: "Keep all" / "Replace all" above the file list.
@@ -25,6 +26,7 @@ import {
 @Component({
   selector: 'ptah-bulk-decision-bar',
   standalone: true,
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (count() > 0) {
@@ -36,8 +38,10 @@ import {
       >
         <strong class="flex-1">{{ countLabel() }}</strong>
         <button
+          ptahButton
+          variant="ghost"
+          size="xs"
           type="button"
-          class="btn btn-ghost btn-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
           data-testid="bulk-keep"
           [disabled]="disabled()"
           (click)="applyAll.emit('keep')"
@@ -45,8 +49,10 @@ import {
           Keep all
         </button>
         <button
+          ptahButton
+          variant="ghost"
+          size="xs"
           type="button"
-          class="btn btn-ghost btn-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
           data-testid="bulk-replace"
           [disabled]="disabled()"
           (click)="applyAll.emit('replace')"

@@ -20,6 +20,7 @@ import {
 import { MemoryRpcService } from '../services/memory-rpc.service';
 
 import { CorpusBuildDialogComponent } from './corpus-build-dialog.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import { CorpusSuggestionsComponent } from './corpus-suggestions.component';
 
 /**
@@ -51,6 +52,7 @@ export const CORPUS_CHAT_NAVIGATOR = new InjectionToken<CorpusChatNavigator>(
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    PtahButtonDirective,
     CommonModule,
     CorpusBuildDialogComponent,
     CorpusSuggestionsComponent,
@@ -73,7 +75,8 @@ export const CORPUS_CHAT_NAVIGATOR = new InjectionToken<CorpusChatNavigator>(
         <div class="ml-auto flex gap-1">
           <button
             type="button"
-            class="btn btn-sm btn-ghost"
+            ptahButton
+            variant="ghost"
             [disabled]="loading()"
             (click)="onRefresh()"
             aria-label="Refresh corpus list"
@@ -85,7 +88,8 @@ export const CORPUS_CHAT_NAVIGATOR = new InjectionToken<CorpusChatNavigator>(
           </button>
           <button
             type="button"
-            class="btn btn-sm btn-primary"
+            ptahButton
+            variant="primary"
             (click)="onOpenBuild()"
             aria-label="Open build corpus dialog"
           >
@@ -157,7 +161,9 @@ export const CORPUS_CHAT_NAVIGATOR = new InjectionToken<CorpusChatNavigator>(
               >
                 <button
                   type="button"
-                  class="btn btn-xs btn-ghost"
+                  ptahButton
+                  variant="ghost"
+                  size="xs"
                   [disabled]="busyName() === corpus.name"
                   (click)="onPrimeInNewChat(corpus)"
                   [attr.aria-label]="
@@ -168,7 +174,9 @@ export const CORPUS_CHAT_NAVIGATOR = new InjectionToken<CorpusChatNavigator>(
                 </button>
                 <button
                   type="button"
-                  class="btn btn-xs btn-ghost"
+                  ptahButton
+                  variant="ghost"
+                  size="xs"
                   [disabled]="busyName() === corpus.name"
                   (click)="onReprime(corpus)"
                   [attr.aria-label]="'Reprime corpus ' + corpus.name"
@@ -177,7 +185,9 @@ export const CORPUS_CHAT_NAVIGATOR = new InjectionToken<CorpusChatNavigator>(
                 </button>
                 <button
                   type="button"
-                  class="btn btn-xs btn-ghost"
+                  ptahButton
+                  variant="ghost"
+                  size="xs"
                   [disabled]="busyName() === corpus.name"
                   (click)="onRebuild(corpus)"
                   [attr.aria-label]="'Rebuild corpus ' + corpus.name"

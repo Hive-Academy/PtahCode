@@ -1,6 +1,6 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { TabManagerService } from '@ptah-extension/chat';
+import { TabManagerService } from '@ptah-extension/chat-state';
 import { EffortStateService, ModelStateService } from '@ptah-extension/core';
 import { freezeSessionOverrides } from './canvas-session-overrides';
 
@@ -39,5 +39,40 @@ describe('freezeSessionOverrides', () => {
     expect(tabs()[0]).toMatchObject({ overrideModel: 'model-a', overrideEffort: 'high' });
     expect(setOverrideModel).toHaveBeenCalledTimes(2);
     expect(setOverrideEffort).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the model and effort a parent pinned for a child session', () => {
+    const id = signal('child');
+    const tabs = signal([
+      {
+        id: 'child',
+        overrideModel: undefined as string | undefined,
+        overrideEffort: undefined as string | null | undefined,
+        agentOrigin: { model: 'haiku', effort: 'high' },
+      },
+    ]);
+    const setOverrideModel = jest.fn();
+    const setOverrideEffort = jest.fn();
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: TabManagerService,
+          useValue: { tabs, setOverrideModel, setOverrideEffort },
+        },
+        {
+          provide: ModelStateService,
+          useValue: { isLoaded: signal(true), currentModel: signal('default') },
+        },
+        {
+          provide: EffortStateService,
+          useValue: { isLoaded: signal(true), currentEffort: signal('medium') },
+        },
+      ],
+    });
+    TestBed.runInInjectionContext(() => freezeSessionOverrides(id));
+    TestBed.flushEffects();
+    // The global default must not replace the pin of the parent.
+    expect(setOverrideModel).not.toHaveBeenCalled();
+    expect(setOverrideEffort).not.toHaveBeenCalled();
   });
 });

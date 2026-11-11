@@ -32,6 +32,10 @@ import { GitStatusService } from '../services/git-status.service';
 import { ReviewNavigationService } from '../services/review-navigation.service';
 import { stashAge } from '../stash/stash-popover.component';
 import { HistoryStashSectionComponent } from './history-stash-section.component';
+import {
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 
 /** One `git:log` answer, with the workspace and HEAD state it was read for. */
 interface LogRead {
@@ -89,6 +93,8 @@ function toRow(commit: GitHistoryCommit, now: number): CommitRow {
   selector: 'ptah-history-timeline',
   standalone: true,
   imports: [
+    PtahButtonDirective,
+    PtahIconButtonDirective,
     LucideAngularModule,
     OpenInButtonComponent,
     HistoryStashSectionComponent,
@@ -137,9 +143,9 @@ function toRow(commit: GitHistoryCommit, now: number): CommitRow {
           </h3>
           <button
             type="button"
-            class="btn btn-ghost btn-xs px-1"
-            aria-label="Refresh history"
-            title="Refresh history"
+            ptahIconButton
+            label="Refresh history"
+            size="xs"
             data-testid="history-refresh"
             [disabled]="loading() || !gitStatus.activeWorkspacePath()"
             (click)="reload()"
@@ -195,7 +201,9 @@ function toRow(commit: GitHistoryCommit, now: number): CommitRow {
             <span class="flex-1">{{ message }}</span>
             <button
               type="button"
-              class="btn btn-ghost btn-xs"
+              ptahButton
+              variant="ghost"
+              size="xs"
               data-testid="history-retry"
               [disabled]="loading()"
               (click)="reload()"

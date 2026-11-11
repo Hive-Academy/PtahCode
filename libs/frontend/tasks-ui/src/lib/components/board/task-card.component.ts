@@ -50,6 +50,10 @@ import {
   taskEstimateBadge,
   taskTypeBadge,
 } from '../../task-presentation';
+import {
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 
 /**
  * Payload emitted when the Start action fires. `isolate` requests
@@ -137,7 +141,7 @@ const HTTP_URL = /^https?:\/\//i;
 @Component({
   selector: 'ptah-task-card',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahButtonDirective, PtahIconButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- Checked and selected are shown DIFFERENTLY on purpose: a ring for the
@@ -262,9 +266,9 @@ const HTTP_URL = /^https?:\/\//i;
               <button
                 type="button"
                 [attr.tabindex]="rovingTabIndex()"
-                class="btn btn-ghost btn-sm btn-square h-8 min-h-8 w-8 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                aria-label="Change status"
-                title="Change status"
+                ptahIconButton
+                label="Change status"
+                class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
                 (click)="$event.stopPropagation()"
               >
                 <lucide-angular
@@ -421,7 +425,9 @@ const HTTP_URL = /^https?:\/\//i;
           @if (childRollup(); as rollup) {
             <button
               type="button"
-              class="btn btn-outline btn-xs gap-1 px-1.5 font-normal tabular-nums focus-visible:outline-offset-2"
+              ptahButton
+              size="xs"
+              class="tabular-nums focus-visible:outline-offset-2"
               [attr.tabindex]="rovingTabIndex()"
               [title]="rollupActionTitle()"
               data-testid="task-card-rollup"

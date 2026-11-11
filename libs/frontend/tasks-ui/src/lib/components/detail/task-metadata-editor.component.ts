@@ -17,6 +17,7 @@ import {
 } from '@ptah-extension/shared';
 import { TASK_ESTIMATE_LABELS, labelChipClass } from '../../task-presentation';
 import type { TaskMetadataWrite } from './task-metadata-write';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /**
  * Metadata editor for the task detail panel: labels, estimate, parent.
@@ -62,7 +63,7 @@ import type { TaskMetadataWrite } from './task-metadata-write';
 @Component({
   selector: 'ptah-task-metadata-editor',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="flex flex-col gap-3" data-testid="task-metadata-editor">
@@ -123,7 +124,8 @@ import type { TaskMetadataWrite } from './task-metadata-write';
           </datalist>
           <button
             type="button"
-            class="btn btn-xs"
+            ptahButton
+            size="xs"
             data-testid="task-editor-label-add"
             [disabled]="busy() || !canAddLabel()"
             (click)="onAddLabel()"
@@ -201,7 +203,8 @@ import type { TaskMetadataWrite } from './task-metadata-write';
           </datalist>
           <button
             type="button"
-            class="btn btn-xs"
+            ptahButton
+            size="xs"
             data-testid="task-editor-parent-set"
             [disabled]="busy() || !canSetParent()"
             (click)="onSetParent()"
@@ -211,7 +214,9 @@ import type { TaskMetadataWrite } from './task-metadata-write';
           @if (task().parent) {
             <button
               type="button"
-              class="btn btn-xs btn-ghost"
+              ptahButton
+              variant="ghost"
+              size="xs"
               data-testid="task-editor-parent-clear"
               [disabled]="busy()"
               (click)="onClearParent()"

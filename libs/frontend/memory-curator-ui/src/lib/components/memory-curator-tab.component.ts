@@ -35,6 +35,7 @@ import { MemoryStatsStripComponent } from './memory-stats-strip.component';
 import { MemorySearchBarComponent } from './memory-search-bar.component';
 import { MemoryEntryListComponent } from './memory-entry-list.component';
 import { MemoryIndexedCodeComponent } from './memory-indexed-code.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import {
   MemoryDangerZoneComponent,
   type MemoryPurgeRequest,
@@ -61,6 +62,7 @@ export const PURGE_JUNK_FAILED_MESSAGE =
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    PtahButtonDirective,
     CommonModule,
     LucideAngularModule,
     WorkspaceIndexingComponent,
@@ -88,10 +90,13 @@ export const PURGE_JUNK_FAILED_MESSAGE =
         />
         <p class="text-sm font-medium">Memory lives in the desktop app</p>
         <p class="text-xs text-base-content-muted">
-          Memory curation needs the local index and runs only in PtahCode desktop.
+          Memory curation needs the local index and runs only in PtahCode
+          desktop.
         </p>
         <a
-          class="btn btn-sm btn-primary mt-1"
+          ptahButton
+          variant="primary"
+          class="mt-1"
           href="https://github.com/Hive-Academy/PtahCode/releases"
           target="_blank"
           rel="noopener noreferrer"
@@ -125,7 +130,8 @@ export const PURGE_JUNK_FAILED_MESSAGE =
             <div class="flex items-center gap-2">
               <button
                 type="button"
-                class="btn btn-sm btn-ghost"
+                ptahButton
+                variant="ghost"
                 [disabled]="purgingJunk() || !hasWorkspace()"
                 [attr.title]="
                   !hasWorkspace()
@@ -142,9 +148,10 @@ export const PURGE_JUNK_FAILED_MESSAGE =
               </button>
               <button
                 type="button"
-                class="btn btn-sm btn-ghost"
+                ptahButton
+                variant="ghost"
                 [disabled]="rebuilding()"
-                [attr.aria-busy]="rebuilding()"
+                [busy]="rebuilding()"
                 (click)="onRebuildIndex()"
                 aria-label="Rebuild memory search index"
                 data-testid="memory-rebuild-index"

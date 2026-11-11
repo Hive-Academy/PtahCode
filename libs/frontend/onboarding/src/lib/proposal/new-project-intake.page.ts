@@ -9,7 +9,10 @@ import {
 import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { ArrowRight, FolderPlus, LucideAngularModule } from 'lucide-angular';
-import { AttachmentTrayComponent, ComposerAttachmentsService } from '@ptah-extension/chat';
+import {
+  AttachmentTrayComponent,
+  ComposerAttachmentsService,
+} from '@ptah-extension/chat';
 import {
   HarnessBuilderLeaveDialogComponent,
   HarnessRpcService,
@@ -31,6 +34,7 @@ import {
   type OnboardingStep,
 } from '../shared/onboarding-stepper.component';
 import { ProposalFlowStore } from './proposal-flow.store';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-new-project-intake-page',
@@ -42,6 +46,7 @@ import { ProposalFlowStore } from './proposal-flow.store';
     AttachmentTrayComponent,
     WorkspaceHeaderComponent,
     LucideAngularModule,
+    PtahButtonDirective,
   ],
   providers: [ComposerAttachmentsService],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -52,21 +57,46 @@ import { ProposalFlowStore } from './proposal-flow.store';
       data-testid="new-project-intake"
     >
       <header class="flex items-center gap-3">
-        <span class="flex size-11 shrink-0 items-center justify-center rounded-xl border border-base-300 text-state-need" data-glass-surface="tile">
-          <lucide-angular [img]="icons.folder" class="size-5" aria-hidden="true" />
+        <span
+          class="flex size-11 shrink-0 items-center justify-center rounded-xl border border-base-300 text-state-need"
+          data-glass-surface="tile"
+        >
+          <lucide-angular
+            [img]="icons.folder"
+            class="size-5"
+            aria-hidden="true"
+          />
         </span>
         <div>
-          <h1 id="new-project-intake-title" class="text-2xl font-semibold" tabindex="-1">New project</h1>
-          <p class="text-sm text-base-content-muted">Tell the agent what you want to build.</p>
+          <h1
+            id="new-project-intake-title"
+            class="text-2xl font-semibold"
+            tabindex="-1"
+          >
+            New project
+          </h1>
+          <p class="text-sm text-base-content-muted">
+            Tell the agent what you want to build.
+          </p>
         </div>
       </header>
       <ptah-workspace-header [canSwitch]="true" />
       <ptah-onboarding-stepper [steps]="steps" />
       @if (workspaceEmpty() === null) {
-        <div class="rounded-xl border border-base-300 p-3 text-sm" role="status">
+        <div
+          class="rounded-xl border border-base-300 p-3 text-sm"
+          role="status"
+        >
           @if (workspaceCheckError()) {
             <p>{{ workspaceCheckError() }}</p>
-            <button type="button" class="btn btn-sm mt-2" (click)="retryWorkspaceCheck()">Retry folder check</button>
+            <button
+              ptahButton
+              type="button"
+              class="mt-2"
+              (click)="retryWorkspaceCheck()"
+            >
+              Retry folder check
+            </button>
           } @else {
             Checking folder contents…
           }
@@ -74,8 +104,17 @@ import { ProposalFlowStore } from './proposal-flow.store';
       }
       @if (workspaceEmpty() === false && !confirmedNonEmpty()) {
         <div class="rounded-xl border border-warning p-3 text-sm" role="alert">
-          <p>Folder is not empty. Starting a new project here may use existing files.</p>
-          <button type="button" class="btn btn-warning btn-sm mt-2" (click)="confirmedNonEmpty.set(true)">Continue in this folder</button>
+          <p>
+            Folder is not empty. Starting a new project here may use existing
+            files.
+          </p>
+          <button
+            type="button"
+            class="btn btn-warning btn-sm mt-2"
+            (click)="confirmedNonEmpty.set(true)"
+          >
+            Continue in this folder
+          </button>
         </div>
       }
       @if (draftTab()) {
@@ -85,7 +124,8 @@ import { ProposalFlowStore } from './proposal-flow.store';
         >
           <p>Continue your draft</p>
           <button
-            class="btn btn-sm mt-2"
+            ptahButton
+            class="mt-2"
             type="button"
             (click)="continueDraft()"
           >
@@ -127,11 +167,18 @@ import { ProposalFlowStore } from './proposal-flow.store';
             (drop)="attachments.onDrop($event)"
             [attr.aria-invalid]="whatInvalid() ? true : null"
             [attr.aria-describedby]="
-              whatInvalid() ? 'project-attachment-hint project-what-error' : 'project-attachment-hint'
+              whatInvalid()
+                ? 'project-attachment-hint project-what-error'
+                : 'project-attachment-hint'
             "
           ></textarea>
           <ptah-attachment-tray />
-          <p id="project-attachment-hint" class="mt-1 text-xs text-base-content-muted">Attachments are not saved if you leave this page</p>
+          <p
+            id="project-attachment-hint"
+            class="mt-1 text-xs text-base-content-muted"
+          >
+            Attachments are not saved if you leave this page
+          </p>
           @if (whatInvalid()) {
             <p id="project-what-error" class="text-sm text-state-err">
               Describe what you want to build.
@@ -224,7 +271,10 @@ import { ProposalFlowStore } from './proposal-flow.store';
             (ngModelChange)="constraints.set($event)"
           ></textarea>
         </div>
-        <details class="rounded-[14px] border border-base-300 p-3" data-glass-surface="tile">
+        <details
+          class="rounded-[14px] border border-base-300 p-3"
+          data-glass-surface="tile"
+        >
           <summary class="cursor-pointer text-sm font-semibold">
             Advanced · provider and model
           </summary>
@@ -237,10 +287,27 @@ import { ProposalFlowStore } from './proposal-flow.store';
           <p role="alert" class="text-sm text-state-err">{{ error }}</p>
         }
         <div class="flex flex-wrap items-center justify-between gap-2">
-          <button type="button" class="btn btn-ghost" (click)="back()">Back</button>
-          <button type="submit" class="btn btn-primary grow sm:grow-0" [disabled]="starting() || attachments.pendingReads() > 0 || workspaceEmpty() === null || (workspaceEmpty() === false && !confirmedNonEmpty())">
+          <button ptahButton variant="ghost" type="button" (click)="back()">
+            Back
+          </button>
+          <button
+            ptahButton
+            variant="primary"
+            type="submit"
+            class="grow sm:grow-0"
+            [disabled]="
+              starting() ||
+              attachments.pendingReads() > 0 ||
+              workspaceEmpty() === null ||
+              (workspaceEmpty() === false && !confirmedNonEmpty())
+            "
+          >
             {{ starting() ? 'Starting…' : 'Continue' }}
-            <lucide-angular [img]="icons.next" class="size-4" aria-hidden="true" />
+            <lucide-angular
+              [img]="icons.next"
+              class="size-4"
+              aria-hidden="true"
+            />
           </button>
         </div>
       </form>
@@ -265,7 +332,9 @@ export class NewProjectIntakePage {
   protected readonly store = inject(ProposalFlowStore);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
-  private pendingAttachments: ReturnType<ComposerAttachmentsService['snapshotForSend']> | null = null;
+  private pendingAttachments: ReturnType<
+    ComposerAttachmentsService['snapshotForSend']
+  > | null = null;
   protected readonly audienceOptions = NEW_PROJECT_AUDIENCE_OPTIONS;
   protected readonly platformOptions = NEW_PROJECT_PLATFORM_OPTIONS;
   protected readonly steps: readonly OnboardingStep[] = [
@@ -306,7 +375,8 @@ export class NewProjectIntakePage {
     this.workspaceCheckError.set(null);
     try {
       const response = await this.harnessRpc.initialize(root);
-      if (!this.destroyRef.destroyed && check === this.workspaceCheck) this.workspaceEmpty.set(response.workspaceEffectivelyEmpty);
+      if (!this.destroyRef.destroyed && check === this.workspaceCheck)
+        this.workspaceEmpty.set(response.workspaceEffectivelyEmpty);
     } catch {
       // degradation-audit: reported — intake offers a retry when the folder check fails.
       if (!this.destroyRef.destroyed && check === this.workspaceCheck) {
@@ -349,9 +419,18 @@ export class NewProjectIntakePage {
   async submit(event: Event): Promise<void> {
     event.preventDefault();
     if (this.store.workspaceRoot() !== this.lastRoot) return;
-    if (this.workspaceEmpty() === null || (this.workspaceEmpty() === false && !this.confirmedNonEmpty())) return;
+    if (
+      this.workspaceEmpty() === null ||
+      (this.workspaceEmpty() === false && !this.confirmedNonEmpty())
+    )
+      return;
     this.submitted.set(true);
-    if (this.errors().length || this.starting() || this.attachments.pendingReads() > 0) return;
+    if (
+      this.errors().length ||
+      this.starting() ||
+      this.attachments.pendingReads() > 0
+    )
+      return;
     const intake: NewProjectIntake = {
       what: this.what().trim(),
       audience: this.audience(),

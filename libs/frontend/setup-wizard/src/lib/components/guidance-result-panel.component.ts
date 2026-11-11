@@ -6,11 +6,12 @@ import {
   output,
 } from '@angular/core';
 import type { GuidanceCommittedResult } from '../services/guidance-generation.store';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-guidance-result-panel',
   standalone: true,
-  imports: [DatePipe],
+  imports: [DatePipe, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -45,31 +46,20 @@ import type { GuidanceCommittedResult } from '../services/guidance-generation.st
           <span>Use project guidance</span>
         </label>
         <div class="flex flex-wrap gap-2">
-          <button
-            type="button"
-            class="btn btn-outline btn-sm"
-            (click)="cacheRequested.emit()"
-          >
+          <button ptahButton type="button" (click)="cacheRequested.emit()">
             Refresh cache status
           </button>
-          <button
-            type="button"
-            class="btn btn-outline btn-sm"
-            (click)="contentRequested.emit()"
-          >
+          <button ptahButton type="button" (click)="contentRequested.emit()">
             View content
           </button>
-          <button
-            type="button"
-            class="btn btn-outline btn-sm"
-            (click)="downloadRequested.emit()"
-          >
+          <button ptahButton type="button" (click)="downloadRequested.emit()">
             Download
           </button>
           @if (!runActive()) {
             <button
+              ptahButton
+              variant="primary"
               type="button"
-              class="btn btn-primary btn-sm"
               (click)="regenerateRequested.emit()"
             >
               Regenerate guidance
@@ -83,8 +73,10 @@ import type { GuidanceCommittedResult } from '../services/guidance-generation.st
       }
       @if (showSkip()) {
         <button
+          ptahButton
+          variant="ghost"
           type="button"
-          class="btn btn-ghost btn-sm mt-2"
+          class="mt-2"
           (click)="skipRequested.emit()"
         >
           Skip guidance

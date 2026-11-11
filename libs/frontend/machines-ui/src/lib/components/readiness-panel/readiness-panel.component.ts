@@ -22,6 +22,7 @@ import {
 } from '../../services/machines-store';
 import { displayText } from '../../utils/display-text';
 import { READINESS_COMMAND } from '../../utils/machine-copy';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import { CopyCommandComponent } from '../copy-command/copy-command.component';
 
 const STATUS_TEXT: Readonly<Record<MachineReadinessCheck['status'], string>> = {
@@ -75,7 +76,7 @@ interface CheckRow {
 @Component({
   selector: 'ptah-readiness-panel',
   standalone: true,
-  imports: [CopyCommandComponent],
+  imports: [PtahButtonDirective, CopyCommandComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -169,7 +170,8 @@ interface CheckRow {
       <div class="flex gap-2">
         <button
           type="button"
-          class="btn btn-primary btn-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+          ptahButton
+          variant="primary"
           [disabled]="loading()"
           data-testid="readiness-check-again"
           (click)="checkAgain()"
@@ -178,7 +180,8 @@ interface CheckRow {
         </button>
         <button
           type="button"
-          class="btn btn-ghost btn-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+          ptahButton
+          variant="ghost"
           [disabled]="rows().length === 0"
           data-testid="readiness-copy-report"
           (click)="copyReport()"

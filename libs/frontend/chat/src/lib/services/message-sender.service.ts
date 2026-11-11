@@ -45,6 +45,8 @@ import {
   CommandCenterSendLockService,
   commandCenterPersonaFor,
   type QueuedFollowUpRef,
+  resolveTabModel,
+  resolveTabEffort,
 } from '@ptah-extension/chat-state';
 import {
   SessionManager,
@@ -383,20 +385,40 @@ export class MessageSenderService {
   }
 
   /**
+   * The model the next turn of `tab` uses. The tab rule is shared with the
+   * model dropdown (`resolveTabModel`), so the dropdown shows what is sent.
+   * A model that belongs to the session (a child pinned by its parent, or a
+   * restored session) is sent as it is. The backend resolves tier names.
+   * An override or the global selection must be offered by the loaded list.
+   */
+  private modelForTab(
+    tab: TabState | null | undefined,
+  ): string | undefined {
+    const { model, origin } = resolveTabModel(
+      tab,
+      this.modelState.currentModel(),
+    );
+    if (!model) return undefined;
+    return origin === 'session' ? model : this.resolveValidModel(model);
+  }
+
+  /**
    * Resolve effective effort level with three-state semantics:
-   * - undefined on TabState = "not set, follow global"
+   * - undefined on TabState = "not set, follow the session or global"
    * - null on TabState = "explicitly SDK default" (send nothing)
    * - EffortLevel on TabState = explicit per-tab override
    *
-   * Priority: explicit options > tab override > global state
+   * Priority: explicit options > tab override > session effort > global state
    */
   private resolveEffort(
     optionsEffort: EffortLevel | undefined,
-    tabOverride: EffortLevel | null | undefined,
+    tab: TabState | null | undefined,
   ): EffortLevel | undefined {
     if (optionsEffort !== undefined) return optionsEffort;
-    if (tabOverride !== undefined) return tabOverride ?? undefined;
-    return this.effortState.currentEffort();
+    return (
+      resolveTabEffort(tab, this.effortState.currentEffort()).effort ??
+      undefined
+    );
   }
 
   /**
@@ -636,13 +658,8 @@ export class MessageSenderService {
         userMessage,
       ]);
       const ptahCliId = this.ptahCliState.selectedAgentId() ?? undefined;
-      const effectiveModel = this.resolveValidModel(
-        activeTab?.overrideModel ?? this.modelState.currentModel(),
-      );
-      const effectiveEffort = this.resolveEffort(
-        effort,
-        activeTab?.overrideEffort,
-      );
+      const effectiveModel = this.modelForTab(activeTab);
+      const effectiveEffort = this.resolveEffort(effort, activeTab);
       const systemPrompt = activeTab && commandCenterPersonaFor(activeTab);
       const abortSignal = this.wireAbortDispatch(activeTabId);
       const result = await this.claudeRpcService.call(
@@ -791,13 +808,8 @@ export class MessageSenderService {
   }): Promise<RpcResult<ChatContinueResult>> {
     const { content, sessionId, tabId, clientMessageId, options } = input;
     const tab = this.tabManager.findTabByIdAcrossWorkspaces(tabId)?.tab;
-    const effectiveModel = this.resolveValidModel(
-      tab?.overrideModel ?? this.modelState.currentModel(),
-    );
-    const effectiveEffort = this.resolveEffort(
-      options?.effort,
-      tab?.overrideEffort,
-    );
+    const effectiveModel = this.modelForTab(tab);
+    const effectiveEffort = this.resolveEffort(options?.effort, tab);
     const systemPrompt = tab && commandCenterPersonaFor(tab);
     const images = options?.images;
     return this.claudeRpcService.call('chat:continue', {
@@ -944,13 +956,8 @@ export class MessageSenderService {
       ]);
       this.streamingHandler.recordUserPromptBoundary(activeTabId, userMessage);
       sentPromptId = userMessage.id;
-      const effectiveModel = this.resolveValidModel(
-        activeTab?.overrideModel ?? this.modelState.currentModel(),
-      );
-      const effectiveEffort = this.resolveEffort(
-        effort,
-        activeTab?.overrideEffort,
-      );
+      const effectiveModel = this.modelForTab(activeTab);
+      const effectiveEffort = this.resolveEffort(effort, activeTab);
       const systemPrompt = activeTab && commandCenterPersonaFor(activeTab);
       const result = await this.claudeRpcService.call(
         'chat:continue',

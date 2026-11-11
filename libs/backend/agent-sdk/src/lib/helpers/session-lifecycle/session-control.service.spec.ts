@@ -168,7 +168,9 @@ describe('SessionControl end causes', () => {
     h.registry.register('other', makeConfig(), new AbortController());
     await h.control.disposeAllSessions('config-reinit');
     expect(h.notifyAll).toHaveBeenCalledTimes(2);
-    expect(h.notifyAll).toHaveBeenCalledWith(expect.objectContaining({ cause: 'config-reinit' }));
+    expect(h.notifyAll).toHaveBeenCalledWith(
+      expect.objectContaining({ cause: 'config-reinit' }),
+    );
   });
 });
 
@@ -1247,5 +1249,70 @@ describe('SessionControl.disposeAllSessions — a session started mid-dispose su
 
     expect(newAbort.signal.aborted).toBe(false);
     expect(h.registry.find('tab_new')).toBeDefined();
+  });
+});
+
+describe('SessionControl.setSessionModel', () => {
+  it('changes the model of the live query once and ignores the same model', async () => {
+    const h = makeHarness();
+    const rec = h.registry.register(KEY, makeConfig(), new AbortController());
+    const setModel = jest.fn().mockResolvedValue(undefined);
+    rec.query = { setModel } as unknown as typeof rec.query;
+    rec.currentModel = 'model-a';
+
+    await h.control.setSessionModel(KEY_ID, 'model-b');
+    expect(setModel).toHaveBeenCalledTimes(1);
+    expect(setModel).toHaveBeenCalledWith('model-b');
+    expect(rec.currentModel).toBe('model-b');
+
+    // Every chat turn applies the model of its tab: the repeat is a no-op.
+    await h.control.setSessionModel(KEY_ID, 'model-b');
+    expect(setModel).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('SessionControl.setSessionEffort', () => {
+  it('applies a changed effort once and ignores the same effort', async () => {
+    const h = makeHarness();
+    const rec = h.registry.register(KEY, makeConfig(), new AbortController());
+    const applyFlagSettings = jest.fn().mockResolvedValue(undefined);
+    rec.query = { applyFlagSettings } as unknown as typeof rec.query;
+    rec.currentEffort = 'low';
+
+    await h.control.setSessionEffort(KEY_ID, 'high');
+    expect(applyFlagSettings).toHaveBeenCalledTimes(1);
+    expect(applyFlagSettings).toHaveBeenCalledWith({ effortLevel: 'high' });
+    expect(rec.currentEffort).toBe('high');
+
+    await h.control.setSessionEffort(KEY_ID, 'high');
+    expect(applyFlagSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not lower a session that started with max to xhigh', async () => {
+    const h = makeHarness();
+    const rec = h.registry.register(
+      KEY,
+      { ...makeConfig(), effort: 'max' } as AISessionConfig,
+      new AbortController(),
+    );
+    const applyFlagSettings = jest.fn().mockResolvedValue(undefined);
+    rec.query = { applyFlagSettings } as unknown as typeof rec.query;
+
+    await h.control.setSessionEffort(KEY_ID, 'max');
+
+    expect(applyFlagSettings).not.toHaveBeenCalled();
+  });
+
+  it('keeps the old effort when the SDK call fails', async () => {
+    const h = makeHarness();
+    const rec = h.registry.register(KEY, makeConfig(), new AbortController());
+    const applyFlagSettings = jest.fn().mockRejectedValue(new Error('down'));
+    rec.query = { applyFlagSettings } as unknown as typeof rec.query;
+    rec.currentEffort = 'low';
+
+    await expect(h.control.setSessionEffort(KEY_ID, 'high')).rejects.toThrow(
+      'down',
+    );
+    expect(rec.currentEffort).toBe('low');
   });
 });

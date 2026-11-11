@@ -8,6 +8,10 @@ import {
 import { ExternalLink, LucideAngularModule, X } from 'lucide-angular';
 import { MarkdownBlockComponent } from '@ptah-extension/markdown';
 import type { TaskDocumentState } from '../../services/task-folder.store';
+import {
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 
 /** A reader state that names a file (everything but `idle`). */
 export type TaskOpenDocumentState = Exclude<
@@ -62,7 +66,12 @@ const STATE_REASONS: Record<
 @Component({
   selector: 'ptah-task-document-reader',
   standalone: true,
-  imports: [LucideAngularModule, MarkdownBlockComponent],
+  imports: [
+    PtahButtonDirective,
+    PtahIconButtonDirective,
+    LucideAngularModule,
+    MarkdownBlockComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -91,7 +100,9 @@ const STATE_REASONS: Record<
         @if (editorAllowed()) {
           <button
             type="button"
-            class="btn btn-primary btn-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+            ptahButton
+            variant="primary"
+            class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
             [attr.aria-label]="'Open ' + state().file + ' in the editor'"
             data-testid="task-doc-open-editor"
             (click)="openInEditor.emit(state().file)"
@@ -106,9 +117,9 @@ const STATE_REASONS: Record<
         }
         <button
           type="button"
-          class="btn btn-ghost btn-sm btn-square focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-          [attr.aria-label]="'Close ' + state().file"
-          title="Close document"
+          ptahIconButton
+          [label]="'Close ' + state().file"
+          class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
           data-testid="task-doc-close"
           (click)="closed.emit()"
         >

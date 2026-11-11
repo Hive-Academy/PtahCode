@@ -28,6 +28,7 @@ import { TASK_STATUS_LABELS, isStartableStatus } from '../../task-presentation';
 import { TASK_STATUS_INK, deriveTaskStage } from '../../task-stage';
 import type { TaskStartRequest } from '../../types/task-agent.types';
 import type { TaskStatusChange } from '../board/task-card.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** Makes each header's `aria-controls` target unique on the page. */
 let nextMenuId = 0;
@@ -54,7 +55,7 @@ let nextMenuId = 0;
 @Component({
   selector: 'ptah-task-detail-header',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     '(keydown.escape)': 'onEscape($event)',
@@ -68,7 +69,8 @@ let nextMenuId = 0;
         <button
           #backButton
           type="button"
-          class="btn btn-outline btn-sm gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+          ptahButton
+          class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
           aria-label="Back to board"
           data-testid="task-detail-back"
           (click)="back.emit()"
@@ -93,7 +95,8 @@ let nextMenuId = 0;
             @if (startable()) {
               <button
                 type="button"
-                class="btn btn-outline btn-sm gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                ptahButton
+                class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
                 data-testid="task-detail-start"
                 [disabled]="starting()"
                 [attr.aria-label]="'Start task ' + task.id + ' in chat'"
@@ -116,12 +119,13 @@ let nextMenuId = 0;
               <button
                 #statusTrigger
                 type="button"
-                class="btn btn-outline btn-sm gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+                ptahButton
+                class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
                 aria-haspopup="menu"
                 [attr.aria-expanded]="menuVisible()"
                 [attr.aria-controls]="menuId"
                 data-testid="task-detail-status-trigger"
-                [attr.aria-disabled]="busy() || null"
+                [busy]="busy()"
                 (click)="toggleMenu()"
                 (keydown.arrowdown)="openMenu('first', $event)"
                 (keydown.arrowup)="openMenu('last', $event)"

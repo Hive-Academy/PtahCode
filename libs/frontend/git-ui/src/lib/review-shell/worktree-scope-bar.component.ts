@@ -5,6 +5,7 @@ import {
   input,
   output,
 } from '@angular/core';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 const FOCUS_RING =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[oklch(var(--s))]';
@@ -29,6 +30,7 @@ export function worktreeFolderName(path: string): string {
 @Component({
   selector: 'ptah-worktree-scope-bar',
   standalone: true,
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block flex-shrink-0' },
   template: `
@@ -41,27 +43,34 @@ export function worktreeFolderName(path: string): string {
         role="status"
         [title]="root()"
         data-testid="worktree-scope-label"
-        >Viewing <span class="font-semibold">{{ worktreeLabel() }}</span>
-        worktree (read-only)</span
+        >Viewing
+        <span class="font-semibold">{{ worktreeLabel() }}</span> worktree
+        (read-only)</span
       >
       <button
         type="button"
-        class="btn btn-ghost btn-xs {{ focusRing }}"
+        ptahButton
+        variant="ghost"
+        size="xs"
+        class="{{ focusRing }}"
         data-testid="worktree-scope-back"
         (click)="back.emit()"
       >
         Back to {{ activeLabel() }}
       </button>
       @if (!hideOpenAsWorkspace()) {
-      <button
-        type="button"
-        class="btn btn-ghost btn-xs {{ focusRing }}"
-        data-testid="worktree-scope-open"
-        [title]="'Open ' + root() + ' as a workspace folder'"
-        (click)="openAsWorkspace.emit()"
-      >
-        Open as workspace
-      </button>
+        <button
+          type="button"
+          ptahButton
+          variant="ghost"
+          size="xs"
+          class="{{ focusRing }}"
+          data-testid="worktree-scope-open"
+          [title]="'Open ' + root() + ' as a workspace folder'"
+          (click)="openAsWorkspace.emit()"
+        >
+          Open as workspace
+        </button>
       }
     </div>
   `,

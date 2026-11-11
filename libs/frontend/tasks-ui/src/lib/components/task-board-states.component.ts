@@ -12,6 +12,7 @@ import {
   Plus,
 } from 'lucide-angular';
 import { SPEC_ROOT } from '@ptah-extension/shared';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** The four whole-board states that replace the lanes. */
 export type TaskBoardStateKind =
@@ -36,7 +37,7 @@ export type TaskBoardStateKind =
 @Component({
   selector: 'ptah-task-board-states',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'flex flex-1 min-h-0 min-w-0' },
   template: `
@@ -79,7 +80,8 @@ export type TaskBoardStateKind =
           </div>
           <button
             type="button"
-            class="btn btn-ghost btn-sm border border-surface-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+            ptahButton
+            class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
             data-testid="tasks-no-workspace-retry"
             [disabled]="busy()"
             (click)="retry.emit()"
@@ -114,7 +116,9 @@ export type TaskBoardStateKind =
           </div>
           <button
             type="button"
-            class="btn btn-primary btn-sm h-9 min-h-9 gap-1.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+            ptahButton
+            variant="primary"
+            class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
             data-testid="tasks-empty-create"
             (click)="create.emit()"
           >
@@ -149,7 +153,8 @@ export type TaskBoardStateKind =
           </div>
           <button
             type="button"
-            class="btn btn-ghost btn-sm border border-surface-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+            ptahButton
+            class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
             data-testid="tasks-filtered-empty-clear"
             (click)="clearFilter.emit()"
           >

@@ -26,6 +26,7 @@ import {
   MAX_SAVED_VIEW_NAME_LENGTH,
   type SavedTaskView,
 } from '@ptah-extension/shared';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** A rename request: which view, and the new name the user typed. */
 export interface TaskViewRename {
@@ -139,7 +140,7 @@ interface TaskViewRow {
 @Component({
   selector: 'ptah-task-view-menu',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'contents' },
   template: `
@@ -377,7 +378,7 @@ interface TaskViewRow {
                     />
                     <button
                       type="button"
-                      class="btn btn-ghost btn-sm border border-surface-border"
+                      ptahButton
                       [disabled]="renameDraft().trim().length === 0 || busy()"
                       data-testid="task-view-rename-confirm"
                       (click)="commitRename(row.view.id)"
@@ -386,7 +387,8 @@ interface TaskViewRow {
                     </button>
                     <button
                       type="button"
-                      class="btn btn-ghost btn-sm"
+                      ptahButton
+                      variant="ghost"
                       (click)="cancelRename()"
                     >
                       Cancel
@@ -404,7 +406,8 @@ interface TaskViewRow {
                     <span class="flex-1">Delete this view?</span>
                     <button
                       type="button"
-                      class="btn btn-error btn-sm"
+                      ptahButton
+                      variant="danger"
                       [disabled]="busy()"
                       data-testid="task-view-delete-confirm-yes"
                       (click)="commitDelete(row.view.id)"
@@ -413,7 +416,8 @@ interface TaskViewRow {
                     </button>
                     <button
                       type="button"
-                      class="btn btn-ghost btn-sm"
+                      ptahButton
+                      variant="ghost"
                       (click)="confirmingId.set(null)"
                     >
                       Keep
@@ -427,7 +431,9 @@ interface TaskViewRow {
           @if (activeView() !== null) {
             <button
               type="button"
-              class="btn btn-ghost btn-sm justify-start"
+              ptahButton
+              variant="ghost"
+              class="justify-start"
               [disabled]="busy()"
               title="Stop tracking a saved view. The current filters stay as they are."
               data-testid="task-view-clear-active"
@@ -462,7 +468,8 @@ interface TaskViewRow {
           />
           <button
             type="button"
-            class="btn btn-primary btn-sm"
+            ptahButton
+            variant="primary"
             [disabled]="atCap() || createDraft().trim().length === 0 || busy()"
             [title]="createTitle()"
             data-testid="task-view-create"

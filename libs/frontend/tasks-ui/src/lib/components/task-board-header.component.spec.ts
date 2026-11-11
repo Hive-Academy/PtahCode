@@ -71,9 +71,8 @@ describe('TaskBoardHeaderComponent', () => {
     expect(header?.className).toContain('border-surface-border');
     const create = q(fixture, 'tasks-create-trigger');
     expect(create?.className).toContain('btn-primary');
-    expect(create?.className).toContain('h-9');
     expect(q(fixture, 'tasks-palette-trigger')?.className).toContain(
-      'btn-ghost',
+      'btn-secondary',
     );
   });
 
