@@ -111,6 +111,7 @@ export class CodexChatSessionControls {
         if (session.turnId) session.sink.endTurn(session.id, session.turnId);
         session.abort.abort();
         session.sink.dispose();
+        session.context.setUserInputAnswerHandler?.(undefined);
         await session.context.close();
       } finally {
         try {
@@ -144,7 +145,12 @@ export class CodexChatSessionControls {
       return;
     }
     const session = this.deps.sessions.get(id);
-    if (!session || !session.busy || session.stopRequested) return;
+    if (!session) return;
+    if (!session.busy) {
+      session.context.cancelPendingUserInput?.();
+      return;
+    }
+    if (session.stopRequested) return;
     session.stopRequested = true;
     try {
       const accepted = await this.deps.interruptCurrentTurn(id);

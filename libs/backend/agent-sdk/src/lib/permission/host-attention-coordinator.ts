@@ -62,6 +62,7 @@ export class HostAttentionCoordinator implements IHostAttentionIngress {
   private readonly generations = new Map<string, number>();
   private readonly pending = new Map<string, SafeHostAttentionNotice>();
   private readonly claimedAt = new Map<string, number>();
+  private readonly resolvedRequests = new Map<string, number>();
   private readonly releasedSessionAt = new Map<string, number>();
   private readonly releasedLaneAt = new Map<string, number>();
 
@@ -122,6 +123,18 @@ export class HostAttentionCoordinator implements IHostAttentionIngress {
 
   /** A matching resolution invalidates pending asynchronous title reads too. */
   resolve(key: string, generation: number): void {
+    if (!key.startsWith('c:') && Number.isSafeInteger(generation) && generation >= 0) {
+      const previous = this.resolvedRequests.get(key);
+      if (previous === undefined || generation > previous) {
+        this.resolvedRequests.delete(key);
+        this.resolvedRequests.set(key, generation);
+        while (this.resolvedRequests.size > MAX_ENTRIES) {
+          const oldest = this.resolvedRequests.keys().next().value;
+          if (oldest === undefined) break;
+          this.resolvedRequests.delete(oldest);
+        }
+      }
+    }
     if (this.generations.get(key) !== generation) return;
     this.generations.delete(key);
     this.pending.delete(key);
@@ -232,12 +245,25 @@ export class HostAttentionCoordinator implements IHostAttentionIngress {
     }
   }
 
-  private drop(key: string): void {
+  private drop(key: string, expectedGeneration?: number): void {
     const generation = this.generations.get(key);
-    if (generation !== undefined) this.resolve(key, generation);
+    if (generation === undefined) return;
+    if (expectedGeneration !== undefined && generation !== expectedGeneration) return;
+    this.generations.delete(key);
+    this.pending.delete(key);
+    this.claimedAt.delete(key);
+    try {
+      this.host.resolve(key, generation);
+    } catch (error: unknown) {
+      this.logHostError('resolve', error);
+    }
   }
 
   private claim(key: string, generation: number): boolean {
+    if (!key.startsWith('c:')) {
+      const resolved = this.resolvedRequests.get(key);
+      if (resolved !== undefined && generation <= resolved) return false;
+    }
     const current = this.generations.get(key);
     if (current !== undefined && generation <= current) return false;
     if (current !== undefined) this.generations.delete(key);
@@ -264,11 +290,12 @@ export class HostAttentionCoordinator implements IHostAttentionIngress {
         : request.sessionId || request.tabId
           ? await this.metadata.get(request.sessionId ?? request.tabId ?? '')
           : null;
+      if (this.generations.get(key) !== request.generation) return;
       const workspacePath = record?.workspaceId;
       const sessionId = request.sessionId ?? record?.sessionId ?? request.tabId;
       if (!workspacePath || !sessionId) {
         this.logger.debug('[HostAttentionCoordinator] Request dropped: owner metadata unavailable');
-        this.drop(key);
+        this.drop(key, request.generation);
         return;
       }
       const target: AttentionTarget = {
@@ -291,7 +318,7 @@ export class HostAttentionCoordinator implements IHostAttentionIngress {
       this.pending.set(key, notice);
       this.presentIfCurrent(key, request.generation, 'notifications.hostEnabled', notice);
     } catch (error: unknown) {
-      this.drop(key);
+      this.drop(key, request.generation);
       this.logHostError('prepare', error);
     }
   }
@@ -304,14 +331,15 @@ export class HostAttentionCoordinator implements IHostAttentionIngress {
   ): Promise<void> {
     try {
       const record = await this.metadata.get(target.sessionId);
+      if (this.generations.get(key) !== generation) return;
       const label = scope === 'lane' ? 'Lane failed' : scope === 'task' ? 'Task failed' : 'Session failed';
       const presented = this.presentIfCurrent(key, generation, 'notifications.failureHostEnabled', {
         key, generation, kind: 'failure', severity: 'error', label,
         actionLabel: 'Open Ptah', sessionTitle: this.title(record?.name), target,
       });
-      if (!presented) this.drop(key);
+      if (!presented) this.drop(key, generation);
     } catch (error: unknown) {
-      this.drop(key);
+      this.drop(key, generation);
       this.logHostError('prepare', error);
     }
   }

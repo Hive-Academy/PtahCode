@@ -83,6 +83,7 @@ export {
   ActionBannerService,
   type ActionBannerState,
 } from './action-banner.service';
+export { ComposerRestoreService } from './composer-restore.service';
 export { AgentMonitorTreeBuilderService } from './agent-monitor-tree-builder.service';
 /** @deprecated Import from `@ptah-extension/chat-state` instead. */
 export {
@@ -137,3 +138,15 @@ export {
   sessionBranch,
   type SessionGitState,
 } from './session-git-stats/session-git-stats.store';
+export {
+  HarnessChatProposalStore,
+  provideHarnessChatProposalStore,
+  IDLE_HARNESS_APPLY_STATE,
+  buildFullHarnessConfig,
+  fingerprintHarnessConfig,
+  hasMeaningfulHarnessProposal,
+  summarizeHarnessProposal,
+  type HarnessProposalApplyState,
+  type HarnessProposalRecord,
+  type HarnessProposalSummary,
+} from './harness-chat-proposal.store';

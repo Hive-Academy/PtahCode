@@ -101,3 +101,16 @@ export {
   SESSION_EMBED_CHROME,
   type SessionEmbedChrome,
 } from './lib/tokens/session-embed-chrome.token';
+export {
+  HarnessChatProposalStore,
+  provideHarnessChatProposalStore,
+  IDLE_HARNESS_APPLY_STATE,
+  buildFullHarnessConfig,
+  fingerprintHarnessConfig,
+  hasMeaningfulHarnessProposal,
+  summarizeHarnessProposal,
+  type HarnessProposalApplyState,
+  type HarnessProposalRecord,
+  type HarnessProposalSummary,
+} from './lib/services/harness-chat-proposal.store';
+export { HarnessProposalBannerComponent } from './lib/components/molecules/harness-proposal-banner/harness-proposal-banner.component';

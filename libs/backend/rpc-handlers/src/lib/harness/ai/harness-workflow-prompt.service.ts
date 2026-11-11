@@ -77,7 +77,7 @@ Set the user's expectations accordingly as the design firms up.`;
 
     const planningBlock = `## Project Planning (do this first — the workspace is empty)
 This workspace has no project yet. Before designing any AI team, plan the project with the user:
-1. Scan the workspace for any seed documents the user dropped in — use your Read, Glob, and Grep tools to find and read README files, PRDs, specs, and anything under docs/.
+1. Scan the workspace for any seed documents the user dropped in — use your file reading and searching tools to find and read README files, PRDs, specs, and anything under docs/.
 2. Interview the user about what they want to build: goals, target users, stack preferences, and constraints.
 3. Propose an architecture and a plan, and confirm it with the user.
 4. Only then design the AI team (agents, skills, MCP servers) that fits the planned project — leverage the available skills and subagent setup below, and call proposeConfig as decisions firm up.`;

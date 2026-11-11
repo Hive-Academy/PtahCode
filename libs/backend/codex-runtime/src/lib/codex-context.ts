@@ -48,6 +48,7 @@ import type {
   CodexTurnInput,
   CodexTurnReceipt,
   CodexTurnSettings,
+  CodexUserInputAnswer,
 } from './codex-runtime.types';
 
 export interface CodexRuntimeOptions {
@@ -58,6 +59,9 @@ export interface CodexRuntimeOptions {
   readonly clock: Clock;
   readonly logger: CodexRuntimeLogger;
   readonly requestUserInput?: CodexApprovalBridgeOptions['requestUserInput'];
+  readonly deliverUserInputAnswer?: (
+    answer: CodexUserInputAnswer,
+  ) => Promise<void>;
 }
 
 export interface CodexContextProcessOptions extends CodexRuntimeOptions {
@@ -94,6 +98,11 @@ class RuntimeContext implements CodexContext {
     'opening';
   private activeTurn?: string;
   private turnController = new AbortController();
+  private contextController = new AbortController();
+  private asyncInputController = new AbortController();
+  private userInputAnswerHandler?: (
+    answer: CodexUserInputAnswer,
+  ) => Promise<void>;
   private readonly terminalTurns = new Set<string>();
   private readonly childTools = new Map<string, string>();
   private readonly knownChildParents = new Map<string, string>();
@@ -236,6 +245,36 @@ class RuntimeContext implements CodexContext {
 
   stderrTail(maxBytes?: number): string {
     return this.process.stderrTail(maxBytes);
+  }
+
+  setUserInputAnswerHandler(
+    handler: ((answer: CodexUserInputAnswer) => Promise<void>) | undefined,
+  ): void {
+    this.userInputAnswerHandler = handler;
+  }
+
+  cancelPendingUserInput(): void {
+    this.ensureAsyncInputController().abort();
+    if (this.state !== 'closed') {
+      this.asyncInputController = new AbortController();
+    }
+  }
+
+  private ensureContextController(): AbortController {
+    this.contextController ??= new AbortController();
+    return this.contextController;
+  }
+
+  private ensureAsyncInputController(): AbortController {
+    this.asyncInputController ??= new AbortController();
+    return this.asyncInputController;
+  }
+
+  private asyncQuestionSignal(): AbortSignal {
+    return AbortSignal.any([
+      this.ensureContextController().signal,
+      this.ensureAsyncInputController().signal,
+    ]);
   }
 
   get identity(): CodexThreadIdentity {
@@ -747,6 +786,9 @@ class RuntimeContext implements CodexContext {
 
   private async start(input: CodexTurnInput): Promise<CodexTurnReceipt> {
     if (this.state !== 'idle') throw new Error('Codex turn is already active');
+    if (!input.preservePendingUserInput) {
+      this.cancelPendingUserInput();
+    }
     const level = this.settings.permissionLevel ?? this.profile.permissionLevel;
     const levelPolicy = this.levelPolicy;
     const params = codexRequestSchemas['turn/start'].params.parse({
@@ -881,12 +923,18 @@ class RuntimeContext implements CodexContext {
     });
   }
 
-  /** The native async question is an item, so its answer must steer the same live turn. */
+  /** Native async questions outlive their asking turn and are answered by steering or starting a follow-up turn. */
   private askAsyncUserInput(
     event: Extract<CodexRuntimeEvent, { type: 'userInputAsync' }>,
   ): boolean {
     const ask = this.options.requestUserInput;
-    if (!ask || this.state !== 'running' || this.activeTurn !== event.turnId || this.turnController.signal.aborted)
+    if (
+      !ask ||
+      this.state !== 'running' ||
+      this.activeTurn !== event.turnId ||
+      this.isClosed() ||
+      this.turnController.signal.aborted
+    )
       return false;
     const ids = event.questions.map((_, index) => `${event.itemId}:${index}`);
     const request: CodexApprovalRequest = {
@@ -910,7 +958,7 @@ class RuntimeContext implements CodexContext {
         })),
       },
     };
-    const signal = this.turnController.signal;
+    const signal = this.asyncQuestionSignal();
     let response: ReturnType<NonNullable<CodexRuntimeOptions['requestUserInput']>>;
     try {
       response = ask(request, signal);
@@ -921,7 +969,7 @@ class RuntimeContext implements CodexContext {
       return false;
     }
     void response.then((answers) => {
-      if (signal.aborted) {
+      if (signal.aborted || this.isClosed()) {
         this.warnDenialFeedback('turn-ended', 'user-input');
         return;
       }
@@ -940,11 +988,66 @@ class RuntimeContext implements CodexContext {
         return;
       }
       const text = `User has answered your questions: ${pairs.join(', ')}. You can now continue with the user's answers in mind.`;
-      void this.deliverDenialFeedback(text, event.turnId, 'user-input');
+      void this.deliverAsyncUserInputAnswer({
+        threadId: event.threadId,
+        turnId: event.turnId,
+        itemId: event.itemId,
+        text,
+      });
     }).catch(() => {
       if (!signal.aborted) this.warnDenialFeedback('failed', 'user-input');
     });
     return true;
+  }
+
+  private async deliverAsyncUserInputAnswer(
+    answer: CodexUserInputAnswer,
+  ): Promise<void> {
+    const custom =
+      this.userInputAnswerHandler ?? this.options.deliverUserInputAnswer;
+    if (custom) {
+      try {
+        await custom(answer);
+      } catch (error: unknown) {
+        // degradation-audit: reported - consumer follow-up failures are logged without exposing user text.
+        this.warnDenialFeedback(
+          error instanceof CodexRequestRejectedError ||
+            error instanceof CodexUnsupportedMethodError
+            ? 'refused'
+            : 'failed',
+          'user-input',
+        );
+      }
+      return;
+    }
+    const activeTurnId = this.activeTurn;
+    if (
+      this.state === 'running' &&
+      activeTurnId !== undefined &&
+      !this.terminalTurns.has(activeTurnId)
+    ) {
+      await this.deliverDenialFeedback(answer.text, activeTurnId, 'user-input');
+      return;
+    }
+    if (this.isClosed()) {
+      this.warnDenialFeedback('turn-ended', 'user-input');
+      return;
+    }
+    try {
+      await this.startTurn({
+        text: answer.text,
+        preservePendingUserInput: true,
+      });
+    } catch (error: unknown) {
+      // degradation-audit: reported - standalone post-turn answer delivery failures are logged without exposing user text.
+      this.warnDenialFeedback(
+        error instanceof CodexRequestRejectedError ||
+          error instanceof CodexUnsupportedMethodError
+          ? 'refused'
+          : 'failed',
+        'user-input',
+      );
+    }
   }
 
   private warnAsyncQuestion(cause: 'duplicate' | 'already-streamed' | 'card-unavailable'): void {
@@ -1023,6 +1126,7 @@ class RuntimeContext implements CodexContext {
       this.interruptTimer = setTimeout(() => this.onFailure(), 30_000);
       // Invalidate pending UI answers before asking the server to interrupt.
       this.turnController.abort();
+      this.cancelPendingUserInput();
       try {
         await this.process.request('turn/interrupt', {
           threadId: this.identity.threadId,
@@ -1205,6 +1309,9 @@ class RuntimeContext implements CodexContext {
     clearTimeout(this.interruptTimer);
     this.interruptTimer = undefined;
     this.turnController.abort();
+    this.ensureContextController().abort();
+    this.ensureAsyncInputController().abort();
+    this.userInputAnswerHandler = undefined;
     this.finishCompact?.();
     this.bridge?.dispose();
     this.releaseTurnSignal?.();

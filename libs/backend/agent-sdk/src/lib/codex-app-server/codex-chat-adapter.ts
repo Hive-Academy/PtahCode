@@ -428,7 +428,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
       if (this.sessions.has(id))
         throw new CodexChatAdapterError('busy', 'open');
       if (!lease) throw new CodexChatAdapterError('unavailable', 'open');
-      session = this.publishSession(
+      const published = this.publishSession(
         id,
         context,
         sink,
@@ -438,6 +438,10 @@ export class CodexChatAdapter implements NativeChatAdapter {
         prepared.billingMode ?? 'unknown',
         savedUsage?.messageCount ?? 0,
         lease,
+      );
+      session = published;
+      context.setUserInputAnswerHandler?.((answer) =>
+        this.deliverUserInputAnswerWithNotice(published, answer.text),
       );
       this.resolved?.(config.tabId, id);
       return this.turn(
@@ -574,6 +578,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
     context?: CodexContext,
     scope?: CodexChatScope,
   ): Promise<void> {
+    context?.setUserInputAnswerHandler?.(undefined);
     try {
       await context?.close();
     } catch (error) {
@@ -679,6 +684,97 @@ export class CodexChatAdapter implements NativeChatAdapter {
     } finally {
       await iterator.return?.();
     }
+  }
+
+  /** Delivers an async answer. On failure the user gets a visible notice through the session stream. */
+  private async deliverUserInputAnswerWithNotice(
+    session: TrackedSession,
+    text: string,
+  ): Promise<void> {
+    try {
+      await this.deliverUserInputAnswer(session, text);
+    } catch (error: unknown) {
+      await this.publishAnswerFailureNotice(session);
+      throw error;
+    }
+  }
+
+  private async publishAnswerFailureNotice(
+    session: TrackedSession,
+  ): Promise<void> {
+    if (session.consumer === 'gateway' || this.sessions.get(session.id) !== session) {
+      return;
+    }
+    const messageId = `codex-answer-failed:${session.id}:${randomUUID()}`;
+    const base = {
+      timestamp: Date.now(),
+      sessionId: session.id,
+      source: 'complete' as const,
+      messageId,
+    };
+    const events: FlatStreamEventUnion[] = [
+      { ...base, id: `${messageId}:start`, eventType: 'message_start', role: 'assistant' },
+      {
+        ...base,
+        id: `${messageId}:text`,
+        eventType: 'text_delta',
+        delta:
+          'Your answer could not be delivered to Codex. Send it again as a message.',
+        blockIndex: 0,
+      },
+      // No turn follows this notice, so the message must be closed here.
+      { ...base, id: `${messageId}:complete`, eventType: 'message_complete' },
+    ];
+    try {
+      await this.ports.publish(session.id, {
+        async *[Symbol.asyncIterator]() {
+          yield* events;
+        },
+      });
+    } catch (publishError: unknown) {
+      // degradation-audit: reported - the notice is best effort; the delivery failure is logged by the caller.
+      this.ports.logger.warn('Codex answer failure notice could not be published.', {
+        code: 'codex-answer-notice-failed',
+        error: publishError instanceof Error ? publishError.message : 'unknown',
+      });
+    }
+  }
+
+  private async deliverUserInputAnswer(
+    session: TrackedSession,
+    text: string,
+  ): Promise<void> {
+    if (
+      this.sessions.get(session.id) !== session ||
+      session.blocked ||
+      session.closing ||
+      session.abort.signal.aborted
+    ) {
+      throw new CodexChatAdapterError('unavailable', 'followUp');
+    }
+    const activeTurnId = session.turnId;
+    if (session.busy && activeTurnId !== undefined) {
+      try {
+        await session.context.steer({ text }, activeTurnId);
+        return;
+      } catch (error: unknown) {
+        if (!(error instanceof CodexRequestRejectedError)) {
+          throw this.failure(error, 'steer');
+        }
+      }
+    }
+    await this.peerQueue.send(session, () =>
+      publishUntilAdmitted(
+        (admission) =>
+          this.publish(
+            session,
+            { text, preservePendingUserInput: true },
+            undefined,
+            admission,
+          ),
+        this.ports.logger,
+      ),
+    );
   }
 
   async listSessionModels(

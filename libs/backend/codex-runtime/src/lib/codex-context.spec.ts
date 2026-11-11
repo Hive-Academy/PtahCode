@@ -3,7 +3,11 @@ import { childEventParent } from './codex-context';
 import { RuntimeContext } from './codex-context';
 import { CodexRequestRejectedError } from './codex-app-server-process';
 import { CodexEventTranslator } from './codex-event-translator';
-import type { CodexRuntimeEvent } from './codex-runtime.types';
+import type {
+  CodexApprovalRequest,
+  CodexRuntimeEvent,
+  CodexUserInputAnswer,
+} from './codex-runtime.types';
 import { CodexChildBudgetTap } from './codex-child-budget-tap';
 import { settleCodexChildBudgetEvent } from './codex-child-budget-observer';
 import { DEFAULT_AGENT_BUDGET_SETTINGS } from '@ptah-extension/shared';
@@ -340,5 +344,333 @@ describe('CodexContext thread frame boundary', () => {
     expect(start.config).toEqual(config);
     expect(resume.config).toEqual(config);
     expect(start.config).not.toHaveProperty(['mcp_servers.ptah']);
+  });
+});
+
+describe('RuntimeContext userInputAsync lifecycle', () => {
+  function createAsyncQuestionHarness() {
+    const logger = {
+      error: jest.fn(),
+      debug: jest.fn(),
+      info: jest.fn(),
+      warn: jest.fn(),
+    };
+    let resolveAnswer:
+      | ((value: Record<string, { answers: string[] }>) => void)
+      | undefined;
+    let observedSignal: AbortSignal | undefined;
+    const pendingQuestions: {
+      request: CodexApprovalRequest;
+      signal: AbortSignal;
+      resolve: (value: Record<string, { answers: string[] }>) => void;
+    }[] = [];
+    const requestUserInput = jest.fn(
+      (request: CodexApprovalRequest, signal: AbortSignal) => {
+        observedSignal = signal;
+        return new Promise<Record<string, { answers: string[] }>>((resolve) => {
+          resolveAnswer = resolve;
+          pendingQuestions.push({ request, signal, resolve });
+        });
+      },
+    );
+    let nextTurnNumber = 2;
+    const request = jest.fn(async (method: string) => {
+      if (method === 'turn/start') {
+        const id = `turn-${nextTurnNumber++}`;
+        return { turn: { id, status: 'inProgress', items: [] } };
+      }
+      if (method === 'turn/steer') {
+        return { turnId: `turn-${nextTurnNumber - 1}` };
+      }
+      return {};
+    });
+    const context = Object.assign(Object.create(RuntimeContext.prototype), {
+      committedIdentity: {
+        contextId: 'context',
+        processGeneration: 1,
+        threadId: 'root',
+        normalizedHome: '/home',
+        workspaceId: '/work',
+        providerId: 'openai-codex',
+        profileFingerprint: 'fp',
+      },
+      state: 'running',
+      activeTurn: 'turn-1',
+      profile: {
+        consumer: 'chat',
+        contextId: 'context',
+        normalizedHome: '/home',
+        workspaceId: '/work',
+        cwd: '/work',
+        providerId: 'openai-codex',
+        permissionLevel: 'ask',
+        attachments: [],
+      },
+      settings: { permissionLevel: 'ask' },
+      levelPolicy: {
+        approvalPolicy: 'never',
+        sandboxPolicy: {
+          mode: 'read-only',
+          networkAccess: false,
+          writableRoots: [],
+        },
+      },
+      wirePermissionLevel: 'ask',
+      operation: Promise.resolve(),
+      revision: 0,
+      turnRevision: 0,
+      sentInitialInput: true,
+      turnHistory: true,
+      onFailure: jest.fn(),
+      translator: new CodexEventTranslator('context', 1),
+      childTools: new Map<string, string>(),
+      childParentThreads: new Map<string, string>(),
+      childTurns: new Map<string, string>(),
+      knownChildParents: new Map<string, string>(),
+      pendingSpawns: new Map<string, Set<string>>(),
+      pendingChildParents: new Map<string, string>(),
+      unlinkedMethodsLogged: new Set<string>(),
+      earlyChildEvents: new Map<string, CodexRuntimeEvent[]>(),
+      earlyChildCount: 0,
+      earlyChildOverflowLogged: false,
+      rootTerminalPending: false,
+      terminalTurns: new Set<string>(),
+      targets: new Map(),
+      asyncQuestionItems: new Set<string>(),
+      subscribers: new Set(),
+      followUps: new Set(),
+      turnController: new AbortController(),
+      contextController: new AbortController(),
+      asyncInputController: new AbortController(),
+      sequence: 0,
+      process: {
+        close: jest.fn(async () => undefined),
+        request,
+      },
+      release: jest.fn(),
+      options: {
+        logger,
+        requestUserInput,
+        store: { markInactive: jest.fn(async () => undefined) },
+      },
+    }) as RuntimeContext;
+    const feed = (method: string, params: Record<string, unknown>): void => {
+      Reflect.apply(Reflect.get(context, 'onNotification'), context, [
+        { method, params },
+      ]);
+    };
+    return {
+      context,
+      logger,
+      request,
+      requestUserInput,
+      pendingQuestions,
+      feed,
+      signal: () => observedSignal,
+      answer: (value: Record<string, { answers: string[] }>) =>
+        resolveAnswer?.(value),
+    };
+  }
+
+  it('keeps userInputAsync pending after finishActiveTurn and routes post-turn answers to the handler', async () => {
+    const h = createAsyncQuestionHarness();
+    const delivered: CodexUserInputAnswer[] = [];
+    h.context.setUserInputAnswerHandler(async (answer) => {
+      delivered.push(answer);
+    });
+    h.feed('item/completed', {
+      threadId: 'root',
+      turnId: 'turn-1',
+      completedAtMs: 2,
+      item: {
+        type: 'agentMessage',
+        id: 'q-item',
+        text: 'Pick one',
+        delivery: 'async',
+        questions: [{ title: 'Deploy?', options: ['Yes', 'No'] }],
+      },
+    });
+    expect(h.requestUserInput).toHaveBeenCalledTimes(1);
+    expect(h.signal()?.aborted).toBe(false);
+
+    h.feed('turn/completed', {
+      threadId: 'root',
+      turn: { id: 'turn-1', status: 'completed', items: [] },
+    });
+    expect(Reflect.get(h.context, 'state')).toBe('idle');
+    expect(h.signal()?.aborted).toBe(false);
+
+    h.answer({ 'q-item:0': { answers: ['Yes'] } });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(delivered).toEqual([
+      {
+        threadId: 'root',
+        turnId: 'turn-1',
+        itemId: 'q-item',
+        text: 'User has answered your questions: "Deploy?"="Yes". You can now continue with the user\'s answers in mind.',
+      },
+    ]);
+  });
+
+  it('aborts pending userInputAsync on close() and cancelPendingUserInput()', async () => {
+    const first = createAsyncQuestionHarness();
+    const handler = jest.fn(async () => undefined);
+    first.context.setUserInputAnswerHandler(handler);
+    first.feed('item/completed', {
+      threadId: 'root',
+      turnId: 'turn-1',
+      completedAtMs: 2,
+      item: {
+        type: 'agentMessage',
+        id: 'q-close',
+        text: 'Pick one',
+        delivery: 'async',
+        questions: [{ title: 'Deploy?' }],
+      },
+    });
+    first.feed('turn/completed', {
+      threadId: 'root',
+      turn: { id: 'turn-1', status: 'completed', items: [] },
+    });
+    expect(first.signal()?.aborted).toBe(false);
+    await first.context.close();
+    expect(first.signal()?.aborted).toBe(true);
+    first.answer({ 'q-close:0': { answers: ['Yes'] } });
+    await Promise.resolve();
+    expect(handler).not.toHaveBeenCalled();
+
+    const second = createAsyncQuestionHarness();
+    second.feed('item/completed', {
+      threadId: 'root',
+      turnId: 'turn-1',
+      completedAtMs: 2,
+      item: {
+        type: 'agentMessage',
+        id: 'q-stop',
+        text: 'Pick one',
+        delivery: 'async',
+        questions: [{ title: 'Stop?' }],
+      },
+    });
+    second.feed('turn/completed', {
+      threadId: 'root',
+      turn: { id: 'turn-1', status: 'completed', items: [] },
+    });
+    expect(second.signal()?.aborted).toBe(false);
+    second.context.cancelPendingUserInput();
+    expect(second.signal()?.aborted).toBe(true);
+  });
+
+  it('keeps a second pending userInputAsync question answerable after the first starts an answer-delivery turn, while a user turn cancels pending questions', async () => {
+    const h = createAsyncQuestionHarness();
+    h.feed('item/completed', {
+      threadId: 'root',
+      turnId: 'turn-1',
+      completedAtMs: 2,
+      item: {
+        type: 'agentMessage',
+        id: 'q-1',
+        text: 'First question',
+        delivery: 'async',
+        questions: [{ title: 'Database?', options: ['Postgres', 'SQLite'] }],
+      },
+    });
+    h.feed('item/completed', {
+      threadId: 'root',
+      turnId: 'turn-1',
+      completedAtMs: 3,
+      item: {
+        type: 'agentMessage',
+        id: 'q-2',
+        text: 'Second question',
+        delivery: 'async',
+        questions: [{ title: 'Deploy target?', options: ['Fly', 'AWS'] }],
+      },
+    });
+    h.feed('item/completed', {
+      threadId: 'root',
+      turnId: 'turn-1',
+      completedAtMs: 4,
+      item: {
+        type: 'agentMessage',
+        id: 'q-3',
+        text: 'Third question',
+        delivery: 'async',
+        questions: [{ title: 'CI?', options: ['GitHub', 'GitLab'] }],
+      },
+    });
+    expect(h.pendingQuestions).toHaveLength(3);
+
+    h.feed('turn/completed', {
+      threadId: 'root',
+      turn: { id: 'turn-1', status: 'completed', items: [] },
+    });
+    expect(Reflect.get(h.context, 'state')).toBe('idle');
+
+    h.pendingQuestions[0].resolve({ 'q-1:0': { answers: ['Postgres'] } });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(h.request).toHaveBeenCalledTimes(1);
+    expect(h.request).toHaveBeenNthCalledWith(
+      1,
+      'turn/start',
+      expect.objectContaining({
+        threadId: 'root',
+        input: [
+          {
+            type: 'text',
+            text: 'User has answered your questions: "Database?"="Postgres". You can now continue with the user\'s answers in mind.',
+          },
+        ],
+      }),
+    );
+    expect(h.pendingQuestions[1].signal.aborted).toBe(false);
+    expect(h.pendingQuestions[2].signal.aborted).toBe(false);
+
+    h.feed('turn/completed', {
+      threadId: 'root',
+      turn: { id: 'turn-2', status: 'completed', items: [] },
+    });
+
+    h.pendingQuestions[1].resolve({ 'q-2:0': { answers: ['Fly'] } });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(h.request).toHaveBeenCalledTimes(2);
+    expect(h.request).toHaveBeenNthCalledWith(
+      2,
+      'turn/start',
+      expect.objectContaining({
+        threadId: 'root',
+        input: [
+          {
+            type: 'text',
+            text: 'User has answered your questions: "Deploy target?"="Fly". You can now continue with the user\'s answers in mind.',
+          },
+        ],
+      }),
+    );
+    expect(h.pendingQuestions[2].signal.aborted).toBe(false);
+
+    h.feed('turn/completed', {
+      threadId: 'root',
+      turn: { id: 'turn-3', status: 'completed', items: [] },
+    });
+
+    await h.context.startTurn({ text: 'User starts a new turn' });
+    expect(h.pendingQuestions[2].signal.aborted).toBe(true);
+  });
+
+  it('still aborts turnController on finishActiveTurn for synchronous server requests', () => {
+    const h = createAsyncQuestionHarness();
+    const turnSignal = (
+      Reflect.get(h.context, 'turnController') as AbortController
+    ).signal;
+    expect(turnSignal.aborted).toBe(false);
+    h.feed('turn/completed', {
+      threadId: 'root',
+      turn: { id: 'turn-1', status: 'completed', items: [] },
+    });
+    expect(turnSignal.aborted).toBe(true);
   });
 });

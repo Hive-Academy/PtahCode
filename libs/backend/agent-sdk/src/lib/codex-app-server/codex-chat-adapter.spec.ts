@@ -12,6 +12,7 @@ import {
   type CodexExecutionProfile,
   type CodexRuntimeEvent,
   type CodexRuntime,
+  type CodexUserInputAnswer,
 } from '@ptah-extension/codex-runtime';
 import { SessionId, type FlatStreamEventUnion } from '@ptah-extension/shared';
 import {
@@ -65,6 +66,11 @@ function mockLogger(): Logger {
 
 function setup(resolveRuntime?: CodexChatAdapterPorts['resolveRuntime']) {
   const logger = mockLogger();
+  const setUserInputAnswerHandler = jest.fn<
+    void,
+    [Parameters<NonNullable<CodexContext['setUserInputAnswerHandler']>>[0]]
+  >();
+  const cancelPendingUserInput = jest.fn<void, []>();
   const context: jest.Mocked<CodexContext> = {
     listModels: jest.fn(async () => [
       { id: 'catalog-gpt', model: 'gpt', displayName: 'GPT', isDefault: true },
@@ -105,6 +111,8 @@ function setup(resolveRuntime?: CodexChatAdapterPorts['resolveRuntime']) {
     })),
     compact: jest.fn(async () => undefined),
     close: jest.fn(async () => undefined),
+    setUserInputAnswerHandler,
+    cancelPendingUserInput,
   };
   const callbacks = {
     result: jest.fn(),
@@ -185,6 +193,8 @@ function setup(resolveRuntime?: CodexChatAdapterPorts['resolveRuntime']) {
     dispose,
     callbacks,
     lifecycle,
+    setUserInputAnswerHandler,
+    cancelPendingUserInput,
     sink: () => {
       if (!sink) throw new Error('Expected an approval sink after opening');
       return sink;
@@ -2914,3 +2924,257 @@ it.each(['end', 'interrupt'] as const)(
     expect(adapter.canSendFollowUp(id)).toBe(false);
   },
 );
+
+it('starts a follow-up turn and publishes its stream when an async question is answered after turn completion', async () => {
+  const { adapter, context, ports, setUserInputAnswerHandler } = setup();
+  let answerHandler:
+    | ((answer: CodexUserInputAnswer) => Promise<void>)
+    | undefined;
+  setUserInputAnswerHandler.mockImplementation((handler) => {
+    answerHandler = handler;
+  });
+  let turnCount = 0;
+  context.startTurn.mockImplementation(async () => ({
+    threadId: id,
+    turnId: `turn-${++turnCount}`,
+    revision: turnCount,
+  }));
+  context.events
+    .mockImplementationOnce(() =>
+      (async function* () {
+        yield {
+          ...identity,
+          turnId: 'turn-1',
+          sequence: 1,
+          type: 'userInputAsync' as const,
+          itemId: 'q-1',
+          presentation: 'card' as const,
+          text: 'Choose one',
+          questions: [{ title: 'Proceed?', options: ['Yes', 'No'] }],
+        };
+        yield {
+          ...terminal,
+          turnId: 'turn-1',
+        };
+      })(),
+    )
+    .mockImplementationOnce(() =>
+      (async function* () {
+        yield {
+          ...identity,
+          turnId: 'turn-2',
+          sequence: 3,
+          type: 'textDelta' as const,
+          itemId: 'msg-2',
+          delta: 'Continuing with Yes.',
+        };
+        yield {
+          ...identity,
+          turnId: 'turn-2',
+          sequence: 4,
+          type: 'textFinal' as const,
+          itemId: 'msg-2',
+          text: 'Continuing with Yes.',
+        };
+        yield {
+          ...terminal,
+          turnId: 'turn-2',
+          sequence: 5,
+        };
+      })(),
+    )
+    .mockImplementationOnce(() =>
+      (async function* () {
+        yield {
+          ...terminal,
+          turnId: 'turn-3',
+          sequence: 6,
+        };
+      })(),
+    );
+
+  const publishedEvents: FlatStreamEventUnion[] = [];
+  ports.publish = jest.fn(async (_sessionId, stream) => {
+    for await (const event of stream) {
+      publishedEvents.push(event);
+    }
+  });
+
+  const initialStream = await adapter.startChatSession({
+    tabId,
+    prompt: 'Deploy',
+  });
+  for await (const event of initialStream) {
+    void event;
+  }
+
+  expect(adapter.isSessionActive(id)).toBe(true);
+  expect(adapter.canSendFollowUp(id)).toBe(true);
+  expect(answerHandler).toBeDefined();
+
+  const answerText =
+    'User has answered your questions: "Proceed?"="Yes". You can now continue with the user\'s answers in mind.';
+  await answerHandler?.({
+    threadId: id,
+    turnId: 'turn-1',
+    itemId: 'q-1',
+    text: answerText,
+  });
+  await waitFor(() => adapter.canSendFollowUp(id));
+
+  expect(context.steer).not.toHaveBeenCalled();
+  expect(context.startTurn).toHaveBeenCalledTimes(2);
+  expect(context.startTurn).toHaveBeenNthCalledWith(
+    2,
+    expect.objectContaining({
+      text: answerText,
+      preservePendingUserInput: true,
+    }),
+  );
+  expect(ports.publish).toHaveBeenCalledTimes(1);
+  expect(ports.publish).toHaveBeenCalledWith(id, expect.anything());
+  expect(publishedEvents).toContainEqual(
+    expect.objectContaining({
+      eventType: 'text_delta',
+      delta: 'Continuing with Yes.',
+    }),
+  );
+  expect(publishedEvents).toContainEqual(
+    expect.objectContaining({
+      eventType: 'message_complete',
+      stopReason: 'completed',
+    }),
+  );
+  expect(adapter.isSessionActive(id)).toBe(true);
+  expect(adapter.getSessionToken(id)).not.toBeNull();
+  await expect(
+    adapter.endSessionIfTokenMatches(id, adapter.getSessionToken(id) ?? ''),
+  ).resolves.toBe(false);
+  expect(adapter.isSessionActive(id)).toBe(true);
+
+  await adapter.sendMessageToSession(id, 'Follow-up after answer');
+  await waitFor(() => adapter.canSendFollowUp(id));
+  expect(context.startTurn).toHaveBeenCalledTimes(3);
+  expect(context.startTurn).toHaveBeenNthCalledWith(
+    3,
+    expect.objectContaining({ text: 'Follow-up after answer' }),
+  );
+  expect(context.startTurn.mock.calls[2]?.[0]).not.toHaveProperty(
+    'preservePendingUserInput',
+  );
+  expect(ports.publish).toHaveBeenCalledTimes(2);
+  expect(adapter.isSessionActive(id)).toBe(true);
+
+  await adapter.closeSession(id);
+});
+
+it('steers the active turn when an async question is answered before the turn finishes and cancels pending questions on idle Stop', async () => {
+  const {
+    adapter,
+    context,
+    setUserInputAnswerHandler,
+    cancelPendingUserInput,
+  } = setup();
+  let answerHandler:
+    | ((answer: CodexUserInputAnswer) => Promise<void>)
+    | undefined;
+  setUserInputAnswerHandler.mockImplementation((handler) => {
+    answerHandler = handler;
+  });
+  const finishTurn = deferred<void>();
+  context.events.mockImplementationOnce(() =>
+    (async function* () {
+      yield {
+        ...identity,
+        turnId: 'turn',
+        sequence: 1,
+        type: 'textDelta' as const,
+        itemId: 'item',
+        delta: 'waiting',
+      };
+      await finishTurn.promise;
+      yield terminal;
+    })(),
+  );
+
+  const stream = await adapter.startChatSession({ tabId });
+  const iterator = stream[Symbol.asyncIterator]();
+  await iterator.next();
+
+  await answerHandler?.({
+    threadId: id,
+    turnId: 'turn',
+    itemId: 'q-live',
+    text: 'Answered while live',
+  });
+  expect(context.steer).toHaveBeenCalledWith(
+    { text: 'Answered while live' },
+    'turn',
+  );
+
+  finishTurn.resolve();
+  while (!(await iterator.next()).done) {
+    /* Drain terminal. */
+  }
+
+  await adapter.interruptSession(id);
+  expect(cancelPendingUserInput).toHaveBeenCalledTimes(1);
+  expect(adapter.isSessionActive(id)).toBe(true);
+
+  await adapter.closeSession(id);
+});
+
+it('publishes a visible notice when delivery of an async answer fails', async () => {
+  const { adapter, context, ports, setUserInputAnswerHandler } = setup();
+  let answerHandler:
+    | ((answer: CodexUserInputAnswer) => Promise<void>)
+    | undefined;
+  setUserInputAnswerHandler.mockImplementation((handler) => {
+    answerHandler = handler;
+  });
+  const finishTurn = deferred<void>();
+  context.events.mockImplementationOnce(() =>
+    (async function* () {
+      yield {
+        ...identity,
+        turnId: 'turn',
+        sequence: 1,
+        type: 'textDelta' as const,
+        itemId: 'item',
+        delta: 'waiting',
+      };
+      await finishTurn.promise;
+      yield terminal;
+    })(),
+  );
+  context.steer.mockRejectedValueOnce(new Error('steer failed'));
+  const published: FlatStreamEventUnion[] = [];
+  ports.publish = jest.fn(async (_sessionId, stream) => {
+    for await (const event of stream) published.push(event);
+  });
+
+  const stream = await adapter.startChatSession({ tabId });
+  const iterator = stream[Symbol.asyncIterator]();
+  await iterator.next();
+
+  await expect(
+    answerHandler?.({
+      threadId: id,
+      turnId: 'turn',
+      itemId: 'q-fail',
+      text: 'lost answer',
+    }),
+  ).rejects.toBeDefined();
+  expect(published).toContainEqual(
+    expect.objectContaining({
+      eventType: 'text_delta',
+      delta: expect.stringContaining('could not be delivered'),
+    }),
+  );
+
+  finishTurn.resolve();
+  while (!(await iterator.next()).done) {
+    /* Drain terminal. */
+  }
+  await adapter.closeSession(id);
+});

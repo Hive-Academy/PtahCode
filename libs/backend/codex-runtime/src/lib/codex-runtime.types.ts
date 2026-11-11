@@ -118,6 +118,8 @@ export interface CodexTurnInput {
   readonly text: string;
   readonly attachments?: readonly CodexAttachment[];
   readonly signal?: AbortSignal;
+  /** Keep open asynchronous user-input questions alive when starting an answer-delivery turn. */
+  readonly preservePendingUserInput?: boolean;
 }
 export interface CodexTurnReceipt {
   readonly threadId: string;
@@ -401,6 +403,12 @@ export interface CodexModelInfo {
   readonly isDefault: boolean;
   readonly supportedEfforts?: readonly string[];
 }
+export interface CodexUserInputAnswer {
+  readonly threadId: string;
+  readonly turnId: string;
+  readonly itemId: string;
+  readonly text: string;
+}
 export interface CodexContext {
   readonly identity: CodexThreadIdentity;
   readonly turnPermissionLevel: CodexPermissionLevel;
@@ -413,4 +421,10 @@ export interface CodexContext {
   updateNextTurn(patch: CodexTurnSettings): Promise<AppliedSettings>;
   compact(): Promise<void>;
   close(): Promise<void>;
+  /** Optional consumer hook for delivering native async question answers across turn boundaries. */
+  setUserInputAnswerHandler?(
+    handler: ((answer: CodexUserInputAnswer) => Promise<void>) | undefined,
+  ): void;
+  /** Cancel any unanswered asynchronous user-input question without closing the thread. */
+  cancelPendingUserInput?(): void;
 }

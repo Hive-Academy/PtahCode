@@ -154,3 +154,4 @@ export * from './templates/electron-shell.component';
 export * from './file-suggestions/file-tag.component';
 export * from './file-suggestions/unified-suggestions-dropdown.component';
 export * from './atoms/workflow-badge.component';
+export * from './molecules/harness-proposal-banner/harness-proposal-banner.component';

@@ -60,6 +60,16 @@ describe('OnboardingShellComponent', () => {
               { path: '', component: HomePageStubComponent },
               { path: 'analyze', component: StepPageStubComponent },
               {
+                path: 'new-project',
+                component: StepPageStubComponent,
+                data: { crumb: 'New project' },
+              },
+              {
+                path: 'team-builder',
+                component: StepPageStubComponent,
+                data: { crumb: 'AI team builder' },
+              },
+              {
                 path: 'ready',
                 data: { crumb: 'Get ready' },
                 children: [
@@ -127,10 +137,28 @@ describe('OnboardingShellComponent', () => {
     },
   );
 
-  it('shows no second crumb for a page without one', async () => {
+  it('shows no second crumb for a page without one and renders the shell workspace header', async () => {
     const harness = await open('/onboarding/analyze');
     expect(query(harness, '[data-testid="onboarding-crumb-page"]')).toBeNull();
+    expect(query(harness, 'ptah-workspace-header')).not.toBeNull();
   });
+
+  it.each([
+    ['/onboarding/new-project', 'New project'],
+    ['/onboarding/team-builder', 'AI team builder'],
+  ])(
+    'omits the shell workspace header on flat launcher route %s while showing crumb "%s"',
+    async (url, expectedCrumb) => {
+      const harness = await open(url);
+      expect(query(harness, 'ptah-workspace-header')).toBeNull();
+      expect(
+        query(
+          harness,
+          '[data-testid="onboarding-crumb-page"]',
+        )?.textContent?.trim(),
+      ).toBe(expectedCrumb);
+    },
+  );
 
   it('moves focus to the page h1 when a page activates', async () => {
     const harness = await open('/onboarding');

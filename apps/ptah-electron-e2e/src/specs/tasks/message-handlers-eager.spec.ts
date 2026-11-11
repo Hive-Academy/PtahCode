@@ -4,28 +4,20 @@ import type { UiDriver } from '../../support/ui-driver';
 /**
  * R4 gate (TASK_2026_187 Batch 4) — sibling to
  * `specs/thoth/message-handlers-eager.spec.ts` (Batch 3), same pattern,
- * for the two Batch 4 `MESSAGE_HANDLERS` paths: `TasksStore` (reached
- * through the eager `TasksChangedFeed` since TASK_2026_871) and `HarnessWorkflowMessageHandler`
- * (`@ptah-extension/harness-builder/services`). Both must stay constructed
- * and receiving at bootstrap now that `TasksViewComponent` /
- * `HarnessBuilderViewComponent` / `SetupHubComponent` are behind lazy
- * `loadComponent` ROUTES instead of static imports (TASK_2026_524 batch 1;
+ * for the `TasksStore` `MESSAGE_HANDLERS` path (reached through the eager
+ * `TasksChangedFeed` since TASK_2026_871). It must stay constructed and
+ * receiving at bootstrap now that `TasksViewComponent` is behind a lazy
+ * `loadComponent` route instead of a static import (TASK_2026_524 batch 1;
  * previously behind `LazyViewService.resolveWhen` loaders).
  *
  * `apps/ptah-extension-webview/src/app/unit5-message-routing.spec.ts`
  * (Jest, developer's own artifact — batch-4-report.md §8) proves this at the
  * `MessageRouterService` unit level. This file proves the same property
- * against the real Electron renderer, with neither the tasks board nor the
- * harness builder ever having been opened.
+ * against the real Electron renderer, with the tasks board never having been
+ * opened for the negative gate check.
  *
- * The harness test needs no mount-race workaround Batch 3's
- * `thoth/message-handlers-eager.spec.ts` needed — its effect is a direct,
- * immediate consequence of the push itself (a `navigateToView` call fired
- * from inside `handleMessage`), not something a later independent mount-time
- * refresh could race or clobber.
- *
- * `TasksStore` used to be proved the same way — push with nothing mounted,
- * watch a `tasks:board` RPC fire. It no longer can be, and the reason is a
+ * `TasksStore` used to be proved by pushing with nothing mounted and
+ * watching a `tasks:board` RPC fire. It no longer can be, and the reason is a
  * deliberate product change rather than a regression: `TasksStore` is now
  * SURFACE-GATED (tasks-ui guideline 9). A push that arrives with no Tasks
  * surface mounted is dropped on purpose, because a full `.ptah/specs` scan
@@ -50,7 +42,7 @@ async function boardCallCount(ui: UiDriver): Promise<number> {
   return (await ui.getObservedCalls('tasks:board')).length;
 }
 
-test.describe('Tasks / Harness MESSAGE_HANDLERS — eager while unopened (R4, TASK_2026_187)', () => {
+test.describe('Tasks MESSAGE_HANDLERS — eager while unopened (R4, TASK_2026_187)', () => {
   test('TasksStore: a tasks:changed push buys no board scan while the board has never been opened', async ({
     ui,
   }) => {
@@ -93,45 +85,5 @@ test.describe('Tasks / Harness MESSAGE_HANDLERS — eager while unopened (R4, TA
     await expect
       .poll(() => boardCallCount(ui), { timeout: 10_000 })
       .toBeGreaterThan(afterMount);
-  });
-
-  test('HarnessWorkflowMessageHandler: harness:open-workflow navigates to the harness builder with it never opened', async ({
-    ui,
-  }) => {
-    const page = ui.page;
-    const intake = {
-      what: 'An internal scheduling tool.',
-      audience: 'internal',
-      stack: 'recommend',
-    };
-    await ui.mockRpc({
-      'harness:start-new-project': {
-        success: true,
-        seedPrompt: 'Plan the scheduling tool.',
-        intake,
-        plugins: {
-          enabledBundled: [],
-          missingExternal: [],
-          availableSkillIds: [],
-        },
-      },
-      'chat:start': { success: true },
-    });
-
-    // Confirm we start somewhere that is NOT the harness builder — the
-    // negative half of the proof below.
-    await expect(page.locator('ptah-proposal-workspace-page')).toHaveCount(0);
-
-    // Push while still on 'chat' — the harness builder has never been
-    // opened, by any means, at this point in the test.
-    await ui.pushEvent({
-      type: 'harness:open-workflow',
-      payload: { mode: 'new-project', intake },
-    });
-
-    // The eager handler accepts the valid intake and delegates to the
-    // request service, which creates a normal tab and navigates to its
-    // builder route. No explicit view switch appears in this test.
-    await expect(page.locator('ptah-proposal-workspace-page')).toBeVisible();
   });
 });

@@ -216,7 +216,7 @@ function buildProcedureSteps(
 
   steps.push(
     "Run Stage A's two-round discovery (business first, then stack) using " +
-      'the AskUserQuestion tool — one round of questions at a time, and wait ' +
+      'your question tool for asking the user — one round of questions at a time, and wait ' +
       'for my answers. Skip any question the intake above already answers, ' +
       'and never answer a discovery question on my behalf: if you need my ' +
       'input, ask for it.',

@@ -1935,64 +1935,6 @@
     "input-bordered": 2,
     "input-xs": 2
   },
-  "libs/frontend/harness-builder/src/lib/components/harness-builder-leave-dialog.component.ts": {
-    "btn": 5,
-    "btn-outline": 3,
-    "btn-primary": 2,
-    "btn-sm": 5
-  },
-  "libs/frontend/harness-builder/src/lib/components/harness-config-preview.component.ts": {
-    "badge": 5,
-    "badge-accent": 1,
-    "badge-outline": 3,
-    "badge-secondary": 1,
-    "badge-xs": 5,
-    "btn": 3,
-    "btn-outline": 3,
-    "btn-xs": 3,
-    "skeleton": 3
-  },
-  "libs/frontend/harness-builder/src/lib/components/sidebar/builder-ai-helpers-section.component.ts": {
-    "btn": 8,
-    "btn-ghost": 5,
-    "btn-outline": 3,
-    "btn-sm": 3,
-    "btn-xs": 5,
-    "textarea": 1,
-    "textarea-bordered": 1
-  },
-  "libs/frontend/harness-builder/src/lib/components/sidebar/builder-apply-section.component.ts": {
-    "<dynamic>": 1,
-    "btn": 6,
-    "btn-ghost": 4,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 1,
-    "btn-xs": 5
-  },
-  "libs/frontend/harness-builder/src/lib/components/sidebar/builder-presets-section.component.ts": {
-    "btn": 4,
-    "btn-ghost": 1,
-    "btn-outline": 3,
-    "btn-sm": 3,
-    "btn-xs": 1,
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1,
-    "select": 1,
-    "select-bordered": 1,
-    "select-sm": 1,
-    "textarea": 1,
-    "textarea-bordered": 1
-  },
-  "libs/frontend/harness-builder/src/lib/components/sidebar/builder-stack-profile-section.component.ts": {
-    "badge": 3,
-    "badge-outline": 3,
-    "badge-sm": 3,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/machines-ui/src/lib/components/add-machine-pane/add-machine-pane.component.ts": {
     "btn": 1,
     "btn-ghost": 2,
@@ -2746,18 +2688,6 @@
   "libs/frontend/onboarding/src/lib/home/path-tile.component.ts": {
     "<dynamic>": 2
   },
-  "libs/frontend/onboarding/src/lib/proposal/answer-dock.component.ts": {
-    "btn": 3,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "textarea": 1,
-    "textarea-bordered": 1
-  },
-  "libs/frontend/onboarding/src/lib/proposal/apply-result.component.ts": {
-    "btn": 4,
-    "btn-primary": 1,
-    "btn-sm": 4
-  },
   "libs/frontend/onboarding/src/lib/proposal/new-project-intake.page.ts": {
     "btn": 8,
     "btn-ghost": 1,
@@ -2768,49 +2698,6 @@
     "input-bordered": 1,
     "textarea": 2,
     "textarea-bordered": 2
-  },
-  "libs/frontend/onboarding/src/lib/proposal/proposal-item.component.ts": {
-    "badge": 2,
-    "badge-outline": 2,
-    "badge-sm": 2
-  },
-  "libs/frontend/onboarding/src/lib/proposal/proposal-panel.component.ts": {
-    "badge": 1,
-    "badge-outline": 1,
-    "badge-sm": 1,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
-  },
-  "libs/frontend/onboarding/src/lib/proposal/proposal-status-card.component.ts": {
-    "btn": 4,
-    "btn-ghost": 3,
-    "btn-primary": 2,
-    "btn-sm": 4
-  },
-  "libs/frontend/onboarding/src/lib/proposal/proposal-workspace.page.ts": {
-    "btn": 6,
-    "btn-ghost": 1,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 6
-  },
-  "libs/frontend/onboarding/src/lib/proposal/reply-composer.component.ts": {
-    "<dynamic>": 4
-  },
-  "libs/frontend/onboarding/src/lib/proposal/review-apply.page.ts": {
-    "btn": 4,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 4
-  },
-  "libs/frontend/onboarding/src/lib/proposal/revision-history.component.ts": {
-    "badge": 1,
-    "badge-outline": 1,
-    "badge-sm": 1,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
   },
   "libs/frontend/onboarding/src/lib/proposal/team-builder-start.page.ts": {
     "btn": 3,

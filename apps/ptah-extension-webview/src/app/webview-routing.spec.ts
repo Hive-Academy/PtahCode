@@ -697,6 +697,26 @@ describe('webview routing composition', () => {
         expect.stringContaining('[App] Restored route'),
       );
     }, 30_000);
+
+    it.each([
+      '/onboarding/new-project/workspace',
+      '/onboarding/team-builder/review',
+    ])(
+      'redirects removed proposal child route %s inside onboarding to /onboarding',
+      async (legacyRoute) => {
+        const consoleWarn = jest.spyOn(console, 'warn').mockImplementation();
+        installHost(savedRoute(legacyRoute, null), null);
+
+        expect(surfaceNavigationLanded(await runBoot())).toBe(true);
+
+        expect(TestBed.inject(Router).url).toBe('/onboarding');
+        expect(TestBed.inject(AppStateManager).currentView()).toBe('onboarding');
+        expect(consoleWarn).not.toHaveBeenCalledWith(
+          expect.stringContaining('[App] Restored route'),
+        );
+      },
+      30_000,
+    );
   });
 
   /**
@@ -1309,6 +1329,11 @@ describe('app.config routing wiring', () => {
   it('starts the onboarding first-run tracker at bootstrap', () => {
     // The chat guard's redirect commits `shownAt` only through the tracker.
     expect(source).toContain('provideOnboardingFirstRun()');
+  });
+
+  it('registers HarnessChatProposalStore at bootstrap and drops HarnessWorkflowMessageHandler', () => {
+    expect(source).toContain('provideHarnessChatProposalStore()');
+    expect(source).not.toContain('HarnessWorkflowMessageHandler');
   });
 
   it('binds PlatformLocation to MemoryPlatformLocation', () => {

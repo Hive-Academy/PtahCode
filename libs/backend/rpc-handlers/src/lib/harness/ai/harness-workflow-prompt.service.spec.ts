@@ -123,6 +123,25 @@ describe('HarnessWorkflowPromptService', () => {
     expect(prompt).toContain('drive the configuration to completion');
   });
 
+  it('names no Claude-only tool in either variant', async () => {
+    const { service, workspaceContext } = buildService();
+    const forbidden =
+      /AskUserQuestion|TodoWrite|WebFetch|\bGlob\b|\bGrep\b|\bSkill tool\b|`Skill`/;
+
+    const nonEmpty = await service.composePrompt({
+      mode: 'configure-harness',
+      intent: 'anything',
+    });
+    expect(nonEmpty.prompt).not.toMatch(forbidden);
+
+    workspaceContext.isWorkspaceEffectivelyEmpty.mockResolvedValue(true);
+    const empty = await service.composePrompt({
+      mode: 'configure-harness',
+      intent: 'anything',
+    });
+    expect(empty.prompt).not.toMatch(forbidden);
+  });
+
   it('tells the user what Apply writes in both variants', async () => {
     const { service, workspaceContext } = buildService();
 

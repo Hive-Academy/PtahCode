@@ -271,7 +271,7 @@ interface StatusChip {
         <ptah-onboarding-path-tile
           testId="new-project"
           title="New project"
-          description="Answer five short questions and review a proposed agent, skill and toolchain setup."
+          description="Answer five short questions to start a guided project setup session in chat."
           callToAction="Start a project"
           [icon]="icons.folderPlus"
           [link]="newProjectLink"
@@ -282,7 +282,7 @@ interface StatusChip {
         <ptah-onboarding-path-tile
           testId="team-builder"
           title="AI team builder"
-          description="Describe the team you want and tune the proposed configuration with the agent."
+          description="Describe the team you want to configure agents, skills and MCP servers in chat."
           callToAction="Build a team"
           [icon]="icons.users"
           [link]="teamBuilderLink"

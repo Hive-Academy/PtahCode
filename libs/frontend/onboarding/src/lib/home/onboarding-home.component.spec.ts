@@ -194,12 +194,18 @@ describe('OnboardingHomeComponent', () => {
       '/onboarding/new-project',
       '/onboarding/team-builder',
     ]);
-    for (const link of links) {
-      const description = el().querySelector(
-        `#${link.getAttribute('aria-describedby')}`,
-      );
-      expect(description?.textContent?.trim()).toBeTruthy();
-    }
+    const descriptions = links.map((link) =>
+      el()
+        .querySelector(`#${link.getAttribute('aria-describedby')}`)
+        ?.textContent?.trim(),
+    );
+    expect(descriptions[0]).toBeTruthy();
+    expect(descriptions[1]).toBe(
+      'Answer five short questions to start a guided project setup session in chat.',
+    );
+    expect(descriptions[2]).toBe(
+      'Describe the team you want to configure agents, skills and MCP servers in chat.',
+    );
   });
 
   it('offers the Analyze secondary links', () => {

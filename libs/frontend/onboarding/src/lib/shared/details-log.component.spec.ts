@@ -6,9 +6,9 @@ import {
   type SessionStopHandler,
 } from '@ptah-extension/chat';
 import type { LiveModelStats } from '@ptah-extension/chat-ui';
-import { BuilderSessionSectionComponent } from '@ptah-extension/harness-builder';
 import { AnalysisTranscriptComponent } from '@ptah-extension/setup-wizard';
 import type { SessionStatsEntry } from '@ptah-extension/shared';
+import { BuilderSessionSectionComponent } from './builder-session-section.component';
 import { DetailsLogComponent } from './details-log.component';
 
 let embedInstanceSeq = 0;

@@ -257,7 +257,6 @@ export default [
           // hub, so it does not defeat the split either.
           checkDynamicDependenciesExceptions: [
             '@ptah-extension/tasks-ui/services',
-            '@ptah-extension/harness-builder/services',
             // TASK_2026_ONBOARDING: the chat route's first-run guard, the flag
             // and the tracker are eager; the onboarding pages load through
             // `loadChildren`. The entry exports no component.

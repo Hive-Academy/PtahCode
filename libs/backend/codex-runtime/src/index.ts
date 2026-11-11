@@ -24,6 +24,7 @@ export type {
   CodexRuntimeError,
   CodexRuntimeEvent,
   CodexContext,
+  CodexUserInputAnswer,
   CodexModelInfo,
   CodexSessionHistory,
   CodexHistoryReader,

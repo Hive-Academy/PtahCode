@@ -18,7 +18,6 @@ export const SESSION = 'e2e-proposal-session';
 export const FIRST_REVISION = 'proposal-revision-1';
 export const SECOND_REVISION = 'proposal-revision-2';
 const CAPTURED_AT = '2026-10-29T09:00:00.000Z';
-const CANONICAL_WORKSPACE = 'c:/ptah-e2e-ws-a';
 const INTAKE = {
   what: 'Build an internal incident response workspace for an operations team.',
   audience: 'internal',
@@ -135,6 +134,9 @@ export function proposalRpcFixtures(
       warnings: ['Review the GitHub plugin before enabling it for the team.'],
     },
     'harness:health': { health: null },
+    'chat:start': { success: true, sessionId: SESSION },
+    'chat:continue': { success: true, sessionId: SESSION },
+    'chat:stop': { success: true },
   };
 }
 
@@ -225,11 +227,8 @@ export async function bootOnboardingProposal(
       theme: string;
       flag: string;
       workspace: string;
-      canonicalWorkspace: string;
       tab: string;
       session: string;
-      capturedAt: string;
-      intake: typeof INTAKE;
       hasSession: boolean;
     }) => {
       localStorage.setItem('ptah-theme-v2', seed.theme);
@@ -257,57 +256,13 @@ export async function bootOnboardingProposal(
           activeTabId: seed.tab,
         }),
       );
-      const keyPart = (value: string) =>
-        encodeURIComponent(value).replace(/\./g, '%2E');
-      const prefix = 'ptah.harness.builder.v1';
-      const recordKey = (kind: string) =>
-        `${prefix}.${kind}.${keyPart(seed.canonicalWorkspace)}.${keyPart(seed.tab)}`;
-      localStorage.setItem(
-        recordKey('session'),
-        JSON.stringify({
-          version: 1,
-          tabId: seed.tab,
-          sessionId: seed.session,
-          mode: 'new-project',
-          workspacePath: seed.canonicalWorkspace,
-          intake: seed.intake,
-          intakeHash: 'e2e-intake-hash',
-          sendAttempt: { count: 1, ackedAt: seed.capturedAt },
-        }),
-      );
-      localStorage.setItem(
-        recordKey('stack'),
-        JSON.stringify({
-          version: 1,
-          workspaceRoot: seed.canonicalWorkspace,
-          tabId: seed.tab,
-          plugins: {
-            enabledBundled: ['ptah-nx-saas'],
-            missingExternal: [{ marketplace: 'official', plugin: 'github' }],
-            availableSkillIds: ['incident-triage', 'audit-writing'],
-          },
-          toolchain: {
-            profileId: 'node-ts',
-            command: 'node',
-            installed: true,
-            version: '22.0.0',
-            satisfiesMin: true,
-            minVersion: '20.0.0',
-            installHint: 'Node.js is ready.',
-          },
-          capturedAt: seed.capturedAt,
-        }),
-      );
     },
     {
       theme: options.theme,
       flag: JSON.stringify(FLAG_DONE),
       workspace: WORKSPACE,
-      canonicalWorkspace: CANONICAL_WORKSPACE,
       tab: TAB,
       session: SESSION,
-      capturedAt: CAPTURED_AT,
-      intake: INTAKE,
       hasSession: options.scene !== 'empty',
     },
   );

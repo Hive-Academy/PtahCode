@@ -8,12 +8,6 @@ const STEP_OWNERS = {
   // Analyze A1-A3: the saved analysis or catalog source, then the agent
   // generation tab and run.
   analyze: ['analyze', 'agents', 'generate'],
-  'new-project': ['new-project', 'new-project-workspace', 'new-project-review'],
-  'team-builder': [
-    'team-builder',
-    'team-builder-workspace',
-    'team-builder-review',
-  ],
 } as const;
 
 type StepOwner = keyof typeof STEP_OWNERS;
@@ -22,7 +16,9 @@ export type OnboardingStepId =
   | (typeof STEP_OWNERS)[StepOwner][number]
   | 'guidance'
   | 'done'
-  | 'guidance-only';
+  | 'guidance-only'
+  | 'new-project'
+  | 'team-builder';
 
 /** Path below `/onboarding` of every step. */
 const STEP_PATHS: Readonly<Record<OnboardingStepId, readonly string[]>> = {
@@ -33,11 +29,7 @@ const STEP_PATHS: Readonly<Record<OnboardingStepId, readonly string[]>> = {
   done: ['analyze', 'done'],
   'guidance-only': ['guidance'],
   'new-project': ['new-project'],
-  'new-project-workspace': ['new-project', 'workspace'],
-  'new-project-review': ['new-project', 'review'],
   'team-builder': ['team-builder'],
-  'team-builder-workspace': ['team-builder', 'workspace'],
-  'team-builder-review': ['team-builder', 'review'],
 };
 
 /** The identity keys each owner carries between its own steps. */
@@ -48,8 +40,6 @@ const OWNER_KEYS: Readonly<Record<StepOwner, readonly string[]>> = {
     ONBOARDING_QUERY.tab,
     ONBOARDING_QUERY.run,
   ],
-  'new-project': [ONBOARDING_QUERY.tab, ONBOARDING_QUERY.rev],
-  'team-builder': [ONBOARDING_QUERY.tab, ONBOARDING_QUERY.rev],
 };
 
 /** A `routerLink` target: absolute commands plus the complete query. */

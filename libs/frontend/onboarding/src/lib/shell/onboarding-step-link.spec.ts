@@ -25,8 +25,11 @@ describe('onboardingStepLink', () => {
       onboardingStepLink('guidance-only', 'guidance-only', {}).commands,
     ).toEqual(['/onboarding', 'guidance']);
     expect(
-      onboardingStepLink('team-builder', 'team-builder-review', {}).commands,
-    ).toEqual(['/onboarding', 'team-builder', 'review']);
+      onboardingStepLink('new-project', 'new-project', {}).commands,
+    ).toEqual(['/onboarding', 'new-project']);
+    expect(
+      onboardingStepLink('team-builder', 'team-builder', {}).commands,
+    ).toEqual(['/onboarding', 'team-builder']);
   });
 
   it('copies the Analyze owner keys between A1, A2 and A3', () => {
@@ -36,17 +39,6 @@ describe('onboardingStepLink', () => {
     expect(onboardingStepLink('generate', 'agents', identity).queryParams).toEqual(
       { analysis: 'analysis-1.json', source: 'catalog', tab: 'tab-1', run: 'run-1' },
     );
-  });
-
-  it('copies tab and rev within a proposal flow', () => {
-    expect(
-      onboardingStepLink('new-project-workspace', 'new-project-review', identity)
-        .queryParams,
-    ).toEqual({ tab: 'tab-1', rev: '3' });
-    expect(
-      onboardingStepLink('team-builder-review', 'team-builder-workspace', identity)
-        .queryParams,
-    ).toEqual({ tab: 'tab-1', rev: '3' });
   });
 
   it('never emits the agent run on generate → guidance and always sets gen', () => {
@@ -93,9 +85,11 @@ describe('onboardingStepLink', () => {
   });
 
   it.each([
-    ['new project to team builder', 'new-project-review', 'team-builder-review'],
+    ['new project to team builder', 'new-project', 'team-builder'],
     ['analyze to new project', 'analyze', 'new-project'],
-  ] as const)('carries no identity across unrelated owners (%s)', (_label, from, to) => {
+    ['new project self-link', 'new-project', 'new-project'],
+    ['team builder self-link', 'team-builder', 'team-builder'],
+  ] as const)('carries no identity for standalone launcher routes (%s)', (_label, from, to) => {
     expect(onboardingStepLink(from, to, identity).queryParams).toEqual({});
   });
 

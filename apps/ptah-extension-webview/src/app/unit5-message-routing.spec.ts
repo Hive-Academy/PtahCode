@@ -59,20 +59,23 @@ import {
 // inverted-dependency `MODEL_REFRESH_CONTROL` token. `app.config.ts:181` binds
 // it with this exact helper, so the spec uses the same one rather than a
 // hand-rolled stub — same precedent as `thoth-message-routing.spec.ts`.
-import { provideModelRefreshControl } from '@ptah-extension/chat';
+import {
+  HarnessChatProposalStore,
+  provideHarnessChatProposalStore,
+  provideModelRefreshControl,
+} from '@ptah-extension/chat';
+import { HarnessHealthStore } from '@ptah-extension/marketplace/services';
 
 // The three services under test, each imported through the SAME specifier
-// `app.config.ts` uses after Batch 4. If a narrow barrel ever stops exporting
-// one of them, this file fails to compile — the cheapest possible R4 check.
+// `app.config.ts` uses. If an entry point ever stops exporting one of them,
+// this file fails to compile — the cheapest possible R4 check.
 // TASK_2026_871: `TasksStore` is no longer a bootstrap handler (it lives in
 // the lazy board chunk); `tasks:changed` lands on the eager feed, which relays
 // it to the store once the board has opened.
+// TASK_2026_933: `HarnessWorkflowMessageHandler` was replaced at bootstrap by
+// `provideHarnessChatProposalStore()` so `harness:config-proposed` broadcasts
+// land in `HarnessChatProposalStore` even before a chat session mounts.
 import { TasksChangedFeed } from '@ptah-extension/tasks-ui/presentation';
-import {
-  HarnessWorkflowMessageHandler,
-  HarnessWorkflowRequestService,
-  HarnessProposalHydrationService,
-} from '@ptah-extension/harness-builder/services';
 import { SetupWizardStateService } from '@ptah-extension/setup-wizard';
 
 /**
@@ -82,7 +85,6 @@ import { SetupWizardStateService } from '@ptah-extension/setup-wizard';
  */
 const WIRE = {
   tasksChanged: 'tasks:changed',
-  harnessOpenWorkflow: 'harness:open-workflow',
   harnessConfigProposed: 'harness:config-proposed',
   wizardScanProgress: 'setup-wizard:scan-progress',
 } as const;
@@ -118,46 +120,37 @@ function dispatch(type: string, payload?: unknown): void {
   );
 }
 
-async function flushHarnessHandler(
-  handler: HarnessWorkflowMessageHandler,
+async function flushProposalStore(
+  store: HarnessChatProposalStore,
 ): Promise<void> {
-  // Allow the router's scheduled drain, then await the handler's lazy import
-  // queue. An unknown type is a no-op that returns the current pending work.
+  // Allow the router's scheduled drain, then await the store's pending queue.
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
-  await handler.handleMessage({ type: '__test_flush__' });
+  await store.handleMessage({ type: '__test_flush__' });
 }
 
 describe('initial setup bundle boundary', () => {
-  it('does not route or export the removed harness views', () => {
+  it('does not route or import any harness-builder symbols in app.routes.ts or app.config.ts', () => {
     const routes = readFileSync(join(__dirname, 'app.routes.ts'), 'utf8');
     const config = readFileSync(join(__dirname, 'app.config.ts'), 'utf8');
-    const barrel = readFileSync(
-      join(__dirname, '../../../../libs/frontend/harness-builder/src/index.ts'),
-      'utf8',
-    );
     for (const name of [
       'HarnessBuilderViewComponent',
       'HarnessBuilderSidebarComponent',
       'SetupHubComponent',
+      'HarnessWorkflowMessageHandler',
     ]) {
       expect(routes).not.toContain(name);
       expect(config).not.toContain(name);
-      expect(barrel).not.toContain(name);
     }
-    expect(routes).not.toContain("import('@ptah-extension/harness-builder')");
-    expect(config).not.toContain("from '@ptah-extension/harness-builder'");
+    expect(routes).not.toContain('@ptah-extension/harness-builder');
+    expect(config).not.toContain('@ptah-extension/harness-builder');
   });
 });
 
 describe('Unit 5 push-message delivery with tasks and onboarding never opened (R4)', () => {
   let router: MessageRouterService;
   let tasks: TasksChangedFeed;
-  let harness: HarnessWorkflowMessageHandler;
+  let proposals: HarnessChatProposalStore;
   let wizard: SetupWizardStateService;
-  let workflowRequests: {
-    requestAndNavigate: jest.Mock;
-    reportHubError: jest.Mock;
-  };
   let rpcCall: jest.Mock;
 
   beforeEach(() => {
@@ -168,10 +161,6 @@ describe('Unit 5 push-message delivery with tasks and onboarding never opened (R
       data: null,
       error: new Error('stubbed'),
     });
-    workflowRequests = {
-      requestAndNavigate: jest.fn().mockResolvedValue('landed'),
-      reportHubError: jest.fn(),
-    };
 
     TestBed.configureTestingModule({
       providers: [
@@ -182,16 +171,8 @@ describe('Unit 5 push-message delivery with tasks and onboarding never opened (R
         },
         { provide: SURFACE_ACTIVE, useFactory: surfaceActiveFor('chat') },
         {
-          provide: HarnessWorkflowRequestService,
-          useValue: {
-            ...workflowRequests,
-            workspaceRoot: '/ws/a',
-            hasResumableMode: () => false,
-          },
-        },
-        {
-          provide: HarnessProposalHydrationService,
-          useValue: { handlePush: jest.fn() },
+          provide: HarnessHealthStore,
+          useValue: { refresh: jest.fn().mockResolvedValue(undefined) },
         },
         // Required port with no default provider (`app.config.ts` binds it to
         // `FileLinkRouterService`); stubbed rather than dragged in, which would
@@ -226,11 +207,7 @@ describe('Unit 5 push-message delivery with tasks and onboarding never opened (R
           useExisting: TasksChangedFeed,
           multi: true,
         },
-        {
-          provide: MESSAGE_HANDLERS,
-          useExisting: HarnessWorkflowMessageHandler,
-          multi: true,
-        },
+        ...provideHarnessChatProposalStore(),
         {
           provide: MESSAGE_HANDLERS,
           useExisting: SetupWizardStateService,
@@ -240,7 +217,7 @@ describe('Unit 5 push-message delivery with tasks and onboarding never opened (R
     });
 
     tasks = TestBed.inject(TasksChangedFeed);
-    harness = TestBed.inject(HarnessWorkflowMessageHandler);
+    proposals = TestBed.inject(HarnessChatProposalStore);
     wizard = TestBed.inject(SetupWizardStateService);
     // Constructing the router builds the handler map, which reads
     // handledMessageTypes off all three services. A dropped registration or a
@@ -257,12 +234,11 @@ describe('Unit 5 push-message delivery with tasks and onboarding never opened (R
     expect(router).toBeTruthy();
     const registered = TestBed.inject(MESSAGE_HANDLERS);
     expect(registered).toEqual(
-      expect.arrayContaining([tasks, harness, wizard]),
+      expect.arrayContaining([tasks, proposals, wizard]),
     );
   });
 
   it('the shared constants hold the exact strings the backend broadcasts', () => {
-    expect(MESSAGE_TYPES.HARNESS_OPEN_WORKFLOW).toBe(WIRE.harnessOpenWorkflow);
     expect(MESSAGE_TYPES.HARNESS_CONFIG_PROPOSED).toBe(
       WIRE.harnessConfigProposed,
     );
@@ -288,25 +264,25 @@ describe('Unit 5 push-message delivery with tasks and onboarding never opened (R
     });
   });
 
-  it('routes harness:open-workflow to HarnessWorkflowMessageHandler', async () => {
-    dispatch(WIRE.harnessOpenWorkflow, {
-      mode: 'configure-harness',
-      seedPrompt: 'delivered',
+  it('routes harness:config-proposed to HarnessChatProposalStore', async () => {
+    dispatch(WIRE.harnessConfigProposed, {
+      sessionId: 'session-a',
+      configUpdates: {
+        name: 'Delivered Team',
+      },
+      isConfigComplete: true,
     });
-    await flushHarnessHandler(harness);
-    expect(workflowRequests.requestAndNavigate).toHaveBeenCalledWith({
-      mode: 'configure-harness',
-      seedPrompt: 'delivered',
-    });
+    await flushProposalStore(proposals);
+    expect(proposals.proposalFor('session-a')?.configUpdates.name).toBe(
+      'Delivered Team',
+    );
+    expect(proposals.proposalFor('session-a')?.isConfigComplete).toBe(true);
   });
 
-  it('reports a malformed harness relay through the Hub error', async () => {
-    dispatch(WIRE.harnessOpenWorkflow, { mode: 'new-project' });
-    await flushHarnessHandler(harness);
-    expect(workflowRequests.requestAndNavigate).not.toHaveBeenCalled();
-    expect(workflowRequests.reportHubError).toHaveBeenCalledWith(
-      'The workspace sent an invalid builder request. Try again.',
-    );
+  it('drops a malformed harness:config-proposed payload without throwing', async () => {
+    dispatch(WIRE.harnessConfigProposed, { sessionId: '' });
+    await flushProposalStore(proposals);
+    expect(proposals.proposals().size).toBe(0);
   });
 
   it('routes setup-wizard:scan-progress to SetupWizardStateService', () => {
@@ -330,19 +306,23 @@ describe('Unit 5 push-message delivery with tasks and onboarding never opened (R
     tasks.listenRaw((payload) => relayed.push(payload));
 
     dispatch(WIRE.tasksChanged, {});
-    dispatch(WIRE.harnessOpenWorkflow, { mode: 'configure-harness' });
+    dispatch(WIRE.harnessConfigProposed, {
+      sessionId: 'session-b',
+      configUpdates: { name: 'Second Team' },
+      isConfigComplete: false,
+    });
     dispatch(WIRE.wizardScanProgress, {
       filesScanned: 1,
       totalFiles: 2,
       detections: [],
     });
 
-    await flushHarnessHandler(harness);
+    await flushProposalStore(proposals);
 
     expect(relayed).toEqual([{}]);
-    expect(workflowRequests.requestAndNavigate).toHaveBeenCalledWith({
-      mode: 'configure-harness',
-    });
+    expect(proposals.proposalFor('session-b')?.configUpdates.name).toBe(
+      'Second Team',
+    );
     expect(wizard.scanProgress()?.totalFiles).toBe(2);
   });
 });

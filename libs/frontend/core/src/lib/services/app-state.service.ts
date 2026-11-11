@@ -466,7 +466,6 @@ export class AppStateManager implements MessageHandler {
    * respects the tile cap.
    */
   private readonly _canvasTabRequests = signal<readonly CanvasTabRequest[]>([]);
-  /** Signal bridge: request to open the harness surface and run a workflow */
   /** Signal bridge: request to launch a chat session with a seed prompt (Tasks board → orchestrate) */
   private readonly _chatPromptRequest = signal<ChatPromptRequest | null>(null);
   /** Signal bridge: request to open an existing session in chat (Tasks board → "Open session") */
@@ -544,8 +543,7 @@ export class AppStateManager implements MessageHandler {
     this.initializeState();
 
     // Follow the Router, for every surface change this service did NOT start:
-    // `App.handleInitialView`'s initial navigation,
-    // `HarnessWorkflowMessageHandler`, and `Location.back()` / `.forward()`.
+    // `App.handleInitialView`'s initial navigation and `Location.back()` / `.forward()`.
     // Navigations this service starts record through `requestSurface`, which
     // carries its own workspace and generation.
     //
@@ -695,7 +693,6 @@ export class AppStateManager implements MessageHandler {
   readonly newCanvasSessionRequest = this._newCanvasSessionRequest.asReadonly();
   /** Pending request to adopt an existing tab as a canvas tile (consumed by OrchestraCanvasComponent) */
   readonly canvasTabRequests = this._canvasTabRequests.asReadonly();
-  /** Pending request to open the harness surface workflow (consumed by HarnessBuilderViewComponent) */
   /** Pending request to launch a chat session with a seed prompt (consumed by the chat-lib bridge) */
   readonly chatPromptRequest = this._chatPromptRequest.asReadonly();
   /** Pending request to open an existing session in chat (consumed by the chat-lib bridge) */

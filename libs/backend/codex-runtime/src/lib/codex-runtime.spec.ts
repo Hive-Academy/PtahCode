@@ -1816,7 +1816,7 @@ describe('CodexRuntime', () => {
     expect(received.filter((event) => event.type === 'error')).toHaveLength(0);
   });
 
-  it('cancels an async card on terminal and never steers a late answer or starts a turn', async () => {
+  it('keeps an async card pending across turn completion and starts a follow-up turn when answered', async () => {
     let answer: (value: { 'question:0': { answers: string[] } }) => void = () => undefined;
     const ask = jest.fn((_request: unknown, signal: AbortSignal) => new Promise<{ 'question:0': { answers: string[] } }>((resolve) => {
       answer = resolve;
@@ -1834,6 +1834,42 @@ describe('CodexRuntime', () => {
     const signal = ask.mock.calls[0][1];
     children[0].complete();
     await flush();
+    expect(signal.aborted).toBe(false);
+    answer({ 'question:0': { answers: ['Option A'] } });
+    await flush();
+    await flush();
+    const startedTurns = children[0].frames.filter((frame) => frame['method'] === 'turn/start');
+    expect(startedTurns).toHaveLength(2);
+    expect(startedTurns[1]?.['params']).toMatchObject({
+      threadId: 'thread-1',
+      input: [{
+        type: 'text',
+        text: 'User has answered your questions: "Which?"="Option A". You can now continue with the user\'s answers in mind.',
+      }],
+    });
+    expect(children[0].frames.filter((frame) => frame['method'] === 'turn/steer')).toHaveLength(0);
+  });
+
+  it('aborts a pending async card on context close and never delivers a late answer', async () => {
+    let answer: (value: { 'question:0': { answers: string[] } }) => void = () => undefined;
+    const ask = jest.fn((_request: unknown, signal: AbortSignal) => new Promise<{ 'question:0': { answers: string[] } }>((resolve) => {
+      answer = resolve;
+      expect(signal.aborted).toBe(false);
+    }));
+    runtime = new CodexRuntime({ ...options, requestUserInput: ask });
+    const context = await runtime.open(profile);
+    await context.startTurn({ text: 'go' });
+    children[0].notify('item/completed', {
+      threadId: 'thread-1', turnId: 'turn-1', completedAtMs: 2,
+      item: { type: 'agentMessage', id: 'question', text: 'Choose one',
+        delivery: 'async', questions: [{ title: 'Which?' }] },
+    });
+    await flush();
+    const signal = ask.mock.calls[0][1];
+    children[0].complete();
+    await flush();
+    expect(signal.aborted).toBe(false);
+    await context.close();
     expect(signal.aborted).toBe(true);
     answer({ 'question:0': { answers: ['private answer'] } });
     await flush();
@@ -1842,6 +1878,55 @@ describe('CodexRuntime', () => {
     expect(options.logger.warn).toHaveBeenCalledWith('Codex user answer was not delivered.',
       { code: 'codex-user-input-undelivered', cause: 'turn-ended' });
     expect(JSON.stringify(jest.mocked(options.logger.warn).mock.calls)).not.toContain('private answer');
+  });
+
+  it('aborts a synchronous requestUserInput server request when the turn completes', async () => {
+    let syncSignal: AbortSignal | undefined;
+    const ask = jest.fn((_request: unknown, signal: AbortSignal) => {
+      syncSignal = signal;
+      return new Promise<Record<string, { answers: string[] }>>(() => undefined);
+    });
+    runtime = new CodexRuntime({ ...options, requestUserInput: ask });
+    const context = await runtime.open(profile);
+    await context.startTurn({ text: 'go' });
+    children[0].send({
+      id: 'sync-question',
+      method: 'item/tool/requestUserInput',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        itemId: 'item-sync',
+        isBlocking: true,
+        questions: [{ id: 'q', header: 'Question', question: 'Which?' }],
+      },
+    });
+    await flush();
+    expect(syncSignal?.aborted).toBe(false);
+    children[0].complete();
+    await flush();
+    expect(syncSignal?.aborted).toBe(true);
+  });
+
+  it('cancels a superseded async card when a second user turn starts before an answer', async () => {
+    let questionSignal: AbortSignal | undefined;
+    const ask = jest.fn((_request: unknown, signal: AbortSignal) => {
+      questionSignal = signal;
+      return new Promise<Record<string, { answers: string[] }>>(() => undefined);
+    });
+    runtime = new CodexRuntime({ ...options, requestUserInput: ask });
+    const context = await runtime.open(profile);
+    await context.startTurn({ text: 'first' });
+    children[0].notify('item/completed', {
+      threadId: 'thread-1', turnId: 'turn-1', completedAtMs: 2,
+      item: { type: 'agentMessage', id: 'question', text: 'Choose one',
+        delivery: 'async', questions: [{ title: 'Which?' }] },
+    });
+    await flush();
+    children[0].complete();
+    await flush();
+    expect(questionSignal?.aborted).toBe(false);
+    await context.startTurn({ text: 'second message' });
+    expect(questionSignal?.aborted).toBe(true);
   });
 
   it('aborts a pending async card on interrupt', async () => {

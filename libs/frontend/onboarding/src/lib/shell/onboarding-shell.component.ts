@@ -109,7 +109,7 @@ export class OnboardingShellComponent {
     const child = this.route.firstChild;
     this.onHome.set(child?.routeConfig?.path === '');
     const path = child?.routeConfig?.path;
-    this.onEntryPage.set((path === 'new-project' || path === 'team-builder') && child?.firstChild?.routeConfig?.path === '');
+    this.onEntryPage.set(path === 'new-project' || path === 'team-builder');
     const crumb: unknown = child?.snapshot.data['crumb'];
     this.crumb.set(typeof crumb === 'string' ? crumb : null);
     this.focus.focusHeading(this.host.nativeElement);

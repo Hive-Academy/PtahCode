@@ -1,14 +1,12 @@
 import { TestBed } from '@angular/core/testing';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import { VSCodeService } from '@ptah-extension/core';
-import { HarnessBuilderRecordsService } from '@ptah-extension/harness-builder';
 import { WizardRpcService } from '@ptah-extension/setup-wizard';
 import { OnboardingResumeStore } from './onboarding-resume.store';
 
 describe('OnboardingResumeStore', () => {
   const rpc = { getResumableRun: jest.fn(), getBoundRunState: jest.fn() };
   const tabs = { activeWorkspacePath: '/work', getWorkspaceTabs: jest.fn() };
-  const records = { readDraft: jest.fn(), readSession: jest.fn() };
   let store: OnboardingResumeStore;
 
   beforeEach(() => {
@@ -17,14 +15,11 @@ describe('OnboardingResumeStore', () => {
     tabs.getWorkspaceTabs.mockReturnValue([]);
     rpc.getResumableRun.mockResolvedValue({ analysis: null, generation: null });
     rpc.getBoundRunState.mockResolvedValue(null);
-    records.readDraft.mockReturnValue(null);
-    records.readSession.mockReturnValue(null);
     TestBed.configureTestingModule({
       providers: [
         OnboardingResumeStore,
         { provide: WizardRpcService, useValue: rpc },
         { provide: TabManagerService, useValue: tabs },
-        { provide: HarnessBuilderRecordsService, useValue: records },
         {
           provide: VSCodeService,
           useValue: { config: () => ({ workspaceRoot: '/work' }) },
@@ -59,13 +54,13 @@ describe('OnboardingResumeStore', () => {
     });
   });
 
-  it('limits bound tabs and harness records to one item per workflow or mode', async () => {
+  it('limits bound generation tabs to one item per workflow and ignores harness chat tabs', async () => {
     tabs.getWorkspaceTabs.mockReturnValue([
       { id: 'agent-1', workflow: 'setup-agent-generation' },
       { id: 'agent-2', workflow: 'setup-agent-generation' },
       { id: 'guidance-1', workflow: 'setup-project-prompt' },
       { id: 'harness-1', workflow: 'harness-new-project' },
-      { id: 'harness-2', workflow: 'harness-new-project' },
+      { id: 'harness-2', workflow: 'harness-configure' },
     ]);
     rpc.getBoundRunState.mockImplementation(
       async ({ tabId }: { tabId: string }) => ({
@@ -73,30 +68,23 @@ describe('OnboardingResumeStore', () => {
         binding: { runId: `run-${tabId}` },
       }),
     );
-    records.readSession.mockImplementation((_root: string, tabId: string) =>
-      tabId === 'harness-1' ? { lastRevisionId: 'rev-1' } : null,
-    );
     await store.refresh();
     expect(store.items().map((item) => item.id)).toEqual([
       'generation:agent-1',
       'generation:guidance-1',
-      'harness:new-project',
     ]);
-    expect(store.items()[2].target).toEqual({
-      subPath: ['new-project', 'workspace'],
-      queryParams: { tab: 'harness-1' },
-    });
   });
 
-  it('does not advertise unbound generation or harness records', async () => {
+  it('does not advertise unbound generation checkpoints or harness tabs', async () => {
     rpc.getResumableRun.mockResolvedValue({
       analysis: null,
       generation: { lifecycle: 'paused', runId: 'orphan', agents: [] },
     });
     tabs.getWorkspaceTabs.mockReturnValue([
       { id: 'orphan-tab', workflow: 'setup-project-prompt' },
+      { id: 'harness-1', workflow: 'harness-new-project' },
+      { id: 'harness-2', workflow: 'harness-configure' },
     ]);
-    records.readDraft.mockReturnValue({ tabId: 'orphan-tab' });
     await store.refresh();
     expect(store.items()).toEqual([]);
   });

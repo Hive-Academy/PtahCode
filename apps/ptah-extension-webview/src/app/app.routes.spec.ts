@@ -171,4 +171,14 @@ describe('onboarding route (TASK_2026_ONBOARDING)', () => {
     expect(source).toContain("from '@ptah-extension/onboarding/services'");
     expect(source).not.toMatch(/from '@ptah-extension\/onboarding'/);
   });
+
+  it('declares flat new-project and team-builder launcher routes with no workspace or review children', async () => {
+    const module = await import('@ptah-extension/onboarding');
+    const children = module.ONBOARDING_ROUTES[0]?.children ?? [];
+    for (const path of ['new-project', 'team-builder'] as const) {
+      const child = children.find((entry) => entry.path === path);
+      expect(child).toBeDefined();
+      expect(child?.children).toBeUndefined();
+    }
+  });
 });

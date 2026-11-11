@@ -1,0 +1,33 @@
+# Batch 3 Fix Report — `TASK_2026_933_f1f9`
+
+## Failure 1: `onboarding.routes.spec.ts` — Removed Proposal Child Route Redirects
+
+- **Root Cause (`libs/frontend/onboarding/src/lib/onboarding.routes.ts:85`, `libs/frontend/onboarding/src/lib/onboarding.routes.spec.ts:122-131`):**
+  The trailing wildcard fallback route in `ONBOARDING_ROUTES` used a relative string redirect (`{ path: '**', redirectTo: '' }`). In Angular Router 22 (`ApplyRedirects.applyRedirectCommands` / `Recognizer.recognize` in `@angular/router`), a relative string `redirectTo` does not trigger an `AbsoluteRedirect` replacement of the root `UrlTree`, so `Recognizer.recognize()` preserves `this.urlTree.queryParams` on the settled URL. Navigating to `/onboarding/new-project/review?tab=t&rev=r` therefore settled on `'/onboarding?tab=t&rev=r'` instead of `'/onboarding'`.
+- **Query Parameter Audit (`libs/frontend/onboarding/src/lib/home/**`, `libs/frontend/onboarding/src/lib/shell/**`):**
+  Checked `OnboardingHomeComponent` (`onboarding-home.component.ts:322-460`), `OnboardingResumeStore` (`onboarding-resume.store.ts:20-116`), `AnalysisFoundCardComponent` (`analysis-found-card.component.ts:59-135`), `OnboardingPathTileComponent` (`path-tile.component.ts:96-127`), `ResumeBannerComponent` (`resume-banner.component.ts:25-30`), `OnboardingShellComponent` (`onboarding-shell.component.ts:91-122`), `OnboardingRunPillService` (`onboarding-run-pill.service.ts:11-24`), and `WorkspaceHeaderComponent` (`workspace-header.component.ts:33-40`). Neither Home nor the shell reads `tab` or `rev` from `ActivatedRoute` or component inputs, though leaving stale query params on `/onboarding` would still persist dead `?tab=...&rev=...` query strings into `WEBVIEW_ROUTE_STATE_KEY` on route persistence and leave old bookmarks on an unclean URL.
+- **Fault Location:** Production (`libs/frontend/onboarding/src/lib/onboarding.routes.ts` — fallback kept stale query parameters instead of landing on a clean `/onboarding` Home URL; the strict test assertion in `onboarding.routes.spec.ts:130` was kept as-is).
+- **Files Changed:**
+  - `libs/frontend/onboarding/src/lib/onboarding.routes.ts` (`lines 1-2, 19-25, 94`): Replaced `{ path: '**', redirectTo: '' }` with `{ path: '**', redirectTo: onboardingHomeRedirect }`, where `const onboardingHomeRedirect: RedirectFunction = () => inject(Router).createUrlTree(['/onboarding'])` (matching `onboardingReadyHostGuard` in `ready/onboarding-ready-host.guard.ts:9-11` and `restoreMarketplaceRoute` in `marketplace.routes.ts:79-84`).
+- **Why the Test Should Now Pass:**
+  Returning a `UrlTree` from `RedirectFunction` causes Angular 22's `ApplyRedirects.applyRedirectCommands` to issue an `AbsoluteRedirect` to `Router.createUrlTree(['/onboarding'])` with empty `queryParams` (`{}`) and `fragment: null`. Both unknown bare paths (`/onboarding/nowhere`) and removed proposal child URLs with query strings (`/onboarding/new-project/workspace?tab=t`, `/onboarding/new-project/review?tab=t&rev=r`, `/onboarding/team-builder/workspace?tab=t`, `/onboarding/team-builder/review?tab=t&rev=r`) now settle strictly on `'/onboarding'`, while all valid sibling routes declared before `**` continue matching directly with their own query strings intact.
+
+---
+
+## Failure 2: `surface-vs-tab-parity.spec.ts` — Workflow-Tagged Harness Chat Tab Text Accumulation
+
+- **Root Cause (`libs/frontend/chat-routing/src/lib/__tests__/surface-vs-tab-parity.spec.ts:673` vs. `libs/frontend/chat-streaming/src/lib/accumulator-core.service.ts:317-328` and `libs/frontend/chat-types/src/lib/chat-types.ts:872-875`):**
+  In production, `StreamingAccumulatorCore.process` handles `text_delta` (`accumulator-core.service.ts:317-328`) by computing `const blockKey = AccumulatorKeys.textBlock(event.messageId, blockIndex)` and writing `event.delta` into `state.textAccumulators` under that key. `AccumulatorKeys.textBlock(messageId, blockIndex)` (`chat-types.ts:874-875`) formats keys as `` `${messageId}-block-${blockIndex}` `` (i.e. `'msg-parity-1-block-0'`), matching `clearTextAccumulators` (`accumulator-core.service.ts:818`) and `cascadeCleanForEvictedEvent` (`chat-types.ts:424`). Other passing tests in `surface-vs-tab-parity.spec.ts` (`lines 279-282, 433-463`) snapshot `state.textAccumulators` without hardcoding a key format, whereas the Batch 3 test at `line 673` hardcoded the wrong magic string `` `${MSG_ID}:0` `` (`'msg-parity-1:0'`).
+- **Production Flow Audit (`libs/frontend/onboarding/src/lib/launcher/harness-chat-launcher.service.ts:151-170`, `libs/frontend/chat/src/lib/services/chat-message-handler.service.ts:604-658`, `libs/frontend/chat-streaming/src/lib/streaming-handler.service.ts:274-333, 443-495`):**
+  Verified that production does **not** fail to accumulate text for a workflow-tagged chat tab (`'harness-new-project'` / `'harness-configure'`) with zero registered surfaces: `HarnessChatLauncherService` creates a normal tab in `TabManagerService` without claiming a surface in `WorkflowSessionClaimService`, so `ChatMessageHandler.handleChatChunk` sees `renderedSurfaceFor(tabId) === null` and dispatches via `applyChatStreamEvent` -> `ChatStore.processStreamEvent` -> `StreamingHandlerService.processEventForTab` -> `StreamingAccumulatorCore.process` (plus `StreamRouter.routeStreamEvent`), accumulating text under `AccumulatorKeys.textBlock(messageId, blockIndex)` identically to every standard chat tab.
+- **Fault Location:** Test (`libs/frontend/chat-routing/src/lib/__tests__/surface-vs-tab-parity.spec.ts` — hardcoded `` `${MSG_ID}:0` `` instead of `AccumulatorKeys.textBlock(MSG_ID, 0)`).
+- **Files Changed:**
+  - `libs/frontend/chat-routing/src/lib/__tests__/surface-vs-tab-parity.spec.ts` (`lines 43-47, 674-676`): Imported `AccumulatorKeys` from `@ptah-extension/chat-types` and updated the assertion to `expect(state.textAccumulators.get(AccumulatorKeys.textBlock(MSG_ID, 0))).toBe('hello')`.
+- **Why the Test Should Now Pass:**
+  `textDelta(SESSION_TAB)` emits `{ messageId: MSG_ID, blockIndex: 0, delta: 'hello', source: 'stream' }`, which `core.process(state, evt, ctx)` writes into `state.textAccumulators` under `AccumulatorKeys.textBlock(MSG_ID, 0)` (`'msg-parity-1-block-0'`). Querying `state.textAccumulators.get(AccumulatorKeys.textBlock(MSG_ID, 0))` reads that exact key and resolves `'hello'`.
+
+---
+
+## Tool & Skill Availability Notes
+- `angular-frontend-patterns` was not exposed in the CLI's native `<skills>` list; `.claude/skills/angular-frontend-patterns/SKILL.md` was read directly from the workspace via `read_file` and applied.
+- Per task constraints, only built-in file read/write/edit tools were used (no shell commands, no MCP tools, no git; verification deferred to the coordinator's `npm run verify`).

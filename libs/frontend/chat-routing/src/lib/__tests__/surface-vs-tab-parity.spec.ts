@@ -23,6 +23,7 @@ import { signal } from '@angular/core';
 import {
   ConversationRegistry,
   SurfaceId,
+  TabId,
   TabManagerService,
   TabSessionBinding,
   type ClaudeSessionId,
@@ -40,6 +41,7 @@ import {
   type AccumulatorContext,
 } from '@ptah-extension/chat-streaming';
 import {
+  AccumulatorKeys,
   createEmptyStreamingState,
   type StreamingState,
 } from '@ptah-extension/chat-types';
@@ -646,5 +648,31 @@ describe('Surface-vs-Tab parity (TASK_2026_107 Phase 5)', () => {
     // agentMonitorStore is a real instance — sanity that the test wired
     // it up (the parity sequence does not exercise its public APIs).
     expect(agentMonitorStore).toBeDefined();
+  });
+
+  it('binds a workflow-tagged harness chat tab directly through onTabCreated + routeStreamEvent with zero surfaces registered', () => {
+    const harnessTab = TabId.create();
+    router.onTabCreated(harnessTab);
+
+    const state = createEmptyStreamingState();
+    const ctx = makeCtx();
+    for (const evt of [
+      msgStart(SESSION_TAB),
+      textDelta(SESSION_TAB),
+      toolStart(SESSION_TAB),
+      toolResult(SESSION_TAB),
+      messageComplete(SESSION_TAB),
+    ]) {
+      router.routeStreamEvent(evt, harnessTab);
+      core.process(state, evt, ctx);
+    }
+
+    expect(router.tabsForSession(SESSION_TAB)).toEqual([harnessTab]);
+    expect(router.surfacesForSession(SESSION_TAB)).toEqual([]);
+    expect(surfaceRegistry.getAdapter(harnessTab as unknown as SurfaceId)).toBeNull();
+    expect(state.messageEventIds).toEqual([MSG_ID]);
+    expect(
+      state.textAccumulators.get(AccumulatorKeys.textBlock(MSG_ID, 0)),
+    ).toBe('hello');
   });
 });
