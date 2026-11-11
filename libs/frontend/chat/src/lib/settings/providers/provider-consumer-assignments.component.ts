@@ -24,6 +24,8 @@ import {
   NativePopoverComponent,
   ProviderMarkComponent,
   ProviderModelPickerComponent,
+  PtahButtonDirective,
+  PtahIconButtonDirective,
   type ProviderIdentityOption,
   type ProviderModelSelection,
 } from '@ptah-extension/ui';
@@ -45,7 +47,6 @@ import {
   type ProviderConsumerId,
   type BackgroundConsumerRow,
 } from './provider-consumer-rows';
-import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import { DecisionModelRowComponent } from './decision-model-row.component';
 
 const FOCUS =
@@ -79,12 +80,13 @@ const TIMEOUT_DEFAULT_SEC = 120;
   selector: 'ptah-provider-consumer-assignments',
   standalone: true,
   imports: [
-    SettingsBusyDisabledDirective,
     DecisionModelRowComponent,
     LucideAngularModule,
     NativePopoverComponent,
     ProviderMarkComponent,
     ProviderModelPickerComponent,
+    PtahButtonDirective,
+    PtahIconButtonDirective,
     SettingScopeRowComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -227,22 +229,21 @@ const TIMEOUT_DEFAULT_SEC = 120;
                       class="relative w-[27rem] max-w-[calc(100vw-2rem)] space-y-2 whitespace-normal p-2 text-left text-xs"
                       [attr.data-testid]="'consumer-editor-' + row.id"
                     >
-                      <button
-                        type="button"
-                        [class]="
-                          'btn btn-ghost btn-sm btn-square absolute right-3 top-3 z-10 ' +
-                          focusRing
-                        "
-                        aria-label="Close"
-                        (click)="cancelEdit()"
-                        [attr.data-testid]="'consumer-close-' + row.id"
-                      >
-                        <lucide-angular
-                          [img]="CloseIcon"
-                          class="h-3.5 w-3.5"
-                          aria-hidden="true"
-                        />
-                      </button>
+                      <span class="absolute right-3 top-3 z-10">
+                        <button
+                          type="button"
+                          ptahIconButton
+                          label="Close"
+                          (click)="cancelEdit()"
+                          [attr.data-testid]="'consumer-close-' + row.id"
+                        >
+                          <lucide-angular
+                            [img]="CloseIcon"
+                            class="h-3.5 w-3.5"
+                            aria-hidden="true"
+                          />
+                        </button>
+                      </span>
                       <ptah-provider-model-picker
                         [label]="row.name"
                         [provider]="currentDraft().provider"
@@ -436,10 +437,10 @@ const TIMEOUT_DEFAULT_SEC = 120;
                     <span class="text-xs text-base-content">seconds</span>
                     <button
                       type="button"
-                      [class]="
-                        'btn btn-primary btn-sm px-2 ' + focusRing
-                      "
-                      [ptahBusyDisabled]="isTimeoutSaveDisabled()"
+                      ptahButton
+                      variant="primary"
+                      [busy]="busy()"
+                      [disabled]="isTimeoutSaveBlocked()"
                       aria-label="Save Enhancement time limit"
                       (click)="saveTimeout()"
                       data-testid="timeout-save-button"
@@ -636,13 +637,16 @@ export class ProviderConsumerAssignmentsComponent {
       ? `Must be between ${min} and ${max} seconds.`
       : null;
   });
-  protected readonly isTimeoutSaveDisabled = computed<boolean>(
+  /** Lasting reasons the time limit cannot be saved (nothing loaded, invalid, unchanged); a pending write is `busy()`. */
+  protected readonly isTimeoutSaveBlocked = computed<boolean>(
     () =>
       this.timeoutMeta() === null ||
-      this.busy() ||
       this.disabled() ||
       this.timeoutValidationError() !== null ||
       this.timeoutDraftSec() === this.timeoutEffectiveSec(),
+  );
+  protected readonly isTimeoutSaveDisabled = computed<boolean>(
+    () => this.busy() || this.isTimeoutSaveBlocked(),
   );
 
   protected readonly rows = computed<readonly BackgroundConsumerRow[]>(() =>

@@ -18,6 +18,8 @@ import {
 } from '@ptah-extension/core';
 import {
   NativeModalComponent,
+  PtahButtonDirective,
+  PtahIconButtonDirective,
   ProviderMarkComponent,
 } from '@ptah-extension/ui';
 import { ANTHROPIC_API_LANE_ENTRY, getAnthropicProvider } from '@ptah-extension/shared';
@@ -83,6 +85,8 @@ type KeyMode = 'required' | 'optional' | 'none' | 'sign-in';
   imports: [
     LucideAngularModule,
     NativeModalComponent,
+    PtahButtonDirective,
+    PtahIconButtonDirective,
     ProviderMarkComponent,
     SettingsToastComponent,
   ],
@@ -111,8 +115,8 @@ type KeyMode = 'required' | 'optional' | 'none' | 'sign-in';
         </h2>
         <button
           type="button"
-          [class]="'btn btn-ghost btn-sm btn-square ' + focusRing"
-          aria-label="Close"
+          ptahIconButton
+          label="Close"
           (click)="requestClose()"
         >
           <lucide-angular
@@ -260,7 +264,8 @@ type KeyMode = 'required' | 'optional' | 'none' | 'sign-in';
             }
             <button
               type="button"
-              [class]="'btn btn-primary btn-sm ' + focusRing"
+              ptahButton
+              variant="primary"
               [disabled]="signingIn() || signedIn()"
               (click)="signIn()"
               data-testid="add-cli-instance-copilot-login"
@@ -304,24 +309,22 @@ type KeyMode = 'required' | 'optional' | 'none' | 'sign-in';
                 aria-describedby="add-cli-instance-key-help"
                 data-testid="add-cli-instance-key"
               />
-              <button
-                type="button"
-                [class]="
-                  'btn btn-ghost btn-sm absolute inset-y-0 right-0 h-full min-h-0 ' + focusRing
-                "
-                (click)="keyVisible.set(!keyVisible())"
-                [attr.aria-label]="
-                  keyVisible() ? 'Hide API key' : 'Show API key'
-                "
-                [attr.aria-pressed]="keyVisible()"
-                data-testid="add-cli-instance-toggle-visibility"
-              >
-                <lucide-angular
-                  [img]="keyVisible() ? EyeOffIcon : EyeIcon"
-                  class="h-3.5 w-3.5"
-                  aria-hidden="true"
-                />
-              </button>
+              <span class="absolute inset-y-0 right-0 flex items-center">
+                <button
+                  type="button"
+                  ptahIconButton
+                  (click)="keyVisible.set(!keyVisible())"
+                  [label]="keyVisible() ? 'Hide API key' : 'Show API key'"
+                  [attr.aria-pressed]="keyVisible()"
+                  data-testid="add-cli-instance-toggle-visibility"
+                >
+                  <lucide-angular
+                    [img]="keyVisible() ? EyeOffIcon : EyeIcon"
+                    class="h-3.5 w-3.5"
+                    aria-hidden="true"
+                  />
+                </button>
+              </span>
             </div>
           </div>
         }
@@ -349,14 +352,16 @@ type KeyMode = 'required' | 'optional' | 'none' | 'sign-in';
       >
         <button
           type="button"
-          [class]="'btn btn-ghost btn-sm text-base-content ' + focusRing"
+          ptahButton
+          variant="ghost"
           (click)="requestClose()"
         >
           Cancel
         </button>
         <button
           type="button"
-          [class]="'btn btn-primary btn-sm ' + focusRing"
+          ptahButton
+          variant="primary"
           [disabled]="!canSubmit()"
           (click)="submit()"
           data-testid="add-cli-instance-submit"

@@ -8,7 +8,7 @@ import {
   type ProviderAccountChoice, type ProvidersEditContext,
 } from '@ptah-extension/core';
 import {
-  DEFAULT_OVERLAY_OFFSET, NativePopoverComponent, PROVIDER_MODELS_LOADER, ProviderModelSearchFieldComponent, type ProviderModelSearchOption,
+  DEFAULT_OVERLAY_OFFSET, NativePopoverComponent, PROVIDER_MODELS_LOADER, ProviderModelSearchFieldComponent, PtahButtonDirective, PtahIconButtonDirective, type ProviderModelSearchOption,
 } from '@ptah-extension/ui';
 import type { EffortLevel, ProviderModelInfo, SettingScope } from '@ptah-extension/shared';
 import { SAVE_REFUSED_MESSAGE, SettingsSaveFeedbackService, type SettingsSaveResult } from '../feedback/settings-save-feedback.service';
@@ -35,8 +35,6 @@ const MANUAL = '__manual__';
 const PROVIDER_SAVED = 'Main agent provider saved.';
 const SELECT = 'select select-bordered select-sm w-full border-base-content-muted bg-base-100 text-sm text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
 const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
-/** The disabled Save keeps a visible shape and a muted, readable label (native `disabled` semantics unchanged). */
-const SAVE_DISABLED = 'disabled:border-base-content-muted disabled:bg-base-200 disabled:text-base-content-muted';
 /** Every field's label: one style, always above its control. */
 const LABEL = 'block text-xs font-semibold text-base-content-muted';
 
@@ -84,7 +82,7 @@ interface AccountIntent {
 @Component({
   selector: 'ptah-main-agent-reassign-popover',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NativePopoverComponent, ProviderModelSearchFieldComponent],
+  imports: [PtahButtonDirective, PtahIconButtonDirective, SettingsBusyDisabledDirective, LucideAngularModule, NativePopoverComponent, ProviderModelSearchFieldComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Angular owns (and removes) this listener with the component.
   host: { '(window:resize)': 'open() && fitToViewport()' },
@@ -104,11 +102,11 @@ interface AccountIntent {
         <div class="flex min-w-0 shrink-0 flex-wrap items-center justify-between gap-x-2 border-b border-base-300 px-3 py-1">
           <h2 id="main-agent-popover-title" class="whitespace-nowrap text-sm font-semibold text-base-content">Reassign main agent</h2>
           <div class="-mr-1 ml-auto flex min-w-0 items-center gap-1">
-            <button type="button" [class]="'btn btn-ghost btn-sm min-w-0 flex-nowrap px-2 text-xs font-medium text-base-content underline ' + focusRing"
-              [ptahBusyDisabled]="state.route().status === 'loading'" (click)="state.checkConnection()" data-testid="main-agent-check">
+            <button type="button" ptahButton variant="ghost" class="min-w-0"
+              [busy]="state.route().status === 'loading'" (click)="state.checkConnection()" data-testid="main-agent-check">
               <span class="truncate">{{ state.route().status === 'loading' ? 'Checking…' : 'Check connection' }}</span>
             </button>
-            <button type="button" [class]="'btn btn-ghost btn-sm btn-square flex-none ' + focusRing" aria-label="Close" (click)="cancel()">
+            <button type="button" ptahIconButton class="flex-none" label="Close" (click)="cancel()">
               <lucide-angular [img]="CloseIcon" class="h-3.5 w-3.5" aria-hidden="true" />
             </button>
           </div>
@@ -125,8 +123,8 @@ interface AccountIntent {
               }
             </select>
             @if (rescopeOffer(); as scope) {
-              <button type="button" [class]="'btn btn-link btn-sm justify-self-start px-0 text-xs text-base-content ' + focusRing"
-                [disabled]="busy()" (click)="requestRescope()" data-testid="main-agent-provider-rescope">Save provider to {{ scope }}…</button>
+              <button type="button" ptahButton variant="link" class="justify-self-start"
+                [busy]="busy()" (click)="requestRescope()" data-testid="main-agent-provider-rescope">Save provider to {{ scope }}…</button>
             }
             @if (pendingProvider(); as pending) {
               <div role="group" aria-label="Confirm main provider change" class="space-y-1.5 rounded border border-base-300 bg-base-200 p-2"
@@ -141,10 +139,10 @@ interface AccountIntent {
                 }
                 <div class="flex flex-wrap gap-1.5">
                   @if (!providerConfirmed()) {
-                    <button type="button" [class]="'btn btn-primary btn-sm ' + focusRing" [ptahBusyDisabled]="busy() || !pending.writable"
+                    <button type="button" ptahButton variant="primary" [busy]="busy()" [disabled]="!pending.writable"
                       (click)="confirmProvider()">Use for main agent</button>
                   }
-                  <button type="button" [class]="'btn btn-ghost btn-sm text-base-content ' + focusRing" [disabled]="busy()" (click)="resetProvider()">Cancel provider change</button>
+                  <button type="button" ptahButton variant="ghost" [busy]="busy()" (click)="resetProvider()">Cancel provider change</button>
                 </div>
               </div>
             }
@@ -158,7 +156,7 @@ interface AccountIntent {
               @if (account.stored.kind === 'signed-out') {
                 <div class="flex items-center justify-between gap-2">
                   <label for="main-agent-account" [class]="label">Account</label>
-                  <button type="button" [class]="'btn btn-link btn-sm px-0 text-xs text-base-content ' + focusRing"
+                  <button type="button" ptahButton variant="link"
                     [attr.aria-label]="copy.signInSavedAccount" (click)="accountSignInRequested.emit()"
                     data-testid="main-agent-account-sign-in">Sign in</button>
                 </div>
@@ -185,9 +183,9 @@ interface AccountIntent {
                 <input id="main-agent-model" type="text" [class]="'input input-bordered input-sm min-w-0 flex-1 font-mono text-xs ' + focusRing"
                   placeholder="Model ID, e.g. vendor/model-name" [value]="manualDraft()" (input)="manualDraft.set(value($event))"
                   aria-label="Main agent model ID" data-testid="main-agent-model-manual" />
-                <button type="button" [class]="'btn btn-outline btn-sm text-base-content ' + focusRing" [ptahBusyDisabled]="busy() || !targetReady() || !manualDraft().trim()"
+                <button type="button" ptahButton [busy]="busy()" [disabled]="!targetReady() || !manualDraft().trim()"
                   (click)="applyManual()">Use</button>
-                <button type="button" [class]="'btn btn-ghost btn-sm text-base-content ' + focusRing" (click)="closeManual()">Cancel</button>
+                <button type="button" ptahButton variant="ghost" (click)="closeManual()">Cancel</button>
               </div>
             } @else {
               <!-- Batch 28b: the compact searchable model control (ui barrel), filtering the popover's own options. Its list
@@ -200,7 +198,7 @@ interface AccountIntent {
             @if (catalogue().status === 'error') {
               <p role="alert" class="flex items-center gap-1.5 text-base-content" data-testid="main-agent-model-error">
                 Could not load the model list.
-                <button type="button" [class]="'btn btn-link btn-sm px-0 text-xs text-base-content ' + focusRing" (click)="loadModels()">Retry</button>
+                <button type="button" ptahButton variant="link" (click)="loadModels()">Retry</button>
               </p>
             }
           </div>
@@ -230,7 +228,7 @@ interface AccountIntent {
           @if (state.mainSources().status === 'error') {
             <p role="alert" class="flex flex-wrap items-center gap-1.5 text-base-content" data-testid="main-agent-sources-error">
               Where the model and effort are saved could not be loaded. Nothing was changed.
-              <button type="button" [class]="'btn btn-link btn-sm px-0 text-xs text-base-content ' + focusRing"
+              <button type="button" ptahButton variant="link"
                 (click)="state.refreshMainSources()">Retry model and effort sources</button>
             </p>
           } @else if (!targetReady()) {
@@ -246,12 +244,12 @@ interface AccountIntent {
                 Confirm or cancel the provider change to save.</p>
             }
             <div class="flex items-center justify-end gap-2">
-              <button type="button" [class]="'btn btn-ghost btn-sm text-base-content ' + focusRing" (click)="cancel()"
+              <button type="button" ptahButton variant="ghost" (click)="cancel()"
                 data-testid="main-agent-cancel">Cancel</button>
               <!-- Natively disabled while nothing can be saved; the disabled: utilities keep its outline and label legible in
                    both themes (daisyUI's own disabled button nearly vanishes on the popover's base-100). -->
-              <button type="button" [class]="'btn btn-primary btn-sm ' + saveDisabledLook + ' ' + focusRing" [disabled]="!saveReady()"
-                [ptahBusyDisabled]="busy()" [attr.aria-describedby]="awaitingConfirm() ? 'main-agent-save-hint' : null"
+              <button type="button" ptahButton variant="primary" [disabled]="!saveReady()"
+                [busy]="busy()" [attr.aria-describedby]="awaitingConfirm() ? 'main-agent-save-hint' : null"
                 (click)="save()" data-testid="main-agent-save">{{ saving() ? 'Saving…' : 'Save' }}</button>
             </div>
           </div>
@@ -272,7 +270,6 @@ export class MainAgentReassignPopoverComponent {
   protected readonly select = SELECT;
   protected readonly label = LABEL;
   protected readonly focusRing = FOCUS;
-  protected readonly saveDisabledLook = SAVE_DISABLED;
   /** #35: always the last row of the model list, never filtered out; choosing it swaps in the model-ID field. */
   protected readonly manualOption: ProviderModelSearchOption = { id: MANUAL, name: 'Enter a model ID…', supportsToolUse: null };
   protected readonly efforts: readonly { value: EffortLevel | ''; label: string }[] = [

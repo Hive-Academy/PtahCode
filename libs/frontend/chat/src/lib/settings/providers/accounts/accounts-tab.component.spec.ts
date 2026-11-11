@@ -255,7 +255,6 @@ describe('AccountsTabComponent', () => {
       for (const label of ['Work', 'Team plan', 'Broken', 'Out', 'Stopped']) {
         const manage = rowOf(label)?.querySelector<HTMLElement>('[data-testid="accounts-tab-row-manage"]');
         expect(manage?.getAttribute('aria-label')).toBe(`Manage ${label}`);
-        expect(manage?.getAttribute('title')).toBe('Manage');
       }
       const signIns = (label: string) => rowOf(label)?.querySelectorAll('[data-testid="accounts-tab-row-sign-in"]').length;
       expect([signIns('Work'), signIns('Team plan'), signIns('Broken'), signIns('Out'), signIns('Stopped')])

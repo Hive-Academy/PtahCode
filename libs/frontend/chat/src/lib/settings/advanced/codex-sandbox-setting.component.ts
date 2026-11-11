@@ -18,6 +18,7 @@ import {
   DEFAULT_CODEX_SANDBOX_MODE,
 } from '@ptah-extension/shared';
 import type { CodexSandboxMode } from '@ptah-extension/shared';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import {
   SettingsSaveFeedbackService,
@@ -109,7 +110,7 @@ function isSandboxMode(value: unknown): value is CodexSandboxMode {
 @Component({
   selector: 'ptah-codex-sandbox-setting',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective],
+  imports: [PtahButtonDirective, SettingsBusyDisabledDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -153,10 +154,7 @@ function isSandboxMode(value: unknown): value is CodexSandboxMode {
             </p>
             <button
               type="button"
-              [class]="
-                'btn btn-outline btn-sm border-base-content-muted text-base-content ' +
-                focusRing
-              "
+              ptahButton
               (click)="reload()"
               data-testid="codex-sandbox-retry"
             >
@@ -251,8 +249,9 @@ function isSandboxMode(value: unknown): value is CodexSandboxMode {
                 <button
                   #confirmCancel
                   type="button"
-                  [class]="'btn btn-ghost btn-sm text-base-content ' + focusRing"
-                  [ptahBusyDisabled]="busy()"
+                  ptahButton
+                  variant="ghost"
+                  [busy]="busy()"
                   (click)="cancelFullAccess()"
                   data-testid="codex-sandbox-cancel-button"
                 >
@@ -274,8 +273,8 @@ function isSandboxMode(value: unknown): value is CodexSandboxMode {
             }
           </p>
           @if (saved() === null) {
-            <button type="button" [class]="'btn btn-outline btn-sm ' + focusRing"
-              [ptahBusyDisabled]="busy()" (click)="reload()"
+            <button type="button" ptahButton
+              [busy]="busy()" (click)="reload()"
               data-testid="codex-sandbox-reload">Reload effective policy</button>
           }
           <p

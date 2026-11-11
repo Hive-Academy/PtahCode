@@ -268,7 +268,8 @@ const CONTROL =
                 />
                 <button
                   type="button"
-                  [class]="'btn btn-primary btn-sm gap-1.5 ' + focusRing"
+                  ptahButton
+                  variant="primary"
                   (click)="openCatalog()"
                   data-testid="connect-provider"
                   data-focus="more-providers"
@@ -334,10 +335,8 @@ const CONTROL =
                 No connections match “{{ filter() }}”.
                 <button
                   type="button"
-                  [class]="
-                    'btn btn-ghost btn-sm px-2 text-base-content underline ' +
-                    focusRing
-                  "
+                  ptahButton
+                  variant="ghost"
                   (click)="filter.set('')"
                 >
                   Clear filter
