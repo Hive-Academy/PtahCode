@@ -19,6 +19,7 @@ import {
   libraryReachable,
   type OutcomeFileRow,
 } from './completion/outcome-rows';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 type ResultOutcome = NonNullable<
   SetupGenerationResultFacts['agentOutcomes']
@@ -47,6 +48,7 @@ function fileOutcomeOf(status: ResultOutcome['status']): FileOutcome | null {
     OutcomeSummaryComponent,
     GradeExpectationComponent,
     LibraryStaleNoticeComponent,
+    PtahButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -82,17 +84,14 @@ function fileOutcomeOf(status: ResultOutcome['status']): FileOutcome | null {
           {{ previewModel() || 'default model' }}
         </p>
         <button
+          ptahButton
+          variant="primary"
           type="button"
-          class="btn btn-primary btn-sm"
           (click)="startNow.emit()"
         >
           Start now
         </button>
-        <button
-          type="button"
-          class="btn btn-ghost btn-sm"
-          (click)="skip.emit()"
-        >
+        <button ptahButton variant="ghost" type="button" (click)="skip.emit()">
           Skip guidance
         </button>
       } @else if (started()) {
@@ -105,17 +104,14 @@ function fileOutcomeOf(status: ResultOutcome['status']): FileOutcome | null {
               : 'Generate project guidance when you are ready.'
           }}
         </p>
-        <button
-          type="button"
-          class="btn btn-outline btn-sm"
-          (click)="continue.emit()"
-        >
+        <button ptahButton type="button" (click)="continue.emit()">
           Continue to project guidance
         </button>
         @if (manualRecovery() && !skipped()) {
           <button
+            ptahButton
+            variant="ghost"
             type="button"
-            class="btn btn-ghost btn-sm"
             (click)="skip.emit()"
           >
             Skip guidance

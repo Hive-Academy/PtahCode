@@ -29,6 +29,7 @@ import {
   type DecisionSnapshot,
 } from './preview-decisions/preview-decisions.state';
 import { TargetRootChoiceComponent } from './preview-decisions/target-root-choice.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** One keep/replace choice the dialog reports to its owner. */
 export interface PreviewRowDecision {
@@ -64,6 +65,7 @@ let nextDialogId = 0;
     FileDecisionRowComponent,
     ModelOriginNoteComponent,
     TargetRootChoiceComponent,
+    PtahButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -121,8 +123,10 @@ let nextDialogId = 0;
                 }}</span>
                 @if (!info.openedIsHarnessRoot) {
                   <button
+                    ptahButton
+                    variant="ghost"
+                    size="xs"
                     type="button"
-                    class="btn btn-ghost btn-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
                     data-testid="target-change"
                     [attr.aria-expanded]="changeOpen()"
                     [attr.aria-controls]="changePanelId"
@@ -177,8 +181,12 @@ let nextDialogId = 0;
             }
             @if (error()) {
               <p role="alert" class="alert alert-warning my-2">
-                @if (retryOnError()) { Preview failed. Retry the comparison to continue. }
-                @else { Targets could not be checked. Review the agents folder after generation. }
+                @if (retryOnError()) {
+                  Preview failed. Retry the comparison to continue.
+                } @else {
+                  Targets could not be checked. Review the agents folder after
+                  generation.
+                }
               </p>
             }
             @if (!loading() && preview(); as current) {
@@ -265,20 +273,25 @@ let nextDialogId = 0;
               >
             }
             <button
+              ptahButton
+              variant="ghost"
               type="button"
-              class="btn btn-ghost btn-sm"
               (click)="dismissed.emit()"
             >
               Cancel
             </button>
             <button
+              ptahButton
+              variant="primary"
               type="button"
-              class="btn btn-primary btn-sm max-sm:basis-full"
+              class="max-sm:basis-full"
               data-testid="preview-confirm"
               [disabled]="loading()"
               (click)="confirm.emit()"
             >
-              {{ error() && retryOnError() ? 'Retry comparison' : confirmText() }}
+              {{
+                error() && retryOnError() ? 'Retry comparison' : confirmText()
+              }}
             </button>
           </div>
         </section>

@@ -23,6 +23,7 @@ import {
   type PackInstallFinished,
   type PackInstallRequest,
 } from './pack-install/pack-install-result';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /**
  * Community packs in the generation sidebar (TASK_2026_701_9e4b F4).
@@ -36,7 +37,7 @@ import {
 @Component({
   selector: 'ptah-community-packs-panel',
   standalone: true,
-  imports: [PackInstallPromptComponent],
+  imports: [PackInstallPromptComponent, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section aria-labelledby="community-packs-title" class="space-y-2">
@@ -46,7 +47,7 @@ import {
         before anything is written.
       </p>
       @if (!opened()) {
-        <button type="button" class="btn btn-outline btn-sm" (click)="browse()">
+        <button ptahButton type="button" (click)="browse()">
           Browse community packs
         </button>
       }
@@ -57,9 +58,7 @@ import {
         <p role="alert" class="alert alert-error">
           Failed to load community packs. Check your internet connection.
         </p>
-        <button type="button" class="btn btn-outline btn-sm" (click)="browse()">
-          Retry
-        </button>
+        <button ptahButton type="button" (click)="browse()">Retry</button>
       }
       @if (
         opened() && !loading() && !error() && !state.communityPacks().length
@@ -94,8 +93,10 @@ import {
                 installTo().suffix
               }}</span>
               <button
+                ptahButton
+                variant="ghost"
+                size="xs"
                 type="button"
-                class="btn btn-ghost btn-xs"
                 data-testid="pack-change-target"
                 [disabled]="busy() || !pendingFiles(pack).length"
                 (click)="installAll(pack)"
@@ -104,8 +105,9 @@ import {
               </button>
             </p>
             <button
+              ptahButton
+              size="xs"
               type="button"
-              class="btn btn-outline btn-xs"
               data-testid="pack-install-all"
               [disabled]="busy() || !pendingFiles(pack).length"
               (click)="installAll(pack)"
@@ -153,8 +155,9 @@ import {
                     }
                     @case ('failed') {
                       <button
+                        ptahButton
+                        size="xs"
                         type="button"
-                        class="btn btn-outline btn-xs"
                         [disabled]="busy()"
                         (click)="install(pack, agent.file)"
                       >
@@ -163,8 +166,9 @@ import {
                     }
                     @default {
                       <button
+                        ptahButton
+                        size="xs"
                         type="button"
-                        class="btn btn-outline btn-xs"
                         [disabled]="busy()"
                         (click)="install(pack, agent.file)"
                       >

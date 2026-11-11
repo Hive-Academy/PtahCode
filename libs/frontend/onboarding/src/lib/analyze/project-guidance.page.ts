@@ -39,6 +39,7 @@ import { RunPanelComponent } from '../shared/run-panel.component';
 import { chipStateFor } from '../shared/run-status-chip.component';
 import { onboardingStepLink } from '../shell/onboarding-step-link';
 import { GenerationStepStore } from './generation-step.store';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-project-guidance-page',
@@ -50,6 +51,7 @@ import { GenerationStepStore } from './generation-step.store';
     OnboardingStepperComponent,
     RecoveryScreenComponent,
     RunPanelComponent,
+    PtahButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
@@ -64,21 +66,32 @@ import { GenerationStepStore } from './generation-step.store';
         background: transparent;
         padding: 0;
       }
-      :host ::ng-deep ptah-run-panel button.btn-sm,
-      :host ::ng-deep [data-testid='guidance-saved-card'] button.btn-sm {
-        min-height: 36px;
-      }
-      :host ::ng-deep [data-testid='guidance-saved-card'] button.btn-ghost {
-        margin-top: 12px;
-      }
     `,
   ],
   template: `
     <section
       class="mx-auto space-y-5"
-      [class.max-w-[1120px]]="binding() && !recovery() && !workflow.runMismatch() && !workflow.lookupExhausted() && !lookupError()"
-      [class.max-w-[760px]]="!binding() || recovery() || workflow.runMismatch() || workflow.lookupExhausted() || lookupError()"
-      [class.p-4]="!binding() || recovery() || workflow.runMismatch() || workflow.lookupExhausted() || lookupError()"
+      [class.max-w-[1120px]]="
+        binding() &&
+        !recovery() &&
+        !workflow.runMismatch() &&
+        !workflow.lookupExhausted() &&
+        !lookupError()
+      "
+      [class.max-w-[760px]]="
+        !binding() ||
+        recovery() ||
+        workflow.runMismatch() ||
+        workflow.lookupExhausted() ||
+        lookupError()
+      "
+      [class.p-4]="
+        !binding() ||
+        recovery() ||
+        workflow.runMismatch() ||
+        workflow.lookupExhausted() ||
+        lookupError()
+      "
       aria-labelledby="project-guidance-title"
       data-testid="project-guidance-page"
     >
@@ -111,8 +124,10 @@ import { GenerationStepStore } from './generation-step.store';
           <h2 class="font-semibold">Run state is unavailable</h2>
           <p>We could not confirm this run. Try the lookup again.</p>
           <button
+            ptahButton
+            variant="primary"
             type="button"
-            class="btn btn-primary btn-sm mt-3 min-h-9"
+            class="mt-3"
             (click)="refresh()"
           >
             Retry
@@ -127,8 +142,10 @@ import { GenerationStepStore } from './generation-step.store';
           <h2 class="font-semibold">Run state is unavailable</h2>
           <p>We could not check the current guidance run.</p>
           <button
+            ptahButton
+            variant="primary"
             type="button"
-            class="btn btn-primary btn-sm mt-3 min-h-9"
+            class="mt-3"
             (click)="retryLookup()"
           >
             Retry
@@ -137,182 +154,192 @@ import { GenerationStepStore } from './generation-step.store';
       } @else {
         <ptah-live-run-layout [hasLog]="!!binding()">
           @if (binding(); as bound) {
-            <ptah-details-log runLog variant="pane" mode="tab" [tabId]="bound.tabId"
-              [liveState]="panelState() === 'running' ? 'live' : panelState() === 'cancelling' ? 'stopped' : 'idle'"
-              footerNote="Session output. Read-only." />
+            <ptah-details-log
+              runLog
+              variant="pane"
+              mode="tab"
+              [tabId]="bound.tabId"
+              [liveState]="
+                panelState() === 'running'
+                  ? 'live'
+                  : panelState() === 'cancelling'
+                    ? 'stopped'
+                    : 'idle'
+              "
+              footerNote="Session output. Read-only."
+            />
           }
-        <div
-          data-testid="guidance-state-chip"
-          [attr.data-state]="workflow.state()"
-        >
-          <ptah-run-panel
-            [state]="panelState()"
-            [viewState]="workflow.state()"
-            [title]="runTitle()"
-            [message]="runMessage()"
-            continueLabel="Continue"
-            (stop)="workflow.stop()"
-            (retry)="retry()"
-            (startOver)="retry()"
-            (continueRun)="continueDone()"
-            (resumeRequested)="retry()"
+          <div
+            data-testid="guidance-state-chip"
+            [attr.data-state]="workflow.state()"
           >
-            @if (workflow.state() === 'starting') {
-              <button
-                type="button"
-                class="btn btn-sm min-h-8 mt-3"
-                (click)="workflow.stop()"
-              >
-                Stop
-              </button>
-            }
-            @if (
-              workflow.state() === 'idle' &&
-              !lookupPending() &&
-              !handoff.inFlight() &&
-              !handoff.pending()
-            ) {
-              <button
-                type="button"
-                class="btn btn-primary min-h-8 mt-3"
-                data-testid="guidance-start"
-                (click)="start()"
-              >
-                Start guidance
-              </button>
-            }
-          </ptah-run-panel>
-        </div>
-        @if (workflow.rejection()?.reason === 'blocked') {
-          <section
-            class="flex flex-col gap-3 rounded-[14px] border border-state-err/70 p-4 text-sm sm:flex-row sm:items-center"
-            role="status"
-            data-testid="guidance-owner-conflict"
-          >
-            <p class="min-w-0 flex-1 text-state-need">
-              <strong>Another run is active.</strong> Open the active run before
-              starting another.
-            </p>
-            <div class="flex flex-wrap gap-2">
-              <button
-                type="button"
-                class="btn btn-sm min-h-9"
-                (click)="openOwner()"
-              >
-                Open it
-              </button>
-              <button
-                type="button"
-                class="btn btn-sm min-h-9"
-                (click)="refresh()"
-              >
-                Check again
-              </button>
-            </div>
-          </section>
-        }
-        @if (detectedStack(); as stack) {
-          <section
-            class="rounded-[22px] border border-base-300 p-5"
-            data-glass-surface="content"
-            data-testid="guidance-detected-stack"
-          >
-            <h2 class="font-semibold">Detected stack</h2>
-            <p class="text-sm">{{ stack.projectType }}</p>
-            @if (stack.languages.length) {
-              <p class="text-sm">Languages: {{ stack.languages.join(', ') }}</p>
-            }
-            @if (stack.frameworks.length) {
-              <p class="text-sm">
-                Frameworks: {{ stack.frameworks.join(', ') }}
-              </p>
-            }
-            @if (stack.buildTools.length) {
-              <p class="text-sm">
-                Build tools: {{ stack.buildTools.join(', ') }}
-              </p>
-            }
-            @if (stack.testingFrameworks.length) {
-              <p class="text-sm">
-                Testing: {{ stack.testingFrameworks.join(', ') }}
-              </p>
-            }
-          </section>
-        }
-        @if (sections(); as summary) {
-          <section
-            class="rounded-[22px] border border-base-300 p-5"
-            data-glass-surface="content"
-            data-testid="guidance-summary-card"
-          >
-            <h2 class="font-semibold">Generated guidance</h2>
-            <ul class="mt-3 space-y-2">
-              @for (section of summary.sections; track section.name) {
-                <li
-                  class="flex justify-between gap-3 rounded-[10px] border border-base-300 p-3 text-sm"
-                  data-testid="guidance-summary-row"
+            <ptah-run-panel
+              [state]="panelState()"
+              [viewState]="workflow.state()"
+              [title]="runTitle()"
+              [message]="runMessage()"
+              continueLabel="Continue"
+              (stop)="workflow.stop()"
+              (retry)="retry()"
+              (startOver)="retry()"
+              (continueRun)="continueDone()"
+              (resumeRequested)="retry()"
+            >
+              @if (workflow.state() === 'starting') {
+                <button
+                  ptahButton
+                  type="button"
+                  class="mt-3"
+                  (click)="workflow.stop()"
                 >
-                  <span>{{ section.name }}</span
-                  ><span>{{ section.wordCount }} words</span>
-                </li>
+                  Stop
+                </button>
               }
-            </ul>
-            <p class="mt-3 text-sm">
-              {{ generatedCount() }} of 4 sections generated
+              @if (
+                workflow.state() === 'idle' &&
+                !lookupPending() &&
+                !handoff.inFlight() &&
+                !handoff.pending()
+              ) {
+                <button
+                  ptahButton
+                  variant="primary"
+                  type="button"
+                  class="mt-3"
+                  data-testid="guidance-start"
+                  (click)="start()"
+                >
+                  Start guidance
+                </button>
+              }
+            </ptah-run-panel>
+          </div>
+          @if (workflow.rejection()?.reason === 'blocked') {
+            <section
+              class="flex flex-col gap-3 rounded-[14px] border border-state-err/70 p-4 text-sm sm:flex-row sm:items-center"
+              role="status"
+              data-testid="guidance-owner-conflict"
+            >
+              <p class="min-w-0 flex-1 text-state-need">
+                <strong>Another run is active.</strong> Open the active run
+                before starting another.
+              </p>
+              <div class="flex flex-wrap gap-2">
+                <button ptahButton type="button" (click)="openOwner()">
+                  Open it
+                </button>
+                <button ptahButton type="button" (click)="refresh()">
+                  Check again
+                </button>
+              </div>
+            </section>
+          }
+          @if (detectedStack(); as stack) {
+            <section
+              class="rounded-[22px] border border-base-300 p-5"
+              data-glass-surface="content"
+              data-testid="guidance-detected-stack"
+            >
+              <h2 class="font-semibold">Detected stack</h2>
+              <p class="text-sm">{{ stack.projectType }}</p>
+              @if (stack.languages.length) {
+                <p class="text-sm">
+                  Languages: {{ stack.languages.join(', ') }}
+                </p>
+              }
+              @if (stack.frameworks.length) {
+                <p class="text-sm">
+                  Frameworks: {{ stack.frameworks.join(', ') }}
+                </p>
+              }
+              @if (stack.buildTools.length) {
+                <p class="text-sm">
+                  Build tools: {{ stack.buildTools.join(', ') }}
+                </p>
+              }
+              @if (stack.testingFrameworks.length) {
+                <p class="text-sm">
+                  Testing: {{ stack.testingFrameworks.join(', ') }}
+                </p>
+              }
+            </section>
+          }
+          @if (sections(); as summary) {
+            <section
+              class="rounded-[22px] border border-base-300 p-5"
+              data-glass-surface="content"
+              data-testid="guidance-summary-card"
+            >
+              <h2 class="font-semibold">Generated guidance</h2>
+              <ul class="mt-3 space-y-2">
+                @for (section of summary.sections; track section.name) {
+                  <li
+                    class="flex justify-between gap-3 rounded-[10px] border border-base-300 p-3 text-sm"
+                    data-testid="guidance-summary-row"
+                  >
+                    <span>{{ section.name }}</span
+                    ><span>{{ section.wordCount }} words</span>
+                  </li>
+                }
+              </ul>
+              <p class="mt-3 text-sm">
+                {{ generatedCount() }} of 4 sections generated
+              </p>
+            </section>
+          }
+          @if (
+            guidance.run()?.committedState === 'unchanged' &&
+            workflow.state() === 'completed'
+          ) {
+            <p role="status" data-testid="guidance-unchanged">
+              Saved guidance was already current; nothing needed changing.
             </p>
-          </section>
-        }
-        @if (
-          guidance.run()?.committedState === 'unchanged' &&
-          workflow.state() === 'completed'
-        ) {
-          <p role="status" data-testid="guidance-unchanged">
-            Saved guidance was already current; nothing needed changing.
-          </p>
-        }
-        <section
-          class="rounded-[22px] border border-base-300 p-5"
-          data-glass-surface="content"
-          data-testid="guidance-saved-card"
-        >
-          <ptah-guidance-result-panel
-            [result]="guidance.result()"
-            [runActive]="workflow.isBound()"
-            [showSkip]="true"
-            (enabledChanged)="setEnabled($event)"
-            (cacheRequested)="refreshSaved()"
-            (contentRequested)="loadContent()"
-            (downloadRequested)="download()"
-            (regenerateRequested)="retry()"
-            (skipRequested)="skip()"
-          />
-        </section>
-        @if (guidance.content(); as content) {
+          }
           <section
             class="rounded-[22px] border border-base-300 p-5"
-            data-testid="guidance-content"
+            data-glass-surface="content"
+            data-testid="guidance-saved-card"
           >
-            <h2 class="font-semibold">Saved guidance content</h2>
-            <pre class="whitespace-pre-wrap break-words text-sm">{{
-              content
-            }}</pre>
+            <ptah-guidance-result-panel
+              [result]="guidance.result()"
+              [runActive]="workflow.isBound()"
+              [showSkip]="true"
+              (enabledChanged)="setEnabled($event)"
+              (cacheRequested)="refreshSaved()"
+              (contentRequested)="loadContent()"
+              (downloadRequested)="download()"
+              (regenerateRequested)="retry()"
+              (skipRequested)="skip()"
+            />
           </section>
-        }
-        @if (guidance.actionFailed()) {
-          <p role="alert">
-            The guidance action could not be completed. Try again.
-          </p>
-        }
-        @if (!standalone()) {
-          <button
-            type="button"
-            class="btn btn-ghost min-h-9 mt-3"
-            data-testid="guidance-skip"
-            (click)="skip()"
-          >
-            Skip to Done
-          </button>
-        }
+          @if (guidance.content(); as content) {
+            <section
+              class="rounded-[22px] border border-base-300 p-5"
+              data-testid="guidance-content"
+            >
+              <h2 class="font-semibold">Saved guidance content</h2>
+              <pre class="whitespace-pre-wrap break-words text-sm">{{
+                content
+              }}</pre>
+            </section>
+          }
+          @if (guidance.actionFailed()) {
+            <p role="alert">
+              The guidance action could not be completed. Try again.
+            </p>
+          }
+          @if (!standalone()) {
+            <button
+              ptahButton
+              variant="ghost"
+              type="button"
+              class="mt-3"
+              data-testid="guidance-skip"
+              (click)="skip()"
+            >
+              Skip to Done
+            </button>
+          }
         </ptah-live-run-layout>
       }
     </section>

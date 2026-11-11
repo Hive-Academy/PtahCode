@@ -12,6 +12,7 @@ import {
   type ProposalSectionItem,
 } from './proposal-section.component';
 import type { ChangeTag } from './proposal-flow.store';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 const FIELDS = [
   ['name', 'Name'],
@@ -25,7 +26,11 @@ const FIELDS = [
 @Component({
   selector: 'ptah-proposal-panel',
   standalone: true,
-  imports: [ProposalSectionComponent, BuilderStackProfileSectionComponent],
+  imports: [
+    ProposalSectionComponent,
+    BuilderStackProfileSectionComponent,
+    PtahButtonDirective,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<div class="space-y-3" data-testid="proposal-panel">
     <section
@@ -34,12 +39,31 @@ const FIELDS = [
       aria-labelledby="proposal-config-title"
     >
       <div class="flex flex-wrap items-center gap-2">
-          <h2 id="proposal-config-title" class="mr-auto text-base font-semibold">
-            Configuration proposal
-          </h2>
-          <span class="badge badge-outline badge-sm text-base-content">Revision {{ ordinal() }}</span>
-        <span class="inline-flex items-center gap-1 rounded-md border border-base-300 bg-base-200 px-2 py-1 text-xs font-medium text-base-content" data-testid="config-completeness">
-          <svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="4" width="12" height="18" rx="2"/><path d="M8 7H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h9M12 4.5h4M12 14l2 2 4-4"/></svg>
+        <h2 id="proposal-config-title" class="mr-auto text-base font-semibold">
+          Configuration proposal
+        </h2>
+        <span class="badge badge-outline badge-sm text-base-content"
+          >Revision {{ ordinal() }}</span
+        >
+        <span
+          class="inline-flex items-center gap-1 rounded-md border border-base-300 bg-base-200 px-2 py-1 text-xs font-medium text-base-content"
+          data-testid="config-completeness"
+        >
+          <svg
+            class="size-4 shrink-0"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <rect x="8" y="4" width="12" height="18" rx="2" />
+            <path
+              d="M8 7H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h9M12 4.5h4M12 14l2 2 4-4"
+            />
+          </svg>
           {{ complete() ? 'Config complete' : 'Config incomplete' }}
         </span>
       </div>
@@ -79,8 +103,10 @@ const FIELDS = [
             Generated document
           </h2>
           <button
+            ptahButton
+            variant="ghost"
+            size="xs"
             type="button"
-            class="btn btn-ghost btn-xs"
             (click)="copyDocument.emit(content)"
           >
             Copy
