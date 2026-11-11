@@ -4,6 +4,7 @@ import {
   type SqliteConnectionService,
 } from '@ptah-extension/persistence-sqlite';
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
+import { TASK_SPECS_TOKENS, type TaskIndexService, type TaskStatusOverlay } from '@ptah-extension/task-specs';
 import { TaskEndHookSettingsReader } from '../config/task-end-hook-config';
 import { TaskCloseOutService } from '../close-out/task-close-out.service';
 import { TaskPrReconcilerService } from '../close-out/task-pr-reconciler.service';
@@ -49,6 +50,40 @@ export function registerTaskEndHook(container: DependencyContainer): void {
           c.resolve<Logger>(TOKENS.LOGGER),
         ),
     ),
+  });
+  container.register<TaskStatusOverlay>(TASK_SPECS_TOKENS.TASK_STATUS_OVERLAY, {
+    useFactory: (c) => {
+      const store = c.resolve<SqliteTaskEndStore>(TASK_END_TOKENS.STORE);
+      const resolving = new Set<string>();
+      return {
+        mergedTaskIds: (root) => {
+          const detector = c.resolve<TaskEndTransitionDetector>(TASK_END_TOKENS.DETECTOR);
+          const repoId = detector.cachedRepoId(root);
+          if (repoId) return store.mergedTaskIds(repoId);
+          // A root the detector has not seen (for example an explicit
+          // worktreePath): resolve its identity once, then tell the index so
+          // readers recompute with the overlay.
+          if (!resolving.has(root)) {
+            resolving.add(root);
+            void detector
+              .resolveRepoId(root)
+              .then((id) => {
+                if (id) {
+                  c.resolve<TaskIndexService>(TASK_SPECS_TOKENS.TASK_INDEX_SERVICE).notifyStatusOverlayChanged(root);
+                }
+              })
+              .catch((error: unknown) => {
+                c.resolve<Logger>(TOKENS.LOGGER).warn(
+                  '[task-end-hook] overlay identity probe failed; the next read retries',
+                  error instanceof Error ? error : new Error(String(error)),
+                );
+              })
+              .finally(() => resolving.delete(root));
+          }
+          return new Set<string>();
+        },
+      };
+    },
   });
   container.registerSingleton(
     TASK_END_TOKENS.SETTINGS_READER,

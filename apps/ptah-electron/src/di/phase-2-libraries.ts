@@ -623,11 +623,6 @@ export function registerPhase2Libraries(
   // Register the skill trigger and telemetry seam for library RPC handlers.
   registerSkillSynthesisServices(container, logger);
   registerTaskSpecsServices(container, logger);
-  // Warm the index at activation (TASK_2026_179 step 11) so `.ptah/specs/
-  // README.md` lands even for a user who never opens the Tasks board. Electron
-  // restores its workspace AFTER DI, so the helper also re-attempts on
-  // `onDidChangeWorkspaceFolders`. Non-blocking and failure-swallowing.
-  startTaskSpecsIndex(container, logger);
   // Task-end hook (TASK_2026_886): binds the seven host ports, then the
   // library. Only with the SQLite block's connection: the run store and its
   // journal live there. Bound before phase 3 registers the API builder, whose
@@ -636,6 +631,9 @@ export function registerPhase2Libraries(
   if (container.isRegistered(PERSISTENCE_TOKENS.SQLITE_CONNECTION, true)) {
     registerTaskEndHookComposition(container, logger);
   }
+  // Resolve the index after the task-end hook has bound its status overlay.
+  // The helper also retries when Electron restores workspace folders.
+  startTaskSpecsIndex(container, logger);
   // Session organization (TASK_2026_580). Binds nothing when the SQLite block
   // above was skipped, and `start` only subscribes, never aborting activation.
   // Runs after `registerSdkServices` (the callback registries it subscribes

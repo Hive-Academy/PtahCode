@@ -11,6 +11,7 @@
  * `TASK_FOLDER_VISIBILITY_TOKEN` in `../task-folder-visibility.port.ts`.
  */
 export const TASK_SPECS_TOKENS = {
+  TASK_STATUS_OVERLAY: Symbol.for('TaskSpecsStatusOverlay'),
   /** TaskScannerService — folder scan → included tasks + typed exclusions. */
   TASK_SCANNER: Symbol.for('TaskSpecsScanner'),
   /** TaskWriterService — create + updateStatus (byte-preserving). */

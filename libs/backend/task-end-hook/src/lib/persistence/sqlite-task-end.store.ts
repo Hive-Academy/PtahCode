@@ -213,6 +213,12 @@ export class SqliteTaskEndStore implements ITaskEndStore, ITaskCloseOutStore {
     return parsed.success ? this.getCloseOut(parsed.data.runId) : null;
   }
 
+  mergedTaskIds(repoId: string): ReadonlySet<string> {
+    const rows = this.db.prepare(`SELECT task_id AS taskId FROM task_close_out_runs WHERE repo_id = ?`)
+      .all(repoId) as Array<{ taskId: string }>;
+    return new Set(rows.map((row) => row.taskId));
+  }
+
   startCloseOutStep(runId: string, step: CloseOutStep): void {
     const result = this.db.prepare(`UPDATE task_close_out_steps
       SET state = 'running', reason = NULL, attempts = attempts + 1,

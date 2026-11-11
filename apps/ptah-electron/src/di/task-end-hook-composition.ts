@@ -456,7 +456,10 @@ function createCloseOutPrStatusPort(
           container, TOKENS.GIT_INFO_SERVICE, 'git info service',
         );
         const result = await git.readPrStatus(mainRoot, branch);
-        if (result.status !== 'ok' || result.pr.headRefName !== branch || !result.pr.url) {
+        if (result.status !== 'ok') {
+          return { kind: 'unknown', lookupFailed: result.reason !== 'no-pr' && result.reason !== 'not-github' };
+        }
+        if (result.pr.headRefName !== branch || !result.pr.url) {
           return { kind: 'unknown' };
         }
         const { number, url, state } = result.pr;
@@ -467,8 +470,7 @@ function createCloseOutPrStatusPort(
         if (state === 'CLOSED') return { kind: 'closed-unmerged', number, url };
         return { kind: 'unknown' };
       } catch (error: unknown) {
-        logger.error('[Electron DI] close-out PR status read failed', error instanceof Error ? error : new Error(String(error)));
-        return { kind: 'unknown' };
+        return { kind: 'unknown', lookupFailed: true };
       }
     },
   };

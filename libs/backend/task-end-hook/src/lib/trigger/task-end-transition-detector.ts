@@ -30,7 +30,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { inject, injectable } from 'tsyringe';
-import { z } from 'zod';
 import {
   createEvent,
   normalizeWorkspaceRoot,
@@ -40,8 +39,6 @@ import {
   type IWorkspaceProvider,
 } from '@ptah-extension/platform-core';
 import {
-  CARRIER_FILE,
-  SPEC_ROOT_SEGMENTS,
   type TaskEndTriggerSource,
   type TaskSpecSummary,
 } from '@ptah-extension/shared';
@@ -167,29 +164,6 @@ export class TaskEndTransitionDetector {
   /** The worker subscribes and calls `wake()` (plan Component 4). */
   readonly onDidChangeRuns: IEvent<TaskEndRunsChanged>;
 
-  /** Patch exactly one carrier status line, preserving all other bytes. */
-  async setCarrierStatus(root: string, taskId: string, status: 'in_review' | 'done'): Promise<boolean> {
-    const id = z.string().regex(/^TASK_\d{4}_\d{3,4}(?:_[a-zA-Z0-9]+)?$/).parse(taskId);
-    const target = path.join(root, ...SPEC_ROOT_SEGMENTS, id, CARRIER_FILE);
-    const specsRoot = await fs.realpath(path.join(root, '.ptah', 'specs'));
-    const realTarget = await fs.realpath(target);
-    const relative = path.relative(specsRoot, realTarget);
-    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
-      throw new Error('task carrier escapes specs root');
-    }
-    const raw = await fs.readFile(target, 'utf8');
-    const match = /^(?:\uFEFF)?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(raw);
-    if (!match) throw new Error('task carrier has no frontmatter');
-    const statuses = [...match[1].matchAll(/^status:[ \t]*\S+[ \t]*/gm)];
-    if (statuses.length !== 1) throw new Error('task carrier needs exactly one status line');
-    const previous = statuses[0][0];
-    if (previous === `status: ${status}`) return false;
-    const start = match.index + match[0].indexOf(match[1]) + (statuses[0].index ?? 0);
-    const next = raw.slice(0, start) + `status: ${status}` + raw.slice(start + previous.length);
-    await fs.writeFile(target, next, 'utf8');
-    return true;
-  }
-
   constructor(
     @inject(TASK_END_TOKENS.STORE) private readonly store: ITaskEndStore,
     @inject(TASK_SPECS_TOKENS.TASK_INDEX_SERVICE)
@@ -263,6 +237,12 @@ export class TaskEndTransitionDetector {
    */
   cachedRepoId(root: string): string | null {
     return this.identities.cachedRepoId(root);
+  }
+
+  /** Resolve (and cache) the repository id of `root`; null when git cannot tell. */
+  async resolveRepoId(root: string): Promise<string | null> {
+    const result = await this.identities.resolve(root);
+    return result.kind === 'ok' ? result.identity.repoId : null;
   }
 
   /**

@@ -4,6 +4,8 @@ import { TaskEndTransitionDetector } from '../trigger/task-end-transition-detect
 import { TaskCloseOutService } from './task-close-out.service';
 import { TaskPrReconcilerService, type TaskPrReconcileTask } from './task-pr-reconciler.service';
 import { Logger } from '@ptah-extension/vscode-core';
+import type { ITaskCloseOutStore } from '../persistence/task-end-store.interface';
+import type { TaskIndexService } from '@ptah-extension/task-specs';
 
 const task: TaskPrReconcileTask = {
   repoId: 'repo', taskId: 'TASK_2026_898_c1a5', mainRoot: '/main',
@@ -14,74 +16,69 @@ const task: TaskPrReconcileTask = {
 function setup(result: TaskCloseOutPrStatus) {
   const prs: CloseOutPrStatusPort = { prStatus: jest.fn().mockResolvedValue(result) };
   const detector = Object.create(TaskEndTransitionDetector.prototype) as TaskEndTransitionDetector;
-  detector.setCarrierStatus = jest.fn().mockResolvedValue(true);
   const closeOut = Object.create(TaskCloseOutService.prototype) as TaskCloseOutService;
   closeOut.run = jest.fn().mockResolvedValue({ runId: 'run' });
   const logger = Object.create(Logger.prototype) as Logger;
   logger.error = jest.fn();
-  const reconciler = new TaskPrReconcilerService(prs, detector, closeOut, logger);
-  return { reconciler, detector, closeOut, logger };
+  const store = { getCloseOutForTask: jest.fn().mockReturnValue(null),
+    getOrCreateCloseOut: jest.fn() } as unknown as ITaskCloseOutStore;
+  const reconciler = new TaskPrReconcilerService(prs, detector, closeOut, logger, store);
+  return { reconciler, closeOut, store, prs };
 }
 
 describe('TaskPrReconcilerService', () => {
-  it('confirms an open PR before entering review', async () => {
-    const { reconciler, detector, closeOut } = setup({ kind: 'open', number: 7, url: 'https://github.com/a/b/pull/7' });
-    expect(await reconciler.reconcile(task)).toEqual({ kind: 'open', number: 7 });
-    expect(detector.setCarrierStatus).toHaveBeenCalledWith('/main', task.taskId, 'in_review');
+  it.each([
+    { kind: 'open', number: 7, url: 'https://github.com/a/b/pull/7' },
+    { kind: 'closed-unmerged', number: 7, url: 'https://github.com/a/b/pull/7' },
+    { kind: 'unknown' },
+  ] as TaskCloseOutPrStatus[])('never persists or writes a carrier for $kind', async (state) => {
+    const { reconciler, closeOut, store } = setup(state);
+    await reconciler.reconcile(task);
+    expect(store.getOrCreateCloseOut).not.toHaveBeenCalled();
     expect(closeOut.run).not.toHaveBeenCalled();
+    expect('setCarrierStatus' in TaskEndTransitionDetector.prototype).toBe(false);
     reconciler.dispose();
   });
 
-  it('keeps watching after an in_review write fails and retries on the next poll', async () => {
+  it('persists a merged identity before detached close-out', async () => {
+    const { reconciler, closeOut, store } = setup({
+      kind: 'merged', number: 7, url: 'https://github.com/a/b/pull/7',
+    });
+    await reconciler.reconcile(task);
+    expect(store.getOrCreateCloseOut).toHaveBeenCalledWith(expect.objectContaining({
+      repoId: 'repo', taskId: task.taskId, prNumber: 7,
+    }));
+    expect(closeOut.run).toHaveBeenCalledWith(expect.objectContaining({ merged: true }));
+    expect('setCarrierStatus' in TaskEndTransitionDetector.prototype).toBe(false);
+    reconciler.dispose();
+  });
+
+  it('notifies the index only when the merged marker first appears', async () => {
+    const { closeOut, store, prs } = setup({
+      kind: 'merged', number: 7, url: 'https://github.com/a/b/pull/7',
+    });
+    const detector = Object.create(TaskEndTransitionDetector.prototype) as TaskEndTransitionDetector;
+    const logger = Object.create(Logger.prototype) as Logger;
+    logger.error = jest.fn();
+    const index = { notifyStatusOverlayChanged: jest.fn() } as unknown as TaskIndexService;
+    jest.mocked(store.getCloseOutForTask).mockReturnValueOnce(null).mockReturnValue({} as ReturnType<ITaskCloseOutStore['getCloseOutForTask']>);
+    const reconciler = new TaskPrReconcilerService(prs, detector, closeOut, logger, store, index);
+    await reconciler.reconcile(task);
+    await reconciler.reconcile(task);
+    expect(index.notifyStatusOverlayChanged).toHaveBeenCalledTimes(1);
+    reconciler.dispose();
+  });
+
+  it('retries unknown lookups for in_progress', async () => {
     jest.useFakeTimers();
     try {
-      const { reconciler, detector, closeOut, logger } = setup({ kind: 'open', number: 7, url: 'https://github.com/a/b/pull/7' });
-      const failure = new Error('write failed');
-      jest.mocked(detector.setCarrierStatus).mockRejectedValueOnce(failure);
-      await expect(reconciler.reconcile(task)).resolves.toEqual({ kind: 'open', number: 7 });
-      expect(logger.error).toHaveBeenCalledWith('[task-pr-reconciler] carrier update failed', failure);
-      await jest.advanceTimersByTimeAsync(10 * 60_000);
-      expect(detector.setCarrierStatus).toHaveBeenCalledTimes(2);
-      expect(detector.setCarrierStatus).toHaveBeenLastCalledWith('/main', task.taskId, 'in_review');
-      expect(closeOut.run).not.toHaveBeenCalled();
+      const { reconciler, prs } = setup({ kind: 'unknown' });
+      await reconciler.reconcile(task);
+      await jest.advanceTimersByTimeAsync(11 * 60_000);
+      expect(prs.prStatus).toHaveBeenCalledTimes(2);
       reconciler.dispose();
     } finally {
       jest.useRealTimers();
     }
   });
-
-  it('does nothing on unknown or closed-unmerged PR state', async () => {
-    for (const state of [{ kind: 'unknown' }, { kind: 'closed-unmerged', number: 7, url: 'https://github.com/a/b/pull/7' }] as TaskCloseOutPrStatus[]) {
-      const { reconciler, detector, closeOut } = setup(state);
-      await reconciler.reconcile(task);
-      expect(detector.setCarrierStatus).not.toHaveBeenCalled();
-      expect(closeOut.run).not.toHaveBeenCalled();
-      reconciler.dispose();
-    }
-  });
-
-  it('marks confirmed merge done and starts background close-out without cleanup opt-in', async () => {
-    const { reconciler, detector, closeOut } = setup({ kind: 'merged', number: 7, url: 'https://github.com/a/b/pull/7' });
-    expect(await reconciler.reconcile({ ...task, status: 'in_review' })).toEqual({ kind: 'merged', number: 7 });
-    expect(detector.setCarrierStatus).toHaveBeenCalledWith('/main', task.taskId, 'done');
-    expect(closeOut.run).toHaveBeenCalledWith(expect.objectContaining({ merged: true, autoRemoveMergedWorktreeAndBranch: false }));
-    reconciler.dispose();
-  });
-
-  it('leaves cancelled tasks untouched after merge', async () => {
-    const { reconciler, detector, closeOut } = setup({ kind: 'merged', number: 7, url: 'https://github.com/a/b/pull/7' });
-    await reconciler.reconcile({ ...task, status: 'cancelled' });
-    expect(detector.setCarrierStatus).not.toHaveBeenCalled();
-    expect(closeOut.run).not.toHaveBeenCalled();
-    reconciler.dispose();
-  });
-
-  it('starts close-out even when the carrier write fails', async () => {
-    const { reconciler, detector, closeOut } = setup({ kind: 'merged', number: 7, url: 'https://github.com/a/b/pull/7' });
-    jest.mocked(detector.setCarrierStatus).mockRejectedValueOnce(new Error('write failed'));
-    await reconciler.reconcile(task);
-    expect(closeOut.run).toHaveBeenCalledTimes(1);
-    reconciler.dispose();
-  });
-
 });

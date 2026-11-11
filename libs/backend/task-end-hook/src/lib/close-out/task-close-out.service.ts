@@ -1,4 +1,5 @@
 import { inject, injectable } from 'tsyringe';
+import { TASK_SPECS_TOKENS, type TaskIndexService } from '@ptah-extension/task-specs';
 import { z } from 'zod';
 import { resolve } from 'node:path';
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
@@ -48,6 +49,8 @@ export class TaskCloseOutService {
     @inject(TASK_END_TOKENS.GIT_CLEANUP_PORT)
     private readonly cleanup: GitCleanupPort,
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
+    @inject(TASK_SPECS_TOKENS.TASK_INDEX_SERVICE, { isOptional: true })
+    private readonly index?: Pick<TaskIndexService, 'notifyStatusOverlayChanged'>,
   ) {}
 
   async run(input: TaskCloseOutRequest): Promise<CloseOutRunRecord> {
@@ -63,6 +66,9 @@ export class TaskCloseOutService {
     const request = requestSchema.parse(input);
     const identity: CloseOutIdentity = request;
     let run: CloseOutRunRecord;
+    const alreadyRecorded = Boolean(
+      this.store.getCloseOutForTask(request.repoId, request.taskId),
+    );
     try {
       run = this.store.getOrCreateCloseOut(identity);
     } catch (error: unknown) {
@@ -74,6 +80,9 @@ export class TaskCloseOutService {
         }
       }
       throw error;
+    }
+    if (!alreadyRecorded) {
+      this.index?.notifyStatusOverlayChanged(request.mainRoot, request.taskId);
     }
     const existing = this.active.get(run.runId);
     if (existing) return run;

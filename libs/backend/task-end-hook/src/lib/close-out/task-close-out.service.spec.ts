@@ -19,6 +19,7 @@ const logger = (): Logger => {
 
 class Store implements ITaskCloseOutStore {
   private record: CloseOutRunRecord | null = null;
+  mergedTaskIds(): ReadonlySet<string> { return new Set(this.record ? [this.record.taskId] : []); }
   getOrCreateCloseOut(identity: CloseOutIdentity): CloseOutRunRecord {
     this.record ??= { ...identity, runId: 'run-1', steps:
       (['memory', 'learning', 'worktree', 'branch'] as const).map((step) =>
@@ -199,4 +200,17 @@ describe('TaskCloseOutService', () => {
     expect(result.steps.find(step => step.step === 'memory')?.state).toBe('failed');
   });
 
+  it('notifies the index once when a close-out identity is first stored', async () => {
+    const store = new Store();
+    const index = { notifyStatusOverlayChanged: jest.fn() };
+    const service = new TaskCloseOutService(store, { curateEndedSession: jest.fn() },
+      { harvestTask: jest.fn().mockResolvedValue({ outcome: 'harvested' }) },
+      { inspectTaskWorktree: jest.fn(), removeWorktree: jest.fn(), deleteBranch: jest.fn() },
+      logger(), index);
+    service.start(input);
+    service.start(input);
+    expect(index.notifyStatusOverlayChanged).toHaveBeenCalledTimes(1);
+    expect(index.notifyStatusOverlayChanged).toHaveBeenCalledWith('/repo', 'TASK_2026_001');
+    await service.run(input);
+  });
 });

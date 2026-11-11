@@ -37,6 +37,8 @@ import {
   SPECS_README_FILE,
   renderSpecsReadme,
   roundJudgeFile,
+  filterTasks,
+  mergeStatusTypeFacets,
   type DocFile,
   type ExcludedTaskFolder,
   type TaskSpecDetail,
@@ -49,6 +51,7 @@ import { parseTaskFile } from './task-frontmatter';
 import { TaskScannerService } from './task-scanner.service';
 import { logRebuildTiming } from './rebuild-timing';
 import { TASK_SPECS_TOKENS } from './di/tokens';
+import { effectiveTaskStatus, type TaskStatusOverlay } from './task-status-overlay';
 import type { ITaskIndexStore } from './task-index.store';
 import type { ITaskIndexNotifier } from './task-index.port';
 
@@ -154,6 +157,8 @@ export class TaskIndexService implements ITaskIndexNotifier {
     private readonly store: ITaskIndexStore,
     @inject(TASK_INDEX_CLOCK, { isOptional: true })
     now?: () => number,
+    @inject(TASK_SPECS_TOKENS.TASK_STATUS_OVERLAY, { isOptional: true })
+    private readonly statusOverlay?: TaskStatusOverlay,
   ) {
     const [event, fire] = createEvent<TaskIndexChangeEvent>();
     // Each listener is guarded: a listener that throws must not stop the
@@ -181,6 +186,11 @@ export class TaskIndexService implements ITaskIndexNotifier {
   /** Subscribe to derived-index changes (the RPC handler broadcasts these). */
   get onDidChangeIndex(): IEvent<TaskIndexChangeEvent> {
     return this._onDidChangeIndex;
+  }
+
+  /** Signal a host-side status change without rebuilding the carrier index. */
+  notifyStatusOverlayChanged(workspaceRoot: string, taskId?: string): void {
+    this.fireChange({ workspaceRoot: normalizeWorkspaceRoot(workspaceRoot), folderNames: taskId ? [taskId] : [], reason: 'write' });
   }
 
   /**
@@ -380,7 +390,14 @@ export class TaskIndexService implements ITaskIndexNotifier {
     await this.ensureStarted(root);
     let tasks: TaskSpecSummary[] = [];
     try {
-      tasks = this.store.listByWorkspace(root, filters);
+      const stored = this.store.listByWorkspace(root);
+      const merged = this.statusOverlay?.mergedTaskIds(root) ?? new Set<string>();
+      const projected = stored.map((row) => ({
+        ...row, carrierStatus: row.status,
+        status: effectiveTaskStatus(row.status, merged.has(row.id)),
+      }));
+      const spec = filters ? mergeStatusTypeFacets(filters.filter, filters.status, filters.type) : undefined;
+      tasks = spec === null ? [] : spec ? filterTasks(projected, spec) : projected;
     } catch (error: unknown) {
       this.logger.error(
         '[task-specs] index list failed',
@@ -423,7 +440,13 @@ export class TaskIndexService implements ITaskIndexNotifier {
       }
       const entries = listing.entries.slice().sort((a, b) => a.name.localeCompare(b.name));
       const artifacts = entries.map((entry) => entry.name);
-      return { ...parsed.task, body: parsed.body, artifacts, entries };
+      return {
+        ...parsed.task,
+        carrierStatus: parsed.task.status,
+        status: effectiveTaskStatus(parsed.task.status,
+          this.statusOverlay?.mergedTaskIds(root).has(parsed.task.id) ?? false),
+        body: parsed.body, artifacts, entries,
+      };
     } catch (error: unknown) {
       this.logger.warn('[task-specs] getDetail failed', {
         folderName,
