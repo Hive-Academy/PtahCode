@@ -256,24 +256,25 @@ export class HarnessChatProposalStore implements MessageHandler {
     const sessionId = sessionParsed.data;
 
     const previous = this._proposals().get(sessionId);
+    const revisionRecord = isPlainRecord(payload['revision'])
+      ? payload['revision']
+      : null;
+    const updatedAt =
+      typeof revisionRecord?.['updatedAt'] === 'string'
+        ? revisionRecord['updatedAt']
+        : new Date().toISOString();
+    if (previous && updatedAt < previous.updatedAt) return;
     const mergedUpdates = mergeParsedHarnessUpdates(
       previous?.configUpdates ?? {},
       updatesParsed.data,
     );
 
-    const revisionRecord = isPlainRecord(payload['revision'])
-      ? payload['revision']
-      : null;
     const rawComplete =
       typeof payload['isConfigComplete'] === 'boolean'
         ? payload['isConfigComplete']
         : typeof revisionRecord?.['isConfigComplete'] === 'boolean'
           ? revisionRecord['isConfigComplete']
           : (previous?.isConfigComplete ?? false);
-    const updatedAt =
-      typeof revisionRecord?.['updatedAt'] === 'string'
-        ? revisionRecord['updatedAt']
-        : new Date().toISOString();
 
     this.upsertProposal(sessionId, {
       sessionId,

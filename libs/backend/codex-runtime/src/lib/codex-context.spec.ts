@@ -562,6 +562,39 @@ describe('RuntimeContext userInputAsync lifecycle', () => {
     expect(second.signal()?.aborted).toBe(true);
   });
 
+  it('preserves pending questions when a replacement turn is aborted before admission', async () => {
+    const h = createAsyncQuestionHarness();
+    h.feed('item/completed', { threadId: 'root', turnId: 'turn-1', completedAtMs: 2,
+      item: { type: 'agentMessage', id: 'q-abort', text: 'Pick one', delivery: 'async',
+        questions: [{ title: 'Choice?' }] } });
+    h.feed('turn/completed', { threadId: 'root',
+      turn: { id: 'turn-1', status: 'completed', items: [] } });
+    const controller = new AbortController();
+    controller.abort();
+    await expect(h.context.startTurn({ text: 'replacement', signal: controller.signal }))
+      .rejects.toThrow('Codex turn aborted');
+    expect(h.signal()?.aborted).toBe(false);
+    expect(h.request).not.toHaveBeenCalled();
+  });
+
+  it('starts a follow-up when the selected turn ends before an async answer can steer', async () => {
+    const h = createAsyncQuestionHarness();
+    h.feed('item/completed', { threadId: 'root', turnId: 'turn-1', completedAtMs: 2,
+      item: { type: 'agentMessage', id: 'q-late', text: 'Pick one', delivery: 'async',
+        questions: [{ title: 'Choice?' }] } });
+    let release: (() => void) | undefined;
+    Reflect.set(h.context, 'operation', new Promise<void>((resolve) => { release = resolve; }));
+    h.answer({ 'q-late:0': { answers: ['Yes'] } });
+    await Promise.resolve();
+    h.feed('turn/completed', { threadId: 'root',
+      turn: { id: 'turn-1', status: 'completed', items: [] } });
+    release?.();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(h.request).toHaveBeenCalledWith('turn/start', expect.objectContaining({
+      input: [expect.objectContaining({ type: 'text', text: expect.stringContaining('Choice?') })],
+    }));
+  });
+
   it('keeps a second pending userInputAsync question answerable after the first starts an answer-delivery turn, while a user turn cancels pending questions', async () => {
     const h = createAsyncQuestionHarness();
     h.feed('item/completed', {

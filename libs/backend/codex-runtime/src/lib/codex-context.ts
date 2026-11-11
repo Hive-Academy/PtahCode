@@ -786,9 +786,6 @@ class RuntimeContext implements CodexContext {
 
   private async start(input: CodexTurnInput): Promise<CodexTurnReceipt> {
     if (this.state !== 'idle') throw new Error('Codex turn is already active');
-    if (!input.preservePendingUserInput) {
-      this.cancelPendingUserInput();
-    }
     const level = this.settings.permissionLevel ?? this.profile.permissionLevel;
     const levelPolicy = this.levelPolicy;
     const params = codexRequestSchemas['turn/start'].params.parse({
@@ -825,6 +822,7 @@ class RuntimeContext implements CodexContext {
         this.translator.setThreadModel(this.identity.threadId, params.model);
       }
       const result = await this.process.request('turn/start', params);
+      if (!input.preservePendingUserInput) this.cancelPendingUserInput();
       const turnId = result.turn.id;
       if (params.model) this.translator.setTurnModel(this.identity.threadId, turnId, params.model);
       this.sentInitialInput = true;
@@ -885,7 +883,7 @@ class RuntimeContext implements CodexContext {
     text: string,
     turnId: string,
     kind: 'denial' | 'user-input' = 'denial',
-  ): Promise<void> {
+  ): Promise<boolean> {
     return this.serialize(async () => {
       if (
         this.state !== 'running' ||
@@ -893,7 +891,7 @@ class RuntimeContext implements CodexContext {
         this.terminalTurns.has(turnId)
       ) {
         this.warnDenialFeedback('turn-ended', kind);
-        return;
+        return false;
       }
       try {
         const steered = await this.process.request('turn/steer', {
@@ -905,6 +903,7 @@ class RuntimeContext implements CodexContext {
           this.warnDenialFeedback('failed', kind);
           if (kind === 'user-input') this.emitFollowUpRejected(turnId);
         }
+        return true;
       } catch (error) {
         // degradation-audit: reported - A failed steer is logged without exposing the user's text.
         this.warnDenialFeedback(
@@ -916,10 +915,12 @@ class RuntimeContext implements CodexContext {
             (error instanceof CodexRequestRejectedError ||
               error instanceof CodexUnsupportedMethodError))
           this.emitFollowUpRejected(turnId);
+        return true;
       }
     }).catch(() => {
       // degradation-audit: reported - A closed context cannot receive feedback; report the delivery failure.
       this.warnDenialFeedback('failed', kind);
+      return false;
     });
   }
 
@@ -1026,8 +1027,7 @@ class RuntimeContext implements CodexContext {
       activeTurnId !== undefined &&
       !this.terminalTurns.has(activeTurnId)
     ) {
-      await this.deliverDenialFeedback(answer.text, activeTurnId, 'user-input');
-      return;
+      if (await this.deliverDenialFeedback(answer.text, activeTurnId, 'user-input')) return;
     }
     if (this.isClosed()) {
       this.warnDenialFeedback('turn-ended', 'user-input');

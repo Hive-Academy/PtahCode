@@ -80,17 +80,25 @@ export interface ParsedHarnessConfigUpdates {
 }
 
 /** True when `configUpdates` proposes at least one harness section or name. */
+function hasSectionValue(value: unknown): boolean {
+  if (Array.isArray(value)) return value.length > 0;
+  if (value !== null && typeof value === 'object') {
+    return Object.values(value).some(hasSectionValue);
+  }
+  return value !== undefined && value !== null;
+}
+
 export function hasMeaningfulHarnessProposal(
   configUpdates: Partial<HarnessConfig>,
 ): boolean {
   return (
     Boolean(configUpdates.name?.trim()) ||
-    configUpdates.persona !== undefined ||
-    configUpdates.agents !== undefined ||
-    configUpdates.skills !== undefined ||
-    configUpdates.prompt !== undefined ||
-    configUpdates.mcp !== undefined ||
-    configUpdates.claudeMd !== undefined
+    hasSectionValue(configUpdates.persona) ||
+    hasSectionValue(configUpdates.agents) ||
+    hasSectionValue(configUpdates.skills) ||
+    hasSectionValue(configUpdates.prompt) ||
+    hasSectionValue(configUpdates.mcp) ||
+    hasSectionValue(configUpdates.claudeMd)
   );
 }
 
@@ -289,7 +297,13 @@ export function buildFullHarnessConfig(
 export function fingerprintHarnessConfig(
   configUpdates: Partial<HarnessConfig>,
 ): string {
-  return JSON.stringify(configUpdates);
+  return JSON.stringify(configUpdates, (_key, value: unknown) =>
+    value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? Object.fromEntries(
+          Object.entries(value).sort(([left], [right]) => left.localeCompare(right)),
+        )
+      : value,
+  );
 }
 
 /** Convert an unknown failure or RPC error message into safe user-facing copy. */

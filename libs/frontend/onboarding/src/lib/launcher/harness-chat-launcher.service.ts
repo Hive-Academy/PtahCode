@@ -209,6 +209,7 @@ export class HarnessChatLauncherService {
           workspacePath: params.workspacePath,
         },
       );
+      if (outcome.cancelled) return { tabId };
       if (!outcome.success) {
         throw new Error(
           outcome.error || 'Could not send the first message. Try again.',

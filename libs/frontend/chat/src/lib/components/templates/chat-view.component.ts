@@ -1553,8 +1553,9 @@ export class ChatViewComponent implements OnDestroy {
       const sessionId = this.resolvedSessionId();
       if (
         !sessionId ||
-        (workflow !== 'harness-new-project' && workflow !== 'harness-configure')
+        (workflow !== undefined && workflow !== 'harness-new-project' && workflow !== 'harness-configure')
       ) {
+        lastHydratedProposalKey = null;
         return;
       }
       const workspaceRoot = this.resolveTabWorkspaceRoot();

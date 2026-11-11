@@ -333,6 +333,35 @@ describe('HarnessChatProposalStore', () => {
     );
   });
 
+  it('rejects an older push after hydration has completed', async () => {
+    rpcCallMock.mockResolvedValueOnce(rpcOk<HarnessGetProposalResult>({
+      proposal: {
+        version: 1, sessionId: 'session-stale', workspaceRoot: '/ws',
+        configUpdates: { name: 'Current' }, isConfigComplete: true,
+        updatedAt: '2026-11-10T09:00:00.000Z',
+      },
+    }));
+    await store.hydrateForSession('session-stale');
+    await store.handleMessage({
+      type: MESSAGE_TYPES.HARNESS_CONFIG_PROPOSED,
+      payload: { sessionId: 'session-stale', configUpdates: { name: 'Old' },
+        isConfigComplete: false, revision: { updatedAt: '2026-11-10T08:00:00.000Z' } },
+    });
+    expect(store.proposalFor('session-stale')).toEqual(expect.objectContaining({
+      configUpdates: expect.objectContaining({ name: 'Current' }),
+      isConfigComplete: true,
+    }));
+  });
+
+  it('ignores empty sections and fingerprints equivalent property orders equally', async () => {
+    await store.handleMessage({ type: MESSAGE_TYPES.HARNESS_CONFIG_PROPOSED,
+      payload: { sessionId: 'empty', configUpdates: { agents: {} } } });
+    expect(store.proposalFor('empty')).toBeNull();
+    const { fingerprintHarnessConfig } = await import('./harness-chat-proposal.store');
+    expect(fingerprintHarnessConfig({ name: 'A', persona: { label: 'B', description: 'C' } }))
+      .toBe(fingerprintHarnessConfig({ persona: { description: 'C', label: 'B' }, name: 'A' }));
+  });
+
   it('replaces supplied prompt and CLAUDE.md section maps instead of merging their keys', async () => {
     await store.handleMessage({
       type: MESSAGE_TYPES.HARNESS_CONFIG_PROPOSED,

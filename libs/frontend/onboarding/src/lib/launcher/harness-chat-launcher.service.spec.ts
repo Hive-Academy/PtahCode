@@ -269,6 +269,17 @@ describe('HarnessChatLauncherService', () => {
       ]);
     });
 
+    it('treats a stopped first turn as cancellation without restoring the draft', async () => {
+      rpcCall.mockResolvedValueOnce(rpcSuccess({ success: true, seedPrompt: 'seed',
+        intake: VALID_INTAKE, plugins: { enabledBundled: [], missingExternal: [], availableSkillIds: [] } }));
+      chatStore.sendOrQueueMessage.mockResolvedValueOnce({ success: false, cancelled: true });
+      await expect(service.launchNewProject(VALID_INTAKE, makeSnapshot()))
+        .resolves.toEqual({ tabId: 'tab-42' });
+      expect(showError).not.toHaveBeenCalled();
+      expect(restore).not.toHaveBeenCalled();
+      expect(restoreAttachments).not.toHaveBeenCalled();
+    });
+
     it('shows the error and restores the draft when sendOrQueueMessage throws', async () => {
       rpcCall.mockResolvedValueOnce(
         rpcSuccess({
