@@ -21,6 +21,7 @@ import { EditorLauncherService } from '../services/editor-launcher.service';
 import { GitStatusService } from '../services/git-status.service';
 import { SourceControlService } from '../services/source-control.service';
 import { GitConfirmDialogComponent } from '../shared/git-confirm-dialog.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** Rows the banner lists before it summarises the rest. */
 export const CONFLICT_ROWS_SHOWN = 50;
@@ -158,7 +159,11 @@ let nextBannerId = 0;
 @Component({
   selector: 'ptah-conflict-banner',
   standalone: true,
-  imports: [GitConfirmDialogComponent, LucideAngularModule],
+  imports: [
+    PtahButtonDirective,
+    GitConfirmDialogComponent,
+    LucideAngularModule,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block flex-shrink-0' },
   template: `
@@ -203,7 +208,9 @@ let nextBannerId = 0;
                     @if (editorTarget(); as target) {
                       <button
                         type="button"
-                        class="btn btn-outline btn-xs flex-shrink-0"
+                        ptahButton
+                        size="xs"
+                        class="flex-shrink-0"
                         [disabled]="running() !== null"
                         [attr.aria-label]="openLabel(row, target)"
                         [title]="openLabel(row, target)"
@@ -258,7 +265,9 @@ let nextBannerId = 0;
           @if (canContinue()) {
             <button
               type="button"
-              class="btn btn-primary btn-xs"
+              ptahButton
+              variant="primary"
+              size="xs"
               data-testid="conflict-banner-continue"
               [disabled]="running() !== null"
               (click)="onContinue()"
@@ -277,7 +286,9 @@ let nextBannerId = 0;
           </button>
           <button
             type="button"
-            class="btn btn-error btn-xs err-solid-text"
+            ptahButton
+            variant="danger"
+            size="xs"
             data-testid="conflict-banner-abort"
             [disabled]="running() !== null"
             (click)="onAbortClick($event)"

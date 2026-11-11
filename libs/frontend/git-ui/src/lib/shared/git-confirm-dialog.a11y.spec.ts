@@ -423,7 +423,7 @@ describe('GitConfirmDialogComponent — secondary answer', () => {
     ]);
     const secondary = required(fixture, 'git-confirm-secondary');
     expect(secondary.textContent?.trim()).toBe('Reload');
-    expect(secondary.className).toBe('btn btn-sm');
+    expect(secondary.className).toBe('btn btn-secondary btn-sm');
     expect(document.activeElement).toBe(
       required(fixture, 'git-confirm-cancel'),
     );

@@ -49,6 +49,10 @@ import {
   type TaskCreateDraft,
 } from './task-create-dialog.component';
 import { TaskMaintenanceDialogComponent } from './task-maintenance-dialog.component';
+import {
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 
 /**
  * TasksViewComponent
@@ -66,6 +70,8 @@ import { TaskMaintenanceDialogComponent } from './task-maintenance-dialog.compon
   selector: 'ptah-tasks-view',
   standalone: true,
   imports: [
+    PtahButtonDirective,
+    PtahIconButtonDirective,
     LucideAngularModule,
     TaskBoardHeaderComponent,
     TaskBoardStatesComponent,
@@ -120,8 +126,8 @@ import { TaskMaintenanceDialogComponent } from './task-maintenance-dialog.compon
           <span class="min-w-0 flex-1">{{ message }}</span>
           <button
             type="button"
-            class="btn btn-ghost btn-sm btn-square"
-            aria-label="Dismiss"
+            ptahIconButton
+            label="Dismiss"
             (click)="store.clearActionMessage()"
           >
             <lucide-angular [img]="XIcon" class="h-4 w-4" aria-hidden="true" />
@@ -137,7 +143,8 @@ import { TaskMaintenanceDialogComponent } from './task-maintenance-dialog.compon
           <span class="min-w-0 flex-1 text-error">{{ error }}</span>
           <button
             type="button"
-            class="btn btn-ghost btn-sm"
+            ptahButton
+            variant="ghost"
             data-testid="tasks-error-retry"
             [disabled]="store.loading()"
             (click)="store.loadBoard()"
@@ -155,8 +162,8 @@ import { TaskMaintenanceDialogComponent } from './task-maintenance-dialog.compon
           <span class="min-w-0 flex-1 text-error">{{ startError }}</span>
           <button
             type="button"
-            class="btn btn-ghost btn-sm btn-square"
-            aria-label="Dismiss"
+            ptahIconButton
+            label="Dismiss"
             (click)="taskStart.clearError()"
           >
             <lucide-angular [img]="XIcon" class="h-4 w-4" aria-hidden="true" />

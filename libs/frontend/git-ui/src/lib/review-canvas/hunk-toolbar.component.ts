@@ -23,6 +23,10 @@ import { ReviewDiffService } from '../services/review-diff.service';
 import type { DiffTabState } from '../types/review-diff.types';
 import type { ReviewScope } from '../services/review-navigation.service';
 import { GitConfirmDialogComponent } from '../shared/git-confirm-dialog.component';
+import {
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 
 /** The comparison the toolbar's hunk belongs to. */
 export type HunkToolbarComparison = ReviewScope['kind'];
@@ -119,7 +123,12 @@ function focusNearestHunkStop(container: HTMLElement, ordinal: number): void {
 @Component({
   selector: 'ptah-hunk-toolbar',
   standalone: true,
-  imports: [LucideAngularModule, GitConfirmDialogComponent],
+  imports: [
+    PtahButtonDirective,
+    PtahIconButtonDirective,
+    LucideAngularModule,
+    GitConfirmDialogComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     '(focusin)': 'focusWithin = true',
@@ -163,8 +172,9 @@ function focusNearestHunkStop(container: HTMLElement, ordinal: number): void {
           }}</span>
           <button
             type="button"
-            class="btn btn-ghost btn-xs h-5 min-h-5 px-1"
-            aria-label="Dismiss error"
+            ptahIconButton
+            size="xs"
+            label="Dismiss error"
             data-testid="hunk-refused-dismiss"
             (click)="dismissRefusal()"
           >
@@ -188,10 +198,11 @@ function focusNearestHunkStop(container: HTMLElement, ordinal: number): void {
           <button
             #control
             type="button"
-            class="btn btn-ghost btn-xs px-1"
+            ptahIconButton
+            label="Previous hunk"
+            size="xs"
             data-control="prev"
             data-testid="hunk-prev"
-            aria-label="Previous hunk"
             [attr.tabindex]="tabIndexFor('prev')"
             [attr.aria-disabled]="!canStep() || null"
             (click)="step(-1)"
@@ -205,10 +216,11 @@ function focusNearestHunkStop(container: HTMLElement, ordinal: number): void {
           <button
             #control
             type="button"
-            class="btn btn-ghost btn-xs px-1"
+            ptahIconButton
+            label="Next hunk"
+            size="xs"
             data-control="next"
             data-testid="hunk-next"
-            aria-label="Next hunk"
             [attr.tabindex]="tabIndexFor('next')"
             [attr.aria-disabled]="!canStep() || null"
             (click)="step(1)"

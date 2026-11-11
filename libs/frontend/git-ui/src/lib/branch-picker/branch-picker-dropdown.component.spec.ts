@@ -156,16 +156,10 @@ describe('BranchPickerDropdownComponent', () => {
     });
     await click(fixture, '.max-h-72 > button');
     expect(query(fixture, '[data-testid="conflicting-paths"]')).toBeNull();
-    // Destructive but secondary: an error-bordered outline with base-content
-    // ink (text-error on the warning tint fails AA; anubis-light's btn-ghost
-    // override erased it).
+    // Destructive: the danger variant of the ptahButton directive.
     const discard = query(fixture, '[data-testid="discard-switch"]');
     expect([...(discard?.classList ?? [])]).toEqual(
-      expect.arrayContaining([
-        'btn-outline',
-        'border-error',
-        'text-base-content',
-      ]),
+      expect.arrayContaining(['btn-error']),
     );
     expect(discard?.classList).not.toContain('text-error');
 

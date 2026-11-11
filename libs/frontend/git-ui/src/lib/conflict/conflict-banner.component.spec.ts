@@ -219,9 +219,7 @@ describe('ConflictBannerComponent', () => {
 
       expect(query('conflict-banner-continue')).toBeNull();
       expect(query('conflict-banner-ask')?.className).toContain('btn-primary');
-      expect(query('conflict-banner-abort')?.className).toContain(
-        'err-solid-text',
-      );
+      expect(query('conflict-banner-abort')?.className).toContain('btn-error');
     });
 
     it('shows Continue as the primary action once no path conflicts (11.5)', async () => {

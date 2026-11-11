@@ -11,6 +11,7 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** `danger` destroys work that exists nowhere else; `warning` is recoverable. */
 export type GitConfirmDialogTone = 'danger' | 'warning';
@@ -47,6 +48,7 @@ let nextDialogId = 0;
 @Component({
   selector: 'ptah-git-confirm-dialog',
   standalone: true,
+  imports: [PtahButtonDirective],
   template: `
     @if (isOpen()) {
       <dialog
@@ -69,7 +71,7 @@ let nextDialogId = 0;
             <button
               #cancelButton
               type="button"
-              class="btn btn-sm"
+              ptahButton
               data-testid="git-confirm-cancel"
               (click)="cancel()"
             >
@@ -79,7 +81,7 @@ let nextDialogId = 0;
               <button
                 #secondaryButton
                 type="button"
-                class="btn btn-sm"
+                ptahButton
                 data-testid="git-confirm-secondary"
                 (click)="chooseSecondary()"
               >
@@ -134,8 +136,7 @@ export class GitConfirmDialogComponent {
       : 'btn btn-sm btn-warning',
   );
 
-  private readonly dialog =
-    viewChild<ElementRef<HTMLDialogElement>>('dialog');
+  private readonly dialog = viewChild<ElementRef<HTMLDialogElement>>('dialog');
   private readonly cancelButton =
     viewChild<ElementRef<HTMLButtonElement>>('cancelButton');
   private readonly secondaryButton =

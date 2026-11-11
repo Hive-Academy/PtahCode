@@ -38,6 +38,7 @@ import {
 } from '../types/file-view.types';
 // Type-only: erased at build time, so CodeMirror stays out of this chunk.
 import type { SpotEditorHandle } from './codemirror-setup';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** Same ceiling as the read-only file view (`file-view.component.ts:32`). */
 const MAX_MARKDOWN_PREVIEW_BYTES = 512 * 1024;
@@ -108,6 +109,7 @@ interface DialogCopy {
   selector: 'ptah-spot-editor',
   standalone: true,
   imports: [
+    PtahButtonDirective,
     LucideAngularModule,
     MarkdownBlockComponent,
     OpenInButtonComponent,
@@ -121,7 +123,9 @@ interface DialogCopy {
       <button
         #backButton
         type="button"
-        class="btn btn-ghost btn-xs gap-1"
+        ptahButton
+        variant="ghost"
+        size="xs"
         data-testid="spot-editor-back"
         (click)="goBack()"
       >
@@ -156,7 +160,9 @@ interface DialogCopy {
       @if (showEditButton()) {
         <button
           type="button"
-          class="btn btn-ghost btn-xs"
+          ptahButton
+          variant="ghost"
+          size="xs"
           data-testid="spot-editor-edit"
           (click)="startEditing()"
         >
@@ -191,7 +197,9 @@ interface DialogCopy {
       }
       <button
         type="button"
-        class="btn btn-primary btn-xs gap-1"
+        ptahButton
+        variant="primary"
+        size="xs"
         data-testid="spot-editor-save"
         [disabled]="!canSave()"
         (click)="save()"
@@ -227,7 +235,9 @@ interface DialogCopy {
         >
         <button
           type="button"
-          class="btn btn-ghost btn-xs"
+          ptahButton
+          variant="ghost"
+          size="xs"
           data-testid="spot-editor-stale-reload"
           (click)="reloadFromBanner()"
         >
@@ -307,7 +317,9 @@ interface DialogCopy {
             <span>{{ current.failure?.message }}</span>
             <button
               type="button"
-              class="btn btn-ghost btn-xs"
+              ptahButton
+              variant="ghost"
+              size="xs"
               (click)="retry()"
             >
               Retry

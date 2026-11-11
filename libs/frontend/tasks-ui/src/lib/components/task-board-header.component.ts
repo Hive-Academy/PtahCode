@@ -23,6 +23,7 @@ import {
   TASK_VIEW_MODE_LABELS,
   type TaskViewMode,
 } from '../services/task-view-mode.service';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** Shared focus ring from the design spec's token map. */
 const FOCUS =
@@ -45,7 +46,7 @@ const FOCUS =
 @Component({
   selector: 'ptah-task-board-header',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     class: 'block flex-shrink-0',
@@ -98,7 +99,8 @@ const FOCUS =
 
         <button
           type="button"
-          class="btn btn-ghost btn-sm gap-1.5 border border-surface-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+          ptahButton
+          class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
           aria-haspopup="dialog"
           [attr.aria-expanded]="paletteOpen()"
           data-testid="tasks-palette-trigger"
@@ -206,7 +208,9 @@ const FOCUS =
 
         <button
           type="button"
-          class="btn btn-primary btn-sm h-9 min-h-9 gap-1.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+          ptahButton
+          variant="primary"
+          class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
           data-testid="tasks-create-trigger"
           [disabled]="!canWrite()"
           (click)="createTask.emit()"
