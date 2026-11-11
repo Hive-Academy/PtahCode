@@ -23,6 +23,7 @@ export {
 export { allocateTaskId } from './lib/id-allocator';
 export { randomIdSuffix, TASK_ID_SUFFIX_RE } from './lib/id-suffix';
 export { normalizeWorkspaceRoot } from './lib/normalize-workspace-root';
+export { effectiveTaskStatus, type TaskStatusOverlay } from './lib/task-status-overlay';
 
 // Services.
 export {

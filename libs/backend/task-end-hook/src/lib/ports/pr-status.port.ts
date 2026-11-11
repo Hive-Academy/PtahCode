@@ -41,6 +41,7 @@ export type TaskCloseOutPrStatus =
       readonly kind: 'unknown';
       readonly number?: number;
       readonly url?: string;
+      readonly lookupFailed?: boolean;
     };
 
 /** Host PR lookup for close-out; failures become `unknown`. */

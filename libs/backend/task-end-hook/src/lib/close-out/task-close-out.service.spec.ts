@@ -19,6 +19,7 @@ const logger = (): Logger => {
 
 class Store implements ITaskCloseOutStore {
   private record: CloseOutRunRecord | null = null;
+  mergedTaskIds(): ReadonlySet<string> { return new Set(this.record ? [this.record.taskId] : []); }
   getOrCreateCloseOut(identity: CloseOutIdentity): CloseOutRunRecord {
     this.record ??= { ...identity, runId: 'run-1', steps:
       (['memory', 'learning', 'worktree', 'branch'] as const).map((step) =>

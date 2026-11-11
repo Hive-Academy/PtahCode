@@ -51,6 +51,57 @@ function scopeWithHook(
 }
 
 describe('startTaskEndHook', () => {
+  it('logs a missing session link once for the skipped task', async () => {
+    const { scope } = scopeWithHook([]);
+    const logger = { error: jest.fn(), info: jest.fn(), warn: jest.fn() };
+    const reconcile = jest.fn();
+    scope.register(TASK_END_TOKENS.STORE, { useValue: { getCloseOutForTask: () => null, mergedTaskIds: () => new Set() } });
+    scope.register(TASK_END_TOKENS.PR_RECONCILER, { useValue: { reconcile, dispose: jest.fn() } });
+    scope.register(TASK_SPECS_TOKENS.TASK_INDEX_SERVICE, { useValue: {
+      list: async () => ({ tasks: [{ id: 'TASK_2026_898_c1a5', status: 'in_progress', frontmatterValid: true }] }),
+      onDidChangeIndex: () => ({ dispose: jest.fn() }),
+    } });
+    scope.register(PLATFORM_TOKENS.WORKSPACE_PROVIDER, { useValue: {
+      getWorkspaceFolders: () => ['/repo'], getConfiguration: () => false,
+    } });
+    scope.register(SESSION_ORGANIZATION_TOKENS.STORE, { useValue: {
+      listTaskLinks: () => [], getOrganization: jest.fn(),
+    } });
+    const handle = await startTaskEndHook(scope, new AbortController().signal, logger);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(reconcile).not.toHaveBeenCalled();
+    expect(logger.info).toHaveBeenCalledWith('Task PR reconcile skipped',
+      { taskId: 'TASK_2026_898_c1a5', reason: 'no-session-link' });
+    handle?.dispose();
+  });
+  it('aggregates PR lookup failures into one scan warning', async () => {
+    const { scope } = scopeWithHook([]);
+    const logger = { error: jest.fn(), info: jest.fn(), warn: jest.fn() };
+    const reconcile = jest.fn(async () => ({ kind: 'unknown', lookupFailed: true }));
+    scope.register(TASK_END_TOKENS.STORE, { useValue: { getCloseOutForTask: () => null, mergedTaskIds: () => new Set() } });
+    scope.register(TASK_END_TOKENS.PR_RECONCILER, { useValue: { reconcile, dispose: jest.fn() } });
+    scope.register(TASK_SPECS_TOKENS.TASK_INDEX_SERVICE, { useValue: {
+      list: async () => ({ tasks: ['TASK_2026_898_c1a5', 'TASK_2026_899_c1a5'].map((id) =>
+        ({ id, status: 'in_progress', frontmatterValid: true })) }),
+      onDidChangeIndex: () => ({ dispose: jest.fn() }),
+    } });
+    scope.register(PLATFORM_TOKENS.WORKSPACE_PROVIDER, { useValue: {
+      getWorkspaceFolders: () => ['/repo'], getConfiguration: () => false,
+    } });
+    scope.register(SESSION_ORGANIZATION_TOKENS.STORE, { useValue: {
+      listTaskLinks: () => [{ sessionId: 's1' }],
+      getOrganization: () => ({ worktreePath: '/tree', branch: 'feat/task' }),
+    } });
+    const handle = await startTaskEndHook(scope, new AbortController().signal, logger);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(reconcile).toHaveBeenCalledTimes(2);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith('Task PR lookup failed during scan', { count: 2 });
+    handle?.dispose();
+  });
   it('starts PR reconciliation in the background and disposes its subscription', async () => {
     const order: string[] = [];
     const { scope } = scopeWithHook(order);
@@ -58,7 +109,7 @@ describe('startTaskEndHook', () => {
     const unsubscribe = jest.fn();
     const reconcile = jest.fn(async () => { order.push('pr.reconcile'); });
     const disposeReconciler = jest.fn();
-    scope.register(TASK_END_TOKENS.STORE, { useValue: { getCloseOutForTask: () => null } });
+    scope.register(TASK_END_TOKENS.STORE, { useValue: { getCloseOutForTask: () => null, mergedTaskIds: () => new Set() } });
     scope.register(TASK_END_TOKENS.PR_RECONCILER, {
       useValue: { reconcile, dispose: disposeReconciler },
     });

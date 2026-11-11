@@ -163,6 +163,8 @@ export interface CloseOutRunRecord extends CloseOutIdentity {
 }
 
 export interface ITaskCloseOutStore {
+  /** Task IDs with a verified merged PR identity for this repository. */
+  mergedTaskIds(repoId: string): ReadonlySet<string>;
   /** Atomic identity lookup/create; concurrent callers join the same run. */
   getOrCreateCloseOut(identity: CloseOutIdentity): CloseOutRunRecord;
   getCloseOut(runId: string): CloseOutRunRecord | null;

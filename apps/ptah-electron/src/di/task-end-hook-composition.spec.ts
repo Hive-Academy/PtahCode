@@ -486,6 +486,14 @@ describe('activity adapter', () => {
 });
 
 describe('PR status adapter', () => {
+  it('marks a GitHub lookup failure for scan-level logging', async () => {
+    const { c } = compose();
+    c.register(TOKENS.GIT_INFO_SERVICE, { useValue: {
+      readPrStatus: jest.fn().mockResolvedValue({ status: 'unavailable', reason: 'not-authenticated' }),
+    } });
+    const port = c.resolve<CloseOutPrStatusPort>(TASK_END_TOKENS.CLOSE_OUT_PR_STATUS_PORT);
+    await expect(port.prStatus('/repo', 'feat/x')).resolves.toEqual({ kind: 'unknown', lookupFailed: true });
+  });
   it('does not report a PR merged into another base as merged', async () => {
     const { c } = compose();
     c.register(TOKENS.GIT_INFO_SERVICE, { useValue: {

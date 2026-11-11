@@ -1333,6 +1333,9 @@ describe('Electron DI — session organization recorder binding (TASK_2026_580 R
     expect(at('startTaskSpecsIndex(container, logger);')).toBeLessThan(
       register,
     );
+    expect(at('registerTaskEndHookComposition(container, logger);')).toBeLessThan(
+      at('startTaskSpecsIndex(container, logger);'),
+    );
     expect(register).toBeLessThan(at('startSessionOrganization(container);'));
     // Phase 2 itself never resolves a producer early.
     expect(phase2).not.toMatch(

@@ -22,6 +22,7 @@ import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import { createMockFileSystemProvider } from '@ptah-extension/platform-core/testing';
 import {
   SPECS_README_FILE,
+  EMPTY_TASK_FILTER,
   renderSpecsReadme,
   roundJudgeFile,
 } from '@ptah-extension/shared';
@@ -1044,6 +1045,22 @@ describe('TaskIndexService DI', () => {
 });
 
 describe('TaskIndexService.getDetail', () => {
+  it('projects merged status in list, detail, and effective status filters', async () => {
+    const fs = new FakeFs();
+    const id = 'TASK_2026_001';
+    fs.setFile(carrier(id), validTask(id).replace('status: backlog', 'status: in_review'));
+    const logger = makeLogger();
+    const service = new TaskIndexService(logger, fs as unknown as IFileSystemProvider,
+      new TaskScannerService(fs as unknown as IFileSystemProvider, logger),
+      new InMemoryTaskIndexStore(logger), undefined,
+      { mergedTaskIds: () => new Set([id]) });
+    expect((await service.list(ROOT)).tasks[0]).toMatchObject({ status: 'done', carrierStatus: 'in_review' });
+    expect((await service.list(ROOT, { status: ['done'] })).tasks).toHaveLength(1);
+    expect((await service.list(ROOT, { status: ['in_review'] })).tasks).toHaveLength(0);
+    expect((await service.list(ROOT, { filter: { ...EMPTY_TASK_FILTER, statuses: ['done'] } })).tasks).toHaveLength(1);
+    expect(await service.getDetail(ROOT, id)).toMatchObject({ status: 'done', carrierStatus: 'in_review' });
+    service.dispose();
+  });
   it.each(['TASK_2026_123_ABC', 'TASK_2026_123_ab_cd'])(
     'reads every board-listed folder %s',
     async (folder) => {

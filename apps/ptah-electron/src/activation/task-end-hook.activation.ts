@@ -39,7 +39,7 @@ export interface TaskEndHookActivationHandle {
 export async function startTaskEndHook(
   container: DependencyContainer,
   signal: AbortSignal,
-  logger: Pick<Logger, 'error'>,
+  logger: Pick<Logger, 'error'> & Partial<Pick<Logger, 'info' | 'warn'>>,
 ): Promise<TaskEndHookActivationHandle | null> {
   if (
     signal.aborted ||
@@ -95,30 +95,43 @@ export async function startTaskEndHook(
         const listing = await index.list(root);
         const repoId = hook.detector.cachedRepoId(root);
         if (!repoId || disposed) return;
+        let lookupFailures = 0;
         for (const row of listing.tasks) {
-          if (!row.frontmatterValid || (row.status !== 'in_progress' && row.status !== 'in_review' && row.status !== 'done')) continue;
+          if (!row.frontmatterValid || (row.status !== 'in_progress' && row.status !== 'in_review' && row.status !== 'done')) {
+            logger.info?.('Task PR reconcile skipped', { taskId: row.id,
+              reason: row.frontmatterValid ? 'ineligible-status' : 'invalid-frontmatter' });
+            continue;
+          }
           const optedIn = workspace.getConfiguration<unknown>(
             TASK_END_HOOK_SECTION, TASK_END_HOOK_KEYS.autoRemoveMergedWorktreeAndBranch,
             TASK_END_HOOK_DEFAULTS.autoRemoveMergedWorktreeAndBranch) === true;
-          if (row.status === 'done') {
-            const previous = store.getCloseOutForTask(repoId, row.id);
-            if (previous && previous.steps.every(step => step.state === 'ok' || step.state === 'skipped' ||
-                (step.state === 'refused' && (step.reason !== 'pending-user-approval' || !optedIn)))) continue;
+          const previous = store.getCloseOutForTask(repoId, row.id);
+          if (previous && previous.steps.every(step => step.state === 'ok' || step.state === 'skipped' ||
+              (step.state === 'refused' && (step.reason !== 'pending-user-approval' || !optedIn)))) {
+            logger.info?.('Task PR reconcile skipped', { taskId: row.id, reason: 'close-out-complete' });
+            continue;
           }
           const sessionIds = organization.listTaskLinks(root, [row.id]).map((link) => link.sessionId);
-          const candidate = sessionIds
-            .map((id) => organization.getOrganization(root, id))
-            .find((entry) => entry?.worktreePath && entry.branch);
-          if (!candidate?.worktreePath || !candidate.branch) continue;
+          const organizations = sessionIds.map((id) => organization.getOrganization(root, id));
+          const candidate = organizations.find((entry) => entry?.worktreePath && entry.branch);
+          const worktreePath = candidate?.worktreePath ?? previous?.worktreePath;
+          const branch = candidate?.branch ?? previous?.branch;
+          if (!worktreePath || !branch) {
+            logger.info?.('Task PR reconcile skipped', { taskId: row.id,
+              reason: organizations.some((entry) => entry?.worktreePath) ? 'no-branch' : 'no-session-link' });
+            continue;
+          }
           const task: TaskPrReconcileTask = {
             repoId, taskId: row.id, mainRoot: root,
-            worktreePath: candidate.worktreePath, branch: candidate.branch,
-            status: row.status, sessionIds,
+            worktreePath, branch,
+            status: row.carrierStatus ?? row.status, sessionIds,
             autoRemoveMergedWorktreeAndBranch: optedIn,
           };
           if (disposed) return;
-          await reconciler?.reconcile(task);
+          const result = await reconciler?.reconcile(task);
+          if (result?.kind === 'unknown' && result.lookupFailed) lookupFailures++;
         }
+        if (lookupFailures) logger.warn?.('Task PR lookup failed during scan', { count: lookupFailures });
       };
       const report = (error: unknown): void => {
         logger.error('Task PR reconcile failed', error instanceof Error ? error : new Error(String(error)));
@@ -139,7 +152,11 @@ export async function startTaskEndHook(
         })();
       };
       reconcileSubscription = index.onDidChangeIndex((event) => schedule(event.workspaceRoot));
-      for (const root of workspace.getWorkspaceFolders()) schedule(root);
+      for (const root of workspace.getWorkspaceFolders()) {
+        schedule(root);
+        const repoId = hook.detector.cachedRepoId(root);
+        if (repoId && store.mergedTaskIds(repoId).size > 0) index.notifyStatusOverlayChanged(root);
+      }
     }
     } catch (error: unknown) {
       reconcileSubscription?.dispose();

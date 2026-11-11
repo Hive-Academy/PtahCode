@@ -4,6 +4,7 @@ import {
   type SqliteConnectionService,
 } from '@ptah-extension/persistence-sqlite';
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
+import { TASK_SPECS_TOKENS, type TaskStatusOverlay } from '@ptah-extension/task-specs';
 import { TaskEndHookSettingsReader } from '../config/task-end-hook-config';
 import { TaskCloseOutService } from '../close-out/task-close-out.service';
 import { TaskPrReconcilerService } from '../close-out/task-pr-reconciler.service';
@@ -49,6 +50,18 @@ export function registerTaskEndHook(container: DependencyContainer): void {
           c.resolve<Logger>(TOKENS.LOGGER),
         ),
     ),
+  });
+  container.register<TaskStatusOverlay>(TASK_SPECS_TOKENS.TASK_STATUS_OVERLAY, {
+    useFactory: (c) => {
+      const store = c.resolve<SqliteTaskEndStore>(TASK_END_TOKENS.STORE);
+      return {
+        mergedTaskIds: (root) => {
+          const detector = c.resolve<TaskEndTransitionDetector>(TASK_END_TOKENS.DETECTOR);
+          const repoId = detector.cachedRepoId(root);
+          return repoId ? store.mergedTaskIds(repoId) : new Set<string>();
+        },
+      };
+    },
   });
   container.registerSingleton(
     TASK_END_TOKENS.SETTINGS_READER,

@@ -143,6 +143,8 @@ export interface TaskSpecSummary {
   id: string;
   folderName: string;
   status: TaskStatus;
+  /** Raw status in task.md; status may include a host merge overlay. */
+  carrierStatus?: TaskStatus;
   /** null when frontmatter `type` failed validation (warning, not exclusion). */
   type: TaskType | null;
   title: string;

@@ -102,8 +102,8 @@ main agent, every subagent and every CLI lane. Repeat them in any task prompt yo
   CI results, and review state. If CI or reviews remain pending, explicitly report that
   state and keep the watch active while the session permits. Report failed, cancelled,
   timed-out, or unavailable checks and any blocker that needs the user's decision.
-- Once the task PR opens, set `task.md` to `in_review`. After review and merge, the host marks it
-  `done` and starts durable-journal close-out in the background: task memory curation, learning,
+- Once the task PR opens, agents set `task.md` to `in_review`. After review and merge, the host shows
+  the task as `done` from the close-out store without rewriting the carrier, and starts close-out in the background: task memory curation, learning,
   and cleanup evaluation. Skill-trajectory harvest no longer runs on Stop. It runs as the
   close-out learning step, or explicitly through `skillSynthesis:harvestSpecs`.
   To start or retry close-out by hand for a done task with a merged PR, call
