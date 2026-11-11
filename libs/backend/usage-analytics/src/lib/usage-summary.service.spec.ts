@@ -16,7 +16,7 @@ import { CodexSource } from './sources/codex.source';
 import { OpenCodeSource } from './sources/opencode.source';
 import { GrokSource } from './sources/grok.source';
 import { CliSessionSource } from './cli-session.source';
-import type { UsageSource, UsageContribution } from './usage-source.types';
+import type { UsageSource, UsageContribution, UsageSourceResult } from './usage-source.types';
 import { SessionStatsRepository } from '@ptah-extension/persistence-sqlite';
 
 describe('UsageAnalyticsService', () => {
@@ -65,6 +65,84 @@ describe('UsageAnalyticsService', () => {
     expect(messages).toHaveBeenCalledTimes(1);
     expect(summary.sessionCount).toBe(4);
     expect(summary.messageCount).toBe(9);
+  });
+
+  it('starts independent external readers before waiting for the first one', async () => {
+    let releaseCodex: () => void = () => undefined;
+    let codexStarted: () => void = () => undefined;
+    let opencodeStarted: () => void = () => undefined;
+    let grokStarted: () => void = () => undefined;
+    const codexGate = new Promise<void>((resolve) => { releaseCodex = resolve; });
+    const starts = [
+      new Promise<void>((resolve) => { codexStarted = resolve; }),
+      new Promise<void>((resolve) => { opencodeStarted = resolve; }),
+      new Promise<void>((resolve) => { grokStarted = resolve; }),
+    ];
+    const empty = { contributions: [], status: { sourceId: 'external', status: 'complete' as const } };
+    const codex = jest.spyOn(CodexSource.prototype, 'read').mockImplementation(async () => { codexStarted(); await codexGate; return empty; });
+    const opencode = jest.spyOn(OpenCodeSource.prototype, 'read').mockImplementation(async () => { opencodeStarted(); return empty; });
+    const grok = jest.spyOn(GrokSource.prototype, 'read').mockImplementation(async () => { grokStarted(); return empty; });
+    jest.spyOn(CliSessionSource.prototype, 'read').mockResolvedValue(empty);
+    const service = new UsageAnalyticsService({ read: async () => empty }, { price: async () => ({ costUsd: null, cacheSavingsUsd: null, costSource: 'unpriced', priceSource: 'unavailable' }) }, { warn: jest.fn() });
+    const pending = service.summarize({ range: 7 }, 'C:/workspace');
+    await Promise.all(starts);
+    expect(codex).toHaveBeenCalledTimes(1);
+    expect(opencode).toHaveBeenCalledTimes(1);
+    expect(grok).toHaveBeenCalledTimes(1);
+    releaseCodex();
+    await expect(pending).resolves.toMatchObject({ sources: expect.any(Array) });
+  });
+
+  it('marks a stalled source partial after its deadline and keeps completed sources', async () => {
+    jest.useFakeTimers();
+    try {
+      const empty = { contributions: [], status: { sourceId: 'external', status: 'complete' as const } };
+      const stalled: UsageSource = { read: async () => new Promise<UsageSourceResult>(() => undefined) };
+      jest.spyOn(CodexSource.prototype, 'read').mockResolvedValue(empty);
+      jest.spyOn(OpenCodeSource.prototype, 'read').mockResolvedValue(empty);
+      jest.spyOn(GrokSource.prototype, 'read').mockResolvedValue(empty);
+      jest.spyOn(CliSessionSource.prototype, 'read').mockResolvedValue(empty);
+      const service = new UsageAnalyticsService(stalled, { price: async () => ({ costUsd: null, cacheSavingsUsd: null, costSource: 'unpriced', priceSource: 'unavailable' }) }, { warn: jest.fn() });
+      const pending = service.summarize({ range: 7 }, 'C:/workspace');
+      await jest.advanceTimersByTimeAsync(11_000);
+      const summary = await pending;
+      expect(summary.sources[0]).toMatchObject({ sourceId: 'claude-ledger', status: 'partial', reason: 'time-budget' });
+      expect(summary.sources[1]).toMatchObject({ status: 'complete' });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('settles a stalled source promptly when the parent budget aborts', async () => {
+    jest.useFakeTimers();
+    try {
+      let markStarted: () => void = () => undefined;
+      const started = new Promise<void>((resolve) => { markStarted = resolve; });
+      const stalled: UsageSource = {
+        read: async () => {
+          markStarted();
+          return new Promise<UsageSourceResult>(() => undefined);
+        },
+      };
+      const empty = { contributions: [], status: { sourceId: 'external', status: 'complete' as const } };
+      for (const source of [CodexSource, OpenCodeSource, GrokSource, CliSessionSource]) {
+        jest.spyOn(source.prototype, 'read').mockResolvedValue(empty);
+      }
+      const parent = new AbortController();
+      const service = new UsageAnalyticsService(stalled, { price: async () => ({ costUsd: null, cacheSavingsUsd: null, costSource: 'unpriced', priceSource: 'unavailable' }) }, { warn: jest.fn() });
+      const pending = service.summarize({ range: 7 }, 'C:/workspace', parent.signal);
+      await started;
+      let settled = false;
+      void pending.then(() => { settled = true; });
+      parent.abort();
+      await jest.advanceTimersByTimeAsync(1);
+      expect(settled).toBe(true);
+      const summary = await pending;
+      expect(summary.sources[0]).toMatchObject({ sourceId: 'claude-ledger', status: 'partial', reason: 'time-budget' });
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('marks an empty ledger partial because historical sessions were not backfilled', async () => {

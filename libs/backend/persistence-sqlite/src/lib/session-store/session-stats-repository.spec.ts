@@ -1,4 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { SqliteDatabase } from '../sqlite-connection.service';
 import { SESSION_STORE_MIGRATIONS } from './session-store-migrations';
 import { SqliteSessionUsageSink } from './sqlite-session-usage-sink';
@@ -13,11 +16,12 @@ function sqlValue(value: unknown): string | number | null {
   throw new Error('Unexpected SQL parameter');
 }
 
-function openTestStore(): {
+function openTestStore(file = ':memory:'): {
   ready(): Promise<Pick<SqliteDatabase, 'exec' | 'prepare'>>;
   close(): void;
+  raw: DatabaseSync;
 } {
-  const raw = new DatabaseSync(':memory:');
+  const raw = new DatabaseSync(file);
   for (const migration of SESSION_STORE_MIGRATIONS) {
     if (migration.sql) raw.exec(migration.sql);
   }
@@ -42,7 +46,7 @@ function openTestStore(): {
       };
     },
   };
-  return { ready: async () => db, close: () => raw.close() };
+  return { ready: async () => db, close: () => raw.close(), raw };
 }
 
 const contribution: SessionUsageContribution = {
@@ -66,6 +70,41 @@ const contribution: SessionUsageContribution = {
 };
 
 describe('SessionStatsRepository', () => {
+  it('uses the time index for a workspace aggregate on a large temp database', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ptah-usage-plan-'));
+    const store = openTestStore(join(dir, 'synthetic.sqlite'));
+    try {
+      const insert = store.raw.prepare(`INSERT INTO session_usage_turns
+        (session_id, producer, run_id, turn_id, event_key, revision, occurred_at_ms, workspace_key,
+         provider_id, model_id, source, cost_authority, input_tokens, output_tokens,
+         cache_read_tokens, cache_write_tokens)
+        VALUES (?, 'sdk', 'run', 'turn', ?, 1, ?, '/work/a', 'anthropic', 'model', 'live',
+                'unpriced', 1, 1, 0, 0)`);
+      store.raw.exec('BEGIN');
+      for (let i = 0; i < 20_000; i++) {
+        insert.run(`session-${i}`, `event-${i}`, i * 3_600_000);
+      }
+      store.raw.exec('COMMIT');
+      const database = await store.ready();
+      let aggregateSql = '';
+      const tracked = {
+        ready: async () => ({
+          ...database,
+          prepare: (sql: string) => {
+            if (sql.includes('GROUP BY day')) aggregateSql = sql;
+            return database.prepare(sql);
+          },
+        }),
+      };
+      await new SessionStatsRepository(tracked).getWorkspaceUsageGroups('/work/a', 0, 86_400_000);
+      expect(aggregateSql).toContain('FROM session_usage_turns');
+      const plan = store.raw.prepare(`EXPLAIN QUERY PLAN ${aggregateSql}`).all('/work/a', 0, 86_400_000);
+      expect(plan.some((row) => String(row['detail']).includes('USING INDEX idx_session_usage_turns_time'))).toBe(true);
+    } finally {
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it('pages through more than 32 idle startup rows while preserving a live id', async () => {
     const store = openTestStore();
     try {
