@@ -17,6 +17,7 @@ import {
   type SessionId,
   type SteerQueuedFollowUpResult,
 } from '@ptah-extension/shared';
+import type { SessionIdResolvedRegistryCallback } from '@ptah-extension/agent-sdk';
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import { RpcUserError, type Logger } from '@ptah-extension/vscode-core';
 
@@ -108,23 +109,42 @@ function build(
     options.registeredTab !== undefined
       ? { tabId: options.registeredTab, realSessionId: SESSION }
       : undefined;
-  const reregister = (tabId: string) => {
-    record = { tabId, realSessionId: SESSION };
+  const reregister = (tabId: string, realSessionId = SESSION) => {
+    record = { tabId, realSessionId };
   };
   const registrations = {
-    find: jest.fn((id: string) => (id === SESSION ? record : undefined)),
+    find: jest.fn((id: string) => (record?.realSessionId === id ? record : undefined)),
   };
   const logger = createMockLogger();
+  // Fan-out twin of the adapter's "Session ID resolved" callback.
+  const resolvedListeners: SessionIdResolvedRegistryCallback[] = [];
+  const sessionIdResolved = {
+    register: (listener: SessionIdResolvedRegistryCallback) => {
+      resolvedListeners.push(listener);
+      return () => undefined;
+    },
+  };
+  const resolve = (tabId: string, realSessionId = SESSION, previousSessionId?: string) => {
+    for (const listener of resolvedListeners) {
+      listener({
+        tabId,
+        realSessionId,
+        timestamp: 0,
+        ...(previousSessionId === undefined ? {} : { previousSessionId }),
+      });
+    }
+  };
   const service = new ChatFollowUpQueueService(
     logger as unknown as Logger,
     webviewManager,
     adapter,
     registrations as never,
     options.codexOwner === undefined ? null : () => options.codexOwner,
+    sessionIdResolved,
   );
   const states = () =>
     sent.filter((entry) => entry.type === MESSAGE_TYPES.CHAT_QUEUED_MESSAGE_STATE);
-  return { service, fake, sent, states, logger, webviewManager, reregister };
+  return { service, fake, sent, states, logger, webviewManager, reregister, resolve };
 }
 
 describe('ChatFollowUpQueueService', () => {
@@ -325,12 +345,13 @@ describe('ChatFollowUpQueueService', () => {
     h.service.adoptTab(SESSION, TAB_B);
     expect(() => h.service.assertTabOwnsSession(SESSION, TAB_B)).not.toThrow();
     expect(h.service.list(SESSION, TAB_B)).toEqual([]);
-    expect(() => h.service.assertTabOwnsSession(SESSION, TAB_A)).toThrow(RpcUserError);
+    expect(h.service.ownerIdentity(SESSION)).toBe(TAB_B);
+    // The registered tab still shows the same live session: it may queue.
+    expect(() => h.service.assertTabOwnsSession(SESSION, TAB_A)).not.toThrow();
 
     // The registered tab opened it again: the adoption ends.
     h.service.adoptTab(SESSION, TAB_A);
-    expect(() => h.service.assertTabOwnsSession(SESSION, TAB_A)).not.toThrow();
-    expect(() => h.service.assertTabOwnsSession(SESSION, TAB_B)).toThrow(RpcUserError);
+    expect(h.service.ownerIdentity(SESSION)).toBe(TAB_A);
   });
 
   it('hands the held items of the earlier tab to the adopting tab', () => {
@@ -348,7 +369,7 @@ describe('ChatFollowUpQueueService', () => {
     const h = build({ registeredTab: TAB_A });
     h.service.adoptTab(SESSION, TAB_B);
     h.reregister(TAB_A);
-    expect(() => h.service.assertTabOwnsSession(SESSION, TAB_B)).toThrow(RpcUserError);
+    expect(h.service.ownerIdentity(SESSION)).toBe(TAB_A);
 
     h.service.adoptTab(SESSION, TAB_B);
     h.service.retireSession(SESSION);
@@ -361,6 +382,83 @@ describe('ChatFollowUpQueueService', () => {
     h.service.bind(SESSION, TAB_A, ID_1);
     h.fake.hold(ID_1);
     expect(() => h.service.assertTabOwnsSession(SESSION, TAB_B)).toThrow(RpcUserError);
+  });
+
+  describe('a tab that still shows the live session after another tab took its stream', () => {
+    const OTHER_SESSION = '77777777-8888-4999-8aaa-bbbbbbbbbbbb';
+    const TAB_C = '55555555-6666-4777-8888-999999999999';
+
+    // The 2026-11-11 log: tab A bound, chat:continue from tab B ends the dead
+    // record and restarts under B, every pushed turn re-registers under B.
+    function takenOver() {
+      const h = build({ registeredTab: TAB_A });
+      h.resolve(TAB_A);
+      h.reregister(TAB_B);
+      h.resolve(TAB_B);
+      h.reregister(TAB_B);
+      h.resolve(TAB_B);
+      return h;
+    }
+
+    it('accepts queue admission, queued-list and withdraw from tab A without moving the stream', async () => {
+      const h = takenOver();
+      expect(() => h.service.assertTabOwnsSession(SESSION, TAB_A)).not.toThrow();
+      h.service.bind(SESSION, TAB_A, ID_1);
+      h.fake.hold(ID_1);
+      expect(h.service.list(SESSION, TAB_A)).toEqual([{ clientMessageId: ID_1, content: 'follow-up' }]);
+      expect(h.service.list(SESSION, TAB_B)).toEqual([]);
+      expect(h.service.ownerIdentity(SESSION)).toBe(TAB_B);
+      expect(h.states().at(-1)?.payload).toMatchObject({ tabId: TAB_A, state: 'queued' });
+      await expect(h.service.withdraw(SESSION, TAB_A, ID_1)).resolves.toBe(true);
+    });
+
+    it('accepts tab A when the host saw it only as the registered tab', () => {
+      const h = build({ registeredTab: TAB_A });
+      expect(() => h.service.assertTabOwnsSession(SESSION, TAB_B)).toThrow(RpcUserError);
+      h.reregister(TAB_B);
+      expect(() => h.service.assertTabOwnsSession(SESSION, TAB_A)).not.toThrow();
+    });
+
+    it('still refuses a tab bound to another session or never bound, and logs both tabs', () => {
+      const h = takenOver();
+      h.resolve(TAB_A, OTHER_SESSION);
+      expect(() => h.service.assertTabOwnsSession(SESSION, TAB_A)).toThrow(RpcUserError);
+      expect(() => h.service.assertTabOwnsSession(SESSION, TAB_C)).toThrow(RpcUserError);
+      expect(h.logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('follow-up refused'),
+        expect.objectContaining({ sessionId: SESSION, tabId: TAB_C, ownerTabId: TAB_B }),
+      );
+    });
+
+    it('moves every bound tab to the new id when a compaction rotates the session id', () => {
+      const h = takenOver();
+      // Tab B's record is rebound from SESSION to OTHER_SESSION.
+      h.reregister(TAB_B, OTHER_SESSION);
+      h.resolve(TAB_B, OTHER_SESSION, SESSION);
+      expect(() => h.service.assertTabOwnsSession(OTHER_SESSION, TAB_A)).not.toThrow();
+      expect(() => h.service.assertTabOwnsSession(OTHER_SESSION, TAB_C)).toThrow(RpcUserError);
+    });
+
+    it('does not let an old registration replace the newer binding of its tab', () => {
+      const h = build({ registeredTab: TAB_A });
+      h.resolve(TAB_A);
+      // Tab A opened another conversation; its old stream is still registered.
+      h.service.noteTabSession(OTHER_SESSION, TAB_A);
+      expect(h.service.ownerIdentity(SESSION)).toBe(TAB_A);
+      // Another tab takes the stream of the old session.
+      h.reregister(TAB_B);
+      h.resolve(TAB_B);
+      expect(() => h.service.assertTabOwnsSession(SESSION, TAB_A)).toThrow(RpcUserError);
+    });
+
+    it('keeps a tab in use when many other tabs bind after it', () => {
+      const h = takenOver();
+      for (let i = 0; i < 300; i += 1) {
+        h.service.noteTabSession(OTHER_SESSION, `filler-${i}`);
+        if (i % 100 === 0) h.service.assertTabOwnsSession(SESSION, TAB_A);
+      }
+      expect(() => h.service.assertTabOwnsSession(SESSION, TAB_A)).not.toThrow();
+    });
   });
 
   it('accepts an unowned session from any tab', () => {

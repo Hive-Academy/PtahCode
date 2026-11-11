@@ -324,6 +324,7 @@ type ChatFollowUpQueue = Pick<
   ChatFollowUpQueueService,
   | 'assertTabOwnsSession'
   | 'adoptTab'
+  | 'noteTabSession'
   | 'beginAdmission'
   | 'acceptedRetry'
   | 'endAdmission'
@@ -1863,7 +1864,6 @@ export class ChatSessionService {
         followUp.queue.assertTabOwnsSession(sessionId, tabId);
       }
       let followUpIdentity = followUp?.queue.liveIdentity(sessionId);
-      let followUpOwner = followUp?.queue.ownerIdentity(sessionId);
       driveAttempt = await this.driverLock.beginDrive(sessionId, tabId);
       await this.gateAccount({
         sessionId,
@@ -1951,7 +1951,6 @@ export class ChatSessionService {
         if (followUp && justResumed) {
           followUp.queue.assertTabOwnsSession(sessionId, tabId);
           followUpIdentity = followUp.queue.liveIdentity(sessionId);
-          followUpOwner = followUp.queue.ownerIdentity(sessionId);
         }
       }
 
@@ -2069,11 +2068,12 @@ export class ChatSessionService {
           return { success: false, sessionId, cancelled: true, error: 'Follow-up withdrawn by Stop.' };
         }
         if (followUp) {
-          if (followUp.queue.liveIdentity(sessionId) !== followUpIdentity ||
-              followUp.queue.ownerIdentity(sessionId) !== followUpOwner) {
+          if (followUp.queue.liveIdentity(sessionId) !== followUpIdentity) {
             followUpRefusalCode = 'SESSION_CHANGED';
             return { success: false, sessionId, errorCode: 'SESSION_CHANGED', error: 'The session changed during follow-up admission.' };
           }
+          // Another tab may take the stream during admission. The follow-up
+          // belongs to the session: a tab still bound to it stays accepted.
           followUp.queue.assertTabOwnsSession(sessionId, tabId);
         }
         if (followUp?.queue.isAbandoned(sessionId, followUp.clientMessageId)) {
@@ -2350,6 +2350,8 @@ export class ChatSessionService {
       });
       // The session may be live under an earlier tab id (its tab was closed
       // and the user opened it again). This tab now queues its follow-ups.
+      // This tab shows the session now, so it may queue follow-ups for it.
+      if (params.tabId) this.followUpQueue?.noteTabSession(sessionId, params.tabId);
       if (params.adoptFollowUps === true && params.tabId) {
         this.followUpQueue?.adoptTab(sessionId, params.tabId);
       }

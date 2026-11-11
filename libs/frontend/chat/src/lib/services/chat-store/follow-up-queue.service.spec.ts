@@ -291,6 +291,12 @@ describe('FollowUpQueueService', () => {
       expect(logWarn).toHaveBeenCalledWith(expect.any(String), expect.any(String), expect.objectContaining({
         errorCode: 'SESSION_CHANGED', tabId: 'tab-1', sessionId: S1, clientMessageId: ref.clientMessageId,
       }));
+      // The host log keeps only the console text: the fields must be in it.
+      expect(logWarn).toHaveBeenCalledWith(
+        expect.any(String),
+        `queued chat:continue refused errorCode=SESSION_CHANGED tabId=tab-1 sessionId=${S1}`,
+        expect.anything(),
+      );
       expect(JSON.stringify(logWarn.mock.calls)).not.toContain('private backend detail');
       expect(restore.pendingFor('tab-1')).toBe('next');
     });
