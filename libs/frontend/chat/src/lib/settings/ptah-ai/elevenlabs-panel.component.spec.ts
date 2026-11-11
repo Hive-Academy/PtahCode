@@ -388,9 +388,10 @@ describe('ElevenLabsPanelComponent', () => {
       mount('stt', elConfig());
 
       const toggle = byTestId<HTMLButtonElement>('elevenlabs-key-visibility');
+      expect(toggle.hasAttribute('data-ptah-button')).toBe(true);
       expect(toggle.classList).toContain('btn-square');
-      expect(toggle.classList).toContain('min-w-6');
-      expect(toggle.classList).toContain('min-h-6');
+      expect(toggle.classList).toContain('btn-xs');
+      expect(toggle.getAttribute('aria-label')).toBe('Show API key');
     });
 
     it.each([
@@ -418,16 +419,13 @@ describe('ElevenLabsPanelComponent', () => {
       const clear = byTestId<HTMLButtonElement>('elevenlabs-key-clear');
       // Gate V 50 decision: the resting Clear is neutral; red only on the confirm button (P8).
       expect(clear.classList).not.toContain('border-error');
-      expect(clear.classList).toContain('btn-outline');
+      expect(clear.hasAttribute('data-ptah-button')).toBe(true);
+      expect(clear.classList).toContain('btn-secondary');
       expect(clear.classList).toContain('btn-xs');
-      expect(clear.classList).toContain('text-base-content');
       clear.click();
       fixture.detectChanges();
       expect(byTestId('elevenlabs-clear-confirm').classList).toContain('border-error');
-      // Visual N2: the open confirm's trigger keeps its resting look, without daisyUI's btn-outline hover fill.
       expect(clear.getAttribute('aria-expanded')).toBe('true');
-      expect(clear.classList).toContain('aria-expanded:hover:bg-transparent');
-      expect(clear.classList).toContain('aria-expanded:hover:text-base-content');
       expect(clear.classList).not.toContain('btn-active');
 
       const group = byTestId('elevenlabs-clear-group');

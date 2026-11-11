@@ -8,6 +8,7 @@ import {
 import type { GatewayRegisterDiscordCommandsResult } from '@ptah-extension/shared';
 
 import { GatewayStateService } from '../services/gateway-state.service';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 const DISCORD_INVITE_PERMISSIONS = '292057779200';
 
@@ -43,6 +44,7 @@ interface RegisterFeedback {
 @Component({
   selector: 'ptah-discord-integration-kit',
   standalone: true,
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="flex flex-col gap-4" data-testid="gateway-discord-integration">
@@ -63,7 +65,7 @@ interface RegisterFeedback {
           />
           <button
             type="button"
-            class="btn btn-sm btn-outline"
+            ptahButton
             data-testid="gateway-discord-appid-save"
             (click)="onSaveDiscordAppId()"
           >
@@ -75,7 +77,7 @@ interface RegisterFeedback {
       <div class="flex flex-wrap items-center gap-2">
         @if (discordInviteUrl(); as url) {
           <a
-            class="btn btn-sm btn-outline"
+            ptahButton
             [href]="url"
             target="_blank"
             rel="noopener noreferrer"
@@ -90,7 +92,7 @@ interface RegisterFeedback {
         }
         <button
           type="button"
-          class="btn btn-sm btn-outline"
+          ptahButton
           data-testid="gateway-discord-register"
           [disabled]="registering()"
           (click)="onRegisterDiscordCommands()"
@@ -134,7 +136,9 @@ interface RegisterFeedback {
           </span>
           <button
             type="button"
-            class="btn btn-xs btn-ghost"
+            ptahButton
+            variant="ghost"
+            size="xs"
             data-testid="gateway-discord-guilds-refresh"
             (click)="onRefreshGuilds()"
           >

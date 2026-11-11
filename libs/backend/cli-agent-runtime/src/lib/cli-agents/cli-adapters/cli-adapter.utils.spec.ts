@@ -118,6 +118,9 @@ describe('buildTaskPrompt', () => {
   it('has one stable canary and the required tool table', () => {
     expect(PTAH_LANE_POLICY.match(/Lane policy id: ptah-lane-policy-v1/g)).toHaveLength(1);
     expect(PTAH_LANE_POLICY).toContain('search your tool list for "ptah_"');
+    expect(PTAH_LANE_POLICY).toContain('ui-ux-designer');
+    expect(PTAH_LANE_POLICY).toContain('angular-frontend-patterns');
+    expect(PTAH_LANE_POLICY).not.toContain('impeccable');
     for (const key of ['ptah_code_search_symbols', 'ptah_ast_analyze', 'ptah_lsp_references', 'ptah_get_diagnostics', 'ptah_memory_search', 'ptah_search_files', 'ptah_context_enrich_file', 'ptah_get_dependents', 'ptah_web_search', 'ptah_browser_navigate', 'ptah_browser_screenshot']) {
       expect(PTAH_LANE_POLICY).toContain(key);
     }

@@ -5,7 +5,10 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { InboxLayoutComponent } from '@ptah-extension/ui';
+import {
+  InboxLayoutComponent,
+  PtahButtonDirective,
+} from '@ptah-extension/ui';
 import { ReviewStateSchema } from '@ptah-extension/review-contracts';
 import { ReviewRunsStore } from '../review-runs.store';
 import { ReviewPageHeaderComponent } from './review-page-header.component';
@@ -33,6 +36,7 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
     ReviewRunDetailComponent,
     ReviewSettingsDrawerComponent,
     ReviewConfirmDialogComponent,
+    PtahButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block h-full w-full' },
@@ -189,7 +193,9 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
                   Try another repository or state.
                 </p>
                 <button
-                  class="btn btn-ghost btn-sm mt-3"
+                  ptahButton
+                  variant="ghost"
+                  class="mt-3"
                   (click)="store.clearFilters()"
                 >
                   Clear filters
@@ -201,7 +207,12 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
                 <p class="text-sm text-base-content-muted">
                   Runs will appear after the next poll.
                 </p>
-                <button class="btn btn-ghost btn-sm mt-3" (click)="store.load()">
+                <button
+                  ptahButton
+                  variant="ghost"
+                  class="mt-3"
+                  (click)="store.load()"
+                >
                   Refresh
                 </button>
               </div>
@@ -214,7 +225,9 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
               <!-- Also shown with "No matching runs": a later page can hold a match. -->
               <button
                 type="button"
-                class="btn btn-ghost btn-sm mt-4 w-full"
+                ptahButton
+                variant="ghost"
+                class="mt-4 w-full"
                 data-testid="review-runs-load-more"
                 [disabled]="store.loadingMore()"
                 (click)="loadMore()"

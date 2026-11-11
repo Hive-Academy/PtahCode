@@ -8,7 +8,10 @@ import {
 } from '@angular/core';
 import { VSCodeService, rpcCall } from '@ptah-extension/core';
 import { TabManagerService } from '@ptah-extension/chat-state';
-import { SettingsFieldComponent } from '@ptah-extension/ui';
+import {
+  SettingsFieldComponent,
+  PtahButtonDirective,
+} from '@ptah-extension/ui';
 import {
   SESSION_BUDGET_SETTINGS,
   isSessionBudgetPercentOrderValid,
@@ -171,7 +174,7 @@ function storedNumberIsValid(
 @Component({
   selector: 'ptah-session-budget-settings',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, SettingsFieldComponent],
+  imports: [SettingsBusyDisabledDirective, SettingsFieldComponent, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -210,10 +213,7 @@ function storedNumberIsValid(
             </p>
             <button
               type="button"
-              [class]="
-                'btn btn-outline btn-sm border-base-content-muted text-base-content ' +
-                focusRing
-              "
+              ptahButton
               (click)="reload()"
               data-testid="session-budget-retry"
             >

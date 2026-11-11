@@ -4,6 +4,7 @@ import type { SurfaceSelection } from '@ptah-extension/shared/mcp-apps-contracts
 import type { SurfaceComponentViewState } from '../surface-view-state';
 import { cellText, nextTableSort, tableRows, type TableNode } from '../table/table-rows';
 import { DashboardPagerComponent } from './dashboard-pager.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 interface TableColumn {
   readonly key: string;
@@ -28,13 +29,13 @@ function scalarCell(value: unknown): DashboardTableCell {
 @Component({
   selector: 'ptah-dashboard-table',
   standalone: true,
-  imports: [DashboardPagerComponent],
+  imports: [DashboardPagerComponent, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card card-bordered bg-base-100 p-3 text-base-content" (keydown.escape)="collapse($event)">
       <div class="flex items-center justify-between gap-2">
         <h3 class="text-sm font-semibold">{{ title() }}</h3>
-        <button #expandButton type="button" class="btn btn-ghost btn-xs"
+        <button #expandButton type="button" ptahButton variant="ghost" size="xs"
           [attr.aria-label]="(viewState().expanded ? 'Collapse ' : 'Expand ') + title()"
           [attr.aria-expanded]="!!viewState().expanded" [attr.aria-controls]="contentId"
           [attr.data-apps-focus-key]="focusKey('expand')" (click)="toggleExpanded()">
@@ -60,7 +61,7 @@ function scalarCell(value: unknown): DashboardTableCell {
                 <tr>
                   @for (column of columns(); track $index) {
                     <th scope="col" [class]="alignClass(column)" [attr.aria-sort]="ariaSort(column)">
-                      <button type="button" class="btn btn-ghost btn-xs"
+                      <button type="button" ptahButton variant="ghost" size="xs"
                         [attr.data-apps-focus-key]="focusKey('sort-' + $index)" (click)="sortBy(column)">{{ column.label }}</button>
                     </th>
                   }
@@ -74,7 +75,7 @@ function scalarCell(value: unknown): DashboardTableCell {
                       <td [class]="alignClass(column)">{{ cell(row.cells, $index) }}</td>
                     }
                     @if (node().selectable) {
-                      <td><button type="button" class="btn btn-ghost btn-xs"
+                      <td><button type="button" ptahButton variant="ghost" size="xs"
                         [attr.aria-label]="'Select row ' + (row.originalIndex + 1)"
                         [attr.aria-pressed]="isSelected(row.originalIndex)"
                         [attr.data-apps-focus-key]="focusKey('row-' + row.originalIndex)"

@@ -504,7 +504,7 @@ describe('WorkspaceIndexingComponent — busy state, last run, messages', () => 
     const pending = fixture.componentInstance.onStart(true);
     fixture.detectChanges();
     expect(button.disabled).toBe(true);
-    expect(button.querySelector('.loading-spinner')).not.toBeNull();
+    expect(button.getAttribute('aria-busy')).toBe('true');
     release(makeRpcResult(true, { accepted: true, state: 'indexed' }));
     await pending;
     fixture.detectChanges();

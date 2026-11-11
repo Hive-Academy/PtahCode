@@ -14,6 +14,7 @@ import {
   settingNotSavedMessage,
 } from '../feedback/settings-save-feedback.service';
 import { parseDecisionModelStatus } from '../providers/decision-model-row.view';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 const FOCUS =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
@@ -46,7 +47,7 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
 @Component({
   selector: 'ptah-host-routing-setting',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective],
+  imports: [SettingsBusyDisabledDirective, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -106,11 +107,8 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
             </p>
             <button
               type="button"
-              [class]="
-                'btn btn-outline btn-sm border-base-content-muted text-base-content ' +
-                focusRing
-              "
-              [ptahBusyDisabled]="saving()"
+              ptahButton
+              [busy]="saving()"
               (click)="reload()"
               data-testid="host-routing-retry"
             >

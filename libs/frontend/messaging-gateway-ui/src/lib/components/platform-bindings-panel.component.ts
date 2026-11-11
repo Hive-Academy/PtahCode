@@ -12,10 +12,12 @@ import type {
 } from '@ptah-extension/shared';
 
 import { GatewayStateService } from '../services/gateway-state.service';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-platform-bindings-panel',
   standalone: true,
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (approvalToast(); as msg) {
@@ -86,7 +88,9 @@ import { GatewayStateService } from '../services/gateway-state.service';
                 @if (canAllowSender(b)) {
                   <button
                     type="button"
-                    class="btn btn-xs btn-ghost"
+                    ptahButton
+                    variant="ghost"
+                    size="xs"
                     [attr.data-testid]="'gateway-allow-sender-' + b.id"
                     (click)="onAllowSender(b)"
                   >
@@ -120,7 +124,9 @@ import { GatewayStateService } from '../services/gateway-state.service';
                 @if (canAllowSender(b)) {
                   <button
                     type="button"
-                    class="btn btn-xs btn-ghost"
+                    ptahButton
+                    variant="ghost"
+                    size="xs"
                     [attr.data-testid]="'gateway-allow-sender-' + b.id"
                     (click)="onAllowSender(b)"
                   >

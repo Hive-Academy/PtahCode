@@ -273,6 +273,11 @@ export interface StatsLimitViewModel {
    */
   readonly refreshNotice?: string;
   readonly planTiles: readonly PlanLimitTileModel[];
+  /**
+   * Provider name of the owner the plan tiles belong to ("Codex", "Claude").
+   * Absent when the session has no listed owner; never a fixed provider.
+   */
+  readonly sessionProviderLabel?: string;
   readonly laneTiles: readonly LaneUsageTileModel[];
   readonly inspectorRuns: readonly InspectorLaneRunDetail[];
   readonly providerLimits: readonly ProviderLaneLimitModel[];

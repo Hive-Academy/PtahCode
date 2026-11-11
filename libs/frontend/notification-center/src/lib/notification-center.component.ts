@@ -10,11 +10,12 @@ import { Bell, Check, CircleAlert, MessageCircleQuestion, ShieldQuestion, Trash2
 import { AttentionPermissionActionsComponent, type AttentionItem } from '@ptah-extension/core';
 import { NotificationCenterStore } from './notification-center.store';
 import { NotificationSoundService } from './notification-sound.service';
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-notification-center',
   standalone: true,
-  imports: [LucideAngularModule, AttentionPermissionActionsComponent],
+  imports: [LucideAngularModule, AttentionPermissionActionsComponent, PtahButtonDirective, PtahIconButtonDirective],
   providers: [NotificationCenterStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
@@ -22,9 +23,9 @@ import { NotificationSoundService } from './notification-sound.service';
     '(document:click)': 'onDocumentClick($event)',
   },
   template: `
-    <button #bellButton type="button" class="btn btn-ghost btn-square btn-xs relative focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+    <button #bellButton type="button" ptahIconButton size="xs" [label]="bellLabel()"
       aria-haspopup="dialog" [attr.aria-expanded]="panelOpen()" aria-controls="ptah-notification-center-panel"
-      [attr.aria-label]="bellLabel()" title="Notifications" data-testid="notification-center-bell" (click)="toggle()">
+      data-testid="notification-center-bell" (click)="toggle()">
       <lucide-angular [img]="BellIcon" class="size-3.5" />
       @if (store.badgeCount() > 0) { <span class="absolute -right-1 -top-1 min-w-4 h-4 px-1 rounded-full bg-warning text-warning-content text-[10px] leading-4 text-center font-semibold" aria-hidden="true" data-testid="notification-count-badge">{{ visualCount() }}</span> }
     </button>
@@ -34,8 +35,8 @@ import { NotificationSoundService } from './notification-sound.service';
         data-testid="notification-center-panel" (keydown.escape)="close(true)">
         <header class="sticky top-0 z-10 flex items-center gap-2 border-b border-[color:var(--surface-border)] surface-3 p-3">
           <h2 #panelHeading id="ptah-notification-center-heading" tabindex="-1" class="flex-1 text-sm font-semibold outline-none">Notifications</h2>
-          <button type="button" class="btn btn-ghost btn-square btn-xs min-h-11 min-w-11" [attr.aria-label]="sound.muted() ? 'Unmute notification sounds' : 'Mute notification sounds'" (click)="sound.setMuted(!sound.muted())"><lucide-angular [img]="sound.muted() ? VolumeXIcon : Volume2Icon" class="size-3.5" /></button>
-          <button type="button" class="btn btn-ghost btn-xs min-h-11 disabled:opacity-100 disabled:text-base-content-muted" aria-label="Clear all notices" [disabled]="!store.canClearAll()" (click)="store.clearAll()"><lucide-angular [img]="ClearIcon" class="size-3.5" />Clear all notices</button>
+          <button type="button" ptahIconButton size="xs" [label]="sound.muted() ? 'Unmute notification sounds' : 'Mute notification sounds'" (click)="sound.setMuted(!sound.muted())"><lucide-angular [img]="sound.muted() ? VolumeXIcon : Volume2Icon" class="size-3.5" /></button>
+          <button type="button" ptahButton variant="ghost" size="xs" aria-label="Clear all notices" [disabled]="!store.canClearAll()" (click)="store.clearAll()"><lucide-angular [img]="ClearIcon" class="size-3.5" />Clear all notices</button>
         </header>
         @if (store.needsYou().length === 0 && store.recentNotices().length === 0) {
           <div class="px-3 py-11 text-center"><lucide-angular [img]="EmptyIcon" class="mx-auto size-7 text-success" aria-hidden="true" /><h3 class="mt-2 text-sm font-semibold">All clear</h3><p class="mt-1 text-xs text-base-content-muted">Nothing needs your attention.</p></div>

@@ -215,9 +215,11 @@ describe('buildNewProjectSeedPrompt — profile-driven skills', () => {
     expect(prompt).not.toContain('nx-workspace-architect');
   });
 
-  it('keeps ddd-architecture on every platform', () => {
+  it('keeps ddd-architecture on every platform when installed', () => {
     for (const intake of [BASE_INTAKE, DOTNET_INTAKE]) {
-      expect(buildNewProjectSeedPrompt(intake)).toContain('`ddd-architecture`');
+      expect(buildNewProjectSeedPrompt(intake, ALL_INSTALLED)).toContain(
+        '`ddd-architecture`',
+      );
     }
   });
 
@@ -240,12 +242,15 @@ describe('buildNewProjectSeedPrompt — profile-driven skills', () => {
   });
 
   it('names no preset skill when the platform is one we have no profile for', () => {
-    const prompt = buildNewProjectSeedPrompt({
-      ...BASE_INTAKE,
-      platform: 'other',
-      stack: 'other',
-      stackOther: 'Elixir + Phoenix',
-    });
+    const prompt = buildNewProjectSeedPrompt(
+      {
+        ...BASE_INTAKE,
+        platform: 'other',
+        stack: 'other',
+        stackOther: 'Elixir + Phoenix',
+      },
+      ALL_INSTALLED,
+    );
 
     expect(prompt).toContain('**Platform:** Other / not listed');
     expect(prompt).toContain('Other — Elixir + Phoenix');
@@ -374,9 +379,7 @@ describe('buildNewProjectSeedPrompt — skills that are not installed', () => {
     expect(after).toContain(`\`${PYTHON.architect}\``);
   });
 
-  it('keeps the ddd step and the `other` platform branch out of this', () => {
-    // `domain` is not gated — it is not a per-platform preset — and the `other`
-    // branch has its own prose, which an empty skill set must not replace.
+  it('omits the domain skill when unavailable and preserves the `other` platform branch', () => {
     const other = buildNewProjectSeedPrompt(
       { ...BASE_INTAKE, platform: 'other', stack: 'other' },
       { availableSkillIds: [] },
@@ -386,10 +389,18 @@ describe('buildNewProjectSeedPrompt — skills that are not installed', () => {
       'ask me which language, runtime and package manager',
     );
     expect(other).not.toContain(GENERIC_INITIALIZER);
-    expect(other).toContain('`ddd-architecture`');
-    expect(
-      buildNewProjectSeedPrompt(PYTHON_INTAKE, { availableSkillIds: [] }),
-    ).toContain('`ddd-architecture`');
+    expect(other).not.toContain('`ddd-architecture`');
+    expect(other).toContain(
+      'name the bounded contexts directly from the domain model',
+    );
+
+    const pythonUnavailable = buildNewProjectSeedPrompt(PYTHON_INTAKE, {
+      availableSkillIds: [],
+    });
+    expect(pythonUnavailable).not.toContain('`ddd-architecture`');
+    expect(pythonUnavailable).toContain(
+      'name the bounded contexts directly from the domain model',
+    );
   });
 });
 
@@ -406,7 +417,7 @@ describe('buildNewProjectSeedPrompt — the workspace-tool decision', () => {
   });
 
   it('adds a seventh step for .NET and leaves the rest in order', () => {
-    const prompt = buildNewProjectSeedPrompt(DOTNET_INTAKE);
+    const prompt = buildNewProjectSeedPrompt(DOTNET_INTAKE, ALL_INSTALLED);
     expect(prompt).toMatch(/^7\. /m);
     expect(prompt.indexOf('In that same discovery')).toBeLessThan(
       prompt.indexOf('`ddd-architecture`'),

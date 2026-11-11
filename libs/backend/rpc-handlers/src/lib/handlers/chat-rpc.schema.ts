@@ -164,6 +164,7 @@ export const ChatResumeParamsSchema = z
     sessionId: uuidString('sessionId'),
     ptahUiFence: z.boolean().optional(),
     historyBlockOwners: z.literal(true).optional(),
+    adoptFollowUps: z.literal(true).optional(),
     historyPage: z
       .object({ maxEvents: HistoryPageSizeSchema })
       .strict()

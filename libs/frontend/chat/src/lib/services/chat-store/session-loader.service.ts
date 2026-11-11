@@ -1038,6 +1038,11 @@ export class SessionLoaderService {
           ...(opts?.activate === true && !targetTabId
             ? { activate: true }
             : {}),
+          // A user-opened tab takes over the follow-up queue of a session
+          // that is live under an earlier tab id.
+          ...(!targetTabId && !isResync && opts?.reason !== 'compaction'
+            ? { adoptFollowUps: true as const }
+            : {}),
           ...(this.vscodeService.isElectron ? { ptahUiFence: true } : {}),
         },
         { timeout: SessionLoaderService.RESUME_TIMEOUT_MS },

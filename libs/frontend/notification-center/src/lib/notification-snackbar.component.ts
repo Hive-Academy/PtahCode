@@ -9,11 +9,12 @@ import {
   CircleAlert, MessageCircleQuestion, ShieldQuestion, TriangleAlert,
   X, LucideAngularModule,
 } from 'lucide-angular';
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-notification-snackbar',
   standalone: true,
-  imports: [LucideAngularModule, AttentionPermissionActionsComponent],
+  imports: [LucideAngularModule, AttentionPermissionActionsComponent, PtahButtonDirective, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'ptah-snackbar-host', '[style.bottom]': "limit() === 1 ? '11rem' : '1rem'" },
   styles: [`
@@ -27,7 +28,7 @@ import {
     @if (!panelOpen()) {
       <div class="flex flex-col gap-1" data-testid="notification-snackbars">
         @if (overflow() > 0) {
-          <button type="button" class="snackbar-more btn btn-ghost btn-xs self-end focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          <button type="button" ptahButton variant="ghost" size="xs" class="snackbar-more self-end"
             [attr.aria-label]="'Show ' + overflow() + ' more notifications'"
             (click)="$event.stopPropagation(); openNotifications.emit()">+{{ overflow() }} more</button>
         }
@@ -42,8 +43,8 @@ import {
               <lucide-angular [img]="icon(item)" class="size-4 shrink-0" [class.text-state-need]="isRequest(item)" [class.text-state-err]="!isRequest(item)" aria-hidden="true" />
               <span class="shrink-0 text-[10px] font-semibold text-base-content-muted">{{ kindLabel(item) }}</span>
               <p class="min-w-0 flex-1 truncate text-xs font-semibold text-base-content" [attr.title]="sessionName(item)">{{ sessionName(item) }}</p>
-               <button type="button" class="btn btn-ghost btn-square size-6 min-h-6 min-w-6 shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                [attr.aria-label]="'Dismiss ' + kindLabel(item) + ' presentation for ' + sessionName(item) + ' in ' + workspaceName(item)" (click)="dismiss(item.key)">
+               <button type="button" ptahIconButton size="xs" class="shrink-0"
+                [label]="'Dismiss ' + kindLabel(item) + ' presentation for ' + sessionName(item) + ' in ' + workspaceName(item)" (click)="dismiss(item.key)">
                 <lucide-angular [img]="XIcon" class="size-4" aria-hidden="true" />
               </button>
             </div>

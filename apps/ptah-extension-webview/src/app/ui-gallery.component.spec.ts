@@ -222,3 +222,55 @@ it('renders the button family as one reference with the token look on every dire
     col.querySelectorAll('[data-testid="long-text-specimen"] button'),
   ).toHaveLength(1);
 });
+
+it('renders the form controls family with a directive on every control', () => {
+  TestBed.configureTestingModule({
+    providers: [
+      { provide: Router, useValue: { navigateByUrl: jest.fn() } },
+      { provide: ThemeService, useValue: createThemeServiceStub() },
+    ],
+  });
+  const fixture = TestBed.createComponent(UiGalleryComponent);
+  fixture.detectChanges();
+  const root = fixture.nativeElement as HTMLElement;
+
+  expect(root.querySelector('section#family-form-controls')).not.toBeNull();
+  const ref = root.querySelector(
+    '[data-testid="form-controls-reference"]',
+  ) as HTMLElement;
+  expect(ref).not.toBeNull();
+  expect(
+    ref.querySelectorAll('input, textarea, select').length,
+  ).toBeGreaterThan(30);
+  expect(ref.querySelectorAll('ptah-field').length).toBeGreaterThan(20);
+  expect(
+    ref.querySelectorAll('[data-ptah-control="rich-select"][role="combobox"]').length,
+  ).toBeGreaterThan(5);
+  expect(ref.querySelector('[data-testid="form-controls-provider-form"]')).not.toBeNull();
+  expect(ref.querySelectorAll('.ptah-field[data-busy="true"]')).toHaveLength(1);
+  expect(
+    ref.querySelectorAll(
+      'input:not([data-ptah-control]), textarea:not([data-ptah-control]), select:not([data-ptah-control])',
+    ),
+  ).toHaveLength(0);
+  for (const kind of ['input', 'textarea', 'select', 'checkbox', 'toggle']) {
+    expect(
+      ref.querySelectorAll(`[data-ptah-control="${kind}"]`).length,
+    ).toBeGreaterThan(0);
+  }
+  expect(ref.querySelectorAll('[data-ptah-tone="mono"]').length).toBeGreaterThan(0);
+  expect(ref.querySelectorAll('[data-ptah-tone="compact"]')).toHaveLength(1);
+  expect(ref.querySelectorAll('[aria-invalid="false"]')).toHaveLength(0);
+  expect(ref.querySelectorAll('[aria-invalid="true"]').length).toBeGreaterThan(3);
+  expect(ref.querySelector('[data-testid="form-controls-tint-base-200"]')).not.toBeNull();
+  expect(ref.querySelector('[data-testid="form-controls-tint-base-300"]')).not.toBeNull();
+  for (const control of Array.from(
+    ref.querySelectorAll<HTMLElement>('[data-ptah-control]'),
+  )) {
+    const named =
+      control.hasAttribute('aria-label') ||
+      control.closest('label') !== null ||
+      (control.id !== '' && root.querySelector(`label[for="${control.id}"]`) !== null);
+    expect(named).toBe(true);
+  }
+});

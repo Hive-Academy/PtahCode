@@ -18,6 +18,9 @@ import type {
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { VoiceDownloadProgressService } from '../../services/voice-download-progress.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
+import {
+  PtahButtonDirective,
+} from '@ptah-extension/ui';
 
 /** Matches the backend TTS download-progress sentinel (`TTS_PROGRESS_MODEL`). */
 const TTS_PROGRESS_MODEL = 'tts';
@@ -68,7 +71,7 @@ interface VoiceGroup {
 @Component({
   selector: 'ptah-local-tts-panel',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -158,8 +161,11 @@ interface VoiceGroup {
                 />
                 <button
                   type="button"
-                  class="btn btn-primary btn-xs"
-                  [ptahBusyDisabled]="saving() || !customModelValid()"
+                  ptahButton
+                  variant="primary"
+                  size="xs"
+                  [busy]="saving()"
+                  [disabled]="!customModelValid()"
                   (click)="saveCustomSource()"
                   data-testid="local-tts-custom-save"
                 >
@@ -281,8 +287,10 @@ interface VoiceGroup {
                 <div class="flex items-center gap-1">
                   <button
                     type="button"
-                    class="btn btn-ghost btn-xs gap-1"
-                    [ptahBusyDisabled]="isPreviewing() || saving()"
+                    ptahButton
+                    variant="ghost"
+                    size="xs"
+                    [busy]="isPreviewing() || saving()"
                     (click)="previewVoice()"
                     data-testid="local-tts-preview-btn"
                   >
@@ -295,8 +303,10 @@ interface VoiceGroup {
                   </button>
                   <button
                     type="button"
-                    class="btn btn-outline btn-xs gap-1"
-                    [ptahBusyDisabled]="saving() || !canDownload()"
+                    ptahButton
+                    size="xs"
+                    [busy]="saving()"
+                    [disabled]="!canDownload()"
                     (click)="downloadTtsModel()"
                     data-testid="local-tts-download-btn"
                   >

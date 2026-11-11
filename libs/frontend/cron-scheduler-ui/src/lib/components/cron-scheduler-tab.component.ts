@@ -28,6 +28,10 @@ import {
 import { formatRelative, formatTime } from './cron-format';
 import { CronJobCardComponent } from './cron-job-card.component';
 import { CronJobDetailDrawerComponent } from './cron-job-detail-drawer.component';
+import {
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 
 interface CronJobFormState {
   id: string | null;
@@ -86,6 +90,8 @@ function emptyForm(timezone: string): CronJobFormState {
     LucideAngularModule,
     CronJobCardComponent,
     CronJobDetailDrawerComponent,
+    PtahButtonDirective,
+    PtahIconButtonDirective,
   ],
   template: `
     @if (!isElectron()) {
@@ -137,7 +143,8 @@ function emptyForm(timezone: string): CronJobFormState {
             @if (reviewAvailable()) {
               <a
                 routerLink="/review-runs"
-                class="btn btn-ghost btn-sm"
+                ptahButton
+                variant="ghost"
                 aria-label="Open review runs"
                 data-testid="cron-review-runs-link"
               >Review runs</a>
@@ -172,9 +179,8 @@ function emptyForm(timezone: string): CronJobFormState {
             </div>
             <button
               type="button"
-              class="btn btn-ghost btn-sm btn-square text-base-content-muted transition-colors duration-150 hover:text-base-content"
-              aria-label="Refresh jobs"
-              title="Refresh jobs"
+              ptahIconButton
+              label="Refresh jobs"
               [disabled]="loading()"
               (click)="refresh()"
             >
@@ -187,7 +193,8 @@ function emptyForm(timezone: string): CronJobFormState {
             </button>
             <button
               type="button"
-              class="btn btn-primary btn-sm transition-colors duration-150"
+              ptahButton
+              variant="primary"
               data-testid="cron-new-job-btn"
               (click)="newJob()"
             >
@@ -302,7 +309,9 @@ function emptyForm(timezone: string): CronJobFormState {
             </p>
             <button
               type="button"
-              class="btn btn-primary btn-sm mt-1 transition-colors duration-150"
+              ptahButton
+              variant="primary"
+              class="mt-1"
               (click)="newJob()"
             >
               New job
@@ -433,7 +442,8 @@ function emptyForm(timezone: string): CronJobFormState {
             <div class="mt-5 flex gap-2">
               <button
                 type="button"
-                class="btn btn-primary btn-sm transition-colors duration-150"
+                ptahButton
+                variant="primary"
                 data-testid="cron-form-submit"
                 [disabled]="!canSubmit() || loading()"
                 (click)="submitForm()"
@@ -442,7 +452,8 @@ function emptyForm(timezone: string): CronJobFormState {
               </button>
               <button
                 type="button"
-                class="btn btn-ghost btn-sm transition-colors duration-150"
+                ptahButton
+                variant="ghost"
                 (click)="closeForm()"
               >
                 Cancel

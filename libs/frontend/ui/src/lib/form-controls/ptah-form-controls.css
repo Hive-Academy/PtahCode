@@ -1,0 +1,163 @@
+/* Ptah form controls family look (TASK_2026_950_ed73).
+   Scope: only elements that use ptahInput, ptahTextarea, ptahSelect,
+   ptahCheckbox or ptahToggle. Each directive sets the data-ptah-control host
+   attribute. A raw .input, .select, .textarea, .checkbox or .toggle keeps the
+   DaisyUI and glass rules of styles.css until it moves to a directive.
+   Uses --ptah-* tokens only.
+   Imported before @tailwind components in styles.css. The glass form rules in
+   styles.css have a specificity of at most (0,5,0). The :is(.x, #ptah-control)
+   tail counts as one id, so each rule here wins without !important. The id
+   never matches an element: it only raises the specificity.
+   Layout stays with the consumer: no rule sets position, width, margin or
+   padding-inline. The DaisyUI padding of each size already equals the
+   control padding tokens, and padding utilities (pl-8, pr-9) still win.
+   Height, radius, border, fill, focus and font are the look of the family.
+   Utility classes such as h-8, rounded-lg or text-xs have no effect on a
+   directive host: use the size and tone inputs. */
+
+/* Text controls: input, textarea, select */
+.input[data-ptah-control]:is(.input, #ptah-control),
+.textarea[data-ptah-control]:is(.textarea, #ptah-control),
+.select[data-ptah-control]:is(.select, #ptah-control) {
+  height: var(--ptah-control-h-sm);
+  min-height: var(--ptah-control-h-sm);
+  border-radius: var(--ptah-radius-control);
+  border-width: var(--ptah-border-width);
+  border-style: solid;
+  border-color: var(--ptah-field-border);
+  background-color: var(--ptah-field-bg);
+  color: var(--ptah-field-fg);
+  font-size: var(--ptah-text-body-size);
+  line-height: var(--ptah-text-body-leading);
+  font-weight: var(--ptah-text-body-weight);
+  box-shadow: var(--ptah-elevation-0);
+  outline: none;
+  transition-property: border-color, background-color, color, opacity;
+  transition-duration: var(--ptah-duration-fast);
+  transition-timing-function: var(--ptah-ease-standard);
+}
+
+/* Sizes: xs (24 px), sm (32 px, default), md (40 px) */
+.input[data-ptah-control].input-xs:is(.input, #ptah-control),
+.select[data-ptah-control].select-xs:is(.select, #ptah-control) {
+  height: var(--ptah-control-h-xs);
+  min-height: var(--ptah-control-h-xs);
+  font-size: var(--ptah-text-label-size);
+  line-height: var(--ptah-text-label-leading);
+}
+
+.input[data-ptah-control].input-md:is(.input, #ptah-control),
+.select[data-ptah-control].select-md:is(.select, #ptah-control) {
+  height: var(--ptah-control-h-md);
+  min-height: var(--ptah-control-h-md);
+}
+
+/* Textarea: the height follows rows or the consumer. Only a minimum is set. */
+.textarea[data-ptah-control]:is(.textarea, #ptah-control) {
+  height: auto;
+  min-height: var(--ptah-field-textarea-min-h);
+  border-radius: var(--ptah-radius-field-multiline);
+  resize: vertical;
+}
+
+.textarea[data-ptah-control].textarea-xs:is(.textarea, #ptah-control) {
+  min-height: var(--ptah-control-h-md);
+  font-size: var(--ptah-text-label-size);
+  line-height: var(--ptah-text-label-leading);
+}
+
+/* Select: keep the DaisyUI chevron. The glass rule uses the background
+   shorthand, which removes it, so it is declared again here. */
+.select[data-ptah-control]:is(.select, #ptah-control) {
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - var(--ptah-select-chevron-inset)) 50%,
+    calc(100% - var(--ptah-select-chevron-inset) + var(--ptah-select-chevron-size)) 50%;
+  background-size:
+    var(--ptah-select-chevron-size) var(--ptah-select-chevron-size),
+    var(--ptah-select-chevron-size) var(--ptah-select-chevron-size);
+  background-repeat: no-repeat;
+}
+
+/* Tones: mono (paths, ids, code) and compact (dense rows) */
+:is(.input, .textarea, .select)[data-ptah-control][data-ptah-tone='mono']:is(.input, .textarea, .select, #ptah-control) {
+  font-family: var(--ptah-font-mono);
+  font-size: var(--ptah-text-code-size);
+  line-height: var(--ptah-text-code-leading);
+  font-weight: var(--ptah-text-code-weight);
+}
+
+:is(.input, .textarea, .select)[data-ptah-control][data-ptah-tone='compact']:is(.input, .textarea, .select, #ptah-control) {
+  font-size: var(--ptah-text-label-size);
+  line-height: var(--ptah-text-label-leading);
+}
+
+.input[data-ptah-control]:is(.input, #ptah-control)::placeholder,
+.textarea[data-ptah-control]:is(.textarea, #ptah-control)::placeholder {
+  color: var(--ptah-field-placeholder);
+  opacity: 1;
+}
+
+/* Hover */
+:is(.input, .textarea, .select)[data-ptah-control]:is(:hover, [data-state='hover']):not(:disabled, :focus-visible, [aria-invalid='true']):is(.input, .textarea, .select, #ptah-control) {
+  border-color: var(--ptah-field-border-hover);
+}
+
+/* Error: aria-invalid="true". The attribute is absent when the control is valid. */
+:is(.input, .textarea, .select)[data-ptah-control][aria-invalid='true']:is(.input, .textarea, .select, #ptah-control) {
+  border-color: var(--ptah-field-border-invalid);
+}
+
+/* Keyboard focus ring: shared outline, never a box shadow or a halo */
+:is(.input, .textarea, .select)[data-ptah-control]:is(:focus-visible, [data-state='focus']):is(.input, .textarea, .select, #ptah-control) {
+  outline-style: solid;
+  outline-width: var(--ptah-focus-ring-width);
+  outline-offset: var(--ptah-focus-ring-offset);
+  outline-color: var(--ptah-focus-ring-color);
+  box-shadow: var(--ptah-elevation-0);
+}
+
+/* A focused invalid control keeps the error edge. */
+:is(.input, .textarea, .select)[data-ptah-control]:is(:focus-visible, [data-state='focus']):not([aria-invalid='true']):is(.input, .textarea, .select, #ptah-control) {
+  border-color: var(--ptah-field-border-hover);
+}
+
+/* Disabled: native disabled only */
+:is(.input, .textarea, .select)[data-ptah-control]:disabled:is(.input, .textarea, .select, #ptah-control) {
+  background-color: var(--ptah-field-disabled-bg);
+  border-color: var(--ptah-border-color);
+  color: var(--ptah-field-disabled-fg);
+  opacity: var(--ptah-field-disabled-opacity);
+  cursor: not-allowed;
+}
+
+/* Choice controls: checkbox and toggle. DaisyUI keeps the geometry of each
+   size (checkbox xs 16 px, sm 20 px; toggle xs 16 x 24 px, sm 20 x 32 px)
+   and the checked color (the primary tone class). */
+.checkbox[data-ptah-control]:not(:checked, :indeterminate):is(.checkbox, #ptah-control) {
+  border-color: var(--ptah-choice-edge);
+}
+
+.toggle[data-ptah-control]:not(:checked, :indeterminate):is(.toggle, #ptah-control) {
+  border-color: var(--ptah-choice-edge);
+  color: var(--ptah-choice-edge);
+}
+
+.checkbox[data-ptah-control]:is(:checked, :indeterminate):is(.checkbox, #ptah-control),
+.toggle[data-ptah-control]:is(:checked, :indeterminate):is(.toggle, #ptah-control) {
+  border-color: var(--ptah-choice-on);
+}
+
+:is(.checkbox, .toggle)[data-ptah-control]:is(:focus-visible, [data-state='focus']):is(.checkbox, .toggle, #ptah-control) {
+  outline-style: solid;
+  outline-width: var(--ptah-focus-ring-width);
+  outline-offset: var(--ptah-focus-ring-offset);
+  outline-color: var(--ptah-focus-ring-color);
+}
+
+:is(.checkbox, .toggle)[data-ptah-control]:disabled:is(.checkbox, .toggle, #ptah-control) {
+  opacity: var(--ptah-field-disabled-opacity);
+  cursor: not-allowed;
+}

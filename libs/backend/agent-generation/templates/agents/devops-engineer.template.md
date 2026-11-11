@@ -60,6 +60,11 @@ Discover the task folder first — never assume a document exists.
    surface. Cite them; do not restate them in a pipeline comment.
 4. The existing pipeline file, build target or service definition closest to the change.
    Read two before editing one.
+5. `Required Skills:` in the brief or batch — this role honours the brief's
+   `Required Skills:` line by loading each named skill before design or edits when the host
+   lists it (or, when `none` or omitted, any skill in the host's skill list whose
+   description matches the task's stack and layer when the host lists it), and never stops
+   work because an optional skill is absent.
 
 ## Method
 

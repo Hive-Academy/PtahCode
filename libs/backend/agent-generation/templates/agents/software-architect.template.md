@@ -102,6 +102,11 @@ there, in this authority order (highest first):
 4. `design-spec.md`, `design-handoff.md`,
    `design-assets-inventory.md` — present only for UI work.
 5. `implementation-plan.md` — a previous version of your own deliverable.
+6. `Required Skills:` in the brief — this role honours the brief's `Required Skills:` line
+   by loading each named skill before designing when the host lists it, and writes a
+   `Required Skills:` line (skill ids chosen from the host's skill list whose descriptions
+   match each component's stack and layer, or `none`; each loaded when the host lists it
+   without stopping work if absent) in the phase brief and team-leader handoff.
 
 Record a missing document only when its absence changes a decision, and say
 which decision. Do not demand a file just because this prompt names it.
@@ -237,6 +242,7 @@ Write the plan with `Write`, using the absolute path of
 ## Team-leader handoff
 
 - Recommended executors: [agent type per component, with the reason]
+- Required Skills: [skill ids from the host's skill list whose descriptions match the stack and layer, loaded when the host lists it — or none]
 - Complexity: [LOW | MEDIUM | HIGH, with rationale]
 - Dependencies and ordering: [component-level constraints only]
 - Parallel-safe work: [file-disjoint components, or none]

@@ -24,7 +24,10 @@ import {
   Trash2,
 } from 'lucide-angular';
 import type { ScheduledJobDto } from '@ptah-extension/shared';
-import { NativeCardComponent } from '@ptah-extension/ui';
+import {
+  NativeCardComponent,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 
 import {
   buildJobMetrics,
@@ -37,7 +40,7 @@ import {
   selector: 'ptah-cron-job-card',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [LucideAngularModule, NativeCardComponent],
+  imports: [LucideAngularModule, NativeCardComponent, PtahIconButtonDirective],
   template: `
     <ptah-native-card
       class="block rounded-xl"
@@ -105,9 +108,9 @@ import {
       >
         <button
           type="button"
-          class="btn btn-ghost btn-xs btn-square text-base-content-muted transition-colors duration-150"
-          aria-label="Run now"
-          title="Run now"
+          ptahIconButton
+          size="xs"
+          label="Run now"
           (click)="runNow.emit()"
         >
           <lucide-angular
@@ -118,9 +121,9 @@ import {
         </button>
         <button
           type="button"
-          class="btn btn-ghost btn-xs btn-square text-base-content-muted transition-colors duration-150"
-          aria-label="Edit job"
-          title="Edit job"
+          ptahIconButton
+          size="xs"
+          label="Edit job"
           (click)="edit.emit()"
         >
           <lucide-angular
@@ -131,9 +134,9 @@ import {
         </button>
         <button
           type="button"
-          class="btn btn-ghost btn-xs btn-square text-base-content-muted transition-colors duration-150"
-          [attr.aria-label]="job().enabled ? 'Disable job' : 'Enable job'"
-          [attr.title]="job().enabled ? 'Disable job' : 'Enable job'"
+          ptahIconButton
+          size="xs"
+          [label]="job().enabled ? 'Disable job' : 'Enable job'"
           (click)="toggled.emit()"
         >
           <lucide-angular

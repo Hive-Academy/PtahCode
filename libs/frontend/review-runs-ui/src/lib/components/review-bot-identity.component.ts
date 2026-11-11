@@ -1,9 +1,11 @@
 import { ChangeDetectionStrategy, Component, inject, input, output } from '@angular/core';
 import { ReviewRunsStore } from '../review-runs.store';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-review-bot-identity',
   standalone: true,
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
             <section class="space-y-2">
@@ -47,7 +49,7 @@ import { ReviewRunsStore } from '../review-runs.store';
               <div class="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  class="btn btn-primary btn-sm"
+                  ptahButton variant="primary"
                   [disabled]="store.credentialState() === 'saving'"
                   (click)="submitted.emit(tokenInput)"
                 >
@@ -55,7 +57,7 @@ import { ReviewRunsStore } from '../review-runs.store';
                 </button>
                 <button
                   type="button"
-                  class="btn btn-ghost btn-sm"
+                  ptahButton variant="ghost"
                   (click)="store.loadBotIdentity()"
                 >
                   Verify connection
@@ -63,7 +65,7 @@ import { ReviewRunsStore } from '../review-runs.store';
                 @if (hasToken()) {
                   <button
                     type="button"
-                    class="btn btn-ghost btn-sm"
+                    ptahButton variant="ghost"
                     (click)="removeRequested.emit()"
                   >
                     Remove connection

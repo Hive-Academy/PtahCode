@@ -36,7 +36,11 @@ import {
   TabManagerService,
 } from '@ptah-extension/chat';
 import { SessionInspectorComponent } from '@ptah-extension/chat/inspector';
-import { PlanLimitsStore, SURFACE_ACTIVE } from '@ptah-extension/core';
+import {
+  AuthStateService,
+  PlanLimitsStore,
+  SURFACE_ACTIVE,
+} from '@ptah-extension/core';
 import {
   AgentMonitorStore,
   BackgroundAgentStore,
@@ -551,6 +555,16 @@ describe('CanvasRailBoardComponent rendering', () => {
         { provide: CanvasLayoutService, useValue: { containerWidth: width } },
         { provide: CanvasLayoutPersistenceService, useValue: { writeFailed } },
         { provide: PlanLimitsStore, useValue: { snapshot: () => null } },
+        {
+          // The session stats source reads the main provider. The real
+          // service starts an auth status read that never settles here.
+          provide: AuthStateService,
+          useValue: {
+            isLoaded: () => true,
+            isLoading: () => false,
+            activeProviderId: () => 'anthropic',
+          },
+        },
         {
           provide: AgentMonitorStore,
           useValue: { agentsOwnedBySession: () => [], agents, subagents },

@@ -1029,6 +1029,12 @@ Default
       expect(callArgs.systemPromptAppend).toContain(
         "Reference only skills relevant to this agent's role; every skill listed here is one this agent may invoke.",
       );
+      expect(callArgs.systemPromptAppend).toContain(
+        "When an available skill's description matches this role's work, the generated role instructions must name that skill by its exact id and say to load it before that work; never name a skill that is not in the list.",
+      );
+      expect(callArgs.prompt).toContain(
+        "name that skill by its exact id and say to load it before that work; never name a skill that is not in the list.",
+      );
       expect(callArgs.systemPromptAppend).not.toContain('where relevant');
       expect(callArgs.systemPromptAppend).toContain('FORMATTED_SKILLS_HERE');
       // `pluginPaths` reaches the LLM as PROSE in the system prompt and by no

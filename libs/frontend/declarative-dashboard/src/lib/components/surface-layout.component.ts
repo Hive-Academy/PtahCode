@@ -13,6 +13,7 @@ import {
 import { SURFACE_LIMITS, type SurfaceAction } from '@ptah-extension/shared/mcp-apps-contracts/surface';
 import type { SurfaceActionInvoke, SurfaceActionUiState } from '../surface-interaction';
 import type { LayoutNode, SurfaceNode } from '../view-model/view-model.types';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /**
  * Children are rendered by the host's template, never by a component imported
@@ -128,7 +129,7 @@ function submitStatusText(state: SurfaceActionUiState | undefined): string {
 @Component({
   selector: 'ptah-surface-layout',
   standalone: true,
-  imports: [NgTemplateOutlet],
+  imports: [NgTemplateOutlet, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [SURFACE_CONTAINER_GRID_STYLES, SURFACE_CONTAINER_BODY_STYLES, COLLAPSE_STYLES],
   template: `
@@ -152,7 +153,7 @@ function submitStatusText(state: SurfaceActionUiState | undefined): string {
     <ng-template #submit>
       @for (action of submitActions(); track $index + ':' + action.id) {
         <div class="flex flex-wrap items-center gap-2">
-          <button type="button" class="btn btn-primary btn-sm" [disabled]="isSubmitDisabled(action)"
+          <button type="button" ptahButton variant="primary" [disabled]="isSubmitDisabled(action)"
             [attr.aria-describedby]="statusId($index)" [attr.data-apps-focus-key]="focusKey('action-' + action.id)"
             (click)="invoke(action)">{{ action.label.text }}</button>
           <!-- Only "Sent" carries color (prototype); every other state stays base-content text. -->

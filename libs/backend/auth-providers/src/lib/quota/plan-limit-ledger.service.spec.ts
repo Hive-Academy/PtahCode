@@ -1094,6 +1094,53 @@ describe('PlanLimitLedgerService — persistence (P6, F24, F74)', () => {
     expect(afterReset.ledger.knownOwners()).toEqual([]);
   });
 
+  // Regression (Codex stayed "AT LIMIT" at 12% used): a table-reported weekly
+  // hit restored from storage must clear on the first fresh below-limit read,
+  // and must stay cleared after the next restart.
+  it('a restored table-reported hit clears on a fresh below-limit read of the new window', () => {
+    const storage = memoryStorage();
+    const oldReset = T0 + 4 * DAY;
+    const first = harness({ storage });
+    first.ledger.recordWindowEvidence(OWNER_A, {
+      ...readWindow('weekly', T0, 100, {
+        resetsAt: oldReset,
+        resetSource: 'provider-api',
+      }),
+      exhaustion: { observedAt: T0, source: 'provider-api' },
+    });
+    const state = (ledger: PlanLimitLedgerService, now: number) => {
+      const weekly = windowOf(ledger, OWNER_A, 'weekly');
+      return (
+        weekly &&
+        classifyWindow(weekly, {
+          now,
+          status: 'available',
+          freshnessMs: FRESHNESS_MS,
+          nearLimitPercent: NEAR_LIMIT_PERCENT,
+        })
+      );
+    };
+
+    const at = T0 + HOUR;
+    const restarted = harness({ storage, at });
+    expect(state(restarted.ledger, at)).toBe('limit-reached');
+
+    restarted.ledger.recordWindowEvidence(
+      OWNER_A,
+      readWindow('weekly', at, 12, {
+        resetsAt: at + 7 * DAY,
+        resetSource: 'provider-api',
+      }),
+    );
+    expect(windowOf(restarted.ledger, OWNER_A, 'weekly')?.exhaustion).toBe(
+      undefined,
+    );
+    expect(state(restarted.ledger, at)).toBe('ok');
+
+    const again = harness({ storage, at: at + MINUTE });
+    expect(state(again.ledger, at + MINUTE)).not.toBe('limit-reached');
+  });
+
   it('a corrupt payload starts empty; a corrupt owner entry is dropped alone', () => {
     const corrupt = harness({
       storage: memoryStorage({ [PLAN_LIMIT_LEDGER_STORAGE_KEY]: 'garbage' }),

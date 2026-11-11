@@ -15,7 +15,10 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { LucideAngularModule, X, Check } from 'lucide-angular';
-import { NativePopoverComponent } from '@ptah-extension/ui';
+import {
+  NativePopoverComponent,
+  PtahButtonDirective,
+} from '@ptah-extension/ui';
 import {
   AppStateManager,
   defaultSessionName,
@@ -74,6 +77,7 @@ const TILE_BOUND_MESSAGE = `The board holds ${MAX_CANVAS_TILES} sessions. Close 
     CanvasRailBoardComponent,
     LucideAngularModule,
     NativePopoverComponent,
+    PtahButtonDirective,
   ],
   template: `
     <div
@@ -141,7 +145,9 @@ const TILE_BOUND_MESSAGE = `The board holds ${MAX_CANVAS_TILES} sessions. Close 
               <div class="flex gap-2">
                 <button
                   type="button"
-                  class="btn btn-sm btn-ghost flex-1 gap-1.5 text-base-content-muted"
+                  ptahButton
+                  variant="ghost"
+                  class="flex-1"
                   (click)="handleCancelSession()"
                 >
                   <lucide-angular [img]="XIcon" class="w-3 h-3" />
@@ -149,7 +155,9 @@ const TILE_BOUND_MESSAGE = `The board holds ${MAX_CANVAS_TILES} sessions. Close 
                 </button>
                 <button
                   type="button"
-                  class="btn btn-sm btn-primary flex-1 gap-1.5"
+                  ptahButton
+                  variant="primary"
+                  class="flex-1"
                   (click)="handleCreateSession()"
                 >
                   <lucide-angular [img]="CheckIcon" class="w-3 h-3" />

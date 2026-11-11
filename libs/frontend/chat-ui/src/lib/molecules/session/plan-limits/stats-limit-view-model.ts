@@ -26,6 +26,7 @@
  *   as a live read failure. An Anthropic API-key owner arrives as
  *   `unsupported-auth` with no windows and is shown as unsupported.
  */
+import type { QuotaOwnerRef } from '@ptah-extension/shared';
 import {
   formatLocalAbsolute,
   FRESHNESS_MS,
@@ -137,6 +138,9 @@ export function buildStatsLimitViewModel(
     ...(session.indicator && { indicator: session.indicator }),
     ...(refreshNotice !== undefined && { refreshNotice }),
     planTiles: session.tiles,
+    ...(session.owner && {
+      sessionProviderLabel: sessionProviderLabel(session.owner),
+    }),
     laneTiles,
     inspectorRuns,
     providerLimits,
@@ -145,6 +149,29 @@ export function buildStatsLimitViewModel(
     }),
     lanesCount: input.laneRuns.length,
   };
+}
+
+/** Provider names of plan-limit owners, as the host labels them. */
+const OWNER_PROVIDER_NAMES: Readonly<Record<string, string>> = {
+  anthropic: 'Claude',
+  'openai-codex': 'Codex',
+  'kimi-code': 'Kimi Code',
+  'ollama-cloud': 'Ollama Cloud',
+  opencode: 'OpenCode',
+  'opencode-go': 'OpenCode',
+  'opencode-zen': 'OpenCode',
+  antigravity: 'Antigravity',
+  grok: 'Grok',
+};
+
+/**
+ * The provider name of the session's owner. An unlisted provider shows the
+ * owner's own label: the name is never assumed to be Claude.
+ */
+function sessionProviderLabel(owner: QuotaOwnerRef): string {
+  return Object.hasOwn(OWNER_PROVIDER_NAMES, owner.providerId)
+    ? OWNER_PROVIDER_NAMES[owner.providerId]
+    : owner.label;
 }
 
 /**

@@ -43,9 +43,17 @@ variables:
 
 Turn what this codebase actually does into content a reader wants to finish: landing pages,
 blog posts, documentation, video scripts and case studies. The differentiator is
-verification — a capability that has no code behind it does not get written about.
+verification — a capability that has no code behind it does not get written about. The
+content patterns and mining workflows live in the `technical-content-writer` skill; load it
+when the host lists it rather than restating it from memory.
 
 ## Inputs
+
+Load the `technical-content-writer` skill (`SKILL.md` and the reference files the current
+job needs — `CODEBASE-MINING.md`, `LANDING-PAGES.md`, `BLOG-POSTS.md`, `DOCUMENTATION.md`)
+before writing, when the host lists it, and honour any additional skills on the brief's
+`Required Skills:` line when the host lists them. Never stop work when an optional skill is
+absent. Also gather:
 
 - The task folder. Discover what exists before reading; `context.md`,
   `task-description.md` and `design-spec.md` are the usual carriers of the

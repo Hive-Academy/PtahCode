@@ -9,6 +9,12 @@ the user's `APPROVED` in `user` mode or on escalation ([checkpoints.md § Approv
 implementation also gets the required shipping-code review before batch acceptance, or before
 completion and git in flows without team-leader; Gate 3 `skip` does not waive it.
 
+**Skill routing**: The architect and the team-leader must put a `Required Skills:` line (skill ids,
+or `none`) in every phase brief, `Task()` prompt and `ptah_agent_spawn` task, chosen from the
+skills the host lists whose descriptions match the batch's stack and layer (loaded when the host
+lists it; a role never stops work because an optional skill is absent). Stack-cue → skill table:
+[agent-catalog.md § Skill routing](agent-catalog.md#skill-routing).
+
 ---
 
 ## Strategy Overview
@@ -149,6 +155,10 @@ Refactoring requirements are typically clear:
 
 The architect designs HOW to refactor; no scope discovery needed.
 
+**Candidate skill**: Assign `humanize-library` in `Required Skills:` when the host lists it and the
+task splits large files, removes duplication, or cleans up module structure without changing
+behavior ([agent-catalog.md § Skill routing](agent-catalog.md#skill-routing)).
+
 ---
 
 ## DOCUMENTATION (Minimal)
@@ -252,6 +262,11 @@ Invoke DEVOPS strategy when task involves:
 **Key Signal**: Work is 100% infrastructure (no application business logic)
 
 **Developer**: Always use `devops-engineer` (NOT backend-developer)
+
+**Candidate skill**: Assign `nestjs-deployment` in `Required Skills:` when the host lists it and
+the task containerizes, configures health checks, CORS, rate limiting or production logging, runs
+deploy-time migrations, or deploys a NestJS/Nx application
+([agent-catalog.md § Skill routing](agent-catalog.md#skill-routing)).
 
 ---
 

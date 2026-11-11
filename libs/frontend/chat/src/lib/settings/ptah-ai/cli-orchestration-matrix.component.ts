@@ -37,6 +37,9 @@ import { CliLaneDefaultsStore } from './cli-lane-defaults.store';
 import { CliProviderGridComponent, type CliProviderOpenCell } from './cli-provider-grid.component';
 import type { CliProviderOpenKind } from './cli-provider-card.component';
 import { CliSharedDefaultsComponent } from './cli-shared-defaults.component';
+import {
+  PtahButtonDirective,
+} from '@ptah-extension/ui';
 
 /** Which popover of which row is open; one at a time. */
 type OpenCell = {
@@ -136,6 +139,7 @@ const SAVE_SCOPE = 'global';
     PtahCliInstancesComponent,
     CliProviderGridComponent,
     CliSharedDefaultsComponent,
+    PtahButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -181,7 +185,7 @@ const SAVE_SCOPE = 'global';
           (popoverToggled)="toggleProviderPopover($event)" (popoverDismissed)="closeProviderPopover()"
           (codexSettingsRequested)="codexSettingsRequested.emit()" />
         @if (groups().length > 1) {
-          <button type="button" class="btn btn-ghost btn-sm before:inline-block before:w-3 before:transition-transform before:content-['›'] aria-expanded:before:rotate-90"
+          <button type="button" ptahButton variant="ghost" class="before:inline-block before:w-3 before:transition-transform before:content-['›'] aria-expanded:before:rotate-90"
             data-testid="cli-matrix-uninstalled-toggle" [attr.aria-expanded]="uninstalledShown()"
             (click)="toggleUninstalled()">Uninstalled CLI agents ({{ groups()[1].rows.length }})</button>
           @if (uninstalledShown()) {

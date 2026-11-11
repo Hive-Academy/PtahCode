@@ -4,10 +4,7 @@
     "alert-error": 1
   },
   "apps/ptah-extension-webview/src/app/git-window/git-window.component.ts": {
-    "<dynamic>": 2,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-sm": 2
+    "<dynamic>": 2
   },
   "libs/frontend/canvas/src/lib/canvas-detail/agent-dock-card.component.ts": {
     "<dynamic>": 1
@@ -71,10 +68,6 @@
     "btn-xs": 2
   },
   "libs/frontend/canvas/src/lib/orchestra-canvas.component.ts": {
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 2,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
@@ -906,42 +899,30 @@
     "<dynamic>": 5
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/agent-orchestration-config.component.ts": {
-    "<dynamic>": 10,
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-sm": 1,
+    "<dynamic>": 5,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/capability-matrix-setting.component.ts": {
-    "<dynamic>": 2,
+    "<dynamic>": 1,
     "badge": 3,
     "badge-ghost": 2,
     "badge-sm": 1,
     "badge-warning": 1,
-    "badge-xs": 2,
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-sm": 1
+    "badge-xs": 2
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/claude-lane-account-cell.component.ts": {
-    "<dynamic>": 3,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1,
-    "btn-square": 1
+    "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/cli-capability-cells.component.ts": {
     "badge": 1,
     "badge-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/cli-lane-default-cell.component.ts": {
-    "btn": 4,
-    "btn-ghost": 3,
-    "btn-sm": 3,
+    "btn": 1,
+    "btn-sm": 1,
     "btn-warning": 1,
-    "btn-xs": 1,
     "card-layout": 1,
     "select": 2,
     "select-bordered": 2,
@@ -949,52 +930,25 @@
     "select-xs": 2
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/cli-model-effort-popover.component.ts": {
-    "<dynamic>": 4,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-link": 1,
-    "btn-square": 1,
-    "btn-xs": 2
-  },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/cli-orchestration-matrix.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1
-  },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/cli-provider-card-popovers.component.ts": {
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-outline": 1,
-    "btn-sm": 1,
-    "btn-xs": 1
+    "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/cli-provider-card.component.ts": {
     "badge": 1,
     "badge-outline": 1,
     "badge-sm": 1,
-    "btn": 9,
-    "btn-ghost": 8,
-    "btn-outline": 1,
-    "btn-sm": 1,
-    "btn-xs": 8,
     "card-body": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/copilot-auto-approve-toggle.component.ts": {
-    "<dynamic>": 2,
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-sm": 1
+    "<dynamic>": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/cursor-credential-popover.component.ts": {
-    "<dynamic>": 7,
+    "<dynamic>": 2,
     "badge": 1,
     "badge-outline": 1,
     "badge-xs": 1,
-    "btn": 3,
-    "btn-ghost": 2,
+    "btn": 1,
     "btn-primary": 1,
-    "btn-square": 1,
-    "btn-xs": 3,
+    "btn-xs": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
@@ -1003,13 +957,9 @@
     "badge": 2,
     "badge-outline": 2,
     "badge-sm": 2,
-    "btn": 10,
-    "btn-ghost": 5,
-    "btn-outline": 4,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-square": 1,
-    "btn-xs": 8,
+    "btn": 1,
+    "btn-outline": 1,
+    "btn-sm": 1,
     "input": 2,
     "input-bordered": 2,
     "input-sm": 2,
@@ -1017,43 +967,29 @@
     "select-bordered": 2,
     "select-sm": 2
   },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/go-vet-consent-config.component.ts": {
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 2
-  },
   "libs/frontend/chat/src/lib/settings/ptah-ai/host-routing-setting.component.ts": {
-    "<dynamic>": 2,
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-sm": 1
+    "<dynamic>": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/lane-guards-settings.component.ts": {
-    "<dynamic>": 2,
-    "btn": 2,
-    "btn-outline": 1,
-    "btn-sm": 2,
+    "<dynamic>": 1,
+    "btn": 1,
+    "btn-sm": 1,
     "input": 1,
     "input-bordered": 1,
     "input-error": 1,
     "input-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/lane-rotation-setting.component.ts": {
-    "<dynamic>": 2,
-    "btn": 2,
-    "btn-outline": 2,
-    "btn-sm": 2
+    "<dynamic>": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/local-stt-panel.component.ts": {
     "badge": 2,
     "badge-outline": 2,
     "badge-sm": 2,
-    "btn": 3,
+    "btn": 1,
     "btn-ghost": 1,
-    "btn-outline": 1,
-    "btn-primary": 2,
-    "btn-xs": 3,
+    "btn-primary": 1,
+    "btn-xs": 1,
     "input": 1,
     "input-bordered": 1,
     "input-error": 1,
@@ -1066,11 +1002,10 @@
     "badge": 2,
     "badge-outline": 2,
     "badge-sm": 2,
-    "btn": 4,
-    "btn-ghost": 2,
-    "btn-outline": 1,
-    "btn-primary": 2,
-    "btn-xs": 4,
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-primary": 1,
+    "btn-xs": 1,
     "input": 1,
     "input-bordered": 1,
     "input-error": 1,
@@ -1080,23 +1015,15 @@
     "select-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/ptah-cli-instances.component.ts": {
-    "<dynamic>": 18,
+    "<dynamic>": 11,
     "badge": 4,
     "badge-outline": 3,
-    "badge-sm": 4,
-    "btn": 4,
-    "btn-ghost": 2,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 3,
-    "btn-square": 1,
-    "btn-xs": 1
+    "badge-sm": 4
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/session-budget-settings.component.ts": {
-    "<dynamic>": 4,
-    "btn": 2,
-    "btn-outline": 1,
-    "btn-sm": 2,
+    "<dynamic>": 3,
+    "btn": 1,
+    "btn-sm": 1,
     "input": 1,
     "input-bordered": 1,
     "input-error": 1,
@@ -1106,10 +1033,7 @@
     "select-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/subagent-cache-ttl-setting.component.ts": {
-    "<dynamic>": 2,
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-sm": 1,
+    "<dynamic>": 1,
     "select": 1,
     "select-bordered": 1,
     "select-sm": 1
@@ -1118,27 +1042,15 @@
     "<dynamic>": 1,
     "badge": 1,
     "badge-outline": 1,
-    "badge-sm": 1,
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-square": 1,
-    "btn-xs": 2
-  },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/voice-details-drawer.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1
+    "badge-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/web-search-config.component.ts": {
     "badge": 3,
     "badge-outline": 3,
     "badge-sm": 3,
-    "btn": 8,
-    "btn-ghost": 3,
-    "btn-outline": 4,
-    "btn-primary": 1,
-    "btn-sm": 4,
-    "btn-xs": 4,
+    "btn": 1,
+    "btn-outline": 1,
+    "btn-sm": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
@@ -1192,26 +1104,23 @@
   },
   "libs/frontend/cron-scheduler-ui/src/lib/components/cron-job-card.component.ts": {
     "<dynamic>": 1,
-    "btn": 4,
-    "btn-ghost": 4,
-    "btn-square": 4,
-    "btn-xs": 4
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-square": 1,
+    "btn-xs": 1
   },
   "libs/frontend/cron-scheduler-ui/src/lib/components/cron-job-detail-drawer.component.ts": {
     "<dynamic>": 2,
-    "btn": 4,
-    "btn-ghost": 3,
-    "btn-primary": 1,
-    "btn-sm": 4
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-sm": 1
   },
   "libs/frontend/cron-scheduler-ui/src/lib/components/cron-scheduler-tab.component.ts": {
     "alert": 1,
     "alert-error": 1,
-    "btn": 8,
-    "btn-ghost": 3,
-    "btn-primary": 5,
-    "btn-sm": 8,
-    "btn-square": 1,
+    "btn": 2,
+    "btn-primary": 2,
+    "btn-sm": 2,
     "input": 3,
     "input-bordered": 3,
     "input-sm": 3,
@@ -1223,38 +1132,13 @@
     "textarea-sm": 1
   },
   "libs/frontend/dashboard/src/lib/components/builders-card/builders-card.component.html": {
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 2,
     "card-actions": 1,
     "card-title": 1
   },
-  "libs/frontend/dashboard/src/lib/components/dashboard-grid/dashboard-grid.component.html": {
-    "btn": 1,
-    "btn-circle": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1
-  },
-  "libs/frontend/dashboard/src/lib/components/provider-account-card/provider-account-card.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/dashboard/src/lib/components/provider-account-tile/provider-account-tile.component.html": {
-    "<dynamic>": 1,
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-square": 1,
-    "btn-xs": 2
+    "<dynamic>": 1
   },
   "libs/frontend/dashboard/src/lib/components/skill-selection-card/skill-selection-card.component.ts": {
-    "btn": 2,
-    "btn-circle": 1,
-    "btn-ghost": 1,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 2,
     "card-title": 1
   },
   "libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-breakdown-table.component.ts": {
@@ -1279,12 +1163,11 @@
     "badge": 1,
     "badge-sm": 1,
     "badge-warning": 1,
-    "btn": 5,
+    "btn": 4,
     "btn-active": 3,
-    "btn-ghost": 1,
     "btn-primary": 3,
     "btn-sm": 1,
-    "btn-xs": 4
+    "btn-xs": 3
   },
   "libs/frontend/declarative-dashboard/src/lib/components/dashboard-alert.component.ts": {
     "<dynamic>": 5
@@ -1297,10 +1180,6 @@
   },
   "libs/frontend/declarative-dashboard/src/lib/components/dashboard-chart.component.ts": {
     "<dynamic>": 5,
-    "btn": 5,
-    "btn-ghost": 3,
-    "btn-sm": 4,
-    "btn-xs": 1,
     "card": 1,
     "card-bordered": 1
   },
@@ -1308,19 +1187,11 @@
     "<dynamic>": 4
   },
   "libs/frontend/declarative-dashboard/src/lib/components/dashboard-list.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2,
     "card": 1,
     "card-bordered": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
-  },
-  "libs/frontend/declarative-dashboard/src/lib/components/dashboard-pager.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
   },
   "libs/frontend/declarative-dashboard/src/lib/components/dashboard-progress.component.ts": {
     "<dynamic>": 1
@@ -1332,17 +1203,10 @@
     "<dynamic>": 1
   },
   "libs/frontend/declarative-dashboard/src/lib/components/dashboard-stat.component.ts": {
-    "<dynamic>": 1,
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-square": 1,
-    "btn-xs": 2
+    "<dynamic>": 1
   },
   "libs/frontend/declarative-dashboard/src/lib/components/dashboard-table.component.ts": {
     "<dynamic>": 2,
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-xs": 3,
     "card": 1,
     "card-bordered": 1,
     "input": 1,
@@ -1356,9 +1220,6 @@
   },
   "libs/frontend/declarative-dashboard/src/lib/components/surface-layout.component.ts": {
     "<dynamic>": 2,
-    "btn": 1,
-    "btn-primary": 1,
-    "btn-sm": 1,
     "card": 2,
     "card-bordered": 2
   },
@@ -1780,11 +1641,6 @@
     "skeleton": 2
   },
   "libs/frontend/mcp-apps-page/src/lib/components/apps-page.component.ts": {
-    "btn": 5,
-    "btn-ghost": 4,
-    "btn-primary": 1,
-    "btn-square": 2,
-    "btn-xs": 5,
     "textarea": 1,
     "textarea-bordered": 1
   },
@@ -1832,9 +1688,6 @@
   "libs/frontend/memory-curator-ui/src/lib/components/diagnostics/memory-diagnostics-accordion.component.ts": {
     "alert": 2,
     "alert-error": 2,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1,
     "textarea": 1,
     "textarea-bordered": 1,
     "textarea-xs": 1
@@ -1903,78 +1756,55 @@
     "skeleton": 2
   },
   "libs/frontend/messaging-gateway-ui/src/lib/components/allow-list-editor.component.ts": {
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-sm": 1,
     "textarea": 1,
     "textarea-bordered": 1,
     "textarea-sm": 1
   },
   "libs/frontend/messaging-gateway-ui/src/lib/components/discord-integration-kit.component.ts": {
-    "btn": 4,
-    "btn-ghost": 1,
-    "btn-outline": 3,
-    "btn-sm": 3,
-    "btn-xs": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
   },
   "libs/frontend/messaging-gateway-ui/src/lib/components/gateway-platform-pane.component.ts": {
     "alert": 1,
-    "alert-error": 1,
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-sm": 1
-  },
-  "libs/frontend/messaging-gateway-ui/src/lib/components/gateway-setup-guide.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
+    "alert-error": 1
   },
   "libs/frontend/messaging-gateway-ui/src/lib/components/messaging-gateway-tab.component.ts": {
     "alert": 1,
     "alert-error": 1,
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-sm": 1,
+    "btn": 2,
+    "btn-ghost": 2,
     "btn-xs": 2
   },
   "libs/frontend/messaging-gateway-ui/src/lib/components/platform-bindings-panel.component.ts": {
     "alert": 1,
     "alert-error": 1,
-    "btn": 6,
-    "btn-ghost": 5,
+    "btn": 4,
+    "btn-ghost": 3,
     "btn-outline": 1,
     "btn-success": 1,
-    "btn-xs": 6,
+    "btn-xs": 4,
     "input": 1,
     "input-bordered": 1,
     "input-xs": 1
   },
   "libs/frontend/messaging-gateway-ui/src/lib/components/platform-token-form.component.ts": {
-    "btn": 1,
-    "btn-primary": 1,
-    "btn-sm": 1,
     "input": 2,
     "input-bordered": 2,
     "input-sm": 2
   },
   "libs/frontend/notification-center/src/lib/notification-center.component.ts": {
-    "btn": 6,
-    "btn-ghost": 6,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-square": 3,
-    "btn-xs": 3
-  },
-  "libs/frontend/notification-center/src/lib/notification-snackbar.component.ts": {
     "btn": 3,
     "btn-ghost": 3,
     "btn-primary": 1,
-    "btn-sm": 1,
-    "btn-square": 1,
-    "btn-xs": 1
+    "btn-sm": 2,
+    "btn-square": 1
+  },
+  "libs/frontend/notification-center/src/lib/notification-snackbar.component.ts": {
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-primary": 1,
+    "btn-sm": 1
   },
   "libs/frontend/onboarding/src/lib/home/path-tile.component.ts": {
     "<dynamic>": 2
@@ -2019,17 +1849,8 @@
   "libs/frontend/review-runs-ui/src/lib/components/review-bot-identity.component.ts": {
     "alert": 1,
     "alert-warning": 1,
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-sm": 3,
     "input": 1,
     "input-bordered": 1
-  },
-  "libs/frontend/review-runs-ui/src/lib/components/review-confirm-dialog.component.ts": {
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-primary": 1
   },
   "libs/frontend/review-runs-ui/src/lib/components/review-findings-table.component.ts": {
     "select": 1,
@@ -2038,16 +1859,9 @@
   },
   "libs/frontend/review-runs-ui/src/lib/components/review-page-header.component.ts": {
     "badge": 1,
-    "badge-outline": 1,
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-sm": 3
+    "badge-outline": 1
   },
   "libs/frontend/review-runs-ui/src/lib/components/review-repositories-editor.component.ts": {
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-secondary": 1,
-    "btn-sm": 2,
     "input": 1,
     "input-bordered": 1
   },
@@ -2063,10 +1877,9 @@
     "badge": 2,
     "badge-outline": 1,
     "badge-warning": 1,
-    "btn": 5,
-    "btn-ghost": 4,
-    "btn-primary": 1,
-    "btn-sm": 5
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-sm": 1
   },
   "libs/frontend/review-runs-ui/src/lib/components/review-runs-list.component.ts": {
     "<dynamic>": 1
@@ -2075,9 +1888,9 @@
     "alert": 5,
     "alert-error": 2,
     "alert-warning": 3,
-    "btn": 6,
-    "btn-ghost": 6,
-    "btn-sm": 6,
+    "btn": 3,
+    "btn-ghost": 3,
+    "btn-sm": 3,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1,
@@ -2089,9 +1902,7 @@
   "libs/frontend/review-runs-ui/src/lib/components/review-settings-drawer.component.html": {
     "alert": 1,
     "alert-error": 1,
-    "btn": 1,
     "btn-ghost": 2,
-    "btn-primary": 1,
     "input": 6,
     "input-bordered": 6
   },
@@ -2160,10 +1971,7 @@
   "libs/frontend/setup-wizard/src/lib/components/pack-install-prompt.component.ts": {
     "alert": 2,
     "alert-error": 1,
-    "alert-info": 1,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
+    "alert-info": 1
   },
   "libs/frontend/setup-wizard/src/lib/components/preview-decisions/file-decision-row.component.ts": {
     "badge": 1,
@@ -2416,20 +2224,12 @@
     "<dynamic>": 2,
     "badge": 1,
     "badge-sm": 1,
-    "badge-warning": 1,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
+    "badge-warning": 1
   },
   "libs/frontend/workspace-indexing/src/lib/workspace-indexing.component.html": {
     "alert": 7,
     "alert-error": 2,
     "alert-info": 1,
-    "alert-warning": 2,
-    "btn": 12,
-    "btn-ghost": 5,
-    "btn-primary": 7,
-    "btn-xs": 12
+    "alert-warning": 2
   }
 }

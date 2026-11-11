@@ -103,12 +103,16 @@ function build(
   };
   const fake = new FakeQueueAdapter();
   const adapter = (options.adapter ?? fake) as IAgentAdapter;
+  // One record object per registration, as the lifecycle manager keeps it.
+  let record =
+    options.registeredTab !== undefined
+      ? { tabId: options.registeredTab, realSessionId: SESSION }
+      : undefined;
+  const reregister = (tabId: string) => {
+    record = { tabId, realSessionId: SESSION };
+  };
   const registrations = {
-    find: jest.fn((id: string) =>
-      options.registeredTab !== undefined && id === SESSION
-        ? { tabId: options.registeredTab, realSessionId: SESSION }
-        : undefined,
-    ),
+    find: jest.fn((id: string) => (id === SESSION ? record : undefined)),
   };
   const logger = createMockLogger();
   const service = new ChatFollowUpQueueService(
@@ -120,7 +124,7 @@ function build(
   );
   const states = () =>
     sent.filter((entry) => entry.type === MESSAGE_TYPES.CHAT_QUEUED_MESSAGE_STATE);
-  return { service, fake, sent, states, logger, webviewManager };
+  return { service, fake, sent, states, logger, webviewManager, reregister };
 }
 
 describe('ChatFollowUpQueueService', () => {
@@ -314,6 +318,49 @@ describe('ChatFollowUpQueueService', () => {
       RpcUserError,
     );
     expect(() => held.service.assertTabOwnsSession(SESSION, TAB_A)).not.toThrow();
+  });
+
+  it('moves ownership to the tab that reopened a live session', () => {
+    const h = build({ registeredTab: TAB_A });
+    h.service.adoptTab(SESSION, TAB_B);
+    expect(() => h.service.assertTabOwnsSession(SESSION, TAB_B)).not.toThrow();
+    expect(h.service.list(SESSION, TAB_B)).toEqual([]);
+    expect(() => h.service.assertTabOwnsSession(SESSION, TAB_A)).toThrow(RpcUserError);
+
+    // The registered tab opened it again: the adoption ends.
+    h.service.adoptTab(SESSION, TAB_A);
+    expect(() => h.service.assertTabOwnsSession(SESSION, TAB_A)).not.toThrow();
+    expect(() => h.service.assertTabOwnsSession(SESSION, TAB_B)).toThrow(RpcUserError);
+  });
+
+  it('hands the held items of the earlier tab to the adopting tab', () => {
+    const h = build({ registeredTab: TAB_A });
+    h.service.bind(SESSION, TAB_A, ID_1);
+    h.fake.hold(ID_1);
+    expect(h.service.list(SESSION, TAB_A)).toHaveLength(1);
+
+    h.service.adoptTab(SESSION, TAB_B);
+    expect(h.service.list(SESSION, TAB_B)).toHaveLength(1);
+    expect(h.logger.info).toHaveBeenCalled();
+  });
+
+  it('drops an adoption when the registration is replaced or retired', () => {
+    const h = build({ registeredTab: TAB_A });
+    h.service.adoptTab(SESSION, TAB_B);
+    h.reregister(TAB_A);
+    expect(() => h.service.assertTabOwnsSession(SESSION, TAB_B)).toThrow(RpcUserError);
+
+    h.service.adoptTab(SESSION, TAB_B);
+    h.service.retireSession(SESSION);
+    expect(() => h.service.assertTabOwnsSession(SESSION, TAB_B)).toThrow(RpcUserError);
+  });
+
+  it('adopts nothing for a session that is not live', () => {
+    const h = build();
+    h.service.adoptTab(SESSION, TAB_B);
+    h.service.bind(SESSION, TAB_A, ID_1);
+    h.fake.hold(ID_1);
+    expect(() => h.service.assertTabOwnsSession(SESSION, TAB_B)).toThrow(RpcUserError);
   });
 
   it('accepts an unowned session from any tab', () => {
