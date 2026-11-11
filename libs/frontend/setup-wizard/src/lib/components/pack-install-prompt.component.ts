@@ -14,7 +14,7 @@ import type {
   GenerationTargetChoice,
   WizardPlanPackInstallResult,
 } from '@ptah-extension/shared';
-import { NativeModalComponent } from '@ptah-extension/ui';
+import { NativeModalComponent, PtahButtonDirective } from '@ptah-extension/ui';
 import {
   PackInstallStore,
   type PackHostScope,
@@ -65,6 +65,7 @@ let nextPromptId = 0;
     BulkDecisionBarComponent,
     FileDecisionRowComponent,
     TargetRootChoiceComponent,
+    PtahButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -172,16 +173,14 @@ let nextPromptId = 0;
               >{{ text }}</span
             >
           }
-          <button
-            type="button"
-            class="btn btn-ghost btn-sm"
-            (click)="dismiss()"
-          >
+          <button ptahButton variant="ghost" type="button" (click)="dismiss()">
             Cancel
           </button>
           <button
+            ptahButton
+            variant="primary"
             type="button"
-            class="btn btn-primary btn-sm max-sm:basis-full"
+            class="max-sm:basis-full"
             data-testid="pack-confirm"
             [disabled]="loading() || planError() || !plan()"
             (click)="confirmInstall()"

@@ -41,6 +41,7 @@ import {
   type OnboardingStep,
 } from '../shared/onboarding-stepper.component';
 import { onboardingStepLink } from '../shell/onboarding-step-link';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 const DONE_STEPS: readonly OnboardingStep[] = [
   { id: 'analyze', label: 'Analyze', state: 'completed' },
@@ -68,6 +69,7 @@ type FactState =
     GradeExpectationComponent,
     LibraryStaleNoticeComponent,
     LucideAngularModule,
+    PtahButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
@@ -78,20 +80,27 @@ type FactState =
       data-testid="analyze-done-page"
     >
       <header class="flex items-center gap-3 pb-1">
-        <span class="flex size-11 shrink-0 items-center justify-center rounded-xl border border-base-300 text-state-done" data-glass-surface="tile">
-          <lucide-angular [img]="icons.done" class="size-5" aria-hidden="true" />
+        <span
+          class="flex size-11 shrink-0 items-center justify-center rounded-xl border border-base-300 text-state-done"
+          data-glass-surface="tile"
+        >
+          <lucide-angular
+            [img]="icons.done"
+            class="size-5"
+            aria-hidden="true"
+          />
         </span>
         <div>
-        <h1
-          id="analyze-done-title"
-          tabindex="-1"
-          class="text-2xl font-semibold"
-        >
-          {{ pageHeading() }}
-        </h1>
-        <p class="text-sm text-base-content-muted">
-          {{ pageSubtitle() }}
-        </p>
+          <h1
+            id="analyze-done-title"
+            tabindex="-1"
+            class="text-2xl font-semibold"
+          >
+            {{ pageHeading() }}
+          </h1>
+          <p class="text-sm text-base-content-muted">
+            {{ pageSubtitle() }}
+          </p>
         </div>
       </header>
       <ptah-onboarding-stepper [steps]="steps" />
@@ -100,7 +109,13 @@ type FactState =
         data-glass-surface="content"
         data-testid="analyze-done-facts"
       >
-        <h2 class="flex items-center gap-2 font-semibold"><lucide-angular [img]="icons.done" class="size-5 text-state-done" aria-hidden="true" />What happened</h2>
+        <h2 class="flex items-center gap-2 font-semibold">
+          <lucide-angular
+            [img]="icons.done"
+            class="size-5 text-state-done"
+            aria-hidden="true"
+          />What happened
+        </h2>
         @if (agentState() === 'loading') {
           <p class="mt-2 text-sm" data-testid="done-agents-loading">
             Loading agent results…
@@ -409,32 +424,38 @@ type FactState =
         aria-label="Next steps"
       >
         <button
+          ptahButton
+          variant="primary"
           type="button"
-          class="btn btn-primary min-h-9 w-full min-[480px]:w-auto"
+          class="w-full min-[480px]:w-auto"
           data-testid="done-open-chat"
           (click)="openChat()"
         >
           Open chat
         </button>
         <button
+          ptahButton
           type="button"
-          class="btn min-h-9 w-full min-[480px]:w-auto"
+          class="w-full min-[480px]:w-auto"
           data-testid="done-command-center"
           (click)="commandCenter()"
         >
           Command center
         </button>
         <button
+          ptahButton
           type="button"
-          class="btn min-h-9 w-full min-[480px]:w-auto"
+          class="w-full min-[480px]:w-auto"
           data-testid="done-tribunal"
           (click)="tribunal()"
         >
           Get a second opinion in chat
         </button>
         <button
+          ptahButton
+          variant="ghost"
           type="button"
-          class="btn btn-ghost min-h-9 w-full min-[480px]:w-auto"
+          class="w-full min-[480px]:w-auto"
           data-testid="done-run-again"
           (click)="runAgain()"
         >

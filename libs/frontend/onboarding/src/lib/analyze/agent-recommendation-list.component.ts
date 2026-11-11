@@ -6,7 +6,11 @@ import {
   output,
 } from '@angular/core';
 import { Bot, LucideAngularModule } from 'lucide-angular';
-import type { AgentCategory, AgentRecommendation } from '@ptah-extension/shared';
+import type {
+  AgentCategory,
+  AgentRecommendation,
+} from '@ptah-extension/shared';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 const CATEGORIES = [
   { key: 'planning', label: 'Planning & Architecture' },
@@ -52,7 +56,7 @@ export function criteriaOf(agent: AgentRecommendation): readonly string[] {
 @Component({
   selector: 'ptah-agent-recommendation-list',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -67,8 +71,8 @@ export function criteriaOf(agent: AgentRecommendation): readonly string[] {
       >
         <h2 id="agent-recommendation-title" class="sr-only">Select agents</h2>
         <button
+          ptahButton
           type="button"
-          class="btn btn-outline btn-sm min-h-8"
           data-testid="agent-recommendation-select-recommended"
           [disabled]="disabled()"
           (click)="selectRecommended.emit()"
@@ -76,8 +80,9 @@ export function criteriaOf(agent: AgentRecommendation): readonly string[] {
           Select recommended
         </button>
         <button
+          ptahButton
+          variant="ghost"
           type="button"
-          class="btn btn-ghost btn-sm min-h-8"
           data-testid="agent-recommendation-clear"
           [disabled]="disabled()"
           (click)="clearSelection.emit()"
@@ -103,7 +108,10 @@ export function criteriaOf(agent: AgentRecommendation): readonly string[] {
               [class.border-primary]="isSelected(row.agent.agentId)"
               [class.cursor-not-allowed]="disabled()"
             >
-              <label class="flex min-w-0 flex-1 cursor-pointer items-start gap-2" [class.cursor-not-allowed]="disabled()">
+              <label
+                class="flex min-w-0 flex-1 cursor-pointer items-start gap-2"
+                [class.cursor-not-allowed]="disabled()"
+              >
                 <input
                   type="checkbox"
                   class="checkbox checkbox-sm mt-0.5"
@@ -118,52 +126,66 @@ export function criteriaOf(agent: AgentRecommendation): readonly string[] {
                   aria-hidden="true"
                 />
                 <span class="min-w-0 flex-1">
-                <span class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                  <span class="font-medium" data-testid="agent-recommendation-name">{{ row.agent.agentName }}</span>
-                  @if (row.match !== null) {
+                  <span class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                     <span
-                      class="text-xs font-medium text-base-content-muted"
-                      data-testid="agent-recommendation-match"
-                      [attr.aria-label]="row.match + '% match'"
-                      >{{ row.match }}% match</span
+                      class="font-medium"
+                      data-testid="agent-recommendation-name"
+                      >{{ row.agent.agentName }}</span
                     >
-                  }
-                </span>
-                @if (row.match !== null) {
-                  <span
-                    class="mt-1 block h-1 w-full max-w-xs overflow-hidden rounded-full bg-base-300"
-                    aria-hidden="true"
-                    data-testid="agent-recommendation-meter"
-                  >
-                    <span
-                      class="block h-full bg-primary"
-                      [style.width.%]="row.match"
-                    ></span>
-                  </span>
-                }
-                @if (row.agent.description) {
-                  <span class="mt-1 block text-xs text-base-content-muted" data-testid="agent-recommendation-description">{{
-                    row.agent.description
-                  }}</span>
-                }
-                @if (row.criteria.length) {
-                  <span
-                    class="mt-2 flex flex-wrap gap-1"
-                    data-testid="agent-recommendation-criteria"
-                  >
-                    @for (criterion of row.criteria; track criterion) {
+                    @if (row.match !== null) {
                       <span
-                        class="rounded-full border border-base-300 px-2 py-0.5 text-xs"
-                        data-glass-surface="tile"
-                        >{{ criterion }}</span
+                        class="text-xs font-medium text-base-content-muted"
+                        data-testid="agent-recommendation-match"
+                        [attr.aria-label]="row.match + '% match'"
+                        >{{ row.match }}% match</span
                       >
                     }
                   </span>
-                }
+                  @if (row.match !== null) {
+                    <span
+                      class="mt-1 block h-1 w-full max-w-xs overflow-hidden rounded-full bg-base-300"
+                      aria-hidden="true"
+                      data-testid="agent-recommendation-meter"
+                    >
+                      <span
+                        class="block h-full bg-primary"
+                        [style.width.%]="row.match"
+                      ></span>
+                    </span>
+                  }
+                  @if (row.agent.description) {
+                    <span
+                      class="mt-1 block text-xs text-base-content-muted"
+                      data-testid="agent-recommendation-description"
+                      >{{ row.agent.description }}</span
+                    >
+                  }
+                  @if (row.criteria.length) {
+                    <span
+                      class="mt-2 flex flex-wrap gap-1"
+                      data-testid="agent-recommendation-criteria"
+                    >
+                      @for (criterion of row.criteria; track criterion) {
+                        <span
+                          class="rounded-full border border-base-300 px-2 py-0.5 text-xs"
+                          data-glass-surface="tile"
+                          >{{ criterion }}</span
+                        >
+                      }
+                    </span>
+                  }
                 </span>
               </label>
-              <button type="button" class="btn btn-outline btn-sm min-h-8" data-testid="agent-recommendation-preview" [disabled]="disabled()"
-                [attr.aria-label]="'Preview ' + row.agent.agentName" (click)="previewRequested.emit(row.agent.agentId)">Preview</button>
+              <button
+                ptahButton
+                type="button"
+                data-testid="agent-recommendation-preview"
+                [disabled]="disabled()"
+                [attr.aria-label]="'Preview ' + row.agent.agentName"
+                (click)="previewRequested.emit(row.agent.agentId)"
+              >
+                Preview
+              </button>
             </div>
           }
         </section>

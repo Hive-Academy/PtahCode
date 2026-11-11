@@ -8,6 +8,7 @@ import {
 } from '@angular/core';
 import { HarnessSessionController } from '@ptah-extension/harness-builder';
 import { HarnessHealthStore } from '@ptah-extension/marketplace/services';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 type SessionRecord = NonNullable<
   ReturnType<ReturnType<HarnessSessionController['session']>['record']>
@@ -16,6 +17,7 @@ type Receipt = NonNullable<SessionRecord['applyReceipt']>;
 @Component({
   selector: 'ptah-apply-result',
   standalone: true,
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<section
     class="space-y-3 rounded-[22px] border border-state-done p-5"
@@ -32,9 +34,7 @@ type Receipt = NonNullable<SessionRecord['applyReceipt']>;
           <li class="break-all font-mono text-xs">{{ path }}</li>
         }
       </ul>
-      <button type="button" class="btn btn-sm" (click)="copyPaths()">
-        Copy paths
-      </button>
+      <button ptahButton type="button" (click)="copyPaths()">Copy paths</button>
       @if (receipt().warnings.length) {
         <div role="status">
           <h3 class="font-medium">Warnings</h3>
@@ -54,15 +54,11 @@ type Receipt = NonNullable<SessionRecord['applyReceipt']>;
       }}
     </p>
     <div class="flex flex-wrap gap-2">
-      <button type="button" class="btn btn-sm" (click)="openChat.emit()">
+      <button ptahButton type="button" (click)="openChat.emit()">
         Open chat</button
-      ><button type="button" class="btn btn-sm" (click)="openDashboard.emit()">
+      ><button ptahButton type="button" (click)="openDashboard.emit()">
         Open health dashboard</button
-      ><button
-        type="button"
-        class="btn btn-primary btn-sm"
-        (click)="done.emit()"
-      >
+      ><button ptahButton variant="primary" type="button" (click)="done.emit()">
         Done
       </button>
     </div>

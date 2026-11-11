@@ -8,6 +8,7 @@ import {
 } from '@angular/core';
 import { Check, Copy, LucideAngularModule } from 'lucide-angular';
 import { OnboardingAnnouncerService } from '../shell/onboarding-announcer.service';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** How long the button reads "Copied". */
 export const COMMAND_COPIED_MS = 2000;
@@ -21,7 +22,7 @@ export const COMMAND_COPIED_MS = 2000;
 @Component({
   selector: 'ptah-command-copy-row',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -35,8 +36,9 @@ export const COMMAND_COPIED_MS = 2000;
         >{{ command() }}</code
       >
       <button
+        ptahButton
         type="button"
-        class="btn btn-sm min-h-8 flex-none max-[480px]:self-end"
+        class="flex-none max-[480px]:self-end"
         data-testid="command-copy-button"
         [attr.aria-label]="copyLabel()"
         (click)="copy()"

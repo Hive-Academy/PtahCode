@@ -31,6 +31,7 @@ import {
 import { ReviewSummaryComponent } from './review-summary.component';
 import { ProposalStatusCardComponent } from './proposal-status-card.component';
 import { StatusCardComponent } from '../shared/status-card.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-review-apply-page',
@@ -42,6 +43,7 @@ import { StatusCardComponent } from '../shared/status-card.component';
     OnboardingStepperComponent,
     ProposalStatusCardComponent,
     StatusCardComponent,
+    PtahButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<section
@@ -51,14 +53,18 @@ import { StatusCardComponent } from '../shared/status-card.component';
   >
     <header class="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <h1 id="review-apply-title" class="text-2xl font-semibold" tabindex="-1">
+        <h1
+          id="review-apply-title"
+          class="text-2xl font-semibold"
+          tabindex="-1"
+        >
           Review and apply
         </h1>
         <p class="text-sm text-base-content-muted">
           Review the configuration before writing it to your workspace.
         </p>
       </div>
-      <button type="button" class="btn btn-ghost btn-sm border border-base-300" (click)="back()">
+      <button ptahButton type="button" (click)="back()">
         Back to proposal
       </button>
     </header>
@@ -78,8 +84,9 @@ import { StatusCardComponent } from '../shared/status-card.component';
             revision {{ revision.ordinal }}.
           </p>
           <button
+            ptahButton
             type="button"
-            class="btn btn-sm mt-2"
+            class="mt-2"
             [disabled]="pendingRevisionId() !== null"
             (click)="updateReview()"
           >
@@ -135,7 +142,9 @@ import { StatusCardComponent } from '../shared/status-card.component';
             data-glass-surface="content"
             aria-labelledby="review-apply-card-title"
           >
-            <h2 id="review-apply-card-title" class="text-base font-semibold">Apply</h2>
+            <h2 id="review-apply-card-title" class="text-base font-semibold">
+              Apply
+            </h2>
             <p class="mt-1 text-sm text-base-content-muted">
               Writes the agents, skills and MCP entries to your workspace.
             </p>
@@ -168,7 +177,7 @@ import { StatusCardComponent } from '../shared/status-card.component';
         </p>
       }
       @if (appliedWithoutReceipt()) {
-        <button type="button" class="btn btn-primary btn-sm" (click)="done()">
+        <button ptahButton variant="primary" type="button" (click)="done()">
           Done
         </button>
       }
@@ -185,20 +194,26 @@ import { StatusCardComponent } from '../shared/status-card.component';
       >
         <h2 class="font-semibold">Review unavailable</h2>
         <p class="text-sm">The selected revision could not be loaded.</p>
-        <button type="button" class="btn btn-sm mt-2" (click)="back()">
+        <button ptahButton type="button" class="mt-2" (click)="back()">
           Back to proposal
         </button>
       </section>
     }
   </section>`,
-  styles: [`
-    .review-page { container-type: inline-size; }
-    @media (min-width: 768px) {
-      @container (min-width: 716px) {
-        .review-grid { grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); }
+  styles: [
+    `
+      .review-page {
+        container-type: inline-size;
       }
-    }
-  `],
+      @media (min-width: 768px) {
+        @container (min-width: 716px) {
+          .review-grid {
+            grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+          }
+        }
+      }
+    `,
+  ],
 })
 export class ReviewApplyPage implements OnInit {
   protected readonly store = inject(ProposalFlowStore);
@@ -259,8 +274,9 @@ export class ReviewApplyPage implements OnInit {
       : new Map<string, ChangeTag>();
   });
   readonly sessionStatus = this.store.sessionStatus;
-  readonly busy = computed(() =>
-    this.sessionStatus() === 'working' || this.sessionStatus() === 'stopping',
+  readonly busy = computed(
+    () =>
+      this.sessionStatus() === 'working' || this.sessionStatus() === 'stopping',
   );
   ngOnInit(): void {
     const subscription = this.route.queryParamMap

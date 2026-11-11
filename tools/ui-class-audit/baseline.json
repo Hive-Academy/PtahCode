@@ -2419,67 +2419,19 @@
     "btn-square": 1,
     "btn-xs": 1
   },
-  "libs/frontend/onboarding/src/lib/analyze/agent-recommendation-list.component.ts": {
-    "btn": 3,
-    "btn-ghost": 1,
-    "btn-outline": 2,
-    "btn-sm": 3
-  },
-  "libs/frontend/onboarding/src/lib/analyze/analyze-done.page.ts": {
-    "btn": 4,
-    "btn-ghost": 1,
-    "btn-primary": 1
-  },
-  "libs/frontend/onboarding/src/lib/analyze/choose-agents.page.ts": {
-    "btn": 3,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 2
-  },
-  "libs/frontend/onboarding/src/lib/analyze/generate-agents.page.ts": {
-    "btn": 7,
-    "btn-primary": 2,
-    "btn-sm": 5
-  },
-  "libs/frontend/onboarding/src/lib/analyze/project-guidance.page.ts": {
-    "btn": 7,
-    "btn-ghost": 1,
-    "btn-primary": 3,
-    "btn-sm": 5
-  },
-  "libs/frontend/onboarding/src/lib/home/analysis-found-card.component.ts": {
-    "btn": 3,
-    "btn-outline": 2,
-    "btn-primary": 1,
-    "btn-sm": 3
-  },
-  "libs/frontend/onboarding/src/lib/home/onboarding-home.component.ts": {
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-outline": 1,
-    "btn-sm": 2,
-    "btn-xs": 1
-  },
   "libs/frontend/onboarding/src/lib/home/path-tile.component.ts": {
     "<dynamic>": 2
   },
   "libs/frontend/onboarding/src/lib/proposal/answer-dock.component.ts": {
-    "btn": 3,
+    "btn": 2,
     "btn-primary": 1,
-    "btn-sm": 2,
+    "btn-sm": 1,
     "textarea": 1,
     "textarea-bordered": 1
   },
-  "libs/frontend/onboarding/src/lib/proposal/apply-result.component.ts": {
-    "btn": 4,
-    "btn-primary": 1,
-    "btn-sm": 4
-  },
   "libs/frontend/onboarding/src/lib/proposal/new-project-intake.page.ts": {
-    "btn": 8,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 6,
+    "btn": 4,
+    "btn-sm": 4,
     "btn-warning": 1,
     "input": 1,
     "input-bordered": 1,
@@ -2494,113 +2446,49 @@
   "libs/frontend/onboarding/src/lib/proposal/proposal-panel.component.ts": {
     "badge": 1,
     "badge-outline": 1,
-    "badge-sm": 1,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
+    "badge-sm": 1
   },
   "libs/frontend/onboarding/src/lib/proposal/proposal-status-card.component.ts": {
-    "btn": 4,
-    "btn-ghost": 3,
-    "btn-primary": 2,
-    "btn-sm": 4
-  },
-  "libs/frontend/onboarding/src/lib/proposal/proposal-workspace.page.ts": {
-    "btn": 6,
+    "btn": 1,
     "btn-ghost": 1,
-    "btn-outline": 1,
     "btn-primary": 1,
-    "btn-sm": 6
+    "btn-sm": 1
   },
   "libs/frontend/onboarding/src/lib/proposal/reply-composer.component.ts": {
     "<dynamic>": 4
   },
-  "libs/frontend/onboarding/src/lib/proposal/review-apply.page.ts": {
-    "btn": 4,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 4
-  },
   "libs/frontend/onboarding/src/lib/proposal/revision-history.component.ts": {
     "badge": 1,
     "badge-outline": 1,
-    "badge-sm": 1,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
+    "badge-sm": 1
   },
   "libs/frontend/onboarding/src/lib/proposal/team-builder-start.page.ts": {
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 1,
     "textarea": 1,
     "textarea-bordered": 1
   },
-  "libs/frontend/onboarding/src/lib/ready/command-copy-row.component.ts": {
-    "btn": 1,
-    "btn-sm": 1
-  },
-  "libs/frontend/onboarding/src/lib/ready/connection-choice.component.ts": {
-    "btn": 5,
-    "btn-ghost": 1,
-    "btn-outline": 3,
-    "btn-primary": 1,
-    "btn-sm": 5
-  },
-  "libs/frontend/onboarding/src/lib/ready/connection-readiness-banner.component.ts": {
-    "btn": 1,
-    "btn-sm": 1
-  },
   "libs/frontend/onboarding/src/lib/ready/provider-panel.component.ts": {
     "<dynamic>": 1,
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-sm": 3,
     "skeleton": 2
   },
   "libs/frontend/onboarding/src/lib/ready/ready-connection-step.page.ts": {
-    "btn": 3,
-    "btn-ghost": 3,
+    "btn": 2,
+    "btn-ghost": 2,
     "btn-outline": 1,
     "btn-primary": 1
-  },
-  "libs/frontend/onboarding/src/lib/ready/ready-settings-step.page.ts": {
-    "btn": 5,
-    "btn-ghost": 2,
-    "btn-primary": 3,
-    "btn-sm": 2
   },
   "libs/frontend/onboarding/src/lib/ready/ready-strip.component.ts": {
     "<dynamic>": 2
   },
   "libs/frontend/onboarding/src/lib/shared/item-status-card.component.ts": {
-    "<dynamic>": 2,
-    "btn": 1,
-    "btn-sm": 1
-  },
-  "libs/frontend/onboarding/src/lib/shared/owner-conflict-banner.component.ts": {
-    "btn": 2,
-    "btn-sm": 2
-  },
-  "libs/frontend/onboarding/src/lib/shared/recovery-screen.component.ts": {
-    "btn": 2,
-    "btn-primary": 1,
-    "btn-sm": 2
+    "<dynamic>": 2
   },
   "libs/frontend/onboarding/src/lib/shared/run-panel.component.ts": {
-    "btn": 5,
-    "btn-ghost": 1,
+    "btn": 1,
     "btn-outline": 1,
-    "btn-primary": 3,
-    "btn-sm": 5
+    "btn-sm": 1
   },
   "libs/frontend/onboarding/src/lib/shared/run-status-chip.component.ts": {
     "<dynamic>": 1
-  },
-  "libs/frontend/onboarding/src/lib/shell/workspace-header.component.ts": {
-    "btn": 2,
-    "btn-outline": 2,
-    "btn-sm": 2
   },
   "libs/frontend/review-runs-ui/src/lib/components/review-bot-identity.component.ts": {
     "alert": 1,
@@ -2690,24 +2578,12 @@
     "textarea": 2,
     "textarea-bordered": 2
   },
-  "libs/frontend/setup-wizard/src/lib/components/agent-next-steps.component.ts": {
-    "btn": 4,
-    "btn-ghost": 2,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 4
-  },
   "libs/frontend/setup-wizard/src/lib/components/agent-preview-dialog.component.ts": {
     "alert": 4,
     "alert-info": 1,
     "alert-warning": 3,
     "badge": 2,
-    "badge-sm": 2,
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-xs": 1
+    "badge-sm": 2
   },
   "libs/frontend/setup-wizard/src/lib/components/analysis-transcript.component.ts": {
     "badge": 1,
@@ -2725,12 +2601,7 @@
     "badge": 2,
     "badge-ghost": 1,
     "badge-sm": 2,
-    "badge-success": 1,
-    "btn": 6,
-    "btn-ghost": 1,
-    "btn-outline": 5,
-    "btn-sm": 2,
-    "btn-xs": 4
+    "badge-success": 1
   },
   "libs/frontend/setup-wizard/src/lib/components/completion/grade-expectation.component.ts": {
     "alert": 1,
@@ -2749,47 +2620,24 @@
     "badge-error": 1,
     "badge-ghost": 1,
     "badge-outline": 1,
-    "badge-sm": 1,
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-xs": 1
+    "badge-sm": 1
   },
   "libs/frontend/setup-wizard/src/lib/components/confirmation-modal.component.ts": {
     "<dynamic>": 1,
-    "btn": 2,
-    "btn-ghost": 1,
+    "btn": 1,
     "btn-primary": 1
   },
   "libs/frontend/setup-wizard/src/lib/components/generation-errors.component.ts": {
     "alert": 1,
     "alert-error": 1
   },
-  "libs/frontend/setup-wizard/src/lib/components/generation-stop-control.component.ts": {
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-sm": 1
-  },
-  "libs/frontend/setup-wizard/src/lib/components/guidance-result-panel.component.ts": {
-    "btn": 5,
-    "btn-ghost": 1,
-    "btn-outline": 3,
-    "btn-primary": 1,
-    "btn-sm": 5
-  },
   "libs/frontend/setup-wizard/src/lib/components/pack-install-prompt.component.ts": {
     "alert": 2,
     "alert-error": 1,
     "alert-info": 1,
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-sm": 2,
+    "btn": 1,
+    "btn-ghost": 1,
     "btn-xs": 1
-  },
-  "libs/frontend/setup-wizard/src/lib/components/preview-decisions/bulk-decision-bar.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
   },
   "libs/frontend/setup-wizard/src/lib/components/preview-decisions/file-decision-row.component.ts": {
     "badge": 1,

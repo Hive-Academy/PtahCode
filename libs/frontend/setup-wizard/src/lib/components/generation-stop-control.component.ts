@@ -4,18 +4,16 @@ import {
   input,
   output,
 } from '@angular/core';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-generation-stop-control',
   standalone: true,
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (active()) {
-      <button
-        type="button"
-        class="btn btn-sm btn-outline"
-        (click)="stopRequested.emit()"
-      >
+      <button ptahButton type="button" (click)="stopRequested.emit()">
         Stop generation
       </button>
       <p class="text-xs text-base-content-muted">
