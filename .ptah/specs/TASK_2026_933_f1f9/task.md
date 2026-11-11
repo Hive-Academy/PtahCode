@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_933_f1f9
-status: backlog
+status: in_review
 type: BUGFIX
 title: Keep the Codex setup question answerable and show the Codex session
 depends_on: []
