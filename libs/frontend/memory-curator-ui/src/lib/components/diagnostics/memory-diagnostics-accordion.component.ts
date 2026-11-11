@@ -166,7 +166,7 @@ import { EventFeedComponent } from './event-feed.component';
             </div>
             <button
               type="button"
-              class="btn btn-ghost btn-xs min-h-7 px-1 text-primary underline underline-offset-2 focus-visible:outline-2"
+              ptahButton variant="link" size="xs"
               (click)="manageCurator()"
             >
               Change

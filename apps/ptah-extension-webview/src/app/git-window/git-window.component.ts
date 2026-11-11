@@ -7,11 +7,12 @@ import { GitDockScopeStore, loadReviewShell } from '@ptah-extension/git-ui/servi
 import { GitWindowScopeSchema } from '@ptah-extension/shared';
 import { LucideAngularModule, PanelRight } from 'lucide-angular';
 import { GitWindowScopeHandler } from './git-window.config';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-git-window',
   standalone: true,
-  imports: [NgComponentOutlet, LucideAngularModule],
+  imports: [NgComponentOutlet, LucideAngularModule, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Same pane as the docked Git dock: the dock class and the chrome glass role.
   host: {
@@ -21,12 +22,12 @@ import { GitWindowScopeHandler } from './git-window.config';
   template: `
     <header class="flex shrink-0 items-center justify-between border-b border-surface-border px-4 py-2">
       <h1 class="text-sm font-semibold">Git</h1>
-      <button type="button" class="btn btn-ghost btn-sm gap-1" data-testid="git-window-attach" (click)="attach()"><lucide-angular [img]="AttachIcon" class="h-3.5 w-3.5" aria-hidden="true" />Attach</button>
+      <button type="button" ptahButton variant="ghost" data-testid="git-window-attach" (click)="attach()"><lucide-angular [img]="AttachIcon" class="h-3.5 w-3.5" aria-hidden="true" />Attach</button>
     </header>
     @if (error()) {
       <div role="alert" [class]="shell() ? stripClass : centerClass" data-testid="git-window-error">
         <p>{{ error() }}</p>
-        <button type="button" class="btn btn-sm" (click)="retry()">Retry</button>
+        <button type="button" ptahButton (click)="retry()">Retry</button>
       </div>
     } @else if (!scopeHandler.scope()) {
       <p role="status" [class]="shell() ? stripClass : centerClass" data-testid="git-window-status">Resolving Git scope…</p>

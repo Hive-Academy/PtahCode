@@ -14,6 +14,7 @@ import { AppsSessionService } from '../services/apps-session.service';
 import { AppsFocusMemoryDirective } from './apps-focus-memory.directive';
 import { AppsSurfacePanelComponent } from './apps-surface-panel.component';
 import { AppsTranscriptComponent } from './apps-transcript.component';
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 
 /**
  * `AppsPageComponent` — the routed Apps page (implementation-plan.md:648-693).
@@ -124,8 +125,7 @@ export const APPS_PAGE_STYLES = `
     AppsTranscriptComponent,
     AppsSurfacePanelComponent,
     ElectronResizeHandleComponent,
-    LucideAngularModule,
-  ],
+    LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective,],
   hostDirectives: [AppsFocusMemoryDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
@@ -154,7 +154,8 @@ export const APPS_PAGE_STYLES = `
           @if (hasConversation()) {
             <button
               type="button"
-              class="btn btn-ghost btn-xs shrink-0"
+              ptahButton variant="ghost" size="xs"
+              class="shrink-0"
               data-apps-focus-key="apps:new-conversation"
               data-testid="apps-new-conversation"
               (click)="newConversation()"
@@ -178,8 +179,10 @@ export const APPS_PAGE_STYLES = `
               <span class="flex-1">{{ error }}</span>
               <button
                 type="button"
-                class="btn btn-ghost btn-xs btn-square shrink-0"
-                aria-label="Dismiss error"
+                ptahIconButton
+                size="xs"
+                class="shrink-0"
+                label="Dismiss error"
                 (click)="session.clearError()"
               >
                 <lucide-angular
@@ -199,8 +202,10 @@ export const APPS_PAGE_STYLES = `
               <span class="flex-1">{{ notice }}</span>
               <button
                 type="button"
-                class="btn btn-ghost btn-xs btn-square shrink-0"
-                aria-label="Dismiss notice"
+                ptahIconButton
+                size="xs"
+                class="shrink-0"
+                label="Dismiss notice"
                 (click)="session.clearNotice()"
               >
                 <lucide-angular
@@ -226,7 +231,7 @@ export const APPS_PAGE_STYLES = `
             @if (hasConversation()) {
               <button
                 type="button"
-                class="btn btn-ghost btn-xs"
+                ptahButton variant="ghost" size="xs"
                 data-apps-focus-key="apps:stop"
                 [disabled]="!session.isProcessing()"
                 [attr.title]="
@@ -241,7 +246,7 @@ export const APPS_PAGE_STYLES = `
             }
             <button
               type="button"
-              class="btn btn-primary btn-xs"
+              ptahButton variant="primary" size="xs"
               data-apps-focus-key="apps:send"
               data-testid="apps-send"
               [disabled]="!canSend()"

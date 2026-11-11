@@ -41,7 +41,7 @@ import { MemoryCuratorTabComponent } from '@ptah-extension/memory-curator-ui';
 import { SkillSynthesisTabComponent } from '@ptah-extension/skill-synthesis-ui';
 import { CronSchedulerTabComponent } from '@ptah-extension/cron-scheduler-ui';
 import { MessagingGatewayTabComponent } from '@ptah-extension/messaging-gateway-ui';
-import { MotionStageDirective } from '@ptah-extension/ui';
+import { MotionStageDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 
 /** Tab identifiers for the Thoth hub, in rail order. */
 export const THOTH_TAB_IDS = ['memory', 'skills', 'cron', 'gateway'] as const;
@@ -92,8 +92,7 @@ interface ThothTabSpec {
     SkillSynthesisTabComponent,
     CronSchedulerTabComponent,
     MessagingGatewayTabComponent,
-    MotionStageDirective,
-  ],
+    MotionStageDirective, PtahIconButtonDirective,],
   template: `
     <div class="flex h-full w-full flex-col bg-surface-0 lg:flex-row">
       <aside
@@ -103,8 +102,9 @@ interface ThothTabSpec {
         <div class="flex items-center gap-2 px-3 pb-3 pt-4 lg:px-4">
           <button
             type="button"
-            class="btn btn-ghost btn-xs btn-square"
-            aria-label="Back to chat"
+            ptahIconButton
+            size="xs"
+            label="Back to chat"
             (click)="goBack()"
           >
             <lucide-angular
