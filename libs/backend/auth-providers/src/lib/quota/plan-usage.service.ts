@@ -48,6 +48,7 @@ import type {
   PlanLimitOwnerSnapshot,
   ProviderAccountUsageStatus,
   QuotaOwnerRef,
+  UsageSourceLabel,
 } from '@ptah-extension/shared';
 import { AUTH_PROVIDERS_TOKENS } from '../di/tokens';
 import type { PlanLimitLedgerService } from './plan-limit-ledger.service';
@@ -68,6 +69,7 @@ import {
   createCodexPlanUsageReader,
   type CodexPlanUsageSource,
 } from './readers/codex-plan-usage.reader';
+import { disposeFallbackRuns } from './readers/fallback-usage.runner';
 import { createAntigravityPlanUsageReader } from './readers/antigravity-plan-usage.reader';
 import { createOllamaCloudPlanUsageReader } from './readers/ollama-cloud-plan-usage.reader';
 import { createOpenCodeLocalUsageReader } from './readers/opencode-local-usage.reader';
@@ -89,6 +91,19 @@ export const PLAN_USAGE_MAX_OWNERS = 64;
 
 /** Providers that have an owner but no source reporting its limits. */
 const NO_USAGE_SOURCE_PROVIDERS: ReadonlySet<string> = new Set([]);
+
+/** Legacy reader origins; multi-source readers will report their own winner. */
+const READER_SOURCE_LABELS: Readonly<Record<string, UsageSourceLabel>> = {
+  anthropic: 'session-sdk',
+  'openai-codex': 'provider-api',
+  'ollama-cloud': 'provider-api',
+  antigravity: 'local-rpc',
+  opencode: 'local-state',
+  'opencode-go': 'provider-api',
+  'opencode-zen': 'local-state',
+  grok: 'provider-api',
+  'kimi-code': 'provider-api',
+};
 
 /**
  * The owner cannot be read at all; such a snapshot never has an established
@@ -114,6 +129,7 @@ export type PlanUsageCredentials = Pick<PlanCredentialSource, 'resolve'>;
 export interface PlanUsageRequestOptions {
   /** Skip the 30 s cache (an in-flight read is still joined). */
   readonly refresh?: boolean;
+  readonly allowCliFallback?: boolean;
   /** Ends this caller's wait with an `AbortError`. */
   readonly signal?: AbortSignal;
 }
@@ -199,32 +215,38 @@ export class PlanUsageService {
       target.claudeRoute?.kind !== 'named' &&
       !options.refresh &&
       cached &&
+      !(options.allowCliFallback && cached.reading.status !== 'available') &&
       this.now() - cached.readAt < PLAN_USAGE_CACHE_TTL_MS
     ) {
       return Promise.resolve(this.assemble(target.ownerRef, cached.reading));
     }
     const flight =
-      this.flights.get(flightKey(target)) ??
-      this.startFlight(target, options.refresh === true);
+      this.flights.get(flightKey(target) + (options.allowCliFallback ? ':cli' : '')) ??
+      this.startFlight(target, options.refresh === true, options.allowCliFallback === true);
     return this.join(flight, signal);
   }
 
   /** Cancel pending reads and release all retained owner data. */
-  dispose(): void {
+  async dispose(): Promise<void> {
     this.disposed = true;
     for (const flight of this.flights.values()) flight.controller.abort();
     this.flights.clear();
     this.cache.clear();
     this.failingSince.clear();
+    try {
+      await disposeFallbackRuns();
+    } catch (_error: unknown) {
+      // degradation-audit: optional-capability - shutdown continues after a failed process kill.
+    }
   }
 
   // ------------------------------------------------------- single flight
 
-  private startFlight(target: PlanOwnerTarget, refresh: boolean): Flight {
+  private startFlight(target: PlanOwnerTarget, refresh: boolean, allowCliFallback: boolean): Flight {
     const controller = new AbortController();
-    const read = this.read(target, refresh, controller.signal);
+    const read = this.read(target, refresh, controller.signal, allowCliFallback);
     const flight: Flight = {
-      key: flightKey(target),
+      key: flightKey(target) + (allowCliFallback ? ':cli' : ''),
       ownerKey: target.ownerRef.key,
       controller,
       cancellable: 0,
@@ -283,6 +305,7 @@ export class PlanUsageService {
     target: PlanOwnerTarget,
     refresh: boolean,
     signal: AbortSignal,
+    allowCliFallback: boolean,
   ): Promise<PlanLimitOwnerSnapshot> {
     const owner = target.ownerRef;
     const providerId = normaliseOwnerProviderId(target.providerId);
@@ -318,6 +341,7 @@ export class PlanUsageService {
         target,
         refresh,
         signal,
+        allowCliFallback,
         ...(credential && { credential }),
       };
       const localReader = this.localReaders[providerId];
@@ -371,6 +395,17 @@ export class PlanUsageService {
     }
     // A failure caused by the cancellation itself is not the owner's state.
     if (signal.aborted) throw abortError();
+    if (
+      (reading.status === 'stale' || (reading.status === 'available' &&
+        reading.windowSetEstablished && reading.windows.length > 0)) &&
+      !reading.sourceInvalid
+    ) {
+      reading = {
+        ...reading,
+        source: reading.source ?? READER_SOURCE_LABELS[providerId],
+        readAt: reading.readAt ?? reading.fetchedAt ?? this.now(),
+      };
+    }
     return this.settle(owner, reading);
   }
 
@@ -454,6 +489,8 @@ export class PlanUsageService {
       owner,
       status: reading.status,
       ...(reading.fetchedAt !== undefined && { fetchedAt: reading.fetchedAt }),
+      ...(reading.source && { source: reading.source }),
+      ...(reading.readAt !== undefined && { readAt: reading.readAt }),
       ...(staleSince !== undefined && { staleSince }),
       windowSetEstablished: !ineligible && reading.windowSetEstablished,
       windows: snapshotWindowsForStatus(

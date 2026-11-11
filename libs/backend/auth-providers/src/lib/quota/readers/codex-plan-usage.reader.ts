@@ -34,10 +34,17 @@ import type {
   CodexAccountUsageResult,
   ICodexAccountUsageService,
 } from '../../providers/codex/codex-provider.types';
+import { CodexHomeResolver } from '../../providers/codex/codex-home-resolver';
 import type {
   PlanUsageReader,
   PlanUsageReading,
+  UsageSource,
 } from './plan-usage-reader.types';
+import { readUsageSourceChain } from './usage-source-chain';
+import { createCodexRolloutUsageSource, type CodexRolloutFileSystem } from './codex-rollout-usage.reader';
+
+/** App Server can initialize and make account, limits, and usage requests (10 s each); leave 10 s for local rollout. */
+const CODEX_USAGE_CHAIN_DEADLINE_MS = 50_000;
 
 type CodexQuotaWindow = NonNullable<
   NonNullable<CodexAccountUsageResult['quota']>['primary']
@@ -54,16 +61,53 @@ export function createCodexPlanUsageReader(
   usage: CodexPlanUsageSource,
   now: () => number = Date.now,
   homeSource?: () => string | undefined,
+  rolloutFs?: CodexRolloutFileSystem,
 ): PlanUsageReader {
-  return async ({ refresh, signal }) =>
-    mapCodexAccountUsage(
-      await usage.getAccountUsage({
-        refresh,
-        ...(signal && { signal }),
-        ...(homeSource && { home: homeSource() }),
-      }),
-      now(),
-    );
+  const home = homeSource ?? (() => new CodexHomeResolver().path);
+  const rollout = createCodexRolloutUsageSource(home, now, rolloutFs);
+  return async (request) => {
+    let lastResult: CodexAccountUsageResult | undefined;
+    let lastError: unknown;
+    const appServer: UsageSource = {
+    id: 'codex-app-server', label: 'provider-api',
+    async read({ refresh, signal }) {
+      try {
+        const result = await usage.getAccountUsage({
+          refresh,
+          ...(signal && { signal }),
+          ...(homeSource && { home: home() }),
+        });
+        lastResult = result;
+        const readAt = result.fetchedAt ?? now();
+        const reading = mapCodexAccountUsage(result, now());
+        return result.status === 'available'
+          ? { ok: true, source: 'provider-api', readAt, reading }
+          : { ok: false, source: 'provider-api', reason: 'source-not-applicable' };
+      } catch (error: unknown) {
+        // degradation-audit: optional-capability - local rollout may still answer after App Server fails.
+        lastError = error;
+        return { ok: false, source: 'provider-api', reason: 'source-not-applicable' };
+      }
+    },
+    };
+    const guardedRollout: UsageSource = {
+      ...rollout,
+      read: (sourceRequest) => lastResult?.status === 'available' ||
+        lastResult?.status === 'unsupported-auth' ||
+        lastResult?.status === 'unsupported-config' ||
+        lastResult?.status === 'cli-version-unsupported'
+        ? Promise.resolve({ ok: false, source: 'local-state', reason: 'source-not-applicable' })
+        : rollout.read(sourceRequest),
+    };
+    const reading = await readUsageSourceChain([appServer, guardedRollout], request, now, CODEX_USAGE_CHAIN_DEADLINE_MS);
+    if (reading.status === 'available') return reading;
+    if (lastError) throw lastError;
+    if (lastResult) return {
+      ...mapCodexAccountUsage(lastResult, now()),
+      ...(lastResult.status === 'available' && { source: 'provider-api' as const, readAt: lastResult.fetchedAt ?? now() }),
+    };
+    return reading;
+  };
 }
 
 /** Map one Codex account result; `readAt` stands in for a missing `fetchedAt`. */

@@ -4,6 +4,7 @@ import type {
   PlanLimitStatusReason,
   PlanLimitWindow,
   ProviderAccountUsageStatus,
+  UsageSourceLabel,
 } from '@ptah-extension/shared';
 import {
   buildPlanTile,
@@ -51,6 +52,33 @@ function owner(
 }
 
 describe('plan-tile-view.model', () => {
+  it.each<[UsageSourceLabel, string]>([
+    ['provider-api', 'provider API'],
+    ['cli-command', 'CLI command'],
+    ['local-state', 'local state'],
+    ['session-sdk', 'session SDK'],
+    ['local-rpc', 'local RPC'],
+  ])('shows %s and a live reading age on the tile', (source, label) => {
+    const reading = owner([win()], { source, readAt: NOW - 12_000 });
+    expect(buildPlanTile(reading, NOW, TIME).readingSource).toBe(`${label} · 12s ago`);
+    expect(buildPlanTile(reading, NOW + 48_000, TIME).readingSource).toBe(`${label} · 1m ago`);
+  });
+
+  it('omits provenance for old snapshots', () => {
+    expect(buildPlanTile(owner([win()]), NOW, TIME).readingSource).toBeNull();
+  });
+
+  it.each(['copilot', 'cursor', 'pi'])('shows no usage source for %s', (providerId) => {
+    const reading = owner([], {
+      owner: { key: `${providerId}#account:synthetic`, providerId, identityKind: 'account', label: 'Account' },
+      status: 'no-usage-source',
+      windowSetEstablished: false,
+    });
+    const view = buildPlanTile(reading, NOW, TIME);
+    expect(view.statusPill?.text?.toLowerCase()).toContain('no usage source');
+    expect(view.statusPill?.text?.toLowerCase()).not.toContain('unknown');
+  });
+
   describe('buildPlanTile primary selection', () => {
     it('shows the window with the highest finite used percentage', () => {
       const view = buildPlanTile(
