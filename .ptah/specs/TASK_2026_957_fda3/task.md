@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_957_fda3
-status: backlog
+status: in_review
 type: FEATURE
 title: "Badge and status composite: research, owner, gallery, look"
 depends_on: []
