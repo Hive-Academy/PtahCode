@@ -34,14 +34,12 @@ async function applyOne(
   try {
     const outcome = await Promise.race([call().then(() => 'done'), deadline]);
     if (outcome === 'timeout') {
-      // degradation-audit: reported - the turn still runs on the current setting of the session.
       logger.warn(
         `RPC: chat:continue - applying the ${what} to the live session timed out`,
         { ...context, timeoutMs: LIVE_TURN_SETTINGS_TIMEOUT_MS },
       );
     }
   } catch (error) {
-    // degradation-audit: reported - the turn still runs on the current setting of the session.
     logger.warn(
       `RPC: chat:continue - could not apply the ${what} to the live session`,
       {
