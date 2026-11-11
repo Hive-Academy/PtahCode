@@ -24,6 +24,7 @@ import type {
   IFileSystemProvider,
   IWorkspaceProvider,
 } from '@ptah-extension/platform-core';
+import { FileType } from '@ptah-extension/platform-core';
 import {
   createMockFileSystemProvider,
   createMockWorkspaceProvider,
@@ -100,6 +101,8 @@ function buildSuite(): Suite {
   const workspace = createMockWorkspaceProvider({
     folders: ['/workspace', 'D:\\repos\\other'],
   });
+  const fileSystem = createMockFileSystemProvider();
+  fileSystem.stat.mockResolvedValue({ type: FileType.Directory, ctime: 0, mtime: 0, size: 0 });
   const getWorktrees = jest.fn().mockResolvedValue([]);
   const gitInfo: MockGitInfo = {
     cancelOperation: jest.fn().mockReturnValue(true),
@@ -143,7 +146,7 @@ function buildSuite(): Suite {
     workspace as unknown as IWorkspaceProvider,
     gitInfo as unknown as GitInfoService,
     generator as unknown as CommitMessageGenerator,
-    createMockFileSystemProvider() as unknown as IFileSystemProvider,
+    fileSystem as unknown as IFileSystemProvider,
   ).register();
   return { rpc, gitInfo, generator, logger };
 }

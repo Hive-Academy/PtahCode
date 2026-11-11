@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { TabManagerService } from '@ptah-extension/chat-state';
-import { VSCodeService, rpcCall } from '@ptah-extension/core';
+import { LoggingService, VSCodeService, rpcCall } from '@ptah-extension/core';
 import { GIT_ROOT_MISSING_MESSAGE, GIT_ROOT_UNAVAILABLE_MESSAGE, GIT_ROOT_PROBE_FAILED_MESSAGE, MESSAGE_TYPES, type GitInfoResult } from '@ptah-extension/shared';
 import {
   SessionGitStatsStore,
@@ -33,6 +33,21 @@ function deferred<T>() {
 }
 
 describe(SessionGitStatsStore.name, () => {
+  const loggerWarn = jest.fn();
+  it('joins a pending root read across a release and re-track', async () => {
+    const pending = deferred<ReturnType<typeof success>>();
+    call.mockReturnValueOnce(pending.promise).mockResolvedValue(success(info()));
+    const release = store.track('/same', 'one');
+    await tick();
+    release();
+    store.track('/same', 'one');
+    await tick();
+    expect(call).toHaveBeenCalledTimes(1);
+    pending.resolve(success(info()));
+    await Promise.resolve();
+    await tick();
+    expect(call).toHaveBeenCalledTimes(2);
+  });
   it('keeps the last good counts after a retryable probe failure', async () => {
     tabs.set('one', { tab: { claudeSessionId: 'session' } });
     call.mockResolvedValueOnce(success(info([{ path: 'a', status: 'M', staged: false, additions: 2, deletions: 1 }])))
@@ -63,11 +78,16 @@ describe(SessionGitStatsStore.name, () => {
       turn('session');
       await tick();
       expect(call).toHaveBeenCalledTimes(1);
-      expect(warn).toHaveBeenCalledTimes(1);
+      expect(loggerWarn).toHaveBeenCalledTimes(1);
       release();
       store.track('/gone', 'one');
       await tick();
+      expect(call).toHaveBeenCalledTimes(1);
+      tabs.set('two', { tab: { claudeSessionId: 'new-session' } });
+      store.track('/gone', 'two');
+      await tick();
       expect(call).toHaveBeenCalledTimes(2);
+      expect(loggerWarn).toHaveBeenCalledTimes(1);
       push('/gone', info());
       expect(store.stateFor('/gone').kind).toBe('known');
       turn('session');
@@ -79,6 +99,19 @@ describe(SessionGitStatsStore.name, () => {
     } finally {
       warn.mockRestore();
     }
+  });
+  it('re-probes a reappeared root after backoff in the same session', async () => {
+    tabs.set('one', { tab: { claudeSessionId: 'session' } });
+    call.mockResolvedValueOnce({ success: false, error: GIT_ROOT_MISSING_MESSAGE })
+      .mockResolvedValueOnce(success(info()));
+    const release = store.track('/gone', 'one');
+    await tick();
+    release();
+    jest.advanceTimersByTime(180_000);
+    store.track('/gone', 'one');
+    await tick();
+    expect(call).toHaveBeenCalledTimes(2);
+    expect(store.stateFor('/gone').kind).toBe('known');
   });
   it('retries an unregistered root after a session turn', async () => {
     tabs.set('one', { tab: { claudeSessionId: 'session' } });
@@ -100,8 +133,10 @@ describe(SessionGitStatsStore.name, () => {
     jest.useFakeTimers();
     call.mockReset();
     tabs.clear();
+    loggerWarn.mockReset();
     TestBed.configureTestingModule({
       providers: [
+        { provide: LoggingService, useValue: { warn: loggerWarn } },
         {
           provide: VSCodeService,
           useValue: { config: () => ({ workspaceRoot: '/fallback' }) },
@@ -424,6 +459,7 @@ describe(SessionGitStatsStore.name, () => {
     release();
     store.track('/a', 'two');
     await tick();
+    expect(call).toHaveBeenCalledTimes(1);
     old.resolve(
       success(
         info([
@@ -440,6 +476,7 @@ describe(SessionGitStatsStore.name, () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(store.stateFor('/a')).toEqual({ kind: 'none' });
+    await tick();
     fresh.resolve(success(info()));
     await Promise.resolve();
     await Promise.resolve();

@@ -233,6 +233,7 @@ function buildSuite(wsRoot: string | null = '/workspace'): Suite {
   const gitInfo = createMockGitInfo();
   const webviewManager = createMockWebviewManager();
   const fileSystem = createMockFileSystemProvider();
+  fileSystem.stat.mockResolvedValue({ type: FileType.Directory, ctime: 0, mtime: 0, size: 0 });
 
   const handlers = new GitRpcHandlers(
     logger as unknown as Logger,
@@ -438,7 +439,8 @@ describe('worktree roots', () => {
       },
     ]);
     suite.fileSystem.stat.mockImplementation(async (dir: string) => {
-      if (dir.replace(/\/$/, '') !== WORKTREE) {
+      const normalized = dir.replace(/\\/g, '/').replace(/\/$/, '');
+      if (normalized !== WORKTREE && normalized !== '/workspace') {
         throw Object.assign(new Error(`ENOENT: ${dir}`), { code: 'ENOENT' });
       }
       return { type: FileType.Directory, ctime: 0, mtime: 0, size: 0 };

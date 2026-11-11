@@ -78,6 +78,8 @@ export interface GitRootResolverDeps {
 export const READ_PROBE_TTL_MS = 60_000;
 /** How long a confirmed refusal is reused by read-only methods (review M1). */
 export const READ_PROBE_NEGATIVE_TTL_MS = 2_000;
+/** Short reuse window for a registered folder confirmed to exist. */
+export const REGISTERED_FOLDER_TTL_MS = 2_000;
 /** Probe failures in a row after which a root reads as unavailable (review #6). */
 export const MAX_CONSECUTIVE_PROBE_FAILURES = 3;
 /**
@@ -130,6 +132,8 @@ export class GitRootResolver {
   private readonly readProbes = new Map<string, ReadProbeEntry>();
   /** Consecutive probe failures by requested root (see header). */
   private readonly failureStreaks = new Map<string, number>();
+  private readonly missingWarnings = new Set<string>();
+  private readonly registeredFolders = new Map<string, { expiresAt: number; epoch: number }>();
   /** Per-root warning rate limit (see {@link GIT_ROOT_WARNING_INTERVAL_MS}). */
   private readonly warnings: RepeatedWarningLimiter;
 
@@ -162,7 +166,21 @@ export class GitRootResolver {
       requested,
       platform,
     );
-    if (folder) return folder;
+    if (folder) {
+      const readOnly = READ_ONLY_GIT_METHODS.has(method);
+      if (!readOnly) this.registeredFolders.delete(folder);
+      const cached = this.registeredFolders.get(folder);
+      const existsRecently = readOnly && cached && cached.expiresAt > this.now() && cached.epoch === this.deps.epoch();
+      const absent = existsRecently ? false : await this.isConfirmedAbsent(folder);
+      if (absent) {
+        this.registeredFolders.delete(folder);
+        this.warnMissing(folder);
+        throw new RpcUserError(GIT_ROOT_MISSING_MESSAGE, 'GIT_ROOT_UNAVAILABLE');
+      }
+      if (readOnly && absent === false) this.registeredFolders.set(folder, { expiresAt: this.now() + REGISTERED_FOLDER_TTL_MS, epoch: this.deps.epoch() });
+      this.missingWarnings.delete(folder);
+      return folder;
+    }
 
     if (policy === 'folder-or-worktree') {
       const readOnly = READ_ONLY_GIT_METHODS.has(method);
@@ -178,6 +196,7 @@ export class GitRootResolver {
           );
       if (outcome.kind === 'confirmed-worktree') {
         this.failureStreaks.delete(requested);
+        this.missingWarnings.delete(requested);
         return outcome.path;
       }
       if (outcome.kind === 'probe-failed') {
@@ -202,6 +221,14 @@ export class GitRootResolver {
       }
     }
 
+    if (
+      READ_ONLY_GIT_METHODS.has(method) &&
+      (await this.isConfirmedAbsent(requested))
+    ) {
+      this.warnMissing(requested);
+      throw new RpcUserError(GIT_ROOT_MISSING_MESSAGE, 'GIT_ROOT_UNAVAILABLE');
+    }
+    this.missingWarnings.delete(requested);
     this.warnLimited(
       'refused',
       requested,
@@ -212,16 +239,16 @@ export class GitRootResolver {
         policy,
       },
     );
-    if (
-      READ_ONLY_GIT_METHODS.has(method) &&
-      (await this.isConfirmedAbsent(requested))
-    ) {
-      throw new RpcUserError(GIT_ROOT_MISSING_MESSAGE, 'GIT_ROOT_UNAVAILABLE');
-    }
     throw new RpcUserError(
       GIT_ROOT_UNAVAILABLE_MESSAGE,
       'GIT_ROOT_UNAVAILABLE',
     );
+  }
+
+  private warnMissing(root: string): void {
+    if (this.missingWarnings.has(root)) return;
+    this.missingWarnings.add(root);
+    this.deps.warn('[GitRoot] worktree folder is missing', { workspaceRoot: root });
   }
 
   /**
@@ -229,7 +256,7 @@ export class GitRootResolver {
    * keeps the retryable {@link GIT_ROOT_UNAVAILABLE_MESSAGE}, so the webview
    * does not stop git reads on an unconfirmed answer.
    */
-  private async isConfirmedAbsent(requested: string): Promise<boolean> {
+  private async isConfirmedAbsent(requested: string): Promise<boolean | null> {
     if (!checkLinkedPathForm(requested, this.deps.platform).ok) return false;
     // The missing-root message must not become an existence oracle for any
     // caller-named path. Answer it only inside a workspace folder or as a
@@ -247,7 +274,7 @@ export class GitRootResolver {
             cause: directory.cause,
           },
         );
-        return false;
+        return null;
       }
       return directory.kind === 'absent';
     } catch (error: unknown) {
@@ -261,7 +288,7 @@ export class GitRootResolver {
           cause: error instanceof Error ? error.message : String(error),
         },
       );
-      return false;
+      return null;
     }
   }
 
