@@ -630,7 +630,12 @@ export class StreamingAccumulatorCore {
         }
         return this.mutated(event.eventType);
       case 'agent_status':
-        if (!ctx.skipStoreEffects) agentMonitorStore.onAgentStatus(event);
+        if (!ctx.skipStoreEffects) {
+          agentMonitorStore.onAgentStatus(
+            event,
+            this.parentToolName(state, event.parentToolUseId),
+          );
+        }
         return this.mutated(event.eventType);
       case 'agent_completed':
         if (!ctx.skipStoreEffects) {

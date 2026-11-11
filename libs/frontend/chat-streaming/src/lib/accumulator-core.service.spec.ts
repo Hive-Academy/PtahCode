@@ -936,6 +936,38 @@ describe('StreamingAccumulatorCore (TASK_2026_107 Phase 2)', () => {
       },
     );
 
+    it.each(['Bash', 'PowerShell'])(
+      '(a) agent_status for a background %s node creates no subagent record',
+      (toolName) => {
+        const monitor = TestBed.runInInjectionContext(
+          () => new AgentMonitorStore(),
+        );
+        const ctx = makeCtx({ agentMonitorStore: monitor });
+        core.process(
+          state,
+          toolStart({ toolCallId: 'toolu_shell_status', toolName }),
+          ctx,
+        );
+        core.process(
+          state,
+          {
+            id: 'status-shell',
+            eventType: 'agent_status',
+            timestamp: 16,
+            sessionId: SESSION_ID,
+            messageId: MESSAGE_ID,
+            parentToolUseId: 'toolu_shell_status',
+            taskId: 'task-shell',
+            status: 'running',
+          },
+          ctx,
+        );
+
+        expect(monitor.getSubagent('toolu_shell_status')).toBeUndefined();
+        expect(monitor.subagents().size).toBe(0);
+      },
+    );
+
     it('(c) agent_completed for an Agent node still creates its record', () => {
       const monitor = TestBed.runInInjectionContext(
         () => new AgentMonitorStore(),

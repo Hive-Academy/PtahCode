@@ -2690,10 +2690,14 @@ export class AgentMonitorStore implements OnDestroy {
     });
   }
 
-  /** Reducer for SDK `agent_status` events. */
-  onAgentStatus(event: AgentStatusEvent): void {
+  /**
+   * Reducer for SDK `agent_status` events. A shell parent never creates a NEW
+   * record, for the same reason as {@link onAgentCompleted}.
+   */
+  onAgentStatus(event: AgentStatusEvent, parentToolName?: string): void {
     const key = event.parentToolUseId;
     if (!key) return;
+    if (this.isShellParentWithoutRecord(key, parentToolName)) return;
     const wf = readWorkflowFields(event);
     this._subagents.update((map) => {
       this.claimHistoryCandidate(key);
