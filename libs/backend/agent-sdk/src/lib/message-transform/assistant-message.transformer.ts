@@ -32,6 +32,12 @@ import type {
 } from './transformer-state';
 import type { TransformerHelpers } from './transformer-helpers';
 
+/** Shell tools whose `run_in_background` launches a non-agent task. */
+const BACKGROUND_SHELL_TOOLS: ReadonlySet<string> = new Set([
+  'Bash',
+  'PowerShell',
+]);
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -151,7 +157,7 @@ export class AssistantMessageTransformer {
       } else if (isToolUseBlock(block)) {
         const isTaskTool = isAgentDispatchTool(block.name);
         if (
-          block.name === 'Bash' &&
+          BACKGROUND_SHELL_TOOLS.has(block.name) &&
           block.input?.['run_in_background'] === true &&
           typeof block.input['command'] === 'string'
         ) {
