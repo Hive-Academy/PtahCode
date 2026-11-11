@@ -4,3 +4,6 @@ export * from './textarea.directive';
 export * from './select.directive';
 export * from './checkbox.directive';
 export * from './toggle.directive';
+export * from './rich-select/rich-select.types';
+export * from './rich-select/rich-select-icon.directive';
+export * from './rich-select/rich-select.component';

@@ -1,0 +1,278 @@
+/* Rich select look (TASK_2026_950_ed73). Scope: the ptah-select component
+   (.ptah-select and its parts). Uses --ptah-* tokens only.
+   Standalone, the trigger draws its own edge. Inside ptah-field, the field
+   box draws the edge and the trigger is transparent (see ptah-field.css).
+   The panel is a glass sheet. The active option shows an inset rail at the
+   start edge: the same line as the field rail, turned on its side. */
+
+.ptah-select {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+.ptah-select__trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--ptah-space-2);
+  width: 100%;
+  min-height: var(--ptah-control-h-sm);
+  padding-inline: var(--ptah-control-px);
+  border: var(--ptah-border-width) solid var(--ptah-field-border);
+  border-radius: var(--ptah-field-radius);
+  background-color: var(--ptah-field-bg);
+  color: var(--ptah-field-fg);
+  font-size: var(--ptah-text-body-size);
+  line-height: var(--ptah-text-body-leading);
+  text-align: start;
+  cursor: pointer;
+}
+
+.ptah-select__trigger:hover:not(:disabled) {
+  border-color: var(--ptah-field-border-hover);
+}
+
+.ptah-select__trigger:focus-visible {
+  outline: var(--ptah-focus-ring-width) solid var(--ptah-focus-ring-color);
+  outline-offset: var(--ptah-focus-ring-offset);
+}
+
+.ptah-select__trigger:disabled {
+  cursor: not-allowed;
+  opacity: var(--ptah-field-disabled-opacity);
+}
+
+.ptah-select__trigger[aria-invalid='true'] {
+  border-color: var(--ptah-field-border-invalid);
+}
+
+.ptah-select__value,
+.ptah-select__placeholder {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ptah-select__placeholder {
+  color: var(--ptah-field-placeholder);
+}
+
+/* In a floating field the label takes the place of the placeholder at rest. */
+.ptah-field[data-appearance='floating'] .ptah-select:not([data-ptah-filled]) .ptah-select__placeholder {
+  visibility: hidden;
+}
+
+.ptah-select__chevron,
+.ptah-select__clear svg,
+.ptah-select__search-icon,
+.ptah-select__check {
+  flex-shrink: 0;
+  width: var(--ptah-field-icon);
+  height: var(--ptah-field-icon);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ptah-select__chevron {
+  color: var(--ptah-field-icon-fg);
+  transition: transform var(--ptah-duration-base) var(--ptah-ease-emphasis);
+}
+
+.ptah-select[data-open] .ptah-select__chevron {
+  transform: rotate(180deg);
+}
+
+.ptah-select:has(.ptah-select__clear) .ptah-select__trigger {
+  padding-inline-end: calc(var(--ptah-field-action-size) + var(--ptah-space-4));
+}
+
+.ptah-select__clear {
+  position: absolute;
+  inset-inline-end: calc(var(--ptah-field-icon) + var(--ptah-space-2));
+  top: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ptah-field-action-size);
+  height: var(--ptah-field-action-size);
+  padding: 0;
+  border: 0;
+  border-radius: var(--ptah-radius-control);
+  background-color: transparent;
+  color: var(--ptah-field-icon-fg);
+  transform: translateY(-50%);
+  cursor: pointer;
+}
+
+.ptah-select__clear:hover {
+  background-color: var(--ptah-select-option-active-bg);
+  color: var(--ptah-field-fg);
+}
+
+.ptah-select__clear:focus-visible {
+  outline: var(--ptah-focus-ring-width) solid var(--ptah-focus-ring-color);
+  outline-offset: calc(var(--ptah-focus-ring-width) * -1);
+}
+
+.ptah-select__icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: var(--ptah-field-icon);
+  height: var(--ptah-field-icon);
+  color: var(--ptah-field-icon-fg);
+}
+
+.ptah-select__icon > * {
+  width: 100%;
+  height: 100%;
+}
+
+/* Panel */
+.ptah-select__panel {
+  z-index: var(--ptah-z-menu);
+  display: flex;
+  flex-direction: column;
+  max-height: var(--ptah-select-panel-max-h);
+  padding: var(--ptah-select-panel-pad);
+  border: var(--ptah-border-width) solid var(--ptah-select-panel-edge);
+  border-radius: var(--ptah-field-radius);
+  background-color: var(--ptah-select-panel-bg);
+  box-shadow: var(--ptah-elevation-3);
+  color: var(--ptah-field-fg);
+  backdrop-filter: var(--glass-blur-overlay, none);
+}
+
+.ptah-select__search-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ptah-space-2);
+  margin-bottom: var(--ptah-select-panel-pad);
+  padding: var(--ptah-space-2) var(--ptah-space-2);
+  border-bottom: var(--ptah-border-width) solid var(--ptah-border-color);
+  color: var(--ptah-field-icon-fg);
+}
+
+.ptah-select__search {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background-color: transparent;
+  color: var(--ptah-field-fg);
+  font-size: var(--ptah-text-body-size);
+  line-height: var(--ptah-text-body-leading);
+  outline: none;
+}
+
+.ptah-select__search::placeholder {
+  color: var(--ptah-field-placeholder);
+}
+
+.ptah-select__list {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  outline: none;
+}
+
+.ptah-select__group {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ptah-select__group + .ptah-select__group,
+li + li > .ptah-select__group {
+  margin-top: var(--ptah-space-1);
+}
+
+.ptah-select__group-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: var(--ptah-space-2) var(--ptah-space-2) var(--ptah-space-1);
+  background-color: var(--ptah-select-panel-bg);
+  color: var(--ptah-select-group-fg);
+  font-size: var(--ptah-text-caption-size);
+  line-height: var(--ptah-text-caption-leading);
+  font-weight: var(--ptah-field-label-float-weight);
+}
+
+.ptah-select__option {
+  display: flex;
+  align-items: center;
+  gap: var(--ptah-space-2);
+  min-height: var(--ptah-select-option-min-h);
+  padding: var(--ptah-space-1) var(--ptah-space-2);
+  border-radius: calc(var(--ptah-field-radius) - var(--ptah-select-panel-pad));
+  font-size: var(--ptah-text-body-size);
+  line-height: var(--ptah-text-body-leading);
+  cursor: pointer;
+}
+
+.ptah-select__option[data-active] {
+  background-color: var(--ptah-select-option-active-bg);
+  box-shadow: inset var(--ptah-field-rail-h) 0 0 var(--ptah-field-rail-color);
+}
+
+.ptah-select__option[aria-selected='true'] {
+  color: var(--ptah-select-option-selected-fg);
+  font-weight: var(--ptah-field-label-float-weight);
+}
+
+.ptah-select__option[aria-selected='true'] .ptah-select__icon {
+  color: var(--ptah-select-option-selected-fg);
+}
+
+.ptah-select__option[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: var(--ptah-field-disabled-opacity);
+}
+
+.ptah-select__text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ptah-select__label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ptah-select__description {
+  overflow: hidden;
+  color: var(--ptah-field-message-fg);
+  font-size: var(--ptah-text-label-size);
+  line-height: var(--ptah-text-label-leading);
+  font-weight: var(--ptah-text-body-weight);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ptah-select__check {
+  visibility: hidden;
+}
+
+.ptah-select__option[aria-selected='true'] .ptah-select__check {
+  visibility: visible;
+}
+
+.ptah-select__empty {
+  padding: var(--ptah-space-4) var(--ptah-space-3);
+  color: var(--ptah-field-message-fg);
+  font-size: var(--ptah-text-label-size);
+  line-height: var(--ptah-text-label-leading);
+  text-align: center;
+}

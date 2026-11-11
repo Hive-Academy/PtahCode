@@ -1,0 +1,317 @@
+/* Ptah field look: floating label, slots, rail (TASK_2026_950_ed73).
+   Scope: the ptah-field owner (.ptah-field and its parts) and the family
+   controls inside it. Uses --ptah-* tokens only.
+   The box draws the edge, the fill and the focus ring. The control inside is
+   transparent. The rail at the bottom edge carries focus (it grows from the
+   start edge), error (it stays) and busy (a sweep).
+   A control inside the body is reset with :is(.ptah-field__body, #ptah-field),
+   which adds one id to the control rules of ptah-form-controls.css, so the
+   reset wins without !important. Layout utilities on <ptah-field> still win:
+   no rule here targets the host. State attributes: data-invalid and data-busy
+   are absent when idle. */
+
+.ptah-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ptah-space-1);
+  min-width: 0;
+}
+
+.ptah-field__box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--ptah-space-2);
+  min-height: var(--ptah-field-h-md);
+  padding-inline: var(--ptah-field-pad-x);
+  border: var(--ptah-border-width) solid var(--ptah-field-border);
+  border-radius: var(--ptah-field-radius);
+  background-color: var(--ptah-field-bg);
+  color: var(--ptah-field-fg);
+  overflow: hidden;
+  transition-property: border-color, background-color;
+  transition-duration: var(--ptah-duration-fast);
+  transition-timing-function: var(--ptah-ease-standard);
+}
+
+.ptah-field[data-size='lg'] .ptah-field__box {
+  min-height: var(--ptah-field-h-lg);
+}
+
+.ptah-field[data-appearance='stacked'] .ptah-field__box {
+  min-height: var(--ptah-control-h-md);
+}
+
+.ptah-field[data-appearance='stacked'][data-size='lg'] .ptah-field__box {
+  min-height: var(--ptah-field-h-md);
+}
+
+.ptah-field__box:has(textarea) {
+  align-items: stretch;
+}
+
+.ptah-field__body {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  align-self: stretch;
+  min-width: 0;
+}
+
+/* Label */
+.ptah-field__label {
+  color: var(--ptah-field-label-fg);
+  font-size: var(--ptah-text-label-size);
+  line-height: var(--ptah-text-label-leading);
+  font-weight: var(--ptah-text-label-weight);
+}
+
+.ptah-field[data-appearance='floating'] .ptah-field__label {
+  position: absolute;
+  inset-inline-start: 0;
+  top: 50%;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  transform: translateY(-50%);
+  font-size: var(--ptah-text-body-size);
+  line-height: var(--ptah-text-body-leading);
+  font-weight: var(--ptah-text-body-weight);
+  pointer-events: none;
+  transition-property: top, transform, font-size, line-height, color;
+  transition-duration: var(--ptah-duration-base);
+  transition-timing-function: var(--ptah-ease-emphasis);
+}
+
+.ptah-field[data-appearance='floating'] .ptah-field__body:has(textarea) .ptah-field__label {
+  top: var(--ptah-space-3);
+  transform: none;
+}
+
+/* Floated: focus, a value, autofill, a real placeholder, a native select,
+   or a filled rich select. */
+.ptah-field[data-appearance='floating']:is(
+    :focus-within,
+    :has(.ptah-field__body :is(input, textarea):not(:placeholder-shown)),
+    :has(.ptah-field__body :is(input, textarea):autofill),
+    :has(.ptah-field__body :is(input, textarea)[placeholder]:not([placeholder=' '])),
+    :has(.ptah-field__body select),
+    :has(.ptah-field__body .ptah-select[data-ptah-filled])
+  )
+  .ptah-field__label {
+  top: var(--ptah-field-label-float-top);
+  transform: none;
+  font-size: var(--ptah-field-label-float-size);
+  line-height: var(--ptah-field-label-float-leading);
+  font-weight: var(--ptah-field-label-float-weight);
+}
+
+.ptah-field__box:focus-within .ptah-field__label,
+.ptah-field:has(.ptah-select[data-open]) .ptah-field__label {
+  color: var(--ptah-field-label-fg-active);
+}
+
+.ptah-field__required {
+  color: var(--ptah-state-err);
+}
+
+/* Controls inside the body */
+:is(.ptah-field__body, #ptah-field) :is(.input, .textarea, .select)[data-ptah-control]:is(.input, .textarea, .select, #ptah-control),
+:is(.ptah-field__body, #ptah-field) .ptah-select__trigger {
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  padding-inline-start: 0;
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
+  box-shadow: none;
+  outline: none;
+}
+
+:is(.ptah-field__body, #ptah-field) :is(.input, .select)[data-ptah-control]:is(.input, .select, #ptah-control),
+:is(.ptah-field__body, #ptah-field) .ptah-select__trigger {
+  align-self: stretch;
+}
+
+.ptah-field[data-appearance='floating'] :is(.ptah-field__body, #ptah-field) :is(.input, .textarea, .select)[data-ptah-control]:is(.input, .textarea, .select, #ptah-control),
+.ptah-field[data-appearance='floating'] :is(.ptah-field__body, #ptah-field) .ptah-select__trigger {
+  padding-top: var(--ptah-field-pad-top);
+  padding-bottom: var(--ptah-field-pad-bottom);
+}
+
+:is(.ptah-field__body, #ptah-field) .textarea[data-ptah-control]:is(.textarea, #ptah-control) {
+  min-height: var(--ptah-field-textarea-min-h);
+  padding-inline-end: 0;
+}
+
+.ptah-field[data-appearance='floating'] :is(.ptah-field__body, #ptah-field) .textarea[data-ptah-control]:is(.textarea, #ptah-control) {
+  padding-top: calc(var(--ptah-field-pad-top) + var(--ptah-space-2));
+}
+
+/* Hover, focus ring and rail */
+.ptah-field__box:hover:not(:has(:disabled)) {
+  border-color: var(--ptah-field-border-hover);
+  background-color: var(--ptah-field-bg-hover);
+}
+
+.ptah-field__box:has(.ptah-field__body :focus-visible) {
+  outline: var(--ptah-focus-ring-width) solid var(--ptah-focus-ring-color);
+  outline-offset: var(--ptah-focus-ring-offset);
+}
+
+.ptah-field__rail {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: var(--ptah-field-rail-h);
+  background-color: var(--ptah-field-rail-color);
+  transform: scaleX(0);
+  transform-origin: left center;
+  pointer-events: none;
+  transition: transform var(--ptah-duration-base) var(--ptah-ease-emphasis);
+}
+
+.ptah-field__box:focus-within .ptah-field__rail,
+.ptah-field:has(.ptah-select[data-open]) .ptah-field__rail {
+  transform: scaleX(1);
+}
+
+/* Error: the field error or aria-invalid="true" on the control */
+.ptah-field:is([data-invalid='true'], :has(.ptah-field__body [aria-invalid='true'])) .ptah-field__box {
+  border-color: var(--ptah-field-border-invalid);
+}
+
+.ptah-field:is([data-invalid='true'], :has(.ptah-field__body [aria-invalid='true'])) .ptah-field__rail {
+  background-color: var(--ptah-field-border-invalid);
+  transform: scaleX(1);
+}
+
+.ptah-field:is([data-invalid='true'], :has(.ptah-field__body [aria-invalid='true'])) .ptah-field__label {
+  color: var(--ptah-state-err);
+}
+
+/* Busy: a sweep on the rail. Reduced motion: a still rail. */
+.ptah-field[data-busy='true'] .ptah-field__rail {
+  transform: scaleX(1);
+  background-color: var(--ptah-field-rail-busy);
+  background-image: linear-gradient(90deg, transparent, var(--ptah-field-rail-color), transparent);
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: ptah-field-busy var(--ptah-field-busy-duration) linear infinite;
+}
+
+@keyframes ptah-field-busy {
+  from {
+    background-position: -40% 0;
+  }
+  to {
+    background-position: 140% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ptah-field[data-busy='true'] .ptah-field__rail {
+    animation: none;
+    background-image: none;
+  }
+}
+
+/* Disabled and read-only */
+.ptah-field:has(.ptah-field__body :disabled) .ptah-field__box {
+  background-color: var(--ptah-field-disabled-bg);
+  border-color: var(--ptah-border-color);
+  opacity: var(--ptah-field-disabled-opacity);
+  cursor: not-allowed;
+}
+
+:is(.ptah-field__body, #ptah-field) :is(.input, .textarea, .select)[data-ptah-control]:disabled:is(.input, .textarea, .select, #ptah-control) {
+  background-color: transparent;
+  opacity: 1;
+}
+
+.ptah-field:has(.ptah-field__body [readonly]) .ptah-field__box {
+  border-style: dashed;
+  background-color: transparent;
+}
+
+/* Slots and actions */
+.ptah-field [ptahFieldLeading],
+.ptah-field [ptahFieldTrailing],
+.ptah-field__action {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  color: var(--ptah-field-icon-fg);
+}
+
+.ptah-field :is([ptahFieldLeading], [ptahFieldTrailing]) svg,
+.ptah-field__action svg {
+  width: var(--ptah-field-icon);
+  height: var(--ptah-field-icon);
+}
+
+.ptah-field__box:focus-within [ptahFieldLeading] {
+  color: var(--ptah-field-label-fg-active);
+}
+
+.ptah-field__action {
+  width: var(--ptah-field-action-size);
+  height: var(--ptah-field-action-size);
+  padding: 0;
+  border: 0;
+  border-radius: var(--ptah-radius-control);
+  background-color: transparent;
+  cursor: pointer;
+}
+
+.ptah-field__action svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.ptah-field__action:hover {
+  background-color: var(--ptah-select-option-active-bg);
+  color: var(--ptah-field-fg);
+}
+
+.ptah-field__action:focus-visible {
+  outline: var(--ptah-focus-ring-width) solid var(--ptah-focus-ring-color);
+  outline-offset: calc(var(--ptah-focus-ring-width) * -1);
+}
+
+.ptah-field:has(.ptah-field__body :is(input, textarea):placeholder-shown) .ptah-field__clear,
+.ptah-field:has(.ptah-field__body :disabled) .ptah-field__action {
+  display: none;
+}
+
+/* Footer: hint or error, character count */
+.ptah-field__footer {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ptah-space-2);
+  padding-inline: var(--ptah-field-pad-x);
+}
+
+.ptah-field__message {
+  margin: 0;
+  color: var(--ptah-field-message-fg);
+  font-size: var(--ptah-text-label-size);
+  line-height: var(--ptah-text-label-leading);
+}
+
+.ptah-field__message[data-error='true'] {
+  color: var(--ptah-state-err);
+}
+
+.ptah-field__counter {
+  margin-inline-start: auto;
+  color: var(--ptah-field-message-fg);
+  font-size: var(--ptah-text-label-size);
+  line-height: var(--ptah-text-label-leading);
+  font-variant-numeric: tabular-nums;
+}

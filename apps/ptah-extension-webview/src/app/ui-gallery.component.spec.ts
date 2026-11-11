@@ -242,6 +242,12 @@ it('renders the form controls family with a directive on every control', () => {
   expect(
     ref.querySelectorAll('input, textarea, select').length,
   ).toBeGreaterThan(30);
+  expect(ref.querySelectorAll('ptah-field').length).toBeGreaterThan(20);
+  expect(
+    ref.querySelectorAll('[data-ptah-control="rich-select"][role="combobox"]').length,
+  ).toBeGreaterThan(5);
+  expect(ref.querySelector('[data-testid="form-controls-provider-form"]')).not.toBeNull();
+  expect(ref.querySelectorAll('.ptah-field[data-busy="true"]')).toHaveLength(1);
   expect(
     ref.querySelectorAll(
       'input:not([data-ptah-control]), textarea:not([data-ptah-control]), select:not([data-ptah-control])',

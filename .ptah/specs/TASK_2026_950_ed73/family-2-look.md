@@ -1,194 +1,218 @@
 # Family 2 look: form controls
 
 Date: 2026-11-11. Task: TASK_2026_950_ed73. Status: waiting for the user approval (step 4).
-Owner: `libs/frontend/ui/src/lib/form-controls/` (directives) and `ptah-form-controls.css`
-(look). API: `context.md` in this folder. Research: `TASK_2026_940_eef5/form-controls-research.md`.
-Gallery: `/ui-gallery`, section `family-form-controls` (Electron only).
+Revision 2: the user rejected the first look ("very basic"). This revision adds the floating label
+field and the rich select, and reverses decision 3.
 
-The look has one scope: hosts with `data-ptah-control`. A raw DaisyUI control keeps the look of
-today until it moves to a directive (step 5). There is no `[data-ptah-look='next']` scope.
+Owners in `libs/frontend/ui/src/lib/`:
+
+- `surfaces/field.component.ts` (`ptah-field`): the one field owner. Label, control, icon slots,
+  actions, helper text, error text, counter, required mark, busy rail.
+- `form-controls/rich-select/` (`ptah-select`): the rich select.
+- `form-controls/*.directive.ts`: `ptahInput`, `ptahTextarea`, `ptahSelect` (native), `ptahCheckbox`,
+  `ptahToggle`.
+- Look: `form-controls/ptah-form-controls.css`, `form-controls/ptah-field.css`,
+  `form-controls/rich-select/ptah-select.css`. Tokens: `tokens/ptah-tokens.css`.
+
+Gallery: `/ui-gallery`, section `family-form-controls` (Electron only). The look has one scope:
+`.ptah-field`, `.ptah-select` and hosts with `data-ptah-control`. A raw DaisyUI control keeps the
+look of today until it moves to an owner (step 5).
 
 ## Decisions for the user (epic section 10)
 
-The coordinator took the recommendations. Confirm or change each one at the approval.
-
 | # | Decision | Proposed | Visible effect |
 |---|---|---|---|
-| 1 | Default size of text controls | `sm` = `--ptah-control-h-sm` (32 px) for input, select; textarea minimum 52 px | The 13 unsized inputs go from 48 px to 32 px high (review settings drawer). The 9 wizard inputs go from 36 px (`min-h-9`) to 32 px. |
-| 2 | 85 custom input looks | Fold into three tones: `default`, `mono`, `compact`. Own height, fill, border, radius, focus and font-size classes stop to have an effect on a directive host. Layout classes stay. | Filter bar inputs lose `rounded-lg` (pill radius of the theme) and `bg-surface-0` (field fill). Wizard inputs lose `bg-base-100` and the muted border (token edge). |
-| 3 | Native `<select>` against combobox | Keep native `<select>` with `ptahSelect` | The chevron shows again in glass themes (the glass `background` shorthand removes it today). No behavior change. |
+| 1 | Default size of text controls | In a form: `ptah-field` size `md` (48 px), `lg` 56 px. Inline (toolbar, table): the bare directive, `sm` 32 px. | Form inputs grow from 32–48 px to 48 px and get the floating label. Toolbar inputs stay 32 px. |
+| 2 | 85 custom input looks | Three tones stay: `default`, `mono`, `compact`. Compact is stacked only (no floating label). | Filter bar inputs lose `rounded-lg` and `bg-surface-0`. |
+| 3 | Native `<select>` against the rich select | **Reversed.** Form selects move to `ptah-select` (rich). Inline selects stay native with `ptahSelect`. | Form selects get the floating label, groups, search, icons and descriptions. See section 6. |
+
+## The concept: one field, one rail
+
+The field is a glass well with a 2 px rail at the bottom edge. The rail carries the state, so the
+edge of the well stays quiet:
+
+- Focus: the rail grows from the center (`scaleX` 0 → 1). The label takes the accent ink.
+- Error: the rail is on in the error color, also without focus. The error text replaces the hint.
+- Busy: a short segment sweeps along the rail. It replaces a spinner. Under reduced motion it stops.
+- Read-only: the edge is dashed, there is no rail and no hover fill.
+- Disabled: the fill of base-200 and 48 % opacity.
+
+The rich select uses the same language. The active option has an inset 2 px rail at the left edge.
+The selected option has the accent ink and a check mark. The button family has the same pill
+focus ring, so the two families agree.
 
 ## A. Owner checks
 
-- [x] Owner in `libs/frontend/ui`, exported from `@ptah-extension/ui` (`src/index.ts`).
-- [x] Tokens only. `form-controls` is in `TOKEN_ONLY_DIRS` (`tokens/ptah-tokens.spec.ts`).
-- [x] Gallery section with each size, tone and state: default, hover, focus-visible, disabled,
-      error, placeholder, long text, icon slot (`pl-8`), tinted panels. Busy and active do not
-      apply to a text field. Icon only does not apply.
-- [x] Behavior is native (`<input>`, `<textarea>`, `<select>`, checkbox). The toggle is a native
-      checkbox with `role="switch"`. The accessibility spec is
-      `form-controls/form-controls.a11y.spec.ts` (name, role, keyboard path, state, focus ring).
+- [x] Owners in `libs/frontend/ui`, exported from `@ptah-extension/ui` (`src/index.ts`).
+- [x] Tokens only. `design-tokens.spec.ts` checks that each rule of `ptah-field.css` and
+      `ptah-select.css` is scoped to its owner, with no `!important`.
+- [x] Gallery: each variant and state, in dark and light, on base-100, base-200 and base-300.
+      A provider connection form. A rich select with groups, icons and search.
+- [x] A11y specs: `field.component.spec.ts`, `rich-select.component.spec.ts`,
+      `rich-select-list.spec.ts`, `form-controls.a11y.spec.ts`, and the gallery spec (each control
+      has a name).
 - [ ] Zero-pixel adoption: not in this step (step 5 starts after the approval).
-- [x] Scoped checks: see the pull request test plan.
 
 ## 1. Variants
 
 | Variant | Purpose | Use | Do not use |
 |---|---|---|---|
-| `ptahInput`, tone `default` | One line of text, number, search, URL, password | Forms, settings, dialogs | Chat composer (exception U2) |
-| tone `mono` | Paths, ids, keys, cron expressions, code | Values that the user copies or compares by character | Prose |
-| tone `compact` | Dense rows: filter bars, table cells, inline edit | With size `xs` or `sm` in a toolbar row | A form with labels above the fields |
-| `ptahTextarea` | Many lines of text | Descriptions, prompts in settings, allow lists | Chat or lane composers (exception U2) |
-| `ptahSelect` | One choice from a short fixed list | Up to about 15 options | Search in a long list (use `ptah-native-autocomplete`) |
-| `ptahCheckbox` | Select an item, or one option with a separate save | Lists, filters, consent | An on/off setting that applies at once (use the toggle) |
-| `ptahToggle` | An on/off setting that applies at once | Settings rows, feature switches | A choice that needs a submit |
+| `ptah-field` floating (default), size `md` / `lg` | A labeled form field. The label sits in the field and floats up on focus or value. | Forms, settings, dialogs, wizards | Toolbars, table cells |
+| `ptah-field` `appearance="stacked"` | Label above the control | Long labels, compact tone, textareas with a long hint | — |
+| `ptahInput` bare, sizes `xs` / `sm` / `md` | Inline text | Filter bars, table cells, inline edit | A form field (use `ptah-field`) |
+| tone `mono` | Paths, ids, keys, cron expressions | Values that the user copies | Prose |
+| tone `compact` | Dense rows | Stacked only, size `xs` / `sm` | A floating field |
+| `ptahTextarea` in `ptah-field` | Many lines. `counter` shows "N / max". | Descriptions, notes, allow lists | Chat or lane composers (exception U2) |
+| `ptah-select` (rich) | One choice. Groups, search, icons, descriptions, disabled options, clear. | Form selects. Search turns on by itself at 8 or more options. | Toolbar sorts with 2–4 words |
+| `ptahSelect` (native) | One choice from a short fixed list, inline | Toolbar and table selects | Form fields |
+| `ptahCheckbox`, `ptahToggle` | No change from revision 1 | — | — |
 
-Sizes: text controls `xs` (24 px), `sm` (32 px, default), `md` (40 px). A textarea has no fixed
-height: `sm` and `md` have a minimum of 52 px, and `xs` has a minimum of 40 px with label type. Checkbox and toggle `xs`
-and `sm` (default). One tone for checkbox and toggle: primary when checked. The research proposed a
-`neutral` tone. It is removed: the glass rule paints each checked choice primary, so `neutral`
-looked the same as `primary` in the reference themes.
+Field actions:
+
+- `clearable`: a clear button. It shows only when the control has a value. It sends an `input`
+  event, so `ngModel` and reactive forms see the change. Then focus goes back to the control.
+- `revealable`: show and hide for a password, with `aria-pressed`.
+- `counter`: the character count, with `maxlength` when it is set.
+- `[ptahFieldLeading]` and `[ptahFieldTrailing]`: icon slots.
+- `required`: the mark `*` (hidden from screen readers) and `aria-required`.
+
+Rich select keyboard path: ArrowDown, ArrowUp, Enter and Space open. The arrows skip disabled
+options. Home and End go to the ends. Type-ahead finds an option by its first letters. Enter
+chooses. Esc closes and keeps focus on the trigger. Tab closes and does not choose. The trigger is
+a `combobox` with `aria-activedescendant`, and the panel is a `listbox` with `group` parts. With
+search, the search input is the combobox. The panel uses `FloatingUIService`. The component works
+with `ngModel`, reactive forms (CVA) and `[(value)]`.
 
 ## 2. Tokens
 
-Each rule of `ptah-form-controls.css` reads `--ptah-*` tokens only. New tokens are in
-`tokens/ptah-tokens.css`, block "Form controls family". Values: `ptah-glass` (dark) and
-`ptah-glass-light` (light) from `apps/ptah-extension-webview/tailwind.config.js`.
+New tokens in `tokens/ptah-tokens.css`, block "Field and select". Revision 1 tokens stay.
 
-| Token | Definition | Dark | Light |
-|---|---|---|---|
-| `--ptah-control-h-xs` / `-sm` / `-md` | 1.5 / 2 / 2.5 rem | 24 / 32 / 40 px | same |
-| `--ptah-field-textarea-min-h` | `--ptah-control-h-field` | 52 px | same |
-| `--ptah-radius-control` | `--rounded-btn` | 9999 px (pill) | 9999 px |
-| `--ptah-radius-field-multiline` | `--glass-radius-inner`, else `--rounded-box` | 14 px (glass on) | 14 px |
-| `--ptah-border-width` | 1 px | 1 px | 1 px |
-| `--ptah-field-bg` | `--glass-fill-input`, else base-100 | base-100 #17191d at 66 % (glass) | base-100 #f7f3fd at 58 % (glass) |
-| `--ptah-field-fg` | base-content | #f2f2f1 | #1e1936 |
-| `--ptah-field-placeholder` | `--bcm` | oklch(90.05% 0.0071 268.54) | oklch(46.56% 0.0614 293.53) |
-| `--ptah-field-border` | `--ptah-control-edge` (55 % base-content in base-100) | mix of #f2f2f1 and #17191d | mix of #1e1936 and #f7f3fd |
-| `--ptah-field-border-hover` | `--ptah-control-edge-strong` (68 %) | mix | mix |
-| `--ptah-field-border-invalid` | `--ptah-state-err` | state ink, else error #ff6b6b | state ink, else error #cf3a3a |
-| `--ptah-field-disabled-bg` | `--surface-2` (base-200) | #202329 | #eee8f8 |
-| `--ptah-field-disabled-fg` | `--bcm` | as placeholder | as placeholder |
-| `--ptah-field-disabled-opacity` | `--ptah-btn-disabled-opacity` | 0.48 | 0.48 |
-| `--ptah-choice-edge` | `--ptah-control-edge` | mix | mix |
-| `--ptah-choice-on` | primary | #e4b94a | #7c5700 |
-| `--ptah-focus-ring-*` | 2 px outline, 2 px offset, `--glass-focus` else primary | base-content (glass) | base-content (glass) |
-| `--ptah-font-mono` | JetBrains Mono stack (same as Tailwind `font-mono`) | | |
-| `--ptah-select-chevron-size` / `-inset` | 0.25 rem / 1.25 rem (DaisyUI geometry) | 4 / 20 px | same |
-| `--ptah-text-body-*` | 0.875 rem / 1.25 rem / 400 | default tone, sizes sm and md | same |
-| `--ptah-text-label-*` | 0.75 rem / 1 rem | size xs and tone compact | same |
-| `--ptah-text-code-*` | 0.8125 rem / 1.25 rem / 400 | tone mono | same |
+| Token | Value | Note |
+|---|---|---|
+| `--ptah-field-h-md` / `-lg` | 3 / 3.5 rem (48 / 56 px) | Floating field heights |
+| `--ptah-field-pad-x` / `-pad-top` / `-pad-bottom` | 12 px / 20 px / 6 px | Room for the floated label |
+| `--ptah-field-radius` | `--glass-radius-inner`, else 10 px | Field well. Not pill: a label needs room. |
+| `--ptah-field-bg-hover` | field fill mixed 8 % with base-content | Hover fill |
+| `--ptah-field-label-fg` / `-fg-active` | muted ink / primary 62 % in base-content | Active label ≥ 4.5:1 on base-100/200/300 (spec) |
+| `--ptah-field-label-float-*` | 11 px, 16 px leading, 600, top 6 px | Floated label |
+| `--ptah-field-rail-h` / `-rail-color` / `-rail-busy` | 2 px / primary / primary 55 % | The rail |
+| `--ptah-field-busy-duration` | 1400 ms, 0.01 ms under reduced motion | Busy sweep |
+| `--ptah-field-icon` / `-action-size` | 16 px / 28 px | Icon slot, action button |
+| `--ptah-field-icon-fg` / `-message-fg` | muted ink | Icons, hint, counter |
+| `--ptah-select-panel-bg` / `-panel-edge` | glass overlay fill / strong edge | Panel, with `--glass-blur-overlay` |
+| `--ptah-select-panel-max-h` / `-panel-pad` | 18 rem / 4 px | Panel size |
+| `--ptah-select-option-min-h` | 36 px | Option row |
+| `--ptah-select-option-active-bg` / `-selected-fg` | primary 16 % / primary 62 % in base-content | Active and selected option |
+| `--ptah-select-group-fg` | muted ink | Group header |
+
+Motion: the label float and the rail use `--ptah-duration-*` and `--ptah-ease-*` tokens. Under
+`prefers-reduced-motion` all transitions and the busy sweep stop.
 
 ## 3. White space
 
-Rules from `foundation-tokens.md` section 3 (the rule names of its table).
-
 | Item | Value | Rule |
 |---|---|---|
-| Control height | 24 / 32 / 40 px | Control dimensions, `--ptah-control-h-*` |
-| Inner padding (inline) | 8 / 12 / 16 px for xs / sm / md. DaisyUI sets it and it equals the tokens. The consumer can add `pl-8` or `pr-9` for an icon. | `--ptah-control-px-xs`, `--ptah-control-px`, `--ptah-control-px-md` |
-| Label to control, control to hint | 4 px (`ptah-field`) | "Label to control, control to hint", `--ptah-gap-label` |
-| Control to control in one row | 8 px | "Control to control in one row", `--ptah-gap-controls` |
-| Field to field | 16 px | "Field to field", `--ptah-gap-field` |
-| Checkbox or toggle to its label | 8 px | "Icon to label in a control", `--ptah-gap-inline` |
-
-The stylesheet sets no `position`, width, margin or inline padding. The consumer owns layout.
+| Field height | 48 / 56 px floating, 32 px bare `sm` | Control dimensions |
+| Inner padding | 12 px inline. 20 px top and 6 px bottom in a floating field. | `--ptah-field-pad-*` |
+| Icon slot to text | 8 px | `--ptah-gap-inline` |
+| Control to hint or error | 4 px | `--ptah-gap-label` |
+| Field to field | 16 px | `--ptah-gap-field` |
+| Option row | 36 px high, 8 px inline padding, 4 px panel padding | `--ptah-select-*` |
 
 ## 4. Visual hierarchy
 
 | Part | Type role |
 |---|---|
-| Field label (`ptah-field`) | label (12 px, 500) |
-| Value, default tone | body (14 px, 400) |
-| Value, mono tone | code (13 px mono) |
-| Value, compact tone or size xs | label size (12 px) |
-| Placeholder | body size, muted ink (`--bcm`) |
-| Hint and error text | hint (12 px). Error uses state ink. |
+| Label at rest | body (14 px), muted ink |
+| Floated label | 11 px, 600, accent ink on focus |
+| Value | body (14 px). Mono tone: code (13 px). |
+| Hint, error, counter | hint (12 px). Error uses state ink. |
+| Option label / description | body / hint, muted |
+| Group header | label (12 px, 600), muted, sticky |
 
-Order of emphasis: focus ring > error edge > hover edge > rest edge > disabled. A focused invalid
-control keeps the error edge and gets the focus ring. Utility classes for height, radius, border,
-fill, focus or font have no effect on a directive host: use the `size` and `tone` inputs. A checked choice
-(primary fill) is stronger than a text field. A form has at most one primary button (button family).
+Order of emphasis: focus ring > error rail > focus rail > hover fill > rest > disabled.
 
 ## 5. Reference pages
 
-Recipes of today come from the source (static `class`). Heights before are DaisyUI values plus the
-global `.input` rule (`min-height: 32px`, `font-size: 13px`).
+| Page | Today | Proposed |
+|---|---|---|
+| Provider setup wizard | 9 raw inputs, 36 px | `ptah-field` floating `md`. The provider and model selects become `ptah-select` with icons. The key field is `revealable`. |
+| Session filter bar | raw compact input and 2 selects | Bare `ptahInput` compact and native `ptahSelect` (inline, stays native) |
+| Review settings drawer | 5 unsized inputs, 48 px | `ptah-field` floating `md` (same height, new label) |
+| Cron scheduler tab | inputs, mono textarea, select | `ptah-field`, `ptahTextarea` mono with `counter`, `ptah-select` |
+| Session organization editor | 4 selects | `ptah-select`, groups by workspace |
 
-| Page | Today | Proposed | Expected visible difference |
-|---|---|---|---|
-| Provider setup wizard (`chat/.../providers/provider-setup-wizard.component.ts`) | 9 × `input input-bordered input-sm w-full min-h-9 border-base-content-muted bg-base-100 text-base-content focus-visible:outline…`; 7 × `radio radio-sm` | `ptahInput` default, `w-full` stays. Radios stay raw (out of family scope). | 36 → 32 px high. Fill: glass input fill. Edge: token edge. Value 13 → 14 px. Focus ring: same 2 px outline. |
-| Session filter bar (`chat/.../session-filter-bar.component.ts`) | `input input-sm rounded-lg h-8 min-h-8 bg-surface-0 border-surface-border`; 2 × `select select-sm rounded-lg h-8 … pl-2 pr-6 bg-surface-0 text-xs`; 2 × `checkbox checkbox-xs`; 2 × `toggle toggle-xs` | `ptahInput`/`ptahSelect` tone `compact`, size sm; `ptahCheckbox` xs; `ptahToggle` xs. `pl-2 pr-6` and width classes stay. | Height stays 32 px. Radius `rounded-lg` → pill. Edge `surface-border` → token edge (stronger, 3:1). Checked checkbox → primary in non-glass themes. Unchecked toggle edge stronger. |
-| Review settings drawer (`review-runs-ui/.../review-settings-drawer.component.html`) | 5 × `input input-bordered w-full` (unsized, 4 number); `toggle toggle-warning` (md) | `ptahInput` default sm; `ptahToggle` sm | Inputs 48 → 32 px (decision 1). Toggle 24 × 48 → 20 × 32 px and warning → primary. |
-| Cron scheduler tab (`cron-scheduler-ui/.../cron-scheduler-tab.component.ts`) | 2 × `input input-bordered input-sm`; `input … input-sm font-mono`; `textarea textarea-bordered textarea-sm font-mono`; `select select-bordered select-sm`; `toggle toggle-sm toggle-primary` | `ptahInput` default and `mono`; `ptahTextarea` mono; `ptahSelect`; `ptahToggle` sm | Height stays 32 px. Value 13 → 14 px (mono 13 px). Textarea minimum 52 px, radius 14 px. Select chevron shows in glass. |
-| Session organization editor (`chat/.../session-organization-editor.component.ts`) | 4 × `select select-bordered select-sm` (2 with `w-full`); `input … input-sm text-xs`; `input … input-sm font-mono text-xs`; `toggle toggle-sm` | `ptahSelect`; `ptahInput` compact and mono; `ptahToggle` sm | Height stays 32 px. Mono value 12 → 13 px. Neutral toggle → primary when on (non-glass themes). |
+## 6. Census: native selects
+
+The census found 84 native `<select>` in 40 files. The rule: a select in a form (a label, a
+value that the user saves, more than about 5 options, groups, icons or descriptions) moves to
+`ptah-select`. An inline select (toolbar, table cell, 2–5 short options, the value applies at
+once) stays native with `ptahSelect`. Native keeps the platform picker and costs no overlay.
+
+| Group | Files | Move to `ptah-select` | Stay native | Why |
+|---|---|---|---|---|
+| Provider and model pickers | `ui/native/provider-model-picker` (11), `setup-wizard/generation-model-picker`, `chat/settings/providers/decision-model-row`, `main-agent-reassign-popover`, `add-cli-instance-modal`, `cli-lane-default-cell` | All | — | Many options, groups by provider, provider icons, search |
+| Settings forms | `chat/settings/ptah-ai/*` (elevenlabs, local TTS/STT, cache TTL, session budget), `pro-features/*`, `output-style-parity-section` | All | — | Labeled form fields with a saved value |
+| Task and review forms | `tasks-ui/task-create-dialog`, `task-metadata-editor`, `task-relations`, `session-organization-editor`, `cron-scheduler-tab`, `harness-builder/builder-presets-section`, `mcp-directory-browser` | All | — | Labeled fields, descriptions help the choice |
+| Toolbars and filters | `task-filter-bar`, `task-bulk-bar`, `session-filter-bar`, `review-findings-panel`, `review-runs-page`, `review-findings-table`, `git-ui/comparison-bar`, `file-diff-section`, `remote-session-list`, `onboarding/workspace-header`, `memory-danger-zone` | — | All | Inline, short lists, the value applies at once |
+| Generic owners | `ui/native/form/json-schema-form`, `declarative-dashboard/surface-choice-input`, `provider-model-search-field` | Decide in step 5 | — | The data decides: enum size and labels come from a schema |
+| Test files | `webview-e2e-harness/*` | — | Follow the page | Fixtures follow the adopted page |
+
+The step 5 batches use this table. Each batch confirms its count with a fresh grep.
 
 ## Exceptions (keep their look)
 
-- Chat composer textarea (`chat-input.component.ts`), decision U2. The four other composers
-  (`lane-composer`, `commit-composer`, `remote-composer`, `reply-composer`) are reviewed one by one
-  in step 5.
+- Chat composer textarea (`chat-input.component.ts`), decision U2. The four other composers are
+  reviewed one by one in step 5.
 - Canvas rail, `contenteditable` editors, CodeMirror (`git-ui/spot-editor`), terminal.
-- `input type="range"` (1), card radios with `peer sr-only` (3), the JSON schema form (5, after
-  the owners exist).
+- `input type="range"` (1), card radios with `peer sr-only` (3).
 - Radios (23): not in this family scope. See the open questions.
 
 ## Proposed Removals
 
 Step 6 removes these after the adoption. Nothing is removed in this step.
 
-- `extracted/setup-field` (`select[ptahSetupField]`, `SETUP_FIELD_LOOK`): replaced by `ptahSelect`.
+- Decision 3 of revision 1 ("keep native select first"): reversed.
+- The spinner in a busy field: the busy rail replaces it.
+- `extracted/setup-field` (`select[ptahSetupField]`, `SETUP_FIELD_LOOK`): replaced by `ptah-select`.
 - `surfaces/field-control.directive.ts` (`ptahFieldControl`): replaced by `ptahInput`,
-  `ptahTextarea` and `ptahSelect` inside `ptah-field`.
+  `ptahTextarea` and `ptah-select` inside `ptah-field`.
+- `ptah-native-autocomplete` as a select replacement: `ptah-select` with search covers it.
 - Raw recipes outside `libs/frontend/ui`: `input input-bordered*`, `select select-bordered*`,
-  `textarea textarea-bordered*`, `checkbox checkbox-*`, `toggle toggle-*` (the 129 recipes of the
-  research, minus the exceptions).
-- Global rules in `styles.css` that only serve raw controls: `.input, .textarea { min-height:
-  var(--input-height) }`, `.toggle-sm { width: 32px; height: 16px }` (it never applies: DaisyUI
-  `[type=checkbox].toggle-sm` has a higher specificity), and the glass form rules once no raw
-  control remains.
-- Local focus constants on controls (for example `${FOCUS_RING}` in the session filter bar) and the
-  Settings ring rule `:where(ptah-settings) :is(.checkbox, .radio, .toggle):focus-visible`.
+  `textarea textarea-bordered*`, `checkbox checkbox-*`, `toggle toggle-*`.
+- Global rules in `styles.css` that only serve raw controls (`.input, .textarea` min-height,
+  `.toggle-sm`), and the glass form rules once no raw control remains.
+- Local focus constants on controls and the Settings ring rule for raw choices.
 - Ratchet: add the class roots `input`, `select`, `textarea`, `checkbox`, `toggle` to
-  `tools/ui-class-audit` in step 5 and seed the baseline (not in this step).
+  `tools/ui-class-audit` in step 5 and seed the baseline.
 
 ## D. Review
 
-- [x] Contrast: `design-tokens.spec.ts` asserts, for `ptah-glass` and `ptah-glass-light`, text
-      ≥ 4.5:1 (value and placeholder on base-100) and edge, focus ring, checked fill and error edge
-      ≥ 3:1 on base-100 and the tinted panels. Axe on the gallery needs Electron (see C).
-- [x] Spacing: each value is a token of the 4 px scale. Chevron geometry is a token.
-- [x] One design language: the five pages map to the same three tones and two choice sizes.
+- [x] Contrast: `design-tokens.spec.ts` checks the muted ink and the active label ≥ 4.5:1 and the
+      rail ≥ 3:1 on base-100/200/300, in `ptah-glass` and `ptah-glass-light`.
+- [x] Spacing: each value is a token.
+- [x] One design language: the field, the rich select and the button family share the focus
+      ring, the radius family and the glass fills.
 - [ ] Independent reviewer lane: see the pull request.
 
-## C. Screenshots: blocker
+## C. Screenshots
 
-The owner session must not run `build`, `serve`, `dev`, `e2e` or `package` targets. Electron
-screenshots need the renderer and the Electron host built from this branch. To make them, the user
-(or the coordinator with the user's permission) runs, in this worktree:
-
-1. `npm run electron:serve`
-2. Open `/ui-gallery`, section "Form controls family", in `ptah-glass` and `ptah-glass-light`.
-3. Open the five reference pages above at 1440 × 900. "Before" is `main`. "After" needs the
-   step 5 adoption of the page, so the after images of the pages come with the first adoption
-   batch. The gallery shows the proposed look now.
-4. Record the file name and the SHA-256 hash of each image here.
+The coordinator runs the Electron dev app from this worktree. Open `/ui-gallery`, section
+"Form controls family", in `ptah-glass` and `ptah-glass-light`.
 
 | Image | Theme | File | SHA-256 |
 |---|---|---|---|
 | Gallery section | dark / light | open | open |
-| Each reference page, before | dark / light | open | open |
-| Keyboard focus on a control | dark | open | open |
+| Rich select open, with search | dark / light | open | open |
+| Provider form | dark / light | open | open |
 
 ## Open questions
 
-1. **Radios.** The research proposed `ptahRadio`. The family scope has five kinds without radio.
-   Recommendation: add `ptahRadio` with the checkbox look in step 5, before the Settings batches.
-2. **Composites.** `ptah-search-input` and `ptah-secret-input` (icon, clear, reveal) are
-   composites. Recommendation: build them in level 2 with the input owner.
-3. **`ptah-field` density and state** (`compact`, `pending`, `saved`). Recommendation: add them in
-   the first adoption batch that needs them, with a look request only if the look changes.
+1. **Radios.** Recommendation: add `ptahRadio` with the checkbox look in step 5.
+2. **Multi-select.** `ptah-select` chooses one value. Recommendation: add multiple values only
+   when a consumer needs them.
+3. **Async options.** Recommendation: add a `loading` state to `ptah-select` in the first batch
+   that loads options from the host.
 
 ## Approval record
 

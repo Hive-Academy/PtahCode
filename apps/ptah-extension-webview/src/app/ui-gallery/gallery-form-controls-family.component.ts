@@ -1,14 +1,23 @@
-import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
+import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import {
   PtahCheckboxDirective,
   PtahControlSize,
   PtahFieldComponent,
   PtahInputDirective,
+  PtahRichSelectComponent,
   PtahSelectDirective,
+  PtahSelectIconDirective,
   PtahTextareaDirective,
-  PtahTextTone,
   PtahToggleDirective,
 } from '@ptah-extension/ui';
+import {
+  GALLERY_ICON_PATHS,
+  MODEL_OPTIONS,
+  PROVIDER_OPTIONS,
+  REGION_OPTIONS,
+} from './gallery-form-controls.data';
+import { GalleryProviderFormComponent } from './gallery-provider-form.component';
 import { GallerySectionComponent } from './gallery-section.component';
 
 interface TintPanel {
@@ -22,200 +31,170 @@ interface TintPanel {
   standalone: true,
   imports: [
     GallerySectionComponent,
+    NgTemplateOutlet,
+    GalleryProviderFormComponent,
     PtahFieldComponent,
     PtahInputDirective,
     PtahTextareaDirective,
     PtahSelectDirective,
+    PtahRichSelectComponent,
+    PtahSelectIconDirective,
     PtahCheckboxDirective,
     PtahToggleDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `<ptah-gallery-section
-    id="family-form-controls"
-    title="Form controls family"
-  >
+  template: `<ptah-gallery-section id="family-form-controls" title="Form controls family">
     <p class="text-ptah-hint text-base-content-muted">
-      Reference for the form controls family: input, textarea, select, checkbox
-      and toggle. Text controls have the sizes xs, sm (default) and md, and the
-      tones default, mono and compact. Each control uses a ptah directive.
+      A field puts its label inside the box. The label moves up when the control
+      gets focus or a value. The line at the bottom edge shows focus, an error or
+      work in progress. The rich select adds groups, search and icons.
     </p>
-    <div
-      data-testid="form-controls-reference"
-      class="flex flex-col gap-ptah-group"
-    >
-      <div
-        data-testid="form-controls-sizes"
-        class="flex flex-wrap items-center gap-ptah-controls"
-      >
+    <ng-template #icon let-option>
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path [attr.d]="icons[option.icon ?? 'cloud']" />
+      </svg>
+    </ng-template>
+    <div data-testid="form-controls-reference" class="flex flex-col gap-ptah-group">
+      <div data-testid="form-controls-field-states" class="grid grid-cols-1 gap-ptah-field sm:grid-cols-2 lg:grid-cols-3">
+        <ptah-field label="Workspace name"><input ptahInput /></ptah-field>
+        <ptah-field label="Workspace name" hint="Filled"><input ptahInput value="ptah-extension" /></ptah-field>
+        <ptah-field label="Branch prefix" hint="A real placeholder floats the label">
+          <input ptahInput placeholder="feat/" />
+        </ptah-field>
+        <ptah-field label="Search sessions" clearable>
+          <span ptahFieldLeading aria-hidden="true">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path [attr.d]="icons['search']" /></svg>
+          </span>
+          <input ptahInput type="search" value="design tokens" />
+        </ptah-field>
+        <ptah-field label="Access token" revealable required hint="Select the eye to show the text">
+          <input ptahInput type="password" value="pt-demo-value" autocomplete="off" />
+        </ptah-field>
+        <ptah-field label="Timeout in seconds" required error="Enter a number from 1 to 60">
+          <input ptahInput inputmode="numeric" value="99" />
+        </ptah-field>
+        <ptah-field label="Indexed files" busy hint="Busy: the index runs">
+          <input ptahInput value="1 204 files" readonly />
+        </ptah-field>
+        <ptah-field label="Workspace root" hint="Read-only">
+          <input ptahInput value="/projects/ptah" readonly />
+        </ptah-field>
+        <ptah-field label="License seat" hint="Disabled">
+          <input ptahInput value="Team plan" disabled />
+        </ptah-field>
+        <ptah-field label="Large field" size="lg"><input ptahInput value="Size lg" /></ptah-field>
+        <ptah-field label="Stacked label" appearance="stacked" hint="The label sits above the box">
+          <input ptahInput placeholder="Stacked" />
+        </ptah-field>
+        <ptah-field label="Compact path" appearance="stacked" hint="Compact has no floating label">
+          <input ptahInput tone="compact" value="libs/frontend/ui" />
+        </ptah-field>
+      </div>
+
+      <div data-testid="form-controls-multiline" class="grid grid-cols-1 gap-ptah-field sm:grid-cols-2">
+        <ptah-field label="Commit message" counter hint="72 characters for the subject line">
+          <textarea ptahTextarea rows="3" maxlength="200">feat(ui): add the floating label field</textarea>
+        </ptah-field>
+        <ptah-field label="Cron schedule" hint="Mono tone">
+          <textarea ptahTextarea tone="mono" rows="3">*/5 * * * *</textarea>
+        </ptah-field>
+        <ptah-field label="Archived notes" hint="Disabled">
+          <textarea ptahTextarea disabled>Disabled</textarea>
+        </ptah-field>
+        <ptah-field label="System prompt" error="The prompt is empty. Type a prompt.">
+          <textarea ptahTextarea></textarea>
+        </ptah-field>
+      </div>
+
+      <div data-testid="form-controls-rich-select" class="grid grid-cols-1 gap-ptah-field sm:grid-cols-2 lg:grid-cols-3">
+        <ptah-field label="Provider" hint="Groups, icons, descriptions, a disabled option">
+          <ptah-select [options]="providers" clearable>
+            <ng-template ptahSelectIcon let-option><ng-container *ngTemplateOutlet="icon; context: { $implicit: option }" /></ng-template>
+          </ptah-select>
+        </ptah-field>
+        <ptah-field label="Model" hint="More than 7 options: search is on">
+          <ptah-select [options]="models" [(value)]="model">
+            <ng-template ptahSelectIcon let-option><ng-container *ngTemplateOutlet="icon; context: { $implicit: option }" /></ng-template>
+          </ptah-select>
+        </ptah-field>
+        <ptah-field label="Region" hint="Short list: no search">
+          <ptah-select [options]="regions" />
+        </ptah-field>
+        <ptah-field label="Region" error="Select a region">
+          <ptah-select [options]="regions" />
+        </ptah-field>
+        <ptah-field label="Region" hint="Disabled">
+          <ptah-select [options]="regions" [value]="'eu'" disabled />
+        </ptah-field>
+        <div class="flex flex-col gap-ptah-label">
+          <span class="text-ptah-label text-base-content-muted">Standalone in a toolbar</span>
+          <ptah-select label="Sort order" [options]="regions" [value]="'us'" />
+        </div>
+      </div>
+
+      <div data-testid="form-controls-native-select" class="flex flex-wrap items-center gap-ptah-controls">
+        <span class="text-ptah-label text-base-content-muted">Native select, inline sizes</span>
         @for (size of sizes; track size) {
-          <input
-            ptahInput
-            [size]="size"
-            [label]="'Input size ' + size"
-            [placeholder]="'Size ' + size"
-          />
-          <select ptahSelect [size]="size" [label]="'Select size ' + size">
-            <option>Size {{ size }}</option>
-            <option>Other</option>
+          <select ptahSelect [size]="size" [label]="'Page size ' + size">
+            <option>25 rows</option>
+            <option>50 rows</option>
           </select>
         }
       </div>
 
-      <div
-        data-testid="form-controls-tones"
-        class="flex flex-wrap items-center gap-ptah-controls"
-      >
-        @for (tone of tones; track tone) {
-          <input
-            ptahInput
-            [tone]="tone"
-            [label]="'Input tone ' + tone"
-            [value]="tone === 'mono' ? 'libs/frontend/ui/src/index.ts' : 'Tone ' + tone"
-          />
-        }
-      </div>
-
-      <div
-        data-testid="form-controls-states"
-        class="grid grid-cols-1 gap-ptah-field sm:grid-cols-2"
-      >
-        <input ptahInput label="Placeholder" placeholder="Placeholder text" />
-        <input ptahInput label="Hover" data-state="hover" value="Hover" />
-        <input ptahInput label="Focus" data-state="focus" value="Focus" />
-        <input ptahInput label="Disabled" disabled value="Disabled" />
-        <input ptahInput label="Error" invalid value="Invalid value" />
-        <input
-          ptahInput
-          label="Long text"
-          class="w-full"
-          value="A long value that is wider than the control and scrolls inside it without a change to the height"
-        />
-        <div class="relative" data-testid="form-controls-icon-slot">
-          <span
-            aria-hidden="true"
-            class="pointer-events-none absolute left-ptah-control-x top-1/2 -translate-y-1/2 text-ptah-label text-base-content-muted"
-            >#</span
-          >
-          <input
-            ptahInput
-            label="Search with an icon"
-            class="w-full pl-8"
-            placeholder="Search"
-          />
-        </div>
-        <ptah-field label="Field with an error" error="Enter a number from 1 to 60">
-          <input ptahInput value="99" />
-        </ptah-field>
-      </div>
-
-      <div
-        data-testid="form-controls-multiline"
-        class="grid grid-cols-1 gap-ptah-field sm:grid-cols-2"
-      >
-        <textarea ptahTextarea label="Textarea" rows="3">
-Many lines of text</textarea
-        >
-        <textarea
-          ptahTextarea
-          tone="mono"
-          label="Textarea mono"
-          rows="3"
-        >
-*/5 * * * *</textarea
-        >
-        <textarea ptahTextarea label="Textarea disabled" disabled>
-Disabled</textarea
-        >
-        <textarea ptahTextarea label="Textarea error" invalid>
-Invalid</textarea
-        >
-      </div>
-
-      <div
-        data-testid="form-controls-choices"
-        class="flex flex-wrap items-center gap-ptah-group"
-      >
+      <div data-testid="form-controls-choices" class="flex flex-wrap items-center gap-ptah-group">
         @for (size of choiceSizes; track size) {
           <label class="flex items-center gap-ptah-inline text-ptah-label">
-            <input type="checkbox" ptahCheckbox [size]="size" />
-            Checkbox {{ size }}
+            <input type="checkbox" ptahCheckbox [size]="size" checked /> Checkbox {{ size }}
           </label>
           <label class="flex items-center gap-ptah-inline text-ptah-label">
-            <input type="checkbox" ptahCheckbox [size]="size" checked />
-            Checked {{ size }}
-          </label>
-          <label class="flex items-center gap-ptah-inline text-ptah-label">
-            <input type="checkbox" ptahToggle [size]="size" />
-            Toggle {{ size }}
-          </label>
-          <label class="flex items-center gap-ptah-inline text-ptah-label">
-            <input type="checkbox" ptahToggle [size]="size" checked />
-            On {{ size }}
+            <input type="checkbox" ptahToggle [size]="size" checked /> Toggle {{ size }}
           </label>
         }
         <label class="flex items-center gap-ptah-inline text-ptah-label">
-          <input type="checkbox" ptahCheckbox disabled />
-          Checkbox disabled
+          <input type="checkbox" ptahCheckbox /> Checkbox off
         </label>
         <label class="flex items-center gap-ptah-inline text-ptah-label">
-          <input type="checkbox" ptahToggle disabled checked />
-          Toggle disabled
-        </label>
-        <label class="flex items-center gap-ptah-inline text-ptah-label">
-          <input type="checkbox" ptahCheckbox data-state="focus" />
-          Checkbox focus
+          <input type="checkbox" ptahToggle disabled checked /> Toggle disabled
         </label>
       </div>
+
+      <ptah-gallery-provider-form />
 
       @for (panel of panels; track panel.id) {
         <div
           [attr.data-testid]="'form-controls-tint-' + panel.id"
-          class="flex flex-wrap items-center gap-ptah-controls rounded-ptah-surface border border-surface-border p-ptah-surface"
+          class="grid grid-cols-1 gap-ptah-field rounded-ptah-surface border border-surface-border p-ptah-surface sm:grid-cols-3"
           [class.bg-base-200]="panel.id === 'base-200'"
           [class.bg-base-300]="panel.id === 'base-300'"
         >
-          <span class="text-ptah-label text-base-content-muted">{{
-            panel.label
-          }}</span>
-          <input ptahInput [label]="'Input on ' + panel.label" placeholder="Placeholder" />
-          <input ptahInput [label]="'Error on ' + panel.label" invalid value="Invalid" />
-          <select ptahSelect [label]="'Select on ' + panel.label">
-            <option>Option</option>
-          </select>
-          <input
-            type="checkbox"
-            ptahCheckbox
-            [label]="'Checkbox on ' + panel.label"
-          />
-          <input
-            type="checkbox"
-            ptahCheckbox
-            checked
-            [label]="'Checked on ' + panel.label"
-          />
-          <input
-            type="checkbox"
-            ptahToggle
-            [label]="'Toggle on ' + panel.label"
-          />
-          <input
-            type="checkbox"
-            ptahToggle
-            checked
-            [label]="'Toggle on, on ' + panel.label"
-          />
+          <ptah-field [label]="'Name on ' + panel.label"><input ptahInput /></ptah-field>
+          <ptah-field [label]="'Error on ' + panel.label" error="Enter a name">
+            <input ptahInput value="x" />
+          </ptah-field>
+          <ptah-field [label]="'Provider on ' + panel.label">
+            <ptah-select [options]="providers" [value]="'ollama'">
+              <ng-template ptahSelectIcon let-option><ng-container *ngTemplateOutlet="icon; context: { $implicit: option }" /></ng-template>
+            </ptah-select>
+          </ptah-field>
+          <label class="flex items-center gap-ptah-inline text-ptah-label">
+            <input type="checkbox" ptahCheckbox checked /> Checkbox on {{ panel.label }}
+          </label>
+          <label class="flex items-center gap-ptah-inline text-ptah-label">
+            <input type="checkbox" ptahToggle checked /> Toggle on {{ panel.label }}
+          </label>
         </div>
       }
     </div>
   </ptah-gallery-section>`,
 })
 export class GalleryFormControlsFamilyComponent {
+  protected readonly icons = GALLERY_ICON_PATHS;
+  protected readonly providers = PROVIDER_OPTIONS;
+  protected readonly models = MODEL_OPTIONS;
+  protected readonly regions = REGION_OPTIONS;
+  protected readonly model = signal<string | null>('opus');
   public readonly sizes: readonly PtahControlSize[] = ['xs', 'sm', 'md'];
-  public readonly tones: readonly PtahTextTone[] = [
-    'default',
-    'mono',
-    'compact',
-  ];
   public readonly choiceSizes = ['xs', 'sm'] as const;
   public readonly panels: readonly TintPanel[] = [
     { id: 'base-200', label: 'base-200' },

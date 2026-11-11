@@ -4,6 +4,7 @@
   "peerDependencies": {
     "@angular/cdk": "~22.2.0",
     "@angular/core": "~22.2.0",
+    "@angular/forms": "~22.2.0",
     "@angular/common": "~22.2.0",
     "@angular/router": "~22.2.0",
     "@floating-ui/dom": "^1.7.4",

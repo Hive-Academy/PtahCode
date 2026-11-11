@@ -19,12 +19,31 @@ const TOKEN_FILE = 'libs/frontend/ui/src/lib/tokens/ptah-tokens.css';
 const BUTTON_CSS_FILE = 'libs/frontend/ui/src/lib/button/ptah-button.css';
 const FORM_CONTROLS_CSS_FILE =
   'libs/frontend/ui/src/lib/form-controls/ptah-form-controls.css';
+const FIELD_CSS_FILE = 'libs/frontend/ui/src/lib/form-controls/ptah-field.css';
+const SELECT_CSS_FILE =
+  'libs/frontend/ui/src/lib/form-controls/rich-select/ptah-select.css';
 const WORKSPACE_ROOT = join(__dirname, '..', '..', '..', '..');
 const tokenCss = readFileSync(join(WORKSPACE_ROOT, TOKEN_FILE), 'utf8');
 const stylesCss = readFileSync(join(__dirname, '..', 'styles.css'), 'utf8');
 
 const declared = (css: string): Set<string> =>
   new Set([...css.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]));
+
+/** Splits a selector list at the commas outside parentheses. */
+function splitTopLevel(list: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < list.length; i++) {
+    if (list[i] === '(') depth++;
+    else if (list[i] === ')') depth--;
+    else if (list[i] === ',' && depth === 0) {
+      parts.push(list.slice(start, i));
+      start = i + 1;
+    }
+  }
+  return [...parts, list.slice(start)];
+}
 
 /** Sections with older `ptah-` names that are not design tokens. */
 const NOT_TOKEN_SECTIONS = new Set(['animation', 'keyframes']);
@@ -96,6 +115,37 @@ describe('Ptah design tokens in the application', () => {
     expect(css).not.toMatch(
       /(^|[;{\s])(position|inset|(min-|max-)?width|margin[a-z-]*|padding-inline[a-z-]*)\s*:/m,
     );
+  });
+
+  it('imports the field and rich select looks after the form controls look', () => {
+    const formImportAt = stylesCss.indexOf(
+      `@import '../../../${FORM_CONTROLS_CSS_FILE}';`,
+    );
+    let previous = formImportAt;
+    for (const file of [FIELD_CSS_FILE, SELECT_CSS_FILE]) {
+      const at = stylesCss.indexOf(`@import '../../../${file}';`);
+      expect(at).toBeGreaterThan(previous);
+      expect(at).toBeLessThan(stylesCss.indexOf('@tailwind base'));
+      previous = at;
+    }
+  });
+
+  it.each([
+    [FIELD_CSS_FILE, /^(\.ptah-field|:is\(\.ptah-field__body, #ptah-field\))/],
+    [SELECT_CSS_FILE, /^(\.ptah-select|\.ptah-field|li \+ li > \.ptah-select)/],
+  ])('scopes every rule of %s to its owner', (file, owner) => {
+    const css = readFileSync(join(WORKSPACE_ROOT, file), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/@keyframes[^{]*\{[\s\S]*?\}\s*\}/g, '');
+    const selectors = [...css.matchAll(/([^{}]+)\{/g)]
+      .map((m) => m[1].trim())
+      .filter((prelude) => prelude && !prelude.startsWith('@'))
+      .flatMap(splitTopLevel)
+      .map((selector) => selector.trim());
+    expect(selectors.length).toBeGreaterThan(20);
+    expect(css).not.toContain('data-ptah-look');
+    expect(css).not.toContain('!important');
+    expect(selectors.filter((selector) => !owner.test(selector))).toEqual([]);
   });
 
   it('has a Tailwind name for each token group', () => {
@@ -214,6 +264,25 @@ describe('Ptah reference theme contrast (ptah-glass and ptah-glass-light)', () =
         );
         expect(
           wcagContrast(theme['error'], surfaces[surface]),
+        ).toBeGreaterThanOrEqual(3);
+      }
+    });
+
+    it('keeps the floating label colors >= 4.5:1 and the rail >= 3:1 on each panel', () => {
+      // --ptah-field-label-fg-active: color-mix(primary 62%, base-content).
+      const labelActive = interpolate(
+        [theme['base-content'], theme['primary']],
+        'oklch',
+      )(0.62);
+      for (const surface of ['base-100', 'base-200', 'base-300'] as const) {
+        expect(wcagContrast(muted, surfaces[surface])).toBeGreaterThanOrEqual(
+          4.5,
+        );
+        expect(
+          wcagContrast(labelActive, surfaces[surface]),
+        ).toBeGreaterThanOrEqual(4.5);
+        expect(
+          wcagContrast(theme['primary'], surfaces[surface]),
         ).toBeGreaterThanOrEqual(3);
       }
     });
