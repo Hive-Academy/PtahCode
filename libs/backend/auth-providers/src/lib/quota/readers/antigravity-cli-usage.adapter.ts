@@ -60,7 +60,12 @@ export type AntigravityCliFailureReason = 'cli-busy' | Extract<
 >;
 
 export type AntigravityCliResult =
-  | { readonly ok: true; readonly windows: readonly PlanLimitWindow[] }
+  | {
+      readonly ok: true;
+      readonly windows: readonly PlanLimitWindow[];
+      /** Time of the original CLI observation (older than now on a cache hit). */
+      readonly readAt: number;
+    }
   | {
       readonly ok: false;
       readonly reason: AntigravityCliFailureReason;
@@ -118,8 +123,9 @@ export async function readAntigravityCliUsage(
       args: ['-p', '/usage'], executor, parse: parseAntigravityCliUsage, signal, now,
       deadline,
       logger: options.logger });
-    if (result.ok) return { ok: true, windows: result.value };
-    if (result.reason === 'cli-not-found' || result.reason === 'cli-unavailable' || result.reason === 'cli-exit-error') {
+    if (result.ok) return { ok: true, windows: result.value, readAt: result.readAt };
+    if (result.reason === 'cli-not-found' || result.reason === 'cli-unavailable' ||
+      result.reason === 'cli-exit-error' || result.reason === 'cli-backoff') {
       if (result.reason !== 'cli-not-found') firstFailure ??= result.reason;
       continue;
     }

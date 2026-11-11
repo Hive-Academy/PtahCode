@@ -107,5 +107,25 @@ describe('Codex rollout usage source', () => {
     await writeFile(join(outside.day, 'rollout-outside.jsonl'), `${line()}\n`);
     expect((await createCodexRolloutUsageSource(() => root, () => NOW).read(request)).ok).toBe(false);
   });
+
+  it('stops file work and opens no file after the request signal aborts', async () => {
+    const { root, day } = await home();
+    await writeFile(join(day, 'rollout-abort.jsonl'), line());
+    const controller = new AbortController();
+    const open = jest.fn();
+    const fs = {
+      readdir: jest.fn(async (...args: Parameters<typeof import('node:fs/promises').readdir>) => {
+        controller.abort();
+        return (await import('node:fs/promises')).readdir(...args);
+      }),
+      realpath: (await import('node:fs/promises')).realpath,
+      stat: (await import('node:fs/promises')).stat,
+      open,
+    } as unknown as Parameters<typeof createCodexRolloutUsageSource>[2];
+    const result = await createCodexRolloutUsageSource(() => root, () => NOW, fs)
+      .read({ ...request, signal: controller.signal });
+    expect(result.ok).toBe(false);
+    expect(open).not.toHaveBeenCalled();
+  });
 });
 

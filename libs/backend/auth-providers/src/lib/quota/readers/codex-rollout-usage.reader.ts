@@ -41,7 +41,12 @@ function inside(candidate: string, root: string): boolean {
     !part.startsWith('../') && !isAbsolute(part));
 }
 
-async function newestRollout(home: string, fs: CodexRolloutFileSystem): Promise<string | undefined> {
+async function newestRollout(
+  home: string,
+  fs: CodexRolloutFileSystem,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  signal?.throwIfAborted();
   const root = await fs.realpath(home);
   const sessions = join(home, 'sessions');
   if (!inside(await fs.realpath(sessions), root)) return undefined;
@@ -56,6 +61,7 @@ async function newestRollout(home: string, fs: CodexRolloutFileSystem): Promise<
       const recentDirs = entries.filter((entry) => entry.isDirectory() && /^\d{2,4}$/.test(entry.name)).slice(0, MAX_RECENT_DIRS);
       const recentFiles = depth === 3 ? entries.filter((entry) => entry.isFile() && /^rollout-.*\.jsonl$/.test(entry.name)).slice(0, MAX_RECENT_FILES) : [];
       for (const entry of [...recentDirs, ...recentFiles]) {
+        signal?.throwIfAborted();
         const path = join(dir, entry.name);
         if (!inside(await fs.realpath(path), root)) continue;
         if (entry.isDirectory() && depth < 3) next.push(path);
@@ -91,18 +97,21 @@ export function createCodexRolloutUsageSource(
 ): UsageSource {
   return {
     id: 'codex-rollout', label: 'local-state',
-    async read(): Promise<UsageSourceResult> {
+    async read(request): Promise<UsageSourceResult> {
       const home = homeSource();
       if (!home) return { ok: false, source: 'local-state', reason: 'source-not-applicable' };
+      const signal = request.signal;
       try {
-        const path = await newestRollout(home, fs);
+        const path = await newestRollout(home, fs, signal);
         if (!path) return { ok: false, source: 'local-state', reason: 'source-not-applicable' };
+        signal?.throwIfAborted();
         let authChangedAt: number;
         try { authChangedAt = (await fs.stat(join(home, 'auth.json'))).mtimeMs; }
         catch (_error: unknown) {
           // degradation-audit: optional-capability - without auth change time the rollout owner is unverified.
           return { ok: false, source: 'local-state', reason: 'account-unverified' };
         }
+        signal?.throwIfAborted();
         const lines = (await tail(path, fs)).split(/\r?\n/);
         for (let i = lines.length - 1; i >= 0; i--) {
           let parsedJson: unknown;
@@ -137,6 +146,7 @@ export function createCodexRolloutUsageSource(
         return { ok: false, source: 'local-state', reason: 'cli-unavailable' };
       } catch (error: unknown) {
         // degradation-audit: optional-capability - absent or inaccessible local sessions cannot answer usage.
+        if (signal?.aborted) return { ok: false, source: 'local-state', reason: 'source-not-applicable' };
         if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT')
           return { ok: false, source: 'local-state', reason: 'source-not-applicable' };
         return { ok: false, source: 'local-state', reason: 'cli-unavailable' };

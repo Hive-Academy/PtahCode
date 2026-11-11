@@ -114,13 +114,13 @@ export function createAntigravityPlanUsageReader(
           : sourceFailure('local-rpc', 'no-local-server');
       } },
       { id: 'antigravity-cli', label: 'cli-command', read: async (stage) => {
+        if (!stage.allowCliFallback) return sourceFailure('cli-command', 'source-not-applicable');
+        if (!['cli-store', 'unknown', 'account'].includes(target.ownerRef.identityKind))
+          return sourceFailure('cli-command', 'source-not-applicable');
         const storeOwner = readStoreOwner();
         if (target.ownerRef.identityKind === 'account' &&
           !matchesAntigravityStoreAccount(target.ownerRef, storeOwner))
           return sourceFailure('cli-command', 'account-unverified');
-        if (!['cli-store', 'unknown', 'account'].includes(target.ownerRef.identityKind))
-          return sourceFailure('cli-command', 'source-not-applicable');
-        if (!stage.allowCliFallback) return sourceFailure('cli-command', 'source-not-applicable');
         const remaining = chainDeadline - now();
         if (remaining < MIN_STAGE_MS) return sourceFailure('cli-command', 'cli-timeout');
         const cli = await readCli(stage.signal, { now, logger, timeoutMs: Math.min(ANTIGRAVITY_CLI_TIMEOUT_MS, remaining),
@@ -129,7 +129,7 @@ export function createAntigravityPlanUsageReader(
         if (target.ownerRef.identityKind === 'account' &&
           !matchesAntigravityStoreAccount(target.ownerRef, readStoreOwner()))
           return sourceFailure('cli-command', 'account-unverified');
-        const observedAt = now();
+        const observedAt = cli.readAt;
         return { ok: true, source: 'cli-command', readAt: observedAt,
           reading: { status: 'available', fetchedAt: observedAt, windowSetEstablished: true,
             windows: cli.windows } };

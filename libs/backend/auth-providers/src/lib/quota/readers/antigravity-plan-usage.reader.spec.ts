@@ -105,6 +105,7 @@ describe('Antigravity plan-usage reader', () => {
   it('uses CLI windows for an account matching the active store', async () => {
     const cli = jest.fn(async () => ({
       ok: true as const,
+      readAt: 1,
       windows: parseAntigravityCliUsage(ANTIGRAVITY_USAGE_FIXTURE, 1) ?? [],
     }));
     const instance = createAntigravityPlanUsageReader(
@@ -132,7 +133,7 @@ describe('Antigravity plan-usage reader', () => {
   });
 
   it('refuses CLI output when the store account differs', async () => {
-    const cli = jest.fn(async () => ({ ok: true as const, windows: [] }));
+    const cli = jest.fn(async () => ({ ok: true as const, windows: [], readAt: 1 }));
     const instance = createAntigravityPlanUsageReader(
       createMockLogger() as Partial<Logger> as Logger,
       () => 1,
@@ -190,6 +191,7 @@ describe('Antigravity plan-usage reader', () => {
       async () => undefined,
       async () => ({
         ok: true,
+        readAt: 1,
         windows: parseAntigravityCliUsage(ANTIGRAVITY_USAGE_FIXTURE, 1) ?? [],
       }),
       readStoreOwner,
@@ -597,7 +599,7 @@ describe('Antigravity plan-usage reader', () => {
       const order: string[] = [];
       mockedCli.mockImplementationOnce(async () => {
         order.push('cli');
-        return { ok: true, windows: [cliWindow] };
+        return { ok: true, windows: [cliWindow], readAt: 1 };
       });
       const instance = createAntigravityPlanUsageReader(
         createMockLogger() as unknown as Logger,
@@ -621,6 +623,30 @@ describe('Antigravity plan-usage reader', () => {
         windowSetEstablished: true,
         windows: [cliWindow],
       });
+    });
+
+    it('reports the CLI observation time of a cached reading, not the current time', async () => {
+      mockedCli.mockResolvedValueOnce({ ok: true, windows: [cliWindow], readAt: 1 });
+      const instance = createAntigravityPlanUsageReader(
+        createMockLogger() as unknown as Logger,
+        () => 20_000,
+        async () => '',
+        jest.fn(async () => response),
+        () => owner,
+        async () => undefined,
+      );
+      const result = await instance(request);
+      expect(result).toMatchObject({ source: 'cli-command', fetchedAt: 1 });
+    });
+
+    it('reports no local server, not account-unverified, when CLI fallback is not allowed', async () => {
+      mockedCli.mockClear();
+      const result = await failingLocal()({
+        target: { ownerRef: { key: owner, identityKind: 'account' } } as never,
+        refresh: true, allowCliFallback: false,
+      });
+      expect(result.statusReason).not.toBe('account-unverified');
+      expect(mockedCli).not.toHaveBeenCalled();
     });
 
     it('does not use CLI after a cli-store owner changes at the local server', async () => {

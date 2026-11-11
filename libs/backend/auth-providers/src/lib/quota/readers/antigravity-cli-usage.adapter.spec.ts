@@ -257,6 +257,21 @@ describe('Antigravity CLI usage adapter', () => {
       if (result.ok) expect(result.windows[0].label).toContain(' \u00B7 ');
     });
 
+    it('still reaches a working second candidate while the first is in backoff', async () => {
+      const clock = 1;
+      const exec: AntigravityCliExec = jest.fn(async (executable: string) => {
+        if (executable === 'agy') throw errno('EINVAL');
+        return SAMPLE;
+      });
+      const options = { exec, executables: ['agy', 'C:/agy/bin/agy.exe'], now: () => clock };
+      const first = await readAntigravityCliUsage(undefined, options);
+      const second = await readAntigravityCliUsage(undefined, options);
+      expect(first.ok).toBe(true);
+      expect(second.ok).toBe(true);
+      if (first.ok && second.ok) expect(second.readAt).toBe(first.readAt);
+      expect(exec).toHaveBeenCalledTimes(2);
+    });
+
     it('reports the first real failure when every candidate fails', async () => {
       const exec: AntigravityCliExec = async (executable: string) => {
         throw errno(executable === 'agy' ? 'EINVAL' : 'ENOENT');
