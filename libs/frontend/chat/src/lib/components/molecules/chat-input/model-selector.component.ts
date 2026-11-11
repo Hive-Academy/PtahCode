@@ -27,12 +27,16 @@ import {
   NativeOptionComponent,
   KeyboardNavigationService,
 } from '@ptah-extension/ui';
-import { ChatStore } from '../../../services/chat.store';
-import { TabManagerService } from '@ptah-extension/chat-state';
+import {
+  TabManagerService,
+  resolveTabModel,
+} from '@ptah-extension/chat-state';
 import { SESSION_CONTEXT } from '../../../tokens/session-context.token';
-import { SessionId } from '@ptah-extension/shared';
 
 let nextModelSelectorId = 0;
+
+/** Tier names a parent session can send instead of a model id. */
+const SESSION_MODEL_TIERS: readonly string[] = ['haiku', 'sonnet', 'opus'];
 
 @Component({
   selector: 'ptah-model-selector',
@@ -238,7 +242,6 @@ export class ModelSelectorComponent {
   readonly otherVersionsToggleId = `model-other-versions-toggle-${this.instanceId}`;
   readonly otherVersionsSectionId = `model-other-versions-${this.instanceId}`;
   readonly modelState = inject(ModelStateService);
-  private readonly chatStore = inject(ChatStore);
   private readonly keyboardNav = inject(KeyboardNavigationService);
   private readonly tabManager = inject(TabManagerService);
   private readonly _sessionContext = inject(SESSION_CONTEXT, {
@@ -252,29 +255,37 @@ export class ModelSelectorComponent {
   readonly activeIndex = this.keyboardNav.activeIndex;
 
   /**
-   * Effective model for this context: the canvas tile's tab when present,
-   * otherwise the active main-panel tab. Intentional overrides take priority
-   * over the model restored with session history, then global state is the
-   * fallback for fresh tabs.
+   * The tab this selector controls: the canvas tile's tab when present,
+   * otherwise the active main-panel tab.
+   */
+  private readonly contextTab = computed(() => {
+    const contextTabId = this._sessionContext?.();
+    return contextTabId
+      ? this.tabManager.tabs().find((candidate) => candidate.id === contextTabId)
+      : this.tabManager.activeTab();
+  });
+
+  /**
+   * Effective model for this context. It follows the same rule as the send
+   * path (`resolveTabModel`): tab override, then the model of the session,
+   * then the global selection.
    */
   readonly effectiveModel = computed(() => {
-    const contextTabId = this._sessionContext?.();
-    const tab = contextTabId
-      ? this.tabManager
-          .tabs()
-          .find((candidate) => candidate.id === contextTabId)
-      : this.tabManager.activeTab();
-
+    const { model, origin } = resolveTabModel(
+      this.contextTab(),
+      this.modelState.currentModel(),
+    );
     // An override the loaded list does not offer was picked under a provider
     // the user switched away from. The send path drops it the same way
-    // (`MessageSenderService.resolveValidModel`), so showing it would name a
-    // model the next turn will not use.
-    const override = tab?.overrideModel;
+    // (`MessageSenderService.resolveValidModel`), so showing it would name
+    // a model the next turn will not use. A model that belongs to the session
+    // is sent as it is, so it is shown as it is.
     const models = this.modelState.availableModels();
     if (
-      override &&
+      origin !== 'session' &&
+      model &&
       models.length > 0 &&
-      !models.some((m) => m.id === override)
+      !models.some((m) => m.id === model)
     ) {
       // Same fallback order as `resolveValidModel`.
       const fallback =
@@ -283,34 +294,50 @@ export class ModelSelectorComponent {
         models[0];
       return fallback.id;
     }
-    return override ?? tab?.sessionModel ?? this.modelState.currentModel();
+    return model;
+  });
+
+  /**
+   * The listed model that matches the effective model. A tier name such as
+   * `haiku` (sent by a parent session) matches the listed model of that tier.
+   */
+  private readonly effectiveListedModel = computed(() => {
+    const modelId = this.effectiveModel();
+    const models = this.modelState.availableModels();
+    const exact = models.find((m) => m.id === modelId);
+    if (exact || !modelId) {
+      return exact;
+    }
+    const tier = modelId.toLowerCase();
+    if (!SESSION_MODEL_TIERS.includes(tier)) {
+      return undefined;
+    }
+    return models.find(
+      (m) =>
+        m.id.toLowerCase().includes(tier) ||
+        m.name.toLowerCase().includes(tier),
+    );
   });
 
   /**
    * Display name for the effective model (resolves API name to human-readable).
    */
-  readonly effectiveModelDisplay = computed(() => {
-    const modelId = this.effectiveModel();
-    const models = this.modelState.availableModels();
-    const model = models.find((m) => m.id === modelId);
-    return model?.name ?? modelId;
-  });
+  readonly effectiveModelDisplay = computed(
+    () => this.effectiveListedModel()?.name ?? this.effectiveModel(),
+  );
 
   /**
    * Provider hint for the effective model.
    */
   readonly effectiveModelProviderHint = computed(() => {
-    const modelId = this.effectiveModel();
-    const models = this.modelState.availableModels();
-    const model = models.find((m) => m.id === modelId);
-    return model?.providerModelId ?? null;
+    return this.effectiveListedModel()?.providerModelId ?? null;
   });
 
   /**
    * Available models with selection state reflecting the effective model.
    */
   readonly effectiveAvailableModels = computed(() => {
-    const effective = this.effectiveModel();
+    const effective = this.effectiveListedModel()?.id ?? this.effectiveModel();
     return this.modelState.availableModels().map((m) => ({
       ...m,
       isSelected: m.id === effective,
@@ -365,25 +392,16 @@ export class ModelSelectorComponent {
   }
 
   /**
-   * Select AI model. When in canvas tile context, stores override per-tab.
-   * Otherwise updates the global ModelStateService.
+   * Select AI model for the session of this tab only. The choice is stored on
+   * the tab. The send path applies it to the next turn of that session, so
+   * other tabs and the global selection stay as they are.
    */
   selectModel(model: string): void {
     this.closeDropdown();
-
-    const ctx = this._sessionContext;
-    if (ctx) {
-      const tabId = ctx();
-      if (tabId) {
-        this.tabManager.setOverrideModel(tabId, model);
-        return;
-      }
+    const tabId = this.contextTab()?.id;
+    if (tabId) {
+      this.tabManager.setOverrideModel(tabId, model);
     }
-
-    const sessionId = this.chatStore.currentSessionId() as SessionId | null;
-    this.modelState.switchModel(model, sessionId).catch((error) => {
-      console.error('[ModelSelectorComponent] Failed to switch model:', error);
-    });
   }
 
   /**

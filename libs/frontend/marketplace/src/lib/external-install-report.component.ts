@@ -17,6 +17,7 @@ import {
   isRepairableFamily,
   keptReasonLabel,
 } from './kept-items-repair-prompt.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** Note under a kept row, by reason; null when the badge says enough. */
 function keptNote(item: KeptItem): string | null {
@@ -51,6 +52,7 @@ function keptNote(item: KeptItem): string | null {
  * net-line rule.
  */
 @Component({
+  imports: [PtahButtonDirective],
   selector: 'ptah-external-install-report',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -65,7 +67,10 @@ function keptNote(item: KeptItem): string | null {
           {{ report().installedVersion }} ({{ report().filesWritten }} files)
         </span>
         <button
-          class="btn btn-ghost btn-xs shrink-0"
+          ptahButton
+          variant="ghost"
+          size="xs"
+          class="shrink-0"
           type="button"
           (click)="dismissed.emit()"
         >
@@ -140,7 +145,8 @@ function keptNote(item: KeptItem): string | null {
           @for (family of repairFamilies(); track family) {
             <button
               type="button"
-              class="btn btn-outline btn-xs"
+              ptahButton
+              size="xs"
               [attr.data-family]="family"
               [attr.aria-label]="'Review and replace kept ' + nameOf(family)"
               (click)="reviewKept.emit(family)"

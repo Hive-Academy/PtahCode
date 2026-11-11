@@ -199,7 +199,9 @@ const VERIFIED_BADGE: CatalogCardBadge = { label: 'Verified', tone: 'info' };
               />
               <button
                 type="submit"
-                class="btn btn-primary btn-sm w-full"
+                ptahButton
+                variant="primary"
+                class="w-full"
                 [disabled]="isSavingKey() || keyInput().trim().length === 0"
               >
                 @if (isSavingKey()) {
@@ -283,7 +285,8 @@ const VERIFIED_BADGE: CatalogCardBadge = { label: 'Verified', tone: 'info' };
                         connection.status !== 'connected'
                       ) {
                         <button
-                          class="btn btn-ghost btn-xs border border-base-300"
+                          ptahButton
+                          size="xs"
                           type="button"
                           [disabled]="isConnectionBusy(connection)"
                           (click)="authorizeConnection(connection)"
@@ -328,7 +331,8 @@ const VERIFIED_BADGE: CatalogCardBadge = { label: 'Verified', tone: 'info' };
             }
             <div panel-footer>
               <button
-                class="btn btn-ghost btn-xs border border-base-300"
+                ptahButton
+                size="xs"
                 type="button"
                 (click)="toggleKeyForm()"
               >
@@ -385,7 +389,9 @@ const VERIFIED_BADGE: CatalogCardBadge = { label: 'Verified', tone: 'info' };
             <div class="alert alert-error alert-sm py-1 px-2">
               <span class="text-xs">{{ browseError() }}</span>
               <button
-                ptahButton variant="ghost" size="xs"
+                ptahButton
+                variant="ghost"
+                size="xs"
                 (click)="browseError.set(null)"
                 type="button"
               >
@@ -440,7 +446,7 @@ const VERIFIED_BADGE: CatalogCardBadge = { label: 'Verified', tone: 'info' };
                       <div card-actions class="flex items-center gap-2">
                         @if (isInstalled(card.server.name)) {
                           <button
-                            class="btn btn-ghost btn-sm border border-base-300"
+                            ptahButton
                             [disabled]="isUninstalling(card.server.name)"
                             (click)="uninstall(card.server)"
                             type="button"
@@ -571,7 +577,9 @@ const VERIFIED_BADGE: CatalogCardBadge = { label: 'Verified', tone: 'info' };
                           @if (!isLoadingDetails() && !detailError()) {
                             <div panel-footer>
                               <button
-                                ptahButton variant="primary" size="sm"
+                                ptahButton
+                                variant="primary"
+                                size="sm"
                                 [disabled]="
                                   !canSetup() || isBusy(card.server.name)
                                 "
@@ -612,7 +620,8 @@ const VERIFIED_BADGE: CatalogCardBadge = { label: 'Verified', tone: 'info' };
               <!-- Load more: appends the next cursor page. -->
               @if (nextCursor()) {
                 <button
-                  class="btn btn-ghost btn-sm w-full mt-3 border border-base-300"
+                  ptahButton
+                  class="w-full mt-3"
                   type="button"
                   [disabled]="isLoadingMore()"
                   (click)="loadMore()"

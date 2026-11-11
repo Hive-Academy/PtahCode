@@ -303,21 +303,30 @@ process to resume (§5), and it never exits, it goes idle. Use a lane for a boun
 CLI; use a child session when the work needs the full chat runtime, slash commands such as
 `/orchestrate TASK_…`, or a branch the user can open and review.
 
-| Tool                                               | Use                                                                                                      |
-| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `ptah_session_start({ task, branch, … })`          | Create the worktree and branch, open the tab, run `task`                                                 |
-| `ptah_session_send({ sessionId, message, mode? })` | Steer. `queue` (default), `steer` (interrupts the turn in flight), `if-idle` (refused as busy otherwise) |
-| `ptah_session_status({ sessionId? })`              | State of one or all of your children                                                                     |
-| `ptah_session_read({ sessionId, tailKiB? })`       | Tail of the child's transcript (default 32 KiB, max 256)                                                 |
-| `ptah_session_stop({ sessionId })`                 | Stop it; tab, transcript, worktree and branch remain                                                     |
+| Tool                                                   | Use                                                                                                                                                  |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ptah_session_start({ task, branch, … })`              | Create the worktree and branch, open the tab, run `task`                                                                                             |
+| `ptah_session_send({ sessionId, message, mode? })`     | Steer. `queue` (default), `steer` (interrupts the turn in flight), `if-idle` (refused as busy otherwise)                                             |
+| `ptah_session_status({ sessionId?, includeFinished? })`| State of one or all of your children; without `sessionId`, lists live children in full and finished children as outcome counts + short lines (`includeFinished: true` for full records) |
+| `ptah_session_read({ sessionId, tailKiB? })`           | Tail of the child's transcript (default 32 KiB, max 256)                                                                                             |
+| `ptah_session_stop({ sessionId, followHandoff? })`     | Stop it (pass `followHandoff: true` to stop a handed-off child's successor); tab, transcript, worktree and branch remain                             |
+| `ptah_session_clear_finished({ sessionIds? })`         | Remove finished (terminal) child sessions from the session list; never removes live ones or deletes worktrees, branches, transcripts or tabs         |
 
 A child can hand off to a successor in the same worktree and branch. The host warns before its
 runtime cap; an idle child succeeds at the cap, while a busy child finishes its turn first.
 After the grace period, the host interrupts a busy turn and starts a recovery successor. An
 unexpected session end that does not recover in 30 seconds also starts a recovery successor.
 The parent receives one `handed-off` signal with verdict `unverified` and `succeededBy`; use
-either the old child id or the successor id with `ptah_session_*`. User or parent stops, workspace
-close, and host shutdown end the child instead; its running lanes move to the parent.
+either the old child id or the successor id with `ptah_session_send`, `ptah_session_status` and
+`ptah_session_read` (`ptah_session_stop` refuses a handed-off id and names the successor unless
+`followHandoff: true`). Terminal children record an `outcome` (`completed`, `handed-off`, `stopped`,
+`interrupted`, `failed`, `timed-out` or `unknown`) with a reason that names who ended it, the
+machine `cause` when recorded, `endedAt` and optional `successorId`. `unknown` means no end cause
+was recorded; it is never guessed. An `idle` child with 0 settled turns shows as `starting (first
+turn not started)`. If `ptah_session_start` returns a timeout, call `ptah_session_status` first: a
+`starting` child on your branch is your start; do not start again. User or
+parent stops, workspace close, and host shutdown end the child instead; its running lanes move to
+the parent.
 
 - **Messaging first.** Steer with `ptah_session_send`; use `ptah_session_read` to inspect. Do not poll
   `ptah_session_status` while a completion turn is due: one is pushed into your session each time a

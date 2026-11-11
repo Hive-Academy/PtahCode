@@ -763,7 +763,7 @@ describe('separate child account inheritance (Batch 21)', () => {
         success: false,
         error: handoff
           ? 'the session launch failed (unknown).'
-          : 'Source session policy lineage is unavailable.',
+          : 'Source session policy lineage is unavailable: the source session has no recorded metadata yet. Start the child again after the parent session has an SDK id.',
       });
       expect(h.sdk.startChatSession).not.toHaveBeenCalled();
     },

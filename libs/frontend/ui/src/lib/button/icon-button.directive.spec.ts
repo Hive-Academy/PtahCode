@@ -32,6 +32,7 @@ it('names the square icon button and composes its tooltip', () => {
   ) as HTMLButtonElement;
   expect(button.getAttribute('aria-label')).toBe('More actions');
   expect(button.classList.contains('btn-square')).toBe(true);
+  expect(button.hasAttribute('data-ptah-button')).toBe(true);
   expect([...button.classList].sort()).toEqual(
     ['btn', 'btn-ghost', 'btn-sm', 'btn-square'].sort(),
   );

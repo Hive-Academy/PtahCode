@@ -152,6 +152,7 @@ describe('budget tables', () => {
       'ptah_session_send',
       'ptah_session_status',
       'ptah_session_stop',
+      'ptah_session_clear_finished',
       'ptah_session_handoff',
       'ptah_outcome_report',
     ]) {
@@ -194,6 +195,7 @@ describe('budget tables', () => {
       ptah_session_status: 'preformatted',
       ptah_session_read: 'preformatted',
       ptah_session_stop: 'preformatted',
+      ptah_session_clear_finished: 'preformatted',
       ptah_session_handoff: 'preformatted',
       ptah_route_decide: 'preformatted',
       ptah_outcome_report: 'preformatted',

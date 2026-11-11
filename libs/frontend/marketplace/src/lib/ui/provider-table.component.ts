@@ -244,7 +244,7 @@ export function nextProviderSort(
           }
           <button
             type="button"
-            class="btn btn-outline btn-sm gap-1"
+            ptahButton
             data-testid="provider-table-retry"
             (click)="retryRequested.emit()"
           >
@@ -277,7 +277,9 @@ export function nextProviderSort(
             @if (emptyActionLabel(); as actionLabel) {
               <button
                 type="button"
-                ptahButton variant="primary" size="sm"
+                ptahButton
+                variant="primary"
+                size="sm"
                 data-testid="provider-table-empty-action"
                 (click)="emptyActionRequested.emit()"
               >
@@ -450,11 +452,13 @@ export function nextProviderSort(
                       @if (removalAction(row); as action) {
                         <button
                           type="button"
-                          class="btn btn-ghost btn-xs gap-1"
+                          ptahButton
+                          variant="ghost"
+                          size="xs"
                           data-testid="provider-row-remove"
                           [attr.aria-label]="action.ariaLabel"
                           [disabled]="busyRefs().has(row.ref)"
-                          [attr.aria-busy]="busyRefs().has(row.ref)"
+                          [busy]="busyRefs().has(row.ref)"
                           (click)="removeRequested.emit(row)"
                         >
                           @if (busyRefs().has(row.ref)) {

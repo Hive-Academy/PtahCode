@@ -150,6 +150,9 @@ function mergedLaneAccount(
  * toward the cap and is evictable; 'running' agents are always preserved. */
 const MAX_COMPLETED_AGENTS = 20;
 
+/** Shell tools whose background command settles via `agent_completed`. */
+const SHELL_TOOL_NAMES: ReadonlySet<string> = new Set(['Bash', 'PowerShell']);
+
 /**
  * Cap on {@link AgentMonitorStore._resumedAgentNodeIds}. A node id carries no
  * session, so tab close and `/clear` cannot target its entries — the set is
@@ -2631,10 +2634,16 @@ export class AgentMonitorStore implements OnDestroy {
     return fillIdentity(merged, pending);
   }
 
-  /** Reducer for SDK `agent_progress` events. */
-  onAgentProgress(event: AgentProgressEvent): void {
+  /**
+   * Reducer for SDK `agent_progress` events. `parentToolName` is the tool name
+   * of the parent tool node when the caller knows it. Progress whose parent is
+   * a shell tool never creates a NEW record, for the same reason as
+   * {@link onAgentCompleted}.
+   */
+  onAgentProgress(event: AgentProgressEvent, parentToolName?: string): void {
     const key = event.parentToolUseId;
     if (!key) return;
+    if (this.isShellParentWithoutRecord(key, parentToolName)) return;
     const wf = readWorkflowFields(event);
     this._subagents.update((map) => {
       this.claimHistoryCandidate(key);
@@ -2681,10 +2690,14 @@ export class AgentMonitorStore implements OnDestroy {
     });
   }
 
-  /** Reducer for SDK `agent_status` events. */
-  onAgentStatus(event: AgentStatusEvent): void {
+  /**
+   * Reducer for SDK `agent_status` events. A shell parent never creates a NEW
+   * record, for the same reason as {@link onAgentCompleted}.
+   */
+  onAgentStatus(event: AgentStatusEvent, parentToolName?: string): void {
     const key = event.parentToolUseId;
     if (!key) return;
+    if (this.isShellParentWithoutRecord(key, parentToolName)) return;
     const wf = readWorkflowFields(event);
     this._subagents.update((map) => {
       this.claimHistoryCandidate(key);
@@ -2727,10 +2740,30 @@ export class AgentMonitorStore implements OnDestroy {
     });
   }
 
-  /** Reducer for SDK `agent_completed` events. */
-  onAgentCompleted(event: AgentCompletedEvent): void {
+  /** True when `key` is a shell tool node that has no subagent record yet. */
+  private isShellParentWithoutRecord(
+    key: string,
+    parentToolName: string | undefined,
+  ): boolean {
+    return (
+      parentToolName !== undefined &&
+      SHELL_TOOL_NAMES.has(parentToolName) &&
+      !this._subagents().has(key)
+    );
+  }
+
+  /**
+   * Reducer for SDK `agent_completed` events. `parentToolName` is the tool
+   * name of the parent tool node when the caller knows it. A completion whose
+   * parent is a shell tool (a background Bash/PowerShell command) never
+   * creates a NEW record: it is not an agent, and a record built from the
+   * completion alone shows as a phantom "Sub-agent" card. An existing record
+   * still merges as before.
+   */
+  onAgentCompleted(event: AgentCompletedEvent, parentToolName?: string): void {
     const key = event.parentToolUseId;
     if (!key) return;
+    if (this.isShellParentWithoutRecord(key, parentToolName)) return;
     const wf = readWorkflowFields(event);
     this._subagents.update((map) => {
       this.claimHistoryCandidate(key);

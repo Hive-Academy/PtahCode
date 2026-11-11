@@ -2070,22 +2070,14 @@
     "badge-ghost": 2,
     "badge-sm": 1,
     "badge-warning": 1,
-    "badge-xs": 2,
-    "btn": 1,
-    "btn-circle": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1
+    "badge-xs": 2
   },
   "libs/frontend/marketplace/src/lib/external-install-report.component.ts": {
     "alert": 1,
     "alert-warning": 1,
     "badge": 1,
     "badge-ghost": 1,
-    "badge-sm": 1,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-outline": 1,
-    "btn-xs": 2
+    "badge-sm": 1
   },
   "libs/frontend/marketplace/src/lib/external-installed-row.component.ts": {
     "btn": 1,
@@ -2097,10 +2089,9 @@
     "alert": 3,
     "alert-error": 3,
     "alert-sm": 3,
-    "btn": 4,
-    "btn-ghost": 3,
-    "btn-primary": 1,
-    "btn-sm": 3,
+    "btn": 2,
+    "btn-ghost": 2,
+    "btn-sm": 1,
     "btn-xs": 1,
     "input": 1,
     "input-bordered": 1,
@@ -2117,20 +2108,17 @@
     "alert": 1,
     "alert-error": 1,
     "alert-sm": 1,
-    "btn": 2,
-    "btn-ghost": 1,
+    "btn": 1,
     "btn-outline": 1,
     "btn-warning": 1,
-    "btn-xs": 2
+    "btn-xs": 1
   },
   "libs/frontend/marketplace/src/lib/harness/harness-repair-dialog.component.ts": {
     "alert": 1,
     "alert-error": 1,
     "alert-sm": 1,
-    "btn": 2,
-    "btn-circle": 1,
-    "btn-ghost": 1,
-    "btn-sm": 2,
+    "btn": 1,
+    "btn-sm": 1,
     "btn-warning": 1
   },
   "libs/frontend/marketplace/src/lib/harness/harness-target-row.component.ts": {
@@ -2151,26 +2139,17 @@
     "alert": 2,
     "alert-error": 2,
     "alert-sm": 2,
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-xs": 1,
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-sm": 1,
     "input": 5,
     "input-bordered": 5,
     "input-sm": 5
   },
-  "libs/frontend/marketplace/src/lib/pages/connectors/connector-detail.component.html": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1
-  },
   "libs/frontend/marketplace/src/lib/pages/connectors/connectors-page.component.html": {
-    "btn": 5,
-    "btn-ghost": 4,
-    "btn-outline": 1,
+    "btn": 2,
+    "btn-ghost": 2,
     "btn-primary": 2,
-    "btn-sm": 3,
     "btn-xs": 2,
     "input": 1,
     "input-bordered": 1,
@@ -2180,44 +2159,24 @@
     "<dynamic>": 1,
     "badge": 1,
     "badge-ghost": 1,
-    "badge-sm": 1,
-    "btn": 3,
-    "btn-outline": 2,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-xs": 1
+    "badge-sm": 1
   },
   "libs/frontend/marketplace/src/lib/pages/servers/installed-servers-page.component.ts": {
     "badge": 2,
     "badge-ghost": 1,
     "badge-outline": 1,
     "badge-sm": 2,
-    "btn": 6,
-    "btn-outline": 5,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-xs": 4,
     "skeleton": 2
   },
   "libs/frontend/marketplace/src/lib/pages/servers/provider-list-view.component.html": {
     "badge": 1,
     "badge-ghost": 1,
-    "badge-sm": 1,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
+    "badge-sm": 1
   },
   "libs/frontend/marketplace/src/lib/pages/servers/server-detail.component.html": {
     "badge": 1,
     "badge-ghost": 1,
     "badge-sm": 1,
-    "btn": 4,
-    "btn-error": 1,
-    "btn-outline": 3,
-    "btn-primary": 1,
-    "btn-sm": 3,
-    "btn-xs": 1,
     "skeleton": 4
   },
   "libs/frontend/marketplace/src/lib/pages/skills/installed-library-stale-notice.component.ts": {
@@ -2230,10 +2189,9 @@
     "badge-outline": 1,
     "badge-sm": 4,
     "badge-warning": 1,
-    "btn": 5,
-    "btn-ghost": 4,
-    "btn-outline": 1,
-    "btn-xs": 5,
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-xs": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1,
@@ -2250,23 +2208,12 @@
     "badge-sm": 2,
     "badge-warning": 2,
     "badge-xs": 1,
-    "btn": 2,
-    "btn-error": 1,
-    "btn-ghost": 1,
-    "btn-outline": 1,
-    "btn-sm": 2,
     "skeleton": 3
   },
   "libs/frontend/marketplace/src/lib/shell/marketplace-nav.component.ts": {
     "badge": 1,
     "badge-ghost": 1,
     "badge-sm": 1
-  },
-  "libs/frontend/marketplace/src/lib/shell/marketplace-shell.component.html": {
-    "btn": 1,
-    "btn-circle": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1
   },
   "libs/frontend/marketplace/src/lib/smithery-surface.component.ts": {
     "<dynamic>": 2,
@@ -2277,22 +2224,15 @@
     "badge": 1,
     "badge-neutral": 1,
     "badge-xs": 1,
-    "btn": 8,
-    "btn-ghost": 7,
-    "btn-primary": 3,
-    "btn-sm": 4,
-    "btn-xs": 4,
+    "btn": 3,
+    "btn-ghost": 3,
+    "btn-primary": 2,
+    "btn-sm": 1,
+    "btn-xs": 2,
     "input": 2,
     "input-bordered": 2,
     "input-sm": 2,
     "skeleton": 2
-  },
-  "libs/frontend/marketplace/src/lib/ui/bulk-action-bar.component.ts": {
-    "btn": 3,
-    "btn-error": 1,
-    "btn-ghost": 2,
-    "btn-sm": 2,
-    "btn-xs": 1
   },
   "libs/frontend/marketplace/src/lib/ui/capability-toggle.component.ts": {
     "<dynamic>": 1
@@ -2300,52 +2240,18 @@
   "libs/frontend/marketplace/src/lib/ui/connector-card-actions.component.ts": {
     "<dynamic>": 6
   },
-  "libs/frontend/marketplace/src/lib/ui/connector-card-status.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
-  },
-  "libs/frontend/marketplace/src/lib/ui/copy-command-button.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/marketplace/src/lib/ui/coverage-matrix.component.ts": {
     "<dynamic>": 3,
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-xs": 1,
     "skeleton": 1
-  },
-  "libs/frontend/marketplace/src/lib/ui/docked-inspector.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1,
-    "btn-square": 1
-  },
-  "libs/frontend/marketplace/src/lib/ui/featured-connectors.component.ts": {
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-outline": 1,
-    "btn-sm": 2
   },
   "libs/frontend/marketplace/src/lib/ui/needs-attention.component.ts": {
     "badge": 1,
     "badge-ghost": 1,
     "badge-sm": 1,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-outline": 1,
-    "btn-xs": 2,
     "skeleton": 2
   },
   "libs/frontend/marketplace/src/lib/ui/provider-card-list.component.ts": {
     "<dynamic>": 1,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-outline": 1,
-    "btn-sm": 1,
-    "btn-xs": 1,
     "skeleton": 3
   },
   "libs/frontend/marketplace/src/lib/ui/provider-filter-select.component.ts": {
@@ -2354,10 +2260,9 @@
     "btn-sm": 1
   },
   "libs/frontend/marketplace/src/lib/ui/provider-filters.component.ts": {
-    "btn": 2,
+    "btn": 1,
     "btn-active": 1,
-    "btn-ghost": 1,
-    "btn-sm": 2,
+    "btn-sm": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
@@ -2367,11 +2272,6 @@
     "badge": 1,
     "badge-ghost": 1,
     "badge-sm": 1,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-outline": 1,
-    "btn-sm": 1,
-    "btn-xs": 1,
     "skeleton": 4
   },
   "libs/frontend/marketplace/src/lib/ui/source-band.component.ts": {
@@ -2379,9 +2279,6 @@
   },
   "libs/frontend/marketplace/src/lib/ui/stat-card.component.ts": {
     "<dynamic>": 1,
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-xs": 1,
     "skeleton": 2
   },
   "libs/frontend/marketplace/src/lib/ui/status-pill.component.ts": {
@@ -2389,9 +2286,6 @@
   },
   "libs/frontend/marketplace/src/lib/ui/storefront-hero.component.ts": {
     "<dynamic>": 5,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1,
     "skeleton": 2
   },
   "libs/frontend/mcp-apps-page/src/lib/components/apps-page.component.ts": {
