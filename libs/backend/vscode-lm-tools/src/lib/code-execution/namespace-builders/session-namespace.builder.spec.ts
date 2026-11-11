@@ -25,7 +25,16 @@ function fakeSpawner(): jest.Mocked<ISessionSpawner> {
       .mockResolvedValue({ delivered: true, effect: 'started-turn' }),
     status: jest.fn().mockReturnValue({ ok: true, children: [] }),
     read: jest.fn().mockResolvedValue({ ok: false, reason: 'unknown-child' }),
-    stop: jest.fn().mockResolvedValue({ ok: true, child: CHILD }),
+    stop: jest.fn().mockResolvedValue({
+      ok: true,
+      child: CHILD,
+      requestedSessionId: 'c-1',
+      followed: false,
+      alreadyEnded: false,
+    }),
+    clearFinished: jest
+      .fn()
+      .mockReturnValue({ ok: true, cleared: [], skipped: [] }),
     listUiDescriptors: jest.fn(),
     takeHeldCompletions: jest.fn().mockReturnValue([]),
     dispose: jest.fn(),
@@ -90,6 +99,8 @@ describe('buildSessionNamespace', () => {
     await h.session.status();
     await h.session.read('c-1', 8);
     await h.session.stop('c-1');
+    await h.session.stop('c-1', { followHandoff: true });
+    await h.session.clearFinished(['c-1']);
     h.session.takeHeldCompletions();
 
     expect(h.spawner.start).toHaveBeenCalledWith({
@@ -112,9 +123,18 @@ describe('buildSessionNamespace', () => {
       childSessionId: 'c-1',
       tailKiB: 8,
     });
-    expect(h.spawner.stop).toHaveBeenCalledWith({
+    expect(h.spawner.stop).toHaveBeenNthCalledWith(1, {
       callerSessionId: 'tab-parent',
       childSessionId: 'c-1',
+    });
+    expect(h.spawner.stop).toHaveBeenNthCalledWith(2, {
+      callerSessionId: 'tab-parent',
+      childSessionId: 'c-1',
+      followHandoff: true,
+    });
+    expect(h.spawner.clearFinished).toHaveBeenCalledWith({
+      callerSessionId: 'tab-parent',
+      childSessionIds: ['c-1'],
     });
     expect(h.spawner.takeHeldCompletions).toHaveBeenCalledWith('tab-parent');
   });
@@ -205,6 +225,10 @@ describe('buildSessionNamespace', () => {
       ['status', (s: ReturnType<typeof absent>) => s.status()],
       ['read', (s: ReturnType<typeof absent>) => s.read('c')],
       ['stop', (s: ReturnType<typeof absent>) => s.stop('c')],
+      [
+        'clearFinished',
+        (s: ReturnType<typeof absent>) => s.clearFinished(['c']),
+      ],
     ])('%s rejects with the named error', async (_name, op) => {
       await expect(op(absent())).rejects.toThrow(
         SESSION_SPAWNER_UNAVAILABLE_MESSAGE,

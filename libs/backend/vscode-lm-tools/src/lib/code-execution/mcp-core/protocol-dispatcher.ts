@@ -186,12 +186,14 @@ import {
   formatSessionLinkTaskResult,
 } from './session-organization-tools';
 import {
+  SESSION_CLEAR_FINISHED_TOOL_NAME,
   SESSION_HANDOFF_TOOL_NAME,
   SESSION_READ_TOOL_NAME,
   SESSION_SEND_TOOL_NAME,
   SESSION_START_TOOL_NAME,
   SESSION_STATUS_TOOL_NAME,
   SESSION_STOP_TOOL_NAME,
+  buildSessionClearFinishedTool,
   buildSessionHandoffTool,
   buildSessionReadTool,
   buildSessionSendTool,
@@ -636,6 +638,7 @@ function buildToolDefinitions(
           buildSessionStatusTool(),
           buildSessionReadTool(),
           buildSessionStopTool(),
+          buildSessionClearFinishedTool(),
           // Blocking waits (TASK_2026_597, D13): one call instead of a
           // ptah_agent_status loop, and an Nx check that blocks until it ends.
           // Both are orchestration steps, so the `agent` toggle governs them.
@@ -2605,6 +2608,7 @@ async function handleIndividualTool(
       case SESSION_STATUS_TOOL_NAME:
       case SESSION_READ_TOOL_NAME:
       case SESSION_STOP_TOOL_NAME:
+      case SESSION_CLEAR_FINISHED_TOOL_NAME:
       case SESSION_HANDOFF_TOOL_NAME: {
         const reply = await handleSessionToolCall(
           name,

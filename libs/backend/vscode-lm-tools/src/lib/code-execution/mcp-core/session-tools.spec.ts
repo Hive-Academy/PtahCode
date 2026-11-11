@@ -2,6 +2,7 @@
 // tool-description.builder, whose workspace-intelligence import needs the
 // reflect polyfill.
 import 'reflect-metadata';
+import { SESSION_CHILD_OUTCOME_UNKNOWN_REASON } from '@ptah-extension/shared';
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -18,6 +19,7 @@ import {
 } from '../namespace-builders/session-namespace.builder';
 import { MAX_AGENT_MESSAGE_LENGTH } from './tool-description.builder';
 import {
+  SessionClearFinishedArgsSchema,
   SessionHandoffArgsSchema,
   SessionReadArgsSchema,
   SessionSendArgsSchema,
@@ -27,6 +29,7 @@ import {
 } from './session-tool-args.schema';
 import {
   SESSION_TOOL_NAMES,
+  buildSessionClearFinishedTool,
   buildSessionHandoffTool,
   buildSessionReadTool,
   buildSessionSendTool,
@@ -51,6 +54,7 @@ const PARITY = [
   [buildSessionStatusTool, SessionStatusArgsSchema, []],
   [buildSessionReadTool, SessionReadArgsSchema, ['sessionId']],
   [buildSessionStopTool, SessionStopArgsSchema, ['sessionId']],
+  [buildSessionClearFinishedTool, SessionClearFinishedArgsSchema, []],
   [
     buildSessionHandoffTool,
     SessionHandoffArgsSchema,
@@ -65,6 +69,13 @@ describe('session tool definitions', () => {
     );
     expect(buildSessionStatusTool().description).toContain('succeededBy');
     expect(buildSessionStartTool().description).toContain('handed-off');
+  });
+
+  it('tells a parent whose start timed out to check status before starting again', () => {
+    expect(buildSessionStartTool().description).toContain(
+      'On a timeout, call ptah_session_status first: a starting child on ' +
+        'your branch is your start; do not start again.',
+    );
   });
   it.each(PARITY)(
     '%p advertises exactly the keys its schema accepts, closed, with the right required set',
@@ -84,7 +95,7 @@ describe('session tool definitions', () => {
     },
   );
 
-  it('lists the six names in order', () => {
+  it('lists the seven names in order', () => {
     expect(PARITY.map(([build]) => build().name)).toEqual([
       ...SESSION_TOOL_NAMES,
     ]);
@@ -95,6 +106,7 @@ describe('session tool definitions', () => {
     expect(buildSessionReadTool().annotations?.readOnlyHint).toBe(true);
     expect(buildSessionStartTool().annotations).toBeUndefined();
     expect(buildSessionStopTool().annotations).toBeUndefined();
+    expect(buildSessionClearFinishedTool().annotations).toBeUndefined();
     expect(buildSessionHandoffTool().annotations).toBeUndefined();
   });
 
@@ -302,6 +314,58 @@ describe('session tool schemas', () => {
       ).toBe(ok);
     }
   });
+
+  it('validates followHandoff on stop, includeFinished on status, and sessionIds on clear_finished strictly', () => {
+    expect(SessionStopArgsSchema.safeParse({ sessionId: 's' }).success).toBe(
+      true,
+    );
+    expect(
+      SessionStopArgsSchema.safeParse({ sessionId: 's', followHandoff: true })
+        .success,
+    ).toBe(true);
+    expect(
+      SessionStopArgsSchema.safeParse({
+        sessionId: 's',
+        followHandoff: 'yes',
+      }).success,
+    ).toBe(false);
+    expect(
+      SessionStopArgsSchema.safeParse({
+        sessionId: 's',
+        extra: true,
+      }).success,
+    ).toBe(false);
+
+    expect(
+      SessionStatusArgsSchema.safeParse({ includeFinished: true }).success,
+    ).toBe(true);
+    expect(
+      SessionStatusArgsSchema.safeParse({ includeFinished: 'yes' }).success,
+    ).toBe(false);
+    expect(SessionStatusArgsSchema.safeParse({ extra: true }).success).toBe(
+      false,
+    );
+
+    expect(SessionClearFinishedArgsSchema.safeParse({}).success).toBe(true);
+    expect(
+      SessionClearFinishedArgsSchema.safeParse({ sessionIds: ['c-1', 'c-2'] })
+        .success,
+    ).toBe(true);
+    expect(
+      SessionClearFinishedArgsSchema.safeParse({ sessionIds: [] }).success,
+    ).toBe(false);
+    expect(
+      SessionClearFinishedArgsSchema.safeParse({
+        sessionIds: Array.from({ length: 51 }, (_, i) => `c-${i}`),
+      }).success,
+    ).toBe(false);
+    expect(
+      SessionClearFinishedArgsSchema.safeParse({
+        sessionIds: ['c-1'],
+        callerSessionId: 'p-1',
+      }).success,
+    ).toBe(false);
+  });
 });
 
 /* ------------------------------------------------------------------------- */
@@ -366,9 +430,16 @@ function fakeSession(
         available: true,
       },
     }),
-    stop: jest
+    stop: jest.fn().mockResolvedValue({
+      ok: true,
+      child: { ...CHILD, status: 'stopped' },
+      requestedSessionId: 'c-1',
+      followed: false,
+      alreadyEnded: false,
+    }),
+    clearFinished: jest
       .fn()
-      .mockResolvedValue({ ok: true, child: { ...CHILD, status: 'stopped' } }),
+      .mockResolvedValue({ ok: true, cleared: ['c-1'], skipped: [] }),
     handoff: jest.fn().mockResolvedValue(HANDED_OFF),
     ...overrides,
     takeHeldCompletions: jest.fn(() => held),
@@ -402,6 +473,22 @@ describe('handleSessionToolCall', () => {
     expect(reply.text).toContain(
       'model claude-opus-4 (model); effort high (ranking)',
     );
+  });
+  it('says an existing child was returned when the start already exists', async () => {
+    const session = fakeSession({
+      start: jest
+        .fn()
+        .mockResolvedValue({ ok: true, child: CHILD, alreadyExists: true }),
+    });
+    const reply = await call(
+      'ptah_session_start',
+      { task: 't', branch: CHILD.branch },
+      session,
+    );
+    expect(reply.isError).toBe(false);
+    expect(reply.text).toContain('Not started again');
+    expect(reply.text).toContain(CHILD.childSessionId);
+    expect(reply.text).not.toContain('Started child session');
   });
   it.each(['minimal', 'turbo'])(
     'refuses unsupported effort %s with the accepted list',
@@ -453,7 +540,9 @@ describe('handleSessionToolCall', () => {
     expect(reply.text).toMatch(/sessionId c-1/);
     expect(reply.text).toMatch(/feat\/x/);
     expect(reply.text).toMatch(/\/repo\/\.worktrees\/feat-x/);
-    expect(reply.text).toContain('model default (default); effort default (default)');
+    expect(reply.text).toContain(
+      'model default (default); effort default (default)',
+    );
   });
 
   it('a plain refusal is a plain-text answer with code and detail', async () => {
@@ -559,31 +648,166 @@ describe('handleSessionToolCall', () => {
 
   it('names the successor of a handed-off child', async () => {
     const session = fakeSession({
-      status: jest
-        .fn()
-        .mockResolvedValue({
-          ok: true,
-          children: [
-            { ...CHILD, status: 'handed-off', succeededBy: 'successor-1' },
-          ],
-        }),
+      status: jest.fn().mockResolvedValue({
+        ok: true,
+        children: [
+          { ...CHILD, status: 'handed-off', succeededBy: 'successor-1' },
+        ],
+      }),
     });
     const reply = await call('ptah_session_status', {}, session);
-    expect(reply.text).toContain('handed-off; succeededBy successor-1');
+    expect(reply.text).toContain(
+      '- parser fix (c-1): Handed off (handed-off) — no reason recorded; successor successor-1',
+    );
+    const full = await call(
+      'ptah_session_status',
+      { includeFinished: true },
+      session,
+    );
+    expect(full.text).toContain('handed-off; succeededBy successor-1');
+  });
+
+  it('renders an ended record without an end cause as unknown, never a guessed kind', async () => {
+    const legacy: SessionChildSnapshot = {
+      ...CHILD,
+      status: 'ended',
+      endedAt: '2026-10-01T12:40:00.000Z',
+    };
+    const recorded: SessionChildSnapshot = {
+      ...CHILD,
+      childSessionId: 'c-2',
+      status: 'ended',
+      endedAt: '2026-10-01T12:41:00.000Z',
+      outcome: {
+        kind: 'unknown',
+        reason: 'some guessed text',
+        endedAt: '2026-10-01T12:41:00.000Z',
+      },
+    };
+    const session = fakeSession({
+      status: jest
+        .fn()
+        .mockResolvedValue({ ok: true, children: [legacy, recorded] }),
+    });
+    const reply = await call('ptah_session_status', {}, session);
+    expect(reply.text).toContain('Finished: 2 (Unknown 2)');
+    expect(reply.text).toContain(
+      `- parser fix (c-1): Unknown (unknown) — ${SESSION_CHILD_OUTCOME_UNKNOWN_REASON}; ended 2026-10-01T12:40:00.000Z`,
+    );
+    expect(reply.text).toContain(
+      `- parser fix (c-2): Unknown (unknown) — ${SESSION_CHILD_OUTCOME_UNKNOWN_REASON}; ended 2026-10-01T12:41:00.000Z`,
+    );
+    expect(reply.text).not.toContain('some guessed text');
+    expect(reply.text).not.toContain('interrupted');
+  });
+
+  it('counts every outcome kind, unknown included, and shows the cause when recorded', async () => {
+    const kinds = [
+      'completed',
+      'handed-off',
+      'stopped',
+      'interrupted',
+      'failed',
+      'timed-out',
+      'unknown',
+    ] as const;
+    const children: SessionChildSnapshot[] = kinds.map(
+      (kind, index): SessionChildSnapshot => ({
+        ...CHILD,
+        childSessionId: `c-${index}`,
+        status: kind === 'handed-off' ? 'handed-off' : 'ended',
+        endedAt: '2026-10-01T13:00:00.000Z',
+        outcome: {
+          kind,
+          reason:
+            kind === 'stopped'
+              ? 'stopped by the parent session p-1 (ptah_session_stop)'
+              : `${kind} reason`,
+          ...(kind === 'stopped' ? { cause: 'parent-stop' } : {}),
+          endedAt: '2026-10-01T13:00:00.000Z',
+        },
+      }),
+    );
+    const session = fakeSession({
+      status: jest.fn().mockResolvedValue({ ok: true, children }),
+    });
+    const reply = await call('ptah_session_status', {}, session);
+    expect(reply.text).toContain(
+      'Finished: 7 (Completed 1, Handed off 1, Stopped 1, Interrupted 1, ' +
+        'Failed 1, Timed out 1, Unknown 1)',
+    );
+    expect(reply.text).toContain(
+      '- parser fix (c-2): Stopped (stopped) — stopped by the parent session ' +
+        'p-1 (ptah_session_stop) [cause parent-stop]; ended 2026-10-01T13:00:00.000Z',
+    );
+  });
+
+  it('shows an idle child with no settled turn as starting, not idle', async () => {
+    const session = fakeSession({
+      status: jest.fn().mockResolvedValue({
+        ok: true,
+        children: [{ ...CHILD, status: 'idle', turnsSettled: 0 }],
+      }),
+      read: jest.fn().mockResolvedValue({
+        ok: true,
+        result: {
+          child: { ...CHILD, status: 'idle', turnsSettled: 0 },
+          transcript: '',
+          truncated: false,
+          available: false,
+        },
+      }),
+    });
+    const reply = await call('ptah_session_status', {}, session);
+    expect(reply.text).toContain(
+      '- parser fix (c-1): starting (first turn not started)',
+    );
+    expect(reply.text).not.toMatch(/\(c-1\): idle/);
+    const read = await call('ptah_session_read', { sessionId: 'c-1' }, session);
+    expect(read.text).toContain('starting (first turn not started)');
+
+    const settled = fakeSession({
+      status: jest.fn().mockResolvedValue({
+        ok: true,
+        children: [{ ...CHILD, status: 'idle', turnsSettled: 1 }],
+      }),
+    });
+    expect((await call('ptah_session_status', {}, settled)).text).toContain(
+      '- parser fix (c-1): idle',
+    );
+  });
+
+  it('lists a pending start with its id, branch and start time', async () => {
+    const pending: SessionChildSnapshot = {
+      ...CHILD,
+      childSessionId: 'c-pending',
+      status: 'starting',
+      baseRef: '',
+      worktreePath: '',
+    };
+    const session = fakeSession({
+      status: jest.fn().mockResolvedValue({ ok: true, children: [pending] }),
+    });
+    const reply = await call('ptah_session_status', {}, session);
+    expect(reply.text).toContain(
+      '- parser fix (c-pending): starting\n  branch feat/x; started 2026-10-01T12:00:00.000Z',
+    );
+    expect(reply.text).not.toContain('worktree ');
+    expect(reply.text).not.toContain('Finished:');
   });
 
   it('shows model and effort in status', async () => {
     const session = fakeSession({
-      status: jest
-        .fn()
-        .mockResolvedValue({
-          ok: true,
-          children: [{ ...CHILD, model: 'opus', effort: 'low' }, CHILD],
-        }),
+      status: jest.fn().mockResolvedValue({
+        ok: true,
+        children: [{ ...CHILD, model: 'opus', effort: 'low' }, CHILD],
+      }),
     });
     const reply = await call('ptah_session_status', {}, session);
     expect(reply.text).toContain('model opus (default); effort low (default)');
-    expect(reply.text).toContain('model default (default); effort default (default)');
+    expect(reply.text).toContain(
+      'model default (default); effort default (default)',
+    );
   });
 
   it('stop states that tab, transcript, worktree and branch remain', async () => {
@@ -592,8 +816,283 @@ describe('handleSessionToolCall', () => {
       { sessionId: 'c-1' },
       fakeSession(),
     );
+    expect(reply.text).toContain('Stopped "parser fix" (c-1): stopped');
     expect(reply.text).toMatch(/tab, its transcript, the worktree/);
     expect(reply.text).toMatch(/branch feat\/x remain/);
+  });
+
+  it('stop with followHandoff appends the followed handoff note', async () => {
+    const session = fakeSession({
+      stop: jest.fn().mockResolvedValue({
+        ok: true,
+        child: { ...CHILD, childSessionId: 'c-2', status: 'stopped' },
+        requestedSessionId: 'c-1',
+        followed: true,
+        alreadyEnded: false,
+      }),
+    });
+    const reply = await call(
+      'ptah_session_stop',
+      { sessionId: 'c-1', followHandoff: true },
+      session,
+    );
+    expect(session.stop).toHaveBeenCalledWith('c-1', { followHandoff: true });
+    expect(reply.isError).toBe(false);
+    expect(reply.text).toContain(
+      'Stopped "parser fix" (c-2): stopped (followed the handoff from c-1).',
+    );
+  });
+
+  it('stop when alreadyEnded states nothing was stopped with the outcome kind', async () => {
+    const session = fakeSession({
+      stop: jest.fn().mockResolvedValue({
+        ok: true,
+        child: {
+          ...CHILD,
+          status: 'ended',
+          outcome: {
+            kind: 'completed',
+            reason: 'stopped by the user (stop button or tab closed)',
+            cause: 'user-stop',
+            endedAt: '2026-10-01T12:30:00.000Z',
+          },
+        },
+        requestedSessionId: 'c-1',
+        followed: false,
+        alreadyEnded: true,
+      }),
+    });
+    const reply = await call(
+      'ptah_session_stop',
+      { sessionId: 'c-1' },
+      session,
+    );
+    expect(reply.isError).toBe(false);
+    expect(reply.text).toContain(
+      'Session "parser fix" (c-1) had already ended (completed): nothing was stopped.',
+    );
+    expect(reply.text).toContain(
+      'Outcome: Completed (completed) — stopped by the user (stop button or ' +
+        'tab closed) [cause user-stop]; ended 2026-10-01T12:30:00.000Z.',
+    );
+  });
+
+  it('stop on a handed-off child without followHandoff refuses in plain text naming the successor id', async () => {
+    const session = fakeSession({
+      stop: jest.fn().mockResolvedValue({
+        ok: false,
+        reason: 'handed-off',
+        detail:
+          'Session c-1 already handed off to successor c-2 (working). Pass followHandoff: true to stop the successor.',
+        requestedSessionId: 'c-1',
+        successorId: 'c-2',
+        successorStatus: 'working',
+      }),
+    });
+    const reply = await call(
+      'ptah_session_stop',
+      { sessionId: 'c-1' },
+      session,
+    );
+    expect(reply.isError).toBe(false);
+    expect(reply.text).toContain(
+      'ptah_session_stop refused (handed-off): nothing was stopped.',
+    );
+    expect(reply.text).toContain('c-2');
+  });
+
+  it('stop of a live child names the stopped session and its outcome', async () => {
+    const session = fakeSession({
+      stop: jest.fn().mockResolvedValue({
+        ok: true,
+        child: {
+          ...CHILD,
+          status: 'stopped',
+          endedAt: '2026-10-01T12:31:00.000Z',
+          outcome: {
+            kind: 'stopped',
+            reason: 'stopped by the parent session p-1 (ptah_session_stop)',
+            cause: 'parent-stop',
+            endedAt: '2026-10-01T12:31:00.000Z',
+          },
+        },
+        requestedSessionId: 'c-1',
+        followed: false,
+        alreadyEnded: false,
+      }),
+    });
+    const reply = await call(
+      'ptah_session_stop',
+      { sessionId: 'c-1' },
+      session,
+    );
+    expect(reply.text).toContain('Stopped "parser fix" (c-1): stopped.');
+    expect(reply.text).toContain(
+      'Outcome: Stopped (stopped) — stopped by the parent session p-1 ' +
+        '(ptah_session_stop) [cause parent-stop]; ended 2026-10-01T12:31:00.000Z.',
+    );
+  });
+
+  it('status default list mode renders live children in full, finished counts, one short line per finished child, and the hint', async () => {
+    const finishedCompleted: SessionChildSnapshot = {
+      ...CHILD,
+      childSessionId: 'c-2',
+      label: 'done lane',
+      status: 'ended',
+      endedAt: '2026-10-01T12:20:00.000Z',
+      endReason: 'user-stop',
+      outcome: {
+        kind: 'completed',
+        reason: 'user-stop',
+        endedAt: '2026-10-01T12:20:00.000Z',
+      },
+    };
+    const finishedHandedOff: SessionChildSnapshot = {
+      ...CHILD,
+      childSessionId: 'c-3',
+      label: 'handed lane',
+      status: 'handed-off',
+      succeededBy: 'c-4',
+      endedAt: '2026-10-01T12:25:00.000Z',
+      endReason: 'runtime-cap',
+      outcome: {
+        kind: 'handed-off',
+        reason: 'runtime-cap',
+        endedAt: '2026-10-01T12:25:00.000Z',
+        successorId: 'c-4',
+      },
+    };
+    const finishedInterrupted: SessionChildSnapshot = {
+      ...CHILD,
+      childSessionId: 'c-5',
+      label: 'crashed lane',
+      status: 'ended',
+      endedAt: '2026-10-01T12:28:00.000Z',
+      endReason: 'stream-exit',
+      outcome: {
+        kind: 'interrupted',
+        reason: 'stream-exit',
+        endedAt: '2026-10-01T12:28:00.000Z',
+      },
+    };
+    const session = fakeSession({
+      status: jest.fn().mockResolvedValue({
+        ok: true,
+        children: [
+          CHILD,
+          finishedCompleted,
+          finishedHandedOff,
+          finishedInterrupted,
+        ],
+      }),
+    });
+    const reply = await call('ptah_session_status', {}, session);
+    expect(reply.isError).toBe(false);
+    expect(reply.text).toContain('- parser fix (c-1): working');
+    expect(reply.text).toContain('  branch feat/x from');
+    expect(reply.text).toContain(
+      'Finished: 3 (Completed 1, Handed off 1, Interrupted 1)',
+    );
+    expect(reply.text).toContain(
+      '- done lane (c-2): Completed (completed) — user-stop; ended 2026-10-01T12:20:00.000Z',
+    );
+    expect(reply.text).toContain(
+      '- handed lane (c-3): Handed off (handed-off) — runtime-cap; ended 2026-10-01T12:25:00.000Z; successor c-4',
+    );
+    expect(reply.text).toContain(
+      '- crashed lane (c-5): Interrupted (interrupted) — stream-exit; ended 2026-10-01T12:28:00.000Z',
+    );
+    expect(reply.text).toContain(
+      'Use includeFinished: true for full records, ptah_session_clear_finished to remove them.',
+    );
+  });
+
+  it('status with includeFinished: true renders full records and outcome details for terminal children', async () => {
+    const finishedHandedOff: SessionChildSnapshot = {
+      ...CHILD,
+      childSessionId: 'c-3',
+      label: 'handed lane',
+      status: 'handed-off',
+      succeededBy: 'c-4',
+      endedAt: '2026-10-01T12:25:00.000Z',
+      endReason: 'runtime-cap',
+      outcome: {
+        kind: 'handed-off',
+        reason: 'runtime-cap',
+        endedAt: '2026-10-01T12:25:00.000Z',
+        successorId: 'c-4',
+      },
+    };
+    const session = fakeSession({
+      status: jest.fn().mockResolvedValue({
+        ok: true,
+        children: [finishedHandedOff],
+      }),
+    });
+    const reply = await call(
+      'ptah_session_status',
+      { includeFinished: true },
+      session,
+    );
+    expect(reply.isError).toBe(false);
+    expect(reply.text).toContain('  branch feat/x from');
+    expect(reply.text).toContain(
+      '  outcome: Handed off (handed-off) — runtime-cap; ended 2026-10-01T12:25:00.000Z; successor c-4',
+    );
+    expect(reply.text).not.toContain(
+      'Use includeFinished: true for full records',
+    );
+  });
+
+  it('clear_finished reports cleared and skipped ids with reasons, and returns isError on unattributed-caller', async () => {
+    const session = fakeSession({
+      clearFinished: jest.fn().mockResolvedValue({
+        ok: true,
+        cleared: ['c-1', 'c-2'],
+        skipped: [
+          { childSessionId: 'c-3', reason: 'live' },
+          { childSessionId: 'c-4', reason: 'unknown-child' },
+          { childSessionId: 'c-5', reason: 'held-completion' },
+        ],
+      }),
+    });
+    const reply = await call(
+      'ptah_session_clear_finished',
+      { sessionIds: ['c-1', 'c-2', 'c-3', 'c-4'] },
+      session,
+    );
+    expect(session.clearFinished).toHaveBeenCalledWith([
+      'c-1',
+      'c-2',
+      'c-3',
+      'c-4',
+    ]);
+    expect(reply.isError).toBe(false);
+    expect(reply.text).toContain('Cleared 2 finished session(s): c-1, c-2');
+    expect(reply.text).toContain(
+      'c-3 (live: still live; live sessions are never cleared)',
+    );
+    expect(reply.text).toContain('c-4 (unknown-child: no such session)');
+    expect(reply.text).toContain(
+      'c-5 (held-completion: its completion was not delivered yet',
+    );
+
+    const unattributed = fakeSession({
+      clearFinished: jest.fn().mockResolvedValue({
+        ok: false,
+        reason: 'unattributed-caller',
+        detail: 'Caller session id is required.',
+      }),
+    });
+    const errReply = await call(
+      'ptah_session_clear_finished',
+      {},
+      unattributed,
+    );
+    expect(errReply.isError).toBe(true);
+    expect(errReply.text).toContain(
+      'ptah_session_clear_finished refused (unattributed-caller): Caller session id is required.',
+    );
   });
 
   describe('held completions', () => {
@@ -604,6 +1103,7 @@ describe('handleSessionToolCall', () => {
         ptah_session_status: {},
         ptah_session_read: { sessionId: 'c-1' },
         ptah_session_stop: { sessionId: 'c-1' },
+        ptah_session_clear_finished: {},
         ptah_session_handoff: { handoffPath: '/repo/HANDOFF.md', prompt: 'p' },
       };
       for (const name of SESSION_TOOL_NAMES) {

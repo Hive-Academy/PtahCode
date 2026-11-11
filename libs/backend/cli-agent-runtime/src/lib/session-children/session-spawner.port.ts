@@ -18,6 +18,7 @@ import type {
   EffortLevel,
   LaneCompletionRefusalReason,
   LaneCompletionVerdict,
+  SessionChildOutcome,
 } from '@ptah-extension/shared';
 
 export type SessionChildStatus =
@@ -105,6 +106,8 @@ export interface SessionChildSnapshot {
   };
   readonly lastRecap?: string;
   readonly lastCompletion?: SessionChildLastCompletion;
+  /** How the child ended (TASK_2026_932). Present exactly when it is terminal. */
+  readonly outcome?: SessionChildOutcome;
 }
 
 /** Sources for records restored from before child setting routing existed. */
@@ -168,7 +171,15 @@ export interface SessionChildRollbackStep {
 }
 
 export type SessionChildStartResult =
-  | { readonly ok: true; readonly child: SessionChildSnapshot }
+  | {
+      readonly ok: true;
+      readonly child: SessionChildSnapshot;
+      /**
+       * Set when this caller already had a pending or live child on the same
+       * branch: that child is returned and no second start ran (TASK_2026_932 E2).
+       */
+      readonly alreadyExists?: true;
+    }
   | {
       readonly ok: false;
       readonly refusal: SessionSpawnRefusalCode;
@@ -251,6 +262,75 @@ export interface SessionChildLookupRefusal {
     'not-a-child-of-caller' | 'unknown-child' | 'unattributed-caller';
   readonly detail: string;
 }
+
+export interface SessionChildStopQuery extends SessionChildQuery {
+  readonly childSessionId: string;
+  /** Stop the latest successor when `childSessionId` already handed off. */
+  readonly followHandoff?: boolean;
+}
+
+/** `stop` on a handed-off id without `followHandoff`: nothing was stopped. */
+export interface SessionChildStopHandedOffRefusal {
+  readonly ok: false;
+  readonly reason: 'handed-off';
+  readonly detail: string;
+  /** The id that was asked for (terminal, handed-off). */
+  readonly requestedSessionId: string;
+  /** The latest successor in the chain, and its status. */
+  readonly successorId: string;
+  readonly successorStatus: SessionChildStatus;
+}
+
+export type SessionChildStopResult =
+  | {
+      readonly ok: true;
+      /** The session that was stopped (or already ended), after any follow. */
+      readonly child: SessionChildSnapshot;
+      /** The id the caller passed. */
+      readonly requestedSessionId: string;
+      /** True when the call followed a handoff chain to a successor. */
+      readonly followed: boolean;
+      /** True when `child` was already terminal: nothing was interrupted. */
+      readonly alreadyEnded: boolean;
+    }
+  | SessionChildLookupRefusal
+  | SessionChildStopHandedOffRefusal
+  | SessionChildStopStartingRefusal;
+
+/** `stop` on a start that is still in progress: nothing was stopped. */
+export interface SessionChildStopStartingRefusal {
+  readonly ok: false;
+  readonly reason: 'starting';
+  readonly detail: string;
+}
+
+export interface SessionChildClearQuery {
+  readonly callerSessionId: string | undefined;
+  /** Only these ids; absent means every terminal child of the caller. */
+  readonly childSessionIds?: readonly string[];
+}
+
+export type SessionChildClearSkipReason =
+  | 'live'
+  | 'held-completion'
+  | 'unknown-child'
+  | 'not-a-child-of-caller';
+
+export type SessionChildClearResult =
+  | {
+      readonly ok: true;
+      /** Ids removed from the registry, in start order. */
+      readonly cleared: readonly string[];
+      readonly skipped: readonly {
+        readonly childSessionId: string;
+        readonly reason: SessionChildClearSkipReason;
+      }[];
+    }
+  | {
+      readonly ok: false;
+      readonly reason: 'unattributed-caller';
+      readonly detail: string;
+    };
 
 export interface SessionChildReadResult {
   readonly child: SessionChildSnapshot;
@@ -348,12 +428,19 @@ export interface ISessionSpawner {
     | { readonly ok: true; readonly result: SessionChildReadResult }
     | SessionChildLookupRefusal
   >;
-  stop(
-    query: SessionChildQuery & { readonly childSessionId: string },
-  ): Promise<
-    | { readonly ok: true; readonly child: SessionChildSnapshot }
-    | SessionChildLookupRefusal
-  >;
+  /**
+   * Stop one child. A handed-off id is refused (`handed-off`, naming the
+   * successor) unless `followHandoff` is true; then the latest successor is
+   * stopped. The result names the session that was actually stopped.
+   */
+  stop(query: SessionChildStopQuery): Promise<SessionChildStopResult>;
+  /**
+   * Remove the caller's TERMINAL children from the registry (TASK_2026_932).
+   * Live children are never removed. Worktrees, branches, transcripts and
+   * tabs are not touched. Without `childSessionIds`, every terminal child of
+   * the caller is removed.
+   */
+  clearFinished(query: SessionChildClearQuery): SessionChildClearResult;
   /** Live children as UI descriptors — serves `chat:agent-sessions` for late tab adoption. */
   listUiDescriptors(
     workspaceRoot?: string,
