@@ -15,7 +15,10 @@ import {
   VSCodeService,
   type ProviderAccountChoice,
 } from '@ptah-extension/core';
-import { NativePopoverComponent } from '@ptah-extension/ui';
+import {
+  NativePopoverComponent,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import {
@@ -55,6 +58,7 @@ let nextId = 0;
     NativePopoverComponent,
     LucideAngularModule,
     SettingsBusyDisabledDirective,
+    PtahIconButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -110,8 +114,8 @@ let nextId = 0;
                 </h3>
                 <button
                   type="button"
-                  [class]="'btn btn-ghost btn-sm btn-square ' + focusRing"
-                  aria-label="Close"
+                  ptahIconButton
+                  label="Close"
                   (click)="closeToTrigger()"
                   data-testid="cli-matrix-account-close"
                 >
@@ -174,7 +178,6 @@ export class ClaudeLaneAccountCellComponent {
 
   protected readonly cell = CELL;
   protected readonly item = ITEM;
-  protected readonly focusRing = FOCUS;
   protected readonly ChevronIcon = ChevronDown;
   protected readonly CloseIcon = X;
   protected readonly CheckIcon = Check;

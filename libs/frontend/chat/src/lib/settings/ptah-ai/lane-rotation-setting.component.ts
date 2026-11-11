@@ -14,6 +14,7 @@ import {
   settingNotConfirmedMessage,
   settingNotSavedMessage,
 } from '../feedback/settings-save-feedback.service';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 const FOCUS =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
@@ -39,7 +40,7 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
 @Component({
   selector: 'ptah-lane-rotation-setting',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective],
+  imports: [SettingsBusyDisabledDirective, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -94,7 +95,7 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
         }
         @if (lastPicksUnavailable()) {
           <div class="mt-2 flex items-center gap-2 text-xs text-warning" role="status">Recent picks unavailable
-            <button type="button" class="btn btn-outline btn-sm" (click)="retryPicks()">Retry</button>
+            <button type="button" ptahButton (click)="retryPicks()">Retry</button>
           </div>
         }
       </div>
@@ -117,11 +118,8 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
             </p>
             <button
               type="button"
-              [class]="
-                'btn btn-outline btn-sm border-base-content-muted text-base-content ' +
-                focusRing
-              "
-              [ptahBusyDisabled]="saving()"
+              ptahButton
+              [busy]="saving()"
               (click)="reload()"
               data-testid="lane-rotation-retry"
             >

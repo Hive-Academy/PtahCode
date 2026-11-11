@@ -10,7 +10,10 @@ import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
 import type { AgentOrchestrationConfig } from '@ptah-extension/shared';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
-import { SettingsFieldComponent } from '@ptah-extension/ui';
+import {
+  SettingsFieldComponent,
+  PtahButtonDirective,
+} from '@ptah-extension/ui';
 import {
   LANE_GUARD_DEFAULTS,
   LANE_GUARD_FIELDS,
@@ -47,7 +50,7 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
 @Component({
   selector: 'ptah-lane-guards-settings',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, SettingsFieldComponent],
+  imports: [SettingsBusyDisabledDirective, SettingsFieldComponent, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -79,10 +82,7 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
             </p>
             <button
               type="button"
-              [class]="
-                'btn btn-outline btn-sm border-base-content-muted text-base-content ' +
-                focusRing
-              "
+              ptahButton
               (click)="reload()"
               data-testid="lane-guards-retry"
             >

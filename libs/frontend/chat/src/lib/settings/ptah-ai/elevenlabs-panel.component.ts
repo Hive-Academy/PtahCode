@@ -34,6 +34,10 @@ import {
   type ElevenLabsSelectRow,
 } from './elevenlabs-select-rows';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
+import {
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 
 type WriteResult = { ok: true } | { ok: false; message: string };
 type SelectionKey = 'voiceId' | ElevenLabsSelectKey;
@@ -89,7 +93,7 @@ function testFailureMessage(category: string | undefined): string {
 @Component({
   selector: 'ptah-elevenlabs-panel',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -124,7 +128,8 @@ function testFailureMessage(category: string | undefined): string {
                   @if (!showKeyForm()) {
                     <button
                       type="button"
-                      class="btn btn-outline btn-xs gap-1"
+                      ptahButton
+                      size="xs"
                       [disabled]="!canTest()"
                       (click)="testConnection()"
                       data-testid="elevenlabs-test-btn"
@@ -139,7 +144,9 @@ function testFailureMessage(category: string | undefined): string {
                   }
                   <button
                     type="button"
-                    class="btn btn-ghost btn-xs"
+                    ptahButton
+                    variant="ghost"
+                    size="xs"
                     [disabled]="saving()"
                     [attr.aria-expanded]="replacingKey()"
                     aria-controls="elevenlabs-key"
@@ -148,11 +155,11 @@ function testFailureMessage(category: string | undefined): string {
                   >
                     {{ replacingKey() ? 'Cancel' : 'Replace' }}
                   </button>
-                  <!-- Visual N2: no btn-outline:hover fill on the trigger while its confirm is open. -->
                   <button
                     #clearBtn
                     type="button"
-                    class="btn btn-outline btn-xs text-base-content aria-expanded:hover:bg-transparent aria-expanded:hover:text-base-content"
+                    ptahButton
+                    size="xs"
                     [disabled]="saving()"
                     [attr.aria-expanded]="confirmingClear()"
                     (click)="openClearConfirm()"
@@ -210,7 +217,8 @@ function testFailureMessage(category: string | undefined): string {
                   <button
                     #clearCancel
                     type="button"
-                    class="btn btn-ghost btn-sm"
+                    ptahButton
+                    variant="ghost"
                     (click)="cancelClear()"
                     data-testid="elevenlabs-clear-cancel"
                   >
@@ -249,26 +257,28 @@ function testFailureMessage(category: string | undefined): string {
                   (input)="onKeyInput($event)"
                   data-testid="elevenlabs-key-input"
                 />
-                <button
-                  type="button"
-                  class="btn btn-ghost btn-xs btn-square absolute right-0 top-0 min-w-6 min-h-6"
-                  [attr.aria-label]="
-                    keyVisible() ? 'Hide API key' : 'Show API key'
-                  "
-                  [attr.aria-pressed]="keyVisible()"
-                  (click)="keyVisible.set(!keyVisible())"
-                  data-testid="elevenlabs-key-visibility"
-                >
-                  <lucide-angular
-                    [img]="keyVisible() ? EyeOffIcon : EyeIcon"
-                    class="w-3 h-3"
-                    aria-hidden="true"
-                  />
-                </button>
+                <span class="absolute right-0 top-0">
+                  <button
+                    type="button"
+                    ptahIconButton
+                    size="xs"
+                    [label]="keyVisible() ? 'Hide API key' : 'Show API key'"
+                    [attr.aria-pressed]="keyVisible()"
+                    (click)="keyVisible.set(!keyVisible())"
+                    data-testid="elevenlabs-key-visibility"
+                  >
+                    <lucide-angular
+                      [img]="keyVisible() ? EyeOffIcon : EyeIcon"
+                      class="w-3 h-3"
+                      aria-hidden="true"
+                    />
+                  </button>
+                </span>
               </div>
               <button
                 type="button"
-                class="btn btn-outline btn-xs gap-1"
+                ptahButton
+                size="xs"
                 [disabled]="!canTest()"
                 (click)="testConnection()"
                 data-testid="elevenlabs-test-btn"
@@ -285,7 +295,9 @@ function testFailureMessage(category: string | undefined): string {
               </button>
               <button
                 type="button"
-                class="btn btn-primary btn-xs"
+                ptahButton
+                variant="primary"
+                size="xs"
                 [disabled]="!canSaveKey()"
                 (click)="saveKey()"
                 data-testid="elevenlabs-key-save"
@@ -365,7 +377,9 @@ function testFailureMessage(category: string | undefined): string {
                   </span>
                   <button
                     type="button"
-                    class="btn btn-ghost btn-xs"
+                    ptahButton
+                    variant="ghost"
+                    size="xs"
                     (click)="loadVoices()"
                     data-testid="elevenlabs-voices-retry"
                   >
@@ -396,8 +410,10 @@ function testFailureMessage(category: string | undefined): string {
                   />
                   <button
                     type="button"
-                    class="btn btn-ghost btn-xs whitespace-nowrap"
-                    [ptahBusyDisabled]="!canSaveVoiceId()"
+                    ptahButton
+                    variant="ghost"
+                    size="xs"
+                    [disabled]="!canSaveVoiceId()"
                     (click)="saveVoiceId()"
                     data-testid="elevenlabs-voice-id-save"
                   >

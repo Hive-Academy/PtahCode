@@ -14,6 +14,9 @@ import type { VoiceProviderConfigLocalDto } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { VoiceDownloadProgressService } from '../../services/voice-download-progress.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
+import {
+  PtahButtonDirective,
+} from '@ptah-extension/ui';
 
 interface WhisperModelOption {
   readonly value: string;
@@ -61,7 +64,7 @@ const HF_REPO_ID_RE = /^[\w.-]+\/[\w.-]+$/;
 @Component({
   selector: 'ptah-local-stt-panel',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -163,8 +166,11 @@ const HF_REPO_ID_RE = /^[\w.-]+\/[\w.-]+$/;
                 />
                 <button
                   type="button"
-                  class="btn btn-primary btn-xs"
-                  [ptahBusyDisabled]="saving() || !customModelValid()"
+                  ptahButton
+                  variant="primary"
+                  size="xs"
+                  [busy]="saving()"
+                  [disabled]="!customModelValid()"
                   (click)="saveCustomSource()"
                   data-testid="local-stt-custom-save"
                 >
@@ -247,8 +253,10 @@ const HF_REPO_ID_RE = /^[\w.-]+\/[\w.-]+$/;
 
                 <button
                   type="button"
-                  class="btn btn-outline btn-xs gap-1"
-                  [ptahBusyDisabled]="saving() || !canDownload()"
+                  ptahButton
+                  size="xs"
+                  [busy]="saving()"
+                  [disabled]="!canDownload()"
                   (click)="downloadModel()"
                   data-testid="local-stt-download-btn"
                 >

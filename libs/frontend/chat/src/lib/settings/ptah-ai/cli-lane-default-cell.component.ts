@@ -1,5 +1,8 @@
 import { ChangeDetectionStrategy, Component, ElementRef, computed, input, output, signal, viewChild } from '@angular/core';
-import { NativePopoverComponent } from '@ptah-extension/ui';
+import {
+  NativePopoverComponent,
+  PtahButtonDirective,
+} from '@ptah-extension/ui';
 import type { CliAdapterManifest, CliLaneDefaults, CliType, LaneNetworkMode, LanePermissionMode } from '@ptah-extension/shared';
 import { CLI_LANE_DEFAULT_SCHEMA, resolveCliLaneDefaultPair } from '@ptah-extension/shared';
 
@@ -13,7 +16,7 @@ let nextTitleId = 0;
 @Component({
   selector: 'ptah-cli-lane-default-cell',
   standalone: true,
-  imports: [NativePopoverComponent],
+  imports: [NativePopoverComponent, PtahButtonDirective],
   styles: `:host { display: block; } dialog.modal:not([open]) { display: none; } .compact { width: 4.75rem; } .wide, .card-layout { width: 100%; } .wide select { max-width: 20rem; min-width: 9rem; } @container (max-width: 479px) { .wide > .grid { grid-template-columns: minmax(0, 1fr); } }`,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -23,8 +26,8 @@ let nextTitleId = 0;
       @if (showCaption()) { <span>{{ saved() ? 'Saved default' : 'Auto (default) · built-in' }}</span> }
       @if (saved()) {
         <ptah-native-popover [isOpen]="resetOpen()" placement="bottom-start" [hasBackdrop]="true" backdropClass="transparent" (closed)="resetOpen.set(false)">
-          <button trigger type="button" class="btn btn-ghost btn-xs" [attr.aria-expanded]="resetOpen()" (click)="resetOpen.set(!resetOpen())">More default actions</button>
-          @if (resetOpen()) { <div content class="p-2"><button type="button" class="btn btn-ghost btn-sm" [disabled]="disabled() || pending() !== null" (click)="requestReset()">Reset to default ({{ resetDescription() }})</button></div> }
+          <button trigger type="button" ptahButton variant="ghost" size="xs" [attr.aria-expanded]="resetOpen()" (click)="resetOpen.set(!resetOpen())">More default actions</button>
+          @if (resetOpen()) { <div content class="p-2"><button type="button" ptahButton variant="ghost" [disabled]="disabled() || pending() !== null" (click)="requestReset()">Reset to default ({{ resetDescription() }})</button></div> }
         </ptah-native-popover>
       }
       @if (unsupportedCombination(); as reason) { <span role="status">Unsupported combination: {{ reason }}</span> }
@@ -55,7 +58,7 @@ let nextTitleId = 0;
         <div class="modal-box border border-base-content/60 bg-base-100 text-base-content">
           <h3 [id]="titleId" tabindex="-1" class="text-base font-semibold">Confirm full access</h3>
           <p class="mt-3 text-sm">{{ cli() === 'codex' ? warning : 'Full auto can approve every action. Network access may let the lane reach external services. Choose this only for runs you trust.' }}</p>
-          <div class="modal-action"><button type="button" class="btn btn-ghost btn-sm" (click)="cancel()">Cancel</button><button type="button" class="btn btn-warning btn-sm" (click)="confirm()">Confirm</button></div>
+          <div class="modal-action"><button type="button" ptahButton variant="ghost" (click)="cancel()">Cancel</button><button type="button" class="btn btn-warning btn-sm" (click)="confirm()">Confirm</button></div>
         </div>
       </dialog>
     </div>

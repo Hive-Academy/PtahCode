@@ -19,6 +19,8 @@ import {
   ProviderModelPickerComponent,
   ProviderModelSearchFieldComponent,
   type ProviderModelSearchOption,
+  PtahButtonDirective,
+  PtahIconButtonDirective,
 } from '@ptah-extension/ui';
 import {
   CLI_REASONING_EFFORT_VALUES,
@@ -101,6 +103,8 @@ const FOCUS =
     LucideAngularModule,
     ProviderModelSearchFieldComponent,
     ProviderModelPickerComponent,
+    PtahButtonDirective,
+    PtahIconButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -121,8 +125,9 @@ const FOCUS =
         </h3>
         <button
           type="button"
-          [class]="'btn btn-ghost btn-xs btn-square min-h-6 ' + focusRing"
-          aria-label="Close"
+          ptahIconButton
+          size="xs"
+          label="Close"
           (click)="closed.emit()"
         >
           <lucide-angular
@@ -153,10 +158,9 @@ const FOCUS =
             The model list could not be loaded.
             <button
               type="button"
-              [class]="
-                'btn btn-link btn-xs h-auto min-h-6 px-0 text-base-content ' +
-                focusRing
-              "
+              ptahButton
+              variant="link"
+              size="xs"
               (click)="state.refreshDelegatedModelOptions()"
             >
               Retry
@@ -286,7 +290,6 @@ const FOCUS =
 })
 export class CliModelEffortPopoverComponent implements OnInit {
   protected readonly CloseIcon = X;
-  protected readonly focusRing = FOCUS;
   protected readonly state = inject(ProvidersSettingsStateService);
   private readonly feedback = inject(SettingsSaveFeedbackService);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);

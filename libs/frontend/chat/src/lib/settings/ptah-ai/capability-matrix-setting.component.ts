@@ -6,7 +6,10 @@ import {
   signal,
 } from '@angular/core';
 import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
-import { NativePopoverComponent } from '@ptah-extension/ui';
+import {
+  NativePopoverComponent,
+  PtahButtonDirective,
+} from '@ptah-extension/ui';
 import { RoutingDisplayNamesStore } from './routing-display-names.store';
 import {
   OUTCOME_TASK_KINDS,
@@ -27,7 +30,7 @@ const NO_PARAMS: AgentGetCapabilityMatrixParams = {};
 @Component({
   selector: 'ptah-capability-matrix-setting',
   standalone: true,
-  imports: [NativePopoverComponent],
+  imports: [NativePopoverComponent, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -67,10 +70,7 @@ const NO_PARAMS: AgentGetCapabilityMatrixParams = {};
             </p>
             <button
               type="button"
-              [class]="
-                'btn btn-outline btn-sm border-base-content-muted text-base-content ' +
-                focusRing
-              "
+              ptahButton
               (click)="reload()"
               data-testid="capability-matrix-retry"
             >

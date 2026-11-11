@@ -10,6 +10,8 @@ import { ChevronDown, Ellipsis, LucideAngularModule, Plus } from 'lucide-angular
 import {
   NativePopoverComponent,
   ProviderMarkComponent,
+  PtahButtonDirective,
+  PtahIconButtonDirective,
 } from '@ptah-extension/ui';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import {
@@ -63,6 +65,8 @@ const LABEL = 'text-xs font-semibold uppercase tracking-wide text-base-content-m
     ProviderMarkComponent,
     SettingsBusyDisabledDirective,
     CliModelEffortPopoverComponent,
+    PtahButtonDirective,
+    PtahIconButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -89,7 +93,8 @@ const LABEL = 'text-xs font-semibold uppercase tracking-wide text-base-content-m
           <!-- Batch 32: opens the add-instance modal (#46-#49); focus returns here when it closes. -->
           <button
             type="button"
-            [class]="'btn btn-outline btn-sm ml-auto shrink-0 gap-1.5 ' + focusRing"
+            ptahButton
+            class="ml-auto shrink-0"
             [disabled]="busy() || !canWrite()"
             (click)="addRequested.emit('header')"
             data-testid="cli-matrix-add"
@@ -114,7 +119,9 @@ const LABEL = 'text-xs font-semibold uppercase tracking-wide text-base-content-m
           </p>
           <button
             type="button"
-            [class]="'btn btn-primary btn-sm shrink-0 gap-1.5 ' + focusRing"
+            ptahButton
+            variant="primary"
+            class="shrink-0"
             [disabled]="busy() || !canWrite()"
             (click)="addRequested.emit('empty')"
           >
@@ -182,7 +189,7 @@ const LABEL = 'text-xs font-semibold uppercase tracking-wide text-base-content-m
                       <span class="badge badge-sm inline-flex whitespace-nowrap border-base-content/40 bg-base-200 text-base-content">{{ badge.label }}: {{ badge.value }}</span>
                     }
                     <ptah-native-popover [isOpen]="capabilitiesOpen() === row.id" placement="bottom-start" [hasBackdrop]="true" backdropClass="transparent" (closed)="capabilitiesOpen.set(null)">
-                      <button trigger type="button" class="btn btn-ghost btn-xs" [attr.aria-expanded]="capabilitiesOpen() === row.id" [attr.aria-controls]="'instance-capabilities-' + row.id" (click)="capabilitiesOpen.set(capabilitiesOpen() === row.id ? null : row.id)">Show capabilities</button>
+                      <button trigger type="button" ptahButton variant="ghost" size="xs" [attr.aria-expanded]="capabilitiesOpen() === row.id" [attr.aria-controls]="'instance-capabilities-' + row.id" (click)="capabilitiesOpen.set(capabilitiesOpen() === row.id ? null : row.id)">Show capabilities</button>
                       @if (capabilitiesOpen() === row.id) {
                         <div content [id]="'instance-capabilities-' + row.id" class="max-h-72 w-72 overflow-auto p-3 text-xs">
                           @for (group of capabilityView(row).groups; track group.heading) {
@@ -208,38 +215,44 @@ const LABEL = 'text-xs font-semibold uppercase tracking-wide text-base-content-m
                       <span class="text-xs text-base-content">Delete {{ row.name }}?</span>
                       <button
                         type="button"
-                        [class]="action"
-                        [ptahBusyDisabled]="busy() || !canWrite()"
+                        ptahButton
+                        [busy]="busy()"
+                        [disabled]="!canWrite()"
                         (click)="deleteConfirmed.emit(row)"
                         [attr.aria-label]="'Confirm delete ' + row.name"
                       >
                         Delete
                       </button>
-                      <button type="button" [class]="action" (click)="deleteCancelled.emit(row.id)" data-cancel-delete>
+                      <button type="button" ptahButton (click)="deleteCancelled.emit(row.id)" data-cancel-delete>
                         Cancel
                       </button>
                     </div>
                   } @else {
-                    <button
-                      type="button"
-                      [class]="action + ' inst-inline-action'"
-                      [disabled]="busy() || !canWrite()"
-                      (click)="tiersRequested.emit(row)"
-                      [attr.aria-label]="'Tiers for ' + row.name"
-                      [attr.data-testid]="'cli-matrix-tiers-' + row.id"
-                    >
-                      Tiers
-                    </button>
-                    <button
-                      type="button"
-                      [class]="action + ' inst-inline-action'"
-                      [ptahBusyDisabled]="testing()"
-                      (click)="testRequested.emit(row.id)"
-                      [attr.aria-label]="'Test ' + row.name"
-                      [attr.data-testid]="'cli-matrix-test-' + row.id"
-                    >
-                      {{ testingId() === row.id ? 'Testing…' : 'Test' }}
-                    </button>
+                    <!-- The span hides the inline action in a narrow box: ptahButton sets display, so it cannot carry the class. -->
+                    <span class="inst-inline-action">
+                      <button
+                        type="button"
+                        ptahButton
+                        [disabled]="busy() || !canWrite()"
+                        (click)="tiersRequested.emit(row)"
+                        [attr.aria-label]="'Tiers for ' + row.name"
+                        [attr.data-testid]="'cli-matrix-tiers-' + row.id"
+                      >
+                        Tiers
+                      </button>
+                    </span>
+                    <span class="inst-inline-action">
+                      <button
+                        type="button"
+                        ptahButton
+                        [busy]="testing()"
+                        (click)="testRequested.emit(row.id)"
+                        [attr.aria-label]="'Test ' + row.name"
+                        [attr.data-testid]="'cli-matrix-test-' + row.id"
+                      >
+                        {{ testingId() === row.id ? 'Testing…' : 'Test' }}
+                      </button>
+                    </span>
                     <ptah-native-popover
                       [isOpen]="isOpen(row.id, 'more')"
                       placement="bottom-end"
@@ -251,8 +264,8 @@ const LABEL = 'text-xs font-semibold uppercase tracking-wide text-base-content-m
                       <button
                         trigger
                         type="button"
-                        [class]="'btn btn-ghost btn-sm btn-square ' + focusRing"
-                        [attr.aria-label]="'More actions for ' + row.name"
+                        ptahIconButton
+                        [label]="'More actions for ' + row.name"
                         [attr.aria-expanded]="isOpen(row.id, 'more')"
                         (click)="cellToggled.emit({ rowId: row.id, kind: 'more' })"
                         [attr.data-testid]="'cli-matrix-more-' + row.id"
@@ -468,7 +481,6 @@ export class PtahCliInstancesComponent {
   protected readonly ChevronIcon = ChevronDown;
   protected readonly focusRing = CLI_MATRIX_FOCUS;
   protected readonly cell = CELL;
-  protected readonly action = `btn btn-outline btn-sm px-2 text-xs font-medium text-base-content ${CLI_MATRIX_FOCUS}`;
   protected readonly menuItem = MENU_ITEM;
   protected readonly label = LABEL;
   protected readonly dot = CLI_MATRIX_DOT;
