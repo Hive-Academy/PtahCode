@@ -14,12 +14,13 @@ import {
 } from 'lucide-angular';
 
 import type { MemoryWire } from '@ptah-extension/shared';
+import { PtahIconButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-memory-entry-list',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, LucideAngularModule],
+  imports: [PtahIconButtonDirective, CommonModule, LucideAngularModule],
   template: `
     <section
       aria-label="Memory entries"
@@ -103,9 +104,11 @@ import type { MemoryWire } from '@ptah-extension/shared';
                   <button
                     type="button"
                     data-testid="memory-entry-unpin"
-                    class="btn btn-ghost btn-xs btn-square text-base-content-muted"
+                    ptahIconButton
+                    size="xs"
+                    class="text-base-content-muted"
                     (click)="unpin.emit(entry.id)"
-                    [attr.aria-label]="'Unpin entry ' + entry.id"
+                    [label]="'Unpin entry ' + entry.id"
                   >
                     <lucide-angular
                       [img]="PinOffIcon"
@@ -117,9 +120,11 @@ import type { MemoryWire } from '@ptah-extension/shared';
                   <button
                     type="button"
                     data-testid="memory-entry-pin"
-                    class="btn btn-ghost btn-xs btn-square text-base-content-muted"
+                    ptahIconButton
+                    size="xs"
+                    class="text-base-content-muted"
                     (click)="pin.emit(entry.id)"
-                    [attr.aria-label]="'Pin entry ' + entry.id"
+                    [label]="'Pin entry ' + entry.id"
                   >
                     <lucide-angular
                       [img]="PinIcon"
@@ -131,9 +136,11 @@ import type { MemoryWire } from '@ptah-extension/shared';
                 <button
                   type="button"
                   data-testid="memory-entry-forget"
-                  class="btn btn-ghost btn-xs btn-square text-base-content-muted hover:text-error"
+                  ptahIconButton
+                  size="xs"
+                  class="text-base-content-muted hover:text-error"
                   (click)="forget.emit(entry.id)"
-                  [attr.aria-label]="'Forget entry ' + entry.id"
+                  [label]="'Forget entry ' + entry.id"
                 >
                   <lucide-angular
                     [img]="Trash2Icon"

@@ -17,6 +17,7 @@ import {
   HarnessChatLauncherService,
 } from '../launcher/harness-chat-launcher.service';
 import { WorkspaceHeaderComponent } from '../shell/workspace-header.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-team-builder-start-page',
@@ -26,6 +27,7 @@ import { WorkspaceHeaderComponent } from '../shell/workspace-header.component';
     AttachmentTrayComponent,
     WorkspaceHeaderComponent,
     LucideAngularModule,
+    PtahButtonDirective,
   ],
   providers: [ComposerAttachmentsService],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -122,12 +124,14 @@ import { WorkspaceHeaderComponent } from '../shell/workspace-header.component';
           <p role="alert" class="text-sm text-state-err">{{ error }}</p>
         }
         <div class="flex flex-wrap items-center justify-between gap-2">
-          <button type="button" class="btn btn-ghost" (click)="back()">
+          <button ptahButton variant="ghost" type="button" (click)="back()">
             Back
           </button>
           <button
+            ptahButton
+            variant="primary"
             type="submit"
-            class="btn btn-primary grow sm:grow-0"
+            class="grow sm:grow-0"
             [disabled]="starting() || attachments.pendingReads() > 0"
           >
             {{ starting() ? 'Starting…' : 'Start team builder' }}

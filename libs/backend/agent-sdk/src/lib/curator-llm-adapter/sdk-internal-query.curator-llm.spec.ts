@@ -324,12 +324,12 @@ describe('SdkInternalQueryCuratorLlm — query cwd', () => {
     const adapter = new SdkInternalQueryCuratorLlm(
       makeLogger(),
       internalQuery,
-      makeWorkspace('', '/home/abdo/active-project'),
+      makeWorkspace('', '/home/dev/active-project'),
     );
     await adapter.extract(EXTRACT_TRANSCRIPT, undefined, {
-      workspaceRoot: '/home/abdo/project',
+      workspaceRoot: '/home/dev/project',
     });
-    expect(capture.cwd).toBe('/home/abdo/project');
+    expect(capture.cwd).toBe('/home/dev/project');
     expect(capture.cwd).not.toBe(process.cwd());
   });
 
@@ -342,7 +342,7 @@ describe('SdkInternalQueryCuratorLlm — query cwd', () => {
     const adapter = new SdkInternalQueryCuratorLlm(
       makeLogger(),
       internalQuery,
-      makeWorkspace('', '/home/abdo/active-project'),
+      makeWorkspace('', '/home/dev/active-project'),
     );
     await adapter.extract(EXTRACT_TRANSCRIPT);
     expect(capture.cwd).toBe(os.homedir());

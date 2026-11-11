@@ -59,7 +59,7 @@
 ## Verification
 
 - Command: `npm run verify -- -t test -p @ptah-extension/canvas -- --testPathPatterns=canvas-lane-tabs` (foreground; tailed Nx output and inspected its full task log).
-- Result: **failed**: 1 suite failed; **49 passed, 1 failed, 50 total**. Failure is the production regression above. Final Nx task log: `C:\Users\abdal\.nx\8b7110c7390b9603\cache\terminalOutputs\12047438549753439835`.
+- Result: **failed**: 1 suite failed; **49 passed, 1 failed, 50 total**. Failure is the production regression above. Final Nx task log: `C:\Users\dev\.nx\8b7110c7390b9603\cache\terminalOutputs\12047438549753439835`.
 - Scoped `ptah_get_diagnostics` after the test edits reported no errors in the changed spec. It reported 10 errors in sibling files outside this lane?s edit scope.
 - No skill-loading tool or available-skills catalogue was exposed in this lane, so no skill was loaded.
 

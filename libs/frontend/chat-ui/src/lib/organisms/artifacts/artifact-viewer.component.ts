@@ -27,6 +27,7 @@ import {
   ArtifactPageToHostMessageSchema,
   type ArtifactRecord,
 } from '@ptah-extension/shared/mcp-apps-contracts';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import { ArtifactThemeBridgeService } from './artifact-theme-bridge.service';
 
 /**
@@ -107,7 +108,7 @@ export function clampArtifactHeight(px: number): number {
 @Component({
   selector: 'ptah-artifact-viewer',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective],
   providers: [ArtifactThemeBridgeService],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
@@ -122,7 +123,7 @@ export function clampArtifactHeight(px: number): number {
         data-testid="artifact-viewer-error"
       >
         The artifact "{{ artifact().title }}" could not be displayed.
-        @if (!srcInvalid()) { <button type="button" class="btn btn-ghost btn-xs" (click)="retry()">Retry</button> }
+        @if (!srcInvalid()) { <button type="button" ptahButton variant="ghost" size="xs" (click)="retry()">Retry</button> }
       </p>
     } @else {
       <div
@@ -150,7 +151,9 @@ export function clampArtifactHeight(px: number): number {
           </span>
           <button
             type="button"
-            class="btn btn-ghost btn-xs gap-1"
+            ptahButton
+            variant="ghost"
+            size="xs"
             (click)="toggleFullscreen()"
             [attr.aria-pressed]="fullscreenActive()"
             data-testid="artifact-viewer-fullscreen-toggle"

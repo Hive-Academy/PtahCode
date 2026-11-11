@@ -26,14 +26,17 @@ describe('review prompts', () => {
 
   it('uses one triage lane for the walkthrough and strict parser-compatible JSON', () => {
     const prompt = buildTriagePrompt(input);
-    expect(prompt).toContain('out/walkthrough.md');
+    expect(prompt).toContain('out/triage.json');
+    expect(prompt).not.toContain('out/walkthrough.md');
+    expect(prompt).toContain('"schemaVersion": 1');
+    expect(prompt).toContain('Do not write markdown');
     expect(prompt).toContain('findings: []');
     expect(prompt).toContain('out/lane-output.json');
     expect(prompt).toContain('src/ is read-only');
     expect(prompt).toContain('Write files only under out/');
     expect(prompt).toContain('schemaVersion: 1');
-    expect(prompt).toContain('Observed behavior');
-    expect(prompt).toContain('Inferred risks');
+    expect(prompt).toContain('apiChanges');
+    expect(prompt).toContain('changeType');
   });
 
   it.each([

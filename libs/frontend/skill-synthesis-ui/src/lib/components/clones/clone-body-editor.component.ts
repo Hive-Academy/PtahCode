@@ -41,6 +41,7 @@ import {
 import { FormsModule } from '@angular/forms';
 
 import { cloneBodyDraftRefusal } from './clone-action-gating';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 let nextEditorId = 0;
 
@@ -68,7 +69,7 @@ export const BODY_CHANGED_UNDERNEATH =
   selector: 'ptah-clone-body-editor',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule],
+  imports: [PtahButtonDirective, FormsModule],
   template: `
     <div class="space-y-2" data-testid="clone-body-editor">
       <label
@@ -106,7 +107,9 @@ export const BODY_CHANGED_UNDERNEATH =
       <div class="flex items-center gap-2">
         <button
           type="button"
-          class="btn btn-primary btn-xs"
+          ptahButton
+          variant="primary"
+          size="xs"
           data-testid="clone-body-editor-save"
           [attr.aria-describedby]="saveDescribedBy()"
           [disabled]="!canSave()"
@@ -116,7 +119,9 @@ export const BODY_CHANGED_UNDERNEATH =
         </button>
         <button
           type="button"
-          class="btn btn-ghost btn-xs"
+          ptahButton
+          variant="ghost"
+          size="xs"
           data-testid="clone-body-editor-cancel"
           [disabled]="saving()"
           (click)="cancelled.emit()"

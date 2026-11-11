@@ -52,6 +52,10 @@ import type {
   TaskAgentTarget,
   TaskStartRequest,
 } from '../../types/task-agent.types';
+import {
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 
 /** One status group, resolved for rendering. */
 interface TaskListGroup {
@@ -152,7 +156,7 @@ const MAX_VISIBLE_LABELS = 3;
 @Component({
   selector: 'ptah-task-list',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahButtonDirective, PtahIconButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     class: 'block h-full min-h-0',
@@ -209,10 +213,10 @@ const MAX_VISIBLE_LABELS = 3;
                  affordance that lies about where it puts things. -->
             <button
               type="button"
-              class="btn btn-ghost btn-xs btn-square"
+              ptahIconButton
+              [label]="'New task in ' + group.label"
+              size="xs"
               [attr.data-testid]="'task-list-add-' + group.status"
-              [attr.aria-label]="'New task in ' + group.label"
-              [title]="'New task in ' + group.label"
               (click)="createInStatus.emit(group.status)"
             >
               <lucide-angular [img]="PlusIcon" class="h-3 w-3" />
@@ -510,7 +514,10 @@ const MAX_VISIBLE_LABELS = 3;
                              on the default theme. -->
                         <button
                           type="button"
-                          class="btn btn-ghost btn-xs gap-1 px-1.5 hover:bg-primary hover:text-primary-content"
+                          ptahButton
+                          variant="ghost"
+                          size="xs"
+                          class="hover:bg-primary hover:text-primary-content"
                           [attr.tabindex]="rovingTabIndex(task.id)"
                           [attr.aria-label]="'Start task ' + task.id"
                           [title]="'Start task ' + task.id"
@@ -532,10 +539,10 @@ const MAX_VISIBLE_LABELS = 3;
                       <div class="dropdown dropdown-end">
                         <button
                           type="button"
-                          class="btn btn-ghost btn-xs btn-square"
+                          ptahIconButton
+                          label="Task actions"
+                          size="xs"
                           [attr.tabindex]="rovingTabIndex(task.id)"
-                          aria-label="Task actions"
-                          title="Task actions"
                           (click)="$event.stopPropagation()"
                         >
                           <lucide-angular
@@ -704,7 +711,9 @@ const MAX_VISIBLE_LABELS = 3;
                   </span>
                   <button
                     type="button"
-                    class="btn btn-ghost btn-xs"
+                    ptahButton
+                    variant="ghost"
+                    size="xs"
                     [attr.data-testid]="'task-list-more-btn-' + group.status"
                     [attr.aria-label]="
                       'Show ' +
@@ -719,7 +728,9 @@ const MAX_VISIBLE_LABELS = 3;
                   </button>
                   <button
                     type="button"
-                    class="btn btn-ghost btn-xs"
+                    ptahButton
+                    variant="ghost"
+                    size="xs"
                     [attr.data-testid]="'task-list-all-btn-' + group.status"
                     [attr.aria-label]="
                       'Show all ' + group.matched + ' ' + group.label + ' tasks'

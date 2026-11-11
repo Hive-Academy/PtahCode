@@ -6,6 +6,7 @@ import {
   output,
 } from '@angular/core';
 import { LucideAngularModule, X } from 'lucide-angular';
+import { PtahIconButtonDirective } from '@ptah-extension/ui';
 import type { ReplaySummary } from './session-sync';
 
 /**
@@ -16,7 +17,7 @@ import type { ReplaySummary } from './session-sync';
 @Component({
   selector: 'ptah-reconnect-banner',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahIconButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -32,8 +33,9 @@ import type { ReplaySummary } from './session-sync';
       </span>
       <button
         type="button"
-        class="btn btn-ghost btn-xs btn-square focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-        aria-label="Close reconnect notice"
+        ptahIconButton
+        size="xs"
+        label="Close reconnect notice"
         data-testid="reconnect-banner-close"
         (click)="dismissed.emit()"
       >

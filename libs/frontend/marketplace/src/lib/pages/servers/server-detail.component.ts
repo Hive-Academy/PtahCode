@@ -447,7 +447,10 @@ export class ServerDetailComponent {
   }
 
   protected selectTab(id: string): void {
-    if ((id === 'overview' || id === 'targets' || id === 'config') && id !== this.activeTab()) {
+    if (
+      (id === 'overview' || id === 'targets' || id === 'config') &&
+      id !== this.activeTab()
+    ) {
       this.hasSwitchedTab.set(true);
       this.activeTab.set(id);
     }

@@ -1,7 +1,8 @@
 /**
  * CliFileSystemProvider — IFileSystemProvider implementation using Node.js fs/promises.
  *
- * Uses fast-glob for findFiles() and chokidar for createFileWatcher().
+ * Uses fast-glob for findFiles(). createFileWatcher() uses one recursive fs.watch
+ * on win32/darwin and chokidar elsewhere (see platform-core recursive-file-watcher).
  * No Electron imports required — pure Node.js implementation.
  *
  * Copied from ElectronFileSystemProvider (identical logic, CLI class prefix).
@@ -15,6 +16,7 @@ import type {
   FileStat,
   DirectoryEntry,
   IFileWatcher,
+  FileWatcherHostOptions,
 } from '@ptah-extension/platform-core';
 import {
   FileType,
@@ -22,12 +24,14 @@ import {
   collectBounded,
   createEvent,
   createFailureTally,
-  planGlobWatch,
+  createGlobFileWatcher,
   searchRootError,
   walkGlobMatches,
 } from '@ptah-extension/platform-core';
 
 export class CliFileSystemProvider implements IFileSystemProvider {
+  constructor(private readonly watchOptions: FileWatcherHostOptions = {}) {}
+
   async readFile(filePath: string): Promise<string> {
     return fs.readFile(filePath, 'utf-8');
   }
@@ -226,58 +230,74 @@ export class CliFileSystemProvider implements IFileSystemProvider {
     pattern: string,
     options?: { exclude?: string[]; cwd?: string },
   ): IFileWatcher {
-    const [onDidChange, fireChange] = createEvent<string>();
-    const [onDidCreate, fireCreate] = createEvent<string>();
-    const [onDidDelete, fireDelete] = createEvent<string>();
+    return createGlobFileWatcher(
+      pattern,
+      { ...this.watchOptions, ...options },
+      (plan) => {
+        const [onDidChange, fireChange] = createEvent<string>();
+        const [onDidCreate, fireCreate] = createEvent<string>();
+        const [onDidDelete, fireDelete] = createEvent<string>();
 
-    let underlying: { close(): Promise<void> | void } | undefined;
-    let disposed = false;
-    const plan = planGlobWatch(pattern, options);
-    // chokidar echoes back the absolute root it was given, so paths arrive
-    // absolute — the same shape the VS Code adapter emits (`uri.fsPath`).
-    const emit =
-      (fire: (p: string) => void) =>
-      (filePath: string): void => {
-        const absolute = path.resolve(filePath);
-        if (plan.matches(absolute)) fire(absolute);
-      };
-    void (async () => {
-      const mod = (await import('chokidar')) as {
-        watch: (
-          target: string,
-          options: {
-            ignoreInitial: boolean;
-            persistent: boolean;
-            ignored?: (candidate: string) => boolean;
+        let underlying: { close(): Promise<void> | void } | undefined;
+        let disposed = false;
+        // chokidar echoes back the absolute root it was given, so paths arrive
+        // absolute — the same shape the VS Code adapter emits (`uri.fsPath`).
+        const emit =
+          (fire: (p: string) => void) =>
+          (filePath: string): void => {
+            if (disposed) return;
+            const absolute = path.resolve(filePath);
+            if (plan.matches(absolute)) fire(absolute);
+          };
+        void (async () => {
+          try {
+            const mod = (await import('chokidar')) as {
+              watch: (
+                target: string,
+                options: {
+                  ignoreInitial: boolean;
+                  persistent: boolean;
+                  ignored?: (candidate: string) => boolean;
+                },
+              ) => {
+                on(event: string, handler: (filePath: string) => void): unknown;
+                close(): Promise<void> | void;
+              };
+            };
+            if (disposed) return;
+            const watcher = mod.watch(plan.watchRoot, {
+              ignoreInitial: true,
+              persistent: true,
+              // A FUNCTION, not globs: chokidar v4+ does not glob here either.
+              ignored: (candidate: string) => plan.ignores(candidate),
+            });
+            watcher.on('change', emit(fireChange));
+            watcher.on('add', emit(fireCreate));
+            watcher.on('unlink', emit(fireDelete));
+            underlying = watcher;
+          } catch (error: unknown) {
+            // degradation-audit: reported - fallback load failure is logged at warn; returns a safe no-op watcher.
+            this.watchOptions.getLogger?.()?.warn(
+              '[file-watcher] chokidar unavailable, no-op watcher',
+              {
+                root: plan.watchRoot,
+                error: error instanceof Error ? error.message : String(error),
+              },
+            );
+          }
+        })();
+
+        return {
+          onDidChange,
+          onDidCreate,
+          onDidDelete,
+          dispose() {
+            if (disposed) return;
+            disposed = true;
+            if (underlying) void underlying.close();
           },
-        ) => {
-          on(event: string, handler: (filePath: string) => void): unknown;
-          close(): Promise<void> | void;
         };
-      };
-      if (disposed) return;
-      const watcher = mod.watch(plan.watchRoot, {
-        ignoreInitial: true,
-        persistent: true,
-        // A FUNCTION, not globs: chokidar v4+ does not glob here either, and a
-        // function is consulted for directories, so it prunes `node_modules`
-        // rather than walking it and discarding the events.
-        ignored: (candidate: string) => plan.ignores(candidate),
-      });
-      watcher.on('change', emit(fireChange));
-      watcher.on('add', emit(fireCreate));
-      watcher.on('unlink', emit(fireDelete));
-      underlying = watcher;
-    })();
-
-    return {
-      onDidChange,
-      onDidCreate,
-      onDidDelete,
-      dispose() {
-        disposed = true;
-        if (underlying) void underlying.close();
       },
-    };
+    );
   }
 }

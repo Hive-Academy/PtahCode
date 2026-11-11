@@ -338,7 +338,8 @@ interface ConversionError {
           </p>
         </div>
         <a
-          class="btn btn-primary btn-sm gap-1"
+          ptahButton
+          variant="primary"
           [routerLink]="connectorsLink"
           data-testid="servers-add"
         >
@@ -426,7 +427,8 @@ interface ConversionError {
                           @if (isBusy(line.group)) {
                             <button
                               type="button"
-                              class="btn btn-outline btn-xs"
+                              ptahButton
+                              size="xs"
                               disabled
                               data-testid="server-make-global"
                             >
@@ -439,7 +441,8 @@ interface ConversionError {
                           } @else {
                             <button
                               type="button"
-                              class="btn btn-outline btn-xs"
+                              ptahButton
+                              size="xs"
                               data-testid="server-make-global"
                               [attr.data-make-global]="line.group.key"
                               [attr.aria-label]="
@@ -513,7 +516,9 @@ interface ConversionError {
                         <div class="flex gap-1.5">
                           <button
                             type="button"
-                            ptahButton variant="primary" size="sm"
+                            ptahButton
+                            variant="primary"
+                            size="sm"
                             data-testid="server-convert-confirm"
                             (click)="confirmMakeGlobal(line.group)"
                           >
@@ -521,7 +526,7 @@ interface ConversionError {
                           </button>
                           <button
                             type="button"
-                            class="btn btn-outline btn-sm"
+                            ptahButton
                             data-testid="server-convert-cancel"
                             (click)="cancelMakeGlobal(line.group)"
                           >
@@ -547,7 +552,8 @@ interface ConversionError {
                         @if (failure.retryTargets; as targets) {
                           <button
                             type="button"
-                            class="btn btn-outline btn-xs"
+                            ptahButton
+                            size="xs"
                             data-testid="server-convert-retry"
                             [disabled]="isBusy(line.group)"
                             (click)="runMakeGlobal(line.group, targets)"
@@ -606,7 +612,8 @@ interface ConversionError {
                   </p>
                   <button
                     type="button"
-                    class="btn btn-outline btn-xs"
+                    ptahButton
+                    size="xs"
                     data-testid="server-capabilities-retry"
                     (click)="reloadCapabilities()"
                   >

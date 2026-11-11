@@ -9,7 +9,7 @@ import {
   input,
   output,
 } from '@angular/core';
-import { NativeDrawerComponent } from '@ptah-extension/ui';
+import { NativeDrawerComponent, PtahButtonDirective } from '@ptah-extension/ui';
 import type {
   CloneSummary,
   SkillSynthesisPreviewEnhancementResult,
@@ -21,7 +21,7 @@ import { LazyDiffViewComponent } from './lazy-diff-view.component';
   selector: 'ptah-enhance-preview-drawer',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NativeDrawerComponent, LazyDiffViewComponent],
+  imports: [PtahButtonDirective, NativeDrawerComponent, LazyDiffViewComponent],
   template: `
     <ptah-native-drawer
       [isOpen]="clone() !== null"
@@ -65,7 +65,11 @@ import { LazyDiffViewComponent } from './lazy-diff-view.component';
             </div>
           } @else if (preview(); as p) {
             @if (error(); as saveMessage) {
-              <div role="alert" class="alert alert-error py-2 text-sm" data-testid="preview-save-error">
+              <div
+                role="alert"
+                class="alert alert-error py-2 text-sm"
+                data-testid="preview-save-error"
+              >
                 {{ saveMessage }}
               </div>
             }
@@ -153,7 +157,8 @@ import { LazyDiffViewComponent } from './lazy-diff-view.component';
           <span class="flex items-center gap-2">
             <button
               type="button"
-              class="btn btn-ghost btn-sm"
+              ptahButton
+              variant="ghost"
               data-testid="preview-discard-btn"
               [disabled]="applying()"
               (click)="discard.emit()"
@@ -162,7 +167,8 @@ import { LazyDiffViewComponent } from './lazy-diff-view.component';
             </button>
             <button
               type="button"
-              class="btn btn-primary btn-sm"
+              ptahButton
+              variant="primary"
               data-testid="preview-save-btn"
               [disabled]="!canSave() || applying()"
               [title]="saveTitle()"
@@ -190,8 +196,8 @@ export class EnhancePreviewDrawerComponent {
   /** Close without writing anything. */
   public readonly discard = output<void>();
 
-  protected readonly canSave = computed(() =>
-    this.preview()?.proposed === true && this.preview()?.draft != null,
+  protected readonly canSave = computed(
+    () => this.preview()?.proposed === true && this.preview()?.draft != null,
   );
 
   protected readonly drawerLabel = computed(() => {

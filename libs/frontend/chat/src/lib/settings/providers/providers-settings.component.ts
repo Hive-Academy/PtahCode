@@ -64,6 +64,7 @@ import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.
 import { commitToast } from '../feedback/settings-commit-toast';
 // Rendered only inside `@defer`, so it stays out of the eager settings bundle.
 import { KimiCodeLoginProgressComponent } from './connection-drawer/kimi-code-login-progress.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /**
  * Deep-link sections this page owns. Background roles and CLI agents are on the same tab, in
@@ -102,6 +103,7 @@ const CONTROL =
     MainAgentReassignPopoverComponent,
     ProviderCatalogModalComponent,
     KimiCodeLoginProgressComponent,
+    PtahButtonDirective,
   ],
   template: `
     <div
@@ -266,7 +268,8 @@ const CONTROL =
                 />
                 <button
                   type="button"
-                  [class]="'btn btn-primary btn-sm gap-1.5 ' + focusRing"
+                  ptahButton
+                  variant="primary"
                   (click)="openCatalog()"
                   data-testid="connect-provider"
                   data-focus="more-providers"
@@ -284,7 +287,7 @@ const CONTROL =
               </div>
             </div>
             @if (requestedDrawer()?.tab === 'credentials' && state.connections().status === 'ready' && !codexConnectionPresent()) {
-              <button type="button" class="btn btn-primary btn-sm mt-3" data-testid="connect-codex" (click)="connectMissingCodex()">Connect Codex</button>
+              <button type="button" ptahButton variant="primary" class="mt-3" data-testid="connect-codex" (click)="connectMissingCodex()">Connect Codex</button>
             }
             <!-- Catalog caption, directly under the header: one passive line, the names truncate (full list in the
                  title). "Connect provider" above is the one way into the catalog. -->
@@ -332,10 +335,8 @@ const CONTROL =
                 No connections match “{{ filter() }}”.
                 <button
                   type="button"
-                  [class]="
-                    'btn btn-ghost btn-sm px-2 text-base-content underline ' +
-                    focusRing
-                  "
+                  ptahButton
+                  variant="ghost"
                   (click)="filter.set('')"
                 >
                   Clear filter
@@ -415,7 +416,7 @@ const CONTROL =
             @if (login.status !== 'failed') {
               <button
                 type="button"
-                class="btn btn-outline btn-sm"
+                ptahButton
                 (click)="externalAction(kimiCodeId, 'sign-in-cancel')"
                 data-testid="providers-kimi-login-cancel"
               >

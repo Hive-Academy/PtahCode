@@ -313,7 +313,7 @@ describe('AgentMonitorPanelComponent — overlay focus', () => {
   it('moves focus to the close control when the overlay opens', () => {
     const fixture = createPanel(true);
     const closeButton = fixture.nativeElement.querySelector(
-      'button[title="Close panel"]',
+      'button[aria-label="Close panel"]',
     ) as HTMLButtonElement;
 
     fixture.componentRef.setInput('embeddedOpen', true);
@@ -325,7 +325,7 @@ describe('AgentMonitorPanelComponent — overlay focus', () => {
   it('does not move focus when the panel opens in wide mode', () => {
     const fixture = createPanel(false);
     const closeButton = fixture.nativeElement.querySelector(
-      'button[title="Close panel"]',
+      'button[aria-label="Close panel"]',
     ) as HTMLButtonElement;
     const focusSpy = jest.spyOn(closeButton, 'focus');
 

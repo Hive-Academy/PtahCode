@@ -13,6 +13,13 @@ export type {
   SessionChildCompletionSubject,
   SessionChildLastCompletion,
   SessionChildLookupRefusal,
+  SessionChildStopQuery,
+  SessionChildStopHandedOffRefusal,
+  SessionChildStopStartingRefusal,
+  SessionChildStopResult,
+  SessionChildClearQuery,
+  SessionChildClearResult,
+  SessionChildClearSkipReason,
   SessionChildPendingPermission,
   SessionChildQuery,
   SessionChildReadResult,
@@ -114,3 +121,7 @@ export {
   renderSuccessorTask,
   successionEndReason,
 } from './session-child-succession';
+export {
+  childOutcomeOf,
+  type SessionChildOutcomeInput,
+} from './session-child-outcome';

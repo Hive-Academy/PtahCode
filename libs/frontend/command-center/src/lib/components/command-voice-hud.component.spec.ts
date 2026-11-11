@@ -105,7 +105,7 @@ describe('CommandVoiceHudComponent', () => {
       (button: HTMLButtonElement) =>
         button.textContent?.includes('Open Voice settings'),
     ) as HTMLButtonElement;
-    expect(recovery.className).toContain('text-base-content');
+    expect(recovery.className).toContain('btn-ghost');
     recovery.click();
     expect(settings).toHaveBeenCalledTimes(1);
   });
@@ -153,8 +153,8 @@ describe('CommandVoiceHudComponent', () => {
     expect(start.disabled).toBe(false);
     expect(muteButton.disabled).toBe(true);
     expect(stop.disabled).toBe(false);
-    expect(muteButton.className).toContain('btn-outline');
-    expect(stop.className).toContain('btn-outline');
+    expect(muteButton.className).toContain('btn-secondary');
+    expect(stop.className).toContain('btn-secondary');
     muteButton.click();
     expect(mute).not.toHaveBeenCalled();
   });

@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, effect, input, output, signal, untracked } from '@angular/core';
 import type { ProvidersConnection, ProvidersConnectionDraft } from '@ptah-extension/core';
 import type { ConnectionCheckRecord, KimiCodeLoginState } from '@ptah-extension/shared';
-import { NativeDrawerComponent, NativeTabGroupComponent } from '@ptah-extension/ui';
+import { NativeDrawerComponent, NativeTabGroupComponent, PtahButtonDirective } from '@ptah-extension/ui';
 import type { UsedBy } from './connection-usage';
 import {
   connectionDrawerTabs, connectionKind, type ConnectionDrawerTabId, type ConnectionKind,
@@ -61,7 +61,8 @@ const CREDENTIALS_COMPLETE: ReadonlySet<ConnectionKind> = new Set(['api-key', 'o
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [NativeDrawerComponent, NativeTabGroupComponent, OverviewTabComponent, CredentialsTabComponent,
-    ModelsTiersTabComponent, AdvancedTabComponent, AccountsTabComponent],
+    ModelsTiersTabComponent, AdvancedTabComponent, AccountsTabComponent,
+    PtahButtonDirective],
   template: `
     <ptah-native-drawer [isOpen]="connection() !== null" widthClass="w-full max-w-lg"
       [ariaLabel]="(connection()?.name ?? 'Connection') + ' connection details'" (closed)="closed.emit()">
@@ -133,9 +134,9 @@ const CREDENTIALS_COMPLETE: ReadonlySet<ConnectionKind> = new Set(['api-key', 'o
         <div drawer-footer class="flex items-center justify-between gap-2 border-t border-base-300 px-4 py-3">
           <span class="text-xs text-base-content-muted">Esc to close</span>
           <div class="flex items-center gap-2">
-            <button type="button" class="btn btn-ghost btn-sm" (click)="closed.emit()" data-testid="connection-drawer-close">Close</button>
+            <button type="button" ptahButton variant="ghost" (click)="closed.emit()" data-testid="connection-drawer-close">Close</button>
             @if (setupFallback()) {
-              <button type="button" class="btn btn-primary btn-sm" [disabled]="loading() || !canEdit()"
+              <button type="button" ptahButton variant="primary" [disabled]="loading() || !canEdit()"
                 (click)="setupRequested.emit(current.id)" data-testid="connection-edit-in-setup">Edit in setup</button>
             }
           </div>

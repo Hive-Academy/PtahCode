@@ -35,7 +35,7 @@
       }
       <button
         type="button"
-        class="btn btn-outline btn-sm"
+        ptahButton
         data-testid="server-detail-retry"
         (click)="retry()"
       >
@@ -209,7 +209,7 @@
                   <p class="min-w-0 flex-1">{{ capabilities.loadError() }}.</p>
                   <button
                     type="button"
-                    class="btn btn-outline btn-xs"
+                    ptahButton size="xs"
                     data-testid="server-detail-capability-retry"
                     (click)="reloadCapabilities()"
                   >
@@ -588,10 +588,10 @@
             @if (canReconnect()) {
               <button
                 type="button"
-                class="btn btn-primary btn-sm gap-1"
+                ptahButton variant="primary"
                 data-testid="server-detail-reconnect"
                 [disabled]="reconnecting()"
-                [attr.aria-busy]="reconnecting()"
+                [busy]="reconnecting()"
                 (click)="reconnect()"
               >
                 @if (reconnecting()) {
@@ -612,10 +612,10 @@
             @if (removalLabel(); as label) {
               <button
                 type="button"
-                class="btn btn-outline btn-error btn-sm gap-1"
+                ptahButton variant="danger"
                 data-testid="server-detail-remove"
                 [disabled]="removing() || confirming()"
-                [attr.aria-busy]="removing()"
+                [busy]="removing()"
                 [attr.aria-label]="removalAriaLabel()"
                 (click)="requestRemoval()"
               >

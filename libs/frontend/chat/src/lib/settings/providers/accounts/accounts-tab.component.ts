@@ -29,7 +29,7 @@ import {
   type ProviderAccountsSnapshot,
 } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../../feedback/settings-save-feedback.service';
-import { SettingsBusyDisabledDirective } from '../../feedback/busy-disabled.directive';
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 import {
   ACCOUNT_COPY,
   AMBIENT_ROW_KEY,
@@ -93,7 +93,8 @@ type FocusFallback = 'detail-heading' | 'accounts-heading';
   standalone: true,
   imports: [
     LucideAngularModule,
-    SettingsBusyDisabledDirective,
+    PtahButtonDirective,
+    PtahIconButtonDirective,
     AmbientAccountRowComponent,
     AddAccountFormComponent,
     AccountDetailViewComponent,
@@ -146,8 +147,9 @@ type FocusFallback = 'detail-heading' | 'accounts-heading';
                 </span>
                 <button
                   type="button"
-                  [class]="'btn btn-ghost btn-sm min-h-8 ' + focusRing"
-                  [ptahBusyDisabled]="view().status === 'loading'"
+                  ptahButton
+                  variant="ghost"
+                  [busy]="view().status === 'loading'"
                   (click)="retry()"
                   data-testid="accounts-tab-stale-retry"
                 >Try again</button>
@@ -222,8 +224,9 @@ type FocusFallback = 'detail-heading' | 'accounts-heading';
                       @if (row.canSignIn) {
                         <button
                           type="button"
-                          [class]="'btn btn-primary btn-sm min-h-8 ' + focusRing"
-                          [ptahBusyDisabled]="row.busy"
+                          ptahButton
+                          variant="primary"
+                          [busy]="row.busy"
                           (click)="rowSignIn(row.account.profileId)"
                           data-testid="accounts-tab-row-sign-in"
                         >Sign in</button>
@@ -231,9 +234,8 @@ type FocusFallback = 'detail-heading' | 'accounts-heading';
                       <button
                         #manage
                         type="button"
-                        [class]="'btn btn-ghost btn-sm btn-square h-8 min-h-8 w-8 ' + focusRing"
-                        [attr.aria-label]="'Manage ' + row.account.label"
-                        title="Manage"
+                        ptahIconButton
+                        [label]="'Manage ' + row.account.label"
                         (click)="openDetail(row.account.profileId)"
                         data-testid="accounts-tab-row-manage"
                       >
@@ -251,7 +253,7 @@ type FocusFallback = 'detail-heading' | 'accounts-heading';
               data-testid="accounts-tab-error"
             >
               <span class="min-w-0 flex-1 break-words">Could not load accounts</span>
-              <button type="button" [class]="'btn btn-outline btn-sm min-h-8 ' + focusRing" (click)="retry()">
+              <button type="button" ptahButton (click)="retry()">
                 Try again
               </button>
             </div>

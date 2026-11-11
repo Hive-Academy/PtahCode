@@ -23,7 +23,10 @@ import {
   parseOnboardingReadyOpen,
   type OnboardingReadyArea,
 } from '@ptah-extension/core';
-import { PROVIDER_MODELS_LOADER } from '@ptah-extension/ui';
+import {
+  PROVIDER_MODELS_LOADER,
+  PtahButtonDirective,
+} from '@ptah-extension/ui';
 import { LucideAngularModule, PlugZap, RotateCw } from 'lucide-angular';
 import { OnboardingFlagService } from '../first-run/onboarding-flag.service';
 import { ConnectionReadinessBannerComponent } from './connection-readiness-banner.component';
@@ -75,6 +78,7 @@ const AREA_TABS: readonly AreaTab[] = [
     SettingsToastComponent,
     ConnectionReadinessBannerComponent,
     ReadyStripComponent,
+    PtahButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block', 'data-testid': 'ready-settings-step' },
@@ -108,8 +112,10 @@ const AREA_TABS: readonly AreaTab[] = [
         </h1>
       </div>
       <p class="mt-2 max-w-[62ch] text-base-content-muted">
-        Choose what Ptah can use{{ chosen().provider ? ' besides ' + chosen().name : '' }}. This is the same screen as
-        Settings, so you can skip now and come back any time.
+        Choose what Ptah can use{{
+          chosen().provider ? ' besides ' + chosen().name : ''
+        }}. This is the same screen as Settings, so you can skip now and come
+        back any time.
       </p>
 
       <ptah-connection-readiness-banner
@@ -171,8 +177,9 @@ const AREA_TABS: readonly AreaTab[] = [
                   again.
                 </p>
                 <button
+                  ptahButton
+                  variant="primary"
                   type="button"
-                  class="btn btn-sm btn-primary gap-1.5"
                   (click)="reloadWindow()"
                 >
                   <lucide-angular
@@ -209,8 +216,9 @@ const AREA_TABS: readonly AreaTab[] = [
                   again.
                 </p>
                 <button
+                  ptahButton
+                  variant="primary"
                   type="button"
-                  class="btn btn-sm btn-primary gap-1.5"
                   (click)="reloadWindow()"
                 >
                   <lucide-angular
@@ -230,7 +238,8 @@ const AREA_TABS: readonly AreaTab[] = [
         class="mt-5 flex flex-wrap items-center justify-between gap-3 max-[480px]:flex-col max-[480px]:items-stretch"
       >
         <a
-          class="btn btn-ghost min-h-9"
+          ptahButton
+          variant="ghost"
           routerLink="/onboarding/ready"
           data-testid="ready-settings-back"
           >Back</a
@@ -239,16 +248,18 @@ const AREA_TABS: readonly AreaTab[] = [
           class="flex flex-wrap gap-2 max-[480px]:grid max-[480px]:grid-cols-1"
         >
           <button
+            ptahButton
+            variant="ghost"
             type="button"
-            class="btn btn-ghost min-h-9"
             data-testid="ready-settings-skip"
             (click)="leave('skippedAt')"
           >
             Skip for now
           </button>
           <button
+            ptahButton
+            variant="primary"
             type="button"
-            class="btn btn-primary min-h-9"
             data-testid="ready-settings-continue"
             (click)="leave('settingsAt')"
           >

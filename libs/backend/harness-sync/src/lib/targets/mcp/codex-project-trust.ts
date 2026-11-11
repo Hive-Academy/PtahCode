@@ -23,8 +23,8 @@
  * The key is the project path as a TOML quoted key. Separators and a trailing
  * separator are always normalized, since `{ws}` and `{ws}\` name the same
  * directory. Case is folded only where the filesystem is case-insensitive —
- * Codex writes the path LOWERCASED on Windows (`C:\Users\abdal` is stored as
- * `c:\users\abdal`), so Windows must fold or nothing ever matches, while ext4
+ * Codex writes the path LOWERCASED on Windows (`C:\Users\dev` is stored as
+ * `c:\users\dev`), so Windows must fold or nothing ever matches, while ext4
  * must not or trust granted to a sibling directory would be read as this one's.
  * See `defaultCaseInsensitive`.
  *
@@ -79,7 +79,7 @@ export interface CodexTrustOptions extends CodexHomeOptions {
  * and folding would claim trust that was granted to a sibling.
  *
  * Windows must fold, because Codex LOWERCASES what it records
- * (`C:\Users\abdal` is stored as `c:\users\abdal`), so an exact comparison
+ * (`C:\Users\dev` is stored as `c:\users\dev`), so an exact comparison
  * would report every Windows project untrusted. macOS folds because APFS and
  * HFS+ are case-insensitive by default; on a case-sensitive macOS volume — rare,
  * and rarer still with two sibling directories differing only in case — this

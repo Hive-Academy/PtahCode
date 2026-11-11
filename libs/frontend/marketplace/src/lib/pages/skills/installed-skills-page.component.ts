@@ -208,7 +208,10 @@ const ROW_LINK_SELECTOR = '[data-testid="installed-skill-open"]';
                   >
                 }
                 <a
-                  class="btn btn-ghost btn-xs ml-auto"
+                  ptahButton
+                  variant="ghost"
+                  size="xs"
+                  class="ml-auto"
                   [routerLink]="sourceLink(group.browse.source)"
                   [attr.aria-label]="group.browse.label"
                   >Browse</a
@@ -236,7 +239,9 @@ const ROW_LINK_SELECTOR = '[data-testid="installed-skill-open"]';
                   </p>
                   <button
                     type="button"
-                    class="btn btn-ghost btn-xs gap-1"
+                    ptahButton
+                    variant="ghost"
+                    size="xs"
                     data-testid="installed-skills-retry"
                     (click)="retry(group.id)"
                   >
@@ -273,7 +278,9 @@ const ROW_LINK_SELECTOR = '[data-testid="installed-skill-open"]';
                     Nothing installed yet.
                   </p>
                   <a
-                    ptahButton variant="primary" size="xs"
+                    ptahButton
+                    variant="primary"
+                    size="xs"
                     [routerLink]="sourceLink(group.browse.source)"
                     >{{ group.browse.label }}</a
                   >
@@ -374,7 +381,9 @@ const ROW_LINK_SELECTOR = '[data-testid="installed-skill-open"]';
                         @if (scope === 'workspace') {
                           <button
                             type="button"
-                            class="btn btn-outline btn-xs shrink-0"
+                            ptahButton
+                            size="xs"
+                            class="shrink-0"
                             data-testid="installed-skill-make-global"
                             [disabled]="
                               convertingIds().has(row.ref) ||
@@ -403,7 +412,10 @@ const ROW_LINK_SELECTOR = '[data-testid="installed-skill-open"]';
                       }
                       @if (row.action === 'manage') {
                         <a
-                          class="btn btn-ghost btn-xs shrink-0"
+                          ptahButton
+                          variant="ghost"
+                          size="xs"
+                          class="shrink-0"
                           data-testid="installed-skill-manage"
                           [routerLink]="pluginsLink"
                           [attr.aria-label]="'Manage ' + row.name"
@@ -473,7 +485,11 @@ const ROW_LINK_SELECTOR = '[data-testid="installed-skill-open"]';
           [heading]="detailHeading()"
           (closed)="close()"
         >
-          <div ptahMotionRouteStage [motionRouteKey]="detailMotionKey" [motionLeaveClone]="motionLeaveClone">
+          <div
+            ptahMotionRouteStage
+            [motionRouteKey]="detailMotionKey"
+            [motionLeaveClone]="motionLeaveClone"
+          >
             <router-outlet />
           </div>
         </ptah-docked-inspector>
@@ -493,7 +509,11 @@ const ROW_LINK_SELECTOR = '[data-testid="installed-skill-open"]';
           >
             {{ detailHeading() }}
           </h2>
-          <div ptahMotionRouteStage [motionRouteKey]="detailMotionKey" [motionLeaveClone]="motionLeaveClone">
+          <div
+            ptahMotionRouteStage
+            [motionRouteKey]="detailMotionKey"
+            [motionLeaveClone]="motionLeaveClone"
+          >
             <router-outlet />
           </div>
         </ptah-native-drawer>
@@ -506,7 +526,10 @@ export class InstalledSkillsPageComponent {
   private readonly layout = inject(MarketplaceLayout);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
-  protected readonly detailMotionKey = detailParamKey(this.route, SKILL_REF_PARAM);
+  protected readonly detailMotionKey = detailParamKey(
+    this.route,
+    SKILL_REF_PARAM,
+  );
   protected readonly motionLeaveClone = inject(MARKETPLACE_LEAVE_CLONE);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly vscode = inject(VSCodeService);

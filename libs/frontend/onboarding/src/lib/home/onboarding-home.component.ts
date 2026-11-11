@@ -39,6 +39,7 @@ import {
   type OnboardingResumeItem,
 } from './onboarding-resume.store';
 import { ResumeBannerComponent } from './resume-banner.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 const NO_WORKSPACE_REASON = 'Open a folder to use this path.';
 
@@ -68,6 +69,7 @@ interface StatusChip {
     ResumeBannerComponent,
     WorkspaceHeaderComponent,
     AnalysisFoundCardComponent,
+    PtahButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block', 'data-testid': 'onboarding-home' },
@@ -136,8 +138,8 @@ interface StatusChip {
         >
           <span>No folder is open. Open one to start a path.</span>
           <button
+            ptahButton
             type="button"
-            class="btn btn-sm btn-outline"
             data-testid="onboarding-open-folder"
             (click)="openFolder()"
           >
@@ -218,8 +220,10 @@ interface StatusChip {
             >
               <span class="text-base-content-muted">Status unavailable</span>
               <button
+                ptahButton
+                variant="ghost"
+                size="xs"
                 type="button"
-                class="btn btn-xs btn-ghost"
                 (click)="retryStatus()"
               >
                 <lucide-angular
@@ -314,8 +318,9 @@ interface StatusChip {
           }
         </span>
         <button
+          ptahButton
+          variant="ghost"
           type="button"
-          class="btn btn-ghost btn-sm"
           data-testid="onboarding-skip"
           (click)="skip()"
         >

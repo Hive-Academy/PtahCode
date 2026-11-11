@@ -10,7 +10,12 @@ import type {
   MemoryDbHealthDto,
   VecLoadDiagnosticWire,
 } from '@ptah-extension/shared';
-import { NativeCardComponent, type NativeCardTone } from '@ptah-extension/ui';
+import {
+  NativeCardComponent,
+  type NativeCardTone,
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 
 import { VecEmbedderRecoveryService } from '../../services/vec-embedder-recovery.service';
 
@@ -36,7 +41,7 @@ const VEC_REASON_COPY: Record<VecLoadDiagnosticWire['reason'], string> = {
   selector: 'ptah-db-health-panel',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NativeCardComponent],
+  imports: [PtahButtonDirective, PtahIconButtonDirective, NativeCardComponent],
   template: `
     <div class="flex flex-col gap-4">
       <section class="flex flex-col gap-2" aria-label="Database health">
@@ -194,7 +199,9 @@ const VEC_REASON_COPY: Record<VecLoadDiagnosticWire['reason'], string> = {
         >
           <button
             type="button"
-            class="btn btn-xs btn-primary"
+            ptahButton
+            variant="primary"
+            size="xs"
             [disabled]="vecBusy()"
             (click)="onRetryVec()"
             data-testid="vec-retry-btn"
@@ -206,7 +213,9 @@ const VEC_REASON_COPY: Record<VecLoadDiagnosticWire['reason'], string> = {
           </button>
           <button
             type="button"
-            class="btn btn-xs btn-ghost"
+            ptahButton
+            variant="ghost"
+            size="xs"
             [disabled]="!vecDiagnostic()?.attemptedPath"
             (click)="onOpenBindingFolder()"
             data-testid="vec-open-folder-btn"
@@ -282,7 +291,9 @@ const VEC_REASON_COPY: Record<VecLoadDiagnosticWire['reason'], string> = {
         >
           <button
             type="button"
-            class="btn btn-xs btn-primary"
+            ptahButton
+            variant="primary"
+            size="xs"
             [disabled]="embedderBusy() || embedderDownloading()"
             (click)="onRetryEmbedder()"
             data-testid="embedder-retry-btn"
@@ -294,7 +305,9 @@ const VEC_REASON_COPY: Record<VecLoadDiagnosticWire['reason'], string> = {
           </button>
           <button
             type="button"
-            class="btn btn-xs btn-ghost"
+            ptahButton
+            variant="ghost"
+            size="xs"
             (click)="onCopyDiagnostic()"
             data-testid="copy-diagnostic-btn"
           >
@@ -315,9 +328,10 @@ const VEC_REASON_COPY: Record<VecLoadDiagnosticWire['reason'], string> = {
           <span class="flex-1">{{ t.message }}</span>
           <button
             type="button"
-            class="btn btn-ghost btn-xs"
+            ptahIconButton
+            size="xs"
             (click)="onDismissToast()"
-            aria-label="Dismiss notification"
+            label="Dismiss notification"
           >
             ✕
           </button>

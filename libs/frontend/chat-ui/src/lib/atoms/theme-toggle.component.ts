@@ -15,6 +15,7 @@ import {
   type OnDestroy,
 } from '@angular/core';
 import { LucideAngularModule, Palette, Check } from 'lucide-angular';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import {
   ThemeService,
   VSCodeService,
@@ -44,7 +45,7 @@ const CATEGORIES: readonly ThemeCategory[] = ['light', 'dark', 'glass'];
 @Component({
   selector: 'ptah-theme-toggle',
   standalone: true,
-  imports: [LucideAngularModule, MotionPreferenceComponent, MotionStylePickerComponent],
+  imports: [LucideAngularModule, MotionPreferenceComponent, MotionStylePickerComponent, PtahButtonDirective],
   styles: `
     /* DaisyUI keeps .dropdown-content opacity:0 until :focus-within, and
        position:absolute inside the 40px bar. The bar is a flex item under
@@ -200,7 +201,9 @@ const CATEGORIES: readonly ThemeCategory[] = ['light', 'dark', 'glass'];
       <button
         #trigger
         type="button"
-        class="btn btn-ghost btn-xs gap-1"
+        ptahButton
+        variant="ghost"
+        size="xs"
         aria-label="Change theme"
         aria-haspopup="dialog"
         [attr.aria-expanded]="menuOpen() ? 'true' : 'false'"

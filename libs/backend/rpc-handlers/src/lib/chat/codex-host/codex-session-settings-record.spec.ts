@@ -95,9 +95,9 @@ describe('Codex session settings record', () => {
     );
   });
   it('uses the raw Windows path for every inactive-session read and returned settings', () => {
-    const workspacePath = 'C:\\Users\\abdal\\proj';
+    const workspacePath = 'C:\\Users\\dev\\proj';
     const h = harness(
-      { ...identity, workspaceId: 'c:/users/abdal/proj' },
+      { ...identity, workspaceId: 'c:/users/dev/proj' },
       workspacePath,
     );
     h.record.lifecycle.opened(sessionId, profileResult);

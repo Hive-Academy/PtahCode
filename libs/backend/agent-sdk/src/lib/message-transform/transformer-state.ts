@@ -107,9 +107,32 @@ export interface TransformerState {
    * True for a task whose `task_started` was rejected as non-agent (see
    * `isAgentTaskType`). Keyed by task id because the later lifecycle messages
    * (`task_progress` / `task_updated` / `task_notification`) carry the task id
-   * and would otherwise upsert a phantom agent into the monitor store.
+   * and would otherwise upsert a phantom agent into the monitor store. The
+   * mark is scoped to `sessionId`, like the task-parent and terminal keys, so
+   * a shell and an agent that share a task id in different sessions never
+   * resolve each other.
    */
-  isNonAgentTask(taskId: string): boolean;
+  isNonAgentTask(taskId: string, sessionId?: string): boolean;
+  /**
+   * The tool_use id that launched the background shell task `taskId` in
+   * `sessionId`, recorded at `task_started`. Survives a compact boundary until
+   * the task completes, so a `task_notification` without `tool_use_id` can
+   * still settle the Bash or PowerShell node.
+   */
+  getShellTaskToolUseId(
+    taskId: string,
+    sessionId?: string,
+  ): string | undefined;
+  /**
+   * True when `toolUseId` launched a background shell command (Bash or
+   * PowerShell with `run_in_background`) in `sessionId`. Survives a compact
+   * boundary and is shared with isolated streams, so a shell's late
+   * `task_notification` (which has no `task_type`) is still recognised.
+   */
+  isBackgroundShellToolUse(
+    toolUseId: string | undefined,
+    sessionId: string | undefined,
+  ): boolean;
   getBackgroundTaskCommand(
     sessionId: string,
     taskId: string,
@@ -146,7 +169,10 @@ export interface TransformerState {
     parentToolUseId: string,
     sessionId?: string,
   ): void;
-  /** Clears the session-scoped task→tool_use link AND any non-agent mark. */
+  /**
+   * Clears the session-scoped task→tool_use link, any non-agent mark and the
+   * background shell launch link of the task.
+   */
   clearTaskParent(taskId: string, sessionId?: string): void;
   markTaskTerminalEmitted(
     taskId: string,

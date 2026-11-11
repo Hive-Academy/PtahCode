@@ -115,6 +115,7 @@ import type {
   MessageAnchorHint,
 } from '@ptah-extension/shared';
 
+import { PtahButtonDirective } from '@ptah-extension/ui';
 /** Minimum transcript/composer width requested by a Rail pane. */
 export const RAIL_MIN_CONTENT_WIDTH = new InjectionToken<Signal<number | null>>(
   'RAIL_MIN_CONTENT_WIDTH',
@@ -218,6 +219,7 @@ const VIEW_PANEL_KEY = '';
     AgentOriginBannerComponent,
     HarnessProposalBannerComponent,
     QueuedFollowUpsComponent,
+    PtahButtonDirective,
   ],
   templateUrl: './chat-view.component.html',
   styleUrl: './chat-view.component.css',

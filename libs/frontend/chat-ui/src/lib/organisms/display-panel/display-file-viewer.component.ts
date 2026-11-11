@@ -2,20 +2,21 @@ import { ChangeDetectionStrategy, Component, DestroyRef, effect, inject, input, 
 import { DomSanitizer, type SafeResourceUrl } from '@angular/platform-browser';
 import { ClaudeRpcService } from '@ptah-extension/core';
 import { MarkdownBlockComponent } from '@ptah-extension/markdown';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import type { DisplayFileItem } from './display-file-item';
 
 /** Reads only the selected file; the component is destroyed when selection changes. */
 @Component({
   selector: 'ptah-display-file-viewer',
   standalone: true,
-  imports: [MarkdownBlockComponent],
+  imports: [MarkdownBlockComponent, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (loading()) { <p role="status" class="p-3 text-xs">Loading file…</p> }
     @else if (error()) {
       <div role="alert" class="flex items-center gap-2 rounded-box border border-error/30 p-3 text-xs">
         <span>{{ error() }}</span>
-        <button type="button" class="btn btn-ghost btn-xs" (click)="retry()">Retry</button>
+        <button type="button" ptahButton variant="ghost" size="xs" (click)="retry()">Retry</button>
       </div>
     } @else if (file().kind === 'markdown-file') {
       <ptah-markdown-block [content]="markdown()" variant="auto" />

@@ -12,6 +12,10 @@ import type {
   BulkOperation,
   BulkSummary,
 } from '../../services/tasks-store.service';
+import {
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 
 /**
  * What the last bulk run did, per task (FR-C4.5, FR-C4.7).
@@ -48,7 +52,7 @@ import type {
 @Component({
   selector: 'ptah-task-bulk-summary',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahButtonDirective, PtahIconButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'contents' },
   template: `
@@ -79,7 +83,7 @@ import type {
                asks again rather than inheriting the first run's consent. -->
           <button
             type="button"
-            class="btn btn-ghost btn-sm border border-surface-border"
+            ptahButton
             data-testid="task-bulk-summary-retry"
             (click)="retry.emit(summary().operation)"
           >
@@ -88,9 +92,8 @@ import type {
         }
         <button
           type="button"
-          class="btn btn-ghost btn-sm btn-square"
-          aria-label="Dismiss this summary"
-          title="Dismiss this summary"
+          ptahIconButton
+          label="Dismiss this summary"
           data-testid="task-bulk-summary-dismiss"
           (click)="dismissed.emit()"
         >

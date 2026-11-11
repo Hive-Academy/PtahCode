@@ -16,6 +16,10 @@ import {
 
 import type { ConnectorCardState } from './connector-card-state';
 import { StatusPillComponent } from './status-pill.component';
+import {
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 
 /**
  * The `[card-status]` content of a connector: pill, "managed outside Ptah",
@@ -26,7 +30,13 @@ import { StatusPillComponent } from './status-pill.component';
 @Component({
   selector: 'ptah-connector-card-status',
   standalone: true,
-  imports: [LucideAngularModule, RouterLink, StatusPillComponent],
+  imports: [
+    PtahButtonDirective,
+    PtahIconButtonDirective,
+    LucideAngularModule,
+    RouterLink,
+    StatusPillComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     class: 'flex flex-col gap-2',
@@ -90,7 +100,9 @@ import { StatusPillComponent } from './status-pill.component';
         >
         <button
           type="button"
-          class="btn btn-ghost btn-xs gap-1"
+          ptahButton
+          variant="ghost"
+          size="xs"
           [attr.aria-label]="'Retry setup for ' + card().connector.label"
           data-testid="connector-card-timeout-retry"
           (click)="retry.emit()"
@@ -126,8 +138,9 @@ import { StatusPillComponent } from './status-pill.component';
         <span class="min-w-0 flex-1 break-words">{{ message }}</span>
         <button
           type="button"
-          class="btn btn-ghost btn-xs h-5 min-h-0 w-5 p-0"
-          aria-label="Dismiss error"
+          ptahIconButton
+          label="Dismiss error"
+          size="xs"
           data-testid="connector-card-error-dismiss"
           (click)="dismissError.emit()"
         >

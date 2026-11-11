@@ -43,6 +43,7 @@ import type {
 } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 export const COULD_NOT_LOAD_CLAUDE_BUILTINS =
   'Could not load the Claude Code tool and skill settings.';
@@ -71,7 +72,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
 @Component({
   selector: 'ptah-claude-builtins-config',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -109,7 +110,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
         >
           <lucide-angular [img]="AlertCircleIcon" class="w-3.5 h-3.5 text-error shrink-0" aria-hidden="true" />
           <span class="flex-1">{{ message }}</span>
-          <button type="button" class="btn btn-ghost btn-xs text-base-content" (click)="load()"
+          <button type="button" ptahButton variant="ghost" size="xs" (click)="load()"
             data-testid="claude-tools-load-retry">
             Retry
           </button>

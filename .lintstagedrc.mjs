@@ -1,6 +1,17 @@
 import path from 'node:path';
 
 export default {
+  // Privacy guard: no home path with a real user name in a public repository.
+  // Runs on every staged text file (binary files are skipped by the script).
+  '*': (files) => {
+    const rel = files.map((f) => `"${path.relative(process.cwd(), f).split(path.sep).join('/')}"`);
+    // Chunks keep each command line under the Windows limit (about 8191 chars).
+    const commands = [];
+    for (let i = 0; i < rel.length; i += 40) {
+      commands.push(`node scripts/check-home-paths.mjs ${rel.slice(i, i + 40).join(' ')}`);
+    }
+    return commands;
+  },
   // Single glob with function form: runs format + lint ONCE, never chunked.
   // Prevents lint-staged from spawning parallel nx processes that OOM.
   '*.{ts,js,json,md}': (files) => {

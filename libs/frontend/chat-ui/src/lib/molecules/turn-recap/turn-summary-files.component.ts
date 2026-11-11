@@ -7,7 +7,10 @@
   signal,
 } from '@angular/core';
 import { LucideAngularModule, TriangleAlert } from 'lucide-angular';
-import { FileStatusBadgeComponent } from '@ptah-extension/ui';
+import {
+  FileStatusBadgeComponent,
+  PtahButtonDirective,
+} from '@ptah-extension/ui';
 import { ROW_PAGE_SIZE } from './turn-summary-files.utils';
 import type {
   TurnSummaryFileRow,
@@ -42,7 +45,7 @@ function splitPath(path: string): {
 @Component({
   selector: 'ptah-turn-summary-files',
   standalone: true,
-  imports: [LucideAngularModule, FileStatusBadgeComponent],
+  imports: [LucideAngularModule, FileStatusBadgeComponent, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
@@ -149,7 +152,9 @@ function splitPath(path: string): {
         @if (hiddenActiveCount() > 0) {
           <button
             type="button"
-            class="btn btn-xs btn-ghost"
+            ptahButton
+            variant="ghost"
+            size="xs"
             (click)="showMoreActive()"
             data-testid="turn-summary-show-more"
           >
@@ -193,7 +198,9 @@ function splitPath(path: string): {
               <li>
                 <button
                   type="button"
-                  class="btn btn-xs btn-ghost"
+                  ptahButton
+                  variant="ghost"
+                  size="xs"
                   (click)="showMoreReconciled()"
                   data-testid="turn-summary-show-more-reconciled"
                 >

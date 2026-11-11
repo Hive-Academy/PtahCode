@@ -81,6 +81,7 @@ import { NotificationFocusCoordinator } from '../../services/notification-focus-
 import { ClosedTabSessionEnderService } from '../../services/closed-tab-session-ender.service';
 import { GitWindowSync } from '../../services/git-window/git-window-sync.service';
 
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 @Component({
   selector: 'ptah-electron-shell',
   standalone: true,
@@ -99,6 +100,8 @@ import { GitWindowSync } from '../../services/git-window/git-window-sync.service
     NotificationCenterComponent,
     NotificationSnackbarComponent,
     NotificationAnnouncerComponent,
+    PtahButtonDirective,
+    PtahIconButtonDirective,
   ],
   providers: [
     {
@@ -404,8 +407,7 @@ import { GitWindowSync } from '../../services/git-window/git-window-sync.service
             ) {
               <button
                 type="button"
-                class="btn btn-ghost btn-sm btn-square"
-                aria-label="Back to welcome"
+                ptahIconButton label="Back to welcome"
                 data-test="config-back-to-welcome"
                 (click)="appState.setCurrentView('chat')"
               >
@@ -474,7 +476,7 @@ import { GitWindowSync } from '../../services/git-window/git-window-sync.service
             </p>
             <button
               type="button"
-              class="btn btn-sm btn-primary gap-1.5"
+              ptahButton variant="primary"
               data-testid="electron-welcome-reload"
               (click)="reloadWindow()"
             >
@@ -554,7 +556,7 @@ import { GitWindowSync } from '../../services/git-window/git-window-sync.service
                   >
                   <button
                     type="button"
-                    class="btn btn-xs btn-outline"
+                    ptahButton size="xs"
                     (click)="retryDockLoad()"
                   >
                     Retry
@@ -571,8 +573,8 @@ import { GitWindowSync } from '../../services/git-window/git-window-sync.service
           @if (gitWindowSync.detached()) {
             <div class="electron-git-dock flex w-24 shrink-0 flex-col items-center gap-2 border-l border-surface-border p-2" data-glass-surface="chrome" data-testid="detached-git-rail">
               <span class="text-xs text-base-content-muted">Git window</span>
-              <button type="button" class="btn btn-xs btn-ghost" (click)="gitWindowSync.focus()">Focus</button>
-              <button type="button" class="btn btn-xs btn-ghost" (click)="gitWindowSync.attach()">Attach</button>
+              <button type="button" ptahButton variant="ghost" size="xs" (click)="gitWindowSync.focus()">Focus</button>
+              <button type="button" ptahButton variant="ghost" size="xs" (click)="gitWindowSync.attach()">Attach</button>
               @if (gitWindowSync.error()) { <span class="text-xs text-error" role="status">{{ gitWindowSync.error() }}</span> }
             </div>
           }

@@ -24,6 +24,7 @@ import {
   NativeDrawerComponent,
   MotionRouteStageDirective,
   detailParamKey,
+  PtahIconButtonDirective,
 } from '@ptah-extension/ui';
 
 import {
@@ -198,6 +199,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
   selector: 'ptah-provider-list-view',
   standalone: true,
   imports: [
+    PtahIconButtonDirective,
     RouterOutlet,
     LucideAngularModule,
     NativeDrawerComponent,

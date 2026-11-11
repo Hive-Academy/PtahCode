@@ -693,6 +693,65 @@ describe('MessageSenderService', () => {
     });
   });
 
+  describe('model and effort of the sending tab', () => {
+    const origin = {
+      parentTabId: 'parent',
+      parentSessionId: null,
+      label: 'child',
+      branch: 'b',
+      worktreePath: 'w',
+      startedAt: 1,
+    };
+
+    async function continuePayload(tab: TabState): Promise<Record<string, unknown>> {
+      tabsSignal.set([tab]);
+      rpcCall.mockImplementation(
+        (method: string): Promise<{ success: boolean; data?: unknown }> =>
+          Promise.resolve(
+            method === 'session:validate'
+              ? { success: true, data: { exists: true } }
+              : { success: true },
+          ),
+      );
+      await service.send('next turn');
+      return rpcCall.mock.calls.find((c) => c[0] === 'chat:continue')?.[1];
+    }
+
+    it('sends the model a parent pinned for a child, not the global model', async () => {
+      const payload = await continuePayload(
+        makeTab({
+          id: 'tab-1',
+          claudeSessionId: 'sess-X',
+          agentOrigin: { ...origin, model: 'haiku', effort: 'high' },
+        }),
+      );
+      expect(payload.model).toBe('haiku');
+      expect(payload.effort).toBe('high');
+    });
+
+    it('sends the dropdown choice of that tab on the next turn', async () => {
+      const payload = await continuePayload(
+        makeTab({
+          id: 'tab-1',
+          claudeSessionId: 'sess-X',
+          overrideModel: 'claude-opus-4',
+          overrideEffort: 'low',
+          agentOrigin: { ...origin, model: 'haiku', effort: 'high' },
+        }),
+      );
+      expect(payload.model).toBe('claude-opus-4');
+      expect(payload.effort).toBe('low');
+    });
+
+    it('falls back to the global model for a tab without a model of its own', async () => {
+      const payload = await continuePayload(
+        makeTab({ id: 'tab-1', claudeSessionId: 'sess-X' }),
+      );
+      expect(payload.model).toBe('claude-opus-4');
+      expect(payload.effort).toBe('medium');
+    });
+  });
+
   describe('startNewConversation happy path (via send)', () => {
     it('uses the captured workspace for chat:start after service readiness', async () => {
       rpcCall.mockResolvedValue({ success: true });

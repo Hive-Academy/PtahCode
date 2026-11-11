@@ -32,7 +32,7 @@ Ran from the specified worktree root:
 
 `npx nx run-many -t lint,typecheck,test -p @ptah-extension/mcp-apps-page --skip-nx-cache`
 
-Exit code 0. Nx summarized successful tasks without printing their logs; counts were read from its saved terminal output at `C:\Users\abdal\.nx\d66630b900f534d5\cache\terminalOutputs\16024530939720513393`, without rerunning tests. No git commands were run. No other worktree files were edited.
+Exit code 0. Nx summarized successful tasks without printing their logs; counts were read from its saved terminal output at `C:\Users\dev\.nx\d66630b900f534d5\cache\terminalOutputs\16024530939720513393`, without rerunning tests. No git commands were run. No other worktree files were edited.
 
 Last 10 lines of verification output:
 ```text

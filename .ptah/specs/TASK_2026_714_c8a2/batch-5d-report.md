@@ -70,10 +70,10 @@ At line:1 char:1
 
 
 ✖ nx run @ptah-extension/auth-providers:test
-  full log: C:\Users\abdal\.nx\8b7110c7390b9603\cache\terminalOutputs\13628026684437695834
+  full log: C:\Users\dev\.nx\8b7110c7390b9603\cache\terminalOutputs\13628026684437695834
 
 ✖ nx run @ptah-extension/auth-providers:lint
-  full log: C:\Users\abdal\.nx\8b7110c7390b9603\cache\terminalOutputs\3056550894988569834
+  full log: C:\Users\dev\.nx\8b7110c7390b9603\cache\terminalOutputs\3056550894988569834
 
 Re-run with --output-style=static to inline logs.
 

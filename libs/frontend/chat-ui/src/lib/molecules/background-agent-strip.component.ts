@@ -18,7 +18,10 @@ import {
   Moon,
   Square,
 } from 'lucide-angular';
-import { NativeDropdownComponent } from '@ptah-extension/ui';
+import {
+  NativeDropdownComponent,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 import { AgentSteerInputComponent } from './agent-steer-input.component';
 import { generateAgentColor } from '../utils/agent-color.utils';
 import { backgroundAgentPopulation } from './background-agent-population';
@@ -153,6 +156,7 @@ interface StripRow {
     LucideAngularModule,
     NativeDropdownComponent,
     AgentSteerInputComponent,
+    PtahIconButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -301,11 +305,11 @@ interface StripRow {
                       #menuTrigger
                       trigger
                       type="button"
-                      class="btn btn-ghost btn-xs btn-square w-6 h-6 min-h-0 text-base-content-muted hover:text-base-content focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
+                      ptahIconButton
+                      size="xs"
                       data-test="agent-strip-menu-trigger"
                       [attr.aria-expanded]="openMenuId() === row.entry.id"
-                      [attr.aria-label]="'Actions for agent ' + row.entry.name"
-                      title="Agent actions"
+                      [label]="'Actions for agent ' + row.entry.name"
                       (click)="toggleMenu(row.entry.id)"
                     >
                       <lucide-angular

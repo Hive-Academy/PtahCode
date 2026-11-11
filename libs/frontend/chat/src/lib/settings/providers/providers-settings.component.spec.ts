@@ -985,7 +985,8 @@ describe('ProvidersSettingsComponent', () => {
     for (const node of actions.filter((candidate) => !nodeAction(candidate) && !cardTrigger(candidate))) {
       expect(node.classList.contains('btn-sm')).toBe(true);
       expect(node.classList.contains('btn-xs')).toBe(false);
-      expect(node.classList.contains('focus-visible:outline-2')).toBe(true);
+      // `ptahButton` hosts get the shared focus ring from ptah-button.css; raw buttons carry the utility classes.
+      expect(node.hasAttribute('data-ptah-button') || node.classList.contains('focus-visible:outline-2')).toBe(true);
     }
   });
 });

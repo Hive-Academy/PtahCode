@@ -27,7 +27,10 @@ import type {
   GitReviewFile,
 } from '@ptah-extension/shared';
 import { isSameWorkingRoot } from '@ptah-extension/shared';
-import { FileStatusBadgeComponent } from '@ptah-extension/ui';
+import {
+  FileStatusBadgeComponent,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 import { RailResizeHandleComponent } from '../git-dock/rail-resize-handle.component';
 import type { OpenInRequest } from '../open-in/open-in-button.component';
 import { GitConfirmDialogComponent } from '../shared/git-confirm-dialog.component';
@@ -114,6 +117,7 @@ function selectionOf(file: TreeFile): ChangedFileSelection {
   selector: 'ptah-changed-file-tree',
   standalone: true,
   imports: [
+    PtahIconButtonDirective,
     LucideAngularModule,
     FileStatusBadgeComponent,
     RailResizeHandleComponent,
@@ -292,10 +296,10 @@ function selectionOf(file: TreeFile): ChangedFileSelection {
                       }}</span>
                       <button
                         type="button"
-                        class="btn btn-ghost btn-xs btn-square h-6 min-h-6 w-6 shrink-0 p-0 {{
-                          focusRing
-                        }}"
-                        aria-label="Dismiss error"
+                        ptahIconButton
+                        label="Dismiss error"
+                        size="xs"
+                        class="shrink-0 {{ focusRing }}"
                         [tabIndex]="actionTabIndex(row)"
                         (click)="dismissRowError(row)"
                       >

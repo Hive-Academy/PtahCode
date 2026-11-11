@@ -6,7 +6,7 @@
 
 ## Log evidence
 
-`%APPDATA%` is unset in this shell. The user profile contains `C:\Users\abdal\.ptah`; a quick log-name search found archived build/CI logs, but no applicable Electron host lifecycle log. Incident cause remains inferred from code and the reported state.
+`%APPDATA%` is unset in this shell. The user profile contains `C:\Users\dev\.ptah`; a quick log-name search found archived build/CI logs, but no applicable Electron host lifecycle log. Incident cause remains inferred from code and the reported state.
 
 ## Changes
 

@@ -5,6 +5,7 @@ import {
   signal,
 } from '@angular/core';
 import type { FileChange, FileChangeToolInput } from '@ptah-extension/shared';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import { LazyFileChangeRendererComponent } from './lazy-file-change-renderer.component';
 
 const MAX_PATCH_CHARS = 100_000;
@@ -13,7 +14,7 @@ const MAX_RENDERED_FILES = 8;
 @Component({
   selector: 'ptah-file-change-diff',
   standalone: true,
-  imports: [LazyFileChangeRendererComponent],
+  imports: [LazyFileChangeRendererComponent, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-3" data-testid="file-change-diff">
@@ -45,7 +46,7 @@ const MAX_RENDERED_FILES = 8;
           } @else {
             <pre class="overflow-auto whitespace-pre-wrap break-words p-2 text-xs text-base-content">{{ shownDiff(change.diff, $index) }}</pre>
             @if (change.diff.length > MAX_PATCH_CHARS && !expanded().has($index)) {
-              <button type="button" class="btn btn-ghost btn-xs m-2" (click)="expand($index)">Show all</button>
+              <button type="button" ptahButton variant="ghost" size="xs" class="m-2" (click)="expand($index)">Show all</button>
             }
             @if ($index === MAX_RENDERED_FILES) {
               <p class="px-2 text-xs text-base-content-muted">Only the first 8 files render as patches in this card.</p>

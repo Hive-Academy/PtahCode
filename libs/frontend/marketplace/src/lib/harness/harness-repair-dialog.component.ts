@@ -7,7 +7,10 @@ import {
   output,
   signal,
 } from '@angular/core';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import {
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 import { LucideAngularModule, FolderInput, X } from 'lucide-angular';
 import type {
   HarnessRepairBlockedPath,
@@ -116,7 +119,7 @@ const OUTCOME_TEXT: Readonly<Record<HarnessRepairOutcome, string>> = {
 @Component({
   selector: 'ptah-harness-repair-dialog',
   standalone: true,
-  imports: [PtahButtonDirective, LucideAngularModule],
+  imports: [PtahIconButtonDirective, PtahButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dialog
@@ -152,12 +155,13 @@ const OUTCOME_TEXT: Readonly<Record<HarnessRepairOutcome, string>> = {
             </div>
           </div>
           <button
-            class="btn btn-sm btn-circle btn-ghost shrink-0"
+            ptahIconButton
+            label="Close without moving anything"
+            class="shrink-0"
             type="button"
             data-testid="harness-repair-close"
             [disabled]="busy()"
             (click)="close()"
-            aria-label="Close without moving anything"
           >
             <lucide-angular [img]="XIcon" class="w-4 h-4" aria-hidden="true" />
           </button>

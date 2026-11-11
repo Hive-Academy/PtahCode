@@ -19,6 +19,7 @@ import {
   type AdvancedSettingGroupId,
   type AdvancedSettingValidation,
 } from '@ptah-extension/shared';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 
@@ -74,7 +75,7 @@ function formatValue(
 @Component({
   selector: 'ptah-advanced-settings-group',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective],
+  imports: [PtahButtonDirective, SettingsBusyDisabledDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (group(); as group) {
@@ -119,10 +120,7 @@ function formatValue(
               </p>
               <button
                 type="button"
-                [class]="
-                  'btn btn-outline btn-sm border-base-content-muted text-base-content ' +
-                  focusRing
-                "
+                ptahButton
                 (click)="reload()"
                 [attr.data-testid]="idPrefix() + '-retry'"
               >

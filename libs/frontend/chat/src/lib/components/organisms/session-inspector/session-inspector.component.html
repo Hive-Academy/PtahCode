@@ -114,9 +114,7 @@
         #closeButton
         type="button"
         data-inspector-close
-        class="btn btn-ghost btn-xs btn-square size-7 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-        [attr.aria-label]="closeLabel"
-        [title]="closeLabel"
+        ptahIconButton size="xs" [label]="closeLabel"
         (click)="closeRequested.emit()"
       >
         <lucide-angular

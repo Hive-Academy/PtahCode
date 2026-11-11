@@ -16,6 +16,10 @@ import type {
   BulkOperation,
   BulkProgress,
 } from '../../services/tasks-store.service';
+import {
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 
 /** What the label field emits: the trimmed label and which way to apply it. */
 export interface TaskBulkLabelPick {
@@ -70,7 +74,7 @@ export interface TaskBulkLabelPick {
 @Component({
   selector: 'ptah-task-bulk-bar',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahButtonDirective, PtahIconButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'contents' },
   template: `
@@ -101,7 +105,7 @@ export interface TaskBulkLabelPick {
 
         <button
           type="button"
-          class="btn btn-ghost btn-sm border border-surface-border"
+          ptahButton
           data-testid="task-bulk-cancel"
           [disabled]="run.cancelled"
           (click)="cancelRun.emit()"
@@ -142,7 +146,7 @@ export interface TaskBulkLabelPick {
 
           <button
             type="button"
-            class="btn btn-ghost btn-sm border border-surface-border"
+            ptahButton
             data-testid="task-bulk-confirm-cancel"
             (click)="cancelRequest.emit()"
           >
@@ -154,7 +158,8 @@ export interface TaskBulkLabelPick {
                sentence beside it still names the count and the target. -->
           <button
             type="button"
-            class="btn btn-primary btn-sm h-9 min-h-9"
+            ptahButton
+            variant="primary"
             data-testid="task-bulk-confirm-run"
             (click)="confirmRequest.emit()"
           >
@@ -188,7 +193,7 @@ export interface TaskBulkLabelPick {
         @if (canSelectAllMatching()) {
           <button
             type="button"
-            class="btn btn-ghost btn-sm border border-surface-border"
+            ptahButton
             data-testid="task-bulk-select-all"
             (click)="selectAllMatching.emit()"
           >
@@ -239,7 +244,7 @@ export interface TaskBulkLabelPick {
 
         <button
           type="button"
-          class="btn btn-ghost btn-sm border border-surface-border"
+          ptahButton
           data-testid="task-bulk-label-add"
           (click)="pickLabel(labelField, 'add')"
         >
@@ -248,7 +253,7 @@ export interface TaskBulkLabelPick {
 
         <button
           type="button"
-          class="btn btn-ghost btn-sm border border-surface-border"
+          ptahButton
           data-testid="task-bulk-label-remove"
           (click)="pickLabel(labelField, 'remove')"
         >
@@ -257,9 +262,8 @@ export interface TaskBulkLabelPick {
 
         <button
           type="button"
-          class="btn btn-ghost btn-sm btn-square"
-          aria-label="Clear the selection"
-          title="Clear the selection"
+          ptahIconButton
+          label="Clear the selection"
           data-testid="task-bulk-clear"
           (click)="clearSelection.emit()"
         >

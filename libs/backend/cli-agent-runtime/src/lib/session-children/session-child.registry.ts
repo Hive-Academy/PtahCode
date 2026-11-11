@@ -16,6 +16,7 @@ import type {
   SessionChildSnapshot,
   SessionChildTerminalStatus,
 } from './session-spawner.port';
+import type { SessionChildEndCause } from './session-child-outcome';
 
 /** Ended records kept for `ptah_session_status`; older ones are pruned. */
 export const SESSION_CHILD_ENDED_HISTORY_SIZE = 20;
@@ -32,12 +33,17 @@ export interface SessionChildHeldCompletion {
  */
 export interface SessionChildRecord extends Omit<
   SessionChildSnapshot,
-  'status' | 'heldCompletion'
+  'status' | 'heldCompletion' | 'outcome'
 > {
-  /** The task as given to `ptah_session_start` (without the contract). */
+  /** The task as given to {@link ISessionSpawner.start} (without the contract). */
   readonly task: string;
   /** Set once by {@link SessionChildRegistry.markEnded}; never cleared. */
   readonly terminalStatus?: SessionChildTerminalStatus;
+  /**
+   * Machine end cause, set with the terminal status (TASK_2026_932). Internal:
+   * the snapshot exposes it only through `outcome.cause`.
+   */
+  readonly endCause?: SessionChildEndCause;
   readonly heldCompletion?: SessionChildHeldCompletion;
 }
 
@@ -48,6 +54,7 @@ type MutableRecordFields = Omit<
   | 'parentSessionId'
   | 'startedAt'
   | 'terminalStatus'
+  | 'endCause'
   | 'endedAt'
   | 'endReason'
   | 'succeeds'
@@ -86,6 +93,22 @@ function pathKey(path: string): string {
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 
+/** Records whose parent tab id or parent SDK id is one of `parentIds`. */
+function filterByParent(
+  records: Iterable<SessionChildRecord>,
+  parentIds: readonly (string | undefined)[],
+): readonly SessionChildRecord[] {
+  const ids = new Set(
+    parentIds.map((id) => id?.trim()).filter((id): id is string => !!id),
+  );
+  if (ids.size === 0) return [];
+  return [...records].filter(
+    (record) =>
+      ids.has(record.parentSessionId) ||
+      (!!record.parentSdkSessionId && ids.has(record.parentSdkSessionId)),
+  );
+}
+
 @injectable()
 export class SessionChildRegistry {
   /** Keyed by child tab id (`childSessionId`). Insertion order = start order. */
@@ -97,6 +120,12 @@ export class SessionChildRegistry {
   private nextReservationId = 1;
   /** Child ids in the order they ended, for pruning. */
   private readonly endedOrder: string[] = [];
+  /**
+   * Starts still running (TASK_2026_932 E2), keyed by their allocated child
+   * id. Kept apart from `records` so the cap, lookups and events never see a
+   * child that has no worktree or tab yet; {@link add} replaces the entry.
+   */
+  private readonly pending = new Map<string, SessionChildRecord>();
 
   /**
    * Claim one slot synchronously, or `null` when `max` is already taken by
@@ -137,6 +166,7 @@ export class SessionChildRegistry {
       );
     }
     this.reservations.delete(reservation.id);
+    this.pending.delete(record.childSessionId);
     const stored: SessionChildRecord = { ...record };
     this.records.set(stored.childSessionId, stored);
     if (stored.sdkSessionId) {
@@ -144,6 +174,32 @@ export class SessionChildRegistry {
     }
     if (stored.terminalStatus) this.endedOrder.push(stored.childSessionId);
     return stored;
+  }
+
+  /**
+   * Record a start that is still running so status readers see its id. Throws
+   * on an id already in use: the spawner allocates a fresh id per start.
+   */
+  addPending(record: SessionChildRecord): SessionChildRecord {
+    const id = record.childSessionId;
+    if (this.records.has(id) || this.pending.has(id)) {
+      throw new Error(`SessionChildRegistry.addPending: child ${id} already exists`);
+    }
+    const stored: SessionChildRecord = { ...record };
+    this.pending.set(id, stored);
+    return stored;
+  }
+
+  /** Drop a pending start (refusal or failure). Returns whether it existed. */
+  removePending(childSessionId: string): boolean {
+    return this.pending.delete(childSessionId);
+  }
+
+  /** Pending starts whose recorded parent tab id or SDK id is in `parentIds`. */
+  pendingOf(
+    parentIds: readonly (string | undefined)[],
+  ): readonly SessionChildRecord[] {
+    return filterByParent(this.pending.values(), parentIds);
   }
 
   /** Remove a child entirely (start rollback). Returns whether it existed. */
@@ -155,6 +211,16 @@ export class SessionChildRegistry {
     const index = this.endedOrder.indexOf(childSessionId);
     if (index >= 0) this.endedOrder.splice(index, 1);
     return true;
+  }
+
+  /**
+   * Remove a terminal child from the registry (TASK_2026_932). Live children
+   * are refused; `bySdkId` and `endedOrder` are cleaned.
+   */
+  removeEnded(childSessionId: string): boolean {
+    const record = this.records.get(childSessionId);
+    if (!record || !record.terminalStatus) return false;
+    return this.remove(childSessionId);
   }
 
   /** Look a child up by its tab id or its SDK session id. */
@@ -198,15 +264,7 @@ export class SessionChildRegistry {
   childrenOf(
     parentIds: readonly (string | undefined)[],
   ): readonly SessionChildRecord[] {
-    const ids = new Set(
-      parentIds.map((id) => id?.trim()).filter((id): id is string => !!id),
-    );
-    if (ids.size === 0) return [];
-    return [...this.records.values()].filter(
-      (record) =>
-        ids.has(record.parentSessionId) ||
-        (!!record.parentSdkSessionId && ids.has(record.parentSdkSessionId)),
-    );
+    return filterByParent(this.records.values(), parentIds);
   }
 
   /**
@@ -306,6 +364,7 @@ export class SessionChildRegistry {
     status: SessionChildTerminalStatus,
     reason: string,
     endedAt: string = new Date().toISOString(),
+    endCause?: SessionChildEndCause,
   ): SessionChildRecord | undefined {
     const record = this.records.get(childSessionId);
     if (!record) return undefined;
@@ -316,6 +375,7 @@ export class SessionChildRegistry {
       terminalStatus: status,
       endedAt,
       endReason: reason,
+      ...(endCause !== undefined ? { endCause } : {}),
     };
     delete (next as { pendingPermission?: unknown }).pendingPermission;
     const ended = this.replace(next);
@@ -341,6 +401,7 @@ export class SessionChildRegistry {
     const predecessor: SessionChildRecord = {
       ...prior,
       terminalStatus: 'handed-off',
+      endCause: 'handed-off',
       endedAt,
       endReason: reason,
       succeededBy: successor.childSessionId,
@@ -375,6 +436,7 @@ export class SessionChildRegistry {
     delete (restored as { terminalStatus?: SessionChildTerminalStatus }).terminalStatus;
     delete (restored as { endedAt?: string }).endedAt;
     delete (restored as { endReason?: string }).endReason;
+    delete (restored as { endCause?: SessionChildEndCause }).endCause;
     delete (restored as { succeededBy?: string }).succeededBy;
     const index = this.endedOrder.indexOf(predecessorId);
     if (index >= 0) this.endedOrder.splice(index, 1);

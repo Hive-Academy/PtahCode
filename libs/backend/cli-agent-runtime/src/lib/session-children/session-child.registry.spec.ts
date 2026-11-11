@@ -398,13 +398,14 @@ describe('SessionChildRegistry', () => {
         },
       });
 
-      registry.markEnded('a', 'stopped', 'stopped-by-parent', 't1');
-      registry.markEnded('a', 'ended', 'ended outside the spawner', 't2');
+      registry.markEnded('a', 'stopped', 'stopped-by-parent', 't1', 'user-stop');
+      registry.markEnded('a', 'ended', 'ended outside the spawner', 't2', 'stream-exit');
 
       const child = registry.get('a');
       expect(child?.terminalStatus).toBe('stopped');
       expect(child?.endReason).toBe('stopped-by-parent');
       expect(child?.endedAt).toBe('t1');
+      expect(child?.endCause).toBe('user-stop');
       expect(child?.pendingPermission).toBeUndefined();
     });
 
@@ -417,6 +418,24 @@ describe('SessionChildRegistry', () => {
       expect(registry.get('a')).toBeUndefined();
       expect(registry.get('sdk-a')).toBeUndefined();
       expect(registry.liveCount()).toBe(0);
+    });
+
+    it('removeEnded refuses live or unknown children and cleans bySdkId and endedOrder for ended ones', () => {
+      const registry = new SessionChildRegistry();
+      addChild(registry, 'live', { sdkSessionId: 'sdk-live' });
+      addChild(registry, 'ended', { sdkSessionId: 'sdk-ended' });
+      registry.markEnded('ended', 'ended', 'done', 't1', 'user-stop');
+
+      expect(registry.removeEnded('missing')).toBe(false);
+      expect(registry.removeEnded('live')).toBe(false);
+      expect(registry.get('live')).toBeDefined();
+      expect(registry.get('sdk-live')).toBeDefined();
+
+      expect(registry.removeEnded('ended')).toBe(true);
+      expect(registry.removeEnded('ended')).toBe(false);
+      expect(registry.get('ended')).toBeUndefined();
+      expect(registry.get('sdk-ended')).toBeUndefined();
+      expect(registry.isChild('ended')).toBe(false);
     });
   });
 
@@ -473,6 +492,35 @@ describe('SessionChildRegistry', () => {
       expect(registry.get('e0')).toBeUndefined();
       expect(registry.get('e1')).toBeUndefined();
       expect(registry.get('e2')).toBeDefined();
+    });
+  });
+
+  describe('pending starts (TASK_2026_932 E2)', () => {
+    it('lists a pending start by parent without counting it or exposing it to get', () => {
+      const registry = new SessionChildRegistry();
+      registry.addPending(record('p1', { parentSdkSessionId: PARENT_SDK }));
+      expect(registry.pendingOf([PARENT_SDK]).map((r) => r.childSessionId)).toEqual(['p1']);
+      expect(registry.pendingOf(['someone-else'])).toEqual([]);
+      expect(registry.get('p1')).toBeUndefined();
+      expect(registry.childrenOf([PARENT])).toEqual([]);
+      expect(registry.liveCount()).toBe(0);
+    });
+
+    it('replaces the pending start when the full record is added', () => {
+      const registry = new SessionChildRegistry();
+      registry.addPending(record('p1'));
+      addChild(registry, 'p1');
+      expect(registry.pendingOf([PARENT])).toEqual([]);
+      expect(registry.get('p1')).toBeDefined();
+    });
+
+    it('removes a pending start and refuses a duplicate id', () => {
+      const registry = new SessionChildRegistry();
+      registry.addPending(record('p1'));
+      expect(() => registry.addPending(record('p1'))).toThrow('already exists');
+      expect(registry.removePending('p1')).toBe(true);
+      expect(registry.removePending('p1')).toBe(false);
+      expect(registry.pendingOf([PARENT])).toEqual([]);
     });
   });
 });

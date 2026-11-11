@@ -11,6 +11,7 @@ import { VSCodeService } from '@ptah-extension/core';
 import type { ExecutionNode } from '@ptah-extension/shared';
 import { SESSION_CONTEXT } from '../../../tokens/session-context.token';
 
+import { PtahButtonDirective } from '@ptah-extension/ui';
 /**
  * WorkflowCardComponent — compact "Workflow launched" chip for the chat
  * transcript.
@@ -27,7 +28,7 @@ import { SESSION_CONTEXT } from '../../../tokens/session-context.token';
 @Component({
   selector: 'ptah-workflow-card',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -59,7 +60,7 @@ import { SESSION_CONTEXT } from '../../../tokens/session-context.token';
       @if (!isElectron) {
       <button
         type="button"
-        class="btn btn-xs btn-ghost gap-1 text-primary shrink-0"
+        ptahButton variant="ghost" size="xs" class="text-primary shrink-0"
         (click)="openMonitor()"
         title="Watch this workflow in the Agents panel"
       >

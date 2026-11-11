@@ -15,6 +15,7 @@ import {
 } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { LayoutDashboard, LucideAngularModule } from 'lucide-angular';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import {
   SurfaceRendererComponent,
   type SurfaceInteractionState,
@@ -153,6 +154,7 @@ function idSafe(key: string): string {
     DisplayFileViewerComponent,
     LucideAngularModule,
     NgTemplateOutlet,
+    PtahButtonDirective,
     SurfaceRendererComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -170,7 +172,9 @@ function idSafe(key: string): string {
         </p>
         <button
           type="button"
-          class="btn btn-ghost btn-xs"
+          ptahButton
+          variant="ghost"
+          size="xs"
           (click)="retryArtifacts.emit()"
           data-testid="display-panel-artifact-retry"
         >

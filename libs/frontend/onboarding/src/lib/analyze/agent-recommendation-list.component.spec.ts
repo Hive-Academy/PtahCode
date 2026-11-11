@@ -107,7 +107,8 @@ describe('AgentRecommendationListComponent', () => {
       }),
     ]);
     expect(
-      el.querySelector('[data-testid="agent-recommendation-match"]')?.textContent,
+      el.querySelector('[data-testid="agent-recommendation-match"]')
+        ?.textContent,
     ).toContain('0% match');
   });
 
@@ -128,12 +129,14 @@ describe('AgentRecommendationListComponent', () => {
     );
     expect(matches.length).toBe(1);
     expect(matches[0].textContent).toContain('92% match');
-    expect(el.querySelectorAll('[data-testid="agent-recommendation-meter"]').length).toBe(
-      1,
-    );
+    expect(
+      el.querySelectorAll('[data-testid="agent-recommendation-meter"]').length,
+    ).toBe(1);
     expect(el.textContent).not.toContain('9200%');
     const hiddenRow = el.querySelector('[data-agent-id="out-of-range"]');
-    expect(hiddenRow?.querySelector('[data-testid="agent-recommendation-match"]')).toBeNull();
+    expect(
+      hiddenRow?.querySelector('[data-testid="agent-recommendation-match"]'),
+    ).toBeNull();
   });
 
   it('renders criteria as chips', () => {
@@ -149,9 +152,11 @@ describe('AgentRecommendationListComponent', () => {
     const el = render([backend]);
     const requested = jest.fn();
     fixture.componentInstance.previewRequested.subscribe(requested);
-    const button = el.querySelector('[data-agent-id="backend-developer"] [data-testid="agent-recommendation-preview"]') as HTMLButtonElement;
+    const button = el.querySelector(
+      '[data-agent-id="backend-developer"] [data-testid="agent-recommendation-preview"]',
+    ) as HTMLButtonElement;
     expect(button.getAttribute('aria-label')).toBe('Preview Backend Developer');
-    expect(button.className).toContain('min-h-8');
+    expect(button.hasAttribute('data-ptah-button')).toBe(true);
     button.click();
     expect(requested).toHaveBeenCalledWith('backend-developer');
   });
@@ -162,14 +167,26 @@ describe('AgentRecommendationListComponent', () => {
     const requested = jest.fn();
     fixture.componentInstance.toggled.subscribe(toggled);
     fixture.componentInstance.previewRequested.subscribe(requested);
-    const row = el.querySelector('[data-agent-id="backend-developer"]') as HTMLElement;
+    const row = el.querySelector(
+      '[data-agent-id="backend-developer"]',
+    ) as HTMLElement;
     const label = row.querySelector('label') as HTMLLabelElement;
-    const button = row.querySelector('[data-testid="agent-recommendation-preview"]') as HTMLButtonElement;
+    const button = row.querySelector(
+      '[data-testid="agent-recommendation-preview"]',
+    ) as HTMLButtonElement;
     expect(label.contains(button)).toBe(false);
     expect(label.className).toContain('cursor-pointer');
-    (row.querySelector('[data-testid="agent-recommendation-name"]') as HTMLElement).click();
+    (
+      row.querySelector(
+        '[data-testid="agent-recommendation-name"]',
+      ) as HTMLElement
+    ).click();
     expect(toggled).toHaveBeenCalledTimes(1);
-    (row.querySelector('[data-testid="agent-recommendation-description"]') as HTMLElement).click();
+    (
+      row.querySelector(
+        '[data-testid="agent-recommendation-description"]',
+      ) as HTMLElement
+    ).click();
     expect(toggled).toHaveBeenCalledTimes(2);
     button.click();
     expect(requested).toHaveBeenCalledWith('backend-developer');
@@ -188,7 +205,9 @@ describe('AgentRecommendationListComponent', () => {
     expect(criteriaOf(bare)).toEqual([]);
     const el = render([bare]);
     expect(el.textContent).toContain('Bare Agent');
-    expect(el.querySelector('[data-testid="agent-recommendation-criteria"]')).toBeNull();
+    expect(
+      el.querySelector('[data-testid="agent-recommendation-criteria"]'),
+    ).toBeNull();
   });
 
   it('emits toggle, selectRecommended and clear, and reports n selected', () => {
@@ -203,7 +222,8 @@ describe('AgentRecommendationListComponent', () => {
     fixture.componentInstance.clearSelection.subscribe(clearSelection);
 
     expect(
-      el.querySelector('[data-testid="agent-recommendation-count"]')?.textContent,
+      el.querySelector('[data-testid="agent-recommendation-count"]')
+        ?.textContent,
     ).toContain('1 selected');
 
     (

@@ -11,7 +11,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { DOCUMENT } from '@angular/common';
-import { NativeDrawerComponent } from '@ptah-extension/ui';
+import { NativeDrawerComponent, PtahButtonDirective } from '@ptah-extension/ui';
 import {
   SPEC_ROOT,
   type ExcludedTaskFolder,
@@ -120,7 +120,8 @@ const FOCUSABLE = 'button:not([disabled])';
         <div class="mt-4 flex justify-end gap-2">
           <button
             type="button"
-            class="btn btn-ghost btn-sm"
+            ptahButton
+            variant="ghost"
             data-testid="tasks-sweep-close"
             (click)="closed.emit()"
           >
@@ -133,7 +134,8 @@ const FOCUSABLE = 'button:not([disabled])';
           @if (plan().previewOnly && deletableCount() > 0) {
             <button
               type="button"
-              class="btn btn-error btn-sm h-9 min-h-9"
+              ptahButton
+              variant="danger"
               [disabled]="sweeping()"
               data-testid="tasks-sweep-confirm"
               (click)="confirmed.emit()"
@@ -229,7 +231,11 @@ interface ExcludedFolderRow extends ExcludedTaskFolder {
 @Component({
   selector: 'ptah-task-maintenance-dialog',
   standalone: true,
-  imports: [NativeDrawerComponent, TaskSweepDialogComponent],
+  imports: [
+    PtahButtonDirective,
+    NativeDrawerComponent,
+    TaskSweepDialogComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (sweep(); as plan) {

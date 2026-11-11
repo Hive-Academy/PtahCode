@@ -39,6 +39,7 @@ import { ClaudeRpcService } from '@ptah-extension/core';
 import type { McpExternalCallerAccess } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 export const COULD_NOT_SAVE_PORT = 'Could not save the MCP port.';
 export const COULD_NOT_UPDATE_NAMESPACES = 'Could not update MCP tool namespaces.';
@@ -49,7 +50,7 @@ export const COULD_NOT_LOAD_MCP_CONFIG = 'Could not load the MCP and browser set
 @Component({
   selector: 'ptah-mcp-port-config',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, FormsModule],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, FormsModule, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -76,7 +77,7 @@ export const COULD_NOT_LOAD_MCP_CONFIG = 'Could not load the MCP and browser set
         >
           <lucide-angular [img]="AlertCircleIcon" class="w-3.5 h-3.5 text-error shrink-0" aria-hidden="true" />
           <span class="flex-1">{{ loadErrorMessage }}</span>
-          <button type="button" class="btn btn-ghost btn-xs text-base-content" (click)="loadConfig()"
+          <button type="button" ptahButton variant="ghost" size="xs" (click)="loadConfig()"
             data-testid="mcp-config-load-retry">
             Retry
           </button>
@@ -103,9 +104,10 @@ export const COULD_NOT_LOAD_MCP_CONFIG = 'Could not load the MCP and browser set
         />
         <button
           type="button"
-          class="btn btn-primary btn-xs gap-1"
+          ptahButton variant="primary" size="xs"
           (click)="savePort()"
-          [ptahBusyDisabled]="saving() || !loaded() || !isDirty() || validationError() !== null"
+          [busy]="saving()"
+          [disabled]="!loaded() || !isDirty() || validationError() !== null"
           aria-label="Save MCP port"
           data-testid="mcp-port-save-btn"
         >
@@ -241,7 +243,7 @@ export const COULD_NOT_LOAD_MCP_CONFIG = 'Could not load the MCP and browser set
                       <button
                         #allowLocalhostCancel
                         type="button"
-                        class="btn btn-ghost btn-xs text-base-content"
+                        ptahButton variant="ghost" size="xs"
                         [disabled]="saving()"
                         (click)="cancelEnableLocalhost()"
                         data-testid="allow-localhost-cancel-btn"

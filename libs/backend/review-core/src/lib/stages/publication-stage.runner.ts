@@ -57,7 +57,8 @@ export class PublicationStageRunner {
       throw new Error('Review finding contains redaction secret');
     if (this.sqlite && (!this.publication || claim.dryRun || !this.policy.publication(operatorSettings, baseConfig, claim.repo).allowed) && !signal?.aborted)
       persistVerifiedFindings(this.sqlite.db, claim.attemptId, verified);
-    const walkthrough = triageCompleted ? await this.writer.readWalkthrough(out) : '';
+    const triage = triageCompleted ? await this.writer.readTriage(out) : null;
+    const walkthrough = triage ? this.writer.triageText(triage) : '';
     if (signal?.aborted) throw new Error('Review publication aborted');
     const preview: ReviewPreviewInput = {
       headSha: claim.headSha, walkthrough, accepted, suppressed,
@@ -73,10 +74,11 @@ export class PublicationStageRunner {
     const exportPath = await this.writer.writeExport(out, preview, settings);
     if (signal?.aborted) throw new Error('Review publication aborted');
     if (this.sqlite) await persistExportArtifact(this.sqlite.db, claim.attemptId, exportPath);
-    if (this.publication && triageCompleted) await this.publication.publish(claim, walkthrough, context.promptInput.diff,
+    if (this.publication && triage) await this.publication.publish(claim, triage, context.promptInput.diff,
       verdicts, operatorSettings, baseConfig, secrets, context.incrementalScope, signal,
       lenses.map(({ lens, result }) => ({ lens, family: result.status === 'completed' ? result.family : 'unavailable',
-        status: result.status === 'completed' ? 'completed' : `unavailable: ${result.reason}` })));
+        status: result.status === 'completed' ? 'completed' : `unavailable: ${result.reason}` })),
+      { diffTruncated: context.coverage.includes('diff-truncated') });
     return { artifactPath, exportPath, acceptedCount: accepted.length, suppressedCount: suppressed.length };
   }
 }

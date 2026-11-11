@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, ElementRef, effect, inject, input, signal, viewChild } from '@angular/core';
 import DOMPurify from 'dompurify';
 import { ChartNoAxesCombined, Code2, Copy, LucideAngularModule } from 'lucide-angular';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import { MermaidThemeService } from './mermaid-theme.service';
 
 let nextDiagramId = 0;
@@ -22,7 +23,7 @@ export function extractMermaidCss(svg: string): string {
 interface RenderedDiagram { svg: string; css: string }
 
 @Component({
-  selector: 'ptah-mermaid-diagram', standalone: true, imports: [LucideAngularModule],
+  selector: 'ptah-mermaid-diagram', standalone: true, imports: [LucideAngularModule, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="not-prose my-3 overflow-hidden rounded-lg border border-base-300 bg-base-100" aria-label="Mermaid diagram">
@@ -31,7 +32,7 @@ interface RenderedDiagram { svg: string; css: string }
           <button type="button" class="btn btn-xs join-item" [class.btn-active]="view() === 'diagram'" [attr.aria-pressed]="view() === 'diagram'" (click)="view.set('diagram')"><lucide-angular [img]="DiagramIcon" class="h-3.5 w-3.5" /> Diagram</button>
           <button type="button" class="btn btn-xs join-item" [class.btn-active]="view() === 'code'" [attr.aria-pressed]="view() === 'code'" (click)="view.set('code')"><lucide-angular [img]="CodeIcon" class="h-3.5 w-3.5" /> Code</button>
         </div>
-        <button type="button" class="btn btn-ghost btn-xs" (click)="copy()" aria-label="Copy Mermaid source"><lucide-angular [img]="CopyIcon" class="h-3.5 w-3.5" /> Copy</button>
+        <button type="button" ptahButton variant="ghost" size="xs" (click)="copy()" aria-label="Copy Mermaid source"><lucide-angular [img]="CopyIcon" class="h-3.5 w-3.5" /> Copy</button>
       </div>
       @if (view() === 'diagram' && !error()) {
         <div #diagramHost class="overflow-x-auto p-3" [class.hidden]="!svg()"></div>

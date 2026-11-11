@@ -203,7 +203,7 @@ Three compounding facts, each verified:
 The codex lane spawned for this task's investigation failed immediately with exit code 1:
 
 ```
-[Codex SDK Error] spawn C:\Users\abdal\AppData\Local\Programs\Ptah\resources\app.asar\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe ENOENT
+[Codex SDK Error] spawn C:\Users\dev\AppData\Local\Programs\Ptah\resources\app.asar\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe ENOENT
 ```
 
 Verified as a real bug on this branch — not environmental, not a stale host build. `codex-cli.adapter.ts:228-235` hardcodes a `vendor/<triple>/codex/` path segment; the binary ships at `vendor/<triple>/bin/codex.exe`. Every candidate misses, `codexPathOverride` is never set (`:475-478`), and the SDK self-resolves — which works against a real `node_modules` tree but fails from a packaged asar build.

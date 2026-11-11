@@ -22,6 +22,7 @@ interface ModelTabStub {
   readonly id: TabId;
   readonly overrideModel?: string | null;
   readonly sessionModel?: string | null;
+  readonly agentOrigin?: { readonly model?: string };
 }
 
 interface HarnessOptions {
@@ -270,6 +271,74 @@ describe('ModelSelectorComponent.effectiveModel', () => {
     });
 
     expect(component.effectiveModel()).toBe('haiku');
+  });
+});
+
+describe('ModelSelectorComponent session model', () => {
+  it('shows the model a parent pinned for a child session from the first render', () => {
+    const childTabId = TabId.create();
+    const { component } = makeHarness({
+      tabs: [{ id: childTabId, agentOrigin: { model: 'haiku' } }],
+      activeTabId: childTabId,
+      currentModel: 'default',
+      availableIds: ['default', 'claude-haiku-5-5', 'claude-fable-5-2'],
+    });
+
+    // The label names the Haiku model, not "Default (recommended)".
+    expect(component.effectiveModel()).toBe('haiku');
+    expect(component.effectiveModelDisplay()).toBe('claude-haiku-5-5');
+    expect(
+      component
+        .effectiveAvailableModels()
+        .filter((m) => m.isSelected)
+        .map((m) => m.id),
+    ).toEqual(['claude-haiku-5-5']);
+  });
+
+  it('keeps a session model that the list does not offer instead of showing the default', () => {
+    const childTabId = TabId.create();
+    const { component } = makeHarness({
+      tabs: [{ id: childTabId, agentOrigin: { model: 'claude-old-1' } }],
+      activeTabId: childTabId,
+      currentModel: 'default',
+      availableIds: ['default', 'claude-fable-5-2'],
+    });
+
+    expect(component.effectiveModel()).toBe('claude-old-1');
+  });
+
+  it('keeps separate selections for two tabs and never writes the global model', () => {
+    const tabA = TabId.create();
+    const tabB = TabId.create();
+    const activeTabId = signal<TabId | null>(tabA);
+    const { component, stubs } = makeHarness({
+      tabs: [{ id: tabA }, { id: tabB }],
+      activeTabId: tabA,
+      sessionContext: activeTabId,
+      currentModel: 'default',
+      availableIds: ['default', 'opus', 'haiku'],
+    });
+
+    component.selectModel('opus');
+
+    expect(stubs.tabManager.setOverrideModel).toHaveBeenCalledTimes(1);
+    expect(stubs.tabManager.setOverrideModel).toHaveBeenCalledWith(tabA, 'opus');
+    expect(stubs.modelState.switchModel).not.toHaveBeenCalled();
+  });
+
+  it('writes the override to the active tab in the main panel without the global model', () => {
+    const tabA = TabId.create();
+    const { component, stubs } = makeHarness({
+      tabs: [{ id: tabA }],
+      activeTabId: tabA,
+      currentModel: 'default',
+      availableIds: ['default', 'opus'],
+    });
+
+    component.selectModel('opus');
+
+    expect(stubs.tabManager.setOverrideModel).toHaveBeenCalledWith(tabA, 'opus');
+    expect(stubs.modelState.switchModel).not.toHaveBeenCalled();
   });
 });
 

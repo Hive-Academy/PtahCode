@@ -1,30 +1,78 @@
-import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core';
-import { SetupFieldDirective } from '@ptah-extension/ui';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  inject,
+  input,
+} from '@angular/core';
+import { SetupFieldDirective, PtahButtonDirective } from '@ptah-extension/ui';
 import { OnboardingWorkspaceStore } from './onboarding-workspace.store';
 
 @Component({
   selector: 'ptah-workspace-header',
   standalone: true,
-  imports: [SetupFieldDirective],
+  imports: [SetupFieldDirective, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section class="rounded-xl border border-base-300 bg-base-200 p-3 text-sm" aria-label="Workspace folder" data-testid="workspace-header">
-      <p class="font-medium">Current folder: {{ store.active()?.name ?? store.activePath() ?? 'No folder open' }}</p>
+    <section
+      class="rounded-xl border border-base-300 bg-base-200 p-3 text-sm"
+      aria-label="Workspace folder"
+      data-testid="workspace-header"
+    >
+      <p class="font-medium">
+        Current folder:
+        {{ store.active()?.name ?? store.activePath() ?? 'No folder open' }}
+      </p>
       @if (store.isElectron) {
         @if (canSwitch()) {
           <div class="mt-2 flex flex-wrap items-center gap-2">
-            <label for="onboarding-workspace-select" class="sr-only">Switch open folder</label>
-            <select id="onboarding-workspace-select" [ptahSetupField]="'workspace'" [disabled]="!store.canSwitch()" (change)="switchTo($event)">
-              @for (folder of store.folders(); track folder.path; let index = $index) {
-                <option [value]="index" [selected]="index === store.activeIndex()">{{ folder.name }}</option>
+            <label for="onboarding-workspace-select" class="sr-only"
+              >Switch open folder</label
+            >
+            <select
+              id="onboarding-workspace-select"
+              [ptahSetupField]="'workspace'"
+              [disabled]="!store.canSwitch()"
+              (change)="switchTo($event)"
+            >
+              @for (
+                folder of store.folders();
+                track folder.path;
+                let index = $index
+              ) {
+                <option
+                  [value]="index"
+                  [selected]="index === store.activeIndex()"
+                >
+                  {{ folder.name }}
+                </option>
               }
             </select>
-            <button type="button" class="btn btn-outline btn-sm" [disabled]="!store.canSwitch()" (click)="store.openFolder()">Open folder…</button>
-            <button type="button" class="btn btn-outline btn-sm" [disabled]="!store.canSwitch()" (click)="store.createFolder()">New folder…</button>
+            <button
+              ptahButton
+              type="button"
+              [disabled]="!store.canSwitch()"
+              (click)="store.openFolder()"
+            >
+              Open folder…
+            </button>
+            <button
+              ptahButton
+              type="button"
+              [disabled]="!store.canSwitch()"
+              (click)="store.createFolder()"
+            >
+              New folder…
+            </button>
           </div>
-          @if (store.folderError()) { <p class="mt-2 text-error" role="alert">{{ store.folderError() }}</p> }
+          @if (store.folderError()) {
+            <p class="mt-2 text-error" role="alert">
+              {{ store.folderError() }}
+            </p>
+          }
         } @else {
-          <p class="mt-1 text-base-content-muted">Return to Home to switch folder.</p>
+          <p class="mt-1 text-base-content-muted">
+            Return to Home to switch folder.
+          </p>
         }
       }
     </section>

@@ -8,6 +8,7 @@ import {
 import type { FileOutcome, GenerationTargetInfo } from '@ptah-extension/shared';
 import { safeFailureCopy } from '../../utils/safe-failure-copy';
 import { libraryReachable, type OutcomeFileRow } from './outcome-rows';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 const WRITE_FAILED_FALLBACK = 'The write failed.';
 
@@ -31,6 +32,7 @@ const OUTCOME_LABEL = new Map<FileOutcome, string>(OUTCOME_LABELS);
 @Component({
   selector: 'ptah-outcome-summary',
   standalone: true,
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -126,8 +128,9 @@ const OUTCOME_LABEL = new Map<FileOutcome, string>(OUTCOME_LABELS);
         {{ divergedNames().join(', ') }}. Choose rebase or keep in the Library.
         <div class="mt-2">
           <button
+            ptahButton
+            size="xs"
             type="button"
-            class="btn btn-outline btn-xs"
             (click)="openLibrary.emit()"
           >
             Open the Library

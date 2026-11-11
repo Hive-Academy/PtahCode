@@ -10,12 +10,13 @@ import type {
   IndexingActionMessage,
   IndexingUiState,
 } from '@ptah-extension/workspace-indexing';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-memory-indexing-banner',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule],
+  imports: [PtahButtonDirective, CommonModule],
   template: `
     @let message = actionMessage();
     @if (message) {
@@ -51,7 +52,8 @@ import type {
           </div>
           <button
             type="button"
-            class="btn btn-sm btn-primary"
+            ptahButton
+            variant="primary"
             [disabled]="!hasWorkspace() || busy()"
             (click)="indexNow.emit()"
             aria-label="Index workspace now"
@@ -105,7 +107,8 @@ import type {
           </div>
           <button
             type="button"
-            class="btn btn-sm btn-ghost"
+            ptahButton
+            variant="ghost"
             (click)="cancelIndex.emit()"
             aria-label="Cancel indexing"
           >
@@ -124,14 +127,16 @@ import type {
           </span>
           <button
             type="button"
-            class="btn btn-sm btn-primary"
+            ptahButton
+            variant="primary"
             (click)="resumeIndex.emit()"
           >
             Resume
           </button>
           <button
             type="button"
-            class="btn btn-sm btn-ghost"
+            ptahButton
+            variant="ghost"
             (click)="cancelIndex.emit()"
           >
             Cancel
@@ -150,7 +155,8 @@ import type {
           </span>
           <button
             type="button"
-            class="btn btn-sm btn-primary"
+            ptahButton
+            variant="primary"
             (click)="indexNow.emit()"
           >
             Re-index
@@ -168,7 +174,8 @@ import type {
           </span>
           <button
             type="button"
-            class="btn btn-sm btn-primary"
+            ptahButton
+            variant="primary"
             (click)="indexNow.emit()"
           >
             Try again

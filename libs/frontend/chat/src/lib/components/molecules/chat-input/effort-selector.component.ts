@@ -18,15 +18,17 @@ import {
   ChangeDetectionStrategy,
 } from '@angular/core';
 import { LucideAngularModule, ChevronDown, Check } from 'lucide-angular';
-import { type EffortLevel, type SessionId } from '@ptah-extension/shared';
+import { type EffortLevel } from '@ptah-extension/shared';
 import { EffortStateService } from '@ptah-extension/core';
 import {
   NativeDropdownComponent,
   NativeOptionComponent,
   KeyboardNavigationService,
 } from '@ptah-extension/ui';
-import { TabManagerService } from '@ptah-extension/chat-state';
-import { ChatStore } from '../../../services/chat.store';
+import {
+  TabManagerService,
+  resolveTabEffort,
+} from '@ptah-extension/chat-state';
 import { SESSION_CONTEXT } from '../../../tokens/session-context.token';
 
 interface EffortOption {
@@ -230,7 +232,6 @@ export class EffortSelectorComponent {
   private readonly keyboardNav = inject(KeyboardNavigationService);
   private readonly effortState = inject(EffortStateService);
   private readonly tabManager = inject(TabManagerService);
-  private readonly chatStore = inject(ChatStore);
   private readonly _sessionContext = inject(SESSION_CONTEXT, {
     optional: true,
   });
@@ -242,23 +243,28 @@ export class EffortSelectorComponent {
   readonly barSlots = [0, 1, 2, 3, 4];
 
   /**
-   * Effective effort for this context: per-tab override when in canvas tile,
-   * otherwise global EffortStateService selection.
+   * The tab this selector controls: the canvas tile's tab when present,
+   * otherwise the active main-panel tab.
+   */
+  private readonly contextTab = computed(() => {
+    const contextTabId = this._sessionContext?.();
+    return contextTabId
+      ? this.tabManager.tabs().find((t) => t.id === contextTabId)
+      : this.tabManager.activeTab();
+  });
+
+  /**
+   * Effective effort for this context. It follows the same rule as the send
+   * path (`resolveTabEffort`): tab override, then the effort of the session,
+   * then the global selection.
    * Three-state semantics on TabState:
-   *   undefined = not set (follow global), null = explicitly SDK default, EffortLevel = override
+   *   undefined = not set (follow session or global), null = explicitly SDK default, EffortLevel = override
    */
   readonly effectiveEffort = computed((): EffortLevel | '' => {
-    const ctx = this._sessionContext;
-    if (ctx) {
-      const tabId = ctx();
-      if (tabId) {
-        const tab = this.tabManager.tabs().find((t) => t.id === tabId);
-        if (tab?.overrideEffort !== undefined) {
-          return tab.overrideEffort ?? '';
-        }
-      }
-    }
-    return this.effortState.currentEffort() ?? '';
+    return (
+      resolveTabEffort(this.contextTab(), this.effortState.currentEffort())
+        .effort ?? ''
+    );
   });
 
   readonly selectedOption = computed(() => {
@@ -286,8 +292,9 @@ export class EffortSelectorComponent {
   }
 
   /**
-   * Select effort level. When in canvas tile context, stores override per-tab.
-   * Otherwise updates the global EffortStateService.
+   * Select effort level for the session of this tab only. The choice is stored
+   * on the tab. The send path applies it to the next turn of that session, so
+   * other tabs and the global selection stay as they are.
    */
   selectEffort(value: unknown): void {
     const option = value as EffortOption;
@@ -297,21 +304,10 @@ export class EffortSelectorComponent {
 
     this.effortChanged.emit(effortValue);
 
-    const ctx = this._sessionContext;
-    if (ctx) {
-      const tabId = ctx();
-      if (tabId) {
-        this.tabManager.setOverrideEffort(tabId, effortValue ?? null);
-        const tab = this.tabManager.tabs().find((t) => t.id === tabId);
-        const tileSessionId = (tab?.claudeSessionId ??
-          null) as SessionId | null;
-        this.effortState.setEffort(effortValue, tileSessionId);
-        return;
-      }
+    const tabId = this.contextTab()?.id;
+    if (tabId) {
+      this.tabManager.setOverrideEffort(tabId, effortValue ?? null);
     }
-
-    const sessionId = this.chatStore.currentSessionId() as SessionId | null;
-    this.effortState.setEffort(effortValue, sessionId);
   }
 
   onHover(index: number): void {

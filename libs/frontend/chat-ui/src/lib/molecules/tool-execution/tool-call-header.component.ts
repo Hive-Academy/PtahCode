@@ -15,6 +15,7 @@ import {
   ExternalLink,
 } from 'lucide-angular';
 import { FILE_LINK_OPENER } from '@ptah-extension/core';
+import { PtahIconButtonDirective } from '@ptah-extension/ui';
 import { DurationBadgeComponent } from '../../atoms/duration-badge.component';
 import type { ExecutionNode } from '@ptah-extension/shared';
 import {
@@ -80,7 +81,7 @@ import { toolStatusPresentation } from '../../utils/tool-status.utils';
 @Component({
   selector: 'ptah-tool-call-header',
   standalone: true,
-  imports: [LucideAngularModule, DurationBadgeComponent],
+  imports: [LucideAngularModule, DurationBadgeComponent, PtahIconButtonDirective],
   template: `
     <div class="group flex items-start min-w-0">
       <button
@@ -224,9 +225,10 @@ import { toolStatusPresentation } from '../../utils/tool-status.utils';
       @if (filePath()) {
         <button
           type="button"
-          class="btn btn-ghost btn-square btn-xs h-7 w-7 min-h-0 flex-shrink-0 text-info/80 hover:text-info"
-          [attr.aria-label]="'Open ' + fileName()"
-          [title]="'Open ' + filePath()"
+          ptahIconButton
+          size="xs"
+          class="flex-shrink-0"
+          [label]="'Open ' + fileName()"
           (click)="openFile()"
         >
           <lucide-angular

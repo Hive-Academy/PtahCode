@@ -7,9 +7,9 @@ Date: 2026-11-07 UTC. Worktree: `D:\projects\ptah-extension\.claude-worktrees\su
 | Check | Result | Evidence |
 | --- | --- | --- |
 | Required ancestor | PASS | `git merge-base --is-ancestor 28f5c97ac HEAD` exited 0. |
-| Production baseline | PASS | `C:\Users\abdal\.ptah\settings.json` SHA-256 was `54FADE38980C3A9E6013B5FFEEAA6917165AD44E5FAC5CF7F4CA84E423B75238` before setup. |
+| Production baseline | PASS | `C:\Users\dev\.ptah\settings.json` SHA-256 was `54FADE38980C3A9E6013B5FFEEAA6917165AD44E5FAC5CF7F4CA84E423B75238` before setup. |
 | Dev ownership | PASS | Before launch, no Electron process had the Ptah Dev user-data-dir. Each run's root was identified by this worktree's `main.mjs --remote-debugging-port=9344`; unrelated Electron and production Ptah PID 26500 were left untouched. |
-| Dev backup | PASS | `C:\Users\abdal\.ptah-dev\settings.json.bak-livetest4` SHA-256 `3B727D826F40043DCC6E879B9023DB60A075C4FBD67ED945BA5AC738D694FAD6`. |
+| Dev backup | PASS | `C:\Users\dev\.ptah-dev\settings.json.bak-livetest4` SHA-256 `3B727D826F40043DCC6E879B9023DB60A075C4FBD67ED945BA5AC738D694FAD6`. |
 | Rechecks | PASS | Production hash remained the baseline after every Dev settings edit, each launch, the Codex UI save, and cleanup. |
 
 ## Setup
@@ -18,7 +18,7 @@ Required build commands completed in order: `node scripts/verify.mjs --exec --ta
 
 Settings were edited through Node JSON parsing under the Dev profile only. Scenario thresholds: (1) 40000 / 100000000; (2) 2000000 / 100000000; (3) 40000 / 100000000; (4) 2000000 / 60000; (5) 40000 / 100000000. The UI showed Haiku 5.5 for Claude and OpenAI Codex `gpt-5.6-luna` for scenario 5. The fake marker was appended to `.ptah/live-test-ws/note-15.txt`; no real secret value was used or recorded.
 
-Log references below are one-based lines in `C:\Users\abdal\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-07.log`, with UTC timestamps.
+Log references below are one-based lines in `C:\Users\dev\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-07.log`, with UTC timestamps.
 
 ## Scenario 1 — handoff stop
 
@@ -65,7 +65,7 @@ Log references below are one-based lines in `C:\Users\abdal\AppData\Roaming\Ptah
 
 | Criterion | Result | Evidence |
 | --- | --- | --- |
-| Signed in and model selection | PASS | UI showed Codex signed in; workspace main connection saved as OpenAI Codex with `gpt-5.6-luna`. ModelDiag at 20:45:03.068Z, line 26795, shows saved model. Main usage at 20:46:35.928Z, line 26988, says `gpt-5.6-luna`. Main and child rollout files under `C:\Users\abdal\.codex\sessions\2026\11\07` (`rollout-2026-11-07T22-45-13-01a1b7c2-194b-7b82-8a2d-c8ecf8d24b49.jsonl` and `rollout-2026-11-07T22-45-24-01a1b7c2-43d1-7710-9049-93dbb2da3639.jsonl`) both contain `model=gpt-5.6-luna`. |
+| Signed in and model selection | PASS | UI showed Codex signed in; workspace main connection saved as OpenAI Codex with `gpt-5.6-luna`. ModelDiag at 20:45:03.068Z, line 26795, shows saved model. Main usage at 20:46:35.928Z, line 26988, says `gpt-5.6-luna`. Main and child rollout files under `C:\Users\dev\.codex\sessions\2026\11\07` (`rollout-2026-11-07T22-45-13-01a1b7c2-194b-7b82-8a2d-c8ecf8d24b49.jsonl` and `rollout-2026-11-07T22-45-24-01a1b7c2-43d1-7710-9049-93dbb2da3639.jsonl`) both contain `model=gpt-5.6-luna`. |
 | Handoff stop, record, parent attribution | NOT PROVEN | No `[SubagentBudgetMonitor]` event appeared during this run. The child completed all 15 files normally; UI reported no budget stop and no handoff path. [Screenshot](live-test-4/scenario5-codex.png). |
 | 85% notice and redaction | NOT PROVEN | No monitor handoff or record, so these criteria could not be observed. |
 

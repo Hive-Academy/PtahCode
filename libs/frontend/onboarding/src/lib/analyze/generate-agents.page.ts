@@ -42,6 +42,7 @@ import { StepMeterComponent } from '../shared/step-meter.component';
 import { chipStateFor } from '../shared/run-status-chip.component';
 import { onboardingStepLink } from '../shell/onboarding-step-link';
 import { GenerationStepStore } from './generation-step.store';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-generate-agents-page',
@@ -54,6 +55,7 @@ import { GenerationStepStore } from './generation-step.store';
     RecoveryScreenComponent,
     RunPanelComponent,
     StepMeterComponent,
+    PtahButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
@@ -62,17 +64,29 @@ import { GenerationStepStore } from './generation-step.store';
       :host ::ng-deep .has-failed-agents ptah-run-status-chip {
         display: none;
       }
-      :host ::ng-deep ptah-run-panel button.btn-sm {
-        min-height: 36px;
-      }
     `,
   ],
   template: `
     <section
       class="mx-auto space-y-5"
-      [class.max-w-[1120px]]="binding() && !recovery() && !workflow.runMismatch() && !workflow.lookupExhausted()"
-      [class.max-w-[760px]]="!binding() || recovery() || workflow.runMismatch() || workflow.lookupExhausted()"
-      [class.p-4]="!binding() || recovery() || workflow.runMismatch() || workflow.lookupExhausted()"
+      [class.max-w-[1120px]]="
+        binding() &&
+        !recovery() &&
+        !workflow.runMismatch() &&
+        !workflow.lookupExhausted()
+      "
+      [class.max-w-[760px]]="
+        !binding() ||
+        recovery() ||
+        workflow.runMismatch() ||
+        workflow.lookupExhausted()
+      "
+      [class.p-4]="
+        !binding() ||
+        recovery() ||
+        workflow.runMismatch() ||
+        workflow.lookupExhausted()
+      "
       aria-labelledby="generate-agents-title"
       data-testid="generate-agents-page"
     >
@@ -115,8 +129,10 @@ import { GenerationStepStore } from './generation-step.store';
           <h2 class="font-semibold">Run state is unavailable</h2>
           <p>We could not confirm this run. Try the lookup again.</p>
           <button
+            ptahButton
+            variant="primary"
             type="button"
-            class="btn btn-primary btn-sm mt-3 min-h-9"
+            class="mt-3"
             (click)="refresh()"
           >
             Retry
@@ -125,171 +141,178 @@ import { GenerationStepStore } from './generation-step.store';
       } @else {
         <ptah-live-run-layout [hasLog]="!!binding()">
           @if (binding(); as bound) {
-            <ptah-details-log runLog variant="pane" mode="tab" [tabId]="bound.tabId"
-              [liveState]="panelState() === 'running' ? 'live' : panelState() === 'cancelling' ? 'stopped' : 'idle'"
-              footerNote="Session output. Read-only." />
-          }
-        <div
-          data-testid="generate-state-chip"
-          [attr.data-state]="workflow.state()"
-          [class.has-failed-agents]="
-            workflow.state() === 'completed' && hasFailedAgents()
-          "
-        >
-          <ptah-run-panel
-            [state]="panelState()"
-            [viewState]="workflow.state()"
-            [title]="runTitle()"
-            [message]="runMessage()"
-            continueLabel="Continue to guidance"
-            (stop)="workflow.stop()"
-            (retry)="retryRun()"
-            (startOver)="backToAgents()"
-            (resumeRequested)="resume()"
-            (continueRun)="continueGuidance()"
-          >
-            @if (workflow.state() === 'starting') {
-              <button
-                type="button"
-                class="btn btn-sm min-h-8 mt-3"
-                data-testid="generate-stop-starting"
-                (click)="workflow.stop()"
-              >
-                Stop
-              </button>
-            }
-            @if (progress(); as value) {
-              <ptah-step-meter
-                label="Agent generation progress"
-                [percent]="value"
-              />
-            }
-            @if (workflow.state() === 'completed' && hasFailedAgents()) {
-              <span
-                class="mt-3 inline-flex rounded-full border border-state-need px-2.5 py-1 text-xs font-medium text-state-need"
-                data-testid="generate-partial-warning"
-                >Needs attention</span
-              >
-            }
-            @if (workflow.run()?.result?.counts; as counts) {
-              <p class="mt-3 text-sm" data-testid="generate-facts">
-                {{ counts.written }} written · {{ counts.unchanged }} unchanged
-                · {{ counts.failed }} failed · {{ counts.skipped }} skipped ·
-                {{ counts.rejected }} rejected
-              </p>
-            }
-          </ptah-run-panel>
-        </div>
-        @if (workflow.rejection()?.reason === 'blocked') {
-          <section
-            class="flex flex-col gap-3 rounded-[14px] border border-state-err/70 p-4 text-sm sm:flex-row sm:items-center"
-            role="status"
-            data-testid="generate-owner-conflict"
-          >
-            <p class="min-w-0 flex-1 text-state-need">
-              <strong>Another run is active.</strong> Open the active run before
-              starting another.
-            </p>
-            <div class="flex flex-wrap gap-2">
-              <button
-                type="button"
-                class="btn btn-sm min-h-9"
-                (click)="openOwner()"
-              >
-                Open it
-              </button>
-              <button
-                type="button"
-                class="btn btn-sm min-h-9"
-                (click)="refresh()"
-              >
-                Check again
-              </button>
-            </div>
-          </section>
-        }
-        @if (workflow.run()?.result?.agentOutcomes; as outcomes) {
-          <div
-            class="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-3"
-            aria-label="Generated agents"
-          >
-            @for (agent of outcomes; track agent.agentId) {
-              <article
-                class="rounded-[10px] border border-base-300 p-4"
-                data-glass-surface="tile"
-                data-testid="generate-agent-card"
-              >
-                <div class="flex flex-wrap items-start justify-between gap-2">
-                  <h2 class="font-semibold">{{ agent.agentId }}</h2>
-                  <span
-                    class="inline-flex min-h-9 items-center rounded-full border border-base-300 px-2.5 py-1 text-xs font-medium capitalize"
-                    data-glass-surface="tile"
-                    data-testid="generate-agent-status"
-                    [class.text-state-err]="agent.status === 'failed'"
-                    [class.text-state-done]="agent.status === 'written'"
-                    [class.text-base-content-muted]="
-                      agent.status !== 'failed' && agent.status !== 'written'
-                    "
-                    >{{ agent.status }}</span
-                  >
-                </div>
-                @if (agent.fileName) {
-                  <p
-                    class="break-all font-mono text-xs"
-                    data-testid="generate-agent-file"
-                  >
-                    {{ agent.fileName }}
-                  </p>
-                }
-                @if (agent.status === 'failed') {
-                  <button
-                    type="button"
-                    class="btn btn-sm min-h-9 mt-3"
-                    (click)="retryAgent(agent.agentId)"
-                  >
-                    Retry this agent
-                  </button>
-                }
-              </article>
-            }
-          </div>
-        } @else if (rows().length) {
-          <div data-testid="generate-agent-cards">
-            <ptah-item-status-grid
-              [items]="rows()"
-              (retry)="retryAgent($event)"
+            <ptah-details-log
+              runLog
+              variant="pane"
+              mode="tab"
+              [tabId]="bound.tabId"
+              [liveState]="
+                panelState() === 'running'
+                  ? 'live'
+                  : panelState() === 'cancelling'
+                    ? 'stopped'
+                    : 'idle'
+              "
+              footerNote="Session output. Read-only."
             />
-          </div>
-        }
-        @if (handoff.pending(); as pending) {
-          <section
-            class="rounded-[22px] border border-base-300 p-5"
-            data-glass-surface="content"
-            data-testid="generate-countdown"
+          }
+          <div
+            data-testid="generate-state-chip"
+            [attr.data-state]="workflow.state()"
+            [class.has-failed-agents]="
+              workflow.state() === 'completed' && hasFailedAgents()
+            "
           >
-            <h2 class="font-semibold">
-              Project guidance starts in {{ remainingSeconds() }}s
-            </h2>
-            <div class="mt-3 flex flex-wrap gap-2">
-              <button
-                type="button"
-                class="btn btn-primary min-h-8"
-                data-testid="generate-start-now"
-                (click)="startNow()"
-              >
-                Start now
-              </button>
-              <button
-                type="button"
-                class="btn min-h-8"
-                data-testid="generate-skip"
-                (click)="skipGuidance()"
-              >
-                Skip
-              </button>
+            <ptah-run-panel
+              [state]="panelState()"
+              [viewState]="workflow.state()"
+              [title]="runTitle()"
+              [message]="runMessage()"
+              continueLabel="Continue to guidance"
+              (stop)="workflow.stop()"
+              (retry)="retryRun()"
+              (startOver)="backToAgents()"
+              (resumeRequested)="resume()"
+              (continueRun)="continueGuidance()"
+            >
+              @if (workflow.state() === 'starting') {
+                <button
+                  ptahButton
+                  type="button"
+                  class="mt-3"
+                  data-testid="generate-stop-starting"
+                  (click)="workflow.stop()"
+                >
+                  Stop
+                </button>
+              }
+              @if (progress(); as value) {
+                <ptah-step-meter
+                  label="Agent generation progress"
+                  [percent]="value"
+                />
+              }
+              @if (workflow.state() === 'completed' && hasFailedAgents()) {
+                <span
+                  class="mt-3 inline-flex rounded-full border border-state-need px-2.5 py-1 text-xs font-medium text-state-need"
+                  data-testid="generate-partial-warning"
+                  >Needs attention</span
+                >
+              }
+              @if (workflow.run()?.result?.counts; as counts) {
+                <p class="mt-3 text-sm" data-testid="generate-facts">
+                  {{ counts.written }} written ·
+                  {{ counts.unchanged }} unchanged · {{ counts.failed }} failed
+                  · {{ counts.skipped }} skipped ·
+                  {{ counts.rejected }} rejected
+                </p>
+              }
+            </ptah-run-panel>
+          </div>
+          @if (workflow.rejection()?.reason === 'blocked') {
+            <section
+              class="flex flex-col gap-3 rounded-[14px] border border-state-err/70 p-4 text-sm sm:flex-row sm:items-center"
+              role="status"
+              data-testid="generate-owner-conflict"
+            >
+              <p class="min-w-0 flex-1 text-state-need">
+                <strong>Another run is active.</strong> Open the active run
+                before starting another.
+              </p>
+              <div class="flex flex-wrap gap-2">
+                <button ptahButton type="button" (click)="openOwner()">
+                  Open it
+                </button>
+                <button ptahButton type="button" (click)="refresh()">
+                  Check again
+                </button>
+              </div>
+            </section>
+          }
+          @if (workflow.run()?.result?.agentOutcomes; as outcomes) {
+            <div
+              class="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-3"
+              aria-label="Generated agents"
+            >
+              @for (agent of outcomes; track agent.agentId) {
+                <article
+                  class="rounded-[10px] border border-base-300 p-4"
+                  data-glass-surface="tile"
+                  data-testid="generate-agent-card"
+                >
+                  <div class="flex flex-wrap items-start justify-between gap-2">
+                    <h2 class="font-semibold">{{ agent.agentId }}</h2>
+                    <span
+                      class="inline-flex min-h-9 items-center rounded-full border border-base-300 px-2.5 py-1 text-xs font-medium capitalize"
+                      data-glass-surface="tile"
+                      data-testid="generate-agent-status"
+                      [class.text-state-err]="agent.status === 'failed'"
+                      [class.text-state-done]="agent.status === 'written'"
+                      [class.text-base-content-muted]="
+                        agent.status !== 'failed' && agent.status !== 'written'
+                      "
+                      >{{ agent.status }}</span
+                    >
+                  </div>
+                  @if (agent.fileName) {
+                    <p
+                      class="break-all font-mono text-xs"
+                      data-testid="generate-agent-file"
+                    >
+                      {{ agent.fileName }}
+                    </p>
+                  }
+                  @if (agent.status === 'failed') {
+                    <button
+                      ptahButton
+                      type="button"
+                      class="mt-3"
+                      (click)="retryAgent(agent.agentId)"
+                    >
+                      Retry this agent
+                    </button>
+                  }
+                </article>
+              }
             </div>
-          </section>
-        }
+          } @else if (rows().length) {
+            <div data-testid="generate-agent-cards">
+              <ptah-item-status-grid
+                [items]="rows()"
+                (retry)="retryAgent($event)"
+              />
+            </div>
+          }
+          @if (handoff.pending(); as pending) {
+            <section
+              class="rounded-[22px] border border-base-300 p-5"
+              data-glass-surface="content"
+              data-testid="generate-countdown"
+            >
+              <h2 class="font-semibold">
+                Project guidance starts in {{ remainingSeconds() }}s
+              </h2>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <button
+                  ptahButton
+                  variant="primary"
+                  type="button"
+                  data-testid="generate-start-now"
+                  (click)="startNow()"
+                >
+                  Start now
+                </button>
+                <button
+                  ptahButton
+                  type="button"
+                  data-testid="generate-skip"
+                  (click)="skipGuidance()"
+                >
+                  Skip
+                </button>
+              </div>
+            </section>
+          }
         </ptah-live-run-layout>
       }
     </section>

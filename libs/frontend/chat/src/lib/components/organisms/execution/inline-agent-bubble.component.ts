@@ -56,6 +56,7 @@ import { ScrollDirtyService } from '../../../services/scroll-dirty.service';
 import { injectWallClock } from '@ptah-extension/core';
 import { subagentToolCount } from '../../../utils/subagent-tool-count';
 
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 /**
  * InlineAgentBubbleComponent - Unified agent rendering for both streaming and replay
  *
@@ -85,6 +86,8 @@ import { subagentToolCount } from '../../../utils/subagent-tool-count';
     DurationBadgeComponent,
     NgClass,
     NgTemplateOutlet,
+    PtahButtonDirective,
+    PtahIconButtonDirective,
   ],
   template: `
     <!-- Enhanced styling for interrupted agents -->
@@ -295,12 +298,10 @@ import { subagentToolCount } from '../../../utils/subagent-tool-count';
           @if (canBackground()) {
             <button
               type="button"
-              class="btn btn-ghost btn-xs px-1 min-h-0 h-5 text-base-content-muted hover:text-info"
+              ptahIconButton size="xs" label="Send subagent to background"
               (click)="onBackgroundClick($event)"
               [disabled]="backgroundPending()"
               data-testid="subagent-background-button"
-              title="Send this subagent to the background"
-              aria-label="Send subagent to background"
             >
               <lucide-angular
                 [img]="backgroundPending() ? LoaderIcon : MoonIcon"
@@ -336,13 +337,13 @@ import { subagentToolCount } from '../../../utils/subagent-tool-count';
                So we surface it honestly as a "message this agent" affordance. -->
           <button
             type="button"
-            class="btn btn-ghost btn-xs px-1 min-h-0 h-5 text-base-content-muted"
+            ptahIconButton size="xs"
+            [label]="
+              sendInputExpanded() ? 'Hide message input' : 'Message this agent'
+            "
             (click)="toggleSendInput($event)"
             data-testid="subagent-send-toggle"
             [attr.aria-expanded]="sendInputExpanded()"
-            [title]="
-              sendInputExpanded() ? 'Hide message input' : 'Message this agent'
-            "
           >
             <lucide-angular
               [img]="sendInputExpanded() ? ChevronUpIcon : ChevronDownIcon"
@@ -391,12 +392,10 @@ import { subagentToolCount } from '../../../utils/subagent-tool-count';
             ></textarea>
             <button
               type="button"
-              class="btn btn-primary btn-xs px-2 min-h-0 h-7 flex-shrink-0"
+              ptahIconButton variant="primary" size="xs" label="Send message to this agent" class="flex-shrink-0"
               [disabled]="!canSubmitSend()"
               (click)="onSendSubmit()"
               data-testid="subagent-send-submit"
-              title="Send message (Cmd/Ctrl+Enter)"
-              aria-label="Send message to this agent"
             >
               <lucide-angular [img]="SendIcon" class="w-3 h-3" />
             </button>
@@ -450,7 +449,7 @@ import { subagentToolCount } from '../../../utils/subagent-tool-count';
             @if (canLoadHistory()) {
               <button
                 type="button"
-                class="btn btn-ghost btn-xs"
+                ptahButton variant="ghost" size="xs"
                 (click)="loadHistory()"
                 data-testid="load-agent-output"
               >
@@ -466,7 +465,7 @@ import { subagentToolCount } from '../../../utils/subagent-tool-count';
                 Could not load saved output: {{ historyEntry()?.historyError }}
                 <button
                   type="button"
-                  class="btn btn-link btn-xs p-0"
+                  ptahButton variant="link" size="xs"
                   (click)="loadHistory()"
                 >
                   Retry
@@ -477,7 +476,7 @@ import { subagentToolCount } from '../../../utils/subagent-tool-count';
                 Saved output for this agent could not be linked.
                 <button
                   type="button"
-                  class="btn btn-link btn-xs p-0"
+                  ptahButton variant="link" size="xs"
                   (click)="loadHistory()"
                 >
                   Retry

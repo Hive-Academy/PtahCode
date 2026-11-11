@@ -26,6 +26,7 @@ import {
   HarnessChatLauncherService,
 } from '../launcher/harness-chat-launcher.service';
 import { WorkspaceHeaderComponent } from '../shell/workspace-header.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import {
   NEW_PROJECT_AUDIENCE_OPTIONS,
   NEW_PROJECT_PLATFORM_OPTIONS,
@@ -39,6 +40,7 @@ import {
     AttachmentTrayComponent,
     WorkspaceHeaderComponent,
     LucideAngularModule,
+    PtahButtonDirective,
   ],
   providers: [ComposerAttachmentsService],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -82,8 +84,9 @@ import {
           @if (workspaceCheckError()) {
             <p>{{ workspaceCheckError() }}</p>
             <button
+              ptahButton
               type="button"
-              class="btn btn-sm mt-2"
+              class="mt-2"
               (click)="retryWorkspaceCheck()"
             >
               Retry folder check
@@ -262,12 +265,14 @@ import {
           <p role="alert" class="text-sm text-state-err">{{ error }}</p>
         }
         <div class="flex flex-wrap items-center justify-between gap-2">
-          <button type="button" class="btn btn-ghost" (click)="back()">
+          <button ptahButton variant="ghost" type="button" (click)="back()">
             Back
           </button>
           <button
+            ptahButton
+            variant="primary"
             type="submit"
-            class="btn btn-primary grow sm:grow-0"
+            class="grow sm:grow-0"
             [disabled]="
               starting() ||
               attachments.pendingReads() > 0 ||

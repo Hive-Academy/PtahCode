@@ -66,6 +66,7 @@ import {
 } from '../../atoms/session-organization-chips/session-organization-labels';
 import { wrapTabWithin } from '../../../utils/focus-wrap.utils';
 
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 /** Longest PR URL the host accepts (`SessionAddPrLinkParams`). */
 const MAX_PR_URL_LENGTH = 2048;
 
@@ -101,7 +102,7 @@ let nextId = 0;
 @Component({
   selector: 'ptah-session-organization-editor',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [':host { display: contents; }'],
   template: `
@@ -124,8 +125,7 @@ let nextId = 0;
             <button
               #closeButton
               type="button"
-              class="btn btn-ghost btn-sm btn-circle"
-              aria-label="Close dialog"
+              ptahIconButton label="Close dialog"
               (click)="close()"
               data-testid="session-org-close"
             >
@@ -234,7 +234,7 @@ let nextId = 0;
                         }
                         <button
                           type="button"
-                          class="btn btn-ghost btn-xs h-6 min-h-6"
+                          ptahButton variant="ghost" size="xs"
                           [disabled]="busy()"
                           [attr.aria-label]="'Unlink task ' + task.taskId"
                           (click)="unlinkTask(task.taskId)"
@@ -282,7 +282,7 @@ let nextId = 0;
                   </select>
                   <button
                     type="submit"
-                    class="btn btn-sm"
+                    ptahButton
                     [disabled]="busy() || !taskDraft().trim()"
                     data-testid="session-org-link-task"
                   >
@@ -338,7 +338,7 @@ let nextId = 0;
                         }
                         <button
                           type="button"
-                          class="btn btn-ghost btn-xs h-6 min-h-6"
+                          ptahButton variant="ghost" size="xs"
                           [disabled]="busy()"
                           [attr.aria-label]="'Remove ' + prLabel(pr)"
                           (click)="removePr(pr.url)"
@@ -374,7 +374,7 @@ let nextId = 0;
                   />
                   <button
                     type="submit"
-                    class="btn btn-sm"
+                    ptahButton
                     [disabled]="busy() || !prDraft().trim()"
                     data-testid="session-org-add-pr"
                   >
@@ -426,7 +426,7 @@ let nextId = 0;
                       </select>
                       <button
                         type="button"
-                        class="btn btn-sm gap-1"
+                        ptahButton
                         [disabled]="opening()"
                         (click)="openWorktree(path)"
                         data-testid="session-org-open-worktree"
@@ -441,7 +441,7 @@ let nextId = 0;
                     }
                     <button
                       type="button"
-                      class="btn btn-sm btn-ghost gap-1"
+                      ptahButton variant="ghost"
                       (click)="copyPath(path)"
                       data-testid="session-org-copy-path"
                     >

@@ -73,6 +73,7 @@ import {
   toSpendCell,
 } from '../../services/vitals/welcome-vitals.view';
 
+import { PtahButtonDirective } from '@ptah-extension/ui';
 const LOG_CONTEXT = 'ElectronWelcome';
 
 @Component({
@@ -87,6 +88,7 @@ const LOG_CONTEXT = 'ElectronWelcome';
     StatCellComponent,
     StatRowComponent,
     StatValueComponent,
+    PtahButtonDirective,
   ],
   providers: [WelcomeVitalsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -108,7 +110,7 @@ const LOG_CONTEXT = 'ElectronWelcome';
           <div class="flex flex-wrap items-center justify-center gap-2">
             <button
               type="button"
-              class="btn btn-primary gap-2 rounded-full px-6"
+              ptahButton variant="primary" size="md"
               data-testid="welcome-open-folder"
               (click)="addFolder()"
             >
@@ -126,7 +128,7 @@ const LOG_CONTEXT = 'ElectronWelcome';
             </button>
             <button
               type="button"
-              class="btn btn-ghost gap-2 rounded-full px-5"
+              ptahButton variant="ghost" size="md"
               data-testid="welcome-open-machines"
               (click)="openMachines()"
             >
@@ -168,7 +170,7 @@ const LOG_CONTEXT = 'ElectronWelcome';
             Recent folders unavailable
             <button
               type="button"
-              class="btn btn-ghost btn-xs gap-1"
+              ptahButton variant="ghost" size="xs"
               (click)="reloadRecents()"
             >
               <lucide-angular

@@ -26,7 +26,7 @@ import {
   EyeOff,
 } from 'lucide-angular';
 import { ClaudeRpcService } from '@ptah-extension/core';
-import { NativePopoverComponent } from '@ptah-extension/ui';
+import { NativePopoverComponent, PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 import { ChatStore } from '../../services/chat.store';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 
@@ -66,7 +66,7 @@ const LOGOUT_FAILED = 'Could not log out.';
 @Component({
   selector: 'ptah-license-status-card',
   standalone: true,
-  imports: [LucideAngularModule, FormsModule, NativePopoverComponent],
+  imports: [LucideAngularModule, FormsModule, NativePopoverComponent, PtahButtonDirective, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -89,7 +89,7 @@ const LOGOUT_FAILED = 'Could not log out.';
             @if (isPremium()) {
               <button
                 type="button"
-                class="btn btn-primary btn-sm gap-1"
+                ptahButton variant="primary"
                 (click)="openPricing()"
               >
                 <lucide-angular
@@ -110,7 +110,7 @@ const LOGOUT_FAILED = 'Could not log out.';
                 <button
                   trigger
                   type="button"
-                  class="btn btn-ghost btn-sm gap-1 text-base-content"
+                  ptahButton variant="ghost"
                   (click)="openKeyPopover()"
                   data-testid="membership-key-trigger"
                 >
@@ -144,9 +144,8 @@ const LOGOUT_FAILED = 'Could not log out.';
                     </div>
                     <button
                       type="button"
-                      class="btn btn-ghost btn-sm btn-square"
+                      ptahIconButton label="Close"
                       (click)="closeKeyPopover()"
-                      aria-label="Close"
                     >
                       <lucide-angular
                         [img]="CloseIcon"
@@ -175,13 +174,11 @@ const LOGOUT_FAILED = 'Could not log out.';
                       [disabled]="isSubmittingKey()"
                       data-testid="membership-key-input"
                     />
+                    <span class="absolute right-1 top-1">
                     <button
                       type="button"
-                      class="btn btn-ghost btn-sm absolute right-1 top-1"
+                      ptahIconButton [label]="keyVisible() ? 'Hide membership key' : 'Show membership key'"
                       (click)="keyVisible.set(!keyVisible())"
-                      [attr.aria-label]="
-                        keyVisible() ? 'Hide membership key' : 'Show membership key'
-                      "
                       [attr.aria-pressed]="keyVisible()"
                       data-testid="membership-key-visibility"
                     >
@@ -191,6 +188,7 @@ const LOGOUT_FAILED = 'Could not log out.';
                         aria-hidden="true"
                       />
                     </button>
+                    </span>
                   </div>
                   <p
                     id="membership-key-help"
@@ -200,7 +198,7 @@ const LOGOUT_FAILED = 'Could not log out.';
                   </p>
                   <button
                     type="button"
-                    class="btn btn-primary btn-sm gap-1 mt-2 w-full"
+                    ptahButton variant="primary" class="mt-2 w-full"
                     (click)="submitLicenseKey()"
                     [disabled]="isSubmittingKey() || !licenseKeyInput()"
                     data-testid="membership-key-activate"
@@ -238,7 +236,7 @@ const LOGOUT_FAILED = 'Could not log out.';
               </ptah-native-popover>
               <button
                 type="button"
-                class="btn btn-ghost btn-sm gap-1 text-base-content"
+                ptahButton variant="ghost"
                 (click)="openPricing()"
               >
                 <lucide-angular
@@ -250,7 +248,7 @@ const LOGOUT_FAILED = 'Could not log out.';
               </button>
               <button
                 type="button"
-                class="btn btn-primary btn-sm gap-1"
+                ptahButton variant="primary"
                 (click)="openSignup()"
               >
                 <lucide-angular
@@ -328,7 +326,7 @@ const LOGOUT_FAILED = 'Could not log out.';
               </p>
               <button
                 type="button"
-                class="btn btn-outline btn-sm gap-1 text-base-content"
+                ptahButton
                 (click)="openKeyPopover()"
                 data-testid="membership-key-alert-action"
               >
@@ -368,7 +366,7 @@ const LOGOUT_FAILED = 'Could not log out.';
             <button
               #logoutButton
               type="button"
-              class="btn btn-ghost btn-sm gap-1 shrink-0 text-base-content"
+              ptahButton variant="ghost" class="shrink-0"
               (click)="requestLogout()"
               aria-label="Remove membership key and log out"
               data-testid="logout-button"
@@ -412,7 +410,7 @@ const LOGOUT_FAILED = 'Could not log out.';
                 <button
                   #logoutCancel
                   type="button"
-                  class="btn btn-ghost btn-sm text-base-content"
+                  ptahButton variant="ghost"
                   [disabled]="isLoggingOut()"
                   (click)="cancelLogout()"
                   data-testid="logout-cancel-button"

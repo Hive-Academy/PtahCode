@@ -27,9 +27,9 @@ Command: `npm run verify -- -p @ptah-extension/shared,@ptah-extension/persistenc
 ```text
 NX   6 tasks: 4 succeeded, 2 failed
 ✖ nx run @ptah-extension/persistence-sqlite:lint
-  full log: C:\Users\abdal\.nx\8b7110c7390b9603\cache\terminalOutputs\14827098283059401881
+  full log: C:\Users\dev\.nx\8b7110c7390b9603\cache\terminalOutputs\14827098283059401881
 ✖ nx run @ptah-extension/persistence-sqlite:test
-  full log: C:\Users\abdal\.nx\8b7110c7390b9603\cache\terminalOutputs\7476374682002350954
+  full log: C:\Users\dev\.nx\8b7110c7390b9603\cache\terminalOutputs\7476374682002350954
 Run duration: 3m 13s
 Cache: 0/4 hit (0%)
 [verify 2026-10-30T17:44:02.632Z] lock released after 199.8s, exit code 1

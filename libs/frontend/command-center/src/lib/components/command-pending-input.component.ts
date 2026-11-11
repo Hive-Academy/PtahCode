@@ -7,6 +7,7 @@ import {
   output,
   signal,
 } from '@angular/core';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import type { CommandPendingInput } from '../model/command-center.store';
 import {
   LucideAngularModule,
@@ -17,7 +18,7 @@ import {
 @Component({
   selector: 'ptah-command-pending-input',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <p class="sr-only" aria-live="assertive" aria-atomic="true">
@@ -59,7 +60,8 @@ import {
                 @for (choice of choices(); track choice) {
                   <button
                     type="button"
-                    class="btn btn-outline min-h-11 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                    ptahButton
+                    size="md"
                     [disabled]="
                       timedOut() ||
                       respondedIds().has(request.id) ||
@@ -111,7 +113,8 @@ import {
             <div class="mt-3 flex gap-2">
               <button
                 type="button"
-                class="btn btn-outline min-h-11 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                ptahButton
+                size="md"
                 [disabled]="
                   timedOut() ||
                   respondedIds().has(request.id) ||

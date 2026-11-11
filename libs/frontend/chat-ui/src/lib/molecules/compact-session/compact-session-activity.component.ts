@@ -14,6 +14,7 @@ import {
 } from '@angular/core';
 import { LucideAngularModule, CheckCircle, XCircle } from 'lucide-angular';
 import { MarkdownBlockComponent } from '@ptah-extension/markdown';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import { CompactSessionStatsComponent } from './compact-session-stats.component';
 import {
   CompactSessionLanesComponent,
@@ -102,6 +103,7 @@ const FALLBACK_RECAP_HEIGHT = 180;
     SplitHandleComponent,
     ToolIconComponent,
     CompactSessionCalloutComponent,
+    PtahButtonDirective,
   ],
   host: {
     class: 'block h-full min-h-0 overflow-hidden',
@@ -563,7 +565,10 @@ const FALLBACK_RECAP_HEIGHT = 180;
                 @if (summary().content.actionable) {
                   <button
                     type="button"
-                    class="btn btn-primary btn-xs w-full"
+                    ptahButton
+                    variant="primary"
+                    size="xs"
+                    class="w-full"
                     (click)="openFullView.emit()"
                   >
                     Open full view

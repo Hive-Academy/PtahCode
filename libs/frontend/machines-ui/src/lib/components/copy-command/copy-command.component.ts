@@ -8,6 +8,7 @@ import {
   signal,
 } from '@angular/core';
 import { Check, Copy, LucideAngularModule } from 'lucide-angular';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 const COPIED_FEEDBACK_MS = 2000;
 
@@ -18,7 +19,7 @@ const COPIED_FEEDBACK_MS = 2000;
 @Component({
   selector: 'ptah-copy-command',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -31,7 +32,9 @@ const COPIED_FEEDBACK_MS = 2000;
       >
       <button
         type="button"
-        class="btn btn-ghost btn-xs gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+        ptahButton
+        variant="ghost"
+        size="xs"
         [attr.aria-label]="label() + ': ' + command()"
         data-testid="copy-command-button"
         (click)="copy()"

@@ -26,7 +26,7 @@ Written 2026-11-02 ~16:10 UTC by the coordinating session (session-handoff).
   `U\task-tracking\landing-live-demo\HANDOFF.md` (foreign). Do not edit tools/mcp-bench. Never
   npm install. Decision D31: keep `@openai/codex-sdk` in root/electron manifests + lockfile.
 - Never commit real Codex session captures (private data). A 1.6 MB `thread/list` capture was
-  moved to `C:\Users\abdal\AppData\Local\Temp\ptah-d9-fix4\` on purpose.
+  moved to `C:\Users\dev\AppData\Local\Temp\ptah-d9-fix4\` on purpose.
 
 ## Done (all pushed)
 
@@ -55,7 +55,7 @@ Merge blocked only by required review.
   history after reload FAIL (thread/list frame > 1 MiB), follow-up after sub-agent PASS, no
   proxy/legacy logs.
 - `T\live-test-d9-1a70e28d9.md` (0 paid turns, reopened session 01a19cd2-dc3c-7680-ae77-a7c9363246e9
-  from evidence `C:\Users\abdal\AppData\Local\Temp\ptah-live-d9-20261102-170847\` copied to
+  from evidence `C:\Users\dev\AppData\Local\Temp\ptah-live-d9-20261102-170847\` copied to
   `...\ptah-live-d9b-20261102-174330\`): resume succeeds, no frame errors; card shows but WITHOUT
   child output; agent lane "unavailable"; agents panel only Orchestrator → PARTIAL/FAIL.
 - Live-test worktree: `D:\projects\ptah-extension\.claude-worktrees\d9-live` (detached at

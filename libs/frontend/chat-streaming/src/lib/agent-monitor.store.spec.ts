@@ -225,6 +225,116 @@ describe('AgentMonitorStore', () => {
       });
     const generation = () => store.pendingHistoryCandidates()[0].generation;
 
+    it.each([undefined, 'Agent', 'Bash'])(
+      '(c) foreground subagent keeps agentType, tokens and startedAt through onAgentCompleted (parent tool %s)',
+      (parentToolName) => {
+        start();
+        store.onAgentCompleted(
+          {
+            ...base,
+            eventType: 'agent_completed',
+            parentToolUseId: 'tool',
+            taskId: 'A',
+            status: 'completed',
+            timestamp: 30,
+            summary: 'done',
+            outputFile: '',
+            totalTokens: 1234,
+            toolUses: 3,
+          },
+          parentToolName,
+        );
+        expect(store.getSubagent('tool')).toMatchObject({
+          agentType: 'Explore',
+          totalTokens: 1234,
+          toolUses: 3,
+          startedAt: 10,
+          completedAt: 30,
+          status: 'completed',
+        });
+      },
+    );
+
+    it('(a) agent_completed under a background shell tool creates no record', () => {
+      store.onAgentCompleted(
+        {
+          ...base,
+          eventType: 'agent_completed',
+          parentToolUseId: 'shell-tool',
+          taskId: 'shell-task',
+          status: 'stopped',
+          summary: 'Background command stopped',
+          outputFile: '',
+        },
+        'PowerShell',
+      );
+      expect(store.getSubagent('shell-tool')).toBeUndefined();
+    });
+
+    it.each(['Bash', 'PowerShell'])(
+      '(a) agent_progress under a background %s node creates no record',
+      (toolName) => {
+        store.onAgentProgress(
+          {
+            ...base,
+            eventType: 'agent_progress',
+            parentToolUseId: 'shell-tool',
+            taskId: 'shell-task',
+            summary: 'still running',
+          },
+          toolName,
+        );
+        expect(store.getSubagent('shell-tool')).toBeUndefined();
+        expect(store.subagents().size).toBe(0);
+      },
+    );
+
+    it.each(['Bash', 'PowerShell'])(
+      '(a) agent_status under a background %s node creates no record',
+      (toolName) => {
+        store.onAgentStatus(
+          {
+            ...base,
+            eventType: 'agent_status',
+            parentToolUseId: 'shell-tool',
+            taskId: 'shell-task',
+            status: 'running',
+          },
+          toolName,
+        );
+        expect(store.getSubagent('shell-tool')).toBeUndefined();
+        expect(store.subagents().size).toBe(0);
+      },
+    );
+
+    it('(c) agent_status under an Agent node still creates its record', () => {
+      store.onAgentStatus(
+        {
+          ...base,
+          eventType: 'agent_status',
+          parentToolUseId: 'agent-tool',
+          taskId: 'agent-task',
+          status: 'running',
+        },
+        'Agent',
+      );
+      expect(store.getSubagent('agent-tool')).toBeDefined();
+    });
+
+    it('(c) agent_progress under an Agent node still creates its record', () => {
+      store.onAgentProgress(
+        {
+          ...base,
+          eventType: 'agent_progress',
+          parentToolUseId: 'agent-tool',
+          taskId: 'agent-task',
+          summary: 'working',
+        },
+        'Agent',
+      );
+      expect(store.getSubagent('agent-tool')).toBeDefined();
+    });
+
     it('keeps completion and timestamp after late status and same-id starts', () => {
       start();
       complete();
