@@ -489,6 +489,7 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
       cwd: paths.cwd,
       label,
       displayPrompt: request.prompt,
+      ...(record.currentModel ? { model: record.currentModel } : {}),
       startedAt: Date.now(),
     };
     let outcome: Awaited<

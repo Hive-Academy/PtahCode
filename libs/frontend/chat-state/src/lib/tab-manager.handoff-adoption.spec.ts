@@ -100,6 +100,15 @@ describe('TabManagerService — handoff tab adoption (TASK_2026_655)', () => {
     expect(tab.agentOrigin).toBeUndefined();
   });
 
+  it('carries the model of the handing-off session into the tab', () => {
+    service.switchWorkspace(WS_A);
+    const source = service.createTab('source');
+
+    service.adoptHandoffTab(payload(source, { model: 'claude-opus-4-7' }));
+
+    expect(service.tabs()[1].sessionModel).toBe('claude-opus-4-7');
+  });
+
   it('focuses the new tab when the source is the active tab', () => {
     service.switchWorkspace(WS_A);
     const source = service.createTab('source');

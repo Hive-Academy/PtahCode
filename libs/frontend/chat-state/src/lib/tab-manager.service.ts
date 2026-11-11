@@ -1434,6 +1434,8 @@ export class TabManagerService {
       ],
       streamingState: null,
       hasLiveSession: true,
+      // Successor runs on the model of the handing-off session.
+      ...(payload.model ? { sessionModel: payload.model } : {}),
     };
   }
 
