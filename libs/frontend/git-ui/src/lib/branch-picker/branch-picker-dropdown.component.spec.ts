@@ -171,7 +171,7 @@ describe('BranchPickerDropdownComponent', () => {
     expect(document.activeElement).toBe(confirm);
     // error-content on a btn-error fill is 3.87:1 / 4.12:1, below AA.
     expect(confirm?.classList).not.toContain('btn-error');
-    expect(confirm?.classList).toContain('text-base-content');
+    expect(confirm?.classList).toContain('btn-secondary');
     // Script focus after a pointer click is not :focus-visible in Chromium.
     expect(confirm?.classList).toContain('focus:!outline');
     expect(query(fixture, '[data-testid="stash-switch"]')).toBeNull();

@@ -72,7 +72,7 @@ describe('TaskBoardHeaderComponent', () => {
     const create = q(fixture, 'tasks-create-trigger');
     expect(create?.className).toContain('btn-primary');
     expect(q(fixture, 'tasks-palette-trigger')?.className).toContain(
-      'btn-ghost',
+      'btn-secondary',
     );
   });
 
