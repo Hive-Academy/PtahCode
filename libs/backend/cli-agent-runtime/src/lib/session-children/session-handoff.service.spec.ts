@@ -337,6 +337,7 @@ describe('SessionHandoffService', () => {
         cwd: root,
         label: 'Continued: Refactor auth',
         displayPrompt: PROMPT,
+        model: 'claude-sonnet-4-5',
         startedAt: expect.any(Number),
       },
     });

@@ -22,6 +22,8 @@ export interface SessionHandoffOpenedPayload {
   readonly label: string;
   /** The continuation prompt shown as the first user turn of the new tab. */
   readonly displayPrompt: string;
+  /** Model the new session starts on. Absent when the host default applies. */
+  readonly model?: string;
   /** Epoch milliseconds the new session was started at. */
   readonly startedAt: number;
 }

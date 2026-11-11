@@ -340,6 +340,27 @@ describe('AgentSessionAdoptionService', () => {
       expect(parsed).toEqual(descriptor('c1', { taskId: 'T1' }));
     });
 
+    it('keeps the resolved model, effort and their sources', () => {
+      const full = {
+        ...descriptor('c1'),
+        model: 'claude-sonnet-5-5',
+        effort: 'high',
+        modelSource: 'pin',
+        effortSource: 'default',
+      };
+      expect(parseAgentSessionOpenedPayload(full)).toEqual(full);
+    });
+
+    it('drops an invalid effort, source and empty model', () => {
+      const parsed = parseAgentSessionOpenedPayload({
+        ...descriptor('c1'),
+        model: '',
+        effort: 'ultra',
+        modelSource: 'x',
+      });
+      expect(parsed).toEqual(descriptor('c1'));
+    });
+
     it.each([
       ['null', null],
       ['an array', []],
@@ -350,6 +371,27 @@ describe('AgentSessionAdoptionService', () => {
       ['empty parentSessionId', { ...descriptor('c1'), parentSessionId: '' }],
     ])('rejects %s', (_label, value) => {
       expect(parseAgentSessionOpenedPayload(value)).toBeNull();
+    });
+  });
+
+  describe('parseSessionHandoffOpenedPayload model', () => {
+    const base = {
+      tabId: 't',
+      fromTabId: 'f',
+      fromSessionId: null,
+      workspaceRoot: '/ws',
+      cwd: '/ws',
+      label: 'l',
+      displayPrompt: 'p',
+      startedAt: 1,
+    };
+    it('keeps a model and drops an empty one', () => {
+      expect(
+        parseSessionHandoffOpenedPayload({ ...base, model: 'm' })?.model,
+      ).toBe('m');
+      expect(parseSessionHandoffOpenedPayload({ ...base, model: '' })).toEqual(
+        base,
+      );
     });
   });
 

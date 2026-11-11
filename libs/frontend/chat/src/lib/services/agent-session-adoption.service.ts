@@ -1,7 +1,11 @@
 import { Injectable, Injector, computed, effect, inject } from '@angular/core';
 import { AppStateManager, ClaudeRpcService } from '@ptah-extension/core';
 import {
+  CHILD_SETTING_SOURCES,
+  EFFORT_LEVELS,
   SessionId,
+  type ChildSettingSource,
+  type EffortLevel,
   type AgentSessionOpenedPayload,
   type SessionHandoffLinkedPayload,
   type SessionHandoffOpenedPayload,
@@ -83,9 +87,33 @@ export function parseAgentSessionOpenedPayload(
     branch: p['branch'],
     label: p['label'],
     ...(isNonEmptyString(taskId) ? { taskId } : {}),
+    // The host resolved these for the child. Dropping them left the tab
+    // dropdowns on the global default and made a follow-up send it.
+    ...(isNonEmptyString(p['model']) ? { model: p['model'] } : {}),
+    ...(isEffort(p['effort']) ? { effort: p['effort'] } : {}),
+    ...(isSettingSource(p['modelSource'])
+      ? { modelSource: p['modelSource'] }
+      : {}),
+    ...(isSettingSource(p['effortSource'])
+      ? { effortSource: p['effortSource'] }
+      : {}),
     displayPrompt: p['displayPrompt'],
     startedAt: p['startedAt'],
   };
+}
+
+function isEffort(value: unknown): value is EffortLevel {
+  return (
+    typeof value === 'string' &&
+    (EFFORT_LEVELS as readonly string[]).includes(value)
+  );
+}
+
+function isSettingSource(value: unknown): value is ChildSettingSource {
+  return (
+    typeof value === 'string' &&
+    (CHILD_SETTING_SOURCES as readonly string[]).includes(value)
+  );
 }
 
 /**
@@ -121,6 +149,7 @@ export function parseSessionHandoffOpenedPayload(
     cwd: p['cwd'],
     label: p['label'],
     displayPrompt: p['displayPrompt'],
+    ...(isNonEmptyString(p['model']) ? { model: p['model'] } : {}),
     startedAt: p['startedAt'],
   };
 }
