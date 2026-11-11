@@ -239,6 +239,12 @@ export class TaskEndTransitionDetector {
     return this.identities.cachedRepoId(root);
   }
 
+  /** Resolve (and cache) the repository id of `root`; null when git cannot tell. */
+  async resolveRepoId(root: string): Promise<string | null> {
+    const result = await this.identities.resolve(root);
+    return result.kind === 'ok' ? result.identity.repoId : null;
+  }
+
   /**
    * Resolves once every queued flush and reconcile has finished. Pending
    * entries whose timer has not fired are not waited for.
