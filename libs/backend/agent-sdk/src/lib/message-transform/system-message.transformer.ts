@@ -693,6 +693,18 @@ export class SystemMessageTransformer {
     return events;
   }
 
+  private isNonAgentSnapshotTask(
+    taskId: string,
+    helpers: TransformerHelpers,
+    sessionId?: TransformerSessionId,
+  ): boolean {
+    if (!sessionId) return false;
+    const task = helpers.turnState
+      .get(sessionId)
+      ?.backgroundTasks.find((t) => t.id === taskId);
+    return task !== undefined && !isAgentTaskType(task.type);
+  }
+
   private buildAgentCompleted(
     msg: SDKTaskNotificationMessage,
     state: TransformerState,
@@ -705,7 +717,15 @@ export class SystemMessageTransformer {
       state.getTaskParentToolUseId(msg.task_id, taskSessionId);
 
     // Read before clearing — `clearTaskParent` also drops the non-agent mark.
-    const isNonAgentTask = state.isNonAgentTask(msg.task_id);
+    // A notification has no task_type, so a shell whose in-memory mark was
+    // lost (compact boundary, or a stream that never saw its task_started) is
+    // recognised by its launching tool_use id or by the session's last
+    // background-task snapshot. Only positive shell evidence counts: an
+    // unknown task keeps the agent path, so a real subagent is never hidden.
+    const isNonAgentTask =
+      state.isNonAgentTask(msg.task_id) ||
+      state.isBackgroundShellToolUse(parentToolUseId, taskSessionId) ||
+      this.isNonAgentSnapshotTask(msg.task_id, helpers, sessionId);
     const isDuplicateAgentTerminal =
       !isNonAgentTask &&
       state.isTaskTerminalEmitted(msg.task_id, taskSessionId, msg.tool_use_id);

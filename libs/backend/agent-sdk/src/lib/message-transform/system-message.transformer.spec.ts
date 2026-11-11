@@ -47,6 +47,7 @@ function makeState(): jest.Mocked<TransformerState> {
       backgroundAnnounced.get(id),
     ),
     isNonAgentTask: jest.fn().mockReturnValue(false),
+    isBackgroundShellToolUse: jest.fn().mockReturnValue(false),
     getBackgroundTaskCommand: jest.fn().mockReturnValue(undefined),
     hasActiveSkillToolUseId: jest.fn().mockReturnValue(false),
     activeSkillToolUseIdsCount: jest.fn().mockReturnValue(0),
@@ -1757,6 +1758,105 @@ describe('SystemMessageTransformer', () => {
         'agent_completed',
         'background_agent_completed',
       ]);
+    });
+
+    it('(b) background local_agent subagent still emits agent_completed and its background terminal', () => {
+      const helpers = makeHelpers();
+      (helpers.turnState.get as jest.Mock).mockReturnValue({
+        backgroundTasks: [
+          {
+            id: 'task-bg-agent',
+            type: 'local_agent',
+            status: 'running',
+            description: 'review',
+          },
+        ],
+      });
+      transformer.transformTaskStarted(
+        {
+          task_id: 'task-bg-agent',
+          tool_use_id: 'toolu_agent_bg',
+          skip_transcript: false,
+          task_type: 'local_agent',
+          is_backgrounded: true,
+        } as never,
+        state,
+        helpers,
+        'sess' as never,
+      );
+
+      const events = transformer.transformTaskNotification(
+        {
+          task_id: 'task-bg-agent',
+          tool_use_id: 'toolu_agent_bg',
+          status: 'completed',
+          summary: 'review finished',
+          usage: { total_tokens: 10, tool_uses: 2, duration_ms: 42 },
+        } as never,
+        state,
+        helpers,
+        'sess' as never,
+      );
+
+      expect(
+        events
+          .map((e) => e.eventType)
+          .filter((t) => t !== 'turn_state'),
+      ).toEqual(['agent_completed', 'background_agent_completed']);
+    });
+
+    it('(a) background shell with a lost mark but a known shell tool_use emits tool_result, not agent_completed', () => {
+      const helpers = makeHelpers();
+      state.isBackgroundShellToolUse.mockImplementation(
+        (toolUseId, sessionId) =>
+          toolUseId === 'toolu_shell' && sessionId === 'sess',
+      );
+
+      const events = transformer.transformTaskNotification(
+        {
+          task_id: 'task-shell',
+          tool_use_id: 'toolu_shell',
+          status: 'stopped',
+          summary: 'Background command stopped',
+        } as never,
+        state,
+        helpers,
+        'sess' as never,
+      );
+
+      expect(events.map((e) => e.eventType)).toEqual(['tool_result']);
+      expect(events[0]).toMatchObject({
+        toolCallId: 'toolu_shell',
+        isError: true,
+      });
+    });
+
+    it('(a) background shell known only from the turn-state snapshot emits tool_result, not agent_completed', () => {
+      const helpers = makeHelpers();
+      (helpers.turnState.get as jest.Mock).mockReturnValue({
+        backgroundTasks: [
+          {
+            id: 'task-shell-snap',
+            type: 'local_bash',
+            status: 'running',
+            description: 'npm run watch',
+          },
+        ],
+      });
+
+      const events = transformer.transformTaskNotification(
+        {
+          task_id: 'task-shell-snap',
+          tool_use_id: 'toolu_shell_snap',
+          status: 'completed',
+          summary: 'exit 0',
+        } as never,
+        state,
+        helpers,
+        'sess' as never,
+      );
+
+      expect(events.map((e) => e.eventType)).toEqual(['tool_result']);
     });
   });
 });

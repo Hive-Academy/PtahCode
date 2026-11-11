@@ -20,6 +20,7 @@ function makeState(): jest.Mocked<TransformerState> {
     isBackgroundAnnounced: jest.fn().mockReturnValue(false),
     getBackgroundAnnounceOrigin: jest.fn().mockReturnValue(undefined),
     isNonAgentTask: jest.fn().mockReturnValue(false),
+    isBackgroundShellToolUse: jest.fn().mockReturnValue(false),
     getBackgroundTaskCommand: jest.fn().mockReturnValue(undefined),
     hasActiveSkillToolUseId: jest.fn().mockReturnValue(false),
     activeSkillToolUseIdsCount: jest.fn().mockReturnValue(0),

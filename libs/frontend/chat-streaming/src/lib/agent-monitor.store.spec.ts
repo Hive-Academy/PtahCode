@@ -225,6 +225,52 @@ describe('AgentMonitorStore', () => {
       });
     const generation = () => store.pendingHistoryCandidates()[0].generation;
 
+    it.each([undefined, 'Agent', 'Bash'])(
+      '(c) foreground subagent keeps agentType, tokens and startedAt through onAgentCompleted (parent tool %s)',
+      (parentToolName) => {
+        start();
+        store.onAgentCompleted(
+          {
+            ...base,
+            eventType: 'agent_completed',
+            parentToolUseId: 'tool',
+            taskId: 'A',
+            status: 'completed',
+            timestamp: 30,
+            summary: 'done',
+            outputFile: '',
+            totalTokens: 1234,
+            toolUses: 3,
+          },
+          parentToolName,
+        );
+        expect(store.getSubagent('tool')).toMatchObject({
+          agentType: 'Explore',
+          totalTokens: 1234,
+          toolUses: 3,
+          startedAt: 10,
+          completedAt: 30,
+          status: 'completed',
+        });
+      },
+    );
+
+    it('(a) agent_completed under a background shell tool creates no record', () => {
+      store.onAgentCompleted(
+        {
+          ...base,
+          eventType: 'agent_completed',
+          parentToolUseId: 'shell-tool',
+          taskId: 'shell-task',
+          status: 'stopped',
+          summary: 'Background command stopped',
+          outputFile: '',
+        },
+        'PowerShell',
+      );
+      expect(store.getSubagent('shell-tool')).toBeUndefined();
+    });
+
     it('keeps completion and timestamp after late status and same-id starts', () => {
       start();
       complete();

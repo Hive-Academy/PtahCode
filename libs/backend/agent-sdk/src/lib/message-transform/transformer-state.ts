@@ -110,6 +110,16 @@ export interface TransformerState {
    * and would otherwise upsert a phantom agent into the monitor store.
    */
   isNonAgentTask(taskId: string): boolean;
+  /**
+   * True when `toolUseId` launched a background shell command (Bash or
+   * PowerShell with `run_in_background`) in `sessionId`. Survives a compact
+   * boundary and is shared with isolated streams, so a shell's late
+   * `task_notification` (which has no `task_type`) is still recognised.
+   */
+  isBackgroundShellToolUse(
+    toolUseId: string | undefined,
+    sessionId: string | undefined,
+  ): boolean;
   getBackgroundTaskCommand(
     sessionId: string,
     taskId: string,
