@@ -429,11 +429,7 @@
     "btn": 1,
     "btn-error": 1,
     "btn-primary": 1,
-    "btn-warning": 1,
-    "checkbox": 1,
-    "checkbox-sm": 1,
-    "label": 1,
-    "label-text": 1
+    "btn-warning": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/delivery-status/delivery-status.component.ts": {
     "btn": 1,
@@ -478,19 +474,14 @@
     "badge-info": 1,
     "badge-sm": 2,
     "badge-success": 1,
-    "badge-xs": 1,
-    "textarea": 1,
-    "textarea-bordered": 1
+    "badge-xs": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/previous-sessions-toolbar/previous-sessions-toolbar.component.ts": {
-    "<dynamic>": 4,
     "btn": 3,
     "btn-circle": 1,
     "btn-ghost": 3,
     "btn-sm": 1,
-    "btn-xs": 2,
-    "input": 3,
-    "input-sm": 3
+    "btn-xs": 2
   },
   "libs/frontend/chat/src/lib/components/molecules/send-to-messaging/send-to-messaging.component.ts": {
     "<dynamic>": 1,
@@ -499,7 +490,6 @@
     "btn-sm": 2
   },
   "libs/frontend/chat/src/lib/components/molecules/session-filter-bar/session-filter-bar.component.ts": {
-    "<dynamic>": 5,
     "badge": 1,
     "badge-neutral": 1,
     "badge-xs": 1,
@@ -507,31 +497,10 @@
     "btn-circle": 1,
     "btn-ghost": 3,
     "btn-sm": 1,
-    "btn-xs": 2,
-    "checkbox": 2,
-    "checkbox-xs": 2,
-    "input": 2,
-    "input-sm": 2,
-    "select": 2,
-    "select-sm": 2,
-    "toggle": 2,
-    "toggle-xs": 2
+    "btn-xs": 2
   },
   "libs/frontend/chat/src/lib/components/molecules/session-list-row/session-list-row.component.ts": {
-    "<dynamic>": 6,
-    "input": 1,
-    "input-bordered": 1,
-    "input-xs": 1
-  },
-  "libs/frontend/chat/src/lib/components/molecules/session-organization-editor/session-organization-editor.component.ts": {
-    "input": 2,
-    "input-bordered": 2,
-    "input-sm": 2,
-    "select": 4,
-    "select-bordered": 4,
-    "select-sm": 4,
-    "toggle": 1,
-    "toggle-sm": 1
+    "<dynamic>": 5
   },
   "libs/frontend/chat/src/lib/components/molecules/tool-execution/tool-call-item.component.ts": {
     "<dynamic>": 2
@@ -608,9 +577,7 @@
     "btn-ghost": 4,
     "btn-sm": 3,
     "btn-square": 1,
-    "btn-xs": 1,
-    "input": 1,
-    "input-bordered": 1
+    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-task-section.component.ts": {
     "<dynamic>": 1,
@@ -656,10 +623,7 @@
     "btn-gold": 2,
     "btn-primary": 1,
     "btn-square": 1,
-    "btn-xs": 6,
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1
+    "btn-xs": 6
   },
   "libs/frontend/chat/src/lib/components/templates/electron-shell.component.ts": {
     "badge": 1,
@@ -808,10 +772,7 @@
     "btn": 2,
     "btn-error": 2,
     "btn-outline": 2,
-    "btn-sm": 2,
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1
+    "btn-sm": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/accounts/accounts-tab.component.ts": {
     "<dynamic>": 4,
@@ -835,25 +796,15 @@
     "badge-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/add-cli-instance-modal.component.ts": {
-    "<dynamic>": 3,
     "badge": 1,
     "badge-outline": 1,
-    "badge-xs": 1,
-    "select": 1,
-    "select-bordered": 1,
-    "select-sm": 1
+    "badge-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/agents-routing-settings.component.ts": {
     "<dynamic>": 2,
     "badge": 1,
     "badge-outline": 1,
     "badge-sm": 1
-  },
-  "libs/frontend/chat/src/lib/settings/providers/cli-tier-mapping-modal.component.ts": {
-    "<dynamic>": 1,
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/connection-detail-drawer.component.ts": {
     "<dynamic>": 1
@@ -863,9 +814,6 @@
     "btn": 2,
     "btn-outline": 2,
     "btn-sm": 2,
-    "input": 6,
-    "input-bordered": 6,
-    "input-sm": 6,
     "skeleton": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/connection-drawer/codex-sign-in-block.component.ts": {
@@ -878,10 +826,7 @@
     "<dynamic>": 2,
     "btn": 4,
     "btn-outline": 4,
-    "btn-sm": 4,
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1
+    "btn-sm": 4
   },
   "libs/frontend/chat/src/lib/settings/providers/connection-drawer/kimi-code-login-progress.component.ts": {
     "<dynamic>": 1
@@ -910,10 +855,7 @@
     "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/main-agent-reassign-popover.component.ts": {
-    "<dynamic>": 11,
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1
+    "<dynamic>": 10
   },
   "libs/frontend/chat/src/lib/settings/providers/main-agent-scope-badges.component.ts": {
     "<dynamic>": 2
@@ -926,8 +868,6 @@
   },
   "libs/frontend/chat/src/lib/settings/providers/provider-catalog-modal.component.ts": {
     "<dynamic>": 2,
-    "input": 1,
-    "input-sm": 1,
     "skeleton": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/provider-connection-card.component.ts": {
@@ -938,26 +878,15 @@
     "badge-sm": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/provider-consumer-assignments.component.ts": {
-    "<dynamic>": 9,
+    "<dynamic>": 8,
     "badge": 2,
     "badge-outline": 1,
-    "badge-sm": 2,
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1
-  },
-  "libs/frontend/chat/src/lib/settings/providers/provider-setup-wizard.component.ts": {
-    "input": 9,
-    "input-bordered": 9,
-    "input-sm": 9
+    "badge-sm": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/providers-settings.component.ts": {
-    "<dynamic>": 9,
+    "<dynamic>": 8,
     "badge": 1,
-    "badge-sm": 1,
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1
+    "badge-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/setting-scope-row.component.ts": {
     "<dynamic>": 5

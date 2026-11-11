@@ -8,7 +8,7 @@ import {
   type ProviderAccountChoice, type ProvidersEditContext,
 } from '@ptah-extension/core';
 import {
-  DEFAULT_OVERLAY_OFFSET, NativePopoverComponent, PROVIDER_MODELS_LOADER, ProviderModelSearchFieldComponent, PtahButtonDirective, PtahIconButtonDirective, type ProviderModelSearchOption,
+  DEFAULT_OVERLAY_OFFSET, NativePopoverComponent, PROVIDER_MODELS_LOADER, ProviderModelSearchFieldComponent, PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective, PtahSelectDirective, type ProviderModelSearchOption,
 } from '@ptah-extension/ui';
 import type { EffortLevel, ProviderModelInfo, SettingScope } from '@ptah-extension/shared';
 import { SAVE_REFUSED_MESSAGE, SettingsSaveFeedbackService, type SettingsSaveResult } from '../feedback/settings-save-feedback.service';
@@ -33,7 +33,7 @@ const MODALITY: Readonly<Record<string, string>> = {
 /** Model select value that swaps the select for an inline model-ID field (#35). */
 const MANUAL = '__manual__';
 const PROVIDER_SAVED = 'Main agent provider saved.';
-const SELECT = 'select select-bordered select-sm w-full border-base-content-muted bg-base-100 text-sm text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
+const SELECT = 'w-full text-sm text-base-content';
 const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
 /** Every field's label: one style, always above its control. */
 const LABEL = 'block text-xs font-semibold text-base-content-muted';
@@ -82,7 +82,7 @@ interface AccountIntent {
 @Component({
   selector: 'ptah-main-agent-reassign-popover',
   standalone: true,
-  imports: [PtahButtonDirective, PtahIconButtonDirective, SettingsBusyDisabledDirective, LucideAngularModule, NativePopoverComponent, ProviderModelSearchFieldComponent],
+  imports: [PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective, PtahSelectDirective, SettingsBusyDisabledDirective, LucideAngularModule, NativePopoverComponent, ProviderModelSearchFieldComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Angular owns (and removes) this listener with the component.
   host: { '(window:resize)': 'open() && fitToViewport()' },
@@ -115,7 +115,7 @@ interface AccountIntent {
         <div class="grid min-h-16 grid-cols-1 gap-2 overflow-y-auto px-3 py-2" data-testid="main-agent-popover-body">
           <div class="grid gap-1">
             <label for="main-agent-provider" [class]="label">Provider connection</label>
-            <select id="main-agent-provider" [class]="select" data-focus="main-agent" [disabled]="busy()"
+            <select ptahSelect size="sm" id="main-agent-provider" [class]="select" data-focus="main-agent" [disabled]="busy()"
               (change)="onProvider(value($event))" data-testid="main-agent-provider">
               @if (!driverId()) { <option value="" [selected]="!providerId()">Choose a provider…</option> }
               @for (option of providers(); track option.id) {
@@ -163,8 +163,8 @@ interface AccountIntent {
               } @else {
                 <label for="main-agent-account" [class]="label">Account</label>
               }
-              <select id="main-agent-account" [class]="select" [ptahBusyDisabled]="busy()" [title]="accountText()"
-                [attr.aria-invalid]="accountRemoved() ? 'true' : null" [attr.aria-describedby]="accountRemoved() ? 'main-agent-account-removed' : null"
+              <select ptahSelect size="sm" id="main-agent-account" [class]="select" [ptahBusyDisabled]="busy()" [title]="accountText()"
+                [invalid]="accountRemoved()" [attr.aria-describedby]="accountRemoved() ? 'main-agent-account-removed' : null"
                 (change)="onAccount($event)" data-testid="main-agent-account">
                 @for (option of account.options; track option.value) {
                   <option [value]="option.value" [disabled]="option.disabled" [selected]="option.value === accountValue()">{{ option.label }}</option>
@@ -180,7 +180,7 @@ interface AccountIntent {
             <label for="main-agent-model" [class]="label">Model selection</label>
             @if (manual()) {
               <div class="flex items-center gap-1.5">
-                <input id="main-agent-model" type="text" [class]="'input input-bordered input-sm min-w-0 flex-1 font-mono text-xs ' + focusRing"
+                <input ptahInput size="sm" tone="mono" id="main-agent-model" type="text" class="min-w-0 flex-1 text-xs"
                   placeholder="Model ID, e.g. vendor/model-name" [value]="manualDraft()" (input)="manualDraft.set(value($event))"
                   aria-label="Main agent model ID" data-testid="main-agent-model-manual" />
                 <button type="button" ptahButton [busy]="busy()" [disabled]="!targetReady() || !manualDraft().trim()"
@@ -217,7 +217,7 @@ interface AccountIntent {
 
           <div class="grid gap-1">
             <label for="main-agent-save-to" [class]="label">Save to</label>
-            <select id="main-agent-save-to" [class]="select" [disabled]="busy() || !targetReady()"
+            <select ptahSelect size="sm" id="main-agent-save-to" [class]="select" [disabled]="busy() || !targetReady()"
               (change)="onTarget(asScope(value($event)))" data-testid="main-agent-save-to">
               @for (scope of targets(); track scope) {
                 <option [value]="scope" [selected]="scope === target()">{{ scopeLabel(scope) }}</option>

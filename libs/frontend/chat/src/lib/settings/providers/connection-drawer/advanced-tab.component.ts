@@ -8,7 +8,7 @@ import { runDrawerWrite, type DrawerWriteOutcome } from './drawer-write';
 import { SettingsBusyDisabledDirective } from '../../feedback/busy-disabled.directive';
 import { SettingsSaveFeedbackService } from '../../feedback/settings-save-feedback.service';
 import { commitToast } from '../../feedback/settings-commit-toast';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahFieldComponent, PtahInputDirective } from '@ptah-extension/ui';
 
 /** Verbatim (plan :662-664): pricing has no runtime reader (`provider-registry.ts:703-718`). */
 export const PRICING_NOTE = 'Stored for your reference; Ptah does not use it for cost estimates yet.';
@@ -69,7 +69,7 @@ export function parsePricing(input: string, output: string): { readonly ok: true
 @Component({
   selector: 'ptah-connection-advanced-tab',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, PtahButtonDirective],
+  imports: [SettingsBusyDisabledDirective, PtahButtonDirective, PtahFieldComponent, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-4 text-sm" data-testid="connection-advanced">
@@ -81,19 +81,22 @@ export function parsePricing(input: string, output: string): { readonly ok: true
       } @else {
         <section class="space-y-2" aria-labelledby="advanced-endpoint-heading">
           <h3 id="advanced-endpoint-heading" class="font-semibold text-base-content">Endpoint</h3>
-          <label for="advanced-base-url" class="block text-xs font-medium text-base-content-muted">Base URL</label>
-          <input id="advanced-base-url" type="url" class="input input-bordered input-sm w-full font-mono text-xs" [value]="baseUrl()"
+          <ptah-field label="Base URL">
+          <input ptahInput id="advanced-base-url" type="url" class="w-full font-mono text-xs" tone="mono" [value]="baseUrl()"
             (input)="baseUrlDraft.set(value($event)); abandonProbe()" data-testid="advanced-base-url" />
+          </ptah-field>
           @if (baseUrlError(); as error) { <p class="text-xs text-base-content">{{ error }}</p> }
-          <label for="advanced-models-endpoint" class="block text-xs font-medium text-base-content-muted">Models endpoint</label>
-          <input id="advanced-models-endpoint" type="text" class="input input-bordered input-sm w-full font-mono text-xs"
+          <ptah-field label="Models endpoint">
+          <input ptahInput id="advanced-models-endpoint" type="text" class="w-full font-mono text-xs" tone="mono"
             [value]="modelsEndpoint()" placeholder="e.g. /v1/models" (input)="modelsEndpointDraft.set(value($event)); abandonProbe()"
             data-testid="advanced-models-endpoint" />
+          </ptah-field>
           <p class="text-xs text-base-content-muted">Path Ptah uses to list this gateway's models. Leave it empty to use the default.</p>
           @if (baseUrlChanged()) {
-            <label for="advanced-check-key" class="block text-xs font-medium text-base-content-muted">API key for the check</label>
-            <input id="advanced-check-key" type="password" autocomplete="off" class="input input-bordered input-sm w-full font-mono text-xs"
+            <ptah-field label="API key for the check">
+            <input ptahInput id="advanced-check-key" type="password" autocomplete="off" class="w-full font-mono text-xs" tone="mono"
               [value]="keyDraft()" (input)="keyDraft.set(value($event)); abandonProbe()" data-testid="advanced-check-key" />
+            </ptah-field>
             <p class="text-xs text-base-content-muted">The stored key can only be checked against the saved address. It is used for this check only and is not saved.</p>
           }
           <!-- The check's state gates Save endpoint, so it stays here; its result is also the page toast. -->
@@ -112,7 +115,7 @@ export function parsePricing(input: string, output: string): { readonly ok: true
         <section class="space-y-2" aria-labelledby="advanced-help-heading">
           <h3 id="advanced-help-heading" class="font-semibold text-base-content">Documentation URL</h3>
           <div class="flex gap-2">
-            <input id="advanced-help-url" type="url" aria-labelledby="advanced-help-heading" class="input input-bordered input-sm min-w-0 flex-1 text-xs"
+            <input ptahInput id="advanced-help-url" type="url" aria-labelledby="advanced-help-heading" class="min-w-0 flex-1 text-xs"
               [value]="helpUrl()" placeholder="https://" (input)="helpUrlDraft.set(value($event))" data-testid="advanced-help-url" />
             <button type="button" ptahButton [busy]="busy()" [disabled]="helpUrlDraft() === null || !!helpUrlError()"
               (click)="saveHelpUrl()" data-testid="advanced-save-help">Save</button>
@@ -123,14 +126,14 @@ export function parsePricing(input: string, output: string): { readonly ok: true
         <section class="space-y-2 rounded border border-base-300 bg-base-200 p-3" aria-labelledby="advanced-pricing-heading">
           <h3 id="advanced-pricing-heading" class="font-semibold text-base-content">Token pricing (per 1M tokens)</h3>
           <div class="grid grid-cols-2 gap-2">
-            <label class="text-xs text-base-content-muted">Input price ($ / 1M)
-              <input type="number" min="0" step="0.01" class="input input-bordered input-sm mt-1 w-full font-mono text-xs"
+            <ptah-field label="Input price ($ / 1M)" appearance="stacked">
+              <input ptahInput type="number" min="0" step="0.01" class="mt-1 w-full font-mono text-xs" tone="mono"
                 [value]="inputPrice()" (input)="inputPriceDraft.set(value($event))" data-testid="advanced-price-input" />
-            </label>
-            <label class="text-xs text-base-content-muted">Output price ($ / 1M)
-              <input type="number" min="0" step="0.01" class="input input-bordered input-sm mt-1 w-full font-mono text-xs"
+            </ptah-field>
+            <ptah-field label="Output price ($ / 1M)" appearance="stacked">
+              <input ptahInput type="number" min="0" step="0.01" class="mt-1 w-full font-mono text-xs" tone="mono"
                 [value]="outputPrice()" (input)="outputPriceDraft.set(value($event))" data-testid="advanced-price-output" />
-            </label>
+            </ptah-field>
           </div>
           <p class="text-xs text-base-content-muted" data-testid="advanced-pricing-note">{{ pricingNote }}</p>
           @if (!pricing().ok) { <p class="text-xs text-base-content">Enter both prices as numbers of 0 or more, or leave both empty.</p> }

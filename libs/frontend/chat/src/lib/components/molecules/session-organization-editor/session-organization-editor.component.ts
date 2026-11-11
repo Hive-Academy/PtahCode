@@ -66,7 +66,7 @@ import {
 } from '../../atoms/session-organization-chips/session-organization-labels';
 import { wrapTabWithin } from '../../../utils/focus-wrap.utils';
 
-import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective, PtahRichSelectComponent, PtahFieldComponent, PtahSelectDirective, PtahToggleDirective, type PtahSelectOption } from '@ptah-extension/ui';
 /** Longest PR URL the host accepts (`SessionAddPrLinkParams`). */
 const MAX_PR_URL_LENGTH = 2048;
 
@@ -102,7 +102,7 @@ let nextId = 0;
 @Component({
   selector: 'ptah-session-organization-editor',
   standalone: true,
-  imports: [LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective],
+  imports: [LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective, PtahRichSelectComponent, PtahFieldComponent, PtahSelectDirective, PtahToggleDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [':host { display: contents; }'],
   template: `
@@ -151,52 +151,33 @@ let nextId = 0;
 
               <!-- Priority, status, pin -->
               <div class="grid grid-cols-2 gap-2">
-                <div class="flex flex-col gap-1">
-                  <label class="text-xs font-semibold" [attr.for]="priorityId"
-                    >Priority</label
-                  >
-                  <select
+                <ptah-field label="Priority">
+                  <ptah-select
                     [id]="priorityId"
-                    class="select select-bordered select-sm w-full"
+                    [options]="priorityOptions"
+                    [value]="org.priority"
                     [disabled]="busy()"
-                    (change)="onPriority($event)"
+                    (valueChange)="onPriority($event)"
                     data-testid="session-org-priority"
-                  >
-                    @for (value of priorities; track value) {
-                      <option
-                        [value]="value"
-                        [selected]="value === org.priority"
-                      >
-                        {{ priorityLabels[value] }}
-                      </option>
-                    }
-                  </select>
-                </div>
-                <div class="flex flex-col gap-1">
-                  <label class="text-xs font-semibold" [attr.for]="statusId"
-                    >Status</label
-                  >
-                  <select
+                  />
+                </ptah-field>
+                <ptah-field label="Status">
+                  <ptah-select
                     [id]="statusId"
-                    class="select select-bordered select-sm w-full"
+                    [options]="statusOptions"
+                    [value]="org.status"
                     [disabled]="busy()"
-                    (change)="onStatus($event)"
+                    (valueChange)="onStatus($event)"
                     data-testid="session-org-status"
-                  >
-                    @for (value of statuses; track value) {
-                      <option [value]="value" [selected]="value === org.status">
-                        {{ statusLabels[value] }}
-                      </option>
-                    }
-                  </select>
-                </div>
+                  />
+                </ptah-field>
               </div>
               <label
                 class="flex items-center gap-2 min-h-6 cursor-pointer self-start"
               >
                 <input
                   type="checkbox"
-                  class="toggle toggle-sm"
+                  ptahToggle size="sm"
                   [checked]="org.pinned"
                   [disabled]="busy()"
                   (change)="onPinned($event)"
@@ -259,7 +240,7 @@ let nextId = 0;
                   <input
                     [id]="taskInputId"
                     type="text"
-                    class="input input-bordered input-sm flex-1 min-w-0 font-mono text-xs"
+                    ptahInput size="sm" tone="mono" class="flex-1 min-w-0 text-xs"
                     placeholder="TASK_2026_..."
                     [value]="taskDraft()"
                     (input)="taskDraft.set(inputValue($event))"
@@ -269,7 +250,7 @@ let nextId = 0;
                   <label class="sr-only" [attr.for]="roleId">Link role</label>
                   <select
                     [id]="roleId"
-                    class="select select-bordered select-sm"
+                    ptahSelect size="sm"
                     [disabled]="busy()"
                     (change)="onRole($event)"
                     data-testid="session-org-task-role"
@@ -365,7 +346,7 @@ let nextId = 0;
                   <input
                     [id]="prInputId"
                     type="url"
-                    class="input input-bordered input-sm flex-1 min-w-0 text-xs"
+                    ptahInput size="sm" class="flex-1 min-w-0 text-xs"
                     placeholder="https://github.com/owner/repo/pull/1"
                     [value]="prDraft()"
                     (input)="prDraft.set(inputValue($event))"
@@ -411,7 +392,7 @@ let nextId = 0;
                       >
                       <select
                         [id]="targetId"
-                        class="select select-bordered select-sm"
+                        ptahSelect size="sm"
                         (change)="onTarget($event)"
                         data-testid="session-org-editor-target"
                       >
@@ -497,8 +478,8 @@ export class SessionOrganizationEditorComponent {
   protected readonly priorities = SESSION_PRIORITIES;
   protected readonly statuses = SESSION_WORKFLOW_STATUSES;
   protected readonly roles = SESSION_TASK_LINK_ROLES;
-  protected readonly priorityLabels = SESSION_PRIORITY_LABELS;
-  protected readonly statusLabels = SESSION_STATUS_LABELS;
+  protected readonly priorityOptions: readonly PtahSelectOption<SessionPriority>[] = SESSION_PRIORITIES.map((value) => ({ value, label: SESSION_PRIORITY_LABELS[value] }));
+  protected readonly statusOptions: readonly PtahSelectOption<SessionWorkflowStatus>[] = SESSION_WORKFLOW_STATUSES.map((value) => ({ value, label: SESSION_STATUS_LABELS[value] }));
 
   private readonly idSuffix = nextId++;
   protected readonly titleId = `session-org-title-${this.idSuffix}`;
@@ -583,18 +564,16 @@ export class SessionOrganizationEditorComponent {
     this.close();
   }
 
-  protected onPriority(event: Event): void {
-    const priority = (event.target as HTMLSelectElement)
-      .value as SessionPriority;
+  protected onPriority(priority: SessionPriority | null): void {
+    if (priority === null) return;
     void this.mutate('session:setOrganization', (sessionId) => ({
       sessionId,
       priority,
     }));
   }
 
-  protected onStatus(event: Event): void {
-    const status = (event.target as HTMLSelectElement)
-      .value as SessionWorkflowStatus;
+  protected onStatus(status: SessionWorkflowStatus | null): void {
+    if (status === null) return;
     void this.mutate('session:setOrganization', (sessionId) => ({
       sessionId,
       status,

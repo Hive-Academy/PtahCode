@@ -9,7 +9,7 @@ import type {
   PeerSessionRow,
   PeerSessionSendResult,
 } from '@ptah-extension/shared';
-import { PeerSessionPickerComponent, PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
+import { PeerSessionPickerComponent, PtahButtonDirective, PtahIconButtonDirective, PtahFieldComponent, PtahTextareaDirective } from '@ptah-extension/ui';
 
 /**
  * PeerSessionSendDialogComponent — presentational modal dialog for composing
@@ -34,7 +34,7 @@ import { PeerSessionPickerComponent, PtahButtonDirective, PtahIconButtonDirectiv
   selector: 'ptah-peer-session-send-dialog',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PeerSessionPickerComponent, PtahButtonDirective, PtahIconButtonDirective],
+  imports: [PeerSessionPickerComponent, PtahButtonDirective, PtahIconButtonDirective, PtahFieldComponent, PtahTextareaDirective],
   template: `
     @if (isOpen()) {
       <dialog class="modal modal-open" data-testid="peer-session-send-dialog">
@@ -91,23 +91,17 @@ import { PeerSessionPickerComponent, PtahButtonDirective, PtahIconButtonDirectiv
             }
 
             <!-- Message input textarea -->
-            <div class="flex flex-col gap-1">
-              <label
-                for="peer-session-message-input"
-                class="text-xs font-semibold text-base-content-muted"
-              >
-                Message
-              </label>
+            <ptah-field label="Message" appearance="stacked">
               <textarea
                 id="peer-session-message-input"
-                class="textarea textarea-bordered w-full h-24 text-sm resize-none"
+                ptahTextarea class="w-full h-24 text-sm resize-none"
                 placeholder="Type a message or instruction for the peer session..."
                 [value]="message()"
                 (input)="onMessageInput($event)"
                 [disabled]="isSending() || sendResult() !== null"
                 data-testid="peer-session-message-input"
               ></textarea>
-            </div>
+            </ptah-field>
 
             <!-- Criterion 5: Cost disclosure notice BEFORE sending -->
             <div

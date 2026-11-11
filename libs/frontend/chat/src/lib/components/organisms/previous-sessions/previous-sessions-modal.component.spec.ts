@@ -1375,10 +1375,9 @@ describe('PreviousSessionsModalComponent', () => {
       expect(list().classList).toContain('overscroll-contain');
       expect(header.contains(list())).toBe(false);
 
-      const field = search().closest('label');
-      expect(field?.classList).toContain('h-8');
-      expect(field?.classList).toContain('rounded-lg');
-      expect(field?.classList).toContain('bg-surface-0');
+      // The search box is the shared `ptahInput` (sm); no wrapping label.
+      expect(search().hasAttribute('ptahinput')).toBe(true);
+      expect(search().closest('label')).toBeNull();
     });
 
     // TASK_2026_628: `transition-all` makes Chromium start `scrollbar-color`

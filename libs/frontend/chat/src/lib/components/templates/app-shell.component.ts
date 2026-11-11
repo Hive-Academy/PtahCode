@@ -34,7 +34,13 @@ import {
   SkeletonBlockComponent,
   ThemeToggleComponent,
 } from '@ptah-extension/chat-ui';
-import { NativePopoverComponent, PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
+import {
+  NativePopoverComponent,
+  PtahButtonDirective,
+  PtahFieldComponent,
+  PtahIconButtonDirective,
+  PtahInputDirective,
+} from '@ptah-extension/ui';
 import { AgentMonitorStore } from '@ptah-extension/chat-streaming';
 import { KeyboardShortcutsService } from '../../services/keyboard-shortcuts.service';
 import {
@@ -124,7 +130,9 @@ import { AgentFollowUpQueueService } from '../../services/agent-follow-up-queue.
     PreviousSessionsModalComponent,
     PreviousSessionsLoadStateComponent,
     PtahButtonDirective,
+    PtahFieldComponent,
     PtahIconButtonDirective,
+    PtahInputDirective,
   ],
   providers: [
     {

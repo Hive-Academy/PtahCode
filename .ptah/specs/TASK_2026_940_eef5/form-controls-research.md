@@ -121,3 +121,7 @@ Adopt the checkbox look in `libs/frontend/chat-ui/src/lib/molecules/setup-plugin
 4. **Floating label and label-text.** No floating label exists and only 5 `label-text` uses exist. Recommendation: no floating label in step 1. Use `ptah-field` label text above the control.
 5. **Settings owns 96 controls (30 %).** Recommendation: do the Settings adoption in the Settings extraction batches. Let the owners accept `ptahSettingsField` as a shell.
 Note (not a user decision): **Name coverage is high (3 controls without a name) but name quality is unknown.** Recommendation: add a ratchet rule that requires `aria-label` or a field label on each new control.
+
+## Named exception: radios (decision of the coordinator)
+
+Radios (23 tokens in the baseline) are out of scope for family 2. There is no `ptahRadio` owner. They stay raw as a named exception.

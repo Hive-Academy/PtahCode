@@ -24,7 +24,7 @@ import {
   signal,
 } from '@angular/core';
 import { ListFilter, LucideAngularModule, Search, X } from 'lucide-angular';
-import { NativePopoverComponent } from '@ptah-extension/ui';
+import { NativePopoverComponent, PtahCheckboxDirective, PtahInputDirective, PtahSelectDirective, PtahToggleDirective } from '@ptah-extension/ui';
 import {
   SESSION_PRIORITIES,
   SESSION_WORKFLOW_STATUSES,
@@ -69,17 +69,6 @@ const GROUP_OPTIONS: readonly { value: SessionListGroup; label: string }[] = [
   { value: 'parent', label: 'By parent' },
 ];
 
-/**
- * The app's keyboard focus ring (`styles.css` `:focus-visible`, the one the
- * buttons show). daisyUI's `.input`/`.select` focus outline is a 20% tint and
- * wins over the global rule, so these controls restate it as utilities.
- */
-const FOCUS_RING =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))]';
-/** The same ring on a label that wraps its input (search box). */
-const FOCUS_RING_WITHIN =
-  'has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-[oklch(var(--s))]';
-
 let nextId = 0;
 
 /**
@@ -99,7 +88,7 @@ function keepDraftUntilTrimmedChange(
 @Component({
   selector: 'ptah-session-filter-bar',
   standalone: true,
-  imports: [LucideAngularModule, NativePopoverComponent],
+  imports: [LucideAngularModule, NativePopoverComponent, PtahCheckboxDirective, PtahInputDirective, PtahSelectDirective, PtahToggleDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- One wrapping toolbar (TASK_2026_679 design 3.4). From 640 px the
@@ -113,17 +102,15 @@ function keepDraftUntilTrimmedChange(
       aria-label="Filter sessions"
       data-testid="session-filter-bar"
     >
-      <label
-        class="input input-sm rounded-lg h-8 min-h-8 w-full min-w-0 sm:w-auto sm:flex-1 sm:min-w-[200px] flex items-center gap-1.5 bg-surface-0 border-surface-border ${FOCUS_RING_WITHIN}"
-      >
+      <div class="relative w-full min-w-0 sm:w-auto sm:flex-1 sm:min-w-[200px]">
         <lucide-angular
           [img]="SearchIcon"
-          class="w-3 h-3 text-base-content-muted flex-shrink-0"
+          class="absolute left-2 top-2.5 w-3 h-3 text-base-content-muted pointer-events-none"
           aria-hidden="true"
         />
         <input
           type="text"
-          class="grow text-xs min-w-0 placeholder:text-base-content-muted"
+          ptahInput size="sm" class="w-full pl-7 pr-8 text-xs min-w-0 placeholder:text-base-content-muted"
           placeholder="Search sessions..."
           aria-label="Search sessions by name"
           [value]="text()"
@@ -134,14 +121,14 @@ function keepDraftUntilTrimmedChange(
         @if (text()) {
           <button
             type="button"
-            class="btn btn-ghost btn-xs btn-circle w-6 h-6 min-h-6 p-0"
+            class="btn btn-ghost btn-xs btn-circle absolute right-1 top-1 w-6 h-6 min-h-6 p-0"
             aria-label="Clear search"
             (click)="clearText()"
           >
             <lucide-angular [img]="XIcon" class="w-3 h-3" aria-hidden="true" />
           </button>
         }
-      </label>
+      </div>
 
       <div class="flex shrink-0 items-center">
         <ptah-native-popover
@@ -191,7 +178,7 @@ function keepDraftUntilTrimmedChange(
                 >
                   <input
                     type="checkbox"
-                    class="checkbox checkbox-xs"
+                    ptahCheckbox size="xs"
                     [checked]="statuses().includes(option.value)"
                     (change)="toggleStatus(option.value)"
                     [attr.data-testid]="'session-filter-status-' + option.value"
@@ -209,7 +196,7 @@ function keepDraftUntilTrimmedChange(
                 >
                   <input
                     type="checkbox"
-                    class="checkbox checkbox-xs"
+                    ptahCheckbox size="xs"
                     [checked]="priorities().includes(option.value)"
                     (change)="togglePriority(option.value)"
                     [attr.data-testid]="
@@ -228,7 +215,7 @@ function keepDraftUntilTrimmedChange(
               <input
                 [id]="taskInputId"
                 type="text"
-                class="input input-sm rounded-lg h-8 min-h-8 w-full bg-surface-0 border-surface-border placeholder:text-base-content-muted ${FOCUS_RING}"
+                ptahInput size="sm" class="w-full placeholder:text-base-content-muted"
                 placeholder="TASK_2026_..."
                 [value]="taskId()"
                 (input)="onTaskId($event)"
@@ -242,7 +229,7 @@ function keepDraftUntilTrimmedChange(
               >
                 <input
                   type="checkbox"
-                  class="toggle toggle-xs"
+                  ptahToggle size="xs"
                   [checked]="pinnedOnly()"
                   (change)="setPinnedOnly($event)"
                   data-testid="session-filter-pinned"
@@ -254,7 +241,7 @@ function keepDraftUntilTrimmedChange(
               >
                 <input
                   type="checkbox"
-                  class="toggle toggle-xs"
+                  ptahToggle size="xs"
                   [checked]="hasPrOnly()"
                   (change)="setHasPrOnly($event)"
                   data-testid="session-filter-has-pr"
@@ -284,7 +271,7 @@ function keepDraftUntilTrimmedChange(
         <label class="sr-only" [attr.for]="sortSelectId">Sort sessions</label>
         <select
           [id]="sortSelectId"
-          class="select select-sm rounded-lg h-8 min-h-8 min-w-0 flex-1 sm:flex-initial sm:w-32 pl-2 pr-6 bg-surface-0 border-surface-border text-xs ${FOCUS_RING}"
+          ptahSelect size="sm" class="min-w-0 flex-1 sm:flex-initial sm:w-32 text-xs"
           (change)="onSort($event)"
           data-testid="session-filter-sort"
         >
@@ -298,7 +285,7 @@ function keepDraftUntilTrimmedChange(
         <label class="sr-only" [attr.for]="groupSelectId">Group sessions</label>
         <select
           [id]="groupSelectId"
-          class="select select-sm rounded-lg h-8 min-h-8 min-w-0 flex-1 sm:flex-initial sm:w-32 pl-2 pr-6 bg-surface-0 border-surface-border text-xs ${FOCUS_RING}"
+          ptahSelect size="sm" class="min-w-0 flex-1 sm:flex-initial sm:w-32 text-xs"
           (change)="onGroup($event)"
           data-testid="session-filter-group"
         >

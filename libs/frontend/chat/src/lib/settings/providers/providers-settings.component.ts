@@ -64,7 +64,7 @@ import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.
 import { commitToast } from '../feedback/settings-commit-toast';
 // Rendered only inside `@defer`, so it stays out of the eager settings bundle.
 import { KimiCodeLoginProgressComponent } from './connection-drawer/kimi-code-login-progress.component';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
 
 /**
  * Deep-link sections this page owns. Background roles and CLI agents are on the same tab, in
@@ -104,6 +104,7 @@ const CONTROL =
     ProviderCatalogModalComponent,
     KimiCodeLoginProgressComponent,
     PtahButtonDirective,
+    PtahInputDirective,
   ],
   template: `
     <div
@@ -255,11 +256,10 @@ const CONTROL =
               </div>
               <div class="flex flex-wrap items-center gap-2">
                 <input
+                  ptahInput
+                  size="sm"
                   type="search"
-                  [class]="
-                    'input input-bordered input-sm w-52 border-base-content-muted bg-base-100 text-sm text-base-content ' +
-                    focusRing
-                  "
+                  class="w-52 text-sm text-base-content"
                   placeholder="Filter connections…"
                   aria-label="Filter connections"
                   data-testid="connections-filter"

@@ -167,14 +167,16 @@ describe('SessionOrganizationEditorComponent', () => {
     );
     await open(organization());
 
-    const priority = el<HTMLSelectElement>('session-org-priority');
-    priority.value = 'urgent';
-    priority.dispatchEvent(new Event('change'));
+    el('session-org-priority').querySelector<HTMLButtonElement>('[role="combobox"]')!.click();
+    await settle();
+    [...el('session-org-priority').querySelectorAll<HTMLElement>('[role="option"]')]
+      .find((option) => option.textContent?.includes('Urgent'))!.click();
     await settle();
 
-    const status = el<HTMLSelectElement>('session-org-status');
-    status.value = 'done';
-    status.dispatchEvent(new Event('change'));
+    el('session-org-status').querySelector<HTMLButtonElement>('[role="combobox"]')!.click();
+    await settle();
+    [...el('session-org-status').querySelectorAll<HTMLElement>('[role="option"]')]
+      .find((option) => option.textContent?.includes('Done'))!.click();
     await settle();
 
     el<HTMLInputElement>('session-org-pinned').click();
@@ -316,9 +318,10 @@ describe('SessionOrganizationEditorComponent', () => {
     );
     await open(organization());
 
-    const status = el<HTMLSelectElement>('session-org-status');
-    status.value = 'archived';
-    status.dispatchEvent(new Event('change'));
+    el('session-org-status').querySelector<HTMLButtonElement>('[role="combobox"]')!.click();
+    await settle();
+    [...el('session-org-status').querySelectorAll<HTMLElement>('[role="option"]')]
+      .find((option) => option.textContent?.includes('Archived'))!.click();
     await settle();
     const alert = el('session-org-error');
     expect(alert.getAttribute('role')).toBe('alert');

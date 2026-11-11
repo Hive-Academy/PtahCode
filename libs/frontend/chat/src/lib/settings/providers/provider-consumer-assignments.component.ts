@@ -26,6 +26,7 @@ import {
   ProviderModelPickerComponent,
   PtahButtonDirective,
   PtahIconButtonDirective,
+  PtahInputDirective,
   type ProviderIdentityOption,
   type ProviderModelSelection,
 } from '@ptah-extension/ui';
@@ -87,6 +88,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
     ProviderModelPickerComponent,
     PtahButtonDirective,
     PtahIconButtonDirective,
+    PtahInputDirective,
     SettingScopeRowComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -420,13 +422,12 @@ const TIMEOUT_DEFAULT_SEC = 120;
                       >Enhancement time limit in seconds</label
                     >
                     <input
+                      ptahInput
+                      size="sm"
                       #timeoutInput
                       id="enhance-timeout-input"
                       type="number"
-                      [class]="
-                        'input input-bordered input-sm w-24 border-base-content-muted bg-base-100 text-sm text-base-content ' +
-                        focusRing
-                      "
+                      class="w-24 text-sm text-base-content"
                       [min]="timeoutMinSec()"
                       [max]="timeoutMaxSec()"
                       [value]="timeoutDraftSec()"
