@@ -60,9 +60,14 @@ rejects any key not listed here — pass only the documented parameters.
 When a `Routing:` system reminder is present, reuse its taskType, depth and executor
 suggestions; do not repeat host pre-flight routing. Gate 0.1 still applies.
 
-The `tier` and `effort` in a `ptah_route_decide` roster are advisory for system CLI lanes,
-not universal CLI model IDs. System CLI model resolution is request `model` →
-`agentOrchestration.<cli>Model` setting → native CLI default. A per-CLI tier map is future work.
+For system CLI rows other than `claude`, `model` is `lane-default` unless the decision
+chose an exact ID from that CLI's live model list (`source: model`). Deterministic ranking
+uses `lane-default` or the configured model. Pass a concrete row `model` as spawn `model`;
+omit it for `lane-default`.
+For ptah-cli and `cli: "claude"` rows, pass `tier` as `modelTier`, not row `model`.
+Pass row `effort` as spawn `effort` when present; it overrides the per-CLI effort setting.
+A user-pinned lane/model wins. Never invent a model id. System CLI resolution is request
+`model` -> `agentOrchestration.<cli>Model` setting -> native CLI default.
 
 ## 3. Task contract
 

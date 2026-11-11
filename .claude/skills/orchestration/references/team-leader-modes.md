@@ -100,9 +100,15 @@ executor prompt **only** from that entry plus the generic lane policy and role; 
 plan, `context.md` or other batches. The entry must contain everything the executor needs.
 
 When `ptah_route_decide` is listed, make the post-decomposition routing call with each batch as a phase with its `shape` and `weight`;
-the roster returns `tier` and `effort`. For a subagent, pass `tier` as the Agent call's `model`
-alias and `effort` where supported. For CLI lanes, `tier` is advisory; model resolution remains
-request model → `agentOrchestration.<cli>Model` setting → native CLI default.
+the roster returns `model`, `tier` and `effort`. For a subagent, pass `tier` as the Agent call's `model`
+alias and `effort` where supported. For system CLI rows other than `claude`, `model` is
+`lane-default` unless the decision chose an exact ID from that CLI's live model list
+(`source: model`). Deterministic ranking uses `lane-default`. Pass a concrete row `model`
+as spawn `model`; omit it for `lane-default`. For ptah-cli and `cli: "claude"` rows,
+pass `tier` as `modelTier`, not row `model`. Pass row `effort` as spawn `effort` when present;
+it overrides the per-CLI effort setting. A user-pinned lane/model wins. Never invent a
+model id. System CLI resolution is request `model` -> `agentOrchestration.<cli>Model`
+setting -> native CLI default.
 
 - **Sequential, subagent** → one `Task()` with the prompt built from that batch entry.
 - **Sequential, CLI lane** → one capable lane for the bounded batch, including coupled files;

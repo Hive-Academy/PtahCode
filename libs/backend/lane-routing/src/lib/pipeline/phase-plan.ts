@@ -18,6 +18,7 @@ import { ModelTierSchema } from '../contracts/route-decide-result.schema';
 import type { LaneQuestion, ModelRequestOutcome } from './model-refine';
 import { resolvePhase } from './phase-resolve';
 import {
+  isSystemCliLane,
   toSubagentCandidate,
   type RoutingCandidate,
 } from '../ranking/candidate.types';
@@ -33,6 +34,8 @@ import { score, type CandidateScore } from '../ranking/score';
 import { spread, type SpreadResult } from '../ranking/spread';
 import type { FallbackCause } from '../reasons/compile-reasons';
 import { policyForPhase, type PhasePolicy } from './tier-effort-policy';
+import { LANE_MODEL_ALTERNATES_CAP } from '../routing-constants';
+import { AUTOMATIC_MATRIX_MODEL } from '../matrix/local-derivation';
 
 const LANE_INSTRUCTIONS = 'Choose the executor for this phase. Each score already includes past outcomes; pastOutcomes lists the delivered and failed run counts behind it. No entry means no verified runs were available for that executor in the outcome window.';
 
@@ -90,13 +93,20 @@ export interface PhasePlan {
   readonly policy: PhasePolicy;
   readonly constraint: PhaseConstraintResult;
   readonly ranked: readonly ScoredCandidate[];
+  readonly alternates?: readonly AlternateOption[];
   readonly spread: SpreadResult | null;
+}
+
+interface AlternateOption {
+  readonly option: DecisionOption;
+  readonly scored: CandidateScore;
 }
 
 export interface ChosenResolution {
   readonly kind: 'chosen';
   readonly source: 'model' | 'ranking' | 'pin';
   readonly candidate: RoutingCandidate;
+  readonly selectedScore?: CandidateScore;
   readonly cause: FallbackCause | null;
   readonly proposal: {
     readonly option: string;
@@ -184,6 +194,7 @@ export function planRoutePhases(
       rotate,
     });
     cursor = spreadResult.rotation;
+    const ranked = orderScored(scored, spreadResult.ranking);
     plans.push({
       phaseId: phase.id,
       kind: phase.kind,
@@ -192,7 +203,8 @@ export function planRoutePhases(
       weight: phase.weight,
       policy,
       constraint,
-      ranked: orderScored(scored, spreadResult.ranking),
+      ranked,
+      alternates: alternateOptions(ranked, taskKind, gathered),
       spread: spreadResult,
     });
   }
@@ -223,14 +235,56 @@ export function dispatchMode(caller: OpenedCaller): DispatchMode {
 
 export function laneQuestion(plan: PhasePlan): LaneQuestion {
   const top = Math.max(...plan.ranked.map((row) => row.scored.score));
+  const primaries = plan.ranked.filter((row) => insideClosenessBand(top, row.scored.score));
+  const eligible = new Set(primaries.map((row) => row.candidate.id));
   return {
     phaseId: plan.phaseId,
     taskKind: plan.taskKind,
     instructions: LANE_INSTRUCTIONS,
-    options: plan.ranked
-      .filter((row) => insideClosenessBand(top, row.scored.score))
-      .map(toOption),
+    primaryCount: primaries.length,
+    options: [
+      ...primaries.map(toOption),
+      ...(plan.alternates ?? [])
+        .filter((entry) => eligible.has(entry.option.laneId))
+        .map((entry) => entry.option),
+    ],
   };
+}
+
+function alternateOptions(
+  ranked: readonly ScoredCandidate[],
+  taskKind: OutcomeTaskKind,
+  gathered: GatheredCall,
+): AlternateOption[] {
+  const options: AlternateOption[] = [];
+  const top = Math.max(...ranked.map((row) => row.scored.score));
+  for (const row of ranked) {
+    const candidate = row.candidate;
+    if (!isSystemCliLane(candidate)) continue;
+    const seen = new Set([row.scored.model]);
+    const laneOptions: AlternateOption[] = [];
+    for (const listed of gathered.models.get(candidate.id)?.models ?? []) {
+      if (listed.provenance !== 'reported' || listed.auto === true ||
+          listed.id === LANE_DEFAULT_MODEL || listed.id === AUTOMATIC_MATRIX_MODEL ||
+          listed.id === '' || seen.has(listed.id)) continue;
+      seen.add(listed.id);
+      const resolved = gathered.matrix.resolve(candidate.family, listed.id, taskKind);
+      if (!insideClosenessBand(top, resolved.score)) continue;
+      const scored: CandidateScore = {
+        ...row.scored,
+        model: listed.id,
+        provenance: 'reported',
+        score: resolved.score,
+        cell: resolved.cell,
+        profileModel: resolved.profileModel,
+        noProfile: resolved.noProfile,
+      };
+      laneOptions.push({ option: toOption({ candidate, scored }), scored });
+    }
+    laneOptions.sort((a, b) => b.scored.score - a.scored.score);
+    options.push(...laneOptions.slice(0, LANE_MODEL_ALTERNATES_CAP));
+  }
+  return options;
 }
 
 export function implementersOf(

@@ -48,7 +48,7 @@ export function askedFromLane(
   phases: readonly LaneQuestion[],
   offered: ReadonlyMap<string, readonly DecisionOption[]>,
 ): readonly AskedQuestion[] {
-  return phases.map((phase) => ({
+  return phases.filter((phase) => offered.has(phase.phaseId)).map((phase) => ({
     phaseId: phase.phaseId,
     labels: (offered.get(phase.phaseId) ?? []).map(
       (_, index) => `o${index + 1}`,

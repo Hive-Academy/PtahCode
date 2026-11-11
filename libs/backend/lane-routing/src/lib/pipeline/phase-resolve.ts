@@ -3,7 +3,6 @@
  * ranking pick when that pass did not send the phase.
  */
 import type { RoutingCandidate } from '../ranking/candidate.types';
-import { insideClosenessBand } from '../ranking/closeness-band';
 import type { FallbackCause } from '../reasons/compile-reasons';
 import { MIN_OPTIONS_PER_PHASE } from '../routing-constants';
 import { optionIndex } from './model-refine';
@@ -13,13 +12,13 @@ import type {
   PhasePlan,
   PhaseResolution,
 } from './phase-plan';
+import { laneQuestion } from './phase-plan';
 
 export function isSendable(plan: PhasePlan): boolean {
-  const top = Math.max(...plan.ranked.map((candidate) => candidate.scored.score));
   return (
     plan.constraint.status === 'eligible' &&
     !plan.constraint.pinAccepted &&
-    plan.ranked.filter((row) => insideClosenessBand(top, row.scored.score)).length >= MIN_OPTIONS_PER_PHASE
+    laneQuestion(plan).options.length >= MIN_OPTIONS_PER_PHASE
   );
 }
 
@@ -37,31 +36,30 @@ export function resolvePhase(
   }
   const pick = rankingPick(plan);
   if (!isSendable(plan)) return rankingResolution(pick, 'ranking', null, null);
+  const alternatesOnly = laneQuestion(plan).primaryCount < MIN_OPTIONS_PER_PHASE;
+  const fallback = (cause: FallbackCause | null, proposal: ChosenResolution['proposal'] = null) =>
+    rankingResolution(pick, 'ranking', alternatesOnly ? null : cause, alternatesOnly ? null : proposal);
   if (context.limited.has(plan.phaseId)) {
-    return rankingResolution(pick, 'ranking', 'question-limit', null);
+    return fallback('question-limit');
   }
   if (context.mode === 'blocked') {
-    return rankingResolution(pick, 'ranking', context.blockedCause, null);
+    return fallback(context.blockedCause);
   }
   if (context.mode === 'ranking' || context.outcome === null) {
-    return rankingResolution(pick, 'ranking', null, null);
+    return fallback(null);
   }
   const outcome = context.outcome;
   if (!outcome.sent || outcome.requestCause !== null) {
-    return rankingResolution(pick, 'ranking', outcome.requestCause, null);
+    return fallback(outcome.requestCause);
   }
+  if (!outcome.offered.has(plan.phaseId)) return fallback(null);
   const validation = outcome.answers.get(plan.phaseId);
   if (
     validation === undefined ||
     validation.cause !== null ||
     validation.choice === null
   ) {
-    return rankingResolution(
-      pick,
-      'ranking',
-      validation?.cause ?? 'bad-output',
-      validation?.proposal ?? null,
-    );
+    return fallback(validation?.cause ?? 'bad-output', validation?.proposal ?? null);
   }
   const options = outcome.offered.get(plan.phaseId) ?? [];
   const index = optionIndex(validation.choice);
@@ -70,13 +68,17 @@ export function resolvePhase(
     option === undefined
       ? undefined
       : plan.ranked.find((entry) => entry.candidate.id === option.laneId);
-  if (row === undefined) {
-    return rankingResolution(pick, 'ranking', 'bad-output', null);
+  if (option === undefined || row === undefined) {
+    return fallback('bad-output');
   }
+  const alternate = plan.alternates?.find((entry) =>
+    entry.option.laneId === option.laneId && entry.option.model === option.model,
+  );
   return {
     kind: 'chosen',
     source: 'model',
     candidate: row.candidate,
+    ...(alternate !== undefined ? { selectedScore: alternate.scored } : {}),
     cause: null,
     proposal: null,
     reported: validation.confidence,
