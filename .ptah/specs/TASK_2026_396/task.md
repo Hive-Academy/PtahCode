@@ -18,7 +18,7 @@ Sending one fails with:
 
 ```
 Could not resume the session: ENOENT: no such file or directory, access
-'C:\Users\abdal\.claude\projects\D--projects-ptah-extension\01a081dc-2990-7dd1-b292-22a5093f090e.jsonl'
+'C:\Users\dev\.claude\projects\D--projects-ptah-extension\01a081dc-2990-7dd1-b292-22a5093f090e.jsonl'
 ```
 
 See `context.md` for the diagnosis and `task-description.md` for scope and

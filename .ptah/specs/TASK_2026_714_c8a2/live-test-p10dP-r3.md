@@ -2,7 +2,7 @@
 
 - Date: 2026-10-31 23:42 to 2026-11-01 00:01 local. Worktree `codex-runtime-integration`, head `16218ed0a`
   (code `c4266a3dc` + docs).
-- F: `C:\Users\abdal\AppData\Local\Temp\ptah-live-p10dL3-20261031-234219\` (`app.log`, `a.json`, `b.json`,
+- F: `C:\Users\dev\AppData\Local\Temp\ptah-live-p10dL3-20261031-234219\` (`app.log`, `a.json`, `b.json`,
   `mark-a.txt`, `mark-b.txt`, `launch-epoch.txt`, `lane-out.after-a.txt`, `ptah.db`, `sessions.db`, `shots\`,
   `settings.json.bak`, `settings.after.json`, `build.log` `wasm.log` `build2.log` and `*.exit`, helper scripts
   `cdp.js` `s-*.js` `turns.js` `db.js`).

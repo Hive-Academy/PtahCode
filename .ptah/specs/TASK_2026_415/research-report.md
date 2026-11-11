@@ -3,7 +3,7 @@
 Status: read-only research. No product code changed. No commits, no pushes, no
 agent spawns, no production DB/log mutation, no live-app restart.
 Checkout examined: `D:/projects/ptah-extension/.claude-worktrees/boot-readiness-timeout`.
-Log examined: `C:/Users/abdal/AppData/Roaming/Ptah/logs/Ptah Electron-2026-09-10.log`.
+Log examined: `C:/Users/dev/AppData/Roaming/Ptah/logs/Ptah Electron-2026-09-10.log`.
 
 ---
 

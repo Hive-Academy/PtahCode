@@ -10,7 +10,7 @@ loopback 41873, reached through `ssh -W`). Phase F = Machines view, **PR #982**
 worktree `/home/amun/ptah-extension/.claude-worktrees/remote-workers-phase-f`.
 PR #982 is **ready for review** (no longer draft). Phase F is the last phase of this task.
 All user decisions: `decisions.md` rows 12–41. Do not ask again about anything recorded there.
-amun-PC stays the parent; the abdallah-pc move (issue #988) comes later.
+amun-PC stays the parent; the acme-pc move (issue #988) comes later.
 
 ## Done this session (all verified, scoped)
 

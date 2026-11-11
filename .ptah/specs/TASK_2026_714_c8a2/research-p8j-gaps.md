@@ -23,7 +23,7 @@ The `permissionLevel` gate, the details gate and the real-path gate would all ha
 - `proposedExecpolicyAmendment` and `reason` are not gated.
 
 **Gate 3, cwd handling (`:111-118`, `:127`): passes.**
-- The rollout `turn_context.cwd` is a plain `C:\Users\abdal\...\ws`. The `file:///` form (3 rollout entries) is converted by `fileURLToPath` at `:113`. Candidate (c) is handled.
+- The rollout `turn_context.cwd` is a plain `C:\Users\dev\...\ws`. The `file:///` form (3 rollout entries) is converted by `fileURLToPath` at `:113`. Candidate (c) is handled.
 - `threadCwd` is `prepared.profile.cwd` (`A/codex-chat-adapter.ts:283`, normalized).
 - `pathWithin(cwd, threadCwd)` with equal paths gives `relative === ''`, which is accepted (`A/codex-read-only-command.ts:88-94`).
 

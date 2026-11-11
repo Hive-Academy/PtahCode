@@ -1,7 +1,7 @@
 # Live test 10d.P r4: native Codex CLI lanes in Electron (after fix 10d.L5)
 
 - Date: 2026-11-01 01:24 to 01:52 local. Worktree `codex-runtime-integration`, head `2d1c69dd2`.
-- F: `C:\Users\abdal\AppData\Local\Temp\ptah-live-p10dL4-20261101-012450\` (`app.log`, `a.json`, `c1.json`,
+- F: `C:\Users\dev\AppData\Local\Temp\ptah-live-p10dL4-20261101-012450\` (`app.log`, `a.json`, `c1.json`,
   `c2.json`, `mark-*.txt`, `launch-epoch.txt`, `root-pid.txt`, `lane-out.after-a.txt`, `ptah.db`, `sessions.db`,
   `shots\`, `settings.json.bak`, `settings.after.json`, `build.log` `wasm.log` `build2.log` and `*.exit`, helper
   scripts copied from r3, plus `turns.js` (now filtered by this run's `ws` cwd) and the budget guards `guard.js`

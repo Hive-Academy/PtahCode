@@ -23,11 +23,11 @@ A rendered browser screenshot was unavailable because this batch forbids build, 
 
 ## Verification
 
-Baseline capture: `npm run verify -- -t test -p @ptah-extension/ui,@ptah-extension/chat -- --testPathPatterns="(session-budget-settings|lane-guards-settings).component.spec" --updateSnapshot | Select-Object -Last 60` — 2/2 Nx tasks succeeded.
+Baseline capture: `npm run verify -- -t test -p @ptah-extension/ui,@ptah-extension/chat -- --testPathPatterns="(session-budget-settings|lane-guards-settings).component.spec" --updateSnapshot | Select-Object -Last 60` ï¿½ 2/2 Nx tasks succeeded.
 
-Required full command: `npm run verify -- -p @ptah-extension/ui,@ptah-extension/chat | Select-Object -Last 60` — exit 1. Output tail: lint/typecheck 3/4 tasks succeeded; UI lint initially failed on Angular's element-prefix rule for the required attribute selector. A narrow local exception was then added. Test phase 1/2 tasks succeeded: UI passed; chat failed. Chat log: 251 suites passed, 104 failed; 4,416 tests passed, 5 failed, 2 inline snapshots failed at that point due to hint spaces. Most suite failures are `marked` module resolution at the worktree `node_modules/marked/lib/marked.umd.js`. Hint spaces were fixed after this full run. The lint correction and the unrelated `marked` failures were not rechecked by another full run.
+Required full command: `npm run verify -- -p @ptah-extension/ui,@ptah-extension/chat | Select-Object -Last 60` ï¿½ exit 1. Output tail: lint/typecheck 3/4 tasks succeeded; UI lint initially failed on Angular's element-prefix rule for the required attribute selector. A narrow local exception was then added. Test phase 1/2 tasks succeeded: UI passed; chat failed. Chat log: 251 suites passed, 104 failed; 4,416 tests passed, 5 failed, 2 inline snapshots failed at that point due to hint spaces. Most suite failures are `marked` module resolution at the worktree `node_modules/marked/lib/marked.umd.js`. Hint spaces were fixed after this full run. The lint correction and the unrelated `marked` failures were not rechecked by another full run.
 
-Final focused command: `npm run verify -- -t test -p @ptah-extension/ui,@ptah-extension/chat -- --testPathPatterns="(settings-field|session-budget-settings|lane-guards-settings).component.spec" | Select-Object -Last 60` — exit 0; Nx 2/2 tasks succeeded, 1 cached. Ptah diagnostics found no issues in the four requested changed TypeScript files; it reported errors only in sibling files. No UI class or degradation ratchet failure appeared in the lint output; the UI lint error was selector-specific.
+Final focused command: `npm run verify -- -t test -p @ptah-extension/ui,@ptah-extension/chat -- --testPathPatterns="(settings-field|session-budget-settings|lane-guards-settings).component.spec" | Select-Object -Last 60` ï¿½ exit 0; Nx 2/2 tasks succeeded, 1 cached. Ptah diagnostics found no issues in the four requested changed TypeScript files; it reported errors only in sibling files. No UI class or degradation ratchet failure appeared in the lint output; the UI lint error was selector-specific.
 
 ## Files changed
 
@@ -57,7 +57,7 @@ Apply the extracted shell to other repeated numeric/text Settings rows only afte
 ```text
 NX   2 tasks: 1 succeeded, 1 failed
 ? nx run @ptah-extension/chat:test
-full log: C:\Users\abdal\.nx\d60e02896ae18ad9\cache\terminalOutputs\17499264056795573320
+full log: C:\Users\dev\.nx\d60e02896ae18ad9\cache\terminalOutputs\17499264056795573320
 [verify 2026-11-10T17:10:05.018Z] lock slot 0 acquired after 0s
 [verify 2026-11-10T17:10:05.020Z] starting verify lint,typecheck
 Run duration: 34.8s

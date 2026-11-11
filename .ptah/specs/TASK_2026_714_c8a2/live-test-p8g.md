@@ -2,7 +2,7 @@
 
 Date: 2026-10-29. The user approved this run. It was a test and report only: no product source was touched and nothing was committed.
 
-- Evidence folder F: `C:\Users\abdal\AppData\Local\Temp\ptah-live-p8g-20261029-003228\`
+- Evidence folder F: `C:\Users\dev\AppData\Local\Temp\ptah-live-p8g-20261029-003228\`
   (`app.log`, `build.log`, `build2.log`, `wasm.log`, `shots\`, `settings.json.bak`, `scan.js`, `init-time.js`,
   Playwright scripts copied from p8f, `mark-*.txt` log offsets)
 - Single-instance check: the only other root electron was the Playwright e2e one (PID 9872, `wizard-library-alignment`,

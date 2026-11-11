@@ -2,7 +2,7 @@
 
 - Date: 2026-10-29. Model: gpt-6-sol only. Approval mode Manual except in D14a. CDP port 9336.
 - Paid turns used: **8 of 10** (T1 to T8), one run (app restarts only). Run 1 pid 42436; later restarts 38484, 28140, 23952, 20448, 44460, 1844, 43952 (this worktree's roots only, stopped with `taskkill /T /F`).
-- Evidence folder F: `C:\Users\abdal\AppData\Local\Temp\ptah-live-p8j-20261029\` (`app-run1..8.log`, `app.log` = all joined, `build.log`, `shots\`, `settings.json.bak`, `settings.after.json`, `mark-*.txt` log line offsets, helper scripts).
+- Evidence folder F: `C:\Users\dev\AppData\Local\Temp\ptah-live-p8j-20261029\` (`app-run1..8.log`, `app.log` = all joined, `build.log`, `shots\`, `settings.json.bak`, `settings.after.json`, `mark-*.txt` log line offsets, helper scripts).
 - settings.json restore: `cmp settings.json.bak ~/.ptah/settings.json` = **identical (CMP_OK)**. `settings.after.json` differs from the backup at line 47 (the app wrote settings during the run); it was restored to the backup.
 - Build: `build-dev`, `copy-wasm.js`, `copy-renderer-dev` all exit 0. No foreign Ptah Dev root electron held the single-instance lock. Launch env as specified. Setup via UI: OpenAI Codex, gpt-6-sol, saved to This workspace, Manual (via "Disable Autopilot").
 - Note: `git status` in the worktree shows `M .ptah/specs/TASK_2026_714_c8a2/batches.md` and `decisions.md`. I did not touch them (edited by another agent during the run).

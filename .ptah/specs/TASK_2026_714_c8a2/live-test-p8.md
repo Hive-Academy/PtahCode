@@ -2,7 +2,7 @@
 
 Date: 2026-10-26. Approved by the user. Test and report only; no source edits.
 
-- Evidence folder: `C:\Users\abdal\AppData\Local\Temp\ptah-live-p8-20261026-183415\`
+- Evidence folder: `C:\Users\dev\AppData\Local\Temp\ptah-live-p8-20261026-183415\`
   - `electron.log` (main-process stdout/stderr), `build.log`, `build2.log`
   - `shots\` (screenshots), `settings.json.bak` (settings backup)
   - test DBs `ptah.db`, `sessions.db`; workspace `ws\`

@@ -64,6 +64,13 @@ jobs:
             nx-${{ runner.os }}-checks-
             nx-${{ runner.os }}-
 
+      # Privacy guard: the repository is public, so no tracked text file may
+      # hold a home path with a real user name. Its own test runs first.
+      - name: check-home-paths (privacy guard + self-test)
+        run: |
+          node --test scripts/check-home-paths.test.mjs
+          node scripts/check-home-paths.mjs --all
+
       # DI invariant gate — every @inject(token) must resolve to a
       # register*(token, ...) call somewhere. Also runs the meta self-test
       # against a planted fixture so a broken linter can't silently pass.

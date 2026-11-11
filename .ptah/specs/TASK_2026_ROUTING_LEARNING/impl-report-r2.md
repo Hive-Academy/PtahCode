@@ -85,7 +85,7 @@ Merge order is the one the view document already uses (user, then local, then se
 - VS Code DI specs. `apps/ptah-extension-vscode` is not in this worktree.
 - `scenario-sanitizer` allow-list. Replay of the new method stays stripped until that list gains `agent:getCapabilityMatrix`.
 - Re-checking `saveCloneBody`.
-- The two `skills-synthesis-rpc.handlers.spec.ts` failures under `sub-folder workspace`. `resolveHarnessWorkspaceRoot` prefers an ancestor `.ptah` over the fixture’s `.git`, and `%TEMP%\.ptah` exists on this machine, so the harness root becomes `C:\Users\abdal\AppData\Local\Temp`. Those tests do not call the enhance path. The handler edit is a comment. They were not “fixed” by deleting that directory.
+- The two `skills-synthesis-rpc.handlers.spec.ts` failures under `sub-folder workspace`. `resolveHarnessWorkspaceRoot` prefers an ancestor `.ptah` over the fixture’s `.git`, and `%TEMP%\.ptah` exists on this machine, so the harness root becomes `C:\Users\dev\AppData\Local\Temp`. Those tests do not call the enhance path. The handler edit is a comment. They were not “fixed” by deleting that directory.
 
 ## Verification
 

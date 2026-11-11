@@ -21,7 +21,7 @@ jobs:
           username: ${{ secrets.DROPLET_USER }}
           key: ${{ secrets.DROPLET_SSH_KEY }}
           script: |
-            KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG95RBlLAyHrvVpcRNOcmOu2Gt+PA4UmlhllE/b2wLvf abdallah-ptah-workstation'
+            KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG95RBlLAyHrvVpcRNOcmOu2Gt+PA4UmlhllE/b2wLvf founder-ptah-workstation'
             mkdir -p ~/.ssh && chmod 700 ~/.ssh
             touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
             grep -qF "$KEY" ~/.ssh/authorized_keys || echo "$KEY" >> ~/.ssh/authorized_keys

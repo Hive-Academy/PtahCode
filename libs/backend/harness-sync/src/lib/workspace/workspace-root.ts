@@ -33,9 +33,9 @@
  *
  * **The boundary test is platform-aware, and it has to be.** NTFS and APFS are
  * case-insensitive, and the two spellings of a home directory that reach this
- * function come from different places: `os.homedir()` returns `C:\Users\Abdallah`
+ * function come from different places: `os.homedir()` returns `C:\Users\Acme`
  * while a cwd inherited from a spawned CLI, a terminal or a `cd` can arrive as
- * `c:\users\abdallah`. A case-sensitive `===` compares those unequal, the ascent
+ * `c:\users\acme`. A case-sensitive `===` compares those unequal, the ascent
  * walks straight past the home directory, and the reconciler ends up copying the
  * user layer into `~/.claude/skills` — the exact accident the boundary exists to
  * prevent. Same rule, same reason, as `lock/workspace-lock.ts`'s `queueKey`.
@@ -106,7 +106,7 @@ function findAncestorWith(
  *
  * Case-insensitive on Windows, byte-exact everywhere else — the same rule as
  * `queueKey` in `lock/workspace-lock.ts`, and for the same reason: comparing
- * `C:\Users\Abdallah` with `c:\users\abdallah` as different directories is a bug
+ * `C:\Users\Acme` with `c:\users\acme` as different directories is a bug
  * on every filesystem Windows ships with.
  */
 export function isSamePath(left: string, right: string): boolean {

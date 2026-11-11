@@ -38,7 +38,7 @@ Selected command-tail lines (queue-holder paths abbreviated):
 [verify 2026-10-30T18:10:22.089Z] lock slot 0 acquired after 209s: verify lint,test,typecheck (@ptah-extension/lane-outcomes,@ptah-extension/cli-agent-runtime,@ptah-extension/vscode-lm-tools)
 NX   9 tasks: 8 succeeded, 1 failed
 ✖ nx run @ptah-extension/vscode-lm-tools:test
-full log: C:\Users\abdal\.nx\8b7110c7390b9603\cache\terminalOutputs\5382706156613535101
+full log: C:\Users\dev\.nx\8b7110c7390b9603\cache\terminalOutputs\5382706156613535101
 Run duration: 7m 42s
 [verify 2026-10-30T18:18:11.818Z] lock released after 469.7s, exit code 1
 VERIFY_EXIT_CODE=1

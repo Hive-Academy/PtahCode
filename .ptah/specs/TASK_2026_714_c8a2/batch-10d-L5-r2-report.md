@@ -2,7 +2,7 @@
 
 ## Root cause and timing
 
-The live Electron log at `C:\Users\abdal\AppData\Local\Temp\ptah-live-p10dL4-20261101-012450\app.log:76` identifies the missing `Symbol(WorkspaceScopeResolver)`. The warning appears before settings registration at log line 78.
+The live Electron log at `C:\Users\dev\AppData\Local\Temp\ptah-live-p10dL4-20261101-012450\app.log:76` identifies the missing `Symbol(WorkspaceScopeResolver)`. The warning appears before settings registration at log line 78.
 
 `apps/ptah-electron/src/di/container.ts:42-48` runs phases 0 through 4 and then starts lane outcomes. Phase 2 registers outcome services and both classifier aliases at `apps/ptah-electron/src/di/phase-2-libraries.ts:293-303`; the structured decision binding is installed by `libs/backend/agent-sdk/src/lib/di/register.ts:882-884`. `libs/backend/lane-outcomes/src/lib/di/start.ts:75-82` previously resolved the recorder immediately. Its factory resolves the failure and task kind classifiers at `libs/backend/lane-outcomes/src/lib/di/register.ts:76-93`. The routing classifier factory resolves `STRUCTURED_DECISION` at `libs/backend/lane-routing/src/lib/di/register.ts:189-218`.
 

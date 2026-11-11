@@ -9,16 +9,16 @@ Date: 2026-11-07. Worktree: `D:\projects\ptah-extension\.claude-worktrees\subage
 | Check | Result | Evidence |
 | --- | --- | --- |
 | #978 included | PASS | `git merge-base --is-ancestor 28f5c97ac HEAD` exited 0. `apps/ptah-electron/src/main.ts:72` sets `PTAH_SETTINGS_DIR` to `path.join(homedir(), '.ptah-dev')`. |
-| Production baseline | PASS | `C:\Users\abdal\.ptah\settings.json` SHA-256: `54FADE38980C3A9E6013B5FFEEAA6917165AD44E5FAC5CF7F4CA84E423B75238`, matching expected prefix. |
+| Production baseline | PASS | `C:\Users\dev\.ptah\settings.json` SHA-256: `54FADE38980C3A9E6013B5FFEEAA6917165AD44E5FAC5CF7F4CA84E423B75238`, matching expected prefix. |
 | Dev lock | PASS | Prelaunch process command lines showed no unowned instance using the Ptah Dev profile. PID 24380 used a separate docs-capture profile. |
-| Backup and restore | PASS | `C:\Users\abdal\.ptah-dev\settings.json.bak-livetest3` SHA-256 `3B727D826F40043DCC6E879B9023DB60A075C4FBD67ED945BA5AC738D694FAD6`. Restored Dev settings matched that hash at end, with budgets 150000/3000000 and Haiku tier `gpt-5.6-luna`. |
+| Backup and restore | PASS | `C:\Users\dev\.ptah-dev\settings.json.bak-livetest3` SHA-256 `3B727D826F40043DCC6E879B9023DB60A075C4FBD67ED945BA5AC738D694FAD6`. Restored Dev settings matched that hash at end, with budgets 150000/3000000 and Haiku tier `gpt-5.6-luna`. |
 | Isolation throughout | PASS | Production hash was rechecked after every Dev settings change, each launch, UI provider save, and cleanup; always identical to baseline. |
 
 ## Setup
 
 The required commands succeeded in order: `node scripts/verify.mjs --exec --task build-dev -- npx nx build-dev ptah-electron` (19:27:29Z); `node scripts/copy-wasm.js dist/apps/ptah-electron`; `node scripts/verify.mjs --exec --task copy-renderer-dev -- npx nx copy-renderer-dev ptah-electron` (19:29:12Z). No tests, serve, e2e, or workspace-wide check ran.
 
-Port **9343** was free before launch. Each launch used `CLAUDE_CODE_SUBAGENT_MODEL=haiku`, `PTAH_NO_DEVTOOLS=1`, and `node apps/ptah-electron/scripts/launch.js --remote-debugging-port=9343`. Production Ptah root PID **26500** remained running and untouched. Scratch workspace: `.ptah/live-test-ws`. Log below: `C:\Users\abdal\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-07.log` (one-based lines, UTC timestamps).
+Port **9343** was free before launch. Each launch used `CLAUDE_CODE_SUBAGENT_MODEL=haiku`, `PTAH_NO_DEVTOOLS=1`, and `node apps/ptah-electron/scripts/launch.js --remote-debugging-port=9343`. Production Ptah root PID **26500** remained running and untouched. Scratch workspace: `.ptah/live-test-ws`. Log below: `C:\Users\dev\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-07.log` (one-based lines, UTC timestamps).
 
 | Run | Own Dev root PID | Handoff | Weighted stop | Dev settings SHA-256 after edit | Actual model |
 | --- | ---: | ---: | ---: | --- | --- |
@@ -74,7 +74,7 @@ Settings showed Connected OAuth. The Dev UI selected `gpt-5.6-luna` ([screenshot
 
 | Criterion | Result | Evidence |
 | --- | --- | --- |
-| Main and child use selected model | **PASS** | `ModelDiag savedModel=gpt-5.6-luna` at 19:42:05.465Z, line 17594, and 19:42:26.886Z, line 17743. Main usage at 19:43:20.570Z, line 17978, says `gpt-5.6-luna`. Main rollout `rollout-2026-11-07T21-42-38-01a1b788-cbc5-7e72-b002-418bf9e84c4c.jsonl` and child rollout `rollout-2026-11-07T21-42-48-01a1b788-f431-7430-9f98-c5a5c84459e9.jsonl` under `C:\Users\abdal\.codex\sessions\2026\11\07` both record `model=gpt-5.6-luna`; child metadata links to main thread and scratch cwd. Round 2's wrong-model finding did not recur. |
+| Main and child use selected model | **PASS** | `ModelDiag savedModel=gpt-5.6-luna` at 19:42:05.465Z, line 17594, and 19:42:26.886Z, line 17743. Main usage at 19:43:20.570Z, line 17978, says `gpt-5.6-luna`. Main rollout `rollout-2026-11-07T21-42-38-01a1b788-cbc5-7e72-b002-418bf9e84c4c.jsonl` and child rollout `rollout-2026-11-07T21-42-48-01a1b788-f431-7430-9f98-c5a5c84459e9.jsonl` under `C:\Users\dev\.codex\sessions\2026\11\07` both record `model=gpt-5.6-luna`; child metadata links to main thread and scratch cwd. Round 2's wrong-model finding did not recur. |
 | Handoff stop, progress, parent attribution | **NOT PROVEN** | No `[SubagentBudgetMonitor]` event appeared after Codex launch. UI still showed the run active at 19:44:31Z; Dev was stopped to avoid further model cost. No attributed handoff record or completed parent reply. |
 | Secret redaction | **NOT PROVEN** | No handoff record or secret marker. |
 

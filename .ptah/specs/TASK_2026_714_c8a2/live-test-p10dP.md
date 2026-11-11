@@ -1,7 +1,7 @@
 # Live test 10d.P: native Codex CLI lanes in Electron
 
 - Date: 2026-10-31, 20:34 to 20:46 local. Worktree `codex-runtime-integration`, head `168678765`.
-- F: `C:\Users\abdal\AppData\Local\Temp\ptah-live-p10dP-20261031-203424\` (`app.log`, `a.json` `b.json` `c.json`
+- F: `C:\Users\dev\AppData\Local\Temp\ptah-live-p10dP-20261031-203424\` (`app.log`, `a.json` `b.json` `c.json`
   `c2.json` `d.json`, `shots\`, `sessions\3cd27680-...\agent-output.*.json`, `settings.json.bak`, `settings.after.json`).
 - Preflight: no root `electron.exe` without `--type=` was running. This run's root PID was 10168. It was stopped with
   `taskkill /T /F /PID 10168`. The installed Ptah Store app's codex.exe (PID 33808, parent 16236) was left alone.

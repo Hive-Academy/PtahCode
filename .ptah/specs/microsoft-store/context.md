@@ -6,7 +6,7 @@
 - The Store release is "v2". The user updates the landing page / download links and emails existing
   users personally — landing page, docs and user migration are OUT of scope.
 - macOS (Developer ID + notarization) and Linux are OUT of scope for this task.
-- Publisher: individual account (Abdallah Khalil, Egypt). The user does the Partner Center steps and
+- Publisher: individual account (Example Dev, Egypt). The user does the Partner Center steps and
   provides credentials (Entra tenant/client/secret, seller ID, product ID) as GitHub secrets.
 - The first Store submission is manual (Partner Center). CI automates later submissions.
 

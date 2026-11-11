@@ -40,7 +40,7 @@ At line:1 char:1
 
  NX   3 tasks: 2 succeeded, 1 failed
 ✖ nx run @ptah-extension/cli-agent-runtime:test
-  full log: C:\Users\abdal\.nx\8b7110c7390b9603\cache\terminalOutputs\15038523815929166310
+  full log: C:\Users\dev\.nx\8b7110c7390b9603\cache\terminalOutputs\15038523815929166310
 Re-run with --output-style=static to inline logs.
   Run duration:      2m 5s
   Cache:             0/2 hit (0%)

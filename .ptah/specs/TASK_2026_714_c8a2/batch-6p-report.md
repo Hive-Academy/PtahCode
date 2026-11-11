@@ -153,9 +153,9 @@ Both scoped ptah_get_diagnostics calls, including after the final source edit, r
 
 Verification logs written outside the repository:
 
-- C:/Users/abdal/AppData/Local/Temp/ptah-batch6p-libs-verify.log
-- C:/Users/abdal/AppData/Local/Temp/ptah-batch6p-hosts-verify.log
-- C:/Users/abdal/AppData/Local/Temp/ptah-batch6p-runtime-final-verify.log
+- C:/Users/dev/AppData/Local/Temp/ptah-batch6p-libs-verify.log
+- C:/Users/dev/AppData/Local/Temp/ptah-batch6p-hosts-verify.log
+- C:/Users/dev/AppData/Local/Temp/ptah-batch6p-runtime-final-verify.log
 
 ## Remaining work outside this batch
 

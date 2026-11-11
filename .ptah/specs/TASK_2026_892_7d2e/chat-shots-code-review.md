@@ -104,7 +104,7 @@ It is lower than 5 because two paths can put private or price text into
 8. **Medium — gaps in the mask and check.**
    - The mask and the check can disagree on case. `maskPrivateText` (`chat.shot.ts:174-175`)
      uses case-sensitive `replaceAll(username)` and `replaceAll(project)`.
-     `hasPrivateText` (`:114-115`) compares in lowercase. Text such as `Abdal` or
+     `hasPrivateText` (`:114-115`) compares in lowercase. Text such as `Dev` or
      `PTAH-EXTENSION` stays unmasked. The check then throws. This is a loud failure, not a
      leak, but with defect 5 the shot is already written.
    - With `PTAH_DOCS_SESSION_WORKSPACE=D:\projects\ptah-extension` (the value in the lane

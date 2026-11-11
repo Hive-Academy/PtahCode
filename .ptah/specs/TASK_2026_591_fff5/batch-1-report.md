@@ -4,7 +4,7 @@ Worktree: `D:\projects\ptah-extension\.claude-worktrees\task-591-opencode-messag
 
 ## Part A — what opencode 2.0.12 actually does (verified from the bundle)
 
-Source: the embedded JS in `C:\Users\abdal\AppData\Roaming\npm\node_modules\@opencode\cli\bin\opencode.exe` (v2.0.12), the `run` command's event loop. Excerpt, minified:
+Source: the embedded JS in `C:\Users\dev\AppData\Roaming\npm\node_modules\@opencode\cli\bin\opencode.exe` (v2.0.12), the `run` command's event loop. Excerpt, minified:
 
 ```js
 if(t.type==="session.step.ended"){ ... D("step_finish",a,{part:{ ..., type:"step-finish", reason:t.data.finish, cost, tokens }}); continue }

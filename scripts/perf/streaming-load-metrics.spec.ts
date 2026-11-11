@@ -102,7 +102,7 @@ const RPC_TIMEOUT_DUP =
 const CONTINUATION =
   '[2026-11-06T02:26:21.136Z]   Context: {"windowId":1,"message":"[ClaudeRpcService] RPC timeout for method: boot:getReadiness"}';
 const PLAIN =
-  '[2026-11-04T22:00:04.125Z] [INFO ] 2026-11-04T22:00:04.125Z - [JsonlReader] Scanning for agent files: {"sessionsDir":"C:\\\\Users\\\\abdal\\\\.claude\\\\projects\\\\D--projects-ptah-extension","agentFilesFound":2,"source":"nested"}';
+  '[2026-11-04T22:00:04.125Z] [INFO ] 2026-11-04T22:00:04.125Z - [JsonlReader] Scanning for agent files: {"sessionsDir":"C:\\\\Users\\\\dev\\\\.claude\\\\projects\\\\D--projects-ptah-extension","agentFilesFound":2,"source":"nested"}';
 
 const HANG =
   '{"time":"2026-09-20T16:11:23.394Z","source":"main-loop-watchdog","event":"hang","blockedForMs":5168,"breadcrumbs":{"lastLag":"max=1823.5ms p99=1823.5ms at 2026-09-20T16:11:09.070Z"}}';

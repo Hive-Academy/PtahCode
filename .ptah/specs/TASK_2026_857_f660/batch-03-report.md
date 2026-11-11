@@ -43,7 +43,7 @@ At line:1 char:1
 
 NX   3 tasks: 2 succeeded, 1 failed
 ✖ nx run @ptah-extension/lane-outcomes:test
-  full log: C:\Users\abdal\.nx\8b7110c7390b9603\cache\terminalOutputs\7918118687407845233
+  full log: C:\Users\dev\.nx\8b7110c7390b9603\cache\terminalOutputs\7918118687407845233
 Re-run with --output-style=static to inline logs.
   Run duration:      1m 2s
   Cache:             0/2 hit (0%)

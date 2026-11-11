@@ -31,7 +31,7 @@ No product source was edited. `batches.md` was not edited.
 - Host refusal without isolation: `node dist/tools/mcp-bench/bench-host.mjs --workspace <repo>` → `{"benchHost":"fatal","error":"refusing to boot: PTAH_BENCH_ISOLATED_HOME, PTAH_CONFIG_PATH and PTAH_DB_PATH must all be set by the launcher"}`.
 - Manual smoke. The driver was a throwaway script in `%TEMP%\mcp-bench-smoke` (not in the repo), run with `npx tsx --tsconfig tools/mcp-bench/tsconfig.json`. It runs on the pinned corpus via `withPinnedCorpus` (commit `7910f34cf`, 6455 eligible files). Final run:
   - `ready port=60317 pid=38080 coldStartMs=2843`
-  - `child homedir=C:\Users\abdal\AppData\Local\Temp\ptah-mcp-bench-home-w3GVAL realHome=C:\Users\abdal dbPath=…\ptah-mcp-bench-home-w3GVAL\.ptah\state\ptah.sqlite`
+  - `child homedir=C:\Users\dev\AppData\Local\Temp\ptah-mcp-bench-home-w3GVAL realHome=C:\Users\dev dbPath=…\ptah-mcp-bench-home-w3GVAL\.ptah\state\ptah.sqlite`
   - `tools/list count=58 has ptah_code_search_symbols=true`
   - `code_search class=unknown-coverage wallMs=11586` (index `symbolCount:0, reindexInFlight:true`, coverage `census?`). This is today's honest CLI behaviour, scored as an error per the edge-case rule.
   - `while bench host pid=38080 is alive, holders of real ptah.sqlite: 6872:Ptah`. The holder list comes from the Windows Restart Manager (`RmGetList`), which reads open handles and opens no file itself. The bench host never held the real DB.

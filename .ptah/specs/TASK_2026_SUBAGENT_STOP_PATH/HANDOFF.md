@@ -94,8 +94,8 @@ allowed revise round) is running** — see Background work.
 - `libs/backend/agent-sdk/src/lib/helpers/session-lifecycle/session-query-executor.service.ts` — stop/turn correlation.
 - `libs/backend/rpc-handlers/src/lib/chat/session/chat-subagent-context-injector.service.ts` — INTERRUPTED AGENTS advice.
 - `libs/backend/rpc-handlers/src/lib/handlers/subagent-rpc.handlers.ts` — RPC resume refusal.
-- `C:\Users\abdal\.ptah\settings.json` (production, do not edit for tests) / `C:\Users\abdal\.ptah-dev\settings.json` (dev).
-- `C:\Users\abdal\.ptah\handoffs\agent-budget-research-brief.md` — brief for the agent-budget session.
+- `C:\Users\dev\.ptah\settings.json` (production, do not edit for tests) / `C:\Users\dev\.ptah-dev\settings.json` (dev).
+- `C:\Users\dev\.ptah\handoffs\agent-budget-research-brief.md` — brief for the agent-budget session.
 
 ## Background work
 
