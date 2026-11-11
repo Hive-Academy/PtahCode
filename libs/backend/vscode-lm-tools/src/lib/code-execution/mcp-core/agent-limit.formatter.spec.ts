@@ -8,6 +8,7 @@ import {
   type OwnerLimitEvidence,
   type PlanLimitOwnerSnapshot,
   type PlanLimitWindow,
+  type UsageSourceLabel,
 } from '@ptah-extension/shared';
 import {
   findAgentLimit,
@@ -206,6 +207,31 @@ const ROSTER = [
 ];
 
 describe('agent limit formatter (TASK_2026_596 Batch 14)', () => {
+  it.each(['copilot', 'cursor', 'pi'] as const)('shows no usage source for %s', (cli) => {
+    expect(formatLimitColumn(lane(cliRow(cli), snapshot({ status: 'no-usage-source' })), NOW))
+      .toBe('no usage source');
+  });
+  it.each<[UsageSourceLabel, string]>([
+    ['provider-api', 'provider API'],
+    ['cli-command', 'CLI command'],
+    ['local-state', 'local state'],
+    ['session-sdk', 'session SDK'],
+    ['local-rpc', 'local RPC'],
+  ])('shows %s and the reading age in the limit text', (source, label) => {
+    const limit = lane(cliRow('codex'), snapshot({
+      status: 'no-usage-source',
+      source,
+      readAt: NOW - 12_000,
+    }));
+    expect(formatLimitColumn(limit, NOW)).toBe(`no usage source [${label}, 12s ago]`);
+    expect(formatLimitColumn(limit, NOW + 48_000)).toBe(`no usage source [${label}, 1m ago]`);
+  });
+
+  it('keeps legacy limit text when the source is absent', () => {
+    const limit = lane(cliRow('codex'), snapshot({ status: 'no-usage-source' }));
+    expect(formatLimitColumn(limit, NOW)).toBe('no usage source');
+  });
+
   it('F42 snapshots the near-limit list state verbatim', () => {
     expect(formatLimitColumn(nearLane, NOW)).toBe(
       'near limit (5-hour session 94%)',
@@ -880,7 +906,7 @@ describe('unknown causes and the gate-aware spawn block (cli-lane-limits)', () =
     const limit = withSnapshot(overrides);
     expect(limit.state.state).toBe('unknown');
     expect(unknownCause(limit)).toBe(cause);
-    expect(formatLimitColumn(limit, NOW)).toBe(`unknown (${cause})`);
+    expect(formatLimitColumn(limit, NOW)).toBe(cause === 'no usage source' ? cause : `unknown (${cause})`);
   });
 
   it('says limits are not tracked for a lane with no owner', () => {

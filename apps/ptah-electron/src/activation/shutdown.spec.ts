@@ -10,6 +10,8 @@
 
 import 'reflect-metadata';
 import { container } from 'tsyringe';
+import { ElectronDIContainer } from '../di/container';
+import { AUTH_PROVIDERS_TOKENS } from '@ptah-extension/auth-providers';
 import type { CodexThreadIdentity } from '@ptah-extension/codex-runtime';
 import {
   createElectronCodexBindingHandle,
@@ -105,6 +107,18 @@ describe('will-quit — the run-check kill', () => {
   afterEach(() => {
     jest.useRealTimers();
     jest.restoreAllMocks();
+  });
+
+  it('awaits plan usage fallback disposal before quitting', async () => {
+    const dispose = jest.fn(async () => undefined);
+    jest.spyOn(ElectronDIContainer, 'isRegistered').mockImplementation((token) =>
+      token === AUTH_PROVIDERS_TOKENS.PLAN_USAGE_SERVICE);
+    jest.spyOn(ElectronDIContainer, 'resolve').mockReturnValue({ dispose });
+    const deps = quitDeps(minimalRefs([]));
+    expect(handleWillQuit(deps)).toBe(false);
+    await flushMicrotasks();
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(deps.quit).toHaveBeenCalledTimes(1);
   });
 
   it('defers the quit while a check is running, with nothing else to await', () => {

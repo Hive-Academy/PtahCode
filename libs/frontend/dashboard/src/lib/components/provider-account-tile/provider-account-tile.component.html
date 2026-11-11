@@ -17,6 +17,10 @@
     </button>
   </header>
 
+  @if (view().readingSource; as readingSource) {
+    <p class="m-0 mt-0.5 truncate text-[10px] text-base-content-muted" [attr.title]="readingSource" data-testid="tile-reading-source">{{ readingSource }}</p>
+  }
+
   @if (view().compactWindows.length > 0) {
     <div class="mt-1 flex min-w-0 gap-2" data-testid="tile-windows">
       @for (window of view().compactWindows; track window.key) {

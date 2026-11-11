@@ -26,6 +26,7 @@ import {
   type PlanLimitStatusReason,
   type PlanWindowBlockingState,
   type PlanWindowState,
+  type UsageSourceLabel,
 } from '@ptah-extension/shared';
 import type { LaneLimitResult } from '@ptah-extension/cli-agent-runtime';
 
@@ -315,7 +316,31 @@ function blockedColumn(block: LaneBlock): string {
 }
 
 /** The list's `Limit state` cell and the spawn's `**Limit state:**` value. */
+const USAGE_SOURCE_LABELS: Readonly<Record<UsageSourceLabel, string>> = {
+  'provider-api': 'provider API',
+  'cli-command': 'CLI command',
+  'local-state': 'local state',
+  'session-sdk': 'session SDK',
+  'local-rpc': 'local RPC',
+};
+
+function readingSourceText(limit: AgentLimit, now: number): string {
+  const source = limit.snapshot?.source;
+  if (source === undefined) return '';
+  const readAt = limit.snapshot?.readAt;
+  if (readAt === undefined) return ` [${USAGE_SOURCE_LABELS[source]}]`;
+  const age = Math.max(0, now - readAt);
+  const ageText = age < 60_000
+    ? `${Math.floor(age / 1_000)}s ago`
+    : formatRelative(readAt, now);
+  return ` [${USAGE_SOURCE_LABELS[source]}, ${ageText}]`;
+}
+
 export function formatLimitColumn(limit: AgentLimit, now = Date.now()): string {
+  return formatLimitColumnBase(limit, now) + readingSourceText(limit, now);
+}
+
+function formatLimitColumnBase(limit: AgentLimit, now: number): string {
   const { state, reasons, windows } = limit.state;
   if (state === 'at-limit') {
     const evidence = ownerLimitEvidence(limit);
@@ -342,6 +367,7 @@ export function formatLimitColumn(limit: AgentLimit, now = Date.now()): string {
       : 'near limit';
   }
   if (state === 'confirmed-room') return 'confirmed room';
+  if (hasNoUsageSource(limit)) return 'no usage source';
   return `unknown (${unknownCause(limit)})`;
 }
 

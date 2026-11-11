@@ -115,7 +115,7 @@ describe('Antigravity CLI usage adapter', () => {
         });
         await expect(
           readAntigravityCliUsage(undefined, options),
-        ).resolves.toEqual({ ok: false, reason: 'cli-backoff' });
+        ).resolves.toMatchObject({ ok: false, reason: 'cli-backoff' });
         expect(exec).toHaveBeenCalledTimes(1);
         await jest.advanceTimersByTimeAsync(ANTIGRAVITY_CLI_SHORT_BACKOFF_MS);
         const next = readAntigravityCliUsage(undefined, options);
@@ -132,20 +132,11 @@ describe('Antigravity CLI usage adapter', () => {
 
     it('does not back off when the caller aborts during CLI execution', async () => {
       const controller = new AbortController();
+      let finish!: (value: string) => void;
       const exec = jest
         .fn<ReturnType<AntigravityCliExec>, Parameters<AntigravityCliExec>>()
         .mockImplementationOnce(
-          async (_executable, _args, signal) =>
-            new Promise<string>((_, reject) =>
-              signal.addEventListener(
-                'abort',
-                () =>
-                  reject(
-                    Object.assign(new Error('aborted'), { code: 'ABORT_ERR' }),
-                  ),
-                { once: true },
-              ),
-            ),
+          async () => new Promise<string>((resolve) => { finish = resolve; }),
         )
         .mockResolvedValueOnce(SAMPLE);
       const options = { exec, executables: ['agy'] };
@@ -155,8 +146,10 @@ describe('Antigravity CLI usage adapter', () => {
         ok: false,
         reason: 'cli-unavailable',
       });
+      finish(SAMPLE);
+      await new Promise<void>((resolve) => setImmediate(resolve));
       expect((await readAntigravityCliUsage(undefined, options)).ok).toBe(true);
-      expect(exec).toHaveBeenCalledTimes(2);
+      expect(exec).toHaveBeenCalledTimes(1);
     });
 
     it('shares one timer across two failing candidates', async () => {
@@ -205,7 +198,7 @@ describe('Antigravity CLI usage adapter', () => {
       ).resolves.toEqual({ ok: false, reason: 'cli-parse-failed' });
       await expect(
         readAntigravityCliUsage(undefined, options),
-      ).resolves.toEqual({ ok: false, reason: 'cli-backoff' });
+      ).resolves.toMatchObject({ ok: false, reason: 'cli-backoff' });
       expect(exec).toHaveBeenCalledTimes(1);
       clock += ANTIGRAVITY_CLI_PARSE_BACKOFF_MS;
       const success = await readAntigravityCliUsage(undefined, options);
@@ -220,7 +213,7 @@ describe('Antigravity CLI usage adapter', () => {
           ['Claude and GPT models', 'five_hour'],
         ]);
       await readAntigravityCliUsage(undefined, options);
-      expect(exec).toHaveBeenCalledTimes(3);
+      expect(exec).toHaveBeenCalledTimes(2);
     });
     it('runs agy with an argument array and parses the result', async () => {
       const exec = jest.fn<
@@ -262,6 +255,21 @@ describe('Antigravity CLI usage adapter', () => {
       });
       expect(result.ok).toBe(true);
       if (result.ok) expect(result.windows[0].label).toContain(' \u00B7 ');
+    });
+
+    it('still reaches a working second candidate while the first is in backoff', async () => {
+      const clock = 1;
+      const exec: AntigravityCliExec = jest.fn(async (executable: string) => {
+        if (executable === 'agy') throw errno('EINVAL');
+        return SAMPLE;
+      });
+      const options = { exec, executables: ['agy', 'C:/agy/bin/agy.exe'], now: () => clock };
+      const first = await readAntigravityCliUsage(undefined, options);
+      const second = await readAntigravityCliUsage(undefined, options);
+      expect(first.ok).toBe(true);
+      expect(second.ok).toBe(true);
+      if (first.ok && second.ok) expect(second.readAt).toBe(first.readAt);
+      expect(exec).toHaveBeenCalledTimes(2);
     });
 
     it('reports the first real failure when every candidate fails', async () => {

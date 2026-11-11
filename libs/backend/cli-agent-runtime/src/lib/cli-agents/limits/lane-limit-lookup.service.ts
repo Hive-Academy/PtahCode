@@ -100,6 +100,7 @@ export interface LaneLimitLookupRow {
 export interface LaneLimitLookupOptions {
   /** Per-lookup deadline; {@link LIMIT_LOOKUP_DEADLINE_MS} by default. */
   readonly deadlineMs?: number;
+  readonly allowCliFallback?: boolean;
   /** Ends the lookup early; lanes still waiting become `failed`. */
   readonly signal?: AbortSignal;
 }
@@ -138,6 +139,8 @@ interface LaneRead {
 type LaneOutcome =
   | { readonly kind: 'read'; readonly read: LaneRead }
   | { readonly kind: 'missed'; readonly failure: LaneLookupFailure };
+
+const NO_USAGE_SOURCE_CLIS: ReadonlySet<CliType> = new Set(['copilot', 'cursor', 'pi']);
 
 const TIMED_OUT: LaneOutcome = { kind: 'missed', failure: 'timed-out' };
 const CANCELLED: LaneOutcome = { kind: 'missed', failure: 'failed' };
@@ -199,7 +202,7 @@ export class LaneLimitLookupService {
     });
     try {
       return await Promise.race([
-        this.readLane(row, controller.signal),
+        this.readLane(row, controller.signal, options.allowCliFallback === true),
         deadline,
         cancelled,
       ]);
@@ -214,8 +217,15 @@ export class LaneLimitLookupService {
   private async readLane(
     row: LaneLimitLookupRow,
     signal: AbortSignal,
+    allowCliFallback: boolean,
   ): Promise<LaneOutcome> {
     try {
+      if (NO_USAGE_SOURCE_CLIS.has(row.cli)) {
+        const owner: QuotaOwnerRef = { key: `${row.cli}#unknown:no-usage-source`,
+          providerId: row.cli, identityKind: 'unknown', label: `${row.cli} account` };
+        return { kind: 'read', read: { owner, snapshot: { owner, status: 'no-usage-source',
+          windowSetEstablished: false, windows: [], ownerEvidence: [] } } };
+      }
       const owner = row.quotaOwner ?? (await this.ownerOf(row));
       if (!owner) return { kind: 'read', read: {} };
       const plan = planOwnerRead(owner, {
@@ -226,7 +236,7 @@ export class LaneLimitLookupService {
       if (!plan) return { kind: 'read', read: { owner } };
       const snapshot =
         plan.kind === 'read'
-          ? await this.snapshots.getOwnerSnapshot(plan.target, { signal })
+          ? await this.snapshots.getOwnerSnapshot(plan.target, { signal, allowCliFallback })
           : snapshotWithoutRead(owner, plan, this.ledger);
       return { kind: 'read', read: { owner, snapshot } };
     } catch (error: unknown) {

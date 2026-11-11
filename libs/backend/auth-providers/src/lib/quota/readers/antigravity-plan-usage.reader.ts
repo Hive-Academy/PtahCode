@@ -42,6 +42,8 @@ import {
   readAntigravityCliUsage,
 } from './antigravity-cli-usage.adapter';
 import { readAntigravityOAuthQuota } from './antigravity-oauth-plan-usage.reader';
+import { readUsageSourceChain } from './usage-source-chain';
+import type { UsageSource, UsageSourceResult, UsageFailureReason, UsageSourceLabel } from './plan-usage-reader.types';
 
 export const ANTIGRAVITY_USAGE_TIMEOUT_MS = 3_000;
 export const ANTIGRAVITY_CHAIN_TIMEOUT_MS = 11_000;
@@ -50,6 +52,9 @@ const MIN_STAGE_MS = 1_000;
 export const ANTIGRAVITY_MAX_BODY_BYTES = 1_048_576;
 export const ANTIGRAVITY_MAX_MODEL_LENGTH = 64;
 const MAX_ATTEMPTS = 8;
+function sourceFailure(source: UsageSourceLabel, reason: UsageFailureReason): UsageSourceResult {
+  return { ok: false, source, reason };
+}
 type Scheme = 'http' | 'https';
 type StatusRequest = (
   scheme: Scheme,
@@ -80,62 +85,58 @@ export function createAntigravityPlanUsageReader(
   readCli: typeof readAntigravityCliUsage = readAntigravityCliUsage,
   readStoreOwner: typeof currentAntigravityStoreOwner = currentAntigravityStoreOwner,
 ): PlanUsageReader {
-  return async ({ signal, target }) => {
-    const deadline = now() + ANTIGRAVITY_CHAIN_TIMEOUT_MS;
-    const timeLeft = () => Math.max(0, deadline - now());
-    const local = await probeLocal(signal, target, timeLeft);
-    if (local === 'account-changed') return unavailable();
-    if (local.status === 'available') return local;
-    if (signal?.aborted) return unavailable();
-    // CLI usage has no email. The active CLI-store account proves ownership.
-    if (
-      target.ownerRef.identityKind === 'account' &&
-      !matchesAntigravityStoreAccount(target.ownerRef, readStoreOwner())
-    ) {
-      return { ...unavailable(), statusReason: 'account-unverified' };
-    }
-    if (
-      target.ownerRef.identityKind !== 'cli-store' &&
-      target.ownerRef.identityKind !== 'unknown' &&
-      target.ownerRef.identityKind !== 'account'
-    ) {
-      return local;
-    }
-    const cliBudget = Math.min(ANTIGRAVITY_CLI_TIMEOUT_MS, timeLeft());
-    if (cliBudget < MIN_STAGE_MS) return budgetUnavailable();
-    const controller = new AbortController();
-    const abort = () => controller.abort();
-    signal?.addEventListener('abort', abort, { once: true });
-    const timeout = setTimeout(abort, cliBudget);
-    let cli: Awaited<ReturnType<typeof readCli>>;
-    try {
-      cli = await untilAborted(
-        readCli(controller.signal, { now, logger, timeoutMs: cliBudget }),
-        controller.signal,
-      );
-    } catch {
-      // degradation-audit: optional-capability - the CLI stage ran out of time or the caller aborted.
-      return signal?.aborted ? unavailable() : budgetUnavailable();
-    } finally {
-      clearTimeout(timeout);
-      signal?.removeEventListener('abort', abort);
-    }
-    if (!cli.ok) return { ...unavailable(), statusReason: cli.reason };
-    if (
-      target.ownerRef.identityKind === 'account' &&
-      !matchesAntigravityStoreAccount(target.ownerRef, readStoreOwner())
-    ) {
-      return { ...unavailable(), statusReason: 'account-unverified' };
-    }
-    const observedAt = now();
-    return {
-      status: 'available',
-      fetchedAt: observedAt,
-      windowSetEstablished: true,
-      windows: cli.windows,
-    };
+  return async (request) => {
+    const { signal, target } = request;
+    const chainDeadline = now() + ANTIGRAVITY_CHAIN_TIMEOUT_MS;
+    const sources: UsageSource[] = [
+      { id: 'antigravity-oauth', label: 'provider-api', read: async (stage) => {
+        if (target.ownerRef.identityKind !== 'cli-store' && target.ownerRef.identityKind !== 'unknown')
+          return sourceFailure('provider-api', 'source-not-applicable');
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        stage.signal?.addEventListener('abort', abort, { once: true });
+        const timer = setTimeout(abort, ANTIGRAVITY_OAUTH_STAGE_TIMEOUT_MS);
+        try {
+          const reading = await untilAborted(readOAuth(controller.signal, now), controller.signal);
+          return reading?.status === 'available'
+            ? { ok: true, source: 'provider-api', readAt: now(), reading }
+            : sourceFailure('provider-api', 'no-oauth');
+        } catch (_error: unknown) {
+          // degradation-audit: optional-capability - local RPC remains eligible.
+          return sourceFailure('provider-api', 'no-oauth');
+        } finally { clearTimeout(timer); stage.signal?.removeEventListener('abort', abort); }
+      } },
+      { id: 'antigravity-local', label: 'local-rpc', read: async (stage) => {
+        const reading = await probeLocal(stage.signal, target, () => ANTIGRAVITY_USAGE_TIMEOUT_MS);
+        if (reading === 'account-changed') return sourceFailure('local-rpc', 'account-unverified');
+        return reading.status === 'available'
+          ? { ok: true, source: 'local-rpc', readAt: reading.fetchedAt ?? now(), reading }
+          : sourceFailure('local-rpc', 'no-local-server');
+      } },
+      { id: 'antigravity-cli', label: 'cli-command', read: async (stage) => {
+        if (!stage.allowCliFallback) return sourceFailure('cli-command', 'source-not-applicable');
+        if (!['cli-store', 'unknown', 'account'].includes(target.ownerRef.identityKind))
+          return sourceFailure('cli-command', 'source-not-applicable');
+        const storeOwner = readStoreOwner();
+        if (target.ownerRef.identityKind === 'account' &&
+          !matchesAntigravityStoreAccount(target.ownerRef, storeOwner))
+          return sourceFailure('cli-command', 'account-unverified');
+        const remaining = chainDeadline - now();
+        if (remaining < MIN_STAGE_MS) return sourceFailure('cli-command', 'cli-timeout');
+        const cli = await readCli(stage.signal, { now, logger, timeoutMs: Math.min(ANTIGRAVITY_CLI_TIMEOUT_MS, remaining),
+          ownerKey: target.ownerRef.key, accountFingerprint: storeOwner.key });
+        if (!cli.ok) return sourceFailure('cli-command', cli.reason === 'cli-busy' ? 'cli-unavailable' : cli.reason);
+        if (target.ownerRef.identityKind === 'account' &&
+          !matchesAntigravityStoreAccount(target.ownerRef, readStoreOwner()))
+          return sourceFailure('cli-command', 'account-unverified');
+        const observedAt = cli.readAt;
+        return { ok: true, source: 'cli-command', readAt: observedAt,
+          reading: { status: 'available', fetchedAt: observedAt, windowSetEstablished: true,
+            windows: cli.windows } };
+      } },
+    ];
+    return readUsageSourceChain(sources, request, now, ANTIGRAVITY_CHAIN_TIMEOUT_MS);
   };
-
   async function probeLocal(
     signal: AbortSignal | undefined,
     target: PlanOwnerTarget,
@@ -144,33 +145,6 @@ export function createAntigravityPlanUsageReader(
     if (signal?.aborted) return unavailable();
     // An account owner observed through the language server has verified email;
     // the ACP token file contains no email to prove it is the same account.
-    if (
-      target.ownerRef.identityKind === 'cli-store' ||
-      target.ownerRef.identityKind === 'unknown'
-    ) {
-      const oauthBudget = Math.min(
-        ANTIGRAVITY_OAUTH_STAGE_TIMEOUT_MS,
-        timeLeft(),
-      );
-      if (oauthBudget < MIN_STAGE_MS) return budgetUnavailable();
-      const oauthController = new AbortController();
-      const abortOAuth = () => oauthController.abort();
-      signal?.addEventListener('abort', abortOAuth, { once: true });
-      const oauthTimeout = setTimeout(abortOAuth, oauthBudget);
-      try {
-        const oauth = await untilAborted(
-          readOAuth(oauthController.signal, now),
-          oauthController.signal,
-        );
-        if (oauth?.status === 'available') return oauth;
-      } catch {
-        // degradation-audit: optional-capability - the local sources may still answer inside the shared deadline.
-      } finally {
-        clearTimeout(oauthTimeout);
-        signal?.removeEventListener('abort', abortOAuth);
-      }
-      if (signal?.aborted) return unavailable();
-    }
     const probeBudget = Math.min(ANTIGRAVITY_USAGE_TIMEOUT_MS, timeLeft());
     if (probeBudget < MIN_STAGE_MS) return budgetUnavailable();
     const controller = new AbortController();
@@ -545,3 +519,4 @@ export function readJsonResponse(
     request.end();
   });
 }
+

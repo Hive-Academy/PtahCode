@@ -40,7 +40,26 @@ import {
   type PlanWindowState,
   type PlanModelUsage,
   type ProviderAccountUsageStatus,
+  type UsageSourceLabel,
 } from '@ptah-extension/shared';
+
+const USAGE_SOURCE_LABELS: Readonly<Record<UsageSourceLabel, string>> = {
+  'provider-api': 'provider API',
+  'cli-command': 'CLI command',
+  'local-state': 'local state',
+  'session-sdk': 'session SDK',
+  'local-rpc': 'local RPC',
+};
+
+function readingSourceText(owner: PlanLimitOwnerSnapshot, now: number): string | null {
+  if (owner.source === undefined) return null;
+  if (owner.readAt === undefined) return USAGE_SOURCE_LABELS[owner.source];
+  const age = Math.max(0, now - owner.readAt);
+  const ageText = age < 60_000
+    ? `${Math.floor(age / 1_000)}s ago`
+    : formatRelative(owner.readAt, now);
+  return `${USAGE_SOURCE_LABELS[owner.source]} · ${ageText}`;
+}
 
 export type Tone = 'success' | 'error' | 'warning' | 'info' | 'neutral';
 
@@ -277,6 +296,7 @@ export interface PlanTileView {
   readonly headerTitle: string;
   /** Plan badge text (e.g. "plus"), or `null` when no plan is known. */
   readonly planBadge: string | null;
+  readonly readingSource: string | null;
   readonly bar: PlanTileBarView | null;
   readonly primaryValue: string | null;
   readonly primaryTone: Tone;
@@ -1040,6 +1060,7 @@ export function buildPlanTile(
     headerTitle:
       subtitle === '' ? label : `${label} — ${subtitle}`,
     planBadge: badge,
+    readingSource: readingSourceText(owner, now),
     bar,
     primaryValue,
     primaryTone,

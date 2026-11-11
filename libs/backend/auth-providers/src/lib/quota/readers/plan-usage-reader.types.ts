@@ -12,7 +12,9 @@
  */
 import type {
   PlanLimitOwnerSnapshot,
+  PlanLimitStatusReason,
   QuotaOwnerRef,
+  UsageSourceLabel,
 } from '@ptah-extension/shared';
 import type { ClaudeAccountRoute } from '@ptah-extension/auth-providers-tokens';
 import type { PlanSecret } from '../plan-credential.source';
@@ -59,6 +61,7 @@ export interface PlanUsageReadRequest {
   /** Resolved from `target.credentialRef` for this call only; never kept. */
   readonly credential?: PlanSecret;
   readonly refresh: boolean;
+  readonly allowCliFallback?: boolean;
   /**
    * Local CLI accounting range expressed as OpenCode's `--days` value.
    * `0` means today. Omitted leaves the CLI's default aggregation intact.
@@ -85,3 +88,18 @@ export type PlanUsageReading = Omit<
 export type PlanUsageReader = (
   request: PlanUsageReadRequest,
 ) => Promise<PlanUsageReading>;
+
+export type { UsageSourceLabel } from '@ptah-extension/shared';
+export type UsageFailureReason = PlanLimitStatusReason | 'source-not-applicable';
+
+export interface UsageSource {
+  readonly id: string;
+  readonly label: UsageSourceLabel;
+  read(request: PlanUsageReadRequest): Promise<UsageSourceResult>;
+}
+
+export type UsageSourceResult =
+  | { readonly ok: true; readonly source: UsageSourceLabel; readonly readAt: number; readonly reading: PlanUsageReading }
+  | { readonly ok: false; readonly source: UsageSourceLabel; readonly reason: UsageFailureReason; readonly retryAfter?: number };
+
+export type UsageSourceChain = Readonly<Record<string, readonly UsageSource[]>>;

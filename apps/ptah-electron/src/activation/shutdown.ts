@@ -8,6 +8,8 @@ import {
 } from '@ptah-extension/vscode-lm-tools';
 import type { BootRefs } from './boot-coordinator';
 import { disposeBootProgress } from './boot-progress-publisher';
+import { AUTH_PROVIDERS_TOKENS } from '@ptah-extension/auth-providers';
+import { ElectronDIContainer } from '../di/container';
 
 /**
  * The `will-quit` sequence, extracted from `main.ts` (TASK_2026_331 B1.T6).
@@ -157,6 +159,7 @@ export const TASK_END_HOOK_STOP_BUDGET_MS = 5_000;
  * budget leaves that lease to the next launch's reclaim.
  */
 export const CHAT_SESSION_DISPOSE_BUDGET_MS = 2000;
+export const PLAN_USAGE_DISPOSE_BUDGET_MS = 2000;
 
 export interface QuitSequenceDeps {
   /** The coordinator's stable refs object — read, never copied. */
@@ -609,6 +612,7 @@ async function withBudget(
  */
 export function requiresDeferredDisposal(refs: BootRefs): boolean {
   return (
+    ElectronDIContainer.isRegistered(AUTH_PROVIDERS_TOKENS.PLAN_USAGE_SERVICE) ||
     hasElectronCodexBindings() ||
     refs.laneOutcomesDisposer !== null ||
     refs.sessionUsageSink !== null ||
@@ -638,6 +642,14 @@ export async function disposeBootRefs(deps: DisposalDeps): Promise<void> {
     codexSignInStopped: stopStarted,
     searchWorkerExited: exitStarted,
   } = disposeBeforePersistence(deps);
+  if (ElectronDIContainer.isRegistered(AUTH_PROVIDERS_TOKENS.PLAN_USAGE_SERVICE)) {
+    await withBudget(
+      'Plan usage fallback dispose',
+      () => ElectronDIContainer.resolve<{ dispose(): Promise<void> }>(AUTH_PROVIDERS_TOKENS.PLAN_USAGE_SERVICE).dispose(),
+      PLAN_USAGE_DISPOSE_BUDGET_MS,
+      'continuing shutdown.',
+    );
+  }
   // The check kill gates nothing in the chain, only the re-issued quit, so its
   // budget starts now and it is awaited after the rest of the teardown: the
   // gateway drain, SQLite close and the agent reap do not queue behind it.

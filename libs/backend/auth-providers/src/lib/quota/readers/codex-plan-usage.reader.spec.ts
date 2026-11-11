@@ -1,4 +1,4 @@
-import 'reflect-metadata';
+﻿import 'reflect-metadata';
 import type { CodexAccountUsageResult } from '../../providers/codex/codex-provider.types';
 import {
   accountOwnerKey,
@@ -44,6 +44,107 @@ function result(
 }
 
 describe('Codex plan-usage reader', () => {
+  it('keeps App Server account and allowances when no windows exist', async () => {
+    const reader = createCodexPlanUsageReader({ getAccountUsage: async () => result({
+      quota: undefined,
+      buckets: [{ id: 'codex', label: 'Codex', credits: { balance: '12.50', hasCredits: true, unlimited: false } }],
+    }) }, () => NOW, () => '/no-rollout-home');
+    expect(await reader({ target: TARGET, refresh: false })).toMatchObject({
+      status: 'available', source: 'provider-api', windows: [], account: { planType: 'plus' },
+      allowances: [{ credits: { balance: '12.50' } }],
+    });
+  });
+
+  it('keeps window-less App Server allowances ahead of a fresh rollout', async () => {
+    const { mkdtemp, mkdir, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const home = await mkdtemp(join(tmpdir(), 'codex-windowless-synthetic-'));
+    const day = join(home, 'sessions', '2026', '10', '04');
+    await mkdir(day, { recursive: true });
+    await writeFile(join(day, 'rollout-synthetic.jsonl'), JSON.stringify({
+      timestamp: new Date(NOW - 1000).toISOString(), type: 'event_msg', payload: {
+        type: 'token_count', rate_limits: { primary: {
+          used_percent: 25, window_minutes: 300,
+          resets_at: Math.floor((NOW + 60_000) / 1000),
+        } },
+      },
+    }));
+    const reader = createCodexPlanUsageReader({ getAccountUsage: async () => result({
+      quota: undefined,
+      buckets: [{ id: 'codex', label: 'Codex', credits: { balance: '12.50', hasCredits: true, unlimited: false } }],
+    }) }, () => NOW, () => home);
+    expect(await reader({ target: TARGET, refresh: false })).toMatchObject({
+      status: 'available', source: 'provider-api', windows: [],
+      allowances: [{ credits: { balance: '12.50' } }],
+    });
+  });
+
+  it('allows a 12 second App Server answer under the Codex deadline', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(NOW);
+    try {
+      const reader = createCodexPlanUsageReader({ getAccountUsage: () =>
+        new Promise((resolve) => setTimeout(() => resolve(result()), 12_000)) }, Date.now);
+      const pending = reader({ target: TARGET, refresh: false });
+      await jest.advanceTimersByTimeAsync(12_000);
+      expect((await pending).source).toBe('provider-api');
+    } finally { jest.useRealTimers(); }
+  });
+
+  it('leaves rollout time after a 12 second App Server failure', async () => {
+    const { mkdtemp, mkdir, utimes, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const home = await mkdtemp(join(tmpdir(), 'codex-chain-budget-'));
+    const day = join(home, 'sessions', '2026', '10', '04');
+    await mkdir(day, { recursive: true });
+    await writeFile(join(home, 'auth.json'), 'synthetic');
+    await utimes(join(home, 'auth.json'), new Date(NOW - 60_000), new Date(NOW - 60_000));
+    await writeFile(join(day, 'rollout-budget.jsonl'), JSON.stringify({
+      timestamp: new Date(NOW - 1000).toISOString(), type: 'event_msg', payload: {
+        type: 'token_count', rate_limits: { primary: {
+          used_percent: 25, window_minutes: 300, resets_at: Math.floor((NOW + 60_000) / 1000),
+        } },
+      },
+    }));
+    jest.useFakeTimers();
+    jest.setSystemTime(NOW);
+    try {
+      const reader = createCodexPlanUsageReader({ getAccountUsage: () =>
+        new Promise((resolve) => setTimeout(() => resolve(result({ status: 'service-unavailable' })), 12_000)) }, Date.now, () => home);
+      const pending = reader({ target: TARGET, refresh: false });
+      await jest.advanceTimersByTimeAsync(12_000);
+      expect((await pending).source).toBe('local-state');
+    } finally { jest.useRealTimers(); }
+  });
+  it('keeps App Server first and uses rollout only after its failure, with no process', async () => {
+    const { mkdtemp, mkdir, utimes, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const home = await mkdtemp(join(tmpdir(), 'codex-chain-synthetic-'));
+    const day = join(home, 'sessions', '2026', '10', '04');
+    await mkdir(day, { recursive: true });
+    await writeFile(join(home, 'auth.json'), 'synthetic');
+    await utimes(join(home, 'auth.json'), new Date(NOW - 60_000), new Date(NOW - 60_000));
+    await writeFile(join(day, 'rollout-synthetic.jsonl'), JSON.stringify({
+      timestamp: new Date(NOW - 1000).toISOString(), type: 'event_msg', payload: {
+        type: 'token_count', rate_limits: { primary: {
+          used_percent: 25, window_minutes: 300,
+          resets_at: Math.floor((NOW + 60_000) / 1000),
+        } },
+      },
+    }));
+    const getAccountUsage = jest.fn(async () => result());
+    const reader = createCodexPlanUsageReader({ getAccountUsage }, () => NOW, () => home);
+    const fromApi = await reader({ target: TARGET, refresh: false });
+    expect(fromApi.source).toBe('provider-api');
+    expect(fromApi.windows[0].used).toEqual({ kind: 'percent', percent: 37 });
+    getAccountUsage.mockImplementationOnce(async () => result({ status: 'service-unavailable' }));
+    const fromRollout = await reader({ target: TARGET, refresh: true });
+    expect(fromRollout.source).toBe('local-state');
+    expect(fromRollout.windows[0].used).toEqual({ kind: 'percent', percent: 25 });
+  });
   it('reads the supplied home on every call and preserves the clock and cancellation', async () => {
     const getAccountUsage = jest.fn(async () =>
       result({ fetchedAt: undefined }),
@@ -60,10 +161,8 @@ describe('Codex plan-usage reader', () => {
     ).toBe(NOW);
     home = '/accounts/b';
     await reader({ target: TARGET, refresh: false });
-    expect(getAccountUsage.mock.calls).toEqual([
-      [{ home: '/accounts/a', refresh: true, signal }],
-      [{ home: '/accounts/b', refresh: false }],
-    ]);
+    expect(getAccountUsage).toHaveBeenNthCalledWith(1, { home: '/accounts/a', refresh: true, signal: expect.any(AbortSignal) });
+    expect(getAccountUsage).toHaveBeenNthCalledWith(2, { home: '/accounts/b', refresh: false, signal: expect.any(AbortSignal) });
   });
 
   it('does not invent absent account, activity or quota values', async () => {
@@ -76,11 +175,8 @@ describe('Codex plan-usage reader', () => {
       },
       () => NOW,
     );
-    expect(await reader({ target: TARGET, refresh: false })).toEqual({
-      status: 'available',
-      fetchedAt: NOW,
-      windowSetEstablished: true,
-      windows: [],
+    expect(await reader({ target: TARGET, refresh: false })).toMatchObject({
+      status: 'available', source: 'provider-api', windowSetEstablished: true, windows: [],
     });
   });
 
@@ -91,7 +187,7 @@ describe('Codex plan-usage reader', () => {
 
     const reading = await reader({ target: TARGET, refresh: true, signal });
 
-    expect(getAccountUsage).toHaveBeenCalledWith({ refresh: true, signal });
+    expect(getAccountUsage).toHaveBeenCalledWith({ refresh: true, signal: expect.any(AbortSignal) });
     expect(reading.status).toBe('available');
     expect(reading.windowSetEstablished).toBe(true);
     expect(reading.fetchedAt).toBe(FETCHED);
@@ -306,3 +402,4 @@ describe('Codex plan-usage reader', () => {
     ).toEqual({ status, windowSetEstablished: false, windows: [] });
   });
 });
+
