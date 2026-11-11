@@ -35,6 +35,7 @@ import type { SentryService } from '@ptah-extension/vscode-core';
 import { SDK_TOKENS, PluginLoaderService } from '@ptah-extension/agent-sdk';
 import {
   HARNESS_SYNC_TOKENS,
+  resolveHarnessWorkspaceRoot,
   type HarnessPropagationService,
   type SkillSyncGate,
 } from '@ptah-extension/harness-sync';
@@ -816,16 +817,26 @@ export class HarnessRpcHandlers {
    * {@link partitionRequiredPlugins}. A generic Stage A contract is a duller
    * prompt; a named skill that does not exist is a broken one.
    */
-  private resolveAvailableSkillIds(workspaceRoot?: string): string[] {
+  private async resolveAvailableSkillIds(workspaceRoot?: string): Promise<string[]> {
     try {
+      if (!workspaceRoot) return [];
+      const normalizedRoot = resolveHarnessWorkspaceRoot(workspaceRoot);
+      const effective = await this.pluginLoader.getEffectivePluginConfig(normalizedRoot);
+      const effectiveSkills = new Set(
+        this.pluginLoader
+          .discoverSkillsForPlugins(effective.overlayPluginPaths)
+          .map((skill) => skill.descriptorId),
+      );
+      const disabled = new Set(effective.config.disabledSkillIds);
       const discovered = this.workspaceContext
         .discoverAvailableSkills()
-        .filter((skill) => skill.isActive)
+        .filter((skill) =>
+          skill.isActive &&
+          effectiveSkills.has(skill.descriptorId) &&
+          !disabled.has(skill.id),
+        )
         .map((skill) => skill.id);
-      if (!workspaceRoot) {
-        return discovered;
-      }
-      const decision = this.skillSyncGate.resolve(workspaceRoot);
+      const decision = this.skillSyncGate.resolve(normalizedRoot);
       if (decision.mode === 'all') {
         return discovered;
       }
@@ -919,14 +930,17 @@ export class HarnessRpcHandlers {
           this.partitionRequiredPlugins(profile);
         const profileSkillSlugs = this.collectProfileSkillSlugs(profile);
 
+        const workspaceRoot = this.workspaceProvider.getWorkspaceRoot();
         const config = this.pluginLoader.getWorkspacePluginConfig();
-        const disabledPlugins = new Set(config.disabledPluginIds ?? []);
+        const effectiveConfig = await this.pluginLoader.getEffectivePluginConfig(workspaceRoot);
+        const disabledPlugins = new Set(effectiveConfig.config.disabledPluginIds ?? []);
+        const availableBundled = bundled.filter((id) => !disabledPlugins.has(id));
         const requiredBundled =
           profile &&
           !disabledPlugins.has(DEFAULT_BUNDLED_PLUGIN_ID) &&
-          !bundled.includes(DEFAULT_BUNDLED_PLUGIN_ID)
-            ? [...bundled, DEFAULT_BUNDLED_PLUGIN_ID]
-            : bundled;
+          !availableBundled.includes(DEFAULT_BUNDLED_PLUGIN_ID)
+            ? [...availableBundled, DEFAULT_BUNDLED_PLUGIN_ID]
+            : availableBundled;
         const enabled = new Set(config.enabledPluginIds);
         const newlyEnabled = requiredBundled.filter((id) => !enabled.has(id));
         let pluginConfigChanged = false;
@@ -945,7 +959,6 @@ export class HarnessRpcHandlers {
           );
         }
 
-        const workspaceRoot = this.workspaceProvider.getWorkspaceRoot();
         const allowlistReady = this.allowlistProfileSkills(
           workspaceRoot,
           profileSkillSlugs,
@@ -963,7 +976,7 @@ export class HarnessRpcHandlers {
         const toolchain = await this.probeProfileToolchain(profile);
         const availableSkillIds =
           allowlistReady && reconcileSucceeded
-            ? this.resolveAvailableSkillIds(workspaceRoot)
+            ? await this.resolveAvailableSkillIds(workspaceRoot)
             : [];
         const seedPrompt = buildNewProjectSeedPrompt(intake, {
           toolchain,
@@ -1001,7 +1014,7 @@ export class HarnessRpcHandlers {
           seedPrompt,
           intake,
           plugins: {
-            enabledBundled: bundled,
+            enabledBundled: availableBundled,
             missingExternal,
             availableSkillIds,
           },

@@ -10,6 +10,7 @@
  */
 
 import 'reflect-metadata';
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 
 /**
  * `probeStackToolchain` lives behind the `workspace-intelligence` barrel, and
@@ -135,6 +136,8 @@ interface Suite {
     Pick<
       PluginLoaderService,
       | 'getWorkspacePluginConfig'
+      | 'getEffectivePluginConfig'
+      | 'discoverSkillsForPlugins'
       | 'resolvePluginPaths'
       | 'saveWorkspacePluginConfig'
     >
@@ -184,6 +187,8 @@ function buildSuite(folders: string[] = ['/ws']): Suite {
       enabledPluginIds: [],
       disabledSkillIds: [],
     }),
+    getEffectivePluginConfig: jest.fn(),
+    discoverSkillsForPlugins: jest.fn(),
     resolvePluginPaths: jest.fn().mockReturnValue([]),
     saveWorkspacePluginConfig: jest.fn().mockResolvedValue(undefined),
   } as unknown as Suite['pluginLoader'];
@@ -206,6 +211,24 @@ function buildSuite(folders: string[] = ['/ws']): Suite {
     discoverAvailableSkills: jest.fn().mockReturnValue([]),
     isWorkspaceEffectivelyEmpty: jest.fn().mockResolvedValue(false),
   } as unknown as Mocked<HarnessWorkspaceContextService>;
+  pluginLoader.getEffectivePluginConfig.mockImplementation(async () => ({
+    config: pluginLoader.getWorkspacePluginConfig(),
+    fingerprint: 'test',
+    overlayPluginPaths: ['/plugins'],
+  }));
+  pluginLoader.discoverSkillsForPlugins.mockImplementation(() =>
+    workspaceContext.discoverAvailableSkills().map((skill) => ({
+      skillId: skill.id,
+      descriptorId: skill.descriptorId,
+      invocationName: skill.invocationName,
+      displayName: skill.name,
+      description: skill.description,
+      pluginId: skill.sourceId,
+      sourceId: skill.sourceId,
+      source: skill.provenance,
+      invocability: skill.invocability,
+    })),
+  );
 
   const suggestion = {
     buildSuggestionFromPersona: jest.fn().mockResolvedValue({
@@ -833,6 +856,75 @@ describe('HarnessRpcHandlers (thin facade)', () => {
       expect(
         suite.platformCommands.focusChat.mock.invocationCallOrder[0],
       ).toBeLessThan(disposeWebview.mock.invocationCallOrder[0]);
+    });
+
+    it('honors globally disabled plugins when enabling the project profile', async () => {
+      const suite = buildSuite();
+      suite.pluginLoader.getEffectivePluginConfig.mockResolvedValue({
+        config: {
+          enabledPluginIds: [],
+          disabledPluginIds: ['ptah-core', 'ptah-nx-saas'],
+          disabledSkillIds: [],
+        },
+        fingerprint: 'global-disable',
+        overlayPluginPaths: [],
+      });
+      suite.pluginLoader.discoverSkillsForPlugins.mockReturnValue([]);
+      suite.workspaceContext.discoverAvailableSkills.mockReturnValue(
+        installedSkills(...NODE_TS_SKILLS),
+      );
+      suite.handlers.register();
+
+      const result = await getHandler(suite.rpc, 'harness:start-new-project')({
+        intake: VALID_INTAKE,
+      });
+      const payload = result as Extract<HarnessStartNewProjectResult, { success: true }>;
+      expect(suite.pluginLoader.saveWorkspacePluginConfig).not.toHaveBeenCalled();
+      expect(payload.plugins.enabledBundled).toEqual([]);
+      expect(payload.plugins.availableSkillIds).toEqual([]);
+      expect(payload.seedPrompt).not.toContain('saas-workspace-initializer');
+    });
+
+    it('excludes globally disabled skills from the seed prompt', async () => {
+      const suite = buildSuite();
+      suite.pluginLoader.getEffectivePluginConfig.mockResolvedValue({
+        config: {
+          enabledPluginIds: ['ptah-nx-saas'],
+          disabledSkillIds: ['saas-workspace-initializer'],
+        },
+        fingerprint: 'global-skill-disable',
+        overlayPluginPaths: ['/plugins'],
+      });
+      suite.workspaceContext.discoverAvailableSkills.mockReturnValue(
+        installedSkills(...NODE_TS_SKILLS),
+      );
+      suite.handlers.register();
+
+      const result = await getHandler(suite.rpc, 'harness:start-new-project')({
+        intake: VALID_INTAKE,
+      });
+      const payload = result as Extract<HarnessStartNewProjectResult, { success: true }>;
+      expect(payload.plugins.availableSkillIds).not.toContain('saas-workspace-initializer');
+      expect(payload.seedPrompt).not.toContain('`saas-workspace-initializer`');
+      expect(payload.plugins.availableSkillIds).toContain('nx-workspace-architect');
+    });
+
+    it('resolves the skill gate at the normalized workspace root', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'ptah-harness-rpc-'));
+      const child = join(root, 'nested');
+      mkdirSync(join(root, '.ptah'));
+      mkdirSync(child);
+      try {
+        const suite = buildSuite([child]);
+        suite.workspaceContext.discoverAvailableSkills.mockReturnValue(
+          installedSkills(...NODE_TS_SKILLS),
+        );
+        suite.handlers.register();
+        await getHandler(suite.rpc, 'harness:start-new-project')({ intake: VALID_INTAKE });
+        expect(suite.skillSyncGate.resolve).toHaveBeenCalledWith(root);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
     });
 
     it('skips plugin enablement when ptah-nx-saas and ptah-core are already enabled, while still allowlisting skills and reconciling', async () => {
