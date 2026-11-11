@@ -15,6 +15,13 @@
  *   - Windows path handling via `expectNormalizedPath()`.
  */
 
+jest.mock('chokidar', () => ({
+  watch: jest.fn(() => ({
+    on: () => undefined,
+    close: () => Promise.resolve(),
+  })),
+}));
+
 import 'reflect-metadata';
 import * as fsSync from 'fs';
 import * as fs from 'fs/promises';
@@ -80,7 +87,13 @@ function remap(
     copy: (src, dst, opts) => provider.copy(rewrite(src), rewrite(dst), opts),
     findFiles: (pattern, exclude, max, cwd) =>
       provider.findFiles(pattern, exclude, max, cwd ? rewrite(cwd) : undefined),
-    createFileWatcher: (pattern) => provider.createFileWatcher(pattern),
+    createFileWatcher: (pattern, opts) =>
+      provider.createFileWatcher(
+        pattern,
+        opts
+          ? { ...opts, cwd: opts.cwd ? rewrite(opts.cwd) : undefined }
+          : undefined,
+      ),
   };
 }
 
@@ -436,6 +449,87 @@ describe('ElectronFileSystemProvider — Electron-specific behaviour', () => {
     const s = await provider.stat(path.join(root, 'sz.txt'));
     expect(s.type).toBe(FileType.File);
     expect(s.size).toBe(4);
+  });
+
+  it('createFileWatcher uses one recursive fs.watch handle on win32 and logs timing via getLogger', () => {
+    const close = jest.fn();
+    const fsWatch = jest.fn(() => ({ close, on: jest.fn() }));
+    const debug = jest.fn();
+    const winProvider = new ElectronFileSystemProvider({
+      platform: 'win32',
+      fsWatch,
+      getLogger: () => ({ debug, warn: jest.fn() }),
+    });
+    const watcher = winProvider.createFileWatcher('.ptah/specs/**', {
+      cwd: root,
+    });
+    expect(fsWatch).toHaveBeenCalledTimes(1);
+    expect(debug).toHaveBeenCalledWith(
+      '[file-watcher] created',
+      expect.objectContaining({ mode: 'recursive', handles: 1 }),
+    );
+    watcher.dispose();
+    watcher.dispose();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('createFileWatcher uses chokidar fallback on linux and filters by glob', () => {
+    const handlers: Record<string, ((fp: string) => void)[]> = {};
+    const close = jest.fn(() => Promise.resolve());
+    const chokidar = jest.requireMock<{ watch: jest.Mock }>('chokidar');
+    const prevWatch = chokidar.watch;
+    const mockWatch = jest.fn((_target: string, _opts: object) => ({
+      on(event: string, handler: (fp: string) => void): unknown {
+        (handlers[event] ??= []).push(handler);
+        return this;
+      },
+      close,
+    }));
+    chokidar.watch = mockWatch;
+    const debug = jest.fn();
+    try {
+      const linuxProvider = new ElectronFileSystemProvider({
+        platform: 'linux',
+        getLogger: () => ({ debug, warn: jest.fn() }),
+      });
+      const watcher = linuxProvider.createFileWatcher('**/*.ts', {
+        cwd: root,
+        exclude: ['**/node_modules/**'],
+      });
+      const seen: { kind: string; path: string }[] = [];
+      watcher.onDidChange((p) => seen.push({ kind: 'change', path: p }));
+      watcher.onDidCreate((p) => seen.push({ kind: 'create', path: p }));
+      watcher.onDidDelete((p) => seen.push({ kind: 'delete', path: p }));
+
+      expect(mockWatch).toHaveBeenCalledTimes(1);
+      const opts = mockWatch.mock.calls[0][1] as {
+        ignored: (candidate: string) => boolean;
+      };
+      expect(opts.ignored(path.join(root, 'node_modules', 'a.ts'))).toBe(true);
+
+      handlers['change']?.[0]?.(path.join(root, 'a.ts'));
+      handlers['add']?.[0]?.(path.join(root, 'b.ts'));
+      handlers['unlink']?.[0]?.(path.join(root, 'c.ts'));
+      handlers['add']?.[0]?.(path.join(root, 'ignore.md'));
+
+      expect(seen).toEqual([
+        { kind: 'change', path: path.join(root, 'a.ts') },
+        { kind: 'create', path: path.join(root, 'b.ts') },
+        { kind: 'delete', path: path.join(root, 'c.ts') },
+      ]);
+      expect(debug).toHaveBeenCalledWith(
+        '[file-watcher] created',
+        expect.objectContaining({ mode: 'chokidar' }),
+      );
+
+      watcher.dispose();
+      watcher.dispose();
+      expect(close).toHaveBeenCalledTimes(1);
+      handlers['add']?.[0]?.(path.join(root, 'after-dispose.ts'));
+      expect(seen).toHaveLength(3);
+    } finally {
+      chokidar.watch = prevWatch;
+    }
   });
 });
 
