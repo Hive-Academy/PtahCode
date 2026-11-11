@@ -13,7 +13,7 @@
 import * as path from 'path';
 import { existsSync } from 'fs';
 import { mkdir, writeFile, readFile } from 'fs/promises';
-import * as os from 'os';
+import { resolvePtahHomeDir } from '@ptah-extension/platform-core';
 import { z } from 'zod';
 import {
   HarnessConfigUpdatesSchema,
@@ -765,7 +765,7 @@ export function buildHarnessNamespace(
       const resolvedScope = resolveHarnessScope(scope);
 
       const pluginId = `${HARNESS_PLUGIN_ID_PREFIX}${sanitizedName}`;
-      const userPluginsDir = path.join(os.homedir(), '.ptah', 'plugins');
+      const userPluginsDir = path.join(resolvePtahHomeDir(), 'plugins');
       // The policy root, not getWorkspaceRoot(): that one falls back to the
       // home folder, which would make "no folder open" look like a workspace
       // and write a "workspace" skill into ~/.ptah/plugins.

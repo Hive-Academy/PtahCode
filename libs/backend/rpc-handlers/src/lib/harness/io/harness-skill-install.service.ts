@@ -22,10 +22,11 @@
  * reported `foreign` by `ptah harness doctor` forever. Both call sites now land
  * in `~/.ptah/plugins/ptah-skillssh-*`, which is ordinary overlay source state.
  *
- * `ref.scope` is likewise not read: this path calls
- * `SkillsShSourceRootService.install` with its default global location. A
- * workspace source root (`{ws}/.ptah/plugins/ptah-skillssh-*`) is chosen only
- * through `skillsSh:install`, whose scope defaults to the workspace.
+ * `ref.scope` is not read: this path always passes the WORKSPACE location
+ * (`{ws}/.ptah/plugins/ptah-skillssh-*`), the same default `skillsSh:install`
+ * uses. It never relies on the service's implicit global default, because a
+ * global install leaks into every other workspace that syncs all skills. With
+ * no workspace root it installs nothing and reports a warning.
  *
  * This service does NOT propagate. `harness:apply` reconciles once at the end
  * of its own flow, and a per-skill propagate inside this loop would be N
@@ -87,12 +88,28 @@ export class HarnessSkillInstallService {
       }
     }
 
+    // Harness apply belongs to ONE workspace, so its skills go to that
+    // workspace's source root. The service default is global, and a global
+    // install fans out to every workspace whose sync mode is `all`.
+    const trimmedRoot = workspaceRoot?.trim();
+    if (!trimmedRoot) {
+      if (installable.length > 0) {
+        outcome.warnings.push(
+          `No workspace folder is open, so ${installable.length} skills.sh skill(s) were not installed. Open the workspace and apply the harness again.`,
+        );
+      }
+      return outcome;
+    }
+
     for (const ref of installable) {
       try {
-        const result = await this.sourceRoots.install({
-          source: ref.installSource.trim(),
-          skillId: ref.skillId,
-        });
+        const result = await this.sourceRoots.install(
+          {
+            source: ref.installSource.trim(),
+            skillId: ref.skillId,
+          },
+          { scope: 'workspace', workspaceRoot: trimmedRoot },
+        );
 
         if (!result.success) {
           outcome.warnings.push(
@@ -107,11 +124,10 @@ export class HarnessSkillInstallService {
         // The CLI does not print where it wrote and a repo's directory name
         // need not equal the skill id, so this is read back from disk rather
         // than predicted — the reason the old code had to probe and fall back.
-        const rootSkillsDir = path.join(
-          this.sourceRoots.pluginsBasePath,
-          result.rootId,
-          'skills',
-        );
+        const rootDir =
+          this.sourceRoots.workspaceRootDir(trimmedRoot, result.rootId) ??
+          path.join(trimmedRoot, '.ptah', 'plugins', result.rootId);
+        const rootSkillsDir = path.join(rootDir, 'skills');
         for (const slug of result.slugs) {
           outcome.installedPaths.push(path.join(rootSkillsDir, slug));
         }
@@ -138,7 +154,7 @@ export class HarnessSkillInstallService {
   /** Non-fatal: a failed sweep must not fail the harness the user just applied. */
   private async adoptLegacy(workspaceRoot: string | undefined): Promise<void> {
     try {
-      await this.sourceRoots.adoptLegacyInstalls(workspaceRoot);
+      await this.sourceRoots.adoptLegacyInstalls(workspaceRoot, 'workspace');
     } catch (error: unknown) {
       this.logger.warn('RPC: harness:apply legacy skill adoption failed', {
         error: error instanceof Error ? error.message : String(error),

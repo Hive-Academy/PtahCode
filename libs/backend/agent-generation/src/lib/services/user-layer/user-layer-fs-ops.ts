@@ -12,7 +12,7 @@
  * the reason this class is not a bag of free functions: it is a policy, and a
  * policy with one caller is a bug waiting for a second caller.
  */
-import { homedir } from 'os';
+import { resolvePtahHomeDir } from '@ptah-extension/platform-core';
 import { join, resolve, sep, basename, dirname } from 'path';
 import {
   mkdir,
@@ -44,9 +44,12 @@ export class UserLayerFsOps {
     this.excludedSubdirectories.set(resolve(root), slugs);
   }
 
-  /** Absolute root of the user layer (`~/.ptah/user`). */
+  /**
+   * Absolute root of the user layer (`~/.ptah/user`, or `~/.ptah-dev/user` for
+   * the dev Electron instance, see `resolvePtahHomeDir`).
+   */
   userLayerBase(): string {
-    return resolve(join(homedir(), '.ptah', 'user'));
+    return resolve(join(resolvePtahHomeDir(), 'user'));
   }
 
   /**
@@ -61,7 +64,7 @@ export class UserLayerFsOps {
         `[UserLayerMirror] refusing to write outside ~/.ptah/user/: ${resolved}`,
       );
     }
-    const pluginsBase = resolve(join(homedir(), '.ptah', 'plugins'));
+    const pluginsBase = resolve(join(resolvePtahHomeDir(), 'plugins'));
     if (resolved === pluginsBase || resolved.startsWith(pluginsBase + sep)) {
       throw new Error(
         `[UserLayerMirror] refusing to write under ~/.ptah/plugins/: ${resolved}`,

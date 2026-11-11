@@ -14,7 +14,7 @@
 import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import * as path from 'path';
-import { homedir } from 'os';
+import { resolvePtahHomeDir } from './file-settings-manager';
 import * as https from 'https';
 import * as http from 'http';
 
@@ -95,7 +95,8 @@ export class ContentDownloadService {
     'https://raw.githubusercontent.com/Hive-Academy/PtahCode/main/content-manifest.json';
 
   constructor() {
-    this.ptahDir = path.join(homedir(), '.ptah');
+    // Same directory as settings: `~/.ptah-dev` for the dev Electron instance.
+    this.ptahDir = resolvePtahHomeDir();
     this.pluginsDir = path.join(this.ptahDir, 'plugins');
     this.templatesDir = path.join(this.ptahDir, 'templates', 'agents');
     this.cacheMetadataPath = path.join(this.ptahDir, '.content-cache.json');

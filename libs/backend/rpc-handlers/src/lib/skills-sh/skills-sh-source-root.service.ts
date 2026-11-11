@@ -28,6 +28,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { TOKENS } from '@ptah-extension/vscode-core';
+import { resolvePtahHomeDir } from '@ptah-extension/platform-core';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
   SKILLS_SH_OWNER_MARKER,
@@ -189,7 +190,7 @@ function toError(error: unknown): Error {
 
 @injectable()
 export class SkillsShSourceRootService {
-  private readonly homeDir: string;
+  private readonly ptahDir: string;
 
   /**
    * Make global calls run one at a time. Two overlapping conversions of the
@@ -216,12 +217,15 @@ export class SkillsShSourceRootService {
      */
     homeDir: string | null = null,
   ) {
-    this.homeDir = homeDir ?? os.homedir();
+    // No override: the shared Ptah home, which is `~/.ptah-dev` for the dev
+    // Electron instance, so dev installs never reach the release store.
+    this.ptahDir =
+      homeDir === null ? resolvePtahHomeDir() : path.join(homeDir, '.ptah');
   }
 
-  /** `~/.ptah/plugins`. */
+  /** `~/.ptah/plugins` (`~/.ptah-dev/plugins` in dev Electron). */
   get pluginsBasePath(): string {
-    return path.join(this.homeDir, '.ptah', 'plugins');
+    return path.join(this.ptahDir, 'plugins');
   }
 
   /** `~/.ptah/plugins/<rootId>`. */
@@ -1016,11 +1020,19 @@ export class SkillsShSourceRootService {
    */
   async adoptLegacyInstalls(
     workspaceRoot: string | undefined,
+    scope: 'global' | 'workspace' = 'global',
   ): Promise<number> {
     if (workspaceRoot === undefined || workspaceRoot.trim() === '') return 0;
+    // A workspace-scoped caller (harness apply) adopts into that workspace's
+    // source root, so the adopted skill does not fan out to other workspaces.
+    const pluginsBasePath =
+      scope === 'workspace'
+        ? workspacePluginsDir(workspaceRoot)
+        : this.pluginsBasePath;
+    if (pluginsBasePath === null) return 0;
     return adoptLegacySkillsShInstalls({
       workspaceRoot,
-      pluginsBasePath: this.pluginsBasePath,
+      pluginsBasePath,
       logger: this.logger,
     });
   }
@@ -1149,7 +1161,7 @@ export class SkillsShSourceRootService {
   }
 
   private async makeStagingDir(): Promise<string> {
-    const base = path.join(this.homeDir, '.ptah', 'tmp');
+    const base = path.join(this.ptahDir, 'tmp');
     await fs.mkdir(base, { recursive: true });
     return fs.mkdtemp(path.join(base, 'skillssh-'));
   }

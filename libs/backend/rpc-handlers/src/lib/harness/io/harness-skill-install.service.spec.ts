@@ -20,8 +20,9 @@ import type { HarnessSkillRef } from '@ptah-extension/shared';
 import type { SkillsShSourceRootService } from '../../skills-sh/skills-sh-source-root.service';
 import { HarnessSkillInstallService } from './harness-skill-install.service';
 
-/** Stands in for `~/.ptah/plugins`; nothing here touches the filesystem. */
-const PLUGINS_BASE = path.join('/home', 'user', '.ptah', 'plugins');
+/** Stands in for `{ws}/.ptah/plugins`; nothing here touches the filesystem. */
+const PLUGINS_BASE = path.join('/ws', '.ptah', 'plugins');
+const WORKSPACE_LOCATION = { scope: 'workspace', workspaceRoot: '/ws' };
 const ROOT_ID = 'ptah-skillssh-anthropics-skills';
 
 /** Absolute path a slug is expected to be reported at. */
@@ -49,7 +50,11 @@ function makeService(): Harness {
       .mockResolvedValue({ success: true, rootId: ROOT_ID, slugs: [] });
 
     get pluginsBasePath(): string {
-      return PLUGINS_BASE;
+      return path.join('/home', 'user', '.ptah', 'plugins');
+    }
+
+    workspaceRootDir(ws: string, rootId: string): string {
+      return path.join(ws, '.ptah', 'plugins', rootId);
     }
   }
 
@@ -108,14 +113,39 @@ describe('HarnessSkillInstallService', () => {
 
     await service.installSkills([marketplaceRef()], '/ws');
 
-    expect(sourceRoots.adoptLegacyInstalls).toHaveBeenCalledWith('/ws');
+    expect(sourceRoots.adoptLegacyInstalls).toHaveBeenCalledWith('/ws', 'workspace');
     expect(
       sourceRoots.adoptLegacyInstalls.mock.invocationCallOrder[0],
     ).toBeLessThan(sourceRoots.install.mock.invocationCallOrder[0]);
-    expect(sourceRoots.install).toHaveBeenCalledWith({
-      source: 'anthropics/skills',
-      skillId: 'frontend-design',
-    });
+    expect(sourceRoots.install).toHaveBeenCalledWith(
+      { source: 'anthropics/skills', skillId: 'frontend-design' },
+      WORKSPACE_LOCATION,
+    );
+  });
+
+  it('never installs globally: every install names the workspace scope', async () => {
+    const { service, sourceRoots } = makeService();
+
+    await service.installSkills(
+      [marketplaceRef({ skillId: 'a' }), marketplaceRef({ skillId: 'b' })],
+      '/ws',
+    );
+
+    expect(sourceRoots.install).toHaveBeenCalledTimes(2);
+    for (const call of sourceRoots.install.mock.calls) {
+      expect(call[1]).toEqual(WORKSPACE_LOCATION);
+    }
+  });
+
+  it('installs nothing and warns when no workspace root exists', async () => {
+    const { service, sourceRoots } = makeService();
+
+    const outcome = await service.installSkills([marketplaceRef()], undefined);
+
+    expect(sourceRoots.install).not.toHaveBeenCalled();
+    expect(outcome.installedPaths).toEqual([]);
+    expect(outcome.warnings).toHaveLength(1);
+    expect(outcome.warnings[0]).toContain('No workspace folder');
   });
 
   it('reports every slug a whole-repo install wrote', async () => {
