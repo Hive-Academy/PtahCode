@@ -66,7 +66,8 @@ describe('ReviewLaneGateway', () => {
     // An earlier lane can plant a symlink in the attempt folder; the write must not follow it.
     const victimDir = await mkdtemp(join(tmpdir(), 'review-gateway-victim-'));
     await writeFile(join(victimDir, 'review-task.md'), 'untouched', 'utf8');
-    await symlink(victimDir, join(cwd, 'task'));
+    // A directory junction needs no symlink privilege on Windows; POSIX ignores the type argument.
+    await symlink(victimDir, join(cwd, 'task'), 'junction');
     const prompt = 'A'.repeat(100_001);
     await expect(gateway.spawn({ laneId: 'codex', cwd, prompt, signal: new AbortController().signal }))
       .rejects.toThrow('spawn reached');
