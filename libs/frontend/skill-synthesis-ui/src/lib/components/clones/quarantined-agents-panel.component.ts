@@ -44,7 +44,7 @@ import type {
   SkillSynthesisListQuarantinedAgentsResult,
   SkillSynthesisRestoreQuarantinedAgentResult,
 } from '@ptah-extension/shared';
-import { NativeModalComponent } from '@ptah-extension/ui';
+import { NativeModalComponent, PtahButtonDirective } from '@ptah-extension/ui';
 
 import { SkillSynthesisRpcService } from '../../services/skill-synthesis-rpc.service';
 import { SkillClonesStateService } from '../../services/skill-clones-state.service';
@@ -100,7 +100,7 @@ let nextInstanceId = 0;
   selector: 'ptah-quarantined-agents-panel',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NativeModalComponent],
+  imports: [PtahButtonDirective, NativeModalComponent],
   template: `
     <section
       class="mt-4 space-y-2 rounded-lg border border-base-300 p-3"
@@ -196,7 +196,9 @@ let nextInstanceId = 0;
                     @if (l.agentSync !== 'disabled') {
                       <button
                         type="button"
-                        class="btn btn-ghost btn-xs transition-colors duration-150"
+                        ptahButton
+                        variant="ghost"
+                        size="xs"
                         data-testid="quarantine-finish-btn"
                         [disabled]="controlsLocked()"
                         (click)="onFinishRestore(row.entry)"
@@ -207,7 +209,9 @@ let nextInstanceId = 0;
                   } @else if (row.entry.hasSnapshot) {
                     <button
                       type="button"
-                      class="btn btn-ghost btn-xs transition-colors duration-150"
+                      ptahButton
+                      variant="ghost"
+                      size="xs"
                       data-testid="quarantine-restore-btn"
                       [disabled]="controlsLocked()"
                       (click)="pendingRestore.set(row.entry)"
@@ -223,7 +227,9 @@ let nextInstanceId = 0;
                       >
                       <button
                         type="button"
-                        class="btn btn-ghost btn-xs"
+                        ptahButton
+                        variant="ghost"
+                        size="xs"
                         data-testid="quarantine-restore-btn"
                         disabled
                         title="No quarantine snapshot was found for this agent."
@@ -274,7 +280,8 @@ let nextInstanceId = 0;
       <div modal-footer class="modal-action">
         <button
           type="button"
-          class="btn btn-sm btn-ghost"
+          ptahButton
+          variant="ghost"
           data-testid="quarantine-restore-cancel"
           (click)="pendingRestore.set(null)"
         >
@@ -282,7 +289,8 @@ let nextInstanceId = 0;
         </button>
         <button
           type="button"
-          class="btn btn-sm btn-primary"
+          ptahButton
+          variant="primary"
           data-testid="quarantine-restore-confirm"
           [disabled]="controlsLocked()"
           (click)="onConfirmRestore()"

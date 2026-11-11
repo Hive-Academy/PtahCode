@@ -1994,23 +1994,13 @@
     "btn-xs": 1
   },
   "libs/frontend/machines-ui/src/lib/components/add-machine-pane/add-machine-pane.component.ts": {
-    "btn": 1,
-    "btn-ghost": 2,
-    "btn-xs": 1,
+    "btn-ghost": 1,
     "input": 2,
     "input-bordered": 2,
     "input-sm": 2
   },
-  "libs/frontend/machines-ui/src/lib/components/copy-command/copy-command.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/machines-ui/src/lib/components/machine-list/machine-list.component.ts": {
     "<dynamic>": 1,
-    "btn": 1,
-    "btn-primary": 1,
-    "btn-sm": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1,
@@ -2023,14 +2013,8 @@
     "badge": 1,
     "badge-outline": 1,
     "badge-sm": 1,
-    "btn": 7,
-    "btn-ghost": 6,
-    "btn-primary": 1,
-    "btn-sm": 7
-  },
-  "libs/frontend/machines-ui/src/lib/components/machines-view/machines-intro.component.ts": {
     "btn": 1,
-    "btn-primary": 1,
+    "btn-ghost": 1,
     "btn-sm": 1
   },
   "libs/frontend/machines-ui/src/lib/components/machines-view/machines-page-header.component.ts": {
@@ -2039,23 +2023,10 @@
     "badge-sm": 1
   },
   "libs/frontend/machines-ui/src/lib/components/machines-view/machines-view.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2,
     "skeleton": 3
   },
   "libs/frontend/machines-ui/src/lib/components/readiness-panel/readiness-panel.component.ts": {
-    "<dynamic>": 1,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 2
-  },
-  "libs/frontend/machines-ui/src/lib/components/reconnect-banner/reconnect-banner.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
+    "<dynamic>": 1
   },
   "libs/frontend/machines-ui/src/lib/components/reconnect-banner/session-sync-chip.component.ts": {
     "badge": 1,
@@ -2065,17 +2036,9 @@
   "libs/frontend/machines-ui/src/lib/components/remote-approval-block/remote-approval-block.component.ts": {
     "badge": 1,
     "badge-outline": 1,
-    "badge-sm": 1,
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-xs": 1
+    "badge-sm": 1
   },
   "libs/frontend/machines-ui/src/lib/components/remote-composer/remote-composer.component.ts": {
-    "btn": 1,
-    "btn-primary": 1,
-    "btn-sm": 1,
     "textarea": 1,
     "textarea-bordered": 1,
     "textarea-sm": 1
@@ -2084,11 +2047,6 @@
     "badge": 1,
     "badge-outline": 1,
     "badge-sm": 1,
-    "btn": 5,
-    "btn-ghost": 3,
-    "btn-primary": 2,
-    "btn-sm": 2,
-    "btn-xs": 3,
     "select": 1,
     "select-bordered": 1,
     "select-sm": 1,
@@ -2099,11 +2057,7 @@
   "libs/frontend/machines-ui/src/lib/components/remote-session-view/remote-session-view.component.ts": {
     "badge": 3,
     "badge-outline": 3,
-    "badge-sm": 3,
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-sm": 2,
-    "btn-xs": 1
+    "badge-sm": 3
   },
   "libs/frontend/markdown/src/lib/markdown-block.component.ts": {
     "<dynamic>": 1
@@ -2117,12 +2071,10 @@
     "badge-sm": 1,
     "badge-warning": 1,
     "badge-xs": 2,
-    "btn": 5,
+    "btn": 1,
     "btn-circle": 1,
-    "btn-ghost": 4,
-    "btn-primary": 1,
-    "btn-sm": 3,
-    "btn-xs": 2
+    "btn-ghost": 1,
+    "btn-sm": 1
   },
   "libs/frontend/marketplace/src/lib/external-install-report.component.ts": {
     "alert": 1,
@@ -2145,12 +2097,11 @@
     "alert": 3,
     "alert-error": 3,
     "alert-sm": 3,
-    "btn": 10,
-    "btn-error": 1,
-    "btn-ghost": 8,
+    "btn": 4,
+    "btn-ghost": 3,
     "btn-primary": 1,
     "btn-sm": 3,
-    "btn-xs": 7,
+    "btn-xs": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
@@ -2166,23 +2117,21 @@
     "alert": 1,
     "alert-error": 1,
     "alert-sm": 1,
-    "btn": 3,
+    "btn": 2,
     "btn-ghost": 1,
     "btn-outline": 1,
-    "btn-primary": 1,
     "btn-warning": 1,
-    "btn-xs": 3
+    "btn-xs": 2
   },
   "libs/frontend/marketplace/src/lib/harness/harness-repair-dialog.component.ts": {
     "alert": 1,
     "alert-error": 1,
     "alert-sm": 1,
-    "btn": 4,
+    "btn": 2,
     "btn-circle": 1,
-    "btn-ghost": 3,
-    "btn-sm": 3,
-    "btn-warning": 1,
-    "btn-xs": 1
+    "btn-ghost": 1,
+    "btn-sm": 2,
+    "btn-warning": 1
   },
   "libs/frontend/marketplace/src/lib/harness/harness-target-row.component.ts": {
     "<dynamic>": 1
@@ -2195,23 +2144,18 @@
     "badge-error": 1,
     "badge-ghost": 2,
     "badge-sm": 2,
-    "badge-success": 1,
-    "btn": 5,
-    "btn-ghost": 3,
-    "btn-primary": 2,
-    "btn-sm": 3,
-    "btn-xs": 2
+    "badge-success": 1
   },
   "libs/frontend/marketplace/src/lib/oauth-surface.component.ts": {
     "<dynamic>": 3,
     "alert": 2,
     "alert-error": 2,
     "alert-sm": 2,
-    "btn": 6,
-    "btn-ghost": 5,
+    "btn": 3,
+    "btn-ghost": 2,
     "btn-primary": 1,
-    "btn-sm": 3,
-    "btn-xs": 3,
+    "btn-sm": 2,
+    "btn-xs": 1,
     "input": 5,
     "input-bordered": 5,
     "input-sm": 5
@@ -2222,12 +2166,12 @@
     "btn-sm": 1
   },
   "libs/frontend/marketplace/src/lib/pages/connectors/connectors-page.component.html": {
-    "btn": 8,
-    "btn-ghost": 6,
+    "btn": 5,
+    "btn-ghost": 4,
     "btn-outline": 1,
-    "btn-primary": 3,
-    "btn-sm": 5,
-    "btn-xs": 3,
+    "btn-primary": 2,
+    "btn-sm": 3,
+    "btn-xs": 2,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
@@ -2248,10 +2192,10 @@
     "badge-ghost": 1,
     "badge-outline": 1,
     "badge-sm": 2,
-    "btn": 7,
+    "btn": 6,
     "btn-outline": 5,
-    "btn-primary": 2,
-    "btn-sm": 3,
+    "btn-primary": 1,
+    "btn-sm": 2,
     "btn-xs": 4,
     "skeleton": 2
   },
@@ -2268,12 +2212,11 @@
     "badge": 1,
     "badge-ghost": 1,
     "badge-sm": 1,
-    "btn": 5,
+    "btn": 4,
     "btn-error": 1,
-    "btn-ghost": 1,
     "btn-outline": 3,
     "btn-primary": 1,
-    "btn-sm": 4,
+    "btn-sm": 3,
     "btn-xs": 1,
     "skeleton": 4
   },
@@ -2287,11 +2230,10 @@
     "badge-outline": 1,
     "badge-sm": 4,
     "badge-warning": 1,
-    "btn": 6,
+    "btn": 5,
     "btn-ghost": 4,
     "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-xs": 6,
+    "btn-xs": 5,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1,
@@ -2308,12 +2250,11 @@
     "badge-sm": 2,
     "badge-warning": 2,
     "badge-xs": 1,
-    "btn": 4,
+    "btn": 2,
     "btn-error": 1,
-    "btn-ghost": 2,
+    "btn-ghost": 1,
     "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 4,
+    "btn-sm": 2,
     "skeleton": 3
   },
   "libs/frontend/marketplace/src/lib/shell/marketplace-nav.component.ts": {
@@ -2336,11 +2277,11 @@
     "badge": 1,
     "badge-neutral": 1,
     "badge-xs": 1,
-    "btn": 10,
-    "btn-ghost": 8,
-    "btn-primary": 4,
-    "btn-sm": 5,
-    "btn-xs": 5,
+    "btn": 8,
+    "btn-ghost": 7,
+    "btn-primary": 3,
+    "btn-sm": 4,
+    "btn-xs": 4,
     "input": 2,
     "input-bordered": 2,
     "input-sm": 2,
@@ -2376,12 +2317,6 @@
     "btn-xs": 1,
     "skeleton": 1
   },
-  "libs/frontend/marketplace/src/lib/ui/direct-removal-confirm.component.ts": {
-    "btn": 2,
-    "btn-error": 1,
-    "btn-ghost": 1,
-    "btn-xs": 2
-  },
   "libs/frontend/marketplace/src/lib/ui/docked-inspector.component.ts": {
     "btn": 1,
     "btn-ghost": 1,
@@ -2389,11 +2324,10 @@
     "btn-square": 1
   },
   "libs/frontend/marketplace/src/lib/ui/featured-connectors.component.ts": {
-    "btn": 3,
+    "btn": 2,
     "btn-ghost": 1,
     "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 3
+    "btn-sm": 2
   },
   "libs/frontend/marketplace/src/lib/ui/needs-attention.component.ts": {
     "badge": 1,
@@ -2407,11 +2341,10 @@
   },
   "libs/frontend/marketplace/src/lib/ui/provider-card-list.component.ts": {
     "<dynamic>": 1,
-    "btn": 3,
+    "btn": 2,
     "btn-ghost": 1,
     "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 2,
+    "btn-sm": 1,
     "btn-xs": 1,
     "skeleton": 3
   },
@@ -2434,11 +2367,10 @@
     "badge": 1,
     "badge-ghost": 1,
     "badge-sm": 1,
-    "btn": 3,
+    "btn": 2,
     "btn-ghost": 1,
     "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 2,
+    "btn-sm": 1,
     "btn-xs": 1,
     "skeleton": 4
   },
@@ -2472,33 +2404,24 @@
     "textarea-bordered": 1
   },
   "libs/frontend/memory-curator-ui/src/lib/components/corpus-build-dialog.component.ts": {
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 2,
-    "btn-sm": 2,
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-primary": 1,
     "btn-xs": 1,
     "input": 5,
     "input-bordered": 5,
     "input-sm": 5
   },
   "libs/frontend/memory-curator-ui/src/lib/components/corpus-list.component.ts": {
-    "btn": 6,
-    "btn-ghost": 5,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-xs": 4,
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-xs": 1,
     "skeleton": 2
   },
   "libs/frontend/memory-curator-ui/src/lib/components/corpus-suggestions.component.ts": {
     "badge": 1,
     "badge-ghost": 1,
     "badge-sm": 1,
-    "btn": 2,
-    "btn-circle": 1,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 1,
-    "btn-xs": 1,
     "skeleton": 3
   },
   "libs/frontend/memory-curator-ui/src/lib/components/diagnostics/db-health-panel.component.ts": {
@@ -2511,11 +2434,7 @@
     "badge-ghost": 1,
     "badge-sm": 5,
     "badge-success": 3,
-    "badge-warning": 1,
-    "btn": 5,
-    "btn-ghost": 3,
-    "btn-primary": 2,
-    "btn-xs": 5
+    "badge-warning": 1
   },
   "libs/frontend/memory-curator-ui/src/lib/components/diagnostics/event-feed.component.ts": {
     "badge": 1,
@@ -2528,11 +2447,9 @@
   "libs/frontend/memory-curator-ui/src/lib/components/diagnostics/memory-diagnostics-accordion.component.ts": {
     "alert": 2,
     "alert-error": 2,
-    "btn": 4,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-xs": 2,
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-xs": 1,
     "textarea": 1,
     "textarea-bordered": 1,
     "textarea-xs": 1
@@ -2550,18 +2467,7 @@
     "badge-success": 2,
     "badge-warning": 1
   },
-  "libs/frontend/memory-curator-ui/src/lib/components/memory-curator-tab.component.ts": {
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-sm": 3
-  },
   "libs/frontend/memory-curator-ui/src/lib/components/memory-danger-zone.component.ts": {
-    "btn": 2,
-    "btn-error": 1,
-    "btn-link": 1,
-    "btn-sm": 1,
-    "btn-xs": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1,
@@ -2570,26 +2476,15 @@
     "select-sm": 1
   },
   "libs/frontend/memory-curator-ui/src/lib/components/memory-entry-list.component.ts": {
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-square": 3,
-    "btn-xs": 3,
     "skeleton": 3
   },
   "libs/frontend/memory-curator-ui/src/lib/components/memory-indexed-code.component.ts": {
-    "btn": 3,
-    "btn-ghost": 1,
-    "btn-xs": 3,
+    "btn": 2,
+    "btn-xs": 2,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1,
     "skeleton": 2
-  },
-  "libs/frontend/memory-curator-ui/src/lib/components/memory-indexing-banner.component.ts": {
-    "btn": 6,
-    "btn-ghost": 2,
-    "btn-primary": 4,
-    "btn-sm": 6
   },
   "libs/frontend/memory-curator-ui/src/lib/components/memory-pause-switch.component.ts": {
     "badge": 1,
@@ -2608,10 +2503,9 @@
     "badge": 1,
     "badge-sm": 1,
     "badge-warning": 1,
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 2,
-    "btn-sm": 2,
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-primary": 1,
     "btn-xs": 1,
     "input": 5,
     "input-bordered": 5,
@@ -2621,11 +2515,6 @@
   "libs/frontend/memory-curator-ui/src/lib/components/timeline-view.component.ts": {
     "alert": 1,
     "alert-error": 1,
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-outline": 1,
-    "btn-sm": 1,
-    "btn-xs": 2,
     "skeleton": 2
   },
   "libs/frontend/messaging-gateway-ui/src/lib/components/allow-list-editor.component.ts": {
@@ -3088,25 +2977,19 @@
     "<dynamic>": 1,
     "badge": 1,
     "badge-xs": 1,
-    "btn": 8,
-    "btn-ghost": 6,
-    "btn-primary": 1,
+    "btn": 1,
     "btn-warning": 1,
-    "btn-xs": 8,
+    "btn-xs": 1,
     "input": 1,
     "input-bordered": 1,
     "input-xs": 1
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/bulk-rebase-confirm.component.ts": {
-    "btn": 2,
-    "btn-sm": 2,
+    "btn": 1,
+    "btn-sm": 1,
     "btn-warning": 1
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/clone-body-editor.component.ts": {
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-xs": 2,
     "textarea": 1,
     "textarea-bordered": 1
   },
@@ -3121,18 +3004,16 @@
     "<dynamic>": 2,
     "badge": 1,
     "badge-sm": 1,
-    "btn": 4,
-    "btn-ghost": 4,
-    "btn-xs": 4
+    "btn": 2,
+    "btn-ghost": 2,
+    "btn-xs": 2
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/clone-detail-drawer.component.ts": {
     "<dynamic>": 1,
-    "btn": 7,
-    "btn-ghost": 4,
+    "btn": 2,
     "btn-outline": 2,
-    "btn-primary": 1,
     "btn-warning": 2,
-    "btn-xs": 7
+    "btn-xs": 2
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/enhance-preview-drawer.component.ts": {
     "alert": 2,
@@ -3141,16 +3022,7 @@
     "badge-ghost": 1,
     "badge-outline": 1,
     "badge-sm": 3,
-    "badge-success": 1,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 2
-  },
-  "libs/frontend/skill-synthesis-ui/src/lib/components/clones/lazy-diff-view.component.ts": {
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-xs": 1
+    "badge-success": 1
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/provenance-badge.component.ts": {
     "<dynamic>": 2,
@@ -3162,20 +3034,14 @@
     "alert-error": 1,
     "badge": 1,
     "badge-ghost": 1,
-    "badge-sm": 1,
-    "btn": 5,
-    "btn-ghost": 4,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-xs": 3
+    "badge-sm": 1
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/reconcile-guard.ts": {
     "badge": 2,
     "badge-ghost": 2,
     "badge-sm": 2,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-sm": 2,
+    "btn": 1,
+    "btn-sm": 1,
     "btn-warning": 1
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/scorecard-badge.component.ts": {
@@ -3198,18 +3064,9 @@
     "alert-info": 2,
     "alert-success": 1,
     "alert-warning": 1,
-    "btn": 5,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-warning": 1,
-    "btn-xs": 3
-  },
-  "libs/frontend/skill-synthesis-ui/src/lib/components/skill-specs-control.component.ts": {
-    "btn": 2,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-xs": 2
+    "btn": 1,
+    "btn-sm": 1,
+    "btn-warning": 1
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/skills-pause-switch.component.ts": {
     "badge": 1,

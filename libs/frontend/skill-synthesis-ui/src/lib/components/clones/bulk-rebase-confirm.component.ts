@@ -33,10 +33,12 @@ import {
 } from '@angular/core';
 
 import { BULK_REBASE_EXPLANATION } from './clone-action-gating';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-bulk-rebase-confirm',
   standalone: true,
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dialog
@@ -64,7 +66,7 @@ import { BULK_REBASE_EXPLANATION } from './clone-action-gating';
           <button
             #cancelButton
             type="button"
-            class="btn btn-sm"
+            ptahButton
             data-testid="clones-bulk-cancel"
             (click)="cancelled.emit()"
           >

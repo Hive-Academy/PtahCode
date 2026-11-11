@@ -10,7 +10,7 @@ import {
   type OnInit,
 } from '@angular/core';
 import { ArrowLeft, LucideAngularModule } from 'lucide-angular';
-import { InboxLayoutComponent } from '@ptah-extension/ui';
+import { InboxLayoutComponent, PtahButtonDirective } from '@ptah-extension/ui';
 import {
   MachinesStore,
   type MachinesOutcome,
@@ -57,6 +57,7 @@ const CLOCK_TICK_MS = 1000;
   selector: 'ptah-machines-view',
   standalone: true,
   imports: [
+    PtahButtonDirective,
     LucideAngularModule,
     InboxLayoutComponent,
     MachinesPageHeaderComponent,
@@ -122,7 +123,10 @@ const CLOCK_TICK_MS = 1000;
               @if (selected(); as machine) {
                 <button
                   type="button"
-                  class="btn btn-ghost btn-xs self-start gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                  ptahButton
+                  variant="ghost"
+                  size="xs"
+                  class="self-start"
                   data-testid="machines-back"
                   (click)="closePane()"
                 >
@@ -141,7 +145,10 @@ const CLOCK_TICK_MS = 1000;
                 @if (openSession(); as session) {
                   <button
                     type="button"
-                    class="btn btn-ghost btn-xs self-start gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                    ptahButton
+                    variant="ghost"
+                    size="xs"
+                    class="self-start"
                     data-testid="machines-session-back"
                     (click)="closeSession()"
                   >
@@ -178,7 +185,11 @@ const CLOCK_TICK_MS = 1000;
                   (opened)="showSession($event)"
                   (backToList)="narrowDetailOpen.set(false)"
                 />
-              } @else if (!store.loading() && store.machines().length === 0 && !store.error()) {
+              } @else if (
+                !store.loading() &&
+                store.machines().length === 0 &&
+                !store.error()
+              ) {
                 <ptah-machines-intro (add)="openAdd()" />
               } @else if (store.loading()) {
                 <div
