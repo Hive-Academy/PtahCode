@@ -8,6 +8,7 @@ import { ReviewOutputParser } from './review-output.parser';
 import { REVIEW_CORE_TOKENS } from '../../di/tokens';
 import type { ReviewStageEnvironment } from '../stages/context-stage.runner';
 import { sanitizeReviewFailureMessage } from '../review-failure-sanitizer';
+import { hasLegacyHeadings, parseTriageOutputDetailed } from '../publication/walkthrough/triage-output.schema';
 
 export interface IReviewLaneGateway {
   list(): Promise<{ lanes: ReviewLaneCapability[]; maxConcurrentAgents: number }>;
@@ -18,8 +19,8 @@ export interface IReviewLaneGateway {
 export interface IReviewLaneFiles {
   prepare(repo: RepoIdentity, attemptRoot: string, headSha: string, signal?: AbortSignal): Promise<string>;
   sourceChecksum(repo: RepoIdentity, attemptRoot: string, headSha: string, signal?: AbortSignal): Promise<string>;
-  readOutput(attemptRoot: string, name: 'lane-output.json' | 'walkthrough.md'): Promise<string>;
-  /** Removes stale lane output. Only the triage lane owns walkthrough.md. */
+  readOutput(attemptRoot: string, name: 'lane-output.json' | 'walkthrough.md' | 'triage.json'): Promise<string>;
+  /** Removes stale lane output. Only the triage lane owns walkthrough.md and triage.json. */
   clearOutput(attemptRoot: string, includeWalkthrough: boolean): Promise<void>;
 }
 
@@ -54,6 +55,30 @@ export class ReviewLaneRunner {
     @inject(TOKENS.LOGGER) private readonly logger: Pick<Logger, 'error'>,
     @inject(REVIEW_CORE_TOKENS.ENVIRONMENT) private readonly environment: ReviewStageEnvironment,
   ) {}
+
+  /** Reads an optional triage output file. A missing file gives null; any other failure is thrown. */
+  private async readTriageFile(attemptRoot: string, name: 'triage.json' | 'walkthrough.md'): Promise<string | null> {
+    try { return (await this.files.readOutput(attemptRoot, name)).replace(/^\uFEFF/, ''); }
+    catch (error: unknown) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') return null;
+      throw error;
+    }
+  }
+
+  /**
+   * Checks the triage output. A valid out/triage.json or an earlier-format walkthrough.md is fine.
+   * Anything else must not lose the review: the lane stays completed, the cause is logged with schema
+   * paths only, and the publication stage renders a safe body without a walkthrough.
+   */
+  private async checkTriageOutput(attemptRoot: string): Promise<void> {
+    const json = await this.readTriageFile(attemptRoot, 'triage.json');
+    const parsed = json === null ? null : parseTriageOutputDetailed(json);
+    if (parsed?.ok) return;
+    const walkthrough = await this.readTriageFile(attemptRoot, 'walkthrough.md');
+    if (walkthrough !== null && hasLegacyHeadings(walkthrough)) return;
+    this.logger.error(new Error(`Triage output unusable, the review continues without a walkthrough: triage.json ${
+      parsed ? `invalid at ${parsed.issues}` : 'missing'}; walkthrough.md ${walkthrough === null ? 'missing' : 'without the required headings'}`));
+  }
 
   async run(request: ReviewLaneRequest): Promise<ReviewLaneResult> {
     if (request.signal?.aborted) return { status: 'partial', reason: 'aborted' };
@@ -115,13 +140,7 @@ export class ReviewLaneRunner {
           error instanceof Error ? error.message : 'unknown';
         throw new Error(`output-invalid: ${sanitizeReviewFailureMessage(detail).slice(0, 160)}`);
       }
-      if (request.kind === 'triage') {
-        const walkthrough = (await this.files.readOutput(request.attemptRoot, 'walkthrough.md')).replace(/^\uFEFF/, '');
-        if (!/^#{1,3} Observed behavior\s*$/mi.test(walkthrough) ||
-            !/^#{1,3} Inferred risks\s*$/mi.test(walkthrough) ||
-            !/^#{1,3} Risk map\s*$/mi.test(walkthrough))
-          throw new Error('Triage walkthrough missing required headings');
-      }
+      if (request.kind === 'triage') await this.checkTriageOutput(request.attemptRoot);
       completed = true;
       return { status: 'completed', family: choice.lane.family,
         ...(choice.lane.limitState === 'unknown' ? { limitCheck: 'unavailable' as const } : {}),

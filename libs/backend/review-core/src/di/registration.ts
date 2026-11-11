@@ -1,4 +1,5 @@
 import type { DependencyContainer } from 'tsyringe';
+import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import { ReviewPolicyService } from '../lib/review-policy.service';
 import { ReviewQueueService } from '../lib/review-queue.service';
 import { SqliteReviewRepository } from '../lib/persistence/sqlite-review.repository';
@@ -69,7 +70,8 @@ export function registerReviewCore(container: DependencyContainer): void {
   container.registerSingleton(LensStageRunner);
   container.registerSingleton(VerificationStageRunner);
   container.register(REVIEW_CORE_TOKENS.ARTIFACT_WRITER, { useFactory: (provider) =>
-    new ReviewArtifactWriter(provider.resolve<ReviewArtifactFileSystem>(REVIEW_CORE_TOKENS.ARTIFACT_FILES)) });
+    new ReviewArtifactWriter(provider.resolve<ReviewArtifactFileSystem>(REVIEW_CORE_TOKENS.ARTIFACT_FILES),
+      provider.resolve<Logger>(TOKENS.LOGGER)) });
   container.registerSingleton(PublicationOutboxService);
   container.register(PublicationOutboxRepository, { useFactory: (provider) =>
     new PublicationOutboxRepository(provider.resolve<SqliteConnectionService>(PERSISTENCE_TOKENS.SQLITE_CONNECTION).db) });

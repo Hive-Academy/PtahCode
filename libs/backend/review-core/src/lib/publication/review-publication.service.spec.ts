@@ -61,6 +61,32 @@ describe('ReviewPublicationService regression', () => {
     expect(publish).not.toHaveBeenCalled();
   });
 
+  it('renders the structured walkthrough with deterministic scope, lens, size and finding data', async () => {
+    const triage = { schemaVersion: 1 as const, summary: 'Fixes the retry path.', changeType: 'fix' as const,
+      risk: { level: 'low' as const, reason: 'Small change.' },
+      areas: [{ name: 'Retry', paths: ['src/retry.ts'], summary: 'Releases the pending request.', details: [] }],
+      risks: [], apiChanges: [], tests: { summary: 'Covered by retry spec.', gaps: [] } };
+    const gitDiff = `diff --git a/src/retry.ts b/src/retry.ts\n--- a/src/retry.ts\n${diff}`;
+    await service().publish(claim, { kind: 'structured', triage }, gitDiff, [verdict('candidate', 'accepted')], settings, null, [], scope, undefined,
+      [{ lens: 'security', family: 'unavailable', status: 'unavailable: deadline' }, { lens: 'correctness-lifecycle', family: 'codex', status: 'completed' }]);
+    const body: string = publish.mock.calls[0][0].walkthrough;
+    expect(body).toContain('Fixes the retry path.');
+    expect(body).toContain('⚠️ **Partial** · 1 of 2 lenses unavailable: security (deadline)');
+    expect(body).toContain(`compare/${'b'.repeat(40)}...${sha}`);
+    expect(body).toContain('1 file · +1 −0 since the last review · fix');
+    expect(body).toContain('**1 verified in this run** (🟠 1 major)');
+    expect(body).not.toContain('<!-- ptah-review');
+    expect(body.length).toBeLessThanOrEqual(6000);
+  });
+
+  it('keeps an earlier-format walkthrough string renderable as a collapsed section', async () => {
+    await service().publish(claim, '# Observed behavior\nRetry changed', diff, [], settings, null, []);
+    const body: string = publish.mock.calls[0][0].walkthrough;
+    expect(body).toContain('<summary>Walkthrough (earlier format)</summary>');
+    expect(body).toContain('Retry changed');
+    expect(body).toContain('No verified findings');
+  });
+
   it('sends a still-open root for marker reconciliation', async () => {
     await service().publish(claim, 'Walkthrough', diff, [verdict('candidate', 'accepted')], settings, null, [], scope);
     expect(publish.mock.calls[0][0].candidates).toHaveLength(1);
@@ -78,6 +104,42 @@ describe('ReviewPublicationService regression', () => {
     await service().publish(claim, 'Walkthrough', diff, [verdict('candidate', 'accepted')], settings, null, [], scope);
     expect(publish.mock.calls[0][0].candidates).toHaveLength(0);
     expect(publish.mock.calls[0][0].overview).not.toContain('Additional verified findings');
+  });
+  it('does not count a carried-over finding as dismissed or say that no findings exist', async () => {
+    jest.spyOn(PublicationOutboxRepository.prototype, 'hasConfirmedFinding').mockReturnValue(true);
+    await service().publish(claim, '# Observed behavior\nx', diff, [verdict('candidate', 'accepted')], settings, null, [], scope);
+    const body: string = publish.mock.calls[0][0].walkthrough;
+    expect(body).toContain('No new verified findings in this run');
+    expect(body).toContain('1 earlier finding still present');
+    expect(body).not.toContain('No verified findings');
+    expect(body).not.toContain('1 dismissed');
+  });
+  it('still counts a below-severity finding as dismissed on an incremental run', async () => {
+    const low = { ...verdict('candidate', 'accepted'), finding: { ...finding, confidence: 0.1 } };
+    await service().publish(claim, '# Observed behavior\nx', diff, [low], settings, null, [], scope);
+    expect(publish.mock.calls[0][0].walkthrough).toContain('1 dismissed');
+  });
+  it('does not count a finding with unavailable verification as dismissed', async () => {
+    const unavailable = { ...verdict('candidate', 'accepted'), verification: 'unavailable' as const };
+    await service().publish(claim, '# Observed behavior\nx', diff, [unavailable], settings, null, [], scope);
+    expect(publish.mock.calls[0][0].walkthrough).not.toContain('1 dismissed');
+  });
+  it('passes the truncated-diff flag to the size row', async () => {
+    const gitDiff = `diff --git a/src/retry.ts b/src/retry.ts\n--- a/src/retry.ts\n${diff}`;
+    await service().publish(claim, '# Observed behavior\nx', gitDiff, [], settings, null, [], undefined, undefined, [], { diffTruncated: true });
+    const body: string = publish.mock.calls[0][0].walkthrough;
+    expect(body).toContain('at least 1 file');
+    expect(body).toContain('diff truncated');
+  });
+  it('neutralizes mentions and issue references in model text', async () => {
+    const triage = { schemaVersion: 1 as const, summary: 'Thanks @octocat for #99.', changeType: 'fix' as const,
+      risk: { level: 'low' as const, reason: 'Small.' },
+      areas: [{ name: 'Retry', paths: ['src/retry.ts'], summary: 'See https://evil.example now.', details: [] }],
+      risks: [], apiChanges: [], tests: { summary: 'Covered.', gaps: [] } };
+    await service().publish(claim, { kind: 'structured', triage }, diff, [], settings, null, []);
+    const body: string = publish.mock.calls[0][0].walkthrough;
+    expect(body).not.toMatch(/@octocat|#99|https:\/\/evil/);
+    expect(body).toContain('@​octocat');
   });
   it('replays a pending reopened follow-up after identity status has changed', async () => {
     jest.spyOn(PublicationOutboxRepository.prototype, 'pendingFollowUp').mockReturnValue('reopened');

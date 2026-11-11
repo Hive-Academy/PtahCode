@@ -2,6 +2,8 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import { z } from 'zod';
 import { CandidateFindingSchema, SeveritySchema, type CandidateFinding } from '@ptah-extension/review-contracts';
 import type { EffectiveReviewSettings } from '../review-policy.service';
+import type { Logger } from '@ptah-extension/vscode-core';
+import { hasLegacyHeadings, parseTriageOutputDetailed, type TriageContent } from '../publication/walkthrough/triage-output.schema';
 
 export interface ReviewArtifactFileSystem {
   realpath(path: string): Promise<string>;
@@ -60,7 +62,7 @@ function formatFinding(finding: CandidateFinding, secrets: readonly string[]): s
 }
 
 export class ReviewArtifactWriter {
-  constructor(private readonly fs: ReviewArtifactFileSystem) {}
+  constructor(private readonly fs: ReviewArtifactFileSystem, private readonly logger?: Pick<Logger, 'warn'>) {}
 
   private formatVerified(finding: CandidateFinding, input: z.infer<typeof PreviewInputSchema>): string {
     const rendered = formatFinding(finding, input.secrets);
@@ -122,10 +124,47 @@ export class ReviewArtifactWriter {
 
   async readWalkthrough(outRoot: string): Promise<string> {
     const root = await this.validRoot(outRoot);
-    if (!this.fs.readFile) return 'Walkthrough unavailable';
-    try { return await this.fs.readFile(resolve(root, 'walkthrough.md'), 'utf8'); }
+    return (await this.readOptional(resolve(root, 'walkthrough.md'))) ?? 'Walkthrough unavailable';
+  }
+
+  /**
+   * Reads the triage result: structured `triage.json` first, then the earlier `walkthrough.md` format.
+   * When neither is usable the result is `unavailable` and the reason is logged. It never throws for bad content.
+   */
+  async readTriage(outRoot: string): Promise<TriageContent> {
+    const root = await this.validRoot(outRoot);
+    const json = await this.readOptional(resolve(root, 'triage.json'));
+    const parsed = json === null ? null : parseTriageOutputDetailed(json);
+    if (parsed?.ok) return { kind: 'structured', triage: parsed.triage };
+    const legacyRaw = await this.readOptional(resolve(root, 'walkthrough.md'));
+    const legacy = legacyRaw === null ? null : legacyRaw.replace(/^\uFEFF/, '');
+    if (legacy !== null && hasLegacyHeadings(legacy)) {
+      this.logger?.warn(`Review triage used the earlier walkthrough format (triage.json ${parsed ? `invalid at ${parsed.issues}` : 'missing'})`);
+      return { kind: 'legacy', text: legacy };
+    }
+    const reason = `triage.json ${parsed ? `invalid at ${parsed.issues}` : 'missing'}; walkthrough.md ${legacy === null ? 'missing' : 'without the required headings'}`;
+    this.logger?.warn(`Review triage output unusable, publishing without a walkthrough body (${reason})`);
+    return { kind: 'unavailable', reason };
+  }
+
+  /** Plain text of a triage result for the local dry-run preview. */
+  triageText(content: TriageContent): string {
+    if (content.kind === 'unavailable') return 'Walkthrough unavailable';
+    if (content.kind === 'legacy') return content.text;
+    const { triage } = content;
+    return [triage.summary, `Risk: ${triage.risk.level} — ${triage.risk.reason}`,
+      ...triage.areas.map((area) => `- ${area.name}: ${area.summary}`),
+      ...triage.risks.map((risk) => `- Risk: ${risk.title} — ${risk.detail} (verify: ${risk.verify})`),
+      ...triage.apiChanges.map((api) => `- API ${api.change}: ${api.symbol} — ${api.impact}`),
+      `Tests: ${triage.tests.summary}`,
+      ...triage.tests.gaps.map((gap) => `- Test gap: ${gap}`)].join('\n');
+  }
+
+  private async readOptional(path: string): Promise<string | null> {
+    if (!this.fs.readFile) return null;
+    try { return await this.fs.readFile(path, 'utf8'); }
     catch (error: unknown) {
-      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return 'Walkthrough unavailable';
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') return null;
       throw error;
     }
   }

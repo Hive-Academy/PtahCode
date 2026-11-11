@@ -94,12 +94,53 @@ describe('ReviewLaneRunner', () => {
     expect(await runner.run(request)).toMatchObject({ status: 'partial', reason: 'timeout' });
   });
 
-  it('fails triage when the walkthrough lacks required headings', async () => {
+  it('keeps the review when the walkthrough lacks required headings, and logs the cause', async () => {
     files.readOutput = jest.fn().mockImplementation(async (_root: string, name: string) => name === 'walkthrough.md'
       ? '# Observed behavior\n' : JSON.stringify({ schemaVersion: 1, headSha: sha, findings: [], coverage: [] }));
-    expect(await runner.run(request)).toMatchObject({ status: 'partial', reason: expect.stringContaining('lane-failed: lane; Error; Triage walkthrough') });
-    expect(files.clearOutput).toHaveBeenLastCalledWith('/attempt', true);
-    expect(files.clearOutput).toHaveBeenCalledTimes(2);
+    expect(await runner.run(request)).toMatchObject({ status: 'completed' });
+    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('without the required headings') }));
+  });
+
+  it('accepts a valid out/triage.json without an earlier-format walkthrough', async () => {
+    const triage = { schemaVersion: 1, summary: 'A change.', changeType: 'fix', risk: { level: 'low', reason: 'Small.' },
+      areas: [{ name: 'Core', paths: ['a.ts'], summary: 'Fixes a bug.', details: [] }], risks: [], apiChanges: [],
+      tests: { summary: 'Covered.', gaps: [] } };
+    files.readOutput = jest.fn().mockImplementation(async (_root: string, name: string) => {
+      if (name === 'walkthrough.md') throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      return name === 'triage.json' ? JSON.stringify(triage) : JSON.stringify({ schemaVersion: 1, headSha: sha, findings: [], coverage: [] });
+    });
+    expect(await runner.run(request)).toMatchObject({ status: 'completed' });
+  });
+
+  it('keeps the review when out/triage.json is invalid and no walkthrough.md exists', async () => {
+    files.readOutput = jest.fn().mockImplementation(async (_root: string, name: string) => {
+      if (name === 'triage.json') return '{"schemaVersion":1}';
+      if (name === 'walkthrough.md') throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      return JSON.stringify({ schemaVersion: 1, headSha: sha, findings: [], coverage: [] });
+    });
+    expect(await runner.run(request)).toMatchObject({ status: 'completed' });
+    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({
+      message: expect.stringContaining('triage.json invalid at summary, risk, areas') }));
+    expect(files.clearOutput).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the review when out/triage.json and walkthrough.md are both missing', async () => {
+    files.readOutput = jest.fn().mockImplementation(async (_root: string, name: string) => {
+      if (name === 'triage.json' || name === 'walkthrough.md') throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      return JSON.stringify({ schemaVersion: 1, headSha: sha, findings: [], coverage: [] });
+    });
+    expect(await runner.run(request)).toMatchObject({ status: 'completed' });
+    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('triage.json missing; walkthrough.md missing') }));
+  });
+
+  it('accepts a triage.json with over-long text instead of failing the lane', async () => {
+    const triage = { schemaVersion: 1, summary: 'x'.repeat(900), changeType: 'other', risk: { level: 'low', reason: 'Small.' },
+      areas: [{ name: 'Core', paths: ['a.ts'], summary: 'Fixes a bug.', details: [], extra: true }], risks: [], apiChanges: [],
+      tests: { summary: 'Covered.', gaps: [] } };
+    files.readOutput = jest.fn().mockImplementation(async (_root: string, name: string) => name === 'triage.json'
+      ? JSON.stringify(triage) : JSON.stringify({ schemaVersion: 1, headSha: sha, findings: [], coverage: [] }));
+    expect(await runner.run(request)).toMatchObject({ status: 'completed' });
+    expect(logger.error).not.toHaveBeenCalled();
   });
 
   it('removes a partial walkthrough when triage is aborted after spawn', async () => {
