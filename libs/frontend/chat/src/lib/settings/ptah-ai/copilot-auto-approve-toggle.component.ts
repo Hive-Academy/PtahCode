@@ -4,6 +4,9 @@ import {
   SettingsSaveFeedbackService, settingNotConfirmedMessage, settingNotSavedMessage,
 } from '../feedback/settings-save-feedback.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
+import {
+  PtahButtonDirective,
+} from '@ptah-extension/ui';
 
 const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
 const LABEL = 'Copilot auto-approve';
@@ -29,7 +32,7 @@ const NOT_CONFIRMED = `${settingNotConfirmedMessage(LABEL)} Check the saved sett
 @Component({
   selector: 'ptah-copilot-auto-approve-toggle',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective],
+  imports: [SettingsBusyDisabledDirective, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-1.5 border-t border-base-300 pt-2" data-testid="copilot-auto-approve-section">
@@ -44,8 +47,8 @@ const NOT_CONFIRMED = `${settingNotConfirmedMessage(LABEL)} Check the saved sett
         <p class="text-xs text-base-content-muted" role="status" data-testid="copilot-auto-approve-unloaded">The saved setting could not be read.</p>
       }
       @if (needsRecheck()) {
-        <button type="button" [class]="'btn btn-outline btn-sm border-base-content-muted text-base-content ' + focusRing"
-          [ptahBusyDisabled]="saving()" (click)="recheck()" data-testid="copilot-auto-approve-recheck">Check saved setting again</button>
+        <button type="button" ptahButton
+          [busy]="saving()" (click)="recheck()" data-testid="copilot-auto-approve-recheck">Check saved setting again</button>
       }
     </div>
   `,

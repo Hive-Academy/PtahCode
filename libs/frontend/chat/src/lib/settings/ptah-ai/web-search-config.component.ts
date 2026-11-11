@@ -20,7 +20,11 @@ import {
   XCircle,
 } from 'lucide-angular';
 import { ClaudeRpcService } from '@ptah-extension/core';
-import { NativePopoverComponent } from '@ptah-extension/ui';
+import {
+  NativePopoverComponent,
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 
@@ -104,7 +108,7 @@ function providerLabel(provider: ProviderId): string {
 @Component({
   selector: 'ptah-web-search-config',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NativePopoverComponent],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NativePopoverComponent, PtahButtonDirective, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -120,7 +124,7 @@ function providerLabel(provider: ProviderId): string {
             Web Search
           </h2>
         </div>
-        <button type="button" class="btn btn-outline btn-xs gap-1" [disabled]="isTesting()"
+        <button type="button" ptahButton size="xs" [disabled]="isTesting()"
           (click)="testSearch()" aria-label="Test web search connection" data-testid="settings-web-search-test">
           @if (isTesting()) {
             <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
@@ -200,7 +204,7 @@ function providerLabel(provider: ProviderId): string {
                 <td class="align-top text-right">
                   <div class="flex flex-nowrap justify-end gap-1.5">
                     <ptah-native-popover [isOpen]="activeKeyProvider() === opt.value" (closed)="closeKeyEditor()">
-                      <button type="button" trigger class="btn btn-outline btn-xs gap-1"
+                      <button type="button" trigger ptahButton size="xs"
                         (click)="openKeyEditor(opt.value)"
                         [attr.aria-label]="(apiKeyConfigured()[opt.value] ? 'Update' : 'Set') + ' API key for ' + opt.label"
                         [attr.data-testid]="'settings-web-search-key-btn-' + opt.value">
@@ -217,12 +221,14 @@ function providerLabel(provider: ProviderId): string {
                             placeholder="Paste the API key" autocomplete="off" spellcheck="false"
                             [value]="apiKeyInput()" (input)="onApiKeyInput($event)" (keydown.enter)="saveApiKey()"
                             data-testid="settings-web-search-key-input" />
-                          <button type="button" class="btn btn-ghost btn-xs absolute right-1 top-1"
-                            (click)="keyVisible.set(!keyVisible())"
-                            [attr.aria-label]="keyVisible() ? 'Hide API key' : 'Show API key'"
-                            [attr.aria-pressed]="keyVisible()" data-testid="settings-web-search-key-visibility">
-                            <lucide-angular [img]="keyVisible() ? EyeOffIcon : EyeIcon" class="h-3.5 w-3.5" aria-hidden="true" />
-                          </button>
+                          <span class="absolute right-1 top-1">
+                            <button type="button" ptahIconButton size="xs"
+                              (click)="keyVisible.set(!keyVisible())"
+                              [label]="keyVisible() ? 'Hide API key' : 'Show API key'"
+                              [attr.aria-pressed]="keyVisible()" data-testid="settings-web-search-key-visibility">
+                              <lucide-angular [img]="keyVisible() ? EyeOffIcon : EyeIcon" class="h-3.5 w-3.5" aria-hidden="true" />
+                            </button>
+                          </span>
                         </div>
                         <p class="text-xs text-base-content-muted">
                           Stored encrypted on this machine. Use Test connection after saving to check it.
@@ -230,8 +236,8 @@ function providerLabel(provider: ProviderId): string {
                             class="link underline text-base-content">Get a key</a>
                         </p>
                         <div class="flex gap-2">
-                          <button type="button" class="btn btn-primary btn-sm"
-                            [ptahBusyDisabled]="!apiKeyInput().trim() || saving()" (click)="saveApiKey()"
+                          <button type="button" ptahButton variant="primary"
+                            [busy]="saving()" [disabled]="!apiKeyInput().trim()" (click)="saveApiKey()"
                             [attr.aria-label]="'Save API key for ' + opt.label"
                             data-testid="settings-web-search-key-save">
                             @if (isSavingKey()) {
@@ -239,16 +245,13 @@ function providerLabel(provider: ProviderId): string {
                             }
                             Save key
                           </button>
-                          <button type="button" class="btn btn-ghost btn-sm" (click)="closeKeyEditor()"
+                          <button type="button" ptahButton variant="ghost" (click)="closeKeyEditor()"
                             data-testid="settings-web-search-key-cancel">Cancel</button>
                         </div>
                       </div>
                     </ptah-native-popover>
                     @if (apiKeyConfigured()[opt.value]) {
-                      <!-- Visual N2: daisyUI's btn-outline:hover fill stays under the pointer after the click; while
-                        the confirm is open the trigger keeps its resting look. -->
-                      <button type="button"
-                        class="btn btn-outline btn-xs text-base-content aria-expanded:hover:bg-transparent aria-expanded:hover:text-base-content"
+                      <button type="button" ptahButton size="xs"
                         [disabled]="saving()" (click)="requestClear(opt.value)"
                         [attr.aria-label]="'Clear API key for ' + opt.label"
                         [attr.aria-expanded]="confirmingClear() === opt.value"
@@ -267,7 +270,7 @@ function providerLabel(provider: ProviderId): string {
                         <button type="button" class="btn btn-outline btn-sm border-error text-base-content"
                           [ptahBusyDisabled]="saving()" (click)="deleteApiKey(opt.value)"
                           [attr.data-testid]="'settings-web-search-clear-confirm-' + opt.value">Clear key</button>
-                        <button #clearCancel type="button" class="btn btn-ghost btn-sm" (click)="cancelClear(opt.value)"
+                        <button #clearCancel type="button" ptahButton variant="ghost" (click)="cancelClear(opt.value)"
                           [attr.data-testid]="'settings-web-search-clear-cancel-' + opt.value">Cancel</button>
                       </div>
                     </div>

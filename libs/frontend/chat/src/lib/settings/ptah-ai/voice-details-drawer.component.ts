@@ -12,6 +12,7 @@ import {
   NativeDrawerComponent,
   NativeTabGroupComponent,
   type NativeTab,
+  PtahButtonDirective,
 } from '@ptah-extension/ui';
 import type { VoiceProviderConfigDto } from '@ptah-extension/shared';
 import { LocalSttPanelComponent } from './local-stt-panel.component';
@@ -43,6 +44,7 @@ const TABS: readonly NativeTab[] = [
     LocalSttPanelComponent,
     LocalTtsPanelComponent,
     ElevenLabsPanelComponent,
+    PtahButtonDirective,
   ],
   template: `
     <ptah-native-drawer [isOpen]="direction() !== null" widthClass="w-full max-w-2xl"
@@ -102,7 +104,7 @@ const TABS: readonly NativeTab[] = [
       @if (direction() !== null) {
         <div drawer-footer class="flex items-center justify-between gap-2 border-t border-base-300 px-4 py-3">
           <span class="text-xs text-base-content-muted">Each control saves itself. Esc to close</span>
-          <button type="button" class="btn btn-ghost btn-sm" [disabled]="saving()" (click)="requestClose()"
+          <button type="button" ptahButton variant="ghost" [disabled]="saving()" (click)="requestClose()"
             data-testid="voice-details-close">Close</button>
         </div>
       }

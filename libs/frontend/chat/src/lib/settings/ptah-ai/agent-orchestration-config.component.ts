@@ -20,10 +20,13 @@ import {
   X,
 } from 'lucide-angular';
 import { ProvidersSettingsStateService } from '@ptah-extension/core';
-import { NativePopoverComponent } from '@ptah-extension/ui';
+import {
+  NativePopoverComponent,
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { cliMatrixRows } from './cli-matrix-rows';
-import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 
 /** Bounds of the max-concurrent field; the runtime enforces the same range (`MAX_CONCURRENT_AGENTS`). */
 const MIN_CONCURRENT = 1;
@@ -36,12 +39,6 @@ const CHIP =
 /** `gap-1` between the strip's items. */
 const ORDER_GAP_PX = 4;
 const ORDER_SUBPIXEL_SLACK_PX = 1;
-/**
- * ▲/▼ in the order popover: 24×24 px targets (WCAG 2.5.8). `aria-disabled` looks like `disabled` but keeps focus (Batch
- * 36: a native `disabled` on the focused button during a save dropped focus to the page, where Esc missed the popover).
- * The disabled look is the shared Settings rule in the app styles (Batch 51); both states keep the ghost (transparent) fill.
- */
-const MOVE = `btn btn-ghost btn-sm btn-square p-0 text-base-content disabled:border-transparent disabled:bg-transparent aria-disabled:border-transparent aria-disabled:bg-transparent ${FOCUS}`;
 /** Orchestration policy lives in the user settings (plan §3 rows 891-892), like the CLI matrix's writes. */
 const SAVE_SCOPE = 'global';
 const DETECT_FAILED =
@@ -72,9 +69,10 @@ interface OrderChip {
   selector: 'ptah-agent-orchestration-config',
   standalone: true,
   imports: [
-    SettingsBusyDisabledDirective,
     LucideAngularModule,
     NativePopoverComponent,
+    PtahButtonDirective,
+    PtahIconButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -192,8 +190,8 @@ interface OrderChip {
               <button
                 trigger
                 type="button"
-                [class]="moveClass"
-                [attr.aria-label]="orderSummary() + '. Edit order'"
+                ptahIconButton
+                [label]="orderSummary() + '. Edit order'"
                 aria-haspopup="dialog"
                 [attr.aria-expanded]="orderOpen()"
                 (click)="toggleOrder()"
@@ -225,8 +223,8 @@ interface OrderChip {
                     </p>
                     <button
                       type="button"
-                      [class]="moveClass"
-                      aria-label="Close"
+                      ptahIconButton
+                      label="Close"
                       (click)="closeOrder()"
                     >
                       <lucide-angular
@@ -261,10 +259,10 @@ interface OrderChip {
                              aria-disabled and ignore clicks, so the focused one keeps focus and Esc closes the popover. -->
                         <button
                           type="button"
-                          [class]="moveClass"
+                          ptahIconButton
                           [disabled]="first"
-                          [attr.aria-disabled]="canReorder() ? null : 'true'"
-                          [attr.aria-label]="'Move ' + chip.name + ' up'"
+                          [busy]="!canReorder()"
+                          [label]="'Move ' + chip.name + ' up'"
                           [attr.data-testid]="'policy-order-up-' + chip.id"
                           (click)="moveAgentUp(i)"
                         >
@@ -276,10 +274,10 @@ interface OrderChip {
                         </button>
                         <button
                           type="button"
-                          [class]="moveClass"
+                          ptahIconButton
                           [disabled]="last"
-                          [attr.aria-disabled]="canReorder() ? null : 'true'"
-                          [attr.aria-label]="'Move ' + chip.name + ' down'"
+                          [busy]="!canReorder()"
+                          [label]="'Move ' + chip.name + ' down'"
                           [attr.data-testid]="'policy-order-down-' + chip.id"
                           (click)="moveAgentDown(i)"
                         >
@@ -310,11 +308,9 @@ interface OrderChip {
 
         <button
           type="button"
-          [class]="
-            'btn btn-outline btn-sm shrink-0 gap-1.5 border-base-content-muted text-xs text-base-content ' +
-            focusRing
-          "
-          [ptahBusyDisabled]="detecting()"
+          ptahButton
+          class="shrink-0"
+          [busy]="detecting()"
           (click)="redetectClis()"
           aria-label="Re-detect CLI agents"
           data-testid="policy-redetect"
@@ -345,7 +341,6 @@ export class AgentOrchestrationConfigComponent {
   protected readonly EditIcon = Pencil;
   protected readonly CloseIcon = X;
   protected readonly focusRing = FOCUS;
-  protected readonly moveClass = MOVE;
 
   private readonly state = inject(ProvidersSettingsStateService);
   private readonly feedback = inject(SettingsSaveFeedbackService);

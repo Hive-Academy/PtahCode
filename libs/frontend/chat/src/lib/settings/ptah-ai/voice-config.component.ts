@@ -17,7 +17,11 @@ import {
   Mic,
 } from 'lucide-angular';
 import { ClaudeRpcService } from '@ptah-extension/core';
-import { NativePopoverComponent } from '@ptah-extension/ui';
+import {
+  NativePopoverComponent,
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 import type {
   VoiceProviderCapabilityDto,
   VoiceInfoDto,
@@ -82,7 +86,7 @@ const SAVE_PROVIDER_FAILED: Record<VoiceDirection, string> = {
 @Component({
   selector: 'ptah-voice-config',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NativePopoverComponent, VoiceDetailsDrawerComponent],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NativePopoverComponent, VoiceDetailsDrawerComponent, PtahButtonDirective, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -135,7 +139,7 @@ const SAVE_PROVIDER_FAILED: Record<VoiceDirection, string> = {
                   <td>
                     <ptah-native-popover [isOpen]="picker() === row.direction" placement="bottom-start"
                       backdropClass="transparent" (closed)="picker.set(null)">
-                      <button type="button" trigger class="btn btn-ghost btn-xs gap-1 px-1.5 font-normal text-base-content"
+                      <button type="button" trigger ptahButton variant="ghost" size="xs"
                         [disabled]="saving()" (click)="picker.set(row.direction)"
                         [attr.aria-label]="row.name + ' provider: ' + row.providerLabel + '. Change provider'"
                         aria-haspopup="dialog" [attr.aria-expanded]="picker() === row.direction"
@@ -183,8 +187,8 @@ const SAVE_PROVIDER_FAILED: Record<VoiceDirection, string> = {
                     </span>
                   </td>
                   <td class="text-right">
-                    <button type="button" class="btn btn-ghost btn-xs btn-square" (click)="openDetails(row.direction)"
-                      [attr.aria-label]="row.name + ' details: ' + row.detail"
+                    <button type="button" ptahIconButton size="xs" (click)="openDetails(row.direction)"
+                      [label]="row.name + ' details: ' + row.detail"
                       [attr.data-testid]="'voice-engine-details-' + row.direction">
                       <lucide-angular [img]="ChevronRightIcon" class="w-3.5 h-3.5 text-base-content" aria-hidden="true" />
                     </button>

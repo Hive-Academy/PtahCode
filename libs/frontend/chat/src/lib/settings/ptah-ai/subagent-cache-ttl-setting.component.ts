@@ -17,6 +17,7 @@ import {
   type SettingsSaveResult,
 } from '../feedback/settings-save-feedback.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 const FOCUS =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
@@ -46,7 +47,7 @@ const LABELS: Readonly<Record<SubagentPromptCacheTtlSetting, string>> = {
 @Component({
   selector: 'ptah-subagent-cache-ttl-setting',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective],
+  imports: [SettingsBusyDisabledDirective, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -115,11 +116,8 @@ const LABELS: Readonly<Record<SubagentPromptCacheTtlSetting, string>> = {
       @if (needsRecheck()) {
         <button
           type="button"
-          [class]="
-            'btn btn-outline btn-sm border-base-content-muted text-base-content ' +
-            focusRing
-          "
-          [ptahBusyDisabled]="saving()"
+          ptahButton
+          [busy]="saving()"
           (click)="recheck()"
           data-testid="subagent-cache-ttl-recheck"
         >

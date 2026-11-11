@@ -24,6 +24,9 @@ import type {
   GoVetConsentStaleReasonDto,
 } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
+import {
+  PtahButtonDirective,
+} from '@ptah-extension/ui';
 
 /** Why a stored consent no longer holds (User Decision 25), in the user's words. */
 const STALE_REASON_TEXT: Record<GoVetConsentStaleReasonDto, string> = {
@@ -72,7 +75,7 @@ const LOAD_ERROR = 'Could not read the go vet setting for this workspace.';
 @Component({
   selector: 'ptah-go-vet-consent-config',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block', '[class.mt-4]': 'visible()' },
   template: `
@@ -276,7 +279,8 @@ const LOAD_ERROR = 'Could not read the go vet setting for this workspace.';
               <div class="flex gap-2">
                 <button
                   type="button"
-                  class="btn btn-primary btn-sm"
+                  ptahButton
+                  variant="primary"
                   (click)="confirmEnable()"
                   data-testid="go-vet-consent-allow"
                 >
@@ -285,7 +289,8 @@ const LOAD_ERROR = 'Could not read the go vet setting for this workspace.';
                 <button
                   #cancelButton
                   type="button"
-                  class="btn btn-ghost btn-sm"
+                  ptahButton
+                  variant="ghost"
                   (click)="cancelEnable()"
                   data-testid="go-vet-consent-cancel"
                 >

@@ -2,19 +2,22 @@ import { ChangeDetectionStrategy, Component, input, output } from '@angular/core
 import type { SystemCliMatrixRow } from './cli-matrix-rows';
 import { CliCapabilityDetailComponent } from './cli-capability-detail.component';
 import { CopilotAutoApproveToggleComponent } from './copilot-auto-approve-toggle.component';
+import {
+  PtahButtonDirective,
+} from '@ptah-extension/ui';
 
 export type CliProviderInfoKind = 'info' | 'capabilities' | 'permission' | 'install';
 
 @Component({
   selector: 'ptah-cli-provider-card-popovers', standalone: true,
-  imports: [CliCapabilityDetailComponent, CopilotAutoApproveToggleComponent],
+  imports: [CliCapabilityDetailComponent, CopilotAutoApproveToggleComponent, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<div role="dialog" [attr.aria-label]="row().name + ' ' + kind()"
       class="w-[19rem] max-w-[calc(100vw-2rem)] space-y-2 p-3 text-sm text-base-content"
       data-testid="cli-provider-popover-content">
     <div class="flex items-center justify-between gap-2 border-b border-base-content/10 pb-2">
       <h3 class="font-semibold">{{ row().name }} · {{ heading() }}</h3>
-      <button type="button" class="btn btn-ghost btn-xs" aria-label="Close" (click)="closed.emit()">Close</button>
+      <button type="button" ptahButton variant="ghost" size="xs" aria-label="Close" (click)="closed.emit()">Close</button>
     </div>
     @switch (kind()) {
       @case ('capabilities') { <ptah-cli-capability-detail [manifest]="row().manifest" /> }
@@ -25,7 +28,7 @@ export type CliProviderInfoKind = 'info' | 'capabilities' | 'permission' | 'inst
       @case ('install') {
         @if (guide()?.command; as command) { <code class="block select-all break-all rounded bg-base-300 p-2 text-xs">{{ command }}</code> }
         <p class="break-words">{{ guide()?.note ?? 'Install the CLI, then Re-detect.' }}</p>
-        <button type="button" class="btn btn-outline btn-sm border-base-content/60" [disabled]="busy()"
+        <button type="button" ptahButton [disabled]="busy()"
           (click)="redetectRequested.emit(row().id)">Re-detect</button>
       }
       @default {
