@@ -12,9 +12,8 @@ import {
 import { GallerySectionComponent } from './gallery-section.component';
 
 interface TintPanel {
-  readonly id: string;
+  readonly id: 'base-200' | 'base-300';
   readonly label: string;
-  readonly surface: string;
 }
 
 /** Reference for the form controls family (TASK_2026_950_ed73). */
@@ -172,7 +171,8 @@ Invalid</textarea
         <div
           [attr.data-testid]="'form-controls-tint-' + panel.id"
           class="flex flex-wrap items-center gap-ptah-controls rounded-ptah-surface border border-surface-border p-ptah-surface"
-          [class]="panel.surface"
+          [class.bg-base-200]="panel.id === 'base-200'"
+          [class.bg-base-300]="panel.id === 'base-300'"
         >
           <span class="text-ptah-label text-base-content-muted">{{
             panel.label
@@ -218,7 +218,7 @@ export class GalleryFormControlsFamilyComponent {
   ];
   public readonly choiceSizes = ['xs', 'sm'] as const;
   public readonly panels: readonly TintPanel[] = [
-    { id: 'base-200', label: 'base-200', surface: 'bg-base-200' },
-    { id: 'base-300', label: 'base-300', surface: 'bg-base-300' },
+    { id: 'base-200', label: 'base-200' },
+    { id: 'base-300', label: 'base-300' },
   ];
 }
