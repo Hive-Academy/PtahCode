@@ -24,5 +24,6 @@ jobs:
             KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG95RBlLAyHrvVpcRNOcmOu2Gt+PA4UmlhllE/b2wLvf founder-ptah-workstation'
             mkdir -p ~/.ssh && chmod 700 ~/.ssh
             touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
-            grep -qF "$KEY" ~/.ssh/authorized_keys || echo "$KEY" >> ~/.ssh/authorized_keys
+            MATERIAL=$(echo "$KEY" | cut -d" " -f2)
+            grep -qF "$MATERIAL" ~/.ssh/authorized_keys || echo "$KEY" >> ~/.ssh/authorized_keys
             echo "authorized keys now: $(wc -l < ~/.ssh/authorized_keys) lines"

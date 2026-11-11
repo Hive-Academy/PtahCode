@@ -112,7 +112,19 @@ export function checkFiles(files) {
 }
 
 function main(argv) {
-  const files = argv.includes('--all') ? trackedFiles() : argv.filter((a) => !a.startsWith('--'));
+  const unknown = argv.filter((a) => a.startsWith('--') && a !== '--all');
+  if (unknown.length > 0) {
+    console.error(`check-home-paths: unknown option(s): ${unknown.join(' ')}`);
+    console.error('usage: check-home-paths.mjs <file...> | --all');
+    return 2;
+  }
+  const all = argv.includes('--all');
+  const given = argv.filter((a) => a !== '--all');
+  if (!all && given.length === 0) {
+    console.error('check-home-paths: no files given. usage: check-home-paths.mjs <file...> | --all');
+    return 2;
+  }
+  const files = all ? trackedFiles() : given;
   const failures = checkFiles(files);
   for (const f of failures) {
     // The segment itself is not printed: it may be a private name.
