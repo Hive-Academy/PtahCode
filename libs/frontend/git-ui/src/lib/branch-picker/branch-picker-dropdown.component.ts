@@ -142,9 +142,9 @@ type SwitchMode = Pick<GitCheckoutParams, 'stash' | 'force'>;
                 <button
                   #discardConfirmButton
                   type="button"
-                  ptahButton
-                  size="xs"
-                  class="focus:!outline focus:!outline-2 focus:!outline-offset-2 focus:!outline-[oklch(var(--s))]"
+                  class="btn btn-outline btn-xs border-error bg-error/10 text-base-content
+                         focus:!outline focus:!outline-2 focus:!outline-offset-2
+                         focus:!outline-[oklch(var(--s))]"
                   data-testid="confirm-discard"
                   [disabled]="busy()"
                   (click)="retryBlocked({ force: true })"
@@ -188,13 +188,13 @@ type SwitchMode = Pick<GitCheckoutParams, 'stash' | 'force'>;
                   Cancel
                 </button>
                 @if (!blocked.discardRefusal) {
-                  <!-- Danger variant: the error look is the destructive cue and
-                       stays secondary to the filled Stash & switch. -->
+                  <!-- Outline, not ghost: anubis-light forces .btn-ghost to
+                       base-content ink, which erased text-error. The error
+                       border is the destructive cue; the unfilled outline keeps
+                       it secondary to the filled Stash & switch. -->
                   <button
                     type="button"
-                    ptahButton
-                    variant="danger"
-                    size="xs"
+                    class="btn btn-outline btn-xs border-error text-base-content"
                     data-testid="discard-switch"
                     [disabled]="busy()"
                     (click)="confirmingDiscard.set(true)"

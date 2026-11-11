@@ -286,9 +286,7 @@ let nextBannerId = 0;
           </button>
           <button
             type="button"
-            ptahButton
-            variant="danger"
-            size="xs"
+            class="btn btn-error btn-xs err-solid-text"
             data-testid="conflict-banner-abort"
             [disabled]="running() !== null"
             (click)="onAbortClick($event)"
