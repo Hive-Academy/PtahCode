@@ -251,7 +251,7 @@
   -webkit-text-fill-color: transparent;
 }
 
-[data-ptah-look='next'] .btn[aria-busy='true']:is(.btn, #ptah-next) > :where(svg:first-child) {
+[data-ptah-look='next'] .btn[aria-busy='true']:is(.btn, #ptah-next) > :where(svg) {
   visibility: hidden;
 }
 
@@ -278,6 +278,10 @@
 [data-ptah-look='next'] .btn.btn-error[aria-busy='true']:is(.btn, #ptah-next)::before {
   border-color: var(--ptah-btn-danger-fg);
   border-inline-end-color: transparent;
+}
+
+[data-ptah-look='next'] .btn.btn-link[aria-busy='true']:is(.btn, #ptah-next) {
+  text-decoration-color: transparent;
 }
 
 [data-ptah-look='next'] .btn.btn-link[aria-busy='true']:is(.btn, #ptah-next)::before {
