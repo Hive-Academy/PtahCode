@@ -27,6 +27,7 @@ export class PtahTooltipDirective {
   private panel?: ComponentRef<PtahTooltipPanelComponent>;
   private timer?: ReturnType<typeof setTimeout>;
   private openedByFocus = false;
+  private pointerOver = false;
 
   constructor() {
     effect(() => {
@@ -42,11 +43,13 @@ export class PtahTooltipDirective {
 
   protected onPointerEnter(event: PointerEvent): void {
     if (event.pointerType === 'touch') return;
+    this.pointerOver = true;
     this.clearTimer();
     if (!this.overlayRef) this.timer = setTimeout(() => this.show(false), SHOW_DELAY_MS);
   }
 
   protected onPointerLeave(): void {
+    this.pointerOver = false;
     if (!this.openedByFocus) this.scheduleHide();
   }
 
@@ -60,7 +63,11 @@ export class PtahTooltipDirective {
   }
 
   protected onBlur(): void {
-    if (this.openedByFocus) this.hide();
+    if (!this.openedByFocus) return;
+    // WCAG 1.4.13: keep the tooltip while the pointer is over the host or the
+    // panel. The pointer-leave schedule closes it later.
+    if (this.pointerOver) this.openedByFocus = false;
+    else this.hide();
   }
 
   private show(fromFocus: boolean): void {
@@ -84,8 +91,8 @@ export class PtahTooltipDirective {
     this.panel.setInput('id', this.id);
     this.panel.setInput('text', value);
     this.panel.changeDetectorRef.detectChanges();
-    ref.overlayElement.addEventListener('pointerenter', this.cancelHide);
-    ref.overlayElement.addEventListener('pointerleave', this.scheduleHide);
+    ref.overlayElement.addEventListener('pointerenter', this.panelEnter);
+    ref.overlayElement.addEventListener('pointerleave', this.panelLeave);
     ref.keydownEvents().subscribe((event) => {
       if (event.key !== 'Escape' || !this.overlayRef) return;
       event.preventDefault();
@@ -95,7 +102,14 @@ export class PtahTooltipDirective {
     this.syncDescription(value);
   }
 
-  private readonly cancelHide = (): void => this.clearTimer();
+  private readonly panelEnter = (): void => {
+    this.pointerOver = true;
+    this.clearTimer();
+  };
+  private readonly panelLeave = (): void => {
+    this.pointerOver = false;
+    this.scheduleHide();
+  };
   private readonly scheduleHide = (): void => {
     this.clearTimer();
     if (!this.openedByFocus) this.timer = setTimeout(() => this.hide(), LEAVE_GRACE_MS);
