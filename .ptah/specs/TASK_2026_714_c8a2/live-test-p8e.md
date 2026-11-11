@@ -2,7 +2,7 @@
 
 Date: 2026-10-27/28. The user approved this run. It was test and report only, with no source edits.
 
-- Evidence folder: `C:\Users\abdal\AppData\Local\Temp\ptah-live-p8e-20261027-235006\`
+- Evidence folder: `C:\Users\dev\AppData\Local\Temp\ptah-live-p8e-20261027-235006\`
   - `electron.log` (main-process stdout/stderr), `build.log` (build-dev), `wasm.log`, `build2.log`
     (copy-renderer-dev)
   - `shots\` (screenshots), `settings.json.bak` / `settings.backup.json` (settings backup),

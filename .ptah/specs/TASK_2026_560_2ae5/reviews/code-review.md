@@ -6005,11 +6005,11 @@ result where I actually ran one live, and the spec citation where I did not.
 - **AC-2.1** (scope + path shown per declaration; both scopes when declared in both) — LIVE. One
   `capabilities:getState` call (no params) against the real repo workspace returned, in the same
   response: a global-only entry (`"sentry"` →
-  `sources:[{"scope":"global","path":"C:\\Users\\abdal\\.claude.json"}]`), a workspace-only entry with
+  `sources:[{"scope":"global","path":"C:\\Users\\dev\\.claude.json"}]`), a workspace-only entry with
   two workspace paths (`"firecrawl"` →
   `sources:[{"scope":"workspace","path":"...\\.mcp.json"},{"scope":"workspace","path":"...\\.vscode\\mcp.json"}]`),
   and a both-scopes entry (`"ptah"` →
-  `sources:[{"scope":"workspace","path":"...\\.mcp.json"},{"scope":"global","path":"C:\\Users\\abdal\\.codex\\config.toml"}]`).
+  `sources:[{"scope":"workspace","path":"...\\.mcp.json"},{"scope":"global","path":"C:\\Users\\dev\\.codex\\config.toml"}]`).
   This is the backend classification AC-2.1 requires (scope + path per source, and both scopes together
   when declared in both). It does not cover the literal "Global"/"Workspace" UI label text — that
   rendering is the Marketplace component's job (B13/B14), out of scope for an RPC-only session.
@@ -6073,7 +6073,7 @@ headless").
 
 `ptah interact --config <dir> --cwd <dir>` alone is **not** sufficient to isolate `CapabilityToggleStore`
 from the real machine — see Finding 1 below. I additionally overrode `HOME`/`USERPROFILE` for every CLI
-invocation once I discovered this, and verified after every run that `C:\Users\abdal\.ptah\capabilities`
+invocation once I discovered this, and verified after every run that `C:\Users\dev\.ptah\capabilities`
 did not exist (it did briefly, once, before I found the fix — see Finding 1; I deleted the three files
 it had accumulated and confirmed the directory was gone again before continuing). No other real user
 file was written. I used a low-entropy fake `ANTHROPIC_API_KEY` env var (`sk-test-fake-000...`, never a
@@ -6181,7 +6181,7 @@ under the real OS home directory, never under the CLI's `--config`/`PTAH_CONFIG_
 migrations," with no stated carve-out for capability state). I hit this directly: my first
 isolated-looking test run (`--config <tempdir> --cwd <tempdir>`, no `HOME` override) silently wrote
 `global/plugin__l_ptah-core.json` and a `workspaces/<hash>/` tree into the REAL
-`C:\Users\abdal\.ptah\capabilities`. I deleted those three files immediately on discovering this
+`C:\Users\dev\.ptah\capabilities`. I deleted those three files immediately on discovering this
 (confirmed via `find` before and after) and switched every subsequent run to also override
 `HOME`/`USERPROFILE`. Re-scoring rationale (per the round-1 logic review): normal end users who never
 pass `--config` are unaffected, and no PR 1 acceptance criterion is violated (`AC-1.2`'s workspace
@@ -6448,7 +6448,7 @@ no substitute, and the report is transparent about that.
   were each independently exercised this session, when the document supplies no way to confirm that.
 - Finding 1's framing ("Normal end users... are unaffected... a test/CI-isolation gap, not a
   user-facing one") is defensible for the *end-user* impact but undersells the blast radius the tester's
-  own account demonstrates: the store silently wrote into the real `C:\Users\abdal\.ptah\capabilities`
+  own account demonstrates: the store silently wrote into the real `C:\Users\dev\.ptah\capabilities`
   during an ordinary `--config`-isolated run. `apps/ptah-cli/src/cli/router.ts:192` documents `--config`/
   `PTAH_CONFIG_PATH` as covering "Settings, secrets, sqlite, and migrations" with no stated carve-out for
   capability state, and `capability-toggle-store.ts:170-177`'s constructor already accepts a `baseDir`

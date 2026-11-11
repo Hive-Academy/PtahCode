@@ -22,6 +22,7 @@
 import type {
   ISessionHandoff,
   ISessionSpawner,
+  SessionChildClearResult,
   SessionChildCompletionEnvelope,
   SessionChildLookupRefusal,
   SessionChildReadResult,
@@ -29,6 +30,7 @@ import type {
   SessionChildSnapshot,
   SessionChildStartRequest,
   SessionChildStartResult,
+  SessionChildStopResult,
   SessionHandoffRequest,
   SessionHandoffAckRequest,
   SessionHandoffAckResult,
@@ -74,9 +76,9 @@ export type SessionReadOutcome =
   | { readonly ok: true; readonly result: SessionChildReadResult }
   | SessionChildLookupRefusal;
 
-export type SessionStopOutcome =
-  | { readonly ok: true; readonly child: SessionChildSnapshot }
-  | SessionChildLookupRefusal;
+export type SessionStopOutcome = SessionChildStopResult;
+
+export type SessionClearFinishedOutcome = SessionChildClearResult;
 
 export interface SessionNamespace {
   start(input: SessionStartInput): Promise<SessionChildStartResult>;
@@ -84,7 +86,13 @@ export interface SessionNamespace {
   /** Omit the id for every child of the caller. */
   status(childSessionId?: string): Promise<SessionStatusOutcome>;
   read(childSessionId: string, tailKiB?: number): Promise<SessionReadOutcome>;
-  stop(childSessionId: string): Promise<SessionStopOutcome>;
+  stop(
+    childSessionId: string,
+    options?: { readonly followHandoff?: boolean },
+  ): Promise<SessionStopOutcome>;
+  clearFinished(
+    childSessionIds?: readonly string[],
+  ): Promise<SessionClearFinishedOutcome>;
   /** Hand the caller off to a new top-level session (never throws past the lookup). */
   handoff(input: SessionHandoffInput): Promise<SessionHandoffResult>;
   acknowledge(input: SessionHandoffAckInput): Promise<SessionHandoffAckResult>;
@@ -127,7 +135,7 @@ export function buildSessionNamespace(
         ...input,
         callerSessionId: caller(),
       });
-      if (result.ok) {
+      if (result.ok && !result.alreadyExists) {
         deps.onWorktreeChanged?.({
           action: 'created',
           worktreePath: result.child.worktreePath,
@@ -155,8 +163,20 @@ export function buildSessionNamespace(
         tailKiB,
       }),
 
-    stop: async (childSessionId) =>
-      requireSpawner().stop({ callerSessionId: caller(), childSessionId }),
+    stop: async (childSessionId, options) =>
+      requireSpawner().stop({
+        callerSessionId: caller(),
+        childSessionId,
+        ...(options?.followHandoff !== undefined
+          ? { followHandoff: options.followHandoff }
+          : {}),
+      }),
+
+    clearFinished: async (childSessionIds) =>
+      requireSpawner().clearFinished({
+        callerSessionId: caller(),
+        childSessionIds,
+      }),
 
     handoff: async (input) => {
       const handoff = deps.getHandoff();

@@ -23,7 +23,7 @@
 ## Verification
 
 - Scoped `ptah_get_diagnostics` after edits: 0 errors.
-- `npm run verify -- -t lint,typecheck,test -p agent-sdk`: exit **1**. Lint and typecheck passed; test log `C:\Users\abdal\.nx\d60e02896ae18ad9\cache\terminalOutputs\6311321263198216581` reports 225 suites and 5,618 tests passed. Only `plugin-loader.service.capabilities.spec.ts` and `plugin-loader.service.session-notice.spec.ts` failed on the documented Windows symlink `EPERM` cases. No changed suite failed.
+- `npm run verify -- -t lint,typecheck,test -p agent-sdk`: exit **1**. Lint and typecheck passed; test log `C:\Users\dev\.nx\d60e02896ae18ad9\cache\terminalOutputs\6311321263198216581` reports 225 suites and 5,618 tests passed. Only `plugin-loader.service.capabilities.spec.ts` and `plugin-loader.service.session-notice.spec.ts` failed on the documented Windows symlink `EPERM` cases. No changed suite failed.
 - `npm run verify -- -t typecheck -p ptah-electron`: exit **0** (final source state).
 
 ## Limits

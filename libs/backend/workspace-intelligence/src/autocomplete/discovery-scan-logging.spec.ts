@@ -3,7 +3,7 @@
  *
  * The captured Electron log (`tmp/logs/log.log:849`, `:873`) carried
  *
- *     [AgentDiscovery] Directory C:\Users\abdal\.claude\agents not accessible: ENOENT: ...
+ *     [AgentDiscovery] Directory C:\Users\dev\.claude\agents not accessible: ENOENT: ...
  *
  * once per `autocomplete:agents`, with no `[DEBUG]`/`[INFO]` prefix — a raw
  * `console.debug`, unlike every other line in that log. A user who has never

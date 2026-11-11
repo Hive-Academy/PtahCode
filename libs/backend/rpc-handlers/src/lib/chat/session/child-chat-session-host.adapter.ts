@@ -108,8 +108,12 @@ export class ChildChatSessionHostAdapter implements IChildChatSessionHost {
     let error: string;
     let accountRefusal: ProviderAccountPortRefusal | undefined;
     try {
+      const sourceSessionId =
+        input.descriptor.parentSessionId ??
+        this.lifecycle?.find(input.descriptor.parentTabId)?.realSessionId ??
+        input.descriptor.parentTabId;
       const result = await this.session.startAgentChildSession({
-        sourceSessionId: SessionId.from(input.descriptor.parentSessionId ?? input.descriptor.parentTabId),
+        sourceSessionId: SessionId.from(sourceSessionId),
         tabId: input.tabId,
         workspaceRoot: input.workspaceRoot,
         worktreePath: input.worktreePath,
@@ -167,8 +171,12 @@ export class ChildChatSessionHostAdapter implements IChildChatSessionHost {
     let error: string;
     let accountRefusal: ProviderAccountPortRefusal | undefined;
     try {
+      const sourceSessionId =
+        input.descriptor.fromSessionId ??
+        this.lifecycle?.find(input.descriptor.fromTabId)?.realSessionId ??
+        input.descriptor.fromTabId;
       const result = await this.session.startHandoffSession({
-        sourceSessionId: SessionId.from(input.descriptor.fromSessionId ?? input.descriptor.fromTabId),
+        sourceSessionId: SessionId.from(sourceSessionId),
         tabId: input.tabId,
         workspaceRoot: input.workspaceRoot,
         cwd: input.cwd,

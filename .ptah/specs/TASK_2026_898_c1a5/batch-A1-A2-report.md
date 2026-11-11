@@ -23,7 +23,7 @@ Registered and exported the acknowledgement store and host closer token. A3/A4 m
 ## Verification
 
 - Requested command: `npm run verify -- -p @ptah-extension/cli-agent-runtime 2>&1 | tail -60`. First invocation exited before verification because PowerShell has no `tail`. A temporary shell `tail` function backed by `Select-Object -Last 60` allowed the same pipeline to run in the foreground.
-- Final result: lint/typecheck **2 succeeded, 0 failed**; Jest **172 suites passed, 1 failed**; **3506 tests passed, 1 failed, 1 skipped**. The sole failure is `session-spawner.service.spec.ts:1622`: its direct `new SessionHandoffService(...)` fixture supplies no acknowledgement store, so durable recording refuses the otherwise successful handoff. That file is outside A1/A2 write scope. Full Jest log: `C:\Users\abdal\.nx\d60e02896ae18ad9\cache\terminalOutputs\10013771810265298371`.
+- Final result: lint/typecheck **2 succeeded, 0 failed**; Jest **172 suites passed, 1 failed**; **3506 tests passed, 1 failed, 1 skipped**. The sole failure is `session-spawner.service.spec.ts:1622`: its direct `new SessionHandoffService(...)` fixture supplies no acknowledgement store, so durable recording refuses the otherwise successful handoff. That file is outside A1/A2 write scope. Full Jest log: `C:\Users\dev\.nx\d60e02896ae18ad9\cache\terminalOutputs\10013771810265298371`.
 - Scoped `ptah_get_diagnostics` after the spec edit: 0 errors, 0 warnings.
 
 ## Decisions

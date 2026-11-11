@@ -1,6 +1,6 @@
 # Ptah Dev live test round 3 — TASK_2026_AGENT_BUDGET
 
-Attempt 1 could not start a chat: the board held 20 sessions and disabled **New session**. This rerun closed three earlier completed test sessions through the UI and exercised checks A and B. Date: 2026-11-08 (Africa/Cairo). HEAD: `5be9cd31da0fbd6c00d38fbc81ea3dd65b183f82`. Line numbers below refer to `C:\Users\abdal\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-08.log`; a token-free selection is in [sanitized-log.txt](live-test-round-3/sanitized-log.txt).
+Attempt 1 could not start a chat: the board held 20 sessions and disabled **New session**. This rerun closed three earlier completed test sessions through the UI and exercised checks A and B. Date: 2026-11-08 (Africa/Cairo). HEAD: `5be9cd31da0fbd6c00d38fbc81ea3dd65b183f82`. Line numbers below refer to `C:\Users\dev\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-08.log`; a token-free selection is in [sanitized-log.txt](live-test-round-3/sanitized-log.txt).
 
 ## Isolation gate
 

@@ -13,6 +13,7 @@ import {
   TargetMarksComponent,
   type TargetMarkItem,
 } from './target-marks.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** Load state of one "Your stack" tile; each tile loads on its own. */
 export type StackTileState = 'loading' | 'ready' | 'error';
@@ -105,7 +106,12 @@ function toTileView(tile: StorefrontStackTile): StackTileView {
 @Component({
   selector: 'ptah-storefront-hero',
   standalone: true,
-  imports: [NgTemplateOutlet, LucideAngularModule, TargetMarksComponent],
+  imports: [
+    PtahButtonDirective,
+    NgTemplateOutlet,
+    LucideAngularModule,
+    TargetMarksComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -217,7 +223,9 @@ function toTileView(tile: StorefrontStackTile): StackTileView {
                         <span class="sr-only">Unavailable</span>
                         <button
                           type="button"
-                          class="btn btn-ghost btn-xs gap-1"
+                          ptahButton
+                          variant="ghost"
+                          size="xs"
                           [attr.aria-label]="'Retry loading ' + tile.label"
                           data-testid="storefront-hero-tile-retry"
                           (click)="retryTile.emit(tile.id)"

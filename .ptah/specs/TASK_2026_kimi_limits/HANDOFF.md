@@ -12,7 +12,7 @@ Today Kimi shows "limits not tracked" because `PlanUsageService` has no `kimi-co
 
 Claude usage is high. Delegate to CLI lanes (`ptah_agent_list` -> `ptah_agent_spawn`) and
 keep the main session thin. See "Usage: delegate heavily to CLI agent lanes" in
-`C:\Users\abdal\.claude\CLAUDE.md`.
+`C:\Users\dev\.claude\CLAUDE.md`.
 
 ## Location
 

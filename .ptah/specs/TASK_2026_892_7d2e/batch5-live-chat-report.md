@@ -29,7 +29,7 @@ Read-only metadata search found Run F/E strings in real Claude transcript files,
 
 ## Settings hash
 
-C:\Users\abdal\.ptah\settings.json SHA-256 before and after saved-session capture:
+C:\Users\dev\.ptah\settings.json SHA-256 before and after saved-session capture:
 54FADE38980C3A9E6013B5FFEEAA6917165AD44E5FAC5CF7F4CA84E423B75238 (unchanged).
 The fixture hash guard stayed on. The harness did not use the real ~/.ptah as the app home.
 
@@ -74,4 +74,4 @@ D15 explicitly allowed read-only file copies of `~/.ptah/state/ptah-dev.sqlite` 
 
 The final locked command used `PTAH_DOCS_SESSION_WORKSPACE=D:\projects\ptah-extension`, `PTAH_DOCS_KEEP_CAPTURE=1`, `PTAH_DOCS_LIVE_AI` unset, and `node scripts/verify.mjs --exec --task docs-live-chat -- npx nx run ptah-docs:screenshots -- --grep "saved conversation, lane, cost, and sessions surfaces"`. It exited 1 after 3m 8s. Electron reported `SqliteMigrationRunner: database reports schema_migration` and `PERSISTENCE_UNAVAILABLE`: the copied development database schema is newer than this build. Playwright then timed out clicking `[data-previous-sessions-trigger]:visible` because the top bar's `Git status is unavailable (git reported an error)` element intercepted pointer events. The test never reached a saved lane or wrote an image. No prompt was sent; retry count for D15: zero. The earlier live retry had already exhausted the one permitted AI retry.
 
-The real `C:\Users\abdal\.ptah\settings.json` SHA-256 was `54FADE38980C3A9E6013B5FFEEAA6917165AD44E5FAC5CF7F4CA84E423B75238` before and after this run. The six image timestamps remained 18:03 UTC. This was the user-designated last attempt, so capture stopped. The stale `sessions-tabs.webp` contains a private project name and remains unsuitable for publication. The other five stale images likewise do not satisfy the requested saved-session capture.
+The real `C:\Users\dev\.ptah\settings.json` SHA-256 was `54FADE38980C3A9E6013B5FFEEAA6917165AD44E5FAC5CF7F4CA84E423B75238` before and after this run. The six image timestamps remained 18:03 UTC. This was the user-designated last attempt, so capture stopped. The stale `sessions-tabs.webp` contains a private project name and remains unsuitable for publication. The other five stale images likewise do not satisfy the requested saved-session capture.

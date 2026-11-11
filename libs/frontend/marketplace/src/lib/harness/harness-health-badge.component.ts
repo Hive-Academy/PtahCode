@@ -13,7 +13,11 @@ import {
   RefreshCw,
   TriangleAlert,
 } from 'lucide-angular';
-import { NativePopoverComponent, PtahButtonDirective } from '@ptah-extension/ui';
+import {
+  NativePopoverComponent,
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 import { AppStateManager, VSCodeService } from '@ptah-extension/core';
 import { HARNESS_BLOCKED_RECONCILE_STEPS } from '@ptah-extension/shared';
 import { HarnessHealthStore } from './harness-health.store';
@@ -59,6 +63,7 @@ const TONE_CLASSES: Readonly<Record<HarnessBadgeTone, string>> = {
   selector: 'ptah-harness-health-badge',
   standalone: true,
   imports: [
+    PtahIconButtonDirective,
     PtahButtonDirective,
     LucideAngularModule,
     NativePopoverComponent,
@@ -117,11 +122,13 @@ const TONE_CLASSES: Readonly<Record<HarnessBadgeTone, string>> = {
           </div>
           <button
             type="button"
-            class="btn btn-ghost btn-xs shrink-0"
+            ptahIconButton
+            label="Re-check harness health"
+            size="xs"
+            class="shrink-0"
             data-testid="harness-refresh"
             [disabled]="store.busy()"
             (click)="refresh()"
-            aria-label="Re-check harness health"
           >
             <lucide-angular
               [img]="RefreshIcon"
@@ -171,7 +178,10 @@ const TONE_CLASSES: Readonly<Record<HarnessBadgeTone, string>> = {
         }
 
         @if (blocked().count > 0) {
-          <ptah-harness-blocked-paths [blocked]="blocked()" [reconcileStep]="RECONCILE_STEP" />
+          <ptah-harness-blocked-paths
+            [blocked]="blocked()"
+            [reconcileStep]="RECONCILE_STEP"
+          />
         }
 
         @if (collisionCount() > 0) {
@@ -192,11 +202,20 @@ const TONE_CLASSES: Readonly<Record<HarnessBadgeTone, string>> = {
           </span>
           <div class="flex flex-wrap items-center gap-1">
             @if (blocked().count > 0) {
-              <button type="button" class="btn btn-warning btn-outline btn-xs" data-testid="harness-badge-repair" (click)="repairOpen.set(true)">Move these aside…</button>
+              <button
+                type="button"
+                class="btn btn-warning btn-outline btn-xs"
+                data-testid="harness-badge-repair"
+                (click)="repairOpen.set(true)"
+              >
+                Move these aside…
+              </button>
             }
             <button
               type="button"
-              ptahButton variant="primary" size="xs"
+              ptahButton
+              variant="primary"
+              size="xs"
               data-testid="harness-reconcile"
               [disabled]="store.busy()"
               (click)="reconcile()"
@@ -213,7 +232,10 @@ const TONE_CLASSES: Readonly<Record<HarnessBadgeTone, string>> = {
       </div>
     </ptah-native-popover>
     @if (repairOpen()) {
-      <ptah-harness-repair-dialog [blocked]="blocked()" (closed)="repairOpen.set(false)" />
+      <ptah-harness-repair-dialog
+        [blocked]="blocked()"
+        (closed)="repairOpen.set(false)"
+      />
     }
   `,
 })
@@ -222,9 +244,7 @@ export class HarnessHealthBadgeComponent implements OnInit {
   protected readonly appState = inject(AppStateManager);
   private readonly vscodeService = inject(VSCodeService);
 
-  protected readonly isElectron = computed(
-    () => this.vscodeService.isElectron,
-  );
+  protected readonly isElectron = computed(() => this.vscodeService.isElectron);
 
   protected readonly RefreshIcon = RefreshCw;
 

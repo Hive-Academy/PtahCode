@@ -243,6 +243,30 @@ export type {
 export { planGlobWatch } from './utils/glob-watch-plan';
 export { collectBounded } from './utils/bounded-collect';
 export {
+  COALESCE_MS,
+  createGlobFileWatcher,
+  createRecursiveFileWatcher,
+  shouldUseRecursiveWatch,
+  watcherModeFor,
+} from './utils/recursive-file-watcher';
+export type {
+  FileWatcherHostOptions,
+  FsWatchFn,
+  FsWatchHandle,
+  FsWatchListener,
+  GlobFileWatcherOptions,
+  RecursiveFileWatcherOptions,
+  WatcherLogger,
+  WatcherLoggerGetter,
+  WatcherMode,
+} from './utils/recursive-file-watcher';
+export { classifyWatchBurst } from './utils/recursive-watch-events';
+export type {
+  FileEventKind,
+  WatchBurst,
+  WatchedPathState,
+} from './utils/recursive-watch-events';
+export {
   DestinationWriteLock,
   destinationLockKey,
   destinationWriteLock,

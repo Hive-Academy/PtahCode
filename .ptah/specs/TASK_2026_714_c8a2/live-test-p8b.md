@@ -2,7 +2,7 @@
 
 Date: 2026-10-26. The user approved this run. It was test and report only, with no source edits.
 
-- Evidence folder: `C:\Users\abdal\AppData\Local\Temp\ptah-live-p8b-20261026-203740\`
+- Evidence folder: `C:\Users\dev\AppData\Local\Temp\ptah-live-p8b-20261026-203740\`
   - `electron.log` (main-process stdout/stderr), `build.log`, `build2.log`
   - `shots\` (screenshots), `settings.json.bak` (settings backup), Playwright scripts `*.js`
   - test DBs `ptah.db`, `sessions.db`; workspace `ws\` (a copy of the p8 workspace)

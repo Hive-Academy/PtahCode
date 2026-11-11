@@ -63,3 +63,26 @@ describe('roster order', () => {
     expect(rows.slice(-2).map((row) => row.status)).toEqual(['failed', 'failed']);
   });
 });
+
+describe('background shell is not a roster agent', () => {
+  it('(d) CLI lane row remains beside a real subagent and no "Sub-agent" row appears', () => {
+    // A background shell completion no longer creates a SubagentRecord, so
+    // the store hands the roster only the real subagent and the CLI lane.
+    const subagent: SubagentRecord = {
+      parentToolUseId: 'toolu_agent', parentSessionId: 'session-1',
+      status: 'completed', agentType: 'Explore', startedAt: 1_000,
+      completedAt: 2_000, totalTokens: 500,
+    };
+    const rows = buildSessionAgentRoster({
+      sessionId: 'session-1', tabStatus: 'streaming', subagents: [subagent],
+      cliAgents: [lane([])], backgroundAgents: [], permissions: [], questions: [],
+    });
+    expect(rows.filter((row) => row.kind === 'cli')).toEqual([
+      expect.objectContaining({ name: 'codex', cliId: 'codex' }),
+    ]);
+    expect(rows.find((row) => row.kind === 'subagent')).toMatchObject({
+      name: 'Explore', agentType: 'Explore',
+    });
+    expect(rows.map((row) => row.name)).not.toContain('Sub-agent');
+  });
+});

@@ -10,6 +10,7 @@
 import 'reflect-metadata';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'path';
 import { container as rootContainer, type DependencyContainer } from 'tsyringe';
 import {
@@ -292,6 +293,18 @@ export function makeHarness(
     });
   }
 
+  /**
+   * Bind a fresh SDK id to a child: it ran its first turn, so the first-turn
+   * watchdog and the failed-start path of a session end leave it alone.
+   */
+  function markRan(childSessionId: string): void {
+    idResolved.notifyAll({
+      tabId: childSessionId,
+      realSessionId: randomUUID(),
+      timestamp: 1,
+    });
+  }
+
   function emitPermission(event: PermissionPromptLifecycleEvent): void {
     for (const listener of permissionListeners) listener(event);
   }
@@ -329,6 +342,7 @@ export function makeHarness(
     startChild,
     turnEnded,
     emitPermission,
+    markRan,
   };
 }
 
@@ -1182,6 +1196,7 @@ describe('SessionSpawnerService — parent not live: held completions', () => {
   it('never stops children when the parent ends', async () => {
     const h = makeHarness();
     const child = await h.startChild();
+    h.markRan(child.childSessionId);
 
     h.active.delete(PARENT);
     h.sessionEnd.notifyAll({
@@ -1474,7 +1489,18 @@ describe('SessionSpawnerService.stop', () => {
 
     expect(result).toMatchObject({
       ok: true,
-      child: { status: 'stopped', endReason: 'stopped-by-parent' },
+      requestedSessionId: child.childSessionId,
+      followed: false,
+      alreadyEnded: false,
+      child: {
+        status: 'stopped',
+        endReason: 'stopped-by-parent',
+        outcome: {
+          kind: 'stopped',
+          cause: 'parent-stop',
+          reason: expect.stringContaining('stopped by the parent session'),
+        },
+      },
     });
     expect(h.adapter.interruptSession).toHaveBeenCalledWith(
       child.childSessionId,
@@ -1501,8 +1527,118 @@ describe('SessionSpawnerService.stop', () => {
         callerSessionId: PARENT,
         childSessionId: child.childSessionId,
       }),
-    ).resolves.toMatchObject({ ok: true, child: { status: 'stopped' } });
+    ).resolves.toMatchObject({
+      ok: true,
+      requestedSessionId: child.childSessionId,
+      followed: false,
+      alreadyEnded: true,
+      child: { status: 'stopped' },
+    });
     expect(h.adapter.interruptSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses handed-off without followHandoff and stops the latest successor when followHandoff is true (Defect B)', async () => {
+    const h = makeHarness();
+    const childA = await h.startChild();
+    const s1 = await h.spawner.succeed({
+      callerSessionId: childA.childSessionId,
+      handoffPath: `${childA.worktreePath}/HANDOFF.md`,
+      prompt: 'step 2',
+    });
+    if (!s1.ok) throw new Error('expected s1');
+    const childB = s1.successor;
+    const s2 = await h.spawner.succeed({
+      callerSessionId: childB.childSessionId,
+      handoffPath: `${childB.worktreePath}/HANDOFF.md`,
+      prompt: 'step 3',
+    });
+    if (!s2.ok) throw new Error('expected s2');
+    const childC = s2.successor;
+    h.adapter.interruptSession.mockClear();
+
+    const refused = await h.spawner.stop({
+      callerSessionId: PARENT,
+      childSessionId: childA.childSessionId,
+    });
+
+    expect(refused).toEqual({
+      ok: false,
+      reason: 'handed-off',
+      requestedSessionId: childA.childSessionId,
+      successorId: childC.childSessionId,
+      successorStatus: 'starting',
+      detail: `session ${childA.childSessionId} already handed off to ${childC.childSessionId} (status starting); nothing was stopped. Call again with followHandoff: true to stop ${childC.childSessionId}.`,
+    });
+    expect(h.adapter.interruptSession).not.toHaveBeenCalled();
+    expect(h.registry.get(childC.childSessionId)?.terminalStatus).toBeUndefined();
+
+    const followedStop = await h.spawner.stop({
+      callerSessionId: PARENT,
+      childSessionId: childA.childSessionId,
+      followHandoff: true,
+    });
+
+    expect(followedStop).toMatchObject({
+      ok: true,
+      requestedSessionId: childA.childSessionId,
+      followed: true,
+      alreadyEnded: false,
+      child: {
+        childSessionId: childC.childSessionId,
+        status: 'stopped',
+      },
+    });
+    expect(h.adapter.interruptSession).toHaveBeenCalledWith(
+      childC.childSessionId,
+      'parent-stop',
+    );
+
+    const followedAlreadyEnded = await h.spawner.stop({
+      callerSessionId: PARENT,
+      childSessionId: childA.childSessionId,
+      followHandoff: true,
+    });
+
+    expect(followedAlreadyEnded).toMatchObject({
+      ok: true,
+      requestedSessionId: childA.childSessionId,
+      followed: true,
+      alreadyEnded: true,
+      child: {
+        childSessionId: childC.childSessionId,
+        status: 'stopped',
+      },
+    });
+  });
+
+  it('reports alreadyEnded false for a live stop and true for a terminal child without a successor (Defect B)', async () => {
+    const h = makeHarness();
+    const child = await h.startChild();
+
+    const first = await h.spawner.stop({
+      callerSessionId: PARENT,
+      childSessionId: child.childSessionId,
+    });
+    expect(first).toMatchObject({
+      ok: true,
+      requestedSessionId: child.childSessionId,
+      followed: false,
+      alreadyEnded: false,
+      child: { childSessionId: child.childSessionId, status: 'stopped' },
+    });
+
+    h.adapter.interruptSession.mockClear();
+    const again = await h.spawner.stop({
+      callerSessionId: PARENT,
+      childSessionId: child.childSessionId,
+    });
+    expect(again).toMatchObject({
+      ok: true,
+      requestedSessionId: child.childSessionId,
+      followed: false,
+      alreadyEnded: true,
+    });
+    expect(h.adapter.interruptSession).not.toHaveBeenCalled();
   });
 
   it('F.1 M7: releases the child budget under its tab and SDK ids, after the interrupt', async () => {
@@ -1964,5 +2100,222 @@ describe('SessionSpawnerService — after ptah_session_handoff', () => {
     });
     expect(h.spawner.takeHeldCompletions(successor)).toEqual([envelope(1)]);
     expect(h.spawner.takeHeldCompletions(successor)).toEqual([]);
+  });
+});
+
+describe('SessionSpawnerService — snapshot outcome & endCause privacy (Defect C)', () => {
+  it('populates outcome on terminal snapshots and never leaks endCause', async () => {
+    const h = makeHarness();
+    const completedChild = await h.startChild({ branch: 'feat/completed' });
+    h.turnEnded(completedChild.childSessionId, { timestamp: 10 });
+    await flush();
+    h.active.delete(completedChild.childSessionId);
+    h.sessionEnd.notifyAll({
+      sessionId: completedChild.childSessionId,
+      workspaceRoot: WORKTREE,
+      cause: 'user-stop',
+    });
+    jest.advanceTimersByTime(SESSION_CHILD_GRACE_MS);
+    await flush();
+
+    const status = h.spawner.status({
+      callerSessionId: PARENT,
+      childSessionId: completedChild.childSessionId,
+    });
+    expect(status.ok).toBe(true);
+    if (!status.ok) return;
+    const snap = status.children[0];
+    expect(snap.outcome).toMatchObject({
+      kind: 'completed',
+      cause: 'user-stop',
+      reason: 'stopped by the user (stop button or tab closed)',
+    });
+    expect('endCause' in snap).toBe(false);
+  });
+
+  it('omits outcome on live snapshots and records parent-stop on stop', async () => {
+    const h = makeHarness();
+    const child = await h.startChild();
+    const live = h.spawner.status({
+      callerSessionId: PARENT,
+      childSessionId: child.childSessionId,
+    });
+    if (!live.ok) throw new Error('expected live status');
+    expect(live.children[0].outcome).toBeUndefined();
+
+    const stopped = await h.spawner.stop({
+      callerSessionId: PARENT,
+      childSessionId: child.childSessionId,
+    });
+    if (!stopped.ok) throw new Error('expected stop');
+    expect(stopped.child.outcome).toMatchObject({
+      kind: 'stopped',
+      cause: 'parent-stop',
+      reason: `stopped by the parent session ${PARENT} (ptah_session_stop)`,
+    });
+    expect(h.registry.get(child.childSessionId)?.endCause).toBe('parent-stop');
+  });
+
+  it('gives a handed-off snapshot the latest successor in the chain', async () => {
+    const h = makeHarness();
+    const childA = await h.startChild();
+    const s1 = await h.spawner.succeed({
+      callerSessionId: childA.childSessionId,
+      handoffPath: `${childA.worktreePath}/HANDOFF.md`,
+      prompt: 'step 2',
+    });
+    if (!s1.ok) throw new Error('expected s1');
+    const s2 = await h.spawner.succeed({
+      callerSessionId: s1.successor.childSessionId,
+      handoffPath: `${s1.successor.worktreePath}/HANDOFF.md`,
+      prompt: 'step 3',
+    });
+    if (!s2.ok) throw new Error('expected s2');
+    const status = h.spawner.status({ callerSessionId: PARENT });
+    if (!status.ok) throw new Error('expected status');
+    const snapA = status.children.find(
+      (c) => c.childSessionId === childA.childSessionId,
+    );
+    expect(snapA?.outcome).toMatchObject({
+      kind: 'handed-off',
+      cause: 'handed-off',
+      successorId: s2.successor.childSessionId,
+      reason: `handed off to ${s2.successor.childSessionId}`,
+    });
+  });
+});
+
+describe('SessionSpawnerService.clearFinished (Defect D)', () => {
+  it('refuses an unattributed caller', () => {
+    const h = makeHarness();
+    expect(h.spawner.clearFinished({ callerSessionId: undefined })).toEqual({
+      ok: false,
+      reason: 'unattributed-caller',
+      detail: 'this call carries no live chat session id',
+    });
+  });
+
+  it('clears all terminal children of the caller in start order, skips live ones, and never touches worktrees or foreign children', async () => {
+    const h = makeHarness();
+    h.active.add(OTHER);
+    const ended1 = await h.startChild({ branch: 'feat/ended-1' });
+    const live1 = await h.startChild({ branch: 'feat/live-1' });
+    const ended2 = await h.startChild({ branch: 'feat/ended-2' });
+    const foreign = await h.startChild({
+      callerSessionId: OTHER,
+      branch: 'feat/foreign',
+    });
+
+    await h.spawner.stop({
+      callerSessionId: PARENT,
+      childSessionId: ended1.childSessionId,
+    });
+    await h.spawner.stop({
+      callerSessionId: PARENT,
+      childSessionId: ended2.childSessionId,
+    });
+    await h.spawner.stop({
+      callerSessionId: OTHER,
+      childSessionId: foreign.childSessionId,
+    });
+
+    const result = h.spawner.clearFinished({ callerSessionId: PARENT });
+
+    expect(result).toEqual({
+      ok: true,
+      cleared: [ended1.childSessionId, ended2.childSessionId],
+      skipped: [{ childSessionId: live1.childSessionId, reason: 'live' }],
+    });
+    expect(h.registry.get(ended1.childSessionId)).toBeUndefined();
+    expect(h.registry.get(ended2.childSessionId)).toBeUndefined();
+    expect(h.registry.get(live1.childSessionId)).toBeDefined();
+    expect(h.registry.get(foreign.childSessionId)).toBeDefined();
+    expect(h.provisioner.rollback).not.toHaveBeenCalled();
+    expect(
+      h.lines.some((line) =>
+        line.includes('cleared 2 finished child session(s)'),
+      ),
+    ).toBe(true);
+  });
+
+  it('filters by explicit childSessionIds and reports live, unknown-child, and not-a-child-of-caller skips', async () => {
+    const h = makeHarness();
+    h.active.add(OTHER);
+    const ended1 = await h.startChild({ branch: 'feat/e1' });
+    const ended2 = await h.startChild({ branch: 'feat/e2' });
+    const live = await h.startChild({ branch: 'feat/live' });
+    const foreign = await h.startChild({
+      callerSessionId: OTHER,
+      branch: 'feat/foreign',
+    });
+
+    await h.spawner.stop({
+      callerSessionId: PARENT,
+      childSessionId: ended1.childSessionId,
+    });
+    await h.spawner.stop({
+      callerSessionId: PARENT,
+      childSessionId: ended2.childSessionId,
+    });
+    await h.spawner.stop({
+      callerSessionId: OTHER,
+      childSessionId: foreign.childSessionId,
+    });
+
+    // Pass ended2 before ended1 to verify cleared is returned in start order.
+    const result = h.spawner.clearFinished({
+      callerSessionId: PARENT,
+      childSessionIds: [
+        ended2.childSessionId,
+        'missing-id',
+        live.childSessionId,
+        foreign.childSessionId,
+        ended1.childSessionId,
+      ],
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      cleared: [ended1.childSessionId, ended2.childSessionId],
+      skipped: [
+        { childSessionId: 'missing-id', reason: 'unknown-child' },
+        { childSessionId: live.childSessionId, reason: 'live' },
+        {
+          childSessionId: foreign.childSessionId,
+          reason: 'not-a-child-of-caller',
+        },
+      ],
+    });
+  });
+
+  it('skips a finished child whose completion is still held until it is delivered (review M1)', async () => {
+    const h = makeHarness();
+    const child = await h.startChild();
+    h.notifier.signalSessionChild.mockResolvedValueOnce({
+      delivered: false,
+      reason: 'parent-session-not-active',
+      envelope: envelope(1),
+    });
+    h.turnEnded(child.childSessionId);
+    await flush();
+    await h.spawner.stop({
+      callerSessionId: PARENT,
+      childSessionId: child.childSessionId,
+    });
+    expect(h.registry.get(child.childSessionId)?.heldCompletion).toBeDefined();
+
+    expect(h.spawner.clearFinished({ callerSessionId: PARENT })).toEqual({
+      ok: true,
+      cleared: [],
+      skipped: [
+        { childSessionId: child.childSessionId, reason: 'held-completion' },
+      ],
+    });
+    expect(h.spawner.takeHeldCompletions(PARENT)).toEqual([envelope(1)]);
+    expect(h.spawner.clearFinished({ callerSessionId: PARENT })).toEqual({
+      ok: true,
+      cleared: [child.childSessionId],
+      skipped: [],
+    });
   });
 });

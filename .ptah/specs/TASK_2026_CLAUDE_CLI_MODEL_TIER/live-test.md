@@ -1,6 +1,6 @@
 # Ptah Dev Electron live test — Claude CLI model tier
 
-Date: 2026-11-08 local (2026-11-07 UTC). Built from this worktree. Log citations are one-based lines in `C:\Users\abdal\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-08.log`.
+Date: 2026-11-08 local (2026-11-07 UTC). Built from this worktree. Log citations are one-based lines in `C:\Users\dev\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-08.log`.
 
 ## Isolation gate
 

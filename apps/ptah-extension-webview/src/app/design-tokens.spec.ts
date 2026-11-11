@@ -47,6 +47,22 @@ describe('Ptah design tokens in the application', () => {
     expect(buttonImportAt).toBeLessThan(stylesCss.indexOf('@tailwind base'));
   });
 
+  it('scopes every rule of the button look to directive hosts', () => {
+    const css = readFileSync(join(WORKSPACE_ROOT, BUTTON_CSS_FILE), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/@keyframes[^{]*\{[\s\S]*?\}\s*\}/g, '');
+    const preludes = [...css.matchAll(/([^{}]+)\{/g)]
+      .map((m) => m[1].trim())
+      .filter((prelude) => prelude && !prelude.startsWith('@'));
+    expect(preludes.length).toBeGreaterThan(30);
+    expect(css).not.toContain('data-ptah-look');
+    const unscoped = preludes
+      .flatMap((prelude) => prelude.split(/,(?![^(]*\))/))
+      .map((selector) => selector.trim())
+      .filter((selector) => !selector.startsWith('.btn[data-ptah-button]'));
+    expect(unscoped).toEqual([]);
+  });
+
   it('has a Tailwind name for each token group', () => {
     const sections = new Set(ptahEntries.map(([section]) => section));
     expect([...sections].sort()).toEqual([

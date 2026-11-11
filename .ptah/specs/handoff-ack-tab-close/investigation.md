@@ -17,7 +17,7 @@ The successor's `ptah_session_handoff_ack` repeatedly returned `retryable-failur
 
 ## Logs
 
-Read only `C:\Users\abdal\AppData\Roaming\Ptah\logs\Ptah Electron-2026-11-10.log`. Calls at 10:50:58, 10:51:32 and 10:52:11 UTC; slow-tool records at 10:51:28, 10:52:02 and 10:52:41 show 30104, 30008 and 30012 ms. The predecessor SDK session was already ended at 10:51:00. No `SessionAutoHandoff` blocker line was found in the host log.
+Read only `C:\Users\dev\AppData\Roaming\Ptah\logs\Ptah Electron-2026-11-10.log`. Calls at 10:50:58, 10:51:32 and 10:52:11 UTC; slow-tool records at 10:51:28, 10:52:02 and 10:52:41 show 30104, 30008 and 30012 ms. The predecessor SDK session was already ended at 10:51:00. No `SessionAutoHandoff` blocker line was found in the host log.
 
 ## Does main already correct it
 

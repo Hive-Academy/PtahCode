@@ -4,7 +4,7 @@
 
 Across 24 high-context gaps of at least 54 minutes, seven sent idle `/compact`; 17 did not. Fifteen misses had an explicit session end before fire, releasing the attempt. Two reached fire time and logged `background-subagent` vetoes. None of the seven successes logged a session resume/load during its 54-minute window. The logs do not identify the shown tab; the live 60-second test did fire for a background tab and workspace [live-evidence.md, Results].
 
-Log references: **L2** = `C:\Users\abdal\AppData\Roaming\Ptah\logs\Ptah Electron-2026-11-02.log`; **L3** = the corresponding `2026-11-03.log`. Times UTC. Context is stats `lastTurnContextTokens`, a logged proxy, not a direct `getContextUsage` reading. The packaged build lacks armed/firing/released logs [live-evidence.md, Field logs].
+Log references: **L2** = `C:\Users\dev\AppData\Roaming\Ptah\logs\Ptah Electron-2026-11-02.log`; **L3** = the corresponding `2026-11-03.log`. Times UTC. Context is stats `lastTurnContextTokens`, a logged proxy, not a direct `getContextUsage` reading. The packaged build lacks armed/firing/released logs [live-evidence.md, Field logs].
 
 ## Candidate windows
 

@@ -30,6 +30,7 @@ import {
   resolveInstalledBrandSlug,
   resolveListingBrandSlug,
   PtahButtonDirective,
+  PtahIconButtonDirective,
 } from '@ptah-extension/ui';
 import type {
   McpOAuthConnectedRecord,
@@ -135,6 +136,7 @@ function isProbableServerUrl(value: string): boolean {
   selector: 'ptah-oauth-surface',
   standalone: true,
   imports: [
+    PtahIconButtonDirective,
     PtahButtonDirective,
     LucideAngularModule,
     BrandMarkComponent,
@@ -163,7 +165,9 @@ function isProbableServerUrl(value: string): boolean {
           <div class="alert alert-error alert-sm py-1 px-2 mb-3">
             <span class="text-xs">{{ connectError() }}</span>
             <button
-              ptahButton variant="ghost" size="xs"
+              ptahButton
+              variant="ghost"
+              size="xs"
               (click)="connectError.set(null)"
               type="button"
             >
@@ -256,8 +260,10 @@ function isProbableServerUrl(value: string): boolean {
                     />
                     <button
                       type="button"
-                      class="btn btn-ghost btn-xs shrink-0"
-                      aria-label="Copy redirect URL"
+                      ptahIconButton
+                      label="Copy redirect URL"
+                      size="xs"
+                      class="shrink-0"
                       (click)="copyRedirectUri(redirectUriField)"
                     >
                       @if (copied()) {
@@ -307,7 +313,9 @@ function isProbableServerUrl(value: string): boolean {
 
           <button
             type="submit"
-            class="btn btn-primary btn-sm w-full"
+            ptahButton
+            variant="primary"
+            class="w-full"
             [disabled]="isConnecting() || urlInput().trim().length === 0"
           >
             @if (isConnecting()) {
@@ -343,7 +351,9 @@ function isProbableServerUrl(value: string): boolean {
           <div class="alert alert-error alert-sm py-1 px-2">
             <span class="text-xs">{{ loadError() }}</span>
             <button
-              ptahButton variant="ghost" size="xs"
+              ptahButton
+              variant="ghost"
+              size="xs"
               (click)="reload()"
               type="button"
             >
@@ -375,7 +385,9 @@ function isProbableServerUrl(value: string): boolean {
                 <div card-actions class="flex items-center gap-2">
                   @if (card.status !== 'connected') {
                     <button
-                      ptahButton variant="ghost" size="sm"
+                      ptahButton
+                      variant="ghost"
+                      size="sm"
                       [disabled]="reconnectingKeys().has(card.server.serverKey)"
                       (click)="reconnect(card.server)"
                       type="button"

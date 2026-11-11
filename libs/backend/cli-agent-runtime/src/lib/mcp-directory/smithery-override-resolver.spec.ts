@@ -122,7 +122,7 @@ describe('SmitheryOverrideResolver', () => {
     over: Partial<SmitheryInstalledRecord> = {},
   ): SmitheryInstalledRecord =>
     record({
-      namespace: 'abdallah',
+      namespace: 'acme',
       connectionId: 'hubspot',
       qualifiedName: 'hubspot',
       serverKey: 'smithery_hubspot',
@@ -144,7 +144,7 @@ describe('SmitheryOverrideResolver', () => {
     expect(Object.keys(overrides)).toEqual([SMITHERY_NAMESPACE_OVERRIDE_KEY]);
     expect(overrides['smithery']).toEqual({
       type: 'http',
-      url: 'https://mcp.smithery.run/abdallah',
+      url: 'https://mcp.smithery.run/acme',
       headers: { Authorization: 'Bearer ns-key' },
     });
     expect(resolver.resolve).not.toHaveBeenCalled();
@@ -192,7 +192,7 @@ describe('SmitheryOverrideResolver', () => {
   it('treats a record with a namespace but no connectionId as legacy', async () => {
     const r = new SmitheryOverrideResolver({
       manifest: makeManifest([
-        record({ namespace: 'abdallah', serverKey: 'half' }),
+        record({ namespace: 'acme', serverKey: 'half' }),
       ]),
       resolver: makeResolver(async () => ({ type: 'http', url: 'https://ok' })),
     });

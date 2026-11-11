@@ -1,6 +1,6 @@
 # Ptah Dev Electron live test — post-stop Read/Glob
 
-Date: 2026-11-07 UTC (2026-11-08 local). Built from this worktree. Log references are one-based lines in `C:\Users\abdal\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-08.log`. The log filename follows local date; entries use UTC timestamps.
+Date: 2026-11-07 UTC (2026-11-08 local). Built from this worktree. Log references are one-based lines in `C:\Users\dev\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-08.log`. The log filename follows local date; entries use UTC timestamps.
 
 ## Isolation gate
 
@@ -9,7 +9,7 @@ Date: 2026-11-07 UTC (2026-11-08 local). Built from this worktree. Log reference
 | Required ancestor | PASS | `git merge-base --is-ancestor 5a88ce09d HEAD` exited 0. |
 | Production raw SHA-256 | PASS | Start, after the sole Dev settings edit, after launch, and end: `780f1063cb844f461dac8fa5c11d14c565af2afe02c805253824527ab4b1c01a`. |
 | Production canonical SHA-256 | PASS | Recursive key sort, JSON stringify, SHA-256 at the same checkpoints: `321e5a3bccff6840ed43c6d7e85f35f193ccf575b7fd71db5e09ec80c1e44abb`. No raw-only reserialization or canonical change. Production settings were read for hashes only. |
-| Dev settings backup and restore | PASS | Backup `C:\Users\abdal\.ptah-dev\settings.json.bak-post-stop-read-denial` raw SHA-256 `3b727d826f40043dcc6e879b9023db60a075c4fbd67ed945ba5ac738d694fad6`; restored file has the identical hash. |
+| Dev settings backup and restore | PASS | Backup `C:\Users\dev\.ptah-dev\settings.json.bak-post-stop-read-denial` raw SHA-256 `3b727d826f40043dcc6e879b9023db60a075c4fbd67ed945ba5ac738d694fad6`; restored file has the identical hash. |
 | Dev process ownership | PASS | Prelaunch query found zero Ptah Dev Electron processes; port 9346 was free. Only owned root PID 27624, launched from this worktree, was stopped. Final query found zero Ptah Dev user-data-dir Electron processes. |
 
 ## Setup

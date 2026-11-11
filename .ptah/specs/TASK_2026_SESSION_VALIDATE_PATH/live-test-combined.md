@@ -1,6 +1,6 @@
 ﻿# Combined Ptah Dev Electron live test
 
-2026-11-08 local (Africa/Cairo), detached integration worktree HEAD `066ab997c`. Log references below are one-based lines in `C:\Users\abdal\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-08.log` (UTC timestamps). Screenshots: [V](live-test-combined/V-continuation.png), [B](live-test-combined/B-normal-stop.png), [S2](live-test-combined/S2-budget-denial.png).
+2026-11-08 local (Africa/Cairo), detached integration worktree HEAD `066ab997c`. Log references below are one-based lines in `C:\Users\dev\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-08.log` (UTC timestamps). Screenshots: [V](live-test-combined/V-continuation.png), [B](live-test-combined/B-normal-stop.png), [S2](live-test-combined/S2-budget-denial.png).
 
 ## Isolation gate
 
@@ -18,7 +18,7 @@ The requested commands ran in order and exited 0: `node scripts/verify.mjs --exe
 
 ## Scenario V — session continuation: PASS
 
-The first turn replied `ACK` to a marker instruction. The second turn in the same chat returned the exact first-turn marker, `amber-orbit-42`. Both turns used SDK session ID `0793ec61-d163-47f6-b5d7-371dc362532d` (stats lines 21126 and 21190). `session:validate` lines 21154-21157 include `session file exists` at `C:\Users\abdal\.claude\projects\D--projects-ptah-extension--claude-worktrees-subagent-budget-stop-path--ptah-live-test-ws\0793ec61-d163-47f6-b5d7-371dc362532d.jsonl`. No `[MessageSender] ... starting new session instead` warning occurred in this run.
+The first turn replied `ACK` to a marker instruction. The second turn in the same chat returned the exact first-turn marker, `amber-orbit-42`. Both turns used SDK session ID `0793ec61-d163-47f6-b5d7-371dc362532d` (stats lines 21126 and 21190). `session:validate` lines 21154-21157 include `session file exists` at `C:\Users\dev\.claude\projects\D--projects-ptah-extension--claude-worktrees-subagent-budget-stop-path--ptah-live-test-ws\0793ec61-d163-47f6-b5d7-371dc362532d.jsonl`. No `[MessageSender] ... starting new session instead` warning occurred in this run.
 
 ## Scenario B — normal background completion: PASS for isBackground; lookup not observed
 

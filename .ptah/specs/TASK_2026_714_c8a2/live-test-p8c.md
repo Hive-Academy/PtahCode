@@ -2,7 +2,7 @@
 
 Date: 2026-10-27. The user approved this run. It was test and report only, with no source edits.
 
-- Evidence folder: `C:\Users\abdal\AppData\Local\Temp\ptah-live-p8c-20261027-202233\`
+- Evidence folder: `C:\Users\dev\AppData\Local\Temp\ptah-live-p8c-20261027-202233\`
   - `electron.log` (main-process stdout/stderr of the run), `electron-attempt1-locked.log`
     (first launch, which quit on the single-instance lock; see Launch)
   - `build.log` (build-dev), `wasm.log`, `build2.log` (copy-renderer-dev)

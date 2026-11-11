@@ -81,9 +81,9 @@ describe('persisted runtime identity cache', () => {
     await Promise.resolve();
   };
 
-  const rawRow = (workspacePath = 'C:\\Users\\abdal\\proj'): SessionMetadata => ({
+  const rawRow = (workspacePath = 'C:\\Users\\dev\\proj'): SessionMetadata => ({
     ...row(),
-    codexExecution: { ...identity, workspaceId: 'c:/users/abdal/proj' },
+    codexExecution: { ...identity, workspaceId: 'c:/users/dev/proj' },
     codexThread: {
       version: 1,
       contextId: 'context',
@@ -100,10 +100,10 @@ describe('persisted runtime identity cache', () => {
       f.store,
       mockLogger(),
     );
-    expect(lookup.lookup(id)?.persisted?.workspaceId).toBe('c:/users/abdal/proj');
-    expect(lookup.lookup(id)?.workspacePath).toBe('C:\\Users\\abdal\\proj');
+    expect(lookup.lookup(id)?.persisted?.workspaceId).toBe('c:/users/dev/proj');
+    expect(lookup.lookup(id)?.workspacePath).toBe('C:\\Users\\dev\\proj');
     lookup.releaseSession(id);
-    expect(lookup.lookup(id)?.workspacePath).toBe('C:\\Users\\abdal\\proj');
+    expect(lookup.lookup(id)?.workspacePath).toBe('C:\\Users\\dev\\proj');
     lookup.dispose();
     expect(lookup.lookup(id)).toBeUndefined();
   });
@@ -114,10 +114,10 @@ describe('persisted runtime identity cache', () => {
       f.store,
       mockLogger(),
     );
-    f.store.get.mockResolvedValue(rawRow('C:\\Users\\Abdal\\proj\\'));
+    f.store.get.mockResolvedValue(rawRow('C:\\Users\\Dev\\proj\\'));
     f.emit();
     await drain();
-    expect(lookup.lookup(id)?.workspacePath).toBe('C:\\Users\\Abdal\\proj\\');
+    expect(lookup.lookup(id)?.workspacePath).toBe('C:\\Users\\Dev\\proj\\');
     f.store.get.mockResolvedValue(row());
     f.emit();
     await drain();
@@ -156,7 +156,7 @@ describe('persisted runtime identity cache', () => {
     await lookup.updateCodexExecution(id, () => identity);
     expect(lookup.lookup(id)).toEqual({
       persisted: rawRow().codexExecution,
-      workspacePath: 'C:\\Users\\abdal\\proj',
+      workspacePath: 'C:\\Users\\dev\\proj',
     });
     lookup.dispose();
   });

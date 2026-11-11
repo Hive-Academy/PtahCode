@@ -14,6 +14,7 @@ describe('mcp caller policy', () => {
     expect(toolClass('ptah_not_a_real_tool')).toBe('agent-control');
     expect(toolClass('ptah_agent_message_control')).toBe('agent-control');
     expect(toolClass('ptah_agent_message_ack')).toBe('agent-control');
+    expect(toolClass('ptah_session_clear_finished')).toBe('agent-control');
   });
 
   it('permits only the read class for read-only callers', () => {

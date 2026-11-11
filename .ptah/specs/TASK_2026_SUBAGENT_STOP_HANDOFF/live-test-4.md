@@ -11,7 +11,7 @@ Date: 2026-11-08 (Africa/Cairo). **PASS: background scenario.** One fresh Haiku 
 
 ## Results
 
-Evidence roots: Dev log `C:\Users\abdal\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-08.log`; parent JSONL `C:\Users\abdal\.claude\projects\D--projects-ptah-extension--claude-worktrees-subagent-budget-stop-path--ptah-live-test-ws\8e5b4ab9-add7-4766-85b9-d12895782a08.jsonl`; subagent JSONL in that session's `subagents\agent-abc05b3e9d019e917.jsonl`. Line numbers are one-based.
+Evidence roots: Dev log `C:\Users\dev\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-08.log`; parent JSONL `C:\Users\dev\.claude\projects\D--projects-ptah-extension--claude-worktrees-subagent-budget-stop-path--ptah-live-test-ws\8e5b4ab9-add7-4766-85b9-d12895782a08.jsonl`; subagent JSONL in that session's `subagents\agent-abc05b3e9d019e917.jsonl`. Line numbers are one-based.
 
 | Check | Result | Evidence |
 | --- | --- | --- |
@@ -26,8 +26,8 @@ The 45 s postdecision timeout was not exercised because the warned agent wrote n
 ## Isolation
 
 - Stopped only the Ptah Dev launch started for this run (port 58604, Electron main PID 41396 and launcher PID 12272); a subsequent process check found no Ptah Dev Electron process. No production Ptah process was stopped.
-- Production `C:\Users\abdal\.ptah\settings.json` was never written; raw SHA-256 before and after: `780f1063cb844f461dac8fa5c11d14c565af2afe02c805253824527ab4b1c01a`.
-- Restored Dev `C:\Users\abdal\.ptah-dev\settings.json` byte for byte; raw SHA-256 before and after: `3b727d826f40043dcc6e879b9023db60a075c4fbd67ed945ba5ac738d694fad6`.
+- Production `C:\Users\dev\.ptah\settings.json` was never written; raw SHA-256 before and after: `780f1063cb844f461dac8fa5c11d14c565af2afe02c805253824527ab4b1c01a`.
+- Restored Dev `C:\Users\dev\.ptah-dev\settings.json` byte for byte; raw SHA-256 before and after: `3b727d826f40043dcc6e879b9023db60a075c4fbd67ed945ba5ac738d694fad6`.
 - Restored `note-01.txt` byte for byte; raw SHA-256 before and after: `f8ccfd1b6ebf47f8a0c853b79da879412596196fc3b2c5370ea42ad7dcd0f393`.
 - The two backup copies (`settings.json.live-test-4.bak` and `note-01.txt.live4.bak`) remain. Automatic approval review rejected their deletion command; it gave only `blocked by policy` as the reason. The temporary CDP helper scripts were removed.
 - `live-integration` remains present, detached at `1b6b1e796`, with clean Git status. Earlier `live-test*.md` files were not changed.

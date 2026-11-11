@@ -75,6 +75,7 @@ const AGENT_CONTROL_TOOLS: ReadonlySet<string> = new Set([
   'ptah_session_start',
   'ptah_session_send',
   'ptah_session_stop',
+  'ptah_session_clear_finished',
   'ptah_session_handoff',
   'ptah_route_decide',
   'ptah_outcome_report',

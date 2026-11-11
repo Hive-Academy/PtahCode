@@ -113,6 +113,17 @@ it('maps every variant and size to its DaisyUI class', () => {
     expect([...button.classList].sort()).toEqual(expected[i].sort()),
   );
 });
+it('marks each host with data-ptah-button so the token look applies', () => {
+  const fixture = TestBed.createComponent(ClassesHost);
+  fixture.detectChanges();
+  const buttons = [
+    ...fixture.nativeElement.querySelectorAll('button'),
+  ] as HTMLButtonElement[];
+  expect(buttons.length).toBeGreaterThan(0);
+  buttons.forEach((button) =>
+    expect(button.hasAttribute('data-ptah-button')).toBe(true),
+  );
+});
 @Component({
   standalone: true,
   imports: [PtahButtonDirective],

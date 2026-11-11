@@ -1,7 +1,8 @@
 /**
  * ElectronFileSystemProvider — IFileSystemProvider implementation using Node.js fs/promises.
  *
- * Uses fast-glob for findFiles() and chokidar for createFileWatcher().
+ * Uses fast-glob for findFiles(). createFileWatcher() uses one recursive fs.watch
+ * on win32/darwin and chokidar elsewhere (see platform-core recursive-file-watcher).
  * No Electron imports required — pure Node.js implementation.
  */
 
@@ -13,6 +14,7 @@ import type {
   FileStat,
   DirectoryEntry,
   IFileWatcher,
+  FileWatcherHostOptions,
 } from '@ptah-extension/platform-core';
 import {
   FileType,
@@ -20,12 +22,14 @@ import {
   collectBounded,
   createEvent,
   createFailureTally,
-  planGlobWatch,
+  createGlobFileWatcher,
   searchRootError,
   walkGlobMatches,
 } from '@ptah-extension/platform-core';
 
 export class ElectronFileSystemProvider implements IFileSystemProvider {
+  constructor(private readonly watchOptions: FileWatcherHostOptions = {}) {}
+
   async readFile(filePath: string): Promise<string> {
     return fs.readFile(filePath, 'utf-8');
   }
@@ -232,37 +236,43 @@ export class ElectronFileSystemProvider implements IFileSystemProvider {
     pattern: string,
     options?: { exclude?: string[]; cwd?: string },
   ): IFileWatcher {
-    const chokidar = require('chokidar');
-    const plan = planGlobWatch(pattern, options);
-    const watcher = chokidar.watch(plan.watchRoot, {
-      ignoreInitial: true,
-      persistent: true,
-      ignored: (candidate: string) => plan.ignores(candidate),
-    });
-
-    const [onDidChange, fireChange] = createEvent<string>();
-    const [onDidCreate, fireCreate] = createEvent<string>();
-    const [onDidDelete, fireDelete] = createEvent<string>();
-
-    // chokidar echoes back the absolute root it was given, so paths arrive
-    // absolute — the same shape the VS Code adapter emits (`uri.fsPath`).
-    const emit =
-      (fire: (p: string) => void) =>
-      (filePath: string): void => {
-        const absolute = path.resolve(filePath);
-        if (plan.matches(absolute)) fire(absolute);
-      };
-    watcher.on('change', emit(fireChange));
-    watcher.on('add', emit(fireCreate));
-    watcher.on('unlink', emit(fireDelete));
-
-    return {
-      onDidChange,
-      onDidCreate,
-      onDidDelete,
-      dispose() {
-        watcher.close();
+    return createGlobFileWatcher(
+      pattern,
+      { ...this.watchOptions, ...options },
+      (plan) => {
+        const chokidar = require('chokidar');
+        const watcher = chokidar.watch(plan.watchRoot, {
+          ignoreInitial: true,
+          persistent: true,
+          ignored: (candidate: string) => plan.ignores(candidate),
+        });
+        const [onDidChange, fireChange] = createEvent<string>();
+        const [onDidCreate, fireCreate] = createEvent<string>();
+        const [onDidDelete, fireDelete] = createEvent<string>();
+        let disposed = false;
+        // chokidar echoes back the absolute root it was given, so paths arrive
+        // absolute — the same shape the VS Code adapter emits (`uri.fsPath`).
+        const emit =
+          (fire: (p: string) => void) =>
+          (filePath: string): void => {
+            if (disposed) return;
+            const absolute = path.resolve(filePath);
+            if (plan.matches(absolute)) fire(absolute);
+          };
+        watcher.on('change', emit(fireChange));
+        watcher.on('add', emit(fireCreate));
+        watcher.on('unlink', emit(fireDelete));
+        return {
+          onDidChange,
+          onDidCreate,
+          onDidDelete,
+          dispose() {
+            if (disposed) return;
+            disposed = true;
+            void watcher.close();
+          },
+        };
       },
-    };
+    );
   }
 }

@@ -555,7 +555,7 @@ export class ChatSessionService {
       const live = this.pendingLineage.get(sourceSessionId);
       if (!live) {
         throw new RpcUserError(
-          'Source session policy lineage is unavailable.',
+          'Source session policy lineage is unavailable: the source session has no recorded metadata yet. Start the child again after the parent session has an SDK id.',
           'SESSION_NOT_FOUND',
         );
       }

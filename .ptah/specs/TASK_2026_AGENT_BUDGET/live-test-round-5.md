@@ -1,6 +1,6 @@
 # Ptah Dev live test round 5 — TASK_2026_AGENT_BUDGET
 
-Date: 2026-11-08 (Africa/Cairo). HEAD `cd1c9bb9903f3b64845b9e80ab62576d470e8f60`. Evidence uses one-based lines of `C:\Users\abdal\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-08.log`; selected token-free lines are in [sanitized-log.txt](live-test-round-5/sanitized-log.txt).
+Date: 2026-11-08 (Africa/Cairo). HEAD `cd1c9bb9903f3b64845b9e80ab62576d470e8f60`. Evidence uses one-based lines of `C:\Users\dev\AppData\Roaming\Ptah Dev\logs\Ptah Electron-2026-11-08.log`; selected token-free lines are in [sanitized-log.txt](live-test-round-5/sanitized-log.txt).
 
 ## Isolation gate
 

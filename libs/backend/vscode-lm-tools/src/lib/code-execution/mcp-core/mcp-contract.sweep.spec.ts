@@ -1060,6 +1060,21 @@ const TOOL_DRIVERS: Readonly<Record<string, ToolDriver>> = {
         stop: async () => ({
           ok: true,
           child: sessionChild(`${marker}-${filler(280000, 'o')}`),
+          requestedSessionId: 'c-1',
+          followed: false,
+          alreadyEnded: false,
+        }),
+      });
+    },
+  },
+  ptah_session_clear_finished: {
+    args: {},
+    mock: (api, marker) => {
+      api.session = sessionStub({
+        clearFinished: async () => ({
+          ok: true,
+          cleared: [`${marker}-${filler(280000, 'c')}`],
+          skipped: [],
         }),
       });
     },
@@ -1592,6 +1607,7 @@ const PINNED_PREFORMATTED_TOOLS: ReadonlySet<string> = new Set([
   'ptah_session_status',
   'ptah_session_read',
   'ptah_session_stop',
+  'ptah_session_clear_finished',
   'ptah_session_handoff',
   'ptah_session_handoff_ack',
   'ptah_route_decide',
@@ -1993,7 +2009,8 @@ describe('coverage matrix — served tools across host, caller and transport (de
     // run_check and HTTP-only run_check_wait. +1: ptah_session_handoff,
     // always-on (TASK_2026_655). +1: ptah_agent_message_control
     // (TASK_2026_AGENT_MESSAGING P1-E). +1: ptah_agent_message_ack (P2-G).
-    expect(namesPerCaller[0]).toHaveLength(73);
+    // +1: ptah_session_clear_finished (TASK_2026_932).
+    expect(namesPerCaller[0]).toHaveLength(74);
     expect(namesPerCaller[0]).toContain('ptah_artifact_publish');
   });
 
@@ -2020,8 +2037,9 @@ describe('coverage matrix — served tools across host, caller and transport (de
     }
     // 63 in total minus the 3 IDE-gated tools; see the note above
     // (TASK_2026_655: +1, ptah_session_handoff; P1-E: +1,
-    // ptah_agent_message_control; P2-G: +1, ptah_agent_message_ack).
-    expect(namesPerCaller[0]).toHaveLength(70);
+    // ptah_agent_message_control; P2-G: +1, ptah_agent_message_ack;
+    // TASK_2026_932: +1, ptah_session_clear_finished).
+    expect(namesPerCaller[0]).toHaveLength(71);
     expect(namesPerCaller[0]).toContain('ptah_artifact_publish');
     for (const ideOnly of [
       'ptah_lsp_references',
@@ -2062,7 +2080,8 @@ describe('coverage matrix — served tools across host, caller and transport (de
         );
         // TASK_2026_655: +1, ptah_session_handoff (always-on). P1-E: +1,
         // ptah_agent_message_control. P2-G: +1, ptah_agent_message_ack.
-        expect(apps).toHaveLength(hasIDECapabilities ? 76 : 73);
+        // TASK_2026_932: +1, ptah_session_clear_finished.
+        expect(apps).toHaveLength(hasIDECapabilities ? 77 : 74);
         expect(apps.filter((name) => !APPS_ONLY_TOOL_NAMES.has(name))).toEqual(
           coding,
         );
@@ -2536,12 +2555,15 @@ describe('MCP dispatcher contract sweep (TASK_2026_559 Batch 21, Task 21.1)', ()
       ptah_agent_stop: 162,
       ptah_git_worktree_list: 156,
       ptah_git_worktree_remove: 144,
-      // TASK_2026_584, measured 2026-10-01: 885, 539, 426, 274, 275 chars.
-      ptah_session_start: 984,
+      // TASK_2026_584 / TASK_2026_932: session tools description budgets.
+      // TASK_2026_932 E2, measured 2026-11-11: 1023 chars (+ the start
+      // timeout sentence); raised minimally to 1033.
+      ptah_session_start: 1033,
       ptah_session_send: 603,
-      ptah_session_status: 479,
+      ptah_session_status: 643,
       ptah_session_read: 312,
-      ptah_session_stop: 313,
+      ptah_session_stop: 438,
+      ptah_session_clear_finished: 361,
       // TASK_2026_655, measured 2026-10-14: 685 chars; ceil(685 * 1.1) + 10.
       ptah_session_handoff: 764,
       // TASK_2026_914, measured 2026-11-10: 211 chars; ceil(211 * 1.1) + 10.

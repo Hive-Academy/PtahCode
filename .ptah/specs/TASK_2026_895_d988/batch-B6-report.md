@@ -16,7 +16,7 @@
 - Mojibake scan for `â€`, `â‰`, `â†`: 0 matches in all four touched files.
 - `wc -l` equivalent: both orchestration `SKILL.md` copies are 239 lines (under 300).
 - `git diff --check`: passed. Ptah diagnostics reported Markdown unavailable (`analyzed: 0`).
-- Extra read beyond the specified read set: the Nx test terminal output at `C:\Users\abdal\.nx\d60e02896ae18ad9\cache\terminalOutputs\3613380322405742735`, only to identify the two failing test names.
+- Extra read beyond the specified read set: the Nx test terminal output at `C:\Users\dev\.nx\d60e02896ae18ad9\cache\terminalOutputs\3613380322405742735`, only to identify the two failing test names.
 
 ## Decisions
 

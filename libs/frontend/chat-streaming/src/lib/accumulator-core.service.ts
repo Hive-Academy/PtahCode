@@ -622,14 +622,27 @@ export class StreamingAccumulatorCore {
         }
         return this.mutated(event.eventType);
       case 'agent_progress':
-        if (!ctx.skipStoreEffects) agentMonitorStore.onAgentProgress(event);
+        if (!ctx.skipStoreEffects) {
+          agentMonitorStore.onAgentProgress(
+            event,
+            this.parentToolName(state, event.parentToolUseId),
+          );
+        }
         return this.mutated(event.eventType);
       case 'agent_status':
-        if (!ctx.skipStoreEffects) agentMonitorStore.onAgentStatus(event);
+        if (!ctx.skipStoreEffects) {
+          agentMonitorStore.onAgentStatus(
+            event,
+            this.parentToolName(state, event.parentToolUseId),
+          );
+        }
         return this.mutated(event.eventType);
       case 'agent_completed':
         if (!ctx.skipStoreEffects) {
-          agentMonitorStore.onAgentCompleted(event);
+          agentMonitorStore.onAgentCompleted(
+            event,
+            this.parentToolName(state, event.parentToolUseId),
+          );
           backgroundAgentStore.onAgentCompleted(event);
         }
         return this.mutated(event.eventType);
@@ -899,5 +912,22 @@ export class StreamingAccumulatorCore {
       compactionComplete: false,
       eventType,
     };
+  }
+
+  /**
+   * Tool name of the `tool_start` with `toolCallId` in this stream, or
+   * undefined when that tool node is not known here. Lets the agent monitor
+   * refuse to file a background shell's completion as a subagent.
+   */
+  private parentToolName(
+    state: StreamingState,
+    toolCallId: string | undefined,
+  ): string | undefined {
+    if (!toolCallId) return undefined;
+    for (const eventId of state.toolCallMap.get(toolCallId) ?? []) {
+      const node = state.events.get(eventId);
+      if (node?.eventType === 'tool_start') return node.toolName;
+    }
+    return undefined;
   }
 }

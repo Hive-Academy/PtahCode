@@ -15,7 +15,7 @@ One run, using PowerShell `Select-Object -Last 40` as the requested `tail -40` f
 
 `npm run verify -- -p platform-core,platform-electron,settings-core,ptah-electron,cli-engine,platform-cli -- --testPathPatterns="file-settings-path|legacy-threshold-migration|file-settings-keys|electron-settings-registration|migration-location|dev-settings" 2>&1 | Tee-Object -Variable verifyLines | Select-Object -Last 40`
 
-Result: **test phase: 16 tasks, 16 succeeded**. **Lint/typecheck phase: 11 tasks, 0 succeeded, 11 failed**; overall verify exit code 1. The failures were command-line parsing, not reported source diagnostics: `verify.mjs` forwarded `--testPathPatterns=...` to `tsc` and lint. The TypeScript log says `error TS5023: Unknown compiler option '--testPathPatterns=...'` (for example Nx terminal output `C:\Users\abdal\.nx\d60e02896ae18ad9\cache\terminalOutputs\12772048215017225233`). Scoped `ptah_get_diagnostics` timed out twice after 45 seconds. No second verify run was made under the once-only instruction.
+Result: **test phase: 16 tasks, 16 succeeded**. **Lint/typecheck phase: 11 tasks, 0 succeeded, 11 failed**; overall verify exit code 1. The failures were command-line parsing, not reported source diagnostics: `verify.mjs` forwarded `--testPathPatterns=...` to `tsc` and lint. The TypeScript log says `error TS5023: Unknown compiler option '--testPathPatterns=...'` (for example Nx terminal output `C:\Users\dev\.nx\d60e02896ae18ad9\cache\terminalOutputs\12772048215017225233`). Scoped `ptah_get_diagnostics` timed out twice after 45 seconds. No second verify run was made under the once-only instruction.
 
 ## Decisions
 

@@ -4,7 +4,7 @@
 
 `fe3648eff` introduced the hostile integration spec and the checker. Git blame attributes all eight fixture cases and the environment builder to that commit. The Go toolchain is installed (`go1.27.1` in the checker's audit). The initial narrow verify reproduced six failures: 6 failed, 96 passed across the Go vet suites. The other two hostile cases, minimum Go version and missing modules, already passed.
 
-The common root cause is in **product code**: `go-vet-checker.ts:393-405` built the sanitized child environment without `GOCACHE`; it copied `LOCALAPPDATA` only if the parent supplied it. This Windows process has `USERPROFILE=C:\Users\abdal` but no `LOCALAPPDATA`. A temporary diagnostic read of the child output showed: `build cache is required, but could not be located: GOCACHE is not defined and %LocalAppData% is not defined`. The checker then returned `failed/unparseable`. The temporary diagnostic lines were removed.
+The common root cause is in **product code**: `go-vet-checker.ts:393-405` built the sanitized child environment without `GOCACHE`; it copied `LOCALAPPDATA` only if the parent supplied it. This Windows process has `USERPROFILE=C:\Users\dev` but no `LOCALAPPDATA`. A temporary diagnostic read of the child output showed: `build cache is required, but could not be located: GOCACHE is not defined and %LocalAppData% is not defined`. The checker then returned `failed/unparseable`. The temporary diagnostic lines were removed.
 
 | Failing case (spec line) | Root cause and verdict | Fix |
 | --- | --- | --- |

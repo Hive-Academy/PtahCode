@@ -1,7 +1,7 @@
 # Live test 10d.P r2: native Codex CLI lanes in Electron (after 10d.L fixes)
 
 - Date: 2026-10-31, 21:57 to 22:10 local. Worktree `codex-runtime-integration`, head `0feebb6ab`.
-- F: `C:\Users\abdal\AppData\Local\Temp\ptah-live-p10dL-20261031-215714\` (`app.log`, `a.json` `a2.json` `a3.json`
+- F: `C:\Users\dev\AppData\Local\Temp\ptah-live-p10dL-20261031-215714\` (`app.log`, `a.json` `a2.json` `a3.json`
   `b.json` `b2.json`, `pid30144.txt`, `shots\`, `sessions\01a1938d-...\agent-output.498d54e4-....json`,
   `settings.json.bak`, `settings.after.json`, `build.log` `wasm.log` `build2.log`).
 - Preflight: no root `electron.exe` without `--type=` was running. This run's root PID was 10824. It was stopped with
