@@ -15,7 +15,10 @@ const ipcMainListeners = new Map<
 >();
 
 jest.mock('electron', () => ({
-  app: { getGPUFeatureStatus: () => ({ gpu_compositing: 'enabled' }) },
+  app: {
+    isPackaged: false,
+    getGPUFeatureStatus: () => ({ gpu_compositing: 'enabled' }),
+  },
   ipcMain: {
     on: (channel: string, listener: (...args: unknown[]) => unknown) => {
       const arr = ipcMainListeners.get(channel) ?? [];
@@ -28,12 +31,14 @@ jest.mock('electron', () => ({
   },
 }));
 
+import { app } from 'electron';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DependencyContainer } from 'tsyringe';
 import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
 import {
   gpuCompositingModeFor,
+  readIsDevInstance,
   readStartupConfig,
   registerStartupConfigIpc,
 } from './startup-config-ipc';
@@ -88,6 +93,7 @@ describe('get-startup-config responder', () => {
       workspaceRoot: '',
       workspaceName: '',
       zoneChangeDetectionFallback: false,
+      isDevInstance: false,
       gpuCompositing: 'hardware',
     });
   });
@@ -107,6 +113,7 @@ describe('get-startup-config responder', () => {
       workspaceRoot: join('/tmp', 'demo-workspace'),
       workspaceName: 'demo-workspace',
       zoneChangeDetectionFallback: false,
+      isDevInstance: false,
       gpuCompositing: 'hardware',
     });
   });
@@ -126,6 +133,7 @@ describe('get-startup-config responder', () => {
       workspaceRoot: '',
       workspaceName: '',
       zoneChangeDetectionFallback: false,
+      isDevInstance: false,
       gpuCompositing: 'hardware',
     });
     jest.restoreAllMocks();
@@ -217,5 +225,32 @@ describe('startup ordering: the sync responder precedes the first window', () =>
     expect(guard).toBeGreaterThanOrEqual(0);
     expect(guard).toBeLessThan(shellLoad);
     expect(bootstrap).toBeGreaterThan(shellLoad);
+  });
+});
+
+describe('readIsDevInstance', () => {
+  const original = process.env['NODE_ENV'];
+  afterEach(() => {
+    process.env['NODE_ENV'] = original;
+    (app as { isPackaged: boolean }).isPackaged = false;
+  });
+
+  it('is true only for the unpackaged development instance', () => {
+    process.env['NODE_ENV'] = 'development';
+    expect(readIsDevInstance()).toBe(true);
+    expect(readStartupConfig(null).isDevInstance).toBe(true);
+  });
+
+  it('is false when packaged, even under NODE_ENV=development', () => {
+    process.env['NODE_ENV'] = 'development';
+    (app as { isPackaged: boolean }).isPackaged = true;
+    expect(readIsDevInstance()).toBe(false);
+    expect(readStartupConfig(null).isDevInstance).toBe(false);
+  });
+
+  it('is false outside development', () => {
+    process.env['NODE_ENV'] = 'production';
+    expect(readIsDevInstance()).toBe(false);
+    expect(readStartupConfig(null).isDevInstance).toBe(false);
   });
 });
