@@ -4,26 +4,27 @@ import { ReviewRunsStore } from '../review-runs.store';
 import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component';
 import { ReviewFindingsPanelComponent } from '../findings/review-findings-panel.component';
 import { RUN_STATUS_INK, reviewStatusLabel } from './review-runs-list.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** The run contract and the query return 16 stage records at most. */
 const STAGE_LIMIT = 16;
 
 @Component({
-  selector: 'ptah-review-run-detail', standalone: true, imports: [ReviewFindingsPanelComponent, ReviewConfirmDialogComponent],
+  selector: 'ptah-review-run-detail', standalone: true, imports: [ReviewFindingsPanelComponent, ReviewConfirmDialogComponent, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div>
       <aside role="region" aria-labelledby="review-detail-title" (keydown)="onKeydown($event)">
         <header class="flex items-start justify-between gap-4"><div class="min-w-0">
-          <button type="button" class="btn btn-ghost btn-sm mb-2 min-[768px]:hidden" aria-label="Close run details" (click)="closed.emit()">All runs</button>
+          <button type="button" ptahButton variant="ghost" class="mb-2 min-[768px]:hidden" aria-label="Close run details" (click)="closed.emit()">All runs</button>
           <h2 id="review-detail-title" class="truncate text-xl font-semibold" tabindex="-1"><span class="sr-only">PR </span>#{{ run().prNumber }} {{ run().prTitle || 'review' }}</h2>
           <p class="text-sm text-base-content-muted" [title]="'Attempt ' + run().attemptId">{{ run().repo.owner }}/{{ run().repo.name }} · <span class="font-mono">{{ run().headSha.slice(0, 10) }}</span> · {{ run().trigger === 'poll' ? 'Poll' : 'Manual' }}</p>
         </div>
           <span class="badge badge-outline shrink-0" data-testid="review-detail-state"><span class="inline-flex items-center gap-1.5" [class]="ink(run().status)"><span class="h-2 w-2 rounded-full bg-current" aria-hidden="true"></span>{{ label(run().status) }}</span></span>
         </header>
         <div class="mt-3 flex flex-wrap gap-2" data-testid="review-detail-rerun">
-          <button type="button" class="btn btn-primary btn-sm" title="A dry run creates a local preview. CodeRabbit stays enabled." [disabled]="store.rerunState() === 'running'" (click)="store.rerun(run().attemptId, true)">Rerun dry run</button>
-          <button type="button" class="btn btn-ghost btn-sm" title="A live rerun can publish comments. CodeRabbit stays enabled." [disabled]="store.rerunState() === 'running' || !store.hasToken() || store.settings()?.globalPublicationPaused" (click)="confirmLive.set(true)">Rerun live</button>
+          <button type="button" ptahButton variant="primary" title="A dry run creates a local preview. CodeRabbit stays enabled." [disabled]="store.rerunState() === 'running'" (click)="store.rerun(run().attemptId, true)">Rerun dry run</button>
+          <button type="button" ptahButton variant="ghost" title="A live rerun can publish comments. CodeRabbit stays enabled." [disabled]="store.rerunState() === 'running' || !store.hasToken() || store.settings()?.globalPublicationPaused" (click)="confirmLive.set(true)">Rerun live</button>
         </div>
         @if (store.rerunState() === 'error') { <p role="alert" class="mt-2 text-sm text-error">Rerun could not be started.</p> }
         @if (run().failure; as failure) {
@@ -67,7 +68,7 @@ const STAGE_LIMIT = 16;
           <section class="mt-6">
           <h3 class="font-semibold">Findings</h3>
             @if (findingsState() === 'loading') { <p class="mt-1 text-sm text-base-content-muted" role="status">Loading findings…</p> }
-            @else if (findingsState() === 'error') { <p class="mt-1 text-sm text-base-content-muted" role="alert">Findings are unavailable. <button type="button" class="btn btn-ghost btn-sm" (click)="retryFindings.emit()">Retry</button></p> }
+            @else if (findingsState() === 'error') { <p class="mt-1 text-sm text-base-content-muted" role="alert">Findings are unavailable. <button type="button" ptahButton variant="ghost" (click)="retryFindings.emit()">Retry</button></p> }
             @else { <ptah-review-findings-panel [findings]="findings()" /> }
           </section>
           <section class="mt-6"><h3 class="font-semibold">Walkthrough preview</h3><p class="text-sm text-base-content-muted">Walkthrough preview unavailable.</p></section>

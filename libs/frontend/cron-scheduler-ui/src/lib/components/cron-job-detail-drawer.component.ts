@@ -29,7 +29,7 @@ import {
   Trash2,
 } from 'lucide-angular';
 import type { JobRunDto, ScheduledJobDto } from '@ptah-extension/shared';
-import { NativeDrawerComponent } from '@ptah-extension/ui';
+import { NativeDrawerComponent, PtahButtonDirective } from '@ptah-extension/ui';
 
 import {
   buildJobMetrics,
@@ -43,7 +43,7 @@ import {
   selector: 'ptah-cron-job-detail-drawer',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [LucideAngularModule, NativeDrawerComponent],
+  imports: [LucideAngularModule, NativeDrawerComponent, PtahButtonDirective],
   template: `
     <ptah-native-drawer
       [isOpen]="job() !== null"
@@ -177,7 +177,8 @@ import {
         >
           <button
             type="button"
-            class="btn btn-primary btn-sm transition-colors duration-150"
+            ptahButton
+            variant="primary"
             data-testid="cron-drawer-run-now"
             (click)="runNow.emit()"
           >
@@ -190,7 +191,8 @@ import {
           </button>
           <button
             type="button"
-            class="btn btn-ghost btn-sm transition-colors duration-150"
+            ptahButton
+            variant="ghost"
             data-testid="cron-drawer-edit"
             (click)="edit.emit()"
           >
@@ -203,7 +205,8 @@ import {
           </button>
           <button
             type="button"
-            class="btn btn-ghost btn-sm transition-colors duration-150"
+            ptahButton
+            variant="ghost"
             data-testid="cron-drawer-toggle"
             (click)="toggled.emit()"
           >

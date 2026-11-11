@@ -23,21 +23,19 @@
     </div>
     <button
       type="button"
-      class="btn btn-xs btn-ghost gap-1"
-      [disabled]="isLoading()"
+      ptahButton
+      variant="ghost"
+      size="xs"
+      [busy]="isLoading()"
       (click)="retry()"
       aria-label="Refresh usage"
       data-testid="usage-refresh"
     >
-      @if (isLoading()) {
-        <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
-      } @else {
-        <lucide-angular
-          [img]="RefreshCwIcon"
-          class="h-3.5 w-3.5"
-          aria-hidden="true"
-        ></lucide-angular>
-      }
+      <lucide-angular
+        [img]="RefreshCwIcon"
+        class="h-3.5 w-3.5"
+        aria-hidden="true"
+      ></lucide-angular>
       Refresh
     </button>
     @if (viewModel()?.isPartial) {

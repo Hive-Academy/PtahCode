@@ -12,7 +12,7 @@
     @if (view().primaryValue; as value) {
       <strong class="shrink-0 text-lg leading-none font-bold tabular-nums" [class.text-success]="view().primaryTone === 'success'" [class.text-warning]="view().primaryTone === 'warning'" [class.text-error]="view().primaryTone === 'error'" data-testid="tile-primary">{{ value }}</strong>
     }
-    <button type="button" class="btn btn-ghost btn-xs btn-square shrink-0" [attr.aria-label]="'Refresh ' + view().label + ' usage'" [disabled]="refreshing()" (click)="refresh.emit()" data-testid="tile-refresh">
+    <button type="button" ptahIconButton size="xs" class="shrink-0" [label]="'Refresh ' + view().label + ' usage'" [disabled]="refreshing()" (click)="refresh.emit()" data-testid="tile-refresh">
       <span aria-hidden="true">↻</span>
     </button>
   </header>
@@ -48,7 +48,7 @@
     <div class="mt-1 flex items-center gap-2 text-xs" data-testid="tile-status">
       <span class="min-w-0 flex-1" data-testid="tile-status-pill">{{ view().statusPill?.text ?? view().statusNotice ?? 'Usage unavailable' }}</span>
       @if (view().action; as action) {
-        <button type="button" class="btn btn-ghost btn-xs shrink-0" (click)="actionClick.emit(action)" [attr.data-testid]="'tile-action-' + action.kind">{{ action.label }}</button>
+        <button type="button" ptahButton variant="ghost" size="xs" class="shrink-0" (click)="actionClick.emit(action)" [attr.data-testid]="'tile-action-' + action.kind">{{ action.label }}</button>
       }
     </div>
   }

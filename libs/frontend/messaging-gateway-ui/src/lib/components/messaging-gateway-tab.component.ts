@@ -24,6 +24,7 @@ import {
   type PlatformCardConfig,
 } from './gateway-platform-pane.component';
 import { GatewaySetupGuideComponent } from './gateway-setup-guide.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
   {
@@ -55,6 +56,7 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
     GatewayPlatformTabsComponent,
     GatewayPlatformPaneComponent,
     GatewaySetupGuideComponent,
+    PtahButtonDirective,
   ],
   template: `
     @if (!isElectron) {
@@ -121,7 +123,8 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
             </span>
             <button
               type="button"
-              class="btn btn-ghost btn-sm"
+              ptahButton
+              variant="ghost"
               (click)="toggleHelp()"
               aria-label="Open gateway setup guide"
             >

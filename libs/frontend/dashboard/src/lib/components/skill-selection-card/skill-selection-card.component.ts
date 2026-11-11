@@ -13,6 +13,10 @@ import {
   PluginCatalogPanelComponent,
 } from '@ptah-extension/chat-ui';
 import type { HarnessGetSkillSelectionResult } from '@ptah-extension/shared';
+import {
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 
 /** Budget for the one read this card makes. A cached gate resolve plus one skills walk. */
 const SKILL_SELECTION_READ_TIMEOUT_MS = 10_000;
@@ -77,7 +81,12 @@ const SKILL_SELECTION_READ_TIMEOUT_MS = 10_000;
 @Component({
   selector: 'ptah-skill-selection-card',
   standalone: true,
-  imports: [LucideAngularModule, PluginCatalogPanelComponent],
+  imports: [
+    LucideAngularModule,
+    PluginCatalogPanelComponent,
+    PtahButtonDirective,
+    PtahIconButtonDirective,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (needsSelection()) {
@@ -111,7 +120,9 @@ const SKILL_SELECTION_READ_TIMEOUT_MS = 10_000;
           </div>
 
           <button
-            class="btn btn-sm btn-primary btn-outline self-start"
+            ptahButton
+            variant="primary"
+            class="self-start"
             type="button"
             data-testid="skill-selection-card-choose"
             (click)="onPickerOpened()"
@@ -147,15 +158,21 @@ const SKILL_SELECTION_READ_TIMEOUT_MS = 10_000;
         (document:keydown.escape)="onPickerEscape()"
       >
         <div class="modal-box surface-3 relative max-w-2xl">
-          <button
-            class="btn btn-sm btn-circle btn-ghost absolute right-3 top-3"
-            type="button"
-            data-testid="skill-selection-card-close"
-            aria-label="Close plugin browser"
-            (click)="onPickerClosed()"
-          >
-            <lucide-angular [img]="XIcon" class="w-4 h-4" aria-hidden="true" />
-          </button>
+          <span class="absolute right-3 top-3">
+            <button
+              ptahIconButton
+              label="Close plugin browser"
+              type="button"
+              data-testid="skill-selection-card-close"
+              (click)="onPickerClosed()"
+            >
+              <lucide-angular
+                [img]="XIcon"
+                class="w-4 h-4"
+                aria-hidden="true"
+              />
+            </button>
+          </span>
 
           <ptah-plugin-catalog-panel (saved)="onPluginsSaved()" />
         </div>

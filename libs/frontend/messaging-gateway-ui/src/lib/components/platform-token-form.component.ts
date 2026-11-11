@@ -8,10 +8,12 @@ import {
 import type { GatewayPlatformId } from '@ptah-extension/shared';
 
 import { GatewayStateService } from '../services/gateway-state.service';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-platform-token-form',
   standalone: true,
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <form class="flex flex-col gap-3" (submit)="onSubmit($event)">
@@ -60,7 +62,8 @@ import { GatewayStateService } from '../services/gateway-state.service';
         </span>
         <button
           type="submit"
-          class="btn btn-sm btn-primary"
+          ptahButton
+          variant="primary"
           [disabled]="submitting() || !canSubmit()"
         >
           @if (submitting()) {

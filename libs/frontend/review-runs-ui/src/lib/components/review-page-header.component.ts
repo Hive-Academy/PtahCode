@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /**
  * Header of the Reviews page (approved Inbox design, TASK_2026_UX_REVIEWS_MACHINES
@@ -12,6 +13,7 @@ import { ChangeDetectionStrategy, Component, input, output } from '@angular/core
 @Component({
   selector: 'ptah-review-page-header',
   standalone: true,
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <header class="flex flex-wrap items-center gap-3">
@@ -40,7 +42,7 @@ import { ChangeDetectionStrategy, Component, input, output } from '@angular/core
       </span>
       <button
         type="button"
-        class="btn btn-ghost btn-sm"
+        ptahButton variant="ghost"
         [disabled]="!pauseAvailable() || pauseSaving()"
         (click)="paused() ? resumeRequested.emit() : pauseRequested.emit()"
       >
@@ -48,7 +50,7 @@ import { ChangeDetectionStrategy, Component, input, output } from '@angular/core
       </button>
       <button
         type="button"
-        class="btn btn-ghost btn-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+        ptahButton variant="ghost"
         aria-label="Refresh review runs"
         [disabled]="refreshing()"
         (click)="refresh.emit()"
@@ -57,7 +59,7 @@ import { ChangeDetectionStrategy, Component, input, output } from '@angular/core
       </button>
       <button
         type="button"
-        class="btn btn-ghost btn-sm"
+        ptahButton variant="ghost"
         (click)="openSettings.emit()"
       >
         Review settings

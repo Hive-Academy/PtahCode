@@ -5,6 +5,7 @@ import { AnalyticsCardComponent } from '../analytics-card/analytics-card.compone
 import { BuildersCardComponent } from '../builders-card/builders-card.component';
 import { ProviderAccountCardComponent } from '../provider-account-card/provider-account-card.component';
 import { SkillSelectionCardComponent } from '../skill-selection-card/skill-selection-card.component';
+import { PtahIconButtonDirective } from '@ptah-extension/ui';
 
 /**
  * DashboardGridComponent
@@ -24,6 +25,7 @@ import { SkillSelectionCardComponent } from '../skill-selection-card/skill-selec
     SkillSelectionCardComponent,
     AnalyticsCardComponent,
     BuildersCardComponent,
+    PtahIconButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './dashboard-grid.component.html',

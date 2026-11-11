@@ -6,6 +6,7 @@ import {
 } from '@angular/core';
 import { LucideAngularModule, Users } from 'lucide-angular';
 import { ClaudeRpcService } from '@ptah-extension/core';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /**
  * BuildersCardComponent
@@ -29,7 +30,7 @@ import { ClaudeRpcService } from '@ptah-extension/core';
 @Component({
   selector: 'ptah-builders-card',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './builders-card.component.html',
 })

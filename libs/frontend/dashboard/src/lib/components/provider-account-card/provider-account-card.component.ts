@@ -44,11 +44,12 @@ import {
 } from '@ptah-extension/shared';
 import type { PlanTileActionView } from './plan-tile-view.model';
 import { ProviderAccountTileComponent } from '../provider-account-tile/provider-account-tile.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-provider-account-card',
   standalone: true,
-  imports: [ProviderAccountTileComponent],
+  imports: [ProviderAccountTileComponent, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     // Responsive columns follow available section width.
@@ -106,7 +107,9 @@ import { ProviderAccountTileComponent } from '../provider-account-tile/provider-
               <h5 class="font-medium text-sm">Account usage</h5>
               <button
                 type="button"
-                class="btn btn-ghost btn-xs"
+                ptahButton
+                variant="ghost"
+                size="xs"
                 [disabled]="loading()"
                 (click)="refresh()"
               >

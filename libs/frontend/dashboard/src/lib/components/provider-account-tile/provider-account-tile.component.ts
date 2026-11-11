@@ -12,7 +12,11 @@ import type {
   LocalTimeOptions,
   PlanLimitOwnerSnapshot,
 } from '@ptah-extension/shared';
-import { ProviderMarkComponent } from '@ptah-extension/ui';
+import {
+  ProviderMarkComponent,
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 import {
   buildPlanTile,
   type PlanTileActionView,
@@ -28,7 +32,7 @@ import {
 @Component({
   selector: 'ptah-provider-account-tile',
   standalone: true,
-  imports: [ProviderMarkComponent],
+  imports: [ProviderMarkComponent, PtahButtonDirective, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './provider-account-tile.component.html',
   styles: [
