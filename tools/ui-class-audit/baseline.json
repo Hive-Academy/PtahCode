@@ -238,6 +238,9 @@
     "btn-info": 3,
     "btn-outline": 2,
     "btn-xs": 3,
+    "checkbox": 1,
+    "checkbox-info": 1,
+    "checkbox-xs": 1,
     "input": 1,
     "input-bordered": 1,
     "input-info": 1,
@@ -286,9 +289,14 @@
     "btn": 1,
     "btn-ghost": 1,
     "btn-xs": 1,
+    "checkbox": 1,
+    "checkbox-primary": 1,
+    "checkbox-xs": 1,
     "input": 2,
     "input-bordered": 2,
     "input-sm": 2,
+    "label": 1,
+    "label-text": 1,
     "select": 1,
     "select-bordered": 1,
     "select-sm": 1,
@@ -302,9 +310,15 @@
     "btn-ghost": 2,
     "btn-primary": 2,
     "btn-xs": 2,
+    "checkbox": 2,
+    "checkbox-primary": 2,
+    "checkbox-xs": 2,
     "input": 1,
     "input-bordered": 1,
-    "input-sm": 1
+    "input-sm": 1,
+    "toggle": 1,
+    "toggle-primary": 1,
+    "toggle-sm": 1
   },
   "libs/frontend/chat-ui/src/lib/molecules/setup-plugins/skill-sh-browser.component.ts": {
     "<dynamic>": 3,
@@ -415,7 +429,11 @@
     "btn": 1,
     "btn-error": 1,
     "btn-primary": 1,
-    "btn-warning": 1
+    "btn-warning": 1,
+    "checkbox": 1,
+    "checkbox-sm": 1,
+    "label": 1,
+    "label-text": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/delivery-status/delivery-status.component.ts": {
     "btn": 1,
@@ -485,7 +503,9 @@
     "input-sm": 2,
     "select": 4,
     "select-bordered": 4,
-    "select-sm": 4
+    "select-sm": 4,
+    "toggle": 1,
+    "toggle-sm": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/tool-execution/tool-call-item.component.ts": {
     "<dynamic>": 2
@@ -632,7 +652,10 @@
     "btn-sm": 1,
     "input": 1,
     "input-bordered": 1,
-    "input-sm": 1
+    "input-sm": 1,
+    "toggle": 1,
+    "toggle-primary": 1,
+    "toggle-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/advanced/codex-sandbox-setting.component.ts": {
     "<dynamic>": 2,
@@ -667,7 +690,10 @@
   },
   "libs/frontend/chat/src/lib/settings/output-style/output-style-instructions-field.component.ts": {
     "textarea": 1,
-    "textarea-bordered": 1
+    "textarea-bordered": 1,
+    "toggle": 1,
+    "toggle-primary": 1,
+    "toggle-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/output-style/output-style-list.component.ts": {
     "badge": 4,
@@ -688,6 +714,9 @@
     "btn": 1,
     "btn-outline": 1,
     "btn-xs": 1,
+    "checkbox": 1,
+    "checkbox-primary": 1,
+    "checkbox-xs": 1,
     "select": 1,
     "select-bordered": 1,
     "select-xs": 1
@@ -699,7 +728,10 @@
     "btn": 1,
     "btn-outline": 1,
     "btn-primary": 1,
-    "btn-xs": 1
+    "btn-xs": 1,
+    "checkbox": 3,
+    "checkbox-primary": 3,
+    "checkbox-xs": 3
   },
   "libs/frontend/chat/src/lib/settings/pro-features/claude-builtins-config.component.ts": {
     "badge": 4,
@@ -707,6 +739,9 @@
     "badge-warning": 1,
     "badge-xs": 4,
     "card": 1,
+    "checkbox": 6,
+    "checkbox-primary": 6,
+    "checkbox-xs": 6,
     "skeleton": 3
   },
   "libs/frontend/chat/src/lib/settings/pro-features/mcp-port-config.component.ts": {
@@ -716,6 +751,9 @@
     "btn": 1,
     "btn-outline": 1,
     "btn-xs": 1,
+    "checkbox": 2,
+    "checkbox-primary": 2,
+    "checkbox-xs": 2,
     "input": 1,
     "input-bordered": 1,
     "input-xs": 1,
@@ -936,10 +974,16 @@
     "badge": 1,
     "badge-outline": 1,
     "badge-sm": 1,
-    "card-body": 1
+    "card-body": 1,
+    "checkbox": 1,
+    "checkbox-primary": 1,
+    "checkbox-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/copilot-auto-approve-toggle.component.ts": {
-    "<dynamic>": 1
+    "<dynamic>": 1,
+    "toggle": 1,
+    "toggle-success": 1,
+    "toggle-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/cursor-credential-popover.component.ts": {
     "<dynamic>": 2,
@@ -967,8 +1011,16 @@
     "select-bordered": 2,
     "select-sm": 2
   },
+  "libs/frontend/chat/src/lib/settings/ptah-ai/go-vet-consent-config.component.ts": {
+    "toggle": 1,
+    "toggle-primary": 1,
+    "toggle-sm": 1
+  },
   "libs/frontend/chat/src/lib/settings/ptah-ai/host-routing-setting.component.ts": {
-    "<dynamic>": 1
+    "<dynamic>": 1,
+    "toggle": 1,
+    "toggle-success": 1,
+    "toggle-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/lane-guards-settings.component.ts": {
     "<dynamic>": 1,
@@ -980,7 +1032,10 @@
     "input-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/lane-rotation-setting.component.ts": {
-    "<dynamic>": 1
+    "<dynamic>": 1,
+    "toggle": 1,
+    "toggle-success": 1,
+    "toggle-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/local-stt-panel.component.ts": {
     "badge": 2,
@@ -1018,7 +1073,10 @@
     "<dynamic>": 11,
     "badge": 4,
     "badge-outline": 3,
-    "badge-sm": 4
+    "badge-sm": 4,
+    "checkbox": 1,
+    "checkbox-primary": 1,
+    "checkbox-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/session-budget-settings.component.ts": {
     "<dynamic>": 3,
@@ -1030,7 +1088,10 @@
     "input-sm": 1,
     "select": 1,
     "select-bordered": 1,
-    "select-sm": 1
+    "select-sm": 1,
+    "toggle": 1,
+    "toggle-primary": 1,
+    "toggle-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/subagent-cache-ttl-setting.component.ts": {
     "<dynamic>": 1,
@@ -1051,6 +1112,9 @@
     "btn": 1,
     "btn-outline": 1,
     "btn-sm": 1,
+    "checkbox": 1,
+    "checkbox-primary": 1,
+    "checkbox-xs": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
@@ -1129,7 +1193,10 @@
     "select-sm": 1,
     "textarea": 1,
     "textarea-bordered": 1,
-    "textarea-sm": 1
+    "textarea-sm": 1,
+    "toggle": 1,
+    "toggle-primary": 1,
+    "toggle-sm": 1
   },
   "libs/frontend/dashboard/src/lib/components/builders-card/builders-card.component.html": {
     "card-actions": 1,
@@ -1213,6 +1280,10 @@
     "input-bordered": 1,
     "input-sm": 1
   },
+  "libs/frontend/declarative-dashboard/src/lib/components/surface-checkbox-input.component.ts": {
+    "checkbox": 1,
+    "checkbox-sm": 1
+  },
   "libs/frontend/declarative-dashboard/src/lib/components/surface-choice-input.component.ts": {
     "select": 1,
     "select-bordered": 1,
@@ -1263,7 +1334,9 @@
     "btn-xs": 2
   },
   "libs/frontend/git-ui/src/lib/review-canvas/changed-file-row-actions.component.ts": {
-    "<dynamic>": 4
+    "<dynamic>": 4,
+    "checkbox": 1,
+    "checkbox-xs": 1
   },
   "libs/frontend/git-ui/src/lib/review-canvas/changed-file-section-actions.component.ts": {
     "<dynamic>": 2
@@ -1341,6 +1414,8 @@
     "badge-ghost": 3,
     "badge-warning": 1,
     "badge-xs": 4,
+    "checkbox": 1,
+    "checkbox-xs": 1,
     "input": 2,
     "input-bordered": 2,
     "input-xs": 2
@@ -1471,7 +1546,9 @@
     "alert-sm": 1,
     "btn": 1,
     "btn-sm": 1,
-    "btn-warning": 1
+    "btn-warning": 1,
+    "checkbox": 1,
+    "checkbox-xs": 1
   },
   "libs/frontend/marketplace/src/lib/harness/harness-target-row.component.ts": {
     "<dynamic>": 1
@@ -1518,6 +1595,9 @@
     "badge-ghost": 1,
     "badge-outline": 1,
     "badge-sm": 2,
+    "checkbox": 1,
+    "checkbox-primary": 1,
+    "checkbox-xs": 1,
     "skeleton": 2
   },
   "libs/frontend/marketplace/src/lib/pages/servers/provider-list-view.component.html": {
@@ -1587,7 +1667,10 @@
     "skeleton": 2
   },
   "libs/frontend/marketplace/src/lib/ui/capability-toggle.component.ts": {
-    "<dynamic>": 1
+    "<dynamic>": 1,
+    "toggle": 1,
+    "toggle-primary": 1,
+    "toggle-sm": 1
   },
   "libs/frontend/marketplace/src/lib/ui/connector-card-actions.component.ts": {
     "<dynamic>": 6
@@ -1604,6 +1687,8 @@
   },
   "libs/frontend/marketplace/src/lib/ui/provider-card-list.component.ts": {
     "<dynamic>": 1,
+    "checkbox": 1,
+    "checkbox-xs": 1,
     "skeleton": 3
   },
   "libs/frontend/marketplace/src/lib/ui/provider-filter-select.component.ts": {
@@ -1624,6 +1709,8 @@
     "badge": 1,
     "badge-ghost": 1,
     "badge-sm": 1,
+    "checkbox": 2,
+    "checkbox-xs": 2,
     "skeleton": 4
   },
   "libs/frontend/marketplace/src/lib/ui/source-band.component.ts": {
@@ -1649,9 +1736,14 @@
     "btn-ghost": 1,
     "btn-primary": 1,
     "btn-xs": 1,
+    "checkbox": 1,
+    "checkbox-sm": 1,
+    "form-control": 5,
     "input": 5,
     "input-bordered": 5,
-    "input-sm": 5
+    "input-sm": 5,
+    "label": 1,
+    "label-text": 5
   },
   "libs/frontend/memory-curator-ui/src/lib/components/corpus-list.component.ts": {
     "btn": 1,
@@ -1693,6 +1785,8 @@
     "textarea-xs": 1
   },
   "libs/frontend/memory-curator-ui/src/lib/components/diagnostics/memory-trigger-toggle.component.ts": {
+    "checkbox": 1,
+    "checkbox-sm": 1,
     "input": 1,
     "input-bordered": 1,
     "input-xs": 1
@@ -1727,7 +1821,10 @@
   "libs/frontend/memory-curator-ui/src/lib/components/memory-pause-switch.component.ts": {
     "badge": 1,
     "badge-sm": 1,
-    "badge-warning": 1
+    "badge-warning": 1,
+    "toggle": 1,
+    "toggle-primary": 1,
+    "toggle-sm": 1
   },
   "libs/frontend/memory-curator-ui/src/lib/components/memory-search-bar.component.ts": {
     "btn": 2,
@@ -1761,6 +1858,8 @@
     "textarea-sm": 1
   },
   "libs/frontend/messaging-gateway-ui/src/lib/components/discord-integration-kit.component.ts": {
+    "checkbox": 1,
+    "checkbox-xs": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
@@ -1805,6 +1904,10 @@
     "btn-ghost": 1,
     "btn-primary": 1,
     "btn-sm": 1
+  },
+  "libs/frontend/onboarding/src/lib/analyze/agent-recommendation-list.component.ts": {
+    "checkbox": 1,
+    "checkbox-sm": 1
   },
   "libs/frontend/onboarding/src/lib/home/path-tile.component.ts": {
     "<dynamic>": 2
@@ -1852,6 +1955,9 @@
     "input": 1,
     "input-bordered": 1
   },
+  "libs/frontend/review-runs-ui/src/lib/components/review-confirm-dialog.component.ts": {
+    "checkbox": 1
+  },
   "libs/frontend/review-runs-ui/src/lib/components/review-findings-table.component.ts": {
     "select": 1,
     "select-bordered": 1,
@@ -1862,6 +1968,8 @@
     "badge-outline": 1
   },
   "libs/frontend/review-runs-ui/src/lib/components/review-repositories-editor.component.ts": {
+    "checkbox": 3,
+    "checkbox-sm": 3,
     "input": 1,
     "input-bordered": 1
   },
@@ -1904,7 +2012,9 @@
     "alert-error": 1,
     "btn-ghost": 2,
     "input": 6,
-    "input-bordered": 6
+    "input-bordered": 6,
+    "toggle": 1,
+    "toggle-warning": 1
   },
   "libs/frontend/review-runs-ui/src/lib/findings/review-finding-card.component.ts": {
     "badge": 3,
@@ -1967,6 +2077,11 @@
   "libs/frontend/setup-wizard/src/lib/components/generation-errors.component.ts": {
     "alert": 1,
     "alert-error": 1
+  },
+  "libs/frontend/setup-wizard/src/lib/components/guidance-result-panel.component.ts": {
+    "label": 1,
+    "toggle": 1,
+    "toggle-primary": 1
   },
   "libs/frontend/setup-wizard/src/lib/components/pack-install-prompt.component.ts": {
     "alert": 2,
@@ -2078,10 +2193,18 @@
     "btn-sm": 1,
     "btn-warning": 1
   },
+  "libs/frontend/skill-synthesis-ui/src/lib/components/skill-synthesis-tab.component.ts": {
+    "toggle": 1,
+    "toggle-primary": 1,
+    "toggle-sm": 1
+  },
   "libs/frontend/skill-synthesis-ui/src/lib/components/skills-pause-switch.component.ts": {
     "badge": 1,
     "badge-sm": 1,
-    "badge-warning": 1
+    "badge-warning": 1,
+    "toggle": 1,
+    "toggle-primary": 1,
+    "toggle-sm": 1
   },
   "libs/frontend/tasks-ui/src/lib/components/board/task-card.component.ts": {
     "<dynamic>": 4,
@@ -2092,7 +2215,11 @@
     "btn": 2,
     "btn-primary": 2,
     "btn-square": 1,
-    "btn-xs": 2
+    "btn-xs": 2,
+    "checkbox": 1,
+    "label": 1,
+    "toggle": 1,
+    "toggle-xs": 1
   },
   "libs/frontend/tasks-ui/src/lib/components/board/task-column.component.ts": {
     "<dynamic>": 2
@@ -2103,7 +2230,9 @@
     "badge-ghost": 1,
     "badge-outline": 1,
     "badge-sm": 1,
-    "badge-xs": 5
+    "badge-xs": 5,
+    "checkbox": 1,
+    "checkbox-xs": 1
   },
   "libs/frontend/tasks-ui/src/lib/components/bulk/task-bulk-bar.component.ts": {
     "input": 1,
@@ -2180,6 +2309,8 @@
     "btn-active": 2,
     "btn-ghost": 1,
     "btn-sm": 2,
+    "checkbox": 2,
+    "checkbox-sm": 2,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1,
@@ -2206,6 +2337,7 @@
     "btn-sm": 1
   },
   "libs/frontend/tasks-ui/src/lib/components/task-create-dialog.component.ts": {
+    "form-control": 4,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1,
@@ -2230,6 +2362,9 @@
     "alert": 7,
     "alert-error": 2,
     "alert-info": 1,
-    "alert-warning": 2
+    "alert-warning": 2,
+    "toggle": 2,
+    "toggle-primary": 2,
+    "toggle-xs": 2
   }
 }
