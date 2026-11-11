@@ -488,6 +488,124 @@ describe('PlanLimitLedgerService — clearing (F22, F23, F62-F66)', () => {
     });
   });
 
+  describe('a below-limit read against known-reset exhaustion', () => {
+    const OLD_RESET = T0 + 4 * DAY;
+    /** What the Codex reader records at 100%: no reset of its own. */
+    const tableHit = (observedAt: number): PlanLimitWindow => ({
+      ...readWindow('weekly', observedAt, 100, {
+        resetsAt: OLD_RESET,
+        resetSource: 'provider-api',
+      }),
+      exhaustion: { observedAt, source: 'provider-api' },
+    });
+
+    it('clears a hit the same table reported when the provider restarts the window early', () => {
+      const { ledger, clock } = harness();
+      ledger.recordWindowEvidence(OWNER_A, tableHit(T0));
+      clock.now = T0 + 10 * MINUTE;
+      ledger.recordWindowEvidence(
+        OWNER_A,
+        readWindow('weekly', clock.now, 7, { resetsAt: clock.now + 7 * DAY }),
+      );
+
+      const weekly = windowOf(ledger, OWNER_A, 'weekly');
+      expect(weekly?.exhaustion).toBeUndefined();
+      expect(
+        weekly &&
+          classifyWindow(weekly, {
+            now: clock.now,
+            status: 'available',
+            freshnessMs: FRESHNESS_MS,
+            nearLimitPercent: NEAR_LIMIT_PERCENT,
+          }),
+      ).not.toBe('limit-reached');
+    });
+
+    it('clears a table-reported hit when the reset did not move', () => {
+      const { ledger } = harness();
+      ledger.recordWindowEvidence(OWNER_A, tableHit(T0));
+      ledger.recordWindowEvidence(
+        OWNER_A,
+        readWindow('weekly', T0 + MINUTE, 7, { resetsAt: OLD_RESET }),
+      );
+
+      expect(windowOf(ledger, OWNER_A, 'weekly')?.exhaustion).toBeUndefined();
+    });
+
+    it('keeps a table-reported hit when the read is at the limit, estimated or stale', () => {
+      const { ledger } = harness();
+      ledger.recordWindowEvidence(OWNER_A, tableHit(T0));
+      ledger.recordWindowEvidence(
+        OWNER_A,
+        readWindow('weekly', T0 + MINUTE, 100, { resetsAt: OLD_RESET }),
+      );
+      ledger.recordWindowEvidence(
+        OWNER_A,
+        readWindow('weekly', T0 + 2 * MINUTE, 7, { usedSource: 'estimated' }),
+      );
+      ledger.recordWindowEvidence(
+        OWNER_A,
+        readWindow('weekly', T0 + 3 * MINUTE, 7),
+        { stale: true },
+      );
+
+      expect(windowOf(ledger, OWNER_A, 'weekly')?.exhaustion).toBeDefined();
+    });
+
+    it('keeps a stream-reported hit while the read is in the same window', () => {
+      const { ledger } = harness();
+      ledger.recordWindowEvidence(
+        OWNER_A,
+        exhaustedWindow('weekly', T0, { resetsAt: OLD_RESET }),
+      );
+      ledger.recordWindowEvidence(
+        OWNER_A,
+        readWindow('weekly', T0 + MINUTE, 7, { resetsAt: OLD_RESET + MINUTE }),
+      );
+
+      expect(windowOf(ledger, OWNER_A, 'weekly')?.exhaustion?.resetsAt).toBe(
+        OLD_RESET,
+      );
+    });
+
+    it('keeps a stream-reported hit when the reset of the read moves forward', () => {
+      const { ledger } = harness();
+      ledger.recordWindowEvidence(
+        OWNER_A,
+        exhaustedWindow('weekly', T0, { resetsAt: OLD_RESET }),
+      );
+      ledger.recordWindowEvidence(
+        OWNER_A,
+        readWindow('weekly', T0 + MINUTE, 7, { resetsAt: T0 + 7 * DAY }),
+      );
+
+      expect(windowOf(ledger, OWNER_A, 'weekly')?.exhaustion?.resetsAt).toBe(
+        OLD_RESET,
+      );
+    });
+
+    it.each([
+      ['a reached type', { reachedType: 'workspace_owner_usage_limit_reached' }],
+      ['a spend control', { spendControlReached: true }],
+    ])('keeps a table-reported hit while the read names %s', (_name, gate) => {
+      const { ledger } = harness();
+      ledger.recordWindowEvidence(
+        OWNER_A,
+        readWindow('weekly', T0, 100, { resetsAt: OLD_RESET }),
+      );
+      ledger.recordWindowEvidence(OWNER_A, tableHit(T0 + MINUTE));
+      ledger.recordWindowEvidence(
+        OWNER_A,
+        readWindow('weekly', T0 + 2 * MINUTE, 7, {
+          resetsAt: T0 + 7 * DAY,
+          ...gate,
+        }),
+      );
+
+      expect(windowOf(ledger, OWNER_A, 'weekly')?.exhaustion).toBeDefined();
+    });
+  });
+
   it('a newer reading without a used value keeps the held exhaustion', () => {
     const { ledger } = harness();
     ledger.recordWindowEvidence(OWNER_A, exhaustedWindow('five_hour', T0));
