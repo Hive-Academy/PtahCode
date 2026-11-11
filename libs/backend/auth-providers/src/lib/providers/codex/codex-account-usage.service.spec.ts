@@ -457,14 +457,16 @@ describe('CodexAccountUsageService', () => {
     const core = client();
     const homeA = resolve('home-a');
     const homeB = resolve('home-b');
+    // The service hands the client the normalized home key, which is lower case on Windows.
+    const keyA = normalizeCodexHomeKey(homeA, process.platform);
     const ownerA = accountOwnerKey('openai-codex', 'owner-a');
     const ownerB = accountOwnerKey('openai-codex', 'owner-b');
     jest.spyOn(core, 'read').mockImplementation(async (home, options) =>
-      usageResult(options?.refresh ? 200 : 100, home === homeA ? 20 : 80),
+      usageResult(options?.refresh ? 200 : 100, home === keyA ? 20 : 80),
     );
     jest
       .spyOn(core, 'currentOwnerKey')
-      .mockImplementation((home) => (home === homeA ? ownerA : ownerB));
+      .mockImplementation((home) => (home === keyA ? ownerA : ownerB));
     const h = harness({}, core);
 
     const a = await h.service.applyRateLimitsUpdated({
@@ -500,7 +502,9 @@ describe('CodexAccountUsageService', () => {
       }),
     ).resolves.toMatchObject({ result: { fetchedAt: 200 } });
     expect(read).toHaveBeenCalledTimes(1);
-    expect(read).toHaveBeenCalledWith(h.syntheticHome);
+    expect(read).toHaveBeenCalledWith(
+      normalizeCodexHomeKey(h.syntheticHome, process.platform),
+    );
   });
 
   it('rejects a live update when refreshed evidence predates it', async () => {
