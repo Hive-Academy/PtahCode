@@ -206,6 +206,7 @@ export class HarnessChatLauncherService {
         {
           ...params.attachmentSnapshot.options,
           tabId,
+          workspacePath: params.workspacePath,
         },
       );
       if (!outcome.success) {
@@ -224,6 +225,11 @@ export class HarnessChatLauncherService {
         error,
       );
       this.composerRestore.restore(tabId, [params.visibleMessage]);
+      this.composerRestore.restoreAttachments(
+        tabId,
+        params.attachmentSnapshot.attachments.files,
+        params.attachmentSnapshot.attachments.images,
+      );
       this.actionBanner.showError(error.message, tabId);
       throw error;
     }

@@ -22,6 +22,8 @@ import {
  * Defined here (not in service file) to avoid circular dependencies with TabState.
  */
 export interface SendMessageOptions {
+  /** Workspace captured by a launch flow for its first chat turn. */
+  workspacePath?: string;
   /** Optional file paths to include */
   files?: string[];
   /** Optional inline images (pasted/dropped) */

@@ -694,6 +694,21 @@ describe('MessageSenderService', () => {
   });
 
   describe('startNewConversation happy path (via send)', () => {
+    it('uses the captured workspace for chat:start after service readiness', async () => {
+      rpcCall.mockResolvedValue({ success: true });
+      vscodeConfig.mockReturnValue({ workspaceRoot: 'D:/other' });
+
+      await service.send('First prompt', {
+        tabId: 'tab-1',
+        workspacePath: 'D:/captured',
+      });
+
+      expect(rpcCall).toHaveBeenCalledWith(
+        'chat:start',
+        expect.objectContaining({ workspacePath: 'D:/captured' }),
+        expect.anything(),
+      );
+    });
     it('clears node maps, transitions to streaming, and calls chat:start with model/effort', async () => {
       rpcCall.mockResolvedValue({ success: true });
       await service.send('Refactor auth to use Zod', {

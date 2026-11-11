@@ -184,6 +184,7 @@ function setup(resolveRuntime?: CodexChatAdapterPorts['resolveRuntime']) {
     publish: jest.fn(async (_id, stream) => {
       for await (const event of stream) void event;
     }),
+    publishNotice: jest.fn(async () => undefined),
   };
   return {
     adapter: new CodexChatAdapter(ports, new SessionTurnStateRegistry()),
@@ -3161,10 +3162,6 @@ it('publishes a visible notice when delivery of an async answer fails', async ()
     })(),
   );
   context.steer.mockRejectedValueOnce(new Error('steer failed'));
-  const published: FlatStreamEventUnion[] = [];
-  ports.publish = jest.fn(async (_sessionId, stream) => {
-    for await (const event of stream) published.push(event);
-  });
 
   const stream = await adapter.startChatSession({ tabId });
   const iterator = stream[Symbol.asyncIterator]();
@@ -3178,20 +3175,20 @@ it('publishes a visible notice when delivery of an async answer fails', async ()
       text: 'lost answer',
     }),
   ).rejects.toBeDefined();
-  // The notice stream must not settle the live turn, so it waits for idle.
+  expect(ports.publishNotice).toHaveBeenCalledWith(
+    id,
+    expect.arrayContaining([
+      expect.objectContaining({ eventType: 'message_complete' }),
+      expect.objectContaining({ eventType: 'text_delta', delta: expect.stringContaining('could not be delivered') }),
+    ]),
+  );
+  expect(adapter.canSendFollowUp(id)).toBe(false);
   expect(ports.publish).not.toHaveBeenCalled();
 
   finishTurn.resolve();
   while (!(await iterator.next()).done) {
     /* Drain terminal. */
   }
-  await waitFor(() => published.length > 0);
-  expect(published).toContainEqual(
-    expect.objectContaining({
-      eventType: 'text_delta',
-      delta: expect.stringContaining('could not be delivered'),
-    }),
-  );
   await adapter.closeSession(id);
 });
 
@@ -3221,10 +3218,6 @@ it('shows the failure notice and starts no new turn when Codex refuses a steer f
   context.steer.mockRejectedValueOnce(
     new CodexRequestRejectedError('turn/steer', -32600, 'codexRequestRejected'),
   );
-  const published: FlatStreamEventUnion[] = [];
-  ports.publish = jest.fn(async (_sessionId, stream) => {
-    for await (const event of stream) published.push(event);
-  });
 
   const stream = await adapter.startChatSession({ tabId });
   const iterator = stream[Symbol.asyncIterator]();
@@ -3243,12 +3236,11 @@ it('shows the failure notice and starts no new turn when Codex refuses a steer f
   while (!(await iterator.next()).done) {
     /* Drain terminal. */
   }
-  await waitFor(() => published.length > 0);
-  expect(published).toContainEqual(
-    expect.objectContaining({
-      eventType: 'text_delta',
-      delta: expect.stringContaining('could not be delivered'),
-    }),
+  expect(ports.publishNotice).toHaveBeenCalledWith(
+    id,
+    expect.arrayContaining([
+      expect.objectContaining({ eventType: 'text_delta', delta: expect.stringContaining('could not be delivered') }),
+    ]),
   );
   expect(context.startTurn).toHaveBeenCalledTimes(1);
   await adapter.closeSession(id);
@@ -3312,5 +3304,31 @@ it('discards a queued async answer when the user stops the turn before delivery'
     'Codex answer was discarded because the user stopped the turn.',
     { code: 'codex-user-input-cancelled' },
   );
+  await adapter.closeSession(id);
+});
+
+it('does not start an answer turn when Stop arrives before stream admission', async () => {
+  const { adapter, context, ports, setUserInputAnswerHandler } = setup();
+  let answerHandler:
+    | ((answer: CodexUserInputAnswer) => Promise<void>)
+    | undefined;
+  setUserInputAnswerHandler.mockImplementation((handler) => {
+    answerHandler = handler;
+  });
+  const initialStream = await adapter.startChatSession({ tabId });
+  for await (const event of initialStream) void event;
+  ports.publish = jest.fn(async (_sessionId, stream) => {
+    await adapter.interruptSession(id);
+    for await (const event of stream) void event;
+  });
+
+  await answerHandler?.({
+    threadId: id,
+    turnId: 'turn',
+    itemId: 'q-race',
+    text: 'answer before delayed admission',
+  });
+
+  expect(context.startTurn).toHaveBeenCalledTimes(1);
   await adapter.closeSession(id);
 });

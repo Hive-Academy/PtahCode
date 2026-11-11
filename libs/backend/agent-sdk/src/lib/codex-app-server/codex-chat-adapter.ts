@@ -145,6 +145,8 @@ export interface CodexChatAdapterPorts {
     sessionId: SessionId,
     stream: AsyncIterable<FlatStreamEventUnion>,
   ): Promise<void>;
+  /** Deliver standalone UI chunks without ending the native turn or session. */
+  publishNotice?(sessionId: SessionId, events: readonly FlatStreamEventUnion[]): Promise<void>;
 }
 
 export interface CodexChatSessionLifecycle {
@@ -688,6 +690,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
     clientMessageId?: string,
     admission?: CodexChatAdmission,
     inboundPeer?: { readonly label: string },
+    answerCancellation?: AbortSignal,
   ): Promise<void> {
     const iterator = this.turn(
       session,
@@ -695,6 +698,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
       clientMessageId,
       admission,
       inboundPeer,
+      answerCancellation,
     )[Symbol.asyncIterator]();
     try {
       await this.safe('publish', () =>
@@ -729,14 +733,6 @@ export class CodexChatAdapter implements NativeChatAdapter {
     if (session.consumer === 'gateway' || this.sessions.get(session.id) !== session) {
       return;
     }
-    if (session.busy) {
-      // The notice stream's teardown settles the session's turn state. Wait
-      // for the live turn to release the session so it is not forced idle.
-      void this.peerQueue
-        .send(session, () => this.publishAnswerFailureNotice(session))
-        .catch((error: unknown) => this.warnNoticeFailed(error));
-      return;
-    }
     const messageId = `codex-answer-failed:${session.id}:${randomUUID()}`;
     const base = {
       timestamp: Date.now(),
@@ -758,11 +754,13 @@ export class CodexChatAdapter implements NativeChatAdapter {
       { ...base, id: `${messageId}:complete`, eventType: 'message_complete' },
     ];
     try {
-      await this.ports.publish(session.id, {
-        async *[Symbol.asyncIterator]() {
-          yield* events;
-        },
-      });
+      if (!this.ports.publishNotice) {
+        this.ports.logger.warn('Codex answer failure notice host port unavailable.', {
+          code: 'codex-answer-notice-unavailable',
+        });
+        return;
+      }
+      await this.ports.publishNotice(session.id, events);
     } catch (publishError: unknown) {
       // degradation-audit: reported - the notice is best effort; the delivery failure is logged by the caller.
       this.warnNoticeFailed(publishError);
@@ -837,6 +835,8 @@ export class CodexChatAdapter implements NativeChatAdapter {
             { text, preservePendingUserInput: true },
             undefined,
             admission,
+            undefined,
+            cancelled,
           ),
         this.ports.logger,
       );
@@ -873,6 +873,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
     clientMessageId?: string,
     admission?: CodexChatAdmission,
     inboundPeer?: { readonly label: string },
+    answerCancellation?: AbortSignal,
   ): AsyncIterable<FlatStreamEventUnion> {
     if (session.busy) throw new CodexChatAdapterError('busy', 'turn');
     if (session.blocked || session.closing)
@@ -917,6 +918,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
         failure: (error, operation) => this.failure(error, operation),
         onIdle: (active) => this.peerQueue.onIdle(active),
         admission,
+        answerCancellation,
       },
       clientMessageId,
       inboundPeer,

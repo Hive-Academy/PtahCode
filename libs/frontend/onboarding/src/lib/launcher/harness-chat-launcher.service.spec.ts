@@ -71,6 +71,7 @@ describe('HarnessChatLauncherService', () => {
   let loggerError: jest.Mock;
   let showError: jest.Mock;
   let restore: jest.Mock;
+  let restoreAttachments: jest.Mock;
 
   function makeSnapshot(
     options: LauncherAttachmentSnapshot['options'] = {
@@ -80,6 +81,7 @@ describe('HarnessChatLauncherService', () => {
   ): LauncherAttachmentSnapshot & { removeSent: jest.Mock } {
     return {
       options,
+      attachments: { files: [], images: [] },
       removeSent: jest.fn(() => {
         callOrder.push('removeSent');
       }),
@@ -133,6 +135,7 @@ describe('HarnessChatLauncherService', () => {
     loggerError = jest.fn();
     showError = jest.fn();
     restore = jest.fn();
+    restoreAttachments = jest.fn();
 
     TestBed.configureTestingModule({
       providers: [
@@ -142,7 +145,7 @@ describe('HarnessChatLauncherService', () => {
         { provide: AppStateManager, useValue: appState },
         { provide: ChatStore, useValue: chatStore },
         { provide: ActionBannerService, useValue: { showError } },
-        { provide: ComposerRestoreService, useValue: { restore } },
+        { provide: ComposerRestoreService, useValue: { restore, restoreAttachments } },
         { provide: VSCodeService, useValue: { config } },
         { provide: LoggingService, useValue: { error: loggerError } },
       ],
@@ -202,6 +205,7 @@ describe('HarnessChatLauncherService', () => {
           files: ['/ws/spec.md'],
           images: [{ data: 'YWJj', mediaType: 'image/png' }],
           tabId: 'tab-42',
+          workspacePath: '/ws',
         },
       );
       expect(callOrder).toEqual([
@@ -282,6 +286,16 @@ describe('HarnessChatLauncherService', () => {
         new Error('Network down'),
       );
       const snapshot = makeSnapshot();
+      const file = {
+        path: '/ws/spec.md', name: 'spec.md', size: 10, type: 'text' as const,
+        isLarge: false, tokenEstimate: 3,
+      };
+      const image = {
+        id: 'pasted-1', data: 'YWJj', mediaType: 'image/png',
+        dataUrl: 'data:image/png;base64,YWJj', name: 'pasted-image.png',
+      };
+      snapshot.attachments.files.push(file);
+      snapshot.attachments.images.push(image);
 
       await expect(
         service.launchNewProject(VALID_INTAKE, snapshot),
@@ -291,6 +305,7 @@ describe('HarnessChatLauncherService', () => {
       expect(restore).toHaveBeenCalledWith('tab-42', [
         formatIntakeSummary(VALID_INTAKE),
       ]);
+      expect(restoreAttachments).toHaveBeenCalledWith('tab-42', [file], [image]);
       expect(snapshot.removeSent).not.toHaveBeenCalled();
     });
 
@@ -319,6 +334,23 @@ describe('HarnessChatLauncherService', () => {
         'AI Team Builder',
         true,
         { timeoutMs: 10_000 },
+      );
+    });
+
+    it('pins the first send when the workspace changes during canvas adoption', async () => {
+      rpcCall.mockResolvedValueOnce(
+        rpcSuccess({ prompt: 'CONFIGURE_HARNESS_PREAMBLE' }),
+      );
+      appState.requestCanvasTab.mockImplementationOnce(async () => {
+        config.set({ workspaceRoot: '/other' });
+        return true;
+      });
+
+      await service.launchTeamBuilder('Build a QA team', makeSnapshot());
+
+      expect(chatStore.sendOrQueueMessage).toHaveBeenCalledWith(
+        'Build a QA team',
+        expect.objectContaining({ tabId: 'tab-42', workspacePath: '/ws' }),
       );
     });
 
@@ -428,6 +460,7 @@ describe('HarnessChatLauncherService', () => {
           files: ['/ws/team.md'],
           images: undefined,
           tabId: 'tab-42',
+          workspacePath: '/ws',
         },
       );
       expect(callOrder).toEqual([

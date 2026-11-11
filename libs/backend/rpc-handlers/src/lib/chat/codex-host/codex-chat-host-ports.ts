@@ -33,6 +33,7 @@ import {
   type PermissionLevel,
   type RuntimeHostCapabilities,
   type SessionId,
+  MESSAGE_TYPES,
 } from '@ptah-extension/shared';
 import { ChatRuntimeProfileService } from '../session/chat-runtime-profile.service';
 import { createCodexChatApprovalPresentation } from './codex-chat-approval-presentation';
@@ -555,5 +556,14 @@ export function createCodexChatHostPorts(
     },
     publish: (id, stream) =>
       deps.broadcaster.streamEventsToWebview(id, stream, deps.tabId(id)),
+    publishNotice: async (id, events) => {
+      for (const event of events) {
+        await deps.webviewManager.broadcastMessage(MESSAGE_TYPES.CHAT_CHUNK, {
+          tabId: deps.tabId(id),
+          sessionId: id,
+          event,
+        });
+      }
+    },
   };
 }

@@ -586,7 +586,8 @@ export class MessageSenderService {
         );
         return { success: false, error: 'Services not available' };
       }
-      const workspacePath = this.vscodeService.config().workspaceRoot;
+      const workspacePath =
+        options?.workspacePath ?? this.vscodeService.config().workspaceRoot;
       if (!activeTabId) {
         activeTabId = this.tabManager.createTab();
         this.tabManager.switchTab(activeTabId);

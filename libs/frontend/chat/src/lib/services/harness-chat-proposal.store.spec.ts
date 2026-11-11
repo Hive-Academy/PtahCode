@@ -295,6 +295,44 @@ describe('HarnessChatProposalStore', () => {
     expect(record?.isConfigComplete).toBe(true);
   });
 
+  it('keeps a newer hydrated revision over an older push received during hydration', async () => {
+    let resolveHydration:
+      | ((value: RpcResult<HarnessGetProposalResult>) => void)
+      | undefined;
+    rpcCallMock.mockImplementationOnce(
+      () => new Promise<RpcResult<HarnessGetProposalResult>>((resolve) => {
+        resolveHydration = resolve;
+      }),
+    );
+    const hydration = store.hydrateForSession('session-delayed', '/workspaces/delayed');
+    await store.handleMessage({
+      type: MESSAGE_TYPES.HARNESS_CONFIG_PROPOSED,
+      payload: {
+        sessionId: 'session-delayed',
+        revision: { updatedAt: '2026-11-10T08:00:00.000Z' },
+        configUpdates: { name: 'Older Push' },
+        isConfigComplete: false,
+      },
+    });
+    resolveHydration?.(rpcOk<HarnessGetProposalResult>({
+      proposal: {
+        version: 1,
+        workspaceRoot: '/workspaces/delayed',
+        sessionId: 'session-delayed',
+        configUpdates: { name: 'Newer Hydration' },
+        isConfigComplete: true,
+        updatedAt: '2026-11-10T09:00:00.000Z',
+      },
+    }));
+    await hydration;
+    expect(store.proposalFor('session-delayed')).toEqual(
+      expect.objectContaining({
+        configUpdates: expect.objectContaining({ name: 'Newer Hydration' }),
+        isConfigComplete: true,
+      }),
+    );
+  });
+
   it('replaces supplied prompt and CLAUDE.md section maps instead of merging their keys', async () => {
     await store.handleMessage({
       type: MESSAGE_TYPES.HARNESS_CONFIG_PROPOSED,

@@ -67,7 +67,6 @@ export class HarnessChatProposalStore implements MessageHandler {
 
   private pendingQueue: Promise<void> = Promise.resolve();
   private readonly inFlightHydrations = new Map<string, Promise<void>>();
-  private readonly pushVersions = new Map<string, number>();
 
   readonly handledMessageTypes = [
     MESSAGE_TYPES.HARNESS_CONFIG_PROPOSED,
@@ -255,10 +254,6 @@ export class HarnessChatProposalStore implements MessageHandler {
     }
 
     const sessionId = sessionParsed.data;
-    this.pushVersions.set(
-      sessionId,
-      (this.pushVersions.get(sessionId) ?? 0) + 1,
-    );
 
     const previous = this._proposals().get(sessionId);
     const mergedUpdates = mergeParsedHarnessUpdates(
@@ -295,7 +290,6 @@ export class HarnessChatProposalStore implements MessageHandler {
     sessionId: string,
     workspaceRoot?: string,
   ): Promise<void> {
-    const versionBefore = this.pushVersions.get(sessionId) ?? 0;
     try {
       const result = await this.rpc.call(
         'harness:get-proposal',
@@ -330,16 +324,13 @@ export class HarnessChatProposalStore implements MessageHandler {
         ? mergeParsedHarnessUpdates({}, normalizedUpdates.data)
         : proposal.configUpdates;
 
-      const versionAfter = this.pushVersions.get(sessionId) ?? 0;
       const liveRecord = this._proposals().get(sessionId);
-      const pushArrivedWhileHydrating = versionAfter !== versionBefore;
 
       // The live record wins when it is newer; completeness follows the
       // same revision as the configuration.
       const liveWins =
         liveRecord !== undefined &&
-        (pushArrivedWhileHydrating ||
-          liveRecord.updatedAt > proposal.updatedAt);
+        liveRecord.updatedAt > proposal.updatedAt;
       if (liveRecord && liveWins) {
         hydratedUpdates = mergeHarnessConfigUpdates(
           hydratedUpdates,
