@@ -1758,6 +1758,9 @@
     "textarea-bordered": 1
   },
   "libs/frontend/git-ui/src/lib/branch-picker/branch-picker-dropdown.component.ts": {
+    "btn": 2,
+    "btn-outline": 2,
+    "btn-xs": 2,
     "input": 2,
     "input-xs": 2
   },
@@ -1769,7 +1772,10 @@
     "textarea-bordered": 1
   },
   "libs/frontend/git-ui/src/lib/conflict/conflict-banner.component.ts": {
-    "<dynamic>": 1
+    "<dynamic>": 1,
+    "btn": 1,
+    "btn-error": 1,
+    "btn-xs": 1
   },
   "libs/frontend/git-ui/src/lib/git-dock/git-dock-scope-header.component.ts": {
     "<dynamic>": 1
