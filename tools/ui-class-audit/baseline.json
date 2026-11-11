@@ -1758,11 +1758,9 @@
     "textarea-bordered": 1
   },
   "libs/frontend/git-ui/src/lib/branch-picker/branch-picker-dropdown.component.ts": {
-    "btn": 10,
-    "btn-ghost": 6,
+    "btn": 2,
     "btn-outline": 2,
-    "btn-primary": 2,
-    "btn-xs": 10,
+    "btn-xs": 2,
     "input": 2,
     "input-xs": 2
   },
@@ -1770,44 +1768,17 @@
     "badge": 1,
     "badge-sm": 1,
     "badge-success": 1,
-    "btn": 3,
-    "btn-ghost": 1,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-xs": 1,
     "textarea": 1,
     "textarea-bordered": 1
   },
   "libs/frontend/git-ui/src/lib/conflict/conflict-banner.component.ts": {
     "<dynamic>": 1,
-    "btn": 3,
-    "btn-error": 1,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-xs": 3
-  },
-  "libs/frontend/git-ui/src/lib/git-dock/git-dock-header.component.ts": {
-    "btn": 8,
-    "btn-ghost": 8,
-    "btn-square": 1,
-    "btn-xs": 8
-  },
-  "libs/frontend/git-ui/src/lib/git-dock/git-dock-scope-header.component.ts": {
-    "<dynamic>": 1,
     "btn": 1,
-    "btn-ghost": 1,
+    "btn-error": 1,
     "btn-xs": 1
   },
-  "libs/frontend/git-ui/src/lib/history/history-stash-section.component.ts": {
-    "btn": 4,
-    "btn-ghost": 4,
-    "btn-xs": 4
-  },
-  "libs/frontend/git-ui/src/lib/history/history-timeline.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
+  "libs/frontend/git-ui/src/lib/git-dock/git-dock-scope-header.component.ts": {
+    "<dynamic>": 1
   },
   "libs/frontend/git-ui/src/lib/open-in/open-in-button.component.ts": {
     "btn": 2,
@@ -1822,18 +1793,14 @@
     "<dynamic>": 2
   },
   "libs/frontend/git-ui/src/lib/review-canvas/changed-file-tree.component.ts": {
-    "<dynamic>": 3,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
+    "<dynamic>": 3
   },
   "libs/frontend/git-ui/src/lib/review-canvas/comparison-bar.component.ts": {
     "<dynamic>": 6,
-    "btn": 6,
+    "btn": 4,
     "btn-active": 4,
-    "btn-ghost": 6,
-    "btn-xs": 6,
+    "btn-ghost": 4,
+    "btn-xs": 4,
     "input": 1,
     "input-bordered": 1,
     "input-xs": 1,
@@ -1841,18 +1808,8 @@
     "select-bordered": 2,
     "select-xs": 2
   },
-  "libs/frontend/git-ui/src/lib/review-canvas/draft-comments-bar.component.ts": {
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-xs": 3
-  },
   "libs/frontend/git-ui/src/lib/review-canvas/file-diff-section.component.ts": {
     "<dynamic>": 5,
-    "btn": 4,
-    "btn-ghost": 3,
-    "btn-primary": 1,
-    "btn-xs": 4,
     "input": 2,
     "input-bordered": 2,
     "input-xs": 2,
@@ -1870,31 +1827,18 @@
     "badge-ghost": 2,
     "badge-outline": 1,
     "badge-xs": 3,
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-xs": 3
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-xs": 1
   },
   "libs/frontend/git-ui/src/lib/review-canvas/hunk-toolbar.component.ts": {
-    "<dynamic>": 2,
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-xs": 3
-  },
-  "libs/frontend/git-ui/src/lib/review-shell/review-shell.component.ts": {
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-xs": 3
+    "<dynamic>": 2
   },
   "libs/frontend/git-ui/src/lib/review-shell/worktree-scope-bar.component.ts": {
-    "<dynamic>": 2,
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
+    "<dynamic>": 2
   },
   "libs/frontend/git-ui/src/lib/shared/git-confirm-dialog.component.ts": {
-    "<dynamic>": 1,
-    "btn": 2,
-    "btn-sm": 2
+    "<dynamic>": 1
   },
   "libs/frontend/git-ui/src/lib/spot-editor/spot-editor.component.ts": {
     "alert": 2,
@@ -1903,22 +1847,17 @@
     "badge": 1,
     "badge-ghost": 1,
     "badge-xs": 1,
-    "btn": 7,
-    "btn-ghost": 6,
-    "btn-primary": 1,
-    "btn-xs": 7
+    "btn": 2,
+    "btn-ghost": 2,
+    "btn-xs": 2
   },
   "libs/frontend/git-ui/src/lib/stash/stash-popover.component.ts": {
-    "btn": 7,
-    "btn-error": 1,
-    "btn-ghost": 6,
-    "btn-xs": 7
+    "btn": 2,
+    "btn-ghost": 2,
+    "btn-xs": 2
   },
   "libs/frontend/git-ui/src/lib/task/task-pr-panel.component.ts": {
     "<dynamic>": 1,
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-xs": 1,
     "skeleton": 2
   },
   "libs/frontend/git-ui/src/lib/task/task-worktree-view.component.ts": {
@@ -1926,11 +1865,6 @@
     "badge-ghost": 3,
     "badge-warning": 1,
     "badge-xs": 4,
-    "btn": 6,
-    "btn-ghost": 4,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-xs": 6,
     "input": 2,
     "input-bordered": 2,
     "input-xs": 2
@@ -2973,13 +2907,10 @@
     "badge-ghost": 4,
     "badge-outline": 1,
     "badge-xs": 8,
-    "btn": 4,
-    "btn-ghost": 1,
-    "btn-outline": 1,
+    "btn": 2,
     "btn-primary": 2,
-    "btn-sm": 1,
-    "btn-square": 2,
-    "btn-xs": 3
+    "btn-square": 1,
+    "btn-xs": 2
   },
   "libs/frontend/tasks-ui/src/lib/components/board/task-column.component.ts": {
     "<dynamic>": 2
@@ -2990,18 +2921,9 @@
     "badge-ghost": 1,
     "badge-outline": 1,
     "badge-sm": 1,
-    "badge-xs": 5,
-    "btn": 5,
-    "btn-ghost": 5,
-    "btn-square": 2,
-    "btn-xs": 5
+    "badge-xs": 5
   },
   "libs/frontend/tasks-ui/src/lib/components/bulk/task-bulk-bar.component.ts": {
-    "btn": 7,
-    "btn-ghost": 6,
-    "btn-primary": 1,
-    "btn-sm": 7,
-    "btn-square": 1,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1,
@@ -3009,29 +2931,17 @@
     "select-bordered": 1,
     "select-sm": 1
   },
-  "libs/frontend/tasks-ui/src/lib/components/bulk/task-bulk-summary.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-sm": 2,
-    "btn-square": 1
-  },
   "libs/frontend/tasks-ui/src/lib/components/detail/task-activity.component.ts": {
     "<dynamic>": 1,
     "badge": 1,
     "badge-ghost": 1,
-    "badge-sm": 1,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1
+    "badge-sm": 1
   },
   "libs/frontend/tasks-ui/src/lib/components/detail/task-detail-header.component.ts": {
     "<dynamic>": 1,
     "badge": 3,
     "badge-ghost": 3,
-    "badge-sm": 3,
-    "btn": 3,
-    "btn-outline": 3,
-    "btn-sm": 3
+    "badge-sm": 3
   },
   "libs/frontend/tasks-ui/src/lib/components/detail/task-detail.component.ts": {
     "<dynamic>": 1,
@@ -3042,11 +2952,6 @@
     "badge": 1,
     "badge-ghost": 1,
     "badge-sm": 1,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-square": 1,
     "skeleton": 4
   },
   "libs/frontend/tasks-ui/src/lib/components/detail/task-folder-files.component.ts": {
@@ -3057,18 +2962,12 @@
     "alert-warning": 1,
     "badge": 1,
     "badge-ghost": 1,
-    "badge-sm": 1,
-    "btn": 1,
-    "btn-primary": 1,
-    "btn-sm": 1
+    "badge-sm": 1
   },
   "libs/frontend/tasks-ui/src/lib/components/detail/task-metadata-editor.component.ts": {
     "<dynamic>": 1,
     "badge": 1,
     "badge-sm": 1,
-    "btn": 3,
-    "btn-ghost": 1,
-    "btn-xs": 3,
     "input": 2,
     "input-bordered": 2,
     "input-xs": 2,
@@ -3081,10 +2980,6 @@
     "badge-ghost": 1,
     "badge-outline": 1,
     "badge-sm": 1,
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 2,
     "input": 1,
     "input-bordered": 1,
     "input-xs": 1,
@@ -3099,11 +2994,10 @@
   },
   "libs/frontend/tasks-ui/src/lib/components/filter/task-filter-bar.component.ts": {
     "<dynamic>": 1,
-    "btn": 4,
+    "btn": 2,
     "btn-active": 2,
-    "btn-ghost": 3,
-    "btn-sm": 4,
-    "btn-square": 1,
+    "btn-ghost": 1,
+    "btn-sm": 2,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1,
@@ -3115,34 +3009,21 @@
     "badge": 1,
     "badge-outline": 1,
     "badge-xs": 1,
-    "btn": 7,
+    "btn": 1,
     "btn-active": 1,
-    "btn-error": 1,
-    "btn-ghost": 5,
-    "btn-primary": 1,
-    "btn-sm": 7,
+    "btn-ghost": 1,
+    "btn-sm": 1,
     "input": 2,
     "input-bordered": 2,
     "input-sm": 2
   },
   "libs/frontend/tasks-ui/src/lib/components/task-board-header.component.ts": {
     "<dynamic>": 1,
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-sm": 3
-  },
-  "libs/frontend/tasks-ui/src/lib/components/task-board-states.component.ts": {
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-sm": 3
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-sm": 1
   },
   "libs/frontend/tasks-ui/src/lib/components/task-create-dialog.component.ts": {
-    "btn": 2,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 2,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1,
@@ -3155,17 +3036,7 @@
   },
   "libs/frontend/tasks-ui/src/lib/components/task-maintenance-dialog.component.ts": {
     "badge": 2,
-    "badge-ghost": 2,
-    "btn": 2,
-    "btn-error": 1,
-    "btn-ghost": 1,
-    "btn-sm": 2
-  },
-  "libs/frontend/tasks-ui/src/lib/components/tasks-view.component.ts": {
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-sm": 3,
-    "btn-square": 2
+    "badge-ghost": 2
   },
   "libs/frontend/thoth-shell/src/lib/components/thoth-shell.component.ts": {
     "<dynamic>": 2,

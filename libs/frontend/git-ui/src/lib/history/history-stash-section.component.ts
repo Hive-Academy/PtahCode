@@ -26,6 +26,10 @@ import {
 import { GitStatusService } from '../services/git-status.service';
 import { GitConfirmDialogComponent } from '../shared/git-confirm-dialog.component';
 import { stashAge } from '../stash/stash-popover.component';
+import {
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 
 const STATUS_LABELS: Record<GitStashFileEntry['status'], string> = {
   A: 'Added',
@@ -53,7 +57,12 @@ let instanceCount = 0;
 @Component({
   selector: 'ptah-history-stash-section',
   standalone: true,
-  imports: [LucideAngularModule, GitConfirmDialogComponent],
+  imports: [
+    PtahButtonDirective,
+    PtahIconButtonDirective,
+    LucideAngularModule,
+    GitConfirmDialogComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Truncation priority (V-8): below 400 px the "on <branch>" note steps
   // aside so the stash message keeps the row; visually hidden, still read.
@@ -176,7 +185,9 @@ let instanceCount = 0;
                   </button>
                   <button
                     type="button"
-                    class="btn btn-ghost btn-xs"
+                    ptahButton
+                    variant="ghost"
+                    size="xs"
                     data-testid="history-stash-apply"
                     [disabled]="stash.busy()"
                     [attr.aria-label]="'Apply ' + stashRef(entry)"
@@ -186,7 +197,9 @@ let instanceCount = 0;
                   </button>
                   <button
                     type="button"
-                    class="btn btn-ghost btn-xs"
+                    ptahButton
+                    variant="ghost"
+                    size="xs"
                     data-testid="history-stash-pop"
                     [disabled]="stash.busy()"
                     [attr.aria-label]="'Pop ' + stashRef(entry)"
@@ -196,11 +209,11 @@ let instanceCount = 0;
                   </button>
                   <button
                     type="button"
-                    class="btn btn-ghost btn-xs px-1"
+                    ptahIconButton
+                    [label]="'Drop ' + stashRef(entry)"
+                    size="xs"
                     data-testid="history-stash-drop"
                     [disabled]="stash.busy()"
-                    [attr.aria-label]="'Drop ' + stashRef(entry)"
-                    [title]="'Drop ' + stashRef(entry)"
                     (click)="askDrop(entry, $event)"
                   >
                     <lucide-angular
@@ -227,7 +240,10 @@ let instanceCount = 0;
                         <li>
                           <button
                             type="button"
-                            class="btn btn-ghost btn-xs w-full justify-start gap-2 font-normal"
+                            ptahButton
+                            variant="ghost"
+                            size="xs"
+                            class="w-full justify-start"
                             data-testid="history-stash-file"
                             [title]="'Open diff for ' + file.path"
                             [disabled]="stash.busy()"

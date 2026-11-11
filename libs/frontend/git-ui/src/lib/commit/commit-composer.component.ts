@@ -35,6 +35,7 @@ import {
   subjectOf,
   UNCONFIRMED_TEXT,
 } from './commit-timeout-check';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /**
  * Most characters of hook output kept on screen. The backend keeps a 256 KiB
@@ -225,7 +226,7 @@ let instanceCount = 0;
 @Component({
   selector: 'ptah-commit-composer',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -242,7 +243,8 @@ let instanceCount = 0;
         >
         <button
           type="button"
-          class="btn btn-outline btn-xs gap-1"
+          ptahButton
+          size="xs"
           data-testid="commit-generate"
           [disabled]="!canGenerate()"
           (click)="onGenerate()"
@@ -312,7 +314,8 @@ let instanceCount = 0;
           @if (canCancel()) {
             <button
               type="button"
-              class="btn btn-ghost btn-sm"
+              ptahButton
+              variant="ghost"
               data-testid="commit-cancel"
               [disabled]="cancelling()"
               (click)="onCancel()"
@@ -322,7 +325,8 @@ let instanceCount = 0;
           }
           <button
             type="button"
-            class="btn btn-primary btn-sm"
+            ptahButton
+            variant="primary"
             data-testid="commit-submit"
             [disabled]="!canCommit()"
             (click)="onCommit()"

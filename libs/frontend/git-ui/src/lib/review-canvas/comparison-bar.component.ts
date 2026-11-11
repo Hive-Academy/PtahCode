@@ -16,7 +16,10 @@ import {
   rpcCall,
   VSCodeService,
 } from '@ptah-extension/core';
-import { NativePopoverComponent } from '@ptah-extension/ui';
+import {
+  NativePopoverComponent,
+  PtahButtonDirective,
+} from '@ptah-extension/ui';
 import { GitBranchesService } from '../services/git-branches.service';
 import { GitReviewService } from '../services/git-review.service';
 import {
@@ -67,7 +70,7 @@ const FOCUS_RING =
 @Component({
   selector: 'ptah-comparison-bar',
   standalone: true,
-  imports: [LucideAngularModule, NativePopoverComponent],
+  imports: [PtahButtonDirective, LucideAngularModule, NativePopoverComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -77,7 +80,10 @@ const FOCUS_RING =
       @if (layout.gitRailCollapsed()) {
         <button
           type="button"
-          class="btn btn-ghost btn-xs gap-1 {{ focusRing }}"
+          ptahButton
+          variant="ghost"
+          size="xs"
+          class="{{ focusRing }}"
           data-testid="comparison-show-files"
           (click)="layout.toggleGitRail()"
         >
@@ -99,7 +105,10 @@ const FOCUS_RING =
         <button
           trigger
           type="button"
-          class="btn btn-ghost btn-xs max-w-[16rem] gap-1 {{ focusRing }}"
+          ptahButton
+          variant="ghost"
+          size="xs"
+          class="max-w-[16rem] {{ focusRing }}"
           aria-haspopup="true"
           [attr.aria-expanded]="pickerOpen()"
           [attr.aria-label]="'Comparison: ' + currentLabel()"

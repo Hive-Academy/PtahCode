@@ -17,6 +17,7 @@ import type {
 } from '@ptah-extension/shared';
 import { TaskAgentDiscoveryService } from '../../services/task-agent-discovery.service';
 import { TaskSessionLinksService } from '../../services/task-session-links.service';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /**
  * Visible word for a session's live phase; `none` is a session not loaded in
@@ -166,7 +167,7 @@ function toSessionRow(session: TaskLinkedSession): SessionRow {
 @Component({
   selector: 'ptah-task-activity',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -278,7 +279,9 @@ function toSessionRow(session: TaskLinkedSession): SessionRow {
                 </div>
                 <button
                   type="button"
-                  class="btn btn-ghost btn-sm shrink-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                  ptahButton
+                  variant="ghost"
+                  class="shrink-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
                   [attr.aria-label]="'Open session ' + session.displayName"
                   [title]="'Open session ' + session.displayName"
                   data-testid="task-detail-session-open"

@@ -13,8 +13,15 @@ import {
   viewChild,
 } from '@angular/core';
 import { LucideAngularModule, PictureInPicture2 } from 'lucide-angular';
-import { attentionConditionKey, ElectronLayoutService } from '@ptah-extension/core';
-import { NativeTabGroupComponent, type NativeTab } from '@ptah-extension/ui';
+import {
+  attentionConditionKey,
+  ElectronLayoutService,
+} from '@ptah-extension/core';
+import {
+  NativeTabGroupComponent,
+  PtahButtonDirective,
+  type NativeTab,
+} from '@ptah-extension/ui';
 import { CommitComposerComponent } from '../commit/commit-composer.component';
 import { ConflictBannerComponent } from '../conflict/conflict-banner.component';
 import { GitDockHeaderComponent } from '../git-dock/git-dock-header.component';
@@ -125,6 +132,7 @@ type BodyNotice = 'loading' | 'unavailable' | 'not-a-repo';
   selector: 'ptah-review-shell',
   standalone: true,
   imports: [
+    PtahButtonDirective,
     LucideAngularModule,
     CommitComposerComponent,
     ConflictBannerComponent,
@@ -181,24 +189,59 @@ type BodyNotice = 'loading' | 'unavailable' | 'not-a-repo';
         <ptah-git-dock-header class="min-w-0 flex-1" [compact]="compact()" />
         <!-- No repository: the header is empty, so Detach does not stay alone in the row. -->
         @if (canDetach() && gitStatus.isGitRepo()) {
-          <span class="mx-1 h-4 w-px shrink-0 bg-base-content/20" aria-hidden="true" data-testid="git-dock-detach-divider"></span>
-          <button type="button" class="btn btn-ghost btn-xs mr-2 gap-1" data-testid="git-dock-detach" (click)="onDetach()"><lucide-angular [img]="DetachIcon" class="h-3 w-3" aria-hidden="true" />Detach</button>
+          <span
+            class="mx-1 h-4 w-px shrink-0 bg-base-content/20"
+            aria-hidden="true"
+            data-testid="git-dock-detach-divider"
+          ></span>
+          <button
+            type="button"
+            ptahButton
+            variant="ghost"
+            size="xs"
+            class="mr-2"
+            data-testid="git-dock-detach"
+            (click)="onDetach()"
+          >
+            <lucide-angular
+              [img]="DetachIcon"
+              class="h-3 w-3"
+              aria-hidden="true"
+            />Detach
+          </button>
         }
       </div>
 
       <!-- Cross-cutting notices sit above the tabs (design-spec §3.2). -->
       @if (staleLabel(); as label) {
         @if (dismissedStripKey() !== noticeKey()) {
-        <div
-          role="status"
-          class="flex flex-shrink-0 items-start gap-1 border-b border-l-2 border-base-content/10 border-l-warning bg-base-200 px-2 py-1.5 text-xs text-base-content"
-          data-testid="review-shell-stale"
-        >
-          Git status is unavailable ({{ label }}) — showing the last known
-          changes.
-          <button type="button" class="btn btn-ghost btn-xs" (click)="retryStatus()">Retry</button>
-          <button type="button" class="btn btn-ghost btn-xs" aria-label="Dismiss git status warning" (click)="dismissStrip()">Dismiss</button>
-        </div>
+          <div
+            role="status"
+            class="flex flex-shrink-0 items-start gap-1 border-b border-l-2 border-base-content/10 border-l-warning bg-base-200 px-2 py-1.5 text-xs text-base-content"
+            data-testid="review-shell-stale"
+          >
+            Git status is unavailable ({{ label }}) — showing the last known
+            changes.
+            <button
+              type="button"
+              ptahButton
+              variant="ghost"
+              size="xs"
+              (click)="retryStatus()"
+            >
+              Retry
+            </button>
+            <button
+              type="button"
+              ptahButton
+              variant="ghost"
+              size="xs"
+              aria-label="Dismiss git status warning"
+              (click)="dismissStrip()"
+            >
+              Dismiss
+            </button>
+          </div>
         }
       }
 
@@ -410,7 +453,9 @@ type BodyNotice = 'loading' | 'unavailable' | 'not-a-repo';
   `,
 })
 export class ReviewShellComponent {
-  protected readonly windowContext = inject(GIT_WINDOW_CONTEXT, { optional: true });
+  protected readonly windowContext = inject(GIT_WINDOW_CONTEXT, {
+    optional: true,
+  });
   protected readonly gitStatus = inject(GitStatusService);
   private readonly gitBranches = inject(GitBranchesService);
   private readonly navigation = inject(ReviewNavigationService);
@@ -541,7 +586,8 @@ export class ReviewShellComponent {
     effect(() => {
       const key = this.noticeKey();
       const reason = this.gitStatus.statusUnavailable();
-      if (previousKey !== key || reason === null) this.dismissedStripKey.set(null);
+      if (previousKey !== key || reason === null)
+        this.dismissedStripKey.set(null);
       previousKey = key;
     });
 
@@ -589,7 +635,10 @@ export class ReviewShellComponent {
   protected readonly DetachIcon = PictureInPicture2;
 
   protected canDetach(): boolean {
-    return this.windowContext?.role === 'main' && this.windowContext.detach !== undefined;
+    return (
+      this.windowContext?.role === 'main' &&
+      this.windowContext.detach !== undefined
+    );
   }
 
   protected onDetach(): void {

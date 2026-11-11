@@ -39,6 +39,7 @@ import {
   type HunkToolbarComparison,
 } from './hunk-toolbar.component';
 import { FileSectionHeaderComponent } from './file-section-header.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** Rows that never mount the renderer (Requirement 6.10). */
 export type ReviewFileLabel = 'binary' | 'submodule' | 'conflicted';
@@ -233,6 +234,7 @@ function splitLines(text: string): string[] {
   selector: 'ptah-file-diff-section',
   standalone: true,
   imports: [
+    PtahButtonDirective,
     FileSectionHeaderComponent,
     PierreDiffHostComponent,
     HunkToolbarComponent,
@@ -328,7 +330,9 @@ function splitLines(text: string): string[] {
             <span class="flex items-center gap-1">
               <button
                 type="submit"
-                class="btn btn-primary btn-xs"
+                ptahButton
+                variant="primary"
+                size="xs"
                 data-testid="comment-add"
                 [disabled]="!canComment()"
                 [attr.aria-describedby]="
@@ -339,7 +343,10 @@ function splitLines(text: string): string[] {
               </button>
               <button
                 type="button"
-                class="btn btn-ghost btn-xs {{ focusRing }}"
+                ptahButton
+                variant="ghost"
+                size="xs"
+                class="{{ focusRing }}"
                 data-testid="comment-cancel"
                 (click)="closeComposer()"
               >
@@ -393,7 +400,10 @@ function splitLines(text: string): string[] {
               }}</span>
               <button
                 type="button"
-                class="btn btn-ghost btn-xs {{ focusRing }}"
+                ptahButton
+                variant="ghost"
+                size="xs"
+                class="{{ focusRing }}"
                 data-testid="file-read-retry"
                 (click)="retry()"
               >
@@ -410,7 +420,10 @@ function splitLines(text: string): string[] {
                 <span>{{ d.errorMessage ?? staleMessage }}</span>
                 <button
                   type="button"
-                  class="btn btn-ghost btn-xs {{ focusRing }}"
+                  ptahButton
+                  variant="ghost"
+                  size="xs"
+                  class="{{ focusRing }}"
                   data-testid="file-stale-retry"
                   (click)="retry()"
                 >

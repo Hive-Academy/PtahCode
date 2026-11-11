@@ -8,6 +8,7 @@ import {
 import { ExternalLink, LucideAngularModule } from 'lucide-angular';
 import { MarkdownBlockComponent } from '@ptah-extension/markdown';
 import { CARRIER_FILE, type TaskSpecDetail } from '@ptah-extension/shared';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /**
  * The carrier overview: what the machine-owned `task.md` says about the task,
@@ -23,7 +24,7 @@ import { CARRIER_FILE, type TaskSpecDetail } from '@ptah-extension/shared';
 @Component({
   selector: 'ptah-task-folder-overview',
   standalone: true,
-  imports: [LucideAngularModule, MarkdownBlockComponent],
+  imports: [PtahButtonDirective, LucideAngularModule, MarkdownBlockComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -47,7 +48,9 @@ import { CARRIER_FILE, type TaskSpecDetail } from '@ptah-extension/shared';
         @if (carrierOpenable()) {
           <button
             type="button"
-            class="btn btn-primary btn-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+            ptahButton
+            variant="primary"
+            class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
             [attr.aria-label]="'Open ' + carrierFile + ' in the editor'"
             data-testid="task-overview-open-editor"
             (click)="openInEditor.emit(carrierFile)"
