@@ -1,7 +1,9 @@
 import { AfterViewInit, ChangeDetectionStrategy, Component, ElementRef, OnDestroy, inject, input, output, signal } from '@angular/core';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 @Component({
-  selector: 'ptah-review-confirm-dialog', standalone: true, changeDetection: ChangeDetectionStrategy.OnPush,
+  selector: 'ptah-review-confirm-dialog', standalone: true,
+  imports: [PtahButtonDirective], changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
       <section class="surface-1 w-full max-w-md rounded-xl border border-base-300 p-5 shadow-xl" role="dialog"
@@ -12,8 +14,8 @@ import { AfterViewInit, ChangeDetectionStrategy, Component, ElementRef, OnDestro
         @if (requirePermissions()) { <label class="mt-4 flex items-start gap-2 text-sm"><input type="checkbox" class="checkbox" [checked]="acknowledged()" (change)="acknowledged.set(!acknowledged())" />
           I confirm this bot token has Pull requests: Read and write, Contents: Read, and Metadata: Read for this repository.</label> }
         <div class="mt-5 flex justify-end gap-2">
-          <button type="button" class="btn btn-ghost" (click)="cancelled.emit()">Cancel</button>
-          <button type="button" class="btn btn-primary" [disabled]="requirePermissions() && !acknowledged()" (click)="confirmed.emit()">{{ confirmLabel() }}</button>
+          <button type="button" ptahButton variant="ghost" size="md" (click)="cancelled.emit()">Cancel</button>
+          <button type="button" ptahButton variant="primary" size="md" [disabled]="requirePermissions() && !acknowledged()" (click)="confirmed.emit()">{{ confirmLabel() }}</button>
         </div>
       </section>
     </div>

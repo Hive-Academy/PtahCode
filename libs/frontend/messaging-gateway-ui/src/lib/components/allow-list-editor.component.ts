@@ -8,10 +8,12 @@ import {
 import type { GatewayPlatformId } from '@ptah-extension/shared';
 
 import { GatewayStateService } from '../services/gateway-state.service';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-allow-list-editor',
   standalone: true,
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <label class="flex flex-col gap-1.5">
@@ -32,7 +34,7 @@ import { GatewayStateService } from '../services/gateway-state.service';
       <div class="flex items-center gap-2">
         <button
           type="button"
-          class="btn btn-sm btn-outline"
+          ptahButton
           [attr.data-testid]="'gateway-allowlist-save-' + platform()"
           (click)="onSave()"
         >

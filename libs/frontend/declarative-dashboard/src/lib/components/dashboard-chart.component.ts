@@ -4,6 +4,7 @@ import { chartGeometry, type ChartPoint } from '../charts/chart-geometry';
 import type { SurfaceComponentViewState } from '../surface-view-state';
 import { pageSlice } from '../table/table-rows';
 import type { DisplayNode } from '../view-model/view-model.types';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 export type ChartNode = Extract<DisplayNode, { kind: 'line-chart' | 'bar-chart' }>;
 
@@ -14,6 +15,7 @@ const SERIES_FILLS = ['fill-primary', 'fill-secondary', 'fill-accent', 'fill-inf
 @Component({
   selector: 'ptah-dashboard-chart',
   standalone: true,
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card card-bordered bg-base-100 p-4 text-base-content" (keydown.escape)="collapse($event)">
@@ -23,12 +25,12 @@ const SERIES_FILLS = ['fill-primary', 'fill-secondary', 'fill-accent', 'fill-inf
         <p role="status">Data is not available in this view.@if (data.rowCount !== undefined) { {{ data.rowCount }} rows. }</p>
       } @else {
         <div class="flex flex-wrap items-center gap-1">
-          <button type="button" class="btn btn-ghost btn-sm" [attr.aria-pressed]="!!viewState().chartAsTable"
+          <button type="button" ptahButton variant="ghost" [attr.aria-pressed]="!!viewState().chartAsTable"
             [attr.data-apps-focus-key]="focusKey('table')" (click)="toggleTable()">
             {{ viewState().chartAsTable ? 'Show as chart' : 'Show as table' }}
           </button>
           <!-- Client-only presentation toggle: it writes view state and never reaches the host. -->
-          <button #expandButton type="button" class="btn btn-ghost btn-sm"
+          <button #expandButton type="button" ptahButton variant="ghost"
             [attr.aria-label]="(viewState().expanded ? 'Collapse ' : 'Expand ') + (node().title?.text ?? 'Chart')"
             [attr.aria-expanded]="!!viewState().expanded" [attr.aria-controls]="contentId"
             [attr.data-apps-focus-key]="focusKey('expand')" (click)="toggleExpanded()">
@@ -48,7 +50,7 @@ const SERIES_FILLS = ['fill-primary', 'fill-secondary', 'fill-accent', 'fill-inf
                 @for (point of page().items; track point.seriesIndex + ':' + point.pointIndex) {
                   <tr><th scope="row">{{ point.name }}</th><td>{{ point.x }}</td><td>{{ point.y }}</td>
                     @if (node().selectable) {
-                      <td><button type="button" class="btn btn-ghost btn-xs"
+                      <td><button type="button" ptahButton variant="ghost" size="xs"
                         [attr.aria-label]="'Select ' + point.name + ', ' + point.x + ', ' + point.y"
                         [attr.aria-pressed]="isSelected(point)"
                         [attr.data-apps-focus-key]="focusKey('point-' + point.seriesIndex + '-' + point.pointIndex)"
@@ -62,9 +64,9 @@ const SERIES_FILLS = ['fill-primary', 'fill-secondary', 'fill-accent', 'fill-inf
           <p role="status">{{ page().total }} points. Page {{ page().page + 1 }} of {{ page().pageCount }}</p>
           @if (page().pageCount > 1) {
             <div class="flex gap-2">
-              <button type="button" class="btn btn-sm" [disabled]="page().page === 0"
+              <button type="button" ptahButton [disabled]="page().page === 0"
                 [attr.data-apps-focus-key]="focusKey('previous')" (click)="setPage(page().page - 1)">Previous</button>
-              <button type="button" class="btn btn-sm" [disabled]="page().page + 1 === page().pageCount"
+              <button type="button" ptahButton [disabled]="page().page + 1 === page().pageCount"
                 [attr.data-apps-focus-key]="focusKey('next')" (click)="setPage(page().page + 1)">Next</button>
             </div>
           }

@@ -14,6 +14,7 @@ import { PlatformTokenFormComponent } from './platform-token-form.component';
 import { AllowListEditorComponent } from './allow-list-editor.component';
 import { DiscordIntegrationKitComponent } from './discord-integration-kit.component';
 import { PlatformBindingsPanelComponent } from './platform-bindings-panel.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 export interface PlatformCardConfig {
   readonly id: GatewayPlatformId;
@@ -31,6 +32,7 @@ export interface PlatformCardConfig {
     AllowListEditorComponent,
     DiscordIntegrationKitComponent,
     PlatformBindingsPanelComponent,
+    PtahButtonDirective,
   ],
   template: `
     <div
@@ -67,7 +69,7 @@ export interface PlatformCardConfig {
             >
               <button
                 type="button"
-                class="btn btn-outline btn-sm"
+                ptahButton
                 [disabled]="!canSendTest()"
                 (click)="onSendTest()"
               >

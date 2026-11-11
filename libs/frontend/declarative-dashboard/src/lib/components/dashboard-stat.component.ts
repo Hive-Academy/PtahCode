@@ -3,6 +3,10 @@ import type { SurfaceSelection } from '@ptah-extension/shared/mcp-apps-contracts
 import type { SurfaceComponentViewState } from '../surface-view-state';
 import type { DisplayNode } from '../view-model/view-model.types';
 import { DashboardSparklineComponent } from './dashboard-sparkline.component';
+import {
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 
 export type StatNode = Extract<DisplayNode, { kind: 'stat' }>;
 let nextStatInstance = 0;
@@ -37,7 +41,11 @@ const TREND_ARROWS = { up: 'M12 19V5M6 11l6-6 6 6', down: 'M12 5v14M6 13l6 6 6-6
 @Component({
   selector: 'ptah-dashboard-stat',
   standalone: true,
-  imports: [DashboardSparklineComponent],
+  imports: [
+    DashboardSparklineComponent,
+    PtahButtonDirective,
+    PtahIconButtonDirective,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [TREND_STYLES],
   template: `
@@ -48,8 +56,8 @@ const TREND_ARROWS = { up: 'M12 19V5M6 11l6-6 6 6', down: 'M12 5v14M6 13l6 6 6-6
         @if (node().delta !== undefined) {
           <span class="shrink-0 text-[10px] leading-tight tabular-nums text-base-content-muted" data-testid="stat-delta"><span aria-hidden="true">&Delta; </span><span class="sr-only">Change </span>{{ signedDelta() }}</span>
         }
-        <button #expandButton type="button" class="btn btn-ghost btn-xs btn-square shrink-0"
-          [attr.aria-label]="(viewState().expanded ? 'Collapse ' : 'Expand ') + (node().title?.text ?? 'Stat')"
+        <button #expandButton type="button" ptahIconButton size="xs" class="shrink-0"
+          [label]="(viewState().expanded ? 'Collapse ' : 'Expand ') + (node().title?.text ?? 'Stat')"
           [attr.aria-expanded]="!!viewState().expanded" [attr.aria-controls]="detailsId"
           [attr.data-apps-focus-key]="focusKey('expand')" (click)="toggleExpanded()">
           <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2">
@@ -67,7 +75,7 @@ const TREND_ARROWS = { up: 'M12 19V5M6 11l6-6 6 6', down: 'M12 5v14M6 13l6 6 6-6
           [failing]="node().trend?.polarity === 'bad'" />
       }
       @if (node().selectable) {
-        <button type="button" class="btn btn-ghost btn-xs" [attr.aria-label]="'Select ' + (node().title?.text ?? 'Stat')"
+        <button type="button" ptahButton variant="ghost" size="xs" [attr.aria-label]="'Select ' + (node().title?.text ?? 'Stat')"
           [attr.aria-pressed]="selection()?.componentId === node().id && selection()?.target?.kind === 'stat'"
           [attr.data-apps-focus-key]="focusKey('select')" (click)="selectStat()">Select</button>
       }

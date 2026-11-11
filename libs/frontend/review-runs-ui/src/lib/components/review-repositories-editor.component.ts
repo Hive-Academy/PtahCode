@@ -1,9 +1,11 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
 import type { OperatorSettings, RepositorySettings } from '@ptah-extension/review-contracts';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-review-repositories-editor',
   standalone: true,
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
             <section class="space-y-3">
@@ -19,7 +21,7 @@ import type { OperatorSettings, RepositorySettings } from '@ptah-extension/revie
                     </p>
                     <button
                       type="button"
-                      class="btn btn-ghost btn-sm"
+                      ptahButton variant="ghost"
                       [attr.aria-label]="
                         'Remove ' + repo.owner + '/' + repo.name
                       "
@@ -75,7 +77,7 @@ import type { OperatorSettings, RepositorySettings } from '@ptah-extension/revie
                 />
                 <button
                   type="button"
-                  class="btn btn-secondary btn-sm"
+                  ptahButton
                   (click)="added.emit()"
                 >
                   Add repository

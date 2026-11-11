@@ -1,8 +1,10 @@
 import { ChangeDetectionStrategy, Component, output } from '@angular/core';
+import { PtahIconButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-gateway-setup-guide',
   standalone: true,
+  imports: [PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -24,9 +26,10 @@ import { ChangeDetectionStrategy, Component, output } from '@angular/core';
         <h2 class="text-base font-semibold">Gateway setup</h2>
         <button
           type="button"
-          class="btn btn-ghost btn-xs"
+          ptahIconButton
+          size="xs"
+          label="Close gateway setup guide"
           (click)="closed.emit()"
-          aria-label="Close gateway setup guide"
         >
           ✕
         </button>
