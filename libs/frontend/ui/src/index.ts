@@ -41,3 +41,4 @@ export * from './lib/motion';
 export * from './lib/foundation';
 export * from './lib/extracted';
 export * from './lib/button';
+export * from './lib/form-controls';

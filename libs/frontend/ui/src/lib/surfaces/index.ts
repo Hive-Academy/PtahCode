@@ -6,3 +6,4 @@ export * from './field-control.directive';
 export * from './field.component';
 export * from './inbox-layout.component';
 export * from './inbox-row.directive';
+export * from './field-control-ref';

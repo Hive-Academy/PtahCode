@@ -148,7 +148,7 @@ Update this table in the pull request of each step. Do not keep another status l
 | Level | Family | Research | Component and gallery | Look | User approval | Adoption | Removal |
 |---|---|---|---|---|---|---|---|
 | 1 | Button and icon button | done | done (#1066) | done (#1071) | done | in progress (marketplace #1073 merged, pages in a branch) | open |
-| 1 | Form controls | done (this task) | open | open | open | open | open |
+| 1 | Form controls | done (this task) | done (TASK_2026_950_ed73) | done (`family-2-look.md`, screenshots wait for Electron) | open | open | open |
 | 2 | Composites | done (this task) | open | open | open | open | open |
 
 Order of the composites: section 3 of this document.
@@ -169,6 +169,6 @@ needs the answer. Sources: the two research files of TASK_2026_940_eef5.
 |---|---|---|---|
 | 1 | Default size of text controls. The unsized DaisyUI input is 3rem high. The token size `sm` is 2rem. Today 13 inputs and 4 textareas are unsized. | Form controls, step 3 | Use `sm` as the default. Show the height change in the look sheet. |
 | 2 | Custom looks on 85 inputs (own height, focus or surface classes). | Form controls, step 3 | Fold them into three tones: default, mono and compact. The consumer keeps layout classes. |
-| 3 | Native `<select>` against the rich combobox. | Form controls, step 2 | Keep native `<select>` with `ptahSelect` first. Move to the combobox only after a behavior parity test. |
+| 3 | Native `<select>` against the rich combobox. | Form controls, step 2 | Reversed (user, revision 2): form selects move to `ptah-select`; inline selects stay native. See `family-2-look.md` section 6. |
 | 4 | Duplicate owner folders in `libs/frontend/ui` (`native`, `overlays`, `selection`) for menu, popover and autocomplete. | Before the ratchet and lint rules of the composites | Keep `native/*`. It has all consumers. Delete `overlays/*` and `selection/*` after a check shows zero imports. |
 | 5 | Card owners (5 today) and 158 raw panel surfaces. Also list row and settings row, where the DOM varies. | Composites 3 and 6 | One `ptah-surface-card` API with a `variant` input. Rows get content slots. Batches take rows with an equal DOM first. The other rows move together with the new look. Each row still moves one time. Autocomplete stays WATCH. Autocomplete has 2 raw uses, so the skip rule applies: keep it at WATCH even though the user listed it. Toast, divider, avatar, steps, kbd and raw tooltip stay SKIP (0 to 2 uses each). |

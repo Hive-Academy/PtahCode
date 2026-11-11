@@ -14,6 +14,7 @@ import {
 } from '@ptah-extension/ui';
 import { GalleryButtonFamilyComponent } from './ui-gallery/gallery-button-family.component';
 import { GalleryComponentsComponent } from './ui-gallery/gallery-components.component';
+import { GalleryFormControlsFamilyComponent } from './ui-gallery/gallery-form-controls-family.component';
 import { GalleryTokensShapeComponent } from './ui-gallery/gallery-tokens-shape.component';
 import { GalleryTokensSpacingComponent } from './ui-gallery/gallery-tokens-spacing.component';
 import { GalleryTokensTypeComponent } from './ui-gallery/gallery-tokens-type.component';
@@ -35,6 +36,7 @@ interface GallerySectionLink {
     GalleryTokensTypeComponent,
     GalleryTokensShapeComponent,
     GalleryButtonFamilyComponent,
+    GalleryFormControlsFamilyComponent,
     GalleryComponentsComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -97,6 +99,7 @@ interface GallerySectionLink {
       <ptah-gallery-tokens-type />
       <ptah-gallery-tokens-shape />
       <ptah-gallery-button-family />
+      <ptah-gallery-form-controls-family />
       <ptah-gallery-components />
     </div>
   </main>`,
@@ -118,6 +121,7 @@ export class UiGalleryComponent {
     { id: 'tokens-type', label: 'Typography and hierarchy' },
     { id: 'tokens-shape', label: 'Shape, elevation, motion and state' },
     { id: 'family-button', label: 'Button family' },
+    { id: 'family-form-controls', label: 'Form controls family' },
     { id: 'components-buttons', label: 'Buttons' },
     { id: 'components-fields', label: 'Fields' },
     { id: 'components-metrics', label: 'Metrics' },

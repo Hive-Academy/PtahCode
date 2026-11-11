@@ -106,6 +106,58 @@
   --ptah-btn-busy-opacity: 0.8;
   --ptah-btn-spinner-duration: 720ms;
 
+  /* Form controls family (TASK_2026_950_ed73). The field fill is the glass
+     input fill when glass is on, else base-100. */
+  --ptah-field-bg: var(--glass-fill-input, oklch(var(--b1)));
+  --ptah-field-fg: oklch(var(--bc));
+  --ptah-field-placeholder: oklch(var(--bcm, var(--bc)));
+  --ptah-field-border: var(--ptah-control-edge);
+  --ptah-field-border-hover: var(--ptah-control-edge-strong);
+  --ptah-field-border-invalid: var(--ptah-state-err);
+  --ptah-field-disabled-bg: var(--surface-2);
+  --ptah-field-disabled-fg: oklch(var(--bcm, var(--bc)));
+  --ptah-field-disabled-opacity: var(--ptah-btn-disabled-opacity);
+  --ptah-field-textarea-min-h: var(--ptah-control-h-field);
+  --ptah-radius-field-multiline: var(--glass-radius-inner, var(--rounded-box));
+  --ptah-font-mono: 'JetBrains Mono', 'Fira Code', Menlo, monospace;
+  --ptah-select-chevron-size: 0.25rem;
+  --ptah-select-chevron-inset: 1.25rem;
+  --ptah-choice-edge: var(--ptah-control-edge);
+  --ptah-choice-on: oklch(var(--p));
+
+  /* Field with a floating label, and the rich select (TASK_2026_950_ed73).
+     The field box owns the edge, the fill and the rail. The rail is a line
+     at the bottom edge that carries focus, error and busy. */
+  --ptah-field-h-md: 3rem;
+  --ptah-field-h-lg: 3.5rem;
+  --ptah-field-pad-x: var(--ptah-space-3);
+  --ptah-field-pad-top: 1.25rem;
+  --ptah-field-pad-bottom: 0.375rem;
+  --ptah-field-radius: var(--glass-radius-inner, 0.625rem);
+  --ptah-field-bg-hover: color-mix(in oklch, var(--ptah-field-bg) 92%, oklch(var(--bc)));
+  --ptah-field-label-fg: oklch(var(--bcm, var(--bc)));
+  --ptah-field-label-fg-active: color-mix(in oklch, oklch(var(--p)) 62%, oklch(var(--bc)));
+  --ptah-field-label-float-size: 0.6875rem;
+  --ptah-field-label-float-leading: 1rem;
+  --ptah-field-label-float-top: 0.375rem;
+  --ptah-field-label-float-weight: 600;
+  --ptah-field-rail-h: 2px;
+  --ptah-field-rail-color: oklch(var(--p));
+  --ptah-field-rail-busy: color-mix(in oklch, oklch(var(--p)) 55%, transparent);
+  --ptah-field-busy-duration: 1400ms;
+  --ptah-field-icon: 1rem;
+  --ptah-field-action-size: 1.75rem;
+  --ptah-field-icon-fg: oklch(var(--bcm, var(--bc)));
+  --ptah-field-message-fg: oklch(var(--bcm, var(--bc)));
+  --ptah-select-panel-bg: var(--glass-fill-overlay, oklch(var(--b1)));
+  --ptah-select-panel-edge: var(--ptah-control-edge-strong);
+  --ptah-select-panel-max-h: 18rem;
+  --ptah-select-panel-pad: var(--ptah-space-1);
+  --ptah-select-option-min-h: 2.25rem;
+  --ptah-select-option-active-bg: color-mix(in oklch, oklch(var(--p)) 16%, transparent);
+  --ptah-select-option-selected-fg: color-mix(in oklch, oklch(var(--p)) 62%, oklch(var(--bc)));
+  --ptah-select-group-fg: oklch(var(--bcm, var(--bc)));
+
   /* Focus ring: an outline with an outline offset (the offset is transparent).
      The shared glass focus color when glass is on, else the theme primary. */
   --ptah-focus-ring-width: 2px;
@@ -146,6 +198,7 @@
     --ptah-duration-base: 0.01ms;
     --ptah-duration-slow: 0.01ms;
     --ptah-btn-spinner-duration: 0.01ms;
+    --ptah-field-busy-duration: 0.01ms;
   }
 }
 
