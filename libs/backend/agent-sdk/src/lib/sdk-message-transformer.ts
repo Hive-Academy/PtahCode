@@ -146,6 +146,7 @@ export class SdkMessageTransformer implements TransformerState {
     string,
     BackgroundAnnounceOrigin
   >();
+  /** Keyed by {@link taskLifecycleKey}: session-scoped like the task parents. */
   private readonly nonAgentTaskIds: Set<string> = new Set();
   /** Shared with isolated streams — see {@link BackgroundShellLedger}. */
   private backgroundShellLedger = new BackgroundShellLedger();
@@ -645,8 +646,16 @@ export class SdkMessageTransformer implements TransformerState {
     return this.backgroundAnnouncedToolUseIds.get(toolUseId);
   }
 
-  isNonAgentTask(taskId: string): boolean {
-    return this.nonAgentTaskIds.has(taskId);
+  isNonAgentTask(taskId: string, sessionId?: string): boolean {
+    return this.nonAgentTaskIds.has(this.taskLifecycleKey(taskId, sessionId));
+  }
+
+  getShellTaskToolUseId(
+    taskId: string,
+    sessionId?: string,
+  ): string | undefined {
+    if (!sessionId) return undefined;
+    return this.bashTaskToolUseIdsBySession.get(sessionId)?.get(taskId);
   }
 
   isBackgroundShellToolUse(
@@ -748,7 +757,13 @@ export class SdkMessageTransformer implements TransformerState {
     this.taskIdToParentToolUseId.delete(
       this.taskLifecycleKey(taskId, sessionId),
     );
-    this.nonAgentTaskIds.delete(taskId);
+    this.nonAgentTaskIds.delete(this.taskLifecycleKey(taskId, sessionId));
+    if (sessionId) {
+      const links = this.bashTaskToolUseIdsBySession.get(sessionId);
+      if (links?.delete(taskId) && !links.size) {
+        this.bashTaskToolUseIdsBySession.delete(sessionId);
+      }
+    }
   }
 
   markTaskTerminalEmitted(
@@ -776,7 +791,7 @@ export class SdkMessageTransformer implements TransformerState {
     toolUseId?: string,
     sessionId?: string,
   ): void {
-    this.nonAgentTaskIds.add(taskId);
+    this.nonAgentTaskIds.add(this.taskLifecycleKey(taskId, sessionId));
     if (this.nonAgentTaskIds.size > MAX_BACKGROUND_SHELL_MARKS) {
       const oldest = this.nonAgentTaskIds.values().next().value;
       if (oldest) this.nonAgentTaskIds.delete(oldest);

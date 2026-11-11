@@ -271,6 +271,38 @@ describe('AgentMonitorStore', () => {
       expect(store.getSubagent('shell-tool')).toBeUndefined();
     });
 
+    it.each(['Bash', 'PowerShell'])(
+      '(a) agent_progress under a background %s node creates no record',
+      (toolName) => {
+        store.onAgentProgress(
+          {
+            ...base,
+            eventType: 'agent_progress',
+            parentToolUseId: 'shell-tool',
+            taskId: 'shell-task',
+            summary: 'still running',
+          },
+          toolName,
+        );
+        expect(store.getSubagent('shell-tool')).toBeUndefined();
+        expect(store.subagents().size).toBe(0);
+      },
+    );
+
+    it('(c) agent_progress under an Agent node still creates its record', () => {
+      store.onAgentProgress(
+        {
+          ...base,
+          eventType: 'agent_progress',
+          parentToolUseId: 'agent-tool',
+          taskId: 'agent-task',
+          summary: 'working',
+        },
+        'Agent',
+      );
+      expect(store.getSubagent('agent-tool')).toBeDefined();
+    });
+
     it('keeps completion and timestamp after late status and same-id starts', () => {
       start();
       complete();

@@ -39,6 +39,7 @@ function makeState(): jest.Mocked<TransformerState> {
     isTaskStartedEmitted: jest.fn().mockReturnValue(false),
     isNonAgentTask: jest.fn().mockReturnValue(false),
     isBackgroundShellToolUse: jest.fn().mockReturnValue(false),
+    getShellTaskToolUseId: jest.fn().mockReturnValue(undefined),
     hasActiveSkillToolUseId: jest
       .fn()
       .mockImplementation((id: string) => activeSkills.has(id)),

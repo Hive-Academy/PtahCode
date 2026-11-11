@@ -2634,10 +2634,16 @@ export class AgentMonitorStore implements OnDestroy {
     return fillIdentity(merged, pending);
   }
 
-  /** Reducer for SDK `agent_progress` events. */
-  onAgentProgress(event: AgentProgressEvent): void {
+  /**
+   * Reducer for SDK `agent_progress` events. `parentToolName` is the tool name
+   * of the parent tool node when the caller knows it. Progress whose parent is
+   * a shell tool never creates a NEW record, for the same reason as
+   * {@link onAgentCompleted}.
+   */
+  onAgentProgress(event: AgentProgressEvent, parentToolName?: string): void {
     const key = event.parentToolUseId;
     if (!key) return;
+    if (this.isShellParentWithoutRecord(key, parentToolName)) return;
     const wf = readWorkflowFields(event);
     this._subagents.update((map) => {
       this.claimHistoryCandidate(key);
@@ -2730,6 +2736,18 @@ export class AgentMonitorStore implements OnDestroy {
     });
   }
 
+  /** True when `key` is a shell tool node that has no subagent record yet. */
+  private isShellParentWithoutRecord(
+    key: string,
+    parentToolName: string | undefined,
+  ): boolean {
+    return (
+      parentToolName !== undefined &&
+      SHELL_TOOL_NAMES.has(parentToolName) &&
+      !this._subagents().has(key)
+    );
+  }
+
   /**
    * Reducer for SDK `agent_completed` events. `parentToolName` is the tool
    * name of the parent tool node when the caller knows it. A completion whose
@@ -2741,13 +2759,7 @@ export class AgentMonitorStore implements OnDestroy {
   onAgentCompleted(event: AgentCompletedEvent, parentToolName?: string): void {
     const key = event.parentToolUseId;
     if (!key) return;
-    if (
-      parentToolName !== undefined &&
-      SHELL_TOOL_NAMES.has(parentToolName) &&
-      !this._subagents().has(key)
-    ) {
-      return;
-    }
+    if (this.isShellParentWithoutRecord(key, parentToolName)) return;
     const wf = readWorkflowFields(event);
     this._subagents.update((map) => {
       this.claimHistoryCandidate(key);

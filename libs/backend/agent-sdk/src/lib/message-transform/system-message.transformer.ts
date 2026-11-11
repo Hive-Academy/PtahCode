@@ -358,11 +358,18 @@ export class SystemMessageTransformer {
     helpers: TransformerHelpers,
     sessionId?: TransformerSessionId,
   ): FlatStreamEventUnion[] {
-    if (state.isNonAgentTask(msg.task_id)) {
+    const taskSessionId = sessionId || msg.session_id;
+    if (state.isNonAgentTask(msg.task_id, taskSessionId)) {
       return [];
     }
 
-    const taskSessionId = sessionId || msg.session_id;
+    // A shell whose in-memory mark was lost (stream that never saw its
+    // task_started) is recognised by its launching tool_use id. It is not an
+    // agent, so its progress must not open a monitor record.
+    if (state.isBackgroundShellToolUse(msg.tool_use_id, taskSessionId)) {
+      return [];
+    }
+
     if (msg.tool_use_id) {
       state.setTaskParent(msg.task_id, msg.tool_use_id, taskSessionId);
     }
@@ -415,7 +422,7 @@ export class SystemMessageTransformer {
     helpers: TransformerHelpers,
     sessionId?: TransformerSessionId,
   ): FlatStreamEventUnion[] {
-    if (state.isNonAgentTask(msg.task_id)) {
+    if (state.isNonAgentTask(msg.task_id, sessionId || msg.session_id)) {
       return [];
     }
 
@@ -712,9 +719,13 @@ export class SystemMessageTransformer {
     sessionId?: TransformerSessionId,
   ): FlatStreamEventUnion[] {
     const taskSessionId = sessionId || msg.session_id;
+    // A shell notification may omit tool_use_id. Its launch link, recorded at
+    // task_started and kept across compaction, then names the Bash or
+    // PowerShell node to settle. Agent tasks never have such a link.
     const parentToolUseId =
       msg.tool_use_id ??
-      state.getTaskParentToolUseId(msg.task_id, taskSessionId);
+      state.getTaskParentToolUseId(msg.task_id, taskSessionId) ??
+      state.getShellTaskToolUseId(msg.task_id, taskSessionId);
 
     // Read before clearing — `clearTaskParent` also drops the non-agent mark.
     // A notification has no task_type, so a shell whose in-memory mark was
@@ -723,7 +734,7 @@ export class SystemMessageTransformer {
     // background-task snapshot. Only positive shell evidence counts: an
     // unknown task keeps the agent path, so a real subagent is never hidden.
     const isNonAgentTask =
-      state.isNonAgentTask(msg.task_id) ||
+      state.isNonAgentTask(msg.task_id, taskSessionId) ||
       state.isBackgroundShellToolUse(parentToolUseId, taskSessionId) ||
       this.isNonAgentSnapshotTask(msg.task_id, helpers, sessionId);
     const isDuplicateAgentTerminal =
