@@ -420,6 +420,25 @@ export function scanTsFile(content: string, relFile: string): ClassOccurrence[] 
           });
         }
       } else {
+        if (ts.isTemplateExpression(initializer)) {
+          // Scan the static text; each `${...}` becomes a neutral placeholder.
+          const staticText =
+            initializer.head.text +
+            initializer.templateSpans
+              .map((span) => `__expr__${span.literal.text}`)
+              .join('');
+          const startLine = sourceFile.getLineAndCharacterOfPosition(
+            initializer.getStart(),
+          ).line;
+          for (const hit of findTemplateHits(staticText)) {
+            const before = staticText.slice(0, hit.offset);
+            occurrences.push({
+              file: relFile,
+              line: startLine + 1 + (before.match(/\n/g)?.length ?? 0),
+              token: hit.token,
+            });
+          }
+        }
         // `template: someExpression` — cannot be proven safe.
         occurrences.push({
           file: relFile,

@@ -384,7 +384,7 @@
     "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/components/atoms/session-organization-chips/session-organization-chips.component.ts": {
-    "<dynamic>": 1
+    "<dynamic>": 3
   },
   "libs/frontend/chat/src/lib/components/atoms/workflow-badge.component.ts": {
     "badge": 1,
@@ -483,7 +483,14 @@
     "textarea-bordered": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/previous-sessions-toolbar/previous-sessions-toolbar.component.ts": {
-    "<dynamic>": 1
+    "<dynamic>": 1,
+    "btn": 3,
+    "btn-circle": 1,
+    "btn-ghost": 3,
+    "btn-sm": 1,
+    "btn-xs": 2,
+    "input": 3,
+    "input-sm": 3
   },
   "libs/frontend/chat/src/lib/components/molecules/send-to-messaging/send-to-messaging.component.ts": {
     "<dynamic>": 1,
@@ -492,10 +499,29 @@
     "btn-sm": 2
   },
   "libs/frontend/chat/src/lib/components/molecules/session-filter-bar/session-filter-bar.component.ts": {
-    "<dynamic>": 1
+    "<dynamic>": 1,
+    "badge": 1,
+    "badge-neutral": 1,
+    "badge-xs": 1,
+    "btn": 3,
+    "btn-circle": 1,
+    "btn-ghost": 3,
+    "btn-sm": 1,
+    "btn-xs": 2,
+    "checkbox": 2,
+    "checkbox-xs": 2,
+    "input": 2,
+    "input-sm": 2,
+    "select": 2,
+    "select-sm": 2,
+    "toggle": 2,
+    "toggle-xs": 2
   },
   "libs/frontend/chat/src/lib/components/molecules/session-list-row/session-list-row.component.ts": {
-    "<dynamic>": 1
+    "<dynamic>": 2,
+    "input": 1,
+    "input-bordered": 1,
+    "input-xs": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/session-organization-editor/session-organization-editor.component.ts": {
     "input": 2,

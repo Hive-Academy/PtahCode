@@ -316,6 +316,20 @@ describe('scanTsFile', () => {
     ]);
   });
 
+  it('scans the static text of an interpolated template and keeps the dynamic token', () => {
+    const source = [
+      '@Component({',
+      '  template: `',
+      '    <div class="btn ${cls}">Go</div>',
+      '  `,',
+      '})',
+      'export class DemoYComponent {}',
+    ].join('\n');
+    const result = scanTsFile(source, FILE);
+    expect(result).toContainEqual({ file: FILE, line: 3, token: 'btn' });
+    expect(result.some((o) => o.token === DYNAMIC_TOKEN)).toBe(true);
+  });
+
   it('ignores blocked-root words outside template properties', () => {
     const source = [
       "const label = 'btn';",
