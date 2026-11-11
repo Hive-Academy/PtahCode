@@ -3601,6 +3601,47 @@ describe('StreamTransformer — onCompactBoundary (TASK_2026_597 N7)', () => {
 });
 
 describe('StreamTransformer — onMessage / onStreamEnd (TASK_2026_614 D.11)', () => {
+  it.each([
+    ['no-activity', 'no stream activity'],
+    ['compaction-dwell', 'compaction did not finish'],
+  ] as const)('replaces a generic SDK abort after %s watchdog fire', async (cause, phrase) => {
+    const { transformer } = makeHarness();
+    const original = new Error('Operation aborted');
+    const watchdog = { ...makeFakeWatchdog(), firedCause: cause };
+    const sdkQuery: AsyncIterable<SDKMessage> = {
+      [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(original) }),
+    };
+    try {
+      await drain(transformer.transform({
+        sdkQuery,
+        sessionId: 'sess-1' as SessionId,
+        initialModel: MODEL,
+        activityWatchdog: watchdog as unknown as NoActivityWatchdog,
+      }));
+      throw new Error('expected timeout error');
+    } catch (error) {
+      if (!(error instanceof Error)) throw error;
+      expect(error.message.toLowerCase()).toContain(phrase);
+      expect(error.message.toLowerCase()).not.toContain('abort');
+      expect(error.cause).toBe(original);
+    }
+  });
+
+  it('preserves the original SDK abort when the watchdog has not fired', async () => {
+    const { transformer } = makeHarness();
+    const original = new Error('Operation aborted');
+    const watchdog = { ...makeFakeWatchdog(), firedCause: null };
+    const sdkQuery: AsyncIterable<SDKMessage> = {
+      [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(original) }),
+    };
+    await expect(drain(transformer.transform({
+      sdkQuery,
+      sessionId: 'sess-1' as SessionId,
+      initialModel: MODEL,
+      activityWatchdog: watchdog as unknown as NoActivityWatchdog,
+    }))).rejects.toBe(original);
+  });
+
   const compactingStatus = (): SDKMessage =>
     ({
       type: 'system',

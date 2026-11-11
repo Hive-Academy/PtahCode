@@ -39,6 +39,7 @@ describe('NoActivityWatchdog', () => {
     const wd = new NoActivityWatchdog(WINDOW, onTimeout);
 
     wd.start();
+    expect(wd.firedCause).toBeNull();
     expect(onTimeout).not.toHaveBeenCalled();
 
     // Just before the deadline: still silent, must not fire yet.
@@ -48,6 +49,7 @@ describe('NoActivityWatchdog', () => {
     // Deadline reached with zero activity → fire exactly once.
     jest.advanceTimersByTime(1);
     expect(onTimeout).toHaveBeenCalledTimes(1);
+    expect(wd.firedCause).toBe('no-activity');
 
     // No further fires even if time keeps advancing.
     jest.advanceTimersByTime(WINDOW * 3);
@@ -273,6 +275,7 @@ describe('NoActivityWatchdog', () => {
       jest.advanceTimersByTime(1);
       expect(onTimeout).toHaveBeenCalledTimes(1);
       expect(onTimeout).toHaveBeenCalledWith('compaction-dwell');
+      expect(wd.firedCause).toBe('compaction-dwell');
       expect(onOverdue).toHaveBeenCalledTimes(overdueCalls);
 
       // Fired once: no timer is left to re-arm.
@@ -393,6 +396,46 @@ describe('NoActivityWatchdog', () => {
       expect(onOverdue).toHaveBeenCalledTimes(3);
       expect(onOverdue).toHaveBeenLastCalledWith(['Bash']);
       expect(onTimeout).not.toHaveBeenCalled();
+    });
+
+    it('holds an open root tool seen in the stream until its result arrives', () => {
+      const onTimeout = jest.fn();
+      const onOverdue = jest.fn();
+      const wd = new NoActivityWatchdog(WINDOW, onTimeout, onOverdue);
+      wd.start();
+
+      wd.observe({
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 'tool-2', name: 'Bash', input: {} }] },
+      } as unknown as SDKMessage);
+      jest.advanceTimersByTime(WINDOW * 3);
+      expect(onOverdue).toHaveBeenCalledTimes(3);
+      expect(onOverdue).toHaveBeenLastCalledWith(['Bash']);
+      expect(onTimeout).not.toHaveBeenCalled();
+      expect(wd.firedCause).toBeNull();
+
+      wd.observe({
+        type: 'user',
+        message: { content: [{ type: 'tool_result', tool_use_id: 'tool-2', content: 'done' }] },
+      } as unknown as SDKMessage);
+      jest.advanceTimersByTime(WINDOW);
+      expect(onTimeout).toHaveBeenCalledWith('no-activity');
+    });
+
+    it('drops a stale tool from a late message when the next turn begins', () => {
+      const onTimeout = jest.fn();
+      const wd = new NoActivityWatchdog(WINDOW, onTimeout);
+      wd.start();
+      wd.observe({ type: 'result' } as unknown as SDKMessage);
+      wd.hold();
+      wd.observe({
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 'late', name: 'Bash', input: {} }] },
+      } as unknown as SDKMessage);
+      wd.beginTurn();
+      wd.release();
+      jest.advanceTimersByTime(WINDOW);
+      expect(onTimeout).toHaveBeenCalledWith('no-activity');
     });
   });
 });

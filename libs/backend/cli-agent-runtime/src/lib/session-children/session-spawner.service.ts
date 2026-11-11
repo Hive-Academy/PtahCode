@@ -167,6 +167,8 @@ interface ChildRuntime {
   firstTurnTimer?: ReturnType<typeof setTimeout>;
   firstTurnRearmed?: boolean;
   endCause?: SessionEndCause;
+  /** `turnsSettled` when the session ended; a later settle owns the turn. */
+  turnsSettledAtEnd?: number;
   capReached: boolean;
   succeeding: boolean;
   graceTimer?: ReturnType<typeof setTimeout>;
@@ -1356,6 +1358,7 @@ export class SessionSpawnerService implements ISessionSpawner {
       return;
     }
     runtime.endCause = parseSessionEndCause(payload.cause);
+    runtime.turnsSettledAtEnd = child.turnsSettled;
     const wasWorking = this.phaseOf(child) === 'generating';
     this.armGrace(runtime, child.childSessionId, wasWorking);
     this.log(
@@ -1365,7 +1368,7 @@ export class SessionSpawnerService implements ISessionSpawner {
 
   private async onGraceExpired(
     childSessionId: string,
-    _wasWorking: boolean,
+    wasWorking: boolean,
   ): Promise<void> {
     const runtime = this.runtimes.get(childSessionId);
     if (runtime) runtime.graceTimer = undefined;
@@ -1408,19 +1411,44 @@ export class SessionSpawnerService implements ISessionSpawner {
       this.endOutside(
         child,
         cause,
+        wasWorking,
         `automatic successor failed: ${result.detail}`,
       );
       return;
     }
-    this.endOutside(child, cause);
+    this.endOutside(child, cause, wasWorking);
   }
 
   private endOutside(
     child: SessionChildRecord,
     cause: SessionEndCause,
+    wasWorking: boolean,
     failure?: string,
   ): void {
     const childSessionId = child.childSessionId;
+    const endRuntime = this.runtimes.get(childSessionId);
+    // A turn event that settled during the grace already told the parent.
+    const turnUnsettled =
+      endRuntime?.turnsSettledAtEnd === undefined ||
+      endRuntime.turnsSettledAtEnd ===
+        (this.registry.get(childSessionId)?.turnsSettled ?? child.turnsSettled);
+    if (wasWorking && turnUnsettled) {
+      // The turn in flight never settles on its own once the session is gone:
+      // push its terminal completion, so the parent does not wait for a child
+      // that no longer works. It names the true cause of the end.
+      void this.settle(
+        childSessionId,
+        'failed',
+        (cause === 'no-activity-timeout'
+          ? 'session ended while it worked: no stream activity for 180 s ' +
+            '(no-activity watchdog, cause no-activity-timeout); not stopped by a user. ' +
+            'The session can be resumed: the user sends a message in its tab ' +
+            '(ptah_session_send refuses an ended child), or start a successor'
+          : `session ended while it worked (${cause})`) +
+          (failure ? `; ${failure}` : ''),
+        Date.now(),
+      );
+    }
     const runtime = this.runtimes.get(childSessionId);
     if (runtime) runtime.stopping = true;
     const lanes = this.adoptToParent(child);

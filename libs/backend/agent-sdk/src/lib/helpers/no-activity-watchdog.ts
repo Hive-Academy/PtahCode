@@ -23,13 +23,27 @@ import { COMPACTION_MAX_DWELL_MS } from './compaction/compaction-state.types';
 export class NoActivityWatchdog {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private fired = false;
+  /**
+   * Why the watchdog fired, or `null` while it has not. The SDK rethrows the
+   * abort as a generic "Operation aborted" error that loses the abort reason,
+   * so the stream reads this to report the true end cause (not `user-stop`).
+   */
+  private timeoutCause: WatchdogTimeoutCause | null = null;
   private stopped = false;
   private started = false;
   private holds = 0;
   private turnOpen = true;
 
+  get firedCause(): WatchdogTimeoutCause | null {
+    return this.timeoutCause;
+  }
+
   beginTurn(): void {
     if (this.stopped || this.fired) return;
+    // A real turn boundary: a tool from a late message of the previous turn
+    // must not hold this turn's deadline forever.
+    this.tools.clear();
+    this.tasks.clear();
     this.turnOpen = true;
     this.kick();
   }
@@ -159,6 +173,7 @@ export class NoActivityWatchdog {
     )
       return;
     if (message.type === 'system' && this.observeSystem(message)) return;
+    this.observeToolUses(message);
     this.observeToolResults(message);
     if (message.type === 'result') this.endTurn();
     this.kick();
@@ -240,6 +255,29 @@ export class NoActivityWatchdog {
     }
   }
 
+  /**
+   * A root `tool_use` in the stream opens a tool call until its result. The
+   * PreToolUse hook is only an early signal: when it is missed, a long tool
+   * call (for example a Bash `npm run verify` that waits in the verify lock)
+   * must still hold the watchdog instead of reading as provider silence.
+   *
+   * A root assistant message proves that a turn is open. It reopens the turn
+   * even when `beginTurn` was skipped (for example after a steer interrupt
+   * whose replacement message started while the turn still counted as in
+   * flight), so the tool hooks of that turn are observed again.
+   */
+  private observeToolUses(message: SDKMessage): void {
+    if (message.type !== 'assistant') return;
+    this.turnOpen = true;
+    const content: unknown = message.message?.content;
+    if (!Array.isArray(content)) return;
+    for (const block of content) {
+      if (block.type === 'tool_use' && typeof block.id === 'string') {
+        this.tools.set(block.id, typeof block.name === 'string' ? block.name : 'tool');
+      }
+    }
+  }
+
   private observeToolResults(message: SDKMessage): void {
     if (message.type === 'user' && Array.isArray(message.message.content)) {
       for (const block of message.message.content) {
@@ -279,7 +317,8 @@ export class NoActivityWatchdog {
         return;
       }
       this.fired = true;
-      this.onTimeout(dwellExceeded ? 'compaction-dwell' : 'no-activity');
+      this.timeoutCause = dwellExceeded ? 'compaction-dwell' : 'no-activity';
+      this.onTimeout(this.timeoutCause);
     }, delayMs);
     this.timer.unref?.();
   }

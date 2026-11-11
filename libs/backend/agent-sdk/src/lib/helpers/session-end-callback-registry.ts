@@ -22,7 +22,7 @@ import { z } from 'zod';
 export const SESSION_END_CAUSES = [
   'user-stop', 'parent-stop', 'stream-exit', 'provider-error',
   'config-reinit', 'workspace-close', 'compaction-abort',
-  'host-shutdown', 'unknown',
+  'no-activity-timeout', 'host-shutdown', 'unknown',
 ] as const;
 export const SessionEndCauseSchema = z.enum(SESSION_END_CAUSES);
 export type SessionEndCause = z.infer<typeof SessionEndCauseSchema>;

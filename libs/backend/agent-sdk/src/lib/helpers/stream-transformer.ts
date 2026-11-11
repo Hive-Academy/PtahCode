@@ -1238,6 +1238,23 @@ export class StreamTransformer {
             `[StreamTransformer] Stream ended for ${sessionId}: ${sdkMessageCount} SDK messages, ${yieldedEventCount} events yielded`,
           );
         } catch (error) {
+          // The SDK rethrows a watchdog abort as a generic "aborted" error,
+          // which callers classify as a user stop. Replace it with the true
+          // cause; the wording deliberately avoids "abort"/"cancel".
+          const watchdogCause = activityWatchdog?.firedCause ?? null;
+          if (watchdogCause !== null) {
+            const timeoutError = new Error(
+              watchdogCause === 'compaction-dwell'
+                ? 'Compaction did not finish in time. Stopped for recovery; retry the turn.'
+                : 'No stream activity from the provider in time. Stopped for recovery; retry the turn.',
+              { cause: error },
+            );
+            logger.error(
+              `[StreamTransformer] Session ${sessionId} ended by the no-activity watchdog (${watchdogCause})`,
+              timeoutError,
+            );
+            throw timeoutError;
+          }
           const errorObj =
             error instanceof Error ? error : new Error(String(error));
           const lowerMessage = errorObj.message.toLowerCase();

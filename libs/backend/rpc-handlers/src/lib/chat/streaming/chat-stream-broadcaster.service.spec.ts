@@ -437,6 +437,22 @@ describe('ChatStreamBroadcaster.streamEventsToWebview — session teardown', () 
     );
   });
 
+  it('classifies a watchdog timeout separately from a generic user abort', async () => {
+    for (const [message, cause] of [
+      ['No stream activity from the provider in time. Stopped for recovery; retry the turn.', 'no-activity-timeout'],
+      ['Operation aborted', 'user-stop'],
+    ] as const) {
+      const h = makeHarness();
+      h.sdkAdapter.getSessionToken.mockReturnValue('T1');
+      async function* stream(): AsyncGenerator<FlatStreamEventUnion> {
+        yield makeEvent('message_start');
+        throw new Error(message);
+      }
+      await h.broadcaster.streamEventsToWebview(SESSION_ID, stream(), TAB_ID);
+      expect(h.sdkAdapter.endSessionIfTokenMatches).toHaveBeenCalledWith(SESSION_ID, 'T1', cause);
+    }
+  });
+
   it('broadcasts the real SDK id on fresh-session end', async () => {
     const h = makeHarness();
     h.sdkAdapter.getSessionToken.mockReturnValue('T1');

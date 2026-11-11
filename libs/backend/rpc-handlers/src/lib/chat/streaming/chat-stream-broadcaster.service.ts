@@ -160,7 +160,12 @@ export class ChatStreamBroadcaster {
     let childMetadataSaved = false;
     const isPtahCliSession = this.ptahCli.hasSession(tabId);
     let streamExitedNormally = false;
-    let endCause: 'stream-exit' | 'provider-error' | 'user-stop' | 'compaction-abort' = 'stream-exit';
+    let endCause:
+      | 'stream-exit'
+      | 'provider-error'
+      | 'user-stop'
+      | 'compaction-abort'
+      | 'no-activity-timeout' = 'stream-exit';
     let recordReplaced = false;
     let sessionConfirmedEnded = false;
     // The id the turn state is keyed under. `sessionId` is the tabId for a
@@ -362,7 +367,7 @@ export class ChatStreamBroadcaster {
       endCause = lowerMessage.includes('compaction did not finish')
         ? 'compaction-abort'
         : lowerMessage.includes('no stream activity')
-          ? 'stream-exit'
+          ? 'no-activity-timeout'
           : isUserAbort
             ? 'user-stop'
             : 'provider-error';
