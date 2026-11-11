@@ -8,6 +8,7 @@ import {
   signal,
 } from '@angular/core';
 import { Check, Copy, LucideAngularModule } from 'lucide-angular';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /** How long the "Copied" confirmation stays before the button resets. */
 export const COPIED_FEEDBACK_MS = 2000;
@@ -55,14 +56,16 @@ function clipboardFailureMessage(error: unknown): string {
 @Component({
   selector: 'ptah-copy-command-button',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'inline-flex shrink-0' },
   template: `
     @if (hasCommand()) {
       <button
         type="button"
-        class="btn btn-ghost btn-xs gap-1"
+        ptahButton
+        variant="ghost"
+        size="xs"
         [attr.aria-label]="label()"
         data-testid="copy-command-button"
         (click)="copy()"

@@ -15,7 +15,7 @@ import {
   Zap,
   type LucideIconData,
 } from 'lucide-angular';
-import { BrandMarkComponent } from '@ptah-extension/ui';
+import { BrandMarkComponent, PtahButtonDirective } from '@ptah-extension/ui';
 
 import type {
   CoverageCell,
@@ -107,7 +107,12 @@ interface MatrixRowView {
 @Component({
   selector: 'ptah-coverage-matrix',
   standalone: true,
-  imports: [LucideAngularModule, BrandMarkComponent, TargetMarksComponent],
+  imports: [
+    PtahButtonDirective,
+    LucideAngularModule,
+    BrandMarkComponent,
+    TargetMarksComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -143,7 +148,8 @@ interface MatrixRowView {
             </p>
             <button
               type="button"
-              class="btn btn-outline btn-xs gap-1"
+              ptahButton
+              size="xs"
               data-testid="coverage-matrix-retry"
               (click)="retryRequested.emit()"
             >

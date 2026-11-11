@@ -144,7 +144,9 @@ const SOURCE_PATTERN = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
           <div class="alert alert-error alert-sm py-1 px-2 mb-2" role="alert">
             <span class="text-xs">{{ addError() }}</span>
             <button
-              ptahButton variant="ghost" size="xs"
+              ptahButton
+              variant="ghost"
+              size="xs"
               type="button"
               (click)="addError.set(null)"
             >
@@ -176,7 +178,9 @@ const SOURCE_PATTERN = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
           <button
             type="submit"
             data-testid="marketplace-add"
-            class="btn btn-primary btn-sm shrink-0"
+            ptahButton
+            variant="primary"
+            class="shrink-0"
             [disabled]="!canAdd()"
           >
             @if (isAdding()) {
@@ -242,7 +246,9 @@ const SOURCE_PATTERN = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
           <div class="alert alert-error alert-sm py-1 px-2" role="alert">
             <span class="text-xs">{{ loadError() }}</span>
             <button
-              ptahButton variant="ghost" size="xs"
+              ptahButton
+              variant="ghost"
+              size="xs"
               type="button"
               (click)="reload()"
             >
@@ -287,14 +293,18 @@ const SOURCE_PATTERN = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
                     </p>
                     <div class="flex gap-1 justify-end">
                       <button
-                        ptahButton variant="ghost" size="xs"
+                        ptahButton
+                        variant="ghost"
+                        size="xs"
                         type="button"
                         (click)="pendingRemoveSource.set(null)"
                       >
                         Keep
                       </button>
                       <button
-                        ptahButton variant="danger" size="xs"
+                        ptahButton
+                        variant="danger"
+                        size="xs"
                         type="button"
                         (click)="removeMarketplace(marketplace)"
                       >
@@ -305,7 +315,7 @@ const SOURCE_PATTERN = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
                 }
                 <div card-actions class="flex items-center gap-2">
                   <button
-                    class="btn btn-ghost btn-sm border-base-300"
+                    ptahButton
                     type="button"
                     [disabled]="isBrowsing(marketplace.source)"
                     [attr.aria-expanded]="
@@ -363,7 +373,9 @@ const SOURCE_PATTERN = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
                       >
                         <span class="text-xs">{{ browseError() }}</span>
                         <button
-                          ptahButton variant="ghost" size="xs"
+                          ptahButton
+                          variant="ghost"
+                          size="xs"
                           type="button"
                           (click)="
                             refreshBrowse(marketplace.source, { refresh: true })
@@ -445,7 +457,9 @@ const SOURCE_PATTERN = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
 
       <div class="flex justify-end">
         <button
-          ptahButton variant="ghost" size="xs"
+          ptahButton
+          variant="ghost"
+          size="xs"
           type="button"
           [disabled]="isLoading()"
           (click)="reload()"

@@ -18,7 +18,7 @@ import {
   ptahConnectorCategoryLabel,
   type PtahConnector,
 } from '@ptah-extension/shared';
-import { BrandMarkComponent } from '@ptah-extension/ui';
+import { BrandMarkComponent, PtahButtonDirective } from '@ptah-extension/ui';
 
 import { ConnectorLinksStore } from '../../data/connector-links.store';
 import { MarketplaceInventoryStore } from '../../data/marketplace-inventory.store';
@@ -82,6 +82,7 @@ interface ConnectorFact {
   selector: 'ptah-connector-detail',
   standalone: true,
   imports: [
+    PtahButtonDirective,
     RouterLink,
     LucideAngularModule,
     BrandMarkComponent,
