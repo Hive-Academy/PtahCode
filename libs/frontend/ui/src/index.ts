@@ -42,3 +42,4 @@ export * from './lib/foundation';
 export * from './lib/extracted';
 export * from './lib/button';
 export * from './lib/form-controls';
+export * from './lib/badge';

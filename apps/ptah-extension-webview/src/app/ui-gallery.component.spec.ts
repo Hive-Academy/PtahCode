@@ -274,3 +274,27 @@ it('renders the form controls family with a directive on every control', () => {
     expect(named).toBe(true);
   }
 });
+
+it('renders the badge family with an owner on every badge and a name on every dot', () => {
+  TestBed.configureTestingModule({
+    providers: [
+      { provide: Router, useValue: { navigateByUrl: jest.fn() } },
+      { provide: ThemeService, useValue: createThemeServiceStub() },
+    ],
+  });
+  const fixture = TestBed.createComponent(UiGalleryComponent);
+  fixture.detectChanges();
+  const root = fixture.nativeElement as HTMLElement;
+  const ref = root.querySelector('section#family-badge [data-testid="badge-family-reference"]');
+  expect(ref).not.toBeNull();
+  expect(ref?.querySelector('.badge')).toBeNull();
+  expect(ref?.querySelectorAll('[data-ptah-badge]').length).toBeGreaterThanOrEqual(24);
+  const inks = new Set(
+    Array.from(ref?.querySelectorAll<HTMLElement>('ptah-status') ?? []).map((s) => s.dataset['ink']),
+  );
+  expect([...inks].sort()).toEqual(['done', 'err', 'idle', 'need', 'run']);
+  for (const dot of Array.from(ref?.querySelectorAll('ptah-status[data-appearance="dot"]') ?? [])) {
+    expect(dot.getAttribute('role')).toBe('img');
+    expect(dot.getAttribute('aria-label')).toBeTruthy();
+  }
+});

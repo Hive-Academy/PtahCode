@@ -184,6 +184,21 @@
   --ptah-state-err: var(--state-ink-err, oklch(var(--er)));
   --ptah-state-info: var(--state-ink-run, oklch(var(--in)));
 
+  /* Badge family (TASK_2026_957_fda3). Text is the ink at full strength on a
+     light tint of the same ink, so the text keeps the measured 4.5:1 ink. */
+  --ptah-badge-h-xs: 1rem;
+  --ptah-badge-h-sm: 1.25rem;
+  --ptah-badge-px-xs: var(--ptah-space-1);
+  --ptah-badge-px: var(--ptah-space-2);
+  --ptah-badge-fill-mix: 12%;
+  --ptah-badge-edge-mix: 45%;
+  --ptah-badge-neutral-ink: oklch(var(--bc));
+  --ptah-badge-accent-ink: var(--ptah-accent-ink, var(--ptah-link, oklch(var(--p))));
+  --ptah-status-glyph: 0.5rem;
+  --ptah-status-ring: 0.125rem;
+  --ptah-status-square-radius: 0.125rem;
+  --ptah-status-pulse-duration: 1600ms;
+
   /* Layers: the values overlays use today. Nothing above the CDK overlay. */
   --ptah-z-raised: 30;
   --ptah-z-menu: 50;
