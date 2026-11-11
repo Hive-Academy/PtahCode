@@ -1,3 +1,4 @@
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 import {
   Component,
   Input,
@@ -166,7 +167,7 @@ describe('ElectronShellComponent configuration gate', () => {
     })
       .overrideComponent(ElectronShellComponent, {
         set: {
-          imports: [RouterOutlet, GlobalConfigActionsComponent],
+          imports: [RouterOutlet, GlobalConfigActionsComponent, PtahButtonDirective, PtahIconButtonDirective],
           schemas: [CUSTOM_ELEMENTS_SCHEMA],
         },
       })

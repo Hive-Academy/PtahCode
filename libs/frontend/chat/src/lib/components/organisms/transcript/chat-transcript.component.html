@@ -29,8 +29,7 @@
         <!-- Manual path: the button emits through the same component output. -->
         <button
           type="button"
-          class="btn btn-ghost btn-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-          [attr.aria-busy]="olderHistoryLoading()"
+          ptahButton variant="ghost" [busy]="olderHistoryLoading()"
           [disabled]="olderHistoryLoading()"
           (click)="olderHistoryRequested.emit()"
         >

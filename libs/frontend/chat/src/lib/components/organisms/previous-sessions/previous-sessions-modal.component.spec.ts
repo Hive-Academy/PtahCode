@@ -1389,7 +1389,8 @@ describe('PreviousSessionsModalComponent', () => {
       await open([session('a', 'Alpha')]);
 
       const loadMore = el('[data-testid="session-load-more"]');
-      expect(loadMore.classList).toContain('transition-colors');
+      expect(loadMore.hasAttribute('data-ptah-button')).toBe(true);
+      expect(loadMore.classList.contains('transition-all')).toBe(false);
       expect(all('[data-action="open"]').length).toBeGreaterThan(0);
       expect(Array.from(panel().querySelectorAll('.transition-all'))).toEqual(
         [],

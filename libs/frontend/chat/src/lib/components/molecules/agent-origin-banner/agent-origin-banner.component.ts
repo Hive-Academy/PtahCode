@@ -14,6 +14,7 @@ import {
 } from 'lucide-angular';
 import type { TabAgentOrigin } from '@ptah-extension/chat-types';
 
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 let nextDetailsId = 0;
 
 /**
@@ -29,7 +30,7 @@ let nextDetailsId = 0;
  */
 @Component({
   selector: 'ptah-agent-origin-banner',
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -57,7 +58,7 @@ let nextDetailsId = 0;
         @if (parentTitle() !== null) {
           <button
             type="button"
-            class="btn btn-xs btn-ghost gap-0.5 px-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-secondary"
+            ptahButton variant="ghost" size="xs"
             (click)="$event.stopPropagation(); openParent.emit(origin().parentTabId)"
             [attr.aria-label]="'Open parent session ' + parentTitle()"
             data-test="agent-origin-open-parent"
@@ -72,13 +73,10 @@ let nextDetailsId = 0;
         }
         <button
           type="button"
-          class="btn btn-xs btn-ghost px-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-secondary"
+          ptahIconButton size="xs" [label]="detailsOpen() ? 'Hide session details' : 'Show session details'"
           (click)="toggleDetails()"
           [attr.aria-expanded]="detailsOpen()"
           [attr.aria-controls]="detailsOpen() ? detailsId : null"
-          [attr.aria-label]="
-            detailsOpen() ? 'Hide session details' : 'Show session details'
-          "
           data-test="agent-origin-toggle"
         >
           <lucide-angular

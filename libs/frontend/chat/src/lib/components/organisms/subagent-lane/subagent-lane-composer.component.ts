@@ -17,6 +17,7 @@ import type { TrayAgentContext } from '../../../services/session-agents/session-
 import { ChatAgentFeedbackSender } from '../../../services/agent-feedback/chat-agent-feedback-sender.service';
 import { subagentFollowUpPrompt } from '../../../utils/subagent-follow-up-prompt';
 
+import { PtahIconButtonDirective } from '@ptah-extension/ui';
 /** How the composer delivers the text for the agent's current state. */
 export type SubagentComposerMode = 'steer' | 'follow-up' | 'unavailable';
 
@@ -35,7 +36,7 @@ const FOLLOW_UP_FAILED = 'Could not send the follow-up. Try again.';
 @Component({
   selector: 'ptah-subagent-lane-composer',
   standalone: true,
-  imports: [AgentSteerInputComponent, LucideAngularModule],
+  imports: [AgentSteerInputComponent, LucideAngularModule, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   // The lane places it below its scroller, in the chat column; the input
   // sits in the main chat composer's card.
@@ -45,8 +46,7 @@ const FOLLOW_UP_FAILED = 'Could not send the follow-up. Try again.';
       @if (context(); as ctx) {
         <div class="flex items-center justify-end gap-1 py-1">
           @if (ctx.entry.canBackground) {
-            <button type="button" class="btn btn-ghost btn-xs btn-square"
-              aria-label="Send to background" title="Send to background"
+            <button type="button" ptahIconButton size="xs" label="Send to background"
               [disabled]="backgroundPending()" (click)="backgroundRequested.emit(ctx)">
               <lucide-angular [img]="MoonIcon" class="w-3.5 h-3.5" aria-hidden="true" />
             </button>
@@ -84,8 +84,7 @@ const FOLLOW_UP_FAILED = 'Could not send the follow-up. Try again.';
         @if (context(); as ctx) {
           <ng-container composerActions>
             @if (ctx.entry.canBackground) {
-              <button type="button" class="btn btn-ghost btn-xs btn-square"
-                aria-label="Send to background" title="Send to background"
+              <button type="button" ptahIconButton size="xs" label="Send to background"
                 [disabled]="backgroundPending()" (click)="backgroundRequested.emit(ctx)">
                 <lucide-angular [img]="MoonIcon" class="w-3.5 h-3.5" aria-hidden="true" />
               </button>

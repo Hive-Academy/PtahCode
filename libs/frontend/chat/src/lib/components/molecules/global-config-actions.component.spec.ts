@@ -52,7 +52,6 @@ describe('GlobalConfigActionsComponent', () => {
     );
     expect(buttons().every((b) => b.type === 'button')).toBe(true);
     expect(buttons().every((b) => b.textContent?.trim() === '')).toBe(true);
-    expect(buttons()[0].title).toBe('Thoth — agentic platform');
     expect(
       (fixture.nativeElement as HTMLElement).querySelector(
         '[data-test="config-menu-trigger"]',

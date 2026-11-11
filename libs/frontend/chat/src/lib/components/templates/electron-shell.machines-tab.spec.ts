@@ -9,6 +9,7 @@
  *     really activates the Machines route without a folder;
  *   - a pending-approval count badge is a hint on the label, not a button.
  */
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -125,7 +126,7 @@ describe('ElectronShellComponent Machines tab', () => {
     })
       .overrideComponent(ElectronShellComponent, {
         set: {
-          imports: [RouterOutlet],
+          imports: [RouterOutlet, PtahButtonDirective, PtahIconButtonDirective],
           schemas: [CUSTOM_ELEMENTS_SCHEMA],
         },
       })

@@ -34,6 +34,7 @@ import {
 } from 'lucide-angular';
 import { SessionTaskReader } from './session-task-reader';
 
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 /** Shape cue per status, so status is never carried by colour alone (17.2). */
 const STATUS_ICON: Readonly<Record<TaskStatus, LucideIconData>> = {
   backlog: Circle,
@@ -69,7 +70,7 @@ let nextTaskSectionId = 0;
 @Component({
   selector: 'ptah-inspector-task-section',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective],
   providers: [SessionTaskReader],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -112,7 +113,7 @@ let nextTaskSectionId = 0;
             <span class="min-w-0 flex-1">Could not load task</span>
             <button
               type="button"
-              class="btn btn-ghost btn-xs shrink-0"
+              ptahButton variant="ghost" size="xs" class="shrink-0"
               aria-label="Retry loading task"
               (click)="reader.retry()"
             >
@@ -165,7 +166,7 @@ let nextTaskSectionId = 0;
                 <span class="min-w-0 flex-1">Could not load task</span>
                 <button
                   type="button"
-                  class="btn btn-ghost btn-xs shrink-0"
+                  ptahButton variant="ghost" size="xs" class="shrink-0"
                   aria-label="Retry loading task"
                   (click)="reader.retry()"
                 >
@@ -176,7 +177,7 @@ let nextTaskSectionId = 0;
 
             @if (relatedCount() > 0) {
               <div class="mt-1">
-                <button type="button" class="btn btn-ghost btn-xs" [attr.aria-expanded]="relatedOpen()" [attr.aria-controls]="relatedId" [attr.aria-label]="relatedLabel()" (click)="relatedOpen.set(!relatedOpen())">+{{ relatedCount() }} more</button>
+                <button type="button" ptahButton variant="ghost" size="xs" [attr.aria-expanded]="relatedOpen()" [attr.aria-controls]="relatedId" [attr.aria-label]="relatedLabel()" (click)="relatedOpen.set(!relatedOpen())">+{{ relatedCount() }} more</button>
               </div>
             }
 
@@ -204,7 +205,7 @@ let nextTaskSectionId = 0;
                 }
               @if (groupedDocuments().other.length) {
                 <div #dropdownRoot class="dropdown static" [class.dropdown-open]="documentsOpen()">
-                  <button #documentsToggle type="button" class="btn btn-ghost btn-xs font-mono" [attr.aria-expanded]="documentsOpen()" [attr.aria-controls]="documentsMenuId" (click)="documentsOpen.set(!documentsOpen())">+{{ groupedDocuments().other.length }} files</button>
+                  <button #documentsToggle type="button" ptahButton variant="ghost" size="xs" [attr.aria-expanded]="documentsOpen()" [attr.aria-controls]="documentsMenuId" (click)="documentsOpen.set(!documentsOpen())">+{{ groupedDocuments().other.length }} files</button>
                   @if (documentsOpen()) {
                     <ul [id]="documentsMenuId" class="dropdown-content menu menu-xs left-0 top-full z-20 mt-1 max-h-56 w-full flex-nowrap overflow-y-auto rounded-lg border border-surface-border bg-surface-1 p-1 shadow-lg" aria-label="Other task documents">
                       @for (doc of groupedDocuments().other; track doc) {
@@ -220,14 +221,14 @@ let nextTaskSectionId = 0;
                   <div class="flex items-baseline justify-between gap-2 text-xs">
                     <span class="min-w-0 flex-1 truncate font-mono text-xs" [title]="preview.file">{{ preview.file }}</span>
                     @if (reader.canOpen) {
-                      <button #openButton type="button" class="btn btn-ghost btn-xs" [attr.aria-describedby]="reader.openError()?.file === preview.file ? openErrorId : null" (click)="reader.openDocument(preview.file, openButton)">Open</button>
+                      <button #openButton type="button" ptahButton variant="ghost" size="xs" [attr.aria-describedby]="reader.openError()?.file === preview.file ? openErrorId : null" (click)="reader.openDocument(preview.file, openButton)">Open</button>
                     }
-                    <button type="button" class="btn btn-ghost btn-xs btn-square" aria-label="Close document preview" (click)="reader.closePreview()">×</button>
+                    <button type="button" ptahIconButton size="xs" label="Close document preview" (click)="reader.closePreview()">×</button>
                   </div>
                   @if (preview.status === 'loading') {
                     <div class="skeleton h-12 w-full" aria-label="Loading document preview"></div>
                   } @else if (preview.status === 'error') {
-                    <p class="text-xs text-base-content-muted">Could not preview this document <button type="button" class="btn btn-ghost btn-xs" (click)="reader.previewDocument(preview.file)">Retry</button></p>
+                    <p class="text-xs text-base-content-muted">Could not preview this document <button type="button" ptahButton variant="ghost" size="xs" (click)="reader.previewDocument(preview.file)">Retry</button></p>
                   } @else {
                     <pre class="mt-1 max-h-[6lh] overflow-hidden whitespace-pre-wrap break-words font-mono text-xs leading-4 text-base-content-muted">{{ preview.content }}</pre>
                   }

@@ -2,8 +2,7 @@
   @if (narrow()) {
     @if (hasActions()) {
       <button type="button" data-inspector-action="more"
-        class="btn btn-ghost btn-xs btn-square size-7 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-        aria-label="More session actions" title="More session actions"
+        ptahIconButton size="xs" label="More session actions"
         aria-haspopup="menu" [attr.aria-expanded]="moreOpen()"
         (click)="toggleMore()" (keydown)="onMenuKeydown($event)">
         <lucide-angular [img]="EllipsisIcon" class="size-4" aria-hidden="true" />
@@ -34,14 +33,12 @@
   } @else {
     @if (sessionId()) {
       <button type="button" data-inspector-action="rename"
-        class="btn btn-ghost btn-xs btn-square size-7 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-        aria-label="Rename session" title="Rename session" (click)="select('rename')">
+        ptahIconButton size="xs" label="Rename session" (click)="select('rename')">
         <lucide-angular [img]="PencilIcon" class="size-4" aria-hidden="true" />
       </button>
       @if (organizer.available()) {
         <button type="button" data-inspector-action="organize"
-          class="btn btn-ghost btn-xs btn-square size-7 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-          aria-label="Organize session" title="Organize session" (click)="select('organize')">
+          ptahIconButton size="xs" label="Organize session" (click)="select('organize')">
           <lucide-angular [img]="FolderOpenIcon" class="size-4" aria-hidden="true" />
         </button>
       }
@@ -72,8 +69,8 @@
         <p id="inspector-rename-error" class="mt-2 text-sm text-state-err" role="alert">{{ renameError() }}</p>
       }
       <div class="mt-4 flex justify-end gap-2">
-        <button type="button" class="btn btn-ghost btn-sm" (click)="cancelRename()">Cancel</button>
-        <button type="submit" class="btn btn-primary btn-sm" [disabled]="renaming() || !renameDraft().trim()">Save</button>
+        <button type="button" ptahButton variant="ghost" (click)="cancelRename()">Cancel</button>
+        <button type="submit" ptahButton variant="primary" [disabled]="renaming() || !renameDraft().trim()">Save</button>
       </div>
     </form>
   </div>

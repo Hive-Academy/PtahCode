@@ -386,11 +386,7 @@
   },
   "libs/frontend/chat/src/lib/components/file-suggestions/file-tag.component.ts": {
     "badge": 1,
-    "badge-lg": 1,
-    "btn": 1,
-    "btn-circle": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
+    "badge-lg": 1
   },
   "libs/frontend/chat/src/lib/components/file-suggestions/suggestion-option.component.ts": {
     "badge": 3,
@@ -408,32 +404,13 @@
     "badge-sm": 4,
     "badge-success": 1,
     "badge-warning": 1,
-    "badge-xs": 5,
-    "btn": 4,
-    "btn-error": 1,
-    "btn-ghost": 3,
-    "btn-outline": 1,
-    "btn-square": 2,
-    "btn-xs": 4
+    "badge-xs": 5
   },
   "libs/frontend/chat/src/lib/components/molecules/agent-card/cli-agent-output.component.ts": {
     "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/components/molecules/agent-continue-input/agent-continue-input.component.ts": {
     "<dynamic>": 2
-  },
-  "libs/frontend/chat/src/lib/components/molecules/agent-origin-banner/agent-origin-banner.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
-  },
-  "libs/frontend/chat/src/lib/components/molecules/attachment-tray/attachment-tray.component.ts": {
-    "btn": 3,
-    "btn-circle": 1,
-    "btn-error": 1,
-    "btn-ghost": 2,
-    "btn-sm": 2,
-    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/chat-input/chat-input.component.ts": {
     "<dynamic>": 1
@@ -442,17 +419,15 @@
     "<dynamic>": 4
   },
   "libs/frontend/chat/src/lib/components/molecules/confirmation-dialog.component.ts": {
-    "btn": 2,
+    "btn": 1,
     "btn-error": 1,
-    "btn-ghost": 1,
     "btn-primary": 1,
     "btn-warning": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/delivery-status/delivery-status.component.ts": {
-    "btn": 3,
-    "btn-ghost": 2,
+    "btn": 1,
     "btn-warning": 1,
-    "btn-xs": 3
+    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/execution-header/execution-header.component.ts": {
     "<dynamic>": 1,
@@ -460,19 +435,10 @@
     "badge-ghost": 1,
     "badge-sm": 1
   },
-  "libs/frontend/chat/src/lib/components/molecules/global-config-actions.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1,
-    "btn-square": 1
-  },
   "libs/frontend/chat/src/lib/components/molecules/lane-event/lane-event-row.component.html": {
     "badge": 2,
     "badge-ghost": 2,
-    "badge-sm": 2,
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
+    "badge-sm": 2
   },
   "libs/frontend/chat/src/lib/components/molecules/mcp-server-list.component.ts": {
     "<dynamic>": 1
@@ -480,36 +446,17 @@
   "libs/frontend/chat/src/lib/components/molecules/mcp-status-chip.component.ts": {
     "<dynamic>": 2
   },
-  "libs/frontend/chat/src/lib/components/molecules/notifications/auth-required-banner.component.ts": {
-    "btn": 3,
-    "btn-ghost": 1,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-xs": 3
-  },
   "libs/frontend/chat/src/lib/components/molecules/notifications/install-scope-migration-notice.component.ts": {
-    "btn": 2,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 2,
     "card": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/notifications/resume-notification-banner.component.ts": {
     "badge": 2,
     "badge-outline": 1,
     "badge-warning": 2,
-    "badge-xs": 2,
-    "btn": 3,
-    "btn-ghost": 1,
-    "btn-primary": 2,
-    "btn-square": 1,
-    "btn-xs": 3
+    "badge-xs": 2
   },
   "libs/frontend/chat/src/lib/components/molecules/notifications/session-budget-banner.component.ts": {
-    "<dynamic>": 6,
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-xs": 3
+    "<dynamic>": 6
   },
   "libs/frontend/chat/src/lib/components/molecules/peer-session-send/peer-session-send-dialog.component.ts": {
     "alert": 2,
@@ -521,28 +468,11 @@
     "badge-sm": 2,
     "badge-success": 1,
     "badge-xs": 1,
-    "btn": 5,
-    "btn-circle": 1,
-    "btn-ghost": 3,
-    "btn-primary": 2,
-    "btn-sm": 4,
-    "btn-xs": 1,
     "textarea": 1,
     "textarea-bordered": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/previous-sessions-toolbar/previous-sessions-toolbar.component.ts": {
     "<dynamic>": 1
-  },
-  "libs/frontend/chat/src/lib/components/molecules/queued-follow-ups/queued-follow-ups.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
-  },
-  "libs/frontend/chat/src/lib/components/molecules/send-to-messaging/handoff-binding-picker.component.ts": {
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-xs": 3
   },
   "libs/frontend/chat/src/lib/components/molecules/send-to-messaging/send-to-messaging.component.ts": {
     "<dynamic>": 1,
@@ -557,11 +487,6 @@
     "<dynamic>": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/session-organization-editor/session-organization-editor.component.ts": {
-    "btn": 7,
-    "btn-circle": 1,
-    "btn-ghost": 4,
-    "btn-sm": 5,
-    "btn-xs": 2,
     "input": 2,
     "input-bordered": 2,
     "input-sm": 2,
@@ -578,18 +503,11 @@
     "badge-sm": 1,
     "badge-warning": 3,
     "badge-xs": 4,
-    "btn": 6,
+    "btn": 2,
     "btn-error": 1,
-    "btn-ghost": 4,
     "btn-outline": 1,
-    "btn-square": 3,
     "btn-success": 1,
-    "btn-xs": 6
-  },
-  "libs/frontend/chat/src/lib/components/organisms/display-sheet/display-sheet.component.ts": {
-    "btn": 4,
-    "btn-ghost": 4,
-    "btn-xs": 4
+    "btn-xs": 2
   },
   "libs/frontend/chat/src/lib/components/organisms/execution/execution-node.component.ts": {
     "alert": 1,
@@ -605,11 +523,9 @@
     "badge-success": 2,
     "badge-warning": 2,
     "badge-xs": 10,
-    "btn": 7,
-    "btn-ghost": 4,
-    "btn-link": 2,
-    "btn-primary": 1,
-    "btn-xs": 7,
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-xs": 1,
     "textarea": 1,
     "textarea-bordered": 1,
     "textarea-disabled": 1,
@@ -638,29 +554,9 @@
     "badge": 1,
     "badge-xs": 1
   },
-  "libs/frontend/chat/src/lib/components/organisms/execution/workflow-card.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/chat/src/lib/components/organisms/message-bubble.component.html": {
     "badge": 2,
-    "badge-sm": 2,
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
-  },
-  "libs/frontend/chat/src/lib/components/organisms/previous-sessions/previous-sessions-load-state.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1,
-    "btn-square": 1
-  },
-  "libs/frontend/chat/src/lib/components/organisms/previous-sessions/previous-sessions-modal.component.html": {
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-sm": 3,
-    "btn-square": 1
+    "badge-sm": 2
   },
   "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-agent-row.component.ts": {
     "<dynamic>": 2
@@ -669,12 +565,11 @@
     "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-session-actions.component.html": {
-    "btn": 9,
-    "btn-ghost": 8,
-    "btn-primary": 1,
-    "btn-sm": 5,
-    "btn-square": 4,
-    "btn-xs": 4,
+    "btn": 4,
+    "btn-ghost": 4,
+    "btn-sm": 3,
+    "btn-square": 1,
+    "btn-xs": 1,
     "input": 1,
     "input-bordered": 1
   },
@@ -686,38 +581,19 @@
     "badge": 3,
     "badge-ghost": 2,
     "badge-sm": 3,
-    "btn": 8,
+    "btn": 1,
     "btn-active": 1,
-    "btn-ghost": 8,
-    "btn-square": 1,
-    "btn-xs": 8,
+    "btn-ghost": 1,
+    "btn-xs": 1,
     "skeleton": 3
   },
-  "libs/frontend/chat/src/lib/components/organisms/session-inspector/session-inspector.component.html": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/chat/src/lib/components/organisms/subagent-lane/subagent-lane-composer.component.ts": {
-    "<dynamic>": 2,
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-square": 2,
-    "btn-xs": 2
+    "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/components/organisms/subagent-lane/subagent-lane.component.ts": {
-    "<dynamic>": 4,
-    "btn": 5,
-    "btn-ghost": 2,
-    "btn-link": 3,
-    "btn-square": 2,
-    "btn-xs": 5
+    "<dynamic>": 4
   },
   "libs/frontend/chat/src/lib/components/organisms/transcript/chat-transcript.component.html": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1,
     "skeleton": 3
   },
   "libs/frontend/chat/src/lib/components/organisms/transcript/lane-thread-row.component.ts": {
@@ -728,65 +604,28 @@
     "badge-warning": 1,
     "badge-xs": 1
   },
-  "libs/frontend/chat/src/lib/components/organisms/transcript/single-chat-subagent-view.component.ts": {
+  "libs/frontend/chat/src/lib/components/organisms/workspace-sidebar.component.ts": {
     "btn": 1,
     "btn-ghost": 1,
-    "btn-xs": 1
-  },
-  "libs/frontend/chat/src/lib/components/organisms/workspace-sidebar.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-sm": 1,
     "btn-square": 1,
     "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/components/templates/app-shell.component.html": {
-    "btn": 10,
+    "btn": 6,
     "btn-active": 3,
-    "btn-circle": 1,
-    "btn-ghost": 7,
+    "btn-ghost": 4,
     "btn-gold": 2,
-    "btn-primary": 2,
-    "btn-sm": 2,
+    "btn-primary": 1,
     "btn-square": 1,
-    "btn-xs": 8,
+    "btn-xs": 6,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
   },
-  "libs/frontend/chat/src/lib/components/templates/chat-view.component.html": {
-    "btn": 4,
-    "btn-ghost": 3,
-    "btn-outline": 1,
-    "btn-sm": 2,
-    "btn-xs": 2
-  },
-  "libs/frontend/chat/src/lib/components/templates/display-window/display-window.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
-  },
   "libs/frontend/chat/src/lib/components/templates/electron-shell.component.ts": {
     "badge": 1,
     "badge-warning": 1,
-    "badge-xs": 1,
-    "btn": 5,
-    "btn-ghost": 3,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-square": 1,
-    "btn-xs": 3
-  },
-  "libs/frontend/chat/src/lib/components/templates/electron-welcome.component.ts": {
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-xs": 1
-  },
-  "libs/frontend/chat/src/lib/components/templates/workspace-loading-state.component.ts": {
-    "btn": 1,
-    "btn-primary": 1
+    "badge-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/advanced-settings.component.ts": {
     "<dynamic>": 1,

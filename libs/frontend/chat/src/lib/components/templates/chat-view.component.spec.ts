@@ -3347,7 +3347,7 @@ describe('agent panel narrow overlay mode', () => {
     openPanelFromSidebar();
     expect(panel().classList.contains('absolute')).toBe(true);
     expect(
-      h.fixture.nativeElement.querySelector('button[title="Close panel"]'),
+      h.fixture.nativeElement.querySelector('button[aria-label="Close panel"]'),
     ).toBe(document.activeElement);
 
     // The binding is host-scoped, not document-scoped: a canvas holds many
@@ -3393,7 +3393,7 @@ describe('agent panel narrow overlay mode', () => {
     openPanelFromSidebar();
 
     const closeButton = h.fixture.nativeElement.querySelector(
-      'button[title="Close panel"]',
+      'button[aria-label="Close panel"]',
     ) as HTMLButtonElement;
     closeButton.click();
     h.fixture.detectChanges();

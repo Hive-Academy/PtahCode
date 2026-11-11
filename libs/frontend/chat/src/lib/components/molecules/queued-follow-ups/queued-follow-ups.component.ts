@@ -15,6 +15,7 @@ import {
 } from '@ptah-extension/chat-state';
 import { FollowUpQueueService } from '../../../services/chat-store/follow-up-queue.service';
 
+import { PtahButtonDirective } from '@ptah-extension/ui';
 const PREVIEW_LENGTH = 100;
 
 /**
@@ -27,7 +28,7 @@ const PREVIEW_LENGTH = 100;
 @Component({
   selector: 'ptah-queued-follow-ups',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective],
   template: `
     @if (items().length > 0) {
       <section
@@ -55,7 +56,7 @@ const PREVIEW_LENGTH = 100;
               @if (sendNowAvailable() && item.phase === 'queued') {
                 <button
                   type="button"
-                  class="btn btn-ghost btn-xs"
+                  ptahButton variant="ghost" size="xs"
                   data-testid="queued-follow-up-send-now"
                   [disabled]="pending().has(item.clientMessageId)"
                   [attr.aria-label]="(isClaude() ? 'Interrupt and send: ' : 'Send now: ') + preview(item.content)"
@@ -66,7 +67,7 @@ const PREVIEW_LENGTH = 100;
               }
               <button
                 type="button"
-                class="btn btn-ghost btn-xs"
+                ptahButton variant="ghost" size="xs"
                 data-testid="queued-withdraw"
                 title="Withdraw and put the text back in the composer"
                 [disabled]="

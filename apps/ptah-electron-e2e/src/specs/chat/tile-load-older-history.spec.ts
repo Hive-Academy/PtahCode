@@ -321,7 +321,8 @@ async function activateLoadEarlierWithoutSentinelRace(
 ): Promise<void> {
   await expect(button).toBeVisible();
   await expect(button).toBeEnabled();
-  await expect(button).toHaveAttribute('aria-busy', 'false');
+  // ptahButton omits aria-busy when idle; only the busy state sets it.
+  await expect(button).not.toHaveAttribute('aria-busy', 'true');
 
   // Playwright's pointer click scrolls this off-screen control into view first.
   // That upward scroll intentionally arms the adjacent auto-load sentinel,

@@ -8,6 +8,7 @@ import { LucideAngularModule, PlayCircle, X } from 'lucide-angular';
 import { injectWallClock } from '@ptah-extension/core';
 import type { SubagentRecord } from '@ptah-extension/shared';
 
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 /**
  * ResumeNotificationBannerComponent - Banner for resumable interrupted agents
  *
@@ -31,7 +32,7 @@ import type { SubagentRecord } from '@ptah-extension/shared';
  */
 @Component({
   selector: 'ptah-resume-notification-banner',
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective],
   template: `
     @if (resumableSubagents().length > 0) {
       <div
@@ -54,7 +55,7 @@ import type { SubagentRecord } from '@ptah-extension/shared';
           @if (resumableSubagents().length > 1) {
             <button
               type="button"
-              class="btn btn-xs btn-primary gap-0.5 px-2"
+              ptahButton variant="primary" size="xs"
               (click)="onResumeAll()"
               aria-label="Resume all interrupted agents"
             >
@@ -68,10 +69,8 @@ import type { SubagentRecord } from '@ptah-extension/shared';
           }
           <button
             type="button"
-            class="btn btn-ghost btn-xs btn-square h-5 w-5 min-h-0"
+            ptahIconButton size="xs" label="Dismiss interrupted agents notification"
             (click)="onDismiss()"
-            title="Dismiss"
-            aria-label="Dismiss interrupted agents notification"
           >
             <lucide-angular [img]="XIcon" class="w-3 h-3 opacity-50" />
           </button>
@@ -99,7 +98,7 @@ import type { SubagentRecord } from '@ptah-extension/shared';
             <span class="flex-1"></span>
             <button
               type="button"
-              class="btn btn-xs btn-primary gap-0.5 px-2"
+              ptahButton variant="primary" size="xs"
               (click)="onResume(agent)"
               [attr.aria-label]="
                 'Resume ' + agent.agentType + ' agent ' + agent.agentId

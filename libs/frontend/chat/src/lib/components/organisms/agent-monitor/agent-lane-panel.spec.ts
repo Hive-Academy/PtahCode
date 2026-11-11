@@ -286,17 +286,17 @@ describe('agent panel lanes', () => {
   it('toggles forced single view with an accessible pressed state', () => {
     const fixture = create();
     const button: HTMLButtonElement = fixture.nativeElement.querySelector(
-      '[title="Show one agent"]',
+      '[aria-label="Show one agent"]',
     );
     button.click();
     fixture.detectChanges();
     expect(button.getAttribute('aria-pressed')).toBe('true');
-    expect(button.title).toBe('Show agents side by side');
+    expect(button.getAttribute('aria-label')).toBe('Show agents side by side');
     expect(fixture.componentInstance.lanesMode()).toBe(false);
     button.click();
     fixture.detectChanges();
     expect(button.getAttribute('aria-pressed')).toBe('false');
-    expect(button.title).toBe('Show one agent');
+    expect(button.getAttribute('aria-label')).toBe('Show one agent');
     expect(
       fixture.nativeElement.querySelectorAll('[data-lane-id]'),
     ).toHaveLength(2);
@@ -305,12 +305,12 @@ describe('agent panel lanes', () => {
   it('hides the toggle on narrow panels but keeps an active force-single toggle available', () => {
     const fixture = create(599);
     expect(
-      fixture.nativeElement.querySelector('button[title="Show one agent"]'),
+      fixture.nativeElement.querySelector('button[aria-label="Show one agent"]'),
     ).toBeNull();
     fixture.componentInstance.bodyWidth.set(650);
     fixture.detectChanges();
     const toggle: HTMLButtonElement = fixture.nativeElement.querySelector(
-      'button[title="Show one agent"]',
+      'button[aria-label="Show one agent"]',
     );
     toggle.click();
     fixture.detectChanges();
@@ -318,7 +318,7 @@ describe('agent panel lanes', () => {
     fixture.detectChanges();
     expect(
       fixture.nativeElement.querySelector(
-        'button[title="Show agents side by side"]',
+        'button[aria-label="Show agents side by side"]',
       ),
     ).toBe(toggle);
     toggle.click();
