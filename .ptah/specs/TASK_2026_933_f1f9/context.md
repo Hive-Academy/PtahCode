@@ -98,3 +98,42 @@ Observations, not fixed in this task:
 
 Evidence (local, in the temporary trial folder, not in the repository): screenshots `t3-*.png` and
 `t4-*.png`, videos `setup-hub-trial-3-codex-8x.mp4` and `setup-hub-trial-4-codex-banner-apply.mp4`.
+
+## Electron trial of "AI team builder" (2026-11-11, head `af83146a7`)
+
+Setup: Electron dev app built from `af83146a7`, window 1456 x 940 (viewport 1440 x 875), an
+existing small project (Fastify + SQLite API, 7 files), Codex with `gpt-6.1-terra`.
+
+Results:
+
+- The form opened a normal chat tab ("AI Team Builder", workflow "Configure Harness"). The session
+  showed in the Sessions list with the brief as the first user message.
+- Codex read the workspace, searched skills and the MCP registry, created two workspace skills and
+  submitted the proposal in one turn (1 min 02 s, 13 tools, no questions asked).
+- The banner showed "Fastify SQLite API team, 2 agents, 3 subagents, 4 skills, CLAUDE.md, System
+  prompt". "Apply to Workspace" ended with "Applied · 8 files written". Host log: `harness:apply`
+  success, 7 of 7 targets, 25.3 s (slow handler warning again).
+- Files on disk after Apply: three agents in `.claude/agents/`, `.claude/CLAUDE.md`, two skills
+  under `.ptah/plugins/ptah-harness-*/skills/`, `.mcp.json`, `.agents/mcp_config.json`. The two
+  catalog skills (`fastify-best-practices`, `vitest`) were installed from skills.sh.
+- A second launch from the same form opened a second chat tab and ended with its own banner
+  ("Bookshelf API Documentation Writer, 1 subagent, 2 skills"). It was not applied.
+
+Not covered:
+
+- Cancel on Back during a launch: the launch finished before a scripted click on Back could land
+  (under one second), so this path has unit test evidence only.
+- The canvas adoption failure path and the workspace change path: no way to cause them by hand.
+- Codex asked no question in this flow, so the async question path was not used here (it was used
+  in the "New project" trial).
+
+Observations, not fixed in this task:
+
+- The plan limits card in the stats panel is titled "Claude" while its account line reads "Codex
+  account" and Codex is the main provider. A separate session works on this
+  (branch `fix/codex-limit-state-and-plan-limits-provider`).
+- In the collapsed stats rail the cost note is cut off ("covered by subscriptio").
+
+Evidence (local, in the temporary trial folder): screenshots `t5-*.png`, videos
+`setup-hub-trial-5-codex-team-builder.mp4` (11 min 47 s, real time) and
+`setup-hub-trial-5-codex-team-builder-4x.mp4`.
