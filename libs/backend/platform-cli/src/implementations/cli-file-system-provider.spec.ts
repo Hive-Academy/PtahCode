@@ -84,7 +84,13 @@ function remap(
     copy: (src, dst, opts) => provider.copy(rewrite(src), rewrite(dst), opts),
     findFiles: (pattern, exclude, max, cwd) =>
       provider.findFiles(pattern, exclude, max, cwd ? rewrite(cwd) : undefined),
-    createFileWatcher: (pattern) => provider.createFileWatcher(pattern),
+    createFileWatcher: (pattern, opts) =>
+      provider.createFileWatcher(
+        pattern,
+        opts
+          ? { ...opts, cwd: opts.cwd ? rewrite(opts.cwd) : undefined }
+          : undefined,
+      ),
   };
 }
 
@@ -445,7 +451,7 @@ describe('CliFileSystemProvider — CLI-specific behaviour', () => {
     expect(Array.from(actual)).toEqual(Array.from(bytes));
   });
 
-  it('createFileWatcher wires change/add/unlink events through chokidar and fires the correct IFileWatcher events', async () => {
+  it('createFileWatcher wires change/add/unlink events through chokidar on linux and fires the correct IFileWatcher events', async () => {
     // Replace the module-level chokidar stub with one that captures event
     // handlers so we can invoke them manually and assert the IFileWatcher
     // onDidChange / onDidCreate / onDidDelete events fire correctly.
@@ -461,8 +467,11 @@ describe('CliFileSystemProvider — CLI-specific behaviour', () => {
     const chokidar = jest.requireMock<{ watch: jest.Mock }>('chokidar');
     chokidar.watch = mockWatch;
 
+    const linuxProvider = new CliFileSystemProvider({ platform: 'linux' });
     const projectRoot = path.resolve('/project');
-    const watcher = provider.createFileWatcher('**/*.ts', { cwd: projectRoot });
+    const watcher = linuxProvider.createFileWatcher('**/*.ts', {
+      cwd: projectRoot,
+    });
 
     const changedFiles: string[] = [];
     const createdFiles: string[] = [];
@@ -494,6 +503,33 @@ describe('CliFileSystemProvider — CLI-specific behaviour', () => {
     expect(deletedFiles).toEqual([path.join(projectRoot, 'baz.ts')]);
 
     watcher.dispose();
+    watcher.dispose();
+  });
+
+  it('createFileWatcher uses one recursive fs.watch handle on win32 and logs timing via getLogger', () => {
+    const close = jest.fn();
+    const fsWatch = jest.fn(() => ({ close, on: jest.fn() }));
+    const debug = jest.fn();
+    const mockChokidar = jest.fn();
+    const chokidar = jest.requireMock<{ watch: jest.Mock }>('chokidar');
+    chokidar.watch = mockChokidar;
+
+    const winProvider = new CliFileSystemProvider({
+      platform: 'win32',
+      fsWatch,
+      getLogger: () => ({ debug, warn: jest.fn() }),
+    });
+    const watcher = winProvider.createFileWatcher('.ptah/specs/**', {
+      cwd: root,
+    });
+    expect(fsWatch).toHaveBeenCalledTimes(1);
+    expect(mockChokidar).not.toHaveBeenCalled();
+    expect(debug).toHaveBeenCalledWith(
+      '[file-watcher] created',
+      expect.objectContaining({ mode: 'recursive', handles: 1 }),
+    );
+    watcher.dispose();
+    expect(close).toHaveBeenCalledTimes(1);
   });
 });
 

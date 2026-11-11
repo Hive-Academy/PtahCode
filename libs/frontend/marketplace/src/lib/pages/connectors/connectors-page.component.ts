@@ -184,7 +184,10 @@ interface PageActionError extends TrackedActionError {
 export class ConnectorsPageComponent {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
-  protected readonly detailMotionKey = detailParamKey(this.route, 'connectorId');
+  protected readonly detailMotionKey = detailParamKey(
+    this.route,
+    'connectorId',
+  );
   protected readonly motionLeaveClone = inject(MARKETPLACE_LEAVE_CLONE);
   private readonly injector = inject(Injector);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
@@ -396,7 +399,9 @@ export class ConnectorsPageComponent {
 
   public constructor() {
     void this.links.ensure();
-    afterNextRender(() => this.hasRendered.set(true), { injector: this.injector });
+    afterNextRender(() => this.hasRendered.set(true), {
+      injector: this.injector,
+    });
 
     // The hero needs the detected CLIs, and only at wide. Ask once; the root
     // store keeps the answer for every other page. The CLI tile's Retry asks

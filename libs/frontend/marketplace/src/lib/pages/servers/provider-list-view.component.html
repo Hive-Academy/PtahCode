@@ -23,8 +23,9 @@
         <p class="min-w-0 flex-1">{{ message }}</p>
         <button
           type="button"
-          class="btn btn-ghost btn-xs btn-square"
-          aria-label="Dismiss message"
+          ptahIconButton
+          label="Dismiss message"
+          size="xs"
           data-testid="provider-list-notice-dismiss"
           (click)="notice.set(null)"
         >
@@ -135,7 +136,11 @@
         data-testid="provider-detail-docked"
         (closed)="closeDetail()"
       >
-        <div ptahMotionRouteStage [motionRouteKey]="detailMotionKey" [motionLeaveClone]="motionLeaveClone">
+        <div
+          ptahMotionRouteStage
+          [motionRouteKey]="detailMotionKey"
+          [motionLeaveClone]="motionLeaveClone"
+        >
           <router-outlet />
         </div>
       </ptah-docked-inspector>
@@ -149,7 +154,11 @@
         data-testid="provider-detail-drawer"
         (closed)="closeDetail()"
       >
-        <div ptahMotionRouteStage [motionRouteKey]="detailMotionKey" [motionLeaveClone]="motionLeaveClone">
+        <div
+          ptahMotionRouteStage
+          [motionRouteKey]="detailMotionKey"
+          [motionLeaveClone]="motionLeaveClone"
+        >
           <router-outlet />
         </div>
       </ptah-native-drawer>

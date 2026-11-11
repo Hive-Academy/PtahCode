@@ -71,6 +71,35 @@ export { isResultMessage as isSDKResultMessage };
 export const NEUTRAL_PEER_LABEL = 'peer session';
 const MAX_PENDING_BASH_COMMANDS = 64;
 const MAX_BACKGROUND_COMMAND_LENGTH = 2_000;
+/** Bound of the background-shell identity marks kept per transformer family. */
+const MAX_BACKGROUND_SHELL_MARKS = 1_000;
+
+/**
+ * Remembers which tool_use ids launched a background shell command (Bash or
+ * PowerShell with `run_in_background`). A `task_notification` carries no
+ * `task_type`, so this is the only way to know, after a compact boundary or
+ * in a later stream of the same session, that a terminal notification belongs
+ * to a shell and not to a subagent. The root transformer shares one ledger
+ * with every `createIsolated()` stream. It is never cleared by compaction and
+ * is bounded (oldest entry first out).
+ */
+class BackgroundShellLedger {
+  private readonly keys = new Set<string>();
+
+  add(sessionId: string, toolUseId: string): void {
+    const key = JSON.stringify([sessionId, toolUseId]);
+    this.keys.delete(key);
+    this.keys.add(key);
+    if (this.keys.size > MAX_BACKGROUND_SHELL_MARKS) {
+      const oldest = this.keys.values().next().value;
+      if (oldest) this.keys.delete(oldest);
+    }
+  }
+
+  has(sessionId: string, toolUseId: string): boolean {
+    return this.keys.has(JSON.stringify([sessionId, toolUseId]));
+  }
+}
 
 /**
  * Read the provenance stamp off any SDK message. Present on user turns and
@@ -117,7 +146,10 @@ export class SdkMessageTransformer implements TransformerState {
     string,
     BackgroundAnnounceOrigin
   >();
+  /** Keyed by {@link taskLifecycleKey}: session-scoped like the task parents. */
   private readonly nonAgentTaskIds: Set<string> = new Set();
+  /** Shared with isolated streams — see {@link BackgroundShellLedger}. */
+  private backgroundShellLedger = new BackgroundShellLedger();
   private readonly pendingBashCommands = new Map<
     string,
     { sessionId: string; command: string }
@@ -185,7 +217,7 @@ export class SdkMessageTransformer implements TransformerState {
   }
 
   createIsolated(): SdkMessageTransformer {
-    return new SdkMessageTransformer(
+    const isolated = new SdkMessageTransformer(
       this.logger,
       this.authEnv,
       this.subagentRegistry,
@@ -197,6 +229,10 @@ export class SdkMessageTransformer implements TransformerState {
       this.stopNotices,
       this.hostAttention,
     );
+    // A shell started in an earlier stream of the session (resume, query
+    // restart, worker_restart) must still be known as a shell here.
+    isolated.backgroundShellLedger = this.backgroundShellLedger;
+    return isolated;
   }
 
   getCumulativeTokens(sessionId: string): number {
@@ -543,7 +579,10 @@ export class SdkMessageTransformer implements TransformerState {
       }
     }
     this.taskStartedEmitted.clear();
-    this.nonAgentTaskIds.clear();
+    // nonAgentTaskIds is deliberately NOT cleared: a background shell can
+    // settle after a compact boundary, and without the mark its
+    // task_notification became a phantom "Sub-agent" card. Each mark is
+    // removed per task by clearTaskParent; the set is bounded on insert.
     this.workflowRunByToolUseId.clear();
   }
 
@@ -607,8 +646,32 @@ export class SdkMessageTransformer implements TransformerState {
     return this.backgroundAnnouncedToolUseIds.get(toolUseId);
   }
 
-  isNonAgentTask(taskId: string): boolean {
-    return this.nonAgentTaskIds.has(taskId);
+  isNonAgentTask(taskId: string, sessionId?: string): boolean {
+    return this.nonAgentTaskIds.has(this.taskLifecycleKey(taskId, sessionId));
+  }
+
+  getShellTaskToolUseId(
+    taskId: string,
+    sessionId?: string,
+  ): string | undefined {
+    if (!sessionId) return undefined;
+    return this.bashTaskToolUseIdsBySession.get(sessionId)?.get(taskId);
+  }
+
+  isBackgroundShellToolUse(
+    toolUseId: string | undefined,
+    sessionId: string | undefined,
+  ): boolean {
+    if (!toolUseId || !sessionId) return false;
+    if (this.backgroundShellLedger.has(sessionId, toolUseId)) return true;
+    if (this.pendingBashCommands.get(toolUseId)?.sessionId === sessionId)
+      return true;
+    for (const linked of this.bashTaskToolUseIdsBySession
+      .get(sessionId)
+      ?.values() ?? []) {
+      if (linked === toolUseId) return true;
+    }
+    return false;
   }
 
   hasActiveSkillToolUseId(toolUseId: string): boolean {
@@ -694,7 +757,13 @@ export class SdkMessageTransformer implements TransformerState {
     this.taskIdToParentToolUseId.delete(
       this.taskLifecycleKey(taskId, sessionId),
     );
-    this.nonAgentTaskIds.delete(taskId);
+    this.nonAgentTaskIds.delete(this.taskLifecycleKey(taskId, sessionId));
+    if (sessionId) {
+      const links = this.bashTaskToolUseIdsBySession.get(sessionId);
+      if (links?.delete(taskId) && !links.size) {
+        this.bashTaskToolUseIdsBySession.delete(sessionId);
+      }
+    }
   }
 
   markTaskTerminalEmitted(
@@ -722,8 +791,13 @@ export class SdkMessageTransformer implements TransformerState {
     toolUseId?: string,
     sessionId?: string,
   ): void {
-    this.nonAgentTaskIds.add(taskId);
+    this.nonAgentTaskIds.add(this.taskLifecycleKey(taskId, sessionId));
+    if (this.nonAgentTaskIds.size > MAX_BACKGROUND_SHELL_MARKS) {
+      const oldest = this.nonAgentTaskIds.values().next().value;
+      if (oldest) this.nonAgentTaskIds.delete(oldest);
+    }
     if (!toolUseId || !sessionId) return;
+    this.backgroundShellLedger.add(sessionId, toolUseId);
     const links =
       this.bashTaskToolUseIdsBySession.get(sessionId) ??
       new Map<string, string>();
@@ -743,6 +817,7 @@ export class SdkMessageTransformer implements TransformerState {
       command.length > MAX_BACKGROUND_COMMAND_LENGTH
         ? `${command.slice(0, MAX_BACKGROUND_COMMAND_LENGTH - 1)}…`
         : command;
+    this.backgroundShellLedger.add(sessionId, toolUseId);
     this.pendingBashCommands.set(toolUseId, {
       sessionId,
       command: boundedCommand,

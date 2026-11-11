@@ -78,7 +78,12 @@ export function registerPlatformCliServices(
     useValue: createSessionDriverLock(),
   });
   container.register(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER, {
-    useValue: new CliFileSystemProvider(),
+    useValue: new CliFileSystemProvider({
+      getLogger: () =>
+        container.isRegistered(LOGGER_TOKEN)
+          ? container.resolve<Logger>(LOGGER_TOKEN)
+          : undefined,
+    }),
   });
   container.register(PLATFORM_TOKENS.STATE_STORAGE, {
     useValue: new CliStateStorage(userDataPath, 'global-state.json'),

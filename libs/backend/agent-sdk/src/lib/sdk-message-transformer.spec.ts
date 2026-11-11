@@ -1245,6 +1245,263 @@ describe('SdkMessageTransformer — task_notification after compact_boundary', (
     expect(completed[0]).toMatchObject({ parentToolUseId: 'toolu_bg' });
   });
 
+  function shellTaskStarted(taskId: string, toolUseId: string): unknown {
+    return {
+      type: 'system',
+      subtype: 'task_started',
+      task_id: taskId,
+      tool_use_id: toolUseId,
+      session_id: SESSION,
+      skip_transcript: false,
+      task_type: 'local_bash',
+    };
+  }
+
+  function toolResultsOf(events: unknown[]): Array<Record<string, unknown>> {
+    return events.filter(
+      (e) => (e as { eventType?: string }).eventType === 'tool_result',
+    ) as Array<Record<string, unknown>>;
+  }
+
+  it('(a) background Bash shell settling after compact_boundary emits tool_result, not agent_completed', () => {
+    const transformer = build();
+    transformer.transform(
+      makeAssistantWithToolUse({
+        toolUseId: 'toolu_bash_bg',
+        name: 'Bash',
+        input: { command: 'npm run watch', run_in_background: true },
+      }) as never,
+      SESSION as never,
+    );
+    transformer.transform(
+      shellTaskStarted('task-bash-bg', 'toolu_bash_bg') as never,
+      SESSION as never,
+    );
+    transformer.transform(makeCompactBoundary({}) as never, SESSION as never);
+
+    const events = transformer.transform(
+      notification('task-bash-bg', { tool_use_id: 'toolu_bash_bg' }) as never,
+      SESSION as never,
+    );
+
+    expect(completionsOf(events)).toHaveLength(0);
+    const results = toolResultsOf(events);
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ toolCallId: 'toolu_bash_bg' });
+  });
+
+  it('(a) background PowerShell shell settling after compact_boundary emits tool_result, not agent_completed', () => {
+    const transformer = build();
+    transformer.transform(
+      makeAssistantWithToolUse({
+        toolUseId: 'toolu_pwsh_bg',
+        name: 'PowerShell',
+        input: { command: 'npm run watch', run_in_background: true },
+      }) as never,
+      SESSION as never,
+    );
+    // No task_started reaches this stream: only the tool_use identifies it.
+    transformer.transform(makeCompactBoundary({}) as never, SESSION as never);
+
+    const events = transformer.transform(
+      notification('task-pwsh-bg', { tool_use_id: 'toolu_pwsh_bg' }) as never,
+      SESSION as never,
+    );
+
+    expect(completionsOf(events)).toHaveLength(0);
+    expect(toolResultsOf(events)).toHaveLength(1);
+  });
+
+  it('(a) background shell stopped by worker_restart in a fresh isolated stream emits no agent_completed', () => {
+    const root = build();
+    const first = root.createIsolated();
+    first.transform(
+      makeAssistantWithToolUse({
+        toolUseId: 'toolu_bash_restart',
+        name: 'Bash',
+        input: { command: 'node rec.mjs', run_in_background: true },
+      }) as never,
+      SESSION as never,
+    );
+    first.transform(
+      shellTaskStarted('task-bash-restart', 'toolu_bash_restart') as never,
+      SESSION as never,
+    );
+
+    const second = root.createIsolated();
+    const events = second.transform(
+      notification('task-bash-restart', {
+        tool_use_id: 'toolu_bash_restart',
+        status: 'stopped',
+        reason: 'worker_restart',
+        summary: 'Background command stopped',
+      }) as never,
+      SESSION as never,
+    );
+
+    expect(completionsOf(events)).toHaveLength(0);
+    const results = toolResultsOf(events);
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      toolCallId: 'toolu_bash_restart',
+      isError: true,
+    });
+  });
+
+  it('(a) background shell notification without tool_use_id settles its Bash node after compact_boundary', () => {
+    const transformer = build();
+    transformer.transform(
+      makeAssistantWithToolUse({
+        toolUseId: 'toolu_bash_nolink',
+        name: 'Bash',
+        input: { command: 'npm run watch', run_in_background: true },
+      }) as never,
+      SESSION as never,
+    );
+    transformer.transform(
+      shellTaskStarted('task-bash-nolink', 'toolu_bash_nolink') as never,
+      SESSION as never,
+    );
+    transformer.transform(makeCompactBoundary({}) as never, SESSION as never);
+
+    const events = transformer.transform(
+      notification('task-bash-nolink') as never,
+      SESSION as never,
+    );
+
+    expect(completionsOf(events)).toHaveLength(0);
+    const results = toolResultsOf(events);
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ toolCallId: 'toolu_bash_nolink' });
+
+    // The launch link is cleared at completion: a repeated notification
+    // cannot settle the node a second time.
+    const repeated = transformer.transform(
+      notification('task-bash-nolink') as never,
+      SESSION as never,
+    );
+    expect(toolResultsOf(repeated)).toHaveLength(0);
+  });
+
+  it('(a) a shell mark in one session does not hide an agent with the same task_id in another session', () => {
+    const transformer = build();
+    const OTHER = 'sess-other';
+    transformer.transform(
+      shellTaskStarted('task-shared', 'toolu_shell_a') as never,
+      SESSION as never,
+    );
+    transformer.transform(
+      makeCompactBoundary({}) as never,
+      SESSION as never,
+    );
+    transformer.transform(
+      {
+        ...(makeTaskStarted({
+          taskId: 'task-shared',
+          toolUseId: 'toolu_agent_b',
+          sessionId: OTHER,
+        }) as Record<string, unknown>),
+        task_type: 'local_agent',
+      } as never,
+      OTHER as never,
+    );
+
+    const progress = transformer.transform(
+      {
+        type: 'system',
+        subtype: 'task_progress',
+        task_id: 'task-shared',
+        tool_use_id: 'toolu_agent_b',
+        session_id: OTHER,
+        description: 'working',
+        usage: { total_tokens: 1, tool_uses: 1, duration_ms: 1 },
+      } as never,
+      OTHER as never,
+    );
+    expect(
+      progress.filter(
+        (e) => (e as { eventType?: string }).eventType === 'agent_progress',
+      ),
+    ).toHaveLength(1);
+
+    const events = transformer.transform(
+      notification('task-shared', {
+        tool_use_id: 'toolu_agent_b',
+        session_id: OTHER,
+      }) as never,
+      OTHER as never,
+    );
+    const completed = completionsOf(events);
+    expect(completed).toHaveLength(1);
+    expect(completed[0]).toMatchObject({ parentToolUseId: 'toolu_agent_b' });
+    expect(toolResultsOf(events)).toHaveLength(0);
+  });
+
+  it('(a) task_progress of a background shell in a fresh isolated stream emits no agent_progress', () => {
+    const root = build();
+    const first = root.createIsolated();
+    first.transform(
+      makeAssistantWithToolUse({
+        toolUseId: 'toolu_bash_prog',
+        name: 'Bash',
+        input: { command: 'node rec.mjs', run_in_background: true },
+      }) as never,
+      SESSION as never,
+    );
+
+    const second = root.createIsolated();
+    const events = second.transform(
+      {
+        type: 'system',
+        subtype: 'task_progress',
+        task_id: 'task-bash-prog',
+        tool_use_id: 'toolu_bash_prog',
+        session_id: SESSION,
+        description: 'running',
+        usage: { total_tokens: 1, tool_uses: 1, duration_ms: 1 },
+      } as never,
+      SESSION as never,
+    );
+
+    expect(
+      events.filter(
+        (e) => (e as { eventType?: string }).eventType === 'agent_progress',
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('(c) foreground subagent settling after compact_boundary still emits agent_completed', () => {
+    const transformer = build();
+    transformer.transform(
+      makeAssistantWithToolUse({
+        toolUseId: 'toolu_agent_fg',
+        name: 'Agent',
+        input: { description: 'review', prompt: 'review it' },
+      }) as never,
+      SESSION as never,
+    );
+    transformer.transform(
+      makeTaskStarted({
+        taskId: 'task-agent-fg',
+        toolUseId: 'toolu_agent_fg',
+      }) as never,
+      SESSION as never,
+    );
+    transformer.transform(makeCompactBoundary({}) as never, SESSION as never);
+
+    const completed = completionsOf(
+      transformer.transform(
+        notification('task-agent-fg', {
+          tool_use_id: 'toolu_agent_fg',
+        }) as never,
+        SESSION as never,
+      ),
+    );
+
+    expect(completed).toHaveLength(1);
+    expect(completed[0]).toMatchObject({ parentToolUseId: 'toolu_agent_fg' });
+  });
+
   it('drops an unannounced task notification without tool_use_id (current behaviour)', () => {
     const transformer = build();
     transformer.transform(

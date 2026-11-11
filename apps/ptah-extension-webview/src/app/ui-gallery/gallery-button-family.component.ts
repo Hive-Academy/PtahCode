@@ -1,13 +1,6 @@
-import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { GalleryButtonColumnComponent } from './gallery-button-column.component';
 import { GallerySectionComponent } from './gallery-section.component';
-
-interface ButtonLookColumn {
-  readonly id: 'current' | 'proposed';
-  readonly heading: string;
-  readonly subtitle: string;
-  readonly lookScope: 'next' | null;
-}
 
 @Component({
   selector: 'ptah-gallery-button-family',
@@ -16,8 +9,9 @@ interface ButtonLookColumn {
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<ptah-gallery-section id="family-button" title="Button family">
     <p class="text-ptah-hint text-base-content-muted">
-      Side-by-side comparison of the current button styling and the proposed
-      token-based look.
+      Reference for the button family: the five variants, the three sizes, the
+      forced states, icon buttons and the busy state. Each button uses the
+      ptahButton or ptahIconButton directive.
     </p>
     <p
       class="text-ptah-hint text-base-content-muted"
@@ -27,34 +21,12 @@ interface ButtonLookColumn {
       list. Use danger only for the confirmation, or for the destructive action
       of a single resource card.
     </p>
-    <div class="grid gap-ptah-group lg:grid-cols-2">
-      @for (column of columns(); track column.id) {
-        <div
-          [attr.data-testid]="'button-family-col-' + column.id"
-          [attr.data-ptah-look]="column.lookScope"
-        >
-          <ptah-gallery-button-column
-            [heading]="column.heading"
-            [subtitle]="column.subtitle"
-          />
-        </div>
-      }
+    <div data-testid="button-family-reference">
+      <ptah-gallery-button-column
+        heading="Button family"
+        subtitle="Token-based look from libs/frontend/ui/src/lib/button/ptah-button.css"
+      />
     </div>
   </ptah-gallery-section>`,
 })
-export class GalleryButtonFamilyComponent {
-  public readonly columns = signal<readonly ButtonLookColumn[]>([
-    {
-      id: 'current',
-      heading: 'Current',
-      subtitle: 'Unscoped DaisyUI + glass button rules currently in production',
-      lookScope: null,
-    },
-    {
-      id: 'proposed',
-      heading: 'Proposed',
-      subtitle: 'Opt-in token-only contract look under [data-ptah-look="next"]',
-      lookScope: 'next',
-    },
-  ]);
-}
+export class GalleryButtonFamilyComponent {}

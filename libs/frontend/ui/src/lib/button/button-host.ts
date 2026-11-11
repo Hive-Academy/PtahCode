@@ -7,6 +7,8 @@ import {
 } from '@angular/core';
 export const BUTTON_HOST = {
   class: 'btn',
+  // Scopes the token look in ptah-button.css to directive hosts. A raw `btn` keeps the old look.
+  'data-ptah-button': '',
   '[class.btn-primary]': "variant() === 'primary'",
   '[class.btn-secondary]': "variant() === 'secondary'",
   '[class.btn-ghost]': "variant() === 'ghost'",

@@ -869,6 +869,126 @@ describe('StreamingAccumulatorCore (TASK_2026_107 Phase 2)', () => {
     );
   });
 
+  describe('background shell agent_completed guard', () => {
+    function shellCompleted(toolCallId: string): FlatStreamEventUnion {
+      return {
+        id: `completed-${toolCallId}`,
+        eventType: 'agent_completed',
+        timestamp: 20,
+        sessionId: SESSION_ID,
+        messageId: MESSAGE_ID,
+        parentToolUseId: toolCallId,
+        taskId: 'task-shell',
+        status: 'stopped',
+        summary: 'Background command stopped',
+        outputFile: '',
+      };
+    }
+
+    it.each(['Bash', 'PowerShell'])(
+      '(a) agent_completed for a background %s node creates no subagent record',
+      (toolName) => {
+        const monitor = TestBed.runInInjectionContext(
+          () => new AgentMonitorStore(),
+        );
+        const ctx = makeCtx({ agentMonitorStore: monitor });
+        core.process(
+          state,
+          toolStart({ toolCallId: 'toolu_shell', toolName }),
+          ctx,
+        );
+        core.process(state, shellCompleted('toolu_shell'), ctx);
+
+        expect(monitor.getSubagent('toolu_shell')).toBeUndefined();
+        expect(monitor.subagents().size).toBe(0);
+      },
+    );
+
+    it.each(['Bash', 'PowerShell'])(
+      '(a) agent_progress for a background %s node creates no subagent record',
+      (toolName) => {
+        const monitor = TestBed.runInInjectionContext(
+          () => new AgentMonitorStore(),
+        );
+        const ctx = makeCtx({ agentMonitorStore: monitor });
+        core.process(
+          state,
+          toolStart({ toolCallId: 'toolu_shell_prog', toolName }),
+          ctx,
+        );
+        core.process(
+          state,
+          {
+            id: 'progress-shell',
+            eventType: 'agent_progress',
+            timestamp: 15,
+            sessionId: SESSION_ID,
+            messageId: MESSAGE_ID,
+            parentToolUseId: 'toolu_shell_prog',
+            taskId: 'task-shell',
+            summary: 'still running',
+          },
+          ctx,
+        );
+
+        expect(monitor.getSubagent('toolu_shell_prog')).toBeUndefined();
+        expect(monitor.subagents().size).toBe(0);
+      },
+    );
+
+    it.each(['Bash', 'PowerShell'])(
+      '(a) agent_status for a background %s node creates no subagent record',
+      (toolName) => {
+        const monitor = TestBed.runInInjectionContext(
+          () => new AgentMonitorStore(),
+        );
+        const ctx = makeCtx({ agentMonitorStore: monitor });
+        core.process(
+          state,
+          toolStart({ toolCallId: 'toolu_shell_status', toolName }),
+          ctx,
+        );
+        core.process(
+          state,
+          {
+            id: 'status-shell',
+            eventType: 'agent_status',
+            timestamp: 16,
+            sessionId: SESSION_ID,
+            messageId: MESSAGE_ID,
+            parentToolUseId: 'toolu_shell_status',
+            taskId: 'task-shell',
+            status: 'running',
+          },
+          ctx,
+        );
+
+        expect(monitor.getSubagent('toolu_shell_status')).toBeUndefined();
+        expect(monitor.subagents().size).toBe(0);
+      },
+    );
+
+    it('(c) agent_completed for an Agent node still creates its record', () => {
+      const monitor = TestBed.runInInjectionContext(
+        () => new AgentMonitorStore(),
+      );
+      const ctx = makeCtx({ agentMonitorStore: monitor });
+      core.process(
+        state,
+        toolStart({
+          id: 'evt-agent-start-tool',
+          toolCallId: 'toolu_agent',
+          toolName: 'Agent',
+          isTaskTool: true,
+        }),
+        ctx,
+      );
+      core.process(state, shellCompleted('toolu_agent'), ctx);
+
+      expect(monitor.getSubagent('toolu_agent')?.status).toBe('stopped');
+    });
+  });
+
   describe('dedup-source-replay (wizard/harness regression coverage)', () => {
     it('duplicate message_start with `complete` source REPLACES the prior stream message_start (no duplicate messageEventIds)', () => {
       const first = core.process(
@@ -1156,7 +1276,10 @@ describe('StreamingAccumulatorCore (TASK_2026_107 Phase 2)', () => {
         outputFile: '',
       };
       core.process(state, event, makeCtx());
-      expect(agentMonitorStore.onAgentCompleted).toHaveBeenCalledWith(event);
+      expect(agentMonitorStore.onAgentCompleted).toHaveBeenCalledWith(
+        event,
+        undefined,
+      );
       expect(backgroundAgentStore.onAgentCompleted).toHaveBeenCalledWith(event);
     });
   });
