@@ -253,7 +253,10 @@ export class SessionControl {
    * This method is the ONLY reliable way to detect interrupted subagents. All running
    * subagents for this session are marked as 'interrupted' to enable resumption.
    */
-  async endSession(sessionId: SessionId, cause: SessionEndCause = 'unknown'): Promise<EndSessionOutcome> {
+  async endSession(
+    sessionId: SessionId,
+    cause: SessionEndCause = 'unknown',
+  ): Promise<EndSessionOutcome> {
     const rec = this.registry.find(sessionId as string);
     if (!rec) {
       this.logger.info(
@@ -517,7 +520,10 @@ export class SessionControl {
    * (permissions, subagents, interrupt, abort, deregister, SessionEnd
    * notification). A failed teardown is logged and does not stop the others.
    */
-  async disposeSessionsForWorkspace(workspacePath: string, cause: SessionEndCause = 'unknown'): Promise<void> {
+  async disposeSessionsForWorkspace(
+    workspacePath: string,
+    cause: SessionEndCause = 'unknown',
+  ): Promise<void> {
     const records = this.recordsForWorkspace(workspacePath);
     this.logger.info(
       `[SessionLifecycle] Disposing ${records.length} session(s) of one workspace...`,
@@ -638,6 +644,12 @@ export class SessionControl {
       );
     }
 
+    // A chat turn applies the model of its tab on every live send, so the
+    // same model must not reach the SDK again.
+    if (session.currentModel === resolvedModel) {
+      return;
+    }
+
     this.logger.info(
       `[SessionLifecycle] Setting model for ${sessionId}: ${resolvedModel}`,
     );
@@ -678,6 +690,14 @@ export class SessionControl {
       );
     }
 
+    // A chat turn applies the effort of its tab on every live send. The same
+    // effort must not reach the flag layer again: it has no `max` tier, so a
+    // repeat would lower a session that started with `max` to `xhigh`.
+    // `undefined` always goes through: it is an explicit clear.
+    if (effort !== undefined && session.currentEffort === effort) {
+      return;
+    }
+
     const flagEffort: FlagEffortLevel =
       effort === undefined ? null : effort === 'max' ? 'xhigh' : effort;
 
@@ -687,6 +707,7 @@ export class SessionControl {
 
     try {
       await session.query.applyFlagSettings({ effortLevel: flagEffort });
+      session.currentEffort = effort;
     } catch (error) {
       this.logger.error(
         `[SessionLifecycle] Failed to set effort for ${sessionId}`,
