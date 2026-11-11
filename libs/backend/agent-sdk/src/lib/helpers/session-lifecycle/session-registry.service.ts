@@ -27,6 +27,7 @@ import type {
   AISessionConfig,
   AuthEnv,
   ContextCapacityRoute,
+  EffortLevel,
   PermissionLevel,
   QueuedFollowUpSnapshot,
 } from '@ptah-extension/shared';
@@ -122,6 +123,11 @@ export interface SessionRecord {
   promotingFollowUpId?: string | null;
   /** Current model ID (may differ from config.model after setModel calls). */
   currentModel: string;
+  /**
+   * Effort level the live query runs with: the start effort, then every
+   * `setSessionEffort` call. `undefined` is the model or provider default.
+   */
+  currentEffort?: EffortLevel;
   /**
    * Live autopilot permission level for THIS session — the per-session source
    * of truth read by the canUseTool callback. Seeded at session start from the
@@ -362,6 +368,7 @@ export class SessionRegistry {
       resolveNext: null,
       turnInFlight: false,
       currentModel: config.model || '',
+      currentEffort: config.effort,
       permissionLevel: 'ask',
       activityHold: null,
       lastActivityAt: this._now(),
