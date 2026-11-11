@@ -499,17 +499,20 @@ export class SessionLoaderService {
 
   /** Start order of the full-list reads (`loadSessions` and workspace switch). */
   private listReadSequence = 0;
-  /** Start order of the newest full-list reply already shown. */
-  private listAppliedSequence = 0;
+  /** Per workspace key: start order of its newest full-list reply shown. */
+  private readonly listAppliedSequence = new Map<string, number>();
 
   /**
    * Whether a full-list reply may replace the rows. A workspace-switch read
    * runs beside the single-flighted reads, so the two can answer out of order;
    * a reply that started before the one already shown is older and is dropped.
+   * The order is kept per workspace, so a switch away and back neither lets
+   * an old reply win nor drops the newest read of a workspace.
    */
-  private claimListReply(readSequence: number): boolean {
-    if (readSequence < this.listAppliedSequence) return false;
-    this.listAppliedSequence = readSequence;
+  private claimListReply(workspacePath: string, readSequence: number): boolean {
+    const key = SessionLoaderService.normalizeCacheKey(workspacePath);
+    if (readSequence < (this.listAppliedSequence.get(key) ?? 0)) return false;
+    this.listAppliedSequence.set(key, readSequence);
     return true;
   }
 
@@ -608,7 +611,7 @@ export class SessionLoaderService {
       }
 
       if (result.success && result.data) {
-        if (!this.claimListReply(readSequence)) return;
+        if (!this.claimListReply(workspacePath, readSequence)) return;
         const page = readSessionListPage(result.data);
         this._organizationAvailable.set(page.organizationAvailable);
         this._sessions.set(page.sessions);
@@ -772,8 +775,6 @@ export class SessionLoaderService {
     }
 
     this.currentWorkspacePath = normalizedNew;
-    // Reply order is compared inside one workspace only.
-    this.listAppliedSequence = 0;
     // Rows cached under another query would show filters the list does not
     // honour; treat them as a miss and read again.
     const cached = this.sessionCache.get(normalizedNew);
@@ -864,7 +865,7 @@ export class SessionLoaderService {
       if (generation !== this.listQueryGeneration) return;
 
       if (result.success && result.data) {
-        if (!this.claimListReply(readSequence)) return;
+        if (!this.claimListReply(workspacePath, readSequence)) return;
         const page = readSessionListPage(result.data);
         this._organizationAvailable.set(page.organizationAvailable);
         this._sessions.set(page.sessions);

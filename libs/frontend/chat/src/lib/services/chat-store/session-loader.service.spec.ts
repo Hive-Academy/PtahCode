@@ -4285,6 +4285,50 @@ describe('SessionLoaderService', () => {
       expect(service.sessions().map((s) => s.id)).toEqual(['child-session']);
     }, 10000);
 
+    it('drops an old reply after a switch away and back, and keeps the newest one', async () => {
+      const releases: (() => void)[] = [];
+      let listCount = 0;
+
+      rpcCall.mockClear();
+      rpcCall.mockImplementation(async (method: string) => {
+        if (method !== 'session:list') {
+          return { success: true, data: { sessions: [], total: 0, hasMore: false } };
+        }
+        const call = ++listCount;
+        // Reads 1 and 3 (both for workspace A) stay pending until released.
+        if (call === 1 || call === 3) {
+          await new Promise<void>((resolve) => releases.push(resolve));
+        }
+        const id = call === 1 ? 'old-a' : call === 3 ? 'new-a' : 'b';
+        return {
+          success: true,
+          data: { sessions: [makeSummary({ id })], total: 1, hasMore: false },
+        };
+      });
+
+      const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+      service.switchWorkspace('D:/order-A'); // read 1, pending
+      await Promise.resolve();
+      service.switchWorkspace('D:/order-B'); // read 2, shown
+      await settle();
+      expect(service.sessions().map((s) => s.id)).toEqual(['b']);
+
+      // Leaving A cached its (empty) rows; drop them so the return reads again.
+      service.removeWorkspaceCache('D:/order-A');
+      service.switchWorkspace('D:/order-A'); // read 3, pending
+      await Promise.resolve();
+      expect(listCount).toBe(3);
+
+      // The newest A read answers first, then the old A read.
+      releases[1]();
+      await settle();
+      expect(service.sessions().map((s) => s.id)).toEqual(['new-a']);
+      releases[0]();
+      await settle();
+      expect(service.sessions().map((s) => s.id)).toEqual(['new-a']);
+    }, 10000);
+
     it('issues a fresh read for a caller that arrives after the previous one settled', async () => {
       rpcCall.mockClear();
 
