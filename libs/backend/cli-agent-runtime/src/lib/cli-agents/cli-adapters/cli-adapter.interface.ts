@@ -63,6 +63,8 @@ export interface LaneAccountBindingPort {
 export interface CliModelInfo {
   readonly id: string;
   readonly name: string;
+  /** A curated row the CLI did not report. */
+  readonly isFallback?: boolean;
 }
 
 /** Constructible before Claude joins the public system detection roster. */

@@ -1,7 +1,7 @@
 import { toSubagentCandidate } from '../ranking/candidate.types';
 import type { PhasePlan } from './phase-plan';
 import { laneQuestion } from './phase-plan';
-import { isSendable } from './phase-resolve';
+import { isSendable, resolvePhase } from './phase-resolve';
 import { TASK_TYPES } from '@ptah-extension/shared';
 import type { GatheredCall } from './gather';
 import { planRoutePhases, type GateArgs } from './phase-plan';
@@ -25,6 +25,98 @@ it('offers only the five-point band to the decision model', () => {
   const phase = plan([80, 76, 70]);
   expect(laneQuestion(phase).options.map((option) => option.score)).toEqual([80, 76]);
   expect(isSendable(phase)).toBe(true);
+});
+
+it('ranks reported alternates before capping and keeps the system CLI default row', () => {
+  const lane = {
+    kind: 'lane' as const, id: 'codex', cli: 'codex' as const, family: 'codex',
+    installed: true, disabled: false, limitState: 'confirmed-room' as const,
+  };
+  const gathered: GatheredCall = {
+    lanes: [lane], roles: [], rotation: { version: 1, entries: [] },
+    rotationUnavailable: false, missing: [], detailReasons: [],
+    models: new Map([['codex', { models: [
+      { id: 'fallback-id', provenance: 'fallback' as const },
+      { id: 'live-one', provenance: 'reported' as const },
+      { id: 'live-two', provenance: 'reported' as const },
+      { id: 'live-three', provenance: 'reported' as const },
+    ] }]]),
+    matrix: {
+      reasons: [], outcomeFigures: () => null,
+      resolve: (family, model, taskKind) => ({
+        family, model, taskKind, score: model === 'live-three' ? 54 : 50, cell: { kind: 'unknown' as const },
+        profileModel: '*', noProfile: true,
+      }),
+    },
+  };
+  const args: GateArgs = {
+    stage: 'gate-0.1', request: 'Implement', taskType: TASK_TYPES[0], depth: 'Full',
+    phases: [{ id: 'build', kind: 'implement', role: 'custom-role' }],
+  };
+  const phase = planRoutePhases(args.phases, args, gathered, gathered.rotation, false, [], () => undefined).plans[0];
+  expect(laneQuestion(phase).options.map((option) => option.model)).toEqual([
+    'lane-default', 'live-three', 'live-one',
+  ]);
+  expect(isSendable(phase)).toBe(true);
+  const empty = { ...phase, alternates: [] };
+  expect(isSendable(empty)).toBe(false);
+  const options = laneQuestion(phase).options;
+  const outcome = {
+    sent: true, succeeded: true, requestCause: null, notFoundDetail: null,
+    answers: new Map([['build', { cause: null, confidence: 0.9, choice: 'o2', proposal: null }]]),
+    offered: new Map([['build', options]]),
+    inputTokens: null, outputTokens: null, outcomeFigures: 0,
+  };
+  const chosen = resolvePhase(phase, {
+    mode: 'model', blockedCause: null, limited: new Set(), outcome,
+  });
+  expect(chosen).toMatchObject({ kind: 'chosen', source: 'model',
+    candidate: { id: 'codex' }, selectedScore: { model: 'live-three', provenance: 'reported' } });
+  const invalid = resolvePhase(phase, {
+    mode: 'model', blockedCause: null, limited: new Set(),
+    outcome: { ...outcome, answers: new Map([['build', {
+      cause: 'bad-output' as const, confidence: null, choice: null, proposal: null,
+    }]]) },
+  });
+  expect(invalid).toMatchObject({ kind: 'chosen', source: 'ranking', candidate: { id: 'codex' } });
+  expect(invalid).toMatchObject({ cause: null, proposal: null });
+  for (const context of [
+    { mode: 'blocked' as const, blockedCause: 'provider-error' as const, limited: new Set<string>(), outcome: null },
+    { mode: 'model' as const, blockedCause: null, limited: new Set(['build']), outcome },
+    { mode: 'model' as const, blockedCause: null, limited: new Set<string>(), outcome: { ...outcome, sent: false, requestCause: 'timeout' as const } },
+    { mode: 'model' as const, blockedCause: null, limited: new Set<string>(), outcome: { ...outcome, answers: new Map([['build', { cause: 'bad-output' as const, confidence: null, choice: 'o9', proposal: { option: 'o9', confidence: null } }]]) } },
+  ]) {
+    expect(resolvePhase(phase, context)).toMatchObject({ source: 'ranking', cause: null, proposal: null });
+  }
+  const bandGathered: GatheredCall = {
+    ...gathered,
+    models: new Map([['codex', { models: [
+      { id: 'low-a', provenance: 'reported' },
+      { id: 'low-b', provenance: 'reported' },
+      { id: 'good-c', provenance: 'reported' },
+    ] }]]),
+    matrix: { ...gathered.matrix, resolve: (family, model, taskKind) => ({
+      family, model, taskKind, score: model.startsWith('low-') ? 40 : 50,
+      cell: { kind: 'unknown' as const }, profileModel: '*', noProfile: true,
+    }) },
+  };
+  const bandPhase = planRoutePhases(args.phases, args, bandGathered,
+    bandGathered.rotation, false, [], () => undefined).plans[0];
+  expect(laneQuestion(bandPhase).options.map((option) => option.model)).toEqual([
+    'lane-default', 'good-c',
+  ]);
+  const fallbackOnly: GatheredCall = {
+    ...gathered,
+    lanes: [{ ...lane, id: 'cursor', cli: 'cursor', family: 'cursor' }],
+    models: new Map([['cursor', { models: [
+      { id: 'cursor-fallback', provenance: 'fallback' },
+    ] }]]),
+  };
+  const cursorPhase = planRoutePhases(args.phases, args, fallbackOnly,
+    fallbackOnly.rotation, false, [], () => undefined).plans[0];
+  expect(cursorPhase.ranked[0].scored).toMatchObject({
+    model: 'lane-default', provenance: 'lane-default',
+  });
 });
 
 it('scores a subagent with the policy tier and keeps a lane configured model', () => {

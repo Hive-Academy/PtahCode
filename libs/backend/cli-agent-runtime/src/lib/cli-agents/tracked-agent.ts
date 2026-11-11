@@ -7,8 +7,11 @@ import type {
 import type { SdkHandle } from './cli-adapters/cli-adapter.interface';
 import type { PendingAgentMessage } from './agent-message-router.service';
 import type { AgentBudgetCoordinator } from './agent-budget-coordinator';
+import type { LaneModelLogState } from './lane-model-log';
 
 export interface TrackedAgent {
+  /** In-memory model selection and adapter-reported evidence for terminal logging. */
+  modelLog?: LaneModelLogState;
   budget?: AgentBudgetCoordinator;
   budgetTimer?: NodeJS.Timeout;
   budgetCostWarned?: boolean;

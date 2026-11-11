@@ -94,6 +94,7 @@ export const ROTATION_MAX_KEYS = 200;
  */
 export const OPTIONS_PER_PHASE_CAP = 4;
 export const MIN_OPTIONS_PER_PHASE = 2;
+export const LANE_MODEL_ALTERNATES_CAP = 2;
 
 export const PROVIDER_OPTION_LIMIT = {
   ollama: 26,
@@ -186,6 +187,9 @@ function assertRoutingConstantInvariants(): void {
     throw new Error(
       'OPTIONS_PER_PHASE_CAP must be at least MIN_OPTIONS_PER_PHASE',
     );
+  }
+  if (LANE_MODEL_ALTERNATES_CAP < 0 || LANE_MODEL_ALTERNATES_CAP >= OPTIONS_PER_PHASE_CAP) {
+    throw new Error('LANE_MODEL_ALTERNATES_CAP must fit below OPTIONS_PER_PHASE_CAP');
   }
 }
 

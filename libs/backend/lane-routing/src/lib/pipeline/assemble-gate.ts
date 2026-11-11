@@ -127,10 +127,10 @@ function chosenFactsOf(
   return {
     phaseId: plan.phaseId,
     executor: executorOf(resolution.candidate),
-    model: row.scored.model,
-    score: row.scored.score,
+    model: (resolution.selectedScore ?? row.scored).model,
+    score: (resolution.selectedScore ?? row.scored).score,
     source: resolution.source,
-    cell: row.scored.cell,
+    cell: (resolution.selectedScore ?? row.scored).cell,
     limitState: limitOf(resolution.candidate),
     rotationChangedChoice: flags.rotation,
     preferenceChangedChoice: flags.preference,
@@ -336,6 +336,7 @@ function chosenEntry(draft: ChosenDraft, reason: string): ChosenEntry {
       `phase ${draft.phaseId} is missing a score for ${draft.resolution.candidate.id}`,
     );
   }
+  const selected = draft.resolution.selectedScore ?? row.scored;
   const confidence = rosterEntryConfidence({
     status: 'chosen',
     source: draft.resolution.source,
@@ -350,11 +351,11 @@ function chosenEntry(draft: ChosenDraft, reason: string): ChosenEntry {
     phaseId: draft.phaseId,
     status: 'chosen',
     executor: executorOf(draft.resolution.candidate),
-    model: row.scored.model,
+    model: selected.model,
     tier,
     effort: draft.plan.policy.effort,
-    provenance: row.scored.provenance,
-    score: row.scored.score,
+    provenance: selected.provenance,
+    score: selected.score,
     source: draft.resolution.source,
     taskKind: draft.plan.taskKind,
     confidence,

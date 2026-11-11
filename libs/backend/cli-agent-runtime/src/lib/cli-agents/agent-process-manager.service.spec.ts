@@ -2374,6 +2374,49 @@ describe('AgentProcessManager - SDK Execution Path', () => {
   // TASK_2026_515: the orchestrator hears from a lane on EVERY ending. A path
   // that forgets this call puts the session back to polling with no notice.
   describe('lane completion signal', () => {
+    it('logs requested policy and one observed model outcome at completion', async () => {
+      const segmentCallbacks: Array<(segment: CliOutputSegment) => void> = [];
+      Object.assign(sdkControls.handle, {
+        onSegment: (cb: (segment: CliOutputSegment) => void) => segmentCallbacks.push(cb),
+      });
+      const result = await manager.spawn({
+        task: 'Task', cli: 'codex', workingDirectory: '/workspace/root',
+        model: 'gpt-requested', modelTier: 'sonnet', effort: 'high',
+        routingSource: 'ranking',
+      });
+      expect(logger.info).toHaveBeenCalledWith(
+        '[AgentProcessManager] Lane policy',
+        expect.objectContaining({
+          requestedModel: 'gpt-requested', requestedTier: 'sonnet',
+          requestedEffort: 'high', routingSource: 'ranking',
+        }),
+      );
+      const telemetry: CliOutputSegment = {
+        type: 'info', content: 'Usage', turnTelemetry: {
+          status: 'reported', usage: {
+            turnId: 'turn-1', modelId: 'provider/observed', scope: 'turn', source: 'sdk',
+            inputTokens: 1, outputTokens: 1,
+            cacheReadTokens: { status: 'unavailable', reason: 'none', source: 'sdk' },
+            cacheWriteTokens: { status: 'unavailable', reason: 'none', source: 'sdk' },
+            requestContextTokens: { status: 'unavailable', reason: 'none', source: 'sdk' },
+            providerCostUsd: { status: 'unavailable', reason: 'none', source: 'sdk' },
+            cacheSemantics: 'unknown',
+          },
+        },
+      };
+      for (const callback of segmentCallbacks) callback(telemetry);
+      sdkControls.resolve(0);
+      await Promise.resolve();
+      await Promise.resolve();
+      const outcomes = logger.info.mock.calls.filter(
+        ([message]) => message === '[AgentProcessManager] Lane model outcome',
+      );
+      expect(outcomes).toHaveLength(1);
+      expect(outcomes[0][1]).toEqual(expect.objectContaining({
+        agentId: result.agentId, requestedModel: 'gpt-requested',
+        selectedModel: 'gpt-requested', actualModel: 'provider/observed',
+      }));
+    });
     it('flushes the final output before signalling a normal completion', async () => {
       const result = await manager.spawn({
         task: 'Task',
