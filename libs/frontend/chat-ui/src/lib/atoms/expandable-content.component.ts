@@ -5,6 +5,7 @@ import {
   ChangeDetectionStrategy,
 } from '@angular/core';
 import { LucideAngularModule, ChevronRight } from 'lucide-angular';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 /**
  * ExpandableContentComponent - Expand/collapse button with content size display
@@ -21,11 +22,13 @@ import { LucideAngularModule, ChevronRight } from 'lucide-angular';
 @Component({
   selector: 'ptah-expandable-content',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective],
   template: `
     <button
       type="button"
-      class="btn btn-xs btn-ghost gap-1 h-4 min-h-4 px-1"
+      ptahButton
+      variant="ghost"
+      size="xs"
       (click)="toggleClicked.emit($event)"
     >
       <lucide-angular

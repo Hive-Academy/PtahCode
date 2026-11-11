@@ -9,6 +9,7 @@ import {
 } from '@angular/core';
 import { AppStateManager, LoggingService } from '@ptah-extension/core';
 import type { HarnessPreset } from '@ptah-extension/shared';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import { HarnessBuilderRecordsService } from '../../services/harness-builder-records.service';
 import { HarnessProposalHydrationService } from '../../services/harness-proposal-hydration.service';
 import { HarnessRpcService } from '../../services/harness-rpc.service';
@@ -17,7 +18,7 @@ import { commitBuilderUpdates, fullConfig } from './builder-sidebar-helpers';
 @Component({
   selector: 'ptah-builder-presets-section',
   standalone: true,
-  imports: [],
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (initialized()) {
@@ -52,7 +53,8 @@ import { commitBuilderUpdates, fullConfig } from './builder-sidebar-helpers';
           </select>
           <button
             type="button"
-            class="btn btn-outline btn-sm mt-2 border-base-content/50"
+            ptahButton
+            class="mt-2"
             [disabled]="!selectedPresetId()"
             (click)="loadPreset()"
           >
@@ -76,7 +78,8 @@ import { commitBuilderUpdates, fullConfig } from './builder-sidebar-helpers';
           </p>
           <button
             type="button"
-            class="btn btn-outline btn-xs border-base-content/50"
+            ptahButton
+            size="xs"
             (click)="loadPresets()"
           >
             Retry
@@ -84,7 +87,9 @@ import { commitBuilderUpdates, fullConfig } from './builder-sidebar-helpers';
         }
         <button
           type="button"
-          class="btn btn-ghost btn-sm mt-2"
+          ptahButton
+          variant="ghost"
+          class="mt-2"
           [attr.aria-expanded]="saveFormOpen()"
           aria-controls="save-form"
           (click)="saveFormOpen.set(!saveFormOpen())"
@@ -126,7 +131,7 @@ import { commitBuilderUpdates, fullConfig } from './builder-sidebar-helpers';
             ></textarea
             ><button
               type="button"
-              class="btn btn-outline btn-sm border-base-content/50"
+              ptahButton
               [attr.aria-disabled]="
                 !hasPreview() || savingPreset() ? true : null
               "

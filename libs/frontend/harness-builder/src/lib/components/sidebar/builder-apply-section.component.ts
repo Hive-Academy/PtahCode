@@ -12,6 +12,7 @@ import {
 } from '@angular/core';
 import { LoggingService } from '@ptah-extension/core';
 import { HarnessHealthStore } from '@ptah-extension/marketplace/services';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import type {
   HarnessApplyResponse,
   HarnessConfig,
@@ -23,7 +24,7 @@ import { fullConfig } from './builder-sidebar-helpers';
 @Component({
   selector: 'ptah-builder-apply-section',
   standalone: true,
-  imports: [],
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (initialized() && (hasPreview() || result() || applyError())) {
@@ -79,7 +80,10 @@ import { fullConfig } from './builder-sidebar-helpers';
           @if (!showAllPaths() && applied.appliedPaths.length > 5) {
             <button
               type="button"
-              class="btn btn-ghost btn-xs min-h-6 mt-1"
+              ptahButton
+              variant="ghost"
+              size="xs"
+              class="mt-1"
               (click)="showAllPaths.set(true)"
             >
               Show all {{ applied.appliedPaths.length }}
@@ -87,7 +91,9 @@ import { fullConfig } from './builder-sidebar-helpers';
           }
           <button
             type="button"
-            class="btn btn-ghost btn-xs min-h-6"
+            ptahButton
+            variant="ghost"
+            size="xs"
             aria-label="Copy the list of written files"
             (click)="copyPaths()"
           >
@@ -116,7 +122,9 @@ import { fullConfig } from './builder-sidebar-helpers';
               @if (health.summary().level !== 'ok') {
                 <button
                   type="button"
-                  class="btn btn-ghost btn-xs min-h-6"
+                  ptahButton
+                  variant="ghost"
+                  size="xs"
                   (click)="openDashboard.emit()"
                 >
                   Open in Dashboard
@@ -126,7 +134,10 @@ import { fullConfig } from './builder-sidebar-helpers';
           }
           <button
             type="button"
-            class="btn btn-ghost btn-xs min-h-6 mt-2"
+            ptahButton
+            variant="ghost"
+            size="xs"
+            class="mt-2"
             (click)="dismissResult()"
           >
             Dismiss result
@@ -141,7 +152,9 @@ import { fullConfig } from './builder-sidebar-helpers';
             </div>
             <button
               type="button"
-              class="btn btn-primary btn-sm w-full mt-2"
+              ptahButton
+              variant="primary"
+              class="w-full mt-2"
               [disabled]="agentBusy() || applying()"
               (click)="apply()"
             >

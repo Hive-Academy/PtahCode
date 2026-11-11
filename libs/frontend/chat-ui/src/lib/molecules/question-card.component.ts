@@ -8,6 +8,7 @@ import {
   signal,
 } from '@angular/core';
 import { injectWallClock, WallClockService } from '@ptah-extension/core';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import { FormsModule } from '@angular/forms';
 import {
   LucideAngularModule,
@@ -45,7 +46,7 @@ import type {
 @Component({
   selector: 'ptah-question-card',
   standalone: true,
-  imports: [FormsModule, LucideAngularModule],
+  imports: [FormsModule, LucideAngularModule, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -231,7 +232,9 @@ import type {
           <button
             (click)="prevStep()"
             [disabled]="currentStep() === 0"
-            class="btn btn-xs btn-ghost gap-0.5 px-1.5"
+            ptahButton
+            variant="ghost"
+            size="xs"
             type="button"
           >
             <lucide-angular [img]="ChevronLeftIcon" class="w-3 h-3" />

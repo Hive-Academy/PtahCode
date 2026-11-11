@@ -11,11 +11,12 @@ import {
   type HarnessBuilderMode,
   type HarnessStackProfileRecord,
 } from '../../services/harness-builder-records.service';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-builder-stack-profile-section',
   standalone: true,
-  imports: [],
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (initialized() && mode() === 'new-project') {
@@ -78,7 +79,9 @@ import {
               ) {
                 <button
                   type="button"
-                  class="btn btn-ghost btn-xs min-h-6"
+                  ptahButton
+                  variant="ghost"
+                  size="xs"
                   (click)="showAllSkills.set(true)"
                 >
                   +{{ stack.plugins.availableSkillIds.length - 3 }} more

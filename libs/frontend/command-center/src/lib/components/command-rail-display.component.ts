@@ -22,6 +22,7 @@ import {
   type DisplayDockTabState,
 } from '@ptah-extension/chat';
 import { ClaudeRpcService } from '@ptah-extension/core';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import type { ArtifactRecord } from '@ptah-extension/shared';
 
 const NO_ARTIFACTS: readonly ArtifactRecord[] = Object.freeze([]);
@@ -62,14 +63,14 @@ function keyForSelection(selection: DisplayDockSelection): string | null {
 @Component({
   selector: 'ptah-command-rail-display',
   standalone: true,
-  imports: [DisplayPanelComponent],
+  imports: [DisplayPanelComponent, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'flex h-full min-h-0 flex-col' },
   template: `
     @if (window && tabId()) {
       <div class="flex shrink-0 items-center justify-end gap-1 px-2 py-1">
         @if (window.error(); as error) { <p role="alert" class="mr-auto text-xs text-error">{{ error }}</p> }
-        <button type="button" class="btn btn-ghost btn-xs" (click)="toggleWindow()">
+        <button type="button" ptahButton variant="ghost" size="xs" (click)="toggleWindow()">
           {{ window.detached() ? 'Dock' : 'Detach' }}
         </button>
       </div>
@@ -116,7 +117,9 @@ function keyForSelection(selection: DisplayDockSelection): string | null {
             Display failed to load.
             <button
               type="button"
-              class="btn btn-ghost btn-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+              ptahButton
+              variant="ghost"
+              size="xs"
               (click)="retry()"
             >
               Retry
