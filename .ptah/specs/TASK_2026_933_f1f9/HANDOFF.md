@@ -74,7 +74,7 @@ Worktree root: `D:\projects\ptah-extension\.claude-worktrees\fix-setup-hub-codex
 - `libs/frontend/onboarding/src/lib/proposal/`: dead pages and `ProposalFlowStore` to delete in Batch 4 (keep `new-project-intake.page.ts`, `team-builder-start.page.ts`, `new-project-intake.model.ts`).
 - `libs/frontend/chat/src/lib/services/harness-chat-proposal.store.ts` and `components/molecules/harness-proposal-banner/`: the apply banner.
 - `libs/backend/codex-runtime/src/lib/codex-context.ts`: Codex question lifecycle fix.
-- `C:\Users\abdal\AppData\Local\Temp\ptah-trial\` (`cdp.cjs`, `record.cjs`, `provider.cjs`): trial scripts, connect to `http://127.0.0.1:9334`.
+- `C:\Users\<user>\AppData\Local\Temp\ptah-trial\` (`cdp.cjs`, `record.cjs`, `provider.cjs`): trial scripts, connect to `http://127.0.0.1:9334`.
 
 ## Background work
 
