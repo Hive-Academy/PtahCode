@@ -9,6 +9,9 @@ import { PublicationOutboxRepository } from './publication-outbox.repository';
 import { PublicationOutboxService } from './publication-outbox.service';
 import { safeText } from './publication-text';
 import { escapeText, renderInline, renderSummary, type ReviewRunRow } from './review-markdown.renderer';
+import { diffStats } from './walkthrough/diff-stats';
+import type { TriageContent } from './walkthrough/triage-output.schema';
+import { renderWalkthrough } from './walkthrough/walkthrough.renderer';
 
 const severityRank = { Critical: 4, Major: 3, Minor: 2, Nitpick: 1 } as const;
 /** Parses RIGHT-side added lines from a unified diff. */
@@ -52,9 +55,11 @@ export class ReviewPublicationService {
     @inject(ReviewPolicyService) private readonly policy: ReviewPolicyService,
   ) {}
 
-  async publish(claim: ReviewQueueClaim, walkthrough: string, diff: string, verdicts: readonly VerificationResult[],
+  /** `walkthrough` is the triage content. A plain string is the text of an earlier-format walkthrough. */
+  async publish(claim: ReviewQueueClaim, walkthrough: string | TriageContent, diff: string, verdicts: readonly VerificationResult[],
     settingsInput: unknown, baseConfig: unknown | null, secrets: readonly string[],
-    scope?: IncrementalScope, signal?: AbortSignal, runRows: readonly ReviewRunRow[] = []): Promise<void> {
+    scope?: IncrementalScope, signal?: AbortSignal, runRows: readonly ReviewRunRow[] = [],
+    options: { readonly diffTruncated?: boolean } = {}): Promise<void> {
     const decision = claim.dryRun ? { allowed: false } : this.policy.publication(settingsInput, baseConfig, claim.repo);
     if (!decision.allowed) return;
     const settings = this.policy.effectiveSettings(settingsInput, baseConfig);
@@ -63,6 +68,8 @@ export class ReviewPublicationService {
     if (scope && scope.headSha !== claim.headSha) throw new Error('Incremental scope head mismatch');
     const repository = new PublicationOutboxRepository(this.sqlite.db);
     const suppressed: string[] = [];
+    /** Findings of an earlier run that this run confirmed again. They are not dismissed. */
+    let carriedOver = 0;
     const followUps: { findingId: string; body: string }[] = [];
     const selected: { findingId: string; candidateId: string; path: string; line: number; body: string; rank: number;
       finding: ReturnType<typeof ReviewFindingSchema.parse>; verifierFamily: string }[] = [];
@@ -108,6 +115,7 @@ export class ReviewPublicationService {
       }
       if (scope?.publishNewVerifiedRootsOnly && identity.outcome !== 'new' && repository.hasConfirmedFinding(identity.findingId)) {
         suppressed.push(`${safeText(finding.title, secrets)}: previously-identified-root`);
+        carriedOver++;
         continue;
       }
       if (scope?.publishNewVerifiedRootsOnly && identity.outcome === 'new' && !scope.changedPaths.includes(finding.path) &&
@@ -138,8 +146,20 @@ export class ReviewPublicationService {
     const overview = renderSummary(claim.headSha, runRows, inline, suppressed.length,
       followUps.map(item => item.body), value => safeText(value, secrets))
       + (overflow.length ? `\n\n${overflow.length} additional findings held locally.` : '');
+    const counts = { Critical: 0, Major: 0, Minor: 0, Nitpick: 0 };
+    for (const item of selected) counts[item.finding.severity]++;
+    const walkthroughBody = renderWalkthrough({
+      repo: claim.repo, headSha: claim.headSha,
+      content: typeof walkthrough === 'string' ? { kind: 'legacy', text: walkthrough } : walkthrough,
+      lenses: runRows.map(({ lens, status }) => ({ lens, status })),
+      scope: scope ?? null,
+      findings: { bySeverity: counts, heldLocally: overflow.length, carriedOver,
+        dismissed: Math.max(0, suppressed.length - overflow.length - carriedOver) },
+      diffStats: diffStats(diff, options.diffTruncated === true),
+      redact: value => safeText(value, secrets),
+    });
     await this.outbox.publish({ attemptId: claim.attemptId, target: { repo: claim.repo, number: claim.prNumber, headSha: claim.headSha },
-      walkthrough: safeText(walkthrough, secrets), overview,
+      walkthrough: safeText(walkthroughBody, secrets), overview,
       candidates: inline.map(({ findingId, path, line, body }) => ({ findingId, path, line, body })),
       followUps, validRightAnchors: anchors }, signal);
   }

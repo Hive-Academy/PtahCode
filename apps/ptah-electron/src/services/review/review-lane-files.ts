@@ -40,7 +40,7 @@ export class ReviewLaneFiles implements IReviewLaneFiles {
     const out = await realpath(outPath);
     if (relative(attempt, out) !== 'out') throw new Error('Lane output escapes attempt out/');
     // Publication reads the triage walkthrough after all lanes, so later lanes keep it.
-    const names = includeWalkthrough ? ['lane-output.json', 'walkthrough.md'] : ['lane-output.json'];
+    const names = includeWalkthrough ? ['lane-output.json', 'walkthrough.md', 'triage.json'] : ['lane-output.json'];
     for (const name of names) {
       try {
         await unlink(resolve(out, name));
@@ -54,7 +54,7 @@ export class ReviewLaneFiles implements IReviewLaneFiles {
     }
   }
 
-  async readOutput(attemptRoot: string, name: 'lane-output.json' | 'walkthrough.md'): Promise<string> {
+  async readOutput(attemptRoot: string, name: 'lane-output.json' | 'walkthrough.md' | 'triage.json'): Promise<string> {
     await this.source(attemptRoot);
     const attempt = await realpath(attemptRoot);
     const out = await realpath(resolve(attemptRoot, 'out'));

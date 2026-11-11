@@ -23,6 +23,49 @@ describe('ReviewArtifactWriter', () => {
   const fs: ReviewArtifactFileSystem = { realpath: jest.fn(async (path: string) => path), writeFile: jest.fn(async () => undefined) };
   const writer = new ReviewArtifactWriter(fs);
 
+  describe('readTriage', () => {
+    const triage = { schemaVersion: 1, summary: 'A change.', changeType: 'fix', risk: { level: 'low', reason: 'Small.' },
+      areas: [{ name: 'Core', paths: ['a.ts'], summary: 'Fixes a bug.', details: [] }], risks: [], apiChanges: [],
+      tests: { summary: 'Covered.', gaps: [] } };
+    const warn = jest.fn();
+    const files = (contents: Record<string, string>): ReviewArtifactWriter => new ReviewArtifactWriter({
+      realpath: async (path: string) => path, writeFile: async () => undefined,
+      readFile: async (path: string) => {
+        const name = path.split(/[\\/]/).at(-1) ?? '';
+        if (name in contents) return contents[name];
+        throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      } }, { warn });
+    const out = resolve('/attempt', 'out');
+    const legacy = '# Observed behavior\nA\n# Inferred risks\nB\n# Risk map\nC\n';
+
+    beforeEach(() => warn.mockClear());
+
+    it('prefers a valid triage.json', async () => {
+      const result = await files({ 'triage.json': JSON.stringify(triage), 'walkthrough.md': legacy }).readTriage(out);
+      expect(result.kind).toBe('structured');
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('falls back to a valid walkthrough.md when triage.json is invalid or missing, and logs it', async () => {
+      expect(await files({ 'triage.json': '{', 'walkthrough.md': legacy }).readTriage(out)).toEqual({ kind: 'legacy', text: legacy });
+      expect(await files({ 'walkthrough.md': legacy }).readTriage(out)).toEqual({ kind: 'legacy', text: legacy });
+      expect(warn).toHaveBeenCalledTimes(2);
+    });
+
+    it('reports an unavailable walkthrough, with a logged reason, when no usable file exists', async () => {
+      const result = await files({}).readTriage(out);
+      expect(result).toEqual({ kind: 'unavailable', reason: 'triage.json missing; walkthrough.md missing' });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('unusable'));
+    });
+
+    it('does not use a walkthrough.md without the required headings, and names only schema paths', async () => {
+      const result = await files({ 'triage.json': JSON.stringify({ ...triage, summary: 'secret text' , areas: [] }), 'walkthrough.md': 'old' }).readTriage(out);
+      expect(result).toMatchObject({ kind: 'unavailable' });
+      expect(JSON.stringify(result)).toContain('invalid at areas');
+      expect(JSON.stringify(result)).not.toContain('secret text');
+    });
+  });
+
   it('renders walkthrough, accepted and suppressed findings with reasons', () => {
     const result = writer.renderPreview(preview, settings);
     expect(result).toContain('## Walkthrough');
