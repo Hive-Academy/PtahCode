@@ -497,6 +497,25 @@ export class SessionLoaderService {
   /** The fresh read queued behind {@link loadSessionsInFlight}, or `null`. */
   private loadSessionsTrailing: Promise<void> | null = null;
 
+  /** Start order of the full-list reads (`loadSessions` and workspace switch). */
+  private listReadSequence = 0;
+  /** Per workspace key: start order of its newest full-list reply shown. */
+  private readonly listAppliedSequence = new Map<string, number>();
+
+  /**
+   * Whether a full-list reply may replace the rows. A workspace-switch read
+   * runs beside the single-flighted reads, so the two can answer out of order;
+   * a reply that started before the one already shown is older and is dropped.
+   * The order is kept per workspace, so a switch away and back neither lets
+   * an old reply win nor drops the newest read of a workspace.
+   */
+  private claimListReply(workspacePath: string, readSequence: number): boolean {
+    const key = SessionLoaderService.normalizeCacheKey(workspacePath);
+    if (readSequence < (this.listAppliedSequence.get(key) ?? 0)) return false;
+    this.listAppliedSequence.set(key, readSequence);
+    return true;
+  }
+
   /**
    * Start a fresh read and make it the one later callers join. Used directly
    * (never joining) after a query change, because a read already in flight
@@ -571,6 +590,7 @@ export class SessionLoaderService {
       );
 
       const generation = this.listQueryGeneration;
+      const readSequence = ++this.listReadSequence;
       const result = await this.claudeRpcService.call('session:list', {
         workspacePath,
         limit,
@@ -591,6 +611,7 @@ export class SessionLoaderService {
       }
 
       if (result.success && result.data) {
+        if (!this.claimListReply(workspacePath, readSequence)) return;
         const page = readSessionListPage(result.data);
         this._organizationAvailable.set(page.organizationAvailable);
         this._sessions.set(page.sessions);
@@ -833,6 +854,7 @@ export class SessionLoaderService {
         SessionLoaderService.normalizeCacheKey(workspacePath);
 
       const generation = this.listQueryGeneration;
+      const readSequence = ++this.listReadSequence;
       const result = await this.claudeRpcService.call('session:list', {
         workspacePath,
         limit: SessionLoaderService.SESSIONS_PAGE_SIZE,
@@ -843,6 +865,7 @@ export class SessionLoaderService {
       if (generation !== this.listQueryGeneration) return;
 
       if (result.success && result.data) {
+        if (!this.claimListReply(workspacePath, readSequence)) return;
         const page = readSessionListPage(result.data);
         this._organizationAvailable.set(page.organizationAvailable);
         this._sessions.set(page.sessions);
