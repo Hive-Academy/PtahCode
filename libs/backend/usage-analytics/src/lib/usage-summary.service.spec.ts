@@ -341,5 +341,23 @@ describe('UsageAnalyticsService', () => {
     expect(summary.sources[1]).toMatchObject({ sourceId: 'codex', status: 'partial', reason: 'time-budget' });
     expect(summary.sources[2]).toMatchObject({ sourceId: 'opencode', status: 'unavailable', reason: 'time-budget' });
   });
+
+  it('stops waiting on a pending price lookup when the parent budget aborts', async () => {
+    const budget = new AbortController();
+    const today = Math.floor(Date.now() / 86_400_000) * 86_400_000;
+    const row: UsageContribution = { key: 'a', timestampMs: today, providerId: 'anthropic', modelId: 'm', inputUncachedTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 1, sourceId: 'claude-ledger' };
+    const claude: UsageSource = { read: async () => ({ contributions: [row], status: { sourceId: 'claude-ledger', status: 'complete' } }) };
+    const empty = { contributions: [], status: { sourceId: 'cli', status: 'complete' as const } };
+    jest.spyOn(CodexSource.prototype, 'read').mockResolvedValue(empty);
+    jest.spyOn(OpenCodeSource.prototype, 'read').mockResolvedValue(empty);
+    jest.spyOn(GrokSource.prototype, 'read').mockResolvedValue(empty);
+    jest.spyOn(CliSessionSource.prototype, 'read').mockResolvedValue(empty);
+    const price = jest.fn(() => { budget.abort(); return new Promise<never>(() => undefined); });
+    const service = new UsageAnalyticsService(claude, { price }, { warn: jest.fn() });
+    const summary = await service.summarize({ range: 7 }, '', budget.signal);
+    expect(price).toHaveBeenCalledTimes(1);
+    expect(summary.facts).toHaveLength(0);
+    expect(summary.sources[0]).toMatchObject({ sourceId: 'claude-ledger', status: 'partial', reason: 'time-budget' });
+  });
 });
 

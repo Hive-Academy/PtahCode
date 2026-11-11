@@ -194,7 +194,8 @@ export class UsageAnalyticsService {
           const dedupKey = `${contribution.sourceId}:${contribution.key}`;
           if (seen.has(dedupKey)) continue;
           seen.add(dedupKey);
-          const priced = await this.pricing.price(contribution);
+          const priced = await untilAborted(this.pricing.price(contribution), signal);
+          if (priced === ABORTED) { interrupted = true; break; }
           const day = new Date(contribution.timestampMs).toISOString().slice(0, 10);
           const key = JSON.stringify([day, contribution.providerId, contribution.modelId, contribution.sourceId, priced.costSource]);
           const previous = groups.get(key);
@@ -302,6 +303,19 @@ export function mergeKnownCost(
 ): { knownCostUsd?: number } {
   if (prior === undefined && next === undefined) return {};
   return { knownCostUsd: (prior ?? 0) + (next ?? 0) };
+}
+
+const ABORTED: unique symbol = Symbol('aborted');
+
+/** Stops this caller's wait on abort; the shared work behind `work` keeps running for other callers. */
+function untilAborted<T>(work: Promise<T>, signal?: AbortSignal): Promise<T | typeof ABORTED> {
+  if (!signal) return work;
+  if (signal.aborted) return Promise.resolve(ABORTED);
+  return new Promise<T | typeof ABORTED>((resolve, reject) => {
+    const onAbort = (): void => resolve(ABORTED);
+    signal.addEventListener('abort', onAbort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
 }
 
 function validContribution(row: UsageContribution, since: number, until: number): boolean {
