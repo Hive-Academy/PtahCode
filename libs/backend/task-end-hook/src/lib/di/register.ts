@@ -72,8 +72,12 @@ export function registerTaskEndHook(container: DependencyContainer): void {
                   c.resolve<TaskIndexService>(TASK_SPECS_TOKENS.TASK_INDEX_SERVICE).notifyStatusOverlayChanged(root);
                 }
               })
-              // degradation-audit: reported - the next overlay read retries the probe
-              .catch(() => undefined)
+              .catch((error: unknown) => {
+                c.resolve<Logger>(TOKENS.LOGGER).warn(
+                  '[task-end-hook] overlay identity probe failed; the next read retries',
+                  error instanceof Error ? error : new Error(String(error)),
+                );
+              })
               .finally(() => resolving.delete(root));
           }
           return new Set<string>();
