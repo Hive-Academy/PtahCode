@@ -198,6 +198,26 @@ describe('renderWalkthrough', () => {
     expect(text).not.toContain('libs/sync/retry.ts');
   });
 
+  it('counts a repeated path of an area once', () => {
+    const paths = new Set(['libs/sync/client.ts']);
+    const repeated = triage({ areas: [{ name: 'Sync client', paths: ['libs/sync/client.ts', 'libs/sync/client.ts'], summary: 'Retries.', details: [] }] });
+    const text = renderWalkthrough(input({ content: { kind: 'structured', triage: repeated }, diffStats: { files: 1, additions: 1, deletions: 0, paths } }));
+    expect(text).toContain('| Sync client | 1 | Retries. |');
+  });
+
+  it('does not show a model path count when the diff paths are unknown', () => {
+    const text = renderWalkthrough(input({ diffStats: { files: 2, additions: 4, deletions: 1, paths: new Set<string>() } }));
+    expect(text).toContain('| Sync client | – | Retries failed calls twice. |');
+  });
+
+  it('breaks GH-number references and commit SHA autolinks in model text', () => {
+    const hostile = triage({ summary: 'Fixes GH-26 from 1aeafd4e1f0f4d9a8f4c9c0f4b6c1f7a2d3e4f50 and 1aeafd4.' });
+    const text = renderWalkthrough(input({ content: { kind: 'structured', triage: hostile } }));
+    expect(text).not.toMatch(/GH-\d/);
+    expect(text).not.toContain('1aeafd4e1f0f4d9a8f4c9c0f4b6c1f7a2d3e4f50');
+    expect(text).not.toContain('1aeafd4.');
+  });
+
   it('describes an incremental run without "No verified findings" while earlier findings are open', () => {
     const scope = { previousReviewedHeadSha: PREVIOUS, changedPaths: ['a.ts'], dependentPaths: [], recheckFailureIds: [] };
     const text = renderWalkthrough(input({ scope, findings: { bySeverity: none, heldLocally: 0, carriedOver: 2, dismissed: 0 } }));

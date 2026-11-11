@@ -119,6 +119,11 @@ describe('ReviewPublicationService regression', () => {
     await service().publish(claim, '# Observed behavior\nx', diff, [low], settings, null, [], scope);
     expect(publish.mock.calls[0][0].walkthrough).toContain('1 dismissed');
   });
+  it('does not count a finding with unavailable verification as dismissed', async () => {
+    const unavailable = { ...verdict('candidate', 'accepted'), verification: 'unavailable' as const };
+    await service().publish(claim, '# Observed behavior\nx', diff, [unavailable], settings, null, [], scope);
+    expect(publish.mock.calls[0][0].walkthrough).not.toContain('1 dismissed');
+  });
   it('passes the truncated-diff flag to the size row', async () => {
     const gitDiff = `diff --git a/src/retry.ts b/src/retry.ts\n--- a/src/retry.ts\n${diff}`;
     await service().publish(claim, '# Observed behavior\nx', gitDiff, [], settings, null, [], undefined, undefined, [], { diffTruncated: true });

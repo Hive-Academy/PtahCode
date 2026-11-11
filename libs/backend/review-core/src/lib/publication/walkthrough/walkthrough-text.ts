@@ -21,7 +21,9 @@ function neutralizeReferences(value: string): string {
     .replace(/@/g, `@${ZWSP}`)
     .replace(/#(?=\d)/g, `#${ZWSP}`)
     .replace(/\b([a-z][a-z0-9+.-]*):\/\//gi, `$1:${ZWSP}//`)
-    .replace(/\bwww\./gi, `www${ZWSP}.`);
+    .replace(/\bwww\./gi, `www${ZWSP}.`)
+    .replace(/\b(GH-)(?=\d)/gi, `$1${ZWSP}`)
+    .replace(/\b([0-9a-f]{6})(?=[0-9a-f]{1,34}\b)/gi, `$1${ZWSP}`);
 }
 
 /** Model text is plain text. Escape HTML and Markdown syntax once, fold newlines, redact first. */

@@ -66,6 +66,28 @@ describe('ReviewArtifactWriter', () => {
     });
   });
 
+  describe('legacy walkthrough with a BOM', () => {
+    it('accepts a walkthrough.md that starts with a BOM and strips it', async () => {
+      const legacyText = '# Observed behavior\nA\n# Inferred risks\nB\n# Risk map\nC\n';
+      const w = new ReviewArtifactWriter({
+        realpath: async (path: string) => path, writeFile: async () => undefined,
+        readFile: async (path: string) => {
+          if (path.endsWith('walkthrough.md')) return '\uFEFF' + legacyText;
+          throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+        } });
+      expect(await w.readTriage(resolve('/attempt', 'out'))).toEqual({ kind: 'legacy', text: legacyText });
+    });
+  });
+
+  it('includes API changes and test gaps in the dry-run text', () => {
+    const text = writer.triageText({ kind: 'structured', triage: {
+      schemaVersion: 1, summary: 'A change.', changeType: 'fix', risk: { level: 'low', reason: 'Small.' },
+      areas: [], risks: [], apiChanges: [{ symbol: 'Client.send', change: 'changed', impact: 'Now retries.', callers: [] }],
+      tests: { summary: 'Covered.', gaps: ['No timeout test.'] } } });
+    expect(text).toContain('API changed: Client.send');
+    expect(text).toContain('Test gap: No timeout test.');
+  });
+
   it('renders walkthrough, accepted and suppressed findings with reasons', () => {
     const result = writer.renderPreview(preview, settings);
     expect(result).toContain('## Walkthrough');

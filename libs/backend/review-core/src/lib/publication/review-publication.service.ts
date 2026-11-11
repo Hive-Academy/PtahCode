@@ -146,6 +146,7 @@ export class ReviewPublicationService {
     const overview = renderSummary(claim.headSha, runRows, inline, suppressed.length,
       followUps.map(item => item.body), value => safeText(value, secrets))
       + (overflow.length ? `\n\n${overflow.length} additional findings held locally.` : '');
+    const unavailable = suppressed.filter((entry) => entry.endsWith(': verifier-unavailable')).length;
     const counts = { Critical: 0, Major: 0, Minor: 0, Nitpick: 0 };
     for (const item of selected) counts[item.finding.severity]++;
     const walkthroughBody = renderWalkthrough({
@@ -154,7 +155,7 @@ export class ReviewPublicationService {
       lenses: runRows.map(({ lens, status }) => ({ lens, status })),
       scope: scope ?? null,
       findings: { bySeverity: counts, heldLocally: overflow.length, carriedOver,
-        dismissed: Math.max(0, suppressed.length - overflow.length - carriedOver) },
+        dismissed: Math.max(0, suppressed.length - overflow.length - carriedOver - unavailable) },
       diffStats: diffStats(diff, options.diffTruncated === true),
       redact: value => safeText(value, secrets),
     });

@@ -136,7 +136,8 @@ export class ReviewArtifactWriter {
     const json = await this.readOptional(resolve(root, 'triage.json'));
     const parsed = json === null ? null : parseTriageOutputDetailed(json);
     if (parsed?.ok) return { kind: 'structured', triage: parsed.triage };
-    const legacy = await this.readOptional(resolve(root, 'walkthrough.md'));
+    const legacyRaw = await this.readOptional(resolve(root, 'walkthrough.md'));
+    const legacy = legacyRaw === null ? null : legacyRaw.replace(/^\uFEFF/, '');
     if (legacy !== null && hasLegacyHeadings(legacy)) {
       this.logger?.warn(`Review triage used the earlier walkthrough format (triage.json ${parsed ? `invalid at ${parsed.issues}` : 'missing'})`);
       return { kind: 'legacy', text: legacy };
@@ -153,7 +154,10 @@ export class ReviewArtifactWriter {
     const { triage } = content;
     return [triage.summary, `Risk: ${triage.risk.level} — ${triage.risk.reason}`,
       ...triage.areas.map((area) => `- ${area.name}: ${area.summary}`),
-      ...triage.risks.map((risk) => `- Risk: ${risk.title} — ${risk.detail} (verify: ${risk.verify})`)].join('\n');
+      ...triage.risks.map((risk) => `- Risk: ${risk.title} — ${risk.detail} (verify: ${risk.verify})`),
+      ...triage.apiChanges.map((api) => `- API ${api.change}: ${api.symbol} — ${api.impact}`),
+      `Tests: ${triage.tests.summary}`,
+      ...triage.tests.gaps.map((gap) => `- Test gap: ${gap}`)].join('\n');
   }
 
   private async readOptional(path: string): Promise<string | null> {
