@@ -1578,6 +1578,19 @@ describe('CodexChatAdapter', () => {
     await adapter.reset();
     expect(adapter.getPermissionLevel(id)).toBeUndefined();
   });
+  it('resolves an MCP caller id to the live native session only', async () => {
+    const { adapter } = setup();
+    expect(adapter.resolveLiveSessionId(tabId)).toBeUndefined();
+    const stream = await adapter.startChatSession({ tabId });
+    for await (const event of stream) void event;
+    expect(adapter.resolveLiveSessionId(tabId)).toBe(id);
+    expect(adapter.resolveLiveSessionId(id)).toBe(id);
+    expect(adapter.resolveLiveSessionId('other-tab')).toBeUndefined();
+    expect(adapter.resolveLiveSessionId('')).toBeUndefined();
+    await adapter.reset();
+    expect(adapter.resolveLiveSessionId(tabId)).toBeUndefined();
+    expect(adapter.resolveLiveSessionId(id)).toBeUndefined();
+  });
   it('types a closed context as unavailable while preserving a real permission failure', async () => {
     const h = setup();
     const stream = await h.adapter.startChatSession({ tabId });

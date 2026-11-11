@@ -342,6 +342,103 @@ describe('PtahAPIBuilder harness proposal wiring', () => {
     );
   });
 
+  it('resolves a native Codex caller to its live session id', async () => {
+    const sessionManager = makeSessionManager();
+    sessionManager.find.mockReturnValue(undefined);
+    const codexSessions = {
+      getPermissionLevel: jest.fn().mockReturnValue(undefined),
+      resolveLiveSessionId: jest.fn((callerId: string) =>
+        callerId === 'codex-tab' ? 'codex-thread-1' : undefined,
+      ),
+    };
+    const builder = buildTestBuilder(
+      makeRawWorkspaceProvider(),
+      sessionManager,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      makeLogger(),
+      codexSessions,
+    );
+    Object.assign(builder, { pluginLoader: {} });
+    builder.build();
+    const deps = (
+      namespaceBuilders.buildHarnessNamespace as jest.Mock
+    ).mock.calls.at(-1)?.[0];
+    await runWithMcpRequestContext(
+      { callerSessionId: 'codex-tab' },
+      async () => {
+        expect(deps.getCallerSdkSessionId()).toBe('codex-thread-1');
+      },
+    );
+    await runWithMcpRequestContext(
+      { callerSessionId: 'unknown-tab' },
+      async () => {
+        expect(deps.getCallerSdkSessionId()).toBeUndefined();
+      },
+    );
+    expect(codexSessions.resolveLiveSessionId).toHaveBeenCalledWith(
+      'codex-tab',
+    );
+  });
+
+  it('keeps the SDK session id ahead of a Codex lookup', async () => {
+    const sessionManager = makeSessionManager();
+    sessionManager.find.mockImplementation((id: string) =>
+      id === 'tab-7' ? { realSessionId: 'sdk-7' } : undefined,
+    );
+    const codexSessions = {
+      getPermissionLevel: jest.fn().mockReturnValue(undefined),
+      resolveLiveSessionId: jest.fn().mockReturnValue('codex-thread-1'),
+    };
+    const builder = buildTestBuilder(
+      makeRawWorkspaceProvider(),
+      sessionManager,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      makeLogger(),
+      codexSessions,
+    );
+    Object.assign(builder, { pluginLoader: {} });
+    builder.build();
+    const deps = (
+      namespaceBuilders.buildHarnessNamespace as jest.Mock
+    ).mock.calls.at(-1)?.[0];
+    await runWithMcpRequestContext({ callerSessionId: 'tab-7' }, async () => {
+      expect(deps.getCallerSdkSessionId()).toBe('sdk-7');
+    });
+    expect(codexSessions.resolveLiveSessionId).not.toHaveBeenCalled();
+  });
+
+  it('yields undefined for a Codex reader without the session lookup', async () => {
+    const sessionManager = makeSessionManager();
+    sessionManager.find.mockReturnValue(undefined);
+    const builder = buildTestBuilder(
+      makeRawWorkspaceProvider(),
+      sessionManager,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      makeLogger(),
+      { getPermissionLevel: () => undefined },
+    );
+    Object.assign(builder, { pluginLoader: {} });
+    builder.build();
+    const deps = (
+      namespaceBuilders.buildHarnessNamespace as jest.Mock
+    ).mock.calls.at(-1)?.[0];
+    await runWithMcpRequestContext({ callerSessionId: 'tab-9' }, async () => {
+      expect(deps.getCallerSdkSessionId()).toBeUndefined();
+    });
+  });
+
   it('throws when the proposal store is unavailable', () => {
     const builder = buildTestBuilder(
       makeRawWorkspaceProvider(),
@@ -488,7 +585,10 @@ function buildTestBuilder(
   webviewManager?: WebviewManager,
   sessionOrganizationRecorder?: ISessionOrganizationRecorder,
   logger: Logger = makeLogger(),
-  codexPermissionReader?: { getPermissionLevel(sessionId: string): 'ask' | 'auto-edit' | 'yolo' | 'plan' | undefined },
+  codexPermissionReader?: {
+    getPermissionLevel(sessionId: string): 'ask' | 'auto-edit' | 'yolo' | 'plan' | undefined;
+    resolveLiveSessionId?(callerId: string): string | undefined;
+  },
 ): PtahAPIBuilder {
   return new PtahAPIBuilder(
     {} as unknown as WorkspaceAnalyzerService,

@@ -17,6 +17,8 @@ import { CodexChatAdapterError } from './codex-chat-adapter-error';
 export type TrackedSession = Session & {
   lease: CodexChatDriverLease;
   settings: Pick<CodexExecutionProfile, 'model' | 'effort' | 'permissionLevel'>;
+  /** Chat tab that opened the session; the Ptah MCP URL routes by it. */
+  tabId?: string;
 };
 
 interface SessionControlsDependencies {

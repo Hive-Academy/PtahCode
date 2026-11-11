@@ -197,6 +197,26 @@ export class CodexChatAdapter implements NativeChatAdapter {
       : undefined;
   }
 
+  /**
+   * Live native session id for a Ptah MCP caller id. The Codex MCP URL
+   * carries the chat tab id when one exists, else the session id
+   * (`ptahMcpSessionUrl`). Returns an id only for a session this adapter
+   * holds now; an unknown, closed, or ambiguous caller yields `undefined`.
+   */
+  resolveLiveSessionId(callerId: string): SessionId | undefined {
+    if (callerId.trim() === '') return undefined;
+    if (SessionId.validate(callerId) && this.sessions.has(callerId)) {
+      return callerId;
+    }
+    let match: SessionId | undefined;
+    for (const session of this.sessions.values()) {
+      if (session.tabId !== callerId) continue;
+      if (match !== undefined) return undefined;
+      match = session.id;
+    }
+    return match;
+  }
+
   constructor(
     private readonly ports: CodexChatAdapterPorts,
     private readonly turnState: Pick<
@@ -438,6 +458,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
         prepared.billingMode ?? 'unknown',
         savedUsage?.messageCount ?? 0,
         lease,
+        config.tabId,
       );
       session = published;
       context.setUserInputAnswerHandler?.((answer) =>
@@ -548,8 +569,10 @@ export class CodexChatAdapter implements NativeChatAdapter {
     billingMode: 'subscription' | 'api-key' | 'unknown',
     messageCount: number,
     lease: CodexChatDriverLease,
+    tabId: string | undefined,
   ): TrackedSession {
     const session: TrackedSession = {
+      ...(tabId === undefined || tabId.trim() === '' ? {} : { tabId }),
       settings: {
         model: profile.model,
         effort: profile.effort,
