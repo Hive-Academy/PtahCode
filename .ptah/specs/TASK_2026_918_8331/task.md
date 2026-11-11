@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_918_8331
-status: in_progress
+status: done
 type: BUGFIX
 title: Fix model list and model tiers for the Claude API lane
 depends_on: []

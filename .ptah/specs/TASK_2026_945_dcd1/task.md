@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_945_dcd1
-status: in_review
+status: done
 type: BUGFIX
 title: Sync model dropdown with session model per tab
 depends_on: []

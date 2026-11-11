@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_938_0e68
-status: in_review
+status: done
 type: REFACTORING
 title: Redact developer user name and add home-path guard
 depends_on: []

@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_913_865e
-status: in_review
+status: done
 type: FEATURE
 title: Build approved Inbox list-detail design for Reviews and Machines pages
 depends_on: []

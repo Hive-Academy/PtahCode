@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_955_0886
-status: in_review
+status: done
 type: REFACTORING
 title: 'ui-button-adopt 4d-1 canvas, review-runs, dashboards, cron, gateway'
 depends_on: []

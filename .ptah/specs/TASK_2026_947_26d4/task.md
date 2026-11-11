@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_947_26d4
-status: in_review
+status: done
 type: REFACTORING
 title: >-
   Family 1 button: adopt directives in chat-ui, harness-builder, command-center

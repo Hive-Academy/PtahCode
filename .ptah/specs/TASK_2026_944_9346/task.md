@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_944_9346
-status: in_review
+status: done
 type: REFACTORING
 title: 'Family 1 button: adopt directives in git-ui and tasks-ui (batch 1b-3)'
 depends_on: []

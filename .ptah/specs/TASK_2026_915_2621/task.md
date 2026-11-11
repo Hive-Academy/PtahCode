@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_915_2621
-status: in_review
+status: done
 type: FEATURE
 title: Let a parent select model and effort of child sessions
 depends_on: []

@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_925_0b1d
-status: in_review
+status: done
 type: RESEARCH
 title: Audit skill invocation outside orchestration
 depends_on: []

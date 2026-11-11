@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_956_3064
-status: in_review
+status: done
 type: REFACTORING
 title: 'Button adoption 4d-2: remaining page libs'
 depends_on: []

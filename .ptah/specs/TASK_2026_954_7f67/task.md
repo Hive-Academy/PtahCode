@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_954_7f67
-status: in_review
+status: done
 type: BUGFIX
 title: Accept queued follow-ups from the tab that reopened a live session
 depends_on: []

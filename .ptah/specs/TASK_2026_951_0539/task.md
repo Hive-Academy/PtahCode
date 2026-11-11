@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_951_0539
-status: in_review
+status: done
 type: BUGFIX
 title: Fix stale Codex AT LIMIT state and plan limits main provider
 depends_on: []

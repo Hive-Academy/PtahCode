@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_946_8944
-status: in_review
+status: done
 type: REFACTORING
 title: 'Family 1 button: adopt directives in onboarding and setup-wizard (batch 4a)'
 depends_on: []

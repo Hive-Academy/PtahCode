@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_920_e684
-status: in_review
+status: done
 type: BUGFIX
 title: Ptah CLI lane shows provider mark
 depends_on: []
