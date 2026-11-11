@@ -27,6 +27,8 @@ export class PtahTooltipDirective {
   private panel?: ComponentRef<PtahTooltipPanelComponent>;
   private timer?: ReturnType<typeof setTimeout>;
   private openedByFocus = false;
+  private pointerOverHost = false;
+  private pointerOverPanel = false;
 
   constructor() {
     effect(() => {
@@ -42,12 +44,14 @@ export class PtahTooltipDirective {
 
   protected onPointerEnter(event: PointerEvent): void {
     if (event.pointerType === 'touch') return;
+    this.pointerOverHost = true;
     this.clearTimer();
     if (!this.overlayRef) this.timer = setTimeout(() => this.show(false), SHOW_DELAY_MS);
   }
 
   protected onPointerLeave(): void {
-    if (!this.openedByFocus) this.scheduleHide();
+    this.pointerOverHost = false;
+    if (!this.openedByFocus && !this.pointerOverPanel) this.scheduleHide();
   }
 
   protected onFocus(): void {
@@ -60,7 +64,11 @@ export class PtahTooltipDirective {
   }
 
   protected onBlur(): void {
-    if (this.openedByFocus) this.hide();
+    if (!this.openedByFocus) return;
+    // WCAG 1.4.13: keep the tooltip while the pointer is over the host or the
+    // panel. The pointer-leave schedule closes it later.
+    if (this.pointerOverHost || this.pointerOverPanel) this.openedByFocus = false;
+    else this.hide();
   }
 
   private show(fromFocus: boolean): void {
@@ -84,8 +92,8 @@ export class PtahTooltipDirective {
     this.panel.setInput('id', this.id);
     this.panel.setInput('text', value);
     this.panel.changeDetectorRef.detectChanges();
-    ref.overlayElement.addEventListener('pointerenter', this.cancelHide);
-    ref.overlayElement.addEventListener('pointerleave', this.scheduleHide);
+    ref.overlayElement.addEventListener('pointerenter', this.panelEnter);
+    ref.overlayElement.addEventListener('pointerleave', this.panelLeave);
     ref.keydownEvents().subscribe((event) => {
       if (event.key !== 'Escape' || !this.overlayRef) return;
       event.preventDefault();
@@ -95,7 +103,14 @@ export class PtahTooltipDirective {
     this.syncDescription(value);
   }
 
-  private readonly cancelHide = (): void => this.clearTimer();
+  private readonly panelEnter = (): void => {
+    this.pointerOverPanel = true;
+    this.clearTimer();
+  };
+  private readonly panelLeave = (): void => {
+    this.pointerOverPanel = false;
+    if (!this.pointerOverHost) this.scheduleHide();
+  };
   private readonly scheduleHide = (): void => {
     this.clearTimer();
     if (!this.openedByFocus) this.timer = setTimeout(() => this.hide(), LEAVE_GRACE_MS);
@@ -119,6 +134,8 @@ export class PtahTooltipDirective {
   private hide(): void {
     this.clearTimer();
     this.openedByFocus = false;
+    // The panel is disposed before its pointerleave can fire: reset its flag here.
+    this.pointerOverPanel = false;
     this.overlayRef?.dispose();
     this.overlayRef = undefined;
     this.panel = undefined;

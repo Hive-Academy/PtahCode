@@ -58,6 +58,34 @@ const TOKEN_NAMES: readonly string[] = [
     'border-width',
     'border-color',
     'border-color-strong',
+    'control-edge',
+    'control-edge-strong',
+    'btn-primary-bg',
+    'btn-primary-bg-hover',
+    'btn-primary-bg-active',
+    'btn-primary-fg',
+    'btn-secondary-bg',
+    'btn-secondary-bg-hover',
+    'btn-secondary-bg-active',
+    'btn-secondary-fg',
+    'btn-secondary-border',
+    'btn-secondary-border-hover',
+    'btn-ghost-bg-hover',
+    'btn-ghost-bg-active',
+    'btn-ghost-fg',
+    'btn-danger-bg',
+    'btn-danger-bg-hover',
+    'btn-danger-bg-active',
+    'btn-danger-fg',
+    'btn-link-fg',
+    'btn-link-fg-hover',
+    'btn-link-fg-active',
+    'btn-disabled-bg',
+    'btn-disabled-fg',
+    'btn-disabled-border',
+    'btn-disabled-opacity',
+    'btn-busy-opacity',
+    'btn-spinner-duration',
     'focus-ring-width',
     'focus-ring-offset',
     'focus-ring-color',
@@ -131,7 +159,7 @@ describe('ptah design tokens', () => {
   });
 
   it('keeps token-only folders free of raw palette and pixel values', () => {
-    const raw = /#[0-9a-fA-F]{3,8}\b|\brgba?\(|\boklch\(|\[\d+(\.\d+)?px\]/;
+    const raw = /#[0-9a-fA-F]{3,8}\b|\brgba?\(|\boklch\(|\b\d+(\.\d+)?px\b/;
     for (const dir of TOKEN_ONLY_DIRS) {
       const files = listFiles(join(LIB_SRC, dir)).filter(
         (f) =>

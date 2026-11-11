@@ -12,6 +12,7 @@ import {
   PtahPageHeaderComponent,
   PtahStatusBadgeComponent,
 } from '@ptah-extension/ui';
+import { GalleryButtonFamilyComponent } from './ui-gallery/gallery-button-family.component';
 import { GalleryComponentsComponent } from './ui-gallery/gallery-components.component';
 import { GalleryTokensShapeComponent } from './ui-gallery/gallery-tokens-shape.component';
 import { GalleryTokensSpacingComponent } from './ui-gallery/gallery-tokens-spacing.component';
@@ -33,6 +34,7 @@ interface GallerySectionLink {
     GalleryTokensSpacingComponent,
     GalleryTokensTypeComponent,
     GalleryTokensShapeComponent,
+    GalleryButtonFamilyComponent,
     GalleryComponentsComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -94,6 +96,7 @@ interface GallerySectionLink {
       <ptah-gallery-tokens-spacing />
       <ptah-gallery-tokens-type />
       <ptah-gallery-tokens-shape />
+      <ptah-gallery-button-family />
       <ptah-gallery-components />
     </div>
   </main>`,
@@ -114,6 +117,7 @@ export class UiGalleryComponent {
     { id: 'tokens-spacing', label: 'Spacing and white space' },
     { id: 'tokens-type', label: 'Typography and hierarchy' },
     { id: 'tokens-shape', label: 'Shape, elevation, motion and state' },
+    { id: 'family-button', label: 'Button family' },
     { id: 'components-buttons', label: 'Buttons' },
     { id: 'components-fields', label: 'Fields' },
     { id: 'components-metrics', label: 'Metrics' },
