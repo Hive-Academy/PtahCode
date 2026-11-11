@@ -20,8 +20,10 @@ export class OpenCodeSource implements UsageSource {
     const file = path.join(this.dataHome, 'opencode', 'opencode.db');
     let dbStat: Awaited<ReturnType<typeof fs.stat>>;
     try { dbStat = await fs.stat(file); } catch { return { contributions: [], status: { sourceId: 'opencode', status: 'unavailable', reason: 'OpenCode database missing' } }; }
+    if (signal?.aborted) return { contributions: [], status: { sourceId: 'opencode', status: 'partial', reason: 'time-budget' } };
     // degradation-audit: optional-capability - SQLite has no WAL file after a checkpoint; the cache key then uses 0
     const wal = await fs.stat(`${file}-wal`).catch(() => null);
+    if (signal?.aborted) return { contributions: [], status: { sourceId: 'opencode', status: 'partial', reason: 'time-budget' } };
     const key = `${file}:${dbStat.size}:${dbStat.mtimeMs}:${wal?.size ?? 0}:${wal?.mtimeMs ?? 0}:${since}:${until}:${workspacePath}`;
     const cached = this.cache.get(key);
     if (cached) return cached;

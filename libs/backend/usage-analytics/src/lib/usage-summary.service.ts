@@ -10,10 +10,12 @@ import { CodexSource } from './sources/codex.source';
 import { OpenCodeSource } from './sources/opencode.source';
 import { GrokSource } from './sources/grok.source';
 import { UsagePricingService } from './usage-pricing.service';
-import type { UsageContribution, UsageSource } from './usage-source.types';
+import type { UsageContribution, UsageSource, UsageSourceResult } from './usage-source.types';
 
 const DAY_MS = 86_400_000;
 const LEDGER_SLICE_MS = 3_600_000;
+const SOURCE_BUDGET_MS = 10_000;
+const SOURCE_ABORT_GRACE_MS = 1_000;
 const MAX_FACTS = 100_000;
 /** Source ids in the same order as `UsageAnalyticsService.sources`. */
 const EXTERNAL_SOURCE_IDS = ['codex', 'opencode', 'grok', 'antigravity', 'ollama-cloud'] as const;
@@ -125,18 +127,61 @@ export class UsageAnalyticsService {
         }
       }
     }
-    for (const [sourceIndex, source] of this.sources.entries()) {
+    // Start independent disk/SQLite readers together. Consume in source order so
+    // deduplication, partial statuses, and fact-limit behavior remain stable.
+    const sourceBudgets: AbortController[] = [];
+    const sourceReads = signal?.aborted ? [] : this.sources.map((source, sourceIndex) => {
+      const budget = new AbortController();
+      sourceBudgets.push(budget);
+      let rejectParent: ((error: Error) => void) | undefined;
+      const parentAbort = new Promise<never>((_resolve, reject) => { rejectParent = reject; });
+      const onAbort = () => {
+        budget.abort();
+        rejectParent?.(new Error('Usage summary aborted'));
+      };
+      if (signal?.aborted) budget.abort();
+      else signal?.addEventListener('abort', onAbort, { once: true });
+      let timer: ReturnType<typeof setTimeout>;
+      let graceTimer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          budget.abort();
+          graceTimer = setTimeout(() => reject(new Error('Usage source deadline')), SOURCE_ABORT_GRACE_MS);
+          graceTimer.unref?.();
+        }, SOURCE_BUDGET_MS);
+        timer.unref?.();
+      });
+      const read = Promise.resolve().then(async (): Promise<UsageSourceResult> => {
+        // Give a completed first source one turn to settle before later sources
+        // can abort the shared RPC budget. Slow readers still overlap.
+        if (sourceIndex > 0) await new Promise<void>((resolve) => setImmediate(resolve));
+        if (budget.signal.aborted) return { contributions: [], status: { sourceId: this.sourceIds[sourceIndex], status: 'partial', reason: 'time-budget' } };
+        return source.read(workspacePath, since, until, budget.signal);
+      });
+      return Promise.race([read, deadline, parentAbort])
+        .then((result) => ({ ok: true as const, result, timedOut: budget.signal.aborted && !signal?.aborted, abortedAtRead: signal?.aborted === true }),
+          (error: unknown) => ({ ok: false as const, error, timedOut: budget.signal.aborted && !signal?.aborted, abortedAtRead: signal?.aborted === true }))
+        .finally(() => { clearTimeout(timer); clearTimeout(graceTimer); signal?.removeEventListener('abort', onAbort); });
+    });
+    for (const [sourceIndex] of this.sources.entries()) {
       const sourceId = this.sourceIds[sourceIndex];
       if (signal?.aborted) {
         statuses.push({ sourceId, status: 'partial', reason: 'time-budget' });
         statuses.push(...skippedSources(this.sourceIds, sourceIndex, 'time-budget'));
         break;
       }
+      let sourceTimedOut = false;
+      let sourceAborted = false;
       try {
-        const result = await source.read(workspacePath, since, until, signal);
+        const read = await sourceReads[sourceIndex];
+        sourceTimedOut = read.timedOut;
+        sourceAborted = read.abortedAtRead;
+        if (!read.ok) throw read.error;
+        const result = read.result;
         let overflow = false;
+        let interrupted = false;
         for (const contribution of result.contributions) {
-          if (signal?.aborted) break;
+          if (signal?.aborted) { interrupted = true; break; }
           if (!validContribution(contribution, since, until)) continue;
           if (sourceId === 'codex' && contribution.sessionId && this.statsRepository && workspaceKey) {
             let overlaps = ledgerCodexSessions.get(contribution.sessionId);
@@ -149,7 +194,8 @@ export class UsageAnalyticsService {
           const dedupKey = `${contribution.sourceId}:${contribution.key}`;
           if (seen.has(dedupKey)) continue;
           seen.add(dedupKey);
-          const priced = await this.pricing.price(contribution);
+          const priced = await untilAborted(this.pricing.price(contribution), signal);
+          if (priced === ABORTED) { interrupted = true; break; }
           const day = new Date(contribution.timestampMs).toISOString().slice(0, 10);
           const key = JSON.stringify([day, contribution.providerId, contribution.modelId, contribution.sourceId, priced.costSource]);
           const previous = groups.get(key);
@@ -208,12 +254,17 @@ export class UsageAnalyticsService {
           };
           groups.set(key, row);
         }
-        statuses.push(signal?.aborted ? { ...result.status, status: 'partial', reason: 'time-budget' } : overflow ? { ...result.status, status: 'partial', reason: 'fact-limit' } : result.status);
+        statuses.push(sourceAborted || interrupted || sourceTimedOut ? { ...result.status, status: 'partial', reason: 'time-budget' } : overflow ? { ...result.status, status: 'partial', reason: 'fact-limit' } : result.status);
         if (signal?.aborted || overflow) {
+          if (overflow) sourceBudgets.slice(sourceIndex + 1).forEach((budget) => budget.abort());
           statuses.push(...skippedSources(this.sourceIds, sourceIndex, signal?.aborted ? 'time-budget' : 'fact-limit'));
           break;
         }
       } catch (error: unknown) {
+        if (sourceTimedOut && !signal?.aborted) {
+          statuses.push({ sourceId, status: 'partial', reason: 'time-budget' });
+          continue;
+        }
         if (signal?.aborted) {
           statuses.push({ sourceId, status: 'partial', reason: 'time-budget' });
           statuses.push(...skippedSources(this.sourceIds, sourceIndex, 'time-budget'));
@@ -252,6 +303,19 @@ export function mergeKnownCost(
 ): { knownCostUsd?: number } {
   if (prior === undefined && next === undefined) return {};
   return { knownCostUsd: (prior ?? 0) + (next ?? 0) };
+}
+
+const ABORTED: unique symbol = Symbol('aborted');
+
+/** Stops this caller's wait on abort; the shared work behind `work` keeps running for other callers. */
+function untilAborted<T>(work: Promise<T>, signal?: AbortSignal): Promise<T | typeof ABORTED> {
+  if (!signal) return work;
+  if (signal.aborted) return Promise.resolve(ABORTED);
+  return new Promise<T | typeof ABORTED>((resolve, reject) => {
+    const onAbort = (): void => resolve(ABORTED);
+    signal.addEventListener('abort', onAbort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
 }
 
 function validContribution(row: UsageContribution, since: number, until: number): boolean {
