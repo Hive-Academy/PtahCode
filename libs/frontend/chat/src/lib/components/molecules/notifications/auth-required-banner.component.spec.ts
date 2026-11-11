@@ -65,13 +65,13 @@ describe('AuthRequiredBannerComponent', () => {
       {
         text: 'Open Settings',
         ariaLabel: 'Open Settings',
-        className: 'btn btn-xs btn-primary gap-0.5 px-2',
+        className: 'btn btn-primary btn-xs',
         disabled: false,
       },
       {
         text: '',
         ariaLabel: 'Dismiss',
-        className: 'btn btn-xs btn-ghost px-1',
+        className: 'btn btn-ghost btn-xs btn-square',
         disabled: false,
       },
     ]);
@@ -149,9 +149,11 @@ describe('AuthRequiredBannerComponent', () => {
     const host = render({ carryOverProvider: 'Codex' });
     const classes = carryOverButton(host)?.classList;
 
-    expect(classes?.contains('btn-outline')).toBe(true);
-    expect(classes?.contains('text-base-content-muted')).toBe(true);
     expect(classes?.contains('btn-primary')).toBe(false);
+    expect(classes?.contains('btn-ghost')).toBe(false);
+    expect(carryOverButton(host)?.hasAttribute('data-ptah-button')).toBe(
+      true,
+    );
   });
 
   it('colours its busy spinner itself so the disabled dimming does not hide it', () => {
@@ -166,7 +168,7 @@ describe('AuthRequiredBannerComponent', () => {
     const button = carryOverButton(host);
 
     expect(button?.disabled).toBe(false);
-    expect(button?.getAttribute('aria-busy')).toBe('false');
+    expect(button?.getAttribute('aria-busy')).toBeNull();
     expect(button?.querySelector('.loading')).toBeNull();
   });
 

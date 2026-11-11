@@ -29,14 +29,11 @@
       <time class="ml-auto shrink-0 text-xs text-base-content-muted tabular-nums" [attr.datetime]="iso(latest().timestamp)">{{ time(latest().timestamp) }}</time>
     </button>
     <div data-testid="lane-event-actions" class="pointer-events-none flex shrink-0 items-center gap-0.5 rounded bg-base-200 opacity-0 shadow-none transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 motion-reduce:transition-none">
-      <button type="button" class="btn btn-ghost btn-xs focus-visible:ring-2 focus-visible:ring-primary"
-        title="Branch conversation from here" aria-label="Branch conversation from this message"
+      <button type="button" ptahIconButton size="xs" label="Branch conversation from this message"
         data-testid="lane-event-branch" (click)="branchRequested.emit(lastMessageId())">
         <lucide-angular [img]="BranchIcon" class="h-3.5 w-3.5" aria-hidden="true" />
       </button>
-      <button type="button" class="btn btn-ghost btn-xs focus-visible:ring-2 focus-visible:ring-primary"
-        [title]="isSessionActive() ? 'Rewind file changes to here' : 'Rewind is only available during an active conversation'"
-        [attr.aria-label]="isSessionActive() ? 'Rewind file changes to this message' : 'Rewind unavailable — session is not active'"
+      <button type="button" ptahIconButton size="xs" [label]="isSessionActive() ? 'Rewind file changes to this message' : 'Rewind unavailable — session is not active'"
         [disabled]="!isSessionActive()" [attr.aria-disabled]="!isSessionActive()"
         data-testid="lane-event-rewind" (click)="requestRewind()">
         <lucide-angular [img]="RewindIcon" class="h-3.5 w-3.5" aria-hidden="true" />

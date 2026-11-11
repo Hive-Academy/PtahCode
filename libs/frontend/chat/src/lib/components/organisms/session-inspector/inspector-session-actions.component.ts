@@ -19,13 +19,14 @@ import { ChatStore } from '../../../services/chat.store';
 import { SessionOrganizerService } from '../../../services/session-list/session-organizer.service';
 import { SessionRowActionsService } from '../../../services/session-list/session-row-actions.service';
 
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 type Action = 'rename' | 'organize' | 'stop';
 interface SessionTarget { readonly id: SessionId; readonly title: string }
 
 @Component({
   selector: 'ptah-inspector-session-actions',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './inspector-session-actions.component.html',
   host: {

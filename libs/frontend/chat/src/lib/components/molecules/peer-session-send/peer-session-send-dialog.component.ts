@@ -9,7 +9,7 @@ import type {
   PeerSessionRow,
   PeerSessionSendResult,
 } from '@ptah-extension/shared';
-import { PeerSessionPickerComponent } from '@ptah-extension/ui';
+import { PeerSessionPickerComponent, PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 
 /**
  * PeerSessionSendDialogComponent — presentational modal dialog for composing
@@ -34,7 +34,7 @@ import { PeerSessionPickerComponent } from '@ptah-extension/ui';
   selector: 'ptah-peer-session-send-dialog',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PeerSessionPickerComponent],
+  imports: [PeerSessionPickerComponent, PtahButtonDirective, PtahIconButtonDirective],
   template: `
     @if (isOpen()) {
       <dialog class="modal modal-open" data-testid="peer-session-send-dialog">
@@ -50,10 +50,9 @@ import { PeerSessionPickerComponent } from '@ptah-extension/ui';
             </h3>
             <button
               type="button"
-              class="btn btn-ghost btn-xs btn-circle"
+              ptahIconButton size="xs" label="Close dialog"
               (click)="onClose()"
               [disabled]="isSending()"
-              aria-label="Close dialog"
               data-testid="peer-session-dialog-close-btn"
             >
               ✕
@@ -226,7 +225,7 @@ import { PeerSessionPickerComponent } from '@ptah-extension/ui';
             @if (sendResult()) {
               <button
                 type="button"
-                class="btn btn-ghost btn-sm"
+                ptahButton variant="ghost"
                 (click)="resetOutcome.emit()"
                 data-testid="peer-session-reset-btn"
               >
@@ -234,7 +233,7 @@ import { PeerSessionPickerComponent } from '@ptah-extension/ui';
               </button>
               <button
                 type="button"
-                class="btn btn-primary btn-sm"
+                ptahButton variant="primary"
                 (click)="onClose()"
                 data-testid="peer-session-done-btn"
               >
@@ -243,7 +242,7 @@ import { PeerSessionPickerComponent } from '@ptah-extension/ui';
             } @else {
               <button
                 type="button"
-                class="btn btn-ghost btn-sm"
+                ptahButton variant="ghost"
                 (click)="onClose()"
                 [disabled]="isSending()"
                 data-testid="peer-session-cancel-btn"
@@ -252,7 +251,7 @@ import { PeerSessionPickerComponent } from '@ptah-extension/ui';
               </button>
               <button
                 type="button"
-                class="btn btn-primary btn-sm"
+                ptahButton variant="primary"
                 [disabled]="isActionDisabled()"
                 (click)="sendRequested.emit()"
                 data-testid="peer-session-submit-btn"

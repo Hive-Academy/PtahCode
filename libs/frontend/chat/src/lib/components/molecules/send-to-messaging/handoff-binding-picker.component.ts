@@ -7,6 +7,7 @@ import {
 import { LucideAngularModule, MessageSquare } from 'lucide-angular';
 import type { GatewayBindingDto } from '@ptah-extension/shared';
 
+import { PtahButtonDirective } from '@ptah-extension/ui';
 /** A binding row in the hand-off picker, joined with its adapter's run state. */
 export interface HandoffBindingRow {
   readonly binding: GatewayBindingDto;
@@ -38,7 +39,7 @@ export interface HandoffRowError {
  */
 @Component({
   selector: 'ptah-handoff-binding-picker',
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective],
   template: `
     <div
       role="listbox"
@@ -73,7 +74,7 @@ export interface HandoffRowError {
           >
             <p>{{ msg }}</p>
             <button
-              class="btn btn-ghost btn-xs mt-1.5 px-2"
+              ptahButton variant="ghost" size="xs" class="mt-1.5"
               type="button"
               (click)="retry.emit()"
               data-testid="handoff-picker-retry"
@@ -126,7 +127,7 @@ export interface HandoffRowError {
                 </p>
                 <div class="mt-1.5 flex items-center gap-1">
                   <button
-                    class="btn btn-primary btn-xs gap-1"
+                    ptahButton variant="primary" size="xs"
                     type="button"
                     [disabled]="attaching()"
                     (click)="confirmPick.emit(row.binding)"
@@ -138,7 +139,7 @@ export interface HandoffRowError {
                     Continue
                   </button>
                   <button
-                    class="btn btn-ghost btn-xs"
+                    ptahButton variant="ghost" size="xs"
                     type="button"
                     [disabled]="attaching()"
                     (click)="cancelPick.emit()"

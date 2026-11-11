@@ -31,6 +31,7 @@ import {
 } from '../../../services/display-window/display-window-wire';
 import { DisplayDragOutDirective } from './display-drag-out.directive';
 
+import { PtahButtonDirective } from '@ptah-extension/ui';
 /**
  * The session's Display collection as a right sidebar (TASK_2026_853_3401, D1).
  *
@@ -43,7 +44,7 @@ import { DisplayDragOutDirective } from './display-drag-out.directive';
 @Component({
   selector: 'ptah-display-sheet',
   standalone: true,
-  imports: [DisplayPanelComponent, SidebarTabComponent, DisplayDragOutDirective],
+  imports: [DisplayPanelComponent, SidebarTabComponent, DisplayDragOutDirective, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     class: 'min-w-0',
@@ -127,7 +128,7 @@ import { DisplayDragOutDirective } from './display-drag-out.directive';
           </h2>
           <button
             type="button"
-            class="btn btn-ghost btn-xs"
+            ptahButton variant="ghost" size="xs"
             [attr.aria-pressed]="state().pinned"
             [class.text-primary]="state().pinned"
             aria-label="Keep current view"
@@ -141,7 +142,7 @@ import { DisplayDragOutDirective } from './display-drag-out.directive';
           @if (detachable()) {
             <button
               type="button"
-              class="btn btn-ghost btn-xs"
+              ptahButton variant="ghost" size="xs"
               aria-label="Open Display in a separate window"
               (click)="detachRequested.emit()"
               data-testid="display-sheet-detach"
@@ -151,7 +152,7 @@ import { DisplayDragOutDirective } from './display-drag-out.directive';
           }
           <button
             type="button"
-            class="btn btn-ghost btn-xs"
+            ptahButton variant="ghost" size="xs"
             aria-label="Collapse display"
             [attr.aria-expanded]="true"
             [attr.aria-controls]="regionId()"
@@ -209,7 +210,7 @@ import { DisplayDragOutDirective } from './display-drag-out.directive';
               Display failed to load.
               <button
                 type="button"
-                class="btn btn-ghost btn-xs"
+                ptahButton variant="ghost" size="xs"
                 (click)="retry()"
               >
                 Retry

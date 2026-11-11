@@ -12,6 +12,7 @@ import type {
 } from '@ptah-extension/shared';
 import { budgetAmount, formatPercent } from './session-budget-format';
 
+import { PtahButtonDirective } from '@ptah-extension/ui';
 /** Stages that show a banner. */
 type BannerStage = 'handoff' | 'limit';
 
@@ -50,7 +51,7 @@ const FOCUS =
 @Component({
   selector: 'ptah-session-budget-banner',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective],
   template: `
     @if (stage(); as current) {
       <!-- One compact row in the same plate as the queued follow-ups: the
@@ -106,7 +107,7 @@ const FOCUS =
             @if (autoHandoffQueued()) {
               <button
                 type="button"
-                class="btn btn-ghost btn-xs {{ focus }}"
+                ptahButton variant="ghost" size="xs" class="{{ focus }}"
                 aria-label="Cancel the automatic hand-off"
                 (click)="cancelAutoHandoff.emit()"
                 data-testid="session-budget-auto-cancel"
@@ -116,7 +117,7 @@ const FOCUS =
             }
             <button
               type="button"
-              class="btn btn-ghost btn-xs {{ focus }}"
+              ptahButton variant="ghost" size="xs" class="{{ focus }}"
               [attr.aria-describedby]="bodyId"
               [disabled]="wrapUpSent()"
               (click)="wrapUp.emit()"
@@ -126,7 +127,7 @@ const FOCUS =
             </button>
             <button
               type="button"
-              class="btn btn-ghost btn-xs {{ focus }}"
+              ptahButton variant="ghost" size="xs" class="{{ focus }}"
               [attr.aria-describedby]="bodyId"
               (click)="dismiss.emit()"
               data-testid="session-budget-dismiss"

@@ -29,6 +29,7 @@ import type { MonitoredAgent } from '@ptah-extension/chat-streaming';
 import type { LaneStopReason } from '@ptah-extension/shared';
 import { ProviderAccountsStateService } from '@ptah-extension/core';
 
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 /** Readable host stop or interruption reason for a lane. */
 export function laneGuardStopText(
   reason: LaneStopReason | undefined,
@@ -64,7 +65,7 @@ export function laneAccountText(
 @Component({
   selector: 'ptah-agent-card-header',
   standalone: true,
-  imports: [LucideAngularModule, SlicePipe],
+  imports: [LucideAngularModule, SlicePipe, PtahButtonDirective, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -75,11 +76,7 @@ export function laneAccountText(
       @if (presentation() === 'card') {
       <button
         type="button"
-        class="btn btn-ghost btn-xs btn-square flex-shrink-0"
-        [attr.aria-label]="
-          (agent().expanded ? 'Collapse ' : 'Expand ') +
-          (agent().displayName || agent().cli)
-        "
+        ptahIconButton size="xs" [label]="(agent().expanded ? 'Collapse ' : 'Expand ') + (agent().displayName || agent().cli)" class="flex-shrink-0"
         [attr.aria-expanded]="agent().expanded"
         (click)="toggleExpanded.emit()"
       >
@@ -145,11 +142,9 @@ export function laneAccountText(
       @if (agent().status === 'running') {
         <button
           type="button"
-          class="btn btn-error btn-outline btn-xs ml-auto flex-shrink-0"
+          ptahIconButton variant="danger" size="xs" label="Stop agent" class="ml-auto flex-shrink-0"
           [disabled]="isStopping()"
-          title="Stop agent"
           (click)="stopAgent.emit($event)"
-          aria-label="Stop agent"
         >
           @if (isStopping()) {
             <span class="loading loading-spinner loading-xs"></span>
@@ -163,7 +158,7 @@ export function laneAccountText(
       @if (agent().status !== 'running' && agent().cliSessionId) {
         <button
           type="button"
-          class="btn btn-ghost btn-xs ml-auto flex-shrink-0"
+          ptahButton variant="ghost" size="xs" class="ml-auto flex-shrink-0"
           [disabled]="isResuming()"
           title="Resume session"
           (click)="resumeAgent.emit($event)"
@@ -198,11 +193,7 @@ export function laneAccountText(
       @if (closable()) {
         <button
           type="button"
-          class="btn btn-ghost btn-xs btn-square flex-shrink-0"
-          title="Remove column"
-          [attr.aria-label]="
-            'Remove ' + (agent().displayName || agent().cli) + ' column'
-          "
+          ptahIconButton size="xs" [label]="'Remove ' + (agent().displayName || agent().cli) + ' column'" class="flex-shrink-0"
           (click)="closeLane.emit($event)"
         >
           <lucide-angular [img]="XIcon" class="w-3 h-3" aria-hidden="true" />

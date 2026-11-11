@@ -20,10 +20,11 @@ import { ElectronLayoutService } from '@ptah-extension/core';
 import { SessionLivenessRegistry } from '@ptah-extension/chat-state';
 import { McpServersCardComponent } from '../molecules/mcp-servers-card.component';
 
+import { PtahButtonDirective } from '@ptah-extension/ui';
 @Component({
   selector: 'ptah-workspace-sidebar',
   standalone: true,
-  imports: [LucideAngularModule, McpServersCardComponent],
+  imports: [LucideAngularModule, McpServersCardComponent, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: `
     :host {
@@ -112,7 +113,7 @@ import { McpServersCardComponent } from '../molecules/mcp-servers-card.component
       <!-- Add folder button -->
       <div class="mt-auto px-3 py-3 border-t border-surface-border">
         <button
-          class="btn btn-ghost btn-sm w-full gap-2 text-base-content-muted hover:text-base-content justify-start"
+          ptahButton variant="ghost" class="w-full justify-start"
           (click)="layout.addFolder()"
           aria-label="Add workspace folder"
         >

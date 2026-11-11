@@ -60,6 +60,7 @@ import { toUserMessageMarkdown } from '../../utils/user-message-markdown.utils';
 import { TurnDisclosureRowComponent } from '../molecules/turn/turn-disclosure-row.component';
 import { TurnActivityPanelComponent } from '../molecules/turn/turn-activity-panel.component';
 
+import { PtahIconButtonDirective } from '@ptah-extension/ui';
 /** The disclosure toggle of a turn, emitted for the transcript's per-turn flag. */
 export interface TurnLogToggle {
   readonly turnId: string;
@@ -120,6 +121,7 @@ function turnHasActivityData(turn: TurnContext): boolean {
     TurnDisclosureRowComponent,
     TurnActivityPanelComponent,
     LucideAngularModule,
+    PtahIconButtonDirective,
   ],
   templateUrl: './message-bubble.component.html',
   // Two sheets, ONE stylesheet split in two — the combined rules exceeded the
