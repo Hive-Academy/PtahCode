@@ -138,7 +138,7 @@ export interface ChangesOptions { readonly maxRows: number; readonly diffStats?:
  */
 function areaFiles(area: TriageOutput['areas'][number], stats: DiffStats | null | undefined): string {
   const known = stats?.paths && stats.paths.size > 0 ? stats.paths : null;
-  if (!known) return '–';
+  if (!known) return stats?.paths ? '–' : String(new Set(area.paths).size || '–');
   const count = new Set(area.paths.filter((path) => known.has(path))).size;
   return count === 0 ? '–' : `${count}${stats?.truncated ? '+' : ''}`;
 }

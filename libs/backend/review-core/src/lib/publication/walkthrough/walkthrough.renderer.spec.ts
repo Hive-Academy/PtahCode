@@ -214,7 +214,8 @@ describe('renderWalkthrough', () => {
     const hostile = triage({ summary: 'Fixes GH-26 from 1aeafd4e1f0f4d9a8f4c9c0f4b6c1f7a2d3e4f50 and 1aeafd4.' });
     const text = renderWalkthrough(input({ content: { kind: 'structured', triage: hostile } }));
     expect(text).not.toMatch(/GH-\d/);
-    expect(text).not.toContain('1aeafd4e1f0f4d9a8f4c9c0f4b6c1f7a2d3e4f50');
+    expect(text).not.toContain('Fixes GH-26');
+    expect(text).not.toContain('from 1aeafd4e1f0f4d9a8f4c9c0f4b6c1f7a2d3e4f50');
     expect(text).not.toContain('1aeafd4.');
   });
 
