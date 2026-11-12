@@ -29,11 +29,6 @@ export const REMOTE_PERMISSION_TIMEOUT_BY = 'Worker timeout';
 /** Shown once the worker's deadline passed or its timeout record arrived. */
 export const PERMISSION_TIMED_OUT_COPY = `No answer within ${REMOTE_PERMISSION_TIMEOUT_SEC} s — the worker denied this request.`;
 
-/** Countdown line of a pending, answerable request. */
-export function permissionCountdownCopy(secondsLeft: number): string {
-  return `Denied automatically in ${Math.max(0, Math.ceil(secondsLeft))} s`;
-}
-
 /** The worker command that lists what a paired machine may use. */
 export const GRANTS_COMMAND = `${WORKER_REMOTE_COMMAND} grants`;
 

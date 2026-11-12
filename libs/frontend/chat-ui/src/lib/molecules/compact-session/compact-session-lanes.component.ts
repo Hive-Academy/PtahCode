@@ -60,8 +60,7 @@ export function formatBoardDuration(ms: number): string {
     .replace(
       /(\d+m )(\d)s$/,
       (_match, prefix: string, second: string) => `${prefix}0${second}s`,
-    )
-    .replace(/\.0s$/, 's');
+    );
 }
 
 @Component({
