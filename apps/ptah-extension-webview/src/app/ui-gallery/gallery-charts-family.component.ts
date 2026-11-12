@@ -49,6 +49,12 @@ import { GallerySectionComponent } from './gallery-section.component';
           <ptah-meter [value]="45" [max]="100" label="Progressbar" barRole="progressbar" valueText="45%" />
           <ptah-meter [value]="0" [max]="0" label="Indeterminate" barRole="progressbar" [indeterminate]="true" />
         </div>
+        <div class="flex flex-wrap items-center gap-ptah-inline" data-testid="meter-family-marker-stripes">
+          <ptah-meter [value]="45" [max]="100" label="Marker at 80" [marker]="80" />
+          <ptah-meter [value]="92" [max]="100" label="Stripes warn" tone="warn" [stripes]="true" [marker]="80" />
+          <ptah-meter [value]="100" [max]="100" label="Stripes err" tone="err" [stripes]="true" />
+          <ptah-meter [value]="45" [max]="100" label="Neutral stripes" tone="neutral" [stripes]="true" />
+        </div>
       </div>
     </ptah-gallery-section>
 
