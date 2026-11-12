@@ -59,7 +59,7 @@ describe('InspectorLimitsLanesComponent', () => {
     expect(providers).toHaveLength(2);
     expect(providers[0].textContent).toContain('Claude');
     expect(providers[1].textContent).toContain('Codex');
-    expect(providers.map(row => row.querySelector('.badge-ghost')?.textContent?.trim()))
+    expect(providers.map(row => row.querySelector('[data-ptah-badge]')?.textContent?.trim()))
       .toEqual(['Provider API', 'Provider API']);
   });
 

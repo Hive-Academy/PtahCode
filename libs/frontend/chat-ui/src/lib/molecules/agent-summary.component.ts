@@ -91,9 +91,9 @@ export type ParsedBlock =
                 class="w-3.5 h-3.5 text-info mt-0.5 flex-shrink-0"
               />
               <div class="flex-1 min-w-0">
-                <span ptahBadge size="xs" class="font-mono">{{
-                  block.name
-                }}</span>
+                <span ptahBadge size="xs" class="font-mono"
+                  ><span class="ptah-badge-text">{{ block.name }}</span></span
+                >
                 @if (getMainParam(block)) {
                   <span class="text-base-content-muted ml-1 truncate">{{
                     getMainParam(block)
