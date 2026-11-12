@@ -8,7 +8,7 @@ const select = readFileSync(join(__dirname, 'rich-select', 'ptah-select.css'), '
 describe('form control look contract', () => {
   it('hides the browser search action for family and field controls', () => {
     expect(family).toContain("input[type='search'][data-ptah-control]::-webkit-search-cancel-button");
-    expect(family).toContain(".ptah-field__body input[type='search']::-webkit-search-cancel-button");
+    expect(field).toContain(".ptah-field__body input[type='search']::-webkit-search-cancel-button");
   });
 
   it('resets a native field control without a family data attribute', () => {
@@ -48,6 +48,8 @@ describe('form control look contract', () => {
   });
 
   it('gives the panel search no own focus box', () => {
-    expect(select).toMatch(/\.ptah-select__search:focus-visible[^{}]*\{\s*outline: none;\s*box-shadow: none;/);
+    expect(select).toMatch(
+      /^\.ptah-select :is\(\.ptah-select__search, #ptah-select\):focus-visible[^{}]*\{\s*outline: none;\s*box-shadow: none;/m,
+    );
   });
 });

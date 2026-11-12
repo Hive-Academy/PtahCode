@@ -155,6 +155,13 @@
   padding-top: calc(var(--ptah-field-pad-top) + var(--ptah-space-2));
 }
 
+/* The field clear action replaces the browser search action. */
+.ptah-field__body input[type='search']::-webkit-search-cancel-button,
+.ptah-field__body input[type='search']::-webkit-search-decoration {
+  display: none;
+  -webkit-appearance: none;
+}
+
 /* Hover, focus ring and rail */
 .ptah-field__box:hover:not(:has(:disabled)) {
   border-color: var(--ptah-field-border-hover);

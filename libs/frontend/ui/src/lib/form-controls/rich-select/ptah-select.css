@@ -189,7 +189,7 @@
 }
 
 /* Keyboard focus marks the search row without a second input box. */
-:is(.ptah-select, #ptah-select) .ptah-select__search:focus-visible:is(.ptah-select__search, #ptah-control) {
+.ptah-select :is(.ptah-select__search, #ptah-select):focus-visible:is(.ptah-select__search, #ptah-control) {
   outline: none;
   box-shadow: none;
 }
