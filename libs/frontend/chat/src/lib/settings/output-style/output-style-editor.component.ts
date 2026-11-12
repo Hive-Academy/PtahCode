@@ -209,7 +209,10 @@ interface StaleConflict {
         <form class="space-y-3" id="output-style-editor-form" (submit)="submit($event)">
           <!-- Name -->
           <div>
-            <ptah-field label="Name">
+            <ptah-field
+              label="Name"
+              hint="The name is what a session binds to. The filename is derived from it and is only storage."
+            >
             <input
               ptahInput
               id="output-style-name"
@@ -221,11 +224,7 @@ interface StaleConflict {
               [value]="name()"
               (input)="onNameInput($event)"
               (blur)="nameTouched.set(true)"
-              [attr.aria-describedby]="
-                showNameError()
-                  ? 'output-style-name-error'
-                  : 'output-style-name-hint'
-              "
+              [attr.aria-describedby]="showNameError() ? 'output-style-name-error' : null"
             />
             </ptah-field>
             @if (showNameError()) {
@@ -235,14 +234,6 @@ interface StaleConflict {
                   Give the style a name. This is the value the agent is selected by,
                   so it cannot be blank.
                 </span>
-              </p>
-            } @else {
-              <p
-                id="output-style-name-hint"
-                class="text-xs text-base-content-muted mt-1"
-              >
-                The name is what a session binds to. The filename is derived from it
-                and is only storage.
               </p>
             }
           </div>
