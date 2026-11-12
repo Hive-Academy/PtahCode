@@ -140,7 +140,8 @@ worktree returns `refused` with the reason; dependency failures return `retryabl
     code-logic-review.md           review
     visual-review.md               visual-review
     screenshots/                   visual-review evidence
-    future-enhancements.md         completion
+    completion-report.md             completion
+    future-enhancements.md         research (after-QA modernization scan)
 ```
 
 `registry.md` is derived from each folder's `task.md` and carries a `GENERATED — DO NOT HAND-EDIT`
@@ -166,9 +167,10 @@ the `review`/`tests`/`visual-review` row. Before the next phase, complete any re
 | `design-spec.md` + `prototype/` | Resume `document-review` and Gate 1.7 for the current revision; after approval, select the next phase from the task type/strategy recorded in `context.md` (CREATIVE → docs; BUGFIX → batch (decomposition); flows with architecture → architecture) |
 | `implementation-plan.md` | Resume `document-review` and Gate 2 for the current revision; then `batch` (decomposition) |
 | `batches.md`, a batch not COMPLETE | resume `implement` for the next incomplete batch, then orchestrator acceptance (Mode 2) |
-| `batches.md`, every batch COMPLETE | `completion` (Mode 3), then Gate 3 |
+| `batches.md`, every batch COMPLETE | Run required `review` and `tests` (QA), then `completion`, Gate 3 and the after-QA `research` modernization scan where the flow calls for it |
 | QA reports (`test-report.md`, `code-style-review.md`, `code-logic-review.md`, `visual-review.md`) | After the document gates and batch work: continue the chosen `review`, `tests` or `visual-review` phase, or finish |
-| `future-enhancements.md` | Workflow already complete |
+| `completion-report.md` (no future-enhancements.md) | Present Gate 3; run after-QA `research` modernization scan when the selected flow calls for it |
+| `future-enhancements.md` | Workflow complete after QA modernization research |
 
 ## Status vocabularies
 

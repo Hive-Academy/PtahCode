@@ -4,7 +4,7 @@ kind: plan
 input: ["User request and task context", "Existing implementation and repository rules"]
 deliverable: ["task-description.md", "parity-inventory.md when an existing surface changes"]
 verdict: ["Requirements ready for design", "Clarification needed"]
-acceptanceStep: ["Check every criterion against user intent and existing behavior", "Obtain the applicable requirements gate decision"]
+acceptanceStep: ["See ../SKILL.md orchestrator acceptance step", "Check every criterion against user intent and existing behavior", "Obtain the applicable requirements gate decision"]
 requiredCapabilities: ["Requirements discovery", "Capability inventory", "Risk and scope analysis"]
 toolProfile:
   disallowedTools: []

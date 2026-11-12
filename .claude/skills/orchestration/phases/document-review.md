@@ -4,7 +4,7 @@ kind: document-review
 input: ["Artifact and exact user request", "Project rules and prior approved artifacts", "Parity inventory and prototype evidence when applicable"]
 deliverable: ["<artifact-stem>-review.md"]
 verdict: ["APPROVED", "REVISE"]
-acceptanceStep: ["Independent opposite-side review before document gate", "Recheck changed revision and record gate decision"]
+acceptanceStep: ["See ../SKILL.md orchestrator acceptance step", "Independent opposite-side review before document gate", "Recheck changed revision and record gate decision"]
 requiredCapabilities: ["Requirement traceability", "Artifact feasibility review", "Revision-state tracking"]
 toolProfile:
   disallowedTools: []

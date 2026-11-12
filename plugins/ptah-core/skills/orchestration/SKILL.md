@@ -50,12 +50,12 @@ step, including batch verification and commits; an executor never accepts its ow
 
 | Type | Phase-kind flow |
 | --- | --- |
-| FEATURE | `plan` -> [`research`] -> [`design` -> `document-review` -> Gate 1.7] -> `architecture` -> `document-review` -> `batch` -> `implement` -> `review` -> `tests` -> `completion` |
-| BUGFIX | [`research`] -> `batch` -> `implement` -> `review` -> `tests` -> `completion` |
-| REFACTORING | `architecture` -> `document-review` -> `batch` -> `implement` -> `review` -> `tests` -> `completion` |
-| DOCUMENTATION | `plan` -> `document-review` -> `docs` -> `review` -> `completion` |
+| FEATURE | `plan` -> `document-review` -> [`research`] -> [`design` -> `document-review` -> Gate 1.7] -> `architecture` -> `document-review` -> `batch` -> `implement` -> `review` -> `tests` -> `completion` -> `research` (after-QA modernization scan) |
+| BUGFIX | [`research`] -> `batch` -> `implement` -> `review` -> `tests` -> `completion` -> `research` (after-QA modernization scan) |
+| REFACTORING | `architecture` -> `document-review` -> `batch` -> `implement` -> `review` -> `tests` -> `completion` -> `research` (after-QA modernization scan) |
+| DOCUMENTATION | `plan` -> `document-review` -> `docs` (content specification) -> `implement` (documentation files) -> `review` -> `tests` -> `completion` |
 | RESEARCH | `research` -> [`plan` and FEATURE flow if implementation is needed] -> `completion` |
-| DEVOPS | `plan` -> `document-review` -> `architecture` -> `document-review` -> `implement` -> `review` -> `tests` -> `completion` |
+| DEVOPS | `plan` -> `document-review` -> `architecture` -> `document-review` -> `implement` -> `review` -> `tests` -> `completion` -> `research` (after-QA modernization scan) |
 | SAAS_INIT | discovery -> `plan` -> `document-review` -> `architecture` -> `document-review` -> `batch` -> `implement` -> `review` -> `tests` -> `completion` |
 | CREATIVE | [`design` -> `document-review` -> Gate 1.7] -> `docs` -> `implement` -> `review` -> `visual-review` -> `completion` |
 
@@ -113,7 +113,7 @@ and the completion summary list them so the user can audit and overturn any of t
 | 1.5 Technical  | Before `architecture`, if several valid approaches                                                                                                                                                   | Decision ladder; ask only if user-reserved                                         |
 | 1.7 Design     | After `design-spec.md` and `prototype/`, before the next phase of the flow (`architecture`, `batch`, or `docs`); mandatory whenever `design` ran or any UI surface is added/redesigned | Per approval mode (below)                                                          |
 | 2 Architecture | After `implementation-plan.md`                                                                                                                                                                  | Per approval mode (below)                                                          |
-| 3 QA phase selection | After `batch` completion                                                                                                                                                                    | Notice, agents chosen by rule                                                      |
+| 3 QA phase selection | After `completion`                                                                                                                                                                    | Notice, agents chosen by rule                                                      |
 | SR Questions   | An agent messaged a question or returned `## Clarifications Needed`                                                                                                                             | Decision ladder, answer back via messaging                                         |
 
 At Gate 0.1, a current explicit instruction wins. For conflicting or stale memory, use the most
@@ -162,8 +162,8 @@ Templates, skip conditions and rejection handling: [checkpoints.md](references/c
   precedence is call -> agent frontmatter -> `CLAUDE_CODE_SUBAGENT_MODEL` -> parent;
   `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` and `CLAUDE_CODE_EFFORT_LEVEL` can override.
   When no chosen roster row exists, keep the agent frontmatter `model:` default. Record requested vs observed model when observable.
-- **Batch guidance** is advisory and spawns nothing. Each return ends in a `### Next action:` line —
-  do exactly that: [team-leader-modes.md](references/team-leader-modes.md).
+- **Batch guidance** is advisory and spawns nothing. The orchestrator follows the
+  [acceptance step](references/team-leader-modes.md#acceptance-step) and records state in `batches.md` or `decisions.md`.
 - **CLI lanes**: Gate 0.1 decides whether they are used. Who may spawn them and how phases,
   batches or whole runs are assigned to lanes: [lane-assignment.md](references/lane-assignment.md).
   How to run a lane: the [agent-lanes skill](../agent-lanes/SKILL.md).
@@ -215,7 +215,7 @@ Every tool call in any agent or lane resends its whole thread, so cost is reques
 
 ## Lean orchestration rules
 
-1. **Fresh guidance for batch acceptance and completion.** Give it only the batch report path, plus the
+1. **Fresh guidance for batch acceptance and completion.** Run acceptance from the batch report path only, plus the
    review path when you return with a phase review verdict. Never resume a long-lived batch executor.
 2. **Resume only inside the cache window.** Resume a developer or reviewer only when its last
    activity was under 5 minutes ago. Otherwise start a fresh one with the batch section and the

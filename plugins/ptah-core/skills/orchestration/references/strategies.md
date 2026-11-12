@@ -21,12 +21,12 @@ lists it; a role never stops work because an optional skill is absent). Stack-cu
 
 | Strategy | Complexity | Phase kinds | User checkpoints |
 | --- | --- | --- | --- |
-| FEATURE | Full | `plan`, optional `research`/`design`, `architecture`, `batch`, `implement`, `review`, `tests`, `completion` | Scope, requirements, design (1.7), architecture, QA |
-| BUGFIX | Streamlined | optional `research`, `batch`, `implement`, `review`, `tests`, `completion` | QA |
-| REFACTORING | Focused | `architecture`, `batch`, `implement`, `review`, `tests`, `completion` | Architecture, QA |
-| DOCUMENTATION | Minimal | `plan`, `docs`, `review`, `completion` | Requirements |
+| FEATURE | Full | `plan`, `document-review`, optional `research`/`design`, `architecture`, `batch`, `implement`, `review`, `tests`, `completion`, after-QA `research` | Scope, requirements, design (1.7), architecture, QA |
+| BUGFIX | Streamlined | optional `research`, `batch`, `implement`, `review`, `tests`, `completion`, after-QA `research` | QA |
+| REFACTORING | Focused | `architecture`, `batch`, `implement`, `review`, `tests`, `completion`, after-QA `research` | Architecture, QA |
+| DOCUMENTATION | Minimal | `plan`, `document-review`, `docs`, `implement`, `review`, `tests`, `completion` | Requirements |
 | RESEARCH | Investigation | `research`, optional FEATURE flow, `completion` | None |
-| DEVOPS | Infrastructure | `plan`, `architecture`, `implement`, `review`, `tests`, `completion` | Requirements, architecture, QA |
+| DEVOPS | Infrastructure | `plan`, `architecture`, `implement`, `review`, `tests`, `completion`, after-QA `research` | Requirements, architecture, QA |
 | SAAS_INIT | Full + discovery | discovery, `plan`, `architecture`, `batch`, `implement`, `review`, `tests`, `completion` | Scope, PRD, architecture, batches |
 | CREATIVE | Design first | `design`, `docs`, `implement`, `review`, `visual-review`, `completion` | Design system, design (1.7) |
 
@@ -73,7 +73,7 @@ Phase 4: architecture --> Creates implementation-plan.md
          GATE PASSES (lane-review: reviewer APPROVED; user: "APPROVED" or feedback)
          |
          v
-Phase 5: batch (decompose) --> implement + acceptance (loop) --> completion
+Phase 5: batch (decompose) --> implement + acceptance (loop)
          |
          Review and test phases selected by rule (notice; user may add agents)
          |
@@ -84,7 +84,7 @@ Phase 6: `review`, `tests`, `visual-review` as selected
 Phase 7: User handles git (commits already created)
          |
          v
-Phase 8: completion --> Creates future-enhancements.md
+Phase 8: completion --> research (after-QA modernization scan) --> Creates future-enhancements.md
 ```
 
 Before design starts on an existing surface being replaced, consolidated, rebuilt or redesigned,
@@ -109,12 +109,12 @@ revise them until Gate 1.7 is approved, then pass the approved prototype to the 
 [IF complex/unknown cause] research
          |
          v
-batch (decompose) --> implement + acceptance (loop) --> completion
+batch (decompose) --> implement + acceptance (loop)
          |
          Review and test phases selected by rule
          |
          v
-[`review`, `tests`, `visual-review` as selected] --> Git --> completion
+[`review`, `tests`, `visual-review` as selected] --> Git --> completion --> research (after-QA modernization scan)
 ```
 
 ### Decision Points
@@ -137,12 +137,12 @@ architecture --> Creates implementation-plan.md
          GATE PASSES (lane-review: reviewer APPROVED; user: "APPROVED" or feedback)
          |
          v
-batch (decompose) --> implement + acceptance (loop) --> completion
+batch (decompose) --> implement + acceptance (loop)
          |
          Review and test phases selected by rule
          |
          v
-[`review`, `tests`, `visual-review` as selected] --> Git --> completion
+[`review`, `tests`, `visual-review` as selected] --> Git --> completion --> research (after-QA modernization scan)
 ```
 
 ### Why Skip `plan`
@@ -173,7 +173,10 @@ plan --> Creates task-description.md
          GATE PASSES (lane-review: reviewer APPROVED; user: "APPROVED" or feedback)
          |
          v
-`docs` --> Implements documentation
+`docs` --> Writes content-specification.md
+         |
+         v
+`implement` --> Edits real documentation files
          |
          v
 `review` --> Verifies formatting/consistency
@@ -184,7 +187,7 @@ Orchestrator acceptance and git
 
 ### Documentation Implementation Selection
 
-Route documentation work as `docs` and preserve the subject expertise when selecting an executor.
+Route documentation content specification as `docs`; route real documentation file edits as `implement` and preserve the subject expertise when selecting an executor.
 
 | Documentation type | Required expertise |
 | --- | --- |
@@ -247,7 +250,7 @@ Phase 4: `review`, `tests`, `visual-review` as selected
 Phase 5: User handles git (commits already created)
          |
          v
-Phase 6: completion --> Creates future-enhancements.md
+Phase 6: completion --> research (after-QA modernization scan) --> Creates future-enhancements.md
 ```
 
 ### DEVOPS Trigger Keywords
@@ -263,7 +266,7 @@ Invoke DEVOPS strategy when task involves:
 
 **Key Signal**: Work is 100% infrastructure (no application business logic)
 
-**Implementation**: Route the infrastructure work as `implement` with DevOps skills.
+**Implementation**: Route the infrastructure work as `implement`; default executor alias `devops-engineer`; use `Required Skills:` from the skill-routing table.
 
 **Candidate skill**: Assign `nestjs-deployment` in `Required Skills:` when the host lists it and
 the task containerizes, configures health checks, CORS, rate limiting or production logging, runs

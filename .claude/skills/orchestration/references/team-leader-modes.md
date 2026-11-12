@@ -14,6 +14,17 @@ The orchestrator owns the phase exchange. The `batch` kind decomposes and recomm
 
 Pass the absolute task folder, mode-equivalent kind or acceptance step, and relevant report paths to a fresh invocation. For acceptance, supply the batch report path and, when available, the review path and one-line verdict. Require a file deliverable and `WROTE: <absolute path>` confirmation.
 
+## Acceptance step
+
+The orchestrator runs this step from the batch report path in a fresh invocation. The report is a claim; the file is the fact.
+
+1. Parse the report: require every assigned task to be done, every changed file path to be listed, evidence for each task, and a resolution for every plan-validation risk. If evidence is missing, return `BATCH [N] PARTIAL FAILURE` with the missing item.
+2. Verify each reported file on disk yourself. Inspect source structure first with `ptah_ast_analyze` or `ptah_context_enrich_file`, then read the relevant implementation and compare it with the batch contract. Missing files or incomplete work give `BATCH [N] PARTIAL FAILURE`. Only after this verification mark each task `IMPLEMENTED` in `batches.md`.
+3. Run the batch's one scoped verification command. Record its result. On failure, keep the batch `IN_PROGRESS` and return `BATCH [N] NOT ACCEPTED` with actionable `file:line` diagnostics. Retry the same executor under the lean retry rule; do not accept or commit a failed batch.
+4. Discover the full write set with `git status --short` and `git diff --name-only`; executors may have touched unreported shared files. Review each diff, stage only files belonging to this batch, and match the style of the last ten commit subjects before committing. Never stage another writer's changes.
+5. After checks and commit, mark every task and the batch `COMPLETE` and write the commit SHA on the batch header. `IMPLEMENTED` means verified on disk; `COMPLETE` means checked and committed. If more batches remain, count and return the `PENDING` batches. On the last batch of a phase, request one review of the combined diff from the parent of its first phase commit to `HEAD`: code logic for shipping code, style for new public API, and visual review for rendered UI.
+6. Read the review at its supplied path. For APPROVED or APPROVE, record its path on the last batch header and return the next batch or `ALL BATCHES COMPLETE`. For NEEDS_REVISION, REVISE, REJECTED or REJECT, open one fix batch `IN_PROGRESS` for findings within the fix-round rule and return `BATCH [N] NOT ACCEPTED`. Its work repeats steps 1-5; its one re-review covers only the fix commits. Record review-family evidence before advancing.
+
 ## Lean orchestration rules
 
 - Every acceptance/completion invocation is fresh. In Mode 2, give it the batch report path
@@ -57,17 +68,16 @@ Missing or stale required evidence (including any required design gate) is a blo
 The `completion` kind checks that this evidence still applies and that every phase that changed shipping code has its
 accepting code-logic review; it never commissions another document review. When a flow legitimately skips an artifact,
 its approval and review are not required either.
-For each reviewed phase, the `### Next action:` return and Mode 3 summary must identify the actual
+For each reviewed phase, the recorded state transition and Mode 3 summary must identify the actual
 executor, author family, reviewer family, and any same-family reason with its weaker-evidence label.
 If review fell back to an independent subagent, include `Subagent reason` and the unavailable lane
 evidence. Do not describe a same-family review as different-family evidence.
 
-## Acting on a return
+## Orchestrator state transitions
 
-Every return ends with a `### Next action:` line. Do what it says; the heading tells you which case
-you are in.
+The orchestrator records and follows these state transitions in batches.md or decisions.md.
 
-| Return heading              | Your action                                                                                                                                                                                                                                                                                                                                                                                          |
+| State recorded              | Orchestrator action                                                                                                                                                                                                                                                                                                                                                                                          |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DECOMPOSITION COMPLETE`    | Spawn Batch 1's executor (below)                                                                                                                                                                                                                                                                                                                                                                     |
 | `DECOMPOSITION BLOCKED`     | Plan-free BUGFIX: return the blocking questions to the orchestrator, who runs Gate SR or commissions research, then re-invokes `batch`; no architecture/Gate 2 for a flow without a plan. Planned flows: re-invoke architecture with the blocking issues, refresh the document review, then Gate 2 again.                                                                        |
@@ -75,7 +85,7 @@ you are in.
 | `NEEDS REVIEW`              | A phase review is due. For shipping code, select an independent capable reviewer from a different family than the implementer when available (agent-lanes §6). Use an eligible existing review if present; otherwise obtain the combined-diff `code-logic-review.md` and any additional named review. Record actual executor, author/reviewer families and any same-family weaker-evidence reason or `Subagent reason`. Repeat acceptance with each actual report path (`code-logic-review.md`, `code-style-review.md`, `visual-review.md` as applicable) and verdict |
 | `BATCH [N] NOT ACCEPTED`    | Re-invoke the same executor with the listed issues (a failing scoped check, or the fix batch for a rejected phase review), then acceptance again                                                                                                                                                                                                                                                         |
 | `BATCH [N] COMPLETE`        | Spawn the next batch's executor                                                                                                                                                                                                                                                                                                                                                                      |
-| `ALL BATCHES COMPLETE`      | Invoke `completion`                                                                                                                                                                                                                                                                                                                                                                                        |
+| ALL BATCHES COMPLETE | Run required review, tests and applicable visual-review, then invoke completion |
 | `TASK COMPLETE`             | Present Gate 3 with the options it returned                                                                                                                                                                                                                                                                                                                                                          |
 
 A hook failure during its commit is your gate: [git-standards.md](git-standards.md#hook-failure-protocol).

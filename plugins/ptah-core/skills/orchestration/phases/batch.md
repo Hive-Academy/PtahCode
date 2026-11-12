@@ -4,7 +4,7 @@ kind: batch
 input: [context.md, task-description.md, implementation-plan.md when present, parity-inventory.md, research findings]
 deliverable: [batches.md]
 verdict: [DECOMPOSITION COMPLETE, DECOMPOSITION BLOCKED]
-acceptanceStep: [orchestrator later checks each batch with scoped verification and independent review, records git and status evidence]
+acceptanceStep: ["See ../SKILL.md orchestrator acceptance step", orchestrator later checks each batch with scoped verification and independent review, records git and status evidence]
 requiredCapabilities: [validate contracts, decompose file-disjoint work, estimate weight, recommend capable executor]
 toolProfile:
   disallowedTools: []
@@ -21,7 +21,7 @@ Write `batches.md` in the task folder. Start with total tasks/batches, plan-vali
 Return `WROTE: <absolute path>` and `DECOMPOSITION COMPLETE` with the first batch ready, or `DECOMPOSITION BLOCKED` with numbered evidence and next decision.
 
 ## Refusals
-Do not split coupled edits across parallel writers, omit a dependency or write set, prescribe workspace-wide checks, guess a model ID, route a blocked contract to implementation, or place verify-and-commit mechanics in this phase. Do not commit or alter task status while decomposing.
+Do not split coupled edits across parallel writers, omit a dependency or write set, prescribe workspace-wide checks, guess a model ID, or route a blocked contract to implementation. The orchestrator performs the acceptance step linked from `../SKILL.md`; do not commit or alter task status while decomposing.
 
 ## Escalation protocol
 For blockers, show the conflicting paths and contract lines. A plan-free fix goes to the orchestrator for research or scope resolution; a planned flow goes back for plan revision and renewed gate review. State which batches remain safe to define and which cannot start.

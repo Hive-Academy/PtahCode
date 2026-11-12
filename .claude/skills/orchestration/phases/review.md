@@ -4,7 +4,7 @@ kind: review
 input: ["Task requirements and changed code", "Implementation report and relevant repository rules"]
 deliverable: ["Code review report named by task tracking reference"]
 verdict: ["APPROVED", "REVISE"]
-acceptanceStep: ["Recheck each finding after revision", "Send verdict and unresolved issues to orchestrator acceptance"]
+acceptanceStep: ["See ../SKILL.md orchestrator acceptance step", "Recheck each finding after revision", "Send verdict and unresolved issues to orchestrator acceptance"]
 requiredCapabilities: ["Logic and failure review", "Style and architecture review", "Evidence-based severity assessment"]
 toolProfile:
   disallowedTools: []
