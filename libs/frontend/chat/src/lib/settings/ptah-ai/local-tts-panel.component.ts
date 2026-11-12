@@ -19,6 +19,7 @@ import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.
 import { VoiceDownloadProgressService } from '../../services/voice-download-progress.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import {
+  PtahBadgeDirective,
   PtahButtonDirective,
   PtahInputDirective,
   PtahSelectDirective,
@@ -76,6 +77,7 @@ interface VoiceGroup {
   imports: [
     SettingsBusyDisabledDirective,
     LucideAngularModule,
+    PtahBadgeDirective,
     PtahButtonDirective,
     PtahInputDirective,
     PtahSelectDirective,
@@ -272,7 +274,7 @@ interface VoiceGroup {
               <div class="flex items-center justify-between gap-2">
                 @if (downloaded()) {
                   <span
-                    class="badge badge-outline badge-sm gap-1 whitespace-nowrap text-base-content"
+                    ptahBadge appearance="outline" class="gap-1 whitespace-nowrap text-base-content"
                     data-testid="local-tts-download-status"
                   >
                     <span
@@ -283,7 +285,7 @@ interface VoiceGroup {
                   </span>
                 } @else {
                   <span
-                    class="badge badge-outline badge-sm gap-1 whitespace-nowrap text-base-content"
+                    ptahBadge appearance="outline" class="gap-1 whitespace-nowrap text-base-content"
                     data-testid="local-tts-download-status"
                   >
                     <span

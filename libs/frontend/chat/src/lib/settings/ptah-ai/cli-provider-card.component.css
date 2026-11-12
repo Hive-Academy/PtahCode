@@ -7,5 +7,5 @@
 .credential-slot { height: 1.9rem; min-height: 1.9rem; }
 .capability-strip { height: 2.25rem; overflow: hidden; }
 :host ::ng-deep .capability-strip [data-testid='cli-capability-summary'] { flex-wrap: nowrap; overflow: hidden; }
-:host ::ng-deep .capability-strip [data-testid='cli-capability-summary'] .badge:nth-child(n+3) { display: none; }
+:host ::ng-deep .capability-strip [data-testid='cli-capability-summary'] [data-ptah-badge]:nth-child(n+3) { display: none; }
 :host button:focus-visible, :host input:focus-visible { outline: 2px solid var(--ptah-gold-strong); outline-offset: 2px; }

@@ -15,6 +15,7 @@ import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.
 import { VoiceDownloadProgressService } from '../../services/voice-download-progress.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import {
+  PtahBadgeDirective,
   PtahButtonDirective,
   PtahInputDirective,
   PtahSelectDirective,
@@ -69,6 +70,7 @@ const HF_REPO_ID_RE = /^[\w.-]+\/[\w.-]+$/;
   imports: [
     SettingsBusyDisabledDirective,
     LucideAngularModule,
+    PtahBadgeDirective,
     PtahButtonDirective,
     PtahInputDirective,
     PtahSelectDirective,
@@ -238,8 +240,8 @@ const HF_REPO_ID_RE = /^[\w.-]+\/[\w.-]+$/;
             } @else {
               <div class="flex items-center justify-between gap-2">
                 @if (downloaded()) {
-                  <span
-                    class="badge badge-outline badge-sm gap-1 whitespace-nowrap text-base-content"
+                  <span ptahBadge appearance="outline" tone="ok"
+                    class="gap-1 whitespace-nowrap"
                     data-testid="local-stt-download-status"
                   >
                     <span
@@ -249,8 +251,8 @@ const HF_REPO_ID_RE = /^[\w.-]+\/[\w.-]+$/;
                     Downloaded
                   </span>
                 } @else {
-                  <span
-                    class="badge badge-outline badge-sm gap-1 whitespace-nowrap text-base-content"
+                  <span ptahBadge appearance="outline" tone="warn"
+                    class="gap-1 whitespace-nowrap"
                     data-testid="local-stt-download-status"
                   >
                     <span

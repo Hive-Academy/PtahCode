@@ -207,7 +207,8 @@ describe('ElevenLabsPanelComponent', () => {
 
       const result = byTestId('elevenlabs-test-result');
       expect(result.textContent?.trim()).toBe('Authentication: ElevenLabs rejected the key.');
-      expect(result.classList).toContain('text-base-content');
+      expect(result.hasAttribute('data-ptah-badge')).toBe(true);
+      expect(result.getAttribute('data-tone')).toBe('err');
       expect(element.textContent).not.toContain('host detail');
       expect(isDisabledControl(byTestId<HTMLButtonElement>('elevenlabs-key-save'))).toBe(true);
 

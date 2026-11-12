@@ -12,17 +12,19 @@ import {
   ChangeDetectionStrategy,
 } from '@angular/core';
 import type { AgentPermissionRequest } from '@ptah-extension/shared';
+import { PtahBadgeDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-agent-card-permission',
   standalone: true,
+  imports: [PtahBadgeDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
       class="border-t border-warning/20 bg-warning/5 px-3 py-2 flex-shrink-0"
     >
       <div class="flex items-center gap-2 mb-1.5">
-        <span class="badge badge-sm badge-warning">Permission</span>
+        <span ptahBadge tone="warn">Permission</span>
         <span class="text-[10px] text-base-content-muted">
           {{ permission().description }}
         </span>
