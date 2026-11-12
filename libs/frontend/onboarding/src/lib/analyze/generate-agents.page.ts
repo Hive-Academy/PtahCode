@@ -10,7 +10,7 @@ import {
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { TabManagerService } from '@ptah-extension/chat-state';
-import { VSCodeService } from '@ptah-extension/core';
+import { VSCodeService, injectClock } from '@ptah-extension/core';
 import type {
   ResumableGenerationAgent,
   SetupGenerationTabBinding,
@@ -334,7 +334,7 @@ export class GenerateAgentsPage implements OnInit {
   protected readonly binding = signal<SetupGenerationTabBinding | null>(null);
   protected readonly recovery = signal<OnboardingRecoveryReason | null>(null);
   protected readonly continueError = signal<string | null>(null);
-  private readonly now = signal(Date.now());
+  private readonly now = injectClock(() => this.handoff.pending() !== null);
   protected readonly remainingSeconds = computed(() =>
     Math.max(
       0,
@@ -448,13 +448,6 @@ export class GenerateAgentsPage implements OnInit {
   constructor() {
     this.destroyRef.onDestroy(() => {
       this.destroyed = true;
-    });
-    effect((cleanup) => {
-      const pending = this.handoff.pending();
-      if (!pending) return;
-      this.now.set(Date.now());
-      const timer = setInterval(() => this.now.set(Date.now()), 250);
-      cleanup(() => clearInterval(timer));
     });
     effect(() => {
       const started = this.handoff.started();

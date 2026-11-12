@@ -1,3 +1,5 @@
+import { ClockService } from '@ptah-extension/core';
+import { PTAH_CLOCK } from '@ptah-extension/ui';
 import { computed, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { SURFACE_ACTIVE } from '@ptah-extension/core';
@@ -105,6 +107,7 @@ async function setup(initial: RemoteSessionView = view()) {
     providers: [
       { provide: MachinesStore, useValue: store },
       { provide: SURFACE_ACTIVE, useValue: signal(true) },
+      { provide: PTAH_CLOCK, useExisting: ClockService },
       provideMarkdownRendering({ extensions: 'basic' }),
     ],
   });
@@ -156,11 +159,15 @@ describe('RemoteSessionViewComponent', () => {
   it('4.6: header and "Claude on <Machine>" author label', async () => {
     const { fixture } = await setup();
     expect(text(fixture, 'remote-session-title')).toBe('Summarise sprint log');
-    expect(text(fixture, 'remote-session-meta')).toBe('on Horus · ~/work/notes');
+    expect(text(fixture, 'remote-session-meta')).toBe(
+      'on Horus · ~/work/notes',
+    );
     expect(text(fixture, 'remote-message-author')).toBe('Claude on Horus');
     expect(q(fixture, 'remote-message-user')?.textContent).toContain('You:');
     expect(
-      (fixture.nativeElement as HTMLElement).querySelectorAll('ptah-markdown-block'),
+      (fixture.nativeElement as HTMLElement).querySelectorAll(
+        'ptah-markdown-block',
+      ),
     ).toHaveLength(2);
     expect(text(fixture, 'session-sync-chip')).toBe('Caught up');
   });
@@ -179,7 +186,9 @@ describe('RemoteSessionViewComponent', () => {
     );
     expect(send(fixture).disabled).toBe(true);
     expect(text(fixture, 'remote-live')).toBe('Claude is responding');
-    expect((q(fixture, 'remote-stop') as HTMLButtonElement).disabled).toBe(false);
+    expect((q(fixture, 'remote-stop') as HTMLButtonElement).disabled).toBe(
+      false,
+    );
 
     await set(view());
     send(fixture).click();
@@ -260,7 +269,9 @@ describe('RemoteSessionViewComponent', () => {
     );
     expect(q(fixture, 'remote-error')).toBeNull();
     const host = (fixture.nativeElement as HTMLElement).textContent ?? '';
-    expect(host).not.toMatch(/driving|driven from|SESSION_DRIVER_LOCK_UNAVAILABLE/);
+    expect(host).not.toMatch(
+      /driving|driven from|SESSION_DRIVER_LOCK_UNAVAILABLE/,
+    );
   });
 
   it('9c with a cached view: labelled cached, request read-only', async () => {
@@ -313,11 +324,18 @@ describe('RemoteSessionViewComponent', () => {
     (q(fixture, 'approval-allow') as HTMLButtonElement).click();
     await flush();
     fixture.detectChanges();
-    expect(store.respondPermission).toHaveBeenCalledWith('m1', 's1', 'p1', 'allow');
+    expect(store.respondPermission).toHaveBeenCalledWith(
+      'm1',
+      's1',
+      'p1',
+      'allow',
+    );
     expect(text(fixture, 'approval-error')).toContain(
       'This request could not be answered from this app.',
     );
-    expect((q(fixture, 'approval-allow') as HTMLButtonElement).disabled).toBe(true);
+    expect((q(fixture, 'approval-allow') as HTMLButtonElement).disabled).toBe(
+      true,
+    );
   });
 
   it('decision 27: a request the worker denied on timeout says so', async () => {
@@ -325,7 +343,9 @@ describe('RemoteSessionViewComponent', () => {
     expect(text(fixture, 'approval-timed-out')).toBe(
       'No answer within 60 s — the worker denied this request.',
     );
-    expect((q(fixture, 'approval-deny') as HTMLButtonElement).disabled).toBe(true);
+    expect((q(fixture, 'approval-deny') as HTMLButtonElement).disabled).toBe(
+      true,
+    );
   });
 
   it('3.4: an offline machine keeps the view as last known state', async () => {
@@ -336,11 +356,15 @@ describe('RemoteSessionViewComponent', () => {
     expect(fixture.nativeElement.textContent).not.toMatch(/failed/i);
     await type(fixture, 'later');
     expect(send(fixture).disabled).toBe(true);
-    expect(text(fixture, 'remote-composer-reason')).toBe('Horus is not connected.');
+    expect(text(fixture, 'remote-composer-reason')).toBe(
+      'Horus is not connected.',
+    );
   });
 
   it('4.8: reconnecting shows the replay banner and the gap chip', async () => {
-    const { fixture, machines, set } = await setup(view({ last: 1204, target: 1204 }));
+    const { fixture, machines, set } = await setup(
+      view({ last: 1204, target: 1204 }),
+    );
     machines.set([{ ...HORUS, state: 'reconnecting' }]);
     await set(view({ last: 1204, target: 1204, stale: true }));
     machines.set([HORUS]);
@@ -400,10 +424,7 @@ describe('RemoteSessionViewComponent', () => {
   });
 
   it('H: a denied tool reads "Failed", a finished one "Completed"', async () => {
-    const tool = (
-      callId: string,
-      isError: boolean,
-    ): FlatStreamEventUnion[] => [
+    const tool = (callId: string, isError: boolean): FlatStreamEventUnion[] => [
       {
         id: `${callId}-start`,
         eventType: 'tool_start',
@@ -461,9 +482,9 @@ describe('RemoteSessionViewComponent', () => {
     const { fixture } = await setup(
       view({ events: [USER_MESSAGE[0], deceptive, ...HISTORY_MESSAGE] }),
     );
-    const anchor = (fixture.nativeElement as HTMLElement).querySelector<HTMLAnchorElement>(
-      'ptah-remote-transcript a',
-    );
+    const anchor = (
+      fixture.nativeElement as HTMLElement
+    ).querySelector<HTMLAnchorElement>('ptah-remote-transcript a');
     expect(anchor).not.toBeNull();
     const event = new MouseEvent('click', { bubbles: true, cancelable: true });
     anchor?.dispatchEvent(event);
@@ -480,7 +501,8 @@ describe('RemoteSessionViewComponent', () => {
       eventType: 'text_delta',
       timestamp: 1,
       messageId: 'msg-0',
-      delta: 'ok <img src=x onerror="alert(1)"><script>alert(2)</script> evil\u202Etxt.exe',
+      delta:
+        'ok <img src=x onerror="alert(1)"><script>alert(2)</script> evil\u202Etxt.exe',
       blockIndex: 0,
       source: 'history',
     };
@@ -488,7 +510,11 @@ describe('RemoteSessionViewComponent', () => {
     // Through the reducer's boundary, as a snapshot would arrive.
     const events = reduceSessionEvent(initialSessionEventState('s1'), {
       kind: 'attach-succeeded',
-      result: { mode: 'snapshot', events: [USER_MESSAGE[0], hostile], live: false },
+      result: {
+        mode: 'snapshot',
+        events: [USER_MESSAGE[0], hostile],
+        live: false,
+      },
     }).state.events;
     await set(view({ events }));
     const region = q(fixture, 'remote-transcript-region') as HTMLElement;
@@ -504,6 +530,8 @@ describe('RemoteSessionViewComponent', () => {
     (q(fixture, 'remote-stop') as HTMLButtonElement).click();
     await flush();
     fixture.detectChanges();
-    expect(text(fixture, 'remote-send-error')).toBe('This session is not open.');
+    expect(text(fixture, 'remote-send-error')).toBe(
+      'This session is not open.',
+    );
   });
 });

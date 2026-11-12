@@ -6,12 +6,14 @@ import {
   OnDestroy,
   OnInit,
   computed,
+  effect,
   inject,
   input,
   signal,
   viewChild,
 } from '@angular/core';
 import { Router } from '@angular/router';
+import { ClockService } from '@ptah-extension/core';
 import { LucideAngularModule, Play, ScanSearch } from 'lucide-angular';
 import { SetupActionDirective } from '@ptah-extension/ui';
 import {
@@ -24,7 +26,10 @@ import {
 } from '@ptah-extension/setup-wizard';
 import { DetailsLogComponent } from '../shared/details-log.component';
 import { LiveRunLayoutComponent } from '../shared/live-run-layout.component';
-import { OnboardingStepperComponent, type OnboardingStep } from '../shared/onboarding-stepper.component';
+import {
+  OnboardingStepperComponent,
+  type OnboardingStep,
+} from '../shared/onboarding-stepper.component';
 import { RunPanelComponent } from '../shared/run-panel.component';
 import { onboardingStepLink } from '../shell/onboarding-step-link';
 import { AnalysisStepStore } from './analysis-step.store';
@@ -49,9 +54,15 @@ import { PhaseListComponent } from './phase-list.component';
   template: `
     <section
       class="mx-auto space-y-5"
-      [class.max-w-[1120px]]="(runner.isRunning() || runner.isCanceling()) && !stopRecovery()"
-      [class.max-w-[760px]]="(!runner.isRunning() && !runner.isCanceling()) || stopRecovery()"
-      [class.p-4]="(!runner.isRunning() && !runner.isCanceling()) || stopRecovery()"
+      [class.max-w-[1120px]]="
+        (runner.isRunning() || runner.isCanceling()) && !stopRecovery()
+      "
+      [class.max-w-[760px]]="
+        (!runner.isRunning() && !runner.isCanceling()) || stopRecovery()
+      "
+      [class.p-4]="
+        (!runner.isRunning() && !runner.isCanceling()) || stopRecovery()
+      "
       aria-labelledby="analyze-workspace-title"
       data-testid="analyze-workspace"
     >
@@ -62,7 +73,11 @@ import { PhaseListComponent } from './phase-list.component';
           ><lucide-angular [img]="icons.scan" class="size-6" aria-hidden="true"
         /></span>
         <div>
-          <h1 id="analyze-workspace-title" tabindex="-1" class="text-2xl font-semibold">
+          <h1
+            id="analyze-workspace-title"
+            tabindex="-1"
+            class="text-2xl font-semibold"
+          >
             Analyze workspace
           </h1>
           <p class="text-sm text-base-content-muted">
@@ -95,8 +110,14 @@ import { PhaseListComponent } from './phase-list.component';
           <ptah-run-panel
             [state]="runner.isCanceling() ? 'cancelling' : 'running'"
             [viewState]="viewState()"
-            [title]="runner.isCanceling() ? 'Stopping analysis' : 'Analyzing workspace'"
-            [message]="runner.isCanceling() ? 'Waiting for the run to stop.' : runner.statusText()"
+            [title]="
+              runner.isCanceling() ? 'Stopping analysis' : 'Analyzing workspace'
+            "
+            [message]="
+              runner.isCanceling()
+                ? 'Waiting for the run to stop.'
+                : runner.statusText()
+            "
             (stop)="confirmStop()"
           >
             @if (store.phaseHeader(); as header) {
@@ -111,7 +132,9 @@ import { PhaseListComponent } from './phase-list.component';
               </p>
             }
           </ptah-run-panel>
-          <p class="text-sm text-base-content-muted">You can leave this page. The analysis keeps running.</p>
+          <p class="text-sm text-base-content-muted">
+            You can leave this page. The analysis keeps running.
+          </p>
         </ptah-live-run-layout>
       } @else if (runner.errorMessage(); as rawError) {
         <ptah-run-panel
@@ -175,7 +198,11 @@ import { PhaseListComponent } from './phase-list.component';
             >
               Continue previous run
             </button>
-            <button type="button" [ptahSetupAction]="'ghost'" (click)="startFresh()">
+            <button
+              type="button"
+              [ptahSetupAction]="'ghost'"
+              (click)="startFresh()"
+            >
               Start fresh
             </button>
           </div>
@@ -213,7 +240,11 @@ import { PhaseListComponent } from './phase-list.component';
             <p class="text-sm text-state-err" role="alert">
               Saved analyses could not be loaded. Try again.
             </p>
-            <button type="button" [ptahSetupAction]="'ghost'" (click)="loadSaved()">
+            <button
+              type="button"
+              [ptahSetupAction]="'ghost'"
+              (click)="loadSaved()"
+            >
               Retry
             </button>
           }
@@ -309,8 +340,9 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
               : 'idle',
   );
   private readonly openedAt = signal<number | null>(null);
-  private readonly now = signal(Date.now());
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private readonly clock = inject(ClockService);
+  private readonly now = this.clock.now;
+  private releaseClock: (() => void) | null = null;
   protected readonly elapsedSeconds = computed(() =>
     this.openedAt() === null
       ? null
@@ -320,6 +352,14 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
   constructor() {
     this.destroyRef.onDestroy(() => {
       this.destroyed = true;
+    });
+    effect(() => {
+      if (
+        this.openedAt() !== null &&
+        !this.runner.isRunning() &&
+        !this.runner.isCanceling()
+      )
+        this.stopClock();
     });
   }
   async ngOnInit(): Promise<void> {
@@ -434,20 +474,15 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     }
   }
   private startClock(): void {
-    const startedAt = Date.now();
+    this.stopClock();
+    this.releaseClock = this.clock.acquire();
+    const startedAt = this.now();
     this.store.attachStream();
-    this.now.set(startedAt);
     this.openedAt.set(startedAt);
-    if (this.timer) clearInterval(this.timer);
-    this.timer = setInterval(() => {
-      if (this.runner.isRunning() || this.runner.isCanceling())
-        this.now.set(Date.now());
-      else this.stopClock();
-    }, 1000);
   }
   private stopClock(): void {
-    if (this.timer) clearInterval(this.timer);
-    this.timer = null;
+    this.releaseClock?.();
+    this.releaseClock = null;
     this.openedAt.set(null);
   }
   protected async chooseAgents(): Promise<void> {
