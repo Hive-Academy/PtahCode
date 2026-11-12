@@ -11,6 +11,11 @@
   min-width: 0;
 }
 
+.ptah-field__body > .ptah-select {
+  flex: 1 1 auto;
+  align-self: stretch;
+}
+
 .ptah-select__trigger {
   display: flex;
   align-items: center;
@@ -79,8 +84,16 @@
 }
 
 .ptah-select__chevron {
+  margin-inline-start: auto;
   color: var(--ptah-field-icon-fg);
   transition: transform var(--ptah-duration-base) var(--ptah-ease-emphasis);
+}
+
+/* In a floating field the trigger pads the top for the label. The negative
+   top margin moves the chevron up by half that difference, so it sits at the
+   vertical center of the box, like the clear action and a native select. */
+.ptah-field[data-appearance='floating'] .ptah-select__chevron {
+  margin-block-start: calc(var(--ptah-field-pad-bottom) - var(--ptah-field-pad-top));
 }
 
 .ptah-select[data-open] .ptah-select__chevron {
@@ -173,6 +186,16 @@
 
 .ptah-select__search::placeholder {
   color: var(--ptah-field-placeholder);
+}
+
+/* Keyboard focus marks the search row without a second input box. */
+:is(.ptah-select, #ptah-select) .ptah-select__search:focus-visible:is(.ptah-select__search, #ptah-control) {
+  outline: none;
+  box-shadow: none;
+}
+
+.ptah-select__search-row:focus-within {
+  border-bottom-color: var(--ptah-focus-ring-color);
 }
 
 .ptah-select__list {

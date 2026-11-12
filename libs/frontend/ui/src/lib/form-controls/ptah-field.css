@@ -2,8 +2,7 @@
    Scope: the ptah-field owner (.ptah-field and its parts) and the family
    controls inside it. Uses --ptah-* tokens only.
    The box draws the edge, the fill and the focus ring. The control inside is
-   transparent. The rail at the bottom edge carries focus (it grows from the
-   start edge), error (it stays) and busy (a sweep).
+   transparent. The rail at the bottom edge carries error and busy states.
    A control inside the body is reset with :is(.ptah-field__body, #ptah-field),
    which adds one id to the control rules of ptah-form-controls.css, so the
    reset wins without !important. Layout utilities on <ptah-field> still win:
@@ -116,9 +115,14 @@
   color: var(--ptah-state-err);
 }
 
-/* Controls inside the body */
-:is(.ptah-field__body, #ptah-field) :is(.input, .textarea, .select)[data-ptah-control]:is(.input, .textarea, .select, #ptah-control),
+/* Controls inside the body. The reset matches each native text control or
+   select with a DaisyUI root class (ptahInput, ptahTextarea, ptahSelect and
+   ptahFieldControl), not only [data-ptah-control]. The field box is the only
+   edge, so a second .input placed in the body also loses its own border. */
+:is(.ptah-field__body, #ptah-field) :is(input, textarea, select):is(.input, .textarea, .select, #ptah-control),
 :is(.ptah-field__body, #ptah-field) .ptah-select__trigger {
+  flex: 1 1 auto;
+  min-width: 0;
   width: 100%;
   height: auto;
   min-height: 0;
@@ -130,23 +134,24 @@
   outline: none;
 }
 
-:is(.ptah-field__body, #ptah-field) :is(.input, .select)[data-ptah-control]:is(.input, .select, #ptah-control),
+:is(.ptah-field__body, #ptah-field) :is(input, select):is(.input, .select, #ptah-control),
 :is(.ptah-field__body, #ptah-field) .ptah-select__trigger {
   align-self: stretch;
 }
 
-.ptah-field[data-appearance='floating'] :is(.ptah-field__body, #ptah-field) :is(.input, .textarea, .select)[data-ptah-control]:is(.input, .textarea, .select, #ptah-control),
+.ptah-field[data-appearance='floating'] :is(.ptah-field__body, #ptah-field) :is(input, textarea, select):is(.input, .textarea, .select, #ptah-control),
 .ptah-field[data-appearance='floating'] :is(.ptah-field__body, #ptah-field) .ptah-select__trigger {
   padding-top: var(--ptah-field-pad-top);
   padding-bottom: var(--ptah-field-pad-bottom);
 }
 
-:is(.ptah-field__body, #ptah-field) .textarea[data-ptah-control]:is(.textarea, #ptah-control) {
+:is(.ptah-field__body, #ptah-field) textarea:is(.textarea, #ptah-control) {
   min-height: var(--ptah-field-textarea-min-h);
   padding-inline-end: 0;
+  resize: none;
 }
 
-.ptah-field[data-appearance='floating'] :is(.ptah-field__body, #ptah-field) .textarea[data-ptah-control]:is(.textarea, #ptah-control) {
+.ptah-field[data-appearance='floating'] :is(.ptah-field__body, #ptah-field) textarea:is(.textarea, #ptah-control) {
   padding-top: calc(var(--ptah-field-pad-top) + var(--ptah-space-2));
 }
 
@@ -161,6 +166,14 @@
   outline-offset: var(--ptah-focus-ring-offset);
 }
 
+/* The box owns keyboard focus. Beat the glass and family host focus rules. */
+:is(.ptah-field__body, #ptah-field) :is(input, textarea, select):focus-visible:is(.input, .textarea, .select, #ptah-control),
+:is(.ptah-field__body, #ptah-field) .ptah-select__trigger:focus-visible:is(.ptah-select__trigger, #ptah-control) {
+  outline: none;
+  box-shadow: none;
+  border-color: transparent;
+}
+
 .ptah-field__rail {
   position: absolute;
   inset-inline: 0;
@@ -171,11 +184,6 @@
   transform-origin: left center;
   pointer-events: none;
   transition: transform var(--ptah-duration-base) var(--ptah-ease-emphasis);
-}
-
-.ptah-field__box:focus-within .ptah-field__rail,
-.ptah-field:has(.ptah-select[data-open]) .ptah-field__rail {
-  transform: scaleX(1);
 }
 
 /* Error: the field error or aria-invalid="true" on the control */
@@ -226,7 +234,7 @@
   cursor: not-allowed;
 }
 
-:is(.ptah-field__body, #ptah-field) :is(.input, .textarea, .select)[data-ptah-control]:disabled:is(.input, .textarea, .select, #ptah-control) {
+:is(.ptah-field__body, #ptah-field) :is(input, textarea, select):disabled:is(.input, .textarea, .select, #ptah-control) {
   background-color: transparent;
   opacity: 1;
 }
