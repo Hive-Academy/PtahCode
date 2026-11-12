@@ -2,6 +2,8 @@ import { ChangeDetectionStrategy, Component, computed, input } from '@angular/co
 import { CHART_TEXT } from './chart-geometry';
 import { PtahChartSize, PtahChartTone, PtahStatTrend } from './chart.types';
 
+export type PtahStatAppearance = 'card' | 'plain';
+
 const GLYPH: Readonly<Record<PtahStatTrend, string>> = { up: '▲', down: '▼', flat: '▬' };
 const VALUE_TEXT: Readonly<Record<PtahChartSize, string>> = { xs: 'text-sm', sm: 'text-lg', md: 'text-2xl' };
 
@@ -14,6 +16,16 @@ const VALUE_TEXT: Readonly<Record<PtahChartSize, string>> = { xs: 'text-sm', sm:
 @Component({
   selector: 'ptah-stat', standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { '[attr.data-appearance]': 'appearance()' },
+  styles: `
+    :host { display: block; }
+    :host([data-appearance='card']) {
+      padding: var(--ptah-stat-pad-y) var(--ptah-stat-pad-x);
+      border: var(--ptah-border-width) solid var(--ptah-stat-border);
+      border-radius: var(--ptah-stat-radius);
+      background-color: var(--ptah-stat-bg);
+    }
+  `,
   template: `<div class="flex flex-col gap-0.5">
     <span class="text-xs text-base-content-muted">{{ label() }}</span>
     <span class="flex items-baseline gap-2">
@@ -36,6 +48,8 @@ export class PtahStatComponent {
   readonly tone = input<PtahChartTone>('neutral');
   readonly hint = input<string | undefined>(undefined);
   readonly size = input<PtahChartSize>('sm');
+  /** `card` (default) draws a small card around the stat. `plain` draws none. */
+  readonly appearance = input<PtahStatAppearance>('card');
 
   readonly display = computed(() => {
     const v = this.value();

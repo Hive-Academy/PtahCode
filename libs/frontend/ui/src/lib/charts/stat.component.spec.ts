@@ -38,6 +38,26 @@ describe('PtahStatComponent', () => {
     expect(render({ value: 3, hint: 'Last 7 days' }).textContent).toContain('Last 7 days');
   });
 
+  it('draws a card by default', () => {
+    const fixture = TestBed.createComponent(PtahStatComponent);
+    fixture.componentRef.setInput('label', 'Sessions');
+    fixture.componentRef.setInput('value', 1);
+    fixture.detectChanges();
+    expect((fixture.nativeElement as HTMLElement).getAttribute('data-appearance')).toBe('card');
+  });
+
+  it('draws no card for the plain appearance and keeps the text', () => {
+    const fixture = TestBed.createComponent(PtahStatComponent);
+    fixture.componentRef.setInput('label', 'Sessions');
+    fixture.componentRef.setInput('value', 5);
+    fixture.componentRef.setInput('appearance', 'plain');
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.getAttribute('data-appearance')).toBe('plain');
+    expect(el.textContent).toContain('Sessions');
+    expect(el.querySelector('.tabular-nums')?.textContent).toBe('5');
+  });
+
   it('scales the value text with the size', () => {
     expect(render({ value: 3, size: 'md' }).querySelector('.text-2xl')).not.toBeNull();
   });
