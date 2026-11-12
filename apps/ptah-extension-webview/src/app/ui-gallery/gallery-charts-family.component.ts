@@ -6,6 +6,7 @@ import {
   PtahMeterComponent,
   PtahRingComponent,
   PtahSparklineComponent,
+  PtahStatCardComponent,
   PtahStatComponent,
   PtahStatTrend,
 } from '@ptah-extension/ui';
@@ -19,6 +20,7 @@ import { GallerySectionComponent } from './gallery-section.component';
     PtahMeterComponent,
     PtahRingComponent,
     PtahSparklineComponent,
+    PtahStatCardComponent,
     PtahStatComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -41,6 +43,12 @@ import { GallerySectionComponent } from './gallery-section.component';
               [indeterminate]="sample.indeterminate" />
           </div>
         }
+        <div class="flex flex-wrap items-center gap-ptah-inline" data-testid="meter-family-variants">
+          <ptah-meter [value]="45" [max]="100" label="Hidden label" [hideLabel]="true" />
+          <ptah-meter [value]="45" [max]="100" label="Custom text" valueText="45%" />
+          <ptah-meter [value]="45" [max]="100" label="Progressbar" barRole="progressbar" valueText="45%" />
+          <ptah-meter [value]="0" [max]="0" label="Indeterminate" barRole="progressbar" [indeterminate]="true" />
+        </div>
       </div>
     </ptah-gallery-section>
 
@@ -102,6 +110,10 @@ import { GallerySectionComponent } from './gallery-section.component';
               [trend]="sample.trend" [hint]="sample.hint" />
           </div>
         }
+        <div class="grid gap-ptah-field sm:grid-cols-2">
+          <ptah-stat-card label="Review runs" [value]="24" trend="This month" />
+          <ptah-stat-card label="Connected machines" [value]="3" size="dense" trend="2 online" />
+        </div>
       </div>
     </ptah-gallery-section>
   `,
@@ -113,7 +125,10 @@ export class GalleryChartsFamilyComponent {
 
   public readonly meterStates = [
     { label: 'normal', value: 62, max: 100, indeterminate: false },
-    { label: 'near limit', value: 88, max: 100, indeterminate: false },
+    { label: 'below limit', value: 89, max: 100, indeterminate: false },
+    { label: 'near limit', value: 90, max: 100, indeterminate: false },
+    { label: 'almost full', value: 99, max: 100, indeterminate: false },
+    { label: 'at limit', value: 100, max: 100, indeterminate: false },
     { label: 'over max', value: 125, max: 100, indeterminate: false },
     { label: 'zero', value: 0, max: 100, indeterminate: false },
     { label: 'invalid value', value: NaN, max: 100, indeterminate: false },

@@ -5,7 +5,7 @@ import type {
 } from './rich-select.types';
 
 /** Lower case and no diacritics, for the search and the type-ahead. */
-export function normalizeText(text: string): string {
+function normalizeText(text: string): string {
   return text
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')

@@ -295,6 +295,14 @@
   --ptah-z-overlay: 1000;
 }
 
+/* ---- ptah-meter tokens (isolated block, TASK_2026_1011_946d) ---- */
+:root,
+[data-theme] {
+  /* Track behind the meter fill. Same value the meter used before. */
+  --ptah-meter-track: var(--surface-border-strong);
+}
+/* ---- end ptah-meter tokens ---- */
+
 @media (prefers-reduced-motion: reduce) {
   :root,
   [data-theme] {

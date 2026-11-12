@@ -23,8 +23,9 @@
  *      which are Tailwind user-select utilities, not DaisyUI classes.
  * Words that merely contain a root (`file-input`, `stats-card-header`,
  * `select2`) are never matched because the root must anchor the start.
- * `input-group` IS flagged: it is not a Tailwind utility, and any `input-*`
- * class outside the design system deserves review. HTML tag names
+ * `input-group` IS flagged: it is not a Tailwind utility. For the `input`
+ * root only real DaisyUI modifiers (`input-bordered`, `input-sm`, ...) are
+ * flagged; custom classes such as `input-preview-block` are not form tokens. HTML tag names
  * (`<select>`, `<input>`, `<textarea>`, `<button>`) are never inspected; only
  * class lists are.
  *
@@ -84,6 +85,29 @@ export const BLOCKED_ROOTS = [
 /** Tailwind user-select utilities that collide with the `select` root. */
 const TAILWIND_SELECT_UTILITIES = new Set(['all', 'auto', 'none', 'text']);
 
+/**
+ * DaisyUI `input-*` modifiers (plus `group`, blocked by documented decision).
+ * Other `input-*` classes are custom classes and are not form tokens.
+ */
+const DAISY_INPUT_MODIFIERS = new Set([
+  'accent',
+  'bordered',
+  'error',
+  'ghost',
+  'group',
+  'info',
+  'lg',
+  'md',
+  'neutral',
+  'primary',
+  'secondary',
+  'sm',
+  'success',
+  'warning',
+  'xl',
+  'xs',
+]);
+
 /** Sentinel token for class expressions that cannot be proven safe. */
 export const DYNAMIC_TOKEN = '<dynamic>';
 
@@ -98,6 +122,9 @@ export function isBlockedClassToken(rawToken: string): boolean {
     const modifier = token.slice(root.length + 1);
     if (root === 'select' && TAILWIND_SELECT_UTILITIES.has(modifier)) {
       continue; // Tailwind user-select utility, not a DaisyUI class
+    }
+    if (root === 'input' && !DAISY_INPUT_MODIFIERS.has(modifier)) {
+      continue; // custom class such as `input-preview-block`, not a DaisyUI input variant
     }
     return true;
   }
