@@ -16,6 +16,7 @@ import {
 } from '@ptah-extension/ui';
 import { GalleryBadgeFamilyComponent } from './ui-gallery/gallery-badge-family.component';
 import { GalleryButtonFamilyComponent } from './ui-gallery/gallery-button-family.component';
+import { GalleryChartsFamilyComponent } from './ui-gallery/gallery-charts-family.component';
 import { GalleryComponentsComponent } from './ui-gallery/gallery-components.component';
 import { GalleryFormControlsFamilyComponent } from './ui-gallery/gallery-form-controls-family.component';
 import { GalleryTokensShapeComponent } from './ui-gallery/gallery-tokens-shape.component';
@@ -41,6 +42,7 @@ interface GallerySectionLink {
     GalleryButtonFamilyComponent,
     GalleryFormControlsFamilyComponent,
     GalleryBadgeFamilyComponent,
+    GalleryChartsFamilyComponent,
     GalleryComponentsComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -110,6 +112,7 @@ interface GallerySectionLink {
       <ptah-gallery-button-family />
       <ptah-gallery-form-controls-family />
       <ptah-gallery-badge-family />
+      <ptah-gallery-charts-family />
       <ptah-gallery-components />
     </div>
   </main>`,
@@ -143,6 +146,10 @@ export class UiGalleryComponent {
     { id: 'family-button', label: 'Button family' },
     { id: 'family-form-controls', label: 'Form controls family' },
     { id: 'family-badge', label: 'Badge and status family' },
+    { id: 'family-meter', label: 'Meter family' },
+    { id: 'family-ring', label: 'Ring family' },
+    { id: 'family-sparkline', label: 'Sparkline family' },
+    { id: 'family-stat', label: 'Stat family' },
     { id: 'components-buttons', label: 'Buttons' },
     { id: 'components-fields', label: 'Fields' },
     { id: 'components-metrics', label: 'Metrics' },
