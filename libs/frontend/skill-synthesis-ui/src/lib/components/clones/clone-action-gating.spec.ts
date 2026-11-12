@@ -89,13 +89,13 @@ describe('cloneActionModel — Enhance gating', () => {
     expect(model.eligibilityLabel).toBe('1/5 runs');
   });
 
-  it('formats cooldown remainders in minutes, hours and days', () => {
+  it('formats cooldown remainders with the shared compact duration', () => {
     const label = (ms: number) =>
       cloneActionModel(clone({ enhanceCooldownUntil: NOW + ms }), NOW)
         .eligibilityLabel;
     expect(label(5 * 60_000)).toBe('cooldown 5m');
     expect(label(3 * 60 * 60_000)).toBe('cooldown 3h');
-    expect(label(50 * 60 * 60_000)).toBe('cooldown 2d');
+    expect(label(50 * 60 * 60_000)).toBe('cooldown 2d 2h');
   });
 });
 

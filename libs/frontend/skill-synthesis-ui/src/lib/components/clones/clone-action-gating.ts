@@ -23,6 +23,7 @@
  * `authored` and `synth` entries can never be rebased and must never be offered
  * the action.
  */
+import { formatDuration, formatRelative as formatRelativeAge } from '@ptah-extension/ui';
 import type {
   CloneSummary,
   SkillCloneKind,
@@ -202,26 +203,14 @@ export function cloneStatusLabel(clone: CloneSummary): SkillCloneStatus {
   return clone.diverged ? 'diverged' : clone.cloneStatus;
 }
 
-/** Coarse duration for eligibility copy: minutes, then hours, then days. */
-export function formatDuration(ms: number): string {
-  const minutes = Math.max(1, Math.floor(ms / 60_000));
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  return `${Math.floor(hours / 24)}d`;
-}
-
-/** Relative "x ago" for epoch-ms timestamps; `—` when never. */
+/**
+ * Relative "x ago" for epoch-ms timestamps; `—` when never or not finite.
+ * The text comes from the shared `formatRelative` owner. This wrapper only
+ * keeps the null guard and the em dash.
+ */
 export function formatRelative(epochMs: number | null): string {
   if (epochMs === null || !Number.isFinite(epochMs)) return '—';
-  const deltaMs = Date.now() - epochMs;
-  if (deltaMs < 0) return 'just now';
-  const minutes = Math.floor(deltaMs / 60_000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
+  return formatRelativeAge(epochMs, Date.now());
 }
 
 /**

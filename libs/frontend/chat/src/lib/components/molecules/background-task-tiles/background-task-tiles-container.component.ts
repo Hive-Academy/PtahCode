@@ -5,8 +5,8 @@ import {
   effect,
   inject,
   input,
-  signal,
 } from '@angular/core';
+import { ClockService } from '@ptah-extension/core';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import { BackgroundTaskStore } from '@ptah-extension/chat-streaming';
 import { isAgentTaskType } from '@ptah-extension/shared';
@@ -27,7 +27,8 @@ export class BackgroundTaskTilesContainerComponent {
   readonly tabId = input<string | null>(null);
   private readonly tabManager = inject(TabManagerService);
   private readonly backgroundTasks = inject(BackgroundTaskStore);
-  protected readonly now = signal(Date.now());
+  private readonly clock = inject(ClockService);
+  protected readonly now = this.clock.now;
 
   private readonly sessionId = computed(() => {
     const tabId = this.tabId();
@@ -53,9 +54,7 @@ export class BackgroundTaskTilesContainerComponent {
   constructor() {
     effect((onCleanup) => {
       if (!this.tiles().length) return;
-      this.now.set(Date.now());
-      const timer = setInterval(() => this.now.set(Date.now()), 1_000);
-      onCleanup(() => clearInterval(timer));
+      onCleanup(this.clock.acquire());
     });
   }
 }
