@@ -3,6 +3,7 @@ import {
   blockBusyActivation,
   BUTTON_HOST,
   buttonHostType,
+  syncSelectedAria,
 } from './button-host';
 import { PtahButtonAlign, PtahButtonSelectedAs, PtahButtonShape, PtahButtonSize, PtahButtonTone, PtahButtonVariant } from './button.types';
 @Directive({
@@ -23,6 +24,10 @@ export class PtahButtonDirective {
   readonly shape = input<PtahButtonShape>('default');
   /** Ghost variant ink only; other variants ignore tone. */
   readonly tone = input<PtahButtonTone>('default');
+  /**
+   * Selected state. Undefined: not a toggle, the owner writes no aria-pressed or aria-current.
+   * Do not bind `aria-pressed` by hand together with `selected`.
+   */
   readonly selected = input<boolean | undefined>(undefined);
   readonly selectedAs = input<PtahButtonSelectedAs>('pressed');
   /** Native `type`. A `button` element defaults to `button`, also after a binding removes it. */
@@ -32,5 +37,6 @@ export class PtahButtonDirective {
   protected readonly hostType = buttonHostType(this.type);
   constructor() {
     blockBusyActivation(this.busy);
+    syncSelectedAria(this.selected, this.selectedAs);
   }
 }

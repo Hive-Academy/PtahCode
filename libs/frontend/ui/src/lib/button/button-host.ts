@@ -1,10 +1,13 @@
 import {
   computed,
   DestroyRef,
+  effect,
   ElementRef,
   inject,
+  Renderer2,
   Signal,
 } from '@angular/core';
+import type { PtahButtonSelectedAs } from './button.types';
 export const BUTTON_HOST = {
   class: 'btn',
   // Scopes the token look in ptah-button.css to directive hosts. A raw `btn` keeps the old look.
@@ -20,8 +23,6 @@ export const BUTTON_HOST = {
   '[class.btn-lg]': "size() === 'lg'",
   '[attr.data-tone]': "tone() === 'default' ? null : tone()",
   '[attr.data-selected]': "selected() ? '' : null",
-  '[attr.aria-pressed]': "selectedAs() === 'pressed' && selected() !== undefined ? (selected() ? 'true' : 'false') : null",
-  '[attr.aria-current]': "selectedAs() === 'current' && selected() ? 'page' : null",
   '[class.opacity-60]': 'busy()',
   '[class.cursor-wait]': 'busy()',
   '[attr.aria-disabled]': "busy() ? 'true' : null",
@@ -60,5 +61,40 @@ export function blockBusyActivation(busy: () => boolean): void {
   destroyRef.onDestroy(() => {
     element.removeEventListener('click', block, true);
     element.removeEventListener('auxclick', block, true);
+  });
+}
+/**
+ * Writes `aria-pressed` or `aria-current` from `selected` and `selectedAs`.
+ * It is not a host binding: a host binding writes null when `selected` is not set and
+ * would erase an attribute that the consumer sets on the same host. This function
+ * writes only while `selected` is defined, and removes only what it wrote itself.
+ */
+export function syncSelectedAria(
+  selected: () => boolean | undefined,
+  selectedAs: () => PtahButtonSelectedAs,
+): void {
+  const element = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
+  const renderer = inject(Renderer2);
+  const written = new Set<string>();
+  const apply = (name: string, value: string | null) => {
+    if (value !== null) {
+      renderer.setAttribute(element, name, value);
+      written.add(name);
+    } else if (written.delete(name)) {
+      renderer.removeAttribute(element, name);
+    }
+  };
+  effect(() => {
+    const isSelected = selected();
+    const as = selectedAs();
+    apply(
+      'aria-pressed',
+      as === 'pressed' && isSelected !== undefined
+        ? isSelected
+          ? 'true'
+          : 'false'
+        : null,
+    );
+    apply('aria-current', as === 'current' && isSelected ? 'page' : null);
   });
 }

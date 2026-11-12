@@ -157,3 +157,48 @@ describe('icon button label', () => {
     expect(errorSpy).not.toHaveBeenCalled();
   });
 });
+
+@Component({
+  standalone: true,
+  imports: [PtahIconButtonDirective],
+  template: `
+    <button ptahIconButton label="Act" [attr.aria-pressed]="pressed()" [attr.aria-current]="current()">Hand</button>
+    <button ptahIconButton label="Act" aria-pressed="mixed" aria-current="step">Static</button>
+    <button ptahIconButton label="Act" [selected]="selected()" selectedAs="pressed">Owner</button>
+  `,
+})
+class ConsumerAriaHost {
+  readonly pressed = signal('true');
+  readonly current = signal<string | null>('page');
+  readonly selected = signal<boolean | undefined>(undefined);
+}
+
+describe('ptahIconButton selected aria ownership', () => {
+  it('keeps aria set by the consumer when selected is not set', () => {
+    const fixture = TestBed.createComponent(ConsumerAriaHost);
+    fixture.detectChanges();
+    const [hand, fixed] = Array.from(
+      (fixture.nativeElement as HTMLElement).querySelectorAll('button'),
+    );
+    expect(hand.getAttribute('aria-pressed')).toBe('true');
+    expect(hand.getAttribute('aria-current')).toBe('page');
+    expect(fixed.getAttribute('aria-pressed')).toBe('mixed');
+    expect(fixed.getAttribute('aria-current')).toBe('step');
+    fixture.componentInstance.pressed.set('false');
+    fixture.detectChanges();
+    expect(hand.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('writes the owner value while selected is set and removes only what it wrote', () => {
+    const fixture = TestBed.createComponent(ConsumerAriaHost);
+    fixture.detectChanges();
+    const owner = (fixture.nativeElement as HTMLElement).querySelectorAll('button')[2];
+    expect(owner.hasAttribute('aria-pressed')).toBe(false);
+    fixture.componentInstance.selected.set(true);
+    fixture.detectChanges();
+    expect(owner.getAttribute('aria-pressed')).toBe('true');
+    fixture.componentInstance.selected.set(undefined);
+    fixture.detectChanges();
+    expect(owner.hasAttribute('aria-pressed')).toBe(false);
+  });
+});
