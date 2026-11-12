@@ -1493,6 +1493,7 @@ describe('AgentMonitorStore', () => {
         });
         expect(store.permissionSecondsRemaining(timeoutAt)).toBe(10);
         jest.advanceTimersByTime(10_000);
+        TestBed.tick();
         expect(store.pendingPermissions()).toHaveLength(0);
       } finally {
         jest.useRealTimers();
