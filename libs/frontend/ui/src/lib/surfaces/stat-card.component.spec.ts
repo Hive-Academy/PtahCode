@@ -10,18 +10,18 @@ import { PtahStatCardComponent } from './stat-card.component';
 })
 class Host {}
 describe('PtahStatCardComponent', () => {
-  it('renders required metrics and projected actions', async () => {
+  it('renders required metrics and projected actions through the stat owner', async () => {
     await TestBed.configureTestingModule({
       imports: [Host],
     }).compileComponents();
     const f = TestBed.createComponent(Host);
     f.detectChanges();
-    const card = f.nativeElement.querySelector('article') as HTMLElement;
+    const card = f.nativeElement.querySelector('ptah-stat') as HTMLElement;
+    expect(card.getAttribute('data-appearance')).toBe('card');
     expect(card.textContent).toContain('Sessions');
     expect(card.textContent).toContain('42');
     expect(card.textContent).toContain('Up 10%');
     expect(card.querySelector('button')?.textContent).toContain('Open');
-    expect(card.className).toContain('surface-2');
-    expect(card.querySelector('.text-xl')?.textContent).toContain('42');
+    expect(card.querySelector('.text-lg')?.textContent).toContain('42');
   });
 });
