@@ -14,6 +14,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import matter from 'gray-matter';
+import * as ts from 'typescript';
 
 /**
  * Represents a validation error found during checks.
@@ -167,6 +169,107 @@ const LANE_SKILL_FILE = path.join(
 );
 const TEAM_LEADER_TEMPLATE = path.join(AGENTS_DIR, 'team-leader.template.md');
 const REFERENCES_DIR: string = path.join(SKILL_ROOT, 'references');
+const MIRROR_ROOT = path.join(process.cwd(), '.claude', 'skills', 'orchestration');
+const PHASE_KINDS = [
+  'plan', 'architecture', 'implement', 'review', 'document-review',
+  'research', 'tests', 'docs', 'visual-review', 'design', 'batch', 'completion',
+] as const;
+const PHASE_HEADINGS = [
+  'Method', 'Output contract', 'Return value', 'Refusals', 'Escalation protocol',
+] as const;
+const REVIEW_KINDS: readonly string[] = ['review', 'document-review', 'visual-review'];
+
+function error(file: string, message: string): ValidationError {
+  return { file, type: 'content', message, suggestion: 'Correct the orchestration skill contract' };
+}
+
+function listFiles(root: string): string[] {
+  if (!fs.existsSync(root)) return [];
+  return fs.readdirSync(root, { withFileTypes: true }).flatMap(entry => {
+    const absolute = path.join(root, entry.name);
+    if (entry.isDirectory()) return listFiles(absolute).map(file => path.join(entry.name, file));
+    return entry.isFile() ? [entry.name] : [];
+  });
+}
+
+function validateMirror(): ValidationError[] {
+  const errors: ValidationError[] = [];
+  const pluginFiles = new Set(listFiles(SKILL_ROOT));
+  const mirrorFiles = new Set(listFiles(MIRROR_ROOT));
+  for (const relative of new Set([...pluginFiles, ...mirrorFiles])) {
+    if (!pluginFiles.has(relative) || !mirrorFiles.has(relative)) {
+      errors.push(error(relative, `Mirror file missing: ${relative} in ${pluginFiles.has(relative) ? '.claude' : 'plugin'} copy`));
+    } else if (!fs.readFileSync(path.join(SKILL_ROOT, relative)).equals(fs.readFileSync(path.join(MIRROR_ROOT, relative)))) {
+      errors.push(error(relative, `Mirror bytes differ: ${relative}`));
+    }
+  }
+  return errors;
+}
+
+function retiredRoles(): string[] {
+  const sourcePath = path.join(process.cwd(), 'tools', 'role-census', 'check-role-census.ts');
+  const source = ts.createSourceFile(sourcePath, fs.readFileSync(sourcePath, 'utf8'), ts.ScriptTarget.Latest, true);
+  for (const statement of source.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (!ts.isIdentifier(declaration.name) || declaration.name.text !== 'ROLES' || !declaration.initializer || !ts.isArrayLiteralExpression(declaration.initializer)) continue;
+      const roles = declaration.initializer.elements;
+      if (!roles.length || !roles.every(ts.isStringLiteral)) throw new Error('Role census ROLES must contain string literals');
+      return roles.map(role => (role as ts.StringLiteral).text);
+    }
+  }
+  throw new Error('Role census ROLES list was not found');
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown> : undefined;
+}
+
+function validatePhase(file: string, roles: readonly string[]): ValidationError[] {
+  const relative = path.relative(SKILL_ROOT, file).replace(/\\/g, '/');
+  const content = fs.readFileSync(file, 'utf8');
+  const errors: ValidationError[] = [];
+  let data: Record<string, unknown> | undefined;
+  try {
+    data = record(matter(content, { language: 'yaml' }).data);
+  } catch (caught: unknown) {
+    return [error(relative, `Invalid phase YAML: ${caught instanceof Error ? caught.message : String(caught)}`)];
+  }
+  if (!content.startsWith('---')) errors.push(error(relative, 'Missing phase YAML frontmatter'));
+  if (data?.version !== 1) errors.push(error(relative, 'Invalid phase field: version must be 1'));
+  const kind = path.basename(file, '.md');
+  if (!PHASE_KINDS.includes(kind as typeof PHASE_KINDS[number]) || data?.kind !== kind) errors.push(error(relative, `Invalid phase field: kind must equal filename ${kind}`));
+  for (const field of ['input', 'deliverable', 'verdict', 'acceptanceStep'] as const) {
+    if (!Array.isArray(data?.[field]) || !data[field].length || !data[field].every(value => typeof value === 'string' && value.trim())) errors.push(error(relative, `Invalid phase field: ${field} must be a nonempty list of nonempty strings`));
+  }
+  if (!Array.isArray(data?.requiredCapabilities) || !data.requiredCapabilities.every(value => typeof value === 'string' && value.trim())) errors.push(error(relative, 'Invalid phase field: requiredCapabilities must be a list of nonempty strings'));
+  const profile = record(data?.toolProfile);
+  if (!profile || !Array.isArray(profile.disallowedTools) || !profile.disallowedTools.every(value => typeof value === 'string' && value.trim()) || !['allow', 'deny', 'prompt'].includes(String(profile.permission))) errors.push(error(relative, 'Invalid phase field: toolProfile requires disallowedTools and permission allow|deny|prompt'));
+  const headings = [...PHASE_HEADINGS, ...(REVIEW_KINDS.includes(kind) ? ['Reviewer stance'] : [])];
+  for (const heading of headings) {
+    const match = new RegExp(`^## ${heading}\\s*$([\\s\\S]*?)(?=^## |(?![\\s\\S]))`, 'mi').exec(content);
+    if (!match || !match[1]?.trim()) errors.push(error(relative, `Missing or empty phase section: ${heading}`));
+  }
+  for (const role of roles) if (content.includes(role)) errors.push(error(relative, `Retired role name in phase definition: ${role}`));
+  return errors;
+}
+
+function validatePhases(): ValidationError[] {
+  const directory = path.join(SKILL_ROOT, 'phases');
+  const files = fs.existsSync(directory) ? fs.readdirSync(directory).filter(name => name.endsWith('.md')) : [];
+  const roles = retiredRoles();
+  const errors = files.flatMap(name => validatePhase(path.join(directory, name), roles));
+  const skill = fs.readFileSync(path.join(SKILL_ROOT, 'SKILL.md'), 'utf8');
+  const active = /^## Phase-kind flows\s*$([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(skill);
+  if (active) {
+    const expected = new Set(PHASE_KINDS.map(kind => `${kind}.md`));
+    for (const name of expected) if (!files.includes(name)) errors.push(error(`phases/${name}`, `Required phase file missing: ${name}`));
+    for (const name of files) if (!expected.has(name)) errors.push(error(`phases/${name}`, `Unexpected phase file: ${name}`));
+    for (const role of roles) if (active[1]?.includes(role)) errors.push(error('SKILL.md', `Retired role name in active phase flow: ${role}`));
+  }
+  return errors;
+}
 
 /**
  * Logs a colored message to console.
@@ -798,6 +901,8 @@ function validateOrchestrationSkill(): ValidationResult {
   result.errors.push(...validateAgentFilesExist());
   result.errors.push(...validateReferenceFilesExist());
   result.errors.push(...validateLanesFirstRules());
+  result.errors.push(...validateMirror());
+  result.errors.push(...validatePhases());
   result.passed = result.errors.length === 0;
 
   return result;
