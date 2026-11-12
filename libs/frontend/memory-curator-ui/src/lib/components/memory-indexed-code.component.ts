@@ -111,7 +111,9 @@ import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
         <div class="join">
           <button
             type="button"
-            class="btn join-item btn-xs"
+            ptahButton
+            size="xs"
+            class="join-item"
             [disabled]="prevDisabled() || loading()"
             (click)="prev.emit()"
             aria-label="Previous symbol page"
@@ -120,7 +122,9 @@ import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
           </button>
           <button
             type="button"
-            class="btn join-item btn-xs"
+            ptahButton
+            size="xs"
+            class="join-item"
             [disabled]="nextDisabled() || loading()"
             (click)="next.emit()"
             aria-label="Next symbol page"

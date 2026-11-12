@@ -166,7 +166,7 @@
     "<dynamic>": 1
   },
   "libs/frontend/chat-ui/src/lib/molecules/session/plan-limits/plan-limit-tile.component.ts": {
-    "<dynamic>": 9
+    "<dynamic>": 7
   },
   "libs/frontend/chat-ui/src/lib/molecules/session/plan-limits/plan-window-detail.component.ts": {
     "<dynamic>": 2
@@ -342,6 +342,12 @@
   },
   "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-agents-section.component.ts": {
     "<dynamic>": 2
+  },
+  "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-session-actions.component.html": {
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-square": 1,
+    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-task-section.component.ts": {
     "alert": 2,
@@ -1014,12 +1020,6 @@
     "<dynamic>": 5,
     "skeleton": 2
   },
-  "libs/frontend/memory-curator-ui/src/lib/components/corpus-build-dialog.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/memory-curator-ui/src/lib/components/corpus-list.component.ts": {
     "btn": 1,
     "btn-ghost": 1,
@@ -1043,20 +1043,7 @@
     "skeleton": 3
   },
   "libs/frontend/memory-curator-ui/src/lib/components/memory-indexed-code.component.ts": {
-    "btn": 2,
-    "btn-xs": 2,
     "skeleton": 2
-  },
-  "libs/frontend/memory-curator-ui/src/lib/components/memory-search-bar.component.ts": {
-    "btn": 2,
-    "btn-primary": 2,
-    "btn-sm": 2
-  },
-  "libs/frontend/memory-curator-ui/src/lib/components/timeline-filters.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-xs": 1
   },
   "libs/frontend/memory-curator-ui/src/lib/components/timeline-view.component.ts": {
     "alert": 1,
@@ -1069,10 +1056,7 @@
   },
   "libs/frontend/messaging-gateway-ui/src/lib/components/messaging-gateway-tab.component.ts": {
     "alert": 1,
-    "alert-error": 1,
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
+    "alert-error": 1
   },
   "libs/frontend/messaging-gateway-ui/src/lib/components/platform-bindings-panel.component.ts": {
     "alert": 1,
@@ -1343,11 +1327,5 @@
     "alert-error": 2,
     "alert-info": 1,
     "alert-warning": 2
-  },
-  "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-session-actions.component.html": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
   }
 }
