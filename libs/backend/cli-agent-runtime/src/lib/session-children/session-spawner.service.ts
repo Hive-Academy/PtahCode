@@ -2389,7 +2389,6 @@ export class SessionSpawnerService implements ISessionSpawner {
     const token = CLI_AGENT_RUNTIME_TOKENS.HANDOFF_PREDECESSOR_CLOSER;
     const ids = `tabId=${childSessionId} sdkId=${predecessor.sdkSessionId ?? 'none'}`;
     if (!this.container?.isRegistered(token, true)) {
-      // degradation-audit: reported - the host has no predecessor closer.
       this.log(`predecessor close unavailable: closer absent (${ids})`);
       return;
     }
@@ -2398,7 +2397,6 @@ export class SessionSpawnerService implements ISessionSpawner {
         .resolve<HandoffPredecessorCloser>(token)
         .close(childSessionId, predecessor.sdkSessionId ?? null);
       if (result.kind !== 'closed') {
-        // degradation-audit: reported - a blocked or missing tab never reverses succession.
         this.log(
           `predecessor close: ${result.kind}${result.kind === 'blocked' ? ` (${result.code})` : ''} (${ids})`,
         );
