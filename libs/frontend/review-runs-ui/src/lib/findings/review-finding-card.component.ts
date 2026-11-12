@@ -1,10 +1,10 @@
 import { ChangeDetectionStrategy, Component, effect, input, output, signal } from '@angular/core';
-import { PtahButtonDirective, PtahFieldControlDirective, PtahStatusBadgeComponent } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahFieldComponent, PtahStatusBadgeComponent, PtahTextareaDirective } from '@ptah-extension/ui';
 import type { FindingTriage, ReviewFindingView } from './review-finding-view';
 
 @Component({
   selector: 'ptah-review-finding-card', standalone: true, changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PtahButtonDirective, PtahFieldControlDirective, PtahStatusBadgeComponent],
+  imports: [PtahButtonDirective, PtahFieldComponent, PtahStatusBadgeComponent, PtahTextareaDirective],
   template: `
     <article class="surface-1 rounded-lg border border-base-300 p-4 space-y-3" [attr.aria-label]="view().title">
       <div class="flex flex-wrap items-center gap-2 text-xs">
@@ -44,11 +44,11 @@ import type { FindingTriage, ReviewFindingView } from './review-finding-view';
         <button ptahButton variant="ghost" size="xs" type="button" [disabled]="triage().pending" (click)="replyOpen.set(!replyOpen())">Reply</button>
         <button ptahButton variant="secondary" size="xs" type="button" (click)="sendToLane.emit()">Copy fix prompt</button>
       </div>
-      @if (reasonOpen()) { <form class="space-y-2" (submit)="submitDismiss($event)"><label class="block text-sm" [for]="'reason-' + view().key">Reason (optional)</label>
-        <textarea ptahFieldControl class="textarea textarea-bordered w-full" [id]="'reason-' + view().key" maxlength="4000" [disabled]="triage().pending" [value]="reason()" (input)="reason.set(readValue($event))"></textarea>
+      @if (reasonOpen()) { <form class="space-y-2" (submit)="submitDismiss($event)"><ptah-field label="Reason (optional)" appearance="stacked">
+        <textarea ptahTextarea class="w-full" [id]="'reason-' + view().key" maxlength="4000" [disabled]="triage().pending" [value]="reason()" (input)="reason.set(readValue($event))"></textarea></ptah-field>
         <button ptahButton size="xs" type="submit" [disabled]="triage().pending">Submit dismissal</button></form> }
-      @if (replyOpen()) { <form class="space-y-2" (submit)="submitReply($event)"><label class="block text-sm" [for]="'reply-' + view().key">Reply on GitHub</label>
-        <textarea ptahFieldControl class="textarea textarea-bordered w-full" [id]="'reply-' + view().key" maxlength="4000" required [disabled]="triage().pending" [value]="reply()" (input)="reply.set(readValue($event))"></textarea>
+      @if (replyOpen()) { <form class="space-y-2" (submit)="submitReply($event)"><ptah-field label="Reply on GitHub" appearance="stacked">
+        <textarea ptahTextarea class="w-full" [id]="'reply-' + view().key" maxlength="4000" required [disabled]="triage().pending" [value]="reply()" (input)="reply.set(readValue($event))"></textarea></ptah-field>
         <button ptahButton size="xs" type="submit" [disabled]="triage().pending || !reply().trim()">Send reply</button></form> }
       @if (triage().pending) { <p role="status" class="text-sm">Sending to GitHub…</p> }
       @if (triage().state !== 'open') { <p role="status" class="text-sm">{{ triage().state === 'accepted' ? 'Accepted' : 'Dismissed' }}. The reply is on GitHub.</p> }

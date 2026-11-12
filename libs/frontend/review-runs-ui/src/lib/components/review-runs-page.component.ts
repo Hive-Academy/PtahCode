@@ -8,6 +8,8 @@ import {
 import {
   InboxLayoutComponent,
   PtahButtonDirective,
+  PtahInputDirective,
+  PtahSelectDirective,
 } from '@ptah-extension/ui';
 import { ReviewStateSchema } from '@ptah-extension/review-contracts';
 import { ReviewRunsStore } from '../review-runs.store';
@@ -37,6 +39,8 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
     ReviewSettingsDrawerComponent,
     ReviewConfirmDialogComponent,
     PtahButtonDirective,
+    PtahInputDirective,
+    PtahSelectDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block h-full w-full' },
@@ -129,7 +133,7 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
               <label class="sr-only" for="review-repo-filter">Repository</label>
               <select
                 id="review-repo-filter"
-                class="select select-bordered select-sm w-full"
+                ptahSelect class="w-full"
                 [value]="store.repoFilter()"
                 (change)="setRepo($event)"
               >
@@ -148,7 +152,7 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
               <label class="sr-only" for="review-state-filter">State</label>
               <select
                 id="review-state-filter"
-                class="select select-bordered select-sm w-full"
+                ptahSelect class="w-full"
                 [value]="store.stateFilter()"
                 (change)="setState($event)"
               >
@@ -160,7 +164,8 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
             </div>
             <input
               type="text"
-              class="input input-bordered input-sm mb-4 w-full"
+              ptahInput
+              class="mb-4 w-full"
               aria-label="Search runs"
               placeholder="Search runs"
               [value]="store.searchQuery()"

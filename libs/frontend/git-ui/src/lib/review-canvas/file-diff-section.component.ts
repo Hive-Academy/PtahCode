@@ -39,7 +39,7 @@ import {
   type HunkToolbarComparison,
 } from './hunk-toolbar.component';
 import { FileSectionHeaderComponent } from './file-section-header.component';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahInputDirective, PtahSelectDirective, PtahTextareaDirective } from '@ptah-extension/ui';
 
 /** Rows that never mount the renderer (Requirement 6.10). */
 export type ReviewFileLabel = 'binary' | 'submodule' | 'conflicted';
@@ -235,6 +235,9 @@ function splitLines(text: string): string[] {
   standalone: true,
   imports: [
     PtahButtonDirective,
+    PtahInputDirective,
+    PtahSelectDirective,
+    PtahTextareaDirective,
     FileSectionHeaderComponent,
     PierreDiffHostComponent,
     HunkToolbarComponent,
@@ -277,7 +280,8 @@ function splitLines(text: string): string[] {
               <span class="text-base-content-muted">Side</span>
               <select
                 #composerStart
-                class="select select-bordered select-xs"
+                ptahSelect
+                size="xs"
                 data-testid="comment-side"
                 (change)="patchComposer({ side: sideValue($event) })"
               >
@@ -300,7 +304,9 @@ function splitLines(text: string): string[] {
               <input
                 type="number"
                 min="1"
-                class="input input-bordered input-xs w-20 focus-visible:outline-[oklch(var(--s))]"
+                ptahInput
+                size="xs"
+                class="w-20"
                 data-testid="comment-from"
                 [value]="draft.from"
                 (input)="patchComposer({ from: numberValue($event) })"
@@ -311,7 +317,9 @@ function splitLines(text: string): string[] {
               <input
                 type="number"
                 min="1"
-                class="input input-bordered input-xs w-20 focus-visible:outline-[oklch(var(--s))]"
+                ptahInput
+                size="xs"
+                class="w-20"
                 data-testid="comment-to"
                 [value]="draft.to"
                 (input)="patchComposer({ to: numberValue($event) })"
@@ -320,7 +328,8 @@ function splitLines(text: string): string[] {
             <label class="flex min-w-[12rem] flex-1 flex-col gap-0.5">
               <span class="text-base-content-muted">Comment</span>
               <textarea
-                class="textarea textarea-bordered textarea-xs focus-visible:outline-[oklch(var(--s))]"
+                ptahTextarea
+                size="xs"
                 rows="2"
                 data-testid="comment-body"
                 [value]="draft.body"

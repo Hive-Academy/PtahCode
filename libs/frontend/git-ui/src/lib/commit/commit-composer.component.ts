@@ -35,7 +35,7 @@ import {
   subjectOf,
   UNCONFIRMED_TEXT,
 } from './commit-timeout-check';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahFieldComponent, PtahTextareaDirective } from '@ptah-extension/ui';
 
 /**
  * Most characters of hook output kept on screen. The backend keeps a 256 KiB
@@ -226,7 +226,7 @@ let instanceCount = 0;
 @Component({
   selector: 'ptah-commit-composer',
   standalone: true,
-  imports: [PtahButtonDirective, LucideAngularModule],
+  imports: [PtahButtonDirective, PtahFieldComponent, PtahTextareaDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -266,23 +266,27 @@ let instanceCount = 0;
         </button>
       </div>
 
-      <label class="sr-only" [for]="messageId">Commit message</label>
       <!-- The status regions below stay in the DOM and only their text
            changes: a live region inserted already filled is often not
            announced. Their content carries its own top margin, so an empty
            region adds no gap. -->
       <div class="flex flex-col">
-        <textarea
-          class="textarea textarea-bordered w-full font-mono text-sm focus-visible:outline-[oklch(var(--s))]"
-          rows="4"
-          data-testid="commit-message"
-          [id]="messageId"
-          [placeholder]="placeholder()"
-          [value]="message()"
-          [disabled]="isRunning()"
-          [attr.aria-describedby]="generateNotice() ? noticeId : null"
-          (input)="onMessageInput($event)"
-        ></textarea>
+        <ptah-field label="Commit message">
+          <textarea
+            ptahTextarea
+            tone="mono"
+            size="md"
+            class="w-full"
+            rows="4"
+            data-testid="commit-message"
+            [id]="messageId"
+            [placeholder]="placeholder()"
+            [value]="message()"
+            [disabled]="isRunning()"
+            [attr.aria-describedby]="generateNotice() ? noticeId : null"
+            (input)="onMessageInput($event)"
+          ></textarea>
+        </ptah-field>
         <div role="status" data-testid="commit-generate-status">
           @if (generateNotice(); as notice) {
             <p

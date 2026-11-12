@@ -1,11 +1,11 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
 import type { OperatorSettings, RepositorySettings } from '@ptah-extension/review-contracts';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahCheckboxDirective, PtahFieldComponent, PtahInputDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-review-repositories-editor',
   standalone: true,
-  imports: [PtahButtonDirective],
+  imports: [PtahButtonDirective, PtahCheckboxDirective, PtahFieldComponent, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
             <section class="space-y-3">
@@ -33,7 +33,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
                   <label class="mt-2 flex items-center gap-2 text-sm"
                     ><input
                       type="checkbox"
-                      class="checkbox checkbox-sm"
+                      ptahCheckbox
                       [checked]="repo.enabled"
                       (change)="enabledChanged.emit({ repo, event: $event })"
                     />Enable review polling</label
@@ -41,7 +41,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
                   <label class="mt-2 flex items-center gap-2 text-sm"
                     ><input
                       type="checkbox"
-                      class="checkbox checkbox-sm"
+                      ptahCheckbox
                       [checked]="repo.dryRun"
                       [disabled]="
                         repo.dryRun && (!hasToken() || !botConnected())
@@ -50,7 +50,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
                     />Keep this repository in dry-run</label
                   >
                   <label class="mt-2 flex items-center gap-2 text-sm"><input type="checkbox"
-                    class="checkbox checkbox-sm" [checked]="repo.publicationPaused"
+                    ptahCheckbox [checked]="repo.publicationPaused"
                     (change)="pauseChanged.emit({ repo, event: $event })" />Pause publication for this repository</label>
                   @if (!hasToken() || !botConnected()) {
                     <p class="text-xs text-base-content-muted">
@@ -63,18 +63,18 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
                   No repositories added.
                 </p>
               }
-              <label class="block text-sm" for="review-add-repository"
-                >Add repository (owner/name)</label
-              >
               <div class="flex gap-2">
-                <input
-                  #repositoryInput
-                  id="review-add-repository"
-                  class="input input-bordered w-full"
-                  [value]="newRepository()"
-                  (input)="newRepositoryChanged.emit($event)"
-                  autocomplete="off"
-                />
+                <ptah-field class="w-full" label="Add repository (owner/name)">
+                  <input
+                    #repositoryInput
+                    ptahInput
+                    id="review-add-repository"
+                    class="w-full"
+                    [value]="newRepository()"
+                    (input)="newRepositoryChanged.emit($event)"
+                    autocomplete="off"
+                  />
+                </ptah-field>
                 <button
                   type="button"
                   ptahButton

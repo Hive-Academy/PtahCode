@@ -21,7 +21,7 @@ import type {
   GitCheckoutResult,
 } from '@ptah-extension/shared';
 import { GitBranchesService } from '../services/git-branches.service';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
 
 /** A switch git refused because local changes would be overwritten. */
 interface BlockedSwitch {
@@ -50,7 +50,7 @@ type SwitchMode = Pick<GitCheckoutParams, 'stash' | 'force'>;
 @Component({
   selector: 'ptah-branch-picker-dropdown',
   standalone: true,
-  imports: [PtahButtonDirective, FormsModule, LucideAngularModule],
+  imports: [PtahButtonDirective, PtahInputDirective, FormsModule, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     class: 'relative',
@@ -66,7 +66,9 @@ type SwitchMode = Pick<GitCheckoutParams, 'stash' | 'force'>;
         class="surface-3 absolute top-full left-0 z-50 mt-1 min-w-72 rounded"
       >
         <input
-          class="input input-xs m-2 w-[calc(100%-1rem)] focus-visible:outline-[oklch(var(--s))]"
+          ptahInput
+          size="xs"
+          class="m-2 w-[calc(100%-1rem)]"
           aria-label="Search branches"
           placeholder="Search branches…"
           [ngModel]="query()"
@@ -302,7 +304,9 @@ type SwitchMode = Pick<GitCheckoutParams, 'stash' | 'force'>;
         </div>
         <div class="flex gap-1 border-t border-base-content/10 p-2">
           <input
-            class="input input-xs flex-1 focus-visible:outline-[oklch(var(--s))]"
+            ptahInput
+            size="xs"
+            class="flex-1"
             aria-label="New branch name"
             placeholder="New branch"
             [ngModel]="newBranch()"
