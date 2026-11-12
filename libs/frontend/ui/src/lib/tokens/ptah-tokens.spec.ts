@@ -22,6 +22,7 @@ const TOKEN_ONLY_DIRS: readonly string[] = [
   'badge',
   'time',
   'charts',
+  'card',
 ];
 
 const SPACE_STEPS = ['1', '2', '3', '4', '6', '8', '12'] as const;
@@ -123,6 +124,26 @@ const TOKEN_NAMES: readonly string[] = [
     'z-menu',
     'z-dialog',
     'z-overlay',
+    'card-bg',
+    'card-border',
+    'card-radius',
+    'card-padding-sm',
+    'card-padding-md',
+    'card-padding-lg',
+    'card-gap',
+    'card-shadow',
+    'card-shadow-raised',
+    'card-hover-border',
+    'card-selected-ring',
+    'card-disabled-opacity',
+    'section-title-size',
+    'section-title-weight',
+    'section-title-color',
+    'section-eyebrow-size',
+    'section-eyebrow-tracking',
+    'section-eyebrow-color',
+    'section-gap',
+    'section-description-color',
   ].map((n) => `--ptah-${n}`),
   ...TEXT_ROLES.flatMap((r) =>
     ['size', 'leading', 'weight'].map((p) => `--ptah-text-${r}-${p}`),
@@ -142,6 +163,12 @@ const TOKEN_VALUES: Readonly<Record<string, string>> = {
   'control-h-sm': '2rem',
   'control-h-md': '2.5rem',
   'control-h-field': '3.25rem',
+  'card-bg': 'var(--glass-fill-tile, oklch(var(--b2)))',
+  'card-border': 'oklch(var(--b3))',
+  'card-radius': '0.75rem',
+  'card-padding-md': 'var(--ptah-space-4)',
+  'card-gap': 'var(--ptah-space-3)',
+  'card-shadow': '0 0 0 0 transparent',
 };
 
 function listFiles(dir: string): string[] {

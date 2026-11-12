@@ -15,6 +15,7 @@ import {
   PtahStatusBadgeComponent,
 } from '@ptah-extension/ui';
 import { GalleryBadgeFamilyComponent } from './ui-gallery/gallery-badge-family.component';
+import { GalleryCardFamilyComponent } from './ui-gallery/gallery-card-family.component';
 import { GalleryTimersFamilyComponent } from './ui-gallery/gallery-timers-family.component';
 import { GalleryButtonFamilyComponent } from './ui-gallery/gallery-button-family.component';
 import { GalleryChartsFamilyComponent } from './ui-gallery/gallery-charts-family.component';
@@ -43,6 +44,7 @@ interface GallerySectionLink {
     GalleryButtonFamilyComponent,
     GalleryFormControlsFamilyComponent,
     GalleryBadgeFamilyComponent,
+    GalleryCardFamilyComponent,
     GalleryTimersFamilyComponent,
     GalleryChartsFamilyComponent,
     GalleryComponentsComponent,
@@ -114,6 +116,7 @@ interface GallerySectionLink {
       <ptah-gallery-button-family />
       <ptah-gallery-form-controls-family />
       <ptah-gallery-badge-family />
+      <ptah-gallery-card-family />
       <ptah-gallery-timers-family />
       <ptah-gallery-charts-family />
       <ptah-gallery-components />
@@ -149,6 +152,7 @@ export class UiGalleryComponent {
     { id: 'family-button', label: 'Button family' },
     { id: 'family-form-controls', label: 'Form controls family' },
     { id: 'family-badge', label: 'Badge and status family' },
+    { id: 'family-card', label: 'Card and surface family' },
     { id: 'timer-running', label: 'Timer: running' },
     { id: 'timer-frozen', label: 'Timer: frozen' },
     { id: 'timer-compact', label: 'Timer: compact' },
