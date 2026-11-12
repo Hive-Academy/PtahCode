@@ -105,6 +105,10 @@ import {
   ProviderAccountRpcHandlers,
   SetupRpcHandlers,
   SkillsSynthesisRpcHandlers,
+  SKILL_RECOMMENDATION_SERVICE,
+  SKILL_PROJECT_GUIDANCE_SERVICE,
+  SKILL_SELECTION_SERVICE,
+  SKILL_CONSENT_SERVICE,
   registerSharedRpcHandlers,
 } from '@ptah-extension/rpc-handlers';
 import { AUTH_PROVIDERS_TOKENS } from '@ptah-extension/auth-providers-tokens';
@@ -423,6 +427,17 @@ describe('Electron DI — shared RPC handler resolution', () => {
 
   beforeAll(() => {
     c = buildMinimalContainer();
+  });
+
+  it.each([
+    SKILL_RECOMMENDATION_SERVICE,
+    SKILL_PROJECT_GUIDANCE_SERVICE,
+    SKILL_SELECTION_SERVICE,
+    SKILL_CONSENT_SERVICE,
+  ])('resolves shared skill service %s as a singleton', (token) => {
+    const service = c.resolve(token);
+    expect(service).toBeDefined();
+    expect(c.resolve(token)).toBe(service);
   });
 
   it('resolves the usage analytics service token', () => {

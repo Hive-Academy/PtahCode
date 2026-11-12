@@ -59,6 +59,7 @@ import {
   type InstallScopeReconciler,
 } from './install-scope/install-scope-migration.service';
 import { InstallScopeNoticeRpcHandlers } from './install-scope/install-scope-notice-rpc.handlers';
+import { registerSkillServices } from './di/register';
 
 /**
  * Register the shared RPC handler classes that every app wires the same way,
@@ -87,6 +88,7 @@ import { InstallScopeNoticeRpcHandlers } from './install-scope/install-scope-not
 export function registerSharedRpcHandlers(
   container: DependencyContainer,
 ): void {
+  registerSkillServices(container, container.resolve<Logger>(TOKENS.LOGGER));
   container.registerSingleton(ReviewRpcHandlers);
   container.registerSingleton(CliModelListService);
   container.registerSingleton(GuidanceGenerationRunSupervisor);

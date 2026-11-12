@@ -7,6 +7,9 @@ jest.mock('@ptah-extension/agent-sdk', () => ({
   SDK_TOKENS: { SDK_PLUGIN_LOADER: Symbol('SDK_PLUGIN_LOADER') },
   PluginLoaderService: class PluginLoaderServiceStub {},
 }));
+jest.mock('@ptah-extension/cli-agent-runtime', () => ({
+  SkillsShApiClient: class SkillsShApiClientStub {},
+}));
 jest.mock('@ptah-extension/agent-generation', () => ({
   ProjectAnalysisZodSchema: require('zod').z.object({
     projectType: require('zod').z.string(),
@@ -50,11 +53,13 @@ describe('setup wizard skill RPC stubs', () => {
     await expect(
       methods.get(names[0])?.({ analysis: { projectType: 'node' } }),
     ).resolves.toEqual({ skills: [] });
-    await expect(methods.get(names[1])?.({ query: 'nx' })).resolves.toEqual({ skills: [] });
+    await expect(methods.get(names[1])?.({ query: 'nx' })).resolves.toEqual({
+      skills: [],
+    });
     await expect(methods.get(names[2])?.({})).resolves.toEqual({ facts: [] });
-    await expect(methods.get(names[3])?.({ skills: [], consentRecords: [] })).resolves.toEqual(
-      { success: true, installed: [] },
-    );
+    await expect(
+      methods.get(names[3])?.({ skills: [], consentRecords: [] }),
+    ).resolves.toEqual({ success: true, installed: [] });
     await expect(methods.get(names[1])?.({ query: '' })).rejects.toThrow();
   });
 

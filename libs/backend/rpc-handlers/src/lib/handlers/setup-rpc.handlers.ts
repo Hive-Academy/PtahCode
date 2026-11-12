@@ -9,6 +9,8 @@
  */
 
 import * as path from 'path';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
 import { injectable, inject, DependencyContainer } from 'tsyringe';
 import { z } from 'zod';
 import {
@@ -85,6 +87,21 @@ import {
   WizardInstallSkillsWithConsentParamsSchema,
 } from './setup-rpc.schema';
 import { PackInstallService } from './setup/pack-install.service';
+import { SkillsShApiClient } from '@ptah-extension/cli-agent-runtime';
+import { stageSkillsInstall, STAGED_SKILLS_REL } from '../utils/skills-sh-cli';
+import {
+  HARNESS_SYNC_TOKENS,
+  type HarnessPropagationService,
+  type SkillSyncGate,
+} from '@ptah-extension/harness-sync';
+import { SKILL_CONSENT_SERVICE } from '../di/tokens';
+
+type SkillConsentPort = {
+  hasScripts(packagePath: string): boolean;
+  computeContentHash(packagePath: string): string;
+  canInstall(skillName: string, contentHash: string): boolean;
+  recordConsent(skillName: string, contentHash: string): void;
+};
 
 /** The pack operations the setup handler delegates to. */
 export type PackInstaller = Pick<
@@ -140,6 +157,8 @@ export class SetupRpcHandlers {
     private readonly sentryService: SentryService,
     @inject(PackInstallService)
     private readonly packInstall: PackInstaller,
+    @inject(SkillsShApiClient)
+    private readonly skillsShApi: SkillsShApiClient,
   ) {}
 
   /**
@@ -1002,8 +1021,106 @@ export class SetupRpcHandlers {
       WizardInstallSkillsWithConsentParams,
       WizardInstallSkillsWithConsentResponse
     >('wizard:install-skills-with-consent', async (rawParams) => {
-      this.parse(WizardInstallSkillsWithConsentParamsSchema, rawParams);
-      return { success: true, installed: [] };
+      const params = this.parse(
+        WizardInstallSkillsWithConsentParamsSchema,
+        rawParams,
+      );
+      if (params.skills.length === 0) return { success: true, installed: [] };
+      const workspaceRoot = this.workspaceProvider.getWorkspaceRoot();
+      if (!workspaceRoot)
+        throw new RpcUserError(
+          'No workspace folder open.',
+          'WORKSPACE_NOT_OPEN',
+        );
+      const consent = this.resolveService<SkillConsentPort>(
+        SKILL_CONSENT_SERVICE,
+        'SkillConsentService',
+      );
+      const installed: string[] = [];
+      for (const skillName of [...new Set(params.skills)]) {
+        const parts = skillName.split('/');
+        if (
+          parts.length !== 3 ||
+          parts.some((part) => !/^[a-zA-Z0-9_-][a-zA-Z0-9_.-]*$/.test(part))
+        ) {
+          throw new RpcUserError(
+            'Invalid skill name. Expected owner/repo/skill.',
+            'INVALID_PARAMS',
+          );
+        }
+        const [owner, repo, skillId] = parts;
+        const stagingDir = await fs.mkdtemp(
+          path.join(os.tmpdir(), 'ptah-skill-consent-'),
+        );
+        try {
+          const staged = await stageSkillsInstall(
+            { source: `${owner}/${repo}`, skillId },
+            stagingDir,
+          );
+          if (!staged.success) return { success: false, installed };
+          const packagePath = path.join(
+            stagingDir,
+            ...STAGED_SKILLS_REL,
+            skillId,
+          );
+          if (!(await fs.stat(packagePath).catch(() => null))?.isDirectory()) {
+            return { success: false, installed };
+          }
+          if (consent.hasScripts(packagePath)) {
+            const hash = consent.computeContentHash(packagePath);
+            const approved = params.consentRecords.some(
+              (record) =>
+                record.skillName === skillName &&
+                record.contentHash.toLowerCase() === hash,
+            );
+            if (!approved && !consent.canInstall(skillName, hash)) {
+              throw new RpcUserError(
+                'This skill contains scripts and requires consent for its current content.',
+                'INVALID_PARAMS',
+              );
+            }
+            if (approved) consent.recordConsent(skillName, hash);
+          }
+        } finally {
+          await fs.rm(stagingDir, { recursive: true, force: true });
+        }
+        const result = await this.rpcHandler.handleMessage({
+          method: 'skillsSh:install',
+          params: { source: `${owner}/${repo}`, skillId, scope: 'workspace' },
+          correlationId: `wizard-skill-${installed.length}`,
+        });
+        if (
+          !result.success ||
+          !(result.data as { success?: boolean } | undefined)?.success
+        ) {
+          return { success: false, installed };
+        }
+        installed.push(skillName);
+        this.skillsShApi.invalidateInstallCaches();
+      }
+      const gate = this.resolveService<SkillSyncGate>(
+        HARNESS_SYNC_TOKENS.SKILL_SYNC_GATE,
+        'SkillSyncGate',
+      );
+      const selectionSaved = gate.keepSelected(
+        workspaceRoot,
+        installed.map((name) => name.split('/')[2]),
+      );
+      if (!selectionSaved) {
+        throw new RpcUserError(
+          'Could not save the skill selection.',
+          'PERSISTENCE_UNAVAILABLE',
+        );
+      }
+      const propagation = this.resolveService<HarnessPropagationService>(
+        HARNESS_SYNC_TOKENS.PROPAGATION,
+        'HarnessPropagationService',
+      );
+      await propagation.propagate(
+        workspaceRoot,
+        'wizard:install-skills-with-consent',
+      );
+      return { success: true, installed };
     });
   }
 

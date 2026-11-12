@@ -72,6 +72,22 @@ export const AGENT_RECOMMENDATION_SERVICE = Symbol.for(
   'AgentRecommendationService',
 );
 
+// Skill service tokens moved to rpc-handlers/di/tokens.ts in Phase 3.
+// They are now owned by the skills.sh RPC surface.
+
+/** SkillRecommendationService - dependency-proven skills.sh recommendations */
+export const SKILL_RECOMMENDATION_SERVICE = Symbol.for(
+  'SkillRecommendationService',
+);
+/** ProjectGuidanceService - labeled project facts and owner decision prompt */
+export const SKILL_PROJECT_GUIDANCE_SERVICE = Symbol.for(
+  'ProjectGuidanceService',
+);
+/** SkillSelectionService - relevance gate for skill selection */
+export const SKILL_SELECTION_SERVICE = Symbol.for('SkillSelectionService');
+/** SkillConsentService - script detection and content-hash consent */
+export const SKILL_CONSENT_SERVICE = Symbol.for('SkillConsentService');
+
 /**
  * ContentGenerationService - Template rendering with variable substitution
  * Responsibilities: Substitute variables, inject LLM sections, process conditionals, preserve static sections
@@ -189,6 +205,10 @@ export const AGENT_GENERATION_TOKENS = {
   AGENT_TEMPLATE_RENDERER,
   AGENT_SELECTION_SERVICE,
   AGENT_RECOMMENDATION_SERVICE,
+  SKILL_RECOMMENDATION_SERVICE,
+  SKILL_PROJECT_GUIDANCE_SERVICE,
+  SKILL_SELECTION_SERVICE,
+  SKILL_CONSENT_SERVICE,
   CONTENT_GENERATION_SERVICE,
   OUTPUT_VALIDATION_SERVICE,
   AGENT_FILE_WRITER_SERVICE,

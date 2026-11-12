@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import {
   ELECTRON_CODEX_BOUND_TOKENS,
   EXPECTED_RUNTIME_TOKENS,
+  EXPECTED_RESOLVABLE_TOKENS,
 } from './expected-resolvable';
 /**
  * RPC surface baseline — Electron desktop host (reference implementation).
@@ -181,4 +182,15 @@ it('includes the complete Electron runtime binding in the DI census', () => {
     expect.arrayContaining([...ELECTRON_CODEX_BOUND_TOKENS.slice(1)]),
   );
   expect(new Set(ELECTRON_CODEX_BOUND_TOKENS).size).toBe(8);
+});
+
+it('includes all shared skill service tokens in the DI census', () => {
+  for (const name of [
+    'SKILL_RECOMMENDATION_SERVICE',
+    'SKILL_PROJECT_GUIDANCE_SERVICE',
+    'SKILL_SELECTION_SERVICE',
+    'SKILL_CONSENT_SERVICE',
+  ]) {
+    expect(EXPECTED_RESOLVABLE_TOKENS.some(([entry]) => entry === name)).toBe(true);
+  }
 });
