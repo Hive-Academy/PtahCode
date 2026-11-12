@@ -18,6 +18,7 @@ import { GalleryBadgeFamilyComponent } from './ui-gallery/gallery-badge-family.c
 import { GalleryTimersFamilyComponent } from './ui-gallery/gallery-timers-family.component';
 import { GalleryButtonFamilyComponent } from './ui-gallery/gallery-button-family.component';
 import { GalleryChartsFamilyComponent } from './ui-gallery/gallery-charts-family.component';
+import { GalleryStatExtrasComponent } from './ui-gallery/gallery-stat-extras.component';
 import { GalleryComponentsComponent } from './ui-gallery/gallery-components.component';
 import { GalleryFormControlsFamilyComponent } from './ui-gallery/gallery-form-controls-family.component';
 import { GalleryTokensShapeComponent } from './ui-gallery/gallery-tokens-shape.component';
@@ -45,6 +46,7 @@ interface GallerySectionLink {
     GalleryBadgeFamilyComponent,
     GalleryTimersFamilyComponent,
     GalleryChartsFamilyComponent,
+    GalleryStatExtrasComponent,
     GalleryComponentsComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -116,6 +118,7 @@ interface GallerySectionLink {
       <ptah-gallery-badge-family />
       <ptah-gallery-timers-family />
       <ptah-gallery-charts-family />
+      <ptah-gallery-stat-extras />
       <ptah-gallery-components />
     </div>
   </main>`,
@@ -166,6 +169,7 @@ export class UiGalleryComponent {
     { id: 'family-ring', label: 'Ring family' },
     { id: 'family-sparkline', label: 'Sparkline family' },
     { id: 'family-stat', label: 'Stat family' },
+    { id: 'family-stat-extras', label: 'Stat extras' },
     { id: 'components-list-detail', label: 'List and detail' },
     { id: 'components-inbox-layout', label: 'Inbox layout' },
     { id: 'components-states', label: 'States' },
