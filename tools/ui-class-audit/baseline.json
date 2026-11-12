@@ -166,7 +166,7 @@
     "<dynamic>": 1
   },
   "libs/frontend/chat-ui/src/lib/molecules/session/plan-limits/plan-limit-tile.component.ts": {
-    "<dynamic>": 9
+    "<dynamic>": 7
   },
   "libs/frontend/chat-ui/src/lib/molecules/session/plan-limits/plan-window-detail.component.ts": {
     "<dynamic>": 2
@@ -342,6 +342,12 @@
   },
   "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-agents-section.component.ts": {
     "<dynamic>": 2
+  },
+  "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-session-actions.component.html": {
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-square": 1,
+    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-task-section.component.ts": {
     "alert": 2,
@@ -606,18 +612,6 @@
     "toggle": 1,
     "toggle-success": 1,
     "toggle-xs": 1
-  },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/local-stt-panel.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-xs": 1
-  },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/local-tts-panel.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/ptah-cli-instances.component.ts": {
     "<dynamic>": 9
@@ -1361,11 +1355,5 @@
     "alert-error": 2,
     "alert-info": 1,
     "alert-warning": 2
-  },
-  "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-session-actions.component.html": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
   }
 }

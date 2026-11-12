@@ -101,9 +101,10 @@ const HF_REPO_ID_RE = /^[\w.-]+\/[\w.-]+$/;
               @for (opt of sourceOptions; track opt.value) {
                 <button
                   type="button"
-                  class="btn btn-xs flex-1"
-                  [class.btn-primary]="source() === opt.value"
-                  [class.btn-ghost]="source() !== opt.value"
+                  ptahButton
+                  size="xs"
+                  class="flex-1"
+                  [variant]="source() === opt.value ? 'primary' : 'ghost'"
                   role="radio"
                   [attr.aria-checked]="source() === opt.value"
                   [ptahBusyDisabled]="saving()"
