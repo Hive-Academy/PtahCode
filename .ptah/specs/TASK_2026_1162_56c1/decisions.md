@@ -77,7 +77,7 @@ Audit log for Phase 3 implementation. Parent program task: TASK_2026_977_0876.
 
 | Batch | Lane | Family | Status |
 |-------|------|--------|--------|
-| B1 | codex | codex | running |
+| B1 | codex | codex | completed, committed |
 | B2-B5 | (pending) | (pending) | planned |
 | B6 | (pending) | (pending) | planned |
 | B8-B10 | (pending) | (pending) | planned |
