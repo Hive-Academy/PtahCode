@@ -190,7 +190,7 @@
   --ptah-badge-h-sm: 1.25rem;
   --ptah-badge-px-xs: var(--ptah-space-1);
   --ptah-badge-px: var(--ptah-space-2);
-  --ptah-badge-fill-mix: 12%;
+  --ptah-badge-fill-mix: 10%; /* warn ink on ptah-glass-light surface-2: 4.54:1 (12% gave 4.41:1) */
   --ptah-badge-edge-mix: 45%;
   --ptah-badge-neutral-ink: oklch(var(--bc));
   --ptah-badge-accent-ink: var(--ptah-accent-ink, var(--ptah-link, oklch(var(--p))));
