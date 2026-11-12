@@ -14,10 +14,10 @@ export function policyForPhase(
   shape?: PhaseShape,
   weight?: number,
 ): PhasePolicy {
-  if (kind === 'plan' || kind === 'architecture') {
+  if (kind === 'plan' || kind === 'architecture' || kind === 'batch') {
     return { tier: 'opus', effort: weight !== undefined && weight >= 8000 ? 'xhigh' : 'high', ruleId: 'R1' };
   }
-  if (kind === 'review' || kind === 'document-review' || kind === 'visual-review') {
+  if (kind === 'review' || kind === 'document-review' || kind === 'visual-review' || kind === 'completion') {
     return { tier: 'opus', effort: weight !== undefined && weight >= 8000 ? 'xhigh' : 'high', ruleId: 'R2' };
   }
   if (shape === 'contract' || shape === 'logic') {

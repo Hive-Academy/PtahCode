@@ -1,3 +1,5 @@
+import { ClockService } from '@ptah-extension/core';
+import { PTAH_CLOCK } from '@ptah-extension/ui';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import type { PermissionRequest } from '@ptah-extension/shared';
 import {
@@ -47,7 +49,10 @@ function setup(initial: RemoteSessionView | null) {
   };
   TestBed.configureTestingModule({
     imports: [RemoteSessionPaneComponent],
-    providers: [{ provide: MachinesStore, useValue: store }],
+    providers: [
+      { provide: MachinesStore, useValue: store },
+      { provide: PTAH_CLOCK, useExisting: ClockService },
+    ],
   });
   const fixture = TestBed.createComponent(RemoteSessionPaneComponent);
   fixture.componentRef.setInput('machineId', 'm1');

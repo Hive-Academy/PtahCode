@@ -208,6 +208,20 @@ For each role:
 - The default executor for that phase kind is not `subagent:<role>`.
 - The role leaves the catalog, the template folder, the sync, the icon map and the tests.
 - One real task ran through the phase on a non-subagent executor, with the result recorded.
+- Before the role retires, compare its workspace agent file with its template. Move the useful
+  learned differences into the related phase definition or stack skill. Record the comparison in
+  the task folder (user decision U-D13).
+- After the role retires, its entry in the Agents tab of skills learning is read-only history.
+  The tab does not offer "Rebase to upstream" for it, because no template exists.
+
+Skills learning (user decision U-D13). The plan of Phase 4 specifies these points before step 1:
+
+- The learning actions (enhance, revert, snapshots, rebase to upstream, keep mine) apply to
+  skills and phase definitions. The Skills tab is the primary surface.
+- New grades use the phase kind, the skill and the executor as keys. Grades by role stay
+  readable. The alias table of the compatibility appendix maps each role to its phase kind.
+- The Agents tab stays for agent files that the user writes.
+- "Rebase all diverged" does not run on the 14 role files before their learned differences move.
 
 Acceptance: each step is one pull request. After step 4, no workflow path names a role.
 
@@ -244,6 +258,8 @@ Acceptance:
   `surface-composition.spec.ts`) pass after the removals.
 - The CLI bootstrap composes and the scoped checks of `cli-engine` and `platform-cli` pass.
 - Skill grades recorded before the removal stay readable.
+- The Agents tab of skills learning shows the agent files that the user writes, with their
+  learning actions. The sync of provider copies stays for these files (user decision U-D13).
 
 ### Phase 6 - General workflow
 
@@ -286,6 +302,7 @@ User decisions (final):
 | U-D10 | (was U4) The custom subagent designer of the harness wizard is not removed in Phase 5. It is the base of the later bots task, where its output changes from a subagent to a bot. Same source as U-D9: the user asked the orchestrator to select | 2026-11-12 |
 | U-D11 | Phase 0 ships in this task and in pull request #1131, not as a child task. The pull request then has real work when it merges | 2026-11-12 |
 | U-D12 | The user approved the 12 proposed removals of `parity-inventory.md` § Proposed Removals. The removals occur in Phase 4 and Phase 5, not before. Existing generated files stay until the user agrees to a cleanup | 2026-11-12 |
+| U-D13 | Skills learning moves from the agent files to skills and phase definitions. (1) The learning actions apply to skills and phase definitions. (2) The learned differences of each of the 14 role files move into the related phase definition or stack skill before the role retires. (3) New grades use the phase kind, the skill and the executor as keys, and grades by role stay readable. (4) The Agents tab stays for agent files that the user writes, and the retired roles are read-only history. (5) The sync of provider copies stays for agent files that the user writes. The plan of Phase 4 specifies the details | 2026-11-12 |
 
 Open decisions for the user: none. Each removal that Phase 0 proposes still needs the approval of
 the user.

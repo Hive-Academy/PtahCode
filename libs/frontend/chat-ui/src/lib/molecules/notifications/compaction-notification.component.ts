@@ -1,5 +1,6 @@
 import { Component, input, ChangeDetectionStrategy } from '@angular/core';
 import { LucideAngularModule, RefreshCw } from 'lucide-angular';
+import { PtahMeterComponent } from '@ptah-extension/ui';
 
 /**
  * In-flight compaction notice. Presentational: the host passes the in-flight
@@ -7,7 +8,7 @@ import { LucideAngularModule, RefreshCw } from 'lucide-angular';
  */
 @Component({
   selector: 'ptah-compaction-notification',
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahMeterComponent],
   template: `
     @if (isCompacting()) {
       <div
@@ -26,16 +27,19 @@ import { LucideAngularModule, RefreshCw } from 'lucide-angular';
             <div class="font-semibold leading-5" data-testid="compaction-title">
               Compacting context
             </div>
-            <div
-              class="relative mt-1.5 h-1.5 overflow-hidden rounded-full bg-base-300"
-              role="progressbar"
-              aria-valuetext="Compaction in progress"
+            <ptah-meter
+              [value]="0"
+              [max]="100"
+              label="Compaction"
+              [hideLabel]="true"
+              [showValue]="false"
+              [indeterminate]="true"
+              valueText="Compaction in progress"
+              tone="warn"
+              size="sm"
+              aria-hidden="true"
               data-testid="compaction-progress"
-            >
-              <div
-                class="absolute inset-y-0 left-0 w-1/3 rounded-full bg-warning animate-indeterminate"
-              ></div>
-            </div>
+            />
           </div>
         </div>
         <p
@@ -45,23 +49,6 @@ import { LucideAngularModule, RefreshCw } from 'lucide-angular';
           Summarizing conversation history to continue.
         </p>
       </div>
-    }
-  `,
-  styles: `
-    /* Transform only, so the compositor can run the indeterminate bar. */
-    @keyframes indeterminate {
-      0% {
-        transform: translateX(-100%);
-      }
-      50% {
-        transform: translateX(200%);
-      }
-      100% {
-        transform: translateX(400%);
-      }
-    }
-    .animate-indeterminate {
-      animation: indeterminate 1.8s ease-in-out infinite;
     }
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,

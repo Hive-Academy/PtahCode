@@ -1,11 +1,12 @@
 import {
   Injectable,
+  DestroyRef,
   InjectionToken,
   signal,
   computed,
   inject,
 } from '@angular/core';
-import { ClaudeRpcService } from '@ptah-extension/core';
+import { ClaudeRpcService, ClockService } from '@ptah-extension/core';
 
 export type VoiceInputState = 'idle' | 'recording' | 'transcribing';
 
@@ -51,13 +52,20 @@ export const MEDIA_RECORDER_FACTORY = new InjectionToken<MediaRecorderFactory>(
 export class VoiceInputService {
   private readonly rpcService = inject(ClaudeRpcService);
   private readonly recorderFactory = inject(MEDIA_RECORDER_FACTORY);
+  private readonly clock = inject(ClockService);
 
   private readonly _state = signal<VoiceInputState>('idle');
-  private readonly _elapsedSeconds = signal(0);
+  private readonly recordingStartedAt = signal<number | null>(null);
+  private readonly stoppedSeconds = signal(0);
   private readonly _error = signal<string | null>(null);
 
   readonly state = this._state.asReadonly();
-  readonly elapsedSeconds = this._elapsedSeconds.asReadonly();
+  readonly elapsedSeconds = computed(() => {
+    const startedAt = this.recordingStartedAt();
+    return startedAt === null
+      ? this.stoppedSeconds()
+      : Math.max(0, Math.floor((this.clock.now() - startedAt) / 1000));
+  });
   readonly error = this._error.asReadonly();
   readonly isRecording = computed(() => this._state() === 'recording');
   readonly isTranscribing = computed(() => this._state() === 'transcribing');
@@ -67,8 +75,12 @@ export class VoiceInputService {
   private stream: MediaStream | null = null;
   private chunks: Blob[] = [];
   private mimeType = 'audio/webm';
-  private elapsedTimer: ReturnType<typeof setInterval> | null = null;
+  private releaseClock: (() => void) | null = null;
   private autoStopTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor() {
+    inject(DestroyRef).onDestroy(() => this.teardownRecording());
+  }
 
   async startRecording(): Promise<void> {
     if (this._state() !== 'idle') return;
@@ -113,7 +125,7 @@ export class VoiceInputService {
 
     this.recorder.start();
     this._state.set('recording');
-    this._elapsedSeconds.set(0);
+    this.stoppedSeconds.set(0);
     this.startTimers();
   }
 
@@ -166,7 +178,8 @@ export class VoiceInputService {
   cancelRecording(): void {
     this.teardownRecording();
     this._state.set('idle');
-    this._elapsedSeconds.set(0);
+    this.stoppedSeconds.set(0);
+    this.recordingStartedAt.set(null);
   }
 
   private async transcribe(blob: Blob): Promise<VoiceTranscriptionResult> {
@@ -218,19 +231,18 @@ export class VoiceInputService {
   }
 
   private startTimers(): void {
-    this.elapsedTimer = setInterval(() => {
-      this._elapsedSeconds.update((value) => value + 1);
-    }, 1000);
+    this.releaseClock = this.clock.acquire();
+    this.recordingStartedAt.set(this.clock.now());
     this.autoStopTimer = setTimeout(() => {
       void this.stopRecording();
     }, MAX_RECORDING_MS);
   }
 
   private clearTimers(): void {
-    if (this.elapsedTimer) {
-      clearInterval(this.elapsedTimer);
-      this.elapsedTimer = null;
-    }
+    this.stoppedSeconds.set(this.elapsedSeconds());
+    this.recordingStartedAt.set(null);
+    this.releaseClock?.();
+    this.releaseClock = null;
     if (this.autoStopTimer) {
       clearTimeout(this.autoStopTimer);
       this.autoStopTimer = null;

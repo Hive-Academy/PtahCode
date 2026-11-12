@@ -14,6 +14,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import matter from 'gray-matter';
+import * as ts from 'typescript';
+import { PHASE_KINDS } from '../libs/shared/src/lib/types/phase-contract.types';
 
 /**
  * Represents a validation error found during checks.
@@ -167,6 +170,135 @@ const LANE_SKILL_FILE = path.join(
 );
 const TEAM_LEADER_TEMPLATE = path.join(AGENTS_DIR, 'team-leader.template.md');
 const REFERENCES_DIR: string = path.join(SKILL_ROOT, 'references');
+const MIRROR_ROOT = path.join(process.cwd(), '.claude', 'skills', 'orchestration');
+const PHASE_HEADINGS = [
+  'Method', 'Output contract', 'Return value', 'Refusals', 'Escalation protocol',
+] as const;
+const REVIEW_KINDS: readonly string[] = ['review', 'document-review', 'visual-review'];
+
+function error(file: string, message: string): ValidationError {
+  return { file, type: 'content', message, suggestion: 'Correct the orchestration skill contract' };
+}
+
+function listFiles(root: string, errors: ValidationError[] = [], relativeRoot = ''): string[] {
+  if (!fs.existsSync(root)) return [];
+  return fs.readdirSync(root, { withFileTypes: true }).flatMap(entry => {
+    const absolute = path.join(root, entry.name);
+    const relative = path.join(relativeRoot, entry.name).replace(/\\/g, '/');
+    if (entry.isSymbolicLink()) {
+      errors.push(error(relative, `Symbolic link in skill copy: ${relative}`));
+      return [];
+    }
+    if (entry.isDirectory()) return listFiles(absolute, errors, relative).map(file => path.join(entry.name, file));
+    return entry.isFile() ? [entry.name] : [];
+  });
+}
+
+function validateMirror(): ValidationError[] {
+  const errors: ValidationError[] = [];
+  const pluginFiles = new Set(listFiles(SKILL_ROOT, errors));
+  const mirrorFiles = new Set(listFiles(MIRROR_ROOT, errors));
+  for (const relative of new Set([...pluginFiles, ...mirrorFiles])) {
+    if (!pluginFiles.has(relative) || !mirrorFiles.has(relative)) {
+      errors.push(error(relative, `Mirror file missing: ${relative} in ${pluginFiles.has(relative) ? '.claude' : 'plugin'} copy`));
+    } else if (!fs.readFileSync(path.join(SKILL_ROOT, relative)).equals(fs.readFileSync(path.join(MIRROR_ROOT, relative)))) {
+      errors.push(error(relative, `Mirror bytes differ: ${relative}`));
+    }
+  }
+  return errors;
+}
+
+function retiredRoles(): string[] {
+  const sourcePath = path.join(process.cwd(), 'tools', 'role-census', 'check-role-census.ts');
+  const source = ts.createSourceFile(sourcePath, fs.readFileSync(sourcePath, 'utf8'), ts.ScriptTarget.Latest, true);
+  for (const statement of source.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (!ts.isIdentifier(declaration.name) || declaration.name.text !== 'ROLES' || !declaration.initializer || !ts.isArrayLiteralExpression(declaration.initializer)) continue;
+      const roles = declaration.initializer.elements;
+      if (!roles.length || !roles.every(ts.isStringLiteral)) throw new Error('Role census ROLES must contain string literals');
+      return roles.map(role => (role as ts.StringLiteral).text);
+    }
+  }
+  throw new Error('Role census ROLES list was not found');
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown> : undefined;
+}
+
+// Keep heading rules aligned with libs/backend/lane-routing/src/lib/contracts/phase-definition-resolver.ts.
+function maskFences(body: string): string {
+  let fence: { marker: string; length: number } | undefined;
+  return body.replace(/^.*(?:\n|$)/gm, line => {
+    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (!fence && marker) fence = { marker: marker.charAt(0), length: marker.length };
+    else if (fence && marker?.charAt(0) === fence.marker && marker.length >= fence.length) fence = undefined;
+    return fence || marker ? line.replace(/[^\r\n]/g, ' ') : line;
+  });
+}
+
+function validatePhase(file: string, roles: readonly string[]): ValidationError[] {
+  const relative = path.relative(SKILL_ROOT, file).replace(/\\/g, '/');
+  const content = fs.readFileSync(file, 'utf8');
+  const errors: ValidationError[] = [];
+  let data: Record<string, unknown> | undefined;
+  try {
+    data = record(matter(content, { language: 'yaml' }).data);
+  } catch (caught: unknown) {
+    return [error(relative, `Invalid phase YAML: ${caught instanceof Error ? caught.message : String(caught)}`)];
+  }
+  if (!content.startsWith('---')) errors.push(error(relative, 'Missing phase YAML frontmatter'));
+  const topKeys = ['version', 'kind', 'input', 'deliverable', 'verdict', 'acceptanceStep', 'requiredCapabilities', 'toolProfile'];
+  for (const key of Object.keys(data ?? {})) if (!topKeys.includes(key)) errors.push(error(relative, `Unknown phase field: ${key}`));
+  if (data?.version !== 1) errors.push(error(relative, 'Invalid phase field: version must be 1'));
+  const kind = path.basename(file, '.md');
+  if (!PHASE_KINDS.includes(kind as typeof PHASE_KINDS[number]) || data?.kind !== kind) errors.push(error(relative, `Invalid phase field: kind must equal filename ${kind}`));
+  for (const field of ['input', 'deliverable', 'verdict', 'acceptanceStep', 'requiredCapabilities'] as const) {
+    if (!Array.isArray(data?.[field]) || !data[field].length || !data[field].every(value => typeof value === 'string' && value.trim())) errors.push(error(relative, `Invalid phase field: ${field} must be a nonempty list of nonempty strings`));
+  }
+  const profile = record(data?.toolProfile);
+  for (const key of Object.keys(profile ?? {})) if (!['disallowedTools', 'permission'].includes(key)) errors.push(error(relative, `Unknown toolProfile field: ${key}`));
+  if (!profile || !Array.isArray(profile.disallowedTools) || !profile.disallowedTools.every(value => typeof value === 'string' && value.trim()) || !['allow', 'deny', 'prompt'].includes(String(profile.permission))) errors.push(error(relative, 'Invalid phase field: toolProfile requires disallowedTools and permission allow|deny|prompt'));
+  const body = matter(content, { language: 'yaml' }).content;
+  const matches = [...maskFences(body).matchAll(/^## ([^\r\n]+)\r?$/gm)];
+  const sections = new Map<string, string[]>();
+  for (let index = 0; index < matches.length; index++) {
+    const match = matches[index];
+    if (!match) continue;
+    const heading = match[1]?.trim();
+    if (!heading) continue;
+    if (![...PHASE_HEADINGS, 'Reviewer stance'].includes(heading)) continue;
+    const start = match.index! + match[0].length;
+    sections.set(heading, [...(sections.get(heading) ?? []), body.slice(start, matches[index + 1]?.index ?? body.length).trim()]);
+  }
+  for (const heading of [...PHASE_HEADINGS, ...(REVIEW_KINDS.includes(kind) ? ['Reviewer stance'] : [])]) {
+    if (!sections.get(heading)?.[0]) errors.push(error(relative, `Missing or empty phase section: ${heading}`));
+  }
+  for (const [heading, values] of sections) if (values.length > 1) errors.push(error(relative, `Duplicate phase section: ${heading}`));
+  if (!REVIEW_KINDS.includes(kind) && sections.has('Reviewer stance')) errors.push(error(relative, 'Unexpected phase section: Reviewer stance'));
+  for (const role of roles) if (content.includes(role)) errors.push(error(relative, `Retired role name in phase definition: ${role}`));
+  return errors;
+}
+
+function validatePhases(): ValidationError[] {
+  const directory = path.join(SKILL_ROOT, 'phases');
+  const files = fs.existsSync(directory) ? fs.readdirSync(directory).filter(name => name.endsWith('.md')) : [];
+  const roles = retiredRoles();
+  const errors = files.flatMap(name => validatePhase(path.join(directory, name), roles));
+  const skill = fs.readFileSync(path.join(SKILL_ROOT, 'SKILL.md'), 'utf8');
+  const active = /^## Phase-kind flows\s*$([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(maskFences(skill));
+  if (active) {
+    const expected = new Set(PHASE_KINDS.map(kind => `${kind}.md`));
+    for (const name of expected) if (!files.includes(name)) errors.push(error(`phases/${name}`, `Required phase file missing: ${name}`));
+    for (const name of files) if (!expected.has(name)) errors.push(error(`phases/${name}`, `Unexpected phase file: ${name}`));
+    // The mask keeps the string length, so the offsets of the masked match are valid in the original text.
+    const flow = skill.slice(active.index, active.index + active[0].length);
+    for (const role of roles) if (flow.includes(role)) errors.push(error('SKILL.md', `Retired role name in active phase flow: ${role}`));
+  }
+  return errors;
+}
 
 /**
  * Logs a colored message to console.
@@ -314,8 +446,7 @@ function extractMarkdownLinks(content: string): ExtractedLink[] {
       if (
         link !== undefined &&
         !link.startsWith('http://') &&
-        !link.startsWith('https://') &&
-        !link.startsWith('#')
+        !link.startsWith('https://')
       ) {
         links.push({ link, line: index + 1 });
       }
@@ -336,13 +467,12 @@ function validateInternalReferences(
   content: string,
 ): ValidationError[] {
   const errors: ValidationError[] = [];
-  const links = extractMarkdownLinks(content);
+  const links = extractMarkdownLinks(maskFences(content));
   const fileDir = path.dirname(filePath);
 
   for (const { link, line } of links) {
-    const linkPath = link.split('#')[0];
-    if (!linkPath) continue;
-    const resolvedPath = path.resolve(fileDir, linkPath);
+    const [linkPath, anchor] = link.split('#');
+    const resolvedPath = linkPath ? path.resolve(fileDir, linkPath) : filePath;
 
     if (!fs.existsSync(resolvedPath)) {
       errors.push({
@@ -355,6 +485,14 @@ function validateInternalReferences(
         )}`,
         line,
       });
+    } else if (anchor && fs.statSync(resolvedPath).isFile()) {
+      const target = maskFences(fs.readFileSync(resolvedPath, 'utf8'));
+      const slugs = [...target.matchAll(/^#{1,6}\s+(.+)$/gm)].map(match =>
+        (match[1] ?? '').trim().toLowerCase().replace(/[`*_~]/g, '').replace(/[^\p{L}\p{N} -]/gu, '').replace(/ /g, '-'),
+      );
+      if (!slugs.includes(decodeURIComponent(anchor).toLowerCase())) {
+        errors.push(error(filePath, `Broken heading anchor: ${link}`));
+      }
     }
   }
 
@@ -798,6 +936,8 @@ function validateOrchestrationSkill(): ValidationResult {
   result.errors.push(...validateAgentFilesExist());
   result.errors.push(...validateReferenceFilesExist());
   result.errors.push(...validateLanesFirstRules());
+  result.errors.push(...validateMirror());
+  result.errors.push(...validatePhases());
   result.passed = result.errors.length === 0;
 
   return result;

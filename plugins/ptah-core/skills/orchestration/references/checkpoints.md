@@ -209,7 +209,7 @@ sub-agents accordingly: [lane-assignment.md § Gate 0.1 outcome](lane-assignment
 
 ## Checkpoint 0: Scope Clarification
 
-**Owner**: Orchestrator only. The project-manager subagent CANNOT ask the user.
+**Owner**: Orchestrator only. The plan phase subagent CANNOT ask the user.
 
 ### Trigger Conditions
 
@@ -265,7 +265,7 @@ Before I create the requirements, I have a few clarifying questions:
 
 ### When to Present
 
-After project-manager completes and creates `task-description.md`.
+After plan phase completes and creates `task-description.md`.
 
 In `lane-review` mode with no [escalation](#approval-mode), post the lane-review notice and continue. Otherwise present as below.
 
@@ -331,14 +331,14 @@ When ready, reply:
 | Response          | Action                                                         |
 | ----------------- | -------------------------------------------------------------- |
 | "APPROVED"        | Proceed to required design/Gate 1.7, Checkpoint 1.5 or Architect                         |
-| Feedback provided | Re-invoke project-manager with feedback, re-present checkpoint |
+| Feedback provided | Re-invoke plan phase with feedback, re-present checkpoint |
 | Questions asked   | Answer questions, re-present checkpoint                        |
 
 ---
 
 ## Checkpoint 1.5: Technical Clarification
 
-**Owner**: Orchestrator only. The software-architect subagent CANNOT ask the user.
+**Owner**: Orchestrator only. The architecture phase subagent CANNOT ask the user.
 
 Technical choices are agent decisions by default. The architect settles them from evidence, and a
 cross-side peer validates the ones that stay open.
@@ -399,7 +399,7 @@ Before I create the architecture, I have a few technical questions:
 ### When to Present
 
 After `design-spec.md` and `<taskFolder>/prototype/` are ready, before the next phase of the flow
-(architect, team-leader, or content writer). **Mandatory whenever a designer ran or any UI surface is added/redesigned.**
+(architecture, batch, or docs phase). **Mandatory whenever a design phase ran or any UI surface is added/redesigned.**
 
 In `lane-review` mode with no [escalation](#approval-mode), post the lane-review notice with the
 prototype path and screenshot links, and continue. Otherwise present as below.
@@ -455,7 +455,7 @@ Please open the spec and prototype above and review the screenshots at your own 
 
 When ready, reply:
 
-- **"APPROVED"** — use this prototype as the visual source of truth; proceed to the next phase of the recorded flow (architect, team-leader, or content writer)
+- **"APPROVED"** — use this prototype as the visual source of truth; proceed to the next phase of the recorded flow (architecture, batch, or docs phase)
 - **Revisions / questions** — I'll revise and re-present
 ```
 
@@ -464,7 +464,7 @@ When ready, reply:
 | Response          | Action                                                         |
 | ----------------- | -------------------------------------------------------------- |
 | "APPROVED"        | Record approval and any approved parity removals; proceed       |
-| Revisions provided | Re-invoke designer with feedback, re-present spec and prototype |
+| Revisions provided | Re-invoke design phase with feedback, re-present spec and prototype |
 | Questions asked   | Answer questions, re-present checkpoint                         |
 
 ---
@@ -473,10 +473,10 @@ When ready, reply:
 
 ### When to Present
 
-After software-architect completes and creates `implementation-plan.md`.
+After architecture phase completes and creates `implementation-plan.md`.
 
 In `lane-review` mode with no [escalation](#approval-mode), post the lane-review notice and invoke
-team-leader MODE 1. Otherwise present as below.
+batch phase. Otherwise present as below.
 
 ### How to Present — PLAIN MESSAGE, NOT `AskUserQuestion`
 
@@ -545,7 +545,7 @@ When ready, reply:
 
 | Response          | Action                                                   |
 | ----------------- | -------------------------------------------------------- |
-| "APPROVED"        | Invoke team-leader MODE 1                                |
+| "APPROVED"        | Invoke batch phase                                |
 | Feedback provided | Re-invoke architect with feedback, re-present checkpoint |
 | Questions asked   | Answer questions, re-present checkpoint                  |
 | Request changes   | Update requirements if needed, re-invoke architect       |
@@ -556,7 +556,7 @@ When ready, reply:
 
 ### When to Present
 
-After team-leader MODE 3 confirms all development complete. This is a notice, not a question: you
+After the last batch is `COMPLETE`, before the `review` and `tests` phases and before `completion`. This is a notice, not a question: you
 select the QA agents by the rule below, announce them and start them. This selection does not waive the
 required UI evidence against the approved prototype (or — for a UI change with no added/redesigned
 surface and so no prototype — before/after screenshots [dark + light] of the affected screen, the
@@ -566,10 +566,10 @@ surface and so no prototype — before/after screenshots [dark + light] of the a
 
 | The change …                                                | Add             |
 | ----------------------------------------------------------- | --------------- |
-| changes rendered UI                                         | visual-reviewer |
-| adds a public API, a new library or a new cross-lib contract | code-style-reviewer |
-| has acceptance criteria that no test proves yet             | senior-tester   |
-| has logic not covered by the required shipping-code review  | code-logic-reviewer |
+| changes rendered UI                                         | `visual-review` |
+| adds a public API, a new library or a new cross-lib contract | `review` (style) |
+| has acceptance criteria that no test proves yet             | `tests` |
+| has logic not covered by the required shipping-code review  | `review` (logic) |
 | none of the above (types, docs, tests only)                 | nothing extra   |
 
 ### Template
@@ -584,18 +584,18 @@ Reply with "tester", "style", "logic", "visual", "reviewers" or "all" to add age
 Parallel invocations: [agent-catalog.md § Parallel QA](agent-catalog.md#parallel-qa).
 
 Gate 3 selects ADDITIONAL QA. It never waives the required shipping-code review (agent-lanes §6),
-which runs before batch acceptance, or before completion and git in flows without team-leader.
+which runs before completion and git in flows without a batch planner.
 
 ### Response Handling (user additions)
 
 | Response    | Action                                      |
 | ----------- | ------------------------------------------- |
-| "tester"    | Invoke senior-tester only                   |
-| "style"     | Invoke code-style-reviewer only             |
-| "logic"     | Invoke code-logic-reviewer only             |
-| "visual"    | Invoke visual-reviewer only                 |
-| "reviewers" | Invoke ALL THREE reviewers in parallel      |
-| "all"       | Invoke ALL FOUR QA agents in parallel       |
+| "tester"    | Invoke `tests` only                         |
+| "style"     | Invoke `review` for style only              |
+| "logic"     | Invoke `review` for logic only              |
+| "visual"    | Invoke `visual-review` only                 |
+| "reviewers" | Invoke applicable `review` and `visual-review` in parallel |
+| "all"       | Invoke `tests`, `review` and applicable `visual-review` in parallel |
 ---
 
 ## Checkpoint SR: Agent Questions
@@ -686,16 +686,16 @@ When user provides feedback instead of "APPROVED" (in `lane-review` mode, also f
 
 ### Verification Failure Handling
 
-When team-leader MODE 2 rejects a batch:
+When orchestrator acceptance step rejects a batch:
 
 ```
-1. Extract rejection reasons from team-leader response
+1. Extract rejection reasons from acceptance report
 2. Re-invoke developer with:
    - Original task assignment
    - List of issues found
    - Clear fix instructions
 3. Developer produces fixes
-4. Re-invoke team-leader MODE 2 for re-verification
+4. Re-invoke orchestrator acceptance step for re-verification
 5. Repeat until batch passes verification
 ```
 
@@ -729,7 +729,7 @@ New Task Start
   Designer → design-spec.md + prototype/ (when required)
      │
      v
-[Checkpoint 1.7: Design Validation]  ←─ Required if designer ran or UI added/redesigned (approver per approval mode)
+[Checkpoint 1.7: Design Validation]  ←─ Required if design phase ran or UI added/redesigned (approver per approval mode)
      │
      v
   Software Architect
@@ -738,10 +738,10 @@ New Task Start
 [Checkpoint 2: Architecture Validation]  ←─ Required (lane-review: reviewer approves; user: APPROVED)
      │
      v
-  Team-Leader MODE 1 → Development Loop
+  batch phase → Development Loop
      │
      v
-  Team-Leader MODE 3
+  completion phase
      │
      v
 [Checkpoint 3: QA Selection]  ←─ Notice (rule-based)

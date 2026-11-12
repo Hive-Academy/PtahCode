@@ -13,13 +13,16 @@ import {
 } from '@angular/core';
 import type { PermissionRequest } from '@ptah-extension/shared';
 import { Check, Copy, LucideAngularModule } from 'lucide-angular';
-import { CountdownClock } from '../../services/countdown-clock';
+import { ClockService } from '@ptah-extension/core';
 import type { MachinesError } from '../../services/machines-store';
 import { displayBlockText, displayText } from '../../utils/display-text';
-import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
+import {
+  PtahBadgeDirective,
+  PtahButtonDirective,
+  PtahCountdownComponent,
+} from '@ptah-extension/ui';
 import {
   PERMISSION_TIMED_OUT_COPY,
-  permissionCountdownCopy,
   permissionNotPermittedCopy,
 } from '../../utils/remote-session-copy';
 
@@ -44,15 +47,21 @@ let nextBlockId = 0;
  *
  * The worker denies an unanswered request at its deadline (`timeoutAt`,
  * decision 27). While answerable, the block counts down to it on the shared
- * {@link CountdownClock} (one interval for all blocks); it lets go of the
- * clock at expiry and on destroy. After expiry, or once the worker's timeout
+ * {@link ClockService} (one interval for all blocks); it lets go of the
+ * clock at expiry and on destroy. The shown time is a `ptah-countdown`.
+ * After expiry, or once the worker's timeout
  * record arrived (`timedOut`), the buttons are disabled and the block says
  * the worker denied it.
  */
 @Component({
   selector: 'ptah-remote-approval-block',
   standalone: true,
-  imports: [PtahBadgeDirective, PtahButtonDirective, LucideAngularModule],
+  imports: [
+    PtahBadgeDirective,
+    PtahButtonDirective,
+    PtahCountdownComponent,
+    LucideAngularModule,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -124,7 +133,16 @@ let nextBlockId = 0;
         @if (mode() === 'answerable' && !expired()) {
           <dt class="text-base-content-muted">If unanswered</dt>
           <dd class="min-w-0 text-base-content" data-testid="approval-deadline">
-            {{ deadlineText() }}
+            @if (deadline(); as at) {
+              Denied automatically in
+              <ptah-countdown
+                [deadline]="at"
+                format="compact"
+                label="Time until the worker denies this request"
+              />
+            } @else {
+              Stays pending, like a local request.
+            }
           </dd>
         }
       </dl>
@@ -222,13 +240,13 @@ export class RemoteApprovalBlockComponent {
   protected readonly CopyIcon = Copy;
   protected readonly CheckIcon = Check;
 
-  private readonly clock = inject(CountdownClock);
+  private readonly clock = inject(ClockService);
   protected readonly now = this.clock.now;
   protected readonly copied = signal(false);
   private copiedTimer: ReturnType<typeof setTimeout> | undefined;
 
   /** The worker's deadline, or `null` when the request has none (`timeoutAt: 0`). */
-  private readonly deadline = computed(() => {
+  protected readonly deadline = computed(() => {
     const at = this.request().timeoutAt;
     return Number.isFinite(at) && at > 0 ? at : null;
   });
@@ -292,12 +310,6 @@ export class RemoteApprovalBlockComponent {
       default:
         return `${machine} wants to run a command`;
     }
-  });
-
-  protected readonly deadlineText = computed(() => {
-    const deadline = this.deadline();
-    if (deadline === null) return 'Stays pending, like a local request.';
-    return permissionCountdownCopy((deadline - this.now()) / 1000);
   });
 
   protected readonly errorText = computed(() => {
