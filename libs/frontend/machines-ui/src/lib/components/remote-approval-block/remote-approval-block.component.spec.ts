@@ -1,10 +1,14 @@
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
+import { ClockService } from '@ptah-extension/core';
 import type { PermissionRequest } from '@ptah-extension/shared';
+import { PTAH_CLOCK } from '@ptah-extension/ui';
 import { RemoteApprovalBlockComponent } from './remote-approval-block.component';
 
 const NOW = 1_700_000_000_000;
 
-function request(overrides: Partial<PermissionRequest> = {}): PermissionRequest {
+function request(
+  overrides: Partial<PermissionRequest> = {},
+): PermissionRequest {
   return {
     id: 'p1',
     toolName: 'Bash',
@@ -20,7 +24,10 @@ function setup(
   inputs: Record<string, unknown> = {},
 ): ComponentFixture<RemoteApprovalBlockComponent> {
   TestBed.resetTestingModule();
-  TestBed.configureTestingModule({ imports: [RemoteApprovalBlockComponent] });
+  TestBed.configureTestingModule({
+    imports: [RemoteApprovalBlockComponent],
+    providers: [{ provide: PTAH_CLOCK, useExisting: ClockService }],
+  });
   const fixture = TestBed.createComponent(RemoteApprovalBlockComponent);
   fixture.componentRef.setInput('request', request());
   fixture.componentRef.setInput('machineName', 'Horus');
@@ -35,6 +42,9 @@ const q = (fixture: ComponentFixture<unknown>, id: string) =>
   (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>(
     `[data-testid="${id}"]`,
   );
+/** The countdown value (the `time` element), without the live-region text. */
+const left = (fixture: ComponentFixture<unknown>) =>
+  q(fixture, 'approval-deadline')?.querySelector('time')?.textContent?.trim();
 const button = (fixture: ComponentFixture<unknown>, id: string) =>
   q(fixture, id) as HTMLButtonElement | null;
 
@@ -48,19 +58,20 @@ describe('RemoteApprovalBlockComponent', () => {
     activeIntervals.clear();
     const realSet = globalThis.setInterval;
     const realClear = globalThis.clearInterval;
-    jest
-      .spyOn(globalThis, 'setInterval')
-      .mockImplementation(((handler: () => void, ms?: number) => {
-        const id = realSet(handler, ms);
-        activeIntervals.add(id);
-        return id;
-      }) as typeof setInterval);
-    jest
-      .spyOn(globalThis, 'clearInterval')
-      .mockImplementation(((id?: ReturnType<typeof setInterval>) => {
-        activeIntervals.delete(id);
-        realClear(id);
-      }) as typeof clearInterval);
+    jest.spyOn(globalThis, 'setInterval').mockImplementation(((
+      handler: () => void,
+      ms?: number,
+    ) => {
+      const id = realSet(handler, ms);
+      activeIntervals.add(id);
+      return id;
+    }) as typeof setInterval);
+    jest.spyOn(globalThis, 'clearInterval').mockImplementation(((
+      id?: ReturnType<typeof setInterval>,
+    ) => {
+      activeIntervals.delete(id);
+      realClear(id);
+    }) as typeof clearInterval);
   });
   afterEach(() => {
     TestBed.resetTestingModule();
@@ -77,7 +88,9 @@ describe('RemoteApprovalBlockComponent', () => {
       'Horus wants to run a command',
     );
     expect(q(fixture, 'approval-tool')?.textContent?.trim()).toBe('Bash');
-    expect(q(fixture, 'approval-args')?.textContent).toContain('"command": "ls -la"');
+    expect(q(fixture, 'approval-args')?.textContent).toContain(
+      '"command": "ls -la"',
+    );
     expect(button(fixture, 'approval-allow')?.disabled).toBe(false);
     expect(button(fixture, 'approval-deny')?.disabled).toBe(false);
     expect(q(fixture, 'approval-hint')?.textContent?.trim()).toBe(
@@ -100,7 +113,9 @@ describe('RemoteApprovalBlockComponent', () => {
 
   it('never binds arguments as HTML', () => {
     const fixture = setup({
-      request: request({ toolInput: { command: '<img src=x onerror=alert(1)>' } }),
+      request: request({
+        toolInput: { command: '<img src=x onerror=alert(1)>' },
+      }),
     });
     const args = q(fixture, 'approval-args');
     expect(args?.querySelector('img')).toBeNull();
@@ -118,14 +133,16 @@ describe('RemoteApprovalBlockComponent', () => {
 
   it('decision 27: counts down to the worker deadline, then disables the buttons', () => {
     const fixture = setup({ request: request({ timeoutAt: NOW + 42_000 }) });
-    expect(q(fixture, 'approval-deadline')?.textContent?.trim()).toBe(
-      'Denied automatically in 42 s',
+    expect(q(fixture, 'approval-deadline')?.textContent).toContain(
+      'Denied automatically in',
     );
+    expect(left(fixture)).toBe('42s');
     jest.advanceTimersByTime(2_000);
     fixture.detectChanges();
-    expect(q(fixture, 'approval-deadline')?.textContent?.trim()).toBe(
-      'Denied automatically in 40 s',
+    expect(q(fixture, 'approval-deadline')?.textContent).toContain(
+      'Denied automatically in',
     );
+    expect(left(fixture)).toBe('40s');
 
     jest.advanceTimersByTime(40_000);
     fixture.detectChanges();
@@ -162,12 +179,14 @@ describe('RemoteApprovalBlockComponent', () => {
 
     jest.advanceTimersByTime(5_000);
     for (const fixture of [first, ...others]) fixture.detectChanges();
-    expect(q(others[0], 'approval-deadline')?.textContent?.trim()).toBe(
-      'Denied automatically in 5 s',
+    expect(q(others[0], 'approval-deadline')?.textContent).toContain(
+      'Denied automatically in',
     );
-    expect(q(others[3], 'approval-deadline')?.textContent?.trim()).toBe(
-      'Denied automatically in 35 s',
+    expect(left(others[0])).toBe('5s');
+    expect(q(others[3], 'approval-deadline')?.textContent).toContain(
+      'Denied automatically in',
     );
+    expect(left(others[3])).toBe('35s');
     expect(activeIntervals.size).toBe(1);
 
     for (const fixture of others) fixture.destroy();

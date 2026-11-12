@@ -10,6 +10,7 @@ import {
   type OnInit,
 } from '@angular/core';
 import { ArrowLeft, LucideAngularModule } from 'lucide-angular';
+import { ClockService } from '@ptah-extension/core';
 import { InboxLayoutComponent, PtahButtonDirective } from '@ptah-extension/ui';
 import {
   MachinesStore,
@@ -37,8 +38,6 @@ import { MachinesPageHeaderComponent } from './machines-page-header.component';
 /** What the detail pane shows. */
 export type MachinesPaneMode =
   'detail' | 'add' | 'repair' | 'readiness' | 'session';
-
-const CLOCK_TICK_MS = 1000;
 
 /**
  * The Machines page (approved option A): the page header, then the shared
@@ -236,13 +235,15 @@ export class MachinesViewComponent implements OnInit {
   });
   protected readonly busy = signal(false);
   protected readonly actionError = signal<MachinesActionError | null>(null);
-  protected readonly now = signal(Date.now());
+  private readonly clockService = inject(ClockService);
+  protected readonly now = this.clockService.now;
   protected readonly openSession = signal<RemoteSessionOpenRequest | null>(
     null,
   );
 
   protected readonly ArrowLeftIcon = ArrowLeft;
-  private clock: ReturnType<typeof setInterval> | undefined;
+  /** Releases the shared clock; `null` while no clock is held. */
+  private releaseClock: (() => void) | null = null;
 
   /** The selected machine; the first one when none (or a removed one) is selected. */
   protected readonly selected = computed<RemoteMachine | null>(() => {
@@ -269,7 +270,6 @@ export class MachinesViewComponent implements OnInit {
       this.store.machines();
       const state = this.selected()?.state;
       untracked(() => {
-        this.now.set(Date.now());
         this.setClock(state === 'offline' || state === 'reconnecting');
       });
     });
@@ -376,11 +376,11 @@ export class MachinesViewComponent implements OnInit {
 
   private setClock(running: boolean): void {
     if (!running) {
-      clearInterval(this.clock);
-      this.clock = undefined;
+      this.releaseClock?.();
+      this.releaseClock = null;
       return;
     }
-    if (this.clock !== undefined) return;
-    this.clock = setInterval(() => this.now.set(Date.now()), CLOCK_TICK_MS);
+    // The banner text counts seconds, so hold the one-second clock.
+    this.releaseClock ??= this.clockService.acquire();
   }
 }

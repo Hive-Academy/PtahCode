@@ -1,5 +1,6 @@
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { ClaudeRpcService } from '@ptah-extension/core';
+import { ClaudeRpcService, ClockService } from '@ptah-extension/core';
 import {
   VoiceInputService,
   MEDIA_RECORDER_FACTORY,
@@ -55,11 +56,17 @@ describe('VoiceInputService', () => {
   let lastRecorder: FakeMediaRecorder;
   let lastStream: FakeMediaStream;
   let getUserMedia: jest.Mock;
+  const now = signal(0);
+  const releaseClock = jest.fn();
+  const acquireClock = jest.fn(() => releaseClock);
 
   function configure(
     factoryOverrides: Partial<MediaRecorderFactory> = {},
   ): void {
     lastStream = new FakeMediaStream(2);
+    now.set(100_000);
+    releaseClock.mockClear();
+    acquireClock.mockClear();
     getUserMedia = jest.fn().mockResolvedValue(lastStream);
     rpcCall = jest.fn().mockResolvedValue({
       success: true,
@@ -81,6 +88,7 @@ describe('VoiceInputService', () => {
       providers: [
         VoiceInputService,
         { provide: ClaudeRpcService, useValue: { call: rpcCall } },
+        { provide: ClockService, useValue: { now, acquire: acquireClock } },
         { provide: MEDIA_RECORDER_FACTORY, useValue: factory },
       ],
     });
@@ -97,6 +105,17 @@ describe('VoiceInputService', () => {
     configure();
     expect(service.state()).toBe('idle');
     expect(service.isRecording()).toBe(false);
+  });
+
+  it('derives elapsed seconds from the shared clock and releases it on stop', async () => {
+    configure();
+    await service.startRecording();
+    expect(acquireClock).toHaveBeenCalledTimes(1);
+    now.set(103_250);
+    expect(service.elapsedSeconds()).toBe(3);
+    await service.stopRecording();
+    expect(service.elapsedSeconds()).toBe(3);
+    expect(releaseClock).toHaveBeenCalledTimes(1);
   });
 
   it('record -> stop -> transcribe happy path returns transcript', async () => {
