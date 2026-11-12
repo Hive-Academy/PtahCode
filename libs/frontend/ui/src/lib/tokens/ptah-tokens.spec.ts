@@ -20,6 +20,7 @@ const TOKEN_ONLY_DIRS: readonly string[] = [
   'button',
   'form-controls',
   'badge',
+  'time',
   'charts',
 ];
 

@@ -17,7 +17,11 @@ import {
   Unplug,
   type LucideIconData,
 } from 'lucide-angular';
-import { BrandMarkComponent, PtahButtonDirective } from '@ptah-extension/ui';
+import {
+  BrandMarkComponent,
+  PtahButtonDirective,
+  PtahCheckboxDirective,
+} from '@ptah-extension/ui';
 
 import { PTAH_SESSIONS_LABEL } from '../data/coverage';
 import type { ProviderSort, ProviderSortKey } from '../data/provider-filtering';
@@ -197,6 +201,7 @@ export function nextProviderSort(
   standalone: true,
   imports: [
     PtahButtonDirective,
+    PtahCheckboxDirective,
     LucideAngularModule,
     BrandMarkComponent,
     RemovalLockBadgeComponent,
@@ -303,7 +308,8 @@ export function nextProviderSort(
                     <input
                       #selectAll
                       type="checkbox"
-                      class="checkbox checkbox-xs"
+                      ptahCheckbox
+                      size="xs"
                       aria-label="Select all selectable servers"
                       data-testid="provider-select-all"
                       [checked]="allSelected()"
@@ -388,7 +394,8 @@ export function nextProviderSort(
                       <input
                         #rowBox
                         type="checkbox"
-                        class="checkbox checkbox-xs"
+                        ptahCheckbox
+                        size="xs"
                         data-testid="provider-row-checkbox"
                         [attr.aria-label]="checkboxLabel(row)"
                         [attr.title]="

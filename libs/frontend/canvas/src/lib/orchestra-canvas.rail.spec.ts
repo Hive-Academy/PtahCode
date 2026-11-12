@@ -34,6 +34,7 @@ import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { FormsModule } from '@angular/forms';
 import { LucideAngularModule } from 'lucide-angular';
+import { PtahFieldComponent, PtahInputDirective } from '@ptah-extension/ui';
 import {
   AppStateManager,
   BackOfficeActivityService,
@@ -249,6 +250,8 @@ describe('OrchestraCanvasComponent Rail integration', () => {
           LucideAngularModule,
           RailStub,
           PopoverStub,
+          PtahFieldComponent,
+          PtahInputDirective,
         ],
         providers: [
           { provide: CanvasStore, useValue: store },
@@ -285,7 +288,9 @@ describe('OrchestraCanvasComponent Rail integration', () => {
     find<HTMLButtonElement>('ptah-canvas-rail footer button');
   const createButton = () =>
     [
-      ...(fixture.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>(
+      ...(
+        fixture.nativeElement as HTMLElement
+      ).querySelectorAll<HTMLButtonElement>(
         '[data-testid="canvas-new-session-popover"] button',
       ),
     ].find((button) => button.textContent?.trim() === 'Create');
@@ -332,8 +337,12 @@ describe('OrchestraCanvasComponent Rail integration', () => {
     fixture.detectChanges();
     expect(popoverOpen()).toBe(true);
     expect(popovers()[0]?.anchor()).toBe(footerButton());
-    expect(find('label[for="canvas-session-name"]')?.textContent).toContain('Session name (optional)');
-    expect(find('input#canvas-session-name')?.hasAttribute('aria-label')).toBe(false);
+    expect(find('label[for="canvas-session-name"]')?.textContent).toContain(
+      'Session name (optional)',
+    );
+    expect(find('input#canvas-session-name')?.hasAttribute('aria-label')).toBe(
+      false,
+    );
     expect(addTile).not.toHaveBeenCalled();
     expect(popovers()).toHaveLength(1);
   });
@@ -356,18 +365,28 @@ describe('OrchestraCanvasComponent Rail integration', () => {
   it('closes the new-session popover once when Escape is pressed on its external anchor', () => {
     tiles.set([]);
     fixture.detectChanges();
-    const trigger = find<HTMLButtonElement>('[data-testid="canvas-rail-empty-board"] button')!;
+    const trigger = find<HTMLButtonElement>(
+      '[data-testid="canvas-rail-empty-board"] button',
+    )!;
     trigger.click();
     fixture.detectChanges();
     expect(popoverOpen()).toBe(true);
     const focus = jest.spyOn(trigger, 'focus');
     trigger.focus();
     focus.mockClear();
-    trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    trigger.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
     fixture.detectChanges();
     expect(popoverOpen()).toBe(false);
     expect(focus).toHaveBeenCalledTimes(1);
-    trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    trigger.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+    );
     expect(focus).toHaveBeenCalledTimes(1);
   });
 
@@ -482,9 +501,7 @@ describe('OrchestraCanvasComponent Rail integration', () => {
     footerButton()?.click();
     fixture.detectChanges();
     await fixture.whenStable();
-    expect(
-      find<HTMLInputElement>('input#canvas-session-name')?.value,
-    ).toBe('');
+    expect(find<HTMLInputElement>('input#canvas-session-name')?.value).toBe('');
   });
 
   it('returns focus to the invoking footer on cancel and failed create', () => {
@@ -528,9 +545,7 @@ describe('OrchestraCanvasComponent Rail integration', () => {
     await fixture.whenStable();
     expect(popovers()).toHaveLength(1);
     expect(popoverOpen()).toBe(false);
-    expect(
-      find<HTMLInputElement>('input#canvas-session-name')?.value,
-    ).toBe('');
+    expect(find<HTMLInputElement>('input#canvas-session-name')?.value).toBe('');
     expect(addTile).not.toHaveBeenCalled();
   });
 

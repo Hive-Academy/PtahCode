@@ -3,10 +3,11 @@ import {
   provideBrowserGlobalErrorListeners, provideZonelessChangeDetection, provideZoneChangeDetection,
 } from '@angular/core';
 import {
-  ClaudeRpcService, ElectronLayoutService, GIT_SESSION_SCOPE_SOURCE,
+  ClaudeRpcService, ClockService, ElectronLayoutService, GIT_SESSION_SCOPE_SOURCE,
   MESSAGE_HANDLERS, ThemeService, provideMessageRouter, provideVSCodeService,
   type GitSessionScopeCandidate, type GitSessionScopeSource, type MessageHandler,
 } from '@ptah-extension/core';
+import { PTAH_CLOCK } from '@ptah-extension/ui';
 import {
   FileContentChangesService, GIT_WINDOW_CONTEXT, GitBranchesService, GitDockScopeStore,
   GitOperationOutputService, GitStatusService, ReviewDiffService, WorktreeService,
@@ -67,6 +68,7 @@ export class GitWindowScopeHandler implements MessageHandler {
 
 export const gitWindowConfig: ApplicationConfig = {
   providers: [
+    { provide: PTAH_CLOCK, useExisting: ClockService },
     provideBrowserGlobalErrorListeners(),
     useZoneChangeDetectionFallback() ? provideZoneChangeDetection() : provideZonelessChangeDetection(),
     provideVSCodeService(),

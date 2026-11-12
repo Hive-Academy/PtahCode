@@ -10,6 +10,7 @@ import {
 import {
   PtahButtonDirective,
   PtahIconButtonDirective,
+  PtahCheckboxDirective,
 } from '@ptah-extension/ui';
 import { LucideAngularModule, FolderInput, X } from 'lucide-angular';
 import type {
@@ -119,7 +120,12 @@ const OUTCOME_TEXT: Readonly<Record<HarnessRepairOutcome, string>> = {
 @Component({
   selector: 'ptah-harness-repair-dialog',
   standalone: true,
-  imports: [PtahIconButtonDirective, PtahButtonDirective, LucideAngularModule],
+  imports: [
+    PtahIconButtonDirective,
+    PtahButtonDirective,
+    PtahCheckboxDirective,
+    LucideAngularModule,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dialog
@@ -235,7 +241,9 @@ const OUTCOME_TEXT: Readonly<Record<HarnessRepairOutcome, string>> = {
                       [attr.data-path]="candidate.key"
                     >
                       <input
-                        class="checkbox checkbox-xs mt-0.5 shrink-0"
+                        ptahCheckbox
+                        size="xs"
+                        class="mt-0.5 shrink-0"
                         type="checkbox"
                         data-testid="harness-repair-checkbox"
                         [attr.data-path]="candidate.key"

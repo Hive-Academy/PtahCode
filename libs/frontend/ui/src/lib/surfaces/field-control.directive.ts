@@ -12,8 +12,6 @@ import { PtahFieldControlRef } from './field-control-ref';
 })
 export class PtahFieldControlDirective implements PtahFieldControlRef {
   readonly element = inject(ElementRef<HTMLElement>);
-  readonly originalDescription =
-    this.element.nativeElement.getAttribute('aria-describedby');
 
   constructor() {
     const control = this.element.nativeElement;

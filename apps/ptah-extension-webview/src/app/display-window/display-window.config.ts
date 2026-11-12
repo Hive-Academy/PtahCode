@@ -7,10 +7,12 @@ import {
 } from '@angular/core';
 import {
   ClaudeRpcService,
+  ClockService,
   MESSAGE_HANDLERS,
   provideMessageRouter,
   provideVSCodeService,
 } from '@ptah-extension/core';
+import { PTAH_CLOCK } from '@ptah-extension/ui';
 import { DisplayWindowStateHandler } from '@ptah-extension/chat';
 import { useZoneChangeDetectionFallback } from '../zone-change-detection';
 
@@ -55,6 +57,7 @@ class DisplayWindowErrorHandler implements ErrorHandler {
  */
 export const displayWindowConfig: ApplicationConfig = {
   providers: [
+    { provide: PTAH_CLOCK, useExisting: ClockService },
     provideBrowserGlobalErrorListeners(),
     useZoneChangeDetectionFallback() ? provideZoneChangeDetection() : provideZonelessChangeDetection(),
     { provide: ErrorHandler, useClass: DisplayWindowErrorHandler },

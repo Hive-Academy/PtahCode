@@ -10,7 +10,11 @@ import {
   LucideAngularModule,
   RefreshCw,
 } from 'lucide-angular';
-import { BrandMarkComponent, PtahButtonDirective } from '@ptah-extension/ui';
+import {
+  BrandMarkComponent,
+  PtahButtonDirective,
+  PtahCheckboxDirective,
+} from '@ptah-extension/ui';
 
 import { PTAH_SESSIONS_LABEL } from '../data/coverage';
 import type { ProviderRow } from '../data/provider-row';
@@ -67,6 +71,7 @@ const SKELETON_CARDS = [0, 1, 2] as const;
   standalone: true,
   imports: [
     PtahButtonDirective,
+    PtahCheckboxDirective,
     LucideAngularModule,
     BrandMarkComponent,
     RemovalLockBadgeComponent,
@@ -182,7 +187,9 @@ const SKELETON_CARDS = [0, 1, 2] as const;
                   <input
                     #cardBox
                     type="checkbox"
-                    class="checkbox checkbox-xs relative z-10 mt-1"
+                    ptahCheckbox
+                    size="xs"
+                    class="relative z-10 mt-1"
                     data-testid="provider-card-checkbox"
                     [attr.aria-label]="checkboxLabel(row)"
                     [attr.title]="isSelectable(row) ? null : checkboxLabel(row)"
