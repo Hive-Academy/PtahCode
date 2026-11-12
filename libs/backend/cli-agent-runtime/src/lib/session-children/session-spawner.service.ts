@@ -21,7 +21,7 @@
 import { inject, injectable, type DependencyContainer } from 'tsyringe';
 import type { ProviderAccountPortRefusal } from '@ptah-extension/auth-providers-tokens';
 import { isAbsolute, resolve } from 'node:path';
-import { access, realpath } from 'node:fs/promises';
+import { access, readFile, realpath } from 'node:fs/promises';
 import {
   SDK_TOKENS,
   SessionAdmissionRefusedError,
@@ -371,10 +371,21 @@ export class SessionSpawnerService implements ISessionSpawner {
       [caller, callerSdkId],
       request.branch?.trim() ?? '',
     );
-    if (
-      existing &&
-      (!request.attachToSessionId || existing.taskId === request.taskId)
-    ) {
+    if (existing && request.attachToSessionId) {
+      if (existing.childSessionId !== request.attachToSessionId) {
+        return this.refuseStart(
+          'branch-exists',
+          `attach target ${request.attachToSessionId} does not match existing child ${existing.childSessionId} on this branch`,
+        );
+      }
+      if (existing.taskId !== request.taskId) {
+        return this.refuseStart(
+          'branch-exists',
+          'attach requires the same taskId as the existing child',
+        );
+      }
+    }
+    if (existing) {
       this.log(
         `start for ${caller} on ${existing.branch} returns existing child ${existing.childSessionId}`,
       );
@@ -458,6 +469,29 @@ export class SessionSpawnerService implements ISessionSpawner {
     const paths = resolveChildPaths(plannedPath, request);
     if (!paths.ok) return this.refuseStart('invalid-arguments', paths.detail);
 
+    const skillPrompts: string[] = [];
+    for (const skill of request.skills ?? request.phase?.skills ?? []) {
+      if (skill.text !== undefined) {
+        skillPrompts.push(`Skill ${skill.name}:\n${skill.text}`);
+        continue;
+      }
+      if (!skill.path?.trim()) {
+        return this.refuseStart(
+          'invalid-arguments',
+          `Skill ${skill.name} delivery unavailable: no text or path was provided`,
+        );
+      }
+      const skillPath = resolve(root, skill.path);
+      try {
+        skillPrompts.push(`Skill ${skill.name}:\n${await readFile(skillPath, 'utf8')}`);
+      } catch (error: unknown) {
+        return this.refuseStart(
+          'invalid-arguments',
+          `Skill ${skill.name} delivery unavailable: cannot read ${skillPath}: ${errorMessage(error)}`,
+        );
+      }
+    }
+
     this.registry.addPending(
       this.pendingRecordOf(childTabId, request, guard, {
         root,
@@ -472,6 +506,7 @@ export class SessionSpawnerService implements ISessionSpawner {
       branch,
       task,
       paths,
+      skillPrompts,
     });
     this.pendingStarts.set(childTabId, run);
     try {
@@ -529,7 +564,7 @@ export class SessionSpawnerService implements ISessionSpawner {
     childTabId: string,
     request: SessionChildStartRequest,
     guard: StartGuardPass,
-    { root, branch, task, paths }: PreparedStart,
+    { root, branch, task, paths, skillPrompts }: PreparedStart & { readonly skillPrompts: readonly string[] },
   ): Promise<SessionChildStartResult> {
     // After the cheap argument checks, still before any git work: a refused
     // model leaves no worktree, branch or registry record behind.
@@ -720,11 +755,7 @@ export class SessionSpawnerService implements ISessionSpawner {
           contract,
           [
             request.phase?.text,
-            ...(request.skills ?? request.phase?.skills ?? []).map((skill) =>
-              skill.text
-                ? `Skill ${skill.name}:\n${skill.text}`
-                : `Skill ${skill.name}: ${skill.path}`,
-            ),
+            ...skillPrompts,
             task,
           ]
             .filter(Boolean)

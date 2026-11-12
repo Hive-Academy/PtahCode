@@ -411,6 +411,39 @@ describe('registered same-task attach', () => {
     );
     h.spawner.dispose();
   });
+  it('reads a path-only skill before starting the host session', async () => {
+    const h = makeHarness();
+    const directory = mkdtempSync(join(tmpdir(), 'ptah-skill-'));
+    const skillPath = join(directory, 'SKILL.md');
+    try {
+      writeFileSync(skillPath, 'Run the focused check.');
+      const result = await h.spawner.start(
+        h.request({ skills: [{ name: 'coding', path: skillPath }] }),
+      );
+      expect(result.ok).toBe(true);
+      expect(h.host.startChildSession.mock.calls[0][0].prompt).toContain(
+        'Skill coding:\nRun the focused check.',
+      );
+    } finally {
+      h.spawner.dispose();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+  it('refuses an unavailable skill path before host dispatch', async () => {
+    const h = makeHarness();
+    const skillPath = join(tmpdir(), `missing-skill-${randomUUID()}.md`);
+    const result = await h.spawner.start(
+      h.request({ skills: [{ name: 'coding', path: skillPath }] }),
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      refusal: 'invalid-arguments',
+      detail: expect.stringContaining('Skill coding delivery unavailable'),
+    });
+    expect(h.host.startChildSession).not.toHaveBeenCalled();
+    expect(h.provisioner.create).not.toHaveBeenCalled();
+    h.spawner.dispose();
+  });
   it('starts two separate sessions on one branch and worktree', async () => {
     const h = makeHarness();
     const first = await h.spawner.start(h.request({ taskId: 'TASK_2026_584' }));
@@ -433,6 +466,31 @@ describe('registered same-task attach', () => {
     expect(h.provisioner.create).toHaveBeenCalledTimes(1);
     expect(h.provisioner.attach).toHaveBeenCalledTimes(1);
     expect(h.registry.findByCwd(first.child.worktreePath)).toBeUndefined();
+    h.spawner.dispose();
+  });
+  it('refuses an attach retry with a different target ID', async () => {
+    const h = makeHarness();
+    const first = await h.spawner.start(h.request({ taskId: 'TASK_2026_584' }));
+    if (!first.ok) throw new Error('first start failed');
+    h.active.add(OTHER);
+    const attach = h.request({
+      callerSessionId: OTHER,
+      taskId: 'TASK_2026_584',
+      attachToSessionId: first.child.childSessionId,
+    });
+    const second = await h.spawner.start(attach);
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    const wrongTarget = await h.spawner.start({
+      ...attach,
+      attachToSessionId: randomUUID(),
+    });
+    expect(wrongTarget).toMatchObject({
+      ok: false,
+      refusal: 'branch-exists',
+      detail: expect.stringContaining('does not match existing child'),
+    });
+    expect(h.host.startChildSession).toHaveBeenCalledTimes(2);
     h.spawner.dispose();
   });
 
