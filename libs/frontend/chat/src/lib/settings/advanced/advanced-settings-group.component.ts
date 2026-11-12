@@ -19,12 +19,10 @@ import {
   type AdvancedSettingGroupId,
   type AdvancedSettingValidation,
 } from '@ptah-extension/shared';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahInputDirective, PtahToggleDirective } from '@ptah-extension/ui';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 
-const FOCUS =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
 const NUMBER_FORMAT = new Intl.NumberFormat('en-US');
 /**
  * A missing host response must reveal Retry instead of leaving the group busy. It bounds both the `rpcCall`
@@ -75,7 +73,7 @@ function formatValue(
 @Component({
   selector: 'ptah-advanced-settings-group',
   standalone: true,
-  imports: [PtahButtonDirective, SettingsBusyDisabledDirective],
+  imports: [PtahButtonDirective, PtahInputDirective, PtahToggleDirective, SettingsBusyDisabledDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (group(); as group) {
@@ -151,15 +149,13 @@ function formatValue(
                     >
                       <input
                         type="checkbox"
+                        ptahToggle size="sm"
                         [id]="'advanced-setting-' + setting.key"
-                        [class]="'toggle toggle-sm toggle-primary ' + focusRing"
                         [checked]="booleanValue(setting)"
                         [ptahBusyDisabled]="busy()"
                         (change)="toggle(setting, $event)"
                         [attr.aria-label]="setting.label"
-                        [attr.aria-invalid]="
-                          errors()[setting.key] ? 'true' : null
-                        "
+                        [attr.aria-invalid]="errors()[setting.key] ? 'true' : null"
                         [attr.aria-describedby]="describedBy(setting)"
                         [attr.data-testid]="'advanced-setting-' + setting.key"
                       />
@@ -187,19 +183,14 @@ function formatValue(
                     <div class="join flex w-full">
                       <input
                         type="text"
+                        ptahInput size="sm"
                         [id]="'advanced-setting-' + setting.key"
                         [attr.inputmode]="
                           setting.integer ? 'numeric' : 'decimal'
                         "
-                        [class]="
-                          'input input-bordered input-sm join-item min-w-0 flex-1 text-right text-sm tabular-nums text-base-content ' +
-                          (errors()[setting.key] ? errorBorder + ' ' : '') +
-                          focusRing
-                        "
+                        class="join-item min-w-0 flex-1 text-right text-sm tabular-nums text-base-content"
+                        [invalid]="!!errors()[setting.key]"
                         [value]="numberText(setting)"
-                        [attr.aria-invalid]="
-                          errors()[setting.key] ? 'true' : null
-                        "
                         [attr.aria-describedby]="describedBy(setting)"
                         [ptahBusyDisabled]="busy()"
                         (input)="edit(setting, $event)"
@@ -278,13 +269,6 @@ export class AdvancedSettingsGroupComponent implements OnInit {
 
   readonly groupId = input.required<AdvancedSettingGroupId>();
 
-  protected readonly focusRing = FOCUS;
-  /**
-   * The anubis-light `.input` rule in styles.css sets the border at (0,2,0), which beats daisyUI's `input-error`,
-   * so the error border is forced. It uses the measured `--ptah-error-ink` and falls back to the theme's error.
-   */
-  protected readonly errorBorder =
-    'input-error !border-[color:var(--ptah-error-ink,oklch(var(--er)))]';
   protected readonly restartBadge =
     'badge badge-outline badge-sm whitespace-nowrap border-info/30 bg-info/10 text-xs font-medium text-base-content';
 

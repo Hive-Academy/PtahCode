@@ -24,7 +24,7 @@ import { LucideAngularModule, Check, Star, Cpu } from 'lucide-angular';
 import { LlmProviderStateService } from '@ptah-extension/core';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahSelectDirective } from '@ptah-extension/ui';
 
 export const COULD_NOT_SAVE_LM_MODEL = 'Could not save the VS Code language model.';
 export const COULD_NOT_SET_DEFAULT_PROVIDER = 'Could not set the default provider.';
@@ -32,7 +32,7 @@ export const COULD_NOT_SET_DEFAULT_PROVIDER = 'Could not set the default provide
 @Component({
   selector: 'ptah-vscode-lm-config',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective, PtahSelectDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -93,7 +93,7 @@ export const COULD_NOT_SET_DEFAULT_PROVIDER = 'Could not set the default provide
           @if (vsCodeModels().length > 0) {
             <select
               id="vscode-lm-model"
-              class="select select-bordered select-xs flex-1 min-w-0 max-w-[260px] text-xs truncate text-base-content"
+              ptahSelect size="xs" class="flex-1 min-w-0 max-w-[260px] text-xs truncate text-base-content"
               [value]="currentModelId()"
               (change)="onVsCodeModelSelectEvent($event)"
               [ptahBusyDisabled]="saving() || savingModel()"

@@ -11,13 +11,13 @@
 
 import { ChangeDetectionStrategy, Component, computed, model, signal, type AnimationCallbackEvent } from '@angular/core';
 import { LucideAngularModule, AlertTriangle } from 'lucide-angular';
-import { MotionStageDirective, NativeTabGroupComponent, type NativeTab } from '@ptah-extension/ui';
+import { MotionStageDirective, NativeTabGroupComponent, PtahFieldComponent, PtahTextareaDirective, PtahToggleDirective, type NativeTab } from '@ptah-extension/ui';
 import { MarkdownBlockComponent } from '@ptah-extension/markdown';
 
 @Component({
   selector: 'ptah-output-style-instructions-field',
   standalone: true,
-  imports: [LucideAngularModule, MotionStageDirective, NativeTabGroupComponent, MarkdownBlockComponent],
+  imports: [LucideAngularModule, MotionStageDirective, NativeTabGroupComponent, PtahFieldComponent, PtahTextareaDirective, PtahToggleDirective, MarkdownBlockComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Block host: the editor form's space-y-3 sets a top margin, which an inline host ignores.
   host: { class: 'block' },
@@ -33,7 +33,7 @@ import { MarkdownBlockComponent } from '@ptah-extension/markdown';
           </span>
           <input
             type="checkbox"
-            class="toggle toggle-xs toggle-primary"
+            ptahToggle size="xs"
             [checked]="keepCodingInstructions()"
             (change)="onKeepInstructionsChange($event)"
             aria-label="Keep the default coding instructions"
@@ -69,9 +69,9 @@ import { MarkdownBlockComponent } from '@ptah-extension/markdown';
       <!-- Body / Instructions with NativeTabGroupComponent (Gap G6) -->
       <div>
         <div class="flex items-center justify-between mb-1">
-          <label class="text-xs font-medium text-base-content" for="output-style-body">
-            Instructions
-          </label>
+          @if (showPreview()) {
+            <span class="text-xs font-medium text-base-content">Instructions</span>
+          }
           <ptah-native-tab-group
             [tabs]="editorTabs"
             [activeId]="activeTab()"
@@ -97,14 +97,17 @@ import { MarkdownBlockComponent } from '@ptah-extension/markdown';
           </div>
         } @else {
           <div class="ptah-motion-panel" animate.enter="ptah-motion-enter" [animate.leave]="leaveEditorPanel">
+          <ptah-field label="Instructions" appearance="stacked">
           <textarea
+            ptahTextarea tone="mono"
             id="output-style-body"
             rows="5"
-            class="textarea textarea-bordered w-full text-xs font-mono leading-relaxed text-base-content"
+            class="w-full text-xs leading-relaxed text-base-content"
             placeholder="Write in short sentences. Prefer plain words over jargon."
             [value]="body()"
             (input)="onBodyInput($event)"
           ></textarea>
+          </ptah-field>
           </div>
         }
         </div>

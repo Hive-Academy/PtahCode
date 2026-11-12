@@ -43,7 +43,7 @@ import type {
 } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahCheckboxDirective } from '@ptah-extension/ui';
 
 export const COULD_NOT_LOAD_CLAUDE_BUILTINS =
   'Could not load the Claude Code tool and skill settings.';
@@ -72,7 +72,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
 @Component({
   selector: 'ptah-claude-builtins-config',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective, PtahCheckboxDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -148,7 +148,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
                     <td class="align-top">
                       <input
                         type="checkbox"
-                        class="checkbox checkbox-xs checkbox-primary"
+                        ptahCheckbox size="xs"
                         [checked]="isToolOn(tool.id)"
                         (change)="toggle('tool', tool.id, $event)"
                         [ptahBusyDisabled]="saving() || !loaded()"
@@ -170,7 +170,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
                 @for (row of skeletonRows; track row) {
                   <tr data-testid="claude-tools-skeleton-row">
                     <td class="align-top">
-                      <input type="checkbox" class="checkbox checkbox-xs checkbox-primary" disabled
+                      <input type="checkbox" ptahCheckbox size="xs" disabled
                         aria-label="Loading tool" />
                     </td>
                     <td colspan="4"><div class="skeleton h-4 w-full"></div></td>
@@ -204,7 +204,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
                     <td class="align-top">
                       <input
                         type="checkbox"
-                        class="checkbox checkbox-xs checkbox-primary"
+                        ptahCheckbox size="xs"
                         [checked]="isSkillOn(skill.id)"
                         (change)="toggle('skill', skill.id, $event)"
                         [ptahBusyDisabled]="saving() || !loaded()"
@@ -236,7 +236,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
                 @for (row of skeletonRows; track row) {
                   <tr data-testid="claude-tools-skeleton-row">
                     <td class="align-top">
-                      <input type="checkbox" class="checkbox checkbox-xs checkbox-primary" disabled
+                      <input type="checkbox" ptahCheckbox size="xs" disabled
                         aria-label="Loading skill" />
                     </td>
                     <td colspan="4"><div class="skeleton h-4 w-full"></div></td>
@@ -280,7 +280,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
                       <td class="align-top">
                         <input
                           type="checkbox"
-                          class="checkbox checkbox-xs checkbox-primary"
+                          ptahCheckbox size="xs"
                           [checked]="isSkillOn(skill.id)"
                           (change)="toggle('skill', skill.id, $event, skillName(skill))"
                           [ptahBusyDisabled]="saving() || !loaded()"
@@ -301,7 +301,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
                   @for (row of skeletonRows; track row) {
                     <tr data-testid="claude-tools-skeleton-row">
                       <td class="align-top">
-                        <input type="checkbox" class="checkbox checkbox-xs checkbox-primary" disabled
+                        <input type="checkbox" ptahCheckbox size="xs" disabled
                           aria-label="Loading skill" />
                       </td>
                       <td colspan="3"><div class="skeleton h-4 w-full"></div></td>

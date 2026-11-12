@@ -637,15 +637,9 @@
     "btn-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/advanced/advanced-settings-group.component.ts": {
-    "<dynamic>": 4,
+    "<dynamic>": 2,
     "btn": 1,
-    "btn-sm": 1,
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1,
-    "toggle": 1,
-    "toggle-primary": 1,
-    "toggle-sm": 1
+    "btn-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/advanced/codex-sandbox-setting.component.ts": {
     "<dynamic>": 2,
@@ -664,26 +658,12 @@
     "badge-sm": 4,
     "btn": 1,
     "btn-outline": 1,
-    "btn-sm": 1,
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1
+    "btn-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/output-style/output-style-editor.component.ts": {
     "btn": 4,
     "btn-outline": 4,
-    "btn-xs": 4,
-    "input": 2,
-    "input-bordered": 2,
-    "input-error": 2,
-    "input-sm": 2
-  },
-  "libs/frontend/chat/src/lib/settings/output-style/output-style-instructions-field.component.ts": {
-    "textarea": 1,
-    "textarea-bordered": 1,
-    "toggle": 1,
-    "toggle-primary": 1,
-    "toggle-xs": 1
+    "btn-xs": 4
   },
   "libs/frontend/chat/src/lib/settings/output-style/output-style-list.component.ts": {
     "badge": 4,
@@ -703,13 +683,7 @@
   "libs/frontend/chat/src/lib/settings/output-style/output-style-parity-section.component.ts": {
     "btn": 1,
     "btn-outline": 1,
-    "btn-xs": 1,
-    "checkbox": 1,
-    "checkbox-primary": 1,
-    "checkbox-xs": 1,
-    "select": 1,
-    "select-bordered": 1,
-    "select-xs": 1
+    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/pro-features/agent-behaviour-section.component.ts": {
     "badge": 1,
@@ -718,10 +692,7 @@
     "btn": 1,
     "btn-outline": 1,
     "btn-primary": 1,
-    "btn-xs": 1,
-    "checkbox": 3,
-    "checkbox-primary": 3,
-    "checkbox-xs": 3
+    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/pro-features/claude-builtins-config.component.ts": {
     "badge": 4,
@@ -729,9 +700,6 @@
     "badge-warning": 1,
     "badge-xs": 4,
     "card": 1,
-    "checkbox": 6,
-    "checkbox-primary": 6,
-    "checkbox-xs": 6,
     "skeleton": 3
   },
   "libs/frontend/chat/src/lib/settings/pro-features/mcp-port-config.component.ts": {
@@ -740,16 +708,7 @@
     "badge-xs": 1,
     "btn": 1,
     "btn-outline": 1,
-    "btn-xs": 1,
-    "checkbox": 2,
-    "checkbox-primary": 2,
-    "checkbox-xs": 2,
-    "input": 1,
-    "input-bordered": 1,
-    "input-xs": 1,
-    "select": 1,
-    "select-bordered": 1,
-    "select-xs": 1
+    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/pro-features/system-prompt-drawer.component.ts": {
     "btn": 1,
@@ -759,10 +718,7 @@
   "libs/frontend/chat/src/lib/settings/pro-features/vscode-lm-config.component.ts": {
     "badge": 3,
     "badge-outline": 3,
-    "badge-xs": 3,
-    "select": 1,
-    "select-bordered": 1,
-    "select-xs": 1
+    "badge-xs": 3
   },
   "libs/frontend/chat/src/lib/settings/providers/accounts/account-detail-view.component.ts": {
     "<dynamic>": 5,

@@ -15,7 +15,7 @@ import {
   Sparkles,
 } from 'lucide-angular';
 import { ClaudeRpcService, EffortStateService, WorkspaceScopeService } from '@ptah-extension/core';
-import { NativePopoverComponent, PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
+import { NativePopoverComponent, PtahButtonDirective, PtahCheckboxDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 import type {
   EffortLevel,
   EnhancedPromptsGetStatusResponse,
@@ -87,7 +87,7 @@ interface LoadError {
 @Component({
   selector: 'ptah-agent-behaviour-section',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NativePopoverComponent, SystemPromptDrawerComponent, PtahButtonDirective, PtahIconButtonDirective],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NativePopoverComponent, SystemPromptDrawerComponent, PtahButtonDirective, PtahCheckboxDirective, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -130,7 +130,7 @@ interface LoadError {
             <!-- A10/A11: System prompt mode -->
             <tr data-testid="agent-behaviour-row-prompt">
               <td class="align-top">
-                <input type="checkbox" class="checkbox checkbox-xs checkbox-primary"
+                <input type="checkbox" ptahCheckbox size="xs"
                   [checked]="promptEnabled()" [ptahBusyDisabled]="promptToggleDisabled() || saving()"
                   (change)="onPromptModeChange($event)"
                   aria-label="Toggle Enhanced System Prompt" aria-describedby="agent-behaviour-prompt-note" />
@@ -208,7 +208,7 @@ interface LoadError {
             <!-- A27: Dynamic workflows (PR-2: the "paid plan" sentence is removed) -->
             <tr data-testid="agent-behaviour-row-workflows">
               <td class="align-top">
-                <input type="checkbox" class="checkbox checkbox-xs checkbox-primary"
+                <input type="checkbox" ptahCheckbox size="xs"
                   [checked]="workflowsEnabled()" [ptahBusyDisabled]="!workflowsLoaded() || saving()"
                   (change)="onWorkflowsChange($event)" aria-label="Toggle dynamic workflows"
                   aria-describedby="agent-behaviour-workflows-note" />
@@ -233,7 +233,7 @@ interface LoadError {
             <!-- A29: Ultracode (restores the previous effort when turned off) -->
             <tr data-testid="agent-behaviour-row-ultracode">
               <td class="align-top">
-                <input type="checkbox" class="checkbox checkbox-xs checkbox-primary"
+                <input type="checkbox" ptahCheckbox size="xs"
                   [checked]="ultracode.enabled()" [ptahBusyDisabled]="saving()"
                   (change)="onUltracodeChange($event)" aria-label="Toggle Ultracode mode"
                   aria-describedby="agent-behaviour-ultracode-note" />

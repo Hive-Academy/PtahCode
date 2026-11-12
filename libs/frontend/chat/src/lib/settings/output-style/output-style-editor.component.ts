@@ -35,7 +35,7 @@ import {
   AlertTriangle,
   Palette,
 } from 'lucide-angular';
-import { NativeDrawerComponent, PtahButtonDirective } from '@ptah-extension/ui';
+import { NativeDrawerComponent, PtahButtonDirective, PtahFieldComponent, PtahInputDirective } from '@ptah-extension/ui';
 import type {
   InvalidOutputStyle,
   OutputStyleDetail,
@@ -89,6 +89,8 @@ interface StaleConflict {
     NativeDrawerComponent,
     OutputStyleInstructionsFieldComponent,
     PtahButtonDirective,
+    PtahFieldComponent,
+    PtahInputDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -207,29 +209,25 @@ interface StaleConflict {
         <form class="space-y-3" id="output-style-editor-form" (submit)="submit($event)">
           <!-- Name -->
           <div>
-            <label
-              class="block text-xs font-medium mb-1 text-base-content"
-              for="output-style-name"
-            >
-              Name
-            </label>
+            <ptah-field label="Name">
             <input
+              ptahInput
               id="output-style-name"
               type="text"
               autocomplete="off"
-              class="input input-bordered input-sm w-full text-xs text-base-content"
-              [class.input-error]="showNameError()"
+              class="w-full text-xs text-base-content"
+              [invalid]="showNameError()"
               placeholder="Simplified Technical English"
               [value]="name()"
               (input)="onNameInput($event)"
               (blur)="nameTouched.set(true)"
-              [attr.aria-invalid]="showNameError()"
               [attr.aria-describedby]="
                 showNameError()
                   ? 'output-style-name-error'
                   : 'output-style-name-hint'
               "
             />
+            </ptah-field>
             @if (showNameError()) {
               <p id="output-style-name-error" class="flex items-start gap-1 text-xs text-base-content mt-1">
                 <lucide-angular [img]="AlertCircleIcon" class="w-3.5 h-3.5 mt-px shrink-0 text-error" aria-hidden="true" />
@@ -251,25 +249,21 @@ interface StaleConflict {
 
           <!-- Description -->
           <div>
-            <label
-              class="block text-xs font-medium mb-1 text-base-content"
-              for="output-style-description"
-            >
-              Description
-            </label>
+            <ptah-field label="Description">
             <input
+              ptahInput
               id="output-style-description"
               type="text"
               autocomplete="off"
-              class="input input-bordered input-sm w-full text-xs text-base-content"
-              [class.input-error]="showDescriptionError()"
+              class="w-full text-xs text-base-content"
+              [invalid]="showDescriptionError()"
               placeholder="Short sentences, plain words, no marketing language."
               [value]="description()"
               (input)="onDescriptionInput($event)"
               (blur)="descriptionTouched.set(true)"
-              [attr.aria-invalid]="showDescriptionError()"
               [attr.aria-describedby]="showDescriptionError() ? 'output-style-description-error' : null"
             />
+            </ptah-field>
             @if (showDescriptionError()) {
               <p id="output-style-description-error" class="flex items-start gap-1 text-xs text-base-content mt-1">
                 <lucide-angular [img]="AlertCircleIcon" class="w-3.5 h-3.5 mt-px shrink-0 text-error" aria-hidden="true" />

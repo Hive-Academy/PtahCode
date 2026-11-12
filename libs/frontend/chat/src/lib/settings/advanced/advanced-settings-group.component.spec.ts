@@ -377,20 +377,17 @@ describe('AdvancedSettingsGroupComponent', () => {
       expect(writes()).toEqual([]);
     });
 
-    it('styles and announces a client error, with a forced error border', async () => {
+    it('styles and announces a client error, with aria-invalid', async () => {
       await create('memory-upkeep');
       const input = field('memory.retention.processedDays');
-      expect(input.classList).not.toContain('input-error');
+      expect(input.getAttribute('aria-invalid')).toBeNull();
       await enter('memory.retention.processedDays', '0');
       const error = byTestId(
         'advanced-setting-memory.retention.processedDays-error',
       );
       expect(error?.getAttribute('role')).toBe('alert');
       expect(error?.classList).toContain('text-error');
-      expect(input.classList).toContain('input-error');
-      expect(input.classList).toContain(
-        '!border-[color:var(--ptah-error-ink,oklch(var(--er)))]',
-      );
+      expect(input.getAttribute('aria-invalid')).toBe('true');
     });
 
     it('a surviving numeric setting accepts an integer and shows its unit suffix', async () => {
