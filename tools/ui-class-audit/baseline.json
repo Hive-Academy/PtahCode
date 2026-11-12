@@ -1073,8 +1073,10 @@
     "btn-xs": 4
   },
   "libs/frontend/notification-center/src/lib/notification-center.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
+    "btn": 3,
+    "btn-ghost": 3,
+    "btn-primary": 1,
+    "btn-sm": 2,
     "btn-square": 1
   },
   "libs/frontend/notification-center/src/lib/notification-snackbar.component.ts": {
