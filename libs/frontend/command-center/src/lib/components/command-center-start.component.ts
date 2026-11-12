@@ -19,6 +19,7 @@ import {
   ProviderMarkComponent,
   PROVIDER_BRAND_SLUGS,
   PROVIDER_MARKS,
+  PtahBadgeDirective,
   PtahButtonDirective,
 } from '@ptah-extension/ui';
 import { relativeTime } from './command-relative-time';
@@ -27,7 +28,7 @@ import { History, Plus, Play, LucideAngularModule } from 'lucide-angular';
 @Component({
   selector: 'ptah-command-center-start',
   standalone: true,
-  imports: [MonogramTileComponent, ProviderMarkComponent, LucideAngularModule, PtahButtonDirective],
+  imports: [MonogramTileComponent, ProviderMarkComponent, LucideAngularModule, PtahButtonDirective, PtahBadgeDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: `
     :host-context([data-glass='on']) section[data-glass-surface='content'] {
@@ -98,7 +99,7 @@ import { History, Plus, Play, LucideAngularModule } from 'lucide-angular';
             [disabled]="choosing()"
             (click)="current.emit()"
           >
-            <span class="badge badge-primary">Current</span>
+            <span ptahBadge tone="accent">Current</span>
             <lucide-angular [img]="playIcon" class="size-4" aria-hidden="true" />
             <span class="min-w-0 flex-1">
               <span class="block truncate font-semibold">{{
@@ -120,7 +121,7 @@ import { History, Plus, Play, LucideAngularModule } from 'lucide-angular';
             @if (
               currentSessionId() && currentSessionId() === recordedSessionId()
             ) {
-              <span class="badge badge-outline">Command Center</span>
+              <span ptahBadge appearance="outline">Command Center</span>
             }
             @if (currentSession(); as session) {
               <span class="text-sm text-base-content-muted">{{
@@ -180,7 +181,7 @@ import { History, Plus, Play, LucideAngularModule } from 'lucide-angular';
                 }
               </span>
               @if (session.id === recordedSessionId()) {
-                <span class="badge badge-outline">Command Center</span>
+                <span ptahBadge appearance="outline">Command Center</span>
               }
             </button>
           }

@@ -16,14 +16,14 @@ import {
   input,
   signal,
 } from '@angular/core';
-import { ProviderMarkComponent } from '@ptah-extension/ui';
+import { PtahBadgeDirective, ProviderMarkComponent } from '@ptah-extension/ui';
 import { type DayBreakdownRow, type ModelBreakdownRow } from './usage-summary.view-model';
 import { formatCompactTokens, formatDayShort, formatPercent, formatUsd, providerDisplayName } from './usage-formatting';
 
 @Component({
   selector: 'ptah-usage-breakdown-table',
   standalone: true,
-  imports: [ProviderMarkComponent],
+  imports: [ProviderMarkComponent, PtahBadgeDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="flex flex-col gap-2" data-testid="usage-breakdown">
@@ -79,7 +79,7 @@ import { formatCompactTokens, formatDayShort, formatPercent, formatUsd, provider
                       <span class="truncate" [attr.title]="row.modelDisplayName">
                         {{ row.modelDisplayName }}
                       </span>
-                      <span class="badge badge-ghost badge-xs text-[10px] text-base-content-muted">
+                      <span ptahBadge size="xs" class="text-[10px]">
                         {{ providerName(row.providerId) }}
                       </span>
                     </div>

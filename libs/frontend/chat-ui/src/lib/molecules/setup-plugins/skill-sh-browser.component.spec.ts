@@ -537,9 +537,9 @@ describe('SkillShBrowserComponent', () => {
       card.querySelector('[data-testid="skill-scope-badge"]'),
     );
     expect(badges[0]?.textContent?.trim()).toBe('This workspace');
-    expect(badges[0]?.classList.contains('border-warning')).toBe(false);
+    expect(badges[0]?.getAttribute('data-tone')).toBe('neutral');
     expect(badges[1]?.textContent?.trim()).toBe('All workspaces');
-    expect(badges[1]?.classList.contains('border-warning')).toBe(true);
+    expect(badges[1]?.getAttribute('data-tone')).toBe('warn');
   });
 
   describe('Remove on an installed result card', () => {

@@ -200,7 +200,7 @@ describe('plugin catalog panel — per-workspace skill selection', () => {
     // An ordinary row: a plain checkbox, ticked/untickable like any other —
     // and specifically NO plugin-id badge, since `pluginId` is null.
     expect(row?.querySelector('input[type="checkbox"]')).not.toBeNull();
-    expect(row?.querySelectorAll('.badge')).toHaveLength(0);
+    expect(row?.querySelectorAll('[data-ptah-badge]')).toHaveLength(0);
   });
 
   it('sends mode: "all" with no slugs when the user switches to All of them', async () => {

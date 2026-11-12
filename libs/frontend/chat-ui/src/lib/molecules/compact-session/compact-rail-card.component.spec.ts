@@ -113,7 +113,7 @@ describe(CompactRailCardComponent.name, () => {
     });
     f.detectChanges();
     const badges = () =>
-      [...(f.nativeElement as HTMLElement).querySelectorAll('.badge')].map(
+      [...(f.nativeElement as HTMLElement).querySelectorAll('[data-ptah-badge]')].map(
         (b) => b.textContent?.trim(),
       );
     expect(badges()).toEqual(['2 agents', '1 CLI', '35% ctx']);

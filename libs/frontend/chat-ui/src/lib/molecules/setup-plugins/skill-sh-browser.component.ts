@@ -19,6 +19,7 @@ import {
   CatalogCardSkeletonComponent,
   CatalogGridComponent,
   MonogramTileComponent,
+  PtahBadgeDirective,
   PtahButtonDirective,
   StorefrontPanelComponent,
   type CatalogCardBadge,
@@ -127,6 +128,7 @@ const SCOPE_BADGE_LABELS: Readonly<Record<InstalledSkill['scope'], string>> = {
     CatalogGridComponent,
     MonogramTileComponent,
     StorefrontPanelComponent,
+    PtahBadgeDirective,
     PtahButtonDirective,
     InstallScopeFieldComponent,
   ],
@@ -265,8 +267,8 @@ const SCOPE_BADGE_LABELS: Readonly<Record<InstalledSkill['scope'], string>> = {
         <div card-actions>
           @if (installedRecord(skill); as record) {
             <span
-              class="badge badge-outline badge-sm"
-              [class.border-warning]="record.scope === 'global'"
+              ptahBadge size="sm" appearance="outline"
+              [tone]="record.scope === 'global' ? 'warn' : 'neutral'"
               data-testid="skill-scope-badge"
               >{{ scopeBadgeLabel(record) }}</span
             >

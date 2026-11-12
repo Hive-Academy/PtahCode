@@ -5,6 +5,7 @@ import {
   input,
   output,
 } from '@angular/core';
+import { PtahBadgeDirective } from '@ptah-extension/ui';
 import type {
   CompactGitState,
   CompactLinkedTask,
@@ -29,6 +30,7 @@ const COMPACT_COUNT = new Intl.NumberFormat('en', {
 @Component({
   selector: 'ptah-compact-rail-meta',
   standalone: true,
+  imports: [PtahBadgeDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     class:
@@ -81,7 +83,7 @@ const COMPACT_COUNT = new Intl.NumberFormat('en', {
       :host(.rc-meta-dense) {
         gap: 3px;
       }
-      :host(.rc-meta-dense) .badge.rc-chip {
+      :host(.rc-meta-dense) [data-ptah-badge].rc-chip {
         padding: 0 3px;
       }
     `,
@@ -128,25 +130,25 @@ const COMPACT_COUNT = new Intl.NumberFormat('en', {
     }
     @if (agentCount() > 0) {
       <span
-        class="badge badge-xs badge-outline rc-chip"
+        ptahBadge size="xs" appearance="outline" class="rc-chip"
         [title]="agentLabel()"
         [attr.aria-label]="agentLabel()"
-        >{{ dense() ? agentCount() + ' ag' : agentLabel() }}</span
+        ><span class="ptah-badge-text">{{ dense() ? agentCount() + ' ag' : agentLabel() }}</span></span
       >
     }
     @if (lanes().kinds.cli; as count) {
       <span
-        class="badge badge-xs badge-outline rc-chip"
+        ptahBadge size="xs" appearance="outline" class="rc-chip"
         [title]="count + ' CLI'"
-        >{{ count }} CLI</span
+        ><span class="ptah-badge-text">{{ count }} CLI</span></span
       >
     }
     @if (roundedContextPercent() !== null) {
       <span
-        class="badge badge-xs badge-outline rc-chip"
+        ptahBadge size="xs" appearance="outline" class="rc-chip"
         [attr.aria-label]="roundedContextPercent() + '% context used'"
         [title]="roundedContextPercent() + '% context used'"
-        >{{ roundedContextPercent() }}%{{ dense() ? '' : ' ctx' }}</span
+        ><span class="ptah-badge-text">{{ roundedContextPercent() }}%{{ dense() ? '' : ' ctx' }}</span></span
       >
     }
     <span class="ml-auto shrink-0 tabular-nums" [title]="gitTooltip()">{{

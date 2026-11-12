@@ -24,6 +24,7 @@ import {
   CatalogCardSkeletonComponent,
   CatalogGridComponent,
   MonogramTileComponent,
+  PtahBadgeDirective,
   PtahButtonDirective,
   type CatalogCardBadge,
 } from '@ptah-extension/ui';
@@ -200,6 +201,7 @@ function skillSelectionKey(
     CatalogCardSkeletonComponent,
     CatalogGridComponent,
     MonogramTileComponent,
+    PtahBadgeDirective,
     PtahButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -395,7 +397,7 @@ function skillSelectionKey(
                     }
                   </span>
                   @if (candidate.pluginId) {
-                    <span class="badge badge-xs badge-ghost shrink-0">{{
+                    <span ptahBadge tone="neutral" size="xs" class="shrink-0">{{
                       candidate.pluginId
                     }}</span>
                   }

@@ -27,7 +27,7 @@ describe('ProviderLaneLimitTileComponent', () => {
     expect(root.querySelectorAll('progress')).toHaveLength(3);
     expect(root.querySelector('select, button')).toBeNull();
     expect(root.textContent).not.toMatch(/Less detail|More detail/);
-    expect(root.querySelectorAll('.badge-ghost')).toHaveLength(1);
+    expect(root.querySelectorAll('[data-ptah-badge][data-size="xs"]')).toHaveLength(1);
     expect(root.querySelector('progress')?.getAttribute('aria-label')).toBe('Kimi Code Monthly code usage');
   });
   it('shows untracked provider state', () => {

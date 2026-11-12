@@ -6,6 +6,7 @@ import {
   output,
   viewChildren,
 } from '@angular/core';
+import { PtahBadgeDirective } from '@ptah-extension/ui';
 
 export type CommandRailTab = 'live' | 'work' | 'stats' | 'display';
 
@@ -37,6 +38,7 @@ export function railPanelId(key: CommandRailTab): string {
 @Component({
   selector: 'ptah-command-rail-tabs',
   standalone: true,
+  imports: [PtahBadgeDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   styles: `
@@ -79,7 +81,7 @@ export function railPanelId(key: CommandRailTab): string {
         >
           {{ tab.label }}
           @if (tab.key === 'display' && displayCount() > 0) {
-            <span class="tab-badge badge badge-sm" aria-hidden="true">{{
+            <span ptahBadge count class="tab-badge" aria-hidden="true">{{
               displayCount()
             }}</span>
           }
