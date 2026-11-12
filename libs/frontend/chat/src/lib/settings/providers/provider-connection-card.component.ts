@@ -7,7 +7,7 @@ import {
   type OutputEmitterRef,
 } from '@angular/core';
 import { LucideAngularModule, AlertTriangle } from 'lucide-angular';
-import { NativeCardComponent } from '@ptah-extension/ui';
+import { NativeCardComponent, PtahBadgeDirective } from '@ptah-extension/ui';
 import type { ConnectionCheckRecord, SettingScope } from '@ptah-extension/shared';
 import {
   SettingScopeRowComponent,
@@ -61,7 +61,7 @@ interface InlineAction {
 @Component({
   selector: 'ptah-provider-connection-card',
   standalone: true,
-  imports: [LucideAngularModule, NativeCardComponent, SettingScopeRowComponent],
+  imports: [LucideAngularModule, NativeCardComponent, PtahBadgeDirective, SettingScopeRowComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block self-start' },
   template: `
@@ -137,10 +137,10 @@ interface InlineAction {
               (copyGlobalRequested)="scopeCopyGlobalRequested.emit()" data-testid="card-scope-wrapper" />
           }
           @if (connectedAccounts(); as connected) {
-            <span class="badge badge-ghost badge-sm text-xs" data-testid="connected-accounts-badge">{{ connected }} connected</span>
+            <span ptahBadge data-testid="connected-accounts-badge">{{ connected }} connected</span>
           }
           @if (modalityLabel(); as modality) {
-            <span class="badge badge-sm badge-outline whitespace-nowrap border-base-content-muted bg-base-100 text-xs font-medium text-base-content"
+            <span ptahBadge appearance="outline" class="whitespace-nowrap"
               data-testid="auth-modality">{{ modality }}</span>
           }
         </div>

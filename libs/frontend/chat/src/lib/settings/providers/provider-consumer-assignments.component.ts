@@ -25,6 +25,7 @@ import {
   ProviderMarkComponent,
   ProviderModelPickerComponent,
   PtahButtonDirective,
+  PtahBadgeDirective,
   PtahIconButtonDirective,
   PtahInputDirective,
   type ProviderIdentityOption,
@@ -84,6 +85,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
     DecisionModelRowComponent,
     LucideAngularModule,
     NativePopoverComponent,
+    PtahBadgeDirective,
     ProviderMarkComponent,
     ProviderModelPickerComponent,
     PtahButtonDirective,
@@ -140,7 +142,8 @@ const TIMEOUT_DEFAULT_SEC = 120;
                 }
               </div>
               <span
-                class="badge badge-sm shrink-0 whitespace-nowrap border-base-300 bg-base-300 text-xs text-base-content"
+                ptahBadge
+                class="shrink-0 whitespace-nowrap"
                 [attr.data-testid]="'consumer-tier-' + row.id"
                 >{{ row.tierLabel }}</span
               >
@@ -390,7 +393,10 @@ const TIMEOUT_DEFAULT_SEC = 120;
                   >Maximum time allowed for one enhancement attempt.</span
                 >
                 <span
-                  class="badge badge-outline badge-sm whitespace-nowrap border-warning/30 bg-warning/10 font-mono text-base-content"
+                  ptahBadge
+                  appearance="outline"
+                  tone="warn"
+                  class="whitespace-nowrap font-mono"
                   data-testid="timeout-effective-display"
                   >Time limit: {{ timeoutEffectiveSec() }} seconds</span
                 >

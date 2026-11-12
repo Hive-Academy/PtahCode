@@ -17,7 +17,11 @@ import {
 } from '@ptah-extension/shared';
 import { TASK_ESTIMATE_LABELS, labelChipClass } from '../../task-presentation';
 import type { TaskMetadataWrite } from './task-metadata-write';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import {
+  PtahButtonDirective,
+  PtahInputDirective,
+  PtahSelectDirective,
+} from '@ptah-extension/ui';
 
 /**
  * Metadata editor for the task detail panel: labels, estimate, parent.
@@ -63,7 +67,12 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
 @Component({
   selector: 'ptah-task-metadata-editor',
   standalone: true,
-  imports: [PtahButtonDirective, LucideAngularModule],
+  imports: [
+    PtahButtonDirective,
+    PtahInputDirective,
+    PtahSelectDirective,
+    LucideAngularModule,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="flex flex-col gap-3" data-testid="task-metadata-editor">
@@ -107,7 +116,9 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
         <div class="flex gap-1">
           <input
             type="text"
-            class="input input-xs input-bordered flex-1 min-w-0"
+            ptahInput
+            size="xs"
+            class="flex-1 min-w-0"
             list="task-label-completions"
             placeholder="Add a label"
             aria-labelledby="task-label-editor-label"
@@ -150,7 +161,8 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
              binding would be applied against an empty option list on first
              render and silently fall back to "No estimate". -->
         <select
-          class="select select-xs select-bordered"
+          ptahSelect
+          size="xs"
           data-testid="task-editor-estimate"
           [disabled]="busy()"
           (change)="onEstimate($event)"
@@ -186,7 +198,10 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
         <div class="flex gap-1">
           <input
             type="text"
-            class="input input-xs input-bordered flex-1 min-w-0 font-mono"
+            ptahInput
+            size="xs"
+            tone="mono"
+            class="flex-1 min-w-0"
             list="task-parent-completions"
             placeholder="Task folder name"
             aria-labelledby="task-parent-editor-label"

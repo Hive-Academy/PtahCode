@@ -54,6 +54,7 @@ import type {
 } from '../../types/task-agent.types';
 import {
   PtahButtonDirective,
+  PtahCheckboxDirective,
   PtahIconButtonDirective,
 } from '@ptah-extension/ui';
 
@@ -156,7 +157,12 @@ const MAX_VISIBLE_LABELS = 3;
 @Component({
   selector: 'ptah-task-list',
   standalone: true,
-  imports: [PtahButtonDirective, PtahIconButtonDirective, LucideAngularModule],
+  imports: [
+    PtahButtonDirective,
+    PtahCheckboxDirective,
+    PtahIconButtonDirective,
+    LucideAngularModule,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     class: 'block h-full min-h-0',
@@ -274,7 +280,8 @@ const MAX_VISIBLE_LABELS = 3;
                     >
                       <input
                         type="checkbox"
-                        class="checkbox checkbox-xs"
+                        ptahCheckbox
+                        size="xs"
                         data-testid="task-row-select"
                         [attr.tabindex]="rovingTabIndex(task.id)"
                         [checked]="selection().has(task.id)"

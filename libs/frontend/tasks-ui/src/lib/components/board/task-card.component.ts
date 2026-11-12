@@ -53,6 +53,7 @@ import {
 import {
   PtahButtonDirective,
   PtahIconButtonDirective,
+  PtahToggleDirective,
 } from '@ptah-extension/ui';
 
 /**
@@ -141,7 +142,12 @@ const HTTP_URL = /^https?:\/\//i;
 @Component({
   selector: 'ptah-task-card',
   standalone: true,
-  imports: [PtahButtonDirective, PtahIconButtonDirective, LucideAngularModule],
+  imports: [
+    PtahButtonDirective,
+    PtahIconButtonDirective,
+    PtahToggleDirective,
+    LucideAngularModule,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- Checked and selected are shown DIFFERENTLY on purpose: a ring for the
@@ -612,12 +618,13 @@ const HTTP_URL = /^https?:\/\//i;
             class="flex items-center justify-between gap-2 border-t border-surface-border pt-2"
           >
             <label
-              class="label cursor-pointer gap-1 p-0"
+              class="flex cursor-pointer items-center gap-1"
               [title]="'Run implementation in an isolated git worktree — the agent delegates file-editing work to worktree-isolated subagents, keeping changes off the main working tree until reviewed'"
             >
               <input
                 type="checkbox"
-                class="toggle toggle-xs"
+                ptahToggle
+                size="xs"
                 [attr.tabindex]="rovingTabIndex()"
                 [checked]="isolate()"
                 (click)="$event.stopPropagation()"
