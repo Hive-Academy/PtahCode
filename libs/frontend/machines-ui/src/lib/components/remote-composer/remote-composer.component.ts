@@ -14,7 +14,7 @@ import {
   type RemoteSessionView,
 } from '../../services/machines-store';
 import { outcomeSentence } from '../../utils/remote-session-copy';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahTextareaDirective } from '@ptah-extension/ui';
 
 /** `aria-describedby` target of the reason line; pinned by the session view spec. */
 const COMPOSER_REASON_ID = 'ptah-remote-session-reason-composer';
@@ -32,7 +32,7 @@ const COMPOSER_REASON_ID = 'ptah-remote-session-reason-composer';
 @Component({
   selector: 'ptah-remote-composer',
   standalone: true,
-  imports: [PtahButtonDirective],
+  imports: [PtahButtonDirective, PtahTextareaDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <form
@@ -43,7 +43,9 @@ const COMPOSER_REASON_ID = 'ptah-remote-session-reason-composer';
     >
       <div class="flex items-end gap-2">
         <textarea
-          class="textarea textarea-bordered textarea-sm min-h-[2.5rem] flex-1 rounded-md text-sm text-base-content placeholder:text-base-content-muted disabled:cursor-not-allowed"
+          ptahTextarea
+          size="sm"
+          class="min-h-[2.5rem] flex-1"
           rows="2"
           name="prompt"
           aria-label="Message"

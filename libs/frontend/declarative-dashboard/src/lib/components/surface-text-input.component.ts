@@ -13,6 +13,7 @@ import {
   type SurfaceDataValue,
 } from '@ptah-extension/shared/mcp-apps-contracts/surface';
 import type { SurfaceInputCommit } from '../surface-interaction';
+import { PtahInputDirective, PtahTextareaDirective } from '@ptah-extension/ui';
 import type { InputNode } from '../view-model/view-model.types';
 import {
   committedInputValue,
@@ -62,6 +63,7 @@ let nextTextInputInstance = 0;
 @Component({
   selector: 'ptah-surface-text-input',
   standalone: true,
+  imports: [PtahInputDirective, PtahTextareaDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="flex flex-col gap-1 text-base-content">
@@ -69,13 +71,13 @@ let nextTextInputInstance = 0;
         <span aria-hidden="true"> *</span>
       }</label>
       @if (multiline()) {
-        <textarea #multiLineControl [id]="controlId" class="textarea textarea-bordered w-full text-sm" rows="3"
+        <textarea #multiLineControl [id]="controlId" ptahTextarea class="w-full" rows="3" [invalid]="hasError()"
           [value]="displayedText()" [attr.placeholder]="placeholder()"
           [attr.aria-required]="required() ? 'true' : null" [attr.aria-invalid]="hasError() ? 'true' : null"
           [attr.aria-describedby]="describedBy()" [attr.data-apps-focus-key]="focusKey('input')"
           (input)="draftInput(multiLineControl.value)" (blur)="commitNow()"></textarea>
       } @else {
-        <input #singleLineControl [id]="controlId" type="text" class="input input-bordered input-sm w-full text-sm"
+        <input #singleLineControl [id]="controlId" type="text" ptahInput size="sm" class="w-full" [invalid]="hasError()"
           [value]="displayedText()" [attr.placeholder]="placeholder()"
           [attr.aria-required]="required() ? 'true' : null" [attr.aria-invalid]="hasError() ? 'true' : null"
           [attr.aria-describedby]="describedBy()" [attr.data-apps-focus-key]="focusKey('input')"

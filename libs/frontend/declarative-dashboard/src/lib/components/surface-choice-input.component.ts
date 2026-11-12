@@ -15,6 +15,7 @@ import {
   type SurfaceInputOption,
 } from '@ptah-extension/shared/mcp-apps-contracts/surface';
 import type { SurfaceInputCommit } from '../surface-interaction';
+import { PtahSelectDirective } from '@ptah-extension/ui';
 import type { InputNode } from '../view-model/view-model.types';
 import {
   describedByOf,
@@ -54,7 +55,7 @@ function isOption(value: unknown): value is SurfaceInputOption {
         <label [for]="controlId" class="block text-xs font-medium">{{ node().label }}@if (required()) {
           <span aria-hidden="true"> *</span>
         }</label>
-        <select #selectControl [id]="controlId" class="select select-bordered select-sm w-full text-sm"
+        <select #selectControl [id]="controlId" ptahSelect size="sm" class="w-full" [invalid]="hasError()"
           [attr.aria-required]="required() ? 'true' : null" [attr.aria-invalid]="hasError() ? 'true' : null"
           [attr.aria-describedby]="describedBy()" [attr.data-apps-focus-key]="focusKey('input')"
           (change)="chooseIndex(selectControl.selectedIndex)">
@@ -92,7 +93,7 @@ function isOption(value: unknown): value is SurfaceInputOption {
       }
     </ng-template>
   `,
-  imports: [NgTemplateOutlet],
+  imports: [NgTemplateOutlet, PtahSelectDirective],
 })
 export class SurfaceChoiceInputComponent {
   public readonly controlId = `ptah-surface-choice-${nextChoiceInputInstance++}`;

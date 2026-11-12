@@ -8,12 +8,12 @@ import {
 import type { GatewayPlatformId } from '@ptah-extension/shared';
 
 import { GatewayStateService } from '../services/gateway-state.service';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-platform-token-form',
   standalone: true,
-  imports: [PtahButtonDirective],
+  imports: [PtahButtonDirective, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <form class="flex flex-col gap-3" (submit)="onSubmit($event)">
@@ -26,7 +26,9 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
           autocapitalize="off"
           spellcheck="false"
           name="bot-token"
-          class="input input-sm input-bordered font-mono"
+          ptahInput
+          size="sm"
+          tone="mono"
           [placeholder]="tokenPlaceholder()"
           [value]="botToken()"
           (input)="onTokenInput('bot', $event)"
@@ -46,7 +48,9 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
             autocapitalize="off"
             spellcheck="false"
             name="app-token"
-            class="input input-sm input-bordered font-mono"
+            ptahInput
+            size="sm"
+            tone="mono"
             placeholder="Paste app-level token (xapp-...)"
             [value]="appToken()"
             (input)="onTokenInput('app', $event)"

@@ -10,6 +10,7 @@ import {
   type SurfaceDataValue,
 } from '@ptah-extension/shared/mcp-apps-contracts/surface';
 import type { SurfaceInputCommit } from '../surface-interaction';
+import { PtahCheckboxDirective } from '@ptah-extension/ui';
 import type { InputNode } from '../view-model/view-model.types';
 import {
   describedByOf,
@@ -35,11 +36,12 @@ let nextCheckboxInputInstance = 0;
 @Component({
   selector: 'ptah-surface-checkbox-input',
   standalone: true,
+  imports: [PtahCheckboxDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="flex flex-col gap-1 text-base-content">
       <label [for]="controlId" class="flex items-center gap-2 text-sm">
-        <input #checkboxControl [id]="controlId" type="checkbox" class="checkbox checkbox-sm" [checked]="checked()"
+        <input #checkboxControl [id]="controlId" type="checkbox" ptahCheckbox size="sm" [checked]="checked()"
           [attr.aria-required]="required() ? 'true' : null" [attr.aria-invalid]="hasError() ? 'true' : null"
           [attr.aria-describedby]="describedBy()" [attr.data-apps-focus-key]="focusKey('input')"
           (change)="toggle(checkboxControl)" />

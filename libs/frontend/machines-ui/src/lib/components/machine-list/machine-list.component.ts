@@ -8,7 +8,7 @@ import {
   viewChildren,
   type ElementRef,
 } from '@angular/core';
-import { InboxRowDirective, PtahButtonDirective } from '@ptah-extension/ui';
+import { InboxRowDirective, PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
 import type {
   MachinesError,
   RemoteMachine,
@@ -50,6 +50,7 @@ interface MachineRow {
   standalone: true,
   imports: [
     PtahButtonDirective,
+    PtahInputDirective,
     MachineStatusComponent,
     DisplayTextPipe,
     InboxRowDirective,
@@ -61,7 +62,7 @@ interface MachineRow {
 
     <input
       type="search"
-      class="input input-bordered input-sm w-full rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+      ptahInput size="sm" class="w-full"
       aria-label="Search machines"
       placeholder="Search machines"
       data-testid="machine-list-search"

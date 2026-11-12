@@ -75,30 +75,70 @@
   --ptah-border-width: 1px;
   --ptah-border-color: var(--surface-border);
   --ptah-border-color-strong: var(--surface-border-strong);
-  --ptah-control-edge: color-mix(in oklch, oklch(var(--bc)) 55%, oklch(var(--b1)));
-  --ptah-control-edge-strong: color-mix(in oklch, oklch(var(--bc)) 68%, oklch(var(--b1)));
+  --ptah-control-edge: color-mix(
+    in oklch,
+    oklch(var(--bc)) 55%,
+    oklch(var(--b1))
+  );
+  --ptah-control-edge-strong: color-mix(
+    in oklch,
+    oklch(var(--bc)) 68%,
+    oklch(var(--b1))
+  );
 
   /* Button family (TASK_2026_929_26ca Batch 1c) */
   --ptah-btn-primary-bg: oklch(var(--p));
-  --ptah-btn-primary-bg-hover: color-mix(in oklch, oklch(var(--p)) 88%, oklch(var(--bc)));
-  --ptah-btn-primary-bg-active: color-mix(in oklch, oklch(var(--p)) 78%, oklch(var(--bc)));
+  --ptah-btn-primary-bg-hover: color-mix(
+    in oklch,
+    oklch(var(--p)) 88%,
+    oklch(var(--bc))
+  );
+  --ptah-btn-primary-bg-active: color-mix(
+    in oklch,
+    oklch(var(--p)) 78%,
+    oklch(var(--bc))
+  );
   --ptah-btn-primary-fg: oklch(var(--pc));
   --ptah-btn-secondary-bg: var(--surface-2);
   --ptah-btn-secondary-bg-hover: oklch(var(--b3));
-  --ptah-btn-secondary-bg-active: color-mix(in oklch, oklch(var(--b3)) 92%, oklch(var(--bc)));
+  --ptah-btn-secondary-bg-active: color-mix(
+    in oklch,
+    oklch(var(--b3)) 92%,
+    oklch(var(--bc))
+  );
   --ptah-btn-secondary-fg: oklch(var(--bc));
   --ptah-btn-secondary-border: var(--ptah-control-edge);
   --ptah-btn-secondary-border-hover: var(--ptah-control-edge-strong);
   --ptah-btn-ghost-bg-hover: oklch(var(--b3));
-  --ptah-btn-ghost-bg-active: color-mix(in oklch, oklch(var(--b3)) 92%, oklch(var(--bc)));
+  --ptah-btn-ghost-bg-active: color-mix(
+    in oklch,
+    oklch(var(--b3)) 92%,
+    oklch(var(--bc))
+  );
   --ptah-btn-ghost-fg: oklch(var(--bc));
   --ptah-btn-danger-bg: oklch(var(--er));
-  --ptah-btn-danger-bg-hover: color-mix(in oklch, oklch(var(--er)) 90%, oklch(var(--bc)));
-  --ptah-btn-danger-bg-active: color-mix(in oklch, oklch(var(--er)) 82%, oklch(var(--bc)));
+  --ptah-btn-danger-bg-hover: color-mix(
+    in oklch,
+    oklch(var(--er)) 90%,
+    oklch(var(--bc))
+  );
+  --ptah-btn-danger-bg-active: color-mix(
+    in oklch,
+    oklch(var(--er)) 82%,
+    oklch(var(--bc))
+  );
   --ptah-btn-danger-fg: oklch(var(--erc));
   --ptah-btn-link-fg: var(--ptah-link, oklch(var(--p)));
-  --ptah-btn-link-fg-hover: color-mix(in oklch, var(--ptah-link, oklch(var(--p))) 75%, oklch(var(--bc)));
-  --ptah-btn-link-fg-active: color-mix(in oklch, var(--ptah-link, oklch(var(--p))) 60%, oklch(var(--bc)));
+  --ptah-btn-link-fg-hover: color-mix(
+    in oklch,
+    var(--ptah-link, oklch(var(--p))) 75%,
+    oklch(var(--bc))
+  );
+  --ptah-btn-link-fg-active: color-mix(
+    in oklch,
+    var(--ptah-link, oklch(var(--p))) 60%,
+    oklch(var(--bc))
+  );
   --ptah-btn-disabled-bg: var(--surface-2);
   --ptah-btn-disabled-fg: oklch(var(--bcm, var(--bc)));
   --ptah-btn-disabled-border: var(--ptah-border-color);
@@ -134,9 +174,17 @@
   --ptah-field-pad-top: 1.25rem;
   --ptah-field-pad-bottom: 0.375rem;
   --ptah-field-radius: var(--glass-radius-inner, 0.625rem);
-  --ptah-field-bg-hover: color-mix(in oklch, var(--ptah-field-bg) 92%, oklch(var(--bc)));
+  --ptah-field-bg-hover: color-mix(
+    in oklch,
+    var(--ptah-field-bg) 92%,
+    oklch(var(--bc))
+  );
   --ptah-field-label-fg: oklch(var(--bcm, var(--bc)));
-  --ptah-field-label-fg-active: color-mix(in oklch, oklch(var(--p)) 40%, oklch(var(--bc)));
+  --ptah-field-label-fg-active: color-mix(
+    in oklch,
+    oklch(var(--p)) 40%,
+    oklch(var(--bc))
+  );
   --ptah-field-label-float-size: 0.6875rem;
   --ptah-field-label-float-leading: 1rem;
   --ptah-field-label-float-top: 0.375rem;
@@ -164,8 +212,16 @@
   --ptah-select-panel-max-h: 18rem;
   --ptah-select-panel-pad: var(--ptah-space-1);
   --ptah-select-option-min-h: 2.25rem;
-  --ptah-select-option-active-bg: color-mix(in oklch, oklch(var(--p)) 16%, transparent);
-  --ptah-select-option-selected-fg: color-mix(in oklch, oklch(var(--p)) 62%, oklch(var(--bc)));
+  --ptah-select-option-active-bg: color-mix(
+    in oklch,
+    oklch(var(--p)) 16%,
+    transparent
+  );
+  --ptah-select-option-selected-fg: color-mix(
+    in oklch,
+    oklch(var(--p)) 40%,
+    oklch(var(--bc))
+  );
   --ptah-select-group-fg: oklch(var(--bcm, var(--bc)));
 
   /* Focus ring: an outline with an outline offset (the offset is transparent).
@@ -203,7 +259,10 @@
   --ptah-badge-fill-mix: 10%; /* warn ink on ptah-glass-light surface-2: 4.54:1 (12% gave 4.41:1) */
   --ptah-badge-edge-mix: 45%;
   --ptah-badge-neutral-ink: oklch(var(--bc));
-  --ptah-badge-accent-ink: var(--ptah-accent-ink, var(--ptah-link, oklch(var(--p))));
+  --ptah-badge-accent-ink: var(
+    --ptah-accent-ink,
+    var(--ptah-link, oklch(var(--p)))
+  );
   --ptah-status-glyph: 0.5rem;
   --ptah-status-ring: 0.125rem;
   --ptah-status-square-radius: 0.125rem;

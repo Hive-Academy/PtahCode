@@ -5,7 +5,7 @@ import { SURFACE_PAGE_SIZE, type SurfaceComponentViewState } from '../surface-vi
 import { pageSlice } from '../table/table-rows';
 import type { DisplayNode } from '../view-model/view-model.types';
 import { DashboardPagerComponent } from './dashboard-pager.component';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
 
 export type ListNode = Extract<DisplayNode, { kind: 'list' }>;
 interface ListItem {
@@ -26,7 +26,7 @@ function plainText(value: unknown): string | undefined {
 @Component({
   selector: 'ptah-dashboard-list',
   standalone: true,
-  imports: [NgTemplateOutlet, DashboardPagerComponent, PtahButtonDirective],
+  imports: [NgTemplateOutlet, DashboardPagerComponent, PtahButtonDirective, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card card-bordered bg-base-100 p-3 text-base-content" (keydown.escape)="collapse($event)">
@@ -47,7 +47,7 @@ function plainText(value: unknown): string | undefined {
           <p role="status">Data is not available in this view.@if (data.rowCount !== undefined) { {{ data.rowCount }} rows. }</p>
         } @else {
           <label [for]="filterId" class="text-sm text-base-content-muted">Filter {{ title() }}</label>
-          <input #filterInput [id]="filterId" type="search" class="input input-bordered input-sm w-full"
+          <input #filterInput [id]="filterId" type="search" ptahInput size="sm" class="w-full"
             [value]="viewState().filter ?? ''" [attr.data-apps-focus-key]="focusKey('filter')"
             (input)="setFilter(filterInput.value)" />
           <p role="status" class="text-sm text-base-content-muted">{{ page().total }} results</p>

@@ -12,12 +12,12 @@ import type {
 } from '@ptah-extension/shared';
 
 import { GatewayStateService } from '../services/gateway-state.service';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-platform-bindings-panel',
   standalone: true,
-  imports: [PtahButtonDirective],
+  imports: [PtahButtonDirective, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (approvalToast(); as msg) {
@@ -61,7 +61,10 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
                   type="text"
                   autocomplete="off"
                   data-testid="gateway-approve-code"
-                  class="input input-xs input-bordered w-24 font-mono"
+                  ptahInput
+                  size="xs"
+                  tone="mono"
+                  class="w-24"
                   placeholder="code"
                   [value]="bindingCodeFor(b.id)"
                   (input)="onBindingCodeInput(b.id, $event)"
