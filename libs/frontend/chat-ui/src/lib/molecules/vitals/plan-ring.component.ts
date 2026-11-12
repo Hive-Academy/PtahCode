@@ -16,6 +16,8 @@ export interface PlanRingData {
   readonly resetsInMs: number | null;
 }
 
+const MINUTE_MS = 60_000;
+
 /**
  * The caption a stat cell shows under a plan ring: `"<label> · resets in 2h 14m"`,
  * or just `"<label>"` when the reset time is unknown. The ring itself renders
@@ -24,8 +26,11 @@ export interface PlanRingData {
 export function planRingCaption(ring: PlanRingData): string {
   const { label, resetsInMs } = ring;
   if (resetsInMs === null || !Number.isFinite(resetsInMs)) return label;
-  if (resetsInMs < 1000) return `${label} · resets now`;
-  return `${label} · resets in ${formatDuration(resetsInMs)}`;
+  if (resetsInMs <= 0) return `${label} · resets now`;
+  // The plan clock ticks every 30 s, so show whole minutes only.
+  const wholeMinutes = Math.floor(resetsInMs / MINUTE_MS) * MINUTE_MS;
+  if (wholeMinutes < MINUTE_MS) return `${label} · resets in <1m`;
+  return `${label} · resets in ${formatDuration(wholeMinutes)}`;
 }
 
 /**
