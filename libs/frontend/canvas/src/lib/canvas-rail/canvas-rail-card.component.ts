@@ -203,19 +203,19 @@ export const SPLIT_ALREADY_FOCUSED_REASON =
                     [busy]="submittingKeys().has(item.key) || blockedKeys().has(item.key)"
                     (selected)="attentionAction.emit({item, actionId: $event.actionId, reason: $event.reason})" />
                 }
-                @if (attentionItems().length > 1) { <button ptahButton variant="ghost" size="xs" type="button" class="min-h-11" (click)="otherRequests.emit()">+{{ attentionItems().length - 1 }} more</button> }
+                @if (attentionItems().length > 1) { <button type="button" class="btn btn-ghost btn-xs min-h-11" (click)="otherRequests.emit()">+{{ attentionItems().length - 1 }} more</button> }
               } @else {
               <div class="mt-1 flex flex-wrap gap-1">
                 @for (action of attentionItems()[0].actions; track action.id) {
                   @if (action.id === 'answer' || action.id === 'allow' || action.id === 'deny' || action.id === 'open') {
-                    <button ptahButton size="sm" type="button" class="min-h-11" [variant]="isPrimaryAttentionAction(attentionItems()[0], action) ? 'primary' : 'ghost'" [disabled]="!!action.disabledReason || submittingKeys().has(attentionItems()[0].key) || blockedKeys().has(attentionItems()[0].key)"
+                    <button type="button" class="btn btn-sm min-h-11" [class.btn-primary]="isPrimaryAttentionAction(attentionItems()[0], action)" [class.btn-ghost]="!isPrimaryAttentionAction(attentionItems()[0], action)" [disabled]="!!action.disabledReason || submittingKeys().has(attentionItems()[0].key) || blockedKeys().has(attentionItems()[0].key)"
                       [attr.title]="action.disabledReason ?? null"
                       [attr.aria-describedby]="action.disabledReason ? 'rail-card-attention-reason-' + tabId() : null"
                       [attr.aria-label]="action.label + ' for ' + (attentionItems()[0].sessionTitle ?? current.title) + ' in ' + (attentionItems()[0].workspaceName || 'Workspace unavailable')"
                       (click)="attentionAction.emit({item: attentionItems()[0], actionId: action.id})">{{ action.label }}</button>
                   }
                 }
-                @if (attentionItems().length > 1) { <button ptahButton variant="ghost" size="xs" type="button" class="min-h-11" (click)="otherRequests.emit()">+{{ attentionItems().length - 1 }} more</button> }
+                @if (attentionItems().length > 1) { <button type="button" class="btn btn-ghost btn-xs min-h-11" (click)="otherRequests.emit()">+{{ attentionItems().length - 1 }} more</button> }
               </div>
               }
               @if (firstDisabledReason(); as reason) { <span class="sr-only" [id]="'rail-card-attention-reason-' + tabId()">{{ reason }}</span> }
@@ -351,11 +351,11 @@ export const SPLIT_ALREADY_FOCUSED_REASON =
             }
             @if (reorderable()) {
               <div role="separator" class="my-1 border-t border-base-content/10"></div>
-              <button ptahButton variant="ghost" size="sm"
+              <button
                 type="button"
                 role="menuitem"
                 data-action="move-up"
-                class="justify-start font-normal"
+                class="btn btn-ghost btn-sm justify-start font-normal"
                 [class.opacity-60]="!canMoveUp()"
                 [attr.aria-disabled]="canMoveUp() ? null : 'true'"
                 [attr.aria-label]="canMoveUp() ? 'Move up' : 'Move up, first in group'"
@@ -364,11 +364,11 @@ export const SPLIT_ALREADY_FOCUSED_REASON =
               >
                 Move up
               </button>
-              <button ptahButton variant="ghost" size="sm"
+              <button
                 type="button"
                 role="menuitem"
                 data-action="move-down"
-                class="justify-start font-normal"
+                class="btn btn-ghost btn-sm justify-start font-normal"
                 [class.opacity-60]="!canMoveDown()"
                 [attr.aria-disabled]="canMoveDown() ? null : 'true'"
                 [attr.aria-label]="canMoveDown() ? 'Move down' : 'Move down, last in group'"
@@ -379,11 +379,11 @@ export const SPLIT_ALREADY_FOCUSED_REASON =
               </button>
             }
             <div role="separator" class="my-1 border-t border-base-content/10"></div>
-            <button ptahButton variant="ghost" size="sm"
+            <button
               type="button"
               role="menuitem"
               data-action="toggle-view"
-              class="justify-start font-normal"
+              class="btn btn-ghost btn-sm justify-start font-normal"
               (click)="toggleView()"
             >
               {{ tab()?.viewMode === 'compact' ? 'Switch to full view' : 'Switch to compact view' }}
@@ -393,22 +393,22 @@ export const SPLIT_ALREADY_FOCUSED_REASON =
               <ptah-send-to-messaging [tabId]="tabId()" />
             }
             @if (running()) {
-              <button ptahButton variant="ghost" size="sm"
+              <button
                 type="button"
                 role="menuitem"
                 data-action="stop"
-                class="justify-start font-normal"
+                class="btn btn-ghost btn-sm justify-start font-normal"
                 (click)="stop()"
               >
                 Stop session
               </button>
             }
             <div role="separator" class="my-1 border-t border-base-content/10"></div>
-            <button ptahButton variant="ghost" size="sm"
+            <button
               type="button"
               role="menuitem"
               data-action="close-session"
-              class="justify-start font-normal"
+              class="btn btn-ghost btn-sm justify-start font-normal"
               (click)="closeSession($event)"
             >
               Close session
