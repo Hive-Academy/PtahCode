@@ -39,13 +39,25 @@ export class PhaseDefinitionError extends Error {
 
 function sectionsFor(kind: PhaseKind, body: string): PhaseDefinitionV1['discipline'] {
   const found = new Map<string, string>();
-  const matches = [...body.matchAll(/^## (.+?)\r?\n([\s\S]*?)(?=^## |(?![\s\S]))/gm)];
-  for (const match of matches) found.set(match[1].trim(), match[2].trim());
+  // Keep heading rules aligned with scripts/validate-orchestration-skill.ts.
+  const scan = maskFences(body);
+  const matches = [...scan.matchAll(/^## ([^\r\n]+)\r?$/gm)];
+  for (let index = 0; index < matches.length; index++) {
+    const match = matches[index];
+    const heading = match[1].trim();
+    if (!headings.some(([known]) => known === heading)) continue;
+    if (found.has(heading)) throw new PhaseDefinitionError('INVALID_SCHEMA', kind);
+    const start = match.index! + match[0].length;
+    found.set(heading, body.slice(start, matches[index + 1]?.index ?? body.length).trim());
+  }
   for (const [heading] of headings.slice(0, 5)) {
     if (!found.get(heading)) throw new PhaseDefinitionError('MISSING_SECTION', kind);
   }
   if (['review', 'document-review', 'visual-review'].includes(kind) && !found.get('Reviewer stance')) {
     throw new PhaseDefinitionError('MISSING_SECTION', kind);
+  }
+  if (!['review', 'document-review', 'visual-review'].includes(kind) && found.has('Reviewer stance')) {
+    throw new PhaseDefinitionError('INVALID_SCHEMA', kind);
   }
   return {
     method: found.get('Method')!,
@@ -55,6 +67,16 @@ function sectionsFor(kind: PhaseKind, body: string): PhaseDefinitionV1['discipli
     escalationProtocol: found.get('Escalation protocol')!,
     ...(found.get('Reviewer stance') ? { reviewerStance: found.get('Reviewer stance') } : {}),
   };
+}
+
+function maskFences(body: string): string {
+  let fence: { marker: string; length: number } | undefined;
+  return body.replace(/^.*(?:\n|$)/gm, line => {
+    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (!fence && marker) fence = { marker: marker[0], length: marker.length };
+    else if (fence && marker?.[0] === fence.marker && marker.length >= fence.length) fence = undefined;
+    return fence || marker ? line.replace(/[^\r\n]/g, ' ') : line;
+  });
 }
 
 export function resolvePhaseDefinition(

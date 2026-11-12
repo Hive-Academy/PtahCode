@@ -59,3 +59,23 @@ it.each(['review', 'document-review', 'visual-review'] as const)('requires revie
   expect(() => resolvePhaseDefinition(kind, () => metadata.replace('kind: batch', `kind: ${kind}`) + body))
     .toThrow(PhaseDefinitionError);
 });
+
+it('keeps fenced headings inside section text', () => {
+  const source = metadata + body.replace('Decompose the work.', 'Decompose the work.\n\n```md\n## Method\nExample only.\n```');
+  expect(resolvePhaseDefinition('batch', () => source).definition.discipline.method).toContain('## Method\nExample only.');
+});
+
+it('does not count a fenced-only section', () => {
+  const source = metadata + body.replace('## Method\nDecompose the work.', '```md\n## Method\nDecompose the work.\n```');
+  expect(() => resolvePhaseDefinition('batch', () => source)).toThrow(new PhaseDefinitionError('MISSING_SECTION', 'batch'));
+});
+
+it('rejects duplicate known sections', () => {
+  expect(() => resolvePhaseDefinition('batch', () => metadata + body + '\n## Method\nAgain.'))
+    .toThrow(new PhaseDefinitionError('INVALID_SCHEMA', 'batch'));
+});
+
+it('rejects reviewer stance on a non-review phase', () => {
+  expect(() => resolvePhaseDefinition('batch', () => metadata + body + '\n## Reviewer stance\nCritique.'))
+    .toThrow(new PhaseDefinitionError('INVALID_SCHEMA', 'batch'));
+});

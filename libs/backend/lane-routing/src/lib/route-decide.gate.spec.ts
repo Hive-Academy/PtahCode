@@ -283,6 +283,16 @@ describe('gate phase policy roster', () => {
     expect(result.roster[0].reason).not.toContain('-Infinity');
   });
 
+  it('preserves exclusion detail when a batch lane is unavailable', async () => {
+    const run = harness({ rows: [lane('codex')], limits: new Map<string, LaneLimitState>([['codex', 'at-limit']]), rotate: false, selection: { kind: 'unset' } });
+    const result = await run.service.decide({ ...implement(), phases: [{ id: 'batch', kind: 'batch' }] }, run.source);
+    if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
+    const entry = result.roster[0];
+    expect(entry).toMatchObject({ status: 'unavailable', exclusionReason: 'no-eligible-candidate' });
+    expect(entry.reason).toContain('candidate codex excluded by at-limit');
+    expect(entry.reason).toContain('No executor; the orchestrator does this phase');
+  });
+
   it.each(['batch', 'completion'] as const)('accepts an explicit role for %s', async (kind) => {
     const run = harness({ rows: [], rotate: false, selection: { kind: 'unset' } });
     const role = [...BUILTIN_SUBAGENT_ROLES][0];

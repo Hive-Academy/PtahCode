@@ -325,7 +325,9 @@ function unavailableEntry(plan: PhasePlan, reason: string): UnavailableEntry {
     score: null,
     confidence: null,
     fallbackCause: null,
-    reason: orchestratorPhase ? `${reason}; No executor; the orchestrator does this phase` : reason,
+    reason: orchestratorPhase
+      ? `${reason}; No executor; the orchestrator does this phase${plan.constraint.excluded.length ? ` (excluded: ${plan.constraint.excluded.map(item => `${item.candidate}:${item.rule}`).join(', ')})` : ''}`
+      : reason,
   };
 }
 
