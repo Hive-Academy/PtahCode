@@ -31,6 +31,7 @@ import {
   MonogramTileComponent,
   StorefrontPanelComponent,
   PtahButtonDirective,
+  PtahInputDirective,
 } from '@ptah-extension/ui';
 import type {
   ExternalConsentReason,
@@ -112,6 +113,7 @@ const SOURCE_PATTERN = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
   standalone: true,
   imports: [
     PtahButtonDirective,
+    PtahInputDirective,
     LucideAngularModule,
     CatalogCardComponent,
     CatalogCardSkeletonComponent,
@@ -158,16 +160,19 @@ const SOURCE_PATTERN = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
         <form class="flex items-start gap-2" (submit)="addMarketplace($event)">
           <div class="flex-1 min-w-0">
             <input
+              ptahInput
+              size="sm"
+              tone="mono"
               type="text"
               autocomplete="off"
               spellcheck="false"
               data-testid="marketplace-source"
-              class="input input-bordered input-sm w-full text-xs font-mono"
+              class="w-full text-xs font-mono"
               placeholder="owner/repo"
               [value]="sourceInput()"
               (input)="onSourceInput($event)"
               aria-label="Marketplace repository, as owner/repo"
-              [attr.aria-invalid]="showSourceHint() ? 'true' : null"
+              [invalid]="showSourceHint()"
             />
             @if (showSourceHint()) {
               <p class="text-[10px] text-error mt-1">

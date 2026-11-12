@@ -32,6 +32,7 @@ import {
   MotionRouteStageDirective,
   detailParamKey,
   PtahButtonDirective,
+  PtahInputDirective,
 } from '@ptah-extension/ui';
 import { MarketplaceInventoryStore } from '../../data/marketplace-inventory.store';
 import {
@@ -122,6 +123,7 @@ const ROW_LINK_SELECTOR = '[data-testid="installed-skill-open"]';
   standalone: true,
   imports: [
     PtahButtonDirective,
+    PtahInputDirective,
     RouterLink,
     RouterOutlet,
     LucideAngularModule,
@@ -163,24 +165,24 @@ const ROW_LINK_SELECTOR = '[data-testid="installed-skill-open"]';
           <ptah-installed-library-stale-notice />
         }
 
-        <label
-          class="input input-sm input-bordered flex w-full max-w-sm items-center gap-2"
-        >
+        <div class="relative w-full max-w-sm">
           <lucide-angular
             [img]="SearchIcon"
-            class="h-4 w-4 shrink-0 text-base-content-muted"
+            class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-base-content-muted"
             aria-hidden="true"
           />
           <input
+            ptahInput
+            size="sm"
             type="search"
-            class="min-w-0 grow"
+            class="w-full min-w-0 pl-9"
             placeholder="Search installed skills"
             aria-label="Search installed skills"
             data-testid="installed-skills-search"
             [value]="query()"
             (input)="onSearch($event)"
           />
-        </label>
+        </div>
 
         <div class="space-y-4" (keydown)="onListKeydown($event)">
           @for (group of groups(); track group.id) {

@@ -18,6 +18,8 @@ import { LucideAngularModule, X, Check } from 'lucide-angular';
 import {
   NativePopoverComponent,
   PtahButtonDirective,
+  PtahFieldComponent,
+  PtahInputDirective,
 } from '@ptah-extension/ui';
 import {
   AppStateManager,
@@ -78,6 +80,8 @@ const TILE_BOUND_MESSAGE = `The board holds ${MAX_CANVAS_TILES} sessions. Close 
     LucideAngularModule,
     NativePopoverComponent,
     PtahButtonDirective,
+    PtahFieldComponent,
+    PtahInputDirective,
   ],
   template: `
     <div
@@ -124,24 +128,34 @@ const TILE_BOUND_MESSAGE = `The board holds ${MAX_CANVAS_TILES} sessions. Close 
               aria-labelledby="canvas-new-session-title"
               aria-describedby="canvas-new-session-help"
             >
-              <h3 id="canvas-new-session-title" class="text-sm font-semibold text-base-content">
+              <h3
+                id="canvas-new-session-title"
+                class="text-sm font-semibold text-base-content"
+              >
                 New session
               </h3>
-              <p id="canvas-new-session-help" class="mb-3 text-xs text-base-content-muted">Give this session a name, or use the default.</p>
-              <label for="canvas-session-name" class="mb-1 block text-xs font-medium text-base-content">Session name (optional)</label>
-              <input
-                #sessionNameInputRef
-                id="canvas-session-name"
-                type="text"
-                class="input input-sm input-bordered w-full mb-3 bg-base-100 border-base-content/10 focus:border-primary"
-                placeholder="New session"
-                [(ngModel)]="sessionNameInput"
-                (keydown.enter)="
-                  handleCreateSession();
-                  $event.preventDefault();
-                  $event.stopPropagation()
-                "
-              />
+              <p
+                id="canvas-new-session-help"
+                class="mb-3 text-xs text-base-content-muted"
+              >
+                Give this session a name, or use the default.
+              </p>
+              <ptah-field label="Session name (optional)" class="mb-3">
+                <input
+                  ptahInput
+                  #sessionNameInputRef
+                  id="canvas-session-name"
+                  type="text"
+                  class="w-full"
+                  placeholder="New session"
+                  [(ngModel)]="sessionNameInput"
+                  (keydown.enter)="
+                    handleCreateSession();
+                    $event.preventDefault();
+                    $event.stopPropagation()
+                  "
+                />
+              </ptah-field>
               <div class="flex gap-2">
                 <button
                   type="button"
@@ -575,7 +589,10 @@ export class OrchestraCanvasComponent implements OnDestroy {
       this.headerMessage.set(blocked);
       return;
     }
-    this.sessionPopoverAnchor()?.removeEventListener('keydown', this.onSessionAnchorEscape);
+    this.sessionPopoverAnchor()?.removeEventListener(
+      'keydown',
+      this.onSessionAnchorEscape,
+    );
     this.sessionPopoverAnchor.set(anchor);
     anchor.addEventListener('keydown', this.onSessionAnchorEscape);
     this.sessionNameInput.set('');
@@ -614,7 +631,10 @@ export class OrchestraCanvasComponent implements OnDestroy {
   }
 
   private closeSessionPopover(): void {
-    this.sessionPopoverAnchor()?.removeEventListener('keydown', this.onSessionAnchorEscape);
+    this.sessionPopoverAnchor()?.removeEventListener(
+      'keydown',
+      this.onSessionAnchorEscape,
+    );
     this.sessionPopoverOpen.set(false);
     this.sessionNameInput.set('');
   }
@@ -627,7 +647,10 @@ export class OrchestraCanvasComponent implements OnDestroy {
   }
 
   ngOnDestroy(): void {
-    this.sessionPopoverAnchor()?.removeEventListener('keydown', this.onSessionAnchorEscape);
+    this.sessionPopoverAnchor()?.removeEventListener(
+      'keydown',
+      this.onSessionAnchorEscape,
+    );
     this.unsubscribeTabClosed?.();
     this.unsubscribeTabClosed = null;
     this.layoutPersistence.flush();

@@ -27,8 +27,6 @@ export abstract class PtahTextControlBase implements PtahFieldControlRef {
   readonly label = input<string>();
 
   readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
-  readonly originalDescription =
-    this.element.nativeElement.getAttribute('aria-describedby');
 
   private readonly fieldInvalid = signal(false);
   protected readonly ariaInvalid = computed(() =>

@@ -9,8 +9,6 @@ import type { ElementRef } from '@angular/core';
 export abstract class PtahFieldControlRef {
   /** The labelable element: the native control or the combobox trigger. */
   abstract readonly element: ElementRef<HTMLElement>;
-  /** `aria-describedby` that the consumer set before the field added its own id. */
-  abstract readonly originalDescription: string | null;
   /** The id that the control binds itself. The field uses it for `label[for]`. */
   readonly controlId?: string;
   /** The field calls this when its `error` input changes. */

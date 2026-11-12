@@ -50,7 +50,11 @@ import { CanvasStore } from './canvas.store';
 import { CanvasDetailService } from './canvas-detail/canvas-detail.service';
 import { CanvasLayoutService } from './canvas-layout.service';
 import { CanvasLayoutPersistenceService } from './canvas-layout-persistence.service';
-import { NativePopoverComponent } from '@ptah-extension/ui';
+import {
+  NativePopoverComponent,
+  PtahFieldComponent,
+  PtahInputDirective,
+} from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-canvas-rail-board',
@@ -361,8 +365,16 @@ describe('OrchestraCanvasComponent workspace effects', () => {
     const composer = document.createElement('input');
     document.body.append(anchor, composer);
     try {
-      Reflect.apply(Reflect.get(fixture.componentInstance, 'openNewSessionPopover'), fixture.componentInstance, [anchor]);
-      Reflect.apply(Reflect.get(fixture.componentInstance, 'handleCancelSession'), fixture.componentInstance, []);
+      Reflect.apply(
+        Reflect.get(fixture.componentInstance, 'openNewSessionPopover'),
+        fixture.componentInstance,
+        [anchor],
+      );
+      Reflect.apply(
+        Reflect.get(fixture.componentInstance, 'handleCancelSession'),
+        fixture.componentInstance,
+        [],
+      );
       composer.focus();
       canAddTile.set(false);
       fixture.detectChanges();
@@ -378,7 +390,10 @@ describe('OrchestraCanvasComponent workspace effects', () => {
     canStartRunningSession.set(false);
     const anchor = document.createElement('button');
     const instance = fixture.componentInstance;
-    const open = () => Reflect.apply(Reflect.get(instance, 'openNewSessionPopover'), instance, [anchor]);
+    const open = () =>
+      Reflect.apply(Reflect.get(instance, 'openNewSessionPopover'), instance, [
+        anchor,
+      ]);
     const notice = () => Reflect.get(instance, 'boardNotice')();
     open();
     const firstKey = notice()?.key;
@@ -392,7 +407,8 @@ describe('OrchestraCanvasComponent workspace effects', () => {
   it('shows a dismissed write-failure notice after another failed write', () => {
     const fixture = mount();
     const instance = fixture.componentInstance;
-    const notice = () => Reflect.get(instance, 'boardNotice')() as { key: string } | null;
+    const notice = () =>
+      Reflect.get(instance, 'boardNotice')() as { key: string } | null;
     writeFailed.set(true);
     flush();
     const firstKey = notice()?.key;
@@ -884,6 +900,8 @@ describe('OrchestraCanvasComponent dock and viewport allocation', () => {
           LucideAngularModule,
           RailBoardStub,
           NativePopoverComponent,
+          PtahFieldComponent,
+          PtahInputDirective,
         ],
         providers: [
           CanvasStore,
@@ -932,7 +950,9 @@ describe('OrchestraCanvasComponent dock and viewport allocation', () => {
       ),
     ).toBeNull();
     expect(observeSpy).toHaveBeenCalledWith(viewport);
-    const interactive = fixture.nativeElement.querySelector('[data-testid="canvas-interactive"]');
+    const interactive = fixture.nativeElement.querySelector(
+      '[data-testid="canvas-interactive"]',
+    );
     expect(interactive).not.toBeNull();
     expect(interactive.querySelector('ptah-canvas-rail-board')).not.toBeNull();
   });

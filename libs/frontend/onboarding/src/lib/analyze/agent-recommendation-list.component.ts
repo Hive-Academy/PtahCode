@@ -10,7 +10,7 @@ import type {
   AgentCategory,
   AgentRecommendation,
 } from '@ptah-extension/shared';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahCheckboxDirective } from '@ptah-extension/ui';
 
 const CATEGORIES = [
   { key: 'planning', label: 'Planning & Architecture' },
@@ -56,7 +56,7 @@ export function criteriaOf(agent: AgentRecommendation): readonly string[] {
 @Component({
   selector: 'ptah-agent-recommendation-list',
   standalone: true,
-  imports: [LucideAngularModule, PtahButtonDirective],
+  imports: [LucideAngularModule, PtahButtonDirective, PtahCheckboxDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -114,7 +114,9 @@ export function criteriaOf(agent: AgentRecommendation): readonly string[] {
               >
                 <input
                   type="checkbox"
-                  class="checkbox checkbox-sm mt-0.5"
+                  ptahCheckbox
+                  size="sm"
+                  class="mt-0.5"
                   [checked]="isSelected(row.agent.agentId)"
                   [disabled]="disabled()"
                   [attr.aria-label]="'Select ' + row.agent.agentName"

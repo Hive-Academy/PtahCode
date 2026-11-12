@@ -25,6 +25,7 @@ import {
   resolveListingBrandSlug,
   type CatalogCardBadge,
   PtahButtonDirective,
+  PtahInputDirective,
 } from '@ptah-extension/ui';
 import type {
   McpRegistryEntry,
@@ -153,6 +154,7 @@ const VERIFIED_BADGE: CatalogCardBadge = { label: 'Verified', tone: 'info' };
   standalone: true,
   imports: [
     PtahButtonDirective,
+    PtahInputDirective,
     LucideAngularModule,
     JsonSchemaFormComponent,
     BrandMarkComponent,
@@ -189,9 +191,11 @@ const VERIFIED_BADGE: CatalogCardBadge = { label: 'Verified', tone: 'info' };
             }
             <form class="space-y-2" (submit)="saveKey($event)">
               <input
+                ptahInput
+                size="sm"
                 type="password"
                 autocomplete="off"
-                class="input input-bordered input-sm w-full text-xs"
+                class="w-full text-xs"
                 placeholder="Smithery API key"
                 [value]="keyInput()"
                 (input)="onKeyInput($event)"
@@ -350,8 +354,10 @@ const VERIFIED_BADGE: CatalogCardBadge = { label: 'Verified', tone: 'info' };
               <lucide-angular [img]="SearchIcon" class="w-3.5 h-3.5" />
             </span>
             <input
+              ptahInput
+              size="sm"
               type="text"
-              class="input input-bordered input-sm w-full pl-8 text-xs"
+              class="w-full pl-8 text-xs"
               placeholder="Search Smithery servers..."
               [value]="searchQuery()"
               (input)="onSearchInput($event)"
