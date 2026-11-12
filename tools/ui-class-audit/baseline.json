@@ -656,10 +656,17 @@
     "input-sm": 1
   },
   "libs/frontend/cron-scheduler-ui/src/lib/components/cron-job-card.component.ts": {
-    "<dynamic>": 1
+    "<dynamic>": 1,
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-square": 1,
+    "btn-xs": 1
   },
   "libs/frontend/cron-scheduler-ui/src/lib/components/cron-job-detail-drawer.component.ts": {
-    "<dynamic>": 2
+    "<dynamic>": 2,
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-sm": 1
   },
   "libs/frontend/cron-scheduler-ui/src/lib/components/cron-scheduler-tab.component.ts": {
     "alert": 1,
