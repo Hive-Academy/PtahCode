@@ -1,47 +1,34 @@
-# Team-Leader Integration
+# Phase Mode Compatibility
 
-The team-leader decomposes, verifies and commits. It is **advisory**: it spawns nothing, and every
-return tells you, the orchestrator, what to spawn next. Its own agent definition owns the
-`batches.md` schema, the executor heuristics and the verification steps — this file covers only your
-side of the exchange.
+The orchestrator owns the phase exchange. The `batch` kind decomposes and recommends executors without spawning. Each phase acceptance step verifies reports, records state and commits under the existing gate protocol. The `completion` kind audits final evidence and presents QA options. Phase definitions own the discipline; this file retains the legacy Mode 1/2/3 mapping and orchestration rules.
 
 ---
 
-## Modes
+## Mode compatibility mapping
 
-| Mode                  | Invoke when                                                                                                   | It produces                                                               |
-| --------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| 1 — Decomposition     | Architect approved (BUGFIX: plan-free, after init and any required research/design gate); no `batches.md` yet | `batches.md`, Batch 1 marked `IN_PROGRESS`                                |
-| 2 — Verify and commit | An executor returned a report, or a phase review verdict is ready                                             | A commit plus the next assignment, a phase review request, or a rejection |
-| 3 — Completion        | Every batch is `COMPLETE`                                                                                     | Final verification summary and QA options                                 |
+| Legacy mode | Active phase step | Invoke when | Produces |
+| --- | --- | --- | --- |
+| Mode 1 -> Decomposition | `batch` -> `../phases/batch.md` | Architecture approved, or plan-free BUGFIX after initialization and required research/design gate; no `batches.md` yet | `batches.md`, Batch 1 `IN_PROGRESS` |
+| Mode 2 -> Verify and commit | Orchestrator acceptance step of each phase -> `../phases/<kind>.md` | Executor report or phase review verdict ready | Scoped checks, independent review, commit/status and gate evidence; next assignment, review request or rejection |
+| Mode 3 -> Completion | `completion` -> `../phases/completion.md` | Every batch `COMPLETE` | Final verification summary and QA options |
 
-```typescript
-Task({
-  subagent_type: 'team-leader',
-  description: 'Mode <N> for TASK_[ID]',
-  prompt: `You are team-leader for TASK_[ID].
-
-**Task Folder**: <absolute path>
-**MODE**: <1 - DECOMPOSITION | 2 - VERIFY AND COMMIT | 3 - COMPLETION>
-<Mode 2 only — the executor report path; on return from a phase review, the review path with the one-line verdict>`,
-});
-```
+Pass the absolute task folder, mode-equivalent kind or acceptance step, and relevant report paths to a fresh invocation. For acceptance, supply the batch report path and, when available, the review path and one-line verdict. Require a file deliverable and `WROTE: <absolute path>` confirmation.
 
 ## Lean orchestration rules
 
-- Every Mode 2/3 call is a **fresh** team-leader `Task()`. In Mode 2, give it the batch report path
-  (plus the review path only when you return with a phase review verdict) rather than resuming an earlier team-leader with its long thread.
-- Mode 1 writes `batches.md`. Each self-contained batch entry records its id and state; shape
+- Every acceptance/completion invocation is fresh. In Mode 2, give it the batch report path
+  (plus the review path only when you return with a phase review verdict) rather than resuming an earlier orchestrator with its long thread.
+- The `batch` kind writes `batches.md`. Each self-contained batch entry records its id and state; shape
   (`mechanical|logic|contract|test|docs|review`); estimated weight (read-set plus write-set tokens
   measured with `ptah_count_tokens`, plus 10% framing); actual lane tokens (`pending` until measured,
   `unavailable` if unknown, never guessed); write set; read set with line ranges; inline contract
   excerpts; dependencies; parallel-safe flag; routed executor/tier/effort/reason; exact verify command
   (`npm run verify -- -p A,B`); and acceptance criteria.
-- Mode 2 records actual lane tokens beside each batch estimate in `batches.md` for calibration by shape.
+- Each acceptance step records actual lane tokens beside each batch estimate in `batches.md` for calibration by shape.
 - "Re-invoke the same executor" (below) means resume it only if its last activity was under
   5 minutes ago; otherwise start a fresh one with the batch section and the report paths.
 - Risk-based review: no per-batch review; each batch passes its scoped typecheck, lint and tests
-  before commit. One independent code-logic review per phase on the combined diff, requested by the team-leader
+  before commit. One independent code-logic review per phase on the combined diff, requested by the orchestrator
   after the phase's last batch commits; none for a phase whose batches change only types, tests,
   docs or measurement; a style review only for new public API. Assign the code-logic review to a
   capable different-family lane when available. A same-family or subagent fallback needs its
@@ -52,22 +39,22 @@ Task({
 
 ## Completion checks
 
-Mode 3 verifies `parity-inventory.md` row by row: each capability stays, moves with its proving
+The `completion` kind verifies `parity-inventory.md` row by row: each capability stays, moves with its proving
 test, or has a user-approved removal. A missing, unapproved capability blocks completion.
-UI batches require visual-reviewer screenshots in dark + light themes against the approved
+UI batches require visual-review screenshots in dark + light themes against the approved
 `<taskFolder>/prototype/`, or — for a UI change with no added/redesigned surface and so no
 prototype — before/after screenshots (dark + light) of the affected screen (the "before" screenshots
 captured from the base commit, before the fix lands), shown to the user before merge; typecheck/test/lint alone do not suffice.
-Check the lane's tool list; lanes that have `ptah_browser_*` render and screenshot their own UI; the visual-reviewer still gives the independent dark+light evidence.
+Check the lane's tool list; lanes that have `ptah_browser_*` render and screenshot their own UI; the visual-review still gives the independent dark+light evidence.
 For changed persisted settings/config/storage writes, require a **write-path trace** to each
 runtime reader (key, scope, value format, side effects such as env vars), confirming unchanged or
 intended behaviour. Missing evidence goes back for verification before `TASK COMPLETE`.
 
-Mode 1 receives the plan, document reviews and recorded user gate decisions the selected flow
+The `batch` kind receives the plan, document reviews and recorded user gate decisions the selected flow
 requires (including open items the user accepted). **BUGFIX is plan-free**: decompose from `task.md`,
 `context.md` and `research-report.md` when present; `implementation-plan.md` is not required.
 Missing or stale required evidence (including any required design gate) is a blocker for you.
-Mode 3 checks that this evidence still applies and that every phase that changed shipping code has its
+The `completion` kind checks that this evidence still applies and that every phase that changed shipping code has its
 accepting code-logic review; it never commissions another document review. When a flow legitimately skips an artifact,
 its approval and review are not required either.
 For each reviewed phase, the `### Next action:` return and Mode 3 summary must identify the actual
@@ -83,12 +70,12 @@ you are in.
 | Return heading              | Your action                                                                                                                                                                                                                                                                                                                                                                                          |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DECOMPOSITION COMPLETE`    | Spawn Batch 1's executor (below)                                                                                                                                                                                                                                                                                                                                                                     |
-| `DECOMPOSITION BLOCKED`     | Plan-free BUGFIX: return the blocking questions to the orchestrator, who runs Gate SR or commissions researcher-expert, then re-invokes Mode 1; no software-architect/Gate 2 for a flow without a plan. Planned flows: re-invoke software-architect with the blocking issues, refresh the document review, then Gate 2 again.                                                                        |
+| `DECOMPOSITION BLOCKED`     | Plan-free BUGFIX: return the blocking questions to the orchestrator, who runs Gate SR or commissions research, then re-invokes `batch`; no architecture/Gate 2 for a flow without a plan. Planned flows: re-invoke architecture with the blocking issues, refresh the document review, then Gate 2 again.                                                                        |
 | `BATCH [N] PARTIAL FAILURE` | Re-invoke the same executor for the missing tasks only                                                                                                                                                                                                                                                                                                                                               |
-| `NEEDS REVIEW`              | A phase review is due. For shipping code, select an independent capable reviewer from a different family than the implementer when available (agent-lanes §6). Use an eligible existing review if present; otherwise obtain the combined-diff `code-logic-review.md` and any additional named review. Record actual executor, author/reviewer families and any same-family weaker-evidence reason or `Subagent reason`. Re-invoke Mode 2 with each actual report path (`code-logic-review.md`, `code-style-review.md`, `visual-review.md` as applicable) and verdict |
-| `BATCH [N] NOT ACCEPTED`    | Re-invoke the same executor with the listed issues (a failing scoped check, or the fix batch for a rejected phase review), then Mode 2 again                                                                                                                                                                                                                                                         |
+| `NEEDS REVIEW`              | A phase review is due. For shipping code, select an independent capable reviewer from a different family than the implementer when available (agent-lanes §6). Use an eligible existing review if present; otherwise obtain the combined-diff `code-logic-review.md` and any additional named review. Record actual executor, author/reviewer families and any same-family weaker-evidence reason or `Subagent reason`. Repeat acceptance with each actual report path (`code-logic-review.md`, `code-style-review.md`, `visual-review.md` as applicable) and verdict |
+| `BATCH [N] NOT ACCEPTED`    | Re-invoke the same executor with the listed issues (a failing scoped check, or the fix batch for a rejected phase review), then acceptance again                                                                                                                                                                                                                                                         |
 | `BATCH [N] COMPLETE`        | Spawn the next batch's executor                                                                                                                                                                                                                                                                                                                                                                      |
-| `ALL BATCHES COMPLETE`      | Invoke Mode 3                                                                                                                                                                                                                                                                                                                                                                                        |
+| `ALL BATCHES COMPLETE`      | Invoke `completion`                                                                                                                                                                                                                                                                                                                                                                                        |
 | `TASK COMPLETE`             | Present Gate 3 with the options it returned                                                                                                                                                                                                                                                                                                                                                          |
 
 A hook failure during its commit is your gate: [git-standards.md](git-standards.md#hook-failure-protocol).
@@ -96,7 +83,7 @@ A hook failure during its commit is your gate: [git-standards.md](git-standards.
 ## Spawning a batch executor
 
 Read that batch entry's executor, tier, effort and parallel-safe flag in `batches.md`. Build each
-executor prompt **only** from that entry plus the generic lane policy and role; do not paste the
+executor prompt **only** from that entry plus the generic lane policy and kind; do not paste the
 plan, `context.md` or other batches. The entry must contain everything the executor needs.
 
 When `ptah_route_decide` is listed, make the post-decomposition routing call with each batch as a phase with its `shape` and `weight`;
@@ -112,13 +99,13 @@ setting -> native CLI default.
 
 - **Sequential, subagent** → one `Task()` with the prompt built from that batch entry.
 - **Sequential, CLI lane** → one capable lane for the bounded batch, including coupled files;
-  give it the self-contained task prompt and verify its report before Mode 2.
+  give it the self-contained task prompt and verify its report before acceptance.
 - **Parallel, CLI lanes** → one lane per task, file-disjoint, each with a self-contained prompt built
   from its task in that batch entry. Run them per the `agent-lanes` skill; merge the lane results into **one**
-  implementation report; re-invoke Mode 2 with it.
+  implementation report; repeat acceptance with it.
 - **Recommended executor unavailable** (lanes disabled at Gate 0.1, or no such lane) → use the
   batch's `Fallback executor`.
 
-Who may spawn what, and the per-role hand-offs: [lane-assignment.md](lane-assignment.md).
+Who may spawn what, and phase-kind hand-offs: [lane-assignment.md](lane-assignment.md).
 
-Executors never edit `batches.md` and never commit; the team-leader owns both.
+Executors never edit `batches.md` and never commit; the orchestrator owns both.
