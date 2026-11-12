@@ -1,9 +1,21 @@
-import { trustedContextWindow, type SessionBudgetState, type SessionStatsEntry } from '@ptah-extension/shared';
+import {
+  trustedContextWindow,
+  type SessionBudgetState,
+  type SessionStatsEntry,
+} from '@ptah-extension/shared';
 import type { LiveModelStats } from './session-stats-summary.component';
 import type { StatsLimitViewModel } from './plan-limits/stats-limit-view-model.types';
 import type { SessionLimitSummary } from './plan-limits/session-limit-summary';
-import { budgetTooltip, costTooltip, tokensTooltip } from './session-budget-format';
-import { formatCost, formatDuration, formatTokens } from './session-stats-format';
+import {
+  budgetTooltip,
+  costTooltip,
+  tokensTooltip,
+} from './session-budget-format';
+import {
+  formatCost,
+  formatDuration,
+  formatTokens,
+} from './session-stats-format';
 import { costBasisLabel } from '../../atoms/cost-badge.component';
 
 export interface SessionStatsInputs {
@@ -31,7 +43,12 @@ export const KNOWN_SUBTOTAL_DETAILS =
 export const AGENTS_DETAILS =
   'Unique subagents this session has run, over its whole lifetime.';
 
-export const STATS_EMPTY = { value: '—', context: 'Context unavailable', tokens: 'Tokens unavailable', cost: 'Cost unavailable' } as const;
+export const STATS_EMPTY = {
+  value: '—',
+  context: 'Context unavailable',
+  tokens: 'Tokens unavailable',
+  cost: 'Cost unavailable',
+} as const;
 
 /**
  * Label for a null cost whose narrow cause is a missing published rate. Every
@@ -42,8 +59,9 @@ export const NOT_PRICED = 'Not priced';
 
 /** Accessible label for a null session cost, by its backend-named cause. */
 export function nullCostLabel(s: SessionStatsEntry | null): string {
-  return s !== null && s.totalCost === null &&
-      s.costUnavailableReason === 'rate-missing'
+  return s !== null &&
+    s.totalCost === null &&
+    s.costUnavailableReason === 'rate-missing'
     ? NOT_PRICED
     : STATS_EMPTY.cost;
 }
@@ -55,11 +73,19 @@ function withEstimateLine(text: string | null): string {
   return text ? `${ESTIMATE_LINE}\n\n${text}` : ESTIMATE_LINE;
 }
 
-export function sessionContextCue(live: LiveModelStats | null): SessionContextCue {
-  const trustedWindow = live ? trustedContextWindow(live.contextCapacity, live.model) : null;
-  const known = !!live && live.contextKnown !== false &&
-    Number.isFinite(live.contextUsed) && live.contextUsed >= 0 &&
-    Number.isFinite(live.contextPercent) && trustedWindow !== null &&
+export function sessionContextCue(
+  live: LiveModelStats | null,
+): SessionContextCue {
+  const trustedWindow = live
+    ? trustedContextWindow(live.contextCapacity, live.model)
+    : null;
+  const known =
+    !!live &&
+    live.contextKnown !== false &&
+    Number.isFinite(live.contextUsed) &&
+    live.contextUsed >= 0 &&
+    Number.isFinite(live.contextPercent) &&
+    trustedWindow !== null &&
     live.contextWindow === trustedWindow;
   return {
     hasLive: !!live,
@@ -70,7 +96,10 @@ export function sessionContextCue(live: LiveModelStats | null): SessionContextCu
   };
 }
 
-export function contextDetailsText(live: LiveModelStats | null, compactions: number): string | null {
+export function contextDetailsText(
+  live: LiveModelStats | null,
+  compactions: number,
+): string | null {
   if (!live) return STATS_EMPTY.context;
   const text = !sessionContextCue(live).known
     ? STATS_EMPTY.context
@@ -84,7 +113,10 @@ export function contextDetailsText(live: LiveModelStats | null, compactions: num
     : text;
 }
 
-export function tokenDetailsText(s: SessionStatsEntry | null, b: SessionBudgetState | null): string {
+export function tokenDetailsText(
+  s: SessionStatsEntry | null,
+  b: SessionBudgetState | null,
+): string {
   let breakdown: string = STATS_EMPTY.tokens;
   if (s) {
     const t = s.tokens;
@@ -93,44 +125,56 @@ export function tokenDetailsText(s: SessionStatsEntry | null, b: SessionBudgetSt
       `Output: ${t.output.toLocaleString()}`,
       `Cache Read: ${t.cacheRead.toLocaleString()}`,
       `Cache Creation: ${t.cacheCreation.toLocaleString()}`,
-      typeof s.tokenCount === 'number' ? `Total: ${s.tokenCount.toLocaleString()}` : 'Total: unavailable',
+      typeof s.tokenCount === 'number'
+        ? `Total: ${s.tokenCount.toLocaleString()}`
+        : 'Total: unavailable',
     ];
-    if (s.coverage === 'partial') lines.push('Some usage could not be counted.');
+    if (s.coverage === 'partial')
+      lines.push('Some usage could not be counted.');
     breakdown = lines.join('\n');
   }
   const budgetLine = budgetTooltip(b, {
-    tokensLabel: typeof s?.tokenCount === 'number' ? formatTokens(s.tokenCount) : '—',
+    tokensLabel:
+      typeof s?.tokenCount === 'number' ? formatTokens(s.tokenCount) : '—',
     totalCost: s?.totalCost ?? null,
   });
   const text = tokensTooltip(b, budgetLine, breakdown);
   return s?.provisional ? withEstimateLine(text) : text;
 }
 
-export function costDetailsText(s: SessionStatsEntry | null, b: SessionBudgetState | null): string | null {
+export function costDetailsText(
+  s: SessionStatsEntry | null,
+  b: SessionBudgetState | null,
+): string | null {
   const basis = costBasisLabel(s?.totalCost, s?.costBasis);
-  const basisDetails = basis === 'estimated'
-    ? 'Estimated cost, not a charge.'
-    : basis === 'covered by subscription'
-      ? 'Published-rate value covered by the subscription, not a charge.'
-      : null;
+  const basisDetails =
+    basis === 'estimated'
+      ? 'Estimated cost, not a charge.'
+      : basis === 'covered by subscription'
+        ? 'Published-rate value covered by the subscription, not a charge.'
+        : null;
   const budgetLine = budgetTooltip(b, {
-    tokensLabel: typeof s?.tokenCount === 'number' ? formatTokens(s.tokenCount) : '—',
+    tokensLabel:
+      typeof s?.tokenCount === 'number' ? formatTokens(s.tokenCount) : '—',
     totalCost: s?.totalCost ?? null,
   });
   const parts = [
     s?.totalCost == null ? nullCostLabel(s) : basisDetails,
     costTooltip(b, budgetLine),
     knownSubtotalOf(s) ? KNOWN_SUBTOTAL_DETAILS : null,
-  ]
-    .filter((part): part is string => part !== null);
+  ].filter((part): part is string => part !== null);
   const text = parts.length ? parts.join('\n\n') : null;
   return s?.provisional ? withEstimateLine(text) : text;
 }
 
-export function knownSubtotalOf(s: SessionStatsEntry | null): { value: number } | null {
-  if (!s || s.totalCost !== null || s.pricingCoverage !== 'partial') return null;
+export function knownSubtotalOf(
+  s: SessionStatsEntry | null,
+): { value: number } | null {
+  if (!s || s.totalCost !== null || s.pricingCoverage !== 'partial')
+    return null;
   return typeof s.knownCost === 'number' && Number.isFinite(s.knownCost)
-    ? { value: s.knownCost } : null;
+    ? { value: s.knownCost }
+    : null;
 }
 
 export function agentCountOf(s: SessionStatsEntry | null): number | null {
@@ -156,7 +200,9 @@ export interface CompactSessionMetric {
   readonly unavailable: boolean;
 }
 
-export function compactSessionMetrics(stats: SessionStatsInputs): readonly CompactSessionMetric[] {
+export function compactSessionMetrics(
+  stats: SessionStatsInputs,
+): readonly CompactSessionMetric[] {
   const snapshot = stats.snapshot;
   const tokens = snapshot?.tokenCount;
   const subtotal = knownSubtotalOf(snapshot);
@@ -167,37 +213,67 @@ export function compactSessionMetrics(stats: SessionStatsInputs): readonly Compa
   const partialTokens = snapshot?.coverage === 'partial';
   const metrics: CompactSessionMetric[] = [
     {
-      id: 'context', label: 'Ctx', value: stats.context.label,
+      id: 'context',
+      label: 'Ctx',
+      value: stats.context.label,
       ariaLabel: stats.context.known
         ? `Context ${stats.context.label}, ${stats.context.usedTokens?.toLocaleString()} tokens used`
         : STATS_EMPTY.context,
       unavailable: !stats.context.known,
     },
     {
-      id: 'tokens', label: 'Tokens',
-      value: typeof tokens === 'number' ? `${estimate}${partialTokens ? '≥' : ''}${formatTokens(tokens)}` : STATS_EMPTY.value,
-      ariaLabel: typeof tokens === 'number' ? `Tokens ${estimatedLabel}${partialTokens ? 'at least ' : ''}${tokens.toLocaleString()}` : STATS_EMPTY.tokens,
+      id: 'tokens',
+      label: 'Tokens',
+      value:
+        typeof tokens === 'number'
+          ? `${estimate}${partialTokens ? '≥' : ''}${formatTokens(tokens)}`
+          : STATS_EMPTY.value,
+      ariaLabel:
+        typeof tokens === 'number'
+          ? `Tokens ${estimatedLabel}${partialTokens ? 'at least ' : ''}${tokens.toLocaleString()}`
+          : STATS_EMPTY.tokens,
       unavailable: typeof tokens !== 'number',
     },
     {
-      id: 'cost', label: 'Cost',
-      value: cost === null
-        ? STATS_EMPTY.value
-        : `${estimate}${subtotal ? '≥' : ''}${formatCost(cost)}${basis ? ` ${basis}` : ''}`,
-      ariaLabel: cost === null
-        ? nullCostLabel(snapshot)
-        : `Cost ${basis === 'estimated' ? '' : estimatedLabel}${subtotal ? 'known subtotal ' : ''}${formatCost(cost).slice(1)} US dollars${basis ? `, ${basis}` : ''}`,
+      id: 'cost',
+      label: 'Cost',
+      value:
+        cost === null
+          ? STATS_EMPTY.value
+          : `${estimate}${subtotal ? '≥' : ''}${formatCost(cost)}${basis ? ` ${basis}` : ''}`,
+      ariaLabel:
+        cost === null
+          ? nullCostLabel(snapshot)
+          : `Cost ${basis === 'estimated' ? '' : estimatedLabel}${subtotal ? 'known subtotal ' : ''}${formatCost(cost).slice(1)} US dollars${basis ? `, ${basis}` : ''}`,
       unavailable: cost === null,
     },
   ];
   const duration = durationMsOf(snapshot);
   if (duration !== null) {
     const value = formatDuration(duration);
-    const spokenDuration = value.replace(/([\d.]+)(ms|m|s)\b/g, (_match: string, amount: string, unit: string) => {
-      const name = unit === 'ms' ? 'millisecond' : unit === 'm' ? 'minute' : 'second';
-      return `${amount} ${name}${Number(amount) === 1 ? '' : 's'}`;
+    const spokenDuration = value.replace(
+      /([\d.]+)(ms|d|h|m|s)\b/g,
+      (_match: string, amount: string, unit: string) => {
+        const name =
+          unit === 'ms'
+            ? 'millisecond'
+            : unit === 'd'
+              ? 'day'
+              : unit === 'h'
+                ? 'hour'
+                : unit === 'm'
+                  ? 'minute'
+                  : 'second';
+        return `${amount} ${name}${Number(amount) === 1 ? '' : 's'}`;
+      },
+    );
+    metrics.push({
+      id: 'time',
+      label: 'Time',
+      value,
+      ariaLabel: `Time ${spokenDuration}`,
+      unavailable: false,
     });
-    metrics.push({ id: 'time', label: 'Time', value, ariaLabel: `Time ${spokenDuration}`, unavailable: false });
   }
   return metrics;
 }

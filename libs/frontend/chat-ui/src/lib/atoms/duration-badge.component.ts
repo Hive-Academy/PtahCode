@@ -1,6 +1,5 @@
 import { Component, input, ChangeDetectionStrategy } from '@angular/core';
-import { formatDurationMs } from '@ptah-extension/shared';
-import { PtahBadgeDirective } from '@ptah-extension/ui';
+import { formatDuration, PtahBadgeDirective } from '@ptah-extension/ui';
 
 /**
  * DurationBadgeComponent - Displays execution duration
@@ -8,9 +7,7 @@ import { PtahBadgeDirective } from '@ptah-extension/ui';
  * Complexity Level: 1 (Simple atom)
  * Patterns: Standalone component, OnPush change detection
  *
- * Formatting lives in the shared `formatDurationMs`
- * (`@ptah-extension/shared`), so this badge and every other surface print the
- * same string for the same duration.
+ * Formatting uses the shared UI duration formatter.
  */
 @Component({
   selector: 'ptah-duration-badge',
@@ -18,7 +15,7 @@ import { PtahBadgeDirective } from '@ptah-extension/ui';
   imports: [PtahBadgeDirective],
   template: `
     <span ptahBadge tone="neutral">
-      {{ formatDurationMs(durationMs()) }}
+      {{ formatDuration(durationMs()) }}
     </span>
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -26,6 +23,5 @@ import { PtahBadgeDirective } from '@ptah-extension/ui';
 export class DurationBadgeComponent {
   readonly durationMs = input.required<number>();
 
-  /** Shared formatter; values below 100 are seconds, not milliseconds. */
-  protected readonly formatDurationMs = formatDurationMs;
+  protected readonly formatDuration = formatDuration;
 }

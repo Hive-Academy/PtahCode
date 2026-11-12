@@ -7,6 +7,8 @@
 import type { DashboardSessionEntry } from '../models/session-analytics.models';
 import {
   costValueClass,
+  formatDuration,
+  formatRelativeTime,
   formatSessionCost,
   sessionCostPerMessage,
   sessionCoverageNotes,
@@ -45,6 +47,37 @@ const partial = session({
   totalCost: null,
   knownCost: 3,
   pricingCoverage: 'partial',
+});
+
+describe('format.utils duration wrappers', () => {
+  it.each([
+    [0, '0s'],
+    [45_000, '45s'],
+    [2_525_000, '42m 5s'],
+    [11_520_000, '3h 12m'],
+    [187_200_000, '2d 4h'],
+    [-1, '--'],
+    [Number.NaN, '--'],
+    [Number.POSITIVE_INFINITY, '--'],
+  ])('formats %s ms as %s', (ms, expected) => {
+    expect(formatDuration(ms)).toBe(expected);
+  });
+
+  it('formats past timestamps with the owner units and keeps invalid or future values empty', () => {
+    const now = 1_700_000_000_000;
+    const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(now);
+    try {
+      expect(formatRelativeTime(now - 5_000)).toBe('just now');
+      expect(formatRelativeTime(now - 45_000)).toBe('45s ago');
+      expect(formatRelativeTime(now - 90 * 60_000)).toBe('1h ago');
+      expect(formatRelativeTime(now - 45 * 86_400_000)).toBe('45d ago');
+      expect(formatRelativeTime(0)).toBe('');
+      expect(formatRelativeTime(Number.NaN)).toBe('');
+      expect(formatRelativeTime(now + 1_000)).toBe('');
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
 });
 const none = session({
   totalCost: null,
@@ -92,9 +125,9 @@ describe('format.utils — session cost', () => {
       'CLI agent runs (codex) record no cost; they are not included in this estimate.',
     );
     // A session with no usage and no CLI lanes really has none.
-    expect(
-      formatSessionCost(session({ ...cliOnly, cliAgents: [] })),
-    ).toBe('No usage');
+    expect(formatSessionCost(session({ ...cliOnly, cliAgents: [] }))).toBe(
+      'No usage',
+    );
   });
 
   it('keeps state words out of the success colour', () => {

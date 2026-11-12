@@ -10,6 +10,7 @@ import {
   formatTokenCount,
   type AgentStatusWord,
 } from '@ptah-extension/chat-ui';
+import { formatDuration } from '@ptah-extension/ui';
 import type { SessionAgent } from '../../../services/session-agents/session-agent-roster';
 import type { TrayAgentContext } from '../../../services/session-agents/session-agent-tray';
 import type { InspectorRequest } from '../../../services/session-inspector';
@@ -122,12 +123,27 @@ export function agentListTotal(rows: readonly AgentListRow[]): AgentListTotal {
       costPartial = true;
     }
   }
-  const tokensValue = tokenCount ? tokensText(tokens, tokensPartial) ?? NOT_REPORTED_VALUE : NOT_REPORTED_VALUE;
+  const tokensValue = tokenCount
+    ? (tokensText(tokens, tokensPartial) ?? NOT_REPORTED_VALUE)
+    : NOT_REPORTED_VALUE;
   const costValue = costCount
-    ? costText({ tokens: null, tokensPartial: false, cost, costPartial, costEstimated, input: null, output: null }) ?? NOT_REPORTED_VALUE
+    ? (costText({
+        tokens: null,
+        tokensPartial: false,
+        cost,
+        costPartial,
+        costEstimated,
+        input: null,
+        output: null,
+      }) ?? NOT_REPORTED_VALUE)
     : NOT_REPORTED_VALUE;
   const title = `Total of ${rows.length} agents · ${rows.length - tokenCount} without token data · ${rows.length - costCount} without cost data`;
-  return { tokens: tokensValue, cost: costValue, title, ariaLabel: `Total for all agents: ${tokensValue} tokens, ${costValue} cost` };
+  return {
+    tokens: tokensValue,
+    cost: costValue,
+    title,
+    ariaLabel: `Total for all agents: ${tokensValue} tokens, ${costValue} cost`,
+  };
 }
 
 /** `In 1.1M · Out 48.0k`; one unknown side shows `—`, both unknown is `null`. */
@@ -179,7 +195,10 @@ export function agentListRow(input: AgentRowInput): AgentListRow {
     tokensTitle: inOut ?? NOT_REPORTED_TITLE,
     cost: cost ?? NOT_REPORTED_VALUE,
     usage,
-    time: input.durationMs === null ? NOT_REPORTED_VALUE : formatDuration(input.durationMs),
+    time:
+      input.durationMs === null
+        ? NOT_REPORTED_VALUE
+        : formatDuration(input.durationMs),
     usageLabel,
     ariaLabel: `${label}. ${model}${usageLabel}${startedAtTitle ? `. ${startedAtTitle}` : ''}`,
     requests: input.requests,
@@ -191,13 +210,9 @@ export function agentListRow(input: AgentRowInput): AgentListRow {
 function formatStartedAt(timestamp: number | null): string | null {
   if (timestamp === null || !Number.isFinite(timestamp)) return null;
   const date = new Date(timestamp);
-  return Number.isNaN(date.getTime()) ? null : `Started: ${date.toLocaleString()}`;
-}
-
-function formatDuration(ms: number): string {
-  const seconds = Math.max(0, Math.floor(ms / 1000));
-  const minutes = Math.floor(seconds / 60);
-  return minutes ? `${minutes}m ${String(seconds % 60).padStart(2, '0')}s` : `${seconds}s`;
+  return Number.isNaN(date.getTime())
+    ? null
+    : `Started: ${date.toLocaleString()}`;
 }
 
 /** The kind label shown on the second line of a non-Orchestrator row. */
