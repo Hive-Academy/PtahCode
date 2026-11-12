@@ -161,14 +161,9 @@ export class UiGalleryComponent {
     { id: 'family-ring', label: 'Ring family' },
     { id: 'family-sparkline', label: 'Sparkline family' },
     { id: 'family-stat', label: 'Stat family' },
-    { id: 'components-buttons', label: 'Buttons' },
-    { id: 'components-fields', label: 'Fields' },
-    { id: 'components-metrics', label: 'Metrics' },
     { id: 'components-list-detail', label: 'List and detail' },
     { id: 'components-inbox-layout', label: 'Inbox layout' },
-    { id: 'components-statuses', label: 'Statuses' },
     { id: 'components-states', label: 'States' },
-    { id: 'components-meters', label: 'Meters' },
     { id: 'components-surfaces', label: 'Surfaces' },
   ];
 
