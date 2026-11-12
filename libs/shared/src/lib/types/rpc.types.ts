@@ -17,6 +17,57 @@ import type {
   UsageSummaryParams,
 } from './rpc/rpc-analytics.types';
 import type { WorkspaceListRecentResult } from './rpc/rpc-workspace.types';
+
+/** Stack fields of the deep analysis accepted by the skill RPC boundary. */
+export interface DeepProjectAnalysis {
+  projectType: string | number;
+  frameworks: string[];
+}
+
+/** A skills.sh entry recommended for the detected project stack. */
+export interface SkillRecommendation {
+  skill: SkillShEntry;
+  evidence: string;
+  score: number;
+}
+
+export interface ProjectGuidance {
+  category: string;
+  label: 'follow' | 'tolerate' | 'do_not_copy';
+  fact: string;
+  evidence?: string;
+}
+
+export interface SkillConsentRecord {
+  skillName: string;
+  contentHash: string;
+  consentDate: string;
+}
+
+export interface WizardRecommendSkillsParams {
+  analysis: DeepProjectAnalysis;
+}
+export interface WizardRecommendSkillsResponse {
+  skills: SkillRecommendation[];
+}
+export interface WizardSearchSkillsParams {
+  query: string;
+}
+export interface WizardSearchSkillsResponse {
+  skills: SkillShEntry[];
+}
+export type WizardGetProjectGuidanceParams = Record<string, never>;
+export interface WizardGetProjectGuidanceResponse {
+  facts: ProjectGuidance[];
+}
+export interface WizardInstallSkillsWithConsentParams {
+  skills: string[];
+  consentRecords: SkillConsentRecord[];
+}
+export interface WizardInstallSkillsWithConsentResponse {
+  success: boolean;
+  installed: string[];
+}
 import type { CliLaneDefaults } from './cli-lane-defaults.types';
 import type { CodexSandboxMode } from './advanced-settings.types';
 export * from './rpc/rpc-config.types';
@@ -1121,12 +1172,30 @@ export interface RpcMethodRegistry
     params: DisplayWindowActionParams;
     result: DisplayWindowActionResult;
   };
-  'gitWindow:open': { params: GitWindowOpenParams; result: GitWindowOpenResult };
-  'gitWindow:close': { params: GitWindowCloseParams; result: GitWindowCloseResult };
-  'gitWindow:status': { params: GitWindowStatusParams; result: GitWindowStatusResult };
-  'gitWindow:publishScope': { params: GitWindowPublishScopeParams; result: GitWindowPublishScopeResult };
-  'gitWindow:getScope': { params: GitWindowGetScopeParams; result: GitWindowGetScopeResult };
-  'gitWindow:setMode': { params: GitWindowSetModeParams; result: GitWindowSetModeResult };
+  'gitWindow:open': {
+    params: GitWindowOpenParams;
+    result: GitWindowOpenResult;
+  };
+  'gitWindow:close': {
+    params: GitWindowCloseParams;
+    result: GitWindowCloseResult;
+  };
+  'gitWindow:status': {
+    params: GitWindowStatusParams;
+    result: GitWindowStatusResult;
+  };
+  'gitWindow:publishScope': {
+    params: GitWindowPublishScopeParams;
+    result: GitWindowPublishScopeResult;
+  };
+  'gitWindow:getScope': {
+    params: GitWindowGetScopeParams;
+    result: GitWindowGetScopeResult;
+  };
+  'gitWindow:setMode': {
+    params: GitWindowSetModeParams;
+    result: GitWindowSetModeResult;
+  };
   'analytics:spendSummary': {
     params: UsageSummaryParams;
     result: UsageSummary;
@@ -1236,7 +1305,11 @@ export interface RpcMethodRegistry
     result: SessionHandoffChainResult;
   };
   'session:handoffCloseResult': {
-    params: { requestId: string; outcome: 'closed' | 'absent' | 'blocked'; blockerCode?: import('./messages/session-handoff').HandoffCloseBlockerCode };
+    params: {
+      requestId: string;
+      outcome: 'closed' | 'absent' | 'blocked';
+      blockerCode?: import('./messages/session-handoff').HandoffCloseBlockerCode;
+    };
     result: { accepted: boolean };
   };
   'session:linkTask': {
@@ -1453,6 +1526,22 @@ export interface RpcMethodRegistry
   'wizard:recommend-agents': {
     params: WizardRecommendAgentsParams;
     result: WizardRecommendAgentsResponse;
+  };
+  'wizard:recommend-skills': {
+    params: WizardRecommendSkillsParams;
+    result: WizardRecommendSkillsResponse;
+  };
+  'wizard:search-skills': {
+    params: WizardSearchSkillsParams;
+    result: WizardSearchSkillsResponse;
+  };
+  'wizard:get-project-guidance': {
+    params: WizardGetProjectGuidanceParams;
+    result: WizardGetProjectGuidanceResponse;
+  };
+  'wizard:install-skills-with-consent': {
+    params: WizardInstallSkillsWithConsentParams;
+    result: WizardInstallSkillsWithConsentResponse;
   };
   'wizard:cancel-analysis': {
     params: WizardCancelAnalysisParams;
@@ -1760,8 +1849,12 @@ export interface RpcMethodRegistry
   };
   'agent:setConfig': {
     params: AgentSetConfigParams;
-    result: { success: boolean; error?: string;
-      cliLaneDefaults?: CliLaneDefaults; codexSandboxMode?: CodexSandboxMode };
+    result: {
+      success: boolean;
+      error?: string;
+      cliLaneDefaults?: CliLaneDefaults;
+      codexSandboxMode?: CodexSandboxMode;
+    };
   };
   /** Claude built-in tool and skill catalog with the stored opt-ins (TASK_2026_853). */
   'agent:getClaudeBuiltins': {
@@ -3701,6 +3794,10 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'wizard:get-resumable-run': true,
   'wizard:analysis-status': true,
   'wizard:recommend-agents': true,
+  'wizard:recommend-skills': true,
+  'wizard:search-skills': true,
+  'wizard:get-project-guidance': true,
+  'wizard:install-skills-with-consent': true,
   'wizard:cancel-analysis': true,
   'wizard:submit-selection': true,
   'wizard:cancel': true,

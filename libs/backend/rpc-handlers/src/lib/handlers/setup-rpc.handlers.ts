@@ -56,6 +56,14 @@ import type {
   WizardInstallPackAgentsResult,
   WizardPlanPackInstallParams,
   WizardPlanPackInstallResult,
+  WizardRecommendSkillsParams,
+  WizardRecommendSkillsResponse,
+  WizardSearchSkillsParams,
+  WizardSearchSkillsResponse,
+  WizardGetProjectGuidanceParams,
+  WizardGetProjectGuidanceResponse,
+  WizardInstallSkillsWithConsentParams,
+  WizardInstallSkillsWithConsentResponse,
 } from '@ptah-extension/shared';
 import { Result } from '@ptah-extension/shared';
 import type { MultiPhaseManifest } from '@ptah-extension/agent-generation';
@@ -71,6 +79,10 @@ import {
   WizardListAnalysesParamsSchema,
   WizardLoadAnalysisParamsSchema,
   WizardPlanPackInstallParamsSchema,
+  WizardRecommendSkillsParamsSchema,
+  WizardSearchSkillsParamsSchema,
+  WizardGetProjectGuidanceParamsSchema,
+  WizardInstallSkillsWithConsentParamsSchema,
 } from './setup-rpc.schema';
 import { PackInstallService } from './setup/pack-install.service';
 
@@ -103,6 +115,10 @@ export class SetupRpcHandlers {
     'wizard:get-resumable-run',
     'wizard:analysis-status',
     'wizard:recommend-agents',
+    'wizard:recommend-skills',
+    'wizard:search-skills',
+    'wizard:get-project-guidance',
+    'wizard:install-skills-with-consent',
     'wizard:cancel-analysis',
     'wizard:list-analyses',
     'wizard:load-analysis',
@@ -180,6 +196,10 @@ export class SetupRpcHandlers {
     this.registerGetResumableRun();
     this.registerAnalysisStatus();
     this.registerRecommendAgents();
+    this.registerRecommendSkills();
+    this.registerSearchSkills();
+    this.registerGetProjectGuidance();
+    this.registerInstallSkillsWithConsent();
     this.registerCancelAnalysis();
     this.registerListAnalyses();
     this.registerLoadAnalysis();
@@ -945,6 +965,46 @@ export class SetupRpcHandlers {
         this.parse(WizardInstallPackAgentsParamsSchema, rawParams),
       ),
     );
+  }
+
+  private registerRecommendSkills(): void {
+    this.rpcHandler.registerMethod<
+      WizardRecommendSkillsParams,
+      WizardRecommendSkillsResponse
+    >('wizard:recommend-skills', async (rawParams) => {
+      this.parse(WizardRecommendSkillsParamsSchema, rawParams);
+      return { skills: [] };
+    });
+  }
+
+  private registerSearchSkills(): void {
+    this.rpcHandler.registerMethod<
+      WizardSearchSkillsParams,
+      WizardSearchSkillsResponse
+    >('wizard:search-skills', async (rawParams) => {
+      this.parse(WizardSearchSkillsParamsSchema, rawParams);
+      return { skills: [] };
+    });
+  }
+
+  private registerGetProjectGuidance(): void {
+    this.rpcHandler.registerMethod<
+      WizardGetProjectGuidanceParams,
+      WizardGetProjectGuidanceResponse
+    >('wizard:get-project-guidance', async (rawParams) => {
+      this.parse(WizardGetProjectGuidanceParamsSchema, rawParams);
+      return { facts: [] };
+    });
+  }
+
+  private registerInstallSkillsWithConsent(): void {
+    this.rpcHandler.registerMethod<
+      WizardInstallSkillsWithConsentParams,
+      WizardInstallSkillsWithConsentResponse
+    >('wizard:install-skills-with-consent', async (rawParams) => {
+      this.parse(WizardInstallSkillsWithConsentParamsSchema, rawParams);
+      return { success: true, installed: [] };
+    });
   }
 
   /**

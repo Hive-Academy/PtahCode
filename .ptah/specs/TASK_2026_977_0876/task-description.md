@@ -187,7 +187,8 @@ Scope:
 
 Acceptance:
 
-- Setup of this repository selects the Angular, Nx and NestJS skills that the dependencies prove.
+- Setup of this repository selects the Angular and Nx skills that the dependencies prove.
+  It does not select NestJS, because no dependency proves it. A fixture with `@nestjs/core` proves the positive case.
   It does not select a Fastify or Vitest skill.
 - Setup of a repository with weak practices writes labeled facts and asks for the owner decision.
 - No skill is installed without the consent step when it contains scripts.
