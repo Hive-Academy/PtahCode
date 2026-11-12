@@ -310,7 +310,7 @@ Executor facts, checked in the code by the orchestrator:
 | Agent selection loads all templates with score 100. The analysis changes the text only | `libs/backend/agent-generation/src/lib/services/agent-selection.service.ts:61-94` |
 | Agents sync to three provider folders, skills to four | `libs/backend/harness-sync/src/lib/gitignore/harness-state-store.ts:62-83` |
 | Agents need a transform for each provider | `libs/backend/harness-sync/src/lib/targets/transformers/transform-rules.ts:340-373` |
-| Skills sync with no transform | Not checked in the target code. Phase 0 confirms it |
+| Skills sync byte for byte to the Claude target only. The other targets rewrite the frontmatter (drop `allowed-tools`, quote a `description` with colon-space, force `name` to the folder name). The skill body does not change | `libs/backend/harness-sync/src/lib/targets/skill-transform.ts:1-23,114` (Phase 0, `research-report.md` P9) |
 | The tool deny lists are for Claude agent files only, and their purpose is context cost | `libs/backend/agent-generation/src/lib/services/subagent-tool-allowlist.ts:1-24,66-83` |
 | The outcome classifier maps role slugs to task kinds | `libs/backend/lane-outcomes/src/lib/task-kind-mapping.ts:13-43` |
 | The harness wizard designs custom subagents with execution modes and triggers | `libs/backend/rpc-handlers/src/lib/harness/ai/harness-subagent-design.service.ts:25-99` |
@@ -324,6 +324,11 @@ Coupling baseline (lane census, `evidence/coupling-census.md`; class counts are 
 - Non-test TypeScript: 43 files, 200 lines.
 - Tests: 137 files, 934 lines.
 - Orchestration skill: 212 lines in each of two copies. 5 of 9 files differ between the copies.
+
+Enforced baseline (Phase 0, `tools/role-census/baseline.json`): 2,085 lines in 298 files, in 7
+buckets. This number replaces the lane census as the reference for the "census goes down only"
+rule. It is larger because it also counts generated agent files, documents and manifests. The
+check runs in CI next to `degradation-audit`.
 
 Economics baseline (`.ptah/specs/TASK_2026_AGENT_BUDGET/usage-burn-investigation.md`, scan
 2026-11-05 to 2026-11-08):
@@ -339,20 +344,28 @@ External products: `evidence/web-trends.md`, `evidence/web-trends-b.md`.
 
 ## 9. Open points for Phase 0
 
-The review answered points 4, 6 and 7. The answers from the lane for points 1, 2, 3 and 5 are
-partial. The orchestrator did not check them.
+Phase 0 closed each point. "Measured" = a runtime result from Electron. "Code" = the orchestrator
+read the cited lines. Details: `research-report.md` (with its orchestrator addendum),
+`template-classification.md`, `parity-inventory.md` and `evidence/`.
 
-| # | Point | State |
-| --- | --- | --- |
-| 1 | Which copy of the orchestration skill is authored | Open. The validator and one spec read the plugin copy. No copy step was found. Phase 0 selects the source |
-| 2 | Does a child session have the browser tools | Open. It needs a measured tool list from Electron. The MCP caller policy puts the browser tools in the privileged class |
-| 3 | Which providers can a child session use | Partial. The chat runtime has a Claude SDK branch and a Codex app-server branch. Phase 0 lists the profiles |
-| 4 | Do lane permission modes cover the tool deny lists | Answered: no. See Phase 2, tool profile |
-| 5 | Who reads the `executor` field of `batches.md` | Open. The task carrier `executor` is parsed and indexed. No parser of the batch field was found |
-| 6 | Does the usage ledger have a field for a role or a phase kind | Answered: no. See Phase 2, usage by phase kind |
-| 7 | Do the judge and scorecard services depend on role names | Answered: the judge does not. The grade attribution does. See Phase 5 |
-| 8 | Which sections of each template are cross-references to other roles | Open |
-| 9 | Do skills sync to each provider with no transform | Open |
+| # | Point | Answer | Basis |
+| --- | --- | --- | --- |
+| 1 | Which copy of the orchestration skill is authored | The plugin copy `plugins/ptah-core/skills/orchestration/**`. It ships to users and it is the validated copy. No step copies one copy to the other. 5 of 9 files differ and each side has unique edits, so Phase 1 starts with a merge. The `.claude/skills/orchestration` copy has a consumer: the sessions of this repository load it as a project skill | Code: `scripts/generate-content-manifest.js:25,135-138`, `.github/workflows/publish-electron.yml:308-318`, `plugin-loader.service.ts:307-316` |
+| 2 | Does a child session have the browser tools | Yes on the Claude SDK branch. The child listed the 10 `ptah_browser_*` tools and a call of `ptah_browser_status` was successful. Not measured: the Codex app-server branch, and the `navigate` and `screenshot` calls. A tool in the list is not always an effective capability: the child lists `ptah_session_start`, but the host refuses a start from a child | Measured: `evidence/child-session-tool-probe.md`. Code: `sdk-query-options-builder.ts:2272-2288` |
+| 3 | Which providers can a child session use | The chat runtime only: `claude-sdk`, or `codex-app-server` (Electron only). No provider CLI and no Ptah CLI branch can run a child. The list of provider profiles stays open for Phase 2 | Code: `research-report.md` P3 |
+| 4 | Do lane permission modes cover the tool deny lists | No. See Phase 2, tool profile | Review round 1 |
+| 5 | Who reads the `executor` field of `batches.md` | No code routes work from it. One parser reads it for the skill-score harvest: `parseBatchVerdicts`. A rename of the executors must change `normalizeExecutor` and its tests in the same phase | Code: `libs/backend/skill-synthesis/src/lib/spec-extractor.ts:221-233` |
+| 6 | Does the usage ledger have a field for a role or a phase kind | No. See Phase 2, usage by phase kind | Review round 1 |
+| 7 | Do the judge and scorecard services depend on role names | The judge does not. The grade attribution does. See Phase 5 | Review round 1 |
+| 8 | Which sections of each template are cross-references to other roles | Classified for the 14 templates and the 5 shared parts. Most content is discipline. Stack knowledge is small, with the exception of `technical-content-writer` (199 of 343 lines). Team leader Mode 1 becomes `batch`, Mode 3 becomes `completion`, and Mode 2 becomes an acceptance step of the orchestrator | `template-classification.md` |
+| 9 | Do skills sync to each provider with no transform | No. The Claude target only gets a byte copy. The other targets get three frontmatter rewrites. The skill body does not change. OpenCode gets no folder. Grok and Pi have no target | Code: `libs/backend/harness-sync/src/lib/targets/skill-transform.ts:1-23,114` |
+| 10 | Does each provider CLI load a skill by name (U-D9) | Not as U-D9 assumed. `codex` lane: no skill mechanism in the session, load by path only. `Claude Api` lane: the `Skill` tool loads a skill that is in the list of the lane, but the list has none of the workspace engineering skills, and `skillOverrides` refuses `agent-lanes` and `orchestration`. Not measured: `grok`, `Glm`, `kimi code` (at limit), `antigravity`, `copilot`, `cursor`, `opencode`, `pi` | Measured: `evidence/skill-load-probe-codex.md`, `evidence/skill-load-probe-claude-api.md`, `evidence/skill-load-probe-claude-api-2.md`. Code: `codex-lane-config.builder.ts:102`, `sdk-query-options-builder.ts:514-528`, `.gitignore:170` |
+
+Effect of point 10 on U-D9. The `skills` input of a spawn stays a list of names for the caller.
+Phase 2 must resolve each name on the host and deliver the skill to the lane: as a path, or as
+inline text, or (Claude family) as an entry that the capability policy of the lane enables. The
+phase contract must not tell a lane to "load skill X" and assume that the lane can do it. Phase 2
+adds a measured probe for each CLI before it relies on a delivery channel.
 
 ## 10. Risks
 
