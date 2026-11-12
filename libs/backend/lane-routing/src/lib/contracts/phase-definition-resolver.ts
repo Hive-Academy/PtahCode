@@ -1,6 +1,6 @@
 import matter from 'gray-matter';
 import { z } from 'zod';
-import { PHASE_KINDS, type PhaseDefinitionV1, type PhaseKind } from '@ptah-extension/shared';
+import { PHASE_KINDS, PHASE_CONTRACT_VERSION, type PhaseDefinitionV1, type PhaseDispatchV1, type PhaseKind, type PhaseSkillV1 } from '@ptah-extension/shared';
 
 const MATTER_OPTIONS = { language: 'yaml' } as const;
 const list = z.array(z.string().trim().min(1)).min(1);
@@ -17,6 +17,34 @@ const metadataSchema = z.object({
     permission: z.enum(['allow', 'deny', 'prompt']),
   }).strict(),
 }).strict();
+
+const skillSchema = z.object({
+  name: z.string().trim().min(1),
+  path: z.string().trim().min(1).optional(),
+  text: z.string().trim().min(1).optional(),
+}).strict().refine(skill => skill.path !== undefined || skill.text !== undefined);
+
+const dispatchSchema = z.object({
+  version: z.literal(PHASE_CONTRACT_VERSION),
+  kind: z.enum(PHASE_KINDS),
+  text: z.string().trim().min(1),
+  definition: metadataSchema.extend({ discipline: z.object({
+    method: z.string().trim().min(1),
+    outputContract: z.string().trim().min(1),
+    returnValue: z.string().trim().min(1),
+    refusals: z.string().trim().min(1),
+    escalationProtocol: z.string().trim().min(1),
+    reviewerStance: z.string().trim().min(1).optional(),
+  }).strict() }),
+  toolProfile: metadataSchema.shape.toolProfile,
+  skills: z.array(skillSchema).optional(),
+}).strict().superRefine((payload, ctx) => {
+  if (payload.kind !== payload.definition.kind ||
+      JSON.stringify(payload.toolProfile) !== JSON.stringify(payload.definition.toolProfile) ||
+      payload.text !== renderDiscipline(payload.definition.discipline)) {
+    ctx.addIssue({ code: 'custom', message: 'dispatch metadata mismatch' });
+  }
+});
 
 const headings = [
   ['Method', 'method'],
@@ -101,9 +129,41 @@ export function resolvePhaseDefinition(
   if (metadata.data.kind !== kind) throw new PhaseDefinitionError('KIND_MISMATCH', kind);
   const discipline = sectionsFor(kind, parsed.content);
   const definition: PhaseDefinitionV1 = { ...metadata.data, discipline };
-  const text = headings
+  const text = renderDiscipline(discipline);
+  return { text, toolProfile: definition.toolProfile, definition };
+}
+
+function renderDiscipline(discipline: PhaseDefinitionV1['discipline']): string {
+  return headings
     .filter(([heading]) => heading !== 'Reviewer stance' || discipline.reviewerStance)
     .map(([heading, key]) => `## ${heading}\n${discipline[key]}`)
     .join('\n\n');
-  return { text, toolProfile: definition.toolProfile, definition };
+}
+
+/** Validate a handoff before any executor is started. */
+export function parsePhaseDispatch(payload: unknown): PhaseDispatchV1 {
+  const result = dispatchSchema.safeParse(payload);
+  if (!result.success) {
+    const kind = typeof payload === 'object' && payload !== null && 'kind' in payload &&
+      PHASE_KINDS.includes(payload.kind as PhaseKind) ? payload.kind as PhaseKind : 'batch';
+    throw new PhaseDefinitionError('INVALID_SCHEMA', kind);
+  }
+  return result.data;
+}
+
+/** Existing callers may continue using resolvePhaseDefinition without skills. */
+export function resolvePhaseDispatch(
+  kind: PhaseKind,
+  readDefinition: (kind: PhaseKind) => string,
+  skills?: readonly PhaseSkillV1[],
+): PhaseDispatchV1 {
+  const resolved = resolvePhaseDefinition(kind, readDefinition);
+  return parsePhaseDispatch({
+    version: PHASE_CONTRACT_VERSION,
+    kind,
+    text: resolved.text,
+    definition: resolved.definition,
+    toolProfile: resolved.toolProfile,
+    ...(skills === undefined ? {} : { skills }),
+  });
 }
