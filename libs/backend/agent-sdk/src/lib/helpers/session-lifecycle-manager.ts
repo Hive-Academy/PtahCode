@@ -176,6 +176,9 @@ export interface Query {
  * Configuration for executeQuery method
  */
 export interface ExecuteQueryConfig {
+  /** Host-resolved phase and skills delivered to the SDK query. */
+  phase?: import('@ptah-extension/shared').PhaseDispatchV1;
+  skills?: readonly import('@ptah-extension/shared').PhaseSkillV1[];
   /** Session ID to use (tabId for new sessions, real UUID for resume) */
   sessionId: SessionId;
   /** Session configuration (model, workspace, etc.) */

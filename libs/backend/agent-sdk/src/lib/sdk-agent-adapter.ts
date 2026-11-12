@@ -991,6 +991,8 @@ export class SdkAgentAdapter implements IAgentAdapter {
 
   async startChatSession(
     config: AISessionConfig & {
+      phase?: import('@ptah-extension/shared').PhaseDispatchV1;
+      skills?: readonly import('@ptah-extension/shared').PhaseSkillV1[];
       accountSelection?: ProviderAccountSelection;
       tabId: string;
       name?: string;
@@ -1077,6 +1079,8 @@ export class SdkAgentAdapter implements IAgentAdapter {
       accountingAuthEnv,
       capacityRoute,
     } = await this.sessionLifecycle.executeQuery({
+      phase: config.phase,
+      skills: config.skills,
       sessionId: trackingId,
       sessionConfig: sessionConfigWithProfileModel,
       initialPrompt: config.prompt
@@ -1345,6 +1349,8 @@ export class SdkAgentAdapter implements IAgentAdapter {
   async resumeSession(
     sessionId: SessionId,
     config?: AISessionConfig & {
+      phase?: import('@ptah-extension/shared').PhaseDispatchV1;
+      skills?: readonly import('@ptah-extension/shared').PhaseSkillV1[];
       accountSelection?: ProviderAccountSelection;
       mcpServerRunning?: boolean;
       enhancedPromptsContent?: string;
@@ -1482,6 +1488,8 @@ export class SdkAgentAdapter implements IAgentAdapter {
       accountingAuthEnv,
       capacityRoute,
     } = await this.sessionLifecycle.executeQuery({
+      phase: config?.phase,
+      skills: config?.skills,
       sessionId,
       sessionConfig: sessionConfigWithProfileModel,
       resumeSessionId: sessionId as string,

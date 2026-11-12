@@ -15,6 +15,7 @@
 import { injectable, inject } from 'tsyringe';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import {
@@ -1053,6 +1054,7 @@ export type SdkQueryOptions = Options;
 /** Apply the same host-resolved phase and skills to the SDK prompt. */
 export function withPhaseDelivery(
   systemPrompt: Options['systemPrompt'],
+  cwd: string,
   phase?: import('@ptah-extension/shared').PhaseDispatchV1,
   skills?: readonly import('@ptah-extension/shared').PhaseSkillV1[],
 ): Options['systemPrompt'] {
@@ -1060,8 +1062,15 @@ export function withPhaseDelivery(
   const preset = systemPrompt as Extract<Options['systemPrompt'], { type: 'preset' }>;
   return {
     ...preset,
-    append: [preset.append, phase?.text, ...(skills ?? phase?.skills ?? []).map(skill =>
-      `Skill ${skill.name}: ${skill.text ?? readFileSync(skill.path!, 'utf8')}`)].filter(Boolean).join('\n\n'),
+    append: [preset.append, phase?.text, ...(skills ?? phase?.skills ?? []).map(skill => {
+      if (skill.text) return `Skill ${skill.name}: ${skill.text}`;
+      if (!skill.path?.trim()) return undefined;
+      try {
+        return `Skill ${skill.name}: ${readFileSync(resolve(cwd, skill.path), 'utf8')}`;
+      } catch {
+        return undefined;
+      }
+    })].filter(Boolean).join('\n\n'),
   };
 }
 
@@ -1231,6 +1240,8 @@ export class SdkQueryOptionsBuilder {
    */
   async build(input: QueryOptionsInput): Promise<QueryConfig> {
     const {
+      phase,
+      skills,
       userMessageStream,
       abortController,
       sessionConfig,
@@ -1616,7 +1627,7 @@ export class SdkQueryOptionsBuilder {
         model,
         resume: resumeSessionId,
         maxTurns: this.calculateMaxTurns(sessionConfig),
-        systemPrompt: withPhaseDelivery(systemPrompt, input.phase, input.skills),
+        systemPrompt: withPhaseDelivery(systemPrompt, cwd, phase, skills),
         // Flag tier. Fresh per session when a style is active; the shared
         // PTAH_DISABLE_SDK_AUTO_MEMORY constant itself is never mutated (G4),
         // and the `outputStyle` key is absent entirely when no style is

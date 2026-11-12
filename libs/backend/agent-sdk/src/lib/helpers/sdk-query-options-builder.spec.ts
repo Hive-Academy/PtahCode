@@ -30,10 +30,15 @@ import {
 
 describe('SDK phase delivery', () => {
   it('keeps legacy prompts and appends resolved skill text', () => {
-    const prompt = { type: 'preset' as const, preset: 'claude_code' as const, append: 'Existing' };
-    expect(withPhaseDelivery(prompt)).toBe(prompt);
-    expect(withPhaseDelivery(prompt, undefined, [{ name: 'checks', text: 'Verify output' }]))
-      .toEqual({ ...prompt, append: 'Existing\n\nSkill checks: Verify output' });
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'test-'));
+    try {
+      const prompt = { type: 'preset' as const, preset: 'claude_code' as const, append: 'Existing' };
+      expect(withPhaseDelivery(prompt, tmpRoot)).toBe(prompt);
+      expect(withPhaseDelivery(prompt, tmpRoot, undefined, [{ name: 'checks', text: 'Verify output' }]))
+        .toEqual({ ...prompt, append: 'Existing\n\nSkill checks: Verify output' });
+    } finally {
+      rmSync(tmpRoot, { recursive: true });
+    }
   });
 });
 import {
@@ -68,6 +73,7 @@ import type {
   EffectiveCapabilitySet,
   McpHttpServerOverride,
   McpToolProfile,
+  PhaseDispatchV1,
 } from '@ptah-extension/shared';
 
 // ---------------------------------------------------------------------------
@@ -346,6 +352,8 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
   }
 
   interface BuildOverrides {
+    phase?: PhaseDispatchV1;
+    skills?: readonly import('@ptah-extension/shared').PhaseSkillV1[];
     sessionId?: string;
     mcpToolProfile?: McpToolProfile;
     enableFileCheckpointing?: boolean;
@@ -395,6 +403,15 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
     });
     return { options: cfg.options, logger };
   }
+
+  it('includes the supplied phase definition and skills in built SDK query options', async () => {
+    const phase = { version: 1, kind: 'implement', text: 'Implement the change' } as PhaseDispatchV1;
+    const skills = [{ name: 'checks', text: 'Verify output' }];
+    const { options } = await buildWithLogger({ phase, skills });
+    expect(options.systemPrompt).toEqual(expect.objectContaining({
+      append: expect.stringContaining('Implement the change\n\nSkill checks: Verify output'),
+    }));
+  });
 
   it('routes SDK SendMessage through PreToolUse before an auto-allow skips canUseTool', async () => {
     const { options, logger } = await buildWithLogger({
