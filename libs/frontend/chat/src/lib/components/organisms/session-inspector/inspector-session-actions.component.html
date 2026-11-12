@@ -45,7 +45,8 @@
     }
     @if (running()) {
       <button type="button" data-inspector-action="stop"
-        ptahIconButton size="xs" [label]="sessionId() ? 'Stop session' : 'Session not yet saved'" class="size-7 text-state-err hover:bg-error/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+        class="btn btn-ghost btn-xs btn-square size-7 text-state-err hover:bg-error/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+        aria-label="Stop session" [title]="sessionId() ? 'Stop session' : 'Session not yet saved'"
         [disabled]="!sessionId()" (click)="select('stop')">
         <lucide-angular [img]="SquareIcon" class="size-4" aria-hidden="true" />
       </button>

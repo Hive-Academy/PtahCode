@@ -1386,5 +1386,11 @@
     "alert-error": 2,
     "alert-info": 1,
     "alert-warning": 2
+  },
+  "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-session-actions.component.html": {
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-square": 1,
+    "btn-xs": 1
   }
 }
