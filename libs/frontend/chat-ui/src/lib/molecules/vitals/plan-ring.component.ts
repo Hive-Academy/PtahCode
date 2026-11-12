@@ -5,6 +5,8 @@ import {
   input,
 } from '@angular/core';
 
+import { formatDuration } from '@ptah-extension/ui';
+
 import { ProgressRingComponent } from './progress-ring.component';
 
 /** The plan-window reading a plan ring draws. `percent` is 0-100. */
@@ -15,23 +17,6 @@ export interface PlanRingData {
 }
 
 const MINUTE_MS = 60_000;
-const HOUR_MINUTES = 60;
-const DAY_MINUTES = 24 * HOUR_MINUTES;
-
-/** "2h 14m", "3d 4h", "14m"; under one minute reads "<1m". */
-function formatResetDelay(ms: number): string {
-  const minutes = Math.floor(ms / MINUTE_MS);
-  if (minutes < 1) return '<1m';
-  if (minutes < HOUR_MINUTES) return `${minutes}m`;
-  if (minutes < DAY_MINUTES) {
-    const hours = Math.floor(minutes / HOUR_MINUTES);
-    const rest = minutes % HOUR_MINUTES;
-    return rest > 0 ? `${hours}h ${rest}m` : `${hours}h`;
-  }
-  const days = Math.floor(minutes / DAY_MINUTES);
-  const hours = Math.floor((minutes % DAY_MINUTES) / HOUR_MINUTES);
-  return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
-}
 
 /**
  * The caption a stat cell shows under a plan ring: `"<label> · resets in 2h 14m"`,
@@ -42,7 +27,10 @@ export function planRingCaption(ring: PlanRingData): string {
   const { label, resetsInMs } = ring;
   if (resetsInMs === null || !Number.isFinite(resetsInMs)) return label;
   if (resetsInMs <= 0) return `${label} · resets now`;
-  return `${label} · resets in ${formatResetDelay(resetsInMs)}`;
+  // The plan clock ticks every 30 s, so show whole minutes only.
+  const wholeMinutes = Math.floor(resetsInMs / MINUTE_MS) * MINUTE_MS;
+  if (wholeMinutes < MINUTE_MS) return `${label} · resets in <1m`;
+  return `${label} · resets in ${formatDuration(wholeMinutes)}`;
 }
 
 /**
