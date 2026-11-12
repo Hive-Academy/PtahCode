@@ -2,7 +2,6 @@
  * Display formatting for the session stats chips and the per-model table.
  * Pure functions: no Angular, no state.
  */
-import { formatDuration as formatUiDuration } from '@ptah-extension/ui';
 
 /** A dollar figure: `—` for unknown, four decimals below one cent. */
 export function formatCost(cost: number | null): string {
@@ -31,7 +30,16 @@ export function formatOptionalTokens(count: number | undefined): string {
   return typeof count === 'number' ? formatTokens(count) : '—';
 }
 
-/** A duration in the shared compact format. */
+/** A duration: `850ms`, `12.5s`, or `2m 5s`. */
 export function formatDuration(ms: number): string {
-  return formatUiDuration(ms);
+  if (ms < 1000) {
+    return `${ms}ms`;
+  }
+  const seconds = ms / 1000;
+  if (seconds < 60) {
+    return `${seconds.toFixed(1)}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = Math.floor(seconds % 60);
+  return `${minutes}m ${remainingSeconds}s`;
 }

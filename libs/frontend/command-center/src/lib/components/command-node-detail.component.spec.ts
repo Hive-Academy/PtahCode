@@ -69,10 +69,10 @@ describe('CommandNodeDetailComponent', () => {
     expect(text()).toContain('Running for 2m 30s');
     fixture.componentRef.setInput('now', 1_030_000);
     fixture.detectChanges();
-    expect(text()).toContain('Running for 3m');
+    expect(text()).toContain('Running for 3m 0s');
     fixture.componentRef.setInput('node', { ...node, startedAt: 1_040_000 });
     fixture.detectChanges();
-    expect(text()).toContain('Running for 0s');
+    expect(text()).toContain('Running for 0ms');
     fixture.componentRef.setInput('node', {
       ...node,
       state: 'completed',

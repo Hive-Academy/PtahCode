@@ -21,19 +21,19 @@ describe('DurationBadgeComponent', () => {
     expect(fixture.componentInstance).toBeTruthy();
   });
 
-  it('formats sub-second durations as whole seconds', () => {
+  it('formats sub-second durations as ms', () => {
     setDuration(500);
-    expect(fixture.nativeElement.textContent).toContain('0s');
+    expect(fixture.nativeElement.textContent).toContain('500ms');
   });
 
-  it('treats small values as milliseconds', () => {
-    setDuration(2);
-    expect(fixture.nativeElement.textContent).toContain('0s');
+  it('treats values < 100 as seconds and converts to ms', () => {
+    setDuration(2); // 2 seconds → 2000ms → "2.0s"
+    expect(fixture.nativeElement.textContent).toContain('2.0s');
   });
 
-  it('formats sub-minute durations as whole seconds', () => {
+  it('formats sub-minute durations as seconds with one decimal', () => {
     setDuration(12_500);
-    expect(fixture.nativeElement.textContent).toContain('12s');
+    expect(fixture.nativeElement.textContent).toContain('12.5s');
   });
 
   it('formats >= 1 minute durations as minutes + seconds', () => {

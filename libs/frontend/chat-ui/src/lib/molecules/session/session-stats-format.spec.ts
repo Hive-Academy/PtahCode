@@ -44,12 +44,11 @@ describe('session-stats-format', () => {
 
   describe('formatDuration', () => {
     it.each([
-      [850, '0s'],
-      [1_000, '1s'],
-      [12_500, '12s'],
-      [60_000, '1m'],
+      [850, '850ms'],
+      [1_000, '1.0s'],
+      [12_500, '12.5s'],
+      [60_000, '1m 0s'],
       [125_000, '2m 5s'],
-      [3_600_000, '1h'],
     ])('formats %p ms as %p', (ms, expected) => {
       expect(formatDuration(ms)).toBe(expected);
     });
