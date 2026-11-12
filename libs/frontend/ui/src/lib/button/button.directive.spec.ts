@@ -1,6 +1,7 @@
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { PtahButtonDirective } from './button.directive';
+import { PtahButtonAlign, PtahButtonSelectedAs, PtahButtonShape, PtahButtonSize, PtahButtonTone } from './button.types';
 @Component({
   standalone: true,
   imports: [PtahButtonDirective],
@@ -134,6 +135,66 @@ it('marks each host with data-ptah-button so the token look applies', () => {
 class TypeHost {
   readonly inputType = signal<string | undefined>('submit');
 }
+
+@Component({
+  standalone: true,
+  imports: [PtahButtonDirective],
+  template: `<button ptahButton [align]="align()" [shape]="shape()" [tone]="tone()" [size]="size()" [selected]="selected()" [selectedAs]="selectedAs()">Action</button>`,
+})
+class InputsHost {
+  readonly align = signal<PtahButtonAlign>('center');
+  readonly shape = signal<PtahButtonShape>('default');
+  readonly tone = signal<PtahButtonTone>('default');
+  readonly size = signal<PtahButtonSize>('sm');
+  readonly selected = signal<boolean | undefined>(undefined);
+  readonly selectedAs = signal<PtahButtonSelectedAs>('pressed');
+}
+
+it.each([['center', null], ['start', 'start'], ['row', 'row']] as const)('maps align %s to its host attribute', (value, expected) => {
+  const fixture = TestBed.createComponent(InputsHost);
+  fixture.componentInstance.align.set(value);
+  fixture.detectChanges();
+  expect((fixture.nativeElement as HTMLElement).querySelector('button')?.getAttribute('data-align')).toBe(expected);
+});
+
+it.each([['default', null], ['danger', 'danger'], ['muted-danger', 'muted-danger']] as const)('maps tone %s to its host attribute', (value, expected) => {
+  const fixture = TestBed.createComponent(InputsHost);
+  fixture.componentInstance.tone.set(value);
+  fixture.detectChanges();
+  expect((fixture.nativeElement as HTMLElement).querySelector('button')?.getAttribute('data-tone')).toBe(expected);
+});
+
+it.each([['default', false], ['pill', true]] as const)('maps shape %s to btn-pill', (value, expected) => {
+  const fixture = TestBed.createComponent(InputsHost);
+  fixture.componentInstance.shape.set(value);
+  fixture.detectChanges();
+  expect((fixture.nativeElement as HTMLElement).querySelector('button')?.classList.contains('btn-pill')).toBe(expected);
+});
+
+it('maps size lg to btn-lg', () => {
+  const fixture = TestBed.createComponent(InputsHost);
+  fixture.componentInstance.size.set('lg');
+  fixture.detectChanges();
+  expect((fixture.nativeElement as HTMLElement).querySelector('button')?.classList.contains('btn-lg')).toBe(true);
+});
+
+it.each([
+  [undefined, 'pressed', null, null, false],
+  [false, 'pressed', 'false', null, false],
+  [true, 'pressed', 'true', null, true],
+  [true, 'current', null, 'page', true],
+  [false, 'current', null, null, false],
+  [true, 'none', null, null, true],
+] as const)('maps selection %s as %s to host state', (selected, as, pressed, current, active) => {
+  const fixture = TestBed.createComponent(InputsHost);
+  fixture.componentInstance.selected.set(selected);
+  fixture.componentInstance.selectedAs.set(as);
+  fixture.detectChanges();
+  const button = (fixture.nativeElement as HTMLElement).querySelector('button')!;
+  expect(button.hasAttribute('data-selected')).toBe(active);
+  expect(button.getAttribute('aria-pressed')).toBe(pressed);
+  expect(button.getAttribute('aria-current')).toBe(current);
+});
 it('keeps the button type default when a binding removes the type', () => {
   const fixture = TestBed.createComponent(TypeHost);
   fixture.detectChanges();

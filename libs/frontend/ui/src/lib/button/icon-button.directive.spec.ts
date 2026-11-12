@@ -1,6 +1,7 @@
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { PtahIconButtonDirective } from './icon-button.directive';
+import { PtahButtonSelectedAs, PtahButtonSize, PtahButtonTone } from './button.types';
 @Component({
   standalone: true,
   imports: [PtahIconButtonDirective],
@@ -24,6 +25,52 @@ class Host {
   readonly busy = signal(false);
   count = 0;
 }
+
+@Component({
+  standalone: true,
+  imports: [PtahIconButtonDirective],
+  template: `<button ptahIconButton label="Action" [tone]="tone()" [size]="size()" [selected]="selected()" [selectedAs]="selectedAs()"><svg aria-hidden="true"></svg></button>`,
+})
+class InputsHost {
+  readonly tone = signal<PtahButtonTone>('default');
+  readonly size = signal<PtahButtonSize>('sm');
+  readonly selected = signal<boolean | undefined>(undefined);
+  readonly selectedAs = signal<PtahButtonSelectedAs>('pressed');
+}
+
+it.each([['default', null], ['danger', 'danger'], ['muted-danger', 'muted-danger']] as const)('maps icon tone %s to its host attribute', (value, expected) => {
+  const fixture = TestBed.createComponent(InputsHost);
+  fixture.componentInstance.tone.set(value);
+  fixture.detectChanges();
+  expect((fixture.nativeElement as HTMLElement).querySelector('button')?.getAttribute('data-tone')).toBe(expected);
+});
+
+it('maps icon size lg to a square btn-lg host', () => {
+  const fixture = TestBed.createComponent(InputsHost);
+  fixture.componentInstance.size.set('lg');
+  fixture.detectChanges();
+  const button = (fixture.nativeElement as HTMLElement).querySelector('button')!;
+  expect(button.classList.contains('btn-lg')).toBe(true);
+  expect(button.classList.contains('btn-square')).toBe(true);
+});
+
+it.each([
+  [undefined, 'pressed', null, null, false],
+  [false, 'pressed', 'false', null, false],
+  [true, 'pressed', 'true', null, true],
+  [true, 'current', null, 'page', true],
+  [false, 'current', null, null, false],
+  [true, 'none', null, null, true],
+] as const)('maps icon selection %s as %s to host state', (selected, as, pressed, current, active) => {
+  const fixture = TestBed.createComponent(InputsHost);
+  fixture.componentInstance.selected.set(selected);
+  fixture.componentInstance.selectedAs.set(as);
+  fixture.detectChanges();
+  const button = (fixture.nativeElement as HTMLElement).querySelector('button')!;
+  expect(button.hasAttribute('data-selected')).toBe(active);
+  expect(button.getAttribute('aria-pressed')).toBe(pressed);
+  expect(button.getAttribute('aria-current')).toBe(current);
+});
 it('names the square icon button and composes its tooltip', () => {
   const fixture = TestBed.createComponent(Host);
   fixture.detectChanges();

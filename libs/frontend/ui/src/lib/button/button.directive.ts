@@ -4,17 +4,27 @@ import {
   BUTTON_HOST,
   buttonHostType,
 } from './button-host';
-import { PtahButtonSize, PtahButtonVariant } from './button.types';
+import { PtahButtonAlign, PtahButtonSelectedAs, PtahButtonShape, PtahButtonSize, PtahButtonTone, PtahButtonVariant } from './button.types';
 @Directive({
   selector: 'button[ptahButton], a[ptahButton]',
   standalone: true,
-  host: BUTTON_HOST,
+  host: {
+    ...BUTTON_HOST,
+    '[attr.data-align]': "align() === 'center' ? null : align()",
+    '[class.btn-pill]': "shape() === 'pill'",
+  },
 })
 export class PtahButtonDirective {
   /** DaisyUI color recipe. */
   readonly variant = input<PtahButtonVariant>('secondary');
   /** DaisyUI control size. */
   readonly size = input<PtahButtonSize>('sm');
+  readonly align = input<PtahButtonAlign>('center');
+  readonly shape = input<PtahButtonShape>('default');
+  /** Ghost variant ink only; other variants ignore tone. */
+  readonly tone = input<PtahButtonTone>('default');
+  readonly selected = input<boolean | undefined>(undefined);
+  readonly selectedAs = input<PtahButtonSelectedAs>('pressed');
   /** Native `type`. A `button` element defaults to `button`, also after a binding removes it. */
   readonly type = input<string>();
   /** Blocks activation while keeping the control focusable. */

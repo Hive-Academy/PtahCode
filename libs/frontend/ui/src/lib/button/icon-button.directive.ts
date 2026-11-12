@@ -11,7 +11,7 @@ import {
   BUTTON_HOST,
   buttonHostType,
 } from './button-host';
-import { PtahButtonSize, PtahButtonVariant } from './button.types';
+import { PtahButtonSelectedAs, PtahButtonSize, PtahButtonTone, PtahButtonVariant } from './button.types';
 import { PtahTooltipDirective } from './tooltip.directive';
 @Directive({
   selector: 'button[ptahIconButton], a[ptahIconButton]',
@@ -35,6 +35,10 @@ export class PtahIconButtonDirective {
   readonly variant = input<Exclude<PtahButtonVariant, 'link'>>('ghost');
   /** DaisyUI control size. */
   readonly size = input<PtahButtonSize>('sm');
+  /** Ghost variant ink only; other variants ignore tone. */
+  readonly tone = input<PtahButtonTone>('default');
+  readonly selected = input<boolean | undefined>(undefined);
+  readonly selectedAs = input<PtahButtonSelectedAs>('pressed');
   /** Native `type`. A `button` element defaults to `button`, also after a binding removes it. */
   readonly type = input<string>();
   /** Blocks activation while keeping the control focusable. */

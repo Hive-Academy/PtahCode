@@ -43,7 +43,7 @@
   transition-timing-function: var(--ptah-ease-standard);
 }
 
-/* Sizes: xs (24 px), sm (32 px), md (40 px) */
+/* Sizes: xs (24 px), sm (32 px), md (40 px), lg (44 px) */
 .btn[data-ptah-button].btn-xs:is(.btn, #ptah-button) {
   height: var(--ptah-control-h-xs);
   min-height: var(--ptah-control-h-xs);
@@ -69,6 +69,29 @@
   font-size: var(--ptah-text-group-title-size);
   line-height: var(--ptah-text-group-title-leading);
   font-weight: var(--ptah-text-group-title-weight);
+}
+
+.btn[data-ptah-button].btn-lg:is(.btn, #ptah-button) {
+  height: var(--ptah-control-h-lg);
+  min-height: var(--ptah-control-h-lg);
+  padding-inline: var(--ptah-control-px);
+  font-size: var(--ptah-text-label-size);
+  line-height: var(--ptah-text-label-leading);
+  font-weight: var(--ptah-text-label-weight);
+}
+
+.btn[data-ptah-button][data-align]:is(.btn, #ptah-button) {
+  justify-content: flex-start;
+  text-align: start;
+}
+
+.btn[data-ptah-button][data-align='row']:is(.btn, #ptah-button) {
+  font-weight: var(--ptah-btn-row-weight);
+}
+
+.btn[data-ptah-button].btn-pill:is(.btn, #ptah-button) {
+  border-radius: var(--ptah-radius-pill);
+  padding-inline: var(--ptah-btn-pill-px);
 }
 
 /* Icon sizing inside buttons */
@@ -115,6 +138,12 @@
 .btn[data-ptah-button].btn-md.btn-square:is(.btn, #ptah-button) {
   width: var(--ptah-control-h-md);
   min-width: var(--ptah-control-h-md);
+  padding-inline: 0;
+}
+
+.btn[data-ptah-button].btn-lg.btn-square:is(.btn, #ptah-button) {
+  width: var(--ptah-control-h-lg);
+  min-width: var(--ptah-control-h-lg);
   padding-inline: 0;
 }
 
@@ -167,6 +196,14 @@
   box-shadow: var(--ptah-elevation-0);
 }
 
+.btn[data-ptah-button].btn-ghost[data-tone='danger']:is(.btn, #ptah-button) {
+  color: var(--ptah-state-err);
+}
+
+.btn[data-ptah-button].btn-ghost[data-tone='muted-danger']:is(.btn, #ptah-button) {
+  color: var(--ptah-btn-ghost-fg-muted);
+}
+
 .btn[data-ptah-button].btn-ghost:is(:hover, [data-state='hover']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-button) {
   background-color: var(--ptah-btn-ghost-bg-hover);
   border-color: var(--ptah-border-color);
@@ -177,6 +214,11 @@
   background-color: var(--ptah-btn-ghost-bg-active);
   border-color: var(--ptah-border-color-strong);
   color: var(--ptah-btn-ghost-fg);
+}
+
+.btn[data-ptah-button].btn-ghost[data-tone]:is(:hover, [data-state='hover']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-button) {
+  color: var(--ptah-state-err);
+  background-color: var(--ptah-btn-ghost-danger-bg-hover);
 }
 
 /* Variant 4: danger (destructive action, maps to .btn-error) */
@@ -224,6 +266,12 @@
 }
 
 /* Keyboard focus ring: shared outline, never a box shadow */
+.btn[data-ptah-button][data-selected]:not(.btn-primary, .btn-error):is(.btn, #ptah-button) {
+  background-color: var(--ptah-btn-selected-bg);
+  border-color: var(--ptah-btn-selected-border);
+  color: var(--ptah-btn-selected-fg);
+}
+
 .btn[data-ptah-button]:is(:focus-visible, [data-state='focus']):is(.btn, #ptah-button) {
   outline-style: solid;
   outline-width: var(--ptah-focus-ring-width);
