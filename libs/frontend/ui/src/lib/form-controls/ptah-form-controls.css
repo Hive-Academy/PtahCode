@@ -100,6 +100,9 @@
   opacity: 1;
 }
 
+/* A standalone search control keeps the browser clear action. Only the
+   field owner replaces it (ptah-field.css, .ptah-field__body scope). */
+
 /* Hover */
 :is(.input, .textarea, .select)[data-ptah-control]:is(:hover, [data-state='hover']):not(:disabled, :focus-visible, [aria-invalid='true']):is(.input, .textarea, .select, #ptah-control) {
   border-color: var(--ptah-field-border-hover);
@@ -110,7 +113,7 @@
   border-color: var(--ptah-field-border-invalid);
 }
 
-/* Keyboard focus ring: shared outline, never a box shadow or a halo */
+/* Keyboard focus ring in the standard themes. */
 :is(.input, .textarea, .select)[data-ptah-control]:is(:focus-visible, [data-state='focus']):is(.input, .textarea, .select, #ptah-control) {
   outline-style: solid;
   outline-width: var(--ptah-focus-ring-width);
@@ -119,7 +122,28 @@
   box-shadow: var(--ptah-elevation-0);
 }
 
-/* A focused invalid control keeps the error edge. */
+/* Glass focus is one edge for keyboard and pointer input: the border takes the
+   focus color and an inset band of the same color touches it (no layout shift). */
+:root[data-glass='on'] :is(.input, .textarea, .select)[data-ptah-control]:is(:focus, [data-state='focus']):is(.input, .textarea, .select, #ptah-control) {
+  border-color: var(--ptah-focus-ring-color);
+  outline: none;
+  box-shadow: inset 0 0 0 calc(var(--ptah-focus-ring-width) - var(--ptah-border-width)) var(--ptah-focus-ring-color);
+}
+
+/* Keep the glass fill behind the border instead of tinting its translucent edge. */
+:root[data-glass='on'] :is(.input, .textarea, .select)[data-ptah-control]:is(.input, .textarea, .select, #ptah-control) {
+  background-clip: padding-box;
+}
+
+/* The keyboard path also wins over the standard theme outline above. */
+:root[data-glass='on'] :is(.input, .textarea, .select)[data-ptah-control]:is(:focus-visible, [data-state='focus']):is(.input, .textarea, .select, #ptah-control) {
+  border-color: var(--ptah-focus-ring-color);
+  outline: none;
+  box-shadow: inset 0 0 0 calc(var(--ptah-focus-ring-width) - var(--ptah-border-width)) var(--ptah-focus-ring-color);
+}
+
+
+/* A focused invalid control keeps the error edge outside glass. */
 :is(.input, .textarea, .select)[data-ptah-control]:is(:focus-visible, [data-state='focus']):not([aria-invalid='true']):is(.input, .textarea, .select, #ptah-control) {
   border-color: var(--ptah-field-border-hover);
 }

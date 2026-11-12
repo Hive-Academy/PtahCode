@@ -3354,23 +3354,23 @@ END OF ANUBIS DESIGN SYSTEM
 :root[data-glass='on'] .btn:is(:disabled, [disabled], .btn-disabled) { background: var(--glass-fill-tile); border-color: var(--glass-line); color: oklch(var(--bc) / 0.4); box-shadow: none; filter: none; }
 
 /* forms */
-:root[data-glass='on'] :is(.input, .select, .textarea) {
+:root[data-glass='on'] :is(.input, .select, .textarea):not([data-ptah-control]) {
   background: var(--glass-fill-input);
   border-color: var(--glass-input-edge);
   color: var(--glass-ink);
   box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.1);
 }
 :root[data-glass='on'] :is(.input, .select, .textarea)::placeholder { color: oklch(var(--bcm, var(--bc))); opacity: 1; }
-:root[data-glass='on'] .textarea { border-radius: var(--glass-radius-inner); }
-:root[data-glass='on'] :is(.input, .select, .textarea):focus,
-:root[data-glass='on'] .input:focus-within {
+:root[data-glass='on'] .textarea:not([data-ptah-control]) { border-radius: var(--glass-radius-inner); }
+:root[data-glass='on'] :is(.input, .select, .textarea):not([data-ptah-control]):focus,
+:root[data-glass='on'] .input:not([data-ptah-control]):focus-within {
   outline: 2px solid var(--glass-focus);
   outline-offset: 2px;
   border-color: var(--glass-focus);
   box-shadow: 0 0 0 5px oklch(var(--p) / 0.28);
 }
 :root[data-glass='on'] .input input { background: transparent; }
-:root[data-glass='on'] :is(.input, .select, .textarea):disabled { background: var(--glass-fill-tile); border-color: var(--glass-line); color: oklch(var(--bc) / 0.4); }
+:root[data-glass='on'] :is(.input, .select, .textarea):not([data-ptah-control]):disabled { background: var(--glass-fill-tile); border-color: var(--glass-line); color: oklch(var(--bc) / 0.4); }
 :root[data-glass='on'] .label-text { color: var(--glass-ink); }
 :root[data-glass='on'] :is(.checkbox, .radio) { border-color: var(--glass-input-edge); }
 :root[data-glass='on'] .toggle { color: var(--glass-input-edge); background-color: var(--glass-fill-input); --tglbg: var(--glass-input-edge); border-color: var(--glass-input-edge); }
