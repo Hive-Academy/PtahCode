@@ -1,0 +1,35 @@
+{
+  "templates": {
+    "lines": 68,
+    "files": 14
+  },
+  "skills": {
+    "lines": 466,
+    "files": 35
+  },
+  "generated-agents": {
+    "lines": 176,
+    "files": 28
+  },
+  "docs": {
+    "lines": 116,
+    "files": 28
+  },
+  "test": {
+    "lines": 938,
+    "files": 141
+  },
+  "source": {
+    "lines": 201,
+    "files": 44
+  },
+  "other": {
+    "lines": 120,
+    "files": 8
+  },
+  "total": {
+    "lines": 2085,
+    "files": 298
+  },
+  "excludes": []
+}
