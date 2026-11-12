@@ -275,6 +275,7 @@ Update this table in the pull request of each step. Do not keep another status l
 | 2 | 1. Badge and status | done (TASK_2026_957_fda3) | done (TASK_2026_957_fda3) | done (`family-3-look.md`, screenshots wait for Electron) | open | open | open |
 | 2 | Timers and countdowns (planned, section 3A) | done (TASK_2026_970_fa60) | open | open | open | open | open |
 | 2 | Charts (planned, section 3A) | done (TASK_2026_970_fa60) | open | open | open | open | open |
+| 2 | 3. Card, panel surface, section header | done (TASK_2026_1012_b1dc, `card-family-research.md`) | done (this PR: `ptah-surface-card`, `[ptahSurface]`, `ptah-section-header`, gallery family) | done (`family-card-look.md`, screenshots wait for Electron) | open | open | open |
 
 Order of the composites: section 3 of this document. Timers and charts: section 3A. They start after PR #1118 is accepted.
 
