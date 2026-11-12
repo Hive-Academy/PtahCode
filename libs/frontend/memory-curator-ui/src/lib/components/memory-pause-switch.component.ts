@@ -12,7 +12,7 @@ import {
 } from '@angular/core';
 
 import { MemoryDiagnosticsStateService } from '../services/memory-diagnostics-state.service';
-import { PtahToggleDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahToggleDirective } from '@ptah-extension/ui';
 
 /**
  * The Memory master switch (`memory.enabled`) at the top of the Thoth Memory
@@ -32,7 +32,7 @@ import { PtahToggleDirective } from '@ptah-extension/ui';
   selector: 'ptah-memory-pause-switch',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PtahToggleDirective],
+  imports: [PtahBadgeDirective, PtahToggleDirective],
   template: `
     <section
       class="flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3"
@@ -56,7 +56,10 @@ import { PtahToggleDirective } from '@ptah-extension/ui';
           </label>
           @if (paused() && !saving()) {
             <span
-              class="badge badge-warning badge-sm text-xs font-medium"
+              ptahBadge
+              tone="warn"
+              size="sm"
+              class="text-xs font-medium"
               data-testid="memory-pause-state"
               >Paused</span
             >

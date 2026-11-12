@@ -1034,15 +1034,7 @@
   "libs/frontend/marketplace/src/lib/pages/servers/installed-servers-page.component.ts": {
     "skeleton": 2
   },
-  "libs/frontend/marketplace/src/lib/pages/servers/provider-list-view.component.html": {
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-sm": 1
-  },
   "libs/frontend/marketplace/src/lib/pages/servers/server-detail.component.html": {
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-sm": 1,
     "skeleton": 4
   },
   "libs/frontend/marketplace/src/lib/pages/skills/installed-library-stale-notice.component.ts": {
@@ -1050,11 +1042,8 @@
     "alert-warning": 1
   },
   "libs/frontend/marketplace/src/lib/pages/skills/installed-skills-page.component.ts": {
-    "badge": 4,
-    "badge-ghost": 1,
-    "badge-outline": 1,
-    "badge-sm": 4,
-    "badge-warning": 1,
+    "badge": 1,
+    "badge-sm": 1,
     "btn": 1,
     "btn-ghost": 1,
     "btn-xs": 1,
@@ -1067,16 +1056,9 @@
     "btn-xs": 1
   },
   "libs/frontend/marketplace/src/lib/pages/skills/skill-detail.component.ts": {
-    "badge": 3,
-    "badge-sm": 2,
-    "badge-warning": 2,
-    "badge-xs": 1,
-    "skeleton": 3
-  },
-  "libs/frontend/marketplace/src/lib/shell/marketplace-nav.component.ts": {
     "badge": 1,
-    "badge-ghost": 1,
-    "badge-sm": 1
+    "badge-sm": 1,
+    "skeleton": 3
   },
   "libs/frontend/marketplace/src/lib/smithery-surface.component.ts": {
     "<dynamic>": 2,
@@ -1084,9 +1066,6 @@
     "alert-error": 2,
     "alert-sm": 3,
     "alert-warning": 1,
-    "badge": 1,
-    "badge-neutral": 1,
-    "badge-xs": 1,
     "btn": 3,
     "btn-ghost": 3,
     "btn-primary": 2,
@@ -1105,9 +1084,6 @@
     "skeleton": 1
   },
   "libs/frontend/marketplace/src/lib/ui/needs-attention.component.ts": {
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-sm": 1,
     "skeleton": 2
   },
   "libs/frontend/marketplace/src/lib/ui/provider-card-list.component.ts": {
@@ -1126,9 +1102,6 @@
   },
   "libs/frontend/marketplace/src/lib/ui/provider-table.component.ts": {
     "<dynamic>": 1,
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-sm": 1,
     "skeleton": 4
   },
   "libs/frontend/marketplace/src/lib/ui/source-band.component.ts": {
@@ -1158,42 +1131,17 @@
     "skeleton": 2
   },
   "libs/frontend/memory-curator-ui/src/lib/components/corpus-suggestions.component.ts": {
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-sm": 1,
     "skeleton": 3
   },
   "libs/frontend/memory-curator-ui/src/lib/components/diagnostics/db-health-panel.component.ts": {
     "alert": 1,
     "alert-error": 1,
     "alert-success": 1,
-    "alert-warning": 1,
-    "badge": 5,
-    "badge-error": 3,
-    "badge-ghost": 1,
-    "badge-sm": 5,
-    "badge-success": 3,
-    "badge-warning": 1
-  },
-  "libs/frontend/memory-curator-ui/src/lib/components/diagnostics/event-feed.component.ts": {
-    "badge": 1,
-    "badge-error": 1,
-    "badge-info": 1,
-    "badge-sm": 1,
-    "badge-success": 1,
-    "badge-warning": 1
+    "alert-warning": 1
   },
   "libs/frontend/memory-curator-ui/src/lib/components/diagnostics/memory-diagnostics-accordion.component.ts": {
     "alert": 2,
     "alert-error": 2
-  },
-  "libs/frontend/memory-curator-ui/src/lib/components/diagnostics/storage-health-panel.component.ts": {
-    "badge": 2,
-    "badge-error": 1,
-    "badge-ghost": 1,
-    "badge-sm": 2,
-    "badge-success": 2,
-    "badge-warning": 1
   },
   "libs/frontend/memory-curator-ui/src/lib/components/memory-entry-list.component.ts": {
     "skeleton": 3
@@ -1203,20 +1151,12 @@
     "btn-xs": 2,
     "skeleton": 2
   },
-  "libs/frontend/memory-curator-ui/src/lib/components/memory-pause-switch.component.ts": {
-    "badge": 1,
-    "badge-sm": 1,
-    "badge-warning": 1
-  },
   "libs/frontend/memory-curator-ui/src/lib/components/memory-search-bar.component.ts": {
     "btn": 2,
     "btn-primary": 2,
     "btn-sm": 2
   },
   "libs/frontend/memory-curator-ui/src/lib/components/timeline-filters.component.ts": {
-    "badge": 1,
-    "badge-sm": 1,
-    "badge-warning": 1,
     "btn": 1,
     "btn-ghost": 1,
     "btn-primary": 1,
@@ -1315,10 +1255,6 @@
   "libs/frontend/review-runs-ui/src/lib/components/review-bot-identity.component.ts": {
     "alert": 1,
     "alert-warning": 1
-  },
-  "libs/frontend/review-runs-ui/src/lib/components/review-page-header.component.ts": {
-    "badge": 1,
-    "badge-outline": 1
   },
   "libs/frontend/review-runs-ui/src/lib/components/review-repositories.component.ts": {
     "<dynamic>": 1,

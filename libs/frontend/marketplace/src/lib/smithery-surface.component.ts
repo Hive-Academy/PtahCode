@@ -25,6 +25,7 @@ import {
   resolveListingBrandSlug,
   type CatalogCardBadge,
   PtahButtonDirective,
+  PtahBadgeDirective,
   PtahInputDirective,
 } from '@ptah-extension/ui';
 import type {
@@ -153,6 +154,7 @@ const VERIFIED_BADGE: CatalogCardBadge = { label: 'Verified', tone: 'info' };
   selector: 'ptah-smithery-surface',
   standalone: true,
   imports: [
+    PtahBadgeDirective,
     PtahButtonDirective,
     PtahInputDirective,
     LucideAngularModule,
@@ -270,7 +272,7 @@ const VERIFIED_BADGE: CatalogCardBadge = { label: 'Verified', tone: 'info' };
                         />
                         @if (connection.managedByPtah) {
                           <span
-                            class="badge badge-xs badge-neutral text-[10px]"
+                            ptahBadge size="xs"
                           >
                             Managed by Ptah
                           </span>

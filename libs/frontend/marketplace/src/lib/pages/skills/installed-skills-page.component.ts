@@ -32,6 +32,7 @@ import {
   MotionRouteStageDirective,
   detailParamKey,
   PtahButtonDirective,
+  PtahBadgeDirective,
   PtahInputDirective,
 } from '@ptah-extension/ui';
 import { MarketplaceInventoryStore } from '../../data/marketplace-inventory.store';
@@ -122,6 +123,7 @@ const ROW_LINK_SELECTOR = '[data-testid="installed-skill-open"]';
   selector: 'ptah-installed-skills-page',
   standalone: true,
   imports: [
+    PtahBadgeDirective,
     PtahButtonDirective,
     PtahInputDirective,
     RouterLink,
@@ -204,7 +206,11 @@ const ROW_LINK_SELECTOR = '[data-testid="installed-skill-open"]';
                 </h2>
                 @if (group.state === 'ready') {
                   <span
-                    class="badge badge-ghost badge-sm tabular-nums"
+                    ptahBadge
+                    tone="neutral"
+                    size="sm"
+                    count
+                    class="tabular-nums"
                     data-testid="installed-skills-count"
                     >{{ group.total }}</span
                   >
@@ -364,21 +370,27 @@ const ROW_LINK_SELECTOR = '[data-testid="installed-skill-open"]';
                       >
                       @if (row.shadowedAgents.length > 0) {
                         <span
-                          class="badge badge-warning badge-sm shrink-0"
+                          ptahBadge
+                          tone="warn"
+                          size="sm"
+                          class="shrink-0"
                           data-testid="installed-skill-shadowed"
                           [attr.title]="
                             'Shadowed by a Library copy: ' +
                             row.shadowedAgents.join(', ')
                           "
-                          >{{ shadowedText(row) }}</span
+                          ><span class="ptah-badge-text">{{ shadowedText(row) }}</span></span
                         >
                       }
                       @if (row.scope; as scope) {
                         <span
-                          class="badge badge-outline badge-sm shrink-0"
-                          [class.border-warning]="scope === 'global'"
+                          ptahBadge
+                          [tone]="scope === 'global' ? 'warn' : 'neutral'"
+                          appearance="outline"
+                          size="sm"
+                          class="shrink-0"
                           data-testid="installed-skill-scope"
-                          >{{ scopeLabel(scope) }}</span
+                          ><span class="ptah-badge-text">{{ scopeLabel(scope) }}</span></span
                         >
                         @if (scope === 'workspace') {
                           <button

@@ -8,7 +8,11 @@ import { CommonModule } from '@angular/common';
 import type { MemoryTypeWire } from '@ptah-extension/shared';
 
 import { TimelineStateService } from '../services/timeline-state.service';
-import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
+import {
+  PtahBadgeDirective,
+  PtahButtonDirective,
+  PtahInputDirective,
+} from '@ptah-extension/ui';
 
 interface TypeChip {
   readonly id: MemoryTypeWire;
@@ -36,7 +40,12 @@ const TYPE_CHIPS: readonly TypeChip[] = [
   selector: 'ptah-timeline-filters',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PtahButtonDirective, PtahInputDirective, CommonModule],
+  imports: [
+    PtahBadgeDirective,
+    PtahButtonDirective,
+    PtahInputDirective,
+    CommonModule,
+  ],
   template: `
     <div class="flex flex-col gap-2">
       <div class="flex flex-wrap items-center gap-2">
@@ -142,7 +151,9 @@ const TYPE_CHIPS: readonly TypeChip[] = [
         </label>
         @if (state.bm25Only()) {
           <span
-            class="badge badge-warning badge-sm"
+            ptahBadge
+            tone="warn"
+            size="sm"
             data-testid="timeline-bm25-only-badge"
             title="Vec embeddings unavailable for this run; results are BM25-only."
           >

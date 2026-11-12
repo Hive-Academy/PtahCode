@@ -87,9 +87,11 @@
             <p class="text-xs text-base-content-muted">{{ kindLabel() }}</p>
             <div class="flex flex-wrap items-center gap-1.5">
               <span
-                class="badge badge-ghost badge-sm"
+                ptahBadge
+                tone="neutral"
+                size="sm"
                 data-testid="server-detail-origin"
-                >{{ server.originLabel }}</span
+                ><span class="ptah-badge-text">{{ server.originLabel }}</span></span
               >
               <ptah-status-pill
                 [status]="server.status"

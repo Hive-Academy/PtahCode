@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
 
 /**
  * Header of the Reviews page (approved Inbox design, TASK_2026_UX_REVIEWS_MACHINES
@@ -13,7 +13,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
 @Component({
   selector: 'ptah-review-page-header',
   standalone: true,
-  imports: [PtahButtonDirective],
+  imports: [PtahBadgeDirective, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <header class="flex flex-wrap items-center gap-3">
@@ -31,7 +31,9 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
         }
       </div>
       <span
-        class="badge badge-outline gap-2 text-xs"
+        ptahBadge
+        appearance="outline"
+        class="gap-2 text-xs"
         [class.text-state-done]="!paused()"
         [class.text-state-need]="paused()"
       >

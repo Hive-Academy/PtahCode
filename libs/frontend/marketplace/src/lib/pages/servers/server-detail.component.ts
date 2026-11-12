@@ -28,6 +28,7 @@ import {
   NativeTabGroupComponent,
   type NativeTab,
   PtahButtonDirective,
+  PtahBadgeDirective,
 } from '@ptah-extension/ui';
 import type { CapabilityEntry, CapabilityScope } from '@ptah-extension/shared';
 
@@ -144,6 +145,7 @@ export function formatDetailDate(value: string): string {
   selector: 'ptah-server-detail',
   standalone: true,
   imports: [
+    PtahBadgeDirective,
     PtahButtonDirective,
     RouterLink,
     LucideAngularModule,

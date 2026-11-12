@@ -1,0 +1,7 @@
+# Batch 6 lane brief (badge adoption, Group 6)
+Worktree: D:\projects\ptah-extension\.claude-worktrees\feat-ui-badge-adopt-2-346b1564142c (branch feat/ui-badge-adopt-6). Stay inside it. Do NOT commit or push.
+Read first: root CLAUDE.md, .ptah/specs/TASK_2026_924_8ac1/design-system-epic.md, .ptah/specs/TASK_2026_957_fda3/batch5-lane-a.md and batch5-review.md (pattern), family-3-look.md.
+Task: in your files, replace raw DaisyUI `badge badge-*` classes with the `ptahBadge` directive from `@ptah-extension/ui` (`tone` neutral|info|ok|warn|err, `size` xs|sm, `appearance="outline"`). Keep layout utility classes. A badge host is a `span`. Truncated text uses `ptah-badge-text`. Import the directive in the component `imports`. Update specs that query `.badge` (grep specs of the changed components, also other components) to `[data-ptah-badge]` / `data-size`. If a file cannot adopt without a look change, leave it raw and name it in your report.
+Rules: Electron first. Verify only with `npm run verify -- -t lint -p <project>` style scoped commands, background, filtered output. Never build/serve/e2e/workspace-wide. No node_modules in this worktree: some suites cannot start; run only targeted specs.
+Deliverable: your report file (list per file: adopted/left raw, reason).
+Form adoption touches git-ui and review-runs-ui form lines: edit badge lines only.
