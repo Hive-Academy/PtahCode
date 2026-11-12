@@ -16,7 +16,7 @@ import {
 } from '@angular/core';
 import { SlicePipe } from '@angular/common';
 import { LucideAngularModule } from 'lucide-angular';
-import { ClaudeRpcService, injectWallClock } from '@ptah-extension/core';
+import { ClaudeRpcService } from '@ptah-extension/core';
 import { type MonitoredAgent } from '@ptah-extension/chat-streaming';
 import { CliAgentOutputComponent } from './cli-agent-output.component';
 import { AgentContinueInputComponent } from '../agent-continue-input/agent-continue-input.component';
@@ -30,8 +30,6 @@ import {
   createStderrParser,
 } from './agent-card.utils';
 import {
-  agentRunDurationMs,
-  formatAgentDuration,
   type RenderSegment,
   type StderrSegment,
 } from '@ptah-extension/chat-ui';
@@ -64,7 +62,6 @@ import {
         <ptah-agent-card-header
           class="block flex-shrink-0"
           [agent]="agent()"
-          [elapsedDisplay]="elapsedDisplay()"
           [isStopping]="isStopping()"
           [isResuming]="isResuming()"
           [closable]="closable()"
@@ -148,27 +145,9 @@ export class AgentCardComponent {
   readonly toggleExpanded = output<void>();
   readonly closeLane = output<string>();
 
-  private readonly now = injectWallClock('second', () => this.agent().status === 'running');
   private readonly rpcService = inject(ClaudeRpcService);
   readonly isStopping = signal(false);
   readonly isResuming = signal(false);
-
-  /**
-   * Elapsed time display derived from the shared wall clock.
-   * Freezes at completedAt when the agent finishes (no more ticking).
-   */
-  readonly elapsedDisplay = computed(() => {
-    const a = this.agent();
-    const duration = agentRunDurationMs(
-      {
-        running: a.status === 'running',
-        startedAt: a.startedAt,
-        endedAt: a.completedAt,
-      },
-      this.now(),
-    );
-    return duration === null ? '' : (formatAgentDuration(duration) ?? '');
-  });
 
   protected readonly laneUsage = computed(() => resolveCliLaneUsage(this.agent()));
   /**

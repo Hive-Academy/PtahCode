@@ -695,6 +695,22 @@ describe('PlanLimitsStore', () => {
   });
 
   describe('shared clock', () => {
+    it('keeps the coarse clock for scope-less readers after the last surface closes', async () => {
+      rpc.call.mockResolvedValue(rpcSuccess(snapshot(T0, [])) as RpcResult<never>);
+      const first = surfaceWithInjector();
+      const second = surfaceWithInjector();
+      await first.handle.update({ sessionIds: [], ownerKeys: [] });
+      expect(jest.getTimerCount()).toBe(1);
+      first.handle.release();
+      expect(jest.getTimerCount()).toBe(1);
+      second.handle.release();
+      expect(jest.getTimerCount()).toBe(1);
+      jest.advanceTimersByTime(PLAN_LIMITS_CLOCK_TICK_MS);
+      expect(store.now()).toBe(T0 + PLAN_LIMITS_CLOCK_TICK_MS);
+      first.injector.destroy();
+      second.injector.destroy();
+      expect(jest.getTimerCount()).toBe(1);
+    });
     it('does not tick before the first load', () => {
       jest.advanceTimersByTime(PLAN_LIMITS_CLOCK_TICK_MS * 3);
       expect(store.now()).toBe(T0);

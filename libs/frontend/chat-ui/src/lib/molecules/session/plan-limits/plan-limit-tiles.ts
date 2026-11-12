@@ -310,13 +310,17 @@ function windowTile(
 ): PlanLimitTileModel {
   const detail = windowDetail(entry, snapshot, ctx);
   const chip = detail.chip;
+  const resetInstant = activeWindowExhaustion(entry.window, ctx.now)?.resetsAt ?? entry.window.resetsAt;
+  const resetsAt = entry.state !== 'reset-usage-unknown' && entry.state !== 'aged' &&
+    resetInstant !== undefined && resetInstant > ctx.now ? resetInstant : undefined;
   return {
     id: `plan:${snapshot.owner.key}:${entry.window.key}`,
     kind: 'window',
     label: entry.window.label,
     ...caption,
     value: detail.usedText,
-    resetLine: windowResetLine(entry, ctx),
+    resetLine: windowResetLine(entry, ctx, resetsAt !== undefined),
+    ...(resetsAt !== undefined && { resetsAt }),
     ...(chip && { chip }),
     tone: windowTone(entry.state),
     sourceChips: detail.sourceChips,
@@ -486,20 +490,20 @@ function withRelative(instant: number, ctx: Ctx): string {
   return formatLocalWithRelative(instant, ctx.now, ctx.time);
 }
 
-function plainReset(resetsAt: number | undefined, ctx: Ctx): string {
+function plainReset(resetsAt: number | undefined, ctx: Ctx, countdown = false): string {
   if (resetsAt === undefined) return 'reset unknown';
   return resetsAt > ctx.now
-    ? `resets ${withRelative(resetsAt, ctx)}`
+    ? `resets ${countdown ? formatLocalAbsolute(resetsAt, ctx.now, ctx.time) : withRelative(resetsAt, ctx)}`
     : `reset ${withRelative(resetsAt, ctx)} passed`;
 }
 
-function windowResetLine(entry: ClassifiedWindow, ctx: Ctx): string {
+function windowResetLine(entry: ClassifiedWindow, ctx: Ctx, countdown = false): string {
   const { window, state } = entry;
   if (state === 'limit-reached') {
-    const resetsAt = activeWindowExhaustion(window, ctx.now)?.resetsAt;
+    const resetsAt = activeWindowExhaustion(window, ctx.now)?.resetsAt ?? window.resetsAt;
     return resetsAt === undefined
       ? 'Limit reached · reset unknown'
-      : `Limit reached · resets ${withRelative(resetsAt, ctx)}`;
+      : `Limit reached · resets ${countdown ? formatLocalAbsolute(resetsAt, ctx.now, ctx.time) : withRelative(resetsAt, ctx)}`;
   }
   const passage = resetPassage(window, ctx.now);
   if (state === 'reset-usage-unknown' && passage) {
@@ -510,7 +514,7 @@ function windowResetLine(entry: ClassifiedWindow, ctx: Ctx): string {
         : withRelative(passage.nextResetAt, ctx);
     return `reset ${passed} passed · next ${next}`;
   }
-  const base = plainReset(window.resetsAt, ctx);
+  const base = plainReset(window.resetsAt, ctx, countdown);
   if (state === 'aged') {
     return `${base} · observed ${formatRelative(windowObservedAt(window), ctx.now)}`;
   }

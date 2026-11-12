@@ -1,6 +1,7 @@
 import { signal, type Provider } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { ModelStateService } from '@ptah-extension/core';
+import { PTAH_CLOCK } from '@ptah-extension/ui';
 import type {
   PlanLimitWindow,
   QuotaOwnerRef,
@@ -87,6 +88,7 @@ describe('SessionStatsSummaryComponent', () => {
     TestBed.configureTestingModule({
       imports: [SessionStatsSummaryComponent],
       providers: [
+        { provide: PTAH_CLOCK, useValue: { now: signal(Date.now()), acquire: () => () => {} } },
         {
           provide: ModelStateService,
           useValue: {
@@ -783,6 +785,7 @@ describe('SessionStatsSummaryComponent limits', () => {
     TestBed.configureTestingModule({
       imports: [SessionStatsSummaryComponent],
       providers: [
+        { provide: PTAH_CLOCK, useValue: { now: signal(Date.now()), acquire: () => () => {} } },
         {
           provide: ModelStateService,
           useValue: {
