@@ -21,6 +21,7 @@ const TOKEN_ONLY_DIRS: readonly string[] = [
   'form-controls',
   'badge',
   'time',
+  'charts',
 ];
 
 const SPACE_STEPS = ['1', '2', '3', '4', '6', '8', '12'] as const;

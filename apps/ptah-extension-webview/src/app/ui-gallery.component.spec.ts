@@ -37,7 +37,7 @@ it('renders the foundation samples without host data', () => {
   const root = fixture.nativeElement as HTMLElement;
   expect(root.querySelectorAll('ptah-ui-status-badge')).toHaveLength(10);
   expect(root.querySelectorAll('ptah-state-panel')).toHaveLength(5);
-  expect(root.querySelectorAll('ptah-meter')).toHaveLength(6);
+  expect(root.querySelectorAll('section#components-meters ptah-meter')).toHaveLength(6);
   expect(root.querySelectorAll('[ptahListRow]')).toHaveLength(4);
 });
 
@@ -308,6 +308,32 @@ it('renders the badge family with an owner on every badge and a name on every do
     expect(dot.getAttribute('role')).toBe('img');
     expect(dot.getAttribute('aria-label')).toBeTruthy();
   }
+});
+
+it('renders each chart owner with tone, size and state examples', () => {
+  TestBed.configureTestingModule({
+    providers: [
+      { provide: Router, useValue: { navigateByUrl: jest.fn() } },
+      { provide: ThemeService, useValue: createThemeServiceStub() },
+    ],
+  });
+  const fixture = TestBed.createComponent(UiGalleryComponent);
+  fixture.detectChanges();
+  const root = fixture.nativeElement as HTMLElement;
+  for (const [id, selector] of [
+    ['family-meter', 'ptah-meter'],
+    ['family-ring', 'ptah-ring'],
+    ['family-sparkline', 'ptah-sparkline'],
+    ['family-stat', 'ptah-stat'],
+  ]) {
+    const section = root.querySelector(`section#${id}`);
+    expect(section).not.toBeNull();
+    expect(section?.querySelectorAll(selector).length).toBeGreaterThan(20);
+    expect(root.querySelector(`nav a[href="#${id}"]`)).not.toBeNull();
+  }
+  expect(root.querySelector('section#family-meter')?.textContent).toContain('Unavailable');
+  expect(root.querySelector('section#family-ring')?.textContent).toContain('Unavailable');
+  expect(root.querySelector('section#family-sparkline')?.textContent).toContain('No trend data');
 });
 
 it('scrolls inside its own container and scrolls a section link to its section', () => {
