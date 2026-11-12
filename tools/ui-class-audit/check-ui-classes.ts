@@ -420,6 +420,56 @@ export function scanTsFile(content: string, relFile: string): ClassOccurrence[] 
           });
         }
       } else {
+        if (ts.isTemplateExpression(initializer)) {
+          // Scan the static text; each `${...}` becomes a neutral placeholder.
+          // `pieces` maps an offset in the joined text back to a source position,
+          // so a substitution that spans lines cannot shift later hits.
+          const placeholder = '__expr__';
+          const pieces: Array<{ start: number; src: number }> = [
+            { start: 0, src: initializer.head.getStart() + 1 },
+          ];
+          let staticText = initializer.head.text;
+          for (const span of initializer.templateSpans) {
+            staticText += placeholder;
+            pieces.push({
+              start: staticText.length,
+              src: span.literal.getStart() + 1,
+            });
+            staticText += span.literal.text;
+          }
+          const lineAt = (offset: number): number => {
+            let piece = pieces[0];
+            for (const candidate of pieces) {
+              if (candidate.start <= offset) piece = candidate;
+            }
+            return (
+              sourceFile.getLineAndCharacterOfPosition(
+                piece.src + (offset - piece.start),
+              ).line + 1
+            );
+          };
+          for (const hit of findTemplateHits(staticText)) {
+            occurrences.push({
+              file: relFile,
+              line: lineAt(hit.offset),
+              token: hit.token,
+            });
+          }
+          // A plain class attribute that holds a substitution cannot be proven safe
+          // (`[class]` and `[ngClass]` bindings already give their own token):
+          // one dynamic occurrence per such binding.
+          const classBinding =
+            /(?<![\w.-])class\s*=\s*("[^"]*"|'[^']*')/g;
+          for (const match of staticText.matchAll(classBinding)) {
+            if (match[1].includes(placeholder)) {
+              occurrences.push({
+                file: relFile,
+                line: lineAt(match.index ?? 0),
+                token: DYNAMIC_TOKEN,
+              });
+            }
+          }
+        }
         // `template: someExpression` — cannot be proven safe.
         occurrences.push({
           file: relFile,

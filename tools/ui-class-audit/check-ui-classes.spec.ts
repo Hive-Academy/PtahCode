@@ -316,6 +316,56 @@ describe('scanTsFile', () => {
     ]);
   });
 
+  it('scans the static text of an interpolated template and keeps the dynamic token', () => {
+    const source = [
+      '@Component({',
+      '  template: `',
+      '    <div class="btn ${cls}">Go</div>',
+      '  `,',
+      '})',
+      'export class DemoYComponent {}',
+    ].join('\n');
+    const result = scanTsFile(source, FILE);
+    expect(result).toContainEqual({ file: FILE, line: 3, token: 'btn' });
+    expect(result.some((o) => o.token === DYNAMIC_TOKEN)).toBe(true);
+  });
+
+  it('keeps source lines when a substitution spans several lines', () => {
+    const source = [
+      '@Component({',
+      '  template: `',
+      '    <p>${a ?',
+      "      b : c}</p>",
+      '    <div class="btn">Go</div>',
+      '  `,',
+      '})',
+      'export class DemoZComponent {}',
+    ].join('\n');
+    expect(scanTsFile(source, FILE)).toContainEqual({
+      file: FILE,
+      line: 5,
+      token: 'btn',
+    });
+  });
+
+  it('reports one dynamic occurrence per class binding with a substitution', () => {
+    const source = [
+      '@Component({',
+      '  template: `',
+      '    <div class="${RAW}">A</div>',
+      '    <div class="p-2">B</div>',
+      '    <div [ngClass]="${EXPR}">C</div>',
+      '  `,',
+      '})',
+      'export class DemoWComponent {}',
+    ].join('\n');
+    const dynamic = scanTsFile(source, FILE).filter(
+      (o) => o.token === DYNAMIC_TOKEN,
+    );
+    // two bindings plus the template-level occurrence
+    expect(dynamic.map((o) => o.line).sort()).toEqual([2, 3, 5]);
+  });
+
   it('ignores blocked-root words outside template properties', () => {
     const source = [
       "const label = 'btn';",
