@@ -69,6 +69,14 @@ import { GallerySectionComponent } from './gallery-section.component';
             <ptah-ring [value]="sample.value" [max]="sample.max" [label]="sample.label" />
           </div>
         }
+        <div class="flex flex-wrap items-center gap-ptah-inline" data-testid="ring-family-variants">
+          <ptah-ring [value]="62" [max]="100" label="Bare" [bare]="true" />
+          <ptah-ring [value]="62" [max]="100" label="Center text" centerText="3/5" size="md" />
+          <ptah-ring [value]="62" [max]="100" label="Sub text" centerText="62" subText="pts" size="lg" />
+          <ptah-ring [value]="0" [max]="0" label="Indeterminate" [indeterminate]="true" valueText="Indexing" size="md" />
+          <ptah-ring [value]="62" [max]="100" label="Large" size="lg" />
+          <ptah-ring [value]="62" [max]="100" label="Extra large" size="xl" />
+        </div>
       </div>
     </ptah-gallery-section>
 

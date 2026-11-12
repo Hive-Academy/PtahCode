@@ -290,6 +290,20 @@
 }
 /* ---- end ptah-meter tokens ---- */
 
+/* ---- ptah-ring tokens (isolated block, TASK_2026_1011_946d) ---- */
+:root,
+[data-theme] {
+  /* Track behind the ring arc. Same value the ring used before. */
+  --ptah-ring-track: var(--surface-border-strong);
+  /* Sizes beyond xs, sm and md (24, 40 and 64 px). */
+  --ptah-ring-size-lg: 6rem;
+  --ptah-ring-size-xl: 7rem;
+  /* Center text size for lg and xl. */
+  --ptah-ring-center-lg: 1.125rem;
+  --ptah-ring-center-xl: 1.375rem;
+}
+/* ---- end ptah-ring tokens ---- */
+
 @media (prefers-reduced-motion: reduce) {
   :root,
   [data-theme] {
