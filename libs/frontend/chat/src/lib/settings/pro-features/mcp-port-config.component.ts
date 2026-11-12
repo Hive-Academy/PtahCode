@@ -39,7 +39,7 @@ import { ClaudeRpcService } from '@ptah-extension/core';
 import type { McpExternalCallerAccess } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahCheckboxDirective, PtahInputDirective, PtahSelectDirective } from '@ptah-extension/ui';
 
 export const COULD_NOT_SAVE_PORT = 'Could not save the MCP port.';
 export const COULD_NOT_UPDATE_NAMESPACES = 'Could not update MCP tool namespaces.';
@@ -50,7 +50,7 @@ export const COULD_NOT_LOAD_MCP_CONFIG = 'Could not load the MCP and browser set
 @Component({
   selector: 'ptah-mcp-port-config',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, FormsModule, PtahButtonDirective],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, FormsModule, PtahButtonDirective, PtahCheckboxDirective, PtahInputDirective, PtahSelectDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -92,7 +92,7 @@ export const COULD_NOT_LOAD_MCP_CONFIG = 'Could not load the MCP and browser set
         <input
           id="mcp-port-input"
           type="number"
-          class="input input-bordered input-xs w-28 text-base-content"
+          ptahInput size="xs" class="w-28 text-base-content"
           [ngModel]="portValue()"
           (ngModelChange)="onPortInput($event)"
           [min]="1024"
@@ -137,7 +137,7 @@ export const COULD_NOT_LOAD_MCP_CONFIG = 'Could not load the MCP and browser set
         </label>
         <select
           id="mcp-external-caller-access"
-          class="select select-bordered select-xs mt-1 w-full max-w-xs text-base-content"
+          ptahSelect size="xs" class="mt-1 w-full max-w-xs text-base-content"
           [ngModel]="externalCallerAccess()"
           (ngModelChange)="onExternalCallerAccessChange($event)"
           [ptahBusyDisabled]="saving() || !loaded()"
@@ -173,7 +173,7 @@ export const COULD_NOT_LOAD_MCP_CONFIG = 'Could not load the MCP and browser set
                 <td class="align-top">
                   <input
                     type="checkbox"
-                    class="checkbox checkbox-xs checkbox-primary"
+                    ptahCheckbox size="xs"
                     [checked]="isNamespaceEnabled(ns.id)"
                     (change)="toggleNamespace(ns.id)"
                     [ptahBusyDisabled]="saving() || !loaded()"
@@ -201,7 +201,7 @@ export const COULD_NOT_LOAD_MCP_CONFIG = 'Could not load the MCP and browser set
                 <input
                   #allowLocalhostToggle
                   type="checkbox"
-                  class="checkbox checkbox-xs checkbox-primary"
+                  ptahCheckbox size="xs"
                   [checked]="browserAllowLocalhost()"
                   (change)="onAllowLocalhostToggle($event)"
                   [disabled]="saving() || !loaded() || confirmingAllowLocalhost()"

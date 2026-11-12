@@ -27,7 +27,7 @@ import {
 } from 'lucide-angular';
 import type { SettingsTier } from '@ptah-extension/shared';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahCheckboxDirective, PtahSelectDirective } from '@ptah-extension/ui';
 
 export interface ParityTierOption {
   readonly tier: SettingsTier;
@@ -56,7 +56,7 @@ export const PARITY_TIERS: readonly ParityTierOption[] = [
 @Component({
   selector: 'ptah-output-style-parity-section',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective, PtahCheckboxDirective, PtahSelectDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <details
@@ -74,7 +74,8 @@ export const PARITY_TIERS: readonly ParityTierOption[] = [
       <label class="flex items-start gap-2 cursor-pointer mt-2">
         <input
           type="checkbox"
-          class="checkbox checkbox-xs checkbox-primary mt-0.5"
+          ptahCheckbox size="xs"
+          class="mt-0.5"
           [checked]="parityEnabled()"
           (change)="onToggle($event)"
           data-testid="output-style-parity-checkbox"
@@ -101,8 +102,9 @@ export const PARITY_TIERS: readonly ParityTierOption[] = [
             Where to write it
           </label>
           <select
+            ptahSelect size="xs"
             id="output-style-parity-tier"
-            class="select select-bordered select-xs w-full max-w-xs text-base-content"
+            class="w-full max-w-xs text-base-content"
             [value]="parityTier()"
             (change)="onTierChange($event)"
             data-testid="output-style-parity-select"

@@ -26,7 +26,7 @@ import {
   EyeOff,
 } from 'lucide-angular';
 import { ClaudeRpcService } from '@ptah-extension/core';
-import { NativePopoverComponent, PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
+import { NativePopoverComponent, PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
 import { ChatStore } from '../../services/chat.store';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 
@@ -66,7 +66,7 @@ const LOGOUT_FAILED = 'Could not log out.';
 @Component({
   selector: 'ptah-license-status-card',
   standalone: true,
-  imports: [LucideAngularModule, FormsModule, NativePopoverComponent, PtahButtonDirective, PtahIconButtonDirective],
+  imports: [LucideAngularModule, FormsModule, NativePopoverComponent, PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -162,11 +162,12 @@ const LOGOUT_FAILED = 'Could not log out.';
                   </label>
                   <div class="relative">
                     <input
+                      ptahInput size="sm" tone="mono"
                       id="membership-key-input"
                       [attr.type]="keyVisible() ? 'text' : 'password'"
                       autocomplete="off"
                       spellcheck="false"
-                      class="input input-bordered input-sm w-full pr-9 font-mono text-xs text-base-content"
+                      class="w-full pr-9 text-xs text-base-content"
                       placeholder="ptah_lic_..."
                       aria-describedby="membership-key-help"
                       [(ngModel)]="licenseKeyInput"
