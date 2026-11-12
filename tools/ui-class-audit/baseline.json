@@ -1043,7 +1043,14 @@
     "skeleton": 3
   },
   "libs/frontend/memory-curator-ui/src/lib/components/memory-indexed-code.component.ts": {
+    "btn": 2,
+    "btn-xs": 2,
     "skeleton": 2
+  },
+  "libs/frontend/memory-curator-ui/src/lib/components/memory-search-bar.component.ts": {
+    "btn": 2,
+    "btn-primary": 2,
+    "btn-sm": 2
   },
   "libs/frontend/memory-curator-ui/src/lib/components/timeline-view.component.ts": {
     "alert": 1,

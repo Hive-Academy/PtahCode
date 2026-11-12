@@ -5,7 +5,7 @@ import {
   output,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
+import { PtahInputDirective } from '@ptah-extension/ui';
 
 import type {
   MemoryScopeFilter,
@@ -21,7 +21,7 @@ interface TierChip {
   selector: 'ptah-memory-search-bar',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, PtahButtonDirective, PtahInputDirective],
+  imports: [CommonModule, PtahInputDirective],
   template: `
     <div class="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
       <input
@@ -61,9 +61,8 @@ interface TierChip {
         <button
           type="button"
           role="tab"
-          ptahButton
-          class="join-item"
-          [variant]="scope() === 'workspace' ? 'primary' : 'secondary'"
+          class="join-item btn btn-sm"
+          [class.btn-primary]="scope() === 'workspace'"
           [attr.aria-selected]="scope() === 'workspace'"
           (click)="scopeChange.emit('workspace')"
         >
@@ -72,9 +71,8 @@ interface TierChip {
         <button
           type="button"
           role="tab"
-          ptahButton
-          class="join-item"
-          [variant]="scope() === 'all' ? 'primary' : 'secondary'"
+          class="join-item btn btn-sm"
+          [class.btn-primary]="scope() === 'all'"
           [attr.aria-selected]="scope() === 'all'"
           (click)="scopeChange.emit('all')"
         >
