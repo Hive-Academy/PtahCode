@@ -78,6 +78,12 @@ describe('buildRouteDecideTool', () => {
     });
   });
 
+  it('advertises both orchestration phase kinds', () => {
+    const phases = buildRouteDecideTool().inputSchema.properties['phases'];
+    expect(JSON.stringify(phases)).toContain('batch');
+    expect(JSON.stringify(phases)).toContain('completion');
+  });
+
   it('describes phase inputs and roster outputs', () => {
     const description = buildRouteDecideTool().description;
     for (const term of ['shape', 'weight', 'tier', 'effort']) {
