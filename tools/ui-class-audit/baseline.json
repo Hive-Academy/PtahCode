@@ -85,11 +85,7 @@
     "btn-xs": 2
   },
   "libs/frontend/chat-ui/src/lib/molecules/agent-steer-input.component.ts": {
-    "<dynamic>": 4,
-    "btn": 1,
-    "btn-primary": 1,
-    "btn-square": 1,
-    "btn-xs": 1
+    "<dynamic>": 4
   },
   "libs/frontend/chat-ui/src/lib/molecules/boot-progress/boot-progress.component.ts": {
     "<dynamic>": 1
@@ -651,11 +647,10 @@
     "<dynamic>": 2
   },
   "libs/frontend/core/src/lib/components/attention-permission-actions.component.ts": {
-    "btn": 5,
-    "btn-error": 1,
-    "btn-ghost": 4,
+    "btn": 3,
+    "btn-ghost": 3,
     "btn-primary": 1,
-    "btn-sm": 5,
+    "btn-sm": 3,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
