@@ -139,7 +139,7 @@ export function badgeClass(tone: StatsChipTone): string {
 }
 
 /** Usage at or above this percent fills the bar in the warning colour. */
-const BAR_WARNING_PERCENT = 75;
+export const BAR_WARNING_PERCENT = 75;
 
 /**
  * Fill colour of a plan row's usage bar: error for an error-toned row,

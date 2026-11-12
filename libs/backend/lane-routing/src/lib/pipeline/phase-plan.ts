@@ -40,7 +40,7 @@ import { AUTOMATIC_MATRIX_MODEL } from '../matrix/local-derivation';
 const LANE_INSTRUCTIONS = 'Choose the executor for this phase. Each score already includes past outcomes; pastOutcomes lists the delivered and failed run counts behind it. No entry means no verified runs were available for that executor in the outcome window.';
 
 /** Built-in subagent role for a phase kind (part A, Assumption A4). */
-const DEFAULT_ROLE: Readonly<Record<PhaseKind, string>> = {
+const DEFAULT_ROLE: Readonly<Partial<Record<PhaseKind, string>>> = {
   plan: 'project-manager',
   architecture: 'software-architect',
   implement: 'backend-developer',
@@ -87,6 +87,7 @@ export interface ScoredCandidate {
 export interface PhasePlan {
   readonly phaseId: string;
   readonly kind: PhaseKind;
+  readonly hasExplicitRole?: boolean;
   readonly taskKind: OutcomeTaskKind;
   readonly shape?: GatePhase['shape'];
   readonly weight?: GatePhase['weight'];
@@ -159,6 +160,7 @@ export function planRoutePhases(
       plans.push({
         phaseId: phase.id,
         kind: phase.kind,
+        hasExplicitRole: phase.role !== undefined,
         taskKind,
         shape: phase.shape,
         weight: phase.weight,
@@ -198,6 +200,7 @@ export function planRoutePhases(
     plans.push({
       phaseId: phase.id,
       kind: phase.kind,
+      hasExplicitRole: phase.role !== undefined,
       taskKind,
       shape: phase.shape,
       weight: phase.weight,
@@ -234,7 +237,7 @@ export function dispatchMode(caller: OpenedCaller): DispatchMode {
 }
 
 export function laneQuestion(plan: PhasePlan): LaneQuestion {
-  const top = Math.max(...plan.ranked.map((row) => row.scored.score));
+  const top = plan.ranked.length === 0 ? 0 : Math.max(...plan.ranked.map((row) => row.scored.score));
   const primaries = plan.ranked.filter((row) => insideClosenessBand(top, row.scored.score));
   const eligible = new Set(primaries.map((row) => row.candidate.id));
   return {
@@ -257,7 +260,7 @@ function alternateOptions(
   gathered: GatheredCall,
 ): AlternateOption[] {
   const options: AlternateOption[] = [];
-  const top = Math.max(...ranked.map((row) => row.scored.score));
+  const top = ranked.length === 0 ? 0 : Math.max(...ranked.map((row) => row.scored.score));
   for (const row of ranked) {
     const candidate = row.candidate;
     if (!isSystemCliLane(candidate)) continue;
@@ -311,6 +314,7 @@ function candidatesFor(
 ): RoutingCandidate[] {
   const role = phase.role ?? DEFAULT_ROLE[phase.kind];
   const candidates: RoutingCandidate[] = [...gathered.lanes];
+  if (role === undefined) return candidates;
   if (BUILTIN_SUBAGENT_ROLES.has(role) || gathered.roles.includes(role)) {
     candidates.push(toSubagentCandidate(role));
   }
@@ -410,6 +414,8 @@ function taskKindFor(kind: PhaseKind): OutcomeTaskKind {
   switch (kind) {
     case 'plan':
     case 'architecture':
+    case 'batch':
+    case 'completion':
       return 'plan';
     case 'implement':
       return 'implement';

@@ -54,7 +54,7 @@ import {
   VSCodeService,
   injectWallClock,
 } from '@ptah-extension/core';
-import { AuroraEffectComponent } from '@ptah-extension/ui';
+import { AuroraEffectComponent, PtahButtonDirective } from '@ptah-extension/ui';
 import type { CanvasBoardNotice } from './canvas-rail-board.component';
 import {
   previousSessionsLabel,
@@ -75,6 +75,7 @@ export const LOAD_STEPS_MAX_MS = 12_000;
   selector: 'ptah-canvas-empty-board',
   standalone: true,
   imports: [
+    PtahButtonDirective,
     LucideAngularModule,
     ActivityGridComponent,
     ReadinessRingComponent,
@@ -114,9 +115,8 @@ export const LOAD_STEPS_MAX_MS = 12_000;
               aria-hidden="true"
             />
             <span class="flex-1">{{ current.text }}</span>
-            <button
+            <button ptahButton variant="ghost" size="xs"
               type="button"
-              class="btn btn-ghost btn-xs"
               aria-label="Dismiss notice"
               (click)="noticeDismissed.emit(current.key)"
             >
@@ -203,9 +203,9 @@ export const LOAD_STEPS_MAX_MS = 12_000;
               data-testid="canvas-empty-board-readiness-error"
             >
               <span>Readiness unavailable</span>
-              <button
+              <button ptahButton variant="ghost" size="xs"
                 type="button"
-                class="btn btn-ghost btn-xs gap-1"
+                class="gap-1"
                 (click)="retryReadiness()"
               >
                 <lucide-angular
@@ -230,9 +230,9 @@ export const LOAD_STEPS_MAX_MS = 12_000;
           }
         </div>
 
-        <button
+        <button ptahButton variant="primary" size="md"
           type="button"
-          class="ptah-empty-board__new btn btn-primary gap-2 rounded-full px-6"
+          class="ptah-empty-board__new gap-2 rounded-full px-6"
           data-testid="canvas-hero-new-session"
           [class.ptah-empty-board__new--blocked]="!!newSessionBlockReason()"
           [attr.aria-disabled]="newSessionBlockReason() ? 'true' : null"

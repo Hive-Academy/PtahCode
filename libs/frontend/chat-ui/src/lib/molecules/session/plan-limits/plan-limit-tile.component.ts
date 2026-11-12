@@ -7,7 +7,7 @@ import {
 } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { ChevronDown, ChevronUp, LucideAngularModule } from 'lucide-angular';
-import { PtahCountdownComponent } from '@ptah-extension/ui';
+import { PtahCountdownComponent, PtahMeterComponent } from '@ptah-extension/ui';
 import { PlanWindowDetailComponent } from './plan-window-detail.component';
 import { sameSources } from './stats-limit-sections';
 import {
@@ -16,8 +16,8 @@ import {
   newPanelId,
   planCardClass,
   planRowClass,
+  BAR_WARNING_PERCENT,
   sourceChipClass,
-  usageBarFillClass,
 } from './stats-tile.styles';
 import type { PlanLimitTileModel } from './stats-limit-view-model.types';
 
@@ -47,7 +47,7 @@ import type { PlanLimitTileModel } from './stats-limit-view-model.types';
 @Component({
   selector: 'ptah-plan-limit-tile',
   standalone: true,
-  imports: [LucideAngularModule, NgTemplateOutlet, PlanWindowDetailComponent, PtahCountdownComponent],
+  imports: [LucideAngularModule, NgTemplateOutlet, PlanWindowDetailComponent, PtahCountdownComponent, PtahMeterComponent],
   host: {
     class: 'block min-w-0',
     '[attr.data-tile-id]': 'tile().id',
@@ -133,23 +133,20 @@ import type { PlanLimitTileModel } from './stats-limit-view-model.types';
             class="mt-2 flex min-w-0 items-center gap-2"
             data-testid="plan-limit-card-centre"
           >
-            <span
-              class="relative h-2 min-w-8 flex-1 overflow-hidden rounded-full bg-base-content/10"
-              role="progressbar"
-              aria-valuemin="0"
-              aria-valuemax="100"
-              [attr.aria-valuenow]="progressPercent()"
-              [attr.aria-valuetext]="t.value"
-              [attr.aria-label]="t.label + ' plan usage'"
+            <ptah-meter
+              class="block min-w-8 flex-1"
+              [value]="progressPercent() ?? 0"
+              [max]="100"
+              [label]="t.label + ' plan usage'"
+              [valueText]="t.value"
+              [tone]="meterTone()"
+              size="md"
+              barRole="progressbar"
+              [showValue]="false"
+              [hideLabel]="true"
               [attr.title]="t.value + '. ' + t.resetLine"
               data-testid="plan-limit-progress"
-            >
-              <span
-                [class]="barFillClass()"
-                [style.width.%]="progressPercent()"
-                data-testid="plan-limit-progress-fill"
-              ></span>
-            </span>
+            />
             <span
               class="shrink-0 whitespace-nowrap text-xs font-semibold tabular-nums"
               data-testid="plan-limit-tile-value"
@@ -234,23 +231,20 @@ import type { PlanLimitTileModel } from './stats-limit-view-model.types';
               >{{ t.value }}@if (t.resetLine) { · {{ t.resetLine }} }</span
             >
           } @else if (hasBar()) {
-            <span
-              class="relative h-1.5 min-w-8 flex-1 overflow-hidden rounded-full bg-base-content/10"
-              role="progressbar"
-              aria-valuemin="0"
-              aria-valuemax="100"
-              [attr.aria-valuenow]="progressPercent()"
-              [attr.aria-valuetext]="t.value"
-              [attr.aria-label]="t.label + ' plan usage'"
+            <ptah-meter
+              class="block min-w-8 flex-1"
+              [value]="progressPercent() ?? 0"
+              [max]="100"
+              [label]="t.label + ' plan usage'"
+              [valueText]="t.value"
+              [tone]="meterTone()"
+              size="sm"
+              barRole="progressbar"
+              [showValue]="false"
+              [hideLabel]="true"
               [attr.title]="t.value + '. ' + t.resetLine"
               data-testid="plan-limit-progress"
-            >
-              <span
-                [class]="barFillClass()"
-                [style.width.%]="progressPercent()"
-                data-testid="plan-limit-progress-fill"
-              ></span>
-            </span>
+            />
             <span
               class="shrink-0 whitespace-nowrap text-xs font-semibold tabular-nums"
               data-testid="plan-limit-tile-value"
@@ -381,8 +375,12 @@ export class PlanLimitTileComponent {
   protected readonly hasBar = computed(
     () => this.tile().kind !== 'status' && this.progressPercent() !== null,
   );
-  protected readonly barFillClass = computed(
-    () =>
-      `block h-full rounded-full ${usageBarFillClass(this.tile().tone, this.progressPercent() ?? 0)}`,
+  /** Owner tone of the usage bar: error row is `err`, 75% or more is `warn`, else `ok`. */
+  protected readonly meterTone = computed<'ok' | 'warn' | 'err'>(() =>
+    this.tile().tone === 'error'
+      ? 'err'
+      : (this.progressPercent() ?? 0) >= BAR_WARNING_PERCENT
+        ? 'warn'
+        : 'ok',
   );
 }

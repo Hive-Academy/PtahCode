@@ -64,6 +64,10 @@ Inventory: 45 capabilities: 18 keep, 15 move, 12 remove-proposed. By first named
 | Classify role slug into task kind | `libs/backend/lane-outcomes/src/lib/task-kind-mapping.ts:49` | `taskKindForRole` | move | Phase 2, phase-kind primary, role aliases until Phase 4 | none found |
 | Read historical subagent grade attribution | `libs/backend/skill-synthesis/src/lib/skill-task-grade.store.ts:167` | `lane_outcome_records.role`, `registry.kind='agent'` | keep | Phase 5, historical read or explicit migration | none found |
 | Show agent-clone scorecards | `libs/backend/skill-synthesis/src/lib/skill-scorecard.service.ts:84` | `getAggregates('agent',...)` | move | Phase 5, preserve old records, new phase/skill views | none found |
+| Learning actions on an agent file (enhance, revert, rebase to upstream, keep mine) | not located in Phase 0. The plan of Phase 4 must locate it | not located in Phase 0. The plan of Phase 4 must locate it | move | Phase 4, the actions apply to skills and phase definitions. They stay for agent files that the user writes (U-D13) | none found |
+| Snapshot history of an agent file | not located in Phase 0. The plan of Phase 4 must locate it | not located in Phase 0. The plan of Phase 4 must locate it | keep | Phase 4, read-only history for a retired role (U-D13) | none found |
+| Learned differences of the 14 role files | workspace agent files, state "diverged" | not located in Phase 0. The plan of Phase 4 must locate it | move | Phase 4, into the related phase definition or stack skill before the role retires (U-D13) | none found |
+| Sync provider copies of an agent file | not located in Phase 0. The plan of Phase 4 must locate it | not located in Phase 0. The plan of Phase 4 must locate it | keep | Phase 5, for agent files that the user writes (U-D13) | none found |
 
 ### 7. Harness wizard designer
 
