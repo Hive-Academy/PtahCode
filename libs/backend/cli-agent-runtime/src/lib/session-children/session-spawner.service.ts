@@ -106,6 +106,7 @@ import {
   successionEndReason,
 } from './session-child-succession';
 import { childOutcomeOf } from './session-child-outcome';
+import { transferHeldPeerMessages } from './session-held-message-transfer';
 import type { HandoffPredecessorCloser } from './session-handoff.port';
 import {
   SESSION_CHILD_FIRST_TURN_TIMEOUT_MS,
@@ -2343,6 +2344,12 @@ export class SessionSpawnerService implements ISessionSpawner {
         ...(runtime.effort ? { effort: runtime.effort } : {}),
       });
       if (!outcome.started) throw new Error(outcome.error);
+      await transferHeldPeerMessages(
+        this.adapter,
+        child.childSessionId as SessionId,
+        successorId,
+        (message) => this.log(message),
+      );
       this.agents.settleLaneAdoption(adopted, 'kept');
       this.armRuntimeCap(nextRuntime, successorId, settings.maxRuntimeMinutes);
       this.releaseBudget(child.childSessionId);

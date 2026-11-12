@@ -409,6 +409,10 @@ describe('SessionSpawnerService succession', () => {
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
+    expect(h.adapter.claimHeldPeerMessages).toHaveBeenCalledWith(
+      child.childSessionId,
+    );
+    expect(h.adapter.sendMessageToSession).not.toHaveBeenCalled();
     const status = h.spawner.status({
       callerSessionId: PARENT,
       childSessionId: child.childSessionId,
@@ -464,6 +468,49 @@ describe('SessionSpawnerService succession', () => {
         status: 'stopped',
       },
     });
+  });
+
+  it('replays held messages in order after the successor prompt and never stops successor', async () => {
+    const h = makeHarness();
+    const child = await h.startChild();
+    h.markRan(child.childSessionId);
+    const origin = { kind: 'peer' as const, from: 'parent' };
+    h.adapter.claimHeldPeerMessages.mockReturnValue([
+      { content: 'one', origin },
+      { content: 'two', origin },
+    ]);
+    const result = await h.spawner.succeed({
+      callerSessionId: child.childSessionId,
+      handoffPath: `${child.worktreePath}/HANDOFF.md`,
+      prompt: 'continue',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(h.adapter.claimHeldPeerMessages).toHaveBeenCalledWith(
+      child.childSessionId,
+    );
+    expect(
+      h.adapter.sendMessageToSession.mock.calls.map((call) => call[1]),
+    ).toEqual(['one', 'two']);
+    expect(
+      h.adapter.sendMessageToSession.mock.calls.every(
+        (call) => call[0] === result.successor.childSessionId,
+      ),
+    ).toBe(true);
+    expect(h.adapter.sendMessageToSession.mock.calls[0][2]).toMatchObject({
+      origin,
+    });
+    expect(h.host.startChildSession).toHaveBeenCalledTimes(2);
+    expect(h.host.startChildSession.mock.invocationCallOrder[1]).toBeLessThan(
+      h.adapter.claimHeldPeerMessages.mock.invocationCallOrder[0],
+    );
+    expect(
+      h.adapter.claimHeldPeerMessages.mock.invocationCallOrder[0],
+    ).toBeLessThan(h.adapter.sendMessageToSession.mock.invocationCallOrder[0]);
+    expect(h.adapter.interruptSession).not.toHaveBeenCalledWith(
+      result.successor.childSessionId,
+      expect.anything(),
+    );
   });
 
   it('passes the parent live SDK id in the host descriptor and stores it on the successor after parent reparent without SDK id (Defect A)', async () => {
@@ -561,6 +608,7 @@ describe('SessionSpawnerService succession', () => {
     expect(h.registry.liveCount()).toBe(1);
     expect(h.provisioner.rollback).not.toHaveBeenCalled();
     expect(h.agents.settleLaneAdoption).toHaveBeenCalledWith([], 'reverted');
+    expect(h.adapter.claimHeldPeerMessages).not.toHaveBeenCalled();
   });
 
   it('keeps the predecessor when clear_finished runs during a succession that then fails (review M2)', async () => {

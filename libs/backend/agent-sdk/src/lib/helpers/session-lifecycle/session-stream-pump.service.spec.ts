@@ -99,24 +99,70 @@ describe('SessionStreamPump — one message per turn (TASK_2026_294)', () => {
     await h.pump.sendMessage(TAB, 'completion', undefined, undefined, options);
     await h.pump.sendMessage(TAB, 'completion', undefined, undefined, options);
     expect(h.registry.find(TAB as string)?.messageQueue).toHaveLength(1);
-    await expect(h.pump.sendMessage(TAB, 'different', undefined, undefined, options))
-      .rejects.toThrow('Lane delivery ID reused');
-    await h.pump.sendMessage(TAB, 'human', undefined, undefined, { clientMessageId: 'ordinary' });
-    await h.pump.sendMessage(TAB, 'human', undefined, undefined, { clientMessageId: 'ordinary' });
+    await expect(
+      h.pump.sendMessage(TAB, 'different', undefined, undefined, options),
+    ).rejects.toThrow('Lane delivery ID reused');
+    await h.pump.sendMessage(TAB, 'human', undefined, undefined, {
+      clientMessageId: 'ordinary',
+    });
+    await h.pump.sendMessage(TAB, 'human', undefined, undefined, {
+      clientMessageId: 'ordinary',
+    });
     expect(h.registry.find(TAB as string)?.messageQueue).toHaveLength(3);
+  });
+
+  it('claims queued peer turns FIFO once, preserving origin and attachments', async () => {
+    const h = makeHarness();
+    const origin = { kind: 'peer' as const, from: 'parent' };
+    await h.pump.sendMessage(
+      TAB,
+      'first',
+      ['file'],
+      [{ data: 'image', mediaType: 'image/png' }],
+      { origin },
+    );
+    await h.pump.sendMessage(TAB, 'human');
+    await h.pump.sendMessage(TAB, 'second', undefined, undefined, { origin });
+    expect(h.pump.claimHeldPeerMessages(TAB)).toEqual([
+      {
+        content: 'first',
+        origin,
+        files: ['file'],
+        images: [{ data: 'image', mediaType: 'image/png' }],
+      },
+      { content: 'second', origin, files: undefined, images: undefined },
+    ]);
+    expect(h.pump.claimHeldPeerMessages(TAB)).toEqual([]);
+    expect(h.registry.find(TAB as string)?.messageQueue).toHaveLength(1);
+  });
+
+  it('does not claim a peer turn already yielded to the SDK', async () => {
+    const h = makeHarness();
+    const origin = { kind: 'peer' as const, from: 'parent' };
+    await h.pump.sendMessage(TAB, 'yielded', undefined, undefined, { origin });
+    expect((await h.iterator.next()).value?.message.content).toBe('yielded');
+    await h.pump.sendMessage(TAB, 'held', undefined, undefined, { origin });
+    expect(
+      h.pump.claimHeldPeerMessages(TAB).map((message) => message.content),
+    ).toEqual(['held']);
   });
 
   it('keeps same-payload retries idempotent and refuses changed or withdrawn IDs', async () => {
     const h = makeHarness();
-    const options = { queueIntent: 'next-turn' as const, clientMessageId: 'same' };
+    const options = {
+      queueIntent: 'next-turn' as const,
+      clientMessageId: 'same',
+    };
     await h.pump.sendMessage(TAB, 'first', undefined, undefined, options);
     await h.pump.sendMessage(TAB, 'first', undefined, undefined, options);
     expect(h.registry.find(TAB as string)?.messageQueue).toHaveLength(1);
-    await expect(h.pump.sendMessage(TAB, 'changed', undefined, undefined, options))
-      .rejects.toThrow('FOLLOW_UP_ID_CONFLICT');
+    await expect(
+      h.pump.sendMessage(TAB, 'changed', undefined, undefined, options),
+    ).rejects.toThrow('FOLLOW_UP_ID_CONFLICT');
     expect(h.pump.withdrawQueuedFollowUp(TAB, 'same')).toBe(true);
-    await expect(h.pump.sendMessage(TAB, 'first', undefined, undefined, options))
-      .rejects.toThrow('FOLLOW_UP_ID_CONFLICT');
+    await expect(
+      h.pump.sendMessage(TAB, 'first', undefined, undefined, options),
+    ).rejects.toThrow('FOLLOW_UP_ID_CONFLICT');
   });
   it('holds a message sent while a turn is in flight, then yields it on turn end', async () => {
     const h = makeHarness();
@@ -142,13 +188,21 @@ describe('SessionStreamPump — one message per turn (TASK_2026_294)', () => {
     await h.pump.sendMessage(TAB, 'first');
     await h.iterator.next();
     await h.pump.sendMessage(TAB, 'follow-up', undefined, undefined, {
-      queueIntent: 'next-turn', clientMessageId: 'follow-up-id',
+      queueIntent: 'next-turn',
+      clientMessageId: 'follow-up-id',
     });
     const next = h.iterator.next();
-    for (const boundary of ['assistant text', 'tool_use', 'tool_result', 'assistant final text']) {
+    for (const boundary of [
+      'assistant text',
+      'tool_use',
+      'tool_result',
+      'assistant final text',
+    ]) {
       expect(await settle(next)).toBe(PENDING);
       expect(h.registry.find(TAB as string)?.turnInFlight).toBe(true);
-      expect(h.pump.listQueuedFollowUps(TAB).map((item) => item.clientMessageId)).toEqual(['follow-up-id']);
+      expect(
+        h.pump.listQueuedFollowUps(TAB).map((item) => item.clientMessageId),
+      ).toEqual(['follow-up-id']);
     }
     h.registry.markTurnEnded(TAB); // SDK result
     expect(textOf((await next).value as SDKUserMessage)).toBe('follow-up');
@@ -502,12 +556,15 @@ describe('SessionStreamPump turn identity', () => {
     rec.interruptAwaitingResultYieldSequence = rec.yieldSequence ?? 0;
     h.registry.markTurnEnded(TAB);
     await h.pump.sendMessage(TAB, 'Q', undefined, undefined, {
-      clientMessageId: 'Q', origin: { kind: 'human' },
+      clientMessageId: 'Q',
+      origin: { kind: 'human' },
     });
     const q = await h.iterator.next();
     expect(rec.yieldSequence).toBe(2);
     expect(rec.interruptAwaitingResultYieldSequence).toBe(1);
-    expect(takeAwaitingEcho(rec, q.value as SDKUserMessage)?.clientMessageId).toBe('Q');
+    expect(
+      takeAwaitingEcho(rec, q.value as SDKUserMessage)?.clientMessageId,
+    ).toBe('Q');
     expect(rec.currentTurnClientMessageId).toBe('Q');
     h.abortController.abort();
   });

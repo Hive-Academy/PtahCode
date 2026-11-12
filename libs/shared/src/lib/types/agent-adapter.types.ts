@@ -11,6 +11,7 @@ import type {
   SessionEndCause,
   AISessionConfig,
   EffortLevel,
+  HeldPeerMessage,
 } from './ai-provider.types';
 import type { SessionId } from './branded.types';
 import type { FollowUpQueueOperations } from './follow-up-queue.types';
@@ -318,6 +319,8 @@ export interface AgentModelInfo {
  * runtime MUST throw an Error rather than silently no-op.
  */
 export interface IAgentAdapter extends IAIProvider, FollowUpQueueOperations {
+  /** Atomically remove undelivered peer turns from this session's queue. */
+  claimHeldPeerMessages(sessionId: SessionId): readonly HeldPeerMessage[];
   /** Pre-warm any heavy SDK modules (no-op if nothing to pre-load). */
   preloadSdk(): Promise<void>;
 
@@ -380,7 +383,10 @@ export interface IAgentAdapter extends IAIProvider, FollowUpQueueOperations {
   interruptCurrentTurn(sessionId: SessionId): Promise<boolean>;
 
   /** Interrupt and clean up the session entirely. */
-  interruptSession(sessionId: SessionId, cause?: SessionEndCause): Promise<void>;
+  interruptSession(
+    sessionId: SessionId,
+    cause?: SessionEndCause,
+  ): Promise<void>;
 
   /** Change the permission level mid-session. */
   setSessionPermissionLevel(

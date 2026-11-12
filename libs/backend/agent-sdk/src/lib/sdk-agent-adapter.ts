@@ -21,6 +21,7 @@ import {
   ProviderCapabilities,
   AISessionConfig,
   AIMessageOptions,
+  type HeldPeerMessage,
   type QueuedFollowUpSnapshot,
   type QueuedFollowUpStateChange,
   type SteerQueuedFollowUpResult,
@@ -972,7 +973,10 @@ export class SdkAgentAdapter implements IAgentAdapter {
       leases.push(...this.captureStatsLeases(id as SessionId));
       budgetKeys.push(...this.sessionKeys(id as SessionId));
     }
-    await this.sessionLifecycle.disposeSessionsForWorkspace(workspacePath, 'config-reinit');
+    await this.sessionLifecycle.disposeSessionsForWorkspace(
+      workspacePath,
+      'config-reinit',
+    );
     const liveIds = new Set(
       this.sessionLifecycle
         .getLiveSessionIds()
@@ -1835,6 +1839,10 @@ export class SdkAgentAdapter implements IAgentAdapter {
     this.callbacks.setWorktreeRemoved(callback);
   }
 
+  claimHeldPeerMessages(sessionId: SessionId): readonly HeldPeerMessage[] {
+    return this.sessionLifecycle.claimHeldPeerMessages(sessionId);
+  }
+
   async sendMessageToSession(
     sessionId: SessionId,
     content: string,
@@ -1884,7 +1892,10 @@ export class SdkAgentAdapter implements IAgentAdapter {
     sessionId: SessionId,
     clientMessageId: string,
   ): Promise<SteerQueuedFollowUpResult> {
-    return this.sessionLifecycle.steerQueuedFollowUp(sessionId, clientMessageId);
+    return this.sessionLifecycle.steerQueuedFollowUp(
+      sessionId,
+      clientMessageId,
+    );
   }
 
   async executeSlashCommand(
@@ -2060,7 +2071,10 @@ export class SdkAgentAdapter implements IAgentAdapter {
    * stage and compactions must survive a Stop. Only a real end releases it (`endSession`,
    * a token-matched stream-exit end, dispose).
    */
-  async interruptSession(sessionId: SessionId, cause: SessionEndCause = 'unknown'): Promise<void> {
+  async interruptSession(
+    sessionId: SessionId,
+    cause: SessionEndCause = 'unknown',
+  ): Promise<void> {
     this.logger.info(`[SdkAgentAdapter] Interrupting session: ${sessionId}`);
     this.flushPendingUserActivityFor(sessionId);
     const statsLeases = this.captureStatsLeases(sessionId);

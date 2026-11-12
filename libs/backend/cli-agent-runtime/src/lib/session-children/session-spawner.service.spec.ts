@@ -106,6 +106,7 @@ export function makeHarness(
   const adapter = {
     isSessionActive: jest.fn((id: string) => active.has(id)),
     sendMessageToSession: jest.fn().mockResolvedValue(undefined),
+    claimHeldPeerMessages: jest.fn().mockReturnValue([]),
     interruptCurrentTurn: jest.fn().mockResolvedValue(true),
     interruptSession: jest.fn().mockResolvedValue(undefined),
   };
@@ -1720,11 +1721,18 @@ describe('SessionSpawnerService — child session end grace', () => {
       h.markRan(child.childSessionId);
       h.phases.set(child.childSessionId, 'generating');
       h.active.delete(child.childSessionId);
-      h.sessionEnd.notifyAll({ sessionId: child.childSessionId, workspaceRoot: WORKTREE, cause });
+      h.sessionEnd.notifyAll({
+        sessionId: child.childSessionId,
+        workspaceRoot: WORKTREE,
+        cause,
+      });
       jest.advanceTimersByTime(SESSION_CHILD_GRACE_MS);
       await flush();
       expect(h.notifier.signalSessionChild).toHaveBeenCalledTimes(1);
-      expect(h.notifier.signalSessionChild.mock.calls[0][1]).toMatchObject({ status: 'failed', turn: 1 });
+      expect(h.notifier.signalSessionChild.mock.calls[0][1]).toMatchObject({
+        status: 'failed',
+        turn: 1,
+      });
       jest.advanceTimersByTime(SESSION_CHILD_GRACE_MS);
       await flush();
       expect(h.notifier.signalSessionChild).toHaveBeenCalledTimes(1);
@@ -1737,7 +1745,11 @@ describe('SessionSpawnerService — child session end grace', () => {
     h.markRan(child.childSessionId);
     h.phases.set(child.childSessionId, 'generating');
     h.active.delete(child.childSessionId);
-    h.sessionEnd.notifyAll({ sessionId: child.childSessionId, workspaceRoot: WORKTREE, cause: 'no-activity-timeout' });
+    h.sessionEnd.notifyAll({
+      sessionId: child.childSessionId,
+      workspaceRoot: WORKTREE,
+      cause: 'no-activity-timeout',
+    });
     // A normal turn settle lands inside the grace window.
     h.registry.update(child.childSessionId, { turnsSettled: 1 });
     jest.advanceTimersByTime(SESSION_CHILD_GRACE_MS);
@@ -1751,7 +1763,11 @@ describe('SessionSpawnerService — child session end grace', () => {
     h.markRan(child.childSessionId);
     h.phases.set(child.childSessionId, 'idle');
     h.active.delete(child.childSessionId);
-    h.sessionEnd.notifyAll({ sessionId: child.childSessionId, workspaceRoot: WORKTREE, cause: 'user-stop' });
+    h.sessionEnd.notifyAll({
+      sessionId: child.childSessionId,
+      workspaceRoot: WORKTREE,
+      cause: 'user-stop',
+    });
     jest.advanceTimersByTime(SESSION_CHILD_GRACE_MS);
     await flush();
     expect(h.notifier.signalSessionChild).not.toHaveBeenCalled();
