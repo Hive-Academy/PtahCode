@@ -9,6 +9,10 @@ it('emits search input and displays count', () => {
   fixture.componentInstance.queryChange.subscribe(changed);
   fixture.detectChanges();
   const input = fixture.nativeElement.querySelector('input') as HTMLInputElement;
+  const bar = input.parentElement as HTMLElement;
+  expect(bar.hasAttribute('data-glass-surface')).toBe(false);
+  expect(bar.classList.contains('border-b')).toBe(true);
+  expect(bar.classList.contains('grid-cols-[minmax(0,1fr)_auto]')).toBe(true);
   input.value = 'run';
   input.dispatchEvent(new Event('input'));
   expect(changed).toHaveBeenCalledWith('run');
