@@ -281,6 +281,13 @@
   --ptah-countdown-box-w-md: 3.5rem;
   --ptah-countdown-box-w-lg: 5rem;
 
+  /* Stat card: the small card around one ptah-stat (appearance="card"). */
+  --ptah-stat-bg: var(--surface-2);
+  --ptah-stat-border: var(--ptah-border-color);
+  --ptah-stat-radius: var(--ptah-radius-surface);
+  --ptah-stat-pad-y: var(--ptah-space-2);
+  --ptah-stat-pad-x: var(--ptah-space-3);
+
   /* Layers: the values overlays use today. Nothing above the CDK overlay. */
   --ptah-z-raised: 30;
   --ptah-z-menu: 50;
