@@ -28,11 +28,13 @@ describe('planRingCaption', () => {
   });
 
   it.each([
-    [30 * 1000, 'resets in <1m'],
+    [30 * 1000, 'resets in 30s'],
     [14 * MINUTE, 'resets in 14m'],
+    [14 * MINUTE + 30 * 1000, 'resets in 14m 30s'],
     [3 * HOUR, 'resets in 3h'],
     [3 * DAY + 4 * HOUR + 10 * MINUTE, 'resets in 3d 4h'],
     [2 * DAY, 'resets in 2d'],
+    [999, 'resets now'],
     [0, 'resets now'],
   ])('formats %d ms as "%s"', (ms, expected) => {
     expect(
