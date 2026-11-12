@@ -38,7 +38,7 @@ import {
 } from '../types/file-view.types';
 // Type-only: erased at build time, so CodeMirror stays out of this chunk.
 import type { SpotEditorHandle } from './codemirror-setup';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
 
 /** Same ceiling as the read-only file view (`file-view.component.ts:32`). */
 const MAX_MARKDOWN_PREVIEW_BYTES = 512 * 1024;
@@ -109,6 +109,7 @@ interface DialogCopy {
   selector: 'ptah-spot-editor',
   standalone: true,
   imports: [
+    PtahBadgeDirective,
     PtahButtonDirective,
     LucideAngularModule,
     MarkdownBlockComponent,
@@ -153,7 +154,7 @@ interface DialogCopy {
         </span>
       }
       @if (!editable()) {
-        <span class="badge badge-ghost badge-xs" data-testid="spot-editor-ro"
+        <span ptahBadge size="xs" data-testid="spot-editor-ro"
           >Read only</span
         >
       }

@@ -847,11 +847,6 @@
     "btn-outline": 2,
     "btn-xs": 2
   },
-  "libs/frontend/git-ui/src/lib/commit/commit-composer.component.ts": {
-    "badge": 1,
-    "badge-sm": 1,
-    "badge-success": 1
-  },
   "libs/frontend/git-ui/src/lib/conflict/conflict-banner.component.ts": {
     "<dynamic>": 1,
     "btn": 1,
@@ -889,10 +884,6 @@
   },
   "libs/frontend/git-ui/src/lib/review-canvas/file-section-header.component.ts": {
     "<dynamic>": 3,
-    "badge": 3,
-    "badge-ghost": 2,
-    "badge-outline": 1,
-    "badge-xs": 3,
     "btn": 1,
     "btn-ghost": 1,
     "btn-xs": 1
@@ -910,9 +901,6 @@
     "alert": 2,
     "alert-error": 1,
     "alert-warning": 1,
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-xs": 1,
     "btn": 2,
     "btn-ghost": 2,
     "btn-xs": 2
@@ -925,12 +913,6 @@
   "libs/frontend/git-ui/src/lib/task/task-pr-panel.component.ts": {
     "<dynamic>": 1,
     "skeleton": 2
-  },
-  "libs/frontend/git-ui/src/lib/task/task-worktree-view.component.ts": {
-    "badge": 4,
-    "badge-ghost": 3,
-    "badge-warning": 1,
-    "badge-xs": 4
   },
   "libs/frontend/machines-ui/src/lib/components/add-machine-pane/add-machine-pane.component.ts": {
     "btn-ghost": 1,
@@ -949,17 +931,9 @@
     "<dynamic>": 1
   },
   "libs/frontend/machines-ui/src/lib/components/machines-view/machine-overview.component.ts": {
-    "badge": 1,
-    "badge-outline": 1,
-    "badge-sm": 1,
     "btn": 1,
     "btn-ghost": 1,
     "btn-sm": 1
-  },
-  "libs/frontend/machines-ui/src/lib/components/machines-view/machines-page-header.component.ts": {
-    "badge": 1,
-    "badge-outline": 1,
-    "badge-sm": 1
   },
   "libs/frontend/machines-ui/src/lib/components/machines-view/machines-view.component.ts": {
     "skeleton": 3
@@ -967,25 +941,12 @@
   "libs/frontend/machines-ui/src/lib/components/readiness-panel/readiness-panel.component.ts": {
     "<dynamic>": 1
   },
-  "libs/frontend/machines-ui/src/lib/components/reconnect-banner/session-sync-chip.component.ts": {
-    "badge": 1,
-    "badge-outline": 1,
-    "badge-sm": 1
-  },
-  "libs/frontend/machines-ui/src/lib/components/remote-approval-block/remote-approval-block.component.ts": {
-    "badge": 1,
-    "badge-outline": 1,
-    "badge-sm": 1
-  },
   "libs/frontend/machines-ui/src/lib/components/remote-composer/remote-composer.component.ts": {
     "textarea": 1,
     "textarea-bordered": 1,
     "textarea-sm": 1
   },
   "libs/frontend/machines-ui/src/lib/components/remote-session-list/remote-session-list.component.ts": {
-    "badge": 1,
-    "badge-outline": 1,
-    "badge-sm": 1,
     "select": 1,
     "select-bordered": 1,
     "select-sm": 1,
@@ -993,30 +954,17 @@
     "textarea-bordered": 1,
     "textarea-sm": 1
   },
-  "libs/frontend/machines-ui/src/lib/components/remote-session-view/remote-session-view.component.ts": {
-    "badge": 3,
-    "badge-outline": 3,
-    "badge-sm": 3
-  },
   "libs/frontend/markdown/src/lib/markdown-block.component.ts": {
     "<dynamic>": 1
   },
   "libs/frontend/marketplace/src/lib/external-consent-dialog.component.ts": {
     "alert": 1,
     "alert-error": 1,
-    "alert-sm": 1,
-    "badge": 3,
-    "badge-ghost": 2,
-    "badge-sm": 1,
-    "badge-warning": 1,
-    "badge-xs": 2
+    "alert-sm": 1
   },
   "libs/frontend/marketplace/src/lib/external-install-report.component.ts": {
     "alert": 1,
-    "alert-warning": 1,
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-sm": 1
+    "alert-warning": 1
   },
   "libs/frontend/marketplace/src/lib/external-installed-row.component.ts": {
     "btn": 1,
@@ -1063,12 +1011,7 @@
   "libs/frontend/marketplace/src/lib/kept-items-repair-prompt.component.ts": {
     "alert": 2,
     "alert-error": 1,
-    "alert-warning": 1,
-    "badge": 2,
-    "badge-error": 1,
-    "badge-ghost": 2,
-    "badge-sm": 2,
-    "badge-success": 1
+    "alert-warning": 1
   },
   "libs/frontend/marketplace/src/lib/oauth-surface.component.ts": {
     "<dynamic>": 3,
@@ -1086,16 +1029,9 @@
     "btn-xs": 2
   },
   "libs/frontend/marketplace/src/lib/pages/overview/overview-page.component.html": {
-    "<dynamic>": 1,
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-sm": 1
+    "<dynamic>": 1
   },
   "libs/frontend/marketplace/src/lib/pages/servers/installed-servers-page.component.ts": {
-    "badge": 2,
-    "badge-ghost": 1,
-    "badge-outline": 1,
-    "badge-sm": 2,
     "skeleton": 2
   },
   "libs/frontend/marketplace/src/lib/pages/servers/provider-list-view.component.html": {

@@ -18,7 +18,7 @@ import {
 } from '../../services/machines-store';
 import { DisplayTextPipe, displayText } from '../../utils/display-text';
 import { durationText } from '../../utils/machine-copy';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
 import { remoteSessionStateLabel } from '../../utils/remote-session-copy';
 
 /** What "Open" hands the container: enough to title the opened view. */
@@ -53,7 +53,12 @@ interface RemoteSessionRow {
 @Component({
   selector: 'ptah-remote-session-list',
   standalone: true,
-  imports: [PtahButtonDirective, LucideAngularModule, DisplayTextPipe],
+  imports: [
+    PtahBadgeDirective,
+    PtahButtonDirective,
+    LucideAngularModule,
+    DisplayTextPipe,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -264,7 +269,10 @@ interface RemoteSessionRow {
                   </span>
                   @if (row.session.driver; as driver) {
                     <span
-                      class="badge badge-outline badge-sm mt-1 max-w-[16rem] gap-1 truncate text-base-content"
+                      ptahBadge
+                      appearance="outline"
+                      size="sm"
+                      class="mt-1 max-w-[16rem] gap-1"
                       data-testid="remote-session-driver"
                     >
                       <lucide-angular
@@ -272,7 +280,9 @@ interface RemoteSessionRow {
                         class="h-3 w-3 shrink-0"
                         aria-hidden="true"
                       />
-                      Driver: {{ driver.label | displayText }}
+                      <span class="ptah-badge-text"
+                        >Driver: {{ driver.label | displayText }}</span
+                      >
                     </span>
                   }
                 </button>

@@ -803,10 +803,8 @@ describe('InstalledServersPageComponent', () => {
       );
       expect(text(within('exa', 'server-scope-badge'))).toBe('All workspaces');
       expect(
-        within('exa', 'server-scope-badge')?.classList.contains(
-          'border-warning',
-        ),
-      ).toBe(true);
+        within('exa', 'server-scope-badge')?.getAttribute('data-tone'),
+      ).toBe('warn');
       expect(text(within('exa', 'server-scope-everywhere'))).toBe(
         'Available everywhere',
       );

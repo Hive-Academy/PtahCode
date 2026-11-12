@@ -5,7 +5,7 @@ import {
   output,
 } from '@angular/core';
 import { LucideAngularModule, Plus } from 'lucide-angular';
-import { SetupActionDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, SetupActionDirective } from '@ptah-extension/ui';
 
 /**
  * The Machines page header (approved option A): the page title with its
@@ -19,7 +19,7 @@ import { SetupActionDirective } from '@ptah-extension/ui';
 @Component({
   selector: 'ptah-machines-page-header',
   standalone: true,
-  imports: [LucideAngularModule, SetupActionDirective],
+  imports: [LucideAngularModule, PtahBadgeDirective, SetupActionDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <header class="flex flex-wrap items-center gap-3">
@@ -33,7 +33,11 @@ import { SetupActionDirective } from '@ptah-extension/ui';
       </div>
       @if (pendingApprovals() > 0) {
         <span
-          class="badge badge-outline badge-sm gap-2 text-state-need"
+          ptahBadge
+          tone="warn"
+          appearance="outline"
+          size="sm"
+          class="gap-2"
           data-testid="machines-approvals-badge"
         >
           <span

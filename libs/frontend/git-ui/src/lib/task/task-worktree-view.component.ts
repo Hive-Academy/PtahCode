@@ -40,6 +40,7 @@ import { WorktreeService } from '../services/worktree.service';
 import { GitConfirmDialogComponent } from '../shared/git-confirm-dialog.component';
 import { TaskPrPanelComponent } from './task-pr-panel.component';
 import {
+  PtahBadgeDirective,
   PtahButtonDirective,
   PtahCheckboxDirective,
   PtahIconButtonDirective,
@@ -90,6 +91,7 @@ let instanceCount = 0;
   selector: 'ptah-task-worktree-view',
   standalone: true,
   imports: [
+    PtahBadgeDirective,
     PtahButtonDirective,
     PtahCheckboxDirective,
     PtahIconButtonDirective,
@@ -410,25 +412,30 @@ let instanceCount = 0;
                     >{{ branchLabel(wt) }}</span
                   >
                   @if (wt.isMain) {
-                    <span class="badge badge-xs badge-ghost flex-shrink-0"
+                    <span ptahBadge size="xs" class="flex-shrink-0"
                       >main</span
                     >
                   }
                   @if (isActiveWorktree(wt)) {
-                    <span class="badge badge-xs badge-ghost flex-shrink-0"
+                    <span ptahBadge size="xs" class="flex-shrink-0"
                       >active</span
                     >
                   }
                   @if (wt.locked) {
                     <span
-                      class="badge badge-xs badge-warning flex-shrink-0"
+                      ptahBadge
+                      tone="warn"
+                      size="xs"
+                      class="flex-shrink-0"
                       [title]="wt.lockReason ?? 'Locked'"
                       >locked</span
                     >
                   }
                   @if (wt.prunable) {
                     <span
-                      class="badge badge-xs badge-ghost flex-shrink-0"
+                      ptahBadge
+                      size="xs"
+                      class="flex-shrink-0"
                       [title]="wt.prunableReason ?? 'Prunable'"
                       >prunable</span
                     >

@@ -4,6 +4,7 @@ import {
   computed,
   input,
 } from '@angular/core';
+import { PtahBadgeDirective } from '@ptah-extension/ui';
 import { SESSION_SYNC_LABELS, type SessionSyncState } from './session-sync';
 
 /**
@@ -14,11 +15,15 @@ import { SESSION_SYNC_LABELS, type SessionSyncState } from './session-sync';
 @Component({
   selector: 'ptah-session-sync-chip',
   standalone: true,
+  imports: [PtahBadgeDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <span
-      class="badge badge-outline badge-sm gap-1 text-base-content"
-      [class.text-state-done]="state() === 'caught-up'"
+      ptahBadge
+      [tone]="state() === 'caught-up' ? 'ok' : 'info'"
+      appearance="outline"
+      size="sm"
+      class="gap-1"
       data-testid="session-sync-chip"
       [attr.data-state]="state()"
     >

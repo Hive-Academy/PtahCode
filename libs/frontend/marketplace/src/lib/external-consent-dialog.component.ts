@@ -11,6 +11,7 @@ import {
   viewChild,
 } from '@angular/core';
 import {
+  PtahBadgeDirective,
   PtahButtonDirective,
   PtahIconButtonDirective,
 } from '@ptah-extension/ui';
@@ -158,6 +159,7 @@ function localItemCopy(item: ExternalLocalItem): LocalItemCopy {
   imports: [
     PtahIconButtonDirective,
     PtahButtonDirective,
+    PtahBadgeDirective,
     LucideAngularModule,
     MarketplaceKeepReplaceComponent,
     InstallScopeFieldComponent,
@@ -200,8 +202,8 @@ function localItemCopy(item: ExternalLocalItem): LocalItemCopy {
               <p class="text-[11px] text-base-content-muted mt-0.5 break-all">
                 {{ plan().source }} · version {{ plan().version }}
                 @if (isUpgrade()) {
-                  <span class="badge badge-xs badge-warning ml-1">
-                    upgrade from {{ plan().installedVersion }}
+                  <span ptahBadge tone="warn" size="xs" class="ml-1">
+                    <span class="ptah-badge-text">upgrade from {{ plan().installedVersion }}</span>
                   </span>
                 }
               </p>
@@ -265,10 +267,8 @@ function localItemCopy(item: ExternalLocalItem): LocalItemCopy {
             @if (plan().skills.length > 0) {
               <div class="flex gap-1 flex-wrap">
                 @for (skill of plan().skills; track $index) {
-                  <span
-                    class="badge badge-xs badge-ghost font-mono text-[10px]"
-                  >
-                    {{ skill }}
+                  <span ptahBadge size="xs" class="font-mono">
+                    <span class="ptah-badge-text">{{ skill }}</span>
                   </span>
                 }
               </div>
@@ -476,7 +476,7 @@ function localItemCopy(item: ExternalLocalItem): LocalItemCopy {
                         class="grow text-[11px] font-mono [overflow-wrap:anywhere]"
                         >{{ row.path }}</code
                       >
-                      <span class="badge badge-sm badge-ghost shrink-0">{{
+                      <span ptahBadge class="shrink-0">{{
                         row.copy.badge
                       }}</span>
                     </div>
