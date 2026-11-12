@@ -92,9 +92,11 @@ const TYPE_CHIPS: readonly TypeChip[] = [
         @for (chip of typeChips; track chip.id) {
           <button
             type="button"
-            class="btn btn-xs"
-            [class.btn-primary]="state.typeFilter().includes(chip.id)"
-            [class.btn-ghost]="!state.typeFilter().includes(chip.id)"
+            ptahButton
+            size="xs"
+            [variant]="
+              state.typeFilter().includes(chip.id) ? 'primary' : 'ghost'
+            "
             [attr.aria-pressed]="state.typeFilter().includes(chip.id)"
             (click)="onTypeToggle(chip.id)"
           >

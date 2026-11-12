@@ -270,6 +270,7 @@ function providerLabel(provider: ProviderId): string {
                         Clear the stored {{ opt.label }} key from this machine? Searches through {{ opt.label }} stop until a key is added.
                       </p>
                       <div class="flex gap-2">
+                        <!-- Outline has no owner variant; preserve the destructive confirmation style. -->
                         <button type="button" class="btn btn-outline btn-sm border-error text-base-content"
                           [ptahBusyDisabled]="saving()" (click)="deleteApiKey(opt.value)"
                           [attr.data-testid]="'settings-web-search-clear-confirm-' + opt.value">Clear key</button>

@@ -1,0 +1,183 @@
+/* Ptah card family look (TASK_2026_1012_b1dc, family-card-look.md).
+   One recipe for every card and panel surface: the ptahSurface directive,
+   ptah-surface-card and ptah-section-header read this file. Scope: only
+   .ptah-card and [data-ptah-section-header]. Uses --ptah-* tokens only.
+   The .ptah-card rule sets only the look (fill, border, radius, padding,
+   shadow). It does not set display or layout, so a raw panel keeps its DOM
+   and its layout when it moves to the directive. */
+
+.ptah-card {
+  --_bg: var(--ptah-card-bg);
+  --_radius: var(--ptah-card-radius);
+  --_pad: var(--ptah-card-padding-md);
+  --_gap: var(--ptah-card-gap);
+  --_shadow: var(--ptah-card-shadow);
+  --_tone: var(--ptah-card-tone-neutral);
+  --_spine: var(--ptah-card-tone-neutral-spine);
+  background-color: var(--_bg);
+  border: var(--ptah-card-border-width) solid var(--ptah-card-border);
+  border-radius: var(--_radius);
+  padding: var(--_pad);
+  box-shadow: var(--_shadow);
+}
+
+/* Glass on: the border color of a raw border-base-300 box in glass mode
+   (styles.css). :where keeps the specificity low, so tone and hover win. */
+:where(:root[data-glass='on']) .ptah-card {
+  border-color: var(--ptah-card-border-glass);
+}
+
+/* Variants */
+.ptah-card[data-variant='subtle'] { --_bg: var(--ptah-card-bg-subtle); }
+.ptah-card[data-variant='inset'] {
+  --_bg: var(--ptah-card-bg-inset);
+  --_radius: var(--ptah-card-radius-inset);
+}
+.ptah-card[data-variant='raised'] {
+  --_bg: var(--ptah-card-bg-raised);
+  --_shadow: var(--ptah-card-shadow-raised);
+}
+
+/* Glass on: the rim and lift of a bordered box (same as the glass layer
+   gives a raw border-base-300 box today). Raised keeps its own shadow. */
+:root[data-glass='on'] .ptah-card:not([data-variant='raised']) {
+  --_shadow: var(--ptah-card-shadow-glass);
+}
+
+/* Padding */
+.ptah-card[data-padding='none'] { --_pad: 0; }
+.ptah-card[data-padding='sm'] {
+  --_pad: var(--ptah-card-padding-sm);
+  --_gap: var(--ptah-card-gap-sm);
+}
+.ptah-card[data-padding='lg'] { --_pad: var(--ptah-card-padding-lg); }
+
+/* Tone: the spine and the selected ring */
+.ptah-card[data-tone='info'] { --_tone: var(--ptah-card-tone-info); --_spine: var(--_tone); }
+.ptah-card[data-tone='success'] { --_tone: var(--ptah-card-tone-success); --_spine: var(--_tone); }
+.ptah-card[data-tone='warning'] { --_tone: var(--ptah-card-tone-warning); --_spine: var(--_tone); }
+.ptah-card[data-tone='error'] { --_tone: var(--ptah-card-tone-error); --_spine: var(--_tone); }
+.ptah-card[data-tone='accent'] { --_tone: var(--ptah-card-tone-accent); --_spine: var(--_tone); }
+.ptah-card[data-tone='secondary'] { --_tone: var(--ptah-card-tone-secondary); --_spine: var(--_tone); }
+.ptah-card[data-tone='primary'] { --_tone: var(--ptah-card-tone-primary); --_spine: var(--_tone); }
+
+/* ---- ptah-surface-card only ---- */
+ptah-surface-card { display: block; }
+
+ptah-surface-card > .ptah-card {
+  display: flex;
+  flex-direction: column;
+  transition-property: background-color, border-color, box-shadow;
+  transition-duration: var(--ptah-duration-fast);
+  transition-timing-function: var(--ptah-ease-standard);
+}
+
+.ptah-card > .ptah-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--_gap);
+  min-width: 0;
+}
+
+/* Spine: a colored edge at the start of the card. */
+.ptah-card[data-spine] {
+  position: relative;
+  overflow: hidden;
+  padding-inline-start: var(--ptah-card-spine-pad);
+}
+.ptah-card > .ptah-card-spine {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: var(--ptah-card-spine-width);
+  background-color: var(--_spine);
+}
+
+/* Interactive: hover and focus. [data-state] forces a state in the gallery. */
+.ptah-card[data-interactive]:not([data-disabled]) { cursor: pointer; }
+.ptah-card[data-interactive]:not([data-disabled]):is(:hover, [data-state='hover'], [data-state='hover'] > *) {
+  background-color: color-mix(in oklch, var(--_bg), var(--ptah-card-hover-tint) var(--ptah-card-hover-mix));
+  border-color: var(--ptah-card-hover-border);
+}
+.ptah-card[data-interactive]:not([data-disabled]):is(:focus-visible, [data-state='focus'], [data-state='focus'] > *) {
+  outline: var(--ptah-focus-ring-width) solid var(--ptah-card-focus-color);
+  outline-offset: var(--ptah-focus-ring-offset);
+}
+
+/* Selected: a ring in the tone color. It keeps the shadow of the variant. */
+.ptah-card[data-selected] {
+  box-shadow: 0 0 0 var(--ptah-card-selected-ring) var(--_tone), var(--_shadow);
+}
+
+.ptah-card[data-disabled] {
+  opacity: var(--ptah-card-disabled-opacity);
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ptah-surface-card > .ptah-card { transition: none; }
+}
+
+/* ---- ptah-section-header ---- */
+[data-ptah-section-header] {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ptah-section-gap);
+  min-width: 0;
+}
+
+[data-ptah-section-header] > .ptah-section-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ptah-section-text-gap);
+  min-width: 0;
+}
+
+[data-ptah-section-header] .ptah-section-eyebrow {
+  font-size: var(--ptah-section-eyebrow-size);
+  line-height: var(--ptah-section-eyebrow-leading);
+  font-weight: var(--ptah-section-eyebrow-weight);
+  letter-spacing: var(--ptah-section-eyebrow-tracking);
+  text-transform: uppercase;
+  color: var(--ptah-section-eyebrow-color);
+}
+
+[data-ptah-section-header] .ptah-section-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ptah-gap-inline);
+  min-width: 0;
+}
+
+[data-ptah-section-header] .ptah-section-title {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--ptah-section-title-size);
+  line-height: var(--ptah-section-title-leading);
+  font-weight: var(--ptah-section-title-weight);
+  color: var(--ptah-section-title-color);
+}
+
+[data-ptah-section-header][data-size='section'] .ptah-section-title {
+  font-size: var(--ptah-section-title-lg-size);
+  line-height: var(--ptah-section-title-lg-leading);
+  font-weight: var(--ptah-section-title-lg-weight);
+}
+
+[data-ptah-section-header] .ptah-section-description {
+  margin: 0;
+  font-size: var(--ptah-section-description-size);
+  line-height: var(--ptah-section-description-leading);
+  color: var(--ptah-section-description-color);
+}
+
+[data-ptah-section-header] > .ptah-section-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--ptah-gap-controls);
+}
+
+[data-ptah-section-header] > .ptah-section-actions:empty { display: none; }

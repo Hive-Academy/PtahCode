@@ -312,6 +312,84 @@
 }
 /* ---- end ptah-meter tokens ---- */
 
+/* ---- Card, panel surface and section header (TASK_2026_1012_b1dc,
+   family-card-look.md). The defaults equal the most used card of today:
+   bg-base-200, border border-base-300, rounded-xl, p-4, gap-3, no shadow.
+   With glass on, the fill is the glass tile fill, the same value that the
+   glass layer gives to a raw bg-base-200 today. ---- */
+:root,
+[data-theme] {
+  --ptah-card-bg: var(--glass-fill-tile, oklch(var(--b2)));
+  --ptah-card-bg-subtle: var(--glass-fill-tile, var(--surface-1));
+  --ptah-card-bg-inset: var(--glass-fill-tile, oklch(var(--b1)));
+  --ptah-card-bg-raised: var(--surface-3);
+  --ptah-card-border: oklch(var(--b3));
+  /* Glass on: the line color that the glass layer gives to border-base-300. */
+  --ptah-card-border-glass: var(--glass-line, oklch(var(--b3)));
+  --ptah-card-border-width: var(--ptah-border-width);
+  --ptah-card-radius: 0.75rem;
+  --ptah-card-radius-inset: 0.5rem;
+  --ptah-card-padding-sm: var(--ptah-space-3);
+  --ptah-card-padding-md: var(--ptah-space-4);
+  --ptah-card-padding-lg: 1.25rem;
+  --ptah-card-gap: var(--ptah-space-3);
+  --ptah-card-gap-sm: var(--ptah-space-2);
+  /* A valid zero shadow, not "none": the selected ring adds a shadow list. */
+  --ptah-card-shadow: 0 0 0 0 transparent;
+  --ptah-card-shadow-raised: var(--ptah-elevation-2);
+  /* Glass on: the rim and lift that the glass layer gives today to a raw
+     bordered, rounded box with border-base-300. */
+  --ptah-card-shadow-glass: var(--glass-rim, 0 0 0 0 transparent),
+    var(--glass-elev-1, 0 0 0 0 transparent);
+  --ptah-card-hover-border: color-mix(
+    in oklch,
+    oklch(var(--bc)) 20%,
+    transparent
+  );
+  --ptah-card-hover-tint: oklch(var(--bc));
+  --ptah-card-hover-mix: 4%;
+  --ptah-card-selected-ring: 2px;
+  --ptah-card-focus-color: oklch(var(--bc));
+  --ptah-card-disabled-opacity: 0.6;
+  --ptah-card-spine-width: 0.25rem;
+  --ptah-card-spine-pad: 1.25rem;
+  /* Tone: the spine color and the selected ring (the DaisyUI colors that
+     ptah-native-card uses today). */
+  --ptah-card-tone-neutral: color-mix(in oklch, oklch(var(--bc)) 40%, transparent);
+  --ptah-card-tone-neutral-spine: color-mix(
+    in oklch,
+    oklch(var(--bc)) 30%,
+    transparent
+  );
+  --ptah-card-tone-info: oklch(var(--in));
+  --ptah-card-tone-success: oklch(var(--su));
+  --ptah-card-tone-warning: oklch(var(--wa));
+  --ptah-card-tone-error: oklch(var(--er));
+  --ptah-card-tone-accent: oklch(var(--a, var(--p)));
+  --ptah-card-tone-secondary: oklch(var(--s, var(--p)));
+  --ptah-card-tone-primary: oklch(var(--p));
+
+  /* Section header: the most used section title is text-sm font-semibold. */
+  --ptah-section-title-size: var(--ptah-text-group-title-size);
+  --ptah-section-title-leading: var(--ptah-text-group-title-leading);
+  --ptah-section-title-weight: var(--ptah-text-group-title-weight);
+  --ptah-section-title-lg-size: var(--ptah-text-section-title-size);
+  --ptah-section-title-lg-leading: var(--ptah-text-section-title-leading);
+  --ptah-section-title-lg-weight: var(--ptah-text-section-title-weight);
+  --ptah-section-title-color: oklch(var(--bc));
+  --ptah-section-eyebrow-size: var(--ptah-text-caption-size);
+  --ptah-section-eyebrow-leading: var(--ptah-text-caption-leading);
+  --ptah-section-eyebrow-weight: 600;
+  --ptah-section-eyebrow-tracking: 0.05em;
+  --ptah-section-eyebrow-color: oklch(var(--bcm, var(--bc)));
+  --ptah-section-description-size: var(--ptah-text-hint-size);
+  --ptah-section-description-leading: var(--ptah-text-hint-leading);
+  --ptah-section-description-color: oklch(var(--bcm, var(--bc)));
+  --ptah-section-gap: var(--ptah-gap-heading);
+  --ptah-section-text-gap: var(--ptah-gap-label);
+}
+/* ---- end card tokens ---- */
+
 /* ---- ptah-ring tokens (isolated block, TASK_2026_1011_946d) ---- */
 :root,
 [data-theme] {
