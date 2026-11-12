@@ -46,6 +46,15 @@ export interface PhaseSkillV1 {
   readonly text?: string;
 }
 
+/**
+ * Whether an executor applied the phase tool profile to its own built-in
+ * tools. `unfiltered` means that executor has no built-in deny channel.
+ */
+export interface ToolProfileAdapterResultV1 {
+  readonly executorId: string;
+  readonly toolProfileStatus: 'filtered' | 'unfiltered';
+}
+
 /** Versioned handoff from phase resolution to an executor. */
 export interface PhaseDispatchV1 {
   readonly version: typeof PHASE_CONTRACT_VERSION;

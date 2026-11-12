@@ -310,6 +310,11 @@ export interface AgentProcessInfo {
    * on the outcome record.
    */
   readonly routingSource?: Exclude<OutcomeRoutingSource, 'not-routed'>;
+  /**
+   * Set when the spawn carried a phase with a non-empty denial list.
+   * `filtered` means this executor applied that list to its built-in tools.
+   */
+  readonly toolProfileAdapter?: import('./phase-contract.types').ToolProfileAdapterResultV1;
 }
 
 const AGENT_BUDGET_STOP_REASONS = ['budget', 'telemetry-unavailable', 'duration'] as const;
@@ -501,6 +506,8 @@ export interface SpawnAgentResult {
   readonly roleChannel?: AgentRoleChannel;
   /** Set only on a spawn that asked to resume a session: whether it was resumed or started fresh, and why. */
   readonly resumeDecision?: AgentResumeOutcome;
+  /** Same field as {@link AgentProcessInfo.toolProfileAdapter}, on the spawn return. */
+  readonly toolProfileAdapter?: import('./phase-contract.types').ToolProfileAdapterResultV1;
 }
 
 export * from './agent-messaging.types';

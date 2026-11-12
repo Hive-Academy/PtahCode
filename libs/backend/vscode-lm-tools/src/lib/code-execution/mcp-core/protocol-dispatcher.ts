@@ -235,6 +235,10 @@ import {
 } from './mcp-caller-auth.types';
 import type { McpCallerCapability } from '@ptah-extension/platform-core';
 import {
+  applyPhaseToolFilter,
+  isPhaseToolDenied,
+} from './mcp-caller-phase-filter';
+import {
   applyToolResultBudget,
   getToolResultBudget,
   spoolToolText,
@@ -531,14 +535,18 @@ function handleInitialize(request: MCPRequest, logger: Logger): MCPResponse {
  * Platform-agnostic tools (always included):
  * - ptah_get_diagnostics: Uses IDiagnosticsProvider abstraction (works on both platforms)
  */
+
 function handleToolsList(
   request: MCPRequest,
   deps: ProtocolHandlerDependencies,
 ): MCPResponse {
   const profile = resolveMcpToolProfile(request);
   const capability = requestCapability(request);
-  const tools = buildToolSet(resolveMcpCaller(request), profile, deps).filter(
-    (tool) => isToolPermitted(tool.name, capability),
+  const tools = applyPhaseToolFilter(
+    buildToolSet(resolveMcpCaller(request), profile, deps).filter((tool) =>
+      isToolPermitted(tool.name, capability),
+    ),
+    request._callerBinding,
   );
 
   markEagerTools(tools, deps, profile);
@@ -925,6 +933,7 @@ async function handleToolsCall(
   try {
     if (
       !isToolPermitted(toolNameOf(request), requestCapability(request)) ||
+      isPhaseToolDenied(toolNameOf(request), request._callerBinding) ||
       laneReportTargetsAnotherAgent(request)
     ) {
       response = createErrorResponse(

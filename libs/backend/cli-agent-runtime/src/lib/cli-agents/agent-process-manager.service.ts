@@ -53,7 +53,10 @@ import {
   PLATFORM_TOKENS,
   type IMcpCallerCredentials,
 } from '@ptah-extension/platform-core';
-import { issueLaneMcpToken } from './cli-adapters/lane-mcp-credentials';
+import {
+  issueLaneMcpToken,
+  laneToolProfileAdapterResult,
+} from './cli-adapters/lane-mcp-credentials';
 import {
   claudeModelFamily,
   SDK_TOKENS,
@@ -954,6 +957,10 @@ export class AgentProcessManager {
     const roleStamp: AgentRoleStamp | undefined = roleDefinition
       ? { role: roleDefinition.name, roleDelivery: 'preamble', roleChannel }
       : undefined;
+    const toolProfileAdapter = laneToolProfileAdapterResult(
+      cli,
+      request.phase,
+    );
 
     const info: AgentProcessInfo & LaneAccountBindingFields = {
       ...options.accountReference,
@@ -984,6 +991,7 @@ export class AgentProcessManager {
       routingSource: request.routingSource,
       potentialCapabilities: this.cliDetection.getAdapter(cli)?.capabilities(),
       effectivePolicy: options.effectivePolicy,
+      ...(toolProfileAdapter ? { toolProfileAdapter } : {}),
     };
 
     const scopedInfo = stampWorkspaceKey(info, this.spawnEnvironment, previous);
@@ -1050,6 +1058,7 @@ export class AgentProcessManager {
               agentId,
               workingDirectory,
               cli === 'antigravity' ? 'lane-report' : 'privileged',
+              request.phase,
             )
           : undefined;
       sdkHandle = await runSdk({
@@ -1204,6 +1213,8 @@ export class AgentProcessManager {
       accountReference?: LaneAccountReference;
       potentialCapabilities?: CliAdapterManifest;
       effectivePolicy?: EffectiveLanePolicy;
+      /** Phase handoff. A non-empty denial list is recorded on the spawn result. */
+      phase?: SpawnAgentRequest['phase'];
     },
   ): Promise<SpawnAgentResult> {
     await this.reserveSpawnSlot();
@@ -1217,6 +1228,10 @@ export class AgentProcessManager {
       const previous = previousResumeRecord(this.agents.values(),
         meta.cli,
         meta.resumeSessionId,
+      );
+      const toolProfileAdapter = laneToolProfileAdapterResult(
+        meta.cli,
+        meta.phase,
       );
 
       const info: AgentProcessInfo = {
@@ -1251,6 +1266,7 @@ export class AgentProcessManager {
           ? { originalTask: meta.originalTask }
           : {}),
         ...meta.roleStamp,
+        ...(toolProfileAdapter ? { toolProfileAdapter } : {}),
       };
       const scopedInfo = stampWorkspaceKey(info, this.spawnEnvironment, previous);
       const effectiveChannel = sdkHandle.getRoleDelivery?.();
@@ -1566,6 +1582,9 @@ export class AgentProcessManager {
       ptahCliName: info.ptahCliName,
       ptahCliId: info.ptahCliId,
       ...roleStampOf(info),
+      ...(info.toolProfileAdapter
+        ? { toolProfileAdapter: info.toolProfileAdapter }
+        : {}),
     };
 
     this.events.emit('agent:spawned', tracked.info);
