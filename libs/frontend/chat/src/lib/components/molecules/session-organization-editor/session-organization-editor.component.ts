@@ -151,7 +151,7 @@ let nextId = 0;
 
               <!-- Priority, status, pin -->
               <div class="grid grid-cols-2 gap-2">
-                <ptah-field label="Priority">
+                <ptah-field label="Priority" appearance="stacked">
                   <ptah-select
                     [id]="priorityId"
                     [options]="priorityOptions"
@@ -161,7 +161,7 @@ let nextId = 0;
                     data-testid="session-org-priority"
                   />
                 </ptah-field>
-                <ptah-field label="Status">
+                <ptah-field label="Status" appearance="stacked">
                   <ptah-select
                     [id]="statusId"
                     [options]="statusOptions"
