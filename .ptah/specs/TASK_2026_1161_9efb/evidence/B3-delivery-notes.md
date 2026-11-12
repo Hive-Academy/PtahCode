@@ -5,3 +5,7 @@
 The SDK options builder accepts the same dispatch and skills and appends their text to the session system prompt. It leaves legacy sessions untouched when neither field is supplied. SDK skill paths are read and their contents appended to the prompt; this change does not claim a verified SDK skill load. The separate B4 adapter work owns executable tool filtering.
 
 Channel evidence is in [B1-discovery-notes.md](B1-discovery-notes.md): Claude SDK exposes `Options.skills`; Kimi has a skills directory flag; other installed CLI channels have no verified per-spawn skill loading. The returned unavailable status therefore does not imply the discipline was omitted: it is carried inline.
+
+## Verification
+
+Role census before and after: identical counts, 1700 lines in 292 files. `npm run verify -- -p @ptah-extension/vscode-lm-tools,@ptah-extension/agent-sdk`: all four lint/typecheck tasks passed; both full test targets failed because Jest mapped `marked` to a missing worktree-local `node_modules/marked/lib/marked.umd.js`. The package exists at the repository root. A local ignored junction enabled focused checks: SDK options builder 108/108, spawn schema 80/80, and agent namespace 112/112 tests passed. After the parser import and legacy prompt fix, `npx nx typecheck @ptah-extension/vscode-lm-tools --parallel=1` passed. The junction is a local test environment artifact and is not committed.

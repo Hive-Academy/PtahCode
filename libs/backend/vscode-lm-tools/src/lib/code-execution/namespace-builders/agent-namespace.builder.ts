@@ -12,7 +12,7 @@
 
 import type { AgentNamespace } from '../types';
 import { readFileSync } from 'node:fs';
-import { parsePhaseDispatch } from '@ptah-extension/lane-routing';
+import { parsePhaseDispatch } from '../../../../../lane-routing/src/lib/contracts/phase-definition-resolver';
 import {
   MAX_EFFORT_LENGTH,
   agentSpawnAccountRefusal,
@@ -454,7 +454,7 @@ export function buildAgentNamespace(
         // rendered here from the SAME function the rival-CLI adapters use
         // (TASK_2026_515). Two call sites, one text.
         const ptahCliTask =
-          `${prepared.task}\n\n${deliveryText}\n\n` +
+          `${prepared.task}${deliveryText ? `\n\n${deliveryText}` : ''}\n\n` +
           renderLaneCompletionContract({
             taskFolder: request.taskFolder,
             deliverables: request.deliverables,
