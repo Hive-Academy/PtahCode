@@ -100,7 +100,6 @@ export class PtahRichSelectComponent<T = unknown>
 
   readonly controlId = `ptah-select-${++selectId}`;
   readonly listboxId = `${this.controlId}-listbox`;
-  readonly originalDescription = null;
   readonly iconTemplate = contentChild(PtahSelectIconDirective);
   private readonly triggerRef = viewChild.required<ElementRef<HTMLElement>>('trigger');
   private readonly panelRef = viewChild<ElementRef<HTMLElement>>('panel');

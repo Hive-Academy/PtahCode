@@ -5,7 +5,9 @@ import {
   Component,
   computed,
   contentChild,
+  DestroyRef,
   effect,
+  inject,
   input,
   signal,
 } from '@angular/core';
@@ -138,7 +140,11 @@ export class PtahFieldComponent {
     return max === null ? `${this.length()}` : `${this.length()} / ${max}`;
   });
 
+  private observed: HTMLElement | null = null;
+  private descriptionObserver: MutationObserver | null = null;
+
   constructor() {
+    inject(DestroyRef).onDestroy(() => this.descriptionObserver?.disconnect());
     effect(() => this.wire());
     afterEveryRender(() => this.readCount());
   }
@@ -161,17 +167,16 @@ export class PtahFieldComponent {
   private wire(): void {
     const marked = this.control();
     const control = marked?.element.nativeElement;
-    if (!control || !marked) return;
+    if (!control || !marked) {
+      this.descriptionObserver?.disconnect();
+      this.observed = null;
+      return;
+    }
     const id = marked.controlId ?? (control.id || this.controlId);
     if (!control.id) control.id = id;
     this.labelFor.set(id);
-    const text = this.error() || this.hint();
-    const ids = new Set(
-      (marked.originalDescription ?? '').split(/\s+/).filter(Boolean),
-    );
-    if (text) ids.add(this.descriptionId);
-    if (ids.size) control.setAttribute('aria-describedby', [...ids].join(' '));
-    else control.removeAttribute('aria-describedby');
+    this.syncDescription(control);
+    this.observeDescription(control);
     this.toggleAttr(control, 'aria-required', this.required());
     this.toggleAttr(control, 'aria-busy', this.busy());
     // The floating label rests over an empty control: `:placeholder-shown`
@@ -182,6 +187,37 @@ export class PtahFieldComponent {
     }
     marked.setFieldInvalid(!!this.error());
     marked.setFieldLabel?.(this.labelId);
+  }
+
+  /**
+   * Keeps the consumer ids of `aria-describedby` and adds the id of the field
+   * text. The consumer value is read from the live attribute, so a bound value
+   * survives. Writes only when the value differs.
+   */
+  private syncDescription(control: HTMLElement): void {
+    const ids = (control.getAttribute('aria-describedby') ?? '')
+      .split(/\s+/)
+      .filter((id) => id && id !== this.descriptionId);
+    if (this.error() || this.hint()) ids.push(this.descriptionId);
+    const next = ids.join(' ');
+    if ((control.getAttribute('aria-describedby') ?? '') === next) return;
+    if (next) control.setAttribute('aria-describedby', next);
+    else control.removeAttribute('aria-describedby');
+  }
+
+  /** A later change of a bound `aria-describedby` overwrites the field id: add it again. */
+  private observeDescription(control: HTMLElement): void {
+    if (this.observed === control) return;
+    if (typeof MutationObserver === 'undefined') return;
+    this.descriptionObserver?.disconnect();
+    this.observed = control;
+    this.descriptionObserver = new MutationObserver(() =>
+      this.syncDescription(control),
+    );
+    this.descriptionObserver.observe(control, {
+      attributes: true,
+      attributeFilter: ['aria-describedby'],
+    });
   }
 
   /** Reads the length on each input event and after each render (a value set by a form). */

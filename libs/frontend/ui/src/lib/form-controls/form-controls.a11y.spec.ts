@@ -265,3 +265,25 @@ describe('ptah-field with a family control', () => {
     expect(input.hasAttribute('aria-invalid')).toBe(false);
   });
 });
+
+describe('ptahToggle indeterminate', () => {
+  it('drops role=switch while indeterminate and restores it when determinate', () => {
+    @Component({
+      standalone: true,
+      imports: [PtahToggleDirective],
+      template: `<input type="checkbox" ptahToggle [indeterminate]="unknown()" />`,
+    })
+    class UnknownHost {
+      unknown = signal(true);
+    }
+    const f = TestBed.createComponent(UnknownHost);
+    f.detectChanges();
+    const input = f.nativeElement.querySelector('input') as HTMLInputElement;
+    expect(input.indeterminate).toBe(true);
+    expect(input.hasAttribute('role')).toBe(false);
+    f.componentInstance.unknown.set(false);
+    f.detectChanges();
+    expect(input.indeterminate).toBe(false);
+    expect(input.getAttribute('role')).toBe('switch');
+  });
+});
