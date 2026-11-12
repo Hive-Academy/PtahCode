@@ -25,6 +25,9 @@ import {
   CatalogGridComponent,
   MonogramTileComponent,
   PtahButtonDirective,
+  PtahCheckboxDirective,
+  PtahInputDirective,
+  PtahToggleDirective,
   type CatalogCardBadge,
 } from '@ptah-extension/ui';
 import {
@@ -201,6 +204,9 @@ function skillSelectionKey(
     CatalogGridComponent,
     MonogramTileComponent,
     PtahButtonDirective,
+    PtahCheckboxDirective,
+    PtahInputDirective,
+    PtahToggleDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -373,8 +379,10 @@ function skillSelectionKey(
                   class="flex items-start gap-2 py-1 px-1 -mx-1 rounded cursor-pointer hover:bg-base-200/60"
                 >
                   <input
+                    ptahCheckbox
+                    size="xs"
                     type="checkbox"
-                    class="checkbox checkbox-xs checkbox-primary mt-0.5"
+                    class="mt-0.5"
                     [checked]="isSkillSlugSelected(candidate.slug)"
                     (change)="toggleSkillSlug(candidate.slug)"
                     [attr.aria-label]="
@@ -453,8 +461,10 @@ function skillSelectionKey(
             <lucide-angular [img]="SearchIcon" class="w-4 h-4" />
           </span>
           <input
+            ptahInput
+            size="sm"
             type="search"
-            class="input input-bordered input-sm w-full pl-9"
+            class="w-full pl-9"
             placeholder="Search plugins..."
             [value]="searchQuery()"
             (input)="onSearchInput($event)"
@@ -525,8 +535,9 @@ function skillSelectionKey(
                         </button>
                       }
                       <input
+                        ptahToggle
+                        size="sm"
                         type="checkbox"
-                        class="toggle toggle-primary toggle-sm"
                         [checked]="isSelected(card.plugin.id)"
                         (change)="togglePlugin(card.plugin.id)"
                         [attr.aria-label]="'Enable ' + card.plugin.name"
@@ -552,8 +563,9 @@ function skillSelectionKey(
                             class="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-base-200/40 rounded px-1 -mx-1"
                           >
                             <input
+                              ptahCheckbox
+                              size="xs"
                               type="checkbox"
-                              class="checkbox checkbox-xs checkbox-primary"
                               [checked]="isSkillEnabled(skill.skillId)"
                               (change)="toggleSkill(skill.skillId, $event)"
                               [attr.aria-label]="

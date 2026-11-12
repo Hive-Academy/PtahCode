@@ -98,8 +98,14 @@ export class PtahRichSelectComponent<T = unknown>
   readonly size = input<PtahControlSize>('sm');
   readonly compareWith = input<(a: T | null, b: T | null) => boolean>(Object.is);
 
-  readonly controlId = `ptah-select-${++selectId}`;
-  readonly listboxId = `${this.controlId}-listbox`;
+  /** Id of the combobox trigger. Default: a generated id. Not the host `id`. */
+  readonly triggerId = input<string | undefined>(undefined);
+  private readonly generatedId = `ptah-select-${++selectId}`;
+  /** The id of the trigger: `triggerId` when set, else the generated id. */
+  get controlId(): string {
+    return this.triggerId() ?? this.generatedId;
+  }
+  readonly listboxId = `${this.generatedId}-listbox`;
   readonly iconTemplate = contentChild(PtahSelectIconDirective);
   private readonly triggerRef = viewChild.required<ElementRef<HTMLElement>>('trigger');
   private readonly panelRef = viewChild<ElementRef<HTMLElement>>('panel');
@@ -122,7 +128,7 @@ export class PtahRichSelectComponent<T = unknown>
     () => this.searchable() ?? this.options().length >= PTAH_SELECT_SEARCH_MIN_OPTIONS,
   );
   readonly groups = computed(() =>
-    buildGroups(this.options(), this.isSearchable() ? this.query() : '', this.controlId),
+    buildGroups(this.options(), this.isSearchable() ? this.query() : '', this.generatedId),
   );
   readonly items = computed(() => flatItems(this.groups()));
   readonly activeId = computed(() => this.items()[this.activeIndex()]?.id ?? null);

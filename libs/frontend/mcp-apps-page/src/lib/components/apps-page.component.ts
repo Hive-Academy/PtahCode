@@ -14,7 +14,7 @@ import { AppsSessionService } from '../services/apps-session.service';
 import { AppsFocusMemoryDirective } from './apps-focus-memory.directive';
 import { AppsSurfacePanelComponent } from './apps-surface-panel.component';
 import { AppsTranscriptComponent } from './apps-transcript.component';
-import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahIconButtonDirective, PtahTextareaDirective } from '@ptah-extension/ui';
 
 /**
  * `AppsPageComponent` — the routed Apps page (implementation-plan.md:648-693).
@@ -125,7 +125,7 @@ export const APPS_PAGE_STYLES = `
     AppsTranscriptComponent,
     AppsSurfacePanelComponent,
     ElectronResizeHandleComponent,
-    LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective,],
+    LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective, PtahTextareaDirective,],
   hostDirectives: [AppsFocusMemoryDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
@@ -217,7 +217,9 @@ export const APPS_PAGE_STYLES = `
             </div>
           }
           <textarea
-            class="textarea textarea-bordered w-full text-sm resize-none"
+            ptahTextarea
+            size="md"
+            class="w-full text-sm resize-none"
             rows="2"
             placeholder="Ask for a dashboard, a form, or a change…"
             aria-label="Message the Apps conversation"

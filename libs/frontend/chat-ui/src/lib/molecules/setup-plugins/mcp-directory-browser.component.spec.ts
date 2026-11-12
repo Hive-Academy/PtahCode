@@ -457,6 +457,8 @@ describe('mcp directory browser — registry discovery', () => {
     );
     expect(panel?.textContent).toContain('--token');
     expect(panel?.textContent).toContain('API key for the ACME service');
+    await new Promise<void>((r) => setTimeout(r));
+    await settle(fixture);
     expect(input?.type).toBe('password');
     expect(
       panel?.querySelector(`label[for="${input?.id}"]`)?.textContent,
@@ -516,10 +518,13 @@ describe('mcp directory browser — registry discovery', () => {
     await clickInstall(fixture);
 
     const panel = host(fixture).querySelector('ptah-storefront-panel');
-    const select = panel?.querySelector<HTMLSelectElement>(
-      '[data-testid="mcp-required-inputs"] select',
+    const select = panel?.querySelector<HTMLElement>(
+      '[data-testid="mcp-required-inputs"] [role="combobox"]',
     );
     expect(select).not.toBeNull();
+    expect(
+      panel?.querySelector(`label[for="${select?.id}"]`)?.textContent,
+    ).toContain('api_host');
     expect(panel?.textContent).toContain('api_host');
     expect(panel?.textContent).toContain('Hostname of the MCP endpoint');
     expect(
@@ -527,8 +532,11 @@ describe('mcp directory browser — registry discovery', () => {
         ?.disabled,
     ).toBe(true);
 
-    select!.value = 'mcp.acme.test';
-    select!.dispatchEvent(new Event('change'));
+    select!.click();
+    await settle(fixture);
+    panel
+      ?.querySelector<HTMLElement>('[role="option"]')
+      ?.click();
     await settle(fixture);
 
     expect(

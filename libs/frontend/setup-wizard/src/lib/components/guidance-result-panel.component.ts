@@ -6,12 +6,12 @@ import {
   output,
 } from '@angular/core';
 import type { GuidanceCommittedResult } from '../services/guidance-generation.store';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahToggleDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-guidance-result-panel',
   standalone: true,
-  imports: [DatePipe, PtahButtonDirective],
+  imports: [DatePipe, PtahButtonDirective, PtahToggleDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -31,11 +31,11 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
         <p class="text-sm text-base-content-muted">
           {{ saved.cacheValid ? 'Cache is current' : 'Cache needs refreshing' }}
         </p>
-        <label class="label cursor-pointer justify-start gap-2">
+        <label class="flex cursor-pointer items-center justify-start gap-2">
           <input
             #enabledToggle
             type="checkbox"
-            class="toggle toggle-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+            ptahToggle
             [checked]="saved.enabled"
             (change)="
               enabledChanged.emit(enabledToggle.checked);

@@ -41,14 +41,13 @@ describe('CommandPendingInputComponent', () => {
     expect(live.textContent).toContain('Action required: Choose a target');
   });
 
-  it('uses readable light input tokens and a base-content focus ring', () => {
+  it('uses the ptahInput owner at size md', () => {
     const fixture = setup();
     const answer = fixture.nativeElement.querySelector(
       '#pending-answer',
     ) as HTMLInputElement;
-    expect(answer.className).toContain('placeholder:!text-base-content-muted');
-    expect(answer.className).toContain('!border-base-content/70');
-    expect(answer.className).toContain('focus-visible:outline-base-content');
+    expect(answer.getAttribute('data-ptah-control')).toBe('input');
+    expect(answer.className).toContain('input-md');
   });
 
 
@@ -71,9 +70,7 @@ describe('CommandPendingInputComponent', () => {
       false,
     );
     expect(input.placeholder).toBe('e.g. release/next');
-    expect(input.className).toContain('!border-base-content/50');
-    expect(input.className).toContain('placeholder:!text-base-content-muted');
-    expect(input.className).toContain('focus-visible:outline-2');
+    expect(input.getAttribute('data-ptah-control')).toBe('input');
   });
 
   it('shows and emits the full ordinary choice', () => {

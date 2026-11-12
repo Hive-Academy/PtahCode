@@ -30,11 +30,11 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { LucideAngularModule, Send, MessageSquare } from 'lucide-angular';
-import { NativePopoverComponent } from '@ptah-extension/ui';
+import { NativePopoverComponent, PtahInputDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-deny-message-popover',
-  imports: [FormsModule, LucideAngularModule, NativePopoverComponent],
+  imports: [FormsModule, LucideAngularModule, NativePopoverComponent, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <ptah-native-popover
@@ -63,8 +63,10 @@ import { NativePopoverComponent } from '@ptah-extension/ui';
         <div class="flex gap-1.5 items-center">
           <input
             #messageInput
+            ptahInput
+            size="xs"
             type="text"
-            class="input input-xs input-bordered flex-1 text-xs"
+            class="flex-1 text-xs"
             placeholder="Explain why or suggest alternatives..."
             aria-label="Message to Claude"
             [(ngModel)]="messageText"

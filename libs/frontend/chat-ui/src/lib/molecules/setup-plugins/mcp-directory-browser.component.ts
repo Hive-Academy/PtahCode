@@ -30,6 +30,11 @@ import {
   CatalogGridComponent,
   MonogramTileComponent,
   PtahButtonDirective,
+  PtahCheckboxDirective,
+  PtahFieldComponent,
+  PtahInputDirective,
+  PtahRichSelectComponent,
+  type PtahSelectOption,
   StorefrontPanelComponent,
   resolveListingBrandSlug,
   type CatalogCardBadge,
@@ -138,6 +143,10 @@ interface RegistryCardView {
     StorefrontPanelComponent,
     InstallScopeFieldComponent,
     PtahButtonDirective,
+    PtahCheckboxDirective,
+    PtahInputDirective,
+    PtahFieldComponent,
+    PtahRichSelectComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -178,8 +187,10 @@ interface RegistryCardView {
           <lucide-angular [img]="SearchIcon" class="h-3.5 w-3.5" />
         </span>
         <input
+          ptahInput
+          size="sm"
           type="search"
-          class="input input-bordered input-sm w-full pl-8 text-xs"
+          class="w-full pl-8 text-xs"
           placeholder="Search MCP servers..."
           [value]="searchQuery()"
           (input)="onSearchInput($event)"
@@ -316,37 +327,31 @@ interface RegistryCardView {
                               requiredInput of requiredInputs();
                               track requiredInput.key
                             ) {
-                              <div class="space-y-1">
-                                <label
-                                  class="label py-0"
-                                  [for]="'mcp-required-input-' + $index"
-                                >
-                                  <span class="label-text font-mono text-xs">{{
-                                    requiredInput.name
-                                  }}</span>
-                                  @if (requiredInput.isSecret) {
-                                    <span class="badge badge-sm badge-neutral ml-1"
-                                      >secret</span
-                                    >
-                                  }
-                                </label>
+                              <ptah-field
+                                appearance="stacked"
+                                [label]="
+                                  requiredInput.isSecret
+                                    ? requiredInput.name + ' (secret)'
+                                    : requiredInput.name
+                                "
+                                [hint]="requiredInput.description ?? null"
+                              >
                                 @if (requiredInput.choices; as choices) {
-                                  <select
-                                    class="select select-bordered select-sm w-full text-xs"
-                                    [id]="'mcp-required-input-' + $index"
-                                    [value]="inputValues()[requiredInput.key] ?? ''"
-                                    (change)="
-                                      onRequiredInputChange(requiredInput.key, $event)
+                                  <ptah-select
+                                    [triggerId]="'mcp-required-input-' + $index"
+                                    placeholder="Select a value"
+                                    [options]="choiceOptions(choices)"
+                                    [value]="
+                                      inputValues()[requiredInput.key] || null
                                     "
-                                  >
-                                    <option value="">Select a value</option>
-                                    @for (choice of choices; track choice) {
-                                      <option [value]="choice">{{ choice }}</option>
-                                    }
-                                  </select>
+                                    (valueChange)="
+                                      setRequiredInput(requiredInput.key, $event)
+                                    "
+                                  />
                                 } @else {
                                   <input
-                                    class="input input-bordered input-sm w-full font-mono text-xs"
+                                    ptahInput
+                                    tone="mono"
                                     [id]="'mcp-required-input-' + $index"
                                     [type]="requiredInput.isSecret ? 'password' : 'text'"
                                     [value]="inputValues()[requiredInput.key] ?? ''"
@@ -355,12 +360,7 @@ interface RegistryCardView {
                                     "
                                   />
                                 }
-                                @if (requiredInput.description) {
-                                  <p class="text-xs text-base-content-muted">
-                                    {{ requiredInput.description }}
-                                  </p>
-                                }
-                              </div>
+                              </ptah-field>
                             }
                           </div>
                         }
@@ -396,8 +396,9 @@ interface RegistryCardView {
                                 "
                               >
                                 <input
+                                  ptahCheckbox
+                                  size="xs"
                                   type="checkbox"
-                                  class="checkbox checkbox-xs checkbox-primary"
                                   [checked]="selectedTargets().has(target)"
                                   [disabled]="isTargetLocked(target)"
                                   (change)="toggleTarget(target)"
@@ -752,6 +753,14 @@ export class McpDirectoryBrowserComponent implements OnInit, OnDestroy {
     const target = event.target as HTMLInputElement | HTMLSelectElement;
     const value = target.value;
     this.inputValues.update((values) => ({ ...values, [key]: value }));
+  }
+
+  setRequiredInput(key: string, value: string | null): void {
+    this.inputValues.update((values) => ({ ...values, [key]: value ?? '' }));
+  }
+
+  choiceOptions(choices: readonly string[]): PtahSelectOption<string>[] {
+    return choices.map((choice) => ({ value: choice, label: choice }));
   }
 
   /** A home target is locked (disabled, "Global only") outside All workspaces. */
