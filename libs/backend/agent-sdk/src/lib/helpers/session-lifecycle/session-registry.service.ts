@@ -54,6 +54,7 @@ export type SessionAccountBinding = Readonly<
 
 export interface QueuedUserTurn {
   readonly message: SDKUserMessage;
+  readonly heldPeer?: import('@ptah-extension/shared').HeldPeerMessage;
   readonly clientMessageId?: string;
   readonly followUp?: QueuedFollowUpSnapshot;
   readonly sessionId?: SessionId;

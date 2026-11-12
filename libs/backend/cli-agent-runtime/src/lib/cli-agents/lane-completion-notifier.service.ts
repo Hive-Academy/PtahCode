@@ -45,11 +45,18 @@ import {
   type LaneOutcomeRecorder,
 } from '@ptah-extension/lane-outcomes';
 import { enqueueLaneCompletionOutcome } from './lane-completion-outcome';
-import { AgentReportCoalescer, attachFinalReport, type HeldReport } from './agent-report-coalescer';
+import {
+  AgentReportCoalescer,
+  attachFinalReport,
+  type HeldReport,
+} from './agent-report-coalescer';
 import { buildLaneCompletionEnvelope } from './lane-completion-envelope';
 import { ParentDeliveryDrainerService } from './parent-delivery/parent-delivery-drainer.service';
 import { readReviewDeliverables } from './review-deliverable.reader';
-import type { LaneTerminalCheckpoint, LaneCheckpointResult } from './lane-terminal-checkpoint.port';
+import type {
+  LaneTerminalCheckpoint,
+  LaneCheckpointResult,
+} from './lane-terminal-checkpoint.port';
 import type { ParentCompletionOutboxEntry } from './parent-delivery/parent-envelope.schema';
 import type { ParentEnqueueResult } from './parent-delivery/parent-envelope-store.service';
 import {
@@ -276,7 +283,18 @@ export function buildSessionChildCompletionEnvelope(
     `Worktree: ${subject.worktreePath}`,
   ];
   if (settle.status === 'handed-off' && subject.succeededBy) {
-    lines.push(`Work continues in successor child session ${subject.succeededBy}.`);
+    lines.push(
+      `Work continues in successor child session ${subject.succeededBy}.`,
+    );
+    if (subject.undeliveredHeldMessages?.length) {
+      lines.push(
+        `Not delivered: ${subject.undeliveredHeldMessages.length} held message(s) were lost during the handoff: ` +
+          subject.undeliveredHeldMessages
+            .map((m) => `#${m.index} "${m.preview}"`)
+            .join('; ') +
+          '. Send them again to the successor.',
+      );
+    }
   }
   if (subject.taskFolder) lines.push(`Task folder: ${subject.taskFolder}`);
   if (deliverables.length === 0) {
@@ -354,7 +372,8 @@ export class LaneCompletionNotifier {
           Partial<Pick<LaneOutcomeRecorder, 'captureReview'>>)
       | null = () => null,
     private readonly parentDelivery: ParentDeliveryDrainerService | null = null,
-    private readonly terminalCheckpoint: () => LaneTerminalCheckpoint | null = () => null,
+    private readonly terminalCheckpoint: () => LaneTerminalCheckpoint | null = () =>
+      null,
     private readonly coalescer: AgentReportCoalescer | null = null,
   ) {
     this.pendingReplays = new PendingCompletionReplays(logger);
@@ -372,11 +391,13 @@ export class LaneCompletionNotifier {
   async signal(
     info: AgentProcessInfo,
     context: LaneCompletionContext = { reportsDelivered: 0 },
-  ): Promise<LaneCompletionDelivery & {
-    readonly recorded?: boolean;
-    readonly pending?: boolean;
-    readonly deliveryId?: string;
-  }> {
+  ): Promise<
+    LaneCompletionDelivery & {
+      readonly recorded?: boolean;
+      readonly pending?: boolean;
+      readonly deliveryId?: string;
+    }
+  > {
     if (info.status === 'running') {
       // Not a modelled refusal: a caller that reaches here has a bug, and the
       // orchestrator must never be told a running lane finished.
@@ -390,22 +411,32 @@ export class LaneCompletionNotifier {
     const completedAt = info.completedAt ?? new Date().toISOString();
     const key = `${info.agentId}:${completedAt}`;
     const existing = this.parentDelivery?.find(key);
-    if (existing) return {
-      delivered: existing.state === 'delivered',
-      parentSessionId: existing.parentSessionId,
-      recorded: true,
-      pending: existing.state === 'pending',
-      deliveryId: existing.id,
-    };
-    if (this.signalledKeys.includes(key) &&
-      (!this.parentDelivery || !info.parentSessionId?.trim())) {
+    if (existing)
+      return {
+        delivered: existing.state === 'delivered',
+        parentSessionId: existing.parentSessionId,
+        recorded: true,
+        pending: existing.state === 'pending',
+        deliveryId: existing.id,
+      };
+    if (
+      this.signalledKeys.includes(key) &&
+      (!this.parentDelivery || !info.parentSessionId?.trim())
+    ) {
       return { delivered: false, reason: 'already-signalled' };
     }
-    const firstSignal = !this.signalledKeys.includes(key) && !this.inFlightKeys.has(key);
+    const firstSignal =
+      !this.signalledKeys.includes(key) && !this.inFlightKeys.has(key);
     if (firstSignal && !this.parentDelivery) this.remember(key);
     if (firstSignal) this.inFlightKeys.add(key);
     try {
-      return await this.signalOnce(info, context, completedAt, key, firstSignal);
+      return await this.signalOnce(
+        info,
+        context,
+        completedAt,
+        key,
+        firstSignal,
+      );
     } finally {
       if (firstSignal) this.inFlightKeys.delete(key);
     }
@@ -418,11 +449,13 @@ export class LaneCompletionNotifier {
     key: string,
     firstSignal: boolean,
   ): Promise<LaneCompletionResult> {
-
     let signal = await this.buildSignal(info, completedAt, context);
-    const parentSessionId = SessionId.safeParse(info.parentSessionId?.trim()) ?? info.parentSessionId?.trim();
+    const parentSessionId =
+      SessionId.safeParse(info.parentSessionId?.trim()) ??
+      info.parentSessionId?.trim();
     const activeParentSessionId =
-      parentSessionId && SessionId.safeParse(parentSessionId) &&
+      parentSessionId &&
+      SessionId.safeParse(parentSessionId) &&
       this.agentAdapter?.isSessionActive(SessionId.from(parentSessionId))
         ? parentSessionId
         : null;
@@ -431,39 +464,53 @@ export class LaneCompletionNotifier {
       ? { ...signal, reportsDelivered: signal.reportsDelivered + 1 }
       : signal;
     const candidate = held
-      ? attachFinalReport(this.completionEnvelope(withReport, info), held.envelopeBody)
+      ? attachFinalReport(
+          this.completionEnvelope(withReport, info),
+          held.envelopeBody,
+        )
       : undefined;
     const fits = candidate !== undefined && candidate.length <= 1_048_476;
     let completionSignal = fits ? withReport : signal;
-    let completionBody = fits && candidate ? candidate : this.completionEnvelope(signal, info);
-    if (held && !fits && await this.releaseStandalone(info.agentId, held)) {
+    let completionBody =
+      fits && candidate ? candidate : this.completionEnvelope(signal, info);
+    if (held && !fits && (await this.releaseStandalone(info.agentId, held))) {
       signal = { ...signal, reportsDelivered: signal.reportsDelivered + 1 };
       completionSignal = signal;
       completionBody = this.completionEnvelope(signal, info);
     }
-    if (firstSignal) enqueueLaneCompletionOutcome(
-      this.outcomeRecorder,
-      this.logger,
-      info,
-      key,
-      signal,
-      context.authMatched ?? false,
-      context.rateLimited ?? false,
-      activeParentSessionId,
-      context.usage,
-    );
+    if (firstSignal)
+      enqueueLaneCompletionOutcome(
+        this.outcomeRecorder,
+        this.logger,
+        info,
+        key,
+        signal,
+        context.authMatched ?? false,
+        context.rateLimited ?? false,
+        activeParentSessionId,
+        context.usage,
+      );
 
     const queueReviewCapture = (): void => {
       if (firstSignal && LaneCompletionNotifier.capturesReview(info, signal))
-        void this.captureReview(info, key, signal.deliverables).catch((error: unknown) => {
-          this.logger.error('[LaneCompletionNotifier] Review capture failed',
-            error instanceof Error ? error : new Error('Review capture failed'));
-        });
+        void this.captureReview(info, key, signal.deliverables).catch(
+          (error: unknown) => {
+            this.logger.error(
+              '[LaneCompletionNotifier] Review capture failed',
+              error instanceof Error
+                ? error
+                : new Error('Review capture failed'),
+            );
+          },
+        );
     };
 
     // A parent tab id stays pending until the SDK resolves its session id.
     // Direct delivery requires a session id because it cannot re-key a tab.
-    if (!parentSessionId || (!this.parentDelivery && !SessionId.safeParse(parentSessionId))) {
+    if (
+      !parentSessionId ||
+      (!this.parentDelivery && !SessionId.safeParse(parentSessionId))
+    ) {
       queueReviewCapture();
       if (firstSignal) this.remember(key);
       return this.refuse('no-parent-recorded', signal, {
@@ -498,16 +545,27 @@ export class LaneCompletionNotifier {
       const checkpoint = await this.checkpoint(entry);
       // A durable checkpoint owns the report even when envelope indexing fails.
       if (held && fits && checkpoint === 'durable') held.markEnqueued();
-      const saved = await this.parentDelivery.enqueue(completionEnqueueInput(entry));
+      const saved = await this.parentDelivery.enqueue(
+        completionEnqueueInput(entry),
+      );
       if (held && fits && checkpoint !== 'durable' && !('refused' in saved))
         held.markEnqueued();
       if (held && fits && checkpoint !== 'durable' && 'refused' in saved)
         this.pendingReportMarks.set(key, held);
       queueReviewCapture();
-      const result = await this.settleEnqueue(entry, saved, checkpoint === 'durable');
+      const result = await this.settleEnqueue(
+        entry,
+        saved,
+        checkpoint === 'durable',
+      );
       if (result.reason !== 'storage-unavailable') this.remember(key);
-      return { ...result, signal: checkpoint === 'durable' || !('refused' in saved)
-        ? completionSignal : signal };
+      return {
+        ...result,
+        signal:
+          checkpoint === 'durable' || !('refused' in saved)
+            ? completionSignal
+            : signal,
+      };
     }
 
     if (!activeParentSessionId) {
@@ -551,17 +609,29 @@ export class LaneCompletionNotifier {
     return { delivered: true, parentSessionId, signal };
   }
 
-  private async releaseStandalone(agentId: string, report: HeldReport): Promise<boolean> {
+  private async releaseStandalone(
+    agentId: string,
+    report: HeldReport,
+  ): Promise<boolean> {
     try {
       await report.deliverStandalone();
       return true;
     } catch (error: unknown) {
-      this.logger.error('[LaneCompletionNotifier] Standalone report delivery failed',
-        error instanceof Error ? error : new Error(String(error)));
+      this.logger.error(
+        '[LaneCompletionNotifier] Standalone report delivery failed',
+        error instanceof Error ? error : new Error(String(error)),
+      );
       this.coalescer?.hold(agentId, report, (expired) => {
-        void expired.deliverStandalone().catch((retryError: unknown) =>
-          this.logger.error('[LaneCompletionNotifier] Report retry failed',
-            retryError instanceof Error ? retryError : new Error(String(retryError))));
+        void expired
+          .deliverStandalone()
+          .catch((retryError: unknown) =>
+            this.logger.error(
+              '[LaneCompletionNotifier] Report retry failed',
+              retryError instanceof Error
+                ? retryError
+                : new Error(String(retryError)),
+            ),
+          );
       });
       return false;
     }
@@ -572,20 +642,34 @@ export class LaneCompletionNotifier {
    * rerunning the outcome recorder or the review capture. A key already in the
    * parent index or key shard enqueues nothing.
    */
-  async replay(entry: ParentCompletionOutboxEntry): Promise<LaneCompletionResult> {
+  async replay(
+    entry: ParentCompletionOutboxEntry,
+  ): Promise<LaneCompletionResult> {
     const parentDelivery = this.parentDelivery;
-    if (!parentDelivery) return { delivered: false, reason: 'chat-runtime-unavailable' };
+    if (!parentDelivery)
+      return { delivered: false, reason: 'chat-runtime-unavailable' };
     if (parentDelivery.isParentFrozen(entry.parentSessionId)) {
       this.pendingReplays.delete(entry.dedupeKey);
       return { delivered: false, reason: 'parent-session-not-active' };
     }
     let satisfied: boolean;
     try {
-      satisfied = await parentDelivery.isCompletionSatisfied(entry.parentSessionId, entry.dedupeKey);
+      satisfied = await parentDelivery.isCompletionSatisfied(
+        entry.parentSessionId,
+        entry.dedupeKey,
+      );
     } catch (error: unknown) {
-      this.logger.error('[LaneCompletionNotifier] Completion replay blocked by unreadable storage',
-        error instanceof Error ? error : new Error('Completion dedupe read failed'));
-      return { delivered: false, recorded: false, reason: 'storage-unavailable' };
+      this.logger.error(
+        '[LaneCompletionNotifier] Completion replay blocked by unreadable storage',
+        error instanceof Error
+          ? error
+          : new Error('Completion dedupe read failed'),
+      );
+      return {
+        delivered: false,
+        recorded: false,
+        reason: 'storage-unavailable',
+      };
     }
     if (satisfied) {
       const report = this.pendingReportMarks.get(entry.dedupeKey);
@@ -609,26 +693,34 @@ export class LaneCompletionNotifier {
   /** Replays every durable outbox entry; throws while any entry is still unsaved. */
   async replayOutbox(parentSessionId?: string): Promise<void> {
     if (!this.parentDelivery) return;
-    const entries = await this.parentDelivery.listCompletionOutbox(parentSessionId);
+    const entries =
+      await this.parentDelivery.listCompletionOutbox(parentSessionId);
     let unsaved = 0;
     for (const entry of entries) {
       const result = await this.replay(entry);
       if (result.reason === 'storage-unavailable') unsaved++;
     }
-    if (unsaved > 0) throw new Error(`Completion outbox replay left ${unsaved} unsaved`);
+    if (unsaved > 0)
+      throw new Error(`Completion outbox replay left ${unsaved} unsaved`);
   }
 
   /** Retry of a view-only `not-saved` delivery; undefined when no such entry exists. */
-  async retryUnsaved(deliveryId: string): Promise<ParentDeliveryView | undefined> {
+  async retryUnsaved(
+    deliveryId: string,
+  ): Promise<ParentDeliveryView | undefined> {
     if (!this.parentDelivery) return undefined;
     const key = deliveryId.slice('lane-delivery:'.length);
-    const entry = this.pendingReplays.get(key) ??
-      (await this.parentDelivery.listCompletionOutbox())
-        .find((candidate) => candidate.dedupeKey === key);
+    const entry =
+      this.pendingReplays.get(key) ??
+      (await this.parentDelivery.listCompletionOutbox()).find(
+        (candidate) => candidate.dedupeKey === key,
+      );
     if (!entry) return undefined;
     await this.replay(entry);
     const saved = this.parentDelivery.find(key);
-    return saved ? this.parentDelivery.toView(saved) : unsavedCompletionView(entry, Date.now());
+    return saved
+      ? this.parentDelivery.toView(saved)
+      : unsavedCompletionView(entry, Date.now());
   }
 
   /** Drainer tick: the durable outbox first, then completions with no durable record. */
@@ -638,14 +730,21 @@ export class LaneCompletionNotifier {
       await this.replayOutbox();
     } catch (error: unknown) {
       failed = true;
-      this.logger.error('[LaneCompletionNotifier] Completion outbox replay failed',
-        error instanceof Error ? error : new Error('Completion outbox replay failed'));
+      this.logger.error(
+        '[LaneCompletionNotifier] Completion outbox replay failed',
+        error instanceof Error
+          ? error
+          : new Error('Completion outbox replay failed'),
+      );
     }
     for (const entry of this.pendingReplays.values()) {
       const result = await this.replay(entry);
       if (result.reason === 'storage-unavailable') failed = true;
     }
-    if (failed) throw new Error('Completion replay incomplete; retrying on the next tick');
+    if (failed)
+      throw new Error(
+        'Completion replay incomplete; retrying on the next tick',
+      );
   }
 
   private async scheduleStartupOutboxReplay(): Promise<void> {
@@ -654,42 +753,62 @@ export class LaneCompletionNotifier {
       const entries = await this.parentDelivery.listCompletionOutbox();
       if (entries.length > 0) this.parentDelivery.scheduleRetry();
     } catch (error: unknown) {
-      this.logger.error('[LaneCompletionNotifier] Startup completion outbox check failed',
-        error instanceof Error ? error : new Error('Startup completion outbox check failed'));
+      this.logger.error(
+        '[LaneCompletionNotifier] Startup completion outbox check failed',
+        error instanceof Error
+          ? error
+          : new Error('Startup completion outbox check failed'),
+      );
       this.parentDelivery.scheduleRetry();
     }
   }
 
-  private async checkpoint(entry: ParentCompletionOutboxEntry): Promise<LaneCheckpointResult> {
+  private async checkpoint(
+    entry: ParentCompletionOutboxEntry,
+  ): Promise<LaneCheckpointResult> {
     const checkpointer = this.terminalCheckpoint();
     if (!checkpointer) {
       if (!this.checkpointMissingLogged)
-        this.logger.warn('[LaneCompletionNotifier] No terminal checkpoint; completions are live only');
+        this.logger.warn(
+          '[LaneCompletionNotifier] No terminal checkpoint; completions are live only',
+        );
       this.checkpointMissingLogged = true;
       return 'not-applicable';
     }
     try {
       const result = await checkpointer.checkpoint(entry);
       if (result === 'failed')
-        this.logger.error('[LaneCompletionNotifier] Completion checkpoint failed',
-          new Error(`Checkpoint failed for ${entry.dedupeKey}`));
+        this.logger.error(
+          '[LaneCompletionNotifier] Completion checkpoint failed',
+          new Error(`Checkpoint failed for ${entry.dedupeKey}`),
+        );
       return result;
     } catch (error: unknown) {
-      this.logger.error('[LaneCompletionNotifier] Completion checkpoint threw',
-        error instanceof Error ? error : new Error('Completion checkpoint threw'));
+      this.logger.error(
+        '[LaneCompletionNotifier] Completion checkpoint threw',
+        error instanceof Error
+          ? error
+          : new Error('Completion checkpoint threw'),
+      );
       return 'failed';
     }
   }
 
-  private async settleSatisfied(entry: ParentCompletionOutboxEntry): Promise<LaneCompletionResult> {
+  private async settleSatisfied(
+    entry: ParentCompletionOutboxEntry,
+  ): Promise<LaneCompletionResult> {
     const parentDelivery = this.parentDelivery;
     const deliveryId = completionDeliveryId(entry.dedupeKey);
     this.pendingReplays.delete(entry.dedupeKey);
     parentDelivery?.clearUnsaved(deliveryId);
     await parentDelivery?.backfillCompletionKeys(entry.parentSessionId);
-    const delivered = parentDelivery?.find(entry.dedupeKey)?.state === 'delivered';
+    const delivered =
+      parentDelivery?.find(entry.dedupeKey)?.state === 'delivered';
     return {
-      delivered, recorded: true, deliveryId, parentSessionId: entry.parentSessionId,
+      delivered,
+      recorded: true,
+      deliveryId,
+      parentSessionId: entry.parentSessionId,
       ...(delivered ? {} : { reason: 'already-signalled' as const }),
     };
   }
@@ -704,24 +823,37 @@ export class LaneCompletionNotifier {
     if ('refused' in saved) {
       if (saved.refused === 'parent-session-deleted') {
         this.pendingReplays.delete(entry.dedupeKey);
-        this.logger.warn('[LaneCompletionNotifier] Completion dropped for a deleted parent', {
-          agentId: entry.agentId, parentSessionId: entry.parentSessionId,
-        });
+        this.logger.warn(
+          '[LaneCompletionNotifier] Completion dropped for a deleted parent',
+          {
+            agentId: entry.agentId,
+            parentSessionId: entry.parentSessionId,
+          },
+        );
         return { delivered: false, reason: 'parent-session-not-active' };
       }
-      this.logger.error('[LaneCompletionNotifier] Completion could not be saved',
-        new Error(`Completion ${saved.refused}: ${entry.dedupeKey}`));
+      this.logger.error(
+        '[LaneCompletionNotifier] Completion could not be saved',
+        new Error(`Completion ${saved.refused}: ${entry.dedupeKey}`),
+      );
       if (!durable) this.pendingReplays.set(entry);
       parentDelivery?.publishUnsaved(unsavedCompletionView(entry, Date.now()));
-      return { delivered: false, recorded: false, reason: 'storage-unavailable' };
+      return {
+        delivered: false,
+        recorded: false,
+        reason: 'storage-unavailable',
+      };
     }
     this.pendingReplays.delete(entry.dedupeKey);
     parentDelivery?.clearUnsaved(saved.id);
     await parentDelivery?.drain(entry.parentSessionId);
     const state = parentDelivery?.find(entry.dedupeKey)?.state;
     return {
-      delivered: state === 'delivered', recorded: true, pending: state === 'pending',
-      deliveryId: saved.id, parentSessionId: entry.parentSessionId,
+      delivered: state === 'delivered',
+      recorded: true,
+      pending: state === 'pending',
+      deliveryId: saved.id,
+      parentSessionId: entry.parentSessionId,
     };
   }
 
@@ -917,13 +1049,20 @@ export class LaneCompletionNotifier {
       ...(info.stopReason ? { stopReason: info.stopReason } : {}),
       ...(isAgentBudgetStopReason(info.stopReason)
         ? {
-            progressPointer: deliverables.find((item) => item.exists && (item.bytes ?? 0) > 0 && item.writtenAfterSpawn !== false)?.path
-              ?? `last completed turn ${info.agentBudget?.turnIds.at(-1) ?? 'unavailable'} in CLI Session ID ${info.cliSessionId ?? 'unavailable'}`,
-            budgetLimit: info.stopReason === 'budget'
-              ? `${info.agentBudget?.stopWeightedTokens ?? 'configured'} weighted tokens`
-              : info.stopReason === 'duration'
-                ? `${info.agentBudget?.maxDurationMin ?? 'configured'} minutes`
-                : 'completed-turn telemetry required',
+            progressPointer:
+              deliverables.find(
+                (item) =>
+                  item.exists &&
+                  (item.bytes ?? 0) > 0 &&
+                  item.writtenAfterSpawn !== false,
+              )?.path ??
+              `last completed turn ${info.agentBudget?.turnIds.at(-1) ?? 'unavailable'} in CLI Session ID ${info.cliSessionId ?? 'unavailable'}`,
+            budgetLimit:
+              info.stopReason === 'budget'
+                ? `${info.agentBudget?.stopWeightedTokens ?? 'configured'} weighted tokens`
+                : info.stopReason === 'duration'
+                  ? `${info.agentBudget?.maxDurationMin ?? 'configured'} minutes`
+                  : 'completed-turn telemetry required',
           }
         : {}),
       ...(context.toolCalls !== undefined
@@ -995,8 +1134,7 @@ export class LaneCompletionNotifier {
     rateLimited: boolean,
     _reportsDelivered = 0,
   ): LaneCompletionVerdict {
-    if (stopReason === 'usage-limit' || stopReason === 'auth')
-      return 'failed';
+    if (stopReason === 'usage-limit' || stopReason === 'auth') return 'failed';
     const hostStopped = status === 'stopped' && stopReason !== undefined;
     if (status !== 'completed' && !hostStopped) return 'failed';
     const allFresh =
@@ -1012,14 +1150,22 @@ export class LaneCompletionNotifier {
     return allFresh ? 'delivered' : 'no-deliverable';
   }
 
-  private completionEnvelope(signal: LaneCompletionSignal, info: AgentProcessInfo): string {
+  private completionEnvelope(
+    signal: LaneCompletionSignal,
+    info: AgentProcessInfo,
+  ): string {
     const body = buildLaneCompletionEnvelope(signal);
-    if (info.stopReason !== 'usage-limit' && info.stopReason !== 'auth') return body;
-    const resetDate = info.stopResetAt === undefined ? undefined : new Date(info.stopResetAt);
-    const reset = resetDate && Number.isFinite(resetDate.getTime())
-      ? ` reset-at="${resetDate.toISOString()}"` : '';
-    return reset ? body.replace('<agent-lane-completed ',
-      `<agent-lane-completed${reset} `) : body;
+    if (info.stopReason !== 'usage-limit' && info.stopReason !== 'auth')
+      return body;
+    const resetDate =
+      info.stopResetAt === undefined ? undefined : new Date(info.stopResetAt);
+    const reset =
+      resetDate && Number.isFinite(resetDate.getTime())
+        ? ` reset-at="${resetDate.toISOString()}"`
+        : '';
+    return reset
+      ? body.replace('<agent-lane-completed ', `<agent-lane-completed${reset} `)
+      : body;
   }
 
   /**

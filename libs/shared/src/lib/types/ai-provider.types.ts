@@ -8,9 +8,16 @@ import type { FlatStreamEventUnion } from './execution';
 
 /** Causes passed through host-neutral adapter methods. */
 export type SessionEndCause =
-  | 'user-stop' | 'parent-stop' | 'stream-exit' | 'provider-error'
-  | 'config-reinit' | 'workspace-close' | 'compaction-abort'
-  | 'no-activity-timeout' | 'host-shutdown' | 'unknown';
+  | 'user-stop'
+  | 'parent-stop'
+  | 'stream-exit'
+  | 'provider-error'
+  | 'config-reinit'
+  | 'workspace-close'
+  | 'compaction-abort'
+  | 'no-activity-timeout'
+  | 'host-shutdown'
+  | 'unknown';
 
 /**
  * Supported AI Provider IDs
@@ -19,10 +26,7 @@ export type SessionEndCause =
  * matches the `runtime` value of a native Codex execution profile.
  */
 export type ProviderId =
-  | 'claude-cli'
-  | 'vscode-lm'
-  | 'ptah-cli'
-  | 'codex-app-server';
+  'claude-cli' | 'vscode-lm' | 'ptah-cli' | 'codex-app-server';
 
 /**
  * Provider Status Types
@@ -87,6 +91,14 @@ export type AIMessageOrigin =
   | { readonly kind: 'peer'; readonly from: string; readonly name?: string }
   | { readonly kind: 'task-notification' }
   | { readonly kind: 'coordinator' };
+
+/** A peer turn removed from a predecessor queue before SDK delivery. */
+export interface HeldPeerMessage {
+  readonly content: string;
+  readonly origin: AIMessageOrigin;
+  readonly files?: readonly string[];
+  readonly images?: ReadonlyArray<{ data: string; mediaType: string }>;
+}
 
 /**
  * AI Message Options

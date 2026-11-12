@@ -81,6 +81,11 @@ export interface SessionChildSnapshot {
   readonly succeeds?: string;
   /** Child id of the successor that continues this child. */
   readonly succeededBy?: string;
+  /** Held peer messages that the handoff could not replay to this successor. */
+  readonly undeliveredHeldMessages?: readonly {
+    readonly index: number;
+    readonly preview: string;
+  }[];
   /** Successions before this child in its chain; absent means zero. */
   readonly successionCount?: number;
   /** Absolute deliverable paths, resolved at start. */
@@ -311,10 +316,7 @@ export interface SessionChildClearQuery {
 }
 
 export type SessionChildClearSkipReason =
-  | 'live'
-  | 'held-completion'
-  | 'unknown-child'
-  | 'not-a-child-of-caller';
+  'live' | 'held-completion' | 'unknown-child' | 'not-a-child-of-caller';
 
 export type SessionChildClearResult =
   | {
@@ -347,6 +349,11 @@ export interface SessionChildReadResult {
 export interface SessionChildCompletionSubject {
   readonly childSessionId: string;
   readonly succeededBy?: string;
+  /** Held messages the successor never received (read from the successor). */
+  readonly undeliveredHeldMessages?: readonly {
+    readonly index: number;
+    readonly preview: string;
+  }[];
   readonly label: string;
   /**
    * Parent ids to deliver into, in order of preference: the recorded parent
