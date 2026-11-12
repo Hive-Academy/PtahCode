@@ -92,7 +92,7 @@ Acceptance:
 - Each open point in §9 has an answer. A code point has `file:line` evidence. A runtime point
   (for example the tool list of a child session) has a measured result from Electron.
 - Phase 2 does not start before the measured result for point 2 (browser tools) exists.
-- The user approved or rejected each proposed removal.
+- The user approved or rejected each proposed removal. Result: the user approved all 12 (U-D12).
 
 ### Phase 1 - Phase contract
 
@@ -285,6 +285,7 @@ User decisions (final):
 | U-D9 | (was U2) A spawn has three inputs. `phase` (the phase kind) replaces `role` as the primary input and supplies the discipline text and the tool profile. `skills` is an optional list of skill names; blank is the default and means the executor finds skills by itself. `role` stays only as the name of a user-written agent file. The user asked the orchestrator to select the best solution; this is its recommendation. Phase 0 must confirm that each provider CLI loads a skill by name on request | 2026-11-12 |
 | U-D10 | (was U4) The custom subagent designer of the harness wizard is not removed in Phase 5. It is the base of the later bots task, where its output changes from a subagent to a bot. Same source as U-D9: the user asked the orchestrator to select | 2026-11-12 |
 | U-D11 | Phase 0 ships in this task and in pull request #1131, not as a child task. The pull request then has real work when it merges | 2026-11-12 |
+| U-D12 | The user approved the 12 proposed removals of `parity-inventory.md` § Proposed Removals. The removals occur in Phase 4 and Phase 5, not before. Existing generated files stay until the user agrees to a cleanup | 2026-11-12 |
 
 Open decisions for the user: none. Each removal that Phase 0 proposes still needs the approval of
 the user.

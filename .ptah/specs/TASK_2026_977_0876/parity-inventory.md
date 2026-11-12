@@ -108,6 +108,9 @@ Inventory: 45 capabilities: 18 keep, 15 move, 12 remove-proposed. By first named
 
 Each approval is independent. Existing generated files stay in place; cleanup is offered with consent.
 
+**User approval (2026-11-12, U-D12):** the user approved all 12 rows. The removals occur in the
+phase that each row gives, not before.
+
 | Capability | User loses | Replacement | Phase |
 |---|---|---|---|
 | Bundled templates | 14 installable agent templates | Phase discipline and skills | 5 |
