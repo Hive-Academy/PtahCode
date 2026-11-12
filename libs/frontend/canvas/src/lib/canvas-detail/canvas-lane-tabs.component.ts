@@ -23,7 +23,7 @@ import {
   type AgentKind,
 } from '@ptah-extension/chat-ui';
 import { injectWallClock } from '@ptah-extension/core';
-import { FloatingUIService } from '@ptah-extension/ui';
+import { FloatingUIService, PtahButtonDirective } from '@ptah-extension/ui';
 import { Activity, CircleCheckBig, LucideAngularModule } from 'lucide-angular';
 import { AgentDockCardComponent } from './agent-dock-card.component';
 import { AgentDockMenuComponent } from './agent-dock-menu.component';
@@ -86,6 +86,7 @@ interface DockLayout {
   selector: 'ptah-canvas-lane-tabs',
   standalone: true,
   imports: [
+    PtahButtonDirective,
     AgentAvatarComponent,
     AgentDockCardComponent,
     AgentDockMenuComponent,
@@ -261,7 +262,7 @@ interface DockLayout {
     </div>
     <!-- Outside the tablist: it expands the sidebar, it is not a tab. -->
     @if (rail() && view.hidden.length > 0) {
-      <button type="button" class="btn btn-ghost btn-xs size-7"
+      <button ptahButton variant="ghost" size="xs" type="button" class="size-7"
         [attr.aria-label]="'Show ' + view.hidden.length + ' more active agents'"
         (click)="expandRequested.emit()">+{{ view.hidden.length }}</button>
     }

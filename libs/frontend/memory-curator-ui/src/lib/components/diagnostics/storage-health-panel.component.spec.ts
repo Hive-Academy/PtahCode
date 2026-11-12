@@ -253,8 +253,8 @@ describe('StorageHealthPanelComponent', () => {
     const badge = root.querySelector('[data-testid="storage-run-badge"]');
     expect(badge?.textContent?.trim()).toBe('completed');
     expect(badge?.getAttribute('data-tone')).toBe('ok');
-    expect(root.textContent ?? '').toContain('2 h ago');
-    expect(root.textContent ?? '').toContain('in 30 min');
+    expect(root.textContent ?? '').toContain('1h ago');
+    expect(root.textContent ?? '').toContain('in 30m');
     expect(root.textContent ?? '').toContain('120');
     expect(root.textContent ?? '').toContain('64');
     expect(root.textContent ?? '').toContain('as of last retention run');
@@ -387,7 +387,7 @@ describe('StorageHealthPanelComponent', () => {
       }),
     );
 
-    expect(root.textContent ?? '').toContain('10 min ago');
+    expect(root.textContent ?? '').toContain('10m ago');
     expect(root.textContent ?? '').toContain(
       'another retention run is in progress',
     );
@@ -457,7 +457,7 @@ describe('StorageHealthPanelComponent', () => {
     expect(
       futureRoot.querySelector('[data-testid="storage-next-due"]')
         ?.textContent ?? '',
-    ).toContain('in 30 min');
+    ).toContain('in 30m');
   });
 
   it('formats bytes across scales via the pure formatter', () => {
@@ -537,6 +537,6 @@ describe('StorageHealthPanelComponent', () => {
     );
     // The muted list also carries the other pending fields that DID read.
     expect(root.textContent ?? '').toContain('6,204');
-    expect(root.textContent ?? '').toContain('3 days ago');
+    expect(root.textContent ?? '').toContain('3d ago');
   });
 });

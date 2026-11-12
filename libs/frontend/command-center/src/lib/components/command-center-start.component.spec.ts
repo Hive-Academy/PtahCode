@@ -64,7 +64,7 @@ describe('CommandCenterStartComponent', () => {
       { ...sessions[0], lastActivityAt: 1_065_000 },
     ]);
     fixture.detectChanges();
-    expect(fixture.nativeElement.textContent).toContain('Just now');
+    expect(fixture.nativeElement.textContent).toContain('just now');
   });
 
   it('uses known provider artwork and a monogram for unknown providers', () => {
