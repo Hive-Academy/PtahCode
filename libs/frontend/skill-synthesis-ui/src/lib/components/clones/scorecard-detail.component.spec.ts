@@ -63,6 +63,17 @@ describe('ScorecardDetailComponent', () => {
     expect(text).toContain('TASK_2026_001');
     expect(text).toContain('COMPLETE');
     expect(text).toContain('140'); // 100 + 40 tokens
+    expect(cells[0].querySelector('[data-testid="scorecard-metric-duration"]')?.textContent).toContain('4s');
+  });
+
+  it.each([
+    [500, '0s'],
+    [65_000, '1m 5s'],
+    [3_600_000, '1h'],
+    [86_400_000, '1d'],
+  ])('formats a %i ms duration as %s', (durationMs, expected) => {
+    const el = render({ rows: [row({ durationMs })] });
+    expect(el.querySelector('[data-testid="scorecard-metric-duration"]')?.textContent).toContain(expected);
   });
 
   it('marks heuristically-attributed rows (exactAttribution=false)', () => {

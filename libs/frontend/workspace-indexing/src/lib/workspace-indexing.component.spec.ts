@@ -386,11 +386,16 @@ describe('WorkspaceIndexingComponent', () => {
       expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), WALL_CLOCK_COARSE_MS);
       const interval = setIntervalSpy.mock.results.find((result) => result.type === 'return')?.value;
       const label = () => fixture.componentInstance.formatRelativeTime(110_000);
-      expect(label()).toBe('1 minute ago');
+      expect(label()).toBe('1m ago');
       jest.advanceTimersByTime(WALL_CLOCK_COARSE_MS - 1);
-      expect(label()).toBe('1 minute ago');
+      expect(label()).toBe('1m ago');
       jest.advanceTimersByTime(1);
-      expect(label()).toBe('2 minutes ago');
+      expect(label()).toBe('2m ago');
+      const now = clock.now('coarse')();
+      expect(fixture.componentInstance.formatRelativeTime(now - 1_000)).toBe('just now');
+      expect(fixture.componentInstance.formatRelativeTime(now - 3_600_000)).toBe('1h ago');
+      expect(fixture.componentInstance.formatRelativeTime(now - 86_400_000)).toBe('1d ago');
+      expect(fixture.componentInstance.formatRelativeTime(now + 60_000)).toBe('in 1m');
       fixture.destroy();
       expect(clearIntervalSpy).toHaveBeenCalledWith(interval);
     } finally {
@@ -570,7 +575,7 @@ describe('WorkspaceIndexingComponent — busy state, last run, messages', () => 
     expect(
       query(fixture, '[data-testid="last-run-summary"]')?.textContent?.trim(),
     ).toBe(
-      'Last manual run 2 minutes ago: 3806 files, 41371 symbols, 16 errors, 2h 25m',
+      'Last manual run 2m ago: 3806 files, 41371 symbols, 16 errors, 2h 25m',
     );
   });
 

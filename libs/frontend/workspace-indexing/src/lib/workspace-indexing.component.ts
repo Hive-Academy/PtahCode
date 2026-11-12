@@ -34,7 +34,12 @@ import {
 import { AppStateManager, injectWallClock } from '@ptah-extension/core';
 import type { IndexingPipeline } from '@ptah-extension/shared';
 import { WorkspaceIndexingService } from './workspace-indexing.service';
-import { PtahButtonDirective, PtahToggleDirective } from '@ptah-extension/ui';
+import {
+  formatDuration,
+  formatRelative,
+  PtahButtonDirective,
+  PtahToggleDirective,
+} from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-workspace-indexing',
@@ -181,17 +186,10 @@ export class WorkspaceIndexingComponent {
     }
   }
 
-  /** Compact relative time formatter — e.g. "2 minutes ago". */
+  /** Relative time for the last finished run. */
   formatRelativeTime(epochMs: number | null): string {
     if (epochMs === null) return '—';
-    const deltaMs = this.now() - epochMs;
-    if (deltaMs < 60_000) return 'just now';
-    const minutes = Math.floor(deltaMs / 60_000);
-    if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
-    const days = Math.floor(hours / 24);
-    return `${days} day${days === 1 ? '' : 's'} ago`;
+    return formatRelative(epochMs, this.now());
   }
 
   /** Truncates a 40-char SHA to the first 7 chars for display. */
@@ -203,15 +201,4 @@ export class WorkspaceIndexingComponent {
 
 function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? '' : 's'}`;
-}
-
-/** Compact duration — `2h 25m`, `4m 10s`, `12s`. */
-function formatDuration(ms: number): string {
-  const totalSeconds = Math.max(0, Math.round(ms / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  if (minutes > 0) return `${minutes}m ${seconds}s`;
-  return `${seconds}s`;
 }

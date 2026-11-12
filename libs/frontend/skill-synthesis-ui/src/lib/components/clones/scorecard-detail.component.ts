@@ -8,6 +8,7 @@ import { MarkdownBlockComponent } from '@ptah-extension/markdown';
 import {
   NativeCardComponent,
   PtahBadgeDirective,
+  formatDuration,
   type NativeCardTone,
 } from '@ptah-extension/ui';
 import type { ScorecardInvocationRow } from '@ptah-extension/shared';
@@ -256,10 +257,4 @@ function totalTokens(row: ScorecardDetailRow): number | null {
   const { inputTokens, outputTokens } = row;
   if (inputTokens === null && outputTokens === null) return null;
   return (inputTokens ?? 0) + (outputTokens ?? 0);
-}
-
-function formatDuration(durationMs: number): string {
-  const seconds = durationMs / 1000;
-  if (seconds < 60) return `${seconds.toFixed(1)}s`;
-  return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
 }

@@ -4,7 +4,11 @@ import {
   computed,
   input,
 } from '@angular/core';
-import { PtahBadgeDirective, type PtahBadgeTone } from '@ptah-extension/ui';
+import {
+  formatRelative,
+  PtahBadgeDirective,
+  type PtahBadgeTone,
+} from '@ptah-extension/ui';
 import {
   assertNever,
   type MemoryCuratorEventWire,
@@ -94,23 +98,11 @@ export class EventFeedComponent {
     return list.map((ev, idx) => ({
       key: `${ev.timestamp}-${ev.kind}-${idx}`,
       kind: ev.kind,
-      relative: formatRelative(referenceNow - ev.timestamp),
+      relative: formatRelative(ev.timestamp, referenceNow),
       outcome: buildOutcome(ev),
       tone: toneFor(ev),
     }));
   });
-}
-
-function formatRelative(deltaMs: number): string {
-  if (deltaMs < 0) return 'just now';
-  const seconds = Math.floor(deltaMs / 1000);
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
 }
 
 function buildOutcome(ev: MemoryCuratorEventWire): string {
