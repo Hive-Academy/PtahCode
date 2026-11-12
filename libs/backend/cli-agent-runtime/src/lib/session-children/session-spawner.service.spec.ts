@@ -8,10 +8,27 @@
  * root registrar.
  */
 import 'reflect-metadata';
-jest.mock('node:fs/promises', () => ({
-  ...jest.requireActual('node:fs/promises'),
-  realpath: jest.fn(async (path: string) => path),
-}));
+// One factory for every spec that imports this file. `realpath` stays an
+// identity so attach checks do not depend on a real worktree. `access` stays
+// real unless a suite sets `sessionSpawnerFsAccess.current` (succession and
+// start-guard): a second `jest.mock` in those files would replace this factory.
+jest.mock('node:fs/promises', () => {
+  const actual = jest.requireActual<typeof import('node:fs/promises')>(
+    'node:fs/promises',
+  );
+  const accessHolder = jest.requireActual<
+    typeof import('./__fixtures__/session-spawner-fs-access')
+  >('./__fixtures__/session-spawner-fs-access');
+  return {
+    ...actual,
+    realpath: jest.fn(async (path: string) => path),
+    access: (path: Parameters<typeof actual.access>[0]) => {
+      const override = accessHolder.sessionSpawnerFsAccess.current;
+      if (override) return override(path);
+      return actual.access(path);
+    },
+  };
+});
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';

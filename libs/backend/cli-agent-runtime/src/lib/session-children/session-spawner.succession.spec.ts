@@ -1,13 +1,9 @@
+import { denySessionSpawnerHandoffAccess } from './__fixtures__/session-spawner-fs-access';
 import { makeHarness, PARENT } from './session-spawner.service.spec';
 
 // The spawner looks for the handoff file with real file I/O, which fake timers
 // and a microtask flush cannot settle. The file is absent in every case here.
-jest.mock('node:fs/promises', () => ({
-  ...jest.requireActual('node:fs/promises'),
-  access: jest.fn(async () => {
-    throw new Error('ENOENT');
-  }),
-}));
+denySessionSpawnerHandoffAccess();
 
 const flush = async (): Promise<void> => {
   for (let i = 0; i < 50; i++) await Promise.resolve();
