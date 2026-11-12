@@ -12,8 +12,9 @@ const TEXT: Readonly<Record<PtahChartSize, string>> = { xs: 'text-xs', sm: 'text
  * `indeterminate` is a `progressbar` without `aria-valuenow`.
  *
  * `hideLabel` hides the label visually (it stays in the DOM and as `aria-label`).
- * `valueText` replaces the visible value text and `aria-valuetext`. `role`
- * picks `meter` or `progressbar` for a determinate bar.
+ * `valueText` replaces the visible value text and `aria-valuetext`. `barRole`
+ * picks `meter` or `progressbar` for a determinate bar. The input is not
+ * named `role`: a static `role="..."` would also land on the host element.
  *
  * Test hook: put `data-testid` on the host `<ptah-meter>`. There is no input
  * for it and no inner-element hook.
@@ -40,12 +41,12 @@ export class PtahMeterComponent {
   readonly hideLabel = input(false);
   /** Replaces the visible value text and `aria-valuetext` when set. */
   readonly valueText = input<string | undefined>(undefined);
-  /** ARIA role of a determinate bar. Indeterminate is always `progressbar`. */
-  readonly role = input<PtahMeterRole>('meter');
+  /** ARIA role of the inner bar when determinate. Indeterminate is always `progressbar`. */
+  readonly barRole = input<PtahMeterRole>('meter');
 
   readonly valid = computed(() => isValidRange(this.value(), this.max()));
   readonly ranged = computed(() => this.valid() && !this.indeterminate());
-  readonly ariaRole = computed(() => (this.indeterminate() ? 'progressbar' : this.valid() ? this.role() : null));
+  readonly ariaRole = computed(() => (this.indeterminate() ? 'progressbar' : this.valid() ? this.barRole() : null));
   readonly clampedValue = computed(() => Math.max(0, this.value()));
   readonly ariaNow = computed(() => Math.min(this.max(), this.clampedValue()));
   readonly percent = computed(() => percentOf(this.value(), this.max()));

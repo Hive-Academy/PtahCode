@@ -77,7 +77,7 @@ describe('ptah-meter indeterminate', () => {
 
 describe('ptah-meter progressbar and custom text', () => {
   it('is a named determinate progressbar with a custom aria-valuetext', () => {
-    const el = render(PtahMeterComponent, { value: 45, max: 100, label: 'Step', role: 'progressbar', valueText: '45%', hideLabel: true });
+    const el = render(PtahMeterComponent, { value: 45, max: 100, label: 'Step', barRole: 'progressbar', valueText: '45%', hideLabel: true });
     const bar = el.querySelector('[role="progressbar"]') as HTMLElement;
     expect(bar.getAttribute('aria-label')).toBe('Step');
     expect(ARIA_VALUES.map((a) => bar.getAttribute(a))).toEqual(['0', '100', '45']);

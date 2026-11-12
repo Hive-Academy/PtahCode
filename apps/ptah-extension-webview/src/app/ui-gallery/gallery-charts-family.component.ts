@@ -44,8 +44,8 @@ import { GallerySectionComponent } from './gallery-section.component';
         <div class="flex flex-wrap items-center gap-ptah-inline" data-testid="meter-family-variants">
           <ptah-meter [value]="45" [max]="100" label="Hidden label" [hideLabel]="true" />
           <ptah-meter [value]="45" [max]="100" label="Custom text" valueText="45%" />
-          <ptah-meter [value]="45" [max]="100" label="Progressbar" [role]="'progressbar'" valueText="45%" />
-          <ptah-meter [value]="0" [max]="0" label="Indeterminate" [role]="'progressbar'" [indeterminate]="true" />
+          <ptah-meter [value]="45" [max]="100" label="Progressbar" barRole="progressbar" valueText="45%" />
+          <ptah-meter [value]="0" [max]="0" label="Indeterminate" barRole="progressbar" [indeterminate]="true" />
         </div>
       </div>
     </ptah-gallery-section>

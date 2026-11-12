@@ -1,3 +1,4 @@
+import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { PtahMeterComponent } from './meter.component';
 
@@ -92,13 +93,13 @@ describe('meter hideLabel, valueText and role', () => {
   });
 
   it('renders a determinate progressbar with ARIA values', () => {
-    const bar = render({ value: 30, role: 'progressbar' }).querySelector('[role="progressbar"]') as HTMLElement;
+    const bar = render({ value: 30, barRole: 'progressbar' }).querySelector('[role="progressbar"]') as HTMLElement;
     expect(['aria-valuemin', 'aria-valuemax', 'aria-valuenow'].map((a) => bar.getAttribute(a))).toEqual(['0', '100', '30']);
     expect(bar.getAttribute('aria-label')).toBe('Used');
   });
 
   it.each(['meter', 'progressbar'])('keeps indeterminate a progressbar without values for role %s', (role) => {
-    const bar = render({ value: 0, max: 0, indeterminate: true, role }).querySelector('[role="progressbar"]') as HTMLElement;
+    const bar = render({ value: 0, max: 0, indeterminate: true, barRole: role }).querySelector('[role="progressbar"]') as HTMLElement;
     expect(bar).not.toBeNull();
     expect(bar.hasAttribute('aria-valuenow')).toBe(false);
   });
@@ -136,6 +137,21 @@ describe('meter hideLabel, valueText and role', () => {
   });
 
   it('gives no role for invalid data with progressbar', () => {
-    expect(render({ value: 5, max: 0, role: 'progressbar' }).querySelector('[role]')).toBeNull();
+    expect(render({ value: 5, max: 0, barRole: 'progressbar' }).querySelector('[role]')).toBeNull();
+  });
+
+  it('puts the static barRole attribute on the inner bar and no role on the host', () => {
+    @Component({
+      standalone: true,
+      imports: [PtahMeterComponent],
+      template: '<ptah-meter [value]="45" [max]="100" label="Step" barRole="progressbar" />',
+    })
+    class HostComponent {}
+    const fixture = TestBed.createComponent(HostComponent);
+    fixture.detectChanges();
+    const host = fixture.nativeElement.querySelector('ptah-meter') as HTMLElement;
+    expect(host.hasAttribute('role')).toBe(false);
+    expect(host.querySelectorAll('[role]').length).toBe(1);
+    expect(host.querySelector('[role="progressbar"]')).not.toBeNull();
   });
 });
