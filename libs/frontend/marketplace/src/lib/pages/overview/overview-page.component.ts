@@ -47,7 +47,7 @@ import {
   skillsKpi,
   widgetStateOf,
 } from './overview-kpis';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
 
 /** Every inventory slice the Overview reads (plan C7, performance list). */
 const OVERVIEW_SLICES: readonly InventorySliceId[] = [
@@ -99,6 +99,7 @@ const SKILL_SLICES = [
   standalone: true,
   imports: [
     PtahButtonDirective,
+    PtahBadgeDirective,
     RouterLink,
     LucideAngularModule,
     StatCardComponent,

@@ -14,7 +14,7 @@ import {
 } from '@angular/core';
 import { Check, LucideAngularModule } from 'lucide-angular';
 import { MARKETPLACE_RPC_TIMEOUTS } from '@ptah-extension/chat-ui';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
 import { ClaudeRpcService } from '@ptah-extension/core';
 import type {
   FileDecision,
@@ -378,7 +378,11 @@ interface RepairResultRow {
 @Component({
   selector: 'ptah-kept-items-repair-prompt',
   standalone: true,
-  imports: [MarketplaceKeepReplaceComponent, PtahButtonDirective],
+  imports: [
+    MarketplaceKeepReplaceComponent,
+    PtahButtonDirective,
+    PtahBadgeDirective,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dialog
@@ -417,13 +421,14 @@ interface RepairResultRow {
                     >{{ row.relPath }}</code
                   >
                   <span
-                    class="badge badge-sm shrink-0"
-                    [class.badge-success]="
-                      !row.failed && row.outcome === 'Replaced'
-                    "
-                    [class.badge-error]="row.failed"
-                    [class.badge-ghost]="
-                      !row.failed && row.outcome !== 'Replaced'
+                    ptahBadge
+                    class="shrink-0"
+                    [tone]="
+                      row.failed
+                        ? 'err'
+                        : row.outcome === 'Replaced'
+                          ? 'ok'
+                          : 'neutral'
                     "
                     >{{ row.outcome }}</span
                   >
@@ -486,7 +491,7 @@ interface RepairResultRow {
                       class="grow text-[11px] font-mono [overflow-wrap:anywhere]"
                       >{{ item.relPath }}</code
                     >
-                    <span class="badge badge-sm badge-ghost shrink-0">{{
+                    <span ptahBadge class="shrink-0">{{
                       reasonLabel(item.reason)
                     }}</span>
                   </div>

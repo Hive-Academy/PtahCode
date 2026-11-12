@@ -35,7 +35,7 @@ import {
   subjectOf,
   UNCONFIRMED_TEXT,
 } from './commit-timeout-check';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
 
 /**
  * Most characters of hook output kept on screen. The backend keeps a 256 KiB
@@ -226,7 +226,7 @@ let instanceCount = 0;
 @Component({
   selector: 'ptah-commit-composer',
   standalone: true,
-  imports: [PtahButtonDirective, LucideAngularModule],
+  imports: [PtahBadgeDirective, PtahButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -356,7 +356,7 @@ let instanceCount = 0;
               class="mt-2 flex min-w-0 items-center gap-2 text-xs"
               data-testid="commit-success"
             >
-              <span class="badge badge-success badge-sm gap-1">
+              <span ptahBadge tone="ok" size="sm" class="gap-1">
                 <lucide-angular
                   [img]="CheckIcon"
                   class="h-3 w-3"
