@@ -95,10 +95,15 @@ export function renderSuccessorTask(input: {
   return lines.join('\n');
 }
 
-/** Session ends caused by an explicit stop stay stopped. */
+/**
+ * Session ends caused by an explicit stop stay stopped. A no-activity
+ * watchdog end also stays stopped (no automatic successor): the parent gets a
+ * failed completion that names the cause and can resume the session.
+ */
 export function routeSessionEndCause(cause: string): 'stop' | 'succeed' {
   return cause === 'user-stop' || cause === 'parent-stop' ||
-    cause === 'workspace-close' || cause === 'host-shutdown' ? 'stop' : 'succeed';
+    cause === 'workspace-close' || cause === 'host-shutdown' ||
+    cause === 'no-activity-timeout' ? 'stop' : 'succeed';
 }
 
 /** The predecessor's end reason. */

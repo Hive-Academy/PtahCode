@@ -10,7 +10,7 @@ import type { FlatStreamEventUnion } from './execution';
 export type SessionEndCause =
   | 'user-stop' | 'parent-stop' | 'stream-exit' | 'provider-error'
   | 'config-reinit' | 'workspace-close' | 'compaction-abort'
-  | 'host-shutdown' | 'unknown';
+  | 'no-activity-timeout' | 'host-shutdown' | 'unknown';
 
 /**
  * Supported AI Provider IDs

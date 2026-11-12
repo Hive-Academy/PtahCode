@@ -1704,6 +1704,51 @@ describe('SessionSpawnerService.stop', () => {
 });
 
 describe('SessionSpawnerService — child session end grace', () => {
+  it.each(['user-stop', 'stream-exit', 'no-activity-timeout'] as const)(
+    'signals one failed completion when a generating child ends with %s',
+    async (cause) => {
+      const h = makeHarness({ config: { 'agentSessions.maxSuccessions': 0 } });
+      const child = await h.startChild();
+      h.markRan(child.childSessionId);
+      h.phases.set(child.childSessionId, 'generating');
+      h.active.delete(child.childSessionId);
+      h.sessionEnd.notifyAll({ sessionId: child.childSessionId, workspaceRoot: WORKTREE, cause });
+      jest.advanceTimersByTime(SESSION_CHILD_GRACE_MS);
+      await flush();
+      expect(h.notifier.signalSessionChild).toHaveBeenCalledTimes(1);
+      expect(h.notifier.signalSessionChild.mock.calls[0][1]).toMatchObject({ status: 'failed', turn: 1 });
+      jest.advanceTimersByTime(SESSION_CHILD_GRACE_MS);
+      await flush();
+      expect(h.notifier.signalSessionChild).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('does not signal a second completion when the turn settled during the grace', async () => {
+    const h = makeHarness({ config: { 'agentSessions.maxSuccessions': 0 } });
+    const child = await h.startChild();
+    h.markRan(child.childSessionId);
+    h.phases.set(child.childSessionId, 'generating');
+    h.active.delete(child.childSessionId);
+    h.sessionEnd.notifyAll({ sessionId: child.childSessionId, workspaceRoot: WORKTREE, cause: 'no-activity-timeout' });
+    // A normal turn settle lands inside the grace window.
+    h.registry.update(child.childSessionId, { turnsSettled: 1 });
+    jest.advanceTimersByTime(SESSION_CHILD_GRACE_MS);
+    await flush();
+    expect(h.notifier.signalSessionChild).not.toHaveBeenCalled();
+  });
+
+  it('does not signal an extra completion when an idle child ends', async () => {
+    const h = makeHarness();
+    const child = await h.startChild();
+    h.markRan(child.childSessionId);
+    h.phases.set(child.childSessionId, 'idle');
+    h.active.delete(child.childSessionId);
+    h.sessionEnd.notifyAll({ sessionId: child.childSessionId, workspaceRoot: WORKTREE, cause: 'user-stop' });
+    jest.advanceTimersByTime(SESSION_CHILD_GRACE_MS);
+    await flush();
+    expect(h.notifier.signalSessionChild).not.toHaveBeenCalled();
+  });
+
   it('ends the child when its session stays inactive for the grace period', async () => {
     const h = makeHarness();
     const child = await h.startChild();

@@ -46,6 +46,8 @@ const CAUSE_WORDS: Readonly<
   'stream-exit': 'the agent stream exited',
   'provider-error': 'provider error',
   'compaction-abort': 'context compaction did not finish',
+  'no-activity-timeout':
+    'no stream activity for 180 s (no-activity watchdog); the session can be resumed from its tab',
   'config-reinit': 'configuration reloaded',
   'runtime-cap': 'runtime cap reached',
   'first-turn-not-started': 'first turn did not start',
