@@ -67,7 +67,7 @@ import {
   type AgentModelSettingsScope,
   type AgentModelSettingsValue,
 } from '@ptah-extension/shared';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
 
 import { SkillSynthesisRpcService } from '../../services/skill-synthesis-rpc.service';
 import { AgentModelsStore, type AgentModelsTicket } from './agent-models.store';
@@ -160,7 +160,7 @@ let nextEditorId = 0;
 @Component({
   selector: 'ptah-agent-model-editor',
   standalone: true,
-  imports: [PtahButtonDirective],
+  imports: [PtahButtonDirective, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -313,7 +313,10 @@ let nextEditorId = 0;
                         <input
                           #modelInput
                           type="text"
-                          class="input input-xs input-bordered min-w-0 flex-1 font-mono"
+                          ptahInput
+                          size="xs"
+                          tone="mono"
+                          class="min-w-0 flex-1"
                           [id]="fieldId + '-input'"
                           [attr.list]="fieldId + '-list'"
                           [attr.aria-describedby]="describedBy(row.provider)"

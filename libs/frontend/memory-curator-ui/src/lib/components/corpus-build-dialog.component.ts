@@ -8,7 +8,12 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { AppStateManager } from '@ptah-extension/core';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import {
+  PtahButtonDirective,
+  PtahFieldComponent,
+  PtahInputDirective,
+  PtahCheckboxDirective,
+} from '@ptah-extension/ui';
 import type { CorpusBuildParams, MemoryTypeWire } from '@ptah-extension/shared';
 
 interface TypeChip {
@@ -38,7 +43,13 @@ const TYPE_CHIPS: readonly TypeChip[] = [
   selector: 'ptah-corpus-build-dialog',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PtahButtonDirective, CommonModule],
+  imports: [
+    PtahButtonDirective,
+    PtahFieldComponent,
+    PtahInputDirective,
+    PtahCheckboxDirective,
+    CommonModule,
+  ],
   template: `
     <div
       role="dialog"
@@ -52,17 +63,17 @@ const TYPE_CHIPS: readonly TypeChip[] = [
         </h3>
 
         <div class="mt-3 flex flex-col gap-3">
-          <label class="form-control">
-            <span class="label-text text-xs uppercase">Name</span>
+          <ptah-field label="Name">
             <input
+              ptahInput
+              size="md"
               type="text"
-              class="input input-sm input-bordered"
               [value]="name()"
               (input)="onNameInput($event)"
               placeholder="auth-system"
               aria-label="Corpus name"
             />
-          </label>
+          </ptah-field>
 
           <div
             role="group"
@@ -83,60 +94,56 @@ const TYPE_CHIPS: readonly TypeChip[] = [
             }
           </div>
 
-          <label class="form-control">
-            <span class="label-text text-xs uppercase">
-              Concepts (comma-separated)
-            </span>
+          <ptah-field label="Concepts (comma-separated)">
             <input
+              ptahInput
+              size="md"
               type="text"
-              class="input input-sm input-bordered"
               [value]="concepts()"
               (input)="onConceptsInput($event)"
               aria-label="Comma-separated concepts"
             />
-          </label>
+          </ptah-field>
 
-          <label class="form-control">
-            <span class="label-text text-xs uppercase">
-              Files (comma-separated)
-            </span>
+          <ptah-field label="Files (comma-separated)">
             <input
+              ptahInput
+              size="md"
               type="text"
-              class="input input-sm input-bordered"
               [value]="files()"
               (input)="onFilesInput($event)"
               aria-label="Comma-separated files"
             />
-          </label>
+          </ptah-field>
 
-          <label class="form-control">
-            <span class="label-text text-xs uppercase">Query (optional)</span>
+          <ptah-field label="Query (optional)">
             <input
+              ptahInput
+              size="md"
               type="text"
-              class="input input-sm input-bordered"
               [value]="query()"
               (input)="onQueryInput($event)"
               aria-label="Optional search query"
             />
-          </label>
+          </ptah-field>
 
-          <label class="form-control">
-            <span class="label-text text-xs uppercase">Limit</span>
+          <ptah-field label="Limit">
             <input
+              ptahInput
+              size="md"
               type="number"
               min="1"
               max="500"
-              class="input input-sm input-bordered"
               [value]="limit()"
               (input)="onLimitInput($event)"
               aria-label="Corpus row limit"
             />
-          </label>
+          </ptah-field>
 
-          <label class="label cursor-pointer justify-start gap-2">
+          <label class="flex cursor-pointer items-center justify-start gap-2">
             <input
+              ptahCheckbox
               type="checkbox"
-              class="checkbox checkbox-sm"
               [checked]="workspaceOnly()"
               (change)="onWorkspaceToggle($event)"
               aria-label="Scope to current workspace"

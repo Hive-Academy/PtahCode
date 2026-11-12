@@ -5,6 +5,7 @@ import {
   input,
   output,
 } from '@angular/core';
+import { PtahCheckboxDirective, PtahInputDirective } from '@ptah-extension/ui';
 
 export interface TriggerToggleChange {
   readonly enabled: boolean;
@@ -15,14 +16,15 @@ export interface TriggerToggleChange {
   selector: 'ptah-memory-trigger-toggle',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PtahCheckboxDirective, PtahInputDirective],
   template: `
     <div
       class="flex items-center justify-between gap-2 rounded-md border border-base-300 bg-base-100 px-3 py-2"
     >
       <label class="flex flex-1 cursor-pointer items-center gap-2">
         <input
+          ptahCheckbox
           type="checkbox"
-          class="checkbox checkbox-sm"
           [checked]="enabled()"
           (change)="onToggle($event)"
           [attr.aria-label]="label() + ' enabled'"
@@ -32,8 +34,10 @@ export interface TriggerToggleChange {
       @if (hasValue()) {
         <div class="flex items-center gap-1">
           <input
+            ptahInput
+            size="xs"
             type="number"
-            class="input input-bordered input-xs w-20"
+            class="w-20"
             [value]="value() ?? 0"
             [disabled]="!enabled()"
             [attr.min]="min() ?? null"

@@ -5,6 +5,7 @@ import {
   output,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { PtahInputDirective } from '@ptah-extension/ui';
 
 import type {
   MemoryScopeFilter,
@@ -20,13 +21,15 @@ interface TierChip {
   selector: 'ptah-memory-search-bar',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule],
+  imports: [CommonModule, PtahInputDirective],
   template: `
     <div class="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
       <input
         type="search"
+        ptahInput
+        size="sm"
         data-testid="memory-search-input"
-        class="input input-sm input-bordered w-full max-w-sm"
+        class="w-full max-w-sm"
         placeholder="Search memory (BM25 + vector hybrid)..."
         [value]="searchValue()"
         (input)="onSearchInput($event)"

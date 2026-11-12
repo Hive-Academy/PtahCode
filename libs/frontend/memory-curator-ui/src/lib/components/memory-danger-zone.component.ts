@@ -7,7 +7,12 @@ import {
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import {
+  PtahButtonDirective,
+  PtahFieldComponent,
+  PtahInputDirective,
+  PtahSelectDirective,
+} from '@ptah-extension/ui';
 
 export type MemoryPurgeMode = 'substring' | 'like';
 
@@ -20,7 +25,13 @@ export interface MemoryPurgeRequest {
   selector: 'ptah-memory-danger-zone',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PtahButtonDirective, CommonModule],
+  imports: [
+    PtahButtonDirective,
+    PtahFieldComponent,
+    PtahInputDirective,
+    PtahSelectDirective,
+    CommonModule,
+  ],
   template: `
     <div class="rounded-xl border border-error/40 p-4">
       <h2 class="text-sm font-semibold text-error">Danger zone</h2>
@@ -33,34 +44,25 @@ export interface MemoryPurgeRequest {
         class="mt-3 flex flex-col gap-3 md:flex-row md:items-end"
         aria-label="Purge memory entries by subject pattern"
       >
-        <div class="flex flex-1 flex-col gap-1">
-          <label
-            for="memory-purge-pattern"
-            class="text-xs text-base-content-muted"
-          >
-            Purge by subject pattern
-          </label>
+        <ptah-field label="Purge by subject pattern" class="flex-1">
           <input
+            ptahInput
+            size="md"
             id="memory-purge-pattern"
             type="text"
-            class="input input-sm input-bordered w-full"
+            class="w-full"
             placeholder="e.g. preferences  (substring)  or  alice@%  (like)"
             [value]="pattern()"
             (input)="onPatternInput($event)"
             [disabled]="purging()"
             aria-label="Pattern to match against memory subject"
           />
-        </div>
-        <div class="flex flex-col gap-1">
-          <label
-            for="memory-purge-mode"
-            class="text-xs text-base-content-muted"
-          >
-            Mode
-          </label>
+        </ptah-field>
+        <ptah-field label="Mode">
           <select
+            ptahSelect
+            size="md"
             id="memory-purge-mode"
-            class="select select-sm select-bordered"
             [value]="mode()"
             (change)="onModeChange($event)"
             [disabled]="purging()"
@@ -71,7 +73,7 @@ export interface MemoryPurgeRequest {
             </option>
             <option value="like" [selected]="mode() === 'like'">like</option>
           </select>
-        </div>
+        </ptah-field>
         <button
           type="button"
           ptahButton

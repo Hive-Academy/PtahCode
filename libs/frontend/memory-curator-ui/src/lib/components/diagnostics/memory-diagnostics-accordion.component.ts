@@ -17,7 +17,12 @@ import {
   ProvidersSettingsStateService,
   injectWallClock,
 } from '@ptah-extension/core';
-import { SurfaceCardComponent, PtahButtonDirective } from '@ptah-extension/ui';
+import {
+  SurfaceCardComponent,
+  PtahButtonDirective,
+  PtahFieldComponent,
+  PtahTextareaDirective,
+} from '@ptah-extension/ui';
 
 import {
   MEMORY_PAUSED_REASON,
@@ -45,6 +50,8 @@ import { EventFeedComponent } from './event-feed.component';
     StorageHealthPanelComponent,
     EventFeedComponent,
     SurfaceCardComponent,
+    PtahFieldComponent,
+    PtahTextareaDirective,
   ],
   template: `
     <div
@@ -127,20 +134,18 @@ import { EventFeedComponent } from './event-feed.component';
             />
           </div>
           <div class="border-t border-base-300 px-4 py-2.5">
-            <label
-              class="text-xs text-base-content-muted"
-              for="memory-cue-list"
-            >
-              Cue list (read-only)
-            </label>
-            <textarea
-              id="memory-cue-list"
-              class="textarea textarea-bordered textarea-xs mt-1 w-full font-mono text-xs"
-              readonly
-              rows="3"
-              data-testid="memory-cue-list"
-              [value]="cueListText()"
-            ></textarea>
+            <ptah-field label="Cue list (read-only)" appearance="stacked">
+              <textarea
+                ptahTextarea
+                tone="mono"
+                id="memory-cue-list"
+                class="w-full font-mono text-xs"
+                readonly
+                rows="3"
+                data-testid="memory-cue-list"
+                [value]="cueListText()"
+              ></textarea>
+            </ptah-field>
           </div>
         } @else {
           <div class="px-3 py-3 text-xs text-base-content-muted">
@@ -166,7 +171,9 @@ import { EventFeedComponent } from './event-feed.component';
             </div>
             <button
               type="button"
-              ptahButton variant="link" size="xs"
+              ptahButton
+              variant="link"
+              size="xs"
               (click)="manageCurator()"
             >
               Change
