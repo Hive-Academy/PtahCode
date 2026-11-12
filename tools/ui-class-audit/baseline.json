@@ -498,13 +498,9 @@
     "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-task-section.component.ts": {
-    "<dynamic>": 1,
     "alert": 2,
     "alert-error": 2,
     "alert-soft": 2,
-    "badge": 3,
-    "badge-ghost": 2,
-    "badge-sm": 3,
     "btn": 1,
     "btn-active": 1,
     "btn-ghost": 1,
@@ -520,14 +516,6 @@
   "libs/frontend/chat/src/lib/components/organisms/transcript/chat-transcript.component.html": {
     "skeleton": 3
   },
-  "libs/frontend/chat/src/lib/components/organisms/transcript/lane-thread-row.component.ts": {
-    "badge": 1,
-    "badge-error": 1,
-    "badge-info": 1,
-    "badge-success": 1,
-    "badge-warning": 1,
-    "badge-xs": 1
-  },
   "libs/frontend/chat/src/lib/components/organisms/workspace-sidebar.component.ts": {
     "btn": 1,
     "btn-ghost": 1,
@@ -542,11 +530,6 @@
     "btn-primary": 1,
     "btn-square": 1,
     "btn-xs": 6
-  },
-  "libs/frontend/chat/src/lib/components/templates/electron-shell.component.ts": {
-    "badge": 1,
-    "badge-warning": 1,
-    "badge-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/advanced-settings.component.ts": {
     "<dynamic>": 1,
@@ -640,9 +623,6 @@
   },
   "libs/frontend/chat/src/lib/settings/providers/accounts/account-detail-view.component.ts": {
     "<dynamic>": 5,
-    "badge": 2,
-    "badge-ghost": 2,
-    "badge-sm": 2,
     "btn": 2,
     "btn-error": 2,
     "btn-outline": 2,
@@ -650,9 +630,6 @@
   },
   "libs/frontend/chat/src/lib/settings/providers/accounts/accounts-tab.component.ts": {
     "<dynamic>": 4,
-    "badge": 1,
-    "badge-sm": 1,
-    "badge-warning": 1,
     "btn": 1,
     "btn-outline": 1,
     "btn-sm": 1
@@ -664,21 +641,10 @@
     "btn-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/accounts/ambient-account-row.component.ts": {
-    "<dynamic>": 1,
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-sm": 1
-  },
-  "libs/frontend/chat/src/lib/settings/providers/add-cli-instance-modal.component.ts": {
-    "badge": 1,
-    "badge-outline": 1,
-    "badge-xs": 1
+    "<dynamic>": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/agents-routing-settings.component.ts": {
-    "<dynamic>": 2,
-    "badge": 1,
-    "badge-outline": 1,
-    "badge-sm": 1
+    "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/connection-detail-drawer.component.ts": {
     "<dynamic>": 1
@@ -710,8 +676,6 @@
   },
   "libs/frontend/chat/src/lib/settings/providers/connection-drawer/overview-tab.component.ts": {
     "<dynamic>": 1,
-    "badge": 1,
-    "badge-sm": 1,
     "skeleton": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/decision-model-key-field.component.ts": {
@@ -721,9 +685,7 @@
     "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/decision-model-row.component.ts": {
-    "<dynamic>": 10,
-    "badge": 1,
-    "badge-xs": 1
+    "<dynamic>": 10
   },
   "libs/frontend/chat/src/lib/settings/providers/decision-model-row.timeout-field.component.ts": {
     "<dynamic>": 2
@@ -736,8 +698,6 @@
   },
   "libs/frontend/chat/src/lib/settings/providers/main-agent-section.component.ts": {
     "<dynamic>": 4,
-    "badge": 1,
-    "badge-sm": 1,
     "skeleton": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/provider-catalog-modal.component.ts": {
@@ -745,22 +705,13 @@
     "skeleton": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/provider-connection-card.component.ts": {
-    "<dynamic>": 4,
-    "badge": 2,
-    "badge-ghost": 1,
-    "badge-outline": 1,
-    "badge-sm": 2
+    "<dynamic>": 4
   },
   "libs/frontend/chat/src/lib/settings/providers/provider-consumer-assignments.component.ts": {
-    "<dynamic>": 8,
-    "badge": 2,
-    "badge-outline": 1,
-    "badge-sm": 2
+    "<dynamic>": 8
   },
   "libs/frontend/chat/src/lib/settings/providers/providers-settings.component.ts": {
-    "<dynamic>": 8,
-    "badge": 1,
-    "badge-sm": 1
+    "<dynamic>": 8
   },
   "libs/frontend/chat/src/lib/settings/providers/setting-scope-row.component.ts": {
     "<dynamic>": 5
@@ -769,12 +720,7 @@
     "<dynamic>": 5
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/capability-matrix-setting.component.ts": {
-    "<dynamic>": 1,
-    "badge": 3,
-    "badge-ghost": 2,
-    "badge-sm": 1,
-    "badge-warning": 1,
-    "badge-xs": 2
+    "<dynamic>": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/claude-lane-account-cell.component.ts": {
     "<dynamic>": 2

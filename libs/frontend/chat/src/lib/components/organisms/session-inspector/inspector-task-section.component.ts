@@ -17,7 +17,6 @@ import {
   type TaskStatus,
 } from '@ptah-extension/shared';
 import {
-  TASK_STATUS_INK,
   TASK_STATUS_LABELS,
 } from '@ptah-extension/tasks-ui/presentation';
 import {
@@ -34,7 +33,7 @@ import {
 } from 'lucide-angular';
 import { SessionTaskReader } from './session-task-reader';
 
-import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 /** Shape cue per status, so status is never carried by colour alone (17.2). */
 const STATUS_ICON: Readonly<Record<TaskStatus, LucideIconData>> = {
   backlog: Circle,
@@ -70,7 +69,7 @@ let nextTaskSectionId = 0;
 @Component({
   selector: 'ptah-inspector-task-section',
   standalone: true,
-  imports: [LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective],
+  imports: [LucideAngularModule, PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective],
   providers: [SessionTaskReader],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -90,7 +89,7 @@ let nextTaskSectionId = 0;
             TASK
           </h3>
           @if (state.data?.task; as headingTask) {
-            <span data-testid="task-id" class="badge badge-ghost badge-sm min-w-0 max-w-[70%] font-mono" [attr.title]="headingTask.id"><span class="truncate">{{ headingTask.id }}</span></span>
+            <span ptahBadge data-testid="task-id" class="min-w-0 max-w-[70%] font-mono" [attr.title]="headingTask.id"><span class="ptah-badge-text">{{ headingTask.id }}</span></span>
           }
         </div>
 
@@ -130,11 +129,10 @@ let nextTaskSectionId = 0;
             </p>
             <div class="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
               <span
+                ptahBadge
                 data-testid="task-status"
-                [class]="
-                  'badge badge-sm gap-1 border-transparent bg-current/10 ' +
-                  statusInk(task.status)
-                "
+                class="gap-1"
+                [tone]="statusTone(task.status)"
               >
                 <lucide-angular
                   [img]="statusIcon(task.status)"
@@ -239,7 +237,7 @@ let nextTaskSectionId = 0;
               }
             }
           } @else {
-            <span class="badge badge-ghost badge-sm font-mono">
+            <span ptahBadge class="font-mono">
               {{ data.lead.taskId }}
             </span>
             <p class="mt-2 flex items-center gap-1.5 text-xs text-base-content-muted">
@@ -344,8 +342,14 @@ export class InspectorTaskSectionComponent {
     return STATUS_ICON[status];
   }
 
-  protected statusInk(status: TaskStatus): string {
-    return TASK_STATUS_INK[status];
+  protected statusTone(status: TaskStatus): 'neutral' | 'info' | 'ok' | 'warn' | 'err' {
+    switch (status) {
+      case 'in_progress': return 'info';
+      case 'in_review': return 'warn';
+      case 'blocked': return 'err';
+      case 'done': return 'ok';
+      default: return 'neutral';
+    }
   }
 
   protected statusLabel(status: TaskStatus): string {

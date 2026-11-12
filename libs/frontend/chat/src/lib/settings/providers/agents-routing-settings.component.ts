@@ -10,6 +10,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { ChevronRight, LucideAngularModule } from 'lucide-angular';
+import { PtahBadgeDirective } from '@ptah-extension/ui';
 import {
   AppStateManager,
   ProvidersSettingsStateService,
@@ -52,6 +53,7 @@ const FOCUS =
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    PtahBadgeDirective,
     LucideAngularModule,
     CliOrchestrationMatrixComponent,
     ProviderConsumerAssignmentsComponent,
@@ -126,7 +128,8 @@ const FOCUS =
               >Background Model Roles</span
             >
             <span
-              class="badge badge-outline badge-sm whitespace-nowrap border-info/30 bg-info/10 text-xs font-medium text-base-content"
+              ptahBadge appearance="outline" tone="info"
+              class="whitespace-nowrap text-xs font-medium text-base-content"
               >{{ roleCount }} roles</span
             >
             <!-- Secondary helper text uses the theme's contrast-tested muted-content token. -->

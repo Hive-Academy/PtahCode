@@ -79,7 +79,7 @@ describe('LaneThreadRowComponent', () => {
     fixture.detectChanges();
     const item = fixture.nativeElement as HTMLElement;
     expect(item.querySelector('[role="listitem"]')?.classList.contains('border-error')).toBe(true);
-    expect(item.querySelector('.badge-error')?.textContent).toContain('Rejected');
+    expect(item.querySelector('[data-ptah-badge][data-tone="err"][data-size="xs"]')?.textContent).toContain('Rejected');
     item.querySelector('button')!.click(); fixture.detectChanges();
     expect(item.querySelector('[id^="lane-thread-detail"]')?.textContent).toContain('Rejected by parent');
   });
@@ -92,7 +92,7 @@ describe('LaneThreadRowComponent', () => {
     fixture.detectChanges();
     const item = fixture.nativeElement as HTMLElement;
     expect(item.querySelector('ptah-delivery-status')).toBeNull();
-    expect(item.querySelector('.badge')?.classList).toContain('badge-success');
+    expect(item.querySelector('[data-ptah-badge][data-tone="ok"][data-size="xs"]')).not.toBeNull();
     item.querySelector('button')!.click(); fixture.detectChanges();
     expect(item.querySelector('[id^="lane-thread-detail"]')?.textContent).toContain('Deliverables written');
     expect(item.querySelectorAll('ptah-delivery-status')).toHaveLength(1);

@@ -138,10 +138,9 @@ describe('InspectorTaskSectionComponent', () => {
     const status = root.querySelector<HTMLElement>('[data-testid="task-status"]');
 
     expect(status?.textContent?.trim()).toBe('Backlog');
-    expect(status?.classList.contains('badge')).toBe(true);
-    expect(status?.classList.contains('badge-sm')).toBe(true);
-    expect(status?.classList.contains('bg-current/10')).toBe(true);
-    expect(status?.classList.contains('text-base-content-muted')).toBe(true);
+    expect(status?.hasAttribute('data-ptah-badge')).toBe(true);
+    expect(status?.getAttribute('data-size')).toBe('sm');
+    expect(status?.getAttribute('data-tone')).toBe('neutral');
     expect(status?.querySelector('lucide-angular, svg')).not.toBeNull();
     expect(root.textContent).toContain('· Requirements');
   });
@@ -173,9 +172,10 @@ describe('InspectorTaskSectionComponent', () => {
     const id = root.querySelector<HTMLElement>('[data-testid="task-id"]');
 
     expect(id?.textContent?.trim()).toBe(TASK.id);
-    expect(id?.classList.contains('badge')).toBe(true);
-    expect(id?.classList.contains('badge-ghost')).toBe(true);
-    expect(id?.classList.contains('badge-sm')).toBe(true);
+    expect(id?.hasAttribute('data-ptah-badge')).toBe(true);
+    expect(id?.getAttribute('data-tone')).toBe('neutral');
+    expect(id?.getAttribute('data-size')).toBe('sm');
+    expect(id?.querySelector('.ptah-badge-text')).not.toBeNull();
     expect(id?.classList.contains('font-mono')).toBe(true);
   });
 
