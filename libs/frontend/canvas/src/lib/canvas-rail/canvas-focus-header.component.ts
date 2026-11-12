@@ -1,3 +1,4 @@
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -19,19 +20,18 @@ import { focusMenuItem, handleMenuKeydown } from './canvas-rail-keyboard';
 @Component({
   selector: 'ptah-canvas-focus-header',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahButtonDirective, PtahIconButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:pointerdown)': 'onDocumentPointerDown($event)' },
   template: `
     <div role="group" aria-label="Pane controls"
       class="relative flex items-center"
       (keydown.escape)="escape($event)">
-      <button
+      <button ptahIconButton variant="ghost" size="xs"
         type="button"
-        class="btn btn-ghost btn-xs size-7 btn-square focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+        class="size-7 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
         data-header-menu
-        aria-label="Pane actions"
-        title="Pane actions"
+        label="Pane actions"
         aria-haspopup="menu"
         [attr.aria-expanded]="menuOpen()"
         (click)="toggleMenu()"
@@ -45,29 +45,29 @@ import { focusMenuItem, handleMenuKeydown } from './canvas-rail-keyboard';
           (keydown)="onMenuKeydown($event)"
           class="absolute right-0 top-9 z-20 flex w-max min-w-36 flex-col gap-0.5 whitespace-nowrap rounded-lg border border-base-content/10 bg-base-200 p-2 shadow-lg"
         >
-          <button
+          <button ptahButton variant="ghost" size="sm"
             type="button"
             role="menuitem"
             data-action="swap-panes"
-            class="btn btn-ghost btn-sm flex-nowrap justify-start whitespace-nowrap font-normal"
+            class="flex-nowrap justify-start whitespace-nowrap font-normal"
             (click)="choose(swapPanesRequested)"
           >
             Swap panes
           </button>
-          <button
+          <button ptahButton variant="ghost" size="sm"
             type="button"
             role="menuitem"
             data-action="close-pane"
-            class="btn btn-ghost btn-sm flex-nowrap justify-start whitespace-nowrap font-normal"
+            class="flex-nowrap justify-start whitespace-nowrap font-normal"
             (click)="choose(closePaneRequested)"
           >
             Close pane
           </button>
-          <button
+          <button ptahButton variant="ghost" size="sm"
             type="button"
             role="menuitem"
             data-action="close-split"
-            class="btn btn-ghost btn-sm flex-nowrap justify-start whitespace-nowrap font-normal"
+            class="flex-nowrap justify-start whitespace-nowrap font-normal"
             (click)="choose(closeSplitRequested)"
           >
             Close split
