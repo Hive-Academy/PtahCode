@@ -20,7 +20,7 @@ export const BUTTON_HOST = {
   '[class.btn-lg]': "size() === 'lg'",
   '[attr.data-tone]': "tone() === 'default' ? null : tone()",
   '[attr.data-selected]': "selected() ? '' : null",
-  '[attr.aria-pressed]': "selectedAs() === 'pressed' && selected() !== undefined ? String(selected()) : null",
+  '[attr.aria-pressed]': "selectedAs() === 'pressed' && selected() !== undefined ? (selected() ? 'true' : 'false') : null",
   '[attr.aria-current]': "selectedAs() === 'current' && selected() ? 'page' : null",
   '[class.opacity-60]': 'busy()',
   '[class.cursor-wait]': 'busy()',
