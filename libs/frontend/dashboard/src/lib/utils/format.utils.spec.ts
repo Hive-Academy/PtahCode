@@ -70,7 +70,8 @@ describe('format.utils duration wrappers', () => {
       expect(formatRelativeTime(now - 5_000)).toBe('just now');
       expect(formatRelativeTime(now - 45_000)).toBe('45s ago');
       expect(formatRelativeTime(now - 90 * 60_000)).toBe('1h ago');
-      expect(formatRelativeTime(now - 45 * 86_400_000)).toBe('45d ago');
+      expect(formatRelativeTime(now - 45 * 86_400_000)).toBe('1mo ago');
+      expect(formatRelativeTime(now - 400 * 86_400_000)).toBe('1y ago');
       expect(formatRelativeTime(0)).toBe('');
       expect(formatRelativeTime(Number.NaN)).toBe('');
       expect(formatRelativeTime(now + 1_000)).toBe('');
