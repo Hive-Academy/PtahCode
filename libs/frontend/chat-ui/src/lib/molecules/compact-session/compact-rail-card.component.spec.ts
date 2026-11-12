@@ -585,3 +585,49 @@ describe(CompactRailCardComponent.name, () => {
     },
   );
 });
+
+describe('CompactRailCardComponent parent and child marker', () => {
+  function mount(inputs: Record<string, unknown>) {
+    const fixture = TestBed.createComponent(CompactRailCardComponent);
+    fixture.componentRef.setInput('title', 'Worker');
+    fixture.componentRef.setInput('summary', summary());
+    for (const [key, value] of Object.entries(inputs))
+      fixture.componentRef.setInput(key, value);
+    fixture.detectChanges();
+    return fixture.nativeElement as HTMLElement;
+  }
+
+  it('marks a child with the parent label and a child-of name', () => {
+    const host = mount({ childOf: 'coordinator' });
+    expect(host.querySelector('[data-testid="rail-child-glyph"]')).toBeTruthy();
+    expect(
+      host.querySelector('[data-testid="rail-child-parent"]')?.textContent,
+    ).toContain('coordinator');
+    expect(
+      host.querySelector('.rc-select')?.getAttribute('aria-label'),
+    ).toContain('child session of coordinator');
+  });
+
+  it('shows no marker on a plain card', () => {
+    const host = mount({});
+    expect(host.querySelector('[data-testid="rail-child-glyph"]')).toBeNull();
+    expect(host.querySelector('[data-testid="rail-child-count"]')).toBeNull();
+  });
+
+  it('shows the child count with a running tooltip on a parent', () => {
+    const host = mount({ childCount: 8, childRunning: 5 });
+    const chip = host.querySelector('[data-testid="rail-child-count"]');
+    expect(chip?.textContent).toContain('8');
+    expect(chip?.getAttribute('title')).toBe('8 child sessions (5 running)');
+  });
+
+  it('tints a related card', () => {
+    const fixture = TestBed.createComponent(CompactRailCardComponent);
+    fixture.componentRef.setInput('summary', summary());
+    fixture.componentRef.setInput('related', true);
+    fixture.detectChanges();
+    expect(
+      (fixture.nativeElement as HTMLElement).classList.contains('rc-related'),
+    ).toBe(true);
+  });
+});

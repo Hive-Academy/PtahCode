@@ -31,6 +31,7 @@ import { AgentPermissionResponder } from '../../../services/agent-permission-res
 import { SessionGitStatsStore } from '../../../services/session-git-stats/session-git-stats.store';
 import { SessionGitDockOpener } from '../../../services/session-git-scope/session-git-dock-opener.service';
 import { SessionWorktreeLookup } from '../../../services/session-git-scope/session-worktree-lookup.service';
+import { ChatStore } from '../../../services/chat.store';
 import { SessionOrganizationCache } from '../../../services/session-organization/session-organization-cache.store';
 import {
   RAIL_TRANSCRIPT_RETENTION,
@@ -154,6 +155,7 @@ describe(CompactSessionCardComponent.name, () => {
     questionTargetTabsFor: (id: string) => questionTargets.get(id) ?? [],
   };
   const tabManager = {
+    tabs: () => [],
     findTabByIdAcrossWorkspaces: (id: string) => tabs.get(id) ?? null,
     findTabBySessionIdAcrossWorkspaces: (id: string) =>
       sessions.get(id) ?? null,
@@ -219,6 +221,7 @@ describe(CompactSessionCardComponent.name, () => {
           useValue: { track: trackGit, stateFor: () => gitState() },
         },
         { provide: SessionOrganizationCache, useValue: organizationCache },
+        { provide: ChatStore, useValue: { sessions: () => [] } },
         {
           provide: AgentPermissionResponder,
           useValue: { respondSession, respondLane },
@@ -1009,6 +1012,7 @@ describe(CompactSessionCardComponent.name, () => {
           useValue: { track: trackGit, stateFor: () => gitState() },
         },
         { provide: SessionOrganizationCache, useValue: organizationCache },
+        { provide: ChatStore, useValue: { sessions: () => [] } },
         {
           provide: AgentPermissionResponder,
           useValue: { respondSession, respondLane },

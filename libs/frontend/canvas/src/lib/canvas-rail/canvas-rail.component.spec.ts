@@ -483,6 +483,33 @@ describe('CanvasRailComponent', () => {
     fixture.componentRef.setInput('collapsed', false); fixture.detectChanges();
     expect(finished.getAttribute('aria-expanded')).toBe('false');
   });
+  it('collapses and expands every status group and keeps the count visible', () => {
+    const fixture = mount(['a', 'b', 'c', 'd'].map((id, order) => tile(id, order)));
+    fixture.componentRef.setInput('states', new Map<string, CompactRailState>([
+      ['a', 'running'], ['b', 'background'], ['c', 'needs'], ['d', 'done'],
+    ])); fixture.detectChanges();
+    const host = fixture.nativeElement as HTMLElement;
+    for (const key of ['running', 'background', 'waiting', 'finished']) {
+      const toggle = host.querySelector<HTMLButtonElement>(`[data-rail-group-toggle="${key}"]`)!;
+      const list = host.querySelector<HTMLElement>(`#rail-${key}-cards`)!;
+      expect(toggle.getAttribute('aria-controls')).toBe(`rail-${key}-cards`);
+      expect(toggle.getAttribute('aria-expanded')).toBe('true');
+      toggle.click(); fixture.detectChanges();
+      expect(toggle.getAttribute('aria-expanded')).toBe('false');
+      expect(list.style.display).toBe('none');
+      expect(toggle.textContent).toContain('1');
+      toggle.click(); fixture.detectChanges();
+      expect(list.style.display).toBe('');
+    }
+  });
+  it('drops the cards of a collapsed group from the keyboard order', () => {
+    const fixture = mount(['a', 'b'].map((id, order) => tile(id, order)));
+    fixture.componentRef.setInput('states', new Map<string, CompactRailState>([['a', 'running'], ['b', 'idle']]));
+    fixture.detectChanges();
+    expect(fixture.componentInstance.visibleIds()).toEqual(['a', 'b']);
+    fixture.componentInstance.toggleGroup('running'); fixture.detectChanges();
+    expect(fixture.componentInstance.visibleIds()).toEqual(['b']);
+  });
   it('starts Finished collapsed above three cards and expands on a Done jump', () => {
     const fixture = mount(['a', 'b', 'c', 'd'].map((id, order) => tile(id, order)));
     fixture.componentRef.setInput('states', new Map<string, CompactRailState>(
