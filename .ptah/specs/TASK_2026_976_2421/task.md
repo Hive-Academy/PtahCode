@@ -1,12 +1,14 @@
 ---
 id: TASK_2026_976_2421
-status: backlog
+status: in_review
 type: FEATURE
-title: "Add C1 chart owners: meter, ring, sparkline, stat"
+title: 'Add C1 chart owners: meter, ring, sparkline, stat'
 depends_on: []
-created: "2026-11-12T04:33:58.729Z"
-updated: "2026-11-12T04:33:58.729Z"
-description: "Design system epic C1: inline SVG owners in libs/frontend/ui, gallery, a11y spec"
+created: '2026-11-12T04:33:58.729Z'
+updated: '2026-11-12T04:53:52.632Z'
+description: >-
+  Design system epic C1: inline SVG owners in libs/frontend/ui, gallery, a11y
+  spec
 estimate: M
 relates_to:
   - TASK_2026_924_8ac1
