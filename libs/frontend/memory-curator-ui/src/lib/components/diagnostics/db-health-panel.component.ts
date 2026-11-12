@@ -13,6 +13,7 @@ import type {
 import {
   NativeCardComponent,
   type NativeCardTone,
+  PtahBadgeDirective,
   PtahButtonDirective,
   PtahIconButtonDirective,
 } from '@ptah-extension/ui';
@@ -41,7 +42,7 @@ const VEC_REASON_COPY: Record<VecLoadDiagnosticWire['reason'], string> = {
   selector: 'ptah-db-health-panel',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PtahButtonDirective, PtahIconButtonDirective, NativeCardComponent],
+  imports: [PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective, NativeCardComponent],
   template: `
     <div class="flex flex-col gap-4">
       <section class="flex flex-col gap-2" aria-label="Database health">
@@ -53,9 +54,9 @@ const VEC_REASON_COPY: Record<VecLoadDiagnosticWire['reason'], string> = {
             >
               <span>coherent</span>
               @if (h.coherent) {
-                <span class="badge badge-success badge-sm">true</span>
+                <span ptahBadge tone="ok" size="sm">true</span>
               } @else {
-                <span class="badge badge-error badge-sm">false</span>
+                <span ptahBadge tone="err" size="sm">false</span>
               }
             </span>
           }
@@ -142,11 +143,11 @@ const VEC_REASON_COPY: Record<VecLoadDiagnosticWire['reason'], string> = {
             sqlite-vec
           </span>
           @if (vecAvailable()) {
-            <span class="badge badge-success badge-sm" data-testid="vec-badge">
+            <span ptahBadge tone="ok" size="sm" data-testid="vec-badge">
               online
             </span>
           } @else {
-            <span class="badge badge-error badge-sm" data-testid="vec-badge">
+            <span ptahBadge tone="err" size="sm" data-testid="vec-badge">
               offline
             </span>
           }
@@ -236,22 +237,19 @@ const VEC_REASON_COPY: Record<VecLoadDiagnosticWire['reason'], string> = {
             Embedder
           </span>
           <span
-            class="badge badge-sm"
-            [class.badge-success]="embedderReady()"
-            [class.badge-warning]="embedderDownloading() && !embedderReady()"
-            [class.badge-error]="
-              !embedderReady() &&
-              !embedderDownloading() &&
-              $safeNavigationMigration(embedderStatus()?.error) !== undefined
-            "
-            [class.badge-ghost]="
-              !embedderReady() &&
-              !embedderDownloading() &&
-              !embedderStatus()?.error
+            ptahBadge size="sm"
+            [tone]="
+              embedderReady()
+                ? 'ok'
+                : embedderDownloading()
+                  ? 'warn'
+                  : $safeNavigationMigration(embedderStatus()?.error) !== undefined
+                    ? 'err'
+                    : 'neutral'
             "
             data-testid="embedder-badge"
           >
-            {{ embedderBadgeLabel() }}
+            <span class="ptah-badge-text">{{ embedderBadgeLabel() }}</span>
           </span>
         </div>
         <div class="text-xs">

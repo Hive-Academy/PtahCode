@@ -7,6 +7,7 @@ import {
 import { CommonModule } from '@angular/common';
 import {
   PtahButtonDirective,
+  PtahBadgeDirective,
   PtahIconButtonDirective,
 } from '@ptah-extension/ui';
 import type { CorpusSuggestion } from '@ptah-extension/shared';
@@ -30,7 +31,7 @@ import type { CorpusSuggestion } from '@ptah-extension/shared';
   selector: 'ptah-corpus-suggestions',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PtahIconButtonDirective, PtahButtonDirective, CommonModule],
+  imports: [PtahIconButtonDirective, PtahButtonDirective, PtahBadgeDirective, CommonModule],
   template: `
     @if (loading()) {
       <section
@@ -87,9 +88,9 @@ import type { CorpusSuggestion } from '@ptah-extension/shared';
               @if (suggestion.topConcepts.length > 0) {
                 <div class="flex flex-wrap gap-1">
                   @for (concept of suggestion.topConcepts; track concept) {
-                    <span class="badge badge-ghost badge-sm">{{
-                      concept
-                    }}</span>
+                    <span ptahBadge size="sm">
+                      <span class="ptah-badge-text">{{ concept }}</span>
+                    </span>
                   }
                 </div>
               }

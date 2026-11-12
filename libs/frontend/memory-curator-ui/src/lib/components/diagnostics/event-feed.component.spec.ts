@@ -71,10 +71,10 @@ describe('EventFeedComponent', () => {
     fixture.detectChanges();
 
     const root = fixture.nativeElement as HTMLElement;
-    const badge = root.querySelector('.badge');
+    const badge = root.querySelector('[data-ptah-badge]');
     expect(badge).not.toBeNull();
-    expect(badge?.classList.contains('badge-error')).toBe(true);
-    expect(badge?.classList.contains('badge-warning')).toBe(false);
+    expect(badge?.getAttribute('data-tone')).toBe('err');
+    expect(badge?.getAttribute('data-tone')).not.toBe('warn');
     expect(badge?.textContent ?? '').toContain('curator-error');
     expect(root.textContent ?? '').toContain('curator llm query failed');
   });
@@ -130,8 +130,8 @@ describe('EventFeedComponent', () => {
     expect(text).toContain('stopped early by a gate');
     expect(text).not.toContain('skipped=');
     expect(
-      root.querySelector('.badge')?.classList.contains('badge-warning'),
-    ).toBe(true);
+      root.querySelector('[data-ptah-badge]')?.getAttribute('data-tone'),
+    ).toBe('warn');
   });
 
   it('keeps a clean boot scan at the info tone', () => {
@@ -148,9 +148,9 @@ describe('EventFeedComponent', () => {
 
     const root = fixture.nativeElement as HTMLElement;
     expect(root.textContent ?? '').toContain('scanned=2, succeeded=2');
-    expect(root.querySelector('.badge')?.classList.contains('badge-info')).toBe(
-      true,
-    );
+    expect(
+      root.querySelector('[data-ptah-badge]')?.getAttribute('data-tone'),
+    ).toBe('info');
   });
 
   it('renders user-cue-trigger with cue text', () => {
@@ -235,18 +235,18 @@ describe('EventFeedComponent', () => {
   }
 
   it.each([
-    ['failed', 'badge-error'],
-    ['stalled', 'badge-warning'],
-    ['ran', 'badge-success'],
-  ])('gives a %s manual run the %s tone', (outcome, badgeClass) => {
+    ['failed', 'err'],
+    ['stalled', 'warn'],
+    ['ran', 'ok'],
+  ])('gives a %s manual run the %s tone', (outcome, badgeTone) => {
     const root = renderOne({
       kind: 'manual-run',
       timestamp: 5_000,
       stats: { outcome, extracted: 0, merged: 0, created: 0, skipped: 0 },
     });
-    expect(root.querySelector('.badge')?.classList.contains(badgeClass)).toBe(
-      true,
-    );
+    expect(
+      root.querySelector('[data-ptah-badge]')?.getAttribute('data-tone'),
+    ).toBe(badgeTone);
   });
 
   it('renders reason-based gate text for a curator stall without a limit', () => {

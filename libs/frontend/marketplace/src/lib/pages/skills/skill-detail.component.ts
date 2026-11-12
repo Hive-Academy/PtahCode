@@ -8,7 +8,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import {
@@ -194,6 +194,7 @@ export function skillNameGroups(
   selector: 'ptah-skill-detail',
   standalone: true,
   imports: [
+    PtahBadgeDirective,
     PtahButtonDirective,
     RouterLink,
     LucideAngularModule,
@@ -341,7 +342,7 @@ export function skillNameGroups(
                 class="text-xs text-base-content-muted"
                 data-testid="skill-detail-shadowed"
               >
-                <span class="badge badge-warning badge-sm">Shadowed</span>
+                <span ptahBadge tone="warn" size="sm">Shadowed</span>
                 A Library agent with the same name and another origin is used
                 instead: {{ item.row.shadowedAgents.join(', ') }}.
               </p>
@@ -368,7 +369,9 @@ export function skillNameGroups(
                             <code>{{ entry.name }}</code>
                             @if (entry.shadowed) {
                               <span
-                                class="badge badge-warning badge-xs"
+                                ptahBadge
+                                tone="warn"
+                                size="xs"
                                 data-testid="skill-detail-name-shadowed"
                                 >Shadowed</span
                               >
