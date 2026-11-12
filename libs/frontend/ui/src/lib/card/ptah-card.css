@@ -24,7 +24,7 @@
 /* Glass on: the border color of a raw border-base-300 box in glass mode
    (styles.css). :where keeps the specificity low, so tone and hover win. */
 :where(:root[data-glass='on']) .ptah-card {
-  border-color: var(--glass-line, oklch(var(--b3)));
+  border-color: var(--ptah-card-border-glass);
 }
 
 /* Variants */

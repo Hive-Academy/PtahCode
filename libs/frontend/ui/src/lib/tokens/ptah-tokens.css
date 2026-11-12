@@ -315,6 +315,8 @@
   --ptah-card-bg-inset: var(--glass-fill-tile, oklch(var(--b1)));
   --ptah-card-bg-raised: var(--surface-3);
   --ptah-card-border: oklch(var(--b3));
+  /* Glass on: the line color that the glass layer gives to border-base-300. */
+  --ptah-card-border-glass: var(--glass-line, oklch(var(--b3)));
   --ptah-card-border-width: var(--ptah-border-width);
   --ptah-card-radius: 0.75rem;
   --ptah-card-radius-inset: 0.5rem;
