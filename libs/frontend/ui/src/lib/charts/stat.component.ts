@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
+import { PtahButtonDirective } from '../button/button.directive';
 import { CHART_TEXT } from './chart-geometry';
 import { PtahChartSize, PtahChartTone, PtahStatTrend } from './chart.types';
 
@@ -19,6 +20,7 @@ const VALUE_TEXT: Readonly<Record<PtahChartSize, string>> = { xs: 'text-sm', sm:
  */
 @Component({
   selector: 'ptah-stat', standalone: true,
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '[attr.data-appearance]': 'appearance()' },
   styles: `
@@ -39,7 +41,7 @@ const VALUE_TEXT: Readonly<Record<PtahChartSize, string>> = { xs: 'text-sm', sm:
     @if (error(); as message) {
       <span class="flex flex-col items-start gap-1" role="alert" data-testid="stat-error">
         <span class="text-xs text-state-err">{{ message }}</span>
-        <button type="button" class="btn btn-ghost btn-xs" [attr.aria-label]="'Retry ' + label()"
+        <button type="button" ptahButton variant="ghost" size="xs" [attr.aria-label]="'Retry ' + label()"
           data-testid="stat-retry" (click)="retry.emit()">Retry</button>
       </span>
     } @else if (loading()) {
