@@ -1080,6 +1080,8 @@ export function withPhaseDelivery(
       try {
         realCandidate = realpathSync(candidate);
       } catch {
+        // degradation-audit: optional-capability - a missing in-workspace skill
+        // file is skipped by design (decision O-6); the phase text still applies.
         return undefined;
       }
       try {
@@ -1093,6 +1095,8 @@ export function withPhaseDelivery(
       try {
         return `Skill ${skill.name}: ${readFileSync(realCandidate, 'utf8')}`;
       } catch {
+        // degradation-audit: optional-capability - an unreadable skill file is
+        // skipped like a missing one (decision O-6); the phase text still applies.
         return undefined;
       }
     })].filter(Boolean).join('\n\n'),

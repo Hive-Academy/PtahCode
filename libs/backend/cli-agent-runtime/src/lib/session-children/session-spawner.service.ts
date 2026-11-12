@@ -659,6 +659,8 @@ export class SessionSpawnerService implements ISessionSpawner {
         branch,
         canonical,
       );
+      // degradation-audit: reported - an unresolvable registered path never
+      // equals the canonical path, so the start is refused with the reason below.
       if (
         !target ||
         (await realpath(target.worktreePath).catch(() => '')) !== canonical
