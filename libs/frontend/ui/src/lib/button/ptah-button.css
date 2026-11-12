@@ -159,6 +159,26 @@
   color: var(--ptah-btn-secondary-fg);
 }
 
+/* Outline: transparent neutral action with the DaisyUI outline fill on hover. */
+.btn[data-ptah-button].btn-outline:is(.btn, #ptah-button) {
+  background-color: transparent;
+  border-color: var(--ptah-btn-secondary-fg);
+  color: var(--ptah-btn-secondary-fg);
+  box-shadow: var(--ptah-elevation-0);
+}
+
+.btn[data-ptah-button].btn-outline:is(:hover, [data-state='hover']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-button) {
+  background-color: var(--ptah-btn-secondary-fg);
+  border-color: var(--ptah-btn-secondary-fg);
+  color: var(--ptah-btn-secondary-bg);
+}
+
+.btn[data-ptah-button].btn-outline:is(:active, [data-state='active']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-button) {
+  background-color: var(--ptah-btn-secondary-fg);
+  border-color: var(--ptah-btn-secondary-fg);
+  color: var(--ptah-btn-secondary-bg);
+}
+
 /* Variant 3: ghost (toolbar and row actions: no edge at rest) */
 .btn[data-ptah-button].btn-ghost:is(.btn, #ptah-button) {
   background-color: transparent;
@@ -246,6 +266,12 @@
 .btn[data-ptah-button]:is(.btn-ghost, .btn-link):is(:disabled, [disabled], [aria-disabled='true']):not([aria-busy='true']):is(.btn, #ptah-button) {
   background-color: transparent;
   border-color: transparent;
+}
+
+.btn[data-ptah-button].btn-outline:is(:disabled, [disabled], [aria-disabled='true']):not([aria-busy='true']):is(.btn, #ptah-button) {
+  background-color: transparent;
+  border-color: var(--ptah-btn-disabled-border);
+  color: var(--ptah-btn-disabled-fg);
 }
 
 /* Loading / busy state: leave layout unchanged and overlay the spinner. */

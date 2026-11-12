@@ -87,6 +87,7 @@ class ClassesHost {
   readonly variants = [
     'primary',
     'secondary',
+    'outline',
     'ghost',
     'danger',
     'link',
@@ -102,6 +103,7 @@ it('maps every variant and size to its DaisyUI class', () => {
   const expected = [
     ['btn', 'btn-primary', 'btn-sm'],
     ['btn', 'btn-secondary', 'btn-sm'],
+    ['btn', 'btn-outline', 'btn-sm'],
     ['btn', 'btn-ghost', 'btn-sm'],
     ['btn', 'btn-error', 'btn-sm'],
     ['btn', 'btn-link', 'btn-sm'],
@@ -111,6 +113,11 @@ it('maps every variant and size to its DaisyUI class', () => {
   ];
   buttons.forEach((button, i) =>
     expect([...button.classList].sort()).toEqual(expected[i].sort()),
+  );
+  const outlineIndex = fixture.componentInstance.variants.indexOf('outline');
+  expect(buttons[outlineIndex].hasAttribute('data-ptah-button')).toBe(true);
+  buttons.forEach((button, i) =>
+    expect(button.classList.contains('btn-outline')).toBe(i === outlineIndex),
   );
 });
 it('marks each host with data-ptah-button so the token look applies', () => {
