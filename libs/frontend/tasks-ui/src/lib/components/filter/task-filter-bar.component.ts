@@ -32,7 +32,10 @@ import {
 } from '../../task-presentation';
 import {
   PtahButtonDirective,
+  PtahCheckboxDirective,
   PtahIconButtonDirective,
+  PtahInputDirective,
+  PtahSelectDirective,
 } from '@ptah-extension/ui';
 
 /**
@@ -152,7 +155,8 @@ export interface TaskFilterChip {
             <label class="flex cursor-pointer items-center gap-2 py-1">
               <input
                 type="checkbox"
-                class="checkbox checkbox-sm"
+                ptahCheckbox
+                size="sm"
                 [checked]="option.checked"
                 (change)="picked.emit(option)"
               />
@@ -248,6 +252,9 @@ export class TaskFacetMenuComponent {
   imports: [
     PtahButtonDirective,
     PtahIconButtonDirective,
+    PtahCheckboxDirective,
+    PtahInputDirective,
+    PtahSelectDirective,
     LucideAngularModule,
     TaskFacetMenuComponent,
   ],
@@ -271,7 +278,9 @@ export class TaskFacetMenuComponent {
 
         <input
           type="search"
-          class="input input-bordered input-sm h-8 min-w-[180px] max-w-[330px] flex-1 bg-surface-0 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+          ptahInput
+          size="sm"
+          class="min-w-[180px] max-w-[330px] flex-1"
           placeholder="Find by id, title, text"
           aria-label="Filter tasks by text"
           data-testid="task-filter-text"
@@ -361,7 +370,8 @@ export class TaskFacetMenuComponent {
         <label class="flex cursor-pointer items-center gap-1">
           <input
             type="checkbox"
-            class="checkbox checkbox-sm"
+            ptahCheckbox
+            size="sm"
             data-testid="task-filter-issues"
             [checked]="filter().hasValidationIssues"
             (change)="onIssuesToggle($event)"
@@ -372,7 +382,8 @@ export class TaskFacetMenuComponent {
         <label class="flex items-center gap-1">
           <span class="text-sm text-base-content-muted">Sort</span>
           <select
-            class="select select-bordered select-sm h-8 min-h-8 bg-surface-0 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+            ptahSelect
+            size="sm"
             aria-label="Sort tasks by"
             data-testid="task-sort-field"
             [value]="sort().field"

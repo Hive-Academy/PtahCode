@@ -27,7 +27,7 @@ import {
 } from '@ptah-extension/shared';
 import { NativeModalComponent } from '@ptah-extension/ui';
 import { AlertTriangle, Copy, Lock, LucideAngularModule } from 'lucide-angular';
-import { PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
 import { SettingsBusyDisabledDirective } from '../../feedback/busy-disabled.directive';
 import { SettingsSaveFeedbackService } from '../../feedback/settings-save-feedback.service';
 import {
@@ -77,7 +77,7 @@ const LOCK_REASON_ID = 'account-detail-lock-reason';
 @Component({
   selector: 'ptah-account-detail-view',
   standalone: true,
-  imports: [NativeModalComponent, LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective, SettingsBusyDisabledDirective],
+  imports: [NativeModalComponent, LucideAngularModule, PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective, SettingsBusyDisabledDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-6 text-sm text-base-content" data-testid="account-detail" (focusin)="noteFocus($event)">
@@ -122,11 +122,11 @@ const LOCK_REASON_ID = 'account-detail-lock-reason';
                 <span>{{ stateWord() }}</span>
               </span>
               @if (account().activeRunCount > 0) {
-                <span class="badge badge-ghost badge-sm" data-testid="account-detail-runs">{{ account().activeRunCount }} running</span>
+                <span ptahBadge data-testid="account-detail-runs">{{ account().activeRunCount }} running</span>
               }
               @if (resumeUnavailable()) {
                 <span
-                  class="badge badge-ghost badge-sm gap-1"
+                  ptahBadge class="gap-1"
                   [attr.title]="copy.resumeUnavailable"
                   data-testid="account-detail-resume-unavailable"
                 >

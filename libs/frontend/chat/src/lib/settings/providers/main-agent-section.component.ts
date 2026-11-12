@@ -3,7 +3,7 @@ import { ChevronDown, LucideAngularModule } from 'lucide-angular';
 import {
   ProvidersSettingsStateService, type ProvidersEffectiveRoute, type ProvidersSettingsSection,
 } from '@ptah-extension/core';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
 
 type MainAgentTone = 'success' | 'warning' | 'neutral';
 
@@ -41,7 +41,7 @@ const REASSIGN = `btn btn-primary btn-sm shrink-0 gap-1.5 after:absolute after:i
 @Component({
   selector: 'ptah-main-agent-section',
   standalone: true,
-  imports: [LucideAngularModule, PtahButtonDirective],
+  imports: [LucideAngularModule, PtahBadgeDirective, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- The block only: the page puts it and Connections on one card. It lifts while it holds a popover (role="dialog"),
@@ -63,7 +63,7 @@ const REASSIGN = `btn btn-primary btn-sm shrink-0 gap-1.5 after:absolute after:i
           </div>
           <!-- Every badge button rises above the stretched action (z-10) and keeps its own click. -->
           <div class="contents [&_button]:relative [&_button]:z-10" data-testid="routing-node-badges">
-            <span class="badge badge-sm shrink-0 whitespace-nowrap border-base-300 bg-base-200 text-xs font-medium text-base-content"
+            <span ptahBadge class="shrink-0 whitespace-nowrap"
               data-testid="routing-node-status">{{ main().status }}</span>
             <ng-content select="[main-agent-badges]" />
           </div>

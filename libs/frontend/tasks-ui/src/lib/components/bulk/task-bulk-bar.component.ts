@@ -19,6 +19,8 @@ import type {
 import {
   PtahButtonDirective,
   PtahIconButtonDirective,
+  PtahInputDirective,
+  PtahSelectDirective,
 } from '@ptah-extension/ui';
 
 /** What the label field emits: the trimmed label and which way to apply it. */
@@ -74,7 +76,13 @@ export interface TaskBulkLabelPick {
 @Component({
   selector: 'ptah-task-bulk-bar',
   standalone: true,
-  imports: [PtahButtonDirective, PtahIconButtonDirective, LucideAngularModule],
+  imports: [
+    PtahButtonDirective,
+    PtahIconButtonDirective,
+    PtahInputDirective,
+    PtahSelectDirective,
+    LucideAngularModule,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'contents' },
   template: `
@@ -206,7 +214,8 @@ export interface TaskBulkLabelPick {
         <label class="flex items-center gap-1.5">
           <span>Move to</span>
           <select
-            class="select select-bordered select-sm h-8 min-h-8 bg-surface-0 text-sm"
+            ptahSelect
+            size="sm"
             data-testid="task-bulk-status"
             aria-label="Move the selected tasks to a status"
             [value]="''"
@@ -234,7 +243,9 @@ export interface TaskBulkLabelPick {
           <input
             #labelField
             type="text"
-            class="input input-bordered input-sm h-8 w-36 bg-surface-0 text-sm"
+            ptahInput
+            size="sm"
+            class="w-36"
             data-testid="task-bulk-label-input"
             aria-label="A label to add to or remove from the selected tasks"
             placeholder="label"

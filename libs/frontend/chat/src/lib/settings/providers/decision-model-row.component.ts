@@ -15,6 +15,7 @@ import {
 import { ChevronDown, LucideAngularModule, X } from 'lucide-angular';
 import {
   NativePopoverComponent,
+  PtahBadgeDirective,
   PROVIDER_MODELS_LOADER,
   ProviderMarkComponent,
   PtahButtonDirective,
@@ -100,6 +101,7 @@ type WriteResult = { ok: true } | { ok: false; message: string };
   standalone: true,
   imports: [
     LucideAngularModule,
+    PtahBadgeDirective,
     PtahButtonDirective,
     PtahIconButtonDirective,
     NativePopoverComponent,
@@ -128,7 +130,7 @@ type WriteResult = { ok: true } | { ok: false; message: string };
           {{ row().name }}
         </h3>
         <span
-          class="badge badge-xs shrink-0 whitespace-nowrap border-base-300 bg-base-300 text-[9px] text-base-content"
+          ptahBadge size="xs" class="shrink-0 whitespace-nowrap text-[9px] text-base-content"
           data-testid="consumer-tier-decision"
           >{{ load() === 'loading' ? 'loading' : row().stateLabel }}</span
         >

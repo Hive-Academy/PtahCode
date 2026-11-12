@@ -26,7 +26,7 @@ import {
   MAX_SAVED_VIEW_NAME_LENGTH,
   type SavedTaskView,
 } from '@ptah-extension/shared';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
 
 /** A rename request: which view, and the new name the user typed. */
 export interface TaskViewRename {
@@ -140,7 +140,7 @@ interface TaskViewRow {
 @Component({
   selector: 'ptah-task-view-menu',
   standalone: true,
-  imports: [PtahButtonDirective, LucideAngularModule],
+  imports: [PtahButtonDirective, PtahInputDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'contents' },
   template: `
@@ -369,7 +369,9 @@ interface TaskViewRow {
                   <div class="flex items-center gap-1 pl-1">
                     <input
                       type="text"
-                      class="input input-bordered input-sm h-8 min-w-0 flex-1 bg-surface-0 text-sm"
+                      ptahInput
+                      size="sm"
+                      class="min-w-0 flex-1"
                       [attr.maxlength]="maxNameLength"
                       [attr.aria-label]="'New name for ' + row.view.name"
                       data-testid="task-view-rename-input"
@@ -457,7 +459,9 @@ interface TaskViewRow {
         >
           <input
             type="text"
-            class="input input-bordered input-sm h-8 min-w-0 flex-1 bg-surface-0 text-sm"
+            ptahInput
+            size="sm"
+            class="min-w-0 flex-1"
             placeholder="Name this view"
             aria-label="Name for a new saved view"
             [attr.maxlength]="maxNameLength"

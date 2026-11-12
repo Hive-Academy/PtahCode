@@ -24,6 +24,8 @@ import type { TaskMetadataWrite } from './task-metadata-write';
 import {
   PtahButtonDirective,
   PtahIconButtonDirective,
+  PtahInputDirective,
+  PtahSelectDirective,
 } from '@ptah-extension/ui';
 
 /**
@@ -199,7 +201,13 @@ export interface TaskRelationGroupView {
 @Component({
   selector: 'ptah-task-relations',
   standalone: true,
-  imports: [PtahButtonDirective, PtahIconButtonDirective, LucideAngularModule],
+  imports: [
+    PtahButtonDirective,
+    PtahIconButtonDirective,
+    PtahInputDirective,
+    PtahSelectDirective,
+    LucideAngularModule,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (groups().length > 0 || editable()) {
@@ -275,7 +283,8 @@ export interface TaskRelationGroupView {
             <div class="flex flex-wrap items-center gap-1">
               <span class="text-xs text-base-content-muted">This task</span>
               <select
-                class="select select-xs select-bordered"
+                ptahSelect
+                size="xs"
                 aria-label="Relation kind"
                 data-testid="task-relations-add-kind"
                 [disabled]="busy()"
@@ -289,7 +298,10 @@ export interface TaskRelationGroupView {
               </select>
               <input
                 type="text"
-                class="input input-xs input-bordered flex-1 min-w-0 font-mono"
+                ptahInput
+                size="xs"
+                tone="mono"
+                class="flex-1 min-w-0"
                 list="task-relation-completions"
                 placeholder="Task folder name"
                 aria-labelledby="task-relation-add-label"

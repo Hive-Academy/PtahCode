@@ -81,7 +81,7 @@ import { NotificationFocusCoordinator } from '../../services/notification-focus-
 import { ClosedTabSessionEnderService } from '../../services/closed-tab-session-ender.service';
 import { GitWindowSync } from '../../services/git-window/git-window-sync.service';
 
-import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 @Component({
   selector: 'ptah-electron-shell',
   standalone: true,
@@ -102,6 +102,7 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
     NotificationAnnouncerComponent,
     PtahButtonDirective,
     PtahIconButtonDirective,
+    PtahBadgeDirective,
   ],
   providers: [
     {
@@ -317,7 +318,7 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
               <!-- A hint, not a button (D11); the tab's label says it. -->
               @if (pendingApprovals() > 0) {
                 <span
-                  class="badge badge-warning badge-xs"
+                  ptahBadge tone="warn" size="xs" count
                   data-testid="machines-tab-approvals"
                   aria-hidden="true"
                   >{{ pendingApprovals() }}</span

@@ -27,20 +27,25 @@ export const RICH_SELECT_TEMPLATE = `<button
     } @else {
       <span class="ptah-select__placeholder">{{ placeholder() }}</span>
     }
+  </button>
+  <!-- One action group at the inline end, in a fixed order: clear, then chevron.
+       It is not in the trigger (a button cannot contain a button), so the
+       open state, the value and the clear action do not move it. -->
+  <span class="ptah-select__actions">
+    @if (clearable() && selected() && !isDisabled()) {
+      <button
+        type="button"
+        class="ptah-select__clear"
+        [attr.aria-label]="'Clear ' + (label() ?? 'selection')"
+        (click)="clear()"
+      >
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+      </button>
+    }
     <svg class="ptah-select__chevron" viewBox="0 0 16 16" aria-hidden="true">
       <path d="M4 6l4 4 4-4" />
     </svg>
-  </button>
-  @if (clearable() && selected() && !isDisabled()) {
-    <button
-      type="button"
-      class="ptah-select__clear"
-      [attr.aria-label]="'Clear ' + (label() ?? 'selection')"
-      (click)="clear()"
-    >
-      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
-    </button>
-  }
+  </span>
   @if (open()) {
     <div #panel class="ptah-select__panel" (keydown)="onPanelKey($event)">
       @if (isSearchable()) {

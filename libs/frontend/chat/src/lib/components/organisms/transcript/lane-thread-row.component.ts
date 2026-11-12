@@ -2,12 +2,13 @@ import { ChangeDetectionStrategy, Component, computed, input, signal } from '@an
 import { ChevronDown, ChevronRight, CircleCheckBig, CircleX, Eye, MessageSquareText, TriangleAlert, UserRound, Bot, Waypoints, LucideAngularModule } from 'lucide-angular';
 import { DeliveryStatusComponent } from '../../molecules/delivery-status/delivery-status.component';
 import type { LaneThreadEntry } from './lane-thread';
+import { PtahBadgeDirective } from '@ptah-extension/ui';
 
 /** Entry ids repeat across lanes (every lane has a `completion`), so detail ids count row instances. */
 let nextRowInstance = 0;
 
 @Component({
-  selector: 'ptah-lane-thread-row', standalone: true, imports: [LucideAngularModule, DeliveryStatusComponent],
+  selector: 'ptah-lane-thread-row', standalone: true, imports: [LucideAngularModule, DeliveryStatusComponent, PtahBadgeDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div role="listitem" class="min-w-0 text-sm" [class.border-l-2]="entry().kind === 'message'"
@@ -39,9 +40,7 @@ let nextRowInstance = 0;
           [attr.aria-expanded]="expanded()" [attr.aria-controls]="bodyId()" (click)="expanded.update(value => !value)">
           <lucide-angular [img]="icon()" class="h-4 w-4 shrink-0" aria-hidden="true" />
           <span class="max-w-32 shrink-0 truncate font-semibold" [attr.title]="entry().senderAgentId ?? null">{{ entry().sender }}</span>
-          <span class="badge badge-xs shrink-0" [class.badge-info]="badgeTone() === 'info'"
-            [class.badge-success]="badgeTone() === 'success'" [class.badge-warning]="badgeTone() === 'warning'"
-            [class.badge-error]="badgeTone() === 'error'">{{ badgeLabel() }}</span>
+          <span ptahBadge size="xs" class="shrink-0" [tone]="badgeTone()">{{ badgeLabel() }}</span>
           <span class="min-w-0 flex-1 truncate text-base-content-muted" [title]="summary()">{{ summary() }}</span>
           <time class="shrink-0 text-base-content-muted" [attr.datetime]="iso()" [title]="absoluteTime()">{{ shortTime() }}</time>
           <lucide-angular [img]="expanded() ? ChevronDownIcon : ChevronRightIcon" class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -102,11 +101,11 @@ export class LaneThreadRowComponent {
   private isDelivered(): boolean {
     return this.entry().kind === 'completion' && this.entry().verdict === 'Deliverables written';
   }
-  protected badgeTone(): 'info' | 'success' | 'warning' | 'error' {
-    if (this.isError()) return 'error';
+  protected badgeTone(): 'info' | 'ok' | 'warn' | 'err' {
+    if (this.isError()) return 'err';
     if (this.entry().kind === 'report') return 'info';
-    if (this.entry().kind === 'ack') return this.entry().ackState === 'acted' || this.entry().ackState === 'read' ? 'success' : 'warning';
-    return this.isDelivered() ? 'success' : 'warning';
+    if (this.entry().kind === 'ack') return this.entry().ackState === 'acted' || this.entry().ackState === 'read' ? 'ok' : 'warn';
+    return this.isDelivered() ? 'ok' : 'warn';
   }
   protected kindLabel(): string {
     return this.entry().kind === 'ack' ? 'acknowledgment' : this.entry().kind;

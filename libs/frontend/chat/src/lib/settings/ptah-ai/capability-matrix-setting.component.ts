@@ -8,6 +8,7 @@ import {
 import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
 import {
   NativePopoverComponent,
+  PtahBadgeDirective,
   PtahButtonDirective,
 } from '@ptah-extension/ui';
 import { RoutingDisplayNamesStore } from './routing-display-names.store';
@@ -30,7 +31,7 @@ const NO_PARAMS: AgentGetCapabilityMatrixParams = {};
 @Component({
   selector: 'ptah-capability-matrix-setting',
   standalone: true,
-  imports: [NativePopoverComponent, PtahButtonDirective],
+  imports: [NativePopoverComponent, PtahBadgeDirective, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -101,7 +102,7 @@ const NO_PARAMS: AgentGetCapabilityMatrixParams = {};
                       <button type="button" [class]="'flex min-h-8 items-center gap-2 rounded text-sm font-semibold ' + focusRing" [attr.aria-expanded]="expanded().has(family)" [attr.aria-controls]="'family-' + family" [title]="family" (click)="toggleFamily(family)">
                         <span aria-hidden="true" class="inline-block w-3 transition-transform" [class.rotate-90]="expanded().has(family)">›</span>
                         <span>{{ names.executor(family).text }}</span>
-                        <span class="badge badge-ghost badge-sm font-normal">{{ modelCount(family) }}</span>
+                        <span ptahBadge count>{{ modelCount(family) }}</span>
                       </button>
                       @if (family.startsWith('pc-') && names.executor(family).raw; as raw) {
                         <details><summary class="min-h-8 cursor-pointer">Executor ID details</summary><code class="break-all">{{ raw }}</code></details>
@@ -122,9 +123,9 @@ const NO_PARAMS: AgentGetCapabilityMatrixParams = {};
                                 <span class="font-semibold">{{ cell.score }}/100</span>
                                 <div class="h-1.5 rounded bg-base-content/15" aria-hidden="true"><div class="h-1.5 rounded bg-primary" [style.width.%]="cell.score"></div></div>
                                 <div class="mt-1 flex flex-wrap items-center gap-1.5">
-                                <span class="badge badge-ghost badge-xs">{{ cell.source }}</span>
+                                <span ptahBadge size="xs">{{ cell.source }}</span>
                                 @if (cell.sampleCount !== null) { <span>n={{ cell.sampleCount }}</span> }
-                                @if (cell.stale) { <span class="badge badge-warning badge-xs">Stale</span> }
+                                @if (cell.stale) { <span ptahBadge tone="warn" size="xs">Stale</span> }
                                 <ptah-native-popover [isOpen]="openCell() === rowId(family, profile.model, kind)" [hasBackdrop]="true" (closed)="openCell.set(null)">
                                   <button trigger type="button" class="min-h-8 underline" [attr.aria-expanded]="openCell() === rowId(family, profile.model, kind)" [attr.aria-controls]="'detail-' + rowId(family, profile.model, kind)" (click)="toggleCell(family, profile.model, kind)">Details</button>
                                   <div content [id]="'detail-' + rowId(family, profile.model, kind)" class="max-w-64 bg-base-100 p-3 text-xs shadow-lg"><p>As of {{ cell.asOf }}</p><p>Source: {{ cell.sourceRef || 'None' }}</p>@if (cell.note) { <p>{{ cell.note }}</p> }</div>
