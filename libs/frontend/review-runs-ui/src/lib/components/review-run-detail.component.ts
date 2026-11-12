@@ -20,7 +20,7 @@ const STAGE_LIMIT = 16;
           <h2 id="review-detail-title" class="truncate text-xl font-semibold" tabindex="-1"><span class="sr-only">PR </span>#{{ run().prNumber }} {{ run().prTitle || 'review' }}</h2>
           <p class="text-sm text-base-content-muted" [title]="'Attempt ' + run().attemptId">{{ run().repo.owner }}/{{ run().repo.name }} · <span class="font-mono">{{ run().headSha.slice(0, 10) }}</span> · {{ run().trigger === 'poll' ? 'Poll' : 'Manual' }}</p>
         </div>
-          <span ptahBadge appearance="outline" size="xs" class="shrink-0" data-testid="review-detail-state"><span class="h-2 w-2 shrink-0 rounded-full bg-current" [class]="ink(run().status)" aria-hidden="true"></span><span class="ptah-badge-text" [class]="ink(run().status)">{{ label(run().status) }}</span></span>
+          <span ptahBadge appearance="outline" size="xs" class="shrink-0" data-testid="review-detail-state"><span class="inline-flex min-w-0 items-center gap-1.5" [class]="ink(run().status)"><span class="h-2 w-2 shrink-0 rounded-full bg-current" aria-hidden="true"></span><span class="ptah-badge-text">{{ label(run().status) }}</span></span></span>
         </header>
         <div class="mt-3 flex flex-wrap gap-2" data-testid="review-detail-rerun">
           <button type="button" ptahButton variant="primary" title="A dry run creates a local preview. CodeRabbit stays enabled." [disabled]="store.rerunState() === 'running'" (click)="store.rerun(run().attemptId, true)">Rerun dry run</button>
