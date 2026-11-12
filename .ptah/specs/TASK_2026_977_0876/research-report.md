@@ -150,7 +150,7 @@ text above disagree, the addendum is correct.
 
 - **P1, correction.** The `.claude/skills/orchestration` copy has a consumer. The sessions of this
   repository load it as a project skill. The plugin copy stays the authored source for users.
-- **P2, measured (Electron, Claude SDK branch, one sample).** A child session listed the 10
+- **P2, measured (Electron, Claude SDK branch, one sample).** A child session listed the 11
   `ptah_browser_*` tools, and a call of `ptah_browser_status` was successful. See
   `evidence/child-session-tool-probe.md`. Not measured: the Codex app-server branch, and the
   `navigate` and `screenshot` calls. The lane claim about `antigravity` (`lane-report` capability,
