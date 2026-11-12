@@ -9,6 +9,7 @@ import {
   type SessionCostBasis,
   type SessionCostUnavailableReason,
 } from '@ptah-extension/shared';
+import { PtahBadgeDirective } from '@ptah-extension/ui';
 
 /** Final price meaning shared by cost badges and session stats views. */
 export function costBasisLabel(
@@ -47,10 +48,12 @@ export function costBasisLabel(
 @Component({
   selector: 'ptah-cost-badge',
   standalone: true,
+  imports: [PtahBadgeDirective],
   template: `
     @if (knownCost(); as cost) {
       <span
-        class="badge badge-sm badge-success ok-solid-text"
+        ptahBadge
+        tone="ok"
         [title]="'$' + cost.value.toFixed(4) + ' USD' + (basisLabel() ? ' — ' + basisLabel() : '')"
       >
         {{ formatUsdCost(cost.value) }}
@@ -61,7 +64,9 @@ export function costBasisLabel(
     } @else {
       @if (notPriced()) {
         <span
-          class="badge badge-sm badge-ghost opacity-70"
+          ptahBadge
+          tone="neutral"
+          class="opacity-70"
           title="Ptah does not have the rate needed to calculate this cost."
           data-testid="cost-not-priced"
         >
@@ -69,7 +74,9 @@ export function costBasisLabel(
         </span>
       } @else {
         <span
-          class="badge badge-sm badge-ghost opacity-70"
+          ptahBadge
+          tone="neutral"
+          class="opacity-70"
           title="No per-token pricing is known for this provider or model, so cost cannot be calculated."
           data-testid="cost-unavailable"
         >

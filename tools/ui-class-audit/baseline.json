@@ -87,17 +87,6 @@
     "btn-square": 1,
     "btn-xs": 1
   },
-  "libs/frontend/chat-ui/src/lib/atoms/cost-badge.component.ts": {
-    "badge": 3,
-    "badge-ghost": 2,
-    "badge-sm": 3,
-    "badge-success": 1
-  },
-  "libs/frontend/chat-ui/src/lib/atoms/duration-badge.component.ts": {
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-sm": 1
-  },
   "libs/frontend/chat-ui/src/lib/atoms/report-response-button.component.ts": {
     "btn": 1,
     "btn-ghost": 1,
@@ -111,20 +100,6 @@
   "libs/frontend/chat-ui/src/lib/atoms/split-handle.component.ts": {
     "<dynamic>": 4
   },
-  "libs/frontend/chat-ui/src/lib/atoms/status-badge.component.ts": {
-    "badge": 1,
-    "badge-error": 1,
-    "badge-ghost": 1,
-    "badge-info": 1,
-    "badge-sm": 1,
-    "badge-success": 1,
-    "badge-warning": 1
-  },
-  "libs/frontend/chat-ui/src/lib/atoms/token-badge.component.ts": {
-    "badge": 1,
-    "badge-outline": 1,
-    "badge-sm": 1
-  },
   "libs/frontend/chat-ui/src/lib/atoms/tool-icon.component.ts": {
     "<dynamic>": 1
   },
@@ -136,9 +111,6 @@
     "badge-xs": 2
   },
   "libs/frontend/chat-ui/src/lib/molecules/agent-card/agent-card-permission.component.ts": {
-    "badge": 1,
-    "badge-sm": 1,
-    "badge-warning": 1,
     "btn": 2,
     "btn-error": 1,
     "btn-outline": 1,
@@ -725,10 +697,6 @@
   "libs/frontend/chat/src/lib/settings/ptah-ai/claude-lane-account-cell.component.ts": {
     "<dynamic>": 2
   },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/cli-capability-cells.component.ts": {
-    "badge": 1,
-    "badge-sm": 1
-  },
   "libs/frontend/chat/src/lib/settings/ptah-ai/cli-lane-default-cell.component.ts": {
     "btn": 1,
     "btn-sm": 1,
@@ -739,9 +707,6 @@
     "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/cli-provider-card.component.ts": {
-    "badge": 1,
-    "badge-outline": 1,
-    "badge-sm": 1,
     "card-body": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/copilot-auto-approve-toggle.component.ts": {
@@ -752,17 +717,11 @@
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/cursor-credential-popover.component.ts": {
     "<dynamic>": 2,
-    "badge": 1,
-    "badge-outline": 1,
-    "badge-xs": 1,
     "btn": 1,
     "btn-primary": 1,
     "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/elevenlabs-panel.component.ts": {
-    "badge": 2,
-    "badge-outline": 2,
-    "badge-sm": 2,
     "btn": 1,
     "btn-outline": 1,
     "btn-sm": 1
@@ -784,43 +743,28 @@
     "toggle-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/local-stt-panel.component.ts": {
-    "badge": 2,
-    "badge-outline": 2,
-    "badge-sm": 2,
     "btn": 1,
     "btn-ghost": 1,
     "btn-primary": 1,
     "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/local-tts-panel.component.ts": {
-    "badge": 2,
-    "badge-outline": 2,
-    "badge-sm": 2,
     "btn": 1,
     "btn-ghost": 1,
     "btn-primary": 1,
     "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/ptah-cli-instances.component.ts": {
-    "<dynamic>": 10,
-    "badge": 4,
-    "badge-outline": 3,
-    "badge-sm": 4
+    "<dynamic>": 9
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/session-budget-settings.component.ts": {
     "btn": 1,
     "btn-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/voice-config.component.ts": {
-    "<dynamic>": 1,
-    "badge": 1,
-    "badge-outline": 1,
-    "badge-sm": 1
+    "<dynamic>": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/web-search-config.component.ts": {
-    "badge": 3,
-    "badge-outline": 3,
-    "badge-sm": 3,
     "btn": 1,
     "btn-outline": 1,
     "btn-sm": 1

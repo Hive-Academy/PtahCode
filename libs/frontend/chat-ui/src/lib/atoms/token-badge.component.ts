@@ -9,6 +9,7 @@ import {
   messageTokenTotal,
   type MessageTokenUsage,
 } from '@ptah-extension/shared';
+import { PtahBadgeDirective } from '@ptah-extension/ui';
 
 /**
  * TokenBadgeComponent - Displays token count with formatting and detailed tooltip
@@ -30,9 +31,12 @@ import {
 @Component({
   selector: 'ptah-token-badge',
   standalone: true,
+  imports: [PtahBadgeDirective],
   template: `
     <span
-      class="badge badge-outline badge-sm cursor-help"
+      ptahBadge
+      appearance="outline"
+      class="cursor-help"
       [title]="tooltipText()"
     >
       {{ formatTokens() }}

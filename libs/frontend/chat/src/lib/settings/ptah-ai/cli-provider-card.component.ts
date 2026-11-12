@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, ElementRef, computed, inject, input
 import {
   NativePopoverComponent,
   ProviderMarkComponent,
+  PtahBadgeDirective,
   PtahButtonDirective,
   PtahCheckboxDirective,
 } from '@ptah-extension/ui';
@@ -29,6 +30,7 @@ export type CliProviderDefaultChoice = NonNullable<CliLaneDefaults[CliType]>;
     CliProviderCardPopoversComponent,
     ClaudeLaneAccountCellComponent,
     PtahButtonDirective,
+    PtahBadgeDirective,
     PtahCheckboxDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -39,8 +41,9 @@ export type CliProviderDefaultChoice = NonNullable<CliLaneDefaults[CliType]>;
       <ptah-provider-mark [providerId]="row().cli" fallback="Terminal" size="sm" />
       <h3 class="min-w-0 flex-1 truncate text-sm font-semibold" [title]="row().name">{{ row().name }}</h3>
       @if (row().versionLabel) { <span class="min-w-0 truncate text-xs" data-testid="cli-matrix-version" [title]="row().version ?? ''">{{ row().versionLabel }}</span> }
-      <span class="status-slot badge badge-sm badge-outline border-base-content/60 text-xs" [title]="statusText()"
-        [attr.data-status]="statusKind()">{{ statusText() }}</span>
+      <span ptahBadge appearance="outline" [tone]="statusKind() === 'failed' ? 'err' : statusKind() === 'ready' ? 'ok' : statusKind() === 'running' ? 'info' : 'neutral'"
+        class="status-slot text-xs" [title]="statusText()"
+        [attr.data-status]="statusKind()"><span class="ptah-badge-text">{{ statusText() }}</span></span>
     </header>
     <div class="card-body min-h-0 min-w-0 p-1">
       <div class="flex h-10 shrink-0 items-center justify-between gap-1 px-1">

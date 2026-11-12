@@ -22,6 +22,7 @@ import {
 import { ClaudeRpcService } from '@ptah-extension/core';
 import {
   NativePopoverComponent,
+  PtahBadgeDirective,
   PtahButtonDirective,
   PtahIconButtonDirective,
   PtahCheckboxDirective,
@@ -110,7 +111,7 @@ function providerLabel(provider: ProviderId): string {
 @Component({
   selector: 'ptah-web-search-config',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NativePopoverComponent, PtahButtonDirective, PtahIconButtonDirective, PtahCheckboxDirective, PtahInputDirective],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NativePopoverComponent, PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective, PtahCheckboxDirective, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -184,7 +185,7 @@ function providerLabel(provider: ProviderId): string {
                   </p>
                 </td>
                 <td class="align-top">
-                  <span class="badge badge-outline badge-sm gap-1 whitespace-nowrap text-base-content"
+                  <span ptahBadge appearance="outline" class="gap-1 whitespace-nowrap text-base-content"
                     [attr.data-testid]="'settings-web-search-key-status-' + opt.value">
                     <span aria-hidden="true"
                       [class]="apiKeyConfigured()[opt.value] ? 'w-1.5 h-1.5 rounded-full bg-success' : 'w-1.5 h-1.5 rounded-full bg-base-content/40'"></span>
@@ -193,7 +194,7 @@ function providerLabel(provider: ProviderId): string {
                 </td>
                 <td class="align-top" [attr.data-testid]="'settings-web-search-status-' + opt.value">
                   @if (resultFor(opt.value); as r) {
-                    <span class="badge badge-outline badge-sm h-auto gap-1 text-base-content">
+                    <span ptahBadge appearance="outline" class="h-auto gap-1 text-base-content">
                       <lucide-angular [img]="r.success ? CheckCircleIcon : XCircleIcon" class="w-3 h-3 shrink-0"
                         [class.text-success]="r.success" [class.text-error]="!r.success" aria-hidden="true" />
                       {{ r.success ? 'Works' : TEST_FAILED }}
@@ -292,7 +293,7 @@ function providerLabel(provider: ProviderId): string {
           [ptahBusyDisabled]="saving()" (change)="onMaxResultsChange($event)"
           class="range range-xs range-primary flex-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
           data-testid="settings-web-search-max-results" />
-        <span class="badge badge-outline badge-sm font-mono text-base-content" aria-hidden="true">{{ maxResults() }}</span>
+        <span ptahBadge appearance="outline" count class="font-mono text-base-content" aria-hidden="true">{{ maxResults() }}</span>
         <span class="text-xs text-base-content-muted whitespace-nowrap">per search</span>
       </div>
     </section>

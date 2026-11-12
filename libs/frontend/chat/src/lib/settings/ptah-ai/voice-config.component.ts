@@ -19,6 +19,7 @@ import {
 import { ClaudeRpcService } from '@ptah-extension/core';
 import {
   NativePopoverComponent,
+  PtahBadgeDirective,
   PtahButtonDirective,
   PtahIconButtonDirective,
 } from '@ptah-extension/ui';
@@ -86,7 +87,7 @@ const SAVE_PROVIDER_FAILED: Record<VoiceDirection, string> = {
 @Component({
   selector: 'ptah-voice-config',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NativePopoverComponent, VoiceDetailsDrawerComponent, PtahButtonDirective, PtahIconButtonDirective],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NativePopoverComponent, VoiceDetailsDrawerComponent, PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -180,7 +181,7 @@ const SAVE_PROVIDER_FAILED: Record<VoiceDirection, string> = {
                       [attr.data-testid]="'voice-engine-model-' + row.direction">{{ row.modelLabel }}</span>
                   </td>
                   <td>
-                    <span class="badge badge-outline badge-sm gap-1 whitespace-nowrap text-base-content"
+                    <span ptahBadge appearance="outline" class="gap-1 whitespace-nowrap text-base-content"
                       [attr.data-testid]="'voice-engine-status-' + row.direction">
                       <span [class]="'w-1.5 h-1.5 rounded-full ' + row.status.dot" aria-hidden="true"></span>
                       {{ row.status.label }}

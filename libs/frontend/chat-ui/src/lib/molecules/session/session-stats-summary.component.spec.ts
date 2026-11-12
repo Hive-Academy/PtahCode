@@ -508,7 +508,7 @@ describe('SessionStatsSummaryComponent', () => {
     ] as const)('shows %s in both cost chip layouts and their tooltips', (basis, label, tooltip) => {
       const root = render({ ...SNAPSHOT, costBasis: basis });
       const assertCost = (): void => {
-        const badge = required(root, '[data-testid="stats-cost"] .badge');
+        const badge = required(root, '[data-testid="stats-cost"] [data-ptah-badge]');
         expect(badge.textContent).toContain(label);
         expect(badge.getAttribute('title')).toContain(label);
         expect(badge.parentElement?.closest('[title]')?.getAttribute('title')).toContain(tooltip);

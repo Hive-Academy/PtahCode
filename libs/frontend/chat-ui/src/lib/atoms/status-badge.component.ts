@@ -1,5 +1,12 @@
-import { Component, input, ChangeDetectionStrategy } from '@angular/core';
+import {
+  Component,
+  input,
+  computed,
+  ChangeDetectionStrategy,
+} from '@angular/core';
 import { ExecutionStatus } from '@ptah-extension/shared';
+import { PtahBadgeDirective } from '@ptah-extension/ui';
+import type { PtahBadgeTone } from '@ptah-extension/ui';
 
 /**
  * StatusBadgeComponent - Shows execution status with colored badge
@@ -17,14 +24,11 @@ import { ExecutionStatus } from '@ptah-extension/shared';
 @Component({
   selector: 'ptah-status-badge',
   standalone: true,
+  imports: [PtahBadgeDirective],
   template: `
     <span
-      class="badge badge-sm"
-      [class.badge-ghost]="status() === 'pending'"
-      [class.badge-info]="status() === 'streaming'"
-      [class.badge-success]="status() === 'complete' || status() === 'resumed'"
-      [class.badge-warning]="status() === 'interrupted'"
-      [class.badge-error]="status() === 'error'"
+      ptahBadge
+      [tone]="tone()"
     >
       @if (status() === 'streaming') {
         <span class="loading loading-spinner loading-xs mr-1"></span>
@@ -36,6 +40,22 @@ import { ExecutionStatus } from '@ptah-extension/shared';
 })
 export class StatusBadgeComponent {
   readonly status = input.required<ExecutionStatus>();
+
+  protected readonly tone = computed<PtahBadgeTone>(() => {
+    switch (this.status()) {
+      case 'streaming':
+        return 'info';
+      case 'complete':
+      case 'resumed':
+        return 'ok';
+      case 'interrupted':
+        return 'warn';
+      case 'error':
+        return 'err';
+      default:
+        return 'neutral';
+    }
+  });
 
   protected getLabel(): string {
     switch (this.status()) {

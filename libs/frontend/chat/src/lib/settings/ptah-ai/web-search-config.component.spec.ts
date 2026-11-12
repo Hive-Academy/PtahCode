@@ -454,8 +454,9 @@ describe('WebSearchConfigComponent', () => {
       expect(serper.textContent).not.toContain('Unauthorized');
       expect(byTestId('settings-web-search-status-exa').textContent).toContain('Not tested');
       for (const cell of [tavily, serper]) {
-        expect(cell.querySelector('.badge')?.classList).toContain('text-base-content');
-        expect(cell.innerHTML).not.toMatch(/badge[^"]*text-(success|error)/);
+        const badge = cell.querySelector('[data-ptah-badge][data-size="sm"][data-tone="neutral"]');
+        expect(badge?.classList).toContain('text-base-content');
+        expect(badge?.getAttribute('data-appearance')).toBe('outline');
       }
     });
   });

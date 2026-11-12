@@ -18,6 +18,7 @@ import {
 } from '../providers/connection-drawer/drawer-write';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import {
+  PtahBadgeDirective,
   PtahButtonDirective,
   PtahIconButtonDirective,
   PtahInputDirective,
@@ -46,7 +47,7 @@ const FOCUS =
 @Component({
   selector: 'ptah-cursor-credential-popover',
   standalone: true,
-  imports: [LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective],
+  imports: [LucideAngularModule, PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -88,13 +89,8 @@ const FOCUS =
             >Not loaded</span
           >
         } @else {
-          <span
-            [class]="
-              'badge badge-outline badge-xs h-auto py-0.5 font-medium text-base-content ' +
-              (stored()
-                ? 'border-success/40 bg-success/10'
-                : 'border-base-content-muted/40 bg-base-300')
-            "
+          <span ptahBadge appearance="outline" size="xs" [tone]="stored() ? 'ok' : 'neutral'"
+            class="h-auto py-0.5 font-medium"
             data-testid="cursor-credential-status"
             >{{ stored() ? 'Set' : 'Not set' }}</span
           >

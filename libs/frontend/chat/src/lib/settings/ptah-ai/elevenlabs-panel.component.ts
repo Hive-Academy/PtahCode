@@ -35,6 +35,7 @@ import {
 } from './elevenlabs-select-rows';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import {
+  PtahBadgeDirective,
   PtahButtonDirective,
   PtahIconButtonDirective,
   PtahInputDirective,
@@ -95,7 +96,7 @@ function testFailureMessage(category: string | undefined): string {
 @Component({
   selector: 'ptah-elevenlabs-panel',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective, PtahSelectDirective],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective, PtahSelectDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -178,8 +179,8 @@ function testFailureMessage(category: string | undefined): string {
               </p>
               <div aria-live="polite" class="mt-1">
                 @if (testResult(); as result) {
-                  <span
-                    class="badge badge-outline badge-sm h-auto gap-1 text-base-content"
+                  <span ptahBadge appearance="outline" [tone]="result.ok ? 'ok' : 'err'"
+                    class="h-auto gap-1"
                     data-testid="elevenlabs-test-result"
                   >
                     <lucide-angular
@@ -323,8 +324,8 @@ function testFailureMessage(category: string | undefined): string {
             </p>
             <div aria-live="polite" class="mt-1">
               @if (testResult(); as result) {
-                <span
-                  class="badge badge-outline badge-sm h-auto gap-1 text-base-content"
+                <span ptahBadge appearance="outline" [tone]="result.ok ? 'ok' : 'err'"
+                  class="h-auto gap-1"
                   data-testid="elevenlabs-test-result"
                 >
                   <lucide-angular

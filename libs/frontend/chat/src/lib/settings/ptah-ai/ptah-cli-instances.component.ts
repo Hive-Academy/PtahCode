@@ -9,6 +9,7 @@ import { cliMarkFor } from '@ptah-extension/chat-ui';
 import { ChevronDown, Ellipsis, LucideAngularModule, Plus } from 'lucide-angular';
 import {
   NativePopoverComponent,
+  PtahBadgeDirective,
   ProviderMarkComponent,
   PtahButtonDirective,
   PtahIconButtonDirective,
@@ -17,7 +18,6 @@ import {
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import {
   cliTestFailedText,
-  type CliKeyStatus,
   type CliTierBadge,
   type InstanceCliMatrixRow,
   type PtahCliInstanceCell,
@@ -38,12 +38,6 @@ const TIERS: readonly Pick<CliTierBadge, 'tier' | 'label'>[] = [
   { tier: 'opus', label: 'Opus' },
   { tier: 'haiku', label: 'Haiku' },
 ];
-/** Key status → badge fill; text stays base-content (deviation 6). */
-const KEY_BADGE: Readonly<Record<CliKeyStatus['kind'], string>> = {
-  'key-set': 'border-success/40 bg-success/10',
-  keyless: 'border-base-content-muted/40 bg-base-300',
-  missing: 'border-warning/40 bg-warning/10',
-};
 /** A card cell may take the card's full width (the table's cells cap at a column width). */
 const CELL = `${CLI_MATRIX_CELL_BASE} max-w-full`;
 const MENU_ITEM = `btn btn-ghost btn-sm w-full justify-start px-2 text-sm font-medium text-base-content ${CLI_MATRIX_FOCUS}`;
@@ -63,6 +57,7 @@ const LABEL = 'text-xs font-semibold uppercase tracking-wide text-base-content-m
   imports: [
     LucideAngularModule,
     NativePopoverComponent,
+    PtahBadgeDirective,
     ProviderMarkComponent,
     SettingsBusyDisabledDirective,
     CliModelEffortPopoverComponent,
@@ -172,24 +167,26 @@ const LABEL = 'text-xs font-semibold uppercase tracking-wide text-base-content-m
                     data-testid="cli-matrix-instance-subline"
                   >
                     <span
-                      class="badge badge-outline badge-sm gap-1 whitespace-nowrap border-base-300 text-xs font-medium text-base-content"
+                      ptahBadge appearance="outline" [tone]="row.status.tone === 'success' ? 'ok' : row.status.tone === 'warning' ? 'warn' : row.status.tone === 'error' ? 'err' : row.status.tone === 'info' ? 'info' : 'neutral'"
+                      class="gap-1 whitespace-nowrap border-base-300 text-xs font-medium text-base-content"
                       data-testid="cli-matrix-status"
                     >
                       <span [class]="'h-1.5 w-1.5 shrink-0 rounded-full ' + dot[row.status.tone]" aria-hidden="true"></span>
                       {{ row.status.label }}
                     </span>
                     @if (row.runtimeStatus) {
-                      <span class="badge badge-outline badge-sm whitespace-nowrap border-warning text-warning" data-testid="cli-matrix-runtime-status">{{ row.runtimeStatus }}</span>
+                      <span ptahBadge appearance="outline" [tone]="row.runtimeStatus === 'Error' ? 'err' : 'info'" class="whitespace-nowrap" data-testid="cli-matrix-runtime-status">{{ row.runtimeStatus }}</span>
                     }
                     <span
-                      [class]="'badge badge-outline badge-sm whitespace-nowrap text-xs text-base-content ' + keyBadge[row.keyStatus.kind]"
+                      ptahBadge appearance="outline" [tone]="row.keyStatus.kind === 'key-set' ? 'ok' : row.keyStatus.kind === 'missing' ? 'warn' : 'neutral'"
+                      class="whitespace-nowrap text-xs text-base-content"
                       data-testid="cli-matrix-key-status"
                       >{{ row.keyStatus.label }}</span
                     >
                   </div>
                   <div class="mt-2 flex flex-wrap gap-1.5" data-testid="cli-capability-summary">
                     @for (badge of capabilityBadges(row); track badge.label) {
-                      <span class="badge badge-sm inline-flex whitespace-nowrap border-base-content/40 bg-base-200 text-base-content">{{ badge.label }}: {{ badge.value }}</span>
+                      <span ptahBadge class="inline-flex whitespace-nowrap border-base-content/40 bg-base-200 text-base-content">{{ badge.label }}: {{ badge.value }}</span>
                     }
                     <ptah-native-popover [isOpen]="capabilitiesOpen() === row.id" placement="bottom-start" [hasBackdrop]="true" backdropClass="transparent" (closed)="capabilitiesOpen.set(null)">
                       <button trigger type="button" ptahButton variant="ghost" size="xs" [attr.aria-expanded]="capabilitiesOpen() === row.id" [attr.aria-controls]="'instance-capabilities-' + row.id" (click)="capabilitiesOpen.set(capabilitiesOpen() === row.id ? null : row.id)">Show capabilities</button>
@@ -486,7 +483,6 @@ export class PtahCliInstancesComponent {
   protected readonly menuItem = MENU_ITEM;
   protected readonly label = LABEL;
   protected readonly dot = CLI_MATRIX_DOT;
-  protected readonly keyBadge = KEY_BADGE;
   protected readonly unsetTitle =
     "No model of its own: uses the provider's CLI-agent tier, else the provider default.";
 

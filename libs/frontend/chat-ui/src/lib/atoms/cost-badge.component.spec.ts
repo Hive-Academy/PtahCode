@@ -45,7 +45,7 @@ describe('CostBadgeComponent', () => {
     fixture.componentRef.setInput('costBasis', basis);
     fixture.detectChanges();
 
-    const badge = fixture.nativeElement.querySelector('.badge');
+    const badge = fixture.nativeElement.querySelector('[data-ptah-badge]');
     expect(badge.textContent).toContain(label);
     expect(badge.getAttribute('title')).toContain(label);
   });

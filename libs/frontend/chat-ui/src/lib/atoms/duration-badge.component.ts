@@ -1,5 +1,6 @@
 import { Component, input, ChangeDetectionStrategy } from '@angular/core';
 import { formatDurationMs } from '@ptah-extension/shared';
+import { PtahBadgeDirective } from '@ptah-extension/ui';
 
 /**
  * DurationBadgeComponent - Displays execution duration
@@ -14,8 +15,9 @@ import { formatDurationMs } from '@ptah-extension/shared';
 @Component({
   selector: 'ptah-duration-badge',
   standalone: true,
+  imports: [PtahBadgeDirective],
   template: `
-    <span class="badge badge-ghost badge-sm">
+    <span ptahBadge tone="neutral">
       {{ formatDurationMs(durationMs()) }}
     </span>
   `,
