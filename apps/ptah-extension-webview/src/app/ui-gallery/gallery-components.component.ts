@@ -4,10 +4,8 @@ import {
   PtahButtonDirective,
   PtahFieldComponent,
   PtahFieldControlDirective,
-  PtahIconButtonDirective,
   PtahListDetailComponent,
   PtahListRowComponent,
-  PtahMeterComponent,
   PtahPanelState,
   PtahRichSelectComponent,
   PtahStatCardComponent,
@@ -18,10 +16,7 @@ import {
   SurfaceCardComponent,
   SurfaceTileComponent,
 } from '@ptah-extension/ui';
-import {
-  REPOSITORY_OPTIONS,
-  SORT_OPTIONS,
-} from './gallery-form-controls.data';
+import { REPOSITORY_OPTIONS, SORT_OPTIONS } from './gallery-form-controls.data';
 import { GallerySectionComponent } from './gallery-section.component';
 import { InboxLayoutDemoComponent } from './inbox-layout-demo.component';
 
@@ -32,7 +27,6 @@ import { InboxLayoutDemoComponent } from './inbox-layout-demo.component';
     Listbox,
     Option,
     PtahButtonDirective,
-    PtahIconButtonDirective,
     PtahFieldComponent,
     PtahFieldControlDirective,
     PtahRichSelectComponent,
@@ -42,7 +36,6 @@ import { InboxLayoutDemoComponent } from './inbox-layout-demo.component';
     PtahStatusBadgeComponent,
     PtahStatePanelComponent,
     PtahToolbarComponent,
-    PtahMeterComponent,
     SurfaceCardComponent,
     SurfaceTileComponent,
     GallerySectionComponent,
@@ -50,21 +43,6 @@ import { InboxLayoutDemoComponent } from './inbox-layout-demo.component';
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<div class="flex flex-col gap-ptah-section">
-    <ptah-gallery-section id="components-buttons" title="Buttons">
-      <div class="flex flex-wrap gap-ptah-controls">
-        @for (variant of variants; track variant) {
-          @for (size of sizes; track size) {
-            <button ptahButton [variant]="variant" [size]="size" type="button">
-              {{ variant }} {{ size }}
-            </button>
-          }
-        }
-        <button ptahIconButton label="More actions" type="button">⋯</button>
-        <button ptahButton [busy]="true" type="button">Saving</button>
-        <button ptahButton type="button" disabled>Disabled</button>
-      </div>
-    </ptah-gallery-section>
-
     <ptah-gallery-section id="components-fields" title="Fields">
       <div class="grid gap-ptah-field md:grid-cols-3">
         <ptah-field label="Review name" hint="Shown in the run list"
@@ -160,9 +138,13 @@ import { InboxLayoutDemoComponent } from './inbox-layout-demo.component';
           <p class="mt-ptah-label text-ptah-hint text-base-content-muted">
             Findings and run activity appear here.
           </p>
-          <section class="mt-ptah-group border-t border-surface-border pt-ptah-group">
+          <section
+            class="mt-ptah-group border-t border-surface-border pt-ptah-group"
+          >
             <h3 class="text-ptah-group-title">Run context</h3>
-            <p class="mt-ptah-label text-ptah-hint text-base-content-muted">Repository: org/api</p>
+            <p class="mt-ptah-label text-ptah-hint text-base-content-muted">
+              Repository: org/api
+            </p>
           </section>
         </div>
         <div
@@ -199,19 +181,6 @@ import { InboxLayoutDemoComponent } from './inbox-layout-demo.component';
       </div>
     </ptah-gallery-section>
 
-    <ptah-gallery-section id="components-meters" title="Meters">
-      <div class="grid gap-ptah-field sm:grid-cols-2 xl:grid-cols-3">
-        @for (sample of meterSamples; track sample.label) {
-          <ptah-meter
-            [label]="sample.label"
-            [value]="sample.value"
-            [max]="sample.max"
-            unit="%"
-          />
-        }
-      </div>
-    </ptah-gallery-section>
-
     <ptah-gallery-section id="components-surfaces" title="Surfaces">
       <div class="grid gap-ptah-field sm:grid-cols-2">
         <ptah-surface-card
@@ -231,13 +200,6 @@ import { InboxLayoutDemoComponent } from './inbox-layout-demo.component';
   </div>`,
 })
 export class GalleryComponentsComponent {
-  public readonly variants = [
-    'primary',
-    'secondary',
-    'ghost',
-    'danger',
-  ] as const;
-  public readonly sizes = ['xs', 'sm'] as const;
   public readonly statuses: PtahStatus[] = [
     'running',
     'queued',
@@ -255,14 +217,6 @@ export class GalleryComponentsComponent {
     'error',
     'partial',
     'no-permission',
-  ];
-  public readonly meterSamples = [
-    { label: 'Unused', value: 0, max: 100 },
-    { label: 'Below limit', value: 89, max: 100 },
-    { label: 'Near limit', value: 90, max: 100 },
-    { label: 'Almost full', value: 99, max: 100 },
-    { label: 'At limit', value: 100, max: 100 },
-    { label: 'Unavailable', value: 0, max: 0 },
   ];
   public readonly selection = signal<string | null>(null);
   public readonly query = signal('');
