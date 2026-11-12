@@ -15,6 +15,7 @@ describe('StepMeterComponent', () => {
     expect(bar?.getAttribute('aria-valuemax')).toBe('100');
     expect(bar?.getAttribute('aria-valuenow')).toBe('42');
     expect(el.textContent).toContain('42%');
+    expect(el.textContent).not.toContain('/ 100');
     fixture.componentRef.setInput('percent', 110);
     fixture.detectChanges();
     expect(bar?.getAttribute('aria-valuenow')).toBe('100');
