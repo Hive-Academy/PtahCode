@@ -10,6 +10,7 @@ import {
   inject,
   input,
   signal,
+  untracked,
 } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { PtahFieldControlRef } from './field-control-ref';
@@ -172,9 +173,7 @@ export class PtahFieldComponent {
       this.observed = null;
       return;
     }
-    const id = marked.controlId ?? (control.id || this.controlId);
-    if (!control.id) control.id = id;
-    this.labelFor.set(id);
+    this.syncId(control, marked.controlId);
     this.syncDescription(control);
     this.observeDescription(control);
     this.toggleAttr(control, 'aria-required', this.required());
@@ -187,6 +186,13 @@ export class PtahFieldComponent {
     }
     marked.setFieldInvalid(!!this.error());
     marked.setFieldLabel?.(this.labelId);
+  }
+
+  /** A bound id of the control wins; the generated id applies only while it has none. */
+  private syncId(control: HTMLElement, markedId: string | undefined): void {
+    const id = markedId || control.id || this.controlId;
+    if (!control.id) control.id = id;
+    if (untracked(() => this.labelFor()) !== id) this.labelFor.set(id);
   }
 
   /**
@@ -211,12 +217,13 @@ export class PtahFieldComponent {
     if (typeof MutationObserver === 'undefined') return;
     this.descriptionObserver?.disconnect();
     this.observed = control;
-    this.descriptionObserver = new MutationObserver(() =>
-      this.syncDescription(control),
-    );
+    this.descriptionObserver = new MutationObserver(() => {
+      this.syncId(control, this.control()?.controlId);
+      this.syncDescription(control);
+    });
     this.descriptionObserver.observe(control, {
       attributes: true,
-      attributeFilter: ['aria-describedby'],
+      attributeFilter: ['aria-describedby', 'id'],
     });
   }
 

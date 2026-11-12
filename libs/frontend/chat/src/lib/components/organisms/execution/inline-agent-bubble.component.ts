@@ -56,7 +56,7 @@ import { ScrollDirtyService } from '../../../services/scroll-dirty.service';
 import { injectWallClock } from '@ptah-extension/core';
 import { subagentToolCount } from '../../../utils/subagent-tool-count';
 
-import { PtahButtonDirective, PtahIconButtonDirective, PtahBadgeDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahIconButtonDirective, PtahBadgeDirective, PtahTextareaDirective } from '@ptah-extension/ui';
 /**
  * InlineAgentBubbleComponent - Unified agent rendering for both streaming and replay
  *
@@ -89,6 +89,7 @@ import { PtahButtonDirective, PtahIconButtonDirective, PtahBadgeDirective } from
     NgTemplateOutlet,
     PtahButtonDirective,
     PtahIconButtonDirective,
+    PtahTextareaDirective,
   ],
   template: `
     <!-- Enhanced styling for interrupted agents -->
@@ -378,9 +379,10 @@ import { PtahButtonDirective, PtahIconButtonDirective, PtahBadgeDirective } from
           >
             <textarea
               #sendTextarea
-              class="textarea textarea-bordered textarea-xs flex-1 text-[11px] resize-none leading-snug min-h-[calc(1lh+0.5rem)] max-h-[72px] overflow-y-auto"
+              ptahTextarea
+              size="xs"
+              class="flex-1 text-[11px] resize-none leading-snug min-h-[calc(1lh+0.5rem)] max-h-[72px] overflow-y-auto"
               style="field-sizing: content"
-              [class.textarea-disabled]="!canSendMessage()"
               [disabled]="!canSendMessage()"
               [title]="canSendMessage() ? '' : 'Agent is no longer running'"
               [attr.aria-label]="'Send message to this agent'"

@@ -422,7 +422,8 @@
             <span class="text-xs font-medium">Code symbol index</span>
             <input
               type="checkbox"
-              class="toggle toggle-xs toggle-primary"
+              ptahToggle
+              size="xs"
               [checked]="symbolsEnabled()"
               [disabled]="!workspaceRoot()"
               (change)="onTogglePipeline('symbols', !symbolsEnabled())"
@@ -453,7 +454,8 @@
             <span class="text-xs font-medium">Chat memory extraction</span>
             <input
               type="checkbox"
-              class="toggle toggle-xs toggle-primary"
+              ptahToggle
+              size="xs"
               [checked]="memoryEnabled()"
               [disabled]="!workspaceRoot()"
               (change)="onTogglePipeline('memory', !memoryEnabled())"

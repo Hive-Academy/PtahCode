@@ -7,7 +7,7 @@ import {
   output,
   signal,
 } from '@angular/core';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
 import type { CommandPendingInput } from '../model/command-center.store';
 import {
   LucideAngularModule,
@@ -18,7 +18,7 @@ import {
 @Component({
   selector: 'ptah-command-pending-input',
   standalone: true,
-  imports: [LucideAngularModule, PtahButtonDirective],
+  imports: [LucideAngularModule, PtahButtonDirective, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <p class="sr-only" aria-live="assertive" aria-atomic="true">
@@ -80,7 +80,9 @@ import {
             <input
               #answerInput
               id="pending-answer"
-              class="input mt-1 min-h-11 w-full border !border-base-content/70 placeholder:!text-base-content-muted dark:!border-base-content/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+              ptahInput
+              size="md"
+              class="mt-1 min-h-11 w-full"
               [placeholder]="
                 choices()[0] ? 'e.g. ' + choices()[0] : 'Type an answer'
               "

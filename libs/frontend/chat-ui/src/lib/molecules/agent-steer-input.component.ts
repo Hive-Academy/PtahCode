@@ -7,6 +7,7 @@ import {
   computed,
 } from '@angular/core';
 import { ArrowUp, LucideAngularModule, SendHorizontal } from 'lucide-angular';
+import { PtahInputDirective } from '@ptah-extension/ui';
 import {
   COMPOSER_CARD_BORDER_CLASS,
   COMPOSER_CARD_CLASS,
@@ -32,7 +33,7 @@ import {
 @Component({
   selector: 'ptah-agent-steer-input',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (steerable() && variant() === 'composer') {
@@ -81,8 +82,10 @@ import {
         class="flex items-center gap-1.5 border-t border-base-content/10 px-2.5 py-1.5"
       >
         <input
+          ptahInput
+          size="xs"
           type="text"
-          class="input input-bordered input-xs flex-1 text-xs"
+          class="flex-1 text-xs"
           [placeholder]="placeholder()"
           [disabled]="pending()"
           [value]="draft()"

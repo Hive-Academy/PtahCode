@@ -117,10 +117,7 @@
     "btn": 1,
     "btn-primary": 1,
     "btn-square": 1,
-    "btn-xs": 1,
-    "input": 1,
-    "input-bordered": 1,
-    "input-xs": 1
+    "btn-xs": 1
   },
   "libs/frontend/chat-ui/src/lib/molecules/boot-progress/boot-progress.component.ts": {
     "<dynamic>": 1
@@ -166,10 +163,7 @@
     "btn": 2,
     "btn-outline": 1,
     "btn-warning": 2,
-    "btn-xs": 2,
-    "input": 1,
-    "input-bordered": 1,
-    "input-xs": 1
+    "btn-xs": 2
   },
   "libs/frontend/chat-ui/src/lib/molecules/permissions/permission-request-card.component.ts": {
     "btn": 2,
@@ -222,33 +216,13 @@
     "btn": 1,
     "btn-ghost": 1,
     "btn-xs": 1,
-    "checkbox": 1,
-    "checkbox-primary": 1,
-    "checkbox-xs": 1,
-    "input": 2,
-    "input-bordered": 2,
-    "input-sm": 2,
-    "label": 1,
-    "label-text": 1,
-    "select": 1,
-    "select-bordered": 1,
-    "select-sm": 1,
     "skeleton": 2
   },
   "libs/frontend/chat-ui/src/lib/molecules/setup-plugins/plugin-catalog-panel.component.ts": {
     "btn": 2,
     "btn-ghost": 2,
     "btn-primary": 2,
-    "btn-xs": 2,
-    "checkbox": 2,
-    "checkbox-primary": 2,
-    "checkbox-xs": 2,
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1,
-    "toggle": 1,
-    "toggle-primary": 1,
-    "toggle-sm": 1
+    "btn-xs": 2
   },
   "libs/frontend/chat-ui/src/lib/molecules/setup-plugins/skill-sh-browser.component.ts": {
     "<dynamic>": 3,
@@ -258,10 +232,7 @@
     "btn": 2,
     "btn-ghost": 2,
     "btn-sm": 1,
-    "btn-xs": 1,
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1
+    "btn-xs": 1
   },
   "libs/frontend/chat-ui/src/lib/molecules/thinking-block.component.ts": {
     "card": 1,
@@ -396,11 +367,7 @@
   "libs/frontend/chat/src/lib/components/organisms/execution/inline-agent-bubble.component.ts": {
     "btn": 1,
     "btn-ghost": 1,
-    "btn-xs": 1,
-    "textarea": 1,
-    "textarea-bordered": 1,
-    "textarea-disabled": 1,
-    "textarea-xs": 1
+    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/components/organisms/execution/subagent-tile.component.ts": {
     "badge": 1,
@@ -734,8 +701,7 @@
   },
   "libs/frontend/command-center/src/lib/components/command-pending-input.component.ts": {
     "btn": 2,
-    "btn-warning": 2,
-    "input": 1
+    "btn-warning": 2
   },
   "libs/frontend/command-center/src/lib/components/command-session-controls.component.ts": {
     "input-sm": 1
@@ -1269,10 +1235,6 @@
     "<dynamic>": 5,
     "skeleton": 2
   },
-  "libs/frontend/mcp-apps-page/src/lib/components/apps-page.component.ts": {
-    "textarea": 1,
-    "textarea-bordered": 1
-  },
   "libs/frontend/memory-curator-ui/src/lib/components/corpus-build-dialog.component.ts": {
     "btn": 1,
     "btn-ghost": 1,
@@ -1569,11 +1531,6 @@
     "alert": 1,
     "alert-error": 1
   },
-  "libs/frontend/setup-wizard/src/lib/components/guidance-result-panel.component.ts": {
-    "label": 1,
-    "toggle": 1,
-    "toggle-primary": 1
-  },
   "libs/frontend/setup-wizard/src/lib/components/pack-install-prompt.component.ts": {
     "alert": 2,
     "alert-error": 1,
@@ -1790,9 +1747,6 @@
     "alert": 7,
     "alert-error": 2,
     "alert-info": 1,
-    "alert-warning": 2,
-    "toggle": 2,
-    "toggle-primary": 2,
-    "toggle-xs": 2
+    "alert-warning": 2
   }
 }

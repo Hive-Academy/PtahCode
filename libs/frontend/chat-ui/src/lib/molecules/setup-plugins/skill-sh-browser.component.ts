@@ -21,6 +21,7 @@ import {
   MonogramTileComponent,
   PtahBadgeDirective,
   PtahButtonDirective,
+  PtahInputDirective,
   StorefrontPanelComponent,
   type CatalogCardBadge,
 } from '@ptah-extension/ui';
@@ -130,6 +131,7 @@ const SCOPE_BADGE_LABELS: Readonly<Record<InstalledSkill['scope'], string>> = {
     StorefrontPanelComponent,
     PtahBadgeDirective,
     PtahButtonDirective,
+    PtahInputDirective,
     InstallScopeFieldComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -144,8 +146,10 @@ const SCOPE_BADGE_LABELS: Readonly<Record<InstalledSkill['scope'], string>> = {
           <lucide-angular [img]="SearchIcon" class="w-3.5 h-3.5" />
         </span>
         <input
+          ptahInput
+          size="sm"
           type="search"
-          class="input input-bordered input-sm w-full pl-8 text-xs"
+          class="w-full pl-8 text-xs"
           placeholder="Search skills..."
           [value]="searchQuery()"
           (input)="onSearchInput($event)"
