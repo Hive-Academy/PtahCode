@@ -30,24 +30,14 @@ import {
 } from 'lucide-angular';
 import type { SessionListQuery } from '../../../services/chat-store/session-loader.service';
 import { SessionFilterBarComponent } from '../session-filter-bar/session-filter-bar.component';
-
-/**
- * The app's keyboard focus ring (`styles.css` `:focus-visible`). daisyUI's
- * `.input` focus outline is a 20% tint and wins over the global rule, so these
- * controls restate it as utilities (as `SessionFilterBarComponent` does).
- */
-const FOCUS_RING =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))]';
-/** The same ring on a label that wraps its input (search box). */
-const FOCUS_RING_WITHIN =
-  'has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-[oklch(var(--s))]';
+import { PtahInputDirective } from '@ptah-extension/ui';
 
 let nextId = 0;
 
 @Component({
   selector: 'ptah-previous-sessions-toolbar',
   standalone: true,
-  imports: [LucideAngularModule, SessionFilterBarComponent],
+  imports: [LucideAngularModule, SessionFilterBarComponent, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- The organization filter bar is its own role="search" landmark, so
@@ -65,17 +55,15 @@ let nextId = 0;
           (queryChange)="queryChange.emit($event)"
         />
       } @else {
-        <label
-          class="input input-sm rounded-lg h-8 min-h-8 w-full flex items-center gap-1.5 bg-surface-0 border-surface-border ${FOCUS_RING_WITHIN}"
-        >
+        <div class="relative w-full">
           <lucide-angular
             [img]="SearchIcon"
-            class="w-3 h-3 text-base-content-muted flex-shrink-0"
+            class="absolute left-2 top-2.5 w-3 h-3 text-base-content-muted pointer-events-none"
             aria-hidden="true"
           />
           <input
             type="text"
-            class="grow text-xs min-w-0 placeholder:text-base-content-muted"
+            ptahInput size="sm" class="w-full pl-7 pr-8 text-xs min-w-0 placeholder:text-base-content-muted"
             placeholder="Search sessions..."
             aria-label="Search sessions by name"
             [value]="searchQuery()"
@@ -86,7 +74,7 @@ let nextId = 0;
           @if (searchQuery()) {
             <button
               type="button"
-              class="btn btn-ghost btn-xs btn-circle w-6 h-6 min-h-6 p-0"
+              class="btn btn-ghost btn-xs btn-circle absolute right-1 top-1 w-6 h-6 min-h-6 p-0"
               aria-label="Clear search"
               (click)="searchChange.emit('')"
               data-testid="session-search-local-clear"
@@ -94,7 +82,7 @@ let nextId = 0;
               <lucide-angular [img]="XIcon" class="w-3 h-3" aria-hidden="true" />
             </button>
           }
-        </label>
+        </div>
       }
 
       <div class="flex items-center gap-1">
@@ -148,7 +136,7 @@ let nextId = 0;
             <input
               [id]="dateFromId"
               type="date"
-              class="input input-sm rounded-lg h-8 min-h-8 w-full min-w-0 bg-surface-0 border-surface-border text-xs ${FOCUS_RING}"
+              ptahInput size="sm" class="w-full min-w-0 text-xs"
               [value]="dateFrom()"
               (input)="onDateFromInput($event)"
               data-testid="session-date-from"
@@ -163,7 +151,7 @@ let nextId = 0;
             <input
               [id]="dateToId"
               type="date"
-              class="input input-sm rounded-lg h-8 min-h-8 w-full min-w-0 bg-surface-0 border-surface-border text-xs ${FOCUS_RING}"
+              ptahInput size="sm" class="w-full min-w-0 text-xs"
               [value]="dateTo()"
               (input)="onDateToInput($event)"
               data-testid="session-date-to"

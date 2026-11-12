@@ -42,7 +42,7 @@ import {
 import { LucideAngularModule, Check, Server } from 'lucide-angular';
 import { injectWallClock } from '@ptah-extension/core';
 import type { LucideIconData } from 'lucide-angular';
-import { NativeDrawerComponent, MotionStageDirective, ProviderMarkComponent, ProviderModelPickerComponent, PtahButtonDirective } from '@ptah-extension/ui';
+import { NativeDrawerComponent, MotionStageDirective, ProviderMarkComponent, ProviderModelPickerComponent, PtahButtonDirective, PtahFieldComponent, PtahInputDirective } from '@ptah-extension/ui';
 import type { ProviderModelSelection, ProviderMarkLucideIcon } from '@ptah-extension/ui';
 import { getAllAnthropicProviders, getAnthropicProvider, validateProviderBaseUrl } from '@ptah-extension/shared';
 import type {
@@ -286,6 +286,8 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
     LucideAngularModule, NativeDrawerComponent, MotionStageDirective, ProviderMarkComponent, ProviderModelPickerComponent,
     KimiCodeLoginProgressComponent,
     PtahButtonDirective,
+    PtahFieldComponent,
+    PtahInputDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -429,19 +431,19 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
               >
                 Provider
               </h3>
-              <label class="mt-3 flex flex-col gap-1">
-                <span class="text-xs font-medium text-base-content-muted" id="wizard-search-label"
-                  >Search providers</span
-                >
-                <input
-                  type="text"
-                  class="input input-bordered input-sm w-full min-h-9 border-base-content-muted bg-base-100 text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                  aria-labelledby="wizard-search-label"
-                  [value]="search()"
-                  (input)="onSearchInput($event)"
-                  data-testid="wizard-provider-search"
-                />
-              </label>
+              <div class="mt-3 flex flex-col gap-1">
+                <span id="wizard-search-label" class="sr-only">Search providers</span>
+                <ptah-field label="Search providers">
+                  <input ptahInput
+                      type="text"
+                      class="w-full text-base-content"
+                      aria-labelledby="wizard-search-label"
+                      [value]="search()"
+                      (input)="onSearchInput($event)"
+                      data-testid="wizard-provider-search"
+                    />
+                </ptah-field>
+              </div>
               <fieldset class="mt-3 space-y-2" data-testid="wizard-provider-options">
                 <legend class="text-sm font-semibold text-base-content">Choose a provider</legend>
                 @for (option of providerOptions(); track option.id) {
@@ -510,20 +512,19 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                   class="mt-3 space-y-3 rounded-md border border-base-300 bg-base-100 p-3"
                   data-testid="wizard-custom-fields"
                 >
-                  <label class="flex flex-col gap-1">
-                    <span class="text-xs font-medium text-base-content-muted"
-                      >Name for this connection</span
-                    >
-                    <input
-                      type="text"
-                      class="input input-bordered input-sm w-full min-h-9 border-base-content-muted bg-base-100 text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                      [value]="customName()"
-                      (input)="onCustomNameInput($event)"
-                      [attr.aria-invalid]="customNameError() ? true : null"
-                      [attr.aria-describedby]="customNameError() ? 'wizard-custom-name-error' : null"
-                      data-testid="wizard-custom-name"
-                    />
-                  </label>
+                  <div class="flex flex-col gap-1">
+                    <ptah-field label="Name for this connection">
+                      <input ptahInput
+                          type="text"
+                          class="w-full text-base-content"
+                          [value]="customName()"
+                          (input)="onCustomNameInput($event)"
+                          [attr.aria-invalid]="customNameError() ? true : null"
+                          [attr.aria-describedby]="customNameError() ? 'wizard-custom-name-error' : null"
+                          data-testid="wizard-custom-name"
+                        />
+                    </ptah-field>
+                  </div>
                   @if (customNameError(); as nameError) {
                     <p
                       id="wizard-custom-name-error"
@@ -659,22 +660,20 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                       The stored key stays in use until you replace it.
                     </p>
                   } @else {
-                    <label class="mt-3 flex flex-col gap-1">
-                      <span
-                        id="wizard-api-key-label"
-                        class="text-xs font-medium text-base-content-muted"
-                        >API key</span
-                      >
-                      <input
-                        [type]="showApiKey() ? 'text' : 'password'"
-                        class="input input-bordered input-sm w-full min-h-9 border-base-content-muted bg-base-100 text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                        autocomplete="off"
-                        aria-labelledby="wizard-api-key-label"
-                        [value]="apiKeyDraft()"
-                        (input)="onApiKeyInput($event)"
-                        data-testid="wizard-api-key"
-                      />
-                    </label>
+                    <div class="mt-3 flex flex-col gap-1">
+                      <span id="wizard-api-key-label" class="sr-only">API key</span>
+                      <ptah-field label="API key">
+                        <input ptahInput
+                            [type]="showApiKey() ? 'text' : 'password'"
+                            class="w-full text-base-content"
+                            autocomplete="off"
+                            aria-labelledby="wizard-api-key-label"
+                            [value]="apiKeyDraft()"
+                            (input)="onApiKeyInput($event)"
+                            data-testid="wizard-api-key"
+                          />
+                      </ptah-field>
+                    </div>
                     <button
                       type="button"
                       ptahButton variant="ghost" class="mt-1 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
@@ -815,22 +814,20 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                 }
                 @case ('local-native') {
                    <div class="ptah-motion-panel" [animate.enter]="credentialModeEnterClass()" animate.leave="ptah-motion-leave">
-                  <label class="mt-3 flex flex-col gap-1">
-                    <span
-                      id="wizard-base-url-label"
-                      class="text-xs font-medium text-base-content-muted"
-                      >Server URL</span
-                    >
-                    <input
-                      type="text"
-                      class="input input-bordered input-sm w-full min-h-9 border-base-content-muted bg-base-100 text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                      aria-labelledby="wizard-base-url-label"
-                      [value]="baseUrlDraft()"
-                      (input)="onBaseUrlInput($event)"
-                      [attr.aria-invalid]="baseUrlError() ? true : null"
-                      data-testid="wizard-base-url"
-                    />
-                  </label>
+                  <div class="mt-3 flex flex-col gap-1">
+                    <span id="wizard-base-url-label" class="sr-only">Server URL</span>
+                    <ptah-field label="Server URL">
+                      <input ptahInput
+                          type="text"
+                          class="w-full text-base-content"
+                          aria-labelledby="wizard-base-url-label"
+                          [value]="baseUrlDraft()"
+                          (input)="onBaseUrlInput($event)"
+                          [attr.aria-invalid]="baseUrlError() ? true : null"
+                          data-testid="wizard-base-url"
+                        />
+                    </ptah-field>
+                  </div>
                   @if (baseUrlError(); as urlError) {
                     <p class="text-xs text-base-content" data-testid="wizard-url-error">
                       {{ urlError }}
@@ -843,22 +840,20 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                     Credentials and prompts are sent to {{ destinationHostname() }}.
                   </p>
                   @if (supportsOptionalKey()) {
-                    <label class="mt-3 flex flex-col gap-1">
-                      <span
-                        id="wizard-optional-key-label"
-                        class="text-xs font-medium text-base-content-muted"
-                        >API key (optional)</span
-                      >
-                      <input
-                        [type]="showApiKey() ? 'text' : 'password'"
-                        class="input input-bordered input-sm w-full min-h-9 border-base-content-muted bg-base-100 text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                        autocomplete="off"
-                        aria-labelledby="wizard-optional-key-label"
-                        [value]="apiKeyDraft()"
-                        (input)="onApiKeyInput($event)"
-                        data-testid="wizard-optional-key"
-                      />
-                    </label>
+                    <div class="mt-3 flex flex-col gap-1">
+                      <span id="wizard-optional-key-label" class="sr-only">API key (optional)</span>
+                      <ptah-field label="API key (optional)">
+                        <input ptahInput
+                            [type]="showApiKey() ? 'text' : 'password'"
+                            class="w-full text-base-content"
+                            autocomplete="off"
+                            aria-labelledby="wizard-optional-key-label"
+                            [value]="apiKeyDraft()"
+                            (input)="onApiKeyInput($event)"
+                            data-testid="wizard-optional-key"
+                          />
+                      </ptah-field>
+                    </div>
                     <button
                       type="button"
                       ptahButton variant="ghost" class="mt-1 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
@@ -878,22 +873,20 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                 }
                 @case ('local-proxy') {
                    <div class="ptah-motion-panel" [animate.enter]="credentialModeEnterClass()" animate.leave="ptah-motion-leave">
-                  <label class="mt-3 flex flex-col gap-1">
-                    <span
-                      id="wizard-base-url-label"
-                      class="text-xs font-medium text-base-content-muted"
-                      >Server URL</span
-                    >
-                    <input
-                      type="text"
-                      class="input input-bordered input-sm w-full min-h-9 border-base-content-muted bg-base-100 text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                      aria-labelledby="wizard-base-url-label"
-                      [value]="baseUrlDraft()"
-                      (input)="onBaseUrlInput($event)"
-                      [attr.aria-invalid]="baseUrlError() ? true : null"
-                      data-testid="wizard-base-url"
-                    />
-                  </label>
+                  <div class="mt-3 flex flex-col gap-1">
+                    <span id="wizard-base-url-label" class="sr-only">Server URL</span>
+                    <ptah-field label="Server URL">
+                      <input ptahInput
+                          type="text"
+                          class="w-full text-base-content"
+                          aria-labelledby="wizard-base-url-label"
+                          [value]="baseUrlDraft()"
+                          (input)="onBaseUrlInput($event)"
+                          [attr.aria-invalid]="baseUrlError() ? true : null"
+                          data-testid="wizard-base-url"
+                        />
+                    </ptah-field>
+                  </div>
                   @if (baseUrlError(); as urlError) {
                     <p class="text-xs text-base-content" data-testid="wizard-url-error">
                       {{ urlError }}
@@ -906,22 +899,20 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                     Credentials and prompts are sent to {{ destinationHostname() }}.
                   </p>
                   @if (supportsOptionalKey()) {
-                    <label class="mt-3 flex flex-col gap-1">
-                      <span
-                        id="wizard-optional-key-label"
-                        class="text-xs font-medium text-base-content-muted"
-                        >API key (optional)</span
-                      >
-                      <input
-                        [type]="showApiKey() ? 'text' : 'password'"
-                        class="input input-bordered input-sm w-full min-h-9 border-base-content-muted bg-base-100 text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                        autocomplete="off"
-                        aria-labelledby="wizard-optional-key-label"
-                        [value]="apiKeyDraft()"
-                        (input)="onApiKeyInput($event)"
-                        data-testid="wizard-optional-key"
-                      />
-                    </label>
+                    <div class="mt-3 flex flex-col gap-1">
+                      <span id="wizard-optional-key-label" class="sr-only">API key (optional)</span>
+                      <ptah-field label="API key (optional)">
+                        <input ptahInput
+                            [type]="showApiKey() ? 'text' : 'password'"
+                            class="w-full text-base-content"
+                            autocomplete="off"
+                            aria-labelledby="wizard-optional-key-label"
+                            [value]="apiKeyDraft()"
+                            (input)="onApiKeyInput($event)"
+                            data-testid="wizard-optional-key"
+                          />
+                      </ptah-field>
+                    </div>
                     <button
                       type="button"
                       ptahButton variant="ghost" class="mt-1 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
@@ -941,22 +932,20 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                 }
                 @case ('custom') {
                    <div class="ptah-motion-panel" [animate.enter]="credentialModeEnterClass()" animate.leave="ptah-motion-leave">
-                  <label class="mt-3 flex flex-col gap-1">
-                    <span
-                      id="wizard-base-url-label"
-                      class="text-xs font-medium text-base-content-muted"
-                      >Server URL</span
-                    >
-                    <input
-                      type="text"
-                      class="input input-bordered input-sm w-full min-h-9 border-base-content-muted bg-base-100 text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                      aria-labelledby="wizard-base-url-label"
-                      [value]="baseUrlDraft()"
-                      (input)="onBaseUrlInput($event)"
-                      [attr.aria-invalid]="baseUrlError() ? true : null"
-                      data-testid="wizard-base-url"
-                    />
-                  </label>
+                  <div class="mt-3 flex flex-col gap-1">
+                    <span id="wizard-base-url-label" class="sr-only">Server URL</span>
+                    <ptah-field label="Server URL">
+                      <input ptahInput
+                          type="text"
+                          class="w-full text-base-content"
+                          aria-labelledby="wizard-base-url-label"
+                          [value]="baseUrlDraft()"
+                          (input)="onBaseUrlInput($event)"
+                          [attr.aria-invalid]="baseUrlError() ? true : null"
+                          data-testid="wizard-base-url"
+                        />
+                    </ptah-field>
+                  </div>
                   @if (baseUrlError(); as urlError) {
                     <p class="text-xs text-base-content" data-testid="wizard-url-error">
                       {{ urlError }}
@@ -968,22 +957,20 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                   >
                     Credentials and prompts are sent to {{ destinationHostname() }}.
                   </p>
-                  <label class="mt-3 flex flex-col gap-1">
-                    <span
-                      id="wizard-api-key-label"
-                      class="text-xs font-medium text-base-content-muted"
-                      >API key</span
-                    >
-                    <input
-                      [type]="showApiKey() ? 'text' : 'password'"
-                      class="input input-bordered input-sm w-full min-h-9 border-base-content-muted bg-base-100 text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                      autocomplete="off"
-                      aria-labelledby="wizard-api-key-label"
-                      [value]="apiKeyDraft()"
-                      (input)="onApiKeyInput($event)"
-                      data-testid="wizard-api-key"
-                    />
-                  </label>
+                  <div class="mt-3 flex flex-col gap-1">
+                    <span id="wizard-api-key-label" class="sr-only">API key</span>
+                    <ptah-field label="API key">
+                      <input ptahInput
+                          [type]="showApiKey() ? 'text' : 'password'"
+                          class="w-full text-base-content"
+                          autocomplete="off"
+                          aria-labelledby="wizard-api-key-label"
+                          [value]="apiKeyDraft()"
+                          (input)="onApiKeyInput($event)"
+                          data-testid="wizard-api-key"
+                        />
+                    </ptah-field>
+                  </div>
                   <button
                     type="button"
                     ptahButton variant="ghost" class="mt-1 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"

@@ -27,7 +27,7 @@ import {
 } from '@ptah-extension/shared';
 import { NativeModalComponent } from '@ptah-extension/ui';
 import { AlertTriangle, Copy, Lock, LucideAngularModule } from 'lucide-angular';
-import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
 import { SettingsBusyDisabledDirective } from '../../feedback/busy-disabled.directive';
 import { SettingsSaveFeedbackService } from '../../feedback/settings-save-feedback.service';
 import {
@@ -77,7 +77,7 @@ const LOCK_REASON_ID = 'account-detail-lock-reason';
 @Component({
   selector: 'ptah-account-detail-view',
   standalone: true,
-  imports: [NativeModalComponent, LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective, SettingsBusyDisabledDirective],
+  imports: [NativeModalComponent, LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective, SettingsBusyDisabledDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-6 text-sm text-base-content" data-testid="account-detail" (focusin)="noteFocus($event)">
@@ -204,10 +204,11 @@ const LOCK_REASON_ID = 'account-detail-lock-reason';
         </label>
         <div class="flex flex-wrap items-center gap-2">
           <input
+            ptahInput
             #nameInput
             id="account-detail-name"
             type="text"
-            [class]="'input input-bordered input-sm min-h-8 min-w-0 flex-1 text-sm text-base-content ' + focusRing"
+            [class]="'min-h-8 min-w-0 flex-1 text-sm text-base-content ' + focusRing"
             [value]="draftLabel()"
             (input)="onDraft($event)"
             autocomplete="off"
