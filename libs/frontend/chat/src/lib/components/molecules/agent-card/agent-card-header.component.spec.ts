@@ -6,6 +6,7 @@ import {
   type ProviderAccountsView,
 } from '@ptah-extension/core';
 import type { ProviderAccountsSnapshot } from '@ptah-extension/shared';
+import { PTAH_CLOCK } from '@ptah-extension/ui';
 import { AgentCardHeaderComponent } from './agent-card-header.component';
 
 function lane(overrides: Partial<MonitoredAgent> = {}): MonitoredAgent {
@@ -33,10 +34,14 @@ describe('AgentCardHeaderComponent — prompt cache (N6)', () => {
 
   function setup(agent: MonitoredAgent): HTMLElement {
     TestBed.resetTestingModule();
-    TestBed.configureTestingModule({ imports: [AgentCardHeaderComponent] });
+    TestBed.configureTestingModule({
+      imports: [AgentCardHeaderComponent],
+      providers: [
+        { provide: PTAH_CLOCK, useValue: { now: signal(Date.now()), acquire: () => () => undefined } },
+      ],
+    });
     fixture = TestBed.createComponent(AgentCardHeaderComponent);
     fixture.componentRef.setInput('agent', agent);
-    fixture.componentRef.setInput('elapsedDisplay', '1s');
     fixture.componentRef.setInput('isStopping', false);
     fixture.componentRef.setInput('isResuming', false);
     fixture.detectChanges();
@@ -97,9 +102,46 @@ describe('AgentCardHeaderComponent — prompt cache (N6)', () => {
     expect(flat.textContent).not.toContain('Worker Alpha');
     expect(flat.textContent).toContain('running');
     expect(flat.textContent).toContain('gpt-5');
-    expect(flat.textContent).toContain('1s');
+    expect(flat.querySelector('ptah-timer')).not.toBeNull();
     expect(flat.querySelector('[aria-label="Stop agent"]')).not.toBeNull();
     expect(flat.textContent).not.toContain('session-123');
+  });
+});
+
+describe('AgentCardHeaderComponent — elapsed timer', () => {
+  function render(agent: MonitoredAgent): HTMLElement {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      imports: [AgentCardHeaderComponent],
+      providers: [
+        { provide: PTAH_CLOCK, useValue: { now: signal(61_000), acquire: () => () => undefined } },
+      ],
+    });
+    const fixture = TestBed.createComponent(AgentCardHeaderComponent);
+    fixture.componentRef.setInput('agent', agent);
+    fixture.componentRef.setInput('isStopping', false);
+    fixture.componentRef.setInput('isResuming', false);
+    fixture.detectChanges();
+    return fixture.nativeElement as HTMLElement;
+  }
+
+  it('freezes at completedAt for a finished run', () => {
+    const el = render(lane({ status: 'completed', startedAt: 0, completedAt: 5_000 }));
+    const timer = el.querySelector('ptah-timer');
+    expect(timer?.getAttribute('data-state')).toBe('frozen');
+    expect(timer?.textContent).toContain('5s');
+  });
+
+  it('runs live for a running agent', () => {
+    const el = render(lane({ status: 'running', startedAt: 0 }));
+    const timer = el.querySelector('ptah-timer');
+    expect(timer?.getAttribute('data-state')).toBe('running');
+    expect(timer?.textContent).toContain('1m 1s');
+  });
+
+  it('shows no timer for a finished run without completedAt', () => {
+    const el = render(lane({ status: 'failed', startedAt: 0 }));
+    expect(el.querySelector('ptah-timer')).toBeNull();
   });
 });
 
@@ -125,12 +167,12 @@ describe('AgentCardHeaderComponent — lane account (U5)', () => {
     TestBed.configureTestingModule({
       imports: [AgentCardHeaderComponent],
       providers: [
+        { provide: PTAH_CLOCK, useValue: { now: signal(Date.now()), acquire: () => () => undefined } },
         { provide: ProviderAccountsStateService, useValue: fakeAccounts },
       ],
     });
     const fixture = TestBed.createComponent(AgentCardHeaderComponent);
     fixture.componentRef.setInput('agent', agent);
-    fixture.componentRef.setInput('elapsedDisplay', '1s');
     fixture.componentRef.setInput('isStopping', false);
     fixture.componentRef.setInput('isResuming', false);
     fixture.detectChanges();
@@ -190,6 +232,7 @@ describe('AgentCardHeaderComponent — lane account (U5)', () => {
     TestBed.configureTestingModule({
       imports: [AgentCardHeaderComponent],
       providers: [
+        { provide: PTAH_CLOCK, useValue: { now: signal(Date.now()), acquire: () => () => undefined } },
         { provide: ProviderAccountsStateService, useValue: fakeAccounts },
       ],
     });
@@ -198,7 +241,6 @@ describe('AgentCardHeaderComponent — lane account (U5)', () => {
       'agent',
       lane({ cli: 'claude', accountProfileId: PROFILE }),
     );
-    fixture.componentRef.setInput('elapsedDisplay', '1s');
     fixture.componentRef.setInput('isStopping', false);
     fixture.componentRef.setInput('isResuming', false);
     fixture.detectChanges();

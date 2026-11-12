@@ -1,0 +1,11 @@
+# Lane rules (repeat in every brief)
+Worktree: D:\projects\ptah-extension\.claude-worktrees\feat-ui-timer-adopt-1-c811e390079b (stay inside; no cd to the main checkout).
+Plan: .ptah/specs/TASK_2026_924_8ac1/design-system-epic.md sections 3A.1, 3A.2, 3A.4, 3A.5, 4. Sources: .ptah/specs/TASK_2026_970_fa60/inventory.md, charts-timers-proposal.md. Read CLAUDE.md.
+Owners (DO NOT edit): libs/frontend/ui/src/lib/time/* (ptah-timer, ptah-countdown, ptah-relative-time, formatDuration, formatRelative, formatAbsolute, injectPtahClock), libs/frontend/core ClockService (clock.service.ts). WallClockService is already a wrapper over ClockService. If an owner lacks something, report it in your result file; do not work around it with a private copy.
+Family rules: a timer derives from a timestamp, never a counted tick; one shared interval; pause when hidden; role="timer" is silent for ticks; a consumer passes data and a tone and sets no colors or sizes. Keep behavior, data-testid values and visible text unless the owner format differs; list EVERY visible text change.
+Angular: standalone, OnPush, signals, inject(). Check module boundaries (@nx/enforce-module-boundaries; type:core cannot import type:ui) before each import. If a boundary blocks a file, leave it and report it as a named exception.
+Do not add a line that contains an agent role name (names of specialist agent types) outside .ptah/specs/**.
+Max six write files per batch (spec files do not count). Update/add specs for changed behavior.
+Verify ONLY with: npm run verify -- -p <changed libs>  (extra jest flags after a second --). After a template change: npm run verify -- -t typecheck-templates -p ptah-extension-webview. NEVER run build, serve, dev, e2e, package or workspace-wide checks. Report real numbers (suites/tests passed/failed/total). Never call a failure unrelated without proof it fails on origin/main.
+Do NOT change tools/ui-class-audit baseline.json by hand. No user email, Windows user name or C:\Users path in any file. Do not commit, push, or open PRs. Do not edit apps/ptah-extension-webview/src/app/ui-gallery/**.
+Write the result file named in the brief: files changed, test counts, visible text changes, exceptions, open points.

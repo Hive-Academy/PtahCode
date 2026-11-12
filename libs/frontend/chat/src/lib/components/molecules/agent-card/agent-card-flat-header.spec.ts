@@ -1,5 +1,6 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { PTAH_CLOCK } from '@ptah-extension/ui';
 import { provideMarkdown } from 'ngx-markdown';
 import {
   AgentDeliveryStore,
@@ -47,6 +48,7 @@ describe('AgentCardComponent flat execution header', () => {
     TestBed.configureTestingModule({
       imports: [AgentCardComponent],
       providers: [
+        { provide: PTAH_CLOCK, useValue: { now: signal(Date.now()), acquire: () => () => undefined } },
         provideSurfaceActiveTesting(),
         provideMarkdown(),
         { provide: AgentDeliveryStore, useValue: { receipts: signal(new Map()), recovered: signal(new Map()), takeRecovered: () => null,

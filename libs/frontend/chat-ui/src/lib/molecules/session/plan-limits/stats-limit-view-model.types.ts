@@ -122,6 +122,8 @@ export interface PlanLimitTileModel {
   readonly caption: string;
   readonly value: string;
   readonly resetLine: string;
+  /** Epoch deadline for a window reset countdown, when reported. */
+  readonly resetsAt?: number;
   readonly chip?: StatsChip;
   readonly tone: StatsTileTone;
   /** Short source chips for the values on the closed face. */

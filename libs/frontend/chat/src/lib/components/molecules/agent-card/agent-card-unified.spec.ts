@@ -1,5 +1,6 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { PTAH_CLOCK } from '@ptah-extension/ui';
 import type {
   CliOutputSegment,
   FlatStreamEventUnion,
@@ -49,6 +50,7 @@ describe('agent card unified output regressions', () => {
     TestBed.configureTestingModule({
       imports: [AgentCardComponent, CliAgentOutputComponent],
       providers: [
+        { provide: PTAH_CLOCK, useValue: { now: signal(Date.now()), acquire: () => () => undefined } },
         {
           provide: ChatStore,
           useValue: {

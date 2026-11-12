@@ -19,6 +19,7 @@ import {
   signal,
 } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { PTAH_CLOCK } from '@ptah-extension/ui';
 import { By } from '@angular/platform-browser';
 import { provideSurfaceActiveTesting } from '@ptah-extension/core/testing';
 import { AgentMonitorStore } from '@ptah-extension/chat-streaming';
@@ -254,6 +255,7 @@ describe('AgentMonitorPanelComponent — overlay focus', () => {
     TestBed.configureTestingModule({
       imports: [AgentMonitorPanelComponent],
       providers: [
+        { provide: PTAH_CLOCK, useValue: { now: signal(Date.now()), acquire: () => () => undefined } },
         { provide: AgentPermissionResponder, useValue: { respondLane: jest.fn() } },
         {
           provide: AgentMonitorStore,
@@ -371,6 +373,7 @@ describe('AgentMonitorPanelComponent — sticky-to-bottom scrolling', () => {
     TestBed.configureTestingModule({
       imports: [AgentMonitorPanelComponent],
       providers: [
+        { provide: PTAH_CLOCK, useValue: { now: signal(Date.now()), acquire: () => () => undefined } },
         { provide: AgentPermissionResponder, useValue: { respondLane: jest.fn() } },
         {
           provide: AgentMonitorStore,
@@ -540,6 +543,7 @@ describe('AgentMonitorPanelComponent — session subagents', () => {
     TestBed.configureTestingModule({
       imports: [AgentMonitorPanelComponent],
       providers: [
+        { provide: PTAH_CLOCK, useValue: { now: signal(Date.now()), acquire: () => () => undefined } },
         { provide: AgentPermissionResponder, useValue: { respondLane: jest.fn() } },
         provideSurfaceActiveTesting(),
         {

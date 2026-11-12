@@ -591,6 +591,19 @@ describe('buildStatsLimitViewModel', () => {
   });
 
   describe('plan tiles', () => {
+    it('uses active exhaustion reset for both absolute text and countdown', () => {
+      const window = planWindow({
+        used: { kind: 'percent', percent: 100 },
+        exhaustion: { observedAt: NOW - MIN, source: 'error-derived', resetsAt: NOW + HOUR },
+      });
+      const tile = buildStatsLimitViewModel(
+        input({ owners: [snapshot(CLAUDE_A, { windows: [window] })] }),
+      ).planTiles[0];
+      expect(tile.resetsAt).toBe(NOW + HOUR);
+      expect(tile.resetLine).toContain('resets today 13:00 UTC');
+      expect(tile.resetLine).not.toContain('in 1h');
+    });
+
     it('a reset after the last observation reads unknown with passed and next reset apart', () => {
       const passed = planWindow({
         resetsAt: NOW - 40 * MIN,
@@ -609,6 +622,7 @@ describe('buildStatsLimitViewModel', () => {
         sourceChips: ['Provider API'],
       });
       expect(tile.window?.percent).toBeUndefined();
+      expect(tile.resetsAt).toBeUndefined();
       expect(tile.window?.resetFacts).toEqual([
         'Reset today 11:20 UTC · 40m ago came after the last observation (today 10:52 UTC): current usage unknown',
         'Next reset unknown',
@@ -625,6 +639,7 @@ describe('buildStatsLimitViewModel', () => {
         input({ owners: [snapshot(CLAUDE_A, { windows: [passed] })] }),
       );
       expect(vm.planTiles[0].resetLine).toContain('in 4h 0m');
+      expect(vm.planTiles[0].resetsAt).toBeUndefined();
     });
 
     it('expired owner evidence never claims current exhaustion', () => {
@@ -707,7 +722,7 @@ describe('buildStatsLimitViewModel', () => {
         input({ time: { timeZone: 'Europe/Berlin', zoneNameLocale: 'en-GB' } }),
       );
       expect(vm.planTiles[0].resetLine).toBe(
-        'resets today 17:10 CEST · in 3h 10m',
+        'resets today 17:10 CEST',
       );
     });
   });

@@ -7,6 +7,7 @@ import {
 } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { ChevronDown, ChevronUp, LucideAngularModule } from 'lucide-angular';
+import { PtahCountdownComponent } from '@ptah-extension/ui';
 import { PlanWindowDetailComponent } from './plan-window-detail.component';
 import { sameSources } from './stats-limit-sections';
 import {
@@ -46,7 +47,7 @@ import type { PlanLimitTileModel } from './stats-limit-view-model.types';
 @Component({
   selector: 'ptah-plan-limit-tile',
   standalone: true,
-  imports: [LucideAngularModule, NgTemplateOutlet, PlanWindowDetailComponent],
+  imports: [LucideAngularModule, NgTemplateOutlet, PlanWindowDetailComponent, PtahCountdownComponent],
   host: {
     class: 'block min-w-0',
     '[attr.data-tile-id]': 'tile().id',
@@ -175,6 +176,9 @@ import type { PlanLimitTileModel } from './stats-limit-view-model.types';
             }
           </span>
         }
+        @if (t.resetsAt !== undefined) {
+          <span class="mt-1 block text-[11px] text-base-content-muted"><span aria-hidden="true">Resets in </span><ptah-countdown [deadline]="t.resetsAt" format="compact" label="Resets in" /></span>
+        }
         @if (!captionShared() || ownSources().length > 0) {
           <span
             class="mt-1.5 flex min-w-0 flex-wrap items-center gap-1 text-[10px] text-base-content-muted"
@@ -283,6 +287,9 @@ import type { PlanLimitTileModel } from './stats-limit-view-model.types';
             class="block pl-[4.5rem] text-[11px] leading-tight text-base-content-muted"
             >{{ t.resetLine }}</span
           >
+        }
+        @if (t.resetsAt !== undefined) {
+          <span class="block pl-[4.5rem] text-[11px] text-base-content-muted"><span aria-hidden="true">Resets in </span><ptah-countdown [deadline]="t.resetsAt" format="compact" label="Resets in" /></span>
         }
         @if (!captionShared() || ownSources().length > 0) {
           <span

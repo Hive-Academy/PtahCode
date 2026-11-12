@@ -22,9 +22,9 @@
  * erase a newer pushed snapshot. A malformed push is logged and ignored, and
  * the last good snapshot stays.
  *
- * Runtime cost: ONE 30 s interval drives `now()` for every limit surface. It
- * starts on the first `load()` and is released through `DestroyRef`. Surfaces
- * must not start their own timers.
+ * Runtime cost: ClockService drives `now()` for every limit surface at its
+ * coarse 30 s cadence as a floor; other second holders can make it tick at
+ * 1 s. The store acquires on first load and releases on destroy.
  */
 
 import {
@@ -43,11 +43,12 @@ import {
 } from '@ptah-extension/shared';
 
 import { ClaudeRpcService } from './claude-rpc.service';
+import { ClockService, CLOCK_COARSE_MS } from './clock.service';
 import type { MessageHandler } from './message-router.types';
 import { carryPlanLimitsSnapshot } from './plan-limits-snapshot-carry';
 
 /** Period of the shared `now()` clock. */
-export const PLAN_LIMITS_CLOCK_TICK_MS = 30_000;
+export const PLAN_LIMITS_CLOCK_TICK_MS = CLOCK_COARSE_MS;
 
 /** The sessions and run owners one surface shows. */
 export interface PlanLimitsSurfaceScope {
@@ -74,6 +75,7 @@ export type PlanLimitsLoadParams = Pick<
 @Injectable({ providedIn: 'root' })
 export class PlanLimitsStore implements MessageHandler {
   private readonly rpc = inject(ClaudeRpcService);
+  private readonly clock = inject(ClockService);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly handledMessageTypes = [MESSAGE_TYPES.PLAN_LIMITS_CHANGED] as const;
@@ -85,7 +87,6 @@ export class PlanLimitsStore implements MessageHandler {
   private readonly _snapshot = signal<PlanLimitsSnapshot | null>(null);
   private readonly _loading = signal(false);
   private readonly _loadError = signal(false);
-  private readonly _now = signal<number>(Date.now());
 
   readonly snapshot = this._snapshot.asReadonly();
   readonly loading = this._loading.asReadonly();
@@ -94,8 +95,8 @@ export class PlanLimitsStore implements MessageHandler {
    * pull or push.
    */
   readonly loadError = this._loadError.asReadonly();
-  /** Shared wall clock for "resets in …" text; ticks every 30 s once loaded. */
-  readonly now = this._now.asReadonly();
+  /** Shared wall clock for "resets in …" text; at least every 30 s once loaded. */
+  readonly now = this.clock.now;
 
   private readonly ownersByKey = computed(() => {
     const map = new Map<string, PlanLimitOwnerSnapshot>();
@@ -111,7 +112,7 @@ export class PlanLimitsStore implements MessageHandler {
   private trailingRefresh = false;
   private incompleteRetryCount = 0;
   private incompleteRetryTimer: ReturnType<typeof setTimeout> | null = null;
-  private clockHandle: ReturnType<typeof setInterval> | null = null;
+  private clockRelease: (() => void) | null = null;
   /**
    * Session and run-owner scope of every live surface, by handle id. Every
    * load sends the UNION, because all surfaces read this one snapshot and the
@@ -276,13 +277,16 @@ export class PlanLimitsStore implements MessageHandler {
     return request;
   }
 
-  /** A valid host snapshot (pull or push); older than the held one is ignored. */
+  /**
+   * A valid host snapshot (pull or push); older than the held one is ignored.
+   * The shared clock may be up to one coarse tick old when a push arrives;
+   * accept that brief classification lag until its next tick.
+   */
   private apply(next: PlanLimitsSnapshot): void {
     this._loadError.set(false);
     const current = this._snapshot();
     if (current && next.generatedAt < current.generatedAt) return;
     this._snapshot.set(current ? carryPlanLimitsSnapshot(current, next) : next);
-    this._now.set(Date.now());
   }
 
   /**
@@ -296,21 +300,16 @@ export class PlanLimitsStore implements MessageHandler {
     if (this._snapshot() === null) {
       this._snapshot.set({ generatedAt: 0, owners: [], sessionOwners: {} });
     }
-    this._now.set(Date.now());
   }
 
   private startClock(): void {
-    if (this.clockHandle !== null) return;
-    this.clockHandle = setInterval(
-      () => this._now.set(Date.now()),
-      PLAN_LIMITS_CLOCK_TICK_MS,
-    );
+    if (this.clockRelease !== null) return;
+    this.clockRelease = this.clock.acquire('coarse');
   }
 
   private stopClock(): void {
-    if (this.clockHandle === null) return;
-    clearInterval(this.clockHandle);
-    this.clockHandle = null;
+    this.clockRelease?.();
+    this.clockRelease = null;
   }
 }
 
