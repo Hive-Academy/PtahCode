@@ -30,9 +30,20 @@ describe('form control look contract', () => {
     }
     expect(family).not.toContain('.ptah-select__trigger');
   });
-  it('hides the browser search action for family and field controls', () => {
-    expect(family).toContain("input[type='search'][data-ptah-control]::-webkit-search-cancel-button");
-    expect(field).toContain(".ptah-field__body input[type='search']::-webkit-search-cancel-button");
+  it('hides the browser search action only for a field-owned search control', () => {
+    const rule = field.match(
+      /^\.ptah-field__body input\[type='search'\]::-webkit-search-cancel-button,\s*\.ptah-field__body input\[type='search'\]::-webkit-search-decoration \{([^}]*)\}/m,
+    );
+    expect(rule?.[1]).toContain('display: none;');
+    for (const css of [family, field, select]) {
+      const selectors = css.match(/[^{}]*::-webkit-search-(?:cancel-button|decoration)[^{]*\{/g) ?? [];
+      for (const selector of selectors) {
+        for (const part of selector.replace('{', '').split(',')) {
+          expect(part.replace(/\/\*[\s\S]*?\*\//g, '').trim()).toMatch(/^\.ptah-field__body /);
+        }
+      }
+    }
+    expect(family).not.toContain('::-webkit-search-cancel-button');
   });
 
   it('resets a native field control without a family data attribute', () => {

@@ -100,14 +100,8 @@
   opacity: 1;
 }
 
-/* The field owner supplies the clear action for search controls.
-   ptah-field.css hides the same parts for a field control without the
-   data attribute. */
-input[type='search'][data-ptah-control]::-webkit-search-cancel-button,
-input[type='search'][data-ptah-control]::-webkit-search-decoration {
-  display: none;
-  -webkit-appearance: none;
-}
+/* A standalone search control keeps the browser clear action. Only the
+   field owner replaces it (ptah-field.css, .ptah-field__body scope). */
 
 /* Hover */
 :is(.input, .textarea, .select)[data-ptah-control]:is(:hover, [data-state='hover']):not(:disabled, :focus-visible, [aria-invalid='true']):is(.input, .textarea, .select, #ptah-control) {
