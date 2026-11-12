@@ -155,7 +155,11 @@ import { EventFeedComponent } from './event-feed.component';
       </section>
 
       @if (triggers(); as t) {
-        <ptah-surface-card aria-label="Curator model" class="block">
+        <ptah-surface-card
+          variant="legacy"
+          aria-label="Curator model"
+          class="block"
+        >
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <h3 class="text-sm font-semibold">Curator model</h3>

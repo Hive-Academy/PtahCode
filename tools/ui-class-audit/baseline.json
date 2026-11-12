@@ -85,11 +85,7 @@
     "btn-xs": 2
   },
   "libs/frontend/chat-ui/src/lib/molecules/agent-steer-input.component.ts": {
-    "<dynamic>": 4,
-    "btn": 1,
-    "btn-primary": 1,
-    "btn-square": 1,
-    "btn-xs": 1
+    "<dynamic>": 4
   },
   "libs/frontend/chat-ui/src/lib/molecules/boot-progress/boot-progress.component.ts": {
     "<dynamic>": 1
@@ -651,11 +647,10 @@
     "<dynamic>": 2
   },
   "libs/frontend/core/src/lib/components/attention-permission-actions.component.ts": {
-    "btn": 5,
-    "btn-error": 1,
-    "btn-ghost": 4,
+    "btn": 3,
+    "btn-ghost": 3,
     "btn-primary": 1,
-    "btn-sm": 5,
+    "btn-sm": 3,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
@@ -1008,12 +1003,6 @@
     "<dynamic>": 5,
     "skeleton": 2
   },
-  "libs/frontend/memory-curator-ui/src/lib/components/corpus-build-dialog.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/memory-curator-ui/src/lib/components/corpus-list.component.ts": {
     "btn": 1,
     "btn-ghost": 1,
@@ -1050,12 +1039,6 @@
     "btn-primary": 2,
     "btn-sm": 2
   },
-  "libs/frontend/memory-curator-ui/src/lib/components/timeline-filters.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/memory-curator-ui/src/lib/components/timeline-view.component.ts": {
     "alert": 1,
     "alert-error": 1,
@@ -1067,10 +1050,7 @@
   },
   "libs/frontend/messaging-gateway-ui/src/lib/components/messaging-gateway-tab.component.ts": {
     "alert": 1,
-    "alert-error": 1,
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
+    "alert-error": 1
   },
   "libs/frontend/messaging-gateway-ui/src/lib/components/platform-bindings-panel.component.ts": {
     "alert": 1,
@@ -1082,8 +1062,10 @@
     "btn-xs": 4
   },
   "libs/frontend/notification-center/src/lib/notification-center.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
+    "btn": 3,
+    "btn-ghost": 3,
+    "btn-primary": 1,
+    "btn-sm": 2,
     "btn-square": 1
   },
   "libs/frontend/notification-center/src/lib/notification-snackbar.component.ts": {

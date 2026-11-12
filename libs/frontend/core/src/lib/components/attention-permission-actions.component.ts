@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, input, output, signal, viewChild, viewChildren } from '@angular/core';
 import type { AttentionItem } from '../services/attention.types';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 let permissionActionsInstance = 0;
 
@@ -8,6 +9,7 @@ let permissionActionsInstance = 0;
   selector: 'ptah-attention-permission-actions',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PtahButtonDirective],
   template: `
     @if (!compact() && item().permissionPreview) {
       <p class="mt-2 break-words text-xs text-base-content-muted">{{ item().permissionPreview }}</p>
@@ -52,8 +54,8 @@ let permissionActionsInstance = 0;
           <p [id]="'permission-reason-error-' + instanceId" class="text-xs text-error" role="alert">Enter a reason for denial.</p>
         }
         <div class="flex gap-1">
-          <button type="submit" class="btn btn-error btn-sm" [disabled]="busy() || !!reasonFor('deny_with_message')">Send denial</button>
-          <button type="button" class="btn btn-ghost btn-sm" (click)="toggleMessage()">Cancel</button>
+          <button ptahButton variant="danger" type="submit" [disabled]="busy() || !!reasonFor('deny_with_message')">Send denial</button>
+          <button ptahButton variant="ghost" type="button" (click)="toggleMessage()">Cancel</button>
         </div>
       </form>
     }
