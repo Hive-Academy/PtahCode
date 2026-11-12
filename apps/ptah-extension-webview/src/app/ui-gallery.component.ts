@@ -15,6 +15,7 @@ import {
   PtahStatusBadgeComponent,
 } from '@ptah-extension/ui';
 import { GalleryBadgeFamilyComponent } from './ui-gallery/gallery-badge-family.component';
+import { GalleryTimersFamilyComponent } from './ui-gallery/gallery-timers-family.component';
 import { GalleryButtonFamilyComponent } from './ui-gallery/gallery-button-family.component';
 import { GalleryComponentsComponent } from './ui-gallery/gallery-components.component';
 import { GalleryFormControlsFamilyComponent } from './ui-gallery/gallery-form-controls-family.component';
@@ -41,6 +42,7 @@ interface GallerySectionLink {
     GalleryButtonFamilyComponent,
     GalleryFormControlsFamilyComponent,
     GalleryBadgeFamilyComponent,
+    GalleryTimersFamilyComponent,
     GalleryComponentsComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -110,6 +112,7 @@ interface GallerySectionLink {
       <ptah-gallery-button-family />
       <ptah-gallery-form-controls-family />
       <ptah-gallery-badge-family />
+      <ptah-gallery-timers-family />
       <ptah-gallery-components />
     </div>
   </main>`,
@@ -143,6 +146,14 @@ export class UiGalleryComponent {
     { id: 'family-button', label: 'Button family' },
     { id: 'family-form-controls', label: 'Form controls family' },
     { id: 'family-badge', label: 'Badge and status family' },
+    { id: 'timer-running', label: 'Timer: running' },
+    { id: 'timer-frozen', label: 'Timer: frozen' },
+    { id: 'timer-compact', label: 'Timer: compact' },
+    { id: 'countdown-running', label: 'Countdown: running' },
+    { id: 'countdown-urgent', label: 'Countdown: urgent' },
+    { id: 'countdown-expired', label: 'Countdown: expired' },
+    { id: 'relative-past', label: 'Relative time: past' },
+    { id: 'relative-future', label: 'Relative time: future' },
     { id: 'components-buttons', label: 'Buttons' },
     { id: 'components-fields', label: 'Fields' },
     { id: 'components-metrics', label: 'Metrics' },

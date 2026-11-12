@@ -66,14 +66,14 @@ describe(WallClockService.name, () => {
     expect(documentMock.removeEventListener).toHaveBeenCalledWith('visibilitychange', visibilityListener);
   });
 
-  it('runs independent second and coarse intervals outside Angular', () => {
+  it('shares one interval across second and coarse readings outside Angular', () => {
     const zone = TestBed.inject(NgZone);
     const outsideAngular = jest.spyOn(zone, 'runOutsideAngular');
     const clock = TestBed.inject(WallClockService);
     const releaseSecond = clock.acquire('second');
     const releaseCoarse = clock.acquire('coarse');
-    expect(jest.getTimerCount()).toBe(2);
-    expect(outsideAngular).toHaveBeenCalledTimes(2);
+    expect(jest.getTimerCount()).toBe(1);
+    expect(outsideAngular).toHaveBeenCalledTimes(1);
     expect(documentMock.addEventListener).toHaveBeenCalledTimes(1);
 
     jest.advanceTimersByTime(1_000);
@@ -101,9 +101,31 @@ describe(WallClockService.name, () => {
     changeVisibility(false);
     expect(clock.now('second')()).toBe(50_000);
     expect(clock.now('coarse')()).toBe(50_000);
-    expect(jest.getTimerCount()).toBe(2);
+    expect(jest.getTimerCount()).toBe(1);
     releaseSecond();
     releaseCoarse();
+  });
+
+  it('refreshes coarse on acquire even before 30 seconds have elapsed', () => {
+    const clock = TestBed.inject(WallClockService);
+    const first = clock.acquire('coarse');
+    expect(clock.now('coarse')()).toBe(1_000);
+    jest.setSystemTime(30_000);
+    const second = clock.acquire('coarse');
+    expect(clock.now('coarse')()).toBe(30_000);
+    first();
+    second();
+  });
+
+  it('resets coarse after the wall clock moves backward', () => {
+    const clock = TestBed.inject(WallClockService);
+    const release = clock.acquire('coarse');
+    jest.advanceTimersByTime(WALL_CLOCK_COARSE_MS);
+    expect(clock.now('coarse')()).toBe(31_000);
+    jest.setSystemTime(5_000);
+    jest.advanceTimersByTime(1_000);
+    expect(clock.now('coarse')()).toBe(6_000);
+    release();
   });
 
   it('releases an unconditional injection when its DestroyRef is destroyed', () => {

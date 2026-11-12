@@ -42,9 +42,11 @@ import {
   AGENT_FEEDBACK_SENDER,
   SURFACE_ACTIVE,
   surfaceActiveFor,
+  ClockService,
   SurfaceRouterService,
   withSurfaceViewTransitions,
 } from '@ptah-extension/core';
+import { PTAH_CLOCK } from '@ptah-extension/ui';
 import { TabManagerService } from '@ptah-extension/chat-state';
 
 /** During Electron restore the workspace may activate after initial navigation; the shell revalidates the tab when it does. */
@@ -194,6 +196,7 @@ const changeDetectionProvider = useZoneChangeDetectionFallback()
 
 export const appConfig: ApplicationConfig = {
   providers: [
+    { provide: PTAH_CLOCK, useExisting: ClockService },
     // Root streaming ingestion serves both persistent layouts. The outlet and
     // the two element boundaries provide their narrower surface signals.
     { provide: SURFACE_ACTIVE, useFactory: surfaceActiveFor('chat') },
