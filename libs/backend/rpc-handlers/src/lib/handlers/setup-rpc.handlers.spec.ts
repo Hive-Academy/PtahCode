@@ -285,7 +285,10 @@ function makeHarness(opts: { workspaceFolders?: string[] } = {}): Harness {
     container as unknown as DependencyContainer,
     sentry as unknown as SentryService,
     packInstall,
-    { search: jest.fn(), invalidateInstallCaches: jest.fn() } as unknown as ConstructorParameters<typeof SetupRpcHandlers>[7],
+    {
+      search: jest.fn(),
+      invalidateInstallCaches: jest.fn(),
+    } as unknown as ConstructorParameters<typeof SetupRpcHandlers>[7],
   );
 
   return {
@@ -349,14 +352,19 @@ describe('SetupRpcHandlers', () => {
           'setup-wizard:launch',
           'wizard:cancel-analysis',
           'wizard:deep-analyze',
+          'wizard:get-project-guidance',
           'wizard:get-resumable-run',
           'wizard:analysis-status',
           'wizard:install-pack-agents',
+          'wizard:install-skills-with-consent',
           'wizard:list-agent-packs',
           'wizard:plan-pack-install',
+          'wizard:preview-skills-for-consent',
           'wizard:list-analyses',
           'wizard:load-analysis',
           'wizard:recommend-agents',
+          'wizard:recommend-skills',
+          'wizard:search-skills',
         ].sort(),
       );
     });

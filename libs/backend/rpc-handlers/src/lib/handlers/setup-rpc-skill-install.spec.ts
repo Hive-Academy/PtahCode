@@ -49,6 +49,7 @@ describe('wizard skill installation', () => {
   const install = jest.fn();
   const propagate = jest.fn();
   const keepSelected = jest.fn();
+  const loggerError = jest.fn();
   let workspaceRoot: string;
 
   beforeEach(async () => {
@@ -56,6 +57,7 @@ describe('wizard skill installation', () => {
       path.join(os.tmpdir(), 'ptah-consent-test-'),
     );
     jest.clearAllMocks();
+    consent.computeContentHash.mockReturnValue('a'.repeat(64));
     methods.clear();
     keepSelected.mockReturnValue(true);
     staged.mockImplementation(async (_request, root) => {
@@ -65,17 +67,28 @@ describe('wizard skill installation', () => {
       await fs.writeFile(path.join(skill, 'run.sh'), 'echo example');
       return { success: true };
     });
-    install.mockImplementation(async () => {
-      const root = workspacePluginsDir(workspaceRoot) as string;
-      const skill = path.join(
-        root,
-        'ptah-skillssh-owner-repo',
-        'skills',
-        'example',
+    install.mockImplementation(async (params, verifyStaged) => {
+      const stagingDir = await fs.mkdtemp(
+        path.join(os.tmpdir(), 'ptah-install-stage-'),
       );
-      await fs.mkdir(skill, { recursive: true });
-      await fs.writeFile(path.join(skill, 'SKILL.md'), '# Example');
-      return { success: true, data: { success: true } };
+      try {
+        const result = await staged(params, stagingDir);
+        if (!result.success) return { success: false };
+        const dir = path.join(stagingDir, '.claude', 'skills', params.skillId);
+        await verifyStaged([{ slug: params.skillId, dir }]);
+        const root = workspacePluginsDir(workspaceRoot) as string;
+        const skill = path.join(
+          root,
+          'ptah-skillssh-owner-repo',
+          'skills',
+          params.skillId,
+        );
+        await fs.mkdir(skill, { recursive: true });
+        await fs.cp(dir, skill, { recursive: true, force: true });
+        return { success: true };
+      } finally {
+        await fs.rm(stagingDir, { recursive: true, force: true });
+      }
     });
   });
 
@@ -93,18 +106,22 @@ describe('wizard skill installation', () => {
           name: string,
           fn: (params: unknown) => Promise<unknown>,
         ) => methods.set(name, fn),
-        handleMessage: install,
       },
       workspaceProvider: { getWorkspaceRoot: () => workspaceRoot },
       skillsShApi: { invalidateInstallCaches: jest.fn() },
       container: {
-        resolve: (token: symbol) => {
+        resolve: (token: unknown) => {
+          if (
+            typeof token === 'function' &&
+            token.name === 'SkillsShRpcHandlers'
+          )
+            return { install };
           if (String(token).includes('SkillConsent')) return consent;
           if (String(token).includes('SkillSyncGate')) return { keepSelected };
           return { propagate };
         },
       },
-      logger: { debug: jest.fn(), error: jest.fn() },
+      logger: { debug: jest.fn(), error: loggerError },
     });
     handler.register();
     return methods.get('wizard:install-skills-with-consent') as (
@@ -131,7 +148,8 @@ describe('wizard skill installation', () => {
       'a'.repeat(64),
     );
     expect(install).toHaveBeenCalledWith(
-      expect.objectContaining({ method: 'skillsSh:install' }),
+      { source: 'owner/repo', skillId: 'example', scope: 'workspace' },
+      expect.any(Function),
     );
     expect(keepSelected).toHaveBeenCalledWith(workspaceRoot, ['example']);
     expect(propagate).toHaveBeenCalledTimes(1);
@@ -141,8 +159,13 @@ describe('wizard skill installation', () => {
     consent.hasScripts.mockReturnValue(true);
     await expect(
       method()({ skills: ['owner/repo/example'], consentRecords: [] }),
-    ).rejects.toThrow('requires consent');
-    expect(install).not.toHaveBeenCalled();
+    ).resolves.toEqual({
+      success: false,
+      installed: [],
+      failedSkill: 'owner/repo/example',
+      reason: expect.stringContaining('requires consent'),
+    });
+    expect(install).toHaveBeenCalledTimes(1);
     expect(propagate).not.toHaveBeenCalled();
   });
 
@@ -159,15 +182,27 @@ describe('wizard skill installation', () => {
           },
         ],
       }),
-    ).rejects.toThrow('changed since preview');
-    expect(install).not.toHaveBeenCalled();
+    ).resolves.toEqual({
+      success: false,
+      installed: [],
+      failedSkill: 'owner/repo/example',
+      reason: expect.stringContaining('changed since preview'),
+    });
+    expect(install).toHaveBeenCalledTimes(1);
   });
 
   it('refuses changed bytes fetched during install', async () => {
     consent.hasScripts.mockReturnValue(true);
-    consent.computeContentHash
-      .mockReturnValueOnce('a'.repeat(64))
-      .mockReturnValueOnce('b'.repeat(64));
+    consent.computeContentHash.mockReturnValue('b'.repeat(64));
+    const installedPath = path.join(
+      workspacePluginsDir(workspaceRoot) as string,
+      'ptah-skillssh-owner-repo',
+      'skills',
+      'example',
+    );
+    await fs.mkdir(installedPath, { recursive: true });
+    await fs.writeFile(path.join(installedPath, 'SKILL.md'), '# Old copy');
+    const oldBytes = await fs.readFile(path.join(installedPath, 'SKILL.md'));
     await expect(
       method()({
         skills: ['owner/repo/example'],
@@ -179,10 +214,18 @@ describe('wizard skill installation', () => {
           },
         ],
       }),
-    ).rejects.toThrow('Installed skill content changed');
+    ).resolves.toEqual({
+      success: false,
+      installed: [],
+      failedSkill: 'owner/repo/example',
+      reason: expect.stringContaining('changed since preview'),
+    });
     expect(consent.recordConsent).not.toHaveBeenCalled();
     expect(keepSelected).not.toHaveBeenCalled();
     expect(propagate).not.toHaveBeenCalled();
+    await expect(
+      fs.readFile(path.join(installedPath, 'SKILL.md')),
+    ).resolves.toEqual(oldBytes);
   });
 
   it('previews staged files and computes the consent hash', async () => {
@@ -207,11 +250,75 @@ describe('wizard skill installation', () => {
 
   it('does not run the final propagation after a failed install', async () => {
     consent.hasScripts.mockReturnValue(false);
-    install.mockResolvedValue({ success: true, data: { success: false } });
+    install.mockResolvedValue({ success: false });
     await expect(
       method()({ skills: ['owner/repo/example'], consentRecords: [] }),
-    ).resolves.toEqual({ success: false, installed: [] });
+    ).resolves.toEqual({
+      success: false,
+      installed: [],
+      failedSkill: 'owner/repo/example',
+      reason: 'Skill install failed.',
+    });
     expect(keepSelected).not.toHaveBeenCalled();
     expect(propagate).not.toHaveBeenCalled();
+  });
+
+  it('reports partial progress and propagates earlier installs when a later skill throws', async () => {
+    consent.hasScripts.mockReturnValue(false);
+    staged.mockImplementation(async (request, root) => {
+      const skill = path.join(
+        root,
+        '.claude',
+        'skills',
+        request.skillId ?? 'example',
+      );
+      await fs.mkdir(skill, { recursive: true });
+      await fs.writeFile(path.join(skill, 'SKILL.md'), '# Example');
+      return { success: true };
+    });
+    install.mockImplementation(async (params, verifyStaged) => {
+      if (params.skillId === 'second')
+        throw new Error('network failed at /private/path');
+      const stagingDir = await fs.mkdtemp(
+        path.join(os.tmpdir(), 'ptah-install-stage-'),
+      );
+      try {
+        await staged(params, stagingDir);
+        await verifyStaged([
+          {
+            slug: params.skillId,
+            dir: path.join(stagingDir, '.claude', 'skills', params.skillId),
+          },
+        ]);
+        const skill = path.join(
+          workspacePluginsDir(workspaceRoot) as string,
+          'ptah-skillssh-owner-repo',
+          'skills',
+          'example',
+        );
+        await fs.mkdir(skill, { recursive: true });
+        await fs.writeFile(path.join(skill, 'SKILL.md'), '# Example');
+        return { success: true };
+      } finally {
+        await fs.rm(stagingDir, { recursive: true, force: true });
+      }
+    });
+    await expect(
+      method()({
+        skills: ['owner/repo/example', 'owner/repo/second'],
+        consentRecords: [],
+      }),
+    ).resolves.toEqual({
+      success: false,
+      installed: ['owner/repo/example'],
+      failedSkill: 'owner/repo/second',
+      reason: 'Skill install failed.',
+    });
+    expect(keepSelected).toHaveBeenCalledWith(workspaceRoot, ['example']);
+    expect(propagate).toHaveBeenCalledTimes(1);
+    expect(loggerError).toHaveBeenCalledWith(
+      'Failed to install skill owner/repo/second',
+      expect.any(Error),
+    );
   });
 });

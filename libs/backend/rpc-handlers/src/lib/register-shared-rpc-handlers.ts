@@ -88,7 +88,7 @@ import { registerSkillServices } from './di/register';
 export function registerSharedRpcHandlers(
   container: DependencyContainer,
 ): void {
-  registerSkillServices(container, container.resolve<Logger>(TOKENS.LOGGER));
+  registerSkillServices(container);
   container.registerSingleton(ReviewRpcHandlers);
   container.registerSingleton(CliModelListService);
   container.registerSingleton(GuidanceGenerationRunSupervisor);

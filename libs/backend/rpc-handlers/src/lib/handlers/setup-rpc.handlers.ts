@@ -91,9 +91,8 @@ import {
 } from './setup-rpc.schema';
 import { PackInstallService } from './setup/pack-install.service';
 import { SkillsShApiClient } from '@ptah-extension/cli-agent-runtime';
+import { SkillsShRpcHandlers } from './skills-sh-rpc.handlers';
 import { stageSkillsInstall, STAGED_SKILLS_REL } from '../utils/skills-sh-cli';
-import { skillsShRootId } from '../skills-sh/skills-sh-source-root';
-import { workspacePluginsDir } from '@ptah-extension/shared';
 import {
   HARNESS_SYNC_TOKENS,
   type HarnessPropagationService,
@@ -1249,74 +1248,68 @@ export class SetupRpcHandlers {
         'SkillConsentService',
       );
       const installed: string[] = [];
+      let failure: { failedSkill: string; reason: string } | undefined;
+      const installer = this.container.resolve(SkillsShRpcHandlers);
       for (const skillName of [...new Set(params.skills)]) {
-        const [owner, repo, skillId] = skillName.split('/');
-        const { packagePath, stagingDir } =
-          await this.stageConsentSkill(skillName);
-        let expectedHash: string;
         try {
-          expectedHash = consent.computeContentHash(packagePath);
-          const record = params.consentRecords.find(
-            (entry) => entry.skillName === skillName,
-          );
-          if (record && record.contentHash.toLowerCase() !== expectedHash) {
-            throw new RpcUserError(
-              'Skill content changed since preview. Preview it again.',
-              'INVALID_PARAMS',
-            );
-          }
-          if (consent.hasScripts(packagePath)) {
-            const approved = !!record;
-            if (!approved && !consent.canInstall(skillName, expectedHash)) {
-              throw new RpcUserError(
-                'This skill contains scripts and requires consent for its current content.',
-                'INVALID_PARAMS',
+          const [owner, repo, skillId] = skillName.split('/');
+          let verifiedHash: string | undefined;
+          let hasScripts = false;
+          const result = await installer.install(
+            { source: `${owner}/${repo}`, skillId, scope: 'workspace' },
+            (staged) => {
+              if (staged.length !== 1 || staged[0].slug !== skillId) {
+                throw new RpcUserError(
+                  'Unexpected skill in install.',
+                  'INVALID_PARAMS',
+                );
+              }
+              const dir = staged[0].dir;
+              const expectedHash = consent.computeContentHash(dir);
+              verifiedHash = expectedHash;
+              const record = params.consentRecords.find(
+                (entry) => entry.skillName === skillName,
               );
-            }
-          }
-        } finally {
-          await fs.rm(stagingDir, { recursive: true, force: true });
-        }
-        const result = await this.rpcHandler.handleMessage({
-          method: 'skillsSh:install',
-          params: { source: `${owner}/${repo}`, skillId, scope: 'workspace' },
-          correlationId: `wizard-skill-${installed.length}`,
-        });
-        if (
-          !result.success ||
-          !(result.data as { success?: boolean } | undefined)?.success
-        ) {
-          return { success: false, installed };
-        }
-        const pluginsDir = workspacePluginsDir(workspaceRoot);
-        const rootId = skillsShRootId(`${owner}/${repo}`);
-        if (!pluginsDir || !rootId)
-          throw new RpcUserError(
-            'Could not locate installed skill.',
-            'INVALID_PARAMS',
+              if (record && record.contentHash.toLowerCase() !== expectedHash) {
+                throw new RpcUserError(
+                  'Skill content changed since preview. Preview it again.',
+                  'INVALID_PARAMS',
+                );
+              }
+              hasScripts = consent.hasScripts(dir);
+              if (hasScripts) {
+                const approved = !!record;
+                if (!approved && !consent.canInstall(skillName, expectedHash)) {
+                  throw new RpcUserError(
+                    'This skill contains scripts and requires consent for its current content.',
+                    'INVALID_PARAMS',
+                  );
+                }
+              }
+            },
           );
-        const installedPath = path.join(pluginsDir, rootId, 'skills', skillId);
-        if (
-          !this.isInsideRoot(
-            await fs.realpath(installedPath),
-            await fs.realpath(pluginsDir),
-          ) ||
-          consent.computeContentHash(installedPath) !== expectedHash
-        ) {
+          if (!result.success || !verifiedHash)
+            throw new Error('Skill install failed.');
+          if (hasScripts) consent.recordConsent(skillName, verifiedHash);
+          installed.push(skillName);
+          this.skillsShApi.invalidateInstallCaches();
+        } catch (error) {
           this.logger.error(
-            '[Setup] Installed skill differs from approved content',
-            { skillName },
+            `Failed to install skill ${skillName}`,
+            error instanceof Error ? error : new Error(String(error)),
           );
-          throw new RpcUserError(
-            'Installed skill content changed. Preview it again.',
-            'INVALID_PARAMS',
-          );
+          failure = {
+            failedSkill: skillName,
+            reason:
+              error instanceof RpcUserError
+                ? error.message
+                : 'Skill install failed.',
+          };
+          break;
         }
-        if (consent.hasScripts(installedPath))
-          consent.recordConsent(skillName, expectedHash);
-        installed.push(skillName);
-        this.skillsShApi.invalidateInstallCaches();
       }
+      if (installed.length === 0)
+        return { success: false, installed, ...failure };
       const gate = this.resolveService<SkillSyncGate>(
         HARNESS_SYNC_TOKENS.SKILL_SYNC_GATE,
         'SkillSyncGate',
@@ -1339,7 +1332,7 @@ export class SetupRpcHandlers {
         workspaceRoot,
         'wizard:install-skills-with-consent',
       );
-      return { success: true, installed };
+      return { success: !failure, installed, ...failure };
     });
   }
 

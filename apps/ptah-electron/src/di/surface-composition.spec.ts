@@ -86,7 +86,7 @@ it('includes the shared skill services in the Electron composition guard', () =>
     join(__dirname, '../../../../libs/backend/rpc-handlers/src/lib/register-shared-rpc-handlers.ts'),
     'utf8',
   );
-  expect(registration).toContain('registerSkillServices(container, container.resolve<Logger>(TOKENS.LOGGER))');
+  expect(registration).toContain('registerSkillServices(container)');
 });
 
 describe('Electron session driver lock composition', () => {

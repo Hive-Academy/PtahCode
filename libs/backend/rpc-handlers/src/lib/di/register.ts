@@ -5,11 +5,7 @@
  * owned by the skills.sh RPC surface.
  */
 
-import {
-  DependencyContainer,
-  Lifecycle,
-} from 'tsyringe';
-import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
+import { DependencyContainer, Lifecycle } from 'tsyringe';
 import {
   SKILL_RECOMMENDATION_SERVICE,
   SKILL_PROJECT_GUIDANCE_SERVICE,
@@ -26,18 +22,9 @@ import {
 /**
  * Register all skill services in DI container
  *
- * This must be called after vscode-core services are registered,
- * as skill services depend on Logger.
- *
  * @param container - TSyringe DI container
- * @param logger - Logger instance for debugging
  */
-export function registerSkillServices(
-  container: DependencyContainer,
-  logger: Logger,
-): void {
-  logger.info('[SkillServices] Registering skill services...');
-
+export function registerSkillServices(container: DependencyContainer): void {
   container.register(
     SKILL_RECOMMENDATION_SERVICE,
     { useClass: SkillRecommendationService },
@@ -61,6 +48,4 @@ export function registerSkillServices(
     { useClass: SkillConsentService },
     { lifecycle: Lifecycle.Singleton },
   );
-
-  logger.info('[SkillServices] Skill services registered');
 }
