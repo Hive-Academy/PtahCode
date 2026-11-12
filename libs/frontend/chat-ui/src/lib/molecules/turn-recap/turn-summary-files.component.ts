@@ -126,11 +126,8 @@ function splitPath(path: string): {
             }
             <span class="flex flex-wrap gap-1 pl-6">
               <button
-                ptahButton
-                variant="ghost"
-                size="xs"
                 type="button"
-                class="min-h-6 rounded-full border border-base-content/20"
+                class="btn btn-xs btn-ghost min-h-6 rounded-full border border-base-content/20"
                 [attr.aria-label]="rowActionName(row)"
                 [title]="rowActionName(row)"
                 (click)="openFile.emit(row.file.path)"
@@ -146,11 +143,8 @@ function splitPath(path: string): {
         class="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 border-t border-base-content/10 pt-2"
       >
         <button
-          ptahButton
-          variant="primary"
-          size="xs"
           type="button"
-          class="rounded-full"
+          class="btn btn-xs btn-primary rounded-full"
           (click)="review.emit()"
           data-testid="turn-summary-review-all"
         >

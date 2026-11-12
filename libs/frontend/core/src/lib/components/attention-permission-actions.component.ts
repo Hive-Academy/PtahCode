@@ -8,28 +8,29 @@ let permissionActionsInstance = 0;
 @Component({
   selector: 'ptah-attention-permission-actions',
   standalone: true,
-  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PtahButtonDirective],
   template: `
     @if (!compact() && item().permissionPreview) {
       <p class="mt-2 break-words text-xs text-base-content-muted">{{ item().permissionPreview }}</p>
     }
     <div role="group" aria-label="Permission actions" class="flex min-w-0 items-center gap-1" [class.mt-2]="!compact()" (keydown.escape)="closeMenu($event)">
       @for (action of visibleActions(); track action.id) {
-        <button #visibleButton ptahButton [variant]="action.id === primaryAction()?.id ? 'primary' : 'ghost'" type="button" class="px-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary" [class.min-h-9]="!compact()" [class.min-h-7]="compact()" [class.h-7]="compact()"
+        <button #visibleButton type="button" class="btn btn-sm px-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary" [class.min-h-9]="!compact()" [class.min-h-7]="compact()" [class.h-7]="compact()"
+          [class.btn-primary]="action.id === primaryAction()?.id" [class.btn-ghost]="action.id !== primaryAction()?.id"
           [disabled]="busy() || !!reasonFor(action.id)" [attr.title]="reasonFor(action.id) ?? null"
           [attr.aria-describedby]="reasonFor(action.id) ? 'permission-action-reason-' + instanceId + '-' + item().key + '-' + action.id : null"
           (click)="choose(action.id)">{{ action.label }}</button>
       }
       @if (overflowActions().length) {
-        <button #moreButton ptahButton variant="ghost" type="button" class="px-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary" [class.min-h-9]="!compact()" [class.min-h-7]="compact()" [class.h-7]="compact()"
+        <button #moreButton type="button" class="btn btn-ghost btn-sm px-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary" [class.min-h-9]="!compact()" [class.min-h-7]="compact()" [class.h-7]="compact()"
           aria-label="More permission actions" [attr.aria-expanded]="menuOpen()" [attr.aria-controls]="'permission-more-' + instanceId" [disabled]="busy()" (click)="toggleMenu()">More</button>
       }
     </div>
     <div role="group" aria-label="Additional permission actions" [id]="'permission-more-' + instanceId" [hidden]="!menuOpen()" class="mt-1 flex-wrap gap-1" [class.flex]="menuOpen()" (keydown.escape)="closeMenu($event)">
       @if (menuOpen()) {
         @for (action of overflowActions(); track action.id) {
-          <button #extraAction ptahButton variant="ghost" type="button" class="min-h-7 px-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          <button #extraAction type="button" class="btn btn-ghost btn-sm min-h-7 px-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
             [disabled]="busy() || !!reasonFor(action.id)" [attr.title]="reasonFor(action.id) ?? null"
             [attr.aria-describedby]="reasonFor(action.id) ? 'permission-action-reason-' + instanceId + '-' + item().key + '-' + action.id : null"
             (click)="choose(action.id)">{{ action.label }}</button>
