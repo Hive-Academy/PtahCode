@@ -517,7 +517,7 @@ describe('CommandCenterPageComponent', () => {
     ) as HTMLElement;
     expect(chip.textContent).toContain(`Context ${percent}%`);
     expect(chip.textContent?.includes('Warning')).toBe(percent === 70);
-    expect(chip.classList.contains('text-state-need')).toBe(percent === 70);
+    expect(chip.getAttribute('data-tone')).toBe(percent === 70 ? 'warn' : 'neutral');
     fixture.destroy();
   });
 
