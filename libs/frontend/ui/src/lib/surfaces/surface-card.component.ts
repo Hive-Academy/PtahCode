@@ -60,7 +60,7 @@ const NESTED_INTERACTIVE_SELECTOR =
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
-      class="rounded-xl"
+      [class.rounded-xl]="isLegacy()"
       [class.ptah-card]="!isLegacy()"
       [class.surface-2]="isLegacy()"
       [class.p-4]="isLegacy()"

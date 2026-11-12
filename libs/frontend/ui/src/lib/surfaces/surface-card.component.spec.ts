@@ -120,6 +120,14 @@ describe('SurfaceCardComponent', () => {
     expect(card().dataset['variant']).toBe('inset');
   });
 
+  it('has no look utility class on a non-legacy card', () => {
+    const { card, update } = setup();
+    for (const variant of ['card', 'subtle', 'inset', 'raised'] as const) {
+      update((h) => h.variant.set(variant));
+      expect(card().classList).not.toContain('rounded-xl');
+    }
+  });
+
   it('keeps the old classes for the temporary legacy variant', () => {
     const { card, update } = setup();
     update((h) => h.variant.set('legacy'));
