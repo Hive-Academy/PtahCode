@@ -28,6 +28,34 @@ import {
   type SdkQueryOptions,
 } from './sdk-query-options-builder';
 
+/** A complete, typed phase dispatch; no cast to `PhaseDispatchV1`. */
+function phaseFixture(disallowedTools: readonly string[] = []): PhaseDispatchV1 {
+  const toolProfile = { disallowedTools, permission: 'allow' as const };
+  return {
+    version: 1,
+    kind: 'implement',
+    text: 'Implement the change',
+    definition: {
+      version: 1,
+      kind: 'implement',
+      input: [],
+      deliverable: [],
+      verdict: [],
+      acceptanceStep: [],
+      requiredCapabilities: [],
+      toolProfile,
+      discipline: {
+        method: '',
+        outputContract: '',
+        returnValue: '',
+        refusals: '',
+        escalationProtocol: '',
+      },
+    },
+    toolProfile,
+  };
+}
+
 describe('SDK phase delivery', () => {
   it('keeps legacy prompts and appends resolved skill text', () => {
     const tmpRoot = mkdtempSync(join(tmpdir(), 'test-'));
@@ -91,6 +119,7 @@ import type {
 import {
   INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,
   type IWorkspaceProvider,
+  type McpCallerBinding,
 } from '@ptah-extension/platform-core';
 import {
   CODEX_PROXY_TOKEN_PLACEHOLDER,
@@ -441,7 +470,7 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
   }
 
   it('includes the supplied phase definition and skills in built SDK query options', async () => {
-    const phase = { version: 1, kind: 'implement', text: 'Implement the change' } as PhaseDispatchV1;
+    const phase = phaseFixture();
     const skills = [{ name: 'checks', text: 'Verify output' }];
     const { options } = await buildWithLogger({ phase, skills });
     expect(options.systemPrompt).toEqual(expect.objectContaining({
@@ -2670,7 +2699,9 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
   async function buildWith(input: BuiltinBuildInput = {}): Promise<{
     options: SdkQueryOptions;
     settings: Record<string, unknown>;
+    credentialBinding: McpCallerBinding;
   }> {
+    const issuedBindings: McpCallerBinding[] = [];
     const noopHooks = { createHooks: jest.fn().mockReturnValue({}) };
     const ctor = SdkQueryOptionsBuilder as unknown as new (
       ...args: unknown[]
@@ -2717,7 +2748,10 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
       settingsWorkspace(input.settings ?? {}),
       undefined, // hostKind
       {
-        issue: jest.fn().mockReturnValue('test-token'),
+        issue: jest.fn((binding: McpCallerBinding) => {
+          issuedBindings.push(binding);
+          return 'test-token';
+        }),
         revokeSubject: jest.fn(),
       },
     );
@@ -2745,6 +2779,7 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
     });
     return {
       options: cfg.options,
+      credentialBinding: issuedBindings[0],
       settings: JSON.parse(cfg.options.settings as string) as Record<
         string,
         unknown
@@ -2761,38 +2796,32 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
   });
 
   it('merges phase denials with Claude preset denials without duplicates', async () => {
-    const phase = {
-      version: 1,
-      kind: 'implement',
-      text: 'Implement the change',
-      toolProfile: {
-        disallowedTools: ['mcp__firecrawl', 'Workflow', 'mcp__firecrawl'],
-      },
-    } as PhaseDispatchV1;
+    const phase = phaseFixture(['mcp__firecrawl', 'Workflow', 'mcp__firecrawl']);
     const built = await buildWith({ phase });
     expect(built.options.disallowedTools).toEqual([...DEFAULT_TOOLS, 'mcp__firecrawl']);
+    expect(built.credentialBinding).toEqual(expect.objectContaining({
+      phaseKind: 'implement',
+      disallowedTools: phase.toolProfile.disallowedTools,
+    }));
   });
 
   it('applies phase denials to a named account launch', async () => {
-    const phase = {
-      version: 1,
-      kind: 'implement',
-      text: 'Implement the change',
-      toolProfile: { disallowedTools: ['mcp__firecrawl'] },
-    } as PhaseDispatchV1;
+    const phase = phaseFixture(['mcp__firecrawl']);
     const built = await buildWith({ named: true, phase });
     expect(built.options.disallowedTools).toEqual([...DEFAULT_TOOLS, 'mcp__firecrawl']);
   });
 
   it('keeps preset denials when phase denials are empty or absent', async () => {
-    const phase = {
-      version: 1,
-      kind: 'implement',
-      text: 'Implement the change',
-      toolProfile: { disallowedTools: [] },
-    } as PhaseDispatchV1;
+    const phase = phaseFixture();
     expect((await buildWith({ phase })).options.disallowedTools).toEqual(DEFAULT_TOOLS);
-    expect((await buildWith()).options.disallowedTools).toEqual(DEFAULT_TOOLS);
+    const withoutPhase = await buildWith();
+    expect(withoutPhase.options.disallowedTools).toEqual(DEFAULT_TOOLS);
+    expect(withoutPhase.credentialBinding).toEqual({
+      kind: 'session',
+      sessionId: 'tab-fixture',
+      workspaceRoot: PROJECT,
+      capability: 'privileged',
+    });
   });
 
   it('keeps the protected tools and subagent spawning available', async () => {

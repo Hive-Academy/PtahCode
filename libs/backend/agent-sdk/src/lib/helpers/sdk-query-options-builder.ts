@@ -1627,6 +1627,7 @@ export class SdkQueryOptionsBuilder {
           sessionConfig.mcpToolProfile,
           cwd,
           abortController.signal,
+          phase,
         ),
         mcpServersOverride,
       ),
@@ -2309,6 +2310,7 @@ export class SdkQueryOptionsBuilder {
     toolProfile?: McpToolProfile,
     cwd?: string,
     signal?: AbortSignal,
+    phase?: import('@ptah-extension/shared').PhaseDispatchV1,
   ): Record<string, McpHttpServerConfig> {
     if (!mcpServerRunning) {
       this.logger.info(
@@ -2347,6 +2349,10 @@ export class SdkQueryOptionsBuilder {
         sessionId: routingSessionId,
         workspaceRoot: cwd,
         ...(toolProfile === 'apps' ? { toolProfile: 'apps' as const } : {}),
+        ...(phase ? {
+          phaseKind: phase.kind,
+          disallowedTools: phase.toolProfile.disallowedTools,
+        } : {}),
         capability: 'privileged',
       },
       subject,
