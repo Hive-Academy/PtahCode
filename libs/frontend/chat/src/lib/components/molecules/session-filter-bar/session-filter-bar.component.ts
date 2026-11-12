@@ -24,7 +24,7 @@ import {
   signal,
 } from '@angular/core';
 import { ListFilter, LucideAngularModule, Search, X } from 'lucide-angular';
-import { NativePopoverComponent, PtahCheckboxDirective, PtahInputDirective, PtahSelectDirective, PtahToggleDirective, PtahBadgeDirective } from '@ptah-extension/ui';
+import { NativePopoverComponent, PtahButtonDirective, PtahCheckboxDirective, PtahInputDirective, PtahSelectDirective, PtahToggleDirective, PtahBadgeDirective } from '@ptah-extension/ui';
 import {
   SESSION_PRIORITIES,
   SESSION_WORKFLOW_STATUSES,
@@ -88,7 +88,7 @@ function keepDraftUntilTrimmedChange(
 @Component({
   selector: 'ptah-session-filter-bar',
   standalone: true,
-  imports: [PtahBadgeDirective, LucideAngularModule, NativePopoverComponent, PtahCheckboxDirective, PtahInputDirective, PtahSelectDirective, PtahToggleDirective],
+  imports: [PtahBadgeDirective, LucideAngularModule, NativePopoverComponent, PtahButtonDirective, PtahCheckboxDirective, PtahInputDirective, PtahSelectDirective, PtahToggleDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- One wrapping toolbar (TASK_2026_679 design 3.4). From 640 px the
@@ -138,10 +138,10 @@ function keepDraftUntilTrimmedChange(
           [backdropClass]="'transparent'"
           (closed)="filtersOpen.set(false)"
         >
-          <button
+          <button ptahButton variant="ghost" size="sm"
             trigger
             type="button"
-            class="btn btn-ghost btn-sm h-8 min-h-8 gap-1 px-2 text-base-content"
+            class="h-8 min-h-8 gap-1 px-2 text-base-content"
             aria-haspopup="dialog"
             [attr.aria-expanded]="filtersOpen()"
             [attr.aria-label]="filtersButtonLabel()"
@@ -253,7 +253,7 @@ function keepDraftUntilTrimmedChange(
             @if (activeFilterCount() > 0) {
               <button
                 type="button"
-                class="btn btn-ghost btn-xs h-6 min-h-6 self-start"
+                ptahButton variant="ghost" size="xs" class="h-6 min-h-6 self-start"
                 (click)="clearFilters()"
                 data-testid="session-filter-clear"
               >
