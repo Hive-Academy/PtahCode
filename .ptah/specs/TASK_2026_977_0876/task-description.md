@@ -50,7 +50,8 @@ What stays:
 1. **No silent removal.** Phase 0 writes `parity-inventory.md` from the old code. A capability
    stays, moves or is listed as a proposed removal. The user approves each removal.
 2. **Each phase ships alone.** One child task (`parent: TASK_2026_977_0876`), one worktree from
-   `main`, one pull request. The old path continues to work until its retirement step.
+   `main`, one pull request. Exception (user decision U-D11): Phase 0 ships in this task and in
+   its pull request, because Phase 0 changes no behavior. The old path continues to work until its retirement step.
 3. **Electron first.** Plan, build and verify in `apps/ptah-electron` with the renderer in
    `apps/ptah-extension-webview`. Keep CLI lanes, `platform-cli` and `cli-engine` in operation.
 4. **Coupling goes down only.** The role-name census (§8) is the baseline. No phase can increase
@@ -67,13 +68,16 @@ Phase 4. Phase 7 follows Phase 2 and is a separate decision.
 
 ### Phase 0 - Inventory and open points (no behavior change)
 
+Delivery: in this task (`TASK_2026_977_0876`), on the branch `feat/phase-workflow`, in pull
+request #1131 (user decision U-D11).
+
 Scope:
 
 - Write `parity-inventory.md`: each capability that the role subagents, the agent generation and
   the subagent sync supply today. Columns: capability, where today (`file:line`), backing RPC or
   API, decision (keep, move, remove-proposed), new location, test that proves it.
 - Include the custom subagent designer of the harness wizard
-  (`harness-subagent-design.service.ts`) and its callers in the inventory. See user decision U4.
+  (`harness-subagent-design.service.ts`) and its callers in the inventory. See user decision U-D10.
 - Include the non-Electron consumers: the CLI bootstrap (`cli-engine` `harness-boot.ts`), the
   TUI and the docs app.
 - Close the open points in §9.
@@ -225,7 +229,7 @@ Scope:
 - Skill scorecards: the grade attribution reads `role` from `lane_outcome_records` where
   `executor_kind = 'subagent'` (`skill-task-grade.store.ts`). Keep the historical keys readable,
   or migrate them. Decide in the plan of this phase.
-- The custom subagent designer of the harness wizard: see user decision U4.
+- The custom subagent designer of the harness wizard: it stays (user decision U-D10).
 - Remove the role list from `ptah_agent_list` and the role vocabulary from shared types, or keep
   the approved remainder for user-written agent files.
 - Migration for a workspace that has generated agent files: stop regeneration, leave the files, and offer removal
@@ -278,13 +282,12 @@ User decisions (final):
 | U-D6 | Retire the subagents one by one | 2026-11-11 |
 | U-D7 | (was U1) Generated agent files in a workspace that exists: stop regeneration, leave the files, offer removal with consent | 2026-11-12 |
 | U-D8 | (was U3) Phase 7 (bots) is a later task, not part of this program | 2026-11-12 |
+| U-D9 | (was U2) A spawn has three inputs. `phase` (the phase kind) replaces `role` as the primary input and supplies the discipline text and the tool profile. `skills` is an optional list of skill names; blank is the default and means the executor finds skills by itself. `role` stays only as the name of a user-written agent file. The user asked the orchestrator to select the best solution; this is its recommendation. Phase 0 must confirm that each provider CLI loads a skill by name on request | 2026-11-12 |
+| U-D10 | (was U4) The custom subagent designer of the harness wizard is not removed in Phase 5. It is the base of the later bots task, where its output changes from a subagent to a bot. Same source as U-D9: the user asked the orchestrator to select | 2026-11-12 |
+| U-D11 | Phase 0 ships in this task and in pull request #1131, not as a child task. The pull request then has real work when it merges | 2026-11-12 |
 
-Open decisions for the user:
-
-| ID | Question | Recommendation |
-| --- | --- | --- |
-| U2 | After Phase 5, what replaces `role` on a spawn? The user asked: a skills list, or blank? | Three inputs, each with one meaning. `phase` (the phase kind) replaces `role` as the primary input and supplies the discipline text and the tool profile. `skills` is an optional list of skill names; blank is the default and means the executor finds skills by itself. `role` stays only as the name of a user-written agent file. The list holds names, not contents, so its cost is small. It also gives the skill scorecards a clean attribution key in place of the role key. Phase 0 must confirm that each provider CLI loads a skill by name on request |
-| U4 | The harness wizard designs 2 to 5 custom subagents from a persona, each with an execution mode (`background`, `on-demand`, `scheduled`) and triggers. Does the removal decision U-D1 include it? | Do not remove it in Phase 5. It is the nearest thing to a bot that Ptah has. Make it the base of Phase 7 and change its output from a subagent to a bot |
+Open decisions for the user: none. Each removal that Phase 0 proposes still needs the approval of
+the user.
 
 Orchestrator decisions are in `decisions.md`.
 
