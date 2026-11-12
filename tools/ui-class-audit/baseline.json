@@ -1034,6 +1034,10 @@
     "alert-error": 2
   },
   "libs/frontend/memory-curator-ui/src/lib/components/memory-entry-list.component.ts": {
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-square": 1,
+    "btn-xs": 1,
     "skeleton": 3
   },
   "libs/frontend/memory-curator-ui/src/lib/components/memory-indexed-code.component.ts": {

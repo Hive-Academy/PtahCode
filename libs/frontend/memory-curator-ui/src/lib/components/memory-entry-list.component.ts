@@ -136,11 +136,9 @@ import { PtahIconButtonDirective } from '@ptah-extension/ui';
                 <button
                   type="button"
                   data-testid="memory-entry-forget"
-                  ptahIconButton
-                  size="xs"
-                  class="text-base-content-muted hover:text-error"
+                  class="btn btn-ghost btn-xs btn-square text-base-content-muted hover:text-error"
                   (click)="forget.emit(entry.id)"
-                  [label]="'Forget entry ' + entry.id"
+                  [attr.aria-label]="'Forget entry ' + entry.id"
                 >
                   <lucide-angular
                     [img]="Trash2Icon"
