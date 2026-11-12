@@ -31,7 +31,8 @@ look of today until it moves to an owner (step 5).
 The field is a glass well with a 2 px rail at the bottom edge. The rail carries the state, so the
 edge of the well stays quiet:
 
-- Focus: the rail grows from the center (`scaleX` 0 → 1). The label takes the accent ink.
+- Focus: the box shows the focus ring only. The rail stays off (TASK_2026_969_3aab: one focus
+  treatment, the user rejected ring plus rail). The label takes the accent ink.
 - Error: the rail is on in the error color, also without focus. The error text replaces the hint.
 - Busy: a short segment sweeps along the rail. It replaces a spinner. Under reduced motion it stops.
 - Read-only: the edge is dashed, there is no rail and no hover fill.
@@ -130,7 +131,7 @@ Motion: the label float and the rail use `--ptah-duration-*` and `--ptah-ease-*`
 | Option label / description | body / hint, muted |
 | Group header | label (12 px, 600), muted, sticky |
 
-Order of emphasis: focus ring > error rail > focus rail > hover fill > rest > disabled.
+Order of emphasis: focus ring > error rail > hover fill > rest > disabled.
 
 ## 5. Reference pages
 

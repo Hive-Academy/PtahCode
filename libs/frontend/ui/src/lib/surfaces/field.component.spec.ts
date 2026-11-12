@@ -70,6 +70,8 @@ describe('PtahFieldComponent', () => {
     const root = f.nativeElement as HTMLElement;
     const input = root.querySelector('[data-testid="search"] input') as HTMLInputElement;
     const clear = root.querySelector('[data-testid="search"] .ptah-field__clear') as HTMLButtonElement;
+    expect(root.querySelectorAll('[data-testid="search"] .ptah-field__clear')).toHaveLength(1);
+    expect(input.type).toBe('search');
     const seen: string[] = [];
     input.addEventListener('input', () => seen.push(input.value));
     expect(clear.getAttribute('aria-label')).toBe('Clear Search');
@@ -110,7 +112,7 @@ describe('PtahFieldComponent', () => {
       <input ptahFieldControl type="password" value="abc" />
     </ptah-field>
     <ptah-field data-testid="search" label="Search" clearable>
-      <input ptahFieldControl value="query" />
+      <input ptahFieldControl type="search" value="query" />
     </ptah-field>
     <ptah-field data-testid="notes" label="Notes" counter busy>
       <textarea ptahFieldControl maxlength="40">abc</textarea>

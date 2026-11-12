@@ -14,6 +14,7 @@ import {
 import {
   GALLERY_ICON_PATHS,
   MODEL_OPTIONS,
+  PAGE_SIZE_OPTIONS,
   PROVIDER_OPTIONS,
   REGION_OPTIONS,
 } from './gallery-form-controls.data';
@@ -23,6 +24,8 @@ import { GallerySectionComponent } from './gallery-section.component';
 interface TintPanel {
   readonly id: 'base-200' | 'base-300';
   readonly label: string;
+  /** Opaque fill of the notch label on this panel. */
+  readonly notchBg: string;
 }
 
 /** Reference for the form controls family (TASK_2026_950_ed73). */
@@ -112,7 +115,7 @@ interface TintPanel {
             <ng-template ptahSelectIcon let-option><ng-container *ngTemplateOutlet="icon; context: { $implicit: option }" /></ng-template>
           </ptah-select>
         </ptah-field>
-        <ptah-field label="Model" hint="More than 7 options: search is on">
+        <ptah-field label="Model" hint="8 or more options: search is on">
           <ptah-select [options]="models" [(value)]="model">
             <ng-template ptahSelectIcon let-option><ng-container *ngTemplateOutlet="icon; context: { $implicit: option }" /></ng-template>
           </ptah-select>
@@ -132,14 +135,19 @@ interface TintPanel {
         </div>
       </div>
 
-      <div data-testid="form-controls-native-select" class="flex flex-wrap items-center gap-ptah-controls">
-        <span class="text-ptah-label text-base-content-muted">Native select, inline sizes</span>
+      <div data-testid="form-controls-select-sizes" class="flex flex-wrap items-center gap-ptah-controls">
+        <span class="text-ptah-label text-base-content-muted">Select, inline sizes</span>
         @for (size of sizes; track size) {
-          <select ptahSelect [size]="size" [label]="'Page size ' + size">
-            <option>25 rows</option>
-            <option>50 rows</option>
-          </select>
+          <ptah-select [size]="size" [label]="'Page size ' + size" [options]="pageSizes" [value]="25" clearable />
         }
+      </div>
+
+      <div data-testid="form-controls-native-select" class="flex flex-wrap items-center gap-ptah-controls">
+        <span class="text-ptah-label text-base-content-muted">Legacy ptahSelect (native menu)</span>
+        <select ptahSelect size="sm" label="Page size (legacy)">
+          <option>25 rows</option>
+          <option>50 rows</option>
+        </select>
       </div>
 
       <div data-testid="form-controls-choices" class="flex flex-wrap items-center gap-ptah-group">
@@ -167,6 +175,7 @@ interface TintPanel {
           class="grid grid-cols-1 gap-ptah-field rounded-ptah-surface border border-surface-border p-ptah-surface sm:grid-cols-3"
           [class.bg-base-200]="panel.id === 'base-200'"
           [class.bg-base-300]="panel.id === 'base-300'"
+          [style.--ptah-field-notch-bg]="panel.notchBg"
         >
           <ptah-field [label]="'Name on ' + panel.label"><input ptahInput /></ptah-field>
           <ptah-field [label]="'Error on ' + panel.label" error="Enter a name">
@@ -193,11 +202,12 @@ export class GalleryFormControlsFamilyComponent {
   protected readonly providers = PROVIDER_OPTIONS;
   protected readonly models = MODEL_OPTIONS;
   protected readonly regions = REGION_OPTIONS;
+  protected readonly pageSizes = PAGE_SIZE_OPTIONS;
   protected readonly model = signal<string | null>('opus');
   public readonly sizes: readonly PtahControlSize[] = ['xs', 'sm', 'md'];
   public readonly choiceSizes = ['xs', 'sm'] as const;
   public readonly panels: readonly TintPanel[] = [
-    { id: 'base-200', label: 'base-200' },
-    { id: 'base-300', label: 'base-300' },
+    { id: 'base-200', label: 'base-200', notchBg: 'oklch(var(--b2))' },
+    { id: 'base-300', label: 'base-300', notchBg: 'oklch(var(--b3))' },
   ];
 }

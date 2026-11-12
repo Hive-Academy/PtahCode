@@ -2,22 +2,37 @@
    (.ptah-select and its parts). Uses --ptah-* tokens only.
    Standalone, the trigger draws its own edge. Inside ptah-field, the field
    box draws the edge and the trigger is transparent (see ptah-field.css).
-   The panel is a glass sheet. The active option shows an inset rail at the
-   start edge: the same line as the field rail, turned on its side. */
+   The panel is an opaque sheet (round 2, TASK_2026_969_3aab): page text must
+   not show through it. The active option shows an inset rail at the start
+   edge: the same line as the field rail, turned on its side.
+   Layout: the host is a one-cell grid. The trigger fills the cell. The action
+   group (clear, then chevron) sits in the same cell, pinned at the inline end
+   and centered on the block axis. The panel is out of flow (position: fixed),
+   so the open state does not change the cell. */
 
 .ptah-select {
   position: relative;
-  display: block;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
 }
 
+.ptah-field__body > .ptah-select {
+  flex: 1 1 auto;
+  align-self: stretch;
+}
+
 .ptah-select__trigger {
+  grid-area: 1 / 1;
   display: flex;
   align-items: center;
   gap: var(--ptah-space-2);
   width: 100%;
+  height: var(--ptah-control-h-sm);
   min-height: var(--ptah-control-h-sm);
   padding-inline: var(--ptah-control-px);
+  /* Room for the action group: inset, chevron, gap to the value. */
+  padding-inline-end: calc(var(--ptah-field-pad-x) + var(--ptah-field-icon) + var(--ptah-space-2));
   border: var(--ptah-border-width) solid var(--ptah-field-border);
   border-radius: var(--ptah-field-radius);
   background-color: var(--ptah-field-bg);
@@ -28,6 +43,50 @@
   cursor: pointer;
 }
 
+/* A clearable select keeps room for the clear action at all times, so the
+   value does not change width when the clear action comes or goes. */
+.ptah-select[data-clearable] .ptah-select__trigger {
+  padding-inline-end: calc(
+    var(--ptah-field-pad-x) + var(--ptah-field-icon) + var(--ptah-space-1) + var(--ptah-field-action-size) +
+      var(--ptah-space-2)
+  );
+}
+
+/* Sizes of the standalone trigger: the heights of select[ptahSelect]. */
+.ptah-select[data-size='xs'] .ptah-select__trigger {
+  height: var(--ptah-control-h-xs);
+  min-height: var(--ptah-control-h-xs);
+  padding-inline-start: var(--ptah-control-px-xs);
+  padding-inline-end: calc(var(--ptah-control-px-xs) + var(--ptah-field-icon) + var(--ptah-space-2));
+  font-size: var(--ptah-text-label-size);
+  line-height: var(--ptah-text-label-leading);
+}
+
+.ptah-select[data-size='xs'][data-clearable] .ptah-select__trigger {
+  padding-inline-end: calc(
+    var(--ptah-control-px-xs) + var(--ptah-field-icon) + var(--ptah-space-1) + var(--ptah-control-h-xs) -
+      var(--ptah-space-1) + var(--ptah-space-2)
+  );
+}
+
+.ptah-select[data-size='md'] .ptah-select__trigger {
+  height: var(--ptah-control-h-md);
+  min-height: var(--ptah-control-h-md);
+}
+
+/* Inside ptah-field the field box pads the edge (ptah-field.css), so the
+   action group has no inset of its own. The clear action of a text field
+   sits at the same place. */
+.ptah-field__body .ptah-select .ptah-select__trigger {
+  padding-inline-end: calc(var(--ptah-field-icon) + var(--ptah-space-2));
+}
+
+.ptah-field__body .ptah-select[data-clearable] .ptah-select__trigger {
+  padding-inline-end: calc(
+    var(--ptah-field-icon) + var(--ptah-space-1) + var(--ptah-field-action-size) + var(--ptah-space-2)
+  );
+}
+
 .ptah-select__trigger:hover:not(:disabled) {
   border-color: var(--ptah-field-border-hover);
 }
@@ -35,6 +94,21 @@
 .ptah-select__trigger:focus-visible {
   outline: var(--ptah-focus-ring-width) solid var(--ptah-focus-ring-color);
   outline-offset: var(--ptah-focus-ring-offset);
+}
+
+/* Glass (TASK_2026_969_3aab round 3): a standalone trigger has one edge. The
+   fill stays behind the translucent border, and focus is the border plus an
+   inset band of the same color, with no offset outline or glass halo.
+   :where() keeps the owner class first and adds no weight. The field reset
+   is stronger, so inside ptah-field the box stays the only edge. */
+.ptah-select__trigger:where(:root[data-glass='on'] *) {
+  background-clip: padding-box;
+}
+
+.ptah-select :is(.ptah-select__trigger, #ptah-control):is(:focus, :focus-visible):where(:root[data-glass='on'] *) {
+  border-color: var(--ptah-focus-ring-color);
+  outline: none;
+  box-shadow: inset 0 0 0 calc(var(--ptah-focus-ring-width) - var(--ptah-border-width)) var(--ptah-focus-ring-color);
 }
 
 .ptah-select__trigger:disabled {
@@ -78,23 +152,49 @@
   stroke-linejoin: round;
 }
 
+/* Action group: one container, fixed order (clear, then chevron), pinned at
+   the inline end of the host cell and centered on the block axis. The same
+   rules apply closed and open, with and without a value or a clear action.
+   The group lets pointer events through to the trigger, except on the clear
+   action. */
+.ptah-select__actions {
+  grid-area: 1 / 1;
+  justify-self: end;
+  align-self: center;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--ptah-space-1);
+  margin-inline-end: calc(var(--ptah-field-pad-x) + var(--ptah-border-width));
+  pointer-events: none;
+}
+
+.ptah-select[data-size='xs'] .ptah-select__actions {
+  margin-inline-end: calc(var(--ptah-control-px-xs) + var(--ptah-border-width));
+}
+
+.ptah-field__body .ptah-select .ptah-select__actions {
+  margin-inline-end: 0;
+}
+
 .ptah-select__chevron {
+  order: 2;
   color: var(--ptah-field-icon-fg);
+  transform-origin: 50% 50%;
   transition: transform var(--ptah-duration-base) var(--ptah-ease-emphasis);
 }
 
+/* Rotation only: a centered origin, so the chevron box does not move. */
 .ptah-select[data-open] .ptah-select__chevron {
   transform: rotate(180deg);
 }
 
-.ptah-select:has(.ptah-select__clear) .ptah-select__trigger {
-  padding-inline-end: calc(var(--ptah-field-action-size) + var(--ptah-space-4));
+.ptah-select__trigger:disabled ~ .ptah-select__actions {
+  opacity: var(--ptah-field-disabled-opacity);
 }
 
 .ptah-select__clear {
-  position: absolute;
-  inset-inline-end: calc(var(--ptah-field-icon) + var(--ptah-space-2));
-  top: 50%;
+  order: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -105,8 +205,13 @@
   border-radius: var(--ptah-radius-control);
   background-color: transparent;
   color: var(--ptah-field-icon-fg);
-  transform: translateY(-50%);
   cursor: pointer;
+  pointer-events: auto;
+}
+
+.ptah-select[data-size='xs'] .ptah-select__clear {
+  width: calc(var(--ptah-control-h-xs) - var(--ptah-space-1));
+  height: calc(var(--ptah-control-h-xs) - var(--ptah-space-1));
 }
 
 .ptah-select__clear:hover {
@@ -134,8 +239,11 @@
   height: 100%;
 }
 
-/* Panel */
+/* Panel: out of flow before and after FloatingUIService places it, and an
+   opaque fill (--ptah-select-panel-bg has no alpha), a clear edge and the
+   overlay shadow. No backdrop filter: nothing behind the panel shows. */
 .ptah-select__panel {
+  position: fixed;
   z-index: var(--ptah-z-menu);
   display: flex;
   flex-direction: column;
@@ -146,7 +254,6 @@
   background-color: var(--ptah-select-panel-bg);
   box-shadow: var(--ptah-elevation-3);
   color: var(--ptah-field-fg);
-  backdrop-filter: var(--glass-blur-overlay, none);
 }
 
 .ptah-select__search-row {
@@ -173,6 +280,16 @@
 
 .ptah-select__search::placeholder {
   color: var(--ptah-field-placeholder);
+}
+
+/* Keyboard focus marks the search row without a second input box. */
+.ptah-select :is(.ptah-select__search, #ptah-select):focus-visible:is(.ptah-select__search, #ptah-control) {
+  outline: none;
+  box-shadow: none;
+}
+
+.ptah-select__search-row:focus-within {
+  border-bottom-color: var(--ptah-focus-ring-color);
 }
 
 .ptah-select__list {
