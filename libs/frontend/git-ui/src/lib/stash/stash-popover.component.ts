@@ -170,10 +170,7 @@ export function stashAge(
                       <li>
                         <button
                           type="button"
-                          ptahButton
-                          variant="ghost"
-                          size="xs"
-                          class="w-full justify-start"
+                          class="btn btn-ghost btn-xs w-full justify-start gap-2 font-normal"
                           data-testid="stash-file"
                           [title]="'Open diff for ' + file.path"
                           [disabled]="stash.busy()"
