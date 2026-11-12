@@ -41,7 +41,7 @@ import {
 import { FormsModule } from '@angular/forms';
 
 import { cloneBodyDraftRefusal } from './clone-action-gating';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahTextareaDirective } from '@ptah-extension/ui';
 
 let nextEditorId = 0;
 
@@ -69,7 +69,7 @@ export const BODY_CHANGED_UNDERNEATH =
   selector: 'ptah-clone-body-editor',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PtahButtonDirective, FormsModule],
+  imports: [PtahButtonDirective, PtahTextareaDirective, FormsModule],
   template: `
     <div class="space-y-2" data-testid="clone-body-editor">
       <label
@@ -80,7 +80,9 @@ export const BODY_CHANGED_UNDERNEATH =
       </label>
       <textarea
         #editorTextarea
-        class="textarea textarea-bordered h-72 w-full font-mono text-xs leading-relaxed"
+        ptahTextarea
+        tone="mono"
+        class="h-72 w-full"
         data-testid="clone-body-editor-textarea"
         [attr.id]="textareaId"
         [disabled]="saving()"

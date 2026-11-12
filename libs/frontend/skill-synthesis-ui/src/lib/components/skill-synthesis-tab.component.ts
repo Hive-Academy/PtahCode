@@ -11,6 +11,8 @@ import {
 import { AppStateManager, VSCodeService } from '@ptah-extension/core';
 import { LucideAngularModule, Sparkles } from 'lucide-angular';
 
+import { PtahToggleDirective } from '@ptah-extension/ui';
+
 import { SkillSynthesisStateService } from '../services/skill-synthesis-state.service';
 import { SkillClonesViewComponent } from './clones/skill-clones-view.component';
 import { SkillSpecsControlComponent } from './skill-specs-control.component';
@@ -22,6 +24,7 @@ import { SkillsPauseSwitchComponent } from './skills-pause-switch.component';
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     LucideAngularModule,
+    PtahToggleDirective,
     SkillClonesViewComponent,
     SkillSpecsControlComponent,
     SkillsPauseSwitchComponent,
@@ -41,7 +44,8 @@ import { SkillsPauseSwitchComponent } from './skills-pause-switch.component';
           The Skills Library is only available in the PtahCode desktop app.
         </p>
         <p class="text-xs text-base-content-muted">
-          Download PtahCode desktop to manage your Skills, Agents and Commands Library.
+          Download PtahCode desktop to manage your Skills, Agents and Commands
+          Library.
         </p>
         <a
           class="link link-primary text-xs"
@@ -82,18 +86,25 @@ import { SkillsPauseSwitchComponent } from './skills-pause-switch.component';
           data-testid="skills-telemetry-switch"
         >
           <div>
-            <label id="skills-telemetry-label" for="skills-telemetry-toggle" class="text-sm font-semibold">
+            <label
+              id="skills-telemetry-label"
+              for="skills-telemetry-toggle"
+              class="text-sm font-semibold"
+            >
               Skill telemetry
             </label>
-            <p id="skills-telemetry-help" class="text-xs text-base-content-muted">
+            <p
+              id="skills-telemetry-help"
+              class="text-xs text-base-content-muted"
+            >
               Records skill use even while Skills is paused.
             </p>
           </div>
           <input
             id="skills-telemetry-toggle"
             type="checkbox"
-            role="switch"
-            class="toggle toggle-sm toggle-primary"
+            ptahToggle
+            size="sm"
             [checked]="telemetryEnabled() === true"
             [disabled]="telemetrySaving() || telemetryEnabled() === null"
             aria-describedby="skills-telemetry-help"
@@ -101,7 +112,9 @@ import { SkillsPauseSwitchComponent } from './skills-pause-switch.component';
             data-testid="skills-telemetry-toggle"
           />
           @if (telemetryError(); as message) {
-            <p class="basis-full text-xs text-error" role="alert">{{ message }}</p>
+            <p class="basis-full text-xs text-error" role="alert">
+              {{ message }}
+            </p>
           }
         </section>
 
@@ -131,7 +144,8 @@ export class SkillSynthesisTabComponent implements OnInit {
   );
 
   private readonly _clonesDivergedFilter = signal(0);
-  protected readonly clonesDivergedFilter = this._clonesDivergedFilter.asReadonly();
+  protected readonly clonesDivergedFilter =
+    this._clonesDivergedFilter.asReadonly();
 
   public constructor() {
     effect(() => {

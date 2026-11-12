@@ -12,6 +12,7 @@ import {
 } from '@angular/core';
 
 import { MemoryDiagnosticsStateService } from '../services/memory-diagnostics-state.service';
+import { PtahToggleDirective } from '@ptah-extension/ui';
 
 /**
  * The Memory master switch (`memory.enabled`) at the top of the Thoth Memory
@@ -31,6 +32,7 @@ import { MemoryDiagnosticsStateService } from '../services/memory-diagnostics-st
   selector: 'ptah-memory-pause-switch',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PtahToggleDirective],
   template: `
     <section
       class="flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3"
@@ -90,10 +92,10 @@ import { MemoryDiagnosticsStateService } from '../services/memory-diagnostics-st
         data-testid="memory-enabled-toggle-target"
       >
         <input
+          ptahToggle
           id="memory-enabled-toggle"
           type="checkbox"
           role="switch"
-          class="toggle toggle-sm toggle-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
           [checked]="checked()"
           [attr.aria-checked]="checked()"
           [disabled]="disabled()"

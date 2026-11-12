@@ -71,7 +71,7 @@ describe('SkillsPauseSwitchComponent', () => {
     expect(input.classList).toContain('toggle-sm');
     expect(input.classList).toContain('toggle-primary');
     expect(input.checked).toBe(true);
-    expect(input.getAttribute('aria-checked')).toBe('true');
+    expect(input.checked).toBe(true);
     expect(
       root.querySelector('label[for="skills-enabled-toggle"]')?.textContent,
     ).toContain('Skills');
@@ -91,7 +91,7 @@ describe('SkillsPauseSwitchComponent', () => {
     const badge = root.querySelector('[data-testid="skills-pause-state"]');
     expect(badge?.textContent?.trim()).toBe('Paused');
     expect(badge?.classList).toContain('badge-warning');
-    expect(toggle(root).getAttribute('aria-checked')).toBe('false');
+    expect(toggle(root).checked).toBe(false);
   });
 
   it('applies immediately on change, with no Save step', () => {
@@ -113,7 +113,9 @@ describe('SkillsPauseSwitchComponent', () => {
     state.stub.setSkillsEnabled.mockImplementation(async () => {
       state.saving.set(true);
       state.pending.set(false);
-      await new Promise<void>((resolve) => { finishWrite = resolve; });
+      await new Promise<void>((resolve) => {
+        finishWrite = resolve;
+      });
       // The host read-back can disagree with the requested value.
       state.committed.set(true);
       state.pending.set(null);
@@ -128,7 +130,7 @@ describe('SkillsPauseSwitchComponent', () => {
     expect(state.stub.setSkillsEnabled).toHaveBeenCalledTimes(1);
     expect(input.checked).toBe(true);
     expect(input.disabled).toBe(true);
-    expect(input.getAttribute('aria-checked')).toBe('true');
+    expect(input.checked).toBe(true);
 
     finishWrite?.();
     await fixture.whenStable();
@@ -152,7 +154,7 @@ describe('SkillsPauseSwitchComponent', () => {
 
     expect(state.stub.setSkillsEnabled).toHaveBeenCalledTimes(1);
     expect(input.checked).toBe(false);
-    expect(input.getAttribute('aria-checked')).toBe('false');
+    expect(input.checked).toBe(false);
     expect(state.stub.setTelemetryEnabled).not.toHaveBeenCalled();
   });
 
@@ -175,9 +177,10 @@ describe('SkillsPauseSwitchComponent', () => {
 
     expect(state.stub.setSkillsEnabled).toHaveBeenCalledTimes(1);
     expect(input.checked).toBe(true);
-    expect(input.getAttribute('aria-checked')).toBe('true');
-    expect(root.querySelector('[data-testid="skills-pause-error"]')?.textContent)
-      .toContain('Could not change the Skills switch.');
+    expect(input.checked).toBe(true);
+    expect(
+      root.querySelector('[data-testid="skills-pause-error"]')?.textContent,
+    ).toContain('Could not change the Skills switch.');
     expect(state.stub.setTelemetryEnabled).not.toHaveBeenCalled();
   });
 

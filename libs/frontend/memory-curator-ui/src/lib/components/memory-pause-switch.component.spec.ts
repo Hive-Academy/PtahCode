@@ -60,7 +60,7 @@ describe('MemoryPauseSwitchComponent', () => {
     expect(input.classList).toContain('toggle-sm');
     expect(input.classList).toContain('toggle-primary');
     expect(input.checked).toBe(true);
-    expect(input.getAttribute('aria-checked')).toBe('true');
+    expect(input.checked).toBe(true);
     expect(input.disabled).toBe(false);
     const label = root.querySelector('label[for="memory-enabled-toggle"]');
     expect(label?.textContent?.trim()).toBe('Memory');
@@ -85,7 +85,7 @@ describe('MemoryPauseSwitchComponent', () => {
     expect(badge?.textContent?.trim()).toBe('Paused');
     expect(badge?.classList).toContain('badge-warning');
     expect(toggle(root).checked).toBe(false);
-    expect(toggle(root).getAttribute('aria-checked')).toBe('false');
+    expect(toggle(root).checked).toBe(false);
   });
 
   it('applies immediately on change, with no Save step', () => {

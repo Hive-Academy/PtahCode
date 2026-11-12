@@ -1495,15 +1495,7 @@
     "btn": 1,
     "btn-ghost": 1,
     "btn-primary": 1,
-    "btn-xs": 1,
-    "checkbox": 1,
-    "checkbox-sm": 1,
-    "form-control": 5,
-    "input": 5,
-    "input-bordered": 5,
-    "input-sm": 5,
-    "label": 1,
-    "label-text": 5
+    "btn-xs": 1
   },
   "libs/frontend/memory-curator-ui/src/lib/components/corpus-list.component.ts": {
     "btn": 1,
@@ -1539,17 +1531,7 @@
   },
   "libs/frontend/memory-curator-ui/src/lib/components/diagnostics/memory-diagnostics-accordion.component.ts": {
     "alert": 2,
-    "alert-error": 2,
-    "textarea": 1,
-    "textarea-bordered": 1,
-    "textarea-xs": 1
-  },
-  "libs/frontend/memory-curator-ui/src/lib/components/diagnostics/memory-trigger-toggle.component.ts": {
-    "checkbox": 1,
-    "checkbox-sm": 1,
-    "input": 1,
-    "input-bordered": 1,
-    "input-xs": 1
+    "alert-error": 2
   },
   "libs/frontend/memory-curator-ui/src/lib/components/diagnostics/storage-health-panel.component.ts": {
     "badge": 2,
@@ -1559,40 +1541,23 @@
     "badge-success": 2,
     "badge-warning": 1
   },
-  "libs/frontend/memory-curator-ui/src/lib/components/memory-danger-zone.component.ts": {
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1,
-    "select": 1,
-    "select-bordered": 1,
-    "select-sm": 1
-  },
   "libs/frontend/memory-curator-ui/src/lib/components/memory-entry-list.component.ts": {
     "skeleton": 3
   },
   "libs/frontend/memory-curator-ui/src/lib/components/memory-indexed-code.component.ts": {
     "btn": 2,
     "btn-xs": 2,
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1,
     "skeleton": 2
   },
   "libs/frontend/memory-curator-ui/src/lib/components/memory-pause-switch.component.ts": {
     "badge": 1,
     "badge-sm": 1,
-    "badge-warning": 1,
-    "toggle": 1,
-    "toggle-primary": 1,
-    "toggle-sm": 1
+    "badge-warning": 1
   },
   "libs/frontend/memory-curator-ui/src/lib/components/memory-search-bar.component.ts": {
     "btn": 2,
     "btn-primary": 2,
-    "btn-sm": 2,
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1
+    "btn-sm": 2
   },
   "libs/frontend/memory-curator-ui/src/lib/components/timeline-filters.component.ts": {
     "badge": 1,
@@ -1601,11 +1566,7 @@
     "btn": 1,
     "btn-ghost": 1,
     "btn-primary": 1,
-    "btn-xs": 1,
-    "input": 5,
-    "input-bordered": 5,
-    "input-sm": 1,
-    "input-xs": 4
+    "btn-xs": 1
   },
   "libs/frontend/memory-curator-ui/src/lib/components/timeline-view.component.ts": {
     "alert": 1,
@@ -1864,19 +1825,12 @@
     "badge-xs": 1,
     "btn": 1,
     "btn-warning": 1,
-    "btn-xs": 1,
-    "input": 1,
-    "input-bordered": 1,
-    "input-xs": 1
+    "btn-xs": 1
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/bulk-rebase-confirm.component.ts": {
     "btn": 1,
     "btn-sm": 1,
     "btn-warning": 1
-  },
-  "libs/frontend/skill-synthesis-ui/src/lib/components/clones/clone-body-editor.component.ts": {
-    "textarea": 1,
-    "textarea-bordered": 1
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/clone-bulk-toolbar.component.ts": {
     "btn": 2,
@@ -1953,18 +1907,10 @@
     "btn-sm": 1,
     "btn-warning": 1
   },
-  "libs/frontend/skill-synthesis-ui/src/lib/components/skill-synthesis-tab.component.ts": {
-    "toggle": 1,
-    "toggle-primary": 1,
-    "toggle-sm": 1
-  },
   "libs/frontend/skill-synthesis-ui/src/lib/components/skills-pause-switch.component.ts": {
     "badge": 1,
     "badge-sm": 1,
-    "badge-warning": 1,
-    "toggle": 1,
-    "toggle-primary": 1,
-    "toggle-sm": 1
+    "badge-warning": 1
   },
   "libs/frontend/tasks-ui/src/lib/components/board/task-card.component.ts": {
     "<dynamic>": 4,

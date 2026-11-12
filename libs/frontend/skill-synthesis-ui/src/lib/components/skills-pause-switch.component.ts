@@ -11,6 +11,8 @@ import {
   untracked,
 } from '@angular/core';
 
+import { PtahToggleDirective } from '@ptah-extension/ui';
+
 import { SkillSynthesisStateService } from '../services/skill-synthesis-state.service';
 
 /**
@@ -31,6 +33,7 @@ import { SkillSynthesisStateService } from '../services/skill-synthesis-state.se
   selector: 'ptah-skills-pause-switch',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PtahToggleDirective],
   template: `
     <section
       class="flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3"
@@ -93,10 +96,9 @@ import { SkillSynthesisStateService } from '../services/skill-synthesis-state.se
         <input
           id="skills-enabled-toggle"
           type="checkbox"
-          role="switch"
-          class="toggle toggle-sm toggle-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+          ptahToggle
+          size="sm"
           [checked]="checked()"
-          [attr.aria-checked]="checked()"
           [disabled]="disabled()"
           aria-describedby="skills-pause-help skills-pause-status"
           (change)="onToggle($event)"

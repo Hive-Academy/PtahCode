@@ -7,19 +7,20 @@ import {
 import { CommonModule } from '@angular/common';
 
 import type { CodeSymbolListItem } from '@ptah-extension/shared';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-memory-indexed-code',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PtahButtonDirective, CommonModule],
+  imports: [PtahButtonDirective, PtahInputDirective, CommonModule],
   template: `
     <div class="space-y-3" data-testid="memory-indexed-code">
       <div class="flex flex-wrap items-center gap-3">
         <input
+          ptahInput
           type="search"
-          class="input input-sm input-bordered w-full max-w-sm"
+          class="w-full max-w-sm"
           placeholder="Search indexed symbols..."
           [value]="searchValue()"
           (input)="onSearchInput($event)"

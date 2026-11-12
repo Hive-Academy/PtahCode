@@ -8,7 +8,7 @@ import { CommonModule } from '@angular/common';
 import type { MemoryTypeWire } from '@ptah-extension/shared';
 
 import { TimelineStateService } from '../services/timeline-state.service';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
 
 interface TypeChip {
   readonly id: MemoryTypeWire;
@@ -36,13 +36,15 @@ const TYPE_CHIPS: readonly TypeChip[] = [
   selector: 'ptah-timeline-filters',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PtahButtonDirective, CommonModule],
+  imports: [PtahButtonDirective, PtahInputDirective, CommonModule],
   template: `
     <div class="flex flex-col gap-2">
       <div class="flex flex-wrap items-center gap-2">
         <input
           type="search"
-          class="input input-sm input-bordered w-full md:max-w-md"
+          ptahInput
+          size="sm"
+          class="w-full md:max-w-md"
           placeholder="Filter timeline (BM25 + filters)..."
           [value]="state.query()"
           (input)="onQueryInput($event)"
@@ -95,7 +97,9 @@ const TYPE_CHIPS: readonly TypeChip[] = [
       <div class="flex flex-wrap items-center gap-2">
         <input
           type="text"
-          class="input input-xs input-bordered w-full md:max-w-xs"
+          ptahInput
+          size="xs"
+          class="w-full md:max-w-xs"
           placeholder="Concepts (comma-separated)"
           [value]="conceptInput()"
           (change)="onConceptCommit($event)"
@@ -103,7 +107,9 @@ const TYPE_CHIPS: readonly TypeChip[] = [
         />
         <input
           type="text"
-          class="input input-xs input-bordered w-full md:max-w-xs"
+          ptahInput
+          size="xs"
+          class="w-full md:max-w-xs"
           placeholder="Files (comma-separated)"
           [value]="fileInput()"
           (change)="onFileCommit($event)"
@@ -116,7 +122,8 @@ const TYPE_CHIPS: readonly TypeChip[] = [
           <span class="text-base-content-muted">From</span>
           <input
             type="date"
-            class="input input-xs input-bordered"
+            ptahInput
+            size="xs"
             [value]="fromInput()"
             (change)="onFromChange($event)"
             aria-label="Date range from"
@@ -126,7 +133,8 @@ const TYPE_CHIPS: readonly TypeChip[] = [
           <span class="text-base-content-muted">To</span>
           <input
             type="date"
-            class="input input-xs input-bordered"
+            ptahInput
+            size="xs"
             [value]="toInput()"
             (change)="onToChange($event)"
             aria-label="Date range to"
