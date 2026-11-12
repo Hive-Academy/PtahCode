@@ -9,17 +9,13 @@ import type {
   MemoryStorageHealthDto,
 } from '@ptah-extension/shared';
 import {
+  formatRelative,
   NativeCardComponent,
   PtahBadgeDirective,
   type NativeCardTone,
 } from '@ptah-extension/ui';
 
 const NULL_TEXT = '—';
-
-const MS_PER_SECOND = 1_000;
-const MS_PER_MINUTE = 60_000;
-const MS_PER_HOUR = 3_600_000;
-const MS_PER_DAY = 86_400_000;
 
 /**
  * Format a byte count with binary (1024) steps. `null` means the backend could
@@ -52,24 +48,13 @@ export function formatCount(value: number | null): string {
   return value.toLocaleString('en-US');
 }
 
-function formatSpan(ms: number): string {
-  if (ms < MS_PER_MINUTE) {
-    return `${Math.max(1, Math.round(ms / MS_PER_SECOND))} s`;
-  }
-  if (ms < MS_PER_HOUR) return `${Math.round(ms / MS_PER_MINUTE)} min`;
-  if (ms < MS_PER_DAY) return `${Math.round(ms / MS_PER_HOUR)} h`;
-  return `${Math.round(ms / MS_PER_DAY)} days`;
-}
-
 /**
- * Format a timestamp relative to `now`, past or future ("3 days ago",
- * "in 40 min"). `null` → `—`.
+ * Format a timestamp relative to `now`, past or future ("3d ago",
+ * "in 40m"), through the shared owner. `null` → `—`.
  */
 export function formatRelativeTime(at: number | null, now: number): string {
   if (at === null) return NULL_TEXT;
-  const diff = now - at;
-  if (diff >= 0) return `${formatSpan(diff)} ago`;
-  return `in ${formatSpan(-diff)}`;
+  return formatRelative(at, now) || NULL_TEXT;
 }
 
 interface LastRunView {

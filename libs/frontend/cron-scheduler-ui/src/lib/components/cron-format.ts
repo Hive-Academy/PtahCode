@@ -14,7 +14,10 @@
  * outcomes are shown.
  */
 import type { JobRunDto, ScheduledJobDto } from '@ptah-extension/shared';
-import type { NativeCardTone } from '@ptah-extension/ui';
+import {
+  formatRelative as formatRelativeOwner,
+  type NativeCardTone,
+} from '@ptah-extension/ui';
 
 /** One labelled figure inside a job card's metric list. */
 export interface CronJobMetric {
@@ -50,16 +53,7 @@ export function formatTime(epochMs: number | null | undefined): string {
  */
 export function formatRelative(epochMs: number | null | undefined): string {
   if (epochMs === null || epochMs === undefined) return '';
-  const delta = epochMs - Date.now();
-  const absMs = Math.abs(delta);
-  const minutes = Math.round(absMs / 60_000);
-  const future = delta >= 0;
-  if (minutes < 1) return future ? 'in <1m' : 'just now';
-  if (minutes < 60) return future ? `in ${minutes}m` : `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return future ? `in ${hours}h` : `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  return future ? `in ${days}d` : `${days}d ago`;
+  return formatRelativeOwner(epochMs, Date.now());
 }
 
 /** daisyUI background class for a run-history status dot. */

@@ -70,7 +70,7 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
             >{{ store.refreshErrorMessage() ?? 'The last review poll failed. Review runs may be out of date.' }}</span
           ><button
             type="button"
-            class="btn btn-ghost btn-sm"
+            ptahButton variant="ghost"
             aria-label="Retry with Refresh"
             (click)="store.refresh()"
           >
@@ -84,14 +84,14 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
             >Review service is unavailable. Showing cached runs from
             {{ store.lastRefreshedAt()?.toLocaleString() }}. Live publication
             status is unavailable.</span
-          ><button class="btn btn-ghost btn-sm" (click)="store.load()">
+          ><button ptahButton variant="ghost" (click)="store.load()">
             Retry connection
           </button>
         </div>
       } @else if (store.state() === 'error') {
         <div class="alert alert-error" role="alert">
           <span>Review history could not be loaded.</span
-          ><button class="btn btn-ghost btn-sm" (click)="store.load()">
+          ><button ptahButton variant="ghost" (click)="store.load()">
             Retry
           </button>
         </div>

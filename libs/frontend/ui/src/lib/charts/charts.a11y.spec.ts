@@ -129,3 +129,42 @@ describe('chart reduced motion', () => {
     expect(ring.querySelector('.motion-reduce\\:transition-none')).not.toBeNull();
   });
 });
+
+describe('ptah-ring new inputs accessibility', () => {
+  it('bare is hidden from assistive technology with no role', () => {
+    const el = render(PtahRingComponent, { value: 4, max: 8, label: 'Used', bare: true });
+    expect(el.querySelector('div')?.getAttribute('aria-hidden')).toBe('true');
+    expect(el.querySelector('[role]')).toBeNull();
+    expect(el.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('centerText and subText become aria-valuetext of a ranged ring', () => {
+    const meter = render(PtahRingComponent, { value: 4, max: 8, label: 'Used', centerText: '4 of 8', subText: 'steps', size: 'md' }).querySelector('[role="meter"]');
+    expect(meter?.getAttribute('aria-valuetext')).toBe('4 of 8 steps');
+    expect(meter?.getAttribute('aria-valuenow')).toBe('4');
+  });
+
+  it('valueText is the aria-valuetext of a ranged ring', () => {
+    const meter = render(PtahRingComponent, { value: 4, max: 8, label: 'Used', valueText: 'Half' }).querySelector('[role="meter"]');
+    expect(meter?.getAttribute('aria-valuetext')).toBe('Half');
+  });
+
+  it('indeterminate is a named progressbar without ARIA values', () => {
+    const el = render(PtahRingComponent, { value: 0, max: 0, label: 'Indexing', indeterminate: true, valueText: 'Indexing files' });
+    const bar = el.querySelector('[role="progressbar"]') as HTMLElement;
+    expect(bar.getAttribute('aria-label')).toBe('Indexing');
+    for (const attr of ARIA_VALUES) expect(bar.hasAttribute(attr)).toBe(false);
+    expect(bar.getAttribute('aria-valuetext')).toBe('Indexing files');
+    expect(el.querySelector('.animate-pulse.motion-reduce\\:animate-none')).not.toBeNull();
+  });
+
+  it('indeterminate without valueText has no aria-valuetext', () => {
+    const bar = render(PtahRingComponent, { value: 0, max: 0, label: 'Busy', indeterminate: true }).querySelector('[role="progressbar"]');
+    expect(bar?.hasAttribute('aria-valuetext')).toBe(false);
+  });
+
+  it.each(['lg', 'xl'])('keeps the %s ring named with a meter role', (size) => {
+    const meter = render(PtahRingComponent, { value: 4, max: 8, label: 'Used', size }).querySelector('[role="meter"]');
+    expect(meter?.getAttribute('aria-label')).toBe('Used');
+  });
+});

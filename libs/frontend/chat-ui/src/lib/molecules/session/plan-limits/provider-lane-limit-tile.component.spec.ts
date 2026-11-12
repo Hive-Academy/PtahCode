@@ -24,11 +24,21 @@ describe('ProviderLaneLimitTileComponent', () => {
     fixture.detectChanges();
     const root = fixture.nativeElement as HTMLElement;
     expect(root.querySelectorAll('[data-testid="plan-extra-window"]')).toHaveLength(2);
-    expect(root.querySelectorAll('progress')).toHaveLength(3);
+    expect(root.querySelectorAll('ptah-meter')).toHaveLength(3);
     expect(root.querySelector('select, button')).toBeNull();
     expect(root.textContent).not.toMatch(/Less detail|More detail/);
     expect(root.querySelectorAll('[data-ptah-badge][data-size="xs"]')).toHaveLength(1);
-    expect(root.querySelector('progress')?.getAttribute('aria-label')).toBe('Kimi Code Monthly code usage');
+    const primary = root.querySelector<HTMLElement>('[data-testid="provider-limit-progress"]');
+    const bar = primary?.querySelector<HTMLElement>('[role="progressbar"]');
+    expect(primary?.tagName).toBe('PTAH-METER');
+    expect(bar?.getAttribute('aria-label')).toBe('Kimi Code Monthly code usage');
+    expect(bar?.getAttribute('aria-valuenow')).toBe('80');
+    expect(bar?.getAttribute('aria-valuetext')).toBe('80% used');
+    expect(bar?.className).toContain('h-2');
+    expect(bar?.firstElementChild?.className).toContain('bg-state-need');
+    const extra = root.querySelector<HTMLElement>('[data-testid="provider-limit-extra-progress"] [role="progressbar"]');
+    expect(extra?.getAttribute('aria-valuenow')).toBe('41');
+    expect(extra?.className).toContain('h-1');
   });
   it('shows untracked provider state', () => {
     TestBed.configureTestingModule({ imports: [ProviderLaneLimitTileComponent] });
@@ -41,7 +51,7 @@ describe('ProviderLaneLimitTileComponent', () => {
     const root = fixture.nativeElement as HTMLElement;
     expect(root.textContent).toContain('Usage · Unavailable');
     expect(root.textContent).toContain('Limits not tracked');
-    expect(root.querySelector('progress')).toBeNull();
+    expect(root.querySelector('ptah-meter')).toBeNull();
   });
   it('keeps local usage, evidence, cooldown and status beside a window', () => {
     TestBed.configureTestingModule({ imports: [ProviderLaneLimitTileComponent] });
