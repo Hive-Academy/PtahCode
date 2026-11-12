@@ -73,6 +73,7 @@ try {
   assert.equal(JSON.parse(fs.readFileSync(baselinePath)).docs.lines, 1);
 
   expect(run('--update', '--force-raise'), 2, /--force-raise requires/);
+  expect(run('--json', '--update'), 2, /--json cannot be used with --update/);
   expect(run('--update', '--force-raise', '--reason', 'short'), 2, /at least 10 characters/);
   expect(run('--force-raise', '--reason', '--update'), 2, /--reason requires a value/);
   expect(runRaw('--fixture-dir', '--json'), 2, /--fixture-dir requires a value/);

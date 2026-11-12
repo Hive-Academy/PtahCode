@@ -154,6 +154,7 @@ function main(): number {
   const reason = value('--reason');
   if (reason !== undefined && reason.trim().length < 10) throw new Error('--reason requires at least 10 characters');
   if (force && (!update || !reason || reason.trim().length < 10)) throw new Error('--force-raise requires --update --reason with at least 10 characters');
+  if (update && args.includes('--json')) throw new Error('--json cannot be used with --update');
   const baselinePath = value('--baseline-path') ?? path.join(__dirname, 'baseline.json');
   const baseline = readBaseline(baselinePath);
   const { entries, skipped } = collectFiles(value('--fixture-dir'), baseline.excludes);
