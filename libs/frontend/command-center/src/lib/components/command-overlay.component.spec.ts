@@ -98,12 +98,13 @@ describe('CommandOverlayComponent', () => {
     fixture.componentRef.setInput('rootContextTone', 'normal');
     fixture.detectChanges();
     expect(
-      labels[0].querySelector('ptah-context-ring svg')?.getAttribute('width'),
-    ).toBe('28');
+      labels[0].querySelector('ptah-context-ring ptah-ring span')?.className,
+    ).toContain('h-6');
     expect(
-      (labels[0].querySelector('ptah-context-ring svg') as SVGElement).style
-        .color,
-    ).toBe('var(--state-ink-done)');
+      labels[0]
+        .querySelector('ptah-context-ring circle[pathLength]')
+        ?.classList.contains('text-state-done'),
+    ).toBe(true);
     expect(labels[0].textContent).toContain('Context 62%');
     expect(labels[0].getAttribute('aria-label')).toContain('Context 62%');
     expect(labels[1].querySelector('ptah-context-ring')).toBeNull();
@@ -111,9 +112,10 @@ describe('CommandOverlayComponent', () => {
     fixture.componentRef.setInput('rootContextTone', 'warning');
     fixture.detectChanges();
     expect(
-      (labels[0].querySelector('ptah-context-ring svg') as SVGElement).style
-        .color,
-    ).toBe('var(--state-ink-need)');
+      labels[0]
+        .querySelector('ptah-context-ring circle[pathLength]')
+        ?.classList.contains('text-state-need'),
+    ).toBe(true);
     expect(labels[0].textContent).toContain('Context 70%');
     fixture.componentRef.setInput('rootContextPercent', null);
     fixture.detectChanges();
