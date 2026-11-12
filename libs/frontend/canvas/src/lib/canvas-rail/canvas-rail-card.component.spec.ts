@@ -956,8 +956,8 @@ describe('CanvasRailCardComponent', () => {
     const input = panel.querySelector('input');
     expect(input?.hasAttribute('ptahInput')).toBe(true);
     expect(input?.classList).toContain('input-sm');
-    // Owner stylesheet provides the focus ring (at least 3:1 in light themes).
-    // No separate primary border color on focus, so no double outline.
+    // Directive adds base input class and size class; no custom focus borders.
+    expect(input?.classList).toContain('input');
     const inputClasses = [...(input?.classList ?? [])];
     expect(inputClasses.some((name) => name.startsWith('focus:border-'))).toBe(
       false,
