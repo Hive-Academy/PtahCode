@@ -154,16 +154,16 @@ import { InboxLayoutDemoComponent } from './inbox-layout-demo.component';
           <p class="mt-ptah-label text-ptah-hint text-base-content-muted">
             Findings and run activity appear here.
           </p>
+          <section class="mt-ptah-group border-t border-surface-border pt-ptah-group">
+            <h3 class="text-ptah-group-title">Run context</h3>
+            <p class="mt-ptah-label text-ptah-hint text-base-content-muted">Repository: org/api</p>
+          </section>
         </div>
         <div
           empty
           class="p-ptah-surface text-ptah-hint text-base-content-muted"
         >
           Select a review run to see its details.
-        </div>
-        <div meta class="p-ptah-surface text-ptah-hint">
-          <h3 class="text-ptah-group-title">Run context</h3>
-          <p class="mt-ptah-label">Repository: org/api</p>
         </div>
       </ptah-list-detail>
     </ptah-gallery-section>
