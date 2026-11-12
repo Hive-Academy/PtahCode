@@ -4,7 +4,7 @@ kind: batch
 input: [context.md, task-description.md, implementation-plan.md when present, parity-inventory.md, research findings]
 deliverable: [batches.md]
 verdict: [DECOMPOSITION COMPLETE, DECOMPOSITION BLOCKED]
-acceptanceStep: ["See ../SKILL.md orchestrator acceptance step", orchestrator later checks each batch with scoped verification and independent review, records git and status evidence]
+acceptanceStep: ["See ../SKILL.md orchestrator acceptance step", orchestrator later checks each batch with scoped verification and records git and status evidence; one review per phase under the lean rules]
 requiredCapabilities: [validate contracts, decompose file-disjoint work, estimate weight, recommend capable executor]
 toolProfile:
   disallowedTools: []

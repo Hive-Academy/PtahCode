@@ -556,7 +556,7 @@ When ready, reply:
 
 ### When to Present
 
-After the review and tests QA phases, and completion confirms all work complete. This is a notice, not a question: you
+After the last batch is `COMPLETE`, before the `review` and `tests` phases and before `completion`. This is a notice, not a question: you
 select the QA agents by the rule below, announce them and start them. This selection does not waive the
 required UI evidence against the approved prototype (or — for a UI change with no added/redesigned
 surface and so no prototype — before/after screenshots [dark + light] of the affected screen, the
