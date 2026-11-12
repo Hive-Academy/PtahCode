@@ -16,6 +16,8 @@ import { VoiceDownloadProgressService } from '../../services/voice-download-prog
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import {
   PtahButtonDirective,
+  PtahInputDirective,
+  PtahSelectDirective,
 } from '@ptah-extension/ui';
 
 interface WhisperModelOption {
@@ -64,7 +66,13 @@ const HF_REPO_ID_RE = /^[\w.-]+\/[\w.-]+$/;
 @Component({
   selector: 'ptah-local-stt-panel',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective],
+  imports: [
+    SettingsBusyDisabledDirective,
+    LucideAngularModule,
+    PtahButtonDirective,
+    PtahInputDirective,
+    PtahSelectDirective,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -117,7 +125,9 @@ const HF_REPO_ID_RE = /^[\w.-]+\/[\w.-]+$/;
               <select
                 id="local-stt-model"
                 aria-label="Whisper model"
-                class="select select-bordered select-sm w-full"
+                ptahSelect
+                size="sm"
+                class="w-full"
                 [value]="selectedModel()"
                 [ptahBusyDisabled]="saving()"
                 (change)="onModelChange($event)"
@@ -150,10 +160,10 @@ const HF_REPO_ID_RE = /^[\w.-]+\/[\w.-]+$/;
                   id="local-stt-custom"
                   type="text"
                   aria-label="Custom model id or folder"
-                  class="input input-bordered input-sm w-full"
-                  [class.input-error]="
-                    customModel().length > 0 && !customModelValid()
-                  "
+                  ptahInput
+                  size="sm"
+                  class="w-full"
+                  [invalid]="customModel().length > 0 && !customModelValid()"
                   [value]="customModel()"
                   [disabled]="saving()"
                   [placeholder]="

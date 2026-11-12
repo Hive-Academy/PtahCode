@@ -892,10 +892,7 @@
     "<dynamic>": 5
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/agent-orchestration-config.component.ts": {
-    "<dynamic>": 5,
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1
+    "<dynamic>": 5
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/capability-matrix-setting.component.ts": {
     "<dynamic>": 1,
@@ -916,11 +913,7 @@
     "btn": 1,
     "btn-sm": 1,
     "btn-warning": 1,
-    "card-layout": 1,
-    "select": 2,
-    "select-bordered": 2,
-    "select-sm": 2,
-    "select-xs": 2
+    "card-layout": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/cli-model-effort-popover.component.ts": {
     "<dynamic>": 2
@@ -929,10 +922,7 @@
     "badge": 1,
     "badge-outline": 1,
     "badge-sm": 1,
-    "card-body": 1,
-    "checkbox": 1,
-    "checkbox-primary": 1,
-    "checkbox-sm": 1
+    "card-body": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/copilot-auto-approve-toggle.component.ts": {
     "<dynamic>": 1,
@@ -947,10 +937,7 @@
     "badge-xs": 1,
     "btn": 1,
     "btn-primary": 1,
-    "btn-xs": 1,
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1
+    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/elevenlabs-panel.component.ts": {
     "badge": 2,
@@ -958,18 +945,7 @@
     "badge-sm": 2,
     "btn": 1,
     "btn-outline": 1,
-    "btn-sm": 1,
-    "input": 2,
-    "input-bordered": 2,
-    "input-sm": 2,
-    "select": 2,
-    "select-bordered": 2,
-    "select-sm": 2
-  },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/go-vet-consent-config.component.ts": {
-    "toggle": 1,
-    "toggle-primary": 1,
-    "toggle-sm": 1
+    "btn-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/host-routing-setting.component.ts": {
     "<dynamic>": 1,
@@ -978,13 +954,8 @@
     "toggle-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/lane-guards-settings.component.ts": {
-    "<dynamic>": 1,
     "btn": 1,
-    "btn-sm": 1,
-    "input": 1,
-    "input-bordered": 1,
-    "input-error": 1,
-    "input-sm": 1
+    "btn-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/lane-rotation-setting.component.ts": {
     "<dynamic>": 1,
@@ -999,14 +970,7 @@
     "btn": 1,
     "btn-ghost": 1,
     "btn-primary": 1,
-    "btn-xs": 1,
-    "input": 1,
-    "input-bordered": 1,
-    "input-error": 1,
-    "input-sm": 1,
-    "select": 1,
-    "select-bordered": 1,
-    "select-sm": 1
+    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/local-tts-panel.component.ts": {
     "badge": 2,
@@ -1015,44 +979,17 @@
     "btn": 1,
     "btn-ghost": 1,
     "btn-primary": 1,
-    "btn-xs": 1,
-    "input": 1,
-    "input-bordered": 1,
-    "input-error": 1,
-    "input-sm": 1,
-    "select": 1,
-    "select-bordered": 1,
-    "select-sm": 1
+    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/ptah-cli-instances.component.ts": {
-    "<dynamic>": 11,
+    "<dynamic>": 10,
     "badge": 4,
     "badge-outline": 3,
-    "badge-sm": 4,
-    "checkbox": 1,
-    "checkbox-primary": 1,
-    "checkbox-sm": 1
+    "badge-sm": 4
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/session-budget-settings.component.ts": {
-    "<dynamic>": 3,
     "btn": 1,
-    "btn-sm": 1,
-    "input": 1,
-    "input-bordered": 1,
-    "input-error": 1,
-    "input-sm": 1,
-    "select": 1,
-    "select-bordered": 1,
-    "select-sm": 1,
-    "toggle": 1,
-    "toggle-primary": 1,
-    "toggle-sm": 1
-  },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/subagent-cache-ttl-setting.component.ts": {
-    "<dynamic>": 1,
-    "select": 1,
-    "select-bordered": 1,
-    "select-sm": 1
+    "btn-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/voice-config.component.ts": {
     "<dynamic>": 1,
@@ -1066,13 +1003,7 @@
     "badge-sm": 3,
     "btn": 1,
     "btn-outline": 1,
-    "btn-sm": 1,
-    "checkbox": 1,
-    "checkbox-primary": 1,
-    "checkbox-xs": 1,
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1
+    "btn-sm": 1
   },
   "libs/frontend/command-center/src/lib/components/command-center-header.component.ts": {
     "badge": 3,

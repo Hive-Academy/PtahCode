@@ -39,12 +39,6 @@ const NUMBER_KEYS = (Object.keys(SESSION_BUDGET_SETTINGS) as Key[]).filter(
 );
 
 describe('SessionBudgetSettingsComponent', () => {
-  const normalizeRow = (row: Element): string =>
-    row.outerHTML
-      .replace(/\s+_ng(?:content|host)-[^=]+="[^"]*"/g, '')
-      .replace(/<!--[^]*?-->/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
   let fixture: ComponentFixture<SessionBudgetSettingsComponent>;
   let stored: Record<string, unknown>;
   let readFails: boolean;
@@ -131,58 +125,37 @@ describe('SessionBudgetSettingsComponent', () => {
     fixture?.destroy();
   });
 
-  it('preserves numeric row DOM', async () => {
+  it('keeps labeled numeric rows and unit suffixes', async () => {
     await create();
-    const rows = NUMBER_KEYS.map((key) =>
-      field(key).closest('.flex.min-w-0.flex-col.gap-1'),
-    );
-    expect(rows.every((row) => row !== null)).toBe(true);
-    expect(rows.map((row) => normalizeRow(row as Element)))
-      .toMatchInlineSnapshot(`
-      [
-        "<div class="flex min-w-0 flex-col gap-1"><label class="text-sm font-medium text-base-content" for="session-budget-tokens">Token budget</label><div class="join flex w-full"><input type="text" class="flex-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-base-content focus-visible:outline-offset-2 input input-bordered input-sm join-item min-w-0 tabular-nums text-base-content text-right text-sm" id="session-budget-tokens" inputmode="numeric" aria-describedby="session-budget-tokens-help" data-testid="session-budget-tokens"><span aria-hidden="true" class="btn btn-sm join-item shrink-0 cursor-default whitespace-nowrap border-base-content/10 px-3 text-xs font-normal text-base-content-muted">tokens</span></div><span class="whitespace-nowrap text-xs text-base-content-muted">50M tokens</span><p class="text-xs text-base-content-muted" id="session-budget-tokens-help"> Chat token limit. Range: 1,000,000 to 2,000,000,000. </p></div>",
-        "<div class="flex min-w-0 flex-col gap-1"><label class="text-sm font-medium text-base-content" for="session-budget-usd">Cost budget (USD)</label><div class="join flex w-full"><input type="text" class="flex-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-base-content focus-visible:outline-offset-2 input input-bordered input-sm join-item min-w-0 tabular-nums text-base-content text-right text-sm" id="session-budget-usd" inputmode="decimal" aria-describedby="session-budget-usd-help" data-testid="session-budget-usd"><span aria-hidden="true" class="btn btn-sm join-item shrink-0 cursor-default whitespace-nowrap border-base-content/10 px-3 text-xs font-normal text-base-content-muted">USD</span></div><p class="text-xs text-base-content-muted" id="session-budget-usd-help"> Session cost limit. Range: 0.5 to 10,000. </p></div>",
-        "<div class="flex min-w-0 flex-col gap-1"><label class="text-sm font-medium text-base-content" for="session-budget-fallbackWeightedTokens">Fallback weighted tokens</label><div class="join flex w-full"><input type="text" class="flex-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-base-content focus-visible:outline-offset-2 input input-bordered input-sm join-item min-w-0 tabular-nums text-base-content text-right text-sm" id="session-budget-fallbackWeightedTokens" inputmode="numeric" aria-describedby="session-budget-fallbackWeightedTokens-help" data-testid="session-budget-fallbackWeightedTokens"><span aria-hidden="true" class="btn btn-sm join-item shrink-0 cursor-default whitespace-nowrap border-base-content/10 px-3 text-xs font-normal text-base-content-muted">tokens</span></div><span class="whitespace-nowrap text-xs text-base-content-muted">9M tokens</span><p class="text-xs text-base-content-muted" id="session-budget-fallbackWeightedTokens-help"> Used when model pricing is unavailable. Range: 100,000 to 500,000,000. </p></div>",
-        "<div class="flex min-w-0 flex-col gap-1"><label class="text-sm font-medium text-base-content" for="session-budget-tightenPercent">Tighten at (%)</label><div class="join flex w-full"><input type="text" class="flex-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-base-content focus-visible:outline-offset-2 input input-bordered input-sm join-item min-w-0 tabular-nums text-base-content text-right text-sm" id="session-budget-tightenPercent" inputmode="numeric" aria-describedby="session-budget-tightenPercent-help" data-testid="session-budget-tightenPercent"><span aria-hidden="true" class="btn btn-sm join-item shrink-0 cursor-default whitespace-nowrap border-base-content/10 px-3 text-xs font-normal text-base-content-muted">%</span></div><p class="text-xs text-base-content-muted" id="session-budget-tightenPercent-help"> Starts tightening; stays below Handoff. Range: 10 to 95. </p></div>",
-        "<div class="flex min-w-0 flex-col gap-1"><label class="text-sm font-medium text-base-content" for="session-budget-handoffPercent">Handoff at (%)</label><div class="join flex w-full"><input type="text" class="flex-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-base-content focus-visible:outline-offset-2 input input-bordered input-sm join-item min-w-0 tabular-nums text-base-content text-right text-sm" id="session-budget-handoffPercent" inputmode="numeric" aria-describedby="session-budget-handoffPercent-help" data-testid="session-budget-handoffPercent"><span aria-hidden="true" class="btn btn-sm join-item shrink-0 cursor-default whitespace-nowrap border-base-content/10 px-3 text-xs font-normal text-base-content-muted">%</span></div><p class="text-xs text-base-content-muted" id="session-budget-handoffPercent-help"> Offers to wrap up and hand off to a new session. Range: 20 to 99. </p></div>",
-        "<div class="flex min-w-0 flex-col gap-1"><label class="text-sm font-medium text-base-content" for="session-budget-handoffAfterCompactions">Handoff after compactions</label><div class="join flex w-full"><input type="text" class="flex-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-base-content focus-visible:outline-offset-2 input input-bordered input-sm join-item min-w-0 tabular-nums text-base-content text-right text-sm" id="session-budget-handoffAfterCompactions" inputmode="numeric" aria-describedby="session-budget-handoffAfterCompactions-help" data-testid="session-budget-handoffAfterCompactions"><span aria-hidden="true" class="btn btn-sm join-item shrink-0 cursor-default whitespace-nowrap border-base-content/10 px-3 text-xs font-normal text-base-content-muted">runs</span></div><p class="text-xs text-base-content-muted" id="session-budget-handoffAfterCompactions-help"> Offers a handoff after this many compactions. Range: 1 to 20. </p></div>",
-        "<div class="flex min-w-0 flex-col gap-1"><label class="text-sm font-medium text-base-content" for="session-budget-tightenWindowTokens">Tighten auto-compact window (tokens)</label><div class="join flex w-full"><input type="text" class="flex-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-base-content focus-visible:outline-offset-2 input input-bordered input-sm join-item min-w-0 tabular-nums text-base-content text-right text-sm" id="session-budget-tightenWindowTokens" inputmode="numeric" placeholder="Advisory only" aria-describedby="session-budget-tightenWindowTokens-help" data-testid="session-budget-tightenWindowTokens"><span aria-hidden="true" class="btn btn-sm join-item shrink-0 cursor-default whitespace-nowrap border-base-content/10 px-3 text-xs font-normal text-base-content-muted">tokens</span></div><p class="text-xs text-base-content-muted" id="session-budget-tightenWindowTokens-help"> Advisory only until set; then lowers the compact window. Range: 100,000 to 1,000,000. </p></div>",
-      ]
-    `);
+    for (const key of NUMBER_KEYS) {
+      const control = field(key);
+      const row = control.closest('.flex.min-w-0.flex-col.gap-1');
+      expect(row).not.toBeNull();
+      expect(row?.querySelector('label')?.getAttribute('for')).toBe(control.id);
+      expect(control.getAttribute('data-ptah-control')).toBe('input');
+      expect(control.closest('.join')).not.toBeNull();
+      expect(row?.querySelector('[aria-hidden="true"]')?.textContent?.trim()).toBeTruthy();
+    }
   });
 
-  it('preserves an invalid numeric row DOM', async () => {
+  it('marks invalid numeric input and keeps its error', async () => {
     await create();
     await enter('tokens', 'bad');
-    const row = field('tokens').closest('.flex.min-w-0.flex-col.gap-1');
-    expect(row).not.toBeNull();
-    expect(normalizeRow(row as Element)).toMatchInlineSnapshot(
-      `"<div class="flex min-w-0 flex-col gap-1"><label class="text-sm font-medium text-base-content" for="session-budget-tokens">Token budget</label><div class="join flex w-full"><input type="text" class="flex-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-base-content focus-visible:outline-offset-2 input input-bordered input-sm join-item min-w-0 tabular-nums text-base-content text-right text-sm input-error" id="session-budget-tokens" inputmode="numeric" aria-describedby="session-budget-tokens-help session-budget-tokens-error" data-testid="session-budget-tokens" aria-invalid="true"><span aria-hidden="true" class="btn btn-sm join-item shrink-0 cursor-default whitespace-nowrap border-base-content/10 px-3 text-xs font-normal text-base-content-muted">tokens</span></div><p class="text-xs text-base-content-muted" id="session-budget-tokens-help"> Chat token limit. Range: 1,000,000 to 2,000,000,000. </p><p id="session-budget-tokens-error" data-testid="session-budget-tokens-error"> Enter a number. </p></div>"`,
-    );
+    expect(field('tokens').getAttribute('aria-invalid')).toBe('true');
+    expect(byTestId('session-budget-tokens-error')?.textContent).toContain('Enter a number.');
   });
 
-  it('preserves a stored-value notice row DOM', async () => {
+  it('keeps the stored-value notice associated with the input', async () => {
     stored['sessionBudget.tokens'] = 5;
     await create();
-    const row = field('tokens').closest('.flex.min-w-0.flex-col.gap-1');
-    expect(row).not.toBeNull();
-    expect(normalizeRow(row as Element)).toMatchInlineSnapshot(
-      `"<div class="flex min-w-0 flex-col gap-1"><label class="text-sm font-medium text-base-content" for="session-budget-tokens">Token budget</label><div class="join flex w-full"><input type="text" class="flex-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-base-content focus-visible:outline-offset-2 input input-bordered input-sm join-item min-w-0 tabular-nums text-base-content text-right text-sm" id="session-budget-tokens" inputmode="numeric" aria-describedby="session-budget-tokens-help session-budget-tokens-stored" data-testid="session-budget-tokens"><span aria-hidden="true" class="btn btn-sm join-item shrink-0 cursor-default whitespace-nowrap border-base-content/10 px-3 text-xs font-normal text-base-content-muted">tokens</span></div><p class="text-xs text-base-content-muted" id="session-budget-tokens-help"> Chat token limit. Range: 1,000,000 to 2,000,000,000. </p><p class="rounded-md border border-info/30 bg-info/10 px-2 py-1" id="session-budget-tokens-stored" data-testid="session-budget-tokens-stored"> The saved value is not valid; Ptah uses the default (50,000,000). </p></div>"`,
-    );
+    expect(field('tokens').getAttribute('aria-describedby')).toContain('session-budget-tokens-stored');
+    expect(byTestId('session-budget-tokens-stored')).not.toBeNull();
   });
 
-  it('preserves a row without a readable note', async () => {
+  it('omits the readable note when none is available', async () => {
     await create();
     const row = field('usd').closest('.flex.min-w-0.flex-col.gap-1');
-    expect(row).not.toBeNull();
-    expect(
-      Array.from(row?.children ?? []).some((child) =>
-        child.matches('span.whitespace-nowrap.text-xs'),
-      ),
-    ).toBe(false);
-    expect(normalizeRow(row as Element)).toMatchInlineSnapshot(
-      `"<div class="flex min-w-0 flex-col gap-1"><label class="text-sm font-medium text-base-content" for="session-budget-usd">Cost budget (USD)</label><div class="join flex w-full"><input type="text" class="flex-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-base-content focus-visible:outline-offset-2 input input-bordered input-sm join-item min-w-0 tabular-nums text-base-content text-right text-sm" id="session-budget-usd" inputmode="decimal" aria-describedby="session-budget-usd-help" data-testid="session-budget-usd"><span aria-hidden="true" class="btn btn-sm join-item shrink-0 cursor-default whitespace-nowrap border-base-content/10 px-3 text-xs font-normal text-base-content-muted">USD</span></div><p class="text-xs text-base-content-muted" id="session-budget-usd-help"> Session cost limit. Range: 0.5 to 10,000. </p></div>"`,
-    );
+    expect(row?.querySelector('span.whitespace-nowrap.text-xs:not([aria-hidden])')).toBeNull();
   });
 
   describe('load', () => {

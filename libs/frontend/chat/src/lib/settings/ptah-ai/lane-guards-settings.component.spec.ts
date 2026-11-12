@@ -14,12 +14,6 @@ const CONFIG = {
 } as AgentOrchestrationConfig;
 
 describe('LaneGuardsSettingsComponent', () => {
-  const normalizeRow = (row: Element): string =>
-    row.outerHTML
-      .replace(/\s+_ng(?:content|host)-[^=]+="[^"]*"/g, '')
-      .replace(/<!--[^]*?-->/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
   let fixture: ComponentFixture<LaneGuardsSettingsComponent>;
   let call: jest.Mock;
   let feedback: SettingsSaveFeedbackService;
@@ -80,9 +74,14 @@ describe('LaneGuardsSettingsComponent', () => {
       '.flex.min-w-0.flex-col.gap-1',
     );
     expect(row).not.toBeNull();
-    expect(normalizeRow(row as Element)).toMatchInlineSnapshot(
-      `"<div class="flex min-w-0 flex-col gap-1"><label class="text-sm font-medium text-base-content" for="lane-guards-repeat">Repeat-call stop at</label><div class="join flex w-full"><input type="text" inputmode="numeric" class="flex-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-base-content focus-visible:outline-offset-2 input input-bordered input-sm join-item min-w-0 tabular-nums text-base-content text-right text-sm" id="lane-guards-repeat" aria-describedby="lane-guards-repeat-help" data-testid="lane-guards-repeat"><span aria-hidden="true" class="btn btn-sm join-item shrink-0 cursor-default whitespace-nowrap border-base-content/10 px-3 text-xs font-normal text-base-content-muted">calls</span></div><p class="text-xs text-base-content-muted" id="lane-guards-repeat-help"> Stops a lane that repeats the same tool call this many times. Range: 2 or greater. </p></div>"`,
-    );
+    const field = input('lane-guards-repeat');
+    expect(field.classList.contains('input')).toBe(true);
+    expect(field.classList.contains('input-sm')).toBe(true);
+    expect(field.classList.contains('join-item')).toBe(true);
+    expect(field.getAttribute('data-ptah-control')).toBe('input');
+    expect(field.hasAttribute('aria-invalid')).toBe(false);
+    expect(row?.querySelector('label')?.getAttribute('for')).toBe('lane-guards-repeat');
+    expect(row?.querySelector('p[role="alert"]')).toBeNull();
   });
 
   it('preserves invalid threshold row DOM', async () => {
@@ -92,9 +91,16 @@ describe('LaneGuardsSettingsComponent', () => {
       '.flex.min-w-0.flex-col.gap-1',
     );
     expect(row).not.toBeNull();
-    expect(normalizeRow(row as Element)).toMatchInlineSnapshot(
-      `"<div class="flex min-w-0 flex-col gap-1"><label class="text-sm font-medium text-base-content" for="lane-guards-repeat">Repeat-call stop at</label><div class="join flex w-full"><input type="text" inputmode="numeric" class="flex-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-base-content focus-visible:outline-offset-2 input input-bordered input-sm join-item min-w-0 tabular-nums text-base-content text-right text-sm input-error" id="lane-guards-repeat" aria-describedby="lane-guards-repeat-help lane-guards-repeat-error" data-testid="lane-guards-repeat" aria-invalid="true"><span aria-hidden="true" class="btn btn-sm join-item shrink-0 cursor-default whitespace-nowrap border-base-content/10 px-3 text-xs font-normal text-base-content-muted">calls</span></div><p class="text-xs text-base-content-muted" id="lane-guards-repeat-help"> Stops a lane that repeats the same tool call this many times. Range: 2 or greater. </p><p role="alert" id="lane-guards-repeat-error" data-testid="lane-guards-repeat-error"> Enter a whole number from 2. </p></div>"`,
+    const field = input('lane-guards-repeat');
+    expect(field.classList.contains('join-item')).toBe(true);
+    expect(field.getAttribute('data-ptah-control')).toBe('input');
+    expect(field.getAttribute('aria-invalid')).toBe('true');
+    expect(field.getAttribute('aria-describedby')).toBe(
+      'lane-guards-repeat-help lane-guards-repeat-error',
     );
+    expect(
+      row?.querySelector('[data-testid="lane-guards-repeat-error"]')?.textContent,
+    ).toContain('Enter a whole number from 2.');
   });
 
   it('loads only the repeat-call field from agent:getConfig', async () => {

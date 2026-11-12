@@ -11,6 +11,9 @@ import { TabManagerService } from '@ptah-extension/chat-state';
 import {
   SettingsFieldComponent,
   PtahButtonDirective,
+  PtahToggleDirective,
+  PtahSelectDirective,
+  PtahInputDirective,
 } from '@ptah-extension/ui';
 import {
   SESSION_BUDGET_SETTINGS,
@@ -39,8 +42,6 @@ type Parsed =
   | { readonly ok: true; readonly value: number | null }
   | { readonly ok: false; readonly error: string };
 
-const FOCUS =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
 const BUDGET_KEYS = Object.keys(SESSION_BUDGET_SETTINGS) as BudgetKey[];
 const NUMBER_FORMAT = new Intl.NumberFormat('en-US');
 /** A missing host response must reveal Retry instead of leaving the settings card busy. */
@@ -174,7 +175,7 @@ function storedNumberIsValid(
 @Component({
   selector: 'ptah-session-budget-settings',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, SettingsFieldComponent, PtahButtonDirective],
+  imports: [SettingsBusyDisabledDirective, SettingsFieldComponent, PtahButtonDirective, PtahToggleDirective, PtahSelectDirective, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -233,7 +234,7 @@ function storedNumberIsValid(
                 >
                   <input
                     type="checkbox"
-                    [class]="'toggle toggle-sm toggle-primary ' + focusRing"
+                    ptahToggle size="sm"
                     [checked]="booleanValue(key)"
                     [ptahBusyDisabled]="busy()"
                     (change)="toggle(key, $event)"
@@ -257,11 +258,9 @@ function storedNumberIsValid(
                 labels.unit
               }}</label>
               <select
+                ptahSelect size="sm"
                 id="session-budget-unit"
-                [class]="
-                  'select select-bordered select-sm w-full text-sm ' +
-                  focusRing
-                "
+                class="w-full text-sm"
                 [value]="unitValue()"
                 [ptahBusyDisabled]="busy()"
                 aria-describedby="session-budget-unit-help"
@@ -294,21 +293,18 @@ function storedNumberIsValid(
                 [errorTestId]="'session-budget-' + field.key + '-error'">
                 <ng-container ngProjectAs="[settingsFieldControl]"><div class="join flex w-full">
                   <input
+                    ptahInput size="sm"
                     type="text"
                     [id]="'session-budget-' + field.key"
                     [attr.inputmode]="
                       settings[field.key].integer ? 'numeric' : 'decimal'
                     "
-                    [class]="
-                      'input input-bordered input-sm join-item min-w-0 flex-1 text-right text-sm tabular-nums text-base-content ' +
-                      (errors()[field.key] ? 'input-error ' : '') +
-                      focusRing
-                    "
+                    class="join-item min-w-0 flex-1 text-right text-sm tabular-nums text-base-content"
+                    [invalid]="!!errors()[field.key]"
                     [value]="numberText(field.key)"
                     [attr.placeholder]="
                       settings[field.key].nullable ? 'Advisory only' : null
                     "
-                    [attr.aria-invalid]="errors()[field.key] ? 'true' : null"
                     [attr.aria-describedby]="
                       'session-budget-' +
                       field.key +
@@ -369,7 +365,6 @@ export class SessionBudgetSettingsComponent implements OnInit {
   private readonly tabManager = inject(TabManagerService);
   private readonly feedback = inject(SettingsSaveFeedbackService);
 
-  protected readonly focusRing = FOCUS;
   protected readonly settings = SESSION_BUDGET_SETTINGS;
   protected readonly labels = LABELS;
   protected readonly numberFields = NUMBER_FIELDS;

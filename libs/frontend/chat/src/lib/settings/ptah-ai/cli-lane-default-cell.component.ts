@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, ElementRef, computed, input, output
 import {
   NativePopoverComponent,
   PtahButtonDirective,
+  PtahSelectDirective,
 } from '@ptah-extension/ui';
 import type { CliAdapterManifest, CliLaneDefaults, CliType, LaneNetworkMode, LanePermissionMode } from '@ptah-extension/shared';
 import { CLI_LANE_DEFAULT_SCHEMA, resolveCliLaneDefaultPair } from '@ptah-extension/shared';
@@ -16,7 +17,7 @@ let nextTitleId = 0;
 @Component({
   selector: 'ptah-cli-lane-default-cell',
   standalone: true,
-  imports: [NativePopoverComponent, PtahButtonDirective],
+  imports: [NativePopoverComponent, PtahButtonDirective, PtahSelectDirective],
   styles: `:host { display: block; } dialog.modal:not([open]) { display: none; } .compact { width: 4.75rem; } .wide, .card-layout { width: 100%; } .wide select { max-width: 20rem; min-width: 9rem; } @container (max-width: 479px) { .wide > .grid { grid-template-columns: minmax(0, 1fr); } }`,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -34,7 +35,7 @@ let nextTitleId = 0;
       <div class="grid min-w-0 grid-cols-1" [class.gap-3]="layout() !== 'card'" [class.gap-2]="layout() === 'card'" [class.grid-cols-2]="layout() !== 'compact'">
       @if (permissions().length) {
         <label class="flex flex-col gap-0.5">Permission
-          <select class="select select-bordered w-full min-w-0 max-w-full border-base-content/60 text-base-content" [class.select-sm]="layout() === 'wide'" [class.select-xs]="layout() !== 'wide'" [attr.aria-label]="name() + ' permission default'" [title]="effectivePermission()"
+          <select ptahSelect [size]="layout() === 'wide' ? 'sm' : 'xs'" class="w-full min-w-0 max-w-full text-base-content" [attr.aria-label]="name() + ' permission default'" [title]="effectivePermission()"
             [value]="effectivePermission()" [disabled]="disabled() || pending() !== null" (change)="choosePermission($event)">
             @for (mode of permissions(); track mode) { <option [value]="mode">{{ mode }}</option> }
           </select>
@@ -47,7 +48,7 @@ let nextTitleId = 0;
       } @else { <span tabindex="0" [title]="reason()">Permission: Unavailable — {{ reason() }}</span> }
       @if (networks().length) {
         <label class="flex flex-col gap-0.5">Network
-          <select class="select select-bordered w-full min-w-0 max-w-full border-base-content/60 text-base-content" [class.select-sm]="layout() === 'wide'" [class.select-xs]="layout() !== 'wide'" [attr.aria-label]="name() + ' network default'" [title]="effectiveNetwork()"
+          <select ptahSelect [size]="layout() === 'wide' ? 'sm' : 'xs'" class="w-full min-w-0 max-w-full text-base-content" [attr.aria-label]="name() + ' network default'" [title]="effectiveNetwork()"
             [value]="effectiveNetwork()" [disabled]="disabled() || pending() !== null" (change)="chooseNetwork($event)">
             @for (mode of networks(); track mode) { <option [value]="mode">{{ mode }}</option> }
           </select>

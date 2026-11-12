@@ -12,6 +12,7 @@ import {
   ProviderMarkComponent,
   PtahButtonDirective,
   PtahIconButtonDirective,
+  PtahCheckboxDirective,
 } from '@ptah-extension/ui';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import {
@@ -67,6 +68,7 @@ const LABEL = 'text-xs font-semibold uppercase tracking-wide text-base-content-m
     CliModelEffortPopoverComponent,
     PtahButtonDirective,
     PtahIconButtonDirective,
+    PtahCheckboxDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -143,7 +145,8 @@ const LABEL = 'text-xs font-semibold uppercase tracking-wide text-base-content-m
                 <label class="inline-flex min-h-10 min-w-10 items-center justify-center">
                 <input
                   type="checkbox"
-                  [class]="'cli-check checkbox checkbox-primary checkbox-sm mt-0.5 ' + focusRing"
+                  ptahCheckbox size="sm"
+                  class="cli-check mt-0.5"
                   [checked]="row.enabled"
                   [ptahBusyDisabled]="busy() || !canWrite()"
                   [attr.aria-label]="row.name + ' enabled'"
@@ -479,7 +482,6 @@ export class PtahCliInstancesComponent {
   protected readonly PlusIcon = Plus;
   protected readonly MoreIcon = Ellipsis;
   protected readonly ChevronIcon = ChevronDown;
-  protected readonly focusRing = CLI_MATRIX_FOCUS;
   protected readonly cell = CELL;
   protected readonly menuItem = MENU_ITEM;
   protected readonly label = LABEL;
