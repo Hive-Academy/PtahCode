@@ -268,6 +268,19 @@
   --ptah-status-square-radius: 0.125rem;
   --ptah-status-pulse-duration: 1600ms;
 
+  /* Boxed countdown (timers family). One box for each time unit: a mono value
+     over a small unit label. Value size and box width for each size. */
+  --ptah-countdown-box-bg: var(--surface-2);
+  --ptah-countdown-box-edge: var(--ptah-border-color);
+  --ptah-countdown-box-radius: var(--ptah-radius-control);
+  --ptah-countdown-gap: var(--ptah-space-2);
+  --ptah-countdown-value-sm: 1.25rem;
+  --ptah-countdown-value-md: 1.875rem;
+  --ptah-countdown-value-lg: 3rem;
+  --ptah-countdown-box-w-sm: 2.5rem;
+  --ptah-countdown-box-w-md: 3.5rem;
+  --ptah-countdown-box-w-lg: 5rem;
+
   /* Layers: the values overlays use today. Nothing above the CDK overlay. */
   --ptah-z-raised: 30;
   --ptah-z-menu: 50;

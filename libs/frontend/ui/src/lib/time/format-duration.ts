@@ -33,6 +33,25 @@ export function formatDuration(ms: number, style: DurationStyle = 'compact'): st
   return `${total}s`;
 }
 
+export interface DurationParts {
+  readonly days: number;
+  readonly hours: number;
+  readonly minutes: number;
+  readonly seconds: number;
+}
+
+/** Splits a duration into whole d/h/m/s. Negative -> all 0. NaN -> null. */
+export function splitDuration(ms: number): DurationParts | null {
+  if (Number.isNaN(ms)) return null;
+  const total = Math.floor(Math.max(0, ms) / SECOND);
+  return {
+    days: Math.floor(total / 86_400),
+    hours: Math.floor((total % 86_400) / 3600),
+    minutes: Math.floor((total % 3600) / 60),
+    seconds: total % 60,
+  };
+}
+
 /** ISO 8601 duration ("PT75S") for a `<time datetime>`. Negative -> PT0S. NaN -> null. */
 export function toIsoDuration(ms: number): string | null {
   if (Number.isNaN(ms)) return null;

@@ -27,6 +27,21 @@ import { GallerySectionComponent } from './gallery-section.component';
     <ptah-gallery-section id="countdown-expired" title="Countdown: expired">
       <ptah-countdown [deadline]="expiredDeadline" />
     </ptah-gallery-section>
+    <ptah-gallery-section id="countdown-boxed-sm" title="Countdown: boxed, sm">
+      <ptah-countdown [deadline]="runningDeadline" layout="boxed" size="sm" />
+    </ptah-gallery-section>
+    <ptah-gallery-section id="countdown-boxed-md" title="Countdown: boxed, md">
+      <ptah-countdown [deadline]="runningDeadline" layout="boxed" size="md" />
+    </ptah-gallery-section>
+    <ptah-gallery-section id="countdown-boxed-lg" title="Countdown: boxed, lg">
+      <ptah-countdown [deadline]="runningDeadline" layout="boxed" size="lg" />
+    </ptah-gallery-section>
+    <ptah-gallery-section id="countdown-boxed-urgent" title="Countdown: boxed, urgent">
+      <ptah-countdown [deadline]="urgentDeadline" [urgentBelowMs]="86400000" layout="boxed" />
+    </ptah-gallery-section>
+    <ptah-gallery-section id="countdown-boxed-expired" title="Countdown: boxed, expired">
+      <ptah-countdown [deadline]="expiredDeadline" layout="boxed" />
+    </ptah-gallery-section>
     <ptah-gallery-section id="relative-past" title="Relative time: past">
       <ptah-relative-time [value]="pastTime" />
     </ptah-gallery-section>
