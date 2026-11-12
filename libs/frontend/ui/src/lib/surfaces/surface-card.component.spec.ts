@@ -120,6 +120,19 @@ describe('SurfaceCardComponent', () => {
     expect(card().dataset['variant']).toBe('inset');
   });
 
+  it('keeps the old classes for the temporary legacy variant', () => {
+    const { card, update } = setup();
+    update((h) => h.variant.set('legacy'));
+    expect(card().classList).not.toContain('ptah-card');
+    expect(card().classList).toContain('surface-2');
+    expect(card().classList).toContain('rounded-xl');
+    expect(card().classList).toContain('p-4');
+    expect(card().classList).toContain('elev-1');
+    update((h) => h.elevation.set(2));
+    expect(card().classList).toContain('elev-3');
+    expect(card().classList).not.toContain('elev-1');
+  });
+
   it('projects the header, body and footer slots in order', () => {
     const { by } = setup();
     const body = by('surface-card-body');

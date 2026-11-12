@@ -262,6 +262,15 @@ names and the SHA-256 hashes here.
   `card` or `plain`) is its owner since #1143. `stat-card` is recorded as a duplicate for a
   later decision. It is not migrated here.
 
+7. Old consumer look: the "Curator model" card (`memory-diagnostics-accordion.component.ts`)
+   used `ptah-surface-card` with `surface-2 rounded-xl p-4 elev-1`. The new default has
+   a base-200 fill, a base-300 border and no shadow. In glass, the old card used the reading
+   plane (`--glass-scrim-text`, `--glass-frame`, content shadow), and the new default uses the
+   tile fill, `--glass-line` and the rim. To keep zero look change in this PR, the card uses
+   the temporary variant `legacy` (the old classes). Does the user approve the new card look
+   for this card? If yes, remove `legacy` and use the default. If no, keep `legacy` or
+   choose another variant.
+
 ## Review record
 
 An independent review (Codex) found two major defects. Both are fixed: the selected ring (the

@@ -60,7 +60,12 @@ const NESTED_INTERACTIVE_SELECTOR =
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
-      class="ptah-card"
+      class="rounded-xl"
+      [class.ptah-card]="!isLegacy()"
+      [class.surface-2]="isLegacy()"
+      [class.p-4]="isLegacy()"
+      [class.elev-1]="isLegacy() && elevation() !== 2"
+      [class.elev-3]="isLegacy() && elevation() === 2"
       data-testid="surface-card"
       [attr.data-variant]="effectiveVariant()"
       [attr.data-padding]="effectivePadding()"
@@ -134,6 +139,14 @@ export class SurfaceCardComponent {
   protected readonly isInteractive = computed(
     () => this.interactive() || this.clickable() || this.selectable(),
   );
+
+  /**
+   * TEMPORARY NAMED EXCEPTION: `variant="legacy"` keeps the old look
+   * (`surface-2 rounded-xl p-4 elev-1`, and the glass reading plane) for the
+   * "Curator model" card in memory-curator-ui. Remove it after the user
+   * approves the card look (`family-card-look.md`, question 7).
+   */
+  protected readonly isLegacy = computed(() => this.variant() === 'legacy');
 
   protected readonly effectiveVariant = computed<PtahCardVariant>(() =>
     this.elevation() === 2 && this.variant() === 'card'
