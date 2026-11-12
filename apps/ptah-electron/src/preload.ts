@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld('ptahConfig', {
   // TODO(streaming-p6): remove zone fallback flag after one stable release
   zoneChangeDetectionFallback:
     startupConfig?.zoneChangeDetectionFallback === true,
+  isDevInstance: startupConfig?.isDevInstance === true,
 });
 contextBridge.exposeInMainWorld('ptahClipboard', {
   readText: (): Promise<string> => ipcRenderer.invoke('clipboard:read-text'),
@@ -74,6 +75,7 @@ interface PreloadStartupConfig {
   workspaceRoot?: string;
   workspaceName?: string;
   zoneChangeDetectionFallback?: boolean;
+  isDevInstance?: boolean;
   gpuCompositing?: 'hardware' | 'software' | 'disabled';
 }
 
@@ -97,6 +99,10 @@ function parseStartupConfig(raw: unknown): PreloadStartupConfig | null {
   const workspaceName = fields.get('workspaceName');
   const zoneFallback = fields.get('zoneChangeDetectionFallback');
   const gpuCompositing = fields.get('gpuCompositing');
+  const isDevInstance = fields.get('isDevInstance');
+  if (isDevInstance !== undefined && typeof isDevInstance !== 'boolean') {
+    return null;
+  }
   if (
     initialView !== undefined &&
     initialView !== null &&
@@ -126,6 +132,7 @@ function parseStartupConfig(raw: unknown): PreloadStartupConfig | null {
     workspaceRoot,
     workspaceName,
     zoneChangeDetectionFallback: zoneFallback,
+    isDevInstance,
     gpuCompositing,
   };
 }

@@ -47,6 +47,8 @@ export interface StartupConfig {
   workspaceName: string;
   /** TODO(streaming-p6): remove zone fallback flag after one stable release */
   zoneChangeDetectionFallback: boolean;
+  /** True only in the unpackaged dev instance (`electron:serve`). */
+  isDevInstance: boolean;
 }
 
 const EMPTY_STARTUP_CONFIG: StartupConfig = {
@@ -55,7 +57,12 @@ const EMPTY_STARTUP_CONFIG: StartupConfig = {
   workspaceRoot: '',
   workspaceName: '',
   zoneChangeDetectionFallback: false,
+  isDevInstance: false,
 };
+
+export function readIsDevInstance(): boolean {
+  return !app.isPackaged && process.env['NODE_ENV'] === 'development';
+}
 
 function readZoneChangeDetectionFallback(): boolean {
   return process.env['PTAH_ZONE_CHANGE_DETECTION_FALLBACK'] === '1';
@@ -66,6 +73,7 @@ function emptyStartupConfig(): StartupConfig {
     ...EMPTY_STARTUP_CONFIG,
     gpuCompositing: gpuCompositingMode(),
     zoneChangeDetectionFallback: readZoneChangeDetectionFallback(),
+    isDevInstance: readIsDevInstance(),
   };
 }
 
@@ -121,6 +129,7 @@ export function readStartupConfig(
       workspaceName: path.basename(resolvedRoot),
       // TODO(streaming-p6): remove zone fallback flag after one stable release
       zoneChangeDetectionFallback: readZoneChangeDetectionFallback(),
+      isDevInstance: readIsDevInstance(),
     };
   } catch (error: unknown) {
     console.error(

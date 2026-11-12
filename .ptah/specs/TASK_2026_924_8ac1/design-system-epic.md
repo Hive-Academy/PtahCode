@@ -150,6 +150,7 @@ Update this table in the pull request of each step. Do not keep another status l
 | 1 | Button and icon button | done | done (#1066) | done (#1071) | done | in progress (marketplace #1073 merged, pages in a branch) | open |
 | 1 | Form controls | done (this task) | done (TASK_2026_950_ed73) | done (`family-2-look.md`, screenshots wait for Electron) | open | in progress (ratchet roots `checkbox`, `toggle`, `form-control`, `label` added; batches 1 and 2 of 10 done: chat providers and components (19 files), chat settings/ptah-ai (16 files; success-tone toggles left raw); radios are a named exception) | open |
 | 2 | Composites | done (this task) | open | open | open | open | open |
+| 2 | 1. Badge and status | done (TASK_2026_957_fda3) | done (TASK_2026_957_fda3) | done (`family-3-look.md`, screenshots wait for Electron) | open | open | open |
 
 Order of the composites: section 3 of this document.
 

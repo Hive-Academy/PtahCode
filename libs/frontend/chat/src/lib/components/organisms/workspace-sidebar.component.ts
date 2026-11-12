@@ -12,11 +12,13 @@
 import {
   Component,
   ChangeDetectionStrategy,
+  computed,
   inject,
   input,
 } from '@angular/core';
+import { Router } from '@angular/router';
 import { LucideAngularModule, FolderOpen, FolderPlus, X } from 'lucide-angular';
-import { ElectronLayoutService } from '@ptah-extension/core';
+import { ElectronLayoutService, VSCodeService } from '@ptah-extension/core';
 import { SessionLivenessRegistry } from '@ptah-extension/chat-state';
 import { McpServersCardComponent } from '../molecules/mcp-servers-card.component';
 
@@ -124,18 +126,44 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
       <div class="px-3 pb-3">
         <ptah-mcp-servers-card />
       </div>
+      @if (isDevInstance()) {
+        <!-- Dev instance only (electron:serve): link to the design-system gallery. -->
+        <div class="px-3 pb-3">
+          <button
+            ptahButton
+            variant="ghost"
+            size="sm"
+            class="w-full justify-start"
+            data-testid="workspace-sidebar-ui-gallery-link"
+            (click)="openUiGallery()"
+          >
+            <span class="text-xs">UI gallery</span>
+          </button>
+        </div>
+      }
     </div>
   `,
 })
 export class WorkspaceSidebarComponent {
   protected readonly layout = inject(ElectronLayoutService);
   protected readonly liveness = inject(SessionLivenessRegistry);
+  private readonly vscode = inject(VSCodeService);
+  private readonly router = inject(Router);
+
+  /** True only in the unpackaged Electron dev instance. Hidden by default. */
+  protected readonly isDevInstance = computed(
+    () => this.vscode.config().isDevInstance === true,
+  );
 
   /** Sidebar width in pixels (controlled by parent via resize handle) */
   readonly width = input<number>(220);
   readonly FolderOpenIcon = FolderOpen;
   readonly FolderPlusIcon = FolderPlus;
   readonly XIcon = X;
+
+  openUiGallery(): void {
+    void this.router.navigateByUrl('/ui-gallery');
+  }
 
   onRemoveFolder(event: Event, index: number): void {
     event.stopPropagation();
