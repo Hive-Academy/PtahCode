@@ -5,6 +5,7 @@ import {
   input,
 } from '@angular/core';
 import { NEAR_LIMIT_PERCENT } from '@ptah-extension/shared';
+import { PtahMeterComponent, type PtahMeterTone } from '@ptah-extension/ui';
 import { chipClass, sourceChipClass } from './stats-tile.styles';
 import type { PlanWindowDetailModel } from './stats-limit-view-model.types';
 
@@ -25,6 +26,7 @@ import type { PlanWindowDetailModel } from './stats-limit-view-model.types';
 @Component({
   selector: 'ptah-plan-window-detail',
   standalone: true,
+  imports: [PtahMeterComponent],
   template: `
     @let w = window();
     <div class="py-1" data-testid="plan-window-detail">
@@ -43,27 +45,19 @@ import type { PlanWindowDetailModel } from './stats-limit-view-model.types';
       }
       @if (showSummary() && percent() !== null) {
         <div class="flex items-center gap-2 mt-1">
-          <div
-            class="relative flex-1 h-1.5 rounded bg-base-content/10 overflow-hidden"
-            role="meter"
-            aria-valuemin="0"
-            aria-valuemax="100"
-            [attr.aria-valuenow]="percent()"
-            [attr.aria-valuetext]="w.usedText"
-            [attr.aria-label]="w.label + ' used'"
-          >
-            <div
-              class="h-full rounded bg-base-content/70"
-              [class.stripes-error]="w.chip?.tone === 'error'"
-              [class.stripes-warning]="w.chip?.tone === 'warning'"
-              [style.width.%]="percent()"
-            ></div>
-            <div
-              class="absolute top-0 h-full w-px bg-base-content"
-              [style.left.%]="nearLimitPercent"
-              aria-hidden="true"
-            ></div>
-          </div>
+          <ptah-meter
+            class="block flex-1"
+            [value]="percent() ?? 0"
+            [max]="100"
+            [label]="w.label + ' used'"
+            [valueText]="w.usedText"
+            [tone]="meterTone()"
+            [stripes]="hot()"
+            [marker]="nearLimitPercent"
+            size="sm"
+            [showValue]="false"
+            [hideLabel]="true"
+          />
           <span class="text-xs font-semibold tabular-nums whitespace-nowrap">{{
             w.usedText
           }}</span>
@@ -90,24 +84,6 @@ import type { PlanWindowDetailModel } from './stats-limit-view-model.types';
       }
     </div>
   `,
-  styles: [
-    `
-      .stripes-error {
-        background-image: repeating-linear-gradient(
-          45deg,
-          oklch(var(--er) / 0.85) 0 4px,
-          transparent 4px 7px
-        );
-      }
-      .stripes-warning {
-        background-image: repeating-linear-gradient(
-          45deg,
-          oklch(var(--wa) / 0.85) 0 4px,
-          transparent 4px 7px
-        );
-      }
-    `,
-  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class PlanWindowDetailComponent {
@@ -129,4 +105,13 @@ export class PlanWindowDetailComponent {
     if (typeof value !== 'number' || !Number.isFinite(value)) return null;
     return Math.min(100, Math.max(0, Math.round(value)));
   });
+
+  /** Tone of the meter from the chip: error and warning carry state, the rest is neutral. */
+  protected readonly meterTone = computed<PtahMeterTone>(() => {
+    const tone = this.window().chip?.tone;
+    return tone === 'error' ? 'err' : tone === 'warning' ? 'warn' : 'neutral';
+  });
+
+  /** Stripes decorate a window that is near or at its limit. */
+  protected readonly hot = computed(() => this.meterTone() !== 'neutral');
 }

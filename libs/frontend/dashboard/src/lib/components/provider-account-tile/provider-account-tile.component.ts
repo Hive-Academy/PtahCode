@@ -16,6 +16,8 @@ import {
   ProviderMarkComponent,
   PtahButtonDirective,
   PtahIconButtonDirective,
+  PtahMeterComponent,
+  type PtahMeterTone,
 } from '@ptah-extension/ui';
 import {
   buildPlanTile,
@@ -32,46 +34,14 @@ import {
 @Component({
   selector: 'ptah-provider-account-tile',
   standalone: true,
-  imports: [ProviderMarkComponent, PtahButtonDirective, PtahIconButtonDirective],
+  imports: [ProviderMarkComponent, PtahButtonDirective, PtahIconButtonDirective, PtahMeterComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './provider-account-tile.component.html',
   styles: [
-    // Meter and 90% tick use theme tokens in both themes.
     `
       :host {
         display: block;
         min-width: 0;
-      }
-      .bar-track {
-        position: relative;
-        height: 0.5rem;
-        border-radius: 0.25rem;
-        overflow: hidden;
-        background-color: oklch(var(--b2, var(--b1)));
-      }
-      .bar-fill {
-        height: 100%;
-        border-radius: inherit;
-        transition: width 300ms ease;
-      }
-      /* Decorative 90% (near-limit) tick; the value never has to reach it. */
-      .bar-tick {
-        position: absolute;
-        top: 0;
-        bottom: 0;
-        width: 1px;
-        background: oklch(var(--bc) / 0.5);
-      }
-      /* Success and warning fills are near-white on the light theme; re-tint
-         them so the bar keeps contrast in both themes. */
-      :host-context([data-theme-mode='light']) .bar-fill.bg-success {
-        background-color: color-mix(in oklab, oklch(var(--su)) 60%, black);
-      }
-      :host-context([data-theme-mode='light']) .bar-fill.bg-warning {
-        background-color: color-mix(in oklab, oklch(var(--wa)) 60%, black);
-      }
-      :host-context([data-theme-mode='light']) .bar-fill.bg-error {
-        background-color: color-mix(in oklab, oklch(var(--er)) 75%, black);
       }
     `,
   ],
@@ -128,17 +98,19 @@ export class ProviderAccountTileComponent {
       : view.headerTitle;
   });
 
-  protected barFillClass(tone: Tone): string {
+  /** Maps the view tone to the meter owner tone; the owner sets the colors. */
+  protected meterTone(tone: Tone): PtahMeterTone {
     switch (tone) {
       case 'error':
-        return 'bg-error';
+        return 'err';
       case 'warning':
-        return 'bg-warning';
+        return 'warn';
       case 'success':
-        return 'bg-success';
+        return 'ok';
+      case 'info':
+        return 'info';
       default:
-        return 'bg-base-content/45';
+        return 'neutral';
     }
   }
-
 }

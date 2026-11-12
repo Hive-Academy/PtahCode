@@ -30,10 +30,7 @@
             <span class="shrink-0">{{ window.valueText }}</span>
           </div>
           @if (window.percent !== null) {
-            <div class="bar-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="window.percent" [attr.aria-label]="window.label + ' plan usage'" data-testid="tile-bar">
-              <div class="bar-fill" [class]="barFillClass(window.tone)" [style.width.%]="window.percent"></div>
-              <div class="bar-tick" [style.left.%]="nearLimitPercent" aria-hidden="true"></div>
-            </div>
+            <ptah-meter class="block" [value]="window.percent" [max]="100" [label]="window.label + ' plan usage'" [valueText]="window.valueText" [tone]="meterTone(window.tone)" [marker]="nearLimitPercent" size="md" barRole="progressbar" [showValue]="false" [hideLabel]="true" data-testid="tile-bar" />
           }
         </div>
       }
