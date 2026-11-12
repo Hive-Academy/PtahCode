@@ -55,10 +55,7 @@
     "btn-ghost": 12,
     "btn-primary": 2,
     "btn-sm": 11,
-    "btn-xs": 2,
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1
+    "btn-xs": 2
   },
   "libs/frontend/canvas/src/lib/canvas-rail/canvas-rail.component.ts": {
     "btn": 4,
@@ -242,9 +239,6 @@
   "libs/frontend/chat-ui/src/lib/molecules/tool-execution/tool-call-header.component.ts": {
     "badge": 1,
     "badge-sm": 1
-  },
-  "libs/frontend/chat-ui/src/lib/molecules/tool-execution/tool-input-display.component.ts": {
-    "input-preview-block": 1
   },
   "libs/frontend/chat-ui/src/lib/molecules/turn-recap/turn-summary-chip.component.ts": {
     "<dynamic>": 6

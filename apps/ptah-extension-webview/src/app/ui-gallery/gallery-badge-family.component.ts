@@ -3,6 +3,7 @@ import {
   PtahBadgeDirective,
   PtahBadgeTone,
   PtahStatus,
+  PtahStatusBadgeComponent,
   PtahStatusComponent,
 } from '@ptah-extension/ui';
 import { GallerySectionComponent } from './gallery-section.component';
@@ -11,7 +12,12 @@ import { GallerySectionComponent } from './gallery-section.component';
 @Component({
   selector: 'ptah-gallery-badge-family',
   standalone: true,
-  imports: [GallerySectionComponent, PtahBadgeDirective, PtahStatusComponent],
+  imports: [
+    GallerySectionComponent,
+    PtahBadgeDirective,
+    PtahStatusBadgeComponent,
+    PtahStatusComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<ptah-gallery-section id="family-badge" title="Badge and status family">
     <p class="text-ptah-hint text-base-content-muted">
@@ -63,6 +69,15 @@ import { GallerySectionComponent } from './gallery-section.component';
         }
       </div>
     </div>
+    <div
+      data-testid="status-badge-reference"
+      class="mt-ptah-group flex flex-wrap items-center gap-ptah-inline"
+    >
+      <span class="text-ptah-caption text-base-content-muted w-28">status badge</span>
+      @for (status of allStatuses; track status) {
+        <ptah-ui-status-badge [status]="status" />
+      }
+    </div>
   </ptah-gallery-section>`,
 })
 export class GalleryBadgeFamilyComponent {
@@ -70,5 +85,16 @@ export class GalleryBadgeFamilyComponent {
   public readonly appearances = ['soft', 'outline'] as const;
   public readonly sizes = ['sm', 'xs'] as const;
   public readonly statusAppearances = ['pill', 'inline', 'dot'] as const;
+  public readonly allStatuses: readonly PtahStatus[] = [
+    'running',
+    'queued',
+    'pending',
+    'needs-review',
+    'warning',
+    'failed',
+    'offline',
+    'completed',
+    'online',
+  ];
   public readonly statuses: readonly PtahStatus[] = ['running', 'queued', 'needs-review', 'failed', 'completed'];
 }

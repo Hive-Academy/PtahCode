@@ -37,7 +37,10 @@ it('renders the foundation samples without host data', () => {
   const root = fixture.nativeElement as HTMLElement;
   expect(root.querySelectorAll('ptah-ui-status-badge')).toHaveLength(10);
   expect(root.querySelectorAll('ptah-state-panel')).toHaveLength(5);
-  expect(root.querySelectorAll('section#components-meters ptah-meter')).toHaveLength(6);
+  expect(root.querySelectorAll('section#family-meter')).toHaveLength(1);
+  expect(root.querySelectorAll('section#family-button')).toHaveLength(1);
+  const ids = Array.from(root.querySelectorAll('section[id]')).map((el) => el.id);
+  expect(ids.filter((id, i) => ids.indexOf(id) !== i)).toEqual([]);
   expect(root.querySelectorAll('[ptahListRow]')).toHaveLength(4);
 });
 

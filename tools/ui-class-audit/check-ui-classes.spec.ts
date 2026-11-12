@@ -134,6 +134,12 @@ describe('isBlockedClassToken', () => {
   it('blocks input-group (documented decision: not a Tailwind utility)', () => {
     expect(isBlockedClassToken('input-group')).toBe(true);
   });
+
+  it('does not block custom input-* classes (false positive: input-preview-block)', () => {
+    expect(isBlockedClassToken('input-preview-block')).toBe(false);
+    expect(isBlockedClassToken('input-info')).toBe(true);
+    expect(isBlockedClassToken('input-xs')).toBe(true);
+  });
 });
 
 // --- static template scanning ------------------------------------------------
