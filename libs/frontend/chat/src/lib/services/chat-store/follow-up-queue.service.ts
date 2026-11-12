@@ -496,9 +496,13 @@ export class FollowUpQueueService {
           (typeof rawError === 'string' && rawError.startsWith('RPC timeout:'));
         uncertain = timedOut;
         reason = safeFailureReason(errorCode, data?.cancelled === true, timedOut);
-        this.logger.warn(LOG, 'queued chat:continue refused', {
-          errorCode: parseRpcUserErrorCode(errorCode), tabId, sessionId, clientMessageId,
-        });
+        const refusedCode = parseRpcUserErrorCode(errorCode);
+        // The host log keeps only the console text, so the fields go in it too.
+        this.logger.warn(
+          LOG,
+          `queued chat:continue refused errorCode=${refusedCode ?? 'none'} tabId=${tabId} sessionId=${sessionId}`,
+          { errorCode: refusedCode, tabId, sessionId, clientMessageId },
+        );
       }
     } catch (error: unknown) {
       uncertain = true;

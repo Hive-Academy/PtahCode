@@ -25,7 +25,11 @@
 
 import { inject, injectable } from 'tsyringe';
 import { Logger, RpcUserError, TOKENS } from '@ptah-extension/vscode-core';
-import { SDK_TOKENS, type SessionLifecycleManager } from '@ptah-extension/agent-sdk';
+import {
+  SDK_TOKENS,
+  type SessionIdResolvedCallbackRegistry,
+  type SessionLifecycleManager,
+} from '@ptah-extension/agent-sdk';
 import { MESSAGE_TYPES } from '@ptah-extension/shared';
 import type {
   ChatQueuedMessageStateEvent,
@@ -50,6 +54,8 @@ type SessionRegistrations = Pick<SessionLifecycleManager, 'find'>;
 const NOT_THIS_TAB_MESSAGE = 'This conversation is not open in this tab.';
 const RECEIPT_RETENTION_MS = 10 * 60 * 1000;
 const MAX_TERMINAL_RECEIPTS = 200;
+/** Upper bound of remembered tab → session bindings; the oldest leave first. */
+const MAX_TAB_BINDINGS = 256;
 
 @injectable()
 export class ChatFollowUpQueueService {
@@ -68,7 +74,16 @@ export class ChatFollowUpQueueService {
   private readonly submissions = new Map<string, Set<Promise<void>>>();
   /** sessionId → tab that reopened the live session, with the registration it adopted. */
   private readonly adopted = new Map<string, { tabId: string; record: object }>();
+  /**
+   * tabId → the session the host last bound that tab to. A queued follow-up
+   * is addressed to a session, not to its stream owner: any tab still bound to
+   * the live session may queue, list and withdraw its own items, even after
+   * another tab restarted the session and took the stream. A tab leaves only
+   * when it binds another session or the bound is reached.
+   */
+  private readonly tabSessions = new Map<string, string>();
   private readonly unsubscribe: (() => void) | null;
+  private readonly unsubscribeResolved: (() => void) | null;
 
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
@@ -84,7 +99,20 @@ export class ChatFollowUpQueueService {
     private readonly registrations: SessionRegistrations | null = null,
     @inject(CHAT_TOKENS.CODEX_SESSION_OWNER, { isOptional: true })
     private readonly codexOwner: ((sessionId: string) => string | undefined) | null = null,
+    @inject(SDK_TOKENS.SDK_SESSION_ID_RESOLVED_CALLBACK_REGISTRY, { isOptional: true })
+    sessionIdResolved: Pick<SessionIdResolvedCallbackRegistry, 'register'> | null = null,
   ) {
+    this.unsubscribeResolved =
+      sessionIdResolved?.register(({ tabId, realSessionId, previousSessionId }) => {
+        // A compaction or resume gave the same conversation a new id: every
+        // tab that showed the previous id now shows the new one.
+        if (previousSessionId !== undefined && previousSessionId !== realSessionId) {
+          for (const [boundTab, boundSession] of this.tabSessions) {
+            if (boundSession === previousSessionId) this.tabSessions.set(boundTab, realSessionId);
+          }
+        }
+        if (tabId) this.noteTabSession(realSessionId, tabId);
+      }) ?? null;
     this.unsubscribe =
       this.sdkAdapter.onQueuedFollowUpState?.((change) =>
         this.onStateChange(change),
@@ -94,6 +122,8 @@ export class ChatFollowUpQueueService {
   /** Release the adapter subscription. */
   dispose(): void {
     this.unsubscribe?.();
+    this.unsubscribeResolved?.();
+    this.tabSessions.clear();
     this.bindings.clear();
     this.states.clear();
     this.receiptOwners.clear();
@@ -157,6 +187,9 @@ export class ChatFollowUpQueueService {
     this.stopAt.delete(sessionId);
     this.submissions.delete(sessionId);
     this.adopted.delete(sessionId);
+    for (const [tabId, boundSession] of this.tabSessions) {
+      if (boundSession === sessionId) this.tabSessions.delete(tabId);
+    }
   }
 
   private evictReceipt(sessionId: string, id: string): void {
@@ -235,8 +268,38 @@ export class ChatFollowUpQueueService {
    */
   assertTabOwnsSession(sessionId: string, tabId: string): void {
     const owner = this.ownerTab(sessionId);
-    if (owner !== undefined && owner !== tabId) {
-      throw new RpcUserError(NOT_THIS_TAB_MESSAGE, 'SESSION_NOT_FOUND');
+    if (owner === undefined || owner === tabId) {
+      if (owner !== undefined) this.noteTabSession(sessionId, tabId);
+      return;
+    }
+    // Another tab owns the stream, but this tab still shows the same live
+    // session (for example the stream owner restarted a dead record): its
+    // queued follow-ups belong to the session, so accept them. The stream
+    // stays where it is.
+    if (this.liveIdentity(sessionId) && this.tabSessions.get(tabId) === sessionId) {
+      // Refresh the binding so a tab in use is never the oldest one.
+      this.noteTabSession(sessionId, tabId);
+      return;
+    }
+    this.logger.warn('[RPC] follow-up refused: tab is not bound to the session', {
+      sessionId,
+      tabId,
+      ownerTabId: owner,
+    });
+    throw new RpcUserError(NOT_THIS_TAB_MESSAGE, 'SESSION_NOT_FOUND');
+  }
+
+  /**
+   * Remember that `tabId` shows `sessionId`. A tab shows one session, so a new
+   * binding replaces the old one. Bounded: the oldest binding leaves first.
+   */
+  noteTabSession(sessionId: string, tabId: string): void {
+    this.tabSessions.delete(tabId);
+    this.tabSessions.set(tabId, sessionId);
+    while (this.tabSessions.size > MAX_TAB_BINDINGS) {
+      const oldest = this.tabSessions.keys().next().value;
+      if (oldest === undefined) break;
+      this.tabSessions.delete(oldest);
     }
   }
 
@@ -510,7 +573,13 @@ export class ChatFollowUpQueueService {
   /** Tab of the live Claude record registered under this real session id. */
   private registeredTab(sessionId: string): string | undefined {
     const record = this.registrations?.find(sessionId);
-    return record?.realSessionId === sessionId ? record.tabId : undefined;
+    if (record?.realSessionId !== sessionId) return undefined;
+    // Only a tab the host knows nothing about: a registration must not
+    // replace the newer binding of a tab that opened another conversation.
+    if (record.tabId && !this.tabSessions.has(record.tabId)) {
+      this.noteTabSession(sessionId, record.tabId);
+    }
+    return record.tabId;
   }
 
   /**
@@ -526,6 +595,7 @@ export class ChatFollowUpQueueService {
     }
     const previous = this.ownerTab(sessionId);
     this.adopted.set(sessionId, { tabId, record });
+    this.noteTabSession(sessionId, tabId);
     if (previous === undefined || previous === tabId) return;
     // Items the earlier tab queued stay visible and addressable in this tab.
     for (const owners of [this.bindings.get(sessionId), this.receiptOwners.get(sessionId)]) {
