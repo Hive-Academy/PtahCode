@@ -1,3 +1,4 @@
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -80,6 +81,7 @@ export interface CanvasBoardNotice {
   selector: 'ptah-canvas-rail-board',
   standalone: true,
   imports: [
+    PtahButtonDirective,
     CanvasRailComponent,
     CanvasInspectorDockComponent,
     CanvasFocusAreaComponent,
@@ -194,7 +196,7 @@ export interface CanvasBoardNotice {
                 <div class="w-full max-w-[588px]"><ng-container [ngTemplateOutlet]="noticeTemplate" /></div>
               }
               <p class="text-sm text-base-content" role="alert">The workspace overview could not load.</p>
-              <button type="button" class="btn btn-sm btn-primary gap-1.5" (click)="reloadWindow()">
+              <button ptahButton variant="primary" size="sm" type="button" class="gap-1.5" (click)="reloadWindow()">
                 <lucide-angular [img]="reloadIcon" class="size-3.5" aria-hidden="true" />
                 Reload
               </button>
@@ -276,7 +278,7 @@ export interface CanvasBoardNotice {
           @if (notice(); as currentNotice) {
             <div class="surface-3 mx-auto flex min-h-12 w-full items-center gap-3 rounded-lg border border-warning px-3 py-2.5 text-sm text-base-content" [attr.role]="currentNotice.kind === 'cap' ? 'status' : 'alert'" data-testid="canvas-board-notice">
               <lucide-angular [img]="alertIcon" class="size-4 shrink-0" aria-hidden="true" /><span class="flex-1">{{ currentNotice.text }}</span>
-              <button type="button" class="btn btn-ghost btn-xs" aria-label="Dismiss notice" (click)="noticeDismissed.emit(currentNotice.key)"><lucide-angular [img]="closeIcon" class="size-3.5" aria-hidden="true" /></button>
+              <button ptahButton variant="ghost" size="xs" type="button" aria-label="Dismiss notice" (click)="noticeDismissed.emit(currentNotice.key)"><lucide-angular [img]="closeIcon" class="size-3.5" aria-hidden="true" /></button>
             </div>
           }
         </ng-template>
