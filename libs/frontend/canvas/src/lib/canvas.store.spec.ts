@@ -33,6 +33,7 @@ import { TestBed } from '@angular/core/testing';
 import { TabManagerService } from '@ptah-extension/chat';
 import { SessionId } from '@ptah-extension/shared';
 import { AgentMonitorStore } from '@ptah-extension/chat-streaming';
+import { ClockService } from '@ptah-extension/core';
 import { CanvasStore, RETAINED_WORKSPACE_CAP } from './canvas.store';
 import { CanvasLayoutPersistenceService } from './canvas-layout-persistence.service';
 import { DEFAULT_BOARD_STATE } from './canvas-board-mode';
@@ -73,6 +74,8 @@ describe('CanvasStore', () => {
 
   let getWorkspaceTabs: jest.Mock;
   let activeWorkspacePath: ReturnType<typeof signal<string | null>>;
+  let clockNow: ReturnType<typeof signal<number>>;
+  let clockHolders: number;
 
   beforeEach(() => {
     getWorkspaceTabs = jest.fn(() => []);
@@ -80,6 +83,8 @@ describe('CanvasStore', () => {
     tabs = signal([]);
     agents = signal([]);
     subagents = signal(new Map());
+    clockNow = signal(1_000);
+    clockHolders = 0;
     persistence = {
       load: jest.fn((_path: string) => ({
         tiles: null,
@@ -95,6 +100,18 @@ describe('CanvasStore', () => {
     TestBed.configureTestingModule({
       providers: [
         CanvasStore,
+        {
+          provide: ClockService,
+          useValue: {
+            now: clockNow,
+            acquire: () => {
+              clockHolders++;
+              return () => {
+                clockHolders--;
+              };
+            },
+          },
+        },
         { provide: AgentMonitorStore, useValue: { agents, subagents } },
         { provide: CanvasLayoutPersistenceService, useValue: persistence },
         {
@@ -201,44 +218,40 @@ describe('CanvasStore', () => {
     expect(store.canStartRunningSession()).toBe(false);
   });
 
-  it('rechecks hidden tab status at the cap and stops polling when a slot opens', () => {
-    jest.useFakeTimers();
-    try {
-      const first = Array.from({ length: 5 }, (_, i) => `a-${i}`);
-      const second = Array.from({ length: 4 }, (_, i) => `b-${i}`);
-      const streaming = (ids: readonly string[]) =>
-        ids.map((id) => ({
-          id,
-          name: id,
-          claudeSessionId: null,
-          status: 'streaming' as const,
-        }));
-      let hiddenTabs = streaming(first).map((tab) => ({
-        ...tab,
-        status: 'streaming' as 'streaming' | 'loaded',
+  it('rechecks hidden tab status at the cap and stops polling when a slot opens', async () => {
+    const first = Array.from({ length: 5 }, (_, i) => `a-${i}`);
+    const second = Array.from({ length: 4 }, (_, i) => `b-${i}`);
+    const streaming = (ids: readonly string[]) =>
+      ids.map((id) => ({
+        id,
+        name: id,
+        claudeSessionId: null,
+        status: 'streaming' as const,
       }));
-      getWorkspaceTabs.mockImplementation((path: string) =>
-        path === '/ws/a' ? hiddenTabs : [],
-      );
-      activeWorkspacePath.set('/ws/a');
-      tabs.set(streaming(first));
-      store.hydrateWorkspace('/ws/a', first);
-      activeWorkspacePath.set('/ws/b');
-      tabs.set(streaming(second));
-      store.hydrateWorkspace('/ws/b', second);
-      expect(store.canStartRunningSession()).toBe(false);
-      TestBed.flushEffects();
-      expect(jest.getTimerCount()).toBe(1);
-      hiddenTabs = hiddenTabs.map((tab, index) =>
-        index === 0 ? { ...tab, status: 'loaded' } : tab,
-      );
-      jest.advanceTimersByTime(1000);
-      expect(store.canStartRunningSession()).toBe(true);
-      TestBed.flushEffects();
-      expect(jest.getTimerCount()).toBe(0);
-    } finally {
-      jest.useRealTimers();
-    }
+    let hiddenTabs = streaming(first).map((tab) => ({
+      ...tab,
+      status: 'streaming' as 'streaming' | 'loaded',
+    }));
+    getWorkspaceTabs.mockImplementation((path: string) =>
+      path === '/ws/a' ? hiddenTabs : [],
+    );
+    activeWorkspacePath.set('/ws/a');
+    tabs.set(streaming(first));
+    store.hydrateWorkspace('/ws/a', first);
+    activeWorkspacePath.set('/ws/b');
+    tabs.set(streaming(second));
+    store.hydrateWorkspace('/ws/b', second);
+    expect(store.canStartRunningSession()).toBe(false);
+    await Promise.resolve();
+    TestBed.flushEffects();
+    expect(clockHolders).toBe(1);
+    hiddenTabs = hiddenTabs.map((tab, index) =>
+      index === 0 ? { ...tab, status: 'loaded' } : tab,
+    );
+    clockNow.set(2_000);
+    TestBed.flushEffects();
+    expect(store.canStartRunningSession()).toBe(true);
+    expect(clockHolders).toBe(0);
   });
 
   it('uses the tab manager active path during a workspace switch', () => {
@@ -288,7 +301,10 @@ describe('CanvasStore', () => {
   it('focuses an already-open session tile at the tile cap instead of reporting the cap (Phase 4 visual M2)', () => {
     const sessionAt = (i: number) =>
       SessionId.from(`00000000-0000-4000-8000-${String(i).padStart(12, '0')}`);
-    const ids = Array.from({ length: CanvasStore.MAX_TILES }, (_, i) => `tab-${i}`);
+    const ids = Array.from(
+      { length: CanvasStore.MAX_TILES },
+      (_, i) => `tab-${i}`,
+    );
     hydrate('/ws/a', ids);
     tabs.set(
       ids.map((id, i) => ({
@@ -345,15 +361,31 @@ describe('CanvasStore', () => {
   });
 
   it('hydrates v2 tiles with Rail defaults and upgrades on the first board change', () => {
-    const tiles: TileIntent[] = [{ tabId: 'A', order: 0, width: { kind: 'auto', weight: 1 }, rowBreakBefore: false }];
-    persistence.load.mockReturnValue({ tiles, board: null, writable: true, needsWrite: false, readOnlyReason: null });
+    const tiles: TileIntent[] = [
+      {
+        tabId: 'A',
+        order: 0,
+        width: { kind: 'auto', weight: 1 },
+        rowBreakBefore: false,
+      },
+    ];
+    persistence.load.mockReturnValue({
+      tiles,
+      board: null,
+      writable: true,
+      needsWrite: false,
+      readOnlyReason: null,
+    });
     store.hydrateWorkspace('/ws/a', ['A']);
     expect(store.boardFor('/ws/a')).toEqual(DEFAULT_BOARD_STATE);
     expect(store.tiles()).toEqual(tiles);
     expect(persistence.schedule).not.toHaveBeenCalled();
     store.setRailCollapsed('/ws/a', true);
     expect(persistence.schedule).toHaveBeenCalledTimes(1);
-    expect(persistence.schedule.mock.calls[0][1]()).toEqual({ tiles, board: { ...DEFAULT_BOARD_STATE, railCollapsed: true } });
+    expect(persistence.schedule.mock.calls[0][1]()).toEqual({
+      tiles,
+      board: { ...DEFAULT_BOARD_STATE, railCollapsed: true },
+    });
   });
 
   it('persists each changed board field once without changing tile identity or revision', () => {
@@ -367,7 +399,13 @@ describe('CanvasStore', () => {
     store.setRailScrollTop('/ws/a', 12.6);
     store.setRailSort('/ws/a', 'manual');
     expect(persistence.schedule).toHaveBeenCalledTimes(4);
-    expect(store.boardFor('/ws/a')).toEqual({ ...DEFAULT_BOARD_STATE, railCollapsed: true, railDensity: 'comfortable', railSort: 'manual', railScrollTop: 13 });
+    expect(store.boardFor('/ws/a')).toEqual({
+      ...DEFAULT_BOARD_STATE,
+      railCollapsed: true,
+      railDensity: 'comfortable',
+      railSort: 'manual',
+      railScrollTop: 13,
+    });
     store.setRailScrollTop('/ws/a', 13);
     store.setRailSort('/ws/a', 'manual');
     expect(persistence.schedule).toHaveBeenCalledTimes(4);
@@ -441,7 +479,13 @@ describe('CanvasStore', () => {
       width: { kind: 'auto', weight: 1 },
       rowBreakBefore: order === 1,
     }));
-    persistence.load.mockReturnValueOnce({ tiles, board: null, writable: true, needsWrite: false, readOnlyReason: null });
+    persistence.load.mockReturnValueOnce({
+      tiles,
+      board: null,
+      writable: true,
+      needsWrite: false,
+      readOnlyReason: null,
+    });
     hydrate('/ws/a', ['A', 'B', 'C']);
     store.removeTileOnly('B');
     expect(store.tiles()[1].rowBreakBefore).toBe(true);

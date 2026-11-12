@@ -73,7 +73,8 @@ const FOCUS =
         </button>
         <button
           type="submit"
-          [class]="'btn btn-primary btn-sm min-h-8 ' + focusRing"
+          ptahButton variant="primary" size="sm"
+          class="min-h-8 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
           [ptahBusyDisabled]="pending() || empty()"
           data-testid="add-account-submit"
         >
@@ -97,7 +98,6 @@ export class AddAccountFormComponent {
   readonly cancelled = output<void>();
 
   protected readonly maxLength = PROVIDER_ACCOUNT_LABEL_MAX_LENGTH;
-  protected readonly focusRing = FOCUS;
   protected readonly field = `input input-bordered input-sm w-full text-sm text-base-content aria-[invalid=true]:border-2 aria-[invalid=true]:border-state-err ${FOCUS}`;
 
   protected readonly label = signal('');

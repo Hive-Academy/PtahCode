@@ -208,6 +208,7 @@ function testFailureMessage(category: string | undefined): string {
                   voice stops working until a key is added.
                 </p>
                 <div class="flex gap-2">
+                  <!-- Outline has no owner variant; preserve the destructive confirmation style. -->
                   <button
                     type="button"
                     class="btn btn-outline btn-sm border-error text-base-content"
