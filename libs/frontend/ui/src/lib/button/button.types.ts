@@ -1,6 +1,7 @@
 export type PtahButtonVariant =
   | 'primary'
   | 'secondary'
+  | 'outline'
   | 'ghost'
   | 'danger'
   | 'link';

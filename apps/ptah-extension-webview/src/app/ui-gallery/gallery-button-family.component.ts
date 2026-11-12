@@ -9,7 +9,7 @@ import { GallerySectionComponent } from './gallery-section.component';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<ptah-gallery-section id="family-button" title="Button family">
     <p class="text-ptah-hint text-base-content-muted">
-      Reference for the button family: the five variants, the three sizes, the
+      Reference for the button family: the six variants, the three sizes, the
       forced states, icon buttons and the busy state. Each button uses the
       ptahButton or ptahIconButton directive.
     </p>
