@@ -1,26 +1,26 @@
-import { ChangeDetectionStrategy, Component, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import { PtahStatComponent } from '../charts/stat.component';
+import type { PtahChartSize } from '../charts/chart.types';
 
+const SIZE: Readonly<Record<'default' | 'dense', PtahChartSize>> = { default: 'md', dense: 'sm' };
+
+/** A stat tile for a page. The stat owner draws it. Actions go in the corner slot. */
 @Component({
   selector: 'ptah-stat-card',
   standalone: true,
+  imports: [PtahStatComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `<article class="surface-2 rounded-xl p-4">
-    <div class="flex items-start justify-between gap-2">
-      <div>
-        <p class="text-xs font-medium text-base-content-muted">{{ label() }}</p>
-        <p class="mt-1 font-semibold" [class.text-2xl]="size() === 'default'" [class.text-xl]="size() === 'dense'">{{ value() }}</p>
-        @if (trend()) {
-          <p class="mt-1 text-xs text-base-content-muted">{{ trend() }}</p>
-        }
-      </div>
-      <ng-content select="[actions]" />
-    </div>
+  template: `<ptah-stat appearance="card" [label]="label()" [value]="value()" [hint]="trend() ?? undefined"
+    [size]="statSize()">
+    <span ptahStatIcon><ng-content select="[actions]" /></span>
     <ng-content />
-  </article>`,
+  </ptah-stat>`,
 })
 export class PtahStatCardComponent {
   readonly label = input.required<string>();
   readonly value = input.required<string | number>();
   readonly trend = input<string | null>(null);
   readonly size = input<'default' | 'dense'>('default');
+
+  protected readonly statSize = computed(() => SIZE[this.size()]);
 }
