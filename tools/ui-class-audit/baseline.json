@@ -122,11 +122,6 @@
     "input-bordered": 1,
     "input-xs": 1
   },
-  "libs/frontend/chat-ui/src/lib/molecules/agent-summary.component.ts": {
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-xs": 1
-  },
   "libs/frontend/chat-ui/src/lib/molecules/boot-progress/boot-progress.component.ts": {
     "<dynamic>": 1
   },
@@ -134,19 +129,10 @@
     "<dynamic>": 1,
     "alert": 2,
     "alert-error": 2,
-    "badge": 1,
-    "badge-outline": 1,
-    "badge-primary": 1,
-    "badge-xs": 1,
     "btn": 2,
     "btn-ghost": 1,
     "btn-primary": 1,
     "btn-xs": 2
-  },
-  "libs/frontend/chat-ui/src/lib/molecules/compact-session/compact-rail-meta.component.ts": {
-    "badge": 3,
-    "badge-outline": 3,
-    "badge-xs": 3
   },
   "libs/frontend/chat-ui/src/lib/molecules/compact-session/compact-session-activity.component.ts": {
     "<dynamic>": 2
@@ -186,21 +172,12 @@
     "input-xs": 1
   },
   "libs/frontend/chat-ui/src/lib/molecules/permissions/permission-request-card.component.ts": {
-    "<dynamic>": 1,
-    "badge": 2,
-    "badge-error": 1,
-    "badge-warning": 1,
-    "badge-xs": 2,
     "btn": 2,
     "btn-info": 1,
     "btn-success": 1,
     "btn-xs": 2
   },
   "libs/frontend/chat-ui/src/lib/molecules/question-card.component.ts": {
-    "badge": 1,
-    "badge-error": 1,
-    "badge-warning": 1,
-    "badge-xs": 1,
     "btn": 3,
     "btn-info": 3,
     "btn-outline": 2,
@@ -228,11 +205,6 @@
   "libs/frontend/chat-ui/src/lib/molecules/session/plan-limits/plan-window-detail.component.ts": {
     "<dynamic>": 2
   },
-  "libs/frontend/chat-ui/src/lib/molecules/session/plan-limits/provider-lane-limit-tile.component.ts": {
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-xs": 1
-  },
   "libs/frontend/chat-ui/src/lib/molecules/session/session-stats-summary.component.html": {
     "<dynamic>": 1
   },
@@ -247,12 +219,6 @@
     "alert-error": 1,
     "alert-info": 1,
     "alert-sm": 2,
-    "badge": 3,
-    "badge-neutral": 2,
-    "badge-outline": 1,
-    "badge-sm": 2,
-    "badge-warning": 1,
-    "badge-xs": 1,
     "btn": 1,
     "btn-ghost": 1,
     "btn-xs": 1,
@@ -270,9 +236,6 @@
     "skeleton": 2
   },
   "libs/frontend/chat-ui/src/lib/molecules/setup-plugins/plugin-catalog-panel.component.ts": {
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-xs": 1,
     "btn": 2,
     "btn-ghost": 2,
     "btn-primary": 2,
@@ -292,9 +255,6 @@
     "alert": 1,
     "alert-error": 1,
     "alert-sm": 1,
-    "badge": 1,
-    "badge-outline": 1,
-    "badge-sm": 1,
     "btn": 2,
     "btn-ghost": 2,
     "btn-sm": 1,
@@ -309,9 +269,8 @@
     "card-border": 1
   },
   "libs/frontend/chat-ui/src/lib/molecules/tool-execution/tool-call-header.component.ts": {
-    "badge": 3,
-    "badge-ghost": 2,
-    "badge-sm": 3
+    "badge": 1,
+    "badge-sm": 1
   },
   "libs/frontend/chat-ui/src/lib/molecules/tool-execution/tool-input-display.component.ts": {
     "input-preview-block": 1
@@ -320,9 +279,6 @@
     "<dynamic>": 6
   },
   "libs/frontend/chat-ui/src/lib/molecules/turn-recap/turn-summary-files.component.ts": {
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-sm": 1,
     "btn": 2,
     "btn-ghost": 1,
     "btn-primary": 1,
@@ -764,18 +720,8 @@
     "btn-outline": 1,
     "btn-sm": 1
   },
-  "libs/frontend/command-center/src/lib/components/command-center-header.component.ts": {
-    "badge": 3,
-    "badge-outline": 3,
-    "badge-sm": 3
-  },
   "libs/frontend/command-center/src/lib/components/command-center-page.component.html": {
     "alert": 1
-  },
-  "libs/frontend/command-center/src/lib/components/command-center-start.component.ts": {
-    "badge": 3,
-    "badge-outline": 2,
-    "badge-primary": 1
   },
   "libs/frontend/command-center/src/lib/components/command-live-panel.component.ts": {
     "<dynamic>": 1
@@ -790,10 +736,6 @@
     "btn": 2,
     "btn-warning": 2,
     "input": 1
-  },
-  "libs/frontend/command-center/src/lib/components/command-rail-tabs.component.ts": {
-    "badge": 1,
-    "badge-sm": 1
   },
   "libs/frontend/command-center/src/lib/components/command-session-controls.component.ts": {
     "input-sm": 1
@@ -842,9 +784,6 @@
     "card-title": 1
   },
   "libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-breakdown-table.component.ts": {
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-xs": 1,
     "btn": 2,
     "btn-active": 2,
     "btn-primary": 2,
