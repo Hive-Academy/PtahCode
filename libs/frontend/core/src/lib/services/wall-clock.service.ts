@@ -1,112 +1,44 @@
-import { DOCUMENT } from '@angular/common';
-import {
-  DestroyRef,
-  Injectable,
-  NgZone,
-  Signal,
-  WritableSignal,
-  effect,
-  inject,
-  signal,
-  untracked,
-} from '@angular/core';
+import { DestroyRef, Injectable, Signal, effect, inject, linkedSignal, untracked } from '@angular/core';
+import { CLOCK_COARSE_MS, ClockService } from './clock.service';
 
 export type WallClockCadence = 'second' | 'coarse';
-export const WALL_CLOCK_COARSE_MS = 30_000;
+export const WALL_CLOCK_COARSE_MS = CLOCK_COARSE_MS;
 
-const CADENCES: readonly WallClockCadence[] = ['second', 'coarse'];
-const INTERVAL_MS: Record<WallClockCadence, number> = {
-  second: 1_000,
-  coarse: WALL_CLOCK_COARSE_MS,
-};
-
+/**
+ * The coarse reading can remain up to 30 seconds stale after returning from a hidden window.
+ * Acquiring the coarse cadence always refreshes it immediately.
+ * @deprecated Use ClockService.
+ */
 @Injectable({ providedIn: 'root' })
 export class WallClockService {
-  private readonly document = inject(DOCUMENT);
-  private readonly zone = inject(NgZone);
-  private readonly ticks: Record<WallClockCadence, WritableSignal<number>> = {
-    second: signal(Date.now()),
-    coarse: signal(Date.now()),
-  };
-  private readonly readonlyTicks: Record<WallClockCadence, Signal<number>> = {
-    second: this.ticks.second.asReadonly(),
-    coarse: this.ticks.coarse.asReadonly(),
-  };
-  private readonly subscribers: Record<WallClockCadence, number> = {
-    second: 0,
-    coarse: 0,
-  };
-  private readonly intervals: Record<WallClockCadence, ReturnType<typeof setInterval> | null> = {
-    second: null,
-    coarse: null,
-  };
-
-  private readonly visibilityChanged = (): void => {
-    for (const cadence of CADENCES) {
-      if (this.document.hidden) {
-        this.stop(cadence);
-      } else if (this.subscribers[cadence] > 0) {
-        this.ticks[cadence].set(Date.now());
-        this.start(cadence);
-      }
-    }
-  };
+  private readonly clock = inject(ClockService);
+  private readonly coarse = linkedSignal<number, number>({
+    source: this.clock.now,
+    computation: (now, previous) =>
+      previous && now >= previous.value && now - previous.value < WALL_CLOCK_COARSE_MS
+        ? previous.value
+        : now,
+  });
+  private readonly readonlyCoarse = this.coarse.asReadonly();
 
   now(cadence: WallClockCadence): Signal<number> {
-    return this.readonlyTicks[cadence];
+    return cadence === 'second' ? this.clock.now : this.readonlyCoarse;
   }
 
   acquire(cadence: WallClockCadence): () => void {
-    const wasIdle = this.subscribers.second + this.subscribers.coarse === 0;
-    this.subscribers[cadence]++;
-    this.ticks[cadence].set(Date.now());
-    if (wasIdle) {
-      this.document.addEventListener('visibilitychange', this.visibilityChanged);
-    }
-    this.start(cadence);
-
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      this.subscribers[cadence]--;
-      if (this.subscribers[cadence] === 0) this.stop(cadence);
-      if (this.subscribers.second + this.subscribers.coarse === 0) {
-        this.document.removeEventListener('visibilitychange', this.visibilityChanged);
-      }
-    };
-  }
-
-  private start(cadence: WallClockCadence): void {
-    if (this.document.hidden || this.subscribers[cadence] === 0 || this.intervals[cadence] !== null) return;
-    this.zone.runOutsideAngular(() => {
-      this.intervals[cadence] = setInterval(
-        () => this.ticks[cadence].set(Date.now()),
-        INTERVAL_MS[cadence],
-      );
-    });
-  }
-
-  private stop(cadence: WallClockCadence): void {
-    const interval = this.intervals[cadence];
-    if (interval === null) return;
-    clearInterval(interval);
-    this.intervals[cadence] = null;
+    const release = this.clock.acquire(cadence);
+    if (cadence === 'coarse') this.coarse.set(this.clock.now());
+    return release;
   }
 }
 
-/** Subscribe for the lifetime of the injection context, or only while active. */
-export function injectWallClock(
-  cadence: WallClockCadence,
-  active?: () => boolean,
-): Signal<number> {
+/** @deprecated Use injectClock. */
+export function injectWallClock(cadence: WallClockCadence, active?: () => boolean): Signal<number> {
   const clock = inject(WallClockService);
   const destroyRef = inject(DestroyRef);
   if (active) {
     effect((onCleanup) => {
-      if (active()) {
-        onCleanup(untracked(() => clock.acquire(cadence)));
-      }
+      if (active()) onCleanup(untracked(() => clock.acquire(cadence)));
     });
   } else {
     destroyRef.onDestroy(clock.acquire(cadence));

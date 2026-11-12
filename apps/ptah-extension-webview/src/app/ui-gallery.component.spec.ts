@@ -2,7 +2,18 @@ import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { ThemeName, ThemeService } from '@ptah-extension/core';
+import { PTAH_CLOCK, type PtahClock } from '@ptah-extension/ui';
 import { UiGalleryComponent } from './ui-gallery.component';
+
+describe('UiGalleryComponent', () => {
+const galleryClock: PtahClock = {
+  now: signal(Date.now()).asReadonly(),
+  acquire: () => () => undefined,
+};
+
+beforeEach(() => {
+  TestBed.configureTestingModule({ providers: [{ provide: PTAH_CLOCK, useValue: galleryClock }] });
+});
 
 function createThemeServiceStub(initial: ThemeName = 'ptah-glass') {
   const currentTheme = signal<ThemeName>(initial);
@@ -349,4 +360,5 @@ it('scrolls inside its own container and scrolls a section link to its section',
   link?.dispatchEvent(click);
   expect(click.defaultPrevented).toBe(true);
   expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
+});
 });

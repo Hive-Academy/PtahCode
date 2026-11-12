@@ -43,4 +43,5 @@ export * from './lib/extracted';
 export * from './lib/button';
 export * from './lib/form-controls';
 export * from './lib/badge';
+export * from './lib/time';
 export * from './lib/charts';
