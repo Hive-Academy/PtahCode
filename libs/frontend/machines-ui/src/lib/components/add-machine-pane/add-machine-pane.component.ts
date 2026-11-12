@@ -12,7 +12,7 @@ import {
   type OnInit,
 } from '@angular/core';
 import { MACHINE_SSH_ALIAS_PATTERN } from '@ptah-extension/shared';
-import { SetupActionDirective, PtahButtonDirective } from '@ptah-extension/ui';
+import { SetupActionDirective, PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
 import {
   PAIRING_CODE_LENGTH,
   PAIRING_TTL_DEFAULT_SEC,
@@ -60,7 +60,7 @@ let nextId = 0;
 @Component({
   selector: 'ptah-add-machine-pane',
   standalone: true,
-  imports: [PtahButtonDirective, CopyCommandComponent, SetupActionDirective],
+  imports: [PtahButtonDirective, PtahInputDirective, CopyCommandComponent, SetupActionDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -107,7 +107,7 @@ let nextId = 0;
           >SSH alias</label
         >
         <input
-          class="input input-bordered input-sm rounded-md font-mono focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+          ptahInput size="sm" tone="mono"
           type="text"
           autocomplete="off"
           spellcheck="false"
@@ -167,7 +167,7 @@ let nextId = 0;
             @for (cell of cells(); track $index; let i = $index) {
               <input
                 #codeCell
-                class="input input-bordered input-sm h-9 w-8 rounded-md px-0 text-center font-mono uppercase focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                ptahInput size="sm" tone="mono" class="h-9 w-8 px-0 text-center uppercase" [invalid]="codeInvalid()"
                 [class.border-state-err]="codeInvalid()"
                 type="text"
                 inputmode="text"

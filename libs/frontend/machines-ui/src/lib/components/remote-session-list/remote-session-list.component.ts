@@ -18,7 +18,12 @@ import {
 } from '../../services/machines-store';
 import { DisplayTextPipe, displayText } from '../../utils/display-text';
 import { durationText } from '../../utils/machine-copy';
-import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
+import {
+  PtahBadgeDirective,
+  PtahButtonDirective,
+  PtahSelectDirective,
+  PtahTextareaDirective,
+} from '@ptah-extension/ui';
 import { remoteSessionStateLabel } from '../../utils/remote-session-copy';
 
 /** What "Open" hands the container: enough to title the opened view. */
@@ -54,6 +59,8 @@ interface RemoteSessionRow {
   selector: 'ptah-remote-session-list',
   standalone: true,
   imports: [
+    PtahSelectDirective,
+    PtahTextareaDirective,
     PtahBadgeDirective,
     PtahButtonDirective,
     LucideAngularModule,
@@ -121,7 +128,9 @@ interface RemoteSessionRow {
           <label class="flex flex-col gap-1 text-xs text-base-content-muted">
             Workspace
             <select
-              class="select select-bordered select-sm rounded-md font-mono text-base-content"
+              ptahSelect
+              size="sm"
+              tone="mono"
               name="workspace"
               data-testid="remote-session-new-workspace"
               (change)="workspaceId.set(valueOf($event))"
@@ -139,7 +148,8 @@ interface RemoteSessionRow {
           <label class="flex flex-col gap-1 text-xs text-base-content-muted">
             First message
             <textarea
-              class="textarea textarea-bordered textarea-sm rounded-md text-sm text-base-content"
+              ptahTextarea
+              size="sm"
               name="prompt"
               rows="3"
               data-testid="remote-session-new-prompt"

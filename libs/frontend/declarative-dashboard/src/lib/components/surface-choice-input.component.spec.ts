@@ -73,7 +73,8 @@ describe('SurfaceChoiceInputComponent', () => {
       const { element } = setup(choiceNode('select'));
       expect(Array.from(select(element).options).map(option => option.textContent)).toEqual(['—', 'Production', 'Staging', 'Preview']);
       expect(select(element).selectedIndex).toBe(0);
-      expect(select(element).className).toContain('select-sm');
+      expect(select(element).getAttribute('data-ptah-control')).toBe('select');
+      expect(select(element).classList.contains('select-sm')).toBe(true);
     });
 
     it('commits on change, and "—" maps to null', () => {

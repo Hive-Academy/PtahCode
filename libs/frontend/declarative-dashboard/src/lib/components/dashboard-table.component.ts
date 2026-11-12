@@ -4,7 +4,7 @@ import type { SurfaceSelection } from '@ptah-extension/shared/mcp-apps-contracts
 import type { SurfaceComponentViewState } from '../surface-view-state';
 import { cellText, nextTableSort, tableRows, type TableNode } from '../table/table-rows';
 import { DashboardPagerComponent } from './dashboard-pager.component';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
 
 interface TableColumn {
   readonly key: string;
@@ -29,7 +29,7 @@ function scalarCell(value: unknown): DashboardTableCell {
 @Component({
   selector: 'ptah-dashboard-table',
   standalone: true,
-  imports: [DashboardPagerComponent, PtahButtonDirective],
+  imports: [DashboardPagerComponent, PtahButtonDirective, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card card-bordered bg-base-100 p-3 text-base-content" (keydown.escape)="collapse($event)">
@@ -50,7 +50,7 @@ function scalarCell(value: unknown): DashboardTableCell {
           <p role="status">Data is not available in this view.@if (data.rowCount !== undefined) { {{ data.rowCount }} rows. }</p>
         } @else {
           <label [for]="filterId" class="text-sm text-base-content-muted">Filter {{ title() }}</label>
-          <input #filterInput [id]="filterId" type="search" class="input input-bordered input-sm w-full"
+          <input #filterInput [id]="filterId" type="search" ptahInput size="sm" class="w-full"
             [value]="viewState().filter ?? ''" [attr.data-apps-focus-key]="focusKey('filter')"
             (input)="setFilter(filterInput.value)" />
           <p role="status" class="text-sm text-base-content-muted">{{ page().total }} results</p>

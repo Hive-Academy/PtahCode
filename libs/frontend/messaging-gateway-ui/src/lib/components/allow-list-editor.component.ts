@@ -8,12 +8,12 @@ import {
 import type { GatewayPlatformId } from '@ptah-extension/shared';
 
 import { GatewayStateService } from '../services/gateway-state.service';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahTextareaDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-allow-list-editor',
   standalone: true,
-  imports: [PtahButtonDirective],
+  imports: [PtahButtonDirective, PtahTextareaDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <label class="flex flex-col gap-1.5">
@@ -24,7 +24,10 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
         </span>
       </span>
       <textarea
-        class="textarea textarea-bordered textarea-sm w-full font-mono"
+        ptahTextarea
+        size="sm"
+        tone="mono"
+        class="w-full"
         rows="3"
         [attr.data-testid]="'gateway-allowlist-' + platform()"
         [attr.aria-label]="label() + ' allow-list'"

@@ -8,7 +8,11 @@ import {
 import type { GatewayRegisterDiscordCommandsResult } from '@ptah-extension/shared';
 
 import { GatewayStateService } from '../services/gateway-state.service';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import {
+  PtahButtonDirective,
+  PtahInputDirective,
+  PtahCheckboxDirective,
+} from '@ptah-extension/ui';
 
 const DISCORD_INVITE_PERMISSIONS = '292057779200';
 
@@ -44,7 +48,7 @@ interface RegisterFeedback {
 @Component({
   selector: 'ptah-discord-integration-kit',
   standalone: true,
-  imports: [PtahButtonDirective],
+  imports: [PtahButtonDirective, PtahInputDirective, PtahCheckboxDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="flex flex-col gap-4" data-testid="gateway-discord-integration">
@@ -56,7 +60,10 @@ interface RegisterFeedback {
           <input
             type="text"
             autocomplete="off"
-            class="input input-sm input-bordered w-full font-mono"
+            ptahInput
+            size="sm"
+            tone="mono"
+            class="w-full"
             placeholder="e.g. 1512896140939362527"
             data-testid="gateway-discord-appid"
             [value]="discordAppIdValue()"
@@ -158,7 +165,8 @@ interface RegisterFeedback {
             >
               <input
                 type="checkbox"
-                class="checkbox checkbox-xs"
+                ptahCheckbox
+                size="xs"
                 [checked]="isGuildAllowed(g.id)"
                 (change)="onToggleGuild(g.id)"
                 [attr.aria-label]="'Allow server ' + g.name"
