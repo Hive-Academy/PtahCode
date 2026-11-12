@@ -190,7 +190,7 @@ export class PtahFieldComponent {
 
   /** A bound id of the control wins; the generated id applies only while it has none. */
   private syncId(control: HTMLElement, markedId: string | undefined): void {
-    const id = markedId ?? (control.id || this.controlId);
+    const id = markedId || control.id || this.controlId;
     if (!control.id) control.id = id;
     if (untracked(() => this.labelFor()) !== id) this.labelFor.set(id);
   }

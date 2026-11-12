@@ -103,7 +103,7 @@ export class PtahRichSelectComponent<T = unknown>
   private readonly generatedId = `ptah-select-${++selectId}`;
   /** The id of the trigger: `triggerId` when set, else the generated id. */
   get controlId(): string {
-    return this.triggerId() ?? this.generatedId;
+    return this.triggerId() || this.generatedId;
   }
   readonly listboxId = `${this.generatedId}-listbox`;
   readonly iconTemplate = contentChild(PtahSelectIconDirective);
