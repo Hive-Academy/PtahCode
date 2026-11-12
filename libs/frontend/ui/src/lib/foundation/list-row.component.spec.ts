@@ -14,10 +14,14 @@ it('works as an Angular Aria option and marks route current', () => {
   expect(row.getAttribute('aria-current')).toBe('page');
   expect(row.classList.contains('bg-[var(--surface-2)]')).toBe(true);
   expect(row.classList.contains('border-l-[var(--ptah-gold)]')).toBe(true);
+  expect(row.classList.contains('border-l-transparent')).toBe(false);
   expect(row.classList.contains('min-h-10')).toBe(true);
   expect(row.classList.contains('pl-[calc(var(--ptah-surface-pad)-2px)]')).toBe(true);
   expect(row.classList.contains('hover:bg-[var(--surface-2)]')).toBe(true);
   expect(row.classList.contains('focus-visible:-outline-offset-2')).toBe(true);
+  const other = fixture.nativeElement.querySelectorAll('[ngOption]')[1] as HTMLElement;
+  expect(other.classList.contains('border-l-transparent')).toBe(true);
+  expect(other.classList.contains('border-l-[var(--ptah-gold)]')).toBe(false);
   const selected = fixture.nativeElement.querySelectorAll('[ngOption]')[1] as HTMLElement;
   expect(selected.getAttribute('aria-selected')).toBe('true');
   expect(selected.classList.contains('aria-selected:bg-[var(--surface-2)]')).toBe(true);
