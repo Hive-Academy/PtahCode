@@ -64,7 +64,11 @@ import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.
 import { commitToast } from '../feedback/settings-commit-toast';
 // Rendered only inside `@defer`, so it stays out of the eager settings bundle.
 import { KimiCodeLoginProgressComponent } from './connection-drawer/kimi-code-login-progress.component';
-import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
+import {
+  PtahBadgeDirective,
+  PtahButtonDirective,
+  PtahInputDirective,
+} from '@ptah-extension/ui';
 
 /**
  * Deep-link sections this page owns. Background roles and CLI agents are on the same tab, in
@@ -94,6 +98,7 @@ const CONTROL =
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    PtahBadgeDirective,
     SettingsBusyDisabledDirective,
     MainAgentScopeBadgesComponent,
     ProviderConnectionCardComponent,
@@ -246,7 +251,7 @@ const CONTROL =
                 </h2>
                 @if (state.connections().status === 'ready') {
                   <span
-                    class="badge badge-sm border-base-300 bg-base-200 text-xs text-base-content"
+                    ptahBadge
                     data-testid="connections-count"
                   >
                     {{ connections().length }} configured ·

@@ -18,6 +18,7 @@ import {
 } from '@ptah-extension/core';
 import {
   NativeModalComponent,
+  PtahBadgeDirective,
   PtahButtonDirective,
   PtahFieldComponent,
   PtahInputDirective,
@@ -88,6 +89,7 @@ type KeyMode = 'required' | 'optional' | 'none' | 'sign-in';
     LucideAngularModule,
     NativeModalComponent,
     PtahButtonDirective,
+    PtahBadgeDirective,
     PtahIconButtonDirective,
     ProviderMarkComponent,
     PtahFieldComponent,
@@ -229,12 +231,8 @@ type KeyMode = 'required' | 'optional' | 'none' | 'sign-in';
                 >GitHub sign-in</span
               >
               <span
-                [class]="
-                  'badge badge-outline badge-xs h-auto py-0.5 font-medium text-base-content ' +
-                  (signedIn()
-                    ? 'border-success/40 bg-success/10'
-                    : 'border-warning/40 bg-warning/10')
-                "
+                ptahBadge appearance="outline" size="xs" [tone]="signedIn() ? 'ok' : 'warn'"
+                class="h-auto py-0.5 font-medium text-base-content"
                 data-testid="add-cli-instance-copilot-state"
                 >{{ signInLabel() }}</span
               >

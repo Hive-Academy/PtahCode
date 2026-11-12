@@ -29,7 +29,7 @@ import {
   type ProviderAccountsSnapshot,
 } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../../feedback/settings-save-feedback.service';
-import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 import {
   ACCOUNT_COPY,
   AMBIENT_ROW_KEY,
@@ -93,6 +93,7 @@ type FocusFallback = 'detail-heading' | 'accounts-heading';
   standalone: true,
   imports: [
     LucideAngularModule,
+    PtahBadgeDirective,
     PtahButtonDirective,
     PtahIconButtonDirective,
     AmbientAccountRowComponent,
@@ -139,7 +140,7 @@ type FocusFallback = 'detail-heading' | 'accounts-heading';
               @if (snapshot() && view().stale) {
                 <span
                   role="status"
-                  class="badge badge-warning badge-sm h-auto gap-1"
+                  ptahBadge tone="warn" class="h-auto gap-1"
                   data-testid="accounts-tab-stale"
                 >
                   <lucide-angular [img]="WarningIcon" class="h-3 w-3" aria-hidden="true" />

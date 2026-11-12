@@ -7,7 +7,7 @@ import type { ConnectionCheckFailureReason, ConnectionCheckRecord } from '@ptah-
 import type { ProviderConnectionCardStatus } from '../provider-connection-card.state';
 import type { UsedBy } from '../connection-usage';
 import type { ConnectionKind } from './connection-kind';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
 
 type StatusTone = 'success' | 'warning' | 'error' | 'neutral';
 
@@ -148,7 +148,7 @@ export function usedByBadge(entry: UsedBy): string {
   selector: 'ptah-connection-overview-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [LucideAngularModule, PtahButtonDirective],
+  imports: [LucideAngularModule, PtahBadgeDirective, PtahButtonDirective],
   template: `
     <div class="space-y-4 text-sm" data-testid="connection-overview">
       <div class="rounded border border-base-300 bg-base-200 p-3" [attr.aria-busy]="loading()">
@@ -232,7 +232,7 @@ export function usedByBadge(entry: UsedBy): string {
                     Follows main agent <span class="text-base-content-muted" aria-hidden="true">→</span>
                   </button>
                 } @else {
-                  <span class="badge badge-sm shrink-0 border-success/40 bg-success/10 font-medium text-base-content"
+                  <span ptahBadge tone="ok" class="shrink-0 font-medium text-base-content"
                     data-testid="connection-used-by-badge">{{ badge(entry) }}</span>
                 }
               </li>

@@ -11,7 +11,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { injectWallClock, type ClaudeAmbientStatusView } from '@ptah-extension/core';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
 import { ambientStatusModel, type AmbientTone } from './account-presentation';
 
 const DOT: Readonly<Record<AmbientTone, string>> = {
@@ -37,7 +37,7 @@ const SIGNED_IN_WORD = 'Signed in';
 @Component({
   selector: 'ptah-ambient-account-row',
   standalone: true,
-  imports: [PtahButtonDirective],
+  imports: [PtahBadgeDirective, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -82,7 +82,7 @@ const SIGNED_IN_WORD = 'Signed in';
           <p class="flex min-w-0 flex-wrap items-center gap-1 text-xs" data-testid="ambient-chips">
             <span class="text-base-content-muted">Used by</span>
             @for (chip of chips(); track chip) {
-              <span class="badge badge-ghost badge-sm h-auto max-w-full whitespace-normal break-words">{{ chip }}</span>
+              <span ptahBadge class="h-auto max-w-full whitespace-normal break-words">{{ chip }}</span>
             }
           </p>
         }

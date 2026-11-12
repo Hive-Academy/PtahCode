@@ -374,7 +374,8 @@ describe('ProviderConnectionCardComponent', () => {
       expect(badge?.textContent?.trim()).toBe('2 connected');
       expect(badge?.tagName).toBe('SPAN');
       expect(badge?.querySelector('a, button')).toBeNull();
-      expect(badge?.className).toContain('badge-ghost');
+      expect(badge?.hasAttribute('data-ptah-badge')).toBe(true);
+      expect(badge?.getAttribute('data-tone')).toBe('neutral');
     });
 
     it('follows the input and hides again when it returns to null', () => {
