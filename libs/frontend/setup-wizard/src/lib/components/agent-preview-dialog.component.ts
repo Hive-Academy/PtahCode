@@ -29,7 +29,7 @@ import {
   type DecisionSnapshot,
 } from './preview-decisions/preview-decisions.state';
 import { TargetRootChoiceComponent } from './preview-decisions/target-root-choice.component';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
 
 /** One keep/replace choice the dialog reports to its owner. */
 export interface PreviewRowDecision {
@@ -66,6 +66,7 @@ let nextDialogId = 0;
     ModelOriginNoteComponent,
     TargetRootChoiceComponent,
     PtahButtonDirective,
+    PtahBadgeDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -205,9 +206,9 @@ let nextDialogId = 0;
                   class="mt-3 flex flex-wrap items-center gap-1.5 text-sm font-semibold"
                 >
                   @if (block.certainty) {
-                    <span class="badge badge-sm font-normal">{{
+                    <span ptahBadge size="sm"><span class="ptah-badge-text">{{
                       block.certainty
-                    }}</span>
+                    }}</span></span>
                   }
                   {{ block.agent.agentId }}
                 </h3>
@@ -243,9 +244,9 @@ let nextDialogId = 0;
                         track file.target + file.relPath
                       ) {
                         <li class="[overflow-wrap:anywhere]">
-                          <span class="badge badge-sm">{{
+                          <span ptahBadge size="sm"><span class="ptah-badge-text">{{
                             file.certainty
-                          }}</span>
+                          }}</span></span>
                           <code class="font-mono">{{ file.relPath }}</code>
                           @if (file.condition) {
                             <span class="text-base-content-muted">

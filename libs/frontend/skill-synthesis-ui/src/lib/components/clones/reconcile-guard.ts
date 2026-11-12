@@ -61,7 +61,11 @@ import {
 } from '@angular/core';
 import { HarnessHealthStore } from '@ptah-extension/marketplace/services';
 import type { HarnessHealth, HarnessTargetId } from '@ptah-extension/shared';
-import { NativeModalComponent, PtahButtonDirective } from '@ptah-extension/ui';
+import {
+  NativeModalComponent,
+  PtahBadgeDirective,
+  PtahButtonDirective,
+} from '@ptah-extension/ui';
 
 /** Verbatim from implementation-plan.md C4 step 3. */
 export const RECONCILE_WHOLE_WORKSPACE_NOTICE =
@@ -159,7 +163,7 @@ let nextTitleId = 0;
   selector: 'ptah-reconcile-guard',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PtahButtonDirective, NativeModalComponent],
+  imports: [PtahBadgeDirective, PtahButtonDirective, NativeModalComponent],
   template: `
     <ptah-native-modal
       [isOpen]="view() !== null"
@@ -201,9 +205,11 @@ let nextTitleId = 0;
                     track entry.target + entry.path
                   ) {
                     <li data-testid="reconcile-guard-path">
-                      <span class="badge badge-ghost badge-sm">{{
-                        entry.target
-                      }}</span>
+                      <span ptahBadge tone="neutral" size="sm"
+                        ><span class="ptah-badge-text">{{
+                          entry.target
+                        }}</span></span
+                      >
                       <code class="ml-1 break-all text-xs">{{
                         entry.path
                       }}</code>
@@ -226,9 +232,11 @@ let nextTitleId = 0;
                     track entry.target + entry.path
                   ) {
                     <li data-testid="reconcile-guard-path">
-                      <span class="badge badge-ghost badge-sm">{{
-                        entry.target
-                      }}</span>
+                      <span ptahBadge tone="neutral" size="sm"
+                        ><span class="ptah-badge-text">{{
+                          entry.target
+                        }}</span></span
+                      >
                       <code class="ml-1 break-all text-xs">{{
                         entry.path
                       }}</code>

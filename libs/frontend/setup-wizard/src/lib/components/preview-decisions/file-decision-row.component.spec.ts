@@ -54,6 +54,12 @@ describe('FileDecisionRowComponent', () => {
     expect(query('[data-testid="file-state-badge"]')?.textContent).toBe(
       'Exists — may be replaced',
     );
+    expect(
+      query('[data-testid="file-state-badge"]')?.getAttribute('data-tone'),
+    ).toBe('neutral');
+    expect(
+      query('[data-testid="file-state-badge"]')?.getAttribute('data-size'),
+    ).toBe('sm');
     expect(query('ptah-keep-replace-control')).not.toBeNull();
     expect(
       query('[data-testid="keep-segment"]')?.getAttribute('aria-checked'),

@@ -23,7 +23,7 @@ import {
   type PackInstallFinished,
   type PackInstallRequest,
 } from './pack-install/pack-install-result';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
 
 /**
  * Community packs in the generation sidebar (TASK_2026_701_9e4b F4).
@@ -37,7 +37,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
 @Component({
   selector: 'ptah-community-packs-panel',
   standalone: true,
-  imports: [PackInstallPromptComponent, PtahButtonDirective],
+  imports: [PackInstallPromptComponent, PtahBadgeDirective, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section aria-labelledby="community-packs-title" class="space-y-2">
@@ -139,7 +139,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
                   <span>{{ agent.name }}</span>
                   @switch (status) {
                     @case ('installed') {
-                      <span class="badge badge-success badge-sm"
+                      <span ptahBadge tone="ok" size="sm"
                         >Installed</span
                       >
                     }
@@ -148,7 +148,9 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
                     }
                     @case ('kept') {
                       <span
-                        class="badge badge-ghost badge-sm"
+                        ptahBadge
+                        tone="neutral"
+                        size="sm"
                         data-testid="pack-agent-kept"
                         >Kept</span
                       >

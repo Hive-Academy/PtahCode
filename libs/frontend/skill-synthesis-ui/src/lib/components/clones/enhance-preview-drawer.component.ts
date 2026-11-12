@@ -9,7 +9,11 @@ import {
   input,
   output,
 } from '@angular/core';
-import { NativeDrawerComponent, PtahButtonDirective } from '@ptah-extension/ui';
+import {
+  NativeDrawerComponent,
+  PtahBadgeDirective,
+  PtahButtonDirective,
+} from '@ptah-extension/ui';
 import type {
   CloneSummary,
   SkillSynthesisPreviewEnhancementResult,
@@ -21,7 +25,12 @@ import { LazyDiffViewComponent } from './lazy-diff-view.component';
   selector: 'ptah-enhance-preview-drawer',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PtahButtonDirective, NativeDrawerComponent, LazyDiffViewComponent],
+  imports: [
+    PtahBadgeDirective,
+    PtahButtonDirective,
+    NativeDrawerComponent,
+    LazyDiffViewComponent,
+  ],
   template: `
     <ptah-native-drawer
       [isOpen]="clone() !== null"
@@ -76,22 +85,30 @@ import { LazyDiffViewComponent } from './lazy-diff-view.component';
             <div class="flex flex-wrap items-center gap-2">
               @if (p.proposed) {
                 <span
-                  class="badge badge-success badge-sm"
+                  ptahBadge
+                  tone="ok"
+                  size="sm"
                   data-testid="preview-verdict"
                   >Proposal ready</span
                 >
               } @else {
                 <span
-                  class="badge badge-ghost badge-sm"
+                  ptahBadge
+                  tone="neutral"
+                  size="sm"
                   data-testid="preview-verdict"
                   >No change proposed</span
                 >
               }
               @if (p.judgeScore !== null) {
                 <span
-                  class="badge badge-outline badge-sm tabular-nums"
+                  ptahBadge
+                  tone="neutral"
+                  appearance="outline"
+                  size="sm"
+                  class="tabular-nums"
                   data-testid="preview-judge-score"
-                  >judge {{ p.judgeScore }}</span
+                  ><span class="ptah-badge-text">judge {{ p.judgeScore }}</span></span
                 >
               }
             </div>

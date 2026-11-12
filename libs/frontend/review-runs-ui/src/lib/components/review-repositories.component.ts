@@ -1,18 +1,6 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
-import { InboxRowDirective } from '@ptah-extension/ui';
+import { InboxRowDirective, PtahBadgeDirective, type PtahBadgeTone } from '@ptah-extension/ui';
 import type { RepositorySettings } from '@ptah-extension/review-contracts';
-
-/**
- * Ink of each publication state (approved option A): Live done, Dry run run,
- * Paused need, Disabled idle. The app has no standalone `state-*` classes, so
- * the badge takes its ink from the `text-state-*` Tailwind color utilities.
- */
-const REPOSITORY_BADGE_INK = {
-  live: 'text-state-done',
-  dryRun: 'text-state-run',
-  paused: 'text-state-need',
-  disabled: 'text-state-idle',
-} as const;
 
 /**
  * Repository list of the Reviews page leading pane (approved option A). The
@@ -24,7 +12,7 @@ const REPOSITORY_BADGE_INK = {
 @Component({
   selector: 'ptah-review-repositories',
   standalone: true,
-  imports: [InboxRowDirective],
+  imports: [InboxRowDirective, PtahBadgeDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <h2 class="mb-4 text-sm font-semibold">Repositories</h2>
@@ -50,8 +38,8 @@ const REPOSITORY_BADGE_INK = {
           >
             <span class="flex w-full items-center gap-2">
               <span class="truncate text-sm font-semibold">{{ repo.owner }}/{{ repo.name }}</span>
-              <span class="badge badge-outline shrink-0 text-xs" [class]="ink(repo)">
-                {{ badgeLabel(repo) }}
+              <span ptahBadge appearance="outline" size="xs" class="shrink-0" [tone]="tone(repo)">
+                <span class="ptah-badge-text">{{ badgeLabel(repo) }}</span>
               </span>
             </span>
           </button>
@@ -72,10 +60,10 @@ export class ReviewRepositoriesComponent {
   readonly runCount = input(0);
   readonly choose = output<string>();
 
-  protected ink(repo: RepositorySettings): string {
-    if (!repo.enabled) return REPOSITORY_BADGE_INK.disabled;
-    if (repo.publicationPaused) return REPOSITORY_BADGE_INK.paused;
-    return repo.dryRun ? REPOSITORY_BADGE_INK.dryRun : REPOSITORY_BADGE_INK.live;
+  protected tone(repo: RepositorySettings): PtahBadgeTone {
+    if (!repo.enabled) return 'neutral';
+    if (repo.publicationPaused) return 'warn';
+    return repo.dryRun ? 'info' : 'ok';
   }
 
   protected badgeLabel(repo: RepositorySettings): string {

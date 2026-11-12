@@ -16,6 +16,7 @@ import {
   Terminal,
 } from 'lucide-angular';
 import { ExecutionNodeComponent } from '@ptah-extension/chat';
+import { PtahBadgeDirective } from '@ptah-extension/ui';
 import { ExecutionTreeBuilderService } from '@ptah-extension/chat-streaming';
 import { SetupWizardStateService } from '../services/setup-wizard-state.service';
 
@@ -43,7 +44,7 @@ import { SetupWizardStateService } from '../services/setup-wizard-state.service'
 @Component({
   selector: 'ptah-analysis-transcript',
   standalone: true,
-  imports: [LucideAngularModule, ExecutionNodeComponent],
+  imports: [LucideAngularModule, ExecutionNodeComponent, PtahBadgeDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     '[class.block]': 'paneMode()',
@@ -72,7 +73,7 @@ import { SetupWizardStateService } from '../services/setup-wizard-state.service'
             aria-hidden="true"
           />
           <span class="text-sm font-medium">Agent Transcript</span>
-          <span class="badge badge-sm badge-ghost">
+          <span ptahBadge size="sm" count>
             {{ messageCount() }}
           </span>
         </span>
