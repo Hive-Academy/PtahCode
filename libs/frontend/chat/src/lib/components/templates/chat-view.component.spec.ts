@@ -62,6 +62,7 @@ jest.mock('ngx-markdown', () => {
 });
 
 import { TestBed } from '@angular/core/testing';
+import { PTAH_CLOCK } from '@ptah-extension/ui';
 import {
   ChatViewComponent,
   AGENT_PANEL_OVERLAY_BREAKPOINT,
@@ -648,6 +649,7 @@ function makeHarness(
   TestBed.configureTestingModule({
     imports: [ChatViewComponent],
     providers: [
+      { provide: PTAH_CLOCK, useValue: { now: signal(Date.now()), acquire: () => () => undefined } },
       provideSurfaceActiveTesting(),
       { provide: ElectronLayoutService, useValue: layoutStub },
       { provide: DisplayWindowSync, useValue: displayWindowStub },

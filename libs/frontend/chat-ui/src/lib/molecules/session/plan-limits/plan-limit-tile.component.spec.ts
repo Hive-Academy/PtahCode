@@ -1,4 +1,6 @@
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
+import { signal } from '@angular/core';
+import { PTAH_CLOCK } from '@ptah-extension/ui';
 import { PlanLimitTileComponent } from './plan-limit-tile.component';
 import { sessionPlan } from './plan-limit-tiles';
 import { FRESHNESS_MS, NEAR_LIMIT_PERCENT, type PlanLimitOwnerSnapshot } from '@ptah-extension/shared';
@@ -43,13 +45,43 @@ describe('PlanLimitTileComponent', () => {
   let fixture: ComponentFixture<PlanLimitTileComponent>;
 
   function render(tile: PlanLimitTileModel, open = false): HTMLElement {
-    TestBed.configureTestingModule({ imports: [PlanLimitTileComponent] });
+    TestBed.configureTestingModule({
+      imports: [PlanLimitTileComponent],
+      providers: [{ provide: PTAH_CLOCK, useValue: { now: signal(Date.UTC(2026, 9, 5, 12)), acquire: () => () => {} } }],
+    });
     fixture = TestBed.createComponent(PlanLimitTileComponent);
     fixture.componentRef.setInput('tile', tile);
     fixture.componentRef.setInput('open', open);
     fixture.detectChanges();
     return fixture.nativeElement as HTMLElement;
   }
+
+  it.each(['strip', 'inspector'] as const)('shows a compact reset countdown in %s layout', (variant) => {
+    TestBed.configureTestingModule({
+      imports: [PlanLimitTileComponent],
+      providers: [{ provide: PTAH_CLOCK, useValue: { now: signal(Date.UTC(2026, 9, 5, 12)), acquire: () => () => {} } }],
+    });
+    fixture = TestBed.createComponent(PlanLimitTileComponent);
+    fixture.componentRef.setInput('tile', windowTile({ resetsAt: Date.UTC(2026, 9, 5, 12, 5) }));
+    fixture.componentRef.setInput('variant', variant);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Resets in');
+    expect(root.querySelector('ptah-countdown time')?.textContent).toBe('5m');
+    expect(root.textContent).toContain('resets 15:10');
+    expect([...root.querySelectorAll('[aria-hidden="true"]')].some((el) => el.textContent?.includes('Resets in'))).toBe(true);
+  });
+
+  it.each(['strip', 'inspector'] as const)('omits the countdown for a passed reset in %s layout', (variant) => {
+    TestBed.configureTestingModule({ imports: [PlanLimitTileComponent] });
+    fixture = TestBed.createComponent(PlanLimitTileComponent);
+    fixture.componentRef.setInput('tile', windowTile({ resetLine: 'reset today 11:20 UTC passed', resetsAt: undefined }));
+    fixture.componentRef.setInput('variant', variant);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('passed');
+    expect(root.querySelector('ptah-countdown')).toBeNull();
+  });
 
   it('renders provider-neutral credit and individual allowance tiles in bucket order', () => {
     const now = Date.UTC(2026, 10, 2, 12);

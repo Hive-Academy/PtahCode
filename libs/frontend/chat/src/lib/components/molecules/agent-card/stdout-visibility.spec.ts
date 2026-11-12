@@ -1,5 +1,6 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { PTAH_CLOCK } from '@ptah-extension/ui';
 import { provideMarkdown } from 'ngx-markdown';
 import {
   AgentDeliveryStore,
@@ -73,6 +74,7 @@ describe('raw stdout fallback', () => {
     TestBed.configureTestingModule({
       imports: [AgentCardComponent],
       providers: [
+        { provide: PTAH_CLOCK, useValue: { now, acquire: () => () => undefined } },
         {
           provide: ChatStore,
           useValue: {

@@ -6,6 +6,9 @@ export type PtahChartTone = 'neutral' | 'accent' | 'info' | 'ok' | 'warn' | 'err
 /** `auto`: gold below `NEAR_LIMIT_PERCENT`, warn at or above it, err at or above 100 %. */
 export type PtahMeterTone = PtahChartTone | 'auto';
 
+/** ARIA role of a determinate meter bar. */
+export type PtahMeterRole = 'meter' | 'progressbar';
+
 /** Footprint of a chart owner. The geometry inside stays internal. */
 export type PtahChartSize = 'xs' | 'sm' | 'md';
 

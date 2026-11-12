@@ -29,7 +29,12 @@ import type { MonitoredAgent } from '@ptah-extension/chat-streaming';
 import type { LaneStopReason } from '@ptah-extension/shared';
 import { ProviderAccountsStateService } from '@ptah-extension/core';
 
-import { PtahButtonDirective, PtahIconButtonDirective, PtahBadgeDirective } from '@ptah-extension/ui';
+import {
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+  PtahBadgeDirective,
+  PtahTimerComponent,
+} from '@ptah-extension/ui';
 /** Readable host stop or interruption reason for a lane. */
 export function laneGuardStopText(
   reason: LaneStopReason | undefined,
@@ -65,7 +70,7 @@ export function laneAccountText(
 @Component({
   selector: 'ptah-agent-card-header',
   standalone: true,
-  imports: [PtahBadgeDirective, LucideAngularModule, SlicePipe, PtahButtonDirective, PtahIconButtonDirective],
+  imports: [PtahBadgeDirective, LucideAngularModule, SlicePipe, PtahButtonDirective, PtahIconButtonDirective, PtahTimerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -167,12 +172,17 @@ export function laneAccountText(
       }
 
       <!-- Elapsed time -->
-      <span
-        class="text-[10px] text-base-content-muted flex-shrink-0"
-        [class.ml-auto]="agent().status !== 'running' && !agent().cliSessionId"
-      >
-        {{ elapsedDisplay() }}
-      </span>
+      @if (timerEndedAt() !== undefined) {
+        <ptah-timer
+          class="text-[10px] text-base-content-muted flex-shrink-0"
+          [class.ml-auto]="agent().status !== 'running' && !agent().cliSessionId"
+          format="compact"
+          [startedAt]="agent().startedAt"
+          [endedAt]="timerEndedAt() ?? null"
+        />
+      } @else if (agent().status !== 'running' && !agent().cliSessionId) {
+        <span class="ml-auto" aria-hidden="true"></span>
+      }
 
       <!-- CLI Session ID badge (resume capability) -->
       @if (presentation() === 'card' && agent().cliSessionId) {
@@ -206,7 +216,6 @@ export function laneAccountText(
 })
 export class AgentCardHeaderComponent {
   readonly agent = input.required<MonitoredAgent>();
-  readonly elapsedDisplay = input.required<string>();
   readonly isStopping = input.required<boolean>();
   readonly isResuming = input.required<boolean>();
   readonly closable = input(false);
@@ -228,6 +237,19 @@ export class AgentCardHeaderComponent {
   );
 
   private readonly injector = inject(Injector);
+
+  /**
+   * End time for the elapsed timer: `null` while running (live), the finish
+   * time once the run ended, `undefined` when no valid span exists (no timer).
+   */
+  protected readonly timerEndedAt = computed((): number | null | undefined => {
+    const a = this.agent();
+    if (!Number.isFinite(a.startedAt)) return undefined;
+    if (a.status === 'running') return null;
+    return a.completedAt != null && Number.isFinite(a.completedAt)
+      ? a.completedAt
+      : undefined;
+  });
 
   protected readonly messagingLabel = computed(() => {
     const messaging = this.agent().effectiveCapabilities?.messaging;

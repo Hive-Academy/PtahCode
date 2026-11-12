@@ -1,6 +1,7 @@
 import { ChatStore } from '../../../services/chat.store';
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { PTAH_CLOCK } from '@ptah-extension/ui';
 import { By } from '@angular/platform-browser';
 import { provideMarkdown } from 'ngx-markdown';
 import {
@@ -13,7 +14,6 @@ import {
   FILE_LINK_OPENER,
   LoggingService,
   VSCodeService,
-  WallClockService,
 } from '@ptah-extension/core';
 import {
   createMockRpcService,
@@ -56,6 +56,7 @@ describe('unified CLI agent output', () => {
     TestBed.configureTestingModule({
       imports: [AgentCardComponent, CliAgentOutputComponent],
       providers: [
+        { provide: PTAH_CLOCK, useValue: { now: signal(Date.now()), acquire: () => () => undefined } },
         {
           provide: ChatStore,
           useValue: {
@@ -511,22 +512,17 @@ describe('unified CLI agent output', () => {
   });
 
   it('acquires the shared second clock only while the card is running', () => {
-    const clock = TestBed.inject(WallClockService);
-    const acquire = jest.spyOn(clock, 'acquire');
-    const interval = jest.spyOn(globalThis, 'setInterval');
-    const clear = jest.spyOn(globalThis, 'clearInterval');
+    const release = jest.fn();
+    const acquire = jest.fn(() => release);
+    TestBed.overrideProvider(PTAH_CLOCK, { useValue: { now: signal(1_000), acquire } });
     const fixture = renderCard(agent({ segments: [{ type: 'text', content: 'Working' }] }));
     TestBed.tick();
-    expect(acquire).toHaveBeenCalledWith('second');
-    const timer = interval.mock.results.find((result) => result.type === 'return')?.value;
-    expect(timer).toBeDefined();
+    expect(acquire).toHaveBeenCalledTimes(1);
+    expect(release).not.toHaveBeenCalled();
     fixture.componentRef.setInput('agent', agent({ status: 'completed', completedAt: 2_000 }));
     fixture.detectChanges();
     TestBed.tick();
-    expect(clear).toHaveBeenCalledWith(timer);
+    expect(release).toHaveBeenCalledTimes(1);
     fixture.destroy();
-    acquire.mockRestore();
-    interval.mockRestore();
-    clear.mockRestore();
   });
 });

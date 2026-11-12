@@ -268,12 +268,40 @@
   --ptah-status-square-radius: 0.125rem;
   --ptah-status-pulse-duration: 1600ms;
 
+  /* Boxed countdown (timers family). One box for each time unit: a mono value
+     over a small unit label. Value size and box width for each size. */
+  --ptah-countdown-box-bg: var(--surface-2);
+  --ptah-countdown-box-edge: var(--ptah-border-color);
+  --ptah-countdown-box-radius: var(--ptah-radius-control);
+  --ptah-countdown-gap: var(--ptah-space-2);
+  --ptah-countdown-value-sm: 1.25rem;
+  --ptah-countdown-value-md: 1.875rem;
+  --ptah-countdown-value-lg: 3rem;
+  --ptah-countdown-box-w-sm: 2.5rem;
+  --ptah-countdown-box-w-md: 3.5rem;
+  --ptah-countdown-box-w-lg: 5rem;
+
+  /* Stat card: the small card around one ptah-stat (appearance="card"). */
+  --ptah-stat-bg: var(--surface-2);
+  --ptah-stat-border: var(--ptah-border-color);
+  --ptah-stat-radius: var(--ptah-radius-surface);
+  --ptah-stat-pad-y: var(--ptah-space-2);
+  --ptah-stat-pad-x: var(--ptah-space-3);
+
   /* Layers: the values overlays use today. Nothing above the CDK overlay. */
   --ptah-z-raised: 30;
   --ptah-z-menu: 50;
   --ptah-z-dialog: 60;
   --ptah-z-overlay: 1000;
 }
+
+/* ---- ptah-meter tokens (isolated block, TASK_2026_1011_946d) ---- */
+:root,
+[data-theme] {
+  /* Track behind the meter fill. Same value the meter used before. */
+  --ptah-meter-track: var(--surface-border-strong);
+}
+/* ---- end ptah-meter tokens ---- */
 
 @media (prefers-reduced-motion: reduce) {
   :root,

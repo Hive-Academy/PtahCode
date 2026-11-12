@@ -952,19 +952,13 @@ describe('CanvasRailCardComponent', () => {
     expect(panel.querySelector('h3')?.classList).toContain(
       'text-base-content-muted',
     );
-    expect(panel.querySelector('input')?.classList).toContain('input-sm');
-    // One 2 px ring over the 1 px border in the theme-measured focus ink
-    // (styles.css maps the --s utility to >= 3:1 inks in light themes); no
-    // separate primary border colour on focus, so no double outline.
-    const inputClasses = [...(panel.querySelector('input')?.classList ?? [])];
-    expect(inputClasses).toEqual(
-      expect.arrayContaining([
-        'focus-visible:outline',
-        'focus-visible:outline-2',
-        'focus-visible:outline-offset-[-1px]',
-        'focus-visible:outline-[oklch(var(--s))]',
-      ]),
-    );
+    // ptahInput owner provides the form control styling.
+    const input = panel.querySelector('input');
+    expect(input?.hasAttribute('ptahInput')).toBe(true);
+    expect(input?.classList).toContain('input-sm');
+    // Directive adds base input class and size class; no custom focus borders.
+    expect(input?.classList).toContain('input');
+    const inputClasses = [...(input?.classList ?? [])];
     expect(inputClasses.some((name) => name.startsWith('focus:border-'))).toBe(
       false,
     );

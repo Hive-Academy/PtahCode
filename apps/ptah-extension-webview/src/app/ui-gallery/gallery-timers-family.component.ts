@@ -27,6 +27,21 @@ import { GallerySectionComponent } from './gallery-section.component';
     <ptah-gallery-section id="countdown-expired" title="Countdown: expired">
       <ptah-countdown [deadline]="expiredDeadline" />
     </ptah-gallery-section>
+    <ptah-gallery-section id="countdown-boxed-sm" title="Countdown: boxed, sm">
+      <ptah-countdown [deadline]="runningDeadline" layout="boxed" size="sm" />
+    </ptah-gallery-section>
+    <ptah-gallery-section id="countdown-boxed-md" title="Countdown: boxed, md">
+      <ptah-countdown [deadline]="runningDeadline" layout="boxed" size="md" />
+    </ptah-gallery-section>
+    <ptah-gallery-section id="countdown-boxed-lg" title="Countdown: boxed, lg">
+      <ptah-countdown [deadline]="runningDeadline" layout="boxed" size="lg" />
+    </ptah-gallery-section>
+    <ptah-gallery-section id="countdown-boxed-urgent" title="Countdown: boxed, urgent">
+      <ptah-countdown [deadline]="urgentDeadline" [urgentBelowMs]="86400000" layout="boxed" />
+    </ptah-gallery-section>
+    <ptah-gallery-section id="countdown-boxed-expired" title="Countdown: boxed, expired">
+      <ptah-countdown [deadline]="expiredDeadline" layout="boxed" />
+    </ptah-gallery-section>
     <ptah-gallery-section id="relative-past" title="Relative time: past">
       <ptah-relative-time [value]="pastTime" />
     </ptah-gallery-section>
@@ -37,11 +52,11 @@ import { GallerySectionComponent } from './gallery-section.component';
 })
 export class GalleryTimersFamilyComponent {
   private readonly referenceNow = Date.now();
-  readonly startedAt = this.referenceNow - 185_000;
-  readonly endedAt = this.referenceNow - 65_000;
-  readonly runningDeadline = this.referenceNow + 604_800_000;
-  readonly urgentDeadline = this.referenceNow + 43_200_000;
-  readonly expiredDeadline = this.referenceNow - 30_000;
-  readonly pastTime = this.referenceNow - 300_000;
-  readonly futureTime = this.referenceNow + 604_800_000;
+  public readonly startedAt = this.referenceNow - 185_000;
+  public readonly endedAt = this.referenceNow - 65_000;
+  public readonly runningDeadline = this.referenceNow + 604_800_000;
+  public readonly urgentDeadline = this.referenceNow + 43_200_000;
+  public readonly expiredDeadline = this.referenceNow - 30_000;
+  public readonly pastTime = this.referenceNow - 300_000;
+  public readonly futureTime = this.referenceNow + 604_800_000;
 }

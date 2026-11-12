@@ -33,11 +33,13 @@ describe('CompactionNotificationComponent', () => {
     const root = render(true);
 
     expect(text(root, 'compaction-title')).toBe('Compacting context');
-    expect(
-      root
-        .querySelector('[data-testid="compaction-progress"]')
-        ?.getAttribute('role'),
-    ).toBe('progressbar');
+    const host = root.querySelector('[data-testid="compaction-progress"]');
+    expect(host?.tagName.toLowerCase()).toBe('ptah-meter');
+    expect(host?.getAttribute('aria-hidden')).toBe('true');
+    const bar = host?.querySelector('[role="progressbar"]');
+    expect(bar?.getAttribute('aria-label')).toBe('Compaction');
+    expect(bar?.getAttribute('aria-valuetext')).toBe('Compaction in progress');
+    expect(bar?.hasAttribute('aria-valuenow')).toBe(false);
     expect(text(root, 'compaction-body')).toContain('Summarizing conversation');
   });
 });

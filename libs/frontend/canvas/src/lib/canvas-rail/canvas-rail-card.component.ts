@@ -34,7 +34,7 @@ import {
   type CompactRailDensity,
   type CompactRailState,
 } from '@ptah-extension/chat-ui';
-import { NativePopoverComponent } from '@ptah-extension/ui';
+import { NativePopoverComponent, PtahInputDirective } from '@ptah-extension/ui';
 import { AttentionPermissionActionsComponent, LoggingService, type AttentionItem } from '@ptah-extension/core';
 import { CircleAlert, LucideAngularModule } from 'lucide-angular';
 import { CanvasStore } from '../canvas.store';
@@ -56,6 +56,7 @@ export const SPLIT_ALREADY_FOCUSED_REASON =
   selector: 'li[ptah-canvas-rail-card]',
   standalone: true,
   imports: [
+    PtahInputDirective,
     CompactSessionCardComponent,
     NgTemplateOutlet,
     NativePopoverComponent,
@@ -416,7 +417,7 @@ export const SPLIT_ALREADY_FOCUSED_REASON =
           </div>
           <div content class="w-72 max-w-[calc(100vw-1rem)] p-4" role="dialog" aria-label="Rename session">
             <h3 class="mb-3 text-sm font-semibold text-base-content-muted">Rename session</h3>
-            <input #renameInput type="text" class="input input-sm input-bordered mb-3 w-full bg-base-100 border-base-content/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-1px] focus-visible:outline-[oklch(var(--s))]" aria-label="Session name" [attr.aria-describedby]="renameError() ? 'rail-rename-error-' + tabId() : null" [maxLength]="nameMaxLength" [value]="renameDraft()" [readOnly]="renaming()" (input)="onRenameInput(renameInput.value)" (keydown.enter)="onRenameEnter($event)" />
+            <input #renameInput type="text" ptahInput size="sm" class="mb-3 w-full" aria-label="Session name" [attr.aria-describedby]="renameError() ? 'rail-rename-error-' + tabId() : null" [maxLength]="nameMaxLength" [value]="renameDraft()" [readOnly]="renaming()" (input)="onRenameInput(renameInput.value)" (keydown.enter)="onRenameEnter($event)" />
             @if (renameError(); as error) {
               <p class="mb-3 text-xs text-error" [id]="'rail-rename-error-' + tabId()">{{ error }}</p>
             }
