@@ -1112,6 +1112,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
       statsLease.generation,
       sessionToken,
       null,
+      { phaseKind: config.phase?.kind, executorType: config.phase ? 'sdk-subagent' : 'session' },
     );
 
     const resolvedProjectPath = config?.projectPath || os.homedir();
@@ -1509,6 +1510,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
       statsRun.generation,
       sessionToken,
       statsRun.candidate,
+      { phaseKind: config?.phase?.kind, executorType: config?.phase ? 'sdk-subagent' : 'session' },
     );
 
     const resumeCallback = async (

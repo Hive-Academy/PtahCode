@@ -450,6 +450,7 @@ export type {
   SessionUsageSink,
   SessionUsageContribution,
   SessionUsageModelDelta,
+  UsageExecutorType,
 } from './interfaces/session-usage-sink.interface';
 export type {
   ISessionDriverLock,

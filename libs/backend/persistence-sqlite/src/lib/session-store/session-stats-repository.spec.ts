@@ -16,13 +16,13 @@ function sqlValue(value: unknown): string | number | null {
   throw new Error('Unexpected SQL parameter');
 }
 
-function openTestStore(file = ':memory:'): {
+function openTestStore(file = ':memory:', maxMigration = Number.POSITIVE_INFINITY): {
   ready(): Promise<Pick<SqliteDatabase, 'exec' | 'prepare'>>;
   close(): void;
   raw: DatabaseSync;
 } {
   const raw = new DatabaseSync(file);
-  for (const migration of SESSION_STORE_MIGRATIONS) {
+  for (const migration of SESSION_STORE_MIGRATIONS.filter((entry) => entry.version <= maxMigration)) {
     if (migration.sql) raw.exec(migration.sql);
   }
   const db: Pick<SqliteDatabase, 'exec' | 'prepare'> = {
@@ -70,6 +70,66 @@ const contribution: SessionUsageContribution = {
 };
 
 describe('SessionStatsRepository', () => {
+  it('persists live contribution dimensions and leaves absent dimensions NULL', async () => {
+    const store = openTestStore();
+    try {
+      const sink = new SqliteSessionUsageSink(new SessionStatsRepository(store), { error: jest.fn() });
+      const event = {
+        sessionId: 'session-a', producer: 'sdk-owner' as const, runId: 'run-a',
+        turnId: '1', eventKey: 'with-dimensions', parentSessionId: null,
+        subagentId: null, providerId: 'anthropic', occurredAtMs: 1, revision: 1,
+        models: [{ modelId: 'model-a', inputTokens: 2, outputTokens: 1,
+          cacheReadTokens: 0, cacheCreationTokens: 0, knownCostMicroUsd: 3,
+          costAuthority: 'provider-reported' as const }],
+        totalCostMicroUsd: 3, totalCostAuthority: 'provider-reported' as const,
+        pricingVersion: null,
+      };
+      await sink.recordUsage({ ...event, phaseKind: 'implement' as const,
+        executorType: 'sdk-subagent' as const });
+      await sink.recordUsage({ ...event, eventKey: 'without-dimensions' });
+      expect(store.raw.prepare(`SELECT event_key, phase_kind, executor_type
+        FROM session_usage_turns ORDER BY event_key`).all()).toMatchObject([
+        { event_key: '["run-a","with-dimensions"]', phase_kind: 'implement', executor_type: 'sdk-subagent' },
+        { event_key: '["run-a","without-dimensions"]', phase_kind: null, executor_type: null },
+      ]);
+    } finally {
+      store.close();
+    }
+  });
+  it('keeps S0002 rows unknown after migration and groups new dimensions', async () => {
+    const store = openTestStore(':memory:', 2);
+    try {
+      store.raw.prepare(`INSERT INTO session_usage_turns
+        (session_id, producer, run_id, turn_id, model_id, event_key, occurred_at_ms,
+         provider_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+         cost_authority, source, revision)
+        VALUES ('session-a', 'sdk', 'old-run', 'old-turn', 'model-a', 'old-event', 1,
+          'anthropic', 7, 3, 0, 0, 'unpriced', 'live', 1)`).run();
+      for (const migration of SESSION_STORE_MIGRATIONS.filter((entry) => entry.version > 2)) {
+        if (migration.sql) store.raw.exec(migration.sql);
+      }
+      expect(store.raw.prepare(`SELECT phase_kind, executor_type FROM session_usage_turns
+        WHERE event_key = 'old-event'`).get()).toMatchObject({ phase_kind: null, executor_type: null });
+      const repository = new SessionStatsRepository(store);
+      await repository.recordUsage({ ...contribution, eventKey: 'new-event',
+        phaseKind: 'implement', executorType: 'lane' });
+      await repository.recordUsage({ ...contribution, eventKey: 'other-event',
+        phaseKind: 'implement', executorType: 'session' });
+      await repository.recordUsage({ ...contribution, eventKey: 'undimensioned-event' });
+      const totals = await repository.getUsageDimensionTotals('session-a');
+      expect(totals.byPhaseKind).toEqual(expect.arrayContaining([
+        expect.objectContaining({ dimension: 'implement', input_tokens: 40, known_cost_micro_usd: 300 }),
+        expect.objectContaining({ dimension: 'unknown', input_tokens: 27, has_unpriced: 1 }),
+      ]));
+      expect(totals.byExecutorType).toEqual(expect.arrayContaining([
+        expect.objectContaining({ dimension: 'lane', input_tokens: 20 }),
+        expect.objectContaining({ dimension: 'session', input_tokens: 20 }),
+        expect.objectContaining({ dimension: 'unknown', input_tokens: 27 }),
+      ]));
+    } finally {
+      store.close();
+    }
+  });
   it('uses the time index for a workspace aggregate on a large temp database', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'ptah-usage-plan-'));
     const store = openTestStore(join(dir, 'synthetic.sqlite'));

@@ -305,6 +305,7 @@ function checkpointTurnContribution(
   return {
     sessionId,
     producer: 'codex-checkpoint',
+    executorType: 'session',
     runId: accepted.rootThreadId,
     // A revision may span several threads' turns, so no single turn id.
     turnId: null,
