@@ -446,8 +446,7 @@ function extractMarkdownLinks(content: string): ExtractedLink[] {
       if (
         link !== undefined &&
         !link.startsWith('http://') &&
-        !link.startsWith('https://') &&
-        !link.startsWith('#')
+        !link.startsWith('https://')
       ) {
         links.push({ link, line: index + 1 });
       }
@@ -468,13 +467,12 @@ function validateInternalReferences(
   content: string,
 ): ValidationError[] {
   const errors: ValidationError[] = [];
-  const links = extractMarkdownLinks(content);
+  const links = extractMarkdownLinks(maskFences(content));
   const fileDir = path.dirname(filePath);
 
   for (const { link, line } of links) {
-    const linkPath = link.split('#')[0];
-    if (!linkPath) continue;
-    const resolvedPath = path.resolve(fileDir, linkPath);
+    const [linkPath, anchor] = link.split('#');
+    const resolvedPath = linkPath ? path.resolve(fileDir, linkPath) : filePath;
 
     if (!fs.existsSync(resolvedPath)) {
       errors.push({
@@ -487,6 +485,14 @@ function validateInternalReferences(
         )}`,
         line,
       });
+    } else if (anchor && fs.statSync(resolvedPath).isFile()) {
+      const target = maskFences(fs.readFileSync(resolvedPath, 'utf8'));
+      const slugs = [...target.matchAll(/^#{1,6}\s+(.+)$/gm)].map(match =>
+        (match[1] ?? '').trim().toLowerCase().replace(/[`*_~]/g, '').replace(/[^\p{L}\p{N} -]/gu, '').replace(/ /g, '-'),
+      );
+      if (!slugs.includes(decodeURIComponent(anchor).toLowerCase())) {
+        errors.push(error(filePath, `Broken heading anchor: ${link}`));
+      }
     }
   }
 
