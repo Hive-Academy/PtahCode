@@ -51,6 +51,27 @@ describe('badge family accessibility', () => {
     expect(dot.querySelector('.ptah-status-text')).toBeNull();
   });
 
+  it.each(['', '   '])('falls back to the status name for a blank label (%j)', (label) => {
+    @Component({
+      standalone: true,
+      imports: [PtahStatusComponent],
+      changeDetection: ChangeDetectionStrategy.OnPush,
+      template: `<ptah-status status="offline" appearance="dot" [label]="label" />`,
+    })
+    class BlankHostComponent {
+      public readonly label = label;
+    }
+    const fixture = TestBed.createComponent(BlankHostComponent);
+    fixture.detectChanges();
+    const dot = (fixture.nativeElement as HTMLElement).querySelector('ptah-status');
+    expect(dot?.getAttribute('aria-label')).toBe('offline');
+    expect(dot?.getAttribute('title')).toBe('offline');
+  });
+
+  it('gives overflow text an ellipsis through the .ptah-badge-text child', () => {
+    expect(CSS).toMatch(/\[data-ptah-badge\] > \.ptah-badge-text \{[^}]*text-overflow: ellipsis/);
+  });
+
   it('draws a different glyph shape for each state, not only a different color', () => {
     const shape = (ink: string) =>
       new RegExp(`ptah-status\\[data-ink='${ink}'\\][^{]*\\.ptah-status-glyph[^{]*\\{[^}]*(border|transform|border-radius)`);

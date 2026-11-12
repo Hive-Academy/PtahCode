@@ -49,6 +49,9 @@ Today the product has 30 class mixes for one idea. The proposal has 6 tones, 2 a
 | `sm` (default) | 20 px (`--ptah-badge-h-sm`) | Card headers, settings rows, detail panes |
 | `xs` | 16 px (`--ptah-badge-h-xs`) | Dense list rows, tabs, tree items |
 
+Long text: put text that can overflow in a `.ptah-badge-text` child. It gets the ellipsis.
+Direct text in the badge is cut without an ellipsis.
+
 `count`: tabular figures and a minimum width equal to the height, so 3 and 128 align.
 Rule: one `accent` badge for each surface at most, and at most two state tones in one row.
 

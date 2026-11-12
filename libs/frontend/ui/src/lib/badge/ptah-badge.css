@@ -25,6 +25,15 @@ ptah-status[data-appearance='pill'] {
   vertical-align: middle;
 }
 
+/* Direct text in an inline-flex box cannot show an ellipsis. Put text that can
+   overflow in a .ptah-badge-text child. */
+[data-ptah-badge] > .ptah-badge-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 [data-ptah-badge][data-size='xs'],
 ptah-status[data-appearance='pill'][data-size='xs'] {
   height: var(--ptah-badge-h-xs);

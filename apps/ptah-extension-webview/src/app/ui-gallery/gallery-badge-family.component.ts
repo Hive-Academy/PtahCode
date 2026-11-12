@@ -44,7 +44,7 @@ import { GallerySectionComponent } from './gallery-section.component';
       <div class="flex flex-wrap items-center gap-ptah-inline">
         <span class="text-ptah-caption text-base-content-muted w-28">long text</span>
         <span ptahBadge class="max-w-40" title="claude-opus-5-5 with a very long model label">
-          claude-opus-5-5 with a very long model label
+          <span class="ptah-badge-text">claude-opus-5-5 with a very long model label</span>
         </span>
       </div>
 

@@ -39,13 +39,16 @@ const INK: Readonly<Record<PtahStatus, PtahStatusInk>> = {
 })
 export class PtahStatusComponent {
   readonly status = input.required<PtahStatus>();
-  /** Visible word, or the accessible name of a dot. Defaults to the status name. */
+  /**
+   * Visible word, or the accessible name of a dot. A null, empty or blank
+   * label falls back to the status name, so a status always has a name.
+   */
   readonly label = input<string | null>(null);
   readonly appearance = input<PtahStatusAppearance>('pill');
   readonly size = input<PtahBadgeSize>('sm');
 
   readonly ink = computed(() => INK[this.status()]);
   readonly text = computed(
-    () => this.label() ?? this.status().replace('-', ' '),
+    () => this.label()?.trim() || this.status().replace('-', ' '),
   );
 }
