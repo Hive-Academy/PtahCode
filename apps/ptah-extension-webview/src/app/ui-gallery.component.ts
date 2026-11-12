@@ -169,6 +169,7 @@ export class UiGalleryComponent {
     { id: 'family-ring', label: 'Ring family' },
     { id: 'family-sparkline', label: 'Sparkline family' },
     { id: 'family-stat', label: 'Stat family' },
+    { id: 'family-stat-extras', label: 'Stat extras' },
     { id: 'components-list-detail', label: 'List and detail' },
     { id: 'components-inbox-layout', label: 'Inbox layout' },
     { id: 'components-states', label: 'States' },
