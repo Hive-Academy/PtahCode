@@ -48,6 +48,7 @@ const EMPTY_LANES: CompactLaneSummary = {
     '[class.rc-dense]': 'density() === "dense"',
     '[class.rc-corner-reserved]': 'reserveActionCorner()',
     '[class.rc-focused]': 'focused()',
+    '[class.rc-related]': 'related()',
     '[attr.data-state]': 'state()',
   },
   styles: [
@@ -198,6 +199,16 @@ const EMPTY_LANES: CompactLaneSummary = {
         box-shadow: inset 0 0 0 1px var(--rc-focus-frame);
         background-color: var(--rail-active-fill);
       }
+      /* A parent or child of the hovered or focused card: a subtle ring and
+         tint. Never repaints the active frame. */
+      :host(.rc-related:not(.rc-focused)) {
+        border-color: var(--rail-state-ink);
+        background-color: color-mix(
+          in oklch,
+          var(--rail-state-ink) 10%,
+          transparent
+        );
+      }
       .rc-action:hover {
         box-shadow: inset 0 0 0 1px currentColor;
       }
@@ -255,15 +266,40 @@ const EMPTY_LANES: CompactLaneSummary = {
           class="h-2 w-2 shrink-0 rounded-full"
           [style.background]="'var(--rail-state-ink)'"
         ></span>
+        @if (childOf() !== null) {
+          <span
+            class="rc-child-glyph shrink-0 text-base-content-muted"
+            data-testid="rail-child-glyph"
+            aria-hidden="true"
+            >↳</span
+          >
+        }
         <span class="rc-ellipsis flex-1 font-semibold" [title]="title()">{{
           title()
         }}</span>
+        @if (childCount() > 0) {
+          <span
+            class="rc-pill shrink-0 rounded px-1 text-[10px]"
+            data-testid="rail-child-count"
+            [title]="childCountTooltip()"
+            >⑂ {{ childCount() }}</span
+          >
+        }
         <span class="rc-pill shrink-0 rounded px-1 text-[10px]">{{
           stateLabel()
         }}</span>
       </div>
       @if (density() === 'comfortable') {
         <div class="rc-line rc-meta text-[11px] text-base-content-muted">
+          @if (childOf(); as parent) {
+            <span
+              class="rc-ellipsis max-w-[40%] shrink-0"
+              data-testid="rail-child-parent"
+              [title]="'Child of ' + parent"
+              >↳ {{ parent }}</span
+            >
+            <span aria-hidden="true">·</span>
+          }
           <span class="rc-ellipsis"
             >{{ branch() || '—' }} · {{ model() || '—' }} ·
             {{ elapsed() }}</span
@@ -414,6 +450,21 @@ export class CompactRailCardComponent implements DoCheck {
   readonly innerTabbable = input(false);
   /** The host overlays a control on the top-right corner; keep the title clear of it. */
   readonly reserveActionCorner = input(false);
+  /** Label of the parent session when this card is a child; null otherwise. */
+  readonly childOf = input<string | null>(null);
+  /** Child sessions this card's session started (live and finished). */
+  readonly childCount = input(0);
+  /** How many of those children run now. */
+  readonly childRunning = input(0);
+  /** Hover or focus on a related card: tint this card. */
+  readonly related = input(false);
+  readonly childCountTooltip = computed(() => {
+    const n = this.childCount();
+    const base = `${n} child session${n === 1 ? '' : 's'}`;
+    return this.childRunning() > 0
+      ? `${base} (${this.childRunning()} running)`
+      : base;
+  });
   readonly selectRequested = output<void>();
   readonly laneSelected = output<string>();
   readonly allow = output<CompactPermissionCallout>();
@@ -438,7 +489,7 @@ export class CompactRailCardComponent implements DoCheck {
   );
   readonly selectName = computed(
     () =>
-      `${this.title()}, ${this.stateLabel()}${this.branch() ? ', branch ' + this.branch() : ''}${this.linkedTask() ? ', task ' + this.linkedTask()?.taskId : ''}${this.callout()?.kind === 'permission' ? ', asks permission' : ''}${this.focused() ? ', in focus' : ''}`,
+      `${this.title()}${this.childOf() !== null ? ', child session of ' + this.childOf() : ''}${this.childCount() > 0 ? ', ' + this.childCountTooltip() : ''}, ${this.stateLabel()}${this.branch() ? ', branch ' + this.branch() : ''}${this.linkedTask() ? ', task ' + this.linkedTask()?.taskId : ''}${this.callout()?.kind === 'permission' ? ', asks permission' : ''}${this.focused() ? ', in focus' : ''}`,
   );
   readonly stateLabel = computed(() => compactRailStateLabel(this.state()));
   /** Every CLI lane of the session, including rows capped into `+N more`. */

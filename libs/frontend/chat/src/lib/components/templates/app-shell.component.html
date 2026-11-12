@@ -265,19 +265,22 @@
             </h3>
 
             <!-- Input field with Enter/ESC keyboard support -->
-            <input
-              #sessionNameInputRef
-              type="text"
-              class="input input-sm input-bordered w-full mb-3 bg-base-100 border-base-content/10 focus:border-primary"
-              placeholder="Enter session name (optional)"
-              [(ngModel)]="sessionNameInput"
-              (keydown.enter)="
-                handleCreateSession();
-                $event.preventDefault();
-                $event.stopPropagation()
-              "
-              (keydown.escape)="handleCancelSession()"
-            />
+            <ptah-field label="Session name (optional)" class="mb-3">
+              <input
+                #sessionNameInputRef
+                ptahInput
+                type="text"
+                class="w-full"
+                placeholder="Enter session name (optional)"
+                [(ngModel)]="sessionNameInput"
+                (keydown.enter)="
+                  handleCreateSession();
+                  $event.preventDefault();
+                  $event.stopPropagation()
+                "
+                (keydown.escape)="handleCancelSession()"
+              />
+            </ptah-field>
 
             <!-- Action buttons -->
             <div class="flex gap-2">

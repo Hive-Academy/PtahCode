@@ -20,6 +20,7 @@ import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.
 import {
   PtahButtonDirective,
   PtahIconButtonDirective,
+  PtahInputDirective,
 } from '@ptah-extension/ui';
 
 const FOCUS =
@@ -45,7 +46,7 @@ const FOCUS =
 @Component({
   selector: 'ptah-cursor-credential-popover',
   standalone: true,
-  imports: [LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective],
+  imports: [LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -123,12 +124,15 @@ const FOCUS =
         >
         <div class="relative">
           <input
+            ptahInput
+            size="sm"
+            tone="mono"
             id="cursor-credential-key"
             [type]="keyVisible() ? 'text' : 'password'"
             autocomplete="off"
             spellcheck="false"
             [class]="
-              'input input-bordered input-sm w-full pr-9 font-mono text-xs ' +
+              'w-full pr-9 font-mono text-xs ' +
               focusRing
             "
             [value]="key()"

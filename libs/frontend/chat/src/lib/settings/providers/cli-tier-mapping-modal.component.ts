@@ -9,7 +9,7 @@ import {
 import type { ProviderModelInfo } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService, type SettingsSaveResult } from '../feedback/settings-save-feedback.service';
 import { SettingsToastComponent } from '../feedback/settings-toast.component';
-import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
 
 /** The instance whose tiers the modal edits. */
 export interface CliTierMappingTarget {
@@ -54,7 +54,7 @@ interface Catalogue {
 @Component({
   selector: 'ptah-cli-tier-mapping-modal',
   standalone: true,
-  imports: [PtahButtonDirective, PtahIconButtonDirective, LucideAngularModule, NativeModalComponent, ProviderModelSearchFieldComponent, SettingsToastComponent],
+  imports: [PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective, LucideAngularModule, NativeModalComponent, ProviderModelSearchFieldComponent, SettingsToastComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <ptah-native-modal [isOpen]="open()" ariaLabelledby="cli-tier-mapping-title" size="md" (closed)="closed.emit()">
@@ -100,7 +100,7 @@ interface Catalogue {
                   </div>
                   @if (manualTier() === row.tier) {
                     <div class="flex items-center gap-1.5">
-                      <input [id]="'cli-tier-' + row.tier" type="text" [class]="'input input-bordered input-sm min-w-0 flex-1 font-mono text-xs ' + focusRing"
+                      <input ptahInput size="sm" tone="mono" [id]="'cli-tier-' + row.tier" type="text" class="min-w-0 flex-1 text-xs"
                         placeholder="Model ID, e.g. vendor/model-name" [value]="manualDraft()" (input)="manualDraft.set(value($event))"
                         [attr.aria-label]="row.label + ' tier model ID'" [attr.aria-invalid]="manualInvalid()"
                         [attr.aria-describedby]="manualInvalid() ? 'cli-tier-manual-error' : null" [attr.data-testid]="'cli-tier-manual-' + row.tier" />

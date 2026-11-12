@@ -90,9 +90,10 @@ export class RoutingAgentAdapter implements IAgentAdapter {
     ...args: Parameters<IAgentAdapter['startChatSession']>
   ): ReturnType<IAgentAdapter['startChatSession']> {
     const preparedRuntime = args[0].runtime;
-    const nativeEnabled = args[0].consumer === 'gateway'
-      ? this.capabilities.nativeCodexGateway === true
-      : this.capabilities.nativeCodex === true;
+    const nativeEnabled =
+      args[0].consumer === 'gateway'
+        ? this.capabilities.nativeCodexGateway === true
+        : this.capabilities.nativeCodex === true;
     if (preparedRuntime) {
       if (
         preparedRuntime === 'codex-app-server' &&
@@ -103,7 +104,9 @@ export class RoutingAgentAdapter implements IAgentAdapter {
         );
       }
       if (!this.admission) {
-        throw new ChatRuntimeAdmissionError('Chat runtime admission is unavailable.');
+        throw new ChatRuntimeAdmissionError(
+          'Chat runtime admission is unavailable.',
+        );
       }
       const provider = await this.admission.servingProviderId(args[0]);
       if (provider === 'openai-codex' && (!nativeEnabled || !this.native)) {
@@ -124,7 +127,9 @@ export class RoutingAgentAdapter implements IAgentAdapter {
     }
     // Admission lookup failures propagate: a failed workspace lookup is not consent to switch runtimes.
     if (!this.admission) {
-      throw new ChatRuntimeAdmissionError('Chat runtime admission is unavailable.');
+      throw new ChatRuntimeAdmissionError(
+        'Chat runtime admission is unavailable.',
+      );
     }
     const provider = await this.admission.servingProviderId(args[0]);
     const useNative = provider === 'openai-codex';
@@ -148,25 +153,49 @@ export class RoutingAgentAdapter implements IAgentAdapter {
   ): ReturnType<IAgentAdapter['sendMessageToSession']> {
     return this.adapter(args[0], true).sendMessageToSession(...args);
   }
+  claimHeldPeerMessages(
+    sessionId: SessionId,
+  ): ReturnType<IAgentAdapter['claimHeldPeerMessages']> {
+    return this.adapter(sessionId).claimHeldPeerMessages(sessionId);
+  }
   onQueuedFollowUpState(
-    listener: Parameters<NonNullable<IAgentAdapter['onQueuedFollowUpState']>>[0],
+    listener: Parameters<
+      NonNullable<IAgentAdapter['onQueuedFollowUpState']>
+    >[0],
   ): () => void {
     const unsubscribeLegacy = this.legacy.onQueuedFollowUpState?.(listener);
     const unsubscribeNative = this.native.onQueuedFollowUpState?.(listener);
-    return () => { unsubscribeLegacy?.(); unsubscribeNative?.(); };
+    return () => {
+      unsubscribeLegacy?.();
+      unsubscribeNative?.();
+    };
   }
-  withdrawQueuedFollowUp(sessionId: SessionId, clientMessageId: string): Promise<boolean> {
-    return this.adapter(sessionId).withdrawQueuedFollowUp?.(sessionId, clientMessageId)
-      ?? Promise.resolve(false);
+  withdrawQueuedFollowUp(
+    sessionId: SessionId,
+    clientMessageId: string,
+  ): Promise<boolean> {
+    return (
+      this.adapter(sessionId).withdrawQueuedFollowUp?.(
+        sessionId,
+        clientMessageId,
+      ) ?? Promise.resolve(false)
+    );
   }
-  listQueuedFollowUps(sessionId: SessionId): ReturnType<NonNullable<IAgentAdapter['listQueuedFollowUps']>> {
+  listQueuedFollowUps(
+    sessionId: SessionId,
+  ): ReturnType<NonNullable<IAgentAdapter['listQueuedFollowUps']>> {
     return this.adapter(sessionId).listQueuedFollowUps?.(sessionId) ?? [];
   }
   steerQueuedFollowUp(
-    sessionId: SessionId, clientMessageId: string,
+    sessionId: SessionId,
+    clientMessageId: string,
   ): ReturnType<NonNullable<IAgentAdapter['steerQueuedFollowUp']>> {
-    return this.adapter(sessionId).steerQueuedFollowUp?.(sessionId, clientMessageId)
-      ?? Promise.resolve({ ok: false, code: 'UNSUPPORTED' });
+    return (
+      this.adapter(sessionId).steerQueuedFollowUp?.(
+        sessionId,
+        clientMessageId,
+      ) ?? Promise.resolve({ ok: false, code: 'UNSUPPORTED' })
+    );
   }
   isSessionActive(
     ...args: Parameters<IAgentAdapter['isSessionActive']>

@@ -32,6 +32,7 @@ import {
 } from '@angular/core';
 import { ProviderAccountsStateService } from '@ptah-extension/core';
 import { NgClass } from '@angular/common';
+import { PtahInputDirective } from '@ptah-extension/ui';
 import { LucideAngularModule, Pencil, Tag, Trash2 } from 'lucide-angular';
 import type { WorkflowKind } from '@ptah-extension/chat-types';
 import type { ChatSessionSummary } from '@ptah-extension/shared';
@@ -43,14 +44,6 @@ import { SessionOrganizationChipsComponent } from '../../atoms/session-organizat
 
 /** What ended an inline rename that saves. */
 export type SessionRenameCommitTrigger = 'enter' | 'blur';
-
-/**
- * The app's keyboard focus ring (`styles.css` `:focus-visible`). daisyUI's
- * `.input` focus outline is a 20% tint and wins over the global rule, so the
- * rename field restates it as utilities.
- */
-const FOCUS_RING =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))]';
 
 const ACTION_BUTTON =
   'btn btn-ghost btn-xs btn-square h-6 min-h-6 w-6 rounded text-base-content-muted';
@@ -139,6 +132,7 @@ export const SESSION_LIST_ROW_STYLES = `
   standalone: true,
   imports: [
     NgClass,
+    PtahInputDirective,
     LucideAngularModule,
     WorkflowBadgeComponent,
     SessionLivePhaseIndicatorComponent,
@@ -165,7 +159,7 @@ export const SESSION_LIST_ROW_STYLES = `
           <input
             #renameInput
             type="text"
-            class="input input-xs input-bordered flex-1 min-w-0 h-7 text-[13px] rounded-md bg-surface-0 border-[color:var(--surface-border-strong)] ${FOCUS_RING}"
+            ptahInput size="xs" tone="compact" class="flex-1 min-w-0 text-[13px]"
             [attr.maxlength]="nameMaxLength"
             aria-label="Edit session name"
             [attr.aria-describedby]="renameDescribedBy()"

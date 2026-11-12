@@ -21,7 +21,7 @@ import {
 } from '@ptah-extension/chat-state';
 import { wrapTabWithin } from '../../utils/focus-wrap.utils';
 
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahCheckboxDirective } from '@ptah-extension/ui';
 let nextId = 0;
 
 /**
@@ -34,7 +34,7 @@ let nextId = 0;
 @Component({
   selector: 'ptah-confirmation-dialog',
   standalone: true,
-  imports: [PtahButtonDirective],
+  imports: [PtahButtonDirective, PtahCheckboxDirective],
   template: `
     <dialog
       #dialog
@@ -55,14 +55,14 @@ let nextId = 0;
           @if (checkboxList().length > 0) {
             <div class="flex flex-col gap-2 pb-2">
               @for (cb of checkboxList(); track cb.id) {
-                <label class="label cursor-pointer justify-start gap-2">
+                <label class="cursor-pointer flex items-center justify-start gap-2">
                   <input
                     type="checkbox"
-                    class="checkbox checkbox-sm"
+                    ptahCheckbox size="sm"
                     [checked]="checkboxState()[cb.id]"
                     (change)="onCheckboxChange(cb.id, $event)"
                   />
-                  <span class="label-text">{{ cb.label }}</span>
+                  <span >{{ cb.label }}</span>
                 </label>
               }
             </div>

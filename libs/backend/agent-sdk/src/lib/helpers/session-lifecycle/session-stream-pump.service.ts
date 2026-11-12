@@ -32,6 +32,7 @@
 import type { Logger } from '@ptah-extension/vscode-core';
 import type {
   AIMessageOptions,
+  HeldPeerMessage,
   SessionId,
   InlineImageAttachment,
   QueuedFollowUpSnapshot,
@@ -51,8 +52,31 @@ import type {
 } from './session-registry.service';
 
 export class SessionStreamPump {
+  /** Synchronous removal cannot interleave with the iterator's shift/yield. */
+  claimHeldPeerMessages(sessionId: SessionId): readonly HeldPeerMessage[] {
+    const record = this.registry.find(sessionId as string);
+    if (!record) return [];
+    const claimed: HeldPeerMessage[] = [];
+    for (let index = 0; index < record.messageQueue.length;) {
+      const turn = record.messageQueue[index];
+      if (turn.heldPeer) {
+        claimed.push(turn.heldPeer);
+        record.messageQueue.splice(index, 1);
+      } else index++;
+    }
+    return claimed;
+  }
   private readonly acceptedLaneDeliveries = new Map<string, string>();
-  private readonly receipts = new WeakMap<SessionRecord, Map<string, { fingerprint: string; state: 'queued' | 'delivered' | 'withdrawn' | 'failed' }>>();
+  private readonly receipts = new WeakMap<
+    SessionRecord,
+    Map<
+      string,
+      {
+        fingerprint: string;
+        state: 'queued' | 'delivered' | 'withdrawn' | 'failed';
+      }
+    >
+  >();
   private readonly followUpListeners = new Set<
     (change: QueuedFollowUpStateChange) => void
   >();
@@ -123,7 +147,8 @@ export class SessionStreamPump {
     if (!record || record.abortController.signal.aborted)
       return { ok: false, code: 'SESSION_ENDED' };
     const index = record.messageQueue.findIndex(
-      (turn) => turn.followUp?.clientMessageId === clientMessageId &&
+      (turn) =>
+        turn.followUp?.clientMessageId === clientMessageId &&
         turn.recordToken === record.token,
     );
     if (index < 0) return { ok: false, code: 'NOT_QUEUED' };
@@ -154,7 +179,8 @@ export class SessionStreamPump {
 
   private emit(change: QueuedFollowUpStateChange): void {
     const record = this.registry.find(change.sessionId as string);
-    const receipt = record && this.receipts.get(record)?.get(change.clientMessageId);
+    const receipt =
+      record && this.receipts.get(record)?.get(change.clientMessageId);
     if (receipt && change.state !== 'steered') receipt.state = change.state;
     for (const listener of this.followUpListeners) {
       try {
@@ -399,22 +425,40 @@ export class SessionStreamPump {
       markActive();
     }
     const fingerprint = JSON.stringify([content, files ?? [], images ?? []]);
-    const laneDeliveryId = options?.clientMessageId?.startsWith('lane-delivery:')
-      ? options.clientMessageId : undefined;
+    const laneDeliveryId = options?.clientMessageId?.startsWith(
+      'lane-delivery:',
+    )
+      ? options.clientMessageId
+      : undefined;
     if (laneDeliveryId) {
       const accepted = this.acceptedLaneDeliveries.get(laneDeliveryId);
       if (accepted !== undefined) {
-        if (accepted !== fingerprint) throw new SdkError('Lane delivery ID reused with different content');
+        if (accepted !== fingerprint)
+          throw new SdkError('Lane delivery ID reused with different content');
         return;
       }
     }
-    const receipts = this.receipts.get(session) ?? new Map<string, { fingerprint: string; state: 'queued' | 'delivered' | 'withdrawn' | 'failed' }>();
+    const receipts =
+      this.receipts.get(session) ??
+      new Map<
+        string,
+        {
+          fingerprint: string;
+          state: 'queued' | 'delivered' | 'withdrawn' | 'failed';
+        }
+      >();
     this.receipts.set(session, receipts);
     if (options?.queueIntent) {
       const existing = receipts.get(options.clientMessageId!);
       if (existing) {
-        if (existing.fingerprint !== fingerprint || existing.state === 'withdrawn' || existing.state === 'failed')
-          throw new SdkError('FOLLOW_UP_ID_CONFLICT: clientMessageId was reused');
+        if (
+          existing.fingerprint !== fingerprint ||
+          existing.state === 'withdrawn' ||
+          existing.state === 'failed'
+        )
+          throw new SdkError(
+            'FOLLOW_UP_ID_CONFLICT: clientMessageId was reused',
+          );
         return;
       }
       receipts.set(options.clientMessageId!, { fingerprint, state: 'queued' });
@@ -437,7 +481,8 @@ export class SessionStreamPump {
         origin: options?.origin,
       });
     } catch (error: unknown) {
-      if (options?.queueIntent) receipts.get(options.clientMessageId!)!.state = 'failed';
+      if (options?.queueIntent)
+        receipts.get(options.clientMessageId!)!.state = 'failed';
       throw error;
     }
     if (
@@ -465,6 +510,17 @@ export class SessionStreamPump {
       : undefined;
     session.messageQueue.push({
       message: sdkUserMessage,
+      heldPeer:
+        options?.origin?.kind === 'peer' && !followUp
+          ? {
+              content,
+              origin: options.origin,
+              files: files ? [...files] : undefined,
+              images: images
+                ? images.map((image) => ({ ...image }))
+                : undefined,
+            }
+          : undefined,
       clientMessageId: options?.clientMessageId,
       followUp,
       sessionId: followUp ? sessionId : undefined,

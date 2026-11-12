@@ -25,7 +25,10 @@ import type { AgentProcessInfo } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { IFileSystemProvider } from '@ptah-extension/platform-core';
 import type { SessionUsageSink } from '@ptah-extension/agent-sdk';
-import { AgentReportCoalescer, type HeldReport } from './agent-report-coalescer';
+import {
+  AgentReportCoalescer,
+  type HeldReport,
+} from './agent-report-coalescer';
 import { FileType } from '@ptah-extension/platform-core';
 import {
   LaneCompletionNotifier,
@@ -158,40 +161,92 @@ function createHarness(
 describe('LaneCompletionNotifier.signal', () => {
   it('delivers a held closing report inside one completion envelope', async () => {
     const h = createHarness();
-    const store = new ParentEnvelopeStoreService(h.logger, new FakeStateStorage());
-    const adapter = { isSessionActive: h.isSessionActive,
-      sendMessageToSession: h.sendMessageToSession } as never;
-    const drainer = new ParentDeliveryDrainerService(h.logger, store, adapter, null, null);
+    const store = new ParentEnvelopeStoreService(
+      h.logger,
+      new FakeStateStorage(),
+    );
+    const adapter = {
+      isSessionActive: h.isSessionActive,
+      sendMessageToSession: h.sendMessageToSession,
+    } as never;
+    const drainer = new ParentDeliveryDrainerService(
+      h.logger,
+      store,
+      adapter,
+      null,
+      null,
+    );
     const coalescer = new AgentReportCoalescer();
     const markEnqueued = jest.fn();
-    const held: HeldReport = { message: 'Done', envelopeBody: '<agent-report>Done</agent-report>',
-      heldAt: Date.now(), deliverStandalone: jest.fn().mockResolvedValue(undefined), markEnqueued };
+    const held: HeldReport = {
+      message: 'Done',
+      envelopeBody: '<agent-report>Done</agent-report>',
+      heldAt: Date.now(),
+      deliverStandalone: jest.fn().mockResolvedValue(undefined),
+      markEnqueued,
+    };
     coalescer.hold(AGENT_ID, held, jest.fn());
-    const notifier = new LaneCompletionNotifier(h.logger,
-      { exists: h.exists, stat: h.stat } as never, adapter, () => null, drainer,
-      () => null, coalescer);
+    const notifier = new LaneCompletionNotifier(
+      h.logger,
+      { exists: h.exists, stat: h.stat } as never,
+      adapter,
+      () => null,
+      drainer,
+      () => null,
+      coalescer,
+    );
     const result = await notifier.signal(createInfo());
     expect(h.sendMessageToSession).toHaveBeenCalledTimes(1);
-    expect(h.envelope()).toContain('Closing report:\n<agent-report>Done</agent-report>');
+    expect(h.envelope()).toContain(
+      'Closing report:\n<agent-report>Done</agent-report>',
+    );
     expect(result.signal?.reportsDelivered).toBe(1);
     expect(markEnqueued).toHaveBeenCalledTimes(1);
-    expect(store.list(PARENT).filter((entry) => entry.kind === 'report')).toHaveLength(0);
+    expect(
+      store.list(PARENT).filter((entry) => entry.kind === 'report'),
+    ).toHaveLength(0);
     drainer.dispose();
   });
 
   it('sends an oversize report standalone and completes without embedding it', async () => {
     const h = createHarness();
-    const store = new ParentEnvelopeStoreService(h.logger, new FakeStateStorage());
-    const adapter = { isSessionActive: h.isSessionActive,
-      sendMessageToSession: h.sendMessageToSession } as never;
-    const drainer = new ParentDeliveryDrainerService(h.logger, store, adapter, null, null);
+    const store = new ParentEnvelopeStoreService(
+      h.logger,
+      new FakeStateStorage(),
+    );
+    const adapter = {
+      isSessionActive: h.isSessionActive,
+      sendMessageToSession: h.sendMessageToSession,
+    } as never;
+    const drainer = new ParentDeliveryDrainerService(
+      h.logger,
+      store,
+      adapter,
+      null,
+      null,
+    );
     const coalescer = new AgentReportCoalescer();
     const deliverStandalone = jest.fn().mockResolvedValue(undefined);
-    coalescer.hold(AGENT_ID, { message: 'large', envelopeBody: 'x'.repeat(1_048_476),
-      heldAt: Date.now(), deliverStandalone, markEnqueued: jest.fn() }, jest.fn());
-    const notifier = new LaneCompletionNotifier(h.logger,
-      { exists: h.exists, stat: h.stat } as never, adapter, () => null, drainer,
-      () => null, coalescer);
+    coalescer.hold(
+      AGENT_ID,
+      {
+        message: 'large',
+        envelopeBody: 'x'.repeat(1_048_476),
+        heldAt: Date.now(),
+        deliverStandalone,
+        markEnqueued: jest.fn(),
+      },
+      jest.fn(),
+    );
+    const notifier = new LaneCompletionNotifier(
+      h.logger,
+      { exists: h.exists, stat: h.stat } as never,
+      adapter,
+      () => null,
+      drainer,
+      () => null,
+      coalescer,
+    );
     const result = await notifier.signal(createInfo());
     expect(deliverStandalone).toHaveBeenCalledTimes(1);
     expect(result.signal?.reportsDelivered).toBe(1);
@@ -202,34 +257,86 @@ describe('LaneCompletionNotifier.signal', () => {
   it('keeps an embedded report in the completion after a rejected send', async () => {
     const h = createHarness();
     h.sendMessageToSession.mockRejectedValueOnce(new Error('send refused'));
-    const store = new ParentEnvelopeStoreService(h.logger, new FakeStateStorage());
-    const adapter = { isSessionActive: h.isSessionActive,
-      sendMessageToSession: h.sendMessageToSession } as never;
-    const drainer = new ParentDeliveryDrainerService(h.logger, store, adapter, null, null);
+    const store = new ParentEnvelopeStoreService(
+      h.logger,
+      new FakeStateStorage(),
+    );
+    const adapter = {
+      isSessionActive: h.isSessionActive,
+      sendMessageToSession: h.sendMessageToSession,
+    } as never;
+    const drainer = new ParentDeliveryDrainerService(
+      h.logger,
+      store,
+      adapter,
+      null,
+      null,
+    );
     const coalescer = new AgentReportCoalescer();
     const standalone = jest.fn().mockResolvedValue(undefined);
-    coalescer.hold(AGENT_ID, { message: 'Done', envelopeBody: '<agent-report>Done</agent-report>',
-      heldAt: Date.now(), deliverStandalone: standalone, markEnqueued: jest.fn() }, jest.fn());
-    const notifier = new LaneCompletionNotifier(h.logger,
-      { exists: h.exists, stat: h.stat } as never, adapter, () => null, drainer,
-      () => null, coalescer);
+    coalescer.hold(
+      AGENT_ID,
+      {
+        message: 'Done',
+        envelopeBody: '<agent-report>Done</agent-report>',
+        heldAt: Date.now(),
+        deliverStandalone: standalone,
+        markEnqueued: jest.fn(),
+      },
+      jest.fn(),
+    );
+    const notifier = new LaneCompletionNotifier(
+      h.logger,
+      { exists: h.exists, stat: h.stat } as never,
+      adapter,
+      () => null,
+      drainer,
+      () => null,
+      coalescer,
+    );
     await notifier.signal(createInfo());
-    expect(store.list(PARENT).filter((entry) => entry.kind === 'report')).toHaveLength(0);
-    expect(store.list(PARENT).find((entry) => entry.kind === 'completion')).toBeDefined();
+    expect(
+      store.list(PARENT).filter((entry) => entry.kind === 'report'),
+    ).toHaveLength(0);
+    expect(
+      store.list(PARENT).find((entry) => entry.kind === 'completion'),
+    ).toBeDefined();
     expect(standalone).not.toHaveBeenCalled();
     drainer.dispose();
   });
 
   it('holds a tab-id completion until the real parent session resolves', async () => {
     const h = createHarness();
-    const store = new ParentEnvelopeStoreService(h.logger, new FakeStateStorage());
-    const adapter = { isSessionActive: h.isSessionActive,
-      sendMessageToSession: h.sendMessageToSession } as never;
-    const drainer = new ParentDeliveryDrainerService(h.logger, store, adapter, null, null);
-    const notifier = new LaneCompletionNotifier(h.logger,
-      { exists: h.exists, stat: h.stat } as never, adapter, () => null, drainer);
-    const pending = await notifier.signal(createInfo({ parentSessionId: 'tab-1' }));
-    expect(pending).toMatchObject({ delivered: false, recorded: true, pending: true });
+    const store = new ParentEnvelopeStoreService(
+      h.logger,
+      new FakeStateStorage(),
+    );
+    const adapter = {
+      isSessionActive: h.isSessionActive,
+      sendMessageToSession: h.sendMessageToSession,
+    } as never;
+    const drainer = new ParentDeliveryDrainerService(
+      h.logger,
+      store,
+      adapter,
+      null,
+      null,
+    );
+    const notifier = new LaneCompletionNotifier(
+      h.logger,
+      { exists: h.exists, stat: h.stat } as never,
+      adapter,
+      () => null,
+      drainer,
+    );
+    const pending = await notifier.signal(
+      createInfo({ parentSessionId: 'tab-1' }),
+    );
+    expect(pending).toMatchObject({
+      delivered: false,
+      recorded: true,
+      pending: true,
+    });
     expect(h.sendMessageToSession).not.toHaveBeenCalled();
     await drainer.resolveParentSessionId('tab-1', PARENT);
     expect(store.find(`agent-abc:${COMPLETED_AT}`)?.state).toBe('delivered');
@@ -238,43 +345,66 @@ describe('LaneCompletionNotifier.signal', () => {
 
   it('treats a progress report followed by usage-limit as failed', async () => {
     const h = createHarness();
-    const result = await h.notifier.signal(createInfo({ stopReason: 'usage-limit' }),
-      { reportsDelivered: 1 });
+    const result = await h.notifier.signal(
+      createInfo({ stopReason: 'usage-limit' }),
+      { reportsDelivered: 1 },
+    );
     expect(result.signal?.verdict).toBe('failed');
   });
   it('keeps a usage-limit stop failed despite a report completion flag', async () => {
     const h = createHarness();
-    const result = await h.notifier.signal(createInfo({ stopReason: 'usage-limit' }),
-      { reportsDelivered: 1, reportClaimsCompletion: true });
+    const result = await h.notifier.signal(
+      createInfo({ stopReason: 'usage-limit' }),
+      { reportsDelivered: 1, reportClaimsCompletion: true },
+    );
     expect(result.signal?.verdict).toBe('failed');
   });
   it('marks a usage-limit stop failed despite a fresh skeleton deliverable', async () => {
     const h = createHarness({ files: { '/ws/report.md': 10 } });
-    const result = await h.notifier.signal(createInfo({
-      deliverables: ['report.md'],
-      stopReason: 'usage-limit',
-      stopResetAt: Date.parse('2026-09-21T12:00:00.000Z'),
-    }));
+    const result = await h.notifier.signal(
+      createInfo({
+        deliverables: ['report.md'],
+        stopReason: 'usage-limit',
+        stopResetAt: Date.parse('2026-09-21T12:00:00.000Z'),
+      }),
+    );
     expect(result.signal?.verdict).toBe('failed');
     expect(h.envelope()).toContain('stop-reason="usage-limit"');
     expect(h.envelope()).toContain('reset-at="2026-09-21T12:00:00.000Z"');
   });
   it('omits an invalid usage-limit reset time while delivering completion', async () => {
     const h = createHarness();
-    await expect(h.notifier.signal(createInfo({ stopReason: 'usage-limit', stopResetAt: NaN })))
-      .resolves.toMatchObject({ delivered: true });
+    await expect(
+      h.notifier.signal(
+        createInfo({ stopReason: 'usage-limit', stopResetAt: NaN }),
+      ),
+    ).resolves.toMatchObject({ delivered: true });
     expect(h.envelope()).toContain('stop-reason="usage-limit"');
     expect(h.envelope()).not.toContain('reset-at=');
   });
   it('records orphan lane usage with its workspace and execution host', () => {
     const recordUsage = jest.fn();
     const sink: SessionUsageSink = { recordUsage };
-    recordLaneUsageOutcome(sink, createLogger(), createInfo({ workingDirectory: 'C:/Workspace/Root', cliSessionId: 'native-thread', providerId: 'codex' }), COMPLETED_AT,
-      { inputTokens: 8, outputTokens: 2 });
-    expect(recordUsage).toHaveBeenCalledWith(expect.objectContaining({
-      sessionId: 'native-thread', producer: 'cli-lane', providerId: 'codex',
-      workspaceKey: 'c:/workspace/root', host: 'cli',
-    }));
+    recordLaneUsageOutcome(
+      sink,
+      createLogger(),
+      createInfo({
+        workingDirectory: 'C:/Workspace/Root',
+        cliSessionId: 'native-thread',
+        providerId: 'codex',
+      }),
+      COMPLETED_AT,
+      { inputTokens: 8, outputTokens: 2 },
+    );
+    expect(recordUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'native-thread',
+        producer: 'cli-lane',
+        providerId: 'codex',
+        workspaceKey: 'c:/workspace/root',
+        host: 'cli',
+      }),
+    );
   });
   it('writes provider usage to the lane outcome without estimating cost', async () => {
     const h = createHarness();
@@ -401,10 +531,13 @@ describe('LaneCompletionNotifier.signal', () => {
     it('forwards a held budget warning into the parent completion envelope', async () => {
       const h = createHarness();
       const result = await h.notifier.signal(createInfo(), {
-        reportsDelivered: 0, heldBudgetWarning: true,
+        reportsDelivered: 0,
+        heldBudgetWarning: true,
       });
       expect(result.signal?.heldBudgetWarning).toBe(true);
-      expect(h.envelope()).toContain('Budget warning: this lane passed its warning threshold');
+      expect(h.envelope()).toContain(
+        'Budget warning: this lane passed its warning threshold',
+      );
     });
 
     it('delivers one turn to the parent session with the peer origin', async () => {
@@ -570,20 +703,29 @@ describe('LaneCompletionNotifier.signal', () => {
     });
 
     it('uses the first nonempty current deliverable as a budget progress pointer', async () => {
-      const h = createHarness({ files: { '/tf/empty.md': 0, '/tf/progress.md': 12 } });
-      const result = await h.notifier.signal(createInfo({
-        stopReason: 'budget', deliverables: ['/tf/empty.md', '/tf/progress.md'],
-      }));
+      const h = createHarness({
+        files: { '/tf/empty.md': 0, '/tf/progress.md': 12 },
+      });
+      const result = await h.notifier.signal(
+        createInfo({
+          stopReason: 'budget',
+          deliverables: ['/tf/empty.md', '/tf/progress.md'],
+        }),
+      );
       expect(result.signal?.progressPointer).toBe(p('/tf/progress.md'));
     });
 
     it('does not point to a stale deliverable after a budget stop', async () => {
       const h = createHarness({
-        files: { '/tf/old.md': 12 }, mtime: Date.parse(STARTED_AT) - 1,
+        files: { '/tf/old.md': 12 },
+        mtime: Date.parse(STARTED_AT) - 1,
       });
-      const result = await h.notifier.signal(createInfo({
-        stopReason: 'budget', deliverables: ['/tf/old.md'],
-      }));
+      const result = await h.notifier.signal(
+        createInfo({
+          stopReason: 'budget',
+          deliverables: ['/tf/old.md'],
+        }),
+      );
       expect(result.signal?.progressPointer).toContain('last completed turn');
     });
 
@@ -981,12 +1123,31 @@ describe('LaneCompletionNotifier.signalSessionChild', () => {
     it('reports a handoff as unverified and names the successor', async () => {
       const h = createHarness();
       const result = await h.notifier.signalSessionChild(
-        subject({ succeededBy: 'successor-tab' }), settle({ status: 'handed-off' }),
+        subject({ succeededBy: 'successor-tab' }),
+        settle({ status: 'handed-off' }),
       );
       expect(result.delivered).toBe(true);
       if (!result.delivered) return;
       expect(result.envelope.verdict).toBe('unverified');
       expect(result.envelope.text).toContain('successor-tab');
+    });
+    it('tells the parent which held messages were not delivered to the successor', async () => {
+      const h = createHarness();
+      const result = await h.notifier.signalSessionChild(
+        subject({
+          succeededBy: 'successor-tab',
+          undeliveredHeldMessages: [
+            { index: 2, preview: 'fix the lint [1 file(s)]' },
+          ],
+        }),
+        settle({ status: 'handed-off' }),
+      );
+      expect(result.delivered).toBe(true);
+      if (!result.delivered) return;
+      expect(result.envelope.text).toContain(
+        'Not delivered: 1 held message(s)',
+      );
+      expect(result.envelope.text).toContain('#2 "fix the lint [1 file(s)]"');
     });
     it('reports no-deliverable for a file older than startedAt (a checkout file), while a lane calls it delivered', async () => {
       const before = Date.parse(CHILD_STARTED) - 1;

@@ -1,0 +1,135 @@
+/* Ptah badge family look (TASK_2026_957_fda3, family-3-look.md).
+   Scope: only [data-ptah-badge] (ptahBadge directive) and [data-ptah-status]
+   (ptah-status). A raw DaisyUI .badge keeps its current look until it moves
+   to the owner. Uses --ptah-* tokens only. */
+
+[data-ptah-badge],
+ptah-status[data-appearance='pill'] {
+  --_ink: var(--ptah-badge-neutral-ink);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ptah-gap-label);
+  height: var(--ptah-badge-h-sm);
+  max-width: 100%;
+  padding-inline: var(--ptah-badge-px);
+  border: var(--ptah-border-width) solid transparent;
+  border-radius: var(--ptah-radius-chip);
+  background-color: color-mix(in oklch, var(--_ink) var(--ptah-badge-fill-mix), transparent);
+  color: var(--_ink);
+  font-size: var(--ptah-text-caption-size);
+  line-height: var(--ptah-text-caption-leading);
+  font-weight: var(--ptah-text-caption-weight);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+/* Direct text in an inline-flex box cannot show an ellipsis. Put text that can
+   overflow in a .ptah-badge-text child. */
+[data-ptah-badge] > .ptah-badge-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-ptah-badge][data-size='xs'],
+ptah-status[data-appearance='pill'][data-size='xs'] {
+  height: var(--ptah-badge-h-xs);
+  padding-inline: var(--ptah-badge-px-xs);
+}
+
+[data-ptah-badge][data-appearance='outline'] {
+  background-color: transparent;
+  border-color: color-mix(in oklch, var(--_ink) var(--ptah-badge-edge-mix), transparent);
+}
+
+[data-ptah-badge][data-count] {
+  justify-content: center;
+  min-width: var(--ptah-badge-h-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+[data-ptah-badge][data-count][data-size='xs'] {
+  min-width: var(--ptah-badge-h-xs);
+}
+
+/* Tones */
+[data-ptah-badge][data-tone='accent'] { --_ink: var(--ptah-badge-accent-ink); }
+[data-ptah-badge][data-tone='info'] { --_ink: var(--ptah-state-info); }
+[data-ptah-badge][data-tone='ok'] { --_ink: var(--ptah-state-ok); }
+[data-ptah-badge][data-tone='warn'] { --_ink: var(--ptah-state-warn); }
+[data-ptah-badge][data-tone='err'] { --_ink: var(--ptah-state-err); }
+
+/* Status: glyph plus word. The pill takes the neutral fill. The word keeps
+   the neutral ink. Only the glyph takes the state ink. */
+ptah-status[data-ptah-status] {
+  --_state: var(--ptah-badge-neutral-ink);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ptah-gap-label);
+  max-width: 100%;
+  vertical-align: middle;
+}
+
+ptah-status[data-appearance='inline'] {
+  color: var(--ptah-badge-neutral-ink);
+  font-size: var(--ptah-text-caption-size);
+  line-height: var(--ptah-text-caption-leading);
+  font-weight: var(--ptah-text-caption-weight);
+}
+
+ptah-status[data-ink='run'] { --_state: var(--ptah-state-info); }
+ptah-status[data-ink='idle'] { --_state: var(--ptah-badge-neutral-ink); }
+ptah-status[data-ink='need'] { --_state: var(--ptah-state-warn); }
+ptah-status[data-ink='err'] { --_state: var(--ptah-state-err); }
+ptah-status[data-ink='done'] { --_state: var(--ptah-state-ok); }
+
+ptah-status .ptah-status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+ptah-status .ptah-status-glyph {
+  flex: none;
+  box-sizing: border-box;
+  width: var(--ptah-status-glyph);
+  height: var(--ptah-status-glyph);
+  border-radius: 50%;
+  background-color: var(--_state);
+}
+
+/* run: a ring with a center point and a pulse. idle: a hollow circle. need: a diamond.
+   err: a square. done: a filled circle. */
+ptah-status[data-ink='run'] .ptah-status-glyph,
+ptah-status[data-ink='idle'] .ptah-status-glyph {
+  background-color: transparent;
+  border: var(--ptah-status-ring) solid var(--_state);
+}
+
+/* run: a center point inside the ring, so run and idle differ without motion. */
+ptah-status[data-ink='run'] .ptah-status-glyph {
+  background-image: radial-gradient(circle, var(--_state) 0 35%, transparent 40%);
+  animation: ptah-status-pulse var(--ptah-status-pulse-duration) var(--ptah-ease-standard) infinite;
+}
+
+ptah-status[data-ink='need'] .ptah-status-glyph {
+  border-radius: 0;
+  transform: rotate(45deg) scale(0.85);
+}
+
+ptah-status[data-ink='err'] .ptah-status-glyph {
+  border-radius: var(--ptah-status-square-radius);
+}
+
+@keyframes ptah-status-pulse {
+  50% { opacity: 0.45; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ptah-status[data-ink='run'] .ptah-status-glyph {
+    animation: none;
+  }
+}

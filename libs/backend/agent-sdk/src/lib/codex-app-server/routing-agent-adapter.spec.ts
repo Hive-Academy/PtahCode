@@ -27,6 +27,7 @@ function adapter(): jest.Mocked<NativeChatAdapter> {
       },
     },
     owns: jest.fn().mockReturnValue(false),
+    claimHeldPeerMessages: jest.fn().mockReturnValue([]),
     initialize: jest.fn(),
     dispose: jest.fn(),
     preloadSdk: jest.fn(),

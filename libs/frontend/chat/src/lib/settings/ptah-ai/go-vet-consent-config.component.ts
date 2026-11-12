@@ -26,6 +26,7 @@ import type {
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import {
   PtahButtonDirective,
+  PtahToggleDirective,
 } from '@ptah-extension/ui';
 
 /** Why a stored consent no longer holds (User Decision 25), in the user's words. */
@@ -75,7 +76,7 @@ const LOAD_ERROR = 'Could not read the go vet setting for this workspace.';
 @Component({
   selector: 'ptah-go-vet-consent-config',
   standalone: true,
-  imports: [LucideAngularModule, PtahButtonDirective],
+  imports: [LucideAngularModule, PtahButtonDirective, PtahToggleDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block', '[class.mt-4]': 'visible()' },
   template: `
@@ -185,8 +186,8 @@ const LOAD_ERROR = 'Could not read the go vet setting for this workspace.';
                           #toggle
                           id="go-vet-consent-toggle"
                           type="checkbox"
-                          role="switch"
-                          class="toggle toggle-sm toggle-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                          ptahToggle
+                          size="sm"
                           [checked]="toggleChecked()"
                           [attr.aria-checked]="toggleChecked()"
                           [disabled]="toggleDisabled()"

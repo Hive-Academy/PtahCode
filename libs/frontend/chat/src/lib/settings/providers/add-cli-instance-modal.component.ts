@@ -19,6 +19,9 @@ import {
 import {
   NativeModalComponent,
   PtahButtonDirective,
+  PtahFieldComponent,
+  PtahInputDirective,
+  PtahSelectDirective,
   PtahIconButtonDirective,
   ProviderMarkComponent,
 } from '@ptah-extension/ui';
@@ -49,7 +52,6 @@ const MODALITY: Readonly<Record<string, string>> = {
 };
 const FOCUS =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
-const FIELD = `input input-bordered input-sm w-full text-xs text-base-content ${FOCUS}`;
 const SAVE_SCOPE = 'global';
 /** Gate V 36 M4: a stored key is not a checked key (the matrix then runs the new instance's Test). */
 const KEY_NOT_VERIFIED = 'Key stored, not verified.';
@@ -88,6 +90,9 @@ type KeyMode = 'required' | 'optional' | 'none' | 'sign-in';
     PtahButtonDirective,
     PtahIconButtonDirective,
     ProviderMarkComponent,
+    PtahFieldComponent,
+    PtahInputDirective,
+    PtahSelectDirective,
     SettingsToastComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -132,16 +137,12 @@ type KeyMode = 'required' | 'optional' | 'none' | 'sign-in';
         (submit)="$event.preventDefault(); submit()"
         data-testid="add-cli-instance-form"
       >
-        <div class="space-y-1">
-          <label
-            for="add-cli-instance-name"
-            class="block font-semibold text-base-content"
-            >Instance name</label
-          >
+        <ptah-field label="Instance name" [error]="duplicateName() ? duplicateMessage : null">
           <input
+            ptahInput
             id="add-cli-instance-name"
             type="text"
-            [class]="field"
+            class="w-full text-xs text-base-content"
             [value]="name()"
             (input)="name.set(value($event))"
             placeholder="e.g. Glm-Secondary, Llama-Local"
@@ -153,17 +154,10 @@ type KeyMode = 'required' | 'optional' | 'none' | 'sign-in';
               duplicateName() ? 'add-cli-instance-name-error' : null
             "
           />
+        </ptah-field>
           @if (duplicateName()) {
-            <p
-              id="add-cli-instance-name-error"
-              role="alert"
-              class="text-base-content"
-              data-testid="add-cli-instance-name-error"
-            >
-              {{ duplicateMessage }}
-            </p>
+            <p id="add-cli-instance-name-error" role="alert" class="text-base-content" data-testid="add-cli-instance-name-error">{{ duplicateMessage }}</p>
           }
-        </div>
 
         <div class="space-y-1">
           <span
@@ -192,10 +186,9 @@ type KeyMode = 'required' | 'optional' | 'none' | 'sign-in';
                 />
               }
               <select
-                [class]="
-                  'select select-bordered select-sm min-w-0 flex-1 text-xs text-base-content ' +
-                  focusRing
-                "
+                ptahSelect
+                size="sm"
+                class="min-w-0 flex-1 text-xs text-base-content"
                 aria-labelledby="add-cli-instance-provider-label"
                 (change)="selectProvider(value($event))"
                 data-testid="add-cli-instance-provider"
@@ -290,26 +283,22 @@ type KeyMode = 'required' | 'optional' | 'none' | 'sign-in';
           </fieldset>
         }
         @if (showKey()) {
-          <div class="space-y-1">
-            <label
-              for="add-cli-instance-key"
-              class="block font-semibold text-base-content"
-              >{{ keyLabel() }}</label
-            >
-            <div class="relative">
+          <ptah-field [label]="keyLabel()">
               <input
+                ptahInput
+                size="md"
                 id="add-cli-instance-key"
                 [type]="keyVisible() ? 'text' : 'password'"
                 autocomplete="new-password"
                 spellcheck="false"
-                [class]="field + ' pr-9 font-mono'"
+                class="w-full pr-9 font-mono"
                 [value]="key()"
                 (input)="key.set(value($event))"
                 placeholder="sk-…"
                 aria-describedby="add-cli-instance-key-help"
                 data-testid="add-cli-instance-key"
               />
-              <span class="absolute inset-y-0 right-0 flex items-center">
+              <span ptahFieldTrailing class="flex items-center">
                 <button
                   type="button"
                   ptahIconButton
@@ -325,8 +314,7 @@ type KeyMode = 'required' | 'optional' | 'none' | 'sign-in';
                   />
                 </button>
               </span>
-            </div>
-          </div>
+          </ptah-field>
         }
         @if (keyHint(); as hint) {
           <p
@@ -384,7 +372,6 @@ export class AddCliInstanceModalComponent {
   protected readonly EyeIcon = Eye;
   protected readonly EyeOffIcon = EyeOff;
   protected readonly focusRing = FOCUS;
-  protected readonly field = FIELD;
   protected readonly duplicateMessage = DUPLICATE_NAME;
   protected readonly state = inject(ProvidersSettingsStateService);
   private readonly feedback = inject(SettingsSaveFeedbackService);

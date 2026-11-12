@@ -60,11 +60,12 @@
     <form role="dialog" aria-modal="true" aria-label="Rename session"
       class="w-full max-w-sm rounded-box border border-surface-border bg-base-100 p-4 shadow-xl"
       (submit)="$event.preventDefault(); saveRename()" (keydown)="onRenameKeydown($event)">
-      <label for="inspector-session-name" class="mb-2 block text-sm font-medium">Session name</label>
-      <input #renameField id="inspector-session-name" type="text" class="input input-bordered w-full"
-        [value]="renameDraft()" [attr.aria-invalid]="!!renameError()"
-        [attr.aria-describedby]="renameError() ? 'inspector-rename-error' : null"
-        (input)="renameDraft.set(renameField.value)" />
+      <ptah-field label="Session name" [error]="renameError() || null">
+        <input #renameField ptahInput id="inspector-session-name" type="text" class="w-full"
+          [value]="renameDraft()" [attr.aria-invalid]="!!renameError()"
+          [attr.aria-describedby]="renameError() ? 'inspector-rename-error' : null"
+          (input)="renameDraft.set(renameField.value)" />
+      </ptah-field>
       @if (renameError()) {
         <p id="inspector-rename-error" class="mt-2 text-sm text-state-err" role="alert">{{ renameError() }}</p>
       }

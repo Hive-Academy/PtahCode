@@ -15,7 +15,12 @@ const CSS = readFileSync(join(__dirname, 'ptah-tokens.css'), 'utf8');
  * The token file itself is the one place for raw values. Each component
  * family adds its folder here.
  */
-const TOKEN_ONLY_DIRS: readonly string[] = ['tokens', 'button', 'form-controls'];
+const TOKEN_ONLY_DIRS: readonly string[] = [
+  'tokens',
+  'button',
+  'form-controls',
+  'badge',
+];
 
 const SPACE_STEPS = ['1', '2', '3', '4', '6', '8', '12'] as const;
 const TEXT_ROLES = [
@@ -102,6 +107,16 @@ const TOKEN_NAMES: readonly string[] = [
     'state-warn',
     'state-err',
     'state-info',
+    'badge-h-xs',
+    'badge-h-sm',
+    'badge-px-xs',
+    'badge-px',
+    'badge-fill-mix',
+    'badge-edge-mix',
+    'badge-neutral-ink',
+    'badge-accent-ink',
+    'status-glyph',
+    'status-ring',
     'z-raised',
     'z-menu',
     'z-dialog',

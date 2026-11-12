@@ -13,6 +13,7 @@ import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.
 import {
   SettingsFieldComponent,
   PtahButtonDirective,
+  PtahInputDirective,
 } from '@ptah-extension/ui';
 import {
   LANE_GUARD_DEFAULTS,
@@ -25,8 +26,6 @@ import {
   type LaneGuardValues,
 } from './lane-guards-settings.logic';
 
-const FOCUS =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
 const RPC_TIMEOUT_MS = 5_000;
 
 const EMPTY_DRAFTS: Record<LaneGuardKey, string> = {
@@ -50,7 +49,12 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
 @Component({
   selector: 'ptah-lane-guards-settings',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, SettingsFieldComponent, PtahButtonDirective],
+  imports: [
+    SettingsBusyDisabledDirective,
+    SettingsFieldComponent,
+    PtahButtonDirective,
+    PtahInputDirective,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -116,15 +120,11 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
                     type="text"
                     inputmode="numeric"
                     [id]="field.testId"
-                    [class]="
-                      'input input-bordered input-sm join-item min-w-0 flex-1 text-right text-sm tabular-nums text-base-content ' +
-                      (fieldMessage(field.key) ? 'input-error ' : '') +
-                      focusRing
-                    "
+                    ptahInput
+                    size="sm"
+                    class="join-item min-w-0 flex-1 text-right text-sm tabular-nums text-base-content"
+                    [invalid]="!!fieldMessage(field.key)"
                     [value]="drafts()[field.key]"
-                    [attr.aria-invalid]="
-                      fieldMessage(field.key) ? 'true' : null
-                    "
                     [attr.aria-describedby]="describedBy(field)"
                     [ptahBusyDisabled]="busy() || feedback.saving()"
                     (input)="edit(field.key, $event)"
@@ -156,7 +156,6 @@ export class LaneGuardsSettingsComponent implements OnInit {
   private readonly logger = inject(LoggingService);
   protected readonly feedback = inject(SettingsSaveFeedbackService);
 
-  protected readonly focusRing = FOCUS;
   protected readonly fields = LANE_GUARD_FIELDS;
 
   protected readonly load = signal<'loading' | 'error' | 'ready'>('loading');

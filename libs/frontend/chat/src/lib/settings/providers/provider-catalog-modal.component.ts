@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, effect, input, output, signal, untracked } from '@angular/core';
 import { LucideAngularModule, Search, Waypoints } from 'lucide-angular';
 import type { ProvidersConnection } from '@ptah-extension/core';
-import { NativeModalComponent, PtahButtonDirective } from '@ptah-extension/ui';
+import { NativeModalComponent, PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
 import { getAnthropicProvider } from '@ptah-extension/shared';
 import { connectionAvatarTone, connectionInitials } from './provider-connection-card.state';
 
@@ -23,7 +23,7 @@ const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outli
 @Component({
   selector: 'ptah-provider-catalog-modal',
   standalone: true,
-  imports: [LucideAngularModule, NativeModalComponent, PtahButtonDirective],
+  imports: [LucideAngularModule, NativeModalComponent, PtahButtonDirective, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <ptah-native-modal [isOpen]="open()" ariaLabelledby="provider-catalog-title" size="md" (closed)="closed.emit()">
@@ -31,7 +31,7 @@ const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outli
         <h2 id="provider-catalog-title" class="sr-only">Connect a provider</h2>
         <lucide-angular [img]="SearchIcon" class="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
         <!-- First focusable control in the dialog: showModal() focuses it (asserted in Gate G RUX-3). -->
-        <input type="search" [class]="'input input-sm flex-1 border-none bg-transparent text-sm text-base-content ' + focusRing"
+        <input ptahInput size="sm" type="search" [class]="'flex-1 text-sm text-base-content ' + focusRing"
           [placeholder]="'Type provider name (' + providers().length + ' in catalog)…'" aria-label="Search providers"
           [value]="query()" (input)="query.set(value($event))" data-testid="provider-catalog-search" />
         <kbd class="kbd kbd-xs" aria-hidden="true">ESC</kbd>

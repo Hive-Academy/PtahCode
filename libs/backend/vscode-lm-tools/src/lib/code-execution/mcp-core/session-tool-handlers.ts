@@ -274,6 +274,15 @@ function formatChild(child: SessionChildSnapshot): string {
   if (isFinishedChild(child)) {
     lines.push(`  outcome: ${formatOutcome(outcomeOf(child))}`);
   }
+  if (child.undeliveredHeldMessages?.length) {
+    lines.push(
+      `  not delivered: ${child.undeliveredHeldMessages.length} held message(s) lost in the handoff: ` +
+        child.undeliveredHeldMessages
+          .map((m) => `#${m.index} "${m.preview}"`)
+          .join('; ') +
+        '. Send them again.',
+    );
+  }
   if (child.taskId) lines.push(`  task ${child.taskId}`);
   if (child.taskFolder) lines.push(`  task folder ${child.taskFolder}`);
   if (child.deliverables.length > 0) {

@@ -61,6 +61,16 @@ describe('preload import surface', () => {
 });
 
 describe('preload startup config narrowing', () => {
+  it('exposes isDevInstance only when the reply says true', () => {
+    expect(loadPreloadWith({ isDevInstance: true })['isDevInstance']).toBe(
+      true,
+    );
+    expect(loadPreloadWith({})['isDevInstance']).toBe(false);
+    expect(loadPreloadWith({ isDevInstance: 'yes' })['isDevInstance']).toBe(
+      false,
+    );
+  });
+
   it('passes a well-formed reply through', () => {
     const config = loadPreloadWith({
       initialView: 'settings',

@@ -28,6 +28,8 @@ export interface WebviewConfig {
   gpuCompositing?: 'hardware' | 'software' | 'disabled';
   /** Temporary bootstrap-only rollback switch for the zoneless webview. */
   zoneChangeDetectionFallback?: boolean;
+  /** Electron dev instance only (unpackaged, NODE_ENV=development). */
+  isDevInstance?: boolean;
 }
 
 /**

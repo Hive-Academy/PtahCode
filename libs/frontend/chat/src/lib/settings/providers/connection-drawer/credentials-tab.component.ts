@@ -25,7 +25,7 @@ import { KEY_UNREADABLE_TEXT } from '../provider-connection-card.state';
 import { SettingsBusyDisabledDirective } from '../../feedback/busy-disabled.directive';
 import { SettingsSaveFeedbackService } from '../../feedback/settings-save-feedback.service';
 import { commitToast } from '../../feedback/settings-commit-toast';
-import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahIconButtonDirective, PtahFieldComponent, PtahInputDirective } from '@ptah-extension/ui';
 
 export type VerifyDraftFn = (params: AuthVerifyDraftConnectionParams) => Promise<AuthVerifyDraftConnectionResult>;
 export type CancelDraftFn = (params: AuthCancelDraftVerificationParams) => Promise<AuthCancelDraftVerificationResult>;
@@ -126,7 +126,7 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
   selector: 'ptah-connection-credentials-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NgTemplateOutlet, KimiCodeLoginProgressComponent, CodexSignInBlockComponent, CodexAgentBehaviorComponent, PtahButtonDirective, PtahIconButtonDirective],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NgTemplateOutlet, KimiCodeLoginProgressComponent, CodexSignInBlockComponent, CodexAgentBehaviorComponent, PtahButtonDirective, PtahIconButtonDirective, PtahFieldComponent, PtahInputDirective],
   template: `
     <div class="space-y-4 text-sm" data-testid="connection-credentials">
       @switch (view()) {
@@ -339,11 +339,12 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
 
         @if (replacing()) {
           <div class="space-y-2 rounded border border-base-300 p-3" data-testid="credentials-replace-form">
-            <label for="credentials-new-key" class="block text-xs font-semibold text-base-content">New API key</label>
             <div class="relative">
-              <input id="credentials-new-key" [type]="keyVisible() ? 'text' : 'password'" autocomplete="off" spellcheck="false"
-                class="input input-bordered input-sm w-full pr-9 font-mono text-xs" [value]="keyDraft()" (input)="onKeyInput($event)"
-                [attr.placeholder]="keyPlaceholder()" data-testid="credentials-new-key" />
+              <ptah-field label="New API key">
+                <input ptahInput id="credentials-new-key" [type]="keyVisible() ? 'text' : 'password'" autocomplete="off" spellcheck="false"
+                  class="w-full pr-9 font-mono text-xs" tone="mono" [value]="keyDraft()" (input)="onKeyInput($event)"
+                  [attr.placeholder]="keyPlaceholder()" data-testid="credentials-new-key" />
+              </ptah-field>
               <span class="absolute right-1 top-1"><button type="button" ptahIconButton [label]="keyVisible() ? 'Hide API key' : 'Show API key'" size="xs" (click)="keyVisible.set(!keyVisible())" [attr.aria-pressed]="keyVisible()"
                 data-testid="credentials-toggle-visibility">
                 <lucide-angular [img]="keyVisible() ? EyeOffIcon : EyeIcon" class="h-3.5 w-3.5" aria-hidden="true" />

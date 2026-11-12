@@ -24,6 +24,7 @@ import {
   ISdkPermissionHandler,
   InlineImageAttachment,
   type AIMessageOptions,
+  type HeldPeerMessage,
   type QueuedFollowUpSnapshot,
   type QueuedFollowUpStateChange,
   type SteerQueuedFollowUpResult,
@@ -756,7 +757,10 @@ export class SessionLifecycleManager {
    * This method is the ONLY reliable way to detect interrupted subagents. All running
    * subagents for this session are marked as 'interrupted' to enable resumption.
    */
-  async endSession(sessionId: SessionId, cause: SessionEndCause = 'unknown'): Promise<void> {
+  async endSession(
+    sessionId: SessionId,
+    cause: SessionEndCause = 'unknown',
+  ): Promise<void> {
     await this._control.endSession(sessionId, cause);
   }
 
@@ -825,7 +829,10 @@ export class SessionLifecycleManager {
   }
 
   /** End only the sessions of one workspace; other workspaces keep running. */
-  async disposeSessionsForWorkspace(workspacePath: string, cause: SessionEndCause = 'unknown'): Promise<void> {
+  async disposeSessionsForWorkspace(
+    workspacePath: string,
+    cause: SessionEndCause = 'unknown',
+  ): Promise<void> {
     return this._control.disposeSessionsForWorkspace(workspacePath, cause);
   }
 
@@ -869,6 +876,10 @@ export class SessionLifecycleManager {
    *   turn) and its admission rule (absent means a mid-turn message is held).
    *   Forwarded verbatim; see `SessionStreamPump.sendMessage`.
    */
+  claimHeldPeerMessages(sessionId: SessionId): readonly HeldPeerMessage[] {
+    return this._streamPump.claimHeldPeerMessages(sessionId);
+  }
+
   async sendMessage(
     sessionId: SessionId,
     content: string,

@@ -37,6 +37,8 @@ import { focusRailSelectButton, handleCanvasRailKeydown } from './canvas-rail-ke
 import { CanvasRailFlip } from './canvas-rail-flip';
 import {
   groupRailTiles,
+  railGroupFor,
+  type RailGroupKey,
   neighbouringVisibleId,
   sameTileOrder,
   sortRailTiles,
@@ -262,22 +264,22 @@ const CHIP_STATES = [
           @for (group of grouped().groups; track group.key; let firstGroup = $first) {
             <section [attr.aria-label]="group.label" [attr.data-rail-group]="group.key" [class.mt-2]="!firstGroup">
               @if (!collapsed()) {
-                @if (group.key === 'finished') {
-                  <button type="button" class="flex min-h-7 w-full items-center gap-1 px-2 text-left text-xs font-semibold"
-                    [attr.aria-expanded]="isFinishedExpanded()" aria-controls="rail-finished-cards"
-                    (click)="toggleFinished()">
-                    <span aria-hidden="true">{{ isFinishedExpanded() ? '⌄' : '›' }}</span>
-                    <span class="min-w-0 flex-1">{{ group.label }}</span>
-                    <span class="text-base-content-muted">{{ group.tiles.length }}</span>
-                  </button>
-                } @else {
-                  <h2 class="flex min-h-7 items-center gap-1 px-2 text-xs font-semibold">
-                    <span class="min-w-0 flex-1">{{ group.label }}</span>
-                    <span class="text-base-content-muted">{{ group.tiles.length }}</span>
-                  </h2>
-                }
+                <h2 class="m-0 text-xs font-semibold">
+                <button type="button" class="flex min-h-7 w-full items-center gap-1 px-2 text-left text-xs font-semibold"
+                  [attr.data-rail-group-toggle]="group.key"
+                  [attr.aria-expanded]="isGroupExpanded(group.key)" [attr.aria-controls]="'rail-' + group.key + '-cards'"
+                  (click)="toggleGroup(group.key)">
+                  <span aria-hidden="true">{{ isGroupExpanded(group.key) ? '⌄' : '›' }}</span>
+                  <span class="min-w-0 flex-1">{{ group.label }}</span>
+                  @if (!isGroupExpanded(group.key) && groupAttention(group) > 0) {
+                    <span class="shrink-0 text-state-need" data-testid="rail-group-attention"
+                      [attr.title]="groupAttention(group) + ' need input'"><span aria-hidden="true">● {{ groupAttention(group) }}</span><span class="sr-only">, {{ groupAttention(group) }} need input</span></span>
+                  }
+                  <span class="text-base-content-muted">{{ group.tiles.length }}</span>
+                </button>
+                </h2>
               }
-                <ul role="list" class="flex flex-col gap-1.5 px-2 pb-2" [style.display]="group.key === 'finished' && !collapsed() && !isFinishedExpanded() ? 'none' : null" [id]="group.key === 'finished' ? 'rail-finished-cards' : null">
+                <ul role="list" class="flex flex-col gap-1.5 px-2 pb-2" [style.display]="!collapsed() && !isGroupExpanded(group.key) ? 'none' : null" [id]="'rail-' + group.key + '-cards'">
                   @for (tile of group.tiles; track tile.tabId; let first = $first, last = $last) {
                     <li ptah-canvas-rail-card [tabId]="tile.tabId" [density]="density()"
                       [collapsed]="collapsed()" [focused]="focusedTabId() === tile.tabId"
@@ -532,7 +534,7 @@ export class CanvasRailComponent {
    * layout keeps the same string, so running slides are not restarted.
    */
   private readonly railLayout = computed(() =>
-    `${this.isFinishedExpanded()}|` +
+    `${JSON.stringify(this.groupChoice())}|${this.grouped().counts.done <= 3}|` +
     this.grouped().groups.map((group) => `${group.key}:${group.tiles.map((tile) => tile.tabId).join(',')}`).join(';'));
   private flip: CanvasRailFlip | null = null;
   private flipReady = false;
@@ -564,13 +566,15 @@ export class CanvasRailComponent {
       },
     }, { injector: this.injector });
   });
-  readonly finishedExpanded = signal(false);
-  readonly finishedChoiceMade = signal(false);
+  /** Explicit open (true) or closed (false) choice per group; in memory only. */
+  readonly groupChoice = signal<Partial<Record<RailGroupKey, boolean>>>({});
   readonly keyboardFocusTabId = signal<string | null>(null);
-  readonly isFinishedExpanded = computed(() => this.finishedChoiceMade()
-    ? this.finishedExpanded() : (this.grouped().counts.done <= 3));
+  /** Finished opens when it holds at most 3 cards; every other group opens. */
+  isGroupExpanded(key: RailGroupKey): boolean {
+    return this.groupChoice()[key] ?? (key === 'finished' ? this.grouped().counts.done <= 3 : true);
+  }
   readonly visibleIds = computed(() => this.grouped().groups.flatMap(group =>
-    group.key === 'finished' && !this.collapsed() && !this.isFinishedExpanded()
+    !this.collapsed() && !this.isGroupExpanded(group.key)
       ? [] : group.tiles.map(tile => tile.tabId)));
   private previousFocusedId: string | null = null;
   private previousVisibleIds: readonly string[] = [];
@@ -583,10 +587,7 @@ export class CanvasRailComponent {
     if (selected !== this.previousFocusedId) {
       this.previousFocusedId = selected;
       if (selected && this.grouped().displayedIds.includes(selected)) {
-        if (this.states().get(selected) === 'done' && !this.collapsed()) {
-          this.finishedExpanded.set(true);
-          this.finishedChoiceMade.set(true);
-        }
+        if (!this.collapsed()) this.expandGroup(railGroupFor(this.states().get(selected)));
         this.keyboardFocusTabId.set(selected);
         return;
       }
@@ -597,10 +598,10 @@ export class CanvasRailComponent {
       if (current && this.document.activeElement instanceof HTMLElement &&
         this.host.nativeElement.contains(this.document.activeElement)) {
         afterNextRender(() => {
-          if (this.states().get(current) === 'done' && !this.collapsed() && !this.isFinishedExpanded())
-            this.host.nativeElement.querySelector<HTMLElement>('[aria-controls="rail-finished-cards"]')?.focus();
+          const key = railGroupFor(this.states().get(current));
+          if (!this.collapsed() && !this.isGroupExpanded(key)) this.focusGroupToggle(key);
           else if (next) this.focusCardButton(next);
-          else this.host.nativeElement.querySelector<HTMLElement>('[aria-controls="rail-finished-cards"]')?.focus();
+          else this.focusGroupToggle(key);
         }, { injector: this.injector });
       }
     }
@@ -628,15 +629,25 @@ export class CanvasRailComponent {
   count(state: CompactRailState): number {
     return this.grouped().counts[state];
   }
-  toggleFinished(): void {
-    this.finishedExpanded.set(!this.isFinishedExpanded());
-    this.finishedChoiceMade.set(true);
+  toggleGroup(key: RailGroupKey): void {
+    this.groupChoice.update(choice => ({ ...choice, [key]: !this.isGroupExpanded(key) }));
+  }
+  private expandGroup(key: RailGroupKey): void {
+    if (!this.isGroupExpanded(key)) this.groupChoice.update(choice => ({ ...choice, [key]: true }));
+  }
+  private focusGroupToggle(key: RailGroupKey): void {
+    const host = this.host.nativeElement;
+    (
+      host.querySelector<HTMLElement>(`[data-rail-group-toggle="${key}"]`) ??
+      host.querySelector<HTMLElement>('[data-rail-group-toggle]')
+    )?.focus();
+  }
+  /** Tiles of a group that wait for the user; shown on a collapsed header. */
+  groupAttention(group: { tiles: readonly CanvasTile[] }): number {
+    return group.tiles.filter(tile => this.needsFor(tile).length > 0).length;
   }
   onStatusJump(state: CompactRailState): void {
-    if (state === 'done') {
-      this.finishedExpanded.set(true);
-      this.finishedChoiceMade.set(true);
-    }
+    this.expandGroup(railGroupFor(state));
     this.jumpTo.emit(state);
   }
   onCardSelected(id: string): void {

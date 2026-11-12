@@ -6,19 +6,29 @@ import { PtahButtonDirective } from '../button/button.directive';
   selector: 'ptah-list-detail', standalone: true, imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block [container-type:inline-size]' },
-  template: `<div class="surface-1 min-h-0 [@container(min-width:768px)]:grid [@container(min-width:768px)]:grid-cols-[320px_minmax(0,1fr)] [@container(min-width:1200px)]:grid-cols-[320px_minmax(0,1fr)_280px]">
+  template: `<div class="surface-1 min-h-0 overflow-hidden rounded-ptah-surface [@container(min-width:768px)]:grid " [class]="gridColumns()">
     <section #list class="min-w-0 overflow-auto border-surface-border [@container(min-width:768px)]:!block [@container(min-width:768px)]:border-r" [class.hidden]="hasSelection()"><ng-content select="[list]" /></section>
     <section class="min-w-0 overflow-auto [@container(min-width:768px)]:!block" [class.hidden]="!hasSelection()">
-      @if (hasSelection()) { <button #backButton ptahButton variant="ghost" type="button" class="m-2 [@container(min-width:768px)]:hidden" (click)="goBack()">{{ backLabel() }}</button><ng-content select="[detail]" /> }
+      @if (hasSelection()) { <div class="px-ptah-surface pt-ptah-controls [@container(min-width:768px)]:hidden"><button #backButton ptahButton variant="ghost" size="xs" type="button" (click)="goBack()">{{ backLabel() }}</button></div><ng-content select="[detail]" /> }
       @else { <ng-content select="[empty]" /> }
     </section>
+    @if (withMeta()) {
+    <!-- Optional third column for consumers with separate metadata. -->
     <aside class="hidden min-w-0 border-l border-surface-border [@container(min-width:1200px)]:block"><ng-content select="[meta]" /></aside>
+    }
   </div>`,
 })
 export class PtahListDetailComponent {
   readonly selectedId = input<string | null>(null);
   readonly hasSelection = computed(() => this.selectedId() !== null && this.selectedId() !== '');
   readonly backLabel = input('Back to list');
+  /** Reserve a third column from 1200 px for the `[meta]` slot. Off by default so no empty column shows. */
+  readonly withMeta = input(false);
+  protected readonly gridColumns = computed(() =>
+    this.withMeta()
+      ? '[@container(min-width:768px)_and_(max-width:1199.98px)]:grid-cols-[320px_minmax(0,1fr)] [@container(min-width:1200px)]:grid-cols-[320px_minmax(0,1fr)_280px]'
+      : '[@container(min-width:768px)]:grid-cols-[320px_minmax(0,1fr)]',
+  );
   readonly back = output<void>();
   private readonly list = viewChild<ElementRef<HTMLElement>>('list');
   private readonly backButton = viewChild<ElementRef<HTMLButtonElement>>('backButton');
