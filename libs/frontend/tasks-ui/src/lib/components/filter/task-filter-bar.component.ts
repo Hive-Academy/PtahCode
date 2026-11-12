@@ -353,10 +353,9 @@ export class TaskFacetMenuComponent {
             @for (mode of labelModes; track mode.value) {
               <button
                 type="button"
-                ptahButton
-                class="join-item font-normal"
+                class="btn join-item btn-sm font-normal"
+                [class.btn-active]="filter().labelsMode === mode.value"
                 [attr.aria-pressed]="filter().labelsMode === mode.value"
-                [attr.data-state]="filter().labelsMode === mode.value ? 'active' : null"
                 [title]="mode.title"
                 (click)="onLabelsMode(mode.value)"
               >

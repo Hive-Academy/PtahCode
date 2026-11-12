@@ -1335,10 +1335,10 @@
   },
   "libs/frontend/tasks-ui/src/lib/components/filter/task-filter-bar.component.ts": {
     "<dynamic>": 1,
-    "btn": 1,
-    "btn-active": 1,
+    "btn": 2,
+    "btn-active": 2,
     "btn-ghost": 1,
-    "btn-sm": 1
+    "btn-sm": 2
   },
   "libs/frontend/tasks-ui/src/lib/components/filter/task-view-menu.component.ts": {
     "badge": 1,
