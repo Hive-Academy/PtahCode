@@ -122,9 +122,9 @@ describe(WallClockService.name, () => {
     const release = clock.acquire('coarse');
     jest.advanceTimersByTime(WALL_CLOCK_COARSE_MS);
     expect(clock.now('coarse')()).toBe(31_000);
-    jest.setSystemTime(5_000);
-    jest.advanceTimersByTime(1_000);
-    expect(clock.now('coarse')()).toBe(6_000);
+    jest.setSystemTime(-50_000);
+    jest.advanceTimersByTime(WALL_CLOCK_COARSE_MS);
+    expect(clock.now('coarse')()).toBe(-20_000);
     release();
   });
 

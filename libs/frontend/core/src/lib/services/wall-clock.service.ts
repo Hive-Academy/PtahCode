@@ -1,8 +1,8 @@
 import { DestroyRef, Injectable, Signal, effect, inject, linkedSignal, untracked } from '@angular/core';
-import { ClockService } from './clock.service';
+import { CLOCK_COARSE_MS, ClockService } from './clock.service';
 
 export type WallClockCadence = 'second' | 'coarse';
-export const WALL_CLOCK_COARSE_MS = 30_000;
+export const WALL_CLOCK_COARSE_MS = CLOCK_COARSE_MS;
 
 /**
  * The coarse reading can remain up to 30 seconds stale after returning from a hidden window.
@@ -26,7 +26,7 @@ export class WallClockService {
   }
 
   acquire(cadence: WallClockCadence): () => void {
-    const release = this.clock.acquire();
+    const release = this.clock.acquire(cadence);
     if (cadence === 'coarse') this.coarse.set(this.clock.now());
     return release;
   }

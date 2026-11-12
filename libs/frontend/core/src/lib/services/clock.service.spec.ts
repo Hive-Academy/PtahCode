@@ -1,7 +1,7 @@
 import { DOCUMENT } from '@angular/common';
 import { EnvironmentInjector, NgZone, createEnvironmentInjector, runInInjectionContext, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { ClockService, injectClock } from './clock.service';
+import { CLOCK_COARSE_MS, ClockService, injectClock } from './clock.service';
 
 describe(ClockService.name, () => {
   let hidden = false;
@@ -55,6 +55,55 @@ describe(ClockService.name, () => {
     second();
     expect(jest.getTimerCount()).toBe(0);
     expect(documentMock.removeEventListener).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses one coarse interval and switches cadence as second holders join and leave', () => {
+    const started = jest.spyOn(globalThis, 'setInterval');
+    const cleared = jest.spyOn(globalThis, 'clearInterval');
+    const clock = TestBed.inject(ClockService);
+    const coarse = clock.acquire('coarse');
+    const coarseHandle = started.mock.results.at(-1)?.value;
+    expect(started).toHaveBeenLastCalledWith(expect.any(Function), CLOCK_COARSE_MS);
+    expect(jest.getTimerCount()).toBe(1);
+
+    jest.advanceTimersByTime(CLOCK_COARSE_MS);
+    expect(clock.now()).toBe(31_000);
+    const second = clock.acquire('second');
+    const secondHandle = started.mock.results.at(-1)?.value;
+    expect(cleared).toHaveBeenCalledWith(coarseHandle);
+    expect(started).toHaveBeenLastCalledWith(expect.any(Function), 1_000);
+    expect(jest.getTimerCount()).toBe(1);
+
+    second();
+    const resumedCoarseHandle = started.mock.results.at(-1)?.value;
+    expect(cleared).toHaveBeenCalledWith(secondHandle);
+    expect(started).toHaveBeenLastCalledWith(expect.any(Function), CLOCK_COARSE_MS);
+    expect(jest.getTimerCount()).toBe(1);
+    coarse();
+    expect(cleared).toHaveBeenCalledWith(resumedCoarseHandle);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('pauses coarse and second intervals while hidden and resumes the required cadence', () => {
+    const started = jest.spyOn(globalThis, 'setInterval');
+    const clock = TestBed.inject(ClockService);
+    const coarse = clock.acquire('coarse');
+    visibility(true);
+    expect(jest.getTimerCount()).toBe(0);
+    const second = clock.acquire('second');
+    expect(jest.getTimerCount()).toBe(0);
+    jest.setSystemTime(40_000);
+    visibility(false);
+    expect(clock.now()).toBe(40_000);
+    expect(started).toHaveBeenLastCalledWith(expect.any(Function), 1_000);
+    visibility(true);
+    expect(jest.getTimerCount()).toBe(0);
+    second();
+    visibility(false);
+    expect(started).toHaveBeenLastCalledWith(expect.any(Function), CLOCK_COARSE_MS);
+    expect(jest.getTimerCount()).toBe(1);
+    coarse();
+    expect(jest.getTimerCount()).toBe(0);
   });
 
   it('refreshes every acquisition, pauses hidden, and refreshes immediately on return', () => {
