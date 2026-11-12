@@ -5,7 +5,7 @@
 Wide test runs exhaust the developer machine's RAM. These rules are mandatory for the main
 agent, every subagent and every CLI lane. Repeat them in any task prompt you hand to a lane.
 
-- Verify with `npm run verify`. It runs `nx affected -t lint test typecheck --base=main`.
+- Verify with `npm run verify` (CLI lanes: see "Two-level check"). It runs `nx affected -t lint test typecheck --base=main`.
   - Only some projects or targets: `npm run verify -- -p A,B` / `npm run verify -- -t test -p A`.
   - Extra Nx or Jest flags go after a second `--`: `npm run verify -- -p A -- --testPathPatterns=foo`.
   - `typecheck` does not compile Angular templates. After a template change run
@@ -32,8 +32,26 @@ agent, every subagent and every CLI lane. Repeat them in any task prompt you han
   Do not set `cacheDirectory` or `NX_CACHE_DIRECTORY`: that turns the sharing off.
 - Never run workspace-wide checks, and never `nx run-many` across projects you did not change.
 - Never run `build`, `serve`, `dev`, `e2e` or `package` targets unless the user asks for it.
-- Prefer one foreground run with a long timeout. Filter its output (`| tail`, `grep`) instead of
-  re-running the command to read it.
+- Prefer one foreground run with a long timeout. Write its output to `.ptah/tmp/<name>.log` and
+  filter the file (`tail`, `grep`). A filter on the live stream can hide a failure. Do not run
+  the command again only to read its output.
+
+### Two-level check
+
+The Nx cache is per project. Each edit in a project makes its full test run a cache miss that
+runs every suite, so do not run the full test target after each edit.
+
+- Inner loop, after each batch of edits: `npm run verify -- --related -p A,B`. It runs only the
+  tests related to the files changed since `main` (Jest `--changedSince`).
+  `--related` accepts no other target. Run lint and typecheck as a second, separate command:
+  `npm run verify -- -t lint,typecheck -p A,B`.
+- Full gate: `npm run verify -- -p A,B`, one time before the first push and one time before each
+  later push that changes code. Add `typecheck-templates` after a template change.
+- CLI lanes do not run `npm run verify` or `nx`. A lane runs only focused checks:
+  `npx jest --config <project>/jest.config.ts --runInBand --coverage=false --runTestsByPath <specs>`,
+  `npx tsc --noEmit --project <tsconfig>` and `npx eslint <changed files>`. The coordinating
+  agent runs the inner loop and the gate. Write this rule in each lane brief.
+- Do not start a check of a project while a lane edits files of that project.
 
 ## Product focus: Electron first
 
@@ -114,6 +132,22 @@ main agent, every subagent and every CLI lane. Repeat them in any task prompt yo
 - This authorization does not permit merges, force pushes, history rewrites, branch
   deletion, or worktree removal. Keep the branch and worktree until the user authorizes
   cleanup. Never bypass a permission denial through another tool or agent.
+
+## Sessions: one coordinator per worktree
+
+- One session coordinates a worktree. Only that session writes lane briefs, starts lanes, runs
+  the gate, commits and pushes there. It can delegate a commit or a push explicitly.
+- A parent orchestrator that started a child session for a worktree does not start lanes or
+  commit in that worktree while the child is live. It sends instructions to the child
+  (`ptah_session_send`), or it stops the child first (`ptah_session_stop`).
+- Before each commit, the coordinator reads `git log -3` and `git status`. If it finds a commit
+  or a changed file that it did not make, it makes no commit, reports the fact, and asks which
+  session coordinates.
+- A child session reports to its parent at the end of each batch. If the report is not
+  delivered, the child writes the same text to `status.md` in the task folder.
+- A program (epic) task keeps one table of its phases in its `context.md`: phase, task ID, pull
+  request, state. The session that changes the state of a phase updates the row in the same
+  pull request. A side task records the program in `relatesTo`.
 
 ## Git: commit in the foreground, push in the background
 
