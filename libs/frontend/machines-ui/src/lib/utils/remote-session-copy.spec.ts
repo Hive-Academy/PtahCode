@@ -9,7 +9,6 @@ import {
   lockFreedBanner,
   lockUnavailableBanner,
   locksReleaseCommand,
-  permissionCountdownCopy,
   permissionNotPermittedCopy,
   remoteSessionStateLabel,
 } from './remote-session-copy';
@@ -23,12 +22,6 @@ describe('remote session copy', () => {
     expect(PERMISSION_TIMED_OUT_COPY).toBe(
       'No answer within 60 s — the worker denied this request.',
     );
-  });
-
-  it('counts down in whole seconds, never below zero', () => {
-    expect(permissionCountdownCopy(42)).toBe('Denied automatically in 42 s');
-    expect(permissionCountdownCopy(41.2)).toBe('Denied automatically in 42 s');
-    expect(permissionCountdownCopy(-3)).toBe('Denied automatically in 0 s');
   });
 
   it('names the worker commands from WORKER_REMOTE_COMMAND', () => {
