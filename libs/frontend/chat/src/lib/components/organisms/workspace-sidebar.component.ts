@@ -22,11 +22,11 @@ import { ElectronLayoutService, VSCodeService } from '@ptah-extension/core';
 import { SessionLivenessRegistry } from '@ptah-extension/chat-state';
 import { McpServersCardComponent } from '../molecules/mcp-servers-card.component';
 
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 @Component({
   selector: 'ptah-workspace-sidebar',
   standalone: true,
-  imports: [LucideAngularModule, McpServersCardComponent, PtahButtonDirective],
+  imports: [LucideAngularModule, McpServersCardComponent, PtahButtonDirective, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: `
     :host {
@@ -88,10 +88,8 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
             }
             <!-- Remove button (hover reveal) -->
             <button
-              class="remove-btn opacity-0 btn btn-ghost btn-xs btn-square p-0 min-h-0 w-5 h-5 text-base-content-muted hover:text-error transition-opacity duration-200"
+              ptahIconButton size="xs" label="Remove workspace" class="remove-btn opacity-0 p-0 min-h-0 w-5 h-5 text-base-content-muted hover:text-error transition-opacity duration-200"
               (click)="onRemoveFolder($event, i)"
-              title="Remove workspace"
-              aria-label="Remove workspace"
             >
               <lucide-angular [img]="XIcon" class="w-3 h-3" />
             </button>
