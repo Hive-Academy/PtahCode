@@ -17,7 +17,7 @@ Specs live under `src/lib/scenarios/**/*.e2e.spec.ts` (`playwright.config.ts` `t
   build from `dist/apps/ptah-extension-webview`.
 - `installPostMessageBridge(page)`: the `acquireVsCodeApi()` stub plus outbound capture and
   inbound injection.
-- `installCspStub(page, opts?)`: strips CSP headers and serves fonts from a local copy.
+- `installCspStub(page, opts?)`: strips CSP headers.
 - `startFixtureServer({ port?, rootDir?, appBuild? })`: static HTTP server.
 
 ## Running

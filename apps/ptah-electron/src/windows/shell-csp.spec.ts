@@ -172,15 +172,11 @@ describe('effective Electron shell CSP', () => {
       'default-src': ["'none'"],
       // No hash and no nonce: every inline script is lifted to its own file.
       'script-src': ["'self'"],
-      'style-src': [
-        "'self'",
-        "'unsafe-inline'",
-        'https://fonts.googleapis.com',
-      ],
+      'style-src': ["'self'", "'unsafe-inline'"],
       // https: keeps remote marketplace icons and remote markdown images
       // loading. See copy-renderer.js and context.md, "Shell CSP".
       'img-src': ["'self'", 'https:', 'data:', 'blob:'],
-      'font-src': ["'self'", 'https://fonts.gstatic.com', 'data:'],
+      'font-src': ["'self'", 'data:'],
       'connect-src': ["'self'"],
       'media-src': ["'self'", 'blob:'],
       'worker-src': ["'self'", 'blob:'],
