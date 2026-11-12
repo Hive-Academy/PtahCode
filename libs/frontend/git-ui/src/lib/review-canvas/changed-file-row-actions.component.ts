@@ -6,6 +6,7 @@ import {
 } from '@angular/core';
 import { LucideAngularModule, Minus, Plus, Undo2 } from 'lucide-angular';
 import type { EditorTarget } from '@ptah-extension/shared';
+import { PtahCheckboxDirective } from '@ptah-extension/ui';
 import {
   OpenInButtonComponent,
   type OpenInRequest,
@@ -28,7 +29,7 @@ const ICON_BUTTON = `btn btn-ghost btn-xs p-0.5 h-auto min-h-0 ${FOCUS_RING}`;
 @Component({
   selector: 'ptah-changed-file-row-actions',
   standalone: true,
-  imports: [LucideAngularModule, OpenInButtonComponent],
+  imports: [LucideAngularModule, OpenInButtonComponent, PtahCheckboxDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     class:
@@ -92,7 +93,8 @@ const ICON_BUTTON = `btn btn-ghost btn-xs p-0.5 h-auto min-h-0 ${FOCUS_RING}`;
     @if (showViewed()) {
       <input
         type="checkbox"
-        class="checkbox checkbox-xs {{ focusRing }}"
+        ptahCheckbox
+        size="xs"
         title="Viewed"
         [attr.aria-label]="'Viewed ' + name()"
         data-testid="tree-viewed"
@@ -139,7 +141,6 @@ export class ChangedFileRowActionsComponent {
   protected readonly PlusIcon = Plus;
   protected readonly MinusIcon = Minus;
   protected readonly Undo2Icon = Undo2;
-  protected readonly focusRing = FOCUS_RING;
   protected readonly iconButton = ICON_BUTTON;
 
   protected onDiscard(event: MouseEvent): void {

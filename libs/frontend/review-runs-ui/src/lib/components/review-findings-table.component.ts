@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
+import { PtahSelectDirective } from '@ptah-extension/ui';
 import type { Lens, ReviewFinding, Severity } from '@ptah-extension/review-contracts';
 
 /** Presentation shape supplied by a validated finding RPC in P1-16. */
@@ -47,12 +48,12 @@ type SortField = 'severity' | 'lens' | 'location' | 'confidence';
 const severityOrder: Record<Severity, number> = { Critical: 0, Major: 1, Minor: 2, Nitpick: 3 };
 
 @Component({
-  selector: 'ptah-review-findings-table', standalone: true, changeDetection: ChangeDetectionStrategy.OnPush,
+  selector: 'ptah-review-findings-table', standalone: true, imports: [PtahSelectDirective], changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section aria-label="Findings" class="space-y-3">
       <div class="flex flex-wrap gap-2">
         <label class="sr-only" for="finding-lens">Filter findings by lens</label>
-        <select id="finding-lens" class="select select-bordered select-sm" (change)="setLens($event)">
+        <select id="finding-lens" ptahSelect (change)="setLens($event)">
           <option value="all">All lenses</option>@for (lens of lenses; track lens) { <option [value]="lens">{{ lens }}</option> }
         </select>
       </div>
