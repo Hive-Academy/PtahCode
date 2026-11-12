@@ -1,3 +1,4 @@
+import { PtahBadgeDirective } from '@ptah-extension/ui';
 import {
   Component,
   input,
@@ -21,7 +22,7 @@ import type { ExecutionNode } from '@ptah-extension/shared';
 @Component({
   selector: 'ptah-monitor-card',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahBadgeDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -37,7 +38,7 @@ import type { ExecutionNode } from '@ptah-extension/shared';
           <span class="text-xs font-semibold text-base-content-muted">
             Monitoring
           </span>
-          <span class="badge badge-xs badge-ghost">{{ lifespanLabel() }}</span>
+          <span ptahBadge size="xs">{{ lifespanLabel() }}</span>
         </div>
         @if (description(); as d) {
           <span

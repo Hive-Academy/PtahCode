@@ -1,3 +1,4 @@
+import { PtahBadgeDirective } from '@ptah-extension/ui';
 import {
   Component,
   input,
@@ -25,7 +26,7 @@ import type { ExecutionNode } from '@ptah-extension/shared';
 @Component({
   selector: 'ptah-task-card',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahBadgeDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -42,7 +43,7 @@ import type { ExecutionNode } from '@ptah-extension/shared';
             {{ actionLabel() }}
           </span>
           @if (status(); as s) {
-            <span [class]="'badge badge-xs ' + statusBadgeClass()">{{
+            <span ptahBadge size="xs" [tone]="statusBadgeTone()">{{
               s
             }}</span>
           }
@@ -125,19 +126,19 @@ export class TaskCardComponent {
     readString(this.toolInput()['status']),
   );
 
-  /** DaisyUI badge color keyed off the status value. */
-  readonly statusBadgeClass = computed<string>(() => {
+  /** Badge tone keyed off the status value. */
+  readonly statusBadgeTone = computed<'neutral' | 'ok' | 'info' | 'err'>(() => {
     switch (this.status()) {
       case 'completed':
-        return 'badge-success';
+        return 'ok';
       case 'in_progress':
-        return 'badge-info';
+        return 'info';
       case 'deleted':
-        return 'badge-error';
+        return 'err';
       case 'pending':
-        return 'badge-ghost';
+        return 'neutral';
       default:
-        return 'badge-ghost';
+        return 'neutral';
     }
   });
 }

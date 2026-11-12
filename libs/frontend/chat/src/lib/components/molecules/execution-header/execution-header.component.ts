@@ -1,3 +1,4 @@
+import { PtahBadgeDirective } from '@ptah-extension/ui';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -22,6 +23,7 @@ const META_SEPARATOR = ' · ';
 @Component({
   selector: 'ptah-execution-header',
   standalone: true,
+  imports: [PtahBadgeDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '[attr.data-kind]': 'kind()', class: 'block' },
   template: `
@@ -52,11 +54,11 @@ const META_SEPARATOR = ' · ';
         }
         @if (account(); as accountText) {
           <span
-            class="badge badge-sm badge-ghost text-[9px] text-base-content-muted max-w-[10rem] min-w-0 flex-shrink-0"
+            class="text-[9px] text-base-content-muted max-w-[10rem] min-w-0 flex-shrink-0" ptahBadge
             data-testid="lane-account"
             [title]="accountText"
           >
-            <span class="truncate">{{ accountText }}</span>
+            <span class="ptah-badge-text">{{ accountText }}</span>
           </span>
         }
         <ng-content select="[executionHeaderActions]" />

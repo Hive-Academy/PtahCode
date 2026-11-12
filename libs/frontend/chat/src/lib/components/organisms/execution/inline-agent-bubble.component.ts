@@ -56,7 +56,7 @@ import { ScrollDirtyService } from '../../../services/scroll-dirty.service';
 import { injectWallClock } from '@ptah-extension/core';
 import { subagentToolCount } from '../../../utils/subagent-tool-count';
 
-import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahIconButtonDirective, PtahBadgeDirective } from '@ptah-extension/ui';
 /**
  * InlineAgentBubbleComponent - Unified agent rendering for both streaming and replay
  *
@@ -79,6 +79,7 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
     '[class.fill-height-expanded]': 'fillHeight() && !isCollapsed()',
   },
   imports: [
+    PtahBadgeDirective,
     LucideAngularModule,
     TypingCursorComponent,
     CostBadgeComponent,
@@ -154,7 +155,7 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
 
         <!-- Streaming/Interrupted/Background badge or stats -->
         @if (isBackground() && isStreaming()) {
-          <span class="badge badge-xs badge-info gap-1 flex-shrink-0">
+          <span class="gap-1 flex-shrink-0" ptahBadge tone="info" size="xs">
             <lucide-angular
               [img]="LoaderIcon"
               class="w-2.5 h-2.5 animate-spin"
@@ -163,12 +164,12 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
           </span>
         } @else if (isBackground() && !isInterrupted() && !isStreaming()) {
           <span
-            class="badge badge-xs badge-outline badge-info gap-1 flex-shrink-0"
+            class="gap-1 flex-shrink-0" ptahBadge tone="info" appearance="outline" size="xs"
           >
             <span class="text-[9px]">Background</span>
           </span>
         } @else if (isStreaming()) {
-          <span class="badge badge-xs badge-info gap-1 flex-shrink-0">
+          <span class="gap-1 flex-shrink-0" ptahBadge tone="info" size="xs">
             <lucide-angular
               [img]="LoaderIcon"
               class="w-2.5 h-2.5 animate-spin"
@@ -178,7 +179,7 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
         } @else if (isResumed()) {
           <!-- Resumed indicator — agent was interrupted then continued -->
           <span
-            class="badge badge-sm badge-success gap-1 flex-shrink-0"
+            class="gap-1 flex-shrink-0" ptahBadge tone="ok"
             title="This agent was resumed in a new session."
           >
             <span class="text-[10px] font-medium">Resumed</span>
@@ -186,7 +187,7 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
         } @else if (isInterrupted()) {
           <!-- Enhanced interrupted indicator with auto-resume hint -->
           <span
-            class="badge badge-sm badge-warning gap-1 flex-shrink-0"
+            class="gap-1 flex-shrink-0" ptahBadge tone="warn"
             title="This agent was interrupted. It will auto-resume when you send a message."
           >
             <lucide-angular [img]="StopCircleIcon" class="w-3 h-3" />
@@ -194,7 +195,7 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
           </span>
         } @else if (hasChildren()) {
           <span
-            class="badge badge-xs badge-ghost text-[9px] flex-shrink-0"
+            class="text-[9px] flex-shrink-0" ptahBadge size="xs"
             title="Current known count"
           >
             {{ childStats() }}
@@ -215,7 +216,7 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
           @switch (rec.status) {
             @case ('running') {
               <span
-                class="badge badge-xs badge-info gap-1 flex-shrink-0"
+                class="gap-1 flex-shrink-0" ptahBadge tone="info" size="xs"
                 data-testid="subagent-status-badge"
                 data-status="running"
               >
@@ -227,7 +228,7 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
             }
             @case ('completed') {
               <span
-                class="badge badge-xs badge-success gap-1 flex-shrink-0"
+                class="gap-1 flex-shrink-0" ptahBadge tone="ok" size="xs"
                 data-testid="subagent-status-badge"
                 data-status="completed"
               >
@@ -237,7 +238,7 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
             }
             @case ('failed') {
               <span
-                class="badge badge-xs badge-error gap-1 flex-shrink-0"
+                class="gap-1 flex-shrink-0" ptahBadge tone="err" size="xs"
                 data-testid="subagent-status-badge"
                 data-status="failed"
               >
@@ -247,7 +248,7 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
             }
             @case ('killed') {
               <span
-                class="badge badge-xs badge-error gap-1 flex-shrink-0"
+                class="gap-1 flex-shrink-0" ptahBadge tone="err" size="xs"
                 data-testid="subagent-status-badge"
                 data-status="killed"
               >
@@ -257,7 +258,7 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
             }
             @case ('stopped') {
               <span
-                class="badge badge-xs badge-warning gap-1 flex-shrink-0"
+                class="gap-1 flex-shrink-0" ptahBadge tone="warn" size="xs"
                 data-testid="subagent-status-badge"
                 data-status="stopped"
               >
@@ -267,7 +268,7 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
             }
             @case ('pending') {
               <span
-                class="badge badge-xs badge-ghost gap-1 flex-shrink-0"
+                class="gap-1 flex-shrink-0" ptahBadge size="xs"
                 data-testid="subagent-status-badge"
                 data-status="pending"
               >

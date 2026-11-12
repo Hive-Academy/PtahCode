@@ -1,3 +1,4 @@
+import { PtahBadgeDirective } from '@ptah-extension/ui';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -18,7 +19,7 @@ const labels: Record<WorkflowKind, string> = {
 @Component({
   selector: 'ptah-workflow-badge',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahBadgeDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `@if (label(); as text) {
     @if (variant() === 'compact') {
@@ -35,7 +36,7 @@ const labels: Record<WorkflowKind, string> = {
       </span>
     } @else {
       <span
-        class="badge badge-ghost badge-sm max-w-full shrink-0 whitespace-nowrap border-base-content/20 text-base-content"
+        class="max-w-full shrink-0 whitespace-nowrap border-base-content/20 text-base-content" ptahBadge
         ><span class="sr-only">Workflow: </span>{{ text }}</span
       >
     }

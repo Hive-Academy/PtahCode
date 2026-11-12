@@ -129,9 +129,9 @@
       }
       @if (attachments().files.length || attachments().images) {
         <div class="mt-1 flex flex-wrap gap-1 text-base-content-muted">
-          @for (file of attachments().files; track file) { <span class="badge badge-ghost badge-sm">{{ fileName(file) }}</span> }
+          @for (file of attachments().files; track file) { <span ptahBadge>{{ fileName(file) }}</span> }
           @if (attachments().images) {
-            <span class="badge badge-ghost badge-sm"><lucide-angular [img]="ImageIcon" class="h-3 w-3" aria-hidden="true" />{{ attachments().images }} {{ attachments().images === 1 ? 'image' : 'images' }}</span>
+            <span ptahBadge><lucide-angular [img]="ImageIcon" class="h-3 w-3" aria-hidden="true" />{{ attachments().images }} {{ attachments().images === 1 ? 'image' : 'images' }}</span>
           }
         </div>
       }

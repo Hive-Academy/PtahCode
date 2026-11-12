@@ -386,32 +386,9 @@
   "libs/frontend/chat/src/lib/components/atoms/session-organization-chips/session-organization-chips.component.ts": {
     "<dynamic>": 6
   },
-  "libs/frontend/chat/src/lib/components/atoms/workflow-badge.component.ts": {
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-sm": 1
-  },
   "libs/frontend/chat/src/lib/components/file-suggestions/file-tag.component.ts": {
     "badge": 1,
     "badge-lg": 1
-  },
-  "libs/frontend/chat/src/lib/components/file-suggestions/suggestion-option.component.ts": {
-    "badge": 3,
-    "badge-accent": 1,
-    "badge-ghost": 1,
-    "badge-info": 1,
-    "badge-xs": 3
-  },
-  "libs/frontend/chat/src/lib/components/molecules/agent-card/agent-card-header.component.ts": {
-    "badge": 9,
-    "badge-error": 1,
-    "badge-ghost": 3,
-    "badge-info": 1,
-    "badge-outline": 5,
-    "badge-sm": 4,
-    "badge-success": 1,
-    "badge-warning": 1,
-    "badge-xs": 5
   },
   "libs/frontend/chat/src/lib/components/molecules/agent-card/cli-agent-output.component.ts": {
     "<dynamic>": 2
@@ -437,15 +414,7 @@
     "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/execution-header/execution-header.component.ts": {
-    "<dynamic>": 1,
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-sm": 1
-  },
-  "libs/frontend/chat/src/lib/components/molecules/lane-event/lane-event-row.component.html": {
-    "badge": 2,
-    "badge-ghost": 2,
-    "badge-sm": 2
+    "<dynamic>": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/mcp-server-list.component.ts": {
     "<dynamic>": 1
@@ -456,25 +425,13 @@
   "libs/frontend/chat/src/lib/components/molecules/notifications/install-scope-migration-notice.component.ts": {
     "card": 1
   },
-  "libs/frontend/chat/src/lib/components/molecules/notifications/resume-notification-banner.component.ts": {
-    "badge": 2,
-    "badge-outline": 1,
-    "badge-warning": 2,
-    "badge-xs": 2
-  },
   "libs/frontend/chat/src/lib/components/molecules/notifications/session-budget-banner.component.ts": {
     "<dynamic>": 6
   },
   "libs/frontend/chat/src/lib/components/molecules/peer-session-send/peer-session-send-dialog.component.ts": {
     "alert": 2,
     "alert-error": 1,
-    "alert-warning": 1,
-    "badge": 3,
-    "badge-error": 2,
-    "badge-info": 1,
-    "badge-sm": 2,
-    "badge-success": 1,
-    "badge-xs": 1
+    "alert-warning": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/previous-sessions-toolbar/previous-sessions-toolbar.component.ts": {
     "btn": 3,
@@ -490,9 +447,6 @@
     "btn-sm": 2
   },
   "libs/frontend/chat/src/lib/components/molecules/session-filter-bar/session-filter-bar.component.ts": {
-    "badge": 1,
-    "badge-neutral": 1,
-    "badge-xs": 1,
     "btn": 3,
     "btn-circle": 1,
     "btn-ghost": 3,
@@ -506,11 +460,6 @@
     "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/components/organisms/agent-monitor-panel.component.ts": {
-    "badge": 5,
-    "badge-neutral": 2,
-    "badge-sm": 1,
-    "badge-warning": 3,
-    "badge-xs": 4,
     "btn": 2,
     "btn-error": 1,
     "btn-outline": 1,
@@ -522,15 +471,6 @@
     "alert-info": 1
   },
   "libs/frontend/chat/src/lib/components/organisms/execution/inline-agent-bubble.component.ts": {
-    "badge": 12,
-    "badge-error": 2,
-    "badge-ghost": 2,
-    "badge-info": 4,
-    "badge-outline": 1,
-    "badge-sm": 2,
-    "badge-success": 2,
-    "badge-warning": 2,
-    "badge-xs": 10,
     "btn": 1,
     "btn-ghost": 1,
     "btn-xs": 1,
@@ -539,32 +479,10 @@
     "textarea-disabled": 1,
     "textarea-xs": 1
   },
-  "libs/frontend/chat/src/lib/components/organisms/execution/monitor-card.component.ts": {
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-xs": 1
-  },
-  "libs/frontend/chat/src/lib/components/organisms/execution/send-message-chip.component.ts": {
-    "badge": 4,
-    "badge-error": 1,
-    "badge-info": 1,
-    "badge-success": 1,
-    "badge-warning": 1,
-    "badge-xs": 4
-  },
   "libs/frontend/chat/src/lib/components/organisms/execution/subagent-tile.component.ts": {
     "badge": 1,
     "badge-sm": 1,
     "badge-warning": 1
-  },
-  "libs/frontend/chat/src/lib/components/organisms/execution/task-card.component.ts": {
-    "<dynamic>": 1,
-    "badge": 1,
-    "badge-xs": 1
-  },
-  "libs/frontend/chat/src/lib/components/organisms/message-bubble.component.html": {
-    "badge": 2,
-    "badge-sm": 2
   },
   "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-agent-row.component.ts": {
     "<dynamic>": 2
