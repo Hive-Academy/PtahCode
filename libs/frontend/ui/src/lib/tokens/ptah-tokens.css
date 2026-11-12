@@ -32,6 +32,7 @@
   --ptah-control-h-xs: 1.5rem;
   --ptah-control-h-sm: 2rem;
   --ptah-control-h-md: 2.5rem;
+  --ptah-control-h-lg: 2.75rem;
   --ptah-control-h-field: 3.25rem;
   --ptah-control-px-xs: var(--ptah-space-2);
   --ptah-control-px: var(--ptah-space-3);
@@ -70,6 +71,7 @@
 
   /* Shape and border (from the theme) */
   --ptah-radius-control: var(--rounded-btn);
+  --ptah-radius-pill: 9999px;
   --ptah-radius-surface: var(--rounded-box);
   --ptah-radius-chip: var(--rounded-badge);
   --ptah-border-width: 1px;
@@ -116,6 +118,13 @@
     oklch(var(--bc))
   );
   --ptah-btn-ghost-fg: oklch(var(--bc));
+  --ptah-btn-row-weight: 400;
+  --ptah-btn-pill-px: 1.5rem;
+  --ptah-btn-ghost-fg-muted: oklch(var(--bcm));
+  --ptah-btn-ghost-danger-bg-hover: color-mix(in oklch, var(--ptah-state-err) 10%, transparent);
+  --ptah-btn-selected-bg: oklch(var(--b3));
+  --ptah-btn-selected-border: var(--ptah-control-edge-strong);
+  --ptah-btn-selected-fg: oklch(var(--bc));
   --ptah-btn-danger-bg: oklch(var(--er));
   --ptah-btn-danger-bg-hover: color-mix(
     in oklch,

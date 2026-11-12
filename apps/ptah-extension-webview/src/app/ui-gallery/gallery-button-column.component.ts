@@ -176,6 +176,29 @@ interface ButtonStateSample {
         </div>
       </div>
     </div>
+
+    <div class="flex flex-col gap-ptah-controls">
+      <h4 class="text-ptah-label text-base-content">Owner inputs</h4>
+      <div class="grid gap-ptah-controls sm:grid-cols-2">
+        <div class="surface-1 flex flex-col gap-ptah-label rounded-ptah-control border border-surface-border p-ptah-surface">
+          <button ptahButton align="start" class="w-full">Start aligned</button>
+          <button ptahButton align="row" class="w-full">Menu row</button>
+          <button ptahButton variant="ghost" tone="danger">Delete</button>
+          <button ptahButton variant="ghost" tone="muted-danger">Remove on hover</button>
+          <button ptahButton variant="primary" shape="pill">Pill action</button>
+          <button ptahButton size="lg">Large target</button>
+          <button ptahButton [selected]="true">Selected pressed</button>
+          <button ptahButton [selected]="true" selectedAs="current">Current page</button>
+        </div>
+        <div class="surface-1 flex flex-wrap items-start gap-ptah-controls rounded-ptah-control border border-surface-border p-ptah-surface">
+          <button ptahIconButton label="Delete" tone="danger"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M3 4h10M6 4v9m4-9v9" stroke="currentColor"/></svg></button>
+          <button ptahIconButton label="Remove on hover" tone="muted-danger"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M3 8h10" stroke="currentColor"/></svg></button>
+          <button ptahIconButton label="Large target" size="lg"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M3 8h10" stroke="currentColor"/></svg></button>
+          <button ptahIconButton label="Selected pressed" [selected]="true"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M3 8h10" stroke="currentColor"/></svg></button>
+          <button ptahIconButton label="Current page" [selected]="true" selectedAs="current"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M3 8h10" stroke="currentColor"/></svg></button>
+        </div>
+      </div>
+    </div>
   </div>`,
 })
 export class GalleryButtonColumnComponent {
@@ -192,7 +215,7 @@ export class GalleryButtonColumnComponent {
   ];
   public readonly iconVariants: readonly Exclude<PtahButtonVariant, 'link'>[] =
     ['ghost', 'secondary', 'primary'];
-  public readonly sizes: readonly PtahButtonSize[] = ['xs', 'sm', 'md'];
+  public readonly sizes: readonly PtahButtonSize[] = ['xs', 'sm', 'md', 'lg'];
   public readonly states: readonly ButtonStateSample[] = [
     { id: 'default', caption: 'default' },
     { id: 'hover', caption: 'hover', forcedState: 'hover' },

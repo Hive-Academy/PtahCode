@@ -212,7 +212,7 @@ it('renders the button family as one reference with the token look on every dire
 
   expect(
     col.querySelectorAll('[data-testid="button-matrix-specimen"]'),
-  ).toHaveLength(18);
+  ).toHaveLength(24);
   expect(col.querySelectorAll('[data-testid="button-state-row"]')).toHaveLength(
     6,
   );
@@ -228,7 +228,7 @@ it('renders the button family as one reference with the token look on every dire
     col.querySelectorAll(
       '[data-testid="icon-button-specimen"] [ptahIconButton]',
     ),
-  ).toHaveLength(9);
+  ).toHaveLength(12);
   expect(
     col.querySelectorAll('[data-testid="leading-icon-specimen"] button'),
   ).toHaveLength(1);

@@ -10,8 +10,9 @@ import {
   blockBusyActivation,
   BUTTON_HOST,
   buttonHostType,
+  syncSelectedAria,
 } from './button-host';
-import { PtahButtonSize, PtahButtonVariant } from './button.types';
+import { PtahButtonSelectedAs, PtahButtonSize, PtahButtonTone, PtahButtonVariant } from './button.types';
 import { PtahTooltipDirective } from './tooltip.directive';
 @Directive({
   selector: 'button[ptahIconButton], a[ptahIconButton]',
@@ -35,6 +36,14 @@ export class PtahIconButtonDirective {
   readonly variant = input<Exclude<PtahButtonVariant, 'link'>>('ghost');
   /** DaisyUI control size. */
   readonly size = input<PtahButtonSize>('sm');
+  /** Ghost variant ink only; other variants ignore tone. */
+  readonly tone = input<PtahButtonTone>('default');
+  /**
+   * Selected state. Undefined: not a toggle, the owner writes no aria-pressed or aria-current.
+   * Do not bind `aria-pressed` by hand together with `selected`.
+   */
+  readonly selected = input<boolean | undefined>(undefined);
+  readonly selectedAs = input<PtahButtonSelectedAs>('pressed');
   /** Native `type`. A `button` element defaults to `button`, also after a binding removes it. */
   readonly type = input<string>();
   /** Blocks activation while keeping the control focusable. */
@@ -45,6 +54,7 @@ export class PtahIconButtonDirective {
   );
   constructor() {
     blockBusyActivation(this.busy);
+    syncSelectedAria(this.selected, this.selectedAs);
     // Same pattern as ptah-native-modal: report the missing accessible name in
     // dev mode. A thrown error would stop change detection of the parent view.
     // The directive must not hide its host or invent a name from title or text.
