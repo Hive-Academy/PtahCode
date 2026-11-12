@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
-import { PtahBadgeDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahMeterComponent } from '@ptah-extension/ui';
 import type { PlanLimitTileModel, ProviderLaneLimitModel } from './stats-limit-view-model.types';
 
 function percent(tile: PlanLimitTileModel): number | null {
@@ -10,7 +10,7 @@ function percent(tile: PlanLimitTileModel): number | null {
 @Component({
   selector: 'ptah-provider-lane-limit-tile',
   standalone: true,
-  imports: [PtahBadgeDirective],
+  imports: [PtahBadgeDirective, PtahMeterComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @let p = provider();
@@ -23,10 +23,9 @@ function percent(tile: PlanLimitTileModel): number | null {
             [class.text-error]="tone(tile) === 'error'">{{ tile.value }}</span>
         </div>
         @if (tile.window?.percent !== undefined) {
-          <progress class="progress mt-2 h-2 w-full" [class.progress-success]="tone(tile) === 'success'"
-            [class.progress-warning]="tone(tile) === 'warning'" [class.progress-error]="tone(tile) === 'error'"
-            [value]="percent(tile)" max="100" [attr.aria-label]="p.label + ' ' + tile.label + ' usage'"
-            [attr.aria-valuenow]="percent(tile)" [attr.aria-valuetext]="tile.value"></progress>
+          <ptah-meter class="mt-2 block" [value]="percent(tile) ?? 0" [max]="100" [label]="p.label + ' ' + tile.label + ' usage'"
+            [valueText]="tile.value" [tone]="meterTone(tile)" size="md" barRole="progressbar" [showValue]="false" [hideLabel]="true"
+            data-testid="provider-limit-progress" />
         }
         <p class="mt-1 text-[11px] text-base-content-muted">{{ tile.label }}@if (tile.resetLine) { · {{ tile.resetLine }} }</p>
         @if (tile.chip; as chip) {
@@ -56,10 +55,9 @@ function percent(tile: PlanLimitTileModel): number | null {
               [class.text-error]="tone(tile) === 'error'">{{ tile.value }}</span>
           </div>
           @if (tile.window?.percent !== undefined) {
-            <progress class="progress mt-1 h-1 w-full" [class.progress-success]="tone(tile) === 'success'"
-              [class.progress-warning]="tone(tile) === 'warning'" [class.progress-error]="tone(tile) === 'error'"
-              [value]="percent(tile)" max="100" [attr.aria-label]="p.label + ' ' + tile.label + ' usage'"
-              [attr.aria-valuenow]="percent(tile)" [attr.aria-valuetext]="tile.value"></progress>
+            <ptah-meter class="mt-1 block" [value]="percent(tile) ?? 0" [max]="100" [label]="p.label + ' ' + tile.label + ' usage'"
+              [valueText]="tile.value" [tone]="meterTone(tile)" size="xs" barRole="progressbar" [showValue]="false" [hideLabel]="true"
+              data-testid="provider-limit-extra-progress" />
           }
           @if (tile.resetLine) { <p class="text-[10.5px] text-base-content-muted">{{ tile.resetLine }}</p> }
           @if (tile.kind !== 'window') {
@@ -81,6 +79,10 @@ export class ProviderLaneLimitTileComponent {
   protected readonly extras = computed(() => this.provider().windows.filter(tile => tile !== this.primary())
     .sort((a, b) => a.kind === 'window' && b.kind !== 'window' ? -1 : a.kind !== 'window' && b.kind === 'window' ? 1 : 0));
   protected readonly percent = percent;
+  protected meterTone(tile: PlanLimitTileModel): 'ok' | 'warn' | 'err' {
+    const tone = this.tone(tile);
+    return tone === 'error' ? 'err' : tone === 'warning' ? 'warn' : 'ok';
+  }
   protected tone(tile: PlanLimitTileModel): 'success' | 'warning' | 'error' {
     return tile.tone === 'error' ? 'error' : tile.tone === 'warning' || (percent(tile) ?? 0) >= 75 ? 'warning' : 'success';
   }

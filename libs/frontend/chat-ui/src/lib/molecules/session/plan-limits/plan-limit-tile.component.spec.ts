@@ -20,6 +20,11 @@ const NEAR_WINDOW: PlanWindowDetailModel = {
   sourceChips: ['Provider API'],
 };
 
+/** The fill is the inner bar of the owner meter (no test id on it). */
+function fillOf(root: ParentNode): HTMLElement | null {
+  return root.querySelector<HTMLElement>('[data-testid="plan-limit-progress"] [role="progressbar"] > div');
+}
+
 function windowTile(
   overrides: Partial<PlanLimitTileModel> = {},
 ): PlanLimitTileModel {
@@ -192,21 +197,21 @@ describe('PlanLimitTileComponent', () => {
 
   it('shows an accessible linear usage bar on a window row', () => {
     const root = render(windowTile());
-    const progress = root.querySelector<HTMLElement>(
+    const host = root.querySelector<HTMLElement>(
       '[data-testid="plan-limit-progress"]',
     );
-    const fill = root.querySelector<HTMLElement>(
-      '[data-testid="plan-limit-progress-fill"]',
-    );
+    const progress = host?.querySelector<HTMLElement>('[role="progressbar"]');
+    const fill = fillOf(root);
 
+    expect(host?.tagName).toBe('PTAH-METER');
     expect(progress?.getAttribute('role')).toBe('progressbar');
     expect(progress?.getAttribute('aria-valuenow')).toBe('94');
     expect(progress?.getAttribute('aria-valuemin')).toBe('0');
     expect(progress?.getAttribute('aria-valuemax')).toBe('100');
     expect(progress?.getAttribute('aria-valuetext')).toBe('94% used');
     expect(progress?.getAttribute('aria-label')).toBe('5-hour plan usage');
-    expect(progress?.getAttribute('title')).toContain('resets 15:10');
-    expect(fill?.classList.contains('bg-warning')).toBe(true);
+    expect(host?.getAttribute('title')).toContain('resets 15:10');
+    expect(fill?.classList.contains('bg-state-need')).toBe(true);
     expect(fill?.style.width).toBe('94%');
   });
 
@@ -215,16 +220,16 @@ describe('PlanLimitTileComponent', () => {
       windowTile({ tone: 'neutral', window: { ...NEAR_WINDOW, percent: 40 } }),
     );
     expect(
-      calm.querySelector('[data-testid="plan-limit-progress-fill"]')?.className,
-    ).toContain('bg-success');
+      fillOf(calm)?.className,
+    ).toContain('bg-state-done');
     TestBed.resetTestingModule();
 
     const hot = render(
       windowTile({ tone: 'neutral', window: { ...NEAR_WINDOW, percent: 75 } }),
     );
     expect(
-      hot.querySelector('[data-testid="plan-limit-progress-fill"]')?.className,
-    ).toContain('bg-warning');
+      fillOf(hot)?.className,
+    ).toContain('bg-state-need');
   });
 
   it('omits the caption and the shared source chips the section header shows', () => {
@@ -448,10 +453,10 @@ describe('PlanLimitTileComponent', () => {
 
   it('uses semantic colour only for the row accent and the bar fill, never text', () => {
     const root = render(windowTile({ tone: 'error' }));
-    const fill = root.querySelector('[data-testid="plan-limit-progress-fill"]');
+    const fill = fillOf(root);
 
     expect(button(root).className).toContain('border-error');
-    expect(fill?.className).toContain('bg-error');
+    expect(fill?.className).toContain('bg-state-err');
     expect(root.innerHTML).not.toMatch(/text-(error|warning|success|info)\b/);
   });
 });
@@ -602,7 +607,8 @@ describe('PlanLimitTileComponent (variant="inspector")', () => {
 
   it('keeps an accessible h-2 usage bar beside the value, reset line below (AC 7.4)', () => {
     const root = render(windowTile());
-    const progress = byTestId(root, 'plan-limit-progress');
+    const host = byTestId(root, 'plan-limit-progress');
+    const progress = host.querySelector<HTMLElement>('[role="progressbar"]') as HTMLElement;
     const value = byTestId(root, 'plan-limit-tile-value');
     const reset = byTestId(root, 'plan-limit-reset');
 
@@ -614,11 +620,11 @@ describe('PlanLimitTileComponent (variant="inspector")', () => {
     expect(progress.getAttribute('aria-label')).toBe('5-hour plan usage');
     expect(progress.classList).toContain('h-2');
     expect(progress.classList).not.toContain('h-1.5');
-    expect(byTestId(root, 'plan-limit-progress-fill').style.width).toBe('94%');
+    expect(fillOf(root)?.style.width).toBe('94%');
     expect(value.textContent).toBe('94% used');
-    expect(value.parentElement).toBe(progress.parentElement);
+    expect(value.parentElement).toBe(host.parentElement);
     expect(reset.textContent).toBe('resets 15:10 · in 3h 10m');
-    expect(progress.parentElement?.contains(reset)).toBe(false);
+    expect(host.parentElement?.contains(reset)).toBe(false);
   });
 
   it('renders an unknown 5-hour window as an expandable card with no bar, never 0 (decision 8)', () => {
@@ -744,7 +750,6 @@ describe('PlanLimitTileComponent (variant="inspector")', () => {
     for (const id of [
       'plan-limit-tile',
       'plan-limit-progress',
-      'plan-limit-progress-fill',
       'plan-limit-tile-value',
       'plan-limit-chip',
       'plan-limit-caption',
@@ -811,9 +816,7 @@ describe('PlanLimitTileComponent (variant="inspector")', () => {
     expect(byTestId(root, 'plan-limit-card').classList).toContain(
       'border-l-error',
     );
-    expect(byTestId(root, 'plan-limit-progress-fill').className).toContain(
-      'bg-error',
-    );
+    expect(fillOf(root)?.className).toContain('bg-state-err');
     expect(root.innerHTML).not.toMatch(/text-(error|warning|success|info)\b/);
   });
 });
