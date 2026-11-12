@@ -73,10 +73,9 @@ export function buildSessionStartTool(): MCPToolDefinition {
   return {
     name: SESSION_START_TOOL_NAME,
     description:
-      'Start a child chat session on a new branch and worktree, or use attachToSessionId ' +
-      'with the same taskId and branch to share a registered worktree. The attached ' +
-      'worktree is retained if session start fails. Optional phase is a resolved ' +
-      'phase contract; skills supplies resolved skill paths or text. It opens in ' +
+      'Start a child chat session on a new branch and worktree; attachToSessionId ' +
+      '(same taskId and branch) shares one, kept on failure. phase and skills are ' +
+      'optional. It opens in ' +
       "the user's tab and runs unattended: file edits and allowlisted Bash " +
       'run without asking; other actions wait briefly in that tab, then are ' +
       'denied. ' +

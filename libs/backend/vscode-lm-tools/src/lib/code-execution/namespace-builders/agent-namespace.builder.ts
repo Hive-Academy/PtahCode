@@ -12,7 +12,7 @@
 
 import type { AgentNamespace } from '../types';
 import { readFileSync } from 'node:fs';
-import { parsePhaseDispatch } from '../../../../../lane-routing/src/lib/contracts/phase-definition-resolver';
+import { parsePhaseDispatch } from '@ptah-extension/lane-routing';
 import {
   MAX_EFFORT_LENGTH,
   agentSpawnAccountRefusal,

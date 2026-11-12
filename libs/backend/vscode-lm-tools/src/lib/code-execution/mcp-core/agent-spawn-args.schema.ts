@@ -7,7 +7,7 @@ import {
   type SystemCliType,
 } from '@ptah-extension/shared';
 import { ProviderAccountSelectionSchema } from '@ptah-extension/shared/schemas';
-import { parsePhaseDispatch } from '../../../../../lane-routing/src/lib/contracts/phase-definition-resolver';
+import { parsePhaseDispatch } from '@ptah-extension/lane-routing';
 
 export const MAX_TASK_LENGTH = 100 * 1024;
 

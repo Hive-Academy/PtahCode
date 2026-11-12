@@ -12,6 +12,8 @@
  * CliDetectionService surfaces, so we mock them with typed `jest.Mocked<T>`
  * partials. No `as any` casts.
  */
+// The builder imports `@ptah-extension/lane-routing`, whose index loads tsyringe.
+import 'reflect-metadata';
 
 // The real barrel cannot load here: it reaches tsyringe without the
 // reflect-metadata polyfill. The builder needs only PTAH_CLI_ROLE_DELIVERY at
