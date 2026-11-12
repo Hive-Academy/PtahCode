@@ -136,8 +136,8 @@ function secureRendererHtml(html) {
   // resource or script. frame-ancestors is ignored in meta and intentionally
   // absent; frame-src blocks shell children, and the navigation guard stays.
   // Source inventory: local Angular scripts, styles and fonts; Angular
-  // component styles and UI style attributes need inline CSS. styles.css imports
-  // fonts.googleapis.com, whose fonts come from fonts.gstatic.com. Attachments
+  // component styles and UI style attributes need inline CSS. Fonts are bundled
+  // into the renderer build, so no font host is allowed. Attachments
   // use data/blob images; local-tts-panel uses blob audio.
   // Renderer network calls go over preload RPC: connect-src needs only local
   // resources, never backend provider URLs.
@@ -157,9 +157,9 @@ function secureRendererHtml(html) {
   const policy = [
     "default-src 'none'",
     "script-src 'self'",
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "style-src 'self' 'unsafe-inline'",
     "img-src 'self' https: data: blob:",
-    "font-src 'self' https://fonts.gstatic.com data:",
+    "font-src 'self' data:",
     "connect-src 'self'",
     "media-src 'self' blob:",
     "worker-src 'self' blob:",

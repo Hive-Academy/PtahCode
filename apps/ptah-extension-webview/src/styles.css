@@ -3,8 +3,8 @@ PTAH VS Code Extension - Anubis Design System
 Egyptian-Inspired Theme with DaisyUI v4 + Tailwind CSS v3.4
 ============================================================================ */
 
-/* Google Fonts */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Cinzel:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+/* Self-hosted fonts (Inter, Cinzel, JetBrains Mono; SIL OFL, see fonts/OFL-*.txt). No network fetch. */
+@import './fonts/fonts.css';
 
 /* Angular CDK Overlay Prebuilt Styles - MUST come before Tailwind directives */
 @import '@angular/cdk/overlay-prebuilt.css';
