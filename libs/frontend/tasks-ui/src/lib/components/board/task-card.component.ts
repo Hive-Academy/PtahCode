@@ -47,10 +47,9 @@ import {
   TASK_STATUS_LABELS,
   isStartableStatus,
   labelChipClass,
-  taskEstimateBadge,
-  taskTypeBadge,
 } from '../../task-presentation';
 import {
+  PtahBadgeDirective,
   PtahButtonDirective,
   PtahIconButtonDirective,
   PtahToggleDirective,
@@ -143,6 +142,7 @@ const HTTP_URL = /^https?:\/\//i;
   selector: 'ptah-task-card',
   standalone: true,
   imports: [
+    PtahBadgeDirective,
     PtahButtonDirective,
     PtahIconButtonDirective,
     PtahToggleDirective,
@@ -239,7 +239,11 @@ const HTTP_URL = /^https?:\/\//i;
                aria-hidden reinforcement (WCAG 1.4.1). -->
           @if (bulkOutcome(); as outcome) {
             <span
-              class="badge badge-xs badge-outline gap-0.5 shrink-0 text-base-content"
+              ptahBadge
+              tone="neutral"
+              size="xs"
+              appearance="outline"
+              class="gap-0.5 shrink-0 text-base-content"
               [attr.data-testid]="'task-card-outcome-' + outcome"
               [title]="outcomeTitle()"
               [attr.aria-label]="outcomeTitle()"
@@ -381,13 +385,23 @@ const HTTP_URL = /^https?:\/\//i;
 
         <!-- Meta row: type + estimate + executor + depends_on + rollup + dup -->
         <div class="flex items-center flex-wrap gap-1">
-          <span class="badge badge-xs" [class]="typeBadgeClass()">
+          <span
+            ptahBadge
+            size="xs"
+            appearance="outline"
+            [tone]="task().type ? 'neutral' : 'warn'"
+          >
             {{ task().type ?? 'no type' }}
           </span>
           @if (task().estimate; as estimate) {
             <span
-              class="badge badge-xs"
-              [class]="estimateBadgeClass()"
+              ptahBadge
+              size="xs"
+              tone="neutral"
+              [appearance]="
+                estimate === 'L' || estimate === 'XL' ? 'soft' : 'outline'
+              "
+              class="font-mono"
               [title]="estimateTitle()"
               data-testid="task-card-estimate"
             >
@@ -396,16 +410,22 @@ const HTTP_URL = /^https?:\/\//i;
           }
           @if (task().executor) {
             <span
-              class="badge badge-xs badge-ghost gap-0.5 max-w-[7rem]"
+              ptahBadge
+              tone="neutral"
+              size="xs"
+              class="gap-0.5 max-w-[7rem]"
               [title]="'Executor: ' + task().executor"
             >
               <lucide-angular [img]="UserIcon" class="w-2.5 h-2.5 shrink-0" />
-              <span class="truncate">{{ task().executor }}</span>
+              <span class="ptah-badge-text">{{ task().executor }}</span>
             </span>
           }
           @if (task().dependsOn.length > 0) {
             <span
-              class="badge badge-xs badge-ghost gap-0.5"
+              ptahBadge
+              tone="neutral"
+              size="xs"
+              class="gap-0.5"
               [title]="'Depends on: ' + task().dependsOn.join(', ')"
             >
               <lucide-angular [img]="GitBranchIcon" class="w-2.5 h-2.5" />
@@ -456,7 +476,10 @@ const HTTP_URL = /^https?:\/\//i;
           <!-- Duplicate marker (FR-B4.4) — deliberately de-emphasised. -->
           @if (task().duplicates.length > 0) {
             <span
-              class="badge badge-xs badge-ghost gap-0.5 opacity-60"
+              ptahBadge
+              tone="neutral"
+              size="xs"
+              class="gap-0.5 opacity-60"
               [title]="'Duplicates: ' + task().duplicates.join(', ')"
               data-testid="task-card-duplicate"
             >
@@ -491,7 +514,10 @@ const HTTP_URL = /^https?:\/\//i;
             }
             @if (hiddenLabels().length > 0) {
               <span
-                class="badge badge-xs badge-ghost font-normal tabular-nums"
+                ptahBadge
+                tone="neutral"
+                size="xs"
+                class="font-normal tabular-nums"
                 [title]="hiddenLabelsTitle()"
                 [attr.aria-label]="hiddenLabelsTitle()"
                 data-testid="task-card-labels-overflow"
@@ -946,10 +972,6 @@ export class TaskCardComponent {
   protected readonly rovingTabIndex = computed(() => (this.focused() ? 0 : -1));
 
   protected readonly statusOptions = computed(() => TASK_STATUSES);
-  protected readonly typeBadgeClass = computed(() =>
-    taskTypeBadge(this.task().type),
-  );
-
   /**
    * How many label chips a card shows before rolling the rest into `+N`.
    *
@@ -974,11 +996,6 @@ export class TaskCardComponent {
     return hidden.length === 0
       ? ''
       : `${hidden.length} more label(s): ${hidden.join(', ')}`;
-  });
-
-  protected readonly estimateBadgeClass = computed(() => {
-    const estimate = this.task().estimate;
-    return estimate ? taskEstimateBadge(estimate) : '';
   });
 
   protected readonly estimateTitle = computed(() => {

@@ -5,7 +5,11 @@ import {
   input,
 } from '@angular/core';
 import { MarkdownBlockComponent } from '@ptah-extension/markdown';
-import { NativeCardComponent, type NativeCardTone } from '@ptah-extension/ui';
+import {
+  NativeCardComponent,
+  PtahBadgeDirective,
+  type NativeCardTone,
+} from '@ptah-extension/ui';
 import type { ScorecardInvocationRow } from '@ptah-extension/shared';
 
 interface ScorecardMetric {
@@ -64,7 +68,7 @@ interface ScorecardRow {
   selector: 'ptah-scorecard-detail',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [MarkdownBlockComponent, NativeCardComponent],
+  imports: [MarkdownBlockComponent, NativeCardComponent, PtahBadgeDirective],
   template: `
     @if (loading()) {
       <p
@@ -107,16 +111,24 @@ interface ScorecardRow {
                 <span class="inline-flex shrink-0 items-center gap-1.5">
                   @if (!row.source.exactAttribution) {
                     <span
-                      class="badge badge-ghost badge-xs"
+                      ptahBadge
+                      tone="neutral"
+                      size="xs"
                       data-testid="scorecard-heuristic-marker"
                       title="Attributed heuristically by time window, not an exact task match"
                       >~approx</span
                     >
                   }
                   <span
-                    class="badge badge-xs"
-                    [class.badge-success]="row.source.succeeded === true"
-                    [class.badge-error]="row.source.succeeded === false"
+                    ptahBadge
+                    size="xs"
+                    [tone]="
+                      row.source.succeeded === true
+                        ? 'ok'
+                        : row.source.succeeded === false
+                          ? 'err'
+                          : 'neutral'
+                    "
                     data-testid="scorecard-row-verdict"
                     >{{ row.verdict }}</span
                   >

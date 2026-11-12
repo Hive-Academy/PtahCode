@@ -90,7 +90,7 @@ describe('SkillsPauseSwitchComponent', () => {
 
     const badge = root.querySelector('[data-testid="skills-pause-state"]');
     expect(badge?.textContent?.trim()).toBe('Paused');
-    expect(badge?.classList).toContain('badge-warning');
+    expect(badge?.getAttribute('data-tone')).toBe('warn');
     expect(toggle(root).checked).toBe(false);
   });
 

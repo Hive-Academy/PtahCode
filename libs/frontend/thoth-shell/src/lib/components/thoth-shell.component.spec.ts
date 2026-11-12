@@ -235,16 +235,28 @@ describe('ThothShellComponent', () => {
   it('wires enter and leave classes on every case, with an initial-enter guard', () => {
     // jsdom has no getAnimations(): Angular does not run animate.* here. Check
     // the owning template contract alongside the DOM and direction tests.
-    const source = readFileSync(join(__dirname, 'thoth-shell.component.ts'), 'utf8');
+    const source = readFileSync(
+      join(__dirname, 'thoth-shell.component.ts'),
+      'utf8',
+    );
     const cases = [
-      ...source.matchAll(/@case \('(memory|skills|cron|gateway)'\) \{\s*<div([^>]*)>/g),
+      ...source.matchAll(
+        /@case \('(memory|skills|cron|gateway)'\) \{\s*<div([^>]*)>/g,
+      ),
     ];
     expect(cases.map((match) => match[1])).toEqual([
-      'memory', 'skills', 'cron', 'gateway',
+      'memory',
+      'skills',
+      'cron',
+      'gateway',
     ]);
     for (const match of cases) {
-      expect(match[2]).toContain('class="ptah-motion-panel px-3 py-6 sm:px-4 lg:py-8"');
-      expect(match[2]).toContain("[animate.enter]=\"hasSwitchedTabs() ? 'ptah-motion-enter' : ''\"");
+      expect(match[2]).toContain(
+        'class="ptah-motion-panel px-3 py-6 sm:px-4 lg:py-8"',
+      );
+      expect(match[2]).toContain(
+        "[animate.enter]=\"hasSwitchedTabs() ? 'ptah-motion-enter' : ''\"",
+      );
       expect(match[2]).toContain('animate.leave="ptah-motion-leave"');
     }
   });
@@ -372,9 +384,10 @@ describe('ThothShellComponent', () => {
       await harness.navigateByUrl('/thoth/memory', ThothShellComponent);
 
       const stage = (): HTMLElement => {
-        const element = harness.routeNativeElement?.querySelector<HTMLElement>(
-          '[ptahMotionStage]',
-        );
+        const element =
+          harness.routeNativeElement?.querySelector<HTMLElement>(
+            '[ptahMotionStage]',
+          );
         if (!element) throw new Error('Thoth motion stage was not rendered');
         return element;
       };
@@ -386,12 +399,18 @@ describe('ThothShellComponent', () => {
         const panel = panels[0];
         expect(panel.classList.contains('px-3')).toBe(true);
         expect(panel.classList.contains('py-6')).toBe(true);
-        expect(panel?.querySelector(`ptah-${{
-          memory: 'memory-curator',
-          skills: 'skill-synthesis',
-          cron: 'cron-scheduler',
-          gateway: 'messaging-gateway',
-        }[tab]}-tab`)).not.toBeNull();
+        expect(
+          panel?.querySelector(
+            `ptah-${
+              {
+                memory: 'memory-curator',
+                skills: 'skill-synthesis',
+                cron: 'cron-scheduler',
+                gateway: 'messaging-gateway',
+              }[tab]
+            }-tab`,
+          ),
+        ).not.toBeNull();
       };
 
       expect(stage().classList.contains('ptah-motion-stage')).toBe(true);
@@ -417,9 +436,10 @@ describe('ThothShellComponent', () => {
 
     it('writes direction before the old panel is removed in either direction', async () => {
       await harness.navigateByUrl('/thoth/cron', ThothShellComponent);
-      const stage = harness.routeNativeElement?.querySelector<HTMLElement>(
-        '[ptahMotionStage]',
-      );
+      const stage =
+        harness.routeNativeElement?.querySelector<HTMLElement>(
+          '[ptahMotionStage]',
+        );
       if (!stage) throw new Error('Thoth motion stage was not rendered');
 
       for (const [tab, direction] of [
@@ -452,15 +472,18 @@ describe('ThothShellComponent', () => {
         expect(directionWrite).toBeGreaterThanOrEqual(0);
         expect(oldRemoval).toBeGreaterThan(directionWrite);
         expect(stage.getAttribute('data-motion-dir')).toBe(direction);
-        expect(stage.querySelectorAll(':scope > .ptah-motion-panel')).toHaveLength(1);
+        expect(
+          stage.querySelectorAll(':scope > .ptah-motion-panel'),
+        ).toHaveLength(1);
       }
     });
 
     it('ends a rapid memory-to-gateway-to-skills switch on one backward panel', async () => {
       await harness.navigateByUrl('/thoth/memory', ThothShellComponent);
-      const stage = harness.routeNativeElement?.querySelector<HTMLElement>(
-        '[ptahMotionStage]',
-      );
+      const stage =
+        harness.routeNativeElement?.querySelector<HTMLElement>(
+          '[ptahMotionStage]',
+        );
       if (!stage) throw new Error('Thoth motion stage was not rendered');
 
       for (const tab of ['gateway', 'skills'] as const) {
@@ -472,7 +495,9 @@ describe('ThothShellComponent', () => {
       expect(stage.getAttribute('data-motion-dir')).toBe('back');
       const panels = stage.querySelectorAll(':scope > .ptah-motion-panel');
       expect(panels).toHaveLength(1);
-      expect(panels[0].querySelector('ptah-skill-synthesis-tab')).not.toBeNull();
+      expect(
+        panels[0].querySelector('ptah-skill-synthesis-tab'),
+      ).not.toBeNull();
     });
 
     it('writes no memory for a navigation that never settles', async () => {
@@ -655,7 +680,8 @@ describe('ThothShellComponent', () => {
     const telemetryReads = () =>
       settingsGet.mock.calls.filter(
         ([method, params]) =>
-          method === 'settings:get' && params.key === 'skills.telemetry.enabled',
+          method === 'settings:get' &&
+          params.key === 'skills.telemetry.enabled',
       );
 
     const flushAsync = (): Promise<void> =>
@@ -680,18 +706,20 @@ describe('ThothShellComponent', () => {
       listCandidates = jest.fn(async () => []);
 
       getSettings = jest.fn(async () => ({ enabled: true }));
-      settingsGet = jest.fn(async (_method: string, params: { key: string }) => ({
-        isSuccess: () => true,
-        data: {
-          success: true,
-          value:
-            params.key === 'skills.telemetry.enabled'
-              ? (telemetryByRoot[backend.root ?? ''] ?? false)
-              : params.key === 'skillSynthesis.enabled'
-                ? (await getSettings()).enabled
-                : true,
-        },
-      }));
+      settingsGet = jest.fn(
+        async (_method: string, params: { key: string }) => ({
+          isSuccess: () => true,
+          data: {
+            success: true,
+            value:
+              params.key === 'skills.telemetry.enabled'
+                ? (telemetryByRoot[backend.root ?? ''] ?? false)
+                : params.key === 'skillSynthesis.enabled'
+                  ? (await getSettings()).enabled
+                  : true,
+          },
+        }),
+      );
       memoryDiagnosticsRpc = memoryDiagnosticsRpcStub();
 
       TestBed.configureTestingModule({
@@ -827,8 +855,8 @@ describe('ThothShellComponent', () => {
         fixture.detectChanges();
 
         expect(pausedBadge(el, 'memory')?.textContent?.trim()).toBe('Paused');
-        // Readable size (visual review round 1): badge-sm with 12 px text.
-        expect(pausedBadge(el, 'memory')?.classList).toContain('badge-sm');
+        // Readable size (visual review round 1): sm badge with 12 px text.
+        expect(pausedBadge(el, 'memory')?.getAttribute('data-size')).toBe('sm');
         expect(pausedBadge(el, 'memory')?.classList).toContain('text-xs');
         expect(pausedBadge(el, 'skills')).toBeNull();
         // The tab's accessible name carries the state too.

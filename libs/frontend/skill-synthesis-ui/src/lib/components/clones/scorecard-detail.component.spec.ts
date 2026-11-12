@@ -5,9 +5,7 @@ import {
   type ScorecardDetailRow,
 } from './scorecard-detail.component';
 
-function row(
-  overrides: Partial<ScorecardDetailRow> = {},
-): ScorecardDetailRow {
+function row(overrides: Partial<ScorecardDetailRow> = {}): ScorecardDetailRow {
   return {
     taskId: 'TASK_2026_001',
     succeeded: true,
@@ -76,11 +74,9 @@ describe('ScorecardDetailComponent', () => {
 
   it('renders FAILED with the error pill for a recorded failure', () => {
     const el = render({ rows: [row({ succeeded: false })] });
-    const verdict = el.querySelector(
-      '[data-testid="scorecard-row-verdict"]',
-    );
+    const verdict = el.querySelector('[data-testid="scorecard-row-verdict"]');
     expect(verdict?.textContent?.trim()).toBe('FAILED');
-    expect(verdict?.classList.contains('badge-error')).toBe(true);
+    expect(verdict?.getAttribute('data-tone')).toBe('err');
   });
 
   it('renders "No grade" for an ungraded row instead of claiming FAILED', () => {
@@ -90,8 +86,8 @@ describe('ScorecardDetailComponent', () => {
       '[data-testid="scorecard-row-verdict"]',
     );
     expect(verdict?.textContent?.trim()).toBe('No grade');
-    expect(verdict?.classList.contains('badge-success')).toBe(false);
-    expect(verdict?.classList.contains('badge-error')).toBe(false);
+    expect(verdict?.getAttribute('data-tone')).not.toBe('ok');
+    expect(verdict?.getAttribute('data-tone')).not.toBe('err');
     expect(rowEl?.textContent).not.toContain('FAILED');
     expect(rowEl?.textContent).not.toContain('COMPLETE');
   });

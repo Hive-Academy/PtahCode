@@ -227,8 +227,8 @@ describe('TaskCardComponent', () => {
 
     it('carries exactly one badge — the type badge — and no metadata text', () => {
       const host = render(makeTask()).nativeElement as HTMLElement;
-      const badges = Array.from(host.querySelectorAll('.badge')).filter(
-        (el) => !el.classList.contains('badge-square'),
+      const badges = Array.from(
+        host.querySelectorAll('[data-ptah-badge], .badge'),
       );
       expect(badges).toHaveLength(1);
       expect(badges[0].textContent?.trim()).toBe('FEATURE');
