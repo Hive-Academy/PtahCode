@@ -14,7 +14,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { LucideAngularModule, Moon, Square } from 'lucide-angular';
-import { injectWallClock } from '@ptah-extension/core';
+import { injectClock } from '@ptah-extension/core';
 import {
   AgentMonitorStore,
   SubagentExecutionStore,
@@ -267,7 +267,8 @@ export class SubagentLaneComponent {
   protected readonly live = computed(() =>
     ['running', 'pending', 'background'].includes(this.record().status),
   );
-  protected readonly now = injectWallClock('second', () => this.live());
+  protected readonly now = injectClock(() => this.live());
+  private lastHistoryRefresh: { key: string; at: number } | null = null;
   protected readonly finishedSummary = computed(() =>
     this.nodes().length > 0 || this.live()
       ? null
@@ -372,15 +373,19 @@ export class SubagentLaneComponent {
     // so its tree is backfilled from the sidechain transcript while this lane
     // shows it. The store coalesces overlapping reads; the timer ends when
     // the agent stops or the lane is destroyed.
-    effect((onCleanup) => {
+    effect(() => {
       const key = this.key();
-      if (!this.live()) return;
+      if (!this.live()) {
+        this.lastHistoryRefresh = null;
+        return;
+      }
+      const now = this.now();
+      if (
+        this.lastHistoryRefresh?.key === key &&
+        now - this.lastHistoryRefresh.at < LIVE_HISTORY_REFRESH_MS
+      ) return;
+      this.lastHistoryRefresh = { key, at: now };
       untracked(() => void this.store.refreshLiveHistory(key));
-      const timer = setInterval(
-        () => void this.store.refreshLiveHistory(key),
-        LIVE_HISTORY_REFRESH_MS,
-      );
-      onCleanup(() => clearInterval(timer));
     });
   }
 

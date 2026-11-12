@@ -1,3 +1,4 @@
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { MESSAGE_TYPES } from '@ptah-extension/shared';
 
@@ -6,6 +7,7 @@ import {
   ACTIVITY_RING_CAPACITY,
   BackOfficeActivityService,
 } from './back-office-activity.service';
+import { ClockService } from './clock.service';
 import { WorkspaceScopeService } from './workspace-scope.service';
 import { attentionConditionKey, NotificationService } from './notification.service';
 
@@ -692,12 +694,21 @@ describe('BackOfficeActivityService', () => {
     ]);
   });
 
-  it('clears its idle timer on destroy', () => {
-    const clearSpy = jest.spyOn(global, 'clearInterval');
+  it('holds the shared clock once and releases it on destroy', () => {
+    TestBed.resetTestingModule();
+    const release = jest.fn();
+    const acquire = jest.fn().mockReturnValue(release);
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: ClockService, useValue: { now: signal(Date.now()), acquire } },
+      ],
+    });
+    TestBed.inject(BackOfficeActivityService);
+    expect(acquire).toHaveBeenCalledTimes(1);
+    expect(release).not.toHaveBeenCalled();
 
     TestBed.resetTestingModule();
 
-    expect(clearSpy).toHaveBeenCalled();
-    clearSpy.mockRestore();
+    expect(release).toHaveBeenCalledTimes(1);
   });
 });

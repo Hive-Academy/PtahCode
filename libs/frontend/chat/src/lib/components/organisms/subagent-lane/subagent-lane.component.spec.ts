@@ -13,9 +13,10 @@ import {
   ModelStateService,
   SURFACE_ACTIVE,
   VSCodeService,
-  WallClockService,
+  ClockService,
 } from '@ptah-extension/core';
 import { createMockRpcService } from '@ptah-extension/core/testing';
+import { PTAH_CLOCK } from '@ptah-extension/ui';
 import { provideMarkdown } from 'ngx-markdown';
 import {
   createExecutionNode,
@@ -153,8 +154,12 @@ describe('SubagentLaneComponent', () => {
         },
         { provide: VSCodeService, useValue: { isElectron: false } },
         {
-          provide: WallClockService,
-          useValue: { now: () => clockNow, acquire: () => () => undefined },
+          provide: ClockService,
+          useValue: { now: clockNow, acquire: () => () => undefined },
+        },
+        {
+          provide: PTAH_CLOCK,
+          useValue: { now: clockNow, acquire: () => () => undefined },
         },
         { provide: SURFACE_ACTIVE, useValue: signal(true) },
         provideMarkdown(),
@@ -236,7 +241,9 @@ describe('SubagentLaneComponent', () => {
         root.querySelector('ptah-execution-header')?.getAttribute('data-kind'),
       ).toBe('subagent');
       expect(root.textContent).toContain('Starting agent');
-      expect(root.querySelector('[data-test="execution-header-details"]')).toBeNull();
+      expect(
+        root.querySelector('[data-test="execution-header-details"]'),
+      ).toBeNull();
       const stats = root.querySelector('ptah-agent-lane-stats');
       expect(
         stats?.querySelector('[data-testid="lane-stats-tokens"]')?.textContent,
@@ -244,7 +251,6 @@ describe('SubagentLaneComponent', () => {
       expect(
         stats?.querySelector('[data-testid="lane-stats-model"]')?.textContent,
       ).toContain('claude-sonnet');
-
     } finally {
       resetPricingMapForTesting();
       updatePricingMap(previousPricing);
@@ -266,11 +272,19 @@ describe('SubagentLaneComponent', () => {
     const fixture = setup();
     fixture.componentRef.setInput('presentation', 'flat');
     fixture.detectChanges();
-    const body = (fixture.nativeElement as HTMLElement).querySelector('[data-testid="lane-scroll"]');
-    expect((fixture.nativeElement as HTMLElement).querySelector('ptah-execution-header')).toBeNull();
+    const body = (fixture.nativeElement as HTMLElement).querySelector(
+      '[data-testid="lane-scroll"]',
+    );
+    expect(
+      (fixture.nativeElement as HTMLElement).querySelector(
+        'ptah-execution-header',
+      ),
+    ).toBeNull();
     expect(body?.classList).not.toContain('overflow-y-auto');
     expect(body?.classList).toContain('flex-none');
-    const composer = (fixture.nativeElement as HTMLElement).querySelector('ptah-subagent-lane-composer');
+    const composer = (fixture.nativeElement as HTMLElement).querySelector(
+      'ptah-subagent-lane-composer',
+    );
     expect(composer?.classList).toContain('sticky');
     expect(composer?.classList).toContain('mt-auto');
     expect(composer?.classList).toContain('bottom-0');
@@ -287,7 +301,9 @@ describe('SubagentLaneComponent', () => {
     expect(lane.firstElementChild).toBe(header);
     const row = header!.querySelector('[data-test="execution-header-row"]');
     expect(row?.querySelector('ptah-agent-lane-stats')).not.toBeNull();
-    expect(row?.querySelector('[data-test="execution-header-details"]')).toBeNull();
+    expect(
+      row?.querySelector('[data-test="execution-header-details"]'),
+    ).toBeNull();
   });
 
   it('leaves the tool count to the transcript bubble once the tree has a tool', () => {
@@ -495,36 +511,32 @@ describe('SubagentLaneComponent', () => {
   });
 
   it('backfills a live background agent from its transcript while shown', () => {
-    jest.useFakeTimers();
-    try {
-      const fixture = setup({ ...base, status: 'background' });
-      // A live entry never takes the one-shot load: before this fix the lane
-      // requested nothing and stayed on "Starting agent" for the whole run.
-      expect(ensureHistory).not.toHaveBeenCalled();
-      expect(refreshLiveHistory).toHaveBeenCalledTimes(1);
-      expect(refreshLiveHistory).toHaveBeenCalledWith('tool-1');
-      jest.advanceTimersByTime(5000);
-      expect(refreshLiveHistory).toHaveBeenCalledTimes(2);
-      fixture.destroy();
-      jest.advanceTimersByTime(20000);
-      expect(refreshLiveHistory).toHaveBeenCalledTimes(2);
-    } finally {
-      jest.useRealTimers();
-    }
+    const fixture = setup({ ...base, status: 'background' });
+    // A live entry never takes the one-shot load: before this fix the lane
+    // requested nothing and stayed on "Starting agent" for the whole run.
+    expect(ensureHistory).not.toHaveBeenCalled();
+    expect(refreshLiveHistory).toHaveBeenCalledTimes(1);
+    expect(refreshLiveHistory).toHaveBeenCalledWith('tool-1');
+    clockNow.set(9_000);
+    fixture.detectChanges();
+    expect(refreshLiveHistory).toHaveBeenCalledTimes(1);
+    clockNow.set(10_000);
+    fixture.detectChanges();
+    expect(refreshLiveHistory).toHaveBeenCalledTimes(2);
+    fixture.destroy();
+    clockNow.set(30_000);
+    TestBed.flushEffects();
+    expect(refreshLiveHistory).toHaveBeenCalledTimes(2);
   });
 
   it('stops refreshing when the agent finishes', () => {
-    jest.useFakeTimers();
-    try {
-      const fixture = setup();
-      expect(refreshLiveHistory).toHaveBeenCalledTimes(1);
-      fixture.componentRef.setInput('record', { ...base, status: 'completed' });
-      fixture.detectChanges();
-      jest.advanceTimersByTime(20000);
-      expect(refreshLiveHistory).toHaveBeenCalledTimes(1);
-    } finally {
-      jest.useRealTimers();
-    }
+    const fixture = setup();
+    expect(refreshLiveHistory).toHaveBeenCalledTimes(1);
+    fixture.componentRef.setInput('record', { ...base, status: 'completed' });
+    fixture.detectChanges();
+    clockNow.set(25_000);
+    fixture.detectChanges();
+    expect(refreshLiveHistory).toHaveBeenCalledTimes(1);
   });
 
   it('offers full output when the live tree was spilled', () => {
@@ -676,6 +688,8 @@ describe('SubagentLaneComponent', () => {
     expect(
       root.querySelector('[aria-label="Send Explore to background"]'),
     ).not.toBeNull();
-    expect(root.querySelector('[data-test="execution-header-details"]')).toBeNull();
+    expect(
+      root.querySelector('[data-test="execution-header-details"]'),
+    ).toBeNull();
   });
 });

@@ -18,6 +18,7 @@ import {
   Injector,
   signal,
   computed,
+  effect,
   inject,
   untracked,
   OnDestroy,
@@ -60,6 +61,7 @@ import {
 import { TabManagerService } from '@ptah-extension/chat-state';
 import {
   ClaudeRpcService,
+  ClockService,
   LoggingService,
   ProviderAccountsStateService,
   VSCodeService,
@@ -818,18 +820,24 @@ export class AgentMonitorStore implements OnDestroy {
 
   private readonly _agents = signal<readonly MonitoredAgent[]>([]);
   private readonly logger = inject(LoggingService);
-  private readonly permissionClock = signal(Date.now());
-  private permissionClockTimer: ReturnType<typeof setInterval> | undefined;
+  private readonly clock = inject(ClockService);
+  /** Releases the shared clock hold; set only while a timed permission is queued. */
+  private releasePermissionClock: (() => void) | undefined;
 
   permissionSecondsRemaining(timeoutAt: number): number {
-    return Math.max(0, Math.ceil((timeoutAt - this.permissionClock()) / 1000));
+    return Math.max(0, Math.ceil((timeoutAt - this.clock.now()) / 1000));
   }
 
   private ensurePermissionClock(): void {
-    if (this.permissionClockTimer) return;
-    this.permissionClockTimer = setInterval(() => {
-      const now = Date.now();
-      this.permissionClock.set(now);
+    if (this.releasePermissionClock) return;
+    this.releasePermissionClock = this.clock.acquire('second');
+  }
+
+  /** Drops expired permissions on each shared clock tick while the clock is held. */
+  private readonly expirePermissionsOnTick = effect(() => {
+    const now = this.clock.now();
+    if (!this.releasePermissionClock) return;
+    untracked(() => {
       this.updateAgents(list => {
         let changed = false;
         const next = list.map(agent => {
@@ -842,13 +850,13 @@ export class AgentMonitorStore implements OnDestroy {
         return changed ? next : list;
       });
       this.stopPermissionClockIfIdle();
-    }, 1000);
-  }
+    });
+  });
 
   private stopPermissionClockIfIdle(): void {
     if (this._agents().some(agent => agent.permissionQueue.some(request => request.timeoutAt > 0))) return;
-    clearInterval(this.permissionClockTimer);
-    this.permissionClockTimer = undefined;
+    this.releasePermissionClock?.();
+    this.releasePermissionClock = undefined;
   }
 
   /**
@@ -1394,8 +1402,8 @@ export class AgentMonitorStore implements OnDestroy {
   readonly panelOpenRequest = this._panelOpenRequest.asReadonly();
 
   ngOnDestroy(): void {
-    clearInterval(this.permissionClockTimer);
-    this.permissionClockTimer = undefined;
+    this.releasePermissionClock?.();
+    this.releasePermissionClock = undefined;
     this.historyCandidates.clear();
     this._historyCandidates.set([]);
     // Apply queued output before teardown so the last deltas are not lost;
@@ -1969,7 +1977,6 @@ export class AgentMonitorStore implements OnDestroy {
     this._panelOpen.set(true);
     if (request.timeoutAt > 0 && this._agents().some(agent =>
       agent.permissionQueue.some(pending => pending.requestId === request.requestId))) {
-      this.permissionClock.set(Date.now());
       this.ensurePermissionClock();
     }
   }
