@@ -1651,6 +1651,13 @@ export class SessionSpawnerService implements ISessionSpawner {
           childSessionId,
           label: child.label,
           ...(child.succeededBy ? { succeededBy: child.succeededBy } : {}),
+          ...(child.succeededBy &&
+          this.registry.get(child.succeededBy)?.undeliveredHeldMessages?.length
+            ? {
+                undeliveredHeldMessages: this.registry.get(child.succeededBy)
+                  ?.undeliveredHeldMessages,
+              }
+            : {}),
           parentSessionIds: [
             child.parentSessionId,
             child.parentSdkSessionId,
@@ -2344,12 +2351,17 @@ export class SessionSpawnerService implements ISessionSpawner {
         ...(runtime.effort ? { effort: runtime.effort } : {}),
       });
       if (!outcome.started) throw new Error(outcome.error);
-      await transferHeldPeerMessages(
+      const undelivered = await transferHeldPeerMessages(
         this.adapter,
         child.childSessionId as SessionId,
         successorId,
         (message) => this.log(message),
       );
+      if (undelivered.length > 0) {
+        this.registry.update(successorId, {
+          undeliveredHeldMessages: undelivered,
+        });
+      }
       this.agents.settleLaneAdoption(adopted, 'kept');
       this.armRuntimeCap(nextRuntime, successorId, settings.maxRuntimeMinutes);
       this.releaseBudget(child.childSessionId);

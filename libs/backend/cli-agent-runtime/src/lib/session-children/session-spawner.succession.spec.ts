@@ -513,6 +513,67 @@ describe('SessionSpawnerService succession', () => {
     );
   });
 
+  it('keeps replaying after a failed held message and records the loss on the successor', async () => {
+    const h = makeHarness();
+    const child = await h.startChild();
+    h.markRan(child.childSessionId);
+    const origin = { kind: 'peer' as const, from: 'parent' };
+    h.adapter.claimHeldPeerMessages.mockReturnValue([
+      { content: 'one', origin },
+      { content: 'two\n  lost   message', origin, files: ['a.txt'] },
+      { content: 'three', origin },
+    ]);
+    h.adapter.sendMessageToSession.mockImplementation(
+      async (_id: string, content: string) => {
+        if (content.startsWith('two')) throw new Error('send failed');
+        return undefined;
+      },
+    );
+    const result = await h.spawner.succeed({
+      callerSessionId: child.childSessionId,
+      handoffPath: `${child.worktreePath}/HANDOFF.md`,
+      prompt: 'continue',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const successorId = result.successor.childSessionId;
+    const calls = h.adapter.sendMessageToSession.mock.calls;
+    expect(calls.map((call) => call[1])).toEqual([
+      'one',
+      'two\n  lost   message',
+      'three',
+    ]);
+    expect(calls.every((call) => call[0] === successorId)).toBe(true);
+    const expected = [{ index: 2, preview: 'two lost message [1 file(s)]' }];
+    expect(h.registry.get(successorId)?.undeliveredHeldMessages).toEqual(
+      expected,
+    );
+  });
+
+  it('replays held message files and images unchanged to the successor', async () => {
+    const h = makeHarness();
+    const child = await h.startChild();
+    h.markRan(child.childSessionId);
+    const origin = { kind: 'peer' as const, from: 'parent' };
+    const files = ['/tmp/a.txt', '/tmp/b.txt'];
+    const images = [{ data: 'AAAA', mediaType: 'image/png' }];
+    h.adapter.claimHeldPeerMessages.mockReturnValue([
+      { content: 'with attachments', origin, files, images },
+    ]);
+    const result = await h.spawner.succeed({
+      callerSessionId: child.childSessionId,
+      handoffPath: `${child.worktreePath}/HANDOFF.md`,
+      prompt: 'continue',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const [id, content, options] = h.adapter.sendMessageToSession.mock.calls[0];
+    expect(id).toBe(result.successor.childSessionId);
+    expect(content).toBe('with attachments');
+    expect(options).toMatchObject({ origin, files, images });
+    expect(h.registry.get(id)?.undeliveredHeldMessages).toBeUndefined();
+  });
+
   it('passes the parent live SDK id in the host descriptor and stores it on the successor after parent reparent without SDK id (Defect A)', async () => {
     const h = makeHarness();
     const child = await h.startChild();
