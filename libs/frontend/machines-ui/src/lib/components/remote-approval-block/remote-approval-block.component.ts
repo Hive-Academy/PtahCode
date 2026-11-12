@@ -16,7 +16,7 @@ import { Check, Copy, LucideAngularModule } from 'lucide-angular';
 import { CountdownClock } from '../../services/countdown-clock';
 import type { MachinesError } from '../../services/machines-store';
 import { displayBlockText, displayText } from '../../utils/display-text';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
 import {
   PERMISSION_TIMED_OUT_COPY,
   permissionCountdownCopy,
@@ -52,7 +52,7 @@ let nextBlockId = 0;
 @Component({
   selector: 'ptah-remote-approval-block',
   standalone: true,
-  imports: [PtahButtonDirective, LucideAngularModule],
+  imports: [PtahBadgeDirective, PtahButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -66,8 +66,10 @@ let nextBlockId = 0;
     >
       <div class="flex flex-wrap items-center gap-2">
         <span
-          class="badge badge-outline badge-sm"
-          [class.text-state-need]="!expired() && mode() !== 'cached'"
+          ptahBadge
+          [tone]="!expired() && mode() !== 'cached' ? 'warn' : 'neutral'"
+          appearance="outline"
+          size="sm"
           data-testid="approval-badge"
           >{{ badge() }}</span
         >

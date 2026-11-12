@@ -186,7 +186,9 @@
       </h2>
       @if (installedState() === 'ready') {
         <span
-          class="badge badge-ghost badge-sm tabular-nums"
+          ptahBadge
+          count
+          class="tabular-nums"
           data-testid="overview-providers-count"
           >{{ serverCount() }}</span
         >

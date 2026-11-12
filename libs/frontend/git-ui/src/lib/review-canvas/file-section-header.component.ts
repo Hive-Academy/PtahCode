@@ -20,6 +20,7 @@ import {
 import type { EditorTarget, GitConflictKind } from '@ptah-extension/shared';
 import {
   FileStatusBadgeComponent,
+  PtahBadgeDirective,
   PtahButtonDirective,
   type FileStatusCode,
 } from '@ptah-extension/ui';
@@ -73,6 +74,7 @@ const FOCUS_RING =
   selector: 'ptah-file-section-header',
   standalone: true,
   imports: [
+    PtahBadgeDirective,
     PtahButtonDirective,
     LucideAngularModule,
     FileStatusBadgeComponent,
@@ -214,7 +216,10 @@ const FOCUS_RING =
       >
         @if (sideLabel(); as side) {
           <span
-            class="fsh-side badge badge-outline badge-xs shrink-0 whitespace-nowrap text-base-content"
+            ptahBadge
+            size="xs"
+            appearance="outline"
+            class="fsh-side shrink-0 whitespace-nowrap"
             data-testid="file-section-side"
             [attr.title]="side"
             [attr.data-short]="side === 'Staged' ? 'S' : 'WT'"
@@ -223,14 +228,18 @@ const FOCUS_RING =
         }
         @for (chip of chips(); track chip) {
           <span
-            class="fsh-chip badge badge-ghost badge-xs shrink-0 whitespace-nowrap"
+            ptahBadge
+            size="xs"
+            class="fsh-chip shrink-0 whitespace-nowrap"
             data-testid="file-chip"
             >{{ chip }}</span
           >
         }
         @if (chipSummary(); as summary) {
           <span
-            class="fsh-chip-summary badge badge-ghost badge-xs shrink-0 whitespace-nowrap"
+            ptahBadge
+            size="xs"
+            class="fsh-chip-summary shrink-0 whitespace-nowrap"
             role="img"
             data-testid="file-chip-summary"
             [attr.title]="summary.full"

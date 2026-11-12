@@ -14,6 +14,7 @@ import {
 } from '@angular/core';
 import { ArrowLeft, LucideAngularModule, MoreHorizontal } from 'lucide-angular';
 import {
+  PtahBadgeDirective,
   PtahButtonDirective,
   PtahIconButtonDirective,
 } from '@ptah-extension/ui';
@@ -51,6 +52,7 @@ export interface MachinesActionError {
   selector: 'ptah-machine-overview',
   standalone: true,
   imports: [
+    PtahBadgeDirective,
     PtahButtonDirective,
     PtahIconButtonDirective,
     LucideAngularModule,
@@ -98,7 +100,7 @@ export interface MachinesActionError {
           }
         </p>
       </div>
-      <span class="badge badge-outline badge-sm shrink-0">
+      <span ptahBadge size="sm" appearance="outline" class="shrink-0">
         <ptah-machine-status [state]="machine().state" />
       </span>
       <div class="flex shrink-0 gap-2">

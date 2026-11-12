@@ -9,7 +9,11 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
-import { PtahButtonDirective, PtahCheckboxDirective } from '@ptah-extension/ui';
+import {
+  PtahBadgeDirective,
+  PtahButtonDirective,
+  PtahCheckboxDirective,
+} from '@ptah-extension/ui';
 import { RouterLink } from '@angular/router';
 import { CircleAlert, LucideAngularModule, Plus } from 'lucide-angular';
 import {
@@ -305,6 +309,7 @@ interface ConversionError {
   standalone: true,
   imports: [
     PtahButtonDirective,
+    PtahBadgeDirective,
     PtahCheckboxDirective,
     RouterLink,
     LucideAngularModule,
@@ -402,8 +407,9 @@ interface ConversionError {
                         >{{ line.group.serverKey }}</span
                       >
                       <span
-                        class="badge badge-outline badge-sm"
-                        [class.border-warning]="line.scope === 'global'"
+                        ptahBadge
+                        appearance="outline"
+                        [tone]="line.scope === 'global' ? 'warn' : 'neutral'"
                         data-testid="server-scope-badge"
                         >{{ scopeBadge[line.scope] }}</span
                       >
@@ -648,7 +654,7 @@ interface ConversionError {
                           >
                           @for (scope of scopeLabels(entry); track scope) {
                             <span
-                              class="badge badge-ghost badge-sm"
+                              ptahBadge
                               data-testid="capability-scope-label"
                               >{{ scope }}</span
                             >

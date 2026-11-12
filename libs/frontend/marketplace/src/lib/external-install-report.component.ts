@@ -17,7 +17,7 @@ import {
   isRepairableFamily,
   keptReasonLabel,
 } from './kept-items-repair-prompt.component';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
 
 /** Note under a kept row, by reason; null when the badge says enough. */
 function keptNote(item: KeptItem): string | null {
@@ -52,7 +52,7 @@ function keptNote(item: KeptItem): string | null {
  * net-line rule.
  */
 @Component({
-  imports: [PtahButtonDirective],
+  imports: [PtahButtonDirective, PtahBadgeDirective],
   selector: 'ptah-external-install-report',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -132,7 +132,7 @@ function keptNote(item: KeptItem): string | null {
                     class="grow text-[11px] font-mono [overflow-wrap:anywhere]"
                     >{{ item.relPath }}</code
                   >
-                  <span class="badge badge-sm badge-ghost shrink-0">{{
+                  <span ptahBadge class="shrink-0">{{
                     badgeOf(item)
                   }}</span>
                 </div>

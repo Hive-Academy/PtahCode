@@ -39,7 +39,7 @@ import {
   type ReplaySummary,
 } from '../reconnect-banner/session-sync';
 import { RemoteSessionPaneComponent } from './remote-session-pane.component';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
 import type { RemoteLinkActivation } from './remote-transcript.component';
 
 const REASON_ID = 'ptah-remote-session-reason';
@@ -71,6 +71,7 @@ const REASON_ID = 'ptah-remote-session-reason';
   selector: 'ptah-remote-session-view',
   standalone: true,
   imports: [
+    PtahBadgeDirective,
     PtahButtonDirective,
     LucideAngularModule,
     RemoteSessionPaneComponent,
@@ -119,13 +120,19 @@ const REASON_ID = 'ptah-remote-session-reason';
       <div class="flex flex-wrap items-center gap-2">
         @if (view()?.lockUnavailable) {
           <span
-            class="badge badge-outline badge-sm text-state-err"
+            ptahBadge
+            tone="err"
+            appearance="outline"
+            size="sm"
             data-testid="remote-owner-chip"
             >Not available</span
           >
         } @else if (view()?.watchOnly && view()?.drivenBy) {
           <span
-            class="badge badge-outline badge-sm max-w-[18rem] gap-1 truncate text-base-content"
+            ptahBadge
+            appearance="outline"
+            size="sm"
+            class="max-w-[18rem] gap-1"
             data-testid="remote-owner-chip"
           >
             <lucide-angular
@@ -133,11 +140,13 @@ const REASON_ID = 'ptah-remote-session-reason';
               class="h-3 w-3 shrink-0"
               aria-hidden="true"
             />
-            Driver: {{ holder() }}
+            <span class="ptah-badge-text">Driver: {{ holder() }}</span>
           </span>
         } @else if (freed()) {
           <span
-            class="badge badge-outline badge-sm text-base-content"
+            ptahBadge
+            appearance="outline"
+            size="sm"
             data-testid="remote-owner-chip"
             >Idle</span
           >
