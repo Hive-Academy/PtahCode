@@ -2,10 +2,12 @@ import { z } from 'zod';
 import {
   OUTCOME_TASK_KINDS,
   SYSTEM_CLI_TYPES,
+  PHASE_KINDS,
   type ProviderAccountSelection,
   type SystemCliType,
 } from '@ptah-extension/shared';
 import { ProviderAccountSelectionSchema } from '@ptah-extension/shared/schemas';
+import { parsePhaseDispatch } from '@ptah-extension/lane-routing';
 
 export const MAX_TASK_LENGTH = 100 * 1024;
 
@@ -91,6 +93,28 @@ export const AgentSpawnArgsSchema = z
     modelTier: z.enum(['opus', 'sonnet', 'haiku']).optional(),
     resume_session_id: z.string().optional(),
     role: z.string().min(1).max(100).optional(),
+    /** Rendered, host-resolved phase handoff (B1 contract). */
+    phase: z.object({
+      version: z.literal(1),
+      kind: z.enum(PHASE_KINDS),
+      text: z.string().min(1),
+      definition: z.object({
+        version: z.literal(1), kind: z.enum(PHASE_KINDS),
+        input: z.array(z.string().min(1)).min(1),
+        deliverable: z.array(z.string().min(1)).min(1),
+        verdict: z.array(z.string().min(1)).min(1),
+        acceptanceStep: z.array(z.string().min(1)).min(1),
+        requiredCapabilities: z.array(z.string().min(1)).min(1),
+        toolProfile: z.object({ disallowedTools: z.array(z.string()), permission: z.enum(['allow', 'deny', 'prompt']) }).strict(),
+        discipline: z.object({ method: z.string().min(1), outputContract: z.string().min(1), returnValue: z.string().min(1), refusals: z.string().min(1), escalationProtocol: z.string().min(1), reviewerStance: z.string().min(1).optional() }).strict(),
+      }).strict(),
+      toolProfile: z.object({ disallowedTools: z.array(z.string()), permission: z.enum(['allow', 'deny', 'prompt']) }).strict(),
+      skills: z.array(z.object({ name: z.string().min(1), path: z.string().min(1).optional(), text: z.string().min(1).optional() }).strict().refine(skill => !!skill.path || !!skill.text)).optional(),
+    }).strict().refine(phase => phase.kind === phase.definition.kind &&
+      JSON.stringify(phase.toolProfile) === JSON.stringify(phase.definition.toolProfile),
+    { message: 'phase metadata mismatch' }).optional(),
+    /** Optional host-resolved skills when no phase is selected. */
+    skills: z.array(z.object({ name: z.string().min(1), path: z.string().min(1).optional(), text: z.string().min(1).optional() }).strict().refine(skill => !!skill.path || !!skill.text)).optional(),
     // Free string, not an enum: each CLI accepts its own scale, and the lane
     // spawn policy ignores a value its CLI does not take (R2.3 step 1).
     effort: z.string().min(1).max(MAX_EFFORT_LENGTH).optional(),
@@ -113,6 +137,10 @@ export const AgentSpawnArgsSchema = z
   })
   .strict()
   .superRefine((args, ctx) => {
+    if (args.phase) {
+      try { parsePhaseDispatch(args.phase); }
+      catch { ctx.addIssue({ code: 'custom', path: ['phase'], message: 'invalid phase dispatch' }); }
+    }
     const refusal = agentSpawnAccountRefusal({
       cli: args.cli,
       ptahCliId: args.ptahCliId,

@@ -11,6 +11,8 @@
  */
 
 import type { AgentNamespace } from '../types';
+import { readFileSync } from 'node:fs';
+import { parsePhaseDispatch } from '@ptah-extension/lane-routing';
 import {
   MAX_EFFORT_LENGTH,
   agentSpawnAccountRefusal,
@@ -346,6 +348,15 @@ export function buildAgentNamespace(
 
   return {
     spawn: async (request: UntypedSpawnRequest) => {
+      if (request.phase) parsePhaseDispatch(request.phase);
+      const resolvedSkills = request.skills ?? request.phase?.skills ?? [];
+      const skillText = resolvedSkills.map(skill => {
+        if (skill.text) return `### Skill: ${skill.name}\n${skill.text}`;
+        try { return `### Skill: ${skill.name}\n${readFileSync(skill.path!, 'utf8')}`; }
+        catch { throw new Error(`Resolved skill ${skill.name} could not be read: ${skill.path}`); }
+      }).join('\n\n');
+      const deliveryText = [request.phase?.text, skillText].filter(Boolean).join('\n\n');
+      const deliveredTask = deliveryText ? `${request.task}\n\n${deliveryText}` : request.task;
       assertEffort(request.effort);
       assertOutcomeField('taskKind', request.taskKind, OUTCOME_TASK_KINDS);
       assertOutcomeField(
@@ -443,7 +454,7 @@ export function buildAgentNamespace(
         // rendered here from the SAME function the rival-CLI adapters use
         // (TASK_2026_515). Two call sites, one text.
         const ptahCliTask =
-          `${prepared.task}\n\n` +
+          `${prepared.task}\n\n${deliveryText}\n\n` +
           renderLaneCompletionContract({
             taskFolder: request.taskFolder,
             deliverables: request.deliverables,
@@ -516,7 +527,7 @@ export function buildAgentNamespace(
         );
         result.setAgentId(spawnResult.agentId);
 
-        return markParentless(spawnResult);
+        return { ...markParentless(spawnResult), ...(resolvedSkills.length && { skillDelivery: 'unavailable' as const }) };
       }
       if (request.cli) {
         const disabledClis = getDisabledClis?.() ?? [];
@@ -559,6 +570,7 @@ export function buildAgentNamespace(
 
       const enrichedRequest = {
         ...requestFields,
+        task: deliveredTask,
         ...(accountSelection && { accountSelection }),
         ...(workingDirectory && { workingDirectory }),
         ...(activeSessionId && { parentSessionId: activeSessionId }),
@@ -567,7 +579,7 @@ export function buildAgentNamespace(
         ...(projectGuidance && { projectGuidance }),
         ...(pluginPaths && pluginPaths.length > 0 && { pluginPaths }),
       };
-      return markParentless(await agentProcessManager.spawn(enrichedRequest));
+      return { ...markParentless(await agentProcessManager.spawn(enrichedRequest)), ...(resolvedSkills.length && { skillDelivery: 'unavailable' as const }) };
     },
 
     status: async (agentId?) => {

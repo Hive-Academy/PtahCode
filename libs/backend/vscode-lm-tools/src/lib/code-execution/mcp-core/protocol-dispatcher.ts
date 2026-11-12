@@ -1346,6 +1346,8 @@ async function handleIndividualTool(
             resumeSessionId: spawnArgs.resume_session_id,
             parentSessionId: callerSessionId,
             role: spawnArgs.role,
+            phase: spawnArgs.phase,
+            skills: spawnArgs.skills,
             effort: spawnArgs.effort,
             taskKind: spawnArgs.taskKind,
             routingSource: spawnArgs.routingSource,

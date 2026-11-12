@@ -242,6 +242,17 @@ describe('buildAgentNamespace — outcome metadata validation', () => {
 });
 
 describe('buildAgentNamespace — spawn (non-ptahCli)', () => {
+  it('delivers resolved discipline and skills inline when CLI skill loading is unavailable', async () => {
+    const { deps, mocks } = makeDeps();
+    mocks.processManager.spawn.mockResolvedValue({ agentId: 'a1' } as SpawnAgentResult);
+    const result = await buildAgentNamespace(deps).spawn({
+      task: 'work', skills: [{ name: 'review', text: 'Check evidence' }],
+    });
+    expect(mocks.processManager.spawn).toHaveBeenCalledWith(expect.objectContaining({
+      task: expect.stringContaining('Check evidence'),
+    }));
+    expect(result).toEqual(expect.objectContaining({ skillDelivery: 'unavailable' }));
+  });
   it('forwards the verified parent plan level and drops caller policy metadata', async () => {
     const { deps, mocks } = makeDeps();
     deps.getParentLevel = (id) => id === 'verified' ? 'plan' : undefined;

@@ -367,6 +367,10 @@ export interface LaneRequestContext {
 }
 
 export interface SpawnAgentRequest {
+  /** Validated phase handoff for lane delivery. */
+  readonly phase?: import('./phase-contract.types').PhaseDispatchV1;
+  /** Host-resolved skills, including standalone skills without a phase. */
+  readonly skills?: readonly import('./phase-contract.types').PhaseSkillV1[];
   /** Task description for the CLI agent */
   readonly task: string;
   /** Which CLI to use (auto-detected if omitted) */

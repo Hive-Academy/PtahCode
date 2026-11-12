@@ -22,10 +22,20 @@ import { join } from 'node:path';
 
 import {
   SdkQueryOptionsBuilder,
+  withPhaseDelivery,
   getActiveProviderId,
   namedActualLaunch,
   type SdkQueryOptions,
 } from './sdk-query-options-builder';
+
+describe('SDK phase delivery', () => {
+  it('keeps legacy prompts and appends resolved skill text', () => {
+    const prompt = { type: 'preset' as const, preset: 'claude_code' as const, append: 'Existing' };
+    expect(withPhaseDelivery(prompt)).toBe(prompt);
+    expect(withPhaseDelivery(prompt, undefined, [{ name: 'checks', text: 'Verify output' }]))
+      .toEqual({ ...prompt, append: 'Existing\n\nSkill checks: Verify output' });
+  });
+});
 import {
   CLAUDE_CERTIFIED_ENV_KEYS,
   assertCertifiedLaunch,

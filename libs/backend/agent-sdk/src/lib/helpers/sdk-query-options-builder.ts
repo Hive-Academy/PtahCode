@@ -14,6 +14,7 @@
 
 import { injectable, inject } from 'tsyringe';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import {
@@ -794,6 +795,9 @@ export function buildFlagSettingsArg(
  * Input parameters for building query options
  */
 export interface QueryOptionsInput {
+  /** Validated phase and host-resolved skills for this SDK session. */
+  phase?: import('@ptah-extension/shared').PhaseDispatchV1;
+  skills?: readonly import('@ptah-extension/shared').PhaseSkillV1[];
   /** Certified account route supplied by admission; omitted preserves ambient auth. */
   accountRoute?: ClaudeAccountRoute;
   /**
@@ -1045,6 +1049,21 @@ function namedRunPolicy(
  *    messages carrying `parent_tool_use_id` = the spawning Task tool_use id.
  */
 export type SdkQueryOptions = Options;
+
+/** Apply the same host-resolved phase and skills to the SDK prompt. */
+export function withPhaseDelivery(
+  systemPrompt: Options['systemPrompt'],
+  phase?: import('@ptah-extension/shared').PhaseDispatchV1,
+  skills?: readonly import('@ptah-extension/shared').PhaseSkillV1[],
+): Options['systemPrompt'] {
+  if (!phase && !skills?.length) return systemPrompt;
+  const preset = systemPrompt as Extract<Options['systemPrompt'], { type: 'preset' }>;
+  return {
+    ...preset,
+    append: [preset.append, phase?.text, ...(skills ?? phase?.skills ?? []).map(skill =>
+      `Skill ${skill.name}: ${skill.text ?? readFileSync(skill.path!, 'utf8')}`)].filter(Boolean).join('\n\n'),
+  };
+}
 
 /**
  * Complete query configuration returned by builder
@@ -1597,7 +1616,7 @@ export class SdkQueryOptionsBuilder {
         model,
         resume: resumeSessionId,
         maxTurns: this.calculateMaxTurns(sessionConfig),
-        systemPrompt,
+        systemPrompt: withPhaseDelivery(systemPrompt, input.phase, input.skills),
         // Flag tier. Fresh per session when a style is active; the shared
         // PTAH_DISABLE_SDK_AUTO_MEMORY constant itself is never mutated (G4),
         // and the `outputStyle` key is absent entirely when no style is
