@@ -19,6 +19,8 @@ import {
 import {
   NativePopoverComponent,
   PtahButtonDirective,
+  PtahInputDirective,
+  PtahSelectDirective,
 } from '@ptah-extension/ui';
 import { GitBranchesService } from '../services/git-branches.service';
 import { GitReviewService } from '../services/git-review.service';
@@ -70,7 +72,7 @@ const FOCUS_RING =
 @Component({
   selector: 'ptah-comparison-bar',
   standalone: true,
-  imports: [PtahButtonDirective, LucideAngularModule, NativePopoverComponent],
+  imports: [PtahButtonDirective, PtahInputDirective, PtahSelectDirective, LucideAngularModule, NativePopoverComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -155,7 +157,9 @@ const FOCUS_RING =
           @if (scopeKind() === 'branch') {
             <div class="mt-1 flex items-center gap-1 px-1">
               <select
-                class="select select-bordered select-xs min-w-0 flex-1"
+                ptahSelect
+                size="xs"
+                class="min-w-0 flex-1"
                 aria-label="Review base"
                 data-testid="comparison-base"
                 (change)="review.setBase(selectValue($event))"
@@ -173,7 +177,9 @@ const FOCUS_RING =
                 >←</span
               >
               <select
-                class="select select-bordered select-xs min-w-0 flex-1"
+                ptahSelect
+                size="xs"
+                class="min-w-0 flex-1"
                 aria-label="Review head"
                 data-testid="comparison-head"
                 (change)="review.setHead(selectValue($event))"
@@ -197,7 +203,9 @@ const FOCUS_RING =
 
       <input
         type="text"
-        class="input input-bordered input-xs w-32 min-w-[6rem] max-w-[12rem] flex-1 focus-visible:outline-[oklch(var(--s))]"
+        ptahInput
+        size="xs"
+        class="w-32 min-w-[6rem] max-w-[12rem] flex-1"
         placeholder="Filter files…"
         aria-label="Filter changed files"
         data-testid="comparison-filter"

@@ -42,7 +42,9 @@ import { TaskPrPanelComponent } from './task-pr-panel.component';
 import {
   PtahBadgeDirective,
   PtahButtonDirective,
+  PtahCheckboxDirective,
   PtahIconButtonDirective,
+  PtahInputDirective,
 } from '@ptah-extension/ui';
 
 /**
@@ -91,7 +93,9 @@ let instanceCount = 0;
   imports: [
     PtahBadgeDirective,
     PtahButtonDirective,
+    PtahCheckboxDirective,
     PtahIconButtonDirective,
+    PtahInputDirective,
     GitConfirmDialogComponent,
     LucideAngularModule,
     OpenInButtonComponent,
@@ -245,7 +249,9 @@ let instanceCount = 0;
             <input
               #branchInput
               type="text"
-              class="input input-bordered input-xs w-full focus-visible:outline-[oklch(var(--s))]"
+              ptahInput
+              size="xs"
+              class="w-full"
               aria-label="Branch name"
               placeholder="Branch name"
               data-testid="task-worktree-branch"
@@ -256,7 +262,9 @@ let instanceCount = 0;
             />
             <input
               type="text"
-              class="input input-bordered input-xs w-full focus-visible:outline-[oklch(var(--s))]"
+              ptahInput
+              size="xs"
+              class="w-full"
               aria-label="Custom path (optional)"
               placeholder="Custom path (optional)"
               data-testid="task-worktree-path"
@@ -268,7 +276,8 @@ let instanceCount = 0;
             <label class="flex cursor-pointer items-center gap-1.5">
               <input
                 type="checkbox"
-                class="checkbox checkbox-xs"
+                ptahCheckbox
+                size="xs"
                 data-testid="task-worktree-create-branch"
                 [checked]="newCreateBranch()"
                 (change)="newCreateBranch.set(checkedValue($event))"

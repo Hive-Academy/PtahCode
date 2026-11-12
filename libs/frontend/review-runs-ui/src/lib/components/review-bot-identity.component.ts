@@ -1,11 +1,11 @@
 import { ChangeDetectionStrategy, Component, inject, input, output } from '@angular/core';
 import { ReviewRunsStore } from '../review-runs.store';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahFieldComponent, PtahInputDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-review-bot-identity',
   standalone: true,
-  imports: [PtahButtonDirective],
+  imports: [PtahButtonDirective, PtahFieldComponent, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
             <section class="space-y-2">
@@ -36,16 +36,18 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
                   }}
                 </p>
               }
-              <label class="block text-sm" for="review-bot-token">{{
-                hasToken() ? 'Replace bot token' : 'Connect bot token'
-              }}</label>
-              <input
-                #tokenInput
-                id="review-bot-token"
-                type="password"
-                autocomplete="new-password"
-                class="input input-bordered w-full"
-              />
+              <ptah-field
+                [label]="hasToken() ? 'Replace bot token' : 'Connect bot token'"
+              >
+                <input
+                  #tokenInput
+                  ptahInput
+                  id="review-bot-token"
+                  type="password"
+                  autocomplete="new-password"
+                  class="w-full"
+                />
+              </ptah-field>
               <div class="flex flex-wrap gap-2">
                 <button
                   type="button"

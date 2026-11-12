@@ -190,6 +190,28 @@ describe('Ptah design tokens in the application', () => {
   });
 });
 
+describe('Field focus label contrast on the anubis themes', () => {
+  const themes: Record<string, Record<string, string>> = Object.assign(
+    {},
+    ...config.daisyui.themes,
+  );
+  it.each(['anubis', 'anubis-light'])(
+    'keeps the focus label color >= 4.5:1 on base-100 to base-300 in %s',
+    (name) => {
+      const theme = themes[name];
+      const share = Number(tokenCss.match(/--ptah-field-label-fg-active:[^;]*?\(var\(--p\)\)\s+(\d+)%/)?.[1]);
+      expect(share).toBeGreaterThan(0);
+      const label = interpolate(
+        [theme['base-content'], theme['primary']],
+        'oklch',
+      )(share / 100);
+      for (const key of ['base-100', 'base-200', 'base-300']) {
+        expect(wcagContrast(label, theme[key])).toBeGreaterThanOrEqual(4.5);
+      }
+    },
+  );
+});
+
 describe('Ptah reference theme contrast (ptah-glass and ptah-glass-light)', () => {
   const customThemes: Record<string, Record<string, string>> = Object.assign(
     {},
@@ -269,11 +291,11 @@ describe('Ptah reference theme contrast (ptah-glass and ptah-glass-light)', () =
     });
 
     it('keeps the floating label colors >= 4.5:1 and the rail >= 3:1 on each panel', () => {
-      // --ptah-field-label-fg-active: color-mix(primary 62%, base-content).
+      // --ptah-field-label-fg-active: color-mix(primary 40%, base-content).
       const labelActive = interpolate(
         [theme['base-content'], theme['primary']],
         'oklch',
-      )(0.62);
+      )(0.4);
       for (const surface of ['base-100', 'base-200', 'base-300'] as const) {
         expect(wcagContrast(muted, surfaces[surface])).toBeGreaterThanOrEqual(
           4.5,

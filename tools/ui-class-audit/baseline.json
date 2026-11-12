@@ -845,13 +845,7 @@
   "libs/frontend/git-ui/src/lib/branch-picker/branch-picker-dropdown.component.ts": {
     "btn": 2,
     "btn-outline": 2,
-    "btn-xs": 2,
-    "input": 2,
-    "input-xs": 2
-  },
-  "libs/frontend/git-ui/src/lib/commit/commit-composer.component.ts": {
-    "textarea": 1,
-    "textarea-bordered": 1
+    "btn-xs": 2
   },
   "libs/frontend/git-ui/src/lib/conflict/conflict-banner.component.ts": {
     "<dynamic>": 1,
@@ -869,9 +863,7 @@
     "btn-xs": 2
   },
   "libs/frontend/git-ui/src/lib/review-canvas/changed-file-row-actions.component.ts": {
-    "<dynamic>": 4,
-    "checkbox": 1,
-    "checkbox-xs": 1
+    "<dynamic>": 3
   },
   "libs/frontend/git-ui/src/lib/review-canvas/changed-file-section-actions.component.ts": {
     "<dynamic>": 2
@@ -884,26 +876,11 @@
     "btn": 4,
     "btn-active": 4,
     "btn-ghost": 4,
-    "btn-xs": 4,
-    "input": 1,
-    "input-bordered": 1,
-    "input-xs": 1,
-    "select": 2,
-    "select-bordered": 2,
-    "select-xs": 2
+    "btn-xs": 4
   },
   "libs/frontend/git-ui/src/lib/review-canvas/file-diff-section.component.ts": {
     "<dynamic>": 5,
-    "input": 2,
-    "input-bordered": 2,
-    "input-xs": 2,
-    "select": 1,
-    "select-bordered": 1,
-    "select-xs": 1,
-    "skeleton": 2,
-    "textarea": 1,
-    "textarea-bordered": 1,
-    "textarea-xs": 1
+    "skeleton": 2
   },
   "libs/frontend/git-ui/src/lib/review-canvas/file-section-header.component.ts": {
     "<dynamic>": 3,
@@ -936,13 +913,6 @@
   "libs/frontend/git-ui/src/lib/task/task-pr-panel.component.ts": {
     "<dynamic>": 1,
     "skeleton": 2
-  },
-  "libs/frontend/git-ui/src/lib/task/task-worktree-view.component.ts": {
-    "checkbox": 1,
-    "checkbox-xs": 1,
-    "input": 2,
-    "input-bordered": 2,
-    "input-xs": 2
   },
   "libs/frontend/machines-ui/src/lib/components/add-machine-pane/add-machine-pane.component.ts": {
     "btn-ghost": 1,
@@ -1284,23 +1254,7 @@
   },
   "libs/frontend/review-runs-ui/src/lib/components/review-bot-identity.component.ts": {
     "alert": 1,
-    "alert-warning": 1,
-    "input": 1,
-    "input-bordered": 1
-  },
-  "libs/frontend/review-runs-ui/src/lib/components/review-confirm-dialog.component.ts": {
-    "checkbox": 1
-  },
-  "libs/frontend/review-runs-ui/src/lib/components/review-findings-table.component.ts": {
-    "select": 1,
-    "select-bordered": 1,
-    "select-sm": 1
-  },
-  "libs/frontend/review-runs-ui/src/lib/components/review-repositories-editor.component.ts": {
-    "checkbox": 3,
-    "checkbox-sm": 3,
-    "input": 1,
-    "input-bordered": 1
+    "alert-warning": 1
   },
   "libs/frontend/review-runs-ui/src/lib/components/review-repositories.component.ts": {
     "<dynamic>": 1,
@@ -1328,20 +1282,12 @@
     "btn": 3,
     "btn-ghost": 3,
     "btn-sm": 3,
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1,
-    "select": 2,
-    "select-bordered": 2,
-    "select-sm": 2,
     "skeleton": 3
   },
   "libs/frontend/review-runs-ui/src/lib/components/review-settings-drawer.component.html": {
     "alert": 1,
     "alert-error": 1,
     "btn-ghost": 2,
-    "input": 6,
-    "input-bordered": 6,
     "toggle": 1,
     "toggle-warning": 1
   },
@@ -1350,9 +1296,7 @@
     "badge-ghost": 2,
     "badge-outline": 2,
     "badge-sm": 2,
-    "badge-xs": 1,
-    "textarea": 2,
-    "textarea-bordered": 2
+    "badge-xs": 1
   },
   "libs/frontend/setup-wizard/src/lib/components/agent-preview-dialog.component.ts": {
     "alert": 4,

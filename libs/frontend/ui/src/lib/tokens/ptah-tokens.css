@@ -136,7 +136,7 @@
   --ptah-field-radius: var(--glass-radius-inner, 0.625rem);
   --ptah-field-bg-hover: color-mix(in oklch, var(--ptah-field-bg) 92%, oklch(var(--bc)));
   --ptah-field-label-fg: oklch(var(--bcm, var(--bc)));
-  --ptah-field-label-fg-active: color-mix(in oklch, oklch(var(--p)) 62%, oklch(var(--bc)));
+  --ptah-field-label-fg-active: color-mix(in oklch, oklch(var(--p)) 40%, oklch(var(--bc)));
   --ptah-field-label-float-size: 0.6875rem;
   --ptah-field-label-float-leading: 1rem;
   --ptah-field-label-float-top: 0.375rem;
