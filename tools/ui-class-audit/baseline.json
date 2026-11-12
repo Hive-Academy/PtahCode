@@ -332,6 +332,11 @@
     "alert": 1,
     "alert-info": 1
   },
+  "libs/frontend/chat/src/lib/components/organisms/execution/inline-agent-bubble.component.ts": {
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-xs": 1
+  },
   "libs/frontend/chat/src/lib/components/organisms/execution/subagent-tile.component.ts": {
     "badge": 1,
     "badge-sm": 1,
@@ -344,8 +349,9 @@
     "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-session-actions.component.html": {
-    "btn": 1,
-    "btn-ghost": 1,
+    "btn": 4,
+    "btn-ghost": 4,
+    "btn-sm": 3,
     "btn-square": 1,
     "btn-xs": 1
   },
@@ -368,6 +374,13 @@
   "libs/frontend/chat/src/lib/components/organisms/transcript/chat-transcript.component.html": {
     "skeleton": 3
   },
+  "libs/frontend/chat/src/lib/components/organisms/workspace-sidebar.component.ts": {
+    "btn": 3,
+    "btn-ghost": 3,
+    "btn-sm": 2,
+    "btn-square": 1,
+    "btn-xs": 1
+  },
   "libs/frontend/chat/src/lib/components/templates/app-shell.component.html": {
     "btn": 6,
     "btn-active": 3,
@@ -376,6 +389,11 @@
     "btn-primary": 1,
     "btn-square": 1,
     "btn-xs": 6
+  },
+  "libs/frontend/chat/src/lib/components/templates/chat-view.component.html": {
+    "btn": 2,
+    "btn-ghost": 2,
+    "btn-xs": 2
   },
   "libs/frontend/chat/src/lib/settings/advanced-settings.component.ts": {
     "<dynamic>": 1,
@@ -458,9 +476,10 @@
     "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/pro-features/system-prompt-drawer.component.ts": {
-    "btn": 1,
+    "btn": 2,
+    "btn-ghost": 1,
     "btn-outline": 1,
-    "btn-xs": 1
+    "btn-xs": 2
   },
   "libs/frontend/chat/src/lib/settings/pro-features/vscode-lm-config.component.ts": {
     "badge": 3,
@@ -578,6 +597,9 @@
     "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/cli-provider-card.component.ts": {
+    "btn": 3,
+    "btn-ghost": 3,
+    "btn-xs": 3,
     "card-body": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/copilot-auto-approve-toggle.component.ts": {

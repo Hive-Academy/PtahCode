@@ -22,11 +22,10 @@ import { ElectronLayoutService, VSCodeService } from '@ptah-extension/core';
 import { SessionLivenessRegistry } from '@ptah-extension/chat-state';
 import { McpServersCardComponent } from '../molecules/mcp-servers-card.component';
 
-import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 @Component({
   selector: 'ptah-workspace-sidebar',
   standalone: true,
-  imports: [LucideAngularModule, McpServersCardComponent, PtahButtonDirective, PtahIconButtonDirective],
+  imports: [LucideAngularModule, McpServersCardComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: `
     :host {
@@ -88,8 +87,10 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
             }
             <!-- Remove button (hover reveal) -->
             <button
-              ptahIconButton size="xs" label="Remove workspace" class="remove-btn opacity-0 p-0 min-h-0 w-5 h-5 text-base-content-muted hover:text-error transition-opacity duration-200"
+              class="remove-btn opacity-0 btn btn-ghost btn-xs btn-square p-0 min-h-0 w-5 h-5 text-base-content-muted hover:text-error transition-opacity duration-200"
               (click)="onRemoveFolder($event, i)"
+              title="Remove workspace"
+              aria-label="Remove workspace"
             >
               <lucide-angular [img]="XIcon" class="w-3 h-3" />
             </button>
@@ -113,7 +114,7 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
       <!-- Add folder button -->
       <div class="mt-auto px-3 py-3 border-t border-surface-border">
         <button
-          ptahButton variant="ghost" class="w-full justify-start"
+          class="btn btn-ghost btn-sm w-full gap-2 text-base-content-muted hover:text-base-content justify-start"
           (click)="layout.addFolder()"
           aria-label="Add workspace folder"
         >
@@ -128,10 +129,7 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
         <!-- Dev instance only (electron:serve): link to the design-system gallery. -->
         <div class="px-3 pb-3">
           <button
-            ptahButton
-            variant="ghost"
-            size="sm"
-            class="w-full justify-start"
+            class="btn btn-ghost btn-sm w-full justify-start"
             data-testid="workspace-sidebar-ui-gallery-link"
             (click)="openUiGallery()"
           >
