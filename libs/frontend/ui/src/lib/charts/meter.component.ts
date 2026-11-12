@@ -5,8 +5,11 @@ import { PtahChartSize, PtahMeterRole, PtahMeterTone } from './chart.types';
 const TRACK_H: Readonly<Record<PtahChartSize, string>> = { xs: 'h-1', sm: 'h-1.5', md: 'h-2' };
 const TEXT: Readonly<Record<PtahChartSize, string>> = { xs: 'text-xs', sm: 'text-xs', md: 'text-sm' };
 
-/** Same recipe as the plan window stripes: 45deg, 4px bar, 3px gap. */
-const STRIPES = 'repeating-linear-gradient(45deg, currentColor 0 4px, transparent 4px 7px)';
+/** Same recipe as the plan window stripes: 45deg, bar and gap sizes come from tokens. */
+const STRIPES =
+  'repeating-linear-gradient(45deg, currentColor 0 var(--ptah-meter-stripe-bar), ' +
+  'transparent var(--ptah-meter-stripe-bar) ' +
+  'calc(var(--ptah-meter-stripe-bar) + var(--ptah-meter-stripe-gap)))';
 
 /**
  * Meter owner (TASK_2026_976_2421). A labelled bar with its value as text, so
@@ -78,7 +81,7 @@ export class PtahMeterComponent {
   readonly fillClass = computed(() =>
     this.stripes() ? CHART_TEXT[this.ink()] : CHART_BG[this.ink()],
   );
-  /** Left edge of the tick: the 1px tick stays inside the clipped track at 100%. */
+  /** Left edge of the tick: the tick stays inside the clipped track at 100%. */
   readonly markerLeft = computed(() => {
     const m = this.markerPercent();
     return m === null ? null : `calc(${m}% - ${m / 100}px)`;
