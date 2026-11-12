@@ -317,7 +317,7 @@ import { PtahButtonDirective, PtahIconButtonDirective, PtahBadgeDirective, PtahT
           @if (canStop()) {
             <button
               type="button"
-              ptahButton variant="ghost" size="xs" class="px-1 min-h-0 h-5 text-base-content-muted hover:text-error"
+              class="btn btn-ghost btn-xs px-1 min-h-0 h-5 text-base-content-muted hover:text-error"
               (click)="onStopClick($event)"
               [disabled]="stopPending()"
               data-testid="subagent-stop-button"
