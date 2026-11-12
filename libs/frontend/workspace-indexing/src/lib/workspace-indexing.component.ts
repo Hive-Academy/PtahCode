@@ -34,12 +34,21 @@ import {
 import { AppStateManager, injectWallClock } from '@ptah-extension/core';
 import type { IndexingPipeline } from '@ptah-extension/shared';
 import { WorkspaceIndexingService } from './workspace-indexing.service';
-import { PtahButtonDirective, PtahToggleDirective } from '@ptah-extension/ui';
+import {
+  PtahButtonDirective,
+  PtahMeterComponent,
+  PtahToggleDirective,
+} from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-workspace-indexing',
   standalone: true,
-  imports: [LucideAngularModule, PtahButtonDirective, PtahToggleDirective],
+  imports: [
+    LucideAngularModule,
+    PtahButtonDirective,
+    PtahMeterComponent,
+    PtahToggleDirective,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './workspace-indexing.component.html',
   styleUrl: './workspace-indexing.component.scss',

@@ -19,7 +19,7 @@ echo "🔍 Running pre-commit checks..."
 npx lint-staged --concurrent false
 
 # Check if orchestration skill files were changed
-SKILL_FILES_CHANGED=$(git diff --cached --name-only | grep -E "^\.claude/skills/" || true)
+SKILL_FILES_CHANGED=$(git diff --cached --name-only | grep -E "^(\.claude/skills/|plugins/ptah-core/skills/orchestration/)" || true)
 
 if [ -n "$SKILL_FILES_CHANGED" ]; then
   echo "🔧 Orchestration skill files changed, running validation..."

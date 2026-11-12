@@ -96,6 +96,8 @@ jobs:
         run: |
           node_modules/.bin/nx run role-census:self-test
           node_modules/.bin/nx run role-census:lint
+      - name: validate orchestration skill
+        run: npm run validate-skill
 
       # UI-class-audit ratchet (TASK_2026_926 step 0c): per-file count of raw
       # DaisyUI control classes (btn, badge, input, alert, ...) in the

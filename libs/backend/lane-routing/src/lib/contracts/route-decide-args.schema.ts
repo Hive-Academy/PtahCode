@@ -1,18 +1,7 @@
 import { z } from 'zod';
-import { TASK_TYPES } from '@ptah-extension/shared';
+import { PHASE_KINDS, TASK_TYPES } from '@ptah-extension/shared';
 
-export const PHASE_KINDS = [
-  'plan',
-  'architecture',
-  'implement',
-  'review',
-  'document-review',
-  'research',
-  'tests',
-  'docs',
-  'visual-review',
-  'design',
-] as const;
+export { PHASE_KINDS } from '@ptah-extension/shared';
 
 export const DEPTHS = ['Full', 'Partial', 'Minimal'] as const;
 

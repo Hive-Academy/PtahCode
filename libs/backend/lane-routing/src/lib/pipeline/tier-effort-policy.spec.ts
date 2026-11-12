@@ -2,12 +2,12 @@ import { PHASE_KINDS, PHASE_SHAPES } from '../contracts/route-decide-args.schema
 import { policyForPhase } from './tier-effort-policy';
 
 describe('policyForPhase', () => {
-  it.each(['plan', 'architecture'] as const)('uses R1 for %s', (kind) => {
+  it.each(['plan', 'architecture', 'batch'] as const)('uses R1 for %s', (kind) => {
     expect(policyForPhase(kind)).toEqual({ tier: 'opus', effort: 'high', ruleId: 'R1' });
     expect(policyForPhase(kind, 'mechanical', 8000)).toEqual({ tier: 'opus', effort: 'xhigh', ruleId: 'R1' });
   });
 
-  it.each(['review', 'document-review', 'visual-review'] as const)('uses R2 for %s', (kind) => {
+  it.each(['review', 'document-review', 'visual-review', 'completion'] as const)('uses R2 for %s', (kind) => {
     expect(policyForPhase(kind)).toEqual({ tier: 'opus', effort: 'high', ruleId: 'R2' });
     expect(policyForPhase(kind, 'docs', 8000)).toEqual({ tier: 'opus', effort: 'xhigh', ruleId: 'R2' });
   });
@@ -33,7 +33,7 @@ describe('policyForPhase', () => {
   });
 
   it.each(PHASE_KINDS)('keeps the legacy default for %s', (kind) => {
-    const expected = ['plan', 'architecture', 'review', 'document-review', 'visual-review'].includes(kind) ? 'opus' : 'sonnet';
+    const expected = ['plan', 'architecture', 'batch', 'review', 'document-review', 'visual-review', 'completion'].includes(kind) ? 'opus' : 'sonnet';
     expect(policyForPhase(kind).tier).toBe(expected);
   });
 
