@@ -52,6 +52,14 @@ function addChild(
 }
 
 describe('SessionChildRegistry', () => {
+  it('matches attach only by registered task, branch and canonical path', () => {
+    const registry = new SessionChildRegistry();
+    const child = addChild(registry, 'attached', { taskId: 'TASK_2026_584', branch: 'feat/shared' });
+    expect(registry.findAttachTarget('attached', 'TASK_2026_584', 'feat/shared', child.worktreePath)).toBe(child);
+    expect(registry.findAttachTarget('attached', 'TASK_2026_585', 'feat/shared', child.worktreePath)).toBeUndefined();
+    expect(registry.findAttachTarget('attached', 'TASK_2026_584', 'feat/other', child.worktreePath)).toBeUndefined();
+    expect(registry.findAttachTarget('attached', 'TASK_2026_584', 'feat/shared', resolve('/another/path'))).toBeUndefined();
+  });
   describe('succession', () => {
     it('replaces a live child without consuming another slot and preserves links', () => {
       const registry = new SessionChildRegistry();

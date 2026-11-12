@@ -135,7 +135,8 @@ export class SessionChildRegistry {
    * second one sees the first one's reservation.
    */
   reserveSlot(max: number): SessionChildReservation | null {
-    if (max > 0 && this.liveCount() + this.reservations.size >= max) return null;
+    if (max > 0 && this.liveCount() + this.reservations.size >= max)
+      return null;
     const id = this.nextReservationId++;
     this.reservations.add(id);
     return { id };
@@ -183,7 +184,9 @@ export class SessionChildRegistry {
   addPending(record: SessionChildRecord): SessionChildRecord {
     const id = record.childSessionId;
     if (this.records.has(id) || this.pending.has(id)) {
-      throw new Error(`SessionChildRegistry.addPending: child ${id} already exists`);
+      throw new Error(
+        `SessionChildRegistry.addPending: child ${id} already exists`,
+      );
     }
     const stored: SessionChildRecord = { ...record };
     this.pending.set(id, stored);
@@ -233,6 +236,22 @@ export class SessionChildRegistry {
     return tabId ? this.records.get(tabId) : undefined;
   }
 
+  /** Attach is admitted only against an existing registered task and path. */
+  findAttachTarget(
+    id: string,
+    taskId: string,
+    branch: string,
+    worktreePath: string,
+  ): SessionChildRecord | undefined {
+    const record = this.get(id);
+    return record &&
+      record.taskId === taskId &&
+      record.branch === branch &&
+      pathKey(record.worktreePath) === pathKey(worktreePath)
+      ? record
+      : undefined;
+  }
+
   /**
    * The child whose worktree is `path`, preferring a live one. Used when a
    * turn event arrives before the SDK id was bound.
@@ -241,12 +260,18 @@ export class SessionChildRegistry {
     if (!path?.trim()) return undefined;
     const key = pathKey(path);
     let ended: SessionChildRecord | undefined;
+    let live: SessionChildRecord | undefined;
     for (const record of this.records.values()) {
       if (pathKey(record.worktreePath) !== key) continue;
-      if (!record.terminalStatus) return record;
+      if (!record.terminalStatus) {
+        // A shared cwd cannot identify which live session emitted an event.
+        if (live) return undefined;
+        live = record;
+        continue;
+      }
       ended = record;
     }
-    return ended;
+    return live ?? ended;
   }
 
   /**
@@ -390,13 +415,20 @@ export class SessionChildRegistry {
     successor: SessionChildRecord,
     reason: string,
     endedAt: string = new Date().toISOString(),
-  ): { readonly predecessor: SessionChildRecord; readonly successor: SessionChildRecord } {
+  ): {
+    readonly predecessor: SessionChildRecord;
+    readonly successor: SessionChildRecord;
+  } {
     const prior = this.records.get(predecessorId);
     if (!prior || prior.terminalStatus) {
-      throw new Error(`SessionChildRegistry.succeed: predecessor ${predecessorId} is not live`);
+      throw new Error(
+        `SessionChildRegistry.succeed: predecessor ${predecessorId} is not live`,
+      );
     }
     if (this.records.has(successor.childSessionId)) {
-      throw new Error(`SessionChildRegistry.succeed: successor ${successor.childSessionId} already exists`);
+      throw new Error(
+        `SessionChildRegistry.succeed: successor ${successor.childSessionId} already exists`,
+      );
     }
     const predecessor: SessionChildRecord = {
       ...prior,
@@ -414,7 +446,8 @@ export class SessionChildRegistry {
     delete (predecessor as { pendingPermission?: unknown }).pendingPermission;
     this.replace(predecessor);
     this.replace(next);
-    if (next.sdkSessionId) this.bySdkId.set(next.sdkSessionId, next.childSessionId);
+    if (next.sdkSessionId)
+      this.bySdkId.set(next.sdkSessionId, next.childSessionId);
     this.endedOrder.push(predecessorId);
     this.pruneEnded();
     return { predecessor, successor: next };
@@ -427,13 +460,19 @@ export class SessionChildRegistry {
   ): SessionChildRecord | undefined {
     const predecessor = this.records.get(predecessorId);
     const successor = this.records.get(successorId);
-    if (!predecessor || !successor || predecessor.terminalStatus !== 'handed-off' ||
-      predecessor.succeededBy !== successorId || successor.succeeds !== predecessorId) {
+    if (
+      !predecessor ||
+      !successor ||
+      predecessor.terminalStatus !== 'handed-off' ||
+      predecessor.succeededBy !== successorId ||
+      successor.succeeds !== predecessorId
+    ) {
       return undefined;
     }
     this.remove(successorId);
     const restored: SessionChildRecord = { ...predecessor };
-    delete (restored as { terminalStatus?: SessionChildTerminalStatus }).terminalStatus;
+    delete (restored as { terminalStatus?: SessionChildTerminalStatus })
+      .terminalStatus;
     delete (restored as { endedAt?: string }).endedAt;
     delete (restored as { endReason?: string }).endReason;
     delete (restored as { endCause?: SessionChildEndCause }).endCause;

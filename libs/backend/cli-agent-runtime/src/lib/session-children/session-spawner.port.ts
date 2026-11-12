@@ -19,6 +19,8 @@ import type {
   LaneCompletionRefusalReason,
   LaneCompletionVerdict,
   SessionChildOutcome,
+  PhaseDispatchV1,
+  PhaseSkillV1,
 } from '@ptah-extension/shared';
 
 export type SessionChildStatus =
@@ -143,6 +145,11 @@ export interface SessionChildStartRequest {
   readonly deliverables?: readonly string[];
   readonly model?: string;
   readonly effort?: SessionChildSnapshot['effort'];
+  /** Host-resolved phase contract, forwarded in the child prompt. */
+  readonly phase?: PhaseDispatchV1;
+  readonly skills?: readonly PhaseSkillV1[];
+  /** Existing registered child whose same-task worktree may be shared. */
+  readonly attachToSessionId?: string;
 }
 
 export type SessionSpawnRefusalCode =

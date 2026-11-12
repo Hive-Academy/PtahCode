@@ -8,6 +8,10 @@
  * root registrar.
  */
 import 'reflect-metadata';
+jest.mock('node:fs/promises', () => ({
+  ...jest.requireActual('node:fs/promises'),
+  realpath: jest.fn(async (path: string) => path),
+}));
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -144,6 +148,12 @@ export function makeHarness(
         },
       };
     }),
+    attach: jest.fn(
+      async (root: string, branch: string, worktreePath: string) => ({
+        ok: true as const,
+        worktree: { root, branch, worktreePath, baseSha: SHA, owned: false },
+      }),
+    ),
     rollback: jest.fn().mockResolvedValue([
       { step: 'remove-worktree', ok: true },
       { step: 'delete-branch', ok: true },
@@ -359,6 +369,127 @@ const flush = async (): Promise<void> => {
 
 beforeEach(() => {
   jest.useFakeTimers({ now: Date.UTC(2026, 9, 1, 11, 0, 0) });
+});
+
+describe('registered same-task attach', () => {
+  it('delivers resolved phase discipline and skill text in the child prompt', async () => {
+    const h = makeHarness();
+    const definition = {
+      version: 1 as const,
+      kind: 'implement' as const,
+      input: ['task'],
+      deliverable: ['change'],
+      verdict: ['done'],
+      acceptanceStep: ['check'],
+      requiredCapabilities: [],
+      toolProfile: { disallowedTools: [], permission: 'allow' as const },
+      discipline: {
+        method: 'Follow the plan.',
+        outputContract: 'Commit.',
+        returnValue: 'Code.',
+        refusals: 'Report.',
+        escalationProtocol: 'Ask.',
+      },
+    };
+    await h.spawner.start(
+      h.request({
+        phase: {
+          version: 1,
+          kind: 'implement',
+          text: 'Phase discipline: follow the plan.',
+          definition,
+          toolProfile: definition.toolProfile,
+        },
+        skills: [{ name: 'coding', text: 'Run focused checks.' }],
+      }),
+    );
+    expect(h.host.startChildSession.mock.calls[0][0].prompt).toContain(
+      'Phase discipline: follow the plan.',
+    );
+    expect(h.host.startChildSession.mock.calls[0][0].prompt).toContain(
+      'Skill coding:\nRun focused checks.',
+    );
+    h.spawner.dispose();
+  });
+  it('starts two separate sessions on one branch and worktree', async () => {
+    const h = makeHarness();
+    const first = await h.spawner.start(h.request({ taskId: 'TASK_2026_584' }));
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    h.active.add(OTHER);
+    const second = await h.spawner.start(
+      h.request({
+        callerSessionId: OTHER,
+        taskId: 'TASK_2026_584',
+        attachToSessionId: first.child.childSessionId,
+      }),
+    );
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.child.childSessionId).not.toBe(first.child.childSessionId);
+    expect(second.child.parentSessionId).toBe(OTHER);
+    expect(second.child.worktreePath).toBe(first.child.worktreePath);
+    expect(second.child.branch).toBe(first.child.branch);
+    expect(h.provisioner.create).toHaveBeenCalledTimes(1);
+    expect(h.provisioner.attach).toHaveBeenCalledTimes(1);
+    expect(h.registry.findByCwd(first.child.worktreePath)).toBeUndefined();
+    h.spawner.dispose();
+  });
+
+  it('retains an attached worktree after host failure and rolls back an owned one', async () => {
+    const h = makeHarness();
+    const first = await h.spawner.start(h.request({ taskId: 'TASK_2026_584' }));
+    if (!first.ok) throw new Error('first start failed');
+    h.active.add(OTHER);
+    h.host.startChildSession.mockResolvedValueOnce({
+      started: false,
+      error: 'spawn failed',
+    } as never);
+    const attached = await h.spawner.start(
+      h.request({
+        callerSessionId: OTHER,
+        taskId: 'TASK_2026_584',
+        attachToSessionId: first.child.childSessionId,
+      }),
+    );
+    expect(attached).toMatchObject({
+      ok: false,
+      refusal: 'session-start-failed',
+    });
+    expect(h.provisioner.rollback).not.toHaveBeenCalled();
+    expect(h.registry.get(first.child.childSessionId)).toBeDefined();
+    h.host.startChildSession.mockResolvedValueOnce({
+      started: false,
+      error: 'spawn failed',
+    } as never);
+    const owned = await h.spawner.start(h.request({ branch: 'feat/owned' }));
+    expect(owned).toMatchObject({ ok: false, refusal: 'session-start-failed' });
+    expect(h.provisioner.rollback).toHaveBeenCalledTimes(1);
+    h.spawner.dispose();
+  });
+
+  it('refuses a different task or unrelated branch', async () => {
+    const h = makeHarness();
+    const first = await h.spawner.start(h.request({ taskId: 'TASK_2026_584' }));
+    if (!first.ok) throw new Error('first start failed');
+    h.active.add(OTHER);
+    for (const changes of [
+      { taskId: 'TASK_2026_585' },
+      { branch: 'feat/unrelated' },
+    ]) {
+      const result = await h.spawner.start(
+        h.request({
+          callerSessionId: OTHER,
+          taskId: 'TASK_2026_584',
+          attachToSessionId: first.child.childSessionId,
+          ...changes,
+        }),
+      );
+      expect(result).toMatchObject({ ok: false, refusal: 'branch-exists' });
+    }
+    expect(h.provisioner.attach).not.toHaveBeenCalled();
+    h.spawner.dispose();
+  });
 });
 
 afterEach(() => {

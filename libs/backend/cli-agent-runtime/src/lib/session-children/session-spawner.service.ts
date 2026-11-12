@@ -21,7 +21,7 @@
 import { inject, injectable, type DependencyContainer } from 'tsyringe';
 import type { ProviderAccountPortRefusal } from '@ptah-extension/auth-providers-tokens';
 import { isAbsolute, resolve } from 'node:path';
-import { access } from 'node:fs/promises';
+import { access, realpath } from 'node:fs/promises';
 import {
   SDK_TOKENS,
   SessionAdmissionRefusedError,
@@ -371,7 +371,10 @@ export class SessionSpawnerService implements ISessionSpawner {
       [caller, callerSdkId],
       request.branch?.trim() ?? '',
     );
-    if (existing) {
+    if (
+      existing &&
+      (!request.attachToSessionId || existing.taskId === request.taskId)
+    ) {
       this.log(
         `start for ${caller} on ${existing.branch} returns existing child ${existing.childSessionId}`,
       );
@@ -446,6 +449,12 @@ export class SessionSpawnerService implements ISessionSpawner {
     // The path the provisioner will create: the same deterministic function,
     // so task folder and deliverables are checked before any git work.
     const plannedPath = resolveWorktreePath(root, branch);
+    if (request.attachToSessionId && !request.taskId) {
+      return this.refuseStart(
+        'invalid-arguments',
+        'attachToSessionId requires taskId',
+      );
+    }
     const paths = resolveChildPaths(plannedPath, request);
     if (!paths.ok) return this.refuseStart('invalid-arguments', paths.detail);
 
@@ -596,11 +605,42 @@ export class SessionSpawnerService implements ISessionSpawner {
       }
     }
 
-    const provisioned = await this.provisioner.create(
-      root,
-      branch,
-      request.baseRef,
-    );
+    let provisioned;
+    if (request.attachToSessionId) {
+      // Real paths close the symlink gap between a registered path and the
+      // deterministic path a fresh start would otherwise create.
+      let canonical: string;
+      try {
+        canonical = await realpath(resolveWorktreePath(root, branch));
+      } catch {
+        return this.refuseStart(
+          'branch-exists',
+          'registered attach worktree no longer exists',
+        );
+      }
+      const target = this.registry.findAttachTarget(
+        request.attachToSessionId,
+        request.taskId ?? '',
+        branch,
+        canonical,
+      );
+      if (
+        !target ||
+        (await realpath(target.worktreePath).catch(() => '')) !== canonical
+      ) {
+        return this.refuseStart(
+          'branch-exists',
+          'attach requires a registered child with the same taskId, canonical worktree and branch',
+        );
+      }
+      provisioned = await this.provisioner.attach(root, branch, canonical);
+    } else {
+      provisioned = await this.provisioner.create(
+        root,
+        branch,
+        request.baseRef,
+      );
+    }
     if (!provisioned.ok) {
       this.log(`start refused (${provisioned.refusal}): ${provisioned.detail}`);
       return {
@@ -676,7 +716,20 @@ export class SessionSpawnerService implements ISessionSpawner {
         tabId: childTabId,
         workspaceRoot: root,
         worktreePath: worktree.worktreePath,
-        prompt: composeSessionChildPrompt(contract, task),
+        prompt: composeSessionChildPrompt(
+          contract,
+          [
+            request.phase?.text,
+            ...(request.skills ?? request.phase?.skills ?? []).map((skill) =>
+              skill.text
+                ? `Skill ${skill.name}:\n${skill.text}`
+                : `Skill ${skill.name}: ${skill.path}`,
+            ),
+            task,
+          ]
+            .filter(Boolean)
+            .join('\n\n'),
+        ),
         descriptor: this.descriptorOf(stored),
         sessionName: label,
         ...(guard.permissionLevel
@@ -805,7 +858,9 @@ export class SessionSpawnerService implements ISessionSpawner {
         ok: removed,
         ...(removed ? {} : { detail: 'the child link was never recorded' }),
       },
-      ...(await this.provisioner.rollback(runtime.worktree)),
+      ...(runtime.worktree.owned === false
+        ? []
+        : await this.provisioner.rollback(runtime.worktree)),
     );
     for (const step of rollback) {
       this.log(`rollback ${step.step}: ${rollbackStepOutcome(step)}`);
