@@ -24,6 +24,8 @@ import { GallerySectionComponent } from './gallery-section.component';
 interface TintPanel {
   readonly id: 'base-200' | 'base-300';
   readonly label: string;
+  /** Opaque fill of the notch label on this panel. */
+  readonly notchBg: string;
 }
 
 /** Reference for the form controls family (TASK_2026_950_ed73). */
@@ -173,6 +175,7 @@ interface TintPanel {
           class="grid grid-cols-1 gap-ptah-field rounded-ptah-surface border border-surface-border p-ptah-surface sm:grid-cols-3"
           [class.bg-base-200]="panel.id === 'base-200'"
           [class.bg-base-300]="panel.id === 'base-300'"
+          [style.--ptah-field-notch-bg]="panel.notchBg"
         >
           <ptah-field [label]="'Name on ' + panel.label"><input ptahInput /></ptah-field>
           <ptah-field [label]="'Error on ' + panel.label" error="Enter a name">
@@ -204,7 +207,7 @@ export class GalleryFormControlsFamilyComponent {
   public readonly sizes: readonly PtahControlSize[] = ['xs', 'sm', 'md'];
   public readonly choiceSizes = ['xs', 'sm'] as const;
   public readonly panels: readonly TintPanel[] = [
-    { id: 'base-200', label: 'base-200' },
-    { id: 'base-300', label: 'base-300' },
+    { id: 'base-200', label: 'base-200', notchBg: 'oklch(var(--b2))' },
+    { id: 'base-300', label: 'base-300', notchBg: 'oklch(var(--b3))' },
   ];
 }

@@ -6,6 +6,30 @@ const family = readFileSync(join(__dirname, 'ptah-form-controls.css'), 'utf8');
 const select = readFileSync(join(__dirname, 'rich-select', 'ptah-select.css'), 'utf8');
 
 describe('form control look contract', () => {
+  it('uses one focus border in glass without changing the standard theme focus recipe', () => {
+    expect(family).toMatch(/:root\[data-glass='on'\] :is\(\.input, \.textarea, \.select\)\[data-ptah-control\]:is\(:focus, \[data-state='focus'\]\)[^{]*\{[^}]*border-color: var\(--ptah-focus-ring-color\);[^}]*outline: none;[^}]*box-shadow: inset 0 0 0 calc\(var\(--ptah-focus-ring-width\) - var\(--ptah-border-width\)\) var\(--ptah-focus-ring-color\);/);
+    expect(family).not.toMatch(/:root\[data-glass='on'\][^{]*\{[^}]*border-width: var\(--ptah-focus-ring-width\)/);
+    expect(family).toMatch(/:root\[data-glass='on'\] :is\(\.input, \.textarea, \.select\)\[data-ptah-control\]:is\(:focus-visible, \[data-state='focus'\]\)[^{]*\{[^}]*outline: none;[^}]*box-shadow: inset 0 0 0 /);
+    expect(family).toMatch(/:root\[data-glass='on'\] :is\(\.input, \.textarea, \.select\)\[data-ptah-control\][^{]*\{\s*background-clip: padding-box;/);
+    expect(family).toContain('outline-offset: var(--ptah-focus-ring-offset);');
+  });
+
+  it('keeps the glass fill inside the field box and the standalone trigger border', () => {
+    expect(field).toMatch(/^\.ptah-field__box:where\(:root\[data-glass='on'\] \*\) \{\s*background-clip: padding-box;\s*\}/m);
+    expect(select).toMatch(/^\.ptah-select__trigger:where\(:root\[data-glass='on'\] \*\) \{\s*background-clip: padding-box;\s*\}/m);
+    const focus = select.match(
+      /^\.ptah-select :is\(\.ptah-select__trigger, #ptah-control\):is\(:focus, :focus-visible\):where\(:root\[data-glass='on'\] \*\) \{([^}]*)\}/m,
+    );
+    expect(focus).not.toBeNull();
+    for (const declaration of [
+      'border-color: var(--ptah-focus-ring-color);',
+      'outline: none;',
+      'box-shadow: inset 0 0 0 calc(var(--ptah-focus-ring-width) - var(--ptah-border-width)) var(--ptah-focus-ring-color);',
+    ]) {
+      expect(focus?.[1]).toContain(declaration);
+    }
+    expect(family).not.toContain('.ptah-select__trigger');
+  });
   it('hides the browser search action for family and field controls', () => {
     expect(family).toContain("input[type='search'][data-ptah-control]::-webkit-search-cancel-button");
     expect(field).toContain(".ptah-field__body input[type='search']::-webkit-search-cancel-button");

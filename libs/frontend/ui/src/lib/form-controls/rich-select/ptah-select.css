@@ -96,6 +96,21 @@
   outline-offset: var(--ptah-focus-ring-offset);
 }
 
+/* Glass (TASK_2026_969_3aab round 3): a standalone trigger has one edge. The
+   fill stays behind the translucent border, and focus is the border plus an
+   inset band of the same color, with no offset outline or glass halo.
+   :where() keeps the owner class first and adds no weight. The field reset
+   is stronger, so inside ptah-field the box stays the only edge. */
+.ptah-select__trigger:where(:root[data-glass='on'] *) {
+  background-clip: padding-box;
+}
+
+.ptah-select :is(.ptah-select__trigger, #ptah-control):is(:focus, :focus-visible):where(:root[data-glass='on'] *) {
+  border-color: var(--ptah-focus-ring-color);
+  outline: none;
+  box-shadow: inset 0 0 0 calc(var(--ptah-focus-ring-width) - var(--ptah-border-width)) var(--ptah-focus-ring-color);
+}
+
 .ptah-select__trigger:disabled {
   cursor: not-allowed;
   opacity: var(--ptah-field-disabled-opacity);

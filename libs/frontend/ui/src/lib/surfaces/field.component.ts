@@ -12,7 +12,7 @@ import {
 import { NgTemplateOutlet } from '@angular/common';
 import { PtahFieldControlRef } from './field-control-ref';
 
-/** `floating`: the label sits in the box and moves up. `stacked`: the label is above the box. */
+/** `floating`: a notch label. It rests in the box and moves onto the top border. `stacked`: the label is above the box. */
 export type PtahFieldAppearance = 'floating' | 'stacked';
 /** Box height: md 48 px (default), lg 56 px. */
 export type PtahFieldSize = 'md' | 'lg';

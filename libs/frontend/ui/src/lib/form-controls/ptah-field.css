@@ -1,4 +1,5 @@
-/* Ptah field look: floating label, slots, rail (TASK_2026_950_ed73).
+/* Ptah field look: notch label, slots, rail (TASK_2026_950_ed73,
+   TASK_2026_969_3aab round 3).
    Scope: the ptah-field owner (.ptah-field and its parts) and the family
    controls inside it. Uses --ptah-* tokens only.
    The box draws the edge, the fill and the focus ring. The control inside is
@@ -27,10 +28,16 @@
   border-radius: var(--ptah-field-radius);
   background-color: var(--ptah-field-bg);
   color: var(--ptah-field-fg);
-  overflow: hidden;
   transition-property: border-color, background-color;
   transition-duration: var(--ptah-duration-fast);
   transition-timing-function: var(--ptah-ease-standard);
+}
+
+/* Glass (round 3): keep the translucent fill inside the border, so the
+   translucent border does not show a second tonal line. :where() keeps the
+   owner class first and adds no weight. */
+.ptah-field__box:where(:root[data-glass='on'] *) {
+  background-clip: padding-box;
 }
 
 .ptah-field[data-size='lg'] .ptah-field__box {
@@ -67,47 +74,62 @@
 
 .ptah-field[data-appearance='floating'] .ptah-field__label {
   position: absolute;
-  inset-inline-start: 0;
+  inset-inline-start: calc(var(--ptah-field-notch-pad-x) * -1);
   top: 50%;
-  max-width: 100%;
+  max-width: calc(100% + var(--ptah-field-notch-pad-x) * 2);
+  padding-inline: var(--ptah-field-notch-pad-x);
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
   transform: translateY(-50%);
+  background-color: transparent;
   font-size: var(--ptah-text-body-size);
   line-height: var(--ptah-text-body-leading);
   font-weight: var(--ptah-text-body-weight);
   pointer-events: none;
-  transition-property: top, transform, font-size, line-height, color;
+  transition-property: top, font-size, line-height, color, background-color;
   transition-duration: var(--ptah-duration-base);
-  transition-timing-function: var(--ptah-ease-emphasis);
+  transition-timing-function: var(--ptah-ease-standard);
+}
+
+/* Notch label. At rest (an empty control, no focus) the label sits at the
+   text start and the text size: centered for input and select, on the first
+   text line for textarea. The negative inline start and the same inline
+   padding keep the label text on the control text start. */
+.ptah-field[data-appearance='floating']:has(.ptah-field__body :is(input, textarea):placeholder-shown) .ptah-field__label {
+  background-color: transparent;
+  font-size: var(--ptah-text-body-size);
+  line-height: var(--ptah-text-body-leading);
 }
 
 .ptah-field[data-appearance='floating'] .ptah-field__body:has(textarea) .ptah-field__label {
-  top: var(--ptah-space-3);
-  transform: none;
+  top: calc(var(--ptah-field-textarea-pad-y) + var(--ptah-text-body-leading) / 2);
 }
 
 /* Floated: focus, a value, autofill, a real placeholder, a native select,
-   or a filled rich select. */
+   or an open or filled rich select. The label is centered on the top border
+   line, small, and has an opaque fill that cuts the border. Set
+   --ptah-field-notch-bg to the surface under the field (see ptah-tokens.css). */
 .ptah-field[data-appearance='floating']:is(
     :focus-within,
     :has(.ptah-field__body :is(input, textarea):not(:placeholder-shown)),
     :has(.ptah-field__body :is(input, textarea):autofill),
     :has(.ptah-field__body :is(input, textarea)[placeholder]:not([placeholder=' '])),
     :has(.ptah-field__body select),
-    :has(.ptah-field__body .ptah-select[data-ptah-filled])
+    :has(.ptah-field__body .ptah-select:is([data-open], [data-ptah-filled]))
   )
   .ptah-field__label {
-  top: var(--ptah-field-label-float-top);
-  transform: none;
+  top: calc(var(--ptah-border-width) * -1);
+  transform: translateY(-50%);
+  background-color: var(--ptah-field-notch-bg);
   font-size: var(--ptah-field-label-float-size);
   line-height: var(--ptah-field-label-float-leading);
   font-weight: var(--ptah-field-label-float-weight);
 }
 
-.ptah-field__box:focus-within .ptah-field__label,
-.ptah-field:has(.ptah-select[data-open]) .ptah-field__label {
+/* Focus color only on focus. The select panel is inside the select host, so
+   focus in the open panel is still focus within the box. */
+.ptah-field__box:focus-within .ptah-field__label {
   color: var(--ptah-field-label-fg-active);
 }
 
@@ -139,12 +161,6 @@
   align-self: stretch;
 }
 
-.ptah-field[data-appearance='floating'] :is(.ptah-field__body, #ptah-field) :is(input, textarea, select):is(.input, .textarea, .select, #ptah-control),
-.ptah-field[data-appearance='floating'] :is(.ptah-field__body, #ptah-field) .ptah-select__trigger {
-  padding-top: var(--ptah-field-pad-top);
-  padding-bottom: var(--ptah-field-pad-bottom);
-}
-
 :is(.ptah-field__body, #ptah-field) textarea:is(.textarea, #ptah-control) {
   min-height: var(--ptah-field-textarea-min-h);
   padding-inline-end: 0;
@@ -152,7 +168,7 @@
 }
 
 .ptah-field[data-appearance='floating'] :is(.ptah-field__body, #ptah-field) textarea:is(.textarea, #ptah-control) {
-  padding-top: calc(var(--ptah-field-pad-top) + var(--ptah-space-2));
+  padding-block: var(--ptah-field-textarea-pad-y);
 }
 
 /* The field clear action replaces the browser search action. */
@@ -176,11 +192,14 @@
   border: 0;
 }
 
+/* The box does not clip (the notch label crosses its top border). The rail
+   covers the padding box with the inner radius, and a mask shows only its
+   bottom band, so the band follows the rounded corners. */
 .ptah-field__rail {
   position: absolute;
-  inset-inline: 0;
-  bottom: 0;
-  height: var(--ptah-field-rail-h);
+  inset: 0;
+  border-radius: calc(var(--ptah-field-radius) - var(--ptah-border-width));
+  mask-image: linear-gradient(to top, var(--ptah-field-rail-color) var(--ptah-field-rail-h), transparent var(--ptah-field-rail-h));
   background-color: var(--ptah-field-rail-color);
   transform: scaleX(0);
   transform-origin: left center;
@@ -225,6 +244,10 @@
   .ptah-field[data-busy='true'] .ptah-field__rail {
     animation: none;
     background-image: none;
+  }
+
+  .ptah-field[data-appearance='floating'] .ptah-field__label {
+    transition: none;
   }
 }
 
