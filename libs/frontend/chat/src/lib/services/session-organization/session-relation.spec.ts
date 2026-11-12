@@ -63,12 +63,23 @@ describe('isRelatedSession', () => {
 });
 
 describe('SessionRelationFocus', () => {
-  it('clears only for the focused id', () => {
+  it('clears only for the matching id', () => {
     const focus = new SessionRelationFocus();
-    focus.set('a', null);
-    focus.clear('b');
+    focus.setPointer('a', null);
+    focus.clearPointer('b');
     expect(focus.focused()?.id).toBe('a');
-    focus.clear('a');
+    focus.clearPointer('a');
+    expect(focus.focused()).toBeNull();
+  });
+
+  it('keeps keyboard focus when the pointer enters and leaves another card', () => {
+    const focus = new SessionRelationFocus();
+    focus.setKeyboard('a', null);
+    focus.setPointer('b', null);
+    expect(focus.focused()?.id).toBe('b');
+    focus.clearPointer('b');
+    expect(focus.focused()?.id).toBe('a');
+    focus.clearKeyboard('a');
     expect(focus.focused()).toBeNull();
   });
 });

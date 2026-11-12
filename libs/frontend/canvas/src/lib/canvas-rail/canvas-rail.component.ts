@@ -636,7 +636,11 @@ export class CanvasRailComponent {
     if (!this.isGroupExpanded(key)) this.groupChoice.update(choice => ({ ...choice, [key]: true }));
   }
   private focusGroupToggle(key: RailGroupKey): void {
-    this.host.nativeElement.querySelector<HTMLElement>(`[data-rail-group-toggle="${key}"]`)?.focus();
+    const host = this.host.nativeElement;
+    (
+      host.querySelector<HTMLElement>(`[data-rail-group-toggle="${key}"]`) ??
+      host.querySelector<HTMLElement>('[data-rail-group-toggle]')
+    )?.focus();
   }
   /** Tiles of a group that wait for the user; shown on a collapsed header. */
   groupAttention(group: { tiles: readonly CanvasTile[] }): number {

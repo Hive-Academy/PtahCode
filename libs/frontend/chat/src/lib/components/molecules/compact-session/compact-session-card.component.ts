@@ -193,10 +193,10 @@ function sameLaneSummary(
         [childCount]="relation().childCount"
         [childRunning]="relation().childRunning"
         [related]="relatedHighlight()"
-        (pointerenter)="onRelationEnter()"
-        (pointerleave)="onRelationLeave($event)"
-        (focusin)="onRelationEnter()"
-        (focusout)="onRelationLeave($event)"
+        (pointerenter)="onRelationPointer(true)"
+        (pointerleave)="onRelationPointer(false)"
+        (focusin)="onRelationKeyboard(true)"
+        (focusout)="onRelationKeyboard(false)"
         [tabStop]="tabStop()"
         [innerTabbable]="tabStop()"
         [reserveActionCorner]="reserveActionCorner()"
@@ -776,21 +776,18 @@ export class CompactSessionCardComponent {
     );
   });
 
-  onRelationEnter(): void {
+  onRelationPointer(entered: boolean): void {
     const id = this.tab().claudeSessionId;
-    if (id) this.relationFocus.set(id, this.ownParentId());
+    if (!id) return;
+    if (entered) this.relationFocus.setPointer(id, this.ownParentId());
+    else this.relationFocus.clearPointer(id);
   }
 
-  /** Keep the highlight while the other modality (pointer or focus) still holds. */
-  onRelationLeave(event?: Event): void {
-    const el = event?.currentTarget;
-    if (
-      el instanceof HTMLElement &&
-      (el.matches(':hover') || el.matches(':focus-within'))
-    )
-      return;
+  onRelationKeyboard(entered: boolean): void {
     const id = this.tab().claudeSessionId;
-    if (id) this.relationFocus.clear(id);
+    if (!id) return;
+    if (entered) this.relationFocus.setKeyboard(id, this.ownParentId());
+    else this.relationFocus.clearKeyboard(id);
   }
 
   constructor() {

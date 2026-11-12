@@ -1,4 +1,9 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, computed, signal } from '@angular/core';
+
+interface RelationTarget {
+  readonly id: string;
+  readonly parentId: string | null;
+}
 
 /** Shown when the parent session is not in the list or has no label. */
 export const UNKNOWN_PARENT_LABEL = 'agent session';
@@ -63,17 +68,24 @@ export function isRelatedSession(
 /** The session under pointer or keyboard focus, for the parent/child highlight. */
 @Injectable({ providedIn: 'root' })
 export class SessionRelationFocus {
-  private readonly _focused = signal<{
-    id: string;
-    parentId: string | null;
-  } | null>(null);
-  readonly focused = this._focused.asReadonly();
+  private readonly pointer = signal<RelationTarget | null>(null);
+  private readonly keyboard = signal<RelationTarget | null>(null);
+  /** Pointer wins; keyboard focus holds when the pointer leaves. */
+  readonly focused = computed(() => this.pointer() ?? this.keyboard());
 
-  set(id: string, parentId: string | null): void {
-    this._focused.set(id ? { id, parentId } : null);
+  setPointer(id: string, parentId: string | null): void {
+    this.pointer.set(id ? { id, parentId } : null);
   }
 
-  clear(id: string): void {
-    if (this._focused()?.id === id) this._focused.set(null);
+  clearPointer(id: string): void {
+    if (this.pointer()?.id === id) this.pointer.set(null);
+  }
+
+  setKeyboard(id: string, parentId: string | null): void {
+    this.keyboard.set(id ? { id, parentId } : null);
+  }
+
+  clearKeyboard(id: string): void {
+    if (this.keyboard()?.id === id) this.keyboard.set(null);
   }
 }
