@@ -19,6 +19,7 @@ import {
 } from 'lucide-angular';
 import {
   BrandMarkComponent,
+  PtahBadgeDirective,
   PtahButtonDirective,
   PtahCheckboxDirective,
 } from '@ptah-extension/ui';
@@ -200,6 +201,7 @@ export function nextProviderSort(
   selector: 'ptah-provider-table',
   standalone: true,
   imports: [
+    PtahBadgeDirective,
     PtahButtonDirective,
     PtahCheckboxDirective,
     LucideAngularModule,
@@ -433,10 +435,11 @@ export function nextProviderSort(
                     </td>
                     <td>
                       <span
-                        class="badge badge-ghost badge-sm whitespace-nowrap"
+                        ptahBadge size="sm" class="whitespace-nowrap"
                         data-testid="provider-row-origin"
-                        >{{ row.originLabel }}</span
                       >
+                        <span class="ptah-badge-text">{{ row.originLabel }}</span>
+                      </span>
                     </td>
                     <td>
                       @if (row.kind === 'config') {

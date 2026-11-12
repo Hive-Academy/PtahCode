@@ -213,7 +213,7 @@ describe('StorageHealthPanelComponent', () => {
 
     const badge = root.querySelector('[data-testid="storage-run-badge"]');
     expect(badge?.textContent?.trim()).toBe('partial');
-    expect(badge?.className).toContain('badge-warning');
+    expect(badge?.getAttribute('data-tone')).toBe('warn');
     const detail = root.querySelector('[data-testid="storage-run-detail"]');
     expect(detail?.textContent ?? '').toContain('Reason');
     expect(detail?.textContent ?? '').toContain('row purge failed mid-batch');
@@ -239,7 +239,7 @@ describe('StorageHealthPanelComponent', () => {
 
     const badge = root.querySelector('[data-testid="storage-run-badge"]');
     expect(badge?.textContent?.trim()).toBe('failed');
-    expect(badge?.className).toContain('badge-error');
+    expect(badge?.getAttribute('data-tone')).toBe('err');
     const detail = root.querySelector('[data-testid="storage-run-detail"]');
     expect(detail?.textContent ?? '').toContain('Error');
     expect(detail?.textContent ?? '').toContain(
@@ -252,7 +252,7 @@ describe('StorageHealthPanelComponent', () => {
 
     const badge = root.querySelector('[data-testid="storage-run-badge"]');
     expect(badge?.textContent?.trim()).toBe('completed');
-    expect(badge?.className).toContain('badge-success');
+    expect(badge?.getAttribute('data-tone')).toBe('ok');
     expect(root.textContent ?? '').toContain('2 h ago');
     expect(root.textContent ?? '').toContain('in 30 min');
     expect(root.textContent ?? '').toContain('120');

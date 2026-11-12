@@ -27,6 +27,7 @@ import {
   type MarketplaceNavCountKey,
 } from './marketplace-nav-counts';
 import { marketplaceRouteLink } from './marketplace-route-url';
+import { PtahBadgeDirective } from '@ptah-extension/ui';
 
 /** One destination in the Marketplace nav. */
 export interface MarketplaceNavItem {
@@ -205,7 +206,7 @@ const EXACT_MATCH: IsActiveMatchOptions = {
 @Component({
   selector: 'ptah-marketplace-nav',
   standalone: true,
-  imports: [RouterLink, RouterLinkActive, LucideAngularModule],
+  imports: [RouterLink, RouterLinkActive, LucideAngularModule, PtahBadgeDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     class: 'block h-full shrink-0',
@@ -274,7 +275,11 @@ const EXACT_MATCH: IsActiveMatchOptions = {
                   <span class="min-w-0 flex-1 truncate">{{ item.label }}</span>
                   @if (count !== null) {
                     <span
-                      class="badge badge-ghost badge-sm tabular-nums"
+                      ptahBadge
+                      tone="neutral"
+                      size="sm"
+                      count
+                      class="tabular-nums"
                       data-testid="marketplace-nav-count"
                     >
                       {{ count }}

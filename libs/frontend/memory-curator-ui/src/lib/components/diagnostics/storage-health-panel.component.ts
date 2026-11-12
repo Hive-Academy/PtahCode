@@ -8,7 +8,11 @@ import type {
   MemoryRetentionRunDto,
   MemoryStorageHealthDto,
 } from '@ptah-extension/shared';
-import { NativeCardComponent, type NativeCardTone } from '@ptah-extension/ui';
+import {
+  NativeCardComponent,
+  PtahBadgeDirective,
+  type NativeCardTone,
+} from '@ptah-extension/ui';
 
 const NULL_TEXT = '—';
 
@@ -116,7 +120,7 @@ const RUN_TONE: Record<MemoryRetentionRunDto['outcome'], NativeCardTone> = {
   selector: 'ptah-storage-health-panel',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NativeCardComponent],
+  imports: [NativeCardComponent, PtahBadgeDirective],
   template: `
     <section class="flex flex-col gap-2" aria-label="Storage and retention">
       <header class="flex items-center justify-between gap-2">
@@ -125,9 +129,9 @@ const RUN_TONE: Record<MemoryRetentionRunDto['outcome'], NativeCardTone> = {
         </h3>
         @if (vm(); as v) {
           <span
-            class="badge badge-sm"
-            [class.badge-success]="v.retentionEnabled"
-            [class.badge-ghost]="!v.retentionEnabled"
+            ptahBadge
+            size="sm"
+            [tone]="v.retentionEnabled ? 'ok' : 'neutral'"
             data-testid="storage-retention-badge"
           >
             {{ v.retentionEnabled ? 'retention on' : 'retention off' }}
@@ -228,10 +232,15 @@ const RUN_TONE: Record<MemoryRetentionRunDto['outcome'], NativeCardTone> = {
               <span class="text-xs font-medium">Last retention run</span>
               @if (v.lastRun; as run) {
                 <span
-                  class="badge badge-sm"
-                  [class.badge-success]="run.outcome === 'completed'"
-                  [class.badge-warning]="run.outcome === 'partial'"
-                  [class.badge-error]="run.outcome === 'failed'"
+                  ptahBadge
+                  size="sm"
+                  [tone]="
+                    run.outcome === 'completed'
+                      ? 'ok'
+                      : run.outcome === 'partial'
+                        ? 'warn'
+                        : 'err'
+                  "
                   data-testid="storage-run-badge"
                 >
                   {{ run.outcome }}

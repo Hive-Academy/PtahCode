@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" />
+  <title>Batch 6 badge preview</title>
+  <link rel="stylesheet" href="../../../libs/frontend/ui/src/lib/tokens/ptah-tokens.css" />
+  <link rel="stylesheet" href="../../../libs/frontend/ui/src/lib/badge/ptah-badge.css" />
+  <style>
+    :root { --bc: 0.3 0 0; --ptah-state-warn: #946200; --ptah-gap-label: .25rem; }
+    body { font: 14px Arial, sans-serif; background: #f5f5f5; color: #333; padding: 2rem; }
+    section { display: flex; gap: 1rem; align-items: center; margin-block: 1rem; }
+  </style>
+  <h1>Marketplace badge samples</h1>
+  <section><span>Installed Skills</span><span data-ptah-badge data-tone="neutral" data-size="sm" data-appearance="soft" data-count>12</span></section>
+  <section><span>Server origin</span><span data-ptah-badge data-tone="neutral" data-size="sm" data-appearance="soft"><span class="ptah-badge-text">A very long external marketplace origin label that should truncate</span></span></section>
+  <section><span>Scope</span><span data-ptah-badge data-tone="warn" data-size="sm" data-appearance="outline"><span class="ptah-badge-text">Global</span></span></section>
+  <section><span>State</span><span data-ptah-badge data-tone="warn" data-size="xs" data-appearance="soft">Shadowed</span></section>
+</html>

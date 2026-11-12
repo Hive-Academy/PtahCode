@@ -25,6 +25,7 @@ import {
   MotionRouteStageDirective,
   detailParamKey,
   PtahIconButtonDirective,
+  PtahBadgeDirective,
 } from '@ptah-extension/ui';
 
 import {
@@ -199,6 +200,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
   selector: 'ptah-provider-list-view',
   standalone: true,
   imports: [
+    PtahBadgeDirective,
     PtahIconButtonDirective,
     RouterOutlet,
     LucideAngularModule,

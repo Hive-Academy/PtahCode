@@ -4,6 +4,7 @@ import {
   computed,
   input,
 } from '@angular/core';
+import { PtahBadgeDirective, type PtahBadgeTone } from '@ptah-extension/ui';
 import {
   assertNever,
   type MemoryCuratorEventWire,
@@ -15,7 +16,7 @@ interface FeedRow {
   readonly kind: string;
   readonly relative: string;
   readonly outcome: string;
-  readonly tone: 'success' | 'warning' | 'info' | 'error';
+  readonly tone: PtahBadgeTone;
 }
 
 const MAX_ROWS = 10;
@@ -43,6 +44,7 @@ const GATE_FALLBACK = 'Skipped by a gate';
   selector: 'ptah-event-feed',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PtahBadgeDirective],
   template: `
     <div class="surface-2 overflow-hidden rounded-lg">
       <header
@@ -64,12 +66,10 @@ const GATE_FALLBACK = 'Skipped by a gate';
               class="flex items-center justify-between gap-2 px-3 py-1.5 text-xs"
             >
               <span
-                class="badge badge-sm"
-                [class.badge-success]="row.tone === 'success'"
-                [class.badge-warning]="row.tone === 'warning'"
-                [class.badge-info]="row.tone === 'info'"
-                [class.badge-error]="row.tone === 'error'"
-                >{{ row.kind }}</span
+                ptahBadge
+                size="sm"
+                [tone]="row.tone"
+                ><span class="ptah-badge-text">{{ row.kind }}</span></span
               >
               <span class="flex-1 truncate">{{ row.outcome }}</span>
               <span class="tabular-nums text-base-content-muted">{{
@@ -217,15 +217,15 @@ function toneFor(ev: MemoryCuratorEventWire): FeedRow['tone'] {
   switch (ev.kind) {
     case 'error':
     case 'curator-error':
-      return 'error';
+      return 'err';
     case 'manual-run': {
       const outcome = ev.stats?.['outcome'];
-      if (outcome === 'failed') return 'error';
-      if (outcome === 'stalled') return 'warning';
-      return 'success';
+      if (outcome === 'failed') return 'err';
+      if (outcome === 'stalled') return 'warn';
+      return 'ok';
     }
     case 'curator-run':
-      return 'success';
+      return 'ok';
     case 'idle-trigger':
     case 'turn-trigger':
     case 'turn-complete-trigger':
@@ -235,13 +235,13 @@ function toneFor(ev: MemoryCuratorEventWire): FeedRow['tone'] {
     case 'commit-detect':
       return 'info';
     case 'boot-scan':
-      return bootScanNeedsAttention(ev.stats) ? 'warning' : 'info';
+      return bootScanNeedsAttention(ev.stats) ? 'warn' : 'info';
     case 'curator-skipped-no-data':
     case 'embedder-download':
       return 'info';
     case 'rate-limited':
     case 'tool-failure':
-      return 'warning';
+      return 'warn';
     default:
       return assertNever(ev.kind);
   }
