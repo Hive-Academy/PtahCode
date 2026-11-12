@@ -52,6 +52,7 @@ import {
 } from '@ptah-extension/shared';
 
 import type { MessageHandler } from './message-router.types';
+import { ClockService } from './clock.service';
 import { WorkspaceScopeService } from './workspace-scope.service';
 import { attentionConditionKey, NotificationService } from './notification.service';
 
@@ -85,9 +86,6 @@ export const ACTIVITY_COALESCE_WINDOW_MS = 750;
 /** Quiet period after which the ticker collapses to its idle dot. */
 export const ACTIVITY_IDLE_AFTER_MS = 8000;
 
-/** How often the idle clock is re-read. Coarse on purpose — one timer. */
-const IDLE_TICK_MS = 1000;
-
 /** Display labels for the boot phases, when the host sends no `detail`. */
 const BOOT_PHASE_LABELS: Readonly<Record<BootPhase, string>> = {
   starting: 'Starting up',
@@ -109,6 +107,7 @@ export class BackOfficeActivityService implements MessageHandler {
   private readonly destroyRef = inject(DestroyRef);
   private readonly workspaceScope = inject(WorkspaceScopeService);
   private readonly notifications = inject(NotificationService);
+  private readonly clock = inject(ClockService);
   private readonly noticeGenerations = new Map<string, number>();
 
   readonly handledMessageTypes = [
@@ -124,8 +123,8 @@ export class BackOfficeActivityService implements MessageHandler {
   ] as const;
 
   private readonly _items = signal<readonly ActivityItem[]>([]);
-  /** Wall clock, re-read on a single interval so `isIdle` can settle itself. */
-  private readonly _now = signal<number>(Date.now());
+  /** Shared wall clock, held while this service lives so `isIdle` can settle itself. */
+  private readonly _now = this.clock.now;
   private readonly _lastArrivalAt = signal<number>(0);
 
   /** Newest first, bounded by {@link ACTIVITY_RING_CAPACITY}. */
@@ -150,10 +149,7 @@ export class BackOfficeActivityService implements MessageHandler {
   private lastStatusFingerprint = new Map<string, string>();
 
   constructor() {
-    const handle = setInterval(() => {
-      this._now.set(Date.now());
-    }, IDLE_TICK_MS);
-    this.destroyRef.onDestroy(() => clearInterval(handle));
+    this.destroyRef.onDestroy(this.clock.acquire('second'));
   }
 
   handleMessage(message: { type: string; payload?: unknown }): void {
@@ -277,7 +273,6 @@ export class BackOfficeActivityService implements MessageHandler {
     this.headKey = key;
     this.headArrivalAt = now;
     this._lastArrivalAt.set(now);
-    this._now.set(now);
   }
 
   /**

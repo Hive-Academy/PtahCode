@@ -310,11 +310,10 @@
     "btn-sm": 2
   },
   "libs/frontend/chat/src/lib/components/molecules/session-filter-bar/session-filter-bar.component.ts": {
-    "btn": 3,
+    "btn": 1,
     "btn-circle": 1,
-    "btn-ghost": 3,
-    "btn-sm": 1,
-    "btn-xs": 2
+    "btn-ghost": 1,
+    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/session-list-row/session-list-row.component.ts": {
     "<dynamic>": 5
@@ -333,11 +332,6 @@
     "alert": 1,
     "alert-info": 1
   },
-  "libs/frontend/chat/src/lib/components/organisms/execution/inline-agent-bubble.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/chat/src/lib/components/organisms/execution/subagent-tile.component.ts": {
     "badge": 1,
     "badge-sm": 1,
@@ -348,13 +342,6 @@
   },
   "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-agents-section.component.ts": {
     "<dynamic>": 2
-  },
-  "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-session-actions.component.html": {
-    "btn": 4,
-    "btn-ghost": 4,
-    "btn-sm": 3,
-    "btn-square": 1,
-    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-task-section.component.ts": {
     "alert": 2,
@@ -374,12 +361,6 @@
   },
   "libs/frontend/chat/src/lib/components/organisms/transcript/chat-transcript.component.html": {
     "skeleton": 3
-  },
-  "libs/frontend/chat/src/lib/components/organisms/workspace-sidebar.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/components/templates/app-shell.component.html": {
     "btn": 6,
@@ -494,10 +475,7 @@
     "btn-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/accounts/add-account-form.component.ts": {
-    "<dynamic>": 2,
-    "btn": 1,
-    "btn-primary": 1,
-    "btn-sm": 1
+    "<dynamic>": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/accounts/ambient-account-row.component.ts": {
     "<dynamic>": 1
@@ -689,24 +667,14 @@
     "input-sm": 1
   },
   "libs/frontend/cron-scheduler-ui/src/lib/components/cron-job-card.component.ts": {
-    "<dynamic>": 1,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
+    "<dynamic>": 1
   },
   "libs/frontend/cron-scheduler-ui/src/lib/components/cron-job-detail-drawer.component.ts": {
-    "<dynamic>": 2,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1
+    "<dynamic>": 2
   },
   "libs/frontend/cron-scheduler-ui/src/lib/components/cron-scheduler-tab.component.ts": {
     "alert": 1,
-    "alert-error": 1,
-    "btn": 2,
-    "btn-primary": 2,
-    "btn-sm": 2
+    "alert-error": 1
   },
   "libs/frontend/dashboard/src/lib/components/builders-card/builders-card.component.html": {
     "card-actions": 1,
@@ -1116,10 +1084,8 @@
     "btn-xs": 4
   },
   "libs/frontend/notification-center/src/lib/notification-center.component.ts": {
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-primary": 1,
-    "btn-sm": 2,
+    "btn": 1,
+    "btn-ghost": 1,
     "btn-square": 1
   },
   "libs/frontend/notification-center/src/lib/notification-snackbar.component.ts": {
@@ -1167,10 +1133,7 @@
   "libs/frontend/review-runs-ui/src/lib/components/review-run-detail.component.ts": {
     "<dynamic>": 3,
     "alert": 2,
-    "alert-error": 2,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1
+    "alert-error": 2
   },
   "libs/frontend/review-runs-ui/src/lib/components/review-runs-list.component.ts": {
     "<dynamic>": 1
@@ -1179,9 +1142,6 @@
     "alert": 5,
     "alert-error": 2,
     "alert-warning": 3,
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-sm": 3,
     "skeleton": 3
   },
   "libs/frontend/review-runs-ui/src/lib/components/review-settings-drawer.component.html": {
@@ -1383,5 +1343,11 @@
     "alert-error": 2,
     "alert-info": 1,
     "alert-warning": 2
+  },
+  "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-session-actions.component.html": {
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-square": 1,
+    "btn-xs": 1
   }
 }
