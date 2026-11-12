@@ -30,9 +30,21 @@ describe('form control look contract', () => {
     expect(field).toMatch(/:is\(\.ptah-field__body, #ptah-field\) textarea:is\([^)]*\) \{[^}]*resize: none;/);
   });
 
-  it('keeps keyboard focus on the field box', () => {
-    expect(field).toContain('.ptah-field__box:has(.ptah-field__body :focus-visible)');
-    expect(field).toMatch(/\.ptah-select__trigger:focus-visible[^{}]*\{\s*outline: none;/);
+  it('draws one contiguous field edge on click and keyboard focus', () => {
+    const focus = field.match(/\.ptah-field \.ptah-field__box:has\(\.ptah-field__body :focus\) \{([^}]*)\}/);
+    expect(focus).not.toBeNull();
+    expect(focus?.[1]).toContain('border-color: var(--ptah-focus-ring-color);');
+    expect(focus?.[1]).toContain('box-shadow: inset 0 0 0 calc(var(--ptah-focus-ring-width) - var(--ptah-border-width)) var(--ptah-focus-ring-color);');
+    expect(focus?.[1]).toContain('outline: none;');
+    expect(field).not.toMatch(/\.ptah-field__box:has\([^)]*:focus-visible\)[^{]*\{[^}]*outline-offset:/);
+  });
+
+  it('removes every inner control edge in mouse and keyboard focus states', () => {
+    const focusReset = field.match(/:is\(\.ptah-field__body, #ptah-field\) :is\(input, textarea, select\):is\(:focus, :focus-visible\):is\([^)]*\),\s*:is\(\.ptah-field__body, #ptah-field\) \.ptah-select__trigger:is\(:focus, :focus-visible\):is\([^)]*\) \{([^}]*)\}/);
+    expect(focusReset).not.toBeNull();
+    for (const declaration of ['outline: none;', 'box-shadow: none;', 'border: 0;']) {
+      expect(focusReset?.[1]).toContain(declaration);
+    }
   });
 
   it('does not add the rail as a second focus mark', () => {
@@ -40,11 +52,10 @@ describe('form control look contract', () => {
     expect(field).not.toContain('[data-open]) .ptah-field__rail');
   });
 
-  it('grows the rich select and centers its chevron in a floating field', () => {
+  it('grows the rich select and centers its action group in the field', () => {
     expect(select).toMatch(/\.ptah-field__body > \.ptah-select \{\s*flex: 1 1 auto;/);
-    expect(select).toMatch(
-      /\.ptah-field\[data-appearance='floating'\] \.ptah-select__chevron \{\s*margin-block-start: calc\(/,
-    );
+    expect(select).toMatch(/\.ptah-select__actions \{[^}]*justify-self: end;[^}]*align-self: center;/);
+    expect(select).not.toContain('margin-block-start');
   });
 
   it('gives the panel search no own focus box', () => {

@@ -149,7 +149,9 @@
   --ptah-field-action-size: 1.75rem;
   --ptah-field-icon-fg: oklch(var(--bcm, var(--bc)));
   --ptah-field-message-fg: oklch(var(--bcm, var(--bc)));
-  --ptah-select-panel-bg: var(--glass-fill-overlay, oklch(var(--b1)));
+  /* Opaque raised surface (no alpha, also with glass on): page text must not
+     show through the open panel (TASK_2026_969_3aab round 2). */
+  --ptah-select-panel-bg: var(--surface-3);
   --ptah-select-panel-edge: var(--ptah-control-edge-strong);
   --ptah-select-panel-max-h: 18rem;
   --ptah-select-panel-pad: var(--ptah-space-1);

@@ -168,17 +168,12 @@
   background-color: var(--ptah-field-bg-hover);
 }
 
-.ptah-field__box:has(.ptah-field__body :focus-visible) {
-  outline: var(--ptah-focus-ring-width) solid var(--ptah-focus-ring-color);
-  outline-offset: var(--ptah-focus-ring-offset);
-}
-
-/* The box owns keyboard focus. Beat the glass and family host focus rules. */
-:is(.ptah-field__body, #ptah-field) :is(input, textarea, select):focus-visible:is(.input, .textarea, .select, #ptah-control),
-:is(.ptah-field__body, #ptah-field) .ptah-select__trigger:focus-visible:is(.ptah-select__trigger, #ptah-control) {
+/* The box owns focus. Beat the glass and family host rules for both click and keyboard focus. */
+:is(.ptah-field__body, #ptah-field) :is(input, textarea, select):is(:focus, :focus-visible):is(.input, .textarea, .select, #ptah-control),
+:is(.ptah-field__body, #ptah-field) .ptah-select__trigger:is(:focus, :focus-visible):is(.ptah-select__trigger, #ptah-control) {
   outline: none;
   box-shadow: none;
-  border-color: transparent;
+  border: 0;
 }
 
 .ptah-field__rail {
@@ -249,6 +244,14 @@
 .ptah-field:has(.ptah-field__body [readonly]) .ptah-field__box {
   border-style: dashed;
   background-color: transparent;
+}
+
+/* One contiguous focus edge: the inset band meets the border without changing geometry. */
+.ptah-field .ptah-field__box:has(.ptah-field__body :focus) {
+  border-color: var(--ptah-focus-ring-color);
+  border-style: solid;
+  box-shadow: inset 0 0 0 calc(var(--ptah-focus-ring-width) - var(--ptah-border-width)) var(--ptah-focus-ring-color);
+  outline: none;
 }
 
 /* Slots and actions */

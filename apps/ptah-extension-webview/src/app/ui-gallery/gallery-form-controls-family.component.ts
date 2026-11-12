@@ -14,6 +14,7 @@ import {
 import {
   GALLERY_ICON_PATHS,
   MODEL_OPTIONS,
+  PAGE_SIZE_OPTIONS,
   PROVIDER_OPTIONS,
   REGION_OPTIONS,
 } from './gallery-form-controls.data';
@@ -112,7 +113,7 @@ interface TintPanel {
             <ng-template ptahSelectIcon let-option><ng-container *ngTemplateOutlet="icon; context: { $implicit: option }" /></ng-template>
           </ptah-select>
         </ptah-field>
-        <ptah-field label="Model" hint="More than 7 options: search is on">
+        <ptah-field label="Model" hint="8 or more options: search is on">
           <ptah-select [options]="models" [(value)]="model">
             <ng-template ptahSelectIcon let-option><ng-container *ngTemplateOutlet="icon; context: { $implicit: option }" /></ng-template>
           </ptah-select>
@@ -132,14 +133,19 @@ interface TintPanel {
         </div>
       </div>
 
-      <div data-testid="form-controls-native-select" class="flex flex-wrap items-center gap-ptah-controls">
-        <span class="text-ptah-label text-base-content-muted">Native select, inline sizes</span>
+      <div data-testid="form-controls-select-sizes" class="flex flex-wrap items-center gap-ptah-controls">
+        <span class="text-ptah-label text-base-content-muted">Select, inline sizes</span>
         @for (size of sizes; track size) {
-          <select ptahSelect [size]="size" [label]="'Page size ' + size">
-            <option>25 rows</option>
-            <option>50 rows</option>
-          </select>
+          <ptah-select [size]="size" [label]="'Page size ' + size" [options]="pageSizes" [value]="25" clearable />
         }
+      </div>
+
+      <div data-testid="form-controls-native-select" class="flex flex-wrap items-center gap-ptah-controls">
+        <span class="text-ptah-label text-base-content-muted">Legacy ptahSelect (native menu)</span>
+        <select ptahSelect size="sm" label="Page size (legacy)">
+          <option>25 rows</option>
+          <option>50 rows</option>
+        </select>
       </div>
 
       <div data-testid="form-controls-choices" class="flex flex-wrap items-center gap-ptah-group">
@@ -193,6 +199,7 @@ export class GalleryFormControlsFamilyComponent {
   protected readonly providers = PROVIDER_OPTIONS;
   protected readonly models = MODEL_OPTIONS;
   protected readonly regions = REGION_OPTIONS;
+  protected readonly pageSizes = PAGE_SIZE_OPTIONS;
   protected readonly model = signal<string | null>('opus');
   public readonly sizes: readonly PtahControlSize[] = ['xs', 'sm', 'md'];
   public readonly choiceSizes = ['xs', 'sm'] as const;

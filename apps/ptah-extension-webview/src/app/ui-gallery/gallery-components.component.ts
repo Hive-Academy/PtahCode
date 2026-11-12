@@ -9,6 +9,7 @@ import {
   PtahListRowComponent,
   PtahMeterComponent,
   PtahPanelState,
+  PtahRichSelectComponent,
   PtahStatCardComponent,
   PtahStatePanelComponent,
   PtahStatus,
@@ -17,6 +18,10 @@ import {
   SurfaceCardComponent,
   SurfaceTileComponent,
 } from '@ptah-extension/ui';
+import {
+  REPOSITORY_OPTIONS,
+  SORT_OPTIONS,
+} from './gallery-form-controls.data';
 import { GallerySectionComponent } from './gallery-section.component';
 import { InboxLayoutDemoComponent } from './inbox-layout-demo.component';
 
@@ -30,6 +35,7 @@ import { InboxLayoutDemoComponent } from './inbox-layout-demo.component';
     PtahIconButtonDirective,
     PtahFieldComponent,
     PtahFieldControlDirective,
+    PtahRichSelectComponent,
     PtahStatCardComponent,
     PtahListDetailComponent,
     PtahListRowComponent,
@@ -65,11 +71,8 @@ import { InboxLayoutDemoComponent } from './inbox-layout-demo.component';
           ><input ptahFieldControl value="API security review"
         /></ptah-field>
         <ptah-field label="Repository" hint="Choose a connected repository"
-          ><select ptahFieldControl>
-            <option>org/api</option>
-            <option>org/web</option>
-          </select></ptah-field
-        >
+          ><ptah-select [options]="repositories" [value]="'org/api'"
+        /></ptah-field>
         <ptah-field label="Instructions" error="A summary is required">
           <textarea ptahFieldControl rows="2"></textarea>
         </ptah-field>
@@ -106,10 +109,13 @@ import { InboxLayoutDemoComponent } from './inbox-layout-demo.component';
             >
               All runs
             </button>
-            <select sort ptahFieldControl aria-label="Sort runs">
-              <option>Newest first</option>
-              <option>Oldest first</option>
-            </select>
+            <ptah-select
+              sort
+              size="xs"
+              label="Sort runs"
+              [options]="sortOptions"
+              [(value)]="sort"
+            />
           </ptah-toolbar>
           <div
             ngListbox
@@ -260,6 +266,9 @@ export class GalleryComponentsComponent {
   ];
   public readonly selection = signal<string | null>(null);
   public readonly query = signal('');
+  public readonly sort = signal<string | null>('newest');
+  public readonly sortOptions = SORT_OPTIONS;
+  public readonly repositories = REPOSITORY_OPTIONS;
   public readonly selectedValues = (): string[] =>
     this.selection() ? [this.selection() as string] : [];
   public selectRow(values: string[]): void {

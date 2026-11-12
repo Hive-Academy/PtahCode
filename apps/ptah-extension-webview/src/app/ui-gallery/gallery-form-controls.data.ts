@@ -36,6 +36,25 @@ export const MODEL_OPTIONS: readonly PtahSelectOption<string>[] = [
   { value: 'retired', label: 'Legacy model', description: 'Retired. Select a new model.', group: 'Fast', icon: 'chip', disabled: true },
 ];
 
+/** Page sizes: a short list, so the rich select shows no search. */
+export const PAGE_SIZE_OPTIONS: readonly PtahSelectOption<number>[] = [
+  { value: 25, label: '25 rows' },
+  { value: 50, label: '50 rows' },
+  { value: 100, label: '100 rows' },
+];
+
+/** Sort orders for a toolbar sort slot. */
+export const SORT_OPTIONS: readonly PtahSelectOption<string>[] = [
+  { value: 'newest', label: 'Newest first' },
+  { value: 'oldest', label: 'Oldest first' },
+];
+
+/** Connected repositories for the Fields demo. */
+export const REPOSITORY_OPTIONS: readonly PtahSelectOption<string>[] = [
+  { value: 'org/api', label: 'org/api' },
+  { value: 'org/web', label: 'org/web' },
+];
+
 /** A short list without groups or icons: search stays off. */
 export const REGION_OPTIONS: readonly PtahSelectOption<string>[] = [
   { value: 'us', label: 'United States' },

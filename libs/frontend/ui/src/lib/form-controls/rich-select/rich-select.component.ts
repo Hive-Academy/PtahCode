@@ -27,10 +27,13 @@ import {
   typeAheadIndex,
 } from './rich-select-list';
 import { RICH_SELECT_TEMPLATE } from './rich-select.template';
+import type { PtahControlSize } from '../form-control.types';
 import type { PtahSelectOption } from './rich-select.types';
 
 let selectId = 0;
 const TYPE_AHEAD_RESET_MS = 500;
+/** With `searchable` unset, the panel shows the search input from this number of options. */
+export const PTAH_SELECT_SEARCH_MIN_OPTIONS = 8;
 const OPEN_KEYS = new Set(['ArrowDown', 'ArrowUp', 'Enter', ' ', 'Home', 'End']);
 const PANEL_MOVES = new Map<string, ActiveMove>([
   ['ArrowDown', 'next'],
@@ -61,6 +64,8 @@ const PANEL_MOVES = new Map<string, ActiveMove>([
     class: 'ptah-select',
     '[attr.data-ptah-filled]': "selected() || open() ? 'true' : null",
     '[attr.data-open]': "open() ? 'true' : null",
+    '[attr.data-size]': 'size()',
+    '[attr.data-clearable]': "clearable() ? 'true' : null",
     '(document:pointerdown)': 'onDocumentPointer($event)',
   },
   template: RICH_SELECT_TEMPLATE,
@@ -73,7 +78,10 @@ export class PtahRichSelectComponent<T = unknown>
   /** The accessible name when the select is not inside `ptah-field`. */
   readonly label = input<string | undefined>(undefined);
   readonly placeholder = input('Select');
-  /** Shows the search input in the panel. Default: on when there are more than 7 options. */
+  /**
+   * Shows the search input in the panel. Unset (default): automatic, on from
+   * `PTAH_SELECT_SEARCH_MIN_OPTIONS` (8) options, off for a short list.
+   */
   readonly searchable = input<boolean | undefined, unknown>(undefined, {
     transform: (v: unknown) => (v === undefined ? undefined : booleanAttribute(v)),
   });
@@ -82,6 +90,12 @@ export class PtahRichSelectComponent<T = unknown>
   readonly clearable = input(false, { transform: booleanAttribute });
   readonly disabled = input(false, { transform: booleanAttribute });
   readonly invalid = input(false, { transform: booleanAttribute });
+  /**
+   * Height of the standalone trigger: xs 24 px, sm 32 px (default), md 40 px,
+   * the same heights as `select[ptahSelect]`. Inside `ptah-field` the field box
+   * sets the height.
+   */
+  readonly size = input<PtahControlSize>('sm');
   readonly compareWith = input<(a: T | null, b: T | null) => boolean>(Object.is);
 
   readonly controlId = `ptah-select-${++selectId}`;
@@ -105,7 +119,9 @@ export class PtahRichSelectComponent<T = unknown>
   private typeBuffer = '';
   private typeTimer: ReturnType<typeof setTimeout> | undefined;
 
-  readonly isSearchable = computed(() => this.searchable() ?? this.options().length > 7);
+  readonly isSearchable = computed(
+    () => this.searchable() ?? this.options().length >= PTAH_SELECT_SEARCH_MIN_OPTIONS,
+  );
   readonly groups = computed(() =>
     buildGroups(this.options(), this.isSearchable() ? this.query() : '', this.controlId),
   );
