@@ -1,12 +1,14 @@
 ---
 id: TASK_2026_969_3aab
-status: backlog
+status: in_review
 type: BUGFIX
 title: Correct the look defects of the form controls
 depends_on: []
-created: "2026-11-12T00:40:15.758Z"
-updated: "2026-11-12T00:40:15.758Z"
-description: "One focus ring, one border, one clear button, right-edge chevron, no label overlap in ptah form controls"
+created: '2026-11-12T00:40:15.758Z'
+updated: '2026-11-12T01:02:54.808Z'
+description: >-
+  One focus ring, one border, one clear button, right-edge chevron, no label
+  overlap in ptah form controls
 estimate: M
 relates_to:
   - TASK_2026_924_8ac1
