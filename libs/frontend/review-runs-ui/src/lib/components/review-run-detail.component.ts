@@ -4,13 +4,13 @@ import { ReviewRunsStore } from '../review-runs.store';
 import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component';
 import { ReviewFindingsPanelComponent } from '../findings/review-findings-panel.component';
 import { RUN_STATUS_INK, reviewStatusLabel } from './review-runs-list.component';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
 
 /** The run contract and the query return 16 stage records at most. */
 const STAGE_LIMIT = 16;
 
 @Component({
-  selector: 'ptah-review-run-detail', standalone: true, imports: [ReviewFindingsPanelComponent, ReviewConfirmDialogComponent, PtahButtonDirective],
+  selector: 'ptah-review-run-detail', standalone: true, imports: [ReviewFindingsPanelComponent, ReviewConfirmDialogComponent, PtahButtonDirective, PtahBadgeDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div>
@@ -20,7 +20,7 @@ const STAGE_LIMIT = 16;
           <h2 id="review-detail-title" class="truncate text-xl font-semibold" tabindex="-1"><span class="sr-only">PR </span>#{{ run().prNumber }} {{ run().prTitle || 'review' }}</h2>
           <p class="text-sm text-base-content-muted" [title]="'Attempt ' + run().attemptId">{{ run().repo.owner }}/{{ run().repo.name }} · <span class="font-mono">{{ run().headSha.slice(0, 10) }}</span> · {{ run().trigger === 'poll' ? 'Poll' : 'Manual' }}</p>
         </div>
-          <span class="badge badge-outline shrink-0" data-testid="review-detail-state"><span class="inline-flex items-center gap-1.5" [class]="ink(run().status)"><span class="h-2 w-2 rounded-full bg-current" aria-hidden="true"></span>{{ label(run().status) }}</span></span>
+          <span ptahBadge appearance="outline" size="xs" class="shrink-0" data-testid="review-detail-state"><span class="inline-flex min-w-0 items-center gap-1.5" [class]="ink(run().status)"><span class="h-2 w-2 shrink-0 rounded-full bg-current" aria-hidden="true"></span><span class="ptah-badge-text">{{ label(run().status) }}</span></span></span>
         </header>
         <div class="mt-3 flex flex-wrap gap-2" data-testid="review-detail-rerun">
           <button type="button" ptahButton variant="primary" title="A dry run creates a local preview. CodeRabbit stays enabled." [disabled]="store.rerunState() === 'running'" (click)="store.rerun(run().attemptId, true)">Rerun dry run</button>
@@ -63,7 +63,7 @@ const STAGE_LIMIT = 16;
               @if (lens.error) { <p class="text-xs" role="status">{{ lens.error }}</p> }
             </li> }</ul> }
             @else { <p class="text-sm text-base-content-muted">Lens records unavailable.</p> }
-            @if (sameFamilyVerification()) { <span class="badge badge-warning mt-2">Weaker evidence · same-family verification</span> }
+            @if (sameFamilyVerification()) { <span ptahBadge tone="warn" class="mt-2"><span class="ptah-badge-text">Weaker evidence · same-family verification</span></span> }
           </section>
           <section class="mt-6">
           <h3 class="font-semibold">Findings</h3>

@@ -6,6 +6,7 @@ import {
   output,
 } from '@angular/core';
 import type { FileDecision } from '@ptah-extension/shared';
+import { PtahBadgeDirective } from '@ptah-extension/ui';
 import { DiffDisclosureComponent } from './diff-disclosure.component';
 import { KeepReplaceControlComponent } from './keep-replace-control.component';
 import {
@@ -31,7 +32,11 @@ let nextRowNoteId = 0;
 @Component({
   selector: 'ptah-file-decision-row',
   standalone: true,
-  imports: [KeepReplaceControlComponent, DiffDisclosureComponent],
+  imports: [
+    KeepReplaceControlComponent,
+    DiffDisclosureComponent,
+    PtahBadgeDirective,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -44,9 +49,11 @@ let nextRowNoteId = 0;
           >{{ row().path }}</code
         >
         <span
-          class="badge badge-ghost badge-sm whitespace-nowrap"
+          ptahBadge
+          tone="neutral"
+          size="sm"
           data-testid="file-state-badge"
-          >{{ badge() }}</span
+          ><span class="ptah-badge-text">{{ badge() }}</span></span
         >
       </div>
       <ng-content />

@@ -44,7 +44,11 @@ import type {
   SkillSynthesisListQuarantinedAgentsResult,
   SkillSynthesisRestoreQuarantinedAgentResult,
 } from '@ptah-extension/shared';
-import { NativeModalComponent, PtahButtonDirective } from '@ptah-extension/ui';
+import {
+  NativeModalComponent,
+  PtahBadgeDirective,
+  PtahButtonDirective,
+} from '@ptah-extension/ui';
 
 import { SkillSynthesisRpcService } from '../../services/skill-synthesis-rpc.service';
 import { SkillClonesStateService } from '../../services/skill-clones-state.service';
@@ -100,7 +104,7 @@ let nextInstanceId = 0;
   selector: 'ptah-quarantined-agents-panel',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PtahButtonDirective, NativeModalComponent],
+  imports: [PtahBadgeDirective, PtahButtonDirective, NativeModalComponent],
   template: `
     <section
       class="mt-4 space-y-2 rounded-lg border border-base-300 p-3"
@@ -115,7 +119,10 @@ let nextInstanceId = 0;
         @if (listing(); as l) {
           @if (l.workspaceRoot !== null) {
             <span
-              class="badge badge-ghost badge-sm tabular-nums"
+              ptahBadge
+              tone="neutral"
+              size="sm"
+              count
               data-testid="quarantine-count"
               >{{ l.quarantined.length }}</span
             >

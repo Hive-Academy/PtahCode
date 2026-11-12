@@ -1256,18 +1256,10 @@
     "alert": 1,
     "alert-warning": 1
   },
-  "libs/frontend/review-runs-ui/src/lib/components/review-repositories.component.ts": {
-    "<dynamic>": 1,
-    "badge": 1,
-    "badge-outline": 1
-  },
   "libs/frontend/review-runs-ui/src/lib/components/review-run-detail.component.ts": {
     "<dynamic>": 3,
     "alert": 2,
     "alert-error": 2,
-    "badge": 2,
-    "badge-outline": 1,
-    "badge-warning": 1,
     "btn": 1,
     "btn-ghost": 1,
     "btn-sm": 1
@@ -1291,24 +1283,12 @@
     "toggle": 1,
     "toggle-warning": 1
   },
-  "libs/frontend/review-runs-ui/src/lib/findings/review-finding-card.component.ts": {
-    "badge": 3,
-    "badge-ghost": 2,
-    "badge-outline": 2,
-    "badge-sm": 2,
-    "badge-xs": 1
-  },
   "libs/frontend/setup-wizard/src/lib/components/agent-preview-dialog.component.ts": {
     "alert": 4,
     "alert-info": 1,
-    "alert-warning": 3,
-    "badge": 2,
-    "badge-sm": 2
+    "alert-warning": 3
   },
   "libs/frontend/setup-wizard/src/lib/components/analysis-transcript.component.ts": {
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-sm": 1,
     "skeleton": 6
   },
   "libs/frontend/setup-wizard/src/lib/components/cards/enhanced-prompts-summary-card.component.ts": {
@@ -1317,11 +1297,7 @@
   },
   "libs/frontend/setup-wizard/src/lib/components/community-packs-panel.component.ts": {
     "alert": 1,
-    "alert-error": 1,
-    "badge": 2,
-    "badge-ghost": 1,
-    "badge-sm": 2,
-    "badge-success": 1
+    "alert-error": 1
   },
   "libs/frontend/setup-wizard/src/lib/components/completion/grade-expectation.component.ts": {
     "alert": 1,
@@ -1335,12 +1311,7 @@
     "alert": 3,
     "alert-error": 1,
     "alert-info": 1,
-    "alert-warning": 1,
-    "badge": 1,
-    "badge-error": 1,
-    "badge-ghost": 1,
-    "badge-outline": 1,
-    "badge-sm": 1
+    "alert-warning": 1
   },
   "libs/frontend/setup-wizard/src/lib/components/confirmation-modal.component.ts": {
     "<dynamic>": 1,
@@ -1356,20 +1327,7 @@
     "alert-error": 1,
     "alert-info": 1
   },
-  "libs/frontend/setup-wizard/src/lib/components/preview-decisions/file-decision-row.component.ts": {
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-sm": 1
-  },
-  "libs/frontend/setup-wizard/src/lib/components/preview-decisions/target-root-choice.component.ts": {
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-sm": 1
-  },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/agent-model-editor.component.ts": {
-    "<dynamic>": 1,
-    "badge": 1,
-    "badge-xs": 1,
     "btn": 1,
     "btn-warning": 1,
     "btn-xs": 1
@@ -1387,9 +1345,7 @@
     "btn-xs": 2
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/clone-card.component.ts": {
-    "<dynamic>": 2,
-    "badge": 1,
-    "badge-sm": 1,
+    "<dynamic>": 1,
     "btn": 2,
     "btn-ghost": 2,
     "btn-xs": 2
@@ -1403,29 +1359,18 @@
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/enhance-preview-drawer.component.ts": {
     "alert": 2,
-    "alert-error": 2,
-    "badge": 3,
-    "badge-ghost": 1,
-    "badge-outline": 1,
-    "badge-sm": 3,
-    "badge-success": 1
+    "alert-error": 2
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/provenance-badge.component.ts": {
-    "<dynamic>": 2,
-    "badge": 2,
-    "badge-sm": 2
+    "<dynamic>": 1,
+    "badge": 1,
+    "badge-sm": 1
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/quarantined-agents-panel.component.ts": {
     "alert": 1,
-    "alert-error": 1,
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-sm": 1
+    "alert-error": 1
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/reconcile-guard.ts": {
-    "badge": 2,
-    "badge-ghost": 2,
-    "badge-sm": 2,
     "btn": 1,
     "btn-sm": 1,
     "btn-warning": 1

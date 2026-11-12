@@ -11,6 +11,7 @@ import type {
   GenerationTargetChoice,
   GenerationTargetInfo,
 } from '@ptah-extension/shared';
+import { PtahBadgeDirective } from '@ptah-extension/ui';
 import { agentsFolder, targetFolder } from './preview-decisions.state';
 
 let nextTargetHeadingId = 0;
@@ -27,6 +28,7 @@ let nextTargetHeadingId = 0;
 @Component({
   selector: 'ptah-target-root-choice',
   standalone: true,
+  imports: [PtahBadgeDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @let info = target();
@@ -64,7 +66,7 @@ let nextTargetHeadingId = 0;
           ></span>
           <span class="min-w-0">
             <strong>Project root (recommended)</strong>
-            <span class="badge badge-ghost badge-sm ml-1">Default</span>
+            <span ptahBadge tone="neutral" size="sm" class="ml-1">Default</span>
             <code class="block font-mono [overflow-wrap:anywhere]">{{
               rootFolder()
             }}</code>
