@@ -52,11 +52,11 @@ import { GallerySectionComponent } from './gallery-section.component';
 })
 export class GalleryTimersFamilyComponent {
   private readonly referenceNow = Date.now();
-  readonly startedAt = this.referenceNow - 185_000;
-  readonly endedAt = this.referenceNow - 65_000;
-  readonly runningDeadline = this.referenceNow + 604_800_000;
-  readonly urgentDeadline = this.referenceNow + 43_200_000;
-  readonly expiredDeadline = this.referenceNow - 30_000;
-  readonly pastTime = this.referenceNow - 300_000;
-  readonly futureTime = this.referenceNow + 604_800_000;
+  public readonly startedAt = this.referenceNow - 185_000;
+  public readonly endedAt = this.referenceNow - 65_000;
+  public readonly runningDeadline = this.referenceNow + 604_800_000;
+  public readonly urgentDeadline = this.referenceNow + 43_200_000;
+  public readonly expiredDeadline = this.referenceNow - 30_000;
+  public readonly pastTime = this.referenceNow - 300_000;
+  public readonly futureTime = this.referenceNow + 604_800_000;
 }
