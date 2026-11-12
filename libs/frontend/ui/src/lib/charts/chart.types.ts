@@ -12,5 +12,8 @@ export type PtahMeterRole = 'meter' | 'progressbar';
 /** Footprint of a chart owner. The geometry inside stays internal. */
 export type PtahChartSize = 'xs' | 'sm' | 'md';
 
+/** Footprint of a ring: the chart sizes plus `lg` and `xl`. Meter and sparkline keep `PtahChartSize`. */
+export type PtahRingSize = PtahChartSize | 'lg' | 'xl';
+
 /** Direction of a stat delta. Each trend has a glyph and a hidden word. */
 export type PtahStatTrend = 'up' | 'down' | 'flat';
