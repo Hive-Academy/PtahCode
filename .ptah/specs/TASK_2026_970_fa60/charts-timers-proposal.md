@@ -56,6 +56,18 @@ app. Do not add wrapper and engine sizes as a reliable total.
 | Own inline SVG | none | n/a | none | 0 library | SVG | Fits sparkline, meter, ring. Already used in the code. |
 | Unovis (extra) | 1.8.1 (2026-11-10) | Peer 20-22 | Apache-2.0 | not confirmed | not confirmed | Worth a prototype only if complex charts are needed. |
 
+Sources per row (all checked 2026-11-12; npm dates are npm publish times, not GitHub release dates):
+
+| Row | Version, date, peers, licence | Size | Other facts |
+|---|---|---|---|
+| ECharts | https://registry.npmjs.org/ngx-echarts , https://registry.npmjs.org/echarts | https://bundlephobia.com/api/size?package=echarts%406.1.0 , https://bundlephobia.com/api/size?package=ngx-echarts%4022.0.0 | https://echarts.apache.org/handbook/en/basics/import/ , https://echarts.apache.org/handbook/en/best-practices/aria/ , https://github.com/apache/echarts/issues/19743 |
+| Chart.js | https://registry.npmjs.org/ng2-charts , https://registry.npmjs.org/chart.js | https://bundlephobia.com/api/size?package=chart.js%404.6.1 , https://bundlephobia.com/api/size?package=ng2-charts%4011.0.0 | https://www.chartjs.org/docs/latest/getting-started/usage.html , https://www.chartjs.org/docs/latest/general/accessibility.html |
+| ApexCharts | https://registry.npmjs.org/ng-apexcharts , https://registry.npmjs.org/apexcharts , licence: https://apexcharts.com/license/ | https://bundlephobia.com/api/size?package=apexcharts%408.8.1 , https://bundlephobia.com/api/size?package=ng-apexcharts%403.2.0 | https://apexcharts.com/docs/accessibility/ , https://github.com/apexcharts/apexcharts.js/issues/727 |
+| ngx-charts | https://registry.npmjs.org/@swimlane/ngx-charts | https://bundlephobia.com/api/size?package=%40swimlane%2Fngx-charts%4025.0.3 | https://swimlane.gitbook.io/ngx-charts |
+| D3 | https://registry.npmjs.org/d3 | https://bundlephobia.com/api/size?package=d3%407.9.2 | https://registry.npmjs.org/d3-selection |
+| Unovis | https://registry.npmjs.org/@unovis/angular | not confirmed | https://unovis.dev/releases/ |
+| Own SVG | no source needed (app code) | 0 library | https://angular.dev/guide/zoneless |
+
 Not confirmed (from the lane, not resolved): zoneless and signal behavior of every wrapper, CSP
 details (eval, worker) of every library, per-library open issue trend, Unovis bundle size.
 Peer ranges prove install only. A prototype in the zoneless Electron renderer must test live input
@@ -83,14 +95,20 @@ The existing `WallClockService` and Machines `CountdownClock` show the pattern.
 Cost:
 
 - **Bundle:** about +70 kB gzip at most for Chart.js plus 2 kB wrapper (Bundlephobia estimate,
-  not measured here). The renderer budget value was not read in this research. Not confirmed:
-  whether the budget has room. Lazy-load the chart owner with `@defer` or a lazy route so the
+  not measured here). The renderer budget is read from `apps/ptah-extension-webview/project.json:63-74`
+  (production): `initial` warning 2.5 mb, error 4.1 mb; `anyComponentStyle` warning 10 kb, error
+  20 kb. The current initial size was not measured here (no build allowed), so the room is not
+  confirmed. Lazy chunks do not count in `initial`. Lazy-load the chart owner with `@defer` or a lazy route so the
   initial bundle does not grow. Measure in PR 2.
 - **Licence:** MIT, no obligation beyond the notice in third-party licence lists. Check that the
   Electron packager lists the notice.
 - **Electron `validate-deps` gate:** the renderer is bundled by Angular, so Chart.js is not a
-  runtime external dependency of the main process. Not confirmed: the exact rule of the gate.
-  PR 2 must run it (`apps/ptah-electron` validate-deps build gate runs on push).
+  runtime external dependency of the main process. The gate
+  (`apps/ptah-electron/scripts/validate-deps.js`, run by `.husky/pre-push:48`) builds the Electron
+  main bundle and `worker-host.mjs`, then checks that external imports are listed in the Electron
+  app `package.json`, plus native deps. It does not scan the renderer, so a renderer-only Chart.js
+  dependency is not an input. Not confirmed: whether the repository root dependency list needs
+  the package (it is a root `package.json` change). PR 2 runs the gate on push anyway.
 - **VS Code webview host:** same Angular bundle. Canvas and inline styles fit CSP `style-src
   'unsafe-inline'`. The VS Code webview CSP was not read. Not confirmed. Electron is the first
   host. Verify VS Code only if the user asks.
@@ -179,5 +197,5 @@ PR 1 and PR 3 can run in parallel (file-disjoint). PR 2 waits for the user answe
 | 4 | Which time features are wanted first: runtime-cap clock, budget countdown, rate-limit reset countdown? | Rate-limit reset countdown and session elapsed first, because the data exists. Runtime cap needs host data. |
 | 5 | Tick rate: 1 s for all timers? | 1 s for visible timers. Relative time at the coarser rate. Paused when the window is hidden. |
 | 6 | Should `ClockService` replace `WallClockService` and Machines `CountdownClock`? | Yes, one service. Keep the old API as thin wrappers for one PR. |
-| 7 | Renderer bundle budget: what is the limit and the room? | Not read in this research. PR 2 measures it. The user states the hard limit if one exists. |
+| 7 | Is the renderer budget (initial 2.5 mb warning, 4.1 mb error) the right limit? | Yes. PR 2 measures the room and keeps the chart code in a lazy chunk. |
 | 8 | Does VS Code webview need to be checked for these families? | Not now. Electron first. |
