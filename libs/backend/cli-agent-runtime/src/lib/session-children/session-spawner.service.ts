@@ -106,6 +106,7 @@ import {
   successionEndReason,
 } from './session-child-succession';
 import { childOutcomeOf } from './session-child-outcome';
+import type { HandoffPredecessorCloser } from './session-handoff.port';
 import {
   SESSION_CHILD_FIRST_TURN_TIMEOUT_MS,
   firstTurnFailureText,
@@ -373,7 +374,11 @@ export class SessionSpawnerService implements ISessionSpawner {
       this.log(
         `start for ${caller} on ${existing.branch} returns existing child ${existing.childSessionId}`,
       );
-      return { ok: true, child: this.snapshotOf(existing), alreadyExists: true };
+      return {
+        ok: true,
+        child: this.snapshotOf(existing),
+        alreadyExists: true,
+      };
     }
     const settings = readSessionChildSettings(this.workspace);
     const reservation = this.registry.reserveSlot(settings.maxConcurrent);
@@ -516,7 +521,6 @@ export class SessionSpawnerService implements ISessionSpawner {
     guard: StartGuardPass,
     { root, branch, task, paths }: PreparedStart,
   ): Promise<SessionChildStartResult> {
-
     // After the cheap argument checks, still before any git work: a refused
     // model leaves no worktree, branch or registry record behind.
     let resolvedModel: string | undefined;
@@ -998,9 +1002,7 @@ export class SessionSpawnerService implements ISessionSpawner {
     };
   }
 
-  async stop(
-    query: SessionChildStopQuery,
-  ): Promise<SessionChildStopResult> {
+  async stop(query: SessionChildStopQuery): Promise<SessionChildStopResult> {
     // A pending start has no session to interrupt yet (review m5).
     const pending = this.ownedPending(
       query.callerSessionId,
@@ -1386,10 +1388,16 @@ export class SessionSpawnerService implements ISessionSpawner {
     if (cause === 'unknown')
       this.log(`${childSessionId} session ended with unknown cause`);
     const probe = this.firstTurnProbe(child);
-    if (routeSessionEndCause(cause) === 'succeed' && firstTurnNotStarted(probe)) {
+    if (
+      routeSessionEndCause(cause) === 'succeed' &&
+      firstTurnNotStarted(probe)
+    ) {
       // A child that never ran is a failed start, never a succession. A
       // deliberate stop (user, parent, workspace, host) stays a stop.
-      this.failFirstTurn(child, firstTurnFailureText(probe, `session ended: ${cause}`));
+      this.failFirstTurn(
+        child,
+        firstTurnFailureText(probe, `session ended: ${cause}`),
+      );
       return;
     }
     if (routeSessionEndCause(cause) === 'succeed') {
@@ -1511,17 +1519,24 @@ export class SessionSpawnerService implements ISessionSpawner {
     const verdict = firstTurnVerdict(probe, runtime.firstTurnRearmed === true);
     if (verdict === 'rearm') {
       runtime.firstTurnRearmed = true;
-      this.log(`${childSessionId} first turn still generating without an SDK id; watchdog re-armed once`);
+      this.log(
+        `${childSessionId} first turn still generating without an SDK id; watchdog re-armed once`,
+      );
       this.armFirstTurnWatchdog(runtime, childSessionId);
       return;
     }
     if (verdict === 'give-up') {
-      this.log(`${childSessionId} still generating after the watchdog re-arm; left running`);
+      this.log(
+        `${childSessionId} still generating after the watchdog re-arm; left running`,
+      );
       return;
     }
     if (verdict === 'fail') {
       const seconds = SESSION_CHILD_FIRST_TURN_TIMEOUT_MS / 1000;
-      this.failFirstTurn(child, firstTurnFailureText(probe, `no first turn after ${seconds}s`));
+      this.failFirstTurn(
+        child,
+        firstTurnFailureText(probe, `no first turn after ${seconds}s`),
+      );
     }
   }
 
@@ -1913,9 +1928,7 @@ export class SessionSpawnerService implements ISessionSpawner {
       sessionId: child.sdkSessionId ?? null,
       parentTabId: child.parentSessionId,
       parentSessionId:
-        child.parentSdkSessionId ??
-        this.sdkIdOf(child.parentSessionId) ??
-        null,
+        child.parentSdkSessionId ?? this.sdkIdOf(child.parentSessionId) ?? null,
       workspaceRoot: child.workspaceRoot,
       worktreePath: child.worktreePath,
       branch: child.branch,
@@ -1964,18 +1977,20 @@ export class SessionSpawnerService implements ISessionSpawner {
    * once the interrupt settles, so a result the run emits meanwhile cannot
    * bring the entry back.
    */
-  private interruptInBackground(childSessionId: string): void {
+  private interruptInBackground(childSessionId: string): Promise<boolean> {
     const id = SessionId.safeParse(childSessionId);
     if (!this.adapter || !id) {
       this.releaseBudget(childSessionId);
-      return;
+      return Promise.resolve(false);
     }
-    this.adapter
+    return this.adapter
       .interruptSession(id, 'parent-stop')
+      .then(() => true)
       .catch((error: unknown) => {
         this.log(
           `interrupt of ${childSessionId} failed: ${errorMessage(error)}`,
         );
+        return false;
       })
       .finally(() => this.releaseBudget(childSessionId));
   }
@@ -2345,6 +2360,7 @@ export class SessionSpawnerService implements ISessionSpawner {
       } else if (cause === 'session-ended') {
         runtime.stopping = true;
         this.releaseResources(child.childSessionId);
+        void this.closeRetiredPredecessor(child.childSessionId, child);
       } else this.retirePredecessor(child.childSessionId);
       this.log(`${child.childSessionId} handed off to ${successorId}`);
       return {
@@ -2386,7 +2402,37 @@ export class SessionSpawnerService implements ISessionSpawner {
     const runtime = this.runtimes.get(childSessionId);
     if (runtime) runtime.stopping = true;
     this.releaseResources(childSessionId);
-    this.interruptInBackground(childSessionId);
+    // The registry retains the predecessor binding after its slot moves to the successor.
+    const predecessor = this.registry.get(childSessionId);
+    void this.interruptInBackground(childSessionId).then(async (stopped) => {
+      if (!stopped || predecessor?.terminalStatus !== 'handed-off') return;
+      await this.closeRetiredPredecessor(childSessionId, predecessor);
+    });
+  }
+
+  private async closeRetiredPredecessor(
+    childSessionId: string,
+    predecessor: SessionChildRecord,
+  ): Promise<void> {
+    const token = CLI_AGENT_RUNTIME_TOKENS.HANDOFF_PREDECESSOR_CLOSER;
+    const ids = `tabId=${childSessionId} sdkId=${predecessor.sdkSessionId ?? 'none'}`;
+    if (!this.container?.isRegistered(token, true)) {
+      this.log(`predecessor close unavailable: closer absent (${ids})`);
+      return;
+    }
+    try {
+      const result = await this.container
+        .resolve<HandoffPredecessorCloser>(token)
+        .close(childSessionId, predecessor.sdkSessionId ?? null);
+      if (result.kind !== 'closed') {
+        this.log(
+          `predecessor close: ${result.kind}${result.kind === 'blocked' ? ` (${result.code})` : ''} (${ids})`,
+        );
+      }
+    } catch (error: unknown) {
+      // degradation-audit: reported - closing is best effort after retirement.
+      this.log(`predecessor close failed: ${errorMessage(error)} (${ids})`);
+    }
   }
 
   private armGrace(

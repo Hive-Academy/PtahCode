@@ -84,6 +84,7 @@ function envelope(turn: number): SessionChildCompletionEnvelope {
 export function makeHarness(
   options: {
     config?: Record<string, unknown>;
+    closer?: { close: jest.Mock };
     /** `null` builds the spawner with no recorder bound (VS Code). */
     recorder?: { recordAgentStartedSession: jest.Mock } | null;
   } = {},
@@ -213,6 +214,11 @@ export function makeHarness(
   /** A real child container holding `hostValue` (none when `null`). */
   const containerWith = (hostValue: unknown): DependencyContainer => {
     const scope = rootContainer.createChildContainer();
+    if (options.closer) {
+      scope.register(CLI_AGENT_RUNTIME_TOKENS.HANDOFF_PREDECESSOR_CLOSER, {
+        useValue: options.closer,
+      });
+    }
     if (hostValue !== null) {
       scope.register(CLI_AGENT_RUNTIME_TOKENS.CHILD_CHAT_SESSION_HOST, {
         useValue: hostValue,
@@ -1570,7 +1576,9 @@ describe('SessionSpawnerService.stop', () => {
       detail: `session ${childA.childSessionId} already handed off to ${childC.childSessionId} (status starting); nothing was stopped. Call again with followHandoff: true to stop ${childC.childSessionId}.`,
     });
     expect(h.adapter.interruptSession).not.toHaveBeenCalled();
-    expect(h.registry.get(childC.childSessionId)?.terminalStatus).toBeUndefined();
+    expect(
+      h.registry.get(childC.childSessionId)?.terminalStatus,
+    ).toBeUndefined();
 
     const followedStop = await h.spawner.stop({
       callerSessionId: PARENT,

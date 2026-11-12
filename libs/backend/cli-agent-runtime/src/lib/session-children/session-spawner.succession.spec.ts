@@ -14,51 +14,195 @@ const flush = async (): Promise<void> => {
 };
 
 describe('SessionSpawnerService succession', () => {
-  it.each(['user-stop', 'parent-stop', 'workspace-close', 'host-shutdown'] as const)(
-    'ends %s without a successor and records how to find the work', async (cause) => {
-      const h = makeHarness();
+  it('closes only the retired predecessor after stop resolves', async () => {
+    const closer = { close: jest.fn().mockResolvedValue({ kind: 'closed' }) };
+    const h = makeHarness({
+      config: { 'agentSessions.maxRuntimeMinutes': 5 },
+      closer,
+    });
+    let finishStop: (() => void) | undefined;
+    h.adapter.interruptSession.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishStop = resolve;
+        }),
+    );
+    const child = await h.startChild();
+    h.markRan(child.childSessionId);
+    h.phases.set(child.childSessionId, 'idle');
+    jest.advanceTimersByTime(5 * 60_000);
+    await flush();
+    const successor = h.registry.resolveLatest(child.childSessionId);
+    expect(closer.close).not.toHaveBeenCalled();
+    expect(h.registry.liveCount()).toBe(1);
+    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe(
+      'handed-off',
+    );
+    expect(
+      h.registry.get(successor!.childSessionId)?.terminalStatus,
+    ).toBeUndefined();
+    expect(h.active.has(successor!.childSessionId)).toBe(true);
+    expect(h.adapter.interruptSession).toHaveBeenCalledWith(
+      child.childSessionId,
+      'parent-stop',
+    );
+    expect(h.adapter.interruptSession).not.toHaveBeenCalledWith(
+      successor!.childSessionId,
+      expect.anything(),
+    );
+    finishStop?.();
+    await flush();
+    expect(closer.close).toHaveBeenCalledTimes(1);
+    expect(closer.close).toHaveBeenCalledWith(
+      child.childSessionId,
+      h.registry.get(child.childSessionId)?.sdkSessionId,
+    );
+    expect(closer.close).not.toHaveBeenCalledWith(
+      successor!.childSessionId,
+      expect.anything(),
+    );
+  });
+
+  it.each([{ kind: 'blocked', code: 'unsent-input' }, { kind: 'absent' }])(
+    'keeps succession when close returns $kind',
+    async (result) => {
+      const closer = { close: jest.fn().mockResolvedValue(result) };
+      const h = makeHarness({
+        config: { 'agentSessions.maxRuntimeMinutes': 5 },
+        closer,
+      });
       const child = await h.startChild();
       h.markRan(child.childSessionId);
-      h.active.delete(child.childSessionId);
-      h.sessionEnd.notifyAll({ sessionId: child.childSessionId, workspaceRoot: child.worktreePath, cause });
-      jest.advanceTimersByTime(30_000);
+      h.phases.set(child.childSessionId, 'idle');
+      jest.advanceTimersByTime(5 * 60_000);
       await flush();
-      expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe('ended');
-      expect(h.host.startChildSession).toHaveBeenCalledTimes(1);
-      expect(h.agents.adoptLanes).toHaveBeenCalledWith(expect.any(Array), PARENT);
-      expect(h.logger.info).toHaveBeenCalledWith(expect.stringContaining(child.worktreePath));
-      expect(h.logger.info).toHaveBeenCalledWith(expect.stringContaining(child.branch));
-      expect(h.logger.info).toHaveBeenCalledWith(expect.stringContaining(child.childSessionId));
+      expect(h.registry.liveCount()).toBe(1);
+      expect(closer.close).toHaveBeenCalledTimes(1);
+      expect(h.lines.join('\n')).toContain(result.kind);
+      if (result.kind === 'blocked')
+        expect(h.lines.join('\n')).toContain(result.code);
     },
   );
 
-  it.each(['stream-exit', 'provider-error', 'config-reinit', 'compaction-abort', 'unknown'] as const)(
-    'starts a recovery successor for %s', async (cause) => {
+  it.each(['absent', 'throws'] as const)(
+    'keeps succession when closer is %s',
+    async (mode) => {
+      const closer =
+        mode === 'throws'
+          ? { close: jest.fn().mockRejectedValue(new Error('close failed')) }
+          : undefined;
+      const h = makeHarness({
+        config: { 'agentSessions.maxRuntimeMinutes': 5 },
+        ...(closer ? { closer } : {}),
+      });
+      const child = await h.startChild();
+      h.markRan(child.childSessionId);
+      h.phases.set(child.childSessionId, 'idle');
+      jest.advanceTimersByTime(5 * 60_000);
+      await flush();
+      expect(h.registry.liveCount()).toBe(1);
+      expect(h.lines.join('\n')).toContain(
+        mode === 'throws' ? 'predecessor close failed' : 'closer absent',
+      );
+    },
+  );
+
+  it.each([
+    'user-stop',
+    'parent-stop',
+    'workspace-close',
+    'host-shutdown',
+  ] as const)(
+    'ends %s without a successor and records how to find the work',
+    async (cause) => {
       const h = makeHarness();
       const child = await h.startChild();
       h.markRan(child.childSessionId);
       h.active.delete(child.childSessionId);
-      h.sessionEnd.notifyAll({ sessionId: child.childSessionId, workspaceRoot: child.worktreePath, cause });
+      h.sessionEnd.notifyAll({
+        sessionId: child.childSessionId,
+        workspaceRoot: child.worktreePath,
+        cause,
+      });
       jest.advanceTimersByTime(30_000);
       await flush();
-      expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe('handed-off');
-      expect(h.registry.resolveLatest(child.childSessionId)?.worktreePath).toBe(child.worktreePath);
-      expect(h.host.startChildSession.mock.calls[1][0].prompt).toContain(`previous session ended unexpectedly (${cause})`);
-      if (cause === 'unknown') expect(h.lines.join('\n')).toContain('unknown cause');
+      expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe(
+        'ended',
+      );
+      expect(h.host.startChildSession).toHaveBeenCalledTimes(1);
+      expect(h.agents.adoptLanes).toHaveBeenCalledWith(
+        expect.any(Array),
+        PARENT,
+      );
+      expect(h.logger.info).toHaveBeenCalledWith(
+        expect.stringContaining(child.worktreePath),
+      );
+      expect(h.logger.info).toHaveBeenCalledWith(
+        expect.stringContaining(child.branch),
+      );
+      expect(h.logger.info).toHaveBeenCalledWith(
+        expect.stringContaining(child.childSessionId),
+      );
     },
   );
+
+  it.each([
+    'stream-exit',
+    'provider-error',
+    'config-reinit',
+    'compaction-abort',
+    'unknown',
+  ] as const)('starts a recovery successor for %s', async (cause) => {
+    const closer = { close: jest.fn().mockResolvedValue({ kind: 'closed' }) };
+    const h = makeHarness({ closer });
+    const child = await h.startChild();
+    h.markRan(child.childSessionId);
+    h.active.delete(child.childSessionId);
+    h.sessionEnd.notifyAll({
+      sessionId: child.childSessionId,
+      workspaceRoot: child.worktreePath,
+      cause,
+    });
+    jest.advanceTimersByTime(30_000);
+    await flush();
+    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe(
+      'handed-off',
+    );
+    expect(closer.close).toHaveBeenCalledTimes(1);
+    expect(closer.close).toHaveBeenCalledWith(
+      child.childSessionId,
+      h.registry.get(child.childSessionId)?.sdkSessionId,
+    );
+    expect(h.registry.resolveLatest(child.childSessionId)?.worktreePath).toBe(
+      child.worktreePath,
+    );
+    expect(h.host.startChildSession.mock.calls[1][0].prompt).toContain(
+      `previous session ended unexpectedly (${cause})`,
+    );
+    if (cause === 'unknown')
+      expect(h.lines.join('\n')).toContain('unknown cause');
+  });
 
   it('ends after recovery successor start fails and moves lanes to parent', async () => {
     const h = makeHarness();
     const child = await h.startChild();
     h.markRan(child.childSessionId);
     h.active.delete(child.childSessionId);
-    (h.host.startChildSession as jest.Mock).mockResolvedValueOnce({ started: false, error: 'provider failed' });
-    h.sessionEnd.notifyAll({ sessionId: child.childSessionId, workspaceRoot: child.worktreePath, cause: 'provider-error' });
+    (h.host.startChildSession as jest.Mock).mockResolvedValueOnce({
+      started: false,
+      error: 'provider failed',
+    });
+    h.sessionEnd.notifyAll({
+      sessionId: child.childSessionId,
+      workspaceRoot: child.worktreePath,
+      cause: 'provider-error',
+    });
     jest.advanceTimersByTime(30_000);
     await flush();
     expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe('ended');
-    expect(h.registry.get(child.childSessionId)?.endReason).toContain('automatic successor failed: provider failed');
+    expect(h.registry.get(child.childSessionId)?.endReason).toContain(
+      'automatic successor failed: provider failed',
+    );
     expect(h.agents.adoptLanes).toHaveBeenCalledWith(expect.any(Array), PARENT);
     expect(h.provisioner.rollback).not.toHaveBeenCalled();
   });
@@ -68,30 +212,42 @@ describe('SessionSpawnerService succession', () => {
     const child = await h.startChild();
     h.markRan(child.childSessionId);
     h.active.delete(child.childSessionId);
-    h.sessionEnd.notifyAll({ sessionId: child.childSessionId, workspaceRoot: child.worktreePath,
-      cause: 'stream-exit' });
+    h.sessionEnd.notifyAll({
+      sessionId: child.childSessionId,
+      workspaceRoot: child.worktreePath,
+      cause: 'stream-exit',
+    });
     jest.advanceTimersByTime(30_000);
     await flush();
     expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe('ended');
-    expect(h.registry.get(child.childSessionId)?.endReason).toContain('max successions reached');
+    expect(h.registry.get(child.childSessionId)?.endReason).toContain(
+      'max successions reached',
+    );
     expect(h.host.startChildSession).toHaveBeenCalledTimes(1);
   });
 
   it('warns before the cap without ending or interrupting the child', async () => {
-    const h = makeHarness({ config: {
-      'agentSessions.maxRuntimeMinutes': 5,
-      'agentSessions.runtimeWarnLeadMinutes': 1,
-    } });
+    const h = makeHarness({
+      config: {
+        'agentSessions.maxRuntimeMinutes': 5,
+        'agentSessions.runtimeWarnLeadMinutes': 1,
+      },
+    });
     const child = await h.startChild();
     h.markRan(child.childSessionId);
     h.phases.set(child.childSessionId, 'generating');
     jest.advanceTimersByTime(4 * 60_000);
     await flush();
     expect(h.adapter.sendMessageToSession).toHaveBeenCalledWith(
-      child.childSessionId, expect.stringContaining('runtime cap'),
-      expect.objectContaining({ origin: expect.objectContaining({ kind: 'peer', name: 'Ptah host' }) }),
+      child.childSessionId,
+      expect.stringContaining('runtime cap'),
+      expect.objectContaining({
+        origin: expect.objectContaining({ kind: 'peer', name: 'Ptah host' }),
+      }),
     );
-    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBeUndefined();
+    expect(
+      h.registry.get(child.childSessionId)?.terminalStatus,
+    ).toBeUndefined();
     expect(h.adapter.interruptSession).not.toHaveBeenCalled();
   });
 
@@ -107,12 +263,16 @@ describe('SessionSpawnerService succession', () => {
     expect(predecessor?.terminalStatus).toBe('handed-off');
     expect(successor?.childSessionId).not.toBe(child.childSessionId);
     expect(successor).toMatchObject({
-      parentSessionId: PARENT, branch: child.branch,
-      worktreePath: child.worktreePath, succeeds: child.childSessionId,
+      parentSessionId: PARENT,
+      branch: child.branch,
+      worktreePath: child.worktreePath,
+      succeeds: child.childSessionId,
     });
     expect(h.registry.liveCount()).toBe(1);
     expect(h.notifier.signalSessionChild).toHaveBeenCalledTimes(1);
-    expect(h.notifier.signalSessionChild.mock.calls[0][1]).toMatchObject({ status: 'handed-off' });
+    expect(h.notifier.signalSessionChild.mock.calls[0][1]).toMatchObject({
+      status: 'handed-off',
+    });
   });
 
   it('waits for a busy turn boundary without interrupting', async () => {
@@ -121,11 +281,15 @@ describe('SessionSpawnerService succession', () => {
     h.markRan(child.childSessionId);
     h.phases.set(child.childSessionId, 'generating');
     jest.advanceTimersByTime(5 * 60_000);
-    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBeUndefined();
+    expect(
+      h.registry.get(child.childSessionId)?.terminalStatus,
+    ).toBeUndefined();
     expect(h.adapter.interruptSession).not.toHaveBeenCalled();
     h.turnEnded(child.childSessionId);
     await flush();
-    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe('handed-off');
+    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe(
+      'handed-off',
+    );
   });
 
   it('adopts running lanes before starting the successor', async () => {
@@ -138,38 +302,65 @@ describe('SessionSpawnerService succession', () => {
     h.turnEnded(child.childSessionId);
     await flush();
     const successor = h.registry.resolveLatest(child.childSessionId);
-    expect(h.agents.adoptLanes).toHaveBeenCalledWith([child.childSessionId], successor?.childSessionId);
-    expect(h.agents.settleLaneAdoption).toHaveBeenCalledWith(['lane-1'], 'kept');
+    expect(h.agents.adoptLanes).toHaveBeenCalledWith(
+      [child.childSessionId],
+      successor?.childSessionId,
+    );
+    expect(h.agents.settleLaneAdoption).toHaveBeenCalledWith(
+      ['lane-1'],
+      'kept',
+    );
   });
 
   it('interrupts at grace expiry and continues in a successor', async () => {
-    const h = makeHarness({ config: { 'agentSessions.maxRuntimeMinutes': 5,
-      'agentSessions.handoffGraceMinutes': 1 } });
+    const h = makeHarness({
+      config: {
+        'agentSessions.maxRuntimeMinutes': 5,
+        'agentSessions.handoffGraceMinutes': 1,
+      },
+    });
     const child = await h.startChild();
     h.markRan(child.childSessionId);
     h.phases.set(child.childSessionId, 'generating');
     jest.advanceTimersByTime(6 * 60_000);
     await flush();
-    expect(h.adapter.interruptSession).toHaveBeenCalledWith(child.childSessionId, 'parent-stop');
-    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe('handed-off');
-    expect(h.host.startChildSession.mock.calls[1][0].prompt).toContain('interrupted mid-step');
+    expect(h.adapter.interruptSession).toHaveBeenCalledWith(
+      child.childSessionId,
+      'parent-stop',
+    );
+    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe(
+      'handed-off',
+    );
+    expect(h.host.startChildSession.mock.calls[1][0].prompt).toContain(
+      'interrupted mid-step',
+    );
   });
 
   it('uses the safety net when no succession is allowed', async () => {
-    const h = makeHarness({ config: { 'agentSessions.maxRuntimeMinutes': 5,
-      'agentSessions.maxSuccessions': 0 } });
+    const h = makeHarness({
+      config: {
+        'agentSessions.maxRuntimeMinutes': 5,
+        'agentSessions.maxSuccessions': 0,
+      },
+    });
     const child = await h.startChild();
     h.markRan(child.childSessionId);
     h.phases.set(child.childSessionId, 'idle');
     jest.advanceTimersByTime(5 * 60_000);
     await flush();
-    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe('timed-out');
+    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe(
+      'timed-out',
+    );
     expect(h.host.startChildSession).toHaveBeenCalledTimes(1);
   });
 
   it('applies the chain limit to the successor', async () => {
-    const h = makeHarness({ config: { 'agentSessions.maxRuntimeMinutes': 5,
-      'agentSessions.maxSuccessions': 1 } });
+    const h = makeHarness({
+      config: {
+        'agentSessions.maxRuntimeMinutes': 5,
+        'agentSessions.maxSuccessions': 1,
+      },
+    });
     const child = await h.startChild();
     h.markRan(child.childSessionId);
     h.phases.set(child.childSessionId, 'idle');
@@ -181,19 +372,28 @@ describe('SessionSpawnerService succession', () => {
     h.phases.set(successor.childSessionId, 'idle');
     jest.advanceTimersByTime(5 * 60_000);
     await flush();
-    expect(h.registry.get(successor.childSessionId)?.terminalStatus).toBe('timed-out');
+    expect(h.registry.get(successor.childSessionId)?.terminalStatus).toBe(
+      'timed-out',
+    );
   });
 
   it('uses the safety net after a successor start failure without rolling back the worktree', async () => {
     const h = makeHarness({ config: { 'agentSessions.maxRuntimeMinutes': 5 } });
     const child = await h.startChild();
     h.markRan(child.childSessionId);
-    (h.host.startChildSession as jest.Mock).mockResolvedValueOnce({ started: false, error: 'provider failed' });
+    (h.host.startChildSession as jest.Mock).mockResolvedValueOnce({
+      started: false,
+      error: 'provider failed',
+    });
     h.phases.set(child.childSessionId, 'idle');
     jest.advanceTimersByTime(5 * 60_000);
     await flush();
-    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe('timed-out');
-    expect(h.registry.get(child.childSessionId)?.endReason).toContain('work is kept');
+    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe(
+      'timed-out',
+    );
+    expect(h.registry.get(child.childSessionId)?.endReason).toContain(
+      'work is kept',
+    );
     expect(h.provisioner.rollback).not.toHaveBeenCalled();
     expect(h.agents.adoptLanes).toHaveBeenCalledWith(expect.any(Array), PARENT);
   });
@@ -202,39 +402,67 @@ describe('SessionSpawnerService succession', () => {
     const h = makeHarness();
     const child = await h.startChild();
     h.markRan(child.childSessionId);
-    const result = await h.spawner.succeed({ callerSessionId: child.childSessionId,
-      handoffPath: `${child.worktreePath}/HANDOFF.md`, prompt: 'Continue the parser' });
+    const result = await h.spawner.succeed({
+      callerSessionId: child.childSessionId,
+      handoffPath: `${child.worktreePath}/HANDOFF.md`,
+      prompt: 'Continue the parser',
+    });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    const status = h.spawner.status({ callerSessionId: PARENT, childSessionId: child.childSessionId });
+    const status = h.spawner.status({
+      callerSessionId: PARENT,
+      childSessionId: child.childSessionId,
+    });
     expect(status.ok).toBe(true);
     if (!status.ok) return;
-    expect(status.children[0].childSessionId).toBe(result.successor.childSessionId);
-    expect(await h.spawner.send({ callerSessionId: PARENT, childSessionId: child.childSessionId,
-      mode: 'queue', message: 'continue' })).toMatchObject({ delivered: true });
+    expect(status.children[0].childSessionId).toBe(
+      result.successor.childSessionId,
+    );
+    expect(
+      await h.spawner.send({
+        callerSessionId: PARENT,
+        childSessionId: child.childSessionId,
+        mode: 'queue',
+        message: 'continue',
+      }),
+    ).toMatchObject({ delivered: true });
     expect(result.successor.succeeds).toBe(child.childSessionId);
-    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe('handed-off');
+    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe(
+      'handed-off',
+    );
     expect(h.adapter.interruptSession).not.toHaveBeenCalled();
     h.turnEnded(child.childSessionId);
     await flush();
-    expect(h.adapter.interruptSession).toHaveBeenCalledWith(child.childSessionId, 'parent-stop');
-    expect(await h.spawner.stop({ callerSessionId: PARENT, childSessionId: child.childSessionId }))
-      .toMatchObject({
-        ok: false,
-        reason: 'handed-off',
-        requestedSessionId: child.childSessionId,
-        successorId: result.successor.childSessionId,
-      });
-    expect(await h.spawner.stop({
-      callerSessionId: PARENT,
-      childSessionId: child.childSessionId,
-      followHandoff: true,
-    })).toMatchObject({
+    expect(h.adapter.interruptSession).toHaveBeenCalledWith(
+      child.childSessionId,
+      'parent-stop',
+    );
+    expect(
+      await h.spawner.stop({
+        callerSessionId: PARENT,
+        childSessionId: child.childSessionId,
+      }),
+    ).toMatchObject({
+      ok: false,
+      reason: 'handed-off',
+      requestedSessionId: child.childSessionId,
+      successorId: result.successor.childSessionId,
+    });
+    expect(
+      await h.spawner.stop({
+        callerSessionId: PARENT,
+        childSessionId: child.childSessionId,
+        followHandoff: true,
+      }),
+    ).toMatchObject({
       ok: true,
       requestedSessionId: child.childSessionId,
       followed: true,
       alreadyEnded: false,
-      child: { childSessionId: result.successor.childSessionId, status: 'stopped' },
+      child: {
+        childSessionId: result.successor.childSessionId,
+        status: 'stopped',
+      },
     });
   });
 
@@ -246,7 +474,9 @@ describe('SessionSpawnerService succession', () => {
     const newParentSdk = '88888888-9999-4aaa-8bbb-cccccccccccc';
     // Parent hands off: reparent clears parentSdkSessionId before the new parent's SDK id resolves.
     h.registry.reparent(child.childSessionId, newParentTab, undefined);
-    expect(h.registry.get(child.childSessionId)?.parentSdkSessionId).toBeUndefined();
+    expect(
+      h.registry.get(child.childSessionId)?.parentSdkSessionId,
+    ).toBeUndefined();
     // Later, the new parent's SDK id resolves in lifecycle.
     h.lifecycleIds.set(newParentTab, newParentSdk);
 
@@ -263,41 +493,71 @@ describe('SessionSpawnerService succession', () => {
       parentTabId: newParentTab,
       parentSessionId: newParentSdk,
     });
-    expect(h.registry.get(result.successor.childSessionId)?.parentSdkSessionId).toBe(
-      newParentSdk,
-    );
+    expect(
+      h.registry.get(result.successor.childSessionId)?.parentSdkSessionId,
+    ).toBe(newParentSdk);
   });
 
   it('retires a tool-driven predecessor after the fallback timer', async () => {
-    const h = makeHarness();
+    const closer = { close: jest.fn().mockResolvedValue({ kind: 'closed' }) };
+    const h = makeHarness({ closer });
     const child = await h.startChild();
     h.markRan(child.childSessionId);
-    const result = await h.spawner.succeed({ callerSessionId: child.childSessionId,
-      handoffPath: `${child.worktreePath}/HANDOFF.md`, prompt: 'continue' });
+    const result = await h.spawner.succeed({
+      callerSessionId: child.childSessionId,
+      handoffPath: `${child.worktreePath}/HANDOFF.md`,
+      prompt: 'continue',
+    });
     expect(result.ok).toBe(true);
     expect(h.adapter.interruptSession).not.toHaveBeenCalled();
+    expect(closer.close).not.toHaveBeenCalled();
     jest.advanceTimersByTime(60_000);
     await flush();
-    expect(h.adapter.interruptSession).toHaveBeenCalledWith(child.childSessionId, 'parent-stop');
+    expect(h.adapter.interruptSession).toHaveBeenCalledWith(
+      child.childSessionId,
+      'parent-stop',
+    );
+    expect(closer.close).toHaveBeenCalledTimes(1);
+    expect(closer.close).toHaveBeenCalledWith(
+      child.childSessionId,
+      h.registry.get(child.childSessionId)?.sdkSessionId,
+    );
   });
 
   it('refuses a caller outside a live child', async () => {
     const h = makeHarness();
-    expect(await h.spawner.succeed({ callerSessionId: PARENT,
-      handoffPath: '/tmp/HANDOFF.md', prompt: 'continue' })).toMatchObject({
-        ok: false, refusal: 'not-a-live-child',
-      });
+    expect(
+      await h.spawner.succeed({
+        callerSessionId: PARENT,
+        handoffPath: '/tmp/HANDOFF.md',
+        prompt: 'continue',
+      }),
+    ).toMatchObject({
+      ok: false,
+      refusal: 'not-a-live-child',
+    });
   });
 
   it('keeps a tool-driven predecessor live when successor start fails', async () => {
     const h = makeHarness();
     const child = await h.startChild();
     h.markRan(child.childSessionId);
-    (h.host.startChildSession as jest.Mock).mockResolvedValueOnce({ started: false, error: 'unavailable' });
-    const result = await h.spawner.succeed({ callerSessionId: child.childSessionId,
-      handoffPath: `${child.worktreePath}/HANDOFF.md`, prompt: 'continue' });
-    expect(result).toMatchObject({ ok: false, refusal: 'session-start-failed' });
-    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBeUndefined();
+    (h.host.startChildSession as jest.Mock).mockResolvedValueOnce({
+      started: false,
+      error: 'unavailable',
+    });
+    const result = await h.spawner.succeed({
+      callerSessionId: child.childSessionId,
+      handoffPath: `${child.worktreePath}/HANDOFF.md`,
+      prompt: 'continue',
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      refusal: 'session-start-failed',
+    });
+    expect(
+      h.registry.get(child.childSessionId)?.terminalStatus,
+    ).toBeUndefined();
     expect(h.registry.liveCount()).toBe(1);
     expect(h.provisioner.rollback).not.toHaveBeenCalled();
     expect(h.agents.settleLaneAdoption).toHaveBeenCalledWith([], 'reverted');
@@ -307,40 +567,80 @@ describe('SessionSpawnerService succession', () => {
     const h = makeHarness();
     const child = await h.startChild();
     h.markRan(child.childSessionId);
-    let settleStart: (outcome: { started: false; error: string }) => void = () => undefined;
+    let settleStart: (outcome: {
+      started: false;
+      error: string;
+    }) => void = () => undefined;
     (h.host.startChildSession as jest.Mock).mockImplementationOnce(
-      () => new Promise((resolve) => { settleStart = resolve; }));
-    const handoff = h.spawner.succeed({ callerSessionId: child.childSessionId,
-      handoffPath: `${child.worktreePath}/HANDOFF.md`, prompt: 'continue' });
+      () =>
+        new Promise((resolve) => {
+          settleStart = resolve;
+        }),
+    );
+    const handoff = h.spawner.succeed({
+      callerSessionId: child.childSessionId,
+      handoffPath: `${child.worktreePath}/HANDOFF.md`,
+      prompt: 'continue',
+    });
     await flush();
-    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe('handed-off');
+    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe(
+      'handed-off',
+    );
 
     const cleared = h.spawner.clearFinished({ callerSessionId: PARENT });
     expect(cleared).toMatchObject({ ok: true, cleared: [] });
-    expect(cleared.ok && cleared.skipped).toContainEqual(
-      { childSessionId: child.childSessionId, reason: 'live' });
+    expect(cleared.ok && cleared.skipped).toContainEqual({
+      childSessionId: child.childSessionId,
+      reason: 'live',
+    });
 
     settleStart({ started: false, error: 'unavailable' });
-    expect(await handoff).toMatchObject({ ok: false, refusal: 'session-start-failed' });
-    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBeUndefined();
+    expect(await handoff).toMatchObject({
+      ok: false,
+      refusal: 'session-start-failed',
+    });
+    expect(
+      h.registry.get(child.childSessionId)?.terminalStatus,
+    ).toBeUndefined();
     expect(h.registry.liveCount()).toBe(1);
   });
 
-  const endDuringFailedHandoff = async (cause: 'provider-error' | 'user-stop') => {
+  const endDuringFailedHandoff = async (
+    cause: 'provider-error' | 'user-stop',
+  ) => {
     const h = makeHarness();
     const child = await h.startChild();
     h.markRan(child.childSessionId);
-    let settleStart: (outcome: { started: false; error: string }) => void = () => undefined;
+    let settleStart: (outcome: {
+      started: false;
+      error: string;
+    }) => void = () => undefined;
     (h.host.startChildSession as jest.Mock).mockImplementationOnce(
-      () => new Promise((resolve) => { settleStart = resolve; }));
-    const handoff = h.spawner.succeed({ callerSessionId: child.childSessionId,
-      handoffPath: `${child.worktreePath}/HANDOFF.md`, prompt: 'continue' });
+      () =>
+        new Promise((resolve) => {
+          settleStart = resolve;
+        }),
+    );
+    const handoff = h.spawner.succeed({
+      callerSessionId: child.childSessionId,
+      handoffPath: `${child.worktreePath}/HANDOFF.md`,
+      prompt: 'continue',
+    });
     await flush();
     h.active.delete(child.childSessionId);
-    h.sessionEnd.notifyAll({ sessionId: child.childSessionId, workspaceRoot: child.worktreePath, cause });
+    h.sessionEnd.notifyAll({
+      sessionId: child.childSessionId,
+      workspaceRoot: child.worktreePath,
+      cause,
+    });
     settleStart({ started: false, error: 'unavailable' });
-    expect(await handoff).toMatchObject({ ok: false, refusal: 'session-start-failed' });
-    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBeUndefined();
+    expect(await handoff).toMatchObject({
+      ok: false,
+      refusal: 'session-start-failed',
+    });
+    expect(
+      h.registry.get(child.childSessionId)?.terminalStatus,
+    ).toBeUndefined();
     jest.advanceTimersByTime(30_000);
     await flush();
     return { h, child };
@@ -348,16 +648,22 @@ describe('SessionSpawnerService succession', () => {
 
   it('recovers a child whose session ended during a failed handoff', async () => {
     const { h, child } = await endDuringFailedHandoff('provider-error');
-    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe('handed-off');
+    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe(
+      'handed-off',
+    );
     expect(h.host.startChildSession).toHaveBeenCalledTimes(3);
-    expect(h.host.startChildSession.mock.calls[2][0].prompt)
-      .toContain('previous session ended unexpectedly (provider-error)');
+    expect(h.host.startChildSession.mock.calls[2][0].prompt).toContain(
+      'previous session ended unexpectedly (provider-error)',
+    );
   });
 
   it('keeps a user stop during a failed handoff as a stop', async () => {
     const { h, child } = await endDuringFailedHandoff('user-stop');
     expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe('ended');
     expect(h.host.startChildSession).toHaveBeenCalledTimes(2);
-    expect(h.agents.adoptLanes).toHaveBeenLastCalledWith(expect.any(Array), PARENT);
+    expect(h.agents.adoptLanes).toHaveBeenLastCalledWith(
+      expect.any(Array),
+      PARENT,
+    );
   });
 });
