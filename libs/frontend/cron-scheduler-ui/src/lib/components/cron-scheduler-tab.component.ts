@@ -17,7 +17,11 @@ import {
   LucideAngularModule,
   RefreshCw,
 } from 'lucide-angular';
-import { AppStateManager, isReviewSurfaceAvailable, VSCodeService } from '@ptah-extension/core';
+import {
+  AppStateManager,
+  isReviewSurfaceAvailable,
+  VSCodeService,
+} from '@ptah-extension/core';
 import type { CronCreateParams, ScheduledJobDto } from '@ptah-extension/shared';
 
 import { CronExpressionService } from '../services/cron-expression.service';
@@ -30,7 +34,12 @@ import { CronJobCardComponent } from './cron-job-card.component';
 import { CronJobDetailDrawerComponent } from './cron-job-detail-drawer.component';
 import {
   PtahButtonDirective,
+  PtahFieldComponent,
   PtahIconButtonDirective,
+  PtahInputDirective,
+  PtahSelectDirective,
+  PtahTextareaDirective,
+  PtahToggleDirective,
 } from '@ptah-extension/ui';
 
 interface CronJobFormState {
@@ -92,6 +101,11 @@ function emptyForm(timezone: string): CronJobFormState {
     CronJobDetailDrawerComponent,
     PtahButtonDirective,
     PtahIconButtonDirective,
+    PtahFieldComponent,
+    PtahInputDirective,
+    PtahSelectDirective,
+    PtahTextareaDirective,
+    PtahToggleDirective,
   ],
   template: `
     @if (!isElectron()) {
@@ -106,8 +120,8 @@ function emptyForm(timezone: string): CronJobFormState {
         />
         <p class="text-sm font-medium">Schedules need the desktop app</p>
         <p class="text-xs text-base-content-muted">
-          Cron jobs run headless PtahCode sessions in the background, which is only
-          available in the PtahCode desktop app.
+          Cron jobs run headless PtahCode sessions in the background, which is
+          only available in the PtahCode desktop app.
         </p>
         <a
           class="link link-primary text-xs"
@@ -147,7 +161,8 @@ function emptyForm(timezone: string): CronJobFormState {
                 variant="ghost"
                 aria-label="Open review runs"
                 data-testid="cron-review-runs-link"
-              >Review runs</a>
+                >Review runs</a
+              >
             }
             <div
               class="join"
@@ -216,7 +231,11 @@ function emptyForm(timezone: string): CronJobFormState {
                   aria-hidden="true"
                 />
               </div>
-              <div class="stat-title min-w-0 whitespace-normal text-base-content-muted">Jobs</div>
+              <div
+                class="stat-title min-w-0 whitespace-normal text-base-content-muted"
+              >
+                Jobs
+              </div>
               <div
                 class="stat-value text-2xl text-primary"
                 data-testid="cron-stat-total"
@@ -235,7 +254,11 @@ function emptyForm(timezone: string): CronJobFormState {
                   aria-hidden="true"
                 />
               </div>
-              <div class="stat-title min-w-0 whitespace-normal text-base-content-muted">Enabled</div>
+              <div
+                class="stat-title min-w-0 whitespace-normal text-base-content-muted"
+              >
+                Enabled
+              </div>
               <div
                 class="stat-value text-2xl text-success"
                 data-testid="cron-stat-enabled"
@@ -254,7 +277,11 @@ function emptyForm(timezone: string): CronJobFormState {
                   aria-hidden="true"
                 />
               </div>
-              <div class="stat-title min-w-0 whitespace-normal text-base-content-muted">Disabled</div>
+              <div
+                class="stat-title min-w-0 whitespace-normal text-base-content-muted"
+              >
+                Disabled
+              </div>
               <div
                 class="stat-value text-2xl text-base-content-muted"
                 data-testid="cron-stat-disabled"
@@ -273,8 +300,14 @@ function emptyForm(timezone: string): CronJobFormState {
                   aria-hidden="true"
                 />
               </div>
-              <div class="stat-title min-w-0 whitespace-normal text-base-content-muted">Next run</div>
-              <div class="stat-value min-w-0 break-words text-sm font-medium text-info">
+              <div
+                class="stat-title min-w-0 whitespace-normal text-base-content-muted"
+              >
+                Next run
+              </div>
+              <div
+                class="stat-value min-w-0 break-words text-sm font-medium text-info"
+              >
                 {{ formatTime(stats().nextRunAt) }}
               </div>
               @if (stats().nextRunAt !== null) {
@@ -304,8 +337,9 @@ function emptyForm(timezone: string): CronJobFormState {
             />
             <p class="text-sm font-medium">No scheduled jobs yet</p>
             <p class="max-w-sm text-xs text-base-content-muted">
-              Cron jobs run a prompt on a recurring schedule as a headless PtahCode
-              session — perfect for nightly builds, digests, or maintenance.
+              Cron jobs run a prompt on a recurring schedule as a headless
+              PtahCode session — perfect for nightly builds, digests, or
+              maintenance.
             </p>
             <button
               type="button"
@@ -347,29 +381,28 @@ function emptyForm(timezone: string): CronJobFormState {
               {{ form().id ? 'Edit job' : 'New job' }}
             </h2>
             <div class="mt-4 grid max-w-2xl gap-4 sm:grid-cols-2">
-              <label class="flex flex-col gap-1">
-                <span class="text-xs text-base-content-muted">Name</span>
+              <ptah-field label="Name">
                 <input
                   type="text"
-                  class="input input-bordered input-sm"
+                  ptahInput
                   data-testid="cron-form-name"
                   [value]="form().name"
                   (input)="patchForm({ name: inputValue($event) })"
                 />
-              </label>
+              </ptah-field>
 
-              <label class="flex flex-col gap-1">
-                <span class="text-xs text-base-content-muted"
-                  >Cron expression</span
-                >
-                <input
-                  type="text"
-                  class="input input-bordered input-sm font-mono"
-                  data-testid="cron-form-expr"
-                  placeholder="*/5 * * * *"
-                  [value]="form().cronExpr"
-                  (input)="patchForm({ cronExpr: inputValue($event) })"
-                />
+              <div class="flex flex-col gap-1">
+                <ptah-field label="Cron expression">
+                  <input
+                    type="text"
+                    ptahInput
+                    class="font-mono"
+                    data-testid="cron-form-expr"
+                    placeholder="*/5 * * * *"
+                    [value]="form().cronExpr"
+                    (input)="patchForm({ cronExpr: inputValue($event) })"
+                  />
+                </ptah-field>
                 @if (exprPreview().valid) {
                   <span class="text-xs text-success">
                     {{ exprPreview().description }}
@@ -379,59 +412,58 @@ function emptyForm(timezone: string): CronJobFormState {
                     {{ exprPreview().error }}
                   </span>
                 }
-              </label>
+              </div>
 
-              <label class="flex flex-col gap-1 sm:col-span-2">
-                <span class="text-xs text-base-content-muted"
-                  >Prompt / handler</span
-                >
-                <textarea
-                  class="textarea textarea-bordered textarea-sm font-mono"
-                  rows="3"
-                  data-testid="cron-form-prompt"
-                  [value]="form().prompt"
-                  (input)="patchForm({ prompt: inputValue($event) })"
-                ></textarea>
+              <div class="flex flex-col gap-1 sm:col-span-2">
+                <ptah-field label="Prompt / handler">
+                  <textarea
+                    ptahTextarea
+                    class="font-mono"
+                    rows="3"
+                    data-testid="cron-form-prompt"
+                    [value]="form().prompt"
+                    (input)="patchForm({ prompt: inputValue($event) })"
+                  ></textarea>
+                </ptah-field>
                 <span class="text-xs text-base-content-muted">
                   Reserved internal handlers (prefixed "handler:") are rejected
                   by the backend.
                 </span>
-              </label>
+              </div>
 
-              <label class="flex flex-col gap-1">
-                <span class="text-xs text-base-content-muted"
-                  >Workspace root (optional)</span
-                >
+              <ptah-field label="Workspace root (optional)">
                 <input
                   type="text"
-                  class="input input-bordered input-sm"
+                  ptahInput
                   [value]="form().workspaceRoot"
                   (input)="patchForm({ workspaceRoot: inputValue($event) })"
                 />
-              </label>
+              </ptah-field>
 
-              <label class="flex flex-col gap-1">
-                <span class="text-xs text-base-content-muted">Timezone</span>
-                <select
-                  class="select select-bordered select-sm"
-                  [value]="form().timezone"
-                  (change)="patchForm({ timezone: selectValue($event) })"
-                >
-                  @for (tz of timezoneOptions(); track tz) {
-                    <option [value]="tz" [selected]="tz === form().timezone">
-                      {{ tz }}
-                    </option>
-                  }
-                </select>
+              <div class="flex flex-col gap-1">
+                <ptah-field label="Timezone">
+                  <select
+                    ptahSelect
+                    [value]="form().timezone"
+                    (change)="patchForm({ timezone: selectValue($event) })"
+                  >
+                    @for (tz of timezoneOptions(); track tz) {
+                      <option [value]="tz" [selected]="tz === form().timezone">
+                        {{ tz }}
+                      </option>
+                    }
+                  </select>
+                </ptah-field>
                 <span class="text-xs text-base-content-muted">
                   Detected timezone: {{ detectedTimezone }}
                 </span>
-              </label>
+              </div>
 
               <label class="flex cursor-pointer items-center gap-2">
                 <input
                   type="checkbox"
-                  class="toggle toggle-sm toggle-primary"
+                  ptahToggle
+                  size="sm"
                   [checked]="form().enabled"
                   (change)="patchForm({ enabled: checkboxValue($event) })"
                 />
@@ -476,8 +508,8 @@ function emptyForm(timezone: string): CronJobFormState {
         <p class="text-xs text-base-content-muted">
           Cron settings live in
           <span class="font-mono">~/.ptah/settings.json</span> under
-          <span class="font-mono">cron.*</span>. Edit that file and restart PtahCode
-          desktop to change defaults.
+          <span class="font-mono">cron.*</span>. Edit that file and restart
+          PtahCode desktop to change defaults.
         </p>
       </div>
     }

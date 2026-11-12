@@ -20,7 +20,13 @@ import {
   type TaskType,
 } from '@ptah-extension/shared';
 import { TASK_STATUS_LABELS } from '../task-presentation';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import {
+  PtahButtonDirective,
+  PtahFieldComponent,
+  PtahInputDirective,
+  PtahSelectDirective,
+  PtahTextareaDirective,
+} from '@ptah-extension/ui';
 
 /** What the dialog hands back; the parent turns it into `tasks:create`. */
 export interface TaskCreateDraft {
@@ -51,7 +57,14 @@ const FOCUSABLE =
 @Component({
   selector: 'ptah-task-create-dialog',
   standalone: true,
-  imports: [PtahButtonDirective, FormsModule],
+  imports: [
+    PtahButtonDirective,
+    PtahFieldComponent,
+    PtahInputDirective,
+    PtahSelectDirective,
+    PtahTextareaDirective,
+    FormsModule,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(keydown)': 'onKeyDown($event)' },
   template: `
@@ -69,24 +82,25 @@ const FOCUSABLE =
         </h2>
 
         <form class="flex flex-col gap-3" (ngSubmit)="submit()">
-          <label class="form-control">
-            <span class="mb-1 text-sm text-base-content-muted">Title</span>
-            <input
-              #titleInput
-              type="text"
-              name="title"
-              class="input input-bordered input-sm h-9 bg-surface-0 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-              placeholder="Short imperative title"
-              aria-label="Task title"
-              data-testid="tasks-create-title"
-              [attr.aria-invalid]="titleError() ? 'true' : null"
-              [attr.aria-describedby]="
-                titleError() ? 'task-create-title-error' : null
-              "
-              [ngModel]="title()"
-              (ngModelChange)="title.set($event)"
-              (blur)="touched.set(true)"
-            />
+          <div>
+            <ptah-field label="Title">
+              <input
+                #titleInput
+                type="text"
+                name="title"
+                ptahInput
+                placeholder="Short imperative title"
+                aria-label="Task title"
+                data-testid="tasks-create-title"
+                [invalid]="!!titleError()"
+                [attr.aria-describedby]="
+                  titleError() ? 'task-create-title-error' : null
+                "
+                [ngModel]="title()"
+                (ngModelChange)="title.set($event)"
+                (blur)="touched.set(true)"
+              />
+            </ptah-field>
             @if (titleError()) {
               <span
                 id="task-create-title-error"
@@ -96,14 +110,13 @@ const FOCUSABLE =
                 A task needs a title.
               </span>
             }
-          </label>
+          </div>
 
           <div class="grid grid-cols-2 gap-3">
-            <label class="form-control">
-              <span class="mb-1 text-sm text-base-content-muted">Type</span>
+            <ptah-field label="Type">
               <select
                 name="type"
-                class="select select-bordered select-sm h-9 bg-surface-0 text-sm"
+                ptahSelect
                 aria-label="Task type"
                 data-testid="tasks-create-type"
                 [ngModel]="type()"
@@ -113,13 +126,12 @@ const FOCUSABLE =
                   <option [value]="option">{{ option }}</option>
                 }
               </select>
-            </label>
+            </ptah-field>
 
-            <label class="form-control">
-              <span class="mb-1 text-sm text-base-content-muted">Status</span>
+            <ptah-field label="Status">
               <select
                 name="status"
-                class="select select-bordered select-sm h-9 bg-surface-0 text-sm"
+                ptahSelect
                 aria-label="Task status"
                 data-testid="tasks-create-status"
                 [ngModel]="status()"
@@ -129,23 +141,20 @@ const FOCUSABLE =
                   <option [value]="option">{{ statusLabel(option) }}</option>
                 }
               </select>
-            </label>
+            </ptah-field>
           </div>
 
-          <label class="form-control">
-            <span class="mb-1 text-sm text-base-content-muted">
-              Description (optional)
-            </span>
+          <ptah-field label="Description (optional)">
             <textarea
               name="description"
-              class="textarea textarea-bordered textarea-sm bg-surface-0 text-sm"
+              ptahTextarea
               rows="3"
               placeholder="One-line summary"
               aria-label="Task description"
               [ngModel]="description()"
               (ngModelChange)="description.set($event)"
             ></textarea>
-          </label>
+          </ptah-field>
 
           <div class="mt-2 flex justify-end gap-2">
             <button
