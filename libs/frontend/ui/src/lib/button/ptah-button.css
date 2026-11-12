@@ -266,7 +266,7 @@
 }
 
 /* Keyboard focus ring: shared outline, never a box shadow */
-.btn[data-ptah-button][data-selected]:not(.btn-primary, .btn-error):is(.btn, #ptah-button) {
+.btn[data-ptah-button][data-selected]:not(.btn-primary, .btn-error):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-button) {
   background-color: var(--ptah-btn-selected-bg);
   border-color: var(--ptah-btn-selected-border);
   color: var(--ptah-btn-selected-fg);
