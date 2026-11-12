@@ -37,7 +37,7 @@ describe('CommandNodeDetailComponent', () => {
     fixture.detectChanges();
     expect(host.textContent).toContain('Fix <the> bug');
     expect(host.querySelector('the')).toBeNull();
-    expect(host.textContent).toContain('Updated Just now');
+    expect(host.textContent).toContain('Updated just now');
   });
 
   it('formats provisional child figures and omits unknown values', () => {

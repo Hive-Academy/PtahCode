@@ -33,7 +33,7 @@ const STAGE_LIMIT = 16;
         @if (run().headRetry?.automaticRetriesStopped) { <p class="mt-2 text-sm text-warning">Automatic retries stopped</p> }
         @else if (run().headRetry?.nextEligibleAt; as retryAt) { <p class="mt-2 text-sm text-warning">Retry after {{ retryTime(retryAt) }}</p> }
         @if (loadState() === 'loading') { <p class="mt-5" role="status">Loading run details…</p> }
-        @else if (loadState() === 'error') { <div class="alert alert-error mt-5" role="alert">Run details are unavailable. <button type="button" class="btn btn-ghost btn-sm" (click)="retry.emit()">Retry</button></div> }
+        @else if (loadState() === 'error') { <div class="alert alert-error mt-5" role="alert">Run details are unavailable. <button type="button" ptahButton variant="ghost" (click)="retry.emit()">Retry</button></div> }
         @else {
           <section class="surface-2 mt-4 rounded-box p-4" aria-label="Coverage" data-testid="review-detail-coverage">
             <div class="flex items-center justify-between gap-2 text-sm"><span class="font-semibold">Coverage</span>

@@ -172,9 +172,10 @@ function emptyForm(timezone: string): CronJobFormState {
               <button
                 type="button"
                 role="tab"
-                class="join-item btn btn-sm"
+                ptahButton
+                class="join-item"
                 data-testid="cron-scope-workspace"
-                [class.btn-primary]="scopeFilter() === 'workspace'"
+                [variant]="scopeFilter() === 'workspace' ? 'primary' : 'secondary'"
                 [attr.aria-selected]="scopeFilter() === 'workspace'"
                 (click)="onScopeChange('workspace')"
               >
@@ -183,9 +184,10 @@ function emptyForm(timezone: string): CronJobFormState {
               <button
                 type="button"
                 role="tab"
-                class="join-item btn btn-sm"
+                ptahButton
+                class="join-item"
                 data-testid="cron-scope-all"
-                [class.btn-primary]="scopeFilter() === 'all'"
+                [variant]="scopeFilter() === 'all' ? 'primary' : 'secondary'"
                 [attr.aria-selected]="scopeFilter() === 'all'"
                 (click)="onScopeChange('all')"
               >
