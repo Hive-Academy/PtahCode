@@ -1,4 +1,8 @@
 import {
+  formatDuration as formatSharedDuration,
+  formatRelative,
+} from '@ptah-extension/ui';
+import {
   sessionCostEstimate,
   type DashboardSessionEntry,
 } from '../models/session-analytics.models';
@@ -155,22 +159,13 @@ export function formatCompact(count: number): string {
 }
 
 /**
- * Format a duration in milliseconds as a compact human string
- * ("<1m", "42m", "3h 12m", "2d 4h"). Returns '--' for non-finite or
+ * Format a duration in milliseconds with the shared owner format
+ * ("45s", "42m 5s", "3h 12m", "2d 4h"). Returns '--' for non-finite or
  * negative durations.
  */
 export function formatDuration(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return '--';
-  const minutes = Math.floor(ms / 60_000);
-  if (minutes < 1) return '<1m';
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const remMinutes = minutes % 60;
-  if (hours < 24)
-    return remMinutes > 0 ? `${hours}h ${remMinutes}m` : `${hours}h`;
-  const days = Math.floor(hours / 24);
-  const remHours = hours % 24;
-  return remHours > 0 ? `${days}d ${remHours}h` : `${days}d`;
+  return formatSharedDuration(ms);
 }
 
 /**
@@ -191,22 +186,12 @@ export function formatFullDate(timestamp: number): string {
 }
 
 /**
- * Format a past timestamp as a short relative string ("just now", "2h ago").
+ * Format a past timestamp with the shared owner format ("just now", "2h ago").
  * Falls back to '' for falsy/NaN/epoch-zero or future timestamps.
  */
 export function formatRelativeTime(timestamp: number): string {
   if (!timestamp || isNaN(timestamp)) return '';
-  const diffMs = Date.now() - timestamp;
-  if (diffMs < 0) return '';
-  const seconds = Math.round(diffMs / 1000);
-  if (seconds < 45) return 'just now';
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  const months = Math.round(days / 30);
-  if (months < 12) return `${months}mo ago`;
-  return `${Math.round(months / 12)}y ago`;
+  const now = Date.now();
+  if (now - timestamp < 0) return '';
+  return formatRelative(timestamp, now);
 }
