@@ -1314,10 +1314,10 @@
     "badge": 1,
     "badge-outline": 1,
     "badge-xs": 1,
-    "btn": 1,
+    "btn": 2,
     "btn-active": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1
+    "btn-ghost": 2,
+    "btn-sm": 2
   },
   "libs/frontend/tasks-ui/src/lib/components/task-board-header.component.ts": {
     "<dynamic>": 1,

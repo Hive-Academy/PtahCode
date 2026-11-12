@@ -433,9 +433,7 @@ interface TaskViewRow {
           @if (activeView() !== null) {
             <button
               type="button"
-              ptahButton
-              variant="ghost"
-              class="justify-start"
+              class="btn btn-ghost btn-sm justify-start"
               [disabled]="busy()"
               title="Stop tracking a saved view. The current filters stay as they are."
               data-testid="task-view-clear-active"
