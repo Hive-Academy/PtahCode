@@ -212,18 +212,18 @@ it('renders the button family as one reference with the token look on every dire
 
   expect(
     col.querySelectorAll('[data-testid="button-matrix-specimen"]'),
-  ).toHaveLength(20);
+  ).toHaveLength(24);
   expect(col.querySelectorAll('[data-testid="button-state-row"]')).toHaveLength(
-    5,
+    6,
   );
   expect(
     col.querySelectorAll('[data-testid="button-state-specimen"]'),
-  ).toHaveLength(30);
-  expect(col.querySelectorAll('button[data-state="hover"]')).toHaveLength(5);
-  expect(col.querySelectorAll('button[data-state="focus"]')).toHaveLength(5);
-  expect(col.querySelectorAll('button[data-state="active"]')).toHaveLength(5);
-  expect(col.querySelectorAll('button:disabled')).toHaveLength(5);
-  expect(col.querySelectorAll('button[aria-busy="true"]')).toHaveLength(5);
+  ).toHaveLength(36);
+  expect(col.querySelectorAll('button[data-state="hover"]')).toHaveLength(6);
+  expect(col.querySelectorAll('button[data-state="focus"]')).toHaveLength(6);
+  expect(col.querySelectorAll('button[data-state="active"]')).toHaveLength(6);
+  expect(col.querySelectorAll('button:disabled')).toHaveLength(6);
+  expect(col.querySelectorAll('button[aria-busy="true"]')).toHaveLength(6);
   expect(
     col.querySelectorAll(
       '[data-testid="icon-button-specimen"] [ptahIconButton]',

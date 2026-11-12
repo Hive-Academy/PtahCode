@@ -208,6 +208,7 @@ export class GalleryButtonColumnComponent {
   public readonly variants: readonly PtahButtonVariant[] = [
     'primary',
     'secondary',
+    'outline',
     'ghost',
     'danger',
     'link',
@@ -228,6 +229,7 @@ export class GalleryButtonColumnComponent {
     const labels: Readonly<Record<PtahButtonVariant, string>> = {
       primary: 'Save changes',
       secondary: 'Test connection',
+      outline: 'More options',
       ghost: 'Refresh',
       danger: 'Revoke key',
       link: 'View logs',

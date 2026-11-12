@@ -14,6 +14,7 @@ export const BUTTON_HOST = {
   'data-ptah-button': '',
   '[class.btn-primary]': "variant() === 'primary'",
   '[class.btn-secondary]': "variant() === 'secondary'",
+  '[class.btn-outline]': "variant() === 'outline'",
   '[class.btn-ghost]': "variant() === 'ghost'",
   '[class.btn-error]': "variant() === 'danger'",
   '[class.btn-link]': "variant() === 'link'",

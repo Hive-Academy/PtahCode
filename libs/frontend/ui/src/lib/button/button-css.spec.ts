@@ -33,4 +33,13 @@ describe('ptah-button.css owner input rules', () => {
       expect(selector).toContain(':not(.btn-primary, .btn-error)'),
     );
   });
+
+  it('applies selection to the outline variant and ignores tone there', () => {
+    const selectedRules = rules.filter((selector) =>
+      selector.includes('[data-selected]'),
+    );
+    selectedRules.forEach((selector) => expect(selector).not.toContain('btn-outline'));
+    const toneRules = rules.filter((selector) => selector.includes('[data-tone'));
+    toneRules.forEach((selector) => expect(selector).not.toContain('btn-outline'));
+  });
 });

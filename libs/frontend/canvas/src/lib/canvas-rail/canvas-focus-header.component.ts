@@ -1,4 +1,4 @@
-import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
+import { PtahIconButtonDirective } from '@ptah-extension/ui';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -20,7 +20,7 @@ import { focusMenuItem, handleMenuKeydown } from './canvas-rail-keyboard';
 @Component({
   selector: 'ptah-canvas-focus-header',
   standalone: true,
-  imports: [PtahButtonDirective, PtahIconButtonDirective, LucideAngularModule],
+  imports: [PtahIconButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:pointerdown)': 'onDocumentPointerDown($event)' },
   template: `
@@ -45,29 +45,29 @@ import { focusMenuItem, handleMenuKeydown } from './canvas-rail-keyboard';
           (keydown)="onMenuKeydown($event)"
           class="absolute right-0 top-9 z-20 flex w-max min-w-36 flex-col gap-0.5 whitespace-nowrap rounded-lg border border-base-content/10 bg-base-200 p-2 shadow-lg"
         >
-          <button ptahButton variant="ghost" size="sm"
+          <button
             type="button"
             role="menuitem"
             data-action="swap-panes"
-            class="flex-nowrap justify-start whitespace-nowrap font-normal"
+            class="btn btn-ghost btn-sm flex-nowrap justify-start whitespace-nowrap font-normal"
             (click)="choose(swapPanesRequested)"
           >
             Swap panes
           </button>
-          <button ptahButton variant="ghost" size="sm"
+          <button
             type="button"
             role="menuitem"
             data-action="close-pane"
-            class="flex-nowrap justify-start whitespace-nowrap font-normal"
+            class="btn btn-ghost btn-sm flex-nowrap justify-start whitespace-nowrap font-normal"
             (click)="choose(closePaneRequested)"
           >
             Close pane
           </button>
-          <button ptahButton variant="ghost" size="sm"
+          <button
             type="button"
             role="menuitem"
             data-action="close-split"
-            class="flex-nowrap justify-start whitespace-nowrap font-normal"
+            class="btn btn-ghost btn-sm flex-nowrap justify-start whitespace-nowrap font-normal"
             (click)="choose(closeSplitRequested)"
           >
             Close split

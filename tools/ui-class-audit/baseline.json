@@ -23,14 +23,25 @@
     "btn-success": 1,
     "btn-xs": 2
   },
+  "libs/frontend/canvas/src/lib/canvas-rail/canvas-empty-board.component.ts": {
+    "btn": 1,
+    "btn-primary": 1
+  },
+  "libs/frontend/canvas/src/lib/canvas-rail/canvas-focus-header.component.ts": {
+    "btn": 3,
+    "btn-ghost": 3,
+    "btn-sm": 3
+  },
   "libs/frontend/canvas/src/lib/canvas-rail/canvas-inspector-dock.component.ts": {
     "skeleton": 6
   },
   "libs/frontend/canvas/src/lib/canvas-rail/canvas-rail-card.component.ts": {
     "<dynamic>": 1,
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-sm": 3
+    "btn": 11,
+    "btn-ghost": 11,
+    "btn-primary": 1,
+    "btn-sm": 9,
+    "btn-xs": 2
   },
   "libs/frontend/canvas/src/lib/canvas-rail/canvas-rail.component.ts": {
     "btn": 4,
@@ -656,10 +667,17 @@
     "input-sm": 1
   },
   "libs/frontend/cron-scheduler-ui/src/lib/components/cron-job-card.component.ts": {
-    "<dynamic>": 1
+    "<dynamic>": 1,
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-square": 1,
+    "btn-xs": 1
   },
   "libs/frontend/cron-scheduler-ui/src/lib/components/cron-job-detail-drawer.component.ts": {
-    "<dynamic>": 2
+    "<dynamic>": 2,
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-sm": 1
   },
   "libs/frontend/cron-scheduler-ui/src/lib/components/cron-scheduler-tab.component.ts": {
     "alert": 1,
@@ -747,9 +765,10 @@
     "<dynamic>": 1
   },
   "libs/frontend/git-ui/src/lib/branch-picker/branch-picker-dropdown.component.ts": {
-    "btn": 2,
+    "btn": 5,
+    "btn-ghost": 3,
     "btn-outline": 2,
-    "btn-xs": 2
+    "btn-xs": 5
   },
   "libs/frontend/git-ui/src/lib/conflict/conflict-banner.component.ts": {
     "<dynamic>": 1,
@@ -759,6 +778,11 @@
   },
   "libs/frontend/git-ui/src/lib/git-dock/git-dock-scope-header.component.ts": {
     "<dynamic>": 1
+  },
+  "libs/frontend/git-ui/src/lib/history/history-stash-section.component.ts": {
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-xs": 1
   },
   "libs/frontend/git-ui/src/lib/open-in/open-in-button.component.ts": {
     "btn": 2,
@@ -810,9 +834,9 @@
     "btn-xs": 2
   },
   "libs/frontend/git-ui/src/lib/stash/stash-popover.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
+    "btn": 3,
+    "btn-ghost": 3,
+    "btn-xs": 3
   },
   "libs/frontend/git-ui/src/lib/task/task-pr-panel.component.ts": {
     "<dynamic>": 1,
