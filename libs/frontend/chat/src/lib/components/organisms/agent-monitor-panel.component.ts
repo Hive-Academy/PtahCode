@@ -68,7 +68,7 @@ import { WorkflowPermissionPresenterService } from './agent-monitor/workflow-per
 import { SESSION_CONTEXT } from '../../tokens/session-context.token';
 import { AgentPermissionResponder } from '../../services/agent-permission-responder';
 
-import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahIconButtonDirective, PtahBadgeDirective } from '@ptah-extension/ui';
 // Re-export the pure grouping API alongside the component for consumers that
 // import from the component barrel. The implementation lives in
 // `agent-monitor-panel.grouping.ts` so it stays unit-testable without the
@@ -178,6 +178,7 @@ function subagentToTile(r: SubagentRecord): WorkflowTileVM {
   },
   providers: [WorkflowPermissionPresenterService],
   imports: [
+    PtahBadgeDirective,
     NgClass,
     NgTemplateOutlet,
     AgentLaneGridComponent,
@@ -234,7 +235,7 @@ function subagentToTile(r: SubagentRecord): WorkflowTileVM {
         <div class="flex items-center gap-2">
           <span class="text-sm font-semibold">Agents</span>
           @if (totalCount() > 0) {
-            <span class="badge badge-sm badge-neutral">{{ totalCount() }}</span>
+            <span ptahBadge>{{ totalCount() }}</span>
           }
         </div>
         <div class="flex items-center gap-1">
@@ -325,7 +326,7 @@ function subagentToTile(r: SubagentRecord): WorkflowTileVM {
                   [class.bg-warning]="group.status === 'mixed'"
                   [class.animate-pulse]="group.status === 'running'"
                 ></span>
-                <span class="badge badge-xs badge-neutral shrink-0">
+                <span class="shrink-0" ptahBadge size="xs">
                   {{ group.running }}/{{ group.total }}
                 </span>
                 @if (group.totalTokens !== undefined) {
@@ -366,7 +367,7 @@ function subagentToTile(r: SubagentRecord): WorkflowTileVM {
                       </span>
                       @if (tile.permissionCount > 0) {
                         <span
-                          class="badge badge-xs badge-warning animate-pulse"
+                          class="animate-pulse" ptahBadge tone="warn" size="xs"
                           [attr.aria-label]="
                             tile.permissionCount + ' pending permissions'
                           "
@@ -433,7 +434,7 @@ function subagentToTile(r: SubagentRecord): WorkflowTileVM {
 
                   <!-- Permission badge -->
                   @if (agent.permissionQueue.length > 0) {
-                    <span class="badge badge-xs badge-warning animate-pulse">
+                    <span class="animate-pulse" ptahBadge tone="warn" size="xs">
                       {{ agent.permissionQueue.length }}
                     </span>
                   }
@@ -490,7 +491,7 @@ function subagentToTile(r: SubagentRecord): WorkflowTileVM {
                     class="w-3.5 h-3.5 text-warning flex-shrink-0"
                     aria-hidden="true"
                   />
-                  <span class="badge badge-xs badge-warning">Permission</span>
+                  <span ptahBadge tone="warn" size="xs">Permission</span>
                   @if (perm.timeoutAt > 0) {
                     <span class="text-[10px] text-warning font-mono" role="timer"
                       [attr.aria-label]="'Permission expires in ' + store.permissionSecondsRemaining(perm.timeoutAt) + ' seconds'">

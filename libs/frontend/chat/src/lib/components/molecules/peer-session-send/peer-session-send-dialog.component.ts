@@ -9,7 +9,7 @@ import type {
   PeerSessionRow,
   PeerSessionSendResult,
 } from '@ptah-extension/shared';
-import { PeerSessionPickerComponent, PtahButtonDirective, PtahIconButtonDirective, PtahFieldComponent, PtahTextareaDirective } from '@ptah-extension/ui';
+import { PeerSessionPickerComponent, PtahButtonDirective, PtahIconButtonDirective, PtahFieldComponent, PtahTextareaDirective, PtahBadgeDirective } from '@ptah-extension/ui';
 
 /**
  * PeerSessionSendDialogComponent — presentational modal dialog for composing
@@ -34,7 +34,7 @@ import { PeerSessionPickerComponent, PtahButtonDirective, PtahIconButtonDirectiv
   selector: 'ptah-peer-session-send-dialog',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PeerSessionPickerComponent, PtahButtonDirective, PtahIconButtonDirective, PtahFieldComponent, PtahTextareaDirective],
+  imports: [PtahBadgeDirective, PeerSessionPickerComponent, PtahButtonDirective, PtahIconButtonDirective, PtahFieldComponent, PtahTextareaDirective],
   template: `
     @if (isOpen()) {
       <dialog class="modal modal-open" data-testid="peer-session-send-dialog">
@@ -81,9 +81,7 @@ import { PeerSessionPickerComponent, PtahButtonDirective, PtahIconButtonDirectiv
               >
                 <span>Workspace: {{ target.workspaceLabel }}</span>
                 <span
-                  class="badge badge-xs"
-                  [class.badge-success]="target.reachability === 'reachable'"
-                  [class.badge-error]="target.reachability === 'unreachable'"
+                  ptahBadge size="xs" [tone]="target.reachability === 'reachable' ? 'ok' : target.reachability === 'unreachable' ? 'err' : 'neutral'"
                 >
                   {{ target.reachability }}
                 </span>
@@ -153,14 +151,14 @@ import { PeerSessionPickerComponent, PtahButtonDirective, PtahIconButtonDirectiv
                   </span>
                   @if (res.outcome === 'accepted') {
                     <span
-                      class="badge badge-info badge-sm font-medium"
+                      class="font-medium" ptahBadge tone="info"
                       data-testid="peer-session-outcome"
                     >
                       Accepted
                     </span>
                   } @else {
                     <span
-                      class="badge badge-error badge-sm font-medium"
+                      class="font-medium" ptahBadge tone="err"
                       data-testid="peer-session-outcome"
                     >
                       Refused

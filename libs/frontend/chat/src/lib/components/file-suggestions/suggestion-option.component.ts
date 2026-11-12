@@ -1,3 +1,4 @@
+import { PtahBadgeDirective } from '@ptah-extension/ui';
 import {
   Component,
   input,
@@ -45,7 +46,7 @@ export type SuggestionItem =
  */
 @Component({
   selector: 'ptah-suggestion-option',
-  imports: [LucideAngularModule],
+  imports: [PtahBadgeDirective, LucideAngularModule],
   host: {
     '[id]': 'optionId()',
     class:
@@ -82,9 +83,9 @@ export type SuggestionItem =
           <div class="flex items-center gap-2">
             <span class="font-medium text-xs truncate">{{ s.name }}</span>
             @if (isBuiltinCommand()) {
-              <span class="badge badge-accent badge-xs">Built-in</span>
+              <span ptahBadge tone="accent" size="xs">Built-in</span>
             } @else if (isPluginCommand()) {
-              <span class="badge badge-info badge-xs">Plugin</span>
+              <span ptahBadge tone="info" size="xs">Plugin</span>
             }
           </div>
           <span class="text-[11px] opacity-70 truncate">{{
@@ -95,7 +96,7 @@ export type SuggestionItem =
           <div class="flex items-center gap-2 min-w-0">
             <span class="font-medium text-xs truncate">{{ s.label }}</span>
             <span
-              class="badge badge-ghost badge-xs text-base-content shrink-0 whitespace-nowrap"
+              class="text-base-content shrink-0 whitespace-nowrap" ptahBadge size="xs"
             >
               Prompt · {{ s.category }}
             </span>

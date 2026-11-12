@@ -29,7 +29,7 @@ import type { MonitoredAgent } from '@ptah-extension/chat-streaming';
 import type { LaneStopReason } from '@ptah-extension/shared';
 import { ProviderAccountsStateService } from '@ptah-extension/core';
 
-import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahIconButtonDirective, PtahBadgeDirective } from '@ptah-extension/ui';
 /** Readable host stop or interruption reason for a lane. */
 export function laneGuardStopText(
   reason: LaneStopReason | undefined,
@@ -65,7 +65,7 @@ export function laneAccountText(
 @Component({
   selector: 'ptah-agent-card-header',
   standalone: true,
-  imports: [LucideAngularModule, SlicePipe, PtahButtonDirective, PtahIconButtonDirective],
+  imports: [PtahBadgeDirective, LucideAngularModule, SlicePipe, PtahButtonDirective, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -89,7 +89,7 @@ export function laneAccountText(
 
       <!-- CLI badge (display name or CLI type) -->
       <span
-        class="badge badge-sm badge-outline font-mono text-[10px] flex-shrink-0"
+        class="font-mono text-[10px] flex-shrink-0" ptahBadge appearance="outline"
       >
         {{ agent().displayName || agent().cli }}
       </span>
@@ -97,13 +97,7 @@ export function laneAccountText(
 
       <!-- Status badge -->
       <span
-        class="badge badge-sm flex-shrink-0"
-        [class.badge-info]="agent().status === 'running'"
-        [class.badge-success]="agent().status === 'completed'"
-        [class.badge-error]="
-          agent().status === 'failed' || agent().status === 'timeout'
-        "
-        [class.badge-warning]="agent().status === 'stopped'"
+        class="flex-shrink-0" ptahBadge [tone]="agent().status === 'running' ? 'info' : agent().status === 'completed' ? 'ok' : agent().status === 'failed' || agent().status === 'timeout' ? 'err' : agent().status === 'stopped' ? 'warn' : 'neutral'"
       >
         {{ agent().status }}
       </span>
@@ -120,7 +114,7 @@ export function laneAccountText(
       <!-- Model badge -->
       @if (agent().model) {
         <span
-          class="badge badge-sm badge-ghost font-mono text-[9px] text-base-content-muted flex-shrink-0"
+          class="font-mono text-[9px] text-base-content-muted flex-shrink-0" ptahBadge
           [title]="'Model: ' + agent().model"
         >
           {{ agent().model }}
@@ -130,11 +124,11 @@ export function laneAccountText(
       <!-- Claude account the run used (label only; never an ID) -->
       @if (accountText(); as account) {
         <span
-          class="badge badge-sm badge-ghost text-[9px] text-base-content-muted max-w-[10rem] min-w-0 flex-shrink-0"
+          class="text-[9px] text-base-content-muted max-w-[10rem] min-w-0 flex-shrink-0" ptahBadge
           data-testid="lane-account"
           [title]="account"
         >
-          <span class="truncate">{{ account }}</span>
+          <span class="ptah-badge-text">{{ account }}</span>
         </span>
       }
 
@@ -183,7 +177,7 @@ export function laneAccountText(
       <!-- CLI Session ID badge (resume capability) -->
       @if (presentation() === 'card' && agent().cliSessionId) {
         <span
-          class="badge badge-xs badge-ghost font-mono text-[9px] text-base-content-muted ml-1 flex-shrink-0"
+          class="font-mono text-[9px] text-base-content-muted ml-1 flex-shrink-0" ptahBadge size="xs"
           [title]="'CLI Session: ' + agent().cliSessionId"
         >
           {{ agent().cliSessionId! | slice: 0 : 8 }}...
@@ -202,10 +196,10 @@ export function laneAccountText(
     </div>
     @if (agent().potentialCapabilities || agent().effectiveCapabilities || agent().effectivePolicy) {
       <div class="flex flex-wrap gap-1 px-2 pb-1.5" title="Permission and network chosen by the parent at spawn.">
-        <span class="badge badge-outline badge-xs">Messaging: {{ messagingLabel() }}</span>
-        <span class="badge badge-outline badge-xs">Permission: {{ permissionLabel() }}</span>
-        <span class="badge badge-outline badge-xs">Network: {{ networkLabel() }}</span>
-        <span class="badge badge-outline badge-xs">Limit: {{ limitLabel() }}</span>
+        <span ptahBadge appearance="outline" size="xs">Messaging: {{ messagingLabel() }}</span>
+        <span ptahBadge appearance="outline" size="xs">Permission: {{ permissionLabel() }}</span>
+        <span ptahBadge appearance="outline" size="xs">Network: {{ networkLabel() }}</span>
+        <span ptahBadge appearance="outline" size="xs">Limit: {{ limitLabel() }}</span>
       </div>
     }
   `,

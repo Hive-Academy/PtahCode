@@ -6,8 +6,8 @@ describe('WorkflowBadgeComponent', () => {
     const fixture = TestBed.createComponent(WorkflowBadgeComponent);
     fixture.componentRef.setInput('workflow', 'harness-configure');
     fixture.detectChanges();
-    const badge = fixture.nativeElement.querySelector('.badge') as HTMLElement;
-    expect(badge.classList).toContain('badge-sm');
+    const badge = fixture.nativeElement.querySelector('[data-ptah-badge]') as HTMLElement;
+    expect(badge.getAttribute('data-size')).toBe('sm');
     expect(badge.querySelector('.sr-only')?.textContent?.trim()).toBe(
       'Workflow:',
     );
@@ -15,7 +15,7 @@ describe('WorkflowBadgeComponent', () => {
     expect(badge.hasAttribute('aria-label')).toBe(false);
     fixture.componentRef.setInput('workflow', 'unknown');
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('.badge')).toBeNull();
+    expect(fixture.nativeElement.querySelector('[data-ptah-badge]')).toBeNull();
     fixture.componentRef.setInput('workflow', null);
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('span')).toBeNull();

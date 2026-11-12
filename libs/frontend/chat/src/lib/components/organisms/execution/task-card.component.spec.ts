@@ -68,10 +68,10 @@ describe('TaskCardComponent', () => {
     const fixture = render(
       toolNode('TaskUpdate', { taskId: 't-42', status: 'completed' }),
     );
-    const badge = fixture.nativeElement.querySelector('span.badge');
+    const badge = fixture.nativeElement.querySelector('span[data-ptah-badge]');
     expect(badge).not.toBeNull();
     expect(badge.textContent).toContain('completed');
-    expect(badge.className).toContain('badge-success');
+    expect(badge.getAttribute('data-tone')).toBe('ok');
     expect(fixture.nativeElement.textContent).toContain('t-42');
   });
 
@@ -84,6 +84,6 @@ describe('TaskCardComponent', () => {
     const fixture = render(toolNode('TaskList', undefined));
     expect(fixture.nativeElement.textContent).toContain('Tasks listed');
     // No status badge when there is no status arg.
-    expect(fixture.nativeElement.querySelector('span.badge')).toBeNull();
+    expect(fixture.nativeElement.querySelector('span[data-ptah-badge]')).toBeNull();
   });
 });

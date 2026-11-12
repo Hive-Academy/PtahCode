@@ -24,7 +24,7 @@ import {
   signal,
 } from '@angular/core';
 import { ListFilter, LucideAngularModule, Search, X } from 'lucide-angular';
-import { NativePopoverComponent, PtahCheckboxDirective, PtahInputDirective, PtahSelectDirective, PtahToggleDirective } from '@ptah-extension/ui';
+import { NativePopoverComponent, PtahCheckboxDirective, PtahInputDirective, PtahSelectDirective, PtahToggleDirective, PtahBadgeDirective } from '@ptah-extension/ui';
 import {
   SESSION_PRIORITIES,
   SESSION_WORKFLOW_STATUSES,
@@ -88,7 +88,7 @@ function keepDraftUntilTrimmedChange(
 @Component({
   selector: 'ptah-session-filter-bar',
   standalone: true,
-  imports: [LucideAngularModule, NativePopoverComponent, PtahCheckboxDirective, PtahInputDirective, PtahSelectDirective, PtahToggleDirective],
+  imports: [PtahBadgeDirective, LucideAngularModule, NativePopoverComponent, PtahCheckboxDirective, PtahInputDirective, PtahSelectDirective, PtahToggleDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- One wrapping toolbar (TASK_2026_679 design 3.4). From 640 px the
@@ -156,7 +156,7 @@ function keepDraftUntilTrimmedChange(
             <span class="text-xs">Filters</span>
             @if (activeFilterCount() > 0) {
               <span
-                class="badge badge-xs badge-neutral tabular-nums"
+                class="tabular-nums" ptahBadge size="xs"
                 aria-hidden="true"
                 >{{ activeFilterCount() }}</span
               >

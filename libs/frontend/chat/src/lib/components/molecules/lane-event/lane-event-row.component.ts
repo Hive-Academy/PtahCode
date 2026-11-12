@@ -11,7 +11,7 @@ import { toUserMessageMarkdown } from '../../../utils/user-message-markdown.util
 import type { LaneEventRow } from './lane-event-row.types';
 import { deriveLaneEventPresentation, laneEventTime, parseLaneCompletion, type LaneEventMetrics, type LaneEventTone } from './lane-event-row.presentation';
 
-import { PtahIconButtonDirective } from '@ptah-extension/ui';
+import { PtahIconButtonDirective, PtahBadgeDirective } from '@ptah-extension/ui';
 /** About what line 2 shows, after its indent and caption, at the narrow card minimum. */
 const LONG_SUMMARY_CHARS = 20;
 
@@ -34,7 +34,7 @@ interface AckChipView {
 @Component({
   selector: 'ptah-lane-event',
   standalone: true,
-  imports: [LucideAngularModule, MarkdownModule, SurfaceMarkdownPipe, AgentAvatarComponent, DeliveryStatusComponent, PtahIconButtonDirective],
+  imports: [PtahBadgeDirective, LucideAngularModule, MarkdownModule, SurfaceMarkdownPipe, AgentAvatarComponent, DeliveryStatusComponent, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './lane-event-row.component.html',
   // The card takes a faint wash of its status color and the chip a soft pill

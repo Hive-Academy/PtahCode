@@ -1,3 +1,4 @@
+import { PtahBadgeDirective } from '@ptah-extension/ui';
 import {
   Component,
   input,
@@ -26,7 +27,7 @@ import type { ExecutionNode } from '@ptah-extension/shared';
 @Component({
   selector: 'ptah-send-message-chip',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [PtahBadgeDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -58,7 +59,7 @@ import type { ExecutionNode } from '@ptah-extension/shared';
       @switch (resumedAgentStatus()) {
         @case ('running') {
           <span
-            class="badge badge-xs badge-info gap-1 shrink-0 ml-auto"
+            class="gap-1 shrink-0 ml-auto" ptahBadge tone="info" size="xs"
             data-testid="resumed-agent-status"
             data-status="running"
             role="status"
@@ -72,7 +73,7 @@ import type { ExecutionNode } from '@ptah-extension/shared';
         }
         @case ('done') {
           <span
-            class="badge badge-xs badge-success gap-1 shrink-0 ml-auto"
+            class="gap-1 shrink-0 ml-auto" ptahBadge tone="ok" size="xs"
             data-testid="resumed-agent-status"
             data-status="done"
             role="status"
@@ -87,7 +88,7 @@ import type { ExecutionNode } from '@ptah-extension/shared';
         }
         @case ('failed') {
           <span
-            class="badge badge-xs badge-error gap-1 shrink-0 ml-auto"
+            class="gap-1 shrink-0 ml-auto" ptahBadge tone="err" size="xs"
             data-testid="resumed-agent-status"
             data-status="failed"
             role="status"
@@ -102,7 +103,7 @@ import type { ExecutionNode } from '@ptah-extension/shared';
         }
         @case ('stopped') {
           <span
-            class="badge badge-xs badge-warning gap-1 shrink-0 ml-auto"
+            class="gap-1 shrink-0 ml-auto" ptahBadge tone="warn" size="xs"
             data-testid="resumed-agent-status"
             data-status="stopped"
             role="status"

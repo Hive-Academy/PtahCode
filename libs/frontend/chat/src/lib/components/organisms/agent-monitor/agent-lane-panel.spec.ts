@@ -501,7 +501,7 @@ describe('agent panel lanes', () => {
     expect(fixture.componentInstance.selectedAgentId()).toBe('first');
     expect(fixture.componentInstance.showLaneGrid()).toBe(false);
     const waiting: HTMLElement = fixture.nativeElement.querySelector(
-      'button[title="Second workflow"] .badge-warning',
+      'button[title="Second workflow"] [data-ptah-badge][data-tone="warn"]',
     );
     expect(waiting.textContent?.trim()).toBe('1');
     expect(waiting.getAttribute('aria-label')).toBe('1 pending permissions');

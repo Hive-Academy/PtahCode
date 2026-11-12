@@ -617,7 +617,7 @@ describe('AgentMonitorPanelComponent — session subagents', () => {
 
     expect(fixture.componentInstance.totalCount()).toBe(1);
     const badge = fixture.nativeElement.querySelector(
-      '.badge.badge-sm.badge-neutral',
+      '[data-ptah-badge][data-size="sm"][data-tone="neutral"]',
     );
     expect(badge?.textContent?.trim()).toBe('1');
   });

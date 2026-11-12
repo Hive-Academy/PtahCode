@@ -8,7 +8,7 @@ import { LucideAngularModule, PlayCircle, X } from 'lucide-angular';
 import { injectWallClock } from '@ptah-extension/core';
 import type { SubagentRecord } from '@ptah-extension/shared';
 
-import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahIconButtonDirective, PtahBadgeDirective } from '@ptah-extension/ui';
 /**
  * ResumeNotificationBannerComponent - Banner for resumable interrupted agents
  *
@@ -32,7 +32,7 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
  */
 @Component({
   selector: 'ptah-resume-notification-banner',
-  imports: [LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective],
+  imports: [PtahBadgeDirective, LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective],
   template: `
     @if (resumableSubagents().length > 0) {
       <div
@@ -48,7 +48,7 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
             aria-hidden="true"
           />
           <span class="font-semibold text-base-content-muted">Interrupted</span>
-          <span class="badge badge-xs badge-warning font-mono px-1.5">
+          <span class="font-mono px-1.5" ptahBadge tone="warn" size="xs">
             {{ resumableSubagents().length }}
           </span>
           <span class="flex-1"></span>
@@ -82,7 +82,7 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
             class="flex items-center gap-1.5 px-2 py-1.5 border-t border-base-300/30 bg-base-100/20"
           >
             <span
-              class="badge badge-xs font-mono px-1.5 badge-warning badge-outline"
+              class="font-mono px-1.5" ptahBadge tone="warn" appearance="outline" size="xs"
             >
               {{ agent.agentType }}
             </span>
