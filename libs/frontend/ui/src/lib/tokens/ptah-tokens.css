@@ -300,6 +300,9 @@
 [data-theme] {
   /* Track behind the meter fill. Same value the meter used before. */
   --ptah-meter-track: var(--surface-border-strong);
+  /* Stripe recipe of the meter `stripes` option: bar width and gap. */
+  --ptah-meter-stripe-bar: 4px;
+  --ptah-meter-stripe-gap: 3px;
 }
 /* ---- end ptah-meter tokens ---- */
 

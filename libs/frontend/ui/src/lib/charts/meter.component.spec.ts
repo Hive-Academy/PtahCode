@@ -155,3 +155,34 @@ describe('meter hideLabel, valueText and role', () => {
     expect(host.querySelector('[role="progressbar"]')).not.toBeNull();
   });
 });
+
+describe('marker and stripes', () => {
+  it('draws no marker and keeps the track classes by default', () => {
+    const el = render({ value: 10 });
+    expect(el.querySelector('[data-meter-marker]')).toBeNull();
+    expect(el.querySelector('[role="meter"]')?.classList.contains('relative')).toBe(false);
+    expect((el.querySelector('[role="meter"] > div') as HTMLElement).style.backgroundImage).toBe('');
+  });
+
+  it('draws an aria-hidden marker at the percent without changing the value', () => {
+    const el = render({ value: 30, marker: 80 });
+    const tick = el.querySelector('[data-meter-marker]') as HTMLElement;
+    expect(tick.style.left).toBe('calc(80% - 0.8px)');
+    expect(tick.getAttribute('aria-hidden')).toBe('true');
+    expect(el.querySelector('[role="meter"]')?.getAttribute('aria-valuenow')).toBe('30');
+  });
+
+  it('clamps the marker and hides it for non-finite input or invalid data', () => {
+    expect((render({ value: 30, marker: 150 }).querySelector('[data-meter-marker]') as HTMLElement).style.left).toBe('calc(100% - 1px)');
+    expect(render({ value: 30, marker: Number.NaN }).querySelector('[data-meter-marker]')).toBeNull();
+    expect(render({ value: 30, max: 0, marker: 50 }).querySelector('[data-meter-marker]')).toBeNull();
+  });
+
+  it('draws stripes in the tone ink over the track color', () => {
+    const fill = render({ value: 50, tone: 'err', stripes: true }).querySelector('[role="meter"] > div') as HTMLElement;
+    expect(fill.classList.contains('bg-[var(--ptah-badge-neutral-ink)]')).toBe(false);
+    expect(fill.className).not.toMatch(/(^|\s)bg-state/);
+    expect(fill.classList.contains('text-state-err')).toBe(true);
+    expect(fill.style.backgroundImage).toContain('repeating-linear-gradient');
+  });
+});
