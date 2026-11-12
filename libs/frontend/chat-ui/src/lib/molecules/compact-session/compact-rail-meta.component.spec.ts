@@ -32,7 +32,7 @@ describe(CompactRailMetaComponent.name, () => {
     const fixture = render();
     expect(
       fixture.nativeElement.querySelectorAll(
-        '.badge, button, [data-testid="rail-linked-task"]',
+        '[data-ptah-badge], button, [data-testid="rail-linked-task"]',
       ),
     ).toHaveLength(0);
   });

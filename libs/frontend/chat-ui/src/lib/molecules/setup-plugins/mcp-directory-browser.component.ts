@@ -29,6 +29,7 @@ import {
   CatalogCardSkeletonComponent,
   CatalogGridComponent,
   MonogramTileComponent,
+  PtahBadgeDirective,
   PtahButtonDirective,
   StorefrontPanelComponent,
   resolveListingBrandSlug,
@@ -137,6 +138,7 @@ interface RegistryCardView {
     MonogramTileComponent,
     StorefrontPanelComponent,
     InstallScopeFieldComponent,
+    PtahBadgeDirective,
     PtahButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -295,7 +297,7 @@ interface RegistryCardView {
                           <p
                             class="break-all rounded-lg bg-base-100 p-2 font-mono text-xs"
                           >
-                            <span class="badge badge-sm badge-neutral mr-1">{{
+                            <span ptahBadge tone="neutral" size="sm" class="mr-1">{{
                               config.type
                             }}</span>
                             {{ getConfigSummary() }}
@@ -325,7 +327,7 @@ interface RegistryCardView {
                                     requiredInput.name
                                   }}</span>
                                   @if (requiredInput.isSecret) {
-                                    <span class="badge badge-sm badge-neutral ml-1"
+                                    <span ptahBadge tone="neutral" size="sm" class="ml-1"
                                       >secret</span
                                     >
                                   }
@@ -407,7 +409,7 @@ interface RegistryCardView {
                                 }}</span>
                                 @if (isTargetLocked(target)) {
                                   <span
-                                    class="badge badge-warning badge-outline badge-xs"
+                                    ptahBadge tone="warn" size="xs" appearance="outline"
                                     >Global only</span
                                   >
                                 }

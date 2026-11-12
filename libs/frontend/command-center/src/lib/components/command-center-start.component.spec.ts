@@ -156,7 +156,7 @@ describe('CommandCenterStartComponent', () => {
     fixture.componentRef.setInput('currentSessionId', sessions[0].id);
     fixture.detectChanges();
     const current = (
-      fixture.nativeElement.querySelector('.badge-primary') as HTMLElement
+      fixture.nativeElement.querySelector('[data-tone="accent"]') as HTMLElement
     ).closest('button') as HTMLButtonElement;
     expect(current.querySelector('[data-testid="current-figures"]')).toBeNull();
     fixture.componentRef.setInput('currentStats', {

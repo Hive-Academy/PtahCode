@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import { PtahBadgeDirective } from '@ptah-extension/ui';
 import type { PlanLimitTileModel, ProviderLaneLimitModel } from './stats-limit-view-model.types';
 
 function percent(tile: PlanLimitTileModel): number | null {
@@ -9,6 +10,7 @@ function percent(tile: PlanLimitTileModel): number | null {
 @Component({
   selector: 'ptah-provider-lane-limit-tile',
   standalone: true,
+  imports: [PtahBadgeDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @let p = provider();
@@ -33,7 +35,7 @@ function percent(tile: PlanLimitTileModel): number | null {
         @if (tile.caption || tile.sourceChips.length) {
           <p class="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-base-content-muted">
             @if (tile.caption) { <span>{{ tile.caption }}</span> }
-            @for (source of tile.sourceChips; track source) { <span class="badge badge-ghost badge-xs">{{ source }}</span> }
+            @for (source of tile.sourceChips; track source) { <span ptahBadge size="xs">{{ source }}</span> }
           </p>
         }
         @if (tile.kind !== 'window') {
