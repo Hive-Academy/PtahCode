@@ -24,6 +24,8 @@ import {
   NativePopoverComponent,
   PtahButtonDirective,
   PtahIconButtonDirective,
+  PtahCheckboxDirective,
+  PtahInputDirective,
 } from '@ptah-extension/ui';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
@@ -108,7 +110,7 @@ function providerLabel(provider: ProviderId): string {
 @Component({
   selector: 'ptah-web-search-config',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NativePopoverComponent, PtahButtonDirective, PtahIconButtonDirective],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NativePopoverComponent, PtahButtonDirective, PtahIconButtonDirective, PtahCheckboxDirective, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -164,7 +166,7 @@ function providerLabel(provider: ProviderId): string {
             @for (opt of providerOptions; track opt.value) {
               <tr>
                 <td class="align-top">
-                  <input type="checkbox" class="checkbox checkbox-xs checkbox-primary"
+                  <input type="checkbox" ptahCheckbox size="xs"
                     [checked]="isSelected(opt.value)" [ptahBusyDisabled]="saving()"
                     (change)="onProviderChange(opt.value, $event)"
                     [attr.data-testid]="'settings-toggle-web-search-provider-' + opt.value"
@@ -217,7 +219,7 @@ function providerLabel(provider: ProviderId): string {
                         </label>
                         <div class="relative">
                           <input [id]="'web-search-api-key-' + opt.value" [type]="keyVisible() ? 'text' : 'password'"
-                            class="input input-bordered input-sm w-full pr-9 font-mono text-xs"
+                            ptahInput size="sm" tone="mono" class="w-full pr-9 text-xs"
                             placeholder="Paste the API key" autocomplete="off" spellcheck="false"
                             [value]="apiKeyInput()" (input)="onApiKeyInput($event)" (keydown.enter)="saveApiKey()"
                             data-testid="settings-web-search-key-input" />

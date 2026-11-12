@@ -17,10 +17,8 @@ import {
   type SettingsSaveResult,
 } from '../feedback/settings-save-feedback.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahSelectDirective } from '@ptah-extension/ui';
 
-const FOCUS =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
 const ENV_VAR = 'CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL';
 const LABEL = 'Subagent prompt-cache TTL';
 const NOT_SAVED = `${settingNotSavedMessage(LABEL)} The saved setting is unchanged.`;
@@ -47,7 +45,7 @@ const LABELS: Readonly<Record<SubagentPromptCacheTtlSetting, string>> = {
 @Component({
   selector: 'ptah-subagent-cache-ttl-setting',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, PtahButtonDirective],
+  imports: [SettingsBusyDisabledDirective, PtahButtonDirective, PtahSelectDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -63,11 +61,9 @@ const LABELS: Readonly<Record<SubagentPromptCacheTtlSetting, string>> = {
           >Subagent prompt-cache TTL</label
         >
         <select
+          ptahSelect size="sm"
           id="subagent-cache-ttl"
-          [class]="
-            'select select-bordered select-sm w-full text-sm sm:w-80 ' +
-            focusRing
-          "
+          class="w-full text-sm sm:w-80"
           [value]="shown() ?? ''"
           [ptahBusyDisabled]="saving() || needsRecheck() || feedback.saving()"
           [attr.aria-describedby]="
@@ -133,7 +129,6 @@ const LABELS: Readonly<Record<SubagentPromptCacheTtlSetting, string>> = {
   `,
 })
 export class SubagentCacheTtlSettingComponent {
-  protected readonly focusRing = FOCUS;
   protected readonly envVar = ENV_VAR;
   protected readonly options = SUBAGENT_PROMPT_CACHE_TTL_SETTINGS.map(
     (value) => ({ value, label: LABELS[value] }),

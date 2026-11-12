@@ -24,6 +24,7 @@ import {
   NativePopoverComponent,
   PtahButtonDirective,
   PtahIconButtonDirective,
+  PtahInputDirective,
 } from '@ptah-extension/ui';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { cliMatrixRows } from './cli-matrix-rows';
@@ -73,6 +74,7 @@ interface OrderChip {
     NativePopoverComponent,
     PtahButtonDirective,
     PtahIconButtonDirective,
+    PtahInputDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -94,6 +96,8 @@ interface OrderChip {
             >Max Concurrent:</label
           >
           <input
+            ptahInput
+            size="sm"
             id="agent-max-concurrent"
             type="number"
             min="1"
@@ -101,7 +105,7 @@ interface OrderChip {
             step="1"
             inputmode="numeric"
             [class]="
-              'input input-bordered input-sm w-16 px-1.5 text-center font-mono text-xs ' +
+              'w-16 px-1.5 text-center font-mono text-xs ' +
               focusRing
             "
             [value]="maxConcurrent() ?? ''"

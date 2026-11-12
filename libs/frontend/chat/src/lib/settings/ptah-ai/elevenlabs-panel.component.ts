@@ -37,6 +37,8 @@ import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directi
 import {
   PtahButtonDirective,
   PtahIconButtonDirective,
+  PtahInputDirective,
+  PtahSelectDirective,
 } from '@ptah-extension/ui';
 
 type WriteResult = { ok: true } | { ok: false; message: string };
@@ -93,7 +95,7 @@ function testFailureMessage(category: string | undefined): string {
 @Component({
   selector: 'ptah-elevenlabs-panel',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective, PtahSelectDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -240,13 +242,16 @@ function testFailureMessage(category: string | undefined): string {
             <div class="flex items-center gap-1">
               <div class="relative flex-1">
                 <input
+                  ptahInput
+                  size="sm"
+                  tone="mono"
                   id="elevenlabs-key"
                   [type]="keyVisible() ? 'text' : 'password'"
                   autocomplete="off"
                   spellcheck="false"
                   aria-label="ElevenLabs API key"
                   aria-describedby="elevenlabs-key-help"
-                  class="input input-bordered input-sm w-full pr-8 font-mono"
+                  class="w-full pr-8 font-mono"
                   [value]="keyDraft()"
                   [disabled]="saving()"
                   [placeholder]="
@@ -398,7 +403,10 @@ function testFailureMessage(category: string | undefined): string {
                 <div class="flex items-center gap-2">
                   <input
                     type="text"
-                    class="input input-bordered input-sm w-full font-mono"
+                    ptahInput
+                    size="sm"
+                    tone="mono"
+                    class="w-full font-mono"
                     aria-label="ElevenLabs voice ID"
                     [placeholder]="'Default: ' + defaultVoiceLabel"
                     autocomplete="off"
@@ -423,9 +431,11 @@ function testFailureMessage(category: string | undefined): string {
                 </div>
               } @else {
                 <select
+                  ptahSelect
+                  size="sm"
                   id="elevenlabs-voice"
                   aria-label="Voice"
-                  class="select select-bordered select-sm w-full"
+                  class="w-full"
                   [value]="voiceId()"
                   [ptahBusyDisabled]="saving()"
                   (change)="onVoiceChange($event)"
@@ -455,9 +465,11 @@ function testFailureMessage(category: string | undefined): string {
             </th>
             <td class="align-top">
               <select
+                ptahSelect
+                size="sm"
                 [id]="'elevenlabs-' + row.slug"
                 [attr.aria-label]="row.ariaLabel"
-                class="select select-bordered select-sm w-full"
+                class="w-full"
                 [value]="selection[row.key]()"
                 [ptahBusyDisabled]="saving()"
                 (change)="onSelectionChange($event, row)"

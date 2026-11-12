@@ -3,6 +3,7 @@ import {
   NativePopoverComponent,
   ProviderMarkComponent,
   PtahButtonDirective,
+  PtahCheckboxDirective,
 } from '@ptah-extension/ui';
 import type { CliLaneDefaults, CliType } from '@ptah-extension/shared';
 import { cliModelDisplay, type SystemCliMatrixRow } from './cli-matrix-rows';
@@ -28,6 +29,7 @@ export type CliProviderDefaultChoice = NonNullable<CliLaneDefaults[CliType]>;
     CliProviderCardPopoversComponent,
     ClaudeLaneAccountCellComponent,
     PtahButtonDirective,
+    PtahCheckboxDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styleUrl: './cli-provider-card.component.css',
@@ -46,7 +48,7 @@ export type CliProviderDefaultChoice = NonNullable<CliLaneDefaults[CliType]>;
           {{ row().codexStatusLine ?? (row().installed ? 'Installed' : 'Not installed') }}
         </span>
         <label class="flex min-h-10 shrink-0 items-center gap-1 text-xs">
-          <span>Enabled</span><input type="checkbox" class="checkbox checkbox-primary checkbox-sm border-base-content/60"
+          <span>Enabled</span><input type="checkbox" ptahCheckbox size="sm"
             [checked]="row().enabled && row().installed" [disabled]="!row().installed"
             [attr.aria-disabled]="busy() || !canWrite() ? 'true' : null"
             [attr.aria-label]="row().name + ' enabled'" (change)="onToggle($event)" />
