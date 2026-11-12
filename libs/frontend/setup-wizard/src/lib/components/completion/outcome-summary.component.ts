@@ -8,7 +8,7 @@ import {
 import type { FileOutcome, GenerationTargetInfo } from '@ptah-extension/shared';
 import { safeFailureCopy } from '../../utils/safe-failure-copy';
 import { libraryReachable, type OutcomeFileRow } from './outcome-rows';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
 
 const WRITE_FAILED_FALLBACK = 'The write failed.';
 
@@ -32,7 +32,7 @@ const OUTCOME_LABEL = new Map<FileOutcome, string>(OUTCOME_LABELS);
 @Component({
   selector: 'ptah-outcome-summary',
   standalone: true,
-  imports: [PtahButtonDirective],
+  imports: [PtahBadgeDirective, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -78,14 +78,17 @@ const OUTCOME_LABEL = new Map<FileOutcome, string>(OUTCOME_LABELS);
                   >.claude/agents/{{ row.fileName }}</code
                 >
                 <span
-                  class="badge badge-sm shrink-0"
-                  [class.badge-ghost]="row.status === 'changed-since-preview'"
-                  [class.badge-error]="row.status === 'failed'"
-                  [class.badge-outline]="
-                    row.status !== 'changed-since-preview' &&
-                    row.status !== 'failed'
+                  ptahBadge
+                  size="sm"
+                  class="shrink-0"
+                  [tone]="row.status === 'failed' ? 'err' : 'neutral'"
+                  [appearance]="
+                    row.status === 'changed-since-preview' ||
+                    row.status === 'failed'
+                      ? 'soft'
+                      : 'outline'
                   "
-                  >{{ label(row.status) }}</span
+                  ><span class="ptah-badge-text">{{ label(row.status) }}</span></span
                 >
               </div>
               @if (note(row); as text) {

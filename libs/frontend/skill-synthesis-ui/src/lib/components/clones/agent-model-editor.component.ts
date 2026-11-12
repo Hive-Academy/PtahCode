@@ -67,7 +67,12 @@ import {
   type AgentModelSettingsScope,
   type AgentModelSettingsValue,
 } from '@ptah-extension/shared';
-import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
+import {
+  PtahBadgeDirective,
+  PtahButtonDirective,
+  PtahInputDirective,
+  type PtahBadgeTone,
+} from '@ptah-extension/ui';
 
 import { SkillSynthesisRpcService } from '../../services/skill-synthesis-rpc.service';
 import { AgentModelsStore, type AgentModelsTicket } from './agent-models.store';
@@ -109,12 +114,12 @@ export const SYNC_SKIPPED_COPY =
 
 /** Label and badge tone for a stored value's server classification. */
 const CLASS_BADGE: Readonly<
-  Record<Exclude<AgentModelClass, 'empty'>, { label: string; tone: string }>
+  Record<Exclude<AgentModelClass, 'empty'>, { label: string; tone: PtahBadgeTone }>
 > = {
-  listed: { label: 'listed', tone: 'badge-success' },
-  unlisted: { label: 'not in provider list', tone: 'badge-warning' },
-  unverifiable: { label: 'list unavailable', tone: 'badge-ghost' },
-  malformed: { label: 'not written: invalid id', tone: 'badge-error' },
+  listed: { label: 'listed', tone: 'ok' },
+  unlisted: { label: 'not in provider list', tone: 'warn' },
+  unverifiable: { label: 'list unavailable', tone: 'neutral' },
+  malformed: { label: 'not written: invalid id', tone: 'err' },
 };
 
 const SOURCE_LABEL = {
@@ -132,7 +137,7 @@ interface ModelRow {
   readonly value: string | null;
   /** Where `value` comes from, or what an empty row inherits. */
   readonly source: string;
-  readonly badge: { readonly label: string; readonly tone: string } | null;
+  readonly badge: { readonly label: string; readonly tone: PtahBadgeTone } | null;
   readonly unsupported: boolean;
 }
 
@@ -160,7 +165,7 @@ let nextEditorId = 0;
 @Component({
   selector: 'ptah-agent-model-editor',
   standalone: true,
-  imports: [PtahButtonDirective, PtahInputDirective],
+  imports: [PtahBadgeDirective, PtahButtonDirective, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -198,10 +203,11 @@ let nextEditorId = 0;
                   >
                   @if (row.badge; as badge) {
                     <span
-                      class="badge badge-xs"
-                      [class]="badge.tone"
+                      ptahBadge
+                      size="xs"
+                      [tone]="badge.tone"
                       data-testid="agent-model-class"
-                      >{{ badge.label }}</span
+                      ><span class="ptah-badge-text">{{ badge.label }}</span></span
                     >
                   }
                   @if (edit()?.provider !== row.provider) {

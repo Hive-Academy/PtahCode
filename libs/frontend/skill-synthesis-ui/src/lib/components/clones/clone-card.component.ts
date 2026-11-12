@@ -36,6 +36,8 @@ import {
 import {
   NativeCardComponent,
   NativeCardTone,
+  PtahBadgeDirective,
+  type PtahBadgeTone,
   PtahButtonDirective,
 } from '@ptah-extension/ui';
 import {
@@ -70,20 +72,20 @@ import {
 } from './diverged-reason.component';
 
 interface SyncChipView extends AgentSyncChip {
-  readonly toneClass: string;
+  readonly tone: PtahBadgeTone;
   readonly title: string;
 }
 
-const CHIP_TONE: Record<AgentSyncChipState, string> = {
-  unknown: 'badge-ghost',
-  'not-detected': 'badge-ghost',
-  source: 'badge-info',
-  unsupported: 'badge-ghost',
-  failed: 'badge-error',
-  edited: 'badge-warning',
-  missing: 'badge-warning',
-  'in-sync': 'badge-success',
-  'not-synced': 'badge-ghost',
+const CHIP_TONE: Record<AgentSyncChipState, PtahBadgeTone> = {
+  unknown: 'neutral',
+  'not-detected': 'neutral',
+  source: 'info',
+  unsupported: 'neutral',
+  failed: 'err',
+  edited: 'warn',
+  missing: 'warn',
+  'in-sync': 'ok',
+  'not-synced': 'neutral',
 };
 
 interface CloneMetricView extends CloneMetric {
@@ -160,6 +162,7 @@ function cloneStatusHint(clone: CloneSummary): string {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    PtahBadgeDirective,
     PtahButtonDirective,
     NativeCardComponent,
     ScorecardBadgeComponent,
@@ -328,14 +331,17 @@ function cloneStatusHint(clone: CloneSummary): string {
         >
           @for (chip of chipViews(); track chip.target) {
             <li
-              class="badge badge-sm gap-1"
-              [class]="chip.toneClass"
+              class="min-w-0 max-w-full"
               [title]="chip.title"
               [attr.data-state]="chip.state"
               data-testid="clone-card-sync-chip"
             >
-              <span class="font-medium">{{ chip.target }}</span>
-              {{ chip.label }}
+              <span ptahBadge size="sm" [tone]="chip.tone">
+                <span class="ptah-badge-text"
+                  ><span class="font-medium">{{ chip.target }}</span>
+                  {{ chip.label }}</span
+                >
+              </span>
             </li>
           }
         </ul>
@@ -492,7 +498,7 @@ export class CloneCardComponent {
   protected readonly chipViews = computed<SyncChipView[]>(() =>
     this.syncChips().map((chip) => ({
       ...chip,
-      toneClass: CHIP_TONE[chip.state],
+      tone: CHIP_TONE[chip.state],
       title: chipTitle(chip),
     })),
   );

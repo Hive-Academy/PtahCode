@@ -263,6 +263,12 @@ describe('AgentModelEditorComponent', () => {
       expect(q('agent-model-class', row('codex'))?.textContent).toContain(
         'listed',
       );
+      expect(
+        q('agent-model-class', row('codex'))?.getAttribute('data-tone'),
+      ).toBe('ok');
+      expect(
+        q('agent-model-class', row('codex'))?.getAttribute('data-size'),
+      ).toBe('xs');
       expect(q('agent-model-source', row('copilot'))?.textContent).toContain(
         'machine default, all agents',
       );

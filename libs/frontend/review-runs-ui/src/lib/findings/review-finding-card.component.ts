@@ -1,16 +1,16 @@
 import { ChangeDetectionStrategy, Component, effect, input, output, signal } from '@angular/core';
-import { PtahButtonDirective, PtahFieldControlDirective, PtahStatusBadgeComponent } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective, PtahFieldControlDirective, PtahStatusBadgeComponent } from '@ptah-extension/ui';
 import type { FindingTriage, ReviewFindingView } from './review-finding-view';
 
 @Component({
   selector: 'ptah-review-finding-card', standalone: true, changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PtahButtonDirective, PtahFieldControlDirective, PtahStatusBadgeComponent],
+  imports: [PtahBadgeDirective, PtahButtonDirective, PtahFieldControlDirective, PtahStatusBadgeComponent],
   template: `
     <article class="surface-1 rounded-lg border border-base-300 p-4 space-y-3" [attr.aria-label]="view().title">
       <div class="flex flex-wrap items-center gap-2 text-xs">
         @if (view().severity === 'Critical' || view().severity === 'Major') { <ptah-ui-status-badge [status]="view().severity === 'Critical' ? 'failed' : 'needs-review'" [label]="view().severity" /> }
-        @else { <span class="badge badge-sm" [class.badge-outline]="view().severity === 'Minor'" [class.badge-ghost]="view().severity === 'Nitpick'">{{ view().severity }}</span> }
-        <span class="badge badge-ghost badge-xs">{{ view().lens }}</span>
+        @else { <span ptahBadge size="sm" [appearance]="view().severity === 'Minor' ? 'outline' : 'soft'"><span class="ptah-badge-text">{{ view().severity }}</span></span> }
+        <span ptahBadge size="xs"><span class="ptah-badge-text">{{ view().lens }}</span></span>
         <span>{{ (view().confidence * 100).toFixed(0) }}% confidence</span>
         <span>{{ view().verification }}</span>
       </div>
@@ -39,7 +39,7 @@ import type { FindingTriage, ReviewFindingView } from './review-finding-view';
           <button ptahButton variant="primary" size="xs" type="button" [disabled]="triage().pending || triage().state !== 'open'" (click)="respond.emit({action: 'accept'})">Accept</button>
           <button ptahButton variant="ghost" size="xs" type="button" [disabled]="triage().pending || triage().state !== 'open'" (click)="reasonOpen.set(!reasonOpen())">Dismiss</button>
         } @else {
-          <span class="badge badge-outline badge-sm self-center" data-triage-state>{{ triage().state === 'accepted' ? 'Accepted' : 'Dismissed' }}</span>
+          <span ptahBadge appearance="outline" size="sm" class="self-center" data-triage-state><span class="ptah-badge-text">{{ triage().state === 'accepted' ? 'Accepted' : 'Dismissed' }}</span></span>
         }
         <button ptahButton variant="ghost" size="xs" type="button" [disabled]="triage().pending" (click)="replyOpen.set(!replyOpen())">Reply</button>
         <button ptahButton variant="secondary" size="xs" type="button" (click)="sendToLane.emit()">Copy fix prompt</button>

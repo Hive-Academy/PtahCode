@@ -26,10 +26,11 @@ import {
   type LibraryPluginState,
   type LibraryProvenance,
 } from '@ptah-extension/shared';
+import { PtahBadgeDirective, type PtahBadgeTone } from '@ptah-extension/ui';
 
 interface PluginStateWord {
   readonly label: string;
-  readonly toneClass: string;
+  readonly tone: PtahBadgeTone;
 }
 
 const PLUGIN_BORDER = 'border-primary';
@@ -37,14 +38,15 @@ const DEFAULT_BORDER = 'border-[color:var(--surface-border-strong)]';
 
 const PLUGIN_STATE_WORD: Record<LibraryPluginState, PluginStateWord | null> = {
   active: null,
-  'turned-off': { label: 'Plugin turned off', toneClass: 'badge-ghost' },
-  uninstalled: { label: 'Orphaned', toneClass: 'badge-warning' },
+  'turned-off': { label: 'Plugin turned off', tone: 'neutral' },
+  uninstalled: { label: 'Orphaned', tone: 'warn' },
 };
 
 @Component({
   selector: 'ptah-provenance-badge',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PtahBadgeDirective],
   host: { class: 'contents' },
   template: `
     <span
@@ -56,10 +58,11 @@ const PLUGIN_STATE_WORD: Record<LibraryPluginState, PluginStateWord | null> = {
     >
     @if (stateWord(); as word) {
       <span
-        class="badge badge-sm"
-        [class]="word.toneClass"
+        ptahBadge
+        size="sm"
+        [tone]="word.tone"
         data-testid="provenance-plugin-state"
-        >{{ word.label }}</span
+        ><span class="ptah-badge-text">{{ word.label }}</span></span
       >
     }
   `,

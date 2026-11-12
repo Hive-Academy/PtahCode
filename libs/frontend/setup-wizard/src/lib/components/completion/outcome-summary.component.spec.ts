@@ -80,6 +80,9 @@ describe('OutcomeSummaryComponent', () => {
     expect(counter('failed')).toBe('0');
     expect(root.querySelectorAll('[data-outcome]')).toHaveLength(5);
     expect(root.querySelectorAll('li[data-status]')).toHaveLength(7);
+    expect(
+      root.querySelectorAll('li[data-status] [data-ptah-badge][data-size="sm"]'),
+    ).toHaveLength(7);
     expect(root.querySelector('details')?.hasAttribute('open')).toBe(true);
   });
 
