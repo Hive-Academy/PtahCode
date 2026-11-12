@@ -48,15 +48,22 @@ describe('Electron RPC surface', () => {
         'enhancedPrompts:cancel',
         'enhancedPrompts:getRunState',
         'wizard:get-generation-run-state',
+        'wizard:recommend-skills',
+        'wizard:search-skills',
+        'wizard:get-project-guidance',
+        'wizard:preview-skills-for-consent',
+        'wizard:install-skills-with-consent',
       ]),
     );
   });
 
   it('serves lane permission response and replay methods', () => {
-    expect(surface.registered).toEqual(expect.arrayContaining([
-      'agent:permissionResponse',
-      'agent:pendingPermissions',
-    ]));
+    expect(surface.registered).toEqual(
+      expect.arrayContaining([
+        'agent:permissionResponse',
+        'agent:pendingPermissions',
+      ]),
+    );
   });
 
   it('serves the community pack install plan (TASK_2026_701 B8)', () => {
@@ -172,8 +179,14 @@ describe('Electron RPC surface', () => {
       'gitWindow:getScope',
       'gitWindow:setMode',
     ];
-    expect(surface.registered.filter((method) => method.startsWith('gitWindow:')).sort()).toEqual([...methods].sort());
-    expect(surface.excluded.some((method) => method.startsWith('gitWindow:'))).toBe(false);
+    expect(
+      surface.registered
+        .filter((method) => method.startsWith('gitWindow:'))
+        .sort(),
+    ).toEqual([...methods].sort());
+    expect(
+      surface.excluded.some((method) => method.startsWith('gitWindow:')),
+    ).toBe(false);
   });
 });
 
@@ -191,6 +204,8 @@ it('includes all shared skill service tokens in the DI census', () => {
     'SKILL_SELECTION_SERVICE',
     'SKILL_CONSENT_SERVICE',
   ]) {
-    expect(EXPECTED_RESOLVABLE_TOKENS.some(([entry]) => entry === name)).toBe(true);
+    expect(EXPECTED_RESOLVABLE_TOKENS.some(([entry]) => entry === name)).toBe(
+      true,
+    );
   }
 });

@@ -285,6 +285,7 @@ function makeHarness(opts: { workspaceFolders?: string[] } = {}): Harness {
     container as unknown as DependencyContainer,
     sentry as unknown as SentryService,
     packInstall,
+    { search: jest.fn(), invalidateInstallCaches: jest.fn() } as unknown as ConstructorParameters<typeof SetupRpcHandlers>[7],
   );
 
   return {

@@ -56,9 +56,25 @@ export interface WizardSearchSkillsParams {
 export interface WizardSearchSkillsResponse {
   skills: SkillShEntry[];
 }
-export type WizardGetProjectGuidanceParams = Record<string, never>;
+export interface WizardGetProjectGuidanceParams {
+  analysis: DeepProjectAnalysis;
+}
 export interface WizardGetProjectGuidanceResponse {
   facts: ProjectGuidance[];
+  ownerDecisionPrompt: string;
+}
+export interface WizardPreviewSkillsForConsentParams {
+  skills: string[];
+}
+export interface WizardSkillConsentPreview {
+  skillName: string;
+  files: string[];
+  scriptFiles: string[];
+  hasScripts: boolean;
+  contentHash: string;
+}
+export interface WizardPreviewSkillsForConsentResponse {
+  skills: WizardSkillConsentPreview[];
 }
 export interface WizardInstallSkillsWithConsentParams {
   skills: string[];
@@ -1538,6 +1554,10 @@ export interface RpcMethodRegistry
   'wizard:get-project-guidance': {
     params: WizardGetProjectGuidanceParams;
     result: WizardGetProjectGuidanceResponse;
+  };
+  'wizard:preview-skills-for-consent': {
+    params: WizardPreviewSkillsForConsentParams;
+    result: WizardPreviewSkillsForConsentResponse;
   };
   'wizard:install-skills-with-consent': {
     params: WizardInstallSkillsWithConsentParams;
@@ -3797,6 +3817,7 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'wizard:recommend-skills': true,
   'wizard:search-skills': true,
   'wizard:get-project-guidance': true,
+  'wizard:preview-skills-for-consent': true,
   'wizard:install-skills-with-consent': true,
   'wizard:cancel-analysis': true,
   'wizard:submit-selection': true,

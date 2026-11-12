@@ -38,7 +38,12 @@ export const WizardRecommendSkillsParamsSchema = z.object({
 export const WizardSearchSkillsParamsSchema = z.object({
   query: z.string().trim().min(1).max(200),
 });
-export const WizardGetProjectGuidanceParamsSchema = z.object({});
+export const WizardGetProjectGuidanceParamsSchema = z.object({
+  analysis: ProjectAnalysisZodSchema,
+});
+export const WizardPreviewSkillsForConsentParamsSchema = z.object({
+  skills: z.array(z.string().trim().min(1).max(255)).min(1).max(200),
+});
 export const WizardInstallSkillsWithConsentParamsSchema = z.object({
   skills: z.array(z.string().trim().min(1).max(255)).max(200),
   consentRecords: z

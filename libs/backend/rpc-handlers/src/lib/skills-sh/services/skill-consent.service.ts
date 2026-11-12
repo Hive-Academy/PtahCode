@@ -19,7 +19,15 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, extname, join, relative } from 'node:path';
+import {
+  dirname,
+  extname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from 'node:path';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 
 const SCRIPT_EXTENSIONS = new Set([
@@ -62,7 +70,10 @@ export class SkillConsentService {
   hasScripts(skillPackagePath: string): boolean {
     try {
       return this.scan(skillPackagePath, 0);
-    } catch {
+    } catch (error) {
+      this.logger.warn('[SkillConsent] script scan failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return true;
     }
   }
@@ -72,6 +83,8 @@ export class SkillConsentService {
     const files = this.listFiles(skillPackagePath, 0).sort();
     const hash = createHash('sha256');
     for (const file of files) {
+      if (!this.isInsideRoot(file, skillPackagePath))
+        throw new Error('Skill path escapes root');
       hash.update(relative(skillPackagePath, file).split('\\').join('/'));
       hash.update('\0');
       hash.update(readFileSync(file));
@@ -113,11 +126,17 @@ export class SkillConsentService {
     contentHash: string;
     consentDate: string;
   }[] {
-    if (!existsSync(this.storePath)) return [];
+    if (!existsSync(this.storePath)) {
+      this.logger.debug('[SkillConsent] consent store missing');
+      return [];
+    }
     try {
       const parsed = JSON.parse(readFileSync(this.storePath, 'utf8'));
       return Array.isArray(parsed?.records) ? parsed.records : [];
-    } catch {
+    } catch (error) {
+      this.logger.warn('[SkillConsent] could not read consent store', {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return [];
     }
   }
@@ -127,6 +146,10 @@ export class SkillConsentService {
     const out: string[] = [];
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, entry.name);
+      if (!this.isInsideRoot(full, dir))
+        throw new Error('Skill path escapes root');
+      if (entry.isSymbolicLink())
+        throw new Error('Skill package contains a symbolic link');
       if (entry.isDirectory()) out.push(...this.listFiles(full, depth + 1));
       else out.push(full);
     }
@@ -137,12 +160,21 @@ export class SkillConsentService {
     for (const file of this.listFiles(dir, depth)) {
       const name = file.split(/[\\/]/).pop() as string;
       if (SCRIPT_EXTENSIONS.has(extname(name).toLowerCase())) return true;
+      if (readFileSync(file).subarray(0, 2).toString() === '#!') return true;
       if (name === 'package.json' && this.hasInstallScripts(file)) return true;
       if (/^skill\.md$/i.test(name) && this.hasFrontmatterHooks(file)) {
         return true;
       }
     }
     return false;
+  }
+
+  private isInsideRoot(candidate: string, root: string): boolean {
+    const rel = relative(resolve(root), resolve(candidate));
+    return (
+      rel === '' ||
+      (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+    );
   }
 
   private hasInstallScripts(file: string): boolean {

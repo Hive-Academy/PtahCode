@@ -34,7 +34,7 @@ const CATALOG = [
 const search = async (q: string) =>
   CATALOG.filter((e) => e.skillId.includes(q));
 
-const repoRoot = join(__dirname, '..', '..', '..', '..', '..', '..');
+const repoRoot = join(__dirname, '..', '..', '..', '..', '..', '..', '..');
 const analysis = { projectType: 'x', frameworks: [] };
 
 async function pick(deps: string[]) {
@@ -118,6 +118,13 @@ describe('SkillConsentService', () => {
     mkdirSync(join(sh, 'bin'));
     writeFileSync(join(sh, 'bin', 'x.sh'), 'echo');
     expect(svc.hasScripts(sh)).toBe(true);
+
+    const extensionless = dir();
+    writeFileSync(
+      join(extensionless, 'run'),
+      '#!/usr/bin/env bash\necho hello',
+    );
+    expect(svc.hasScripts(extensionless)).toBe(true);
 
     const pkg = dir();
     writeFileSync(join(pkg, 'package.json'), '{"scripts":{"postinstall":"x"}}');
