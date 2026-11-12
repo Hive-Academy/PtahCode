@@ -79,6 +79,17 @@ disappears from the board. A `>-` block survives colons, braces, quotes and apos
 **Changing status**: `Edit` exactly the `status:` line. Never rewrite the carrier with `Write`, and
 never track status in any other file.
 
+After the task PR opens, set `status: in_review`. A confirmed reviewed merge sets `status: done`
+and starts host close-out in the background. The durable close-out journal records memory curation,
+learning, and cleanup outcomes for retry. A PR closed without merging leaves the status unchanged.
+Manual entry/retry is `ptah_task_close_out { taskId, workspaceRoot }` (task must be done with a
+merged PR); inspect its run with `ptah_task_close_out_status { runId }`. Skill-trajectory harvest
+no longer runs on Stop: it is the close-out learning step, or call `skillSynthesis:harvestSpecs`
+explicitly. An agent cleaning up a completed task calls
+`ptah_task_cleanup_completed { runId, taskId, workspaceRoot }`, which retries the journaled cleanup
+steps and returns `pending-user-approval` when approval is missing. A dirty or unmerged
+worktree returns `refused` with the reason; dependency failures return `retryable-failure`.
+
 ## `context.md` template
 
 ```markdown

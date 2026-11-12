@@ -67,6 +67,11 @@ Any flow adding or redesigning a UI surface inserts [designer → prototype → 
   Columns: capability, where today (file:line), backing RPC/API, decision
   (keep/move/remove-proposed), new location, test that proves it. Record user approval for removals.
 - Status changes: `Edit` exactly the `status:` line of `task.md`. Never rewrite the carrier.
+- After the task PR opens, set `task.md` to `in_review`. After review and a confirmed merge,
+  the host sets it to `done` and starts journaled close-out in the background (task memory
+  curation, learning, and cleanup evaluation). See [task tracking](references/task-tracking.md#taskmd--the-carrier).
+- Skill-trajectory harvest no longer runs automatically on Stop. It runs as the close-out
+  learning step (`ptah_task_close_out`), or explicitly through `skillSynthesis:harvestSpecs`.
 
 ## Decide first, ask last
 
@@ -133,7 +138,7 @@ Templates, skip conditions and rejection handling: [checkpoints.md](references/c
 - Build each executor prompt from its one batch entry: write set, read set with line ranges,
   contract excerpts, dependencies, verify command and acceptance. Do not send the whole plan,
   context or other batches.
-- **Skill routing**: the architect and the team-leader must put a `Required Skills:` line (skill
+- **Skill routing**: the architect and the batch planner must put a `Required Skills:` line (skill
   ids, or `none`) in every phase brief, `Task()` prompt and `ptah_agent_spawn` task, chosen from
   the skills the host lists whose descriptions match the batch's stack and layer (each loaded when
   the host lists it; a role never stops work because an optional skill is absent). Stack-cue table:

@@ -7,9 +7,9 @@ Every document gate below runs `author → independent document review → bound
 artifacts and revisions alike. The gate passes on the reviewer's APPROVED in `lane-review` mode and on
 the user's `APPROVED` in `user` mode or on escalation ([checkpoints.md § Approval mode](checkpoints.md#approval-mode)). Include the reviews in the announced agent sequence. Every
 implementation also gets the required shipping-code review before batch acceptance, or before
-completion and git in flows without team-leader; Gate 3 `skip` does not waive it.
+completion and git in flows without a batch planner; Gate 3 `skip` does not waive it.
 
-**Skill routing**: The architect and the team-leader must put a `Required Skills:` line (skill ids,
+**Skill routing**: The architect and the batch planner must put a `Required Skills:` line (skill ids,
 or `none`) in every phase brief, `Task()` prompt and `ptah_agent_spawn` task, chosen from the
 skills the host lists whose descriptions match the batch's stack and layer (loaded when the host
 lists it; a role never stops work because an optional skill is absent). Stack-cue → skill table:
@@ -120,7 +120,7 @@ team-leader MODE 1 --> MODE 2 (loop) --> MODE 3
 ### Decision Points
 
 - **Unknown cause**: Add researcher-expert before team-leader
-- **Known cause**: Skip directly to team-leader MODE 1
+- **Known cause**: Skip directly to batch decomposition (MODE 1)
 - **Single-file fix**: Consider minimal pattern (direct developer)
 
 ---

@@ -100,7 +100,7 @@ inventory before design when required, using the inventory-only handoff in
 
 ### Skill routing
 
-The architect and the team-leader must put a `Required Skills:` line (skill ids, or `none`) in
+The architect and the batch planner must put a `Required Skills:` line (skill ids, or `none`) in
 every phase brief, `Task()` prompt and `ptah_agent_spawn` task, chosen from the skills the host
 lists whose descriptions match the batch's stack and layer. Every skill is optional per workspace
 and loaded only when the host lists it; a role must never stop work because an optional skill is
