@@ -14,8 +14,8 @@
 
 import { injectable, inject } from 'tsyringe';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync, realpathSync } from 'node:fs';
+import { resolve, isAbsolute, relative, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import {
@@ -1051,6 +1051,11 @@ function namedRunPolicy(
  */
 export type SdkQueryOptions = Options;
 
+function isInsideRoot(candidate: string, root: string): boolean {
+  const rel = relative(root, candidate);
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
+
 /** Apply the same host-resolved phase and skills to the SDK prompt. */
 export function withPhaseDelivery(
   systemPrompt: Options['systemPrompt'],
@@ -1065,8 +1070,28 @@ export function withPhaseDelivery(
     append: [preset.append, phase?.text, ...(skills ?? phase?.skills ?? []).map(skill => {
       if (skill.text) return `Skill ${skill.name}: ${skill.text}`;
       if (!skill.path?.trim()) return undefined;
+
+      const candidate = resolve(cwd, skill.path);
+      if (!isInsideRoot(candidate, cwd)) {
+        throw new Error('Skill path is outside the session workspace');
+      }
+
+      let realCandidate: string;
       try {
-        return `Skill ${skill.name}: ${readFileSync(resolve(cwd, skill.path), 'utf8')}`;
+        realCandidate = realpathSync(candidate);
+      } catch {
+        return undefined;
+      }
+      try {
+        if (!isInsideRoot(realCandidate, realpathSync(cwd))) {
+          throw new Error('Skill path is outside the session workspace');
+        }
+      } catch (e) {
+        if (e instanceof Error && e.message.includes('outside the session workspace')) throw e;
+        return undefined;
+      }
+      try {
+        return `Skill ${skill.name}: ${readFileSync(realCandidate, 'utf8')}`;
       } catch {
         return undefined;
       }
@@ -1466,7 +1491,11 @@ export class SdkQueryOptionsBuilder {
       this.logger,
     );
     const builtinPolicy = resolveClaudeBuiltinPolicy(builtinOptIns);
-    const disallowedTools = [...builtinPolicy.disallowedTools];
+    // Preserve Claude preset denials and apply the phase profile to every route.
+    const disallowedTools = uniqueNames([
+      ...builtinPolicy.disallowedTools,
+      ...(phase?.toolProfile?.disallowedTools ?? []),
+    ]);
     // The host env var wins inside the SDK (it inherits `process.env` below);
     // `sdkValue` still follows the setting so clearing the env restores it.
     const subagentTtl = resolveSubagentPromptCacheTtl({

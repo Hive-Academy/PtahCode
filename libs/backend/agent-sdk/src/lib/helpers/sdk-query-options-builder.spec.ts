@@ -40,6 +40,42 @@ describe('SDK phase delivery', () => {
       rmSync(tmpRoot, { recursive: true });
     }
   });
+
+  it('reads in-workspace relative path skill correctly', () => {
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'test-'));
+    try {
+      writeFileSync(join(tmpRoot, 'skill.txt'), 'Skill content here');
+      const prompt = { type: 'preset' as const, preset: 'claude_code' as const, append: '' };
+      const result = withPhaseDelivery(prompt, tmpRoot, undefined, [{ name: 'custom', path: 'skill.txt' }]);
+      expect((result as any).append).toContain('Skill custom: Skill content here');
+    } finally {
+      rmSync(tmpRoot, { recursive: true });
+    }
+  });
+
+  it('rejects outside-workspace paths with traversal attempts', () => {
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'test-'));
+    try {
+      const prompt = { type: 'preset' as const, preset: 'claude_code' as const, append: '' };
+      expect(() => withPhaseDelivery(prompt, tmpRoot, undefined, [{ name: 'escape', path: '../outside.txt' }]))
+        .toThrow('outside the session workspace');
+      expect(() => withPhaseDelivery(prompt, tmpRoot, undefined, [{ name: 'abs', path: '/' }]))
+        .toThrow('outside the session workspace');
+    } finally {
+      rmSync(tmpRoot, { recursive: true });
+    }
+  });
+
+  it('skips missing in-workspace paths without crashing', () => {
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'test-'));
+    try {
+      const prompt = { type: 'preset' as const, preset: 'claude_code' as const, append: 'Base' };
+      const result = withPhaseDelivery(prompt, tmpRoot, undefined, [{ name: 'missing', path: 'nonexistent.txt' }]);
+      expect((result as any).append).toBe('Base');
+    } finally {
+      rmSync(tmpRoot, { recursive: true });
+    }
+  });
 });
 import {
   CLAUDE_CERTIFIED_ENV_KEYS,
@@ -2600,6 +2636,7 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
   }
 
   interface BuiltinBuildInput {
+    phase?: PhaseDispatchV1;
     settings?: Record<string, unknown>;
     capabilityPolicy?: EffectiveCapabilitySet;
     authEnv?: AuthEnv;
@@ -2685,6 +2722,7 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
       },
     );
     const cfg = await builder.build({
+      phase: input.phase,
       userMessageStream: (async function* () {
         // Intentionally empty — build() attaches the stream, it does not iterate.
       })(),
@@ -2720,6 +2758,41 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
     expect(built.settings['skillOverrides']).toEqual(
       Object.fromEntries(DEFAULT_SKILLS.map((name) => [name, 'off'])),
     );
+  });
+
+  it('merges phase denials with Claude preset denials without duplicates', async () => {
+    const phase = {
+      version: 1,
+      kind: 'implement',
+      text: 'Implement the change',
+      toolProfile: {
+        disallowedTools: ['mcp__firecrawl', 'Workflow', 'mcp__firecrawl'],
+      },
+    } as PhaseDispatchV1;
+    const built = await buildWith({ phase });
+    expect(built.options.disallowedTools).toEqual([...DEFAULT_TOOLS, 'mcp__firecrawl']);
+  });
+
+  it('applies phase denials to a named account launch', async () => {
+    const phase = {
+      version: 1,
+      kind: 'implement',
+      text: 'Implement the change',
+      toolProfile: { disallowedTools: ['mcp__firecrawl'] },
+    } as PhaseDispatchV1;
+    const built = await buildWith({ named: true, phase });
+    expect(built.options.disallowedTools).toEqual([...DEFAULT_TOOLS, 'mcp__firecrawl']);
+  });
+
+  it('keeps preset denials when phase denials are empty or absent', async () => {
+    const phase = {
+      version: 1,
+      kind: 'implement',
+      text: 'Implement the change',
+      toolProfile: { disallowedTools: [] },
+    } as PhaseDispatchV1;
+    expect((await buildWith({ phase })).options.disallowedTools).toEqual(DEFAULT_TOOLS);
+    expect((await buildWith()).options.disallowedTools).toEqual(DEFAULT_TOOLS);
   });
 
   it('keeps the protected tools and subagent spawning available', async () => {
