@@ -34,8 +34,19 @@ describe('UI gallery sections', () => {
     expect(duplicates(tags)).toEqual([]);
   });
 
-  it('keeps the old buttons and meters sections out of the gallery', () => {
-    expect(hostSource).not.toContain("'components-buttons'");
-    expect(hostSource).not.toContain("'components-meters'");
+  it('keeps the old duplicate sections out of the gallery', () => {
+    const sources = [
+      hostSource,
+      ...files.map((file) => readFileSync(join(galleryDir, file), 'utf-8')),
+    ].join(' ');
+    for (const id of [
+      'components-buttons',
+      'components-meters',
+      'components-fields',
+      'components-metrics',
+      'components-statuses',
+    ]) {
+      expect(sources).not.toContain(id);
+    }
   });
 });

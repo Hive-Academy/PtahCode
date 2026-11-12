@@ -2,21 +2,16 @@ import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { Listbox, Option } from '@angular/aria/listbox';
 import {
   PtahButtonDirective,
-  PtahFieldComponent,
-  PtahFieldControlDirective,
   PtahListDetailComponent,
   PtahListRowComponent,
   PtahPanelState,
   PtahRichSelectComponent,
-  PtahStatCardComponent,
   PtahStatePanelComponent,
-  PtahStatus,
-  PtahStatusBadgeComponent,
   PtahToolbarComponent,
   SurfaceCardComponent,
   SurfaceTileComponent,
 } from '@ptah-extension/ui';
-import { REPOSITORY_OPTIONS, SORT_OPTIONS } from './gallery-form-controls.data';
+import { SORT_OPTIONS } from './gallery-form-controls.data';
 import { GallerySectionComponent } from './gallery-section.component';
 import { InboxLayoutDemoComponent } from './inbox-layout-demo.component';
 
@@ -27,13 +22,9 @@ import { InboxLayoutDemoComponent } from './inbox-layout-demo.component';
     Listbox,
     Option,
     PtahButtonDirective,
-    PtahFieldComponent,
-    PtahFieldControlDirective,
-    PtahRichSelectComponent,
-    PtahStatCardComponent,
     PtahListDetailComponent,
     PtahListRowComponent,
-    PtahStatusBadgeComponent,
+    PtahRichSelectComponent,
     PtahStatePanelComponent,
     PtahToolbarComponent,
     SurfaceCardComponent,
@@ -43,32 +34,6 @@ import { InboxLayoutDemoComponent } from './inbox-layout-demo.component';
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<div class="flex flex-col gap-ptah-section">
-    <ptah-gallery-section id="components-fields" title="Fields">
-      <div class="grid gap-ptah-field md:grid-cols-3">
-        <ptah-field label="Review name" hint="Shown in the run list"
-          ><input ptahFieldControl value="API security review"
-        /></ptah-field>
-        <ptah-field label="Repository" hint="Choose a connected repository"
-          ><ptah-select [options]="repositories" [value]="'org/api'"
-        /></ptah-field>
-        <ptah-field label="Instructions" error="A summary is required">
-          <textarea ptahFieldControl rows="2"></textarea>
-        </ptah-field>
-      </div>
-    </ptah-gallery-section>
-
-    <ptah-gallery-section id="components-metrics" title="Metrics">
-      <div class="grid gap-ptah-field sm:grid-cols-2">
-        <ptah-stat-card label="Review runs" [value]="24" trend="This month" />
-        <ptah-stat-card
-          label="Connected machines"
-          [value]="3"
-          size="dense"
-          trend="2 online"
-        />
-      </div>
-    </ptah-gallery-section>
-
     <ptah-gallery-section id="components-list-detail" title="List and detail">
       <ptah-list-detail [selectedId]="selection()" (back)="selection.set(null)">
         <div list>
@@ -160,14 +125,6 @@ import { InboxLayoutDemoComponent } from './inbox-layout-demo.component';
       <ptah-inbox-layout-demo />
     </ptah-gallery-section>
 
-    <ptah-gallery-section id="components-statuses" title="Statuses">
-      <div class="flex flex-wrap gap-ptah-controls">
-        @for (status of statuses; track status) {
-          <ptah-ui-status-badge [status]="status" />
-        }
-      </div>
-    </ptah-gallery-section>
-
     <ptah-gallery-section id="components-states" title="States">
       <div class="grid gap-ptah-field sm:grid-cols-2 xl:grid-cols-5">
         @for (state of states; track state) {
@@ -200,17 +157,6 @@ import { InboxLayoutDemoComponent } from './inbox-layout-demo.component';
   </div>`,
 })
 export class GalleryComponentsComponent {
-  public readonly statuses: PtahStatus[] = [
-    'running',
-    'queued',
-    'pending',
-    'needs-review',
-    'warning',
-    'failed',
-    'offline',
-    'completed',
-    'online',
-  ];
   public readonly states: PtahPanelState[] = [
     'loading',
     'empty',
@@ -222,7 +168,6 @@ export class GalleryComponentsComponent {
   public readonly query = signal('');
   public readonly sort = signal<string | null>('newest');
   public readonly sortOptions = SORT_OPTIONS;
-  public readonly repositories = REPOSITORY_OPTIONS;
   public readonly selectedValues = (): string[] =>
     this.selection() ? [this.selection() as string] : [];
   public selectRow(values: string[]): void {

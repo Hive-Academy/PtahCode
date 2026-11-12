@@ -6,6 +6,7 @@ import {
   PtahMeterComponent,
   PtahRingComponent,
   PtahSparklineComponent,
+  PtahStatCardComponent,
   PtahStatComponent,
   PtahStatTrend,
 } from '@ptah-extension/ui';
@@ -19,6 +20,7 @@ import { GallerySectionComponent } from './gallery-section.component';
     PtahMeterComponent,
     PtahRingComponent,
     PtahSparklineComponent,
+    PtahStatCardComponent,
     PtahStatComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -102,6 +104,10 @@ import { GallerySectionComponent } from './gallery-section.component';
               [trend]="sample.trend" [hint]="sample.hint" />
           </div>
         }
+        <div class="grid gap-ptah-field sm:grid-cols-2">
+          <ptah-stat-card label="Review runs" [value]="24" trend="This month" />
+          <ptah-stat-card label="Connected machines" [value]="3" size="dense" trend="2 online" />
+        </div>
       </div>
     </ptah-gallery-section>
   `,
