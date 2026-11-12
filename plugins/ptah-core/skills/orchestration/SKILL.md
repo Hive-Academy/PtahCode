@@ -36,20 +36,35 @@ correction in agent-lanes §6; any code you change is independently reviewed bef
    `source`, `confidence`, `fallbackCause` and `modelProposal`, plus `overallConfidence`,
    `reasons` and `usage`. If the tool is not listed, use the rules above.
 
-3. **Announce** type, depth and the planned agent sequence. Then proceed.
+3. **Announce** type, depth and the planned phase-kind sequence. Then proceed.
 
-| Type          | Flow                                                                               |
-| ------------- | ---------------------------------------------------------------------------------- |
-| FEATURE       | PM → [research] → [designer → prototype → Gate 1.7] → architect → team-leader → QA |
-| BUGFIX        | [research] → team-leader → QA                                                      |
-| REFACTORING   | architect → team-leader → QA                                                       |
-| DOCUMENTATION | PM → developer → style reviewer                                                    |
-| RESEARCH      | researcher → [switch to FEATURE]                                                   |
-| DEVOPS        | PM → architect → devops-engineer → QA                                              |
-| SAAS_INIT     | discovery → PM → architect → team-leader                                           |
-| CREATIVE      | [designer → prototype → Gate 1.7] → content writer → frontend developer            |
+## Phase-kind flows
 
-Any flow adding or redesigning a UI surface inserts [designer → prototype → cross-side review → Gate 1.7] before the next phase of the flow (architect, team-leader, or content writer). Complete any required inventory first (Task folder below). Any UI change that adds or redesigns no surface requires no prototype and skips the designer and Gate 1.7; its completion requires before/after screenshots (dark + light) of the affected screen instead of a prototype — capture the before screenshots from the base commit (or before the first batch / before the fix lands) with the visual-reviewer.
+Route each phase by its kind at Gate 0.1 using `ptah_route_decide` with `kind`, and read
+[`phases/<kind>.md`](phases/) for its discipline, input, deliverable, verdict and acceptance step.
+For a built-in subagent executor, resolve the phase kind through the
+[agent catalog compatibility appendix](references/agent-catalog.md#compatibility-appendix).
+`batch` and `completion` have no default subagent; when no eligible lane exists, the
+orchestrator performs that phase itself. The orchestrator performs every phase's acceptance
+step, including batch verification and commits; an executor never accepts its own work.
+
+| Type | Phase-kind flow |
+| --- | --- |
+| FEATURE | `plan` -> `document-review` -> [`research`] -> [`design` -> `document-review` -> Gate 1.7] -> `architecture` -> `document-review` -> `batch` -> `implement` -> `review` -> `tests` -> `completion` -> `research` (after-QA modernization scan) |
+| BUGFIX | [`research`] -> `batch` -> `implement` -> `review` -> `tests` -> `completion` -> `research` (after-QA modernization scan) |
+| REFACTORING | `architecture` -> `document-review` -> `batch` -> `implement` -> `review` -> `tests` -> `completion` -> `research` (after-QA modernization scan) |
+| DOCUMENTATION | `plan` -> `document-review` -> `docs` (content specification) -> `implement` (documentation files) -> `review` -> `tests` -> `completion` |
+| RESEARCH | `research` -> [`plan` and FEATURE flow if implementation is needed] -> `completion` |
+| DEVOPS | `plan` -> `document-review` -> `architecture` -> `document-review` -> `implement` -> `review` -> `tests` -> `completion` -> `research` (after-QA modernization scan) |
+| SAAS_INIT | discovery -> `plan` -> `document-review` -> `architecture` -> `document-review` -> `batch` -> `implement` -> `review` -> `tests` -> `completion` |
+| CREATIVE | [`design` -> `document-review` -> Gate 1.7] -> `docs` -> `implement` -> `review` -> `visual-review` -> `completion` |
+
+Any flow adding or redesigning a UI surface inserts `design` -> prototype -> cross-side
+`document-review` -> Gate 1.7 before its next phase. Complete any required inventory first
+(Task folder below). A UI change that adds or redesigns no surface skips the prototype,
+`design` and Gate 1.7; completion requires before/after screenshots (dark + light) of the
+affected screen. Capture the before screenshots from the base commit (or before the first
+batch / fix) during `visual-review`.
 
 ## Task folder
 
@@ -60,13 +75,17 @@ Any flow adding or redesigning a UI surface inserts [designer → prototype → 
 - Anything else → **new task**: 1. Create the worktree from `main` (`ptah_git_worktree_add`). 2. Create the task folder inside it (`ptah_task_create { worktreePath }`), then write `context.md`. Never create task files in the main checkout. Create `task.md` first inside the worktree
   ([task-tracking.md § New task](references/task-tracking.md#new-task)).
 - `parity-inventory.md` is **REQUIRED** when replacing, consolidating, rebuilding or redesigning
-  an existing surface. PM writes it from the **OLD code before design starts**. In flows without
-  a PM (including BUGFIX and REFACTORING), the orchestrator first invokes software-architect in
-  **inventory-only mode** to write it before the designer. For flows with a plan, the architect's
-  plan phase runs after any required Gate 1.7 as usual; BUGFIX remains plan-free.
+  an existing surface. The `plan` phase writes it from the **OLD code before design starts**. In flows without
+  a `plan` phase (including BUGFIX and REFACTORING), the orchestrator first runs `architecture` in
+  **inventory-only mode** to write it before `design`. For flows with an architecture plan, the `architecture` phase runs after any required Gate 1.7 as usual; BUGFIX remains plan-free.
   Columns: capability, where today (file:line), backing RPC/API, decision
   (keep/move/remove-proposed), new location, test that proves it. Record user approval for removals.
 - Status changes: `Edit` exactly the `status:` line of `task.md`. Never rewrite the carrier.
+- After the task PR opens, set `task.md` to `in_review`. After review and a confirmed merge,
+  the host sets it to `done` and starts journaled close-out in the background (task memory
+  curation, learning, and cleanup evaluation). See [task tracking](references/task-tracking.md#taskmd--the-carrier).
+- Skill-trajectory harvest no longer runs automatically on Stop. It runs as the close-out
+  learning step (`ptah_task_close_out`), or explicitly through `skillSynthesis:harvestSpecs`.
 
 ## Decide first, ask last
 
@@ -89,12 +108,12 @@ and the completion summary list them so the user can audit and overturn any of t
 | Gate           | When                                                                                                                                                                                            | How                                                                                |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | 0.1 CLI lanes  | Start; search execution preference with `ptah_memory_search`, then read request, settings and `ptah_agent_list`                                                                                 | Notice, no wait (no-preference default `enabled` when a capable lane is spawnable) |
-| 0 Scope        | Before PM, if the request is ambiguous                                                                                                                                                          | Decision ladder; ask only for scope intent                                         |
+| 0 Scope        | Before `plan`, if the request is ambiguous                                                                                                                                                          | Decision ladder; ask only for scope intent                                         |
 | 1 Requirements | After `task-description.md`                                                                                                                                                                     | Per approval mode (below)                                                          |
-| 1.5 Technical  | Before architect, if several valid approaches                                                                                                                                                   | Decision ladder; ask only if user-reserved                                         |
-| 1.7 Design     | After `design-spec.md` and `prototype/`, before the next phase of the flow (architect, team-leader, or content writer); mandatory whenever a designer ran or any UI surface is added/redesigned | Per approval mode (below)                                                          |
+| 1.5 Technical  | Before `architecture`, if several valid approaches                                                                                                                                                   | Decision ladder; ask only if user-reserved                                         |
+| 1.7 Design     | After `design-spec.md` and `prototype/`, before the next phase of the flow (`architecture`, `batch`, or `docs`); mandatory whenever `design` ran or any UI surface is added/redesigned | Per approval mode (below)                                                          |
 | 2 Architecture | After `implementation-plan.md`                                                                                                                                                                  | Per approval mode (below)                                                          |
-| 3 QA selection | After team-leader completion                                                                                                                                                                    | Notice, agents chosen by rule                                                      |
+| 3 QA phase selection | After the last batch is `COMPLETE`, before `review` and `tests`                                                                                                                                                                  | Notice, agents chosen by rule                                                      |
 | SR Questions   | An agent messaged a question or returned `## Clarifications Needed`                                                                                                                             | Decision ladder, answer back via messaging                                         |
 
 At Gate 0.1, a current explicit instruction wins. For conflicting or stale memory, use the most
@@ -133,7 +152,7 @@ Templates, skip conditions and rejection handling: [checkpoints.md](references/c
 - Build each executor prompt from its one batch entry: write set, read set with line ranges,
   contract excerpts, dependencies, verify command and acceptance. Do not send the whole plan,
   context or other batches.
-- **Skill routing**: the architect and the team-leader must put a `Required Skills:` line (skill
+- **Skill routing**: the architecture and batch phases must put a `Required Skills:` line (skill
   ids, or `none`) in every phase brief, `Task()` prompt and `ptah_agent_spawn` task, chosen from
   the skills the host lists whose descriptions match the batch's stack and layer (each loaded when
   the host lists it; a role never stops work because an optional skill is absent). Stack-cue table:
@@ -143,8 +162,8 @@ Templates, skip conditions and rejection handling: [checkpoints.md](references/c
   precedence is call -> agent frontmatter -> `CLAUDE_CODE_SUBAGENT_MODEL` -> parent;
   `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` and `CLAUDE_CODE_EFFORT_LEVEL` can override.
   When no chosen roster row exists, keep the agent frontmatter `model:` default. Record requested vs observed model when observable.
-- **Team-leader** is advisory and spawns nothing. Each return ends in a `### Next action:` line —
-  do exactly that: [team-leader-modes.md](references/team-leader-modes.md).
+- **Batch guidance** is advisory and spawns nothing. The orchestrator follows the
+  [acceptance step](references/team-leader-modes.md#acceptance-step) and records state in `batches.md` or `decisions.md`.
 - **CLI lanes**: Gate 0.1 decides whether they are used. Who may spawn them and how phases,
   batches or whole runs are assigned to lanes: [lane-assignment.md](references/lane-assignment.md).
   How to run a lane: the [agent-lanes skill](../agent-lanes/SKILL.md).
@@ -196,8 +215,8 @@ Every tool call in any agent or lane resends its whole thread, so cost is reques
 
 ## Lean orchestration rules
 
-1. **Fresh team-leader per Mode 2/3 call.** Give it only the batch report path, plus the
-   review path when you return with a phase review verdict. Never resume a long-lived team-leader.
+1. **Fresh guidance for batch acceptance and completion.** Run acceptance from the batch report path only, plus the
+   review path when you return with a phase review verdict. Never resume a long-lived batch executor.
 2. **Resume only inside the cache window.** Resume a developer or reviewer only when its last
    activity was under 5 minutes ago. Otherwise start a fresh one with the batch section and the
    report paths.
@@ -229,7 +248,7 @@ Every tool call in any agent or lane resends its whole thread, so cost is reques
 | [strategies.md](references/strategies.md)               | Running a strategy's phases                                                       |
 | [checkpoints.md](references/checkpoints.md)             | Presenting any gate                                                               |
 | [agent-catalog.md](references/agent-catalog.md)         | Choosing or invoking an agent                                                     |
-| [team-leader-modes.md](references/team-leader-modes.md) | Invoking team-leader or acting on its return                                      |
+| [team-leader-modes.md](references/team-leader-modes.md) | Invoking a batch executor or acting on its return                                      |
 | [task-tracking.md](references/task-tracking.md)         | Creating or continuing a task folder                                              |
 | [lane-assignment.md](references/lane-assignment.md)     | Whenever `ptah_route_decide` is listed (any lane mode), or the user pinned a phase to a lane                      |
 | [fleet.md](references/fleet.md)                         | `/orchestrate TASK_A TASK_B ...` or an explicit fleet request; validate IDs first |
@@ -238,7 +257,7 @@ Every tool call in any agent or lane resends its whole thread, so cost is reques
 ## Requires
 
 - `agent-lanes` — lane mechanics, when any CLI lane runs. If it is not installed, tell the user to
-  enable the `agent-lanes` skill, and run the task with subagents only until they do.
+  enable the `agent-lanes` skill, and run eligible phases with built-in subagents until they do.
 
 For a high-stakes change whose acceptance bar can be written down in advance, offer the `tribunal`
 skill's Crucible move.

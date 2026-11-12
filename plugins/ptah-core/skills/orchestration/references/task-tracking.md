@@ -79,6 +79,17 @@ disappears from the board. A `>-` block survives colons, braces, quotes and apos
 **Changing status**: `Edit` exactly the `status:` line. Never rewrite the carrier with `Write`, and
 never track status in any other file.
 
+After the task PR opens, set `status: in_review`. A confirmed reviewed merge sets `status: done`
+and starts host close-out in the background. The durable close-out journal records memory curation,
+learning, and cleanup outcomes for retry. A PR closed without merging leaves the status unchanged.
+Manual entry/retry is `ptah_task_close_out { taskId, workspaceRoot }` (task must be done with a
+merged PR); inspect its run with `ptah_task_close_out_status { runId }`. Skill-trajectory harvest
+no longer runs on Stop: it is the close-out learning step, or call `skillSynthesis:harvestSpecs`
+explicitly. An agent cleaning up a completed task calls
+`ptah_task_cleanup_completed { runId, taskId, workspaceRoot }`, which retries the journaled cleanup
+steps and returns `pending-user-approval` when approval is missing. A dirty or unmerged
+worktree returns `refused` with the reason; dependency failures return `retryable-failure`.
+
 ## `context.md` template
 
 ```markdown
@@ -114,22 +125,23 @@ never track status in any other file.
     task.md                        carrier (first)
     context.md                     user intent, strategy, lane roster, approval mode
     decisions.md                   orchestrator — audit log of every agent decision (checkpoints.md § Decision log)
-    task-description.md            project-manager
-    research-report.md             researcher-expert
-    parity-inventory.md            project-manager (no PM: software-architect, inventory-only; see SKILL.md)
-    design-spec.md                 ui-ux-designer
-    prototype/                     ui-ux-designer (README.md, screenshots/) — Gate 1.7
-    implementation-plan.md         software-architect
+    task-description.md            plan
+    research-report.md             research
+    parity-inventory.md            plan (`architecture` inventory-only in flows without `plan`; see SKILL.md)
+    design-spec.md                 design
+    prototype/                     design (README.md, screenshots/) — Gate 1.7
+    implementation-plan.md         architecture
     task-description-review.md     document reviews (other execution side than the author);
     design-spec-review.md          each records author, reviewer, revision, rounds, verdict
     implementation-plan-review.md
-    batches.md                     team-leader (former name tasks.md is still read)
-    test-report.md                 senior-tester
-    code-style-review.md           code-style-reviewer
-    code-logic-review.md           code-logic-reviewer
-    visual-review.md               visual-reviewer
-    screenshots/                   visual-reviewer evidence
-    future-enhancements.md         modernization-detector
+    batches.md                     batch (former filename tasks.md is still read)
+    test-report.md                 tests
+    code-style-review.md           review
+    code-logic-review.md           review
+    visual-review.md               visual-review
+    screenshots/                   visual-review evidence
+    completion-report.md             completion
+    future-enhancements.md         research (after-QA modernization scan)
 ```
 
 `registry.md` is derived from each folder's `task.md` and carries a `GENERATED — DO NOT HAND-EDIT`
@@ -142,29 +154,30 @@ header. If it disagrees with a carrier, the carrier is right; regenerate.
 Read `task.md` for status and `Glob` the folder. First check the document reviews and user gates the
 selected flow requires, in order (1, 1.7, 2), and resume the earliest unfinished one — a review or
 approval applies only to the artifact revision it names, and a document-review file never matches
-the QA row. Before the next phase, complete any required inventory and design steps in
+the `review`/`tests`/`visual-review` row. Before the next phase, complete any required inventory and design steps in
 [SKILL.md](../SKILL.md#task-folder). Otherwise the furthest row that matches decides:
 
 | Present | Next action |
 | --- | --- |
 | no `task.md` | Stop — invalid folder; create the carrier first |
-| `task.md` / `context.md` only | Follow the strategy in `context.md`: BUGFIX → researcher-expert if research is planned, otherwise team-leader Mode 1 (plan-free); REFACTORING → software-architect; other types → their recorded first phase. Complete required inventory/design before implementation planning or decomposition. |
-| `task-description.md` | Resume document review and Gate 1 for the current revision; continue only after the recorded gate decision (user, or cross-side reviewer in `lane-review` mode) |
-| `research-report.md` (no later artifact) | Follow the strategy in `context.md`: BUGFIX → team-leader Mode 1 (plan-free); FEATURE → software-architect; other types → their recorded next phase. Complete required inventory/design first. |
-| `parity-inventory.md` (no later artifact) | Run any planned research first, then resume required designer → prototype → document review → Gate 1.7, then the next phase recorded in `context.md`; without a design phase, continue the recorded flow (BUGFIX → team-leader Mode 1, plan-free). |
-| `design-spec.md` + `prototype/` | Resume document review and Gate 1.7 for the current revision; after approval, select the next phase from the task type/strategy recorded in `context.md` (CREATIVE → technical-content-writer; BUGFIX → team-leader Mode 1; flows with architecture → software-architect) |
-| `implementation-plan.md` | Resume document review and Gate 2 for the current revision; then team-leader Mode 1 |
-| `batches.md`, a batch not COMPLETE | team-leader Mode 2 |
-| `batches.md`, every batch COMPLETE | team-leader Mode 3, then Gate 3 |
-| QA reports (`test-report.md`, `code-style-review.md`, `code-logic-review.md`, `visual-review.md`) | After the document gates and batch work: continue the chosen QA, or finish |
-| `future-enhancements.md` | Workflow already complete |
+| `task.md` / `context.md` only | Follow the strategy in `context.md`: BUGFIX → research if research is planned, otherwise `batch` (decomposition, plan-free); REFACTORING → architecture; other types → their recorded first phase. Complete required inventory/design before implementation planning or decomposition. |
+| `task-description.md` | Resume `document-review` and Gate 1 for the current revision; continue only after the recorded gate decision (user, or cross-side reviewer in `lane-review` mode) |
+| `research-report.md` (no later artifact) | Follow the strategy in `context.md`: BUGFIX → `batch` (decomposition, plan-free); FEATURE → architecture; other types → their recorded next phase. Complete required inventory/design first. |
+| `parity-inventory.md` (no later artifact) | Run any planned research first, then resume required designer → prototype → document review → Gate 1.7, then the next phase recorded in `context.md`; without a design phase, continue the recorded flow (BUGFIX → `batch` (decomposition, plan-free)). |
+| `design-spec.md` + `prototype/` | Resume `document-review` and Gate 1.7 for the current revision; after approval, select the next phase from the task type/strategy recorded in `context.md` (CREATIVE → docs; BUGFIX → batch (decomposition); flows with architecture → architecture) |
+| `implementation-plan.md` | Resume `document-review` and Gate 2 for the current revision; then `batch` (decomposition) |
+| `batches.md`, a batch not COMPLETE | resume `implement` for the next incomplete batch, then orchestrator acceptance (Mode 2) |
+| `batches.md`, every batch COMPLETE | Run required `review` and `tests` (QA), then `completion`, Gate 3 and the after-QA `research` modernization scan where the flow calls for it |
+| QA reports (`test-report.md`, `code-style-review.md`, `code-logic-review.md`, `visual-review.md`) | After the document gates and batch work: continue the chosen `review`, `tests` or `visual-review` phase, or finish |
+| `completion-report.md` (no future-enhancements.md) | Present Gate 3; run after-QA `research` modernization scan when the selected flow calls for it |
+| `future-enhancements.md` | Workflow complete after QA modernization research |
 
 ## Status vocabularies
 
 Word tokens only, no symbols.
 
 - **Task status** (`task.md`): the six values above.
-- **Batch and task status** (`batches.md`, written by team-leader): `PENDING`, `IN_PROGRESS`,
+- **Batch and task status** (`batches.md`, written by batch): `PENDING`, `IN_PROGRESS`,
   `IMPLEMENTED`, `COMPLETE`, `FAILED`. Example heading: `## Batch 1: Backend — COMPLETE`.
 
 Every path given to an agent is absolute.

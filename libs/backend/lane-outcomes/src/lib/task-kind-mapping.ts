@@ -17,6 +17,8 @@ const TASK_KIND_BY_ROLE: ReadonlyMap<string, OutcomeTaskKind> = new Map<
   // Task kinds and phase kinds.
   ['plan', 'plan'],
   ['architecture', 'plan'],
+  ['batch', 'plan'],
+  ['completion', 'plan'],
   ['implement', 'implement'],
   ['review', 'review'],
   ['document-review', 'review'],

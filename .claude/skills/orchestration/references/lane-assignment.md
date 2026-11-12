@@ -1,7 +1,7 @@
 # Lane Assignment
 
 When orchestration work runs on CLI lanes instead of (or under) subagents: who may spawn, what each
-role hands off, what never goes to a lane, and how to run phases — up to a whole task — on lanes.
+kind hands off, what never goes to a lane, and how to run phases — up to a whole task — on lanes.
 How to run any lane (discovery, addressing, prompts, resume, review, revise cap) is the
 [agent-lanes skill](../../agent-lanes/SKILL.md); nothing here repeats it.
 
@@ -13,13 +13,13 @@ How to run any lane (discovery, addressing, prompts, resume, review, revise cap)
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Orchestrator**    | Every subagent, every batch executor (subagent or lane), every lane a phase is assigned to                                                                    |
 | **Team-leader**     | Nothing. It recommends executors in `batches.md`; you act on them                                                                                             |
-| **Other subagents** | CLI lanes for their own sub-tasks, when Gate 0.1 left lanes `enabled` or `auto` and the role is not on the never list below. They own what their lanes return |
+| **Other subagents** | CLI lanes for their own sub-tasks, when Gate 0.1 left lanes `enabled` or `auto` and the kind is not on the never list below. They own what their lanes return |
 
 ## Gate 0.1 outcome
 
 If `ptah_route_decide` is listed, make the initial `stage:'gate-0.1'` call with the planned phases, the user
 `request`, chosen `taskType` and `depth`, and `phases` (`id`, `kind`, optional `role`,
-`reviews`, `shape`, `weight`). After Mode 1 writes `batches.md`, make one more `stage:'gate-0.1'` call with one phase per batch, its shape and weight, and the same preferences. Re-key each user pin to the `id` of the batch phase it covers. A current user pin still wins. `shape` is
+`reviews`, `shape`, `weight`). After the `batch` kind writes `batches.md`, make one more `stage:'gate-0.1'` call with one phase per batch, its shape and weight, and the same preferences. Re-key each user pin to the `id` of the batch phase it covers. A current user pin still wins. `shape` is
 `mechanical|logic|contract|test|docs|review`; `weight` is the integer 0-200000 token
 estimate for the batch read and write sets from `ptah_count_tokens`, plus 10% framing.
 Pass explicit user `pins` and known `preferenceSource`/`preferences` when
@@ -35,7 +35,7 @@ Each chosen roster row returns `executor`, `model`, `tier`
 (`haiku|sonnet|opus`), `effort` (`low|medium|high|xhigh|max`) and a `reason` ending
 `policy Rn; tier ..., effort ..., shape ..., weight ...`. For subagent Agent/Task calls,
 pass `tier` as per-call `model` alias and `effort` where host and model support it.
-Keep frontmatter `model:` as the per-role default; record requested vs observed model
+Keep frontmatter `model:` as the phase-kind default; record requested vs observed model
 when observable. In supported Claude Code versions, model precedence is call ->
 frontmatter -> `CLAUDE_CODE_SUBAGENT_MODEL` -> parent; `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1`
 and `CLAUDE_CODE_EFFORT_LEVEL` can override. For system CLI rows other than `claude`,
@@ -50,7 +50,7 @@ A user-pinned lane/model wins. Never invent a model id. System CLI resolution is
 Record it in `context.md` under `## CLI Lanes`: the preference source, mode (`enabled` / `auto` / `disabled`), the
 approval mode (`Approval: lane-review` / `Approval: user`, per
 [checkpoints.md § Approval mode](checkpoints.md#approval-mode)) and the `ptah_agent_list` rows verbatim. Then, for `enabled` or `auto`, add this block to every subagent
-prompt except team-leader:
+prompt except batch phase:
 
 ```markdown
 ## CLI Lanes
@@ -72,21 +72,21 @@ even if its reset reads `reset unknown`.
 A CLI lane is the default executor for every bounded batch, sequential or parallel, when the batch
 fits the cap and a capable lane is spawnable. Parallel batches still require independent,
 file-disjoint tasks. A subagent executor must carry a `Subagent reason`. You spawn and merge
-parallel lanes: [team-leader-modes.md](team-leader-modes.md#spawning-a-batch-executor).
+parallel lanes: [phase mode compatibility](team-leader-modes.md#spawning-a-batch-executor).
 
-## What each role hands off
+## What each kind hands off
 
-| Role                                     | Hands to a lane                                              | A task line that works                                                                                 |
+| Phase kind                               | Hands to a lane                                              | A task line that works                                                                                 |
 | ---------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| project-manager                          | Codebase surveys, dependency and file-structure analysis     | "List every component under `<dir>` grouped by feature. Markdown table: name, path, inputs."           |
-| software-architect                       | Pattern analysis in named modules, dependency checks, spikes | "In `<dir>`, list every DI token, its type, and where it is provided. Flag circular-dependency risks." |
-| backend-developer, frontend-developer    | Test scaffolding, boilerplate inside the batch               | "Create unit-test scaffolding for `<Class>` in `<absolute path>`: one describe per public method."     |
-| devops-engineer                          | Config and script generation                                 | "Write a multi-stage container file that installs with `npm ci`, builds, and ships a minimal image."   |
-| senior-tester                            | One lane per module for test generation                      | "Write unit tests for `<file>`: happy path and error cases for every public method."                   |
-| code-style-reviewer, code-logic-reviewer | One lane per file across many files                          | "Review `<file>` for naming, error handling and type precision. Numbered issues with line references." |
-| researcher-expert                        | Separate aspects of one question in parallel                 | One lane on the external API surface, one on how this codebase already uses it.                        |
-| modernization-detector                   | One lane per module                                          | "Analyze `<dir>` for deprecated APIs and outdated patterns. Prioritized list."                         |
-| technical-content-writer                 | Feature research and section drafts                          | "Read `<dir>` and summarize its capabilities and integration points for developer docs."               |
+| `plan`                          | Codebase surveys, dependency and file-structure analysis     | "List every component under `<dir>` grouped by feature. Markdown table: name, path, inputs."           |
+| `architecture`                       | Pattern analysis in named modules, dependency checks, spikes | "In `<dir>`, list every DI token, its type, and where it is provided. Flag circular-dependency risks." |
+| `implement` (backend/front-end)    | Test scaffolding, boilerplate inside the batch               | "Create unit-test scaffolding for `<Class>` in `<absolute path>`: one describe per public method."     |
+| `implement` (infrastructure)                          | Config and script generation                                 | "Write a multi-stage container file that installs with `npm ci`, builds, and ships a minimal image."   |
+| `tests`                            | One lane per module for test generation                      | "Write unit tests for `<file>`: happy path and error cases for every public method."                   |
+| `review` (style/logic) | One lane per file across many files                          | "Review `<file>` for naming, error handling and type precision. Numbered issues with line references." |
+| `research` (technical unknown)                        | Separate aspects of one question in parallel                 | One lane on the external API surface, one on how this codebase already uses it.                        |
+| `research` (modernization)                   | One lane per module                                          | "Analyze `<dir>` for deprecated APIs and outdated patterns. Prioritized list."                         |
+| `docs`                 | Feature research and section drafts                          | "Read `<dir>` and summarize its capabilities and integration points for developer docs."               |
 
 ## Never on a lane
 
@@ -94,8 +94,8 @@ parallel lanes: [team-leader-modes.md](team-leader-modes.md#spawning-a-batch-exe
   subagent's _own_ deliverable — lanes may gather inputs, the subagent writes and owns the document.
   A phase assigned wholly to a lane (below) is the exception, and still passes Gate 1 / Gate 2.
 - Git commits, and anything that asks the user.
-- visual-reviewer work — check the lane's tool list; lanes that have `ptah_browser_*` render and screenshot their own UI; the visual-reviewer still gives the independent dark+light evidence.
-- ui-ux-designer work — it needs interactive discovery with the user.
+- visual-review work — check the lane's tool list; lanes that have `ptah_browser_*` render and screenshot their own UI; the visual-review still gives the independent dark+light evidence.
+- `design` work — it needs interactive discovery with the user.
 - Final security-critical decisions. A lane document review may approve Gates 1, 1.7 and 2 in
   `lane-review` mode ([checkpoints.md § Approval mode](checkpoints.md#approval-mode)); in `user`
   mode its findings are advisory and you present them at the user gate. A review that needs
@@ -120,13 +120,13 @@ deliverable early as a skeleton and fills it in as it goes, so any stop leaves u
 
 | Phase           | Deliverable                                                                                     | Default lane when the user names none                                                                                                                |
 | --------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Plan            | `task-description.md`                                                                           | A strong-reasoning lane                                                                                                                              |
-| Architecture    | `implementation-plan.md`                                                                        | A strong-reasoning lane                                                                                                                              |
-| Implement       | code in place + a report with evidence per task; **you** record `batches.md` after verifying it | A capable coding lane in the live list                                                                                                               |
-| Review          | `code-logic-review.md`                                                                          | An independent capable lane from a different family than the implementer; same-family exception requires a specific reason and weaker-evidence label |
-| Document review | `<artifact-stem>-review.md` per plan, design and architecture artifact                          | The opposite execution side from the author, with the disclosed fallback in agent-lanes §6                                                           |
+| `plan`          | `task-description.md`                                                                           | A strong-reasoning lane                                                                                                                              |
+| `architecture`  | `implementation-plan.md`                                                                        | A strong-reasoning lane                                                                                                                              |
+| `implement`     | code in place + a report with evidence per task; **you** record `batches.md` after verifying it | A capable coding lane in the live list                                                                                                               |
+| `review`        | `code-logic-review.md`                                                                          | An independent capable lane from a different family than the implementer; same-family exception requires a specific reason and weaker-evidence label |
+| `document-review` | `<artifact-stem>-review.md` per plan, design and architecture artifact                          | The opposite execution side from the author, with the disclosed fallback in agent-lanes §6                                                           |
 
-### The live roster
+### Live phase-kind roster
 
 - **Pinned** by the current user → resolve the requested lane against `ptah_agent_list` and use it
   when spawnable and capable. If the named lane is absent, stop and ask; do not invent a row.
@@ -139,10 +139,10 @@ Fill this roster from current `ptah_agent_list` rows, not a fixed vendor list:
 
 | Phase        | Live lane row                | Spawn args from row                       | Deliverable              |
 | ------------ | ---------------------------- | ----------------------------------------- | ------------------------ |
-| Plan         | `<spawnable capable row>`    | `<listed identifier and supported model>` | `task-description.md`    |
-| Architecture | `<spawnable capable row>`    | `<listed identifier and supported model>` | `implementation-plan.md` |
-| Implement    | `<spawnable capable row>`    | `<listed identifier and supported model>` | code + report            |
-| Review       | `<independent eligible row>` | `<listed identifier and supported model>` | `code-logic-review.md`   |
+| `plan`       | `<spawnable capable row>`    | `<listed identifier and supported model>` | `task-description.md`    |
+| `architecture` | `<spawnable capable row>`    | `<listed identifier and supported model>` | `implementation-plan.md` |
+| `implement`  | `<spawnable capable row>`    | `<listed identifier and supported model>` | code + report            |
+| `review`     | `<independent eligible row>` | `<listed identifier and supported model>` | `code-logic-review.md`   |
 
 For shipping code, try `other family same capability`, then `same family other provider/model`,
 then an independent `subagent` when no eligible lane can review. The latter two require a

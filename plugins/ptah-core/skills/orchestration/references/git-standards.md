@@ -34,6 +34,14 @@ Before any branch operation, inspect the current branch, working tree, and repos
 3. **Commit changes:** Inspect the diff and staged paths, run scoped checks, stage only reviewed files, and commit with a message that follows the repository's rules.
 4. **Create a PR:** Use the repository host CLI when available (for example, `gh pr create` for GitHub). Give the PR a descriptive title and a body with `## Summary` and `## Test plan`, including the checks actually run and their results. Verify the base and branch before submitting.
 
+After the PR opens, set the task carrier to `in_review`. After review and a confirmed merge, the
+host marks it `done` and runs journaled close-out in the background. Worktree and branch removal
+requires user authorization: the opt-in `taskCloseOut.autoRemoveMergedWorktreeAndBranch`
+setting (default `false`), or the user removing the worktree after they authorize it. Removal
+by the host requires a clean worktree and merged branch; otherwise cleanup is
+`pending-user-approval` when opt-in is missing, or `refused` with a reason when the worktree is dirty or unmerged. Agents must not remove worktrees on their own. `ptah_task_cleanup_completed { runId, taskId, workspaceRoot }` is the manual
+completed-task cleanup hook.
+
 Never commit to or merge into the default branch without the user's authorization.
 
 ## Pre-commit checks
