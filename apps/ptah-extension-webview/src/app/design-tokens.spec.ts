@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const { interpolate, oklch, wcagContrast } = require('culori/require');
+const { interpolate, oklch, rgb, wcagContrast } = require('culori/require');
 const config = require('../../tailwind.config.js') as {
   theme: { extend: Record<string, Record<string, unknown>> };
   daisyui: { themes: Array<Record<string, Record<string, string>>> };
@@ -199,7 +199,11 @@ describe('Field focus label contrast on the anubis themes', () => {
     'keeps the focus label color >= 4.5:1 on base-100 to base-300 in %s',
     (name) => {
       const theme = themes[name];
-      const share = Number(tokenCss.match(/--ptah-field-label-fg-active:[^;]*?\(var\(--p\)\)\s+(\d+)%/)?.[1]);
+      const share = Number(
+        tokenCss.match(
+          /--ptah-field-label-fg-active:[^;]*?\(var\(--p\)\)\s+(\d+)%/,
+        )?.[1],
+      );
       expect(share).toBeGreaterThan(0);
       const label = interpolate(
         [theme['base-content'], theme['primary']],
@@ -208,6 +212,37 @@ describe('Field focus label contrast on the anubis themes', () => {
       for (const key of ['base-100', 'base-200', 'base-300']) {
         expect(wcagContrast(label, theme[key])).toBeGreaterThanOrEqual(4.5);
       }
+    },
+  );
+  it.each(['anubis', 'anubis-light'])(
+    'keeps the selected option color >= 4.5:1 on the panel, also when active, in %s',
+    (name) => {
+      const theme = themes[name];
+      const share = Number(
+        tokenCss.match(
+          /--ptah-select-option-selected-fg:[^;]*?\(var\(--p\)\)\s+(\d+)%/,
+        )?.[1],
+      );
+      expect(share).toBeGreaterThan(0);
+      const fg = interpolate(
+        [theme['base-content'], theme['primary']],
+        'oklch',
+      )(share / 100);
+      // --ptah-select-panel-bg is --surface-3; the active row adds 16% primary.
+      const panel = interpolate(
+        [theme['base-200'], theme['base-300']],
+        'oklch',
+      )(0.86);
+      const p = rgb(theme['primary']);
+      const b = rgb(panel);
+      const active = {
+        mode: 'rgb',
+        r: p.r * 0.16 + b.r * 0.84,
+        g: p.g * 0.16 + b.g * 0.84,
+        b: p.b * 0.16 + b.b * 0.84,
+      };
+      expect(wcagContrast(fg, panel)).toBeGreaterThanOrEqual(4.5);
+      expect(wcagContrast(fg, active)).toBeGreaterThanOrEqual(4.5);
     },
   );
 });
@@ -234,90 +269,93 @@ describe('Ptah reference theme contrast (ptah-glass and ptah-glass-light)', () =
     } as const;
   }
 
-  describe.each(referenceThemes)('%s muted and button contrast', (themeName) => {
-    const theme = customThemes[themeName];
-    const muted = oklch(`oklch(${theme['--bcm']})`);
-    const surfaces = resolveSurfaces(theme);
-    const controlEdge = interpolate(
-      [theme['base-100'], theme['base-content']],
-      'oklch',
-    )(0.55);
-
-    it.each(Object.keys(surfaces) as Array<keyof typeof surfaces>)(
-      'keeps base-content-muted >= 4.5:1 on %s',
-      (surfaceKey) => {
-        expect(wcagContrast(muted, surfaces[surfaceKey])).toBeGreaterThanOrEqual(
-          4.5,
-        );
-      },
-    );
-
-    it('keeps proposed button variant text >= 4.5:1 against its fill', () => {
-      expect(
-        wcagContrast(theme['primary-content'], theme['primary']),
-      ).toBeGreaterThanOrEqual(4.5);
-      expect(
-        wcagContrast(theme['error-content'], theme['error']),
-      ).toBeGreaterThanOrEqual(4.5);
-      expect(
-        wcagContrast(theme['base-content'], surfaces['surface-2']),
-      ).toBeGreaterThanOrEqual(4.5);
-      expect(
-        wcagContrast(theme['base-content'], surfaces['base-100']),
-      ).toBeGreaterThanOrEqual(4.5);
-      expect(
-        wcagContrast(theme['primary'], surfaces['base-100']),
-      ).toBeGreaterThanOrEqual(4.5);
-      expect(
-        wcagContrast(theme['primary'], surfaces['base-200']),
-      ).toBeGreaterThanOrEqual(4.5);
-      expect(
-        wcagContrast(theme['primary'], surfaces['base-300']),
-      ).toBeGreaterThanOrEqual(4.5);
-    });
-
-    it('keeps form field text >= 4.5:1 and the theme error color (error edge fallback) >= 3:1 on each panel', () => {
-      for (const surface of ['base-100', 'base-200', 'base-300'] as const) {
-        expect(
-          wcagContrast(theme['base-content'], surfaces[surface]),
-        ).toBeGreaterThanOrEqual(4.5);
-        expect(wcagContrast(muted, surfaces[surface])).toBeGreaterThanOrEqual(
-          4.5,
-        );
-        expect(
-          wcagContrast(theme['error'], surfaces[surface]),
-        ).toBeGreaterThanOrEqual(3);
-      }
-    });
-
-    it('keeps the floating label colors >= 4.5:1 and the rail >= 3:1 on each panel', () => {
-      // --ptah-field-label-fg-active: color-mix(primary 40%, base-content).
-      const labelActive = interpolate(
-        [theme['base-content'], theme['primary']],
+  describe.each(referenceThemes)(
+    '%s muted and button contrast',
+    (themeName) => {
+      const theme = customThemes[themeName];
+      const muted = oklch(`oklch(${theme['--bcm']})`);
+      const surfaces = resolveSurfaces(theme);
+      const controlEdge = interpolate(
+        [theme['base-100'], theme['base-content']],
         'oklch',
-      )(0.4);
-      for (const surface of ['base-100', 'base-200', 'base-300'] as const) {
-        expect(wcagContrast(muted, surfaces[surface])).toBeGreaterThanOrEqual(
-          4.5,
-        );
+      )(0.55);
+
+      it.each(Object.keys(surfaces) as Array<keyof typeof surfaces>)(
+        'keeps base-content-muted >= 4.5:1 on %s',
+        (surfaceKey) => {
+          expect(
+            wcagContrast(muted, surfaces[surfaceKey]),
+          ).toBeGreaterThanOrEqual(4.5);
+        },
+      );
+
+      it('keeps proposed button variant text >= 4.5:1 against its fill', () => {
         expect(
-          wcagContrast(labelActive, surfaces[surface]),
+          wcagContrast(theme['primary-content'], theme['primary']),
         ).toBeGreaterThanOrEqual(4.5);
         expect(
-          wcagContrast(theme['primary'], surfaces[surface]),
-        ).toBeGreaterThanOrEqual(3);
-      }
-    });
+          wcagContrast(theme['error-content'], theme['error']),
+        ).toBeGreaterThanOrEqual(4.5);
+        expect(
+          wcagContrast(theme['base-content'], surfaces['surface-2']),
+        ).toBeGreaterThanOrEqual(4.5);
+        expect(
+          wcagContrast(theme['base-content'], surfaces['base-100']),
+        ).toBeGreaterThanOrEqual(4.5);
+        expect(
+          wcagContrast(theme['primary'], surfaces['base-100']),
+        ).toBeGreaterThanOrEqual(4.5);
+        expect(
+          wcagContrast(theme['primary'], surfaces['base-200']),
+        ).toBeGreaterThanOrEqual(4.5);
+        expect(
+          wcagContrast(theme['primary'], surfaces['base-300']),
+        ).toBeGreaterThanOrEqual(4.5);
+      });
 
-    it('keeps control edge and focus ring >= 3:1 against base-100, base-200 and base-300', () => {
-      for (const surface of ['base-100', 'base-200', 'base-300'] as const) {
-        expect(
-          wcagContrast(controlEdge, surfaces[surface]),
-        ).toBeGreaterThanOrEqual(3);
-        expect(
-          wcagContrast(theme['primary'], surfaces[surface]),
-        ).toBeGreaterThanOrEqual(3);
-      }
-    });
-  });
+      it('keeps form field text >= 4.5:1 and the theme error color (error edge fallback) >= 3:1 on each panel', () => {
+        for (const surface of ['base-100', 'base-200', 'base-300'] as const) {
+          expect(
+            wcagContrast(theme['base-content'], surfaces[surface]),
+          ).toBeGreaterThanOrEqual(4.5);
+          expect(wcagContrast(muted, surfaces[surface])).toBeGreaterThanOrEqual(
+            4.5,
+          );
+          expect(
+            wcagContrast(theme['error'], surfaces[surface]),
+          ).toBeGreaterThanOrEqual(3);
+        }
+      });
+
+      it('keeps the floating label colors >= 4.5:1 and the rail >= 3:1 on each panel', () => {
+        // --ptah-field-label-fg-active: color-mix(primary 40%, base-content).
+        const labelActive = interpolate(
+          [theme['base-content'], theme['primary']],
+          'oklch',
+        )(0.4);
+        for (const surface of ['base-100', 'base-200', 'base-300'] as const) {
+          expect(wcagContrast(muted, surfaces[surface])).toBeGreaterThanOrEqual(
+            4.5,
+          );
+          expect(
+            wcagContrast(labelActive, surfaces[surface]),
+          ).toBeGreaterThanOrEqual(4.5);
+          expect(
+            wcagContrast(theme['primary'], surfaces[surface]),
+          ).toBeGreaterThanOrEqual(3);
+        }
+      });
+
+      it('keeps control edge and focus ring >= 3:1 against base-100, base-200 and base-300', () => {
+        for (const surface of ['base-100', 'base-200', 'base-300'] as const) {
+          expect(
+            wcagContrast(controlEdge, surfaces[surface]),
+          ).toBeGreaterThanOrEqual(3);
+          expect(
+            wcagContrast(theme['primary'], surfaces[surface]),
+          ).toBeGreaterThanOrEqual(3);
+        }
+      });
+    },
+  );
 });
