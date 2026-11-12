@@ -1,6 +1,6 @@
 # Execution Strategies Reference
 
-Detailed workflow diagrams and guidance for all 8 task type workflows. Which phases or batches may run on CLI lanes: [lane-assignment.md](lane-assignment.md).
+Detailed workflow diagrams and guidance for all 8 task type workflows. Route each phase by kind at Gate 0.1 and read `../phases/<kind>.md`; use [the compatibility appendix](agent-catalog.md#compatibility-appendix) when assigning a built-in subagent. Which phases or batches may run on CLI lanes: [lane-assignment.md](lane-assignment.md).
 
 Every document gate below runs `author → independent document review → bounded revision → gate`
 ([checkpoints.md § Cross-side review protocol](checkpoints.md#cross-side-review-protocol)), for initial
@@ -9,7 +9,7 @@ the user's `APPROVED` in `user` mode or on escalation ([checkpoints.md § Approv
 implementation also gets the required shipping-code review before batch acceptance, or before
 completion and git in flows without a batch planner; Gate 3 `skip` does not waive it.
 
-**Skill routing**: The architect and the batch planner must put a `Required Skills:` line (skill ids,
+**Skill routing**: The `architecture` and `batch` phases must put a `Required Skills:` line (skill ids,
 or `none`) in every phase brief, `Task()` prompt and `ptah_agent_spawn` task, chosen from the
 skills the host lists whose descriptions match the batch's stack and layer (loaded when the host
 lists it; a role never stops work because an optional skill is absent). Stack-cue → skill table:
@@ -19,16 +19,16 @@ lists it; a role never stops work because an optional skill is absent). Stack-cu
 
 ## Strategy Overview
 
-| Strategy      | Complexity     | Primary Agents                       | User Checkpoints                      |
-| ------------- | -------------- | ------------------------------------ | ------------------------------------- |
-| FEATURE       | Full           | PM, [Designer], Architect, Team-Leader, Devs, QA | Scope, Requirements, Design (1.7), Architecture, QA |
-| BUGFIX        | Streamlined    | Team-Leader, Devs, QA                | QA                                    |
-| REFACTORING   | Focused        | Architect, Team-Leader, Devs, QA     | Architecture, QA                      |
-| DOCUMENTATION | Minimal        | PM, Developer, Style Reviewer        | Requirements                          |
-| RESEARCH      | Investigation  | Researcher                           | None                                  |
-| DEVOPS        | Infrastructure | PM, Architect, DevOps Engineer, QA   | Requirements, Architecture, QA        |
-| SAAS_INIT     | Full+Discovery | PM, Architect, Team-Leader, Devs     | Scope, PRD, Architecture, Batches     |
-| CREATIVE      | Design-first   | ui-ux-designer, content-writer, Dev  | Design system check, Design (1.7)     |
+| Strategy | Complexity | Phase kinds | User checkpoints |
+| --- | --- | --- | --- |
+| FEATURE | Full | `plan`, optional `research`/`design`, `architecture`, `batch`, `implement`, `review`, `tests`, `completion` | Scope, requirements, design (1.7), architecture, QA |
+| BUGFIX | Streamlined | optional `research`, `batch`, `implement`, `review`, `tests`, `completion` | QA |
+| REFACTORING | Focused | `architecture`, `batch`, `implement`, `review`, `tests`, `completion` | Architecture, QA |
+| DOCUMENTATION | Minimal | `plan`, `docs`, `review`, `completion` | Requirements |
+| RESEARCH | Investigation | `research`, optional FEATURE flow, `completion` | None |
+| DEVOPS | Infrastructure | `plan`, `architecture`, `implement`, `review`, `tests`, `completion` | Requirements, architecture, QA |
+| SAAS_INIT | Full + discovery | discovery, `plan`, `architecture`, `batch`, `implement`, `review`, `tests`, `completion` | Scope, PRD, architecture, batches |
+| CREATIVE | Design first | `design`, `docs`, `implement`, `review`, `visual-review`, `completion` | Design system, design (1.7) |
 
 ---
 
@@ -43,17 +43,17 @@ Phase 0.5: [IF ambiguous request] SCOPE CLARIFICATION
            SCOPE DECISIONS LOGGED (decisions.md)
            |
            v
-Phase 1: project-manager --> Creates task-description.md
+Phase 1: plan --> Creates task-description.md
          |
          INDEPENDENT DOCUMENT REVIEW (other execution side; bounded revision per agent-lanes §6)
          |
          GATE PASSES (lane-review: reviewer APPROVED; user: "APPROVED" or feedback)
          |
          v
-Phase 2: [IF technical unknowns] researcher-expert --> Creates research-report.md
+Phase 2: [IF technical unknowns] research --> Creates research-report.md
          |
          v
-Phase 3: [IF UI/UX work] ui-ux-designer --> Creates design-spec.md + prototype/
+Phase 3: [IF UI/UX work] design --> Creates design-spec.md + prototype/
          |
          INDEPENDENT DOCUMENT REVIEW (other execution side; bounded revision per agent-lanes §6)
          |
@@ -66,38 +66,38 @@ Phase 3.5: [IF multiple valid approaches] TECHNICAL CLARIFICATION
            TECHNICAL DECISIONS LOGGED (decisions.md)
            |
            v
-Phase 4: software-architect --> Creates implementation-plan.md
+Phase 4: architecture --> Creates implementation-plan.md
          |
          INDEPENDENT DOCUMENT REVIEW (other execution side; bounded revision per agent-lanes §6)
          |
          GATE PASSES (lane-review: reviewer APPROVED; user: "APPROVED" or feedback)
          |
          v
-Phase 5: team-leader MODE 1 --> MODE 2 (loop) --> MODE 3
+Phase 5: batch (decompose) --> implement + acceptance (loop) --> completion
          |
-         QA SELECTED BY RULE (notice; user may add agents)
+         Review and test phases selected by rule (notice; user may add agents)
          |
          v
-Phase 6: [QA agents as selected]
+Phase 6: `review`, `tests`, `visual-review` as selected
          |
          v
 Phase 7: User handles git (commits already created)
          |
          v
-Phase 8: modernization-detector --> Creates future-enhancements.md
+Phase 8: completion --> Creates future-enhancements.md
 ```
 
 Before design starts on an existing surface being replaced, consolidated, rebuilt or redesigned,
-PM (architect when no PM) writes `parity-inventory.md` from the old code. The designer owns
+`plan` (`architecture` inventory-only when no `plan`) writes `parity-inventory.md` from the old code. `design` owns
 `design-spec.md` and `<taskFolder>/prototype/`, including `README.md` and `screenshots/`;
-revise them until Gate 1.7 is approved, then pass the approved prototype to the architect.
+revise them until Gate 1.7 is approved, then pass the approved prototype to the `architecture` phase.
 
-### Conditional Agent Triggers
+### Conditional Phase Triggers
 
-| Agent             | Invoke When                                                 |
+| Kind             | Invoke When                                                 |
 | ----------------- | ----------------------------------------------------------- |
-| researcher-expert | Technical complexity > 3, unknown libraries/APIs, needs POC |
-| ui-ux-designer    | Landing pages, visual redesigns, new UI components          |
+| research | Technical complexity > 3, unknown libraries/APIs, needs POC |
+| design    | Landing pages, visual redesigns, new UI components          |
 
 ---
 
@@ -106,22 +106,22 @@ revise them until Gate 1.7 is approved, then pass the approved prototype to the 
 **When to use**: Bug reports, error fixes, issue resolution
 
 ```
-[IF complex/unknown cause] researcher-expert
+[IF complex/unknown cause] research
          |
          v
-team-leader MODE 1 --> MODE 2 (loop) --> MODE 3
+batch (decompose) --> implement + acceptance (loop) --> completion
          |
-         QA SELECTED BY RULE
+         Review and test phases selected by rule
          |
          v
-[QA agents] --> Git --> modernization-detector
+[`review`, `tests`, `visual-review` as selected] --> Git --> completion
 ```
 
 ### Decision Points
 
-- **Unknown cause**: Add researcher-expert before team-leader
+- **Unknown cause**: Add research before batch
 - **Known cause**: Skip directly to batch decomposition (MODE 1)
-- **Single-file fix**: Consider minimal pattern (direct developer)
+- **Single-file fix**: Consider minimal pattern (direct `implement` phase)
 
 ---
 
@@ -130,22 +130,22 @@ team-leader MODE 1 --> MODE 2 (loop) --> MODE 3
 **When to use**: Code restructuring, optimization, technical debt reduction
 
 ```
-software-architect --> Creates implementation-plan.md
+architecture --> Creates implementation-plan.md
          |
          INDEPENDENT DOCUMENT REVIEW (other execution side; bounded revision per agent-lanes §6)
          |
          GATE PASSES (lane-review: reviewer APPROVED; user: "APPROVED" or feedback)
          |
          v
-team-leader MODE 1 --> MODE 2 (loop) --> MODE 3
+batch (decompose) --> implement + acceptance (loop) --> completion
          |
-         QA SELECTED BY RULE
+         Review and test phases selected by rule
          |
          v
-[QA agents] --> Git --> modernization-detector
+[`review`, `tests`, `visual-review` as selected] --> Git --> completion
 ```
 
-### Why Skip PM
+### Why Skip `plan`
 
 Refactoring requirements are typically clear:
 
@@ -153,7 +153,7 @@ Refactoring requirements are typically clear:
 - "Optimize database queries"
 - "Consolidate duplicate code"
 
-The architect designs HOW to refactor; no scope discovery needed.
+The `architecture` phase designs HOW to refactor; no scope discovery needed.
 
 **Candidate skill**: Assign `humanize-library` in `Required Skills:` when the host lists it and the
 task splits large files, removes duplication, or cleans up module structure without changing
@@ -166,30 +166,32 @@ behavior ([agent-catalog.md § Skill routing](agent-catalog.md#skill-routing)).
 **When to use**: README updates, API docs, comments, guides
 
 ```
-project-manager --> Creates task-description.md
+plan --> Creates task-description.md
          |
          INDEPENDENT DOCUMENT REVIEW (other execution side; bounded revision per agent-lanes §6)
          |
          GATE PASSES (lane-review: reviewer APPROVED; user: "APPROVED" or feedback)
          |
          v
-[appropriate developer] --> Implements documentation
+`docs` --> Implements documentation
          |
          v
-code-style-reviewer --> Verifies formatting/consistency
+`review` --> Verifies formatting/consistency
          |
          v
-Git
+Orchestrator acceptance and git
 ```
 
-### Developer Selection
+### Documentation Implementation Selection
 
-| Documentation Type | Developer          |
-| ------------------ | ------------------ |
-| API docs           | backend-developer  |
-| Component docs     | frontend-developer |
-| CI/CD docs         | devops-engineer    |
-| General guides     | frontend-developer |
+Route documentation work as `docs` and preserve the subject expertise when selecting an executor.
+
+| Documentation type | Required expertise |
+| --- | --- |
+| API docs | Backend APIs |
+| Component docs | Frontend components |
+| CI/CD docs | Infrastructure and deployment |
+| General guides | Frontend and product workflows |
 
 ---
 
@@ -198,7 +200,7 @@ Git
 **When to use**: Technical exploration, feasibility studies, POC evaluation
 
 ```
-researcher-expert --> Creates research-report.md
+research --> Creates research-report.md
          |
          v
 [IF implementation needed] --> Switch to FEATURE strategy
@@ -209,9 +211,9 @@ researcher-expert --> Creates research-report.md
 
 If research concludes implementation is needed:
 
-1. Research report becomes input to PM
+1. Research report becomes input to the `plan` phase
 2. Switch to FEATURE strategy
-3. PM references research-report.md in task-description.md
+3. `plan` references research-report.md in task-description.md
 
 ---
 
@@ -220,32 +222,32 @@ If research concludes implementation is needed:
 **When to use**: CI/CD, Docker, Kubernetes, Terraform, monitoring, publishing
 
 ```
-Phase 1: project-manager --> Creates task-description.md
+Phase 1: plan --> Creates task-description.md
          |
          INDEPENDENT DOCUMENT REVIEW (other execution side; bounded revision per agent-lanes §6)
          |
          GATE PASSES (lane-review: reviewer APPROVED; user: "APPROVED" or feedback)
          |
          v
-Phase 2: software-architect --> Creates implementation-plan.md
+Phase 2: architecture --> Creates implementation-plan.md
          |
          INDEPENDENT DOCUMENT REVIEW (other execution side; bounded revision per agent-lanes §6)
          |
          GATE PASSES (lane-review: reviewer APPROVED; user: "APPROVED" or feedback)
          |
          v
-Phase 3: devops-engineer --> Implements infrastructure
+Phase 3: implement --> Implements infrastructure
          |
-         QA SELECTED BY RULE (style/logic)
+         Review and test phases selected by rule (style/logic)
          |
          v
-Phase 4: [QA agents as selected]
+Phase 4: `review`, `tests`, `visual-review` as selected
          |
          v
 Phase 5: User handles git (commits already created)
          |
          v
-Phase 6: modernization-detector --> Creates future-enhancements.md
+Phase 6: completion --> Creates future-enhancements.md
 ```
 
 ### DEVOPS Trigger Keywords
@@ -261,7 +263,7 @@ Invoke DEVOPS strategy when task involves:
 
 **Key Signal**: Work is 100% infrastructure (no application business logic)
 
-**Developer**: Always use `devops-engineer` (NOT backend-developer)
+**Implementation**: Route the infrastructure work as `implement` with DevOps skills.
 
 **Candidate skill**: Assign `nestjs-deployment` in `Required Skills:` when the host lists it and
 the task containerizes, configures health checks, CORS, rate limiting or production logging, runs
@@ -296,7 +298,7 @@ Phase 0: DISCOVERY (Orchestrator)
          USER ANSWERS (clarifies business/technical context)
          |
          v
-Phase 1: project-manager + [saas-discovery-prompt]
+Phase 1: plan + [saas-discovery-prompt]
          --> Creates SaaS PRD (task-description.md) with:
              - Tenant model
              - Domain boundaries
@@ -308,7 +310,7 @@ Phase 1: project-manager + [saas-discovery-prompt]
          GATE PASSES (lane-review: reviewer APPROVED; user: "APPROVED" or feedback)
          |
          v
-Phase 2: software-architect + [saas-architecture-skills]
+Phase 2: architecture + [saas-architecture-skills]
          References: nx-workspace-architect, nestjs-backend-patterns
          --> Creates implementation-plan.md with:
              - Complete library structure
@@ -320,33 +322,33 @@ Phase 2: software-architect + [saas-architecture-skills]
          GATE PASSES (lane-review: reviewer APPROVED; user: "APPROVED" or feedback)
          |
          v
-Phase 3: team-leader MODE 1
+Phase 3: `batch` (decompose)
          Creates batched tasks from implementation plan
          |
          v
-Phase 4: Development Loop (team-leader MODE 2)
+Phase 4: `implement` batches with orchestrator acceptance
          Batch 1: Workspace + shared infrastructure
          Batch 2: Authentication + multitenancy
          Batch 3: First domain scaffold
          Batch 4: Build verification
          |
          v
-Phase 5: team-leader MODE 3
+Phase 5: `completion`
          Final verification, summary
 ```
 
 ### Discovery (Phase 0)
 
-Single source of truth: `saas-workspace-initializer` Step a. Do not maintain a separate discovery question list here. Ask through the `AskUserQuestion` tool, in the skill's two rounds, before invoking PM:
+Single source of truth: `saas-workspace-initializer` Step a. Do not maintain a separate discovery question list here. Ask through the `AskUserQuestion` tool, in the skill's two rounds, before invoking `plan`:
 
 - **Round 1 — business**: what is being built, customer type (B2B/B2C/internal), core jobs-to-be-done (2-3 candidate domains), MVP scope, monetization yes/no.
 - **Round 2 — stack**: frontend, API, DB/ORM, auth shape, tenancy — each with a "Recommend for me" option.
 
 See `saas-workspace-initializer/SKILL.md` Step a for the exact question wording and the "never proceed with unanswered required questions" rule.
 
-### PM Agent Extension
+### `plan` Phase Brief
 
-When invoking project-manager, include in prompt:
+When invoking `plan`, include in prompt:
 
 ```
 Reference skill: saas-workspace-initializer/SKILL.md
@@ -360,9 +362,9 @@ The task-description.md MUST include sections for:
 6. NON-FUNCTIONAL REQUIREMENTS - Scale, compliance
 ```
 
-### Architect Agent Extension
+### `architecture` Phase Brief
 
-When invoking software-architect, include in prompt:
+When invoking `architecture`, include in prompt:
 
 ```
 Reference skills:
@@ -377,16 +379,16 @@ The implementation-plan.md MUST include:
 3. SHARED INFRASTRUCTURE - Common libraries
 4. MULTITENANCY IMPLEMENTATION - Middleware + policies
 5. AUTHENTICATION SCAFFOLD - Provider pattern
-6. PHASE BREAKDOWN - Batched for team-leader
+6. PHASE BREAKDOWN - Batched for the `batch` phase
 ```
 
 ### Batch Templates
 
 Batch structure follows the phase schema in `saas-workspace-initializer/references/roadmap-format.md` — do not duplicate a separate breakdown here. Batch 1 scaffolds exactly the Foundation phase (Nx workspace, ESLint, shared/domain, api-interfaces, plus tenant/auth/DB primitives only if Phase 0 discovery makes them load-bearing — see `saas-workspace-initializer/SKILL.md` Step c). Later batches implement roadmap Phase 2 (Tenancy & Auth) and Phase 3 (Domain Modules) items, one item per batch, in the dependency order given by each item's `Depends on:` field. A final batch always runs verification (build all, lint, typecheck, boundaries) before handoff.
 
-### Developer Skill References
+### Implementation Skill References
 
-Developers reference these skills during implementation:
+Implementers reference these skills during implementation:
 
 | Task Area            | Skill                     |
 | -------------------- | ------------------------- |
@@ -399,11 +401,11 @@ Developers reference these skills during implementation:
 
 ## Creative Workflows
 
-Creative workflows follow a **design-first principle** with specific agent sequencing.
-Whenever a designer ran or a UI surface is added/redesigned, the designer owns `design-spec.md`
+Creative workflows follow a **design-first principle** with specific phase sequencing.
+Whenever `design` ran or a UI surface is added/redesigned, `design` owns `design-spec.md`
 and `<taskFolder>/prototype/` (with `README.md` and `screenshots/`). Run Gate 1.7 before
 content/implementation; an existing design system does not waive it. For an existing surface,
-PM (architect when no PM) inventories the old code in `parity-inventory.md` before design starts.
+`plan` (`architecture` inventory-only when no `plan`) inventories the old code in `parity-inventory.md` before design starts.
 
 ### Design-First Dependency Chain
 
@@ -412,24 +414,24 @@ PM (architect when no PM) inventories the old code in `parity-inventory.md` befo
 |  CREATIVE WORKFLOW DEPENDENCY CHAIN                           |
 |                                                               |
 |  1. DESIGN SYSTEM (Foundation)                                |
-|     +-- ui-ux-designer creates if missing                     |
+|     +-- design creates if missing                     |
 |         +-- Output: the project's design system, in           |
 |                     docs/design-system/                       |
 |                                                               |
-|  1.7 DESIGNER -> PROTOTYPE -> GATE 1.7 (APPROVED)              |
+|  1.7 DESIGN -> PROTOTYPE -> GATE 1.7 (APPROVED)              |
 |                                                               |
 |  2. CONTENT GENERATION (Depends on #1)                        |
-|     +-- technical-content-writer uses design system           |
+|     +-- docs uses design system           |
 |         +-- Output: Design-integrated content specs           |
 |                                                               |
 |  3. IMPLEMENTATION (Depends on #1 and #2)                     |
-|     +-- frontend-developer implements with specs              |
+|     +-- implement implements with specs              |
 +---------------------------------------------------------------+
 ```
 
 ### Automatic Design System Check
 
-Before invoking technical-content-writer for landing pages:
+Before invoking docs for landing pages:
 
 The design system lives in the project, at `docs/design-system/`; a skill
 directory is never its home. Select ONE authoritative document there: the one the project's
@@ -440,15 +442,15 @@ combine several design systems.
 design_system_file = select_authoritative(Glob(docs/design-system/**/*.md))
 
 if NOT exists(design_system_file):
-    -> Invoke ui-ux-designer FIRST
+    -> Invoke design FIRST
     -> "Create design system for this project"
     -> Wait for completion
-    -> Designer creates design-spec.md + prototype/; run Gate 1.7
-    -> Then invoke technical-content-writer
+    -> `design` creates design-spec.md + prototype/; run Gate 1.7
+    -> Then invoke docs
 
 if exists(design_system_file):
-    -> For added/redesigned UI: designer -> prototype -> Gate 1.7
-    -> Then invoke technical-content-writer
+    -> For added/redesigned UI: `design` -> prototype -> Gate 1.7
+    -> Then invoke docs
     -> Content will use existing design system
 ```
 
@@ -456,14 +458,14 @@ if exists(design_system_file):
 
 | User Says                         | Workflow                                |
 | --------------------------------- | --------------------------------------- |
-| "Create landing page"             | Design check -> ui-ux -> content-writer |
-| "Design our homepage"             | Design check -> ui-ux -> content-writer |
-| "Marketing content for..."        | Design check -> content-writer          |
-| "Visual design for..."            | ui-ux-designer                          |
-| "Brand identity"                  | ui-ux-designer (full discovery)         |
-| "Write a blog post"               | content-writer (design check optional)  |
-| "Video script for..."             | content-writer                          |
-| "What should our site look like?" | ui-ux-designer (discovery)              |
+| "Create landing page"             | Design check -> `design` -> `docs` phase |
+| "Design our homepage"             | Design check -> `design` -> `docs` phase |
+| "Marketing content for..."        | Design check -> `docs` phase          |
+| "Visual design for..."            | design                          |
+| "Brand identity"                  | design (full discovery)         |
+| "Write a blog post"               | `docs` phase (design check optional)  |
+| "Video script for..."             | `docs` phase                          |
+| "What should our site look like?" | design (discovery)              |
 
 ### Workflow A: Full Creative (Landing Page, Marketing Site)
 
@@ -474,19 +476,19 @@ Orchestrator:
   1. Check design system exists
      select_authoritative(Glob(docs/design-system/**/*.md))
 
-  2. IF MISSING -> Invoke ui-ux-designer:
-     Task("Create design system", subagent_type="ui-ux-designer")
+  2. IF MISSING -> Invoke design:
+     Route `design` to create the design system
      - Agent loads NICHE-DISCOVERY.md skill
      - Agent guides user through aesthetic discovery
      - Agent creates the design system in docs/design-system/
      - Wait for completion
 
-  2.5. Invoke ui-ux-designer for design-spec.md + prototype/ (even if design system exists)
+  2.5. Invoke design for design-spec.md + prototype/ (even if design system exists)
        - Include prototype/README.md and prototype/screenshots/
        - Run the independent document review, then present Gate 1.7; revise per the review protocol until APPROVED
 
-  3. Invoke technical-content-writer:
-     Task("Create landing page content", subagent_type="technical-content-writer")
+  3. Invoke docs:
+     Route `docs` to create landing page content
      - Agent loads LANDING-PAGES.md skill
      - Agent loads the project's design system
      - Agent creates design-integrated content
@@ -505,11 +507,11 @@ User: "Write a blog post about the SDK"
 
 Orchestrator:
   1. Design system check (OPTIONAL for blogs)
-     - If exists, content-writer can reference it
+     - If exists, `docs` phase can reference it
      - If missing, proceed without (text-focused content)
 
-  2. Invoke technical-content-writer:
-     Task("Write blog post about SDK", subagent_type="technical-content-writer")
+  2. Invoke docs:
+     Route `docs` to write the blog post
      - Agent loads BLOG-POSTS.md skill
      - Agent investigates codebase
      - Agent creates evidence-backed content
@@ -521,8 +523,8 @@ Orchestrator:
 User: "Help me define our visual identity"
 
 Orchestrator:
-  1. Invoke ui-ux-designer:
-     Task("Create design system with full discovery", subagent_type="ui-ux-designer")
+  1. Invoke design:
+     Route `design` for full discovery and the design system
      - Agent loads NICHE-DISCOVERY.md
      - Agent loads DESIGN-SYSTEM-BUILDER.md
      - Agent guides through discovery questions
@@ -534,7 +536,7 @@ Orchestrator:
 
 **Sequential (Default for Creative)**:
 
-- Design system MUST complete before content; if a designer ran or UI is added/redesigned,
+- Design system MUST complete before content; if `design` ran or UI is added/redesigned,
   designer → prototype → Gate 1.7 approval also precedes content
 - Content informs implementation
 
@@ -545,26 +547,26 @@ Orchestrator:
 
 ```
 # Sequential (design missing)
-ui-ux-designer --> prototype --> Gate 1.7 --> technical-content-writer --> frontend-developer
+design --> prototype --> Gate 1.7 --> docs --> implement
 
 # Parallel (design exists; Gate 1.7 approved for added/redesigned UI)
-+-> technical-content-writer (landing page)
-+-> technical-content-writer (blog post)
-+-> technical-content-writer (video script)
++-> docs (landing page)
++-> docs (blog post)
++-> docs (video script)
 ```
 
 ### Creative Output Locations
 
-| Agent                    | Output File                                                  | Purpose                           |
+| Kind                    | Output File                                                  | Purpose                           |
 | ------------------------ | ------------------------------------------------------------ | --------------------------------- |
-| ui-ux-designer           | Existing authoritative design-system document in the project | Design tokens, colors, typography |
-| ui-ux-designer           | `.ptah/specs/TASK_[ID]/design-spec.md` + `prototype/`         | Visual spec + prototype for Gate 1.7        |
-| technical-content-writer | `.ptah/specs/TASK_[ID]/content-specification.md`             | Content with design integration   |
-| technical-content-writer | `docs/content/*.md`                                          | Final content files               |
+| design           | Existing authoritative design-system document in the project | Design tokens, colors, typography |
+| design           | `.ptah/specs/TASK_[ID]/design-spec.md` + `prototype/`         | Visual spec + prototype for Gate 1.7        |
+| docs | `.ptah/specs/TASK_[ID]/content-specification.md`             | Content with design integration   |
+| docs | `docs/content/*.md`                                          | Final content files               |
 
 ### Creative Handoff Protocols
 
-**ui-ux-designer -> technical-content-writer:**
+**design -> docs:**
 
 ```markdown
 ## Design Handoff for Content
@@ -576,14 +578,14 @@ ui-ux-designer --> prototype --> Gate 1.7 --> technical-content-writer --> front
 **Typography**: [Display + body fonts]
 **Animation Patterns**: [Key effects to reference]
 
-Content writer should:
+The `docs` executor should:
 
 - Reference the project's design system for all visual specs
 - Use LANDING-PAGES.md templates with design integration
 - Include animation/effect specifications in content
 ```
 
-**technical-content-writer -> frontend-developer:**
+**docs -> implement:**
 
 ```markdown
 ## Content Handoff for Implementation
@@ -593,9 +595,9 @@ Content writer should:
 **Approved Prototype**: `<taskFolder>/prototype/` (Gate 1.7)
 **Assets Needed**: [List from asset briefs]
 
-Developer should:
+The `implement` executor should:
 
-- Implement content following visual specs and the approved prototype; return deviations to the designer
+- Implement content following visual specs and the approved prototype; return deviations to the `design` phase
 - Use design system tokens exactly
 - Generate/source assets from briefs
 ```
@@ -625,7 +627,7 @@ Is task a new FEATURE?
 
 Is task a BUGFIX?
     YES -> Is cause known?
-           YES -> Minimal pattern (developer only)
+           YES -> Minimal pattern (`implement` only)
            NO  -> BUGFIX strategy
     NO  -> continue
 
