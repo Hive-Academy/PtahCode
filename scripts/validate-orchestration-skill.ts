@@ -293,7 +293,9 @@ function validatePhases(): ValidationError[] {
     const expected = new Set(PHASE_KINDS.map(kind => `${kind}.md`));
     for (const name of expected) if (!files.includes(name)) errors.push(error(`phases/${name}`, `Required phase file missing: ${name}`));
     for (const name of files) if (!expected.has(name)) errors.push(error(`phases/${name}`, `Unexpected phase file: ${name}`));
-    for (const role of roles) if (active[1]?.includes(role)) errors.push(error('SKILL.md', `Retired role name in active phase flow: ${role}`));
+    // The mask keeps the string length, so the offsets of the masked match are valid in the original text.
+    const flow = skill.slice(active.index, active.index + active[0].length);
+    for (const role of roles) if (flow.includes(role)) errors.push(error('SKILL.md', `Retired role name in active phase flow: ${role}`));
   }
   return errors;
 }
