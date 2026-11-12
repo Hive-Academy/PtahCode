@@ -166,7 +166,7 @@
     "<dynamic>": 1
   },
   "libs/frontend/chat-ui/src/lib/molecules/session/plan-limits/plan-limit-tile.component.ts": {
-    "<dynamic>": 9
+    "<dynamic>": 7
   },
   "libs/frontend/chat-ui/src/lib/molecules/session/plan-limits/plan-window-detail.component.ts": {
     "<dynamic>": 2
@@ -342,6 +342,12 @@
   },
   "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-agents-section.component.ts": {
     "<dynamic>": 2
+  },
+  "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-session-actions.component.html": {
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-square": 1,
+    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-task-section.component.ts": {
     "alert": 2,
@@ -1275,10 +1281,10 @@
     "<dynamic>": 2,
     "badge": 1,
     "badge-xs": 1,
-    "btn": 2,
-    "btn-primary": 2,
+    "btn": 1,
+    "btn-primary": 1,
     "btn-square": 1,
-    "btn-xs": 2,
+    "btn-xs": 1,
     "checkbox": 1
   },
   "libs/frontend/tasks-ui/src/lib/components/board/task-column.component.ts": {
@@ -1329,10 +1335,10 @@
   },
   "libs/frontend/tasks-ui/src/lib/components/filter/task-filter-bar.component.ts": {
     "<dynamic>": 1,
-    "btn": 2,
-    "btn-active": 2,
+    "btn": 1,
+    "btn-active": 1,
     "btn-ghost": 1,
-    "btn-sm": 2
+    "btn-sm": 1
   },
   "libs/frontend/tasks-ui/src/lib/components/filter/task-view-menu.component.ts": {
     "badge": 1,
@@ -1344,7 +1350,6 @@
     "btn-sm": 1
   },
   "libs/frontend/tasks-ui/src/lib/components/task-board-header.component.ts": {
-    "<dynamic>": 1,
     "btn": 1,
     "btn-ghost": 1,
     "btn-sm": 1
@@ -1361,11 +1366,5 @@
     "alert-error": 2,
     "alert-info": 1,
     "alert-warning": 2
-  },
-  "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-session-actions.component.html": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
   }
 }

@@ -662,7 +662,10 @@ const HTTP_URL = /^https?:\/\//i;
             <div class="join">
               <button
                 type="button"
-                class="btn btn-primary btn-xs join-item gap-1"
+                ptahButton
+                variant="primary"
+                size="xs"
+                class="join-item gap-1"
                 [attr.tabindex]="rovingTabIndex()"
                 (click)="$event.stopPropagation(); onStart()"
                 [attr.aria-label]="'Start task ' + task().id"

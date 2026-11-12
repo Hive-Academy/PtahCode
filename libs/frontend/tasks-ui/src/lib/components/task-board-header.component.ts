@@ -25,10 +25,6 @@ import {
 } from '../services/task-view-mode.service';
 import { PtahButtonDirective } from '@ptah-extension/ui';
 
-/** Shared focus ring from the design spec's token map. */
-const FOCUS =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
-
 /**
  * TaskBoardHeaderComponent
  *
@@ -81,7 +77,11 @@ const FOCUS =
           @for (option of viewModes; track option) {
             <button
               type="button"
-              [class]="modeButtonClass(option)"
+              ptahButton
+              variant="ghost"
+              size="sm"
+              class="gap-1.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+              [class.bg-surface-3]="mode() === option"
               [attr.aria-pressed]="mode() === option"
               [attr.data-testid]="'tasks-view-mode-' + option"
               [title]="modeTitle(option)"
@@ -266,12 +266,6 @@ export class TaskBoardHeaderComponent {
     return mode === 'kanban'
       ? 'Kanban — six status columns of cards'
       : 'List — one scrolling table, grouped by status';
-  }
-
-  /** Active mode reads from `aria-pressed` and the selected surface. */
-  protected modeButtonClass(mode: TaskViewMode): string {
-    const active = this.mode() === mode ? ' bg-surface-3' : '';
-    return `btn btn-ghost btn-sm gap-1.5 ${FOCUS}${active}`;
   }
 
   /** Escape closes an open Manage menu and returns focus to its summary. */
