@@ -9,7 +9,7 @@ import {
   ChangeDetectionStrategy,
 } from '@angular/core';
 import { injectWallClock, WallClockService } from '@ptah-extension/core';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
 import {
   LucideAngularModule,
   ShieldAlert,
@@ -53,7 +53,7 @@ import {
  */
 @Component({
   selector: 'ptah-permission-request-card',
-  imports: [LucideAngularModule, DenyMessagePopoverComponent, PtahButtonDirective],
+  imports: [LucideAngularModule, DenyMessagePopoverComponent, PtahBadgeDirective, PtahButtonDirective],
   template: `
     <div
       class="relative bg-base-300/30 rounded border-l-2"
@@ -73,14 +73,13 @@ import {
         <!-- Title -->
         <span class="font-semibold text-base-content-muted">Permission</span>
 
-        <!-- Tool badge with icon - Use DaisyUI badge classes for theme consistency -->
+        <!-- Tool badge with icon -->
         <span
-          [class]="
-            'badge badge-xs font-mono px-1.5 gap-0.5 ' + getToolBadgeClass()
-          "
+          ptahBadge size="xs" [tone]="getToolBadgeTone()"
+          class="font-mono px-1.5 gap-0.5"
         >
           <lucide-angular [img]="getToolIcon()" class="w-2.5 h-2.5" />
-          {{ request().toolName }}
+          <span class="ptah-badge-text">{{ request().toolName }}</span>
         </span>
 
         <!-- Description inline - compact -->
@@ -93,9 +92,8 @@ import {
 
         <!-- Expiry badge -->
         <span
-          class="badge badge-xs font-mono px-1.5 gap-0.5 flex-shrink-0"
-          [class.badge-warning]="!isExpiringSoon()"
-          [class.badge-error]="isExpiringSoon()"
+          ptahBadge size="xs" [tone]="isExpiringSoon() ? 'err' : 'warn'"
+          class="font-mono px-1.5 gap-0.5 flex-shrink-0"
         >
           <lucide-angular [img]="ClockIcon" class="w-2.5 h-2.5" />
           {{ remainingTime() }}
@@ -273,26 +271,25 @@ export class PermissionRequestCardComponent {
   }
 
   /**
-   * Get tool-specific DaisyUI badge class for consistent styling
-   * Uses DaisyUI badge classes for theme-aware styling instead of inline oklch
+   * Get the tool-specific badge tone.
    */
-  protected getToolBadgeClass(): string {
+  protected getToolBadgeTone(): 'info' | 'ok' | 'warn' | 'accent' {
     const toolName = this.request().toolName;
     switch (toolName) {
       case 'Read':
-        return 'badge-info'; // info (blue) - file reading
+        return 'info'; // file reading
       case 'Write':
-        return 'badge-success'; // success (green) - file creation
+        return 'ok'; // file creation
       case 'Bash':
-        return 'badge-warning'; // warning (amber) - shell commands
+        return 'warn'; // shell commands
       case 'Grep':
-        return 'badge-secondary'; // secondary - search operations
+        return 'accent'; // search operations
       case 'Edit':
-        return 'badge-accent'; // accent - file modifications
+        return 'accent'; // file modifications
       case 'Glob':
-        return 'badge-info'; // info - file pattern matching
+        return 'info'; // file pattern matching
       default:
-        return 'badge-warning'; // warning (amber) - default
+        return 'warn'; // default
     }
   }
 

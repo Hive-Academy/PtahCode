@@ -15,7 +15,7 @@ import {
   ExternalLink,
 } from 'lucide-angular';
 import { FILE_LINK_OPENER } from '@ptah-extension/core';
-import { PtahIconButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 import { DurationBadgeComponent } from '../../atoms/duration-badge.component';
 import type { ExecutionNode } from '@ptah-extension/shared';
 import {
@@ -81,7 +81,7 @@ import { toolStatusPresentation } from '../../utils/tool-status.utils';
 @Component({
   selector: 'ptah-tool-call-header',
   standalone: true,
-  imports: [LucideAngularModule, DurationBadgeComponent, PtahIconButtonDirective],
+  imports: [LucideAngularModule, DurationBadgeComponent, PtahBadgeDirective, PtahIconButtonDirective],
   template: `
     <div class="group flex items-start min-w-0">
       <button
@@ -162,10 +162,11 @@ import { toolStatusPresentation } from '../../utils/tool-status.utils';
 
           @for (chip of chips(); track $index) {
             <span
-              class="badge badge-ghost badge-sm h-5 px-1.5 font-mono text-[11px] text-base-content-muted flex-shrink-0 max-w-full truncate"
+              ptahBadge tone="neutral" size="sm"
+              class="font-mono flex-shrink-0 max-w-full"
               [attr.title]="chip.title ?? null"
               data-testid="tool-chip"
-              >{{ chip.label }}</span
+              ><span class="ptah-badge-text">{{ chip.label }}</span></span
             >
           }
 
@@ -195,7 +196,7 @@ import { toolStatusPresentation } from '../../utils/tool-status.utils';
           <!-- The failure in words: colour is never the only signal -->
           @if (statusPresentation().failed) {
             <span
-              class="badge badge-ghost badge-sm h-5 px-1.5 text-[11px] text-base-content flex-shrink-0"
+              ptahBadge tone="neutral" size="sm" class="flex-shrink-0"
               aria-hidden="true"
               data-testid="tool-failed"
               >failed</span

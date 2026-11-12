@@ -8,7 +8,7 @@ import {
   signal,
 } from '@angular/core';
 import { injectWallClock, WallClockService } from '@ptah-extension/core';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
 import { FormsModule } from '@angular/forms';
 import {
   LucideAngularModule,
@@ -46,7 +46,7 @@ import type {
 @Component({
   selector: 'ptah-question-card',
   standalone: true,
-  imports: [FormsModule, LucideAngularModule, PtahButtonDirective],
+  imports: [FormsModule, LucideAngularModule, PtahBadgeDirective, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -64,9 +64,9 @@ import type {
         />
         <span class="font-semibold text-info">Input needed</span>
         <span
-          class="badge badge-xs font-mono px-1.5 gap-0.5 ml-auto flex-shrink-0"
-          [class.badge-warning]="timeRemaining() < 0 || timeRemaining() > 10"
-          [class.badge-error]="timeRemaining() >= 0 && timeRemaining() <= 10"
+          ptahBadge size="xs"
+          [tone]="timeRemaining() >= 0 && timeRemaining() <= 10 ? 'err' : 'warn'"
+          class="font-mono px-1.5 gap-0.5 ml-auto flex-shrink-0"
         >
           <lucide-angular [img]="ClockIcon" class="w-2.5 h-2.5" />
           {{ timeRemaining() < 0 ? 'No timeout' : timeRemaining() + 's' }}

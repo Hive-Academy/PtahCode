@@ -9,6 +9,7 @@
 import { LucideAngularModule, TriangleAlert } from 'lucide-angular';
 import {
   FileStatusBadgeComponent,
+  PtahBadgeDirective,
   PtahButtonDirective,
 } from '@ptah-extension/ui';
 import { ROW_PAGE_SIZE } from './turn-summary-files.utils';
@@ -45,7 +46,7 @@ function splitPath(path: string): {
 @Component({
   selector: 'ptah-turn-summary-files',
   standalone: true,
-  imports: [LucideAngularModule, FileStatusBadgeComponent, PtahButtonDirective],
+  imports: [LucideAngularModule, FileStatusBadgeComponent, PtahBadgeDirective, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
@@ -104,7 +105,7 @@ function splitPath(path: string): {
               </span>
               @if (row.state === 'conflicted') {
                 <span
-                  class="badge badge-sm badge-ghost h-auto whitespace-nowrap diff-del-text"
+                  ptahBadge tone="neutral" size="sm" class="h-auto whitespace-nowrap diff-del-text"
                   data-testid="turn-summary-file-conflicted"
                   >Conflicted</span
                 >

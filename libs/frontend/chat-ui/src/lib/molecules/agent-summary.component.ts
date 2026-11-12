@@ -9,6 +9,7 @@ import {
 } from '@angular/core';
 import { MarkdownModule } from 'ngx-markdown';
 import { SurfaceMarkdownPipe } from '@ptah-extension/markdown';
+import { PtahBadgeDirective } from '@ptah-extension/ui';
 import {
   LucideAngularModule,
   Brain,
@@ -43,7 +44,7 @@ export type ParsedBlock =
 @Component({
   selector: 'ptah-agent-summary',
   standalone: true,
-  imports: [SurfaceMarkdownPipe, MarkdownModule, LucideAngularModule],
+  imports: [SurfaceMarkdownPipe, MarkdownModule, LucideAngularModule, PtahBadgeDirective],
   template: `
     <div class="space-y-1.5">
       @for (block of parsedBlocks(); track $index) {
@@ -90,9 +91,9 @@ export type ParsedBlock =
                 class="w-3.5 h-3.5 text-info mt-0.5 flex-shrink-0"
               />
               <div class="flex-1 min-w-0">
-                <span class="badge badge-xs badge-ghost font-mono">{{
-                  block.name
-                }}</span>
+                <span ptahBadge size="xs" class="font-mono"
+                  ><span class="ptah-badge-text">{{ block.name }}</span></span
+                >
                 @if (getMainParam(block)) {
                   <span class="text-base-content-muted ml-1 truncate">{{
                     getMainParam(block)

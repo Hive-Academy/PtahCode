@@ -24,6 +24,7 @@ import {
   CatalogCardSkeletonComponent,
   CatalogGridComponent,
   MonogramTileComponent,
+  PtahBadgeDirective,
   PtahButtonDirective,
   PtahCheckboxDirective,
   PtahInputDirective,
@@ -203,6 +204,7 @@ function skillSelectionKey(
     CatalogCardSkeletonComponent,
     CatalogGridComponent,
     MonogramTileComponent,
+    PtahBadgeDirective,
     PtahButtonDirective,
     PtahCheckboxDirective,
     PtahInputDirective,
@@ -403,7 +405,7 @@ function skillSelectionKey(
                     }
                   </span>
                   @if (candidate.pluginId) {
-                    <span class="badge badge-xs badge-ghost shrink-0">{{
+                    <span ptahBadge tone="neutral" size="xs" class="shrink-0">{{
                       candidate.pluginId
                     }}</span>
                   }

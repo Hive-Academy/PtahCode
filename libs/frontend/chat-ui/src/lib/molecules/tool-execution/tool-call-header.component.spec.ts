@@ -550,7 +550,7 @@ describe.each([true, false])(
       const failed = host.querySelector('[data-testid="tool-failed"]');
 
       expect(failed?.textContent?.trim()).toBe('failed');
-      expect(failed?.classList).toContain('text-base-content');
+      expect(failed?.getAttribute('data-ptah-badge')).not.toBeNull();
       expect(
         render({
           toolName: 'Bash',

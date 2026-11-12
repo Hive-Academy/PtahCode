@@ -1,11 +1,11 @@
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
-import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 import { AudioLines, CircleGauge, LucideAngularModule, Moon, Settings, Sparkles, Sun } from 'lucide-angular';
 
 @Component({
   selector: 'ptah-command-center-header',
   standalone: true,
-  imports: [LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective],
+  imports: [LucideAngularModule, PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <header class="flex min-h-[60px] flex-wrap items-center justify-between gap-2 border-b border-base-300 bg-base-100 px-4 py-1 text-base-content" data-glass-surface="bar">
@@ -26,10 +26,10 @@ import { AudioLines, CircleGauge, LucideAngularModule, Moon, Settings, Sparkles,
           <span class="size-2 rounded-full" [class.bg-success]="voiceReady()" [class.bg-warning]="!voiceReady()" aria-hidden="true"></span>
           <span class="truncate">{{ voiceProviderText() }}</span>
         </button>
-        <span class="badge badge-outline badge-sm font-mono text-xs">Session {{ shortSessionId() }}</span>
-        <span class="badge badge-outline badge-sm font-mono text-xs" role="status">{{ sessionStatus() }}</span>
+        <span ptahBadge appearance="outline" class="font-mono text-xs">Session {{ shortSessionId() }}</span>
+        <span ptahBadge appearance="outline" class="font-mono text-xs" role="status">{{ sessionStatus() }}</span>
         @if (showContext()) {
-          <span class="badge badge-outline badge-sm gap-1 font-mono text-xs" [class.text-state-need]="contextWarning()" [class.border-state-need]="contextWarning()">
+          <span ptahBadge appearance="outline" [tone]="contextWarning() ? 'warn' : 'neutral'" class="gap-1 font-mono text-xs">
             <lucide-angular [img]="gaugeIcon" class="size-3" aria-hidden="true" /> Context {{ contextLabel() }}
             @if (contextWarning()) { <span>· Warning</span> }
           </span>

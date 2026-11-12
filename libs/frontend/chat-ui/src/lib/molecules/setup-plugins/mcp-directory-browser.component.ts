@@ -29,6 +29,7 @@ import {
   CatalogCardSkeletonComponent,
   CatalogGridComponent,
   MonogramTileComponent,
+  PtahBadgeDirective,
   PtahButtonDirective,
   PtahCheckboxDirective,
   PtahFieldComponent,
@@ -142,6 +143,7 @@ interface RegistryCardView {
     MonogramTileComponent,
     StorefrontPanelComponent,
     InstallScopeFieldComponent,
+    PtahBadgeDirective,
     PtahButtonDirective,
     PtahCheckboxDirective,
     PtahInputDirective,
@@ -306,7 +308,7 @@ interface RegistryCardView {
                           <p
                             class="break-all rounded-lg bg-base-100 p-2 font-mono text-xs"
                           >
-                            <span class="badge badge-sm badge-neutral mr-1">{{
+                            <span ptahBadge tone="neutral" size="sm" class="mr-1">{{
                               config.type
                             }}</span>
                             {{ getConfigSummary() }}
@@ -408,7 +410,7 @@ interface RegistryCardView {
                                 }}</span>
                                 @if (isTargetLocked(target)) {
                                   <span
-                                    class="badge badge-warning badge-outline badge-xs"
+                                    ptahBadge tone="warn" size="xs" appearance="outline"
                                     >Global only</span
                                   >
                                 }

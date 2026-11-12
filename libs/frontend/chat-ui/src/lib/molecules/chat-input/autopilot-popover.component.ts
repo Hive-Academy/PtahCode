@@ -11,13 +11,13 @@ import {
 import { LucideAngularModule, Shield, Zap, ZapOff } from 'lucide-angular';
 import { AutopilotStateService } from '@ptah-extension/core';
 import { type PermissionLevel, type SessionId } from '@ptah-extension/shared';
-import { NativeDropdownComponent } from '@ptah-extension/ui';
+import { NativeDropdownComponent, PtahBadgeDirective } from '@ptah-extension/ui';
 
 let nextApprovalPopoverId = 0;
 
 @Component({
   selector: 'ptah-autopilot-popover',
-  imports: [LucideAngularModule, NativeDropdownComponent],
+  imports: [LucideAngularModule, NativeDropdownComponent, PtahBadgeDirective],
   template: `
     <ptah-native-dropdown
       [isOpen]="isOpen()"
@@ -71,7 +71,7 @@ let nextApprovalPopoverId = 0;
             Autopilot Mode
           </span>
           @if (tabEnabled()) {
-            <span class="badge badge-primary badge-outline badge-xs ml-auto"
+            <span ptahBadge tone="accent" appearance="outline" size="xs" class="ml-auto"
               >Active</span
             >
           }
