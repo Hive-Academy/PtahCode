@@ -52,7 +52,12 @@ describe('WorkspaceSidebarComponent dev-only UI gallery link', () => {
   it('renders in the dev instance and navigates to /ui-gallery', () => {
     const { link, navigateByUrl } = render(true);
     expect(link?.textContent?.trim()).toBe('UI gallery');
-    expect(link?.hasAttribute('ptahbutton')).toBe(true);
+    // Raw on purpose: the owner stylesheet would override `justify-start` (left-aligned label).
+    expect(link?.hasAttribute('ptahbutton')).toBe(false);
+    expect(link?.hasAttribute('data-ptah-button')).toBe(false);
+    expect(link?.classList.contains('btn')).toBe(true);
+    expect(link?.classList.contains('btn-ghost')).toBe(true);
+    expect(link?.classList.contains('justify-start')).toBe(true);
     link?.click();
     expect(navigateByUrl).toHaveBeenCalledWith('/ui-gallery');
   });
