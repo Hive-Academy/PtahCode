@@ -7,6 +7,7 @@ import {
   inject,
   DestroyRef,
 } from '@angular/core';
+import { ClockService } from '@ptah-extension/core';
 import { TabManagerService } from '@ptah-extension/chat';
 import { SessionId } from '@ptah-extension/shared';
 import { AgentMonitorStore } from '@ptah-extension/chat-streaming';
@@ -89,10 +90,16 @@ export class CanvasStore {
   private readonly persistence = inject(CanvasLayoutPersistenceService);
   private readonly agentMonitor = inject(AgentMonitorStore);
   private readonly destroyRef = inject(DestroyRef);
-  private hiddenStatusInterval: ReturnType<typeof setInterval> | null = null;
+  private readonly clock = inject(ClockService);
+  private hiddenStatusRelease: (() => void) | null = null;
+  private hiddenStatusAcquirePending = false;
+  private destroyed = false;
 
   constructor() {
-    this.destroyRef.onDestroy(() => this.stopHiddenStatusInterval());
+    this.destroyRef.onDestroy(() => {
+      this.destroyed = true;
+      this.stopHiddenStatusPolling();
+    });
   }
 
   /**
@@ -106,7 +113,9 @@ export class CanvasStore {
   private readonly _workspaceTiles = signal<
     ReadonlyMap<string, readonly CanvasTile[]>
   >(new Map());
-  private readonly _workspaceBoard = signal<ReadonlyMap<string, CanvasBoardState>>(new Map());
+  private readonly _workspaceBoard = signal<
+    ReadonlyMap<string, CanvasBoardState>
+  >(new Map());
   private readonly _workspaceFocusedTabId = signal<
     ReadonlyMap<string, string | null>
   >(new Map());
@@ -156,6 +165,8 @@ export class CanvasStore {
   private readonly hiddenStatusTick = signal(0);
   private readonly runningSnapshot = computed(() => {
     this.hiddenStatusTick();
+    // While hidden tabs hold the cap, the shared clock wakes this snapshot.
+    if (this.hiddenStatusRelease) this.clock.now();
     // Running sessions in hidden workspaces still count toward the canvas cap.
     const activeTabs = this.tabManager.tabs();
     const activePath =
@@ -194,15 +205,13 @@ export class CanvasStore {
     );
     // Hidden workspace tabs are not signals, so a hidden turn that ends never
     // re-runs this. Poll only while the cap is reached because of them. This
-    // lives here, not in an effect: the store can be created inside a reactive
-    // context, where an effect cannot be created.
+    // The decision stays in this computed: callers can create the store inside
+    // a reactive context, and the shared clock only wakes this snapshot while
+    // hidden running tabs fill the cap.
     if (keys.size >= MAX_RUNNING_SESSIONS && hiddenRunning) {
-      this.hiddenStatusInterval ??= setInterval(() => {
-        this.hiddenStatusTick.update((tick) => tick + 1);
-        this.runningSnapshot();
-      }, 1000);
+      this.startHiddenStatusPolling();
     } else {
-      this.stopHiddenStatusInterval();
+      this.stopHiddenStatusPolling();
     }
     return { count: keys.size, keys, canvasTabs };
   });
@@ -224,10 +233,22 @@ export class CanvasStore {
       : null;
   }
 
-  private stopHiddenStatusInterval(): void {
-    if (this.hiddenStatusInterval === null) return;
-    clearInterval(this.hiddenStatusInterval);
-    this.hiddenStatusInterval = null;
+  private startHiddenStatusPolling(): void {
+    if (this.hiddenStatusRelease || this.hiddenStatusAcquirePending) return;
+    this.hiddenStatusAcquirePending = true;
+    queueMicrotask(() => {
+      if (!this.hiddenStatusAcquirePending || this.destroyed) return;
+      this.hiddenStatusAcquirePending = false;
+      this.hiddenStatusRelease = this.clock.acquire();
+      // Re-run the snapshot so that it starts to read the clock.
+      this.hiddenStatusTick.update((tick) => tick + 1);
+    });
+  }
+
+  private stopHiddenStatusPolling(): void {
+    this.hiddenStatusAcquirePending = false;
+    this.hiddenStatusRelease?.();
+    this.hiddenStatusRelease = null;
   }
 
   /**
@@ -262,12 +283,19 @@ export class CanvasStore {
   }
 
   setRailScrollTop(path: string, px: number): void {
-    this.updateBoard(path, { railScrollTop: Number.isFinite(px) ? Math.max(0, Math.round(px)) : 0 });
+    this.updateBoard(path, {
+      railScrollTop: Number.isFinite(px) ? Math.max(0, Math.round(px)) : 0,
+    });
   }
 
   private updateBoard(path: string, change: Partial<CanvasBoardState>): void {
     const current = this.boardFor(path);
-    if (Object.entries(change).every(([key, value]) => current[key as keyof CanvasBoardState] === value)) return;
+    if (
+      Object.entries(change).every(
+        ([key, value]) => current[key as keyof CanvasBoardState] === value,
+      )
+    )
+      return;
     setIn(this._workspaceBoard, path, { ...current, ...change });
     this.schedulePersist(path);
   }
@@ -465,7 +493,8 @@ export class CanvasStore {
         prev === IMPLICIT_WORKSPACE_PATH &&
         path !== IMPLICIT_WORKSPACE_PATH &&
         !this._workspaceTiles().has(path) &&
-        ((this._workspaceTiles().get(IMPLICIT_WORKSPACE_PATH)?.length ?? 0) > 0 ||
+        ((this._workspaceTiles().get(IMPLICIT_WORKSPACE_PATH)?.length ?? 0) >
+          0 ||
           this._workspaceBoard().has(IMPLICIT_WORKSPACE_PATH))
       ) {
         // First real workspace after bootstrap: carry implicit tiles over so
@@ -504,7 +533,11 @@ export class CanvasStore {
       (tiles.some((tile) => tile.tabId === activeTabId) ? activeTabId : null);
 
     setIn(this._workspaceTiles, path, tiles);
-    setIn(this._workspaceBoard, path, loaded.board ?? this._workspaceBoard().get(path) ?? DEFAULT_BOARD_STATE);
+    setIn(
+      this._workspaceBoard,
+      path,
+      loaded.board ?? this._workspaceBoard().get(path) ?? DEFAULT_BOARD_STATE,
+    );
     setIn(this._workspaceFocusedTabId, path, focused);
     const layoutFocus = this.layoutFocusTabIdFor(path);
     if (
@@ -609,13 +642,10 @@ export class CanvasStore {
   }
 
   private schedulePersist(workspacePath: string): void {
-    this.persistence.schedule(
-      workspacePath,
-      () => ({
-        tiles: this._workspaceTiles().get(workspacePath) ?? EMPTY_TILES,
-        board: this.boardFor(workspacePath),
-      }),
-    );
+    this.persistence.schedule(workspacePath, () => ({
+      tiles: this._workspaceTiles().get(workspacePath) ?? EMPTY_TILES,
+      board: this.boardFor(workspacePath),
+    }));
   }
 
   private clearFocusIf(tabId: string): void {
