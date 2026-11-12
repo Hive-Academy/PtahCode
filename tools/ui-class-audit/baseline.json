@@ -947,9 +947,21 @@
     "btn-outline": 1,
     "btn-sm": 1
   },
+  "libs/frontend/chat/src/lib/settings/ptah-ai/host-routing-setting.component.ts": {
+    "<dynamic>": 1,
+    "toggle": 1,
+    "toggle-success": 1,
+    "toggle-xs": 1
+  },
   "libs/frontend/chat/src/lib/settings/ptah-ai/lane-guards-settings.component.ts": {
     "btn": 1,
     "btn-sm": 1
+  },
+  "libs/frontend/chat/src/lib/settings/ptah-ai/lane-rotation-setting.component.ts": {
+    "<dynamic>": 1,
+    "toggle": 1,
+    "toggle-success": 1,
+    "toggle-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/local-stt-panel.component.ts": {
     "badge": 2,
