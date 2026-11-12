@@ -41,7 +41,11 @@ import { MemoryCuratorTabComponent } from '@ptah-extension/memory-curator-ui';
 import { SkillSynthesisTabComponent } from '@ptah-extension/skill-synthesis-ui';
 import { CronSchedulerTabComponent } from '@ptah-extension/cron-scheduler-ui';
 import { MessagingGatewayTabComponent } from '@ptah-extension/messaging-gateway-ui';
-import { MotionStageDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
+import {
+  MotionStageDirective,
+  PtahBadgeDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 
 /** Tab identifiers for the Thoth hub, in rail order. */
 export const THOTH_TAB_IDS = ['memory', 'skills', 'cron', 'gateway'] as const;
@@ -92,7 +96,10 @@ interface ThothTabSpec {
     SkillSynthesisTabComponent,
     CronSchedulerTabComponent,
     MessagingGatewayTabComponent,
-    MotionStageDirective, PtahIconButtonDirective,],
+    MotionStageDirective,
+    PtahBadgeDirective,
+    PtahIconButtonDirective,
+  ],
   template: `
     <div class="flex h-full w-full flex-col bg-surface-0 lg:flex-row">
       <aside
@@ -164,7 +171,10 @@ interface ThothTabSpec {
                 >
                 @if (status.paused) {
                   <span
-                    class="badge badge-warning badge-sm ml-auto text-xs font-medium"
+                    ptahBadge
+                    tone="warn"
+                    size="sm"
+                    class="ml-auto text-xs font-medium"
                     data-testid="thoth-tab-paused"
                     >Paused</span
                   >
@@ -192,9 +202,13 @@ interface ThothTabSpec {
                       track platform.platform
                     ) {
                       <span
-                        [class]="badgeClassFor(platform.state)"
+                        ptahBadge
+                        [tone]="badgeToneFor(platform.state)"
+                        size="xs"
                         [attr.title]="platform.lastError ?? platform.state"
-                        >{{ platform.platform }}</span
+                        ><span class="ptah-badge-text">{{
+                          platform.platform
+                        }}</span></span
                       >
                     }
                   </div>
@@ -221,29 +235,41 @@ interface ThothTabSpec {
         [id]="'thoth-panel-' + activeTab()"
         [attr.aria-labelledby]="'thoth-tab-' + activeTab()"
       >
-        <div
-          class="w-full"
-          ptahMotionStage
-          [motionIndex]="activeTabIndex()"
-        >
+        <div class="w-full" ptahMotionStage [motionIndex]="activeTabIndex()">
           @switch (activeTab()) {
             @case ('memory') {
-              <div class="ptah-motion-panel px-3 py-6 sm:px-4 lg:py-8" [animate.enter]="hasSwitchedTabs() ? 'ptah-motion-enter' : ''" animate.leave="ptah-motion-leave">
+              <div
+                class="ptah-motion-panel px-3 py-6 sm:px-4 lg:py-8"
+                [animate.enter]="hasSwitchedTabs() ? 'ptah-motion-enter' : ''"
+                animate.leave="ptah-motion-leave"
+              >
                 <ptah-memory-curator-tab (pausedChange)="onPausedChange()" />
               </div>
             }
             @case ('skills') {
-              <div class="ptah-motion-panel px-3 py-6 sm:px-4 lg:py-8" [animate.enter]="hasSwitchedTabs() ? 'ptah-motion-enter' : ''" animate.leave="ptah-motion-leave">
+              <div
+                class="ptah-motion-panel px-3 py-6 sm:px-4 lg:py-8"
+                [animate.enter]="hasSwitchedTabs() ? 'ptah-motion-enter' : ''"
+                animate.leave="ptah-motion-leave"
+              >
                 <ptah-skill-synthesis-tab (pausedChange)="onPausedChange()" />
               </div>
             }
             @case ('cron') {
-              <div class="ptah-motion-panel px-3 py-6 sm:px-4 lg:py-8" [animate.enter]="hasSwitchedTabs() ? 'ptah-motion-enter' : ''" animate.leave="ptah-motion-leave">
+              <div
+                class="ptah-motion-panel px-3 py-6 sm:px-4 lg:py-8"
+                [animate.enter]="hasSwitchedTabs() ? 'ptah-motion-enter' : ''"
+                animate.leave="ptah-motion-leave"
+              >
                 <ptah-cron-scheduler-tab />
               </div>
             }
             @case ('gateway') {
-              <div class="ptah-motion-panel px-3 py-6 sm:px-4 lg:py-8" [animate.enter]="hasSwitchedTabs() ? 'ptah-motion-enter' : ''" animate.leave="ptah-motion-leave">
+              <div
+                class="ptah-motion-panel px-3 py-6 sm:px-4 lg:py-8"
+                [animate.enter]="hasSwitchedTabs() ? 'ptah-motion-enter' : ''"
+                animate.leave="ptah-motion-leave"
+              >
                 <ptah-messaging-gateway-tab />
               </div>
             }
@@ -351,18 +377,20 @@ export class ThothShellComponent implements OnInit {
     void this.thothStatus.refreshPaused();
   }
 
-  /** daisyUI badge classes for a gateway platform's connection state. */
-  protected badgeClassFor(state: ThothGatewayBadge): string {
+  /** Badge tone for a gateway platform's connection state. */
+  protected badgeToneFor(
+    state: ThothGatewayBadge,
+  ): 'ok' | 'info' | 'err' | 'neutral' {
     switch (state) {
       case 'running':
-        return 'badge badge-success badge-xs';
+        return 'ok';
       case 'enabled':
-        return 'badge badge-info badge-xs';
+        return 'info';
       case 'error':
-        return 'badge badge-error badge-xs';
+        return 'err';
       case 'disabled':
       default:
-        return 'badge badge-ghost badge-xs';
+        return 'neutral';
     }
   }
 

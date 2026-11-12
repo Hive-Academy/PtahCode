@@ -36,12 +36,9 @@ import type {
 } from '../../services/tasks-store.service';
 import {
   TASK_ESTIMATE_LABELS,
-  TASK_STATUS_BADGE,
   TASK_STATUS_LABELS,
   isStartableStatus,
   labelChipClass,
-  taskEstimateBadge,
-  taskTypeBadge,
 } from '../../task-presentation';
 import { isTextEntryTarget } from '../keyboard-target';
 import type {
@@ -53,6 +50,7 @@ import type {
   TaskStartRequest,
 } from '../../types/task-agent.types';
 import {
+  PtahBadgeDirective,
   PtahButtonDirective,
   PtahCheckboxDirective,
   PtahIconButtonDirective,
@@ -62,7 +60,7 @@ import {
 interface TaskListGroup {
   readonly status: TaskStatus;
   readonly label: string;
-  readonly badgeClass: string;
+  readonly badgeTone: 'neutral' | 'info' | 'warn' | 'err' | 'ok';
   /** The WINDOW — what actually renders. See {@link PAGE_SIZE}. */
   readonly tasks: readonly TaskSpecSummary[];
   /** How many this group holds after filtering, before windowing. */
@@ -158,6 +156,7 @@ const MAX_VISIBLE_LABELS = 3;
   selector: 'ptah-task-list',
   standalone: true,
   imports: [
+    PtahBadgeDirective,
     PtahButtonDirective,
     PtahCheckboxDirective,
     PtahIconButtonDirective,
@@ -193,7 +192,7 @@ const MAX_VISIBLE_LABELS = 3;
                 class="h-3 w-3"
                 aria-hidden="true"
               />
-              <span class="badge badge-sm" [class]="group.badgeClass">{{
+              <span ptahBadge size="sm" [tone]="group.badgeTone">{{
                 group.label
               }}</span>
             </button>
@@ -336,7 +335,11 @@ const MAX_VISIBLE_LABELS = 3;
                              the signal, never the colour. -->
                         @if (outcomes().get(task.id); as outcome) {
                           <span
-                            class="badge badge-xs badge-outline shrink-0 gap-0.5 text-base-content"
+                            ptahBadge
+                            tone="neutral"
+                            size="xs"
+                            appearance="outline"
+                            class="shrink-0 gap-0.5 text-base-content"
                             [attr.data-testid]="'task-row-outcome-' + outcome"
                             [title]="outcomeTitle(task, outcome)"
                             [attr.aria-label]="outcomeTitle(task, outcome)"
@@ -381,8 +384,10 @@ const MAX_VISIBLE_LABELS = 3;
                         data-testid="task-row-meta"
                       >
                         <span
-                          class="badge badge-xs"
-                          [class]="typeClass(task)"
+                          ptahBadge
+                          size="xs"
+                          appearance="outline"
+                          [tone]="task.type ? 'neutral' : 'warn'"
                           data-testid="task-row-type"
                         >
                           {{ task.type ?? 'no type' }}
@@ -391,8 +396,15 @@ const MAX_VISIBLE_LABELS = 3;
                         @if (!compact()) {
                           @if (task.estimate; as estimate) {
                             <span
-                              class="badge badge-xs"
-                              [class]="estimateClass(estimate)"
+                              ptahBadge
+                              tone="neutral"
+                              size="xs"
+                              [appearance]="
+                                estimate === 'L' || estimate === 'XL'
+                                  ? 'soft'
+                                  : 'outline'
+                              "
+                              class="font-mono"
                               [title]="estimateTitle(estimate)"
                               data-testid="task-row-estimate"
                               >{{ estimate }}</span
@@ -409,7 +421,10 @@ const MAX_VISIBLE_LABELS = 3;
                           }
                           @if (hiddenLabelCount(task) > 0) {
                             <span
-                              class="badge badge-xs badge-ghost font-normal tabular-nums"
+                              ptahBadge
+                              tone="neutral"
+                              size="xs"
+                              class="font-normal tabular-nums"
                               [title]="hiddenLabelsTitle(task)"
                               [attr.aria-label]="hiddenLabelsTitle(task)"
                               data-testid="task-row-labels-overflow"
@@ -840,7 +855,16 @@ export class TaskListComponent {
       return {
         status: column.status,
         label,
-        badgeClass: TASK_STATUS_BADGE[column.status],
+        badgeTone:
+          column.status === 'in_progress'
+            ? 'info'
+            : column.status === 'in_review'
+              ? 'warn'
+              : column.status === 'blocked'
+                ? 'err'
+                : column.status === 'done'
+                  ? 'ok'
+                  : 'neutral',
         tasks: windowed,
         matched,
         shown: windowed.length,
@@ -894,16 +918,6 @@ export class TaskListComponent {
 
   protected statusLabel(status: TaskStatus): string {
     return TASK_STATUS_LABELS[status];
-  }
-
-  protected typeClass(task: TaskSpecSummary): string {
-    return taskTypeBadge(task.type);
-  }
-
-  protected estimateClass(
-    estimate: NonNullable<TaskSpecSummary['estimate']>,
-  ): string {
-    return taskEstimateBadge(estimate);
   }
 
   protected estimateTitle(

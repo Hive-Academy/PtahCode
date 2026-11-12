@@ -6,6 +6,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import type { AgentScorecard } from '@ptah-extension/shared';
+import { PtahBadgeDirective } from '@ptah-extension/ui';
 
 /**
  * ScorecardBadgeComponent — pure presentational atom.
@@ -23,17 +24,22 @@ import type { AgentScorecard } from '@ptah-extension/shared';
   selector: 'ptah-scorecard-badge',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule],
+  imports: [CommonModule, PtahBadgeDirective],
   template: `
     <div
       class="flex flex-wrap items-center gap-2 text-xs"
       data-testid="scorecard-badge"
     >
       <span
-        class="badge badge-sm"
-        [class.badge-success]="successTone() === 'good'"
-        [class.badge-error]="successTone() === 'bad'"
-        [class.badge-ghost]="successTone() === 'none'"
+        ptahBadge
+        size="sm"
+        [tone]="
+          successTone() === 'good'
+            ? 'ok'
+            : successTone() === 'bad'
+              ? 'err'
+              : 'neutral'
+        "
         [title]="successTitle()"
         data-testid="scorecard-success"
       >

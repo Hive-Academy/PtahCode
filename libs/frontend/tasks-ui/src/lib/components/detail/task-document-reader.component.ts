@@ -9,6 +9,7 @@ import { ExternalLink, LucideAngularModule, X } from 'lucide-angular';
 import { MarkdownBlockComponent } from '@ptah-extension/markdown';
 import type { TaskDocumentState } from '../../services/task-folder.store';
 import {
+  PtahBadgeDirective,
   PtahButtonDirective,
   PtahIconButtonDirective,
 } from '@ptah-extension/ui';
@@ -67,6 +68,7 @@ const STATE_REASONS: Record<
   selector: 'ptah-task-document-reader',
   standalone: true,
   imports: [
+    PtahBadgeDirective,
     PtahButtonDirective,
     PtahIconButtonDirective,
     LucideAngularModule,
@@ -91,10 +93,8 @@ const STATE_REASONS: Record<
         >
           {{ state().file }}
         </h3>
-        <span
-          class="badge badge-ghost badge-sm text-base-content"
-          data-testid="task-doc-state"
-          >{{ badge() }}</span
+        <span ptahBadge tone="neutral" size="sm" data-testid="task-doc-state"
+          ><span class="ptah-badge-text">{{ badge() }}</span></span
         >
         <span class="flex-1"></span>
         @if (editorAllowed()) {

@@ -1314,20 +1314,6 @@
     "btn-sm": 1,
     "btn-warning": 1
   },
-  "libs/frontend/skill-synthesis-ui/src/lib/components/clones/scorecard-badge.component.ts": {
-    "badge": 1,
-    "badge-error": 1,
-    "badge-ghost": 1,
-    "badge-sm": 1,
-    "badge-success": 1
-  },
-  "libs/frontend/skill-synthesis-ui/src/lib/components/clones/scorecard-detail.component.ts": {
-    "badge": 2,
-    "badge-error": 1,
-    "badge-ghost": 1,
-    "badge-success": 1,
-    "badge-xs": 2
-  },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/skill-clones-view.component.ts": {
     "alert": 4,
     "alert-error": 3,
@@ -1338,17 +1324,10 @@
     "btn-sm": 1,
     "btn-warning": 1
   },
-  "libs/frontend/skill-synthesis-ui/src/lib/components/skills-pause-switch.component.ts": {
-    "badge": 1,
-    "badge-sm": 1,
-    "badge-warning": 1
-  },
   "libs/frontend/tasks-ui/src/lib/components/board/task-card.component.ts": {
-    "<dynamic>": 4,
-    "badge": 8,
-    "badge-ghost": 4,
-    "badge-outline": 1,
-    "badge-xs": 8,
+    "<dynamic>": 2,
+    "badge": 1,
+    "badge-xs": 1,
     "btn": 2,
     "btn-primary": 2,
     "btn-square": 1,
@@ -1359,12 +1338,9 @@
     "<dynamic>": 2
   },
   "libs/frontend/tasks-ui/src/lib/components/board/task-list.component.ts": {
-    "<dynamic>": 4,
-    "badge": 6,
-    "badge-ghost": 1,
-    "badge-outline": 1,
-    "badge-sm": 1,
-    "badge-xs": 5
+    "<dynamic>": 1,
+    "badge": 1,
+    "badge-xs": 1
   },
   "libs/frontend/tasks-ui/src/lib/components/detail/task-activity.component.ts": {
     "<dynamic>": 1,
@@ -1374,9 +1350,9 @@
   },
   "libs/frontend/tasks-ui/src/lib/components/detail/task-detail-header.component.ts": {
     "<dynamic>": 1,
-    "badge": 3,
-    "badge-ghost": 3,
-    "badge-sm": 3
+    "badge": 1,
+    "badge-ghost": 1,
+    "badge-sm": 1
   },
   "libs/frontend/tasks-ui/src/lib/components/detail/task-detail.component.ts": {
     "<dynamic>": 1,
@@ -1384,9 +1360,6 @@
     "badge-sm": 1
   },
   "libs/frontend/tasks-ui/src/lib/components/detail/task-document-reader.component.ts": {
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-sm": 1,
     "skeleton": 4
   },
   "libs/frontend/tasks-ui/src/lib/components/detail/task-folder-files.component.ts": {
@@ -1394,10 +1367,7 @@
   },
   "libs/frontend/tasks-ui/src/lib/components/detail/task-folder-overview.component.ts": {
     "alert": 1,
-    "alert-warning": 1,
-    "badge": 1,
-    "badge-ghost": 1,
-    "badge-sm": 1
+    "alert-warning": 1
   },
   "libs/frontend/tasks-ui/src/lib/components/detail/task-metadata-editor.component.ts": {
     "<dynamic>": 1,
@@ -1408,11 +1378,6 @@
     "badge": 1,
     "badge-ghost": 1,
     "badge-outline": 1,
-    "badge-sm": 1
-  },
-  "libs/frontend/tasks-ui/src/lib/components/detail/task-run-placeholder.component.ts": {
-    "badge": 1,
-    "badge-ghost": 1,
     "badge-sm": 1
   },
   "libs/frontend/tasks-ui/src/lib/components/filter/task-filter-bar.component.ts": {
@@ -1442,10 +1407,7 @@
     "badge-ghost": 2
   },
   "libs/frontend/thoth-shell/src/lib/components/thoth-shell.component.ts": {
-    "<dynamic>": 2,
-    "badge": 1,
-    "badge-sm": 1,
-    "badge-warning": 1
+    "<dynamic>": 1
   },
   "libs/frontend/workspace-indexing/src/lib/workspace-indexing.component.html": {
     "alert": 7,

@@ -8,7 +8,7 @@ import {
 import { ExternalLink, LucideAngularModule } from 'lucide-angular';
 import { MarkdownBlockComponent } from '@ptah-extension/markdown';
 import { CARRIER_FILE, type TaskSpecDetail } from '@ptah-extension/shared';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
 
 /**
  * The carrier overview: what the machine-owned `task.md` says about the task,
@@ -24,7 +24,12 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
 @Component({
   selector: 'ptah-task-folder-overview',
   standalone: true,
-  imports: [PtahButtonDirective, LucideAngularModule, MarkdownBlockComponent],
+  imports: [
+    PtahBadgeDirective,
+    PtahButtonDirective,
+    LucideAngularModule,
+    MarkdownBlockComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -41,9 +46,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
         >
           {{ carrierFile }}
         </h3>
-        <span class="badge badge-ghost badge-sm text-base-content"
-          >Machine-owned carrier</span
-        >
+        <span ptahBadge tone="neutral" size="sm">Machine-owned carrier</span>
         <span class="flex-1"></span>
         @if (carrierOpenable()) {
           <button

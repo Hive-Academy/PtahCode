@@ -11,7 +11,7 @@ import {
   untracked,
 } from '@angular/core';
 
-import { PtahToggleDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahToggleDirective } from '@ptah-extension/ui';
 
 import { SkillSynthesisStateService } from '../services/skill-synthesis-state.service';
 
@@ -33,7 +33,7 @@ import { SkillSynthesisStateService } from '../services/skill-synthesis-state.se
   selector: 'ptah-skills-pause-switch',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PtahToggleDirective],
+  imports: [PtahBadgeDirective, PtahToggleDirective],
   template: `
     <section
       class="flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3"
@@ -57,7 +57,10 @@ import { SkillSynthesisStateService } from '../services/skill-synthesis-state.se
           </label>
           @if (paused() && !saving()) {
             <span
-              class="badge badge-warning badge-sm text-xs font-medium"
+              ptahBadge
+              tone="warn"
+              size="sm"
+              class="text-xs font-medium"
               data-testid="skills-pause-state"
               >Paused</span
             >

@@ -114,8 +114,8 @@ describe('ScorecardBadgeComponent', () => {
     const el = render(scorecard({ gradedSuccessRate: Number.NaN }));
     const badge = el.querySelector('[data-testid="scorecard-success"]');
     expect(badge?.textContent?.trim()).toBe('No grade');
-    expect(badge?.classList.contains('badge-ghost')).toBe(true);
-    expect(badge?.classList.contains('badge-success')).toBe(false);
-    expect(badge?.classList.contains('badge-error')).toBe(false);
+    expect(badge?.getAttribute('data-tone')).toBe('neutral');
+    expect(badge?.getAttribute('data-tone')).not.toBe('ok');
+    expect(badge?.getAttribute('data-tone')).not.toBe('err');
   });
 });

@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
+import { PtahBadgeDirective } from '@ptah-extension/ui';
 
 /** The task that will own the Ptah multi-stage runner (Phase 2). */
 export const TASK_RUN_PHASE_2_TASK_ID = 'TASK_2026_358';
@@ -14,6 +15,7 @@ export const TASK_RUN_PHASE_2_TASK_ID = 'TASK_2026_358';
 @Component({
   selector: 'ptah-task-run-placeholder',
   standalone: true,
+  imports: [PtahBadgeDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -27,7 +29,7 @@ export const TASK_RUN_PHASE_2_TASK_ID = 'TASK_2026_358';
         class="flex flex-wrap items-center gap-2 text-sm font-semibold text-base-content"
       >
         Run
-        <span class="badge badge-ghost badge-sm font-normal"
+        <span ptahBadge tone="neutral" size="sm"
           >Planned for Phase 2 · {{ phase2TaskId }}</span
         >
       </h3>

@@ -28,7 +28,7 @@ import { TASK_STATUS_LABELS, isStartableStatus } from '../../task-presentation';
 import { TASK_STATUS_INK, deriveTaskStage } from '../../task-stage';
 import type { TaskStartRequest } from '../../types/task-agent.types';
 import type { TaskStatusChange } from '../board/task-card.component';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
 
 /** Makes each header's `aria-controls` target unique on the page. */
 let nextMenuId = 0;
@@ -55,7 +55,7 @@ let nextMenuId = 0;
 @Component({
   selector: 'ptah-task-detail-header',
   standalone: true,
-  imports: [PtahButtonDirective, LucideAngularModule],
+  imports: [PtahButtonDirective, PtahBadgeDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     '(keydown.escape)': 'onEscape($event)',
@@ -188,15 +188,17 @@ let nextMenuId = 0;
             >{{ statusLabels[task.status] }}</span
           >
           @if (task.type) {
-            <span class="badge badge-ghost badge-sm text-base-content">{{
-              task.type
-            }}</span>
+            <span ptahBadge tone="neutral" size="sm">
+              <span class="ptah-badge-text">{{ task.type }}</span>
+            </span>
           }
           @if (stage(); as stage) {
             <span
-              class="badge badge-ghost badge-sm text-base-content"
+              ptahBadge
+              tone="neutral"
+              size="sm"
               data-testid="task-detail-stage"
-              >{{ stage }}</span
+              ><span class="ptah-badge-text">{{ stage }}</span></span
             >
           }
         </div>
