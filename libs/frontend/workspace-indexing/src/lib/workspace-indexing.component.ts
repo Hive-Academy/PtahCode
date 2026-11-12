@@ -38,13 +38,19 @@ import {
   formatDuration,
   formatRelative,
   PtahButtonDirective,
+  PtahMeterComponent,
   PtahToggleDirective,
 } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-workspace-indexing',
   standalone: true,
-  imports: [LucideAngularModule, PtahButtonDirective, PtahToggleDirective],
+  imports: [
+    LucideAngularModule,
+    PtahButtonDirective,
+    PtahMeterComponent,
+    PtahToggleDirective,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './workspace-indexing.component.html',
   styleUrl: './workspace-indexing.component.scss',

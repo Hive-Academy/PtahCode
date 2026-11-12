@@ -1,4 +1,4 @@
-import { formatDuration, toIsoDuration } from './format-duration';
+import { formatDuration, splitDuration, toIsoDuration } from './format-duration';
 
 describe('formatDuration', () => {
   it.each([
@@ -38,5 +38,16 @@ describe('formatDuration', () => {
     expect(toIsoDuration(75_400)).toBe('PT75S');
     expect(toIsoDuration(-1)).toBe('PT0S');
     expect(toIsoDuration(Number.NaN)).toBeNull();
+  });
+});
+
+describe('splitDuration', () => {
+  it('splits into whole days, hours, minutes and seconds', () => {
+    expect(splitDuration(93_784_900)).toEqual({ days: 1, hours: 2, minutes: 3, seconds: 4 });
+  });
+
+  it('gives zeros for a negative value and null for NaN', () => {
+    expect(splitDuration(-5)).toEqual({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+    expect(splitDuration(Number.NaN)).toBeNull();
   });
 });

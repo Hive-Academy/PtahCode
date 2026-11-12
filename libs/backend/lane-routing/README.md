@@ -2,6 +2,12 @@
 
 Host-neutral decision-model lane routing.
 
+The phase contract accepts 12 kinds, including `batch` and `completion`. These two
+kinds use lane candidates when available; with no lane or explicit role, the
+roster marks them unavailable for orchestrator execution. `resolvePhaseDefinition`
+strictly parses a caller-supplied phase document and returns its discipline and
+tool profile without invoking an executor.
+
 This library holds the route-decision tokens, the routing thresholds, the route service and the
 structural logger the hosts pass in. It may import only `@ptah-extension/shared` and
 `@ptah-extension/platform-core`. It does not import `@ptah-extension/vscode-core`.

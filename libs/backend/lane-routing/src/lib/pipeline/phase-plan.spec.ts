@@ -1,6 +1,6 @@
 import { toSubagentCandidate } from '../ranking/candidate.types';
 import type { PhasePlan } from './phase-plan';
-import { laneQuestion } from './phase-plan';
+import { BUILTIN_SUBAGENT_ROLES, laneQuestion } from './phase-plan';
 import { isSendable, resolvePhase } from './phase-resolve';
 import { TASK_TYPES } from '@ptah-extension/shared';
 import type { GatheredCall } from './gather';
@@ -20,6 +20,16 @@ function plan(scores: readonly number[]): PhasePlan {
     })),
   };
 }
+
+it('returns no decision options for an empty ranked list', () => {
+  expect(laneQuestion(plan([]))).toMatchObject({ primaryCount: 0, options: [] });
+  expect(isSendable(plan([]))).toBe(false);
+});
+
+it('preserves the built-in alias set', () => {
+  expect(BUILTIN_SUBAGENT_ROLES.size).toBe(9);
+  expect([...BUILTIN_SUBAGENT_ROLES].every((role) => role.length > 0)).toBe(true);
+});
 
 it('offers only the five-point band to the decision model', () => {
   const phase = plan([80, 76, 70]);

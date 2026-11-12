@@ -404,6 +404,44 @@ describe('WorkspaceIndexingComponent', () => {
     }
   });
 
+  async function renderIndexing(totalKnown: boolean, percent: number) {
+    const fixture = setup();
+    await fixture.whenStable();
+    TestBed.inject(WorkspaceIndexingService).handleMessage({
+      type: 'indexing:progress',
+      payload: {
+        pipeline: 'symbols',
+        percent,
+        currentLabel: 'src/foo.ts',
+        elapsedMs: 100,
+        totalKnown,
+      } satisfies IndexingProgressEvent,
+    });
+    fixture.detectChanges();
+    return fixture.nativeElement as HTMLElement;
+  }
+
+  it('renders a determinate ptah-meter with a labelled progressbar', async () => {
+    const root = await renderIndexing(true, 42);
+    expect(root.querySelector('[data-testid="progress-indeterminate"]')).toBeNull();
+    const host = root.querySelector('[data-testid="progress-determinate"]');
+    expect(host?.tagName.toLowerCase()).toBe('ptah-meter');
+    const bar = host?.querySelector('[role="progressbar"]');
+    expect(bar?.getAttribute('aria-label')).toBe('Indexing progress');
+    expect(bar?.getAttribute('aria-valuenow')).toBe('42');
+    expect(bar?.getAttribute('aria-valuetext')).toBe('42%');
+  });
+
+  it('renders an indeterminate ptah-meter without aria-valuenow', async () => {
+    const root = await renderIndexing(false, 10);
+    expect(root.querySelector('[data-testid="progress-determinate"]')).toBeNull();
+    const host = root.querySelector('[data-testid="progress-indeterminate"]');
+    expect(host?.tagName.toLowerCase()).toBe('ptah-meter');
+    const bar = host?.querySelector('[role="progressbar"]');
+    expect(bar?.getAttribute('aria-label')).toBe('Indexing progress');
+    expect(bar?.hasAttribute('aria-valuenow')).toBe(false);
+  });
+
   it('shortSha truncates to 7 chars', () => {
     const fixture = setup();
     const cmp = fixture.componentInstance;

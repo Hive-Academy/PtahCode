@@ -306,6 +306,8 @@ function unavailableEntry(plan: PhasePlan, reason: string): UnavailableEntry {
   if (plan.constraint.status !== 'unavailable') {
     throw new Error(`phase ${plan.phaseId} constraint is not unavailable`);
   }
+  const orchestratorPhase = (plan.kind === 'batch' || plan.kind === 'completion') &&
+    plan.constraint.exclusionReason === 'no-eligible-candidate' && !plan.hasExplicitRole;
   return {
     phaseId: plan.phaseId,
     status: 'unavailable',
@@ -323,7 +325,9 @@ function unavailableEntry(plan: PhasePlan, reason: string): UnavailableEntry {
     score: null,
     confidence: null,
     fallbackCause: null,
-    reason,
+    reason: orchestratorPhase
+      ? `${reason}; No executor; the orchestrator does this phase${plan.constraint.excluded.length ? ` (excluded: ${plan.constraint.excluded.map(item => `${item.candidate}:${item.rule}`).join(', ')})` : ''}`
+      : reason,
   };
 }
 

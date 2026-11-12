@@ -1,112 +1,69 @@
-# Agent Catalog
+# Phase Catalog
 
-The specialist subagents, how to pick one, and the one invocation shape they all share. Whether an
-agent's work may run on a CLI lane instead is in [lane-assignment.md](lane-assignment.md).
+The active contract uses phase kinds. Read `../phases/<kind>.md` for each kind's inputs, deliverable, verdict, acceptance step, tool profile and discipline. User-authored agent files remain available by explicit `phase.role` selection; keep their file paths and existing membership checks. [Lane assignment](lane-assignment.md) selects the executor for a kind.
 
----
+## Phase kinds
 
-## Capability matrix
+| Kind | Purpose and typical output |
+| --- | --- |
+| `plan` | Requirements in `task-description.md`; include the user's words and required skills. |
+| `architecture` | Technical plan in `implementation-plan.md`; use inventory-only mode to read old code and write `parity-inventory.md` before design where required. |
+| `batch` | Decompose approved work into `batches.md`, with required skills in each entry and executor prompt. |
+| `implement` | Code and evidence per batch for backend, frontend or infrastructure; read the batch, plan and conventions. For BUGFIX, read `task.md`, `context.md` and available research. Do not edit `batches.md`. UI lanes with browser tools render and screenshot their changes. |
+| `review` | Independent logic and style review, including the combined diff and any new public API. Outputs include `code-logic-review.md` and `code-style-review.md`. |
+| `document-review` | Cross-side artifact verdict before the plan, design or architecture gate. |
+| `research` | Compare technical options in `research-report.md`; after QA, record follow-up improvements and debt in `future-enhancements.md`. |
+| `tests` | Write and run tests; record evidence in `test-report.md`. |
+| `docs` | Design-integrated content in `content-specification.md`, using the project design system. |
+| `visual-review` | Render UI and compare dark and light screenshots with the approved prototype, or before/after screenshots when no new surface is designed. Write `visual-review.md` and `screenshots/`. |
+| `design` | Discover constraints and produce `design-spec.md` and `prototype/` with `README.md` and screenshots. Revise through Gate 1.7. |
+| `completion` | Audit parity, accepted reviews and gates before presenting QA choices. |
 
-| Agent                    | Write Code | Design | Review | Plan  | Research | Content | Browser | CLI Delegation |
-| ------------------------ | :--------: | :----: | :----: | :---: | :------: | :-----: | :-----: | :------------: |
-| project-manager          |     -      |   -    |   -    | **P** |    S     |    -    |    -    |       S        |
-| software-architect       |     -      | **P**  |   S    | **P** |    S     |    -    |    -    |       S        |
-| team-leader              |     -      |   -    |   S    | **P** |    -     |    -    |    -    |       -        |
-| backend-developer        |   **P**    |   S    |   -    |   -   |    -     |    -    |    -    |       S        |
-| frontend-developer       |   **P**    |   S    |   -    |   -   |    -     |    -    |    -    |       S        |
-| devops-engineer          |   **P**    |   S    |   -    |   -   |    S     |    -    |    -    |       S        |
-| senior-tester            |   **P**    |   -    | **P**  |   -   |    -     |    -    |    -    |     **P**      |
-| code-style-reviewer      |     -      |   -    | **P**  |   -   |    -     |    -    |    -    |       S        |
-| code-logic-reviewer      |     -      |   -    | **P**  |   -   |    -     |    -    |    -    |       S        |
-| visual-reviewer          |     -      |   -    | **P**  |   -   |    -     |    -    |  **P**  |       -        |
-| researcher-expert        |     -      |   -    |   -    |   -   |  **P**   |    S    |    -    |     **P**      |
-| modernization-detector   |     -      |   -    |   S    |   -   |  **P**   |    -    |    -    |       S        |
-| ui-ux-designer           |     -      | **P**  |   -    |   S   |    -     |    S    |    -    |       -        |
-| technical-content-writer |     -      |   S    |   -    |   -   |    -     |  **P**  |    -    |       S        |
+## Selection
 
-**P** = primary, **S** = secondary, **-** = not applicable.
+| Request | Phase path |
+| --- | --- |
+| Implement feature | `plan` -> [inventory -> `design` -> prototype -> Gate 1.7] -> `architecture` -> `batch` -> `implement` -> `tests` / `review` |
+| Fix bug | [`research`] -> `batch` -> `implement` -> `tests` / `review` |
+| Research | `research` -> [`architecture`] |
+| Review style or logic | `review` |
+| Review rendered UI | `visual-review` |
+| Test | `tests` |
+| Architecture | `architecture` |
+| Landing page | `design` -> prototype -> Gate 1.7 -> `docs` -> `implement` |
+| Brand or visual | `design` -> prototype -> Gate 1.7 |
+| Content | `docs` |
+| Infrastructure | `plan` -> `architecture` -> `batch` -> `implement` -> `tests` |
 
-**CLI Delegation**: **P** benefits most from CLI lanes (parallel analysis, per-module tests, multi-file reviews); **S** delegates occasional sub-tasks; **-** never spawns a lane — team-leader (recommends lanes in `batches.md`, never spawns them), visual-reviewer (needs browser tools) and ui-ux-designer (needs interactive discovery). Rules: [lane-assignment.md](lane-assignment.md).
-
-## Selection matrix
-
-| Request        | Agent path                                                                          |
-| -------------- | ----------------------------------------------------------------------------------- |
-| Implement X    | project-manager → [designer → prototype → Gate 1.7] → architect → team-leader → dev |
-| Fix bug        | team-leader → dev → test → review                                                   |
-| Research X     | researcher-expert → architect                                                       |
-| Review style   | code-style-reviewer                                                                 |
-| Review logic   | code-logic-reviewer                                                                 |
-| Review visual  | visual-reviewer                                                                     |
-| Test X         | senior-tester                                                                       |
-| Architecture   | software-architect                                                                  |
-| Landing page   | ui-ux-designer → prototype → Gate 1.7 → technical-content-writer                    |
-| Brand / visual | ui-ux-designer → prototype → Gate 1.7                                               |
-| Content        | technical-content-writer                                                            |
-| Infrastructure | devops-engineer                                                                     |
-
-These paths include the conditional inventory → design → Gate 1.7 steps in
-[SKILL.md](../SKILL.md#task-folder) before the next phase when UI is added/redesigned.
-
----
+These paths retain the conditional inventory, cross-side design review and Gate 1.7 in [SKILL.md](../SKILL.md#task-folder). Choose eligible live executors by capability and availability. Phase definitions are the source of discipline; the appendix below records old aliases and their original details for compatibility.
 
 ## Invocation
 
-Every agent is invoked with one shape. Subagents have no UI channel: an agent not told where to
-write may answer inline and skip the file.
+Invoke a chosen executor with a self-contained prompt, absolute task folder, required skill ids from the host list (or none), context and an absolute deliverable path. Require the deliverable on disk and a `WROTE: <absolute path>` reply with a one-line verdict. Subagents have no UI channel and may answer inline if no path is given. For `design`, require both `design-spec.md` and `prototype/` (including `README.md` and `screenshots/`) and a separate confirmation for each. For a user-authored agent, keep the existing `Task({ subagent_type: '<agent-file-name>', description, prompt })` shape and explicit role membership check.
 
-```typescript
+For built-in subagents use the existing invocation shape:
+
+```ts
 Task({
-  subagent_type: '<agent>',
-  description: '<description from the table> for TASK_[ID]',
+  subagent_type: '<legacy alias>',
+  description: '<bounded phase task>',
   prompt: `You are <agent> for TASK_[ID].
-
-**Task Folder**: <absolute path to .ptah/specs/TASK_[ID]>
-Required Skills: <skill ids from the host's skill list (load when the host lists it), or none>
-<context lines from the table>
-**Deliverable**: Write your output to \`<absolute task folder>/<deliverable>\` with the Write tool. Do NOT return content inline. After writing, reply with \`WROTE: <absolute path>\` plus the one-line headline of your verdict. Nothing else.
-
-<instruction from the table>`,
-});
+**Task Folder**: <absolute path>
+Phase kind: <kind>
+Required Skills: <listed ids or none>
+Read: <absolute inputs>
+**Deliverable**: <absolute deliverable>. Write it with the Write tool. Do NOT return content inline.
+Reply WROTE: <absolute path> and one-line verdict.`,
+})
 ```
 
-For `ui-ux-designer`, replace the single-deliverable line with **Deliverables** naming two
-absolute paths: `<absolute task folder>/design-spec.md` and `<absolute task folder>/prototype/`
-(including `README.md` and `screenshots/`). Require both outputs on disk and a separate
-`WROTE: <absolute path>` confirmation for each, plus the one-line headline.
-
-| Agent                    | `description`                          | Context lines                                                                                                                                       | Deliverable                                                      | Instruction                                                                                                                                                                                                                          |
-| ------------------------ | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| project-manager          | Create requirements                    | `**User Request**: "<the user's words>"`<br>`Required Skills: <skill ids or none>`                                                                  | `task-description.md`                                            | Analyze the request and write the requirements.                                                                                                                                                                                      |
-| software-architect       | Design implementation / inventory only | `**Requirements**: task-description.md (inventory-only: task.md + context.md)`<br>`**Mode**: plan or inventory-only`<br>`Required Skills: <skill ids or none>` | `implementation-plan.md` (inventory-only: `parity-inventory.md`) | Design the technical implementation plan and write `Required Skills:` for downstream phases; inventory-only mode reads OLD code and writes only the parity inventory before design.                                                  |
-| team-leader              | Decompose / verify / complete          | `**MODE**: 1 - DECOMPOSITION` (or 2, 3) — see [team-leader-modes.md](team-leader-modes.md)<br>`Required Skills: <skill ids or none>`                | `batches.md`                                                     | Per mode; write `Required Skills:` into every batch entry, `Task()` prompt and `ptah_agent_spawn` task.                                                                                                                              |
-| backend-developer        | Implement Batch N                      | `**Batch**: Batch N in batches.md (IN_PROGRESS)`<br>`**Plan**: implementation-plan.md, or for a BUGFIX task.md + context.md (+ research-report.md)`<br>`Required Skills: <skill ids or none>` | code + report                                                    | Load listed `Required Skills:` when the host lists them; report each task's completion with evidence; do not edit batches.md; the team-leader records state.                                                                         |
-| frontend-developer       | Implement Batch N                      | `**Batch**: Batch N in batches.md (IN_PROGRESS)`<br>`**Plan**: implementation-plan.md, or for a BUGFIX task.md + context.md (+ research-report.md)`<br>`Required Skills: <skill ids or none>` | code + report                                                    | Load listed `Required Skills:` when the host lists them; report each task's completion with evidence; do not edit batches.md; the team-leader records state. Check the lane's tool list when the batch runs on a lane; lanes that have `ptah_browser_*` render and screenshot their own UI. |
-| devops-engineer          | Implement infrastructure               | `**Plan**: implementation-plan.md`<br>`Required Skills: <skill ids or none>`                                                                        | code + report                                                    | Load listed `Required Skills:` when the host lists them and implement the infrastructure changes.                                                                                                                                    |
-| senior-tester            | Test implementation                    | `**Changes**: batches.md`<br>`**Plan**: implementation-plan.md, or for a BUGFIX task.md + context.md (+ research-report.md)`<br>`Required Skills: <skill ids or none>` | `test-report.md`                                                 | Write and run the tests; record the results.                                                                                                                                                                                         |
-| code-style-reviewer      | Review code style                      | `**Changes**: batches.md`<br>`Required Skills: <skill ids or none>`                                                                                 | `code-style-review.md`                                           | Review for style, patterns and consistency.                                                                                                                                                                                          |
-| code-logic-reviewer      | Review code logic                      | `**Changes**: batches.md`<br>`**Plan**: implementation-plan.md, or for a BUGFIX task.md + context.md (+ research-report.md)`<br>`Required Skills: <skill ids or none>` | `code-logic-review.md`                                           | Review for logic completeness and correctness.                                                                                                                                                                                       |
-| visual-reviewer          | Visual review                          | `**Changes**: batches.md (frontend files)`<br>`**Base URL**: <running app URL>`<br>`Required Skills: <skill ids or none>`                           | `visual-review.md` + `screenshots/`                              | Run the visual review checklist below.                                                                                                                                                                                               |
-| researcher-expert        | Research X                             | `**Research Question**: "<the question>"`<br>`Required Skills: <skill ids or none>`                                                                 | `research-report.md`                                             | Compare the options, recommend one.                                                                                                                                                                                                  |
-| modernization-detector   | Analyze future improvements            | `**Changes**: batches.md`<br>`Required Skills: <skill ids or none>`                                                                                 | `future-enhancements.md`                                         | Find follow-up improvements and tech debt.                                                                                                                                                                                           |
-| ui-ux-designer           | Create design and prototype            | `**Goal**: <what to design>`<br>`**Parity**: parity-inventory.md when required`<br>`Required Skills: ui-ux-designer`                                | `design-spec.md` + `prototype/`                                  | Load `ui-ux-designer` when the host lists it; run niche discovery, build the design system and prototype (README.md + screenshots/); disclose lane-introduced constraints; revise until Gate 1.7 is approved. The visual-reviewer still gives the independent dark+light evidence. |
-| technical-content-writer | Create content                         | `**Design System**: the project's design system in docs/design-system/`<br>`**Goal**: <what to write>`<br>`Required Skills: technical-content-writer` | `content-specification.md`                                       | Load `technical-content-writer` when the host lists it and write design-integrated content.                                                                                                                                          |
-
-The designer owns `<taskFolder>/prototype/`. Any flow adding or redesigning UI runs
-designer → prototype → cross-side review → Gate 1.7 before the next phase of the flow (architect, team-leader, or content writer).
-Hand off the approved prototype as the visual source of truth. Complete the old-code parity
-inventory before design when required, using the inventory-only handoff in
-[SKILL.md](../SKILL.md#task-folder) for flows without a PM.
+Only the orchestrator acceptance step records states in `batches.md`; specialists do not edit `task.md` or `batches.md`. The design phase owns `<taskFolder>/prototype/`; inventory, design, cross-side review and Gate 1.7 precede the next phase when UI is added or redesigned. For final QA, run the selected `tests`, `review` and rendered-UI `visual-review` invocations in parallel where independent. Independent file-disjoint implementation batches may also run in parallel, one executor each.
 
 ### Skill routing
 
-The architect and the team-leader must put a `Required Skills:` line (skill ids, or `none`) in
-every phase brief, `Task()` prompt and `ptah_agent_spawn` task, chosen from the skills the host
-lists whose descriptions match the batch's stack and layer. Every skill is optional per workspace
-and loaded only when the host lists it; a role must never stop work because an optional skill is
-absent.
+The orchestrator and `architecture`/`batch` phases put `Required Skills:` (listed ids or `none`) in each brief and executor prompt. Load matching listed skills; an absent optional skill does not block work.
 
-| Stack / layer cue | Candidate skill id(s) (load when the host lists it) |
+| Stack / layer cue | Candidate skill id(s) |
 | --- | --- |
 | Domain modeling, bounded contexts, aggregates, CQRS | `ddd-architecture` |
 | Behavior-preserving refactor, file splitting, deduplication | `humanize-library` |
@@ -132,61 +89,42 @@ absent.
 
 ### Document review
 
-You invoke the reviewer after the author returns ([checkpoints.md § Cross-side review protocol](checkpoints.md#cross-side-review-protocol)).
-It is not a code-logic-reviewer invocation: use a role only if its output contract allows
-`<artifact-stem>-review.md`; otherwise a generic subagent, or a CLI lane without `role`, with the
-contract below. If the chosen side cannot supply one, use the agent-lanes §6 fallback.
+Use a role only if its output contract allows `<artifact-stem>-review.md`; otherwise use a generic subagent or a CLI lane without `role`. Supply absolute paths to the artifact, the user's exact request, project rules, prior approved artifacts and `parity-inventory.md` where applicable; for design also supply `prototype/` and screenshots. A CLI lane declares the same review path in `deliverables`.
 
-Supply absolute paths to the artifact, the user's exact request, project rules, prior approved
-artifacts and `parity-inventory.md` when it applies; for a design, `prototype/` and its screenshots.
-Read-only on source and artifacts; write only `<artifact-stem>-review.md`. Require: APPROVED /
-REVISE; each requirement traced to the artifact section that meets it (a missing one cites its
-source); lane-introduced constraints; parity deltas; feasibility evidence; numbered findings with
-`file:line`; the review-state fields; `WROTE: <absolute path>` plus a headline. A CLI lane declares
-the same path in `deliverables`.
-
-**Visual review checklist** (spell it out in the visual-reviewer prompt):
-
-1. Test six viewports: 320, 375, 768, 1024, 1366, 1920.
-2. Screenshot each viewport into `screenshots/`.
-3. Test hover, focus and active states.
-4. Check color contrast ratios.
-5. Check touch target sizes.
-6. Test responsive behavior between the breakpoints.
-7. Compare dark + light theme screenshots with the approved `<taskFolder>/prototype/`. When no prototype is required (a UI change that adds or redesigns no surface), capture dark + light screenshots of the affected screen at the base commit (before) and at the fixed state (after), and compare those. The visual-reviewer prompt must supply both inputs: the base-commit capture or a running app at the base commit, and the running app with the fix. Show evidence to the user before merge.
-
-Check the lane's tool list; lanes that have `ptah_browser_*` render and screenshot their own UI; the visual-reviewer still gives the independent dark+light evidence.
-
----
-
-## Profiles
-
-| Agent                    | Invoked when                                                                                                                                             | Reads                                                                              | Runs alongside                                             |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| project-manager          | FEATURE / DOCUMENTATION / DEVOPS phase 1, or unclear scope                                                                                               | request, `context.md`                                                              | —                                                          |
-| software-architect       | After PM; REFACTORING / DEVOPS; architectural decision needed; inventory-only before design when required, plan after any required Gate 1.7              | `task-description.md`, research; inventory-only: `task.md`, `context.md`, OLD code | —                                                          |
-| team-leader              | After architect (BUGFIX: after init/research and any required design gate) (Mode 1), after each executor or reviewer (Mode 2), all batches done (Mode 3) | plan (BUGFIX: `task.md`, `context.md`), `batches.md`, reports                      | —                                                          |
-| backend-developer        | A batch of server-side work                                                                                                                              | `batches.md`, plan, project conventions                                            | frontend-developer on a different batch                    |
-| frontend-developer       | A batch of UI work                                                                                                                                       | `batches.md`, plan, design spec                                                    | backend-developer on a different batch                     |
-| devops-engineer          | DEVOPS implementation; pipelines, containers, publishing                                                                                                 | plan, existing pipeline and container files                                        | —                                                          |
-| senior-tester            | Gate 3 `tester` / `all`                                                                                                                                  | `batches.md`, plan, changed files                                                  | reviewers                                                  |
-| code-style-reviewer      | Gate 3 `style` / `reviewers` / `all`; DOCUMENTATION final check                                                                                          | changed files, style rules                                                         | tester, other reviewers                                    |
-| code-logic-reviewer      | Gate 3 `logic` / `reviewers` / `all`; team-leader `NEEDS REVIEW`                                                                                         | changed files, plan                                                                | tester, other reviewers                                    |
-| visual-reviewer          | UI batch evidence; Gate 3 `visual` for rendered UI                                                                                                       | changed UI files, running app, approved prototype                                  | tester, other reviewers                                    |
-| researcher-expert        | Technical unknowns, BUGFIX with unknown cause, RESEARCH                                                                                                  | question, `context.md`, external docs                                              | —                                                          |
-| modernization-detector   | Final phase, after QA                                                                                                                                    | `batches.md`, changed files                                                        | —                                                          |
-| ui-ux-designer           | CREATIVE; any flow with added/redesigned UI, after required inventory                                                                                    | brand input, references, `context.md`, parity inventory                            | — (prototype + Gate 1.7 before the next phase of the flow) |
-| technical-content-writer | CREATIVE after the design system exists; blogs, docs, scripts                                                                                            | the project's design system (docs/design-system/), brief, source                   | other content-writer instances                             |
-
-Only the team-leader sets task states in `batches.md`. Specialists never edit `task.md` or `batches.md`.
+After an artifact returns, the orchestrator invokes an independent cross-side `document-review` before its gate. Supply absolute paths to the artifact, exact user request, project rules, prior approved artifacts, and parity inventory where applicable; for design, include prototype and screenshots. Read-only on source and artifacts; write only `<artifact-stem>-review.md`. Require APPROVED or REVISE, each requirement traced to an artifact section (missing items cite their source), lane-introduced constraints, parity deltas, feasibility evidence, numbered `file:line` findings, review-state fields, `WROTE: <absolute path>` and headline. A CLI lane declares that path in `deliverables`. Use the cross-side fallback rule when needed. The reviewer must not silently weaken requirements. A REVISE verdict goes back for one bounded revision and re-review. Record reviewer family and any weaker-evidence fallback.
 
 ## Parallel QA
 
-Send parallel invocations in one message.
+| Choice | Independent phase invocations |
+| --- | --- |
+| `tests` | `tests` |
+| `logic` | `review` for code logic |
+| `style` | `review` for public API style |
+| `visual` | `visual-review` for rendered UI |
+| `reviewers` | `review` for logic and style, plus applicable `visual-review` |
+| `all` | `tests`, `review`, and applicable `visual-review` |
 
-| Gate 3 choice | Agents                                                                       |
-| ------------- | ---------------------------------------------------------------------------- |
-| `reviewers`   | code-style-reviewer, code-logic-reviewer, visual-reviewer (rendered UI only) |
-| `all`         | senior-tester plus the reviewers                                             |
+Run selected independent QA phases in parallel when file ownership permits. Each writes its report; the orchestrator accepts the evidence before completion.
 
-Independent batches (different files, no dependency) may also run in parallel, one developer each.
+## Compatibility appendix
+
+This is an optional legacy path; active routing uses phase kinds.
+
+The following rows preserve retired aliases, the old capability matrix (**P** primary, **S** secondary, **-** not applicable), invocation context and instruction, and profile timing/read/parallel hints. They are historical compatibility data; active routing uses phase kinds. CLI delegation **P** suited parallel analysis, per-module tests and multi-file reviews; **S** suited occasional subtasks; **-** did not spawn lanes. The batch phase recommends lanes in `batches.md` without spawning; visual review needs browser tools and design needs interactive discovery. See [lane-assignment.md](lane-assignment.md).
+
+| Legacy alias (`subagent_type`) | Phase kind and definition | Capabilities: code, design, review, plan, research, content, browser, CLI | Invocation: description; context; deliverable; instruction | Profile: invoked when; reads; runs alongside |
+| --- | --- | --- | --- | --- |
+| project-manager | `plan` -> `../phases/plan.md` | -, -, -, **P**, S, -, -, S | Create requirements; `**User Request**: "<the user's words>"`<br>`Required Skills: <skill ids or none>`; `task-description.md`; Analyze the request and write the requirements. | FEATURE / DOCUMENTATION / DEVOPS phase 1, or unclear scope; request, `context.md`; — |
+| software-architect | `architecture` -> `../phases/architecture.md` | -, **P**, S, **P**, S, -, -, S | Design implementation / inventory only; `**Requirements**: task-description.md (inventory-only: task.md + context.md)`<br>`**Mode**: plan or inventory-only`<br>`Required Skills: <skill ids or none>`; `implementation-plan.md` (inventory-only: `parity-inventory.md`); Design the technical implementation plan and write `Required Skills:` for downstream phases; inventory-only mode reads OLD code and writes only the parity inventory before design. | After PM; REFACTORING / DEVOPS; architectural decision needed; inventory-only before design when required, plan after any required Gate 1.7; `task-description.md`, research; inventory-only: `task.md`, `context.md`, OLD code; — |
+| team-leader | `batch` -> `../phases/batch.md`; acceptance step -> `../phases/<kind>.md`; `completion` -> `../phases/completion.md` | -, -, S, **P**, -, -, -, - | Decompose / verify / complete; `**MODE**: 1 - DECOMPOSITION` (or 2, 3) — see [phase mode compatibility](team-leader-modes.md)<br>`Required Skills: <skill ids or none>`; `batches.md`; Per mode; write `Required Skills:` into every batch entry, `Task()` prompt and `ptah_agent_spawn` task. | After architect (BUGFIX: after init/research and any required design gate) (Mode 1), after each executor or reviewer (Mode 2), all batches done (Mode 3); plan (BUGFIX: `task.md`, `context.md`), `batches.md`, reports; — |
+| backend-developer | `implement` -> `../phases/implement.md` | **P**, S, -, -, -, -, -, S | Implement Batch N; `**Batch**: Batch N in batches.md (IN_PROGRESS)`<br>`**Plan**: implementation-plan.md, or for a BUGFIX task.md + context.md (+ research-report.md)`<br>`Required Skills: <skill ids or none>`; code + report; Load listed `Required Skills:` when the host lists them; report each task's completion with evidence; do not edit batches.md; the batch phase records state. | A batch of server-side work; `batches.md`, plan, project conventions; implement phase on a different batch |
+| frontend-developer | `implement` -> `../phases/implement.md` | **P**, S, -, -, -, -, -, S | Implement Batch N; `**Batch**: Batch N in batches.md (IN_PROGRESS)`<br>`**Plan**: implementation-plan.md, or for a BUGFIX task.md + context.md (+ research-report.md)`<br>`Required Skills: <skill ids or none>`; code + report; Load listed `Required Skills:` when the host lists them; report each task's completion with evidence; do not edit batches.md; the batch phase records state. Check the lane's tool list when the batch runs on a lane; lanes that have `ptah_browser_*` render and screenshot their own UI. | A batch of UI work; `batches.md`, plan, design spec; implement phase on a different batch |
+| devops-engineer | `implement` -> `../phases/implement.md` | **P**, S, -, -, S, -, -, S | Implement infrastructure; `**Plan**: implementation-plan.md`<br>`Required Skills: <skill ids or none>`; code + report; Load listed `Required Skills:` when the host lists them and implement the infrastructure changes. | DEVOPS implementation; pipelines, containers, publishing; plan, existing pipeline and container files; — |
+| senior-tester | `tests` -> `../phases/tests.md` | **P**, -, **P**, -, -, -, -, **P** | Test implementation; `**Changes**: batches.md`<br>`**Plan**: implementation-plan.md, or for a BUGFIX task.md + context.md (+ research-report.md)`<br>`Required Skills: <skill ids or none>`; `test-report.md`; Write and run the tests; record the results. | Gate 3 `tester` / `all`; `batches.md`, plan, changed files; reviewers |
+| code-style-reviewer | `review` -> `../phases/review.md` | -, -, **P**, -, -, -, -, S | Review code style; `**Changes**: batches.md`<br>`Required Skills: <skill ids or none>`; `code-style-review.md`; Review for style, patterns and consistency. | Gate 3 `style` / `reviewers` / `all`; DOCUMENTATION final check; changed files, style rules; tester, other reviewers |
+| code-logic-reviewer | `review` -> `../phases/review.md` | -, -, **P**, -, -, -, -, S | Review code logic; `**Changes**: batches.md`<br>`**Plan**: implementation-plan.md, or for a BUGFIX task.md + context.md (+ research-report.md)`<br>`Required Skills: <skill ids or none>`; `code-logic-review.md`; Review for logic completeness and correctness. | Gate 3 `logic` / `reviewers` / `all`; batch phase `NEEDS REVIEW`; changed files, plan; tester, other reviewers |
+| visual-reviewer | `visual-review` -> `../phases/visual-review.md` | -, -, **P**, -, -, -, **P**, - | Visual review; `**Changes**: batches.md (frontend files)`<br>`**Base URL**: <running app URL>`<br>`Required Skills: <skill ids or none>`; `visual-review.md` + `screenshots/`; Run the visual review checklist in `../phases/visual-review.md`. | UI batch evidence; Gate 3 `visual` for rendered UI; changed UI files, running app, approved prototype; tester, other reviewers |
+| researcher-expert | `research` -> `../phases/research.md` | -, -, -, -, **P**, S, -, **P** | Research X; `**Research Question**: "<the question>"`<br>`Required Skills: <skill ids or none>`; `research-report.md`; Compare the options, recommend one. | Technical unknowns, BUGFIX with unknown cause, RESEARCH; question, `context.md`, external docs; — |
+| modernization-detector | `research` -> `../phases/research.md` | -, -, S, -, **P**, -, -, S | Analyze future improvements; `**Changes**: batches.md`<br>`Required Skills: <skill ids or none>`; `future-enhancements.md`; Find follow-up improvements and tech debt. | Final phase, after QA; `batches.md`, changed files; — |
+| ui-ux-designer | `design` -> `../phases/design.md` | -, **P**, -, S, -, S, -, - | Create design and prototype; `**Goal**: <what to design>`<br>`**Parity**: parity-inventory.md when required`<br>`Required Skills: ui-ux-designer`; `design-spec.md` + `prototype/`; Load `ui-ux-designer` when the host lists it; run niche discovery, build the design system and prototype (README.md + screenshots/); disclose lane-introduced constraints; revise until Gate 1.7 is approved. The visual-review phase still gives the independent dark+light evidence. | CREATIVE; any flow with added/redesigned UI, after required inventory; brand input, references, `context.md`, parity inventory; — (prototype + Gate 1.7 before the next phase of the flow) |
+| technical-content-writer | `docs` -> `../phases/docs.md` | -, S, -, -, -, **P**, -, S | Create content; `**Design System**: the project's design system in docs/design-system/`<br>`**Goal**: <what to write>`<br>`Required Skills: technical-content-writer`; `content-specification.md`; Load `technical-content-writer` when the host lists it and write design-integrated content. | CREATIVE after the design system exists; blogs, docs, scripts; the project's design system (docs/design-system/), brief, source; other content-writer instances |

@@ -4,8 +4,8 @@
     "files": 14
   },
   "skills": {
-    "lines": 466,
-    "files": 35
+    "lines": 119,
+    "files": 29
   },
   "generated-agents": {
     "lines": 176,
@@ -28,8 +28,8 @@
     "files": 8
   },
   "total": {
-    "lines": 2085,
-    "files": 298
+    "lines": 1738,
+    "files": 292
   },
   "excludes": []
 }
