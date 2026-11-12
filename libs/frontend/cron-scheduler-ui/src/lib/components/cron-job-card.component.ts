@@ -147,10 +147,9 @@ import {
         </button>
         <button
           type="button"
-          ptahIconButton
-          size="xs"
-          label="Delete job"
-          class="text-base-content-muted transition-colors duration-150 hover:text-error"
+          class="btn btn-ghost btn-xs btn-square text-base-content-muted transition-colors duration-150 hover:text-error"
+          aria-label="Delete job"
+          title="Delete job"
           (click)="removed.emit()"
         >
           <lucide-angular

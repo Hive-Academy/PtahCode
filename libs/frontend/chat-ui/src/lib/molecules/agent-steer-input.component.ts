@@ -7,7 +7,7 @@ import {
   computed,
 } from '@angular/core';
 import { ArrowUp, LucideAngularModule, SendHorizontal } from 'lucide-angular';
-import { PtahInputDirective } from '@ptah-extension/ui';
+import { PtahIconButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
 import {
   COMPOSER_CARD_BORDER_CLASS,
   COMPOSER_CARD_CLASS,
@@ -33,7 +33,7 @@ import {
 @Component({
   selector: 'ptah-agent-steer-input',
   standalone: true,
-  imports: [LucideAngularModule, PtahInputDirective],
+  imports: [LucideAngularModule, PtahIconButtonDirective, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (steerable() && variant() === 'composer') {
@@ -94,10 +94,12 @@ import {
           (keydown.enter)="onEnter($event)"
         />
         <button
+          ptahIconButton
+          variant="primary"
+          size="xs"
+          [label]="sendLabel()"
           type="button"
-          class="btn btn-xs btn-primary btn-square"
           [disabled]="sendDisabled()"
-          [attr.aria-label]="sendLabel()"
           (click)="submit()"
         >
           @if (pending()) {

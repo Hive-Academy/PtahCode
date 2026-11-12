@@ -142,7 +142,9 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
             <span class="text-sm">{{ msg }}</span>
             <button
               type="button"
-              class="btn btn-ghost btn-xs"
+              ptahButton
+              variant="ghost"
+              size="xs"
               (click)="onDismissGlobalError()"
             >
               Dismiss
@@ -186,7 +188,9 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
               </div>
               <button
                 type="button"
-                class="btn btn-ghost btn-xs"
+                ptahButton
+                variant="ghost"
+                size="xs"
                 (click)="onDismissVoiceToast()"
               >
                 Dismiss

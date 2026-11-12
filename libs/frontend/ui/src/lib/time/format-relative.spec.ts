@@ -11,6 +11,14 @@ describe('formatRelative', () => {
     [NOW - 5 * 60_000 - 59_000, '5m ago'],
     [NOW - 3 * 3_600_000, '3h ago'],
     [NOW - 2 * 86_400_000, '2d ago'],
+    [NOW - 29 * 86_400_000, '29d ago'],
+    [NOW - 30 * 86_400_000, '1mo ago'],
+    [NOW - 45 * 86_400_000, '1mo ago'],
+    [NOW - 359 * 86_400_000, '11mo ago'],
+    [NOW - 360 * 86_400_000, '1y ago'],
+    [NOW - 400 * 86_400_000, '1y ago'],
+    [NOW - 800 * 86_400_000, '2y ago'],
+    [NOW + 60 * 86_400_000, 'in 2mo'],
     [NOW + 5 * 60_000, 'in 5m'],
     [NOW + 30_000, 'in 30s'],
   ])('%d -> %s', (at, text) => {
@@ -19,7 +27,9 @@ describe('formatRelative', () => {
 
   it('accepts a Date and an ISO string', () => {
     expect(formatRelative(new Date(NOW - 60_000), NOW)).toBe('1m ago');
-    expect(formatRelative(new Date(NOW - 7_200_000).toISOString(), NOW)).toBe('2h ago');
+    expect(formatRelative(new Date(NOW - 7_200_000).toISOString(), NOW)).toBe(
+      '2h ago',
+    );
   });
 
   it('returns empty text for an invalid value', () => {

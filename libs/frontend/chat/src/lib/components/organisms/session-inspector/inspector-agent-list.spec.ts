@@ -50,17 +50,34 @@ function row(
 describe('inspector agent list', () => {
   it('sums known numeric usage from every row', () => {
     const total = agentListTotal([
-      row('orchestrator', 'done', 'orchestrator', { ...NO_USAGE, tokens: 100, cost: 0.1, costEstimated: false }),
-      row('cli:one', 'done', 'cli', { ...NO_USAGE, tokens: 200, cost: 0.2, costEstimated: false }),
+      row('orchestrator', 'done', 'orchestrator', {
+        ...NO_USAGE,
+        tokens: 100,
+        cost: 0.1,
+        costEstimated: false,
+      }),
+      row('cli:one', 'done', 'cli', {
+        ...NO_USAGE,
+        tokens: 200,
+        cost: 0.2,
+        costEstimated: false,
+      }),
     ]);
     expect(total.tokens).toBe('300');
     expect(total.cost).toBe('$0.30');
-    expect(total.title).toBe('Total of 2 agents · 0 without token data · 0 without cost data');
+    expect(total.title).toBe(
+      'Total of 2 agents · 0 without token data · 0 without cost data',
+    );
   });
 
   it('marks missing or partial values as lower bounds and estimated cost', () => {
     const total = agentListTotal([
-      row('a', 'done', 'cli', { ...NO_USAGE, tokens: 100, tokensPartial: true, cost: 0.1 }),
+      row('a', 'done', 'cli', {
+        ...NO_USAGE,
+        tokens: 100,
+        tokensPartial: true,
+        cost: 0.1,
+      }),
       row('b', 'done'),
     ]);
     expect(total.tokens).toBe('≥ 100');
@@ -75,9 +92,15 @@ describe('inspector agent list', () => {
   });
   it('uses the role in the visible name and accessible label', () => {
     const result = agentListRow({
-      agent: row('a', 'running').agent, name: 'Codex · reviewer',
-      secondary: '', secondaryTitle: null, usage: NO_USAGE,
-      durationMs: null, requests: [], tray: null, hasActions: false,
+      agent: row('a', 'running').agent,
+      name: 'Codex · reviewer',
+      secondary: '',
+      secondaryTitle: null,
+      usage: NO_USAGE,
+      durationMs: null,
+      requests: [],
+      tray: null,
+      hasActions: false,
     });
     expect(result.name).toBe('Codex · reviewer');
     expect(result.ariaLabel).toContain('Codex · reviewer');
@@ -87,10 +110,15 @@ describe('inspector agent list', () => {
     expect(row('a', 'running').time).toBe('—');
     const timed = agentListRow({
       agent: row('b', 'done').agent,
-      secondary: '', secondaryTitle: null, usage: NO_USAGE,
-      durationMs: 65_000, requests: [], tray: null, hasActions: false,
+      secondary: '',
+      secondaryTitle: null,
+      usage: NO_USAGE,
+      durationMs: 65_000,
+      requests: [],
+      tray: null,
+      hasActions: false,
     });
-    expect(timed.time).toBe('1m 05s');
+    expect(timed.time).toBe('1m 5s');
   });
   it('formats in / out compactly and keeps one unknown side as a dash', () => {
     expect(inOutText(1_050_000, 48_000)).toBe('In 1.1M · Out 48.0k');

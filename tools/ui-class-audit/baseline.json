@@ -85,11 +85,7 @@
     "btn-xs": 2
   },
   "libs/frontend/chat-ui/src/lib/molecules/agent-steer-input.component.ts": {
-    "<dynamic>": 4,
-    "btn": 1,
-    "btn-primary": 1,
-    "btn-square": 1,
-    "btn-xs": 1
+    "<dynamic>": 4
   },
   "libs/frontend/chat-ui/src/lib/molecules/boot-progress/boot-progress.component.ts": {
     "<dynamic>": 1
@@ -673,20 +669,26 @@
     "<dynamic>": 2
   },
   "libs/frontend/core/src/lib/components/attention-permission-actions.component.ts": {
-    "btn": 5,
-    "btn-error": 1,
-    "btn-ghost": 4,
+    "btn": 3,
+    "btn-ghost": 3,
     "btn-primary": 1,
-    "btn-sm": 5,
+    "btn-sm": 3,
     "input": 1,
     "input-bordered": 1,
     "input-sm": 1
   },
   "libs/frontend/cron-scheduler-ui/src/lib/components/cron-job-card.component.ts": {
-    "<dynamic>": 1
+    "<dynamic>": 1,
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-square": 1,
+    "btn-xs": 1
   },
   "libs/frontend/cron-scheduler-ui/src/lib/components/cron-job-detail-drawer.component.ts": {
-    "<dynamic>": 2
+    "<dynamic>": 2,
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-sm": 1
   },
   "libs/frontend/cron-scheduler-ui/src/lib/components/cron-scheduler-tab.component.ts": {
     "alert": 1,
@@ -774,9 +776,10 @@
     "<dynamic>": 1
   },
   "libs/frontend/git-ui/src/lib/branch-picker/branch-picker-dropdown.component.ts": {
-    "btn": 2,
+    "btn": 5,
+    "btn-ghost": 3,
     "btn-outline": 2,
-    "btn-xs": 2
+    "btn-xs": 5
   },
   "libs/frontend/git-ui/src/lib/conflict/conflict-banner.component.ts": {
     "<dynamic>": 1,
@@ -786,6 +789,11 @@
   },
   "libs/frontend/git-ui/src/lib/git-dock/git-dock-scope-header.component.ts": {
     "<dynamic>": 1
+  },
+  "libs/frontend/git-ui/src/lib/history/history-stash-section.component.ts": {
+    "btn": 1,
+    "btn-ghost": 1,
+    "btn-xs": 1
   },
   "libs/frontend/git-ui/src/lib/open-in/open-in-button.component.ts": {
     "btn": 2,
@@ -837,9 +845,9 @@
     "btn-xs": 2
   },
   "libs/frontend/git-ui/src/lib/stash/stash-popover.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
+    "btn": 3,
+    "btn-ghost": 3,
+    "btn-xs": 3
   },
   "libs/frontend/git-ui/src/lib/task/task-pr-panel.component.ts": {
     "<dynamic>": 1,
@@ -1030,12 +1038,6 @@
     "<dynamic>": 5,
     "skeleton": 2
   },
-  "libs/frontend/memory-curator-ui/src/lib/components/corpus-build-dialog.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/memory-curator-ui/src/lib/components/corpus-list.component.ts": {
     "btn": 1,
     "btn-ghost": 1,
@@ -1068,12 +1070,6 @@
     "btn-primary": 2,
     "btn-sm": 2
   },
-  "libs/frontend/memory-curator-ui/src/lib/components/timeline-filters.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/memory-curator-ui/src/lib/components/timeline-view.component.ts": {
     "alert": 1,
     "alert-error": 1,
@@ -1085,10 +1081,7 @@
   },
   "libs/frontend/messaging-gateway-ui/src/lib/components/messaging-gateway-tab.component.ts": {
     "alert": 1,
-    "alert-error": 1,
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
+    "alert-error": 1
   },
   "libs/frontend/messaging-gateway-ui/src/lib/components/platform-bindings-panel.component.ts": {
     "alert": 1,
@@ -1100,8 +1093,10 @@
     "btn-xs": 4
   },
   "libs/frontend/notification-center/src/lib/notification-center.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
+    "btn": 3,
+    "btn-ghost": 3,
+    "btn-primary": 1,
+    "btn-sm": 2,
     "btn-square": 1
   },
   "libs/frontend/notification-center/src/lib/notification-snackbar.component.ts": {
@@ -1336,10 +1331,10 @@
     "badge": 1,
     "badge-outline": 1,
     "badge-xs": 1,
-    "btn": 1,
+    "btn": 2,
     "btn-active": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1
+    "btn-ghost": 2,
+    "btn-sm": 2
   },
   "libs/frontend/tasks-ui/src/lib/components/task-board-header.component.ts": {
     "<dynamic>": 1,
