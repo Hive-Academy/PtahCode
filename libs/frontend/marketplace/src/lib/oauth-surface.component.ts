@@ -31,6 +31,8 @@ import {
   resolveListingBrandSlug,
   PtahButtonDirective,
   PtahIconButtonDirective,
+  PtahFieldComponent,
+  PtahInputDirective,
 } from '@ptah-extension/ui';
 import type {
   McpOAuthConnectedRecord,
@@ -138,6 +140,8 @@ function isProbableServerUrl(value: string): boolean {
   imports: [
     PtahIconButtonDirective,
     PtahButtonDirective,
+    PtahFieldComponent,
+    PtahInputDirective,
     LucideAngularModule,
     BrandMarkComponent,
     CatalogCardComponent,
@@ -202,15 +206,19 @@ function isProbableServerUrl(value: string): boolean {
 
           <fieldset class="space-y-2">
             <legend [class]="groupLabelClass">Server</legend>
-            <input
-              type="url"
-              autocomplete="off"
-              class="input input-bordered input-sm w-full text-xs font-mono"
-              placeholder="https://mcp.notion.com/mcp"
-              [value]="urlInput()"
-              (input)="onUrlInput($event)"
-              aria-label="MCP server URL"
-            />
+            <ptah-field label="MCP server URL">
+              <input
+                ptahInput
+                tone="mono"
+                type="url"
+                autocomplete="off"
+                class="w-full text-xs font-mono"
+                placeholder="https://mcp.notion.com/mcp"
+                [value]="urlInput()"
+                (input)="onUrlInput($event)"
+                aria-label="MCP server URL"
+              />
+            </ptah-field>
             @if (discoveryHint() === 'needs-api-key') {
               <p class="text-[11px] text-warning" role="note">
                 {{ needsApiKeyNote }}
@@ -221,15 +229,18 @@ function isProbableServerUrl(value: string): boolean {
                 {{ needsClientAppNote }}
               </p>
             }
-            <input
-              type="text"
-              autocomplete="off"
-              class="input input-bordered input-sm w-full text-xs"
-              placeholder="Friendly name (optional)"
-              [value]="nameInput()"
-              (input)="onNameInput($event)"
-              aria-label="Friendly name"
-            />
+            <ptah-field label="Friendly name">
+              <input
+                ptahInput
+                type="text"
+                autocomplete="off"
+                class="w-full text-xs"
+                placeholder="Friendly name (optional)"
+                [value]="nameInput()"
+                (input)="onNameInput($event)"
+                aria-label="Friendly name"
+              />
+            </ptah-field>
           </fieldset>
 
           <!-- Advanced: pre-registered client credentials (collapsed by default) -->
@@ -251,10 +262,13 @@ function isProbableServerUrl(value: string): boolean {
                   </p>
                   <div class="flex items-center gap-1">
                     <input
+                      ptahInput
+                      size="sm"
+                      tone="mono"
                       #redirectUriField
                       type="text"
                       readonly
-                      class="input input-bordered input-sm flex-1 min-w-0 text-xs font-mono"
+                      class="flex-1 min-w-0 text-xs font-mono"
                       [value]="uri"
                       aria-label="Redirect URL"
                     />
@@ -285,24 +299,32 @@ function isProbableServerUrl(value: string): boolean {
                   </div>
                 </div>
               }
-              <input
-                type="text"
-                autocomplete="off"
-                class="input input-bordered input-sm w-full text-xs font-mono"
-                placeholder="Client ID (optional)"
-                [value]="clientIdInput()"
-                (input)="onClientIdInput($event)"
-                aria-label="Client ID"
-              />
-              <input
-                type="password"
-                autocomplete="off"
-                class="input input-bordered input-sm w-full text-xs font-mono"
-                placeholder="Client Secret (optional)"
-                [value]="clientSecretInput()"
-                (input)="onClientSecretInput($event)"
-                aria-label="Client Secret"
-              />
+              <ptah-field label="Client ID">
+                <input
+                  ptahInput
+                  tone="mono"
+                  type="text"
+                  autocomplete="off"
+                  class="w-full text-xs font-mono"
+                  placeholder="Client ID (optional)"
+                  [value]="clientIdInput()"
+                  (input)="onClientIdInput($event)"
+                  aria-label="Client ID"
+                />
+              </ptah-field>
+              <ptah-field label="Client Secret">
+                <input
+                  ptahInput
+                  tone="mono"
+                  type="password"
+                  autocomplete="off"
+                  class="w-full text-xs font-mono"
+                  placeholder="Client Secret (optional)"
+                  [value]="clientSecretInput()"
+                  (input)="onClientSecretInput($event)"
+                  aria-label="Client Secret"
+                />
+              </ptah-field>
               <p class="text-[10px] text-base-content-muted">
                 Only needed for servers that do not register apps automatically.
                 Create an app with the provider, add the redirect URL above to

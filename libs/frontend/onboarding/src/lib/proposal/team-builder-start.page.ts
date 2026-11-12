@@ -17,7 +17,11 @@ import {
   HarnessChatLauncherService,
 } from '../launcher/harness-chat-launcher.service';
 import { WorkspaceHeaderComponent } from '../shell/workspace-header.component';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import {
+  PtahButtonDirective,
+  PtahFieldComponent,
+  PtahTextareaDirective,
+} from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-team-builder-start-page',
@@ -28,6 +32,8 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
     WorkspaceHeaderComponent,
     LucideAngularModule,
     PtahButtonDirective,
+    PtahFieldComponent,
+    PtahTextareaDirective,
   ],
   providers: [ComposerAttachmentsService],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -76,26 +82,27 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
           }}</span>
         </p>
         <div>
-          <label for="team-intent" class="block text-sm font-semibold"
-            >What should the team do?</label
-          ><textarea
-            id="team-intent"
-            name="intent"
-            class="textarea textarea-bordered mt-2 min-h-[140px] w-full"
-            placeholder="Example: a social media team that plans a weekly content calendar, drafts posts for each channel and reviews them before I publish."
-            [ngModel]="intent()"
-            (ngModelChange)="intent.set($event)"
-            (blur)="touched.set(true)"
-            (paste)="attachments.onPaste($event)"
-            (dragover)="$event.preventDefault()"
-            (drop)="attachments.onDrop($event)"
-            [attr.aria-invalid]="invalid() ? true : null"
-            [attr.aria-describedby]="
-              invalid()
-                ? 'team-attachment-hint team-intent-error'
-                : 'team-attachment-hint'
-            "
-          ></textarea>
+          <ptah-field label="What should the team do?" appearance="stacked">
+            <textarea
+              id="team-intent"
+              name="intent"
+              ptahTextarea
+              [invalid]="invalid()"
+              class="min-h-[140px] w-full"
+              placeholder="Example: a social media team that plans a weekly content calendar, drafts posts for each channel and reviews them before I publish."
+              [ngModel]="intent()"
+              (ngModelChange)="intent.set($event)"
+              (blur)="touched.set(true)"
+              (paste)="attachments.onPaste($event)"
+              (dragover)="$event.preventDefault()"
+              (drop)="attachments.onDrop($event)"
+              [attr.aria-describedby]="
+                invalid()
+                  ? 'team-attachment-hint team-intent-error'
+                  : 'team-attachment-hint'
+              "
+            ></textarea>
+          </ptah-field>
           <ptah-attachment-tray />
           <p
             id="team-attachment-hint"

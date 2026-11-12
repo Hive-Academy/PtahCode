@@ -26,7 +26,12 @@ import {
   HarnessChatLauncherService,
 } from '../launcher/harness-chat-launcher.service';
 import { WorkspaceHeaderComponent } from '../shell/workspace-header.component';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import {
+  PtahButtonDirective,
+  PtahFieldComponent,
+  PtahInputDirective,
+  PtahTextareaDirective,
+} from '@ptah-extension/ui';
 import {
   NEW_PROJECT_AUDIENCE_OPTIONS,
   NEW_PROJECT_PLATFORM_OPTIONS,
@@ -41,6 +46,9 @@ import {
     WorkspaceHeaderComponent,
     LucideAngularModule,
     PtahButtonDirective,
+    PtahFieldComponent,
+    PtahInputDirective,
+    PtahTextareaDirective,
   ],
   providers: [ComposerAttachmentsService],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -131,25 +139,30 @@ import {
           </div>
         }
         <div>
-          <label for="project-what" class="block text-sm font-semibold"
-            >What are you building? <span aria-hidden="true">*</span></label
-          ><textarea
-            id="project-what"
-            name="what"
-            class="textarea textarea-bordered mt-2 min-h-[140px] w-full"
-            [ngModel]="what()"
-            (ngModelChange)="what.set($event)"
-            (blur)="whatTouched.set(true)"
-            (paste)="attachments.onPaste($event)"
-            (dragover)="$event.preventDefault()"
-            (drop)="attachments.onDrop($event)"
-            [attr.aria-invalid]="whatInvalid() ? true : null"
-            [attr.aria-describedby]="
-              whatInvalid()
-                ? 'project-attachment-hint project-what-error'
-                : 'project-attachment-hint'
-            "
-          ></textarea>
+          <ptah-field
+            label="What are you building?"
+            appearance="stacked"
+            [required]="true"
+          >
+            <textarea
+              id="project-what"
+              name="what"
+              ptahTextarea
+              [invalid]="whatInvalid()"
+              class="min-h-[140px] w-full"
+              [ngModel]="what()"
+              (ngModelChange)="what.set($event)"
+              (blur)="whatTouched.set(true)"
+              (paste)="attachments.onPaste($event)"
+              (dragover)="$event.preventDefault()"
+              (drop)="attachments.onDrop($event)"
+              [attr.aria-describedby]="
+                whatInvalid()
+                  ? 'project-attachment-hint project-what-error'
+                  : 'project-attachment-hint'
+              "
+            ></textarea>
+          </ptah-field>
           <ptah-attachment-tray />
           <p
             id="project-attachment-hint"
@@ -214,20 +227,26 @@ import {
             }
           </div>
           @if (stack() === 'other') {
-            <label for="project-stack-other" class="mt-3 block text-sm"
-              >Describe your stack</label
-            ><input
-              id="project-stack-other"
-              name="stackOther"
-              class="input input-bordered mt-1 w-full"
-              [ngModel]="stackOther()"
-              (ngModelChange)="stackOther.set($event)"
-              (blur)="otherTouched.set(true)"
-              [attr.aria-invalid]="otherInvalid() ? true : null"
-              [attr.aria-describedby]="
-                otherInvalid() ? 'project-stack-other-error' : null
-              "
-            />
+            <ptah-field
+              class="mt-3"
+              label="Describe your stack"
+              appearance="stacked"
+            >
+              <input
+                id="project-stack-other"
+                name="stackOther"
+                ptahInput
+                size="md"
+                [invalid]="otherInvalid()"
+                class="w-full"
+                [ngModel]="stackOther()"
+                (ngModelChange)="stackOther.set($event)"
+                (blur)="otherTouched.set(true)"
+                [attr.aria-describedby]="
+                  otherInvalid() ? 'project-stack-other-error' : null
+                "
+              />
+            </ptah-field>
             @if (otherInvalid()) {
               <p id="project-stack-other-error" class="text-sm text-state-err">
                 Enter your stack.
@@ -236,18 +255,19 @@ import {
           }
         </fieldset>
         <div>
-          <label for="project-constraints" class="block font-medium"
-            >Must-haves or constraints
-            <span class="font-normal text-base-content-muted"
-              >(optional)</span
-            ></label
-          ><textarea
-            id="project-constraints"
-            name="constraints"
-            class="textarea textarea-bordered mt-2 w-full"
-            [ngModel]="constraints()"
-            (ngModelChange)="constraints.set($event)"
-          ></textarea>
+          <ptah-field
+            label="Must-haves or constraints (optional)"
+            appearance="stacked"
+          >
+            <textarea
+              id="project-constraints"
+              name="constraints"
+              ptahTextarea
+              class="w-full"
+              [ngModel]="constraints()"
+              (ngModelChange)="constraints.set($event)"
+            ></textarea>
+          </ptah-field>
         </div>
         <details
           class="rounded-[14px] border border-base-300 p-3"

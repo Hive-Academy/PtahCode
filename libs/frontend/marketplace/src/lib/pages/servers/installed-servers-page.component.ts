@@ -9,7 +9,7 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahCheckboxDirective } from '@ptah-extension/ui';
 import { RouterLink } from '@angular/router';
 import { CircleAlert, LucideAngularModule, Plus } from 'lucide-angular';
 import {
@@ -305,6 +305,7 @@ interface ConversionError {
   standalone: true,
   imports: [
     PtahButtonDirective,
+    PtahCheckboxDirective,
     RouterLink,
     LucideAngularModule,
     ProviderListViewComponent,
@@ -495,7 +496,8 @@ interface ConversionError {
                               >
                                 <input
                                   type="checkbox"
-                                  class="checkbox checkbox-xs checkbox-primary"
+                                  ptahCheckbox
+                                  size="xs"
                                   data-testid="server-convert-target"
                                   [attr.data-target]="target"
                                   [checked]="homeChoices().has(target)"

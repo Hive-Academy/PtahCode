@@ -12,6 +12,7 @@ import {
   type CapabilityEntry,
   type CapabilityScope,
 } from '@ptah-extension/shared';
+import { PtahToggleDirective } from '@ptah-extension/ui';
 
 /** Colour family of a badge. Every badge carries a word, never colour alone. */
 type CapabilityBadgeTone = 'info' | 'warning' | 'neutral';
@@ -194,6 +195,7 @@ let nextToggleId = 0;
 @Component({
   selector: 'ptah-capability-toggle',
   standalone: true,
+  imports: [PtahToggleDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block min-w-0' },
   template: `
@@ -201,7 +203,9 @@ let nextToggleId = 0;
       <label class="flex min-h-9 min-w-0 cursor-pointer items-center gap-2">
         <input
           type="checkbox"
-          class="toggle toggle-sm toggle-primary shrink-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+          ptahToggle
+          size="sm"
+          class="shrink-0"
           data-testid="capability-toggle-input"
           [checked]="checked()"
           [indeterminate]="indeterminate()"

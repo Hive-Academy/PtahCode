@@ -67,11 +67,6 @@
     "btn-sm": 2,
     "btn-xs": 2
   },
-  "libs/frontend/canvas/src/lib/orchestra-canvas.component.ts": {
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1
-  },
   "libs/frontend/chat-ui/src/lib/atoms/agent-avatar/agent-avatar.component.ts": {
     "<dynamic>": 8
   },
@@ -1213,10 +1208,7 @@
     "btn": 2,
     "btn-ghost": 2,
     "btn-sm": 1,
-    "btn-xs": 1,
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1
+    "btn-xs": 1
   },
   "libs/frontend/marketplace/src/lib/external-plugin-row.component.ts": {
     "btn": 2,
@@ -1240,9 +1232,7 @@
     "alert-sm": 1,
     "btn": 1,
     "btn-sm": 1,
-    "btn-warning": 1,
-    "checkbox": 1,
-    "checkbox-xs": 1
+    "btn-warning": 1
   },
   "libs/frontend/marketplace/src/lib/harness/harness-target-row.component.ts": {
     "<dynamic>": 1
@@ -1264,19 +1254,13 @@
     "alert-sm": 2,
     "btn": 1,
     "btn-ghost": 1,
-    "btn-sm": 1,
-    "input": 5,
-    "input-bordered": 5,
-    "input-sm": 5
+    "btn-sm": 1
   },
   "libs/frontend/marketplace/src/lib/pages/connectors/connectors-page.component.html": {
     "btn": 2,
     "btn-ghost": 2,
     "btn-primary": 2,
-    "btn-xs": 2,
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1
+    "btn-xs": 2
   },
   "libs/frontend/marketplace/src/lib/pages/overview/overview-page.component.html": {
     "<dynamic>": 1,
@@ -1289,9 +1273,6 @@
     "badge-ghost": 1,
     "badge-outline": 1,
     "badge-sm": 2,
-    "checkbox": 1,
-    "checkbox-primary": 1,
-    "checkbox-xs": 1,
     "skeleton": 2
   },
   "libs/frontend/marketplace/src/lib/pages/servers/provider-list-view.component.html": {
@@ -1318,9 +1299,6 @@
     "btn": 1,
     "btn-ghost": 1,
     "btn-xs": 1,
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1,
     "skeleton": 3
   },
   "libs/frontend/marketplace/src/lib/pages/skills/plugin-config-home-notice.component.ts": {
@@ -1355,16 +1333,10 @@
     "btn-primary": 2,
     "btn-sm": 1,
     "btn-xs": 2,
-    "input": 2,
-    "input-bordered": 2,
-    "input-sm": 2,
     "skeleton": 2
   },
   "libs/frontend/marketplace/src/lib/ui/capability-toggle.component.ts": {
-    "<dynamic>": 1,
-    "toggle": 1,
-    "toggle-primary": 1,
-    "toggle-sm": 1
+    "<dynamic>": 1
   },
   "libs/frontend/marketplace/src/lib/ui/connector-card-actions.component.ts": {
     "<dynamic>": 6
@@ -1381,8 +1353,6 @@
   },
   "libs/frontend/marketplace/src/lib/ui/provider-card-list.component.ts": {
     "<dynamic>": 1,
-    "checkbox": 1,
-    "checkbox-xs": 1,
     "skeleton": 3
   },
   "libs/frontend/marketplace/src/lib/ui/provider-filter-select.component.ts": {
@@ -1393,18 +1363,13 @@
   "libs/frontend/marketplace/src/lib/ui/provider-filters.component.ts": {
     "btn": 1,
     "btn-active": 1,
-    "btn-sm": 1,
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1
+    "btn-sm": 1
   },
   "libs/frontend/marketplace/src/lib/ui/provider-table.component.ts": {
     "<dynamic>": 1,
     "badge": 1,
     "badge-ghost": 1,
     "badge-sm": 1,
-    "checkbox": 2,
-    "checkbox-xs": 2,
     "skeleton": 4
   },
   "libs/frontend/marketplace/src/lib/ui/source-band.component.ts": {
@@ -1560,25 +1525,13 @@
     "btn-primary": 1,
     "btn-sm": 1
   },
-  "libs/frontend/onboarding/src/lib/analyze/agent-recommendation-list.component.ts": {
-    "checkbox": 1,
-    "checkbox-sm": 1
-  },
   "libs/frontend/onboarding/src/lib/home/path-tile.component.ts": {
     "<dynamic>": 2
   },
   "libs/frontend/onboarding/src/lib/proposal/new-project-intake.page.ts": {
     "btn": 4,
     "btn-sm": 4,
-    "btn-warning": 1,
-    "input": 1,
-    "input-bordered": 1,
-    "textarea": 2,
-    "textarea-bordered": 2
-  },
-  "libs/frontend/onboarding/src/lib/proposal/team-builder-start.page.ts": {
-    "textarea": 1,
-    "textarea-bordered": 1
+    "btn-warning": 1
   },
   "libs/frontend/onboarding/src/lib/ready/provider-panel.component.ts": {
     "<dynamic>": 1,

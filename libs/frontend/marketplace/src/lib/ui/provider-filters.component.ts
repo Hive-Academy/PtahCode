@@ -19,7 +19,7 @@ import {
   type FilterSelectOption,
 } from './provider-filter-select.component';
 import { statusPresentation } from './status-pill.component';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
 
 /** One origin radio. `value: null` is "All". */
 interface OriginChoice {
@@ -58,6 +58,7 @@ interface OriginChoice {
   standalone: true,
   imports: [
     PtahButtonDirective,
+    PtahInputDirective,
     LucideAngularModule,
     ProviderFilterSelectComponent,
   ],
@@ -68,25 +69,25 @@ interface OriginChoice {
       class="flex flex-wrap items-center gap-2"
       data-testid="provider-filters"
     >
-      <label
-        class="input input-sm input-bordered flex min-w-48 flex-1 items-center gap-2"
-      >
+      <div class="relative flex min-w-48 flex-1 items-center">
         <lucide-angular
           [img]="SearchIcon"
-          class="h-3.5 w-3.5 text-base-content-muted"
+          class="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-base-content-muted"
           aria-hidden="true"
         />
         <input
           #searchBox
+          ptahInput
+          size="sm"
           type="search"
-          class="grow bg-transparent"
+          class="w-full pl-8"
           [attr.aria-label]="searchLabel()"
           [placeholder]="searchPlaceholder()"
           [value]="filter().search ?? ''"
           data-testid="provider-filter-search"
           (input)="update({ search: searchBox.value })"
         />
-      </label>
+      </div>
 
       @if (showOrigin()) {
         <div
