@@ -27,9 +27,9 @@ import { focusMenuItem, handleMenuKeydown } from './canvas-rail-keyboard';
     <div role="group" aria-label="Pane controls"
       class="relative flex items-center"
       (keydown.escape)="escape($event)">
-      <button ptahIconButton variant="ghost" size="xs"
+      <!-- Keep size-7: the pane actions control is 28 px; owner xs square is 24 px. -->
+      <button ptahIconButton variant="ghost" size="xs" class="size-7"
         type="button"
-        class="size-7 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
         data-header-menu
         label="Pane actions"
         aria-haspopup="menu"
