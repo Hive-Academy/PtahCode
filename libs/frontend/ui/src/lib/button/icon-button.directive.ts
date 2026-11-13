@@ -2,7 +2,9 @@ import {
   booleanAttribute,
   computed,
   Directive,
+  ErrorHandler,
   effect,
+  inject,
   input,
   isDevMode,
 } from '@angular/core';
@@ -10,9 +12,16 @@ import {
   blockBusyActivation,
   BUTTON_HOST,
   buttonHostType,
+  syncBusyAria,
   syncSelectedAria,
 } from './button-host';
-import { PtahButtonSelectedAs, PtahButtonSize, PtahButtonTone, PtahButtonVariant } from './button.types';
+import {
+  PtahButtonDensity,
+  PtahButtonSelectedAs,
+  PtahButtonSize,
+  PtahButtonTone,
+  PtahButtonVariant,
+} from './button.types';
 import { PtahTooltipDirective } from './tooltip.directive';
 @Directive({
   selector: 'button[ptahIconButton], a[ptahIconButton]',
@@ -21,6 +30,7 @@ import { PtahTooltipDirective } from './tooltip.directive';
     ...BUTTON_HOST,
     '[class.btn-square]': 'true',
     '[attr.aria-label]': 'accessibleName()',
+    '[attr.data-density]': "density() === 'compact' ? 'compact' : null",
   },
   hostDirectives: [
     { directive: PtahTooltipDirective, inputs: ['ptahTooltip: label'] },
@@ -36,6 +46,8 @@ export class PtahIconButtonDirective {
   readonly variant = input<Exclude<PtahButtonVariant, 'link'>>('ghost');
   /** DaisyUI control size. */
   readonly size = input<PtahButtonSize>('sm');
+  /** Footprint density: compact keeps the raw xs and sm footprints. */
+  readonly density = input<PtahButtonDensity>('default');
   /** Ghost variant ink only; other variants ignore tone. */
   readonly tone = input<PtahButtonTone>('default');
   /**
@@ -53,15 +65,16 @@ export class PtahIconButtonDirective {
     () => this.label().trim() || null,
   );
   constructor() {
+    const errorHandler = inject(ErrorHandler);
     blockBusyActivation(this.busy);
+    syncBusyAria(this.busy);
     syncSelectedAria(this.selected, this.selectedAs);
-    // Same pattern as ptah-native-modal: report the missing accessible name in
-    // dev mode. A thrown error would stop change detection of the parent view.
-    // The directive must not hide its host or invent a name from title or text.
     effect(() => {
       if (!this.accessibleName() && isDevMode()) {
-        console.error(
-          'ptahIconButton requires a non-empty label: it is the accessible name and the tooltip text.',
+        errorHandler.handleError(
+          new Error(
+            'ptahIconButton requires a non-empty label for its accessible name and tooltip.',
+          ),
         );
       }
     });

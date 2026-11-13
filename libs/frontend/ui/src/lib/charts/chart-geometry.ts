@@ -1,12 +1,13 @@
 import { NEAR_LIMIT_PERCENT } from '@ptah-extension/shared';
 import { PtahChartTone, PtahMeterTone } from './chart.types';
 
-/** A resolved ink. `gold` is the brand ink of the `auto` tone below the near limit. */
-export type PtahChartInk = PtahChartTone | 'gold';
+/** A resolved ink. `gold` is the brand ink, also used by `auto` below the near limit. */
+export type PtahChartInk = PtahChartTone | 'gold' | 'primary';
 
 /** Fill classes. The `auto` inks keep the classes of the original meter. */
 export const CHART_BG: Readonly<Record<PtahChartInk, string>> = {
   gold: 'bg-[var(--ptah-gold)]',
+  primary: 'bg-primary',
   neutral: 'bg-[var(--ptah-badge-neutral-ink)]',
   accent: 'bg-[var(--ptah-badge-accent-ink)]',
   info: 'bg-state-run',
@@ -18,6 +19,7 @@ export const CHART_BG: Readonly<Record<PtahChartInk, string>> = {
 /** Text classes, for SVG marks that paint with `currentColor`. */
 export const CHART_TEXT: Readonly<Record<PtahChartInk, string>> = {
   gold: 'text-[var(--ptah-gold)]',
+  primary: 'text-primary',
   neutral: 'text-[var(--ptah-badge-neutral-ink)]',
   accent: 'text-[var(--ptah-badge-accent-ink)]',
   info: 'text-state-run',
@@ -31,12 +33,13 @@ export function isValidRange(value: number, max: number): boolean {
   return Number.isFinite(value) && Number.isFinite(max) && max > 0;
 }
 
-/** Percent of the max, with negative values clamped to 0. Not clamped at 100. */
+/** Percent of the max, clamped to [0, Number.MAX_VALUE], not to 100. */
 export function percentOf(value: number, max: number): number {
-  return isValidRange(value, max) ? (Math.max(0, value) / max) * 100 : 0;
+  if (!isValidRange(value, max)) return 0;
+  return Math.min((Math.max(0, value) / max) * 100, Number.MAX_VALUE);
 }
 
-/** The ink of a tone. `auto` follows the near-limit rule of the original meter. */
+/** The ink of a tone. Explicit `gold` stays gold; `auto` follows the near-limit rule. */
 export function resolveInk(tone: PtahMeterTone, percent: number): PtahChartInk {
   if (tone !== 'auto') return tone;
   if (percent >= 100) return 'err';

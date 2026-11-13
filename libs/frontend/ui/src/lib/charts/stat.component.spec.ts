@@ -58,6 +58,42 @@ describe('PtahStatComponent', () => {
     expect(el.querySelector('.tabular-nums')?.textContent).toBe('5');
   });
 
+  it('keeps the label a span by default', () => {
+    const el = render({ value: 1 });
+    expect(el.querySelector('h2,h3,h4,h5,h6')).toBeNull();
+    expect(el.querySelector('span.text-xs')?.textContent).toBe('Sessions');
+  });
+
+  it.each([2, 3, 4, 5, 6])('renders the label as h%i with the same classes', (level) => {
+    const h = render({ value: 1, headingLevel: level }).querySelector(`h${level}`);
+    expect(h?.textContent).toBe('Sessions');
+    expect(h?.className).toBe('text-xs text-base-content-muted');
+  });
+
+  it('formats the value with valueFormat', () => {
+    const el = render({ value: 5, valueFormat: (v: string | number) => `${v}!` });
+    expect(el.querySelector('.tabular-nums')?.textContent).toBe('5!');
+  });
+
+  it('uses a custom placeholder', () => {
+    expect(render({ value: '', placeholder: 'n/a' }).textContent).toContain('n/a');
+  });
+
+  it('shows exactly the passed error copy with role alert', () => {
+    const el = render({ value: 1, error: 'Could not load.' });
+    const alert = el.querySelector('[role="alert"]');
+    expect(alert?.querySelector('.text-state-err')?.textContent).toBe('Could not load.');
+  });
+
+  it('supports data-testid on the host element', () => {
+    const fixture = TestBed.createComponent(PtahStatComponent);
+    fixture.componentRef.setInput('label', 'Sessions');
+    fixture.componentRef.setInput('value', 1);
+    (fixture.nativeElement as HTMLElement).setAttribute('data-testid', 'sessions-stat');
+    fixture.detectChanges();
+    expect((fixture.nativeElement as HTMLElement).getAttribute('data-testid')).toBe('sessions-stat');
+  });
+
   it('scales the value text with the size', () => {
     expect(render({ value: 3, size: 'md' }).querySelector('.text-2xl')).not.toBeNull();
   });
