@@ -14,7 +14,7 @@ import type {
   SdkAdapterSubagentEndedEvent,
   SubagentStopPayload,
 } from '@ptah-extension/agent-sdk';
-import type { IFileSystemProvider } from '@ptah-extension/platform-core';
+import type { IFileSystemProvider, UsageMissingReason } from '@ptah-extension/platform-core';
 import {
   checkDeliverable,
   containedDeliverablePath,
@@ -142,6 +142,23 @@ interface SubagentStopFacts {
 }
 
 export class LaneOutcomeRecorder {
+  private static readonly codexUsageReasons = new Map<UsageMissingReason, number>();
+  private static readonly countedCodexUsageEvents = new Set<string>();
+
+  /** Count each completed Codex lane once, including rejected sink writes. */
+  static countCodexUsageReason(eventKey: string, reason: UsageMissingReason): void {
+    if (this.countedCodexUsageEvents.has(eventKey)) return;
+    if (this.countedCodexUsageEvents.size >= RECORDER_MEMORY_LIMIT) {
+      const oldest = this.countedCodexUsageEvents.values().next().value;
+      if (oldest !== undefined) this.countedCodexUsageEvents.delete(oldest);
+    }
+    this.countedCodexUsageEvents.add(eventKey);
+    this.codexUsageReasons.set(reason, (this.codexUsageReasons.get(reason) ?? 0) + 1);
+  }
+
+  static codexUsageReasonCount(reason: UsageMissingReason): number {
+    return this.codexUsageReasons.get(reason) ?? 0;
+  }
   private readonly classificationInputs = new Map<
     string,
     LaneFailureClassificationInput

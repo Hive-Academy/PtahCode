@@ -18,6 +18,7 @@ import type {
   LanePermissionMode,
   ProviderAccountBinding,
 } from '@ptah-extension/shared';
+import type { UsageScope } from '@ptah-extension/platform-core';
 
 /** Path-free immutable receipt; the registry run id is the binding id. */
 export interface LaneAccountReference {
@@ -204,6 +205,10 @@ export interface SdkHandle extends LaneAccountBindingFields {
   readonly onSegment?: (callback: (segment: CliOutputSegment) => void) => void;
   /** Usage segments are terminal totals for one turn, safe for lane outcomes. */
   readonly outcomeUsageIsTurnTotal?: true;
+  /** Scope of each usage segment delivered by this adapter. */
+  readonly usageScope?: UsageScope;
+  /** Native thread proven by a provider response, independent of resume hints. */
+  readonly getObservedNativeThreadId?: () => string | undefined;
   /** Fired when this handle's own MCP startup gate times out. */
   readonly onMcpAttachmentTimeout?: (callback: () => void) => void;
   readonly mcpConfigWriteFailed?: boolean;
