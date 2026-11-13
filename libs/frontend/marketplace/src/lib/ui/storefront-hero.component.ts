@@ -13,7 +13,7 @@ import {
   TargetMarksComponent,
   type TargetMarkItem,
 } from './target-marks.component';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahSurfaceDirective } from '@ptah-extension/ui';
 
 /** Load state of one "Your stack" tile; each tile loads on its own. */
 export type StackTileState = 'loading' | 'ready' | 'error';
@@ -108,6 +108,7 @@ function toTileView(tile: StorefrontStackTile): StackTileView {
   standalone: true,
   imports: [
     PtahButtonDirective,
+    PtahSurfaceDirective,
     NgTemplateOutlet,
     LucideAngularModule,
     TargetMarksComponent,
@@ -174,6 +175,7 @@ function toTileView(tile: StorefrontStackTile): StackTileView {
           </div>
         </div>
 
+        <!-- Keep this translucent panel: the shared card background is opaque. -->
         <div
           class="flex min-w-0 flex-col gap-4 rounded-xl border border-base-300 bg-base-200/90 p-4"
           data-testid="storefront-hero-stack"
@@ -195,7 +197,8 @@ function toTileView(tile: StorefrontStackTile): StackTileView {
             <dl class="grid grid-cols-2 gap-2">
               @for (tile of tileViews(); track tile.id) {
                 <div
-                  class="flex min-w-0 flex-col gap-1 rounded-lg border border-base-300 bg-base-100 p-3"
+                  ptahSurface variant="inset" padding="sm"
+                  class="flex min-w-0 flex-col gap-1"
                   [attr.data-tile]="tile.id"
                   [attr.data-state]="tile.state"
                   data-testid="storefront-hero-tile"

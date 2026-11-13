@@ -14,6 +14,7 @@ import {
   BrandMarkComponent,
   PtahButtonDirective,
   PtahCheckboxDirective,
+  PtahSurfaceDirective,
 } from '@ptah-extension/ui';
 
 import { PTAH_SESSIONS_LABEL } from '../data/coverage';
@@ -72,6 +73,7 @@ const SKELETON_CARDS = [0, 1, 2] as const;
   imports: [
     PtahButtonDirective,
     PtahCheckboxDirective,
+    PtahSurfaceDirective,
     LucideAngularModule,
     BrandMarkComponent,
     RemovalLockBadgeComponent,
@@ -92,7 +94,8 @@ const SKELETON_CARDS = [0, 1, 2] as const;
           <span class="sr-only">Loading {{ label() }}…</span>
           @for (card of skeletonCards; track card) {
             <div
-              class="flex items-center gap-3 rounded-xl border border-base-300 bg-base-200 p-3"
+              ptahSurface padding="sm"
+              class="flex items-center gap-3"
               aria-hidden="true"
             >
               <div class="skeleton h-6 w-6 rounded-md"></div>

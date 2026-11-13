@@ -313,6 +313,11 @@
   --ptah-meter-stripe-bar: 4px;
   --ptah-meter-stripe-gap: 3px;
 }
+/* Stock light theme, no glass: a 16% track keeps the ok and warn fills at 3:1 or more
+   against the track on the page, card and panel surfaces. Glass mode keeps its 14% track. */
+:root[data-theme='light']:not([data-glass='on']) {
+  --ptah-meter-track: color-mix(in oklch, oklch(var(--bc)) 16%, transparent);
+}
 /* ---- end ptah-meter tokens ---- */
 
 /* ---- Card, panel surface and section header (TASK_2026_1012_b1dc,
