@@ -9,6 +9,7 @@ import { ArrowRight, LucideAngularModule } from 'lucide-angular';
 
 import { ProgressRingComponent } from './progress-ring.component';
 
+// Left raw: it wraps ptah-progress-ring (112 px, 10 px stroke, 28 px numeral); ptah-ring xl differs visibly.
 /** One workspace readiness check. `ready: null` = still being checked. */
 export interface ReadinessCheck {
   readonly id: 'skills' | 'scan' | 'agents';

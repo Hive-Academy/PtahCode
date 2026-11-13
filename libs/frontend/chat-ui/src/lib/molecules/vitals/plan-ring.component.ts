@@ -9,6 +9,7 @@ import { formatDuration } from '@ptah-extension/ui';
 
 import { ProgressRingComponent } from './progress-ring.component';
 
+// Left raw: it wraps ptah-progress-ring, which stays private (no ptah-ring size matches the 56 px value row).
 /** The plan-window reading a plan ring draws. `percent` is 0-100. */
 export interface PlanRingData {
   readonly percent: number;
