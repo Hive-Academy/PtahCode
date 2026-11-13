@@ -12,6 +12,7 @@
  */
 
 import { z } from 'zod';
+import { ProjectAnalysisZodSchema } from '@ptah-extension/agent-generation';
 import {
   FileDecisionEntrySchema,
   GenerationTargetChoiceSchema,
@@ -30,6 +31,31 @@ export const WizardDeepAnalyzeParamsSchema = z.object({
 export const WizardGetResumableRunParamsSchema = z.object({});
 /** `wizard:analysis-status` takes no parameters; unknown keys are dropped. */
 export const WizardAnalysisStatusParamsSchema = z.object({});
+
+export const WizardRecommendSkillsParamsSchema = z.object({
+  analysis: ProjectAnalysisZodSchema,
+});
+export const WizardSearchSkillsParamsSchema = z.object({
+  query: z.string().trim().min(1).max(200),
+});
+export const WizardGetProjectGuidanceParamsSchema = z.object({
+  analysis: ProjectAnalysisZodSchema,
+});
+export const WizardPreviewSkillsForConsentParamsSchema = z.object({
+  skills: z.array(z.string().trim().min(1).max(255)).min(1).max(200),
+});
+export const WizardInstallSkillsWithConsentParamsSchema = z.object({
+  skills: z.array(z.string().trim().min(1).max(255)).max(200),
+  consentRecords: z
+    .array(
+      z.object({
+        skillName: z.string().trim().min(1).max(255),
+        contentHash: z.string().regex(/^[a-fA-F0-9]{64}$/),
+        consentDate: z.string().datetime(),
+      }),
+    )
+    .max(200),
+});
 
 export const WizardListAnalysesParamsSchema = z.object({ workspacePath });
 

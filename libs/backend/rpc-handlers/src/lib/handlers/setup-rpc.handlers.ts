@@ -9,6 +9,8 @@
  */
 
 import * as path from 'path';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
 import { injectable, inject, DependencyContainer } from 'tsyringe';
 import { z } from 'zod';
 import {
@@ -56,6 +58,16 @@ import type {
   WizardInstallPackAgentsResult,
   WizardPlanPackInstallParams,
   WizardPlanPackInstallResult,
+  WizardRecommendSkillsParams,
+  WizardRecommendSkillsResponse,
+  WizardSearchSkillsParams,
+  WizardSearchSkillsResponse,
+  WizardGetProjectGuidanceParams,
+  WizardGetProjectGuidanceResponse,
+  WizardPreviewSkillsForConsentParams,
+  WizardPreviewSkillsForConsentResponse,
+  WizardInstallSkillsWithConsentParams,
+  WizardInstallSkillsWithConsentResponse,
 } from '@ptah-extension/shared';
 import { Result } from '@ptah-extension/shared';
 import type { MultiPhaseManifest } from '@ptah-extension/agent-generation';
@@ -71,8 +83,37 @@ import {
   WizardListAnalysesParamsSchema,
   WizardLoadAnalysisParamsSchema,
   WizardPlanPackInstallParamsSchema,
+  WizardRecommendSkillsParamsSchema,
+  WizardSearchSkillsParamsSchema,
+  WizardGetProjectGuidanceParamsSchema,
+  WizardPreviewSkillsForConsentParamsSchema,
+  WizardInstallSkillsWithConsentParamsSchema,
 } from './setup-rpc.schema';
 import { PackInstallService } from './setup/pack-install.service';
+import { SkillsShApiClient } from '@ptah-extension/cli-agent-runtime';
+import { SkillsShRpcHandlers } from './skills-sh-rpc.handlers';
+import { stageSkillsInstall, STAGED_SKILLS_REL } from '../utils/skills-sh-cli';
+import {
+  HARNESS_SYNC_TOKENS,
+  type HarnessPropagationService,
+  type SkillSyncGate,
+} from '@ptah-extension/harness-sync';
+import {
+  SKILL_CONSENT_SERVICE,
+  SKILL_RECOMMENDATION_SERVICE,
+  SKILL_SELECTION_SERVICE,
+  SKILL_PROJECT_GUIDANCE_SERVICE,
+} from '../di/tokens';
+import type { SkillRecommendationService } from '../skills-sh/services/skill-recommendation.service';
+import type { SkillSelectionService } from '../skills-sh/services/skill-selection.service';
+import type { ProjectGuidanceService } from '../skills-sh/services/project-guidance.service';
+
+type SkillConsentPort = {
+  hasScripts(packagePath: string): boolean;
+  computeContentHash(packagePath: string): string;
+  canInstall(skillName: string, contentHash: string): boolean;
+  recordConsent(skillName: string, contentHash: string): void;
+};
 
 /** The pack operations the setup handler delegates to. */
 export type PackInstaller = Pick<
@@ -103,6 +144,11 @@ export class SetupRpcHandlers {
     'wizard:get-resumable-run',
     'wizard:analysis-status',
     'wizard:recommend-agents',
+    'wizard:recommend-skills',
+    'wizard:search-skills',
+    'wizard:get-project-guidance',
+    'wizard:preview-skills-for-consent',
+    'wizard:install-skills-with-consent',
     'wizard:cancel-analysis',
     'wizard:list-analyses',
     'wizard:load-analysis',
@@ -124,6 +170,8 @@ export class SetupRpcHandlers {
     private readonly sentryService: SentryService,
     @inject(PackInstallService)
     private readonly packInstall: PackInstaller,
+    @inject(SkillsShApiClient)
+    private readonly skillsShApi: SkillsShApiClient,
   ) {}
 
   /**
@@ -180,6 +228,11 @@ export class SetupRpcHandlers {
     this.registerGetResumableRun();
     this.registerAnalysisStatus();
     this.registerRecommendAgents();
+    this.registerRecommendSkills();
+    this.registerSearchSkills();
+    this.registerGetProjectGuidance();
+    this.registerPreviewSkillsForConsent();
+    this.registerInstallSkillsWithConsent();
     this.registerCancelAnalysis();
     this.registerListAnalyses();
     this.registerLoadAnalysis();
@@ -945,6 +998,368 @@ export class SetupRpcHandlers {
         this.parse(WizardInstallPackAgentsParamsSchema, rawParams),
       ),
     );
+  }
+
+  private registerRecommendSkills(): void {
+    this.rpcHandler.registerMethod<
+      WizardRecommendSkillsParams,
+      WizardRecommendSkillsResponse
+    >('wizard:recommend-skills', async (rawParams) => {
+      const { analysis } = this.parse(
+        WizardRecommendSkillsParamsSchema,
+        rawParams,
+      );
+      const root = this.workspaceProvider.getWorkspaceRoot();
+      if (!root)
+        throw new RpcUserError(
+          'No workspace folder open.',
+          'WORKSPACE_NOT_OPEN',
+        );
+      const packageContents = await fs
+        .readFile(path.join(root, 'package.json'), 'utf8')
+        .catch((error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') {
+            this.logger.debug(
+              '[Setup] package.json missing for skill recommendation',
+            );
+            return '{}';
+          }
+          this.logger.error('[Setup] could not read package.json', error);
+          throw error;
+        });
+      const parsedPackage: unknown = JSON.parse(packageContents);
+      const packageJson =
+        parsedPackage && typeof parsedPackage === 'object' && !Array.isArray(parsedPackage)
+          ? (parsedPackage as Record<string, unknown>)
+          : {};
+      const dependencyNames = (value: unknown): string[] =>
+        value && typeof value === 'object' && !Array.isArray(value) &&
+        (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
+          ? Object.keys(value)
+          : [];
+      const dependencies = [
+        ...new Set([
+          ...dependencyNames(packageJson['dependencies']),
+          ...dependencyNames(packageJson['devDependencies']),
+          ...dependencyNames(packageJson['optionalDependencies']),
+        ]),
+      ];
+      const service = this.resolveService<SkillRecommendationService>(
+        SKILL_RECOMMENDATION_SERVICE,
+        'SkillRecommendationService',
+      );
+      const recommendations = await service.recommend({
+        analysis: normalizeAgentOutput(analysis),
+        dependencies,
+        search: (query) => this.skillsShApi.search(query),
+      });
+      const selection = this.resolveService<SkillSelectionService>(
+        SKILL_SELECTION_SERVICE,
+        'SkillSelectionService',
+      );
+      return {
+        skills: selection
+          .select(recommendations)
+          .map(({ skill, evidence, score }) => ({ skill, evidence, score })),
+      };
+    });
+  }
+
+  private registerSearchSkills(): void {
+    this.rpcHandler.registerMethod<
+      WizardSearchSkillsParams,
+      WizardSearchSkillsResponse
+    >('wizard:search-skills', async (rawParams) => {
+      const { query } = this.parse(WizardSearchSkillsParamsSchema, rawParams);
+      return { skills: await this.skillsShApi.search(query) };
+    });
+  }
+
+  private registerGetProjectGuidance(): void {
+    this.rpcHandler.registerMethod<
+      WizardGetProjectGuidanceParams,
+      WizardGetProjectGuidanceResponse
+    >('wizard:get-project-guidance', async (rawParams) => {
+      const { analysis, ownerDecision } = this.parse(
+        WizardGetProjectGuidanceParamsSchema.extend({
+          ownerDecision: z.enum(['match', 'raise']).optional(),
+        }),
+        rawParams,
+      );
+      const service = this.resolveService<ProjectGuidanceService>(
+        SKILL_PROJECT_GUIDANCE_SERVICE,
+        'ProjectGuidanceService',
+      );
+      const supplied = rawParams?.analysis;
+      const source = supplied && typeof supplied === 'object' ? supplied as unknown as Record<string, unknown> : {};
+      const normalized = normalizeAgentOutput(analysis);
+      return service.getGuidance({
+        frameworks: Object.hasOwn(source, 'frameworks') ? normalized.frameworks : [],
+        ...(Object.hasOwn(source, 'architecturePatterns') ? { architecturePatterns: normalized.architecturePatterns } : {}),
+        ...(Object.hasOwn(source, 'codeConventions') && source['codeConventions'] && typeof source['codeConventions'] === 'object' && Object.keys(source['codeConventions']).length > 0 ? { codeConventions: normalized.codeConventions } : {}),
+        ...(Object.hasOwn(source, 'existingIssues') ? { existingIssues: normalized.existingIssues } : {}),
+      }, this.workspaceProvider.getWorkspaceRoot() ?? undefined, ownerDecision);
+    });
+  }
+
+  private registerPreviewSkillsForConsent(): void {
+    this.rpcHandler.registerMethod<
+      WizardPreviewSkillsForConsentParams,
+      WizardPreviewSkillsForConsentResponse
+    >('wizard:preview-skills-for-consent', async (rawParams) => {
+      const { skills } = this.parse(
+        WizardPreviewSkillsForConsentParamsSchema,
+        rawParams,
+      );
+      const consent = this.resolveService<SkillConsentPort>(
+        SKILL_CONSENT_SERVICE,
+        'SkillConsentService',
+      );
+      const previews = [];
+      for (const skillName of [...new Set(skills)]) {
+        const { packagePath, stagingDir } =
+          await this.stageConsentSkill(skillName);
+        try {
+          const files = await this.listSkillFiles(packagePath);
+          const scriptFiles = files.filter((file) =>
+            /\.(sh|ps1|bat|cmd|js|mjs|cjs|ts|py|rb)$/i.test(file),
+          );
+          previews.push({
+            skillName,
+            files,
+            scriptFiles,
+            hasScripts: consent.hasScripts(packagePath),
+            contentHash: consent.computeContentHash(packagePath),
+          });
+        } finally {
+          await fs.rm(stagingDir, { recursive: true, force: true });
+        }
+      }
+      return { skills: previews };
+    });
+  }
+
+  private async listSkillFiles(
+    root: string,
+    relativeDir = '',
+  ): Promise<string[]> {
+    const directory = path.join(root, relativeDir);
+    if (
+      !this.isInsideRoot(await fs.realpath(directory), await fs.realpath(root))
+    )
+      throw new RpcUserError('Skill path escapes its root.', 'INVALID_PARAMS');
+    const entries = await fs.readdir(directory, {
+      withFileTypes: true,
+    });
+    const files: string[] = [];
+    for (const entry of entries) {
+      const relativePath = path.posix.join(
+        relativeDir.replaceAll('\\', '/'),
+        entry.name,
+      );
+      if (entry.isDirectory())
+        files.push(...(await this.listSkillFiles(root, relativePath)));
+      else if (entry.isFile()) {
+        if (
+          !this.isInsideRoot(
+            await fs.realpath(path.join(root, relativePath)),
+            await fs.realpath(root),
+          )
+        )
+          throw new RpcUserError(
+            'Skill path escapes its root.',
+            'INVALID_PARAMS',
+          );
+        files.push(relativePath);
+      }
+    }
+    return files.sort();
+  }
+
+  private isInsideRoot(candidate: string, root: string): boolean {
+    const rel = path.relative(root, candidate);
+    return (
+      rel === '' ||
+      (rel !== '..' &&
+        !rel.startsWith(`..${path.sep}`) &&
+        !path.isAbsolute(rel))
+    );
+  }
+
+  private async stageConsentSkill(
+    skillName: string,
+  ): Promise<{ packagePath: string; stagingDir: string }> {
+    const parts = skillName.split('/');
+    if (
+      parts.length !== 3 ||
+      parts.some((part) => !/^[a-zA-Z0-9_-][a-zA-Z0-9_.-]*$/.test(part))
+    ) {
+      throw new RpcUserError(
+        'Invalid skill name. Expected owner/repo/skill.',
+        'INVALID_PARAMS',
+      );
+    }
+    const [owner, repo, skillId] = parts;
+    const stagingDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'ptah-skill-consent-'),
+    );
+    try {
+      const staged = await stageSkillsInstall(
+        { source: `${owner}/${repo}`, skillId },
+        stagingDir,
+      );
+      const packagePath = path.join(stagingDir, ...STAGED_SKILLS_REL, skillId);
+      const packageStat = await fs
+        .stat(packagePath)
+        .catch((error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') {
+            this.logger.debug('[Setup] staged skill directory missing');
+            return null;
+          }
+          this.logger.error('[Setup] could not stat staged skill', error);
+          throw error;
+        });
+      if (!staged.success || !packageStat?.isDirectory()) {
+        throw new RpcUserError(
+          'Could not stage skill for consent.',
+          'INVALID_PARAMS',
+        );
+      }
+      if (
+        !this.isInsideRoot(
+          await fs.realpath(packagePath),
+          await fs.realpath(stagingDir),
+        )
+      )
+        throw new RpcUserError(
+          'Skill path escapes its root.',
+          'INVALID_PARAMS',
+        );
+      return { packagePath, stagingDir };
+    } catch (error) {
+      await fs.rm(stagingDir, { recursive: true, force: true });
+      throw error;
+    }
+  }
+
+  private registerInstallSkillsWithConsent(): void {
+    this.rpcHandler.registerMethod<
+      WizardInstallSkillsWithConsentParams,
+      WizardInstallSkillsWithConsentResponse
+    >('wizard:install-skills-with-consent', async (rawParams) => {
+      const params = this.parse(
+        WizardInstallSkillsWithConsentParamsSchema,
+        rawParams,
+      );
+      if (params.skills.length === 0) return { success: true, installed: [] };
+      const workspaceRoot = this.workspaceProvider.getWorkspaceRoot();
+      if (!workspaceRoot)
+        throw new RpcUserError(
+          'No workspace folder open.',
+          'WORKSPACE_NOT_OPEN',
+        );
+      const consent = this.resolveService<SkillConsentPort>(
+        SKILL_CONSENT_SERVICE,
+        'SkillConsentService',
+      );
+      const installed: string[] = [];
+      let failure: { failedSkill: string; reason: string } | undefined;
+      const installer = this.container.resolve(SkillsShRpcHandlers);
+      for (const skillName of [...new Set(params.skills)]) {
+        const parts = skillName.split('/');
+        if (
+          parts.length !== 3 ||
+          parts.some((part) => !/^[a-zA-Z0-9_-][a-zA-Z0-9_.-]*$/.test(part))
+        ) {
+          failure = {
+            failedSkill: skillName,
+            reason: 'Invalid skill name. Expected owner/repo/skill.',
+          };
+          break;
+        }
+        try {
+          const [owner, repo, skillId] = parts;
+          let verifiedHash: string | undefined;
+          let hasScripts = false;
+          const result = await installer.install(
+            { source: `${owner}/${repo}`, skillId, scope: 'workspace' },
+            (staged) => {
+              if (staged.length !== 1 || staged[0].slug !== skillId) {
+                throw new RpcUserError(
+                  'Unexpected skill in install.',
+                  'INVALID_PARAMS',
+                );
+              }
+              const dir = staged[0].dir;
+              const expectedHash = consent.computeContentHash(dir);
+              verifiedHash = expectedHash;
+              const record = params.consentRecords.find(
+                (entry) => entry.skillName === skillName,
+              );
+              if (record && record.contentHash.toLowerCase() !== expectedHash) {
+                throw new RpcUserError(
+                  'Skill content changed since preview. Preview it again.',
+                  'INVALID_PARAMS',
+                );
+              }
+              hasScripts = consent.hasScripts(dir);
+              if (hasScripts) {
+                const approved = !!record;
+                if (!approved && !consent.canInstall(skillName, expectedHash)) {
+                  throw new RpcUserError(
+                    'This skill contains scripts and requires consent for its current content.',
+                    'INVALID_PARAMS',
+                  );
+                }
+              }
+            },
+          );
+          if (!result.success || !verifiedHash)
+            throw new Error('Skill install failed.');
+          if (hasScripts) consent.recordConsent(skillName, verifiedHash);
+          installed.push(skillName);
+          this.skillsShApi.invalidateInstallCaches();
+        } catch (error) {
+          this.logger.error(
+            `Failed to install skill ${skillName}`,
+            error instanceof Error ? error : new Error(String(error)),
+          );
+          failure = {
+            failedSkill: skillName,
+            reason:
+              error instanceof RpcUserError
+                ? error.message
+                : 'Skill install failed.',
+          };
+          break;
+        }
+      }
+      if (installed.length === 0)
+        return { success: false, installed, ...failure };
+      const gate = this.resolveService<SkillSyncGate>(
+        HARNESS_SYNC_TOKENS.SKILL_SYNC_GATE,
+        'SkillSyncGate',
+      );
+      const selectionSaved = gate.keepSelected(
+        workspaceRoot,
+        installed.map((name) => name.split('/')[2]),
+      );
+      if (!selectionSaved) {
+        throw new RpcUserError(
+          'Could not save the skill selection.',
+          'PERSISTENCE_UNAVAILABLE',
+        );
+      }
+      const propagation = this.resolveService<HarnessPropagationService>(
+        HARNESS_SYNC_TOKENS.PROPAGATION,
+        'HarnessPropagationService',
+      );
+      await propagation.propagate(
+        workspaceRoot,
+        'wizard:install-skills-with-consent',
+      );
+      return { success: !failure, installed, ...failure };
+    });
   }
 
   /**

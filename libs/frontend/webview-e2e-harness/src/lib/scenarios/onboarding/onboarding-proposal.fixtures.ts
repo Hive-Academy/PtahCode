@@ -1,5 +1,6 @@
 /** Electron proposal capture fixtures. All saved state is installed before Angular boots. */
 import { expect, type Page } from '@playwright/test';
+import type { RpcMethodRegistry } from '@ptah-extension/shared';
 import type {
   PostMessageBridge,
   WebviewToExtensionMessage,
@@ -9,7 +10,10 @@ import {
   installHost,
   installRpcAutoResponder,
 } from '../settings/settings.fixtures';
-import { onboardingAnalyzeFixtures } from './onboarding-analyze.fixtures';
+import {
+  COMPLETED_ANALYSIS,
+  onboardingAnalyzeFixtures,
+} from './onboarding-analyze.fixtures';
 import { FLAG_DONE, type OnboardingTheme } from './onboarding-ready.fixtures';
 
 export const WORKSPACE = 'C:\\ptah-e2e-ws-a';
@@ -57,6 +61,47 @@ const REVISIONS = [
     turnStartedAt: '2026-10-29T09:03:00.000Z',
   },
 ] as const;
+
+const SKILL_RECOMMENDATIONS = {
+  skills: [
+    {
+      skill: {
+        source: 'ptah/skills',
+        skillId: 'typescript-review',
+        name: 'TypeScript review',
+        description: 'Review backend TypeScript changes.',
+        installs: 42,
+        isInstalled: false,
+      },
+      evidence: 'The team reviews backend TypeScript code.',
+      score: 0.94,
+    },
+    {
+      skill: {
+        source: 'ptah/skills',
+        skillId: 'release-checks',
+        name: 'Release checks',
+        description: 'Check release readiness and handoffs.',
+        installs: 27,
+        isInstalled: false,
+      },
+      evidence: 'The team prepares releases.',
+      score: 0.86,
+    },
+  ],
+} satisfies RpcMethodRegistry['wizard:recommend-skills']['result'];
+
+const PROJECT_GUIDANCE = {
+  facts: [
+    {
+      category: 'Code review',
+      label: 'follow',
+      fact: 'Review TypeScript changes before release.',
+      evidence: 'The workspace uses a review step.',
+    },
+  ],
+  ownerDecisionPrompt: '',
+} satisfies RpcMethodRegistry['wizard:get-project-guidance']['result'];
 
 export type ProposalScene = 'empty' | 'first' | 'second' | 'unavailable';
 export interface ProposalBootOptions {
@@ -134,6 +179,15 @@ export function proposalRpcFixtures(
       warnings: ['Review the GitHub plugin before enabling it for the team.'],
     },
     'harness:health': { health: null },
+    'wizard:list-analyses': {
+      analyses: [],
+    } satisfies RpcMethodRegistry['wizard:list-analyses']['result'],
+    'wizard:load-analysis': COMPLETED_ANALYSIS as unknown as RpcMethodRegistry['wizard:load-analysis']['result'],
+    'wizard:recommend-skills': SKILL_RECOMMENDATIONS,
+    'wizard:get-project-guidance': PROJECT_GUIDANCE,
+    'wizard:search-skills': {
+      skills: [],
+    } satisfies RpcMethodRegistry['wizard:search-skills']['result'],
     'chat:start': { success: true, sessionId: SESSION },
     'chat:continue': { success: true, sessionId: SESSION },
     'chat:stop': { success: true },

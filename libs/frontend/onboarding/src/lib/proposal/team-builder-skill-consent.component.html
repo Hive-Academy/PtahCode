@@ -1,0 +1,91 @@
+<ptah-native-modal
+  [isOpen]="open()"
+  ariaLabelledby="skill-consent-title"
+  size="lg"
+  (closed)="onClosed()"
+>
+  <div modal-header>
+    <h2 id="skill-consent-title" class="text-xl font-semibold">
+      Review skill installation
+    </h2>
+    <p class="text-sm text-base-content-muted">
+      Review the files and approve each skill that contains scripts.
+    </p>
+  </div>
+  <div class="max-h-[60vh] space-y-4 overflow-y-auto py-4">
+    @if (error()) {
+      <p role="alert" class="text-sm text-state-err">{{ error() }}</p>
+    }
+    @for (item of previews(); track item.skillName) {
+      <section
+        class="rounded-[14px] border border-base-300 p-3"
+        [attr.aria-label]="item.skillName"
+      >
+        <h3 class="break-all font-semibold">{{ item.skillName }}</h3>
+        <p class="break-all font-mono text-xs text-base-content-muted">
+          Content hash: {{ item.contentHash }}
+        </p>
+        <p class="text-sm">
+          {{ item.hasScripts ? 'Contains scripts' : 'No scripts detected' }}
+        </p>
+        @if (item.scriptFiles.length) {
+          <details class="mt-2">
+            <summary class="cursor-pointer text-sm">
+              Scripts ({{ item.scriptFiles.length }})
+            </summary>
+            <ul class="list-inside list-disc break-all text-xs">
+              @for (file of item.scriptFiles; track file) {
+                <li>{{ file }}</li>
+              }
+            </ul>
+          </details>
+        } @else if (item.hasScripts) {
+          <p class="text-sm">Also contains hooks or executable files. Review all files.</p>
+        }
+        <details class="mt-2">
+          <summary class="cursor-pointer text-sm">
+            All files ({{ item.files.length }})
+          </summary>
+          <ul class="list-inside list-disc break-all text-xs">
+            @for (file of item.files; track file) {
+              <li>{{ file }}</li>
+            }
+          </ul>
+        </details>
+        @if (item.hasScripts) {
+          <label class="mt-3 flex cursor-pointer items-start gap-2 text-sm"
+            ><input
+              type="checkbox"
+              ptahCheckbox
+              [checked]="approvedIds().has(item.skillName)"
+              [disabled]="busy()"
+              (change)="approve.emit(item.skillName)"
+            /><span
+              >I approve installing this exact version of
+              {{ item.skillName }} with its scripts.</span
+            ></label
+          >
+        }
+      </section>
+    }
+  </div>
+  <div modal-footer class="flex justify-end gap-2">
+    <button
+      ptahButton
+      variant="ghost"
+      type="button"
+      [disabled]="busy()"
+      (click)="cancelRequested.emit()"
+    >
+      Back</button
+    ><button
+      ptahButton
+      variant="primary"
+      type="button"
+      [disabled]="busy() || !allApproved()"
+      (click)="install.emit()"
+    >
+      {{ busy() ? 'Installing…' : 'Install and launch chat' }}
+    </button>
+  </div>
+</ptah-native-modal>
