@@ -75,7 +75,7 @@ describe('GlobalConfigActionsComponent', () => {
     expect(appState.setCurrentView).toHaveBeenCalledWith('onboarding');
     appState.openConfigurationSurface.set('onboarding');
     fixture.detectChanges();
-    expect(buttons()[1].getAttribute('aria-current')).toBe('true');
+    expect(buttons()[1].getAttribute('aria-current')).toBe('page');
   });
 
   it.each(ids)('navigates to %s on click', (id) => {
@@ -105,7 +105,7 @@ describe('GlobalConfigActionsComponent', () => {
       buttons().forEach((button, index) => {
         const isCurrent = ids[index] === surface;
         expect(button.getAttribute('aria-current')).toBe(
-          isCurrent ? 'true' : null,
+          isCurrent ? 'page' : null,
         );
       });
     }
