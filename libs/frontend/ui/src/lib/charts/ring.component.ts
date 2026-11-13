@@ -31,6 +31,12 @@ const SUB: Readonly<Record<PtahRingSize, string>> = {
   lg: 'text-[0.625rem]',
   xl: 'text-xs',
 };
+const TEXT_WEIGHT = {
+  normal: 'font-normal',
+  medium: 'font-medium',
+  semibold: 'font-semibold',
+} as const;
+type RingTextWeight = keyof typeof TEXT_WEIGHT;
 
 /**
  * Ring owner (TASK_2026_976_2421). A circular meter: the arc uses a path
@@ -65,8 +71,8 @@ const SUB: Readonly<Record<PtahRingSize, string>> = {
       @if (indeterminate() && pulseStyle() === 'core') { <span class="ring-pulse" [class.has-sub]="!!subText()" [class]="inkClass()" [style.color]="arcColor()" aria-hidden="true"></span> }
       @if (!bare() && (showValue() || centerOnly()) && (centerLabel() !== null || subText())) {
         <span class="absolute inset-0 flex flex-col items-center justify-center tabular-nums" [class.leading-none]="!!subText()" [class]="centerClass()" [class.core-pulse-center]="indeterminate() && pulseStyle() === 'core'" aria-hidden="true">
-          @if (centerLabel() !== null) { <span [style.font-size]="centerTextSize()" [style.color]="centerTextColor()">{{ centerLabel() }}</span> }
-          @if (subText()) { <span [class]="subClass()" [style.color]="subTextColor()" [style.margin-top]="subTextGap()">{{ subText() }}</span> }
+          @if (centerLabel() !== null) { <span [class]="centerWeightClass()" [style.font-size]="centerTextSize()" [style.color]="centerTextColor()">{{ centerLabel() }}</span> }
+          @if (subText()) { <span [class]="subClass()" [style.font-size]="subTextSize()" [style.color]="subTextColor()" [style.margin-top]="subTextGap()">{{ subText() }}</span> }
         </span>
       }
     </span>
@@ -105,7 +111,13 @@ export class PtahRingComponent {
   readonly arcColor = input<string | null>(null);
   readonly ariaLabel = input<string | null>(null);
   readonly semanticRole = input<'meter' | 'img'>('meter');
+  /** Preserve an image role for a consumer's indeterminate core pulse. */
+  readonly indeterminateRole = input<'progressbar' | 'img'>('progressbar');
   readonly centerTextSize = input<string | null>(null);
+  /** Null preserves the existing inherited weight and class list. */
+  readonly centerTextWeight = input<RingTextWeight | null>(null);
+  readonly subTextWeight = input<RingTextWeight | null>(null);
+  readonly subTextSize = input<string | null>(null);
   readonly centerTextColor = input<string | null>(null);
   readonly subTextColor = input<string | null>(null);
   readonly subTextGap = input<string | null>(null);
@@ -133,7 +145,7 @@ export class PtahRingComponent {
   readonly ranged = computed(() => !this.bare() && this.semanticRole() === 'meter' && this.valid() && !this.indeterminate());
   readonly ariaRole = computed(() => {
     if (this.bare()) return null;
-    if (this.indeterminate()) return 'progressbar';
+    if (this.indeterminate()) return this.indeterminateRole();
     return this.semanticRole() === 'img' || this.valid() ? this.semanticRole() : null;
   });
   readonly percent = computed(() => percentOf(this.value(), this.max()));
@@ -169,5 +181,6 @@ export class PtahRingComponent {
   });
   readonly boxClass = computed(() => BOX[this.size()]);
   readonly centerClass = computed(() => CENTER[this.size()]);
-  readonly subClass = computed(() => SUB[this.size()]);
+  readonly centerWeightClass = computed(() => this.centerTextWeight() === null ? '' : TEXT_WEIGHT[this.centerTextWeight()!]);
+  readonly subClass = computed(() => this.subTextWeight() === null ? SUB[this.size()] : `${SUB[this.size()]} ${TEXT_WEIGHT[this.subTextWeight()!]}`);
 }

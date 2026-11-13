@@ -64,6 +64,9 @@ describe('PtahRingComponent inputs', () => {
     expect(el.querySelector('.absolute')?.textContent).toContain('25%');
     expect(el.textContent).toContain('Context');
     expect(el.textContent).toContain('25 / 100');
+    const [center, sub] = render({ value: 25, size: 'row', subText: 'ready' }).querySelectorAll('.absolute span');
+    expect(center.className).toBe('');
+    expect(sub.className).toBe('text-xs');
   });
 
   it('centerOnly hides side text while keeping center text and meter semantics', () => {
@@ -91,6 +94,42 @@ describe('PtahRingComponent inputs', () => {
     const el = render({ value: 0, max: 0, indeterminate: true, valueText: 'Indexing' });
     expect(el.textContent).toContain('Indexing');
     expect(el.querySelector('.animate-pulse.motion-reduce\\:animate-none')).not.toBeNull();
+    expect(el.querySelector('[role="progressbar"]')).not.toBeNull();
+  });
+
+  it('can keep an image role during an indeterminate core pulse', () => {
+    const el = render({ value: 0, max: 0, indeterminate: true, pulseStyle: 'core', indeterminateRole: 'img', ariaLabel: 'Checking readiness' });
+    expect(el.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Checking readiness');
+    expect(el.querySelector('[role="img"]')?.hasAttribute('aria-valuenow')).toBe(false);
+    expect(el.querySelector('.ring-pulse')).not.toBeNull();
+  });
+
+  it.each([
+    ['normal', 'font-normal'],
+    ['medium', 'font-medium'],
+    ['semibold', 'font-semibold'],
+  ])('maps centerTextWeight %s to %s', (weight, cls) => {
+    const el = render({ value: 25, centerTextWeight: weight });
+    expect(el.querySelector('.absolute span')?.classList.contains(cls)).toBe(true);
+  });
+
+  it.each([
+    ['normal', 'font-normal'],
+    ['medium', 'font-medium'],
+    ['semibold', 'font-semibold'],
+  ])('maps subTextWeight %s to %s', (weight, cls) => {
+    const el = render({ value: 25, size: 'row', subText: 'ready', subTextWeight: weight });
+    expect(el.querySelector('.absolute span:last-child')?.classList.contains(cls)).toBe(true);
+    expect(el.querySelector('.absolute span:last-child')?.classList.contains('text-xs')).toBe(true);
+  });
+
+  it('allows a fixed sub text size without changing the default class or style', () => {
+    const custom = render({ value: 25, size: 'xl', subText: 'ready', subTextSize: '12px' });
+    const sub = custom.querySelector('.absolute span:last-child') as HTMLElement;
+    expect(sub.classList.contains('text-xs')).toBe(true);
+    expect(sub.style.fontSize).toBe('12px');
+    const standard = render({ value: 25, size: 'xl', subText: 'ready' });
+    expect((standard.querySelector('.absolute span:last-child') as HTMLElement).style.fontSize).toBe('');
   });
 
   it('valueText replaces the side text', () => {
@@ -159,6 +198,14 @@ describe('PtahRingComponent inputs', () => {
     expect(box(standard).getAttribute('style')?.trim() ?? '').toBe('');
     expect(standard.querySelector('.absolute span:last-child')?.getAttribute('style')?.trim() ?? '').toBe('');
     expect(arc(standard)?.classList.contains('fade-arc')).toBe(false);
+  });
+
+  it('pins an xl box at 112px despite its variable based size class', () => {
+    const el = render({ value: 50, size: 'xl', boxSize: '112px' });
+    expect(box(el).classList.contains('h-[var(--ptah-ring-size-xl,7rem)]')).toBe(true);
+    expect(box(el).getAttribute('style')).toContain('width: 112px');
+    expect(box(el).getAttribute('style')).toContain('height: 112px');
+    expect(box(render({ value: 50, size: 'xl' })).getAttribute('style')?.trim() ?? '').toBe('');
   });
 
   it.each([
