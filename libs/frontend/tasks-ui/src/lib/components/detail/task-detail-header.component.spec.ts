@@ -176,15 +176,15 @@ describe('TaskDetailHeaderComponent', () => {
       expect(menuItems(host)).toHaveLength(6);
       for (const el of targets) {
         expect(el).not.toBeNull();
-        for (const cls of FOCUS_RING) expect(el?.classList).toContain(cls);
       }
-      // Buttons take the shared outward offset; menu items draw it inward so
-      // the menu's padding does not clip it.
+      // The button directive supplies its focus ring. Menu items still use
+      // their own inward ring so the menu does not clip it.
       for (const el of targets.slice(0, 3)) {
-        expect(el?.classList).toContain('focus-visible:outline-offset-2');
+        expect(el?.hasAttribute('data-ptah-button')).toBe(true);
         expect(el?.classList).not.toContain('focus-visible:-outline-offset-2');
       }
       for (const item of menuItems(host)) {
+        for (const cls of FOCUS_RING) expect(item.classList).toContain(cls);
         expect(item.classList).toContain('focus-visible:-outline-offset-2');
         expect(item.classList).not.toContain('focus-visible:outline-offset-2');
       }

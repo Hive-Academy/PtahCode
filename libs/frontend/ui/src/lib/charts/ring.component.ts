@@ -1,9 +1,13 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import { NEAR_LIMIT_PERCENT } from '@ptah-extension/shared';
 import { CHART_TEXT, isValidRange, percentOf, resolveInk } from './chart-geometry';
-import { PtahMeterTone, PtahRingSize } from './chart.types';
+import { PtahMeterTone, PtahRingSize, PtahRingThresholds } from './chart.types';
 
 const BOX: Readonly<Record<PtahRingSize, string>> = {
   xs: 'h-6 w-6',
+  stat: 'h-8 w-8',
+  row: 'h-14 w-14',
+  tile: 'h-[var(--ptah-stat-value-h,3.5rem)] w-[var(--ptah-stat-value-h,3.5rem)]',
   sm: 'h-10 w-10',
   md: 'h-16 w-16',
   lg: 'h-[var(--ptah-ring-size-lg,6rem)] w-[var(--ptah-ring-size-lg,6rem)]',
@@ -11,19 +15,42 @@ const BOX: Readonly<Record<PtahRingSize, string>> = {
 };
 const CENTER: Readonly<Record<PtahRingSize, string>> = {
   xs: 'hidden',
+  stat: 'text-[0.625rem]',
+  row: 'text-sm',
+  tile: 'text-[length:calc(var(--ptah-stat-value-h,3.5rem)*0.25)] text-base-content',
   sm: 'text-[0.625rem]',
   md: 'text-sm',
   lg: 'text-[length:var(--ptah-ring-center-lg,1.125rem)]',
   xl: 'text-[length:var(--ptah-ring-center-xl,1.375rem)]',
 };
-/** Sub text is too small for xs and sm. */
+/** Sub text is too small for xs, stat and sm. */
 const SUB: Readonly<Record<PtahRingSize, string>> = {
   xs: 'hidden',
+  stat: 'hidden',
+  row: 'text-xs',
+  tile: 'hidden',
   sm: 'hidden',
   md: 'text-[0.5rem]',
   lg: 'text-[0.625rem]',
   xl: 'text-xs',
 };
+/** Circle geometry in the 36 unit viewBox. `tile` is the thicker ring of the stat tile. */
+const GEOMETRY: Readonly<Record<PtahRingSize, { readonly stroke: number; readonly radius: number }>> = {
+  xs: { stroke: 4, radius: 15 },
+  stat: { stroke: 4, radius: 15 },
+  row: { stroke: 4, radius: 15 },
+  tile: { stroke: 3.857142857142857, radius: 16.071428571428573 },
+  sm: { stroke: 4, radius: 15 },
+  md: { stroke: 4, radius: 15 },
+  lg: { stroke: 4, radius: 15 },
+  xl: { stroke: 4, radius: 15 },
+};
+const TEXT_WEIGHT = {
+  normal: 'font-normal',
+  medium: 'font-medium',
+  semibold: 'font-semibold',
+} as const;
+type RingTextWeight = keyof typeof TEXT_WEIGHT;
 
 /**
  * Ring owner (TASK_2026_976_2421). A circular meter: the arc uses a path
@@ -31,39 +58,57 @@ const SUB: Readonly<Record<PtahRingSize, string>> = {
  * text beside the ring, and `showValue` adds the percent in the center.
  *
  * `bare` renders the SVG only: no text, `aria-hidden="true"`, no role.
+ * `centerOnly` hides the side text while keeping the ring role and center text.
  * `centerText` replaces the center percent. `subText` is a small second line
  * below it, in the center. It shows at md and larger. Custom text is also the
  * `aria-valuetext` of a ranged ring. `valueText` replaces the side text and
  * `aria-valuetext`. `indeterminate` is a pulsing `progressbar` without
  * `aria-valuenow`.
  *
- * Sizes are a named scale. `xs`, `sm` and `md` are 24, 40 and 64 px. `lg` and
+ * Sizes are a named scale. `xs`, `stat`, `sm`, `row` and `md` are 24, 32, 40, 56 and 64 px. `tile` follows
+ * `--ptah-stat-value-h` (the stat tile value row) with a thicker ring and a soft track. `lg` and
  * `xl` read `--ptah-ring-size-*` (96 and 112 px). The SVG geometry is a fixed
- * viewBox and scales with the box.
+ * viewBox and scales with the box. At `stat`, percent labels wider than two
+ * digits are omitted; custom center text should be short enough to fit 32 px.
  *
  * Test hook: put `data-testid` on the host `<ptah-ring>`. There is no input for it.
  */
 @Component({
   selector: 'ptah-ring', standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `<div class="inline-flex items-center gap-2 text-xs" [attr.aria-hidden]="bare() ? 'true' : null" [attr.role]="ariaRole()" [attr.aria-label]="ariaRole() ? label() : null" [attr.aria-valuemin]="ranged() ? 0 : null" [attr.aria-valuemax]="ranged() ? max() : null" [attr.aria-valuenow]="ranged() ? ariaNow() : null" [attr.aria-valuetext]="ariaValueText()">
+  template: `<div class="inline-flex items-center gap-2 text-xs" [attr.aria-hidden]="bare() ? 'true' : null" [attr.role]="ariaRole()" [attr.aria-label]="ariaRole() ? (ariaLabel() ?? label()) : null" [attr.aria-valuemin]="ranged() ? 0 : null" [attr.aria-valuemax]="ranged() ? max() : null" [attr.aria-valuenow]="ranged() ? ariaNow() : null" [attr.aria-valuetext]="ariaValueText()">
     <span class="relative inline-flex shrink-0 items-center justify-center" [class]="boxClass()">
       <svg class="h-full w-full -rotate-90" viewBox="0 0 36 36" aria-hidden="true" focusable="false">
-        <circle class="text-[var(--ptah-ring-track,var(--surface-border-strong))]" cx="18" cy="18" r="15" fill="none" stroke="currentColor" stroke-width="4" />
-        @if (indeterminate()) { <circle class="animate-pulse motion-reduce:animate-none" [class]="inkClass()" cx="18" cy="18" r="15" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" pathLength="100" stroke-dasharray="25 100" /> }
-        @else if (valid()) { <circle class="transition-[stroke-dasharray] motion-reduce:transition-none" [class]="inkClass()" cx="18" cy="18" r="15" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" pathLength="100" [attr.stroke-dasharray]="arc() + ' 100'" /> }
+        <circle [class]="trackClass()" cx="18" cy="18" [attr.r]="geometry().radius" fill="none" stroke="currentColor" [attr.stroke-width]="geometry().stroke" />
+        @if (indeterminate() && pulseStyle() === 'arc') { <circle class="animate-pulse motion-reduce:animate-none" [class]="inkClass()" cx="18" cy="18" [attr.r]="geometry().radius" fill="none" stroke="currentColor" [attr.stroke-width]="geometry().stroke" stroke-linecap="round" pathLength="100" stroke-dasharray="25 100" /> }
+        @else if (!indeterminate() && valid()) { <circle class="transition-[stroke-dasharray] motion-reduce:transition-none" [class]="inkClass()" [class.fade-arc]="fadeArc()" cx="18" cy="18" [attr.r]="geometry().radius" fill="none" stroke="currentColor" [attr.stroke-width]="geometry().stroke" stroke-linecap="round" pathLength="100" [attr.stroke-dasharray]="arc() + ' 100'" [attr.opacity]="hideZeroArc() && arc() === 0 ? 0 : null" /> }
       </svg>
-      @if (!bare() && showValue() && (centerLabel() !== null || subText())) {
-        <span class="absolute inset-0 flex flex-col items-center justify-center tabular-nums" [class.leading-none]="!!subText()" [class]="centerClass()" aria-hidden="true">
-          @if (centerLabel() !== null) { <span>{{ centerLabel() }}</span> }
+      @if (indeterminate() && pulseStyle() === 'core') { <span class="ring-pulse" [class.has-sub]="!!subText()" [class]="inkClass()" aria-hidden="true"></span> }
+      @if (!bare() && (showValue() || centerOnly()) && (centerLabel() !== null || subText())) {
+        <span class="absolute inset-0 flex flex-col items-center justify-center tabular-nums" [class.leading-none]="!!subText()" [class]="centerClass()" [class.core-pulse-center]="indeterminate() && pulseStyle() === 'core'" aria-hidden="true">
+          @if (centerLabel() !== null) { <span [class]="centerWeightClass()">{{ centerLabel() }}</span> }
           @if (subText()) { <span [class]="subClass()">{{ subText() }}</span> }
         </span>
       }
     </span>
-    @if (!bare()) {
+    @if (!bare() && !centerOnly()) {
       <span class="flex flex-col"><span>{{ label() }}</span><span class="tabular-nums">@if (indeterminate()) { {{ valueText() ?? 'In progress' }} } @else if (valid()) { {{ visibleText() }} } @else { Unavailable }</span></span>
     }
   </div>`,
+  styles: [`
+    .ring-pulse { position: absolute; inset: 0; margin: auto; width: 0.75rem; height: 0.75rem; pointer-events: none; }
+    .ring-pulse::before { content: ''; position: absolute; inset: 22%; border-radius: 50%; background: currentColor; }
+    .ring-pulse::after { content: ''; position: absolute; inset: 0; border: 0.09375rem solid currentColor; border-radius: 50%; }
+    @media (prefers-reduced-motion: no-preference) {
+      .ring-pulse::before { animation: ptah-pulse-core 1.4s ease-in-out infinite; }
+      .ring-pulse::after { animation: ptah-pulse-ring 1.4s ease-out infinite; }
+    }
+    @media (prefers-reduced-motion: reduce) { .ring-pulse::after { display: none; } .ring-pulse::before { opacity: 0.8; } }
+    .core-pulse-center > span:last-child { transform: translateY(1rem); }
+    .ring-pulse.has-sub { transform: translateY(-0.875rem); }
+    @media (prefers-reduced-motion: no-preference) { .fade-arc { animation: ptah-ring-fade 600ms var(--ptah-ease-soft, ease-out) both; } }
+    @keyframes ptah-ring-fade { from { opacity: 0; } }
+  `],
 })
 export class PtahRingComponent {
   readonly value = input.required<number>();
@@ -72,7 +117,20 @@ export class PtahRingComponent {
   readonly unit = input('');
   readonly tone = input<PtahMeterTone>('auto');
   readonly size = input<PtahRingSize>('sm');
+  readonly ariaLabel = input<string | null>(null);
+  readonly semanticRole = input<'meter' | 'img'>('meter');
+  /** Preserve an image role for a consumer's indeterminate core pulse. */
+  readonly indeterminateRole = input<'progressbar' | 'img'>('progressbar');
+  /** Null preserves the existing inherited weight and class list. */
+  readonly centerTextWeight = input<RingTextWeight | null>(null);
+  readonly subTextWeight = input<RingTextWeight | null>(null);
+  readonly hideZeroArc = input(false);
+  readonly fadeArc = input(false);
+  /** `core` shows the vitals center pulse; default keeps the quarter arc. */
+  readonly pulseStyle = input<'arc' | 'core'>('arc');
   readonly showValue = input(true);
+  /** Keep the center text and semantics, but omit the side label and value. */
+  readonly centerOnly = input(false);
   /** Ring only: no text, `aria-hidden`, no role. For decorative rings. */
   readonly bare = input(false);
   /** Replaces the center percent. */
@@ -83,13 +141,15 @@ export class PtahRingComponent {
   readonly indeterminate = input(false);
   /** Replaces the side value text and `aria-valuetext` when set. */
   readonly valueText = input<string | undefined>(undefined);
+  /** Automatic ink cut-offs in percent; explicit tones ignore them. */
+  readonly thresholds = input<PtahRingThresholds>({ warn: NEAR_LIMIT_PERCENT, danger: 100 });
 
   readonly valid = computed(() => isValidRange(this.value(), this.max()));
-  readonly ranged = computed(() => !this.bare() && this.valid() && !this.indeterminate());
+  readonly ranged = computed(() => !this.bare() && this.semanticRole() === 'meter' && this.valid() && !this.indeterminate());
   readonly ariaRole = computed(() => {
     if (this.bare()) return null;
-    if (this.indeterminate()) return 'progressbar';
-    return this.valid() ? 'meter' : null;
+    if (this.indeterminate()) return this.indeterminateRole();
+    return this.semanticRole() === 'img' || this.valid() ? this.semanticRole() : null;
   });
   readonly percent = computed(() => percentOf(this.value(), this.max()));
   readonly arc = computed(() => Math.min(100, this.percent()));
@@ -100,7 +160,7 @@ export class PtahRingComponent {
   readonly defaultText = computed(() => `${this.value()}${this.unit()} / ${this.max()}${this.unit()}`);
   readonly visibleText = computed(() => this.valueText() ?? this.defaultText());
   readonly centerLabel = computed(
-    () => this.centerText() ?? (this.valid() && !this.indeterminate() ? `${this.rounded()}%` : null),
+    () => this.centerText() ?? (this.valid() && !this.indeterminate() && (this.size() !== 'stat' || this.rounded() < 10) ? `${this.rounded()}%` : null),
   );
   /** Custom center text and sub text as one string, or null. */
   readonly customCenter = computed(() => {
@@ -113,8 +173,25 @@ export class PtahRingComponent {
     if (!this.ranged()) return null;
     return this.valueText() ?? this.customCenter() ?? (this.outOfRange() ? this.defaultText() : null);
   });
-  readonly inkClass = computed(() => CHART_TEXT[resolveInk(this.tone(), this.indeterminate() ? 0 : this.percent())]);
+  readonly inkClass = computed(() => {
+    const tone = this.tone();
+    const percent = this.indeterminate() ? 0 : this.percent();
+    if (tone !== 'auto') return CHART_TEXT[resolveInk(tone, percent)];
+    const provided = this.thresholds();
+    const danger = Number.isFinite(provided.danger) ? provided.danger : 100;
+    const warn = Math.min(Number.isFinite(provided.warn) ? provided.warn : NEAR_LIMIT_PERCENT, danger);
+    return CHART_TEXT[percent >= danger ? 'err' : percent >= warn ? 'warn' : 'gold'];
+  });
   readonly boxClass = computed(() => BOX[this.size()]);
+  readonly geometry = computed(() => GEOMETRY[this.size()]);
+  readonly trackClass = computed(() => this.size() === 'tile' ? 'text-[var(--ptah-ring-track-soft,var(--surface-border-strong))]' : 'text-[var(--ptah-ring-track,var(--surface-border-strong))]');
   readonly centerClass = computed(() => CENTER[this.size()]);
-  readonly subClass = computed(() => SUB[this.size()]);
+  readonly centerWeightClass = computed(() => {
+    const weight = this.centerTextWeight();
+    return weight === null ? '' : TEXT_WEIGHT[weight];
+  });
+  readonly subClass = computed(() => {
+    const weight = this.subTextWeight();
+    return weight === null ? SUB[this.size()] : `${SUB[this.size()]} ${TEXT_WEIGHT[weight]}`;
+  });
 }

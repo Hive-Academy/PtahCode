@@ -437,6 +437,41 @@ describe('UiGalleryComponent', () => {
     expect(root.querySelector('section#family-meter')?.textContent).toContain(
       'Unavailable',
     );
+    const meterSection = root.querySelector('section#family-meter');
+    expect(meterSection?.querySelectorAll('ptah-meter')).toHaveLength(45);
+    const newMeters = meterSection?.querySelector(
+      '[data-testid="meter-family-new-inputs"]',
+    );
+    expect(newMeters?.querySelectorAll('ptah-meter')).toHaveLength(6);
+    for (const [id, label] of [
+      ['meter-tone-gold', 'Gold tone'],
+      ['meter-tone-primary', 'Primary tone'],
+      ['meter-sweep', 'Sweep progress'],
+      ['meter-static-fill', 'Static fill'],
+      ['meter-bar-only', 'Bar only, text available to assistive technology'],
+      ['meter-external-label', 'External meter label'],
+    ]) {
+      const specimen = newMeters?.querySelector(`[data-testid="${id}"]`);
+      expect(specimen).not.toBeNull();
+      expect(specimen?.parentElement?.textContent).toContain(label);
+    }
+    expect(
+      newMeters?.querySelector('[data-testid="meter-sweep"] .ptah-meter-sweep'),
+    ).not.toBeNull();
+    expect(
+      newMeters?.querySelector(
+        '[data-testid="meter-static-fill"] [style*="width"]',
+      )?.classList,
+    ).not.toContain('transition-[width]');
+    expect(
+      newMeters?.querySelector('[data-testid="meter-bar-only"] [data-meter-row]')
+        ?.classList,
+    ).toContain('sr-only');
+    expect(
+      newMeters
+        ?.querySelector('[data-testid="meter-external-label"] [aria-labelledby]')
+        ?.getAttribute('aria-labelledby'),
+    ).toBe('gallery-meter-external-label');
     expect(root.querySelector('section#family-ring')?.textContent).toContain(
       'Unavailable',
     );
@@ -464,7 +499,63 @@ describe('UiGalleryComponent', () => {
     ).not.toBeNull();
   });
 
-  it('scrolls inside its own container and scrolls a section link to its section', () => {
+    it('renders every new ring input as a labelled specimen', () => {
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: Router, useValue: { navigateByUrl: jest.fn() } },
+        { provide: ThemeService, useValue: createThemeServiceStub() },
+      ],
+    });
+    const fixture = TestBed.createComponent(UiGalleryComponent);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    const section = root.querySelector('section#family-ring');
+    const samples = section?.querySelector('[data-testid="ring-new-inputs"]');
+    expect(section?.querySelectorAll('ptah-ring')).toHaveLength(44);
+    const specimens: readonly [string, readonly string[]][] = [
+      ['thresholds', ['thresholds']],
+      ['size-stat', ['size: stat']],
+      ['size-row', ['size: row']],
+      ['semantics', ['ariaLabel', 'semanticRole']],
+      ['core-pulse', ['pulseStyle', 'indeterminateRole']],
+      ['center-typography', ['centerTextWeight', 'subTextWeight']],
+      ['tile-size', ['size: tile']],
+      ['hide-zero-arc', ['hideZeroArc']],
+      ['fade-arc', ['fadeArc']],
+      ['center-only', ['centerOnly']],
+    ];
+    expect(samples?.querySelectorAll('ptah-ring')).toHaveLength(
+      specimens.length,
+    );
+    for (const [id, labels] of specimens) {
+      const specimen = samples?.querySelector(
+        `[data-testid="ring-input-${id}"]`,
+      );
+      expect(specimen?.querySelectorAll('ptah-ring')).toHaveLength(1);
+      for (const label of labels) expect(specimen?.textContent).toContain(label);
+    }
+    expect(
+      samples
+        ?.querySelector('[data-testid="ring-input-semantics"] [role="img"]')
+        ?.getAttribute('aria-label'),
+    ).toBe('Completion image');
+    expect(
+      samples?.querySelector(
+        '[data-testid="ring-input-core-pulse"] [role="img"] .ring-pulse',
+      ),
+    ).not.toBeNull();
+    expect(
+      samples
+        ?.querySelector('[data-testid="ring-input-hide-zero-arc"] circle:last-child')
+        ?.getAttribute('opacity'),
+    ).toBe('0');
+    expect(
+      samples?.querySelector('[data-testid="ring-input-fade-arc"] circle:last-child')
+        ?.classList,
+    ).toContain('fade-arc');
+  });
+
+it('scrolls inside its own container and scrolls a section link to its section', () => {
     TestBed.configureTestingModule({
       providers: [
         { provide: Router, useValue: { navigateByUrl: jest.fn() } },

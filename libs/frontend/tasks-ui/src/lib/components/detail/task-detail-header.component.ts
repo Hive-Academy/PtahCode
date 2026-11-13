@@ -70,7 +70,6 @@ let nextMenuId = 0;
           #backButton
           type="button"
           ptahButton
-          class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
           aria-label="Back to board"
           data-testid="task-detail-back"
           (click)="back.emit()"
@@ -96,7 +95,6 @@ let nextMenuId = 0;
               <button
                 type="button"
                 ptahButton
-                class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
                 data-testid="task-detail-start"
                 [disabled]="starting()"
                 [attr.aria-label]="'Start task ' + task.id + ' in chat'"
@@ -120,7 +118,6 @@ let nextMenuId = 0;
                 #statusTrigger
                 type="button"
                 ptahButton
-                class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
                 aria-haspopup="menu"
                 [attr.aria-expanded]="menuVisible()"
                 [attr.aria-controls]="menuId"

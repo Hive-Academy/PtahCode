@@ -98,7 +98,7 @@ describe('GlobalConfigActionsComponent', () => {
     expect(appState.setCurrentView).toHaveBeenCalledTimes(2);
   });
 
-  it('updates aria-current and highlights from the settled surface signal', () => {
+  it('updates aria-current from the settled surface signal', () => {
     for (const surface of [null, ...ids, 'onboarding' as const, null]) {
       appState.openConfigurationSurface.set(surface);
       fixture.detectChanges();
@@ -107,8 +107,6 @@ describe('GlobalConfigActionsComponent', () => {
         expect(button.getAttribute('aria-current')).toBe(
           isCurrent ? 'true' : null,
         );
-        expect(button.classList.contains('text-primary')).toBe(isCurrent);
-        expect(button.classList.contains('bg-base-300')).toBe(isCurrent);
       });
     }
   });

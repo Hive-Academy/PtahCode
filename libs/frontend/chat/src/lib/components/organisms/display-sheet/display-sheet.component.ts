@@ -130,7 +130,6 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
             type="button"
             ptahButton variant="ghost" size="xs"
             [attr.aria-pressed]="state().pinned"
-            [class.text-primary]="state().pinned"
             aria-label="Keep current view"
             aria-description="New or updated displays will not switch items or scroll this panel."
             title="New or updated displays will not switch items or scroll this panel."

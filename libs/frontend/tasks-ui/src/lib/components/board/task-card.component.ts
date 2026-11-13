@@ -278,7 +278,6 @@ const HTTP_URL = /^https?:\/\//i;
                 [attr.tabindex]="rovingTabIndex()"
                 ptahIconButton
                 label="Change status"
-                class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
                 (click)="$event.stopPropagation()"
               >
                 <lucide-angular
@@ -453,7 +452,7 @@ const HTTP_URL = /^https?:\/\//i;
               type="button"
               ptahButton
               size="xs"
-              class="tabular-nums focus-visible:outline-offset-2"
+              class="tabular-nums"
               [attr.tabindex]="rovingTabIndex()"
               [title]="rollupActionTitle()"
               data-testid="task-card-rollup"

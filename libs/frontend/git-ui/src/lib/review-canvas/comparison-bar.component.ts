@@ -85,7 +85,6 @@ const FOCUS_RING =
           ptahButton
           variant="ghost"
           size="xs"
-          class="{{ focusRing }}"
           data-testid="comparison-show-files"
           (click)="layout.toggleGitRail()"
         >
@@ -110,7 +109,7 @@ const FOCUS_RING =
           ptahButton
           variant="ghost"
           size="xs"
-          class="max-w-[16rem] {{ focusRing }}"
+          class="max-w-[16rem]"
           aria-haspopup="true"
           [attr.aria-expanded]="pickerOpen()"
           [attr.aria-label]="'Comparison: ' + currentLabel()"

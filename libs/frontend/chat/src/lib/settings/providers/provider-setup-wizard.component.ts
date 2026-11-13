@@ -400,7 +400,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
             <div class="mt-2 flex gap-2">
               <button
                 type="button"
-                ptahButton class="hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                ptahButton
                 (click)="onKeepEditing()"
                 data-testid="wizard-discard-keep"
               >
@@ -408,7 +408,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
               </button>
               <button
                 type="button"
-                ptahButton variant="ghost" class="hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                ptahButton variant="ghost"
                 (click)="onDiscard()"
                 data-testid="wizard-discard-confirm"
               >
@@ -477,7 +477,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                   </p>
                   <button
                     type="button"
-                    ptahButton variant="ghost" class="hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                    ptahButton variant="ghost"
                     (click)="onClearSearch()"
                     data-testid="wizard-clear-search"
                   >
@@ -599,7 +599,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                   <div class="mt-2 flex gap-2">
                     <button
                       type="button"
-                      ptahButton class="hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                      ptahButton
                       (click)="confirmProviderChange()"
                       data-testid="wizard-provider-change-discard"
                     >
@@ -607,7 +607,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                     </button>
                     <button
                       type="button"
-                      ptahButton variant="ghost" class="hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                      ptahButton variant="ghost"
                       (click)="cancelProviderChange()"
                       data-testid="wizard-provider-change-keep"
                     >
@@ -642,7 +642,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                     </p>
                     <button
                       type="button"
-                      ptahButton class="mt-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                      ptahButton class="mt-2"
                       (click)="verifyStoredKey()"
                       data-testid="wizard-verify-stored-key"
                     >
@@ -650,7 +650,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                     </button>
                     <button
                       type="button"
-                      ptahButton class="mt-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                      ptahButton class="mt-2"
                       (click)="onReplaceKey()"
                       data-testid="wizard-replace-key"
                     >
@@ -676,7 +676,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                     </div>
                     <button
                       type="button"
-                      ptahButton variant="ghost" class="mt-1 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                      ptahButton variant="ghost" class="mt-1"
                       [attr.aria-pressed]="showApiKey()"
                       (click)="toggleKeyVisibility()"
                       data-testid="wizard-key-visibility"
@@ -704,7 +704,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                     </p>
                     <button
                       type="button"
-                      ptahButton variant="link" class="mt-1 !px-0 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                      ptahButton variant="link" noPadding class="mt-1"
                       (click)="setUseKeyInstead(false)"
                       #signInModeToggle
                       data-testid="wizard-use-sign-in"
@@ -733,7 +733,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                     </div>
                     <button
                       type="button"
-                      ptahButton variant="ghost" class="mt-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                      ptahButton variant="ghost" class="mt-2"
                       (click)="emitExternalAction('sign-in-cancel')"
                       data-testid="wizard-sign-in-cancel"
                     >
@@ -742,7 +742,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                   } @else {
                     <button
                       type="button"
-                      ptahButton class="mt-3 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                      ptahButton class="mt-3"
                       (click)="emitExternalAction('sign-in')"
                       data-testid="wizard-sign-in"
                     >
@@ -763,7 +763,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                     @if (keyFallbackAvailable()) {
                       <button
                         type="button"
-                        ptahButton variant="link" class="mt-2 block !px-0 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                        ptahButton variant="link" noPadding class="mt-2 block"
                         (click)="setUseKeyInstead(true)"
                         #apiKeyModeToggle
                         data-testid="wizard-use-api-key"
@@ -787,7 +787,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                     </p>
                     <button
                       type="button"
-                      ptahButton class="mt-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                      ptahButton class="mt-2"
                       (click)="emitExternalAction('cli-check')"
                       data-testid="wizard-cli-check"
                     >
@@ -803,7 +803,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                     </p>
                     <button
                       type="button"
-                      ptahButton class="mt-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                      ptahButton class="mt-2"
                       (click)="emitExternalAction('cli-login')"
                       data-testid="wizard-cli-login"
                     >
@@ -856,7 +856,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                     </div>
                     <button
                       type="button"
-                      ptahButton variant="ghost" class="mt-1 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                      ptahButton variant="ghost" class="mt-1"
                       [attr.aria-pressed]="showApiKey()"
                       (click)="toggleKeyVisibility()"
                       data-testid="wizard-optional-key-visibility"
@@ -915,7 +915,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                     </div>
                     <button
                       type="button"
-                      ptahButton variant="ghost" class="mt-1 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                      ptahButton variant="ghost" class="mt-1"
                       [attr.aria-pressed]="showApiKey()"
                       (click)="toggleKeyVisibility()"
                       data-testid="wizard-optional-key-visibility"
@@ -973,7 +973,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                   </div>
                   <button
                     type="button"
-                    ptahButton variant="ghost" class="mt-1 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                    ptahButton variant="ghost" class="mt-1"
                     [attr.aria-pressed]="showApiKey()"
                     (click)="toggleKeyVisibility()"
                     data-testid="wizard-key-visibility"
@@ -1043,7 +1043,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                 </p>
                 <button
                   type="button"
-                  ptahButton variant="ghost" class="mt-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                  ptahButton variant="ghost" class="mt-2"
                   (click)="onCancelProbe()"
                   data-testid="wizard-verify-cancel"
                 >
@@ -1101,7 +1101,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                     <div class="flex flex-wrap gap-2">
                       <button
                         type="button"
-                        ptahButton class="hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                        ptahButton
                         (click)="startProbe()"
                         data-testid="wizard-verify-retry"
                       >
@@ -1109,7 +1109,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                       </button>
                       <button
                         type="button"
-                        ptahButton variant="ghost" class="hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                        ptahButton variant="ghost"
                         (click)="goToStep('credential')"
                         data-testid="wizard-edit-credential"
                       >
@@ -1129,7 +1129,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                 }
                 <button
                   type="button"
-                  ptahButton variant="primary" class="mt-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                  ptahButton variant="primary" class="mt-3"
                   [disabled]="!credentialReady()"
                   (click)="startProbe()"
                   data-testid="wizard-verify-start"
@@ -1180,7 +1180,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
               @if (defaultsResolvable()) {
                 <button
                   type="button"
-                  ptahButton class="mt-3 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                  ptahButton class="mt-3"
                   (click)="useProviderDefaults()"
                   data-testid="wizard-use-defaults"
                 >
@@ -1320,7 +1320,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                 </p>
                 <button
                   type="button"
-                  ptahButton variant="primary" class="mt-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                  ptahButton variant="primary" class="mt-2"
                   (click)="onDone()"
                   data-testid="wizard-done"
                 >
@@ -1353,7 +1353,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
         <div class="flex items-center gap-2">
           <button
             type="button"
-            ptahButton class="hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+            ptahButton
             [disabled]="stepIndex() === 0 || probeChecking() || commitBusy()"
             (click)="goBack()"
             data-testid="wizard-back"
@@ -1362,7 +1362,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
           </button>
           <button
             type="button"
-            ptahButton variant="ghost" class="hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+            ptahButton variant="ghost"
             [disabled]="commitBusy()"
             (click)="requestWizardClose()"
             data-testid="wizard-cancel"
@@ -1373,7 +1373,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
         @if (step() === 'scope') {
           <button
             type="button"
-            ptahButton variant="primary" class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+            ptahButton variant="primary"
             [disabled]="commitBusy() || !modelsValid() || contextChanged()"
             (click)="onCommit()"
             data-testid="wizard-commit"
@@ -1383,7 +1383,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
         } @else {
           <button
             type="button"
-            ptahButton variant="primary" class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+            ptahButton variant="primary"
             [disabled]="!canContinue()"
             (click)="goForward()"
             data-testid="wizard-continue"

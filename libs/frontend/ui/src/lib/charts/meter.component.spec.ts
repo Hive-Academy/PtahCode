@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { PtahMeterComponent } from './meter.component';
@@ -46,6 +48,64 @@ it('uses a fixed tone when one is set', () => {
   expect(el.querySelector('[role="meter"] > div')?.classList.contains('bg-state-run')).toBe(true);
 });
 
+it.each([0, 90, 100, 150])('keeps explicit gold at %i percent', (value) => {
+  const fill = render({ value, tone: 'gold' }).querySelector('[role="meter"] > div') as HTMLElement;
+  expect(fill.classList.contains('bg-[var(--ptah-gold)]')).toBe(true);
+});
+
+describe('opt-in bar appearance', () => {
+  it('keeps the width transition by default', () => {
+    const fill = render({ value: 30 }).querySelector('[role="meter"] > div') as HTMLElement;
+    expect(fill.classList.contains('transition-[width]')).toBe(true);
+    expect(fill.classList.contains('motion-reduce:transition-none')).toBe(true);
+  });
+
+  it('removes the width transition when animate is false', () => {
+    const fill = render({ value: 30, animate: false }).querySelector('[role="meter"] > div') as HTMLElement;
+    expect(fill.classList.contains('transition-[width]')).toBe(false);
+    expect(fill.classList.contains('motion-reduce:transition-none')).toBe(false);
+    expect(fill.style.width).toBe('30%');
+  });
+
+  it('uses primary fill and primary stripe ink when requested', () => {
+    const fill = render({ value: 30, tone: 'primary' }).querySelector('[role="meter"] > div') as HTMLElement;
+    const striped = render({ value: 30, tone: 'primary', stripes: true }).querySelector('[role="meter"] > div') as HTMLElement;
+    expect(fill.classList.contains('bg-primary')).toBe(true);
+    expect(striped.classList.contains('text-primary')).toBe(true);
+  });
+
+  it('uses primary on the indeterminate fill too', () => {
+    const fill = render({ value: 0, max: 0, indeterminate: true, tone: 'primary' }).querySelector('[role="progressbar"] > div') as HTMLElement;
+    expect(fill.classList.contains('bg-primary')).toBe(true);
+  });
+});
+
+describe('indeterminate appearance', () => {
+  it('keeps the original pulse by default', () => {
+    const fill = render({ value: 0, max: 0, indeterminate: true }).querySelector('[role="progressbar"] > div') as HTMLElement;
+    expect(fill.classList.contains('w-1/3')).toBe(true);
+    expect(fill.classList.contains('animate-pulse')).toBe(true);
+    expect(fill.classList.contains('ptah-meter-sweep')).toBe(false);
+  });
+
+  it('offers a 40 percent sweep with a reduced-motion full-width faint state', () => {
+    const el = render({ value: 0, max: 0, indeterminate: true, indeterminateStyle: 'sweep', tone: 'gold' });
+    const bar = el.querySelector('[role="progressbar"]') as HTMLElement;
+    const fill = bar.firstElementChild as HTMLElement;
+    expect(fill.classList.contains('ptah-meter-sweep')).toBe(true);
+    expect(fill.classList.contains('bg-[var(--ptah-gold)]')).toBe(true);
+    expect(fill.classList.contains('animate-pulse')).toBe(false);
+    expect(bar.getAttribute('aria-label')).toBe('Used');
+    expect(bar.hasAttribute('aria-valuenow')).toBe(false);
+    // Read the component source: the Jest preset strips component styles.
+    const styles = readFileSync(join(__dirname, 'meter.component.ts'), 'utf8');
+    expect(styles).toContain('width: 40%');
+    expect(styles).toContain('prefers-reduced-motion: reduce');
+    expect(styles).toContain('width: 100%; opacity: 0.35');
+    expect(styles).toContain('translateX(250%)');
+  });
+});
+
 it('clamps the bar over the max and keeps the real value in text', () => {
   const el = render({ value: 150, unit: '%' });
   const meter = el.querySelector('[role="meter"]') as HTMLElement;
@@ -61,6 +121,42 @@ it('hides the value visually but keeps it for assistive tech', () => {
 });
 
 describe('meter hideLabel, valueText and role', () => {
+  it('uses aria-label by default without aria-labelledby', () => {
+    const bar = render({ value: 10 }).querySelector('[role="meter"]') as HTMLElement;
+    expect(bar.getAttribute('aria-label')).toBe('Used');
+    expect(bar.hasAttribute('aria-labelledby')).toBe(false);
+  });
+
+  it('links an external label to the inner progressbar', () => {
+    const el = render({ value: 10, barRole: 'progressbar', ariaLabelledby: 'outside-label' });
+    const bar = el.querySelector('[role="progressbar"]') as HTMLElement;
+    expect(bar.getAttribute('aria-labelledby')).toBe('outside-label');
+    expect(bar.hasAttribute('aria-label')).toBe(false);
+    expect(el.hasAttribute('role')).toBe(false);
+  });
+
+  it('links an external label to an indeterminate bar', () => {
+    const bar = render({ value: 0, max: 0, indeterminate: true, ariaLabelledby: 'outside-label' }).querySelector('[role="progressbar"]') as HTMLElement;
+    expect(bar.getAttribute('aria-labelledby')).toBe('outside-label');
+    expect(bar.hasAttribute('aria-label')).toBe(false);
+  });
+
+  it('accepts placement classes and a track color override on the host', () => {
+    @Component({
+      standalone: true,
+      imports: [PtahMeterComponent],
+      template: '<ptah-meter class="mt-auto shrink-0" style="--ptah-meter-track: red" [value]="10" [max]="100" label="Used" />',
+    })
+    class HostComponent {}
+    const fixture = TestBed.createComponent(HostComponent);
+    fixture.detectChanges();
+    const host = fixture.nativeElement.querySelector('ptah-meter') as HTMLElement;
+    expect(host.classList.contains('mt-auto')).toBe(true);
+    expect(host.classList.contains('shrink-0')).toBe(true);
+    expect(host.style.getPropertyValue('--ptah-meter-track').trim()).toBe('red');
+    expect(host.querySelector('[role="meter"]')?.classList.contains('bg-[var(--ptah-meter-track,var(--surface-border-strong))]')).toBe(true);
+  });
+
   it('hides the label visually and keeps it in the DOM and aria-label', () => {
     const el = render({ value: 10, hideLabel: true });
     const label = el.querySelector('span') as HTMLElement;
@@ -184,5 +280,36 @@ describe('marker and stripes', () => {
     expect(fill.className).not.toMatch(/(^|\s)bg-state/);
     expect(fill.classList.contains('text-state-err')).toBe(true);
     expect(fill.style.backgroundImage).toContain('repeating-linear-gradient');
+  });
+});
+
+describe('label row', () => {
+  const row = (el: HTMLElement) => el.querySelector('[data-meter-row]') as HTMLElement;
+
+  it('removes the visual row and mb-1 when label and value are both hidden', () => {
+    const el = render({ value: 10, hideLabel: true, showValue: false });
+    expect(row(el).classList.contains('mb-1')).toBe(false);
+    expect(row(el).classList.contains('flex')).toBe(false);
+    expect(row(el).classList.contains('sr-only')).toBe(true);
+    expect(el.querySelector('.mb-1')).toBeNull();
+    expect(el.querySelector('[role="meter"]')?.getAttribute('aria-label')).toBe('Used');
+    expect(el.textContent).toContain('Used');
+  });
+
+  it('keeps the accessible name when the bar is indeterminate and bare', () => {
+    const el = render({ value: 0, max: 0, indeterminate: true, hideLabel: true, showValue: false });
+    expect(el.querySelector('.mb-1')).toBeNull();
+    expect(el.querySelector('[role="progressbar"]')?.getAttribute('aria-label')).toBe('Used');
+  });
+
+  it.each([
+    [{}],
+    [{ hideLabel: true }],
+    [{ showValue: false }],
+  ])('keeps the visual row for %j', (extra) => {
+    const el = render({ value: 10, ...extra });
+    expect(row(el).classList.contains('mb-1')).toBe(true);
+    expect(row(el).classList.contains('flex')).toBe(true);
+    expect(row(el).classList.contains('sr-only')).toBe(false);
   });
 });
