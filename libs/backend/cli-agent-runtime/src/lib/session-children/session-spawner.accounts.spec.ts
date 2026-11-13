@@ -43,7 +43,7 @@ function harness(refusal?: ProviderAccountPortRefusal) {
     { register } as unknown as Args[7], { register } as unknown as Args[8],
     { onPromptLifecycle: register } as unknown as Args[9],
     { find: (id: string) => id === PARENT ? { realSessionId: PARENT_SDK, permissionLevel: 'ask' } : undefined } as unknown as Args[10],
-    { get: jest.fn() } as unknown as Args[11], {} as Args[12],
+    { get: jest.fn(), onGeneratingChange: register } as unknown as Args[11], {} as Args[12],
     { getWorkspaceFolders: () => [ROOT], getConfiguration: <T>(_section: string, _key: string, fallback: T) => fallback } as unknown as Args[13],
     { appendLine: jest.fn() } as unknown as Args[14], adapter as unknown as Args[15], scope,
     { getPort: () => 4321 }, registrar, null, budget,

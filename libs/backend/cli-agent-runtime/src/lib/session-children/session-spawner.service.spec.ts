@@ -184,11 +184,21 @@ export function makeHarness(
     ),
   };
   const phases = new Map<string, SessionTurnPhase>();
+  const generatingListeners = new Set<() => void>();
   const turnState = {
     get: jest.fn((id: string) => {
       const phase = phases.get(id);
       return phase ? { phase } : undefined;
     }),
+    onGeneratingChange: jest.fn((listener: () => void) => {
+      generatingListeners.add(listener);
+      return () => generatingListeners.delete(listener);
+    }),
+  };
+  /** A turn starts in the child tab: the phase changes and listeners fire. */
+  const startGenerating = (id: string): void => {
+    phases.set(id, 'generating');
+    for (const listener of [...generatingListeners]) listener();
   };
   const transcripts = { read: jest.fn().mockResolvedValue('') };
   const config = options.config ?? {};
@@ -337,6 +347,7 @@ export function makeHarness(
     lifecycleIds,
     parentLevel,
     phases,
+    startGenerating,
     transcripts,
     workspace,
     lines,
