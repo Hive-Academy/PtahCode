@@ -8,7 +8,6 @@ import {
   PtahIconButtonDirective,
 } from '@ptah-extension/ui';
 
-// Left raw: the compact tile has the expand toggle, delta, trend pill and select button in the header; ptah-stat cannot host them without a visible change.
 export type StatNode = Extract<DisplayNode, { kind: 'stat' }>;
 let nextStatInstance = 0;
 
@@ -39,6 +38,8 @@ const TREND_TONE_CLASSES = {
 } as const;
 const TREND_ARROWS = { up: 'M12 19V5M6 11l6-6 6 6', down: 'M12 5v14M6 13l6 6 6-6' } as const;
 
+// Left raw: the compact tile has the expand toggle, delta, trend pill and select button in the header.
+// ptah-stat has no slot for them, so adoption would change the look.
 @Component({
   selector: 'ptah-dashboard-stat',
   standalone: true,

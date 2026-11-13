@@ -13,7 +13,6 @@ import {
 } from 'lucide-angular';
 import { PtahButtonDirective } from '@ptah-extension/ui';
 
-// Left raw: loading skeleton, error and Retry states and the tone icon have no match in ui ptah-stat-card; adoption would change the look.
 /** Colour of the card's icon. The value itself stays in the body colour. */
 export type StatCardTone =
   | 'primary'
@@ -63,6 +62,8 @@ let nextStatCardId = 0;
  * />
  * ```
  */
+// Left raw: it takes a state input (loading, error, ready) and emits retryRequested.
+// ptah-stat-card takes loading and error flags and emits retry, so adoption needs an API change.
 @Component({
   selector: 'ptah-stat-card',
   standalone: true,

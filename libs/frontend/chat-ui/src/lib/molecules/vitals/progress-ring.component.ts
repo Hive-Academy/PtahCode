@@ -5,8 +5,6 @@ import {
   input,
 } from '@angular/core';
 
-// Left raw: ptah-ring has no 56 px value-row size (it has 32/64 px), a 12.4 px stroke at 112 px and a
-// different indeterminate pulse, so adoption would change the look (adopt-rings review).
 /** Viewbox side and stroke per size (TASK_2026_721 component 10, D10). */
 const RING_GEOMETRY = {
   value: { side: 56, stroke: 6 },
@@ -30,6 +28,9 @@ const INDETERMINATE_FRACTION = 0.25;
  * motion). The whole ring is one `role="img"` with the caller's accessible
  * name; the centre text is decorative for assistive tech.
  */
+// Left raw: the large ring box is fixed at 112 px, but ptah-ring xl follows --ptah-ring-size-xl.
+// For an unknown value with no subtext, ptah-ring does not lift the pulse by 14 px.
+// The progress-ring-pulse test id would move from the pulse to the ring host.
 @Component({
   selector: 'ptah-progress-ring',
   standalone: true,

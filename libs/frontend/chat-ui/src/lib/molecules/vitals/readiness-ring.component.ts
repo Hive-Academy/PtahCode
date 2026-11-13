@@ -9,7 +9,6 @@ import { ArrowRight, LucideAngularModule } from 'lucide-angular';
 
 import { ProgressRingComponent } from './progress-ring.component';
 
-// Left raw: it wraps ptah-progress-ring (112 px, 10 px stroke, 28 px numeral); ptah-ring xl differs visibly.
 /** One workspace readiness check. `ready: null` = still being checked. */
 export interface ReadinessCheck {
   readonly id: 'skills' | 'scan' | 'agents';
@@ -39,6 +38,7 @@ function checkWord(ready: boolean | null): string {
  * state is not carried by the arc alone. The parent hides the component when
  * all checks are ready; this component does not hide itself.
  */
+// Left raw: it wraps ptah-progress-ring, which stays raw (112 px box and pulse placement).
 @Component({
   selector: 'ptah-readiness-ring',
   standalone: true,
