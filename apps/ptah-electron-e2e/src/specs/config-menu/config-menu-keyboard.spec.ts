@@ -20,10 +20,10 @@ test.describe('Global configuration actions — keyboard operation', () => {
     await expect(
       page.locator('ptah-app-shell ptah-onboarding-home'),
     ).toBeVisible();
-    await expect(setupHub).toHaveAttribute('aria-current', 'true');
+    await expect(setupHub).toHaveAttribute('aria-current', 'page');
     await expect(
       page.locator('[data-test="config-menu-item-thoth"]'),
-    ).not.toHaveAttribute('aria-current', 'true');
+    ).not.toHaveAttribute('aria-current', 'page');
   });
 
   test('Space on the focused Settings icon button opens Settings and marks it current', async ({
@@ -36,7 +36,7 @@ test.describe('Global configuration actions — keyboard operation', () => {
     await expect(settings).toBeFocused();
     await page.keyboard.press('Space');
 
-    await expect(settings).toHaveAttribute('aria-current', 'true');
+    await expect(settings).toHaveAttribute('aria-current', 'page');
     await expect(settings).toBeFocused();
   });
 });
