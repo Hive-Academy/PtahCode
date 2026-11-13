@@ -332,6 +332,22 @@
 }
 /* ---- end ptah-meter tokens ---- */
 
+/* ---- Chart warn ink (light themes). The stock warn ink, the gold ink and the accent ink are
+   all amber or brown in a light theme, so a warn fill looks like a normal fill. Charts get their
+   own warn ink: orange-red oklch(55% 0.17 45), about #bd4600. Contrast on stock light: 5.20 (white),
+   4.64 (base-200), 4.16 (base-300) against the surface and 4.42, 3.96, 3.55 against the 16% track.
+   On anubis-light and glass light: 4.05 to 4.87 against the surface, 3.82 to 4.60 against the 6%
+   track. Dark themes keep the stock ink. ---- */
+:root,
+[data-theme] {
+  --ptah-chart-warn: var(--state-ink-need, oklch(var(--wa)));
+}
+:root[data-theme-mode='light'],
+:root[data-theme][data-glass='on'][data-glass-mode='light'] {
+  --ptah-chart-warn: oklch(55% 0.17 45);
+}
+/* ---- end chart warn ink ---- */
+
 /* ---- Card, panel surface and section header (TASK_2026_1012_b1dc,
    family-card-look.md). The defaults equal the most used card of today:
    bg-base-200, border border-base-300, rounded-xl, p-4, gap-3, no shadow.

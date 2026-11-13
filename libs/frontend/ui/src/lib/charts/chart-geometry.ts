@@ -12,7 +12,7 @@ export const CHART_BG: Readonly<Record<PtahChartInk, string>> = {
   accent: 'bg-[var(--ptah-badge-accent-ink)]',
   info: 'bg-state-run',
   ok: 'bg-state-done',
-  warn: 'bg-state-need',
+  warn: 'bg-state-need [--state-ink-need:var(--ptah-chart-warn)]',
   err: 'bg-state-err',
 };
 
@@ -24,7 +24,7 @@ export const CHART_TEXT: Readonly<Record<PtahChartInk, string>> = {
   accent: 'text-[var(--ptah-badge-accent-ink)]',
   info: 'text-state-run',
   ok: 'text-state-done',
-  warn: 'text-state-need',
+  warn: 'text-state-need [--state-ink-need:var(--ptah-chart-warn)]',
   err: 'text-state-err',
 };
 
