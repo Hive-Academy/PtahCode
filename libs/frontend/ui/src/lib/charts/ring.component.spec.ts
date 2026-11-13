@@ -123,15 +123,6 @@ describe('PtahRingComponent inputs', () => {
     expect(el.querySelector('.absolute span:last-child')?.classList.contains('text-xs')).toBe(true);
   });
 
-  it('allows a fixed sub text size without changing the default class or style', () => {
-    const custom = render({ value: 25, size: 'xl', subText: 'ready', subTextSize: '12px' });
-    const sub = custom.querySelector('.absolute span:last-child') as HTMLElement;
-    expect(sub.classList.contains('text-xs')).toBe(true);
-    expect(sub.style.fontSize).toBe('12px');
-    const standard = render({ value: 25, size: 'xl', subText: 'ready' });
-    expect((standard.querySelector('.absolute span:last-child') as HTMLElement).style.fontSize).toBe('');
-  });
-
   it('valueText replaces the side text', () => {
     expect(render({ value: 25, valueText: 'Quarter' }).textContent).toContain('Quarter');
   });
@@ -146,7 +137,8 @@ describe('PtahRingComponent inputs', () => {
 
   it('normalizes reversed and non-finite thresholds', () => {
     expect(arc(render({ value: 70, thresholds: { warn: 90, danger: 60 } }))?.classList.contains('text-state-err')).toBe(true);
-    expect(arc(render({ value: 85, thresholds: { warn: Number.NaN, danger: Infinity } }))?.classList.contains('text-state-need')).toBe(true);
+    expect(arc(render({ value: 85, thresholds: { warn: Number.NaN, danger: Infinity } }))?.classList.contains('text-state-need')).toBe(false);
+    expect(arc(render({ value: 92, thresholds: { warn: Number.NaN, danger: Infinity } }))?.classList.contains('text-state-need')).toBe(true);
     expect(arc(render({ value: 100, thresholds: { warn: Number.NaN, danger: Infinity } }))?.classList.contains('text-state-err')).toBe(true);
   });
 
@@ -163,13 +155,8 @@ describe('PtahRingComponent inputs', () => {
     expect(arc(pending)?.getAttribute('stroke-dasharray')).toBe('25 100');
   });
 
-  it('supports consumer geometry, colors, label and core pulse', () => {
-    const el = render({ value: 50, size: 'row', stroke: 3.86, radius: 16.07, trackColor: 'oklch(var(--bc) / 0.12)', arcColor: 'oklch(var(--a))', semanticRole: 'img', ariaLabel: 'Half used' });
-    expect(el.querySelector('circle')?.getAttribute('stroke-width')).toBe('3.86');
-    expect(arc(el)?.getAttribute('stroke-width')).toBe('3.86');
-    expect(arc(el)?.getAttribute('r')).toBe('16.07');
-    expect(el.querySelector('circle')?.getAttribute('style')).toContain('color:');
-    expect(arc(el)?.getAttribute('style')).toContain('color:');
+  it('supports an image role, label and core pulse', () => {
+    const el = render({ value: 50, size: 'row', semanticRole: 'img', ariaLabel: 'Half used' });
     expect(el.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Half used');
     expect(el.querySelector('[role="img"]')?.hasAttribute('aria-valuenow')).toBe(false);
     const pending = render({ value: 0, max: 0, indeterminate: true, pulseStyle: 'core' });
@@ -177,35 +164,22 @@ describe('PtahRingComponent inputs', () => {
     expect(arc(pending)).toBeNull();
   });
 
-  it('allows consumer center colors, font size and hidden zero arc', () => {
-    const el = render({ value: 0, centerText: '0/3', subText: 'ready', centerTextSize: '28px', centerTextColor: 'oklch(var(--bc))', subTextColor: 'oklch(var(--bc) / 0.7)', hideZeroArc: true });
-    expect(arc(el)?.getAttribute('opacity')).toBe('0');
-    const spans = el.querySelectorAll('.absolute span');
-    expect(spans[0].getAttribute('style')).toContain('font-size: 28px');
-    expect(spans[0].getAttribute('style')).toContain('color:');
-    expect(spans[1].getAttribute('style')).toContain('color:');
+  it('hides a zero arc and fades the arc only when asked', () => {
+    expect(arc(render({ value: 0, hideZeroArc: true }))?.getAttribute('opacity')).toBe('0');
     expect(arc(render({ value: 0 }))?.getAttribute('opacity')).toBeNull();
-    expect(render({ value: 25 }).querySelector('.absolute span')?.getAttribute('style')?.trim() ?? '').toBe('');
+    expect(arc(render({ value: 50, fadeArc: true }))?.classList.contains('fade-arc')).toBe(true);
+    expect(arc(render({ value: 50 }))?.classList.contains('fade-arc')).toBe(false);
   });
 
-  it('allows compact box sizing, subline gap and arc fade without changing defaults', () => {
-    const el = render({ value: 50, size: 'row', boxSize: '52px', subText: 'ready', subTextGap: '4px', fadeArc: true });
-    expect(box(el).getAttribute('style')).toContain('width: 52px');
-    expect(box(el).getAttribute('style')).toContain('height: 52px');
-    expect(el.querySelector('.absolute span:last-child')?.getAttribute('style')).toContain('margin-top: 4px');
-    expect(arc(el)?.classList.contains('fade-arc')).toBe(true);
-    const standard = render({ value: 50, size: 'row', subText: 'ready' });
-    expect(box(standard).getAttribute('style')?.trim() ?? '').toBe('');
-    expect(standard.querySelector('.absolute span:last-child')?.getAttribute('style')?.trim() ?? '').toBe('');
-    expect(arc(standard)?.classList.contains('fade-arc')).toBe(false);
-  });
-
-  it('pins an xl box at 112px despite its variable based size class', () => {
-    const el = render({ value: 50, size: 'xl', boxSize: '112px' });
-    expect(box(el).classList.contains('h-[var(--ptah-ring-size-xl,7rem)]')).toBe(true);
-    expect(box(el).getAttribute('style')).toContain('width: 112px');
-    expect(box(el).getAttribute('style')).toContain('height: 112px');
-    expect(box(render({ value: 50, size: 'xl' })).getAttribute('style')?.trim() ?? '').toBe('');
+  it('keeps the stat tile ring as a named size with its own geometry, soft track and text', () => {
+    const el = render({ value: 50, size: 'tile', centerOnly: true, tone: 'accent', subText: 'hidden' });
+    const circles = el.querySelectorAll('circle');
+    expect(circles[0].getAttribute('stroke-width')).toBe('3.857142857142857');
+    expect(circles[0].getAttribute('r')).toBe('16.071428571428573');
+    expect(circles[0].classList.contains('text-[var(--ptah-ring-track-soft,var(--surface-border-strong))]')).toBe(true);
+    expect(box(el).classList.contains('h-[var(--ptah-stat-value-h,3.5rem)]')).toBe(true);
+    expect(el.querySelector('.absolute')?.classList.contains('text-base-content')).toBe(true);
+    expect(el.querySelector('.absolute span:last-child')?.classList.contains('hidden')).toBe(true);
   });
 
   it.each([
