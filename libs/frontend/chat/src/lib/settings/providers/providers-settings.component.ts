@@ -349,10 +349,10 @@ const CONTROL =
               </p>
             }
             <!-- Compact cards (≤ 80 px): the whole card opens the drawer, which holds every per-state action but one.
-                 Rows come from the CONTAINER width: one 22 rem list column in the narrow Electron page, two at 1440 px; below 22 rem
-                 the one column shrinks to the container (onboarding's 400 px content area). -->
+                 Rows come from the CONTAINER width (auto-fit: empty tracks collapse, so a few cards share the whole row).
+                 Each column is at least 22 rem; below 22 rem the one column shrinks to the container (onboarding's 400 px content area). -->
             <div
-              class="grid grid-cols-[repeat(auto-fill,minmax(min(100%,22rem),1fr))] items-start gap-2"
+              class="grid grid-cols-[repeat(auto-fit,minmax(min(100%,22rem),1fr))] items-start gap-2"
               data-testid="connections-grid"
             >
               @for (connection of shownConnections(); track connection.id) {
