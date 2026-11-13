@@ -267,7 +267,7 @@ describe('ElectronShellComponent configuration gate', () => {
     appStateStub.openConfigurationSurface.set('onboarding');
     fixture.detectChanges();
     expect(setupHub.getAttribute('aria-selected')).toBe('true');
-    expect(setupHub.getAttribute('aria-current')).toBe('true');
+    expect(setupHub.getAttribute('aria-current')).toBe('page');
     expect(setupHub.classList.contains('tab-active')).toBe(true);
   });
 
