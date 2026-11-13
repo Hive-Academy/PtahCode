@@ -128,6 +128,8 @@ export {
   sessionUsageContributionSchema,
 } from './lib/session-store/session-stats-repository';
 export { SqliteSessionUsageSink } from './lib/session-store/sqlite-session-usage-sink';
+export { SqliteUsageCursorRepository } from './lib/session-store/usage-cursor-repository';
+export type { UsageSourceCursor, UsageCursorRepository } from './lib/session-store/usage-cursor-repository';
 export type {
   SessionUsageContribution,
   SessionStatsRow,

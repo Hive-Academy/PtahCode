@@ -133,6 +133,23 @@ export class SessionStatsRepository {
     values: readonly SessionUsageContribution[],
   ): Promise<void> {
     if (values.length === 0) return;
+    const db = await this.store.ready();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      this.writeEventInTransaction(db, values);
+      db.exec('COMMIT');
+    } catch (error: unknown) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  /** Write one event on the caller's connection without taking ownership of its transaction. */
+  writeEventInTransaction(
+    db: Pick<SqliteDatabase, 'exec' | 'prepare'>,
+    values: readonly SessionUsageContribution[],
+  ): void {
+    if (values.length === 0) return;
     const inputs = values.map((value) =>
       sessionUsageContributionSchema.parse(value),
     );
@@ -143,9 +160,6 @@ export class SessionStatsRepository {
     if (new Set(inputs.map((input) => input.modelId)).size !== inputs.length) {
       throw new Error('Usage event contains duplicate model rows');
     }
-    const db = await this.store.ready();
-    db.exec('BEGIN IMMEDIATE');
-    try {
       const prior = db.prepare(`SELECT MAX(revision) AS revision,
         MAX(cost_authority = 'provider-reported') AS reported
         FROM session_usage_turns WHERE session_id = ? AND event_key = ?`)
@@ -158,7 +172,6 @@ export class SessionStatsRepository {
           !(prior.reported !== 1 && first.missingReason === null &&
             db.prepare(`SELECT 1 FROM session_usage_turns WHERE session_id = ? AND event_key = ?
               AND missing_reason = 'aborted-before-result' LIMIT 1`).get(first.sessionId, first.eventKey))))) {
-        db.exec('COMMIT');
         return;
       }
       if (first.runCostSnapshot) {
@@ -294,11 +307,6 @@ export class SessionStatsRepository {
           last_captured_at_ms = MAX(last_captured_at_ms, excluded.last_captured_at_ms)`)
           .run(workspaceKey.workspace_key, workspaceKey.first_at, workspaceKey.last_at);
       }
-      db.exec('COMMIT');
-    } catch (error: unknown) {
-      db.exec('ROLLBACK');
-      throw error;
-    }
   }
 
   async requestFinalization(sessionId: string, nowMs = Date.now()): Promise<void> {

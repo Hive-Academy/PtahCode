@@ -25,7 +25,7 @@ function collector(lines: string[]) {
       bytes = next;
       ctime += 1;
     },
-    lstat: jest.fn(async () => ({ type: FileType.File, ctime, mtime: ctime + 1, size: bytes.length })),
+    lstat: jest.fn(async () => ({ type: FileType.File, ctime, mtime: ctime + 1.5, size: bytes.length })),
     readFileRangeNoFollow: jest.fn(async (_file: string, offset: number, maxBytes: number) => ({
       bytes: bytes.subarray(offset, offset + maxBytes), truncated: offset + maxBytes < bytes.length,
     })),
@@ -71,6 +71,7 @@ describe('ClaudeJsonlUsageCollector', () => {
     replay.append([line(parent, 'm6', 2)]);
     const second = await replay.collect(`${parent}.jsonl`, first.next, 1024 * 1024);
     expect(second.next.fingerprint).toBe(first.next.fingerprint);
+    expect(Number.isInteger(second.next.mtimeMs)).toBe(true);
     expect(second.events.map((event) => event.models[0].inputTokens)).toEqual([2]);
   });
 

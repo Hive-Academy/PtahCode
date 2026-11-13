@@ -12,6 +12,7 @@ import {
 import { SessionStoreDatabase } from './session-store-database';
 import { SessionStoreGate } from './session-store-gate';
 import { SessionStatsRepository } from './session-stats-repository';
+import { SqliteUsageCursorRepository } from './usage-cursor-repository';
 import { SqliteSessionUsageSink } from './sqlite-session-usage-sink';
 import { SqliteSessionRecordRepository } from './sqlite-session-record-repository';
 import { SqliteHostRunLeaseRepository } from './sqlite-host-run-lease-repository';
@@ -21,6 +22,7 @@ export interface RegisteredSessionStore {
   readonly repository: SqliteSessionRecordRepository;
   readonly hostRunLeases: SqliteHostRunLeaseRepository;
   readonly stats: SessionStatsRepository;
+  readonly usageCursors: SqliteUsageCursorRepository;
   readonly usageSink: SqliteSessionUsageSink;
   readonly blobs: FileSessionBlobStore;
   /** Mark ready once the host's legacy copy-forward has run. */
@@ -44,6 +46,7 @@ export function registerSessionStoreServices(
   const repository = new SqliteSessionRecordRepository(database, options.host);
   const hostRunLeases = new SqliteHostRunLeaseRepository(database);
   const stats = new SessionStatsRepository(database, logger);
+  const usageCursors = new SqliteUsageCursorRepository(database, stats);
   const usageSink = new SqliteSessionUsageSink(stats, logger);
   const blobs = new FileSessionBlobStore(resolveSessionBlobRoot(dbPath));
   const gate = new SessionStoreGate(logger);
@@ -56,6 +59,7 @@ export function registerSessionStoreServices(
   container.register(PLATFORM_TOKENS.SESSION_BLOB_STORE, { useValue: blobs });
   container.register(PLATFORM_TOKENS.SESSION_STORE_GATE, { useValue: gate });
   container.register(SessionStatsRepository, { useValue: stats });
+  container.register(SqliteUsageCursorRepository, { useValue: usageCursors });
   container.register(PLATFORM_TOKENS.SESSION_USAGE_SINK, {
     useValue: usageSink,
   });
@@ -69,6 +73,7 @@ export function registerSessionStoreServices(
     repository,
     hostRunLeases,
     stats,
+    usageCursors,
     usageSink,
     blobs,
     gate,

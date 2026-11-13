@@ -137,7 +137,7 @@ export class ClaudeJsonlUsageCollector implements UsageCollector {
           producer: 'transcript-replay', runId: sessionId, nativeThreadId: sessionId,
           turnId: null, eventKey, parentSessionId: owner.subagent ? (valid ? sessionId : owner.parent) : null,
           subagentId: owner.subagent, providerId: 'claude',
-          occurredAtMs: Number.isFinite(occurredAtMs) ? occurredAtMs : stat.mtime,
+          occurredAtMs: Number.isFinite(occurredAtMs) ? occurredAtMs : Math.floor(stat.mtime),
           revision: lineOffset, models: [{
             modelId: record.message.model ?? null, inputTokens: usage.input_tokens ?? null,
             outputTokens: usage.output_tokens ?? null,
@@ -163,7 +163,7 @@ export class ClaudeJsonlUsageCollector implements UsageCollector {
       if (parsedBytes >= 1024 * 1024 || Date.now() - started >= 20) await new Promise<void>((resolve) => setImmediate(resolve));
     }
     return { events, next: { sourceId: this.sourceId, sourcePath: file, fingerprint,
-      mtimeMs: stat.mtime, byteOffset: offset, lastEventKey: events.at(-1)?.eventKey ?? cursor?.lastEventKey ?? null },
+      mtimeMs: Math.floor(stat.mtime), byteOffset: offset, lastEventKey: events.at(-1)?.eventKey ?? cursor?.lastEventKey ?? null },
       more: offset < stat.size };
   }
 }
