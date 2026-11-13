@@ -102,7 +102,6 @@ const STATE_REASONS: Record<
             type="button"
             ptahButton
             variant="primary"
-            class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
             [attr.aria-label]="'Open ' + state().file + ' in the editor'"
             data-testid="task-doc-open-editor"
             (click)="openInEditor.emit(state().file)"
@@ -119,7 +118,6 @@ const STATE_REASONS: Record<
           type="button"
           ptahIconButton
           [label]="'Close ' + state().file"
-          class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
           data-testid="task-doc-close"
           (click)="closed.emit()"
         >

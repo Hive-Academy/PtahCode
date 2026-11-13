@@ -53,7 +53,6 @@ import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
             type="button"
             ptahButton
             variant="primary"
-            class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
             [attr.aria-label]="'Open ' + carrierFile + ' in the editor'"
             data-testid="task-overview-open-editor"
             (click)="openInEditor.emit(carrierFile)"

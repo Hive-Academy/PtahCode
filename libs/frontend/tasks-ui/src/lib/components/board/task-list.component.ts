@@ -539,7 +539,6 @@ const MAX_VISIBLE_LABELS = 3;
                           ptahButton
                           variant="ghost"
                           size="xs"
-                          class="hover:bg-primary hover:text-primary-content"
                           [attr.tabindex]="rovingTabIndex(task.id)"
                           [attr.aria-label]="'Start task ' + task.id"
                           [title]="'Start task ' + task.id"
