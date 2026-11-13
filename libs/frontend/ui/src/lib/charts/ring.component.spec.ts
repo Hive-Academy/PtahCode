@@ -146,7 +146,8 @@ describe('PtahRingComponent inputs', () => {
 
   it('normalizes reversed and non-finite thresholds', () => {
     expect(arc(render({ value: 70, thresholds: { warn: 90, danger: 60 } }))?.classList.contains('text-state-err')).toBe(true);
-    expect(arc(render({ value: 85, thresholds: { warn: Number.NaN, danger: Infinity } }))?.classList.contains('text-state-need')).toBe(true);
+    expect(arc(render({ value: 85, thresholds: { warn: Number.NaN, danger: Infinity } }))?.classList.contains('text-state-need')).toBe(false);
+    expect(arc(render({ value: 92, thresholds: { warn: Number.NaN, danger: Infinity } }))?.classList.contains('text-state-need')).toBe(true);
     expect(arc(render({ value: 100, thresholds: { warn: Number.NaN, danger: Infinity } }))?.classList.contains('text-state-err')).toBe(true);
   });
 

@@ -81,7 +81,7 @@ type RingTextWeight = keyof typeof TEXT_WEIGHT;
     }
   </div>`,
   styles: [`
-    .ring-pulse { position: absolute; inset: 0; margin: auto; width: 12px; height: 12px; pointer-events: none; }
+    .ring-pulse { position: absolute; inset: 0; margin: auto; width: 0.75rem; height: 0.75rem; pointer-events: none; }
     .ring-pulse::before { content: ''; position: absolute; inset: 22%; border-radius: 9999px; background: currentColor; }
     .ring-pulse::after { content: ''; position: absolute; inset: 0; border: 1.5px solid currentColor; border-radius: 9999px; }
     @media (prefers-reduced-motion: no-preference) {
