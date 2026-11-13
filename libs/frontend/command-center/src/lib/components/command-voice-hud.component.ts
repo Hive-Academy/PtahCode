@@ -4,6 +4,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
 import type { CommandProviderReadiness, CommandVoiceError, CommandVoiceState } from '../model/command-center.store';
 
 /** Controls for the page-owned voice loop; all actions are explicit user intents. */
+// Left raw: the level bars are six or five separate vertical marks, but ptah-meter draws one continuous track.
 @Component({
   selector: 'ptah-command-voice-hud',
   standalone: true,
@@ -35,7 +36,6 @@ import type { CommandProviderReadiness, CommandVoiceError, CommandVoiceState } f
         </div>
       </div>
       <div class="voice-actions flex flex-wrap items-center gap-1">
-        <!-- Keep these level bars: the owner draws one continuous track instead of six or five vertical marks. -->
         <div class="flex h-8 items-center gap-1" role="meter" aria-label="Microphone level"
           aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="levelPercent()"
           [attr.aria-valuetext]="'Microphone level ' + levelPercent() + '%'">
