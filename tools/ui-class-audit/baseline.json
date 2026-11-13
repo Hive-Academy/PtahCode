@@ -675,9 +675,6 @@
     "card-actions": 1,
     "card-title": 1
   },
-  "libs/frontend/dashboard/src/lib/components/provider-account-tile/provider-account-tile.component.html": {
-    "<dynamic>": 1
-  },
   "libs/frontend/dashboard/src/lib/components/skill-selection-card/skill-selection-card.component.ts": {
     "card-title": 1
   },
@@ -753,9 +750,6 @@
     "btn-error": 1,
     "btn-xs": 1
   },
-  "libs/frontend/git-ui/src/lib/git-dock/git-dock-scope-header.component.ts": {
-    "<dynamic>": 1
-  },
   "libs/frontend/git-ui/src/lib/history/history-stash-section.component.ts": {
     "btn": 1,
     "btn-ghost": 1,
@@ -774,17 +768,17 @@
     "<dynamic>": 2
   },
   "libs/frontend/git-ui/src/lib/review-canvas/changed-file-tree.component.ts": {
-    "<dynamic>": 3
+    "<dynamic>": 2
   },
   "libs/frontend/git-ui/src/lib/review-canvas/comparison-bar.component.ts": {
-    "<dynamic>": 6,
+    "<dynamic>": 4,
     "btn": 4,
     "btn-active": 4,
     "btn-ghost": 4,
     "btn-xs": 4
   },
   "libs/frontend/git-ui/src/lib/review-canvas/file-diff-section.component.ts": {
-    "<dynamic>": 5,
+    "<dynamic>": 2,
     "skeleton": 2
   },
   "libs/frontend/git-ui/src/lib/review-canvas/file-section-header.component.ts": {
@@ -794,9 +788,6 @@
     "btn-xs": 1
   },
   "libs/frontend/git-ui/src/lib/review-canvas/hunk-toolbar.component.ts": {
-    "<dynamic>": 2
-  },
-  "libs/frontend/git-ui/src/lib/review-shell/worktree-scope-bar.component.ts": {
     "<dynamic>": 2
   },
   "libs/frontend/git-ui/src/lib/shared/git-confirm-dialog.component.ts": {
