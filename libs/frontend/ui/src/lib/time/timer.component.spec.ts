@@ -86,4 +86,25 @@ describe('PtahTimerComponent', () => {
     expect(clock.holders).toBe(1);
     expect(timeText(fixture)).toBe('0:05');
   });
+
+  it('does not announce Stopped when it starts frozen', () => {
+    const clock = new FakePtahClock(START + 5_000);
+    TestBed.configureTestingModule({ providers: [clock.provide()] });
+    const fixture = TestBed.createComponent(PtahTimerComponent);
+    fixture.componentRef.setInput('startedAt', START);
+    fixture.componentRef.setInput('endedAt', START + 65_000);
+    fixture.detectChanges();
+    expect(host(fixture).querySelector('.ptah-time-live')?.textContent).toBe('');
+  });
+
+  it('announces Stopped only when it changes from running to frozen', () => {
+    const clock = new FakePtahClock(START + 5_000);
+    const fixture = setup(clock);
+    const live = (): string | null | undefined =>
+      host(fixture).querySelector('.ptah-time-live')?.textContent;
+    expect(live()).toBe('');
+    fixture.componentRef.setInput('endedAt', START + 65_000);
+    fixture.detectChanges();
+    expect(live()).toBe('Stopped');
+  });
 });

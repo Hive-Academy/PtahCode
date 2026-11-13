@@ -93,11 +93,11 @@ describe('SurfaceLayoutComponent', () => {
     expect(element.querySelector('section > h3')?.textContent).toBe('Details');
     expect(element.querySelector('section > p')?.textContent).toBe('About this');
     host.node.set(layout({ id: 'c', kind: 'card', title: { text: 'Card' }, children: stats(1) })); rerender();
-    const card = element.querySelector('.card')!;
-    expect(card.classList.contains('card-bordered')).toBe(true);
+    const card = element.querySelector('[data-ptah-surface][data-variant="inset"][data-padding="md"]')!;
+    expect(card.classList.contains('ptah-card')).toBe(true);
     expect(card.querySelector('h3')?.textContent).toBe('Card');
     host.node.set(layout({ id: 'c2', kind: 'card', children: stats(1) })); rerender();
-    expect(element.querySelector('.card h3')).toBeNull();
+    expect(element.querySelector('[data-ptah-surface] h3')).toBeNull();
   });
 
   it('uses an own-width responsive body for compact card children only in container mode', () => {
